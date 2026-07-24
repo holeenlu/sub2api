@@ -1,0 +1,4 @@
+interface:
+  display_name: "Architecture Maintenance"
+  short_description: "Guard system architecture during iterative development"
+  default_prompt: "Use $architecture-maintenance to assess this change and preserve long-term architecture health."

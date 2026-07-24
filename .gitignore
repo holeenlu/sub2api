@@ -123,10 +123,13 @@ CLAUDE.md
 scripts
 !backend/scripts/
 !backend/scripts/resolve-version.sh
+!scripts/
+!scripts/verify-architecture.sh
 .code-review-state
 #openspec/
 code-reviews/
 AGENTS.md
+!AGENTS.md
 backend/cmd/server/server
 deploy/docker-compose.override.yml
 .gocache/
@@ -136,6 +139,13 @@ docs/*
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
 !docs/ASYNC_IMAGE_TASKS.md
+!docs/API_KEY_INDEPENDENT_PRINCIPAL_REQUIREMENTS_CN.md
+!docs/API_KEY_INDEPENDENT_PRINCIPAL_IMPLEMENTATION_PLAN_CN.md
+!docs/architecture/
+!docs/architecture/*.md
+!docs/adr/
+!docs/adr/*.md
+!docs/architecture-health.md
 !docs/legal/
 !docs/legal/*.md
 .serena/
