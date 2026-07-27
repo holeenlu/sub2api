@@ -292,3 +292,24 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
 })
+
+describe('CreateAccountModal Claude Code OAuth token import', () => {
+  beforeEach(() => {
+    createAccountMock.mockReset().mockResolvedValue({ id: 43, platform: 'anthropic', type: 'setup-token' })
+  })
+
+  it('creates a setup-token account with access_token without OAuth exchange', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('input[value="manual-token"]').setValue(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Claude Code token')
+    await wrapper.get('[data-testid="claude-code-oauth-token"]').setValue('claude-code-token')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      platform: 'anthropic',
+      type: 'setup-token',
+      credentials: { access_token: 'claude-code-token' }
+    }))
+  })
+})

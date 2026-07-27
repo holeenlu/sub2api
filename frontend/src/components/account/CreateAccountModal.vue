@@ -1072,7 +1072,7 @@
       </div>
 
       <!-- Add Method (only for Anthropic OAuth-based type) -->
-      <div v-if="form.platform === 'anthropic' && isOAuthFlow">
+      <div v-if="form.platform === 'anthropic' && accountCategory === 'oauth-based'">
         <label class="input-label">{{ t('admin.accounts.addMethod') }}</label>
         <div class="mt-2 flex gap-4">
           <label class="flex cursor-pointer items-center">
@@ -1095,6 +1095,15 @@
               t('admin.accounts.setupTokenLongLived')
             }}</span>
           </label>
+          <label class="flex cursor-pointer items-center">
+            <input v-model="addMethod" type="radio" value="manual-token" class="mr-2 text-primary-600 focus:ring-primary-500" />
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.claudeCodeTokenDirect') }}</span>
+          </label>
+        </div>
+        <div v-if="addMethod === 'manual-token'" class="mt-3 rounded-lg border border-orange-200 bg-orange-50 p-3 dark:border-orange-800/40 dark:bg-orange-900/20">
+          <label class="input-label">{{ t('admin.accounts.claudeCodeTokenLabel') }}</label>
+          <input v-model="claudeCodeOAuthToken" type="password" required autocomplete="new-password" class="input font-mono" :placeholder="t('admin.accounts.claudeCodeTokenPlaceholder')" data-testid="claude-code-oauth-token" />
+          <p class="input-hint">{{ t('admin.accounts.claudeCodeTokenHint') }}</p>
         </div>
       </div>
 
@@ -3150,7 +3159,7 @@
     <div v-else class="space-y-5">
       <OAuthAuthorizationFlow
         ref="oauthFlowRef"
-        :add-method="form.platform === 'anthropic' ? addMethod : 'oauth'"
+        :add-method="form.platform === 'anthropic' ? oauthAddMethod : 'oauth'"
         :auth-url="currentAuthUrl"
         :session-id="currentSessionId"
         :loading="currentOAuthLoading"
@@ -3683,7 +3692,11 @@ interface TempUnschedRuleForm {
 const step = ref(1)
 const submitting = ref(false)
 const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
-const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
+const addMethod = ref<AddMethod | 'manual-token'>('oauth')
+const claudeCodeOAuthToken = ref('')
+const oauthAddMethod = computed<AddMethod>(() =>
+  addMethod.value === 'manual-token' ? 'setup-token' : addMethod.value
+)
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
@@ -4081,6 +4094,9 @@ const isOAuthFlow = computed(() => {
   if (form.platform === 'anthropic' && accountCategory.value === 'bedrock') {
     return false
   }
+  if (form.platform === 'anthropic' && addMethod.value === 'manual-token') {
+    return false
+  }
   return accountCategory.value === 'oauth-based'
 })
 
@@ -4160,7 +4176,9 @@ watch(
     if ((form.platform === 'gemini' || form.platform === 'anthropic') && category === 'service_account') {
       form.type = 'service_account' as AccountType
     } else if (category === 'oauth-based') {
-      form.type = form.platform === 'anthropic' ? method as AccountType : 'oauth'
+      form.type = form.platform === 'anthropic'
+        ? (method === 'manual-token' ? 'setup-token' : method as AccountType)
+        : 'oauth'
     } else {
       form.type = 'apikey'
     }
@@ -4623,6 +4641,7 @@ const resetForm = () => {
   addMethod.value = 'oauth'
   apiKeyBaseUrl.value = 'https://api.anthropic.com'
   apiKeyValue.value = ''
+  claudeCodeOAuthToken.value = ''
   upstreamBillingAutoProbeEnabled.value = true
   editQuotaLimit.value = null
   editQuotaDailyLimit.value = null
@@ -4920,6 +4939,21 @@ const handleSubmit = async () => {
     return
   }
 
+  // Claude Code's CLAUDE_CODE_OAUTH_TOKEN is an OAuth bearer token, not an API key.
+  if (form.platform === 'anthropic' && addMethod.value === 'manual-token') {
+    if (!form.name.trim()) {
+      appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
+      return
+    }
+    const token = claudeCodeOAuthToken.value.trim()
+    if (!token) {
+      appStore.showError(t('admin.accounts.claudeCodeTokenRequired'))
+      return
+    }
+    await createAccountAndFinish('anthropic', 'setup-token', { access_token: token })
+    return
+  }
+
   // For Bedrock type, create directly
   if (form.platform === 'anthropic' && accountCategory.value === 'bedrock') {
     if (!form.name.trim()) {
@@ -5154,7 +5188,9 @@ const handleGenerateUrl = async () => {
   } else if (form.platform === 'grok') {
     await grokOAuth.generateAuthUrl(form.proxy_id)
   } else {
-    await oauth.generateAuthUrl(addMethod.value, form.proxy_id)
+    if (addMethod.value !== 'manual-token') {
+      await oauth.generateAuthUrl(addMethod.value, form.proxy_id)
+    }
   }
 }
 
@@ -6098,7 +6134,12 @@ const handleAnthropicExchange = async (authCode: string) => {
 
     const credentials: Record<string, unknown> = { ...tokenInfo }
     applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
-    await createAccountAndFinish(form.platform, addMethod.value as AccountType, credentials, extra)
+    await createAccountAndFinish(
+      form.platform,
+      (addMethod.value === 'manual-token' ? 'setup-token' : addMethod.value) as AccountType,
+      credentials,
+      extra
+    )
   } catch (error: any) {
     oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
     appStore.showError(oauth.error.value)
@@ -6234,7 +6275,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           name: accountName,
           notes: form.notes,
           platform: form.platform,
-          type: addMethod.value, // Use addMethod as type: 'oauth' or 'setup-token'
+          type: addMethod.value === 'manual-token' ? 'setup-token' : addMethod.value,
           credentials,
           extra,
           proxy_id: form.proxy_id,
