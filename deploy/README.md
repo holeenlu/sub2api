@@ -16,7 +16,11 @@ This directory contains files for deploying Sub2API on Linux servers and Apple-s
 |------|-------------|
 | `docker-compose.yml` | Docker Compose configuration (named volumes) |
 | `docker-compose.local.yml` | Docker Compose configuration (local directories, easy migration) |
+| `local-deploy.sh` | Local source checkout lifecycle script (init/build/up/check) |
 | `docker-deploy.sh` | **One-click Docker deployment script (recommended)** |
+| `deploy-server.sh` | Shared executor for one server-specific deployment |
+| `servers/deploy-server-<ip>.sh` | Independent deployment entry point per server |
+| `servers/server-<ip>.env` | Independent SSH and deployment configuration per server |
 | `apple-container.sh` | Native Apple `container` lifecycle script |
 | `APPLE_CONTAINER.md` | Apple `container` deployment and operations guide |
 | `.env.example` | Container environment variables template |
@@ -86,6 +90,26 @@ docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
 # http://localhost:8080
 ```
 
+### Method 3: Independent Server Deployments
+
+Each server has its own configuration and entry point. SSH keys or an
+interactive SSH credential flow are required; passwords are never stored in
+the repository:
+
+```bash
+./deploy/servers/deploy-server-192.168.172.80.sh deploy
+./deploy/servers/deploy-server-192.168.172.80.sh status
+./deploy/servers/deploy-server-192.168.172.80.sh health
+
+./deploy/servers/deploy-server-174.137.56.226.sh deploy
+./deploy/servers/deploy-server-192.168.11.12.sh deploy
+```
+
+The shared executor uploads the current Compose file, preserves an existing
+remote `.env`, generates secrets only for a new deployment, creates local data
+directories, pulls images, and waits for `/health`. A failure or later change
+to one server does not alter the other server configurations.
+
 ### Method 2: Manual Deployment
 
 If you prefer manual control:
@@ -118,6 +142,31 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 # Access Web UI
 # http://localhost:8080
 ```
+
+### Method 3: Run the Current Checkout Locally
+
+From the repository root, use the lifecycle script to build and run the current
+source tree. It keeps persistent data under `deploy/`:
+
+```bash
+./deploy/local-deploy.sh
+```
+
+The no-argument form performs the complete local deployment: it initializes the
+configuration, rebuilds the current source image, updates and starts the Compose
+stack, and runs a health check. Individual lifecycle commands remain available:
+
+```bash
+./deploy/local-deploy.sh init
+./deploy/local-deploy.sh up
+./deploy/local-deploy.sh status
+./deploy/local-deploy.sh logs
+./deploy/local-deploy.sh check
+```
+
+The script creates `deploy/.env` with generated secrets on first run. To use a
+published image instead of a locally built image, set `SUB2API_IMAGE` in that
+file before running `up`. `down` stops containers without removing data.
 
 ### Deployment Version Comparison
 
