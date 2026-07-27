@@ -359,6 +359,22 @@ func ValidateOpenAILongContextBillingExtra(platform string, extra map[string]any
 	return nil
 }
 
+// ValidateAnthropicOAuthCredentials keeps Claude Code OAuth tokens on the
+// bearer-token path and prevents accidental API-key authentication mixing.
+func ValidateAnthropicOAuthCredentials(platform, accountType string, credentials map[string]any) error {
+	if platform != PlatformAnthropic || (accountType != AccountTypeOAuth && accountType != AccountTypeSetupToken) {
+		return nil
+	}
+	accessToken, _ := credentials["access_token"].(string)
+	if strings.TrimSpace(accessToken) == "" {
+		return infraerrors.BadRequest("ANTHROPIC_OAUTH_TOKEN_REQUIRED", "access_token is required for Anthropic OAuth accounts")
+	}
+	if apiKey, ok := credentials["api_key"].(string); ok && strings.TrimSpace(apiKey) != "" {
+		return infraerrors.BadRequest("ANTHROPIC_OAUTH_API_KEY_MIXED", "Anthropic OAuth accounts must not include api_key")
+	}
+	return nil
+}
+
 func normalizeOpenAILongContextBillingExtra(platform string, extra map[string]any) (map[string]any, error) {
 	if platform != PlatformOpenAI {
 		return extra, nil
