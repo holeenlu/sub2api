@@ -110,6 +110,7 @@ backend/data/
 # ===================
 backend/config.yaml
 deploy/config.yaml
+deploy/servers.env
 backend/.installed
 
 # ===================

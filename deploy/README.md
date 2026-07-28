@@ -18,6 +18,9 @@ This directory contains files for deploying Sub2API on Linux servers and Apple-s
 | `docker-compose.local.yml` | Docker Compose configuration (local directories, easy migration) |
 | `local-deploy.sh` | Local source checkout lifecycle script (init/build/up/check) |
 | `docker-deploy.sh` | **One-click Docker deployment script (recommended)** |
+| `deploy-server.sh` | Shared executor for one server-specific deployment |
+| `servers/deploy-server-<ip>.sh` | Independent deployment entry point per server |
+| `servers/server-<ip>.env` | Independent SSH and deployment configuration per server |
 | `apple-container.sh` | Native Apple `container` lifecycle script |
 | `APPLE_CONTAINER.md` | Apple `container` deployment and operations guide |
 | `.env.example` | Container environment variables template |
@@ -86,6 +89,26 @@ docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
 # Access Web UI
 # http://localhost:8080
 ```
+
+### Method 3: Independent Server Deployments
+
+Each server has its own configuration and entry point. SSH keys or an
+interactive SSH credential flow are required; passwords are never stored in
+the repository:
+
+```bash
+./deploy/servers/deploy-server-192.168.172.80.sh deploy
+./deploy/servers/deploy-server-192.168.172.80.sh status
+./deploy/servers/deploy-server-192.168.172.80.sh health
+
+./deploy/servers/deploy-server-174.137.56.226.sh deploy
+./deploy/servers/deploy-server-192.168.11.12.sh deploy
+```
+
+The shared executor uploads the current Compose file, preserves an existing
+remote `.env`, generates secrets only for a new deployment, creates local data
+directories, pulls images, and waits for `/health`. A failure or later change
+to one server does not alter the other server configurations.
 
 ### Method 2: Manual Deployment
 
