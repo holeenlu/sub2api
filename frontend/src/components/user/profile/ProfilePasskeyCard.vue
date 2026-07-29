@@ -214,8 +214,11 @@ async function loadCredentials(): Promise<void> {
   try {
     credentials.value = await passkeyAPI.list()
   } catch (error) {
+    // The application error code is exposed through reason; retain the
+    // legacy code check for compatibility with older interceptors.
+    const reason = (error as { reason?: string }).reason
     const code = (error as { code?: string }).code
-    if (code !== 'PASSKEY_DISABLED') {
+    if (reason !== 'PASSKEY_DISABLED' && code !== 'PASSKEY_DISABLED') {
       appStore.showError(t('profile.passkey.loadFailed'))
     }
   } finally {
