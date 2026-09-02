@@ -59,6 +59,8 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "groups", "allow_live", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "force_openai_fast", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "free_openai_fast", "boolean", 0, false)
+	// groups: 无可用账号兜底分组，未配置时为 NULL，目标分组删除后由外键置空。
+	requireColumn(t, tx, "groups", "fallback_group_id_on_no_account", "bigint", 0, true)
 
 	// api_keys: key length should be 128
 	requireColumn(t, tx, "api_keys", "key", "character varying", 128, false)

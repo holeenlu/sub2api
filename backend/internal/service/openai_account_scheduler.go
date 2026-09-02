@@ -2126,25 +2126,142 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
 	excludedIDs map[int64]struct{},
 	requiredCapability OpenAIImagesCapability,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	selection, decision, err := s.selectAccountWithScheduler(ctx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", requiredCapability, false, PlatformOpenAI, false, false)
+	// 第一趟只在本分组内找：能力降级（native -> basic）要优先于换分组，否则本
+	// 分组明明有 OAuth 账号能画图，却先跳去兜底分组了。
+	chainCtx := withNoAccountFallbackActive(ctx)
+	selection, decision, err := s.selectAccountWithSchedulerForGroup(chainCtx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", requiredCapability, false, PlatformOpenAI, false, false)
 	if err == nil && selection != nil && selection.Account != nil {
+		// 这一趟刻意不经兜底链（要先做能力降级），链的统一补记够不着，自己记。
+		selection.stampSchedulingGroupID(groupID)
 		return selection, decision, nil
 	}
 	// 如果要求 native 能力（如指定了模型）但没有可用的 APIKey 账号，回退到 basic（OAuth 账号）
 	if requiredCapability == OpenAIImagesCapabilityNative {
 		return s.selectAccountWithScheduler(ctx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", OpenAIImagesCapabilityBasic, false, PlatformOpenAI, false, false)
 	}
+	// 非 native 请求没有能力降级可走，从第一趟的结果接着走兜底链，不重扫本分组。
+	selection, err = continueNoAccountFallback(chainCtx, s.noAccountFallbackChain(groupID),
+		selection, err, s.imagesSchedulerAttempt(sessionHash, requestedModel, excludedIDs, requiredCapability, &decision))
 	return selection, decision, err
 }
 
-// selectAccountWithScheduler wraps selectAccountWithSchedulerOnce with a
+// imagesSchedulerAttempt 把一次图片调度包成兜底链的 attempt；decision 随最后一次
+// 尝试更新。
+func (s *OpenAIGatewayService) imagesSchedulerAttempt(
+	sessionHash string,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	requiredCapability OpenAIImagesCapability,
+	decision *OpenAIAccountScheduleDecision,
+) noAccountFallbackAttempt[*AccountSelectionResult] {
+	return func(ctx context.Context, groupID *int64) (*AccountSelectionResult, error) {
+		selection, hopDecision, err := s.selectAccountWithSchedulerForGroup(ctx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", requiredCapability, false, PlatformOpenAI, false, false)
+		*decision = hopDecision
+		return selection, err
+	}
+}
+
+// selectAccountWithScheduler 在分组维度包一层「无可用账号兜底分组」链：分组内
+// （含代理熔断的 fail-open 二次放行）确实选不出账号时，换成配置的兜底分组重跑
+// 一次完整选号，借用它的账号池。只借账号，计费仍归 API Key 自己的分组，
+// 详见 scheduling_group_fallback.go。
+func (s *OpenAIGatewayService) selectAccountWithScheduler(
+	ctx context.Context,
+	groupID *int64,
+	previousResponseID string,
+	sessionHash string,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	requiredTransport OpenAIUpstreamTransport,
+	requiredCapability OpenAIEndpointCapability,
+	requiredImageCapability OpenAIImagesCapability,
+	requireCompact bool,
+	platform string,
+	previousResponseCanMove bool,
+	useUpstreamTokenCost bool,
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	decision := OpenAIAccountScheduleDecision{}
+	// A response created by a no-account fallback group is bound in that
+	// scheduling group's namespace. Resolve that binding across the origin's
+	// fallback chain before ordinary selection, otherwise a recovered origin
+	// pool can steal the continuation and forward the response ID through a
+	// different upstream account/project.
+	//
+	// 只认绑定账号的命中：绑定所在的分组只做一次尝试，拿到的必须是绑定的那个账号。
+	// 绑定已失效（账号停调、配额暂停、利润门否决）时那一跳会退化成普通选号，此时必须
+	// 回到原分组正常起链——否则一条陈旧绑定会把会话永久钉在兜底分组，原分组明明有
+	// 容量也借不回来；兜底分组池空了还会沿它自己的兜底链走下去，原分组永远轮不到。
+	//
+	// legacy 路径根本不读 previous_response_id（selectAccountWithLoadAwareness 没有这个
+	// 参数），那一跳只会按负载随机选一个再被判「不是绑定账号」放掉——白跑一次选号加一次
+	// 抢槽/释放。只有高级调度器在时才值得先去兜底分组找绑定。
+	if s.getOpenAIAccountScheduler(ctx) == nil {
+		// 走常规链。
+	} else if hop, boundAccountID := s.previousResponseBinding(ctx, groupID, previousResponseID); hop != nil && derefGroupID(hop) != derefGroupID(groupID) {
+		// A continuation may reuse the fallback account, but not bypass the origin's model policy.
+		if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
+			return nil, decision, newChannelModelRestrictedError(requestedModel)
+		}
+		selection, hopDecision, hopErr := s.selectAccountWithSchedulerForGroup(withNoAccountFallbackActive(ctx), hop, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+		if hopErr == nil && selection != nil && selection.Account != nil && selection.Account.ID == boundAccountID {
+			selection.stampSchedulingGroupID(hop)
+			return selection, hopDecision, nil
+		}
+		if selection != nil && selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
+	}
+	selection, err := runWithNoAccountFallback(ctx, s.noAccountFallbackChain(groupID), func(ctx context.Context, groupID *int64) (*AccountSelectionResult, error) {
+		selection, hopDecision, hopErr := s.selectAccountWithSchedulerForGroup(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+		decision = hopDecision
+		return selection, hopErr
+	})
+	return selection, decision, err
+}
+
+// previousResponseBinding finds the group namespace that owns an existing
+// previous_response_id binding and the account it points at. The search is
+// limited to the origin group's no-account fallback chain, so an unrelated
+// group can never influence routing. A miss preserves the legacy origin-first
+// selection path.
+func (s *OpenAIGatewayService) previousResponseBinding(ctx context.Context, originGroupID *int64, previousResponseID string) (*int64, int64) {
+	if s == nil || strings.TrimSpace(previousResponseID) == "" {
+		return nil, 0
+	}
+	store := s.getOpenAIWSStateStore()
+	if store == nil {
+		return nil, 0
+	}
+
+	boundAccount := func(groupID int64) int64 {
+		accountID, err := store.GetResponseAccount(ctx, groupID, previousResponseID)
+		if err != nil || accountID <= 0 {
+			return 0
+		}
+		return accountID
+	}
+	if accountID := boundAccount(derefGroupID(originGroupID)); accountID > 0 {
+		return originGroupID, accountID
+	}
+
+	chain := s.noAccountFallbackChain(originGroupID)
+	for target := chain.next(ctx); target != nil; target = chain.next(ctx) {
+		if accountID := boundAccount(target.ID); accountID > 0 {
+			groupID := target.ID
+			return &groupID, accountID
+		}
+	}
+	return nil, 0
+}
+
+// selectAccountWithSchedulerForGroup wraps selectAccountWithSchedulerOnce with a
 // fail-open second pass for the proxy stream circuit (#5056): when the only
 // reason no account is available is that every candidate sits behind a
 // quarantined proxy, the quarantine must degrade to a preference instead of
 // zeroing out capacity. The retry re-runs the exact same selection with the
 // quarantine checks bypassed, so healthy proxies always win the first pass
 // and quarantined ones only serve when nothing else can.
-func (s *OpenAIGatewayService) selectAccountWithScheduler(
+func (s *OpenAIGatewayService) selectAccountWithSchedulerForGroup(
 	ctx context.Context,
 	groupID *int64,
 	previousResponseID string,
@@ -2248,7 +2365,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
 		if guardianParentAccountID > 0 {
 			if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
-				return nil, decision, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
+				return nil, decision, newChannelModelRestrictedError(requestedModel)
 			}
 			fallbackScheduler := &defaultOpenAIAccountScheduler{service: s, stats: newOpenAIAccountRuntimeStats()}
 			selection, _, err := fallbackScheduler.selectBySessionHash(ctx, OpenAIAccountScheduleRequest{
@@ -2336,7 +2453,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		slog.Warn("channel pricing restriction blocked request",
 			"group_id", derefGroupID(groupID),
 			"model", requestedModel)
-		return nil, decision, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
+		return nil, decision, newChannelModelRestrictedError(requestedModel)
 	}
 
 	var stickyAccountID int64

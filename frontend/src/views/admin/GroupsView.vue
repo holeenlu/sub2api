@@ -2025,6 +2025,21 @@
           </p>
         </div>
 
+        <!-- 无可用账号兜底（所有平台，目标分组必须同平台） -->
+        <div class="border-t pt-4">
+          <label class="input-label">{{
+            t("admin.groups.noAccountFallback.title")
+          }}</label>
+          <Select
+            v-model="createForm.fallback_group_id_on_no_account"
+            :options="noAccountFallbackOptions"
+            :placeholder="t('admin.groups.noAccountFallback.noFallback')"
+          />
+          <p class="input-hint">
+            {{ t("admin.groups.noAccountFallback.hint") }}
+          </p>
+        </div>
+
         <!-- 模型路由配置（仅 anthropic 平台） -->
         <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -3830,6 +3845,21 @@
           </p>
         </div>
 
+        <!-- 无可用账号兜底（所有平台，目标分组必须同平台） -->
+        <div class="border-t pt-4">
+          <label class="input-label">{{
+            t("admin.groups.noAccountFallback.title")
+          }}</label>
+          <Select
+            v-model="editForm.fallback_group_id_on_no_account"
+            :options="noAccountFallbackOptionsForEdit"
+            :placeholder="t('admin.groups.noAccountFallback.noFallback')"
+          />
+          <p class="input-hint">
+            {{ t("admin.groups.noAccountFallback.hint") }}
+          </p>
+        </div>
+
         <!-- 模型路由配置（仅 anthropic 平台） -->
         <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -4638,6 +4668,11 @@ import {
   setModelsListCandidates,
 } from "./groupsModelsList";
 import { createModelsListCandidatesTracker } from "./groupsModelsListCandidates";
+import {
+  noAccountFallbackCandidates,
+  reconcileNoAccountFallbackForPlatform,
+  withSelectedGroup,
+} from "./groupsNoAccountFallback";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
 import {
   isProfitControlPlatform,
@@ -4966,12 +5001,38 @@ const subscriptionTypeOptions = computed(() => [
   { value: "subscription", label: t("admin.groups.subscription.subscription") },
 ]);
 
+// 兜底类下拉的候选来源。groups 只是分页 + 筛选后的当前页，目标分组不在当前页时
+// 下拉里就没有它；打开弹窗时补一份全量目录（含停用分组），拿不到就退回当前页。
+const fallbackGroupDirectory = ref<AdminGroup[]>([]);
+let fallbackGroupDirectoryLoaded = false;
+const ensureFallbackGroupDirectory = async () => {
+  if (fallbackGroupDirectoryLoaded) return;
+  fallbackGroupDirectoryLoaded = true;
+  try {
+    fallbackGroupDirectory.value =
+      await adminAPI.groups.getAllIncludingInactive();
+  } catch (error) {
+    // 目录只是补全下拉，拿不到不该挡住弹窗；下次打开再试。
+    fallbackGroupDirectoryLoaded = false;
+    console.error("Error loading groups for fallback selectors:", error);
+  }
+};
+
+// 当前页的分组排在前面（数据最新），目录补上不在当前页的那些。
+const fallbackGroupPool = computed<AdminGroup[]>(() => {
+  const onPage = new Set(groups.value.map((g) => g.id));
+  return [
+    ...groups.value,
+    ...fallbackGroupDirectory.value.filter((g) => !onPage.has(g.id)),
+  ];
+});
+
 // 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
 const fallbackGroupOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.claudeCode.noFallback") },
   ];
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = fallbackGroupPool.value.filter(
     (g) =>
       g.platform === "anthropic" &&
       !g.claude_code_only &&
@@ -4989,14 +5050,18 @@ const fallbackGroupOptionsForEdit = computed(() => {
     { value: null, label: t("admin.groups.claudeCode.noFallback") },
   ];
   const currentId = editingGroup.value?.id;
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = fallbackGroupPool.value.filter(
     (g) =>
       g.platform === "anthropic" &&
       !g.claude_code_only &&
       g.status === "active" &&
       g.id !== currentId,
   );
-  eligibleGroups.forEach((g) => {
+  withSelectedGroup(
+    eligibleGroups,
+    fallbackGroupPool.value,
+    editForm.fallback_group_id,
+  ).forEach((g) => {
     options.push({ value: g.id, label: g.name });
   });
   return options;
@@ -5007,7 +5072,7 @@ const invalidRequestFallbackOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.invalidRequestFallback.noFallback") },
   ];
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = fallbackGroupPool.value.filter(
     (g) =>
       g.platform === "anthropic" &&
       g.status === "active" &&
@@ -5026,7 +5091,7 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
     { value: null, label: t("admin.groups.invalidRequestFallback.noFallback") },
   ];
   const currentId = editingGroup.value?.id;
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = fallbackGroupPool.value.filter(
     (g) =>
       g.platform === "anthropic" &&
       g.status === "active" &&
@@ -5034,7 +5099,42 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
       g.fallback_group_id_on_invalid_request === null &&
       g.id !== currentId,
   );
-  eligibleGroups.forEach((g) => {
+  withSelectedGroup(
+    eligibleGroups,
+    fallbackGroupPool.value,
+    editForm.fallback_group_id_on_invalid_request,
+  ).forEach((g) => {
+    options.push({ value: g.id, label: g.name });
+  });
+  return options;
+});
+
+// 无可用账号兜底分组选项（创建时）- 同平台且启用中的分组。
+// 后端按平台过滤账号，异平台分组永远选不出账号，这里就不展示。
+const noAccountFallbackOptions = computed(() => {
+  const options: { value: number | null; label: string }[] = [
+    { value: null, label: t("admin.groups.noAccountFallback.noFallback") },
+  ];
+  noAccountFallbackCandidates(fallbackGroupPool.value, createForm.platform).forEach((g) => {
+    options.push({ value: g.id, label: g.name });
+  });
+  return options;
+});
+
+// 无可用账号兜底分组选项（编辑时）- 排除自身
+const noAccountFallbackOptionsForEdit = computed(() => {
+  const options: { value: number | null; label: string }[] = [
+    { value: null, label: t("admin.groups.noAccountFallback.noFallback") },
+  ];
+  withSelectedGroup(
+    noAccountFallbackCandidates(
+      fallbackGroupPool.value,
+      editForm.platform,
+      editingGroup.value?.id,
+    ),
+    fallbackGroupPool.value,
+    editForm.fallback_group_id_on_no_account,
+  ).forEach((g) => {
     options.push({ value: g.id, label: g.name });
   });
   return options;
@@ -5260,6 +5360,7 @@ const createForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  fallback_group_id_on_no_account: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
@@ -5624,6 +5725,7 @@ const editForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  fallback_group_id_on_no_account: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
@@ -6028,6 +6130,7 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 
 const openCreateModal = () => {
   showCreateModal.value = true;
+  void ensureFallbackGroupDirectory();
   loadModelsListCandidates("create", 0, createForm.platform);
 };
 
@@ -6080,6 +6183,7 @@ const closeCreateModal = () => {
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
+  createForm.fallback_group_id_on_no_account = null;
   resetMessagesDispatchFormState(createForm);
   createForm.allow_live = false;
   createForm.require_oauth_only = false;
@@ -6290,6 +6394,7 @@ const handleCreateGroup = async () => {
 };
 
 const handleEdit = async (group: AdminGroup) => {
+  void ensureFallbackGroupDirectory();
   editingGroup.value = group;
   editForm.name = group.name;
   editForm.description = group.description || "";
@@ -6345,6 +6450,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
     group.fallback_group_id_on_invalid_request;
+  editForm.fallback_group_id_on_no_account =
+    group.fallback_group_id_on_no_account;
   const messagesDispatchFormState = messagesDispatchConfigToFormState(
     group.messages_dispatch_model_config,
   );
@@ -6515,6 +6622,10 @@ const handleUpdateGroup = async () => {
         editForm.fallback_group_id_on_invalid_request === null
           ? 0
           : editForm.fallback_group_id_on_invalid_request,
+      fallback_group_id_on_no_account:
+        editForm.fallback_group_id_on_no_account === null
+          ? 0
+          : editForm.fallback_group_id_on_no_account,
       model_routing: convertRoutingRulesToApiFormat(
         editModelRoutingRules.value,
       ),
@@ -6911,6 +7022,15 @@ watch(
     if (!["anthropic", "antigravity"].includes(newVal)) {
       createForm.fallback_group_id_on_invalid_request = null;
     }
+    // 只有确认所选分组换了平台才清空。无条件清空会把编辑弹窗刚回填的值冲掉
+    //（watcher 是 pre-flush，跑在 handleEdit 的同步赋值之后），管理员不改
+    // 兜底项直接保存就等于把它删了。
+    createForm.fallback_group_id_on_no_account =
+      reconcileNoAccountFallbackForPlatform(
+        createForm.fallback_group_id_on_no_account,
+        newVal,
+        fallbackGroupPool.value,
+      );
     if (!supportsMessagesDispatchPlatform(newVal)) {
       resetMessagesDispatchFormState(createForm);
     }
@@ -6968,8 +7088,15 @@ watch(
     if (!["anthropic", "antigravity"].includes(newVal)) {
       editForm.fallback_group_id_on_invalid_request = null;
     }
+    editForm.fallback_group_id_on_no_account =
+      reconcileNoAccountFallbackForPlatform(
+        editForm.fallback_group_id_on_no_account,
+        newVal,
+        fallbackGroupPool.value,
+      );
     if (!supportsMessagesDispatchPlatform(newVal)) {
       resetMessagesDispatchFormState(editForm);
+      editForm.default_mapped_model = "";
     }
     if (!supportsLivePlatform(newVal)) {
       editForm.allow_live = false;
@@ -7020,22 +7147,6 @@ watch(
     resetDisabledBatchImagePricing(editForm);
   },
 );
-
-watch(
-  () => editForm.platform,
-  (newVal) => {
-    if (!['anthropic', 'antigravity'].includes(newVal)) {
-      editForm.fallback_group_id_on_invalid_request = null
-    }
-    if (!supportsMessagesDispatchPlatform(newVal)) {
-      editForm.allow_messages_dispatch = false
-      editForm.default_mapped_model = ''
-    }
-    if (!supportsLivePlatform(newVal)) {
-      editForm.allow_live = false
-    }
-  }
-)
 
 // 点击外部关闭账号搜索下拉框
 const handleClickOutside = (event: MouseEvent) => {

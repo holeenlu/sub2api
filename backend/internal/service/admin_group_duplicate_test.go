@@ -58,6 +58,7 @@ func cloneGroupForDuplicateTest(group *Group) *Group {
 	cloned.WebSearchPricePerCall = cloneGroupValuePointer(group.WebSearchPricePerCall)
 	cloned.FallbackGroupID = cloneGroupValuePointer(group.FallbackGroupID)
 	cloned.FallbackGroupIDOnInvalidRequest = cloneGroupValuePointer(group.FallbackGroupIDOnInvalidRequest)
+	cloned.FallbackGroupIDOnNoAccount = cloneGroupValuePointer(group.FallbackGroupIDOnNoAccount)
 	cloned.ModelRouting = cloneGroupModelRouting(group.ModelRouting)
 	cloned.SupportedModelScopes = append([]string(nil), group.SupportedModelScopes...)
 	cloned.MessagesDispatchModelConfig = cloneGroupMessagesDispatchModelConfig(group.MessagesDispatchModelConfig)
@@ -159,6 +160,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 		ClaudeCodeOnly:                  true,
 		FallbackGroupID:                 groupDuplicateTestPointer(int64(7)),
 		FallbackGroupIDOnInvalidRequest: groupDuplicateTestPointer(int64(8)),
+		FallbackGroupIDOnNoAccount:      groupDuplicateTestPointer(int64(9)),
 		ModelRouting:                    map[string][]int64{"gpt-*": {13, 17}},
 		ModelRoutingEnabled:             true,
 		MCPXMLInject:                    true,
@@ -213,6 +215,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.Equal(t, source.VideoModelPrices, duplicate.VideoModelPrices)
 	require.Equal(t, source.WebSearchPricePerCall, duplicate.WebSearchPricePerCall)
 	require.Equal(t, source.FallbackGroupID, duplicate.FallbackGroupID)
+	require.Equal(t, source.FallbackGroupIDOnNoAccount, duplicate.FallbackGroupIDOnNoAccount)
 	require.Equal(t, source.ModelRouting, duplicate.ModelRouting)
 	require.Equal(t, source.MessagesDispatchModelConfig, duplicate.MessagesDispatchModelConfig)
 	require.Equal(t, source.ForceOpenAIFast, duplicate.ForceOpenAIFast)

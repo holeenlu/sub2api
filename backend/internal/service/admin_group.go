@@ -432,6 +432,16 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 			return nil, err
 		}
 	}
+	fallbackOnNoAccount := input.FallbackGroupIDOnNoAccount
+	if fallbackOnNoAccount != nil && *fallbackOnNoAccount <= 0 {
+		fallbackOnNoAccount = nil
+	}
+	// 校验无可用账号兜底分组
+	if fallbackOnNoAccount != nil {
+		if err := s.validateFallbackGroupOnNoAccount(ctx, 0, platform, *fallbackOnNoAccount, true); err != nil {
+			return nil, err
+		}
+	}
 
 	// MCPXMLInject：默认为 true，仅当显式传入 false 时关闭
 	mcpXMLInject := true
@@ -517,6 +527,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ClaudeCodeOnly:                  input.ClaudeCodeOnly,
 		FallbackGroupID:                 input.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: fallbackOnInvalidRequest,
+		FallbackGroupIDOnNoAccount:      fallbackOnNoAccount,
 		ModelRouting:                    input.ModelRouting,
 		MCPXMLInject:                    mcpXMLInject,
 		SupportedModelScopes:            input.SupportedModelScopes,
@@ -595,6 +606,56 @@ func normalizePrice(price *float64) *float64 {
 	return price
 }
 
+// fallbackChainSpec 描述一条兜底链怎么走。两种兜底（降级分组、无可用账号兜底）
+// 的链遍历骨架完全一样——visited 判环、GetByIDLite 逐跳、取下一跳——差别只在
+// 指针字段、首跳的附加校验、跳数上限与错误文案。
+type fallbackChainSpec struct {
+	// errPrefix 拼在固定错误文案前面，例如 "fallback " / "no-account fallback "。
+	errPrefix string
+	// maxHops <= 0 表示不限跳数，靠 visited 判环终止。
+	maxHops int
+	// next 取出某一跳的下一跳指针，nil 表示链到此为止。
+	next func(*Group) *int64
+	// firstHop 只对直接目标生效的附加校验（平台、状态等）。
+	firstHop func(*Group) error
+}
+
+// validateFallbackChain 沿兜底链逐跳回源，检测成环、跳数超限与链上分组缺失。
+func (s *adminServiceImpl) validateFallbackChain(ctx context.Context, currentGroupID, fallbackGroupID int64, spec fallbackChainSpec) error {
+	visited := map[int64]struct{}{}
+	nextID := fallbackGroupID
+	hops := 0
+	for {
+		if _, seen := visited[nextID]; seen {
+			return fmt.Errorf("%sgroup cycle detected", spec.errPrefix)
+		}
+		visited[nextID] = struct{}{}
+		if currentGroupID > 0 && nextID == currentGroupID {
+			return fmt.Errorf("%sgroup cycle detected", spec.errPrefix)
+		}
+		hops++
+		if spec.maxHops > 0 && hops > spec.maxHops {
+			return fmt.Errorf("%schain exceeds %d hops", spec.errPrefix, spec.maxHops)
+		}
+
+		fallbackGroup, err := s.groupRepo.GetByIDLite(ctx, nextID)
+		if err != nil {
+			return fmt.Errorf("%sgroup not found: %w", spec.errPrefix, err)
+		}
+		if nextID == fallbackGroupID && spec.firstHop != nil {
+			if hopErr := spec.firstHop(fallbackGroup); hopErr != nil {
+				return hopErr
+			}
+		}
+
+		next := spec.next(fallbackGroup)
+		if next == nil {
+			return nil
+		}
+		nextID = *next
+	}
+}
+
 // validateFallbackGroup 校验降级分组的有效性
 // currentGroupID: 当前分组 ID（新建时为 0）
 // fallbackGroupID: 降级分组 ID
@@ -604,33 +665,17 @@ func (s *adminServiceImpl) validateFallbackGroup(ctx context.Context, currentGro
 		return fmt.Errorf("cannot set self as fallback group")
 	}
 
-	visited := map[int64]struct{}{}
-	nextID := fallbackGroupID
-	for {
-		if _, seen := visited[nextID]; seen {
-			return fmt.Errorf("fallback group cycle detected")
-		}
-		visited[nextID] = struct{}{}
-		if currentGroupID > 0 && nextID == currentGroupID {
-			return fmt.Errorf("fallback group cycle detected")
-		}
-
-		// 检查降级分组是否存在
-		fallbackGroup, err := s.groupRepo.GetByIDLite(ctx, nextID)
-		if err != nil {
-			return fmt.Errorf("fallback group not found: %w", err)
-		}
-
-		// 降级分组不能启用 claude_code_only，否则会造成死循环
-		if nextID == fallbackGroupID && fallbackGroup.ClaudeCodeOnly {
-			return fmt.Errorf("fallback group cannot have claude_code_only enabled")
-		}
-
-		if fallbackGroup.FallbackGroupID == nil {
+	return s.validateFallbackChain(ctx, currentGroupID, fallbackGroupID, fallbackChainSpec{
+		errPrefix: "fallback ",
+		next:      func(g *Group) *int64 { return g.FallbackGroupID },
+		firstHop: func(g *Group) error {
+			// 降级分组不能启用 claude_code_only，否则会造成死循环
+			if g.ClaudeCodeOnly {
+				return fmt.Errorf("fallback group cannot have claude_code_only enabled")
+			}
 			return nil
-		}
-		nextID = *fallbackGroup.FallbackGroupID
-	}
+		},
+	})
 }
 
 // validateFallbackGroupOnInvalidRequest 校验无效请求兜底分组的有效性
@@ -662,6 +707,42 @@ func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Con
 		return fmt.Errorf("fallback group cannot have invalid request fallback configured")
 	}
 	return nil
+}
+
+// validateFallbackGroupOnNoAccount 校验无可用账号兜底分组的有效性。
+// 与无效请求兜底不同，本兜底只借账号池、不改计费归属，因此不限制平台种类，
+// 也不限制订阅类型；但目标分组必须与当前分组同平台——选号本身按平台过滤，
+// 配一个异平台分组永远选不出账号，属于无效配置，直接在保存时拦掉。
+// 目标也不能是 claude_code_only：非 Claude Code 客户端到了那一跳会被
+// ErrClaudeCodeOnly 挡住，兜底等于没配。
+// 兜底链允许多级，这里沿链做成环检测并按 MaxNoAccountFallbackHops 限长，
+// 与运行时截断口径一致。
+// currentGroupID: 当前分组 ID（新建时为 0）
+// platform: 当前分组的有效平台
+// requireActive: 目标是否必须为 active。只有选定一个新目标时才要求；沿用旧值时
+// 目标可能早已被停用，此时复验只会挡住与兜底无关的编辑。
+func (s *adminServiceImpl) validateFallbackGroupOnNoAccount(ctx context.Context, currentGroupID int64, platform string, fallbackGroupID int64, requireActive bool) error {
+	if currentGroupID > 0 && currentGroupID == fallbackGroupID {
+		return fmt.Errorf("cannot set self as no-account fallback group")
+	}
+
+	return s.validateFallbackChain(ctx, currentGroupID, fallbackGroupID, fallbackChainSpec{
+		errPrefix: "no-account fallback ",
+		maxHops:   MaxNoAccountFallbackHops,
+		next:      func(g *Group) *int64 { return g.FallbackGroupIDOnNoAccount },
+		firstHop: func(g *Group) error {
+			if requireActive && g.Status != StatusActive {
+				return fmt.Errorf("no-account fallback group is not active")
+			}
+			if g.Platform != platform {
+				return fmt.Errorf("no-account fallback group must be on the same platform: %s", platform)
+			}
+			if g.ClaudeCodeOnly {
+				return fmt.Errorf("no-account fallback group cannot have claude_code_only enabled")
+			}
+			return nil
+		},
+	})
 }
 
 func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *UpdateGroupInput) (*Group, error) {
@@ -867,6 +948,29 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 	}
 	group.FallbackGroupIDOnInvalidRequest = fallbackOnInvalidRequest
+
+	// 无可用账号兜底分组：只校验真正变更过的值。管理端的编辑弹窗会回填这一项并
+	// 无条件把它序列化进 PUT 载荷，所以「没动这一项」在接口上表现为「重新提交同
+	// 一个值」——它必须与不传字段等价，否则目标分组被停用或删除之后，改名字、改
+	// 价格这些无关编辑全都保存不了。运行时对非 active 目标会自行跳过。
+	// 例外是本次同时改了平台：兜底目标从此永远选不出账号，要重新校验（但仍不要求
+	// 它 active，那与平台无关）。传入 0 或负数表示清除。
+	if input.FallbackGroupIDOnNoAccount != nil {
+		if *input.FallbackGroupIDOnNoAccount > 0 {
+			unchanged := group.FallbackGroupIDOnNoAccount != nil &&
+				*group.FallbackGroupIDOnNoAccount == *input.FallbackGroupIDOnNoAccount
+			if !unchanged || group.Platform != previousPlatform {
+				if err := s.validateFallbackGroupOnNoAccount(
+					ctx, id, group.Platform, *input.FallbackGroupIDOnNoAccount, !unchanged,
+				); err != nil {
+					return nil, err
+				}
+			}
+			group.FallbackGroupIDOnNoAccount = input.FallbackGroupIDOnNoAccount
+		} else {
+			group.FallbackGroupIDOnNoAccount = nil
+		}
+	}
 
 	// 模型路由配置
 	if input.ModelRouting != nil {

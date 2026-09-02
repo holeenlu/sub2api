@@ -265,6 +265,11 @@ func FallbackGroupIDOnInvalidRequest(v int64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFallbackGroupIDOnInvalidRequest, v))
 }
 
+// FallbackGroupIDOnNoAccount applies equality check predicate on the "fallback_group_id_on_no_account" field. It's identical to FallbackGroupIDOnNoAccountEQ.
+func FallbackGroupIDOnNoAccount(v int64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldFallbackGroupIDOnNoAccount, v))
+}
+
 // ModelRoutingEnabled applies equality check predicate on the "model_routing_enabled" field. It's identical to ModelRoutingEnabledEQ.
 func ModelRoutingEnabled(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldModelRoutingEnabled, v))
@@ -2193,6 +2198,56 @@ func FallbackGroupIDOnInvalidRequestIsNil() predicate.Group {
 // FallbackGroupIDOnInvalidRequestNotNil applies the NotNil predicate on the "fallback_group_id_on_invalid_request" field.
 func FallbackGroupIDOnInvalidRequestNotNil() predicate.Group {
 	return predicate.Group(sql.FieldNotNull(FieldFallbackGroupIDOnInvalidRequest))
+}
+
+// FallbackGroupIDOnNoAccountEQ applies the EQ predicate on the "fallback_group_id_on_no_account" field.
+func FallbackGroupIDOnNoAccountEQ(v int64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldFallbackGroupIDOnNoAccount, v))
+}
+
+// FallbackGroupIDOnNoAccountNEQ applies the NEQ predicate on the "fallback_group_id_on_no_account" field.
+func FallbackGroupIDOnNoAccountNEQ(v int64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldFallbackGroupIDOnNoAccount, v))
+}
+
+// FallbackGroupIDOnNoAccountIn applies the In predicate on the "fallback_group_id_on_no_account" field.
+func FallbackGroupIDOnNoAccountIn(vs ...int64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldFallbackGroupIDOnNoAccount, vs...))
+}
+
+// FallbackGroupIDOnNoAccountNotIn applies the NotIn predicate on the "fallback_group_id_on_no_account" field.
+func FallbackGroupIDOnNoAccountNotIn(vs ...int64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldFallbackGroupIDOnNoAccount, vs...))
+}
+
+// FallbackGroupIDOnNoAccountGT applies the GT predicate on the "fallback_group_id_on_no_account" field.
+func FallbackGroupIDOnNoAccountGT(v int64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldFallbackGroupIDOnNoAccount, v))
+}
+
+// FallbackGroupIDOnNoAccountGTE applies the GTE predicate on the "fallback_group_id_on_no_account" field.
+func FallbackGroupIDOnNoAccountGTE(v int64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldFallbackGroupIDOnNoAccount, v))
+}
+
+// FallbackGroupIDOnNoAccountLT applies the LT predicate on the "fallback_group_id_on_no_account" field.
+func FallbackGroupIDOnNoAccountLT(v int64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldFallbackGroupIDOnNoAccount, v))
+}
+
+// FallbackGroupIDOnNoAccountLTE applies the LTE predicate on the "fallback_group_id_on_no_account" field.
+func FallbackGroupIDOnNoAccountLTE(v int64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldFallbackGroupIDOnNoAccount, v))
+}
+
+// FallbackGroupIDOnNoAccountIsNil applies the IsNil predicate on the "fallback_group_id_on_no_account" field.
+func FallbackGroupIDOnNoAccountIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldFallbackGroupIDOnNoAccount))
+}
+
+// FallbackGroupIDOnNoAccountNotNil applies the NotNil predicate on the "fallback_group_id_on_no_account" field.
+func FallbackGroupIDOnNoAccountNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldFallbackGroupIDOnNoAccount))
 }
 
 // ModelRoutingIsNil applies the IsNil predicate on the "model_routing" field.

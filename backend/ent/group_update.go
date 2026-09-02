@@ -888,6 +888,33 @@ func (_u *GroupUpdate) ClearFallbackGroupIDOnInvalidRequest() *GroupUpdate {
 	return _u
 }
 
+// SetFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field.
+func (_u *GroupUpdate) SetFallbackGroupIDOnNoAccount(v int64) *GroupUpdate {
+	_u.mutation.ResetFallbackGroupIDOnNoAccount()
+	_u.mutation.SetFallbackGroupIDOnNoAccount(v)
+	return _u
+}
+
+// SetNillableFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableFallbackGroupIDOnNoAccount(v *int64) *GroupUpdate {
+	if v != nil {
+		_u.SetFallbackGroupIDOnNoAccount(*v)
+	}
+	return _u
+}
+
+// AddFallbackGroupIDOnNoAccount adds value to the "fallback_group_id_on_no_account" field.
+func (_u *GroupUpdate) AddFallbackGroupIDOnNoAccount(v int64) *GroupUpdate {
+	_u.mutation.AddFallbackGroupIDOnNoAccount(v)
+	return _u
+}
+
+// ClearFallbackGroupIDOnNoAccount clears the value of the "fallback_group_id_on_no_account" field.
+func (_u *GroupUpdate) ClearFallbackGroupIDOnNoAccount() *GroupUpdate {
+	_u.mutation.ClearFallbackGroupIDOnNoAccount()
+	return _u
+}
+
 // SetModelRouting sets the "model_routing" field.
 func (_u *GroupUpdate) SetModelRouting(v map[string][]int64) *GroupUpdate {
 	_u.mutation.SetModelRouting(v)
@@ -1825,6 +1852,15 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.FallbackGroupIDOnInvalidRequestCleared() {
 		_spec.ClearField(group.FieldFallbackGroupIDOnInvalidRequest, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.FallbackGroupIDOnNoAccount(); ok {
+		_spec.SetField(group.FieldFallbackGroupIDOnNoAccount, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedFallbackGroupIDOnNoAccount(); ok {
+		_spec.AddField(group.FieldFallbackGroupIDOnNoAccount, field.TypeInt64, value)
+	}
+	if _u.mutation.FallbackGroupIDOnNoAccountCleared() {
+		_spec.ClearField(group.FieldFallbackGroupIDOnNoAccount, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.ModelRouting(); ok {
 		_spec.SetField(group.FieldModelRouting, field.TypeJSON, value)
@@ -3082,6 +3118,33 @@ func (_u *GroupUpdateOne) ClearFallbackGroupIDOnInvalidRequest() *GroupUpdateOne
 	return _u
 }
 
+// SetFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field.
+func (_u *GroupUpdateOne) SetFallbackGroupIDOnNoAccount(v int64) *GroupUpdateOne {
+	_u.mutation.ResetFallbackGroupIDOnNoAccount()
+	_u.mutation.SetFallbackGroupIDOnNoAccount(v)
+	return _u
+}
+
+// SetNillableFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableFallbackGroupIDOnNoAccount(v *int64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetFallbackGroupIDOnNoAccount(*v)
+	}
+	return _u
+}
+
+// AddFallbackGroupIDOnNoAccount adds value to the "fallback_group_id_on_no_account" field.
+func (_u *GroupUpdateOne) AddFallbackGroupIDOnNoAccount(v int64) *GroupUpdateOne {
+	_u.mutation.AddFallbackGroupIDOnNoAccount(v)
+	return _u
+}
+
+// ClearFallbackGroupIDOnNoAccount clears the value of the "fallback_group_id_on_no_account" field.
+func (_u *GroupUpdateOne) ClearFallbackGroupIDOnNoAccount() *GroupUpdateOne {
+	_u.mutation.ClearFallbackGroupIDOnNoAccount()
+	return _u
+}
+
 // SetModelRouting sets the "model_routing" field.
 func (_u *GroupUpdateOne) SetModelRouting(v map[string][]int64) *GroupUpdateOne {
 	_u.mutation.SetModelRouting(v)
@@ -4049,6 +4112,15 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if _u.mutation.FallbackGroupIDOnInvalidRequestCleared() {
 		_spec.ClearField(group.FieldFallbackGroupIDOnInvalidRequest, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.FallbackGroupIDOnNoAccount(); ok {
+		_spec.SetField(group.FieldFallbackGroupIDOnNoAccount, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedFallbackGroupIDOnNoAccount(); ok {
+		_spec.AddField(group.FieldFallbackGroupIDOnNoAccount, field.TypeInt64, value)
+	}
+	if _u.mutation.FallbackGroupIDOnNoAccountCleared() {
+		_spec.ClearField(group.FieldFallbackGroupIDOnNoAccount, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.ModelRouting(); ok {
 		_spec.SetField(group.FieldModelRouting, field.TypeJSON, value)

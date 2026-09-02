@@ -622,6 +622,20 @@ func (_c *GroupCreate) SetNillableFallbackGroupIDOnInvalidRequest(v *int64) *Gro
 	return _c
 }
 
+// SetFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field.
+func (_c *GroupCreate) SetFallbackGroupIDOnNoAccount(v int64) *GroupCreate {
+	_c.mutation.SetFallbackGroupIDOnNoAccount(v)
+	return _c
+}
+
+// SetNillableFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableFallbackGroupIDOnNoAccount(v *int64) *GroupCreate {
+	if v != nil {
+		_c.SetFallbackGroupIDOnNoAccount(*v)
+	}
+	return _c
+}
+
 // SetModelRouting sets the "model_routing" field.
 func (_c *GroupCreate) SetModelRouting(v map[string][]int64) *GroupCreate {
 	_c.mutation.SetModelRouting(v)
@@ -1620,6 +1634,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.FallbackGroupIDOnInvalidRequest(); ok {
 		_spec.SetField(group.FieldFallbackGroupIDOnInvalidRequest, field.TypeInt64, value)
 		_node.FallbackGroupIDOnInvalidRequest = &value
+	}
+	if value, ok := _c.mutation.FallbackGroupIDOnNoAccount(); ok {
+		_spec.SetField(group.FieldFallbackGroupIDOnNoAccount, field.TypeInt64, value)
+		_node.FallbackGroupIDOnNoAccount = &value
 	}
 	if value, ok := _c.mutation.ModelRouting(); ok {
 		_spec.SetField(group.FieldModelRouting, field.TypeJSON, value)
@@ -2624,6 +2642,30 @@ func (u *GroupUpsert) AddFallbackGroupIDOnInvalidRequest(v int64) *GroupUpsert {
 // ClearFallbackGroupIDOnInvalidRequest clears the value of the "fallback_group_id_on_invalid_request" field.
 func (u *GroupUpsert) ClearFallbackGroupIDOnInvalidRequest() *GroupUpsert {
 	u.SetNull(group.FieldFallbackGroupIDOnInvalidRequest)
+	return u
+}
+
+// SetFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field.
+func (u *GroupUpsert) SetFallbackGroupIDOnNoAccount(v int64) *GroupUpsert {
+	u.Set(group.FieldFallbackGroupIDOnNoAccount, v)
+	return u
+}
+
+// UpdateFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateFallbackGroupIDOnNoAccount() *GroupUpsert {
+	u.SetExcluded(group.FieldFallbackGroupIDOnNoAccount)
+	return u
+}
+
+// AddFallbackGroupIDOnNoAccount adds v to the "fallback_group_id_on_no_account" field.
+func (u *GroupUpsert) AddFallbackGroupIDOnNoAccount(v int64) *GroupUpsert {
+	u.Add(group.FieldFallbackGroupIDOnNoAccount, v)
+	return u
+}
+
+// ClearFallbackGroupIDOnNoAccount clears the value of the "fallback_group_id_on_no_account" field.
+func (u *GroupUpsert) ClearFallbackGroupIDOnNoAccount() *GroupUpsert {
+	u.SetNull(group.FieldFallbackGroupIDOnNoAccount)
 	return u
 }
 
@@ -3855,6 +3897,34 @@ func (u *GroupUpsertOne) UpdateFallbackGroupIDOnInvalidRequest() *GroupUpsertOne
 func (u *GroupUpsertOne) ClearFallbackGroupIDOnInvalidRequest() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearFallbackGroupIDOnInvalidRequest()
+	})
+}
+
+// SetFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field.
+func (u *GroupUpsertOne) SetFallbackGroupIDOnNoAccount(v int64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetFallbackGroupIDOnNoAccount(v)
+	})
+}
+
+// AddFallbackGroupIDOnNoAccount adds v to the "fallback_group_id_on_no_account" field.
+func (u *GroupUpsertOne) AddFallbackGroupIDOnNoAccount(v int64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddFallbackGroupIDOnNoAccount(v)
+	})
+}
+
+// UpdateFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateFallbackGroupIDOnNoAccount() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateFallbackGroupIDOnNoAccount()
+	})
+}
+
+// ClearFallbackGroupIDOnNoAccount clears the value of the "fallback_group_id_on_no_account" field.
+func (u *GroupUpsertOne) ClearFallbackGroupIDOnNoAccount() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearFallbackGroupIDOnNoAccount()
 	})
 }
 
@@ -5301,6 +5371,34 @@ func (u *GroupUpsertBulk) UpdateFallbackGroupIDOnInvalidRequest() *GroupUpsertBu
 func (u *GroupUpsertBulk) ClearFallbackGroupIDOnInvalidRequest() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearFallbackGroupIDOnInvalidRequest()
+	})
+}
+
+// SetFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field.
+func (u *GroupUpsertBulk) SetFallbackGroupIDOnNoAccount(v int64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetFallbackGroupIDOnNoAccount(v)
+	})
+}
+
+// AddFallbackGroupIDOnNoAccount adds v to the "fallback_group_id_on_no_account" field.
+func (u *GroupUpsertBulk) AddFallbackGroupIDOnNoAccount(v int64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddFallbackGroupIDOnNoAccount(v)
+	})
+}
+
+// UpdateFallbackGroupIDOnNoAccount sets the "fallback_group_id_on_no_account" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateFallbackGroupIDOnNoAccount() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateFallbackGroupIDOnNoAccount()
+	})
+}
+
+// ClearFallbackGroupIDOnNoAccount clears the value of the "fallback_group_id_on_no_account" field.
+func (u *GroupUpsertBulk) ClearFallbackGroupIDOnNoAccount() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearFallbackGroupIDOnNoAccount()
 	})
 }
 

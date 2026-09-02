@@ -104,6 +104,70 @@ func (t *modelCapableCooldownTracker) apply(diag *ModelAvailabilityDiagnosis) {
 	diag.AllModelCapableRateLimited = t.cooling == t.capable
 }
 
+// isFinalWithoutFallbackChain reports whether the fallback groups can no
+// longer change the verdict this diagnosis leads to. A pool that serves the
+// model and is not fully cooling already answers 503 "temporarily exhausted";
+// borrowing a fallback group's accounts can neither turn that into a 404 nor
+// into a pool-wide cooldown. It also covers the conservative {true,true} the
+// diagnosers return on a lookup failure, so a database hiccup does not fan out
+// into one extra query per hop on the error path.
+func (d ModelAvailabilityDiagnosis) isFinalWithoutFallbackChain() bool {
+	return d.HasModelSupport && !d.AllModelCapableRateLimited
+}
+
+// diagnoseAcrossNoAccountFallback merges the per-group diagnoses along the
+// no-account fallback chain, because account selection walks that same chain
+// before it gives up (see runWithNoAccountFallback). Diagnosing only the API
+// key's own group answers a question the request no longer asked: a group that
+// cannot serve the model but falls back to one that can yields 404
+// model_not_found, which tells the client to stop retrying even though the
+// fallback pool would serve it once its cooldown lifts.
+//
+// The merge is deliberately conservative on the 429 side: every hop that has
+// model-capable accounts must report them all cooling, so a single hop with a
+// live capable account keeps the verdict on 503. EarliestRateLimitResetAt
+// becomes the soonest reset anywhere on the chain, which is when the request
+// first has a chance of succeeding.
+func diagnoseAcrossNoAccountFallback(
+	ctx context.Context,
+	chain *noAccountFallbackChain,
+	origin ModelAvailabilityDiagnosis,
+	hop func(ctx context.Context, groupID *int64) ModelAvailabilityDiagnosis,
+) ModelAvailabilityDiagnosis {
+	if chain == nil || hop == nil {
+		return origin
+	}
+
+	merged := ModelAvailabilityDiagnosis{}
+	supporting, allCooling := 0, 0
+	absorb := func(d ModelAvailabilityDiagnosis) {
+		merged.HasAccountsInPool = merged.HasAccountsInPool || d.HasAccountsInPool
+		merged.HasModelSupport = merged.HasModelSupport || d.HasModelSupport
+		if d.HasModelSupport {
+			supporting++
+			if d.AllModelCapableRateLimited {
+				allCooling++
+			}
+		}
+		if d.EarliestRateLimitResetAt != nil &&
+			(merged.EarliestRateLimitResetAt == nil || d.EarliestRateLimitResetAt.Before(*merged.EarliestRateLimitResetAt)) {
+			merged.EarliestRateLimitResetAt = d.EarliestRateLimitResetAt
+		}
+	}
+
+	absorb(origin)
+	for {
+		target := chain.next(ctx)
+		if target == nil {
+			break
+		}
+		targetID := target.ID
+		absorb(hop(ctx, &targetID))
+	}
+	merged.AllModelCapableRateLimited = supporting > 0 && supporting == allCooling
+	return merged
+}
+
 // ModelAvailabilityDiagnoser is implemented by gateway services that can
 // report whether the requested model is configured to be served by any
 // account. Both *GatewayService and *OpenAIGatewayService implement this so
@@ -128,6 +192,9 @@ type ModelAvailabilityDiagnoser interface {
 // Safe to call on the error path: returns {true,true} on any internal failure
 // or when the inputs preclude meaningful diagnosis (empty model, etc.), so
 // callers stay on the 503 fallback branch.
+//
+// The diagnosis spans the no-account fallback chain, matching the groups
+// account selection would have tried; see diagnoseAcrossNoAccountFallback.
 func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 	ctx context.Context,
 	groupID *int64,
@@ -152,6 +219,24 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 		return ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}
 	}
 
+	origin := s.diagnoseModelAvailabilityInGroup(ctx, groupID, requestedModel, platform)
+	if origin.isFinalWithoutFallbackChain() {
+		return origin
+	}
+	return diagnoseAcrossNoAccountFallback(ctx, s.noAccountFallbackChain(groupID), origin,
+		func(ctx context.Context, hopGroupID *int64) ModelAvailabilityDiagnosis {
+			return s.diagnoseModelAvailabilityInGroup(ctx, hopGroupID, requestedModel, platform)
+		})
+}
+
+// diagnoseModelAvailabilityInGroup is DiagnoseModelAvailabilityForPlatform for
+// a single group, with the input guards already applied.
+func (s *GatewayService) diagnoseModelAvailabilityInGroup(
+	ctx context.Context,
+	groupID *int64,
+	requestedModel string,
+	platform string,
+) ModelAvailabilityDiagnosis {
 	useMixed := platform == PlatformAnthropic || platform == PlatformGemini
 	platforms := []string{platform}
 	if useMixed {

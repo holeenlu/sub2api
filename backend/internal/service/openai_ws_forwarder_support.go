@@ -444,6 +444,48 @@ func getOpenAIGroupIDFromContext(c *gin.Context) int64 {
 	return *apiKey.GroupID
 }
 
+const openAISchedulingGroupContextKey = "openai_scheduling_group_id"
+
+// SetOpenAISchedulingGroup 记录本次请求的账号究竟是从哪个分组选出来的。无可用
+// 账号兜底借用别的分组账号池时它与 API Key 自己的分组不同，而 previous_response_id
+// → 账号的粘连按分组分命名空间：读侧在兜底跳内用的是选号分组，写侧也必须用它，
+// 否则下一轮续话在兜底分组里读不到绑定，换到别的账号后上游报
+// previous response not found。
+//
+// 只影响调度侧的粘连命名空间；计费与响应归属仍按 API Key 自己的分组。
+func SetOpenAISchedulingGroup(c *gin.Context, groupID *int64) {
+	if c == nil || groupID == nil || *groupID <= 0 {
+		return
+	}
+	c.Set(openAISchedulingGroupContextKey, *groupID)
+}
+
+// OpenAISchedulingGroupID 返回 SetOpenAISchedulingGroup 记下的选号分组，
+// 未记录（尚未选号、非 HTTP 入口）时返回 0。
+func OpenAISchedulingGroupID(c *gin.Context) int64 {
+	if c == nil {
+		return 0
+	}
+	value, exists := c.Get(openAISchedulingGroupContextKey)
+	if !exists {
+		return 0
+	}
+	groupID, ok := value.(int64)
+	if !ok || groupID <= 0 {
+		return 0
+	}
+	return groupID
+}
+
+// openAIResponseAccountGroupID 返回响应级账号粘连应当使用的分组：优先本次选号
+// 分组，未记录时退回 API Key 分组。
+func openAIResponseAccountGroupID(c *gin.Context) int64 {
+	if groupID := OpenAISchedulingGroupID(c); groupID > 0 {
+		return groupID
+	}
+	return getOpenAIGroupIDFromContext(c)
+}
+
 // SelectAccountByPreviousResponseID 按 previous_response_id 命中账号粘连。
 // 未命中或账号不可用时返回 (nil, nil)，由调用方继续走常规调度。
 func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
