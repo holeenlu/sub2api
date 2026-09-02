@@ -235,6 +235,10 @@ type Account struct {
 
 	Schedulable bool `json:"schedulable"`
 
+	// CanRefreshToken 是后端下发的能力位（Account.CanRefreshToken）：账号的凭据是否
+	// 参与 OAuth 续期。前端据此决定是否显示"刷新 token"入口，不再自行复刻规则。
+	CanRefreshToken bool `json:"can_refresh_token"`
+
 	RateLimitedAt    *time.Time `json:"rate_limited_at"`
 	RateLimitResetAt *time.Time `json:"rate_limit_reset_at"`
 	OverloadUntil    *time.Time `json:"overload_until"`

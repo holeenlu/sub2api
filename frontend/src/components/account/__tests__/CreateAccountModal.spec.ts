@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   createAccountMock,
+  batchCreateAccountsMock,
   probeUpstreamBillingMock,
   syncUpstreamModelsMock,
   showWarningMock,
@@ -12,6 +13,7 @@ const {
   authIsSimpleMode,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
+  batchCreateAccountsMock: vi.fn(),
   probeUpstreamBillingMock: vi.fn(),
   syncUpstreamModelsMock: vi.fn(),
   showWarningMock: vi.fn(),
@@ -40,6 +42,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       create: createAccountMock,
+      batchCreate: batchCreateAccountsMock,
       probeUpstreamBilling: probeUpstreamBillingMock,
       syncUpstreamModels: syncUpstreamModelsMock,
       checkMixedChannelRisk: vi.fn().mockResolvedValue({ has_risk: false }),
@@ -79,14 +82,17 @@ const BaseDialogStub = defineComponent({
 const OAuthAuthorizationFlowStub = defineComponent({
   name: 'OAuthAuthorizationFlow',
   props: {
+    addMethod: String,
+    platform: String,
+    error: String,
     showManualOption: Boolean,
     showCodexSessionImportOption: Boolean,
     showAgentIdentityOption: Boolean,
     showCodexPatOption: Boolean,
     initialInputMethod: String,
   },
-  data: () => ({ inputMethod: 'manual' }),
-  emits: ['import-codex-session', 'import-codex-pat'],
+  data: () => ({ inputMethod: 'manual', setupToken: '' }),
+  emits: ['import-codex-session', 'import-codex-pat', 'import-setup-token', 'cookie-auth'],
   template: `
     <div>
       <button data-testid="import-codex-session" @click="$emit('import-codex-session', 'session-json')">session</button>
@@ -585,5 +591,141 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await flushPromises()
 
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
+  })
+})
+
+const SETUP_TOKEN = 'sk-ant-oat01-' + 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0'
+const OTHER_SETUP_TOKEN = 'sk-ant-oat01-' + 'z9Y8x7W6v5U4t3S2r1Q0p9O8n7M6l5K4j3I2h1G0'
+
+async function openAnthropicSetupTokenStep(name = 'Claude setup') {
+  const wrapper = mountModal()
+  await wrapper.get('form#create-account-form input[type="text"]').setValue(name)
+  await wrapper.get('input[value="setup-token"]').setValue(true)
+  await wrapper.get('form#create-account-form').trigger('submit.prevent')
+  return wrapper
+}
+
+function batchResults(...successes: boolean[]) {
+  return {
+    success: successes.filter(Boolean).length,
+    failed: successes.filter((ok) => !ok).length,
+    results: successes.map((ok) => (ok ? { success: true } : { success: false, error: 'duplicate' })),
+  }
+}
+
+describe('CreateAccountModal direct Claude setup-token import', () => {
+  beforeEach(() => {
+    authIsSimpleMode.value = true
+    createAccountMock.mockReset().mockResolvedValue({ id: 7, platform: 'anthropic', type: 'setup-token' })
+    batchCreateAccountsMock.mockReset().mockResolvedValue(batchResults(true))
+  })
+
+  it('hands the setup-token mode to the authorization flow', async () => {
+    const wrapper = await openAnthropicSetupTokenStep()
+
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    expect(flow.props('addMethod')).toBe('setup-token')
+    expect(flow.props('platform')).toBe('anthropic')
+  })
+
+  it('creates a setup-token account from the pasted token without an upstream exchange', async () => {
+    const wrapper = await openAnthropicSetupTokenStep()
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+
+    flow.vm.$emit('import-setup-token', `${SETUP_TOKEN}\n`)
+    await flushPromises()
+
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(batchCreateAccountsMock).toHaveBeenCalledTimes(1)
+    const payload = batchCreateAccountsMock.mock.calls[0]?.[0]?.[0]
+    expect(payload).toMatchObject({
+      name: 'Claude setup',
+      platform: 'anthropic',
+      type: 'setup-token',
+      credentials: {
+        access_token: SETUP_TOKEN,
+        token_type: 'Bearer',
+        scope: 'user:inference'
+      }
+    })
+    expect(payload.credentials).not.toHaveProperty('expires_at')
+    expect(payload.credentials).not.toHaveProperty('refresh_token')
+    expect(wrapper.emitted('created')).toHaveLength(1)
+  })
+
+  it('creates one numbered account per line in a single batch request', async () => {
+    const wrapper = await openAnthropicSetupTokenStep()
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    batchCreateAccountsMock.mockResolvedValue(batchResults(true, true))
+
+    flow.vm.$emit('import-setup-token', `${SETUP_TOKEN}\nsk-ant-sid01-not-a-setup-token\n${OTHER_SETUP_TOKEN}`)
+    await flushPromises()
+
+    // N 行一次往返，而不是 N 次串行 create。
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(batchCreateAccountsMock).toHaveBeenCalledTimes(1)
+    const accounts = batchCreateAccountsMock.mock.calls[0]?.[0]
+    expect(accounts).toHaveLength(2)
+    expect(accounts[0]).toMatchObject({
+      name: 'Claude setup #1',
+      credentials: { access_token: SETUP_TOKEN }
+    })
+    expect(accounts[1]).toMatchObject({
+      name: 'Claude setup #3',
+      credentials: { access_token: OTHER_SETUP_TOKEN }
+    })
+    // Partial failure keeps the modal open and lists the bad line with its i18n message.
+    expect(flow.props('error')).toContain('admin.accounts.oauth.keyAuthFailed')
+    expect(wrapper.emitted('created')).toHaveLength(1)
+  })
+
+  // 后端 CreateAccount 不按 access_token 查重：成功的行若留在输入框里，管理员改完
+  // 错误行再次保存就会给同一个 token 建出第二个账号。
+  it('leaves only the failed lines in the textarea after a partial failure', async () => {
+    const wrapper = await openAnthropicSetupTokenStep()
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    batchCreateAccountsMock.mockResolvedValue(batchResults(true, false))
+
+    flow.vm.$emit(
+      'import-setup-token',
+      `${SETUP_TOKEN}\nsk-ant-sid01-not-a-setup-token\n${OTHER_SETUP_TOKEN}`
+    )
+    await flushPromises()
+
+    expect(flow.vm.setupToken).toBe(`sk-ant-sid01-not-a-setup-token\n${OTHER_SETUP_TOKEN}`)
+    expect(flow.props('error')).toContain('admin.accounts.oauth.keyAuthFailed')
+
+    // 重试只重发仍然失败的那一行。
+    batchCreateAccountsMock.mockClear()
+    batchCreateAccountsMock.mockResolvedValue(batchResults(true))
+    flow.vm.$emit('import-setup-token', flow.vm.setupToken)
+    await flushPromises()
+
+    const retried = batchCreateAccountsMock.mock.calls[0]?.[0]
+    expect(retried).toHaveLength(1)
+    expect(retried[0]).toMatchObject({ credentials: { access_token: OTHER_SETUP_TOKEN } })
+  })
+
+  it('keeps every line when the whole batch request fails', async () => {
+    const wrapper = await openAnthropicSetupTokenStep()
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    batchCreateAccountsMock.mockRejectedValue(new Error('network down'))
+
+    flow.vm.$emit('import-setup-token', `${SETUP_TOKEN}\n${OTHER_SETUP_TOKEN}`)
+    await flushPromises()
+
+    expect(flow.vm.setupToken).toBe(`${SETUP_TOKEN}\n${OTHER_SETUP_TOKEN}`)
+    expect(wrapper.emitted('created')).toBeUndefined()
+  })
+
+  it('ignores cookie authorization while in setup-token mode', async () => {
+    const wrapper = await openAnthropicSetupTokenStep()
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+
+    flow.vm.$emit('cookie-auth', 'sk-ant-sid01-session')
+    await flushPromises()
+
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(batchCreateAccountsMock).not.toHaveBeenCalled()
   })
 })

@@ -50,3 +50,51 @@ func MergePreservingSensitiveCreds(existing, incoming map[string]any) map[string
 	}
 	return out
 }
+
+// oauthAuthorizationCredentialKeys 是一次授权产生的整套凭据字段：token 本身，以及
+// 只对这一次授权有效的身份与模式标记。
+//
+// 重新授权时它们必须作为一个整体被替换，理由有两层：
+//   - token：新凭据只带 access_token（直接导入的 setup-token）时，
+//     MergePreservingSensitiveCreds 会保留上一套的 refresh_token（敏感键，缺失即
+//     保留）却丢掉 expires_at（非敏感键，缺失即删除）。账号于是同时持有"长期 token"
+//     和"一个还能用的 refresh_token"，一次刷新就会用后者换回 8h 短期 token 覆盖前者。
+//   - 身份与模式：把 PAT 账号（auth_mode=personalAccessToken）改用普通 ChatGPT OAuth
+//     重新授权时，新凭据不带 auth_mode，残留值会让 IsOpenAIPersonalAccessToken 恒为
+//     true、NeedsRefresh 恒 false，换来的 8h token 永不续期；organization_id /
+//     chatgpt_account_id 残留则会带着上一次授权的组织与账号打上游，换来 401/403。
+//
+// 不含 model_mapping、header_overrides、base_url、project_id 等与授权无关的账号配置，
+// 它们跨授权保留。
+var oauthAuthorizationCredentialKeys = []string{
+	// token 集
+	"access_token", "refresh_token", "id_token",
+	"expires_at", "expires_in", "token_type", "scope",
+	// 授权模式
+	"auth_mode", "openai_auth_mode", "client_id",
+	// 授权身份
+	"email", "organization_id", "chatgpt_account_id", "chatgpt_user_id",
+	"chatgpt_account_is_fedramp", "plan_type", "subscription_expires_at",
+	// Codex agent identity（与 auth_mode=agentIdentity 绑定，换发后不再可用）
+	"agent_runtime_id", "agent_private_key", "task_id",
+}
+
+// ReplaceOAuthTokenCredentials 用 incoming 整体替换 existing 中一次授权产生的凭据字段，
+// 其余键（model_mapping、header_overrides 等账号配置）原样保留。返回新的 map，
+// 不修改入参。
+//
+// 与 MergePreservingSensitiveCreds 互补：那个用于"编辑账号"（脱敏后的表单不该清空
+// token），这个用于"换发凭据"（上一次授权的产物一个都不该留下）。
+func ReplaceOAuthTokenCredentials(existing, incoming map[string]any) map[string]any {
+	out := make(map[string]any, len(existing)+len(incoming))
+	for k, v := range existing {
+		out[k] = v
+	}
+	for _, key := range oauthAuthorizationCredentialKeys {
+		delete(out, key)
+	}
+	for k, v := range incoming {
+		out[k] = v
+	}
+	return out
+}

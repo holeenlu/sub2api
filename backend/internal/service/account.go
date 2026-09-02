@@ -250,6 +250,26 @@ func (a *Account) IsOAuth() bool {
 	return a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken
 }
 
+// CanRefreshToken 报告账号的凭据是否参与 OAuth 续期生命周期。
+//
+// Anthropic setup-token 是 `claude setup-token` 生成并作为
+// CLAUDE_CODE_OAUTH_TOKEN 使用的长期凭据。它不参与 OAuth refresh_token 续期；即使
+// 历史数据残留 refresh_token，也只能通过重新授权导入新 setup-token 来更新。
+//
+// 此谓词由手动刷新入口、后台刷新器、CRS 同步与前端能力字段共用。
+func (a *Account) CanRefreshToken() bool {
+	if a == nil || !a.IsOAuth() {
+		return false
+	}
+	if a.Platform == PlatformAnthropic && a.Type == AccountTypeSetupToken {
+		return false
+	}
+	if a.Type == AccountTypeSetupToken && strings.TrimSpace(a.GetCredential("refresh_token")) == "" {
+		return false
+	}
+	return true
+}
+
 // IsPrivacySet 检查账号的 privacy 是否已成功设置。
 // OpenAI: privacy_mode == "training_off"
 // Antigravity: privacy_mode == "privacy_set"
