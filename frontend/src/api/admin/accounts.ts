@@ -631,6 +631,60 @@ export async function syncUpstreamModelsPreview(params: SyncUpstreamPreviewParam
   return data
 }
 
+/** The six account filters the bulk endpoints understand. */
+export interface SyncAnthropicModelsBulkFilters {
+  platform?: string
+  type?: string
+  status?: string
+  group?: string
+  search?: string
+  privacy_mode?: string
+}
+
+export interface SyncAnthropicModelsBulkParams {
+  account_ids?: number[]
+  filters?: SyncAnthropicModelsBulkFilters
+  aggregation?: 'union' | 'intersection'
+  /** Fail the whole batch when any account cannot answer. Defaults to false. */
+  require_all?: boolean
+}
+
+export interface AnthropicModelSyncFailure {
+  account_id: number
+  name: string
+  error: string
+}
+
+export interface SyncAnthropicModelsBulkResult {
+  models: string[]
+  /** Accounts that could not be reached; the models above exclude them. */
+  failures: AnthropicModelSyncFailure[]
+  account_count: number
+  aggregation: 'union' | 'intersection'
+  source: 'anthropic_v1_models'
+  /**
+   * Present when the batch produced no usable catalog (every account failed,
+   * require_all rejected a partial result, or the intersection was empty).
+   * The response still carries `failures` so the admin can see which account
+   * broke; `models` is empty in that case.
+   */
+  error?: string
+}
+
+/**
+ * Fetch the live Anthropic /v1/models catalog for a batch of accounts.
+ * Use the intersection before writing one whitelist to every selected account.
+ */
+export async function syncAnthropicModelsBulk(
+  params: SyncAnthropicModelsBulkParams
+): Promise<SyncAnthropicModelsBulkResult> {
+  const { data } = await apiClient.post<SyncAnthropicModelsBulkResult>(
+    '/admin/accounts/models/sync-anthropic-bulk',
+    params
+  )
+  return data
+}
+
 export interface CRSPreviewAccount {
   crs_account_id: string
   kind: string
@@ -1075,6 +1129,7 @@ export const accountsAPI = {
   getAvailableModels,
   syncUpstreamModels,
   syncUpstreamModelsPreview,
+  syncAnthropicModelsBulk,
   generateAuthUrl,
   exchangeCode,
   refreshOpenAIToken,

@@ -24,6 +24,7 @@ type GroupHandler struct {
 	adminService         service.AdminService
 	dashboardService     *service.DashboardService
 	groupCapacityService *service.GroupCapacityService
+	accountTestService   *service.AccountTestService
 }
 
 // GetLiveCapability 返回当前服务端是否具备生成 Live attestation 的运行环境。
@@ -86,11 +87,12 @@ func (f optionalLimitField) ToServiceInput() *float64 {
 }
 
 // NewGroupHandler creates a new admin group handler
-func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService) *GroupHandler {
+func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, accountTestService *service.AccountTestService) *GroupHandler {
 	return &GroupHandler{
 		adminService:         adminService,
 		dashboardService:     dashboardService,
 		groupCapacityService: groupCapacityService,
+		accountTestService:   accountTestService,
 	}
 }
 
@@ -482,7 +484,9 @@ func (h *GroupHandler) GetModelsListCandidates(c *gin.Context) {
 		return
 	}
 
-	models, err := h.adminService.GetGroupModelsListCandidates(
+	// 平台解析（空则读分组、再空则默认 anthropic）由 service 一处完成并回传，
+	// 免得 handler 为了拿一个 group.Platform 再打一次带账号计数聚合的 GetGroup。
+	models, platform, err := h.adminService.GetGroupModelsListCandidates(
 		c.Request.Context(),
 		groupID,
 		c.Query("platform"),
@@ -492,7 +496,71 @@ func (h *GroupHandler) GetModelsListCandidates(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, gin.H{"models": models})
+	if platform != service.PlatformAnthropic {
+		response.Success(c, gin.H{"models": models})
+		return
+	}
+
+	// Anthropic 分组额外把分组内账号上游 /v1/models 的并集补进候选。这是「补充」
+	// 不是「全集」：分组的 models_list 允许保存 model_mapping 的别名（网关
+	// /v1/models 对 anthropic 的允许集就是 mapping key ∪ 默认列表），上游列表里
+	// 也不会有已下架的旧模型。把它当全集去反向裁剪已保存项，会让管理员打开编辑
+	// 弹窗、什么都不改直接保存就丢掉那些条目。
+	live := h.liveAnthropicModelCandidates(c, groupID)
+	response.Success(c, gin.H{
+		"models":      unionSyncedModelIDs([][]string{models, live}),
+		"live_models": live,
+		"source":      "static+anthropic_v1_models",
+	})
+}
+
+// liveAnthropicModelCandidates 汇总分组内账号上游支持的模型。任何失败都降级为空
+// 列表：候选只是辅助输入，让整个弹窗因为一个账号的 token 过期而打不开，代价远
+// 大于收益——弹窗打不开时前端拿不到候选，保存路径会把已配置的 models_list 一并
+// 带走。
+func (h *GroupHandler) liveAnthropicModelCandidates(c *gin.Context, groupID int64) []string {
+	// groupID=0 是「新建分组」流程，没有账号池可言。此时不扫全库——那会对系统里
+	// 每个 Anthropic 账号各发一次 /v1/models。
+	if h.accountTestService == nil || groupID <= 0 {
+		return nil
+	}
+	// 实时补充有自己的预算，且远小于管理端 HTTP 客户端的超时：慢账号池只该让
+	// 候选少几项，不该让整个候选请求（含静态候选）超时。
+	ctx, cancel := context.WithTimeout(c.Request.Context(), anthropicModelCandidateTimeout)
+	defer cancel()
+
+	accounts, listErr := h.adminService.ListAccountsForSchedulerScoreFilter(
+		ctx,
+		service.PlatformAnthropic,
+		"",
+		"",
+		"",
+		groupID,
+		"",
+	)
+	if listErr != nil {
+		slog.Warn("group_models_list_candidates_list_accounts_failed", "group_id", groupID, "error", listErr)
+		return nil
+	}
+	accountPointers := make([]*service.Account, 0, len(accounts))
+	for i := range accounts {
+		accountPointers = append(accountPointers, &accounts[i])
+	}
+	if len(accountPointers) == 0 {
+		return nil
+	}
+	result, syncErr := fetchAnthropicModelsFromAccounts(
+		ctx,
+		h.accountTestService,
+		accountPointers,
+		anthropicModelAggregationUnion,
+		false,
+	)
+	if syncErr != nil {
+		slog.Warn("group_models_list_candidates_live_fetch_failed", "group_id", groupID, "error", syncErr)
+		return nil
+	}
+	return result.Models
 }
 
 // Create handles creating a new group

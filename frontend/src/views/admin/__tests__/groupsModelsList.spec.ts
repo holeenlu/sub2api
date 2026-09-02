@@ -93,6 +93,28 @@ describe("groupsModelsList", () => {
     });
   });
 
+  // 候选是补充不是全集：上游 /v1/models 不含 model_mapping 的别名，也不含已
+  // 下架的旧模型。按候选反向裁剪，管理员打开编辑弹窗、什么都不改直接保存就会
+  // 把这些条目永久删掉。
+  it("keeps saved models that the candidate list does not contain", () => {
+    const state = createModelsListState({
+      enabled: true,
+      models: ["claude-alias", "claude-sonnet-5"],
+    });
+
+    setModelsListCandidates(state, ["claude-sonnet-5"]);
+
+    expect(state.savedModels).toEqual(["claude-alias", "claude-sonnet-5"]);
+    expect(state.items).toEqual([
+      { id: "claude-alias", selected: true },
+      { id: "claude-sonnet-5", selected: true },
+    ]);
+    expect(buildModelsListConfig(state)).toEqual({
+      enabled: true,
+      models: ["claude-alias", "claude-sonnet-5"],
+    });
+  });
+
   it("selects all candidate models from the toolbar action", () => {
     const state = hydrateModelsListState({
       enabled: true,

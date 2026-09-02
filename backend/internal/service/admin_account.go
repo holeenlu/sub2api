@@ -950,7 +950,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	delete(input.Extra, OllamaCloudUsageSnapshotExtraKey)
 
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
-		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters)
+		accountIDs, err := s.ResolveBulkUpdateTargetIDs(ctx, input.Filters)
 		if err != nil {
 			return nil, err
 		}
@@ -1210,7 +1210,8 @@ func upstreamBillingProbeIdentity(account *Account) map[string]any {
 	return identity
 }
 
-func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters) ([]int64, error) {
+// ResolveBulkUpdateTargetIDs 把批量筛选条件展开成账号 ID 列表。
+func (s *adminServiceImpl) ResolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters) ([]int64, error) {
 	if filters == nil {
 		return nil, nil
 	}

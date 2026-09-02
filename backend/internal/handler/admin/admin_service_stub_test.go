@@ -17,6 +17,8 @@ type stubAdminService struct {
 	accountSchedulerScoreFilterAccounts []service.Account
 	openAISchedulerScorePoolAccounts    []service.Account
 	schedulerScoreFilterCalls           int
+	getGroupCalls                       int
+	modelsListCandidatesPlatform        string
 	openAISchedulerScorePoolCalls       int
 	proxies                             []service.Proxy
 	proxyCounts                         []service.ProxyWithAccountCount
@@ -37,6 +39,9 @@ type stubAdminService struct {
 	lastApplyOAuthCredentialsInput      *service.ApplyOAuthCredentialsInput
 	bulkUpdateAccountErr                error
 	lastBulkUpdateAccountInput          *service.BulkUpdateAccountsInput
+	bulkUpdateTargetIDs                 []int64
+	resolveBulkUpdateTargetErr          error
+	lastBulkUpdateTargetFilters         *service.BulkUpdateAccountFilters
 	getAccountResult                    *service.Account
 	updateAccountCalls                  int
 	updateAccountExtraCalls             int
@@ -285,15 +290,20 @@ func (s *stubAdminService) GetAllGroupsIncludingInactive(ctx context.Context) ([
 }
 
 func (s *stubAdminService) GetGroup(ctx context.Context, id int64) (*service.Group, error) {
+	s.getGroupCalls++
 	group := service.Group{ID: id, Name: "group", Status: service.StatusActive}
 	return &group, nil
 }
 
-func (s *stubAdminService) GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, error) {
-	if platform == service.PlatformOpenAI {
-		return []string{"gpt-5.5", "gpt-5.4"}, nil
+func (s *stubAdminService) GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, string, error) {
+	s.modelsListCandidatesPlatform = platform
+	if platform == "" {
+		platform = service.PlatformAnthropic
 	}
-	return []string{"claude-sonnet-4-6"}, nil
+	if platform == service.PlatformOpenAI {
+		return []string{"gpt-5.5", "gpt-5.4"}, platform, nil
+	}
+	return []string{"claude-sonnet-4-6"}, platform, nil
 }
 
 func (s *stubAdminService) ListCompositeRoutes(ctx context.Context, groupID int64) ([]service.CompositeModelRoute, error) {
@@ -556,6 +566,14 @@ func (s *stubAdminService) BulkUpdateAccounts(ctx context.Context, input *servic
 		return nil, s.bulkUpdateAccountErr
 	}
 	return &service.BulkUpdateAccountsResult{Success: len(input.AccountIDs), Failed: 0, SuccessIDs: input.AccountIDs}, nil
+}
+
+func (s *stubAdminService) ResolveBulkUpdateTargetIDs(_ context.Context, filters *service.BulkUpdateAccountFilters) ([]int64, error) {
+	s.lastBulkUpdateTargetFilters = filters
+	if s.resolveBulkUpdateTargetErr != nil {
+		return nil, s.resolveBulkUpdateTargetErr
+	}
+	return s.bulkUpdateTargetIDs, nil
 }
 
 func (s *stubAdminService) CheckMixedChannelRisk(ctx context.Context, currentAccountID int64, currentAccountPlatform string, groupIDs []int64) error {
