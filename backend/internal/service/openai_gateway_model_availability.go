@@ -93,7 +93,7 @@ func (s *OpenAIGatewayService) diagnoseModelAvailabilityInGroup(
 		if !acc.isSchedulableIgnoringRateLimit() {
 			continue
 		}
-		cooldown.observe(accountRateLimitCooldownEnd(ctx, acc, requestedModel))
+		cooldown.observe(accountRateLimitCooldownEnd(ctx, acc, requestedModel), nil)
 	}
 	cooldown.apply(&diag)
 	return diag

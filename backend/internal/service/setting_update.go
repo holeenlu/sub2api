@@ -552,26 +552,28 @@ func defaultAccountSchedulingThresholds() map[string]int {
 		PlatformOpenAI:    100,
 		PlatformAnthropic: 100,
 		PlatformGrok:      100,
+		// 100 = 不在 Anthropic 通用阈值之外单独限制 Fable。
+		SchedulingThresholdScopeAnthropicFable: 100,
 	}
 }
 
 func validateAndNormalizeAccountSchedulingThresholds(input map[string]int) (map[string]int, error) {
 	normalized := defaultAccountSchedulingThresholds()
-	for platform, value := range input {
+	for scope, value := range input {
 		allowed := false
-		for _, item := range AllowedSchedulingThresholdPlatforms {
-			if item == platform {
+		for _, item := range AllowedSchedulingThresholdScopes {
+			if item == scope {
 				allowed = true
 				break
 			}
 		}
 		if !allowed {
-			return nil, infraerrors.BadRequest("INVALID_ACCOUNT_SCHEDULING_THRESHOLDS", fmt.Sprintf("unknown platform %q", platform))
+			return nil, infraerrors.BadRequest("INVALID_ACCOUNT_SCHEDULING_THRESHOLDS", fmt.Sprintf("unknown scope %q", scope))
 		}
 		if value < 1 || value > 100 {
-			return nil, infraerrors.BadRequest("INVALID_ACCOUNT_SCHEDULING_THRESHOLDS", "platform scheduling threshold must be between 1 and 100")
+			return nil, infraerrors.BadRequest("INVALID_ACCOUNT_SCHEDULING_THRESHOLDS", "scheduling threshold must be between 1 and 100")
 		}
-		normalized[platform] = value
+		normalized[scope] = value
 	}
 	return normalized, nil
 }
@@ -586,9 +588,9 @@ func parseAccountSchedulingThresholdsSetting(raw string) (map[string]int, error)
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return thresholds, err
 	}
-	for _, platform := range AllowedSchedulingThresholdPlatforms {
-		if value, ok := parsed[platform]; ok {
-			thresholds[platform] = boundedIntOrDefault(value, 1, 100, 100)
+	for _, scope := range AllowedSchedulingThresholdScopes {
+		if value, ok := parsed[scope]; ok {
+			thresholds[scope] = boundedIntOrDefault(value, 1, 100, 100)
 		}
 	}
 	return thresholds, nil
@@ -776,6 +778,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		}
 		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
 			thresholds: cloneAccountSchedulingThresholds(normalizedThresholds),
+			resolved:   true,
 			expiresAt:  time.Now().Add(accountSchedulingThresholdsCacheTTL).UnixNano(),
 		})
 	} else {

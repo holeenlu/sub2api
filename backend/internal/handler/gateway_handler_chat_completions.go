@@ -359,11 +359,13 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 // chatCompletionsErrorResponse writes an error in OpenAI Chat Completions format.
 func (h *GatewayHandler) chatCompletionsErrorResponse(c *gin.Context, status int, errType, message string) {
+	errorObject := gin.H{
+		"type":    errType,
+		"message": message,
+	}
+	applyNoAccountClientErrorFields(c, errorObject)
 	c.JSON(status, gin.H{
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
+		"error": errorObject,
 	})
 }
 

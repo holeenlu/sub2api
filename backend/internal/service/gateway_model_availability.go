@@ -41,6 +41,21 @@ type ModelAvailabilityDiagnosis struct {
 	// regains its first candidate; otherwise it is only a hint about when the
 	// next rate-limited account returns.
 	EarliestRateLimitResetAt *time.Time
+	// RateLimit is populated only when every model-capable account in the
+	// diagnosed pool shares the same precise model-level limit attribution.
+	// Account-wide limits intentionally remain unattributed until their window
+	// is persisted separately.
+	RateLimit *RateLimitAttribution
+}
+
+// RateLimitAttribution identifies a precise, client-actionable limit.
+// ResetAt is copied before returning so callers can safely retain the result.
+type RateLimitAttribution struct {
+	Scope   string
+	Window  string
+	Reason  string
+	Model   string
+	ResetAt *time.Time
 }
 
 // accountRateLimitCooldownEnd reports when the account leaves its current
@@ -71,18 +86,54 @@ func accountRateLimitCooldownEnd(ctx context.Context, acc *Account, requestedMod
 	return &end
 }
 
+// modelRateLimitAttributionForRequest returns the precise Fable model-level
+// attribution when it is the only active limit. Account-wide cooldowns and
+// local threshold pauses deliberately stay unattributed for this vertical
+// slice; labeling either as an upstream Fable exhaustion would mislead the
+// client.
+func modelRateLimitAttributionForRequest(acc *Account, requestedModel string) *RateLimitAttribution {
+	if acc == nil || acc.Platform != PlatformAnthropic {
+		return nil
+	}
+	modelKey := strings.TrimSpace(acc.GetMappedModel(requestedModel))
+	if !isAnthropicFableModel(modelKey) {
+		return nil
+	}
+	now := time.Now()
+	if acc.RateLimitResetAt != nil && now.Before(*acc.RateLimitResetAt) {
+		return nil
+	}
+	resetAt := acc.modelRateLimitResetAt(anthropicFableRateLimitKey)
+	if resetAt == nil || !now.Before(*resetAt) {
+		return nil
+	}
+	if strings.TrimSpace(acc.modelRateLimitReason(anthropicFableRateLimitKey)) != AnthropicFableWindowExhaustedReason {
+		return nil
+	}
+	return &RateLimitAttribution{
+		Scope:   "model",
+		Window:  "7d_oi",
+		Reason:  AnthropicFableWindowExhaustedReason,
+		Model:   strings.TrimSpace(requestedModel),
+		ResetAt: resetAt,
+	}
+}
+
 // modelCapableCooldownTracker accumulates the "is every model-capable account
 // cooling down" verdict across a candidate pool. Both the generic and the
 // OpenAI diagnoser feed it so the two stay in lockstep.
 type modelCapableCooldownTracker struct {
-	capable  int
-	cooling  int
-	earliest *time.Time
+	capable               int
+	cooling               int
+	earliest              *time.Time
+	attribution           *RateLimitAttribution
+	attributionConsistent bool
+	attributionSeen       bool
 }
 
 // observe records one model-capable account. Callers must skip accounts that
 // stay unschedulable after their cooldown before calling this.
-func (t *modelCapableCooldownTracker) observe(cooldownEnd *time.Time) {
+func (t *modelCapableCooldownTracker) observe(cooldownEnd *time.Time, attribution *RateLimitAttribution) {
 	t.capable++
 	if cooldownEnd == nil {
 		return
@@ -90,6 +141,17 @@ func (t *modelCapableCooldownTracker) observe(cooldownEnd *time.Time) {
 	t.cooling++
 	if t.earliest == nil || cooldownEnd.Before(*t.earliest) {
 		t.earliest = cooldownEnd
+	}
+	if !t.attributionSeen {
+		t.attributionSeen = true
+		t.attributionConsistent = attribution != nil
+		if attribution != nil {
+			t.attribution = cloneRateLimitAttribution(attribution)
+		}
+		return
+	}
+	if attribution == nil || !sameRateLimitAttribution(t.attribution, attribution) {
+		t.attributionConsistent = false
 	}
 }
 
@@ -102,6 +164,34 @@ func (t *modelCapableCooldownTracker) apply(diag *ModelAvailabilityDiagnosis) {
 	}
 	diag.EarliestRateLimitResetAt = t.earliest
 	diag.AllModelCapableRateLimited = t.cooling == t.capable
+	if diag.AllModelCapableRateLimited && t.attributionConsistent && t.attribution != nil {
+		attribution := cloneRateLimitAttribution(t.attribution)
+		if attribution.ResetAt == nil || t.earliest.Before(*attribution.ResetAt) {
+			resetAt := *t.earliest
+			attribution.ResetAt = &resetAt
+		}
+		diag.RateLimit = attribution
+	}
+}
+
+func cloneRateLimitAttribution(attribution *RateLimitAttribution) *RateLimitAttribution {
+	if attribution == nil {
+		return nil
+	}
+	clone := *attribution
+	if attribution.ResetAt != nil {
+		resetAt := *attribution.ResetAt
+		clone.ResetAt = &resetAt
+	}
+	return &clone
+}
+
+func sameRateLimitAttribution(left, right *RateLimitAttribution) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Scope == right.Scope && left.Window == right.Window &&
+		left.Reason == right.Reason && left.Model == right.Model
 }
 
 // isFinalWithoutFallbackChain reports whether the fallback groups can no
@@ -140,6 +230,8 @@ func diagnoseAcrossNoAccountFallback(
 
 	merged := ModelAvailabilityDiagnosis{}
 	supporting, allCooling := 0, 0
+	preciseAttribution := true
+	var attribution *RateLimitAttribution
 	absorb := func(d ModelAvailabilityDiagnosis) {
 		merged.HasAccountsInPool = merged.HasAccountsInPool || d.HasAccountsInPool
 		merged.HasModelSupport = merged.HasModelSupport || d.HasModelSupport
@@ -147,6 +239,15 @@ func diagnoseAcrossNoAccountFallback(
 			supporting++
 			if d.AllModelCapableRateLimited {
 				allCooling++
+			} else {
+				preciseAttribution = false
+			}
+			if d.RateLimit == nil {
+				preciseAttribution = false
+			} else if attribution == nil {
+				attribution = cloneRateLimitAttribution(d.RateLimit)
+			} else if !sameRateLimitAttribution(attribution, d.RateLimit) {
+				preciseAttribution = false
 			}
 		}
 		if d.EarliestRateLimitResetAt != nil &&
@@ -165,6 +266,10 @@ func diagnoseAcrossNoAccountFallback(
 		absorb(hop(ctx, &targetID))
 	}
 	merged.AllModelCapableRateLimited = supporting > 0 && supporting == allCooling
+	if merged.AllModelCapableRateLimited && preciseAttribution && attribution != nil {
+		attribution.ResetAt = merged.EarliestRateLimitResetAt
+		merged.RateLimit = attribution
+	}
 	return merged
 }
 
@@ -282,7 +387,10 @@ func (s *GatewayService) diagnoseModelAvailabilityInGroup(
 		if !acc.isSchedulableIgnoringRateLimit() {
 			continue
 		}
-		cooldown.observe(accountRateLimitCooldownEnd(ctx, acc, requestedModel))
+		cooldown.observe(
+			accountRateLimitCooldownEnd(ctx, acc, requestedModel),
+			modelRateLimitAttributionForRequest(acc, requestedModel),
+		)
 	}
 	cooldown.apply(&diag)
 	return diag

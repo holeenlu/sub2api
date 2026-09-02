@@ -37,10 +37,15 @@ import (
 //     because retrying after a backoff can plausibly succeed (or, in the
 //     empty-pool case, the operator may be in the middle of adding accounts).
 type noAccountErrorClassification struct {
-	Status        int
-	ErrType       string
-	Message       string
-	ModelNotFound bool // true when this is a 404 model_not_found classification
+	Status            int
+	ErrType           string
+	Message           string
+	ModelNotFound     bool // true when this is a 404 model_not_found classification
+	ErrorCode         string
+	RetryAt           *time.Time
+	RetryAfterSeconds int64
+	LimitScope        string
+	LimitWindow       string
 	// RetryAfter is the hint to emit as the Retry-After header. Non-zero only
 	// on 429 classifications.
 	RetryAfter time.Duration
@@ -51,6 +56,8 @@ type noAccountErrorClassification struct {
 	// no observed cooldown, no 429.
 	cooldownRetryAfter time.Duration
 }
+
+const noAccountClassificationContextKey = "no_account_error_classification"
 
 const (
 	noAccountRateLimitedMessage = "All available accounts are currently rate-limited. Please retry later."
@@ -216,8 +223,10 @@ func classifySelectionErrorFromGin(
 	if !selectionErrorIsPoolExhaustion(err) {
 		return noAccountUnavailableClassification()
 	}
-	return classifySelectionFailureErrorFromGin(c, err,
+	classification := classifySelectionFailureErrorFromGin(c, err,
 		classifyNoAccountErrorFromGin(c, diag, apiKey, routingModel, displayModel, platform))
+	rememberNoAccountClassification(c, classification)
+	return classification
 }
 
 // classifyOpenAICompatibleSelectionErrorFromGin is classifySelectionErrorFromGin
@@ -233,8 +242,10 @@ func classifyOpenAICompatibleSelectionErrorFromGin(
 	if !selectionErrorIsPoolExhaustion(err) {
 		return noAccountUnavailableClassification()
 	}
-	return classifySelectionFailureErrorFromGin(c, err,
+	classification := classifySelectionFailureErrorFromGin(c, err,
 		classifyOpenAICompatibleNoAccountErrorFromGin(c, diag, apiKey, routingModel, displayModel))
+	rememberNoAccountClassification(c, classification)
+	return classification
 }
 
 // classifyNoAccountError decides between 404 model_not_found, 429
@@ -297,6 +308,9 @@ func classifyNoAccountError(
 	// attached. Only the diagnosis can see the cooldown, and only a rate limit
 	// gives the client a trustworthy "retry after N seconds".
 	if result.HasModelSupport && result.AllModelCapableRateLimited {
+		if result.RateLimit != nil && result.RateLimit.Reason == service.AnthropicFableWindowExhaustedReason {
+			return buildFableRateLimitClassification(displayModel, result.RateLimit)
+		}
 		return noAccountErrorClassification{
 			Status:     http.StatusTooManyRequests,
 			ErrType:    "rate_limit_error",
@@ -334,11 +348,96 @@ func classifyNoAccountErrorFromGin(
 		ctx = c.Request.Context()
 	}
 	classification := classifyNoAccountError(ctx, diag, apiKey, routingModel, displayModel, platform)
+	rememberNoAccountClassification(c, classification)
 	if classification.ModelNotFound {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 	}
 	setNoAccountRetryAfterHeader(c, classification)
 	return classification
+}
+
+func buildFableRateLimitClassification(model string, attribution *service.RateLimitAttribution) noAccountErrorClassification {
+	resetAt := attribution.ResetAt
+	if resetAt == nil {
+		return noAccountErrorClassification{
+			Status:     http.StatusTooManyRequests,
+			ErrType:    "rate_limit_error",
+			Message:    noAccountRateLimitedMessage,
+			RetryAfter: poolCooldownRetryAfterMin,
+		}
+	}
+
+	remainingSeconds := int64(math.Ceil(time.Until(*resetAt).Seconds()))
+	if remainingSeconds < 1 {
+		remainingSeconds = 1
+	}
+	hours := remainingSeconds / 3600
+	minutes := (remainingSeconds % 3600) / 60
+	seconds := remainingSeconds % 60
+	duration := fmt.Sprintf("%dh %dm %ds", hours, minutes, seconds)
+	modelName := humanizeFableModelName(model)
+	message := fmt.Sprintf(
+		"%s usage is exhausted for all available accounts. The Fable 7-day window resets in %s.",
+		modelName,
+		duration,
+	)
+	resetCopy := resetAt.UTC()
+	return noAccountErrorClassification{
+		Status:            http.StatusTooManyRequests,
+		ErrType:           "rate_limit_error",
+		Message:           message,
+		ErrorCode:         "anthropic_fable_7d_oi_exhausted",
+		RetryAt:           &resetCopy,
+		RetryAfterSeconds: remainingSeconds,
+		LimitScope:        "model",
+		LimitWindow:       "7d_oi",
+		RetryAfter:        retryAfterFromReset(resetAt),
+	}
+}
+
+func humanizeFableModelName(model string) string {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.Contains(lower, "fable-5-1"):
+		return "Fable 5.1"
+	case strings.Contains(lower, "fable-5"):
+		return "Fable 5"
+	default:
+		return strings.TrimSpace(model)
+	}
+}
+
+func rememberNoAccountClassification(c *gin.Context, classification noAccountErrorClassification) {
+	if c != nil {
+		c.Set(noAccountClassificationContextKey, classification)
+	}
+}
+
+func applyNoAccountClientErrorFields(c *gin.Context, errorObject gin.H) {
+	if c == nil || errorObject == nil {
+		return
+	}
+	value, ok := c.Get(noAccountClassificationContextKey)
+	if !ok {
+		return
+	}
+	classification, ok := value.(noAccountErrorClassification)
+	if !ok || classification.ErrorCode == "" {
+		return
+	}
+	errorObject["code"] = classification.ErrorCode
+	if classification.RetryAt != nil {
+		errorObject["retry_at"] = classification.RetryAt.UTC().Format(time.RFC3339)
+	}
+	if classification.RetryAfterSeconds > 0 {
+		errorObject["retry_after_seconds"] = classification.RetryAfterSeconds
+	}
+	if classification.LimitScope != "" {
+		errorObject["limit_scope"] = classification.LimitScope
+	}
+	if classification.LimitWindow != "" {
+		errorObject["limit_window"] = classification.LimitWindow
+	}
 }
 
 // setNoAccountRetryAfterHeader writes the Retry-After header for a 429

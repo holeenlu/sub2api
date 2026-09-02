@@ -954,7 +954,14 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	if len(credentials) == 0 {
 		return nil
 	}
-	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type"}
+	keys := []string{
+		"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type",
+		// 阈值停调的账号级覆盖。候选过滤(ListSchedulableAccounts)读的是本投影，
+		// 而粘性路径读的是完整快照；裁掉这两个键会让两条路径按不同阈值判定同一个
+		// 账号——一边打模型级限流、另一边判「阈值未启用」随即解除，来回抖动。
+		"account_scheduling_threshold",
+		"anthropic_fable_scheduling_threshold",
+	}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {
@@ -1020,6 +1027,18 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"auto_pause_7d_threshold",
 		"auto_pause_5h_disabled",
 		"auto_pause_7d_disabled",
+		// Anthropic 阈值停调读的用量采样。这些键属于 schedulerNeutralExtraKeyPrefixes
+		// （被动采样每个响应都写，不值得为它重建 bucket），但 UpdateExtra 仍然会
+		// syncSchedulerAccountSnapshot，而 SetAccount 同时写完整键与本投影——所以进了
+		// 白名单就是即时可见，无需在选号时回源补读。
+		// 裁掉它们，候选过滤看不到用量却看得到 model_rate_limits，会把限流当成无依据的
+		// 残留而解除。
+		"session_window_utilization",
+		"passive_usage_7d_utilization",
+		"passive_usage_7d_reset",
+		"passive_usage_7d_oi_utilization",
+		"passive_usage_7d_oi_reset",
+		"passive_usage_sampled_at",
 		"model_rate_limits",
 		service.UpstreamBillingProbeExtraKey,
 		service.GrokMediaEligibleExtraKey,

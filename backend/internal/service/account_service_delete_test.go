@@ -191,6 +191,10 @@ func (s *accountRepoStub) ClearAntigravityQuotaScopes(ctx context.Context, id in
 	panic("unexpected ClearAntigravityQuotaScopes call")
 }
 
+func (s *accountRepoStub) ClearModelRateLimit(ctx context.Context, id int64, scope string, _ string) (bool, error) {
+	panic("unexpected ClearModelRateLimit call")
+}
+
 func (s *accountRepoStub) ClearModelRateLimits(ctx context.Context, id int64) error {
 	panic("unexpected ClearModelRateLimits call")
 }

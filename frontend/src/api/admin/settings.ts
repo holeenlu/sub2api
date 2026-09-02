@@ -39,7 +39,12 @@ export type SchedulingThresholdPlatformType =
   | "kimi"
   | "zhipu"
 
-export type AccountSchedulingThresholdsMap = Record<SchedulingThresholdPlatformType, number>
+/** 非平台的阈值 scope：Anthropic Fable 模型家族的独立停调阈值。 */
+export type SchedulingThresholdScopeType =
+  | SchedulingThresholdPlatformType
+  | "anthropic_fable"
+
+export type AccountSchedulingThresholdsMap = Record<SchedulingThresholdScopeType, number>
 
 // 与后端 AllowedSchedulingThresholdPlatforms 保持一致（deepseek 为余额型，
 // 走余额检测而非用量阈值）。
@@ -51,13 +56,19 @@ export const SCHEDULING_THRESHOLD_PLATFORMS: SchedulingThresholdPlatformType[] =
   "zhipu",
 ]
 
+// 与后端 AllowedSchedulingThresholdScopes 保持一致：平台 + 非平台 scope。
+export const SCHEDULING_THRESHOLD_SCOPES: SchedulingThresholdScopeType[] = [
+  ...SCHEDULING_THRESHOLD_PLATFORMS,
+  "anthropic_fable",
+]
+
 export function normalizeAccountSchedulingThresholdsMap(
-  input?: Partial<Record<SchedulingThresholdPlatformType, number>> | null,
+  input?: Partial<Record<SchedulingThresholdScopeType, number>> | null,
 ): AccountSchedulingThresholdsMap {
   const result = {} as AccountSchedulingThresholdsMap
-  for (const platform of SCHEDULING_THRESHOLD_PLATFORMS) {
-    const value = input?.[platform]
-    result[platform] = typeof value === "number" && Number.isFinite(value)
+  for (const scope of SCHEDULING_THRESHOLD_SCOPES) {
+    const value = input?.[scope]
+    result[scope] = typeof value === "number" && Number.isFinite(value)
       ? Math.min(100, Math.max(1, Math.trunc(value)))
       : 100
   }
@@ -65,7 +76,7 @@ export function normalizeAccountSchedulingThresholdsMap(
 }
 
 export function sanitizeAccountSchedulingThresholdsMap(
-  input?: Partial<Record<SchedulingThresholdPlatformType, number>> | null,
+  input?: Partial<Record<SchedulingThresholdScopeType, number>> | null,
 ): AccountSchedulingThresholdsMap {
   return normalizeAccountSchedulingThresholdsMap(input)
 }

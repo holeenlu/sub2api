@@ -4969,8 +4969,8 @@
                 </div>
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   <div
-                    v-for="platform in schedulingThresholdPlatforms"
-                    :key="platform"
+                    v-for="scope in schedulingThresholdScopes"
+                    :key="scope"
                     class="rounded-lg border border-gray-200 p-4 dark:border-dark-700"
                   >
                     <div class="flex items-start justify-between gap-3">
@@ -4978,13 +4978,17 @@
                         <label
                           class="font-mono text-sm font-medium text-gray-900 dark:text-white"
                         >
-                          {{ platform }}
+                          {{ schedulingThresholdScopeLabel(scope) }}
                         </label>
                         <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                           {{
-                            t(
-                              "admin.settings.scheduling.accountSchedulingThresholdsRangeHint",
-                            )
+                            scope === "anthropic_fable"
+                              ? t(
+                                  "admin.settings.scheduling.accountSchedulingThresholdsFableHint",
+                                )
+                              : t(
+                                  "admin.settings.scheduling.accountSchedulingThresholdsRangeHint",
+                                )
                           }}
                         </p>
                       </div>
@@ -4995,13 +4999,13 @@
                       </span>
                     </div>
                     <input
-                      v-model.number="form.account_scheduling_thresholds[platform]"
+                      v-model.number="form.account_scheduling_thresholds[scope]"
                       type="number"
                       min="1"
                       max="100"
                       step="1"
                       class="input mt-3"
-                      :data-testid="`account-scheduling-threshold-${platform}`"
+                      :data-testid="`account-scheduling-threshold-${scope}`"
                       placeholder="100"
                     />
                   </div>
@@ -8773,7 +8777,7 @@ import {
   normalizePlatformQuotasMap,
   sanitizeAccountSchedulingThresholdsMap,
   sanitizePlatformQuotasMap,
-  SCHEDULING_THRESHOLD_PLATFORMS,
+  SCHEDULING_THRESHOLD_SCOPES,
   defaultWeChatConnectScopesForMode,
   deriveWeChatConnectStoredMode,
   normalizeDefaultSubscriptionSettings,
@@ -8782,6 +8786,7 @@ import {
 import type {
   AuthSourceDefaultsState,
   AuthSourceType,
+  SchedulingThresholdScopeType,
   SystemSettings,
   UpdateSettingsRequest,
   DefaultSubscriptionSetting,
@@ -9523,7 +9528,14 @@ type SettingsForm = Omit<
   account_scheduling_thresholds: ReturnType<typeof normalizeAccountSchedulingThresholdsMap>;
 };
 
-const schedulingThresholdPlatforms = SCHEDULING_THRESHOLD_PLATFORMS;
+const schedulingThresholdScopes = SCHEDULING_THRESHOLD_SCOPES;
+
+// anthropic_fable 不是平台名，直接渲染原始 key 运维看不出它管的是哪个窗口；
+// 其余 scope 本身就是平台名，保持原样。
+const schedulingThresholdScopeLabel = (scope: SchedulingThresholdScopeType) =>
+  scope === "anthropic_fable"
+    ? t("admin.settings.scheduling.accountSchedulingThresholdsFableLabel")
+    : scope;
 
 const form = reactive<SettingsForm>({
   registration_enabled: true,

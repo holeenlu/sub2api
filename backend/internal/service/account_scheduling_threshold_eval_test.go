@@ -121,7 +121,7 @@ func TestEvaluateAnthropicFableSchedulingThreshold_UsesAccountOverrideWithoutPau
 	accountDecision := EvaluateAccountSchedulingThreshold(account, thresholds, now)
 	require.False(t, accountDecision.ShouldPause)
 
-	decision := evaluateAnthropicFableSchedulingThreshold(account, thresholds, now)
+	decision := evaluateAnthropicFableSchedulingThreshold(account, thresholds, true, now)
 
 	require.True(t, decision.ShouldPause)
 	require.Equal(t, PlatformAnthropic, decision.Platform)

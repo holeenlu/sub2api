@@ -1121,3 +1121,44 @@ func TestBuildSchedulerMetadataAccount_KeepsOpenAIPassthroughForModelGate(t *tes
 		})
 	}
 }
+
+// 候选过滤（ListSchedulableAccounts）读的是本投影，粘性路径读的是完整快照。
+// 阈值停调的判据必须两边都看得见：只留下 model_rate_limits 而裁掉用量采样与账号级
+// 覆盖，会让候选过滤把限流当成无依据的残留而解除，与粘性路径来回抖动。
+func TestBuildSchedulerMetadataAccount_KeepsSchedulingThresholdInputs(t *testing.T) {
+	account := service.Account{
+		ID:       44,
+		Platform: service.PlatformAnthropic,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"account_scheduling_threshold":         float64(80),
+			"anthropic_fable_scheduling_threshold": float64(50),
+			"access_token":                         "drop-me",
+		},
+		Extra: map[string]any{
+			"session_window_utilization":      0.42,
+			"passive_usage_7d_utilization":    0.31,
+			"passive_usage_7d_reset":          float64(1764000000),
+			"passive_usage_7d_oi_utilization": 0.63,
+			"passive_usage_7d_oi_reset":       float64(1764100000),
+			"passive_usage_sampled_at":        float64(1763900000),
+			"model_rate_limits":               map[string]any{"claude-fable-5": map[string]any{}},
+			"unused_large_field":              "drop-me",
+		},
+	}
+
+	got := buildSchedulerMetadataAccount(account)
+
+	require.Equal(t, float64(80), got.Credentials["account_scheduling_threshold"])
+	require.Equal(t, float64(50), got.Credentials["anthropic_fable_scheduling_threshold"])
+	require.Nil(t, got.Credentials["access_token"])
+
+	require.Equal(t, 0.42, got.Extra["session_window_utilization"])
+	require.Equal(t, 0.31, got.Extra["passive_usage_7d_utilization"])
+	require.Equal(t, float64(1764000000), got.Extra["passive_usage_7d_reset"])
+	require.Equal(t, 0.63, got.Extra["passive_usage_7d_oi_utilization"])
+	require.Equal(t, float64(1764100000), got.Extra["passive_usage_7d_oi_reset"])
+	require.Equal(t, float64(1763900000), got.Extra["passive_usage_sampled_at"])
+	require.NotNil(t, got.Extra["model_rate_limits"])
+	require.Nil(t, got.Extra["unused_large_field"])
+}
