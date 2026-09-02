@@ -587,6 +587,11 @@ const (
 	// Claude Code Version Check
 	// =========================
 
+	// SettingKeyUpstreamFailoverStatusCodes 覆盖「上游返回哪些状态码才换账号重试」。
+	// 取值是状态码与闭区间的逗号列表，如 "401,403,429,500-599"；空值 = 用各平台的
+	// 内置默认集。无论怎么配，upstreamFailoverAlwaysSkipStatusCodes 里的码永不重试。
+	SettingKeyUpstreamFailoverStatusCodes = "upstream_failover_status_codes"
+
 	// SettingKeyMinClaudeCodeVersion 最低 Claude Code 版本号要求 (semver, 如 "2.1.0"，空值=不检查)
 	SettingKeyMinClaudeCodeVersion = "min_claude_code_version"
 	// SettingKeyMinCodexVersion 最低 Codex 引擎版本要求 (semver, 如 "0.141.0"，空值=不检查)

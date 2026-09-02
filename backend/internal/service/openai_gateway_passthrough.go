@@ -423,7 +423,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			// 透传模式默认保持原样代理；容量错误以及 API-key 上游的瞬时
 			// 5xx 应先触发多账号 failover，且此时尚未写入下游响应。
 			// probeBody 已在上方任务探测时读取过一次，直接复用避免重复读取。
-			if shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, probeBody) {
+			if shouldFailoverOpenAIPassthroughResponse(s.settingService, account, resp.StatusCode, probeBody) {
 				return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 			}
 			return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
@@ -458,7 +458,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				if signal, ok := asOpenAICompactFallbackSignal(handleErr); ok {
 					_ = resp.Body.Close()
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
-					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
+					if shouldFailoverOpenAIPassthroughResponse(s.settingService, account, compactResp.StatusCode, compactBody) {
 						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 					}
 					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
@@ -485,7 +485,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				if signal, ok := asOpenAICompactFallbackSignal(handleErr); ok {
 					_ = resp.Body.Close()
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
-					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
+					if shouldFailoverOpenAIPassthroughResponse(s.settingService, account, compactResp.StatusCode, compactBody) {
 						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 					}
 					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
@@ -762,7 +762,7 @@ func stripOpenAILegacyResponsesBeta(headers http.Header) {
 	}
 }
 
-func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, responseBody []byte) bool {
+func shouldFailoverOpenAIPassthroughResponse(settingService *SettingService, account *Account, statusCode int, responseBody []byte) bool {
 	if hit, _, _ := detectOpenAICyberPolicy(responseBody); hit {
 		return false
 	}
@@ -778,23 +778,27 @@ func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, r
 	if account != nil && account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode) {
 		return true
 	}
-	switch statusCode {
-	case http.StatusTooManyRequests, 529:
-		return true
-	}
-	if account == nil || account.Type != AccountTypeAPIKey {
-		return false
-	}
-	switch statusCode {
-	case http.StatusInternalServerError,
-		http.StatusBadGateway,
-		http.StatusServiceUnavailable,
-		http.StatusGatewayTimeout,
-		520, 521, 522, 523, 524:
-		return true
-	default:
-		return false
-	}
+	return shouldFailoverStatusCode(settingService, statusCode, func(statusCode int) bool {
+		switch statusCode {
+		case http.StatusTooManyRequests, 529:
+			return true
+		}
+		// 非 API Key 账号（OAuth 等）的 5xx 不换号：透传路径下它们多是会话级问题，
+		// 换账号重放会话反而制造新的失败。
+		if account == nil || account.Type != AccountTypeAPIKey {
+			return false
+		}
+		switch statusCode {
+		case http.StatusInternalServerError,
+			http.StatusBadGateway,
+			http.StatusServiceUnavailable,
+			http.StatusGatewayTimeout,
+			520, 521, 522, 523, 524:
+			return true
+		default:
+			return false
+		}
+	})
 }
 
 func writeOpenAIPassthroughErrorHeaders(dst, src http.Header) {

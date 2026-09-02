@@ -1684,12 +1684,18 @@ func (s *GeminiMessagesCompatService) shouldRetryGeminiUpstreamError(account *Ac
 }
 
 func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCode int) bool {
-	switch statusCode {
-	case 401, 403, 429, 529:
-		return true
-	default:
-		return statusCode >= 500
+	var settingService *SettingService
+	if s != nil && s.rateLimitService != nil {
+		settingService = s.rateLimitService.settingService
 	}
+	return shouldFailoverStatusCode(settingService, statusCode, func(statusCode int) bool {
+		switch statusCode {
+		case 401, 403, 429, 529:
+			return true
+		default:
+			return statusCode >= 500
+		}
+	})
 }
 
 // skippedErrorPolicyFailoverError 命中 ErrorPolicySkipped（池模式、或自定义错误码未命中）
