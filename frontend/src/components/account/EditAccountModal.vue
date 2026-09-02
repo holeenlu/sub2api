@@ -624,10 +624,11 @@
         </div>
       </div>
 
-      <!-- OpenAI/Grok OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
+      <!-- OAuth/Setup Token Model Restriction（这些类型没有 apikey 容器，需要独立区域） -->
       <div
-        v-if="(account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth'"
+        v-if="dedicatedModelRestrictionCapable"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="edit-dedicated-model-restriction"
       >
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
 
@@ -3060,6 +3061,16 @@ const baseUrlHint = computed(() => {
 const antigravityPresetMappings = computed(() => getPresetMappingsByPlatform('antigravity'))
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
 
+// 模型白名单/映射存在 credentials.model_mapping，后端 IsModelSupported 与平台无关。
+// OAuth 家族的账号没有 apikey 表单容器，需要这个独立的模型限制区域。
+const supportsDedicatedModelRestriction = (account: Account) =>
+  ((account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth') ||
+  (account.platform === 'anthropic' && (account.type === 'oauth' || account.type === 'setup-token'))
+
+const dedicatedModelRestrictionCapable = computed(
+  () => props.account != null && supportsDedicatedModelRestriction(props.account)
+)
+
 // Model mapping type
 interface ModelMapping {
   from: string
@@ -4174,8 +4185,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
             : 'https://api.anthropic.com'
     editBaseUrl.value = platformDefaultUrl
 
-    // Load model mappings for OpenAI/Grok OAuth accounts
-    if ((newAccount.platform === 'openai' || newAccount.platform === 'grok') && newAccount.credentials) {
+    // Load model mappings for the OAuth-family accounts that get a dedicated section.
+    if (supportsDedicatedModelRestriction(newAccount) && newAccount.credentials) {
       const oauthCredentials = newAccount.credentials as Record<string, unknown>
       loadModelRestrictionFromMapping(oauthCredentials.model_mapping as Record<string, unknown> | undefined)
     } else {
@@ -5083,8 +5094,8 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
     }
 
-    // OpenAI/Grok OAuth: persist model mapping to credentials
-    if ((props.account.platform === 'openai' || props.account.platform === 'grok') && props.account.type === 'oauth') {
+    // OAuth-family accounts with a dedicated section: persist model mapping to credentials.
+    if (supportsDedicatedModelRestriction(props.account)) {
       const currentCredentials = isSparkShadow.value
         ? {}
         : (updatePayload.credentials as Record<string, unknown>) ||
