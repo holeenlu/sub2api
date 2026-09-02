@@ -42,11 +42,7 @@ func (h *OpenAIGatewayHandler) ResponsesInputTokens(c *gin.Context) {
 
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		RespondRequestBodyReadFailure(c, reqLog, err, h.errorResponse)
 		return
 	}
 	if len(body) == 0 || !gjson.ValidBytes(body) {
@@ -135,11 +131,7 @@ func (h *OpenAIGatewayHandler) ResponsesInputTokens(c *gin.Context) {
 func (h *OpenAIGatewayHandler) GrokCountTokens(c *gin.Context) {
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.anthropicErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		RespondRequestBodyReadFailure(c, requestLogger(c, "handler.openai_gateway.grok_count_tokens"), err, h.anthropicErrorResponse)
 		return
 	}
 	if len(body) == 0 {
@@ -205,11 +197,7 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.anthropicErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		RespondRequestBodyReadFailure(c, reqLog, err, h.anthropicErrorResponse)
 		return
 	}
 	if len(body) == 0 {

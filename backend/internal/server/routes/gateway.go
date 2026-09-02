@@ -543,15 +543,11 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 
 		body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 		if err != nil {
-			status := http.StatusBadRequest
-			message := "Failed to read request body"
-			var maxErr *http.MaxBytesError
-			if errors.As(err, &maxErr) {
-				status = http.StatusRequestEntityTooLarge
-				message = "Request body is too large"
-			}
-			c.JSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
-			c.Abort()
+			// 这里比 handler 先读请求体，读失败的分类与响应要和 handler 内的入口
+			// 一致，否则 composite 分组的客户端断连会以 400 进 ops_error_logs。
+			handler.RespondRequestBodyReadFailure(c, nil, err, func(c *gin.Context, status int, errType, message string) {
+				c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"type": errType, "message": message}})
+			})
 			return
 		}
 
