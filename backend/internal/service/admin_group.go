@@ -48,12 +48,14 @@ func (s *adminServiceImpl) GetGroup(ctx context.Context, id int64) (*Group, erro
 	return s.groupRepo.GetByID(ctx, id)
 }
 
-func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, error) {
+// GetGroupModelsListCandidates 返回候选模型以及解析后的平台。平台解析（空则读
+// 分组、再空则默认 anthropic）只能有一份，调用方拿到的平台必须与候选口径一致。
+func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, string, error) {
 	platform = strings.TrimSpace(platform)
 	if id > 0 {
 		group, err := s.groupRepo.GetByIDLite(ctx, id)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if platform == "" {
 			platform = group.Platform
@@ -65,12 +67,12 @@ func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id 
 
 	candidates := defaultModelsListCandidateIDs(platform)
 	if id <= 0 || s.accountRepo == nil {
-		return candidates, nil
+		return candidates, platform, nil
 	}
 
 	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	seen := make(map[string]struct{}, len(candidates))
@@ -97,7 +99,7 @@ func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id 
 			candidates = append(candidates, model)
 		}
 	}
-	return candidates, nil
+	return candidates, platform, nil
 }
 
 func (s *adminServiceImpl) ListCompositeRoutes(ctx context.Context, groupID int64) ([]CompositeModelRoute, error) {

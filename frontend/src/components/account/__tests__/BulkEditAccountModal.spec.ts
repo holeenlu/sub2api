@@ -29,7 +29,12 @@ vi.mock('@/api/admin', () => ({
 }))
 
 vi.mock('@/api/admin/accounts', () => ({
-  getAntigravityDefaultModelMapping: vi.fn()
+  getAntigravityDefaultModelMapping: vi.fn(),
+  accountsAPI: {
+    syncAnthropicModelsBulk: vi.fn(),
+    syncUpstreamModels: vi.fn(),
+    syncUpstreamModelsPreview: vi.fn()
+  }
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -135,6 +140,54 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.text()).toContain('gemini-3.1-flash-image')
     expect(wrapper.text()).toContain('gemini-2.5-flash-image')
     expect(wrapper.text()).not.toContain('gpt-5.3-codex')
+  })
+
+  it('选中模式把账号 ID 交给实时模型同步组件', async () => {
+    const wrapper = mountModal({
+      accountIds: [11, 12],
+      selectedPlatforms: ['anthropic'],
+      selectedTypes: ['oauth']
+    })
+
+    const selector = wrapper.findComponent(ModelWhitelistSelector)
+    expect(selector.props('accountIds')).toEqual([11, 12])
+    expect(selector.props('syncFilters')).toBeUndefined()
+  })
+
+  // 筛选快照里还带着 sort_by / sort_order 等展示状态，后端的批量筛选只认六个字段。
+  it('筛选模式只把六个筛选字段交给实时模型同步组件', async () => {
+    const wrapper = mountModal({
+      accountIds: [],
+      selectedPlatforms: ['anthropic'],
+      selectedTypes: ['oauth'],
+      target: {
+        mode: 'filtered',
+        filters: {
+          platform: 'anthropic',
+          type: 'oauth',
+          status: 'active',
+          group: 'ungrouped',
+          search: 'prod',
+          privacy_mode: '',
+          sort_by: 'created_at',
+          sort_order: 'desc'
+        },
+        previewCount: 7,
+        selectedPlatforms: ['anthropic'],
+        selectedTypes: ['oauth']
+      }
+    })
+
+    const selector = wrapper.findComponent(ModelWhitelistSelector)
+    expect(selector.props('accountIds')).toBeUndefined()
+    expect(selector.props('syncFilters')).toEqual({
+      platform: 'anthropic',
+      type: 'oauth',
+      status: 'active',
+      group: 'ungrouped',
+      search: 'prod',
+      privacy_mode: undefined
+    })
   })
 
   it('antigravity 映射预设包含图片映射并过滤 OpenAI 预设', async () => {

@@ -196,7 +196,7 @@ func TestAdminService_CompositeModelsListCandidatesIncludeConcreteAccountMapping
 	}
 	svc := &adminServiceImpl{accountRepo: accountRepo, groupRepo: groupRepo}
 
-	candidates, err := svc.GetGroupModelsListCandidates(context.Background(), 99, PlatformComposite)
+	candidates, _, err := svc.GetGroupModelsListCandidates(context.Background(), 99, PlatformComposite)
 
 	require.NoError(t, err)
 	require.Contains(t, candidates, "gpt-custom")

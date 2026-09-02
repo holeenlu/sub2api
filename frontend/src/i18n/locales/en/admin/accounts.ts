@@ -779,6 +779,16 @@ export default {
         'Model IDs were synced, but no capability metadata could be updated.',
       syncUpstreamModelsMetadataPartial:
         'Some model capabilities were updated; remaining models are still incomplete.',
+      syncLiveAnthropicModels: 'Sync live intersection',
+      syncLiveAnthropicModelsLoading: 'Querying selected accounts...',
+      syncLiveAnthropicModelsSuccess:
+        'Added {count} model(s) from the live intersection ({total} supported by every account)',
+      syncLiveAnthropicModelsPartial:
+        'Added {count} of {total} live model(s); {failed} account(s) did not answer',
+      syncLiveAnthropicModelsFailures: '{count} account(s) did not answer and were left out:',
+      syncLiveAnthropicModelsReplace: 'Replace with live list ({count} would be removed)',
+      syncLiveAnthropicModelsReplaceConfirm:
+        'Replace the whitelist with the live intersection? {count} entry/entries not returned by every account will be removed: {models}',
       clearAllModels: 'Clear all models',
       customModelName: 'Custom model name',
       enterCustomModelName: 'Enter custom model name',

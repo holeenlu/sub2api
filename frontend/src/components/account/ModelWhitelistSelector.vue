@@ -111,12 +111,47 @@
         {{ isSyncingUpstream ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
       </button>
       <button
+        v-if="canSyncAnthropicLive"
+        type="button"
+        data-testid="sync-live-anthropic-models"
+        @click="syncLiveAnthropicModels"
+        :disabled="isSyncingLiveAnthropic"
+        class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
+      >
+        {{ isSyncingLiveAnthropic ? t('admin.accounts.syncLiveAnthropicModelsLoading') : t('admin.accounts.syncLiveAnthropicModels') }}
+      </button>
+      <button
+        v-if="modelsOutsideLiveIntersection.length > 0"
+        type="button"
+        data-testid="replace-with-live-anthropic-models"
+        @click="replaceWithLiveAnthropicModels"
+        class="rounded-lg border border-amber-200 px-3 py-1.5 text-sm text-amber-600 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/30"
+      >
+        {{ t('admin.accounts.syncLiveAnthropicModelsReplace', { count: modelsOutsideLiveIntersection.length }) }}
+      </button>
+      <button
         type="button"
         @click="clearAll"
         class="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/30"
       >
         {{ t('admin.accounts.clearAllModels') }}
       </button>
+    </div>
+
+    <!-- Accounts that did not answer the live model sync -->
+    <div
+      v-if="liveAnthropicFailures.length > 0"
+      data-testid="live-anthropic-sync-failures"
+      class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
+    >
+      <p class="font-medium">
+        {{ t('admin.accounts.syncLiveAnthropicModelsFailures', { count: liveAnthropicFailures.length }) }}
+      </p>
+      <ul class="mt-1 space-y-0.5">
+        <li v-for="failure in liveAnthropicFailures" :key="failure.account_id">
+          {{ failure.name || `#${failure.account_id}` }} — {{ failure.error }}
+        </li>
+      </ul>
     </div>
 
     <!-- Custom Model Input -->
@@ -145,12 +180,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { accountsAPI } from '@/api/admin/accounts'
-import type { SyncUpstreamPreviewParams } from '@/api/admin/accounts'
+import type {
+  AnthropicModelSyncFailure,
+  SyncAnthropicModelsBulkFilters,
+  SyncUpstreamPreviewParams
+} from '@/api/admin/accounts'
 import { useClipboard } from '@/composables/useClipboard'
+import { extractApiErrorMessage } from '@/utils/apiError'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { allModels, getModelsByPlatform } from '@/composables/useModelWhitelist'
@@ -162,6 +202,10 @@ const props = defineProps<{
   platform?: string
   platforms?: string[]
   accountId?: number
+  /** Batch targets for the live Anthropic /v1/models sync (explicit selection). */
+  accountIds?: number[]
+  /** Batch targets for the live Anthropic /v1/models sync (filter selection). */
+  syncFilters?: SyncAnthropicModelsBulkFilters
   syncCredentials?: {
     platform: string
     type: string
@@ -220,6 +264,35 @@ const canSyncUpstream = computed(() => {
   }
   return false
 })
+
+// 批量编辑 Anthropic 账号时，同一份白名单要写给每个选中的账号，所以只有实时
+// /v1/models 的交集才是安全的。单账号编辑仍走 canSyncUpstream 那条路。
+const canSyncAnthropicLive = computed(() => {
+  return (
+    normalizedPlatforms.value.length === 1 &&
+    normalizedPlatforms.value[0].toLowerCase() === 'anthropic' &&
+    ((props.accountIds?.length ?? 0) > 0 || Boolean(props.syncFilters))
+  )
+})
+
+const isSyncingLiveAnthropic = ref(false)
+const liveAnthropicModels = ref<string[]>([])
+const liveAnthropicFailures = ref<AnthropicModelSyncFailure[]>([])
+
+// 已勾选但不在实时交集里的条目。它们未必非法（映射别名、上游刚下架的旧模型都
+// 会落在这里），所以只提示、不自动删除。
+const modelsOutsideLiveIntersection = computed(() => {
+  if (liveAnthropicModels.value.length === 0) return []
+  return props.modelValue.filter(model => !liveAnthropicModels.value.includes(model))
+})
+
+watch(
+  () => [normalizedPlatforms.value.join(','), props.accountIds?.join(',') ?? '', props.syncFilters],
+  () => {
+    liveAnthropicModels.value = []
+    liveAnthropicFailures.value = []
+  }
+)
 
 const availableOptions = computed(() => {
   if (normalizedPlatforms.value.length === 0) {
@@ -347,11 +420,87 @@ const syncUpstreamModels = async () => {
       appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataPartial'))
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : t('admin.accounts.syncUpstreamModelsFailed')
-    appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
+    appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message: extractApiErrorMessage(error, t('admin.accounts.syncUpstreamModelsFailed')) }))
   } finally {
     isSyncingUpstream.value = false
   }
+}
+
+const syncLiveAnthropicModels = async () => {
+  if (isSyncingLiveAnthropic.value || !canSyncAnthropicLive.value) return
+
+  isSyncingLiveAnthropic.value = true
+  try {
+    const useIDs = (props.accountIds?.length ?? 0) > 0
+    const result = await accountsAPI.syncAnthropicModelsBulk({
+      account_ids: useIDs ? props.accountIds : undefined,
+      filters: useIDs ? undefined : props.syncFilters,
+      aggregation: 'intersection',
+      // The resulting whitelist is written to every selected account. A
+      // partial intersection only describes the accounts that answered and
+      // is therefore unsafe to apply to the failures.
+      require_all: true
+    })
+
+    const models = Array.from(new Set(result.models.map(model => model.trim()).filter(Boolean)))
+    liveAnthropicModels.value = models
+    liveAnthropicFailures.value = result.failures ?? []
+    // 整批失败也走 200，好让逐账号明细能随响应一起回来（错误响应带不了 data）。
+    if (result.error || liveAnthropicFailures.value.length > 0) {
+      const message = result.error || t('admin.accounts.syncLiveAnthropicModelsFailures', {
+        count: liveAnthropicFailures.value.length
+      })
+      appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
+      return
+    }
+    if (models.length === 0) {
+      appStore.showInfo(t('admin.accounts.syncUpstreamModelsEmpty'))
+      return
+    }
+
+    // 默认合并：实时列表是「上游现在确实支持什么」，不是「这个白名单应该是
+    // 什么」。整体替换要管理员在看到差异之后再确认一次。
+    const merged = [...props.modelValue]
+    let addedCount = 0
+    for (const model of models) {
+      if (!merged.includes(model)) {
+        merged.push(model)
+        addedCount += 1
+      }
+    }
+    emit('update:modelValue', merged)
+
+    if (liveAnthropicFailures.value.length > 0) {
+      appStore.showWarning(t('admin.accounts.syncLiveAnthropicModelsPartial', {
+        count: addedCount,
+        total: models.length,
+        failed: liveAnthropicFailures.value.length
+      }))
+    } else if (addedCount > 0) {
+      appStore.showSuccess(t('admin.accounts.syncLiveAnthropicModelsSuccess', {
+        count: addedCount,
+        total: models.length
+      }))
+    } else {
+      appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: models.length }))
+    }
+  } catch (error) {
+    appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message: extractApiErrorMessage(error, t('admin.accounts.syncUpstreamModelsFailed')) }))
+  } finally {
+    isSyncingLiveAnthropic.value = false
+  }
+}
+
+const replaceWithLiveAnthropicModels = () => {
+  const dropped = modelsOutsideLiveIntersection.value
+  if (dropped.length === 0) return
+  if (!confirm(t('admin.accounts.syncLiveAnthropicModelsReplaceConfirm', {
+    count: dropped.length,
+    models: dropped.join(', ')
+  }))) {
+    return
+  }
+  emit('update:modelValue', [...liveAnthropicModels.value])
 }
 
 const clearAll = () => {
