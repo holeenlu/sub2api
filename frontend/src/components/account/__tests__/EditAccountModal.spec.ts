@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 
 const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
@@ -84,6 +84,9 @@ const ModelWhitelistSelectorStub = defineComponent({
         @click="$emit('update:modelValue', ['gpt-5.2-2025-12-11'])"
       >
         rewrite
+      </button>
+      <button type="button" data-testid="clear-model-whitelist" @click="$emit('update:modelValue', [])">
+        clear
       </button>
       <span data-testid="model-whitelist-value">
         {{ Array.isArray(modelValue) ? modelValue.join(',') : '' }}
@@ -302,6 +305,23 @@ function buildOpenAIOAuthParentAccount() {
   } as any
 }
 
+function buildAnthropicRestrictedAccount(type: 'oauth' | 'setup-token') {
+  return {
+    ...buildAccount(),
+    id: type === 'oauth' ? 8 : 9,
+    name: type === 'oauth' ? 'Anthropic OAuth' : 'Anthropic Setup Token',
+    platform: 'anthropic',
+    type,
+    credentials: {
+      access_token: 'redacted-in-responses',
+      model_mapping: {
+        'claude-sonnet-5': 'claude-sonnet-5',
+        'claude-latest': 'claude-opus-5'
+      }
+    }
+  } as any
+}
+
 function buildAnthropicOAuthAccount(credentials: Record<string, unknown> = {}) {
   return {
     ...buildAccount(),
@@ -368,6 +388,58 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
       'gpt-5.2': 'gpt-5.2'
     })
+  })
+
+  it.each(['oauth', 'setup-token'] as const)(
+    'shows and persists the saved Anthropic %s model restriction',
+    async (type) => {
+      const account = buildAnthropicRestrictedAccount(type)
+      updateAccountMock.mockReset().mockResolvedValue(account)
+      checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+      const wrapper = mountModal(account)
+
+      expect(wrapper.find('[data-testid="edit-dedicated-model-restriction"]').exists()).toBe(true)
+      expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('claude-sonnet-5')
+
+      // Reopening must rehydrate from props rather than keep stale local state.
+      await wrapper.setProps({ show: false })
+      await wrapper.setProps({ show: true })
+      expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('claude-sonnet-5')
+
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(updateAccountMock).toHaveBeenCalledTimes(1)
+      expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
+        'claude-sonnet-5': 'claude-sonnet-5',
+        'claude-latest': 'claude-opus-5'
+      })
+    }
+  )
+
+  it('rewrites the Anthropic model restriction when the whitelist is edited', async () => {
+    const account = buildAnthropicRestrictedAccount('setup-token')
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    // Clearing the whitelist drops its self-mapping; explicit mappings stay.
+    await wrapper.get('[data-testid="clear-model-whitelist"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
+      'claude-latest': 'claude-opus-5'
+    })
+  })
+
+  it('keeps the dedicated section hidden for an Anthropic API-key account', () => {
+    const account = { ...buildAnthropicRestrictedAccount('oauth'), id: 10, type: 'apikey' }
+    const wrapper = mountModal(account as any)
+
+    expect(wrapper.find('[data-testid="edit-dedicated-model-restriction"]').exists()).toBe(false)
   })
 
   it('preserves adaptive Kimi Responses endpoint on submit', async () => {

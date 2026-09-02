@@ -2215,8 +2215,9 @@
 
       <!-- OpenAI OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
       <div
-        v-if="(form.platform === 'openai' || form.platform === 'grok') && isOAuthFlow"
+        v-if="oauthFlowSupportsModelRestriction"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="create-dedicated-model-restriction"
       >
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
 
@@ -5823,12 +5824,10 @@ const createAccountAndFinish = async (
     if (!credentials.base_url) {
       credentials.base_url = apiKeyBaseUrl.value.trim() || 'https://api.x.ai/v1'
     }
-    const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
-    if (modelMapping) {
-      credentials.model_mapping = modelMapping
-    } else {
-      delete credentials.model_mapping
-    }
+    applyOAuthModelRestriction(credentials)
+  }
+  if (platform === 'anthropic' && (type === 'oauth' || type === 'setup-token')) {
+    applyOAuthModelRestriction(credentials)
   }
   await doCreateAccount({
     name: form.name,
@@ -6722,6 +6721,28 @@ const handleGrokExchange = async (authCode: string) => {
   }
 }
 
+// OAuth-family accounts have no apikey form container, so the model whitelist /
+// mapping gets its own section; the backend stores it in credentials.model_mapping
+// and enforces it platform-agnostically.
+const oauthFlowSupportsModelRestriction = computed(
+  () =>
+    isOAuthFlow.value &&
+    (form.platform === 'openai' || form.platform === 'grok' || form.platform === 'anthropic')
+)
+
+const applyOAuthModelRestriction = (credentials: Record<string, unknown>) => {
+  const modelMapping = buildModelMappingObject(
+    modelRestrictionMode.value,
+    allowedModels.value,
+    modelMappings.value
+  )
+  if (modelMapping) {
+    credentials.model_mapping = modelMapping
+  } else {
+    delete credentials.model_mapping
+  }
+}
+
 // Anthropic OAuth-family accounts (oauth / setup-token) share the same extra and
 // create payload no matter how the token was obtained (browser code, sessionKey
 // or a pasted setup token); only the credentials differ.
@@ -6789,6 +6810,7 @@ const buildAnthropicOAuthAccountPayload = (
 ): CreateAccountRequest => {
   const credentials: Record<string, unknown> = { ...tokenInfo }
   applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
+  applyOAuthModelRestriction(credentials)
   if (tempUnschedEnabled.value) {
     credentials.temp_unschedulable_enabled = true
     credentials.temp_unschedulable_rules = tempUnschedPayload

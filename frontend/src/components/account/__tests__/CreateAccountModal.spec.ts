@@ -718,6 +718,26 @@ describe('CreateAccountModal direct Claude setup-token import', () => {
     expect(wrapper.emitted('created')).toBeUndefined()
   })
 
+  it('offers the model restriction section and persists the whitelist on import', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Claude setup')
+    await wrapper.get('input[value="setup-token"]').setValue(true)
+    expect(wrapper.find('[data-testid="create-dedicated-model-restriction"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="model-whitelist-selector"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+
+    wrapper
+      .getComponent(OAuthAuthorizationFlowStub)
+      .vm.$emit('import-setup-token', SETUP_TOKEN)
+    await flushPromises()
+
+    expect(batchCreateAccountsMock).toHaveBeenCalledTimes(1)
+    expect(batchCreateAccountsMock.mock.calls[0]?.[0]?.[0]?.credentials?.model_mapping).toEqual({
+      'public-glm': 'public-glm'
+    })
+  })
+
   it('ignores cookie authorization while in setup-token mode', async () => {
     const wrapper = await openAnthropicSetupTokenStep()
     const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
