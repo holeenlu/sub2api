@@ -65,7 +65,13 @@ func (s *OpsService) GetDashboardOverview(ctx context.Context, filter *OpsDashbo
 		log.Printf("[Ops] ListJobHeartbeats failed: %v", err)
 	}
 
-	overview.HealthScore = computeDashboardHealthScore(time.Now().UTC(), overview)
+	// 阈值读取失败时按默认刻度评分，不阻塞仪表盘渲染。
+	thresholds, err := s.GetMetricThresholds(ctx)
+	if err != nil {
+		log.Printf("[Ops] GetMetricThresholds failed: %v", err)
+		thresholds = nil
+	}
+	overview.HealthScore, overview.HealthScoreBreakdown = computeDashboardHealth(time.Now().UTC(), overview, thresholds)
 
 	return overview, nil
 }

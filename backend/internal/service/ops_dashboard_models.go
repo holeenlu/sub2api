@@ -38,6 +38,8 @@ type OpsDashboardOverview struct {
 	// HealthScore is a backend-computed overall health score (0-100).
 	// It is derived from the monitored metrics in this overview, plus best-effort system metrics/job heartbeats.
 	HealthScore int `json:"health_score"`
+	// HealthScoreBreakdown 解释 HealthScore 的各子分与失联/失败任务；空闲时为 nil。
+	HealthScoreBreakdown *OpsHealthScoreBreakdown `json:"health_score_breakdown,omitempty"`
 
 	// Latest system-level snapshot (window=1m, global).
 	SystemMetrics *OpsSystemMetricsSnapshot `json:"system_metrics"`
@@ -67,6 +69,25 @@ type OpsDashboardOverview struct {
 
 	Duration OpsPercentiles `json:"duration"`
 	TTFT     OpsPercentiles `json:"ttft"`
+}
+
+// OpsHealthScoreBreakdown 是健康评分的明细：各子分均为 0-100。
+// 总分 = Business×0.7 + Infra×0.3；Business = ErrorRate×0.5 + TTFT×0.5；
+// Infra = Storage×0.4 + Compute×0.3 + Jobs×0.3。
+type OpsHealthScoreBreakdown struct {
+	Business  float64 `json:"business"`
+	ErrorRate float64 `json:"error_rate"`
+	TTFT      float64 `json:"ttft"`
+	// TTFTFullScoreMs 是当前生效的 TTFT 满分点（= ttft_p99_ms_max 或默认值），零分点为其 3 倍。
+	TTFTFullScoreMs float64 `json:"ttft_full_score_ms"`
+
+	Infra   float64 `json:"infra"`
+	Storage float64 `json:"storage"`
+	Compute float64 `json:"compute"`
+	Jobs    float64 `json:"jobs"`
+	// FailedJobs 最近一次运行显式报错的任务；StaleJobs 超过自身周期阈值没有成功的任务。
+	FailedJobs []string `json:"failed_jobs"`
+	StaleJobs  []string `json:"stale_jobs"`
 }
 
 type OpsLatencyHistogramBucket struct {

@@ -60,6 +60,8 @@ type OpsCleanupService struct {
 	started   bool
 	stopped   bool
 	effective config.OpsCleanupConfig
+	// interval 是当前 cron schedule 相邻两次触发的间隔，随心跳自报；未调度时为 0。
+	interval time.Duration
 
 	warnNoRedisOnce sync.Once
 }
@@ -143,6 +145,9 @@ func (s *OpsCleanupService) applyScheduleLocked(ctx context.Context) error {
 	s.stopCronLocked()
 
 	if !s.effective.Enabled {
+		s.interval = 0
+		// 关闭时留一条 skipped 心跳并声明"未调度"，否则上次成功时间会在阈值到期后被判成失联。
+		recordOpsJobSkipped(s.opsRepo, opsCleanupJobName, 0, "cleanup disabled by settings")
 		logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] cron disabled by settings")
 		return nil
 	}
@@ -161,10 +166,20 @@ func (s *OpsCleanupService) applyScheduleLocked(ctx context.Context) error {
 
 	c := cron.New(cron.WithParser(opsCleanupCronParser), cron.WithLocation(loc))
 	if _, err := c.AddFunc(schedule, func() { s.runScheduled() }); err != nil {
-		return fmt.Errorf("invalid schedule %q: %w", schedule, err)
+		err = fmt.Errorf("invalid schedule %q: %w", schedule, err)
+		// 调度没建起来，清理就是停摆的。这里必须把任务标成异常：调用方（Reload）
+		// 只记日志，而心跳周期可能还停留在上一次「已关闭」写下的 0，
+		// 那样 opsJobStaleThreshold 会跳过判活，仪表盘将一直显示健康。
+		s.interval = 0
+		s.recordScheduleErrorLocked(err)
+		return err
+	}
+	if sched, err := opsCleanupCronParser.Parse(schedule); err == nil {
+		s.interval = opsCronInterval(sched, time.Now().In(loc))
 	}
 	c.Start()
 	s.cron = c
+	s.declareHeartbeatInterval()
 	logger.LegacyPrintf("service.ops_cleanup",
 		"[OpsCleanup] scheduled (schedule=%q tz=%s retention_days=err:%d/min:%d/hour:%d)",
 		schedule, loc.String(),
@@ -247,6 +262,33 @@ func (s *OpsCleanupService) snapshotEffective() config.OpsCleanupConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.effective
+}
+
+// snapshotInterval 取当前 cron 周期（未调度时为 0）。
+func (s *OpsCleanupService) snapshotInterval() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.interval
+}
+
+// declareHeartbeatInterval 在 cron 建好后只更新心跳的自报周期，不碰任何时间戳：
+// 这样"重新启用"不会伪造一次成功，而距上次成功超过 3 倍周期仍会被判失联。调用方持锁。
+func (s *OpsCleanupService) declareHeartbeatInterval() {
+	if s.opsRepo == nil || s.interval <= 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), opsCleanupHeartbeatTimeout)
+	defer cancel()
+	_ = s.opsRepo.UpsertJobHeartbeat(ctx, &OpsUpsertJobHeartbeatInput{
+		JobName:                 opsCleanupJobName,
+		ExpectedIntervalSeconds: opsJobIntervalSeconds(s.interval),
+	})
+}
+
+// recordScheduleErrorLocked 在 cron 建不起来时写一条 error 心跳，让仪表盘把清理
+// 列进 FailedJobs。调用方持锁，所以不能走 recordHeartbeatError（它会再取一次锁）。
+func (s *OpsCleanupService) recordScheduleErrorLocked(err error) {
+	recordOpsJobError(s.opsRepo, opsCleanupJobName, time.Now().UTC(), 0, s.interval, err)
 }
 
 // refreshEffectiveBeforeRun 在 cron 触发时刷新 effective，让 retention 改动当次即生效。
@@ -378,37 +420,15 @@ func (s *OpsCleanupService) tryAcquireLeaderLock(ctx context.Context) (func(), b
 }
 
 func (s *OpsCleanupService) recordHeartbeatSuccess(runAt time.Time, duration time.Duration, counts opsCleanupDeletedCounts) {
-	if s == nil || s.opsRepo == nil {
+	if s == nil {
 		return
 	}
-	now := time.Now().UTC()
-	durMs := duration.Milliseconds()
-	result := truncateString(counts.String(), 2048)
-	ctx, cancel := context.WithTimeout(context.Background(), opsCleanupHeartbeatTimeout)
-	defer cancel()
-	_ = s.opsRepo.UpsertJobHeartbeat(ctx, &OpsUpsertJobHeartbeatInput{
-		JobName:        opsCleanupJobName,
-		LastRunAt:      &runAt,
-		LastSuccessAt:  &now,
-		LastDurationMs: &durMs,
-		LastResult:     &result,
-	})
+	recordOpsJobSuccess(s.opsRepo, opsCleanupJobName, runAt, duration, s.snapshotInterval(), counts.String())
 }
 
 func (s *OpsCleanupService) recordHeartbeatError(runAt time.Time, duration time.Duration, err error) {
-	if s == nil || s.opsRepo == nil || err == nil {
+	if s == nil {
 		return
 	}
-	now := time.Now().UTC()
-	durMs := duration.Milliseconds()
-	msg := truncateString(err.Error(), 2048)
-	ctx, cancel := context.WithTimeout(context.Background(), opsCleanupHeartbeatTimeout)
-	defer cancel()
-	_ = s.opsRepo.UpsertJobHeartbeat(ctx, &OpsUpsertJobHeartbeatInput{
-		JobName:        opsCleanupJobName,
-		LastRunAt:      &runAt,
-		LastErrorAt:    &now,
-		LastError:      &msg,
-		LastDurationMs: &durMs,
-	})
+	recordOpsJobError(s.opsRepo, opsCleanupJobName, runAt, duration, s.snapshotInterval(), err)
 }

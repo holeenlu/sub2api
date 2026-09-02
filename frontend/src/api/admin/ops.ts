@@ -32,6 +32,7 @@ export interface OpsDashboardOverview {
   group_id?: number | null
 
   health_score?: number
+  health_score_breakdown?: OpsHealthScoreBreakdown | null
 
   system_metrics?: OpsSystemMetricsSnapshot | null
   job_heartbeats?: OpsJobHeartbeat[] | null
@@ -273,6 +274,23 @@ export interface OpsSystemMetricsSnapshot {
   account_switch_count?: number | null
 }
 
+// 健康评分明细：各子分均为 0-100。
+// 总分 = business×0.7 + infra×0.3；business = error_rate×0.5 + ttft×0.5；
+// infra = storage×0.4 + compute×0.3 + jobs×0.3。
+export interface OpsHealthScoreBreakdown {
+  business: number
+  error_rate: number
+  ttft: number
+  ttft_full_score_ms: number // TTFT 满分点（零分点为其 3 倍）
+
+  infra: number
+  storage: number
+  compute: number
+  jobs: number
+  failed_jobs: string[] // 最近一次运行显式报错的任务
+  stale_jobs: string[]  // 超过自身周期阈值没有成功的任务
+}
+
 export interface OpsJobHeartbeat {
   job_name: string
   last_run_at?: string | null
@@ -281,6 +299,7 @@ export interface OpsJobHeartbeat {
   last_error?: string | null
   last_duration_ms?: number | null
   last_result?: string | null
+  expected_interval_seconds?: number | null // 任务自报周期；0 = 当前没有调度
   updated_at: string
 }
 

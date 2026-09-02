@@ -288,6 +288,10 @@ type OpsUpsertJobHeartbeatInput struct {
 
 	// LastResult is an optional human-readable summary of the last successful run.
 	LastResult *string
+
+	// ExpectedIntervalSeconds 是任务自报的预期执行间隔，判活阈值由它派生。
+	// nil 表示不更新已存的值；0 表示任务当前没有调度（例如被设置关闭），不参与失联判定。
+	ExpectedIntervalSeconds *int64
 }
 
 type OpsJobHeartbeat struct {
@@ -299,6 +303,9 @@ type OpsJobHeartbeat struct {
 	LastError      *string    `json:"last_error"`
 	LastDurationMs *int64     `json:"last_duration_ms"`
 	LastResult     *string    `json:"last_result"`
+
+	// ExpectedIntervalSeconds 为 nil 时是尚未自报周期的旧行；0 表示任务当前没有调度。
+	ExpectedIntervalSeconds *int64 `json:"expected_interval_seconds"`
 
 	UpdatedAt time.Time `json:"updated_at"`
 }

@@ -306,9 +306,10 @@ INSERT INTO ops_job_heartbeats (
   last_error,
   last_duration_ms,
   last_result,
+  expected_interval_seconds,
   updated_at
 ) VALUES (
-  $1,$2,$3,$4,$5,$6,$7,NOW()
+  $1,$2,$3,$4,$5,$6,$7,$8,NOW()
 )
 ON CONFLICT (job_name) DO UPDATE SET
   last_run_at = COALESCE(EXCLUDED.last_run_at, ops_job_heartbeats.last_run_at),
@@ -323,9 +324,10 @@ ON CONFLICT (job_name) DO UPDATE SET
   END,
   last_duration_ms = COALESCE(EXCLUDED.last_duration_ms, ops_job_heartbeats.last_duration_ms),
   last_result = CASE
-    WHEN EXCLUDED.last_success_at IS NOT NULL THEN COALESCE(EXCLUDED.last_result, ops_job_heartbeats.last_result)
+    WHEN EXCLUDED.last_error_at IS NULL THEN COALESCE(EXCLUDED.last_result, ops_job_heartbeats.last_result)
     ELSE ops_job_heartbeats.last_result
   END,
+  expected_interval_seconds = COALESCE(EXCLUDED.expected_interval_seconds, ops_job_heartbeats.expected_interval_seconds),
   updated_at = NOW()`
 
 	_, err := r.db.ExecContext(
@@ -338,8 +340,18 @@ ON CONFLICT (job_name) DO UPDATE SET
 		opsNullString(input.LastError),
 		opsNullInt(input.LastDurationMs),
 		opsNullString(input.LastResult),
+		opsNullableInt64Pointer(input.ExpectedIntervalSeconds),
 	)
 	return err
+}
+
+// opsNullableInt64Pointer 区分"未提供"与"显式的 0"：expected_interval_seconds = 0
+// 表示任务当前没有调度，必须落库为 0 而不是 NULL。
+func opsNullableInt64Pointer(v *int64) any {
+	if v == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: *v, Valid: true}
 }
 
 func (r *opsRepository) ListJobHeartbeats(ctx context.Context) ([]*service.OpsJobHeartbeat, error) {
@@ -356,6 +368,7 @@ SELECT
   last_error,
   last_duration_ms,
   last_result,
+  expected_interval_seconds,
   updated_at
 FROM ops_job_heartbeats
 ORDER BY job_name ASC`
@@ -376,6 +389,7 @@ ORDER BY job_name ASC`
 		var lastDuration sql.NullInt64
 
 		var lastResult sql.NullString
+		var expectedInterval sql.NullInt64
 
 		if err := rows.Scan(
 			&item.JobName,
@@ -385,6 +399,7 @@ ORDER BY job_name ASC`
 			&lastError,
 			&lastDuration,
 			&lastResult,
+			&expectedInterval,
 			&item.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -413,6 +428,10 @@ ORDER BY job_name ASC`
 		if lastResult.Valid {
 			v := lastResult.String
 			item.LastResult = &v
+		}
+		if expectedInterval.Valid {
+			v := expectedInterval.Int64
+			item.ExpectedIntervalSeconds = &v
 		}
 
 		out = append(out, &item)

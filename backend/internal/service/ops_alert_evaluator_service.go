@@ -188,7 +188,7 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 
 	rules, err := s.opsRepo.ListAlertRules(ctx)
 	if err != nil {
-		s.recordHeartbeatError(runAt, time.Since(startedAt), err)
+		s.recordHeartbeatError(runAt, time.Since(startedAt), interval, err)
 		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] list rules failed: %v", err)
 		return
 	}
@@ -311,7 +311,7 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 	}
 
 	result := truncateString(fmt.Sprintf("rules=%d enabled=%d evaluated=%d created=%d resolved=%d emails_sent=%d", rulesTotal, rulesEnabled, rulesEvaluated, eventsCreated, eventsResolved, emailsSent), 2048)
-	s.recordHeartbeatSuccess(runAt, time.Since(startedAt), result)
+	s.recordHeartbeatSuccess(runAt, time.Since(startedAt), interval, result)
 }
 
 func (s *OpsAlertEvaluatorService) pruneRuleStates(rules []*OpsAlertRule) {
@@ -954,44 +954,18 @@ func (s *OpsAlertEvaluatorService) maybeLogSkip(key string) {
 	logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] leader lock held by another instance; skipping (key=%q)", key)
 }
 
-func (s *OpsAlertEvaluatorService) recordHeartbeatSuccess(runAt time.Time, duration time.Duration, result string) {
-	if s == nil || s.opsRepo == nil {
+func (s *OpsAlertEvaluatorService) recordHeartbeatSuccess(runAt time.Time, duration time.Duration, interval time.Duration, result string) {
+	if s == nil {
 		return
 	}
-	now := time.Now().UTC()
-	durMs := duration.Milliseconds()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	msg := strings.TrimSpace(result)
-	if msg == "" {
-		msg = "ok"
-	}
-	msg = truncateString(msg, 2048)
-	_ = s.opsRepo.UpsertJobHeartbeat(ctx, &OpsUpsertJobHeartbeatInput{
-		JobName:        opsAlertEvaluatorJobName,
-		LastRunAt:      &runAt,
-		LastSuccessAt:  &now,
-		LastDurationMs: &durMs,
-		LastResult:     &msg,
-	})
+	recordOpsJobSuccess(s.opsRepo, opsAlertEvaluatorJobName, runAt, duration, interval, result)
 }
 
-func (s *OpsAlertEvaluatorService) recordHeartbeatError(runAt time.Time, duration time.Duration, err error) {
-	if s == nil || s.opsRepo == nil || err == nil {
+func (s *OpsAlertEvaluatorService) recordHeartbeatError(runAt time.Time, duration time.Duration, interval time.Duration, err error) {
+	if s == nil {
 		return
 	}
-	now := time.Now().UTC()
-	durMs := duration.Milliseconds()
-	msg := truncateString(err.Error(), 2048)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	_ = s.opsRepo.UpsertJobHeartbeat(ctx, &OpsUpsertJobHeartbeatInput{
-		JobName:        opsAlertEvaluatorJobName,
-		LastRunAt:      &runAt,
-		LastErrorAt:    &now,
-		LastError:      &msg,
-		LastDurationMs: &durMs,
-	})
+	recordOpsJobError(s.opsRepo, opsAlertEvaluatorJobName, runAt, duration, interval, err)
 }
 
 func htmlEscape(s string) string {
