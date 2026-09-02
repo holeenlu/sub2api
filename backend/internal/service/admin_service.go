@@ -89,6 +89,10 @@ type AdminService interface {
 	// UpdateAccountExtra 仅对 Extra 做 JSONB 增量合并（key 级覆盖），不会影响其它字段或运行态键。
 	// 用于刷新流程持久化 account_uuid / org_uuid 等少量键，避免被全量快照覆盖。
 	UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error
+	// ApplyOAuthCredentials 用一次授权换发的整套 token 替换账号凭据（重新授权）。
+	// 与 UpdateAccount 的区别：旧 token 字段（含 refresh_token / expires_at）整体删除而非
+	// "缺失即保留"；model_mapping 等非 token 键原样保留。非 OAuth 账号返回 NOT_OAUTH。
+	ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error)
 	DeleteAccount(ctx context.Context, id int64) error
 	RefreshAccountCredentials(ctx context.Context, id int64) (*Account, error)
 	ClearAccountError(ctx context.Context, id int64) (*Account, error)
@@ -426,6 +430,12 @@ type UpdateAccountInput struct {
 	ProbeEnabled          *bool
 	RateSyncEnabled       *bool
 	SkipMixedChannelCheck bool // 跳过混合渠道检查（用户已确认风险）
+}
+
+// ApplyOAuthCredentialsInput 是重新授权落库的输入：账号类型与本次授权得到的整套 token。
+type ApplyOAuthCredentialsInput struct {
+	Type        string // oauth / setup-token
+	Credentials map[string]any
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.

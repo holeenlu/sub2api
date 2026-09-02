@@ -26,6 +26,12 @@ describe('ReAuthAccountModal Grok re-auth paths', () => {
     expect(source).toContain('applyOAuthCredentials')
   })
 
+  it('keeps direct Claude setup-token import alongside the Grok handlers', () => {
+    expect(source).toContain('@import-setup-token="handleSetupTokenImport"')
+    expect(source).toContain('const handleSetupTokenImport = async')
+    expect(source).toContain('const handleValidateRefreshToken = async')
+  })
+
   it('hides footer code-exchange button for SSO/RT input methods', () => {
     expect(source).toContain("method === 'sso_cookie'")
     expect(source).toContain("method === 'refresh_token'")

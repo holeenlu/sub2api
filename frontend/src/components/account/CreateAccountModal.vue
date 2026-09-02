@@ -3471,6 +3471,7 @@
         :show-project-id="geminiOAuthType === 'code_assist'"
         @generate-url="handleGenerateUrl"
         @cookie-auth="handleCookieAuth"
+        @import-setup-token="handleSetupTokenImport"
         @validate-refresh-token="handleValidateRefreshToken"
         @validate-mobile-refresh-token="handleOpenAIValidateMobileRT"
         @validate-session-token="handleValidateSessionToken"
@@ -3811,9 +3812,13 @@ import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import {
+  buildClaudeSetupTokenCredentials,
+  describeClaudeSetupTokenError,
+  parseClaudeSetupTokens,
   useAccountOAuth,
   type AddMethod,
-  type AuthInputMethod
+  type AuthInputMethod,
+  type TokenInfo
 } from '@/composables/useAccountOAuth'
 import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
@@ -3887,6 +3892,8 @@ interface OAuthFlowExposed {
   oauthState: string
   projectId: string
   sessionKey: string
+  // 可写：setup-token 批量导入部分失败时把成功的行从输入里移除，避免重试重复建号。
+  setupToken: string
   refreshToken: string
   sessionToken: string
   codexSession: string
@@ -6715,8 +6722,100 @@ const handleGrokExchange = async (authCode: string) => {
   }
 }
 
+// Anthropic OAuth-family accounts (oauth / setup-token) share the same extra and
+// create payload no matter how the token was obtained (browser code, sessionKey
+// or a pasted setup token); only the credentials differ.
+const buildAnthropicOAuthAccountExtra = (tokenInfo: TokenInfo): Record<string, unknown> => {
+  const extra: Record<string, unknown> = { ...(oauth.buildExtraInfo(tokenInfo) || {}) }
+
+  if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
+    extra.window_cost_limit = windowCostLimit.value
+    extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
+  }
+
+  if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
+    extra.max_sessions = maxSessions.value
+    extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
+  }
+
+  if (rpmLimitEnabled.value) {
+    const DEFAULT_BASE_RPM = 15
+    extra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
+      ? baseRpm.value
+      : DEFAULT_BASE_RPM
+    extra.rpm_strategy = rpmStrategy.value
+    if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
+      extra.rpm_sticky_buffer = rpmStickyBuffer.value
+    }
+  }
+
+  // UMQ mode（独立于 RPM）
+  if (userMsgQueueMode.value) {
+    extra.user_msg_queue_mode = userMsgQueueMode.value
+  }
+
+  if (tlsFingerprintEnabled.value) {
+    extra.enable_tls_fingerprint = true
+    if (tlsFingerprintProfileId.value) {
+      extra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
+    }
+  }
+
+  if (sessionIdMaskingEnabled.value) {
+    extra.session_id_masking_enabled = true
+  }
+
+  if (cacheTTLOverrideEnabled.value) {
+    extra.cache_ttl_override_enabled = true
+    extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
+  }
+
+  if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
+    extra.custom_base_url_enabled = true
+    extra.custom_base_url = customBaseUrl.value.trim()
+  }
+
+  return extra
+}
+
+// Batch paths (sessionKey / setup token, one account per line) validate the
+// temp-unschedulable rules once up front and pass the result in, so a bad rule
+// set fails before the first account is created instead of half-way through.
+const buildAnthropicOAuthAccountPayload = (
+  name: string,
+  type: AddMethod,
+  tokenInfo: TokenInfo,
+  tempUnschedPayload: ReturnType<typeof buildTempUnschedRules>
+): CreateAccountRequest => {
+  const credentials: Record<string, unknown> = { ...tokenInfo }
+  applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
+  if (tempUnschedEnabled.value) {
+    credentials.temp_unschedulable_enabled = true
+    credentials.temp_unschedulable_rules = tempUnschedPayload
+  }
+
+  return {
+    name,
+    notes: form.notes,
+    platform: 'anthropic',
+    type,
+    credentials,
+    extra: withUpstreamRequestIdHeader(buildAnthropicOAuthAccountExtra(tokenInfo)),
+    proxy_id: form.proxy_id,
+    concurrency: form.concurrency,
+    load_factor: form.load_factor ?? undefined,
+    priority: form.priority,
+    rate_multiplier: form.rate_multiplier,
+    group_ids: form.group_ids,
+    expires_at: form.expires_at,
+    auto_pause_on_expired: autoPauseOnExpired.value
+  }
+}
+
 // Anthropic OAuth 授权码兑换
 const handleAnthropicExchange = async (authCode: string) => {
+  // setup-token accounts are imported directly; there is no code to exchange.
+  if (addMethod.value !== 'oauth') return
   if (!authCode.trim() || !oauth.sessionId.value) return
 
   oauth.loading.value = true
@@ -6724,78 +6823,20 @@ const handleAnthropicExchange = async (authCode: string) => {
 
   try {
     const proxyConfig = form.proxy_id ? { proxy_id: form.proxy_id } : {}
-    const endpoint =
-      addMethod.value === 'oauth'
-        ? '/admin/accounts/exchange-code'
-        : '/admin/accounts/exchange-setup-token-code'
-
-    const tokenInfo = await adminAPI.accounts.exchangeCode(endpoint, {
+    const tokenInfo = await adminAPI.accounts.exchangeCode('/admin/accounts/exchange-code', {
       session_id: oauth.sessionId.value,
       code: authCode.trim(),
       ...proxyConfig
     })
 
-    // Build extra with quota control settings
-    const baseExtra = oauth.buildExtraInfo(tokenInfo) || {}
-    const extra: Record<string, unknown> = { ...baseExtra }
-
-    // Add window cost limit settings
-    if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
-      extra.window_cost_limit = windowCostLimit.value
-      extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
-    }
-
-    // Add session limit settings
-    if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
-      extra.max_sessions = maxSessions.value
-      extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
-    }
-
-    // Add RPM limit settings
-    if (rpmLimitEnabled.value) {
-      const DEFAULT_BASE_RPM = 15
-      extra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
-        ? baseRpm.value
-        : DEFAULT_BASE_RPM
-      extra.rpm_strategy = rpmStrategy.value
-      if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
-        extra.rpm_sticky_buffer = rpmStickyBuffer.value
-      }
-    }
-
-    // UMQ mode（独立于 RPM）
-    if (userMsgQueueMode.value) {
-      extra.user_msg_queue_mode = userMsgQueueMode.value
-    }
-
-    // Add TLS fingerprint settings
-    if (tlsFingerprintEnabled.value) {
-      extra.enable_tls_fingerprint = true
-      if (tlsFingerprintProfileId.value) {
-        extra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
-      }
-    }
-
-    // Add session ID masking settings
-    if (sessionIdMaskingEnabled.value) {
-      extra.session_id_masking_enabled = true
-    }
-
-    // Add cache TTL override settings
-    if (cacheTTLOverrideEnabled.value) {
-      extra.cache_ttl_override_enabled = true
-      extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
-    }
-
-    // Add custom base URL settings
-    if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
-      extra.custom_base_url_enabled = true
-      extra.custom_base_url = customBaseUrl.value.trim()
-    }
-
     const credentials: Record<string, unknown> = { ...tokenInfo }
     applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
-    await createAccountAndFinish(form.platform, addMethod.value as AccountType, credentials, extra)
+    await createAccountAndFinish(
+      form.platform,
+      addMethod.value as AccountType,
+      credentials,
+      buildAnthropicOAuthAccountExtra(tokenInfo)
+    )
   } catch (error: any) {
     oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
     appStore.showError(oauth.error.value)
@@ -6823,6 +6864,8 @@ const handleExchangeCode = async () => {
 }
 
 const handleCookieAuth = async (sessionKey: string) => {
+  if (addMethod.value !== 'oauth') return
+
   oauth.loading.value = true
   oauth.error.value = ''
 
@@ -6843,106 +6886,22 @@ const handleCookieAuth = async (sessionKey: string) => {
       return
     }
 
-    const endpoint =
-      addMethod.value === 'oauth'
-        ? '/admin/accounts/cookie-auth'
-        : '/admin/accounts/setup-token-cookie-auth'
-
     let successCount = 0
     let failedCount = 0
     const errors: string[] = []
 
     for (let i = 0; i < keys.length; i++) {
       try {
-        const tokenInfo = await adminAPI.accounts.exchangeCode(endpoint, {
+        const tokenInfo = await adminAPI.accounts.exchangeCode('/admin/accounts/cookie-auth', {
           session_id: '',
           code: keys[i],
           ...proxyConfig
         })
 
-        // Build extra with quota control settings
-        const baseExtra = oauth.buildExtraInfo(tokenInfo) || {}
-        const extra: Record<string, unknown> = { ...baseExtra }
-
-        // Add window cost limit settings
-        if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
-          extra.window_cost_limit = windowCostLimit.value
-          extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
-        }
-
-        // Add session limit settings
-        if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
-          extra.max_sessions = maxSessions.value
-          extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
-        }
-
-        // Add RPM limit settings
-        if (rpmLimitEnabled.value) {
-          const DEFAULT_BASE_RPM = 15
-          extra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
-            ? baseRpm.value
-            : DEFAULT_BASE_RPM
-          extra.rpm_strategy = rpmStrategy.value
-          if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
-            extra.rpm_sticky_buffer = rpmStickyBuffer.value
-          }
-        }
-
-        // UMQ mode（独立于 RPM）
-        if (userMsgQueueMode.value) {
-          extra.user_msg_queue_mode = userMsgQueueMode.value
-        }
-
-        // Add TLS fingerprint settings
-        if (tlsFingerprintEnabled.value) {
-          extra.enable_tls_fingerprint = true
-          if (tlsFingerprintProfileId.value) {
-            extra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
-          }
-        }
-
-        // Add session ID masking settings
-        if (sessionIdMaskingEnabled.value) {
-          extra.session_id_masking_enabled = true
-        }
-
-        // Add cache TTL override settings
-        if (cacheTTLOverrideEnabled.value) {
-          extra.cache_ttl_override_enabled = true
-          extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
-        }
-
-        // Add custom base URL settings
-        if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
-          extra.custom_base_url_enabled = true
-          extra.custom_base_url = customBaseUrl.value.trim()
-        }
-
         const accountName = keys.length > 1 ? `${form.name} #${i + 1}` : form.name
-
-        const credentials: Record<string, unknown> = { ...tokenInfo }
-        applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
-        if (tempUnschedEnabled.value) {
-          credentials.temp_unschedulable_enabled = true
-          credentials.temp_unschedulable_rules = tempUnschedPayload
-        }
-
-        await adminAPI.accounts.create({
-          name: accountName,
-          notes: form.notes,
-          platform: form.platform,
-          type: addMethod.value, // Use addMethod as type: 'oauth' or 'setup-token'
-          credentials,
-          extra: withUpstreamRequestIdHeader(extra),
-          proxy_id: form.proxy_id,
-          concurrency: form.concurrency,
-          load_factor: form.load_factor ?? undefined,
-          priority: form.priority,
-          rate_multiplier: form.rate_multiplier,
-          group_ids: form.group_ids,
-          expires_at: form.expires_at,
-          auto_pause_on_expired: autoPauseOnExpired.value
-        })
+        await adminAPI.accounts.create(
+          buildAnthropicOAuthAccountPayload(accountName, addMethod.value, tokenInfo, tempUnschedPayload)
+        )
 
         successCount++
       } catch (error: any) {
@@ -6971,6 +6930,103 @@ const handleCookieAuth = async (sessionKey: string) => {
     }
   } catch (error: any) {
     oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.cookieAuthFailed')
+  } finally {
+    oauth.loading.value = false
+  }
+}
+
+// Direct `claude setup-token` import: one account per pasted line, no upstream
+// round-trip. Validation failures are reported per line like the cookie path.
+//
+// 每行互不依赖，走一次 POST /admin/accounts/batch 而不是逐行 create——N 行不必付 N 次
+// 往返。部分失败时只把失败的行留在输入框里：后端 CreateAccount 不按 access_token 查重，
+// 管理员改完错误行再次保存，已建成功的 token 会被重复建号。
+const handleSetupTokenImport = async (setupTokenInput: string) => {
+  if (addMethod.value !== 'setup-token') return
+
+  oauth.loading.value = true
+  oauth.error.value = ''
+
+  try {
+    const setupTokens = parseClaudeSetupTokens(setupTokenInput)
+    if (setupTokens.length === 0) {
+      oauth.error.value = t('admin.accounts.oauth.pleaseEnterSetupToken')
+      return
+    }
+
+    const tempUnschedPayload = tempUnschedEnabled.value
+      ? buildTempUnschedRules(tempUnschedRules.value)
+      : []
+    if (tempUnschedEnabled.value && tempUnschedPayload.length === 0) {
+      appStore.showError(t('admin.accounts.tempUnschedulable.rulesInvalid'))
+      return
+    }
+
+    const failures = new Map<number, string>()
+    const describeFailure = (error: unknown) =>
+      describeClaudeSetupTokenError(error, t, t('admin.accounts.oauth.authFailed'))
+
+    // 格式错误的行在本地就挡下来，不必发给后端。
+    const pending: Array<{ index: number; payload: CreateAccountRequest }> = []
+    setupTokens.forEach((token, index) => {
+      try {
+        const tokenInfo = buildClaudeSetupTokenCredentials(token)
+        const accountName = setupTokens.length > 1 ? `${form.name} #${index + 1}` : form.name
+        pending.push({
+          index,
+          payload: buildAnthropicOAuthAccountPayload(
+            accountName,
+            'setup-token',
+            tokenInfo,
+            tempUnschedPayload
+          )
+        })
+      } catch (error: unknown) {
+        failures.set(index, describeFailure(error))
+      }
+    })
+
+    let successCount = 0
+    if (pending.length > 0) {
+      try {
+        const result = await adminAPI.accounts.batchCreate(pending.map((entry) => entry.payload))
+        // 后端按入参顺序逐条返回结果，下标一一对应。
+        pending.forEach((entry, position) => {
+          const itemResult = result?.results?.[position]
+          if (itemResult && itemResult.success === false) {
+            failures.set(entry.index, itemResult.error || t('admin.accounts.oauth.authFailed'))
+            return
+          }
+          successCount++
+        })
+      } catch (error: unknown) {
+        // 整批请求失败：所有已提交的行都算失败，一行都没建成。
+        const message = describeFailure(error)
+        pending.forEach((entry) => failures.set(entry.index, message))
+      }
+    }
+
+    if (successCount > 0) {
+      appStore.showSuccess(t('admin.accounts.oauth.successCreated', { count: successCount }))
+      emit('created')
+    }
+
+    if (failures.size === 0) {
+      handleClose()
+      return
+    }
+
+    // 成功的行从输入里移除，重试只会重发失败的行。
+    const remaining = setupTokens.filter((_, index) => failures.has(index))
+    if (oauthFlowRef.value) {
+      oauthFlowRef.value.setupToken = remaining.join('\n')
+    }
+    oauth.error.value = [...failures.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([index, error]) =>
+        t('admin.accounts.oauth.keyAuthFailed', { index: index + 1, error })
+      )
+      .join('\n')
   } finally {
     oauth.loading.value = false
   }

@@ -1263,7 +1263,7 @@ func (h *AccountHandler) PreviewFromCRS(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// refreshSingleAccount refreshes credentials for a single OAuth account.
+// refreshSingleAccount refreshes credentials for a single refreshable OAuth account.
 // Returns (updatedAccount, warning, error) where warning is used for Antigravity ProjectIDMissing scenario.
 func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *service.Account) (*service.Account, string, error) {
 	if !account.IsOAuth() {
@@ -1274,6 +1274,12 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 	if account.IsCredentialShadow() {
 		return nil, "", infraerrors.BadRequest("SPARK_SHADOW_NO_REFRESH",
 			"cannot refresh spark shadow account; its credentials are managed by the parent account")
+	}
+	// Anthropic setup-token 是 `claude setup-token` 生成的长期凭据，不参与 OAuth
+	// refresh_token 续期。即使旧记录残留 refresh_token，也必须在调用上游前拒绝。
+	if !account.CanRefreshToken() {
+		return nil, "", infraerrors.BadRequest("SETUP_TOKEN_NO_REFRESH",
+			"this credential does not support refresh-token renewal; re-authorize and import a new token instead")
 	}
 
 	var newCredentials map[string]any
@@ -1495,7 +1501,9 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	// Drop SSO/password residue; re-auth must leave only OAuth tokens on disk.
 	req.Credentials = service.SanitizeStoredCredentials(existing.Platform, req.Credentials)
 
-	updatedAccount, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
+	// 换发凭据走整套替换而不是通用 UpdateAccount 的"缺失即保留"：把 OAuth 账号重新授权
+	// 成直接导入的 setup-token 时，新凭据只有 access_token，旧 refresh_token 不得留下。
+	updatedAccount, err := h.adminService.ApplyOAuthCredentials(ctx, accountID, &service.ApplyOAuthCredentialsInput{
 		Type:        req.Type,
 		Credentials: req.Credentials,
 	})
@@ -1985,6 +1993,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				Extra:                 item.Extra,
 				ProxyID:               item.ProxyID,
 				Concurrency:           item.Concurrency,
+				LoadFactor:            item.LoadFactor,
 				Priority:              item.Priority,
 				RateMultiplier:        item.RateMultiplier,
 				GroupIDs:              item.GroupIDs,
@@ -2271,7 +2280,12 @@ func (h *OAuthHandler) GenerateAuthURL(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// GenerateSetupTokenURL generates OAuth authorization URL for setup token (inference only)
+// GenerateSetupTokenURL generates OAuth authorization URL for setup token (inference only).
+//
+// Legacy: the admin UI no longer calls this. Setup Token accounts are created by
+// pasting the output of `claude setup-token` (POST /admin/accounts with
+// type=setup-token), so no browser round-trip is involved. The endpoint is kept
+// for API compatibility with older clients.
 // POST /api/v1/admin/accounts/generate-setup-token-url
 func (h *OAuthHandler) GenerateSetupTokenURL(c *gin.Context) {
 	var req GenerateAuthURLRequest
@@ -2318,7 +2332,11 @@ func (h *OAuthHandler) ExchangeCode(c *gin.Context) {
 	response.Success(c, tokenInfo)
 }
 
-// ExchangeSetupTokenCode exchanges authorization code for setup token
+// ExchangeSetupTokenCode exchanges authorization code for setup token.
+//
+// Legacy: kept for API compatibility with older clients; see
+// GenerateSetupTokenURL. Tokens minted here carry expires_at/refresh_token but
+// are still long-lived credentials, so they are excluded from refreshing.
 // POST /api/v1/admin/accounts/exchange-setup-token-code
 func (h *OAuthHandler) ExchangeSetupTokenCode(c *gin.Context) {
 	var req ExchangeCodeRequest
@@ -2368,7 +2386,10 @@ func (h *OAuthHandler) CookieAuth(c *gin.Context) {
 	response.Success(c, tokenInfo)
 }
 
-// SetupTokenCookieAuth performs OAuth using sessionKey for setup token (inference only)
+// SetupTokenCookieAuth performs OAuth using sessionKey for setup token (inference only).
+//
+// Legacy: kept for API compatibility with older clients. The admin UI no longer
+// accepts a claude.ai sessionKey for Setup Token accounts.
 // POST /api/v1/admin/accounts/setup-token-cookie-auth
 func (h *OAuthHandler) SetupTokenCookieAuth(c *gin.Context) {
 	var req CookieAuthRequest

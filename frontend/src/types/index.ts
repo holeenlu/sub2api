@@ -1213,6 +1213,10 @@ export interface Account {
   group_ids?: number[] // Groups this account belongs to
   groups?: Group[] // Preloaded group objects
 
+  // 后端下发的能力位：账号的凭据是否参与 OAuth 续期（直接导入的 setup-token 没有
+  // refresh_token，恒为 false）。前端据此决定是否显示"刷新 token"入口。
+  can_refresh_token?: boolean
+
   // Rate limit & scheduling fields
   schedulable: boolean
   rate_limited_at: string | null

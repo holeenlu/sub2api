@@ -552,6 +552,41 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
+	return s.updateAccount(ctx, id, input, MergePreservingSensitiveCreds)
+}
+
+// ApplyOAuthCredentials 把一次授权换发的整套 token 落到账号上。
+//
+// 与 UpdateAccount 只差凭据的合并语义：编辑账号用"缺失即保留"（前端表单已脱敏，
+// 不会带回 token），换发凭据用"整套替换"——否则把一个 OAuth 账号重新授权成直接导入
+// 的 setup-token 时，旧 refresh_token 会留下、expires_at 会被删掉，账号同时持有长期
+// token 与一套不属于它的历史刷新字段。虽然刷新入口也会按 setup-token 类型拒绝，落库时
+// 仍应清掉这些字段，避免错误状态继续传播。model_mapping 等非 token 键原样保留。
+func (s *adminServiceImpl) ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error) {
+	if input == nil || len(input.Credentials) == 0 {
+		return nil, infraerrors.BadRequest("INVALID_OAUTH_CREDENTIALS", "oauth credentials must not be empty")
+	}
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !account.IsOAuth() {
+		return nil, infraerrors.BadRequest("NOT_OAUTH", "cannot apply oauth credentials to non-OAuth account")
+	}
+	return s.updateAccount(ctx, id, &UpdateAccountInput{
+		Type:        input.Type,
+		Credentials: input.Credentials,
+	}, ReplaceOAuthTokenCredentials)
+}
+
+// updateAccount 是 UpdateAccount / ApplyOAuthCredentials 的公共实现；
+// mergeCredentials 决定 input.Credentials 如何合并进已有凭据。
+func (s *adminServiceImpl) updateAccount(
+	ctx context.Context,
+	id int64,
+	input *UpdateAccountInput,
+	mergeCredentials func(existing, incoming map[string]any) map[string]any,
+) (*Account, error) {
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -621,9 +656,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if account.IsCredentialShadow() && input.Credentials != nil {
 		account.Credentials = sanitizeSparkShadowCredentials(input.Credentials)
 	} else if len(input.Credentials) > 0 {
-		// 敏感子键采用"incoming 没提供就保留"的合并语义：前端响应已脱敏，
-		// 全对象 PUT 编辑时不会再带回 token，避免覆盖时清空已有凭证。
-		account.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+		// 编辑账号：敏感子键采用"incoming 没提供就保留"的合并语义（前端响应已脱敏，
+		// 全对象 PUT 时不会再带回 token）；换发凭据：整套 token 字段替换。
+		account.Credentials = mergeCredentials(account.Credentials, input.Credentials)
 		// 校验并规范化请求头覆写配置（header 名小写化、格式检查）
 		if err := NormalizeHeaderOverrideCredentials(account.Credentials); err != nil {
 			return nil, err

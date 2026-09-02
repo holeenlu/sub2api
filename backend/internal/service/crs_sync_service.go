@@ -1411,7 +1411,7 @@ func crsExportAccounts(ctx context.Context, client *http.Client, baseURL, adminT
 // refreshOAuthToken attempts to refresh OAuth token for a synced account
 // Returns updated credentials or nil if refresh failed/not applicable
 func (s *CRSSyncService) refreshOAuthToken(ctx context.Context, account *Account) map[string]any {
-	if account.Type != AccountTypeOAuth {
+	if !account.CanRefreshToken() {
 		return nil
 	}
 

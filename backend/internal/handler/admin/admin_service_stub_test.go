@@ -33,6 +33,8 @@ type stubAdminService struct {
 	createSparkShadowErr                error
 	updateAccountErr                    error
 	lastUpdateAccountInput              *service.UpdateAccountInput
+	applyOAuthCredentialsCalls          int
+	lastApplyOAuthCredentialsInput      *service.ApplyOAuthCredentialsInput
 	bulkUpdateAccountErr                error
 	lastBulkUpdateAccountInput          *service.BulkUpdateAccountsInput
 	getAccountResult                    *service.Account
@@ -513,6 +515,16 @@ func (s *stubAdminService) UpdateAccount(ctx context.Context, id int64, input *s
 func (s *stubAdminService) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
 	s.updateAccountExtraCalls++
 	return nil
+}
+
+func (s *stubAdminService) ApplyOAuthCredentials(ctx context.Context, id int64, input *service.ApplyOAuthCredentialsInput) (*service.Account, error) {
+	s.applyOAuthCredentialsCalls++
+	s.lastApplyOAuthCredentialsInput = input
+	if s.updateAccountErr != nil {
+		return nil, s.updateAccountErr
+	}
+	account := service.Account{ID: id, Name: "account", Type: input.Type, Status: service.StatusActive}
+	return &account, nil
 }
 
 func (s *stubAdminService) DeleteAccount(ctx context.Context, id int64) error {
