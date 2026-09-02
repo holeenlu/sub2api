@@ -54,16 +54,25 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	}
 
 	diag := ModelAvailabilityDiagnosis{}
+	var cooldown modelCapableCooldownTracker
 	for i := range accounts {
+		acc := &accounts[i]
 		diag.HasAccountsInPool = true
 		// Mirrors the per-candidate filter used during account selection
 		// (openai_account_scheduler.isAccountRequestCompatible): empty
 		// model_mapping accepts everything; otherwise the explicit / wildcard
 		// mapping must match.
-		if accounts[i].IsModelSupported(requestedModel) {
-			diag.HasModelSupport = true
-			return diag
+		if !acc.IsModelSupported(requestedModel) {
+			continue
 		}
+		diag.HasModelSupport = true
+		// 与通用诊断器同一规则：看完整个池子，且冷却结束后仍不可调度的账号
+		// 不参与全池冷却判定。
+		if !acc.isSchedulableIgnoringRateLimit() {
+			continue
+		}
+		cooldown.observe(accountRateLimitCooldownEnd(ctx, acc, requestedModel))
 	}
+	cooldown.apply(&diag)
 	return diag
 }
