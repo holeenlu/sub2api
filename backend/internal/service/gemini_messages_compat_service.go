@@ -1821,11 +1821,22 @@ var (
 	retryInRegex             = regexp.MustCompile(`Please retry in ([0-9.]+)s`)
 )
 
+// sanitizeUpstreamErrorMessage 擦除上游错误文本里可能泄露的凭据。该函数是所有
+// 上游错误出口的必经之路（客户端响应与 ops 落库都走它），所以两类来源都要覆盖：
+//  1. URL query 里的 ?key= / ?access_token= 等——Go 的 *url.Error 会回填完整 URL；
+//  2. 响应体文本里直接出现的 key 字面量，例如上游 401 常见的
+//     `Incorrect API key provided: sk-ant-xxx`。
+//
+// 第 2 类与监控路径的 sanitizeErrorMessage 共用 credentialLiteralPatterns。
 func sanitizeUpstreamErrorMessage(msg string) string {
 	if msg == "" {
 		return msg
 	}
-	return sensitiveQueryParamRegex.ReplaceAllString(msg, `$1***`)
+	msg = sensitiveQueryParamRegex.ReplaceAllString(msg, `$1***`)
+	for _, p := range credentialLiteralPatterns {
+		msg = p.pattern.ReplaceAllString(msg, p.replace)
+	}
+	return msg
 }
 
 func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, account *Account, upstreamStatus int, upstreamRequestID string, body []byte) error {

@@ -281,8 +281,16 @@ func sanitizeStreamError(err error) string {
 
 // ExtractUpstreamErrorMessage 从上游响应体中提取错误消息
 // 支持 Claude 风格的错误格式：{"type":"error","error":{"type":"...","message":"..."}}
+// ExtractUpstreamErrorMessage 从上游错误响应体里取出可读消息，并在返回前脱敏。
+//
+// 这个导出版本的全部调用方都在对客路径上（错误透传规则、failover 耗尽响应），
+// 上游 401 的响应体常把 key 片段原样回显，透传规则打开 PassthroughBody 时会把它
+// 直接写给客户端。脱敏必须内建在这里而不是交给调用方逐处记得加——ops 落库前的
+// 脱敏补不了已经发出去的响应。
+//
+// 服务内部要拿未脱敏原文（例如判定上游错误类型）请用 extractUpstreamErrorMessage。
 func ExtractUpstreamErrorMessage(body []byte) string {
-	return extractUpstreamErrorMessage(body)
+	return sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(body))
 }
 
 func extractUpstreamErrorMessage(body []byte) string {
