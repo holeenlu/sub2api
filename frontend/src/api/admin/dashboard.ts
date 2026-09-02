@@ -13,6 +13,7 @@ import type {
   UserUsageTrendPoint,
   UserSpendingRankingResponse,
   UserBreakdownItem,
+  APIKeyBreakdownItem,
   UsageRequestType
 } from '@/types'
 
@@ -193,6 +194,23 @@ export interface UserBreakdownResponse {
 
 export async function getUserBreakdown(params: UserBreakdownParams): Promise<UserBreakdownResponse> {
   const { data } = await apiClient.get<UserBreakdownResponse>('/admin/dashboard/user-breakdown', {
+    params
+  })
+  return data
+}
+
+export interface APIKeyBreakdownResponse {
+  api_keys: APIKeyBreakdownItem[]
+  start_date: string
+  end_date: string
+}
+
+/**
+ * API Key 用量排行。筛选参数与 user-breakdown 完全一致（后端共用同一个解析器），
+ * 因此直接复用 UserBreakdownParams。
+ */
+export async function getAPIKeyBreakdown(params: UserBreakdownParams): Promise<APIKeyBreakdownResponse> {
+  const { data } = await apiClient.get<APIKeyBreakdownResponse>('/admin/dashboard/api-key-breakdown', {
     params
   })
   return data

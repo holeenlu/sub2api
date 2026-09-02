@@ -213,6 +213,24 @@ describe('UsageFilters — user search dropdown', () => {
     expect(wrapper.text()).not.toContain('a@test.com')
   })
 
+  it('setApiKeyKeyword backfills the key name and cancels a pending key search', async () => {
+    mockSearchApiKeys.mockReset().mockResolvedValue([{ id: 1, name: 'stale-key' }])
+
+    const wrapper = mountFilters()
+    const apiKeyInput = wrapper.find('input[placeholder="Search API key..."]')
+    await apiKeyInput.trigger('focus')
+    await apiKeyInput.setValue('sta')
+
+    // 下钻回填发生在 300ms 防抖到期之前
+    ;(wrapper.vm as unknown as { setApiKeyKeyword: (name: string) => void }).setApiKeyKeyword('prod-key')
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+
+    expect(mockSearchApiKeys).not.toHaveBeenCalled()
+    expect((apiKeyInput.element as HTMLInputElement).value).toBe('prod-key')
+    expect(wrapper.text()).not.toContain('stale-key')
+  })
+
   it('does not restore stale user results after the search is cleared', async () => {
     const pendingSearch = deferred<Array<{ id: number; email: string; deleted: boolean }>>()
     mockSearchUsers.mockImplementationOnce(() => pendingSearch.promise)

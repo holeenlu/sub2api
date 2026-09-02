@@ -1971,6 +1971,25 @@ export interface UserBreakdownItem {
   account_cost: number
 }
 
+/** 与 UserBreakdownItem 同构，聚合维度换成 api_key_id。 */
+export interface APIKeyBreakdownItem {
+  api_key_id: number
+  /** Key 已被物理删除时为空 */
+  key_name: string
+  /** Key 已软删除或已不存在；历史用量仍会统计进来，只是标记出来 */
+  key_deleted: boolean
+  user_id: number
+  email: string
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  cache_tokens: number
+  total_tokens: number
+  cost: number
+  actual_cost: number
+  account_cost: number
+}
+
 export interface UserUsageTrendPoint {
   date: string
   user_id: number

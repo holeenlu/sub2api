@@ -557,6 +557,15 @@ export default {
       clickToViewBalance: 'Click to view balance history',
       failedToLoadUser: 'Failed to load user info',
       userDeletedBadge: 'Deleted',
+      keyRanking: {
+        subtitle: 'Per-API-key token usage for the current filters and time range',
+        rowHint: "Click to view this key's usage details",
+        keyCount: '{count} keys',
+        columns: {
+          key: 'API Key',
+          user: 'Owner'
+        }
+      },
       tokenRanking: {
         subtitle: 'Per-user token usage for the current filters and time range',
         rowHint: "Click to view this user's usage details",

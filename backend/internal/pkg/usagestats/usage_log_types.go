@@ -178,7 +178,30 @@ type UserBreakdownItem struct {
 	AccountCost  float64 `json:"account_cost"`  // 账号成本
 }
 
+// APIKeyBreakdownItem represents per-API-key usage breakdown within a dimension.
+// 与 UserBreakdownItem 同构，聚合维度换成 api_key_id：一个用户手里多把 Key 分给不同
+// 项目时，用户排行定位不到具体是哪把在消耗。
+type APIKeyBreakdownItem struct {
+	APIKeyID int64  `json:"api_key_id"`
+	KeyName  string `json:"key_name"` // Key 已被物理删除时为空
+	// KeyDeleted 表示这把 Key 已不可用（软删除或已物理删除）。历史用量仍要能看到，
+	// 所以查询不过滤 deleted_at，只在这里打标；与错误请求 tab 的 keyDeleted 惯例一致。
+	KeyDeleted bool   `json:"key_deleted"`
+	UserID     int64  `json:"user_id"` // Key 归属用户，取自 api_keys.user_id
+	Email      string `json:"email"`
+	// 以下指标列与 UserBreakdownItem 完全一致，排序键也共用同一份 allowlist。
+	Requests     int64   `json:"requests"`
+	InputTokens  int64   `json:"input_tokens"`  // 输入 token 累计
+	OutputTokens int64   `json:"output_tokens"` // 输出 token 累计
+	CacheTokens  int64   `json:"cache_tokens"`  // 缓存创建 + 读取 token 累计
+	TotalTokens  int64   `json:"total_tokens"`  // 输入+输出+缓存 token 累计
+	Cost         float64 `json:"cost"`          // 标准计费
+	ActualCost   float64 `json:"actual_cost"`   // 实际扣除
+	AccountCost  float64 `json:"account_cost"`  // 账号成本
+}
+
 // UserBreakdownDimension specifies the dimension to filter for user breakdown.
+// API Key 排行复用同一套筛选条件，不另建类型。
 type UserBreakdownDimension struct {
 	GroupID      int64  // filter by group_id (>0 to enable)
 	Model        string // filter by model name (non-empty to enable)

@@ -613,26 +613,10 @@ func (r *usageLogRepository) getGroupStatsWithFilters(ctx context.Context, start
 	return results, nil
 }
 
-// GetUserBreakdownStats returns per-user usage breakdown within a specific dimension.
-func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) (results []usagestats.UserBreakdownItem, err error) {
-	query := `
-		SELECT
-			COALESCE(ul.user_id, 0) as user_id,
-			COALESCE(u.email, '') as email,
-			COUNT(*) as requests,
-			COALESCE(SUM(ul.input_tokens), 0) as input_tokens,
-			COALESCE(SUM(ul.output_tokens), 0) as output_tokens,
-			COALESCE(SUM(ul.cache_creation_tokens + ul.cache_read_tokens), 0) as cache_tokens,
-			COALESCE(SUM(ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens), 0) as total_tokens,
-			COALESCE(SUM(ul.total_cost), 0) as cost,
-			COALESCE(SUM(ul.actual_cost), 0) as actual_cost,
-			COALESCE(SUM(COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1)), 0) as account_cost
-		FROM usage_logs ul
-		LEFT JOIN users u ON u.id = ul.user_id
-		WHERE ul.created_at >= $1 AND ul.created_at < $2
-	`
-	args := []any{startTime, endTime}
-
+// appendBreakdownDimensionFilters 把 UserBreakdownDimension 的筛选条件拼进 WHERE 子句。
+// 所有排行类查询（按用户、按 API Key 聚合）共用它，保证筛选语义永远一致。
+// 表别名固定为 ul。
+func appendBreakdownDimensionFilters(query string, args []any, dim usagestats.UserBreakdownDimension) (string, []any) {
 	if dim.GroupID > 0 {
 		query += fmt.Sprintf(" AND ul.group_id = $%d", len(args)+1)
 		args = append(args, dim.GroupID)
@@ -672,14 +656,41 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 		query += fmt.Sprintf(" AND ul.billing_type = $%d", len(args)+1)
 		args = append(args, *dim.BillingType)
 	}
+	return query, args
+}
 
-	// ORDER BY 列来自固定 allowlist(非用户原样字符串),避免 SQL 注入。
-	orderBy := "actual_cost"
-	switch dim.SortBy {
+// resolveBreakdownOrderBy 把排序列收敛到固定 allowlist(非用户原样字符串),避免 SQL 注入。
+// 非法值静默回退 actual_cost，与 handler 层「sort_by 由 repo allowlist 兜底」的约定一致。
+func resolveBreakdownOrderBy(sortBy string) string {
+	switch sortBy {
 	case "total_tokens", "input_tokens", "output_tokens", "cache_tokens", "requests", "cost", "actual_cost":
-		orderBy = dim.SortBy
+		return sortBy
 	}
-	query += " GROUP BY ul.user_id, u.email ORDER BY " + orderBy + " DESC"
+	return "actual_cost"
+}
+
+// GetUserBreakdownStats returns per-user usage breakdown within a specific dimension.
+func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) (results []usagestats.UserBreakdownItem, err error) {
+	query := `
+		SELECT
+			COALESCE(ul.user_id, 0) as user_id,
+			COALESCE(u.email, '') as email,
+			COUNT(*) as requests,
+			COALESCE(SUM(ul.input_tokens), 0) as input_tokens,
+			COALESCE(SUM(ul.output_tokens), 0) as output_tokens,
+			COALESCE(SUM(ul.cache_creation_tokens + ul.cache_read_tokens), 0) as cache_tokens,
+			COALESCE(SUM(ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens), 0) as total_tokens,
+			COALESCE(SUM(ul.total_cost), 0) as cost,
+			COALESCE(SUM(ul.actual_cost), 0) as actual_cost,
+			COALESCE(SUM(COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1)), 0) as account_cost
+		FROM usage_logs ul
+		LEFT JOIN users u ON u.id = ul.user_id
+		WHERE ul.created_at >= $1 AND ul.created_at < $2
+	`
+	args := []any{startTime, endTime}
+	query, args = appendBreakdownDimensionFilters(query, args, dim)
+
+	query += " GROUP BY ul.user_id, u.email ORDER BY " + resolveBreakdownOrderBy(dim.SortBy) + " DESC"
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
@@ -699,6 +710,83 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 	for rows.Next() {
 		var row usagestats.UserBreakdownItem
 		if err := rows.Scan(
+			&row.UserID,
+			&row.Email,
+			&row.Requests,
+			&row.InputTokens,
+			&row.OutputTokens,
+			&row.CacheTokens,
+			&row.TotalTokens,
+			&row.Cost,
+			&row.ActualCost,
+			&row.AccountCost,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+// GetAPIKeyBreakdownStats returns per-API-key usage breakdown within a specific dimension.
+//
+// 与 GetUserBreakdownStats 同构，只按 api_key_id 聚合；归属用户取自 api_keys.user_id，
+// 不参与分组，避免同一把 Key 因 usage_logs.user_id 不一致被拆成多行。
+//
+// api_keys 是 LEFT JOIN 且不过滤 deleted_at：Key 删了它的历史用量还在 usage_logs 里，
+// 过滤掉会让排行凭空少一截且看不到名字。软删除的 Key 照常返回名字并置 key_deleted；
+// 若 Key 行已不存在（k.id IS NULL），同样置 key_deleted，归属用户回退到日志里的 user_id。
+func (r *usageLogRepository) GetAPIKeyBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) (results []usagestats.APIKeyBreakdownItem, err error) {
+	query := `
+		SELECT
+			COALESCE(ul.api_key_id, 0) as api_key_id,
+			COALESCE(k.name, '') as key_name,
+			(k.id IS NULL OR k.deleted_at IS NOT NULL) as key_deleted,
+			COALESCE(k.user_id, MAX(ul.user_id), 0) as user_id,
+			COALESCE(u.email, '') as email,
+			COUNT(*) as requests,
+			COALESCE(SUM(ul.input_tokens), 0) as input_tokens,
+			COALESCE(SUM(ul.output_tokens), 0) as output_tokens,
+			COALESCE(SUM(ul.cache_creation_tokens + ul.cache_read_tokens), 0) as cache_tokens,
+			COALESCE(SUM(ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens), 0) as total_tokens,
+			COALESCE(SUM(ul.total_cost), 0) as cost,
+			COALESCE(SUM(ul.actual_cost), 0) as actual_cost,
+			COALESCE(SUM(COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1)), 0) as account_cost
+		FROM usage_logs ul
+		LEFT JOIN api_keys k ON k.id = ul.api_key_id
+		LEFT JOIN users u ON u.id = k.user_id
+		WHERE ul.created_at >= $1 AND ul.created_at < $2
+	`
+	args := []any{startTime, endTime}
+	query, args = appendBreakdownDimensionFilters(query, args, dim)
+
+	query += " GROUP BY ul.api_key_id, k.id, k.name, k.deleted_at, k.user_id, u.email ORDER BY " +
+		resolveBreakdownOrderBy(dim.SortBy) + " DESC"
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+			results = nil
+		}
+	}()
+
+	results = make([]usagestats.APIKeyBreakdownItem, 0)
+	for rows.Next() {
+		var row usagestats.APIKeyBreakdownItem
+		if err := rows.Scan(
+			&row.APIKeyID,
+			&row.KeyName,
+			&row.KeyDeleted,
 			&row.UserID,
 			&row.Email,
 			&row.Requests,
