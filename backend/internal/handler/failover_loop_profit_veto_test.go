@@ -66,7 +66,7 @@ func runProfitVetoLoop(t *testing.T, fs *FailoverState, pool []int64, vetoed map
 // 「选号 → 否决 → 排除 → 选号耗尽 → 清空排除 → 睡 2s → 选号」会无限循环，
 // 因为利润否决不推进 SwitchCount，退避条件永远成立。
 func TestProfitVetoAfter503DoesNotLivelock(t *testing.T) {
-	fs := NewFailoverState(10, false)
+	fs := NewFailoverState(10, false, nil)
 	// 已经历一次真实 503（Antigravity 单账号分组 MODEL_CAPACITY_EXHAUSTED 是设计内路径）。
 	fs.LastFailoverErr = newTestFailoverErr(503, false, false)
 	fs.SwitchCount = 1
@@ -85,7 +85,7 @@ func TestProfitVetoAfter503DoesNotLivelock(t *testing.T) {
 // 503 退避语义：排除列表里仍有非利润否决的账号时，退避照常清空并重试，
 // 只是被利润门否决的账号不再复活。
 func TestProfitVetoKeepsBackoffUsefulForHealthyAccount(t *testing.T) {
-	fs := NewFailoverState(10, false)
+	fs := NewFailoverState(10, false, nil)
 	fs.LastFailoverErr = newTestFailoverErr(503, false, false)
 	fs.SwitchCount = 1
 	// 账号 1 因真实 503 被排除；账号 2 会被利润门否决。
@@ -102,7 +102,7 @@ func TestProfitVetoKeepsBackoffUsefulForHealthyAccount(t *testing.T) {
 // TestProfitVetoAttemptsCapped 钉死没有 503 参与时，大分组整池越线也会在
 // 常数步内终止，而不是把整池逐个选一遍。
 func TestProfitVetoAttemptsCapped(t *testing.T) {
-	fs := NewFailoverState(10, false)
+	fs := NewFailoverState(10, false, nil)
 	pool := make([]int64, 0, 64)
 	vetoed := make(map[int64]bool, 64)
 	for id := int64(1); id <= 64; id++ {
@@ -120,7 +120,7 @@ func TestProfitVetoAttemptsCapped(t *testing.T) {
 // TestRecordProfitVetoExcludesAccount 钉死 RecordProfitVeto 仍然把账号加入
 // 调度排除列表（选号入参用的就是 FailedAccountIDs）。
 func TestRecordProfitVetoExcludesAccount(t *testing.T) {
-	fs := NewFailoverState(10, false)
+	fs := NewFailoverState(10, false, nil)
 	require.Equal(t, FailoverContinue, fs.RecordProfitVeto(42))
 	require.Contains(t, fs.FailedAccountIDs, int64(42))
 	require.Equal(t, 1, fs.ProfitVetoCount())
@@ -129,7 +129,7 @@ func TestRecordProfitVetoExcludesAccount(t *testing.T) {
 // TestHandleSelectionExhaustedUnaffectedWithoutProfitVeto 钉死未启用利润控制的
 // 请求（无任何利润否决）走的仍是原有退避语义：清空排除列表并重试。
 func TestHandleSelectionExhaustedUnaffectedWithoutProfitVeto(t *testing.T) {
-	fs := NewFailoverState(3, false)
+	fs := NewFailoverState(3, false, nil)
 	fs.LastFailoverErr = newTestFailoverErr(503, false, false)
 	fs.SwitchCount = 1
 	fs.FailedAccountIDs[100] = struct{}{}

@@ -729,8 +729,25 @@ type UpstreamFailoverError struct {
 }
 
 func (e *UpstreamFailoverError) Error() string {
-	if e != nil && e.Stage == GatewayFailureStageAccountAuth {
+	if e == nil {
+		return "upstream failover error"
+	}
+	if e.Stage == GatewayFailureStageAccountAuth {
+		message := strings.TrimSpace(e.ClientMessage)
+		if message == "" {
+			message = strings.TrimSpace(extractUpstreamErrorMessage(e.ResponseBody))
+		}
+		if message != "" {
+			return fmt.Sprintf("credential failure: %s: %s (failover)", e.Reason, sanitizeUpstreamErrorMessage(message))
+		}
 		return fmt.Sprintf("credential failure: %s (failover)", e.Reason)
+	}
+	message := strings.TrimSpace(extractUpstreamErrorMessage(e.ResponseBody))
+	if message != "" {
+		return fmt.Sprintf("upstream error: %d (failover): %s", e.StatusCode, sanitizeUpstreamErrorMessage(message))
+	}
+	if strings.TrimSpace(e.ClientMessage) != "" {
+		return fmt.Sprintf("upstream error: %d (failover): %s", e.StatusCode, sanitizeUpstreamErrorMessage(e.ClientMessage))
 	}
 	return fmt.Sprintf("upstream error: %d (failover)", e.StatusCode)
 }
