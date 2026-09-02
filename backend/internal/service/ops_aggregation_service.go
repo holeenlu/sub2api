@@ -155,6 +155,7 @@ func (s *OpsAggregationService) aggregateHourly() {
 			return
 		}
 		if !s.cfg.Ops.Aggregation.Enabled {
+			recordOpsJobSkipped(s.opsRepo, opsAggHourlyJobName, opsAggHourlyInterval, "aggregation disabled by config")
 			return
 		}
 	}
@@ -201,6 +202,7 @@ func (s *OpsAggregationService) aggregateHourly() {
 
 	start = utcFloorToHour(start)
 	if !start.Before(end) {
+		recordOpsJobSkipped(s.opsRepo, opsAggHourlyJobName, opsAggHourlyInterval, "no closed hourly bucket to aggregate")
 		return
 	}
 
@@ -214,36 +216,13 @@ func (s *OpsAggregationService) aggregateHourly() {
 		}
 	}
 
-	finishedAt := time.Now().UTC()
-	durationMs := finishedAt.Sub(startedAt).Milliseconds()
-	dur := durationMs
-
+	elapsed := time.Since(startedAt)
 	if aggErr != nil {
-		msg := truncateString(aggErr.Error(), 2048)
-		errAt := finishedAt
-		hbCtx, hbCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer hbCancel()
-		_ = s.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{
-			JobName:        opsAggHourlyJobName,
-			LastRunAt:      &runAt,
-			LastErrorAt:    &errAt,
-			LastError:      &msg,
-			LastDurationMs: &dur,
-		})
+		recordOpsJobError(s.opsRepo, opsAggHourlyJobName, runAt, elapsed, opsAggHourlyInterval, aggErr)
 		return
 	}
-
-	successAt := finishedAt
-	hbCtx, hbCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer hbCancel()
-	result := truncateString(fmt.Sprintf("window=%s..%s", start.Format(time.RFC3339), end.Format(time.RFC3339)), 2048)
-	_ = s.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{
-		JobName:        opsAggHourlyJobName,
-		LastRunAt:      &runAt,
-		LastSuccessAt:  &successAt,
-		LastDurationMs: &dur,
-		LastResult:     &result,
-	})
+	recordOpsJobSuccess(s.opsRepo, opsAggHourlyJobName, runAt, elapsed, opsAggHourlyInterval,
+		fmt.Sprintf("window=%s..%s", start.Format(time.RFC3339), end.Format(time.RFC3339)))
 }
 
 func (s *OpsAggregationService) aggregateDaily() {
@@ -255,6 +234,7 @@ func (s *OpsAggregationService) aggregateDaily() {
 			return
 		}
 		if !s.cfg.Ops.Aggregation.Enabled {
+			recordOpsJobSkipped(s.opsRepo, opsAggDailyJobName, opsAggDailyInterval, "aggregation disabled by config")
 			return
 		}
 	}
@@ -299,6 +279,7 @@ func (s *OpsAggregationService) aggregateDaily() {
 
 	start = utcFloorToDay(start)
 	if !start.Before(end) {
+		recordOpsJobSkipped(s.opsRepo, opsAggDailyJobName, opsAggDailyInterval, "no closed daily bucket to aggregate")
 		return
 	}
 
@@ -312,36 +293,13 @@ func (s *OpsAggregationService) aggregateDaily() {
 		}
 	}
 
-	finishedAt := time.Now().UTC()
-	durationMs := finishedAt.Sub(startedAt).Milliseconds()
-	dur := durationMs
-
+	elapsed := time.Since(startedAt)
 	if aggErr != nil {
-		msg := truncateString(aggErr.Error(), 2048)
-		errAt := finishedAt
-		hbCtx, hbCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer hbCancel()
-		_ = s.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{
-			JobName:        opsAggDailyJobName,
-			LastRunAt:      &runAt,
-			LastErrorAt:    &errAt,
-			LastError:      &msg,
-			LastDurationMs: &dur,
-		})
+		recordOpsJobError(s.opsRepo, opsAggDailyJobName, runAt, elapsed, opsAggDailyInterval, aggErr)
 		return
 	}
-
-	successAt := finishedAt
-	hbCtx, hbCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer hbCancel()
-	result := truncateString(fmt.Sprintf("window=%s..%s", start.Format(time.RFC3339), end.Format(time.RFC3339)), 2048)
-	_ = s.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{
-		JobName:        opsAggDailyJobName,
-		LastRunAt:      &runAt,
-		LastSuccessAt:  &successAt,
-		LastDurationMs: &dur,
-		LastResult:     &result,
-	})
+	recordOpsJobSuccess(s.opsRepo, opsAggDailyJobName, runAt, elapsed, opsAggDailyInterval,
+		fmt.Sprintf("window=%s..%s", start.Format(time.RFC3339), end.Format(time.RFC3339)))
 }
 
 func (s *OpsAggregationService) isMonitoringEnabled(ctx context.Context) bool {

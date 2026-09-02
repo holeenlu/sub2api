@@ -12,6 +12,14 @@ import type { OpsRequestDetailsPreset } from './OpsRequestDetailsModal.vue'
 import { useAdminSettingsStore } from '@/stores'
 import { formatNumber } from '@/utils/format'
 import { formatMemorySizeMB } from '../utils/opsFormatters'
+import {
+  getDiagnosisErrorRateLevel,
+  getDiagnosisUpstreamErrorRateLevel,
+  getSLAThresholdLevel as resolveSLAThresholdLevel,
+  getTTFTThresholdLevel as resolveTTFTThresholdLevel,
+  getUpperBoundThresholdLevel,
+  type ThresholdLevel
+} from '../utils/opsThresholds'
 
 type RealtimeWindow = '1min' | '5min' | '30min' | '1h'
 
@@ -216,48 +224,22 @@ function openErrorDetails(kind: 'request' | 'upstream') {
 }
 
 // --- Threshold checking helpers ---
-type ThresholdLevel = 'normal' | 'warning' | 'critical'
+// 判级逻辑统一在 utils/opsThresholds，卡片与诊断面板共用同一口径。
 
 function getSLAThresholdLevel(slaPercent: number | null): ThresholdLevel {
-  if (slaPercent == null) return 'normal'
-  const threshold = props.thresholds?.sla_percent_min
-  if (threshold == null) return 'normal'
-
-  // SLA is "higher is better":
-  // - below threshold => critical
-  // - within +0.1% buffer => warning
-  const warningBuffer = 0.1
-
-  if (slaPercent < threshold) return 'critical'
-  if (slaPercent < threshold + warningBuffer) return 'warning'
-  return 'normal'
+  return resolveSLAThresholdLevel(slaPercent, props.thresholds?.sla_percent_min)
 }
 
 function getTTFTThresholdLevel(ttftMs: number | null): ThresholdLevel {
-  if (ttftMs == null) return 'normal'
-  const threshold = props.thresholds?.ttft_p99_ms_max
-  if (threshold == null) return 'normal'
-  if (ttftMs >= threshold) return 'critical'
-  if (ttftMs >= threshold * 0.8) return 'warning'
-  return 'normal'
+  return resolveTTFTThresholdLevel(ttftMs, props.thresholds?.ttft_p99_ms_max)
 }
 
 function getRequestErrorRateThresholdLevel(errorRatePercent: number | null): ThresholdLevel {
-  if (errorRatePercent == null) return 'normal'
-  const threshold = props.thresholds?.request_error_rate_percent_max
-  if (threshold == null) return 'normal'
-  if (errorRatePercent >= threshold) return 'critical'
-  if (errorRatePercent >= threshold * 0.8) return 'warning'
-  return 'normal'
+  return getUpperBoundThresholdLevel(errorRatePercent, props.thresholds?.request_error_rate_percent_max)
 }
 
 function getUpstreamErrorRateThresholdLevel(upstreamErrorRatePercent: number | null): ThresholdLevel {
-  if (upstreamErrorRatePercent == null) return 'normal'
-  const threshold = props.thresholds?.upstream_error_rate_percent_max
-  if (threshold == null) return 'normal'
-  if (upstreamErrorRatePercent >= threshold) return 'critical'
-  if (upstreamErrorRatePercent >= threshold * 0.8) return 'warning'
-  return 'normal'
+  return getUpperBoundThresholdLevel(upstreamErrorRatePercent, props.thresholds?.upstream_error_rate_percent_max)
 }
 
 function getThresholdColorClass(level: ThresholdLevel): string {
@@ -436,6 +418,30 @@ const healthScoreValue = computed<number | null>(() => {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 })
 
+const healthBreakdown = computed(() => overview.value?.health_score_breakdown ?? null)
+
+const healthBreakdownLines = computed<string[]>(() => {
+  const b = healthBreakdown.value
+  if (!b) return []
+  const pct = (v: number) => `${Math.round(v)}`
+  const lines = [
+    t('admin.ops.healthBreakdown.business', { score: pct(b.business) }),
+    t('admin.ops.healthBreakdown.errorRate', { score: pct(b.error_rate) }),
+    t('admin.ops.healthBreakdown.ttft', { score: pct(b.ttft), threshold: Math.round(b.ttft_full_score_ms) }),
+    t('admin.ops.healthBreakdown.infra', { score: pct(b.infra) }),
+    t('admin.ops.healthBreakdown.storage', { score: pct(b.storage) }),
+    t('admin.ops.healthBreakdown.compute', { score: pct(b.compute) }),
+    t('admin.ops.healthBreakdown.jobs', { score: pct(b.jobs) })
+  ]
+  if (b.failed_jobs?.length) {
+    lines.push(t('admin.ops.healthBreakdown.failedJobs', { jobs: b.failed_jobs.join(', ') }))
+  }
+  if (b.stale_jobs?.length) {
+    lines.push(t('admin.ops.healthBreakdown.staleJobs', { jobs: b.stale_jobs.join(', ') }))
+  }
+  return lines
+})
+
 const healthScoreColor = computed(() => {
   if (isSystemIdle.value) return '#9ca3af' // gray-400
   const score = healthScoreValue.value
@@ -542,8 +548,8 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
     }
   }
 
-  const ttftP99 = ov.ttft?.p99_ms ?? 0
-  if (ttftP99 > 500) {
+  const ttftP99 = ov.ttft?.p99_ms
+  if (ttftP99 != null && getTTFTThresholdLevel(ttftP99) === 'critical') {
     report.push({
       type: 'warning',
       message: t('admin.ops.diagnosis.ttftHigh', { ttft: ttftP99.toFixed(0) }),
@@ -552,16 +558,17 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
     })
   }
 
-  // Error rate diagnostics (adjusted thresholds)
+  // Error rate diagnostics: 与后端评分刻度对齐（<=1% 满分），避免"诊断说偏高、评分给满分"。
   const upstreamRatePct = (ov.upstream_error_rate ?? 0) * 100
-  if (upstreamRatePct > 5) {
+  const upstreamLevel = getDiagnosisUpstreamErrorRateLevel(upstreamRatePct)
+  if (upstreamLevel === 'critical') {
     report.push({
       type: 'critical',
       message: t('admin.ops.diagnosis.upstreamCritical', { rate: upstreamRatePct.toFixed(2) }),
       impact: t('admin.ops.diagnosis.upstreamCriticalImpact'),
       action: t('admin.ops.diagnosis.upstreamCriticalAction')
     })
-  } else if (upstreamRatePct > 2) {
+  } else if (upstreamLevel === 'warning') {
     report.push({
       type: 'warning',
       message: t('admin.ops.diagnosis.upstreamHigh', { rate: upstreamRatePct.toFixed(2) }),
@@ -571,14 +578,15 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
   }
 
   const errorPct = (ov.error_rate ?? 0) * 100
-  if (errorPct > 3) {
+  const errorLevel = getDiagnosisErrorRateLevel(errorPct)
+  if (errorLevel === 'critical') {
     report.push({
       type: 'critical',
       message: t('admin.ops.diagnosis.errorHigh', { rate: errorPct.toFixed(2) }),
       impact: t('admin.ops.diagnosis.errorHighImpact'),
       action: t('admin.ops.diagnosis.errorHighAction')
     })
-  } else if (errorPct > 0.5) {
+  } else if (errorLevel === 'warning') {
     report.push({
       type: 'warning',
       message: t('admin.ops.diagnosis.errorElevated', { rate: errorPct.toFixed(2) }),
@@ -805,23 +813,21 @@ const goroutineStatusClass = computed(() => {
 
 const jobHeartbeats = computed(() => overview.value?.job_heartbeats ?? [])
 
-const jobsStatus = computed<'ok' | 'warn' | 'unknown'>(() => {
-  const list = jobHeartbeats.value
-  if (!list.length) return 'unknown'
-  for (const hb of list) {
-    if (!hb) continue
-    if (hb.last_error_at && (!hb.last_success_at || hb.last_error_at > hb.last_success_at)) return 'warn'
-  }
-  return 'ok'
-})
+// 判活口径完全由后端下发：任务周期各不相同，前端没有判定失联所需的信息。
+const failedJobNames = computed(() => new Set(healthBreakdown.value?.failed_jobs ?? []))
+const staleJobNames = computed(() => new Set(healthBreakdown.value?.stale_jobs ?? []))
 
-const jobsWarnCount = computed(() => {
-  let warn = 0
-  for (const hb of jobHeartbeats.value) {
-    if (!hb) continue
-    if (hb.last_error_at && (!hb.last_success_at || hb.last_error_at > hb.last_success_at)) warn++
-  }
-  return warn
+function jobHealth(jobName: string): 'ok' | 'failed' | 'stale' {
+  if (failedJobNames.value.has(jobName)) return 'failed'
+  if (staleJobNames.value.has(jobName)) return 'stale'
+  return 'ok'
+}
+
+const jobsWarnCount = computed(() => failedJobNames.value.size + staleJobNames.value.size)
+
+const jobsStatus = computed<'ok' | 'warn' | 'unknown'>(() => {
+  if (!jobHeartbeats.value.length) return 'unknown'
+  return jobsWarnCount.value > 0 ? 'warn' : 'ok'
 })
 
 const jobsStatusLabel = computed(() => {
@@ -1087,7 +1093,12 @@ function handleToolbarRefresh() {
             <div class="mt-4 text-center" v-if="!props.fullscreen">
               <div class="flex items-center justify-center gap-1 text-xs font-medium text-gray-500">
                 {{ t('admin.ops.healthCondition') }}
-                <HelpTooltip :content="t('admin.ops.healthHelp')" />
+                <HelpTooltip>
+                  <div>{{ t('admin.ops.healthHelp') }}</div>
+                  <ul v-if="healthBreakdownLines.length" class="mt-2 space-y-0.5">
+                    <li v-for="line in healthBreakdownLines" :key="line">{{ line }}</li>
+                  </ul>
+                </HelpTooltip>
               </div>
               <div class="mt-1 text-xs font-bold" :class="healthScoreClass">
                 {{
@@ -1553,7 +1564,18 @@ function handleToolbarRefresh() {
           class="rounded-xl border border-gray-100 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
         >
           <div class="flex items-center justify-between gap-3">
-            <div class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ hb.job_name }}</div>
+            <div class="flex min-w-0 items-center gap-2">
+              <div class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ hb.job_name }}</div>
+              <span
+                v-if="jobHealth(hb.job_name) !== 'ok'"
+                class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold"
+                :class="jobHealth(hb.job_name) === 'failed'
+                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
+                  : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'"
+              >
+                {{ jobHealth(hb.job_name) === 'failed' ? t('admin.ops.jobFailed') : t('admin.ops.jobStale') }}
+              </span>
+            </div>
             <div class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
               <span v-if="hb.last_duration_ms != null" class="font-mono">{{ hb.last_duration_ms }}ms</span>
               <span>{{ formatTimeShort(hb.updated_at) }}</span>

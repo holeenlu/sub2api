@@ -163,3 +163,30 @@ func TestSetOpenAIQuotaAutoPauseSettings_VisibleImmediately(t *testing.T) {
 		t.Fatalf("after Set, Get = %+v, want {0.88, 0.77}", got)
 	}
 }
+
+// 非法 cron 必须在保存时被拒：清理服务的 Reload 错误只记日志，放过去就等于清理静默停摆。
+func TestUpdateOpsAdvancedSettings_RejectsInvalidCleanupSchedule(t *testing.T) {
+	repo := newRuntimeSettingRepoStub()
+	svc := &OpsService{settingRepo: repo}
+
+	cfg := defaultOpsAdvancedSettings()
+	cfg.DataRetention.CleanupSchedule = "0 3 * *" // 少一个字段
+	if _, err := svc.UpdateOpsAdvancedSettings(context.Background(), cfg); err == nil {
+		t.Fatalf("UpdateOpsAdvancedSettings() error = nil, want invalid schedule error")
+	}
+
+	cfg.DataRetention.CleanupSchedule = "0 99 * * *" // 小时越界
+	if _, err := svc.UpdateOpsAdvancedSettings(context.Background(), cfg); err == nil {
+		t.Fatalf("UpdateOpsAdvancedSettings() error = nil, want invalid schedule error")
+	}
+
+	// 合法的 5 段 cron 与留空（走默认值）都要放行。
+	cfg.DataRetention.CleanupSchedule = "0 3 * * 1-5"
+	if _, err := svc.UpdateOpsAdvancedSettings(context.Background(), cfg); err != nil {
+		t.Fatalf("UpdateOpsAdvancedSettings() error = %v, want nil", err)
+	}
+	cfg.DataRetention.CleanupSchedule = "   "
+	if _, err := svc.UpdateOpsAdvancedSettings(context.Background(), cfg); err != nil {
+		t.Fatalf("UpdateOpsAdvancedSettings() error = %v, want nil", err)
+	}
+}

@@ -174,6 +174,8 @@ func (s *OpsScheduledReportService) runOnce() {
 
 	reports := s.listScheduledReports(ctx, now)
 	if len(reports) == 0 {
+		// 没有任何报表要跑也要留心跳，否则 15 分钟后会被当成失联。
+		recordOpsJobSkipped(s.opsService.opsRepo, opsScheduledReportJobName, opsScheduledReportTickInterval, "no scheduled reports enabled")
 		return
 	}
 
@@ -866,43 +868,17 @@ func (s *OpsScheduledReportService) setLastRunAt(ctx context.Context, reportType
 }
 
 func (s *OpsScheduledReportService) recordHeartbeatSuccess(runAt time.Time, duration time.Duration, result string) {
-	if s == nil || s.opsService == nil || s.opsService.opsRepo == nil {
+	if s == nil || s.opsService == nil {
 		return
 	}
-	now := time.Now().UTC()
-	durMs := duration.Milliseconds()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	msg := strings.TrimSpace(result)
-	if msg == "" {
-		msg = "ok"
-	}
-	msg = truncateString(msg, 2048)
-	_ = s.opsService.opsRepo.UpsertJobHeartbeat(ctx, &OpsUpsertJobHeartbeatInput{
-		JobName:        opsScheduledReportJobName,
-		LastRunAt:      &runAt,
-		LastSuccessAt:  &now,
-		LastDurationMs: &durMs,
-		LastResult:     &msg,
-	})
+	recordOpsJobSuccess(s.opsService.opsRepo, opsScheduledReportJobName, runAt, duration, opsScheduledReportTickInterval, result)
 }
 
 func (s *OpsScheduledReportService) recordHeartbeatError(runAt time.Time, duration time.Duration, err error) {
-	if s == nil || s.opsService == nil || s.opsService.opsRepo == nil || err == nil {
+	if s == nil || s.opsService == nil {
 		return
 	}
-	now := time.Now().UTC()
-	durMs := duration.Milliseconds()
-	msg := truncateString(err.Error(), 2048)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	_ = s.opsService.opsRepo.UpsertJobHeartbeat(ctx, &OpsUpsertJobHeartbeatInput{
-		JobName:        opsScheduledReportJobName,
-		LastRunAt:      &runAt,
-		LastErrorAt:    &now,
-		LastError:      &msg,
-		LastDurationMs: &durMs,
-	})
+	recordOpsJobError(s.opsService.opsRepo, opsScheduledReportJobName, runAt, duration, opsScheduledReportTickInterval, err)
 }
 
 func normalizeEmails(in []string) []string {

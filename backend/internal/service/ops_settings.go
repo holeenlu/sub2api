@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
 const (
@@ -440,6 +442,13 @@ func validateOpsAdvancedSettings(cfg *OpsAdvancedSettings) error {
 	if cfg.AutoRefreshIntervalSec < 15 || cfg.AutoRefreshIntervalSec > 300 {
 		return errors.New("auto_refresh_interval_seconds must be between 15 and 300")
 	}
+	// cron 语法必须在保存时就拒绝：清理服务的 Reload 失败只记日志，
+	// 放行一个建不起来的表达式等于让清理静默停摆。留空走默认表达式。
+	if schedule := strings.TrimSpace(cfg.DataRetention.CleanupSchedule); schedule != "" {
+		if _, err := opsCleanupCronParser.Parse(schedule); err != nil {
+			return fmt.Errorf("cleanup_schedule is not a valid 5-field cron expression: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -512,7 +521,9 @@ const SettingKeyOpsMetricThresholds = "ops_metric_thresholds"
 
 func defaultOpsMetricThresholds() *OpsMetricThresholds {
 	slaMin := 99.5
-	ttftMax := 500.0
+	// TTFT 取决于上游 prefill，流式长上下文请求的 p99 常在数秒到十几秒；
+	// 500ms 会让正常流量长期"变红"。该值同时是健康评分 TTFT 刻度的满分点。
+	ttftMax := float64(dashboardTTFTDefaultFullScoreMs)
 	reqErrMax := 5.0
 	upstreamErrMax := 5.0
 	return &OpsMetricThresholds{
