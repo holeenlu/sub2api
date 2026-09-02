@@ -578,9 +578,11 @@ func extractOrigin(endpoint string) (string, error) {
 // 大小写不敏感，匹配 `?name=value` 或 `&name=value` 形式（value 截到 & 或字符串末尾）。
 var monitorSensitiveQueryParamRegex = regexp.MustCompile(`(?i)([?&](?:key|api[_-]?key|access[_-]?token|token|authorization|x-api-key)=)[^&\s"']+`)
 
-// monitorAPIKeyPatterns 匹配常见 provider 的 API key 字面量。
+// credentialLiteralPatterns 匹配常见 provider 的 API key 字面量。
+// 监控路径与网关上游错误出口（sanitizeUpstreamErrorMessage）共用同一份，
+// 避免两处各写一套、新增 provider 时漏改其一。
 // 顺序敏感：sk-ant- 必须放在 sk- 之前，否则会被通用 sk- 模式先消费。
-var monitorAPIKeyPatterns = []struct {
+var credentialLiteralPatterns = []struct {
 	pattern *regexp.Regexp
 	replace string
 }{
@@ -608,7 +610,7 @@ func sanitizeErrorMessage(msg string) string {
 		return msg
 	}
 	msg = monitorSensitiveQueryParamRegex.ReplaceAllString(msg, `${1}REDACTED`)
-	for _, p := range monitorAPIKeyPatterns {
+	for _, p := range credentialLiteralPatterns {
 		msg = p.pattern.ReplaceAllString(msg, p.replace)
 	}
 	return msg
