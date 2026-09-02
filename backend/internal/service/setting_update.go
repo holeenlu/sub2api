@@ -478,6 +478,18 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyRewriteMessageCacheControl] = strconv.FormatBool(settings.RewriteMessageCacheControl)
 	updates[SettingKeyEnableClientDatelineNormalization] = strconv.FormatBool(settings.EnableClientDatelineNormalization)
 	updates[SettingKeyAntigravityUserAgentVersion] = antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)
+	// 保存前归一化：解析出的区间重新序列化写回，库里存的永远是规范形式（已排序、
+	// 已合并），运维下次打开面板看到的就是生效值。
+	//
+	// 空串表示「用平台默认集」，是合法输入；但填了内容却一个有效片段都没有，说明
+	// 是输入错误——静默存成空串会让管理员以为配置生效了，实际仍走默认集。
+	failoverCodes := strings.TrimSpace(settings.UpstreamFailoverStatusCodes)
+	failoverRanges := ParseStatusCodeRanges(failoverCodes)
+	if failoverCodes != "" && len(failoverRanges) == 0 {
+		return nil, fmt.Errorf("%s has no valid entry: expected status codes or ranges like \"401,403,429,500-599\"",
+			SettingKeyUpstreamFailoverStatusCodes)
+	}
+	updates[SettingKeyUpstreamFailoverStatusCodes] = FormatStatusCodeRanges(failoverRanges)
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)
 	updates[SettingKeyOpenAICodexClientVersion] = NormalizeCodexClientVersion(settings.OpenAICodexClientVersion)
 	updates[SettingKeyOpenAICodexVersionAutoSyncEnabled] = strconv.FormatBool(settings.OpenAICodexVersionAutoSyncEnabled)
@@ -689,6 +701,8 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	if settings == nil {
 		return
 	}
+
+	storeUpstreamFailoverStatusCodes(settings.UpstreamFailoverStatusCodes)
 
 	// 先使 inflight singleflight 失效，再刷新缓存，缩小旧值覆盖新值的竞态窗口
 	versionBoundsSF.Forget("version_bounds")
