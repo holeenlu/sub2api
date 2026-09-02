@@ -120,29 +120,53 @@ const AppLayoutStub = { template: '<div><slot /></div>' }
 const UsageFiltersStub = defineComponent({
   setup(_, { expose }) {
     const userKeyword = ref('')
+    const apiKeyKeyword = ref('')
     let userSearchRevision = 0
     const setUserKeyword = (email: string) => {
       userSearchRevision += 1
       userKeyword.value = email
     }
+    const setApiKeyKeyword = (name: string) => {
+      apiKeyKeyword.value = name
+    }
     expose({
       getUserSearchRevision: () => userSearchRevision,
       setUserKeyword,
+      setApiKeyKeyword,
       simulateUserInput: setUserKeyword,
     })
-    return { userKeyword }
+    return { userKeyword, apiKeyKeyword }
   },
-  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><slot name="after-reset" /></div>',
+  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><span data-test="api-key-filter-label">{{ apiKeyKeyword }}</span><slot name="after-reset" /></div>',
 })
 const UsageTableStub = {
   props: ['columns'],
   emits: ['userClick'],
   template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
 }
-const UserTokenRankingStub = {
+const rankingReload = vi.fn()
+const UserTokenRankingStub = defineComponent({
   emits: ['select-user'],
+  setup(_, { expose }) {
+    expose({ reload: rankingReload })
+    return {}
+  },
   template: '<div data-test="ranking"><button class="pick-user" @click="$emit(\'select-user\', 5, \'rank@test.com\')">pick</button></div>',
-}
+})
+const keyRankingReload = vi.fn()
+const APIKeyTokenRankingStub = defineComponent({
+  props: ['visibleColumnKeys'],
+  emits: ['select-api-key'],
+  setup(_, { expose }) {
+    expose({ reload: keyRankingReload })
+    return {}
+  },
+  template: '<div data-test="key-ranking"><button class="pick-key" @click="$emit(\'select-api-key\', 42, \'prod-key\')">pick</button></div>',
+})
+const OpsErrorLogTableStub = defineComponent({
+  props: ['visibleColumnKeys'],
+  template: '<div data-test="error-log-table" />',
+})
 const ModelDistributionChartStub = {
   props: ['metric'],
   emits: ['update:metric'],
@@ -171,7 +195,7 @@ const mountRouteFilteredUsageView = () => mount(UsageView, {
     UserBalanceHistoryModal: true, Pagination: true, Select: true,
     DateRangePicker: true, Icon: true, TokenUsageTrend: true,
     ModelDistributionChart: true, GroupDistributionChart: true,
-    EndpointDistributionChart: true, UserTokenRanking: true,
+    EndpointDistributionChart: true, UserTokenRanking: true, APIKeyTokenRanking: true,
   } },
 })
 
@@ -384,7 +408,7 @@ describe('admin UsageView distribution metric toggles', () => {
         UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
         DateRangePicker: true, Icon: true, TokenUsageTrend: true,
         ModelDistributionChart: ModelDistributionChartStub, GroupDistributionChart: GroupDistributionChartStub,
-        EndpointDistributionChart: true, UserTokenRanking: true,
+        EndpointDistributionChart: true, UserTokenRanking: true, APIKeyTokenRanking: true,
       } },
     })
     vi.advanceTimersByTime(120)
@@ -422,7 +446,7 @@ describe('admin UsageView distribution metric toggles', () => {
           TokenUsageTrend: true,
           ModelDistributionChart: ModelDistributionChartStub,
           GroupDistributionChart: GroupDistributionChartStub,
-          UserTokenRanking: true,
+          UserTokenRanking: true, APIKeyTokenRanking: true,
         },
       },
     })
@@ -499,7 +523,7 @@ describe('admin UsageView request ID column visibility', () => {
           ModelDistributionChart: true,
           GroupDistributionChart: true,
           EndpointDistributionChart: true,
-          UserTokenRanking: true,
+          UserTokenRanking: true, APIKeyTokenRanking: true,
         },
       },
     })
@@ -608,7 +632,7 @@ describe('admin UsageView handleUserClick', () => {
           ModelDistributionChart: true,
           GroupDistributionChart: true,
           EndpointDistributionChart: true,
-          UserTokenRanking: true,
+          UserTokenRanking: true, APIKeyTokenRanking: true,
         },
       },
     })
@@ -654,7 +678,7 @@ describe('admin UsageView errors tab filter forwarding', () => {
         UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
         DateRangePicker: true, Icon: true, TokenUsageTrend: true,
         ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
-        UserTokenRanking: true, OpsErrorLogTable: true, OpsErrorDetailModal: true,
+        UserTokenRanking: true, APIKeyTokenRanking: true, OpsErrorLogTable: true, OpsErrorDetailModal: true,
       } },
     })
     vi.advanceTimersByTime(120)
@@ -681,9 +705,23 @@ describe('admin UsageView errors tab filter forwarding', () => {
   })
 })
 
+const mountRankingUsageView = () => mount(UsageView, {
+  global: { stubs: {
+    AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+    UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+    UserBalanceHistoryModal: true, Pagination: true, Select: true,
+    DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+    ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+    UserTokenRanking: UserTokenRankingStub, APIKeyTokenRanking: APIKeyTokenRankingStub,
+    OpsErrorLogTable: OpsErrorLogTableStub, OpsErrorDetailModal: true,
+  } },
+})
+
 describe('admin UsageView ranking tab', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    rankingReload.mockReset()
+    keyRankingReload.mockReset()
     list.mockReset()
     getStats.mockReset()
     getSnapshotV2.mockReset()
@@ -710,7 +748,8 @@ describe('admin UsageView ranking tab', () => {
         UserBalanceHistoryModal: true, Pagination: true, Select: true,
         DateRangePicker: true, Icon: true, TokenUsageTrend: true,
         ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
-        UserTokenRanking: UserTokenRankingStub, OpsErrorLogTable: true, OpsErrorDetailModal: true,
+        UserTokenRanking: UserTokenRankingStub, APIKeyTokenRanking: APIKeyTokenRankingStub,
+        OpsErrorLogTable: true, OpsErrorDetailModal: true,
       } },
     })
     vi.advanceTimersByTime(120)
@@ -720,7 +759,7 @@ describe('admin UsageView ranking tab', () => {
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(false)
 
     const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
-    expect(tabs).toHaveLength(3)
+    expect(tabs).toHaveLength(4)
     await tabs[2].trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(true)
@@ -733,6 +772,126 @@ describe('admin UsageView ranking tab', () => {
     expect((wrapper.vm as any).activeTab).toBe('usage')
     expect((wrapper.vm as any).filters.user_id).toBe(5)
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ user_id: 5 }), expect.anything())
+  })
+
+  it('mounts the key ranking lazily and drill-down sets api_key_id, backfills the key name and jumps back', async () => {
+    const wrapper = mountRankingUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="key-ranking"]').exists()).toBe(false)
+
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[3].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="key-ranking"]').exists()).toBe(true)
+
+    list.mockClear()
+    await wrapper.find('[data-test="key-ranking"] .pick-key').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.vm as any).activeTab).toBe('usage')
+    expect((wrapper.vm as any).filters.api_key_id).toBe(42)
+    expect(wrapper.get('[data-test="api-key-filter-label"]').text()).toBe('prod-key')
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ api_key_id: 42 }), expect.anything())
+  })
+
+  it('key ranking has its own column settings while the user ranking has none', async () => {
+    vi.mocked(localStorage.getItem).mockReset().mockImplementation((key: string) =>
+      key === 'usage-key-ranking-hidden-columns' ? JSON.stringify(['cache_tokens']) : null
+    )
+    vi.mocked(localStorage.setItem).mockReset()
+
+    const wrapper = mountRankingUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[2].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-column-settings"]').exists()).toBe(false)
+
+    await tabs[3].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-column-settings"]').exists()).toBe(true)
+
+    const keyRanking = wrapper.findComponent(APIKeyTokenRankingStub)
+    // 存档里的 cache_tokens 已隐藏
+    expect(keyRanking.props('visibleColumnKeys')).toEqual([
+      'key', 'user', 'requests', 'input_tokens', 'output_tokens', 'total_tokens', 'actual_cost',
+    ])
+
+    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
+    // 密钥列是行的身份，不出现在可切换列表里
+    expect(wrapper.find('[data-testid="usage-column-toggle-key"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="usage-column-toggle-user"]').trigger('click')
+    await flushPromises()
+
+    expect(keyRanking.props('visibleColumnKeys')).not.toContain('user')
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'usage-key-ranking-hidden-columns',
+      JSON.stringify(['cache_tokens', 'user'])
+    )
+    // 与用量明细 / 错误请求的存档互不干扰
+    expect(localStorage.setItem).not.toHaveBeenCalledWith('usage-hidden-columns', expect.anything())
+    expect(localStorage.setItem).not.toHaveBeenCalledWith('usage-error-hidden-columns', expect.anything())
+  })
+
+  // 错误请求 tab 的列显隐与其它 tab 共用 useHiddenColumns：存档键、默认隐藏列
+  // 与 alwaysVisible 守卫都由 composable 统一负责。
+  it('error tab column settings honour the archive and never hide a required column', async () => {
+    vi.mocked(localStorage.getItem).mockReset().mockImplementation((key: string) =>
+      key === 'usage-error-hidden-columns' ? JSON.stringify(['category', 'status']) : null
+    )
+    vi.mocked(localStorage.setItem).mockReset()
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 0 })
+
+    const wrapper = mountRankingUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[1].trigger('click')
+    await flushPromises()
+
+    const errorTable = wrapper.findComponent(OpsErrorLogTableStub)
+    // 存档里的 category 已隐藏；status 属于 alwaysVisible，存档也不能把它藏掉
+    expect(errorTable.props('visibleColumnKeys')).not.toContain('category')
+    expect(errorTable.props('visibleColumnKeys')).toContain('status')
+
+    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
+    // alwaysVisible 的列不出现在可切换列表里
+    expect(wrapper.find('[data-testid="usage-column-toggle-status"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="usage-column-toggle-model"]').trigger('click')
+    await flushPromises()
+
+    expect(errorTable.props('visibleColumnKeys')).not.toContain('model')
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'usage-error-hidden-columns',
+      JSON.stringify(['category', 'model'])
+    )
+    expect(localStorage.setItem).not.toHaveBeenCalledWith('usage-hidden-columns', expect.anything())
+  })
+
+  it('refresh reloads every mounted ranking, not only the user one', async () => {
+    const wrapper = mountRankingUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[3].trigger('click')
+    await flushPromises()
+
+    ;(wrapper.vm as any).refreshData()
+    expect(keyRankingReload).toHaveBeenCalledTimes(1)
+    // 用户排行从未打开过，不存在实例，自然不 reload
+    expect(rankingReload).not.toHaveBeenCalled()
+
+    await tabs[2].trigger('click')
+    await flushPromises()
+    ;(wrapper.vm as any).refreshData()
+    expect(rankingReload).toHaveBeenCalledTimes(1)
+    expect(keyRankingReload).toHaveBeenCalledTimes(2)
   })
 })
 
