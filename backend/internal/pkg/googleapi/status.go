@@ -14,8 +14,15 @@ func HTTPStatusToGoogleStatus(status int) string {
 		return "PERMISSION_DENIED"
 	case http.StatusNotFound:
 		return "NOT_FOUND"
+	case http.StatusRequestTimeout:
+		return "DEADLINE_EXCEEDED"
+	case http.StatusUnsupportedMediaType:
+		return "INVALID_ARGUMENT"
 	case http.StatusTooManyRequests:
 		return "RESOURCE_EXHAUSTED"
+	case 499:
+		// nginx 风格的 "client closed request"；google.rpc.Code 里对应 CANCELLED。
+		return "CANCELLED"
 	default:
 		if status >= 500 {
 			return "INTERNAL"

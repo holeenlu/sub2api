@@ -206,11 +206,10 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			googleError(c, http.StatusRequestEntityTooLarge, buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		googleError(c, http.StatusBadRequest, "Failed to read request body")
+		// Google 风格错误体没有 error type 字段，适配时丢弃。
+		RespondRequestBodyReadFailure(c, reqLog, err, func(c *gin.Context, status int, _, message string) {
+			googleError(c, status, message)
+		})
 		return
 	}
 	if len(body) == 0 {

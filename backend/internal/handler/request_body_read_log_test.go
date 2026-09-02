@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +21,8 @@ func TestLogRequestBodyReadFailureClassifiesWithoutPayload(t *testing.T) {
 	req.Header.Set("Content-Encoding", "gzip")
 	req.ContentLength = 21
 
-	logRequestBodyReadFailure(log, req, errors.New(`decode Content-Encoding "gzip": unexpected EOF secret-payload-marker`))
+	readErr := errors.New(`decode Content-Encoding "gzip": unexpected EOF secret-payload-marker`)
+	logRequestBodyReadFailure(log, req, requestBodyReadErrorKind(context.Background(), readErr))
 
 	entries := logs.All()
 	require.Len(t, entries, 1)
@@ -33,8 +35,8 @@ func TestLogRequestBodyReadFailureClassifiesWithoutPayload(t *testing.T) {
 }
 
 func TestRequestBodyReadErrorKind(t *testing.T) {
-	require.Equal(t, "unsupported_content_encoding", requestBodyReadErrorKind(errors.New(`decode Content-Encoding "br": unsupported Content-Encoding`)))
-	require.Equal(t, "truncated_body", requestBodyReadErrorKind(io.ErrUnexpectedEOF))
-	require.Equal(t, "max_bytes", requestBodyReadErrorKind(&http.MaxBytesError{Limit: 10}))
+	require.Equal(t, "unsupported_content_encoding", requestBodyReadErrorKind(context.Background(), errors.New(`decode Content-Encoding "br": unsupported Content-Encoding`)))
+	require.Equal(t, "truncated_body", requestBodyReadErrorKind(context.Background(), io.ErrUnexpectedEOF))
+	require.Equal(t, "max_bytes", requestBodyReadErrorKind(context.Background(), &http.MaxBytesError{Limit: 10}))
 	require.Equal(t, "other", requestContentEncodingCategory("private-payload-marker"))
 }

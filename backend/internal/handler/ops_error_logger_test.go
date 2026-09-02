@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -329,6 +330,38 @@ func TestOpsErrorLoggerMiddleware_OrdinaryPermissionStillRecords(t *testing.T) {
 	job := <-opsErrorLogQueue
 	require.Equal(t, "permission_error", job.entry.ErrorType)
 	require.Equal(t, http.StatusForbidden, job.entry.StatusCode)
+}
+
+// 客户端中途断开上传是运维无法处置的失败：handler 打了跳过标记，中间件不能
+// 再把它写进 ops_error_logs；同一入口的其他读取失败仍照常记录。
+func TestOpsErrorLoggerMiddleware_SkipsBodyReadClientDisconnectOnly(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+	gin.SetMode(gin.TestMode)
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := &OpenAIGatewayHandler{}
+
+	var readErr error
+	router := gin.New()
+	router.Use(OpsErrorLoggerMiddleware(ops))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		RespondRequestBodyReadFailure(c, nil, readErr, h.errorResponse)
+	})
+
+	readErr = context.Canceled
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	require.Equal(t, statusClientClosedRequest, recorder.Code)
+	require.Zero(t, OpsErrorLogQueueLength(), "client_disconnect must stay out of ops_error_logs")
+
+	readErr = io.ErrUnexpectedEOF
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Equal(t, int64(1), OpsErrorLogQueueLength(), "truncated_body must still be recorded")
+	job := <-opsErrorLogQueue
+	require.Equal(t, "invalid_request_error", job.entry.ErrorType)
+	require.Equal(t, http.StatusBadRequest, job.entry.StatusCode)
+	require.Equal(t, bodyReadErrorPolicies[bodyReadKindTruncatedBody].Message, job.entry.ErrorMessage)
 }
 
 func TestOpsErrorLoggerMiddleware_RecordsRecoveredUpstreamTelemetryOutsideFailureSLA(t *testing.T) {
@@ -1953,4 +1986,33 @@ func TestGetOpsAPIKeyPrefersPrimaryContextKey(t *testing.T) {
 	got := getOpsAPIKey(c)
 	require.NotNil(t, got)
 	require.Equal(t, int64(1), got.ID, "已鉴权请求应优先使用正式 api key")
+}
+
+// 每条 body read 策略进 ops_error_logs 后的归因必须是有意的：客户端侧的失败
+// 留在 request/P3，只有我们该负责的读超时才是 internal/P2；兜底策略尤其不能
+// 被抬成 P2，否则未分类的客户端中断会触发告警。
+func TestBodyReadErrorPoliciesOpsClassification(t *testing.T) {
+	type want struct{ phase, severity string }
+	expectations := map[string]want{
+		bodyReadKindMaxBytes:                   {"request", "P3"},
+		bodyReadKindClientDisconnect:           {"request", "P3"},
+		bodyReadKindTruncatedBody:              {"request", "P3"},
+		bodyReadKindTransportTimeout:           {"internal", "P2"},
+		bodyReadKindTransport:                  {"request", "P3"},
+		bodyReadKindUnsupportedContentEncoding: {"request", "P3"},
+		bodyReadKindDecodeContentEncoding:      {"request", "P3"},
+		bodyReadKindIORead:                     {"request", "P3"},
+	}
+	for kind, policy := range bodyReadErrorPolicies {
+		exp, ok := expectations[kind]
+		require.Truef(t, ok, "policy %q has no ops classification expectation", kind)
+		require.Equal(t, policy.ErrorType, normalizeOpsErrorType(policy.ErrorType, ""), "kind %s", kind)
+		require.Equal(t, exp.phase, classifyOpsPhase(policy.ErrorType, policy.Message, ""), "kind %s", kind)
+		require.Equal(t, exp.severity, classifyOpsSeverity(policy.ErrorType, policy.Status), "kind %s", kind)
+	}
+	require.Len(t, expectations, len(bodyReadErrorPolicies))
+
+	fallback := bodyReadErrorFallbackPolicy
+	require.Equal(t, "request", classifyOpsPhase(fallback.ErrorType, fallback.Message, ""))
+	require.Equal(t, "P3", classifyOpsSeverity(fallback.ErrorType, fallback.Status))
 }

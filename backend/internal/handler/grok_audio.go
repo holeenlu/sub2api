@@ -189,14 +189,18 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		return
 	}
 
+	reqLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
 	body, err := readGrokVoiceGatewayBody(c)
 	if err != nil {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		if errors.Is(err, errGrokVoiceBodyRequired) {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+		RespondRequestBodyReadFailure(c, reqLog, err, h.errorResponse)
 		return
 	}
 	if endpoint == "tts" {
 		subject, _ := middleware2.GetAuthSubjectFromContext(c)
-		reqLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
 		// TTS bodies use {"input":"..."} (and variants). Normalize to chat messages so
 		// content moderation extractors see the spoken text.
 		auditBody := body
@@ -219,7 +223,6 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 
 	failed := map[int64]struct{}{}
 	var last *service.UpstreamFailoverError
-	reqLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
 	selectionModel := "grok-4.5"
 
 	for attempts := 0; attempts < 4; attempts++ {
@@ -349,15 +352,19 @@ func (h *OpenAIGatewayHandler) recordGrokVoiceUsage(
 	})
 }
 
+// errGrokVoiceBodyRequired 是唯一可以原样回给客户端的读取错误；其余读取错误
+// 走 RespondRequestBodyReadFailure，避免把底层错误文案（可能含内网地址）回显。
+var errGrokVoiceBodyRequired = errors.New("request body is required")
+
 func readGrokVoiceGatewayBody(c *gin.Context) ([]byte, error) {
 	if c == nil || c.Request == nil {
-		return nil, errors.New("request body is required")
+		return nil, errGrokVoiceBodyRequired
 	}
 	if c.Request.Body == nil {
 		if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodDelete {
 			return nil, nil
 		}
-		return nil, errors.New("request body is required")
+		return nil, errGrokVoiceBodyRequired
 	}
 	return io.ReadAll(c.Request.Body)
 }
