@@ -1097,6 +1097,116 @@ func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	s.Require().NotContains(cacheRecorder.setAccounts[0].Extra, "model_rate_limits")
 }
 
+func (s *AccountRepoSuite) TestClearModelRateLimit_RemovesOnlyTheGivenScope() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "acc-clear-one-model-rate",
+		Extra: map[string]any{
+			"model_rate_limits": map[string]any{
+				"claude-fable-5": map[string]any{
+					"rate_limit_reset_at": "2026-06-03T10:00:00Z",
+					"reason":              `{"source":"account_scheduling_threshold"}`,
+				},
+				"claude-sonnet-4-5": map[string]any{
+					"rate_limit_reset_at": "2026-06-04T10:00:00Z",
+				},
+			},
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	cleared, err := s.repo.ClearModelRateLimit(s.ctx, account.ID, "claude-fable-5", `{"source":"account_scheduling_threshold"}`)
+	s.Require().NoError(err)
+	s.True(cleared)
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	limits, ok := got.Extra["model_rate_limits"].(map[string]any)
+	s.Require().True(ok)
+	s.Require().NotContains(limits, "claude-fable-5")
+	s.Require().Contains(limits, "claude-sonnet-4-5", "只该删掉指定 scope")
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+
+	var count int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &count))
+	s.Require().Equal(1, count)
+}
+
+// 解除路径每次选号都会走到。清一个本就不存在的 scope 必须是真正的空操作：否则每次
+// 选号都 bump updated_at、入 outbox 并触发 bucket 重建。
+func (s *AccountRepoSuite) TestClearModelRateLimit_AbsentScopeIsNoOp() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "acc-clear-absent-model-rate",
+		Extra: map[string]any{
+			"model_rate_limits": map[string]any{
+				"claude-sonnet-4-5": map[string]any{
+					"rate_limit_reset_at": "2026-06-04T10:00:00Z",
+				},
+			},
+		},
+	})
+	before, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	cleared, err := s.repo.ClearModelRateLimit(s.ctx, account.ID, "claude-fable-5", "")
+	s.Require().NoError(err)
+	s.False(cleared)
+
+	after, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(before.UpdatedAt.UTC(), after.UpdatedAt.UTC(), "无变化不该 bump updated_at")
+	s.Require().Empty(cacheRecorder.setAccounts, "无变化不该同步调度快照")
+
+	var count int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &count))
+	s.Require().Zero(count, "无变化不该入 outbox")
+}
+
+// 上游 429 在解除路径拿到账号副本之后改写了同一个 scope：那条限流是真的耗尽，谓词
+// 必须在 DB 层挡住这次清除。
+func (s *AccountRepoSuite) TestClearModelRateLimit_KeepsScopeWhenReasonChanged() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "acc-clear-model-rate-cas",
+		Extra: map[string]any{
+			"model_rate_limits": map[string]any{
+				"claude-fable-5": map[string]any{
+					"rate_limit_reset_at": "2026-06-03T10:00:00Z",
+					"reason":              "anthropic_7d_oi_window_exhausted",
+				},
+			},
+		},
+	})
+	before, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	cleared, err := s.repo.ClearModelRateLimit(s.ctx, account.ID, "claude-fable-5", `{"source":"account_scheduling_threshold"}`)
+	s.Require().NoError(err)
+	s.False(cleared)
+
+	after, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	limits, ok := after.Extra["model_rate_limits"].(map[string]any)
+	s.Require().True(ok)
+	s.Require().Contains(limits, "claude-fable-5", "reason 已被改写，这条限流不是调用方看到的那条")
+	s.Require().Equal(before.UpdatedAt.UTC(), after.UpdatedAt.UTC())
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+// 账号不存在与「本来就没有这条限流」对调用方是同一件事：没有需要清除的东西。唯一的
+// 调用方对错误只 Warn，为了区分 not-found 而多打一条 SELECT 得不偿失——解除路径下
+// affected==0 才是常态。
+func (s *AccountRepoSuite) TestClearModelRateLimit_MissingAccountIsNoOp() {
+	cleared, err := s.repo.ClearModelRateLimit(s.ctx, 999999999, "claude-fable-5", "")
+	s.Require().NoError(err)
+	s.False(cleared)
+}
+
 // --- UpdateLastUsed ---
 
 func (s *AccountRepoSuite) TestUpdateLastUsed() {

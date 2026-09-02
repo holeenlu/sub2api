@@ -2097,6 +2097,9 @@ func (h *GatewayHandler) errorResponse(c *gin.Context, status int, errType, mess
 
 func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errType, code, message string) {
 	errorObject := gin.H{"type": errType, "message": message}
+	// 无可用账号分类：补 code / retry_at（仅该路径有值）
+	applyNoAccountClientErrorFields(c, errorObject)
+	// 调用方显式指定的错误码最具体，最后覆盖
 	if code != "" {
 		errorObject["code"] = code
 	}

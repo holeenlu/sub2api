@@ -379,6 +379,12 @@ export default {
       accountSchedulingThresholdOverrideValue: '账号阈值百分比',
       accountSchedulingThresholdOverrideDisabledHint:
         '1-100，达到该用量百分比后临时不可调度；100 表示禁用当前账号自动停调。',
+      anthropicFableSchedulingThresholdOverride: '7d Fable 阈值覆盖',
+      anthropicFableSchedulingThresholdOverrideHint:
+        '仅对当前账号覆盖全局的 7d Fable 阈值；关闭后使用系统设置。',
+      anthropicFableSchedulingThresholdOverrideValue: '7d Fable 阈值百分比',
+      anthropicFableSchedulingThresholdOverrideDisabledHint:
+        '1-100，只检查 7d F（Fable 专属）窗口。达到该百分比后，该账号不再调度 Fable 模型（其他模型不受影响），直到窗口重置；共享 7d 仍由普通 Anthropic 阈值控制。',
       status: {
         active: '正常',
         inactive: '停用',

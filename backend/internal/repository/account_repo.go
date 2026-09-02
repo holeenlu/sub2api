@@ -2432,6 +2432,56 @@ func (r *accountRepository) ClearAntigravityQuotaScopes(ctx context.Context, id 
 	return nil
 }
 
+// ClearModelRateLimit 只摘掉 model_rate_limits 里的一个 scope，其余保留，且只在该
+// scope 当前的 reason 与 expectedReason 逐字相同时才动手。
+// 与 SetModelRateLimit 对称：同样要 enqueue outbox + 同步调度快照，否则调度侧读到的
+// 仍是清除前的限流。
+//
+// expectedReason 让清除成为一次 compare-and-swap。调用方拿到的是选号时刻从 Redis
+// 拷贝的账号副本，它判断「这条限流是我打的」与真正执行 UPDATE 之间隔着整个转发过程；
+// 期间上游 429 完全可能把同一个 scope 改写成窗口耗尽限流，那条限流绝不能被顺手删掉。
+// 谓词放在 DB 层而不是调用方，是因为并发的清除请求各持一份快照，只有数据库能串行化。
+// 返回值表示是否确实清除了 scope；CAS 未命中时调用方必须保留本次请求的限流快照。
+func (r *accountRepository) ClearModelRateLimit(ctx context.Context, id int64, scope string, expectedReason string) (bool, error) {
+	if strings.TrimSpace(scope) == "" {
+		return false, nil
+	}
+	client := clientFromContext(ctx, r.client)
+	// 谓词里还带上「该 scope 确实存在」：没有它，清除一个本就不存在的 scope 也会 bump
+	// updated_at、入 outbox 并触发 bucket 重建。解除路径每次选号都会走到，无变化时
+	// 必须是真正的空操作。
+	result, err := client.ExecContext(
+		ctx,
+		`UPDATE accounts
+		SET extra = COALESCE(extra, '{}'::jsonb) #- ARRAY['model_rate_limits', $1]::text[],
+			updated_at = NOW()
+		WHERE id = $2 AND deleted_at IS NULL
+			AND extra #> ARRAY['model_rate_limits', $1]::text[] IS NOT NULL
+			AND COALESCE(extra #>> ARRAY['model_rate_limits', $1, 'reason']::text[], '') = $3`,
+		scope,
+		id,
+		expectedReason,
+	)
+	if err != nil {
+		return false, err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		// 没有匹配的行：账号不存在，该 scope 本来就没有限流，或 reason 已经被改写。
+		// 不能据此清除请求内的旧快照：新 reason 可能代表仍然有效的上游 429。
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear model rate limit scope failed: account=%d scope=%s err=%v", id, scope, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return true, nil
+}
+
 func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) error {
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(

@@ -52,6 +52,10 @@ func (r *rateLimitClearRepoStub) ClearAntigravityQuotaScopes(ctx context.Context
 	return r.clearAntigravityErr
 }
 
+func (r *rateLimitClearRepoStub) ClearModelRateLimit(ctx context.Context, id int64, scope string, _ string) (bool, error) {
+	return true, nil
+}
+
 func (r *rateLimitClearRepoStub) ClearModelRateLimits(ctx context.Context, id int64) error {
 	r.clearModelRateLimitCalls++
 	return r.clearModelRateLimitErr

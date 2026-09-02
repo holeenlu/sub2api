@@ -107,6 +107,14 @@ type AccountRepository interface {
 	ClearRateLimit(ctx context.Context, id int64) error
 	ClearAntigravityQuotaScopes(ctx context.Context, id int64) error
 	ClearModelRateLimits(ctx context.Context, id int64) error
+	// ClearModelRateLimit 只清除单个 scope 的模型级限流，其余 scope 原样保留，且只在
+	// 该 scope 当前的 reason 与 expectedReason 逐字相同时才清除——调用方手里的账号
+	// 副本可能已经过时，别把这期间换上来的另一条限流删掉。expectedReason 传空串表示
+	// 「只清除没有记录 reason 的限流」。
+	// 没有匹配的行（账号不存在 / scope 无限流 / reason 已变）时是空操作：不写行、
+	// 不发 outbox、不同步快照，也不报错。
+	// 返回 true 表示确实清除了 scope，false 时调用方不得清除请求内的限流快照。
+	ClearModelRateLimit(ctx context.Context, id int64, scope string, expectedReason string) (bool, error)
 	UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error
 	// UpdateSessionWindowEnd 仅更新 5h 窗口的结束时间，不动 start / status。
 	// 用于 active poll 拿到新 ResetsAt 后回写，避免覆盖请求路径上记录的 status。

@@ -189,6 +189,25 @@ func (a *Account) modelRateLimitResetAt(scope string) *time.Time {
 	return &resetAt
 }
 
+// modelRateLimitReason 返回该 scope 限流的 reason 原文（通常是一段 JSON payload），
+// 供调用方判断限流是谁打的——例如阈值停调只允许解除自己打的限流，不能解除上游 429
+// 打的窗口耗尽限流。
+func (a *Account) modelRateLimitReason(scope string) string {
+	if a == nil || a.Extra == nil || scope == "" {
+		return ""
+	}
+	rawLimits, ok := a.Extra[modelRateLimitsKey].(map[string]any)
+	if !ok {
+		return ""
+	}
+	rawLimit, ok := rawLimits[scope].(map[string]any)
+	if !ok {
+		return ""
+	}
+	reason, _ := rawLimit["reason"].(string)
+	return reason
+}
+
 func setAccountModelRateLimitSnapshot(account *Account, scope string, resetAt time.Time, reason string, now time.Time) {
 	if account == nil || strings.TrimSpace(scope) == "" {
 		return
@@ -209,4 +228,18 @@ func setAccountModelRateLimitSnapshot(account *Account, scope string, resetAt ti
 		payload["reason"] = reason
 	}
 	limits[scope] = payload
+}
+
+// clearAccountModelRateLimitSnapshot 与 setAccountModelRateLimitSnapshot 对称：把内存
+// 里的账号快照同步成「该 scope 无限流」，避免 DB 已清而本次请求手里的 account 仍带着
+// 旧限流。
+func clearAccountModelRateLimitSnapshot(account *Account, scope string) {
+	if account == nil || account.Extra == nil || strings.TrimSpace(scope) == "" {
+		return
+	}
+	limits, ok := account.Extra[modelRateLimitsKey].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(limits, scope)
 }

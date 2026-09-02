@@ -189,6 +189,43 @@ func TestDiagnoseModelAvailabilityForPlatform_RateLimitedSupportingAccountRemain
 	require.True(t, diag.HasModelSupport, "a configured model remains supported while every matching account is temporarily cooling down")
 }
 
+func TestDiagnoseModelAvailabilityForPlatform_ReadsFableModelRateLimitAttribution(t *testing.T) {
+	groupID := int64(44)
+	reset := time.Now().Add(3 * time.Hour)
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{{
+			ID:            4,
+			Platform:      PlatformAnthropic,
+			Status:        StatusActive,
+			Schedulable:   true,
+			AccountGroups: []AccountGroup{{GroupID: groupID}},
+			Credentials:   map[string]any{"model_mapping": map[string]any{"claude-fable-5-1": "claude-fable-5-1"}},
+			Extra: map[string]any{modelRateLimitsKey: map[string]any{
+				anthropicFableRateLimitKey: map[string]any{
+					"rate_limit_reset_at": reset.UTC().Format(time.RFC3339),
+					"reason":              AnthropicFableWindowExhaustedReason,
+				},
+			}},
+		}},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	svc := &GatewayService{accountRepo: repo, cfg: testConfig()}
+
+	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, "claude-fable-5-1", PlatformAnthropic)
+
+	require.True(t, diag.AllModelCapableRateLimited)
+	require.NotNil(t, diag.RateLimit)
+	require.Equal(t, "model", diag.RateLimit.Scope)
+	require.Equal(t, "7d_oi", diag.RateLimit.Window)
+	require.Equal(t, AnthropicFableWindowExhaustedReason, diag.RateLimit.Reason)
+	require.Equal(t, "claude-fable-5-1", diag.RateLimit.Model)
+	require.NotNil(t, diag.RateLimit.ResetAt)
+	require.WithinDuration(t, reset, *diag.RateLimit.ResetAt, time.Second)
+}
+
 func TestOpenAIDiagnoseModelAvailabilityForPlatform_RateLimitedSupportingAccountRemainsConfigured(t *testing.T) {
 	groupID := int64(43)
 	cooldownUntil := time.Now().Add(time.Hour)

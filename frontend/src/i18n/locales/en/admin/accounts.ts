@@ -176,6 +176,12 @@ export default {
       accountSchedulingThresholdOverrideValue: 'Account threshold percent',
       accountSchedulingThresholdOverrideDisabledHint:
         'Use 1-100. The account becomes temporarily unschedulable after reaching this usage percent; 100 disables it for this account.',
+      anthropicFableSchedulingThresholdOverride: '7d Fable Threshold Override',
+      anthropicFableSchedulingThresholdOverrideHint:
+        'Override the global 7d Fable threshold for this account only. Disable to use the system setting.',
+      anthropicFableSchedulingThresholdOverrideValue: '7d Fable threshold percent',
+      anthropicFableSchedulingThresholdOverrideDisabledHint:
+        'Use 1-100. Only the Fable-specific 7d F window is checked. Once it reaches this percent, the account stops serving Fable models (other models are unaffected) until the window resets; shared 7d usage remains controlled by the regular Anthropic threshold.',
       status: {
         active: 'Active',
         inactive: 'Inactive',

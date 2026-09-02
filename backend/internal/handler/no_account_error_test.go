@@ -104,6 +104,44 @@ func TestClassifyNoAccountError_AllModelCapableRateLimited_Returns429(t *testing
 	require.False(t, service.HasOpsClientBusinessLimited(c), "a pool cooldown is routing capacity, not a local model-configuration problem")
 }
 
+func TestClassifyNoAccountError_FableWindowIncludesClientDetails(t *testing.T) {
+	c := newTestGinContextWithRequest()
+	reset := time.Now().Add(2*time.Hour + 3*time.Minute + 4*time.Second)
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{
+		HasAccountsInPool:          true,
+		HasModelSupport:            true,
+		AllModelCapableRateLimited: true,
+		EarliestRateLimitResetAt:   &reset,
+		RateLimit: &service.RateLimitAttribution{
+			Scope:   "model",
+			Window:  "7d_oi",
+			Reason:  service.AnthropicFableWindowExhaustedReason,
+			Model:   "claude-fable-5-1",
+			ResetAt: &reset,
+		},
+	}}
+	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
+
+	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "claude-fable-5-1", "claude-fable-5-1", service.PlatformAnthropic)
+
+	require.Equal(t, http.StatusTooManyRequests, cls.Status)
+	require.Equal(t, "rate_limit_error", cls.ErrType)
+	require.Equal(t, "anthropic_fable_7d_oi_exhausted", cls.ErrorCode)
+	require.Equal(t, "model", cls.LimitScope)
+	require.Equal(t, "7d_oi", cls.LimitWindow)
+	require.Contains(t, cls.Message, "Fable 5.1")
+	require.Contains(t, cls.Message, "7-day window resets in")
+	require.Greater(t, cls.RetryAfterSeconds, int64(7000))
+	require.Less(t, cls.RetryAfterSeconds, int64(7500))
+
+	recorder := httptest.NewRecorder()
+	renderContext, _ := gin.CreateTestContext(recorder)
+	renderContext.Set(noAccountClassificationContextKey, cls)
+	(&GatewayHandler{}).errorResponse(renderContext, cls.Status, cls.ErrType, cls.Message)
+	require.Contains(t, recorder.Body.String(), `"code":"anthropic_fable_7d_oi_exhausted"`)
+	require.Contains(t, recorder.Body.String(), `"limit_window":"7d_oi"`)
+}
+
 // 404 优先级高于 429：模型压根没配，就不该让客户端去重试。
 func TestClassifyNoAccountError_ModelNotFoundWinsOver429(t *testing.T) {
 	c := newTestGinContextWithRequest()

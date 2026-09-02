@@ -302,6 +302,21 @@ function buildOpenAIOAuthParentAccount() {
   } as any
 }
 
+function buildAnthropicOAuthAccount(credentials: Record<string, unknown> = {}) {
+  return {
+    ...buildAccount(),
+    id: 11,
+    name: 'Anthropic OAuth',
+    platform: 'anthropic',
+    type: 'oauth',
+    credentials: {
+      access_token: 'anthropic-access-token',
+      ...credentials
+    },
+    extra: {}
+  } as any
+}
+
 function mountModal(account = buildAccount()) {
   return mount(EditAccountModal, {
     props: {
@@ -1532,6 +1547,128 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     await wrapper.get('[data-testid="auto-reset-credit-5h-threshold"]').setValue('0')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
+describe('EditAccountModal 7d Fable 阈值覆盖', () => {
+  beforeEach(() => {
+    authIsSimpleMode.value = true
+    updateAccountMock.mockReset().mockResolvedValue({})
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+  })
+
+  // Fable 是 Anthropic 独有的模型家族，其他平台没有这个概念。
+  it('只对 Anthropic 账号显示覆盖开关', () => {
+    const anthropic = mountModal(buildAnthropicOAuthAccount())
+    expect(
+      anthropic.find('[data-testid="anthropic-fable-scheduling-threshold-section"]').exists()
+    ).toBe(true)
+    anthropic.unmount()
+
+    const openai = mountModal(buildOpenAIOAuthParentAccount())
+    expect(
+      openai.find('[data-testid="anthropic-fable-scheduling-threshold-section"]').exists()
+    ).toBe(false)
+    openai.unmount()
+  })
+
+  // setup-token 与 OAuth 一样有 7d/7d_oi 窗口样本，覆盖对它有效。
+  it('对 Anthropic setup-token 账号同样显示覆盖开关', () => {
+    const wrapper = mountModal({
+      ...buildAnthropicOAuthAccount(),
+      type: 'setup-token'
+    } as any)
+    expect(
+      wrapper.find('[data-testid="anthropic-fable-scheduling-threshold-section"]').exists()
+    ).toBe(true)
+    wrapper.unmount()
+  })
+
+  // 7d/7d_oi 窗口只来自 OAuth 类账号的被动采样，apikey / bedrock 永远没有候选，
+  // 写进去的键永远不会生效——界面却显示"已启用"。
+  it.each(['apikey', 'bedrock'])('不对 Anthropic %s 账号显示覆盖开关', (type) => {
+    const wrapper = mountModal({
+      ...buildAnthropicOAuthAccount(),
+      type,
+      credentials: { api_key: 'sk-ant-test' }
+    } as any)
+    expect(
+      wrapper.find('[data-testid="anthropic-fable-scheduling-threshold-section"]').exists()
+    ).toBe(false)
+    wrapper.unmount()
+  })
+
+  // 隐藏入口不等于清理数据：已存在的键原样留着，交由后端/运维处理。
+  it('对不支持的类型保留已存的覆盖键不动', async () => {
+    const wrapper = mountModal({
+      ...buildAnthropicOAuthAccount(),
+      type: 'apikey',
+      credentials: { api_key: 'sk-ant-test', anthropic_fable_scheduling_threshold: 50 }
+    } as any)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(
+      updateAccountMock.mock.calls[0]?.[1]?.credentials?.anthropic_fable_scheduling_threshold
+    ).toBe(50)
+    wrapper.unmount()
+  })
+
+  it('回填已保存的覆盖值并提交修改后的值', async () => {
+    const wrapper = mountModal(buildAnthropicOAuthAccount({ anthropic_fable_scheduling_threshold: 50 }))
+
+    expect(
+      (wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-enabled"]')
+        .element as HTMLInputElement).checked
+    ).toBe(true)
+    expect(
+      (wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-value"]')
+        .element as HTMLInputElement).value
+    ).toBe('50')
+
+    await wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-value"]').setValue('70')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.anthropic_fable_scheduling_threshold).toBe(70)
+    wrapper.unmount()
+  })
+
+  // 关闭开关必须显式提交 null，后端据此删掉这个键；否则账号会一直带着旧覆盖。
+  it('关闭开关时提交 null 删键', async () => {
+    const wrapper = mountModal(buildAnthropicOAuthAccount({ anthropic_fable_scheduling_threshold: 50 }))
+
+    await wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-enabled"]').setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.anthropic_fable_scheduling_threshold).toBeNull()
+    wrapper.unmount()
+  })
+
+  // 两个覆盖共用同一个 binding 工厂，各写各的键：动 Fable 不该改到通用阈值。
+  it('与通用阈值覆盖互不影响', async () => {
+    const wrapper = mountModal(buildAnthropicOAuthAccount({ account_scheduling_threshold: 80 }))
+
+    expect(
+      (wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-enabled"]')
+        .element as HTMLInputElement).checked
+    ).toBe(false)
+    expect(
+      (wrapper.get('[data-testid="account-scheduling-threshold-override-value"]')
+        .element as HTMLInputElement).value
+    ).toBe('80')
+
+    await wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-value"]').setValue('40')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials?.anthropic_fable_scheduling_threshold).toBe(40)
+    expect(credentials?.account_scheduling_threshold).toBe(80)
     wrapper.unmount()
   })
 })

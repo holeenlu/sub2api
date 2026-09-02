@@ -984,7 +984,7 @@ func TestAPIContracts(t *testing.T) {
 					"payment_alipay_mobile_precreate_deep_link": false,
 					"balance_low_notify_enabled": false,
 					"account_quota_notify_enabled": false,
-					"account_scheduling_thresholds": {"anthropic":100,"grok":100,"openai":100},
+					"account_scheduling_thresholds": {"anthropic":100,"anthropic_fable":100,"grok":100,"openai":100},
 					"subscription_expiry_notify_enabled": true,
 					"balance_low_notify_threshold": 0,
 					"balance_low_notify_recharge_url": "",
@@ -1297,7 +1297,7 @@ func TestAPIContracts(t *testing.T) {
 					"payment_alipay_mobile_precreate_deep_link": false,
 					"balance_low_notify_enabled": false,
 					"account_quota_notify_enabled": false,
-					"account_scheduling_thresholds": {"anthropic":100,"grok":100,"openai":100},
+					"account_scheduling_thresholds": {"anthropic":100,"anthropic_fable":100,"grok":100,"openai":100},
 					"subscription_expiry_notify_enabled": true,
 					"balance_low_notify_threshold": 0,
 					"balance_low_notify_recharge_url": "",
@@ -2017,6 +2017,10 @@ func (s *stubAccountRepo) ClearRateLimit(ctx context.Context, id int64) error {
 
 func (s *stubAccountRepo) ClearAntigravityQuotaScopes(ctx context.Context, id int64) error {
 	return errors.New("not implemented")
+}
+
+func (s *stubAccountRepo) ClearModelRateLimit(ctx context.Context, id int64, scope string, _ string) (bool, error) {
+	return false, errors.New("not implemented")
 }
 
 func (s *stubAccountRepo) ClearModelRateLimits(ctx context.Context, id int64) error {

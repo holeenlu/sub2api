@@ -121,6 +121,20 @@ var AllowedSchedulingThresholdPlatforms = []string{
 	PlatformZhipu,
 }
 
+// SchedulingThresholdScopeAnthropicFable 是 Anthropic Fable 模型家族的独立停调阈值
+// scope。它不是平台——account.Platform 永远不会等于它，只在
+// account_scheduling_thresholds 这张 map 里多占一个 key。越线只对 Fable 打模型级
+// 限流，账号对其他模型仍可调度。
+const SchedulingThresholdScopeAnthropicFable = "anthropic_fable"
+
+// AllowedSchedulingThresholdScopes 是 account_scheduling_thresholds 允许出现的全部
+// key：平台 + 非平台 scope。设置的校验/解析/审计遍历用它；判定「某账号平台是否支持
+// 阈值停调」仍用 AllowedSchedulingThresholdPlatforms。
+var AllowedSchedulingThresholdScopes = append(
+	append([]string{}, AllowedSchedulingThresholdPlatforms...),
+	SchedulingThresholdScopeAnthropicFable,
+)
+
 // IsAllowedQuotaPlatform 报告 s 是否为合法的 quota platform 标识。
 func IsAllowedQuotaPlatform(s string) bool {
 	for _, p := range AllowedQuotaPlatforms {

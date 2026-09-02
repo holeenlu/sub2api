@@ -76,7 +76,12 @@ const gatewayForwardingDBTimeout = 5 * time.Second
 // cachedAccountSchedulingThresholds 缓存平台自动停调阈值（进程内缓存，60s TTL）
 type cachedAccountSchedulingThresholds struct {
 	thresholds map[string]int
-	expiresAt  int64 // unix nano
+	// resolved 标记这份阈值确实反映了配置（含「settings 里就是没有这一项」），而不是
+	// 读取失败后的兜底默认值。两者的取值完全一样（全 100），但含义相反：前者是「运维
+	// 关掉了阈值」的正证据，后者只是「这一刻读不到配置」。不区分它们，配置系统抖动
+	// 就会被解除路径当成一次运维操作，见 evaluateAnthropicFableSchedulingThreshold。
+	resolved  bool
+	expiresAt int64 // unix nano
 }
 
 var accountSchedulingThresholdsCache atomic.Value // *cachedAccountSchedulingThresholds

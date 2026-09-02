@@ -1503,6 +1503,40 @@
         </div>
       </div>
 
+      <!-- Anthropic 7d Fable 阈值覆盖：只拦 Fable 模型，不停整个账号 -->
+      <div
+        v-if="supportsAnthropicFableSchedulingThresholdOverride"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="anthropic-fable-scheduling-threshold-section"
+      >
+        <div class="mb-3 flex items-center justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverride') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideHint') }}
+            </p>
+          </div>
+          <input
+            v-model="anthropicFableSchedulingThresholdOverrideEnabled"
+            data-testid="anthropic-fable-scheduling-threshold-override-enabled"
+            type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div v-if="anthropicFableSchedulingThresholdOverrideEnabled">
+          <label class="input-label">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideValue') }}</label>
+          <input
+            v-model.number="anthropicFableSchedulingThresholdOverrideValue"
+            data-testid="anthropic-fable-scheduling-threshold-override-value"
+            type="number"
+            min="1"
+            max="100"
+            class="input"
+          />
+          <p class="input-hint">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideDisabledHint') }}</p>
+        </div>
+      </div>
+
       <!-- Intercept Warmup Requests (Anthropic/Antigravity) -->
       <div
         v-if="account?.platform === 'anthropic' || account?.platform === 'antigravity'"
@@ -3258,11 +3292,28 @@ const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
 const isSyncingAntigravityUpstream = ref(false)
 const tempUnschedEnabled = ref(false)
-const accountSchedulingThresholdOverrideEnabled = ref(false)
-const accountSchedulingThresholdOverrideValue = ref(100)
 const ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY = 'account_scheduling_threshold'
+const ANTHROPIC_FABLE_SCHEDULING_THRESHOLD_CREDENTIAL_KEY = 'anthropic_fable_scheduling_threshold'
+
+const accountSchedulingThresholdOverride = createSchedulingThresholdOverrideBinding(
+  ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY,
+  supportsAccountSchedulingThresholdOverridePlatform
+)
+// Fable 是 Anthropic 独有的模型家族，其他平台没有这个概念。
+const anthropicFableSchedulingThresholdOverride = createSchedulingThresholdOverrideBinding(
+  ANTHROPIC_FABLE_SCHEDULING_THRESHOLD_CREDENTIAL_KEY,
+  supportsAnthropicFableSchedulingThresholdAccount
+)
+
+const accountSchedulingThresholdOverrideEnabled = accountSchedulingThresholdOverride.enabled
+const accountSchedulingThresholdOverrideValue = accountSchedulingThresholdOverride.value
 const supportsAccountSchedulingThresholdOverride = computed(() =>
   supportsAccountSchedulingThresholdOverridePlatform(props.account?.platform)
+)
+const anthropicFableSchedulingThresholdOverrideEnabled = anthropicFableSchedulingThresholdOverride.enabled
+const anthropicFableSchedulingThresholdOverrideValue = anthropicFableSchedulingThresholdOverride.value
+const supportsAnthropicFableSchedulingThresholdOverride = computed(() =>
+  supportsAnthropicFableSchedulingThresholdAccount(props.account?.platform, props.account?.type)
 )
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-model-mapping')
@@ -3949,7 +4000,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   loadQuotaControlSettings(newAccount)
 
   loadTempUnschedRules(credentials)
-  loadAccountSchedulingThresholdOverride(newAccount.platform, credentials)
+  loadAccountSchedulingThresholdOverride(newAccount.platform, newAccount.type, credentials)
 
   // Load header override state for eligible account platforms/types
   headerOverrideEnabled.value = false
@@ -4389,6 +4440,16 @@ function supportsAccountSchedulingThresholdOverridePlatform(platform: Account['p
   return platform === 'openai' || platform === 'anthropic' || platform === 'grok'
 }
 
+// 7d / 7d_oi 窗口只来自 Anthropic OAuth 类账号的被动采样（后端
+// supportsAnthropicPassiveUsage 同样只认 oauth / setup-token），apikey 与 bedrock
+// 永远没有窗口样本，覆盖写进去也不会生效，入口就不该出现。
+function supportsAnthropicFableSchedulingThresholdAccount(
+  platform: Account['platform'] | undefined,
+  type: Account['type'] | undefined
+) {
+  return platform === 'anthropic' && (type === 'oauth' || type === 'setup-token')
+}
+
 function normalizeAccountSchedulingThresholdOverride(value: unknown): number | null {
   if (value === null || value === undefined || value === '') {
     return null
@@ -4408,43 +4469,76 @@ function clampAccountSchedulingThresholdOverride(value: unknown): number {
   return Math.min(100, Math.max(1, Math.trunc(Number(value) || 100)))
 }
 
+// 通用阈值覆盖与 Fable 阈值覆盖只差一个 credentials 键和一个适用性判定，其余（回填、
+// 关闭时发 null 删键、无变化不进 patch）逐字相同，因此按键参数化成一个工厂。
+function createSchedulingThresholdOverrideBinding(
+  credentialKey: string,
+  supportsAccount: (
+    platform: Account['platform'] | undefined,
+    type: Account['type'] | undefined
+  ) => boolean
+) {
+  const enabled = ref(false)
+  const value = ref(100)
+
+  const load = (
+    platform: Account['platform'] | undefined,
+    type: Account['type'] | undefined,
+    credentials: Record<string, unknown> | undefined
+  ) => {
+    if (!supportsAccount(platform, type)) {
+      enabled.value = false
+      value.value = 100
+      return
+    }
+    const stored = normalizeAccountSchedulingThresholdOverride(credentials?.[credentialKey])
+    enabled.value = stored !== null
+    value.value = stored ?? 100
+  }
+
+  const applyPatch = (
+    credentials: Record<string, unknown>,
+    currentCredentials: Record<string, unknown>,
+    platform: Account['platform'] | undefined = props.account?.platform,
+    type: Account['type'] | undefined = props.account?.type
+  ) => {
+    if (!supportsAccount(platform, type)) {
+      return
+    }
+    const current = normalizeAccountSchedulingThresholdOverride(currentCredentials[credentialKey])
+    if (!enabled.value) {
+      // 显式发 null 才能让后端删掉这个键；本来就没有则不进 patch。
+      if (current !== null) {
+        credentials[credentialKey] = null
+      }
+      return
+    }
+    const next = clampAccountSchedulingThresholdOverride(value.value)
+    if (current !== next) {
+      credentials[credentialKey] = next
+    }
+  }
+
+  return { enabled, value, load, applyPatch }
+}
+
 function loadAccountSchedulingThresholdOverride(
   platform: Account['platform'] | undefined,
+  type: Account['type'] | undefined,
   credentials: Record<string, unknown> | undefined
 ) {
-  if (!supportsAccountSchedulingThresholdOverridePlatform(platform)) {
-    accountSchedulingThresholdOverrideEnabled.value = false
-    accountSchedulingThresholdOverrideValue.value = 100
-    return
-  }
-  const value = normalizeAccountSchedulingThresholdOverride(
-    credentials?.[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY]
-  )
-  accountSchedulingThresholdOverrideEnabled.value = value !== null
-  accountSchedulingThresholdOverrideValue.value = value ?? 100
+  accountSchedulingThresholdOverride.load(platform, type, credentials)
+  anthropicFableSchedulingThresholdOverride.load(platform, type, credentials)
 }
 
 const applyAccountSchedulingThresholdOverridePatch = (
   credentials: Record<string, unknown>,
   currentCredentials: Record<string, unknown>,
-  platform: Account['platform'] | undefined = props.account?.platform
+  platform: Account['platform'] | undefined = props.account?.platform,
+  type: Account['type'] | undefined = props.account?.type
 ) => {
-  if (!supportsAccountSchedulingThresholdOverridePlatform(platform)) {
-    return
-  }
-  const current = normalizeAccountSchedulingThresholdOverride(
-    currentCredentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY]
-  )
-  if (!accountSchedulingThresholdOverrideEnabled.value) {
-    if (current !== null) {
-      credentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY] = null
-    }
-    return
-  }
-  const next = clampAccountSchedulingThresholdOverride(accountSchedulingThresholdOverrideValue.value)
-  if (current !== next) {
-    credentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY] = next
-  }
+  accountSchedulingThresholdOverride.applyPatch(credentials, currentCredentials, platform, type)
+  anthropicFableSchedulingThresholdOverride.applyPatch(credentials, currentCredentials, platform, type)
 }
 
 function loadTempUnschedRules(credentials?: Record<string, unknown>) {

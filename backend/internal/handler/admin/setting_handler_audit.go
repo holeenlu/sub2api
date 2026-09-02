@@ -821,16 +821,16 @@ func slotOf(s *service.DefaultPlatformQuotaSetting, win string) *float64 {
 
 // equalPlatformQuotaSettings reports whether two platform-quota maps are identical across all allowed slots.
 func equalAccountSchedulingThresholds(before, after map[string]int) bool {
-	for _, platform := range service.AllowedSchedulingThresholdPlatforms {
+	for _, scope := range service.AllowedSchedulingThresholdScopes {
 		beforeValue := 100
 		if before != nil {
-			if value, ok := before[platform]; ok {
+			if value, ok := before[scope]; ok {
 				beforeValue = value
 			}
 		}
 		afterValue := 100
 		if after != nil {
-			if value, ok := after[platform]; ok {
+			if value, ok := after[scope]; ok {
 				afterValue = value
 			}
 		}
