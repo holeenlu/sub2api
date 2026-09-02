@@ -18,7 +18,12 @@ ARG GOSUMDB=sum.golang.google.cn
 FROM ${NODE_IMAGE} AS frontend-builder
 
 WORKDIR /app/frontend
-ENV NODE_OPTIONS=--max-old-space-size=1536
+# `vue-tsc -b && vite build` peaked at 1530MB on 2026-08-30 and died against
+# this ceiling. Kept at the original 1536 so constrained runners are unaffected,
+# but promoted to a build arg: an ENV cannot be overridden by --build-arg, so
+# without this a roomier machine had no way to finish the build.
+ARG NODE_HEAP_MB=1536
+ENV NODE_OPTIONS=--max-old-space-size=${NODE_HEAP_MB}
 
 # Install pnpm. Keep this pinned to the lockfile-compatible major version so
 # Docker builds remain reproducible when pnpm changes config validation rules.

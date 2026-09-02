@@ -34,6 +34,9 @@ jobs:
       - name: Verify Go version
         run: |
           go version | grep -q 'go1.27.0'
+      - name: Verify generated ent code
+        working-directory: backend
+        run: make verify-generate
       - name: Unit tests
         working-directory: backend
         run: make test-unit
