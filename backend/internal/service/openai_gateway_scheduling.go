@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/gin-gonic/gin"
@@ -230,6 +231,18 @@ func resolveOpenAIUpstreamOriginator(c *gin.Context, isOfficialClient bool) stri
 	return "opencode"
 }
 
+// BindSelectionStickySession 以选号结果为准绑定粘性会话，理由见
+// GatewayService 的同名方法。
+func (s *OpenAIGatewayService) BindSelectionStickySession(ctx context.Context, selection *AccountSelectionResult, originGroupID *int64, sessionHash string, accountID int64) error {
+	return s.BindStickySession(ctx, SelectionGroupID(selection, originGroupID), sessionHash, accountID)
+}
+
+// BindSelectionStickySessionAfterProfitAdmission 是 BindSelectionStickySession
+// 的利润门版本。
+func (s *OpenAIGatewayService) BindSelectionStickySessionAfterProfitAdmission(ctx context.Context, selection *AccountSelectionResult, originGroupID *int64, sessionHash string, accountID int64) error {
+	return s.BindStickySessionAfterProfitAdmission(ctx, SelectionGroupID(selection, originGroupID), sessionHash, accountID)
+}
+
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *OpenAIGatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
 	if sessionHash == "" || accountID <= 0 {
@@ -254,8 +267,32 @@ func (s *OpenAIGatewayService) SelectAccountForModel(ctx context.Context, groupI
 
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
 // SelectAccountForModelWithExclusions 选择支持指定模型的账号，同时排除指定的账号。
+//
+// 选不出账号时沿「无可用账号兜底分组」链换组重试（见 scheduling_group_fallback.go）。
 func (s *OpenAIGatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
-	return s.selectAccountForModelWithExclusions(s.withOpenAIQuotaAutoPauseContext(ctx), groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, 0, "", false)
+	return runWithNoAccountFallback(ctx, s.noAccountFallbackChain(groupID), func(ctx context.Context, groupID *int64) (*Account, error) {
+		return s.selectAccountForModelWithExclusions(s.withOpenAIQuotaAutoPauseContext(ctx), groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, 0, "", false)
+	})
+}
+
+// noAccountFallbackChain 为一次选号构造兜底链。分组解析优先命中 ctx 里认证中间件
+// 放入的快照，再回源调度快照。
+//
+// 不给每一跳换 ctxkey.Group：OpenAI 族的利润门直接拿 ctx 分组当计费分组
+// （见 resolveOpenAIProfitControlGate），换掉会把借来的分组当成计费归属。
+// 跳内需要分组配置的地方各自按 groupID 回源，走的是调度快照缓存。
+func (s *OpenAIGatewayService) noAccountFallbackChain(groupID *int64) *noAccountFallbackChain {
+	return newNoAccountFallbackChain(groupID, s.loadGroupLiteForFallback, nil)
+}
+
+func (s *OpenAIGatewayService) loadGroupLiteForFallback(ctx context.Context, groupID int64) (*Group, error) {
+	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(group) && group.ID == groupID {
+		return group, nil
+	}
+	if s.schedulerSnapshot == nil {
+		return nil, nil
+	}
+	return s.schedulerSnapshot.GetGroupByIDLite(ctx, groupID)
 }
 
 // SelectAccountForTokenCount selects an account for a non-billable token-count
@@ -884,7 +921,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 		slog.Warn("channel pricing restriction blocked request",
 			"group_id", derefGroupID(groupID),
 			"model", requestedModel)
-		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
+		return nil, newChannelModelRestrictedError(requestedModel)
 	}
 
 	// 1. 尝试粘性会话命中
@@ -1102,12 +1139,21 @@ func (s *OpenAIGatewayService) isBetterAccount(candidate, current *Account) bool
 }
 
 // SelectAccountWithLoadAwareness selects an account with load-awareness and wait plan.
+//
+// 选不出账号时沿「无可用账号兜底分组」链换组重试（见 scheduling_group_fallback.go）。
 func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
+	return runWithNoAccountFallback(ctx, s.noAccountFallbackChain(groupID), func(ctx context.Context, groupID *int64) (*AccountSelectionResult, error) {
+		return s.selectAccountWithLoadAwarenessOnce(ctx, groupID, sessionHash, requestedModel, excludedIDs)
+	})
+}
+
+func (s *OpenAIGatewayService) selectAccountWithLoadAwarenessOnce(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
 	// 分组利润控制：legacy 公共入口同样装门，保证不经
 	// selectAccountWithScheduler 的调用方也无法绕过利润准入。
 	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
+	// SchedulingGroupID 由兜底链在返回成功前统一补记，这里不再自己写。
 	return s.selectAccountWithLoadAwareness(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
 }
 
@@ -1117,7 +1163,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		slog.Warn("channel pricing restriction blocked request",
 			"group_id", derefGroupID(groupID),
 			"model", requestedModel)
-		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
+		return nil, newChannelModelRestrictedError(requestedModel)
 	}
 
 	cfg := s.schedulingConfig()

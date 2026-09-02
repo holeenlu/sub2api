@@ -584,6 +584,32 @@ type AccountSelectionResult struct {
 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
 	profitGate *openAIProfitControlGate
+	// SchedulingGroupID 是本次选号实际使用的分组：Claude Code 降级或无可用账号
+	// 兜底生效时指向实际选号的那个分组，否则与入参分组一致。无可用账号兜底链
+	// 在返回成功前统一补记（见 stampSchedulingGroup），选号只在自己把分组解析
+	// 成了别的分组（Claude Code 降级）时才需要抢先赋值；handler 的粘性绑定必须
+	// 经 BindSelectionStickySession* 取用，否则借来的账号会被写进原分组的粘性
+	// 命名空间。注意这只影响调度侧；计费归属永远是 API Key 自己的分组。
+	SchedulingGroupID *int64
+}
+
+// stampSchedulingGroupID 由兜底链在成功返回前调用，补记实际选号分组；选号自己
+// 已经解析出分组的（Claude Code 降级）保持不动。
+func (r *AccountSelectionResult) stampSchedulingGroupID(groupID *int64) {
+	if r == nil || r.SchedulingGroupID != nil {
+		return
+	}
+	r.SchedulingGroupID = groupID
+}
+
+// SelectionGroupID 返回本次选号实际使用的分组：结果带 SchedulingGroupID 时以它
+// 为准，否则退回入参分组（不经 *Once 选号构造的结果，如按 previous_response_id
+// 直接命中的账号）。
+func SelectionGroupID(selection *AccountSelectionResult, origin *int64) *int64 {
+	if selection != nil && selection.SchedulingGroupID != nil {
+		return selection.SchedulingGroupID
+	}
+	return origin
 }
 
 // ProfitGateActive 报告本次选号是否处于利润门之下。
@@ -950,6 +976,20 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	}
 
 	return ""
+}
+
+// BindSelectionStickySession 以选号结果为准绑定粘性会话：账号从哪个分组选出，
+// 就绑进哪个分组的命名空间。handler 手里只有 API Key 自己的分组，而无可用账号
+// 兜底借用别的分组账号池后两者不再相同，且调用点看不出差别——所以有 selection
+// 在手的绑定点一律走这里，不再自己传分组。
+func (s *GatewayService) BindSelectionStickySession(ctx context.Context, selection *AccountSelectionResult, originGroupID *int64, sessionHash string, accountID int64) error {
+	return s.BindStickySession(ctx, SelectionGroupID(selection, originGroupID), sessionHash, accountID)
+}
+
+// BindSelectionStickySessionAfterProfitAdmission 是 BindSelectionStickySession
+// 的利润门版本。
+func (s *GatewayService) BindSelectionStickySessionAfterProfitAdmission(ctx context.Context, selection *AccountSelectionResult, originGroupID *int64, sessionHash string, accountID int64) error {
+	return s.BindStickySessionAfterProfitAdmission(ctx, SelectionGroupID(selection, originGroupID), sessionHash, accountID)
 }
 
 // BindStickySession sets session -> account binding with standard TTL.

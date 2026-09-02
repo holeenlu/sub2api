@@ -16,6 +16,10 @@ type GroupModelsListConfig = domain.GroupModelsListConfig
 type GroupCodexModelsManifestConfig = domain.GroupCodexModelsManifestConfig
 type ReasoningEffortMapping = domain.ReasoningEffortMapping
 
+// MaxNoAccountFallbackHops 限制一条无可用账号兜底链最多走几跳。保存时按它拒绝
+// 过长的链，运行时按它截断，两边口径一致，管理员配了的兜底不会被静默丢掉。
+const MaxNoAccountFallbackHops = 3
+
 type Group struct {
 	ID             int64
 	Name           string
@@ -81,6 +85,10 @@ type Group struct {
 	FallbackGroupID *int64
 	// 无效请求兜底分组（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64
+	// 无可用账号兜底分组：本分组选不出可用账号（封禁 / 配额耗尽 / 限流 /
+	// 不可调度）时借用该分组的账号池。仅借账号，计费仍归本分组。所有平台可用，
+	// 但目标分组必须同平台（选号本身按平台过滤，异平台配了也选不出账号）。
+	FallbackGroupIDOnNoAccount *int64
 
 	// 模型路由配置
 	// key: 模型匹配模式（支持 * 通配符，如 "claude-opus-*"）

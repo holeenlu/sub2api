@@ -207,6 +207,11 @@ func (Group) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("无效请求兜底使用的分组 ID"),
+		// 无可用账号兜底 (added by migration 235)
+		field.Int64("fallback_group_id_on_no_account").
+			Optional().
+			Nillable().
+			Comment("当前分组无可用账号时借用账号池的分组 ID"),
 
 		// 模型路由配置 (added by migration 040)
 		field.JSON("model_routing", map[string][]int64{}).

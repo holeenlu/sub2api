@@ -31,7 +31,15 @@ func (s *GatewayService) SelectAccountForModel(ctx context.Context, groupID *int
 }
 
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
+//
+// 选不出账号时沿「无可用账号兜底分组」链换组重试（见 scheduling_group_fallback.go）。
 func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
+	return runWithNoAccountFallback(ctx, s.noAccountFallbackChain(groupID), func(ctx context.Context, groupID *int64) (*Account, error) {
+		return s.selectAccountForModelWithExclusionsOnce(ctx, groupID, sessionHash, requestedModel, excludedIDs)
+	})
+}
+
+func (s *GatewayService) selectAccountForModelWithExclusionsOnce(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
 	// 优先检查 context 中的强制平台（/antigravity 路由）
 	var platform string
 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)
@@ -72,7 +80,7 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 		slog.Warn("channel pricing restriction blocked request",
 			"group_id", derefGroupID(groupID),
 			"model", requestedModel)
-		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
+		return nil, newChannelModelRestrictedError(requestedModel)
 	}
 
 	// anthropic/gemini 分组支持混合调度（包含启用了 mixed_scheduling 的 antigravity 账户）
@@ -97,7 +105,35 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 // SelectAccountWithLoadAwareness selects account with load-awareness and wait plan.
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // sub2apiUserID: 系统用户 ID，用于二维亲和调度
+//
+// 选不出账号时沿「无可用账号兜底分组」链换组重试（见 scheduling_group_fallback.go）。
+// 结果的 SchedulingGroupID 指向实际选号的分组，handler 的粘性绑定必须据此取分组。
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
+	return runWithNoAccountFallback(ctx, s.noAccountFallbackChain(groupID), func(ctx context.Context, groupID *int64) (*AccountSelectionResult, error) {
+		return s.selectAccountWithLoadAwarenessOnce(ctx, groupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
+	})
+}
+
+// selectAccountWithLoadAwarenessOnce 在单个分组内跑一次完整选号。
+func (s *GatewayService) selectAccountWithLoadAwarenessOnce(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
+	// 检查 Claude Code 客户端限制（可能会替换 groupID 为降级分组）
+	group, groupID, err := s.checkClaudeCodeRestriction(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	selection, err := s.selectAccountWithLoadAwarenessInGroup(ctx, group, groupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
+	if err != nil {
+		return nil, err
+	}
+	// Claude Code 降级把分组换成了别的分组：账号真正的来源是降级分组，兜底链
+	// 只知道入参分组，所以这里必须抢在它前面记上。
+	selection.stampSchedulingGroupID(groupID)
+	return selection, nil
+}
+
+// selectAccountWithLoadAwarenessInGroup 是选号主体；group/groupID 已经过 Claude
+// Code 限制解析（group 在无分组或强制平台模式下为 nil）。
+func (s *GatewayService) selectAccountWithLoadAwarenessInGroup(ctx context.Context, group *Group, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
 	// 调试日志：记录调度入口参数
 	excludedIDsList := make([]int64, 0, len(excludedIDs))
 	for id := range excludedIDs {
@@ -111,11 +147,6 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 	cfg := s.schedulingConfig()
 
-	// 检查 Claude Code 客户端限制（可能会替换 groupID 为降级分组）
-	group, groupID, err := s.checkClaudeCodeRestriction(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
 	ctx = s.withGroupContext(ctx, group)
 	ctx = s.withGatewayProfitControlGate(ctx, groupID)
 
@@ -125,7 +156,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		slog.Warn("channel pricing restriction blocked request",
 			"group_id", derefGroupID(groupID),
 			"model", requestedModel)
-		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
+		return nil, newChannelModelRestrictedError(requestedModel)
 	}
 
 	var stickyAccountID int64
@@ -862,6 +893,21 @@ func (s *GatewayService) resolveGroupByID(ctx context.Context, groupID int64) (*
 }
 
 func (s *GatewayService) ResolveGroupByID(ctx context.Context, groupID int64) (*Group, error) {
+	return s.resolveGroupByID(ctx, groupID)
+}
+
+// noAccountFallbackChain 为一次选号构造兜底链。分组解析复用 resolveGroupByID
+// （ctx 快照优先，再回源），换组后把目标分组放进 ctx，跳内的 Claude Code 限制
+// 解析与利润门装配都命中 ctx，不再回源。计费分组由 WithGatewayTokenRequestPricing
+// 在入口钉住，不受 ctx 分组替换影响。
+func (s *GatewayService) noAccountFallbackChain(groupID *int64) *noAccountFallbackChain {
+	return newNoAccountFallbackChain(groupID, s.loadGroupLiteForFallback, s.withGroupContext)
+}
+
+func (s *GatewayService) loadGroupLiteForFallback(ctx context.Context, groupID int64) (*Group, error) {
+	if s.groupRepo == nil {
+		return s.groupFromContext(ctx, groupID), nil
+	}
 	return s.resolveGroupByID(ctx, groupID)
 }
 

@@ -1455,15 +1455,18 @@ func (s *OpenAIGatewayService) bindHTTPResponseAccount(ctx context.Context, c *g
 	if store == nil {
 		return
 	}
-	groupID := getOpenAIGroupIDFromContext(c)
+	// 账号粘连按选号分组分命名空间（兜底借用别的分组账号池时与 API Key 分组
+	// 不同），响应归属仍按 API Key 分组：入口的续话鉴权就是按后者查的。
+	accountGroupID := openAIResponseAccountGroupID(c)
+	ownerGroupID := getOpenAIGroupIDFromContext(c)
 	ttl := s.openAIWSResponseStickyTTL()
-	logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, store.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
+	logOpenAIWSBindResponseAccountWarn(accountGroupID, account.ID, responseID, store.BindResponseAccount(ctx, accountGroupID, responseID, account.ID, ttl))
 	if rawOwner, ok := c.Get(openAIHTTPResponseOwnerContextKey); ok {
 		if owner, ok := rawOwner.(openAIHTTPResponseOwner); ok && owner.userID > 0 && owner.apiKeyID > 0 {
-			if err := s.BindOpenAIHTTPResponseOwner(ctx, groupID, responseID, owner.userID, owner.apiKeyID); err != nil {
+			if err := s.BindOpenAIHTTPResponseOwner(ctx, ownerGroupID, responseID, owner.userID, owner.apiKeyID); err != nil {
 				logger.L().Warn(
 					"openai.http_bind_response_owner_failed",
-					zap.Int64("group_id", groupID),
+					zap.Int64("group_id", ownerGroupID),
 					zap.Int64("account_id", account.ID),
 					zap.Int64("user_id", owner.userID),
 					zap.Int64("api_key_id", owner.apiKeyID),

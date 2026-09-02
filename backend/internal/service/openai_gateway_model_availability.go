@@ -17,6 +17,9 @@ import (
 // Safe to call on the error path: returns {true,true} on any internal
 // failure or when the inputs preclude meaningful diagnosis (empty model,
 // nil service), so callers stay on the 503 fallback branch.
+//
+// The diagnosis spans the no-account fallback chain, matching the groups
+// account selection would have tried; see diagnoseAcrossNoAccountFallback.
 func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	ctx context.Context,
 	groupID *int64,
@@ -35,6 +38,25 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	}
 
 	platform = NormalizeOpenAICompatiblePlatform(platform)
+	origin := s.diagnoseModelAvailabilityInGroup(ctx, groupID, requestedModel, platform)
+	if origin.isFinalWithoutFallbackChain() {
+		return origin
+	}
+	return diagnoseAcrossNoAccountFallback(ctx, s.noAccountFallbackChain(groupID), origin,
+		func(ctx context.Context, hopGroupID *int64) ModelAvailabilityDiagnosis {
+			return s.diagnoseModelAvailabilityInGroup(ctx, hopGroupID, requestedModel, platform)
+		})
+}
+
+// diagnoseModelAvailabilityInGroup is DiagnoseModelAvailabilityForPlatform for
+// a single group, with the input guards and platform normalisation already
+// applied.
+func (s *OpenAIGatewayService) diagnoseModelAvailabilityInGroup(
+	ctx context.Context,
+	groupID *int64,
+	requestedModel string,
+	platform string,
+) ModelAvailabilityDiagnosis {
 	queryGroupID := groupID
 	includeGrouped := false
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {

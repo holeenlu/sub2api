@@ -99,6 +99,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetClaudeCodeOnly(groupIn.ClaudeCodeOnly).
 		SetNillableFallbackGroupID(groupIn.FallbackGroupID).
 		SetNillableFallbackGroupIDOnInvalidRequest(groupIn.FallbackGroupIDOnInvalidRequest).
+		SetNillableFallbackGroupIDOnNoAccount(groupIn.FallbackGroupIDOnNoAccount).
 		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
 		SetMcpXMLInject(groupIn.MCPXMLInject).
 		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
@@ -386,6 +387,12 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		builder = builder.SetFallbackGroupIDOnInvalidRequest(*groupIn.FallbackGroupIDOnInvalidRequest)
 	} else {
 		builder = builder.ClearFallbackGroupIDOnInvalidRequest()
+	}
+	// 处理 FallbackGroupIDOnNoAccount：nil 时清除，否则设置
+	if groupIn.FallbackGroupIDOnNoAccount != nil {
+		builder = builder.SetFallbackGroupIDOnNoAccount(*groupIn.FallbackGroupIDOnNoAccount)
+	} else {
+		builder = builder.ClearFallbackGroupIDOnNoAccount()
 	}
 
 	// 处理 ModelRouting：nil 时清除，否则设置

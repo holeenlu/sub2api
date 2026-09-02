@@ -1190,6 +1190,11 @@ export default {
         hint: '仅当上游明确返回 prompt too long 时才会触发，留空表示不兜底',
         noFallback: '不兜底'
       },
+      noAccountFallback: {
+        title: '无可用账号兜底分组',
+        hint: '当前分组选不出可用账号（封禁 / 配额耗尽 / 限流 / 不可调度）时，自动借用该分组的账号池；计费仍按当前分组结算，只能选同平台分组，留空表示不兜底',
+        noFallback: '不兜底'
+      },
       copyAccounts: {
         title: '从分组复制账号',
         tooltip: '选择一个或多个相同平台的分组，创建后会自动将这些分组的所有账号绑定到新分组（去重）。',
