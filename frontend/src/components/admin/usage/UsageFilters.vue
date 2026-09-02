@@ -217,7 +217,7 @@ interface Props {
   modelOptions?: string[]
   /**
    * errors 模式:隐藏用量专属字段/按钮,显示错误类型+状态码(错误请求 tab 用)
-   * ranking 模式:同 usage 但隐藏计费模式筛选与清理/导出按钮(用户排行 tab 用)
+   * ranking 模式:同 usage 但隐藏计费模式筛选与清理/导出按钮(用户排行 / API 密钥排行 tab 用)
    */
   mode?: 'usage' | 'errors' | 'ranking'
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
@@ -363,9 +363,17 @@ const debounceUserSearch = () => {
   }, 300)
 }
 
+const clearPendingApiKeySearch = () => {
+  if (apiKeySearchTimeout) {
+    clearTimeout(apiKeySearchTimeout)
+    apiKeySearchTimeout = null
+  }
+}
+
 const debounceApiKeySearch = () => {
-  if (apiKeySearchTimeout) clearTimeout(apiKeySearchTimeout)
+  clearPendingApiKeySearch()
   apiKeySearchTimeout = setTimeout(async () => {
+    apiKeySearchTimeout = null
     try {
       apiKeyResults.value = await adminAPI.usage.searchApiKeys(
         filters.value.user_id,
@@ -534,6 +542,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearPendingUserSearch()
+  clearPendingApiKeySearch()
   document.removeEventListener('click', onDocumentClick)
 })
 
@@ -545,7 +554,17 @@ const setUserKeyword = (email: string) => {
   showUserDropdown.value = false
 }
 
+// 与 setUserKeyword 对称：API 密钥排行下钻时把 Key 名回填到筛选栏。
+// 现有 watch(filters.api_key_id) 只负责「变空时清关键词」，不会反向回填；
+// 同时取消挂起的搜索，否则 300ms 后旧关键词的结果会把下拉弹出来。
+const setApiKeyKeyword = (name: string) => {
+  clearPendingApiKeySearch()
+  apiKeyKeyword.value = name
+  apiKeyResults.value = []
+  showApiKeyDropdown.value = false
+}
+
 const getUserSearchRevision = () => userSearchSequence
 
-defineExpose({ getUserSearchRevision, setUserKeyword })
+defineExpose({ getUserSearchRevision, setUserKeyword, setApiKeyKeyword })
 </script>
