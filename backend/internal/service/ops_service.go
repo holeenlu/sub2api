@@ -595,6 +595,7 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		out.Stage = truncateString(strings.TrimSpace(out.Stage), 64)
 		out.Scope = truncateString(strings.TrimSpace(out.Scope), 64)
 		out.Reason = truncateString(strings.TrimSpace(out.Reason), 128)
+		out.RetryAction = truncateString(strings.TrimSpace(out.RetryAction), 64)
 
 		if out.AccountID < 0 {
 			out.AccountID = 0
@@ -604,6 +605,18 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		}
 		if out.AtUnixMs < 0 {
 			out.AtUnixMs = 0
+		}
+		if out.RetryCount < 0 {
+			out.RetryCount = 0
+		}
+		if out.RetryLimit < 0 {
+			out.RetryLimit = 0
+		}
+		if out.SwitchCount < 0 {
+			out.SwitchCount = 0
+		}
+		if out.RetryDelayMs < 0 {
+			out.RetryDelayMs = 0
 		}
 
 		msg := sanitizeUpstreamErrorMessage(strings.TrimSpace(out.Message))

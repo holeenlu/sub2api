@@ -2,13 +2,103 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestUpstreamFailoverErrorIncludesUpstreamMessage(t *testing.T) {
+	err := &UpstreamFailoverError{
+		StatusCode:   http.StatusBadGateway,
+		ResponseBody: []byte(`{"error":{"message":"upstream overloaded","type":"server_error"}}`),
+	}
+	require.Equal(t, "upstream error: 502 (failover): upstream overloaded", err.Error())
+}
+
+func TestAnnotateLastOpsUpstreamFailureAndRetryDecision(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	RecordOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		AccountID:            42,
+		UpstreamStatusCode:   429,
+		Kind:                 "failover",
+		UpstreamResponseBody: `{"error":{"message":"rate limited"}}`,
+	})
+	failoverErr := &UpstreamFailoverError{
+		StatusCode:             http.StatusTooManyRequests,
+		ResponseBody:           []byte(`{"error":{"message":"rate limited"}}`),
+		Stage:                  GatewayFailureStageInference,
+		Scope:                  GatewayFailureScopeAccount,
+		Reason:                 GatewayFailureReason("upstream_rate_limit"),
+		RetryableOnSameAccount: true,
+	}
+	AnnotateLastOpsUpstreamFailure(c, failoverErr)
+	AnnotateLastOpsUpstreamError(c, "same_account_retry", 2, 3, 1, 500*time.Millisecond, true)
+
+	value, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := value.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.Len(t, events, 1)
+	require.Equal(t, "rate limited", events[0].Message)
+	require.Equal(t, string(GatewayFailureStageInference), events[0].Stage)
+	require.Equal(t, string(GatewayFailureScopeAccount), events[0].Scope)
+	require.Equal(t, "upstream_rate_limit", events[0].Reason)
+	require.Equal(t, "same_account_retry", events[0].RetryAction)
+	require.Equal(t, 2, events[0].RetryCount)
+	require.Equal(t, 3, events[0].RetryLimit)
+	require.Equal(t, 1, events[0].SwitchCount)
+	require.Equal(t, int64(500), events[0].RetryDelayMs)
+	require.True(t, events[0].Retryable)
+}
+
+func TestMarkLastOpsUpstreamErrorExhausted(t *testing.T) {
+	first := &OpsUpstreamErrorEvent{RetryAction: "account_switch", SwitchCount: 1}
+	last := &OpsUpstreamErrorEvent{
+		RetryAction: "same_account_retry", RetryCount: 2, RetryLimit: 3,
+		SwitchCount: 4, RetryDelayMs: 500, Retryable: true,
+	}
+	c, _ := gin.CreateTestContext(nil)
+	c.Set(OpsUpstreamErrorsKey, []*OpsUpstreamErrorEvent{first, nil, last, nil})
+	MarkLastOpsUpstreamErrorExhausted(c)
+	require.Equal(t, "account_switch", first.RetryAction)
+	require.Equal(t, 1, first.SwitchCount)
+	require.Equal(t, "exhausted", last.RetryAction)
+	require.Equal(t, 2, last.RetryCount)
+	require.Equal(t, 3, last.RetryLimit)
+	require.Equal(t, 4, last.SwitchCount)
+	require.Zero(t, last.RetryDelayMs)
+	require.False(t, last.Retryable)
+}
+
+func TestOpsRetryAnnotationsWithoutEvent(t *testing.T) {
+	empty, _ := gin.CreateTestContext(nil)
+	invalid, _ := gin.CreateTestContext(nil)
+	invalid.Set(OpsUpstreamErrorsKey, "invalid")
+	nilEvents, _ := gin.CreateTestContext(nil)
+	nilEvents.Set(OpsUpstreamErrorsKey, []*OpsUpstreamErrorEvent{nil})
+	for _, c := range []*gin.Context{nil, empty, invalid, nilEvents} {
+		require.NotPanics(t, func() {
+			MarkLastOpsUpstreamErrorExhausted(c)
+			AnnotateLastOpsUpstreamError(c, "exhausted", 0, 0, 0, 0, false)
+		})
+	}
+}
+
+func TestAnnotateLastOpsUpstreamErrorClearsPreviousDelay(t *testing.T) {
+	for _, delay := range []time.Duration{0, -time.Second} {
+		c, _ := gin.CreateTestContext(nil)
+		event := &OpsUpstreamErrorEvent{RetryDelayMs: 500, Retryable: true}
+		c.Set(OpsUpstreamErrorsKey, []*OpsUpstreamErrorEvent{event})
+		AnnotateLastOpsUpstreamError(c, "exhausted", 2, 3, 4, delay, false)
+		require.Zero(t, event.RetryDelayMs)
+		require.False(t, event.Retryable)
+	}
+}
 
 func TestSafeUpstreamURL(t *testing.T) {
 	tests := []struct {

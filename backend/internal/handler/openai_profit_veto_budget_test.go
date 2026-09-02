@@ -55,7 +55,7 @@ func TestOpenAIProfitVetoLoopTerminates(t *testing.T) {
 // TestProfitVetoBudgetSharedWithFailoverState 钉死两条路径（FailoverState 与
 // OpenAI 独立计数器）使用同一上限语义，避免日后单边漂移。
 func TestProfitVetoBudgetSharedWithFailoverState(t *testing.T) {
-	fs := NewFailoverState(10, false)
+	fs := NewFailoverState(10, false, nil)
 	failed := make(map[int64]struct{})
 	count := 0
 

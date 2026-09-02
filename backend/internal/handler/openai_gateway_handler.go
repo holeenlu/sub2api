@@ -871,6 +871,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
 							sameAccountRetryCount[account.ID]++
 							retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
+							service.AnnotateLastOpsUpstreamFailure(c, failoverErr)
+							service.AnnotateLastOpsUpstreamError(c, "same_account_retry", sameAccountRetryCount[account.ID], retryLimit, switchCount, retryDelay, true)
 							reqLog.Warn("openai.pool_mode_same_account_retry",
 								zap.Int64("account_id", account.ID),
 								zap.Int("upstream_status", failoverErr.StatusCode),
@@ -894,6 +896,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						return
 					}
 					switchCount++
+					service.AnnotateLastOpsUpstreamFailure(c, failoverErr)
+					service.AnnotateLastOpsUpstreamError(c, "account_switch", 0, account.GetPoolModeRetryCount(), switchCount, 0, true)
 					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
@@ -1423,6 +1427,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
 							sameAccountRetryCount[account.ID]++
 							retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
+							service.AnnotateLastOpsUpstreamFailure(c, failoverErr)
+							service.AnnotateLastOpsUpstreamError(c, "same_account_retry", sameAccountRetryCount[account.ID], retryLimit, switchCount, retryDelay, true)
 							reqLog.Warn("openai_messages.pool_mode_same_account_retry",
 								zap.Int64("account_id", account.ID),
 								zap.Int("upstream_status", failoverErr.StatusCode),
@@ -1446,6 +1452,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 					switchCount++
+					service.AnnotateLastOpsUpstreamFailure(c, failoverErr)
+					service.AnnotateLastOpsUpstreamError(c, "account_switch", 0, account.GetPoolModeRetryCount(), switchCount, 0, true)
 					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
@@ -3269,6 +3277,8 @@ func (h *OpenAIGatewayHandler) handleConcurrencyError(c *gin.Context, err error,
 }
 
 func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
+	service.AnnotateLastOpsUpstreamFailure(c, failoverErr)
+	service.MarkLastOpsUpstreamErrorExhausted(c)
 	if failoverErr == nil {
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
 		return

@@ -402,11 +402,128 @@ type OpsUpstreamErrorEvent struct {
 	Message string `json:"message,omitempty"`
 	Detail  string `json:"detail,omitempty"`
 
+	// Retry audit fields describe what the gateway did after this attempt.
+	// They live inside upstream_errors so recovered attempts remain visible
+	// without turning each retry into a failed request-level Ops row.
+	RetryAction  string `json:"retry_action,omitempty"`
+	RetryCount   int    `json:"retry_count,omitempty"`
+	RetryLimit   int    `json:"retry_limit,omitempty"`
+	SwitchCount  int    `json:"switch_count,omitempty"`
+	RetryDelayMs int64  `json:"retry_delay_ms,omitempty"`
+	Retryable    bool   `json:"retryable,omitempty"`
+
 	// SkipMonitoring is request-local rule state. It is intentionally excluded
 	// from persisted attempt JSON. The logger consults it only when this event is
 	// the final client-visible failure; recovered attempts remain provider-health
 	// telemetry and do not count as failed requests.
 	SkipMonitoring bool `json:"-"`
+}
+
+// RecordOpsUpstreamError records one upstream attempt from handler-layer code.
+// Keeping the append operation here ensures the same sanitization and
+// skip-monitoring behavior is used by service and handler paths.
+func RecordOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
+	appendOpsUpstreamError(c, ev)
+}
+
+// AnnotateLastOpsUpstreamError adds the retry decision made after the latest
+// upstream attempt. The annotation is request-local and is serialized with the
+// attempt event when OpsErrorLoggerMiddleware persists the request.
+func AnnotateLastOpsUpstreamError(c *gin.Context, action string, retryCount, retryLimit, switchCount int, retryDelay time.Duration, retryable bool) {
+	event := lastOpsUpstreamError(c)
+	if event == nil {
+		return
+	}
+	event.RetryAction = strings.TrimSpace(action)
+	event.RetryCount = maxNonNegativeInt(retryCount)
+	event.RetryLimit = maxNonNegativeInt(retryLimit)
+	event.SwitchCount = maxNonNegativeInt(switchCount)
+	event.RetryDelayMs = 0
+	if retryDelay > 0 {
+		event.RetryDelayMs = retryDelay.Milliseconds()
+	}
+	event.Retryable = retryable
+}
+
+// MarkLastOpsUpstreamErrorExhausted preserves the scheduler's attempt counts
+// when a protocol handler renders the terminal error without retry state.
+func MarkLastOpsUpstreamErrorExhausted(c *gin.Context) {
+	if event := lastOpsUpstreamError(c); event != nil {
+		event.RetryAction = "exhausted"
+		event.RetryDelayMs = 0
+		event.Retryable = false
+	}
+}
+
+func lastOpsUpstreamError(c *gin.Context) *OpsUpstreamErrorEvent {
+	if c == nil {
+		return nil
+	}
+	v, ok := c.Get(OpsUpstreamErrorsKey)
+	if !ok {
+		return nil
+	}
+	events, ok := v.([]*OpsUpstreamErrorEvent)
+	if !ok {
+		return nil
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i] != nil {
+			return events[i]
+		}
+	}
+	return nil
+}
+
+// AnnotateLastOpsUpstreamFailure copies structured failover metadata onto the
+// latest attempt. Forwarders already record the response body; this keeps the
+// persisted event useful even when the handler later maps the error to a
+// generic client-facing response.
+func AnnotateLastOpsUpstreamFailure(c *gin.Context, failoverErr *UpstreamFailoverError) {
+	if c == nil || failoverErr == nil {
+		return
+	}
+	v, ok := c.Get(OpsUpstreamErrorsKey)
+	if !ok {
+		return
+	}
+	events, ok := v.([]*OpsUpstreamErrorEvent)
+	if !ok {
+		return
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i] == nil {
+			continue
+		}
+		event := events[i]
+		if event.UpstreamStatusCode == 0 && failoverErr.StatusCode > 0 {
+			event.UpstreamStatusCode = failoverErr.StatusCode
+		}
+		if event.Message == "" {
+			event.Message = strings.TrimSpace(extractUpstreamErrorMessage(failoverErr.ResponseBody))
+			if event.Message == "" {
+				event.Message = strings.TrimSpace(failoverErr.ClientMessage)
+			}
+			event.Message = sanitizeUpstreamErrorMessage(event.Message)
+		}
+		if event.Stage == "" {
+			event.Stage = string(failoverErr.Stage)
+		}
+		if event.Scope == "" {
+			event.Scope = string(failoverErr.Scope)
+		}
+		if event.Reason == "" {
+			event.Reason = string(failoverErr.Reason)
+		}
+		return
+	}
+}
+
+func maxNonNegativeInt(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
 }
 
 const (

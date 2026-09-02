@@ -158,9 +158,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		selectionSessionHash = "gemini:" + selectionSessionHash
 	}
 	// 3. Account selection + failover loop
-	fs := NewFailoverState(h.maxAccountSwitches, false)
+	fs := NewFailoverState(h.maxAccountSwitches, false, c)
 	if groupPlatform == service.PlatformGemini {
-		fs = NewFailoverState(h.maxAccountSwitchesGemini, false)
+		fs = NewFailoverState(h.maxAccountSwitchesGemini, false, c)
 	}
 
 	for {
@@ -376,6 +376,10 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	}
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+		service.AnnotateLastOpsUpstreamFailure(c, lastErr)
+		// 覆盖上一次写下的 account_switch：本次请求到此为止，不再换号。
+		// 少了这一步，ops 里最后一条事件会停在「切换中」，与实际结果矛盾。
+		service.MarkLastOpsUpstreamErrorExhausted(c)
 	}
 	if lastErr != nil && lastErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(lastErr)
@@ -390,14 +394,21 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		h.chatCompletionsErrorResponse(c, status, "server_error", lastErr.ClientMessage)
 		return
 	}
-	statusCode := http.StatusBadGateway
-	if lastErr != nil && lastErr.StatusCode > 0 {
-		statusCode = lastErr.StatusCode
+	// 上游原始状态码进 ops，映射后的才给客户端——与 /v1/messages 的
+	// handleFailoverExhausted 同一套约定。两者若合用一个变量，ops 里记的就是
+	// 网关自己的 502/503，排障时看不出上游到底返回了什么。
+	upstreamStatus := 0
+	if lastErr != nil {
+		upstreamStatus = lastErr.StatusCode
+	}
+	statusCode, errType, errMessage := http.StatusBadGateway, "server_error", "All available accounts exhausted"
+	if upstreamStatus > 0 {
+		statusCode, errType, errMessage = h.mapUpstreamError(upstreamStatus)
 	}
 	if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
-		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
+		service.SetOpsUpstreamError(c, upstreamStatus, service.OpenAISilentRefusalClientMessage(), "")
 		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
 		return
 	}
-	h.chatCompletionsErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")
+	h.chatCompletionsErrorResponse(c, statusCode, errType, errMessage)
 }

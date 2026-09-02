@@ -139,16 +139,23 @@ type FailoverState struct {
 	profitVetoedAccountIDs map[int64]struct{}
 	// profitVetoCount 本次请求累计的利润否决次数，用于 maxProfitVetoAttempts 上限。
 	profitVetoCount int
+	request         *gin.Context
 }
 
-// NewFailoverState 创建 failover 状态
-func NewFailoverState(maxSwitches int, hasBoundSession bool) *FailoverState {
+// NewFailoverState 创建 failover 状态。
+//
+// request 是必填参数（可以传 nil）：重试审计要把每一步动作写回该请求的
+// upstream_errors 事件。做成可变参数的话，新增入口漏传不会有编译错误也不会报错，
+// 只是 ops 里静默少一批字段——那种缺失没人会发现。
+func NewFailoverState(maxSwitches int, hasBoundSession bool, request *gin.Context) *FailoverState {
+	requestContext := request
 	return &FailoverState{
 		MaxSwitches:            maxSwitches,
 		FailedAccountIDs:       make(map[int64]struct{}),
 		SameAccountRetryCount:  make(map[int64]int),
 		hasBoundSession:        hasBoundSession,
 		profitVetoedAccountIDs: make(map[int64]struct{}),
+		request:                requestContext,
 	}
 }
 
@@ -204,6 +211,7 @@ func (s *FailoverState) HandleFailoverError(
 		return FailoverCanceled
 	}
 	s.LastFailoverErr = failoverErr
+	service.AnnotateLastOpsUpstreamFailure(s.request, failoverErr)
 	if failoverErr == nil || !failoverErr.ShouldRetryNextAccount() {
 		return FailoverExhausted
 	}
@@ -220,6 +228,7 @@ func (s *FailoverState) HandleFailoverError(
 	if sameAccountRetry {
 		s.SameAccountRetryCount[accountID]++
 		retryDelay := sameAccountRetryDelayFor(failoverErr, s.SameAccountRetryCount[accountID])
+		service.AnnotateLastOpsUpstreamError(s.request, "same_account_retry", s.SameAccountRetryCount[accountID], retryLimit, s.SwitchCount, retryDelay, true)
 		logger.FromContext(ctx).Warn("gateway.failover_same_account_retry",
 			zap.Int64("account_id", accountID),
 			zap.Int("upstream_status", failoverErr.StatusCode),
@@ -243,11 +252,13 @@ func (s *FailoverState) HandleFailoverError(
 
 	// 检查是否耗尽
 	if s.SwitchCount >= s.MaxSwitches {
+		service.AnnotateLastOpsUpstreamError(s.request, "exhausted", retryCount, retryLimit, s.SwitchCount, 0, false)
 		return FailoverExhausted
 	}
 
 	// 递增切换计数
 	s.SwitchCount++
+	service.AnnotateLastOpsUpstreamError(s.request, "account_switch", 0, retryLimit, s.SwitchCount, 0, true)
 	logger.FromContext(ctx).Warn("gateway.failover_switch_account",
 		zap.Int64("account_id", accountID),
 		zap.Int("upstream_status", failoverErr.StatusCode),
@@ -307,6 +318,7 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 			zap.Int("switch_count", s.SwitchCount),
 			zap.Int("max_switches", s.MaxSwitches),
 		)
+		service.AnnotateLastOpsUpstreamError(s.request, "pool_backoff_retry", 0, 0, s.SwitchCount, singleAccountBackoffDelay, true)
 		s.FailedAccountIDs = make(map[int64]struct{})
 		// 利润门否决的账号不参与退避重试的解除：判定依据（冻结的下游倍率）在
 		// 同一请求内不变，放它们回池只会被再次否决。
