@@ -2398,6 +2398,7 @@ type selectionFailureStats struct {
 	Eligible           int
 	Excluded           int
 	Unschedulable      int
+	AccountCooldown    int
 	PlatformFiltered   int
 	ModelUnsupported   int
 	ModelRateLimited   int
@@ -2426,7 +2427,7 @@ func (s *GatewayService) logDetailedSelectionFailure(
 	stats := s.collectSelectionFailureStats(ctx, accounts, requestedModel, platform, excludedIDs, allowMixedScheduling)
 	logger.LegacyPrintf(
 		"service.gateway",
-		"[SelectAccountDetailed] group_id=%v model=%s platform=%s session=%s total=%d eligible=%d excluded=%d unschedulable=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d profit_threshold=%d profit_invalid_account_rate=%d sample_platform_filtered=%v sample_model_unsupported=%v sample_model_rate_limited=%v",
+		"[SelectAccountDetailed] group_id=%v model=%s platform=%s session=%s total=%d eligible=%d excluded=%d unschedulable=%d account_cooldown=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d profit_threshold=%d profit_invalid_account_rate=%d sample_platform_filtered=%v sample_model_unsupported=%v sample_model_rate_limited=%v",
 		derefGroupID(groupID),
 		requestedModel,
 		platform,
@@ -2435,6 +2436,7 @@ func (s *GatewayService) logDetailedSelectionFailure(
 		stats.Eligible,
 		stats.Excluded,
 		stats.Unschedulable,
+		stats.AccountCooldown,
 		stats.PlatformFiltered,
 		stats.ModelUnsupported,
 		stats.ModelRateLimited,
@@ -2467,6 +2469,8 @@ func (s *GatewayService) collectSelectionFailureStats(
 			stats.Excluded++
 		case "unschedulable":
 			stats.Unschedulable++
+		case "account_cooldown":
+			stats.AccountCooldown++
 		case "platform_filtered":
 			stats.PlatformFiltered++
 			stats.SamplePlatformIDs = appendSelectionFailureSampleID(stats.SamplePlatformIDs, acc.ID)
@@ -2503,8 +2507,22 @@ func (s *GatewayService) diagnoseSelectionFailure(
 	if _, excluded := excludedIDs[acc.ID]; excluded {
 		return selectionFailureDiagnosis{Category: "excluded"}
 	}
-	if !s.isAccountSchedulableForSelection(acc) {
+	// 先判持久不可用，再判其他与限流无关的临时状态，最后才是账号级限流：
+	// 手动停调、到期或额度超限的账号即便残留着 RateLimitResetAt，也不是
+	// "冷却一下就回来"，不能被记成 account_cooldown。
+	if !acc.IsActive() || !acc.Schedulable {
+		return selectionFailureDiagnosis{Category: "unschedulable", Detail: "persistent_unschedulable"}
+	}
+	if !acc.isSchedulableIgnoringRateLimit() {
 		return selectionFailureDiagnosis{Category: "unschedulable", Detail: "generic_unschedulable"}
+	}
+	// IsSchedulable() 把账号级限流折叠成一个笼统的 false，全池限流在摘要里
+	// 就只剩 unschedulable=N；单独计数才能让日志和诊断分清冷却与真正不可用。
+	if acc.IsRateLimited() {
+		return selectionFailureDiagnosis{
+			Category: "account_cooldown",
+			Detail:   fmt.Sprintf("remaining=%s", time.Until(*acc.RateLimitResetAt).Truncate(time.Second)),
+		}
 	}
 	if isPlatformFilteredForSelection(acc, platform, allowMixedScheduling) {
 		return selectionFailureDiagnosis{
@@ -2563,13 +2581,17 @@ func appendSelectionFailureRateSample(samples []string, accountID int64, remaini
 	return append(samples, fmt.Sprintf("%d(%s)", accountID, remaining))
 }
 
+// summarizeSelectionFailureStats 生成随 ErrNoAvailableAccounts 返回的摘要。
+// handler 层会用 `(?:model_rate_limited|rate_limited)=(\d+)` 扫描这段文本，
+// 新增字段名不能含 rate_limited 子串，否则会被误当成限流计数。
 func summarizeSelectionFailureStats(stats selectionFailureStats) string {
 	return fmt.Sprintf(
-		"total=%d eligible=%d excluded=%d unschedulable=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d profit_threshold=%d profit_invalid_account_rate=%d",
+		"total=%d eligible=%d excluded=%d unschedulable=%d account_cooldown=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d profit_threshold=%d profit_invalid_account_rate=%d",
 		stats.Total,
 		stats.Eligible,
 		stats.Excluded,
 		stats.Unschedulable,
+		stats.AccountCooldown,
 		stats.PlatformFiltered,
 		stats.ModelUnsupported,
 		stats.ModelRateLimited,

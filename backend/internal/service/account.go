@@ -179,6 +179,14 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
+	return a.isSchedulableIgnoringRateLimit() && !a.IsRateLimited()
+}
+
+// isSchedulableIgnoringRateLimit 是 IsSchedulable 去掉账号级限流窗口后的判定：
+// 回答"限流冷却结束后这个账号能否被调度"。过载、临时停调、到期自动暂停、
+// 额度超限这些状态的恢复时刻都与限流无关，全池冷却诊断据此把它们排除在
+// Retry-After 的计算之外。
+func (a *Account) isSchedulableIgnoringRateLimit() bool {
 	if !a.IsActive() || !a.Schedulable {
 		return false
 	}
@@ -187,9 +195,6 @@ func (a *Account) IsSchedulable() bool {
 		return false
 	}
 	if a.OverloadUntil != nil && now.Before(*a.OverloadUntil) {
-		return false
-	}
-	if a.RateLimitResetAt != nil && now.Before(*a.RateLimitResetAt) {
 		return false
 	}
 	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {

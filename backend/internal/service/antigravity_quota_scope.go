@@ -42,13 +42,15 @@ func (a *Account) IsSchedulableForModelWithContext(ctx context.Context, requeste
 		return false
 	}
 	if a.isModelRateLimitedWithContext(ctx, requestedModel) {
-		// Antigravity + overages 启用 + 积分未耗尽 → 放行（有积分可用）
-		if a.Platform == PlatformAntigravity && a.IsOveragesEnabled() && !a.isCreditsExhausted() {
-			return true
-		}
-		return false
+		return a.modelRateLimitBypassedByOverages()
 	}
 	return true
+}
+
+// modelRateLimitBypassedByOverages 报告模型级限流是否对该账号不构成阻塞：
+// Antigravity 账号启用 overages 且积分未耗尽时，可以用积分继续请求被限流的模型。
+func (a *Account) modelRateLimitBypassedByOverages() bool {
+	return a != nil && a.Platform == PlatformAntigravity && a.IsOveragesEnabled() && !a.isCreditsExhausted()
 }
 
 // GetRateLimitRemainingTime 获取限流剩余时间（模型级限流）
