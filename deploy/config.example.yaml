@@ -521,6 +521,27 @@ gateway:
   # Scheduling configuration
   # 调度配置
   scheduling:
+    # Sticky session TTL in seconds for Anthropic accounts (sliding window, renewed
+    # on every hit). Longer values keep a resumed conversation on the same upstream
+    # account instead of rebuilding its prompt cache elsewhere; raise to 86400 (24h)
+    # or 259200 (72h) if sessions are commonly resumed the next day. Other platforms
+    # (Gemini / Antigravity) always use one hour.
+    # Anthropic 账号的粘性会话 TTL（秒，滑动窗口，每次命中都会续期）。调大后隔夜/跨
+    # 周末续上的会话仍会落回原账号，不必在新账号上重建 prompt cache；常见取值
+    # 86400（24 小时）或 259200（72 小时）。Gemini / Antigravity 固定 1 小时。
+    # 注意：这只延长「优先复用同一账号」的记忆，账号停调、限流、模型不支持、配额或
+    # 利润门不通过时照常换号。
+    sticky_session_ttl_seconds: 3600
+    # Long-lived "session -> account" affinity key TTL in seconds. 0 (default)
+    # disables it. When the short sticky key has expired, the session first
+    # retries its historical account; that account still has to pass every
+    # scheduling gate, so this only lengthens the preference, never bypasses a
+    # rate limit, quota or profit gate. Anthropic accounts only. Try 604800 (7d).
+    # 长周期「会话账号历史」亲和键 TTL（秒），0（默认）为关闭。短期粘性键过期后，
+    # 会话先回试历史账号；该账号仍要过全部调度闸门，所以这只延长「优先级」，不会
+    # 绕过限流、配额或利润门。仅 Anthropic 账号。建议值 604800（7 天）。
+    # 必须 >= sticky_session_ttl_seconds，否则启动校验失败。
+    session_account_history_ttl_seconds: 0
     # Sticky session max waiting queue size
     # 粘性会话最大排队长度
     sticky_session_max_waiting: 3

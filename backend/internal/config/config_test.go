@@ -381,6 +381,14 @@ func TestLoadDefaultSchedulingConfig(t *testing.T) {
 		t.Fatalf("Load() error: %v", err)
 	}
 
+	// 默认必须仍是历史硬编码的 1 小时：升级本身不得改变任何实例的粘性行为。
+	if cfg.Gateway.Scheduling.StickySessionTTLSeconds != 3600 {
+		t.Fatalf("StickySessionTTLSeconds = %d, want 3600", cfg.Gateway.Scheduling.StickySessionTTLSeconds)
+	}
+	// 长周期亲和键默认关闭。
+	if cfg.Gateway.Scheduling.SessionAccountHistoryTTLSeconds != 0 {
+		t.Fatalf("SessionAccountHistoryTTLSeconds = %d, want 0", cfg.Gateway.Scheduling.SessionAccountHistoryTTLSeconds)
+	}
 	if cfg.Gateway.Scheduling.StickySessionMaxWaiting != 3 {
 		t.Fatalf("StickySessionMaxWaiting = %d, want 3", cfg.Gateway.Scheduling.StickySessionMaxWaiting)
 	}
@@ -724,6 +732,8 @@ func TestLoadIdempotencyConfigFromEnv(t *testing.T) {
 func TestLoadSchedulingConfigFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_SCHEDULING_STICKY_SESSION_MAX_WAITING", "5")
+	t.Setenv("GATEWAY_SCHEDULING_STICKY_SESSION_TTL_SECONDS", "259200")
+	t.Setenv("GATEWAY_SCHEDULING_SESSION_ACCOUNT_HISTORY_TTL_SECONDS", "604800")
 
 	cfg, err := Load()
 	if err != nil {
@@ -732,6 +742,12 @@ func TestLoadSchedulingConfigFromEnv(t *testing.T) {
 
 	if cfg.Gateway.Scheduling.StickySessionMaxWaiting != 5 {
 		t.Fatalf("StickySessionMaxWaiting = %d, want 5", cfg.Gateway.Scheduling.StickySessionMaxWaiting)
+	}
+	if cfg.Gateway.Scheduling.StickySessionTTLSeconds != 259200 {
+		t.Fatalf("StickySessionTTLSeconds = %d, want 259200", cfg.Gateway.Scheduling.StickySessionTTLSeconds)
+	}
+	if cfg.Gateway.Scheduling.SessionAccountHistoryTTLSeconds != 604800 {
+		t.Fatalf("SessionAccountHistoryTTLSeconds = %d, want 604800", cfg.Gateway.Scheduling.SessionAccountHistoryTTLSeconds)
 	}
 }
 
@@ -2067,6 +2083,26 @@ func TestValidateConfigErrors(t *testing.T) {
 			name:    "gateway models list cache ttl range",
 			mutate:  func(c *Config) { c.Gateway.ModelsListCacheTTLSeconds = 31 },
 			wantErr: "gateway.models_list_cache_ttl_seconds",
+		},
+		{
+			name:    "gateway scheduling sticky ttl",
+			mutate:  func(c *Config) { c.Gateway.Scheduling.StickySessionTTLSeconds = 0 },
+			wantErr: "gateway.scheduling.sticky_session_ttl_seconds",
+		},
+		{
+			name:    "gateway scheduling session account history ttl negative",
+			mutate:  func(c *Config) { c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds = -1 },
+			wantErr: "gateway.scheduling.session_account_history_ttl_seconds",
+		},
+		{
+			// 历史键比短期粘性键还短是纯配置错误：短期键在时不会读它，短期键一过期
+			// 它也没了。必须启动就拒绝，而不是静默失效。
+			name: "gateway scheduling session account history ttl shorter than sticky",
+			mutate: func(c *Config) {
+				c.Gateway.Scheduling.StickySessionTTLSeconds = 3600
+				c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds = 60
+			},
+			wantErr: "gateway.scheduling.session_account_history_ttl_seconds",
 		},
 		{
 			name:    "gateway scheduling sticky waiting",

@@ -214,6 +214,17 @@ func (c *openAIWSStateStoreTimeoutProbeCache) DeleteSessionAccountID(ctx context
 	return nil
 }
 
+// 长周期亲和键：该 mock 不参与历史键行为，给出中性实现以满足接口。
+func (c *openAIWSStateStoreTimeoutProbeCache) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, ErrStickySessionNotFound
+}
+func (c *openAIWSStateStoreTimeoutProbeCache) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
+	return true, nil
+}
+func (c *openAIWSStateStoreTimeoutProbeCache) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+
 func (c *openAIWSStateStoreTimeoutProbeCache) SetGrokVideoPendingBilling(_ context.Context, _ string, _ []byte, _ time.Duration) error {
 	return nil
 }

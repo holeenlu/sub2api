@@ -1448,6 +1448,31 @@ type TLSProfileConfig struct {
 
 // GatewaySchedulingConfig accounts scheduling configuration.
 type GatewaySchedulingConfig struct {
+	// StickySessionTTLSeconds: session_hash -> account_id 粘连 TTL（滑动窗口，
+	// 每次成功选号或粘性命中都会续期）。默认 3600 与历史硬编码值一致，升级不改
+	// 变任何实例的行为；调大后同一会话隔夜/跨周末回来仍会落回原账号，避免在多个
+	// 账号之间反复重建上游 prompt cache。
+	//
+	// 只作用于 GatewayService 的 Anthropic 账号路径。Gemini、Antigravity 以及
+	// OpenAI 各自保留原有的 TTL 常量/配置，不受此项影响。
+	//
+	// 注意这只延长「同一会话优先复用同一账号」的记忆时长，不会绕过任何调度闸门：
+	// 账号停调、限流、模型不支持、配额或利润门不通过时依旧照常换号。
+	StickySessionTTLSeconds int `mapstructure:"sticky_session_ttl_seconds"`
+
+	// SessionAccountHistoryTTLSeconds: 长周期「会话账号历史」亲和键的 TTL（秒）。
+	// 0（默认）为关闭，保持升级前行为。
+	//
+	// 短期粘性键过期后，自由选号会按优先级重新挑账号，同一个会话隔天回来极可能
+	// 落到另一个账号上并重建整份上游 prompt cache。开启后会额外写一个寿命长得多
+	// 的亲和键：短期键 miss 时先试历史账号，历史账号同样要过全部调度闸门，过不了
+	// 才进入自由选号。
+	//
+	// 与直接把 StickySessionTTLSeconds 拉到几天相比，两级结构保留了「短期内严格
+	// 粘住、长期只是优先建议」的区分，也不会让一次会话把某个账号锁定数天。
+	// 同样只作用于 Anthropic 账号。
+	SessionAccountHistoryTTLSeconds int `mapstructure:"session_account_history_ttl_seconds"`
+
 	// 粘性会话排队配置
 	StickySessionMaxWaiting  int           `mapstructure:"sticky_session_max_waiting"`
 	StickySessionWaitTimeout time.Duration `mapstructure:"sticky_session_wait_timeout"`
@@ -2483,6 +2508,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_nonstream_keepalive_interval", 0)
 	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
+	viper.SetDefault("gateway.scheduling.sticky_session_ttl_seconds", 3600)
+	viper.SetDefault("gateway.scheduling.session_account_history_ttl_seconds", 0)
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)
 	viper.SetDefault("gateway.scheduling.fallback_wait_timeout", 30*time.Second)
@@ -3613,6 +3640,18 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ModelsListCacheTTLSeconds < 10 || c.Gateway.ModelsListCacheTTLSeconds > 30 {
 		return fmt.Errorf("gateway.models_list_cache_ttl_seconds must be between 10-30")
+	}
+	if c.Gateway.Scheduling.StickySessionTTLSeconds <= 0 {
+		return fmt.Errorf("gateway.scheduling.sticky_session_ttl_seconds must be positive")
+	}
+	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds < 0 {
+		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must not be negative")
+	}
+	// 历史键比短期粘性键还短就毫无意义：短期键还在时根本不会去读它，短期键一过期
+	// 它也已经跟着没了。这种配置一定是写错了，直接拒绝而不是静默失效。
+	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds > 0 &&
+		c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds < c.Gateway.Scheduling.StickySessionTTLSeconds {
+		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must be >= gateway.scheduling.sticky_session_ttl_seconds")
 	}
 	if c.Gateway.Scheduling.StickySessionMaxWaiting <= 0 {
 		return fmt.Errorf("gateway.scheduling.sticky_session_max_waiting must be positive")
