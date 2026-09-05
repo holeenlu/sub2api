@@ -159,6 +159,15 @@ func NewFailoverState(maxSwitches int, hasBoundSession bool, request *gin.Contex
 	}
 }
 
+// SetBoundSession 在选号之后补记粘性绑定：请求入口只查得到 API Key 所属分组下的
+// 绑定，落在兜底分组命名空间里的绑定要等选号结果出来才知道去哪查。
+func (s *FailoverState) SetBoundSession(bound bool) {
+	if s == nil {
+		return
+	}
+	s.hasBoundSession = bound
+}
+
 // RecordProfitVeto 记录一次分组利润门终检否决：把账号加入排除列表（同时登记到
 // 利润否决集，使其不被 503 退避分支清掉）并递增否决计数。
 //

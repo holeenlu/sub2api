@@ -39,10 +39,10 @@ func (r *ClaudeTokenRefresher) CacheKey(account *Account) string {
 
 // CanRefresh 检查是否能处理此账号
 //
-// 只处理 Anthropic OAuth 账号。`claude setup-token` 生成的长期凭据不参与刷新，
-// 即使历史数据中残留 refresh_token 也必须排除。
+// 只处理 Anthropic OAuth 系账号。直接导入的 `claude setup-token` 长期凭据不参与刷新；
+// 旧版交换流程写入的 8 小时 setup-token 行仍要续期，具体规则见 Account.CanRefreshToken。
 func (r *ClaudeTokenRefresher) CanRefresh(account *Account) bool {
-	return account != nil && account.Platform == PlatformAnthropic && account.Type == AccountTypeOAuth && account.CanRefreshToken()
+	return account != nil && account.Platform == PlatformAnthropic && account.IsOAuth() && account.CanRefreshToken()
 }
 
 // NeedsRefresh 检查token是否需要刷新

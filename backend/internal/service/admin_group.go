@@ -618,8 +618,11 @@ type fallbackChainSpec struct {
 	maxHops int
 	// next 取出某一跳的下一跳指针，nil 表示链到此为止。
 	next func(*Group) *int64
-	// firstHop 只对直接目标生效的附加校验（平台、状态等）。
+	// firstHop 只对直接目标生效的附加校验（状态、claude_code_only 等）。
 	firstHop func(*Group) error
+	// everyHop 对链上每一跳都生效的校验（如平台）：运行时链走到异平台分组会静默
+	// 截断，只校验首跳的话后面几跳的错误配置保存时不会有任何提示。
+	everyHop func(*Group) error
 }
 
 // validateFallbackChain 沿兜底链逐跳回源，检测成环、跳数超限与链上分组缺失。
@@ -646,6 +649,11 @@ func (s *adminServiceImpl) validateFallbackChain(ctx context.Context, currentGro
 		}
 		if nextID == fallbackGroupID && spec.firstHop != nil {
 			if hopErr := spec.firstHop(fallbackGroup); hopErr != nil {
+				return hopErr
+			}
+		}
+		if spec.everyHop != nil {
+			if hopErr := spec.everyHop(fallbackGroup); hopErr != nil {
 				return hopErr
 			}
 		}
@@ -736,11 +744,14 @@ func (s *adminServiceImpl) validateFallbackGroupOnNoAccount(ctx context.Context,
 			if requireActive && g.Status != StatusActive {
 				return fmt.Errorf("no-account fallback group is not active")
 			}
-			if g.Platform != platform {
-				return fmt.Errorf("no-account fallback group must be on the same platform: %s", platform)
-			}
 			if g.ClaudeCodeOnly {
 				return fmt.Errorf("no-account fallback group cannot have claude_code_only enabled")
+			}
+			return nil
+		},
+		everyHop: func(g *Group) error {
+			if g.Platform != platform {
+				return fmt.Errorf("no-account fallback group %d must be on the same platform: %s", g.ID, platform)
 			}
 			return nil
 		},

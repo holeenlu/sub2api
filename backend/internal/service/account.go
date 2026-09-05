@@ -252,16 +252,20 @@ func (a *Account) IsOAuth() bool {
 
 // CanRefreshToken 报告账号的凭据是否参与 OAuth 续期生命周期。
 //
-// Anthropic setup-token 是 `claude setup-token` 生成并作为
-// CLAUDE_CODE_OAUTH_TOKEN 使用的长期凭据。它不参与 OAuth refresh_token 续期；即使
-// 历史数据残留 refresh_token，也只能通过重新授权导入新 setup-token 来更新。
+// Anthropic setup-token 分两种来源：直接粘贴导入的 `claude setup-token` 是作为
+// CLAUDE_CODE_OAUTH_TOKEN 使用的长期凭据，没有过期时间，不参与 OAuth refresh_token
+// 续期，残留的 refresh_token 也不能拿去换一个 8 小时令牌。而旧版浏览器交换流程
+// （exchange-setup-token-code / setup-token-cookie-auth）写入的行本身就是 8 小时
+// 令牌（expires_in=28800）并带 refresh_token，只有续期才能活过到期时间——把它们
+// 一并排除会让这些账号到期后持续 401（上游 99da30819 修的正是这个）。两者以
+// expires_at 是否存在区分：直接导入不写 expires_at。
 //
 // 此谓词由手动刷新入口、后台刷新器、CRS 同步与前端能力字段共用。
 func (a *Account) CanRefreshToken() bool {
 	if a == nil || !a.IsOAuth() {
 		return false
 	}
-	if a.Platform == PlatformAnthropic && a.Type == AccountTypeSetupToken {
+	if a.Platform == PlatformAnthropic && a.Type == AccountTypeSetupToken && a.GetCredentialAsTime("expires_at") == nil {
 		return false
 	}
 	if a.Type == AccountTypeSetupToken && strings.TrimSpace(a.GetCredential("refresh_token")) == "" {

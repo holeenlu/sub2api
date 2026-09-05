@@ -117,7 +117,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 
 	stateStore := s.getOpenAIWSStateStore()
-	groupID := getOpenAIGroupIDFromContext(c)
+	// previous_response_id → 账号粘连要写进账号真正的来源分组（可能是无可用账号
+	// 兜底分组），否则续写命中的是起点命名空间，账号又不在起点池里而被丢弃。
+	groupID := openAIResponseAccountGroupID(c)
 	sessionHash := s.GenerateSessionHash(c, nil)
 	if sessionHash == "" {
 		var legacySessionHash string

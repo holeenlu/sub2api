@@ -2678,6 +2678,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 		// 准入完成：门并入连接 ctx，turn 级复核与 failover 重选共用。
 		ctx = admissionCtx
+		// 与 acquireOpenAIAccountSlot 同一约定：WS 入站的 previous_response_id 粘连与
+		// 会话状态要写进账号真正的来源分组，兜底借来的账号才不会被绑进起点命名空间。
+		service.SetOpenAISchedulingGroup(c, service.SelectionGroupID(selection, apiKey.GroupID))
 		// Account selection starts a fresh upstream attempt. Clear any model
 		// captured by the previous failover account before credential lookup.
 		setOpsSelectedAccount(c, account.ID, account.Platform)

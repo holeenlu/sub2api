@@ -523,7 +523,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 	stateStore := s.getOpenAIWSStateStore()
-	groupID := getOpenAIGroupIDFromContext(c)
+	// 与 HTTP 入口一致：绑定与会话状态都落在实际选号分组的命名空间下（见
+	// openAIResponseAccountGroupID），兜底借来的账号才能被后续续写找到。
+	groupID := openAIResponseAccountGroupID(c)
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	sessionHash := ""
 	preferredConnID := ""

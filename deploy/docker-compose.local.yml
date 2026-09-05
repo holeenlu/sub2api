@@ -64,7 +64,9 @@ services:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
       - SERVER_MODE=${SERVER_MODE:-release}
-      - SERVER_TRUSTED_PROXIES=${SERVER_TRUSTED_PROXIES:-}
+      # 只在 .env 定义时透传：写成 ${VAR:-} 会把"存在但为空"传进容器，config 层按
+      # os.LookupEnv 判定为显式清空可信代理列表，覆盖 config.yaml 里的值。
+      - SERVER_TRUSTED_PROXIES
       - ENABLE_SERVER_TIMING=${ENABLE_SERVER_TIMING:-false}
       - RUN_MODE=${RUN_MODE:-standard}
       # --- logging: values live in .env but were never referenced here, so the

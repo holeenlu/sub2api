@@ -587,9 +587,12 @@ var credentialLiteralPatterns = []struct {
 	replace string
 }{
 	// Anthropic（带前缀，必须先匹配）：sk-ant-xxxxxxx
-	{regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]{20,}`), "sk-ant-***REDACTED***"},
+	{regexp.MustCompile(`\bsk-ant-[A-Za-z0-9_-]{20,}`), "sk-ant-***REDACTED***"},
 	// OpenAI / Anthropic 通用 sk-: sk-xxxxxxx
-	{regexp.MustCompile(`sk-[A-Za-z0-9-]{20,}`), "sk-***REDACTED***"},
+	// 字符类必须含下划线：sk-proj-/sk-svcacct- 项目密钥交替使用 - 和 _，漏掉 _ 会在
+	// 第一个下划线处截断，甚至前 20 位里出现 _ 时整段不匹配、密钥原样透出。
+	// 前置 \b 防止 disk-quota-…/task-<uuid> 这类连字符词被误擦成 di + sk-***。
+	{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}`), "sk-***REDACTED***"},
 	// xAI API Key：xai-xxxxxxx
 	{regexp.MustCompile(`xai-[A-Za-z0-9_-]{6,}`), "xai-***REDACTED***"},
 	// Gemini / Google API Key：固定前缀 + 35 位

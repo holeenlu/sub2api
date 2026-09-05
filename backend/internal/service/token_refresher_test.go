@@ -213,6 +213,14 @@ func TestClaudeTokenRefresher_CanRefresh(t *testing.T) {
 			want:        false,
 		},
 		{
+			// 旧版交换流程写入的 8 小时令牌行（带 expires_at）必须继续续期，否则到期后持续 401。
+			name:        "anthropic setup-token from the legacy exchange flow - can refresh",
+			platform:    PlatformAnthropic,
+			accType:     AccountTypeSetupToken,
+			credentials: map[string]any{"access_token": "short", "refresh_token": "legacy-refresh", "expires_at": float64(1_800_000_000)},
+			want:        true,
+		},
+		{
 			name:     "anthropic api-key - cannot refresh",
 			platform: PlatformAnthropic,
 			accType:  AccountTypeAPIKey,

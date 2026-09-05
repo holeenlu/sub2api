@@ -258,3 +258,39 @@ func TestOpenAIDiagnoseModelAvailability_FallbackGroupSupportsModel(t *testing.T
 	require.True(t, diag.HasModelSupport, "the fallback group serves this model")
 	require.True(t, diag.AllModelCapableRateLimited)
 }
+
+// 起点全池冷却时同样不走链：结论已经是 429，选号刚刚沿链失败过，兜底分组也没有
+// 可用账号；沿链只会用兜底分组的冷却时间修正 Retry-After，却要在客户端按
+// Retry-After 节奏反复重试的这条响应上每跳多付一次分组读取加一次候选查询。
+func TestDiagnoseModelAvailability_SkipsChainWhenOriginFullyCooling(t *testing.T) {
+	origin, fallback := int64(1), int64(2)
+	resetAt := time.Now().Add(2 * time.Minute)
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:               10,
+				Platform:         PlatformAnthropic,
+				Status:           StatusActive,
+				Schedulable:      true,
+				RateLimitResetAt: &resetAt,
+				AccountGroups:    []AccountGroup{{GroupID: origin}},
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{"claude-opus-4-8": "claude-opus-4-8"},
+				},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	groupRepo := &mockGroupRepoForGateway{groups: map[int64]*Group{
+		origin:   noAccountFallbackGroup(origin, PlatformAnthropic, &fallback),
+		fallback: noAccountFallbackGroup(fallback, PlatformAnthropic, nil),
+	}}
+	svc := &GatewayService{accountRepo: repo, cfg: testConfig(), groupRepo: groupRepo}
+
+	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &origin, "claude-opus-4-8", PlatformAnthropic)
+
+	require.True(t, diag.HasModelSupport)
+	require.True(t, diag.AllModelCapableRateLimited, "the origin alone already yields the 429 verdict")
+	require.NotNil(t, diag.EarliestRateLimitResetAt)
+	require.Zero(t, groupRepo.getByIDLiteCalls, "a fully cooling origin must not walk the fallback chain")
+}

@@ -292,6 +292,10 @@ type OpsUpsertJobHeartbeatInput struct {
 	// ExpectedIntervalSeconds 是任务自报的预期执行间隔，判活阈值由它派生。
 	// nil 表示不更新已存的值；0 表示任务当前没有调度（例如被设置关闭），不参与失联判定。
 	ExpectedIntervalSeconds *int64
+
+	// ClearLastError 为 true 时清掉已存的 last_error_at/last_error，而不伪造一次成功：
+	// 用于"调度曾建不起来（已记 error 心跳）、现在重新建好了"这类状态修复。
+	ClearLastError bool
 }
 
 type OpsJobHeartbeat struct {
