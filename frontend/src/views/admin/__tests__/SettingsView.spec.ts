@@ -736,6 +736,33 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  // 「隐藏 CCS 导入按钮」开关已从界面移除，但后端把该字段当非指针 bool 无条件持久化，
+  // 缺字段会被写成 false。所以前端必须把服务端已有值原样往返，保存无关设置不得改变它。
+  it.each([true, false])(
+    "round-trips hide_ccs_import_button=%s untouched when saving unrelated settings",
+    async (persisted) => {
+      getSettings.mockResolvedValue({
+        ...baseSettingsResponse,
+        hide_ccs_import_button: persisted,
+      });
+      const wrapper = mountView();
+      await flushPromises();
+
+      expect(wrapper.text()).not.toContain("admin.settings.site.hideCcsImportButton");
+
+      await wrapper.get('[data-testid="compact-home-toggle"]').setValue(true);
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          compact_home_enabled: true,
+          hide_ccs_import_button: persisted,
+        }),
+      );
+    },
+  );
+
   it("renders panel rate limit card and saves settings", async () => {
     getPanelRateLimitSettings.mockClear();
     updatePanelRateLimitSettings.mockClear();
