@@ -280,7 +280,7 @@ if filterBySelection && len(selectedModels) > 0 {
 
 不要动 `openAIConfiguredCodexModelIDsForGroup` 里的 `sort.Strings`：自定义列表关闭时它保证确定性输出，且被其他调用方依赖。
 
-排序只调整原始条目的位置，保留现有模型描述及未知扩展字段，不为排序重建 descriptor。验收目标是下载 JSON 的 `models[]` 顺序；若后续还要求客户端模型选择器顺序一致，另行验证客户端是否按 `priority` 等字段重排，不未经验证就改能力元数据。
+2026-09-05 审计修复确认：验收同时覆盖下载 JSON 的 `models[]` 顺序与 Codex 客户端模型选择器顺序。已核实客户端加载目录后按 `priority` 排序，因此启用自定义列表时，先稳定重排条目，再将 `priority` 设为最终位置下标；其他能力字段及未知扩展字段原样保留。即使数组顺序已正确，单独修正 `priority` 也必须置 `changed` 并更新 ETag；重复处理已规范化目录应保持不变。关闭自定义列表时不改上游 `priority`。
 
 ### 4.3 副作用（正向）
 
@@ -291,6 +291,7 @@ if filterBySelection && len(selectedModels) > 0 {
 - 新增：自定义列表 `["b","a","c"]`，账号映射 `a/b/c` → 路径 A 输出 slug 顺序 `b,a,c`。
 - 新增：上游目录 `a,b,c` + 自定义列表 `c,a` → 路径 B 输出 `c,a`，且 ETag 与未排序时不同、`changed == true`。
 - **必须新增纯重排**：模型集合始终为 `a,b,c`，只把自定义顺序改为 `c,b,a`；A/B 两条路径均输出新顺序。合并路径单测使用无需过滤、注入或 visibility 修改的输入，确保仅排序也产生 `changed == true` 和新 ETag。
+- 覆盖原生目录的不同、相同和缺失 `priority`，以及数组已正确但优先级相反的情况；按客户端规则再次排序后仍须遵守自定义列表。验证未知元数据保留、幂等性、优先级单独变化时的 ETag 和关闭自定义列表时的原始内容。
 - Handler 层验证：重排后携带旧 ETag 请求返回 200 和新内容；再次携带新 ETag 返回 304。不能仅在 helper 层比较哈希。模板：`backend/internal/handler/gateway_models_test.go` L231 `TestGatewayCodexModels_GeneratedManifestUsesFinalBodyETag`（非 OpenAI 路径）；OpenAI 的 `openai_codex_models_handler_test.go` L133 已有 `TestCodexModelsAppliesLocalFiltersBeforeClientETag`（含 200/304 断言），L203 已有 `TestCodexModelsAPIKeyCacheDoesNotLeakGroupFilters`。在这些模式上补充纯重排场景，不把过滤用例视为纯重排覆盖，也不声称目前仅有取消请求测试。ETag 比较用 `codexModelsManifestETagMatches`（L2309）。
 - 两个分组共享上游账号/目录缓存但自定义顺序不同，连续和交错请求均保持各自顺序，不污染源目录。**隔离机制已经存在**：`fetchCachedAPIKeyCodexModelsManifest`（L1634）三个返回点都经 `codexModelsManifestForClient` → `cloneCodexModelsManifest`（L2285/L2306），`MergeGroupConfiguredCodexModels` 改的是克隆而非缓存条目。测试的目标是断言这个克隆语义没有被新代码破坏（例如有人为省一次拷贝把 reorder 挪到克隆之前），而不是重新推导隔离。路径 A 不经缓存，无此风险。
 - 原始能力字段及未知字段保留；缺失模型、重复选择、过滤后的有效子集、媒体/auto 模型规则保持现有语义，不为补齐顺序引入本来不可见的条目。

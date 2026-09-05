@@ -202,6 +202,167 @@ func TestCodexModelsAppliesLocalFiltersBeforeClientETag(t *testing.T) {
 	}
 }
 
+// Scenario: the Codex picker follows the administrator's custom-list order for
+// OpenAI groups served from an upstream catalog, and an order-only edit is a real
+// change to the client — old ETag → 200 with the new order, new ETag → 304.
+func TestCodexModelsFollowsCustomListOrderAndRefreshesETag(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &codexModelsFailoverAccountRepo{accounts: []service.Account{
+		{
+			ID:          1,
+			Name:        "custom-openai",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeAPIKey,
+			Status:      service.StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Credentials: map[string]any{
+				"api_key":  "sk-test",
+				"base_url": "https://upstream.example/v1",
+			},
+		},
+	}}
+	upstream := &codexModelsFailoverHTTPUpstream{
+		firstBody: `{"models":[{"slug":"model-a","priority":0},{"slug":"model-b","priority":1},{"slug":"model-c","priority":2,"unknown":{"kept":true}}]}`,
+	}
+	gatewayService := service.NewOpenAIGatewayService(
+		repo,
+		nil, nil, nil, nil, nil, nil, &config.Config{RunMode: config.RunModeSimple}, nil, nil, nil, nil, nil,
+		upstream,
+		nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	handler := &OpenAIGatewayHandler{gatewayService: gatewayService}
+	group := &service.Group{
+		ID:       95,
+		Platform: service.PlatformOpenAI,
+		ModelsListConfig: service.GroupModelsListConfig{
+			Enabled: true,
+			Models:  []string{"model-c", "model-b", "model-a"},
+		},
+	}
+
+	reversed := performCodexModelsRequestForGroup(t, handler, group, "")
+	require.Equal(t, http.StatusOK, reversed.Code, reversed.Body.String())
+	require.Equal(t, []string{"model-c", "model-b", "model-a"}, codexHandlerManifestSlugs(t, reversed))
+	var clientCatalog struct {
+		Models []struct {
+			Slug     string          `json:"slug"`
+			Priority int             `json:"priority"`
+			Unknown  json.RawMessage `json:"unknown"`
+		} `json:"models"`
+	}
+	require.NoError(t, json.Unmarshal(reversed.Body.Bytes(), &clientCatalog))
+	// Codex sorts by priority after loading either a remote or downloaded catalog.
+	sort.SliceStable(clientCatalog.Models, func(i, j int) bool {
+		return clientCatalog.Models[i].Priority < clientCatalog.Models[j].Priority
+	})
+	require.Equal(t, "model-c", clientCatalog.Models[0].Slug)
+	require.Equal(t, "model-b", clientCatalog.Models[1].Slug)
+	require.Equal(t, "model-a", clientCatalog.Models[2].Slug)
+	require.JSONEq(t, `{"kept":true}`, string(clientCatalog.Models[0].Unknown))
+	reversedETag := reversed.Header().Get("ETag")
+	require.NotEmpty(t, reversedETag)
+	require.Equal(t, service.CodexModelsManifestETag(reversed.Body.Bytes()), reversedETag)
+
+	// Same model set, different order: the client's ETag must not yield 304.
+	group.ModelsListConfig.Models = []string{"model-a", "model-b", "model-c"}
+	natural := performCodexModelsRequestForGroup(t, handler, group, reversedETag)
+	require.Equal(t, http.StatusOK, natural.Code, natural.Body.String())
+	require.Equal(t, []string{"model-a", "model-b", "model-c"}, codexHandlerManifestSlugs(t, natural))
+	naturalETag := natural.Header().Get("ETag")
+	require.NotEmpty(t, naturalETag)
+	require.NotEqual(t, reversedETag, naturalETag)
+
+	notModified := performCodexModelsRequestForGroup(t, handler, group, naturalETag)
+	require.Equal(t, http.StatusNotModified, notModified.Code, notModified.Body.String())
+	require.Empty(t, notModified.Body.Bytes())
+	require.Equal(t, naturalETag, notModified.Header().Get("ETag"))
+
+	// Turning the custom list off restores the upstream order.
+	group.ModelsListConfig.Enabled = false
+	off := performCodexModelsRequestForGroup(t, handler, group, "")
+	require.Equal(t, http.StatusOK, off.Code, off.Body.String())
+	require.Equal(t, []string{"model-a", "model-b", "model-c"}, codexHandlerManifestSlugs(t, off))
+}
+
+// Scenario: two groups share one upstream account (and therefore one cached
+// upstream manifest) but order the same models differently. Each response must
+// carry its own group's order, sequentially and interleaved — the merge works on
+// a clone of the cache entry and must keep doing so.
+func TestCodexModelsCustomListOrderIsIsolatedPerGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &codexModelsFailoverAccountRepo{accounts: []service.Account{
+		{
+			ID:          1,
+			Name:        "shared-api-key",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeAPIKey,
+			Status:      service.StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Credentials: map[string]any{
+				"api_key":  "sk-shared",
+				"base_url": "https://upstream.example/v1",
+			},
+		},
+	}}
+	upstream := &codexModelsFailoverHTTPUpstream{
+		firstBody: `{"object":"list","data":[{"id":"model-a"},{"id":"model-b"},{"id":"model-c"}]}`,
+	}
+	gatewayService := service.NewOpenAIGatewayService(
+		repo,
+		nil, nil, nil, nil, nil, nil, &config.Config{RunMode: config.RunModeSimple}, nil, nil, nil, nil, nil,
+		upstream,
+		nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	handler := &OpenAIGatewayHandler{gatewayService: gatewayService}
+	groupA := &service.Group{
+		ID:               96,
+		Platform:         service.PlatformOpenAI,
+		ModelsListConfig: service.GroupModelsListConfig{Enabled: true, Models: []string{"model-b", "model-a", "model-c"}},
+	}
+	groupB := &service.Group{
+		ID:               97,
+		Platform:         service.PlatformOpenAI,
+		ModelsListConfig: service.GroupModelsListConfig{Enabled: true, Models: []string{"model-c", "model-a", "model-b"}},
+	}
+	orderA := []string{"model-b", "model-a", "model-c"}
+	orderB := []string{"model-c", "model-a", "model-b"}
+
+	for i := 0; i < 3; i++ {
+		a := performCodexModelsRequestForGroup(t, handler, groupA, "")
+		require.Equal(t, http.StatusOK, a.Code, a.Body.String())
+		require.Equal(t, orderA, codexHandlerManifestSlugs(t, a))
+		b := performCodexModelsRequestForGroup(t, handler, groupB, "")
+		require.Equal(t, http.StatusOK, b.Code, b.Body.String())
+		require.Equal(t, orderB, codexHandlerManifestSlugs(t, b))
+	}
+
+	var wg sync.WaitGroup
+	results := make([]*httptest.ResponseRecorder, 8)
+	for i := range results {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			if index%2 == 0 {
+				results[index] = performCodexModelsRequestForGroup(t, handler, groupA, "")
+				return
+			}
+			results[index] = performCodexModelsRequestForGroup(t, handler, groupB, "")
+		}(i)
+	}
+	wg.Wait()
+	for i, recorder := range results {
+		require.NotNil(t, recorder)
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		want := orderA
+		if i%2 == 1 {
+			want = orderB
+		}
+		require.Equal(t, want, codexHandlerManifestSlugs(t, recorder))
+	}
+}
+
 func TestCodexModelsAPIKeyCacheDoesNotLeakGroupFilters(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &codexModelsFailoverAccountRepo{accounts: []service.Account{
