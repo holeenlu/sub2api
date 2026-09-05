@@ -1256,15 +1256,25 @@ func mergeConfiguredCodexModelsManifest(
 		return nil, false, err
 	}
 
+	// selected answers "is this model allowed"; selectedIndex remembers the order the
+	// administrator arranged the list in, which is the order the picker must show.
 	selected := make(map[string]struct{}, len(selectedModels))
+	selectedIndex := make(map[string]int, len(selectedModels))
 	for _, modelID := range selectedModels {
 		modelID = strings.TrimSpace(modelID)
-		if modelID != "" {
-			selected[modelID] = struct{}{}
+		if modelID == "" {
+			continue
+		}
+		selected[modelID] = struct{}{}
+		if _, exists := selectedIndex[modelID]; !exists {
+			selectedIndex[modelID] = len(selectedIndex)
 		}
 	}
 	seen := make(map[string]struct{}, len(upstreamModels)+len(configuredModels))
 	merged := make([]json.RawMessage, 0, len(upstreamModels)+len(configuredModels))
+	// mergedSlugs runs parallel to merged so the reorder below never has to
+	// unmarshal the entries a second time.
+	mergedSlugs := make([]string, 0, len(upstreamModels)+len(configuredModels))
 	changed := false
 	for _, rawModel := range upstreamModels {
 		var descriptor struct {
@@ -1276,6 +1286,7 @@ func mergeConfiguredCodexModelsManifest(
 				continue
 			}
 			merged = append(merged, rawModel)
+			mergedSlugs = append(mergedSlugs, "")
 			continue
 		}
 		descriptor.Slug = strings.TrimSpace(descriptor.Slug)
@@ -1305,6 +1316,7 @@ func mergeConfiguredCodexModelsManifest(
 		}
 		seen[descriptor.Slug] = struct{}{}
 		merged = append(merged, rawModel)
+		mergedSlugs = append(mergedSlugs, descriptor.Slug)
 	}
 
 	for _, modelID := range configuredModels {
@@ -1329,8 +1341,36 @@ func mergeConfiguredCodexModelsManifest(
 			return nil, false, err
 		}
 		merged = append(merged, rawModel)
+		mergedSlugs = append(mergedSlugs, modelID)
 		seen[modelID] = struct{}{}
 		changed = true
+	}
+	// Apply the administrator's order before the early return: an order-only edit
+	// leaves the model set untouched, so nothing above flips changed, and without
+	// this the old body (and its ETag) would be served back unchanged.
+	if filterBySelection && len(selectedIndex) > 0 {
+		if reorderCodexModelsBySelection(merged, mergedSlugs, selectedIndex) {
+			changed = true
+		}
+		// Codex sorts by priority after reading the array. Normalize priorities
+		// even when positions already match, and preserve all other metadata.
+		for i, rawModel := range merged {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(rawModel, &fields); err != nil {
+				return nil, false, err
+			}
+			var priority *int
+			if err := json.Unmarshal(fields["priority"], &priority); err == nil && priority != nil && *priority == i {
+				continue
+			}
+			fields["priority"], _ = json.Marshal(i)
+			updated, err := json.Marshal(fields)
+			if err != nil {
+				return nil, false, err
+			}
+			merged[i] = updated
+			changed = true
+		}
 	}
 	if !changed {
 		return body, false, nil
@@ -1346,6 +1386,55 @@ func mergeConfiguredCodexModelsManifest(
 		return nil, false, err
 	}
 	return mergedBody, true, nil
+}
+
+// reorderCodexModelsBySelection arranges catalog entries in the order the
+// administrator gave the group's custom models list, matching what /v1/models and
+// the non-OpenAI Codex catalog already do. Entries that are not in the list (or
+// carry no slug) keep their relative order after the listed ones; the sort is
+// stable, so equal ranks never shuffle. Only positions move — the raw descriptors
+// are untouched, so upstream capability fields and unknown extensions survive.
+//
+// It reports whether any position changed. Callers must fold that into their
+// "changed" flag: reordering alone does not alter the model set, and the merge's
+// early return would otherwise hand back the previous body with the previous ETag.
+func reorderCodexModelsBySelection(models []json.RawMessage, slugs []string, selectedIndex map[string]int) bool {
+	if len(models) != len(slugs) || len(models) < 2 {
+		return false
+	}
+	unlisted := len(selectedIndex)
+	rank := func(slug string) int {
+		if idx, ok := selectedIndex[slug]; ok && slug != "" {
+			return idx
+		}
+		return unlisted
+	}
+	order := make([]int, len(models))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		return rank(slugs[order[a]]) < rank(slugs[order[b]])
+	})
+	moved := false
+	for i, from := range order {
+		if from != i {
+			moved = true
+			break
+		}
+	}
+	if !moved {
+		return false
+	}
+	reorderedModels := make([]json.RawMessage, len(models))
+	reorderedSlugs := make([]string, len(slugs))
+	for i, from := range order {
+		reorderedModels[i] = models[from]
+		reorderedSlugs[i] = slugs[from]
+	}
+	copy(models, reorderedModels)
+	copy(slugs, reorderedSlugs)
+	return true
 }
 
 func codexModelWithVisibility(rawModel json.RawMessage, visibility string) (json.RawMessage, bool, error) {

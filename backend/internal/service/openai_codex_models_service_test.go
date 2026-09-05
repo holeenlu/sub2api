@@ -1463,6 +1463,160 @@ func (s *codexModelsHTTPUpstreamStub) DoWithTLS(req *http.Request, proxyURL stri
 	return s.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
+// Scenario: an OpenAI group with account model mappings gets its locally
+// generated catalog in the administrator's custom-list order, not alphabetical.
+func TestBuildGroupConfiguredCodexModelsManifestFollowsCustomListOrder(t *testing.T) {
+	t.Parallel()
+
+	const groupID int64 = 81
+	svc := &OpenAIGatewayService{accountRepo: codexModelsVisibilityAccountRepo{
+		byGroup: map[int64][]Account{
+			groupID: {{
+				Platform: PlatformOpenAI,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"a-model": "upstream-a",
+						"b-model": "upstream-b",
+						"c-model": "upstream-c",
+					},
+				},
+			}},
+		},
+	}}
+	group := &Group{
+		ID:       groupID,
+		Platform: PlatformOpenAI,
+		ModelsListConfig: GroupModelsListConfig{
+			Enabled: true,
+			Models:  []string{"b-model", "a-model", "c-model"},
+		},
+	}
+
+	manifest, configured, err := svc.BuildGroupConfiguredCodexModelsManifest(context.Background(), group, "")
+	require.NoError(t, err)
+	require.True(t, configured)
+	require.Equal(t, []string{"b-model", "a-model", "c-model"}, codexManifestModelSlugs(t, manifest.Body))
+	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
+}
+
+// Scenario: the upstream ChatGPT catalog is filtered *and* reordered by the custom list.
+func TestMergeGroupConfiguredCodexModelsFiltersAndOrdersByCustomList(t *testing.T) {
+	t.Parallel()
+
+	const groupID int64 = 82
+	svc := &OpenAIGatewayService{accountRepo: codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{}}}
+	group := &Group{
+		ID:       groupID,
+		Platform: PlatformOpenAI,
+		ModelsListConfig: GroupModelsListConfig{
+			Enabled: true,
+			Models:  []string{"c", "a"},
+		},
+	}
+	upstreamBody := []byte(`{"models":[{"slug":"a"},{"slug":"b"},{"slug":"c"}]}`)
+	manifest := &CodexModelsManifest{Body: upstreamBody, ETag: codexModelsManifestBodyETag(upstreamBody)}
+
+	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, manifest, ""))
+	require.Equal(t, []string{"c", "a"}, codexManifestModelSlugs(t, manifest.Body))
+	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
+	require.NotEqual(t, codexModelsManifestBodyETag(upstreamBody), manifest.ETag)
+}
+
+// Scenario: the custom list contains exactly the upstream set, only in a different
+// order. Nothing is filtered or injected, so the reorder alone must mark the body
+// changed and produce a new ETag — otherwise the picker keeps the upstream order.
+func TestMergeConfiguredCodexModelsManifestOrderOnlyChangeStillChangesBody(t *testing.T) {
+	t.Parallel()
+
+	upstreamBody := []byte(`{"models":[{"slug":"a","priority":0,"unknown":{"kept":1}},{"slug":"b","priority":1},{"slug":"c","priority":2}]}`)
+
+	body, changed, err := mergeConfiguredCodexModelsManifest(upstreamBody, nil, []string{"c", "b", "a"}, true)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, []string{"c", "b", "a"}, codexManifestModelSlugs(t, body))
+	require.NotEqual(t, codexModelsManifestBodyETag(upstreamBody), codexModelsManifestBodyETag(body))
+	// Updating order and priority must preserve unrelated descriptor metadata.
+	models := decodeCodexManifestModels(t, body)
+	require.Equal(t, map[string]any{"kept": float64(1)}, models[2]["unknown"])
+
+	// Same order as upstream → genuinely unchanged.
+	sameBody, sameChanged, err := mergeConfiguredCodexModelsManifest(upstreamBody, nil, []string{"a", "b", "c"}, true)
+	require.NoError(t, err)
+	require.False(t, sameChanged)
+	require.Equal(t, upstreamBody, sameBody)
+
+	// Custom list disabled → upstream order is authoritative even if a list is present.
+	offBody, offChanged, err := mergeConfiguredCodexModelsManifest(upstreamBody, nil, []string{"c", "b", "a"}, false)
+	require.NoError(t, err)
+	require.False(t, offChanged)
+	require.Equal(t, upstreamBody, offBody)
+}
+
+func TestMergeConfiguredCodexModelsManifestAlignsClientPriorities(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		body string
+	}{
+		{"reverse upstream order", `{"models":[{"slug":"a","priority":0},{"slug":"b","priority":1,"unknown":{"kept":true}}]}`},
+		{"priority-only change", `{"models":[{"slug":"b","priority":1,"unknown":{"kept":true}},{"slug":"a","priority":0}]}`},
+		{"equal priorities", `{"models":[{"slug":"b","priority":50,"unknown":{"kept":true}},{"slug":"a","priority":50}]}`},
+		{"missing priorities", `{"models":[{"slug":"b","unknown":{"kept":true}},{"slug":"a"}]}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			original := []byte(tt.body)
+			body, changed, err := mergeConfiguredCodexModelsManifest(original, nil, []string{"b", "a"}, true)
+			require.NoError(t, err)
+			require.True(t, changed)
+			models := decodeCodexManifestModels(t, body)
+			require.Equal(t, float64(0), models[0]["priority"])
+			require.Equal(t, float64(1), models[1]["priority"])
+			require.Equal(t, map[string]any{"kept": true}, models[0]["unknown"])
+			require.Equal(t, []string{"b", "a"}, codexManifestModelSlugs(t, body))
+			require.NotEqual(t, codexModelsManifestBodyETag(original), codexModelsManifestBodyETag(body))
+
+			again, changedAgain, err := mergeConfiguredCodexModelsManifest(body, nil, []string{"b", "a"}, true)
+			require.NoError(t, err)
+			require.False(t, changedAgain)
+			require.Equal(t, body, again)
+
+			disabled, changedDisabled, err := mergeConfiguredCodexModelsManifest(original, nil, []string{"b", "a"}, false)
+			require.NoError(t, err)
+			require.False(t, changedDisabled)
+			require.Equal(t, original, disabled)
+		})
+	}
+}
+
+// Scenario: through the service entry point, an order-only list edit yields a new
+// ETag, and the new ETag then satisfies If-None-Match.
+func TestMergeGroupConfiguredCodexModelsOrderOnlyChangeRefreshesETag(t *testing.T) {
+	t.Parallel()
+
+	const groupID int64 = 83
+	svc := &OpenAIGatewayService{accountRepo: codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{}}}
+	// The array already matches the group: only client priorities need repair.
+	upstreamBody := []byte(`{"models":[{"slug":"c","priority":2},{"slug":"b","priority":1},{"slug":"a","priority":0}]}`)
+	upstreamETag := codexModelsManifestBodyETag(upstreamBody)
+
+	group := &Group{
+		ID:               groupID,
+		Platform:         PlatformOpenAI,
+		ModelsListConfig: GroupModelsListConfig{Enabled: true, Models: []string{"c", "b", "a"}},
+	}
+	first := &CodexModelsManifest{Body: append([]byte(nil), upstreamBody...), ETag: upstreamETag}
+	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, first, upstreamETag))
+	require.False(t, first.NotModified, "the reordered body must not match the upstream ETag")
+	require.Equal(t, []string{"c", "b", "a"}, codexManifestModelSlugs(t, first.Body))
+	require.NotEqual(t, upstreamETag, first.ETag)
+
+	second := &CodexModelsManifest{Body: append([]byte(nil), upstreamBody...), ETag: upstreamETag}
+	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, second, first.ETag))
+	require.True(t, second.NotModified)
+	require.Empty(t, second.Body)
+	require.Equal(t, first.ETag, second.ETag)
+}
+
 func TestIsRetryableCodexModelsManifestTransportError(t *testing.T) {
 	tests := []struct {
 		name      string
