@@ -3,6 +3,7 @@
 > 基于 `holeen/main` @ `ef25d1f48` 的源码分析整理。行号为写作时的快照，落地前请以 `rg` 复核。
 > 目标读者：负责实施的开发者。每个需求给出「现状 → 改动点 → 方案 → 测试 → 决策点」。
 > 2026-09-05 审查更新：补齐设置兼容性、模型参数验证、配置下载依赖、纯重排测试及品牌盘点边界。本次更新仅修改方案，不代表功能已实现或测试已通过。
+> 2026-09-05 需求确认：`review_model` 与最终选中的 `model` 始终相同，包括模型目录兜底后的结果；不再单独首选 Terra。此条覆盖本方案此前的双模型设计。
 
 ---
 
@@ -110,14 +111,13 @@ review_model = "${model}"     // 与 model 同值
 
 ```ts
 const model = selectCodexCatalogModel('gpt-5.6-sol')
-const reviewModel = selectCodexCatalogModel('gpt-5.6-terra')
 const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 ...
 model = "${model}"
-review_model = "${reviewModel}"
+review_model = "${model}"
 ```
 
-两个函数各改一处。`selectCodexCatalogModel()`（L657）的语义是：用户点过「获取目录」且目录里没有首选模型时，退回目录第 1 个；未获取目录时原样返回首选值。改动后这个语义不变。
+普通 CLI 和 WebSocket 两条生成路径都只选择一次主模型，`review_model` 直接复用该结果，不独立选择 Terra。`selectCodexCatalogModel()`（L657）的语义是：用户点过「获取目录」且目录里没有首选模型时，退回目录第 1 个；未获取目录时原样返回首选值。改动后这个语义不变，兜底后两个配置键仍必须同值。Composite 和其他 routed Codex 配置同样遵守此约束。
 
 **注意**：后端 `configuredCodexGPTReasoningLevels()`（`openai_codex_models_service.go` L562）为 `gpt-5.6-sol`/`gpt-5.6-terra` 额外声明了 `ultra` 档，目录获取后 `codexReasoningEffortTomlLine` 会按目录 `default_reasoning_level` 生成 `model_reasoning_effort`，不需要前端硬编码。
 
@@ -156,7 +156,7 @@ review_model = "${reviewModel}"
 
 | 测试 | 行 | 处理 |
 |------|----|------|
-| `keeps legacy OpenAI Codex config as the default` | L344, 断言 L368–369 | `gpt-5.5` → `model = "gpt-5.6-sol"`、`review_model = "gpt-5.6-terra"` |
+| `keeps legacy OpenAI Codex config as the default` | L344, 断言 L368–369 | `gpt-5.5` → `model = "gpt-5.6-sol"`、`review_model = "gpt-5.6-sol"` |
 | `renders API Key Mode authorization in OpenAI Codex config` | L387 | 同上 |
 | `keeps legacy OpenAI Codex WebSocket config as the default` | L438, 断言 L470–471 | 同上 |
 | `preserves API Key Mode when switching to OpenAI Codex WebSocket config` | L486 | 检查是否断言模型 |
@@ -166,9 +166,9 @@ review_model = "${reviewModel}"
 | `keeps the preferred Composite default when it exists in the catalog` | L827, fixture L834 | 若 composite 改为 sol，fixture slug 与断言同步 |
 | `derives OpenAI Codex reasoning effort from the selected catalog descriptor` | L873 | fixture 里的 slug 改为 `gpt-5.6-sol` |
 
-新增：一个断言 Anthropic 分组 Codex tab（unix + windows）`model = "claude-sonnet-5"` 的用例；一个断言 `model` 与 `review_model` 不同值的用例。
+新增：一个断言 Anthropic 分组 Codex tab（unix + windows）`model = "claude-sonnet-5"` 的用例；断言 `model` 与 `review_model` 始终同值。Composite 也须覆盖同时提供 Sol/Terra 和仅提供 Terra 时的结果，后者应由主模型目录兜底统一选中 Terra。
 
-默认模型测试覆盖 Codex CLI / WebSocket、legacy / API Key Mode：两项首选均存在、仅 model 存在、仅 review_model 存在、两项均不存在、未获取目录、空目录、获取失败。分别断言 model 与 review_model 的选择结果；发生兜底时允许二者相同，不把「永远不同」写成不变量。按当前 helper 语义，空目录回到首选值，这不代表上游可用性已验证。
+默认模型测试覆盖 Codex CLI / WebSocket、legacy / API Key Mode：Sol/Terra 同时存在、仅 Sol 存在但不在首位、Terra 存在而 Sol 缺失、两者均不存在、未获取目录、空目录、获取失败。先断言主模型的选择结果，再断言 `review_model === model`；不得单独优先选中 Terra。下载文件也须通过 TOML 解析验证此同值约束。按当前 helper 语义，空目录回到主模型首选值，这不代表上游可用性已验证。
 
 ---
 
@@ -505,7 +505,7 @@ go test -tags unit -run 'Codex' ./internal/service/ ./internal/handler/
 
 # 手工
 # 1. /keys 操作列不再出现「导入到 CCS」；Antigravity 分组点「使用密钥」正常
-# 2. OpenAI 分组 → Codex CLI：config.toml 中 model=gpt-5.6-sol / review_model=gpt-5.6-terra；
+# 2. OpenAI 分组 → Codex CLI：默认 model=review_model=gpt-5.6-sol；目录兜底后两者仍同值；
 #    Anthropic 分组 → Codex CLI（Windows tab）：model=claude-sonnet-5
 # 3. 每个 config.toml / opencode.json 卡片有「下载」，文件名与内容正确
 #    TOML 根级字段在首个 table 之前，解析后属于根级；JSON 可解析
