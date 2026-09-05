@@ -149,6 +149,17 @@
               <!-- Code Header -->
               <div class="flex items-center justify-between px-4 py-2 bg-gray-800 dark:bg-dark-800 border-b border-gray-700 dark:border-dark-700">
                 <span class="min-w-0 truncate text-xs text-gray-400 font-mono">{{ file.path }}</span>
+                <div class="flex flex-shrink-0 items-center gap-1.5">
+                <button
+                  v-if="file.downloadName"
+                  type="button"
+                  data-testid="setup-file-download"
+                  @click="downloadFile(file)"
+                  class="flex flex-shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white"
+                >
+                  <Icon name="download" size="xs" />
+                  {{ t('keys.useKeyModal.download') }}
+                </button>
                 <button
                   type="button"
                   @click="copyContent(file.content, index)"
@@ -165,6 +176,7 @@
                   </svg>
                   {{ copiedIndex === index ? t('keys.useKeyModal.copied') : t('keys.useKeyModal.copy') }}
                 </button>
+                </div>
               </div>
               <!-- Code Content -->
               <pre class="p-4 text-sm font-mono text-gray-100 overflow-x-auto"><code v-if="file.highlighted" v-html="file.highlighted"></code><code v-else v-text="file.content"></code></pre>
@@ -293,6 +305,9 @@ interface FileConfig {
   content: string
   hint?: string  // Optional hint message for this file
   highlighted?: string
+  // File name offered by the per-card "Download" button. Left unset for shell
+  // snippets (Terminal / PowerShell / Command Prompt), which are not files.
+  downloadName?: string
 }
 
 const props = defineProps<Props>()
@@ -642,6 +657,16 @@ async function loadCodexModelManifest() {
   }
 }
 
+// downloadFile saves the exact text shown in the card. Display, copy and download
+// all read file.content, so there is never a second template to drift.
+function downloadFile(file: FileConfig) {
+  if (!file.downloadName) return
+  const mime = file.downloadName.endsWith('.json')
+    ? 'application/json;charset=utf-8'
+    : 'text/plain;charset=utf-8'
+  saveAs(new Blob([file.content], { type: mime }), file.downloadName)
+}
+
 function downloadCodexModelManifest() {
   if (!codexModelManifestContent.value) return
   saveAs(
@@ -969,14 +994,16 @@ function buildOpenAICodexFileConfigs(
     {
       path: `${configDir}/config.toml`,
       content: configContent,
-      hint: t('keys.useKeyModal.openai.configTomlHint')
+      hint: t('keys.useKeyModal.openai.configTomlHint'),
+      downloadName: 'config.toml'
     }
   ]
 
   if (codexAuthMode.value === 'legacy') {
     files.push({
       path: `${configDir}/auth.json`,
-      content: JSON.stringify({ OPENAI_API_KEY: apiKey }, null, 2)
+      content: JSON.stringify({ OPENAI_API_KEY: apiKey }, null, 2),
+      downloadName: 'auth.json'
     })
   }
 
@@ -1129,7 +1156,8 @@ image_edit_model_override = "grok-imagine-edit"
     {
       path: joinConfigPath(configDir, 'config.toml', isWindowsPath),
       content: configContent,
-      hint: t('keys.useKeyModal.grok.configTomlHint')
+      hint: t('keys.useKeyModal.grok.configTomlHint'),
+      downloadName: 'config.toml'
     }
   ]
 }
@@ -1198,7 +1226,8 @@ supports_websockets = false
     {
       path: joinConfigPath(configDir, 'config.toml', isWindowsPath),
       content: configContent,
-      hint: t('keys.useKeyModal.grok.codexConfigTomlHint')
+      hint: t('keys.useKeyModal.grok.codexConfigTomlHint'),
+      downloadName: 'config.toml'
     }
   ]
 }
@@ -1263,7 +1292,8 @@ supports_websockets = false`
         platform === 'deepseek' || platform === 'composite'
           ? `keys.useKeyModal.${platform}.codexConfigTomlHint`
           : 'keys.useKeyModal.routedCodex.configTomlHint'
-      )
+      ),
+      downloadName: 'config.toml'
     }
   ]
 }
@@ -1812,7 +1842,8 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
   return {
     path: pathLabel ?? 'opencode.json',
     content,
-    hint: t('keys.useKeyModal.opencode.hint')
+    hint: t('keys.useKeyModal.opencode.hint'),
+    downloadName: 'opencode.json'
   }
 }
 

@@ -25,6 +25,7 @@ vi.mock('file-saver', () => ({
 
 import UseKeyModal from '../UseKeyModal.vue'
 import type { GroupPlatform } from '@/types'
+import { parse as parseToml } from 'smol-toml'
 
 function readBlobAsText(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -1053,5 +1054,181 @@ describe('UseKeyModal', () => {
     const config = findCodeBlock(wrapper, '[model_providers.sub2api]')
     expect(tomlValue(config, 'model')).toBe(expectedModel)
     expect(tomlValue(config, 'review_model')).toBe(tomlValue(config, 'model'))
+  })
+  // ---- Per-file download ----------------------------------------------------------
+  //
+  // Every real config file card (config.toml / auth.json / opencode.json) gets a Download
+  // button next to Copy. Shell snippets are not files and get none. The saved Blob is the
+  // exact card text, and for TOML/JSON it must parse with the config keys at the root.
+
+  type DownloadedFile = { name: string; text: string; cardText: string; cardPath: string }
+
+  async function downloadAllCards(wrapper: ReturnType<typeof mountModal>): Promise<DownloadedFile[]> {
+    saveAsMock.mockClear()
+    const buttons = wrapper.findAll('[data-testid="setup-file-download"]')
+    const files: DownloadedFile[] = []
+    for (const button of buttons) {
+      const card = button.element.closest('div.relative') as HTMLElement
+      const cardText = card.querySelector('pre code')?.textContent ?? ''
+      const cardPath = card.querySelector('span.font-mono')?.textContent ?? ''
+      await button.trigger('click')
+      const call = saveAsMock.mock.calls.at(-1)
+      expect(call).toBeDefined()
+      const [blob, name] = call as [Blob, string]
+      files.push({ name, text: await readBlobAsText(blob), cardText, cardPath })
+    }
+    return files
+  }
+
+  function expectRootKeys(config: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      expect(config, `root key ${key}`).toHaveProperty(key)
+    }
+  }
+
+  it('does not offer a download for shell snippets', () => {
+    const wrapper = mountModal('anthropic')
+    // Claude Code setup: a Terminal snippet plus ~/.claude/settings.json — neither is downloadable here.
+    expect(wrapper.findAll('[data-testid="setup-file-download"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('Terminal')
+  })
+
+  describe.each([
+    ['Codex CLI', 'legacy', 'macOS / Linux'],
+    ['Codex CLI', 'legacy', 'Windows'],
+    ['Codex CLI', 'api-key', 'macOS / Linux'],
+    ['Codex CLI', 'api-key', 'Windows'],
+    ['Codex CLI (WebSocket)', 'legacy', 'macOS / Linux'],
+    ['Codex CLI (WebSocket)', 'legacy', 'Windows'],
+    ['Codex CLI (WebSocket)', 'api-key', 'macOS / Linux'],
+    ['Codex CLI (WebSocket)', 'api-key', 'Windows']
+  ] as const)('OpenAI %s download in %s auth mode on %s', (client, authMode, osTab) => {
+    it('downloads config.toml (and auth.json in legacy mode) matching the cards', async () => {
+      const wrapper = mountModal('openai', 'sk-download-test')
+      if (client === 'Codex CLI (WebSocket)') {
+        await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCliWs'))
+      }
+      if (authMode === 'api-key') {
+        await wrapper.get('[data-testid="codex-auth-mode-api-key"]').trigger('click')
+        await nextTick()
+      }
+      await clickButton(wrapper, (text) => text.trim() === osTab)
+
+      const files = await downloadAllCards(wrapper)
+      const names = files.map((file) => file.name)
+      expect(names).toEqual(authMode === 'legacy' ? ['config.toml', 'auth.json'] : ['config.toml'])
+
+      // The shell/env snippet must never be downloadable.
+      expect(wrapper.findAll('[data-testid="setup-file-download"]')).toHaveLength(files.length)
+
+      const toml = files.find((file) => file.name === 'config.toml')!
+      expect(toml.text).toBe(toml.cardText)
+      expect(toml.cardPath).toMatch(/config\.toml$/)
+      const parsed = parseToml(toml.text) as Record<string, unknown>
+      // Root-level keys come before any [table]; the parser is the arbiter of that.
+      expectRootKeys(parsed, ['model_provider', 'model', 'review_model', 'disable_response_storage', 'model_catalog_json', 'network_access', 'windows_wsl_setup_acknowledged'])
+      expect(parsed.model_provider).toBe('OpenAI')
+      expect(parsed.model).toBe('gpt-5.6-sol')
+      expect(parsed.review_model).toBe(parsed.model)
+      expect(parsed.model_catalog_json).toBe(
+        osTab === 'Windows' ? '%userprofile%\\.codex\\codex-models.json' : '~/.codex/codex-models.json'
+      )
+      const providers = parsed.model_providers as Record<string, Record<string, unknown>>
+      expect(providers.OpenAI.base_url).toBe('https://example.com/v1')
+      expect(providers.OpenAI.wire_api).toBe('responses')
+      if (authMode === 'api-key') {
+        expect(providers.OpenAI.requires_openai_auth).toBe(false)
+        expect(providers.OpenAI.experimental_bearer_token).toBe('sk-download-test')
+      } else {
+        expect(providers.OpenAI.requires_openai_auth).toBe(true)
+        expect(providers.OpenAI).not.toHaveProperty('experimental_bearer_token')
+      }
+      const features = parsed.features as Record<string, unknown>
+      expect(features.goals).toBe(true)
+      if (client === 'Codex CLI (WebSocket)') {
+        expect(providers.OpenAI.supports_websockets).toBe(true)
+        expect(features.responses_websockets_v2).toBe(true)
+      } else {
+        expect(providers.OpenAI).not.toHaveProperty('supports_websockets')
+      }
+
+      if (authMode === 'legacy') {
+        const auth = files.find((file) => file.name === 'auth.json')!
+        expect(auth.text).toBe(auth.cardText)
+        expect(JSON.parse(auth.text)).toEqual({ OPENAI_API_KEY: 'sk-download-test' })
+      }
+    })
+  })
+
+  it('downloads the routed Codex config.toml for Anthropic groups on both OS tabs', async () => {
+    for (const osTab of ['macOS / Linux', 'Windows'] as const) {
+      const wrapper = mountModal('anthropic', 'sk-anthropic-test')
+      await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
+      await clickButton(wrapper, (text) => text.trim() === osTab)
+
+      const files = await downloadAllCards(wrapper)
+      expect(files.map((file) => file.name)).toEqual(['config.toml'])
+      const parsed = parseToml(files[0].text) as Record<string, unknown>
+      expectRootKeys(parsed, ['model_provider', 'model', 'review_model', 'disable_response_storage', 'model_catalog_json'])
+      expect(parsed.model_provider).toBe('sub2api')
+      expect(parsed.model).toBe('claude-sonnet-5')
+      const providers = parsed.model_providers as Record<string, Record<string, unknown>>
+      expect(providers.sub2api.env_key).toBe('SUB2API_API_KEY')
+      expect(providers.sub2api.requires_openai_auth).toBe(false)
+    }
+  })
+
+  it.each([
+    ['openai', 1],
+    ['anthropic', 1],
+    ['gemini', 1],
+    ['grok', 1],
+    ['antigravity', 2]
+  ] as const)('downloads opencode.json for %s groups (%i file(s)) as parseable JSON', async (platform, count) => {
+    const wrapper = mountModal(platform, 'sk-opencode-test')
+    await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.opencode'))
+
+    const files = await downloadAllCards(wrapper)
+    expect(files).toHaveLength(count)
+    for (const file of files) {
+      expect(file.name).toBe('opencode.json')
+      expect(file.text).toBe(file.cardText)
+      const parsed = JSON.parse(file.text)
+      expect(parsed.$schema).toBe('https://opencode.ai/config.json')
+      const providers = Object.values(parsed.provider) as Array<{ options: { apiKey: string } }>
+      expect(providers).toHaveLength(1)
+      expect(providers[0].options.apiKey).toBe('sk-opencode-test')
+    }
+    if (platform === 'antigravity') {
+      expect(files.map((file) => file.cardPath)).toEqual(['opencode.json (Claude)', 'opencode.json (Gemini)'])
+    }
+  })
+
+  it('downloads the Grok CLI and Grok Codex config.toml as parseable TOML', async () => {
+    const wrapper = mountModal('grok', 'sk-grok-download')
+    // Grok CLI tab is the default for grok groups.
+    let files = await downloadAllCards(wrapper)
+    expect(files.map((file) => file.name)).toEqual(['config.toml'])
+    let parsed = parseToml(files[0].text) as Record<string, unknown>
+    expect(parsed).toHaveProperty('endpoints')
+    expect((parsed.models as Record<string, unknown>).default).toBe('grok-4.5')
+
+    await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
+    files = await downloadAllCards(wrapper)
+    expect(files.map((file) => file.name)).toEqual(['config.toml'])
+    parsed = parseToml(files[0].text) as Record<string, unknown>
+    expectRootKeys(parsed, ['model_provider', 'model', 'model_catalog_json'])
+    expect(parsed.model_provider).toBe('sub2api')
+  })
+
+  it('downloads the current key, not a stale one, after the apiKey prop changes', async () => {
+    const wrapper = mountModal('openai', 'sk-first')
+    await wrapper.setProps({ apiKey: 'sk-second' })
+    await nextTick()
+
+    const files = await downloadAllCards(wrapper)
+    const auth = files.find((file) => file.name === 'auth.json')!
+    expect(JSON.parse(auth.text)).toEqual({ OPENAI_API_KEY: 'sk-second' })
+    expect(files.find((file) => file.name === 'config.toml')!.text).not.toContain('sk-first')
   })
 })
