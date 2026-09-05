@@ -179,6 +179,9 @@ const DataTableStub = {
         >
           <slot name="cell-last_used_ip" :value="row.last_used_ip" :row="row" />
         </div>
+        <div data-test="row-actions">
+          <slot name="cell-actions" :value="row" :row="row" />
+        </div>
       </div>
       <slot name="empty" />
     </div>
@@ -283,6 +286,17 @@ describe('user KeysView column settings', () => {
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
     isCurrentStep.mockReturnValue(false)
+  })
+
+  it('renders the use-key action without the removed CC-Switch import entry', async () => {
+    const wrapper = await mountView()
+
+    const actions = wrapper.get('[data-test="row-actions"]')
+    // 操作列确实渲染了（否则下面的否定断言是空的）。
+    expect(actions.text()).toContain('keys.useKey')
+    // 「导入到 CCS」入口已移除，且不再受 hide_ccs_import_button 控制。
+    expect(actions.text()).not.toContain('keys.importToCcSwitch')
+    expect(wrapper.text()).not.toContain('keys.ccsClientSelect.title')
   })
 
   it('uses the default API key columns with low-frequency columns hidden', async () => {

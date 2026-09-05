@@ -95,7 +95,6 @@ export default {
     created: 'Created',
     copyToClipboard: 'Copy to clipboard',
     copied: 'Copied!',
-    importToCcSwitch: 'Import to CCS',
     enable: 'Enable',
     disable: 'Disable',
     nameLabel: 'Name',
@@ -234,15 +233,6 @@ export default {
     ipBlacklistPlaceholder: '1.2.3.4\n5.6.0.0/16',
     ipBlacklistHint: 'One IP or CIDR per line. These IPs will be blocked from using this key.',
     ipRestrictionEnabled: 'IP restriction enabled',
-    ccSwitchNotInstalled: 'CC-Switch is not installed or the protocol handler is not registered. Please install CC-Switch first or manually copy the API key.',
-    ccsClientSelect: {
-      title: 'Select Client',
-      description: 'Please select the client type to import to CC-Switch:',
-      claudeCode: 'Claude Code',
-      claudeCodeDesc: 'Import as Claude Code configuration',
-      geminiCli: 'Gemini CLI',
-      geminiCliDesc: 'Import as Gemini CLI configuration',
-    },
     // Quota and expiration
     quotaLimit: 'Quota Limit',
     quotaAmount: 'Quota Amount (USD)',
