@@ -24,6 +24,7 @@ vi.mock('file-saver', () => ({
 }))
 
 import UseKeyModal from '../UseKeyModal.vue'
+import type { GroupPlatform } from '@/types'
 
 function readBlobAsText(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -32,6 +33,57 @@ function readBlobAsText(blob: Blob): Promise<string> {
     reader.addEventListener('error', () => reject(reader.error))
     reader.readAsText(blob)
   })
+}
+
+
+const stubs = {
+  BaseDialog: {
+    template: '<div><slot /><slot name="footer" /></div>'
+  },
+  Icon: {
+    template: '<span />'
+  }
+}
+
+function mountModal(platform: GroupPlatform, apiKey = 'sk-test') {
+  return mount(UseKeyModal, {
+    props: {
+      show: true,
+      apiKey,
+      baseUrl: 'https://example.com/v1',
+      platform
+    },
+    global: { stubs }
+  })
+}
+
+async function clickButton(wrapper: ReturnType<typeof mountModal>, match: (text: string) => boolean) {
+  const button = wrapper.findAll('button').find((candidate) => match(candidate.text()))
+  expect(button).toBeDefined()
+  await button!.trigger('click')
+  await nextTick()
+}
+
+function findCodeBlock(wrapper: ReturnType<typeof mountModal>, marker: string): string {
+  const block = wrapper.findAll('pre code').map((code) => code.text()).find((content) => content.includes(marker))
+  expect(block).toBeDefined()
+  return block!
+}
+
+function tomlValue(config: string, key: string): string | undefined {
+  return config.match(new RegExp(`^${key} = "([^"]*)"$`, 'm'))?.[1]
+}
+
+function stubCatalog(slugs: string[] | 'error') {
+  if (slugs === 'error') {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502, json: async () => ({}) }))
+    return
+  }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => ({ models: slugs.map((slug) => ({ slug })) })
+  }))
 }
 
 describe('UseKeyModal', () => {
@@ -365,9 +417,9 @@ describe('UseKeyModal', () => {
     const configToml = codeBlocks.find((content) => content.includes('model_provider = "OpenAI"'))
 
     expect(configToml).toBeDefined()
-    expect(configToml).toContain('model = "gpt-5.5"')
-    expect(configToml).toContain('review_model = "gpt-5.5"')
-    expect(configToml).not.toContain('model = "gpt-5.4"')
+    expect(configToml).toContain('model = "gpt-5.6-sol"')
+    expect(configToml).toContain('review_model = "gpt-5.6-sol"')
+    expect(configToml).not.toContain('model = "gpt-5.5"')
     expect(configToml).not.toContain('model_context_window')
     expect(configToml).not.toContain('model_auto_compact_token_limit')
     expect(configToml).toContain('requires_openai_auth = true')
@@ -467,9 +519,9 @@ describe('UseKeyModal', () => {
     const configToml = codeBlocks.find((content) => content.includes('supports_websockets = true'))
 
     expect(configToml).toBeDefined()
-    expect(configToml).toContain('model = "gpt-5.5"')
-    expect(configToml).toContain('review_model = "gpt-5.5"')
-    expect(configToml).not.toContain('model = "gpt-5.4"')
+    expect(configToml).toContain('model = "gpt-5.6-sol"')
+    expect(configToml).toContain('review_model = "gpt-5.6-sol"')
+    expect(configToml).not.toContain('model = "gpt-5.5"')
     expect(configToml).not.toContain('model_context_window')
     expect(configToml).not.toContain('model_auto_compact_token_limit')
     expect(configToml).toContain('requires_openai_auth = true')
@@ -566,38 +618,37 @@ describe('UseKeyModal', () => {
     expect(wrapper.findAll('pre code').map((code) => code.text()).join('\n')).not.toContain('x-openai-actor-authorization')
   })
 
-  it('renders GPT-5.4 mini entry in OpenCode config', async () => {
-    const wrapper = mount(UseKeyModal, {
-      props: {
-        show: true,
-        apiKey: 'sk-test',
-        baseUrl: 'https://example.com/v1',
-        platform: 'openai'
-      },
-      global: {
-        stubs: {
-          BaseDialog: {
-            template: '<div><slot /><slot name="footer" /></div>'
-          },
-          Icon: {
-            template: '<span />'
-          }
-        }
-      }
-    })
+  it('lists only the gpt-5.5, gpt-5.6 family and gpt-6 (astra) in OpenCode config', async () => {
+    const wrapper = mountModal('openai')
 
     const opencodeTab = wrapper.findAll('button').find((button) =>
       button.text().includes('keys.useKeyModal.cliTabs.opencode')
     )
-
     expect(opencodeTab).toBeDefined()
     await opencodeTab!.trigger('click')
     await nextTick()
 
-    const codeBlock = wrapper.find('pre code')
-    expect(codeBlock.exists()).toBe(true)
-    expect(codeBlock.text()).toContain('"name": "GPT-5.4 Mini"')
-    expect(codeBlock.text()).not.toContain('"name": "GPT-5.4 Nano"')
+    const models = JSON.parse(wrapper.find('pre code').text()).provider.openai.models
+    expect(Object.keys(models)).toEqual([
+      'gpt-5.5',
+      'gpt-5.6',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-6',
+      'gpt-6-astra'
+    ])
+    for (const removed of ['gpt-5.2', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark', 'codex-mini-latest']) {
+      expect(models).not.toHaveProperty(removed)
+    }
+
+    // gpt-6-astra: limits come from the pricing source; variants mirror the backend
+    // Codex catalog, which now advertises max for GPT-6 Astra. "gpt-6" is its alias.
+    expect(models['gpt-6-astra'].name).toBe('GPT-6 Astra')
+    expect(models['gpt-6-astra'].limit).toEqual({ context: 922000, output: 128000 })
+    expect(models['gpt-6-astra'].options).toEqual({ store: false })
+    expect(models['gpt-6-astra'].variants).toHaveProperty('max')
+    expect(models['gpt-6'].limit).toEqual(models['gpt-6-astra'].limit)
   })
 
   it('renders GPT-5.6 and GPT-6 Astra capabilities in OpenCode config', async () => {
@@ -634,19 +685,17 @@ describe('UseKeyModal', () => {
       expect(models[model].variants).toHaveProperty('max')
       expect(models[model].variants).toHaveProperty('xhigh')
     }
-    expect(models['gpt-5.6'].name).toBe('GPT-5.6 (Sol)')
-    expect(models['gpt-6']).toEqual({
-      name: 'GPT-6 (Astra)',
-      limit: { context: 1050000, output: 128000 },
-      options: { store: false },
-      variants: { low: {}, medium: {}, high: {}, xhigh: {}, max: {} }
-    })
-    expect(models['gpt-6-astra']).toEqual({
-      name: 'GPT-6 Astra',
-      limit: { context: 1050000, output: 128000 },
-      options: { store: false },
-      variants: { low: {}, medium: {}, high: {}, xhigh: {}, max: {} }
-    })
+    expect(models['gpt-5.6'].name).toBe('GPT-5.6')
+    for (const model of ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+      expect(models[model].limit).toEqual({ context: 922000, output: 128000 })
+    }
+    expect(models['gpt-5.5'].limit).toEqual({ context: 1050000, output: 128000 })
+    for (const model of ['gpt-6', 'gpt-6-astra']) {
+      expect(models[model].limit).toEqual({ context: 922000, output: 128000 })
+      expect(models[model].variants).toEqual({ low: {}, medium: {}, high: {}, xhigh: {}, max: {} })
+    }
+    expect(models['gpt-6'].name).toBe('GPT-6 (Astra)')
+    expect(models['gpt-6-astra'].name).toBe('GPT-6 Astra')
   })
 
   it('renders Claude Fable 5 OpenCode config with adaptive thinking', async () => {
@@ -772,7 +821,7 @@ describe('UseKeyModal', () => {
       .find((content) => content.includes('[model_providers.sub2api]'))
     expect(loadedUnixConfig).toContain('model = "claude-opus-4-8"')
     expect(loadedUnixConfig).toContain('review_model = "claude-opus-4-8"')
-    expect(loadedUnixConfig).not.toContain('model = "gpt-5.5"')
+    expect(loadedUnixConfig).not.toContain('model = "gpt-5.6-sol"')
 
     const downloadButton = wrapper.findAll('button').find((button) =>
       button.text().includes('keys.useKeyModal.codexModelCatalog.download')
@@ -843,7 +892,7 @@ describe('UseKeyModal', () => {
       json: async () => ({
         models: [
           { slug: 'claude-opus-4-8' },
-          { slug: 'gpt-5.5' }
+          { slug: 'gpt-5.6-sol' }
         ]
       })
     }))
@@ -878,8 +927,8 @@ describe('UseKeyModal', () => {
     const config = wrapper.findAll('pre code')
       .map((code) => code.text())
       .find((content) => content.includes('[model_providers.sub2api]'))
-    expect(config).toContain('model = "gpt-5.5"')
-    expect(config).toContain('review_model = "gpt-5.5"')
+    expect(config).toContain('model = "gpt-5.6-sol"')
+    expect(config).toContain('review_model = "gpt-5.6-sol"')
   })
 
   it('derives OpenAI Codex reasoning effort from the selected catalog descriptor', async () => {
@@ -924,5 +973,85 @@ describe('UseKeyModal', () => {
       .find((content) => content.includes('model_provider = "OpenAI"'))
     expect(configToml).toContain('model = "glm-5.3"')
     expect(configToml).not.toContain('model_reasoning_effort')
+  })
+  it.each([
+    ['anthropic', 'macOS / Linux'],
+    ['anthropic', 'Windows'],
+    ['antigravity', 'macOS / Linux'],
+    ['antigravity', 'Windows']
+  ] as const)('defaults the %s routed Codex config to claude-sonnet-5 on %s', async (platform, osTab) => {
+    const wrapper = mountModal(platform)
+    await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
+    await clickButton(wrapper, (text) => text.trim() === osTab)
+
+    const config = findCodeBlock(wrapper, '[model_providers.sub2api]')
+    expect(tomlValue(config, 'model')).toBe('claude-sonnet-5')
+    expect(tomlValue(config, 'review_model')).toBe('claude-sonnet-5')
+    expect(config).not.toContain('claude-sonnet-4-6')
+  })
+
+  it('keeps the OpenAI Codex review_model equal to the selected model', () => {
+    const wrapper = mountModal('openai')
+    const config = findCodeBlock(wrapper, 'model_provider = "OpenAI"')
+    expect(tomlValue(config, 'model')).toBe('gpt-5.6-sol')
+    expect(tomlValue(config, 'review_model')).toBe(tomlValue(config, 'model'))
+  })
+
+  // Resolve the main model once; review_model must follow even when the catalog
+  // forces a fallback or contains Terra alongside the preferred Sol model.
+  describe.each([
+    ['Codex CLI', 'legacy'],
+    ['Codex CLI', 'api-key'],
+    ['Codex CLI (WebSocket)', 'legacy'],
+    ['Codex CLI (WebSocket)', 'api-key']
+  ] as const)('OpenAI %s default models in %s auth mode', (client, authMode) => {
+    async function openConfig(catalog: string[] | 'error' | null) {
+      if (catalog !== null) stubCatalog(catalog)
+      const wrapper = mountModal('openai', 'sk-openai-test')
+      if (client === 'Codex CLI (WebSocket)') {
+        await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCliWs'))
+      }
+      if (authMode === 'api-key') {
+        await wrapper.get('[data-testid="codex-auth-mode-api-key"]').trigger('click')
+        await nextTick()
+      }
+      if (catalog !== null) {
+        await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
+        await flushPromises()
+      }
+      return findCodeBlock(wrapper, 'model_provider = "OpenAI"')
+    }
+
+    it.each([
+      ['Sol and Terra present', ['gpt-5.6-sol', 'gpt-5.6-terra', 'other'], 'gpt-5.6-sol'],
+      ['preferred model present after another model', ['zeta', 'gpt-5.6-sol'], 'gpt-5.6-sol'],
+      ['Terra present without Sol', ['zeta', 'gpt-5.6-terra'], 'zeta'],
+      ['neither Sol nor Terra present', ['alpha', 'beta'], 'alpha'],
+      ['catalog not fetched', null, 'gpt-5.6-sol'],
+      ['empty catalog', [], 'gpt-5.6-sol'],
+      ['catalog fetch failed', 'error', 'gpt-5.6-sol']
+    ] as const)('%s', async (_label, catalog, expectedModel) => {
+      const config = await openConfig(catalog === null ? null : catalog === 'error' ? 'error' : [...catalog])
+      expect(tomlValue(config, 'model')).toBe(expectedModel)
+      expect(tomlValue(config, 'review_model')).toBe(expectedModel)
+    })
+  })
+
+  it.each([
+    ['macOS / Linux', ['gpt-5.6-sol', 'gpt-5.6-terra'], 'gpt-5.6-sol'],
+    ['Windows', ['gpt-5.6-sol', 'gpt-5.6-terra'], 'gpt-5.6-sol'],
+    ['macOS / Linux', ['gpt-5.6-terra'], 'gpt-5.6-terra'],
+    ['Windows', ['gpt-5.6-terra'], 'gpt-5.6-terra']
+  ] as const)('keeps Composite review_model aligned on %s with catalog %j', async (osTab, catalog, expectedModel) => {
+    stubCatalog([...catalog])
+    const wrapper = mountModal('composite')
+    await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
+    await clickButton(wrapper, (text) => text.trim() === osTab)
+    await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
+    await flushPromises()
+
+    const config = findCodeBlock(wrapper, '[model_providers.sub2api]')
+    expect(tomlValue(config, 'model')).toBe(expectedModel)
+    expect(tomlValue(config, 'review_model')).toBe(tomlValue(config, 'model'))
   })
 })

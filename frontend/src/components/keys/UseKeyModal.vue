@@ -926,7 +926,7 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
 
-  const model = selectCodexCatalogModel('gpt-5.5')
+  const model = selectCodexCatalogModel('gpt-5.6-sol')
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content
@@ -1211,15 +1211,15 @@ function generateRoutedCodexFiles(
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
   const preferredModels: Partial<Record<GroupPlatform, string>> = {
-    openai: 'gpt-5.5',
-    anthropic: 'claude-sonnet-4-6',
+    openai: 'gpt-5.6-sol',
+    anthropic: 'claude-sonnet-5',
     gemini: 'gemini-2.5-pro',
-    antigravity: 'claude-sonnet-4-6',
+    antigravity: 'claude-sonnet-5',
     grok: 'grok-4.5',
     kimi: 'kimi-k2.5',
     zhipu: 'glm-4.7',
     deepseek: 'deepseek-v4-pro',
-    composite: 'gpt-5.5'
+    composite: 'gpt-5.6-sol'
   }
   const preferredModel = preferredModels[platform] || ''
   const model = selectCodexCatalogModel(preferredModel)
@@ -1271,7 +1271,7 @@ supports_websockets = false`
 function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
-  const model = selectCodexCatalogModel('gpt-5.5')
+  const model = selectCodexCatalogModel('gpt-5.6-sol')
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content with WebSocket v2
@@ -1306,125 +1306,13 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
       }
     }
   }
+  // Context / output limits follow the project's own pricing source
+  // (Wei-Shaw/model-price-repo model_prices_and_context_window.json, checked 2026-09-05),
+  // which is also what the backend syncs for billing. gpt-5.5 is 1,050,000 there; the
+  // gpt-5.6 family and gpt-6-astra are 922,000. "gpt-6" is the public alias the backend
+  // routes to gpt-6-astra. Reasoning variants mirror what the backend Codex catalog
+  // advertises for each model (GPT-5.6 family and GPT-6 Astra include max).
   const openaiModels = {
-    'gpt-6': {
-      name: 'GPT-6 (Astra)',
-      limit: {
-        context: 1050000,
-        output: 128000
-      },
-      options: {
-        store: false
-      },
-      variants: {
-        low: {},
-        medium: {},
-        high: {},
-        xhigh: {},
-        max: {}
-      }
-    },
-    'gpt-6-astra': {
-      name: 'GPT-6 Astra',
-      limit: {
-        context: 1050000,
-        output: 128000
-      },
-      options: {
-        store: false
-      },
-      variants: {
-        low: {},
-        medium: {},
-        high: {},
-        xhigh: {},
-        max: {}
-      }
-    },
-    'gpt-5.2': {
-      name: 'GPT-5.2',
-      limit: {
-        context: 400000,
-        output: 128000
-      },
-      options: {
-        store: false
-      },
-      variants: {
-        low: {},
-        medium: {},
-        high: {},
-        xhigh: {}
-      }
-    },
-    'gpt-5.6': {
-      name: 'GPT-5.6 (Sol)',
-      limit: {
-        context: 1050000,
-        output: 128000
-      },
-      options: {
-        store: false
-      },
-      variants: {
-        low: {},
-        medium: {},
-        high: {},
-        xhigh: {},
-        max: {}
-      }
-    },
-    'gpt-5.6-sol': {
-      name: 'GPT-5.6 Sol',
-      limit: {
-        context: 1050000,
-        output: 128000
-      },
-      options: {
-        store: false
-      },
-      variants: {
-        low: {},
-        medium: {},
-        high: {},
-        xhigh: {},
-        max: {}
-      }
-    },
-    'gpt-5.6-terra': {
-      name: 'GPT-5.6 Terra',
-      limit: {
-        context: 1050000,
-        output: 128000
-      },
-      options: {
-        store: false
-      },
-      variants: {
-        low: {},
-        medium: {},
-        high: {},
-        xhigh: {},
-        max: {}
-      }
-    },
-    'gpt-5.6-luna': {
-      name: 'GPT-5.6 Luna',
-      limit: {
-        context: 1050000,
-        output: 128000
-      },
-      options: {
-        store: false
-      },
-      variants: {
-        low: {},
-        medium: {},
-        high: {},
-        xhigh: {},
-        max: {}
-      }
-    },
     'gpt-5.5': {
       name: 'GPT-5.5',
       limit: {
@@ -1441,10 +1329,10 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         xhigh: {}
       }
     },
-    'gpt-5.4': {
-      name: 'GPT-5.4',
+    'gpt-5.6': {
+      name: 'GPT-5.6',
       limit: {
-        context: 1050000,
+        context: 922000,
         output: 128000
       },
       options: {
@@ -1454,13 +1342,14 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         low: {},
         medium: {},
         high: {},
-        xhigh: {}
+        xhigh: {},
+        max: {}
       }
     },
-    'gpt-5.4-mini': {
-      name: 'GPT-5.4 Mini',
+    'gpt-5.6-sol': {
+      name: 'GPT-5.6 Sol',
       limit: {
-        context: 400000,
+        context: 922000,
         output: 128000
       },
       options: {
@@ -1470,14 +1359,15 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         low: {},
         medium: {},
         high: {},
-        xhigh: {}
+        xhigh: {},
+        max: {}
       }
     },
-    'gpt-5.3-codex-spark': {
-      name: 'GPT-5.3 Codex Spark',
+    'gpt-5.6-terra': {
+      name: 'GPT-5.6 Terra',
       limit: {
-        context: 128000,
-        output: 32000
+        context: 922000,
+        output: 128000
       },
       options: {
         store: false
@@ -1486,14 +1376,15 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         low: {},
         medium: {},
         high: {},
-        xhigh: {}
+        xhigh: {},
+        max: {}
       }
     },
-    'codex-mini-latest': {
-      name: 'Codex Mini',
+    'gpt-5.6-luna': {
+      name: 'GPT-5.6 Luna',
       limit: {
-        context: 200000,
-        output: 100000
+        context: 922000,
+        output: 128000
       },
       options: {
         store: false
@@ -1501,7 +1392,43 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
       variants: {
         low: {},
         medium: {},
-        high: {}
+        high: {},
+        xhigh: {},
+        max: {}
+      }
+    },
+    'gpt-6': {
+      name: 'GPT-6 (Astra)',
+      limit: {
+        context: 922000,
+        output: 128000
+      },
+      options: {
+        store: false
+      },
+      variants: {
+        low: {},
+        medium: {},
+        high: {},
+        xhigh: {},
+        max: {}
+      }
+    },
+    'gpt-6-astra': {
+      name: 'GPT-6 Astra',
+      limit: {
+        context: 922000,
+        output: 128000
+      },
+      options: {
+        store: false
+      },
+      variants: {
+        low: {},
+        medium: {},
+        high: {},
+        xhigh: {},
+        max: {}
       }
     }
   }
