@@ -345,6 +345,8 @@ zh/en 各约 40 行，建议改为 `{siteName}` 插值（`t('...', { siteName })
 
 ### 5.2 P0-c：README 赞助商 / 生态 / 外部徽章
 
+> **已执行**：按「品牌不换、只删赞助商」策略，三份 README 的赞助商表、`assets/partners/` 全部 logo、站内广告位 `ProxyAdBanner`（含 3 处引用与 `admin.proxies.ad` 文案）已在 `chore: remove sponsor content` 提交中删除。本节及 5.2-d 中对应行号为删除前快照，不再维护；trendshift 徽章、Ecosystem、Star History、`tls.sub2api.org` 外链按策略保留。
+
 | 文件 | 位置 | 内容 |
 |------|------|------|
 | `README.md` | L30–170 | `## ❤️ Sponsors`，25 家赞助商 `<tr>`，含 `mailto:support@sub2api.org` |
