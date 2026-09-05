@@ -13,6 +13,7 @@ const {
   getCapacitySummary,
   getLiveCapability,
   getAllIncludingInactive,
+  getAccountById,
   showSuccess,
   showError
 } = vi.hoisted(() => ({
@@ -23,6 +24,7 @@ const {
   getCapacitySummary: vi.fn(),
   getLiveCapability: vi.fn(),
   getAllIncludingInactive: vi.fn(),
+  getAccountById: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn()
 }))
@@ -45,7 +47,8 @@ vi.mock('@/api/admin', () => ({
     },
     accounts: {
       list: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 }),
-      getAll: vi.fn().mockResolvedValue([])
+      getAll: vi.fn().mockResolvedValue([]),
+      getById: getAccountById
     }
   }
 }))
@@ -181,6 +184,7 @@ describe('GroupsView no-account fallback', () => {
       getCapacitySummary,
       getLiveCapability,
       getAllIncludingInactive,
+      getAccountById,
       showSuccess,
       showError
     ]) {
@@ -200,6 +204,7 @@ describe('GroupsView no-account fallback', () => {
     getCapacitySummary.mockResolvedValue([])
     getLiveCapability.mockResolvedValue({ supported: false })
     getAllIncludingInactive.mockResolvedValue([sourceGroup, fallbackGroup])
+    getAccountById.mockResolvedValue({ id: 101, name: 'Pinned OpenAI' })
   })
 
   afterEach(() => {
@@ -259,6 +264,59 @@ describe('GroupsView no-account fallback', () => {
       { value: null, label: 'admin.groups.noAccountFallback.noFallback' },
       { value: 43, label: 'Spare' }
     ])
+    wrapper.unmount()
+  })
+
+  it('keeps the Codex manifest toggle reactive and submits the enabled config', async () => {
+    const groupWithPinnedAccount: AdminGroup = {
+      ...sourceGroup,
+      codex_models_manifest_config: {
+        enabled: false,
+        account_ids: [101],
+        fallback_to_scheduler: false
+      }
+    }
+    listGroups.mockResolvedValue({
+      items: [groupWithPinnedAccount, fallbackGroup],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    getAllIncludingInactive.mockResolvedValue([groupWithPinnedAccount, fallbackGroup])
+    updateGroup.mockResolvedValue(groupWithPinnedAccount)
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const editButton = wrapper.findAll('button').find(button => button.text().includes('common.edit'))
+    expect(editButton).toBeDefined()
+    await editButton!.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const toggle = wrapper.find('[data-testid="codex-manifest-toggle"]')
+    expect(toggle.exists()).toBe(true)
+    expect(wrapper.find('[data-testid="codex-manifest-search"]').exists()).toBe(false)
+
+    await toggle.trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="codex-manifest-search"]').exists()).toBe(true)
+
+    const forms = wrapper.findAll('form')
+    expect(forms.length).toBeGreaterThan(0)
+    await forms[forms.length - 1].trigger('submit')
+    await flushPromises()
+
+    expect(updateGroup).toHaveBeenCalledTimes(1)
+    expect(updateGroup.mock.calls[0][1]).toMatchObject({
+      codex_models_manifest_config: {
+        enabled: true,
+        account_ids: [101],
+        fallback_to_scheduler: false
+      }
+    })
     wrapper.unmount()
   })
 })

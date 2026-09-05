@@ -3317,8 +3317,9 @@
           v-if="editForm.platform === 'openai' && editingGroup"
           ref="editCodexManifestRef"
           :group-id="editingGroup.id"
-          v-model="editCodexManifestConfig"
+          :model-value="editCodexManifestConfig"
           :account-names="editCodexManifestAccountNames"
+          @update:model-value="setEditCodexManifestConfig"
         />
 
 
@@ -5302,6 +5303,13 @@ const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
 });
 const editCodexManifestConfig = reactive<CodexModelsManifestConfig>(createCodexManifestDefaults());
 const editCodexManifestAccountNames = ref<Record<number, string>>({});
+const setEditCodexManifestConfig = (config: CodexModelsManifestConfig) => {
+  Object.assign(editCodexManifestConfig, {
+    enabled: config.enabled ?? false,
+    account_ids: [...(config.account_ids ?? [])],
+    fallback_to_scheduler: config.fallback_to_scheduler ?? false,
+  });
+};
 const modelsListCandidatesTracker = createModelsListCandidatesTracker();
 const createModelsListSelectedCount = computed(
   () => createModelsListState.items.filter((item) => item.selected).length,
@@ -6490,11 +6498,7 @@ const handleEdit = async (group: AdminGroup) => {
   // 固定账号 manifest 配置：回显配置并异步解析已存账号名称（失败显示 #<id>）
   const savedCodexManifestConfig =
     group.codex_models_manifest_config ?? createCodexManifestDefaults();
-  Object.assign(editCodexManifestConfig, {
-    enabled: savedCodexManifestConfig.enabled ?? false,
-    account_ids: [...(savedCodexManifestConfig.account_ids ?? [])],
-    fallback_to_scheduler: savedCodexManifestConfig.fallback_to_scheduler ?? false,
-  });
+  setEditCodexManifestConfig(savedCodexManifestConfig);
   editCodexManifestAccountNames.value = {};
   for (const id of editCodexManifestConfig.account_ids) {
     adminAPI.accounts
@@ -6555,7 +6559,7 @@ const closeEditModal = () => {
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
   resetModelsListState(editModelsListState);
-  Object.assign(editCodexManifestConfig, createCodexManifestDefaults());
+  setEditCodexManifestConfig(createCodexManifestDefaults());
   editCodexManifestAccountNames.value = {};
   editCodexManifestRef.value?.resetValidation?.();
 };
