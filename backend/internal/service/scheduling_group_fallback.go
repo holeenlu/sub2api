@@ -154,21 +154,43 @@ func (c *noAccountFallbackChain) next(ctx context.Context) *Group {
 	}
 	target := c.loadGroup(ctx, *targetID)
 	if target == nil || target.Status != StatusActive {
+		// 链在这里被截断，而保存时只校验了第一跳：不出声的话运维在日志和后台都
+		// 看不出为什么第三跳的容量从来没被借到。
+		slog.Warn("scheduling.group_fallback_target_unavailable",
+			"from_group_id", c.source.ID,
+			"to_group_id", *targetID,
+			"reason", "missing_or_inactive")
 		return nil
 	}
 	// 选号本身按平台过滤，异平台分组永远选不出账号；保存时已校验，这里再挡一次
 	// 是因为来源/目标分组的平台可能在配置后被单独改动。
 	if target.Platform != c.source.Platform {
+		slog.Warn("scheduling.group_fallback_target_unavailable",
+			"from_group_id", c.source.ID,
+			"to_group_id", target.ID,
+			"reason", "platform_mismatch",
+			"source_platform", c.source.Platform,
+			"target_platform", target.Platform)
 		return nil
 	}
 	c.visited[target.ID] = struct{}{}
 	c.hops++
-	slog.Info("scheduling.group_fallback_on_no_account",
-		"from_group_id", c.source.ID,
-		"to_group_id", target.ID,
-		"hop", c.hops)
 	c.source = target
 	return target
+}
+
+// sourceID 返回链当前所在分组的 ID：尚未展开时就是起点。
+func (c *noAccountFallbackChain) sourceID() int64 {
+	if c == nil {
+		return 0
+	}
+	if c.source != nil {
+		return c.source.ID
+	}
+	if c.origin != nil {
+		return *c.origin
+	}
+	return 0
 }
 
 // noAccountFallbackAttempt 在指定分组内跑一次完整选号。
@@ -211,10 +233,17 @@ func runWithNoAccountFallback[T any](ctx context.Context, chain *noAccountFallba
 // ctx 必须已带 withNoAccountFallbackActive 标记。
 func continueNoAccountFallback[T any](ctx context.Context, chain *noAccountFallbackChain, result T, err error, attempt noAccountFallbackAttempt[T]) (T, error) {
 	for isNoAccountFallbackTriggerError(err) {
+		fromGroupID := chain.sourceID()
 		target := chain.next(ctx)
 		if target == nil {
 			return result, err
 		}
+		// 「兜底已启用」只在这里记：next() 本身也被诊断与 previous_response_id
+		// 查找当作纯查表来走，那些请求并没有借用账号，不能在日志里算作一次兜底。
+		slog.Info("scheduling.group_fallback_on_no_account",
+			"from_group_id", fromGroupID,
+			"to_group_id", target.ID,
+			"hop", chain.hops)
 		hopCtx := ctx
 		if chain.hopContext != nil {
 			hopCtx = chain.hopContext(ctx, target)

@@ -3,6 +3,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -85,4 +86,34 @@ func TestExtractUpstreamErrorMessageSanitizesForClient(t *testing.T) {
 
 	// 服务内部判定用的未导出版本保持原文，供上游错误类型识别使用。
 	require.Contains(t, extractUpstreamErrorMessage(body), "sk-ant-api03-")
+}
+
+// OpenAI 项目密钥（sk-proj-/sk-svcacct-）交替使用 - 与 _，字符类漏掉下划线会在第一个
+// 下划线处截断，甚至前 20 位里出现 _ 时整段不匹配、密钥原样透出。
+func TestSanitizeUpstreamErrorMessageRedactsProjectKeysWithUnderscore(t *testing.T) {
+	t.Parallel()
+
+	for _, leaked := range []string{
+		"sk-proj-" + strings.Repeat("fake_", 8) + "not-a-real-key",
+		"sk-svcacct-" + strings.Repeat("dummy_", 6) + "not-a-real-key",
+		"sk-proj-" + strings.Repeat("x", 24) + "_" + strings.Repeat("y", 24),
+	} {
+		got := sanitizeUpstreamErrorMessage("Incorrect API key provided: " + leaked)
+		require.NotContains(t, got, leaked, "整段密钥必须被擦除: %s", leaked)
+		require.NotContains(t, got, leaked[len(leaked)-12:], "密钥尾部不能残留: %s", leaked)
+		require.Contains(t, got, "sk-***REDACTED***")
+	}
+}
+
+// 通用 sk- 模式前置了 \b：disk-quota-…、task-<uuid> 这类连字符词不能被误擦成 di + sk-***。
+func TestSanitizeUpstreamErrorMessageLeavesHyphenatedWordsAlone(t *testing.T) {
+	t.Parallel()
+
+	for _, msg := range []string{
+		"disk-quota-exceeded-for-this-organization, retry later",
+		"risk-assessment-pending-for-account-review",
+		"task-0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b failed",
+	} {
+		require.Equal(t, msg, sanitizeUpstreamErrorMessage(msg))
+	}
 }

@@ -1113,6 +1113,10 @@ func shallowCopyMap(m map[string]any) map[string]any {
 	return out
 }
 
+// sanitizeErrorBodyForStorage 在落库前清洗错误体：JSON 按键名擦除敏感字段并截断，
+// 之后再过一遍 sanitizeUpstreamErrorMessage——上游 401 常把被拒的 key 原样回显在
+// message 这种"非敏感键"的字符串值里，按键名擦不到，只有对整段文本跑密钥字面量
+// 模式才能保证 upstream_error_detail 与 message 列同样不落明文。
 func sanitizeErrorBodyForStorage(raw string, maxBytes int) (sanitized string, truncated bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -1121,12 +1125,12 @@ func sanitizeErrorBodyForStorage(raw string, maxBytes int) (sanitized string, tr
 
 	// Prefer JSON-safe sanitization when possible.
 	if out, trunc, _ := sanitizeAndTrimJSONPayload([]byte(raw), maxBytes); out != "" {
-		return out, trunc
+		return sanitizeUpstreamErrorMessage(out), trunc
 	}
 
 	// Non-JSON: best-effort truncate.
 	if maxBytes > 0 && len(raw) > maxBytes {
-		return truncateString(raw, maxBytes), true
+		return sanitizeUpstreamErrorMessage(truncateString(raw, maxBytes)), true
 	}
-	return raw, false
+	return sanitizeUpstreamErrorMessage(raw), false
 }

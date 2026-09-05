@@ -377,6 +377,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
+			if rebound := h.stickyBindingInSchedulingGroup(c.Request.Context(), selection, apiKey.GroupID, sessionKey, sessionBoundAccountID); rebound > 0 {
+				sessionBoundAccountID = rebound
+				hasBoundSession = true
+				fs.SetBoundSession(true)
+			}
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
 			if account.IsInterceptWarmupEnabled() {
@@ -707,6 +712,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
+			if rebound := h.stickyBindingInSchedulingGroup(c.Request.Context(), selection, currentAPIKey.GroupID, sessionKey, sessionBoundAccountID); rebound > 0 {
+				sessionBoundAccountID = rebound
+				hasBoundSession = true
+				fs.SetBoundSession(true)
+			}
 
 			// [DEBUG-STICKY] 打印账号选择结果
 			reqLog.Info("sticky.account_selected",
@@ -1965,6 +1975,23 @@ func (h *GatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCod
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
 	service.SetOpsUpstreamError(c, statusCode, errMsg, "")
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
+}
+
+// stickyBindingInSchedulingGroup 在选号落到别的分组（claude_code_only 降级、无可用
+// 账号兜底）时补查那个分组命名空间下的粘性绑定。请求入口只查了 API Key 所属分组，
+// 而成功转发后的绑定写在实际选号分组下，两边不同时入口永远查不到：has_bound_session
+// 一直为 false，换号时不再按缓存计费，且转发后的重绑会覆盖被负载跳过的粘性账号。
+// 起点分组已查到绑定、或选号分组就是起点时不再多查一次。
+func (h *GatewayHandler) stickyBindingInSchedulingGroup(ctx context.Context, selection *service.AccountSelectionResult, originGroupID *int64, sessionKey string, boundAccountID int64) int64 {
+	if boundAccountID > 0 || sessionKey == "" || selection == nil {
+		return 0
+	}
+	schedulingGroupID := service.SelectionGroupID(selection, originGroupID)
+	if schedulingGroupID == nil || (originGroupID != nil && *schedulingGroupID == *originGroupID) {
+		return 0
+	}
+	rebound, _ := h.gatewayService.GetCachedSessionAccountID(ctx, schedulingGroupID, sessionKey)
+	return rebound
 }
 
 func (h *GatewayHandler) mapUpstreamError(statusCode int) (int, string, string) {

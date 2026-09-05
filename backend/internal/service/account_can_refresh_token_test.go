@@ -8,7 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Anthropic setup-token 永远不参与 refresh_token 续期；历史残留字段不能改变凭据语义。
+// 直接导入的 Anthropic setup-token 不参与 refresh_token 续期；只有旧版交换流程写入的
+// 带 expires_at 的 8 小时令牌行才续期。
 func TestAccountCanRefreshToken(t *testing.T) {
 	t.Parallel()
 
@@ -51,7 +52,9 @@ func TestAccountCanRefreshToken(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "anthropic setup-token with legacy refresh fields",
+			// 旧版浏览器交换流程写入的行：8 小时令牌 + refresh_token + expires_at，
+			// 只有续期才能活过到期时间。
+			name: "anthropic setup-token from the legacy exchange flow",
 			account: &Account{
 				Platform: PlatformAnthropic,
 				Type:     AccountTypeSetupToken,
@@ -60,6 +63,16 @@ func TestAccountCanRefreshToken(t *testing.T) {
 					"refresh_token": "legacy-refresh",
 					"expires_at":    "1800000000",
 				},
+			},
+			want: true,
+		},
+		{
+			// 没有 expires_at 就是直接导入的长期凭据，残留 refresh_token 不能改变语义。
+			name: "anthropic setup-token with a stray refresh token but no expiry",
+			account: &Account{
+				Platform:    PlatformAnthropic,
+				Type:        AccountTypeSetupToken,
+				Credentials: map[string]any{"access_token": "sk-ant-oat01-direct", "refresh_token": "legacy-refresh"},
 			},
 			want: false,
 		},

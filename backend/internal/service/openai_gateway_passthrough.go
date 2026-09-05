@@ -778,15 +778,18 @@ func shouldFailoverOpenAIPassthroughResponse(settingService *SettingService, acc
 	if account != nil && account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode) {
 		return true
 	}
+	// 非 API Key 账号（OAuth 等）除 429/529 外不换号：透传路径下它们多是会话级问题，
+	// 换账号重放会话反而制造新的失败。这是账号级规则，必须放在状态码判定之外——
+	// 写进 platformDefault 闭包的话，管理员一配置 upstream_failover_status_codes
+	// 闭包就不再被调用，规则会被一个只看状态码的设置静默覆盖。
+	if statusCode != http.StatusTooManyRequests && statusCode != 529 &&
+		(account == nil || account.Type != AccountTypeAPIKey) {
+		return false
+	}
 	return shouldFailoverStatusCode(settingService, statusCode, func(statusCode int) bool {
 		switch statusCode {
 		case http.StatusTooManyRequests, 529:
 			return true
-		}
-		// 非 API Key 账号（OAuth 等）的 5xx 不换号：透传路径下它们多是会话级问题，
-		// 换账号重放会话反而制造新的失败。
-		if account == nil || account.Type != AccountTypeAPIKey {
-			return false
 		}
 		switch statusCode {
 		case http.StatusInternalServerError,

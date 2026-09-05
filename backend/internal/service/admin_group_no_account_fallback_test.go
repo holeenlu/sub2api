@@ -272,3 +272,22 @@ func TestAdminService_UpdateGroup_RevalidatesUnchangedNoAccountFallbackOnPlatfor
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "same platform")
 }
+
+// 平台校验要覆盖链上每一跳：运行时链走到异平台分组会静默截断，只校验首跳的话
+// 后面几跳的错误配置保存时不会有任何提示。
+func TestAdminService_CreateGroup_RejectsCrossPlatformNoAccountFallbackOnLaterHop(t *testing.T) {
+	// 新分组(openai) -> 7(openai) -> 8(anthropic)
+	eight := int64(8)
+	groups := map[int64]*Group{
+		7: noAccountFallbackAdminGroup(7, PlatformOpenAI, &eight),
+		8: noAccountFallbackAdminGroup(8, PlatformAnthropic, nil),
+	}
+	repo := &groupRepoStubForAdmin{createID: 1, getByIDByID: groups}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.CreateGroup(context.Background(), noAccountFallbackCreateInput(7))
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "group 8 must be on the same platform")
+	require.Nil(t, repo.created)
+}

@@ -61,8 +61,9 @@ func TestRefreshSingleAccountRejectsImportedSetupToken(t *testing.T) {
 	require.Zero(t, client.refreshCalls)
 }
 
-// 历史记录即使残留 refresh_token，也不能把 Anthropic setup-token 误当成可刷新 OAuth。
-func TestRefreshSingleAccountRejectsLegacySetupTokenRefreshToken(t *testing.T) {
+// 没有 expires_at 的 setup-token 是直接导入的长期凭据：残留的 refresh_token 不能
+// 把它误当成可刷新 OAuth 去换一个 8 小时令牌。
+func TestRefreshSingleAccountRejectsStrayRefreshTokenWithoutExpiry(t *testing.T) {
 	t.Parallel()
 
 	client := &stubClaudeOAuthClient{}
@@ -73,10 +74,30 @@ func TestRefreshSingleAccountRejectsLegacySetupTokenRefreshToken(t *testing.T) {
 		Platform:    service.PlatformAnthropic,
 		Type:        service.AccountTypeSetupToken,
 		Status:      service.StatusActive,
-		Credentials: map[string]any{"access_token": "legacy", "refresh_token": "legacy-refresh", "expires_at": float64(1_800_000_000)},
+		Credentials: map[string]any{"access_token": "legacy", "refresh_token": "legacy-refresh"},
 	})
 
 	require.Error(t, err)
 	require.Equal(t, "SETUP_TOKEN_NO_REFRESH", infraerrors.Reason(err))
 	require.Zero(t, client.refreshCalls)
+}
+
+// 旧版浏览器交换流程写入的行是 8 小时令牌 + refresh_token + expires_at：
+// 只有续期才能活过到期时间，手动刷新入口必须放行。
+func TestRefreshSingleAccountRefreshesLegacyExchangeSetupToken(t *testing.T) {
+	t.Parallel()
+
+	client := &stubClaudeOAuthClient{}
+	handler := NewAccountHandler(newStubAdminService(), service.NewOAuthService(nil, client), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	_, _, err := handler.refreshSingleAccount(context.Background(), &service.Account{
+		ID:          3,
+		Platform:    service.PlatformAnthropic,
+		Type:        service.AccountTypeSetupToken,
+		Status:      service.StatusActive,
+		Credentials: map[string]any{"access_token": "legacy", "refresh_token": "legacy-refresh", "expires_at": float64(1_800_000_000)},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, client.refreshCalls)
 }

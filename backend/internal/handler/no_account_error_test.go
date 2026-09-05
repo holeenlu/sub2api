@@ -660,3 +660,30 @@ func TestClassifySelectionError_GateAppliesToEveryEntryPoint(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, wsCls.Status)
 	require.Equal(t, "no available account", noAccountWSCloseReason(wsCls))
 }
+
+// 渠道模型禁令（ErrSchedulingPolicyRejected）也包着 ErrNoAvailableAccounts，但调度层
+// 不会为它走兜底链，池诊断也无从谈起：模型是被禁止而不是被耗尽，必须保住 503 与
+// 自己的文案，不能变成一个邀请客户端不断重试的 429。
+func TestClassifySelectionError_PolicyRejectionKeeps503(t *testing.T) {
+	reset := time.Now().Add(90 * time.Second)
+	diagnosis := service.ModelAvailabilityDiagnosis{
+		HasAccountsInPool:          true,
+		HasModelSupport:            true,
+		AllModelCapableRateLimited: true,
+		EarliestRateLimitResetAt:   &reset,
+	}
+	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
+	policyErr := fmt.Errorf("%w supporting model: gpt-5 (channel pricing restriction): %w",
+		service.ErrNoAvailableAccounts, service.ErrSchedulingPolicyRejected)
+
+	c := newTestGinContextWithRequest()
+	fd := &fakeDiagnoser{resp: diagnosis}
+
+	cls := classifySelectionErrorFromGin(c, policyErr, fd, apiKey, "gpt-5", "gpt-5", service.PlatformOpenAI)
+
+	require.Equal(t, http.StatusServiceUnavailable, cls.Status)
+	require.Equal(t, "api_error", cls.ErrType)
+	require.Empty(t, c.Writer.Header().Get("Retry-After"))
+	require.Empty(t, fd.calls, "策略拒绝不做池诊断")
+	require.Contains(t, cls.messageWithSelectionDetail("No available accounts: ", policyErr), "channel pricing restriction")
+}

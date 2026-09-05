@@ -62,6 +62,10 @@ type OpsCleanupService struct {
 	effective config.OpsCleanupConfig
 	// interval 是当前 cron schedule 相邻两次触发的间隔，随心跳自报；未调度时为 0。
 	interval time.Duration
+	// scheduleErrorRecorded 记录上一次 applyScheduleLocked 是否写过 error 心跳：
+	// 那条心跳只有 last_success_at 才能覆盖，而重新建好调度并不是一次成功，
+	// 所以要在下次自报周期时显式清掉，否则仪表盘会把清理任务一直列为失败。
+	scheduleErrorRecorded bool
 
 	warnNoRedisOnce sync.Once
 }
@@ -279,16 +283,20 @@ func (s *OpsCleanupService) declareHeartbeatInterval() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), opsCleanupHeartbeatTimeout)
 	defer cancel()
-	_ = s.opsRepo.UpsertJobHeartbeat(ctx, &OpsUpsertJobHeartbeatInput{
+	if err := s.opsRepo.UpsertJobHeartbeat(ctx, &OpsUpsertJobHeartbeatInput{
 		JobName:                 opsCleanupJobName,
 		ExpectedIntervalSeconds: opsJobIntervalSeconds(s.interval),
-	})
+		ClearLastError:          s.scheduleErrorRecorded,
+	}); err == nil {
+		s.scheduleErrorRecorded = false
+	}
 }
 
 // recordScheduleErrorLocked 在 cron 建不起来时写一条 error 心跳，让仪表盘把清理
 // 列进 FailedJobs。调用方持锁，所以不能走 recordHeartbeatError（它会再取一次锁）。
 func (s *OpsCleanupService) recordScheduleErrorLocked(err error) {
 	recordOpsJobError(s.opsRepo, opsCleanupJobName, time.Now().UTC(), 0, s.interval, err)
+	s.scheduleErrorRecorded = true
 }
 
 // refreshEffectiveBeforeRun 在 cron 触发时刷新 effective，让 retention 改动当次即生效。

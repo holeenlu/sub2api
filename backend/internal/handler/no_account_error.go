@@ -171,10 +171,19 @@ func classifySelectionFailureErrorFromGin(c *gin.Context, err error, fallback no
 //
 // The list matches isNoAccountFallbackTriggerError in the scheduling layer:
 // exactly the errors that make the scheduler retry in a fallback group are
-// the ones a pool diagnosis can speak to.
+// the ones a pool diagnosis can speak to. A policy rejection (channel pricing
+// ban) wraps ErrNoAvailableAccounts too, but the scheduler refuses to walk the
+// chain for it and the pool has nothing to say: the model is forbidden, not
+// exhausted, so it must keep its 503 and its own wording rather than become a
+// 429 that invites a retry which can never succeed.
 func selectionErrorIsPoolExhaustion(err error) bool {
-	return err == nil ||
-		errors.Is(err, service.ErrNoAvailableAccounts) ||
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, service.ErrSchedulingPolicyRejected) {
+		return false
+	}
+	return errors.Is(err, service.ErrNoAvailableAccounts) ||
 		errors.Is(err, service.ErrNoAvailableCompactAccounts)
 }
 

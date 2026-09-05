@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -118,4 +119,33 @@ func TestGetUpstreamFailoverStatusCodesNilSafety(t *testing.T) {
 		require.Nil(t, ranges)
 		require.False(t, resolved)
 	})
+}
+
+// upstreamFailoverNopSettingRepo 只为让 SettingService 非空：缓存命中时不会真的读库。
+type upstreamFailoverNopSettingRepo struct{ SettingRepository }
+
+// 透传路径「非 API Key 账号除 429/529 外不换号」是账号级规则，必须独立于状态码配置：
+// 管理员配了 500-599 也不能让 OAuth 账号在 502 上换号重放会话。
+func TestPassthroughOAuthAccountKeepsNoFailoverOn5xxWithOverride(t *testing.T) {
+	ResetUpstreamFailoverStatusCodesCacheForTest()
+	defer ResetUpstreamFailoverStatusCodesCacheForTest()
+
+	storeUpstreamFailoverStatusCodes("429,500-599")
+	settingService := &SettingService{settingRepo: upstreamFailoverNopSettingRepo{}}
+	ranges, resolved := settingService.getUpstreamFailoverStatusCodes(context.Background())
+	require.True(t, resolved)
+	require.True(t, statusCodeRangesContain(ranges, http.StatusBadGateway), "前置条件：覆盖集合已生效")
+
+	body := []byte(`{"error":{"message":"upstream exploded"}}`)
+	oauth := &Account{Type: AccountTypeOAuth}
+	apiKey := &Account{Type: AccountTypeAPIKey}
+
+	require.False(t, shouldFailoverOpenAIPassthroughResponse(settingService, oauth, http.StatusBadGateway, body),
+		"OAuth 账号的 5xx 不换号，状态码覆盖集合不能绕过这条账号级规则")
+	require.True(t, shouldFailoverOpenAIPassthroughResponse(settingService, oauth, http.StatusTooManyRequests, body),
+		"429 仍按状态码策略换号")
+	require.True(t, shouldFailoverOpenAIPassthroughResponse(settingService, apiKey, http.StatusBadGateway, body),
+		"API Key 账号按覆盖集合换号")
+	require.False(t, shouldFailoverOpenAIPassthroughResponse(nil, oauth, http.StatusBadGateway, body),
+		"无配置时沿用内置规则")
 }

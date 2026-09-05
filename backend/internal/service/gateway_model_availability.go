@@ -194,15 +194,25 @@ func sameRateLimitAttribution(left, right *RateLimitAttribution) bool {
 		left.Reason == right.Reason && left.Model == right.Model
 }
 
-// isFinalWithoutFallbackChain reports whether the fallback groups can no
-// longer change the verdict this diagnosis leads to. A pool that serves the
-// model and is not fully cooling already answers 503 "temporarily exhausted";
-// borrowing a fallback group's accounts can neither turn that into a 404 nor
-// into a pool-wide cooldown. It also covers the conservative {true,true} the
-// diagnosers return on a lookup failure, so a database hiccup does not fan out
-// into one extra query per hop on the error path.
+// isFinalWithoutFallbackChain reports whether the fallback groups can still
+// change the status code this diagnosis leads to. Only one case needs the
+// chain: the origin has no account configured for the model, where a fallback
+// group that does serve it turns a 404 model_not_found into a 503/429. That is
+// a misconfiguration path, not a hot one.
+//
+// A fully cooling origin deliberately does NOT walk the chain. The verdict is
+// already 429: selection just failed across every hop, so no fallback group has
+// a live capable account either. Walking would only refine Retry-After and the
+// Fable attribution with the fallback groups' cooldowns, at the price of one
+// group read plus one candidate query per hop on exactly the response clients
+// retry at Retry-After cadence for the whole cooldown window (the pre-fallback
+// diagnosis cost one query in total; see the upstream early return). The
+// origin-only Retry-After is the conservative direction and the header is
+// capped at five minutes anyway. The conservative {true,true} the diagnosers
+// return on a lookup failure is covered too, so a database hiccup does not fan
+// out into one extra query per hop on the error path.
 func (d ModelAvailabilityDiagnosis) isFinalWithoutFallbackChain() bool {
-	return d.HasModelSupport && !d.AllModelCapableRateLimited
+	return d.HasModelSupport
 }
 
 // diagnoseAcrossNoAccountFallback merges the per-group diagnoses along the
@@ -298,8 +308,10 @@ type ModelAvailabilityDiagnoser interface {
 // or when the inputs preclude meaningful diagnosis (empty model, etc.), so
 // callers stay on the 503 fallback branch.
 //
-// The diagnosis spans the no-account fallback chain, matching the groups
-// account selection would have tried; see diagnoseAcrossNoAccountFallback.
+// When the origin group has no account configured for the model, the diagnosis
+// spans the no-account fallback chain so a fallback group that does serve it is
+// not reported as 404; see diagnoseAcrossNoAccountFallback and
+// isFinalWithoutFallbackChain for why a fully cooling origin stays origin-only.
 func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 	ctx context.Context,
 	groupID *int64,
