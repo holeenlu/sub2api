@@ -43,6 +43,8 @@ export const useAppStore = defineStore('app', () => {
   const latestVersion = ref<string>('')
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
+  // 本次构建所基于的上游 Sub2API 版本，例如 "v0.2.1"；上游自身的构建为空
+  const upstreamVersion = ref<string>('')
   // 後端 update.check_enabled=false 時為 true：沒有連線查過版本，徽章不該顯示「已是最新」
   const updateDisabled = ref<boolean>(false)
   const releaseInfo = ref<ReleaseInfo | null>(null)
@@ -251,6 +253,7 @@ export const useAppStore = defineStore('app', () => {
         latest_version: latestVersion.value,
         has_update: hasUpdate.value,
         build_type: buildType.value,
+        upstream_version: upstreamVersion.value || undefined,
         release_info: releaseInfo.value || undefined,
         cached: true
       }
@@ -268,6 +271,7 @@ export const useAppStore = defineStore('app', () => {
       latestVersion.value = data.latest_version
       hasUpdate.value = data.has_update
       buildType.value = data.build_type || 'source'
+      upstreamVersion.value = data.upstream_version || ''
       updateDisabled.value = data.disabled === true
       releaseInfo.value = data.release_info || null
       versionLoaded.value = true
@@ -466,6 +470,7 @@ export const useAppStore = defineStore('app', () => {
     latestVersion,
     hasUpdate,
     buildType,
+    upstreamVersion,
     updateDisabled,
     releaseInfo,
 

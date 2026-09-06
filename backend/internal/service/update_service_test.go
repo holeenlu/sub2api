@@ -230,3 +230,27 @@ func TestUpdateServiceCheckEnabledByDefault(t *testing.T) {
 	require.True(t, info.HasUpdate)
 	require.Equal(t, 1, client.latestCalls)
 }
+
+// The upstream baseline is build-time information and must be reported on every
+// CheckUpdate path, including the disabled and remote-failure ones.
+func TestUpdateServiceReportsUpstreamVersion(t *testing.T) {
+	client := &updateServiceGitHubClientStub{
+		release: &GitHubRelease{TagName: "v9.9.9", Name: "v9.9.9"},
+	}
+	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.1.147", "release").
+		WithUpstreamVersion(" v0.2.1 ")
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, "v0.2.1", info.UpstreamVersion)
+
+	disabled, err := svc.WithCheckEnabled(false).CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.True(t, disabled.Disabled)
+	require.Equal(t, "v0.2.1", disabled.UpstreamVersion)
+
+	plain := NewUpdateService(&updateServiceCacheStub{}, client, "0.1.147", "release")
+	info, err = plain.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Empty(t, info.UpstreamVersion, "upstream builds inject nothing and must omit the field")
+}

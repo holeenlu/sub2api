@@ -33,7 +33,9 @@ var (
 const (
 	updateCacheKey = "update_check_cache"
 	updateCacheTTL = 1200 // 20 minutes
-	githubRepo     = "Wei-Shaw/sub2api"
+	// githubRepo is the release repository consulted by the update check; brand
+	// builds override DefaultReleaseRepo in brand.go.
+	githubRepo = DefaultReleaseRepo
 
 	// updateDisabledWarning is surfaced to the admin UI in place of a version
 	// comparison when the online update check is turned off.
@@ -73,6 +75,9 @@ type UpdateService struct {
 	currentVersion string
 	buildType      string // "source" for manual builds, "release" for CI builds
 	checkEnabled   bool   // update.check_enabled; false disables all remote lookups
+	// upstreamVersion is the upstream Sub2API version this build is based on
+	// (e.g. "v0.2.1"); empty for upstream builds that inject nothing.
+	upstreamVersion string
 }
 
 // NewUpdateService creates a new UpdateService. The online update check is on
@@ -85,6 +90,15 @@ func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, versi
 		buildType:      buildType,
 		checkEnabled:   true,
 	}
+}
+
+// WithUpstreamVersion records the upstream version this build is based on.
+func (s *UpdateService) WithUpstreamVersion(version string) *UpdateService {
+	if s == nil {
+		return nil
+	}
+	s.upstreamVersion = strings.TrimSpace(version)
+	return s
 }
 
 // WithCheckEnabled toggles the online update check (update.check_enabled).
@@ -104,7 +118,9 @@ func (s *UpdateService) disabledInfo() *UpdateInfo {
 		HasUpdate:      false,
 		Warning:        updateDisabledWarning,
 		BuildType:      s.buildType,
-		Disabled:       true,
+		// Build-time information is independent of the remote lookup.
+		UpstreamVersion: s.upstreamVersion,
+		Disabled:        true,
 	}
 }
 
@@ -117,6 +133,9 @@ type UpdateInfo struct {
 	Cached         bool         `json:"cached"`
 	Warning        string       `json:"warning,omitempty"`
 	BuildType      string       `json:"build_type"` // "source" or "release"
+	// UpstreamVersion is the upstream Sub2API version this build is based on,
+	// e.g. "v0.2.1". Omitted when the build injects nothing.
+	UpstreamVersion string `json:"upstream_version,omitempty"`
 	// Disabled reports that update.check_enabled is false, so LatestVersion is
 	// simply the current version and no remote lookup was performed.
 	Disabled bool `json:"disabled,omitempty"`
@@ -185,11 +204,12 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 			return cached, nil
 		}
 		return &UpdateInfo{
-			CurrentVersion: s.currentVersion,
-			LatestVersion:  s.currentVersion,
-			HasUpdate:      false,
-			Warning:        err.Error(),
-			BuildType:      s.buildType,
+			CurrentVersion:  s.currentVersion,
+			LatestVersion:   s.currentVersion,
+			HasUpdate:       false,
+			Warning:         err.Error(),
+			BuildType:       s.buildType,
+			UpstreamVersion: s.upstreamVersion,
 		}, nil
 	}
 
@@ -477,8 +497,9 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 			HTMLURL:     release.HTMLURL,
 			Assets:      assets,
 		},
-		Cached:    false,
-		BuildType: s.buildType,
+		Cached:          false,
+		BuildType:       s.buildType,
+		UpstreamVersion: s.upstreamVersion,
 	}, nil
 }
 
@@ -663,12 +684,13 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 	}
 
 	return &UpdateInfo{
-		CurrentVersion: s.currentVersion,
-		LatestVersion:  cached.Latest,
-		HasUpdate:      compareVersions(s.currentVersion, cached.Latest) < 0,
-		ReleaseInfo:    cached.ReleaseInfo,
-		Cached:         true,
-		BuildType:      s.buildType,
+		CurrentVersion:  s.currentVersion,
+		LatestVersion:   cached.Latest,
+		HasUpdate:       compareVersions(s.currentVersion, cached.Latest) < 0,
+		ReleaseInfo:     cached.ReleaseInfo,
+		Cached:          true,
+		BuildType:       s.buildType,
+		UpstreamVersion: s.upstreamVersion,
 	}, nil
 }
 

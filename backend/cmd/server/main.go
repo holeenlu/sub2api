@@ -36,9 +36,17 @@ var (
 	Commit    = "unknown"
 	Date      = "unknown"
 	BuildType = "source" // "source" for manual builds, "release" for CI builds (set by ldflags)
+	// UpstreamVersion 是本次构建所基于的上游 Sub2API 版本，由 ldflags 注入
+	// （-X main.UpstreamVersion=v0.2.1）。留空时回退到 embedded VERSION 文件。
+	UpstreamVersion = ""
 )
 
 func init() {
+	initVersion()
+	initUpstreamVersion()
+}
+
+func initVersion() {
 	// 如果 Version 已通过 ldflags 注入（例如 -X main.Version=...），则不要覆盖。
 	if strings.TrimSpace(Version) != "" {
 		return
@@ -49,6 +57,24 @@ func init() {
 	if Version == "" {
 		Version = "0.0.0-dev"
 	}
+}
+
+// initUpstreamVersion 归一化上游版本号：始终以 "v" 开头，接受 ldflags 传入带或不带前缀的值。
+// 未注入时回退到 embedded VERSION 文件——该文件在上游打 tag 时才回写，只是兜底；
+// 派生构建应由构建流程注入实际同步到的上游版本。
+func initUpstreamVersion() {
+	UpstreamVersion = normalizeUpstreamVersion(UpstreamVersion, embeddedVersion)
+}
+
+func normalizeUpstreamVersion(injected, fallback string) string {
+	v := strings.TrimSpace(injected)
+	if v == "" {
+		v = strings.TrimSpace(fallback)
+	}
+	if v == "" {
+		return ""
+	}
+	return "v" + strings.TrimPrefix(v, "v")
 }
 
 // initLogger configures the default slog handler based on gin.Mode().
@@ -145,8 +171,9 @@ func runMainServer() {
 	}
 
 	buildInfo := handler.BuildInfo{
-		Version:   Version,
-		BuildType: BuildType,
+		Version:         Version,
+		BuildType:       BuildType,
+		UpstreamVersion: UpstreamVersion,
 	}
 
 	app, err := initializeApplication(buildInfo)

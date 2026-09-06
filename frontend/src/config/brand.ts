@@ -15,8 +15,9 @@
  * configured value. The backend's equivalent lives in
  * backend/internal/service/brand.go.
  *
- * Release-channel identifiers (GitHub repo, container image) are intentionally
- * not here: the version badge follows the backend's release repository constant.
+ * RELEASE_REPO / RELEASE_DOCKER_IMAGE mirror service.DefaultReleaseRepo and the
+ * image published by the release pipeline; the version badge builds rollback
+ * commands from them.
  */
 
 /** Product name, used wherever the configured site name is missing. */
@@ -55,3 +56,9 @@ export const BRAND_COMPLIANCE_DOCUMENT_URL = {
   'zh-TW': 'https://github.com/holeenlu/sub2api/blob/main/docs/legal/admin-compliance.zh-TW.md',
   en: `${BRAND_DOCS_URL}/legal/admin-compliance.en.md`
 } as const
+
+/** GitHub "owner/repo" whose releases the version badge follows (= service.DefaultReleaseRepo). */
+export const RELEASE_REPO = 'Wei-Shaw/sub2api'
+
+/** Container image published by the release pipeline (tags carry no "v" prefix). */
+export const RELEASE_DOCKER_IMAGE = 'weishaw/sub2api'

@@ -660,10 +660,11 @@ import {
 } from '@/api/admin/system'
 import { useClipboard } from '@/composables/useClipboard'
 import Icon from '@/components/icons/Icon.vue'
+import { RELEASE_DOCKER_IMAGE, RELEASE_REPO } from '@/config/brand'
 
-const GITHUB_REPO = 'Wei-Shaw/sub2api'
-// Docker Hub image published by CI (tags carry no "v" prefix, e.g. weishaw/sub2api:0.1.146)
-const DOCKER_IMAGE = 'weishaw/sub2api'
+// Release channel (GitHub repo + container image) comes from the brand layer.
+const GITHUB_REPO = RELEASE_REPO
+const DOCKER_IMAGE = RELEASE_DOCKER_IMAGE
 
 const { t } = useI18n()
 

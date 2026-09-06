@@ -9,6 +9,7 @@ const appStoreState = {
   hasUpdate: false,
   releaseInfo: null as unknown,
   buildType: 'release',
+  upstreamVersion: 'v9.9.9',
   updateDisabled: true,
   fetchVersion: vi.fn(),
   clearVersionCache: vi.fn()
@@ -79,6 +80,8 @@ describe('VersionBadge', () => {
     ]) {
       expect(text, `${hidden} should be hidden`).not.toContain(hidden)
     }
+    // the upstream baseline is API data only and must not leak into the UI
+    expect(text).not.toContain('9.9.9')
     // only the badge button itself remains clickable in the popover
     expect(wrapper.findAll('button')).toHaveLength(1)
   })
@@ -103,5 +106,6 @@ describe('VersionBadge', () => {
     expect(text).toContain('version.rollback')
     // refresh button is back
     expect(wrapper.findAll('button').length).toBeGreaterThan(1)
+    expect(text).not.toContain('9.9.9')
   })
 })

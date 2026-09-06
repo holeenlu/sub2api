@@ -17,4 +17,8 @@ const (
 	DefaultSiteTagline = "Subscription to API Conversion Platform"
 	// DefaultDocsBaseURL is where the shipped documentation is published.
 	DefaultDocsBaseURL = "https://github.com/Wei-Shaw/sub2api/blob/main/docs"
+	// DefaultReleaseRepo is the GitHub "owner/repo" whose releases the online
+	// update check and self-update follow. Keep in sync with RELEASE_REPO in
+	// frontend/src/config/brand.ts.
+	DefaultReleaseRepo = "Wei-Shaw/sub2api"
 )
