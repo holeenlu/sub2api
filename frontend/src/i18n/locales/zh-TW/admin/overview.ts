@@ -1220,14 +1220,6 @@ export default {
         selectAccounts: '選擇帳號',
         noAccounts: '此分組暫無帳號',
         loadingAccounts: '載入帳號中...',
-      claudeMaxSimulation: {
-        title: 'Claude Max 用量模擬',
-        tooltip:
-          '啟用後，對於沒有上游快取寫入用量的 Claude 模型，系統會確定性地將 token 對應為少量輸入加 1h 快取建立，同時保持總 token 不變。',
-        enabled: '已啟用（模擬 1h 快取）',
-        disabled: '已停用',
-        hint: '僅調整用量計費日誌中的 token 類別。不會持久化每個請求的對應狀態。'
-      },
         removeRule: '刪除規則',
         noRules: '暫無路由規則',
         noRulesHint: '新增路由規則以將特定模型請求優先路由到指定帳號',
@@ -1239,6 +1231,14 @@ export default {
         tooltip: '啟用後，當請求包含 MCP 工具時，會在 system prompt 中注入 XML 格式呼叫協議提示詞。關閉此選項可避免對某些用戶端造成干擾。',
         enabled: '已啟用',
         disabled: '已停用'
+      },
+      claudeMaxSimulation: {
+        title: 'Claude Max 用量模擬',
+        tooltip:
+          '啟用後，對於沒有上游快取寫入用量的 Claude 模型，系統會確定性地將 token 對應為少量輸入加 1h 快取建立，同時保持總 token 不變。',
+        enabled: '已啟用（模擬 1h 快取）',
+        disabled: '已停用',
+        hint: '僅調整用量計費日誌中的 token 類別。不會持久化每個請求的對應狀態。'
       },
       supportedScopes: {
         title: '支援的模型系列',

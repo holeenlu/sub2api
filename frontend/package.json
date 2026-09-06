@@ -12,7 +12,9 @@
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "i18n": "node ../tools/zh-tw/gen-locale.mjs",
+    "i18n:check": "node ../tools/zh-tw/gen-locale.mjs --check"
   },
   "dependencies": {
     "@airwallex/components-sdk": "^1.30.2",

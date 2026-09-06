@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import en from '../locales/en'
 import zh from '../locales/zh'
 import zhTW from '../locales/zh-TW'
 import { detectLocaleFromLanguage, getIntlLocale, isChineseLocale } from '../localeUtils'
@@ -29,6 +30,28 @@ function collectStrings(node: unknown, out: string[] = []): string[] {
 
 // 只在簡體才會出現的常見字；zh-TW 語言包裡不該有任何一個
 const SIMPLIFIED_ONLY = /[这为发时说见开关电线经东车让门问间业务号请设录网页数据应该们从会来实现动没对头点击复删确认账]/
+
+function missingKeys(reference: string[], candidate: string[]): string[] {
+  const known = new Set(candidate)
+  return reference.filter((key) => !known.has(key))
+}
+
+// en 與 zh 是人工維護的兩份語言包，key 走偏（漏翻、巢狀層級不一致）不會有任何編譯期錯誤，
+// 只會在執行期讓某個語言直接顯示 key 字串。這裡把兩邊的 key 集合固定住。
+describe('en / zh key parity', () => {
+  const enKeys = flattenKeys(en).sort()
+  const zhKeys = flattenKeys(zh).sort()
+
+  it('has no zh keys missing from en', () => {
+    const missing = missingKeys(zhKeys, enKeys)
+    expect(missing, `zh 有但 en 沒有的 key：\n  ${missing.join('\n  ')}`).toEqual([])
+  })
+
+  it('has no en keys missing from zh', () => {
+    const missing = missingKeys(enKeys, zhKeys)
+    expect(missing, `en 有但 zh 沒有的 key：\n  ${missing.join('\n  ')}`).toEqual([])
+  })
+})
 
 describe('zh-TW locale', () => {
   it('has exactly the same keys as zh', () => {
