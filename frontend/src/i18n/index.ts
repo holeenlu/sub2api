@@ -1,19 +1,32 @@
 import { createI18n } from 'vue-i18n'
+import {
+  DEFAULT_LOCALE,
+  detectLocaleFromLanguage,
+  getIntlLocale,
+  isChineseLocale,
+  isLocaleCode,
+  type LocaleCode
+} from './localeUtils'
 
-type LocaleCode = 'en' | 'zh'
+// zh-TW（繁體中文／台灣用語）語言包由 tools/zh-tw/gen-locale.mjs 依 zh 自動產生，
+// 缺漏的 key 依序回退到 zh、en。
+export { detectLocaleFromLanguage, getIntlLocale, isChineseLocale, type LocaleCode }
 
 type LocaleMessages = Record<string, any>
 
 const LOCALE_KEY = 'sub2api_locale'
-const DEFAULT_LOCALE: LocaleCode = 'en'
 
 const localeLoaders: Record<LocaleCode, () => Promise<{ default: LocaleMessages }>> = {
   en: () => import('./locales/en'),
-  zh: () => import('./locales/zh')
+  zh: () => import('./locales/zh'),
+  'zh-TW': () => import('./locales/zh-TW')
 }
 
-function isLocaleCode(value: string): value is LocaleCode {
-  return value === 'en' || value === 'zh'
+// 語言回退鏈：zh-TW → zh → en；其餘 → en
+const FALLBACK_CHAIN: Record<LocaleCode, LocaleCode[]> = {
+  en: [],
+  zh: ['en'],
+  'zh-TW': ['zh', 'en']
 }
 
 function getDefaultLocale(): LocaleCode {
@@ -22,18 +35,13 @@ function getDefaultLocale(): LocaleCode {
     return saved
   }
 
-  const browserLang = navigator.language.toLowerCase()
-  if (browserLang.startsWith('zh')) {
-    return 'zh'
-  }
-
-  return DEFAULT_LOCALE
+  return detectLocaleFromLanguage(navigator.language)
 }
 
 export const i18n = createI18n({
   legacy: false,
   locale: getDefaultLocale(),
-  fallbackLocale: DEFAULT_LOCALE,
+  fallbackLocale: { ...FALLBACK_CHAIN, default: [DEFAULT_LOCALE] },
   messages: {},
   // 禁用 HTML 消息警告 - 引导步骤使用富文本内容（driver.js 支持 HTML）
   // 这些内容是内部定义的，不存在 XSS 风险
@@ -45,6 +53,11 @@ const loadedLocales = new Set<LocaleCode>()
 export async function loadLocaleMessages(locale: LocaleCode): Promise<void> {
   if (loadedLocales.has(locale)) {
     return
+  }
+
+  // 回退語言是延遲載入的，必須一起載入，fallbackLocale 才有內容可回退
+  for (const fallback of FALLBACK_CHAIN[locale]) {
+    await loadLocaleMessages(fallback)
   }
 
   const loader = localeLoaders[locale]
@@ -92,8 +105,9 @@ export function getLocale(): LocaleCode {
 }
 
 export const availableLocales = [
-  { code: 'en', name: 'English', flag: '🇺🇸' },
-  { code: 'zh', name: '中文', flag: '🇨🇳' }
+  { code: 'en', name: 'English' },
+  { code: 'zh', name: '简体中文' },
+  { code: 'zh-TW', name: '繁體中文' }
 ] as const
 
 export default i18n

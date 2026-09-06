@@ -17,7 +17,7 @@ export const useAdminComplianceStore = defineStore('adminCompliance', () => {
   const shouldShow = computed(() => required.value || forceVisible.value)
   const currentLocale = computed(() => getLocale())
   const expectedPhrase = computed(() => {
-    if (currentLocale.value === 'zh') {
+    if (currentLocale.value.startsWith('zh')) {
       return status.value?.ack_phrase_zh || FALLBACK_ZH_PHRASE
     }
     return status.value?.ack_phrase_en || FALLBACK_EN_PHRASE
