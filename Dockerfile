@@ -17,6 +17,31 @@ ARG NPM_CONFIG_REGISTRY=
 # Upstream Sub2API version this build is based on (e.g. v0.2.1); derived builds pass it
 # from CI or a local build script. Empty falls back to backend/cmd/server/VERSION.
 ARG UPSTREAM_VERSION=
+# 建置時把後端 Go 字串字面值（API 錯誤訊息等）從簡體轉成繁體（台灣用語）。
+# 前端不在此轉換：介面文案走提交進 git 的 zh-TW 語言包（frontend/src/i18n/locales/zh-TW）。
+# 預設關閉：後端訊息與上游逐字相同（簡體）。要出繁體後端訊息的下游 fork
+# 自行帶 --build-arg ZH_TW=true。
+ARG ZH_TW=false
+
+# -----------------------------------------------------------------------------
+# Stage 0: zh-TW converter (backend only)
+# -----------------------------------------------------------------------------
+# 用 tools/zh-tw/convert-go.mjs 把後端 Go 原始碼的字串字面值轉成繁體。
+# 比對外部系統文字的字串由 convert-go.mjs 的 PROTECTED 清單保護，不會被轉換。
+FROM --platform=${BUILDPLATFORM} ${NODE_IMAGE} AS zh-tw-converter
+ARG NPM_CONFIG_REGISTRY
+ARG ZH_TW
+
+WORKDIR /work
+
+COPY tools/zh-tw/package.json tools/zh-tw/package-lock.json ./tools/zh-tw/
+RUN --mount=type=cache,id=zhtw-npm,target=/root/.npm \
+    if [ -n "${NPM_CONFIG_REGISTRY}" ]; then npm config set registry "${NPM_CONFIG_REGISTRY}"; fi && \
+    npm ci --prefix ./tools/zh-tw --omit=dev
+COPY tools/zh-tw/ ./tools/zh-tw/
+
+COPY backend/ ./backend/
+RUN if [ "${ZH_TW}" = "true" ]; then node tools/zh-tw/convert-go.mjs backend; fi
 
 # -----------------------------------------------------------------------------
 # Stage 1: Frontend Builder
@@ -81,8 +106,9 @@ COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
     go mod download
 
-# Copy backend source first
-COPY backend/ ./
+# Copy backend source first (already converted to zh-TW by the converter stage
+# when ZH_TW=true; identical to the repo source otherwise)
+COPY --from=zh-tw-converter /work/backend/ ./
 
 # Copy frontend dist from previous stage (must be after backend copy to avoid being overwritten)
 COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist

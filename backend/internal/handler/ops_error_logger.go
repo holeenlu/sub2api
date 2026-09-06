@@ -2275,8 +2275,12 @@ func isOpsClientAuthError(code string, msg string) bool {
 		strings.Contains(msg, "api key is disabled") ||
 		strings.Contains(msg, "user associated with api key not found") ||
 		strings.Contains(msg, "user account is not active") ||
+		// 簡繁兩種都要比對：本系統現在產生繁體訊息，但資料庫既有的歷史
+		// ops_error_logs 仍是簡體，兩者都必須能被歸類。
 		strings.Contains(msg, "api key 所属分组已删除") ||
+		strings.Contains(msg, "api key 所屬分組已刪除") ||
 		strings.Contains(msg, "api key 所属分组已停用") ||
+		strings.Contains(msg, "api key 所屬分組已停用") ||
 		strings.Contains(msg, "api key is not assigned to any group")
 }
 
@@ -2297,10 +2301,16 @@ func isOpsLocalBusinessLimitError(code string, msg string) bool {
 		strings.Contains(msg, opsErrInsufficientBalance) ||
 		strings.Contains(msg, "insufficient account balance") ||
 		strings.Contains(msg, "api key group platform is not gemini") ||
+		// 簡繁兩種都要比對，理由同 isOpsClientAuthError：產生端已轉繁
+		// （internal/service/api_key_service.go），歷史日誌仍是簡體。
 		strings.Contains(msg, "api key 额度已用完") ||
+		strings.Contains(msg, "api key 額度已用完") ||
 		strings.Contains(msg, "api key 5小时限额已用完") ||
+		strings.Contains(msg, "api key 5小時限額已用完") ||
 		strings.Contains(msg, "api key 日限额已用完") ||
+		strings.Contains(msg, "api key 日限額已用完") ||
 		strings.Contains(msg, "api key 7天限额已用完") ||
+		strings.Contains(msg, "api key 7天限額已用完") ||
 		strings.Contains(msg, "daily usage limit exceeded") ||
 		strings.Contains(msg, "weekly usage limit exceeded") ||
 		strings.Contains(msg, "monthly usage limit exceeded") ||

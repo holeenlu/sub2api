@@ -1988,6 +1988,41 @@ func TestGetOpsAPIKeyPrefersPrimaryContextKey(t *testing.T) {
 	require.Equal(t, int64(1), got.ID, "已鉴权请求应优先使用正式 api key")
 }
 
+// 後端訊息已由簡體轉為繁體（見 internal/service/api_key_service.go、
+// internal/server/middleware/api_key_auth*.go），但資料庫裡既有的 ops_error_logs
+// 仍是簡體。分類器必須同時吃得下兩種寫法，否則歷史資料會被誤判成上游錯誤而計入 SLA。
+func TestOpsErrorClassifiersAcceptBothChineseScripts(t *testing.T) {
+	authMessages := []string{
+		// 歷史資料（簡體）
+		"API Key 所属分组已删除",
+		"API Key 所属分组已停用",
+		// 轉繁後產生端的新訊息
+		"API Key 所屬分組已刪除",
+		"API Key 所屬分組已停用",
+	}
+	for _, m := range authMessages {
+		require.Truef(t, isOpsClientAuthError("", strings.ToLower(m)),
+			"isOpsClientAuthError 應辨識 %q", m)
+	}
+
+	limitMessages := []string{
+		// 歷史資料（簡體）
+		"API key 额度已用完",
+		"api key 5小时限额已用完",
+		"api key 日限额已用完",
+		"api key 7天限额已用完",
+		// 轉繁後產生端的新訊息
+		"API key 額度已用完",
+		"api key 5小時限額已用完",
+		"api key 日限額已用完",
+		"api key 7天限額已用完",
+	}
+	for _, m := range limitMessages {
+		require.Truef(t, isOpsLocalBusinessLimitError("", strings.ToLower(m)),
+			"isOpsLocalBusinessLimitError 應辨識 %q", m)
+	}
+}
+
 // 每条 body read 策略进 ops_error_logs 后的归因必须是有意的：客户端侧的失败
 // 留在 request/P3，只有我们该负责的读超时才是 internal/P2；兜底策略尤其不能
 // 被抬成 P2，否则未分类的客户端中断会触发告警。

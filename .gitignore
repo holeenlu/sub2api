@@ -158,3 +158,6 @@ output/
 .vite/
 # 本地闭源插件开发目录及构建产物不进入 Sub2API 仓库
 /plugins/
+
+# convert-go.mjs 的「已轉換」標記；只該出現在建置用的副本樹，不進版控
+.zh-tw-converted
