@@ -20,6 +20,7 @@ export default {
   // Version Badge
   version: {
     currentVersion: 'Current Version',
+    checkDisabled: 'Online update check is disabled',
     latestVersion: 'Latest Version',
     upToDate: "You're running the latest version.",
     updateAvailable: 'A new version is available!',

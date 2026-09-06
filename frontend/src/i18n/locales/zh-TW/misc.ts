@@ -22,6 +22,7 @@ export default {
   // Version Badge
   version: {
     currentVersion: '目前版本',
+    checkDisabled: '已關閉線上版本檢查',
     latestVersion: '最新版本',
     upToDate: '已是最新版本',
     updateAvailable: '有新版本可用！',

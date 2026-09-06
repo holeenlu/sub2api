@@ -31,13 +31,17 @@ type updateServiceGitHubClientStub struct {
 	release        *GitHubRelease
 	recentReleases []*GitHubRelease
 	recentErr      error
+	latestCalls    int
+	recentCalls    int
 }
 
 func (s *updateServiceGitHubClientStub) FetchLatestRelease(context.Context, string) (*GitHubRelease, error) {
+	s.latestCalls++
 	return s.release, nil
 }
 
 func (s *updateServiceGitHubClientStub) FetchRecentReleases(context.Context, string, int) ([]*GitHubRelease, error) {
+	s.recentCalls++
 	return s.recentReleases, s.recentErr
 }
 
@@ -184,4 +188,45 @@ func TestUpdateServiceRollbackToVersionAcceptsVPrefix(t *testing.T) {
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrRollbackVersionNotAllowed)
 	require.Contains(t, err.Error(), "no compatible release found")
+}
+
+// update.check_enabled=false (wire.go feeds it through WithCheckEnabled) must
+// short-circuit every network-backed operation without touching GitHub.
+func TestUpdateServiceCheckDisabledSkipsGitHub(t *testing.T) {
+	client := &updateServiceGitHubClientStub{
+		release:        &GitHubRelease{TagName: "v9.9.9", Name: "v9.9.9"},
+		recentReleases: []*GitHubRelease{{TagName: "v0.1.146"}},
+	}
+	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.1.147", "release").WithCheckEnabled(false)
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.True(t, info.Disabled)
+	require.False(t, info.HasUpdate)
+	require.Equal(t, "0.1.147", info.CurrentVersion)
+	require.Equal(t, "0.1.147", info.LatestVersion)
+	require.Equal(t, "release", info.BuildType)
+
+	require.ErrorIs(t, svc.PerformUpdate(context.Background()), ErrUpdateCheckDisabled)
+	require.ErrorIs(t, svc.RollbackToVersion(context.Background(), "0.1.146"), ErrUpdateCheckDisabled)
+
+	versions, err := svc.ListRollbackVersions(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, versions)
+
+	require.Zero(t, client.latestCalls+client.recentCalls, "no GitHub call may happen while the update check is disabled")
+}
+
+// The default keeps upstream behaviour: checks are enabled unless configured off.
+func TestUpdateServiceCheckEnabledByDefault(t *testing.T) {
+	client := &updateServiceGitHubClientStub{
+		release: &GitHubRelease{TagName: "v9.9.9", Name: "v9.9.9"},
+	}
+	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.1.147", "release")
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.False(t, info.Disabled)
+	require.True(t, info.HasUpdate)
+	require.Equal(t, 1, client.latestCalls)
 }

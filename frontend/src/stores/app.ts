@@ -43,6 +43,8 @@ export const useAppStore = defineStore('app', () => {
   const latestVersion = ref<string>('')
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
+  // 後端 update.check_enabled=false 時為 true：沒有連線查過版本，徽章不該顯示「已是最新」
+  const updateDisabled = ref<boolean>(false)
   const releaseInfo = ref<ReleaseInfo | null>(null)
 
   // Auto-incrementing ID for toasts
@@ -266,6 +268,7 @@ export const useAppStore = defineStore('app', () => {
       latestVersion.value = data.latest_version
       hasUpdate.value = data.has_update
       buildType.value = data.build_type || 'source'
+      updateDisabled.value = data.disabled === true
       releaseInfo.value = data.release_info || null
       versionLoaded.value = true
       return data
@@ -463,6 +466,7 @@ export const useAppStore = defineStore('app', () => {
     latestVersion,
     hasUpdate,
     buildType,
+    updateDisabled,
     releaseInfo,
 
     // Computed

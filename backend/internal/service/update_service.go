@@ -25,12 +25,19 @@ import (
 var (
 	ErrNoUpdateAvailable         = infraerrors.Conflict("ALREADY_UP_TO_DATE", "no update available; current version is latest")
 	ErrRollbackVersionNotAllowed = infraerrors.BadRequest("ROLLBACK_VERSION_NOT_ALLOWED", "version is not in the allowed rollback list")
+	// ErrUpdateCheckDisabled is returned by every network-backed update
+	// operation while update.check_enabled is false.
+	ErrUpdateCheckDisabled = infraerrors.Forbidden("UPDATE_CHECK_DISABLED", "online update check is disabled by configuration")
 )
 
 const (
 	updateCacheKey = "update_check_cache"
 	updateCacheTTL = 1200 // 20 minutes
 	githubRepo     = "Wei-Shaw/sub2api"
+
+	// updateDisabledWarning is surfaced to the admin UI in place of a version
+	// comparison when the online update check is turned off.
+	updateDisabledWarning = "online update check is disabled by configuration"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -65,15 +72,39 @@ type UpdateService struct {
 	githubClient   GitHubReleaseClient
 	currentVersion string
 	buildType      string // "source" for manual builds, "release" for CI builds
+	checkEnabled   bool   // update.check_enabled; false disables all remote lookups
 }
 
-// NewUpdateService creates a new UpdateService
+// NewUpdateService creates a new UpdateService. The online update check is on
+// by default (upstream behaviour); wire.go applies update.check_enabled.
 func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, version, buildType string) *UpdateService {
 	return &UpdateService{
 		cache:          cache,
 		githubClient:   githubClient,
 		currentVersion: version,
 		buildType:      buildType,
+		checkEnabled:   true,
+	}
+}
+
+// WithCheckEnabled toggles the online update check (update.check_enabled).
+func (s *UpdateService) WithCheckEnabled(enabled bool) *UpdateService {
+	if s == nil {
+		return nil
+	}
+	s.checkEnabled = enabled
+	return s
+}
+
+// disabledInfo describes the "no remote lookup performed" state.
+func (s *UpdateService) disabledInfo() *UpdateInfo {
+	return &UpdateInfo{
+		CurrentVersion: s.currentVersion,
+		LatestVersion:  s.currentVersion,
+		HasUpdate:      false,
+		Warning:        updateDisabledWarning,
+		BuildType:      s.buildType,
+		Disabled:       true,
 	}
 }
 
@@ -86,6 +117,9 @@ type UpdateInfo struct {
 	Cached         bool         `json:"cached"`
 	Warning        string       `json:"warning,omitempty"`
 	BuildType      string       `json:"build_type"` // "source" or "release"
+	// Disabled reports that update.check_enabled is false, so LatestVersion is
+	// simply the current version and no remote lookup was performed.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // ReleaseInfo contains GitHub release details
@@ -131,6 +165,10 @@ type GitHubAsset struct {
 
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
+	if !s.checkEnabled {
+		return s.disabledInfo(), nil
+	}
+
 	// Try cache first
 	if !force {
 		if cached, err := s.getFromCache(ctx); err == nil && cached != nil {
@@ -163,6 +201,10 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 // PerformUpdate downloads and applies the update
 // Uses atomic file replacement pattern for safe in-place updates
 func (s *UpdateService) PerformUpdate(ctx context.Context) error {
+	if !s.checkEnabled {
+		return ErrUpdateCheckDisabled
+	}
+
 	info, err := s.CheckUpdate(ctx, true)
 	if err != nil {
 		return err
@@ -307,6 +349,10 @@ func (s *UpdateService) Rollback() error {
 // strictly older than the current version (the current version itself is excluded),
 // newest first. Draft and prerelease entries are skipped.
 func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVersion, error) {
+	if !s.checkEnabled {
+		return []RollbackVersion{}, nil
+	}
+
 	releases, err := s.fetchRollbackCandidates(ctx)
 	if err != nil {
 		return nil, err
@@ -327,6 +373,10 @@ func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVer
 // The target must be one of the versions returned by ListRollbackVersions;
 // anything else (including the current version) is rejected.
 func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) error {
+	if !s.checkEnabled {
+		return ErrUpdateCheckDisabled
+	}
+
 	target := strings.TrimPrefix(strings.TrimSpace(version), "v")
 	if target == "" {
 		return ErrRollbackVersionNotAllowed
