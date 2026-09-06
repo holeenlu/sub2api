@@ -5,110 +5,156 @@ export default {
   },
   // Home Page
   home: {
-    pageTitle: 'Home',
-    viewOnGithub: 'View on GitHub',
     viewDocs: 'View Documentation',
     docs: 'Docs',
     switchToLight: 'Switch to Light Mode',
     switchToDark: 'Switch to Dark Mode',
     dashboard: 'Dashboard',
     login: 'Login',
-    getStarted: 'Get Started',
+    getStarted: 'Get an API Key',
+    exploreModels: 'Explore Models',
     goToDashboard: 'Go to Dashboard',
-    // User-focused value proposition
-    heroSubtitle: 'One Key, All AI Models',
-    heroDescription: 'No need to manage multiple subscriptions. Access Claude, GPT, Gemini and more with a single API key',
-    tags: {
-      subscriptionToApi: 'Subscription to API',
-      stickySession: 'Session Persistence',
-      realtimeBilling: 'Pay As You Go'
+    // Hero copy
+    heroSubtitle: 'One API, any model.',
+    heroDescription:
+      'Access multiple AI models through one unified API.\nSpend less time managing integrations and more time building.',
+    heroEyebrow: 'A multi-model AI API gateway',
+    heroTitle: 'One API, any model.',
+    contactIntegration: 'Discuss your integration',
+    terminal: {
+      caption: 'API request illustration',
+      routing: 'Forwarding to upstream…'
     },
-    // Pain points section
-    painPoints: {
-      title: 'Sound Familiar?',
-      items: {
-        expensive: {
-          title: 'High Subscription Costs',
-          desc: 'Paying for multiple AI subscriptions that add up every month'
-        },
-        complex: {
-          title: 'Account Chaos',
-          desc: 'Managing scattered accounts and API keys across different platforms'
-        },
-        unstable: {
-          title: 'Service Interruptions',
-          desc: 'Single accounts hitting rate limits and disrupting your workflow'
-        },
-        noControl: {
-          title: 'No Usage Control',
-          desc: "Can't track where your money goes or limit team member usage"
-        }
-      }
+    models: {
+      title: 'Models & pricing',
+      description: 'Browse available models and public rates to choose a group for your needs.',
+      rateNote: 'Public rates are shown here; sign in to view rates applicable to your account.',
+      loading: 'Loading models…',
+      error: 'Models could not be loaded. Please try again later.',
+      empty: 'No public models are currently available.',
+      retry: 'Retry',
+      sampleGroup: '{provider} standard group',
+      sampleNote: 'Illustrative data; see the model catalog for actual rates.',
+      inputPer1M: 'Input / 1M tokens',
+      outputPer1M: 'Output / 1M tokens'
     },
-    // Solutions section
-    solutions: {
-      title: 'We Solve These Problems',
-      subtitle: 'Three simple steps to stress-free AI access'
-    },
-    features: {
-      unifiedGateway: 'One-Click Access',
-      unifiedGatewayDesc: 'Get a single API key to call all connected AI models. No separate applications needed.',
-      multiAccount: 'Always Reliable',
-      multiAccountDesc: 'Smart routing across multiple upstream accounts with automatic failover. Say goodbye to errors.',
-      balanceQuota: 'Pay What You Use',
-      balanceQuotaDesc: 'Usage-based billing with quota limits. Full visibility into team consumption.'
-    },
-    // Comparison section
-    comparison: {
-      title: 'Why Choose Us?',
-      headers: {
-        feature: 'Comparison',
-        official: 'Official Subscriptions',
-        us: 'Our Platform'
+    architecture: {
+      title: 'How @:common.siteName works',
+      description:
+        'See how model and tool access, request scheduling, and usage management work together.',
+      indexNote: 'Numbers identify capabilities, not request steps.',
+      layers: {
+        access: 'Access',
+        processing: 'Request processing',
+        management: 'Management'
       },
-      items: {
-        pricing: {
-          feature: 'Pricing',
-          official: 'Fixed monthly fee, pay even if unused',
-          us: 'Pay only for what you use'
-        },
-        models: {
-          feature: 'Model Selection',
-          official: 'Single provider only',
-          us: 'Switch between models freely'
-        },
-        management: {
-          feature: 'Account Management',
-          official: 'Manage each service separately',
-          us: 'Unified key, one dashboard'
-        },
-        stability: {
-          feature: 'Stability',
-          official: 'Single account rate limits',
-          us: 'Multi-account pool, auto-failover'
-        },
-        control: {
-          feature: 'Usage Control',
-          official: 'Not available',
-          us: 'Quotas & detailed analytics'
-        }
+      nodes: {
+        marketplaceDesc: 'Available models, groups, and rates',
+        application: 'Application',
+        applicationDesc: 'Your services and backend',
+        agentsDesc: 'Agent tools such as Claude Code, Codex, and OpenCode',
+        upstream: 'Available upstream accounts',
+        upstreamDesc: 'Candidate account pool for the same model and capabilities',
+        failoverDesc: 'Conditional branch: triggered only when an error is eligible for retry.',
+        gatewayDesc: 'Users, groups, API keys, quotas, and requests-per-minute limits.',
+        billingDesc: 'Request-level records of API usage and charges.'
+      },
+      edges: {
+        selection: 'Model selection',
+        request: 'API request',
+        error: 'Retry-eligible error',
+        retry: 'Retry another available upstream',
+        controls: 'Access & quota settings',
+        usage: 'Usage & charge data'
       }
     },
-    providers: {
-      title: 'Supported AI Models',
-      description: 'One API, Multiple Choices',
-      supported: 'Supported',
-      soon: 'Soon',
-      claude: 'Claude',
-      gemini: 'Gemini',
-      antigravity: 'Antigravity',
-      more: 'More'
+    mechanisms: {
+      marketplace: {
+        title: 'Model marketplace',
+        description: 'Browse available models, groups, and rates to choose your access options.'
+      },
+      routing: {
+        title: 'Smart routing',
+        description:
+          'We select upstream accounts based on availability and scheduling settings, with sticky sessions to help preserve conversation continuity.'
+      },
+      cost: {
+        title: 'Cost-prioritized routing',
+        description:
+          'For supported OpenAI requests, we factor upstream rates for accounts serving the same model into scheduling scores alongside load and other factors.',
+        note: 'Upstream rates are one scheduling factor; this does not guarantee the lowest-rate route or the lowest customer bill.'
+      },
+      failover: {
+        title: 'Failover',
+        description: 'When an upstream error is eligible for retry, we attempt another available upstream.'
+      },
+      billing: {
+        title: 'Usage billing',
+        description:
+          'We record API usage and charges for individual requests so you can review consumption for each call.'
+      },
+      gateway: {
+        title: 'Enterprise AI Gateway',
+        description:
+          'Centrally manage users, groups, API keys, quotas, and requests-per-minute limits, with management-operation logs available to administrators.'
+      },
+      agents: {
+        title: 'Agent routing',
+        description:
+          'Each API key is bound to a group and model scope, so requests from agent tools such as Claude Code, Codex, and OpenCode are routed to the matching models and account pool. Sticky sessions and Codex conversation continuation keep multi-turn tasks on the same line.'
+      }
     },
-    // CTA section
+    management: {
+      subtitle: 'Team access management',
+      description:
+        'Manage usage with group rates, quotas, and access settings, and review usage and charges.',
+      demoLabel: 'Illustrative data',
+      auditNote: 'Management-operation logs are available to platform administrators.',
+      usage: {
+        title: 'Request-level usage & charges',
+        description: 'Review the model, usage, and charges for each API request.'
+      },
+      keys: {
+        title: 'Users, groups & keys',
+        description: 'Centrally manage users, groups, and API keys.'
+      },
+      quotas: {
+        title: 'Quotas & request limits',
+        description: 'Set quotas and requests-per-minute limits to manage resource usage.',
+        monthlyQuota: 'Monthly quota'
+      },
+      fields: {
+        model: 'Model',
+        tokens: 'Token usage',
+        cost: 'Charge',
+        key: 'Key name',
+        group: 'Group',
+        quota: 'Quota',
+        rpm: 'Requests per minute'
+      },
+      sample: {
+        model: 'Example model',
+        key: 'Development key',
+        group: 'Example group'
+      }
+    },
+    agents: {
+      title: 'Agent & tool integrations',
+      setupGuide: 'View setup guide',
+      codexContinuation: 'Supports Codex conversation continuation',
+      codexWebSocket: 'WebSocket mode',
+      dedicatedSetup: 'Dedicated connection settings',
+      details:
+        'All tools share the same connection details: model aliases map to the actual upstream models, /v1/models returns the model catalog for the API key’s group, and reasoning effort settings and the prompt cache key are preserved when forwarding.'
+    },
+    seo: {
+      title: '@:common.siteName | One API, any model',
+      description:
+        'Access multiple AI models through one @:common.siteName API. Explore available models and rates, and review request-level usage and charges.'
+    },
     cta: {
-      title: 'Ready to Get Started?',
-      description: 'Sign up now and get free trial credits to experience seamless AI access',
-      button: 'Sign Up Free'
+      title: 'Start with your next API request',
+      description: 'Get an API key, or explore available models and rates first.'
     },
     footer: {
       allRightsReserved: 'All rights reserved.'
@@ -193,8 +239,8 @@ export default {
   // Setup Wizard
   setup: {
     pageTitle: 'Setup',
-    title: 'Sub2API Setup',
-    description: 'Configure your Sub2API instance',
+    title: '@:common.siteName Setup',
+    description: 'Configure your @:common.siteName instance',
     database: {
       title: 'Database Configuration',
       description: 'Connect to your PostgreSQL database',

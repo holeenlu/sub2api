@@ -7,110 +7,146 @@ export default {
   },
   // Home Page
   home: {
-    pageTitle: '首頁',
-    viewOnGithub: '在 GitHub 上檢視',
     viewDocs: '檢視文件',
     docs: '文件',
     switchToLight: '切換到淺色模式',
     switchToDark: '切換到深色模式',
     dashboard: '控制台',
     login: '登入',
-    getStarted: '立即開始',
+    getStarted: '取得 API Key',
+    exploreModels: '探索模型',
     goToDashboard: '進入控制台',
-    // 新增：面向使用者的價值主張
-    heroSubtitle: '一個金鑰，暢用多個 AI 模型',
-    heroDescription: '無需管理多個訂閱帳號，一站式接入 Claude、GPT、Gemini 等主流 AI 服務',
-    tags: {
-      subscriptionToApi: '訂閱轉 API',
-      stickySession: '工作階段保持',
-      realtimeBilling: '按量計費'
+    // 首頁主視覺文案
+    heroSubtitle: '一個 API，自由選模型。',
+    heroDescription: '通過一個 API 使用不同 AI 模型。\n減少接入與管理的負擔，把時間留給產品開發。',
+    heroEyebrow: '多模型 AI API 閘道器',
+    heroTitle: '一個 API，自由選模型。',
+    contactIntegration: '接入諮詢',
+    terminal: {
+      caption: 'API 請求示意',
+      routing: '正在轉發至上游…'
     },
-    // 使用者痛點區塊
-    painPoints: {
-      title: '你是否也遇到這些問題？',
-      items: {
-        expensive: {
-          title: '訂閱費用高',
-          desc: '每個 AI 服務都要單獨訂閱，每月支出越來越多'
-        },
-        complex: {
-          title: '多帳號難管理',
-          desc: '不同平台的帳號、金鑰分散各處，管理起來很麻煩'
-        },
-        unstable: {
-          title: '服務不穩定',
-          desc: '單一帳號容易觸發限制，影響正常使用'
-        },
-        noControl: {
-          title: '用量無法控制',
-          desc: '不知道錢花在哪了，也無法限制團隊成員的使用'
-        }
-      }
+    models: {
+      title: '模型與費率',
+      description: '檢視可用模型與公開費率，按需選擇分組。',
+      rateNote: '此處顯示公開費率；帳號適用費率請登入後檢視。',
+      loading: '正在載入模型…',
+      error: '暫時無法載入模型，請稍後重試。',
+      empty: '目前沒有公開模型。',
+      retry: '重試',
+      sampleGroup: '{provider} 標準分組',
+      sampleNote: '示意資料，正式費率以模型廣場為準。',
+      inputPer1M: '輸入 / 1M tokens',
+      outputPer1M: '輸出 / 1M tokens'
     },
-    // 解決方案區塊
-    solutions: {
-      title: '我們幫你解決',
-      subtitle: '簡單三步，開始省心使用 AI'
-    },
-    features: {
-      unifiedGateway: '一鍵接入',
-      unifiedGatewayDesc: '取得一個 API 金鑰，即可呼叫所有已接入的 AI 模型，無需分別申請。',
-      multiAccount: '穩定可靠',
-      multiAccountDesc: '智慧排程多個上游帳號，自動切換和負載平衡，告別頻繁錯誤。',
-      balanceQuota: '用多少付多少',
-      balanceQuotaDesc: '按實際使用量計費，支援設定配額上限，團隊用量一目瞭然。'
-    },
-    // 優勢對比
-    comparison: {
-      title: '為什麼選擇我們？',
-      headers: {
-        feature: '對比項',
-        official: '官方訂閱',
-        us: '本平台'
+    architecture: {
+      title: '@:common.siteName 如何運作',
+      description: '從模型與工具接入，到請求排程與用量管理，瞭解各項能力如何配合。',
+      indexNote: '編號代表能力項，不代表請求步驟。',
+      layers: {
+        access: '接入端',
+        processing: '請求處理',
+        management: '管理層'
       },
-      items: {
-        pricing: {
-          feature: '付費方式',
-          official: '固定月費，用不完也付',
-          us: '按量付費，用多少付多少'
-        },
-        models: {
-          feature: '模型選擇',
-          official: '單一服務商',
-          us: '多模型隨意切換'
-        },
-        management: {
-          feature: '帳號管理',
-          official: '每個服務單獨管理',
-          us: '統一金鑰，一站管理'
-        },
-        stability: {
-          feature: '服務穩定性',
-          official: '單帳號易觸發限制',
-          us: '多帳號池，自動切換'
-        },
-        control: {
-          feature: '用量控制',
-          official: '無法限制',
-          us: '可設配額、查明細'
-        }
+      nodes: {
+        marketplaceDesc: '可用模型、分組與費率',
+        application: '應用程式',
+        applicationDesc: '你的服務與後端',
+        agentsDesc: 'Claude Code、Codex、OpenCode 等代理工具',
+        upstream: '可用上游帳號',
+        upstreamDesc: '同模型、同能力的候選帳號池',
+        failoverDesc: '條件分支：僅在錯誤符合重試條件時觸發。',
+        gatewayDesc: '使用者、分組、API Key、配額與每分鐘請求數限制。',
+        billingDesc: '逐條記錄 API 使用量與費用。'
+      },
+      edges: {
+        selection: '選擇模型',
+        request: 'API 請求',
+        error: '符合重試條件的錯誤',
+        retry: '重試其他可用上游',
+        controls: '存取與配額設定',
+        usage: '用量與費用資料'
       }
     },
-    providers: {
-      title: '已支援的 AI 模型',
-      description: '一個 API，多種選擇',
-      supported: '已支援',
-      soon: '即將推出',
-      claude: 'Claude',
-      gemini: 'Gemini',
-      antigravity: 'Antigravity',
-      more: '更多'
+    mechanisms: {
+      marketplace: {
+        title: '模型廣場',
+        description: '檢視可用模型、分組與費率，選擇合適的接入方案。'
+      },
+      routing: {
+        title: '智慧路由',
+        description: '我們按可用狀態與排程設定選擇上游帳號，並通過黏性工作階段協助保持對話連續性。'
+      },
+      cost: {
+        title: '成本優先路由',
+        description: '在支援的 OpenAI 請求中，我們把同一模型候選帳號的上游費率納入排程評分，與負載等因素共同決定分配。',
+        note: '上游費率是排程因子之一，不保證每次採用最低費率，也不代表客戶帳單最低。'
+      },
+      failover: {
+        title: '自動換線重試',
+        description: '遇到符合重試條件的上游錯誤時，我們會嘗試切換其他可用上游。'
+      },
+      billing: {
+        title: '用量計費',
+        description: '我們逐條記錄 API 使用量與費用，讓你檢視每次呼叫的消耗。'
+      },
+      gateway: {
+        title: '企業級 AI 閘道器',
+        description: '集中管理使用者、分組、API Key、配額與每分鐘請求數限制，並由管理員檢視管理操作記錄。'
+      },
+      agents: {
+        title: 'Agent 路由',
+        description: '每把 API Key 綁定分組與模型範圍，Claude Code、Codex、OpenCode 等代理工具的請求據此導向對應的模型與帳號池；黏性工作階段與 Codex 對話續接讓多輪任務保持在同一條線上。'
+      }
     },
-    // CTA 區塊
+    management: {
+      subtitle: '團隊存取管理',
+      description: '通過分組費率、配額與存取設定管理使用，並檢視用量及費用。',
+      demoLabel: '示意資料',
+      auditNote: '管理操作記錄由平台管理員檢視。',
+      usage: {
+        title: '逐條用量與費用',
+        description: '檢視每次 API 呼叫的模型、用量與費用。'
+      },
+      keys: {
+        title: '使用者、分組與金鑰',
+        description: '集中管理使用者、分組與 API Key。'
+      },
+      quotas: {
+        title: '配額與請求限制',
+        description: '設定配額及每分鐘請求數限制，管理資源使用。',
+        monthlyQuota: '本月配額'
+      },
+      fields: {
+        model: '模型',
+        tokens: 'Token 用量',
+        cost: '費用',
+        key: '金鑰名稱',
+        group: '分組',
+        quota: '配額',
+        rpm: '每分鐘請求數'
+      },
+      sample: {
+        model: '示例模型',
+        key: '開發金鑰',
+        group: '示例分組'
+      }
+    },
+    agents: {
+      title: 'Agent 工具接入',
+      setupGuide: '檢視設定指南',
+      codexContinuation: '支援 Codex 對話續接',
+      codexWebSocket: 'WebSocket 模式',
+      dedicatedSetup: '專用接入設定',
+      details: '各工具共用同一組接入細節：模型的別名對應到實際上游模型，/v1/models 按 API Key 所屬分組提供模型目錄，並在轉發時保留推理強度設定與 prompt cache key。'
+    },
+    seo: {
+      title: '@:{\'common.siteName\'}｜一個 API，自由選模型',
+      description: '透過 @:common.siteName 的一個 API 使用不同 AI 模型，探索可用模型與費率，並檢視逐條用量與費用。'
+    },
     cta: {
-      title: '準備好開始了嗎？',
-      description: '註冊即可獲得免費試用額度，體驗一站式 AI 服務',
-      button: '免費註冊'
+      title: '從下一個 API 請求開始',
+      description: '取得 API Key，或先探索可用模型與費率。'
     },
     footer: {
       allRightsReserved: '保留所有權利。'
@@ -195,8 +231,8 @@ export default {
   // Setup Wizard
   setup: {
     pageTitle: '安裝嚮導',
-    title: 'Sub2API 安裝嚮導',
-    description: '設定您的 Sub2API 實例',
+    title: '@:common.siteName 安裝嚮導',
+    description: '設定您的 @:common.siteName 實例',
     database: {
       title: '資料庫設定',
       description: '連線到您的 PostgreSQL 資料庫',

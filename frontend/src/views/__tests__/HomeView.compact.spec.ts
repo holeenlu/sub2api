@@ -29,11 +29,16 @@ vi.mock('@/stores/app', () => ({
   useAppStore: () => appStore,
 }))
 
+// 首页模型区会打模型广场公开端点；组件行为另有测试，这里只要求不发真实请求。
+vi.mock('@/api/modelPlaza', () => ({
+  getModelPlaza: vi.fn().mockResolvedValue({ description: '', groups: [] }),
+}))
+
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
   return {
     ...actual,
-    useI18n: () => ({ t: (key: string) => key }),
+    useI18n: () => ({ t: (key: string) => key, locale: { value: 'en' } }),
   }
 })
 
@@ -163,13 +168,24 @@ describe('HomeView compact mode', () => {
     expect(modelPlazaDestination(wrapper)).toBe('/model-plaza')
   })
 
-  it('shows the model plaza link in the default home header', () => {
+  it('keeps the model plaza deep link inside the default home models section', () => {
     const wrapper = mountHome({
       model_plaza_enabled: true,
       model_plaza_require_auth: false,
     })
 
+    expect(wrapper.find('#models').exists()).toBe(true)
     expect(modelPlazaDestination(wrapper)).toBe('/model-plaza')
+  })
+
+  it('keeps the default home models section but hides the deep link when the plaza is not public', () => {
+    const wrapper = mountHome({
+      model_plaza_enabled: true,
+      model_plaza_require_auth: true,
+    })
+
+    expect(wrapper.find('#models').exists()).toBe(true)
+    expect(modelPlazaDestination(wrapper)).toBeUndefined()
   })
 
   it('hides the model plaza link when the feature is disabled', () => {

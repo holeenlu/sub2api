@@ -38,7 +38,10 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: false,
       title: 'Home',
-      titleKey: 'home.pageTitle'
+      // 首页 SEO 标题自带站点名，不再附加一次
+      titleKey: 'home.seo.title',
+      titleStandalone: true,
+      metaDescriptionKey: 'home.seo.description'
     }
   },
   {
