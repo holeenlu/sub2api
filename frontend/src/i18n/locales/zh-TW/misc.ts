@@ -152,16 +152,16 @@ export default {
     // Admin tour steps
     admin: {
       welcome: {
-        title: '👋 歡迎使用 Sub2API',
+        title: '👋 歡迎使用 @:common.siteName',
         description:
-          '<div style="line-height: 1.8;"><p style="margin-bottom: 16px;">Sub2API 是一個強大的 AI 服務中轉平台，讓您輕鬆管理和分發 AI 服務。</p><p style="margin-bottom: 12px;"><b>🎯 核心功能：</b></p><ul style="margin-left: 20px; margin-bottom: 16px;"><li>📦 <b>分組管理</b> - 建立不同的服務方案（VIP、免費試用等）</li><li>🔗 <b>帳號池</b> - 連線多個上游 AI 服務商帳號</li><li>🔑 <b>金鑰分發</b> - 為使用者生成獨立的 API Key</li><li>💰 <b>計費管理</b> - 靈活的費率和配額控制</li></ul><p style="color: #10b981; font-weight: 600;">接下來，我們將用 3 分鐘帶您完成首次設定 →</p></div>',
+          '<div style="line-height: 1.8;"><p style="margin-bottom: 16px;">@:common.siteName 是一個強大的 AI 服務中轉平台，讓您輕鬆管理和分發 AI 服務。</p><p style="margin-bottom: 12px;"><b>🎯 核心功能：</b></p><ul style="margin-left: 20px; margin-bottom: 16px;"><li>📦 <b>分組管理</b> - 建立不同的服務方案（VIP、免費試用等）</li><li>🔗 <b>帳號池</b> - 連線多個上游 AI 服務商帳號</li><li>🔑 <b>金鑰分發</b> - 為使用者生成獨立的 API Key</li><li>💰 <b>計費管理</b> - 靈活的費率和配額控制</li></ul><p style="color: #10b981; font-weight: 600;">接下來，我們將用 3 分鐘帶您完成首次設定 →</p></div>',
         nextBtn: '開始設定 🚀',
         prevBtn: '跳過'
       },
       groupManage: {
         title: '📦 第一步：分組管理',
         description:
-          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;"><b>什麼是分組？</b></p><p style="margin-bottom: 12px;">分組是 Sub2API 的核心概念，它就像一個"服務方案"：</p><ul style="margin-left: 20px; margin-bottom: 12px; font-size: 13px;"><li>🎯 每個分組可以包含多個上游帳號</li><li>💰 每個分組有獨立的計費倍率</li><li>👥 可以設定為公開或專屬分組</li></ul><p style="margin-top: 12px; padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>💡 示例：</b>您可以建立"VIP專線"（高倍率）和"免費試用"（低倍率）兩個分組</p><p style="margin-top: 16px; color: #10b981; font-weight: 600;">👉 點選左側的"分組管理"開始</p></div>'
+          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;"><b>什麼是分組？</b></p><p style="margin-bottom: 12px;">分組是 @:common.siteName 的核心概念，它就像一個"服務方案"：</p><ul style="margin-left: 20px; margin-bottom: 12px; font-size: 13px;"><li>🎯 每個分組可以包含多個上游帳號</li><li>💰 每個分組有獨立的計費倍率</li><li>👥 可以設定為公開或專屬分組</li></ul><p style="margin-top: 12px; padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>💡 示例：</b>您可以建立"VIP專線"（高倍率）和"免費試用"（低倍率）兩個分組</p><p style="margin-top: 16px; color: #10b981; font-weight: 600;">👉 點選左側的"分組管理"開始</p></div>'
       },
       createGroup: {
         title: '➕ 建立新分組',
@@ -273,9 +273,9 @@ export default {
     // User tour steps
     user: {
       welcome: {
-        title: '👋 歡迎使用 Sub2API',
+        title: '👋 歡迎使用 @:common.siteName',
         description:
-          '<div style="line-height: 1.8;"><p style="margin-bottom: 16px;">您好！歡迎來到 Sub2API AI 服務平台。</p><p style="margin-bottom: 12px;"><b>🎯 快速開始：</b></p><ul style="margin-left: 20px; margin-bottom: 16px;"><li>🔑 建立 API 金鑰</li><li>📋 複製金鑰到您的應用程式</li><li>🚀 開始使用 AI 服務</li></ul><p style="color: #10b981; font-weight: 600;">只需 1 分鐘，讓我們開始吧 →</p></div>',
+          '<div style="line-height: 1.8;"><p style="margin-bottom: 16px;">您好！歡迎來到 @:common.siteName AI 服務平台。</p><p style="margin-bottom: 12px;"><b>🎯 快速開始：</b></p><ul style="margin-left: 20px; margin-bottom: 16px;"><li>🔑 建立 API 金鑰</li><li>📋 複製金鑰到您的應用程式</li><li>🚀 開始使用 AI 服務</li></ul><p style="color: #10b981; font-weight: 600;">只需 1 分鐘，讓我們開始吧 →</p></div>',
         nextBtn: '開始 🚀',
         prevBtn: '跳過'
       },

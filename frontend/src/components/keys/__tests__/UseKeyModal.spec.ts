@@ -19,6 +19,10 @@ vi.mock('@/composables/useClipboard', () => ({
   })
 }))
 
+vi.mock('@/stores/app', () => ({
+  useAppStore: () => ({ siteName: 'Sub2API' })
+}))
+
 vi.mock('file-saver', () => ({
   saveAs: saveAsMock
 }))

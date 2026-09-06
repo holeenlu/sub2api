@@ -1,5 +1,8 @@
 export default {
   common: {
+    // Site name. Overwritten via mergeLocaleMessage in stores/app.ts once the
+    // public settings load; reference it as @:common.siteName in copy.
+    siteName: 'Sub2API',
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',

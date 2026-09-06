@@ -7789,7 +7789,7 @@
                       v-model="form.payment_product_name_prefix"
                       type="text"
                       class="input"
-                      placeholder="Sub2API"
+                      :placeholder="BRAND_NAME"
                     />
                   </div>
                   <div>
@@ -7811,7 +7811,7 @@
                       class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300"
                     >
                       {{
-                        (form.payment_product_name_prefix || "Sub2API") +
+                        (form.payment_product_name_prefix || BRAND_NAME) +
                         " 100 " +
                         (form.payment_product_name_suffix || "CNY")
                       }}
@@ -8820,6 +8820,12 @@ import type {
   Proxy,
 } from "@/types";
 import type { ProviderInstance } from "@/types/payment";
+import {
+  BRAND_NAME,
+  BRAND_PAYMENT_GUIDE_URL,
+  BRAND_PAYMENT_METHODS_URL,
+  BRAND_TAGLINE_EN,
+} from "@/config/brand";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import Icon from "@/components/icons/Icon.vue";
 import Select from "@/components/common/Select.vue";
@@ -8873,14 +8879,14 @@ function localText(zh: string, en: string): string {
 
 const paymentGuideHref = computed(() =>
   isZhLocale.value
-    ? "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md"
-    : "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT.md",
+    ? BRAND_PAYMENT_GUIDE_URL.zh
+    : BRAND_PAYMENT_GUIDE_URL.en,
 );
 
 const paymentMethodsHref = computed(() =>
   isZhLocale.value
-    ? "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md#支持的支付方式"
-    : "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT.md#supported-payment-methods",
+    ? BRAND_PAYMENT_METHODS_URL.zh
+    : BRAND_PAYMENT_METHODS_URL.en,
 );
 
 type SettingsTab =
@@ -9586,9 +9592,9 @@ const form = reactive<SettingsForm>({
   default_subscriptions: [],
   force_email_on_third_party_signup: false,
   default_user_rpm_limit: 0,
-  site_name: "Sub2API",
+  site_name: BRAND_NAME,
   site_logo: "",
-  site_subtitle: "Subscription to API Conversion Platform",
+  site_subtitle: BRAND_TAGLINE_EN,
   api_base_url: "",
   contact_info: "",
   doc_url: "",

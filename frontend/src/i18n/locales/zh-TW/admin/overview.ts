@@ -1175,9 +1175,9 @@ export default {
       openaiLive: {
         title: 'OpenAI Live',
         allow: '允許存取 Live',
-        hint: '啟用後，此 OpenAI 分組的 API Key 可以建立並控制 Live 語音工作階段。預設關閉。執行 Sub2API 的伺服器端必須是 Apple Silicon Mac，並安裝官方 ChatGPT App；用戶端平台不受限制。',
+        hint: '啟用後，此 OpenAI 分組的 API Key 可以建立並控制 Live 語音工作階段。預設關閉。執行 @:common.siteName 的伺服器端必須是 Apple Silicon Mac，並安裝官方 ChatGPT App；用戶端平台不受限制。',
         unsupportedTitle: '目前伺服器端不支援 Live',
-        unsupportedMessage: '目前 Sub2API 伺服器端無法生成 Live 所需的裝置證明，即使開啟也不能使用。是否仍然開啟？',
+        unsupportedMessage: '目前 @:common.siteName 伺服器端無法生成 Live 所需的裝置證明，即使開啟也不能使用。是否仍然開啟？',
         enableAnyway: '仍然開啟'
       },
       openaiFast: {

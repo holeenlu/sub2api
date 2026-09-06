@@ -2,6 +2,9 @@
 // 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
 export default {
   common: {
+    // 站點名稱。實際值在設定載入後由 stores/app.ts 以 mergeLocaleMessage 覆蓋，
+    // 文案中用 @:common.siteName 連結即可自動跟隨後台設定變化。
+    siteName: 'Sub2API',
     loading: '載入中...',
     submitting: '提交中...',
     justNow: '剛剛',

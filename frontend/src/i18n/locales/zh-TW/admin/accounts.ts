@@ -127,7 +127,7 @@ export default {
         ungrouped: '未分組',
         hint: '顯示格式為“分組名 / 基礎分 / 黏性加分”。基礎分按目前篩選條件限定的候選帳號計算，包含優先順序、負載、排隊、錯誤率、首包延遲、重設視窗、額度餘量、計費倍率等因子；黏性加分只在開啟黏性加權時用於 previous_response_id 或 session_hash。分數越大越優先。'
       },
-      usageWindowsHint: '“5h / 7d”是上游帳號（如 OpenAI ChatGPT、Claude）官方的滾動用量視窗限制，由上游對帳號設定，並非 sub2api 設定，也與你對應的模型無關。視窗滾動到期後用量會自動重設，無法在 sub2api 端解除該限制。',
+      usageWindowsHint: '“5h / 7d”是上游帳號（如 OpenAI ChatGPT、Claude）官方的滾動用量視窗限制，由上游對帳號設定，並非 @:common.siteName 設定，也與你對應的模型無關。視窗滾動到期後用量會自動重設，無法在 @:common.siteName 端解除該限制。',
       ollamaCloud: {
         title: 'Ollama Cloud 用量',
         sessionSecurityHint: '瀏覽器工作階段會加密落庫，且只發送到固定的 Ollama 官方設定頁。',
@@ -178,7 +178,7 @@ export default {
         }
       },
       upstreamBilling: {
-        trustWarning: '此倍率由上游站點針對目前 API Key 自行宣告。Sub2API 無法驗證該值是否與實際扣費一致；上游站點或中間代理可能返回偽造、過期或被篡改的資料。請結合帳單、餘額變化和實際用量自行核驗。',
+        trustWarning: '此倍率由上游站點針對目前 API Key 自行宣告。@:common.siteName 無法驗證該值是否與實際扣費一致；上游站點或中間代理可能返回偽造、過期或被篡改的資料。請結合帳單、餘額變化和實際用量自行核驗。',
         autoProbe: '自動探測上游宣告倍率',
         autoProbeHint: '啟用後按全域週期重新整理上游宣告倍率；此開關本身不會修改帳號倍率。',
         syncRate: '同步上游宣告倍率',
@@ -468,7 +468,7 @@ export default {
         claude: 'Claude',
         grokRequests: '請求',
         grokTokens: 'Token',
-        grokFreeQuota24hHint: '按 sub2api 近 24 小時本地 Token 用量估算（上限 {limit}）',
+        grokFreeQuota24hHint: '按本地近 24 小時 Token 用量估算（上限 {limit}）',
         grokWeeklyUsage: '周額度已用 {percent}%',
         grokUsed: '已用 $',
         grokBalance: '餘額 $',
@@ -872,7 +872,7 @@ export default {
       poolMode: '池模式',
       poolModeHint: '上游為帳號池時啟用，錯誤不標記本地帳號狀態',
       poolModeInfo:
-        '啟用後，上游 429/403/401 錯誤將自動重試而不標記帳號速率限制或錯誤，適用於上游指向另一個 sub2api 實例的場景。',
+        '啟用後，上游 429/403/401 錯誤將自動重試而不標記帳號速率限制或錯誤，適用於上游指向另一個 @:common.siteName 實例的場景。',
       poolModeRetryCount: '同帳號重試次數',
       poolModeRetryCountHint: '僅在池模式下生效。0 表示不原地重試；預設 {default}，最大 {max}。',
       poolModeRetryStatusCodes: '同帳號重試狀態碼',

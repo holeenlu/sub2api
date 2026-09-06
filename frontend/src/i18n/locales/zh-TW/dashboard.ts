@@ -176,13 +176,13 @@ export default {
       },
       grok: {
         description:
-          '設定 Grok CLI、Claude Code、Codex 或 OpenCode，讓請求透過目前 Sub2API Grok 分組傳送。文字模型走 Responses；圖片/影片使用 Imagine 模型 ID 與媒體端點。',
-        claudeDescription: '設定 Claude Code，讓 Messages API 請求透過目前 Sub2API Grok 分組傳送。',
-        codexDescription: '設定 Codex，讓 Responses API 請求透過目前 Sub2API Grok 分組傳送。',
+          '設定 Grok CLI、Claude Code、Codex 或 OpenCode，讓請求透過目前 @:common.siteName Grok 分組傳送。文字模型走 Responses；圖片/影片使用 Imagine 模型 ID 與媒體端點。',
+        claudeDescription: '設定 Claude Code，讓 Messages API 請求透過目前 @:common.siteName Grok 分組傳送。',
+        codexDescription: '設定 Codex，讓 Responses API 請求透過目前 @:common.siteName Grok 分組傳送。',
         configTomlHint:
           '官方路徑：~/.grok/config.toml（或 $GROK_HOME）。請填寫 [endpoints]（models_base_url / models_list_url / xai_api_base_url / cli_chat_proxy_base_url）、[auth] preferred_method=api_key、[models]、[session]、[features] 圖片/影片覆蓋。優先 env_key，勿硬編碼 api_key；文字模型必須 api_backend=responses。合併前備份，儲存後執行 grok inspect。',
         codexConfigTomlHint:
-          'Codex 官方：wire_api 僅支援 "responses"；優先 env_key，勿與 experimental_bearer_token 混用；非 OpenAI 閘道器預設 supports_websockets = false（Sub2API 仍可接用戶端 WS 並橋接到 HTTP/SSE）。合併前備份 ~/.codex/config.toml。',
+          'Codex 官方：wire_api 僅支援 "responses"；優先 env_key，勿與 experimental_bearer_token 混用；非 OpenAI 閘道器預設 supports_websockets = false（@:common.siteName 仍可接用戶端 WS 並橋接到 HTTP/SSE）。合併前備份 ~/.codex/config.toml。',
         note:
           '匯出 GROK_MODELS_BASE_URL 與 XAI_API_KEY，將完整 config.toml（endpoints/auth/models/session/features）儲存為 ~/.grok/config.toml，執行 grok inspect，再用 /model 選擇 grok-4.5（程式設計場景可用 grok-build-0.1）。',
         noteWindows:

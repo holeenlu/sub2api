@@ -106,6 +106,7 @@ import Input from '@/components/common/Input.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAdminComplianceStore, useAppStore, useAuthStore } from '@/stores'
 import { getLocale } from '@/i18n'
+import { BRAND_COMPLIANCE_DOCUMENT_URL } from '@/config/brand'
 import zhDocument from '../../../../docs/legal/admin-compliance.zh.md?raw'
 import zhTwDocument from '../../../../docs/legal/admin-compliance.zh-TW.md?raw'
 import enDocument from '../../../../docs/legal/admin-compliance.en.md?raw'
@@ -132,12 +133,12 @@ const currentDocument = computed(() => {
 })
 const documentUrl = computed(() => {
   if (getLocale() === 'zh-TW') {
-    return complianceStore.status?.document_url_zh || 'https://github.com/holeenlu/sub2api/blob/main/docs/legal/admin-compliance.zh-TW.md'
+    return complianceStore.status?.document_url_zh || BRAND_COMPLIANCE_DOCUMENT_URL['zh-TW']
   }
   if (getLocale() === 'zh') {
-    return complianceStore.status?.document_url_zh || 'https://github.com/Wei-Shaw/sub2api/blob/main/docs/legal/admin-compliance.zh.md'
+    return complianceStore.status?.document_url_zh || BRAND_COMPLIANCE_DOCUMENT_URL.zh
   }
-  return complianceStore.status?.document_url_en || 'https://github.com/Wei-Shaw/sub2api/blob/main/docs/legal/admin-compliance.en.md'
+  return complianceStore.status?.document_url_en || BRAND_COMPLIANCE_DOCUMENT_URL.en
 })
 const inputError = computed(() => {
   if (!attemptedSubmit.value || canSubmit.value) {

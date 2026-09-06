@@ -50,6 +50,24 @@ export const i18n = createI18n({
 
 const loadedLocales = new Set<LocaleCode>()
 
+// 後台可自訂站點名稱，文案用 @:common.siteName 連結取用（預設值是語言包裡的品牌名）。
+// 這裡保存目前值，因為語言包是延遲載入且 setLocaleMessage 會整包取代，
+// 每次載入語言包後都得重新套用一次，否則會被語言包裡的預設值蓋回去。
+let currentSiteName = ''
+
+function applySiteName(locale: LocaleCode): void {
+  if (!currentSiteName) return
+  i18n.global.mergeLocaleMessage(locale, { common: { siteName: currentSiteName } })
+}
+
+/** 設定站點名稱，並同步到所有已載入的語言包 */
+export function setSiteName(name: string): void {
+  const trimmed = name.trim()
+  if (!trimmed || trimmed === currentSiteName) return
+  currentSiteName = trimmed
+  loadedLocales.forEach(applySiteName)
+}
+
 export async function loadLocaleMessages(locale: LocaleCode): Promise<void> {
   if (loadedLocales.has(locale)) {
     return
@@ -64,6 +82,7 @@ export async function loadLocaleMessages(locale: LocaleCode): Promise<void> {
   const module = await loader()
   i18n.global.setLocaleMessage(locale, module.default)
   loadedLocales.add(locale)
+  applySiteName(locale)
 }
 
 export async function initI18n(): Promise<void> {
