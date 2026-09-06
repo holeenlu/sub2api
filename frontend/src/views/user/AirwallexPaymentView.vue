@@ -27,6 +27,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { isChineseLocale } from '@/i18n/localeUtils'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -35,6 +36,15 @@ import {
   readPaymentRecoverySnapshot,
   type PaymentRecoverySnapshot,
 } from '@/components/payment/paymentFlow'
+
+// Airwallex Components SDK 的 Locale 联合类型里，繁体中文是 'zh-HK'（没有 zh-TW）。
+// 见 node_modules/@airwallex/components-sdk/lib/index.d.ts 的 `export type Locale`。
+function airwallexLocale(locale: string): 'zh' | 'zh-HK' | 'en' {
+  if (!isChineseLocale(locale)) {
+    return 'en'
+  }
+  return locale.toLowerCase().startsWith('zh-tw') ? 'zh-HK' : 'zh'
+}
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -91,7 +101,7 @@ function restoreAirwallexSnapshot(): PaymentRecoverySnapshot | null {
 
 onMounted(async () => {
   const snapshot = restoreAirwallexSnapshot()
-  const checkoutLocale = locale.value.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+  const checkoutLocale = airwallexLocale(locale.value)
 
   if (!snapshot) {
     loading.value = false

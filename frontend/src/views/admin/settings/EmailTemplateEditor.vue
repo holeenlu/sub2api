@@ -232,6 +232,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { isChineseLocale } from "@/i18n/localeUtils";
 import { adminAPI } from "@/api";
 import type {
   EmailTemplateEventOption,
@@ -336,7 +337,7 @@ interface EventDisplayMeta {
 }
 
 function localText(zh: string, en: string): string {
-  return locale.value.toLowerCase().startsWith("zh") ? zh : en;
+  return isChineseLocale(locale.value) ? zh : en;
 }
 
 const eventDisplayMeta: Record<string, EventDisplayMeta> = {
@@ -475,9 +476,7 @@ function normalizeEventOption(option: EmailTemplateEventOption): EmailTemplateOp
 function eventMetaFor(option?: EmailTemplateOption | null) {
   if (!option) return null;
   const displayMeta = (
-    locale.value.toLowerCase().startsWith("zh")
-      ? eventDisplayMeta
-      : eventDisplayMetaEn
+    isChineseLocale(locale.value) ? eventDisplayMeta : eventDisplayMetaEn
   )[option.value];
   const label = displayMeta?.label || option.label || option.value;
   const timing = displayMeta?.timing || option.description || "";

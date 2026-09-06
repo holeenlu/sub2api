@@ -98,13 +98,12 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { getLocale } from '@/i18n'
 import { sanitizeUrl } from '@/utils/url'
+import { resolveLegalDocumentIcon, type LegalDocumentIcon } from '@/utils/legalDocumentIcon'
 import { useAppStore } from '@/stores/app'
 import type { LoginAgreementDocument } from '@/types'
 import zhAdminCompliance from '../../../../docs/legal/admin-compliance.zh.md?raw'
 import zhTwAdminCompliance from '../../../../docs/legal/admin-compliance.zh-TW.md?raw'
 import enAdminCompliance from '../../../../docs/legal/admin-compliance.en.md?raw'
-
-type LegalDocumentIcon = 'document' | 'shield' | 'globe' | 'cog'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -159,19 +158,9 @@ const renderedHtml = computed(() => {
   return DOMPurify.sanitize(html)
 })
 
-const documentIcon = computed<LegalDocumentIcon>(() => {
-  const title = currentDocument.value?.title || ''
-  if (title.includes('政策') || title.includes('隐私')) {
-    return 'shield'
-  }
-  if (title.includes('国家') || title.includes('地区')) {
-    return 'globe'
-  }
-  if (title.includes('特定')) {
-    return 'cog'
-  }
-  return 'document'
-})
+const documentIcon = computed<LegalDocumentIcon>(() =>
+  resolveLegalDocumentIcon(currentDocument.value?.title || '')
+)
 
 onMounted(async () => {
   loadError.value = false

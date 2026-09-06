@@ -128,6 +128,7 @@ export default {
   },
 
   legal: {
+    pageTitle: 'Legal Document',
     loadFailed: 'Failed to load document',
     retryLater: 'Refresh the page and try again later.',
     notFound: 'Document not found',

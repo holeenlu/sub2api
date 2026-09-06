@@ -49,7 +49,9 @@ describe('fetchAllAccountIds', () => {
       pages: 1
     })
 
-    await expect(fetchAllAccountIds(fetchPage, {})).rejects.toThrow('账号列表结果不完整')
+    await expect(fetchAllAccountIds(fetchPage, {})).rejects.toThrow(
+      'account list result is incomplete: expected 2 ids, got 1'
+    )
   })
 
   it('propagates a later page failure', async () => {

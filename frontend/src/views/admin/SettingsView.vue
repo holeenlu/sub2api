@@ -8784,6 +8784,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { isChineseLocale } from "@/i18n/localeUtils";
 import { adminAPI } from "@/api";
 import {
   appendAuthSourceDefaultsToUpdateRequest,
@@ -8864,20 +8865,20 @@ const appStore = useAppStore();
 // 关闭 step-up 开关是敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 码重试
 const settingsStepUp = useStepUp();
 const adminSettingsStore = useAdminSettingsStore();
-const isZhLocale = computed(() => locale.value.startsWith("zh"));
+const isZhLocale = computed(() => isChineseLocale(locale.value));
 
 function localText(zh: string, en: string): string {
   return isZhLocale.value ? zh : en;
 }
 
 const paymentGuideHref = computed(() =>
-  locale.value.startsWith("zh")
+  isZhLocale.value
     ? "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md"
     : "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT.md",
 );
 
 const paymentMethodsHref = computed(() =>
-  locale.value.startsWith("zh")
+  isZhLocale.value
     ? "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md#支持的支付方式"
     : "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT.md#supported-payment-methods",
 );

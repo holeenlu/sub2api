@@ -130,6 +130,7 @@ export default {
   },
 
   legal: {
+    pageTitle: '法律文件',
     loadFailed: '文件載入失敗',
     retryLater: '請稍後重新整理頁面重試。',
     notFound: '文件不存在',

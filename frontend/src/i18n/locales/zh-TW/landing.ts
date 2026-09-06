@@ -7,6 +7,7 @@ export default {
   },
   // Home Page
   home: {
+    pageTitle: '首頁',
     viewOnGithub: '在 GitHub 上檢視',
     viewDocs: '檢視文件',
     docs: '文件',
@@ -193,6 +194,7 @@ export default {
 
   // Setup Wizard
   setup: {
+    pageTitle: '安裝嚮導',
     title: 'Sub2API 安裝嚮導',
     description: '設定您的 Sub2API 實例',
     database: {

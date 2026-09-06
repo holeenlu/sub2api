@@ -754,6 +754,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { isChineseLocale } from '@/i18n/localeUtils'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -2460,7 +2461,7 @@ type BatchImageTextKey =
   | 'errorReference'
 
 function isZhLocale() {
-  return String(locale.value || '').toLowerCase().startsWith('zh')
+  return isChineseLocale(String(locale.value || ''))
 }
 
 function batchImageText(key: BatchImageTextKey) {

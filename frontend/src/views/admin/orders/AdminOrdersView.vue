@@ -250,8 +250,12 @@ function closeRefundDialog() {
   refundWarning.value = ''
 }
 
+// 后端 service/payment_refund.go 返回的 Warning 是英文自由文本，没有状态枚举可用，
+// 只能按关键字判断。中文分支是为了兼容被翻译过的历史文案，简繁都要覆盖。
+const REFUND_PENDING_WARNING = /pending|处理中|處理中|待/
+
 function isRefundPendingWarning(warning: string | undefined): boolean {
-  return /pending|处理中|待/.test(String(warning || '').toLowerCase())
+  return REFUND_PENDING_WARNING.test(String(warning || '').toLowerCase())
 }
 
 async function handleRefund(data: { amount: number; reason: string; deduct_balance: boolean; force: boolean }) {

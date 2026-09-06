@@ -5,6 +5,7 @@ export default {
   },
   // Home Page
   home: {
+    pageTitle: 'Home',
     viewOnGithub: 'View on GitHub',
     viewDocs: 'View Documentation',
     docs: 'Docs',
@@ -191,6 +192,7 @@ export default {
 
   // Setup Wizard
   setup: {
+    pageTitle: 'Setup',
     title: 'Sub2API Setup',
     description: 'Configure your Sub2API instance',
     database: {
