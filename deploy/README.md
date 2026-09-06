@@ -128,6 +128,8 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 
 **Recommendation:** Use `docker-compose.local.yml` (deployed by `docker-deploy.sh`) for easier data management and migration.
 
+All three Compose files resolve the application image from `SUB2API_IMAGE` (`deploy/.env`), falling back to `weishaw/sub2api:latest` when it is unset — set it to pin a release tag or digest, or to run an image you built yourself.
+
 ### How Auto-Setup Works
 
 When using Docker Compose with `AUTO_SETUP=true`:

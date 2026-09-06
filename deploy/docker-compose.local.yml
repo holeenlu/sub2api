@@ -24,8 +24,8 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    # deploy-server.sh builds a local image and writes its tag to .env as
-    # SUB2API_IMAGE; fall back to the published image when unset.
+    # Override the application image via SUB2API_IMAGE in .env (a pinned release
+    # tag/digest or a locally built image); falls back to the published image.
     image: ${SUB2API_IMAGE:-weishaw/sub2api:latest}
     container_name: sub2api
     restart: unless-stopped
@@ -212,6 +212,9 @@ services:
       # =======================================================================
       # Update Configuration (在线更新配置)
       # =======================================================================
+      # Online release check + the self-update / rollback UI (update.check_enabled,
+      # default true). Set false to keep the deployment from reaching GitHub.
+      - UPDATE_CHECK_ENABLED=${UPDATE_CHECK_ENABLED:-true}
       # Proxy for accessing GitHub (online updates + pricing data)
       # Examples: http://host:port, socks5://host:port
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}

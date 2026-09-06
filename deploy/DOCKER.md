@@ -49,6 +49,8 @@ volumes:
   redis_data:
 ```
 
+The Compose files shipped in `deploy/` read the application image from `SUB2API_IMAGE`, defaulting to `weishaw/sub2api:latest`; set it in `deploy/.env` to pin a tag or digest, or to run a locally built image.
+
 ## Startup and Database Recovery
 
 Sub2API runs database migrations while starting. PostgreSQL may still be
