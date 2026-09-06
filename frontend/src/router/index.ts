@@ -12,7 +12,7 @@ import { useNavigationLoadingState } from '@/composables/useNavigationLoading'
 import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
-import { resolveRouteDocumentTitle } from './title'
+import { applyRouteMetaDescription, resolveRouteDocumentTitle } from './title'
 
 /**
  * Route definitions with lazy loading
@@ -807,6 +807,7 @@ router.beforeEach(async (to, _from, next) => {
     ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
   ]
   document.title = resolveRouteDocumentTitle(to, appStore.siteName, customMenuItems)
+  applyRouteMetaDescription(to)
 
   // Check if route requires authentication
   const requiresAuth = to.meta.requiresAuth !== false // Default to true
