@@ -1579,6 +1579,40 @@ func TestMergeConfiguredCodexModelsManifestOrderOnlyChangeStillChangesBody(t *te
 	require.Equal(t, upstreamBody, offBody)
 }
 
+func TestMergeConfiguredCodexModelsManifestAllowlistOrdering(t *testing.T) {
+	t.Parallel()
+	upstream := []byte(`{"models":[{"slug":"gpt-5.6-sol","priority":50},{"slug":"gpt-6-astra","priority":50,"unknown":{"kept":true}},{"slug":"gpt-5.6-luna","priority":50}]}`)
+	for _, tt := range []struct {
+		name     string
+		selected []string
+		want     []string
+	}{
+		{"wildcard before exact", []string{"gpt-6*", "gpt-5.6-sol"}, []string{"gpt-6-astra", "gpt-5.6-sol"}},
+		{"case insensitive", []string{"GPT-6*", "GPT-5.6-SOL"}, []string{"gpt-6-astra", "gpt-5.6-sol"}},
+		{"multiple wildcards", []string{"gpt-6*", "gpt-5*"}, []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"}},
+		{"exact before wildcard", []string{"gpt-6-astra", "*"}, []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"}},
+		{"first matching entry wins", []string{"*", "gpt-6-astra"}, []string{"gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-luna"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body, changed, err := mergeConfiguredCodexModelsManifest(upstream, nil, tt.selected, true)
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.Equal(t, tt.want, codexManifestModelSlugs(t, body))
+			require.NotEqual(t, codexModelsManifestBodyETag(upstream), codexModelsManifestBodyETag(body))
+			for i, model := range decodeCodexManifestModels(t, body) {
+				require.Equal(t, float64(i), model["priority"])
+				if model["slug"] == "gpt-6-astra" {
+					require.Equal(t, map[string]any{"kept": true}, model["unknown"])
+				}
+			}
+			again, changedAgain, err := mergeConfiguredCodexModelsManifest(body, nil, tt.selected, true)
+			require.NoError(t, err)
+			require.False(t, changedAgain)
+			require.Equal(t, body, again)
+		})
+	}
+}
+
 func TestMergeConfiguredCodexModelsManifestAlignsClientPriorities(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
