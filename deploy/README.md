@@ -50,41 +50,13 @@ See [APPLE_CONTAINER.md](./APPLE_CONTAINER.md) for configuration, upgrades, pers
 
 ## Docker Deployment (Recommended)
 
-### Method 1: One-Click Deployment (Recommended)
+### Private Repository Access
 
-Use the automated preparation script for the easiest setup:
-
-```bash
-# Download and run the preparation script
-curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/KDAN/deploy/docker-deploy.sh | bash
-
-# Or download first, then run
-curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/KDAN/deploy/docker-deploy.sh -o docker-deploy.sh
-chmod +x docker-deploy.sh
-./docker-deploy.sh
-```
-
-**What the script does:**
-- Downloads `docker-compose.local.yml` and `.env.example`
-- Automatically generates secure secrets (JWT_SECRET, TOTP_ENCRYPTION_KEY, POSTGRES_PASSWORD)
-- Creates `.env` file with generated secrets
-- Creates necessary data directories (data/, postgres_data/, redis_data/)
-- **Displays generated credentials** (POSTGRES_PASSWORD, JWT_SECRET, etc.)
-
-**After running the script:**
-```bash
-# Start services
-docker compose -f docker-compose.local.yml up -d
-
-# View logs
-docker compose -f docker-compose.local.yml logs -f kdan
-
-# If admin password was auto-generated, find it in logs:
-docker compose -f docker-compose.local.yml logs kdan | grep "admin password"
-
-# Access Web UI
-# http://localhost:8080
-```
+The source repository is private. Anonymous raw GitHub download scripts cannot
+bootstrap this deployment. Use the authenticated clone below, then configure the
+local Compose files. Do not put access tokens into URLs or image build arguments.
+Log in to GHCR with a credential authorized to read the private package before
+starting Compose; pin the desired release tag or digest in the image environment variable.
 
 ### Method 2: Manual Deployment
 
@@ -128,7 +100,7 @@ docker compose -f docker-compose.local.yml logs -f kdan
 
 **Recommendation:** Use `docker-compose.local.yml` (deployed by `docker-deploy.sh`) for easier data management and migration.
 
-Both Compose files take the application image from `KDAN_IMAGE` (default `kdan/kdan:latest`), so you can pin a specific tag or digest in `.env` without editing the Compose file.
+Both Compose files take the application image from `KDAN_IMAGE` (default `ghcr.io/holeenlu/kdan:latest`), so you can pin a specific tag or digest in `.env` without editing the Compose file.
 
 ### How Auto-Setup Works
 
@@ -262,7 +234,7 @@ docker compose down -v
 | `ADMIN_EMAIL` | No | `admin@kdan.local` | Admin email |
 | `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password |
 | `TZ` | No | `Asia/Shanghai` | Timezone |
-| `KDAN_IMAGE` | No | `kdan/kdan:latest` | Application image used by Docker Compose |
+| `KDAN_IMAGE` | No | `ghcr.io/holeenlu/kdan:latest` | Application image used by Docker Compose |
 | `UPDATE_CHECK_ENABLED` | No | `false` | Release check behind the version badge (holeenlu/sub2api releases; KDAN has no release channel of its own yet). Off by default so nothing is sent to GitHub; set `true` to enable it. |
 | `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for `api.github.com` release checks only; asset downloads remain anonymous. |
 | `GEMINI_OAUTH_CLIENT_ID` | No | *(builtin)* | Google OAuth client ID (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |

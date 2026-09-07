@@ -10,7 +10,7 @@ docker run -d \
   -p 8080:8080 \
   -e DATABASE_URL="postgres://user:pass@host:5432/kdan" \
   -e REDIS_URL="redis://host:6379" \
-  kdan/kdan:latest
+  ghcr.io/holeenlu/kdan:latest
 ```
 
 ## Docker Compose
@@ -20,7 +20,7 @@ version: '3.8'
 
 services:
   kdan:
-    image: kdan/kdan:latest
+    image: ghcr.io/holeenlu/kdan:latest
     ports:
       - "8080:8080"
     environment:
@@ -84,7 +84,7 @@ Docker restores existing containers after a host restart.
 - `x.y` - Latest patch of minor version
 - `x` - Latest minor of major version
 
-The Compose files under `deploy/` read the image from `KDAN_IMAGE` (default `kdan/kdan:latest`), so pin a tag or digest there instead of editing the Compose file.
+The Compose files under `deploy/` read the image from `KDAN_IMAGE` (default `ghcr.io/holeenlu/kdan:latest`), so pin a tag or digest there instead of editing the Compose file.
 
 ## Links
 

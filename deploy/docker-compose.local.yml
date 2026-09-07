@@ -26,7 +26,7 @@ services:
   kdan:
     # deploy-server.sh builds a local image and writes its tag to .env as
     # KDAN_IMAGE; fall back to the published image when unset.
-    image: ${KDAN_IMAGE:-kdan/kdan:latest}
+    image: ${KDAN_IMAGE:-ghcr.io/holeenlu/kdan:latest}
     container_name: kdan
     restart: unless-stopped
     # The daemon default is unbounded json-file. Applied to 45.78.66.2 on

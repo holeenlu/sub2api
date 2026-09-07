@@ -169,6 +169,7 @@ WORKDIR /app
 
 # Copy binary/resources with ownership to avoid extra full-layer chown copy
 COPY --from=backend-builder --chown=kdan:kdan /app/kdan /app/kdan
+RUN ln -s /app/kdan /app/sub2api
 COPY --from=backend-builder --chown=kdan:kdan /app/backend/resources /app/resources
 
 # Create data directory

@@ -1,9 +1,15 @@
-name: KDAN · 上游更新監看
+name: 公共基线 · 上游更新監看
 
-# 手动检查 KDAN 品牌分支；默认 main 的定时监看由 upstream-sync-watch.yml 负责。
-# 只更新追踪 issue，不合并、不推送；KDAN 不覆盖公共 origin/main。
+# 每天盤點上游 Wei-Shaw/sub2api 有多少東西還沒同步進來，把落後幅度與風險點寫進一張
+# 追蹤 issue。這個工作流程是**唯讀**的：不合併、不開 PR、不推分支、不動 repo 內容。
+#
+# The private repository retains Git history and fetches the public upstream directly.
+# This workflow runs on the default main branch; it never pushes code.
 
 on:
+  schedule:
+    # UTC 01:00 = 台北 09:00
+    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       tag:
@@ -12,7 +18,7 @@ on:
         type: string
 
 concurrency:
-  group: kdan-sync-upstream
+  group: upstream-sync-watch
   cancel-in-progress: false
 
 permissions:
@@ -24,17 +30,18 @@ env:
   # 工作流程會加一個叫 upstream 的 git remote，而 gh 在多個 remote 時會優先選 upstream 當目標 repo；
   # 這裡鎖死所有 gh 指令都打本 repo，避免 issue／label 跑到上游去。
   GH_REPO: ${{ github.repository }}
-  WATCH_LABEL: upstream-sync-kdan
+  WATCH_LABEL: upstream-sync
   ISSUE_TITLE_PREFIX: 上游更新待同步
 
 jobs:
   watch:
+    if: github.repository == 'holeenlu/sub2api'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: KDAN
+          ref: main
           fetch-depth: 0
 
       - uses: actions/setup-node@v6
@@ -213,12 +220,12 @@ jobs:
             echo "## 同步步驟（在本機做）"
             echo
             echo '```bash'
-            echo "# 線性 rebase：main 由本機 KDAN 分支 force-push 上來，不要在 GitHub 上合併"
+            echo "# 線性 rebase：main 由本機 公共基线 分支 force-push 上來，不要在 GitHub 上合併"
             echo "deploy/sync.sh          # 或手動："
             echo "git fetch upstream --tags"
             echo "git rebase upstream/main   # 注意上面列的衝突熱點與保護清單"
-            echo "# TODO(brand)：KDAN 目前沒有專屬的 remote，暫時推到 origin"
-            echo "git push --force-with-lease origin KDAN:main"
+            echo "# TODO(brand)：公共基线 目前沒有專屬的 remote，暫時推到 origin"
+            echo "git push --force-with-lease origin 公共基线:main"
             echo '```'
             echo
             echo "## Checklist"
@@ -228,7 +235,7 @@ jobs:
             echo "- [ ] force-push 後 main 的 CI 綠燈"
             echo "- [ ] main 更新後會自動建映像推到 GHCR"
             echo
-            echo "本 issue 由 kdan-sync-upstream 工作流程自動維護（唯讀監看，不會自己開 PR）；main 跟上後自動關閉。"
+            echo "本 issue 由 upstream-sync-watch 工作流程自動維護（唯讀監看，不會自己開 PR）；main 跟上後自動關閉。"
           } > body.md
 
       - name: 建立／更新追蹤 issue

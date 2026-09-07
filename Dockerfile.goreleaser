@@ -42,8 +42,11 @@ RUN addgroup -g 1000 kdan && \
 
 WORKDIR /app
 
+ARG BINARY_NAME=kdan
+
 # Copy the pre-built binary and runtime fallback resources from GoReleaser
-COPY kdan /app/kdan
+COPY ${BINARY_NAME} /app/kdan
+RUN ln -s /app/kdan /app/sub2api
 COPY --chown=kdan:kdan backend/resources /app/resources
 
 # Create data directory

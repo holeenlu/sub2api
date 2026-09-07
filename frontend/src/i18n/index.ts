@@ -57,7 +57,9 @@ let currentSiteName = ''
 
 function applySiteName(locale: LocaleCode): void {
   if (!currentSiteName) return
-  i18n.global.mergeLocaleMessage(locale, { common: { siteName: currentSiteName } })
+  // A message function preserves user text without compiling @, braces or pipes.
+  const name = currentSiteName
+  i18n.global.mergeLocaleMessage(locale, { common: { siteName: () => name } })
 }
 
 /** 設定站點名稱，並同步到所有已載入的語言包 */

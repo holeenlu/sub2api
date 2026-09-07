@@ -69,4 +69,4 @@ export const BRAND_COMPLIANCE_DOCUMENT_URL = {
 export const RELEASE_REPO = 'holeenlu/sub2api'
 
 /** Container image published by the release pipeline (tags carry no "v" prefix). */
-export const RELEASE_DOCKER_IMAGE = 'kdan/kdan'
+export const RELEASE_DOCKER_IMAGE = 'ghcr.io/holeenlu/kdan'

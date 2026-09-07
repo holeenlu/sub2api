@@ -16,7 +16,7 @@ services:
   # KDAN Application
   # ===========================================================================
   kdan:
-    image: ${KDAN_IMAGE:-kdan/kdan:latest}
+    image: ${KDAN_IMAGE:-ghcr.io/holeenlu/kdan:latest}
     container_name: kdan
     restart: unless-stopped
     security_opt:

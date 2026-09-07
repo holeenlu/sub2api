@@ -100,7 +100,7 @@ export KDAN_ENV_FILE=/absolute/path/to/kdan.env
 Apple-specific image overrides are available:
 
 ```dotenv
-APPLE_CONTAINER_KDAN_IMAGE=kdan/kdan:latest
+APPLE_CONTAINER_KDAN_IMAGE=ghcr.io/holeenlu/kdan:latest
 APPLE_CONTAINER_POSTGRES_IMAGE=postgres:18-alpine
 APPLE_CONTAINER_REDIS_IMAGE=redis:8-alpine
 ```
@@ -175,7 +175,7 @@ To restore these backups into an existing stack, first ensure the image versions
 
 # Remove only the app container so a helper can mount its named volume.
 container delete kdan-apple
-KDAN_IMAGE=kdan/kdan:latest # Match APPLE_CONTAINER_KDAN_IMAGE in .env.
+KDAN_IMAGE=ghcr.io/holeenlu/kdan:latest # Match APPLE_CONTAINER_KDAN_IMAGE in .env.
 container run --rm --name kdan-apple-data-restore \
   --entrypoint /bin/sh \
   --volume kdan-apple-data:/restore \

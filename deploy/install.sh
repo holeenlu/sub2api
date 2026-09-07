@@ -2,7 +2,7 @@
 #
 # KDAN Installation Script
 # KDAN 安装脚本
-# Usage: KDAN_INSTALLER_ENABLED=true curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/KDAN/deploy/install.sh | bash
+# Usage (authenticated local checkout): KDAN_INSTALLER_ENABLED=true bash deploy/install.sh
 #
 # NOTE: no KDAN release artifacts are published yet. The only assets on
 # ${GITHUB_REPO} are upstream sub2api builds, so this installer refuses to
@@ -894,6 +894,7 @@ print_completion() {
 
 # Upgrade function
 upgrade() {
+    require_installer_enabled
     # Check if KDAN is installed
     if [ ! -f "$INSTALL_DIR/kdan" ]; then
         print_error "$(msg 'not_installed')"
@@ -934,6 +935,7 @@ upgrade() {
 # Install specific version (for upgrade or rollback)
 # Requires: KDAN must already be installed
 install_version() {
+    require_installer_enabled
     local target_version="$1"
 
     # Check if KDAN is installed

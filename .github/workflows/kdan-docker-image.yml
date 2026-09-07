@@ -1,11 +1,11 @@
 name: KDAN · Docker 映像與 Release
 
-# main 每次更新就建一版 :main / :sha-xxxxxxx 映像；打 v* tag 時另外建語意化版本
+# KDAN 更新发布分支/SHA 镜像；数字版本 tag 另发布版本镜像和 latest
 # 與 :latest，並開一個 GitHub Release（版本徽章讀的就是這個 release）。
 
 on:
   push:
-    branches: [main]
+    branches: [KDAN]
     # tag 不加 v 前綴（例如 1.0.0）：上游的 release.yml 只監聽 v*，這樣它永遠不會在本 repo 被觸發，
     # 也就不必停用它（未登記的工作流程無法用 API 停用）。後端 compareVersions 接受沒有 v 的版號。
     tags: ['[0-9]*']
@@ -32,6 +32,7 @@ permissions:
 
 jobs:
   build:
+    if: github.repository == 'holeenlu/sub2api'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -47,13 +48,13 @@ jobs:
           INPUT_PUSH: ${{ inputs.push }}
         run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kdan"
 
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
             LAST="$(git describe --tags --abbrev=0 --match '[0-9]*' 2>/dev/null || echo 0.0.0)"
-            VERSION="${LAST#v}-main.$(git rev-parse --short=7 HEAD)"
+            VERSION="${LAST#v}-kdan.$(git rev-parse --short=7 HEAD)"
           fi
 
           PLATFORMS="${INPUT_PLATFORMS:-linux/amd64}"
@@ -179,7 +180,7 @@ jobs:
           set -euo pipefail
           TAG="$GITHUB_REF_NAME"
           VERSION="${TAG#v}"
-          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kdan"
           # >>> 上游版本推導：build 與 release job 各有一份，必須逐字一致，改一邊要同步改另一邊 <<<
           # 上游版本 = 本分支掛靠的那個上游 commit 最近的 v* tag。
           # main 是維護者本機的線性分支 force-push 上來的（rebase 到 upstream/main 之上），
