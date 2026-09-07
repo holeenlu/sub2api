@@ -103,18 +103,18 @@ export async function getById(id: number): Promise<AdminGroup> {
 }
 
 /**
- * Get candidate models for custom /v1/models list.
+ * Get candidate models for the group model allowlist and custom /v1/models list.
  * id=0 returns platform default models for create flow. For an existing
  * Anthropic group the candidates also include the live /v1/models union of the
  * group's accounts. Candidates only ever add: they are not the complete set of
  * legal entries, so saved models must never be filtered against them.
  */
-export async function getModelsListCandidates(
+export async function getModelAllowlistCandidates(
   id: number,
   platform?: GroupPlatform
 ): Promise<string[]> {
   const { data } = await apiClient.get<{ models: string[] }>(
-    `/admin/groups/${id}/models-list-candidates`,
+    `/admin/groups/${id}/model-allowlist-candidates`,
     {
       params: platform ? { platform } : undefined
     }
@@ -480,7 +480,7 @@ export const groupsAPI = {
   getAllIncludingInactive,
   getLiveCapability,
   getById,
-  getModelsListCandidates,
+  getModelAllowlistCandidates,
   create,
   duplicate,
   update,

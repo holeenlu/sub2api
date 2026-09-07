@@ -496,6 +496,7 @@ export default {
       leaveEmptyToKeep: '留空則保持原密碼不變',
       generatePassword: '生成隨機密碼',
       copyPassword: '複製密碼',
+      passwordCopied: '密碼已複製',
       creating: '建立中...',
       updating: '更新中...',
       columns: {
@@ -849,7 +850,7 @@ export default {
         maxReasoningEffortOverLimitDeny: '拒絕存取',
         maxReasoningEffortOverLimitHint: '設定上限後生效。自動降檔會將超過上限的請求改寫為上限值後轉發；拒絕存取則直接回傳錯誤。',
         reasoningEffortMappings: '推理強度對應',
-        reasoningEffortMappingsHint: '類型和模型均可留空，表示匹配全部模型。同一類型和模型下可新增多筆請求值對應，例如字首 gpt 同時將 high、xhigh 轉到 medium。精確優先於前後綴，更長前後綴優先。',
+        reasoningEffortMappingsHint: '類型和模型均可留空，表示匹配全部模型。同一類型和模型下可新增多筆請求值對應，例如字首 gpt 同時將 high、xhigh 轉到 medium。轉發值可選拒絕，命中對應請求值時直接回傳錯誤。精確優先於前後綴，更長前後綴優先。',
         addReasoningEffortMapping: '新增對應',
         addReasoningEffortPair: '新增請求值',
         removeReasoningEffortMapping: '刪除對應',
@@ -863,6 +864,7 @@ export default {
         reasoningEffortModelPlaceholder: '留空則全部 / gpt / gpt-5.4',
         reasoningEffortFrom: '請求值',
         reasoningEffortTo: '轉發值',
+        reasoningEffortToDeny: '拒絕',
         reasoningEffortFromPlaceholder: '請選擇 A',
         reasoningEffortToPlaceholder: '請選擇 B',
         fromRequired: '請選擇請求值 A',
@@ -1068,14 +1070,23 @@ export default {
         bufferRangeError: '安全緩衝應在 0 到 99.99 之間',
         sumTooHigh: '最低毛利率與安全緩衝之和必須小於 100%，否則將排除全部帳號'
       },
-      modelsList: {
-        title: '自訂 {endpoint} 模型列表',
-        hint: '僅影響 {endpoint} 展示結果，不影響白名單模型呼叫和帳號排程。',
-        loading: '正在載入模型列表...',
-        empty: '暫無可展示模型',
+      modelAllowlist: {
+        title: '模型白名單',
+        hint: '開啟後，不在白名單中的模型會被拒絕（404 model_not_found），模型列表介面也只展示白名單內的模型。條目支援精確模型 ID 與末尾 * 通配。注意：Claude Code 會用 haiku 系小模型做標題/摘要等探測，/messages/count_tokens 同樣受白名單控制，請一併勾選所需的小模型。',
+        loading: '正在載入候選模型...',
+        empty: '暫無候選模型，可在下方手工新增條目',
         selectedSummary: '已選 {selected} / {total}',
         selectAll: '全選',
-        invertSelection: '反選'
+        invertSelection: '反選',
+        wildcardTag: '通配',
+        customPlaceholder: '自訂條目，如 claude-* 或 gpt-5.5-codex',
+        addCustom: '新增',
+        emptySelectionError: '模型白名單已開啟，請至少選擇或新增一個模型條目',
+        errors: {
+          empty: '請輸入模型條目',
+          invalidWildcard: '萬用字元 * 只能出現在條目末尾',
+          duplicate: '該條目已存在'
+        }
       },
       codexModelsManifest: {
         title: '固定帳號取得模型列表',
