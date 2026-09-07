@@ -48,7 +48,7 @@ func newModelsListCandidatesRouterWith(t *testing.T, adminSvc service.AdminServi
 	}
 	handler := NewGroupHandler(adminSvc, nil, nil, accountTestSvc)
 	router := gin.New()
-	router.GET("/api/v1/admin/groups/:id/models-list-candidates", handler.GetModelsListCandidates)
+	router.GET("/api/v1/admin/groups/:id/model-allowlist-candidates", handler.GetGroupModelAllowlistCandidates)
 	return router
 }
 
@@ -69,11 +69,11 @@ func fetchModelsListCandidates(t *testing.T, router *gin.Engine, url string) map
 // 拿不到（账号 token 过期、分组还没有账号、服务未接线）时必须降级为静态候选，
 // 而不是让整个弹窗打不开——弹窗打不开时前端拿不到候选，保存路径会把已配置的
 // models_list 一并带走。
-func TestGetModelsListCandidatesFallsBackToStaticForAnthropic(t *testing.T) {
+func TestGetGroupModelAllowlistCandidatesFallsBackToStaticForAnthropic(t *testing.T) {
 	router := newModelsListCandidatesRouter(t)
 
 	data := fetchModelsListCandidates(t, router,
-		"/api/v1/admin/groups/2/models-list-candidates?platform=anthropic")
+		"/api/v1/admin/groups/2/model-allowlist-candidates?platform=anthropic")
 
 	require.Contains(t, data["models"], "claude-sonnet-4-6")
 	require.Equal(t, "static+anthropic_v1_models", data["source"])
@@ -81,7 +81,7 @@ func TestGetModelsListCandidatesFallsBackToStaticForAnthropic(t *testing.T) {
 }
 
 // 实时列表只做补充：静态候选一条不少，上游多出来的追加在后面。
-func TestGetModelsListCandidatesMergesLiveModelsIntoStaticCandidates(t *testing.T) {
+func TestGetGroupModelAllowlistCandidatesMergesLiveModelsIntoStaticCandidates(t *testing.T) {
 	stub := newStubAdminService()
 	account := anthropicAPIKeyAccount(741, "candidates.example")
 	stub.accountSchedulerScoreFilterAccounts = []service.Account{*account}
@@ -91,7 +91,7 @@ func TestGetModelsListCandidatesMergesLiveModelsIntoStaticCandidates(t *testing.
 	router := newModelsListCandidatesRouterWith(t, stub, upstream)
 
 	data := fetchModelsListCandidates(t, router,
-		"/api/v1/admin/groups/2/models-list-candidates?platform=anthropic")
+		"/api/v1/admin/groups/2/model-allowlist-candidates?platform=anthropic")
 
 	models, ok := data["models"].([]any)
 	require.True(t, ok)
@@ -101,13 +101,13 @@ func TestGetModelsListCandidatesMergesLiveModelsIntoStaticCandidates(t *testing.
 }
 
 // 分组里一个可用账号都没有时，实时补充直接跳过，静态候选照常返回。
-func TestGetModelsListCandidatesFallsBackToStaticWhenGroupHasNoAccounts(t *testing.T) {
+func TestGetGroupModelAllowlistCandidatesFallsBackToStaticWhenGroupHasNoAccounts(t *testing.T) {
 	stub := newStubAdminService()
 	stub.accountSchedulerScoreFilterAccounts = []service.Account{}
 	router := newModelsListCandidatesRouterWith(t, stub, &anthropicModelsBulkUpstream{})
 
 	data := fetchModelsListCandidates(t, router,
-		"/api/v1/admin/groups/2/models-list-candidates?platform=anthropic")
+		"/api/v1/admin/groups/2/model-allowlist-candidates?platform=anthropic")
 
 	require.Contains(t, data["models"], "claude-sonnet-4-6")
 	require.Empty(t, data["live_models"])
@@ -115,7 +115,7 @@ func TestGetModelsListCandidatesFallsBackToStaticWhenGroupHasNoAccounts(t *testi
 
 // 上游把所有账号都拒了也只是少几项候选：弹窗必须照常打开，否则前端拿不到候选，
 // 保存路径会把已配置的 models_list 一并带走。
-func TestGetModelsListCandidatesFallsBackToStaticWhenUpstreamRejectsEveryAccount(t *testing.T) {
+func TestGetGroupModelAllowlistCandidatesFallsBackToStaticWhenUpstreamRejectsEveryAccount(t *testing.T) {
 	stub := newStubAdminService()
 	stub.accountSchedulerScoreFilterAccounts = []service.Account{
 		*anthropicAPIKeyAccount(751, "rejected.example"),
@@ -127,7 +127,7 @@ func TestGetModelsListCandidatesFallsBackToStaticWhenUpstreamRejectsEveryAccount
 	router := newModelsListCandidatesRouterWith(t, stub, upstream)
 
 	data := fetchModelsListCandidates(t, router,
-		"/api/v1/admin/groups/2/models-list-candidates?platform=anthropic")
+		"/api/v1/admin/groups/2/model-allowlist-candidates?platform=anthropic")
 
 	require.Contains(t, data["models"], "claude-sonnet-4-6")
 	require.Empty(t, data["live_models"])
@@ -136,7 +136,7 @@ func TestGetModelsListCandidatesFallsBackToStaticWhenUpstreamRejectsEveryAccount
 
 // 实时补充的预算必须远小于管理端 HTTP 客户端的 30s 超时：吊死的代理只该让候选
 // 少几项，不该让整个请求（含静态候选）超时。
-func TestGetModelsListCandidatesGivesTheLiveFetchItsOwnBudget(t *testing.T) {
+func TestGetGroupModelAllowlistCandidatesGivesTheLiveFetchItsOwnBudget(t *testing.T) {
 	previous := anthropicModelCandidateTimeout
 	anthropicModelCandidateTimeout = 50 * time.Millisecond
 	t.Cleanup(func() { anthropicModelCandidateTimeout = previous })
@@ -149,7 +149,7 @@ func TestGetModelsListCandidatesGivesTheLiveFetchItsOwnBudget(t *testing.T) {
 
 	started := time.Now()
 	data := fetchModelsListCandidates(t, router,
-		"/api/v1/admin/groups/2/models-list-candidates?platform=anthropic")
+		"/api/v1/admin/groups/2/model-allowlist-candidates?platform=anthropic")
 
 	require.Less(t, time.Since(started), 5*time.Second, "实时抓取不该拖着整个请求")
 	require.Contains(t, data["models"], "claude-sonnet-4-6")
@@ -158,13 +158,13 @@ func TestGetModelsListCandidatesGivesTheLiveFetchItsOwnBudget(t *testing.T) {
 
 // 新建分组（groupID=0）没有账号池可言，不该对系统里每个 Anthropic 账号各发一次
 // /v1/models，只返回静态候选。
-func TestGetModelsListCandidatesSkipsLiveFetchWhenCreatingGroup(t *testing.T) {
+func TestGetGroupModelAllowlistCandidatesSkipsLiveFetchWhenCreatingGroup(t *testing.T) {
 	stub := newStubAdminService()
 	stub.accountSchedulerScoreFilterAccounts = []service.Account{*anthropicAPIKeyAccount(742, "unused.example")}
 	router := newModelsListCandidatesRouterWith(t, stub, &anthropicModelsBulkUpstream{})
 
 	data := fetchModelsListCandidates(t, router,
-		"/api/v1/admin/groups/0/models-list-candidates?platform=anthropic")
+		"/api/v1/admin/groups/0/model-allowlist-candidates?platform=anthropic")
 
 	require.NotEmpty(t, data["models"])
 	require.Empty(t, data["live_models"])
@@ -173,11 +173,11 @@ func TestGetModelsListCandidatesSkipsLiveFetchWhenCreatingGroup(t *testing.T) {
 
 // 平台解析只有 service 一份：handler 不再为拿一个 group.Platform 去打带账号计数
 // 聚合的 GetGroup，同一个请求也就不会对 groups 表查两次。
-func TestGetModelsListCandidatesResolvesPlatformInTheServiceOnly(t *testing.T) {
+func TestGetGroupModelAllowlistCandidatesResolvesPlatformInTheServiceOnly(t *testing.T) {
 	stub := newStubAdminService()
 	router := newModelsListCandidatesRouterWith(t, stub, nil)
 
-	data := fetchModelsListCandidates(t, router, "/api/v1/admin/groups/2/models-list-candidates")
+	data := fetchModelsListCandidates(t, router, "/api/v1/admin/groups/2/model-allowlist-candidates")
 
 	require.Contains(t, data["models"], "claude-sonnet-4-6")
 	require.Equal(t, "static+anthropic_v1_models", data["source"])
@@ -186,11 +186,11 @@ func TestGetModelsListCandidatesResolvesPlatformInTheServiceOnly(t *testing.T) {
 }
 
 // 非 Anthropic 平台的响应形状保持不变。
-func TestGetModelsListCandidatesKeepsNonAnthropicShape(t *testing.T) {
+func TestGetGroupModelAllowlistCandidatesKeepsNonAnthropicShape(t *testing.T) {
 	router := newModelsListCandidatesRouter(t)
 
 	data := fetchModelsListCandidates(t, router,
-		"/api/v1/admin/groups/0/models-list-candidates?platform=openai")
+		"/api/v1/admin/groups/0/model-allowlist-candidates?platform=openai")
 
 	require.Contains(t, data["models"], "gpt-5.5")
 	require.NotContains(t, data, "source")

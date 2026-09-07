@@ -66,6 +66,8 @@ export default {
       updateError: '更新通道失敗',
       deleteError: '刪除通道失敗',
       nameRequired: '請輸入通道名稱',
+      noGroupsSelected: '請為 {platform} 至少選擇一個分組',
+      emptyModelsInPricing: '請為 {platform} 定價規則至少新增一個模型',
       duplicateModels: '模型「{0}」在多個定價條目中重複',
       modelConflict: "模型模式 '{model1}' 和 '{model2}' 衝突：匹配範圍重疊。模型名稱按大小寫不敏感匹配，已有條目已覆蓋其所有大小寫變體，無需重複新增。",
       mappingConflict: "模型對應源 '{model1}' 和 '{model2}' 衝突：匹配範圍重疊。源模式按大小寫不敏感匹配，已有條目已覆蓋其所有大小寫變體。",

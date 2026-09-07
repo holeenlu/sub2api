@@ -833,6 +833,8 @@ export default {
       modelRestriction: '模型限制（可選）',
       modelWhitelist: '模型白名單',
       modelMapping: '模型對應',
+      fromModel: '請求模型',
+      toModel: '目標模型',
       selectAllowedModels: '選擇允許的模型。留空則支援所有模型。',
       mapRequestModels: '將請求模型對應到實際模型。左邊是請求的模型，右邊是傳送到 API 的實際模型。',
       selectedModels: '已選擇 {count} 個模型',
