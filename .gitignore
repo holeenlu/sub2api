@@ -13,8 +13,11 @@
 *.dylib
 backend/bin/
 backend/server
-backend/sub2api
+backend/kdan
 backend/main
+
+# Release binary produced by the local build/deploy kit
+/kdan
 
 # Go 测试二进制
 *.test
