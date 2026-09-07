@@ -3,10 +3,8 @@ name: TapModels · 上游更新監看
 # 每天盤點上游 Wei-Shaw/sub2api 有多少東西還沒同步進來，把落後幅度與風險點寫進一張
 # 追蹤 issue。這個工作流程是**唯讀**的：不合併、不開 PR、不推分支、不動 repo 內容。
 #
-# 為什麼不自動開同步 PR：本 repo 的 main 走線性模型——維護者在本機把 TapModels 分支
-# rebase 到 upstream/main 之上，再 force-push 上來（見 docs/tapmodels-ci.md）。
-# 工作流程在這裡開的分支／合併 commit，下一次 force-push 就會被整個洗掉，
-# 所以同步一律回本機做，CI 只負責「提醒該同步了」與「同步前先看這些風險點」。
+# 維護者在本機以普通 merge 同步並驗證品牌；CI 只盤點上游差異。
+# 發布目標為 origin/TapModels 與 erwinlin/main，保留原始提交歷史。
 
 on:
   schedule:
@@ -83,8 +81,7 @@ jobs:
             exit 1
           fi
 
-          # 線性模型下，main 就是「某個 upstream/main commit ＋ 本地 commit」，
-          # 兩者的 merge-base 即本 repo 目前掛靠的上游基準點。
+          # merge-base 表示目前已納入的上游基準，適用於保留原始提交的合併歷史。
           BASE="$(git merge-base HEAD refs/remotes/upstream/main)"
           BASE_TAG="$(git describe --tags --match 'v*' --abbrev=0 "$BASE" 2>/dev/null || echo '（無法推導）')"
 
@@ -177,7 +174,7 @@ jobs:
               if [ "$n" = "0" ]; then continue; fi
               HIT=1
               case "$p" in
-                backend/ent/schema) note="rebase 後要重跑 \`go generate ./...\`，ent 產生碼衝突不要手解" ;;
+                backend/ent/schema) note="合併後要重跑 \`go generate ./ent\`，ent 產生碼衝突不要手解" ;;
                 backend/migrations) note="有新的 DB migration，部署前確認順序" ;;
                 frontend/src/i18n/locales/zh) note="zh 文案有變，同步後要重跑 \`node tools/zh-tw/gen-locale.mjs\`" ;;
                 tools/zh-tw) note="上游出現同名路徑，會與本地繁體工具鏈撞名" ;;
@@ -188,7 +185,7 @@ jobs:
             echo
             echo "## 雙方都改過的檔案"
             echo
-            echo "（上游與本地 commit 都動過，rebase 時最容易衝突）"
+            echo "（上游與本地 commit 都動過，合併時需核對雙方行為）"
             echo '```'
             comm -12 /tmp/up-files.txt /tmp/our-files.txt | head -n 60 | grep . || echo "無"
             echo '```'
@@ -218,22 +215,14 @@ jobs:
             cat /tmp/dry.txt
             echo '```'
             echo
-            echo "## 同步步驟（在本機做）"
-            echo
-            echo '```bash'
-            echo "# 線性 rebase：main 由本機 TapModels 分支 force-push 上來，不要在 GitHub 上合併"
-            echo "deploy/sync.sh          # 或手動："
-            echo "git fetch upstream --tags"
-            echo "git rebase upstream/main   # 注意上面列的衝突熱點與保護清單"
-            echo "git push --force-with-lease erwinlin TapModels:main"
-            echo '```'
+            python3 deploy/upstream_sync_instructions.py tapmodels
             echo
             echo "## Checklist"
             echo
             echo "- [ ] 保護清單／疑似比對字串已確認（必要時補進 \`tools/zh-tw/convert-go.mjs\`）"
             echo "- [ ] ent schema 有變就重跑 \`go generate\`；zh 文案有變就重跑 \`gen-locale.mjs\`"
-            echo "- [ ] force-push 後 main 的 CI 綠燈"
-            echo "- [ ] main 更新後會自動建映像推到 GHCR"
+            echo "- [ ] 普通推送後目標分支的 CI 綠燈"
+            echo "- [ ] 已核對目標分支推送會觸發的映像發布工作流程"
             echo
             echo "本 issue 由 tapmodels-sync-upstream 工作流程自動維護（唯讀監看，不會自己開 PR）；main 跟上後自動關閉。"
           } > body.md

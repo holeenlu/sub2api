@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-const { copyToClipboardMock, saveAsMock } = vi.hoisted(() => ({
+const { copyToClipboardMock, saveAsMock, appState } = vi.hoisted(() => ({
   copyToClipboardMock: vi.fn().mockResolvedValue(true),
-  saveAsMock: vi.fn()
+  saveAsMock: vi.fn(),
+  appState: { siteName: 'Sub2API' }
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -20,7 +21,7 @@ vi.mock('@/composables/useClipboard', () => ({
 }))
 
 vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({ siteName: 'Sub2API' })
+  useAppStore: () => appState
 }))
 
 vi.mock('file-saver', () => ({
@@ -95,6 +96,7 @@ describe('UseKeyModal', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     saveAsMock.mockClear()
+    appState.siteName = 'Sub2API'
   })
 
   it('omits the attribution override from every standard Claude Code setup form', async () => {
@@ -1223,6 +1225,34 @@ describe('UseKeyModal', () => {
     parsed = parseToml(files[0].text) as Record<string, unknown>
     expectRootKeys(parsed, ['model_provider', 'model', 'model_catalog_json'])
     expect(parsed.model_provider).toBe('tapmodels')
+  })
+
+  it.each(['Acme "Lab"', 'Acme\\Lab', 'Acme\r\nLab\t\u0001\u007f\u2028Line'])('preserves special site names in downloaded TOML: %j', async (name) => {
+    appState.siteName = name
+    const routed = mountModal('anthropic')
+    await clickButton(routed, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
+    for (const tab of ['mac', 'windows'] as const) {
+      if (tab === 'windows') await clickButton(routed, (text) => text.includes('Windows'))
+      const files = await downloadAllCards(routed)
+      const file = files.find((candidate) => candidate.name === 'config.toml')!
+      expect(file.text).toBe(file.cardText)
+      const parsed = parseToml(file.text)
+      const providers = Object.values(parsed.model_providers as Record<string, { name: string }>)
+      expect(providers[0].name).toBe(`${name} Anthropic`)
+      expect(parsed.review_model).toBe(parsed.model)
+    }
+    routed.unmount()
+
+    const grok = mountModal('grok')
+    let files = await downloadAllCards(grok)
+    let parsed = parseToml(files[0].text)
+    expect((parsed.model as Record<string, { description: string }>)['grok-4.5'].description).toBe(`Grok 4.5 via ${name} (Responses)`)
+    await clickButton(grok, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
+    files = await downloadAllCards(grok)
+    parsed = parseToml(files[0].text)
+    const providers = Object.values(parsed.model_providers as Record<string, { name: string }>)
+    expect(providers[0].name).toBe(`${name} Grok`)
+    grok.unmount()
   })
 
   it('downloads the current key, not a stale one, after the apiKey prop changes', async () => {

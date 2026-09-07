@@ -79,7 +79,7 @@ Go 檔裡混有「給人看的訊息」與「程式比對用的值」。後者�
 原因：資料庫裡的歷史日誌是簡體，而訊息的產生端（`internal/server/middleware/api_key_auth*.go`）建置後會輸出繁體，兩種都要能歸類。這兩個檔案在 `PROTECTED_FILES` 裡，建置時不會被動到。
 
 **新增了拿中文去比對外部系統回應的程式碼時**（自己寫的或上游同步進來的），要把它加進 `PROTECTED_LITERALS`。
-每日同步上游的 PR（`tapmodels-sync-upstream.yml`）會自動列出候選；手動稽核：
+上游監看 issue（`tapmodels-sync-upstream.yml`）會列出候選；實際同步由本機普通 merge 完成。手動稽核：
 
 ```bash
 cd tools/zh-tw

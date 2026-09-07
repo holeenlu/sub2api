@@ -212,7 +212,12 @@ func TestDiagnoseModelAvailabilityForPlatform_ReadsFableModelRateLimitAttributio
 	for i := range repo.accounts {
 		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
 	}
-	svc := &GatewayService{accountRepo: repo, cfg: testConfig()}
+	svc := &GatewayService{
+		accountRepo: repo, cfg: testConfig(),
+		groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+			groupID: noAccountFallbackGroup(groupID, PlatformAnthropic, nil),
+		}},
+	}
 
 	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, "claude-fable-5-1", PlatformAnthropic)
 

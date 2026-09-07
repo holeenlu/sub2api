@@ -1302,19 +1302,14 @@ func mergeConfiguredCodexModelsManifest(
 		return nil, false, err
 	}
 
-	// selected answers "is this model allowed"; selectedIndex remembers the order the
-	// administrator arranged the list in, which is the order the picker must show.
+	// Auto models still require an explicit selection, even with a wildcard allowlist.
 	selected := make(map[string]struct{}, len(selectedModels))
-	selectedIndex := make(map[string]int, len(selectedModels))
 	for _, modelID := range selectedModels {
 		modelID = strings.TrimSpace(modelID)
 		if modelID == "" {
 			continue
 		}
 		selected[modelID] = struct{}{}
-		if _, exists := selectedIndex[modelID]; !exists {
-			selectedIndex[modelID] = len(selectedIndex)
-		}
 	}
 	// 白名单条目匹配统一走 GroupModelAllowlist.Allows（通配条目按前缀展开）。
 	allowlist := GroupModelAllowlist{Enabled: filterBySelection, Models: selectedModels}
@@ -1392,8 +1387,8 @@ func mergeConfiguredCodexModelsManifest(
 	// Apply the administrator's order before the early return: an order-only edit
 	// leaves the model set untouched, so nothing above flips changed, and without
 	// this the old body (and its ETag) would be served back unchanged.
-	if filterBySelection && len(selectedIndex) > 0 {
-		if reorderCodexModelsBySelection(merged, mergedSlugs, selectedIndex) {
+	if filterBySelection && len(selected) > 0 {
+		if reorderCodexModelsBySelection(merged, mergedSlugs, allowlist) {
 			changed = true
 		}
 		// Codex sorts by priority after reading the array. Normalize priorities
@@ -1442,23 +1437,31 @@ func mergeConfiguredCodexModelsManifest(
 // It reports whether any position changed. Callers must fold that into their
 // "changed" flag: reordering alone does not alter the model set, and the merge's
 // early return would otherwise hand back the previous body with the previous ETag.
-func reorderCodexModelsBySelection(models []json.RawMessage, slugs []string, selectedIndex map[string]int) bool {
+func reorderCodexModelsBySelection(models []json.RawMessage, slugs []string, allowlist GroupModelAllowlist) bool {
 	if len(models) != len(slugs) || len(models) < 2 {
 		return false
 	}
-	unlisted := len(selectedIndex)
-	rank := func(slug string) int {
-		if idx, ok := selectedIndex[slug]; ok && slug != "" {
-			return idx
+	// Match once per descriptor using the same wildcard and alias rules as admission.
+	// Stable sorting preserves source order within the first matching entry.
+	ranks := make([]int, len(slugs))
+	for i, slug := range slugs {
+		ranks[i] = len(allowlist.Models)
+		if strings.TrimSpace(slug) == "" {
+			continue
 		}
-		return unlisted
+		for rank, entry := range allowlist.Models {
+			if (GroupModelAllowlist{Enabled: true, Models: []string{entry}}).Allows(slug) {
+				ranks[i] = rank
+				break
+			}
+		}
 	}
 	order := make([]int, len(models))
 	for i := range order {
 		order[i] = i
 	}
 	sort.SliceStable(order, func(a, b int) bool {
-		return rank(slugs[order[a]]) < rank(slugs[order[b]])
+		return ranks[order[a]] < ranks[order[b]]
 	})
 	moved := false
 	for i, from := range order {
