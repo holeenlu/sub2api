@@ -119,10 +119,12 @@
       <nav class="mx-auto flex max-w-6xl items-center justify-between">
         <!-- Wordmark -->
         <router-link to="/" class="flex min-w-0 items-center gap-2.5">
-          <span
-            class="h-[26px] w-[26px] shrink-0 rounded-[9px] bg-gradient-primary shadow-[0_0_14px_rgba(20,184,166,0.35)]"
-            aria-hidden="true"
-          ></span>
+          <img
+            :src="siteLogo || '/logo.svg'"
+            :alt="siteName"
+            data-testid="home-brand-logo"
+            class="h-[26px] w-[26px] shrink-0 object-contain"
+          />
           <span class="truncate text-[19px] font-bold tracking-tight text-gray-900 dark:text-white">
             {{ siteName }}
           </span>

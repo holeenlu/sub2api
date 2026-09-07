@@ -174,6 +174,7 @@ func runMainServer() {
 		Version:         Version,
 		BuildType:       BuildType,
 		UpstreamVersion: UpstreamVersion,
+		BuildCommit:     Commit,
 	}
 
 	app, err := initializeApplication(buildInfo)
