@@ -26,7 +26,7 @@ export default {
       running: '執行中',
       schedule: '定時測試',
       cronHelp: '標準 5 欄位 cron 表示式（例如 */30 * * * *）',
-      cronTooltipTitle: 'Cron 表示式示例：',
+      cronTooltipTitle: 'Cron 表示式範例：',
       cronTooltipMeaning: '用於定義自動執行測試的時間規則，格式依次為：分鐘 小時 日 月 星期。',
       cronTooltipExampleEvery30Min: '*/30 * * * *：每 30 分鐘執行一次',
       cronTooltipExampleHourly: '0 * * * *：每小時整點執行一次',
@@ -465,7 +465,7 @@ export default {
         createdAt: '建立時間',
         actions: '操作'
       },
-      // 表單標籤（扁平結構便於模板使用）
+      // 表單標籤（扁平結構便於範本使用）
       code: '優惠碼',
       autoGenerate: '留空自動生成',
       codePlaceholder: '輸入優惠碼或留空',

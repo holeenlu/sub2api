@@ -60,7 +60,7 @@ export default {
     },
     table: { platformModel: '平台 / 模型', rank: '排名', user: '使用者' },
     empty: { title: '沒有可展示的資料', description: '嘗試調整時間範圍或篩選條件' },
-    bucket: { minutes: '{count} 分鐘粒度', hours: '{count} 小時粒度', days: '{count} 天粒度' },
+    bucket: { minutes: '{count} 分鐘統計單位', hours: '{count} 小時統計單位', days: '{count} 天統計單位' },
     matrix: {
       title: '可用性趨勢', description: '每行是一種通道組合，每個色塊代表一個統計區間；懸停檢視明細', wheelZoom: '在色塊上滾輪放大（區間變窄、色塊變寬）', wheelZoomX: '在色塊上滾輪放大（區間變窄、色塊變寬）', dimension: '通道維度', emptyTitle: '目前篩選視窗沒有矩陣資料', legendAria: '健康分數圖例', bad: '差', good: '好', healthyLegend: '健康 (≥80)', warningLegend: '需關注 (50–79)', criticalLegend: '異常 (<50)', unknownLegend: '無流量 / 樣本不足', noTraffic: '該區間無流量', noTrafficAt: '{time} · 無流量', scoreLine: '健康分 {score}', resetZoom: '重設縮放'
     },
@@ -95,7 +95,7 @@ export default {
       enableTitle: '啟用 V2 彙總',
       enableHint: '在系統模式為 V2 時生效；關閉後僅停止本設定的彙總，系統模式開關仍在「功能開關」',
       refreshTitle: '彙總頻率',
-      refreshHint: '影響矩陣時間粒度與重新整理節奏',
+      refreshHint: '影響矩陣時間統計單位與重新整理節奏',
       refreshAria: '彙總頻率',
       platformsTitle: '平台與模型',
       platformsHint: '留空 = 展示全部真實模型名；填寫後僅名單內單獨成行，其餘歸入「其他」',

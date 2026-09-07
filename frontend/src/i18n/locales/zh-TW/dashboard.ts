@@ -15,13 +15,13 @@ export default {
     avgResponse: '平均回應',
     averageTime: '平均時間',
     timeRange: '時間範圍',
-    granularity: '粒度',
-    day: '按天',
-    hour: '按小時',
+    granularity: '統計單位',
+    day: '每日',
+    hour: '每小時',
     modelDistribution: '模型分佈',
     groupDistribution: '分組使用分佈',
-    platformBreakdown: '按平台拆分',
-    platformBreakdownEmpty: '暫無平台用量',
+    platformBreakdown: '依平台分類',
+    platformBreakdownEmpty: '尚無平台使用量',
     platformCount: '{count} 個平台',
     platformOther: '其他',
     platformQuota: {
@@ -221,9 +221,9 @@ export default {
         errorDescription: '無法使用目前 API Key 取得模型目錄。'
       },
       opencode: {
-        title: 'OpenCode 設定示例',
+        title: 'OpenCode 設定範例',
         subtitle: 'opencode.json',
-        hint: '設定檔路徑：~/.config/opencode/opencode.json（或 opencode.jsonc），不存在需手動建立。可使用預設 provider（openai/anthropic/google）或自訂 provider_id。API Key 支援直接設定或透過用戶端 /connect 命令設定。示例僅供參考，模型與選項可按需調整。'
+        hint: '設定檔路徑：~/.config/opencode/opencode.json（或 opencode.jsonc），不存在需手動建立。可使用預設 provider（openai/anthropic/google）或自訂 provider_id。API Key 支援直接設定或透過用戶端 /connect 命令設定。範例僅供參考，模型與選項可按需調整。'
       }
     },
     customKeyLabel: '自訂金鑰',
@@ -465,7 +465,7 @@ export default {
       zhipu: '智譜 GLM',
       deepseek: 'DeepSeek'
     },
-    // 檢查模式（監控條目的工作方式）
+    // 檢查模式（監控項目的工作方式）
     checkMode: {
       probe: '探活',
       quota: '配額',
@@ -820,7 +820,7 @@ export default {
       loginFailed: '驗證失敗，請重試',
       // New translations for email verification
       verifyEmailFirst: '請先驗證您的電子郵件',
-      verifyPasswordFirst: '請先驗證您的身份',
+      verifyPasswordFirst: '請先驗證您的身分',
       emailCode: '電子郵件驗證碼',
       enterEmailCode: '請輸入 6 位驗證碼',
       sendCode: '傳送驗證碼',
@@ -910,7 +910,7 @@ export default {
       replaceEmailPasswordPlaceholder: '輸入目前密碼',
       sendCodeAction: '傳送驗證碼',
       manageEmailAction: '管理電子郵件',
-      hideEmailFormAction: '收起電子郵件表單',
+      hideEmailFormAction: '摺疊電子郵件表單',
       confirmEmailBindAction: '綁定電子郵件',
       confirmEmailReplaceAction: '更換主電子郵件',
       codeSentTo: '驗證碼已傳送到 {email}',
@@ -949,7 +949,7 @@ export default {
   // Table
   table: {
     expandActions: '展開更多操作',
-    collapseActions: '收起操作'
+    collapseActions: '摺疊操作'
   },
 
   // Pagination

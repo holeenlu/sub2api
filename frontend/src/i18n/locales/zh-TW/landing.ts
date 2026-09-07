@@ -57,7 +57,7 @@ export default {
         upstreamDesc: '同模型、同能力的候選帳號池',
         failoverDesc: '條件分支：僅在錯誤符合重試條件時觸發。',
         gatewayDesc: '使用者、分組、API Key、配額與每分鐘請求數限制。',
-        billingDesc: '逐條記錄 API 使用量與費用。'
+        billingDesc: '逐筆記錄 API 使用量與費用。'
       },
       edges: {
         selection: '選擇模型',
@@ -88,7 +88,7 @@ export default {
       },
       billing: {
         title: '用量計費',
-        description: '我們逐條記錄 API 使用量與費用，讓你檢視每次呼叫的消耗。'
+        description: '我們逐筆記錄 API 使用量與費用，讓你檢視每次呼叫的消耗。'
       },
       gateway: {
         title: '企業級 AI 閘道器',
@@ -127,9 +127,9 @@ export default {
         rpm: '每分鐘請求數'
       },
       sample: {
-        model: '示例模型',
+        model: '範例模型',
         key: '開發金鑰',
-        group: '示例分組'
+        group: '範例分組'
       }
     },
     agents: {

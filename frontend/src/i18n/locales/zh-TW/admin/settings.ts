@@ -251,7 +251,7 @@ export default {
         accessKeySecretConfiguredHint: '金鑰已設定，留空以保留目前值。',
         sceneId: '場景 ID',
         sceneIdHint: '在阿里雲驗證碼控制台建立驗證場景後取得；驗證方式（無痕/滑塊/拼圖）在控制台按場景設定',
-        prefix: '身份標（prefix）',
+        prefix: '身分標（prefix）',
         prefixHint: '在控制台總覽頁實例基本資訊中取得',
         region: '服務地域',
         regionCn: '中國內地',
@@ -487,11 +487,11 @@ export default {
         claudeOAuthSystemPromptPlaceholder: '留空時使用內建 Claude Code 擴充套件提示詞。',
         claudeOAuthSystemPromptHint: '相容舊設定：僅控制第三個注入的 system block。',
         claudeOAuthSystemPromptBlocks: 'Claude OAuth System Blocks',
-        claudeOAuthSystemPromptBlocksHint: "每個 block 會儲存為帶 enabled、type、text、可選 cache_control 的 JSON。{'{'}billing_header{'}'} 會按請求動態生成；Claude Code 身份提示詞和擴充套件提示詞可直接編輯，也可用預設恢復預設值。",
+        claudeOAuthSystemPromptBlocksHint: "每個 block 會儲存為帶 enabled、type、text、可選 cache_control 的 JSON。{'{'}billing_header{'}'} 會按請求動態生成；Claude Code 身分提示詞和擴充套件提示詞可直接編輯，也可用預設恢復預設值。",
         systemBlockTitle: 'System Block {index}',
         systemBlockPreset: '預設',
         systemBlockPresetBilling: 'Billing Header',
-        systemBlockPresetIdentity: 'Claude Code 身份提示詞',
+        systemBlockPresetIdentity: 'Claude Code 身分提示詞',
         systemBlockPresetExpansion: 'Claude Code 擴充套件提示詞',
         systemBlockPresetCustom: '自訂',
         systemBlockType: '類型',
@@ -518,7 +518,7 @@ export default {
         upstreamFailoverStatusCodesHint: '逗號分隔的狀態碼或閉區間，上游回傳這些狀態碼時換帳號重試；留空沿用各平台內建集合，400/404/408/413/422/499 無論如何都不換號。',
         openaiCodexUserAgent: 'OpenAI Codex UA',
         openaiCodexUserAgentPlaceholder: 'codex-tui/0.146.1 (Ubuntu 22.4.0; x86_64) WindowsTerminal (codex-tui; 0.146.1)',
-        openaiCodexUserAgentHint: '出站統一使用的完整 Codex User-Agent，用於自訂 OS / 架構 / 終端機指紋。留空則按下方版本號拼出標準 codex-tui 形態（推薦）。填寫後首段和尾部的版本號仍會被下方版本號同步覆蓋，避免這條 UA 停在填寫時的舊版本——上游在容量緊張時按用戶端身份分優先順序降載，陳舊或非官方形態的身份會被優先丟棄並回 server_is_overloaded。',
+        openaiCodexUserAgentHint: '出站統一使用的完整 Codex User-Agent，用於自訂 OS / 架構 / 終端機指紋。留空則按下方版本號拼出標準 codex-tui 形態（推薦）。填寫後首段和尾部的版本號仍會被下方版本號同步覆蓋，避免這條 UA 停在填寫時的舊版本——上游在容量緊張時按用戶端身分分優先順序降載，陳舊或非官方形態的身分會被優先丟棄並回 server_is_overloaded。',
         openaiCodexClientVersion: 'Codex 用戶端版本號',
         openaiCodexClientVersionPlaceholder: '留空則跟隨自動同步',
         openaiCodexClientVersionHint: '閘道器對上游宣告的 Codex 用戶端版本號，User-Agent 與 version 頭同源使用。留空表示使用自動同步到的官方最新穩定版；填寫後固定為該版本，不再跟隨同步。',
@@ -543,7 +543,7 @@ export default {
         codexFpTypeBodyPath: 'body 路徑',
         codexFpMatchPlaceholder: '匹配，變體用 / 分隔（如 session-id / session_id 或 x-codex-）',
         codexFpRequired: '必須',
-        codexFingerprintNoRequiredWarn: '未勾選任何「必須」訊號——引擎指紋門目前不生效，等於放行所有通過身份/版本的候選。如需啟用驗證，請至少勾選一條訊號。',
+        codexFingerprintNoRequiredWarn: '未勾選任何「必須」訊號——引擎指紋門目前不生效，等於放行所有通過身分/版本的候選。如需啟用驗證，請至少勾選一條訊號。',
         codexAllowAppServer: 'Codex app-server',
         codexAllowAppServerDesc:
           '放行內嵌 Codex 引擎、經 app-server 協議接入的第三方用戶端（如 Claude Code 的 codex 外掛）。預設關閉；開啟後此類用戶端通過引擎指紋門（下方訊號列表）即放行，關閉則僅放行官方用戶端與白名單。',
@@ -665,7 +665,7 @@ export default {
         iframeWarning:
           '⚠️ iframe 提示：部分網站會透過 X-Frame-Options 或 CSP（frame-ancestors）禁止被 iframe 嵌入，出現空白時可引導使用者使用”新視窗開啟”。',
         integrationDoc: '支付整合文件',
-        integrationDocHint: '包含介面說明、冪等語義及示例程式碼'
+        integrationDocHint: '包含介面說明、冪等語義及範例程式碼'
       },
       customMenu: {
         title: '自訂選單頁面',
@@ -921,7 +921,7 @@ export default {
         enterRecipientHint: '請輸入收件人電子郵件地址'
       },
       emailTemplates: {
-        title: '郵件模板',
+        title: '郵件範本',
         description: '按事件和語言自訂通知郵件主題與 HTML 內容。',
         event: '事件',
         locale: '語言',
@@ -929,24 +929,24 @@ export default {
         localeZh: '中文',
         subject: '主題',
         subjectPlaceholder: '輸入郵件主題',
-        html: 'HTML 模板',
-        htmlPlaceholder: '編輯郵件 HTML 模板',
+        html: 'HTML 範本',
+        htmlPlaceholder: '編輯郵件 HTML 範本',
         placeholders: '可用預留位置',
         placeholdersHelp: '點選預留位置可複製。後端傳送郵件時會替換這些值。',
         livePreview: '即時預覽',
         previewSecurityHint: '預覽 HTML 由後端預覽介面生成，並在停用腳本的沙盒 iframe 中展示。',
         preview: '預覽 / 重新整理',
         previewing: '預覽中...',
-        save: '儲存模板',
+        save: '儲存範本',
         saving: '儲存中...',
-        restoreOfficial: '恢復官方模板',
+        restoreOfficial: '還原官方範本',
         restoring: '恢復中...',
-        restoreConfirm: '確定恢復此事件和語言的官方模板嗎？目前自訂版本將被替換。',
-        restoreSuccess: '已恢復官方模板',
-        saveSuccess: '郵件模板已儲存',
+        restoreConfirm: '確定恢復此事件和語言的官方範本嗎？目前自訂版本將被替換。',
+        restoreSuccess: '已還原官方範本',
+        saveSuccess: '郵件範本已儲存',
         placeholderCopied: '預留位置已複製',
-        validationRequired: '主題和 HTML 模板不能為空',
-        empty: '暫無可用的郵件模板事件或語言。',
+        validationRequired: '主題和 HTML 範本不能為空',
+        empty: '暫無可用的郵件範本事件或語言。',
         noPreview: '重新整理預覽後檢視渲染後的郵件主題。',
         customized: '已自訂'
       },
@@ -1316,15 +1316,15 @@ export default {
       failedToToggle: '切換狀態失敗'
     },
 
-    // TLS 指紋模板
+    // TLS 指紋範本
     tlsFingerprintProfiles: {
-      title: 'TLS 指紋模板',
-      description: '管理 TLS 指紋模板，用於模擬特定用戶端的 TLS 握手特徵',
-      createProfile: '建立模板',
-      editProfile: '編輯模板',
-      deleteProfile: '刪除模板',
-      noProfiles: '暫無模板',
-      createFirstProfile: '建立你的第一個 TLS 指紋模板',
+      title: 'TLS 指紋範本',
+      description: '管理 TLS 指紋範本，用於模擬特定用戶端的 TLS 握手特徵',
+      createProfile: '建立範本',
+      editProfile: '編輯範本',
+      deleteProfile: '刪除範本',
+      noProfiles: '暫無範本',
+      createFirstProfile: '建立你的第一個 TLS 指紋範本',
 
       columns: {
         name: '名稱',
@@ -1342,10 +1342,10 @@ export default {
         parseYaml: '解析 YAML',
         yamlParsed: 'YAML 解析成功，欄位已自動填充',
         yamlParseFailed: 'YAML 解析失敗：未找到 name 欄位',
-        name: '模板名稱',
+        name: '範本名稱',
         namePlaceholder: '例如 macOS Node.js v24',
         description: '描述',
-        descriptionPlaceholder: '可選的模板描述',
+        descriptionPlaceholder: '可選的範本描述',
         enableGrease: '啟用 GREASE',
         enableGreaseHint: '在 TLS ClientHello 擴充套件中插入 GREASE 值',
         cipherSuites: '密碼套件',
@@ -1362,13 +1362,13 @@ export default {
         extensions: '擴充套件'
       },
 
-      deleteConfirm: '刪除模板',
-      deleteConfirmMessage: '確定要刪除模板 "{name}" 嗎？使用此模板的帳號將回退到內建預設值。',
-      createSuccess: '模板建立成功',
-      updateSuccess: '模板更新成功',
-      deleteSuccess: '模板刪除成功',
-      loadFailed: '載入模板失敗',
-      saveFailed: '儲存模板失敗',
-      deleteFailed: '刪除模板失敗'
+      deleteConfirm: '刪除範本',
+      deleteConfirmMessage: '確定要刪除範本 "{name}" 嗎？使用此範本的帳號將回退到內建預設值。',
+      createSuccess: '範本建立成功',
+      updateSuccess: '範本更新成功',
+      deleteSuccess: '範本刪除成功',
+      loadFailed: '載入範本失敗',
+      saveFailed: '儲存範本失敗',
+      deleteFailed: '刪除範本失敗'
     }
 }

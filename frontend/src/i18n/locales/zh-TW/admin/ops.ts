@@ -348,7 +348,7 @@ export default {
         },
         responsePreview: {
           expand: '回應內容（點選展開）',
-          collapse: '回應內容（點選收起）'
+          collapse: '回應內容（點選摺疊）'
         },
         loading: '載入中…',
         requestId: '請求 ID',
@@ -614,9 +614,9 @@ export default {
           entries: {
             title: '高階：定向靜默',
             hint: '可選：僅靜默特定規則或特定級別。欄位留空表示匹配全部。',
-            add: '新增條目',
-            empty: '暫無定向靜默條目',
-            entryTitle: '條目 #{n}',
+            add: '新增項目',
+            empty: '暫無定向靜默項目',
+            entryTitle: '項目 #{n}',
             ruleId: '規則ID（可選）',
             ruleIdPlaceholder: '例如：1',
             severities: '級別（可選）',
@@ -624,10 +624,10 @@ export default {
             until: '截止時間（RFC3339）',
             reason: '原因',
             validation: {
-              untilRequired: '條目截止時間不能為空',
-              untilFormat: '條目截止時間必須為合法的 RFC3339 時間戳記',
-              ruleIdPositive: '條目 rule_id 必須為正整數',
-              severitiesFormat: '條目級別必須為 P0..P3 的逗號分隔列表'
+              untilRequired: '項目截止時間不能為空',
+              untilFormat: '項目截止時間必須為合法的 RFC3339 時間戳記',
+              ruleIdPositive: '項目 rule_id 必須為正整數',
+              severitiesFormat: '項目級別必須為 P0..P3 的逗號分隔列表'
             }
           },
           validation: {

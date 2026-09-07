@@ -16,6 +16,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/features/channel-monitor-v2/__tests__/monitorFormat.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorZoom.spec.ts \
 	src/i18n/__tests__/zhTwLocale.spec.ts \
+	src/i18n/__tests__/localeKeyCompleteness.spec.ts \
+	src/i18n/__tests__/taiwanLocalization.spec.ts \
+	src/components/charts/__tests__/TokenUsageTrend.spec.ts \
 	src/i18n/__tests__/hardcodedLocaleUsage.spec.ts
 
 # 一键编译前后端

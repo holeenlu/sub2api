@@ -45,7 +45,7 @@ export default {
     selectAll: '全選',
     noData: '暫無資料',
     expand: '展開',
-    collapse: '收起',
+    collapse: '摺疊',
     success: '成功',
     error: '錯誤',
     critical: '嚴重',
@@ -197,7 +197,7 @@ export default {
     myAccount: '我的帳戶',
     lightMode: '淺色模式',
     darkMode: '深色模式',
-    collapse: '收起',
+    collapse: '摺疊',
     expand: '展開',
     logout: '登出',
     github: 'GitHub',
@@ -453,7 +453,7 @@ export default {
   // Step-up（敏感操作二次驗證）
   stepUp: {
     title: '需要二次驗證',
-    hint: '請輸入身份驗證器應用程式中的 6 位驗證碼以繼續此敏感操作。',
+    hint: '請輸入身分驗證器應用程式中的 6 位驗證碼以繼續此敏感操作。',
     verifyFailed: '驗證失敗，請重試',
     notEnabled: '此操作需要開啟二次驗證，請先在個人資料中啟用 TOTP。',
     adminApiKeyForbidden: '管理 API Key 無法執行此操作，請使用已通過二次驗證的管理員工作階段。'
