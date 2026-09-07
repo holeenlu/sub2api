@@ -6,14 +6,13 @@ git 裡的中文原始碼**保持簡體**，與上游 `Wei-Shaw/sub2api` 及其�
 | 層 | 機制 | 何時發生 | 產物在哪 |
 |---|---|---|---|
 | 前端介面文案 | `gen-locale.mjs` 依 `locales/zh` 產生 `zh-TW` 語言包 | 開發者改了 zh 之後手動跑一次 | **提交進 git**：`frontend/src/i18n/locales/zh-TW/`、`docs/legal/admin-compliance.zh-TW.md` |
-| 後端字串（API 錯誤訊息等） | `convert-go.mjs` 轉換 Go 字串字面值 | 根目錄 `Dockerfile` 的 `zh-tw-converter` 階段，`--build-arg ZH_TW=true` 時 | 只在建置用的副本樹，不進 git |
+| 後端字串（API 錯誤訊息等） | `convert-go.mjs` 轉換 Go 字串字面值 | 根目錄 `Dockerfile` 的 `zh-tw-converter` 階段，每次建映像 | 只在建置用的副本樹，不進 git |
 
 兩層共用同一份字典（`convert.mjs` 的 `CORRECTIONS` 與 `TW_VOCAB`），改字典兩邊同時受惠。
 
 為什麼分兩層：前端本來就有語言包系統，產生真檔可以在 PR 裡審、測試跑在真檔上、
 使用者可在簡體與繁體之間切換；後端沒有語言包系統，建置時轉是唯一不改原始碼的做法。
-後端轉換預設**關閉**（`Dockerfile` 的 `ARG ZH_TW=false`）：預設映像的後端訊息與上游逐字相同（簡體）。
-要出繁體後端訊息就帶 `docker build --build-arg ZH_TW=true`。前端 zh-TW 語言包不受此開關影響，一律提供。
+後端轉換預設**開啟**（`Dockerfile` 的 `ARG ZH_TW=true`）；帶 `docker build --build-arg ZH_TW=false` 可建出後端訊息與上游相同（簡體）的映像。前端 zh-TW 語言包不受此開關影響，一律提供。
 
 ## 本機安裝
 

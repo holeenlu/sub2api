@@ -1,10 +1,10 @@
 # =============================================================================
-# Sub2API Docker Compose Configuration
+# TapModels Docker Compose Configuration
 # =============================================================================
 # Quick Start:
 #   1. Copy .env.example to .env and configure
 #   2. docker-compose up -d
-#   3. Check logs: docker-compose logs -f sub2api
+#   3. Check logs: docker-compose logs -f tapmodels
 #   4. Access: http://localhost:8080
 #
 # All configuration is done via environment variables.
@@ -13,13 +13,11 @@
 
 services:
   # ===========================================================================
-  # Sub2API Application
+  # TapModels Application
   # ===========================================================================
-  sub2api:
-    # Override the application image via SUB2API_IMAGE in .env (a pinned release
-    # tag/digest or a locally built image); falls back to the published image.
-    image: ${SUB2API_IMAGE:-weishaw/sub2api:latest}
-    container_name: sub2api
+  tapmodels:
+    image: ${TAPMODELS_IMAGE:-tapmodels/tapmodels:latest}
+    container_name: tapmodels
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -31,7 +29,7 @@ services:
       - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-8080}:8080"
     volumes:
       # Data persistence (config.yaml will be auto-generated here)
-      - sub2api_data:/app/data
+      - tapmodels_data:/app/data
       # Optional: Mount custom config.yaml (uncomment and create the file first)
       # Copy config.example.yaml to config.yaml, modify it, then uncomment:
       # - ./config.yaml:/app/data/config.yaml
@@ -63,7 +61,7 @@ services:
       # app fell back to built-in defaults and WARN-level records were lost.
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - LOG_FORMAT=${LOG_FORMAT:-console}
-      - LOG_SERVICE_NAME=${LOG_SERVICE_NAME:-sub2api}
+      - LOG_SERVICE_NAME=${LOG_SERVICE_NAME:-tapmodels}
       - LOG_ENV=${LOG_ENV:-production}
       - LOG_CALLER=${LOG_CALLER:-true}
       - LOG_STACKTRACE_LEVEL=${LOG_STACKTRACE_LEVEL:-error}
@@ -84,9 +82,9 @@ services:
       # =======================================================================
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
-      - DATABASE_USER=${POSTGRES_USER:-sub2api}
+      - DATABASE_USER=${POSTGRES_USER:-tapmodels}
       - DATABASE_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - DATABASE_DBNAME=${POSTGRES_DB:-sub2api}
+      - DATABASE_DBNAME=${POSTGRES_DB:-tapmodels}
       - DATABASE_SSLMODE=disable
       - DATABASE_MAX_OPEN_CONNS=${DATABASE_MAX_OPEN_CONNS:-50}
       - DATABASE_MAX_IDLE_CONNS=${DATABASE_MAX_IDLE_CONNS:-10}
@@ -108,7 +106,7 @@ services:
       # =======================================================================
       # Admin Account (auto-created on first run)
       # =======================================================================
-      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@sub2api.local}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@tapmodels.local}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
 
       # =======================================================================
@@ -187,7 +185,7 @@ services:
       # Gateway Upstream, Scheduling & Image Configuration
       # =======================================================================
       # Gateway values come from Compose .env or the shell.
-      # Fallbacks mirror Sub2API backend defaults so omitted values preserve behavior.
+      # Fallbacks mirror TapModels backend defaults so omitted values preserve behavior.
       - GATEWAY_FORCE_CODEX_CLI=${GATEWAY_FORCE_CODEX_CLI:-false}
       - GATEWAY_OPENAI_COMPACT_MODEL=${GATEWAY_OPENAI_COMPACT_MODEL:-gpt-5.4}
       - GATEWAY_OPENAI_RESPONSE_HEADER_TIMEOUT=${GATEWAY_OPENAI_RESPONSE_HEADER_TIMEOUT:-0}
@@ -235,7 +233,7 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - sub2api-network
+      - tapmodels-network
     healthcheck:
       test:
         [
@@ -260,7 +258,7 @@ services:
   # ===========================================================================
   postgres:
     image: postgres:18-alpine
-    container_name: sub2api-postgres
+    container_name: tapmodels-postgres
     restart: unless-stopped
     ulimits:
       nofile:
@@ -282,17 +280,17 @@ services:
       # 若不显式设置 PGDATA，则即使挂载了 postgres_data 到 /var/lib/postgresql/data，数据也不会落盘到该命名卷，
       # docker compose down/up 后会触发 initdb 重新初始化，导致用户/密码等数据丢失。
       - PGDATA=/var/lib/postgresql/data
-      - POSTGRES_USER=${POSTGRES_USER:-sub2api}
+      - POSTGRES_USER=${POSTGRES_USER:-tapmodels}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - POSTGRES_DB=${POSTGRES_DB:-sub2api}
+      - POSTGRES_DB=${POSTGRES_DB:-tapmodels}
       - TZ=${TZ:-Asia/Shanghai}
     networks:
-      - sub2api-network
+      - tapmodels-network
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api} && psql -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api} -Atqc 'SELECT 1' >/dev/null",
+          "pg_isready -U ${POSTGRES_USER:-tapmodels} -d ${POSTGRES_DB:-tapmodels} && psql -U ${POSTGRES_USER:-tapmodels} -d ${POSTGRES_DB:-tapmodels} -Atqc 'SELECT 1' >/dev/null",
         ]
       interval: 10s
       timeout: 5s
@@ -306,7 +304,7 @@ services:
   # ===========================================================================
   redis:
     image: redis:8-alpine
-    container_name: sub2api-redis
+    container_name: tapmodels-redis
     restart: unless-stopped
     ulimits:
       nofile:
@@ -330,7 +328,7 @@ services:
       # REDISCLI_AUTH is used by redis-cli for authentication (safer than -a flag)
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}
     networks:
-      - sub2api-network
+      - tapmodels-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -343,7 +341,7 @@ services:
 # Volumes
 # =============================================================================
 volumes:
-  sub2api_data:
+  tapmodels_data:
     driver: local
   postgres_data:
     driver: local
@@ -354,5 +352,5 @@ volumes:
 # Networks
 # =============================================================================
 networks:
-  sub2api-network:
+  tapmodels-network:
     driver: bridge

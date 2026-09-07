@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	DefaultDataManagementAgentSocketPath = "/tmp/sub2api-datamanagement.sock"
+	DefaultDataManagementAgentSocketPath = "/tmp/tapmodels-datamanagement.sock"
 	LegacyBackupAgentSocketPath          = "/tmp/sub2api-backup.sock"
 
 	DataManagementDeprecatedReason         = "DATA_MANAGEMENT_DEPRECATED"

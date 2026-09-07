@@ -1,27 +1,27 @@
 [Unit]
-Description=Sub2API - AI API Gateway Platform
-Documentation=https://github.com/Wei-Shaw/sub2api
+Description=TapModels - Pick a model. Start building.
+Documentation=https://docs.tapmodels.ai
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
 
 [Service]
 Type=simple
-User=sub2api
-Group=sub2api
-WorkingDirectory=/opt/sub2api
-ExecStart=/opt/sub2api/sub2api
+User=tapmodels
+Group=tapmodels
+WorkingDirectory=/opt/tapmodels
+ExecStart=/opt/tapmodels/tapmodels
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=sub2api
+SyslogIdentifier=tapmodels
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/opt/sub2api
+ReadWritePaths=/opt/tapmodels
 
 # Environment - Server configuration
 # Modify these values to change listen address and port

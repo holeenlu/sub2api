@@ -2013,7 +2013,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 	addConfigPath("/app/data")
 	addConfigPath(".")
 	addConfigPath("./config")
-	addConfigPath("/etc/sub2api")
+	addConfigPath("/etc/tapmodels")
 }
 
 func setDefaults() {
@@ -2040,7 +2040,7 @@ func setDefaults() {
 	// Log
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.format", "console")
-	viper.SetDefault("log.service_name", "sub2api")
+	viper.SetDefault("log.service_name", "tapmodels")
 	viper.SetDefault("log.env", "production")
 	viper.SetDefault("log.caller", true)
 	viper.SetDefault("log.stacktrace_level", "error")
@@ -2190,7 +2190,7 @@ func setDefaults() {
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")
 	viper.SetDefault("database.password", "postgres")
-	viper.SetDefault("database.dbname", "sub2api")
+	viper.SetDefault("database.dbname", "tapmodels")
 	viper.SetDefault("database.sslmode", "prefer")
 	viper.SetDefault("database.max_open_conns", 256)
 	viper.SetDefault("database.max_idle_conns", 128)
