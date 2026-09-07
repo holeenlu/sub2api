@@ -59,5 +59,10 @@ Docker CI 从 merge-base 最近的上游 `v*` tag 推导并注入 `main.Upstream
 未注入时才回退到 embedded VERSION。本地发布构建也尝试注入上游 tag。
 在线检查仍访问配置的私有 release 仓库，需要相应运行时凭据，不承担代码同步。
 
-当前本地 `deploy/release.sh` 仍限定公共 `holeen/main` 的生产发布。
+本地 `deploy/release.sh` 按当前检出分支发布，也可用 `--branch` 显式指定。
+生产站使用 `KDAN`，因此标准命令为
+`./deploy/release.sh release --branch KDAN --approve-push --approve-deploy`，
+发布目标是 `origin/KDAN`。发布阶段只验证目标分支已经包含
+`upstream/main`，不会 rebase、改写提交或把品牌分支推送到 `origin/main`；
+上游同步必须先通过普通 Git Merge 完成。
 品牌发布使用各自 CI 通道；不要为了绕过限制把品牌覆盖到公共分支。
