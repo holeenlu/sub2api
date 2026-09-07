@@ -32,6 +32,7 @@ permissions:
 
 jobs:
   build:
+    if: github.repository == 'erwinlin/TapModels'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

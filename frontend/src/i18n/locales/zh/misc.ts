@@ -20,6 +20,7 @@ export default {
   // Version Badge
   version: {
     currentVersion: '当前版本',
+    upstreamBaseline: '基于上游 Sub2API {version}',
     checkDisabled: '已关闭在线版本检查',
     latestVersion: '最新版本',
     upToDate: '已是最新版本',

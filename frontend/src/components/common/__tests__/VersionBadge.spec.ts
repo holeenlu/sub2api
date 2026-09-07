@@ -17,7 +17,7 @@ const appStoreState = {
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key
+    t: (key: string, values?: { version: string }) => values ? `${key}: ${values.version}` : key
   })
 }))
 
@@ -80,8 +80,7 @@ describe('VersionBadge', () => {
     ]) {
       expect(text, `${hidden} should be hidden`).not.toContain(hidden)
     }
-    // the upstream baseline is API data only and must not leak into the UI
-    expect(text).not.toContain('9.9.9')
+    expect(wrapper.get('[data-testid="upstream-version"]').text()).toBe('version.upstreamBaseline: v9.9.9')
     // only the badge button itself remains clickable in the popover
     expect(wrapper.findAll('button')).toHaveLength(1)
   })
@@ -106,6 +105,20 @@ describe('VersionBadge', () => {
     expect(text).toContain('version.rollback')
     // refresh button is back
     expect(wrapper.findAll('button').length).toBeGreaterThan(1)
-    expect(text).not.toContain('9.9.9')
+    expect(text).toContain('version.upstreamBaseline: v9.9.9')
+  })
+
+  it.each(['', '   '])('hides a missing upstream baseline (%j)', async (version) => {
+    appStoreState.upstreamVersion = version
+    const wrapper = await mountOpened()
+    expect(wrapper.find('[data-testid="upstream-version"]').exists()).toBe(false)
+    appStoreState.upstreamVersion = 'v9.9.9'
+  })
+
+  it('normalizes an unprefixed upstream baseline', async () => {
+    appStoreState.upstreamVersion = ' 9.9.9 '
+    const wrapper = await mountOpened()
+    expect(wrapper.get('[data-testid="upstream-version"]').text()).toBe('version.upstreamBaseline: v9.9.9')
+    appStoreState.upstreamVersion = 'v9.9.9'
   })
 })

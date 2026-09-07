@@ -100,7 +100,7 @@ export TAPMODELS_ENV_FILE=/absolute/path/to/tapmodels.env
 Apple-specific image overrides are available:
 
 ```dotenv
-APPLE_CONTAINER_TAPMODELS_IMAGE=tapmodels/tapmodels:latest
+APPLE_CONTAINER_TAPMODELS_IMAGE=ghcr.io/erwinlin/tapmodels:latest
 APPLE_CONTAINER_POSTGRES_IMAGE=postgres:18-alpine
 APPLE_CONTAINER_REDIS_IMAGE=redis:8-alpine
 ```
@@ -175,7 +175,7 @@ To restore these backups into an existing stack, first ensure the image versions
 
 # Remove only the app container so a helper can mount its named volume.
 container delete tapmodels-apple
-TAPMODELS_IMAGE=tapmodels/tapmodels:latest # Match APPLE_CONTAINER_TAPMODELS_IMAGE in .env.
+TAPMODELS_IMAGE=ghcr.io/erwinlin/tapmodels:latest # Match APPLE_CONTAINER_TAPMODELS_IMAGE in .env.
 container run --rm --name tapmodels-apple-data-restore \
   --entrypoint /bin/sh \
   --volume tapmodels-apple-data:/restore \

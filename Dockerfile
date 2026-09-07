@@ -169,6 +169,7 @@ WORKDIR /app
 
 # Copy binary/resources with ownership to avoid extra full-layer chown copy
 COPY --from=backend-builder --chown=tapmodels:tapmodels /app/tapmodels /app/tapmodels
+RUN ln -s /app/tapmodels /app/sub2api
 COPY --from=backend-builder --chown=tapmodels:tapmodels /app/backend/resources /app/resources
 
 # Create data directory

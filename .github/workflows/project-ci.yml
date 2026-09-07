@@ -1,8 +1,8 @@
-name: TapModels · CI
+name: Project · CI
 
 # 精簡版 CI：只跑單元測試、前端檢查與 zh-TW 轉換器。
 # 刻意不含整合測試 / golangci-lint / macOS runner —— 私有 repo 的 Actions 分鐘數有限，
-# 上游的 backend-ci.yml 仍留在樹裡，需要時可再啟用（見 docs/tapmodels-ci.md）。
+# 上游的 backend-ci.yml 仍留在樹裡，需要時可再啟用（見 docs/project-ci.md）。
 #
 # 路徑過濾：先由 changes job 算出 PR 改到哪些區域，只改前端就不跑後端測試（約 9 分鐘），
 # 反之亦然。手動觸發（workflow_dispatch）一律全跑。改到本檔或 Makefile 也全跑。
@@ -13,16 +13,16 @@ name: TapModels · CI
 
 on:
   push:
-    branches: [main, TapModels]
+    branches: [main]
   pull_request:
-    branches: [main, TapModels]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: tapmodels-ci-${{ github.ref }}
+  group: project-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -30,6 +30,7 @@ jobs:
   # 而這個檢查只要 npm ci 一個小套件、幾十秒就跑完。所以不掛路徑過濾也不 needs 任何 job：
   # 每個 PR、每次 push main、每次手動觸發都跑。
   locale:
+    if: github.repository == 'holeenlu/sub2api'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -48,6 +49,7 @@ jobs:
           python3 -m unittest discover -s deploy/tests -p 'test_brand_release.py'
 
   changes:
+    if: github.repository == 'holeenlu/sub2api'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -75,7 +77,7 @@ jobs:
           # pull_request 事件 checkout 的是合併後的 ref，三點 diff 就是這個 PR 的變更。
           git diff --name-only "origin/${BASE_REF}...HEAD" > /tmp/changed.txt
           echo "變更檔案 $(wc -l < /tmp/changed.txt) 個"
-          COMMON='Makefile$|\.github/workflows/tapmodels-ci\.yml$'
+          COMMON='Makefile$|\.github/workflows/project-ci\.yml$'
           hit() { grep -qE "$1" /tmp/changed.txt && echo true || echo false; }
           {
             echo "backend=$(hit "^(backend/|${COMMON})")"

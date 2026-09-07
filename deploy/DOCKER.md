@@ -10,7 +10,7 @@ docker run -d \
   -p 8080:8080 \
   -e DATABASE_URL="postgres://user:pass@host:5432/tapmodels" \
   -e REDIS_URL="redis://host:6379" \
-  tapmodels/tapmodels:latest
+  ghcr.io/erwinlin/tapmodels:latest
 ```
 
 ## Docker Compose
@@ -20,7 +20,7 @@ version: '3.8'
 
 services:
   tapmodels:
-    image: tapmodels/tapmodels:latest
+    image: ghcr.io/erwinlin/tapmodels:latest
     ports:
       - "8080:8080"
     environment:
@@ -84,7 +84,7 @@ Docker restores existing containers after a host restart.
 - `x.y` - Latest patch of minor version
 - `x` - Latest minor of major version
 
-The Compose files under `deploy/` read the image from `TAPMODELS_IMAGE` (default `tapmodels/tapmodels:latest`), so pin a tag or digest there instead of editing the Compose file.
+The Compose files under `deploy/` read the image from `TAPMODELS_IMAGE` (default `ghcr.io/erwinlin/tapmodels:latest`), so pin a tag or digest there instead of editing the Compose file.
 
 ## Links
 

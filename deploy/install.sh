@@ -2,7 +2,7 @@
 #
 # TapModels Installation Script
 # TapModels 安装脚本
-# Usage: TAPMODELS_INSTALLER_ENABLED=true curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/TapModels/deploy/install.sh | bash
+# Usage (authenticated local checkout): TAPMODELS_INSTALLER_ENABLED=true bash deploy/install.sh
 #
 # NOTE: no TapModels release artifacts are published yet. The only assets on
 # ${GITHUB_REPO} are upstream sub2api builds, so this installer refuses to
@@ -894,6 +894,7 @@ print_completion() {
 
 # Upgrade function
 upgrade() {
+    require_installer_enabled
     # Check if TapModels is installed
     if [ ! -f "$INSTALL_DIR/tapmodels" ]; then
         print_error "$(msg 'not_installed')"
@@ -934,6 +935,7 @@ upgrade() {
 # Install specific version (for upgrade or rollback)
 # Requires: TapModels must already be installed
 install_version() {
+    require_installer_enabled
     local target_version="$1"
 
     # Check if TapModels is installed

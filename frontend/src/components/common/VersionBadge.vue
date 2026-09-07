@@ -112,6 +112,9 @@
                     </svg>
                   </span>
                 </div>
+                <p v-if="upstreamVersion" data-testid="upstream-version" class="mt-1 break-words text-xs text-gray-500 dark:text-dark-400">
+                  {{ t('version.upstreamBaseline', { version: upstreamVersion }) }}
+                </p>
                 <p v-if="!updateDisabled" class="mt-1 text-xs text-gray-500 dark:text-dark-400">
                   {{
                     hasUpdate
@@ -687,6 +690,10 @@ const latestVersion = computed(() => appStore.latestVersion)
 const hasUpdate = computed(() => appStore.hasUpdate)
 const releaseInfo = computed(() => appStore.releaseInfo)
 const buildType = computed(() => appStore.buildType)
+const upstreamVersion = computed(() => {
+  const version = appStore.upstreamVersion?.trim()
+  return version ? `v${version.replace(/^v/, '')}` : ''
+})
 const updateDisabled = computed(() => appStore.updateDisabled)
 // With online update checking off, the badge is version-only: no update dot, no status text
 const showUpdateState = computed(() => hasUpdate.value && !updateDisabled.value)
