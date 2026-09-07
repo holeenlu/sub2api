@@ -20,7 +20,7 @@
             type="button"
             @click="clearUser"
             class="absolute right-2 top-9 text-gray-400"
-            aria-label="Clear user filter"
+            :aria-label="t('ui.clearUserFilter')"
           >
             ✕
           </button>
@@ -57,7 +57,7 @@
             type="button"
             @click="onClearApiKey"
             class="absolute right-2 top-9 text-gray-400"
-            aria-label="Clear API key filter"
+            :aria-label="t('ui.clearApiKeyFilter')"
           >
             ✕
           </button>
@@ -100,7 +100,7 @@
             type="button"
             @click="clearAccount"
             class="absolute right-2 top-9 text-gray-400"
-            aria-label="Clear account filter"
+            :aria-label="t('ui.clearAccountFilter')"
           >
             ✕
           </button>
@@ -269,9 +269,12 @@ const modelOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allModels') },
   ...(props.modelOptions ?? []).map((m) => ({ value: m, label: m })),
 ])
-const groupOptions = ref<SelectOption[]>([{ value: null, label: t('admin.usage.allGroups') }])
+const loadedGroupOptions = ref<SelectOption[]>([])
+const groupOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('admin.usage.allGroups') }, ...loadedGroupOptions.value,
+])
 
-const requestTypeOptions = ref<SelectOption[]>([
+const requestTypeOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allTypes') },
   { value: 'ws_v2', label: t('usage.ws') },
   { value: 'live', label: t('usage.live') },
@@ -280,12 +283,12 @@ const requestTypeOptions = ref<SelectOption[]>([
   { value: 'cyber', label: t('usage.cyber') }
 ])
 
-const compactionOptions = ref<SelectOption[]>([
+const compactionOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('usage.allCompactionTypes') },
   { value: true, label: t('usage.compactionOnly') }
 ])
 
-const billingTypeOptions = ref<SelectOption[]>([
+const billingTypeOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allBillingTypes') },
   { value: 0, label: t('admin.usage.billingTypeBalance') },
   { value: 1, label: t('admin.usage.billingTypeSubscription') }
@@ -315,7 +318,7 @@ const statusCodeOptions = computed<SelectOption[]>(() => [
   ...COMMON_ERROR_STATUS_CODES.map((c) => ({ value: c, label: String(c) })),
 ])
 
-const billingModeOptions = ref<SelectOption[]>([
+const billingModeOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allBillingModes') },
   { value: 'token', label: t('admin.usage.billingModeToken') },
   { value: 'per_request', label: t('admin.usage.billingModePerRequest') },
@@ -323,7 +326,7 @@ const billingModeOptions = ref<SelectOption[]>([
   { value: 'video', label: t('admin.usage.billingModeVideo') }
 ])
 
-const upstreamModelMismatchOptions = ref<SelectOption[]>([
+const upstreamModelMismatchOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allUpstreamModelAudit') },
   { value: true, label: t('admin.usage.upstreamModelMismatchOnly') },
   { value: false, label: t('admin.usage.upstreamModelMatchedOnly') }
@@ -534,7 +537,7 @@ onMounted(async () => {
   document.addEventListener('click', onDocumentClick)
   try {
     const gs = await adminAPI.groups.list(1, 1000)
-    groupOptions.value.push(...gs.items.map((g: any) => ({ value: g.id, label: g.name })))
+    loadedGroupOptions.value = gs.items.map((g: any) => ({ value: g.id, label: g.name }))
   } catch {
     // Ignore filter option loading errors (page still usable)
   }

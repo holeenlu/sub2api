@@ -54,7 +54,7 @@ export default {
     list: {
       selectedJobs: '已選擇 {count} 個任務',
       expandChildren: '展開 {n} 個子任務',
-      collapseChildren: '收起子任務',
+      collapseChildren: '摺疊子任務',
       childCount: '{n} 子任務',
       childBadge: '子任務',
       keyNotRecorded: '未記錄',

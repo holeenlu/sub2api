@@ -347,7 +347,7 @@ export default {
             step2: '按 F12 開啟瀏覽器開發者工具，切換到「Network / 網路」標籤，然後重新整理頁面。',
             step3: '在 Network 的篩選框中輸入 /api/biz/v1/organization，點選命中的請求（如 api_keys）。',
             step4: '請求 URL 中 org- 開頭的一段即組織 ID、proj_ 開頭的一段即專案 ID（也可在 Request Headers 中檢視 bigmodel-organization / bigmodel-project 的值），分別填入上方輸入框。',
-            example: '示例：…/organization/org-0610bE2D…/projects/proj_0798F20…/api_keys → org-0610bE2D… 填「組織 ID」，proj_0798F20… 填「專案 ID」',
+            example: '範例：…/organization/org-0610bE2D…/projects/proj_0798F20…/api_keys → org-0610bE2D… 填「組織 ID」，proj_0798F20… 填「專案 ID」',
           },
         },
         balance: '餘額 --',
@@ -501,7 +501,7 @@ export default {
         expiresAt: '到期 {time}',
         expiresAtFull: '重設次數到期時間: {time}',
         expandExpirations: '展開其餘 {count} 張重設次數到期時間',
-        collapseExpirations: '收起重設次數到期時間',
+        collapseExpirations: '摺疊重設次數到期時間',
         expirationDetails: '重設次數到期明細',
         noCreditsAvailable: '沒有可用的重設次數',
         resetSuccess: '已重設 {windows} 個視窗，次數和帳號狀態已更新',
@@ -864,7 +864,7 @@ export default {
       syncLiveAnthropicModelsFailures: '{count} 個帳號未回應，其支援的模型未計入：',
       syncLiveAnthropicModelsReplace: '替換為即時列表（將移除 {count} 項）',
       syncLiveAnthropicModelsReplaceConfirm:
-        '確定用即時交集替換整份白名單？{count} 個並非所有帳號都回傳的條目將被移除：{models}',
+        '確定用即時交集替換整份白名單？{count} 個並非所有帳號都回傳的項目將被移除：{models}',
       clearAllModels: '清除所有模型',
       customModelName: '自訂模型名稱',
       enterCustomModelName: '輸入自訂模型名稱',
@@ -906,7 +906,7 @@ export default {
         importJsonHint: '貼上扁平 JSON 物件（請求標頭名 → 值），解析後將整體替換目前列表。',
         importJsonInvalid: 'JSON 格式不正確：需要"請求標頭名 → 字串值"的扁平物件',
         copyJson: '複製為 JSON',
-        emptyValueHint: '值留空的行不會參與覆蓋，僅作為待填寫的佔位。',
+        emptyValueHint: '值留空的行不會參與覆蓋，僅作為待填寫的預留位置。',
         bulkDisableHint: '儲存後將關閉所選帳號的請求標頭覆寫並清空已有設定。',
         bulkReplaceHint: '儲存後將用下方設定整體替換所選帳號已有的請求標頭覆寫設定。',
         bulkEmptyRows: '請至少新增一行請求標頭再儲存；如需清空已有設定，請關閉上方開關。',
@@ -914,7 +914,7 @@ export default {
         blockedName: '該請求標頭不允許覆寫（驗證頭與連線控制頭由系統管理）',
         duplicateName: '存在重複的請求標頭名稱（匹配不區分大小寫）',
         invalidValue: '請求標頭值不合法（不允許控制字元，長度不超過 8192）',
-        tooManyEntries: '請求標頭覆寫條目過多（最多 64 條）'
+        tooManyEntries: '請求標頭覆寫項目過多（最多 64 條）'
       },
       grokCustomBaseUrl: {
         title: '自訂上游網址',

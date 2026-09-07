@@ -321,7 +321,7 @@
             </div>
             <div>
               <span class="block text-sm font-medium text-gray-900 dark:text-white">Vertex</span>
-              <span class="text-xs text-gray-500 dark:text-gray-400">Service Account</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('ui.serviceAccount') }}</span>
             </div>
           </button>
 
@@ -689,9 +689,7 @@
               <span class="block text-sm font-medium text-gray-900 dark:text-white">
                 Vertex
               </span>
-              <span class="text-xs text-gray-500 dark:text-gray-400">
-                Service Account
-              </span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('ui.serviceAccount') }}</span>
             </div>
           </button>
         </div>
@@ -1073,7 +1071,7 @@
       <!-- Vertex Service Account -->
       <div v-if="(form.platform === 'gemini' || form.platform === 'anthropic') && accountCategory === 'service_account'" class="space-y-4">
         <div>
-          <label class="input-label">Service Account JSON</label>
+          <label class="input-label">{{ t('ui.serviceAccountJson') }}</label>
           <input
             ref="vertexServiceAccountFileInput"
             type="file"
@@ -1117,7 +1115,7 @@
               class="mt-3 rounded-md border border-sky-200 bg-white px-3 py-2 text-xs text-sky-900 dark:border-sky-800/50 dark:bg-dark-800 dark:text-sky-200"
             >
               <div class="truncate">Project ID: <span class="font-mono">{{ vertexProjectId }}</span></div>
-              <div class="truncate">Client Email: <span class="font-mono">{{ vertexClientEmail }}</span></div>
+              <div class="truncate">{{ t('ui.clientEmail') }}:<span class="font-mono">{{ vertexClientEmail }}</span></div>
             </div>
           </div>
           <p class="input-hint">{{ t('admin.accounts.vertexSaJsonUploadHint') }}</p>

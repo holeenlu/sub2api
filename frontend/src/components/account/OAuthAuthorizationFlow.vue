@@ -246,9 +246,7 @@
               <label
                 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300"
               >
-                <Icon name="key" size="sm" class="text-blue-500" />
-                Refresh Token
-                <span
+                <Icon name="key" size="sm" class="text-blue-500" />{{ t('ui.refreshToken') }}<span
                   v-if="parsedRefreshTokenCount > 1"
                   class="rounded-full bg-blue-500 px-2 py-0.5 text-xs text-white"
                 >
@@ -834,7 +832,7 @@
                     <button
                       type="button"
                       class="btn btn-secondary p-2"
-                      title="Copy URL"
+                      :title="t('ui.copyUrl')"
                       @click="handleCopyUrl"
                     >
                       <svg
