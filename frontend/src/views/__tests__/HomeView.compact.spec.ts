@@ -72,6 +72,15 @@ function modelPlazaDestination(wrapper: ReturnType<typeof mountHome>) {
 }
 
 describe('HomeView compact mode', () => {
+  it.each(['', 'https://example.com/custom-logo.png'])(
+    'renders the actual logo in the default header (%j)', (logo) => {
+      const wrapper = mountHome({ compact_home_enabled: false, site_logo: logo })
+      const image = wrapper.get('[data-testid="home-brand-logo"]')
+      expect(image.element.tagName).toBe('IMG')
+      expect(image.attributes('src')).toBe(logo || '/logo.svg')
+      expect(image.attributes('alt')).toBe('Test site')
+    }
+  )
   beforeEach(() => {
     authStore.isAuthenticated = false
     authStore.isAdmin = false

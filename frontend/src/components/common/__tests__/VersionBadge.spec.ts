@@ -10,6 +10,7 @@ const appStoreState = {
   releaseInfo: null as unknown,
   buildType: 'release',
   upstreamVersion: 'v9.9.9',
+  buildCommit: '2776c84a5ebcc94d2fba1f551c200ab1d9ffe149',
   updateDisabled: true,
   fetchVersion: vi.fn(),
   clearVersionCache: vi.fn()
@@ -17,7 +18,7 @@ const appStoreState = {
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string, values?: { version: string }) => values ? `${key}: ${values.version}` : key
+    t: (key: string, values?: { commit: string }) => values ? `${key}: [${values.commit}]` : key
   })
 }))
 
@@ -80,7 +81,9 @@ describe('VersionBadge', () => {
     ]) {
       expect(text, `${hidden} should be hidden`).not.toContain(hidden)
     }
-    expect(wrapper.get('[data-testid="upstream-version"]').text()).toBe('version.upstreamBaseline: v9.9.9')
+    expect(wrapper.get('[data-testid="build-commit"]').text()).toBe('version.buildCommit: [2776c84a5]')
+    expect(wrapper.get('[data-testid="build-commit"]').attributes('title')).toBe(appStoreState.buildCommit)
+    expect(text).not.toContain('9.9.9')
     // only the badge button itself remains clickable in the popover
     expect(wrapper.findAll('button')).toHaveLength(1)
   })
@@ -105,20 +108,21 @@ describe('VersionBadge', () => {
     expect(text).toContain('version.rollback')
     // refresh button is back
     expect(wrapper.findAll('button').length).toBeGreaterThan(1)
-    expect(text).toContain('version.upstreamBaseline: v9.9.9')
+    expect(text).toContain('version.buildCommit: [2776c84a5]')
+    expect(text).not.toContain('9.9.9')
   })
 
-  it.each(['', '   '])('hides a missing upstream baseline (%j)', async (version) => {
-    appStoreState.upstreamVersion = version
+  it.each(['', '   ', 'unknown', 'docker', '123xyz7'])('hides an invalid build commit (%j)', async (commit) => {
+    appStoreState.buildCommit = commit
     const wrapper = await mountOpened()
-    expect(wrapper.find('[data-testid="upstream-version"]').exists()).toBe(false)
-    appStoreState.upstreamVersion = 'v9.9.9'
+    expect(wrapper.find('[data-testid="build-commit"]').exists()).toBe(false)
+    appStoreState.buildCommit = '2776c84a5ebcc94d2fba1f551c200ab1d9ffe149'
   })
 
-  it('normalizes an unprefixed upstream baseline', async () => {
-    appStoreState.upstreamVersion = ' 9.9.9 '
+  it('accepts a legacy short build commit', async () => {
+    appStoreState.buildCommit = ' ABCDEF0 '
     const wrapper = await mountOpened()
-    expect(wrapper.get('[data-testid="upstream-version"]').text()).toBe('version.upstreamBaseline: v9.9.9')
-    appStoreState.upstreamVersion = 'v9.9.9'
+    expect(wrapper.get('[data-testid="build-commit"]').text()).toBe('version.buildCommit: [abcdef0]')
+    appStoreState.buildCommit = '2776c84a5ebcc94d2fba1f551c200ab1d9ffe149'
   })
 })

@@ -64,7 +64,7 @@ jobs:
           {
             echo "image=$IMAGE"
             echo "version=$VERSION"
-            echo "commit=$(git rev-parse --short=7 HEAD)"
+            echo "commit=$(git rev-parse HEAD)"
             echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "platforms=$PLATFORMS"
             echo "push=$PUSH"

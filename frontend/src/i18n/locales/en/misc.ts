@@ -20,7 +20,7 @@ export default {
   // Version Badge
   version: {
     currentVersion: 'Current Version',
-    upstreamBaseline: 'Based on upstream Sub2API {version}',
+    buildCommit: 'Build commit [{commit}]',
     checkDisabled: 'Online update check is disabled',
     latestVersion: 'Latest Version',
     upToDate: "You're running the latest version.",

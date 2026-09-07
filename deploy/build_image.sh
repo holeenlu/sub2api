@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 docker build -t ghcr.io/erwinlin/tapmodels:latest \
+    --build-arg COMMIT="$(git -C "${REPO_ROOT}" rev-parse HEAD)" \
     --build-arg GOPROXY=https://goproxy.cn,direct \
     --build-arg GOSUMDB=sum.golang.google.cn \
     -f "${REPO_ROOT}/Dockerfile" \

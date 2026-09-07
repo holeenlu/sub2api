@@ -78,6 +78,7 @@ type UpdateService struct {
 	// upstreamVersion is the upstream Sub2API version this build is based on
 	// (e.g. "v0.2.1"); empty for upstream builds that inject nothing.
 	upstreamVersion string
+	buildCommit     string
 }
 
 // NewUpdateService creates a new UpdateService. The online update check is on
@@ -101,6 +102,25 @@ func (s *UpdateService) WithUpstreamVersion(version string) *UpdateService {
 	return s
 }
 
+// WithBuildCommit records the identity of the running binary, not a cached release.
+func (s *UpdateService) WithBuildCommit(commit string) *UpdateService {
+	if s == nil {
+		return nil
+	}
+	s.buildCommit = ""
+	commit = strings.TrimSpace(commit)
+	if len(commit) < 7 || len(commit) > 40 {
+		return s
+	}
+	for _, c := range commit {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
+			return s
+		}
+	}
+	s.buildCommit = strings.ToLower(commit)
+	return s
+}
+
 // WithCheckEnabled toggles the online update check (update.check_enabled).
 func (s *UpdateService) WithCheckEnabled(enabled bool) *UpdateService {
 	if s == nil {
@@ -120,12 +140,14 @@ func (s *UpdateService) disabledInfo() *UpdateInfo {
 		BuildType:      s.buildType,
 		// Build-time information is independent of the remote lookup.
 		UpstreamVersion: s.upstreamVersion,
+		BuildCommit:     s.buildCommit,
 		Disabled:        true,
 	}
 }
 
 // UpdateInfo contains update information
 type UpdateInfo struct {
+	BuildCommit    string       `json:"build_commit,omitempty"`
 	CurrentVersion string       `json:"current_version"`
 	LatestVersion  string       `json:"latest_version"`
 	HasUpdate      bool         `json:"has_update"`
@@ -210,6 +232,7 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 			Warning:         err.Error(),
 			BuildType:       s.buildType,
 			UpstreamVersion: s.upstreamVersion,
+			BuildCommit:     s.buildCommit,
 		}, nil
 	}
 
@@ -500,6 +523,7 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 		Cached:          false,
 		BuildType:       s.buildType,
 		UpstreamVersion: s.upstreamVersion,
+		BuildCommit:     s.buildCommit,
 	}, nil
 }
 
@@ -694,6 +718,7 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 		Cached:          true,
 		BuildType:       s.buildType,
 		UpstreamVersion: s.upstreamVersion,
+		BuildCommit:     s.buildCommit,
 	}, nil
 }
 
