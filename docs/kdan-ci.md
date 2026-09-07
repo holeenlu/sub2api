@@ -8,7 +8,8 @@
 
 - 公共代码：本地 `holeen/main` → `origin/main`。
 - 品牌代码：本地 `KDAN` → `origin/KDAN`，不覆盖公共 main。
-- 同步清单：`.release/brand-KDAN.json`；推送、部署须分别批准。
+- 同步入口：`deploy/sync-upstream.sh`，普通 merge 并保留原 SHA；检查点位于 `.release/upstream-sync/<id>/state.json`。
+- 推送、部署按该次明确授权分别执行；旧 `deploy/sync.sh` 已退役。
 - 不向公共 main 合入品牌提交，也不向公开 upstream 推送私有代码。
 
 ## 工作流
@@ -32,6 +33,9 @@ Compose 和版本界面统一使用 `ghcr.io/holeenlu/kdan`。
 私有 GHCR 包须登录并具备读取权限，CI 则使用仓库自带的 `GITHUB_TOKEN`。
 
 分支构建发布分支 tag 和 SHA tag；仅正式发版更新 `latest`。
+数字 SemVer tag（如 `1.0.0-rc.1`）中的预发布标识同时决定镜像通道与 GitHub prerelease。
+预发布不更新 `latest`；非法版本在构建前拒绝，手动选择不推送时也不创建 Release。
+带 build metadata 的版本将镜像 tag 中的 `+` 转为 `_`，Release 保留原始版本名。
 生产通过 `KDAN_IMAGE` 固定 release tag 或 digest，不应把分支推送当成 latest 更新。
 
 仅从已审查的品牌提交创建版本：
@@ -41,8 +45,8 @@ git tag -a 1.0.0 -m "KDAN 1.0.0"
 git push origin refs/tags/1.0.0
 ```
 
-数字版本 tag 属于其发布仓库对应的品牌。TapModels tag 必须推到 `erwinlin`，
-不能推到公共 `origin`。上游 `v*` tag 仅用于基线溯源，不是私有品牌发版。
+数字版本 tag 属于其发布仓库对应的品牌。KDAN tag 从 KDAN 分支推到 `origin`，
+品牌分支仍发布到 `origin/KDAN`。上游 `v*` tag 仅用于基线溯源，不是私有品牌发版。
 CI 不自动部署生产。
 
 ## 徽章中的编译提交
@@ -64,8 +68,8 @@ Compose 部署。旧安装器默认禁用，显式启用检查必须在停止服
 在线私有 release 检查需要运行时凭据，不承担公开上游代码同步。
 
 镜像保留 `/app/sub2api` 兼容入口；本地打包传入 `BINARY_NAME=sub2api`，
-GoReleaser 默认使用品牌二进制名。本地生产发版驱动仍限定 `holeen/main`，
-品牌发布使用上述 CI 通道，不绕过分支保护。
+GoReleaser 默认使用品牌二进制名。本地发布驱动支持显式 `--branch`，
+发布前明确核对目标分支和生产站点；品牌 CI 发布渠道按上表分别运行。
 
 本次兼容修复不迁移现有生产容器名、数据库、卷或 Compose 服务键。
 不得未经迁移审查直接用改名后的品牌模板覆盖线上 Compose。

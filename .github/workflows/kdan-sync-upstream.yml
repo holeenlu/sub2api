@@ -75,8 +75,7 @@ jobs:
             exit 1
           fi
 
-          # 線性模型下，main 就是「某個 upstream/main commit ＋ 本地 commit」，
-          # 兩者的 merge-base 即本 repo 目前掛靠的上游基準點。
+          # merge-base 表示目前已納入的上游基準，適用於保留原始提交的合併歷史。
           BASE="$(git merge-base HEAD refs/remotes/upstream/main)"
           BASE_TAG="$(git describe --tags --match 'v*' --abbrev=0 "$BASE" 2>/dev/null || echo '（無法推導）')"
 
@@ -169,7 +168,7 @@ jobs:
               if [ "$n" = "0" ]; then continue; fi
               HIT=1
               case "$p" in
-                backend/ent/schema) note="rebase 後要重跑 \`go generate ./...\`，ent 產生碼衝突不要手解" ;;
+                backend/ent/schema) note="合併後要重跑 \`go generate ./ent\`，ent 產生碼衝突不要手解" ;;
                 backend/migrations) note="有新的 DB migration，部署前確認順序" ;;
                 frontend/src/i18n/locales/zh) note="zh 文案有變，同步後要重跑 \`node tools/zh-tw/gen-locale.mjs\`" ;;
                 tools/zh-tw) note="上游出現同名路徑，會與本地繁體工具鏈撞名" ;;
@@ -180,7 +179,7 @@ jobs:
             echo
             echo "## 雙方都改過的檔案"
             echo
-            echo "（上游與本地 commit 都動過，rebase 時最容易衝突）"
+            echo "（上游與本地 commit 都動過，合併時需核對雙方行為）"
             echo '```'
             comm -12 /tmp/up-files.txt /tmp/our-files.txt | head -n 60 | grep . || echo "無"
             echo '```'
@@ -210,23 +209,14 @@ jobs:
             cat /tmp/dry.txt
             echo '```'
             echo
-            echo "## 同步步驟（在本機做）"
-            echo
-            echo '```bash'
-            echo "# 線性 rebase：main 由本機 KDAN 分支 force-push 上來，不要在 GitHub 上合併"
-            echo "deploy/sync.sh          # 或手動："
-            echo "git fetch upstream --tags"
-            echo "git rebase upstream/main   # 注意上面列的衝突熱點與保護清單"
-            echo "# TODO(brand)：KDAN 目前沒有專屬的 remote，暫時推到 origin"
-            echo "git push --force-with-lease origin KDAN:main"
-            echo '```'
+            python3 deploy/upstream_sync_instructions.py kdan
             echo
             echo "## Checklist"
             echo
             echo "- [ ] 保護清單／疑似比對字串已確認（必要時補進 \`tools/zh-tw/convert-go.mjs\`）"
             echo "- [ ] ent schema 有變就重跑 \`go generate\`；zh 文案有變就重跑 \`gen-locale.mjs\`"
-            echo "- [ ] force-push 後 main 的 CI 綠燈"
-            echo "- [ ] main 更新後會自動建映像推到 GHCR"
+            echo "- [ ] 普通推送後目標分支的 CI 綠燈"
+            echo "- [ ] 已核對目標分支推送會觸發的映像發布工作流程"
             echo
             echo "本 issue 由 kdan-sync-upstream 工作流程自動維護（唯讀監看，不會自己開 PR）；main 跟上後自動關閉。"
           } > body.md

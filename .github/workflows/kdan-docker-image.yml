@@ -35,10 +35,21 @@ jobs:
     if: github.repository == 'holeenlu/sub2api'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      version: ${{ steps.meta-vars.outputs.version }}
+      image_tag: ${{ steps.release-tag.outputs.image_tag }}
+      prerelease: ${{ steps.release-tag.outputs.prerelease }}
+      stable: ${{ steps.release-tag.outputs.stable }}
+      pushed: ${{ steps.meta-vars.outputs.push }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: 校驗發版標籤
+        id: release-tag
+        shell: bash
+        run: python3 deploy/release_metadata.py "$GITHUB_REF" >> "$GITHUB_OUTPUT"
 
       - name: 計算版本與映像名稱
         id: meta-vars
@@ -46,12 +57,13 @@ jobs:
         env:
           INPUT_PLATFORMS: ${{ inputs.platforms }}
           INPUT_PUSH: ${{ inputs.push }}
+          TAG_VERSION: ${{ steps.release-tag.outputs.version }}
         run: |
           set -euo pipefail
           IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kdan"
 
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+            VERSION="$TAG_VERSION"
           else
             LAST="$(git describe --tags --abbrev=0 --match '[0-9]*' 2>/dev/null || echo 0.0.0)"
             VERSION="${LAST#v}-kdan.$(git rev-parse --short=7 HEAD)"
@@ -78,9 +90,7 @@ jobs:
           set -euo pipefail
           # >>> 上游版本推導：build 與 release job 各有一份，必須逐字一致，改一邊要同步改另一邊 <<<
           # 上游版本 = 本分支掛靠的那個上游 commit 最近的 v* tag。
-          # main 是維護者本機的線性分支 force-push 上來的（rebase 到 upstream/main 之上），
-          # 樹裡沒有「chore(sync): 合併上游 vX.Y.Z」這種 merge commit 可以掃，
-          # 所以改用 merge-base + describe 直接問 git「我是站在哪個上游版本上」。
+          # 由 merge-base + describe 推導已納入的上游版本，不依賴合併提交標題。
           # 也不能讀 backend/cmd/server/VERSION：上游是在發版流程裡才回寫那個檔
           # （chore: sync VERSION to X [skip ci]），vX.Y.Z 這個 tag 上的檔案內容永遠是
           # 「上一版」（v0.2.1 上寫著 0.2.0）——只在推導失敗時當退路。
@@ -115,11 +125,12 @@ jobs:
         id: meta
         with:
           images: ${{ env.IMAGE }}
+          flavor: latest=false
           tags: |
             type=ref,event=branch
             type=sha,prefix=sha-,format=short
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=${{ steps.release-tag.outputs.image_tag }},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=latest,enable=${{ steps.release-tag.outputs.stable == 'true' }}
 
       - uses: docker/build-push-action@v6
         with:
@@ -162,7 +173,7 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') && needs.build.outputs.pushed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -176,16 +187,17 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+          STABLE: ${{ needs.build.outputs.stable }}
         run: |
           set -euo pipefail
           TAG="$GITHUB_REF_NAME"
-          VERSION="${TAG#v}"
           IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kdan"
           # >>> 上游版本推導：build 與 release job 各有一份，必須逐字一致，改一邊要同步改另一邊 <<<
           # 上游版本 = 本分支掛靠的那個上游 commit 最近的 v* tag。
-          # main 是維護者本機的線性分支 force-push 上來的（rebase 到 upstream/main 之上），
-          # 樹裡沒有「chore(sync): 合併上游 vX.Y.Z」這種 merge commit 可以掃，
-          # 所以改用 merge-base + describe 直接問 git「我是站在哪個上游版本上」。
+          # 由 merge-base + describe 推導已納入的上游版本，不依賴合併提交標題。
           # 也不能讀 backend/cmd/server/VERSION：上游是在發版流程裡才回寫那個檔
           # （chore: sync VERSION to X [skip ci]），vX.Y.Z 這個 tag 上的檔案內容永遠是
           # 「上一版」（v0.2.1 上寫著 0.2.0）——只在推導失敗時當退路。
@@ -208,7 +220,10 @@ jobs:
             echo "基於上游 Sub2API ${UPSTREAM_TAG}（https://github.com/Wei-Shaw/sub2api/releases/tag/${UPSTREAM_TAG}）"
             echo
             echo "## 映像"
-            echo "\`${IMAGE}:${VERSION}\`（同時更新 \`latest\`）"
+            echo "\`${IMAGE}:${IMAGE_TAG}\`"
+            if [ "$STABLE" = "true" ]; then
+              echo '正式版本，同時更新 `latest`。'
+            fi
             echo
             if [ -n "$PREV" ]; then
               echo "## 變更（自 ${PREV}）"
@@ -219,11 +234,10 @@ jobs:
             fi
           } > notes.md
 
-          ARGS=()
-          case "$TAG" in *-*) ARGS+=(--prerelease);; esac
+          ARGS=(--prerelease="$PRERELEASE")
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --notes-file notes.md
+            gh release edit "$TAG" --notes-file notes.md "${ARGS[@]}"
           else
             gh release create "$TAG" --title "KDAN v${VERSION}" --notes-file notes.md "${ARGS[@]}"
           fi

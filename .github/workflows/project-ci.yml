@@ -7,9 +7,8 @@ name: Project · CI
 # 路徑過濾：先由 changes job 算出 PR 改到哪些區域，只改前端就不跑後端測試（約 9 分鐘），
 # 反之亦然。手動觸發（workflow_dispatch）一律全跑。改到本檔或 Makefile 也全跑。
 #
-# push main 也要跑：main 是維護者本機線性分支 force-push 上來的，那些 commit 從來沒有
-# 經過 PR，只掛 pull_request 觸發等於 main 完全沒被測過。force-push 的前後基準不可比
-# （event.before 常常不是祖先），所以 push 事件不做路徑過濾，一律全跑。
+# 本機普通合併後的推送也需要驗證，不能只依賴 PR 檢查。
+# push 與手動觸發一律全跑；PR 才按路徑選擇檢查範圍。
 
 on:
   push:
@@ -70,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" != "pull_request" ]; then
-            # push main（含 force-push）與手動觸發：全部跑
+            # push main 與手動觸發：全部跑
             for k in backend frontend zhtw; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi

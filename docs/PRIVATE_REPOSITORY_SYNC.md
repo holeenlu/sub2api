@@ -1,7 +1,7 @@
 # 私有仓库与公开上游同步
 
 `holeenlu/sub2api` 已转为私有独立仓库，并脱离 GitHub Fork 网络。
-公开代码源仍为 `Wei-Shaw/sub2api`；保留的 Git 历史允许继续 fetch/rebase，
+公开代码源仍为 `Wei-Shaw/sub2api`；保留的 Git 历史允许继续 fetch 与普通 merge，
 不依赖 GitHub 的 Fork 同步按钮，也不需要重新加入 Fork 网络。
 
 ## 分支边界
@@ -12,9 +12,10 @@
 | `holeen/main` | `origin/main` | 公共功能集成，不包含品牌提交 |
 | 品牌分支 | `origin/<brand>`，可另有专属远端 | 品牌独有改动 |
 
-禁止把品牌分支覆盖到 `origin/main`。本地同步工具从
-`.release/brand-<brand>.json` 读取公共基线和品牌发布远端。
-同步工具及清单属于本地文件，新工作站须另行配置；不能只靠 clone 恢复。
+禁止把品牌分支覆盖到 `origin/main`。现行入口是 `deploy/sync-upstream.sh`，
+调用个人 `sync-upstream` 技能，固定上述公共层与品牌分支的远端映射。
+检查点保存在 `.release/upstream-sync/<id>/state.json`。技能及入口属于本地文件，
+新工作站须另行配置；不能只靠 clone 恢复。旧 `deploy/sync.sh` 已退役。
 推送与部署仍需分别批准，不向公开 upstream 推送私有代码。
 
 ## 私有访问
@@ -31,8 +32,18 @@ git fetch --no-tags upstream '+refs/heads/main:refs/remotes/upstream/main' '+ref
 git merge-base holeen/main upstream/main
 ```
 
-fetch 只更新引用，不会自动更新应用代码。先将公共集成分支 rebase 到已审查的
-上游基线并验证，再将各品牌 rebase 到新的公共层。数据库迁移与部署另行验收。
+fetch 只更新引用，不会自动更新应用代码。在维护者整合工作区执行：
+
+```bash
+./deploy/sync-upstream.sh prepare --all
+./deploy/sync-upstream.sh status
+```
+
+prepare 会让公共层、KDAN、TapModels 分别普通 merge 同一固定上游 SHA，
+保留原提交并运行验证，不执行历史重写或自动推送。出现冲突后按检查点处理。
+验证完成并获得该次推送授权后，再使用检查点 ID 执行 publish。
+`--all` 不会把公共层的新定制自动传播到品牌；公共修复的接收范围须另行确认。
+数据库迁移与部署另行验收。
 
 ## 默认分支自动化
 

@@ -110,6 +110,8 @@ type noAccountFallbackChain struct {
 	source  *Group
 	visited map[int64]struct{}
 	hops    int
+	// Diagnosis must not publish a precise attribution from an unreadable chain.
+	loadFailed bool
 }
 
 func newNoAccountFallbackChain(origin *int64, load groupLiteLoader, hopContext func(context.Context, *Group) context.Context) *noAccountFallbackChain {
@@ -122,14 +124,19 @@ func newNoAccountFallbackChain(origin *int64, load groupLiteLoader, hopContext f
 
 func (c *noAccountFallbackChain) loadGroup(ctx context.Context, groupID int64) *Group {
 	if c.load == nil {
+		c.loadFailed = true
 		return nil
 	}
 	group, err := c.load(ctx, groupID)
 	if err != nil {
+		c.loadFailed = true
 		// 跑在选号失败的冷路径上：读不到就当作「没有兜底」，不把配置读取故障
 		// 放大成额外的请求失败。
 		slog.Debug("scheduling.group_fallback_load_failed", "group_id", groupID, "error", err)
 		return nil
+	}
+	if group == nil {
+		c.loadFailed = true
 	}
 	return group
 }

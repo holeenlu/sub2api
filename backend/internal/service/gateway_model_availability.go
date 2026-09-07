@@ -194,25 +194,11 @@ func sameRateLimitAttribution(left, right *RateLimitAttribution) bool {
 		left.Reason == right.Reason && left.Model == right.Model
 }
 
-// isFinalWithoutFallbackChain reports whether the fallback groups can still
-// change the status code this diagnosis leads to. Only one case needs the
-// chain: the origin has no account configured for the model, where a fallback
-// group that does serve it turns a 404 model_not_found into a 503/429. That is
-// a misconfiguration path, not a hot one.
-//
-// A fully cooling origin deliberately does NOT walk the chain. The verdict is
-// already 429: selection just failed across every hop, so no fallback group has
-// a live capable account either. Walking would only refine Retry-After and the
-// Fable attribution with the fallback groups' cooldowns, at the price of one
-// group read plus one candidate query per hop on exactly the response clients
-// retry at Retry-After cadence for the whole cooldown window (the pre-fallback
-// diagnosis cost one query in total; see the upstream early return). The
-// origin-only Retry-After is the conservative direction and the header is
-// capped at five minutes anyway. The conservative {true,true} the diagnosers
-// return on a lookup failure is covered too, so a database hiccup does not fan
-// out into one extra query per hop on the error path.
+// Walk the fallback chain when it can establish model support or disprove a
+// precise attribution. Generic origin-only cooldowns keep the bounded retry
+// hint without extra queries; a Fable retry_at requires evidence from all pools.
 func (d ModelAvailabilityDiagnosis) isFinalWithoutFallbackChain() bool {
-	return d.HasModelSupport
+	return d.HasModelSupport && d.RateLimit == nil
 }
 
 // diagnoseAcrossNoAccountFallback merges the per-group diagnoses along the
@@ -276,7 +262,7 @@ func diagnoseAcrossNoAccountFallback(
 		absorb(hop(ctx, &targetID))
 	}
 	merged.AllModelCapableRateLimited = supporting > 0 && supporting == allCooling
-	if merged.AllModelCapableRateLimited && preciseAttribution && attribution != nil {
+	if merged.AllModelCapableRateLimited && preciseAttribution && attribution != nil && !chain.loadFailed {
 		attribution.ResetAt = merged.EarliestRateLimitResetAt
 		merged.RateLimit = attribution
 	}
@@ -308,10 +294,8 @@ type ModelAvailabilityDiagnoser interface {
 // or when the inputs preclude meaningful diagnosis (empty model, etc.), so
 // callers stay on the 503 fallback branch.
 //
-// When the origin group has no account configured for the model, the diagnosis
-// spans the no-account fallback chain so a fallback group that does serve it is
-// not reported as 404; see diagnoseAcrossNoAccountFallback and
-// isFinalWithoutFallbackChain for why a fully cooling origin stays origin-only.
+// Missing model support and precise Fable attributions require checking the
+// no-account fallback chain. Generic cooldowns retain an origin-only retry hint.
 func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 	ctx context.Context,
 	groupID *int64,

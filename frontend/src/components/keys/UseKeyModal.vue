@@ -319,6 +319,8 @@ const { t } = useI18n()
 // 產生給 CLI 的設定檔片段裡的站名，跟隨後台設定而不是寫死品牌名
 const appStore = useAppStore()
 const siteName = computed(() => appStore.siteName || BRAND_NAME)
+// eslint-disable-next-line no-control-regex -- TOML comments cannot contain raw control characters.
+const siteNameComment = computed(() => siteName.value.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' '))
 const { copyToClipboard: clipboardCopy } = useClipboard()
 
 const copiedIndex = ref<number | null>(null)
@@ -1021,7 +1023,12 @@ function joinConfigPath(dir: string, file: string, windows: boolean): string {
 }
 
 function escapeTomlBasicString(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  // eslint-disable-next-line no-control-regex -- TOML basic strings require escaped control characters.
+  return value.replace(/[\\"\u0000-\u001f\u007f]/g, (char) => {
+    if (char === '\\') return '\\\\'
+    if (char === '"') return '\\"'
+    return '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0')
+  })
 }
 
 function generateGrokFiles(baseUrl: string, apiKey: string): FileConfig[] {
@@ -1054,11 +1061,11 @@ export XAI_API_KEY="${apiKey}"`
   // Text models only (Responses). Image/video: Imagine model IDs on media endpoints / feature overrides.
   // Credential order: api_key field → env_key → signed-in session → XAI_API_KEY global fallback.
   const modelsListUrl = `${baseUrl.replace(/\/+$/, '')}/models`
-  const configContent = `# Grok Build CLI → ${siteName.value} Grok group (API key auth).
+  const configContent = `# Grok Build CLI → ${siteNameComment.value} Grok group (API key auth).
 # Docs: ~/.grok/docs/user-guide/05-configuration.md + 11-custom-models.md
 # Verify after save: grok inspect
 #
-# IMPORTANT: api_backend must be "responses" for ${siteName.value} Grok (POST /v1/responses).
+# IMPORTANT: api_backend must be "responses" for ${siteNameComment.value} Grok (POST /v1/responses).
 # If omitted, Grok Build defaults to chat_completions (/v1/chat/completions).
 # Keep api_backend = "responses" on every model entry.
 #
@@ -1073,7 +1080,7 @@ models_list_url = "${modelsListUrl}"        # optional override (env: GROK_MODEL
 xai_api_base_url = "${baseUrl}"             # public xAI API base override for gateway routing
 cli_chat_proxy_base_url = "${baseUrl}"      # CLI chat-proxy base (env: GROK_CLI_CHAT_PROXY_BASE_URL)
 
-# Prefer API key when using a custom gateway (matches ${siteName.value}).
+# Prefer API key when using a custom gateway (matches ${siteNameComment.value}).
 # Requires XAI_API_KEY env or per-model env_key / api_key.
 [auth]
 preferred_method = "api_key"
@@ -1081,7 +1088,7 @@ preferred_method = "api_key"
 [model."grok-4.5"]
 model = "grok-4.5"                          # id sent to the API
 name = "Grok 4.5"                           # shown in /model picker
-description = "Grok 4.5 via ${siteName.value} (Responses)"
+description = "Grok 4.5 via ${escapeTomlBasicString(siteName.value)} (Responses)"
 # base_url inherits from [endpoints].models_base_url; override only if needed:
 # base_url = "${baseUrl}"
 env_key = "XAI_API_KEY"                     # or: api_key = "${apiKey}"  (not recommended)
@@ -1144,7 +1151,7 @@ image_description = "grok-4.5"              # vision/describe-image helper model
 [session]
 auto_compact_threshold_percent = 80         # auto-compact at this % of context_window (default 85)
 
-# Imagine tools: model IDs go to ${siteName.value} media endpoints (not the text [model.*] catalog).
+# Imagine tools: model IDs go to ${siteNameComment.value} media endpoints (not the text [model.*] catalog).
 # Enable only if the Grok group allows image/video generation.
 [features]
 image_gen = true
@@ -1192,7 +1199,7 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
       envContent = `export KDAN_API_KEY="${apiKey}"`
   }
 
-  const configContent = `# Codex CLI → ${siteName.value} Grok group
+  const configContent = `# Codex CLI → ${siteNameComment.value} Grok group
 # Docs: Codex config reference (model_providers.*, wire_api = "responses")
 #
 # Text models only. Image/video: grok-imagine-image / grok-imagine-video on media endpoints.
@@ -1210,7 +1217,7 @@ model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
 # windows_wsl_setup_acknowledged = true
 
 [model_providers.kdan]
-name = "${siteName.value} Grok"
+name = "${escapeTomlBasicString(siteName.value)} Grok"
 base_url = "${baseUrl}"
 # Prefer env_key (variable NAME). Do not combine with experimental_bearer_token.
 env_key = "KDAN_API_KEY"
@@ -1219,7 +1226,7 @@ env_key = "KDAN_API_KEY"
 wire_api = "responses"
 # API-key providers: do not require ChatGPT OAuth login
 requires_openai_auth = false
-# Grok/${siteName.value} path is HTTP/SSE; disable WS (Codex may otherwise try WebSocket first)
+# Grok/${siteNameComment.value} path is HTTP/SSE; disable WS (Codex may otherwise try WebSocket first)
 supports_websockets = false
 
 # Optional:
@@ -1273,7 +1280,7 @@ function generateRoutedCodexFiles(
     ? `$env:KDAN_API_KEY="${apiKey}"`
     : `export KDAN_API_KEY="${apiKey}"`
 
-  const configContent = `# Codex CLI -> ${siteName.value} ${label} group
+  const configContent = `# Codex CLI -> ${siteNameComment.value} ${label} group
 model_provider = "kdan"
 model = "${model}"
 review_model = "${model}"
@@ -1281,7 +1288,7 @@ disable_response_storage = true
 model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
 
 [model_providers.kdan]
-name = "${siteName.value} ${label}"
+name = "${escapeTomlBasicString(siteName.value)} ${label}"
 base_url = "${baseUrl}"
 env_key = "KDAN_API_KEY"
 wire_api = "responses"
