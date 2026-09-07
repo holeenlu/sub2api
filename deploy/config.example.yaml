@@ -1215,14 +1215,13 @@ gemini:
 # Update Configuration (在线更新配置)
 # =============================================================================
 update:
-  # Online release check behind the admin version badge (queries GitHub releases).
-  # Default true keeps upstream behaviour. Set false to turn it off: version check,
+  # Release check behind the version badge (queries this fork's own releases,
+  # holeenlu/sub2api). Off by default for white-label deployments: version check,
   # self-update and rollback endpoints return "disabled" and no request is made to
-  # GitHub; the badge then shows only the running version.
-  # 管理后台版本徽章的在线版本检查（查询 GitHub release）。默认 true 与上游一致；
-  # 设为 false 时版本检查、自更新与回滚接口直接返回 "disabled"，不会访问 GitHub，
-  # 徽章只显示当前版本号。
-  check_enabled: true
+  # GitHub. Set true to allow the online check.
+  # 版本徽章的线上版本检查（查本 fork 自己的 release）。默认关闭（白标部署）：
+  # 版本检查、自更新与回滚接口直接返回 "disabled"，不会访问 GitHub。需要时显式设为 true。
+  check_enabled: false
   # Proxy URL for accessing GitHub (used for online updates and pricing data)
   # 用于访问 GitHub 的代理地址（用于在线更新和定价数据获取）
   # Supports: http, https, socks5, socks5h

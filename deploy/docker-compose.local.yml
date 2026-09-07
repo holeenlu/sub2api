@@ -212,9 +212,9 @@ services:
       # =======================================================================
       # Update Configuration (在线更新配置)
       # =======================================================================
-      # Online release check + the self-update / rollback UI (update.check_enabled,
-      # default true). Set false to keep the deployment from reaching GitHub.
-      - UPDATE_CHECK_ENABLED=${UPDATE_CHECK_ENABLED:-true}
+      # Enable checking GitHub releases for updates and the self-update UI
+      # 是否检查上游发布并显示自更新入口，白标构建默认关闭
+      - UPDATE_CHECK_ENABLED=${UPDATE_CHECK_ENABLED:-false}
       # Proxy for accessing GitHub (online updates + pricing data)
       # Examples: http://host:port, socks5://host:port
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}

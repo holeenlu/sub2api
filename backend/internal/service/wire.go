@@ -44,7 +44,7 @@ func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient)
 }
 
 // ProvideUpdateService creates UpdateService with BuildInfo. Online update
-// checks follow update.check_enabled (default true).
+// checks follow update.check_enabled (default false for this brand).
 func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo, cfg *config.Config) *UpdateService {
 	svc := NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType).
 		WithUpstreamVersion(buildInfo.UpstreamVersion)

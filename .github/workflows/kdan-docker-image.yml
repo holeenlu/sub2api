@@ -1,0 +1,228 @@
+name: KDAN · Docker 映像與 Release
+
+# main 每次更新就建一版 :main / :sha-xxxxxxx 映像；打 v* tag 時另外建語意化版本
+# 與 :latest，並開一個 GitHub Release（版本徽章讀的就是這個 release）。
+
+on:
+  push:
+    branches: [main]
+    # tag 不加 v 前綴（例如 1.0.0）：上游的 release.yml 只監聽 v*，這樣它永遠不會在本 repo 被觸發，
+    # 也就不必停用它（未登記的工作流程無法用 API 停用）。後端 compareVersions 接受沒有 v 的版號。
+    tags: ['[0-9]*']
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: 逗號分隔，例如 linux/amd64,linux/arm64
+        required: false
+        default: linux/amd64
+        type: string
+      push:
+        description: 是否推送到 GHCR
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: kdan-docker-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: 計算版本與映像名稱
+        id: meta-vars
+        shell: bash
+        env:
+          INPUT_PLATFORMS: ${{ inputs.platforms }}
+          INPUT_PUSH: ${{ inputs.push }}
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            LAST="$(git describe --tags --abbrev=0 --match '[0-9]*' 2>/dev/null || echo 0.0.0)"
+            VERSION="${LAST#v}-main.$(git rev-parse --short=7 HEAD)"
+          fi
+
+          PLATFORMS="${INPUT_PLATFORMS:-linux/amd64}"
+          PUSH=true
+          if [ "$INPUT_PUSH" = "false" ]; then PUSH=false; fi
+
+          {
+            echo "image=$IMAGE"
+            echo "version=$VERSION"
+            echo "commit=$(git rev-parse --short=7 HEAD)"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "platforms=$PLATFORMS"
+            echo "push=$PUSH"
+          } >> "$GITHUB_OUTPUT"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: 計算上游版本
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          # >>> 上游版本推導：build 與 release job 各有一份，必須逐字一致，改一邊要同步改另一邊 <<<
+          # 上游版本 = 本分支掛靠的那個上游 commit 最近的 v* tag。
+          # main 是維護者本機的線性分支 force-push 上來的（rebase 到 upstream/main 之上），
+          # 樹裡沒有「chore(sync): 合併上游 vX.Y.Z」這種 merge commit 可以掃，
+          # 所以改用 merge-base + describe 直接問 git「我是站在哪個上游版本上」。
+          # 也不能讀 backend/cmd/server/VERSION：上游是在發版流程裡才回寫那個檔
+          # （chore: sync VERSION to X [skip ci]），vX.Y.Z 這個 tag 上的檔案內容永遠是
+          # 「上一版」（v0.2.1 上寫著 0.2.0）——只在推導失敗時當退路。
+          git remote get-url upstream >/dev/null 2>&1 \
+            || git remote add upstream 'https://github.com/Wei-Shaw/sub2api.git'
+          git fetch --quiet upstream --tags
+          UPSTREAM_BASE="$(git merge-base HEAD upstream/main 2>/dev/null || true)"
+          UPSTREAM_TAG=""
+          if [ -n "$UPSTREAM_BASE" ]; then
+            UPSTREAM_TAG="$(git describe --tags --match 'v*' --abbrev=0 "$UPSTREAM_BASE" 2>/dev/null || true)"
+          fi
+          if [ -z "$UPSTREAM_TAG" ]; then
+            echo "::warning::無法由 upstream/main 推導上游版本，退回 backend/cmd/server/VERSION"
+            UPSTREAM_TAG="v$(tr -d ' \n\r' < backend/cmd/server/VERSION)"
+          fi
+          # <<< 上游版本推導結束 >>>
+          echo "upstream_version=$UPSTREAM_TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+        if: contains(steps.meta-vars.outputs.platforms, 'arm64')
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: steps.meta-vars.outputs.push == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ steps.meta-vars.outputs.platforms }}
+          push: ${{ steps.meta-vars.outputs.push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta-vars.outputs.version }}
+            COMMIT=${{ steps.meta-vars.outputs.commit }}
+            DATE=${{ steps.meta-vars.outputs.date }}
+            UPSTREAM_VERSION=${{ steps.upstream.outputs.upstream_version }}
+            ZH_TW=true
+            GOPROXY=https://proxy.golang.org,direct
+            GOSUMDB=sum.golang.org
+            NPM_CONFIG_REGISTRY=https://registry.npmjs.org
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      - name: 摘要
+        shell: bash
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### KDAN 映像"
+            echo
+            echo "版本字串：\`${{ steps.meta-vars.outputs.version }}\`"
+            echo
+            echo "推送：\`${{ steps.meta-vars.outputs.push }}\`，平台：\`${{ steps.meta-vars.outputs.platforms }}\`"
+            echo
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: 產生 release notes 並發布
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          VERSION="${TAG#v}"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          # >>> 上游版本推導：build 與 release job 各有一份，必須逐字一致，改一邊要同步改另一邊 <<<
+          # 上游版本 = 本分支掛靠的那個上游 commit 最近的 v* tag。
+          # main 是維護者本機的線性分支 force-push 上來的（rebase 到 upstream/main 之上），
+          # 樹裡沒有「chore(sync): 合併上游 vX.Y.Z」這種 merge commit 可以掃，
+          # 所以改用 merge-base + describe 直接問 git「我是站在哪個上游版本上」。
+          # 也不能讀 backend/cmd/server/VERSION：上游是在發版流程裡才回寫那個檔
+          # （chore: sync VERSION to X [skip ci]），vX.Y.Z 這個 tag 上的檔案內容永遠是
+          # 「上一版」（v0.2.1 上寫著 0.2.0）——只在推導失敗時當退路。
+          git remote get-url upstream >/dev/null 2>&1 \
+            || git remote add upstream 'https://github.com/Wei-Shaw/sub2api.git'
+          git fetch --quiet upstream --tags
+          UPSTREAM_BASE="$(git merge-base HEAD upstream/main 2>/dev/null || true)"
+          UPSTREAM_TAG=""
+          if [ -n "$UPSTREAM_BASE" ]; then
+            UPSTREAM_TAG="$(git describe --tags --match 'v*' --abbrev=0 "$UPSTREAM_BASE" 2>/dev/null || true)"
+          fi
+          if [ -z "$UPSTREAM_TAG" ]; then
+            echo "::warning::無法由 upstream/main 推導上游版本，退回 backend/cmd/server/VERSION"
+            UPSTREAM_TAG="v$(tr -d ' \n\r' < backend/cmd/server/VERSION)"
+          fi
+          # <<< 上游版本推導結束 >>>
+          PREV="$(git describe --tags --abbrev=0 --match '[0-9]*' "${TAG}^" 2>/dev/null || true)"
+
+          {
+            echo "基於上游 Sub2API ${UPSTREAM_TAG}（https://github.com/Wei-Shaw/sub2api/releases/tag/${UPSTREAM_TAG}）"
+            echo
+            echo "## 映像"
+            echo "\`${IMAGE}:${VERSION}\`（同時更新 \`latest\`）"
+            echo
+            if [ -n "$PREV" ]; then
+              echo "## 變更（自 ${PREV}）"
+              git log --first-parent --pretty='- %s (%h)' "${PREV}..${TAG}"
+            else
+              echo "## 變更（自 初始）"
+              git log --first-parent --pretty='- %s (%h)' -n 50 "$TAG"
+            fi
+          } > notes.md
+
+          ARGS=()
+          case "$TAG" in *-*) ARGS+=(--prerelease);; esac
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --title "KDAN v${VERSION}" --notes-file notes.md "${ARGS[@]}"
+          fi
