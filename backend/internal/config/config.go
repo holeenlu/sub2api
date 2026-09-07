@@ -172,9 +172,9 @@ type GeminiTierQuotaConfig struct {
 }
 
 type UpdateConfig struct {
-	// CheckEnabled 控制是否允许在线版本检查与自更新（默认 true，与上游行为一致）。
-	// 设为 false 时版本检查、自更新和版本回滚接口直接返回 disabled，
-	// 不会向 GitHub 发起任何请求；不发布 release 的品牌构建应关闭。
+	// CheckEnabled 控制是否允许在线版本检查与自更新（本品牌构建默认 false）。
+	// 为 false 时版本检查、自更新和版本回滚接口直接返回 disabled，不会向 GitHub
+	// 发起任何请求；要查 erwinlin/TapModels 的 release 时显式设为 true。
 	CheckEnabled bool `mapstructure:"check_enabled"`
 
 	// ProxyURL 用于访问 GitHub 的代理地址
@@ -2060,9 +2060,10 @@ func setDefaults() {
 	viper.SetDefault("cors.allowed_origins", []string{})
 	viper.SetDefault("cors.allow_credentials", true)
 
-	// Update: online version check / self-update against the release repository.
-	// Reachable from the environment as UPDATE_CHECK_ENABLED.
-	viper.SetDefault("update.check_enabled", true)
+	// Update: online version check / self-update against the release repository
+	// (erwinlin/TapModels, private). Off by default for this brand; set
+	// UPDATE_CHECK_ENABLED=true to let a deployment reach GitHub.
+	viper.SetDefault("update.check_enabled", false)
 
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
 	// declare its relying-party domain and trusted browser origins.

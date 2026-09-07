@@ -30,7 +30,7 @@ node tools/zh-tw/gen-locale.mjs --check   # 只比對不寫檔，不同步時離
 ```
 
 `frontend/src/i18n/__tests__/zhTwLocale.spec.ts` 會檢查 zh-TW 的 key 集合與 zh 完全一致、
-沒有殘留簡體字；忘了重跑時 `pnpm run test:run` 與 fork 的 CI 都會失敗。
+沒有殘留簡體字；忘了重跑時 `pnpm run test:run` 與 `tapmodels-ci.yml` 都會失敗。
 
 語言選單有「简体中文」「繁體中文」，`zh-TW` 缺 key 時依序回退 `zh` → `en`（`frontend/src/i18n/index.ts`）。
 
@@ -79,7 +79,7 @@ Go 檔裡混有「給人看的訊息」與「程式比對用的值」。後者�
 原因：資料庫裡的歷史日誌是簡體，而訊息的產生端（`internal/server/middleware/api_key_auth*.go`）建置後會輸出繁體，兩種都要能歸類。這兩個檔案在 `PROTECTED_FILES` 裡，建置時不會被動到。
 
 **新增了拿中文去比對外部系統回應的程式碼時**（自己寫的或上游同步進來的），要把它加進 `PROTECTED_LITERALS`。
-fork 若有每日同步上游的自動化流程，可用 `node convert-go.mjs --list-protected` 列出候選；手動稽核：
+每日同步上游的 PR（`tapmodels-sync-upstream.yml`）會自動列出候選；手動稽核：
 
 ```bash
 cd tools/zh-tw

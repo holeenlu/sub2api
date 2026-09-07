@@ -42,9 +42,9 @@ services:
       - ENABLE_SERVER_TIMING=${ENABLE_SERVER_TIMING:-false}
       - RUN_MODE=${RUN_MODE:-standard}
       - UPDATE_GITHUB_TOKEN=${UPDATE_GITHUB_TOKEN:-}
-      # Online release check + the self-update / rollback UI (update.check_enabled,
-      # default true). Set false to keep the deployment from reaching GitHub.
-      - UPDATE_CHECK_ENABLED=${UPDATE_CHECK_ENABLED:-true}
+      # Enable checking GitHub releases for updates and the self-update UI
+      # 是否检查上游发布并显示自更新入口，白标构建默认关闭
+      - UPDATE_CHECK_ENABLED=${UPDATE_CHECK_ENABLED:-false}
 
       # =======================================================================
       # Logging Configuration

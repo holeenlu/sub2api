@@ -62,7 +62,7 @@ export const BRAND_COMPLIANCE_DOCUMENT_URL = {
 } as const
 
 /** GitHub "owner/repo" whose releases the version badge follows (= service.DefaultReleaseRepo). */
-export const RELEASE_REPO = 'Wei-Shaw/sub2api'
+export const RELEASE_REPO = 'erwinlin/TapModels'
 
-/** Container image published by the release pipeline (tags carry no "v" prefix). */
-export const RELEASE_DOCKER_IMAGE = 'weishaw/sub2api'
+/** GHCR image published by tapmodels-docker-image.yml (tags carry no "v" prefix, e.g. 1.0.0). */
+export const RELEASE_DOCKER_IMAGE = 'ghcr.io/erwinlin/tapmodels'
