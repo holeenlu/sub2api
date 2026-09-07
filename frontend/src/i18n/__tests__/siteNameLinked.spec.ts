@@ -14,6 +14,24 @@ import { BRAND_NAME } from '@/config/brand'
  * 這樣設定尚未載入時畫面也不會露出錯誤的品牌。
  */
 describe('siteName linked message', () => {
+  it.each(['Acme @ Home', 'Acme {AI}', 'Acme | AI', "Acme {'@'} AI"])(
+    'preserves runtime site name %j in all lazily loaded locales', async (name) => {
+      const { i18n, loadLocaleMessages, setSiteName } = await import('@/i18n')
+      const previousLocale = i18n.global.locale.value
+      try {
+        setSiteName(name)
+        for (const locale of ['en', 'zh', 'zh-TW'] as const) {
+          await loadLocaleMessages(locale)
+          i18n.global.locale.value = locale
+          expect(i18n.global.t('common.siteName')).toBe(name)
+          expect(i18n.global.t('onboarding.admin.welcome.title')).toContain(name)
+        }
+      } finally {
+        setSiteName(BRAND_NAME)
+        i18n.global.locale.value = previousLocale
+      }
+    }
+  )
   const makeI18n = () =>
     createI18n({
       legacy: false,

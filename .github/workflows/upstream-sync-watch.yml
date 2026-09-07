@@ -1,0 +1,285 @@
+name: 公共基线 · 上游更新監看
+
+# 每天盤點上游 Wei-Shaw/sub2api 有多少東西還沒同步進來，把落後幅度與風險點寫進一張
+# 追蹤 issue。這個工作流程是**唯讀**的：不合併、不開 PR、不推分支、不動 repo 內容。
+#
+# The private repository retains Git history and fetches the public upstream directly.
+# This workflow runs on the default main branch; it never pushes code.
+
+on:
+  schedule:
+    # UTC 01:00 = 台北 09:00
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 上游 tag，例如 v0.2.1；留空則取上游最新 release
+        required: false
+        type: string
+
+concurrency:
+  group: upstream-sync-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  UPSTREAM_REPO: Wei-Shaw/sub2api
+  # 工作流程會加一個叫 upstream 的 git remote，而 gh 在多個 remote 時會優先選 upstream 當目標 repo；
+  # 這裡鎖死所有 gh 指令都打本 repo，避免 issue／label 跑到上游去。
+  GH_REPO: ${{ github.repository }}
+  WATCH_LABEL: upstream-sync
+  ISSUE_TITLE_PREFIX: 上游更新待同步
+
+jobs:
+  watch:
+    if: github.repository == 'holeenlu/sub2api'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: 取得上游 refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote get-url upstream >/dev/null 2>&1 \
+            || git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          # 只抓上游的 v* tag（本 repo 自己的版號 tag 不帶 v，不會被蓋掉）。
+          # 放進 refs/tags 是為了讓 git describe 看得到；這個 job 只有 contents: read，
+          # 推不了任何東西，tag 不會回流到本 repo。
+          git fetch --no-tags upstream \
+            '+refs/heads/main:refs/remotes/upstream/main' \
+            '+refs/tags/v*:refs/tags/v*'
+
+      - name: 盤點落後幅度
+        id: gap
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-}"
+          if [ -z "$TAG" ]; then
+            TAG="$(gh api "repos/${UPSTREAM_REPO}/releases/latest" --jq .tag_name)"
+          fi
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::上游 tag 格式不合法：$TAG"
+            exit 1
+          fi
+          if ! git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            echo "::error::上游 repo 沒有 tag $TAG"
+            exit 1
+          fi
+
+          # 線性模型下，main 就是「某個 upstream/main commit ＋ 本地 commit」，
+          # 兩者的 merge-base 即本 repo 目前掛靠的上游基準點。
+          BASE="$(git merge-base HEAD refs/remotes/upstream/main)"
+          BASE_TAG="$(git describe --tags --match 'v*' --abbrev=0 "$BASE" 2>/dev/null || echo '（無法推導）')"
+
+          {
+            echo "tag=$TAG"
+            echo "base=$BASE"
+            echo "base_short=$(git rev-parse --short=7 "$BASE")"
+            echo "base_tag=$BASE_TAG"
+            echo "up_short=$(git rev-parse --short=7 refs/remotes/upstream/main)"
+            echo "behind=$(git rev-list --count "$BASE..refs/remotes/upstream/main")"
+            echo "behind_tag=$(git rev-list --count "$BASE..refs/tags/$TAG")"
+            echo "merges=$(git rev-list --count --merges "$BASE..refs/remotes/upstream/main")"
+          } >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor refs/remotes/upstream/main HEAD; then
+            echo "::notice::main 已包含 upstream/main，無事可做"
+            echo "uptodate=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "uptodate=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 產生追蹤內文
+        if: steps.gap.outputs.uptodate == 'false'
+        shell: bash
+        env:
+          TAG: ${{ steps.gap.outputs.tag }}
+          BASE: ${{ steps.gap.outputs.base }}
+          BASE_SHORT: ${{ steps.gap.outputs.base_short }}
+          BASE_TAG: ${{ steps.gap.outputs.base_tag }}
+          UP_SHORT: ${{ steps.gap.outputs.up_short }}
+          BEHIND: ${{ steps.gap.outputs.behind }}
+          BEHIND_TAG: ${{ steps.gap.outputs.behind_tag }}
+          MERGES: ${{ steps.gap.outputs.merges }}
+          # grep -P 的 \p{Han} 需要 UTF-8 locale
+          LC_ALL: C.UTF-8
+        run: |
+          set -euo pipefail
+          npm ci --prefix tools/zh-tw --omit=dev
+
+          UP=refs/remotes/upstream/main
+
+          git diff --name-only "$BASE" "$UP" | sort > /tmp/up-files.txt
+          git diff --name-only "$BASE" HEAD | sort > /tmp/our-files.txt
+          node tools/zh-tw/convert-go.mjs --list-protected | sed 's|^|backend/|' | sort > /tmp/protected.txt
+
+          # 上游新增、含中文字面值的 Go 程式碼行（排除 ent/ 與測試）。
+          git diff -U0 "$BASE" "$UP" -- 'backend/*.go' ':(exclude)backend/ent/*' ':(exclude)backend/*_test.go' \
+            | awk '
+                /^\+\+\+ b\//   { f = substr($0, 7); next }
+                /^@@/           { h = $3; sub(/^\+/, "", h); split(h, b, ","); ln = b[1]; next }
+                /^\+/           { print f ":" ln "\t" substr($0, 2); ln++ }
+              ' > /tmp/added.txt || true
+          # 只留真的字串字面值。轉換器本來就不動註解，把註解列出來只會淹沒真正該看的東西：
+          #   1. 剝掉行尾註解（`s#([^:])//…#`，前面要求非 `:` 才不會誤砍字串裡的 https://）
+          #   2. 剔除整行都是註解的行
+          #   3. 要求中文出現在成對引號之間
+          sed -E 's#([^:])//[^"]*$#\1#' /tmp/added.txt \
+            | grep -vP '\t\s*(//|\*|/\*)' \
+            | grep -P '"[^"]*\p{Han}[^"]*"' > /tmp/added-han.txt || true
+          HAN_COUNT="$(wc -l < /tmp/added-han.txt | tr -d ' ')"
+          grep -E '(==|!=|strings\.(Contains|HasPrefix|HasSuffix|EqualFold|Index)|case )' /tmp/added-han.txt \
+            > /tmp/added-cmp.txt || true
+
+          # 轉換器試跑：把上游那棵樹倒進 /tmp（git archive，不動工作目錄也不建 worktree），
+          # 用本 repo 的轉換器跑 --dry，順便驗證 Go 詞法分析器仍能解析上游全部檔案。
+          rm -rf /tmp/upstream-tree
+          mkdir -p /tmp/upstream-tree
+          git archive "$UP" backend | tar -x -C /tmp/upstream-tree
+          ( cd /tmp/upstream-tree && node "$GITHUB_WORKSPACE/tools/zh-tw/convert-go.mjs" backend --dry 2>&1 | tail -n 20 ) \
+            > /tmp/dry.txt 2>&1 || echo '（轉換器試跑失敗，見上方 log）' >> /tmp/dry.txt
+
+          {
+            echo "本 repo \`main\` 落後上游 **$BEHIND** 個 commit（其中 $MERGES 個是 PR 合併 commit）。"
+            echo "最新上游 release：[\`$TAG\`](https://github.com/${UPSTREAM_REPO}/releases/tag/$TAG)（距目前基準 $BEHIND_TAG 個 commit）。"
+            echo
+            echo "- 目前基準：[\`$BASE_SHORT\`](https://github.com/${UPSTREAM_REPO}/commit/${BASE})（最近的上游 tag：\`$BASE_TAG\`）"
+            echo "- 上游 main：\`$UP_SHORT\`"
+            echo "- 上游變更：[\`${BASE_SHORT}...${UP_SHORT}\`](https://github.com/${UPSTREAM_REPO}/compare/${BASE}...${UP_SHORT})"
+            echo "- 差異：$(git diff --shortstat "$BASE" "$UP")"
+            echo
+            echo "## 上游動到的區域"
+            echo '```'
+            cut -d/ -f1 /tmp/up-files.txt | sort | uniq -c | sort -rn | head -20 | grep . || echo "無"
+            echo '```'
+            echo
+            echo "## 需要額外動作的區域"
+            HIT=0
+            for p in backend/ent/schema backend/migrations frontend/src/i18n/locales/zh tools/zh-tw; do
+              n="$(grep -c "^$p/" /tmp/up-files.txt || true)"
+              if [ "$n" = "0" ]; then continue; fi
+              HIT=1
+              case "$p" in
+                backend/ent/schema) note="rebase 後要重跑 \`go generate ./...\`，ent 產生碼衝突不要手解" ;;
+                backend/migrations) note="有新的 DB migration，部署前確認順序" ;;
+                frontend/src/i18n/locales/zh) note="zh 文案有變，同步後要重跑 \`node tools/zh-tw/gen-locale.mjs\`" ;;
+                tools/zh-tw) note="上游出現同名路徑，會與本地繁體工具鏈撞名" ;;
+              esac
+              echo "- \`$p\`：$n 個檔案 —— $note"
+            done
+            if [ "$HIT" = "0" ]; then echo "無"; fi
+            echo
+            echo "## 雙方都改過的檔案"
+            echo
+            echo "（上游與本地 commit 都動過，rebase 時最容易衝突）"
+            echo '```'
+            comm -12 /tmp/up-files.txt /tmp/our-files.txt | head -n 60 | grep . || echo "無"
+            echo '```'
+            echo
+            echo "## 保護清單檔案有更動"
+            echo '```'
+            comm -12 /tmp/up-files.txt /tmp/protected.txt | grep . || echo "無"
+            echo '```'
+            echo
+            echo "## 上游新增的中文字串字面值"
+            echo
+            echo "新增了 $HAN_COUNT 行含中文字串字面值的程式碼（已排除註解）。"
+            echo
+            echo "### 疑似拿中文比對外部文字，請確認是否要加進 convert-go.mjs 的 PROTECTED_LITERALS"
+            echo '```'
+            if [ -s /tmp/added-cmp.txt ]; then
+              head -n 40 /tmp/added-cmp.txt | cut -c1-120
+            else
+              echo "無"
+            fi
+            echo '```'
+            echo
+            echo "## 轉換器試跑"
+            echo
+            echo "在**上游那棵樹**上跑 \`convert-go.mjs backend --dry\`，驗證 Go 詞法分析器仍能解析全部檔案。"
+            echo '```'
+            cat /tmp/dry.txt
+            echo '```'
+            echo
+            echo "## 同步步驟（在本機做）"
+            echo
+            echo '```bash'
+            echo "# 線性 rebase：main 由本機 公共基线 分支 force-push 上來，不要在 GitHub 上合併"
+            echo "deploy/sync.sh          # 或手動："
+            echo "git fetch upstream --tags"
+            echo "git rebase upstream/main   # 注意上面列的衝突熱點與保護清單"
+            echo "# TODO(brand)：公共基线 目前沒有專屬的 remote，暫時推到 origin"
+            echo "git push --force-with-lease origin 公共基线:main"
+            echo '```'
+            echo
+            echo "## Checklist"
+            echo
+            echo "- [ ] 保護清單／疑似比對字串已確認（必要時補進 \`tools/zh-tw/convert-go.mjs\`）"
+            echo "- [ ] ent schema 有變就重跑 \`go generate\`；zh 文案有變就重跑 \`gen-locale.mjs\`"
+            echo "- [ ] force-push 後 main 的 CI 綠燈"
+            echo "- [ ] main 更新後會自動建映像推到 GHCR"
+            echo
+            echo "本 issue 由 upstream-sync-watch 工作流程自動維護（唯讀監看，不會自己開 PR）；main 跟上後自動關閉。"
+          } > body.md
+
+      - name: 建立／更新追蹤 issue
+        if: steps.gap.outputs.uptodate == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.gap.outputs.tag }}
+          UP_SHORT: ${{ steps.gap.outputs.up_short }}
+        run: |
+          set -euo pipefail
+          TITLE="${ISSUE_TITLE_PREFIX}：$TAG / upstream/main $UP_SHORT"
+          gh label create "$WATCH_LABEL" --color 0e8a16 --description "上游更新監看" 2>/dev/null || true
+
+          # 只留一張追蹤 issue：先照 label 找，找不到再用標題前綴找（label 被人拿掉時的退路）。
+          EXISTING="$(gh issue list --state open --label "$WATCH_LABEL" --json number --jq '.[0].number // empty')"
+          if [ -z "$EXISTING" ]; then
+            EXISTING="$(gh issue list --state open --search "\"$ISSUE_TITLE_PREFIX\" in:title" --json number,title \
+              --jq "[.[] | select(.title | startswith(\"$ISSUE_TITLE_PREFIX\"))] | .[0].number // empty")"
+          fi
+
+          if [ -n "$EXISTING" ]; then
+            # 直接改標題與內文，不留言：每天一則留言只會變成噪音。
+            URL="$(gh issue edit "$EXISTING" --title "$TITLE" --body-file body.md --add-label "$WATCH_LABEL")"
+          else
+            URL="$(gh issue create --title "$TITLE" --body-file body.md --label "$WATCH_LABEL")"
+          fi
+          echo "追蹤 issue：$URL" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 關閉追蹤 issue
+        if: steps.gap.outputs.uptodate == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UP_SHORT: ${{ steps.gap.outputs.up_short }}
+        run: |
+          set -euo pipefail
+          EXISTING="$(gh issue list --state open --label "$WATCH_LABEL" --json number --jq '.[0].number // empty')"
+          if [ -z "$EXISTING" ]; then
+            EXISTING="$(gh issue list --state open --search "\"$ISSUE_TITLE_PREFIX\" in:title" --json number,title \
+              --jq "[.[] | select(.title | startswith(\"$ISSUE_TITLE_PREFIX\"))] | .[0].number // empty")"
+          fi
+          if [ -n "$EXISTING" ]; then
+            gh issue close "$EXISTING" --comment "main 已跟上 upstream/main（\`$UP_SHORT\`），自動關閉。"
+            echo "已關閉追蹤 issue #$EXISTING" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "main 已跟上 upstream/main（\`$UP_SHORT\`），沒有待處理的追蹤 issue。" >> "$GITHUB_STEP_SUMMARY"

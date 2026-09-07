@@ -1,0 +1,165 @@
+name: Project · CI
+
+# 精簡版 CI：只跑單元測試、前端檢查與 zh-TW 轉換器。
+# 刻意不含整合測試 / golangci-lint / macOS runner —— 私有 repo 的 Actions 分鐘數有限，
+# 上游的 backend-ci.yml 仍留在樹裡，需要時可再啟用（見 docs/project-ci.md）。
+#
+# 路徑過濾：先由 changes job 算出 PR 改到哪些區域，只改前端就不跑後端測試（約 9 分鐘），
+# 反之亦然。手動觸發（workflow_dispatch）一律全跑。改到本檔或 Makefile 也全跑。
+#
+# push main 也要跑：main 是維護者本機線性分支 force-push 上來的，那些 commit 從來沒有
+# 經過 PR，只掛 pull_request 觸發等於 main 完全沒被測過。force-push 的前後基準不可比
+# （event.before 常常不是祖先），所以 push 事件不做路徑過濾，一律全跑。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: project-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # zh-TW 語言包是產生物（tools/zh-tw/gen-locale.mjs 由 zh 產生），忘了重產的成本很高，
+  # 而這個檢查只要 npm ci 一個小套件、幾十秒就跑完。所以不掛路徑過濾也不 needs 任何 job：
+  # 每個 PR、每次 push main、每次手動觸發都跑。
+  locale:
+    if: github.repository == 'holeenlu/sub2api'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: zh-TW 語言包與 zh 同步檢查
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix tools/zh-tw --omit=dev
+          node tools/zh-tw/gen-locale.mjs --check
+          python3 -m unittest discover -s deploy/tests -p 'test_brand_release.py'
+
+  changes:
+    if: github.repository == 'holeenlu/sub2api'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      zhtw: ${{ steps.filter.outputs.zhtw }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: 判斷 PR 改到哪些區域
+        id: filter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            # push main（含 force-push）與手動觸發：全部跑
+            for k in backend frontend zhtw; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
+          # pull_request 事件 checkout 的是合併後的 ref，三點 diff 就是這個 PR 的變更。
+          git diff --name-only "origin/${BASE_REF}...HEAD" > /tmp/changed.txt
+          echo "變更檔案 $(wc -l < /tmp/changed.txt) 個"
+          COMMON='Makefile$|\.github/workflows/project-ci\.yml$'
+          hit() { grep -qE "$1" /tmp/changed.txt && echo true || echo false; }
+          {
+            echo "backend=$(hit "^(backend/|${COMMON})")"
+            echo "frontend=$(hit "^(frontend/|tools/zh-tw/|docs/legal/|${COMMON})")"
+            echo "zhtw=$(hit "^(backend/|tools/zh-tw/|${COMMON})")"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: 後端單元測試
+        shell: bash
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          make verify-generate
+          make test-unit
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: 安裝前端相依
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+
+      - name: 前端檢查與測試
+        shell: bash
+        run: |
+          set -euo pipefail
+          make test-frontend
+
+      - name: 建置
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir frontend run build
+      # zh-TW 語言包檢查搬到獨立的 locale job（不受路徑過濾影響，每次都跑）。
+
+  zh-tw-go:
+    needs: changes
+    if: needs.changes.outputs.zhtw == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: 後端轉換器試跑
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix tools/zh-tw --omit=dev
+          node tools/zh-tw/convert-go.mjs backend --dry --report | tail -n 5
+          node tools/zh-tw/convert-go.mjs --list-protected
