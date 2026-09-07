@@ -43,7 +43,7 @@ node tools/zh-tw/gen-locale.mjs --check   # 只比對不寫檔，不同步時離
 |---|---|
 | OpenCC 轉錯字／詞（例：账号→賬號、回调→回撥） | `convert.mjs` 的 `CORRECTIONS` |
 | 簡繁同形的中國用語（例：配置→設定、令牌→權杖、當前→目前） | `convert.mjs` 的 `TW_VOCAB`，長詞放前面 |
-| 只對特定句子成立的修正（例：計量詞 條→筆／則） | `gen-locale.mjs` 的 `OVERRIDES` |
+| 只對特定句子成立的修正（例：計量詞 條→筆／則、品牌標語） | `gen-locale.mjs` 的 `OVERRIDES` |
 
 用稽核工具找候選：
 
@@ -95,6 +95,17 @@ node convert-go.mjs --list-protected               # 印出保護清單（backen
 轉換後的後端樹**只用來 `go build`**，不支援 `go test`：測試一律在簡體原始碼上跑。
 `convert-go.mjs` 轉換完成後會在目標樹寫入 `.zh-tw-converted` 標記；對同一棵樹再跑一次會直接拒絕
 （轉換不是嚴格冪等，這是硬性防護）。Docker 每次都從乾淨原始碼複製所以不受影響。
+
+## 站點名稱（品牌）
+
+品牌文案不寫死，用 vue-i18n 的 linked message `@:common.siteName`；
+`frontend/src/i18n/index.ts` 的 `setSiteName()` 會在後台設定載入後、以及每次載入語言包後套用。
+語言包裡 `common.siteName` 的預設值是品牌名（與 `frontend/src/config/brand.ts`、
+`backend/internal/service/brand.go` 一致），設定尚未載入時也不會露出上游品牌。
+
+**寫法注意**：`@:common.siteName` 後面必須是空白或字串結尾；緊接標點（`，`、`。`、`｜`、`.`、`,`）時
+vue-i18n 會把標點吃進 key 而整段消失，要改用 `@:{'common.siteName'}`。
+`siteNameLinked.spec.ts` 釘住了這些寫法。設定欄位的 placeholder（顯示預設值）與 TTS 測試 payload 例外，維持字面值。
 
 ## 已知取捨
 

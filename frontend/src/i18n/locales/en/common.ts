@@ -2,7 +2,7 @@ export default {
   common: {
     // Site name. Overwritten via mergeLocaleMessage in stores/app.ts once the
     // public settings load; reference it as @:common.siteName in copy.
-    siteName: 'Sub2API',
+    siteName: 'TapModels',
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',
@@ -118,8 +118,8 @@ export default {
     blockingNotice: 'Deployment and operation compliance acknowledgment is required before continuing to use the console.',
     riskNotice: 'This acknowledgment provides clear, conspicuous, and reproducible notice of compliance obligations and operation risks for self-hosted instances.',
     version: 'Document Version',
-    openDocument: 'Open the GitHub document',
-    documentSource: 'The agreement text comes from Markdown files in this project repository. When the agreement content changes, the document version must be incremented; acknowledgments of older versions become invalid and console users must acknowledge again.',
+    openDocument: 'View the full agreement',
+    documentSource: 'The agreement text ships with the software and is managed by version. When the agreement content changes, the document version must be incremented; acknowledgments of older versions become invalid and console users must acknowledge again.',
     inputLabel: 'Type the following confirmation phrase exactly',
     inputPlaceholder: 'Type the confirmation phrase to continue',
     inputMismatch: 'The confirmation phrase does not match. Type the displayed text exactly.',

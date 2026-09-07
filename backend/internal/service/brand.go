@@ -11,12 +11,12 @@ package service
 // nil/empty fallback paths (emails, payment product names, public settings).
 const (
 	// DefaultSiteName is the product name used as the site-name fallback.
-	DefaultSiteName = "Sub2API"
+	DefaultSiteName = "TapModels"
 	// DefaultSiteTagline is the product tagline used as the site-subtitle
 	// fallback.
-	DefaultSiteTagline = "Subscription to API Conversion Platform"
+	DefaultSiteTagline = "Pick a model. Start building."
 	// DefaultDocsBaseURL is where the shipped documentation is published.
-	DefaultDocsBaseURL = "https://github.com/Wei-Shaw/sub2api/blob/main/docs"
+	DefaultDocsBaseURL = "https://docs.tapmodels.ai"
 	// DefaultReleaseRepo is the GitHub "owner/repo" whose releases the online
 	// update check and self-update follow. Keep in sync with RELEASE_REPO in
 	// frontend/src/config/brand.ts.

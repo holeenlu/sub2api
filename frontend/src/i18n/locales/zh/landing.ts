@@ -15,10 +15,10 @@ export default {
     exploreModels: '探索模型',
     goToDashboard: '进入控制台',
     // 首页主视觉文案
-    heroSubtitle: '一个 API，自由选模型。',
+    heroSubtitle: '选个模型，开始开发。',
     heroDescription: '通过一个 API 使用不同 AI 模型。\n减少接入与管理的负担，把时间留给产品开发。',
     heroEyebrow: '多模型 AI API 网关',
-    heroTitle: '一个 API，自由选模型。',
+    heroTitle: '选个模型，开始开发。',
     contactIntegration: '接入咨询',
     terminal: {
       caption: 'API 请求示意',

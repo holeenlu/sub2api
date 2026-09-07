@@ -15,11 +15,11 @@ export default {
     exploreModels: 'Explore Models',
     goToDashboard: 'Go to Dashboard',
     // Hero copy
-    heroSubtitle: 'One API, any model.',
+    heroSubtitle: 'Pick a model. Start building.',
     heroDescription:
       'Access multiple AI models through one unified API.\nSpend less time managing integrations and more time building.',
     heroEyebrow: 'A multi-model AI API gateway',
-    heroTitle: 'One API, any model.',
+    heroTitle: 'Pick a model. Start building.',
     contactIntegration: 'Discuss your integration',
     terminal: {
       caption: 'API request illustration',
@@ -148,7 +148,7 @@ export default {
         'All tools share the same connection details: model aliases map to the actual upstream models, /v1/models returns the model catalog for the API key’s group, and reasoning effort settings and the prompt cache key are preserved when forwarding.'
     },
     seo: {
-      title: '@:common.siteName | One API, any model',
+      title: '@:common.siteName | Pick a model. Start building.',
       description:
         'Access multiple AI models through one @:common.siteName API. Explore available models and rates, and review request-level usage and charges.'
     },

@@ -2,7 +2,7 @@ export default {
   common: {
     // 站点名称。实际值在设置加载后由 stores/app.ts 以 mergeLocaleMessage 覆盖，
     // 文案中用 @:common.siteName 链接即可自动跟随后台设置变化。
-    siteName: 'Sub2API',
+    siteName: 'TapModels',
     loading: '加载中...',
     submitting: '提交中...',
     justNow: '刚刚',
@@ -118,8 +118,8 @@ export default {
     blockingNotice: '继续使用控制台前，须完成部署与运营合规确认。',
     riskNotice: '本确认用于以清晰、显著、可留痕的方式提示自部署实例的合规义务与运营风险。',
     version: '协议版本',
-    openDocument: '在 GitHub 查看协议文件',
-    documentSource: '协议正文来自本项目仓库中的 Markdown 文件。修改协议内容时必须同步递增协议版本；已确认的旧版本将失效，控制台使用者须重新确认。',
+    openDocument: '查看协议全文',
+    documentSource: '协议正文随软件一同发布，并按版本管理。修改协议内容时必须同步递增协议版本；已确认的旧版本将失效，控制台使用者须重新确认。',
     inputLabel: '请逐字输入以下确认短语',
     inputPlaceholder: '输入确认短语以继续',
     inputMismatch: '确认短语不匹配，请逐字输入提示内容。',
