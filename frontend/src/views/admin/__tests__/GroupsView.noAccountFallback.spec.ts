@@ -1,4 +1,5 @@
 import { defineComponent, nextTick } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -174,6 +175,7 @@ function mountView() {
 
 describe('GroupsView no-account fallback', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     localStorage.clear()
     vi.spyOn(console, 'error').mockImplementation(() => {})
     for (const fn of [
