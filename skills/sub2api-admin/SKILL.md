@@ -1,14 +1,14 @@
 ---
 name: sub2api-admin
-description: Manage Sub2API admin APIs for accounts, redeem codes, groups, proxies, error passthrough rules, TLS fingerprint profiles, imports, exports, batch updates, and raw administrator API calls. Use when the user mentions Sub2API, admin API keys, account management, redeem code management, recharge codes, invitation codes, bulk account import/export, keeping or deleting accounts, refreshing accounts, clearing errors, CRS sync, or managing Sub2API backend settings through the admin API.
+description: Manage KDAN admin APIs for accounts, redeem codes, groups, proxies, error passthrough rules, TLS fingerprint profiles, imports, exports, batch updates, and raw administrator API calls. Use when the user mentions KDAN, admin API keys, account management, redeem code management, recharge codes, invitation codes, bulk account import/export, keeping or deleting accounts, refreshing accounts, clearing errors, CRS sync, or managing KDAN backend settings through the admin API.
 ---
 
-# Sub2API Admin
+# KDAN Admin
 
 Use the bundled CLI instead of ad hoc `curl`. Run examples from this skill directory.
 
 ```bash
-export SUB2API_BASE_URL='https://your-sub2api-host'
+export SUB2API_BASE_URL='https://api.kdan.com'
 export SUB2API_ADMIN_API_KEY='<admin api key>'
 # Or, when the deployment uses admin JWT login instead of an admin API key:
 # export SUB2API_JWT='<admin access_token>'

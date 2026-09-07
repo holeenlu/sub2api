@@ -603,7 +603,7 @@ export default {
           '停用使用者註冊、公開頁面和自助服務功能。僅管理員可以登入和管理平台。',
         siteName: '站點名稱',
         siteNameHint: '顯示在郵件和頁面標題中',
-        siteNamePlaceholder: 'Sub2API',
+        siteNamePlaceholder: 'KDAN',
         siteSubtitle: '站點副標題',
         siteSubtitleHint: '顯示在登入和註冊頁面',
         siteSubtitlePlaceholder: '訂閱轉 API 轉換平台',
@@ -907,7 +907,7 @@ export default {
         fromEmail: '發件人電子郵件',
         fromEmailPlaceholder: "noreply{'@'}example.com",
         fromName: '發件人名稱',
-        fromNamePlaceholder: 'Sub2API',
+        fromNamePlaceholder: 'KDAN',
         useTls: '使用 TLS',
         useTlsHint: '為 SMTP 連線啟用 TLS 加密'
       },

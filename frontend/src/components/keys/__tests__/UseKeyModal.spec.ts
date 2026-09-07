@@ -366,12 +366,12 @@ describe('UseKeyModal', () => {
     await nextTick()
 
     let codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
-    const configToml = codeBlocks.find((content) => content.includes('[model_providers.sub2api]'))
+    const configToml = codeBlocks.find((content) => content.includes('[model_providers.kdan]'))
     expect(configToml).toBeDefined()
-    expect(configToml).toContain('model_provider = "sub2api"')
+    expect(configToml).toContain('model_provider = "kdan"')
     expect(configToml).toContain('model = "grok-4.5"')
     expect(configToml).toContain('base_url = "https://example.com/v1"')
-    expect(configToml).toContain('env_key = "SUB2API_API_KEY"')
+    expect(configToml).toContain('env_key = "KDAN_API_KEY"')
     expect(configToml).toContain('wire_api = "responses"')
     // API-key provider: Codex must not require a ChatGPT OAuth login.
     expect(configToml).toContain('requires_openai_auth = false')
@@ -384,7 +384,7 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('supports_websockets = true')
     expect(configToml).not.toContain('responses_websockets_v2')
     expect(wrapper.text()).not.toContain('auth.json')
-    expect(codeBlocks.join('\n')).toContain('SUB2API_API_KEY')
+    expect(codeBlocks.join('\n')).toContain('KDAN_API_KEY')
 
     const windowsTab = wrapper.findAll('button').find(
       (button) => button.text().trim() === 'Windows'
@@ -805,9 +805,9 @@ describe('UseKeyModal', () => {
 
     const unixConfig = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.sub2api]'))
+      .find((content) => content.includes('[model_providers.kdan]'))
     expect(unixConfig).toContain('model_catalog_json = "~/.codex/codex-models.json"')
-    expect(unixConfig).toContain('env_key = "SUB2API_API_KEY"')
+    expect(unixConfig).toContain('env_key = "KDAN_API_KEY"')
 
     await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
     await flushPromises()
@@ -823,7 +823,7 @@ describe('UseKeyModal', () => {
 
     const loadedUnixConfig = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.sub2api]'))
+      .find((content) => content.includes('[model_providers.kdan]'))
     expect(loadedUnixConfig).toContain('model = "claude-opus-4-8"')
     expect(loadedUnixConfig).toContain('review_model = "claude-opus-4-8"')
     expect(loadedUnixConfig).not.toContain('model = "gpt-5.6-sol"')
@@ -844,7 +844,7 @@ describe('UseKeyModal', () => {
 
     const windowsConfig = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.sub2api]'))
+      .find((content) => content.includes('[model_providers.kdan]'))
     expect(windowsConfig).toContain(
       'model_catalog_json = "%userprofile%\\\\.codex\\\\codex-models.json"'
     )
@@ -882,7 +882,7 @@ describe('UseKeyModal', () => {
       expect(wrapper.find('[data-testid="codex-model-catalog"]').exists()).toBe(true)
       const config = wrapper.findAll('pre code')
         .map((code) => code.text())
-        .find((content) => content.includes('[model_providers.sub2api]'))
+        .find((content) => content.includes('[model_providers.kdan]'))
       expect(config).toContain('model_catalog_json = "~/.codex/codex-models.json"')
       expect(config).toContain('base_url = "https://example.com/v1"')
       expect(config).toContain('wire_api = "responses"')
@@ -931,7 +931,7 @@ describe('UseKeyModal', () => {
 
     const config = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.sub2api]'))
+      .find((content) => content.includes('[model_providers.kdan]'))
     expect(config).toContain('model = "gpt-5.6-sol"')
     expect(config).toContain('review_model = "gpt-5.6-sol"')
   })
@@ -989,7 +989,7 @@ describe('UseKeyModal', () => {
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
     await clickButton(wrapper, (text) => text.trim() === osTab)
 
-    const config = findCodeBlock(wrapper, '[model_providers.sub2api]')
+    const config = findCodeBlock(wrapper, '[model_providers.kdan]')
     expect(tomlValue(config, 'model')).toBe('claude-sonnet-5')
     expect(tomlValue(config, 'review_model')).toBe('claude-sonnet-5')
     expect(config).not.toContain('claude-sonnet-4-6')
@@ -1055,7 +1055,7 @@ describe('UseKeyModal', () => {
     await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
     await flushPromises()
 
-    const config = findCodeBlock(wrapper, '[model_providers.sub2api]')
+    const config = findCodeBlock(wrapper, '[model_providers.kdan]')
     expect(tomlValue(config, 'model')).toBe(expectedModel)
     expect(tomlValue(config, 'review_model')).toBe(tomlValue(config, 'model'))
   })
@@ -1174,11 +1174,11 @@ describe('UseKeyModal', () => {
       expect(files.map((file) => file.name)).toEqual(['config.toml'])
       const parsed = parseToml(files[0].text) as Record<string, unknown>
       expectRootKeys(parsed, ['model_provider', 'model', 'review_model', 'disable_response_storage', 'model_catalog_json'])
-      expect(parsed.model_provider).toBe('sub2api')
+      expect(parsed.model_provider).toBe('kdan')
       expect(parsed.model).toBe('claude-sonnet-5')
       const providers = parsed.model_providers as Record<string, Record<string, unknown>>
-      expect(providers.sub2api.env_key).toBe('SUB2API_API_KEY')
-      expect(providers.sub2api.requires_openai_auth).toBe(false)
+      expect(providers.kdan.env_key).toBe('KDAN_API_KEY')
+      expect(providers.kdan.requires_openai_auth).toBe(false)
     }
   })
 
@@ -1222,7 +1222,7 @@ describe('UseKeyModal', () => {
     expect(files.map((file) => file.name)).toEqual(['config.toml'])
     parsed = parseToml(files[0].text) as Record<string, unknown>
     expectRootKeys(parsed, ['model_provider', 'model', 'model_catalog_json'])
-    expect(parsed.model_provider).toBe('sub2api')
+    expect(parsed.model_provider).toBe('kdan')
   })
 
   it('downloads the current key, not a stale one, after the apiKey prop changes', async () => {
