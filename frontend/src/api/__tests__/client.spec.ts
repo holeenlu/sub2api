@@ -5,6 +5,7 @@ import type { AxiosInstance } from 'axios'
 // 需要在导入 client 之前设置 mock
 vi.mock('@/i18n', () => ({
   getLocale: () => 'zh-CN',
+  i18n: { global: { t: (key: string) => key === 'ui.networkError' ? 'Network error. Please check your connection.' : key } },
 }))
 
 describe('API Client', () => {

@@ -5,7 +5,7 @@
 
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig, AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types'
-import { getLocale } from '@/i18n'
+import { getLocale, i18n } from '@/i18n'
 import {
   ADMIN_UI_REQUEST_HEADER,
   USER_UI_REQUEST_HEADER,
@@ -17,6 +17,12 @@ import { getAPIBaseURL } from './url'
 export { buildApiUrl, buildGatewayUrl } from './url'
 
 // ==================== Axios Instance Configuration ====================
+
+function clientMessage(key: string, fallback: string): string {
+  // Public settings can fail before the lazy locale bundle has loaded.
+  const message = i18n.global.t(key)
+  return message === key ? fallback : message
+}
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL: getAPIBaseURL(),
@@ -92,7 +98,7 @@ apiClient.interceptors.response.use(
         return Promise.reject({
           status: response.status,
           code: apiResponse.code,
-          message: apiResponse.message || 'Unknown error',
+          message: apiResponse.message || clientMessage('ui.unknownError', 'Unknown error'),
           reason: resp.reason,
           metadata: resp.metadata,
         })
@@ -196,7 +202,7 @@ apiClient.interceptors.response.use(
               return Promise.reject({
                 status: 401,
                 code: 'AUTH_SESSION_CHANGED',
-                message: 'Authentication session changed while refreshing.'
+                message: clientMessage('ui.authSessionChanged', 'Authentication session changed while refreshing.')
               })
             }
 
@@ -214,7 +220,7 @@ apiClient.interceptors.response.use(
             return Promise.reject({
               status: 401,
               code: 'TOKEN_REFRESH_FAILED',
-              message: 'Session expired. Please log in again.'
+              message: clientMessage('ui.sessionExpired', 'Session expired. Please log in again.')
             })
           }
         }
@@ -257,7 +263,7 @@ apiClient.interceptors.response.use(
     // Network error
     return Promise.reject({
       status: 0,
-      message: 'Network error. Please check your connection.'
+      message: clientMessage('ui.networkError', 'Network error. Please check your connection.')
     })
   }
 )

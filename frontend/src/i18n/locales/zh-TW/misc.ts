@@ -163,7 +163,7 @@ export default {
       groupManage: {
         title: '📦 第一步：分組管理',
         description:
-          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;"><b>什麼是分組？</b></p><p style="margin-bottom: 12px;">分組是 @:common.siteName 的核心概念，它就像一個"服務方案"：</p><ul style="margin-left: 20px; margin-bottom: 12px; font-size: 13px;"><li>🎯 每個分組可以包含多個上游帳號</li><li>💰 每個分組有獨立的計費倍率</li><li>👥 可以設定為公開或專屬分組</li></ul><p style="margin-top: 12px; padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>💡 示例：</b>您可以建立"VIP專線"（高倍率）和"免費試用"（低倍率）兩個分組</p><p style="margin-top: 16px; color: #10b981; font-weight: 600;">👉 點選左側的"分組管理"開始</p></div>'
+          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;"><b>什麼是分組？</b></p><p style="margin-bottom: 12px;">分組是 @:common.siteName 的核心概念，它就像一個"服務方案"：</p><ul style="margin-left: 20px; margin-bottom: 12px; font-size: 13px;"><li>🎯 每個分組可以包含多個上游帳號</li><li>💰 每個分組有獨立的計費倍率</li><li>👥 可以設定為公開或專屬分組</li></ul><p style="margin-top: 12px; padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>💡 範例：</b>您可以建立"VIP專線"（高倍率）和"免費試用"（低倍率）兩個分組</p><p style="margin-top: 16px; color: #10b981; font-weight: 600;">👉 點選左側的"分組管理"開始</p></div>'
       },
       createGroup: {
         title: '➕ 建立新分組',
@@ -294,7 +294,7 @@ export default {
       keyName: {
         title: '✏️ 金鑰名稱',
         description:
-          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">為金鑰起一個便於識別的名稱。</p><p style="padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>💡 示例：</b>"我的第一個金鑰"、"測試用" 等</p></div>',
+          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">為金鑰起一個便於識別的名稱。</p><p style="padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>💡 範例：</b>"我的第一個金鑰"、"測試用" 等</p></div>',
         nextBtn: '下一步'
       },
       keyGroup: {
