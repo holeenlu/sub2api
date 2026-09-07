@@ -463,7 +463,7 @@ export default {
         grokDefaultTextModel: '預設 Grok 文字模型',
         grokDefaultTextModelHint: '用於空模型值；僅在右側開關開啟時也用於其他用戶端模型名稱空間。允許填寫自訂 Grok 模型 ID。',
         grokCrossClientMap: '對應其他用戶端模型到 Grok',
-        grokCrossClientMapHint: '預設關閉。開啟後，GPT、Codex、o 系列和 Claude 模型 ID 會路由到左側預設 Grok 文字模型。',
+        grokCrossClientMapHint: '為相容用戶端，預設開啟。GPT、Codex、o 系列和 Claude 模型 ID 會路由到左側預設 Grok 文字模型；關閉後必須使用 Grok 模型 ID。',
         grokDefaultBaseURLMode: '預設 Grok 上游',
         grokDefaultBaseURLModeHint: '僅用於 Grok 帳號未設定顯式 base URL 的文字請求；媒體和語音仍使用官方 API 主機。',
         grokBaseURLModeCLI: 'CLI 聊天代理',
