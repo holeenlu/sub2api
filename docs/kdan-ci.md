@@ -45,11 +45,13 @@ git push origin refs/tags/1.0.0
 不能推到公共 `origin`。上游 `v*` tag 仅用于基线溯源，不是私有品牌发版。
 CI 不自动部署生产。
 
-## 徽章中的上游基线
+## 徽章中的编译提交
 
-管理员版本弹层同时显示应用版本和“基于上游 Sub2API vX.Y.Z”。
-即使 `UPDATE_CHECK_ENABLED=false`，这条本地构建信息仍可显示；缺失时隐藏。
-它不表示 Fork 关系，也不会触发上游更新请求。
+管理员版本弹层保留应用版本，第二行改为“编译提交 [abcdef012]”。
+`build_commit` 来自当前运行二进制的 `main.Commit`，显示前 9 位，悬停显示完整 SHA。
+即使 `UPDATE_CHECK_ENABLED=false` 仍显示；缺失或无效值时隐藏，不展示 unknown。
+CI 注入完整 SHA，旧构建只有 7 位时按实际信息显示，不补造剩余字符。
+不链接私有仓库，也不触发上游更新请求。`upstream_version` 仍保留在接口中供兼容使用。
 
 Docker CI 使用 `git merge-base HEAD upstream/main` 最近的上游 `v*` tag，
 注入 `main.UpstreamVersion`；无法推导时才回退 embedded VERSION。

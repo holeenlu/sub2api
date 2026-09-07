@@ -28,6 +28,7 @@ func ProvideGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthCli
 
 // BuildInfo contains build information
 type BuildInfo struct {
+	BuildCommit     string
 	Version         string
 	BuildType       string
 	UpstreamVersion string // upstream Sub2API version this build is based on, e.g. "v0.2.1"
@@ -47,7 +48,8 @@ func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient)
 // checks follow update.check_enabled (default false for this brand).
 func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo, cfg *config.Config) *UpdateService {
 	svc := NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType).
-		WithUpstreamVersion(buildInfo.UpstreamVersion)
+		WithUpstreamVersion(buildInfo.UpstreamVersion).
+		WithBuildCommit(buildInfo.BuildCommit)
 	if cfg != nil {
 		svc = svc.WithCheckEnabled(cfg.Update.CheckEnabled)
 	}

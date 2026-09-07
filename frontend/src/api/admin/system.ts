@@ -12,6 +12,7 @@ export interface ReleaseInfo {
 }
 
 export interface VersionInfo {
+  build_commit?: string
   current_version: string
   latest_version: string
   has_update: boolean
@@ -26,8 +27,8 @@ export interface VersionInfo {
 /**
  * Get current version
  */
-export async function getVersion(): Promise<{ version: string; upstream_version?: string }> {
-  const { data } = await apiClient.get<{ version: string; upstream_version?: string }>(
+export async function getVersion(): Promise<{ version: string; upstream_version?: string; build_commit?: string }> {
+  const { data } = await apiClient.get<{ version: string; upstream_version?: string; build_commit?: string }>(
     '/admin/system/version'
   )
   return data

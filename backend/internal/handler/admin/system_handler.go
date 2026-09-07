@@ -66,6 +66,7 @@ func (h *SystemHandler) GetVersion(c *gin.Context) {
 	response.Success(c, gin.H{
 		"version":          info.CurrentVersion,
 		"upstream_version": info.UpstreamVersion,
+		"build_commit":     info.BuildCommit,
 	})
 }
 

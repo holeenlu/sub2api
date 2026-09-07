@@ -112,8 +112,8 @@
                     </svg>
                   </span>
                 </div>
-                <p v-if="upstreamVersion" data-testid="upstream-version" class="mt-1 break-words text-xs text-gray-500 dark:text-dark-400">
-                  {{ t('version.upstreamBaseline', { version: upstreamVersion }) }}
+                <p v-if="buildCommit" :title="buildCommit" data-testid="build-commit" class="mt-1 break-words text-xs text-gray-500 dark:text-dark-400">
+                  {{ t('version.buildCommit', { commit: buildCommit.slice(0, 9) }) }}
                 </p>
                 <p v-if="!updateDisabled" class="mt-1 text-xs text-gray-500 dark:text-dark-400">
                   {{
@@ -690,9 +690,9 @@ const latestVersion = computed(() => appStore.latestVersion)
 const hasUpdate = computed(() => appStore.hasUpdate)
 const releaseInfo = computed(() => appStore.releaseInfo)
 const buildType = computed(() => appStore.buildType)
-const upstreamVersion = computed(() => {
-  const version = appStore.upstreamVersion?.trim()
-  return version ? `v${version.replace(/^v/, '')}` : ''
+const buildCommit = computed(() => {
+  const commit = appStore.buildCommit?.trim() || ''
+  return /^[a-f0-9]{7,40}$/i.test(commit) ? commit.toLowerCase() : ''
 })
 const updateDisabled = computed(() => appStore.updateDisabled)
 // With online update checking off, the badge is version-only: no update dot, no status text

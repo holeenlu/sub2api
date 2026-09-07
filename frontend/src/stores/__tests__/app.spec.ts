@@ -3,6 +3,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { useAppStore } from '@/stores/app'
 import { getPublicSettings } from '@/api/auth'
 import type { PublicSettings } from '@/types'
+import { checkUpdates } from '@/api/admin/system'
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
@@ -74,6 +75,23 @@ vi.mock('@/api/auth', () => ({
 }))
 
 describe('useAppStore', () => {
+  it('retains the running build commit in the local version cache', async () => {
+    const commit = '2776c84a5ebcc94d2fba1f551c200ab1d9ffe149'
+    vi.mocked(checkUpdates).mockResolvedValueOnce({
+      current_version: '0.2.1', latest_version: '0.2.1', has_update: false,
+      cached: false, build_type: 'release', build_commit: commit, disabled: true,
+    })
+    const store = useAppStore()
+    await store.fetchVersion(true)
+    expect(store.buildCommit).toBe(commit)
+    expect((await store.fetchVersion(false))?.build_commit).toBe(commit)
+    vi.mocked(checkUpdates).mockResolvedValueOnce({
+      current_version: '0.2.1', latest_version: '0.2.1', has_update: false,
+      cached: false, build_type: 'release', disabled: true,
+    })
+    await store.fetchVersion(true)
+    expect(store.buildCommit).toBe('')
+  })
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.useFakeTimers()

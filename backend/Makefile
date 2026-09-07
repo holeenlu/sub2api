@@ -1,7 +1,8 @@
 .PHONY: build generate verify-generate test test-unit test-integration test-e2e
 
 VERSION ?= $(shell ./scripts/resolve-version.sh)
-LDFLAGS ?= -s -w -X main.Version=$(VERSION)
+COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+LDFLAGS ?= -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT)
 
 build:
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -trimpath -o bin/server ./cmd/server
