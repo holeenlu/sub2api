@@ -1078,11 +1078,11 @@ export default {
         invertSelection: '反選'
       },
       codexModelsManifest: {
-        title: '固定帳號取得 Codex Model Manifest',
-        hint: '開啟後，該分組的 Codex 用戶端 /models 請求只用選定帳號向上游拉取並按 slug 合併，不經過排程器；速率限制/過載中的選定帳號仍會被使用。',
-        enable: '使用特定帳號取得 manifest',
+        title: '固定帳號取得模型列表',
+        hint: '開啟後，普通模型列表與 Codex Model Manifest 均優先從選定帳號取得併合並，再套用帳號對應和分組列表過濾；速率限制/過載中的選定帳號仍會被使用。',
+        enable: '使用特定帳號取得模型列表',
         enabledHint: '帳號來源限定為目前分組內的 OpenAI 帳號，最多選擇 10 個。',
-        disabledHint: '未啟用：manifest 請求經由排程器選帳。',
+        disabledHint: '未啟用：普通列表使用本地對應或預設模型；Codex 優先使用本地目錄，無本地目錄時由排程器選帳。',
         accounts: '選定帳號',
         searchPlaceholder: '搜尋帳號（目前分組內 OpenAI 帳號）',
         searchEmpty: '未找到匹配帳號',
