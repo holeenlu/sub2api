@@ -158,7 +158,7 @@ class BrandReleaseTests(unittest.TestCase):
         if match is None:
             self.skipTest('shared image already uses sub2api')
         name = match.group(1)
-        self.assertIn('COPY ${BINARY_NAME} /app/' + name, source)
+        self.assertIn('COPY --chmod=755 ${BINARY_NAME} /app/' + name, source)
         for filename in ('Dockerfile', 'Dockerfile.goreleaser'):
             self.assertIn('RUN ln -s /app/' + name + ' /app/sub2api', (ROOT / filename).read_text())
 

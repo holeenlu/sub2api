@@ -45,7 +45,7 @@ WORKDIR /app
 ARG BINARY_NAME=kdan
 
 # Copy the pre-built binary and runtime fallback resources from GoReleaser
-COPY ${BINARY_NAME} /app/kdan
+COPY --chmod=755 ${BINARY_NAME} /app/kdan
 RUN ln -s /app/kdan /app/sub2api
 COPY --chown=kdan:kdan backend/resources /app/resources
 
@@ -53,8 +53,7 @@ COPY --chown=kdan:kdan backend/resources /app/resources
 RUN mkdir -p /app/data && chown -R kdan:kdan /app
 
 # Copy entrypoint script (fixes volume permissions then drops to kdan)
-COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+COPY --chmod=755 deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 EXPOSE 8080
 

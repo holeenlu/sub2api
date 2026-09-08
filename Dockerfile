@@ -168,7 +168,7 @@ RUN addgroup -g 1000 kdan && \
 WORKDIR /app
 
 # Copy binary/resources with ownership to avoid extra full-layer chown copy
-COPY --from=backend-builder --chown=kdan:kdan /app/kdan /app/kdan
+COPY --from=backend-builder --chown=kdan:kdan --chmod=755 /app/kdan /app/kdan
 RUN ln -s /app/kdan /app/sub2api
 COPY --from=backend-builder --chown=kdan:kdan /app/backend/resources /app/resources
 
@@ -176,8 +176,7 @@ COPY --from=backend-builder --chown=kdan:kdan /app/backend/resources /app/resour
 RUN mkdir -p /app/data && chown kdan:kdan /app/data
 
 # Copy entrypoint script (fixes volume permissions then drops to kdan)
-COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+COPY --chmod=755 deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # Expose port (can be overridden by SERVER_PORT env var)
 EXPOSE 8080

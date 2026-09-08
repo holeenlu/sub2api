@@ -109,15 +109,14 @@ RUN addgroup -g 1000 kdan && \
 WORKDIR /app
 
 # Copy binary and runtime fallback resources from builder
-COPY --from=backend-builder /app/kdan /app/kdan
+COPY --from=backend-builder --chmod=755 /app/kdan /app/kdan
 COPY --from=backend-builder --chown=kdan:kdan /app/backend/resources /app/resources
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R kdan:kdan /app
 
 # Copy entrypoint script (fixes volume permissions then drops to kdan)
-COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+COPY --chmod=755 deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # Expose port (can be overridden by SERVER_PORT env var)
 EXPOSE 8080
