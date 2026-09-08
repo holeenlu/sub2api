@@ -168,7 +168,7 @@ RUN addgroup -g 1000 tapmodels && \
 WORKDIR /app
 
 # Copy binary/resources with ownership to avoid extra full-layer chown copy
-COPY --from=backend-builder --chown=tapmodels:tapmodels /app/tapmodels /app/tapmodels
+COPY --from=backend-builder --chown=tapmodels:tapmodels --chmod=755 /app/tapmodels /app/tapmodels
 RUN ln -s /app/tapmodels /app/sub2api
 COPY --from=backend-builder --chown=tapmodels:tapmodels /app/backend/resources /app/resources
 
@@ -176,8 +176,7 @@ COPY --from=backend-builder --chown=tapmodels:tapmodels /app/backend/resources /
 RUN mkdir -p /app/data && chown tapmodels:tapmodels /app/data
 
 # Copy entrypoint script (fixes volume permissions then drops to tapmodels)
-COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+COPY --chmod=755 deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # Expose port (can be overridden by SERVER_PORT env var)
 EXPOSE 8080
