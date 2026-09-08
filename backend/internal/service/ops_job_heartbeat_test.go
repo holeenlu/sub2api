@@ -118,102 +118,53 @@ func TestRecordOpsJobSkipped_DoesNotFakeSuccess(t *testing.T) {
 	recordOpsJobSkipped(nil, "job-x", time.Minute, "noop")
 }
 
-// 被设置关闭的清理任务写 skipped 心跳并声明"未调度"，而不是沉默。
-// 不并行：与下面的用例共享 opsCleanupJobName 的 skipped 心跳节流状态。
-func TestOpsCleanupService_DisabledWritesSkippedHeartbeat(t *testing.T) {
-	resetSkippedHeartbeatThrottle(t, opsCleanupJobName)
-
+// Cleanup scheduling follows upstream: only completed runs write heartbeats.
+func TestOpsCleanupService_DisabledDoesNotWriteHeartbeat(t *testing.T) {
 	rec := &opsHeartbeatRecorder{}
 	cfg := &config.Config{}
-	cfg.Ops.Enabled = true
 	cfg.Ops.Cleanup.Enabled = false
 	svc := &OpsCleanupService{opsRepo: rec, cfg: cfg}
-
-	svc.mu.Lock()
 	require.NoError(t, svc.applyScheduleLocked(context.Background()))
-	svc.mu.Unlock()
-
-	hb := rec.last(t)
-	require.Equal(t, opsCleanupJobName, hb.JobName)
-	require.NotNil(t, hb.LastRunAt)
-	require.Nil(t, hb.LastSuccessAt, "关闭清理不能把上一次失败抹掉")
-	require.NotNil(t, hb.LastResult)
-	require.Equal(t, "skipped: cleanup disabled by settings", *hb.LastResult)
-	requireIntervalSeconds(t, hb, 0)
-	require.Equal(t, time.Duration(0), svc.snapshotInterval())
+	require.Nil(t, svc.cron)
+	require.Zero(t, rec.count())
 }
 
-// 启用时只声明周期，不伪造成功时间；周期来自 cron 表达式。
-func TestOpsCleanupService_ScheduledDeclaresCronInterval(t *testing.T) {
-	t.Parallel()
-
+func TestOpsCleanupService_ScheduledWritesRunHeartbeats(t *testing.T) {
 	rec := &opsHeartbeatRecorder{}
 	cfg := &config.Config{Timezone: "UTC"}
-	cfg.Ops.Enabled = true
 	cfg.Ops.Cleanup.Enabled = true
 	cfg.Ops.Cleanup.Schedule = "0 2 * * 0"
 	svc := &OpsCleanupService{opsRepo: rec, cfg: cfg}
-
-	svc.mu.Lock()
 	require.NoError(t, svc.applyScheduleLocked(context.Background()))
-	svc.mu.Unlock()
 	defer svc.Stop()
-
-	require.Equal(t, 7*24*time.Hour, svc.snapshotInterval())
-
+	require.NotNil(t, svc.cron)
+	require.Zero(t, rec.count())
+	svc.recordHeartbeatSuccess(time.Now(), time.Second, opsCleanupDeletedCounts{})
 	hb := rec.last(t)
 	require.Equal(t, opsCleanupJobName, hb.JobName)
-	require.Nil(t, hb.LastRunAt)
-	require.Nil(t, hb.LastSuccessAt)
-	require.Nil(t, hb.LastErrorAt)
-	requireIntervalSeconds(t, hb, 7*24*3600)
-
-	// 成功 / 失败心跳都带上同一个周期。
-	svc.recordHeartbeatSuccess(time.Now(), time.Second, opsCleanupDeletedCounts{})
-	requireIntervalSeconds(t, rec.last(t), 7*24*3600)
+	require.NotNil(t, hb.LastSuccessAt)
+	require.Nil(t, hb.ExpectedIntervalSeconds)
 	svc.recordHeartbeatError(time.Now(), time.Second, context.DeadlineExceeded)
-	requireIntervalSeconds(t, rec.last(t), 7*24*3600)
+	hb = rec.last(t)
+	require.NotNil(t, hb.LastErrorAt)
+	require.Equal(t, context.DeadlineExceeded.Error(), *hb.LastError)
+	require.Nil(t, hb.ExpectedIntervalSeconds)
 }
 
-// cron 建不起来时清理实际停摆，必须写一条 error 心跳把它标成异常。
-// 否则「先关闭（心跳周期 0）再用非法 cron 开启」会让 opsJobStaleThreshold 恒返回
-// ok=false，清理停摆数月而仪表盘一直显示健康。
-// 不并行：与上面的用例共享 opsCleanupJobName 的 skipped 心跳节流状态。
-func TestOpsCleanupService_InvalidScheduleRecordsErrorHeartbeat(t *testing.T) {
-	resetSkippedHeartbeatThrottle(t, opsCleanupJobName)
-
+func TestOpsCleanupService_InvalidScheduleReturnsErrorWithoutHeartbeat(t *testing.T) {
 	rec := &opsHeartbeatRecorder{}
 	cfg := &config.Config{Timezone: "UTC"}
-	cfg.Ops.Enabled = true
-	cfg.Ops.Cleanup.Enabled = false
-	svc := &OpsCleanupService{opsRepo: rec, cfg: cfg}
-
-	// 先关闭：心跳自报周期 0。
-	svc.mu.Lock()
-	require.NoError(t, svc.applyScheduleLocked(context.Background()))
-	svc.mu.Unlock()
-	requireIntervalSeconds(t, rec.last(t), 0)
-
-	// 再用非法 cron 开启。
 	cfg.Ops.Cleanup.Enabled = true
 	cfg.Ops.Cleanup.Schedule = "0 99 * * *"
-	svc.mu.Lock()
-	err := svc.applyScheduleLocked(context.Background())
-	svc.mu.Unlock()
-	require.Error(t, err)
-
-	hb := rec.last(t)
-	require.Equal(t, opsCleanupJobName, hb.JobName)
-	require.NotNil(t, hb.LastErrorAt, "调度没建起来必须写 error 心跳")
-	require.NotNil(t, hb.LastError)
-	require.Contains(t, *hb.LastError, "invalid schedule")
-	require.Nil(t, hb.LastSuccessAt)
-	require.Equal(t, opsJobFailed, classifyOpsJobHeartbeat(time.Now().UTC(), &OpsJobHeartbeat{
-		JobName:                 opsCleanupJobName,
-		LastRunAt:               hb.LastRunAt,
-		LastErrorAt:             hb.LastErrorAt,
-		ExpectedIntervalSeconds: hb.ExpectedIntervalSeconds,
-	}))
+	svc := &OpsCleanupService{opsRepo: rec, cfg: cfg}
+	require.ErrorContains(t, svc.applyScheduleLocked(context.Background()), "invalid schedule")
+	require.Nil(t, svc.cron)
+	require.Zero(t, rec.count())
+	cfg.Ops.Cleanup.Schedule = "0 2 * * 0"
+	require.NoError(t, svc.applyScheduleLocked(context.Background()))
+	defer svc.Stop()
+	require.NotNil(t, svc.cron)
+	require.Zero(t, rec.count())
 }
 
 // 预聚合被配置关闭时，每轮 tick 仍写 skipped 心跳并带上自身周期。

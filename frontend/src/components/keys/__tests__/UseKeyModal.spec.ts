@@ -852,7 +852,7 @@ describe('UseKeyModal', () => {
     )
   })
 
-  it.each(['anthropic', 'gemini', 'antigravity', 'kimi', 'zhipu'] as const)(
+  it.each(['anthropic', 'gemini', 'antigravity', 'kimi', 'zhipu', 'minimax'] as const)(
     'offers Codex catalog configuration for the %s routed group',
     async (platform) => {
       const wrapper = mount(UseKeyModal, {
@@ -899,7 +899,7 @@ describe('UseKeyModal', () => {
       json: async () => ({
         models: [
           { slug: 'claude-opus-4-8' },
-          { slug: 'gpt-5.6-sol' }
+          { slug: 'gpt-5.5' }
         ]
       })
     }))
@@ -934,8 +934,8 @@ describe('UseKeyModal', () => {
     const config = wrapper.findAll('pre code')
       .map((code) => code.text())
       .find((content) => content.includes('[model_providers.tapmodels]'))
-    expect(config).toContain('model = "gpt-5.6-sol"')
-    expect(config).toContain('review_model = "gpt-5.6-sol"')
+    expect(config).toContain('model = "gpt-5.5"')
+    expect(config).toContain('review_model = "gpt-5.5"')
   })
 
   it('derives OpenAI Codex reasoning effort from the selected catalog descriptor', async () => {

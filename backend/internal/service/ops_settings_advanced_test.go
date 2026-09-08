@@ -23,8 +23,26 @@ func TestGetOpsAdvancedSettings_DefaultSnapshotHidesOpenAITokenStats(t *testing.
 	if !cfg.DisplayAlertEvents {
 		t.Fatalf("DisplayAlertEvents = false, want true by default")
 	}
+	if !cfg.DataRetention.CleanupEnabled {
+		t.Fatal("data cleanup should be enabled by default")
+	}
 	if repo.getValueCalls != 0 || repo.getMultipleCalls != 0 {
 		t.Fatalf("hot-path snapshot read touched repository: get=%d get_multiple=%d", repo.getValueCalls, repo.getMultipleCalls)
+	}
+}
+
+func TestGetOpsAdvancedSettings_DefaultCleanupFollowsDeploymentConfig(t *testing.T) {
+	svc := &OpsService{cfg: &config.Config{Ops: config.OpsConfig{
+		Cleanup: config.OpsCleanupConfig{Enabled: false},
+	}}}
+	svc.initRuntimeSettings(context.Background())
+
+	cfg, err := svc.GetOpsAdvancedSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetOpsAdvancedSettings() error = %v", err)
+	}
+	if cfg.DataRetention.CleanupEnabled {
+		t.Fatal("data cleanup should follow the disabled deployment baseline")
 	}
 }
 
@@ -164,29 +182,15 @@ func TestSetOpenAIQuotaAutoPauseSettings_VisibleImmediately(t *testing.T) {
 	}
 }
 
-// 非法 cron 必须在保存时被拒：清理服务的 Reload 错误只记日志，放过去就等于清理静默停摆。
-func TestUpdateOpsAdvancedSettings_RejectsInvalidCleanupSchedule(t *testing.T) {
+// Upstream defers cron syntax validation until the cleanup scheduler is built.
+func TestUpdateOpsAdvancedSettings_DefersCleanupScheduleValidation(t *testing.T) {
 	repo := newRuntimeSettingRepoStub()
 	svc := &OpsService{settingRepo: repo}
-
-	cfg := defaultOpsAdvancedSettings()
-	cfg.DataRetention.CleanupSchedule = "0 3 * *" // 少一个字段
-	if _, err := svc.UpdateOpsAdvancedSettings(context.Background(), cfg); err == nil {
-		t.Fatalf("UpdateOpsAdvancedSettings() error = nil, want invalid schedule error")
-	}
-
-	cfg.DataRetention.CleanupSchedule = "0 99 * * *" // 小时越界
-	if _, err := svc.UpdateOpsAdvancedSettings(context.Background(), cfg); err == nil {
-		t.Fatalf("UpdateOpsAdvancedSettings() error = nil, want invalid schedule error")
-	}
-
-	// 合法的 5 段 cron 与留空（走默认值）都要放行。
-	cfg.DataRetention.CleanupSchedule = "0 3 * * 1-5"
-	if _, err := svc.UpdateOpsAdvancedSettings(context.Background(), cfg); err != nil {
-		t.Fatalf("UpdateOpsAdvancedSettings() error = %v, want nil", err)
-	}
-	cfg.DataRetention.CleanupSchedule = "   "
-	if _, err := svc.UpdateOpsAdvancedSettings(context.Background(), cfg); err != nil {
-		t.Fatalf("UpdateOpsAdvancedSettings() error = %v, want nil", err)
+	for _, schedule := range []string{"0 3 * *", "0 99 * * *", "0 3 * * 1-5", "   "} {
+		cfg := defaultOpsAdvancedSettings()
+		cfg.DataRetention.CleanupSchedule = schedule
+		if _, err := svc.UpdateOpsAdvancedSettings(context.Background(), cfg); err != nil {
+			t.Fatalf("schedule %q: unexpected save error: %v", schedule, err)
+		}
 	}
 }

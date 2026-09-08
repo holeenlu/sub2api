@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
@@ -362,7 +362,9 @@ func (s *OpsService) UpdateOpsAlertRuntimeSettings(ctx context.Context, cfg *Ops
 func defaultOpsAdvancedSettings() *OpsAdvancedSettings {
 	return &OpsAdvancedSettings{
 		DataRetention: OpsDataRetentionSettings{
-			CleanupEnabled:             false,
+			// Keep the DB-backed default aligned with ops.cleanup.enabled so a
+			// first settings read cannot silently disable configured retention.
+			CleanupEnabled:             true,
 			CleanupSchedule:            opsCleanupDefaultSchedule,
 			ErrorLogRetentionDays:      30,
 			MinuteMetricsRetentionDays: 30,
@@ -382,6 +384,14 @@ func defaultOpsAdvancedSettings() *OpsAdvancedSettings {
 		AutoRefreshEnabled:              false,
 		AutoRefreshIntervalSec:          30,
 	}
+}
+
+func defaultOpsAdvancedSettingsForConfig(cfg *config.Config) *OpsAdvancedSettings {
+	defaults := defaultOpsAdvancedSettings()
+	if cfg != nil {
+		defaults.DataRetention.CleanupEnabled = cfg.Ops.Cleanup.Enabled
+	}
+	return defaults
 }
 
 func normalizeOpsAdvancedSettings(cfg *OpsAdvancedSettings) {
@@ -442,13 +452,6 @@ func validateOpsAdvancedSettings(cfg *OpsAdvancedSettings) error {
 	if cfg.AutoRefreshIntervalSec < 15 || cfg.AutoRefreshIntervalSec > 300 {
 		return errors.New("auto_refresh_interval_seconds must be between 15 and 300")
 	}
-	// cron 语法必须在保存时就拒绝：清理服务的 Reload 失败只记日志，
-	// 放行一个建不起来的表达式等于让清理静默停摆。留空走默认表达式。
-	if schedule := strings.TrimSpace(cfg.DataRetention.CleanupSchedule); schedule != "" {
-		if _, err := opsCleanupCronParser.Parse(schedule); err != nil {
-			return fmt.Errorf("cleanup_schedule is not a valid 5-field cron expression: %w", err)
-		}
-	}
 	return nil
 }
 
@@ -465,6 +468,7 @@ func (s *OpsService) OpsAdvancedSettingsSnapshot() OpsAdvancedSettings {
 		if snapshot := s.runtimeSettings.Load(); snapshot != nil {
 			return snapshot.advanced
 		}
+		return *defaultOpsAdvancedSettingsForConfig(s.cfg)
 	}
 	return *defaultOpsAdvancedSettings()
 }
