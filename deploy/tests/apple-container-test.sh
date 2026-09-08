@@ -48,6 +48,8 @@ assert_exists "${STATE_DIR}/containers/kdan-apple"
 assert_exists "${STATE_DIR}/containers/kdan-apple-postgres"
 assert_exists "${STATE_DIR}/containers/kdan-apple-redis"
 assert_exists "${STATE_DIR}/running/kdan-apple"
+[[ ! -s "${STATE_DIR}/network-subnets/kdan-apple" ]] || \
+    fail "up passed a subnet when APPLE_CONTAINER_NETWORK_SUBNET was unset"
 "${SCRIPT}" status >/dev/null
 
 "${SCRIPT}" up --recreate
@@ -62,6 +64,23 @@ assert_missing "${STATE_DIR}/containers/kdan-apple"
 assert_missing "${STATE_DIR}/networks/kdan-apple"
 assert_exists "${STATE_DIR}/volumes/kdan-apple-data"
 
+printf '\nAPPLE_CONTAINER_NETWORK_SUBNET=172.31.250.0/24\n' >>"${ENV_FILE}"
+"${SCRIPT}" up
+[[ "$(<"${STATE_DIR}/network-subnets/kdan-apple")" == "172.31.250.0/24" ]] || \
+    fail "up did not pass APPLE_CONTAINER_NETWORK_SUBNET to network creation"
+
+printf 'APPLE_CONTAINER_NETWORK_SUBNET=172.31.251.0/24\n' >>"${ENV_FILE}"
+if mismatch_output="$("${SCRIPT}" up 2>&1)"; then
+    fail "up accepted a configured subnet that differs from the existing network"
+fi
+[[ "${mismatch_output}" == *"Existing network 'kdan-apple' uses subnet '172.31.250.0/24'"* ]] || \
+    fail "up did not explain the existing network subnet mismatch"
+[[ "${mismatch_output}" == *"destroy --yes"* ]] || \
+    fail "up did not provide the network migration command"
+assert_exists "${STATE_DIR}/networks/kdan-apple"
+assert_exists "${STATE_DIR}/containers/kdan-apple"
+
+"${SCRIPT}" destroy --yes
 "${SCRIPT}" up
 "${SCRIPT}" destroy --volumes --yes
 assert_missing "${STATE_DIR}/volumes/kdan-apple-data"

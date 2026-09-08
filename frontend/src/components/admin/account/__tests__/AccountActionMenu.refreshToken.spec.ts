@@ -42,11 +42,11 @@ function makeAccount(overrides: Partial<Account>): Account {
   }
 }
 
-const position = { top: 100, left: 100 }
+const anchorRect = new DOMRect(100, 100, 32, 24)
 
 function mountMenu(account: Account) {
   return mount(AccountActionMenu, {
-    props: { show: true, account, position },
+    props: { show: true, account, anchorRect },
     attachTo: document.body,
   })
 }
