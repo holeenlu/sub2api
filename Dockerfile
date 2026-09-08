@@ -177,7 +177,7 @@ RUN mkdir -p /app/data && chown kdan:kdan /app/data
 
 # Copy entrypoint script (fixes volume permissions then drops to kdan)
 COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+RUN chmod 755 /app/docker-entrypoint.sh /app/kdan
 
 # Expose port (can be overridden by SERVER_PORT env var)
 EXPOSE 8080

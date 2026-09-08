@@ -160,7 +160,17 @@ class BrandReleaseTests(unittest.TestCase):
         name = match.group(1)
         self.assertIn('COPY ${BINARY_NAME} /app/' + name, source)
         for filename in ('Dockerfile', 'Dockerfile.goreleaser'):
-            self.assertIn('RUN ln -s /app/' + name + ' /app/sub2api', (ROOT / filename).read_text())
+            self.assertIn(
+                'RUN ln -s /app/' + name + ' /app/sub2api',
+                (ROOT / filename).read_text(),
+            )
+        for filename in ('Dockerfile', 'Dockerfile.goreleaser', 'deploy/Dockerfile'):
+            dockerfile = (ROOT / filename).read_text()
+            self.assertIn(
+                'RUN chmod 755 /app/docker-entrypoint.sh /app/' + name,
+                dockerfile,
+            )
+            self.assertNotIn('RUN chmod +x /app/docker-entrypoint.sh', dockerfile)
 
 
 if __name__ == '__main__':
