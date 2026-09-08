@@ -312,6 +312,7 @@ export default {
         kimi: 'Kimi',
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
+        minimax: 'MiniMax',
       },
       cnProviders: {
         accountMode: {
@@ -487,7 +488,9 @@ export default {
         grokLastProbe: '探測 {time}',
         grokLastHeadersSeen: '回應標頭 {time}',
         passiveSampled: '被動取樣',
-        activeQuery: '查詢'
+        activeQuery: '查詢',
+        estimatedTotalCost: '預計總費用 ${cost}',
+        estimatedTotalCostTooltip: '根據目前視窗費用和使用率估算達到 100% 使用率時的總費用'
       },
       openaiQuotaReset: {
         count: '次數',
@@ -930,6 +933,30 @@ export default {
       grokClientToolCache: {
         title: '用戶端工具快取（可能改變自動工具選擇）',
         hint: '僅對已識別為 Free 的 Grok OAuth 帳號生效，預設會為 Codex、Trae 等用戶端函式工具請求啟用上游提示快取；如不接受自動工具選擇行為，可關閉此開關退出。'
+      },
+      grokMediaEligibility: {
+        title: '媒體生成資格',
+        hint: '控制該 Grok OAuth 帳號是否可被圖片和影片生成請求選中。',
+        auto: '自動判斷',
+        enabled: '強制啟用',
+        disabled: '強制停用',
+        current: '目前判定：',
+        eligible: '可用',
+        ineligible: '不可用',
+        loading: '正在讀取媒體資格…',
+        loadFailed: '無法讀取媒體資格',
+        autoHint: '自動判斷只會清除手工覆蓋，不會主動觸發媒體請求。',
+        forceEnableWarning: '強制啟用會繞過自動資格檢查，僅應對已確認支援生圖/生影片的帳號使用。',
+        partialSave: '帳號其他設定可能已儲存，但媒體資格未更新，請重試。',
+        reasons: {
+          eligible: '已確認付費資格',
+          billing_inconclusive: 'Billing 資訊不明確',
+          billing_forbidden: 'Billing 介面拒絕存取',
+          billing_free_tier: 'Free 帳號',
+          billing_unobserved: '尚未探測到 Billing',
+          override_enabled: '手工強制啟用',
+          override_disabled: '手工強制停用'
+        }
       },
       autoPauseOnExpired: '過期自動暫停排程',
       autoPauseOnExpiredDesc: '啟用後，帳號過期將自動暫停排程',

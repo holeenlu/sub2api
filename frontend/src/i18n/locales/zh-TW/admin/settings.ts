@@ -36,6 +36,9 @@ export default {
           showQuota: '向使用者展示通道用量/餘額',
           showQuotaHint:
             '開啟後，配額模式的通道監控會在用戶端通道狀態頁展示關聯帳號的用量滾動視窗/餘額。預設關閉；管理員始終可見。',
+          hideUserRanking: '對使用者隱藏使用者排行',
+          hideUserRankingHint:
+            '開啟後，用戶端通道監控 V2 不再顯示「使用者排行」頁，使用者 API 也不返回排行資料。管理員仍可檢視。',
         },
         availableChannels: {
           title: '可用通道',

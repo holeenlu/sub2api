@@ -38,6 +38,7 @@ export type SchedulingThresholdPlatformType =
   | "grok"
   | "kimi"
   | "zhipu"
+  | "minimax"
 
 /** 非平台的阈值 scope：Anthropic Fable 模型家族的独立停调阈值。 */
 export type SchedulingThresholdScopeType =
@@ -47,13 +48,14 @@ export type SchedulingThresholdScopeType =
 export type AccountSchedulingThresholdsMap = Record<SchedulingThresholdScopeType, number>
 
 // 与后端 AllowedSchedulingThresholdPlatforms 保持一致（deepseek 为余额型，
-// 走余额检测而非用量阈值）。
+// 走余额检测而非用量阈值；minimax Coding/Token Plan 有 5h/weekly 窗口）。
 export const SCHEDULING_THRESHOLD_PLATFORMS: SchedulingThresholdPlatformType[] = [
   "openai",
   "anthropic",
   "grok",
   "kimi",
   "zhipu",
+  "minimax",
 ]
 
 // 与后端 AllowedSchedulingThresholdScopes 保持一致：平台 + 非平台 scope。
@@ -724,6 +726,7 @@ export interface SystemSettings {
   channel_monitor_default_interval_seconds: number;
   channel_monitor_hide_throughput?: boolean;
   channel_monitor_show_quota?: boolean;
+  channel_monitor_hide_user_ranking?: boolean;
 
   // Available Channels feature switch
   available_channels_enabled: boolean;
@@ -1026,6 +1029,7 @@ export interface UpdateSettingsRequest {
   channel_monitor_default_interval_seconds?: number;
   channel_monitor_hide_throughput?: boolean;
   channel_monitor_show_quota?: boolean;
+  channel_monitor_hide_user_ranking?: boolean;
 
   // Available Channels feature switch
   available_channels_enabled?: boolean;
