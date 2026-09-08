@@ -11,7 +11,7 @@ describe('Codex models API', () => {
 
   it('builds the authenticated Codex manifest endpoint from the public API base', () => {
     expect(buildCodexModelsManifestUrl('https://example.com/api/v1/')).toBe(
-      'https://example.com/api/v1/models?client_version=0.147.0'
+      'https://example.com/api/backend-api/codex/models'
     )
   })
 
@@ -50,7 +50,7 @@ describe('Codex models API', () => {
     const result = await fetchCodexModelsManifest('https://example.com/v1', 'sk-user-test')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://example.com/v1/models?client_version=0.147.0',
+      'https://example.com/backend-api/codex/models',
       expect.objectContaining({
         headers: {
           Accept: 'application/json',

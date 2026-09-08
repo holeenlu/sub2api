@@ -3,22 +3,15 @@ export interface CodexModelsManifestResult {
   modelCount: number
 }
 
-const DEFAULT_CODEX_CLIENT_VERSION = '0.147.0'
-
-function normalizeCodexBaseUrl(baseUrl: string): string {
+function normalizeCodexApiRoot(baseUrl: string): string {
   const fallback = typeof window !== 'undefined' ? window.location.origin : ''
   const value = (baseUrl || fallback).trim().replace(/\/+$/, '')
-  if (!value) return '/v1'
-  return /\/v1$/i.test(value) ? value : `${value}/v1`
+  return value.replace(/\/v1$/i, '')
 }
 
-export function buildCodexModelsManifestUrl(
-  baseUrl: string,
-  clientVersion = DEFAULT_CODEX_CLIENT_VERSION
-): string {
-  const url = normalizeCodexBaseUrl(baseUrl)
-  const params = new URLSearchParams({ client_version: clientVersion })
-  return `${url}/models?${params.toString()}`
+export function buildCodexModelsManifestUrl(baseUrl: string): string {
+  const apiRoot = normalizeCodexApiRoot(baseUrl)
+  return `${apiRoot}/backend-api/codex/models`
 }
 
 function isCodexModelsManifest(value: unknown): value is { models: unknown[] } {
