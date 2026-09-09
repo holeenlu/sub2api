@@ -90,8 +90,9 @@ func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
 		ID: 2, Name: "vip", Description: "d", Platform: "anthropic",
 		SubscriptionType: "standard", RateMultiplier: 1, IsExclusive: true,
 		Models: []service.PlazaModel{{
-			Name:     "claude-sonnet",
-			Platform: "anthropic",
+			Name:        "claude-sonnet",
+			ChannelName: "Production Claude",
+			Platform:    "anthropic",
 			Pricing: &service.ChannelModelPricing{
 				BillingMode: service.BillingModeToken,
 				InputPrice:  testPtr(3e-6),
@@ -125,6 +126,7 @@ func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
 	models := decoded["models"].([]any)
 	require.Len(t, models, 1)
 	model := models[0].(map[string]any)
+	require.Equal(t, "Production Claude", model["channel_name"])
 	require.Contains(t, model, "pricing")
 	require.Contains(t, model, "official_pricing")
 	official := model["official_pricing"].(map[string]any)

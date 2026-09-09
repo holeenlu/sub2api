@@ -1,15 +1,16 @@
 <template>
-  <div class="plaza-pricing-table overflow-x-auto" :style="accentStyle">
-    <table class="w-full min-w-[1000px] table-auto border-collapse text-sm tabular-nums">
+  <div class="plaza-pricing-table min-w-0 max-w-full overflow-x-auto" :style="accentStyle">
+    <table class="w-full min-w-[1100px] table-fixed border-collapse text-sm tabular-nums">
+      <!-- 模型 16%、倍率 6%；实付与官方各占 39%，内部列宽保持一致。窄屏横向滚动。 -->
       <colgroup>
-        <col class="w-[25%]" />
-        <col class="w-[11%]" />
-        <col class="w-[9%]" />
-        <col class="w-[14%]" />
-        <col class="w-[11%]" />
-        <col class="w-[8%]" />
-        <col class="w-[14%]" />
-        <col class="w-[8%]" />
+        <col class="w-[16%]" />
+        <col class="w-[10%]" />
+        <col class="w-[7%]" />
+        <col class="w-[22%]" />
+        <col class="w-[10%]" />
+        <col class="w-[7%]" />
+        <col class="w-[22%]" />
+        <col class="w-[6%]" />
       </colgroup>
       <thead>
         <tr
@@ -160,10 +161,10 @@
               </template>
               <div
                 v-else-if="hasCachePricing(m)"
-                class="space-y-0.5 font-mono text-xs text-gray-800 dark:text-gray-200"
+                class="flex items-center gap-1 whitespace-nowrap font-mono text-xs text-gray-800 dark:text-gray-200"
               >
                 <div>
-                  <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.cacheWrite') }}</span>
+                  <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.cacheWriteShort') }}</span>
                   {{ paidPerMillion(m.pricing?.cache_write_price, period)
                   }}<template v-if="m.pricing?.cache_write_1h_price != null"
                     ><span class="font-sans font-normal text-gray-400 dark:text-dark-500"> (1h </span>{{ paidPerMillion(m.pricing.cache_write_1h_price, period)
@@ -171,7 +172,7 @@
                   >
                 </div>
                 <div>
-                  <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.cacheRead') }}</span>
+                  <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.cacheReadShort') }}</span>
                   {{ paidPerMillion(m.pricing?.cache_read_price, period) }}
                 </div>
               </div>
@@ -258,10 +259,10 @@
             </template>
             <div
               v-else-if="m.official_pricing && hasOfficialCache(m.official_pricing)"
-              class="space-y-0.5 font-mono text-xs text-gray-500 dark:text-dark-400"
+              class="flex items-center gap-1 whitespace-nowrap font-mono text-xs text-gray-500 dark:text-dark-400"
             >
               <div>
-                <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.cacheWrite') }}</span>
+                <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.cacheWriteShort') }}</span>
                 {{ official(m.official_pricing.cache_write_price)
                 }}<template v-if="m.official_pricing.cache_write_1h_price != null"
                   ><span class="font-sans text-gray-400 dark:text-dark-500"> (1h </span>{{ official(m.official_pricing.cache_write_1h_price)
@@ -269,7 +270,7 @@
                 >
               </div>
               <div>
-                <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.cacheRead') }}</span>
+                <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.cacheReadShort') }}</span>
                 {{ official(m.official_pricing.cache_read_price) }}
               </div>
             </div>
@@ -536,6 +537,24 @@ function trimZero(n: number): string {
 </script>
 
 <style scoped>
+/* Preserve one line per tier; compact gutters instead of expanding row height. */
+.plaza-pricing-table th,
+.plaza-pricing-table td {
+  padding-left: 0.375rem;
+  padding-right: 0.375rem;
+}
+.plaza-pricing-table thead tr:first-child th:first-child,
+.plaza-pricing-table tbody td:first-child {
+  padding-left: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.plaza-pricing-table td {
+  font-size: 0.75rem;
+}
+.plaza-pricing-table td:last-child {
+  padding-right: 0.75rem;
+}
+
 /* 实付分区配色统一从 --plaza-accent(平台主色)派生,新增平台无需扩展样式 */
 .plaza-pricing-table {
   --pz-title: color-mix(in srgb, var(--plaza-accent) 88%, black);
