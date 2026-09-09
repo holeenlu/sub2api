@@ -54,7 +54,9 @@ func TestListPlazaGroups_GroupCentricAggregation(t *testing.T) {
 	require.Len(t, out[0].Models, 2)
 	// 组内模型按名称排序
 	require.Equal(t, "claude-opus", out[0].Models[0].Name)
+	require.Equal(t, "chB", out[0].Models[0].ChannelName)
 	require.Equal(t, "claude-sonnet", out[0].Models[1].Name)
+	require.Equal(t, "chA", out[0].Models[1].ChannelName)
 }
 
 func TestWithDefaultMaxReasoningEffortMultiplier_Fable51(t *testing.T) {
@@ -89,6 +91,7 @@ func TestListPlazaGroups_DedupFirstWinsWithPricingUpgrade(t *testing.T) {
 	require.Len(t, out, 1)
 	require.Len(t, out[0].Models, 1)
 	require.NotNil(t, out[0].Models[0].Pricing, "无价条目应被有价条目升级")
+	require.Equal(t, "beta", out[0].Models[0].ChannelName)
 	require.NotNil(t, out[0].Models[0].Pricing.InputPrice)
 }
 
@@ -168,7 +171,7 @@ func TestListPlazaGroups_CompositeAndOrdinaryGroupsDoNotLeakPlatforms(t *testing
 	}
 	require.Len(t, byName["anthropic-only"].Models, 1)
 	require.Equal(t, []PlazaModel{{
-		Name: "claude-sonnet", Platform: PlatformAnthropic, Pricing: byName["anthropic-only"].Models[0].Pricing,
+		Name: "claude-sonnet", ChannelName: "multi", Platform: PlatformAnthropic, Pricing: byName["anthropic-only"].Models[0].Pricing,
 	}}, byName["anthropic-only"].Models)
 	require.Len(t, byName["composite"].Models, 2)
 	require.Equal(t, []string{"claude-sonnet", "gpt-5"}, []string{

@@ -128,11 +128,17 @@ scripts
 #openspec/
 code-reviews/
 AGENTS.md
+!/AGENTS.md
 backend/cmd/server/server
 deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
 docs/*
+!docs/CHANGE_DELIVERY.md
+!tools/tests/
+!tools/tests/test_change_delivery.py
+tools/__pycache__/
+tools/tests/__pycache__/
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md

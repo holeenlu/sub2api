@@ -22,6 +22,7 @@ type PlazaOfficialPricing struct {
 // PlazaModel 模型广场中单个模型条目：按实收口径合成的展示定价 + 官方参考价。
 type PlazaModel struct {
 	Name            string
+	ChannelName     string // 渠道管理名称，与去重时选中的渠道定价保持一致。
 	Platform        string
 	Pricing         *ChannelModelPricing
 	OfficialPricing *PlazaOfficialPricing
@@ -177,14 +178,16 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 					// 先见者胜；仅当已存条目无定价而新条目有定价时升级。
 					if pg.Models[at].Pricing == nil && m.Pricing != nil {
 						pg.Models[at].Pricing = m.Pricing
+						pg.Models[at].ChannelName = ch.Name
 					}
 					continue
 				}
 				idx[key] = len(pg.Models)
 				pg.Models = append(pg.Models, PlazaModel{
-					Name:     m.Name,
-					Platform: m.Platform,
-					Pricing:  m.Pricing,
+					Name:        m.Name,
+					ChannelName: ch.Name,
+					Platform:    m.Platform,
+					Pricing:     m.Pricing,
 				})
 			}
 		}
