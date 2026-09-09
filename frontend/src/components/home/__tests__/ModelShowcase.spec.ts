@@ -1,86 +1,85 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-
+import { createI18n } from 'vue-i18n'
 import ModelShowcase from '../ModelShowcase.vue'
-import { SAMPLE_MODELS } from '../sampleModels'
+import en from '@/i18n/locales/en/landing'
+import zh from '@/i18n/locales/zh/landing'
+import zhTW from '@/i18n/locales/zh-TW/landing'
 
-const getModelPlaza = vi.fn()
+const { copyToClipboard, getModelPlaza } = vi.hoisted(() => ({ copyToClipboard: vi.fn(), getModelPlaza: vi.fn() }))
+vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copyToClipboard }) }))
+vi.mock('@/api/modelPlaza', () => ({ getModelPlaza }))
 
-vi.mock('@/api/modelPlaza', () => ({
-  getModelPlaza: () => getModelPlaza()
-}))
-
-vi.mock('vue-i18n', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('vue-i18n')>()
-  return {
-    ...actual,
-    useI18n: () => ({
-      // 插值键在断言里要能看出 provider 有带进去
-      t: (key: string, named?: Record<string, unknown>) =>
-        named ? `${key}:${Object.values(named).join(',')}` : key,
-      locale: { value: 'en' }
-    })
-  }
+const model = (name = 'claude-fable-5-1') => ({
+  name, platform: 'anthropic', channel_name: 'Premium channel',
+  pricing: { billing_mode: 'token', input_price: 0.000004, output_price: 0.00002, cache_read_price: 0.0000004 },
+  official_pricing: { input_price: 99, output_price: 99, cache_read_price: 99 }
 })
+const group = (id = 1, models = [model()]) => ({ id, name: 'Not the channel', rate_multiplier: 2, models })
+function render(locale = 'en') {
+  return mount(ModelShowcase, { global: { plugins: [createI18n({ legacy: false, locale, messages: { en, zh, 'zh-TW': zhTW } })] } })
+}
+beforeEach(() => { vi.clearAllMocks(); getModelPlaza.mockResolvedValue({ groups: [group()] }) })
 
-describe('ModelShowcase', () => {
-  it('广场回传空清单时，改渲染六张示意卡片与说明', async () => {
-    getModelPlaza.mockResolvedValueOnce({ groups: [] })
-
-    const wrapper = mount(ModelShowcase)
+describe('ModelShowcase channel data', () => {
+  it('uses channel name and model pricing times group rate, not official prices', async () => {
+    const wrapper = render()
+    expect(wrapper.find('[role="status"]').exists()).toBe(true)
     await flushPromises()
-
-    const cards = wrapper.findAll('[data-testid="sample-model-card"]')
-    expect(cards).toHaveLength(SAMPLE_MODELS.length)
-    expect(cards).toHaveLength(6)
-
-    const first = cards[0].text()
-    expect(first).toContain('claude-sonnet-4.5')
-    expect(first).toContain('home.models.sampleGroup:Claude')
-    expect(first).toContain('US$3.00')
-    expect(first).toContain('US$15.00')
-    // 每张示意卡片都挂「示意资料」标签
-    for (const card of cards) {
-      expect(card.text()).toContain('home.management.demoLabel')
-    }
-
-    expect(wrapper.get('[data-testid="sample-model-note"]').text()).toBe('home.models.sampleNote')
+    const card = wrapper.get('article')
+    expect(card.get('h4').text()).toBe('claude-fable-5-1')
+    expect(card.text()).toContain('Premium channel')
+    expect(card.text()).not.toContain('Not the channel')
+    expect(card.findAll('dd').map(el => el.text())).toEqual(['US$8.00', 'US$40.00', 'US$0.80'])
+    expect(card.get('a').attributes('href')).toBe('https://platform.claude.com/docs/en/models/fable-5-1/overview')
   })
 
-  it('载入失败时同样退回示意卡片', async () => {
-    getModelPlaza.mockRejectedValueOnce(new Error('boom'))
-
-    const wrapper = mount(ModelShowcase)
-    await flushPromises()
-
-    expect(wrapper.findAll('[data-testid="sample-model-card"]')).toHaveLength(6)
+  it('uses the first six entries in API order across groups, including repeated models', async () => {
+    getModelPlaza.mockResolvedValue({ groups: [group(1, [model(), model('custom')]), group(2, Array.from({ length: 6 }, (_, i) => model(i ? `other-${i}` : 'claude-fable-5-1')))] })
+    const wrapper = render(); await flushPromises()
+    expect(wrapper.findAll('h4').map(el => el.text())).toEqual(['claude-fable-5-1', 'custom', 'claude-fable-5-1', 'other-1', 'other-2', 'other-3'])
+    expect(wrapper.text()).not.toContain('home.models.introductions.')
   })
 
-  it('有真实模型时优先显示真实模型，不显示示意卡片', async () => {
-    getModelPlaza.mockResolvedValueOnce({
-      groups: [
-        {
-          id: 1,
-          name: 'default',
-          rate_multiplier: 2,
-          models: [
-            {
-              name: 'real-model',
-              platform: 'openai',
-              pricing: { input_price: 0.000_001, output_price: 0.000_002 }
-            }
-          ]
-        }
-      ]
-    })
+  it.each([0, 0.5])('uses personal multiplier %s without falling back to group rate', async (rate) => {
+    getModelPlaza.mockResolvedValue({ groups: [{ ...group(), user_rate_multiplier: rate }] })
+    const wrapper = render(); await flushPromises()
+    expect(wrapper.findAll('dd').map(el => el.text())).toEqual(rate ? ['US$2.00', 'US$10.00', 'US$0.20'] : ['US$0.00', 'US$0.00', 'US$0.00'])
+  })
 
-    const wrapper = mount(ModelShowcase)
-    await flushPromises()
+  it('preserves zero prices and shows missing data as unknown', async () => {
+    getModelPlaza.mockResolvedValue({ groups: [{ ...group(), models: [{ ...model(), channel_name: '', pricing: { billing_mode: 'token', input_price: 0, output_price: null, cache_read_price: null } }] }] })
+    const wrapper = render(); await flushPromises()
+    expect(wrapper.findAll('dd').map(el => el.text())).toEqual(['US$0.00', '—', '—'])
+    expect(wrapper.text()).toContain('Channel name unavailable')
+  })
 
-    expect(wrapper.find('[data-testid="sample-model-card"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('real-model')
-    // 单价 × 倍率，按 $ / 1M token
-    expect(wrapper.text()).toContain('$2.00')
-    expect(wrapper.text()).toContain('$4.00')
+  it('does not label per-request prices as token rates', async () => {
+    getModelPlaza.mockResolvedValue({ groups: [group(1, [{ ...model(), pricing: { ...model().pricing, billing_mode: 'per_request' } }])] })
+    const wrapper = render(); await flushPromises()
+    expect(wrapper.findAll('dd').map(el => el.text())).toEqual(['—', '—', '—'])
+  })
+
+  it('shows no static models when API is empty and supports retry on failure', async () => {
+    getModelPlaza.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ groups: [] })
+    const wrapper = render(); await flushPromises()
+    expect(wrapper.findAll('article')).toHaveLength(0)
+    await wrapper.get('[role="alert"] button').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('No public models')
+    expect(wrapper.findAll('article')).toHaveLength(0)
+    expect(wrapper.findAll('a')).toHaveLength(2)
+  })
+
+  it.each(['en', 'zh', 'zh-TW'])('keeps fixed introductions in %s', async (locale) => {
+    const wrapper = render(locale); await flushPromises()
+    expect(wrapper.text()).not.toContain('home.models.')
+    expect(wrapper.get('article p.my-3').text().length).toBeGreaterThan(40)
+  })
+
+  it('copies the dynamic model ID', async () => {
+    getModelPlaza.mockResolvedValue({ groups: [group(1, [model('custom-model')])] })
+    const wrapper = render(); await flushPromises()
+    await wrapper.get('button[aria-label="Copy model ID: custom-model"]').trigger('click')
+    expect(copyToClipboard).toHaveBeenCalledWith('custom-model')
   })
 })

@@ -1,15 +1,16 @@
 <template>
   <div class="plaza-pricing-table overflow-x-auto" :style="accentStyle">
-    <table class="w-full min-w-[1000px] table-auto border-collapse text-sm tabular-nums">
+    <table class="w-full min-w-[1600px] table-fixed border-collapse text-sm tabular-nums">
+      <!-- 固定共用列宽，避免不同分组按内容重新分配宽度；窄屏横向滚动。 -->
       <colgroup>
-        <col class="w-[25%]" />
-        <col class="w-[11%]" />
-        <col class="w-[9%]" />
-        <col class="w-[14%]" />
-        <col class="w-[11%]" />
-        <col class="w-[8%]" />
-        <col class="w-[14%]" />
-        <col class="w-[8%]" />
+        <col class="w-[18%]" />
+        <col class="w-[10%]" />
+        <col class="w-[7%]" />
+        <col class="w-[21%]" />
+        <col class="w-[10%]" />
+        <col class="w-[7%]" />
+        <col class="w-[21%]" />
+        <col class="w-[6%]" />
       </colgroup>
       <thead>
         <tr
@@ -160,7 +161,7 @@
               </template>
               <div
                 v-else-if="hasCachePricing(m)"
-                class="space-y-0.5 font-mono text-xs text-gray-800 dark:text-gray-200"
+                class="space-y-0.5 whitespace-nowrap font-mono text-xs text-gray-800 dark:text-gray-200"
               >
                 <div>
                   <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.cacheWrite') }}</span>
@@ -258,7 +259,7 @@
             </template>
             <div
               v-else-if="m.official_pricing && hasOfficialCache(m.official_pricing)"
-              class="space-y-0.5 font-mono text-xs text-gray-500 dark:text-dark-400"
+              class="space-y-0.5 whitespace-nowrap font-mono text-xs text-gray-500 dark:text-dark-400"
             >
               <div>
                 <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.cacheWrite') }}</span>

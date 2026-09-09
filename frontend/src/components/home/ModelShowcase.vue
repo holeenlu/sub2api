@@ -1,66 +1,54 @@
 <template>
-  <div data-testid="model-showcase">
-    <p v-if="loading" class="py-8 text-center text-sm text-gray-500 dark:text-dark-400">
-      {{ t('home.models.loading') }}
-    </p>
-
-    <template v-else-if="cards.length">
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <div v-for="card in cards" :key="card.key" :class="cardClass">
-          <p class="break-all font-mono text-[14.5px] font-semibold text-gray-900 dark:text-white">
-            {{ card.model }}
-          </p>
-          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ card.group }}</p>
-          <div :class="priceRowClass">
-            <div class="text-xs text-gray-500 dark:text-dark-400">
-              {{ t('modelPlaza.table.input') }}
-              <b :class="priceValueClass">{{ card.input }}</b>
-            </div>
-            <div class="text-xs text-gray-500 dark:text-dark-400">
-              {{ t('modelPlaza.table.output') }}
-              <b :class="priceValueClass">{{ card.output }}</b>
-            </div>
-          </div>
-        </div>
+  <div data-testid="model-showcase" class="space-y-5">
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200/70 pb-4 dark:border-dark-700">
+      <p class="text-xs font-medium text-gray-500 dark:text-dark-400">{{ t('home.models.priceUnit') }}</p>
+      <div class="flex flex-wrap gap-4">
+        <a v-for="group in OFFICIAL_MODEL_GROUPS" :key="group.provider" :href="group.pricingSource" target="_blank" rel="noopener noreferrer" class="text-xs text-gray-500 transition-colors hover:text-primary-600 dark:text-dark-400">
+          {{ group.provider }} · {{ t('home.models.officialPricing') }} ↗
+        </a>
       </div>
-    </template>
-
-    <!-- 没有公开模型（或载入失败）时，用示意卡片撑起版面 -->
-    <template v-else>
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <div
-          v-for="card in sampleCards"
-          :key="card.model"
-          :class="cardClass"
-          data-testid="sample-model-card"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <p
-                class="break-all font-mono text-[14.5px] font-semibold text-gray-900 dark:text-white"
-              >
-                {{ card.model }}
-              </p>
-              <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ card.group }}</p>
+    </div>
+    <p v-if="loading" class="py-6 text-sm text-gray-500" role="status">{{ t('home.models.loading') }}</p>
+    <div v-else-if="loadError" class="py-6 text-sm text-gray-500" role="alert">
+      {{ t('home.models.error') }}
+      <button type="button" class="ml-2 text-primary-600 hover:underline" @click="load">{{ t('home.models.retry') }}</button>
+    </div>
+    <p v-else-if="!cards.length" class="py-6 text-sm text-gray-500">{{ t('home.models.empty') }}</p>
+    <div v-else class="grid grid-cols-1 items-start gap-3 md:grid-cols-2 lg:grid-cols-3 lg:gap-4">
+        <article v-for="card in cards" :key="card.key" :class="cardClass" data-testid="channel-model-card">
+          <div class="flex items-start gap-3">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-50 dark:bg-dark-700" :class="card.platform === 'anthropic' ? 'text-orange-600' : 'text-gray-900 dark:text-white'">
+              <PlatformIcon :platform="card.platform" size="md" />
             </div>
-            <span :class="demoPillClass">{{ t('home.management.demoLabel') }}</span>
+            <div class="min-w-0 flex-1">
+              <h4 class="break-all font-mono text-[15px] font-semibold text-gray-900 dark:text-white">{{ card.model }}</h4>
+              <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ card.channelName || t('home.models.channelUnavailable') }}</p>
+            </div>
+            <button type="button" :aria-label="t('home.models.copyModel', { model: card.model })" class="shrink-0 rounded p-1 text-gray-500 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500 dark:hover:bg-dark-700" @click="copyToClipboard(card.model)">
+              <svg aria-hidden="true" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="8" y="8" width="12" height="12" rx="2" />
+                <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+              </svg>
+            </button>
           </div>
-          <div :class="priceRowClass">
-            <div class="text-xs text-gray-500 dark:text-dark-400">
-              {{ t('home.models.inputPer1M') }}
-              <b :class="priceValueClass">{{ card.input }}</b>
-            </div>
-            <div class="text-xs text-gray-500 dark:text-dark-400">
-              {{ t('home.models.outputPer1M') }}
-              <b :class="priceValueClass">{{ card.output }}</b>
-            </div>
+          <p class="my-3 text-[13px] leading-relaxed text-gray-600 dark:text-dark-300">{{ t(`home.models.introductions.${card.descriptionKey}`) }}</p>
+          <div>
+            <dl class="grid grid-cols-3 gap-2 rounded-xl bg-gray-50/90 px-3 py-2.5 dark:bg-dark-900/50">
+              <div v-for="field in priceFields" :key="field">
+                <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t(`home.models.${field}`) }}</dt>
+                <dd class="mt-1 font-mono text-sm font-semibold text-gray-900 dark:text-white">{{ usd(card[field]) }}</dd>
+              </div>
+            </dl>
+            <a v-if="card.source" :href="card.source" target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-[11px] text-gray-500 hover:text-primary-600 hover:underline dark:text-dark-400">{{ t('home.models.modelDetails') }} ↗</a>
           </div>
-        </div>
+        </article>
+    </div>
+    <details class="text-xs text-gray-500 dark:text-dark-400">
+      <summary class="cursor-pointer select-none transition-colors hover:text-primary-600">{{ t('home.models.pricingDetails') }} · {{ t('home.models.verifiedAt', { date: PRICING_VERIFIED_AT }) }}</summary>
+      <div class="mt-3 space-y-2 rounded-xl bg-gray-50/80 p-4 leading-6 dark:bg-dark-800/60">
+        <p v-for="group in OFFICIAL_MODEL_GROUPS" :key="group.provider"><span class="font-medium">{{ group.provider }} — </span>{{ t(`home.models.${group.noteKey}`) }}</p>
       </div>
-      <p class="mt-4 text-[13px] text-gray-500 dark:text-dark-400" data-testid="sample-model-note">
-        {{ t('home.models.sampleNote') }}
-      </p>
-    </template>
+    </details>
   </div>
 </template>
 
@@ -68,80 +56,53 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getModelPlaza, type ModelPlazaResponse } from '@/api/modelPlaza'
+import type { GroupPlatform } from '@/types'
+import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import { useClipboard } from '@/composables/useClipboard'
 import { formatScaled } from '@/utils/pricing'
-import { SAMPLE_MODELS } from './sampleModels'
+import { OFFICIAL_MODEL_GROUPS, PRICING_VERIFIED_AT } from './officialModels'
 
 const { t } = useI18n()
-
-/** 首页只放前 6 个「模型＋分组」，完整清单交给模型广场。 */
-const MAX_CARDS = 6
-const PER_MILLION = 1_000_000
-const MIN_DECIMALS = 2
-
-const loading = ref(true)
+const { copyToClipboard } = useClipboard()
 const plaza = ref<ModelPlazaResponse | null>(null)
-
-/**
- * 与模型广场同一套实付口径：单价 × 生效倍率（专属倍率优先），按 $ / 1M token 展示。
- * 未知价格显示 '-'，不补 0。
- */
-const cards = computed(() => {
-  const rows: { key: string; model: string; group: string; input: string; output: string }[] = []
-  for (const group of plaza.value?.groups ?? []) {
+const loading = ref(true)
+const loadError = ref(false)
+const descriptions = OFFICIAL_MODEL_GROUPS.flatMap(group => group.models)
+const cards = computed(() => (plaza.value?.groups ?? []).flatMap(group =>
+  group.models.map(model => {
+    const fixed = descriptions.find(item => item.model === model.name)
+    const provider = OFFICIAL_MODEL_GROUPS.find(item => item.platform === model.platform)
     const rate = group.user_rate_multiplier ?? group.rate_multiplier
-    for (const model of group.models ?? []) {
-      if (rows.length >= MAX_CARDS) return rows
-      rows.push({
-        key: `${group.id}:${model.platform}:${model.name}`,
-        model: model.name,
-        group: group.name,
-        input: paid(model.pricing?.input_price, rate),
-        output: paid(model.pricing?.output_price, rate)
-      })
+    const tokenPricing = !model.pricing?.billing_mode || model.pricing.billing_mode === 'token'
+    const paid = (price: number | null | undefined) => tokenPricing && price != null ? price * rate : null
+    return {
+      key: `${group.id}:${model.platform}:${model.name}`,
+      model: model.name,
+      platform: model.platform as GroupPlatform,
+      channelName: model.channel_name,
+      descriptionKey: fixed?.descriptionKey ?? 'generic',
+      source: fixed?.source ?? provider?.pricingSource,
+      input: paid(model.pricing?.input_price),
+      output: paid(model.pricing?.output_price),
+      cacheRead: paid(model.pricing?.cache_read_price)
     }
-  }
-  return rows
-})
-
-/** 示意卡片：价格已是 USD / 1M tokens，故不再乘以倍率或缩放。 */
-const sampleCards = computed(() =>
-  SAMPLE_MODELS.map((item) => ({
-    model: item.model,
-    group: t('home.models.sampleGroup', { provider: item.provider }),
-    input: sampleUsd(item.input),
-    output: sampleUsd(item.output)
-  }))
-)
-
-function paid(value: number | null | undefined, rate: number): string {
-  if (value == null) return '-'
-  return formatScaled(value * rate, PER_MILLION, MIN_DECIMALS)
-}
-
-/** 与真实卡片共用同一个格式化器，另加 US 前缀标明币别（US$3.00）。 */
-function sampleUsd(value: number): string {
-  return `US${formatScaled(value, 1, MIN_DECIMALS)}`
-}
+  })
+).slice(0, 6))
 
 async function load() {
   loading.value = true
+  loadError.value = false
   try {
     plaza.value = await getModelPlaza()
   } catch {
     plaza.value = null
+    loadError.value = true
   } finally {
     loading.value = false
   }
 }
-
 onMounted(load)
-
-const cardClass =
-  'rounded-2xl border border-gray-200/70 bg-white/80 p-5 shadow-sm backdrop-blur-sm dark:border-dark-700/70 dark:bg-dark-800/70'
-const priceRowClass =
-  'mt-4 flex gap-6 border-t border-dashed border-gray-200 pt-3.5 dark:border-dark-700'
-const priceValueClass =
-  'mt-0.5 block font-mono text-[15px] font-semibold text-gray-900 dark:text-white'
-const demoPillClass =
-  'inline-flex shrink-0 items-center rounded-full border border-gray-200 bg-gray-100 px-2.5 py-0.5 text-[11px] font-semibold text-gray-500 dark:border-dark-600 dark:bg-dark-700 dark:text-dark-300'
+const priceFields = ['input', 'output', 'cacheRead'] as const
+const usd = (value: number | null) => value == null ? '—' : `US${formatScaled(value, 1_000_000, 2)}`
+const cardClass = 'flex min-w-0 flex-col rounded-2xl border border-gray-200/70 bg-white/80 p-4 shadow-sm backdrop-blur-sm transition duration-200 hover:border-primary-200 hover:shadow-md motion-reduce:transition-none dark:border-dark-700/70 dark:bg-dark-800/70'
 </script>

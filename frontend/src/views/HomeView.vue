@@ -282,7 +282,7 @@
           </div>
         </section>
 
-        <!-- ============ 2. 模型与费率（整区常驻；广场非公开时只隐藏深连结） ============ -->
+        <!-- ============ 2. 模型与渠道费率（整区常驻；广场非公开时只隐藏深连结） ============ -->
         <section id="models" class="scroll-mt-20 py-16">
           <div :class="sectionHeadClass">
             <div :class="kickerClass">{{ sectionNumber('models') }}</div>
@@ -292,7 +292,7 @@
           <ModelShowcase />
           <div class="mt-6 flex flex-wrap items-center justify-between gap-4">
             <p class="text-[13px] text-gray-500 dark:text-dark-400">
-              {{ t('home.models.rateNote') }}（{{ t('modelPlaza.table.unitPerMillion') }}）
+              {{ t('home.models.rateNote') }}
             </p>
             <router-link v-if="showModelPlazaEntry" to="/model-plaza" :class="textLinkClass">
               {{ t('home.exploreModels') }} →
@@ -472,7 +472,7 @@ function sectionNumber(id: string): string {
   return String(visibleSectionIds.value.indexOf(id) + 1).padStart(2, '0')
 }
 
-/** 「探索模型」滚到 02 模型与费率区块（该区常驻，无公开模型时显示示意卡片）。 */
+/** 「探索模型」滚到 02 模型与费率区块（该区常驻，显示模型广场的前六项）。 */
 function scrollToModels() {
   document.getElementById('models')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
