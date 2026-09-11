@@ -954,11 +954,10 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	if len(credentials) == 0 {
 		return nil
 	}
+	// Candidate admission and sticky routing must evaluate the same account-level
+	// threshold overrides before the full account snapshot is hydrated.
 	keys := []string{
 		"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type",
-		// 阈值停调的账号级覆盖。候选过滤(ListSchedulableAccounts)读的是本投影，
-		// 而粘性路径读的是完整快照；裁掉这两个键会让两条路径按不同阈值判定同一个
-		// 账号——一边打模型级限流、另一边判「阈值未启用」随即解除，来回抖动。
 		"account_scheduling_threshold",
 		"anthropic_fable_scheduling_threshold",
 	}
@@ -979,6 +978,13 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		return nil
 	}
 	keys := []string{
+		// Anthropic shared-window and Fable-only threshold checks run on this
+		// projection. UpdateExtra refreshes both payloads without a bucket rebuild.
+		"session_window_utilization",
+		"passive_usage_7d_utilization",
+		"passive_usage_7d_reset",
+		"passive_usage_7d_oi_utilization",
+		"passive_usage_7d_oi_reset",
 		"quota_limit",
 		"quota_used",
 		"quota_daily_limit",
