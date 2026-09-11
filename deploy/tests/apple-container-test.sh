@@ -48,6 +48,16 @@ assert_exists "${STATE_DIR}/containers/tapmodels-apple"
 assert_exists "${STATE_DIR}/containers/tapmodels-apple-postgres"
 assert_exists "${STATE_DIR}/containers/tapmodels-apple-redis"
 assert_exists "${STATE_DIR}/running/tapmodels-apple"
+grep -q '^while true; do$' "${STATE_DIR}/create-arguments/tapmodels-apple" || \
+    fail "app container does not supervise the TapModels process"
+grep -q '^    su-exec tapmodels "$runtime_binary" &$' "${STATE_DIR}/create-arguments/tapmodels-apple" || \
+    fail "app supervisor does not launch the updatable TapModels binary"
+grep -q '^trap stop TERM INT$' "${STATE_DIR}/create-arguments/tapmodels-apple" || \
+    fail "app supervisor does not handle container stop signals"
+grep -q '^runtime_binary="$runtime_dir/tapmodels"$' "${STATE_DIR}/create-arguments/tapmodels-apple" || \
+    fail "app container does not run its updatable binary from persistent storage"
+grep -q '^APPLE_CONTAINER_TAPMODELS_IMAGE_ID=fake-image-id$' "${STATE_DIR}/env-files/tapmodels-apple" || \
+    fail "app container did not receive the inspected base image ID"
 [[ ! -s "${STATE_DIR}/network-subnets/tapmodels-apple" ]] || \
     fail "up passed a subnet when APPLE_CONTAINER_NETWORK_SUBNET was unset"
 "${SCRIPT}" status >/dev/null
