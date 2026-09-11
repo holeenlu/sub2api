@@ -48,6 +48,16 @@ assert_exists "${STATE_DIR}/containers/kdan-apple"
 assert_exists "${STATE_DIR}/containers/kdan-apple-postgres"
 assert_exists "${STATE_DIR}/containers/kdan-apple-redis"
 assert_exists "${STATE_DIR}/running/kdan-apple"
+grep -q '^while true; do$' "${STATE_DIR}/create-arguments/kdan-apple" || \
+    fail "app container does not supervise the KDAN process"
+grep -q '^    su-exec kdan "$runtime_binary" &$' "${STATE_DIR}/create-arguments/kdan-apple" || \
+    fail "app supervisor does not launch the updatable KDAN binary"
+grep -q '^trap stop TERM INT$' "${STATE_DIR}/create-arguments/kdan-apple" || \
+    fail "app supervisor does not handle container stop signals"
+grep -q '^runtime_binary="$runtime_dir/kdan"$' "${STATE_DIR}/create-arguments/kdan-apple" || \
+    fail "app container does not run its updatable binary from persistent storage"
+grep -q '^APPLE_CONTAINER_KDAN_IMAGE_ID=fake-image-id$' "${STATE_DIR}/env-files/kdan-apple" || \
+    fail "app container did not receive the inspected base image ID"
 [[ ! -s "${STATE_DIR}/network-subnets/kdan-apple" ]] || \
     fail "up passed a subnet when APPLE_CONTAINER_NETWORK_SUBNET was unset"
 "${SCRIPT}" status >/dev/null

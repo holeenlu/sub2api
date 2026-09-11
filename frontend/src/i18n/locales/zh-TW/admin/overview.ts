@@ -438,6 +438,13 @@ export default {
       title: '使用者管理',
       description: '管理使用者帳戶和權限',
       createUser: '建立使用者',
+      bulkDelete: {
+        action: '批次刪除（{count}）',
+        title: '刪除已選使用者',
+        confirm: '確定刪除已選的 {count} 個使用者嗎？此操作無法撤銷。管理員帳號無法刪除。',
+        success: '已刪除 {count} 個使用者',
+        failed: '{count} 個使用者刪除失敗，已保留選中，可重試。'
+      },
       bulkLimits: {
         action: '批次設定限制（{count}）',
         title: '批次設定使用者限制',
