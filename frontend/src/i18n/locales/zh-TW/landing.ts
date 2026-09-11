@@ -222,6 +222,7 @@ export default {
     usedQuota: '已用額度',
     resetNow: '即將重設',
     subscriptionType: '訂閱類型',
+    billingType: '計費方式',
     subscriptionExpires: '訂閱到期',
     // Usage stat cells
     todayRequests: '今日請求',

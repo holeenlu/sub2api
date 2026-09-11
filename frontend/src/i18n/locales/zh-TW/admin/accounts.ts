@@ -313,6 +313,7 @@ export default {
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
+        opencode_go: 'OpenCode',
       },
       cnProviders: {
         accountMode: {
@@ -354,11 +355,29 @@ export default {
         balance: '餘額 --',
         window5h: '5h',
         windowWeekly: '7d',
+        windowMonthly: '月',
         probe: '查詢',
         probeTooltip: '請求供應商額度端點，查詢 5 小時 / 每週滾動視窗用量',
         balanceProbeTooltip: '請求供應商餘額端點，查詢帳戶餘額',
         balanceLow: '餘額不足',
         noBalanceEndpoint: '該平台暫無餘額查詢介面',
+      },
+      opencodeGo: {
+        accountMode: {
+          zen: 'Zen',
+          zenDesc: '按量付費閘道器，消耗帳戶餘額，按 Token 計費。',
+          go: 'GO',
+          goDesc: '訂閱制閘道器，按 5 小時 / 周 / 月滾動用量視窗速率限制。',
+        },
+        protocolRules: {
+          title: '模型協議分流',
+          hint: '自適應模式下按模型匹配上游協議。支援精確 ID 或末尾 * 萬用字元（如 grok-*、qwen*）；自上而下第一條命中生效；未命中走 Chat Completions。',
+          patternPlaceholder: 'grok-* 或 deepseek-v4-flash',
+          add: '新增規則',
+          remove: '刪除規則',
+          restoreDefaults: '恢復預設',
+          fallback: '未命中以上規則 → Chat Completions（/v1/chat/completions）',
+        },
       },
       types: {
         oauth: 'OAuth',

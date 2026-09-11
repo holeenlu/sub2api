@@ -47,6 +47,21 @@ export default {
           enabled: '啟用可用通道',
           enabledHint: '關閉後用戶端側邊欄入口隱藏，介面回傳空陣列。',
         },
+        siteBillingMode: {
+          title: '站點類型',
+          description: '決定用戶端提供哪些購買方式。預設「儲值 & 訂閱」。',
+          label: '購買方式',
+          options: {
+            rechargeAndSubscription: '儲值 & 訂閱',
+            rechargeOnly: '僅儲值',
+            subscriptionOnly: '僅訂閱',
+          },
+          hints: {
+            rechargeAndSubscription: '用戶端同時提供餘額儲值與訂閱方案。',
+            rechargeOnly: '用戶端隱藏「我的訂閱」、購買頁訂閱方案、頂欄訂閱進度與用量頁「計費類型」篩選，直接存取「我的訂閱」會跳回儀表板；管理端側邊欄同時隱藏「訂閱管理」入口（頁面仍可通過地址存取）。已有訂閱的計費與兌換碼發放的訂閱不受影響。',
+            subscriptionOnly: '用戶端購買頁只保留訂閱方案，側邊欄入口顯示為「訂閱」，餘額儲值下單會被拒絕；兌換碼、返利等餘額入帳不受影響。',
+          },
+        },
         modelPlaza: {
           title: '模型廣場',
           description: '以分組為單位向訪客展示可用模型與價格的公開頁面。預設關閉。',
@@ -404,7 +419,7 @@ export default {
         subscriptionGroup: '訂閱分組',
         subscriptionValidityDays: '有效期（天）',
         defaultPlatformQuotas: '預設平台限額（註冊時分配）',
-        defaultPlatformQuotasHint: '新使用者註冊時自動寫入平台限額記錄；已有使用者不受影響。留空 = 該平台該視窗不限制。',
+        defaultPlatformQuotasHint: '新使用者註冊時自動獲得這裡設定的限額；已有使用者不受影響。留空 = 該平台該視窗不限制。',
         platformQuotaNotice: '月限額為 30 天滾動視窗，非自然月',
       },
       platformQuota: {

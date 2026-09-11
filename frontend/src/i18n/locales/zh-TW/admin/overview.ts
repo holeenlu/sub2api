@@ -764,6 +764,7 @@ export default {
         clearAllConfirm: '確認清空全部平台的日 / 周 / 月限額？所有平台將變為"無限額"，本地無法撤銷，需要在儲存前手動重填。',
         reset: {
           button: '重設該視窗',
+          unavailable: '該平台未設定限額，沒有可重設的用量視窗',
           confirm: '確認重設該使用者 {platform} 平台的 {window} 用量？此操作立即生效。',
           success: '已重設 {platform} {window} 用量',
           failed: '重設失敗',
@@ -917,6 +918,7 @@ export default {
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
+        opencode_go: 'OpenCode',
         composite: 'Composite',
       },
       saving: '儲存中...',
