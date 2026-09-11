@@ -678,6 +678,7 @@ export default {
         namePlaceholder: '如：說明中心',
         url: '頁面 URL',
         urlPlaceholder: 'https://example.com/page',
+        hideOpenButton: '隱藏“新視窗開啟”按鈕',
         iconSvg: 'SVG 圖示',
         iconSvgPlaceholder: '<svg>...</svg>',
         iconPreview: '圖示預覽',

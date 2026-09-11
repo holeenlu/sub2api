@@ -429,7 +429,7 @@ export default {
       workerActive: '正在處理非同步稽核或記錄任務',
       workerIdle: '已啟動，目前空閒可用',
       workerDisabled: '風控或內容稽核未啟用',
-      processed: '已處理',
+      processed: '非同步已處理',
       droppedErrors: '丟棄/異常',
       autoRefresh: '每 15 秒自動重新整理',
       lastCleanup: '上次清理：{time}',
