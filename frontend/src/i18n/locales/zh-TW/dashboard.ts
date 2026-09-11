@@ -470,7 +470,8 @@ export default {
       kimi: 'Kimi',
       zhipu: '智譜 GLM',
       deepseek: 'DeepSeek',
-      minimax: 'MiniMax'
+      minimax: 'MiniMax',
+      opencode_go: 'OpenCode'
     },
     // 檢查模式（監控項目的工作方式）
     checkMode: {
@@ -487,6 +488,7 @@ export default {
         '7dSonnet': '7 天 Sonnet',
         '7dFable': '7 天 Fable',
         weekly: '周',
+        monthly: '月',
         daily: '日',
         '30d': '30 天',
         total: '總量'

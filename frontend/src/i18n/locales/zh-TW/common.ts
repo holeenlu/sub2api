@@ -203,6 +203,8 @@ export default {
     github: 'GitHub',
     mySubscriptions: '我的訂閱',
     buySubscription: '儲值/訂閱',
+    recharge: '儲值',
+    subscribe: '訂閱',
     docs: '文件',
     myOrders: '我的訂單',
     orderManagement: '訂單管理',
