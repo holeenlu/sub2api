@@ -66,6 +66,8 @@ export default {
   purchase: {
     title: '儲值/訂閱',
     description: '通過內嵌頁面完成儲值/訂閱',
+    rechargeDescription: '通過內嵌頁面完成儲值',
+    subscriptionDescription: '通過內嵌頁面完成訂閱',
     openInNewTab: '新視窗開啟',
     notEnabledTitle: '該功能未開啟',
     notEnabledDesc: '管理員暫未開啟儲值/訂閱入口，請聯絡管理員。',
@@ -413,6 +415,7 @@ export default {
     tabSubscribe: '訂閱',
     noPlans: '暫無可用訂閱方案',
     notAvailable: '儲值功能暫未開放',
+    billingUnavailable: '儲值與訂閱均暫未開放，請聯絡管理員。',
     confirmSubscription: '確認訂閱',
     confirmCancel: '確定要取消此訂單嗎？',
     amountTooLow: '最低金額為 {min}',
