@@ -168,15 +168,15 @@ export default {
         custom: '自訂'
       },
       openaiTokenStats: {
-        title: 'OpenAI Token 請求統計',
+        title: 'Token 請求統計',
         viewModeTopN: 'TopN',
         viewModePagination: '分頁',
         prevPage: '上一頁',
         nextPage: '下一頁',
         pageInfo: '第 {page}/{total} 頁',
         totalModels: '模型總數：{total}',
-        failedToLoad: '載入 OpenAI Token 統計失敗',
-        empty: '目前篩選條件下暫無 OpenAI Token 請求統計資料',
+        failedToLoad: '載入 Token 請求統計失敗',
+        empty: '目前篩選條件下暫無 Token 請求統計資料',
         table: {
           model: '模型',
           requestCount: '請求數',
@@ -762,8 +762,8 @@ export default {
         dashboardCards: '儀表板卡片',
         displayAlertEvents: '展示警示事件',
         displayAlertEventsHint: '控制維運監控儀表板中警示事件卡片是否顯示，預設開啟。',
-        displayOpenAITokenStats: '展示 OpenAI Token 請求統計',
-        displayOpenAITokenStatsHint: '控制維運監控儀表板中 OpenAI Token 請求統計卡片是否顯示，預設關閉。',
+        displayOpenAITokenStats: '展示 Token 請求統計',
+        displayOpenAITokenStatsHint: '按模型統計所有平台的 Token 請求，支援平台和分組篩選，預設關閉。',
         autoRefreshCountdown: '自動重新整理：{seconds}s',
         validation: {
           title: '請先修正以下問題',
