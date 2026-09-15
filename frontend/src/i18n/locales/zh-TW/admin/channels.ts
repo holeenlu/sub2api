@@ -660,6 +660,41 @@ export default {
 
     // Subscriptions Management
     subscriptions: {
+      batchAssign: {
+        enable: '批次分配訂閱',
+        hint: '搜尋並新增多個使用者，統一分配所選分組和有效期。每次最多 100 人。',
+        selected: '已新增 {count} 位使用者',
+        removeUser: '移除 {email}',
+        result: '分配完成：成功 {success} 人，失敗 {failed} 人',
+        retryHint: '已移除成功項，可檢查失敗原因後重新提交剩餘使用者。'
+      },
+      bulk: {
+        extend: '批次調整有效期',
+        reset_quota: '批次重設配額',
+        revoke: '批次撤銷',
+        restore: '批次恢復',
+        selected: '已選擇 {count} 條訂閱',
+        selectSubscription: '選擇訂閱 #{id}',
+        clearSelection: '清空選擇',
+        selectionHint: '目前頁選擇，翻頁或篩選會清空，最多 100 筆。各操作僅處理適用狀態的訂閱。',
+        selectionLimit: '每次最多操作 100 條訂閱',
+        selectionRequired: '請至少選擇一條訂閱',
+        confirmTargets: '本次將處理以下 {count} 條訂閱',
+        groupFallback: '分組 #{id}',
+        extendHint: '正整數延長，負整數縮短，最多調整 36500 天。已過期訂閱從目前時間起延長，不能縮短；縮短後的到期時間必須在未來。',
+        invalidDays: '請輸入 -36500 到 36500 之間的非零整數天數',
+        resetWindows: '選擇要重設的配額視窗',
+        resetHint: '所選視窗的用量將歸零，並從今天開始重新計算。',
+        selectWindow: '請至少選擇一個配額視窗',
+        revokeHint: '撤銷後這些訂閱將無法繼續使用，可稍後在已撤銷列表中恢復。',
+        restoreHint: '恢復後將重新啟用這些訂閱。原有效期已結束的訂閱將顯示為已過期。',
+        confirm: '確認執行',
+        retry: '重試原操作',
+        retryHint: '暫未確認操作結果。重試會繼續原操作，避免重複處理。也可關閉後重新選擇相同訂閱和參數重試。',
+        requestFailed: '批次操作請求失敗，請重試',
+        result: '處理完成：成功 {success} 筆，失敗 {failed} 筆',
+        itemFailed: '操作失敗'
+      },
       title: '訂閱管理',
       description: '管理使用者訂閱和配額限制',
       assignSubscription: '分配訂閱',

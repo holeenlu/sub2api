@@ -40,7 +40,7 @@ py -3 -m venv "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv"
 & "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv\Scripts\python.exe" "$env:USERPROFILE\.agents\skills\gpt-image-flare\scripts\generate.py" --check-config
 ```
 
-腳本讀取目前 Codex Provider 的 `base_url` 和 `env_key`，不會把 Key 寫入生成檔案。僅設定 `TAPMODELS_API_KEY` 時，URL 和環境變數名稱仍由 Provider 提供；只有明確設定 `TAPMODELS_BASE_URL` 才啟用完整環境覆寫，此時也必須設定 `TAPMODELS_API_KEY`。
+腳本讀取目前 Codex Provider 的 `base_url` 和 `env_key`，不會把 Key 寫入生成檔案。僅設定 `TAPMODELS_API_KEY` 時，URL 和環境變數名仍由 Provider 提供；只有明確設定 `TAPMODELS_BASE_URL` 才啟用完整環境覆蓋，此時也必須設定 `TAPMODELS_API_KEY`。
 
 ## 依賴與認證資訊
 
@@ -53,7 +53,7 @@ python3 -m venv "$HOME/.agents/skills/gpt-image-flare/.venv"
 
 Windows 用 `py -3 -m venv "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv"`，再使用 `.venv\Scripts\python.exe` 執行相同的 `-m pip install -r` 與腳本命令。Sunburst 將路徑中的目錄名對應替換。
 
-明確設定 `TAPMODELS_BASE_URL` 時啟用完整環境覆寫，並要求同時設定 `TAPMODELS_API_KEY`；沒有該 URL 時讀取目前 Codex Provider 的 `base_url` 和 `env_key`，因此僅設定 `TAPMODELS_API_KEY` 也可用。缺少指定環境變數會錯誤，不回退到其他帳號 Key。`--check-config` 只檢查設定結構；實際呼叫還需要認證資訊、網路和模型權限。
+明確設定 `TAPMODELS_BASE_URL` 時啟用完整環境覆蓋，並要求同時設定 `TAPMODELS_API_KEY`；沒有該 URL 時讀取目前 Codex Provider 的 `base_url` 和 `env_key`，因此只設置 `TAPMODELS_API_KEY` 也可用。缺少指定環境變數會錯誤，不回退到其他帳號 Key。`--check-config` 只檢查設定結構；實際呼叫還需要認證資訊、網路和模型權限。
 
 新版官方推薦 `~/.agents/skills`。使用舊版或本專案既有 `~/.codex/skills` 的用戶端，可保留其實際發現路徑；同名 Skill 不要裝兩份。安裝後在任務輸入框輸入 `$gpt-image-flare` 檢查是否出現，未出現則重啟並檢查目錄層級。
 

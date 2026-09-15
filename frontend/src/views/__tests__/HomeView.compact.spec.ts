@@ -125,22 +125,22 @@ describe('HomeView compact mode', () => {
     expect(wrapper.find('.terminal-container').exists()).toBe(true)
   })
 
-  it('links unauthenticated visitors to login', () => {
-    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/login')
+  it('links unauthenticated visitors to TapModels docs', () => {
+    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/docs')
   })
 
-  it('links authenticated users to their dashboard', () => {
+  it('links authenticated users to TapModels docs', () => {
     authStore.isAuthenticated = true
 
-    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/dashboard')
+    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/docs')
   })
 
-  it('links administrators to the admin dashboard', () => {
+  it('links administrators to TapModels docs', () => {
     authStore.isAuthenticated = true
     authStore.isAdmin = true
 
     const wrapper = mountHome({ compact_home_enabled: true })
-    expect(compactDestination(wrapper)).toBe('/admin/dashboard')
+    expect(compactDestination(wrapper)).toBe('/docs')
     expect(authStore.checkAuth).toHaveBeenCalledOnce()
     expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
   })

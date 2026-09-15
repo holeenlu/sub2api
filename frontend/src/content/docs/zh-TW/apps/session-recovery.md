@@ -54,24 +54,24 @@ bash repair-sessions.sh --apply --client-closed
 .\Repair-TapModelsSessions.ps1 -Apply -ClientClosed
 ```
 
-工具僅在工作階段目錄內找到唯一候選，且 JSONL 首條 `session_meta.payload.id` 與索引工作階段 ID 完全一致時修改 `rollout_path`。它先取得寫入鎖，再完成最終掃描；鎖定期間透過另一個唯讀連線生成一致 SQLite 備份，並在提交前驗證資料庫全部資料表、欄位及資料。資料庫、工作階段與備份路徑均拒絕 `..`、任一路徑元件中的符號連結，以及操作中被替換的檔案。任何驗證失敗都會回復交易。原始對話、Key、設定、Provider 和封存標記均不修改。
+工具僅在工作階段目錄內找到唯一候選，且 JSONL 首條 `session_meta.payload.id` 與索引工作階段 ID 完全一致時修改 `rollout_path`。它先取得寫鎖，再完成最終掃描；鎖定期間通過另一隻只讀連線生成一致 SQLite 備份，並在提交前驗證資料庫全部表、列及資料。資料庫、工作階段與備份路徑均拒絕 `..`、任一路徑元件中的符號連結，以及操作中被替換的檔案。任何驗證失敗都會回滾事務。原始對話、Key、設定、Provider 和封存標記均不修改。
 
 沒有匹配檔案、結構未知、資料庫損壞、候選重複或路徑含符號連結時不會替你猜測。它不能從缺失的檔案重建訊息，也不修復任意版本的帳戶篩選邏輯。
 
 ## 檢查結果與回滾
 
-成功後檢視 `repaired_rollout_paths`，重新執行唯讀診斷，再開啟用戶端確認歷史內容。備份位於報告的 `backup` 路徑。先只預覽回復，不修改資料：
+成功後檢視 `repaired_rollout_paths`，重新執行只讀診斷，再開啟用戶端確認歷史內容。備份位於報告的 `backup` 路徑。先只預覽回滾，不修改資料：
 
 ```bash
 bash repair-sessions.sh --rollback "/報告中的備份路徑"
 ```
 
-核對預覽並再次完全退出所有用戶端後，明確執行：
+核對預覽並再次完全退出所有用戶端後，顯式執行：
 
 ```bash
 bash repair-sessions.sh --rollback "/報告中的備份路徑" --apply --client-closed
 ```
 
-PowerShell 對應 `-Rollback "路徑" -Apply -ClientClosed`。回復前工具會先備份目前資料庫，然後使用 compare-and-set 條件，僅撤銷該次修復實際寫入且目前值仍相符的路徑。若路徑後來已變更、備份檔案被替換，或備份不屬於目前 Codex home/資料庫，整次回復都會拒絕執行；新工作階段、Provider 變更及其他資料不會被覆蓋。
+PowerShell 對應 `-Rollback "路徑" -Apply -ClientClosed`。回滾前工具會先備份目前資料庫，然後使用 compare-and-set 條件，僅撤銷該次修復實際寫入且目前值仍匹配的路徑。若路徑後來已改變、備份檔案被替換，或備份不屬於目前 Codex home/資料庫，整次回滾都會拒絕執行；新工作階段、Provider 變更及其他資料不會被覆蓋。
 
 依據：[Codex resume](https://developers.openai.com/codex/cli/reference/)、[Claude Code 工作階段恢復](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)。工具經過臨時資料庫測試；沒有修改本機真實工作階段資料庫。
