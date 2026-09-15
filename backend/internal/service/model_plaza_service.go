@@ -10,11 +10,14 @@ import (
 // PlazaOfficialPricing 模型广场展示用的官方参考价（USD per token），与计费同源：
 // LiteLLM → 内置兜底价卡 → 模型策略。字段为 nil 表示该项缺失（0 视为未配置）。
 type PlazaOfficialPricing struct {
-	InputPrice        *float64
-	OutputPrice       *float64
-	CacheWritePrice   *float64 // 5m 缓存写入（= LiteLLM cache_creation）
-	CacheWrite1hPrice *float64 // 1h 缓存写入，仅计费会区分 5m/1h 时给出
-	CacheReadPrice    *float64
+	InputPrice          *float64
+	OutputPrice         *float64
+	CacheWritePrice     *float64 // 5m 缓存写入（= LiteLLM cache_creation）
+	CacheWrite1hPrice   *float64 // 1h 缓存写入，仅计费会区分 5m/1h 时给出
+	CacheReadPrice      *float64
+	ImageInputPrice     *float64
+	ImageOutputPrice    *float64
+	ImageCacheReadPrice *float64
 	// Intervals 官方长上下文阶梯（多档时给出），不受分组开关影响。
 	Intervals []PricingInterval
 }
@@ -166,6 +169,10 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 			}
 			for j := range supported {
 				m := supported[j]
+				g := groupEnt[gid]
+				if g != nil && g.ModelAllowlistEnabled() && !g.ModelAllowlist.Allows(m.Name) {
+					continue
+				}
 				if pg.Platform == PlatformComposite {
 					if !isConcreteRequestPlatform(m.Platform) {
 						continue
@@ -358,10 +365,13 @@ func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName
 	var result *PlazaOfficialPricing
 	if mp, err := s.billingService.GetModelPricing(modelName); err == nil && mp != nil {
 		result = &PlazaOfficialPricing{
-			InputPrice:      nonZeroPtr(mp.InputPricePerToken),
-			OutputPrice:     nonZeroPtr(mp.OutputPricePerToken),
-			CacheWritePrice: nonZeroPtr(mp.CacheCreationPricePerToken),
-			CacheReadPrice:  nonZeroPtr(mp.CacheReadPricePerToken),
+			InputPrice:          nonZeroPtr(mp.InputPricePerToken),
+			OutputPrice:         nonZeroPtr(mp.OutputPricePerToken),
+			CacheWritePrice:     nonZeroPtr(mp.CacheCreationPricePerToken),
+			CacheReadPrice:      nonZeroPtr(mp.CacheReadPricePerToken),
+			ImageInputPrice:     nonZeroPtr(mp.ImageInputPricePerToken),
+			ImageOutputPrice:    nonZeroPtr(mp.ImageOutputPricePerToken),
+			ImageCacheReadPrice: nonZeroPtr(mp.ImageCacheReadPricePerToken),
 		}
 		// 计费只在支持 5m/1h 分档时使用 1h 价，其余情况 1h 价对用户无意义。
 		if mp.SupportsCacheBreakdown {
@@ -374,7 +384,8 @@ func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName
 			}
 		}
 		if result.InputPrice == nil && result.OutputPrice == nil && result.CacheWritePrice == nil &&
-			result.CacheWrite1hPrice == nil && result.CacheReadPrice == nil && len(result.Intervals) == 0 {
+			result.CacheWrite1hPrice == nil && result.CacheReadPrice == nil && result.ImageInputPrice == nil &&
+			result.ImageOutputPrice == nil && result.ImageCacheReadPrice == nil && len(result.Intervals) == 0 {
 			result = nil
 		}
 	}

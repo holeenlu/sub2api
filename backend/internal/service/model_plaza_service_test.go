@@ -122,6 +122,23 @@ func TestListPlazaGroups_PlatformIsolation(t *testing.T) {
 	require.Equal(t, "gpt-5", byName["g-gpt"][0].Name)
 }
 
+func TestListPlazaGroups_AppliesGroupModelAllowlist(t *testing.T) {
+	channels := []Channel{
+		plazaPricedChannel(1, "openai", []int64{10}, PlatformOpenAI, "gpt-5.6-sol", "gpt-5.6-terra"),
+	}
+	groups := []Group{{
+		ID: 10, Name: "limited", Platform: PlatformOpenAI, RateMultiplier: 0.5,
+		ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.6-sol"}},
+	}}
+
+	out, err := newPlazaService(channels, groups, nil).ListGroups(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Models, 1)
+	require.Equal(t, "gpt-5.6-sol", out[0].Models[0].Name)
+}
+
 func TestListPlazaGroups_CompositeIncludesConfiguredConcretePlatforms(t *testing.T) {
 	anthropicPrice := 3e-6
 	openAIPrice := 2e-6
@@ -223,9 +240,16 @@ func TestListPlazaGroups_OfficialPricingFill(t *testing.T) {
 			CacheReadInputTokenCost:             3e-7,
 		},
 		"token-absent": {Mode: "image_generation", TokenPricingAbsent: true, OutputCostPerImage: 0.04},
+		"image-model": {
+			Mode:                         "image_generation",
+			InputCostPerToken:            5e-6,
+			InputCostPerImageToken:       8e-6,
+			OutputCostPerImageToken:      30e-6,
+			CacheReadInputImageTokenCost: 2e-6,
+		},
 	})
 	channels := []Channel{
-		plazaPricedChannel(1, "ch", []int64{10}, "anthropic", "claude-sonnet", "unknown-model", "token-absent"),
+		plazaPricedChannel(1, "ch", []int64{10}, "anthropic", "claude-sonnet", "unknown-model", "token-absent", "image-model"),
 	}
 	groups := []Group{{ID: 10, Name: "g", Platform: "anthropic", RateMultiplier: 1}}
 	svc := newPlazaService(channels, groups, pricingSvc)
@@ -251,6 +275,29 @@ func TestListPlazaGroups_OfficialPricingFill(t *testing.T) {
 	require.Nil(t, byName["unknown-model"].OfficialPricing)
 	// TokenPricingAbsent 条目不作为官方 token 价展示
 	require.Nil(t, byName["token-absent"].OfficialPricing)
+}
+
+func TestLookupOfficialPricing_IncludesImageTokenPrices(t *testing.T) {
+	pricingSvc := newStubPricingServiceFromMap(map[string]*LiteLLMModelPricing{
+		"gpt-image": {
+			InputCostPerToken:            5e-6,
+			CacheReadInputTokenCost:      1.25e-6,
+			InputCostPerImageToken:       8e-6,
+			CacheReadInputImageTokenCost: 2e-6,
+			OutputCostPerImageToken:      30e-6,
+		},
+	})
+	bs := NewBillingService(nil, pricingSvc)
+	svc := NewModelPlazaService(nil, nil, pricingSvc, bs, nil)
+
+	got := svc.lookupOfficialPricing(context.Background(), "gpt-image", map[string]*PlazaOfficialPricing{})
+
+	require.NotNil(t, got)
+	require.InDelta(t, 5e-6, *got.InputPrice, 1e-12)
+	require.InDelta(t, 1.25e-6, *got.CacheReadPrice, 1e-12)
+	require.InDelta(t, 8e-6, *got.ImageInputPrice, 1e-12)
+	require.InDelta(t, 2e-6, *got.ImageCacheReadPrice, 1e-12)
+	require.InDelta(t, 30e-6, *got.ImageOutputPrice, 1e-12)
 }
 
 func TestListPlazaGroups_GroupImagePriceOverridesChannelPricing(t *testing.T) {
