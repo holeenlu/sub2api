@@ -259,7 +259,7 @@ func TestListPlazaGroups_OfficialPricingFill(t *testing.T) {
 	out, err := svc.ListGroups(context.Background())
 	require.NoError(t, err)
 	require.Len(t, out, 1)
-	require.Len(t, out[0].Models, 3)
+	require.Len(t, out[0].Models, 4)
 
 	byName := map[string]PlazaModel{}
 	for _, m := range out[0].Models {
