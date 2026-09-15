@@ -1,0 +1,65 @@
+export default {
+  docs: {
+    brand: 'API Docs', search: 'Search docs and models', searchShortcut: 'Search docs', close: 'Close', menu: 'Open navigation',
+    backToSite: 'Back to home', console: 'Console', login: 'Log in', copied: 'Copied', copy: 'Copy', copyModel: 'Copy model ID',
+    officialSource: 'Official source', updatedAt: 'Pricing verified {date}', onThisPage: 'On this page', previous: 'Previous', next: 'Next',
+    noResults: 'No matching docs or models', loadingCatalog: 'Loading models enabled for your groups…',
+    noVisibleGroups: 'No visible groups',
+    catalogUnavailable: 'The model catalog is temporarily unavailable. You can still use the integration guides; verify availability in the console or with GET /v1/models.',
+    group: 'Group', chooseGroup: 'Choose group', groupRate: 'Effective rate {rate}x', availability: 'Availability', available: 'Enabled for this group',
+    unavailable: 'Not enabled for this group', unknownAvailability: 'Availability unknown', referencePrice: 'Official Standard × 0.5', livePrice: 'Selected group price',
+    priceUnit: 'USD / 1M tokens', official: 'Official', tapmodels: 'TapModels 0.5x', currentGroup: 'Current group', input: 'Input',
+    cachedInput: 'Cached input', cacheWrite: 'Cache write', cacheWrite1h: '1-hour write', output: 'Output', textInput: 'Text input',
+    cachedTextInput: 'Cached text', imageInput: 'Image input', cachedImageInput: 'Cached image', imageOutput: 'Image output',
+    unitRequest: 'request', unitImage: 'image',
+    longContext: 'Full request over 272K', standardContext: 'Standard context',
+    priceMismatch: 'Group pricing can differ from the official 0.5x reference. Actual charges follow the target group configuration and usage records.',
+    priceFallback: 'These dated public reference prices do not indicate that a model is enabled for your group.',
+    endpointScope: 'Endpoint availability follows this project gateway and the selected group. Official support does not automatically enable a TapModels route.',
+    modelId: 'Model ID', platform: 'Provider', type: 'Type', context: 'Context', maxOutput: 'Max output', cacheMinimum: 'Minimum cache prefix',
+    endpoints: 'Endpoints', features: 'Known capabilities', modelDetailsPending: 'This model is enabled by the current group, but dedicated documentation is still pending. Follow the group description and actual API responses.',
+    modelNotFound: 'This model is not enabled for a visible group and has no static model reference.',
+    requestExample: 'Request example', parametersAndResponse: 'Parameters and response', allModels: 'View all models', startBuilding: 'Start building',
+    viewGuide: 'View guide', docsUpdated: 'Documentation follows the current project routes and configuration.',
+    nav: { start: 'Get started', chat: 'Chat', image: 'Image', models: 'Models and query APIs', apps: 'Apps and tools', availableModels: 'Enabled models' },
+    pages: {
+      overview: { title: 'TapModels API Docs', description: 'Use one gateway for chat and image models. System group configuration controls availability.' },
+      quickstart: { title: 'Quickstart', description: 'Create a key and read your first response.' },
+      authentication: { title: 'Authentication and base URL', description: 'Configure your key, base URL, and request headers.' },
+      pricing: { title: 'Pricing and billing', description: 'Compare official Standard prices, TapModels 0.5x references, and live group pricing.' },
+      errors: { title: 'Errors and retries', description: 'Diagnose authentication, group, model, and upstream failures.' },
+      limits: { title: 'Limits and timeouts', description: 'Understand constraints applied by keys, groups, models, and upstreams.' },
+      openaiChat: { title: 'OpenAI Chat Completions', description: 'Send compatible requests to POST /v1/chat/completions.' },
+      responses: { title: 'OpenAI Responses', description: 'Send text, image, and tool requests to POST /v1/responses.' },
+      messages: { title: 'Anthropic Messages', description: 'Send Anthropic-format requests to POST /v1/messages.' },
+      image: { title: 'OpenAI image generation and edits', description: 'Generate or edit images and safely read the result.' },
+      models: { title: 'Enabled models', description: 'Inspect current models, endpoints, and prices by visible group.' },
+      queryModels: { title: 'List models', description: 'Use GET /v1/models to inspect discovery results for the current key.' },
+      apps: { title: 'App integrations', description: 'Choose a client, configure a key, verify requests and recover your work.' },
+      codex: { title: 'Codex desktop and CLI', description: 'Configure Codex with the TapModels Responses API and dynamic model catalog.' },
+      claudeCode: { title: 'Claude Code', description: 'Configure Claude Code with the TapModels Messages API.' },
+      claudeDesktop: { title: 'Claude desktop', description: 'Third-Party Inference · Messages API' },
+      sessionRecovery: { title: 'Recover Codex sessions', description: 'Diagnose and repair sessions hidden after an account or provider switch.' },
+      imageSkills: { title: 'Codex image skills', description: 'Install the Flare and Sunburst generation and editing skills.' },
+      downloads: { title: 'Downloads', description: 'Download the session repair utility and image skill bundles.' }
+    },
+    models: {
+      chat: 'Chat', image: 'Image', openai: 'OpenAI', anthropic: 'Anthropic',
+      summaries: {
+        astra: 'For complex reasoning, long-running tasks, and demanding workflows.', sol: 'The primary tier for professional quality, speed, and cost.',
+        terra: 'Balances quality and cost for routine production workloads.', luna: 'For high-volume and cost-sensitive lightweight work.',
+        gpt55: 'A general reasoning model with long context and tool workflows.', fable51: 'A high-compute reasoning model with distinct cache-read pricing.',
+        fable5: 'For complex analysis, code, and multi-step tool use.', opus5: 'For high-quality complex reasoning and professional work.',
+        opus48: 'A mature model for complex reasoning and agent tasks.', sonnet5: 'Balances quality, speed, and price.',
+        flare: 'Fast, high-quality everyday image generation and editing.', sunburst: 'A high-capability model for demanding image generation and editing.'
+      }
+    },
+    home: {
+      eyebrow: 'Unified API · Group controls · Precise billing', title: 'Choose a protocol and send your first request',
+      description: 'Endpoints and models are organized separately. Select a current group, then copy a request for that protocol. Prices compare official Standard rates with 0.5x.',
+      step1: 'Create or choose an API key', step2: 'Confirm its group and enabled models', step3: 'Run the request and verify usage and cost',
+      priceTitle: 'A clear pricing basis', priceDescription: 'Each official Standard item is halved separately, including cache, long-context, and image-token rates.',
+      modelsTitle: 'Models follow system groups', modelsDescription: 'Navigation and model pages follow the visible group catalog as models are enabled or removed.'
+    }
+  }
+}

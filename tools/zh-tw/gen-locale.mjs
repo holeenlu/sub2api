@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // 由簡體語言包產生繁體（台灣）語言包。
 //
-//   frontend/src/i18n/locales/zh/**/*.ts   →  frontend/src/i18n/locales/zh-TW/**/*.ts
-//   docs/legal/admin-compliance.zh.md      →  docs/legal/admin-compliance.zh-TW.md
+//   frontend/src/i18n/locales/zh/**/*.ts       →  frontend/src/i18n/locales/zh-TW/**/*.ts
+//   frontend/src/content/docs/zh/**/*.md       →  frontend/src/content/docs/zh-TW/**/*.md
+//   docs/legal/admin-compliance.zh.md          →  docs/legal/admin-compliance.zh-TW.md
 //
 // 用法（在 repo 任何位置執行皆可）：
 //   node tools/zh-tw/gen-locale.mjs            # 產生／覆寫 zh-TW
@@ -21,6 +22,8 @@ import { convertSource } from './convert.mjs'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const ZH_DIR = join(ROOT, 'frontend/src/i18n/locales/zh')
 const TW_DIR = join(ROOT, 'frontend/src/i18n/locales/zh-TW')
+const DOCS_ZH_DIR = join(ROOT, 'frontend/src/content/docs/zh')
+const DOCS_TW_DIR = join(ROOT, 'frontend/src/content/docs/zh-TW')
 const LEGAL_ZH = join(ROOT, 'docs/legal/admin-compliance.zh.md')
 const LEGAL_TW = join(ROOT, 'docs/legal/admin-compliance.zh-TW.md')
 
@@ -59,6 +62,9 @@ function targets() {
     const from = join(ZH_DIR, file)
     const to = join(TW_DIR, file)
     out.push({ from, to, header: HEADER_TS })
+  }
+  for (const file of globSync('**/*.md', { cwd: DOCS_ZH_DIR })) {
+    out.push({ from: join(DOCS_ZH_DIR, file), to: join(DOCS_TW_DIR, file), header: '' })
   }
   out.push({ from: LEGAL_ZH, to: LEGAL_TW, header: '' })
   return out
