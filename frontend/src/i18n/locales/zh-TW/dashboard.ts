@@ -117,6 +117,19 @@ export default {
     nameLabel: '名稱',
     namePlaceholder: '我的 API 金鑰',
     groupLabel: '分組',
+    providerLabel: '廠商',
+    providers: {
+      anthropic: 'Anthropic',
+      openai: 'OpenAI',
+      domestic: '國產模型',
+      other: '其他'
+    },
+    providerHints: {
+      anthropic: '選擇 Anthropic / Claude 的可用分組',
+      openai: '選擇 OpenAI / GPT 的可用分組',
+      domestic: '包含 DeepSeek、Kimi、智譜 GLM、MiniMax',
+      other: '包含 Gemini、Grok、Antigravity、OpenCode 和混合分組'
+    },
     selectGroup: '選擇分組',
     statusLabel: '狀態',
     selectStatus: '選擇狀態',
