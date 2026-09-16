@@ -10,7 +10,7 @@ Claude Code 使用者請使用 [Claude Code 工作階段恢復](/apps/session-re
 | 能找到 JSONL，但索引路徑指向舊目錄 | 用本站工具診斷，滿足條件時修復路徑 |
 | 官方帳號雲端任務或檔案被刪除 | 本地索引修復包無法恢復；回到原帳號或使用自己的備份 |
 
-切換 Key 與更換用戶端帳號、Provider 名稱、資料目錄是不同操作。不要透過刪除 `auth.json`、SQLite 或整個 `.codex` 目錄排查問題。
+切換 Key 與更換用戶端帳號、Provider 名稱、資料目錄是不同操作。不要通過刪除 `auth.json`、SQLite 或整個 `.codex` 目錄故障排除。
 
 ## 先用 Codex 找回
 
@@ -20,9 +20,9 @@ Claude Code 使用者請使用 [Claude Code 工作階段恢復](/apps/session-re
 
 若只是把 `model_provider = "舊名稱"` 改成新名稱，先在舊設定備份中核對舊 Provider 的 ID、模型、地址及認證資訊來源。在同一個舊 Provider 設定項目內更新正確的 TapModels 地址/Key，並恢復頂層原 ID，再重啟嘗試開啟舊工作階段。不要為了顯示歷史把新的 Key 發往舊服務商地址。
 
-不同用戶端版本對帳號/Provider 的篩選不同。本站工具只報告 Provider 分佈，不批次改寫 Provider，也不把一個官方帳號的資料歸給另一個帳號。仍不可見時保留報告聯絡支援。
+不同用戶端版本對帳號/Provider 的過濾不同。本站工具只報告 Provider 分佈，不批次改寫 Provider，也不把一個官方帳號的資料歸給另一個帳號。仍不可見時保留報告聯絡支援。
 
-## 下載與唯讀診斷
+## 下載與只讀診斷
 
 要求 Python 3.10+。[下載 TapModels Codex 工作階段修復工具](/downloads/tapmodels-codex-session-repair.zip)，解壓後進入 `tapmodels-codex-session-repair` 目錄。
 
@@ -60,7 +60,7 @@ bash repair-sessions.sh --apply --client-closed
 
 ## 檢查結果與回滾
 
-成功後檢視 `repaired_rollout_paths`，重新執行唯讀診斷，再開啟用戶端確認歷史內容。先預覽回滾：
+成功後檢視 `repaired_rollout_paths`，重新執行只讀診斷，再開啟用戶端確認歷史內容。先預覽回滾：
 
 ```bash
 bash repair-sessions.sh --rollback "/報告中的備份路徑"

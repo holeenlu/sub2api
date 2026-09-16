@@ -20,13 +20,13 @@ Claude Code CLI 會把工作階段儲存在本機 `~/.claude/projects/<專案>/<
 claude --resume
 ```
 
-`claude --continue` 會恢復目前目錄最近一次工作階段；工作階段內可用 `/resume`。選擇器預設顯示目前專案，按 `Ctrl+W` 查看同一儲存庫的其他 worktree，按 `Ctrl+A` 查看本機全部專案。知道 ID 時使用：
+`claude --continue` 會恢復目前目錄最近一次工作階段；工作階段內可用 `/resume`。選擇器預設顯示目前專案，按 `Ctrl+W` 檢視同一儲存庫的其他 worktree，按 `Ctrl+A` 檢視本機全部專案。知道 ID 時使用：
 
 ```bash
 claude --resume <工作階段ID>
 ```
 
-## 下載唯讀恢復工具
+## 下載只讀恢復工具
 
 [下載 TapModels Claude Code 工作階段恢復包](/downloads/tapmodels-claude-session-recovery.zip)。macOS / Linux：
 
@@ -56,8 +56,8 @@ Set-Location .\tapmodels-claude-session-recovery
 bash find-claude-sessions.sh --claude-home "/原來的/.claude"
 ```
 
-PowerShell 使用 `-ClaudeHome`。若報告提示原工作目錄不存在，先恢復原目錄或把專案放回該路徑，再手動執行產生的命令。開啟工作階段本身不會傳送訊息；繼續輸入並傳送後會產生模型請求。
+PowerShell 使用 `-ClaudeHome`。若報告提示原工作目錄不存在，先恢復原目錄或把專案放回該路徑，再手動執行生成的命令。開啟工作階段本身不會發送訊息；繼續輸入並行送後會產生模型請求。
 
 工具不能重建已刪除、已過期、另一台主機或雲端專屬工作階段，也不會改變 Claude 的保留週期或帳號歸屬。
 
-依據：[Claude Code 工作階段管理](https://code.claude.com/docs/en/sessions)、[Claude 本機資料目錄](https://code.claude.com/docs/en/claude-directory)。工具經過臨時夾具測試，沒有修改本機真實 Claude 工作階段檔案。
+依據：[Claude Code 工作階段管理](https://code.claude.com/docs/en/sessions)、[Claude 本地資料目錄](https://code.claude.com/docs/en/claude-directory)。工具經過臨時夾具測試，沒有修改本機真實 Claude 工作階段檔案。
