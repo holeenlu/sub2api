@@ -29,7 +29,7 @@
           <span class="min-w-0 truncate text-base font-semibold">{{ siteName }}</span>
         </div>
         <div class="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2">
-          <LocaleSwitcher />
+          <LocaleSwitcher align="left" />
           <a
             v-if="docUrl"
             :href="docUrl"
