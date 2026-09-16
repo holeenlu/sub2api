@@ -41,6 +41,20 @@
             <Icon name="book" size="md" />
           </a>
           <router-link
+            to="/docs"
+            class="flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-gray-500 hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800"
+          >
+            <Icon name="book" size="md" />
+            <span class="hidden sm:inline">{{ t('home.apiDocs') }}</span>
+          </router-link>
+          <router-link
+            to="/apps"
+            class="flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-gray-500 hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800"
+          >
+            <Icon name="sparkles" size="md" />
+            <span class="hidden sm:inline">{{ t('home.aiApps') }}</span>
+          </router-link>
+          <router-link
             v-if="showModelPlazaEntry"
             to="/model-plaza"
             class="flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
@@ -146,6 +160,20 @@
           >
             <Icon name="book" size="md" />
           </a>
+          <router-link
+            to="/docs"
+            class="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          >
+            <Icon name="book" size="md" />
+            <span>{{ t('home.apiDocs') }}</span>
+          </router-link>
+          <router-link
+            to="/apps"
+            class="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          >
+            <Icon name="sparkles" size="md" />
+            <span>{{ t('home.aiApps') }}</span>
+          </router-link>
 
           <!-- Theme Toggle -->
           <button
@@ -282,6 +310,13 @@
           </div>
         </section>
 
+        <section class="mx-auto max-w-6xl px-6 pb-4 sm:px-8 lg:px-10">
+          <div class="rounded-2xl border border-primary-200/70 bg-white/80 p-5 shadow-sm backdrop-blur dark:border-primary-900/60 dark:bg-dark-900/70 sm:flex sm:items-center sm:justify-between sm:gap-8">
+            <div class="min-w-0"><p class="text-xs font-semibold uppercase tracking-[0.16em] text-primary-700 dark:text-primary-400">{{ t('home.quickInstall.eyebrow') }}</p><h2 class="mt-2 text-xl font-bold text-gray-900 dark:text-white">{{ t('home.quickInstall.title') }}</h2><p class="mt-1 text-sm text-gray-600 dark:text-dark-300">{{ t('home.quickInstall.description') }}</p></div>
+            <div class="mt-4 flex shrink-0 flex-wrap gap-2 sm:mt-0"><router-link to="/apps/codex" class="btn btn-secondary text-sm">Codex CLI</router-link><router-link to="/apps/claude-code" class="btn btn-secondary text-sm">Claude Code</router-link></div>
+          </div>
+        </section>
+
         <!-- ============ 2. 模型与渠道费率（整区常驻；广场非公开时只隐藏深连结） ============ -->
         <section id="models" class="scroll-mt-20 py-16">
           <div :class="sectionHeadClass">
@@ -387,6 +422,8 @@
           >
             {{ t('home.docs') }}
           </a>
+          <router-link to="/docs" class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-400 dark:hover:text-white">{{ t('home.apiDocs') }}</router-link>
+          <router-link to="/apps" class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-400 dark:hover:text-white">{{ t('home.aiApps') }}</router-link>
         </div>
       </div>
     </footer>

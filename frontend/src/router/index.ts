@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { applyRouteMetaDescription, resolveRouteDocumentTitle } from './title'
+import { docsStaticItems, legacyAppRedirects } from '@/content/docs/nav'
 
 /**
  * Route definitions with lazy loading
@@ -193,6 +194,29 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: false,
       title: 'Model Plaza',
       titleKey: 'modelPlaza.title'
+    }
+  },
+  ...legacyAppRedirects,
+  ...docsStaticItems.map((item, index): RouteRecordRaw => ({
+    path: item.path,
+    name: `DocsPage${index}`,
+    component: () => import('@/views/docs/DocsView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'API Docs',
+      titleKey: item.titleKey,
+      metaDescriptionKey: item.descriptionKey
+    }
+  })),
+  {
+    path: '/docs/models/:modelId',
+    name: 'DocsModel',
+    component: () => import('@/views/docs/DocsView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'Model - API Docs',
+      titleKey: 'docs.pages.models.title',
+      metaDescriptionKey: 'docs.pages.models.description'
     }
   },
 
