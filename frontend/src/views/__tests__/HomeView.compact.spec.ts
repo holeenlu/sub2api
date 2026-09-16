@@ -71,6 +71,10 @@ function modelPlazaDestination(wrapper: ReturnType<typeof mountHome>) {
     ?.props('to')
 }
 
+function destination(wrapper: ReturnType<typeof mountHome>, testId: string) {
+  return wrapper.getComponent(`[data-testid="${testId}"]`).props('to')
+}
+
 describe('HomeView compact mode', () => {
   it.each(['', 'https://example.com/custom-logo.png'])(
     'renders the actual logo in the default header (%j)', (logo) => {
@@ -123,6 +127,18 @@ describe('HomeView compact mode', () => {
 
     expect(wrapper.find('[data-testid="compact-home"]').exists()).toBe(false)
     expect(wrapper.find('.terminal-container').exists()).toBe(true)
+  })
+
+  it.each([
+    [true, 'compact-home-api-docs', 'compact-home-ai-apps'],
+    [false, 'home-api-docs', 'home-ai-apps'],
+  ])('shows explicit API Docs and AI Apps links when compact mode is %s', (compact, docsId, appsId) => {
+    const wrapper = mountHome({ compact_home_enabled: compact })
+
+    expect(destination(wrapper, docsId)).toBe('/docs')
+    expect(destination(wrapper, appsId)).toBe('/apps')
+    expect(wrapper.get(`[data-testid="${docsId}"]`).text()).toBe('home.apiDocs')
+    expect(wrapper.get(`[data-testid="${appsId}"]`).text()).toBe('home.aiApps')
   })
 
   it('links unauthenticated visitors to login', () => {

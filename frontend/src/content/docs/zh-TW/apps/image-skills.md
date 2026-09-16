@@ -1,0 +1,87 @@
+## 可下載 Skills
+
+本專案 提供兩個獨立 Skill：
+
+| Skill | 固定模型 | 生成 | 編輯 |
+| --- | --- | --- | --- |
+| `gpt-image-flare` | `gpt-image-2.5-flare` | `/v1/images/generations` | `/v1/images/edits` |
+| `gpt-image-sunburst` | `gpt-image-2.5-sunburst` | `/v1/images/generations` | `/v1/images/edits` |
+
+下載 [Flare Skill](/downloads/gpt-image-flare.zip) 或 [Sunburst Skill](/downloads/gpt-image-sunburst.zip)。每個包包含 `SKILL.md`、Codex 展示後設資料與 Python 呼叫腳本。
+
+## Codex 桌面版安裝
+
+1. 完全退出 Codex。
+2. ZIP 自帶 `gpt-image-flare/` 或 `gpt-image-sunburst/` 頂層目錄；該目錄內直接包含 `SKILL.md`。
+3. 把整個目錄放入 `~/.agents/skills/`，最終路徑應為 `~/.agents/skills/gpt-image-flare/SKILL.md` 或 `~/.agents/skills/gpt-image-sunburst/SKILL.md`。
+4. 重啟 Codex，在任務中輸入 `$gpt-image-flare` 或 `$gpt-image-sunburst`。
+
+## Codex CLI 安裝
+
+macOS / Linux 範例：
+
+```bash
+mkdir -p "$HOME/.agents/skills"
+unzip -q -o ./gpt-image-flare.zip -d "$HOME/.agents/skills"
+test -f "$HOME/.agents/skills/gpt-image-flare/SKILL.md"
+python3 -m venv "$HOME/.agents/skills/gpt-image-flare/.venv"
+"$HOME/.agents/skills/gpt-image-flare/.venv/bin/python" -m pip install -r "$HOME/.agents/skills/gpt-image-flare/requirements.txt"
+"$HOME/.agents/skills/gpt-image-flare/.venv/bin/python" "$HOME/.agents/skills/gpt-image-flare/scripts/generate.py" --check-config
+```
+
+Windows PowerShell 範例：
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.agents\skills" | Out-Null
+Expand-Archive -Force .\gpt-image-flare.zip "$env:USERPROFILE\.agents\skills"
+if (-not (Test-Path "$env:USERPROFILE\.agents\skills\gpt-image-flare\SKILL.md")) { throw "壓縮包目錄結構無效" }
+py -3 -m venv "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv"
+& "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv\Scripts\python.exe" -m pip install -r "$env:USERPROFILE\.agents\skills\gpt-image-flare\requirements.txt"
+& "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv\Scripts\python.exe" "$env:USERPROFILE\.agents\skills\gpt-image-flare\scripts\generate.py" --check-config
+```
+
+腳本讀取頂層 Codex `model_provider` / `model_providers` 的 `base_url` 和 `env_key`，不會把 Key 寫入生成檔案；不支援透過 Codex `profile` 選擇 Provider。僅設定 `API_KEY` 時，URL 和環境變數名仍由 Provider 提供；只有明確設定 `API_BASE_URL` 才啟用完整環境覆蓋，此時也必須設定 `API_KEY`。Provider 地址必須是 HTTPS（僅迴環測試允許 HTTP），請求重定向會被拒絕。
+
+## 依賴與認證資訊
+
+圖片腳本的認證資訊讀取規則與 Codex 登入檔案不是同一回事：
+
+| 目前 Codex 設定 | 圖片腳本行為 |
+| --- | --- |
+| Provider 設定了 `env_key` | 使用指定變數；變數缺失即停止 |
+| Provider 使用 `experimental_bearer_token` | 使用該 Provider 內的權杖 |
+| Legacy 只在 `auth.json` 儲存 Key | 腳本不讀取該文件；使用下面的顯式環境覆蓋 |
+
+Legacy 使用者或圖片與聊天使用不同分組時，在執行 Skill 的程序環境中同時設定以下兩項。這裡的 Key 必須屬於開放對應影像模型的分組；僅設定 Key 不會替換現有 Provider 的驗證模式。
+
+```bash
+export API_BASE_URL="{{API_ROOT}}"
+export API_KEY="你的圖片分組 API Key"
+```
+
+PowerShell 使用 `$env:API_BASE_URL="{{API_ROOT}}"` 和 `$env:API_KEY="你的圖片分組 API Key"`。桌面版需要從該終端機啟動，詳見 [Codex 設定教程](/apps/codex)。
+
+要求 Python 3.11+ 和 Pillow。在 Skill 目錄建立虛擬環境並安裝隨包列明的依賴：
+
+```bash
+python3 -m venv "$HOME/.agents/skills/gpt-image-flare/.venv"
+"$HOME/.agents/skills/gpt-image-flare/.venv/bin/python" -m pip install -r "$HOME/.agents/skills/gpt-image-flare/requirements.txt"
+```
+
+Windows 用 `py -3 -m venv "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv"`，再使用 `.venv\Scripts\python.exe` 執行相同的 `-m pip install -r` 與腳本命令。Sunburst 將路徑中的目錄名對應替換。
+
+明確設定 `API_BASE_URL` 時啟用完整環境覆蓋，並要求同時設定 `API_KEY`；沒有該 URL 時讀取目前 Codex Provider 的地址及上述認證資訊欄位。缺少指定環境變數會錯誤，不回退到其他帳號 Key。`--check-config` 只檢查設定結構；`--dry-run` 還會驗證請求參數和輸入圖片但不聯網。實際呼叫還需要認證資訊、網路和模型權限。輸出檔案必須使用絕對路徑，已有檔案需顯式 `--force` 覆蓋。
+
+新版官方推薦 `~/.agents/skills`。使用舊版或本專案既有 `~/.codex/skills` 的用戶端，可保留其實際發現路徑；同名 Skill 不要裝兩份。安裝後在任務輸入框輸入 `$gpt-image-flare` 檢查是否出現，未出現則重啟並檢查目錄層級。
+
+## 使用
+
+生成圖片：
+
+```text
+$gpt-image-flare 生成一張白色背景的精密產品圖，1024x1024，高品質。
+```
+
+編輯圖片時附上本地圖片，並明確寫出需要修改及必須保留的內容。Skill 會在有輸入圖時使用編輯介面。每次執行會產生一次計費請求，不會自動重試；結果會驗證實際檔案格式與尺寸。
+
+安裝依據：[Codex 官方 Skills](https://developers.openai.com/codex/skills/)。下載腳本僅做本地和模擬請求測試；實際模型呼叫取決於 Key 分組。
