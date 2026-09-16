@@ -18,13 +18,13 @@ Claude Code 用户请使用 [Claude Code 会话恢复](/apps/session-recovery-cl
 
 ## Provider 切换的处理
 
-若只是把 `model_provider = "旧名称"` 改成新名称，先在旧配置备份中核对旧 Provider 的 ID、模型、地址及凭据来源。在同一个旧 Provider 配置项内更新正确的本项目地址/Key，并恢复顶层原 ID，再重启尝试打开旧会话。不要为了显示历史把新的 Key 发往旧服务商地址。
+若只是把 `model_provider = "旧名称"` 改成新名称，先在旧配置备份中核对旧 Provider 的 ID、模型、地址及凭据来源。在同一个旧 Provider 配置项内更新正确的 KDAN 地址/Key，并恢复顶层原 ID，再重启尝试打开旧会话。不要为了显示历史把新的 Key 发往旧服务商地址。
 
 不同客户端版本对账号/Provider 的过滤不同。本站工具只报告 Provider 分布，不批量改写 Provider，也不把一个官方账号的数据归给另一个账号。仍不可见时保留报告联系支持。
 
 ## 下载与只读诊断
 
-要求 Python 3.10+。[下载 Codex 会话修复工具](/downloads/session-repair.zip)，解压后进入 `session-repair` 目录。
+要求 Python 3.10+。[下载 KDAN Codex 会话修复工具](/downloads/kdan-codex-session-repair.zip)，解压后进入 `kdan-codex-session-repair` 目录。
 
 macOS / Linux：
 

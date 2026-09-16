@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build reproducible documentation downloads; --check rejects stale archives."""
+"""Build reproducible KDAN documentation downloads; --check rejects stale archives."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ import zipfile
 
 DOWNLOADS = Path(__file__).resolve().parents[1] / "frontend/public/downloads"
 PACKAGES = {
-    "session-repair": (
-        "session-repair",
+    "kdan-codex-session-repair": (
+        "kdan-codex-session-repair",
         ("README.md", "repair_sessions.py", "repair-sessions.sh", "RepairSessions.ps1"),
     ),
-    "claude-session-recovery": (
-        "claude-session-recovery",
+    "kdan-claude-session-recovery": (
+        "kdan-claude-session-recovery",
         ("README.md", "find_claude_sessions.py", "find-claude-sessions.sh", "Find-ClaudeSessions.ps1"),
     ),
 }

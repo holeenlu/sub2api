@@ -6,7 +6,7 @@ GET  /v1beta/models/{model}
 POST /v1beta/models/{model}:generateContent
 POST /v1beta/models/{model}:streamGenerateContent?alt=sse
 POST /v1beta/models/{model}:countTokens
-x-goog-api-key: $API_KEY
+x-goog-api-key: $KDAN_API_KEY
 ```
 
 The ordinary `/v1beta` surface accepts Gemini groups only. A separate `/antigravity/v1beta` prefix forces the Antigravity platform and does not imply that an ordinary Gemini group has the same accounts or models.
@@ -16,7 +16,7 @@ The handler allows only `generateContent`, `streamGenerateContent`, and `countTo
 ## Model discovery
 
 ```bash
-curl "$API_BASE_URL/v1beta/models" -H "x-goog-api-key: $API_KEY"
+curl "$KDAN_BASE_URL/v1beta/models" -H "x-goog-api-key: $KDAN_API_KEY"
 ```
 
 The response uses Gemini's `models[]` envelope; `name` is normally `models/YOUR_MODEL_ID`. Items can come from the upstream or a code-defined fallback when selected account types cannot discover models, then pass through the group allowlist. Visibility is not proof of live scheduling.
@@ -24,8 +24,8 @@ The response uses Gemini's `models[]` envelope; `name` is normally `models/YOUR_
 ## generateContent request
 
 ```bash
-curl "$API_BASE_URL/v1beta/models/YOUR_MODEL_ID:generateContent" \
-  -H "x-goog-api-key: $API_KEY" \
+curl "$KDAN_BASE_URL/v1beta/models/YOUR_MODEL_ID:generateContent" \
+  -H "x-goog-api-key: $KDAN_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "systemInstruction":{"parts":[{"text":"Answer briefly."}]},
@@ -49,8 +49,8 @@ The gateway removes messages with empty `parts` and may add a function-call thou
 ## SSE streaming
 
 ```bash
-curl -N "$API_BASE_URL/v1beta/models/YOUR_MODEL_ID:streamGenerateContent?alt=sse" \
-  -H "x-goog-api-key: $API_KEY" \
+curl -N "$KDAN_BASE_URL/v1beta/models/YOUR_MODEL_ID:streamGenerateContent?alt=sse" \
+  -H "x-goog-api-key: $KDAN_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"contents":[{"role":"user","parts":[{"text":"Explain idempotency."}]}]}'
 ```

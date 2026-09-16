@@ -2,7 +2,7 @@
 
 ```http
 GET /v1/models
-Authorization: Bearer $API_KEY
+Authorization: Bearer $KDAN_API_KEY
 ```
 
 模型列表与 API Key 的分组、平台、账号/渠道映射和模型白名单相关。请始终用实际发起推理的同一把 Key 查询。
@@ -10,8 +10,8 @@ Authorization: Bearer $API_KEY
 ## 最小请求与响应
 
 ```bash
-curl "$API_BASE_URL/v1/models" \
-  -H "Authorization: Bearer $API_KEY"
+curl "$KDAN_BASE_URL/v1/models" \
+  -H "Authorization: Bearer $KDAN_API_KEY"
 ```
 
 OpenAI 或 OpenAI 兼容分组通常返回：

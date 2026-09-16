@@ -14,8 +14,8 @@ from typing import Any, NamedTuple
 
 
 REQUIRED_THREAD_COLUMNS = {"id", "rollout_path", "archived"}
-BACKUP_PREFIX = "sub2api-session-repair-"
-SAFETY_PREFIX = "sub2api-session-rollback-safety-"
+BACKUP_PREFIX = "KDAN-session-repair-"
+SAFETY_PREFIX = "KDAN-session-rollback-safety-"
 MANIFEST_NAME = "backup-manifest.json"
 
 

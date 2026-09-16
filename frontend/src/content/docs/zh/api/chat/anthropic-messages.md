@@ -2,7 +2,7 @@
 
 ```http
 POST /v1/messages
-x-api-key: $API_KEY
+x-api-key: $KDAN_API_KEY
 anthropic-version: 2023-06-01
 Content-Type: application/json
 ```
@@ -33,8 +33,8 @@ Content-Type: application/json
 ## 最小请求与非流响应
 
 ```bash
-curl "$API_BASE_URL/v1/messages" \
-  -H "x-api-key: $API_KEY" \
+curl "$KDAN_BASE_URL/v1/messages" \
+  -H "x-api-key: $KDAN_API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
   -d '{

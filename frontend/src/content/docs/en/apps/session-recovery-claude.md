@@ -7,7 +7,7 @@ Codex users should follow [Codex session recovery](/apps/session-recovery-codex)
 | Empty picker in the current project | Return to the project and run `claude --resume`; widen with `Ctrl+W` or `Ctrl+A` |
 | Different OS user, host, or `CLAUDE_CONFIG_DIR` | Locate the original Claude config directory; local sessions do not automatically move between hosts |
 | Project or worktree path changed | Restore the original working directory, then resume by session ID |
-| Missing after changing a service key or login | Keys do not move local files; check the OS user, config directory, and project path |
+| Missing after changing a KDAN key or login | Keys do not move local files; check the OS user, config directory, and project path |
 | Deleted, expired, or cloud-only history | The local scanner cannot recreate it; use the original host, client, or backup |
 
 Claude Code CLI stores sessions at `~/.claude/projects/<project>/<session-id>.jsonl`, or below `CLAUDE_CONFIG_DIR` when configured. Local records older than 30 days can be cleaned up by default.
@@ -28,21 +28,21 @@ claude --resume <session-id>
 
 ## Download the read-only recovery utility
 
-[Download the Claude Code session recovery bundle](/downloads/claude-session-recovery.zip). On macOS or Linux:
+[Download the KDAN Claude Code session recovery bundle](/downloads/kdan-claude-session-recovery.zip). On macOS or Linux:
 
 ```bash
-curl -fsSLO https://your-domain.example/downloads/claude-session-recovery.zip
-unzip claude-session-recovery.zip
-cd claude-session-recovery
+curl -fsSLO https://nextcode.buildtoconnect.com/downloads/kdan-claude-session-recovery.zip
+unzip kdan-claude-session-recovery.zip
+cd kdan-claude-session-recovery
 bash find-claude-sessions.sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-Invoke-WebRequest https://your-domain.example/downloads/claude-session-recovery.zip -OutFile claude-session-recovery.zip
-Expand-Archive .\claude-session-recovery.zip -DestinationPath . -Force
-Set-Location .\claude-session-recovery
+Invoke-WebRequest https://nextcode.buildtoconnect.com/downloads/kdan-claude-session-recovery.zip -OutFile kdan-claude-session-recovery.zip
+Expand-Archive .\kdan-claude-session-recovery.zip -DestinationPath . -Force
+Set-Location .\kdan-claude-session-recovery
 .\Find-ClaudeSessions.ps1
 ```
 
