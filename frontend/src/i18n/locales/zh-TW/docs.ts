@@ -94,7 +94,7 @@ export default {
       claudeCode: { title: 'Claude Code', description: '設定 Claude Code 使用 KDAN Messages API。' },
       claudeDesktop: { title: 'Claude 桌面版', description: 'Third-Party Inference · Messages API' },
       sessionRecoveryCodex: { title: 'Codex 工作階段恢復', description: '診斷切換帳號或 Provider 後 Codex 工作階段不見的問題，並安全修復本地索引。' },
-      sessionRecoveryClaude: { title: 'Claude Code 工作階段恢復', description: '尋找切換 Key、帳號、專案或設定目錄後不見的 Claude Code 本機工作階段。' },
+      sessionRecoveryClaude: { title: 'Claude Code 工作階段恢復', description: '查詢切換 Key、帳號、專案或設定目錄後不見的 Claude Code 本地工作階段。' },
       imageSkills: { title: 'Codex 圖片 Skills', description: '安裝 Flare 與 Sunburst 圖片生成、編輯 Skills。' },
       downloads: { title: '下載中心', description: '下載工作階段修復工具和圖片 Skill 安裝包。' }
     },
