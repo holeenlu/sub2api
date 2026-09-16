@@ -30,7 +30,6 @@ export default {
     available: '当前分组开放',
     unavailable: '当前分组未开放',
     unknownAvailability: '开放状态待确认',
-    referencePrice: '官方标准价 × 0.5',
     livePrice: '所选分组报价',
     priceUnit: 'USD / 1M tokens',
     official: '官方',
