@@ -232,13 +232,7 @@ export default {
         description: '透過目前 MiniMax 分組設定 Claude Code、Codex 或 OpenCode。',
         codexDescription: '使用 API Key 設定 Codex，並透過目前 MiniMax 分組傳送請求。',
         codexConfigTomlHint: '下載下方模型目錄，將兩個檔案儲存到 Codex 設定目錄後重啟 Codex。',
-        codexNote: '啟動 Codex 前先匯出 SUB2API_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
-      },
-      minimax: {
-        description: '透過目前 MiniMax 分組設定 Claude Code、Codex 或 OpenCode。',
-        codexDescription: '使用 API Key 設定 Codex，並透過目前 MiniMax 分組傳送請求。',
-        codexConfigTomlHint: '下載下方模型目錄，將兩個檔案儲存到 Codex 設定目錄後重啟 Codex。',
-        codexNote: '啟動 Codex 前先匯出 SUB2API_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
+        codexNote: '啟動 Codex 前先匯出 KDAN_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
       },
       composite: {
         description: '透過目前 Composite 路由分組設定受支援的用戶端。',
