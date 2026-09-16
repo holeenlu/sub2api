@@ -269,8 +269,8 @@ func grokClientToolCacheAccountPolicy(account *Account) (enabled, explicit bool)
 }
 
 // isGrokClaudeDesktopResponsesCacheRequest recognizes the strict wire
-// fingerprint emitted when Claude Desktop's local agent is translated by
-// CC Switch into an OpenAI Responses request. Requiring every independent
+// fingerprint emitted when a Claude Desktop local agent is translated into
+// an OpenAI Responses request. Requiring every independent
 // signal prevents a generic Claude-compatible client (or the Chat bridge)
 // from silently opting into the mixed native/client tool route.
 func isGrokClaudeDesktopResponsesCacheRequest(c *gin.Context) bool {

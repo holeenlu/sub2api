@@ -1547,7 +1547,7 @@ func cloneAPIKeyWithGroup(apiKey *service.APIKey, group *service.Group) *service
 	return &cloned
 }
 
-// Usage handles getting account balance and usage statistics for CC Switch integration
+// Usage returns API key limits, usage statistics, and available balance details.
 // GET /v1/usage
 //
 // Two modes:
