@@ -18,13 +18,13 @@ Claude Code 用 `claude --resume`、`claude --continue` 或 `/resume`；其資�
 
 ## Provider 切換的處理
 
-若只是把 `model_provider = "舊名稱"` 改成新名稱，先在舊設定備份中核對舊 Provider 的 ID、模型、地址及認證資訊來源。在同一個舊 Provider 設定項目內更新正確的 本專案 地址/Key，並恢復頂層原 ID，再重啟嘗試開啟舊工作階段。不要為了顯示歷史把新的 Key 發往舊服務商地址。
+若只是把 `model_provider = "舊名稱"` 改成新名稱，先在舊設定備份中核對舊 Provider 的 ID、模型、地址及認證資訊來源。在同一個舊 Provider 設定項目內更新正確的 KDAN 地址/Key，並恢復頂層原 ID，再重啟嘗試開啟舊工作階段。不要為了顯示歷史把新的 Key 發往舊服務商地址。
 
 不同用戶端版本對帳號/Provider 的過濾不同，此步驟不是通用保證。本站工具只報告 Provider 分佈，不批次改寫 Provider，也不把一個官方帳號的資料歸給另一個帳號。仍不可見時保留報告聯絡支援。
 
 ## 下載與只讀診斷
 
-要求 Python 3.10+（影像 Skill 需要 3.11+）。[下載恢復工具](/downloads/session-repair.zip)，解壓後進入 `session-repair` 目錄。
+要求 Python 3.10+（影像 Skill 需要 3.11+）。[下載恢復工具](/downloads/kdan-codex-session-repair.zip)，解壓後進入 `session-repair` 目錄。
 
 macOS / Linux：
 
@@ -35,7 +35,7 @@ bash repair-sessions.sh --dry-run
 Windows PowerShell：
 
 ```powershell
-.\Repair-本專案Sessions.ps1 -DryRun
+.\Repair-KDANSessions.ps1 -DryRun
 ```
 
 腳本讀取實際 `CODEX_HOME`，預設 `~/.codex`。如需要指定，使用 `--codex-home "/實際目錄"`，PowerShell 對應 `-CodexHome`。它自動發現唯一的 `state_*.sqlite`，存在多個時不猜測；確認目前用戶端使用的檔案後透過 `--database state_5.sqlite`（範例檔名）或 `-Database` 指定。
@@ -51,7 +51,7 @@ bash repair-sessions.sh --apply --client-closed
 ```
 
 ```powershell
-.\Repair-本專案Sessions.ps1 -Apply -ClientClosed
+.\Repair-KDANSessions.ps1 -Apply -ClientClosed
 ```
 
 工具僅在工作階段目錄內找到唯一候選，且 JSONL 首條 `session_meta.payload.id` 與索引工作階段 ID 完全一致時修改 `rollout_path`。它先取得寫鎖，再完成最終掃描；鎖定期間通過另一隻只讀連線生成一致 SQLite 備份，並在提交前驗證資料庫全部表、列及資料。資料庫、工作階段與備份路徑均拒絕 `..`、任一路徑元件中的符號連結，以及操作中被替換的檔案。任何驗證失敗都會回滾事務。原始對話、Key、設定、Provider 和封存標記均不修改。

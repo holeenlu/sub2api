@@ -18,13 +18,13 @@ Claude Code uses `claude --resume`, `claude --continue` or `/resume`. Its histor
 
 ## Provider changes
 
-If only the `model_provider` identifier changed, inspect the original configuration backup. Restore that identifier and update the corresponding provider's endpoint/key to the intended this project configuration, then restart and try the old task. Never send a new key to an old provider's unrelated endpoint.
+If only the `model_provider` identifier changed, inspect the original configuration backup. Restore that identifier and update the corresponding provider's endpoint/key to the intended KDAN configuration, then restart and try the old task. Never send a new key to an old provider's unrelated endpoint.
 
 Account/provider filtering varies by client version; this is not a universal fix. The utility reports provider distribution without rewriting provider identities or assigning one official account's data to another.
 
 ## Download and diagnose
 
-Requires Python 3.10+; image skills need 3.11+. [Download the utility](/downloads/session-repair.zip), extract and enter `session-repair`.
+Requires Python 3.10+; image skills need 3.11+. [Download the utility](/downloads/kdan-codex-session-repair.zip), extract and enter `session-repair`.
 
 macOS / Linux:
 
@@ -35,7 +35,7 @@ bash repair-sessions.sh --dry-run
 Windows PowerShell:
 
 ```powershell
-.\Repair-this projectSessions.ps1 -DryRun
+.\Repair-KDANSessions.ps1 -DryRun
 ```
 
 The default home is CODEX_HOME, otherwise `~/.codex`. Override with `--codex-home` or `-CodexHome`. The utility selects a unique `state_*.sqlite`; if several exist, identify the active database and use `--database state_5.sqlite` or `-Database` with the actual filename.
@@ -51,7 +51,7 @@ bash repair-sessions.sh --apply --client-closed
 ```
 
 ```powershell
-.\Repair-this projectSessions.ps1 -Apply -ClientClosed
+.\Repair-KDANSessions.ps1 -Apply -ClientClosed
 ```
 
 Only a unique in-tree JSONL whose first `session_meta.payload.id` matches the thread can replace `rollout_path`. The tool obtains a write lock before its final scan and backup, uses a separate read-only connection for that backup, and validates all database tables and columns before commit. Database, rollout and backup paths reject `..`, symbolic-link components and files replaced during the operation. Conversations, credentials, configuration, providers and archive flags are not changed. A failed validation rolls back the transaction.

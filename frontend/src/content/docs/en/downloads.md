@@ -4,7 +4,7 @@ Before downloading, read the [console configuration builder](/apps/console) and 
 
 | File | Purpose | Default behavior |
 | --- | --- | --- |
-| [this project Codex session repair bundle](/downloads/session-repair.zip) | macOS, Linux, and Windows session diagnostics and repair | Read-only; explicit Apply required to write |
+| [KDAN Codex session repair bundle](/downloads/kdan-codex-session-repair.zip) | macOS, Linux, and Windows session diagnostics and repair | Read-only; explicit Apply required to write |
 | [GPT Image 2.5 Flare skill](/downloads/gpt-image-flare.zip) | Codex image generation and editing | Fixed Flare model |
 | [GPT Image 2.5 Sunburst skill](/downloads/gpt-image-sunburst.zip) | Codex image generation and editing | Fixed Sunburst model |
 

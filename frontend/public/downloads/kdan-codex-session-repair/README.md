@@ -36,7 +36,7 @@ SQLite backup. The same transaction changes only proven stale
 table, column, row, and schema object must match the locked snapshot after only
 those approved path values are normalized. Any validation failure rolls the
 transaction back. The backup directory is created with mode `0700` under
-`~/.codex/backups/sub2api-session-repair-*`; the database copy uses mode
+`~/.codex/backups/KDAN-session-repair-*`; the database copy uses mode
 `0600`, preserves the selected database filename, and includes a selective
 rollback manifest. Credentials are not copied into the backup.
 
@@ -54,20 +54,20 @@ On Windows, run the equivalent commands in PowerShell:
 Preview a rollback without changing data:
 
 ```bash
-./repair-sessions.sh --rollback ~/.codex/backups/sub2api-session-repair-YYYYMMDD-HHMMSS-NNNNNNNNN
+./repair-sessions.sh --rollback ~/.codex/backups/KDAN-session-repair-YYYYMMDD-HHMMSS-NNNNNNNNN
 ```
 
 After reviewing it and closing every client again, apply it explicitly:
 
 ```bash
-./repair-sessions.sh --rollback ~/.codex/backups/sub2api-session-repair-YYYYMMDD-HHMMSS-NNNNNNNNN --apply --client-closed
+./repair-sessions.sh --rollback ~/.codex/backups/KDAN-session-repair-YYYYMMDD-HHMMSS-NNNNNNNNN --apply --client-closed
 ```
 
 PowerShell uses `-Rollback <backup-directory> -Apply -ClientClosed`. Rollback
 restores only this tool's recorded `rollout_path` cells and only when every cell
 still equals the value written by that repair. A mismatch aborts the transaction,
 so newer paths and unrelated data are preserved. The current database is backed
-up under `sub2api-session-rollback-safety-*` before any rollback updates.
+up under `KDAN-session-rollback-safety-*` before any rollback updates.
 
 Provider values are diagnostic only. This tool does not rewrite them because a
 database-only provider change can disagree with rollout metadata and can be

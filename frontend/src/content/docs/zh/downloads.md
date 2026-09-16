@@ -4,7 +4,7 @@
 
 | 文件 | 用途 | 默认行为 |
 | --- | --- | --- |
-| [本项目 Codex 会话修复包](/downloads/session-repair.zip) | macOS、Linux、Windows 会话诊断与修复 | 只读诊断，显式 Apply 才修改 |
+| [KDAN Codex 会话修复包](/downloads/kdan-codex-session-repair.zip) | macOS、Linux、Windows 会话诊断与修复 | 只读诊断，显式 Apply 才修改 |
 | [GPT Image 2.5 Flare Skill](/downloads/gpt-image-flare.zip) | Codex 图片生成与编辑 | 固定 Flare 模型 |
 | [GPT Image 2.5 Sunburst Skill](/downloads/gpt-image-sunburst.zip) | Codex 图片生成与编辑 | 固定 Sunburst 模型 |
 

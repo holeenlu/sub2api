@@ -15,9 +15,9 @@
 | --- | --- | --- |
 | OpenAI | Codex CLI、Codex WebSocket、Claude Code（启用 Messages 时）、OpenCode | `config.toml`、`auth.json` 或 `experimental_bearer_token`、Anthropic 环境变量、`opencode.json` |
 | Anthropic | Claude Code、Codex（路由）、OpenCode | `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、Codex Responses provider、OpenCode provider |
-| Gemini | Gemini CLI、Codex（路由）、OpenCode | `GOOGLE_GEMINI_BASE_URL`、`GEMINI_API_KEY`、`GEMINI_MODEL` |
+| Gemini | Gemini CLI、Codex（路由）、OpenCode | `GOOGLE_GEMINI_BASE_URL`、`GEMINI_KDAN_API_KEY`、`GEMINI_MODEL` |
 | Antigravity | Claude Code、Gemini CLI、Codex（路由）、OpenCode | 地址自动追加 `/antigravity`，Gemini 使用 `/v1beta` |
-| Grok | Grok CLI、Claude Code、Codex、OpenCode | `GROK_MODELS_BASE_URL`、`XAI_API_KEY` 或对应客户端配置 |
+| Grok | Grok CLI、Claude Code、Codex、OpenCode | `GROK_MODELS_BASE_URL`、`XAI_KDAN_API_KEY` 或对应客户端配置 |
 | DeepSeek、MiniMax、Composite、Kimi、Zhipu、OpenCode | Claude Code、Codex（路由）、OpenCode | 以弹窗生成的分组地址为准；Codex 目录仅 Composite 提供 |
 
 ## Codex 认证模式
@@ -27,7 +27,7 @@ OpenAI 分组的 Codex 标签提供两种模式：
 - **Legacy**：`config.toml` 使用 `requires_openai_auth = true`，并下载 `auth.json`。只在 Codex 版本需要该登录形态时使用。
 - **API key**：`requires_openai_auth = false`，把 Key 写入 `experimental_bearer_token`，并附加本地图片扩展所需的请求头。该模式会把密钥保存在磁盘，限制文件权限且不要提交到仓库。
 
-其他分组的 Codex 路由默认使用 `env_key = "API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`。WebSocket 标签只对 OpenAI Responses WebSocket 路径启用。
+其他分组的 Codex 路由默认使用 `env_key = "KDAN_API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`。WebSocket 标签只对 OpenAI Responses WebSocket 路径启用。
 
 ## 模型目录
 
@@ -35,23 +35,23 @@ OpenAI 分组的 Codex 标签提供两种模式：
 
 支持的 Codex 标签中的 **获取模型目录** 会使用当前 Key 请求专用入口 `/backend-api/codex/models`，下载 `codex-models.json`。将其放在稳定的绝对路径，并在 `config.toml` 设置 `model_catalog_json`。普通 `GET /v1/models` 返回通用模型列表，不能直接当成这个目录文件。分组权限变化后重新获取；不要手工改模型 slug 绕过分组策略。
 
-## 本项目界面操作
+## KDAN界面操作
 
 以下截图来自当前项目的“使用密钥”组件，使用无效示例 Key 和 `api.example.com` 演示地址。实际接入请复制自己控制台生成的值，不要抄录图片中的地址或 Key。
 
 1. OpenAI 分组选择 **Codex CLI**，按所用客户端选择 Legacy 或 API key 认证；两种模式对应的文件不同。
 
-![本项目 Codex Legacy 配置器（示例数据）](/docs-assets/client-codex-zh.png)
+![KDAN Codex Legacy 配置器（示例数据）](/docs-assets/client-codex-zh.png)
 
 2. API key 模式会把 Key 写入配置文件；下载后限制文件权限，并完全重启客户端。
 
-![本项目 Codex API key 配置器（示例数据）](/docs-assets/client-codex-zh.png)
+![KDAN Codex API key 配置器（示例数据）](/docs-assets/client-codex-zh.png)
 
 3. Anthropic 分组选择 **Claude Code**，根据操作系统切换命令。复制当前标签下完整命令，在同一个终端运行客户端。
 
-![本项目 Claude Code macOS / Linux 配置器（示例数据）](/docs-assets/client-claude-zh.png)
+![KDAN Claude Code macOS / Linux 配置器（示例数据）](/docs-assets/client-claude-zh.png)
 
-![本项目 Claude Code PowerShell 配置器（示例数据）](/docs-assets/client-claude-zh.png)
+![KDAN Claude Code PowerShell 配置器（示例数据）](/docs-assets/client-claude-zh.png)
 
 ## 验证与排查
 
