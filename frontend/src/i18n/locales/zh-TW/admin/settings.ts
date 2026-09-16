@@ -626,7 +626,7 @@ export default {
         siteSubtitleHint: '顯示在登入和註冊頁面',
         siteSubtitlePlaceholder: '選個模型，開始開發。',
         apiBaseUrl: 'API 端點網址',
-        apiBaseUrlHint: '用於"使用金鑰"、"匯入到 CC Switch"和回呼網址建議，留空則使用目前網站網址',
+        apiBaseUrlHint: '用於"使用金鑰"和回呼網址建議，留空則使用目前網站網址',
         apiBaseUrlPlaceholder: 'https://api.example.com',
         tablePreferencesTitle: '通用表格設定',
         tablePreferencesDescription: '設定後台與使用者側表格元件的預設分頁行為',
