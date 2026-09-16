@@ -368,12 +368,12 @@ describe('UseKeyModal', () => {
     await nextTick()
 
     let codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
-    const configToml = codeBlocks.find((content) => content.includes('[model_providers.sub2api]'))
+    const configToml = codeBlocks.find((content) => content.includes('[model_providers.tapmodels]'))
     expect(configToml).toBeDefined()
-    expect(configToml).toContain('model_provider = "sub2api"')
+    expect(configToml).toContain('model_provider = "tapmodels"')
     expect(configToml).toContain('model = "grok-4.5"')
     expect(configToml).toContain('base_url = "https://example.com/v1"')
-    expect(configToml).toContain('env_key = "SUB2API_API_KEY"')
+    expect(configToml).toContain('env_key = "TAPMODELS_API_KEY"')
     expect(configToml).toContain('wire_api = "responses"')
     // API-key provider: Codex must not require a ChatGPT OAuth login.
     expect(configToml).toContain('requires_openai_auth = false')
@@ -386,7 +386,7 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('supports_websockets = true')
     expect(configToml).not.toContain('responses_websockets_v2')
     expect(wrapper.text()).not.toContain('auth.json')
-    expect(codeBlocks.join('\n')).toContain('SUB2API_API_KEY')
+    expect(codeBlocks.join('\n')).toContain('TAPMODELS_API_KEY')
 
     const windowsTab = wrapper.findAll('button').find(
       (button) => button.text().trim() === 'Windows'
@@ -807,9 +807,9 @@ describe('UseKeyModal', () => {
 
     const unixConfig = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.sub2api]'))
+      .find((content) => content.includes('[model_providers.tapmodels]'))
     expect(unixConfig).toContain('model_catalog_json = "~/.codex/codex-models.json"')
-    expect(unixConfig).toContain('env_key = "SUB2API_API_KEY"')
+    expect(unixConfig).toContain('env_key = "TAPMODELS_API_KEY"')
 
     await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
     await flushPromises()
@@ -825,7 +825,7 @@ describe('UseKeyModal', () => {
 
     const loadedUnixConfig = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.sub2api]'))
+      .find((content) => content.includes('[model_providers.tapmodels]'))
     expect(loadedUnixConfig).toContain('model = "claude-opus-4-8"')
     expect(loadedUnixConfig).toContain('review_model = "claude-opus-4-8"')
     expect(loadedUnixConfig).not.toContain('model = "gpt-5.6-sol"')
@@ -846,14 +846,14 @@ describe('UseKeyModal', () => {
 
     const windowsConfig = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.sub2api]'))
+      .find((content) => content.includes('[model_providers.tapmodels]'))
     expect(windowsConfig).toContain(
       'model_catalog_json = "%userprofile%\\\\.codex\\\\codex-models.json"'
     )
   })
 
-  it.each(['anthropic', 'gemini', 'antigravity', 'kimi', 'zhipu', 'minimax'] as const)(
-    'offers Codex catalog configuration for the %s routed group',
+  it.each(['anthropic', 'gemini', 'antigravity', 'kimi', 'zhipu', 'deepseek', 'minimax'] as const)(
+    'hides Codex catalog and omits manifest config for unsupported %s groups',
     async (platform) => {
       const wrapper = mount(UseKeyModal, {
         props: {
@@ -881,15 +881,43 @@ describe('UseKeyModal', () => {
       await codexTab!.trigger('click')
       await nextTick()
 
-      expect(wrapper.find('[data-testid="codex-model-catalog"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="codex-model-catalog"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="codex-model-catalog-fetch"]').exists()).toBe(false)
       const config = wrapper.findAll('pre code')
         .map((code) => code.text())
-        .find((content) => content.includes('[model_providers.sub2api]'))
-      expect(config).toContain('model_catalog_json = "~/.codex/codex-models.json"')
+        .find((content) => content.includes('[model_providers.tapmodels]'))
+      expect(config).toBeDefined()
+      expect(config).not.toContain('model_catalog_json')
       expect(config).toContain('base_url = "https://example.com/v1"')
       expect(config).toContain('wire_api = "responses"')
     }
   )
+
+  it('clears a loaded Composite catalog when switching to an unsupported platform', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ models: [{ slug: 'claude-opus-4-8' }] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mountModal('composite', 'sk-routed-test')
+
+    await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
+    await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
+    await flushPromises()
+    expect(findCodeBlock(wrapper, '[model_providers.tapmodels]')).toContain('model = "claude-opus-4-8"')
+
+    await wrapper.setProps({ platform: 'deepseek' })
+    await nextTick()
+    await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
+
+    expect(wrapper.find('[data-testid="codex-model-catalog"]').exists()).toBe(false)
+    const deepSeekConfig = findCodeBlock(wrapper, '[model_providers.tapmodels]')
+    expect(deepSeekConfig).toContain('model = "deepseek-v4-pro"')
+    expect(deepSeekConfig).not.toContain('claude-opus-4-8')
+    expect(deepSeekConfig).not.toContain('model_catalog_json')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 
   // Scenario: the platform-preferred model remains selected when the downloaded catalog contains it.
   it('keeps the preferred Composite default when it exists in the catalog', async () => {
@@ -933,7 +961,7 @@ describe('UseKeyModal', () => {
 
     const config = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.sub2api]'))
+      .find((content) => content.includes('[model_providers.tapmodels]'))
     expect(config).toContain('model = "gpt-5.5"')
     expect(config).toContain('review_model = "gpt-5.5"')
   })
@@ -991,7 +1019,7 @@ describe('UseKeyModal', () => {
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
     await clickButton(wrapper, (text) => text.trim() === osTab)
 
-    const config = findCodeBlock(wrapper, '[model_providers.sub2api]')
+    const config = findCodeBlock(wrapper, '[model_providers.tapmodels]')
     expect(tomlValue(config, 'model')).toBe('claude-sonnet-5')
     expect(tomlValue(config, 'review_model')).toBe('claude-sonnet-5')
     expect(config).not.toContain('claude-sonnet-4-6')
@@ -1057,7 +1085,7 @@ describe('UseKeyModal', () => {
     await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
     await flushPromises()
 
-    const config = findCodeBlock(wrapper, '[model_providers.sub2api]')
+    const config = findCodeBlock(wrapper, '[model_providers.tapmodels]')
     expect(tomlValue(config, 'model')).toBe(expectedModel)
     expect(tomlValue(config, 'review_model')).toBe(tomlValue(config, 'model'))
   })
@@ -1175,12 +1203,12 @@ describe('UseKeyModal', () => {
       const files = await downloadAllCards(wrapper)
       expect(files.map((file) => file.name)).toEqual(['config.toml'])
       const parsed = parseToml(files[0].text) as Record<string, unknown>
-      expectRootKeys(parsed, ['model_provider', 'model', 'review_model', 'disable_response_storage', 'model_catalog_json'])
-      expect(parsed.model_provider).toBe('sub2api')
+      expectRootKeys(parsed, ['model_provider', 'model', 'review_model', 'disable_response_storage'])
+      expect(parsed.model_provider).toBe('tapmodels')
       expect(parsed.model).toBe('claude-sonnet-5')
       const providers = parsed.model_providers as Record<string, Record<string, unknown>>
-      expect(providers.sub2api.env_key).toBe('SUB2API_API_KEY')
-      expect(providers.sub2api.requires_openai_auth).toBe(false)
+      expect(providers.tapmodels.env_key).toBe('TAPMODELS_API_KEY')
+      expect(providers.tapmodels.requires_openai_auth).toBe(false)
     }
   })
 
@@ -1223,8 +1251,8 @@ describe('UseKeyModal', () => {
     files = await downloadAllCards(wrapper)
     expect(files.map((file) => file.name)).toEqual(['config.toml'])
     parsed = parseToml(files[0].text) as Record<string, unknown>
-    expectRootKeys(parsed, ['model_provider', 'model', 'model_catalog_json'])
-    expect(parsed.model_provider).toBe('sub2api')
+    expectRootKeys(parsed, ['model_provider', 'model'])
+    expect(parsed.model_provider).toBe('tapmodels')
   })
 
   it.each(['Acme "Lab"', 'Acme\\Lab', 'Acme\r\nLab\t\u0001\u007f\u2028Line'])('preserves special site names in downloaded TOML: %j', async (name) => {
