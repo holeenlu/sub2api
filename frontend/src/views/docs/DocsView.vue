@@ -8,7 +8,7 @@
           <span class="hidden truncate text-sm font-semibold text-gray-950 sm:block dark:text-white">{{ appStore.siteName }}</span>
         </RouterLink>
 
-        <button type="button" class="mx-auto flex h-10 w-full max-w-md items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 text-left text-sm text-gray-400 hover:border-gray-300 dark:border-dark-700 dark:bg-dark-900 dark:hover:border-dark-600" @click="searchOpen = true">
+        <button type="button" class="min-w-0 flex-1 mx-0 flex h-10 max-w-md items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 text-left text-sm text-gray-400 hover:border-gray-300 dark:border-dark-700 dark:bg-dark-900 dark:hover:border-dark-600 sm:mx-auto" @click="searchOpen = true">
           <Icon name="search" size="sm" /><span class="min-w-0 flex-1 truncate">{{ searchLabel }}</span><kbd class="hidden rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] text-gray-400 sm:block dark:border-dark-700 dark:bg-dark-800">⌘ K</kbd>
         </button>
 
