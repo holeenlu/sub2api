@@ -14,9 +14,8 @@
           </template>
           <span v-else :class="chipClass">{{ t('home.agents.dedicatedSetup') }}</span>
         </div>
-        <!-- 设定范本在金钥页，需要登入才看得到，这是预期行为 -->
         <router-link
-          to="/keys"
+          :to="tool === 'Codex' ? '/apps/codex' : tool === 'Claude Code' ? '/apps/claude-code' : '/apps/console'"
           class="mt-auto pt-1.5 text-[13px] font-semibold text-primary-700 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300"
         >
           {{ t('home.agents.setupGuide') }} →

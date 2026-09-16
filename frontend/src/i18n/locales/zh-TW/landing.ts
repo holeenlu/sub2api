@@ -9,6 +9,8 @@ export default {
   home: {
     viewDocs: '檢視文件',
     docs: '文件',
+    apiDocs: 'API 文件',
+    aiApps: 'AI 應用',
     switchToLight: '切換到淺色模式',
     switchToDark: '切換到深色模式',
     dashboard: '控制台',
@@ -17,11 +19,12 @@ export default {
     exploreModels: '探索模型',
     goToDashboard: '進入控制台',
     // 首頁主視覺文案
-    heroSubtitle: '一個 API，自由選模型。',
-    heroDescription: '通過一個 API 使用不同 AI 模型。\n減少接入與管理的負擔，把時間留給產品開發。',
+    heroSubtitle: '選個模型，開始開發。',
+    heroDescription: '透過一個 API 使用不同 AI 模型。\n減少串接與管理的負擔，把時間留給產品開發。',
     heroEyebrow: '多模型 AI API 閘道器',
-    heroTitle: '一個 API，自由選模型。',
+    heroTitle: '選個模型，開始開發。',
     contactIntegration: '接入諮詢',
+    quickInstall: { eyebrow: '幾分鐘完成接入', title: '從 API Key 直接開始', description: 'Codex CLI 與 Claude Code 提供安全備份、環境變數和設定檔安裝指引。' },
     terminal: {
       caption: 'API 請求示意',
       routing: '正在轉發至上游…'

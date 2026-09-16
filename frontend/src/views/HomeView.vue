@@ -30,16 +30,21 @@
         </div>
         <div class="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
           <LocaleSwitcher />
-          <a
-            v-if="docUrl"
-            :href="docUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800"
+          <router-link
+            to="/docs"
+            class="flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-gray-500 hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800"
             :title="t('home.viewDocs')"
           >
             <Icon name="book" size="md" />
-          </a>
+            <span>{{ t('home.apiDocs') }}</span>
+          </router-link>
+          <router-link
+            to="/apps"
+            class="flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-gray-500 hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800"
+          >
+            <Icon name="sparkles" size="md" />
+            <span>{{ t('home.aiApps') }}</span>
+          </router-link>
           <router-link
             v-if="showModelPlazaEntry"
             to="/model-plaza"
@@ -116,7 +121,7 @@
 
     <!-- Header -->
     <header class="relative z-20 px-6 py-4">
-      <nav class="mx-auto flex max-w-6xl items-center justify-between">
+      <nav class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
         <!-- Wordmark -->
         <router-link to="/" class="flex min-w-0 items-center gap-2.5">
           <img
@@ -131,21 +136,26 @@
         </router-link>
 
         <!-- Nav Actions -->
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-1 sm:gap-3">
           <!-- Language Switcher -->
           <LocaleSwitcher />
 
           <!-- Doc Link -->
-          <a
-            v-if="docUrl"
-            :href="docUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          <router-link
+            to="/docs"
+            class="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
             :title="t('home.viewDocs')"
           >
             <Icon name="book" size="md" />
-          </a>
+            <span>{{ t('home.apiDocs') }}</span>
+          </router-link>
+          <router-link
+            to="/apps"
+            class="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          >
+            <Icon name="sparkles" size="md" />
+            <span>{{ t('home.aiApps') }}</span>
+          </router-link>
 
           <!-- Theme Toggle -->
           <button
@@ -282,6 +292,13 @@
           </div>
         </section>
 
+        <section class="mx-auto max-w-6xl px-6 pb-4 sm:px-8 lg:px-10">
+          <div class="rounded-2xl border border-primary-200/70 bg-white/80 p-5 shadow-sm backdrop-blur dark:border-primary-900/60 dark:bg-dark-900/70 sm:flex sm:items-center sm:justify-between sm:gap-8">
+            <div class="min-w-0"><p class="text-xs font-semibold uppercase tracking-[0.16em] text-primary-700 dark:text-primary-400">{{ t('home.quickInstall.eyebrow') }}</p><h2 class="mt-2 text-xl font-bold text-gray-900 dark:text-white">{{ t('home.quickInstall.title') }}</h2><p class="mt-1 text-sm text-gray-600 dark:text-dark-300">{{ t('home.quickInstall.description') }}</p></div>
+            <div class="mt-4 flex shrink-0 flex-wrap gap-2 sm:mt-0"><router-link to="/apps/codex" class="btn btn-secondary text-sm">Codex CLI</router-link><router-link to="/apps/claude-code" class="btn btn-secondary text-sm">Claude Code</router-link></div>
+          </div>
+        </section>
+
         <!-- ============ 2. 模型与渠道费率（整区常驻；广场非公开时只隐藏深连结） ============ -->
         <section id="models" class="scroll-mt-20 py-16">
           <div :class="sectionHeadClass">
@@ -378,15 +395,18 @@
           &copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}
         </p>
         <div class="flex items-center gap-4">
-          <a
-            v-if="docUrl"
-            :href="docUrl"
-            target="_blank"
-            rel="noopener noreferrer"
+          <router-link
+            to="/docs"
             class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-400 dark:hover:text-white"
           >
-            {{ t('home.docs') }}
-          </a>
+            {{ t('home.apiDocs') }}
+          </router-link>
+          <router-link
+            to="/apps"
+            class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-400 dark:hover:text-white"
+          >
+            {{ t('home.aiApps') }}
+          </router-link>
         </div>
       </div>
     </footer>
@@ -417,7 +437,6 @@ const appStore = useAppStore()
 const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || BRAND_NAME)
 const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
 const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || t('home.heroSubtitle'))
-const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
 const hasHomeContent = computed(() => homeContent.value.trim().length > 0)
 const compactHomeEnabled = computed(() => appStore.cachedPublicSettings?.compact_home_enabled === true)
