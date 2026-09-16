@@ -18,13 +18,13 @@ Use `codex resume` in the original project, `codex resume --all` across director
 
 ## Provider changes
 
-If only `model_provider` changed, inspect the original configuration backup. Restore that identifier, update the corresponding provider endpoint/key to this service, restart, and try the old task. Never send a new key to an old provider's unrelated endpoint.
+If only `model_provider` changed, inspect the original configuration backup. Restore that identifier, update the corresponding provider endpoint/key to TapModels, restart, and try the old task. Never send a new key to an old provider's unrelated endpoint.
 
 Account/provider filtering varies by client version. The utility reports provider distribution without rewriting provider identities or assigning one official account's data to another.
 
 ## Download and diagnose
 
-Python 3.10+ is required. [Download the Codex session repair utility](/downloads/session-repair.zip), extract it, and enter `session-repair`.
+Python 3.10+ is required. [Download the TapModels Codex session repair utility](/downloads/tapmodels-codex-session-repair.zip), extract it, and enter `tapmodels-codex-session-repair`.
 
 macOS / Linux:
 
@@ -35,7 +35,7 @@ bash repair-sessions.sh --dry-run
 Windows PowerShell:
 
 ```powershell
-.\RepairSessions.ps1 -DryRun
+.\Repair-TapModelsSessions.ps1 -DryRun
 ```
 
 The default home is CODEX_HOME, otherwise `~/.codex`. Override it with `--codex-home` or `-CodexHome`. The utility selects a unique `state_*.sqlite`; if several exist, identify the active database and use `--database state_5.sqlite` or `-Database` with the actual filename.
@@ -51,7 +51,7 @@ bash repair-sessions.sh --apply --client-closed
 ```
 
 ```powershell
-.\RepairSessions.ps1 -Apply -ClientClosed
+.\Repair-TapModelsSessions.ps1 -Apply -ClientClosed
 ```
 
 Only a unique in-tree JSONL whose first `session_meta.payload.id` matches the thread can replace `rollout_path`. The tool obtains a write lock, scans again, creates a consistent SQLite backup, and validates every table and column before commit. Database, rollout, and backup paths reject `..`, symbolic links, and files replaced during the operation. Conversations, credentials, configuration, providers, and archive flags are unchanged. Failed validation rolls back the transaction.

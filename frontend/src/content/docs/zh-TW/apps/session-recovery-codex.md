@@ -18,13 +18,13 @@ Claude Code 使用者請使用 [Claude Code 工作階段恢復](/apps/session-re
 
 ## Provider 切換的處理
 
-若只是把 `model_provider = "舊名稱"` 改成新名稱，先在舊設定備份中核對舊 Provider 的 ID、模型、地址及認證資訊來源。在同一個舊 Provider 設定項目內更新正確的本專案地址/Key，並恢復頂層原 ID，再重啟嘗試開啟舊工作階段。不要為了顯示歷史把新的 Key 發往舊服務商地址。
+若只是把 `model_provider = "舊名稱"` 改成新名稱，先在舊設定備份中核對舊 Provider 的 ID、模型、地址及認證資訊來源。在同一個舊 Provider 設定項目內更新正確的 TapModels 地址/Key，並恢復頂層原 ID，再重啟嘗試開啟舊工作階段。不要為了顯示歷史把新的 Key 發往舊服務商地址。
 
 不同用戶端版本對帳號/Provider 的篩選不同。本站工具只報告 Provider 分佈，不批次改寫 Provider，也不把一個官方帳號的資料歸給另一個帳號。仍不可見時保留報告聯絡支援。
 
 ## 下載與唯讀診斷
 
-要求 Python 3.10+。[下載 Codex 工作階段修復工具](/downloads/session-repair.zip)，解壓後進入 `session-repair` 目錄。
+要求 Python 3.10+。[下載 TapModels Codex 工作階段修復工具](/downloads/tapmodels-codex-session-repair.zip)，解壓後進入 `tapmodels-codex-session-repair` 目錄。
 
 macOS / Linux：
 
@@ -35,7 +35,7 @@ bash repair-sessions.sh --dry-run
 Windows PowerShell：
 
 ```powershell
-.\RepairSessions.ps1 -DryRun
+.\Repair-TapModelsSessions.ps1 -DryRun
 ```
 
 腳本讀取實際 `CODEX_HOME`，預設 `~/.codex`。如需指定，使用 `--codex-home "/實際目錄"`，PowerShell 對應 `-CodexHome`。它自動發現唯一的 `state_*.sqlite`；存在多個時不猜測，需透過 `--database state_5.sqlite`（範例檔名）或 `-Database` 指定。
@@ -51,7 +51,7 @@ bash repair-sessions.sh --apply --client-closed
 ```
 
 ```powershell
-.\RepairSessions.ps1 -Apply -ClientClosed
+.\Repair-TapModelsSessions.ps1 -Apply -ClientClosed
 ```
 
 工具僅在工作階段目錄內找到唯一候選，且 JSONL 首條 `session_meta.payload.id` 與索引工作階段 ID 完全一致時修改 `rollout_path`。它先取得寫鎖，再完成最終掃描；鎖定期間生成一致 SQLite 備份，並在提交前驗證資料庫全部表、列及資料。資料庫、工作階段與備份路徑均拒絕 `..`、符號連結和操作中被替換的檔案。任何驗證失敗都會回滾事務。原始對話、Key、設定、Provider 和封存標記均不修改。

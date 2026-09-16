@@ -28,14 +28,23 @@
           />
           <span class="min-w-0 truncate text-base font-semibold">{{ siteName }}</span>
         </div>
-        <div class="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
+        <div class="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2">
           <LocaleSwitcher />
           <router-link
             to="/docs"
-            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800"
-            :title="t('home.viewDocs')"
+            data-testid="compact-home-api-docs"
+            class="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
           >
             <Icon name="book" size="md" />
+            <span>{{ t('home.apiDocs') }}</span>
+          </router-link>
+          <router-link
+            to="/apps"
+            data-testid="compact-home-ai-apps"
+            class="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          >
+            <Icon name="sparkles" size="md" />
+            <span>{{ t('home.aiApps') }}</span>
           </router-link>
           <router-link
             v-if="showModelPlazaEntry"
@@ -55,6 +64,7 @@
             <Icon v-else name="moon" size="md" />
           </button>
           <router-link
+            data-testid="compact-home-primary"
             :to="isAuthenticated ? dashboardPath : '/login'"
             class="inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
           >
@@ -74,6 +84,7 @@
         <h1 class="[overflow-wrap:anywhere] text-3xl font-bold md:text-4xl">{{ siteName }}</h1>
         <p class="mt-4 whitespace-pre-wrap [overflow-wrap:anywhere] text-base text-gray-600 dark:text-dark-300">{{ siteSubtitle }}</p>
         <router-link
+          data-testid="compact-home-hero-primary"
           :to="isAuthenticated ? dashboardPath : '/login'"
           class="mt-8 inline-flex min-h-10 items-center justify-center rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-primary-700"
         >
@@ -113,7 +124,7 @@
 
     <!-- Header -->
     <header class="relative z-20 px-6 py-4">
-      <nav class="mx-auto flex max-w-6xl items-center justify-between">
+      <nav class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
         <!-- Wordmark -->
         <router-link to="/" class="flex min-w-0 items-center gap-2.5">
           <img
@@ -128,17 +139,28 @@
         </router-link>
 
         <!-- Nav Actions -->
-        <div class="flex items-center gap-3">
+        <div class="flex max-w-full flex-wrap items-center justify-end gap-1 sm:gap-2">
           <!-- Language Switcher -->
           <LocaleSwitcher />
 
-          <!-- Doc Link -->
+          <!-- API Docs -->
           <router-link
             to="/docs"
-            class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
-            :title="t('home.viewDocs')"
+            data-testid="home-api-docs"
+            class="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
           >
             <Icon name="book" size="md" />
+            <span>{{ t('home.apiDocs') }}</span>
+          </router-link>
+
+          <!-- AI Apps -->
+          <router-link
+            to="/apps"
+            data-testid="home-ai-apps"
+            class="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          >
+            <Icon name="sparkles" size="md" />
+            <span>{{ t('home.aiApps') }}</span>
           </router-link>
 
           <!-- Theme Toggle -->

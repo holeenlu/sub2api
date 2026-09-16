@@ -27,7 +27,7 @@ OpenAI 分組的 Codex 標籤提供兩種模式：
 - **Legacy**：`config.toml` 使用 `requires_openai_auth = true`，並下載 `auth.json`。只在 Codex 版本需要該登入形態時使用。
 - **API key**：`requires_openai_auth = false`，把 Key 寫入 `experimental_bearer_token`，並附加本地圖片擴充套件所需的請求標頭。該模式會把金鑰儲存在磁碟，限制檔案權限且不要提交到儲存庫。
 
-其他分組的 Codex 路由預設使用 `env_key = "API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`。WebSocket 標籤只對 OpenAI Responses WebSocket 路徑啟用。
+其他分組的 Codex 路由預設使用 `env_key = "TAPMODELS_API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`。WebSocket 標籤只對 OpenAI Responses WebSocket 路徑啟用。
 
 ## 模型目錄
 

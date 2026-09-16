@@ -27,7 +27,7 @@ OpenAI's Codex tab exposes two modes:
 - **Legacy** sets `requires_openai_auth = true` and offers `auth.json`. Use it only for Codex versions that require that login shape.
 - **API key** sets `requires_openai_auth = false`, writes `experimental_bearer_token`, and adds the local image extension header. This stores the secret on disk; restrict permissions and never commit it.
 
-Routed Codex tabs default to `env_key = "API_KEY"`, `wire_api = "responses"`, and `supports_websockets = false`. The WebSocket tab enables WebSocket transport only for the OpenAI Responses path.
+Routed Codex tabs default to `env_key = "TAPMODELS_API_KEY"`, `wire_api = "responses"`, and `supports_websockets = false`. The WebSocket tab enables WebSocket transport only for the OpenAI Responses path.
 
 ## Model catalog
 

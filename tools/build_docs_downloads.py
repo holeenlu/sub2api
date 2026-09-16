@@ -19,6 +19,10 @@ PACKAGES = {
         "tapmodels-session-repair",
         ("README.md", "repair_sessions.py", "repair-sessions.sh", "Repair-TapModelsSessions.ps1"),
     ),
+    "tapmodels-claude-session-recovery": (
+        "tapmodels-claude-session-recovery",
+        ("README.md", "find_claude_sessions.py", "find-claude-sessions.sh", "Find-ClaudeSessions.ps1"),
+    ),
 }
 
 

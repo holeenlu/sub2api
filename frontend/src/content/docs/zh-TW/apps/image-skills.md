@@ -1,6 +1,6 @@
 ## 可下載 Skills
 
-本專案 提供兩個獨立 Skill：
+TapModels 提供兩個獨立 Skill：
 
 | Skill | 固定模型 | 生成 | 編輯 |
 | --- | --- | --- | --- |
@@ -40,7 +40,7 @@ py -3 -m venv "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv"
 & "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv\Scripts\python.exe" "$env:USERPROFILE\.agents\skills\gpt-image-flare\scripts\generate.py" --check-config
 ```
 
-腳本讀取頂層 Codex `model_provider` / `model_providers` 的 `base_url` 和 `env_key`，不會把 Key 寫入生成檔案；不支援透過 Codex `profile` 選擇 Provider。僅設定 `API_KEY` 時，URL 和環境變數名仍由 Provider 提供；只有明確設定 `API_BASE_URL` 才啟用完整環境覆蓋，此時也必須設定 `API_KEY`。Provider 地址必須是 HTTPS（僅迴環測試允許 HTTP），請求重定向會被拒絕。
+腳本讀取頂層 Codex `model_provider` / `model_providers` 的 `base_url` 和 `env_key`，不會把 Key 寫入生成檔案；不支援透過 Codex `profile` 選擇 Provider。僅設定 `TAPMODELS_API_KEY` 時，URL 和環境變數名仍由 Provider 提供；只有明確設定 `TAPMODELS_BASE_URL` 才啟用完整環境覆蓋，此時也必須設定 `TAPMODELS_API_KEY`。Provider 地址必須是 HTTPS（僅迴環測試允許 HTTP），請求重定向會被拒絕。
 
 ## 依賴與認證資訊
 
@@ -55,11 +55,11 @@ py -3 -m venv "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv"
 Legacy 使用者或圖片與聊天使用不同分組時，在執行 Skill 的程序環境中同時設定以下兩項。這裡的 Key 必須屬於開放對應影像模型的分組；僅設定 Key 不會替換現有 Provider 的驗證模式。
 
 ```bash
-export API_BASE_URL="{{API_ROOT}}"
-export API_KEY="你的圖片分組 API Key"
+export TAPMODELS_BASE_URL="{{API_ROOT}}"
+export TAPMODELS_API_KEY="你的圖片分組 API Key"
 ```
 
-PowerShell 使用 `$env:API_BASE_URL="{{API_ROOT}}"` 和 `$env:API_KEY="你的圖片分組 API Key"`。桌面版需要從該終端機啟動，詳見 [Codex 設定教程](/apps/codex)。
+PowerShell 使用 `$env:TAPMODELS_BASE_URL="{{API_ROOT}}"` 和 `$env:TAPMODELS_API_KEY="你的圖片分組 API Key"`。桌面版需要從該終端機啟動，詳見 [Codex 設定教程](/apps/codex)。
 
 要求 Python 3.11+ 和 Pillow。在 Skill 目錄建立虛擬環境並安裝隨包列明的依賴：
 
@@ -70,7 +70,7 @@ python3 -m venv "$HOME/.agents/skills/gpt-image-flare/.venv"
 
 Windows 用 `py -3 -m venv "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv"`，再使用 `.venv\Scripts\python.exe` 執行相同的 `-m pip install -r` 與腳本命令。Sunburst 將路徑中的目錄名對應替換。
 
-明確設定 `API_BASE_URL` 時啟用完整環境覆蓋，並要求同時設定 `API_KEY`；沒有該 URL 時讀取目前 Codex Provider 的地址及上述認證資訊欄位。缺少指定環境變數會錯誤，不回退到其他帳號 Key。`--check-config` 只檢查設定結構；`--dry-run` 還會驗證請求參數和輸入圖片但不聯網。實際呼叫還需要認證資訊、網路和模型權限。輸出檔案必須使用絕對路徑，已有檔案需顯式 `--force` 覆蓋。
+明確設定 `TAPMODELS_BASE_URL` 時啟用完整環境覆蓋，並要求同時設定 `TAPMODELS_API_KEY`；沒有該 URL 時讀取目前 Codex Provider 的地址及上述認證資訊欄位。缺少指定環境變數會錯誤，不回退到其他帳號 Key。`--check-config` 只檢查設定結構；`--dry-run` 還會驗證請求參數和輸入圖片但不聯網。實際呼叫還需要認證資訊、網路和模型權限。輸出檔案必須使用絕對路徑，已有檔案需顯式 `--force` 覆蓋。
 
 新版官方推薦 `~/.agents/skills`。使用舊版或本專案既有 `~/.codex/skills` 的用戶端，可保留其實際發現路徑；同名 Skill 不要裝兩份。安裝後在任務輸入框輸入 `$gpt-image-flare` 檢查是否出現，未出現則重啟並檢查目錄層級。
 

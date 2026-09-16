@@ -79,6 +79,23 @@ env_key = "TAPMODELS_API_KEY"
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("--client-closed", result.stdout)
 
+    def test_extracted_claude_recovery_entrypoint_is_read_only_and_callable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            name = "tapmodels-claude-session-recovery"
+            with zipfile.ZipFile(builder.DOWNLOADS / f"{name}.zip") as archive:
+                archive.extractall(target)
+            result = subprocess.run(
+                ["bash", "find-claude-sessions.sh", "--help"],
+                cwd=target / name,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--claude-home", result.stdout)
+            self.assertIn("read-only", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

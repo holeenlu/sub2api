@@ -13,7 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { applyRouteMetaDescription, resolveRouteDocumentTitle } from './title'
-import { docsStaticItems } from '@/content/docs/nav'
+import { docsStaticItems, legacyAppRedirects } from '@/content/docs/nav'
 
 /**
  * Route definitions with lazy loading
@@ -196,6 +196,7 @@ const routes: RouteRecordRaw[] = [
       titleKey: 'modelPlaza.title'
     }
   },
+  ...legacyAppRedirects,
   ...docsStaticItems.map((item, index): RouteRecordRaw => ({
     path: item.path,
     name: `DocsPage${index}`,

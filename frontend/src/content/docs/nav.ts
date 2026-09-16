@@ -49,7 +49,8 @@ export const appsNavGroups: DocsNavGroup[] = [
       { path: '/apps/codex', articleId: 'apps/codex', titleKey: 'docs.pages.codex.title', descriptionKey: 'docs.pages.codex.description', icon: 'bolt' },
       { path: '/apps/claude-code', articleId: 'apps/claude-code', titleKey: 'docs.pages.claudeCode.title', descriptionKey: 'docs.pages.claudeCode.description', icon: 'chat' },
       { path: '/apps/claude-desktop', articleId: 'apps/claude-desktop', titleKey: 'docs.pages.claudeDesktop.title', descriptionKey: 'docs.pages.claudeDesktop.description', icon: 'chat' },
-      { path: '/apps/session-recovery', articleId: 'apps/session-recovery', titleKey: 'docs.pages.sessionRecovery.title', descriptionKey: 'docs.pages.sessionRecovery.description', icon: 'server' },
+      { path: '/apps/session-recovery-codex', articleId: 'apps/session-recovery-codex', titleKey: 'docs.pages.sessionRecoveryCodex.title', descriptionKey: 'docs.pages.sessionRecoveryCodex.description', icon: 'server' },
+      { path: '/apps/session-recovery-claude', articleId: 'apps/session-recovery-claude', titleKey: 'docs.pages.sessionRecoveryClaude.title', descriptionKey: 'docs.pages.sessionRecoveryClaude.description', icon: 'chat' },
       { path: '/apps/image-skills', articleId: 'apps/image-skills', titleKey: 'docs.pages.imageSkills.title', descriptionKey: 'docs.pages.imageSkills.description', icon: 'sparkles' },
       { path: '/apps/downloads', articleId: 'downloads', titleKey: 'docs.pages.downloads.title', descriptionKey: 'docs.pages.downloads.description', icon: 'dollar' }
     ]
@@ -63,6 +64,10 @@ export const isAppsPath = (path: string) => path === '/apps' || path.startsWith(
 export const navGroupsForPath = (path: string) => isAppsPath(path) ? appsNavGroups : apiNavGroups
 
 // Preserve published bookmarks while giving applications their own top-level section.
-export const legacyAppRedirects = appsNavGroups.flatMap(group => group.items)
-  .filter(item => item.path !== '/apps/console')
-  .map(item => ({ path: item.path === '/apps/downloads' ? '/docs/downloads' : item.path.replace('/apps', '/docs/apps'), redirect: item.path }))
+export const legacyAppRedirects = [
+  { path: '/apps/session-recovery', redirect: '/apps/session-recovery-codex' },
+  { path: '/docs/apps/session-recovery', redirect: '/apps/session-recovery-codex' },
+  ...appsNavGroups.flatMap(group => group.items)
+    .filter(item => item.path !== '/apps/console')
+    .map(item => ({ path: item.path === '/apps/downloads' ? '/docs/downloads' : item.path.replace('/apps', '/docs/apps'), redirect: item.path }))
+]

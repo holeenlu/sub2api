@@ -24,4 +24,4 @@
 4. 完全退出並重啟應用，傳送一條新工作階段測試。
 5. 在控制台用量記錄中確認請求、模型與費用。
 
-切換後列表為空可能與專案、封存、Provider 篩選、資料目錄或索引路徑有關。遇到這種情況先閱讀 [工作階段恢復](/apps/session-recovery) 並執行只讀診斷，再決定是否應用修復。所有可下載檔案與驗證值集中在 [下載](/apps/downloads)。
+切換後列表為空可能與專案、封存、Provider 篩選、資料目錄或索引路徑有關。按用戶端進入 [Codex 工作階段恢復](/apps/session-recovery-codex) 或 [Claude Code 工作階段恢復](/apps/session-recovery-claude)，先執行唯讀診斷，再決定是否應用修復。所有可下載檔案與驗證值集中在 [下載](/apps/downloads)。

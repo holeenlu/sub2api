@@ -24,4 +24,4 @@ Open [API keys](/keys) and choose the intended group. This screenshot comes from
 4. Fully quit and restart the app, then create a new test session.
 5. Confirm the request, model, and cost in this project usage records.
 
-An empty session list after switching may involve project selection, archives, provider filtering, data directories, or stale index paths. Read [session recovery](/apps/session-recovery) and run the read-only diagnostic before applying a repair. Downloads and checksums are collected under [Downloads](/apps/downloads).
+An empty session list after switching may involve project selection, archives, provider filtering, data directories, or stale index paths. Follow [Codex session recovery](/apps/session-recovery-codex) or [Claude Code session recovery](/apps/session-recovery-claude) for the affected client and run the read-only diagnostic before applying a repair. Downloads and checksums are collected under [Downloads](/apps/downloads).

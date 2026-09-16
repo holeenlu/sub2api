@@ -45,7 +45,8 @@ describe('API docs routes', () => {
       ['/apps/codex', 'docs.pages.codex.title'],
       ['/apps/claude-code', 'docs.pages.claudeCode.title'],
       ['/apps/claude-desktop', 'docs.pages.claudeDesktop.title'],
-      ['/apps/session-recovery', 'docs.pages.sessionRecovery.title'],
+      ['/apps/session-recovery-codex', 'docs.pages.sessionRecoveryCodex.title'],
+      ['/apps/session-recovery-claude', 'docs.pages.sessionRecoveryClaude.title'],
       ['/apps/image-skills', 'docs.pages.imageSkills.title'],
       ['/apps/downloads', 'docs.pages.downloads.title'],
     ]
@@ -58,5 +59,7 @@ describe('API docs routes', () => {
     expect(router.resolve('/docs/apps').matched[0].redirect).toBe('/apps')
     expect(router.resolve('/docs/apps/codex').matched[0].redirect).toBe('/apps/codex')
     expect(router.resolve('/docs/downloads').matched[0].redirect).toBe('/apps/downloads')
+    expect(router.resolve('/apps/session-recovery').matched[0].redirect).toBe('/apps/session-recovery-codex')
+    expect(router.resolve('/docs/apps/session-recovery').matched[0].redirect).toBe('/apps/session-recovery-codex')
   })
 })

@@ -61,7 +61,7 @@ function mountHome(settings: Record<string, unknown> = {}) {
 }
 
 function compactDestination(wrapper: ReturnType<typeof mountHome>) {
-  return wrapper.get('[data-testid="compact-home"]').findComponent(RouterLinkStub).props('to')
+  return wrapper.getComponent('[data-testid="compact-home-primary"]').props('to')
 }
 
 function modelPlazaDestination(wrapper: ReturnType<typeof mountHome>) {
@@ -69,6 +69,10 @@ function modelPlazaDestination(wrapper: ReturnType<typeof mountHome>) {
     .findAllComponents(RouterLinkStub)
     .find((link) => link.props('to') === '/model-plaza')
     ?.props('to')
+}
+
+function destination(wrapper: ReturnType<typeof mountHome>, testId: string) {
+  return wrapper.getComponent(`[data-testid="${testId}"]`).props('to')
 }
 
 describe('HomeView compact mode', () => {
@@ -125,22 +129,34 @@ describe('HomeView compact mode', () => {
     expect(wrapper.find('.terminal-container').exists()).toBe(true)
   })
 
-  it('links unauthenticated visitors to TapModels docs', () => {
-    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/docs')
+  it.each([
+    [true, 'compact-home-api-docs', 'compact-home-ai-apps'],
+    [false, 'home-api-docs', 'home-ai-apps'],
+  ])('shows explicit API Docs and AI Apps links when compact mode is %s', (compact, docsId, appsId) => {
+    const wrapper = mountHome({ compact_home_enabled: compact })
+
+    expect(destination(wrapper, docsId)).toBe('/docs')
+    expect(destination(wrapper, appsId)).toBe('/apps')
+    expect(wrapper.get(`[data-testid="${docsId}"]`).text()).toBe('home.apiDocs')
+    expect(wrapper.get(`[data-testid="${appsId}"]`).text()).toBe('home.aiApps')
   })
 
-  it('links authenticated users to TapModels docs', () => {
+  it('links unauthenticated visitors to login', () => {
+    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/login')
+  })
+
+  it('links authenticated users to their dashboard', () => {
     authStore.isAuthenticated = true
 
-    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/docs')
+    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/dashboard')
   })
 
-  it('links administrators to TapModels docs', () => {
+  it('links administrators to the admin dashboard', () => {
     authStore.isAuthenticated = true
     authStore.isAdmin = true
 
     const wrapper = mountHome({ compact_home_enabled: true })
-    expect(compactDestination(wrapper)).toBe('/docs')
+    expect(compactDestination(wrapper)).toBe('/admin/dashboard')
     expect(authStore.checkAuth).toHaveBeenCalledOnce()
     expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
   })

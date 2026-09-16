@@ -4,13 +4,14 @@ Before downloading, read the [console configuration builder](/apps/console) and 
 
 | File | Purpose | Default behavior |
 | --- | --- | --- |
-| [this project Codex session repair bundle](/downloads/session-repair.zip) | macOS, Linux, and Windows session diagnostics and repair | Read-only; explicit Apply required to write |
+| [TapModels Codex session repair bundle](/downloads/tapmodels-codex-session-repair.zip) | macOS, Linux, and Windows Codex session diagnostics and repair | Read-only; explicit Apply required to write |
+| [TapModels Claude Code session recovery bundle](/downloads/tapmodels-claude-session-recovery.zip) | Find local Claude sessions and produce exact resume commands | Read-only; does not start Claude or modify sessions |
 | [GPT Image 2.5 Flare skill](/downloads/gpt-image-flare.zip) | Codex image generation and editing | Fixed Flare model |
 | [GPT Image 2.5 Sunburst skill](/downloads/gpt-image-sunburst.zip) | Codex image generation and editing | Fixed Sunburst model |
 
 ## Inspect after downloading
 
-These archives are static assets published by this site. Extract and inspect `README.md` or the skill's top-level `SKILL.md` before installing; no script should contain your API key. The recovery bundle only operates on local Codex data. An image skill uses the active Codex provider for one explicit billable request.
+These archives are static assets published by this site. Extract and inspect `README.md` or the skill's top-level `SKILL.md` before installing; no script should contain your API key. The Codex bundle only operates on local Codex data. The Claude bundle scans local Claude sessions read-only and prints resume commands. An image skill uses the active Codex provider for one explicit billable request.
 
 Verify the downloaded archive against [SHA256SUMS.txt](/downloads/SHA256SUMS.txt) before extracting it.
 

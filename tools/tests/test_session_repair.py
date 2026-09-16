@@ -363,6 +363,26 @@ class SessionRepairTest(unittest.TestCase):
         self.assertIsNone(backup)
         self.assertIn("identity differs", error)
 
+    def test_rollback_refuses_replaced_current_database(self):
+        old_path = "/stale/rollout-one.jsonl"
+        rollout = self.add_rollout("rollout-one.jsonl", "thread-one")
+        self.add_thread("thread-one", old_path)
+        backup_dir, _, _ = repair.apply_repairs(self.home.resolve(), self.db.resolve())
+        backup, error = repair.resolve_backup(self.home.resolve(), self.db.resolve(), backup_dir)
+        self.assertIsNone(error)
+        repaired_bytes = self.db.read_bytes()
+        replacement = self.home / "replacement.sqlite"
+        replacement.write_bytes(repaired_bytes)
+        os.replace(replacement, self.db)
+
+        with self.assertRaisesRegex(RuntimeError, "current database identity differs"):
+            repair.apply_rollback(
+                self.home.resolve(), self.db.resolve(), repair.file_identity(self.db), backup
+            )
+        self.assertEqual(self.db.read_bytes(), repaired_bytes)
+        with sqlite3.connect(self.db) as connection:
+            self.assertEqual(connection.execute("SELECT rollout_path FROM threads").fetchone()[0], str(rollout.resolve()))
+
     def test_rollback_refuses_backup_from_another_home(self):
         self.add_rollout("rollout-one.jsonl", "thread-one")
         self.add_thread("thread-one", "/stale/rollout-one.jsonl")

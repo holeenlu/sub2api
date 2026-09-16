@@ -33,9 +33,9 @@ GET  /v1/videos/{request_id}/content
 ## 獨立搜尋
 
 ```bash
-curl "$API_BASE_URL/v1/web_search" \
-  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
-  -d '{"query":"本專案 API updates","max_results":5}'
+curl "$TAPMODELS_BASE_URL/v1/web_search" \
+  -H "Authorization: Bearer $TAPMODELS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"query":"TapModels API updates","max_results":5}'
 ```
 
 `query` 必填，也支援 `input`；`max_results` 預設 5、上限 20。`/v1/x_search` 另支援 `allowed_x_handles`、`excluded_x_handles`、`from_date`、`to_date`、`enable_image_understanding`、`enable_video_understanding`。回應是閘道器聚合的 `query/results/provider/max_results`，不是 Responses 工具事件原樣透傳；應用應驗證 URL 和去重。

@@ -11,8 +11,8 @@ A count is not a final bill prediction. Protocol wrappers, tool schemas, images,
 ## Anthropic Messages count
 
 ```bash
-curl "$API_BASE_URL/v1/messages/count_tokens" \
-  -H "x-api-key: $API_KEY" \
+curl "$TAPMODELS_BASE_URL/v1/messages/count_tokens" \
+  -H "x-api-key: $TAPMODELS_API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
   -d '{"model":"YOUR_MODEL_ID","system":"Answer briefly.","messages":[{"role":"user","content":"What is idempotency?"}]}'
@@ -27,8 +27,8 @@ The body follows Messages input and may include `system`, `messages`, `tools`, a
 ## Responses input_tokens
 
 ```bash
-curl "$API_BASE_URL/v1/responses/input_tokens" \
-  -H "Authorization: Bearer $API_KEY" \
+curl "$TAPMODELS_BASE_URL/v1/responses/input_tokens" \
+  -H "Authorization: Bearer $TAPMODELS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"YOUR_MODEL_ID","instructions":"Answer briefly.","input":"What is idempotency?"}'
 ```
@@ -42,8 +42,8 @@ curl "$API_BASE_URL/v1/responses/input_tokens" \
 ## Gemini countTokens
 
 ```bash
-curl "$API_BASE_URL/v1beta/models/YOUR_MODEL_ID:countTokens" \
-  -H "x-goog-api-key: $API_KEY" \
+curl "$TAPMODELS_BASE_URL/v1beta/models/YOUR_MODEL_ID:countTokens" \
+  -H "x-goog-api-key: $TAPMODELS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"contents":[{"role":"user","parts":[{"text":"What is idempotency?"}]}]}'
 ```

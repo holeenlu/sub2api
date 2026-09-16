@@ -7,7 +7,7 @@ Codex 用户请使用 [Codex 会话恢复](/apps/session-recovery-codex)。Claud
 | 当前项目的选择器为空 | 回到原项目运行 `claude --resume`；按 `Ctrl+W` 或 `Ctrl+A` 扩大范围 |
 | 换操作系统用户、主机或 `CLAUDE_CONFIG_DIR` 后不见 | 找回原来的 Claude 配置目录；本机会话不会自动跨主机同步 |
 | 项目或 worktree 路径改变 | 恢复原工作目录，再按会话 ID 恢复 |
-| 切换本项目 Key 或登录账号后不见 | Key 不会搬走本地文件；检查实际 OS 用户、配置目录和项目路径 |
+| 切换 TapModels Key 或登录账号后不见 | Key 不会搬走本地文件；检查实际 OS 用户、配置目录和项目路径 |
 | 文件已删除、过期或只存在云端 | 本地扫描工具无法重建，需使用原主机、原客户端或备份 |
 
 Claude Code CLI 会把会话保存在本机 `~/.claude/projects/<项目>/<会话ID>.jsonl`；设置 `CLAUDE_CONFIG_DIR` 后则保存在对应目录。默认情况下，超过 30 天的本地记录可能被清理。
@@ -28,21 +28,21 @@ claude --resume <会话ID>
 
 ## 下载只读恢复工具
 
-[下载 Claude Code 会话恢复包](/downloads/claude-session-recovery.zip)。macOS / Linux：
+[下载 TapModels Claude Code 会话恢复包](/downloads/tapmodels-claude-session-recovery.zip)。macOS / Linux：
 
 ```bash
-curl -fsSLO https://your-domain.example/downloads/claude-session-recovery.zip
-unzip claude-session-recovery.zip
-cd claude-session-recovery
+curl -fsSLO https://tapmodels.ai/downloads/tapmodels-claude-session-recovery.zip
+unzip tapmodels-claude-session-recovery.zip
+cd tapmodels-claude-session-recovery
 bash find-claude-sessions.sh
 ```
 
 Windows PowerShell：
 
 ```powershell
-Invoke-WebRequest https://your-domain.example/downloads/claude-session-recovery.zip -OutFile claude-session-recovery.zip
-Expand-Archive .\claude-session-recovery.zip -DestinationPath . -Force
-Set-Location .\claude-session-recovery
+Invoke-WebRequest https://tapmodels.ai/downloads/tapmodels-claude-session-recovery.zip -OutFile tapmodels-claude-session-recovery.zip
+Expand-Archive .\tapmodels-claude-session-recovery.zip -DestinationPath . -Force
+Set-Location .\tapmodels-claude-session-recovery
 .\Find-ClaudeSessions.ps1
 ```
 

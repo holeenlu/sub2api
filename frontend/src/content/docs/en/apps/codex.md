@@ -9,11 +9,11 @@ This guide covers local clients that read Codex configuration. Remote hosts, WSL
 ### Online install (macOS / Linux)
 
 ```bash
-export API_KEY="YOUR_API_KEY"
-curl -fsSL {{API_ROOT}}/install/codex.sh | bash
+export TAPMODELS_API_KEY="YOUR_TAPMODELS_API_KEY"
+curl -fsSL https://tapmodels.ai/install/codex.sh | bash
 ```
 
-The script backs up `config.toml`, writes the Responses provider, and sets mode `600`. Review it before piping into a shell; never put a key in shell history or source control. Set `API_BASE_URL` for a custom gateway and `MODEL_ID` to override the example model.
+The script backs up `config.toml`, writes the Responses provider, and sets mode `600`. Review it before piping into a shell; never put a key in shell history or source control. Set `TAPMODELS_BASE_URL` for a custom gateway and `TAPMODELS_MODEL` to override the example model.
 
 This screenshot shows the project's OpenAI-group API key configuration with invalid sample credentials and an example URL. Copy your own group configuration. The [console guide](/apps/console) also shows Legacy mode and the steps; click images to view full size.
 
@@ -24,14 +24,14 @@ Install the CLI using the [official instructions](https://developers.openai.com/
 macOS / Linux:
 
 ```bash
-export API_KEY="your API key"
+export TAPMODELS_API_KEY="your TapModels API key"
 mkdir -p "${CODEX_HOME:-$HOME/.codex}"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:API_KEY="your API key"
+$env:TAPMODELS_API_KEY="your TapModels API key"
 $codexConfigDir = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
 New-Item -ItemType Directory -Force $codexConfigDir | Out-Null
 notepad (Join-Path $codexConfigDir 'config.toml')
@@ -40,13 +40,13 @@ notepad (Join-Path $codexConfigDir 'config.toml')
 Merge this routed-group example into `~/.codex/config.toml`, or your `CODEX_HOME` directory. It applies to Anthropic, Gemini, Grok, and other groups routed into Codex through Responses. Top-level fields must precede tables and each provider table must appear only once. Copy the current model and `base_url` from the modal rather than inferring them from this example:
 
 ```toml
-model_provider = "gateway"
+model_provider = "tapmodels"
 model = "gpt-5.6-sol"
 
-[model_providers.gateway]
-name = "this project"
+[model_providers.tapmodels]
+name = "TapModels"
 base_url = "{{API_ROOT}}/v1"
-env_key = "API_KEY"
+env_key = "TAPMODELS_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false
@@ -54,7 +54,7 @@ supports_websockets = false
 
 Run `codex` in the same terminal. Disabling WebSockets provides an HTTP/SSE starting point; it does not mean the gateway lacks WebSocket routes.
 
-The OpenAI group generates a different shape: provider ID `OpenAI`, response-storage and network settings, the model catalog, and `[features]`. The default **Legacy** mode downloads `config.toml` plus `auth.json` and sets `requires_openai_auth = true`. **API key** mode instead sets `requires_openai_auth = false` and `experimental_bearer_token`; fully restart Codex after switching. Do not combine the two modes or merge a routed `gateway` provider table into the OpenAI group's `OpenAI` provider.
+The OpenAI group generates a different shape: provider ID `OpenAI`, response-storage and network settings, the model catalog, and `[features]`. The default **Legacy** mode downloads `config.toml` plus `auth.json` and sets `requires_openai_auth = true`. **API key** mode instead sets `requires_openai_auth = false` and `experimental_bearer_token`; fully restart Codex after switching. Do not combine the two modes or merge a routed `tapmodels` provider table into the OpenAI group's `OpenAI` provider.
 
 ## Desktop: make the key available
 
@@ -64,7 +64,7 @@ A desktop app opened from the Dock or Start menu does not automatically inherit 
 "/Applications/Codex.app/Contents/MacOS/Codex"
 ```
 
-Check the actual installation path first. On Windows, invoke the installed Codex `.exe` from the PowerShell that contains `$env:API_KEY`.
+Check the actual installation path first. On Windows, invoke the installed Codex `.exe` from the PowerShell that contains `$env:TAPMODELS_API_KEY`.
 
 For an icon launch, select **API key** in the OpenAI group's Use key modal and download its complete `config.toml`. This stores a secret in the file; restrict access and never commit it. For other groups, keep the generated `env_key` configuration and do not add a second authentication field yourself.
 
@@ -82,7 +82,7 @@ Windows TOML can use a literal path such as `model_catalog_json = 'C:\Users\your
 
 ## Verify and troubleshoot
 
-Send a simple message in a new task and match its timestamp, key and model in this project usage records. Then resume existing work. See [session recovery](/apps/session-recovery) if history disappears.
+Send a simple message in a new task and match its timestamp, key and model in TapModels usage records. Then resume existing work. See [Codex session recovery](/apps/session-recovery-codex) if history disappears.
 
 | Symptom | Check |
 | --- | --- |

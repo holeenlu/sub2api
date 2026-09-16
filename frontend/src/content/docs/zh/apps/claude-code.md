@@ -5,7 +5,7 @@
 | Claude Code CLI | 本页环境变量或用户 `settings.json` |
 | VS Code 中的 Claude Code | 编辑器用户配置中的环境变量，见下文 |
 | 支持 Third-Party Inference 的 Claude 桌面端 | [Claude 桌面端教程](/apps/claude-desktop) |
-| claude.ai 网页聊天 | 本页不会把网页账号聊天切换为 本项目 Key |
+| claude.ai 网页聊天 | 本页不会把网页账号聊天切换为 TapModels Key |
 
 先在 [API 密钥](/keys) 为目标分组创建 Key。项目支持 Messages 请求，最终是否允许该客户端、模型及辅助请求由分组策略决定。
 
@@ -14,11 +14,11 @@
 ### 在线部署（macOS / Linux）
 
 ```bash
-export API_KEY="你的 本项目 API Key"
-curl -fsSL {{API_ROOT}}/install/claude-code.sh | bash
+export TAPMODELS_API_KEY="你的 TapModels API Key"
+curl -fsSL https://tapmodels.ai/install/claude-code.sh | bash
 ```
 
-脚本会备份 `~/.claude/settings.json` 后写入 Messages 环境变量并限制权限。执行前请审阅脚本；需要自定义地址时设置 `API_BASE_URL`。
+脚本会备份 `~/.claude/settings.json` 后写入 Messages 环境变量并限制权限。执行前请审阅脚本；需要自定义地址时设置 `TAPMODELS_BASE_URL`。
 
 下图来自本项目“使用密钥 → Claude Code”，使用无效示例 Key 与演示地址。选择与你操作系统一致的标签，并复制自己控制台里的值；[配置器教程](/apps/console) 也提供了 PowerShell 截图。
 
@@ -30,7 +30,7 @@ macOS / Linux：
 
 ```bash
 export ANTHROPIC_BASE_URL="{{API_ROOT}}"
-export ANTHROPIC_AUTH_TOKEN="你的 本项目 API Key"
+export ANTHROPIC_AUTH_TOKEN="你的 TapModels API Key"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 claude --model claude-sonnet-5
 ```
@@ -39,7 +39,7 @@ Windows PowerShell：
 
 ```powershell
 $env:ANTHROPIC_BASE_URL="{{API_ROOT}}"
-$env:ANTHROPIC_AUTH_TOKEN="你的 本项目 API Key"
+$env:ANTHROPIC_AUTH_TOKEN="你的 TapModels API Key"
 $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
 claude --model claude-sonnet-5
 ```
@@ -54,19 +54,19 @@ claude --model claude-sonnet-5
 {
   "env": {
     "ANTHROPIC_BASE_URL": "{{API_ROOT}}",
-    "ANTHROPIC_AUTH_TOKEN": "你的 本项目 API Key",
+    "ANTHROPIC_AUTH_TOKEN": "你的 TapModels API Key",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   }
 }
 ```
 
-该文件含私密凭据。不要写进共享的项目 `.claude/settings.json`。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 是当前控制台生成器用于减少登录、遥测等非必要外连的设置，不会把 Claude 网页、Remote Control 或语音功能改为由 本项目 提供。GUI 启动的 IDE 不一定继承终端环境。VS Code 扩展可在用户 Settings JSON 中设置：
+该文件含私密凭据。不要写进共享的项目 `.claude/settings.json`。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 是当前控制台生成器用于减少登录、遥测等非必要外连的设置，不会把 Claude 网页、Remote Control 或语音功能改为由 TapModels 提供。GUI 启动的 IDE 不一定继承终端环境。VS Code 扩展可在用户 Settings JSON 中设置：
 
 ```json
 {
   "claudeCode.environmentVariables": [
     { "name": "ANTHROPIC_BASE_URL", "value": "{{API_ROOT}}" },
-    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 本项目 API Key" },
+    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 TapModels API Key" },
     { "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "value": "1" }
   ]
 }
@@ -74,13 +74,13 @@ claude --model claude-sonnet-5
 
 ## 验证与模型选择
 
-运行 `/status` 检查 Base URL 和凭据来源，再通过 `/model claude-sonnet-5` 选择分组开放的精确 ID。发送一次简单问题，并在 本项目 用量记录核对。不要假设 `/model` 一定自动列出 `GET /v1/models` 的所有条目。
+运行 `/status` 检查 Base URL 和凭据来源，再通过 `/model claude-sonnet-5` 选择分组开放的精确 ID。发送一次简单问题，并在 TapModels 用量记录核对。不要假设 `/model` 一定自动列出 `GET /v1/models` 的所有条目。
 
 Claude Code 可能为标题、摘要和 token 计数发送辅助请求。主模型调用正常但辅助功能失败时，需核对分组白名单或模型映射，不能仅换 Key 解决。
 
 ## 切换后找回会话
 
-回到原来的项目目录，使用 `claude --resume` 选择会话；`claude --continue` 继续当前目录最近的会话，也可在客户端使用 `/resume`。确认操作系统用户、项目路径和配置目录没有变化。本站 Codex 恢复脚本不适用于 Claude 数据。
+回到原来的项目目录，使用 `claude --resume` 选择会话；`claude --continue` 继续当前目录最近的会话，也可在客户端使用 `/resume`。确认操作系统用户、项目路径和配置目录没有变化。仍找不到时进入 [Claude Code 会话恢复](/apps/session-recovery-claude)，不要使用 Codex 修复脚本处理 Claude 数据。
 
 | 错误 | 处理 |
 | --- | --- |

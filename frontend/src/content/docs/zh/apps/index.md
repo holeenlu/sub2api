@@ -24,4 +24,4 @@
 4. 完全退出并重启应用，发送一条新会话测试。
 5. 在控制台用量记录中确认请求、模型与费用。
 
-切换后列表为空可能与项目、归档、Provider 筛选、数据目录或索引路径有关。遇到这种情况先阅读 [会话恢复](/apps/session-recovery) 并运行只读诊断，再决定是否应用修复。所有可下载文件与校验值集中在 [下载](/apps/downloads)。
+切换后列表为空可能与项目、归档、Provider 筛选、数据目录或索引路径有关。按客户端进入 [Codex 会话恢复](/apps/session-recovery-codex) 或 [Claude Code 会话恢复](/apps/session-recovery-claude)，先运行只读诊断，再决定是否应用修复。所有可下载文件与校验值集中在 [下载](/apps/downloads)。
