@@ -1,8 +1,10 @@
 ## 用戶端工具
 
+下載前先閱讀 [控制台設定器](/apps/console) 與對應的 [應用教程](/apps)，確認分組和用戶端支援範圍。
+
 | 檔案 | 用途 | 預設行為 |
 | --- | --- | --- |
-| [TapModels Codex 工作階段修復包](/downloads/tapmodels-codex-session-repair.zip) | macOS、Linux、Windows 工作階段診斷與修復 | 只讀診斷，顯式 Apply 才修改 |
+| [本專案 Codex 工作階段修復包](/downloads/session-repair.zip) | macOS、Linux、Windows 工作階段診斷與修復 | 只讀診斷，顯式 Apply 才修改 |
 | [GPT Image 2.5 Flare Skill](/downloads/gpt-image-flare.zip) | Codex 圖片生成與編輯 | 固定 Flare 模型 |
 | [GPT Image 2.5 Sunburst Skill](/downloads/gpt-image-sunburst.zip) | Codex 圖片生成與編輯 | 固定 Sunburst 模型 |
 

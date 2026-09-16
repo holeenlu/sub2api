@@ -11,6 +11,7 @@
         <RouterLink to="/docs/models" class="inline-flex h-10 items-center gap-2 rounded-md border border-gray-200 px-4 text-sm font-semibold text-gray-700 hover:border-gray-300 hover:bg-gray-50 dark:border-dark-700 dark:text-gray-200 dark:hover:bg-dark-800">
           {{ t('docs.allModels') }}
         </RouterLink>
+        <RouterLink to="/docs/api/protocols" class="inline-flex h-10 items-center px-2 text-sm font-semibold text-primary-700 dark:text-primary-400">{{ t('docs.pages.protocols.title') }}</RouterLink>
       </div>
     </section>
 
@@ -22,7 +23,7 @@
             <Icon :name="endpoint.icon" size="sm" />
           </div>
           <h3 class="mt-4 text-sm font-semibold text-gray-950 dark:text-white">{{ t(endpoint.titleKey) }}</h3>
-          <code class="mt-2 block text-xs text-gray-500 dark:text-dark-400">{{ endpoint.method }}</code>
+          <code class="mt-2 block break-all text-xs text-gray-500 dark:text-dark-400">{{ endpoint.method }}</code>
         </RouterLink>
       </div>
     </section>
@@ -78,8 +79,11 @@ const { t } = useI18n()
 const steps = ['docs.home.step1', 'docs.home.step2', 'docs.home.step3']
 const featuredModels = docsModelCatalog.filter((item) => ['gpt-6-astra', 'gpt-5.6-sol', 'claude-opus-5', 'gpt-image-2.5-flare'].includes(item.id))
 const endpoints = [
+  { path: '/docs/api/chat/openai-chat', titleKey: 'docs.pages.openaiChat.title', method: 'POST /v1/chat/completions', icon: 'chat' as const },
   { path: '/docs/api/chat/openai-responses', titleKey: 'docs.pages.responses.title', method: 'POST /v1/responses', icon: 'sparkles' as const },
   { path: '/docs/api/chat/anthropic-messages', titleKey: 'docs.pages.messages.title', method: 'POST /v1/messages', icon: 'chat' as const },
-  { path: '/docs/api/image/openai-image', titleKey: 'docs.pages.image.title', method: 'POST /v1/images/generations', icon: 'sparkles' as const }
+  { path: '/docs/api/image/openai-image', titleKey: 'docs.pages.image.title', method: 'POST /v1/images/generations', icon: 'sparkles' as const },
+  { path: '/docs/api/chat/gemini-native', titleKey: 'docs.pages.geminiNative.title', method: 'POST /v1beta/models/{model}:generateContent', icon: 'sparkles' as const },
+  { path: '/docs/api/query/models', titleKey: 'docs.pages.queryModels.title', method: 'GET /v1/models', icon: 'cube' as const }
 ]
 </script>

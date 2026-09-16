@@ -3,7 +3,7 @@
 ```http
 POST /v1/images/generations
 POST /v1/images/edits
-Authorization: Bearer $TAPMODELS_API_KEY
+Authorization: Bearer $API_KEY
 ```
 
 The currently showcased image models include `gpt-image-2.5-flare` and `gpt-image-2.5-sunburst`; access is determined by the API key's group and available compatible accounts. The gateway validates the `gpt-image-*` family. If `model` is omitted, code defaults to `gpt-image-2`, but that default is not proof of schedulability, so production clients should send an exact ID returned by `GET /v1/models`.
@@ -13,8 +13,8 @@ The currently showcased image models include `gpt-image-2.5-flare` and `gpt-imag
 Generation uses JSON:
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/images/generations" \
-  -H "Authorization: Bearer $TAPMODELS_API_KEY" \
+curl "$API_BASE_URL/v1/images/generations" \
+  -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-image-2.5-flare","prompt":"A clean product photo of a red desk lamp on a white background","n":1,"response_format":"b64_json"}'
 ```
@@ -40,8 +40,8 @@ Do not infer quality, size, format, or multi-image limits from another GPT Image
 The edit endpoint accepts one or more `image` / `image[n]` parts and an optional `mask`. Each uploaded part is read up to 20 MiB; the total request is also bounded by gateway configuration.
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/images/edits" \
-  -H "Authorization: Bearer $TAPMODELS_API_KEY" \
+curl "$API_BASE_URL/v1/images/edits" \
+  -H "Authorization: Bearer $API_KEY" \
   -F "model=gpt-image-2.5-flare" \
   -F "prompt=Replace the background with a quiet library" \
   -F "image=@input.png;type=image/png" \
@@ -94,3 +94,19 @@ Processing responses include `Retry-After: 3`; failed tasks return the synchrono
 ## Errors and troubleshooting
 
 Errors use `{"error":{"type":"...","message":"..."}}`; async responses also expose `error.code`. Check image-family model, group permission, multipart boundary and field names, `n`/`stream`/compression types, object-storage enablement, and the original key for polling. Preserve request ID, model, endpoint, status, and last event type for 502/503, empty output, or stream errors while excluding keys, source/mask data, and generated payloads.
+
+## Batch image jobs (separate API)
+
+```http
+POST   /v1/images/batches
+GET    /v1/images/batches
+GET    /v1/images/batches/models
+GET    /v1/images/batches/{id}
+GET    /v1/images/batches/{id}/items
+GET    /v1/images/batches/{id}/items/{custom_id}/content
+POST   /v1/images/batches/{id}/cancel
+DELETE /v1/images/batches/{id}
+DELETE /v1/images/batches/{id}/outputs
+```
+
+Submit JSON with at least a `model` and non-empty `items`. Each item may include `custom_id`, `prompt`, `output_count`, and `reference_images`; the batch also accepts `task_name`, `parent_batch_id`, `provider`, `response_mime_type`, `aspect_ratio`, `image_size`, and `metadata`. Defaults are 200 items, up to 4 outputs per item, 10 MiB per reference image, and 1,000 references/128 MiB per batch; deployment settings can change them. The response includes `id`, `status`, `item_count`, `estimated_cost`, and `hold_amount`; use the same key to query and send `Idempotency-Key` for submission deduplication. This is a gateway batch capability, not the official OpenAI Batch API.

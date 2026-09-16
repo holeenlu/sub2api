@@ -4,7 +4,7 @@ const authStore = vi.hoisted(() => ({
   checkAuth: vi.fn(), isAuthenticated: false, isAdmin: false, isSimpleMode: false,
 }))
 const appStore = vi.hoisted(() => ({
-  siteName: 'TapModels', backendModeEnabled: false, cachedPublicSettings: null as null | Record<string, unknown>,
+  siteName: 'Sub2API', backendModeEnabled: false, cachedPublicSettings: null as null | Record<string, unknown>,
 }))
 
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => authStore }))
@@ -40,13 +40,14 @@ describe('API docs routes', () => {
   it('registers app guides and downloads as public documentation', async () => {
     const { default: router } = await import('@/router')
     const expected = [
-      ['/docs/apps', 'docs.pages.apps.title'],
-      ['/docs/apps/codex', 'docs.pages.codex.title'],
-      ['/docs/apps/claude-code', 'docs.pages.claudeCode.title'],
-      ['/docs/apps/claude-desktop', 'docs.pages.claudeDesktop.title'],
-      ['/docs/apps/session-recovery', 'docs.pages.sessionRecovery.title'],
-      ['/docs/apps/image-skills', 'docs.pages.imageSkills.title'],
-      ['/docs/downloads', 'docs.pages.downloads.title'],
+      ['/apps', 'docs.pages.apps.title'],
+      ['/apps/console', 'docs.pages.consoleGuide.title'],
+      ['/apps/codex', 'docs.pages.codex.title'],
+      ['/apps/claude-code', 'docs.pages.claudeCode.title'],
+      ['/apps/claude-desktop', 'docs.pages.claudeDesktop.title'],
+      ['/apps/session-recovery', 'docs.pages.sessionRecovery.title'],
+      ['/apps/image-skills', 'docs.pages.imageSkills.title'],
+      ['/apps/downloads', 'docs.pages.downloads.title'],
     ]
 
     for (const [path, titleKey] of expected) {
@@ -54,5 +55,8 @@ describe('API docs routes', () => {
       expect(route.meta.requiresAuth).toBe(false)
       expect(route.meta.titleKey).toBe(titleKey)
     }
+    expect(router.resolve('/docs/apps').matched[0].redirect).toBe('/apps')
+    expect(router.resolve('/docs/apps/codex').matched[0].redirect).toBe('/apps/codex')
+    expect(router.resolve('/docs/downloads').matched[0].redirect).toBe('/apps/downloads')
   })
 })

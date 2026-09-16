@@ -1,8 +1,10 @@
 ## Client tools
 
+Before downloading, read the [console configuration builder](/apps/console) and [app guides](/apps) to confirm the key group and client support.
+
 | File | Purpose | Default behavior |
 | --- | --- | --- |
-| [TapModels Codex session repair bundle](/downloads/tapmodels-codex-session-repair.zip) | macOS, Linux, and Windows session diagnostics and repair | Read-only; explicit Apply required to write |
+| [this project Codex session repair bundle](/downloads/session-repair.zip) | macOS, Linux, and Windows session diagnostics and repair | Read-only; explicit Apply required to write |
 | [GPT Image 2.5 Flare skill](/downloads/gpt-image-flare.zip) | Codex image generation and editing | Fixed Flare model |
 | [GPT Image 2.5 Sunburst skill](/downloads/gpt-image-sunburst.zip) | Codex image generation and editing | Fixed Sunburst model |
 

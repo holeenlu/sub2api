@@ -1,6 +1,6 @@
 ## 接入地址
 
-TapModels 的实际接入地址来自系统公开设置和控制台。原始 HTTP 请求使用 `{根地址}/v1/...`。OpenAI SDK 的 `base_url` 通常使用 `{根地址}/v1`；Anthropic SDK 使用根地址，由 SDK 添加 `/v1/messages`。
+本项目 的实际接入地址来自系统公开设置和控制台。原始 HTTP 请求使用 `{根地址}/v1/...`。OpenAI SDK 的 `base_url` 通常使用 `{根地址}/v1`；Anthropic SDK 使用根地址，由 SDK 添加 `/v1/messages`。
 
 文档会对配置地址做归一化，避免出现 `/v1/v1`。自定义部署域名、反向代理路径和运行配置优先于示例占位域名。
 
@@ -8,9 +8,9 @@ TapModels 的实际接入地址来自系统公开设置和控制台。原始 HTT
 
 | 协议 | 请求头 |
 | --- | --- |
-| OpenAI 兼容 | `Authorization: Bearer $TAPMODELS_API_KEY` |
-| Anthropic Messages | `x-api-key: $TAPMODELS_API_KEY` |
-| Gemini 兼容 | `x-goog-api-key: $TAPMODELS_API_KEY` |
+| OpenAI 兼容 | `Authorization: Bearer $API_KEY` |
+| Anthropic Messages | `x-api-key: $API_KEY` |
+| Gemini 兼容 | `x-goog-api-key: $API_KEY` |
 
 一次请求只需要一种 API Key 鉴权方式。网关按有效 Bearer、`x-api-key`、`x-goog-api-key` 的顺序读取；Messages 原始请求还应带适用的 `anthropic-version`。
 

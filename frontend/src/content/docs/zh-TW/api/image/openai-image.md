@@ -3,7 +3,7 @@
 ```http
 POST /v1/images/generations
 POST /v1/images/edits
-Authorization: Bearer $TAPMODELS_API_KEY
+Authorization: Bearer $API_KEY
 ```
 
 目前產品展示的影像模型包括 `gpt-image-2.5-flare` 與 `gpt-image-2.5-sunburst`，實際權限由 API Key 分組和執行中的相容帳號決定。閘道器驗證 `gpt-image-*` 模型族；如果省略 `model`，程式碼預設使用 `gpt-image-2`，但預設值不代表目前分組一定可排程，生產整合應始終顯式傳送 `GET /v1/models` 回傳的精確 ID。
@@ -13,8 +13,8 @@ Authorization: Bearer $TAPMODELS_API_KEY
 生成介面使用 JSON：
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/images/generations" \
-  -H "Authorization: Bearer $TAPMODELS_API_KEY" \
+curl "$API_BASE_URL/v1/images/generations" \
+  -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model":"gpt-image-2.5-flare",
@@ -46,8 +46,8 @@ curl "$TAPMODELS_BASE_URL/v1/images/generations" \
 編輯的檔案上傳形式接受一個或多個 `image` / `image[n]` part，以及可選 `mask`。每個上傳 part 最多讀取 20 MiB；總請求大小還受伺服器端閘道器設定限制。
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/images/edits" \
-  -H "Authorization: Bearer $TAPMODELS_API_KEY" \
+curl "$API_BASE_URL/v1/images/edits" \
+  -H "Authorization: Bearer $API_KEY" \
   -F "model=gpt-image-2.5-flare" \
   -F "prompt=Replace the background with a quiet library" \
   -F "image=@input.png;type=image/png" \
@@ -132,3 +132,19 @@ GET  /v1/images/tasks/{task_id}
 錯誤使用 `{"error":{"type":"...","message":"..."}}`；非同步介面同時回顯 `error.code`。重點檢查：模型是否屬於影像族；分組是否開放影像權限；編輯請求的 Content-Type/boundary 和圖片欄位；`n`/`stream`/壓縮欄位類型；非同步物件儲存是否啟用；輪詢是否使用原 API Key。
 
 遇到 502/503、空 output 或流內 error 時保留 request ID、模型、端點、HTTP 狀態和最後事件類型。不要記錄 API Key、原圖 base64、mask 或生成結果正文。
+
+## 批次影像任務（獨立介面）
+
+```http
+POST   /v1/images/batches
+GET    /v1/images/batches
+GET    /v1/images/batches/models
+GET    /v1/images/batches/{id}
+GET    /v1/images/batches/{id}/items
+GET    /v1/images/batches/{id}/items/{custom_id}/content
+POST   /v1/images/batches/{id}/cancel
+DELETE /v1/images/batches/{id}
+DELETE /v1/images/batches/{id}/outputs
+```
+
+提交 JSON 至少包含 `model` 和非空 `items`。每項可傳 `custom_id`、`prompt`、`output_count`、`reference_images`；批次還支援 `task_name`、`parent_batch_id`、`provider`、`response_mime_type`、`aspect_ratio`、`image_size`、`metadata`。預設上限為 200 項、每項最多 4 張輸出；單個參考圖預設 10 MiB，批次預設最多 1000 張/128 MiB，均可由部署設定調整。回應包含 `id`、`status`、`item_count`、`estimated_cost`、`hold_amount`；使用同一 Key 查詢，提交可帶 `Idempotency-Key`。這是閘道器批處理能力，不等價於官方 OpenAI Batch API。

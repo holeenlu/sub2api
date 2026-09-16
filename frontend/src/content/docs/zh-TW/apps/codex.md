@@ -1,45 +1,62 @@
 ## 先準備好 Key 和模型
 
-在 [API 金鑰](/keys) 建立 Key，選定分組，再點選“使用金鑰 → Codex”。優先使用控制台目前生成的設定與模型目錄。範例模型 `gpt-5.6-sol` 僅用於演示，請替換為該 Key 實際開放的模型。已有設定先備份，合併對應欄位，不要覆蓋整個檔案。
+在 [API 金鑰](/keys) 建立 Key，選定分組，再點選“使用金鑰 → Codex”。優先使用控制台目前生成的設定；模型目錄僅對 OpenAI/Composite 分組開放。範例模型 `gpt-5.6-sol` 僅用於演示，請替換為該 Key 實際開放的模型。已有設定先備份，合併對應欄位，不要覆蓋整個檔案。控制台的普通 HTTP/SSE 與 WebSocket 設定是不同標籤；先用普萬用字元置驗證。
 
 本文適用於本機讀取 Codex 設定的用戶端。雲端任務不一定讀取這份設定；需要在實際執行主機單獨設定。
 
 ## CLI：設定與啟動
+
+### 線上部署（macOS / Linux）
+
+如果站點管理員已釋出安裝腳本，可在設定環境變數後直接部署目前使用者設定：
+
+```bash
+export API_KEY="你的 本專案 API Key"
+curl -fsSL {{API_ROOT}}/install/codex.sh | bash
+```
+
+腳本會備份已有 `config.toml`、寫入 Responses Provider，並設定 `600` 權限。執行前應審閱腳本內容；不要把 API Key 寫進命令歷史或提交到儲存庫。需要自訂地址時額外設定 `API_BASE_URL`，模型可用 `MODEL_ID` 覆蓋。
+
+下圖為本專案 OpenAI 分組的 API key 模式設定器，使用無效範例 Key 和演示地址。根據自己的分組複製實際設定；[控制台設定器](/apps/console) 展示了另一種 Legacy 模式及操作步驟，截圖可點選放大。
+
+![本專案 Codex API key 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
 
 需要已安裝 Codex CLI，可按 [官方 CLI 安裝說明](https://developers.openai.com/codex/cli/) 安裝，再執行 `codex --version` 確認。
 
 macOS / Linux 終端機：
 
 ```bash
-export TAPMODELS_API_KEY="你的 TapModels API Key"
+export API_KEY="你的 本專案 API Key"
 mkdir -p "${CODEX_HOME:-$HOME/.codex}"
 ```
 
 Windows PowerShell：
 
 ```powershell
-$env:TAPMODELS_API_KEY="你的 TapModels API Key"
+$env:API_KEY="你的 本專案 API Key"
 $codexConfigDir = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
 New-Item -ItemType Directory -Force $codexConfigDir | Out-Null
 notepad (Join-Path $codexConfigDir 'config.toml')
 ```
 
-將以下設定合併到 `~/.codex/config.toml`（設定了 `CODEX_HOME` 時使用該目錄）。頂層欄位要位於所有 `[表名]` 之前。同名 Provider 表只保留一份。
+將以下“路由分組”設定合併到 `~/.codex/config.toml`（設定了 `CODEX_HOME` 時使用該目錄）。它適用於 Anthropic、Gemini、Grok 等透過 Responses 接入 Codex 的分組。頂層欄位要位於所有 `[表名]` 之前，同名 Provider 表只保留一份。模型和 `base_url` 直接複製目前彈出視窗，不要憑範例推斷。
 
 ```toml
-model_provider = "tapmodels"
+model_provider = "gateway"
 model = "gpt-5.6-sol"
 
-[model_providers.tapmodels]
-name = "TapModels"
+[model_providers.gateway]
+name = "本專案"
 base_url = "{{API_ROOT}}/v1"
-env_key = "TAPMODELS_API_KEY"
+env_key = "API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false
 ```
 
-在剛才設定環境變數的同一個終端機執行 `codex`。`supports_websockets = false` 是先驗證 HTTP/SSE 的設定，不代表本站沒有 WebSocket 路由。不要修改 `auth.json` 來切換本站 Key。
+在剛才設定環境變數的同一個終端機執行 `codex`。`supports_websockets = false` 是先驗證 HTTP/SSE 的設定，不代表本站沒有 WebSocket 路由。
+
+OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，包含 `disable_response_storage`、`network_access`、模型目錄和 `[features]`。預設 **Legacy** 模式同時下載 `config.toml` 和 `auth.json`，其中 `requires_openai_auth = true`；**API key** 模式改用 `requires_openai_auth = false` 與 `experimental_bearer_token`，修改後必須完全重啟 Codex。兩種模式不要混合，也不要把路由分組的 `gateway` 表和 OpenAI 分組的 `OpenAI` 表拼成一個 Provider。
 
 ## 桌面版：讓應用拿到 Key
 
@@ -51,11 +68,13 @@ supports_websockets = false
 "/Applications/Codex.app/Contents/MacOS/Codex"
 ```
 
-安裝名稱或路徑不同，請在 Finder 中確認後替換。Windows 在設定 `$env:TAPMODELS_API_KEY` 的 PowerShell 中執行實際安裝的 Codex `.exe` 路徑。遠端主機、WSL 和容器有各自的環境與使用者目錄，需要在執行位置設定。
+安裝名稱或路徑不同，請在 Finder 中確認後替換。Windows 在設定 `$env:API_KEY` 的 PowerShell 中執行實際安裝的 Codex `.exe` 路徑。遠端主機、WSL 和容器有各自的環境與使用者目錄，需要在執行位置設定。
 
-如果必須使用圖示啟動，可按控制台“使用金鑰”提供的直接權杖模式，將目前 Provider 的 `env_key` **替換為** `experimental_bearer_token = "你的 Key"`；兩種方式只選一種。它將認證資訊儲存在設定檔中，注意檔案權限與備份，勿提交到儲存庫。這是官方支援但不推薦的回退方式。
+如果必須使用圖示啟動，可在 OpenAI 分組的“使用金鑰”彈出視窗選擇 **API key**，下載其完整 `config.toml`。它會把認證資訊儲存在設定檔中，注意檔案權限與備份，勿提交到儲存庫。對於其他分組，優先使用彈出視窗生成的 `env_key` 設定；不要自行把兩種驗證欄位並列。
 
 ## 取得目前分組模型目錄
+
+本節只適用於 OpenAI/Composite 分組。其他路由分組不支援專用目錄下載，也不應新增 `model_catalog_json`。用普通 `GET /v1/models` 查詢精確 ID 後填入 `model`；不要把該列表回應儲存為 Codex manifest。
 
 在“API 金鑰 → 使用金鑰 → Codex”中取得並下載目前 Key 的模型目錄。將 `codex-models.json` 放在固定位置，在 `config.toml` 頂層加入：
 
@@ -68,8 +87,8 @@ Windows TOML 使用單引號路徑，例如 `model_catalog_json = 'C:\Users\你�
 ## 驗證接入
 
 1. 新建一個任務並行送簡單問題。
-2. 檢視 TapModels 用量記錄，確認相同時間的請求、模型和 Key。
-3. 確認請求成功後再繼續已有工作階段；遇到歷史記錄不見，進入 [工作階段恢復](/docs/apps/session-recovery)。
+2. 檢視 本專案 用量記錄，確認相同時間的請求、模型和 Key。
+3. 確認請求成功後再繼續已有工作階段；遇到歷史記錄不見，進入 [工作階段恢復](/apps/session-recovery)。
 
 | 現象 | 優先檢查 |
 | --- | --- |

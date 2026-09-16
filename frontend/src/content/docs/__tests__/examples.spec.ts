@@ -9,7 +9,7 @@ describe('copyable API examples', () => {
       const code = buildDocsExamples(kind, 'https://example.com/v1/', 'test-model')[0].code
       // Replace curl with a shell function; no network or real key is involved.
       const args = execFileSync('/bin/bash', ['-c', `curl() { printf '%s\\0' "$@"; }\n${code}`], {
-        env: { TAPMODELS_API_KEY: 'test-value' }
+        env: { API_KEY: 'test-value' }
       }).toString().split('\0').filter(Boolean)
       expect(args).toContain(kind === 'messages' ? 'x-api-key: test-value' : 'Authorization: Bearer test-value')
       expect(args.filter(arg => arg.startsWith('https://example.com/'))).toHaveLength(1)

@@ -2,12 +2,14 @@
 
 ```http
 POST /v1/messages
-x-api-key: $TAPMODELS_API_KEY
+x-api-key: $API_KEY
 anthropic-version: 2023-06-01
 Content-Type: application/json
 ```
 
 Bearer authentication is also accepted, but Anthropic SDK and Claude Code integrations should retain `x-api-key`. Anthropic groups normally use a Messages-compatible path; OpenAI, Grok, Kimi, Zhipu, DeepSeek, MiniMax, and OpenCodeGo groups can bridge through the OpenAI gateway. Blocks, errors, stop reasons, and usage are not guaranteed to remain identical across protocols.
+
+Estimate input tokens with `POST /v1/messages/count_tokens`. It accepts this page's Messages body and returns `{"input_tokens":...}`. Grok and selected OpenAI-compatible paths can use a local tokenizer, so this value is not final usage or billing.
 
 ## Core request fields
 
@@ -31,8 +33,8 @@ An image block uses `{"type":"image","source":{"type":"base64","media_type":"ima
 ## Minimal request and complete response
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/messages" \
-  -H "x-api-key: $TAPMODELS_API_KEY" \
+curl "$API_BASE_URL/v1/messages" \
+  -H "x-api-key: $API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
   -d '{"model":"YOUR_MODEL_ID","max_tokens":256,"messages":[{"role":"user","content":"Explain idempotency in one sentence."}]}'

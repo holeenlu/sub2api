@@ -1,9 +1,9 @@
 ## Pricing basis
 
-TapModels reference prices multiply each official direct-API Standard item by `0.5`. Batch, Flex, Fast, Priority, regional processing, and built-in tool fees are separate from Standard inference pricing.
+this project reference prices multiply each official direct-API Standard item by `0.5`. Batch, Flex, Fast, Priority, regional processing, and built-in tool fees are separate from Standard inference pricing.
 
 ```text
-Item cost = item tokens / 1,000,000 × TapModels item price
+Item cost = item tokens / 1,000,000 × this project item price
 Request cost = input + cache reads + cache writes + output + disclosed extras
 ```
 
@@ -21,8 +21,8 @@ The table below compares dated official 0.5x references with selected-group pric
 
 ## Worked examples
 
-- For 10,000 regular input, 5,000 cached input, and 2,000 output tokens on Sol, the official cost is `$0.082` and the TapModels 0.5x reference is `$0.041`.
-- For 100 regular text input, 200 regular image input, and 1,000 image output tokens on Flare or Sunburst, the official cost is `$0.0321` and the TapModels 0.5x reference is `$0.01605`.
+- For 10,000 regular input, 5,000 cached input, and 2,000 output tokens on Sol, the official cost is `$0.082` and the this project 0.5x reference is `$0.041`.
+- For 100 regular text input, 200 regular image input, and 1,000 image output tokens on Flare or Sunburst, the official cost is `$0.0321` and the this project 0.5x reference is `$0.01605`.
 
 These examples use the stated token counts only. They exclude cache writes, tools, service tiers, and other fees, and do not represent a fixed image size.
 

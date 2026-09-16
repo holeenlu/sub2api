@@ -2,7 +2,7 @@
 
 ```http
 GET /v1/models
-Authorization: Bearer $TAPMODELS_API_KEY
+Authorization: Bearer $API_KEY
 ```
 
 The model list depends on the key's group, platform, account/channel mappings, and model allowlist. Query with the same key that will perform inference.
@@ -10,8 +10,8 @@ The model list depends on the key's group, platform, account/channel mappings, a
 ## Minimal request and response
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/models" \
-  -H "Authorization: Bearer $TAPMODELS_API_KEY"
+curl "$API_BASE_URL/v1/models" \
+  -H "Authorization: Bearer $API_KEY"
 ```
 
 OpenAI-compatible groups normally return:
@@ -34,6 +34,8 @@ List, choose an exact ID, send the target endpoint's minimal request, then confi
 ## Single-model path and Codex mode
 
 `GET /v1/models/{model}` reuses the Models handler and filters by the path parameter; do not assume every platform emits the official Retrieve Model field set.
+
+Native Gemini SDKs use separate `GET /v1beta/models` and `GET /v1beta/models/{model}` routes with `models[]` / `models/...` shapes; the ordinary path is restricted to Gemini groups. Do not impose the OpenAI-style `/v1/models` envelope on native Gemini discovery.
 
 Adding `client_version` to `GET /v1/models` selects a Codex model-manifest path rather than ordinary `{"object":"list","data":[]}` output. General SDKs and application model pickers should omit it.
 

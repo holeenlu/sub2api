@@ -3,7 +3,7 @@ import { docsModelCatalog } from '../modelCatalog'
 import { DOCS_PRICING_RATE, halfOfficialPrice } from '../pricingSnapshot'
 
 describe('API docs pricing snapshot', () => {
-  it('contains the TapModels launch catalog exactly once', () => {
+  it('contains the 本项目 launch catalog exactly once', () => {
     const ids = docsModelCatalog.map((model) => model.id)
 
     expect(new Set(ids).size).toBe(ids.length)

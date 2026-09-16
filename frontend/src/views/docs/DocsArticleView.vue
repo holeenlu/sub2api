@@ -6,7 +6,7 @@
       <p class="mt-3 max-w-2xl text-sm leading-6 text-gray-600 dark:text-dark-300">{{ t(item.descriptionKey) }}</p>
     </header>
 
-    <div v-if="item.path === '/docs/apps'" class="mt-8 grid gap-4 sm:grid-cols-2">
+    <div v-if="item.path === '/apps'" class="mt-8 grid gap-4 sm:grid-cols-2">
       <RouterLink v-for="guide in appGuides" :key="guide.path" :to="guide.path" class="group rounded-xl border border-gray-200 p-5 transition hover:border-primary-400 hover:bg-primary-50/40 dark:border-dark-700 dark:hover:bg-dark-800">
         <p class="font-semibold text-gray-950 dark:text-white">{{ t(guide.titleKey) }} <span aria-hidden="true" class="float-right text-primary-600">↗</span></p>
         <p class="mt-2 text-sm leading-6 text-gray-500 dark:text-dark-300">{{ t(guide.descriptionKey) }}</p>
@@ -52,7 +52,7 @@ import DocsCodeTabs from '@/components/docs/DocsCodeTabs.vue'
 import DocsPricingTable from '@/components/docs/DocsPricingTable.vue'
 import { buildDocsExamples } from '@/content/docs/examples'
 import { docsModelCatalog } from '@/content/docs/modelCatalog'
-import { docsNavGroups, docsStaticItems } from '@/content/docs/nav'
+import { docsNavGroups, appsNavGroups, navGroupsForPath } from '@/content/docs/nav'
 import type { DocsNavItem } from '@/content/docs/types'
 import type { ModelPlazaGroup } from '@/api/modelPlaza'
 
@@ -63,20 +63,21 @@ const markdownModules = import.meta.glob('../../content/docs/**/*.md', { query: 
 const contentHtml = ref('')
 const contentLoading = ref(false)
 let loadVersion = 0
-const appGuides = docsStaticItems.filter(entry => entry.path.startsWith('/docs/apps/') || entry.path === '/docs/downloads')
+const appGuides = appsNavGroups.flatMap(group => group.items).filter(entry => entry.path !== '/apps')
+const sectionItems = computed(() => navGroupsForPath(props.item.path).flatMap(group => group.items))
 
 async function onContentClick(event: MouseEvent) {
   const target = event.target as HTMLElement
   const button = target.closest<HTMLButtonElement>('button[data-docs-copy]')
   if (button) {
     try {
-      await navigator.clipboard.writeText(button.parentElement?.querySelector('code')?.textContent ?? '')
+      await navigator.clipboard.writeText(button.closest('pre')?.querySelector('code')?.textContent ?? '')
       button.textContent = t('docs.copied')
     } catch { button.textContent = t('docs.copy') }
     return
   }
   const link = target.closest<HTMLAnchorElement>('a')
-  if (link && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0 && link.origin === location.origin && link.pathname.startsWith('/docs')) {
+  if (link && link.target !== '_blank' && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0 && link.origin === location.origin && /^\/(docs|apps)(\/|$)/.test(link.pathname)) {
     event.preventDefault()
     await router.push(link.pathname + link.search + link.hash)
   }
@@ -84,9 +85,9 @@ async function onContentClick(event: MouseEvent) {
 
 const groupIndex = computed(() => docsNavGroups.findIndex((group) => group.items.some((entry) => entry.path === props.item.path)))
 const sectionTitle = computed(() => t(docsNavGroups[groupIndex.value]?.titleKey ?? 'docs.brand'))
-const itemIndex = computed(() => docsStaticItems.findIndex((entry) => entry.path === props.item.path))
-const previous = computed(() => itemIndex.value > 0 ? docsStaticItems[itemIndex.value - 1] : null)
-const next = computed(() => itemIndex.value >= 0 && itemIndex.value < docsStaticItems.length - 1 ? docsStaticItems[itemIndex.value + 1] : null)
+const itemIndex = computed(() => sectionItems.value.findIndex((entry) => entry.path === props.item.path))
+const previous = computed(() => itemIndex.value > 0 ? sectionItems.value[itemIndex.value - 1] : null)
+const next = computed(() => itemIndex.value >= 0 && itemIndex.value < sectionItems.value.length - 1 ? sectionItems.value[itemIndex.value + 1] : null)
 const availableModelIds = computed(() => props.selectedGroup?.models.map((model) => model.name))
 const exampleModel = computed(() => {
   const kind = props.item.exampleKind === 'image' ? 'image' : 'chat'
@@ -121,6 +122,17 @@ async function loadArticle() {
     } catch { /* Keep the documented placeholder for invalid public configuration. */ }
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
     while (walker.nextNode()) walker.currentNode.textContent = walker.currentNode.textContent?.split('{{API_ROOT}}').join(root) ?? ''
+    for (const img of container.querySelectorAll<HTMLImageElement>('img')) {
+      if (img.getAttribute('src')?.startsWith('/docs-assets/') && !img.closest('a')) {
+        const link = document.createElement('a')
+        link.href = img.src
+        link.target = '_blank'
+        link.rel = 'noopener noreferrer'
+        link.title = t('docs.openImage')
+        img.replaceWith(link)
+        link.append(img)
+      }
+    }
     for (const table of container.querySelectorAll('table')) {
       const wrapper = document.createElement('div')
       wrapper.className = 'docs-table-scroll'
@@ -129,11 +141,20 @@ async function loadArticle() {
       wrapper.append(table)
     }
     for (const pre of container.querySelectorAll('pre')) {
+      pre.classList.add('docs-code-block')
+      const code = pre.querySelector('code')
+      const language = code?.className.match(/language-([\w-]+)/i)?.[1]?.toUpperCase() ?? 'TEXT'
+      const header = document.createElement('div')
+      header.className = 'docs-code-header'
+      const label = document.createElement('span')
+      label.textContent = language
+      header.append(label)
       const button = document.createElement('button')
       button.type = 'button'
       button.dataset.docsCopy = 'true'
       button.textContent = t('docs.copy')
-      pre.prepend(button)
+      header.append(button)
+      pre.prepend(header)
     }
     for (const link of container.querySelectorAll<HTMLAnchorElement>('a[href]')) {
       if (link.origin !== location.origin) { link.target = '_blank'; link.rel = 'noopener noreferrer' }
@@ -157,9 +178,11 @@ watch(() => [props.item.articleId, locale.value, props.apiBaseUrl], loadArticle,
 .docs-markdown :deep(ol) { @apply my-3 list-decimal space-y-1 pl-6; }
 .docs-markdown :deep(a) { @apply font-medium text-primary-700 underline underline-offset-4 dark:text-primary-400; }
 .docs-markdown :deep(code) { @apply rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[13px] text-gray-800 dark:bg-dark-800 dark:text-gray-100; }
-.docs-markdown :deep(pre) { @apply my-5 overflow-x-auto rounded-lg bg-gray-950 p-4 text-[13px] leading-6 text-gray-200; }
+.docs-markdown :deep(pre) { @apply my-5 overflow-x-auto rounded-lg bg-gray-950 text-[13px] leading-6 text-gray-200; }
+.docs-markdown :deep(.docs-code-header) { @apply flex items-center border-b border-white/10 bg-gray-900 px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400; }
+.docs-markdown :deep(.docs-code-header button) { @apply ml-auto mb-0 rounded border border-white/20 px-2 py-1 text-xs font-normal normal-case tracking-normal text-gray-300 hover:bg-white/10; }
+.docs-markdown :deep(.docs-code-block > code) { @apply block p-4; }
 .docs-markdown :deep(pre code) { @apply bg-transparent p-0 text-inherit; }
-.docs-markdown :deep(pre button) { @apply mb-3 block rounded border border-white/20 px-2 py-1 text-xs text-gray-300 hover:bg-white/10; }
 .docs-markdown :deep(.docs-table-scroll) { @apply my-5 max-w-full overflow-x-auto; }
 .docs-markdown :deep(img) { @apply my-5 max-h-[520px] max-w-full rounded-lg border border-gray-200 object-contain dark:border-dark-700; }
 .docs-markdown :deep(table) { @apply my-5 w-full min-w-[620px] border-collapse text-sm; }

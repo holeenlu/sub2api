@@ -2,12 +2,14 @@
 
 ```http
 POST /v1/messages
-x-api-key: $TAPMODELS_API_KEY
+x-api-key: $API_KEY
 anthropic-version: 2023-06-01
 Content-Type: application/json
 ```
 
 閘道器也接受 Bearer 鑑權，但 Anthropic SDK 和 Claude Code 建議保持 `x-api-key`。Anthropic 分組通常走 Messages 相容鏈；OpenAI、Grok、Kimi、智譜、DeepSeek、MiniMax 和 OpenCodeGo 分組可能橋接到 OpenAI 閘道器。跨協議時內容塊、錯誤、停止原因和 usage 不保證逐欄位等價。
+
+輸入 token 預估使用 `POST /v1/messages/count_tokens`，請求體沿用本頁 Messages 形狀並返回 `{"input_tokens":...}`。Grok 和部分 OpenAI 相容鏈可能使用本地 tokenizer，因此不要把該值當作最終 usage 或帳單。
 
 ## 核心請求參數
 
@@ -31,8 +33,8 @@ Content-Type: application/json
 ## 最小請求與非流回應
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/messages" \
-  -H "x-api-key: $TAPMODELS_API_KEY" \
+curl "$API_BASE_URL/v1/messages" \
+  -H "x-api-key: $API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
   -d '{

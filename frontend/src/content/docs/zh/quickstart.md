@@ -2,11 +2,11 @@
 
 在控制台创建 API Key，并确认它所属的分组。分组决定可以使用的模型、倍率、限额与上游路由；不要仅凭公开模型页判断一把 Key 是否可用。
 
-从控制台复制接入地址。示例中的 `TAPMODELS_BASE_URL` 表示不含末尾 `/v1` 的根地址；若复制的地址已经包含 `/v1`，先移除它再拼接具体路径。
+从控制台复制接入地址。示例中的 `API_BASE_URL` 表示不含末尾 `/v1` 的根地址；若复制的地址已经包含 `/v1`，先移除它再拼接具体路径。
 
 ```bash
-export TAPMODELS_BASE_URL="https://你的接入域名"
-export TAPMODELS_API_KEY="你的密钥"
+export API_BASE_URL="https://你的接入域名"
+export API_KEY="你的密钥"
 ```
 
 ## 选择协议

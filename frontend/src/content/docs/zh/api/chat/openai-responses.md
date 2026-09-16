@@ -2,11 +2,13 @@
 
 ```http
 POST /v1/responses
-Authorization: Bearer $TAPMODELS_API_KEY
+Authorization: Bearer $API_KEY
 Content-Type: application/json
 ```
 
 这是 OpenAI Responses 风格入口。网关会按 Key 分组选择原生或跨协议处理链；官方 Responses API 出现的内置工具并不因此全部可用。
+
+只计算输入时使用 `POST /v1/responses/input_tokens`。它要求非空 `model`，返回 `{"object":"response.input_tokens","input_tokens":...}`；部分账号会本地估算，因此不能替代实际生成 usage。
 
 ## 核心请求参数
 
@@ -32,8 +34,8 @@ Content-Type: application/json
 ## 最小请求与非流响应
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/responses" \
-  -H "Authorization: Bearer $TAPMODELS_API_KEY" \
+curl "$API_BASE_URL/v1/responses" \
+  -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"YOUR_MODEL_ID","input":"用一句话解释幂等性。"}'
 ```

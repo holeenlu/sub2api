@@ -33,7 +33,7 @@
                 <span class="text-gray-300 dark:text-dark-600">→</span>
                 <span class="font-semibold text-gray-900 dark:text-gray-100">{{ formatPerMillion(halfOfficialPrice(priceValue(model, column.key))) }}</span>
               </div>
-              <div v-if="priceValue(model, column.key) != null" class="mt-0.5 text-[11px] text-gray-400">{{ t('docs.official') }} → {{ t('docs.tapmodels') }}</div>
+              <div v-if="priceValue(model, column.key) != null" class="mt-0.5 text-[11px] text-gray-400">{{ t('docs.official') }} → {{ t('docs.referencePrice') }}</div>
               <span v-else class="text-gray-400">—</span>
             </td>
             <td class="px-4 py-3 tabular-nums">

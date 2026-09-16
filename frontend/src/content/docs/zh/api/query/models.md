@@ -2,7 +2,7 @@
 
 ```http
 GET /v1/models
-Authorization: Bearer $TAPMODELS_API_KEY
+Authorization: Bearer $API_KEY
 ```
 
 模型列表与 API Key 的分组、平台、账号/渠道映射和模型白名单相关。请始终用实际发起推理的同一把 Key 查询。
@@ -10,8 +10,8 @@ Authorization: Bearer $TAPMODELS_API_KEY
 ## 最小请求与响应
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/models" \
-  -H "Authorization: Bearer $TAPMODELS_API_KEY"
+curl "$API_BASE_URL/v1/models" \
+  -H "Authorization: Bearer $API_KEY"
 ```
 
 OpenAI 或 OpenAI 兼容分组通常返回：
@@ -43,6 +43,8 @@ Anthropic 类分组的列表项可能使用 `type`、`display_name`、ISO 时间
 项目注册了 `GET /v1/models/{model}`，但当前复用同一个 Models handler：它会按路径参数筛选列表项，不能假设所有平台都返回官方 Retrieve Model 的完整固定字段。
 
 当 `GET /v1/models` 带 `client_version` 查询参数时，路由会选择 Codex 模型 manifest 处理链；该响应不是普通 `{"object":"list","data":[]}`。通用 SDK 和业务模型选择器不要附加 `client_version`。
+
+Gemini 原生 SDK 使用独立的 `GET /v1beta/models` 和 `GET /v1beta/models/{model}`，返回 `models[]` / `models/...` 风格数据，且普通路径只允许 Gemini 分组。不要把 `/v1/models` 的 OpenAI 风格信封硬套到 Gemini 原生发现接口。
 
 ## 错误与排障
 

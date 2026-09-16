@@ -7,6 +7,8 @@ export default {
   home: {
     viewDocs: 'View Documentation',
     docs: 'Docs',
+    apiDocs: 'API Docs',
+    aiApps: 'AI Apps',
     switchToLight: 'Switch to Light Mode',
     switchToDark: 'Switch to Dark Mode',
     dashboard: 'Dashboard',
@@ -21,6 +23,7 @@ export default {
     heroEyebrow: 'A multi-model AI API gateway',
     heroTitle: 'Pick a model. Start building.',
     contactIntegration: 'Discuss your integration',
+    quickInstall: { eyebrow: 'Ready in minutes', title: 'Start with one API key', description: 'Codex CLI and Claude Code guides include backups, environment variables, and configuration files.' },
     terminal: {
       caption: 'API request illustration',
       routing: 'Forwarding to upstream…'
