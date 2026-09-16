@@ -19,7 +19,8 @@
     <transition name="dropdown">
       <div
         v-if="isOpen"
-        class="absolute left-0 right-auto z-[70] mt-1 w-40 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-800 sm:left-auto sm:right-0"
+        class="absolute z-[70] mt-1 w-40 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-800"
+        :class="align === 'left' ? 'left-0 right-auto' : 'left-auto right-0'"
       >
         <button
           v-for="locale in availableLocales"
@@ -45,6 +46,8 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { setLocale, availableLocales } from '@/i18n'
+
+const { align = 'right' } = defineProps<{ align?: 'left' | 'right' }>()
 
 const { locale } = useI18n()
 
