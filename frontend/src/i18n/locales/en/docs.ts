@@ -8,7 +8,7 @@ export default {
     noVisibleGroups: 'No visible groups',
     catalogUnavailable: 'The model catalog is temporarily unavailable. You can still use the integration guides; verify availability in the console or with GET /v1/models.',
     group: 'Group', chooseGroup: 'Choose group', groupRate: 'Effective rate {rate}x', availability: 'Availability', available: 'Enabled for this group',
-    unavailable: 'Not enabled for this group', unknownAvailability: 'Availability unknown', referencePrice: 'Official Standard × 0.5', livePrice: 'Selected group price',
+    unavailable: 'Not enabled for this group', unknownAvailability: 'Availability unknown', livePrice: 'Selected group price',
     priceUnit: 'USD / 1M tokens', official: 'Official', referencePrice: 'Project reference 0.5x', currentGroup: 'Current group', input: 'Input',
     cachedInput: 'Cached input', cacheWrite: 'Cache write', cacheWrite1h: '1-hour write', output: 'Output', textInput: 'Text input',
     cachedTextInput: 'Cached text', imageInput: 'Image input', cachedImageInput: 'Cached image', imageOutput: 'Image output',

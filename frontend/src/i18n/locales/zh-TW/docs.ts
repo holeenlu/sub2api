@@ -32,7 +32,6 @@ export default {
     available: '目前分組開放',
     unavailable: '目前分組未開放',
     unknownAvailability: '開放狀態待確認',
-    referencePrice: '官方標準價 × 0.5',
     livePrice: '所選分組報價',
     priceUnit: 'USD / 1M tokens',
     official: '官方',
