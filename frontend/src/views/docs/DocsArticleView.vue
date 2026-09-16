@@ -64,6 +64,10 @@ const contentHtml = ref('')
 const contentLoading = ref(false)
 let loadVersion = 0
 const appGuides = appsNavGroups.flatMap(group => group.items).filter(entry => entry.path !== '/apps')
+const localizedAsset = (name: string) => {
+  const suffix = locale.value === 'en' ? '-en' : locale.value === 'zh-TW' ? '-zh-TW' : '-zh'
+  return `/docs-assets/${name}${suffix}.png`
+}
 const sectionItems = computed(() => navGroupsForPath(props.item.path).flatMap(group => group.items))
 
 async function onContentClick(event: MouseEvent) {
@@ -115,6 +119,11 @@ async function loadArticle() {
     // Insert the configured URL as text after parsing, so configuration cannot inject Markdown/HTML.
     const container = document.createElement('div')
     container.innerHTML = DOMPurify.sanitize(marked.parse(source) as string)
+    if (props.item.path === '/apps') {
+      container.querySelectorAll<HTMLImageElement>('img[src="/docs-assets/create-api-key.png"]').forEach((image) => {
+        image.src = localizedAsset('create-api-key')
+      })
+    }
     let root = 'https://api.example.com'
     try {
       const url = new URL(props.apiBaseUrl || location.origin)
