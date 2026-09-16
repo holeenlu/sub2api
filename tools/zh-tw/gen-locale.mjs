@@ -28,6 +28,7 @@ const LEGAL_TW = join(ROOT, 'docs/legal/admin-compliance.zh-TW.md')
 // 在轉換結果（繁體）上做字面替換；順序有意義。
 const OVERRIDES = [
   [/通過一個 API 使用不同 AI 模型。\\n減少接入與管理的負擔/g, '透過一個 API 使用不同 AI 模型。\\n減少串接與管理的負擔'],
+  [/\/docs-assets\/(client-(?:codex|claude))-zh\.png/g, '/docs-assets/$1-zh-TW.png'],
   // 台灣的計量詞：記錄／資料／日誌用「筆」，公告／訊息用「則」；規則、Prompt 等保留「條」
   [/(\{\w+\}|\d+) 條(?=新公告|公告|訊息|通知)/g, '$1 則'],
   [/第一條(?=公告|訊息|通知)/g, '第一則'],
