@@ -288,8 +288,8 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T)
 
 	normalized := normalizeSQLWhitespace(capturedSQL)
 	require.Contains(t, normalized, "deleted_at IS NULL")
-	require.Contains(t, normalized, "schedulable = TRUE",
-		"permanently unschedulable accounts must not remain OAuth refresh candidates")
+	require.NotContains(t, normalized, "schedulable = TRUE",
+		"paused (schedulable=false, status=active) accounts must remain OAuth refresh candidates: excluding them lets their stored access_token expire and the usage-window probe then reports a false 'needs re-auth'; permanent rejection is already covered by status = 'active' and refresh failures are bounded by the retry-cooldown exclusion")
 	require.Contains(t, normalized, "status = 'active'")
 	// setup-token 仍留在候选集合里：是否真的刷新由各平台 refresher 的 CanRefresh 决定
 	// （Anthropic 的 setup-token 是长期凭据，已在那里排除）。
