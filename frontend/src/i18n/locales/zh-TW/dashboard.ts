@@ -780,6 +780,7 @@ export default {
     days: '天',
     codeRedeemSuccess: '兌換成功！',
     failedToRedeem: '兌換失敗，請檢查兌換碼後重試。',
+    historyLoadFailed: '載入兌換記錄失敗，請重試。',
     userRefreshFailed: '兌換成功，但帳號資訊重新整理失敗。',
     subscriptionRefreshFailed: '兌換成功，但訂閱狀態重新整理失敗。',
     pleaseEnterCode: '請輸入兌換碼'

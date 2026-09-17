@@ -139,6 +139,7 @@ docs/*
 !tools/tests/test_change_delivery.py
 tools/__pycache__/
 tools/tests/__pycache__/
+!docs/ANTIGRAVITY_ATTRIBUTION_429.md
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
