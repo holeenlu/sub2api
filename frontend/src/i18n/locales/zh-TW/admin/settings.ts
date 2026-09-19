@@ -544,6 +544,14 @@ export default {
         openaiCodexVersionAutoSyncHint: '每 6 小時從官方儲存庫取得最新穩定版用戶端版本號，無需為了跟版本而升級本服務。關閉後僅使用上方手填版本或內建版本。',
         openaiCodexVersionSyncedValue: '目前同步到：{version}',
         codexHardeningTitle: 'Codex 設定',
+        codexTicketEnabled: '292 打票',
+        codexTicketEnabledDesc:
+          '關閉後不打票、不注入 x-codex-turn-state，按原鏈路轉發。開啟後後台打票，並在業務請求中覆蓋該頭。',
+        codexTicketHarvestProxy: '292 打票代理',
+        codexTicketHarvestProxyDesc:
+          '僅在門票功能開啟時用於打票，儲存後後續探測會使用新代理，無需重啟。日常業務仍走帳號自己的住宅代理。填寫完整代理 URL（http 或 socks5h，含使用者名稱和密碼）。代理服務商需自行負責出口 IP 輪換。留空並儲存表示不改已儲存的值。',
+        codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
+        codexTicketHarvestProxyConfigured: '已設定（密碼已隱藏）。要更換請整段貼上新的代理 URL。',
         codexClientRestrictionTitle: 'Codex 用戶端限制',
         codexHardeningDesc:
           '僅對已開啟「僅允許 Codex 官方用戶端」的 OpenAI OAuth 帳號生效（全域）。在 User-Agent/Originator 之外，用版本區間、引擎指紋門與黑/白名單鞏固判定。',
