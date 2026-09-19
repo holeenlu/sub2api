@@ -753,6 +753,11 @@ export default {
         codexFingerprintDevice: '僅裝置',
         codexFingerprintSession: '裝置+工作階段',
         codexFingerprintFull: '完全收斂',
+        codexTurnTicket: 'Codex 292 門票',
+        codexTurnTicketDesc: '顯示已設定模型的門票狀態。僅在啟用缺票攔截時，沒有有效門票的模型才會暫停排程。',
+        codexTurnTicketMissing: '暫無有效門票，仍允許請求',
+        codexTurnTicketReady: '剩餘 {time}',
+        codexTurnTicketPaused: '未打到 292，該模型已暫停',
         codexImageTool: 'Codex 圖片橋接策略',
         codexImageToolDesc:
           '統一控制 Codex /responses 文字請求的 hosted image_generation 橋接和用戶端圖片工具宣告。hosted 工具自動注入僅適用於非 Responses Lite 請求；帳號級策略優先於通道和全域設定，不影響獨立圖片生成介面。',
