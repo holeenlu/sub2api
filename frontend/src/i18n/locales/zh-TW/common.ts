@@ -217,7 +217,7 @@ export default {
     channelStatus: '通道狀態',
     riskControl: '風控中心',
     securityAudit: '安全稽核',
-    contentModeration: '內容審核',
+    contentModeration: '內容稽核',
     promptAudit: '提示詞稽核',
     auditLogs: '操作日誌',
   },
