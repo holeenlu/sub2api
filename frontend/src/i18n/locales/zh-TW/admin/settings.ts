@@ -954,6 +954,7 @@ export default {
         locale: '語言',
         localeEn: '英文',
         localeZh: '中文',
+        localeJa: '日文',
         subject: '主題',
         subjectPlaceholder: '輸入郵件主題',
         html: 'HTML 範本',

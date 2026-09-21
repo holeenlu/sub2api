@@ -8,6 +8,7 @@ import { BRAND_COMPLIANCE_DOCUMENT_URL, BRAND_NAME } from '@/config/brand'
 // 与后端 AdminComplianceAckPhraseZH / EN 同构：站点名来自品牌常量（= service.DefaultSiteName）。
 const FALLBACK_ZH_PHRASE = `我已阅读、理解并同意 ${BRAND_NAME} 部署与运营合规承诺`
 const FALLBACK_EN_PHRASE = `I have read, understood, and agree to the ${BRAND_NAME} Deployment and Operation Compliance Commitment`
+const JA_DISPLAY_PHRASE = `${BRAND_NAME} のデプロイおよび運用コンプライアンス誓約を読み、理解し、同意しました`
 // 后端只有 ack_phrase_zh / ack_phrase_en 两个字段，且 ack_phrase_zh 恒为简体
 // （backend/internal/service/admin_compliance.go 的 AdminComplianceAckPhraseZH）。
 // 繁体界面要让使用者逐字输入繁体短语，所以这里补一个前端常量；提交时仍按后端
@@ -42,6 +43,9 @@ export const useAdminComplianceStore = defineStore('adminCompliance', () => {
   const expectedPhrase = computed(() => {
     if (currentLocale.value === 'zh-TW') {
       return ZH_TW_DISPLAY_PHRASE
+    }
+    if (currentLocale.value === 'ja') {
+      return JA_DISPLAY_PHRASE
     }
     return submittedPhrase.value
   })

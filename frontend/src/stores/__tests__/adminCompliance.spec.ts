@@ -9,6 +9,7 @@ const BACKEND_ZH_PHRASE = `我已阅读、理解并同意 ${BRAND_NAME} 部署�
 const BACKEND_EN_PHRASE = `I have read, understood, and agree to the ${BRAND_NAME} Deployment and Operation Compliance Commitment`
 // zh-TW 界面展示用的繁体短语，由前端常量提供。
 const ZH_TW_PHRASE = `我已閱讀、理解並同意 ${BRAND_NAME} 部署與營運合規承諾`
+const JA_PHRASE = `${BRAND_NAME} のデプロイおよび運用コンプライアンス誓約を読み、理解し、同意しました`
 
 let currentLocale = 'en'
 
@@ -74,11 +75,21 @@ describe('useAdminComplianceStore', () => {
       expect(store.submittedLanguage).toBe('en')
     })
 
+    it('shows a Japanese phrase but submits the backend English phrase', () => {
+      currentLocale = 'ja'
+      const store = useAdminComplianceStore()
+      store.status = makeStatus()
+      expect(store.expectedPhrase).toBe(JA_PHRASE)
+      expect(store.submittedPhrase).toBe(BACKEND_EN_PHRASE)
+      expect(store.submittedLanguage).toBe('en')
+    })
+
     it('falls back to bundled phrases when the status has not been fetched', () => {
       // getLocale() 在测试里不是响应式的，computed 会缓存，所以每种语言用新的 pinia。
       const cases: Array<[string, string]> = [
         ['zh', BACKEND_ZH_PHRASE],
         ['zh-TW', ZH_TW_PHRASE],
+        ['ja', JA_PHRASE],
         ['en', BACKEND_EN_PHRASE],
       ]
       for (const [locale, phrase] of cases) {
@@ -129,6 +140,20 @@ describe('useAdminComplianceStore', () => {
       mockAccept.mockResolvedValue(makeStatus({ required: false }))
 
       await store.accept(BACKEND_EN_PHRASE)
+
+      expect(mockAccept).toHaveBeenCalledWith({
+        phrase: BACKEND_EN_PHRASE,
+        language: 'en',
+      })
+    })
+
+    it('translates the typed Japanese phrase back to the English backend phrase', async () => {
+      currentLocale = 'ja'
+      const store = useAdminComplianceStore()
+      store.status = makeStatus()
+      mockAccept.mockResolvedValue(makeStatus({ required: false }))
+
+      await store.accept(JA_PHRASE)
 
       expect(mockAccept).toHaveBeenCalledWith({
         phrase: BACKEND_EN_PHRASE,

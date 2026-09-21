@@ -38,12 +38,14 @@ export const BRAND_DOCS_URL = 'https://github.com/Wei-Shaw/sub2api/blob/main/doc
 /** Payment integration guide, per UI language. */
 export const BRAND_PAYMENT_GUIDE_URL = {
   zh: `${BRAND_DOCS_URL}/PAYMENT_CN.md`,
+  ja: `${BRAND_DOCS_URL}/PAYMENT.md`,
   en: `${BRAND_DOCS_URL}/PAYMENT.md`
 } as const
 
 /** "Supported payment methods" section of the payment guide, per UI language. */
 export const BRAND_PAYMENT_METHODS_URL = {
   zh: `${BRAND_DOCS_URL}/PAYMENT_CN.md#支持的支付方式`,
+  ja: `${BRAND_DOCS_URL}/PAYMENT.md#supported-payment-methods`,
   en: `${BRAND_DOCS_URL}/PAYMENT.md#supported-payment-methods`
 } as const
 
@@ -54,6 +56,7 @@ export const BRAND_PAYMENT_METHODS_URL = {
 export const BRAND_COMPLIANCE_DOCUMENT_URL = {
   zh: `${BRAND_DOCS_URL}/legal/admin-compliance.zh.md`,
   'zh-TW': 'https://github.com/holeenlu/sub2api/blob/main/docs/legal/admin-compliance.zh-TW.md',
+  ja: `${BRAND_DOCS_URL}/legal/admin-compliance.ja.md`,
   en: `${BRAND_DOCS_URL}/legal/admin-compliance.en.md`
 } as const
 

@@ -17,8 +17,9 @@ const ALLOWED = {
   'stores/adminCompliance.ts': new Set([
     '我已阅读、理解并同意 ', ' 部署与运营合规承诺',
     '我已閱讀、理解並同意 ', ' 部署與營運合規承諾',
+    ' のデプロイおよび運用コンプライアンス誓約を読み、理解し、同意しました',
   ]),
-  'i18n/index.ts': new Set(['简体中文', '繁體中文']),
+  'i18n/index.ts': new Set(['简体中文', '繁體中文', '日本語']),
   'config/brand.ts': new Set(['/PAYMENT_CN.md#支持的支付方式']),
 }
 

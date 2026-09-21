@@ -39,7 +39,10 @@ import {
 
 // Airwallex Components SDK 的 Locale 联合类型里，繁体中文是 'zh-HK'（没有 zh-TW）。
 // 见 node_modules/@airwallex/components-sdk/lib/index.d.ts 的 `export type Locale`。
-function airwallexLocale(locale: string): 'zh' | 'zh-HK' | 'en' {
+function airwallexLocale(locale: string): 'zh' | 'zh-HK' | 'ja' | 'en' {
+  if (locale.toLowerCase().startsWith('ja')) {
+    return 'ja'
+  }
   if (!isChineseLocale(locale)) {
     return 'en'
   }

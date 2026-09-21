@@ -5,12 +5,13 @@ import {
   getIntlLocale,
   isChineseLocale,
   isLocaleCode,
+  usesCjkPunctuation,
   type LocaleCode
 } from './localeUtils'
 
 // zh-TW（繁體中文／台灣用語）語言包由 tools/zh-tw/gen-locale.mjs 依 zh 自動產生，
 // 缺漏的 key 依序回退到 zh、en。
-export { detectLocaleFromLanguage, getIntlLocale, isChineseLocale, type LocaleCode }
+export { detectLocaleFromLanguage, getIntlLocale, isChineseLocale, usesCjkPunctuation, type LocaleCode }
 
 type LocaleMessages = Record<string, any>
 
@@ -19,14 +20,16 @@ const LOCALE_KEY = 'sub2api_locale'
 const localeLoaders: Record<LocaleCode, () => Promise<{ default: LocaleMessages }>> = {
   en: () => import('./locales/en'),
   zh: () => import('./locales/zh'),
-  'zh-TW': () => import('./locales/zh-TW')
+  'zh-TW': () => import('./locales/zh-TW'),
+  ja: () => import('./locales/ja')
 }
 
 // 語言回退鏈：zh-TW → zh → en；其餘 → en
 const FALLBACK_CHAIN: Record<LocaleCode, LocaleCode[]> = {
   en: [],
   zh: ['en'],
-  'zh-TW': ['zh', 'en']
+  'zh-TW': ['zh', 'en'],
+  ja: ['en']
 }
 
 function getDefaultLocale(): LocaleCode {
@@ -129,7 +132,8 @@ export function getLocale(): LocaleCode {
 export const availableLocales = [
   { code: 'en', name: 'English' },
   { code: 'zh', name: '简体中文' },
-  { code: 'zh-TW', name: '繁體中文' }
+  { code: 'zh-TW', name: '繁體中文' },
+  { code: 'ja', name: '日本語' }
 ] as const
 
 export default i18n

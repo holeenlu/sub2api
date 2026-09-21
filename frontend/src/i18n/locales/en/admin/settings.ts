@@ -957,6 +957,7 @@ export default {
         locale: 'Locale',
         localeEn: 'English',
         localeZh: 'Chinese',
+        localeJa: 'Japanese',
         subject: 'Subject',
         subjectPlaceholder: 'Enter the email subject',
         html: 'HTML Template',

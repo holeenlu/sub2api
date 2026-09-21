@@ -104,6 +104,7 @@ import { BRAND_NAME } from '@/config/brand'
 import type { LoginAgreementDocument } from '@/types'
 import zhAdminCompliance from '../../../../docs/legal/admin-compliance.zh.md?raw'
 import zhTwAdminCompliance from '../../../../docs/legal/admin-compliance.zh-TW.md?raw'
+import jaAdminCompliance from '../../../../docs/legal/admin-compliance.ja.md?raw'
 import enAdminCompliance from '../../../../docs/legal/admin-compliance.en.md?raw'
 
 const route = useRoute()
@@ -138,7 +139,13 @@ const currentDocument = computed<LoginAgreementDocument | null>(() => {
     return {
       id: 'admin-compliance',
       title: t('adminCompliance.title'),
-      content_md: getLocale() === 'zh-TW' ? zhTwAdminCompliance : getLocale() === 'zh' ? zhAdminCompliance : enAdminCompliance
+      content_md: getLocale() === 'zh-TW'
+        ? zhTwAdminCompliance
+        : getLocale() === 'zh'
+          ? zhAdminCompliance
+          : getLocale() === 'ja'
+            ? jaAdminCompliance
+            : enAdminCompliance
     }
   }
   const id = documentId.value

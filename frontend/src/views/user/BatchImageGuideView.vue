@@ -754,7 +754,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { isChineseLocale } from '@/i18n/localeUtils'
+import { isChineseLocale, usesCjkPunctuation } from '@/i18n/localeUtils'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -2407,6 +2407,10 @@ type BatchImageTextKey =
   | 'adminReference'
   | 'errorReference'
 
+function usesLocalizedPunctuation() {
+  return usesCjkPunctuation(String(locale.value || ''))
+}
+
 function isZhLocale() {
   return isChineseLocale(String(locale.value || ''))
 }
@@ -2423,7 +2427,7 @@ function batchImageErrorReference(error: any) {
   if (code) parts.push(t('batchImage.messages.errorCodeRef', { code }))
   if (requestId) parts.push(t('batchImage.messages.requestIdRef', { id: requestId }))
   if (!code && status) parts.push(t('batchImage.messages.httpStatusRef', { status }))
-  return parts.length ? `（${parts.join(isZhLocale() ? '，' : ', ')}）` : ''
+  return parts.length ? `（${parts.join(usesLocalizedPunctuation() ? '、' : ', ')}）` : ''
 }
 
 function batchImageAdminError(base: string, error: any) {

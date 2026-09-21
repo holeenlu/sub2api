@@ -13,7 +13,7 @@ describe('separate documentation sections', () => {
     const files = import.meta.glob('../**/*.md', { query: '?raw', import: 'default' })
     for (const item of docsStaticItems) {
       if (!item.articleId) continue
-      for (const language of ['zh', 'en', 'zh-TW']) {
+      for (const language of ['zh', 'en', 'zh-TW', 'ja']) {
         expect(Object.keys(files), `${language}: ${item.path}`).toContain(`../${language}/${item.articleId}.md`)
       }
     }

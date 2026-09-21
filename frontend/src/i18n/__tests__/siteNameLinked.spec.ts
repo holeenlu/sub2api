@@ -3,6 +3,7 @@ import { createI18n } from 'vue-i18n'
 import zh from '../locales/zh'
 import zhTW from '../locales/zh-TW'
 import en from '../locales/en'
+import ja from '../locales/ja'
 import { BRAND_NAME } from '@/config/brand'
 
 /**
@@ -20,7 +21,7 @@ describe('siteName linked message', () => {
       const previousLocale = i18n.global.locale.value
       try {
         setSiteName(name)
-        for (const locale of ['en', 'zh', 'zh-TW'] as const) {
+        for (const locale of ['en', 'zh', 'zh-TW', 'ja'] as const) {
           await loadLocaleMessages(locale)
           i18n.global.locale.value = locale
           expect(i18n.global.t('common.siteName')).toBe(name)
@@ -37,7 +38,7 @@ describe('siteName linked message', () => {
       legacy: false,
       locale: 'zh',
       fallbackLocale: 'en',
-      messages: { zh, 'zh-TW': zhTW, en }
+      messages: { zh, 'zh-TW': zhTW, ja, en }
     })
 
   it('預設值是品牌名', () => {
@@ -45,9 +46,9 @@ describe('siteName linked message', () => {
     expect(i18n.global.t('common.siteName')).toBe(BRAND_NAME)
   })
 
-  it.each(['zh', 'zh-TW', 'en'])('%s：覆蓋後引導教學標題跟著變', (locale) => {
+  it.each(['zh', 'zh-TW', 'ja', 'en'])('%s：覆蓋後引導教學標題跟著變', (locale) => {
     const i18n = makeI18n()
-    i18n.global.locale.value = locale as 'zh' | 'zh-TW' | 'en'
+    i18n.global.locale.value = locale as 'zh' | 'zh-TW' | 'ja' | 'en'
     i18n.global.mergeLocaleMessage(locale, { common: { siteName: 'P2PAPI' } })
 
     const title = i18n.global.t('onboarding.admin.welcome.title')
@@ -55,9 +56,9 @@ describe('siteName linked message', () => {
     expect(title).not.toContain(BRAND_NAME)
   })
 
-  it.each(['zh', 'zh-TW', 'en'])('%s：覆蓋後說明文字也跟著變（含緊接標點的寫法）', (locale) => {
+  it.each(['zh', 'zh-TW', 'ja', 'en'])('%s：覆蓋後說明文字也跟著變（含緊接標點的寫法）', (locale) => {
     const i18n = makeI18n()
-    i18n.global.locale.value = locale as 'zh' | 'zh-TW' | 'en'
+    i18n.global.locale.value = locale as 'zh' | 'zh-TW' | 'ja' | 'en'
     i18n.global.mergeLocaleMessage(locale, { common: { siteName: 'P2PAPI' } })
 
     for (const key of [

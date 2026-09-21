@@ -8898,12 +8898,16 @@ const isZhLocale = computed(() => isChineseLocale(locale.value));
 const paymentGuideHref = computed(() =>
   isZhLocale.value
     ? BRAND_PAYMENT_GUIDE_URL.zh
+    : locale.value === 'ja'
+      ? BRAND_PAYMENT_GUIDE_URL.ja
     : BRAND_PAYMENT_GUIDE_URL.en,
 );
 
 const paymentMethodsHref = computed(() =>
   isZhLocale.value
     ? BRAND_PAYMENT_METHODS_URL.zh
+    : locale.value === 'ja'
+      ? BRAND_PAYMENT_METHODS_URL.ja
     : BRAND_PAYMENT_METHODS_URL.en,
 );
 
