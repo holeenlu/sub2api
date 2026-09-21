@@ -1,0 +1,73 @@
+export default {
+  docs: {
+    brand: 'APIドキュメント', search: 'ドキュメントとモデルを検索', searchApps: 'アプリガイドとダウンロードを検索', openImage: 'スクリーンショットを原寸で開く', searchShortcut: 'ドキュメントを検索', close: '閉じる', menu: 'ナビゲーションを開く',
+    sections: 'ドキュメントセクション',
+    backToSite: 'ホームに戻る', console: 'コンソール', login: 'ログイン', copied: 'コピーしました', copy: 'コピー', copyModel: 'モデルIDをコピー',
+    officialSource: '公式ソース', updatedAt: '価格確認日 {date}', onThisPage: 'このページの内容', previous: '前へ', next: '次へ',
+    noResults: '一致するドキュメントまたはモデルはありません', loadingCatalog: 'グループで有効なモデルを読み込んでいます…',
+    noVisibleGroups: '表示可能なグループはありません',
+    catalogUnavailable: 'モデルカタログは一時的に利用できません。統合ガイドは引き続き利用できます。コンソールまたは GET /v1/models で利用可能か確認してください。',
+    group: 'グループ', chooseGroup: 'グループを選択', groupRate: '実効レート {rate}x', availability: '利用可能性', available: 'このグループで有効',
+    unavailable: 'このグループでは無効', unknownAvailability: '利用可能性不明', livePrice: '選択したグループの価格',
+    priceUnit: 'USD / 100万トークン', official: '公式', referencePrice: 'TapModels 0.5x', currentGroup: '現在のグループ', input: '入力',
+    cachedInput: 'キャッシュ済み入力', cacheWrite: 'キャッシュ書き込み', cacheWrite1h: '1時間書き込み', output: '出力', textInput: 'テキスト入力',
+    cachedTextInput: 'キャッシュ済みテキスト', imageInput: '画像入力', cachedImageInput: 'キャッシュ済み画像', imageOutput: '画像出力',
+    unitRequest: 'リクエスト', unitImage: '画像',
+    longContext: '272K超の完全なリクエスト', standardContext: '標準コンテキスト',
+    priceMismatch: 'グループ価格は公式の0.5x基準価格と異なる場合があります。実際の請求は、対象グループの設定と使用量の記録に基づきます。',
+    priceFallback: 'これらの日付付き公開基準価格は、モデルがご利用のグループで有効であることを示すものではありません。',
+    endpointScope: 'エンドポイントの利用可能性は、このプロジェクトのゲートウェイと選択したグループに従います。公式サポートによってTapModelsのルートが自動的に有効になることはありません。',
+    modelId: 'モデルID', platform: 'プロバイダー', type: 'タイプ', context: 'コンテキスト', maxOutput: '最大出力', cacheMinimum: 'キャッシュプレフィックスの最小長',
+    endpoints: 'エンドポイント', features: '既知の機能', modelDetailsPending: 'このモデルは現在のグループで有効ですが、専用ドキュメントは準備中です。グループの説明と実際のAPIレスポンスを確認してください。',
+    modelNotFound: 'このモデルは表示可能なグループで有効になっておらず、静的なモデルリファレンスもありません。',
+    requestExample: 'リクエスト例', parametersAndResponse: 'パラメーターとレスポンス', allModels: 'すべてのモデルを表示', startBuilding: '構築を始める',
+    viewGuide: 'ガイドを表示', docsUpdated: 'ドキュメントは現在のプロジェクトのルートと設定に基づいています。',
+    nav: { start: '始める', chat: 'チャット', image: '画像', models: 'モデルとクエリAPI', apps: 'アプリとツール', availableModels: '有効なモデル' },
+    pages: {
+      overview: { title: 'TapModels APIドキュメント', description: '1つのゲートウェイでチャットモデルと画像モデルを利用できます。利用可能性はシステムのグループ設定によって制御されます。' },
+      quickstart: { title: 'クイックスタート', description: 'キーを作成して最初のレスポンスを取得します。' },
+      authentication: { title: '認証とベースURL', description: 'キー、ベースURL、リクエストヘッダーを設定します。' },
+      pricing: { title: '価格と請求', description: '公式のStandard価格、TapModels 0.5x基準価格、現在のグループ価格を比較します。' },
+      errors: { title: 'エラーと再試行', description: '認証、グループ、モデル、アップストリームの障害を診断します。' },
+      limits: { title: '制限とタイムアウト', description: 'キー、グループ、モデル、アップストリームによって適用される制約を確認します。' },
+      openaiChat: { title: 'OpenAI Chat Completions', description: 'POST /v1/chat/completions に互換性のあるリクエストを送信します。' },
+      responses: { title: 'OpenAI Responses', description: 'POST /v1/responses にテキスト、画像、ツールのリクエストを送信します。' },
+      messages: { title: 'Anthropic Messages', description: 'POST /v1/messages にAnthropic形式のリクエストを送信します。' },
+      image: { title: 'OpenAI画像生成と編集', description: '画像を生成または編集し、結果を安全に読み取ります。' },
+      models: { title: '有効なモデル', description: '表示可能なグループごとに、現在のモデル、エンドポイント、価格を確認します。' },
+      queryModels: { title: 'モデル一覧', description: 'GET /v1/models を使用して、現在のキーでの検出結果を確認します。' },
+      apps: { title: 'AIアプリ', description: 'このコンソールでCodex、Claude、画像ツールを接続し、設定とトラブルシューティングのガイドを利用できます。' },
+      consoleGuide: { title: 'コンソールとクライアント設定', description: 'キーを作成し、そのグループを選択して、「キーを使用」からクライアント設定を生成します。' },
+      protocols: { title: 'プロトコルとエンドポイント', description: 'ゲートウェイルート、認証、プラットフォーム要件、互換性の範囲。' },
+      geminiNative: { title: 'Geminiネイティブプロトコル', description: 'generateContent、ストリーミング、モデル検出に接続します。' },
+      grokNative: { title: 'Grokエンドポイント', description: 'Grokグループで利用可能なチャット、検索、メディアのルート。' },
+      tokenCount: { title: 'トークン数のカウント', description: 'メッセージのトークン数カウントでサポートされるプラットフォームとレスポンスの制約。' },
+      embeddings: { title: 'テキスト埋め込み', description: 'OpenAIグループ向けの埋め込み入力、エンコーディング、レスポンス形式。' },
+      codex: { title: 'CodexデスクトップとCLI', description: 'TapModels Responses APIと動的モデルカタログでCodexを設定します。' },
+      claudeCode: { title: 'Claude Code', description: 'TapModels Messages APIでClaude Codeを設定します。' },
+      claudeDesktop: { title: 'Claudeデスクトップ', description: 'サードパーティ推論 · Messages API' },
+      sessionRecoveryCodex: { title: 'Codexセッションを復元', description: 'アカウントまたはプロバイダーの変更後に非表示になったCodexセッションを診断し、安全に修復します。' },
+      sessionRecoveryClaude: { title: 'Claude Codeセッションを復元', description: 'アカウント、キー、プロジェクト、または設定ディレクトリの変更後に非表示になったローカルClaude Codeセッションを見つけます。' },
+      imageSkills: { title: 'Codex画像スキル', description: 'FlareとSunburstの生成・編集スキルをインストールします。' },
+      downloads: { title: 'ダウンロード', description: 'CodexとClaudeの復元ユーティリティおよび画像スキルバンドルをダウンロードします。' }
+    },
+    models: {
+      chat: 'チャット', image: '画像', openai: 'OpenAI', anthropic: 'Anthropic',
+      summaries: {
+        astra: '複雑な推論、長時間実行タスク、高負荷のワークフロー向け。', sol: 'プロフェッショナル品質、速度、コストを重視した主要ティア。',
+        terra: '通常の本番ワークロードで品質とコストのバランスを実現。', luna: '大量処理やコスト重視の軽量な作業向け。',
+        gpt55: '長いコンテキストとツールワークフローに対応する汎用推論モデル。', fable51: '高い計算能力を備え、キャッシュ読み取り価格が別設定された推論モデル。',
+        fable5: '複雑な分析、コード、複数ステップのツール利用向け。', opus5: '高品質な複雑な推論とプロフェッショナルな作業向け。',
+        opus48: '複雑な推論とエージェントタスクに対応する実績あるモデル。', sonnet5: '品質、速度、価格のバランスを実現。',
+        flare: '日常的な画像生成と編集に適した高速・高品質モデル。', sunburst: '高負荷の画像生成と編集に対応する高機能モデル。'
+      }
+    },
+    home: {
+      eyebrow: '統合API · グループ制御 · 正確な請求', title: 'プロトコルを選択して最初のリクエストを送信',
+      description: 'エンドポイントとモデルは分けて整理されています。現在のグループを選択し、そのプロトコルのリクエストをコピーしてください。価格は公式のStandardレートと0.5xを比較します。',
+      step1: 'APIキーを作成または選択', step2: 'グループと有効なモデルを確認', step3: 'リクエストを実行し、使用量とコストを確認',
+      priceTitle: '明確な価格基準', priceDescription: '公式Standardの各項目を、キャッシュ、長いコンテキスト、画像トークンのレートを含めて個別に半額にしています。',
+      modelsTitle: 'モデルはシステムグループに従います', modelsDescription: 'モデルが有効化または削除されると、ナビゲーションとモデルページは表示可能なグループカタログに従って更新されます。'
+    }
+  }
+}

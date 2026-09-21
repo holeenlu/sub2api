@@ -7,9 +7,9 @@
 export type LegalDocumentIcon = 'document' | 'shield' | 'globe' | 'cog'
 
 // 隐私政策 / 服务条款一类 -> 盾牌
-const SHIELD_PATTERN = /政策|隐私|隱私|privacy|policy/i
+const SHIELD_PATTERN = /政策|隐私|隱私|プライバシー|ポリシー|privacy|policy/i
 // 支持的国家和地区 -> 地球
-const GLOBE_PATTERN = /国家|國家|地区|地區|country|countries|region/i
+const GLOBE_PATTERN = /国家|國家|地区|地區|国|地域|country|countries|region/i
 // 服务特定条款 -> 齿轮
 const COG_PATTERN = /特定|specific/i
 

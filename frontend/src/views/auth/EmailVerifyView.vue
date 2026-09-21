@@ -181,7 +181,7 @@
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { isChineseLocale } from '@/i18n/localeUtils'
+import { usesCjkPunctuation } from '@/i18n/localeUtils'
 import { AuthLayout } from '@/components/layout'
 import Icon from '@/components/icons/Icon.vue'
 import TurnstileWidget from '@/components/CaptchaChallenge.vue'
@@ -775,7 +775,7 @@ function buildEmailSuffixNotAllowedMessage(): string {
   if (normalizedWhitelist.length === 0) {
     return t('auth.emailSuffixNotAllowed')
   }
-  const separator = isChineseLocale(String(locale.value || '')) ? '、' : ', '
+  const separator = usesCjkPunctuation(String(locale.value || '')) ? '、' : ', '
   return t('auth.emailSuffixNotAllowedWithAllowed', {
     suffixes: formatRegistrationEmailSuffixWhitelistForMessage(normalizedWhitelist, {
       separator,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import en from '../locales/en'
+import ja from '../locales/ja'
 import zh from '../locales/zh'
 import zhTW from '../locales/zh-TW'
 import { baseCompile } from '@intlify/message-compiler'
@@ -66,16 +67,18 @@ describe('locale key completeness', () => {
   const enKeys = new Set(flattenLeafKeys(en))
   const zhKeys = new Set(flattenLeafKeys(zh))
   const twKeys = new Set(flattenLeafKeys(zhTW))
+  const jaKeys = new Set(flattenLeafKeys(ja))
   const usedKeys = [...new Set(sourceKeys())].sort()
 
   it('keeps English and Chinese locale schemas identical', () => {
     expect([...enKeys].filter((key) => !zhKeys.has(key)).sort()).toEqual([])
     expect([...zhKeys].filter((key) => !enKeys.has(key)).sort()).toEqual([])
     expect([...twKeys].sort()).toEqual([...zhKeys].sort())
+    expect([...jaKeys].sort()).toEqual([...enKeys].sort())
   })
 
   it('contains a non-empty message for every locale leaf', () => {
-    for (const [locale, messages] of Object.entries({ en, zh, 'zh-TW': zhTW })) {
+    for (const [locale, messages] of Object.entries({ en, ja, zh, 'zh-TW': zhTW })) {
       const emptyKeys = flattenLeafKeys(messages).filter((key) => {
         let current: unknown = messages
         for (const segment of key.split('.')) {
@@ -91,6 +94,7 @@ describe('locale key completeness', () => {
     expect(missingKeys(usedKeys, enKeys), 'English locale is missing referenced keys').toEqual([])
     expect(missingKeys(usedKeys, zhKeys), 'Chinese locale is missing referenced keys').toEqual([])
     expect(missingKeys(usedKeys, twKeys), 'Taiwan locale is missing referenced keys').toEqual([])
+    expect(missingKeys(usedKeys, jaKeys), 'Japanese locale is missing referenced keys').toEqual([])
   })
 
   it('preserves interpolation parameters and linked message targets in all languages', () => {
@@ -118,7 +122,7 @@ describe('locale key completeness', () => {
     const errors: string[] = []
     for (const key of zhKeys) {
       const expected = signature(valueAt(zh, key))
-      for (const [locale, messages] of Object.entries({ en, 'zh-TW': zhTW })) {
+      for (const [locale, messages] of Object.entries({ en, ja, 'zh-TW': zhTW })) {
         const actual = signature(valueAt(messages, key))
         if (JSON.stringify(actual) !== JSON.stringify(expected)) {
           errors.push(`${locale}:${key}: ${actual.join(',')} != ${expected.join(',')}`)
