@@ -664,8 +664,8 @@ export default {
       cacheReadShort: 'R',
       tierHint: 'リクエスト全体が、合計コンテキスト（入力 + キャッシュ書き込み + キャッシュ読み取り）に対応する段階の料金で請求されます',
       tierHintMarginal: 'しきい値を超えた部分のみこの段階の料金で請求され、出力には影響しません',
-      maxReasoningMultiplierBadge: '最大 ×{multiplier}',
-      maxReasoningMultiplierHint: '転送された推論の強度が最大の場合、リクエストの請求額とクォータ使用量に {multiplier} を乗算します',
+      reasoningMultiplierBadge: '{effort} ×{multiplier}',
+      reasoningMultiplierHint: '最終的に転送された推論強度が {effort} の場合、リクエスト全体の請求額とクォータ使用量に {multiplier} を乗算します。未設定の強度は1倍として扱われます',
       marginalBadge: '超過分のみの段階料金',
       timePricingRowHint: 'この期間（{timezone} 時間）内に行われたリクエストは、この行の料金で請求されます',
       timePricingRowHintWeekdays:
