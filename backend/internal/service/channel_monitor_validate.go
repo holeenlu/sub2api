@@ -128,25 +128,35 @@ func validateJitter(jitterSec, intervalSec int) error {
 //
 // 错误信息不暴露具体 IP / hostname，避免泄露内网拓扑。
 func validateEndpoint(ep string) error {
+	hostname, err := validateEndpointFormat(ep)
+	if err != nil {
+		return err
+	}
+	return validateEndpointHost(hostname)
+}
+
+func validateEndpointFormat(ep string) (string, error) {
 	ep = strings.TrimSpace(ep)
 	if ep == "" {
-		return ErrChannelMonitorInvalidEndpoint
+		return "", ErrChannelMonitorInvalidEndpoint
 	}
 	u, err := url.Parse(ep)
 	if err != nil {
-		return ErrChannelMonitorInvalidEndpoint
+		return "", ErrChannelMonitorInvalidEndpoint
 	}
 	if u.Scheme != "https" {
-		return ErrChannelMonitorEndpointScheme
+		return "", ErrChannelMonitorEndpointScheme
 	}
 	if u.Host == "" {
-		return ErrChannelMonitorInvalidEndpoint
+		return "", ErrChannelMonitorInvalidEndpoint
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		return ErrChannelMonitorEndpointPath
+		return "", ErrChannelMonitorEndpointPath
 	}
+	return u.Hostname(), nil
+}
 
-	hostname := u.Hostname()
+func validateEndpointHost(hostname string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), monitorEndpointResolveTimeout)
 	defer cancel()
 	blocked, err := isPrivateOrLoopbackHost(ctx, hostname)
