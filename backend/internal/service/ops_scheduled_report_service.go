@@ -381,6 +381,8 @@ func (s *OpsScheduledReportService) runReport(ctx context.Context, report *opsSc
 		subjectPrefix := "[Ops Report]"
 		if strings.HasPrefix(strings.ToLower(locale), "zh") {
 			subjectPrefix = "[运维报表]"
+		} else if strings.HasPrefix(strings.ToLower(locale), "ja") {
+			subjectPrefix = "[運用レポート]"
 		}
 		subject := fmt.Sprintf("%s %s", subjectPrefix, subjectName)
 		if err := s.emailService.SendEmail(ctx, addr, subject, content.html); err != nil {
@@ -449,26 +451,40 @@ func opsScheduledReportLocalizedName(report *opsScheduledReport, locale string) 
 	if report == nil {
 		return "Ops report"
 	}
-	chinese := strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "zh")
+	normalizedLocale := strings.ToLower(strings.TrimSpace(locale))
+	chinese := strings.HasPrefix(normalizedLocale, "zh")
+	japanese := strings.HasPrefix(normalizedLocale, "ja")
 	switch strings.TrimSpace(report.ReportType) {
 	case "daily_summary":
 		if chinese {
 			return "日报"
+		}
+		if japanese {
+			return "日次サマリー"
 		}
 		return "Daily summary"
 	case "weekly_summary":
 		if chinese {
 			return "周报"
 		}
+		if japanese {
+			return "週次サマリー"
+		}
 		return "Weekly summary"
 	case "error_digest":
 		if chinese {
 			return "错误摘要"
 		}
+		if japanese {
+			return "エラーダイジェスト"
+		}
 		return "Error digest"
 	case "account_health":
 		if chinese {
 			return "账号健康"
+		}
+		if japanese {
+			return "アカウント正常性"
 		}
 		return "Account health"
 	default:

@@ -450,6 +450,9 @@ function formatLocale(locale: string): string {
   if (lower === "en" || lower.startsWith("en-")) {
     return t("admin.settings.emailTemplates.localeEn");
   }
+  if (lower === "ja" || lower.startsWith("ja-")) {
+    return t("admin.settings.emailTemplates.localeJa");
+  }
   return locale;
 }
 

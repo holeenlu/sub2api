@@ -5,6 +5,7 @@ import ModelShowcase from '../ModelShowcase.vue'
 import en from '@/i18n/locales/en/landing'
 import zh from '@/i18n/locales/zh/landing'
 import zhTW from '@/i18n/locales/zh-TW/landing'
+import ja from '@/i18n/locales/ja/landing'
 
 const { copyToClipboard, getModelPlaza } = vi.hoisted(() => ({ copyToClipboard: vi.fn(), getModelPlaza: vi.fn() }))
 vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copyToClipboard }) }))
@@ -17,7 +18,7 @@ const model = (name = 'claude-fable-5-1') => ({
 })
 const group = (id = 1, models = [model()]) => ({ id, name: 'Not the channel', rate_multiplier: 2, models })
 function render(locale = 'en') {
-  return mount(ModelShowcase, { global: { plugins: [createI18n({ legacy: false, locale, messages: { en, zh, 'zh-TW': zhTW } })] } })
+  return mount(ModelShowcase, { global: { plugins: [createI18n({ legacy: false, locale, messages: { en, zh, 'zh-TW': zhTW, ja } })] } })
 }
 beforeEach(() => { vi.clearAllMocks(); getModelPlaza.mockResolvedValue({ groups: [group()] }) })
 
@@ -70,7 +71,7 @@ describe('ModelShowcase channel data', () => {
     expect(wrapper.findAll('a')).toHaveLength(2)
   })
 
-  it.each(['en', 'zh', 'zh-TW'])('keeps fixed introductions in %s', async (locale) => {
+  it.each(['en', 'zh', 'zh-TW', 'ja'])('keeps fixed introductions in %s', async (locale) => {
     const wrapper = render(locale); await flushPromises()
     expect(wrapper.text()).not.toContain('home.models.')
     expect(wrapper.get('article p.my-3').text().length).toBeGreaterThan(40)

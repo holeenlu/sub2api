@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { baseCompile } from '@intlify/message-compiler'
 
 import en from '../locales/en'
+import ja from '../locales/ja'
 import zh from '../locales/zh'
 import zhTW from '../locales/zh-TW'
 
@@ -34,6 +35,7 @@ describe('locale messages compile', () => {
   it.each([
     ['zh', zh],
     ['zh-TW', zhTW],
+    ['ja', ja],
     ['en', en]
   ] as const)('%s messages all compile without placeholder errors', (locale, messages) => {
     const errors: string[] = []

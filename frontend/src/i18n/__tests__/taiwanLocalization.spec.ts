@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process'
 import zh from '../locales/zh'
 import zhTW from '../locales/zh-TW'
 import en from '../locales/en'
+import ja from '../locales/ja'
 
 const tools = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../tools/zh-tw')
 
@@ -29,8 +30,8 @@ describe('site-wide Taiwan localization', () => {
     expect(zhTW.ui.mobileApp).toBe('行動應用程式')
   })
 
-  it.each(['zh', 'zh-TW', 'en'] as const)('renders batch instructions without corrupting protocol examples in %s', locale => {
-    const i18n = createI18n({ legacy: false, locale, messages: { zh, 'zh-TW': zhTW, en }, warnHtmlMessage: false })
+  it.each(['zh', 'zh-TW', 'ja', 'en'] as const)('renders batch instructions without corrupting protocol examples in %s', locale => {
+    const i18n = createI18n({ legacy: false, locale, messages: { zh, 'zh-TW': zhTW, ja, en }, warnHtmlMessage: false })
     const request = '{"model":"gemini-3-pro-image","output_count":4}'
     const output = i18n.global.t('ui.batchAgentInstruction', {
       endpoint: 'https://example.invalid', skillName: 'test-batch-image', requestExample: request,

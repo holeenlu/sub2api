@@ -1,4 +1,4 @@
-export type DocsLocale = 'en' | 'zh' | 'zh-TW'
+export type DocsLocale = 'en' | 'zh' | 'zh-TW' | 'ja'
 export type DocsModelKind = 'chat' | 'image'
 export type DocsPlatform = 'openai' | 'anthropic'
 

@@ -42,12 +42,14 @@ export const BRAND_DOCS_URL = 'https://docs.tapmodels.ai'
 /** Payment integration guide, per UI language. */
 export const BRAND_PAYMENT_GUIDE_URL = {
   zh: `${BRAND_DOCS_URL}/zh/payment`,
+  ja: `${BRAND_DOCS_URL}/ja/payment`,
   en: `${BRAND_DOCS_URL}/payment`
 } as const
 
 /** "Supported payment methods" section of the payment guide, per UI language. */
 export const BRAND_PAYMENT_METHODS_URL = {
   zh: `${BRAND_DOCS_URL}/zh/payment#supported-payment-methods`,
+  ja: `${BRAND_DOCS_URL}/ja/payment#supported-payment-methods`,
   en: `${BRAND_DOCS_URL}/payment#supported-payment-methods`
 } as const
 
@@ -58,6 +60,7 @@ export const BRAND_PAYMENT_METHODS_URL = {
 export const BRAND_COMPLIANCE_DOCUMENT_URL = {
   zh: `${BRAND_DOCS_URL}/legal/admin-compliance.zh.md`,
   'zh-TW': `${BRAND_DOCS_URL}/legal/admin-compliance.zh-TW.md`,
+  ja: `${BRAND_DOCS_URL}/legal/admin-compliance.ja.md`,
   en: `${BRAND_DOCS_URL}/legal/admin-compliance.en.md`
 } as const
 

@@ -65,7 +65,7 @@ const contentLoading = ref(false)
 let loadVersion = 0
 const appGuides = appsNavGroups.flatMap(group => group.items).filter(entry => entry.path !== '/apps')
 const localizedAsset = (name: string) => {
-  const suffix = locale.value === 'en' ? '-en' : locale.value === 'zh-TW' ? '-zh-TW' : '-zh'
+  const suffix = locale.value === 'zh-TW' ? '-zh-TW' : locale.value === 'zh' ? '-zh' : '-en'
   return `/docs-assets/${name}${suffix}.png`
 }
 const sectionItems = computed(() => navGroupsForPath(props.item.path).flatMap(group => group.items))
@@ -109,9 +109,9 @@ async function loadArticle() {
   if (!props.item.articleId) { contentHtml.value = ''; return }
   contentLoading.value = true
   try {
-    const language = locale.value === 'en' ? 'en' : locale.value === 'zh-TW' ? 'zh-TW' : 'zh'
+    const language = ['en', 'zh', 'zh-TW', 'ja'].includes(locale.value) ? locale.value : 'en'
     const suffix = `/content/docs/${language}/${props.item.articleId}.md`
-    const fallbackSuffix = `/content/docs/zh/${props.item.articleId}.md`
+    const fallbackSuffix = `/content/docs/en/${props.item.articleId}.md`
     const key = Object.keys(markdownModules).find((path) => path.endsWith(suffix))
       ?? Object.keys(markdownModules).find((path) => path.endsWith(fallbackSuffix))
     const source = key ? String(await markdownModules[key]()) : ''

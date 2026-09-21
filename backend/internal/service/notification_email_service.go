@@ -42,6 +42,7 @@ const (
 	notificationEmailUnsubscribeSecretKey = "notification_email_unsubscribe_secret"
 	notificationEmailDefaultLocale        = "en"
 	notificationEmailLocaleChinese        = "zh"
+	notificationEmailLocaleJapanese       = "ja"
 	notificationEmailMaxSubjectLength     = 200
 	notificationEmailMaxHTMLLength        = 30000
 	notificationEmailUnsubscribeTTL       = 365 * 24 * time.Hour
@@ -49,7 +50,7 @@ const (
 
 var (
 	notificationEmailPlaceholderPattern = regexp.MustCompile(`{{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*}}`)
-	notificationEmailLocales            = []string{notificationEmailDefaultLocale, notificationEmailLocaleChinese}
+	notificationEmailLocales            = []string{notificationEmailDefaultLocale, notificationEmailLocaleChinese, notificationEmailLocaleJapanese}
 	notificationEmailCommonPlaceholders = []string{"site_name", "recipient_name", "recipient_email"}
 	// Keep summary values separate so admins can rearrange or omit individual metrics in the template.
 	notificationEmailOpsSummaryPlaceholders = []string{
@@ -268,6 +269,9 @@ func (s *NotificationEmailService) GetTemplate(ctx context.Context, event, local
 	}
 	normalizedLocale := normalizeNotificationLocale(locale)
 	official, ok := notificationEmailOfficialTemplates[normalizedEvent][normalizedLocale]
+	if !ok && normalizedLocale == notificationEmailLocaleJapanese {
+		official, ok = notificationEmailJapaneseOfficialTemplates[normalizedEvent]
+	}
 	if !ok {
 		return NotificationEmailTemplate{}, fmt.Errorf("official template not found for %s/%s", normalizedEvent, normalizedLocale)
 	}
@@ -803,6 +807,9 @@ func normalizeNotificationLocale(raw string) string {
 		if strings.HasPrefix(tag, "zh") || tag == "cn" {
 			return notificationEmailLocaleChinese
 		}
+		if strings.HasPrefix(tag, "ja") || tag == "jp" {
+			return notificationEmailLocaleJapanese
+		}
 		if strings.HasPrefix(tag, "en") {
 			return notificationEmailDefaultLocale
 		}
@@ -896,6 +903,55 @@ func isSafeNotificationEmailURL(raw string) bool {
 }
 
 func notificationEmailSampleVariables(locale string) map[string]string {
+	if normalizeNotificationLocale(locale) == notificationEmailLocaleJapanese {
+		variables := map[string]string{
+			"site_name":           defaultSiteName,
+			"recipient_name":      "山田太郎",
+			"recipient_email":     "user@example.com",
+			"verification_code":   "123456",
+			"expires_in_minutes":  "15",
+			"reset_url":           "https://example.com/reset-password?token=preview",
+			"subscription_group":  "Claude Pro",
+			"subscription_days":   "30",
+			"expiry_time":         "2026-06-18 12:00",
+			"days_remaining":      "3",
+			"current_balance":     "12.34",
+			"threshold":           "20.00",
+			"recharge_url":        "https://example.com/recharge",
+			"recharge_amount":     "50.00",
+			"order_id":            "1024",
+			"unsubscribe_url":     "https://example.com/unsubscribe",
+			"account_id":          "1001",
+			"account_name":        "openai-main",
+			"platform":            "openai",
+			"quota_dimension":     "日次クォータ",
+			"quota_used":          "80.00",
+			"quota_limit":         "100.00",
+			"quota_remaining":     "20.00",
+			"quota_threshold":     "20%",
+			"triggered_at":        "2026-05-20 12:00:00",
+			"group_name":          "デフォルトグループ",
+			"moderation_category": "violence",
+			"moderation_score":    "0.982",
+			"violation_count":     "2",
+			"ban_threshold":       "3",
+			"rule_name":           "エラー率超過",
+			"severity":            "critical",
+			"alert_status":        "firing",
+			"metric_type":         "error_rate",
+			"operator":            ">=",
+			"metric_value":        "12.50",
+			"threshold_value":     "10.00",
+			"alert_description":   "直近10分間のエラー率がしきい値を超えました。",
+			"report_name":         "日次サマリー",
+			"report_type":         "daily_summary",
+			"report_start_time":   "2026-07-18T01:00:26Z",
+			"report_end_time":     "2026-07-19T01:00:26Z",
+			"report_html":         "<h2>日次サマリー</h2><p>リクエスト数: 2,374</p>",
+		}
+		addNotificationEmailOpsSummarySampleVariables(variables)
+		return variables
+	}
 	if normalizeNotificationLocale(locale) == notificationEmailLocaleChinese {
 		variables := map[string]string{
 			"site_name":           defaultSiteName,
@@ -1438,7 +1494,233 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
 	},
 }
 
+var notificationEmailJapaneseOfficialTemplates = map[string]notificationEmailOfficialTemplate{
+	NotificationEmailEventAuthVerifyCode: {
+		Subject: "[{{site_name}}] メール認証コード",
+		HTML: notificationEmailCard("#4f46e5", "メール認証コード", `
+<p>{{recipient_name}} 様</p>
+<p>認証コードは次のとおりです。</p>
+<p style="font-size: 32px; font-weight: 700; letter-spacing: 8px; text-align: center;">{{verification_code}}</p>
+<p>このコードは <strong>{{expires_in_minutes}}</strong> 分後に期限切れになります。</p>
+<p>この操作に心当たりがない場合は、このメールを無視してください。</p>`),
+	},
+	NotificationEmailEventAuthPasswordReset: {
+		Subject: "[{{site_name}}] パスワード再設定リクエスト",
+		HTML: notificationEmailCard("#7c3aed", "パスワードの再設定", `
+<p>{{recipient_name}} 様</p>
+<p>パスワード再設定のリクエストを受け付けました。以下のボタンから新しいパスワードを設定してください。</p>
+<p><a class="button" href="{{reset_url}}">パスワードを再設定</a></p>
+<p>このリンクは <strong>{{expires_in_minutes}}</strong> 分後に期限切れになります。</p>
+<p class="muted">ボタンが機能しない場合は、次のリンクをブラウザに貼り付けてください。<br>{{reset_url}}</p>
+<p>この操作に心当たりがない場合は、このメールを無視してください。</p>`),
+	},
+	NotificationEmailEventNotificationEmailVerifyCode: {
+		Subject: "[{{site_name}}] 通知用メールアドレスの認証コード",
+		HTML: notificationEmailCard("#0ea5e9", "通知用メールアドレスの認証", `
+<p>{{recipient_name}} 様</p>
+<p>このメールアドレスを追加の通知先として登録しようとしています。</p>
+<p>認証コードは次のとおりです。</p>
+<p style="font-size: 32px; font-weight: 700; letter-spacing: 8px; text-align: center;">{{verification_code}}</p>
+<p>このコードは <strong>{{expires_in_minutes}}</strong> 分後に期限切れになります。</p>
+<p>この操作に心当たりがない場合は、このメールを無視してください。</p>`),
+	},
+	NotificationEmailEventSubscriptionPurchaseSuccess: {
+		Subject: "[{{site_name}}] サブスクリプションの購入が完了しました",
+		HTML: notificationEmailCard("#2563eb", "サブスクリプションが有効になりました", `
+<p>{{recipient_name}} 様</p>
+<p><strong>{{subscription_group}}</strong> のサブスクリプションが <strong>{{subscription_days}}</strong> 日間有効になりました。</p>
+<p>有効期限: <strong>{{expiry_time}}</strong></p>
+<p>注文ID: {{order_id}}</p>`),
+	},
+	NotificationEmailEventSubscriptionExpiryReminder: {
+		Subject: "[{{site_name}}] サブスクリプションは {{days_remaining}} 日後に期限切れになります",
+		HTML: notificationEmailCard("#f97316", "サブスクリプション期限のお知らせ", `
+<p>{{recipient_name}} 様</p>
+<p><strong>{{subscription_group}}</strong> のサブスクリプションは <strong>{{days_remaining}}</strong> 日後に期限切れになります。</p>
+<p>有効期限: <strong>{{expiry_time}}</strong></p>
+<p class="muted"><a href="{{unsubscribe_url}}">任意のサブスクリプション通知を停止する</a></p>`),
+	},
+	NotificationEmailEventBalanceLow: {
+		Subject: "[{{site_name}}] 残高不足のお知らせ",
+		HTML: notificationEmailCard("#d97706", "残高不足のお知らせ", `
+<p>{{recipient_name}} 様</p>
+<p>現在の残高は <strong>${{current_balance}}</strong> で、設定された通知しきい値 <strong>${{threshold}}</strong> を下回っています。</p>
+<p>サービスの中断を防ぐため、早めにチャージしてください。</p>
+<p><a class="button" href="{{recharge_url}}">今すぐチャージ</a></p>
+<p class="muted"><a href="{{unsubscribe_url}}">任意の残高通知を停止する</a></p>`),
+	},
+	NotificationEmailEventBalanceRechargeSuccess: {
+		Subject: "[{{site_name}}] 残高のチャージが完了しました",
+		HTML: notificationEmailCard("#16a34a", "チャージ完了", `
+<p>{{recipient_name}} 様</p>
+<p><strong>${{recharge_amount}}</strong> の残高チャージが完了しました。</p>
+<p>現在の残高: <strong>${{current_balance}}</strong></p>
+<p>注文ID: {{order_id}}</p>`),
+	},
+	NotificationEmailEventAccountQuotaAlert: {
+		Subject: "[{{site_name}}] アカウントクォータ警告 - {{account_name}}",
+		HTML: notificationEmailCard("#dc2626", "アカウントクォータ警告", `
+<p>アップストリームアカウント <strong>{{account_name}}</strong> が、設定されたクォータ警告しきい値に達しました。</p>
+<table style="width:100%;border-collapse:collapse;">
+  <tr><td>アカウントID</td><td>{{account_id}}</td></tr>
+  <tr><td>プラットフォーム</td><td>{{platform}}</td></tr>
+  <tr><td>ディメンション</td><td>{{quota_dimension}}</td></tr>
+  <tr><td>使用済み / 上限</td><td>{{quota_used}} / {{quota_limit}}</td></tr>
+  <tr><td>残り</td><td>{{quota_remaining}}</td></tr>
+  <tr><td>しきい値</td><td>{{quota_threshold}}</td></tr>
+</table>`),
+	},
+	NotificationEmailEventContentModerationViolation: {
+		Subject: "[{{site_name}}] リスク管理に関するお知らせ",
+		HTML: notificationEmailCard("#ef4444", "リスク管理に関するお知らせ", `
+<p>{{recipient_name}} 様</p>
+<p>APIリクエストがプラットフォームのコンテンツモデレーションまたはリスク管理ポリシーに該当しました。</p>
+<table style="width:100%;border-collapse:collapse;">
+  <tr><td>検出日時</td><td>{{triggered_at}}</td></tr>
+  <tr><td>グループ</td><td>{{group_name}}</td></tr>
+  <tr><td>カテゴリ / スコア</td><td>{{moderation_category}} / {{moderation_score}}</td></tr>
+  <tr><td>違反回数</td><td>{{violation_count}} / {{ban_threshold}}</td></tr>
+</table>
+<p>今後のサービス中断を防ぐため、リクエスト内容を確認してください。</p>`),
+	},
+	NotificationEmailEventContentModerationDisabled: {
+		Subject: "[{{site_name}}] リスク管理によりアカウントが無効化されました",
+		HTML: notificationEmailCard("#b91c1c", "アカウントが無効化されました", `
+<p>{{recipient_name}} 様</p>
+<p>プラットフォームのコンテンツモデレーションまたはリスク管理ルールに繰り返し該当したため、アカウントが自動的に無効化されました。</p>
+<table style="width:100%;border-collapse:collapse;">
+  <tr><td>無効化日時</td><td>{{triggered_at}}</td></tr>
+  <tr><td>グループ</td><td>{{group_name}}</td></tr>
+  <tr><td>カテゴリ / スコア</td><td>{{moderation_category}} / {{moderation_score}}</td></tr>
+  <tr><td>違反回数</td><td>{{violation_count}} / {{ban_threshold}}</td></tr>
+</table>
+<p>異議申し立てまたはアクセスの復旧が必要な場合は、管理者にお問い合わせください。</p>`),
+	},
+	NotificationEmailEventCyberPolicyNotice: {
+		Subject: "[{{site_name}}] サイバーセキュリティポリシーに関するお知らせ",
+		HTML: notificationEmailCard("#ef4444", "サイバーセキュリティポリシーに関するお知らせ", `
+<p>{{recipient_name}} 様</p>
+<p>リクエストがアップストリームプロバイダーのサイバーセキュリティポリシーによりブロックされました。</p>
+<table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+  <tr><td style="width:128px;vertical-align:top;">検出日時</td><td style="overflow-wrap:anywhere;word-break:break-word;">{{triggered_at}}</td></tr>
+  <tr><td style="width:128px;vertical-align:top;">モデル</td><td style="overflow-wrap:anywhere;word-break:break-word;">{{model}}</td></tr>
+  <tr><td style="width:128px;vertical-align:top;">グループ</td><td style="overflow-wrap:anywhere;word-break:break-word;">{{group_name}}</td></tr>
+  <tr><td style="width:128px;vertical-align:top;">アップストリームメッセージ</td><td style="overflow-wrap:anywhere;word-break:break-all;white-space:pre-wrap;">{{upstream_message}}</td></tr>
+</table>
+<p>誤検出と思われる場合は、リクエストの表現を変更するか、承認済みのセキュリティアクセスを申請してください。</p>`),
+	},
+	NotificationEmailEventOpsAlert: {
+		Subject: "[運用アラート][{{severity}}] {{rule_name}}",
+		HTML: notificationEmailCard("#ea580c", "運用アラート", `
+<p><strong>ルール</strong>: {{rule_name}}</p>
+<p><strong>重大度</strong>: {{severity}}</p>
+<p><strong>ステータス</strong>: {{alert_status}}</p>
+<p><strong>メトリクス</strong>: {{metric_type}} {{operator}} {{metric_value}}（しきい値 {{threshold_value}}）</p>
+<p><strong>検出日時</strong>: {{triggered_at}}</p>
+<p><strong>説明</strong>: {{alert_description}}</p>`),
+	},
+	NotificationEmailEventOpsScheduledReport: {
+		Subject: "[運用レポート] {{report_name}}",
+		HTML:    notificationEmailOpsScheduledReportTemplate(notificationEmailLocaleJapanese),
+	},
+}
+
 func notificationEmailOpsScheduledReportTemplate(locale string) string {
+	if normalizeNotificationLocale(locale) == notificationEmailLocaleJapanese {
+		return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { margin: 0; padding: 24px 12px; background: #f4f6f8; color: #1f2937; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; }
+    .container { width: 100%; max-width: 680px; margin: 0 auto; background: #ffffff; border: 1px solid #dfe7ea; border-radius: 8px; overflow: hidden; }
+    .header { padding: 28px 32px 24px; background: #0f766e; color: #ffffff; }
+    .eyebrow { margin: 0 0 8px; color: #ccfbf1; font-size: 12px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 26px; line-height: 1.3; }
+    .header p { margin: 8px 0 0; color: #e6fffb; font-size: 14px; }
+    .content { padding: 28px 32px 32px; }
+    .meta { width: 100%; margin: 0 0 20px; border-collapse: collapse; background: #f8fafc; border: 1px solid #e2e8f0; }
+    .meta td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px; vertical-align: top; }
+    .meta tr:last-child td { border-bottom: 0; }
+    .meta-label { width: 112px; color: #64748b; font-weight: 600; }
+    .section-title { margin: 28px 0 12px; color: #0f172a; font-size: 16px; line-height: 1.4; }
+    .metric-grid { width: 100%; border-collapse: separate; border-spacing: 8px; margin: -8px; }
+    .metric-cell { width: 50%; padding: 14px 16px; border: 1px solid #e2e8f0; background: #ffffff; vertical-align: top; }
+    .metric-label { display: block; color: #64748b; font-size: 12px; line-height: 1.4; }
+    .metric-value { display: block; margin-top: 6px; color: #0f172a; font-size: 20px; font-weight: 700; line-height: 1.2; }
+    .metric-value.good { color: #15803d; }
+    .metric-value.alert { color: #b91c1c; }
+    .detail { width: 100%; border-collapse: collapse; }
+    .detail td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px; }
+    .detail td:first-child { width: 56%; color: #475569; }
+    .detail td:last-child { color: #0f172a; font-weight: 600; text-align: right; }
+    .report-detail { margin-top: 28px; }
+    .report-detail:empty { display: none; }
+    .footer { padding: 18px 32px; background: #f8fafc; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 12px; line-height: 1.6; }
+    @media only screen and (max-width: 620px) {
+      body { padding: 0; }
+      .container { border: 0; border-radius: 0; }
+      .header, .content, .footer { padding-left: 20px; padding-right: 20px; }
+      .metric-grid, .metric-grid tbody, .metric-grid tr, .metric-cell { display: block; width: 100% !important; box-sizing: border-box; }
+      .metric-cell { margin: 8px 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <p class="eyebrow">運用レポート</p>
+      <h1>{{report_name}}</h1>
+      <p>{{site_name}} の稼働状況概要</p>
+    </div>
+    <div class="content">
+      <table class="meta" role="presentation">
+        <tr><td class="meta-label">レポート</td><td>{{report_name}}</td></tr>
+        <tr><td class="meta-label">種類</td><td>{{report_type}}</td></tr>
+        <tr><td class="meta-label">集計期間</td><td>{{report_start_time}} ～ {{report_end_time}} (UTC)</td></tr>
+      </table>
+
+      <div style="display: {{report_summary_display}};">
+      <h2 class="section-title">リクエスト概要</h2>
+      <table class="metric-grid" role="presentation"><tr>
+        <td class="metric-cell"><span class="metric-label">総リクエスト数</span><span class="metric-value">{{report_total_requests}}</span></td>
+        <td class="metric-cell"><span class="metric-label">成功リクエスト</span><span class="metric-value good">{{report_success_count}}</span></td>
+      </tr><tr>
+        <td class="metric-cell"><span class="metric-label">SLAエラー</span><span class="metric-value alert">{{report_sla_error_count}}</span></td>
+        <td class="metric-cell"><span class="metric-label">ビジネスレート制限</span><span class="metric-value">{{report_business_limited_count}}</span></td>
+      </tr></table>
+
+      <h2 class="section-title">信頼性</h2>
+      <table class="detail" role="presentation">
+        <tr><td>SLA</td><td>{{report_sla}}</td></tr>
+        <tr><td>エラー率</td><td>{{report_error_rate}}</td></tr>
+        <tr><td>アップストリームエラー率（429 / 529を除く）</td><td>{{report_upstream_error_rate}}</td></tr>
+        <tr><td>アップストリームエラー数（429 / 529を除く）</td><td>{{report_upstream_error_count_excl_429_529}}</td></tr>
+        <tr><td>アップストリーム 429 / 529</td><td>{{report_upstream_429_count}} / {{report_upstream_529_count}}</td></tr>
+      </table>
+
+      <h2 class="section-title">レイテンシ</h2>
+      <table class="detail" role="presentation">
+        <tr><td>リクエストレイテンシ p50 / p99</td><td>{{report_latency_p50}} / {{report_latency_p99}}</td></tr>
+        <tr><td>最初のトークンまでの時間 p50 / p99</td><td>{{report_ttft_p50}} / {{report_ttft_p99}}</td></tr>
+      </table>
+
+      <h2 class="section-title">スループット</h2>
+      <table class="detail" role="presentation">
+        <tr><td>トークン使用量</td><td>{{report_tokens}}</td></tr>
+        <tr><td>QPS（現在 / ピーク / 平均）</td><td>{{report_qps_current}} / {{report_qps_peak}} / {{report_qps_avg}}</td></tr>
+        <tr><td>TPS（現在 / ピーク / 平均）</td><td>{{report_tps_current}} / {{report_tps_peak}} / {{report_tps_avg}}</td></tr>
+      </table>
+
+      </div>
+      <div class="report-detail" style="display: {{report_detail_display}};">{{report_html}}</div>
+    </div>
+    <div class="footer">このメールは {{site_name}} から自動送信されています。返信しないでください。</div>
+  </div>
+</body>
+</html>`
+	}
 	if normalizeNotificationLocale(locale) == notificationEmailLocaleChinese {
 		return `<!DOCTYPE html>
 <html lang="zh-CN">

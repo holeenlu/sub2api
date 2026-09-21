@@ -79,6 +79,7 @@ describe('zh-TW locale', () => {
     expect(detectLocaleFromLanguage('zh-CN')).toBe('zh')
     expect(detectLocaleFromLanguage('zh')).toBe('zh')
     expect(detectLocaleFromLanguage('en-US')).toBe('en')
+    expect(detectLocaleFromLanguage('ja-JP')).toBe('ja')
   })
 
   it('maps locale helpers', () => {
@@ -88,5 +89,6 @@ describe('zh-TW locale', () => {
     expect(getIntlLocale('zh-TW')).toBe('zh-TW')
     expect(getIntlLocale('zh')).toBe('zh-CN')
     expect(getIntlLocale('en')).toBe('en-US')
+    expect(getIntlLocale('ja')).toBe('ja-JP')
   })
 })
