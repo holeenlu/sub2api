@@ -670,8 +670,8 @@ export default {
       cacheReadShort: '讀',
       tierHint: '按單次請求的總上下文（輸入 + 快取寫入 + 快取讀取）所在檔位對整單計價',
       tierHintMarginal: '僅超過閾值的部分按該檔計價，輸出不加價',
-      maxReasoningMultiplierBadge: 'Max ×{multiplier}',
-      maxReasoningMultiplierHint: '最終轉發的推理強度為 max 時，整次請求的計費與額度消耗乘以 {multiplier}',
+      reasoningMultiplierBadge: '{effort} ×{multiplier}',
+      reasoningMultiplierHint: '最終轉發的思考等級為 {effort} 時，整次請求的計費與額度消耗乘以 {multiplier}；未設定的等級按 1 倍計費',
       marginalBadge: '超出部分計價',
       timePricingRowHint: '按 {timezone} 時間，在該時段內發起的請求按本行價格計費',
       timePricingRowHintWeekdays:
