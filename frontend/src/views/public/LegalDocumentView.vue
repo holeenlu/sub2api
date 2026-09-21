@@ -133,19 +133,19 @@ const updatedAt = computed(() =>
 const documentTypeLabel = computed(() =>
   isAdminComplianceDocument.value ? t('legal.adminCompliance') : t('legal.loginAgreement')
 )
+const adminComplianceDocuments: Readonly<Record<string, string>> = {
+  en: enAdminCompliance,
+  zh: zhAdminCompliance,
+  'zh-TW': zhTwAdminCompliance,
+  ja: jaAdminCompliance,
+}
 
 const currentDocument = computed<LoginAgreementDocument | null>(() => {
   if (isAdminComplianceDocument.value) {
     return {
       id: 'admin-compliance',
       title: t('adminCompliance.title'),
-      content_md: getLocale() === 'zh-TW'
-        ? zhTwAdminCompliance
-        : getLocale() === 'zh'
-          ? zhAdminCompliance
-          : getLocale() === 'ja'
-            ? jaAdminCompliance
-            : enAdminCompliance
+      content_md: adminComplianceDocuments[getLocale()] ?? enAdminCompliance,
     }
   }
   const id = documentId.value
