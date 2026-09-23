@@ -617,6 +617,8 @@ export default {
       billingModePerRequest: '按次',
       billingModeImage: '按圖片',
       billingModeVideo: '按影片',
+      videoPrice: '影片單價',
+      unitPerSecond: '/ 秒',
       inputPrice: '輸入',
       outputPrice: '輸出',
       cacheWritePrice: '快取寫入',

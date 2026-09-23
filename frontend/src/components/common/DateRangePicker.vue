@@ -43,7 +43,7 @@
             <input
               type="date"
               v-model="localStartDate"
-              :max="localEndDate || tomorrow"
+              :max="localEndDate || tomorrow()"
               class="date-picker-input"
               @change="onDateChange"
             />
@@ -57,7 +57,7 @@
               type="date"
               v-model="localEndDate"
               :min="localStartDate"
-              :max="tomorrow"
+              :max="tomorrow()"
               class="date-picker-input"
               @change="onDateChange"
             />
@@ -109,22 +109,15 @@ const localStartDate = ref(props.startDate)
 const localEndDate = ref(props.endDate)
 const activePreset = ref<string | null>('last24Hours')
 
-const today = computed(() => {
-  // Use local timezone to avoid UTC timezone issues
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-})
+const today = () => formatDateToString(new Date())
 
 // Tomorrow's date - used for max date to handle timezone differences
 // When user is in a timezone behind the server, "today" on server might be "tomorrow" locally
-const tomorrow = computed(() => {
+const tomorrow = () => {
   const d = new Date()
   d.setDate(d.getDate() + 1)
   return formatDateToString(d)
-})
+}
 
 // Helper function to format date to YYYY-MM-DD using local timezone
 const formatDateToString = (date: Date): string => {
@@ -139,7 +132,7 @@ const presets: DatePreset[] = [
     labelKey: 'dates.today',
     value: 'today',
     getRange: () => {
-      const t = today.value
+      const t = today()
       return { start: t, end: t }
     }
   },
@@ -169,7 +162,7 @@ const presets: DatePreset[] = [
     labelKey: 'dates.last7Days',
     value: '7days',
     getRange: () => {
-      const end = today.value
+      const end = today()
       const d = new Date()
       d.setDate(d.getDate() - 6)
       const start = formatDateToString(d)
@@ -180,7 +173,7 @@ const presets: DatePreset[] = [
     labelKey: 'dates.last14Days',
     value: '14days',
     getRange: () => {
-      const end = today.value
+      const end = today()
       const d = new Date()
       d.setDate(d.getDate() - 13)
       const start = formatDateToString(d)
@@ -191,7 +184,7 @@ const presets: DatePreset[] = [
     labelKey: 'dates.last30Days',
     value: '30days',
     getRange: () => {
-      const end = today.value
+      const end = today()
       const d = new Date()
       d.setDate(d.getDate() - 29)
       const start = formatDateToString(d)
@@ -204,7 +197,7 @@ const presets: DatePreset[] = [
     getRange: () => {
       const now = new Date()
       const start = formatDateToString(new Date(now.getFullYear(), now.getMonth(), 1))
-      return { start, end: today.value }
+      return { start, end: today() }
     }
   },
   {
@@ -290,6 +283,14 @@ const handleEscape = (event: KeyboardEvent) => {
     isOpen.value = false
   }
 }
+
+// Restore the applied range after dismissal, including parent updates from Apply.
+watch(isOpen, (open) => {
+  if (open) return
+  localStartDate.value = props.startDate
+  localEndDate.value = props.endDate
+  onDateChange()
+}, { flush: 'post' })
 
 // Sync local state with props
 watch(
