@@ -611,6 +611,8 @@ export default {
       billingModePerRequest: 'リクエスト単位',
       billingModeImage: '画像単位',
       billingModeVideo: '動画単位',
+      videoPrice: '動画料金',
+      unitPerSecond: '/ 秒',
       inputPrice: '入力',
       outputPrice: '出力',
       cacheWritePrice: 'キャッシュ書き込み',

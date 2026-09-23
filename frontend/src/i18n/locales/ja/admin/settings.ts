@@ -480,6 +480,18 @@ export default {
         saved: 'Ollama Cloud使用量の更新設定を保存しました',
         saveFailed: 'Ollama Cloud使用量の更新設定の保存に失敗しました'
       },
+      opencodeGoUsage: {
+        title: 'OpenCode Go使用量の更新',
+        description: '個別に有効化したOpenCode Goアカウントの使用量を更新します。デフォルトでは無効です。',
+        enabled: '全体の自動更新を有効化',
+        enabledHint: 'アカウント側でも自動更新が有効な場合のみ実行します。手動更新は引き続き利用できます。',
+        intervalMinutes: 'リクエスト継続中の最大待機時間（分）',
+        intervalHint: '範囲：5～1440分。連続リクエストでデバウンスが延長されても、この時間後に強制更新します。',
+        debounceMinutes: '最後のリクエスト後の静穏期間（分）',
+        debounceHint: '範囲：1～60分。更新間隔より短くしてください。最後のリクエスト後、指定期間が経過すると更新します。',
+        saved: 'OpenCode Go使用量の更新設定を保存しました',
+        saveFailed: 'OpenCode Go使用量の更新設定の保存に失敗しました'
+      },
       gatewayForwarding: {
         title: 'リクエスト転送',
         description: 'アップストリームのOAuthアカウントへのリクエスト転送方法を管理します',
@@ -548,6 +560,11 @@ export default {
         openaiCodexVersionAutoSync: 'Codexバージョンを自動同期',
         openaiCodexVersionAutoSyncHint: '公式リポジトリから最新の安定版クライアントバージョンを6時間ごとに取得するため、バージョンを最新に保つためだけにこのサービスをアップグレードする必要がありません。無効にすると、上記のバージョンまたは組み込みのデフォルトのみを使用します。',
         openaiCodexVersionSyncedValue: '現在同期済み：{version}',
+        claudeCodeClientVersion: 'Claude Codeクライアントバージョン',
+        claudeCodeClientVersionHint: '公式Claude Codeとして上流へ通知するバージョンです。空欄なら自動同期された最新版を使用します。値を設定するとそのバージョンに固定されます。手動設定と同期値が無効な場合のみ環境変数または組み込み値を使用します。',
+        claudeCodeVersionAutoSync: 'Claude Codeバージョンを自動同期',
+        claudeCodeVersionAutoSyncHint: '公式リリースから最新バージョンを1時間ごとに取得します。無効化すると取得は停止しますが、以前の同期値は残ります。手動設定が常に優先されます。',
+        claudeCodeVersionSyncedValue: '現在同期済み：{version}',
         codexHardeningTitle: "Codex設定",
         codexTicketEnabled: "292チケット収集",
         codexTicketEnabledDesc:
@@ -1234,6 +1251,7 @@ export default {
         oauthRateTitle: 'OAuthスケジューリング参照レート',
         oauthRatePriorityDescription: 'グループにAPIキーアカウントとOAuthアカウントの両方が含まれる場合、このレートを、プローブしたAPIキーの請求レートとOAuthアカウントを並べ替える際に使用します',
         oauthRateWeightedDescription: 'グループにAPIキーアカウントとOAuthアカウントの両方が含まれる場合、請求レートスコアの計算でOAuthアカウントにこのレートを使用します',
+        oauthRateInvalid: 'OAuthスケジューリング参照レートは0以上の数値にしてください。空欄ならアカウントのレートを使用します。',
         stickyWeightedTitle: 'スティッキー重み付け',
         stickyWeightedDescription: '有効にすると、advanced schedulerがprevious_response_idとsession_hashのアフィニティをスコアリングします。無効にすると、スティッキーアカウントは従来の固定的な優先動作を維持します',
         subscriptionPriorityTitle: 'サブスクリプションの優先度',

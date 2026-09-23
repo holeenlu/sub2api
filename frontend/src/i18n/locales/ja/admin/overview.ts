@@ -122,10 +122,42 @@ export default {
         cronExpr: 'Cron式',
         cronHint: '例："0 2 * * *"は毎日午前2:00を意味します',
         retainDays: 'バックアップ保持日数',
-        retainDaysHint: '指定日数後にバックアップファイルを自動削除します。0 = 無期限',
+        retainDaysHint: '通常のバックアップを指定日数後に削除します。0 = 日数制限なし',
         retainCount: '最大保持数',
-        retainCountHint: '保持するバックアップの最大数。0 = 無制限',
+        retainCountHint: '通常のバックアップの最大保持数。0 = 件数制限なし',
+        ordinaryRetention: '通常バックアップの保持設定',
+        ordinaryHint: '日数または件数の上限に達すると古い通常バックアップを削除します。月次アーカイブは別に保持されます。',
+        preview: '保持設定のプレビュー',
+        previewBoth: '直近{days}日間の通常バックアップを最大{count}件保持します。',
+        previewDays: '直近{days}日間の通常バックアップを件数制限なしで保持します。',
+        previewCount: '最新の通常バックアップを{count}件、日数制限なしで保持します。',
+        previewUnlimited: '通常バックアップは自動削除されません。',
         saved: 'スケジュール設定を保存しました'
+      },
+      archive: {
+        title: '月次アーカイブ',
+        enabled: '有効化',
+        dates: 'アーカイブ日（複数選択可）',
+        selectDates: 'アーカイブ日を1つ以上選択してください',
+        selectedDates: '{count}日選択中',
+        day: '{day}日',
+        monthEnd: '月末',
+        done: '完了',
+        datesHint: '選択した日付で最初に成功したスケジュールバックアップを、スケジュールのタイムゾーンに基づいてアーカイブします。',
+        retention: 'アーカイブの保持',
+        count: '保持するアーカイブの件数',
+        copies: '件',
+        forever: '無期限に保持',
+        foreverHint: '新しいアーカイブをすべて無期限に保持します。設定変更後も既存の無期限アーカイブは保護されます。',
+        countHint: '選択日全体の無期限でないアーカイブを数え、上限を超えると古いものから削除します。',
+        fallbackHint: '選択日に成功しなければ、その月の次の成功したバックアップを使用します。該当日がない場合は月末を使用し、同じバックアップは一度だけ数えます。',
+        independentHint: 'アーカイブはスケジュールバックアップを再利用し、通常の保持件数には含まれません。その月に以後成功したバックアップがなければ作成されません。',
+        disabledHint: '無効化すると新しいアーカイブは作成されません。既存のアーカイブには以前の保持設定が適用されます。',
+        invalidRetention: '保持日数と件数は0以上の整数にしてください。無期限でないアーカイブは1件以上必要です。',
+        preview: '毎月{dates}にバックアップをアーカイブ：{retention}。',
+        retainLatest: '最新のアーカイブを合計{count}件保持',
+        badge: '月次アーカイブ',
+        deleteConfirm: '月次アーカイブです。保護を解除して、このバックアップを完全に削除しますか？元に戻せません。',
       },
       operations: {
         title: 'バックアップ記録',
@@ -390,10 +422,12 @@ export default {
 
     affiliates: {
       invitesDescription: 'サイト全体の招待者と被招待者の関係を表示します',
-      rebatesDescription: 'アフィリエイトリベートが発生したチャージ注文を表示します',
-      transfersDescription: 'アフィリエイトのクォータ残高への振替を表示します',
+      rebatesDescription: 'チャージ注文、引換コード、管理者チャージのリベート記録を表示します',
+      transfersDescription: '残高への振替とオフライン出金を表示します',
       errors: {
-        loadFailed: 'アフィリエイト記録の読み込みに失敗しました'
+        loadFailed: 'アフィリエイト記録の読み込みに失敗しました',
+        AFFILIATE_QUOTA_INSUFFICIENT: '利用可能なアフィリエイト枠が不足しています',
+        AFFILIATE_WITHDRAW_AMOUNT_INVALID: '出金額が無効です'
       },
       records: {
         search: '検索',
@@ -418,7 +452,33 @@ export default {
         historyQuotaAfter: '振替後累計リベート',
         invitedAt: '招待日時',
         rebatedAt: 'リベート日時',
-        transferredAt: '振替日時'
+        transferredAt: '振替日時',
+        outflowType: '種別'
+      },
+      outflowTypes: {
+        transfer: '残高へ振替',
+        withdraw: 'オフライン出金'
+      },
+      withdraw: {
+        button: 'オフライン出金を記録',
+        title: 'オフライン出金を記録',
+        user: 'ユーザー',
+        userPlaceholder: 'メールアドレスまたはユーザー名で検索',
+        noUserFound: '該当するユーザーはいません',
+        changeUser: 'ユーザーを変更',
+        availableQuota: '利用可能枠',
+        frozenHint: '凍結期間中のリベートは利用可能枠に含まれません',
+        amount: '出金額（USD）',
+        amountHint: 'サイト外でユーザーに支払済みの金額を入力してください',
+        fillAll: '全額',
+        warning: '記録すると利用可能なアフィリエイト枠から差し引かれ、元に戻せません。サイト外での支払い完了を確認してください。',
+        submit: '確定',
+        submitting: '記録中...',
+        success: 'オフライン出金{amount}を記録しました。残り{remaining}が利用可能です',
+        replayed: 'このオフライン出金{amount}は記録済みで、再度差し引かれていません。残りの利用可能額は{remaining}です',
+        uncertainHint: '前回の送信結果が不明で、すでに記録されている可能性があります。ユーザーと金額は固定され、再送しても二重に差し引かれません。',
+        amountRequired: '0より大きい金額を入力してください',
+        amountExceeds: '利用可能枠を超える金額は指定できません'
       },
       overview: {
         title: 'アフィリエイトユーザー概要',

@@ -124,10 +124,42 @@ export default {
         cronExpr: 'Cron 表示式',
         cronHint: '例如 "0 2 * * *" 表示每天凌晨 2 點',
         retainDays: '備份過期天數',
-        retainDaysHint: '備份檔案超過此天數後自動刪除，0 = 永不過期',
+        retainDaysHint: '普通備份超過此天數後自動刪除，0 = 不每日數清理',
         retainCount: '最大保留份數',
-        retainCountHint: '最多保留的備份數量，0 = 不限制',
+        retainCountHint: '最多保留的普通備份數量，0 = 不按份數清理',
+        ordinaryRetention: '普通備份保留',
+        ordinaryHint: '達到任一清理條件時，清理最舊的普通備份；月度封存獨立保留。',
+        preview: '保留效果',
+        previewBoth: '最近 {days} 天內最多保留 {count} 份普通備份。',
+        previewDays: '保留最近 {days} 天的普通備份，份數不限。',
+        previewCount: '保留最新 {count} 份普通備份，天數不限。',
+        previewUnlimited: '普通備份不自動清理。',
         saved: '定時備份設定已儲存'
+      },
+      archive: {
+        title: '月度封存',
+        enabled: '啟用',
+        dates: '封存日期（可多選）',
+        selectDates: '請至少選擇一個封存日期',
+        selectedDates: '已選擇 {count} 個日期',
+        day: '{day} 日',
+        monthEnd: '月末',
+        done: '完成',
+        datesHint: '按備份計劃的時區與備份開始日期匹配，每個日期封存首份成功的定時備份。',
+        retention: '封存保留方式',
+        count: '封存保留數量',
+        copies: '份',
+        forever: '永久保留',
+        foreverHint: '所有新封存均永久保留；已有永久封存不會因設定變更被自動刪除。',
+        countHint: '所有選定日期的非永久封存合計計數，超出時清理最舊封存。',
+        fallbackHint: '當日無成功備份時，順延至本月下次成功備份；當月沒有所選日期時按月末處理，同一份備份只計一份。',
+        independentHint: '封存不額外執行備份，不佔普通備份名額；本月無後續成功備份則不封存。',
+        disabledHint: '關閉後停止產生新封存，已有封存繼續按原保留方式管理。',
+        invalidRetention: '保留天數和份數須為非負整數；非永久封存須填寫至少 1 份。',
+        preview: '每月 {dates} 各封存一份，{retention}。',
+        retainLatest: '合計保留最近 {count} 份',
+        badge: '月度封存',
+        deleteConfirm: '這是月度封存備份。確定要解除封存保護並永久刪除此備份嗎？此操作無法撤銷。',
       },
       operations: {
         title: '備份記錄',
@@ -392,10 +424,12 @@ export default {
 
     affiliates: {
       invitesDescription: '檢視全站邀請關係和被邀請使用者累計返利',
-      rebatesDescription: '檢視每一筆產生返利的儲值訂單',
-      transfersDescription: '檢視返利額度轉入帳戶餘額的提取流水',
+      rebatesDescription: '檢視每一筆返利入帳，包括儲值訂單、兌換碼和管理員儲值產生的返利',
+      transfersDescription: '檢視返利額度轉入餘額與線下提領的流水',
       errors: {
-        loadFailed: '載入邀請返利記錄失敗'
+        loadFailed: '載入邀請返利記錄失敗',
+        AFFILIATE_QUOTA_INSUFFICIENT: '可提取返利額度不足',
+        AFFILIATE_WITHDRAW_AMOUNT_INVALID: '提領金額無效'
       },
       records: {
         search: '搜尋',
@@ -420,7 +454,33 @@ export default {
         historyQuotaAfter: '提取後歷史返利',
         invitedAt: '邀請時間',
         rebatedAt: '返利時間',
-        transferredAt: '提取時間'
+        transferredAt: '提取時間',
+        outflowType: '類型'
+      },
+      outflowTypes: {
+        transfer: '轉入餘額',
+        withdraw: '線下提領'
+      },
+      withdraw: {
+        button: '登記線下提領',
+        title: '登記線下提領',
+        user: '使用者',
+        userPlaceholder: '輸入電子郵件或使用者名稱搜尋',
+        noUserFound: '未找到匹配的使用者',
+        changeUser: '更換使用者',
+        availableQuota: '目前可提取額度',
+        frozenHint: '凍結期內的返利不計入可提取額度',
+        amount: '提領金額（USD）',
+        amountHint: '填寫已在站外實際打款給該使用者的金額',
+        fillAll: '全部',
+        warning: '登記後將從該使用者的可提取返利額度中扣除，且無法撤銷。請確認已完成站外打款。',
+        submit: '確認登記',
+        submitting: '登記中...',
+        success: '已登記線下提領 {amount}，剩餘可提取 {remaining}',
+        replayed: '這筆線下提領此前已登記（{amount}），本次未重複扣減；登記後剩餘可提取 {remaining}',
+        uncertainHint: '上次提交沒有收到結果，可能已經登記成功。使用者與金額已鎖定，重新提交會沿用同一筆登記，已登記時不會重複扣減。',
+        amountRequired: '請輸入大於 0 的金額',
+        amountExceeds: '提領金額不能超過目前可提取額度'
       },
       overview: {
         title: '使用者返利總覽',
