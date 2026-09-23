@@ -79,6 +79,17 @@ func TestLoadServerTimingConfig(t *testing.T) {
 	})
 }
 
+func TestLoadCORSFromEnvironment(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://web.chatboxai.app, capacitor://localhost")
+	t.Setenv("CORS_ALLOW_CREDENTIALS", "false")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://web.chatboxai.app", "capacitor://localhost"}, cfg.CORS.AllowedOrigins)
+	require.False(t, cfg.CORS.AllowCredentials)
+}
+
 func TestLoadSimpleModeKeyRateLimitEnabledFromEnvironment(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("SIMPLE_MODE_KEY_RATE_LIMIT_ENABLED", "true")
