@@ -475,6 +475,18 @@ export default {
         saved: 'Ollama Cloud 用量重新整理設定已儲存',
         saveFailed: '儲存 Ollama Cloud 用量重新整理設定失敗'
       },
+      opencodeGoUsage: {
+        title: 'OpenCode Go 用量重新整理',
+        description: '重新整理上游 OpenCode Go 帳號上報的用量視窗；預設關閉，僅對單獨開啟的帳號生效。',
+        enabled: '啟用全域自動重新整理',
+        enabledHint: '僅重新整理帳號自身也開啟自動重新整理的帳號。手動重新整理不受影響。',
+        intervalMinutes: '請求持續時的最長等待（分鐘）',
+        intervalHint: '範圍 5–1440 分鐘。請求持續不斷導致 debounce 一直後移時，最晚在此時間強制重新整理。',
+        debounceMinutes: '請求安靜等待（分鐘）',
+        debounceHint: '範圍 1–60 分鐘，且必須小於重新整理間隔。最後一次模型請求安靜滿此時長後再抓取用量。',
+        saved: 'OpenCode Go 用量重新整理設定已儲存',
+        saveFailed: '儲存 OpenCode Go 用量重新整理設定失敗'
+      },
       gatewayForwarding: {
         title: '請求轉發行為',
         description: '控制請求轉發到上游 OAuth 帳號時的行為',
@@ -543,6 +555,11 @@ export default {
         openaiCodexVersionAutoSync: '自動同步 Codex 版本號',
         openaiCodexVersionAutoSyncHint: '每 6 小時從官方儲存庫取得最新穩定版用戶端版本號，無需為了跟版本而升級本服務。關閉後僅使用上方手填版本或內建版本。',
         openaiCodexVersionSyncedValue: '目前同步到：{version}',
+        claudeCodeClientVersion: 'Claude Code 用戶端版本號',
+        claudeCodeClientVersionHint: '閘道器偽裝為官方 Claude Code CLI 時對上游宣告的用戶端版本號。留空表示使用自動同步到的官方最新版本；填寫後固定為該版本，不再跟隨同步。僅在手填值和同步值均不可用時，才回退到環境變數 SUB2API_CLAUDE_CLI_VERSION 或內建版本。',
+        claudeCodeVersionAutoSync: '自動同步 Claude Code 版本號',
+        claudeCodeVersionAutoSyncHint: '每小時從官方釋出通道取得最新版本的 Claude Code 用戶端版本號，無需為了跟版本而升級本服務。關閉後停止取得新版本，已同步的版本仍可使用；上方手填版本始終優先。',
+        claudeCodeVersionSyncedValue: '目前同步到：{version}',
         codexHardeningTitle: 'Codex 設定',
         codexTicketEnabled: '292 打票',
         codexTicketEnabledDesc:
@@ -1228,8 +1245,9 @@ export default {
         lowRatePriorityTitle: '低倍率優先',
         lowRatePriorityDescription: '開啟後優先選擇計費倍率較低的帳號；倍率相同時，再比較帳號優先順序和目前負載等。啟用實驗排程策略後，此開關不生效。',
         oauthRateTitle: 'OAuth 排程參考倍率',
-        oauthRatePriorityDescription: '同一分組同時包含 API Key 和 OAuth 帳號時，OAuth 帳號按此倍率與已探測的 API Key 計費倍率一起排序。',
-        oauthRateWeightedDescription: '同一分組同時包含 API Key 和 OAuth 帳號時，計算“計費倍率”得分時，OAuth 帳號按此倍率參與計算。',
+        oauthRatePriorityDescription: 'OAuth 帳號按此參考倍率參與低倍率優先排序；留空時使用各自的帳號倍率。API Key 帳號優先使用有效探測倍率，無有效探測時使用帳號倍率。',
+        oauthRateWeightedDescription: '計算“計費倍率”得分時，OAuth 帳號使用此參考倍率；留空時使用各自的帳號倍率。API Key 帳號優先使用有效探測倍率，無有效探測時使用帳號倍率。',
+        oauthRateInvalid: 'OAuth 排程參考倍率必須是非負數字，或留空以使用帳號倍率。',
         stickyWeightedTitle: '黏性加權',
         stickyWeightedDescription: '開啟後 previous_response_id 和 session_hash 黏性進入高階排程打分；關閉時仍按舊邏輯硬命中黏性帳號。',
         subscriptionPriorityTitle: '訂閱優先',
