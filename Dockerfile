@@ -81,7 +81,7 @@ FROM --platform=${BUILDPLATFORM} ${GOLANG_IMAGE} AS backend-builder
 
 # Build arguments for version info (set by CI)
 ARG VERSION=
-ARG RELEASE_CHANNEL=
+ARG RELEASE_CHANNEL=kdan
 ARG COMMIT=docker
 ARG DATE
 ARG UPSTREAM_VERSION=

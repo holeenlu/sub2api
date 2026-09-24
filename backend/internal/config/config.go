@@ -2101,10 +2101,7 @@ func setDefaults() {
 	viper.SetDefault("cors.allowed_origins", []string{})
 	viper.SetDefault("cors.allow_credentials", true)
 
-	// Update: online version check / self-update against the release repository
-	// (holeenlu/sub2api). Off by default for this brand, which has no release
-	// channel of its own yet; set UPDATE_CHECK_ENABLED=true to let a deployment
-	// reach GitHub.
+	// Online checks follow the isolated KDAN release channel.
 	viper.SetDefault("update.check_enabled", true)
 
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
