@@ -130,6 +130,11 @@ class PlannerIntegrationTests(unittest.TestCase):
             releases = []
             real_run = planner.run
             def fake_run(*args):
+                if args[:2] == ('git', 'ls-remote'):
+                    match = next((r for r in releases if 'refs/tags/' + r['tag_name'] == args[-1]), None)
+                    if match:
+                        return json.loads(match['body'].split('release-plan:')[1].split(' -->')[0])['commit'] + '\t' + args[-1]
+                    return ''
                 if args[0] != 'gh':
                     return real_run(*args)
                 if args[1] == 'api':
