@@ -30,7 +30,7 @@ func CodexTicketHarvestEnabled(account *Account, model string) bool {
 	if account == nil || !isOpenAICodexTicketAccount(account) || !codexTicketEligibleModel(model) {
 		return false
 	}
-	return codexTicketParticipationEnabled(account, model)
+	return codexTicketAccountSupportsModel(account, model) && codexTicketParticipationEnabled(account, model)
 }
 
 // codexTicketParticipationEnabled reads only saved choices, not runtime availability.

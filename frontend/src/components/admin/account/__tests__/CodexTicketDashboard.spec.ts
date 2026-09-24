@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CodexTicketDashboard from '../CodexTicketDashboard.vue'
 import type { Account } from '@/types'
+import Select from '@/components/common/Select.vue'
 
 const { events, fingerprint, ownKeys, invalidation, diagnose, getById, harvest } = vi.hoisted(() => ({
   events: vi.fn(), fingerprint: vi.fn(), ownKeys: vi.fn(), invalidation: vi.fn(), diagnose: vi.fn(), getById: vi.fn(), harvest: vi.fn()
@@ -74,6 +75,37 @@ describe('Codex ticket dashboard', () => {
     await flushPromises()
     expect(invalidation).toHaveBeenCalledWith(19, 2)
     expect(wrapper.text()).toContain('old-secret')
+    wrapper.unmount()
+  })
+
+  it('uses fresh account ticket models for cards and filters, and clears removed selections', async () => {
+    const fresh = {
+      ...account,
+      codex_turn_tickets: [{ ...account.codex_turn_tickets![0], model: 'gpt-6-astra' }]
+    }
+    getById.mockResolvedValueOnce(fresh)
+    const wrapper = mountDashboard()
+    await flushPromises()
+    expect(wrapper.findAll('article h3').map(card => card.text())).toEqual(['gpt-6-astra'])
+    await wrapper.findAll('nav button')[1].trigger('click')
+    await flushPromises()
+    const modelSelect = () => wrapper.findAllComponents(Select)[1]
+    expect(modelSelect().props('options')).toEqual([
+      { value: '', label: '全部模型' }, { value: 'gpt-6-astra', label: 'gpt-6-astra' }
+    ])
+    modelSelect().vm.$emit('update:modelValue', 'gpt-6-astra')
+    await flushPromises()
+    expect(events).toHaveBeenLastCalledWith(19, expect.objectContaining({ model: 'gpt-6-astra' }))
+
+    await wrapper.findAll('header button').find(button => button.text() === '刷新')!.trigger('click')
+    await flushPromises()
+    expect(modelSelect().props('options')).toEqual([
+      { value: '', label: '全部模型' }, { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol' }
+    ])
+    expect(modelSelect().props('modelValue')).toBe('')
+    expect(events).toHaveBeenLastCalledWith(19, expect.objectContaining({ model: undefined }))
+    await wrapper.findAll('nav button')[0].trigger('click')
+    expect(wrapper.findAll('article h3').map(card => card.text())).toEqual(['gpt-5.6-sol'])
     wrapper.unmount()
   })
 
