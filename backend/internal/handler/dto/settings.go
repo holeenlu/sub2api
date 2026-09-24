@@ -218,12 +218,15 @@ type SystemSettings struct {
 	OpenAICodexClientVersion                string `json:"openai_codex_client_version"`
 	OpenAICodexClientVersionSynced          string `json:"openai_codex_client_version_synced"`
 	OpenAICodexVersionAutoSyncEnabled       bool   `json:"openai_codex_version_auto_sync_enabled"`
-	OpenAICodexTicketEnabled                bool   `json:"openai_codex_ticket_enabled"`
-	OpenAICodexTicketHarvestProxyURL        string `json:"openai_codex_ticket_harvest_proxy_url"`
-	OpenAICodexTicketHarvestProxyConfigured bool   `json:"openai_codex_ticket_harvest_proxy_configured"`
 	ClaudeCodeClientVersion                 string `json:"claude_code_client_version"`
 	ClaudeCodeClientVersionSynced           string `json:"claude_code_client_version_synced"`
 	ClaudeCodeVersionAutoSyncEnabled        bool   `json:"claude_code_version_auto_sync_enabled"`
+	OpenAICodexTicketEnabled                bool   `json:"openai_codex_ticket_enabled"`
+	OpenAICodexTicketAllowWithoutTicket     bool   `json:"openai_codex_ticket_allow_without_ticket"`
+	OpenAICodexTicketHarvestProxyURL        string `json:"openai_codex_ticket_harvest_proxy_url"`
+	OpenAICodexTicketHarvestProxyConfigured bool   `json:"openai_codex_ticket_harvest_proxy_configured"`
+	OpenAICodexTicketPromptTemplate         string `json:"openai_codex_ticket_prompt_template"`
+	OpenAICodexTicketPromptTemplateDefault  string `json:"openai_codex_ticket_prompt_template_default"`
 
 	// codex_cli_only 加固
 	MinCodexVersion                      string `json:"min_codex_version"`

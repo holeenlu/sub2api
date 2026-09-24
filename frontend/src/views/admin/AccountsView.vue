@@ -291,6 +291,16 @@
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
             </div>
           </template>
+          <template #cell-codex_ticket="{ row }">
+            <button
+              v-if="row.platform === 'openai' && (row.type === 'oauth' || row.type === 'setup-token')"
+              type="button"
+              class="rounded-lg px-2 py-1 text-sm font-semibold tabular-nums text-primary-600 transition hover:bg-primary-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500 dark:text-primary-400 dark:hover:bg-primary-900/20"
+              :aria-label="t('admin.accounts.openai.codexTicketSummary', ticketSummary(row))"
+              @click="openCodexTickets(row)"
+            >{{ ticketSummary(row).ready }} / {{ ticketSummary(row).total }}</button>
+            <span v-else class="text-gray-400">—</span>
+          </template>
           <template #cell-schedulable="{ row }">
             <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
@@ -451,12 +461,14 @@
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" @codex-tickets="openEditCodexTickets" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <CodexTicketDashboard :show="showCodexTickets" :account="codexTicketAcc" @close="showCodexTickets = false" @updated="handleAccountUpdated" />
+    <CodexDiagnosticModal :show="showCodexDiagnostic" :account="codexDiagnosticAcc" @close="showCodexDiagnostic = false" @completed="handleCodexDiagnosticCompleted" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @codex-diagnostic="openCodexDiagnostic" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -508,6 +520,8 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import CodexTicketDashboard from '@/components/admin/account/CodexTicketDashboard.vue'
+import CodexDiagnosticModal from '@/components/admin/account/CodexDiagnosticModal.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
@@ -589,6 +603,24 @@ const selTypes = computed<AccountType[]>(() => {
 })
 const showCreate = ref(false)
 const showEdit = ref(false)
+const showCodexTickets = ref(false)
+const codexTicketAcc = ref<Account | null>(null)
+const showCodexDiagnostic = ref(false)
+const codexDiagnosticAcc = ref<Account | null>(null)
+const codexTicketGloballyEnabled = ref(false)
+let codexTicketSettingsRequestId = 0
+function openEditCodexTickets() { if (edAcc.value) { showEdit.value = false; openCodexTickets(edAcc.value) } }
+function openCodexTickets(account: Account) { showCodexDiagnostic.value = false; codexTicketAcc.value = account; showCodexTickets.value = true }
+function openCodexDiagnostic(account: Account) { showCodexTickets.value = false; codexDiagnosticAcc.value = account; showCodexDiagnostic.value = true }
+async function handleCodexDiagnosticCompleted(accountID: number) {
+  try { handleAccountUpdated(await adminAPI.accounts.getById(accountID)) }
+  catch (error) { console.error('Failed to refresh account after diagnostic', error) }
+}
+function ticketSummary(account: Account) {
+  const entries = account.codex_turn_tickets ?? []
+  return { ready: entries.filter(ticket => ticket.ready).length, total: entries.length }
+}
+
 const showSync = ref(false)
 const showImportData = ref(false)
 const showExportDataDialog = ref(false)
@@ -1440,6 +1472,7 @@ const refreshAccountsIncrementally = async () => {
   if (autoRefreshFetching.value) return
   syncAccountListDerivedParams()
   autoRefreshFetching.value = true
+  const ticketSettingsRefresh = loadCodexTicketGlobalState()
   try {
     const result = await adminAPI.accounts.listWithEtag(
       pagination.page,
@@ -1473,14 +1506,28 @@ const refreshAccountsIncrementally = async () => {
   } catch (error) {
     console.error('Auto refresh failed:', error)
   } finally {
+    await ticketSettingsRefresh
     autoRefreshFetching.value = false
   }
 }
 
 const handleManualRefresh = async () => {
-  await Promise.all([load(), loadUpstreamBillingProbeGlobalState()])
+  await Promise.all([load(), loadUpstreamBillingProbeGlobalState(), loadCodexTicketGlobalState()])
   // Force usage cells to refetch /usage on explicit user refresh.
   usageManualRefreshToken.value += 1
+}
+
+const loadCodexTicketGlobalState = async () => {
+  const requestId = ++codexTicketSettingsRequestId
+  try {
+    const settings = await adminAPI.settings.getSettings()
+    if (requestId !== codexTicketSettingsRequestId) return
+    codexTicketGloballyEnabled.value = settings.openai_codex_ticket_enabled === true
+  } catch (error) {
+    if (requestId !== codexTicketSettingsRequestId) return
+    // Keep the last confirmed state; an initial failure leaves the column hidden.
+    console.error('Failed to load Codex ticket settings:', error)
+  }
 }
 
 const loadUpstreamBillingProbeGlobalState = async () => {
@@ -1787,6 +1834,9 @@ const allColumns = computed(() => {
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
+    ...(codexTicketGloballyEnabled.value
+      ? [{ key: 'codex_ticket', label: t('admin.accounts.columns.codexTicket'), sortable: false }]
+      : []),
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
@@ -2534,6 +2584,7 @@ onMounted(async () => {
 
   load()
   loadUpstreamBillingProbeGlobalState()
+  void loadCodexTicketGlobalState()
   const [proxiesResult, groupsResult] = await Promise.allSettled([
     adminAPI.proxies.getAll(),
     adminAPI.groups.getAll()
@@ -2561,6 +2612,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  codexTicketSettingsRequestId += 1
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)

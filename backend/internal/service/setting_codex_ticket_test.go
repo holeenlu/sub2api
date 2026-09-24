@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
@@ -29,14 +27,7 @@ func TestCodexTicketEnabledRuntimeSettingOverridesYaml(t *testing.T) {
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: false, FailClosed: true}, nil)
 	svc.settingService = settings
 	account := ticketTestAccount(41)
-	svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
-		AccountID:  41,
-		Model:      "gpt-6-astra",
-		State:      fakeCodexTicketState(292),
-		Length:     292,
-		CapturedAt: time.Now(),
-		ExpiresAt:  time.Now().Add(time.Hour),
-	})
+	account.Extra = map[string]any{openAICodexTicketExtraKey("gpt-6-astra"): verifiedTicket(account, "gpt-6-astra", fakeCodexTicketState(292), "")}
 
 	h := http.Header{}
 	h.Set(openAICodexTurnStateHeader, "client-state")
@@ -72,25 +63,10 @@ func TestRefreshOpenAICodexTickets_DisabledSkipsHarvest(t *testing.T) {
 	require.Empty(t, upstream.requests)
 }
 
-func TestCodexTicketProxyRuntimeSettingAndFallback(t *testing.T) {
-	repo := &codexTicketSettingRepo{codexPolicyMigrationRepoStub: &codexPolicyMigrationRepoStub{values: map[string]string{}}}
-	settings := NewSettingService(repo, &config.Config{})
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{HarvestProxyURL: "http://fallback.example.com:8080"}, nil)
-	svc.settingService = settings
-	require.Equal(t, "http://fallback.example.com:8080", svc.openAICodexTicketHarvestProxyURL())
-	repo.values[SettingKeyOpenAICodexTicketHarvestProxyURL] = "socks5h://user:secret@first.example.com:1080"
-	settings.InvalidateOpenAICodexTicketHarvestProxyCache()
-	require.Equal(t, repo.values[SettingKeyOpenAICodexTicketHarvestProxyURL], svc.openAICodexTicketHarvestProxyURL())
-	repo.values[SettingKeyOpenAICodexTicketHarvestProxyURL] = "http://second.example.com:8080"
-	settings.InvalidateOpenAICodexTicketHarvestProxyCache()
-	require.Equal(t, "http://second.example.com:8080", svc.openAICodexTicketHarvestProxyURL())
-	// Simulate another instance's settings write after the local cache expires.
-	repo.values[SettingKeyOpenAICodexTicketHarvestProxyURL] = "https://third.example.com:443"
-	settings.openAICodexTicketHarvestProxyCache.Store(&cachedOpenAICodexTicketHarvestProxy{value: "http://second.example.com:8080", expiresAt: time.Now().Add(-time.Second).UnixNano()})
-	require.Equal(t, "https://third.example.com:443", svc.openAICodexTicketHarvestProxyURL())
-	repo.err = errors.New("database unavailable")
-	settings.openAICodexTicketHarvestProxyCache.Store(&cachedOpenAICodexTicketHarvestProxy{value: "https://third.example.com:443", expiresAt: 0})
-	require.Equal(t, "https://third.example.com:443", svc.openAICodexTicketHarvestProxyURL())
+func TestCodexTicketNeverFallsBackToHandEnteredProxy(t *testing.T) {
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{HarvestProxyURL: "http://legacy.example.com:8080"}, nil)
+	_, _, err := svc.chooseCodexTicketProxy(context.Background(), 41, "gpt-6-astra")
+	require.ErrorIs(t, err, ErrCodexTicketNoProxy)
 }
 
 func TestCodexTicketProxyMaskAndValidation(t *testing.T) {
@@ -116,4 +92,33 @@ func TestCodexTicketSettingsRefreshDoesNotMutateSharedConfig(t *testing.T) {
 	svc.refreshCachedSettings(&SystemSettings{OpenAICodexTicketEnabled: true})
 	require.False(t, cfg.Gateway.OpenAICodexTicket.Enabled, "runtime settings must not write the shared immutable startup configuration")
 	require.True(t, svc.GetOpenAICodexTicketEnabled(context.Background(), false))
+}
+
+func TestCodexTicketAdminDefaultsPreserveExplicitSettings(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		configured bool
+		saved      string
+		want       bool
+	}{
+		{name: "unconfigured"},
+		{name: "yaml enabled", configured: true, want: true},
+		{name: "saved enabled", saved: "true", want: true},
+		{name: "saved disabled overrides yaml", configured: true, saved: "false"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAICodexTicket.Enabled = test.configured
+			values := map[string]string{}
+			if test.saved != "" {
+				values[SettingKeyOpenAICodexTicketEnabled] = test.saved
+			}
+			repo := &codexTicketSettingRepo{codexPolicyMigrationRepoStub: &codexPolicyMigrationRepoStub{values: values}}
+			settings := NewSettingService(repo, cfg)
+			require.Equal(t, test.want, settings.parseSettings(values).OpenAICodexTicketEnabled)
+			require.True(t, settings.parseSettings(values).OpenAICodexTicketAllowWithoutTicket)
+			require.Equal(t, test.want, settings.GetOpenAICodexTicketEnabled(context.Background(), cfg.Gateway.OpenAICodexTicket.Enabled))
+			require.Equal(t, test.saved, repo.values[SettingKeyOpenAICodexTicketEnabled])
+		})
+	}
 }

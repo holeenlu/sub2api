@@ -66,6 +66,9 @@ type AccountHandler struct {
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	codexTicketSettings     *service.SettingService
+	codexTicketGateway      *service.OpenAIGatewayService
+	codexTicketRouter       http.Handler
+	codexTicketAPIKeys      *service.APIKeyService
 	cfg                     *config.Config
 	opencodeGoUsage         *service.OpenCodeGoUsageService
 }
@@ -80,12 +83,17 @@ func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUs
 }
 
 // SetCodexTicketSettings supplies the live policy without mutating shared config.
-func (h *AccountHandler) SetCodexTicketSettings(settings *service.SettingService) {
-	h.codexTicketSettings = settings
-}
 
 func (h *AccountHandler) SetOpenCodeGoUsageService(usage *service.OpenCodeGoUsageService) {
 	h.opencodeGoUsage = usage
+}
+
+// SetCodexTicketSettings supplies the live policy without mutating shared config.
+func (h *AccountHandler) SetCodexTicketSettings(settings *service.SettingService) {
+	h.codexTicketSettings = settings
+}
+func (h *AccountHandler) SetCodexTicketGateway(gateway *service.OpenAIGatewayService) {
+	h.codexTicketGateway = gateway
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -372,6 +380,7 @@ func (h *AccountHandler) enrichCodexTicketStatus(account *service.Account, out *
 		cfg := h.cfg.Gateway.OpenAICodexTicket
 		if h.codexTicketSettings != nil {
 			cfg.Enabled = h.codexTicketSettings.GetOpenAICodexTicketEnabled(context.Background(), cfg.Enabled)
+			cfg.FailClosed = !h.codexTicketSettings.GetOpenAICodexTicketAllowWithoutTicket(context.Background(), !cfg.FailClosed)
 		}
 		out.CodexTurnTickets = service.OpenAICodexTicketStatuses(account, cfg, time.Now())
 	}
@@ -813,6 +822,22 @@ func (h *AccountHandler) List(c *gin.Context) {
 		_ = g.Wait()
 	}
 
+	var ticketEvents map[int64]service.CodexTicketRecentEvent
+	if pageHasOpenAIAccounts && h.codexTicketGateway != nil {
+		var ticketAccountIDs []int64
+		for _, account := range accounts {
+			if account.Platform == service.PlatformOpenAI {
+				ticketAccountIDs = append(ticketAccountIDs, account.ID)
+			}
+		}
+		var err error
+		ticketEvents, err = h.codexTicketGateway.CodexTicketLatestEvents(c.Request.Context(), ticketAccountIDs)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+
 	// Build response with concurrency info
 	result := make([]AccountWithConcurrency, len(accounts))
 	for i := range accounts {
@@ -823,6 +848,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 			if h.isSimpleMode() {
 				accountResponse.GroupIDs = filterSimpleModeGroupIDs(accountResponse.GroupIDs, simpleModeCompositeServiceGroupIDs(acc))
 			}
+		}
+		if event, ok := ticketEvents[acc.ID]; ok {
+			accountResponse.CodexTicketLatestEvent = &event
 		}
 		item := AccountWithConcurrency{
 			Account:            accountResponse,
@@ -955,6 +983,13 @@ func ifNoneMatchMatched(ifNoneMatch, etag string) bool {
 
 // GetByID handles getting an account by ID
 // GET /api/v1/admin/accounts/:id
+func (h *AccountHandler) GetOpenAIRequestTimezones(c *gin.Context) {
+	response.Success(c, gin.H{
+		"default":   service.DefaultOpenAIRequestTimezone,
+		"timezones": service.OpenAIRequestTimezoneOptions(),
+	})
+}
+
 func (h *AccountHandler) GetByID(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {

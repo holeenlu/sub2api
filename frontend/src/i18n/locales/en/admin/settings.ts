@@ -568,7 +568,7 @@ export default {
         codexHardeningTitle: "Codex Settings",
         codexTicketEnabled: "292 ticket harvest",
         codexTicketEnabledDesc:
-          "When off, the gateway neither harvests nor injects x-codex-turn-state and forwards traffic as usual. When on, it harvests tickets in the background and overwrites that header on production requests.",
+          'Ticket harvesting is off by default. Enable it manually when needed. When off, requests use the normal forwarding path. When on, background harvesting follows account and model participation settings and injects saved tickets into requests. Introducing this feature turns this switch off once; subsequent manual choices are preserved.',
         codexTicketHarvestProxy: "292 harvest proxy",
         codexTicketHarvestProxyDesc:
           "Used only for minting 292 tickets when the ticket feature is enabled. Changes apply to subsequent probes without a restart. Production traffic still uses each account's residential proxy. Paste a full HTTP or SOCKS5h proxy URL including username and password. The proxy provider must handle IP rotation. Leave blank when saving to keep the stored value.",
@@ -608,6 +608,16 @@ export default {
         codexUaContainsPlaceholder: "User-Agent contains markers, comma-separated (e.g. opencode/)",
         codexAddRow: "Add entry",
         codexRemoveRow: "Remove",
+        codexAdditionalSettingsFailed: 'Settings saved, but a separate setting failed: ',
+        codexProbeTemplate: 'Codex ticket and degradation check template',
+        codexProbeTemplateReset: 'Restore default',
+        codexProbeTemplateDesc: 'Ticket harvesting and degradation checks share this JSONL template. Preserve the message structure, tags and placeholders. Maximum 256 KiB. Save to apply edits or restore the default. Default static instructions are English; random challenges remain Chinese.',
+        codexProbeTimezone: 'Account request timezone',
+        codexProbeDate: 'Current date in the account timezone',
+        codexProbeModel: 'Target model',
+        codexProbeChallenge: 'Fresh random challenge',
+        codexTicketAllowWithoutTicket: 'Allow requests without tickets by default',
+        codexTicketAllowWithoutTicketDesc: 'Enabled when unconfigured, so missing tickets do not block normal requests. Existing policies are preserved. Missing-ticket restrictions apply only when global harvesting is enabled and both the account and current model participate; explicit account policies take priority.',
       },
       webSearchEmulation: {
         title: 'Web Search Emulation',

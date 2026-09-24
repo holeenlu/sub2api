@@ -173,7 +173,7 @@ RUN ln -s /app/kdan /app/sub2api
 COPY --from=backend-builder --chown=kdan:kdan /app/backend/resources /app/resources
 
 # Create data directory
-RUN mkdir -p /app/data && chown kdan:kdan /app/data
+RUN mkdir -p /app/data && chown kdan:kdan /app /app/data
 
 # Copy entrypoint script (fixes volume permissions then drops to kdan)
 COPY --chmod=755 deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
