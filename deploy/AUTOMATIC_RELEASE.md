@@ -12,7 +12,7 @@
 | KDAN | holeenlu/sub2api / KDAN | kdan/v0.2.8.1 | ghcr.io/holeenlu/kdan |
 | TapModels | erwinlin/TapModels / main | tapmodels/v0.2.8.1 | ghcr.io/erwinlin/tapmodels |
 
-origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但界面版本和镜像标签仅显示数字。不会读取混入的 sub4api v1.1.4 标签，也不会把公共版安装到 KDAN。旧品牌镜像工作流只保留手动入口，原作者 release.yml 仅允许原作者仓库运行。
+origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但界面版本和镜像标签仅显示数字。不会读取混入的 sub4api v1.1.4 标签，也不会把公共版安装到 KDAN。三个交付分支只保留 `automatic-release.yml`；独立 CI、安全扫描、CLA、上游定时监看、原作者手动发布和旧品牌镜像工作流均已移除，以减少 Actions 用量。发布所需的版本规则测试、更新界面/API 检查、类型检查、构建和产物校验仍由自动发布流程执行。
 
 ## 版本规则
 
@@ -25,6 +25,14 @@ origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但
 - VERSION 文件仍代表上游源码基准；实际运行版本、提交 SHA、上游版本由编译参数写入，不创建回写 VERSION 的循环提交。
 
 仓库 Actions 需要允许 `contents: write` 和 `packages: write`，GHCR 包需要授予该仓库 Actions 写权限。默认使用 GITHUB_TOKEN；无需 PAT 发版。GitHub 的 token 创建标签不会再次触发普通 push 工作流，因此完整发布在同一流程完成。
+
+## Actions 用量控制
+
+- `.github/workflows/` 只保留 `automatic-release.yml`，不另开 PR 检查或定时任务。
+- GitHub 端已登记但不再使用的工作流应同时停用，防止旧分支或后续合并意外重新触发；历史运行记录不会继续消耗 runner 分钟。
+- GitHub 内置的 `dynamic/dependabot/update-graph` 是 Dependabot graph job，不能通过普通工作流接口停用，且不计入 Actions 分钟，因此保留。它与会计费的 Automatic dependency submission 不同；后者如果另行启用，应在仓库设置中关闭。参见 [GitHub 依赖图计费说明](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependency-graph-data#dependabot-graph-jobs)。
+- 合并上游时复核 `.github/workflows/`，不要重新引入已移除的工作流；本地测试脚本和发布辅助工具继续保留。
+- 需要额外检查时在本地运行 `make test-frontend`、后端 `make test-unit` 和 `golangci-lint run ./...`。
 
 ## 启用与排障
 
