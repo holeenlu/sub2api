@@ -1,3 +1,5 @@
+> Fork releases and Docker Compose online updates: [setup guide](AUTOMATIC_RELEASE.md).
+
 # Sub2API Deployment Files
 
 This directory contains files for deploying Sub2API on Linux servers and Apple-silicon Macs.
@@ -262,7 +264,7 @@ docker compose down -v
 | `ADMIN_EMAIL` | No | `admin@sub2api.local` | Admin email |
 | `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password |
 | `TZ` | No | `Asia/Shanghai` | Timezone |
-| `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for `api.github.com` release checks only; asset downloads remain anonymous. |
+| `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for GitHub Release checks and private API asset downloads; never forwarded to storage redirects. |
 | `GEMINI_OAUTH_CLIENT_ID` | No | *(builtin)* | Google OAuth client ID (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_CLIENT_SECRET` | No | *(builtin)* | Google OAuth client secret (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_SCOPES` | No | *(default)* | OAuth scopes (Gemini OAuth) |
