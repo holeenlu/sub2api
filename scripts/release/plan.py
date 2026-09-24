@@ -132,9 +132,15 @@ def main():
                     commit=head, image=cfg["image"], tag=tag, zh_tw=cfg["zh_tw"],
                     date=git("show", "-s", "--format=%cI", head))
         Path("release-notes.md").write_text("<!-- release-plan:" + json.dumps(plan) + " -->\n")
+        existing_tag = git("ls-remote", "--tags", "origin", "refs/tags/" + tag)
+        if existing_tag and existing_tag.split()[0] != head:
+            raise ValueError("Tag already points to another commit; refusing to reuse it")
         # Reserve once. Failed builds leave a draft which the same SHA resumes.
         run("gh", "release", "create", tag, "--draft", "--target", head,
             "--title", f"{channel} {version}", "--notes-file", "release-notes.md")
+        reserved_tag = git("ls-remote", "--tags", "origin", "refs/tags/" + tag)
+        if not reserved_tag or reserved_tag.split()[0] != head:
+            raise ValueError("Reserved tag does not match the build commit")
         release = next(r for page in json.loads(run("gh", "api", "--paginate", "--slurp",
             f"repos/{cfg['repository']}/releases?per_page=100")) for r in page if r["tag_name"] == tag)
     Path("release-plan.json").write_text(json.dumps(plan, indent=2) + "\n")

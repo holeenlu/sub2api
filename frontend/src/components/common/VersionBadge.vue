@@ -11,7 +11,7 @@
             : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-800 dark:text-dark-400 dark:hover:bg-dark-700'
         ]"
         :title="
-          updateDisabled
+          updateDisabled || appStore.updateWarning
             ? undefined
             : hasUpdate
               ? t('version.updateAvailable')
