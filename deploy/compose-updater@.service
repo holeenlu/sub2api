@@ -1,0 +1,18 @@
+[Unit]
+Description=Restricted Sub2API Compose online updater
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 /opt/sub2api-updater/compose_updater.py --config /etc/sub2api-updater/%i.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

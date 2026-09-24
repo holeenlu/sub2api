@@ -1,0 +1,139 @@
+name: Automatic versioned release
+on:
+  push:
+    branches: [main, KDAN]
+  workflow_dispatch:
+permissions:
+  contents: write
+  packages: write
+# Public and KDAN share a repository. Serialize reservations and publication.
+concurrency:
+  group: automatic-release-${{ github.repository }}
+  cancel-in-progress: false
+  queue: max
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.select.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: select
+        run: python3 scripts/release/plan.py --select >> "$GITHUB_OUTPUT"
+  publish:
+    needs: select
+    if: needs.select.outputs.channel != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Reserve version (or resume failed build)
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release/plan.py
+      - uses: pnpm/action-setup@v6
+        if: steps.plan.outputs.publish == 'true'
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        if: steps.plan.outputs.publish == 'true'
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/setup-go@v6
+        if: steps.plan.outputs.publish == 'true'
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify release tooling and build frontend
+        if: steps.plan.outputs.publish == 'true'
+        run: |
+          python3 -m unittest discover -s deploy/tests -p 'test_auto_release*.py'
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend run typecheck
+          pnpm --dir frontend exec vitest run src/components/common/__tests__/VersionBadge.spec.ts src/components/common/__tests__/VersionBadgeCompose.spec.ts
+          pnpm --dir frontend run build
+          cd backend
+          CGO_ENABLED=0 go test -tags=unit ./internal/service ./internal/repository ./internal/handler/admin -run '^Test(Update|GitHubRelease|SystemHandler)' -count=1
+      - name: Build Linux archives
+        if: steps.plan.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          COMMIT: ${{ steps.plan.outputs.commit }}
+          DATE: ${{ steps.plan.outputs.date }}
+          CHANNEL: ${{ steps.plan.outputs.channel }}
+          ZH_TW: ${{ steps.plan.outputs.zh_tw }}
+          UPSTREAM_VERSION: ${{ steps.plan.outputs.base }}
+        run: bash scripts/release/build-archives.sh
+      - uses: docker/setup-qemu-action@v3
+        if: steps.plan.outputs.publish == 'true'
+      - uses: docker/setup-buildx-action@v3
+        if: steps.plan.outputs.publish == 'true'
+      - uses: docker/login-action@v3
+        if: steps.plan.outputs.publish == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build immutable version image
+        if: steps.plan.outputs.publish == 'true'
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.plan.outputs.image }}:${{ steps.plan.outputs.version }}
+          build-args: |
+            VERSION=${{ steps.plan.outputs.version }}
+            COMMIT=${{ steps.plan.outputs.commit }}
+            DATE=${{ steps.plan.outputs.date }}
+            UPSTREAM_VERSION=${{ steps.plan.outputs.base }}
+            RELEASE_CHANNEL=${{ steps.plan.outputs.channel }}
+            ZH_TW=${{ steps.plan.outputs.zh_tw }}
+            GOPROXY=https://proxy.golang.org,direct
+            GOSUMDB=sum.golang.org
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.plan.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.plan.outputs.commit }}
+          cache-from: type=gha,scope=${{ steps.plan.outputs.channel }}
+          cache-to: type=gha,mode=max,scope=${{ steps.plan.outputs.channel }}
+      - name: Publish complete release
+        if: steps.plan.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          RELEASE_TAG: ${{ steps.plan.outputs.tag }}
+          RELEASE_ID: ${{ steps.plan.outputs.release_id }}
+          RELEASE_IMAGE: ${{ steps.plan.outputs.image }}
+          RELEASE_CHANNEL: ${{ steps.plan.outputs.channel }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release/notes.py
+          gh release upload "$RELEASE_TAG" dist/release/* --clobber
+          gh release edit "$RELEASE_TAG" --notes-file release-notes.md
+          # Public and KDAN must not compete for the repository's /latest feed.
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -f make_latest=false
+      - uses: docker/setup-buildx-action@v3
+        if: steps.plan.outputs.promote == 'true' && steps.plan.outputs.publish != 'true'
+      - uses: docker/login-action@v3
+        if: steps.plan.outputs.promote == 'true' && steps.plan.outputs.publish != 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Promote published image (safe to retry)
+        if: steps.plan.outputs.promote == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.plan.outputs.tag }}
+          RELEASE_IMAGE: ${{ steps.plan.outputs.image }}
+        run: |
+          gh release download "$RELEASE_TAG" --pattern release-manifest.json --dir /tmp/release-promotion --clobber
+          DIGEST=$(python3 -c 'import json; print(json.load(open("/tmp/release-promotion/release-manifest.json"))["image_digest"])')
+          docker buildx imagetools create --tag "$RELEASE_IMAGE:latest" "$RELEASE_IMAGE@$DIGEST"

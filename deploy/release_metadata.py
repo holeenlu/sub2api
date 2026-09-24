@@ -5,7 +5,7 @@ import re
 NUMBER = r"(?:0|[1-9][0-9]*)"
 IDENTIFIER = rf"(?:{NUMBER}|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
 SEMVER = re.compile(
-    rf"{NUMBER}\.{NUMBER}\.{NUMBER}"
+    rf"{NUMBER}\.{NUMBER}\.{NUMBER}(?:\.{NUMBER})?"
     rf"(?:-(?P<prerelease>{IDENTIFIER}(?:\.{IDENTIFIER})*))?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 )

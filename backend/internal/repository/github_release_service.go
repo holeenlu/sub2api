@@ -61,6 +61,7 @@ func NewGitHubReleaseClient(proxyURL string, allowDirectOnProxyError bool) servi
 		downloadClient = &http.Client{Timeout: 10 * time.Minute}
 	}
 	downloadClient = cloneHTTPClient(downloadClient)
+	downloadClient.CheckRedirect = githubAPICheckRedirect(downloadClient.CheckRedirect)
 
 	return &githubReleaseClient{
 		httpClient:         apiClient,
@@ -81,6 +82,9 @@ func isGitHubAPIURL(url *url.URL) bool {
 
 func githubAPICheckRedirect(previous func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("too many GitHub redirects")
+		}
 		if !isGitHubAPIURL(req.URL) {
 			req.Header.Del("Authorization")
 		}
@@ -147,6 +151,10 @@ func (c *githubReleaseClient) FetchLatestRelease(ctx context.Context, repo strin
 }
 
 func (c *githubReleaseClient) FetchRecentReleases(ctx context.Context, repo string, perPage int) ([]*service.GitHubRelease, error) {
+	return c.fetchReleasePage(ctx, repo, perPage, 1)
+}
+
+func (c *githubReleaseClient) fetchReleasePage(ctx context.Context, repo string, perPage, page int) ([]*service.GitHubRelease, error) {
 	if perPage <= 0 {
 		perPage = 10
 	}
@@ -154,6 +162,9 @@ func (c *githubReleaseClient) FetchRecentReleases(ctx context.Context, repo stri
 		perPage = 100 // GitHub API hard limit
 	}
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=%d", repo, perPage)
+	if page > 1 {
+		url += fmt.Sprintf("&page=%d", page)
+	}
 
 	req, err := c.newAPIRequest(ctx, url)
 	if err != nil {
@@ -179,7 +190,7 @@ func (c *githubReleaseClient) FetchRecentReleases(ctx context.Context, repo stri
 }
 
 func (c *githubReleaseClient) DownloadFile(ctx context.Context, url, dest string, maxSize int64) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := c.newAssetRequest(ctx, url)
 	if err != nil {
 		return err
 	}
@@ -227,7 +238,7 @@ func (c *githubReleaseClient) DownloadFile(ctx context.Context, url, dest string
 }
 
 func (c *githubReleaseClient) FetchChecksumFile(ctx context.Context, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := c.newAssetRequest(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -242,5 +253,43 @@ func (c *githubReleaseClient) FetchChecksumFile(ctx context.Context, url string)
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024+1))
+	if len(data) > 1024*1024 {
+		return nil, fmt.Errorf("checksum file too large")
+	}
+	return data, err
+}
+
+// Authenticate API asset downloads only. Redirects to object storage explicitly
+// strip Authorization, including subdomains, so private repository tokens stay local.
+func (c *githubReleaseClient) newAssetRequest(ctx context.Context, rawURL string) (*http.Request, error) {
+	req, err := c.newAPIRequest(ctx, rawURL)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/octet-stream")
+	return req, nil
+}
+
+// Channels sharing a repository may publish at very different rates. Paginate
+// until enough matching releases are found; a busy sibling cannot hide updates.
+func (c *githubReleaseClient) FetchChannelReleases(ctx context.Context, repo, channel string, limit int) ([]*service.GitHubRelease, error) {
+	var result []*service.GitHubRelease
+	for page := 1; ; page++ {
+		releases, err := c.fetchReleasePage(ctx, repo, 100, page)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range releases {
+			if r != nil && strings.HasPrefix(r.TagName, channel+"/v") && !r.Draft && !r.Prerelease {
+				result = append(result, r)
+				if len(result) >= limit {
+					return result, nil
+				}
+			}
+		}
+		if len(releases) < 100 {
+			return result, nil
+		}
+	}
 }

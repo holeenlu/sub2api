@@ -19,6 +19,9 @@ export default {
 
   // Version Badge
   version: {
+    composeSetupRequired: 'この Docker 環境でオンライン更新を有効にするには、ホストの更新サービスを設定してください。',
+    composeUpdating: 'イメージを更新し、アプリコンテナを再作成しています。一時的に接続が切れることがあります。完了後に自動で再読み込みします。',
+    composeUpdateFailed: 'コンテナの更新に失敗しました。復元結果を確認してください：',
     currentVersion: '現在のバージョン',
     buildCommit: 'ビルドコミット [{commit}]',
     checkDisabled: 'オンライン更新チェックは無効です',
