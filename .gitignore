@@ -179,3 +179,6 @@ issues/
 
 # convert-go.mjs 的「已轉換」標記；只該出現在建置用的副本樹，不進版控
 .zh-tw-converted
+
+# Python release/update tooling bytecode
+__pycache__/

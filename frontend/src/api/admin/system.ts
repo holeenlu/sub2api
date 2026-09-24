@@ -11,7 +11,16 @@ export interface ReleaseInfo {
   html_url: string
 }
 
+export interface ContainerUpdateStatus {
+  status: 'idle' | 'running' | 'succeeded' | 'failed'
+  version?: string
+  message?: string
+}
+
 export interface VersionInfo {
+  update_method?: 'binary' | 'compose' | 'manual'
+  release_channel?: string
+  container_update?: ContainerUpdateStatus
   build_commit?: string
   current_version: string
   latest_version: string

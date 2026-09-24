@@ -21,6 +21,10 @@ export default {
 
   // Version Badge
   version: {
+    composeSetupRequired: '此 Docker 部署尚未連線宿主機更新服務，請先按部署文件啟用線上更新。',
+    composeUpdating: '正在更新映像並重建應用容器，連線可能短暫中斷，完成後自動重新整理。',
+    composeUpdateFailed: '容器更新失敗，請檢查恢復結果：',
+
     currentVersion: '目前版本',
     buildCommit: '編譯提交 [{commit}]',
     checkDisabled: '已關閉線上版本檢查',

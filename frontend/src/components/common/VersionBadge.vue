@@ -126,6 +126,11 @@
 
               <!-- Update-check UI is hidden entirely when online version check is disabled -->
               <template v-if="!updateDisabled">
+                <p v-if="manualUpdate" class="text-xs text-amber-600">{{ t('version.composeSetupRequired') }}</p>
+                <p v-if="containerBusy" class="text-xs text-blue-600">{{ t('version.composeUpdating') }}</p>
+                <p v-if="appStore.containerUpdate?.status === 'failed'" class="text-xs text-red-600">
+                  {{ t('version.composeUpdateFailed') }} {{ appStore.containerUpdate.message }}
+                </p>
                 <!-- Priority 1: Update error (must check before hasUpdate) -->
                 <div v-if="updateError" class="space-y-2">
                   <div
@@ -154,7 +159,7 @@
                   <!-- Retry button -->
                   <button
                     @click="handleUpdate"
-                    :disabled="updating"
+                    :disabled="updating || containerBusy || manualUpdate"
                     class="flex w-full items-center justify-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {{ t('version.retry') }}
@@ -332,7 +337,7 @@
                   <!-- Update button -->
                   <button
                     @click="handleUpdate"
-                    :disabled="updating"
+                    :disabled="updating || containerBusy || manualUpdate"
                     class="flex w-full items-center justify-center gap-2 rounded-lg bg-primary-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <svg v-if="updating" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -489,7 +494,7 @@
                             v-for="item in rollbackVersions"
                             :key="item.version"
                             @click="selectRollbackVersion(item.version)"
-                            :disabled="rollingBack"
+                            :disabled="rollingBack || containerBusy"
                             class="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60"
                             :class="
                               selectedRollbackVersion === item.version
@@ -597,7 +602,7 @@
 
                               <button
                                 @click="handleRollback"
-                                :disabled="rollingBack"
+                                :disabled="rollingBack || containerBusy || manualUpdate"
                                 class="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 <svg
@@ -651,7 +656,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import {
@@ -695,6 +700,25 @@ const buildCommit = computed(() => {
   return /^[a-f0-9]{7,40}$/i.test(commit) ? commit.toLowerCase() : ''
 })
 const updateDisabled = computed(() => appStore.updateDisabled)
+const containerBusy = computed(() => appStore.containerUpdate?.status === 'running')
+const manualUpdate = computed(() => appStore.updateMethod === 'manual')
+let composePoll: ReturnType<typeof setInterval> | undefined
+function startComposePolling() {
+  if (composePoll) return
+  composePoll = setInterval(async () => {
+    appStore.clearVersionCache()
+    const info = await appStore.fetchVersion(false)
+    if (info?.container_update?.status === 'succeeded') {
+      clearInterval(composePoll)
+      composePoll = undefined
+      window.location.reload()
+    } else if (info?.container_update?.status === 'failed') {
+      clearInterval(composePoll)
+      composePoll = undefined
+    }
+  }, 5000)
+}
+watch(containerBusy, busy => { if (busy) startComposePolling() }, { immediate: true })
 // With online update checking off, the badge is version-only: no update dot, no status text
 const showUpdateState = computed(() => hasUpdate.value && !updateDisabled.value)
 
@@ -721,16 +745,16 @@ const { copied, copyToClipboard } = useClipboard()
 
 // Manual rollback methods differ by deployment: script installs use install.sh,
 // docker deployments pin the image tag instead
-const manualTab = ref<'script' | 'docker'>('script')
+const manualTab = ref<'script' | 'docker'>(appStore.updateMethod === 'binary' ? 'script' : 'docker')
 
-const manualTabs = computed(() => [
+const manualTabs = computed(() => appStore.updateMethod === 'binary' ? [
   { key: 'script' as const, label: t('version.deployScript') },
   { key: 'docker' as const, label: t('version.deployDocker') }
-])
+] : [{ key: 'docker' as const, label: t('version.deployDocker') }])
 
 const scriptRollbackCommand = computed(() => {
   if (!selectedRollbackVersion.value) return ''
-  const tag = `v${selectedRollbackVersion.value}`
+  const tag = `${appStore.releaseChannel ? appStore.releaseChannel + '/' : ''}v${selectedRollbackVersion.value}`
   return `curl -sSL https://raw.githubusercontent.com/${GITHUB_REPO}/${tag}/deploy/install.sh | sudo bash -s -- rollback ${tag}`
 })
 
@@ -784,6 +808,10 @@ async function handleUpdate() {
     successKind.value = 'update'
     updateSuccess.value = true
     needRestart.value = result.need_restart
+    if (!result.need_restart) {
+      appStore.containerUpdate = { status: 'running' }
+      startComposePolling()
+    }
     // Clear version cache to reflect update completed
     appStore.clearVersionCache()
   } catch (error: unknown) {
@@ -858,6 +886,10 @@ async function handleRollback() {
     successKind.value = 'rollback'
     updateSuccess.value = true
     needRestart.value = result.need_restart
+    if (!result.need_restart) {
+      appStore.containerUpdate = { status: 'running' }
+      startComposePolling()
+    }
     rollbackPanelOpen.value = false
     // Clear version cache so the next check reflects the rolled-back version
     appStore.clearVersionCache()
@@ -939,6 +971,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (composePoll) clearInterval(composePoll)
   document.removeEventListener('click', handleClickOutside)
 })
 </script>

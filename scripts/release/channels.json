@@ -1,0 +1,5 @@
+{
+  "sub2api": {"repository": "holeenlu/sub2api", "branch": "main", "image": "ghcr.io/holeenlu/sub2api", "zh_tw": false},
+  "kdan": {"repository": "holeenlu/sub2api", "branch": "KDAN", "image": "ghcr.io/holeenlu/kdan", "zh_tw": true},
+  "tapmodels": {"repository": "erwinlin/TapModels", "branch": "main", "image": "ghcr.io/erwinlin/tapmodels", "zh_tw": true}
+}
