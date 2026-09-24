@@ -23,6 +23,13 @@ describe('VersionBadge Compose updates', () => {
     await wrapper.find('button').trigger('click')
     return wrapper
   }
+  it('shows a failed release check instead of claiming the version is current', async () => {
+    state.app.updateWarning = 'GitHub API returned 404'
+    state.app.hasUpdate = false
+    const wrapper = await open()
+    expect(wrapper.text()).toContain('GitHub API returned 404')
+    wrapper.unmount()
+  })
   it('disables online update for Docker deployments without the host updater', async () => {
     state.app.updateMethod = 'manual'
     const wrapper = await open()
