@@ -139,13 +139,16 @@ def main():
             run("gh", "api", "-X", "POST", f"repos/{cfg['repository']}/git/refs",
                 "-f", "ref=refs/tags/" + tag, "-f", "sha=" + head)
         # Reserve once. Failed builds leave a draft which the same SHA resumes.
-        run("gh", "release", "create", tag, "--draft", "--verify-tag", "--target", head,
-            "--title", f"{channel} {version}", "--notes-file", "release-notes.md")
+        # Use the creation response directly. The list endpoint can lag behind
+        # a successful create and omit the draft, especially after a tag reset.
+        Path("release-request.json").write_text(json.dumps(dict(tag_name=tag,
+            target_commitish=head, name=f"{channel} {version}", draft=True,
+            body=Path("release-notes.md").read_text())))
+        release = json.loads(run("gh", "api", "--method", "POST",
+            f"repos/{cfg['repository']}/releases", "--input", "release-request.json"))
         reserved_tag = git("ls-remote", "--tags", "origin", "refs/tags/" + tag)
         if not reserved_tag or reserved_tag.split()[0] != head:
             raise ValueError("Reserved tag does not match the build commit")
-        release = next(r for page in json.loads(run("gh", "api", "--paginate", "--slurp",
-            f"repos/{cfg['repository']}/releases?per_page=100")) for r in page if r["tag_name"] == tag)
     Path("release-plan.json").write_text(json.dumps(plan, indent=2) + "\n")
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
         for key, value in {**plan, "release_id": release["id"], "publish": True, "promote": True}.items():
