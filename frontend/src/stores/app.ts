@@ -50,6 +50,7 @@ export const useAppStore = defineStore('app', () => {
   const updateDisabled = ref<boolean>(false)
   const updateMethod = ref<'binary' | 'compose' | 'manual'>('binary')
   const releaseChannel = ref('')
+  const updateWarning = ref('')
   const containerUpdate = ref<import('@/api/admin/system').ContainerUpdateStatus | undefined>()
   const releaseInfo = ref<ReleaseInfo | null>(null)
 
@@ -264,6 +265,7 @@ export const useAppStore = defineStore('app', () => {
         disabled: updateDisabled.value,
         update_method: updateMethod.value,
         release_channel: releaseChannel.value,
+        warning: updateWarning.value || undefined,
         container_update: containerUpdate.value
       }
     }
@@ -285,6 +287,7 @@ export const useAppStore = defineStore('app', () => {
       updateDisabled.value = data.disabled === true
       updateMethod.value = data.update_method || 'binary'
       releaseChannel.value = data.release_channel || ''
+      updateWarning.value = data.warning || ''
       containerUpdate.value = data.container_update
       releaseInfo.value = data.release_info || null
       versionLoaded.value = true
@@ -490,6 +493,7 @@ export const useAppStore = defineStore('app', () => {
     updateDisabled,
     updateMethod,
     releaseChannel,
+    updateWarning,
     containerUpdate,
     releaseInfo,
 

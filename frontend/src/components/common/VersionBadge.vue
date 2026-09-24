@@ -96,7 +96,7 @@
                   <span v-else class="text-2xl font-bold text-gray-400 dark:text-dark-500">--</span>
                   <!-- Show check mark when up to date -->
                   <span
-                    v-if="!hasUpdate && !updateDisabled"
+                    v-if="!hasUpdate && !updateDisabled && !appStore.updateWarning"
                     class="flex h-5 w-5 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30"
                   >
                     <svg
@@ -115,7 +115,7 @@
                 <p v-if="buildCommit" :title="buildCommit" data-testid="build-commit" class="mt-1 break-words text-xs text-gray-500 dark:text-dark-400">
                   {{ t('version.buildCommit', { commit: buildCommit.slice(0, 9) }) }}
                 </p>
-                <p v-if="!updateDisabled" class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+                <p v-if="!updateDisabled && !appStore.updateWarning" class="mt-1 text-xs text-gray-500 dark:text-dark-400">
                   {{
                     hasUpdate
                       ? t('version.latestVersion') + ': v' + latestVersion
@@ -126,6 +126,7 @@
 
               <!-- Update-check UI is hidden entirely when online version check is disabled -->
               <template v-if="!updateDisabled">
+                <p v-if="appStore.updateWarning" class="mb-2 text-xs text-amber-600">{{ appStore.updateWarning }}</p>
                 <p v-if="manualUpdate" class="text-xs text-amber-600">{{ t('version.composeSetupRequired') }}</p>
                 <p v-if="containerBusy" class="text-xs text-blue-600">{{ t('version.composeUpdating') }}</p>
                 <p v-if="appStore.containerUpdate?.status === 'failed'" class="text-xs text-red-600">
