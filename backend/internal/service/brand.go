@@ -20,5 +20,5 @@ const (
 	// DefaultReleaseRepo is the GitHub "owner/repo" whose releases the online
 	// update check and self-update follow. Keep in sync with RELEASE_REPO in
 	// frontend/src/config/brand.ts.
-	DefaultReleaseRepo = "Wei-Shaw/sub2api"
+	DefaultReleaseRepo = "holeenlu/sub2api"
 )

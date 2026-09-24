@@ -26,7 +26,7 @@ services:
   sub2api:
     # Override the application image via SUB2API_IMAGE in .env (a pinned release
     # tag/digest or a locally built image); falls back to the published image.
-    image: ${SUB2API_IMAGE:-weishaw/sub2api:latest}
+    image: ${SUB2API_IMAGE:-ghcr.io/holeenlu/sub2api:latest}
     container_name: sub2api
     restart: unless-stopped
     # The daemon default is unbounded json-file. Applied to 45.78.66.2 on

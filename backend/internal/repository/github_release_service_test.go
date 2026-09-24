@@ -480,3 +480,41 @@ func (s *GitHubReleaseServiceSuite) TestFetchChecksumFile_ContextCancel() {
 func TestGitHubReleaseServiceSuite(t *testing.T) {
 	suite.Run(t, new(GitHubReleaseServiceSuite))
 }
+
+func TestGitHubReleasePrivateAssetDownload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "Bearer secret", r.Header.Get("Authorization"))
+		require.Equal(t, "application/octet-stream", r.Header.Get("Accept"))
+		_, _ = w.Write([]byte("asset"))
+	}))
+	defer server.Close()
+	client := newTestGitHubReleaseClient()
+	client.updateGitHubToken = "secret"
+	client.downloadHTTPClient.Transport = &testTransport{testServerURL: server.URL}
+	client.httpClient.Transport = &testTransport{testServerURL: server.URL}
+	path := filepath.Join(t.TempDir(), "asset.tar.gz")
+	require.NoError(t, client.DownloadFile(context.Background(), "https://api.github.com/repos/test/repo/releases/assets/1", path, 100))
+	body, err := client.FetchChecksumFile(context.Background(), "https://api.github.com/repos/test/repo/releases/assets/2")
+	require.NoError(t, err)
+	require.Equal(t, "asset", string(body))
+}
+
+func TestGitHubReleaseChannelPagination(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Query().Get("page") == "2" {
+			_, _ = w.Write([]byte(`[{"tag_name":"kdan/v0.2.8.1"}]`))
+		} else {
+			_, _ = w.Write([]byte("[" + strings.Repeat(`{"tag_name":"sub2api/v0.2.8.99"},`, 99) + `{"tag_name":"sub2api/v0.2.9"}]`))
+		}
+	}))
+	defer server.Close()
+	client := newTestGitHubReleaseClient()
+	client.httpClient.Transport = &testTransport{testServerURL: server.URL}
+	releases, err := client.FetchChannelReleases(context.Background(), "test/repo", "kdan", 3)
+	require.NoError(t, err)
+	require.Len(t, releases, 1)
+	require.Equal(t, "kdan/v0.2.8.1", releases[0].TagName)
+	require.Equal(t, 2, calls)
+}

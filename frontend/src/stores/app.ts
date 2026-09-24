@@ -48,6 +48,9 @@ export const useAppStore = defineStore('app', () => {
   const buildCommit = ref<string>('')
   // 後端 update.check_enabled=false 時為 true：沒有連線查過版本，徽章不該顯示「已是最新」
   const updateDisabled = ref<boolean>(false)
+  const updateMethod = ref<'binary' | 'compose' | 'manual'>('binary')
+  const releaseChannel = ref('')
+  const containerUpdate = ref<import('@/api/admin/system').ContainerUpdateStatus | undefined>()
   const releaseInfo = ref<ReleaseInfo | null>(null)
 
   // Auto-incrementing ID for toasts
@@ -257,7 +260,11 @@ export const useAppStore = defineStore('app', () => {
         upstream_version: upstreamVersion.value || undefined,
         build_commit: buildCommit.value || undefined,
         release_info: releaseInfo.value || undefined,
-        cached: true
+        cached: true,
+        disabled: updateDisabled.value,
+        update_method: updateMethod.value,
+        release_channel: releaseChannel.value,
+        container_update: containerUpdate.value
       }
     }
 
@@ -276,6 +283,9 @@ export const useAppStore = defineStore('app', () => {
       upstreamVersion.value = data.upstream_version || ''
       buildCommit.value = data.build_commit || ''
       updateDisabled.value = data.disabled === true
+      updateMethod.value = data.update_method || 'binary'
+      releaseChannel.value = data.release_channel || ''
+      containerUpdate.value = data.container_update
       releaseInfo.value = data.release_info || null
       versionLoaded.value = true
       return data
@@ -478,6 +488,9 @@ export const useAppStore = defineStore('app', () => {
     upstreamVersion,
     buildCommit,
     updateDisabled,
+    updateMethod,
+    releaseChannel,
+    containerUpdate,
     releaseInfo,
 
     // Computed

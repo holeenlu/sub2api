@@ -61,7 +61,7 @@ export const BRAND_COMPLIANCE_DOCUMENT_URL = {
 } as const
 
 /** GitHub "owner/repo" whose releases the version badge follows (= service.DefaultReleaseRepo). */
-export const RELEASE_REPO = 'Wei-Shaw/sub2api'
+export const RELEASE_REPO = 'holeenlu/sub2api'
 
 /** Container image published by the release pipeline (tags carry no "v" prefix). */
-export const RELEASE_DOCKER_IMAGE = 'weishaw/sub2api'
+export const RELEASE_DOCKER_IMAGE = 'ghcr.io/holeenlu/sub2api'

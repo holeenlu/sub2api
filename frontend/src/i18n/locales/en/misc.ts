@@ -19,6 +19,10 @@ export default {
 
   // Version Badge
   version: {
+    composeSetupRequired: 'Connect the host Compose updater to enable online updates for this Docker deployment.',
+    composeUpdating: 'Updating the image and recreating the app. The connection may briefly drop; this page reloads when ready.',
+    composeUpdateFailed: 'Container update failed. Check the recovery result:',
+
     currentVersion: 'Current Version',
     buildCommit: 'Build commit [{commit}]',
     checkDisabled: 'Online update check is disabled',
