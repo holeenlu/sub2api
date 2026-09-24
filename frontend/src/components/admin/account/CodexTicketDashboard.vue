@@ -186,7 +186,6 @@ const loading = ref(false)
 const error = ref('')
 const fingerprintCommit = ref('')
 const refreshingBank = ref(false)
-const models = ref<string[]>([])
 const accountDetail = ref<Account | null>(null)
 const participation = ref<tickets.TicketParticipation>({ enabled: true, models: {} })
 const accountLoaded = ref(false)
@@ -209,7 +208,7 @@ const attemptOptions = computed(() => [
   { value: 'all', label: text.value.all }, { value: 'success', label: text.value.success }, { value: 'failure', label: text.value.failure }
 ])
 const modelOptions = computed(() => [
-  { value: '', label: text.value.allModels }, ...models.value.map(model => ({ value: model, label: model }))
+  { value: '', label: text.value.allModels }, ...statuses.value.map(({ model }) => ({ value: model, label: model }))
 ])
 function formatTime(value?: string, clockOnly = false) {
   if (!value) return '—'
@@ -359,13 +358,13 @@ async function loadFingerprint(refresh = false) {
     const bank = await (refresh ? tickets.refreshFingerprint() : tickets.fingerprint())
     if (!isCurrent()) return
     fingerprintCommit.value = bank.commit
-    models.value = bank.models
   } catch (cause) { if (isCurrent()) error.value = extractApiErrorMessage(cause, text.value.error) }
   finally { if (isCurrent()) refreshingBank.value = false }
 }
 async function updateFingerprint() {
   error.value = ''
-  await Promise.all([loadFingerprint(true), loadAccount()])
+  await loadFingerprint(true)
+  await loadAccount()
 }
 async function reload() {
   if (!props.show || !props.account) return
@@ -412,7 +411,6 @@ watch(() => [props.show, props.account?.id], () => {
   refreshingBank.value = false
   busyModel.value = ''
   fingerprintCommit.value = ''
-  models.value = []
   error.value = ''
   loading.value = false
   ++loadSerial
@@ -429,6 +427,9 @@ watch(() => [props.show, props.account?.id], () => {
   reload()
 }, { immediate: true })
 watch([filter, modelFilter, startDay, endDay], () => { if (activeTab.value !== 'attempts' && activeTab.value !== 'invalidations') return; page.value = 1; loadEvents() })
+watch(statuses, current => {
+  if (modelFilter.value && !current.some(status => status.model === modelFilter.value)) modelFilter.value = ''
+})
 watch(page, loadEvents)
 onUnmounted(() => { ++accountSessionSerial; ++loadSerial })
 </script>

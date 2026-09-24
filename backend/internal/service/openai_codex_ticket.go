@@ -155,6 +155,9 @@ func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketCon
 	quota := openAICodexTicketQuota(account, now)
 	out := make([]OpenAICodexTicketStatus, 0, len(models))
 	for _, model := range models {
+		if !codexTicketAccountSupportsModel(account, model) {
+			continue
+		}
 		status := OpenAICodexTicketStatus{Model: model, HarvestPaused: openAICodexTicketHarvestLimited(account, model, now), QuotaResetAt: quota.resetAt, HarvestResumeAt: quota.resumeAt, HarvestEnabled: cfg.Enabled && account.Status == StatusActive && CodexTicketHarvestEnabled(account, model)}
 		var ticket *openAICodexTicket
 		if account.Extra != nil {
@@ -172,6 +175,33 @@ func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketCon
 		out = append(out, status)
 	}
 	return out
+}
+
+// Tickets belong to outbound models, so aliases share their mapped target's
+// ticket. An empty model restriction allows every model in the fingerprint bank.
+func codexTicketAccountSupportsModel(account *Account, model string) bool {
+	if account == nil {
+		return false
+	}
+	mapping := account.GetModelMapping()
+	if len(mapping) == 0 || account.IsOpenAIPassthroughEnabled() {
+		return true
+	}
+	model = normalizeOpenAICodexTicketModel(model)
+	for source, target := range mapping {
+		if normalizeOpenAICodexTicketModel(target) == model {
+			return true
+		}
+		// Whitelist patterns are stored as identity mappings. Respect exact and
+		// longest-prefix overrides when resolving a candidate from the bank.
+		if source == target && matchWildcard(source, model) {
+			resolved := account.GetMappedModel(model)
+			if resolved == source || normalizeOpenAICodexTicketModel(resolved) == model {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *OpenAIGatewayService) openAICodexTicketEnabled() bool {
