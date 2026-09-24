@@ -111,20 +111,20 @@
         {{ isSyncingUpstream ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
       </button>
       <button
-        v-if="canSyncAnthropicLive"
+        v-if="canSyncBatch"
         type="button"
-        data-testid="sync-live-anthropic-models"
-        @click="syncLiveAnthropicModels"
-        :disabled="isSyncingLiveAnthropic"
+        data-testid="sync-upstream-models-bulk"
+        @click="syncBatchModels"
+        :disabled="isSyncingBatch"
         class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
       >
-        {{ isSyncingLiveAnthropic ? t('admin.accounts.syncLiveAnthropicModelsLoading') : t('admin.accounts.syncLiveAnthropicModels') }}
+        {{ isSyncingBatch ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
       </button>
       <button
         v-if="modelsOutsideLiveIntersection.length > 0"
         type="button"
-        data-testid="replace-with-live-anthropic-models"
-        @click="replaceWithLiveAnthropicModels"
+        data-testid="replace-with-live-models"
+        @click="replaceWithLiveModels"
         class="rounded-lg border border-amber-200 px-3 py-1.5 text-sm text-amber-600 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/30"
       >
         {{ t('admin.accounts.syncLiveAnthropicModelsReplace', { count: modelsOutsideLiveIntersection.length }) }}
@@ -138,17 +138,21 @@
       </button>
     </div>
 
+    <p v-if="canSyncBatch" class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+      {{ t('admin.accounts.syncBulkUpstreamModelsHint') }}
+    </p>
+
     <!-- Accounts that did not answer the live model sync -->
     <div
-      v-if="liveAnthropicFailures.length > 0"
-      data-testid="live-anthropic-sync-failures"
+      v-if="liveFailures.length > 0"
+      data-testid="bulk-upstream-sync-failures"
       class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
     >
       <p class="font-medium">
-        {{ t('admin.accounts.syncLiveAnthropicModelsFailures', { count: liveAnthropicFailures.length }) }}
+        {{ t('admin.accounts.syncLiveAnthropicModelsFailures', { count: liveFailures.length }) }}
       </p>
       <ul class="mt-1 space-y-0.5">
-        <li v-for="failure in liveAnthropicFailures" :key="failure.account_id">
+        <li v-for="failure in liveFailures" :key="failure.account_id">
           {{ failure.name || `#${failure.account_id}` }} — {{ failure.error }}
         </li>
       </ul>
@@ -180,13 +184,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { accountsAPI } from '@/api/admin/accounts'
 import type {
   AnthropicModelSyncFailure,
-  SyncAnthropicModelsBulkFilters,
+  SyncUpstreamModelsBulkFilters,
   SyncUpstreamPreviewParams
 } from '@/api/admin/accounts'
 import { useClipboard } from '@/composables/useClipboard'
@@ -202,10 +206,10 @@ const props = defineProps<{
   platform?: string
   platforms?: string[]
   accountId?: number
-  /** Batch targets for the live Anthropic /v1/models sync (explicit selection). */
+  /** Batch targets for the live upstream model sync (explicit selection). */
   accountIds?: number[]
-  /** Batch targets for the live Anthropic /v1/models sync (filter selection). */
-  syncFilters?: SyncAnthropicModelsBulkFilters
+  /** Batch targets for the live upstream model sync (filter selection). */
+  syncFilters?: SyncUpstreamModelsBulkFilters
   syncCredentials?: {
     platform: string
     type: string
@@ -267,33 +271,36 @@ const canSyncUpstream = computed(() => {
   return false
 })
 
-// 批量编辑 Anthropic 账号时，同一份白名单要写给每个选中的账号，所以只有实时
-// /v1/models 的交集才是安全的。单账号编辑仍走 canSyncUpstream 那条路。
-const canSyncAnthropicLive = computed(() => {
-  return (
-    normalizedPlatforms.value.length === 1 &&
-    normalizedPlatforms.value[0].toLowerCase() === 'anthropic' &&
-    ((props.accountIds?.length ?? 0) > 0 || Boolean(props.syncFilters))
-  )
-})
+// A shared whitelist must only add models verified for every batch target.
+const canSyncBatch = computed(() =>
+  !props.accountId && !props.syncCredentials &&
+  ((props.accountIds?.length ?? 0) > 0 || Boolean(props.syncFilters)) &&
+  normalizedPlatforms.value.every(platform => upstreamSyncPlatforms.has(platform.toLowerCase()))
+)
 
-const isSyncingLiveAnthropic = ref(false)
-const liveAnthropicModels = ref<string[]>([])
-const liveAnthropicFailures = ref<AnthropicModelSyncFailure[]>([])
+const isSyncingBatch = ref(false)
+const liveModels = ref<string[]>([])
+const liveFailures = ref<AnthropicModelSyncFailure[]>([])
 
 // 已勾选但不在实时交集里的条目。它们未必非法（映射别名、上游刚下架的旧模型都
 // 会落在这里），所以只提示、不自动删除。
 const modelsOutsideLiveIntersection = computed(() => {
-  if (liveAnthropicModels.value.length === 0) return []
-  return props.modelValue.filter(model => !liveAnthropicModels.value.includes(model))
+  if (liveModels.value.length === 0) return []
+  return props.modelValue.filter(model => !liveModels.value.includes(model))
 })
+
+let batchRequestVersion = 0
+onBeforeUnmount(() => { batchRequestVersion += 1 })
 
 watch(
   () => [normalizedPlatforms.value.join(','), props.accountIds?.join(',') ?? '', props.syncFilters],
   () => {
-    liveAnthropicModels.value = []
-    liveAnthropicFailures.value = []
-  }
+    batchRequestVersion += 1
+    isSyncingBatch.value = false
+    liveModels.value = []
+    liveFailures.value = []
+  },
+  { deep: true, flush: 'sync' }
 )
 
 const availableOptions = computed(() => {
@@ -428,29 +435,27 @@ const syncUpstreamModels = async () => {
   }
 }
 
-const syncLiveAnthropicModels = async () => {
-  if (isSyncingLiveAnthropic.value || !canSyncAnthropicLive.value) return
+const syncBatchModels = async () => {
+  if (isSyncingBatch.value || !canSyncBatch.value) return
 
-  isSyncingLiveAnthropic.value = true
+  const requestVersion = ++batchRequestVersion
+  isSyncingBatch.value = true
+  liveModels.value = []
+  liveFailures.value = []
   try {
     const useIDs = (props.accountIds?.length ?? 0) > 0
-    const result = await accountsAPI.syncAnthropicModelsBulk({
+    const result = await accountsAPI.syncUpstreamModelsBulk({
       account_ids: useIDs ? props.accountIds : undefined,
-      filters: useIDs ? undefined : props.syncFilters,
-      aggregation: 'intersection',
-      // The resulting whitelist is written to every selected account. A
-      // partial intersection only describes the accounts that answered and
-      // is therefore unsafe to apply to the failures.
-      require_all: true
+      filters: useIDs ? undefined : props.syncFilters
     })
+    if (requestVersion !== batchRequestVersion) return
 
     const models = Array.from(new Set(result.models.map(model => model.trim()).filter(Boolean)))
-    liveAnthropicModels.value = models
-    liveAnthropicFailures.value = result.failures ?? []
+    liveFailures.value = result.failures ?? []
     // 整批失败也走 200，好让逐账号明细能随响应一起回来（错误响应带不了 data）。
-    if (result.error || liveAnthropicFailures.value.length > 0) {
+    if (result.error || liveFailures.value.length > 0) {
       const message = result.error || t('admin.accounts.syncLiveAnthropicModelsFailures', {
-        count: liveAnthropicFailures.value.length
+        count: liveFailures.value.length
       })
       appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
       return
@@ -459,6 +464,8 @@ const syncLiveAnthropicModels = async () => {
       appStore.showInfo(t('admin.accounts.syncUpstreamModelsEmpty'))
       return
     }
+
+    liveModels.value = models
 
     // 默认合并：实时列表是「上游现在确实支持什么」，不是「这个白名单应该是
     // 什么」。整体替换要管理员在看到差异之后再确认一次。
@@ -472,13 +479,7 @@ const syncLiveAnthropicModels = async () => {
     }
     emit('update:modelValue', merged)
 
-    if (liveAnthropicFailures.value.length > 0) {
-      appStore.showWarning(t('admin.accounts.syncLiveAnthropicModelsPartial', {
-        count: addedCount,
-        total: models.length,
-        failed: liveAnthropicFailures.value.length
-      }))
-    } else if (addedCount > 0) {
+    if (addedCount > 0) {
       appStore.showSuccess(t('admin.accounts.syncLiveAnthropicModelsSuccess', {
         count: addedCount,
         total: models.length
@@ -487,13 +488,14 @@ const syncLiveAnthropicModels = async () => {
       appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: models.length }))
     }
   } catch (error) {
+    if (requestVersion !== batchRequestVersion) return
     appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message: extractApiErrorMessage(error, t('admin.accounts.syncUpstreamModelsFailed')) }))
   } finally {
-    isSyncingLiveAnthropic.value = false
+    if (requestVersion === batchRequestVersion) isSyncingBatch.value = false
   }
 }
 
-const replaceWithLiveAnthropicModels = () => {
+const replaceWithLiveModels = () => {
   const dropped = modelsOutsideLiveIntersection.value
   if (dropped.length === 0) return
   if (!confirm(t('admin.accounts.syncLiveAnthropicModelsReplaceConfirm', {
@@ -502,7 +504,7 @@ const replaceWithLiveAnthropicModels = () => {
   }))) {
     return
   }
-  emit('update:modelValue', [...liveAnthropicModels.value])
+  emit('update:modelValue', [...liveModels.value])
 }
 
 const clearAll = () => {

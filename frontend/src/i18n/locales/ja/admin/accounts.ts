@@ -841,6 +841,7 @@ export default {
       searchModels: 'モデルを検索...',
       noMatchingModels: '一致するモデルがありません',
       fillRelatedModels: '最新のサポート対象モデルを同期',
+      syncBulkUpstreamModelsHint: '各対象アカウントの最新の上流モデル一覧を取得し、全アカウントが対応するモデルだけを追加します。既存項目は保持され、保存後に反映されます。',
       syncUpstreamModels: 'アップストリームのサポート対象モデルを同期',
       syncUpstreamModelsLoading: 'アップストリームを同期中...',
       syncUpstreamModelsSuccess: 'アップストリームから新しいモデルを{count}件同期しました（アップストリーム合計{total}件）',

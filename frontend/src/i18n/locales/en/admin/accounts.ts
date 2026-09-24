@@ -841,6 +841,7 @@ export default {
       searchModels: 'Search models...',
       noMatchingModels: 'No matching models',
       fillRelatedModels: 'Sync latest supported models',
+      syncBulkUpstreamModelsHint: 'Fetch the latest upstream lists for every target and add only models supported by all of them. Existing entries are kept; changes apply when you save.',
       syncUpstreamModels: 'Sync upstream supported models',
       syncUpstreamModelsLoading: 'Syncing upstream...',
       syncUpstreamModelsSuccess: 'Synced {count} new model(s) from upstream ({total} upstream total)',

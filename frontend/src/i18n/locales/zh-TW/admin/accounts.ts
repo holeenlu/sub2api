@@ -950,6 +950,7 @@ export default {
       searchModels: '搜尋模型...',
       noMatchingModels: '沒有匹配的模型',
       fillRelatedModels: '同步最新支援模型',
+      syncBulkUpstreamModelsHint: '查詢每個目標帳號的最新上游列表，只補入所有帳號共同支援的模型。已有項目不會自動刪除，儲存後生效。',
       syncUpstreamModels: '同步上游支援的模型',
       syncUpstreamModelsLoading: '同步上游中...',
       syncUpstreamModelsSuccess: '已從上游同步 {count} 個新模型（上游共 {total} 個）',
