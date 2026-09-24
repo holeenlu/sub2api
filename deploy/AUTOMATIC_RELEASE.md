@@ -22,7 +22,7 @@ origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但
 - 合入超过正式标签的未发版提交：0.2.9.1。多个本地修改一次推送视为一次发布。
 - 每个渠道独立计数。失败保留 draft 和版本预留，同一 SHA 重试沿用原号；已发布同一 SHA 不重复构建。旧任务不会将 latest 倒退。
 - 并发任务排队；GitHub 的 queue:max 上限为 100，超过平台队列上限需重跑。草稿不是可更新版本。
-- VERSION 文件仍代表上游源码基准；实际运行版本、提交 SHA、上游版本由编译参数写入，不创建回写 VERSION 的循环提交。
+- VERSION 文件仍代表上游源码基准；实际运行版本、提交 SHA、上游版本由编译参数写入，不创建回写 VERSION 的循环提交。Git 标签不会自动改写已部署二进制的版本号；本地应急构建必须使用该渠道、该提交对应的发布计划版本，不能固定填写 `.1`。标签可能仅是失败构建预留，须核对正式 Release、清单和镜像后才能声称发布成功。
 
 仓库 Actions 需要允许 `contents: write` 和 `packages: write`，GHCR 包需要授予该仓库 Actions 写权限。默认使用 GITHUB_TOKEN；无需 PAT 发版。GitHub 的 token 创建标签不会再次触发普通 push 工作流，因此完整发布在同一流程完成。
 
@@ -53,7 +53,7 @@ origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但
 
 ## 生产启用（一次性）
 
-**本功能的代码推送不安装或更新生产服务器。** 需要先把含此功能的版本部署一次，再配置宿主机更新服务。仅适用于 Linux + systemd + Docker Compose v2，应用服务名使用 sub2api/kdan/tapmodels，且只有一个应用容器。现有 PostgreSQL/Redis 不重建，数据卷保留。
+**本功能的代码推送不安装或更新生产服务器。** 需要先把含此功能的版本部署一次，再配置宿主机更新服务。仅适用于 Linux + systemd + Docker Compose v2，且只有一个应用容器。渠道名与 Compose 服务名可以不同，安装时用 `--service` 指定真实服务名。现有 PostgreSQL/Redis 不重建，数据卷保留。
 
 1. 备份数据库和现有 Compose 配置。新版本可能执行数据库迁移；镜像恢复不撤销迁移。
 2. 私有 GHCR 镜像：在宿主机以运行更新服务的 root 用户执行 `docker login ghcr.io`，使用有 `read:packages` 权限的凭据。GitHub Release 私有仓库读取另需有 Contents:read 权限的 token，存入仅 root 可读的文件，例如 `/etc/sub2api-updater.github-token`（chmod 600）；同时在应用 `.env` 配置 `UPDATE_GITHUB_TOKEN`。公开仓库可省略 token 文件参数。
@@ -66,7 +66,7 @@ origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但
      --github-token-file /etc/sub2api-updater.github-token
    ```
 
-   `--directory`、`--project-name` 必须取现有部署真实值。可用 `docker inspect <应用容器> --format '{{ index .Config.Labels "com.docker.compose.project" }}'` 查询项目名。已有多个 override 时按原顺序重复 `--compose-file`，避免丢失现有端口、网络或挂载配置。目录及配置必须 root 所有、不能组/其他用户可写。默认应用 GID 为 1000；自定义 UID/GID 部署用 `--socket-gid` 指定。
+   `--directory`、`--project-name` 必须取现有部署真实值。默认服务名与渠道相同；历史 KDAN 部署若服务名为 `sub2api`，必须补充 `--service sub2api`，不会因此改变 KDAN 发布渠道。安装器会在写入配置前验证服务存在，并为 `/root` 等受 systemd 保护的部署目录配置限定范围的写入权限。再次运行安装器会重启服务以加载新配置。可用 `docker inspect <应用容器> --format '{{ index .Config.Labels "com.docker.compose.project" }}'` 查询项目名。已有多个 override 时按原顺序重复 `--compose-file`，避免丢失现有端口、网络或挂载配置。目录及配置必须 root 所有、不能组/其他用户可写。默认应用 GID 为 1000；自定义 UID/GID 部署用 `--socket-gid` 指定。
 4. 安装器仅启动宿主机更新服务，并打印连接应用所需的完整 Compose 命令。确认使用的是新版本镜像后执行该命令，完成一次应用重建。私有仓库 token/代理也须设置于宿主机服务环境（例如 systemd 的 HTTPS_PROXY）。
 5. 管理后台点击版本号 → 检查更新 → 立即更新。宿主机重新读取对应 GitHub 正式 Release，校验渠道、版本、固定镜像和摘要，拉取镜像，只重建应用服务。网页短暂断线后会自动刷新。
 
@@ -81,3 +81,7 @@ origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但
 未安装更新服务的 Docker 部署仍可检测新版本，但禁用在线更新按钮，避免仅替换容器内二进制而在下次重建时丢失更新。直接运行二进制的部署沿用原有校验和下载、原子替换、手动重启机制。
 
 参考：[GitHub 并发队列](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)、[GitHub Release 资产下载](https://docs.github.com/en/rest/releases/assets)。
+
+### 私有仓库返回 404
+
+GitHub 会对无权访问的私有仓库返回 404。先核对应用 `UPDATE_GITHUB_TOKEN` 是否配置，以及该 Token 是否能读取**本品牌的仓库**；能读取 `holeenlu/sub2api` 不代表能读取 `erwinlin/TapModels`。服务器的应用检查、宿主机 Release 清单下载、GHCR 镜像拉取是三个独立连接，分别需要应用环境变量、`--github-token-file` 和宿主机 Docker 登录。无成功发布的渠道也没有可安装版本；创建 Git 标签或提高页面版本号不能代替发布镜像。
