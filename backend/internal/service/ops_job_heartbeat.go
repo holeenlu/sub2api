@@ -5,8 +5,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/robfig/cron/v3"
 )
 
 const opsJobHeartbeatTimeout = 2 * time.Second
@@ -18,37 +16,6 @@ func opsJobIntervalSeconds(d time.Duration) *int64 {
 		v = 0
 	}
 	return &v
-}
-
-// opsCronProbeCount 是估算周期时向前探的触发次数。10 次足以让「工作日」「每月某日」
-// 这类不等距表达式走完一个完整循环，从而看到真正的最大间隔。
-const opsCronProbeCount = 10
-
-// opsCronInterval 估算 cron 表达式的触发周期，用作任务自报周期。
-//
-// 取未来若干次触发间隔的最大值，而不是紧邻的那一段：'0 3 * * 1-5' 的相邻间隔在
-// 周一至周四是 24h、周五是 72h，只看一段的话自报周期会随服务启动时刻漂移，判活阈值
-// （3 倍周期）可能比真实的最大间隔还短，正常运行的任务会被误判失联。
-func opsCronInterval(sched cron.Schedule, now time.Time) time.Duration {
-	if sched == nil {
-		return 0
-	}
-	prev := sched.Next(now)
-	if prev.IsZero() {
-		return 0
-	}
-	var longest time.Duration
-	for range opsCronProbeCount {
-		next := sched.Next(prev)
-		if next.IsZero() || !next.After(prev) {
-			break
-		}
-		if gap := next.Sub(prev); gap > longest {
-			longest = gap
-		}
-		prev = next
-	}
-	return longest
 }
 
 // recordOpsJobSuccess 记一条成功心跳。result 为空时记 "ok"，让仪表盘不至于空着。

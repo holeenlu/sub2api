@@ -1,6 +1,10 @@
 # 自动发布与 Docker Compose 在线更新
 
-发布入口为 `.github/workflows/automatic-release.yml`。参考 sub4api 的 main 自动发布与原作者的 Release 安装包机制，统一构建 Linux amd64/arm64 镜像、二进制包、checksums.txt、release-manifest.json；每次推送正式交付分支后自动发布。无需手动改 VERSION、打标签，也不需要 Docker Hub 凭据。
+发布入口为 `.github/workflows/automatic-release.yml`。构建采用原作者 Sub2API 的 Release 流程和工具：前端构建一次 → GoReleaser 分平台构建二进制及安装包 → 校验完整构建矩阵 → 用同一批 Linux 二进制打包 Docker 镜像 → 发布 GitHub Release。每次推送正式交付分支后自动分配版本并运行，无需手动改 VERSION、打标签，也不需要 Docker Hub 凭据。
+
+复用 `.goreleaser.yaml`、`.github/release-tools/release_matrix.py`、`release-images.sh` 和 `Dockerfile.goreleaser`。标准矩阵与原作者相同：Linux amd64/arm64、macOS amd64/arm64、Windows amd64；镜像支持 Linux amd64/arm64。镜像构建不再重新编译前后端。参考源码：[原作者 Release 工作流](https://github.com/Wei-Shaw/sub2api/blob/a3eb7ef302961cba716dc78b39b93b60c467db0e/.github/workflows/release.yml)。
+
+定制部分仅负责自动版本分配、渠道信息、发布草稿和在线更新清单。四段版本通过 GoReleaser snapshot 的版本模板打包，以独立的发布步骤上传到预留的正式 Release；不会把四段版本交给严格的 SemVer 标签解析。所有平台产物验证完成后才发布，GitHub Release 发布成功后才将对应镜像摘要提升为 `latest`。
 
 | 渠道 | 仓库 / 分支 | Release 标签 | GHCR 镜像 |
 | --- | --- | --- | --- |
@@ -21,6 +25,23 @@ origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但
 - VERSION 文件仍代表上游源码基准；实际运行版本、提交 SHA、上游版本由编译参数写入，不创建回写 VERSION 的循环提交。
 
 仓库 Actions 需要允许 `contents: write` 和 `packages: write`，GHCR 包需要授予该仓库 Actions 写权限。默认使用 GITHUB_TOKEN；无需 PAT 发版。GitHub 的 token 创建标签不会再次触发普通 push 工作流，因此完整发布在同一流程完成。
+
+## 启用与排障
+
+1. 仓库 Settings → Actions → General 启用 Actions，并允许工作流使用其中的官方 Actions。工作流已按 job 声明所需写权限，不需要将仓库的默认 token 权限整体改成写入。
+2. 私有仓库必须有可用的 Actions 额度。若运行页面 Annotations 提示付款失败或 spending limit，且 job 没有执行步骤，需要账号持有人在 Billing & licensing / Billing & plans 处理付款或预算；更换 PAT 或修改构建脚本不能解除该限制。
+3. 首次发布会由仓库自身的 `GITHUB_TOKEN` 创建或写入对应 GHCR 包。若出现 package write denied，检查包设置中的 Manage Actions access，确保实际发布仓库具备写权限。
+4. 恢复运行条件后，在 Actions → Automatic versioned release → Run workflow 选择 `main` 或 `KDAN`。TapModels 在 `erwinlin/TapModels` 的 `main` 上运行。也可使用以下命令，重试同一提交会沿用已有草稿，不会重复分配版本：
+
+   ```sh
+   gh workflow run automatic-release.yml --repo holeenlu/sub2api --ref main
+   gh workflow run automatic-release.yml --repo holeenlu/sub2api --ref KDAN
+   gh run list --repo holeenlu/sub2api --workflow automatic-release.yml
+   ```
+
+5. 验收要求：工作流成功；GitHub Release 为非草稿，包含五个平台安装包、`checksums.txt`、`release-manifest.json`；GHCR 数字版本具有 amd64/arm64 两个平台，`latest` 指向清单中的同一摘要。仅提交或推送成功不代表镜像发布成功。
+
+本机 Fine-grained PAT 用于读取私有仓库和 Actions，不注入发布工作流。Actions API 的读取与 Checks API 的失败注释不同；若细粒度 Token 不能访问 Checks API，可在已登录 GitHub 的运行页面查看 Annotations，无需反复重新生成 Token。
 
 ## 生产启用（一次性）
 
