@@ -66,8 +66,7 @@ export const BRAND_COMPLIANCE_DOCUMENT_URL = {
 
 /**
  * GitHub "owner/repo" whose releases the version badge follows (= service.DefaultReleaseRepo).
- * TODO(brand): KDAN has no dedicated release repository yet; this follows the
- * holeenlu/sub2api mirror until one exists.
+ * KDAN uses the kdan/v* release channel in this shared repository.
  */
 export const RELEASE_REPO = 'holeenlu/sub2api'
 

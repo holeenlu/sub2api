@@ -1,7 +1,6 @@
 name: KDAN · Docker 映像與 Release
 
-# KDAN 更新发布分支/SHA 镜像；数字版本 tag 另发布版本镜像和 latest
-# 與 :latest，並開一個 GitHub Release（版本徽章讀的就是這個 release）。
+# Legacy manual diagnostic builds only. Automatic publication is owned by automatic-release.yml.
 
 on:
   push:
@@ -19,7 +18,7 @@ on:
       push:
         description: 是否推送到 GHCR
         required: false
-        default: true
+        default: false
         type: boolean
 
 concurrency:
@@ -32,7 +31,7 @@ permissions:
 
 jobs:
   build:
-    if: github.repository == 'holeenlu/sub2api'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'holeenlu/sub2api'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:

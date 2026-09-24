@@ -2105,7 +2105,7 @@ func setDefaults() {
 	// (holeenlu/sub2api). Off by default for this brand, which has no release
 	// channel of its own yet; set UPDATE_CHECK_ENABLED=true to let a deployment
 	// reach GitHub.
-	viper.SetDefault("update.check_enabled", false)
+	viper.SetDefault("update.check_enabled", true)
 
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
 	// declare its relying-party domain and trusted browser origins.

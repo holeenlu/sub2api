@@ -24,7 +24,7 @@ const (
 	// DefaultReleaseRepo is the GitHub "owner/repo" whose releases the online
 	// update check and self-update follow. Keep in sync with RELEASE_REPO in
 	// frontend/src/config/brand.ts.
-	// TODO(brand): KDAN has no dedicated release repository yet; the update
-	// check follows the holeenlu/sub2api mirror until one exists.
+	// KDAN releases share this repository with the public channel; the build
+	// injects ReleaseChannel=kdan to isolate update and rollback selection.
 	DefaultReleaseRepo = "holeenlu/sub2api"
 )
