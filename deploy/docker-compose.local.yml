@@ -216,7 +216,7 @@ services:
       # =======================================================================
       # Enable checking GitHub releases for updates and the self-update UI
       # 是否检查上游发布并显示自更新入口，白标构建默认关闭
-      - UPDATE_CHECK_ENABLED=${UPDATE_CHECK_ENABLED:-false}
+      - UPDATE_CHECK_ENABLED=${UPDATE_CHECK_ENABLED:-true}
       # Proxy for accessing GitHub (online updates + pricing data)
       # Examples: http://host:port, socks5://host:port
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}

@@ -2103,7 +2103,7 @@ func setDefaults() {
 	// Update: online version check / self-update against the release repository
 	// (erwinlin/TapModels, private). Off by default for this brand; set
 	// UPDATE_CHECK_ENABLED=true to let a deployment reach GitHub.
-	viper.SetDefault("update.check_enabled", false)
+	viper.SetDefault("update.check_enabled", true)
 
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
 	// declare its relying-party domain and trusted browser origins.

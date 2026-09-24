@@ -67,5 +67,5 @@ export const BRAND_COMPLIANCE_DOCUMENT_URL = {
 /** GitHub "owner/repo" whose releases the version badge follows (= service.DefaultReleaseRepo). */
 export const RELEASE_REPO = 'erwinlin/TapModels'
 
-/** GHCR image published by tapmodels-docker-image.yml (tags carry no "v" prefix, e.g. 1.0.0). */
+/** GHCR image published by automatic-release.yml (tags carry no "v" prefix, e.g. 1.0.0). */
 export const RELEASE_DOCKER_IMAGE = 'ghcr.io/erwinlin/tapmodels'
