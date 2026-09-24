@@ -4,6 +4,7 @@ import { nextTick } from 'vue'
 import BulkEditAccountModal from '../BulkEditAccountModal.vue'
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
 import { adminAPI } from '@/api/admin'
+import { accountsAPI } from '@/api/admin/accounts'
 
 const { showError, showSuccess, translate } = vi.hoisted(() => ({
   showError: vi.fn(),
@@ -31,7 +32,7 @@ vi.mock('@/api/admin', () => ({
 vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn(),
   accountsAPI: {
-    syncAnthropicModelsBulk: vi.fn(),
+    syncUpstreamModelsBulk: vi.fn(),
     syncUpstreamModels: vi.fn(),
     syncUpstreamModelsPreview: vi.fn()
   }
@@ -140,6 +141,17 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.text()).toContain('gemini-3.1-flash-image')
     expect(wrapper.text()).toContain('gemini-2.5-flash-image')
     expect(wrapper.text()).not.toContain('gpt-5.3-codex')
+  })
+
+  it('OpenAI 批量同步补入实时白名单，保存前不更新账号', async () => {
+    vi.mocked(accountsAPI.syncUpstreamModelsBulk).mockResolvedValue({ models: ['gpt-upstream-new'], failures: [], account_count: 2, aggregation: 'intersection', source: 'upstream_models' })
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent(ModelWhitelistSelector).props('modelValue')).toEqual(['gpt-upstream-new'])
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    await wrapper.setProps({ show: false })
+    expect(wrapper.findComponent(ModelWhitelistSelector).exists()).toBe(false)
   })
 
   it('选中模式把账号 ID 交给实时模型同步组件', async () => {

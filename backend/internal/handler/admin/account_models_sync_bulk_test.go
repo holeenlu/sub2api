@@ -85,6 +85,7 @@ func setupAnthropicModelsBulkRouter(adminSvc service.AdminService, upstream serv
 	}
 	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, accountTestSvc, nil, nil, nil, nil, nil)
 	router.POST("/api/v1/admin/accounts/models/sync-anthropic-bulk", handler.SyncAnthropicModelsBulk)
+	router.POST("/api/v1/admin/accounts/models/sync-upstream-bulk", handler.SyncUpstreamModelsBulk)
 	return router
 }
 

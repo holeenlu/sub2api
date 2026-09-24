@@ -948,6 +948,7 @@ export default {
       searchModels: '搜索模型...',
       noMatchingModels: '没有匹配的模型',
       fillRelatedModels: '同步最新支持模型',
+      syncBulkUpstreamModelsHint: '查询每个目标账号的最新上游列表，只补入所有账号共同支持的模型。已有条目不会自动删除，保存后生效。',
       syncUpstreamModels: '同步上游支持的模型',
       syncUpstreamModelsLoading: '同步上游中...',
       syncUpstreamModelsSuccess: '已从上游同步 {count} 个新模型（上游共 {total} 个）',

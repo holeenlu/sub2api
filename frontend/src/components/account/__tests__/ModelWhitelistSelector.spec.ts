@@ -7,7 +7,7 @@ const {
   showSuccess,
   showInfo,
   showWarning,
-  syncAnthropicModelsBulk,
+  syncUpstreamModelsBulk,
   syncUpstreamModels,
   syncUpstreamModelsPreview
 } = vi.hoisted(() => ({
@@ -16,7 +16,7 @@ const {
   showSuccess: vi.fn(),
   showInfo: vi.fn(),
   showWarning: vi.fn(),
-  syncAnthropicModelsBulk: vi.fn(),
+  syncUpstreamModelsBulk: vi.fn(),
   syncUpstreamModels: vi.fn(),
   syncUpstreamModelsPreview: vi.fn()
 }))
@@ -47,7 +47,7 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/api/admin/accounts', () => ({
   accountsAPI: {
-    syncAnthropicModelsBulk,
+    syncUpstreamModelsBulk,
     syncUpstreamModels,
     syncUpstreamModelsPreview
   }
@@ -95,7 +95,7 @@ describe('ModelWhitelistSelector', () => {
     showSuccess.mockReset()
     showInfo.mockReset()
     showWarning.mockReset()
-    syncAnthropicModelsBulk.mockReset()
+    syncUpstreamModelsBulk.mockReset()
     syncUpstreamModels.mockReset()
     syncUpstreamModelsPreview.mockReset()
   })
@@ -130,7 +130,7 @@ describe('ModelWhitelistSelector', () => {
   // 实时交集是「上游现在支持什么」，不是「白名单应该是什么」：映射别名与刚下架
   // 的旧模型都不在里面，所以默认只做合并。
   it('merges the live Anthropic intersection into the existing whitelist', async () => {
-    syncAnthropicModelsBulk.mockResolvedValue({
+    syncUpstreamModelsBulk.mockResolvedValue({
       models: ['claude-sonnet-5', 'claude-opus-5'],
       failures: [],
       account_count: 2,
@@ -143,14 +143,12 @@ describe('ModelWhitelistSelector', () => {
       accountIds: [11, 12]
     })
 
-    await wrapper.get('[data-testid="sync-live-anthropic-models"]').trigger('click')
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
     await flushPromises()
 
-    expect(syncAnthropicModelsBulk).toHaveBeenCalledWith({
+    expect(syncUpstreamModelsBulk).toHaveBeenCalledWith({
       account_ids: [11, 12],
-      filters: undefined,
-      aggregation: 'intersection',
-      require_all: true
+      filters: undefined
     })
     expect(wrapper.emitted('update:modelValue')).toEqual([
       [['claude-alias', 'claude-sonnet-5', 'claude-opus-5']]
@@ -158,7 +156,7 @@ describe('ModelWhitelistSelector', () => {
   })
 
   it('replaces the whitelist only after a second confirmation', async () => {
-    syncAnthropicModelsBulk.mockResolvedValue({
+    syncUpstreamModelsBulk.mockResolvedValue({
       models: ['claude-sonnet-5'],
       failures: [],
       account_count: 1,
@@ -171,23 +169,23 @@ describe('ModelWhitelistSelector', () => {
       accountIds: [11]
     })
 
-    await wrapper.get('[data-testid="sync-live-anthropic-models"]').trigger('click')
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
     await flushPromises()
     await wrapper.setProps({ modelValue: ['claude-alias', 'claude-sonnet-5'] })
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    await wrapper.get('[data-testid="replace-with-live-anthropic-models"]').trigger('click')
+    await wrapper.get('[data-testid="replace-with-live-models"]').trigger('click')
     expect(confirmSpy).toHaveBeenCalled()
     expect(wrapper.emitted('update:modelValue')).toHaveLength(1)
 
     confirmSpy.mockReturnValue(true)
-    await wrapper.get('[data-testid="replace-with-live-anthropic-models"]').trigger('click')
+    await wrapper.get('[data-testid="replace-with-live-models"]').trigger('click')
     expect(wrapper.emitted('update:modelValue')?.[1]).toEqual([['claude-sonnet-5']])
     confirmSpy.mockRestore()
   })
 
   it('lists failed accounts and refuses to apply a partial intersection', async () => {
-    syncAnthropicModelsBulk.mockResolvedValue({
+    syncUpstreamModelsBulk.mockResolvedValue({
       models: ['claude-sonnet-5'],
       failures: [{ account_id: 13, name: 'expired-oauth', error: 'Upstream returned HTTP 401' }],
       account_count: 2,
@@ -196,10 +194,10 @@ describe('ModelWhitelistSelector', () => {
     })
     const wrapper = mountSelector({ platform: 'anthropic', accountIds: [11, 13] })
 
-    await wrapper.get('[data-testid="sync-live-anthropic-models"]').trigger('click')
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
     await flushPromises()
 
-    const failures = wrapper.get('[data-testid="live-anthropic-sync-failures"]')
+    const failures = wrapper.get('[data-testid="bulk-upstream-sync-failures"]')
     expect(failures.text()).toContain('expired-oauth')
     expect(failures.text()).toContain('Upstream returned HTTP 401')
     expect(showError).toHaveBeenCalled()
@@ -210,7 +208,7 @@ describe('ModelWhitelistSelector', () => {
   // 整批失败时后端回 200 带 error + failures：错误响应没有 data 字段，逐账号明细
   // 只能这样送到管理员眼前。
   it('shows the per-account detail when the whole batch fails', async () => {
-    syncAnthropicModelsBulk.mockResolvedValue({
+    syncUpstreamModelsBulk.mockResolvedValue({
       models: [],
       failures: [
         { account_id: 21, name: 'expired-a', error: 'Upstream returned HTTP 401' },
@@ -223,10 +221,10 @@ describe('ModelWhitelistSelector', () => {
     })
     const wrapper = mountSelector({ platform: 'anthropic', accountIds: [21, 22] })
 
-    await wrapper.get('[data-testid="sync-live-anthropic-models"]').trigger('click')
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
     await flushPromises()
 
-    const failures = wrapper.get('[data-testid="live-anthropic-sync-failures"]')
+    const failures = wrapper.get('[data-testid="bulk-upstream-sync-failures"]')
     expect(failures.text()).toContain('expired-a')
     expect(failures.text()).toContain('expired-b')
     expect(showError).toHaveBeenCalledWith(
@@ -238,30 +236,30 @@ describe('ModelWhitelistSelector', () => {
 
   // apiClient 的拒绝对象不是 Error 实例，只看 error.message 会永远退化成泛化文案。
   it('surfaces the server detail when the live sync fails', async () => {
-    syncAnthropicModelsBulk.mockRejectedValue({
+    syncUpstreamModelsBulk.mockRejectedValue({
       response: { data: { detail: 'Live model sync requires an Anthropic-only account selection' } }
     })
     const wrapper = mountSelector({ platform: 'anthropic', accountIds: [11] })
 
-    await wrapper.get('[data-testid="sync-live-anthropic-models"]').trigger('click')
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith(
       'admin.accounts.syncUpstreamModelsError: Live model sync requires an Anthropic-only account selection'
     )
-    expect(wrapper.find('[data-testid="live-anthropic-sync-failures"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="bulk-upstream-sync-failures"]').exists()).toBe(false)
   })
 
   // apiClient 的拦截器把后端文案压平成 { status, code, message, error }，其中
   // 部分错误只填 error。手写的提取器不认这个字段，用户只会看到泛化文案。
   it('surfaces the interceptor error field when the live sync fails', async () => {
-    syncAnthropicModelsBulk.mockRejectedValue({
+    syncUpstreamModelsBulk.mockRejectedValue({
       status: 400,
       error: 'Live model sync requires an Anthropic-only account selection'
     })
     const wrapper = mountSelector({ platform: 'anthropic', accountIds: [11] })
 
-    await wrapper.get('[data-testid="sync-live-anthropic-models"]').trigger('click')
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith(
@@ -272,7 +270,7 @@ describe('ModelWhitelistSelector', () => {
   it('hides the live sync action when no batch target is provided', () => {
     const wrapper = mountSelector({ platform: 'anthropic' })
 
-    expect(wrapper.find('[data-testid="sync-live-anthropic-models"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sync-upstream-models-bulk"]').exists()).toBe(false)
   })
 
   it('warns when model IDs sync but capability metadata is incomplete', async () => {
@@ -394,4 +392,62 @@ describe('ModelWhitelistSelector', () => {
     expect(syncButton).toBeDefined()
     expect(syncButton?.exists()).toBe(true)
   })
+  it('fetches the live OpenAI batch catalog and preserves existing whitelist entries', async () => {
+    syncUpstreamModelsBulk.mockResolvedValue({ models: ['gpt-new', 'gpt-new'], failures: [] })
+    const wrapper = mountSelector({ accountIds: [41, 42], modelValue: ['custom-alias'] })
+    const button = wrapper.get('[data-testid="sync-upstream-models-bulk"]')
+    expect(button.text()).toBe('admin.accounts.syncUpstreamModels')
+    await button.trigger('click')
+    await flushPromises()
+    expect(syncUpstreamModelsBulk).toHaveBeenCalledWith({ account_ids: [41, 42], filters: undefined })
+    expect(syncUpstreamModels).not.toHaveBeenCalled()
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['custom-alias', 'gpt-new']]])
+  })
+
+  it('sends the filter snapshot for all matching OpenAI accounts', async () => {
+    syncUpstreamModelsBulk.mockResolvedValue({ models: ['gpt-new'], failures: [] })
+    const filters = { platform: 'openai', group: 'ungrouped', search: 'prod' }
+    const wrapper = mountSelector({ syncFilters: filters })
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
+    await flushPromises()
+    expect(syncUpstreamModelsBulk).toHaveBeenCalledWith({ account_ids: undefined, filters })
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['gpt-new']]])
+  })
+
+  it('does not offer replacement from a failed partial result', async () => {
+    syncUpstreamModelsBulk.mockResolvedValue({
+      models: ['gpt-partial'], failures: [{ account_id: 42, name: 'failed', error: 'Unauthorized' }]
+    })
+    const wrapper = mountSelector({ accountIds: [41, 42], modelValue: ['keep-me'] })
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.find('[data-testid="replace-with-live-models"]').exists()).toBe(false)
+  })
+
+  it('ignores late responses after the selection changes', async () => {
+    let finish!: (value: unknown) => void
+    syncUpstreamModelsBulk.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    const wrapper = mountSelector({ accountIds: [41, 42] })
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
+    expect(wrapper.get('[data-testid="sync-upstream-models-bulk"]').attributes('disabled')).toBeDefined()
+    await wrapper.setProps({ accountIds: [43] })
+    finish({ models: ['old-target-model'], failures: [] })
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(showSuccess).not.toHaveBeenCalled()
+  })
+
+  it('ignores a response after the editor has been closed', async () => {
+    let finish!: (value: unknown) => void
+    syncUpstreamModelsBulk.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    const wrapper = mountSelector({ accountIds: [41] })
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
+    wrapper.unmount()
+    finish({ models: ['late-model'], failures: [] })
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(showSuccess).not.toHaveBeenCalled()
+  })
+
 })
