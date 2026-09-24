@@ -173,7 +173,7 @@ RUN ln -s /app/tapmodels /app/sub2api
 COPY --from=backend-builder --chown=tapmodels:tapmodels /app/backend/resources /app/resources
 
 # Create data directory
-RUN mkdir -p /app/data && chown tapmodels:tapmodels /app/data
+RUN mkdir -p /app/data && chown tapmodels:tapmodels /app /app/data
 
 # Copy entrypoint script (fixes volume permissions then drops to tapmodels)
 COPY --chmod=755 deploy/docker-entrypoint.sh /app/docker-entrypoint.sh

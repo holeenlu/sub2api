@@ -568,7 +568,7 @@ export default {
         codexHardeningTitle: "Codex設定",
         codexTicketEnabled: "292チケット収集",
         codexTicketEnabledDesc:
-          "無効にすると、ゲートウェイはx-codex-turn-stateを収集も挿入もせず、通常どおりトラフィックを転送します。有効にすると、バックグラウンドでチケットを収集し、本番リクエストのそのヘッダーを上書きします。",
+          'チケット取得は既定で無効です。必要に応じて手動で有効にしてください。無効時は通常経路で転送します。有効時はアカウントとモデルの参加設定に従って取得し、保存済みチケットをリクエストに注入します。この機能の導入時にスイッチは一度だけ無効になります。その後の手動設定は保持されます。',
         codexTicketHarvestProxy: "292収集プロキシ",
         codexTicketHarvestProxyDesc:
           "チケット機能が有効な場合に、292チケットの発行にのみ使用します。変更は再起動なしで後続のプローブに適用されます。本番トラフィックでは引き続き各アカウントの住宅用プロキシを使用します。ユーザー名とパスワードを含む完全なHTTPまたはSOCKS5hプロキシURLを貼り付けてください。プロキシプロバイダーはIPローテーションに対応している必要があります。保存時に空欄にすると、保存済みの値を維持します。",
@@ -608,6 +608,16 @@ export default {
         codexUaContainsPlaceholder: "User-Agentに含まれるマーカー（カンマ区切り、例：opencode/）",
         codexAddRow: "エントリを追加",
         codexRemoveRow: "削除",
+        codexProbeTemplate: 'Codex チケット取得・劣化チェック共通テンプレート',
+        codexProbeTemplateReset: '既定値に戻す',
+        codexProbeTemplateDesc: 'チケット取得と劣化チェックで共用する JSONL テンプレートです。メッセージ構造、タグ、プレースホルダーを保持してください。上限256 KiBです。保存すると変更や既定値への復元が適用されます。既定の固定指示は英語、ランダムな課題は中国語です。',
+        codexProbeTimezone: 'アカウントのリクエストタイムゾーン',
+        codexProbeDate: 'アカウントのタイムゾーンでの現在日付',
+        codexProbeModel: '対象モデル',
+        codexProbeChallenge: '新しいランダム課題',
+        codexTicketAllowWithoutTicket: '既定でチケットなしのリクエストを許可',
+        codexTicketAllowWithoutTicketDesc: '未設定時は有効で、チケットがなくても通常のリクエストを妨げません。既存ポリシーは保持されます。制限は全体の取得機能が有効でアカウントとモデルが参加している場合にのみ適用され、アカウントの明示的設定が優先されます。',
+        codexAdditionalSettingsFailed: '基本設定は保存されましたが、追加設定の保存に失敗しました：',
       },
       webSearchEmulation: {
         title: 'Web検索エミュレーション',

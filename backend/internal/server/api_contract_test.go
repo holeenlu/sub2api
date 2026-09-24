@@ -5,6 +5,7 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -1425,7 +1426,21 @@ func TestAPIContracts(t *testing.T) {
 
 			status, body := doRequest(t, deps.router, tt.method, tt.path, tt.body, tt.headers)
 			require.Equal(t, tt.wantStatus, status)
-			require.JSONEq(t, tt.wantJSON, body)
+			wantJSON := tt.wantJSON
+			if tt.method == http.MethodGet && tt.path == "/api/v1/admin/settings" {
+				// The shared template is large; keep the settings contract explicit without
+				// duplicating its embedded JSONL in each fixture.
+				var expected map[string]any
+				require.NoError(t, json.Unmarshal([]byte(wantJSON), &expected))
+				data := expected["data"].(map[string]any)
+				data["openai_codex_ticket_allow_without_ticket"] = true
+				data["openai_codex_ticket_prompt_template"] = service.DefaultCodexProbeTemplate()
+				data["openai_codex_ticket_prompt_template_default"] = service.DefaultCodexProbeTemplate()
+				encoded, err := json.Marshal(expected)
+				require.NoError(t, err)
+				wantJSON = string(encoded)
+			}
+			require.JSONEq(t, wantJSON, body)
 		})
 	}
 }

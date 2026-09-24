@@ -1457,7 +1457,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			filterStats.exclude("platform_mismatch")
 			continue
 		}
-		if s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
+		if s.service.isOpenAIAccountRequestRuntimeBlockedContext(ctx, account, req.RequestedModel, req.RequireCompact) {
 			filterStats.exclude("runtime_blocked")
 			continue
 		}
@@ -1779,7 +1779,7 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if req.RequirePrivacySet && !account.IsPrivacySet() {
 		return false, "privacy_not_set"
 	}
-	if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
+	if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlockedContext(ctx, account, req.RequestedModel, req.RequireCompact) {
 		return false, "runtime_blocked"
 	}
 	if s != nil && s.service != nil && s.service.isOpenAIProxyStreamQuarantined(ctx, account) {
@@ -2422,6 +2422,9 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	if _, ok := openAIForwardModelFromContext(ctx); !ok {
+		ctx = WithOpenAIForwardModel(ctx, requestedModel, requireCompact)
+	}
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
 	// 分组利润控制：唯一文本调度入口的防御性装门。handler 文本
@@ -2434,6 +2437,33 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
+	if targetAccountID, ok := ctx.Value(codexTicketDiagnosticTargetKey{}).(int64); ok && targetAccountID > 0 {
+		accounts, err := s.listSchedulableAccounts(ctx, groupID, platform)
+		if err != nil {
+			return nil, OpenAIAccountScheduleDecision{}, err
+		}
+		found := false
+		for _, account := range accounts {
+			if account.ID == targetAccountID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts
+		}
+		excludedIDs = cloneExcludedAccountIDs(excludedIDs)
+		if excludedIDs == nil {
+			excludedIDs = make(map[int64]struct{})
+		}
+		for _, account := range accounts {
+			if account.ID != targetAccountID {
+				excludedIDs[account.ID] = struct{}{}
+			}
+		}
+		previousResponseID = ""
+		sessionHash = ""
+	}
 	decision := OpenAIAccountScheduleDecision{}
 	preserveGuardianParentBinding := preserveOpenAIGuardianParentBinding(ctx, sessionHash)
 	guardianParentAccountID := int64(0)

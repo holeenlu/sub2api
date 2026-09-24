@@ -733,7 +733,7 @@ const (
 	// 关闭：不打票、不注入 x-codex-turn-state，按原链路转发。
 	// 开启：后台打票并在业务请求中覆盖该头。
 	SettingKeyOpenAICodexTicketEnabled = "openai_codex_ticket_enabled"
-	// SettingKeyOpenAICodexTicketHarvestProxyURL Codex 292 打票出口（socks5h/http），后台可改、热更新。
+	// SettingKeyOpenAICodexTicketHarvestProxyURL 保留旧单代理配置兼容性；打票改用独立代理池。
 	SettingKeyOpenAICodexTicketHarvestProxyURL = "openai_codex_ticket_harvest_proxy_url"
 	// SettingKeyClaudeCodeClientVersion 网关对 Anthropic 上游声明的 Claude Code CLI 客户端版本号（管理员覆写）。
 	// 空值表示跟随自动同步值；自动同步也没有结果时回退到 claude.CLIVersion()（环境变量覆盖 + 内置基线）。
@@ -744,6 +744,9 @@ const (
 	SettingKeyClaudeCodeClientVersionSynced = "claude_code_client_version_synced"
 	// SettingKeyClaudeCodeVersionAutoSyncEnabled 是否启用 Claude Code 客户端版本号自动同步（默认 true）。
 	SettingKeyClaudeCodeVersionAutoSyncEnabled = "claude_code_version_auto_sync_enabled"
+	// 打票/诊断共用模板与全局无票放行策略。
+	SettingKeyOpenAICodexTicketPromptTemplate     = "openai_codex_ticket_prompt_template"
+	SettingKeyOpenAICodexTicketAllowWithoutTicket = "openai_codex_ticket_allow_without_ticket"
 	// SettingKeyOpenAIAllowClaudeCodeCodexPlugin 已废弃：历史全局开关只作为升级迁移输入读取。
 	// 迁移后等价规则写入 SettingKeyCodexCLIOnlyWhitelist，不再参与运行时判定。
 	SettingKeyOpenAIAllowClaudeCodeCodexPlugin = "openai_allow_claude_code_codex_plugin"
