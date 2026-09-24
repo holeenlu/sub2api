@@ -135,8 +135,11 @@ def main():
         existing_tag = git("ls-remote", "--tags", "origin", "refs/tags/" + tag)
         if existing_tag and existing_tag.split()[0] != head:
             raise ValueError("Tag already points to another commit; refusing to reuse it")
+        if not existing_tag:
+            run("gh", "api", "-X", "POST", f"repos/{cfg['repository']}/git/refs",
+                "-f", "ref=refs/tags/" + tag, "-f", "sha=" + head)
         # Reserve once. Failed builds leave a draft which the same SHA resumes.
-        run("gh", "release", "create", tag, "--draft", "--target", head,
+        run("gh", "release", "create", tag, "--draft", "--verify-tag", "--target", head,
             "--title", f"{channel} {version}", "--notes-file", "release-notes.md")
         reserved_tag = git("ls-remote", "--tags", "origin", "refs/tags/" + tag)
         if not reserved_tag or reserved_tag.split()[0] != head:
