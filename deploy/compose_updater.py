@@ -216,6 +216,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.respond(409, {'error': 'Another update is already running'})
 
 
+def prepare_socket_directory(path, gid):
+    path.mkdir(mode=0o750, parents=True, exist_ok=True)
+    os.chown(path, 0, gid)
+    # systemd UMask=0077 narrows mkdir(0750) to 0700. Restore group
+    # traversal explicitly so the non-root app can reach the socket.
+    os.chmod(path, 0o750)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True)
@@ -223,8 +231,7 @@ def main():
     cfg = json.loads(Path(args.config).read_text())
     updater = Updater(cfg)
     socket = Path(cfg['socket'])
-    socket.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-    os.chown(socket.parent, 0, cfg.get('socket_gid', 1000))
+    prepare_socket_directory(socket.parent, cfg.get('socket_gid', 1000))
     socket.unlink(missing_ok=True)
     with Server(str(socket), Handler) as server:
         server.updater = updater

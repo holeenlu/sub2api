@@ -7,7 +7,7 @@ from unittest.mock import patch
 import urllib.request
 
 from scripts.release.plan import next_version, parts, records
-from deploy.compose_updater import Updater, SafeRedirect
+from deploy.compose_updater import Updater, SafeRedirect, prepare_socket_directory
 
 
 class VersionTests(unittest.TestCase):
@@ -37,6 +37,18 @@ class VersionTests(unittest.TestCase):
 
 
 class ComposeUpdateTests(unittest.TestCase):
+    def test_socket_directory_remains_group_accessible_under_systemd_umask(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'socket'
+            previous = os.umask(0o077)
+            try:
+                with patch('deploy.compose_updater.os.chown') as chown:
+                    prepare_socket_directory(path, 1000)
+                    chown.assert_called_once_with(path, 0, 1000)
+                self.assertEqual(path.stat().st_mode & 0o777, 0o750)
+            finally:
+                os.umask(previous)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -137,12 +149,14 @@ class PlannerIntegrationTests(unittest.TestCase):
                     return ''
                 if args[0] != 'gh':
                     return real_run(*args)
+                if args[1:4] == ('api','--method','POST'):
+                    payload = json.loads(Path('release-request.json').read_text())
+                    releases.append(dict(id=len(releases)+1, **payload))
+                    # The creation response is sufficient; do not require a
+                    # second list request to observe an eventually visible draft.
+                    return json.dumps(releases[-1])
                 if args[1] == 'api':
                     return json.dumps([releases])
-                if args[1:3] == ('release','create'):
-                    releases.append(dict(id=len(releases)+1, tag_name=args[3], draft=True,
-                        body=Path('release-notes.md').read_text()))
-                    return ''
                 raise AssertionError(args)
             env = {'GITHUB_REPOSITORY':'holeenlu/sub2api','GITHUB_REF':'refs/heads/main',
                    'GITHUB_OUTPUT':str(Path(directory)/'output')}
