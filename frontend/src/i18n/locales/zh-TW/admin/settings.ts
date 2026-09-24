@@ -563,7 +563,7 @@ export default {
         codexHardeningTitle: 'Codex 設定',
         codexTicketEnabled: '292 打票',
         codexTicketEnabledDesc:
-          '關閉後不打票、不注入 x-codex-turn-state，按原鏈路轉發。開啟後後台打票，並在業務請求中覆蓋該頭。',
+          '打票預設關閉，需要時手動開啟。關閉後按原鏈路轉發；開啟後按帳號和模型參與設定後台打票，並在業務請求中注入票據。引入此功能時會一次性關閉此開關；之後手動開啟的選擇會保留。',
         codexTicketHarvestProxy: '292 打票代理',
         codexTicketHarvestProxyDesc:
           '僅在門票功能開啟時用於打票，儲存後後續探測會使用新代理，無需重啟。日常業務仍走帳號自己的住宅代理。填寫完整代理 URL（http 或 socks5h，含使用者名稱和密碼）。代理服務商需自行負責出口 IP 輪換。留空並儲存表示不改已儲存的值。',
@@ -603,6 +603,16 @@ export default {
         codexUaContainsPlaceholder: 'User-Agent 包含標記，逗號分隔（如 opencode/）',
         codexAddRow: '新增一條',
         codexRemoveRow: '刪除',
+        codexAdditionalSettingsFailed: '普通設定已儲存，但打票間隔或其他附加設定儲存失敗：',
+        codexProbeTemplate: 'Codex 打票與降智檢測範本',
+        codexProbeTemplateReset: '恢復預設',
+        codexProbeTemplateDesc: '打票和降智檢測共用此 JSONL 範本。保留訊息結構、標籤和預留位置，最大 256 KiB；恢復預設後點擊儲存生效。預設固定文案為英文，動態隨機挑戰仍為中文。',
+        codexProbeTimezone: '帳號請求時區',
+        codexProbeDate: '帳號時區下的目前日期',
+        codexProbeModel: '目標模型',
+        codexProbeChallenge: '本次隨機挑戰',
+        codexTicketAllowWithoutTicket: '預設允許無票請求',
+        codexTicketAllowWithoutTicketDesc: '未設定時預設開啟，缺票不會阻斷正常請求；已有全域和帳號策略會保留。無票限制僅在全域打票開啟且帳號及目前模型均參與打票時生效，帳號單獨設定優先生效。',
       },
       webSearchEmulation: {
         title: 'Web Search 模擬',

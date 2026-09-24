@@ -508,12 +508,18 @@ type OpenAIGatewayService struct {
 	// 剥离跨账号回带（openai_codex_turn_state.go）。
 	openaiCodexTurnStateOrigins sync.Map
 	openaiCodexTurnStateWrites  atomic.Uint64
-	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，292 长度门票。
+	// openaiCodexTickets: accountID\x00model → ModelTrace-verified ticket generation.
 	openaiCodexTickets           sync.Map
+	openaiCodexTicketInFlight    sync.Map
+	openaiCodexTicketProxyTurns  sync.Map
+	openaiCodexTicketNextAttempt sync.Map
+	openaiCodexTicketHistory     CodexTicketAttemptRepository
+	openaiCodexTicketLifecycle   CodexTicketLifecycleRepository
 	openaiCodexTicketFlight      singleflight.Group
 	openaiCodexTicketLifecycleMu sync.Mutex
 	openaiCodexTicketCancel      context.CancelFunc
 	openaiCodexTicketDone        chan struct{}
+	openaiCodexTicketWake        chan struct{}
 	openaiCodexTicketStopped     bool
 }
 
@@ -592,7 +598,6 @@ func NewOpenAIGatewayService(
 		openAITokenProvider.SetAccountRuntimeBlocker(svc)
 	}
 	svc.logOpenAIWSModeBootstrap()
-	svc.StartOpenAICodexTicketHarvester()
 	return svc
 }
 

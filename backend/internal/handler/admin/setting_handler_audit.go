@@ -485,6 +485,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.UpstreamFailoverStatusCodes != after.UpstreamFailoverStatusCodes {
 		changed = append(changed, "upstream_failover_status_codes")
 	}
+	if before.OpenAICodexTicketPromptTemplate != after.OpenAICodexTicketPromptTemplate {
+		changed = append(changed, "openai_codex_ticket_prompt_template")
+	}
 	if before.OpenAICodexTicketEnabled != after.OpenAICodexTicketEnabled {
 		changed = append(changed, "openai_codex_ticket_enabled")
 	}
