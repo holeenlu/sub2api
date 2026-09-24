@@ -342,6 +342,7 @@
               </div>
 
               <ModelWhitelistSelector
+                v-if="show"
                 v-model="allowedModels"
                 :platforms="targetSelectedPlatforms"
                 :account-ids="targetMode === 'selected' ? accountIds : undefined"
@@ -1518,7 +1519,7 @@ import {
   resolveOpenAIWSModeHintKey
 } from '@/utils/openaiWsMode'
 import type { OpenAIWSMode } from '@/utils/openaiWsMode'
-import type { SyncAnthropicModelsBulkFilters } from '@/api/admin/accounts'
+import type { SyncUpstreamModelsBulkFilters } from '@/api/admin/accounts'
 interface Props {
   show: boolean
   accountIds: number[]
@@ -1551,7 +1552,7 @@ const targetSelectedPlatforms = computed(() => props.target?.selectedPlatforms ?
 const targetSelectedTypes = computed(() => props.target?.selectedTypes ?? props.selectedTypes)
 // 筛选模式下只把后端 BulkUpdateAccountFilters 认识的六个字段传下去；筛选快照里
 // 还带着 sort_by / sort_order 这类与选中集合无关的展示状态。
-const liveModelSyncFilters = computed<SyncAnthropicModelsBulkFilters | undefined>(() => {
+const liveModelSyncFilters = computed<SyncUpstreamModelsBulkFilters | undefined>(() => {
   if (targetMode.value !== 'filtered') return undefined
   const filters = props.target?.filters
   if (!filters) return undefined

@@ -713,6 +713,27 @@ export async function syncAnthropicModelsBulk(
   return data
 }
 
+/** Fresh model IDs common to every selected account; does not save whitelists. */
+export type SyncUpstreamModelsBulkFilters = SyncAnthropicModelsBulkFilters
+export interface SyncUpstreamModelsBulkResult {
+  models: string[]
+  failures: AnthropicModelSyncFailure[]
+  account_count: number
+  aggregation: 'intersection'
+  source: 'upstream_models'
+  error?: string
+}
+
+export async function syncUpstreamModelsBulk(params: {
+  account_ids?: number[]
+  filters?: SyncUpstreamModelsBulkFilters
+}): Promise<SyncUpstreamModelsBulkResult> {
+  const { data } = await apiClient.post<SyncUpstreamModelsBulkResult>(
+    '/admin/accounts/models/sync-upstream-bulk', params, { timeout: 70000 }
+  )
+  return data
+}
+
 export interface CRSPreviewAccount {
   crs_account_id: string
   kind: string
@@ -1223,6 +1244,7 @@ export const accountsAPI = {
   syncUpstreamModels,
   syncUpstreamModelsPreview,
   syncAnthropicModelsBulk,
+  syncUpstreamModelsBulk,
   generateAuthUrl,
   exchangeCode,
   refreshOpenAIToken,
