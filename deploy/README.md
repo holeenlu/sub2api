@@ -1,3 +1,5 @@
+> Fork releases and Docker Compose online updates: [setup guide](AUTOMATIC_RELEASE.md).
+
 # TapModels Deployment Files
 
 This directory contains files for deploying TapModels on Linux servers and Apple-silicon Macs.
@@ -235,8 +237,8 @@ docker compose down -v
 | `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password |
 | `TZ` | No | `Asia/Shanghai` | Timezone |
 | `TAPMODELS_IMAGE` | No | `ghcr.io/erwinlin/tapmodels:latest` | Application image used by Docker Compose |
-| `UPDATE_CHECK_ENABLED` | No | `false` | Release check behind the version badge (erwinlin/TapModels releases). Off by default so nothing is sent to GitHub; set `true` to enable it. |
-| `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for `api.github.com` release checks only; asset downloads remain anonymous. |
+| `UPDATE_CHECK_ENABLED` | No | `true` | Check the isolated tapmodels/v* release channel; Docker online updates require the host updater. |
+| `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for GitHub Release checks and private API asset downloads; never forwarded to storage redirects. |
 | `GEMINI_OAUTH_CLIENT_ID` | No | *(builtin)* | Google OAuth client ID (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_CLIENT_SECRET` | No | *(builtin)* | Google OAuth client secret (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_SCOPES` | No | *(default)* | OAuth scopes (Gemini OAuth) |

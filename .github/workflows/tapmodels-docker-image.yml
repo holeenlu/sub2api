@@ -1,7 +1,6 @@
 name: TapModels · Docker 映像與 Release
 
-# main 更新建置分支/SHA 映像；數字版本 tag 另建版本映像和 GitHub Release。
-# 僅正式版本更新 latest，預發布維持獨立版本標籤。
+# Legacy manual diagnostic builds only. Automatic publication is owned by automatic-release.yml.
 
 on:
   push:

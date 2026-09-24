@@ -2100,9 +2100,7 @@ func setDefaults() {
 	viper.SetDefault("cors.allowed_origins", []string{})
 	viper.SetDefault("cors.allow_credentials", true)
 
-	// Update: online version check / self-update against the release repository
-	// (erwinlin/TapModels, private). Off by default for this brand; set
-	// UPDATE_CHECK_ENABLED=true to let a deployment reach GitHub.
+	// Online checks follow the isolated TapModels release channel.
 	viper.SetDefault("update.check_enabled", true)
 
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
