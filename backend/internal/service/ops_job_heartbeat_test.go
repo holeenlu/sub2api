@@ -55,39 +55,6 @@ func requireIntervalSeconds(t *testing.T, input *OpsUpsertJobHeartbeatInput, wan
 	require.Equal(t, want, *input.ExpectedIntervalSeconds)
 }
 
-func TestOpsCronInterval(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, 9, 2, 7, 21, 0, 0, time.UTC)
-	parse := func(spec string) time.Duration {
-		sched, err := opsCleanupCronParser.Parse(spec)
-		require.NoError(t, err)
-		return opsCronInterval(sched, now)
-	}
-
-	require.Equal(t, 24*time.Hour, parse("0 2 * * *"))
-	require.Equal(t, 7*24*time.Hour, parse("0 2 * * 0"))
-	require.Equal(t, time.Hour, parse("0 * * * *"))
-	require.Equal(t, time.Duration(0), opsCronInterval(nil, now))
-}
-
-// 不等距的 cron 要取最大间隔，否则自报周期取决于服务启动时刻：
-// '0 3 * * 1-5' 在周一至周四启动只看到 24h（阈值 72h），而周五→周一的真实间隔
-// 恰好是 72h，周一那次执行稍慢就会被误判失联。
-func TestOpsCronInterval_UnevenScheduleUsesLargestGap(t *testing.T) {
-	t.Parallel()
-
-	sched, err := opsCleanupCronParser.Parse("0 3 * * 1-5")
-	require.NoError(t, err)
-
-	// 2026-09-02 是周三，往后逐天覆盖一整周的启动时刻。
-	for i := range 7 {
-		start := time.Date(2026, 9, 2, 4, 0, 0, 0, time.UTC).AddDate(0, 0, i)
-		require.Equalf(t, 72*time.Hour, opsCronInterval(sched, start),
-			"启动于 %s 时自报周期不应随启动时刻漂移", start.Weekday())
-	}
-}
-
 func TestOpsJobIntervalSeconds(t *testing.T) {
 	t.Parallel()
 

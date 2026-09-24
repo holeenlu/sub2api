@@ -513,14 +513,6 @@ func extractOpenAICodexResponseCookies(h http.Header) string {
 	return strings.Join(pairs, "; ")
 }
 
-func jsonString(v string) string {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return `""`
-	}
-	return string(b)
-}
-
 func applyOpenAICodexTicketHarvestIdentity(h http.Header, model string) {
 	ensureCodexIdentityHeaders(h)
 	enforceCodexIdentityHeaders(h)
