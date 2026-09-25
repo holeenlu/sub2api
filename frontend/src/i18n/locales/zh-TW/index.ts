@@ -10,8 +10,11 @@ import admin from './admin'
 import misc from './misc'
 import docs from './docs'
 
+import requestTiming from './requestTiming'
+
 export default {
   ...ui,
+  requestTiming,
   ...landing,
   ...common,
   ...dashboard,

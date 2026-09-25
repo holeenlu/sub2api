@@ -383,6 +383,8 @@ export default {
     latency: '延遲',
     latencyFirstToken: '首字',
     latencyDuration: '總耗時',
+    latencyTps: '平均 TPS',
+    latencyTpsHint: '平均 TPS = 輸出 Token ÷ 總耗時(秒). 包含等待時間及上游計入輸出用量的推理 Token, 不代表模型實際生成速度.',
     time: '時間',
     ws: 'WS',
     stream: '串流',

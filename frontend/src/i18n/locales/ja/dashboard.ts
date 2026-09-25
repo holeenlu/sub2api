@@ -377,6 +377,8 @@ export default {
     latency: 'レイテンシ',
     latencyFirstToken: '初回',
     latencyDuration: '合計',
+    latencyTps: '平均 TPS',
+    latencyTpsHint: '平均 TPS = 出力トークン ÷ 総所要時間（秒）。待機時間と、出力使用量に含まれる推論トークンを含みます。モデルの生成速度ではありません。',
     time: '時間',
     ws: 'WS',
     stream: 'ストリーム',

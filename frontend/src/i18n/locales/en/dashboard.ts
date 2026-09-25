@@ -377,6 +377,8 @@ export default {
     latency: 'Latency',
     latencyFirstToken: 'First',
     latencyDuration: 'Total',
+    latencyTps: 'Avg TPS',
+    latencyTpsHint: 'Average TPS = output tokens ÷ total duration (seconds). Includes waiting time and any reasoning tokens reported in output usage; not model generation speed.',
     time: 'Time',
     ws: 'WS',
     stream: 'Stream',
