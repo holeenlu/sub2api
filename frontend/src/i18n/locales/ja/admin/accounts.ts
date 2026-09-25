@@ -658,6 +658,7 @@ export default {
         baseUrlHint: 'OpenAI公式APIを使用する場合はデフォルトのままにしてください',
         apiKeyHint: 'OpenAIのAPIキー',
         oauthPassthrough: '自動パススルー（認証のみ）',
+        copilotSDKDesc: 'Codex のネイティブツールを維持し、切断時に SDK のターンをキャンセルします。sidecar アカウント 1 つだけの専用グループで使ってください。Base URL と API キーは sidecar のものを指定します。',
         oauthPassthroughDesc:
           '有効にすると、このOpenAIアカウントは自動パススルーを使用します。ゲートウェイは認証情報のみを差し替えてリクエスト/レスポンスをそのまま転送し、請求、同時実行数、監査、および必要な安全フィルタリングは維持します。',
         flattenNamespaces: 'Codex名前空間ツールをフラット化（互換性）',

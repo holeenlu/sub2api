@@ -773,6 +773,7 @@ export default {
         baseUrlHint: '留空使用官方 OpenAI API',
         apiKeyHint: '您的 OpenAI API Key',
         oauthPassthrough: '自動透傳（僅替換驗證）',
+        copilotSDKDesc: '保留 Codex 原生工具結構，斷連時取消 SDK 回合。請使用僅含一個 sidecar 帳號的獨立分組；Base URL 和 API Key 填適配服務位址及金鑰。',
         oauthPassthroughDesc:
           '開啟後，該 OpenAI 帳號將自動透傳請求與回應，僅替換驗證並保留計費/並行/稽核及必要安全過濾；如遇相容性問題可隨時關閉回滾。',
         flattenNamespaces: '攤平 Codex namespace 工具（相容）',

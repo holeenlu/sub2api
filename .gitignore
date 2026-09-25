@@ -159,6 +159,7 @@ tools/tests/__pycache__/
 !docs/cyber-session-blocking.md
 !docs/account-quality-operations.md
 !docs/pelican-scheduled-tests.md
+!docs/copilot-sdk-codex.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/

@@ -2173,6 +2173,9 @@ func (a *Account) IsOveragesEnabled() bool {
 // 兼容字段：accounts.extra.openai_oauth_passthrough（历史 OAuth 开关）。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 func (a *Account) IsOpenAIPassthroughEnabled() bool {
+	if a.IsCopilotSDKEnabled() {
+		return true
+	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
@@ -2183,6 +2186,16 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 		return enabled
 	}
 	return false
+}
+
+// IsCopilotSDKEnabled selects the stateful Responses sidecar contract. The
+// endpoint and bearer key belong to the sidecar, not GitHub or ChatGPT OAuth.
+func (a *Account) IsCopilotSDKEnabled() bool {
+	if a == nil || a.Platform != PlatformOpenAI || a.Type != AccountTypeAPIKey {
+		return false
+	}
+	enabled, _ := a.Extra["openai_copilot_sdk"].(bool)
+	return enabled
 }
 
 // IsOpenAIResponsesWebSocketV2Enabled 返回 OpenAI 账号是否开启 Responses WebSocket v2。
@@ -2199,6 +2212,9 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 // 1. 按账号类型读取分类型字段
 // 2. 分类型字段缺失时，回退兼容字段
 func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
+	if a.IsCopilotSDKEnabled() {
+		return false
+	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
@@ -2267,6 +2283,9 @@ func normalizeOpenAIWSIngressDefaultMode(mode string) string {
 // 3. 兼容 enabled 旧字段（bool）
 // 4. defaultMode（非法时回退 ctx_pool）
 func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) string {
+	if a.IsCopilotSDKEnabled() {
+		return OpenAIWSIngressModeOff
+	}
 	resolvedDefault := normalizeOpenAIWSIngressDefaultMode(defaultMode)
 	if a == nil || !a.IsOpenAI() {
 		return OpenAIWSIngressModeOff
@@ -2337,6 +2356,9 @@ func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) stri
 // IsOpenAIWSForceHTTPEnabled 返回账号级"强制 HTTP"开关。
 // 字段：accounts.extra.openai_ws_force_http。
 func (a *Account) IsOpenAIWSForceHTTPEnabled() bool {
+	if a.IsCopilotSDKEnabled() {
+		return true
+	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}

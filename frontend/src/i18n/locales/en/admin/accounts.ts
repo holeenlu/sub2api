@@ -653,6 +653,7 @@ export default {
         baseUrlHint: 'Leave default for official OpenAI API',
         apiKeyHint: 'Your OpenAI API Key',
         oauthPassthrough: 'Auto passthrough (auth only)',
+        copilotSDKDesc: 'Preserve native Codex tools and cancel SDK turns on disconnect. Use a dedicated group with one sidecar account; Base URL and API Key belong to the sidecar.',
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
         flattenNamespaces: 'Flatten Codex namespace tools (compatibility)',

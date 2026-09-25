@@ -289,6 +289,18 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(wrapper.find('[data-testid="create-openai-ws-mode"]').exists()).toBe(true)
   })
 
+  it('persists Copilot SDK mode for an API key account', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('copilot sidecar')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sidecar-key')
+    await wrapper.get('[data-testid="copilot-sdk-toggle"]').setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra?.openai_copilot_sdk).toBe(true)
+  })
+
   it('sends false explicitly for normal OpenAI account creation by default', async () => {
     await submitApiKeyAccount('openai')
 
