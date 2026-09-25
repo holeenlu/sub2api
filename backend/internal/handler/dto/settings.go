@@ -363,12 +363,15 @@ type SystemSettings struct {
 	AccountSchedulingThresholds map[string]int `json:"account_scheduling_thresholds,omitempty"`
 
 	// 允许终端用户在用量页查看自己的失败请求
-	AllowUserViewErrorRequests bool   `json:"allow_user_view_error_requests"`
-	ExcelBPSImageRelayEnabled  bool   `json:"excel_bps_image_relay_enabled"`
-	ExcelBPSImageBaseURL       string `json:"excel_bps_image_base_url"`
-	ExcelBPSImageBodyLimitMiB  int    `json:"excel_bps_image_body_limit_mib"`
-	ExcelBPSImageBudgetMiB     int    `json:"excel_bps_image_budget_mib"`
-	ExcelBPSImageMaxRequests   int    `json:"excel_bps_image_max_requests"`
+	AllowUserViewErrorRequests  bool   `json:"allow_user_view_error_requests"`
+	RequestCaptureEnabled       bool   `json:"request_capture_enabled"`
+	RequestCaptureQuotaMiB      int64  `json:"request_capture_quota_mib"`
+	RequestCaptureRetentionDays int    `json:"request_capture_retention_days"`
+	ExcelBPSImageRelayEnabled   bool   `json:"excel_bps_image_relay_enabled"`
+	ExcelBPSImageBaseURL        string `json:"excel_bps_image_base_url"`
+	ExcelBPSImageBodyLimitMiB   int    `json:"excel_bps_image_body_limit_mib"`
+	ExcelBPSImageBudgetMiB      int    `json:"excel_bps_image_budget_mib"`
+	ExcelBPSImageMaxRequests    int    `json:"excel_bps_image_max_requests"`
 }
 
 type DefaultSubscriptionSetting struct {

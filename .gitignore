@@ -155,6 +155,7 @@ tools/tests/__pycache__/
 !docs/KEYS_PAGE_AND_BRANDING_PLAN.md
 !docs/PRIVATE_REPOSITORY_SYNC.md
 !docs/I18N_COMPLETENESS_AUDIT.md
+!docs/request-capture.md
 !docs/codex-credits.md
 !docs/cyber-session-blocking.md
 !docs/account-quality-operations.md

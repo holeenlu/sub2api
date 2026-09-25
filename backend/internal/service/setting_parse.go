@@ -1028,6 +1028,15 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 
 	result.AllowUserViewErrorRequests = settings[SettingKeyAllowUserViewErrorRequests] == "true" // default false
+	result.RequestCaptureEnabled = settings[SettingKeyRequestCaptureEnabled] == "true"
+	result.RequestCaptureQuotaMiB, _ = strconv.ParseInt(settings[SettingKeyRequestCaptureQuotaMiB], 10, 64)
+	if result.RequestCaptureQuotaMiB <= 0 {
+		result.RequestCaptureQuotaMiB = 1024
+	}
+	result.RequestCaptureRetentionDays, _ = strconv.Atoi(settings[SettingKeyRequestCaptureRetentionDays])
+	if result.RequestCaptureRetentionDays < 1 || result.RequestCaptureRetentionDays > 30 {
+		result.RequestCaptureRetentionDays = 7
+	}
 	result.ExcelBPSImageRelayEnabled = settings[SettingKeyExcelBPSImageRelayEnabled] == "true"
 	result.ExcelBPSImageBaseURL = settings[SettingKeyExcelBPSImageBaseURL]
 	result.ExcelBPSImageBodyLimitMiB, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageBodyLimitMiB], DefaultExcelBPSImageBodyLimitMiB)

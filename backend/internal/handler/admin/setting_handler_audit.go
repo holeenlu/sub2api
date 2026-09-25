@@ -33,6 +33,16 @@ func (h *SettingHandler) auditSettingsUpdate(c *gin.Context, before *service.Sys
 
 func diffSettings(before *service.SystemSettings, after *service.SystemSettings, beforeAuthSourceDefaults *service.AuthSourceDefaultSettings, afterAuthSourceDefaults *service.AuthSourceDefaultSettings, req UpdateSettingsRequest) []string {
 	changed := make([]string, 0, 20)
+	if before.RequestCaptureEnabled != after.RequestCaptureEnabled {
+		changed = append(changed, "request_capture_enabled")
+	}
+	if before.RequestCaptureQuotaMiB != after.RequestCaptureQuotaMiB {
+		changed = append(changed, "request_capture_quota_mib")
+	}
+	if before.RequestCaptureRetentionDays != after.RequestCaptureRetentionDays {
+		changed = append(changed, "request_capture_retention_days")
+	}
+
 	if before.RegistrationEnabled != after.RegistrationEnabled {
 		changed = append(changed, "registration_enabled")
 	}

@@ -7136,6 +7136,24 @@
 
 	        <!-- Tab: Features (功能开关) -->
         <div v-show="activeTab === 'features'" class="space-y-6">
+        <div class="card" data-testid="request-capture-settings">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.requestCapture.title') }}</h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.requestCapture.description') }}</p>
+          </div>
+          <div class="space-y-5 p-6">
+            <div class="flex items-center justify-between gap-4">
+              <label for="request-capture-enabled" class="input-label">{{ t('admin.requestCapture.enabled') }}</label>
+              <Toggle id="request-capture-enabled" v-model="form.request_capture_enabled" />
+            </div>
+            <div class="grid gap-5 md:grid-cols-2">
+              <label class="space-y-1"><span class="input-label">{{ t('admin.requestCapture.quota') }}</span><input v-model.number="form.request_capture_quota_mib" class="input" type="number" min="1" step="1" required /></label>
+              <label class="space-y-1"><span class="input-label">{{ t('admin.requestCapture.retention') }}</span><input v-model.number="form.request_capture_retention_days" class="input" type="number" min="1" max="30" step="1" required /></label>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.requestCapture.limitsHint') }}</p>
+            <p class="text-xs text-amber-700 dark:text-amber-300">{{ t('admin.requestCapture.privacy') }}</p>
+          </div>
+        </div>
         <div class="card" data-testid="excel-bps-image-settings">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
@@ -10128,6 +10146,9 @@ const form = reactive<SettingsForm>({
   affiliate_enabled: false,
   // Allow user view error requests
   allow_user_view_error_requests: false,
+  request_capture_enabled: false,
+  request_capture_quota_mib: 1024,
+  request_capture_retention_days: 7,
   excel_bps_image_relay_enabled: false,
   excel_bps_image_base_url: '',
   excel_bps_image_body_limit_mib: 64,
@@ -11875,6 +11896,9 @@ async function saveSettings() {
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
       allow_user_view_error_requests: form.allow_user_view_error_requests,
+      request_capture_enabled: form.request_capture_enabled,
+      request_capture_quota_mib: form.request_capture_quota_mib,
+      request_capture_retention_days: form.request_capture_retention_days,
       excel_bps_image_relay_enabled: form.excel_bps_image_relay_enabled,
       excel_bps_image_base_url: form.excel_bps_image_base_url.trim(),
       excel_bps_image_body_limit_mib: form.excel_bps_image_body_limit_mib,

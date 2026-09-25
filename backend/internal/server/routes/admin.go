@@ -75,6 +75,19 @@ func RegisterAdminRoutes(
 
 		// 系统设置
 		registerSettingsRoutes(admin, h)
+		if h.Admin.RequestCapture != nil {
+			captures := admin.Group("/request-captures")
+			captures.Use(h.Admin.RequestCapture.Gate)
+			captures.GET("", h.Admin.RequestCapture.List)
+			captures.POST("", h.Admin.RequestCapture.Create)
+			captures.POST("/:task/stop", h.Admin.RequestCapture.Stop)
+			captures.DELETE("/:task", h.Admin.RequestCapture.Delete)
+			captures.GET("/:task/requests", h.Admin.RequestCapture.Records)
+			captures.GET("/:task/requests/:record", h.Admin.RequestCapture.Detail)
+			captures.GET("/:task/requests/:record/content/:part", h.Admin.RequestCapture.Content)
+			captures.GET("/:task/export", h.Admin.RequestCapture.Export)
+			captures.GET("/:task/requests/:record/export", h.Admin.RequestCapture.Export)
+		}
 
 		// 数据管理
 		registerDataManagementRoutes(admin, h, stepUpAuth)

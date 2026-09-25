@@ -6,6 +6,7 @@ import (
 	"compress/zlib"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"io"
 	"net/http"
 	"strings"
@@ -63,17 +64,23 @@ func (p *PrereadBody) Bytes() []byte {
 // client used to compress the body (zstd, gzip, deflate).
 // 已由 PrereadBody 回填的请求体直接返回其完整切片（零拷贝），不检查内部
 // reader 是否已被消费——见 PrereadBody 的文档说明。
-func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
+func ReadRequestBodyWithPrealloc(req *http.Request) (result []byte, resultErr error) {
 	return readRequestBodyWithPrealloc(req, maxDecompressedBodySize, false)
 }
 
 // ReadRequestBodyWithPreallocLimit applies a caller-specific decoded body cap.
 // It rejects compressed input that exceeds the cap instead of truncating it.
-func ReadRequestBodyWithPreallocLimit(req *http.Request, maxDecodedBytes int64) ([]byte, error) {
+func ReadRequestBodyWithPreallocLimit(req *http.Request, maxDecodedBytes int64) (result []byte, resultErr error) {
 	return readRequestBodyWithPrealloc(req, maxDecodedBytes, true)
 }
 
-func readRequestBodyWithPrealloc(req *http.Request, maxDecodedBytes int64, strict bool) ([]byte, error) {
+func readRequestBodyWithPrealloc(req *http.Request, maxDecodedBytes int64, strict bool) (result []byte, resultErr error) {
+	defer func() {
+		if resultErr == nil && req != nil {
+			requestcapture.FromContext(req.Context()).ClientRequest(result, req.Header.Get("Content-Type"), req.Header)
+		}
+	}()
+
 	if req == nil || req.Body == nil {
 		return nil, nil
 	}
