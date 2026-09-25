@@ -1330,6 +1330,10 @@ export default {
         label: 'Allow users to view their own error requests',
         description: 'When enabled, users can see a redacted view of their failed requests on the usage page (no internal/upstream details). Requires ops monitoring enabled to have data.',
       },
+      long_context_badge: {
+        label: 'Show long-context billing badge',
+        description: 'When enabled, usage records billed under long-context tiered pricing show an x2 badge next to their cost. Enabled by default.',
+      },
       saveSettings: 'Save Settings',
       saving: 'Saving...',
       settingsSaved: 'Settings saved successfully',

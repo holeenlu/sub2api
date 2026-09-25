@@ -396,6 +396,7 @@ type UpdateSettingsRequest struct {
 	AuthSourceDingTalkPlatformQuotas map[string]*service.DefaultPlatformQuotaSetting `json:"auth_source_default_dingtalk_platform_quotas"`
 
 	AllowUserViewErrorRequests  *bool   `json:"allow_user_view_error_requests"`
+	UsageShowLongContextBadge   *bool   `json:"usage_show_long_context_badge"`
 	RequestCaptureEnabled       *bool   `json:"request_capture_enabled"`
 	RequestCaptureQuotaMiB      *int64  `json:"request_capture_quota_mib"`
 	RequestCaptureRetentionDays *int    `json:"request_capture_retention_days"`
@@ -1763,6 +1764,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AllowUserViewErrorRequests
 		}(),
+		UsageShowLongContextBadge: func() bool {
+			if req.UsageShowLongContextBadge != nil {
+				return *req.UsageShowLongContextBadge
+			}
+			return previousSettings.UsageShowLongContextBadge
+		}(),
 		OpsMonitoringEnabled: func() bool {
 			if req.OpsMonitoringEnabled != nil {
 				return *req.OpsMonitoringEnabled
@@ -2585,6 +2592,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CyberSessionIdentityStrictEnabled: updatedSettings.CyberSessionIdentityStrictEnabled,
 		AccountSchedulingThresholds:       updatedSettings.AccountSchedulingThresholds,
 		AllowUserViewErrorRequests:        updatedSettings.AllowUserViewErrorRequests,
+		UsageShowLongContextBadge:         updatedSettings.UsageShowLongContextBadge,
 		RequestCaptureEnabled:             updatedSettings.RequestCaptureEnabled,
 		RequestCaptureQuotaMiB:            updatedSettings.RequestCaptureQuotaMiB,
 		RequestCaptureRetentionDays:       updatedSettings.RequestCaptureRetentionDays,

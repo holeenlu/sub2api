@@ -338,6 +338,8 @@ type SystemSettings struct {
 	ExcelBPSImageBodyLimitMiB   int
 	ExcelBPSImageBudgetMiB      int
 	ExcelBPSImageMaxRequests    int
+	// 使用详情中长上下文计费 x2 徽标的展示开关（默认开启）
+	UsageShowLongContextBadge bool
 }
 
 type DefaultSubscriptionSetting struct {
@@ -442,6 +444,9 @@ type PublicSettings struct {
 
 	// 允许终端用户在用量页查看自己的失败请求
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`
+
+	// 使用详情中长上下文计费 x2 徽标的展示开关（默认开启）
+	UsageShowLongContextBadge bool `json:"usage_show_long_context_badge"`
 }
 
 type LoginAgreementDocument struct {
