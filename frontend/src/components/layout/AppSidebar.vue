@@ -814,6 +814,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/smart-ops', label: t('accountOps.smartTitle'), icon: ChartIcon, expandOnly: true, children: [
       { path: '/admin/account-quality', label: t('qualityOps.title'), icon: ChartIcon },
       { path: '/admin/account-ops', label: t('accountOps.title'), icon: BellIcon },
+      { path: '/admin/token-guard', label: t('tokenGuard.title'), icon: ShieldIcon },
     ] },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },

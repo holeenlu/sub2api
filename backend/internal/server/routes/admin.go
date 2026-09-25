@@ -752,6 +752,12 @@ func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.GET("/account-ops/config", h.Admin.AccountOps.GetConfig)
 	admin.PUT("/account-ops/config", h.Admin.AccountOps.SaveConfig)
 	admin.GET("/account-ops/alerts", h.Admin.AccountOps.List)
+	// 智能运维 → 凭证守护：账号令牌巡检 / 自动重登 / 错误态自愈
+	admin.GET("/account-ops/token-guard/status", h.Admin.AccountTokenGuard.Status)
+	admin.PUT("/account-ops/token-guard/config", h.Admin.AccountTokenGuard.SaveConfig)
+	admin.POST("/account-ops/token-guard/run", h.Admin.AccountTokenGuard.Run)
+	admin.GET("/account-ops/token-guard/events", h.Admin.AccountTokenGuard.Events)
+	admin.POST("/account-ops/token-guard/accounts/:id/relogin", h.Admin.AccountTokenGuard.Relogin)
 	admin.GET("/account-quality-results", h.Admin.ScheduledTest.ListQualityHistory)
 	admin.GET("/account-quality-plans", h.Admin.ScheduledTest.ListQualityPlans)
 	admin.POST("/account-quality-plans/:id/run", h.Admin.ScheduledTest.TriggerQuality)

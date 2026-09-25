@@ -3,6 +3,7 @@
 import ui from './ui'
 import qualityOps from './qualityOps'
 import accountOps from './accountOps'
+import tokenGuard from './tokenGuard'
 import landing from './landing'
 import common from './common'
 import dashboard from './dashboard'
@@ -18,6 +19,7 @@ export default {
   ...ui,
   qualityOps,
   accountOps,
+  tokenGuard,
   requestTiming,
   ...landing,
   ...common,

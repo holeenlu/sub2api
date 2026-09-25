@@ -10,6 +10,7 @@ import docs from './docs'
 import requestTiming from './requestTiming'
 import qualityOps from './qualityOps'
 import accountOps from './accountOps'
+import tokenGuard from './tokenGuard'
 
 export default {
   ...ui,
@@ -24,4 +25,5 @@ export default {
   requestTiming,
   qualityOps,
   accountOps,
+  tokenGuard,
 }
