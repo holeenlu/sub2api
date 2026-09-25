@@ -3310,6 +3310,18 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			extraExpression += " || $" + itoa(idx) + "::jsonb"
 			args = append(args, payload)
 			idx++
+			if enabled, exists := updates.Extra["openai_excel_bps"].(bool); exists && !enabled {
+				extraExpression = "(" + extraExpression + ") - 'openai_excel_bps' - 'openai_excel_bps_models' - 'openai_excel_bps_cache_creation_as_input'"
+			} else {
+				// JSON null is a present scope and would disable every model.
+				// Remove the key to restore the all-models routing contract.
+				if scope, exists := updates.Extra["openai_excel_bps_models"]; exists && scope == nil {
+					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_models'"
+				}
+				if enabled, exists := updates.Extra["openai_excel_bps_cache_creation_as_input"].(bool); exists && !enabled {
+					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_cache_creation_as_input'"
+				}
+			}
 			if upstreamBillingProbeExplicitlyDisabled(updates.Extra) || upstreamBillingProbeSnapshotClearRequested(updates.Extra) {
 				extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 			}

@@ -160,6 +160,7 @@ tools/tests/__pycache__/
 !docs/account-quality-operations.md
 !docs/pelican-scheduled-tests.md
 !docs/copilot-sdk-codex.md
+!docs/excel-bps.md
 !docs/account-token-guard.md
 !docs/legal/
 !docs/legal/*.md
