@@ -85,8 +85,10 @@ export default {
           enabled: '啟用風控中心',
           enabledHint: '關閉後管理員側邊欄入口隱藏，閘道器內容稽核不會執行。',
           cyberSessionBlock: 'cyber 工作階段自動遮蔽',
-          cyberSessionBlockHint: '開啟後,被上游網路安全策略(cyber_policy)攔截的工作階段將在 TTL 內被本地遮蔽,不再發往上游。僅遮蔽該工作階段,不影響同 Key 其他工作階段。',
+          cyberSessionBlockHint: '開啟後，僅對攜帶明確工作階段 ID 且被上游網路安全策略(cyber_policy)攔截的工作階段，在 TTL 內執行本地遮蔽。同 Key 的不同工作階段互不影響。缺少工作階段 ID 時仍由上游稽核，不根據 IP、用戶端類型、快取 key 或歷史長度推斷封鎖。',
           cyberSessionBlockTTL: '遮蔽時長(秒)',
+          cyberSessionIdentityStrict: '嚴格要求明確工作階段身分',
+          cyberSessionIdentityStrictHint: '高風險選項，預設關閉。開啟後，缺少、非法或衝突的工作階段身分會在選擇帳號和請求上游前被拒絕。WebSocket 後續輪次可繼承本連線首次確認的身分，但顯式切換身分會關閉連線。請先確認所有用戶端都穩定傳遞 thread_id 或 session_id。',
         },
         affiliate: {
           title: '邀請返利',

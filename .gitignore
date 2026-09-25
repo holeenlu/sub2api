@@ -156,6 +156,7 @@ tools/tests/__pycache__/
 !docs/PRIVATE_REPOSITORY_SYNC.md
 !docs/I18N_COMPLETENESS_AUDIT.md
 !docs/codex-credits.md
+!docs/cyber-session-blocking.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/

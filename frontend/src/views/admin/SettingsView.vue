@@ -7460,6 +7460,23 @@
                 class="input"
               />
             </div>
+
+            <div
+              v-if="form.cyber_session_block_enabled"
+              class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/30"
+            >
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <label class="text-sm font-medium text-amber-900 dark:text-amber-200">
+                    {{ t('admin.settings.features.riskControl.cyberSessionIdentityStrict') }}
+                  </label>
+                  <p class="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                    {{ t('admin.settings.features.riskControl.cyberSessionIdentityStrictHint') }}
+                  </p>
+                </div>
+                <Toggle v-model="form.cyber_session_identity_strict_enabled" />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -9774,6 +9791,7 @@ const form = reactive<SettingsForm>({
   risk_control_enabled: false,
   cyber_session_block_enabled: false,
   cyber_session_block_ttl_seconds: 3600,
+  cyber_session_identity_strict_enabled: false,
   payment_min_amount: 1,
   payment_max_amount: 10000,
   payment_daily_limit: 50000,
@@ -11643,6 +11661,8 @@ async function saveSettings() {
       cyber_session_block_enabled: form.cyber_session_block_enabled,
       cyber_session_block_ttl_seconds:
         Number(form.cyber_session_block_ttl_seconds) || 3600,
+      cyber_session_identity_strict_enabled:
+        form.cyber_session_identity_strict_enabled,
       payment_min_amount: Number(form.payment_min_amount) || 0,
       payment_max_amount: Number(form.payment_max_amount) || 0,
       payment_daily_limit: Number(form.payment_daily_limit) || 0,

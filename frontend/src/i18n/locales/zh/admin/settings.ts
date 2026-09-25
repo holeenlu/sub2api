@@ -83,8 +83,10 @@ export default {
           enabled: '启用风控中心',
           enabledHint: '关闭后管理员侧边栏入口隐藏，网关内容审计不会执行。',
           cyberSessionBlock: 'cyber 会话自动屏蔽',
-          cyberSessionBlockHint: '开启后,被上游网络安全策略(cyber_policy)拦截的会话将在 TTL 内被本地屏蔽,不再发往上游。仅屏蔽该会话,不影响同 Key 其他会话。',
+          cyberSessionBlockHint: '开启后，仅对携带明确会话 ID 且被上游网络安全策略(cyber_policy)拦截的会话，在 TTL 内执行本地屏蔽。同 Key 的不同会话互不影响。缺少会话 ID 时仍由上游审核，不根据 IP、客户端类型、缓存 key 或历史长度推断封锁。',
           cyberSessionBlockTTL: '屏蔽时长(秒)',
+          cyberSessionIdentityStrict: '严格要求明确会话身份',
+          cyberSessionIdentityStrictHint: '高风险选项，默认关闭。开启后，缺少、非法或冲突的会话身份会在选择账号和请求上游前被拒绝。WebSocket 后续轮次可继承本连接首次确认的身份，但显式切换身份会关闭连接。请先确认所有客户端都稳定传递 thread_id 或 session_id。',
         },
         affiliate: {
           title: '邀请返利',

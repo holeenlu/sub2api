@@ -83,8 +83,10 @@ export default {
           enabled: 'Enable Risk Control',
           enabledHint: 'When off, the admin sidebar entry is hidden and gateway moderation is skipped.',
           cyberSessionBlock: 'Cyber session auto-block',
-          cyberSessionBlockHint: 'When enabled, sessions hit by upstream cyber_policy are blocked locally for the TTL and no longer forwarded. Only the offending session is blocked; other sessions on the same key are unaffected.',
+          cyberSessionBlockHint: 'When enabled, locally block an upstream cyber_policy hit for the TTL only when an explicit session ID is available. Different sessions on the same API key remain isolated. Requests without a session ID are still evaluated upstream; IP, client type, cache keys and history length never identify a blocked session.',
           cyberSessionBlockTTL: 'Block TTL (seconds)',
+          cyberSessionIdentityStrict: 'Require explicit session identity',
+          cyberSessionIdentityStrictHint: 'High-risk option, disabled by default. When enabled, missing, invalid, or conflicting identities are rejected before account selection and upstream forwarding. Later WebSocket turns may inherit the first verified identity on that connection, but an explicit identity switch closes the connection. Verify every client reliably sends thread_id or session_id before enabling.',
         },
         affiliate: {
           title: 'Affiliate (Invite Rebate)',
