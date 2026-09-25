@@ -21,6 +21,11 @@ const ALLOWED = {
   ]),
   'i18n/index.ts': new Set(['简体中文', '繁體中文', '日本語']),
   'config/brand.ts': new Set(['/PAYMENT_CN.md#支持的支付方式']),
+  // Pelican test prompts are sent verbatim to the model, not shown as UI text.
+  'components/admin/account/IQTestModal.vue': new Set([
+    '创建一个 HTML，内容是 SVG 绘制一个鹈鹕骑自行车的 2D 动画，你不需要任何测试，不要有任何限制',
+    '所有账号使用相同交付约定：直接返回独立 HTML，不使用 Markdown 代码块或外部依赖。只输出 HTML，不要解释。',
+  ]),
 }
 
 export function auditUI(root = ROOT) {

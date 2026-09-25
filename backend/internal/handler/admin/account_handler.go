@@ -1336,6 +1336,12 @@ type TestAccountRequest struct {
 	AudioDataURL string `json:"audio_data_url"`
 }
 
+type PelicanTestRequest struct {
+	ModelID         string `json:"model_id"`
+	Prompt          string `json:"prompt"`
+	ReasoningEffort string `json:"reasoning_effort"`
+}
+
 type SyncFromCRSRequest struct {
 	BaseURL            string   `json:"base_url" binding:"required"`
 	Username           string   `json:"username" binding:"required"`
@@ -1378,6 +1384,25 @@ func (h *AccountHandler) Test(c *gin.Context) {
 		if _, err := h.rateLimitService.RecoverAccountAfterSuccessfulTest(c.Request.Context(), accountID); err != nil {
 			_ = c.Error(err)
 		}
+	}
+}
+
+// PelicanTest handles the dedicated Pelican HTML-generation test stream.
+// POST /api/v1/admin/accounts/:id/pelican-test
+func (h *AccountHandler) PelicanTest(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	var req PelicanTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := h.accountTestService.TestPelicanAccountConnection(c, accountID, req.ModelID, req.Prompt, req.ReasoningEffort); err != nil {
+		return
 	}
 }
 
