@@ -213,6 +213,7 @@ export default {
     channelPricing: '渠道定价',
     channelMonitor: '渠道监控',
     channelStatus: '渠道状态',
+    pelicanShowcase: '鹈鹕测智',
     riskControl: '风控中心',
     securityAudit: '安全审计',
     contentModeration: '内容审计',

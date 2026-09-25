@@ -895,6 +895,7 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		LoadFactor:              account.LoadFactor,
 		Priority:                account.Priority,
 		RateMultiplier:          account.RateMultiplier,
+		GroupRateMultiplier:     account.GroupRateMultiplier,
 		Status:                  account.Status,
 		LastUsedAt:              account.LastUsedAt,
 		ExpiresAt:               account.ExpiresAt,
@@ -945,11 +946,13 @@ func filterSchedulerAccountGroups(accountGroups []service.AccountGroup) []servic
 		if ag.GroupID <= 0 {
 			continue
 		}
+		// 候选过滤读的是本投影：裁掉 AllowedModels，分组内的模型限制在选号阶段就会失效。
 		filtered = append(filtered, service.AccountGroup{
-			AccountID: ag.AccountID,
-			GroupID:   ag.GroupID,
-			Priority:  ag.Priority,
-			CreatedAt: ag.CreatedAt,
+			AccountID:     ag.AccountID,
+			GroupID:       ag.GroupID,
+			Priority:      ag.Priority,
+			AllowedModels: ag.AllowedModels,
+			CreatedAt:     ag.CreatedAt,
 		})
 	}
 	if len(filtered) == 0 {
@@ -997,10 +1000,13 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	}
 	// Candidate admission and sticky routing must evaluate the same account-level
 	// threshold overrides before the full account snapshot is hydrated.
+	// BPS admission also needs workspace identity and JWT expiry before hydration;
+	// neither access_token nor refresh_token belongs in this metadata projection.
 	keys := []string{
 		"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type",
 		"account_scheduling_threshold",
 		"anthropic_fable_scheduling_threshold",
+		"chatgpt_account_id", "expires_at",
 	}
 	filtered := make(map[string]any)
 	for _, key := range keys {
@@ -1019,6 +1025,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		return nil
 	}
 	keys := []string{
+		service.OpenAIBPSCredentialStateExtraKey,
 		// Anthropic shared-window and Fable-only threshold checks run on this
 		// projection. UpdateExtra refreshes both payloads without a bucket rebuild.
 		"session_window_utilization",
@@ -1066,6 +1073,8 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// 走网关报 no available accounts"。
 		"openai_passthrough",
 		"openai_oauth_passthrough",
+		"openai_excel_bps",
+		"openai_excel_bps_models",
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
 		"codex_allow_without_ticket",
@@ -1101,7 +1110,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 	}
 	filtered := make(map[string]any)
 	for _, key := range keys {
-		if value, ok := extra[key]; ok && value != nil {
+		if value, ok := extra[key]; ok && (value != nil || key == "openai_excel_bps_models") {
 			if key == service.UpstreamBillingProbeExtraKey {
 				filteredProbe := filterSchedulerUpstreamBillingProbe(value)
 				if filteredProbe == nil {

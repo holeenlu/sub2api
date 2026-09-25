@@ -17,7 +17,7 @@ export interface DefaultSubscriptionSetting {
 }
 
 // ── 平台限额类型 ──────────────────────────────────────────────────
-export type PlatformType = "anthropic" | "openai" | "gemini" | "antigravity" | "grok"
+export type PlatformType = "anthropic" | "openai" | "openai_bps" | "gemini" | "antigravity" | "grok"
 export type QuotaWindowType = "daily" | "weekly" | "monthly"
 
 /** 单平台三档限额；null = 不限制，undefined = 未填（等价 null） */
@@ -30,7 +30,7 @@ export interface PlatformQuotaLimits {
 /** 全平台默认限额 map（key = PlatformType） */
 export type DefaultPlatformQuotasMap = Partial<Record<PlatformType, PlatformQuotaLimits>>
 
-const PLATFORMS: PlatformType[] = ["anthropic", "openai", "gemini", "antigravity", "grok"]
+const PLATFORMS: PlatformType[] = ["anthropic", "openai", "openai_bps", "gemini", "antigravity", "grok"]
 
 export type SchedulingThresholdPlatformType =
   | "openai"
@@ -150,6 +150,16 @@ export interface PaymentVisibleMethodSourceOption {
 export interface WeChatConnectModeOption {
   value: WeChatConnectMode;
   labelKey: string;
+}
+
+/** Limits of the user-facing Pelican gallery; kept per group, independent of test history. */
+export interface PelicanShowcaseConfig {
+  group_ids: number[];
+  /** Newest snapshots kept per group (1–100). */
+  max_items: number;
+  /** When on, snapshots older than retention_days (1–90) are removed. */
+  auto_cleanup: boolean;
+  retention_days: number;
 }
 
 const AUTH_SOURCE_TYPES: AuthSourceType[] = [
@@ -668,6 +678,7 @@ export interface SystemSettings {
   // Cyber session block
   cyber_session_block_enabled: boolean;
   cyber_session_block_ttl_seconds: number;
+  cyber_session_identity_strict_enabled: boolean;
 
   payment_min_amount: number;
   payment_max_amount: number;
@@ -743,6 +754,10 @@ export interface SystemSettings {
   // Available Channels feature switch
   available_channels_enabled: boolean;
 
+  // Pelican showcase: user gallery of scheduled Pelican HTML results
+  pelican_showcase_enabled?: boolean;
+  pelican_showcase_config?: PelicanShowcaseConfig;
+
   // Subscription feature switch (user sidebar "My Subscriptions" entry)
   subscription_enabled: boolean;
 
@@ -760,6 +775,14 @@ export interface SystemSettings {
 
   // Allow user view error requests
   allow_user_view_error_requests: boolean;
+  request_capture_enabled: boolean;
+  request_capture_quota_mib: number;
+  request_capture_retention_days: number;
+  excel_bps_image_relay_enabled: boolean;
+  excel_bps_image_base_url: string;
+  excel_bps_image_body_limit_mib: number;
+  excel_bps_image_budget_mib: number;
+  excel_bps_image_max_requests: number;
 }
 
 export interface UpdateSettingsRequest {
@@ -993,6 +1016,7 @@ export interface UpdateSettingsRequest {
   // Cyber session block
   cyber_session_block_enabled?: boolean;
   cyber_session_block_ttl_seconds?: number;
+  cyber_session_identity_strict_enabled?: boolean;
 
   payment_min_amount?: number;
   payment_max_amount?: number;
@@ -1056,6 +1080,10 @@ export interface UpdateSettingsRequest {
   // Available Channels feature switch
   available_channels_enabled?: boolean;
 
+  // Pelican showcase switch + gallery limits
+  pelican_showcase_enabled?: boolean;
+  pelican_showcase_config?: PelicanShowcaseConfig;
+
   // Subscription feature switch
   subscription_enabled?: boolean;
 
@@ -1072,6 +1100,14 @@ export interface UpdateSettingsRequest {
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
 
   allow_user_view_error_requests?: boolean;
+  request_capture_enabled?: boolean;
+  request_capture_quota_mib?: number;
+  request_capture_retention_days?: number;
+  excel_bps_image_relay_enabled?: boolean;
+  excel_bps_image_base_url?: string;
+  excel_bps_image_body_limit_mib?: number;
+  excel_bps_image_budget_mib?: number;
+  excel_bps_image_max_requests?: number;
 }
 
 /**

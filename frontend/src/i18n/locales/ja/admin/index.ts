@@ -1,3 +1,4 @@
+import requestCapture from './requestCapture'
 import overview from './overview'
 import channels from './channels'
 import accounts from './accounts'
@@ -9,6 +10,7 @@ import promptAudit from './promptAudit'
 import plugins from './plugins'
 
 export default {
+  ...requestCapture,
   ...overview,
   ...channels,
   ...accounts,

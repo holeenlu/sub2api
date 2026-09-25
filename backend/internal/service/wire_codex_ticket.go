@@ -10,6 +10,7 @@ import (
 // Construct the harvester only after history and proxy settings are available.
 func ProvideOpenAIGatewayService(
 	accountRepo AccountRepository,
+	proxyRepo ProxyRepository,
 	usageLogRepo UsageLogRepository,
 	usageBillingRepo UsageBillingRepository,
 	userRepo UserRepository,
@@ -33,7 +34,7 @@ func ProvideOpenAIGatewayService(
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
 	history CodexTicketAttemptRepository,
 ) *OpenAIGatewayService {
-	s := NewOpenAIGatewayService(accountRepo, usageLogRepo, usageBillingRepo, userRepo,
+	s := NewOpenAIGatewayService(accountRepo, proxyRepo, usageLogRepo, usageBillingRepo, userRepo,
 		userSubRepo, userGroupRateRepo, cache, cfg, schedulerSnapshot, concurrencyService,
 		billingService, rateLimitService, billingCacheService, httpUpstream, deferredService,
 		openAITokenProvider, grokTokenProvider, resolver, channelService, balanceNotifyService,
