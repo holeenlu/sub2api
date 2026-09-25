@@ -417,9 +417,18 @@ export default {
         conditionType: '條件類型',
         conditionSubscription: '訂閱方案',
         conditionBalance: '餘額',
+        conditionUser: '指定使用者',
         operator: '運算子',
         balanceValue: '餘額閾值',
-        selectPackages: '選擇方案'
+        selectPackages: '選擇方案',
+        targetingUsers: '指定使用者',
+        targetingUsersHint: '只有選中的使用者能看到這條公告，適合單獨提醒或警告某個使用者。通知方式選「彈出視窗」時，對方登入或重新整理頁面後會彈出提醒，直到點「標記已讀」為止。',
+        selectUsers: '選擇使用者',
+        selectUsersRequired: '請至少選擇一個使用者',
+        searchUsersPlaceholder: '輸入電子郵件或使用者名稱搜尋',
+        noUsersFound: '沒有找到匹配的使用者',
+        noUsersSelected: '還沒有選擇使用者',
+        userUnavailable: '使用者不存在'
       },
       operators: {
         gt: '>',
@@ -430,6 +439,7 @@ export default {
       },
       targetingSummaryAll: '全部使用者',
       targetingSummaryCustom: '自訂（{groups} 組）',
+      targetingSummaryUsers: '指定使用者（{count} 人）',
       timeImmediate: '立即',
       timeNever: '永久',
       readStatus: '已讀情況',
