@@ -997,10 +997,13 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	}
 	// Candidate admission and sticky routing must evaluate the same account-level
 	// threshold overrides before the full account snapshot is hydrated.
+	// BPS admission also needs workspace identity and JWT expiry before hydration;
+	// neither access_token nor refresh_token belongs in this metadata projection.
 	keys := []string{
 		"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type",
 		"account_scheduling_threshold",
 		"anthropic_fable_scheduling_threshold",
+		"chatgpt_account_id", "expires_at",
 	}
 	filtered := make(map[string]any)
 	for _, key := range keys {
@@ -1019,6 +1022,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		return nil
 	}
 	keys := []string{
+		service.OpenAIBPSCredentialStateExtraKey,
 		// Anthropic shared-window and Fable-only threshold checks run on this
 		// projection. UpdateExtra refreshes both payloads without a bucket rebuild.
 		"session_window_utilization",

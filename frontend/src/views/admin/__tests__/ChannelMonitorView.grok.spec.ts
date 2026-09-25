@@ -104,6 +104,7 @@ describe('channel monitor Grok provider', () => {
     expect(providerButtons).toHaveLength(PROVIDERS.length)
     expect(wrapper.find('[data-testid="monitor-provider-minimax"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="monitor-provider-opencode_go"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="monitor-provider-openai_bps"]').exists()).toBe(true)
     expect(providerButtons[0].element.parentElement?.className).toContain('grid-cols-2')
     expect(providerButtons[0].element.parentElement?.className).toContain('sm:grid-cols-4')
 

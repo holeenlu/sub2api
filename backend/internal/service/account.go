@@ -186,8 +186,15 @@ func (a *Account) IsSchedulable() bool {
 // isSchedulableIgnoringRateLimit 是 IsSchedulable 去掉账号级限流窗口后的判定：
 // 回答"限流冷却结束后这个账号能否被调度"。过载、临时停调、到期自动暂停、
 // 额度超限这些状态的恢复时刻都与限流无关，全池冷却诊断据此把它们排除在
-// Retry-After 的计算之外。
+// Retry-After 的计算之外。BPS 凭证过期/撤销/认证失败不会随限流结束而恢复，
+// 因此也在这里判定。
 func (a *Account) isSchedulableIgnoringRateLimit() bool {
+	if a.IsOpenAIBPS() {
+		state := a.OpenAIBPSCredentialState(time.Now())
+		if state.Status == "expired" || state.Status == "revoked" || state.Status == "auth_failed" {
+			return false
+		}
+	}
 	if !a.IsActive() || !a.Schedulable {
 		return false
 	}
@@ -328,7 +335,7 @@ func (a *Account) IsCNProvider() bool {
 // openai/grok 原生走 OpenAI 网关；国产供应商同为 OpenAI Chat Completions
 // 兼容上游，也经 OpenAI 网关转发。OpenCode 同样经 OpenAI 网关按模型分流。
 func (a *Account) IsOpenAICompatible() bool {
-	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.IsCNProvider() || a.IsOpenCodeGo())
+	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformOpenAIBPS || a.Platform == PlatformGrok || a.IsCNProvider() || a.IsOpenCodeGo())
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -1868,6 +1875,9 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	}
 	if !a.IsOpenAICompatible() {
 		return false
+	}
+	if a.Platform == PlatformOpenAIBPS {
+		return capability == OpenAIEndpointCapabilityResponses
 	}
 	if a.IsGrok() {
 		switch capability {
