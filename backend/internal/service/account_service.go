@@ -82,6 +82,8 @@ type AccountRepository interface {
 	SetSchedulable(ctx context.Context, id int64, schedulable bool) error
 	AutoPauseExpiredAccounts(ctx context.Context, now time.Time) (int64, error)
 	BindGroups(ctx context.Context, accountID int64, groupIDs []int64) error
+	// SetGroupAllowedModels 覆盖账号在各已绑定分组内的模型限制，未列出的分组恢复为不限制。
+	SetGroupAllowedModels(ctx context.Context, accountID int64, allowed map[int64][]string) error
 
 	ListSchedulable(ctx context.Context) ([]Account, error)
 	ListSchedulableByGroupID(ctx context.Context, groupID int64) ([]Account, error)

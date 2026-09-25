@@ -946,11 +946,13 @@ func filterSchedulerAccountGroups(accountGroups []service.AccountGroup) []servic
 		if ag.GroupID <= 0 {
 			continue
 		}
+		// 候选过滤读的是本投影：裁掉 AllowedModels，分组内的模型限制在选号阶段就会失效。
 		filtered = append(filtered, service.AccountGroup{
-			AccountID: ag.AccountID,
-			GroupID:   ag.GroupID,
-			Priority:  ag.Priority,
-			CreatedAt: ag.CreatedAt,
+			AccountID:     ag.AccountID,
+			GroupID:       ag.GroupID,
+			Priority:      ag.Priority,
+			AllowedModels: ag.AllowedModels,
+			CreatedAt:     ag.CreatedAt,
 		})
 	}
 	if len(filtered) == 0 {

@@ -626,6 +626,8 @@ export interface Group {
 export interface AdminGroup extends Group {
   force_openai_fast: boolean
   free_openai_fast: boolean
+  // 仅允许流式请求（管理端请求策略，用户侧分组不返回）
+  stream_only: boolean
   model_pricing: import('@/api/admin/channels').ChannelModelPricing[]
   // 分组利润控制（openai/anthropic/gemini/grok/antigravity 分组可启用；margin/buffer 为小数存储）。
   // 仅管理员可见：与 rate_multiplier 相乘即可反推上游成本上限，不得下放到 Group。
@@ -800,6 +802,7 @@ export interface CreateGroupRequest {
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
+  stream_only?: boolean
   model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
   allow_image_generation?: boolean
   allow_batch_image_generation?: boolean
@@ -867,6 +870,7 @@ export interface UpdateGroupRequest {
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
+  stream_only?: boolean
   model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
   allow_image_generation?: boolean
   allow_batch_image_generation?: boolean
@@ -1285,6 +1289,7 @@ export interface Account {
   proxy?: Proxy
   group_ids?: number[] // Groups this account belongs to
   groups?: Group[] // Preloaded group objects
+  account_groups?: AccountGroupBinding[] // Per-group binding settings (detail responses only)
 
   // 后端下发的能力位：账号的凭据是否参与 OAuth 续期（直接导入的 setup-token 没有
   // refresh_token，恒为 false）。前端据此决定是否显示"刷新 token"入口。
@@ -1563,6 +1568,16 @@ export interface CreateAccountRequest {
   confirm_mixed_channel_risk?: boolean
 }
 
+// AccountGroupBinding is one account-to-group binding and its per-group settings.
+export interface AccountGroupBinding {
+  account_id: number
+  group_id: number
+  priority: number
+  // Models the account may serve in this group; omitted means no limit.
+  allowed_models?: string[]
+  created_at: string
+}
+
 export interface UpdateAccountRequest {
   name?: string
   notes?: string | null
@@ -1577,6 +1592,8 @@ export interface UpdateAccountRequest {
   schedulable?: boolean
   status?: 'active' | 'inactive' | 'error'
   group_ids?: number[]
+  // Replaces the per-group model limits; groups not listed become unrestricted.
+  group_allowed_models?: Record<number, string[]>
   expires_at?: number | null
   auto_pause_on_expired?: boolean
   upstream_billing_probe_enabled?: boolean

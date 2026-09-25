@@ -630,6 +630,9 @@ func (s *adminServiceImpl) updateAccount(
 	input *UpdateAccountInput,
 	mergeCredentials func(existing, incoming map[string]any) map[string]any,
 ) (*Account, error) {
+	if err := ValidateGroupAllowedModels(input.GroupAllowedModels); err != nil {
+		return nil, err
+	}
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1013,6 +1016,13 @@ func (s *adminServiceImpl) updateAccount(
 	// 绑定分组
 	if input.GroupIDs != nil {
 		if err := s.accountRepo.BindGroups(ctx, account.ID, *input.GroupIDs); err != nil {
+			return nil, err
+		}
+	}
+
+	// 分组内的模型限制写在绑定之后，只作用于最终绑定的分组。
+	if input.GroupAllowedModels != nil {
+		if err := s.accountRepo.SetGroupAllowedModels(ctx, account.ID, input.GroupAllowedModels); err != nil {
 			return nil, err
 		}
 	}

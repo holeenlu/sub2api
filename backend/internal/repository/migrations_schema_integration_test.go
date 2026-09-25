@@ -58,6 +58,7 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	// groups: OpenAI Live 与 Fast 强制策略都默认关闭，管理员显式开启后才生效。
 	requireColumn(t, tx, "groups", "allow_live", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "force_openai_fast", "boolean", 0, false)
+	requireColumn(t, tx, "groups", "stream_only", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "free_openai_fast", "boolean", 0, false)
 	// groups: 无可用账号兜底分组，未配置时为 NULL，目标分组删除后由外键置空。
 	requireColumn(t, tx, "groups", "fallback_group_id_on_no_account", "bigint", 0, true)

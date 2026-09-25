@@ -1200,6 +1200,13 @@ export default {
       billingRateMultiplierHint: '0 表示不計費，僅影響帳號計費',
       groupBillingRateMultiplier: '分組計費倍率',
       groupBillingRateMultiplierHint: '參與使用者/API Key 扣費；預設 1。分組 0.2x 時設定 5x 可恢復 1x 原價',
+      groupModelLimits: {
+        title: '各分組可用模型',
+        hint: '帳號屬於多個分組時，可以限制它在某個分組裡只服務部分模型；只能在帳號本身支援的模型裡收窄。預設不限制。',
+        allModels: '全部模型',
+        selectedModels: '僅限部分',
+        emptyHint: '還沒有選擇模型，儲存後該分組仍按不限制處理。'
+      },
       expiresAt: '過期時間',
       expiresAtHint: '留空表示不過期',
       expiresAtTimezoneHint: '輸入按瀏覽器本地時區（{timezone}）解釋。',

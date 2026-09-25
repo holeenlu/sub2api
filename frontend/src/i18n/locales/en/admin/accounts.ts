@@ -1099,6 +1099,13 @@ export default {
       billingRateMultiplierHint: '0 = free, affects account billing only',
       groupBillingRateMultiplier: 'Group Billing Multiplier',
       groupBillingRateMultiplierHint: 'Applied to user/API key charges. Default 1; use 5 with a 0.2x group to restore 1x.',
+      groupModelLimits: {
+        title: 'Models per group',
+        hint: 'When this account belongs to several groups, you can limit which of its models a group may use. Limits can only narrow the models the account already supports. No limit by default.',
+        allModels: 'All models',
+        selectedModels: 'Only selected',
+        emptyHint: 'No models selected yet; this group stays unrestricted after saving.'
+      },
       expiresAt: 'Expires At',
       expiresAtHint: 'Leave empty for no expiration',
       expiresAtTimezoneHint: 'Input is interpreted in your browser time zone ({timezone}).',

@@ -1990,6 +1990,10 @@ func (s *stubAccountRepo) BindGroups(ctx context.Context, accountID int64, group
 	return errors.New("not implemented")
 }
 
+func (s *stubAccountRepo) SetGroupAllowedModels(ctx context.Context, accountID int64, allowed map[int64][]string) error {
+	return errors.New("not implemented")
+}
+
 func (s *stubAccountRepo) ListShadowsByParent(ctx context.Context, parentID int64) ([]*service.Account, error) {
 	return nil, errors.New("not implemented")
 }

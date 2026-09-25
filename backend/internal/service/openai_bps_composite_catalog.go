@@ -95,7 +95,7 @@ func (s *GatewayService) CompleteCompositeBPSModelCatalog(ctx context.Context, g
 		}
 		for i := range accounts {
 			a := &accounts[i]
-			if a.Type == AccountTypeOAuth && isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, a, PlatformOpenAIBPS, target, false, OpenAIEndpointCapabilityResponses) {
+			if a.Type == AccountTypeOAuth && isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, a, groupID, PlatformOpenAIBPS, target, false, OpenAIEndpointCapabilityResponses) {
 				models = append(models, model)
 				break
 			}

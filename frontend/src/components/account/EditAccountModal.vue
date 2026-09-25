@@ -3113,6 +3113,13 @@
         data-tour="account-form-groups"
       />
 
+      <AccountGroupModelLimits
+        v-model="groupAllowedModels"
+        :groups="groupsForModelLimits"
+        :platform="account?.platform"
+        :account-id="account?.id"
+      />
+
     </form>
 
     <template #footer>
@@ -3206,6 +3213,12 @@ import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import AccountGroupModelLimits from '@/components/account/AccountGroupModelLimits.vue'
+import {
+  buildGroupAllowedModelsPayload,
+  groupAllowedModelsFromAccount,
+  type GroupAllowedModels
+} from '@/components/account/groupAllowedModels'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
@@ -3299,6 +3312,16 @@ const selectableGroups = computed(() => {
     }
   }
   return Array.from(groups.values())
+})
+
+// 各分组内的可用模型限制，按当前勾选的分组顺序展示
+const groupAllowedModels = ref<GroupAllowedModels>({})
+const groupsForModelLimits = computed(() => {
+  const byId = new Map(selectableGroups.value.map(group => [group.id, group]))
+  return form.group_ids.flatMap(id => {
+    const group = byId.get(id)
+    return group ? [{ id: group.id, name: group.name }] : []
+  })
 })
 
 // Spark 影子账号(parent_account_id 非空):代理恒继承母账号,不可独立编辑(外审 B/P1),
@@ -4244,6 +4267,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     ? newAccount.status
     : 'active'
   form.group_ids = newAccount.group_ids || []
+  groupAllowedModels.value = groupAllowedModelsFromAccount(newAccount)
   form.expires_at = newAccount.expires_at ?? null
 
   // Load intercept warmup requests setting (applies to all account types)
@@ -5317,6 +5341,8 @@ const handleSubmit = async () => {
       updatePayload.load_factor = 0
     }
     updatePayload.auto_pause_on_expired = autoPauseOnExpired.value
+    // 整体覆盖：只带仍勾选的分组，没有列出的分组由后端恢复为不限制
+    updatePayload.group_allowed_models = buildGroupAllowedModelsPayload(form.group_ids, groupAllowedModels.value)
     if (props.account.type === 'apikey') {
       updatePayload.upstream_billing_probe_enabled = upstreamBillingAutoProbeEnabled.value
       updatePayload.upstream_billing_rate_sync_enabled = upstreamBillingRateSyncEnabled.value
