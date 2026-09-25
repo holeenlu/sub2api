@@ -83,8 +83,9 @@ func (s *OpenAIGatewayService) diagnoseModelAvailabilityInGroup(
 		// Mirrors the per-candidate filter used during account selection
 		// (openai_account_scheduler.isAccountRequestCompatible): empty
 		// model_mapping accepts everything; otherwise the explicit / wildcard
-		// mapping must match.
-		if !acc.IsModelSupported(requestedModel) {
+		// mapping must match, and the account's allowlist for this group (if
+		// any) must admit the model.
+		if !acc.IsModelSupportedInGroup(groupID, requestedModel) {
 			continue
 		}
 		diag.HasModelSupport = true

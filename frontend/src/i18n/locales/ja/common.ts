@@ -213,6 +213,7 @@ export default {
     channelPricing: 'チャネル料金',
     channelMonitor: 'チャネル監視',
     channelStatus: 'チャネルステータス',
+    pelicanShowcase: 'ペリカンショーケース',
     riskControl: 'リスク管理',
     securityAudit: 'セキュリティ監査',
     contentModeration: 'コンテンツモデレーション',

@@ -895,6 +895,7 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		LoadFactor:              account.LoadFactor,
 		Priority:                account.Priority,
 		RateMultiplier:          account.RateMultiplier,
+		GroupRateMultiplier:     account.GroupRateMultiplier,
 		Status:                  account.Status,
 		LastUsedAt:              account.LastUsedAt,
 		ExpiresAt:               account.ExpiresAt,
@@ -945,11 +946,13 @@ func filterSchedulerAccountGroups(accountGroups []service.AccountGroup) []servic
 		if ag.GroupID <= 0 {
 			continue
 		}
+		// 候选过滤读的是本投影：裁掉 AllowedModels，分组内的模型限制在选号阶段就会失效。
 		filtered = append(filtered, service.AccountGroup{
-			AccountID: ag.AccountID,
-			GroupID:   ag.GroupID,
-			Priority:  ag.Priority,
-			CreatedAt: ag.CreatedAt,
+			AccountID:     ag.AccountID,
+			GroupID:       ag.GroupID,
+			Priority:      ag.Priority,
+			AllowedModels: ag.AllowedModels,
+			CreatedAt:     ag.CreatedAt,
 		})
 	}
 	if len(filtered) == 0 {
@@ -1070,6 +1073,8 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// 走网关报 no available accounts"。
 		"openai_passthrough",
 		"openai_oauth_passthrough",
+		"openai_excel_bps",
+		"openai_excel_bps_models",
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
 		"codex_allow_without_ticket",
@@ -1105,7 +1110,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 	}
 	filtered := make(map[string]any)
 	for _, key := range keys {
-		if value, ok := extra[key]; ok && value != nil {
+		if value, ok := extra[key]; ok && (value != nil || key == "openai_excel_bps_models") {
 			if key == service.UpstreamBillingProbeExtraKey {
 				filteredProbe := filterSchedulerUpstreamBillingProbe(value)
 				if filteredProbe == nil {

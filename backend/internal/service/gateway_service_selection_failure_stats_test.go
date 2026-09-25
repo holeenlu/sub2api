@@ -70,7 +70,7 @@ func TestCollectSelectionFailureStats(t *testing.T) {
 	}
 
 	excluded := map[int64]struct{}{1: {}}
-	stats := svc.collectSelectionFailureStats(context.Background(), accounts, model, PlatformOpenAI, excluded, false)
+	stats := svc.collectSelectionFailureStats(context.Background(), nil, accounts, model, PlatformOpenAI, excluded, false)
 
 	if stats.Total != 6 {
 		t.Fatalf("total=%d want=6", stats.Total)
@@ -104,7 +104,7 @@ func TestDiagnoseSelectionFailure_UnschedulableDetail(t *testing.T) {
 		Schedulable: false,
 	}
 
-	diagnosis := svc.diagnoseSelectionFailure(context.Background(), acc, "gpt-5.4", PlatformOpenAI, map[int64]struct{}{}, false)
+	diagnosis := svc.diagnoseSelectionFailure(context.Background(), nil, acc, "gpt-5.4", PlatformOpenAI, map[int64]struct{}{}, false)
 	if diagnosis.Category != "unschedulable" {
 		t.Fatalf("category=%s want=unschedulable", diagnosis.Category)
 	}
@@ -125,7 +125,7 @@ func TestDiagnoseSelectionFailure_OverloadStaysGenericUnschedulable(t *testing.T
 		OverloadUntil: &overloadUntil,
 	}
 
-	diagnosis := svc.diagnoseSelectionFailure(context.Background(), acc, "gpt-5.4", PlatformOpenAI, map[int64]struct{}{}, false)
+	diagnosis := svc.diagnoseSelectionFailure(context.Background(), nil, acc, "gpt-5.4", PlatformOpenAI, map[int64]struct{}{}, false)
 	if diagnosis.Category != "unschedulable" {
 		t.Fatalf("category=%s want=unschedulable", diagnosis.Category)
 	}
@@ -145,7 +145,7 @@ func TestDiagnoseSelectionFailure_AccountCooldown(t *testing.T) {
 		RateLimitResetAt: &resetAt,
 	}
 
-	diagnosis := svc.diagnoseSelectionFailure(context.Background(), acc, "gpt-5.4", PlatformOpenAI, map[int64]struct{}{}, false)
+	diagnosis := svc.diagnoseSelectionFailure(context.Background(), nil, acc, "gpt-5.4", PlatformOpenAI, map[int64]struct{}{}, false)
 	if diagnosis.Category != "account_cooldown" {
 		t.Fatalf("category=%s want=account_cooldown", diagnosis.Category)
 	}
@@ -203,7 +203,7 @@ func TestDiagnoseSelectionFailure_StaleRateLimitIsNotCooldownWhenOtherwiseUnavai
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			diagnosis := svc.diagnoseSelectionFailure(context.Background(), tc.acc, "gpt-5.4", PlatformOpenAI, map[int64]struct{}{}, false)
+			diagnosis := svc.diagnoseSelectionFailure(context.Background(), nil, tc.acc, "gpt-5.4", PlatformOpenAI, map[int64]struct{}{}, false)
 			if diagnosis.Category != "unschedulable" {
 				t.Fatalf("category=%s want=unschedulable", diagnosis.Category)
 			}
@@ -226,7 +226,7 @@ func TestSummarizeSelectionFailureStats_AccountCooldownCounted(t *testing.T) {
 		{ID: 4, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true},
 	}
 
-	stats := svc.collectSelectionFailureStats(context.Background(), accounts, "gpt-5.4", PlatformOpenAI, map[int64]struct{}{}, false)
+	stats := svc.collectSelectionFailureStats(context.Background(), nil, accounts, "gpt-5.4", PlatformOpenAI, map[int64]struct{}{}, false)
 	if stats.AccountCooldown != 2 {
 		t.Fatalf("account_cooldown=%d want=2", stats.AccountCooldown)
 	}
@@ -270,7 +270,7 @@ func TestDiagnoseSelectionFailure_ModelRateLimitedDetail(t *testing.T) {
 		},
 	}
 
-	diagnosis := svc.diagnoseSelectionFailure(context.Background(), acc, model, PlatformOpenAI, map[int64]struct{}{}, false)
+	diagnosis := svc.diagnoseSelectionFailure(context.Background(), nil, acc, model, PlatformOpenAI, map[int64]struct{}{}, false)
 	if diagnosis.Category != "model_rate_limited" {
 		t.Fatalf("category=%s want=model_rate_limited", diagnosis.Category)
 	}

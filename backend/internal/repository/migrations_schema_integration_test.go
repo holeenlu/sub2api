@@ -58,9 +58,15 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	// groups: OpenAI Live 与 Fast 强制策略都默认关闭，管理员显式开启后才生效。
 	requireColumn(t, tx, "groups", "allow_live", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "force_openai_fast", "boolean", 0, false)
+	requireColumn(t, tx, "groups", "stream_only", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "free_openai_fast", "boolean", 0, false)
 	// groups: 无可用账号兜底分组，未配置时为 NULL，目标分组删除后由外键置空。
 	requireColumn(t, tx, "groups", "fallback_group_id_on_no_account", "bigint", 0, true)
+
+	// pelican_showcase_items: 鹈鹕测智用户展示快照，按分组 + 生成时间倒序读取和清理。
+	requireColumn(t, tx, "pelican_showcase_items", "response_text", "text", 0, false)
+	requireColumn(t, tx, "pelican_showcase_items", "generated_at", "timestamp with time zone", 0, false)
+	requireIndex(t, tx, "pelican_showcase_items", "idx_pelican_showcase_items_group_generated")
 
 	// api_keys: key length should be 128
 	requireColumn(t, tx, "api_keys", "key", "character varying", 128, false)

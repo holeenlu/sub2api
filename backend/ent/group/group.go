@@ -106,6 +106,8 @@ const (
 	FieldFallbackGroupIDOnInvalidRequest = "fallback_group_id_on_invalid_request"
 	// FieldFallbackGroupIDOnNoAccount holds the string denoting the fallback_group_id_on_no_account field in the database.
 	FieldFallbackGroupIDOnNoAccount = "fallback_group_id_on_no_account"
+	// FieldStreamOnly holds the string denoting the stream_only field in the database.
+	FieldStreamOnly = "stream_only"
 	// FieldModelRouting holds the string denoting the model_routing field in the database.
 	FieldModelRouting = "model_routing"
 	// FieldModelRoutingEnabled holds the string denoting the model_routing_enabled field in the database.
@@ -270,6 +272,7 @@ var Columns = []string{
 	FieldFallbackGroupID,
 	FieldFallbackGroupIDOnInvalidRequest,
 	FieldFallbackGroupIDOnNoAccount,
+	FieldStreamOnly,
 	FieldModelRouting,
 	FieldModelRoutingEnabled,
 	FieldMcpXMLInject,
@@ -389,6 +392,8 @@ var (
 	DefaultLongContextPricingEnabled bool
 	// DefaultClaudeCodeOnly holds the default value on creation for the "claude_code_only" field.
 	DefaultClaudeCodeOnly bool
+	// DefaultStreamOnly holds the default value on creation for the "stream_only" field.
+	DefaultStreamOnly bool
 	// DefaultModelRoutingEnabled holds the default value on creation for the "model_routing_enabled" field.
 	DefaultModelRoutingEnabled bool
 	// DefaultMcpXMLInject holds the default value on creation for the "mcp_xml_inject" field.
@@ -660,6 +665,11 @@ func ByFallbackGroupIDOnInvalidRequest(opts ...sql.OrderTermOption) OrderOption 
 // ByFallbackGroupIDOnNoAccount orders the results by the fallback_group_id_on_no_account field.
 func ByFallbackGroupIDOnNoAccount(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldFallbackGroupIDOnNoAccount, opts...).ToFunc()
+}
+
+// ByStreamOnly orders the results by the stream_only field.
+func ByStreamOnly(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldStreamOnly, opts...).ToFunc()
 }
 
 // ByModelRoutingEnabled orders the results by the model_routing_enabled field.

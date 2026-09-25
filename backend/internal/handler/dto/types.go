@@ -172,6 +172,8 @@ type AdminGroup struct {
 	ForceOpenAIFast bool `json:"force_openai_fast"`
 	// FreeOpenAIFast 是管理端计费策略，用户侧分组 DTO 无需暴露。
 	FreeOpenAIFast bool `json:"free_openai_fast"`
+	// StreamOnly 是管理端请求策略（只接受流式的对话生成请求），用户侧分组 DTO 无需暴露。
+	StreamOnly bool `json:"stream_only"`
 
 	// 分组利润控制（五个 token 平台分组可启用；margin/buffer 为小数存储）。
 	// 仅管理员可见：这三个字段与同响应中的 rate_multiplier 相乘即可反推出
@@ -227,6 +229,7 @@ type Account struct {
 	LoadFactor              *int                              `json:"load_factor,omitempty"`
 	Priority                int                               `json:"priority"`
 	RateMultiplier          float64                           `json:"rate_multiplier"`
+	GroupRateMultiplier     float64                           `json:"group_rate_multiplier"`
 	Status                  string                            `json:"status"`
 	ErrorMessage            string                            `json:"error_message"`
 	LastUsedAt              *time.Time                        `json:"last_used_at"`
@@ -362,6 +365,7 @@ type AccountListItem struct {
 	LoadFactor              *int       `json:"load_factor,omitempty"`
 	Priority                int        `json:"priority"`
 	RateMultiplier          float64    `json:"rate_multiplier"`
+	GroupRateMultiplier     float64    `json:"group_rate_multiplier"`
 	Status                  string     `json:"status"`
 	ErrorMessage            string     `json:"error_message"`
 	LastUsedAt              *time.Time `json:"last_used_at"`
@@ -435,10 +439,12 @@ type AccountListItem struct {
 }
 
 type AccountGroup struct {
-	AccountID int64     `json:"account_id"`
-	GroupID   int64     `json:"group_id"`
-	Priority  int       `json:"priority"`
-	CreatedAt time.Time `json:"created_at"`
+	AccountID int64 `json:"account_id"`
+	GroupID   int64 `json:"group_id"`
+	Priority  int   `json:"priority"`
+	// AllowedModels 为空表示账号在该分组内不限制模型
+	AllowedModels []string  `json:"allowed_models,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 
 	Account *Account `json:"account,omitempty"`
 	Group   *Group   `json:"group,omitempty"`
