@@ -298,12 +298,18 @@ type OpenAIForwardResult struct {
 	wsReplayInput                []json.RawMessage
 	wsReplayInputExists          bool
 	wsAccountFailoverReplayInput []json.RawMessage
+	// Local stream-read timeout is not an observed upstream terminal event.
+	// Keep observed partial usage without reporting a successful generation.
+	streamReadIncomplete bool
 }
 
 // SucceededForScheduling reports whether this result is an upstream success
 // that may clear model-scoped transient state. The zero value remains a success
 // for existing non-WS callers.
 func (r *OpenAIForwardResult) SucceededForScheduling() bool {
+	if r != nil && r.streamReadIncomplete {
+		return false
+	}
 	if r == nil || (!r.OpenAIWSMode && r.UpstreamEndpoint != "/basispoints/api/responses") || r.UpstreamTerminalEvent == "" {
 		return true
 	}
@@ -442,6 +448,7 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
 	accountRepo           AccountRepository
+	proxyRepo             ProxyRepository
 	usageLogRepo          UsageLogRepository
 	usageBillingRepo      UsageBillingRepository
 	userRepo              UserRepository
@@ -524,6 +531,7 @@ type OpenAIGatewayService struct {
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
 func NewOpenAIGatewayService(
 	accountRepo AccountRepository,
+	proxyRepo ProxyRepository,
 	usageLogRepo UsageLogRepository,
 	usageBillingRepo UsageBillingRepository,
 	userRepo UserRepository,
@@ -553,6 +561,7 @@ func NewOpenAIGatewayService(
 	}
 	svc := &OpenAIGatewayService{
 		accountRepo:         accountRepo,
+		proxyRepo:           proxyRepo,
 		usageLogRepo:        usageLogRepo,
 		usageBillingRepo:    usageBillingRepo,
 		userRepo:            userRepo,

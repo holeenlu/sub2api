@@ -1776,6 +1776,7 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if account != nil && !bpsBoundAccountAllowed(ctx, account) {
 		return false, "bps_account_binding"
 	}
+	ctx = withOpenAIProxyQuarantineTransport(ctx, req.RequiredTransport)
 	if account == nil {
 		return false, "account_nil"
 	}
@@ -2428,6 +2429,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	if _, ok := openAIForwardModelFromContext(ctx); !ok {
 		ctx = WithOpenAIForwardModel(ctx, requestedModel, requireCompact)
 	}
+	ctx = withOpenAIProxyQuarantineTransport(ctx, requiredTransport)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
 	// 分组利润控制：唯一文本调度入口的防御性装门。handler 文本

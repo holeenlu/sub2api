@@ -196,7 +196,7 @@ func normalizeDeepSeekResponsesRequestBody(account *Account, body []byte) []byte
 }
 
 func shouldAliasDeepSeekResponsesInputImages(account *Account) bool {
-	return targetsDeepSeekAPIHost(account)
+	return account != nil && (account.Platform == PlatformDeepseek || isDeepSeekAPIHost(account.GetOpenAIBaseURL()))
 }
 
 // aliasDeepSeekResponsesInputImages 把图片 part 改写成 DeepSeek 能反序列化
