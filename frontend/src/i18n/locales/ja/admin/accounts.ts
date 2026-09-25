@@ -1102,6 +1102,8 @@ export default {
       priorityHint: '値の小さいアカウントから使用されます',
       billingRateMultiplier: '請求レート倍率',
       billingRateMultiplierHint: '0 = 無料。アカウントの請求にのみ適用されます',
+      groupBillingRateMultiplier: 'グループ課金倍率',
+      groupBillingRateMultiplierHint: 'ユーザー／API キーへの課金に適用されます。既定は 1 です。0.2 倍のグループで 5 を設定すると 1 倍に戻せます。',
       expiresAt: '有効期限',
       expiresAtHint: '有効期限を設定しない場合は空欄にしてください',
       expiresAtTimezoneHint: '入力値はブラウザーのタイムゾーン（{timezone}）として解釈されます。',
