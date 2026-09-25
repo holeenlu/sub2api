@@ -66,7 +66,11 @@ func TestDisableExcelBPSOn403ConcurrentAndCache(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
 	account := mustCreateAccount(t, client, newExcelBPSAutoDisableAccount())
-	t.Cleanup(func() { _ = client.Account.DeleteOneID(account.ID).Exec(ctx) })
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(ctx, "DELETE FROM scheduler_outbox WHERE account_id = $1", account.ID)
+		require.NoError(t, err)
+		require.NoError(t, client.Account.DeleteOneID(account.ID).Exec(ctx))
+	})
 	cache := &schedulerCacheRecorder{}
 	repo := newAccountRepositoryWithSQL(client, integrationDB, cache)
 	before, err := repo.GetByID(ctx, account.ID)
