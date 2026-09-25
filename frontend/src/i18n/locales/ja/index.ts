@@ -8,6 +8,8 @@ import admin from './admin'
 import misc from './misc'
 import docs from './docs'
 import requestTiming from './requestTiming'
+import qualityOps from './qualityOps'
+import accountOps from './accountOps'
 
 export default {
   ...ui,
@@ -20,4 +22,6 @@ export default {
   ...misc,
   ...docs,
   requestTiming,
+  qualityOps,
+  accountOps,
 }

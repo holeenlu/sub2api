@@ -563,7 +563,7 @@ const loadPlans = async () => {
   try {
     const data = await adminAPI.scheduledTests.listByAccount(accountId)
     if (alive && props.show && props.accountId === accountId && revision === version) {
-      plans.value = data.filter((plan) => Boolean(plan.pelican_config) === Boolean(props.pelicanConfig))
+      plans.value = data.filter((plan) => !plan.pelican_config?.quality && Boolean(plan.pelican_config) === Boolean(props.pelicanConfig))
       if (props.pelicanConfig && plans.value.length > 0 && expandedPlanId.value === null) {
         await expandPlan(plans.value[0].id)
       }

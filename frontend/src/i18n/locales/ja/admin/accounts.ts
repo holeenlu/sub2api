@@ -1619,6 +1619,10 @@ export default {
       testModel: 'テストモデル',
       testPrompt: 'プロンプト: "hi"',
       pelicanTest: {
+        question: '問題',
+        candyQuestion: 'キャンディ論理テスト',
+        pelicanQuestion: '自転車に乗るペリカン（HTML）',
+        candyHint: '元の問題の参照回答は 21 です。この応答を比較しますが、アカウントの恒久的な能力評価として扱わないでください。',
         recordCount: '{count} 件の記録',
         recordId: '記録',
         moreRecords: 'さらに記録を読み込む',

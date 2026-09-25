@@ -553,6 +553,12 @@ const (
 	// sidebar entry is hidden. Defaults to false (opt-in feature).
 	SettingKeyAvailableChannelsEnabled = "available_channels_enabled"
 
+	// SettingKeyPelicanShowcaseEnabled is a DB-backed soft switch for the user-facing
+	// Pelican gallery (scheduled Pelican HTML results of selected groups). When false the
+	// user endpoints return an empty gallery, the sidebar entry is hidden and no new
+	// snapshots are copied; cleanup keeps running. Defaults to false (opt-in feature).
+	SettingKeyPelicanShowcaseEnabled = "pelican_showcase_enabled"
+
 	// SettingKeySubscriptionEnabled is a DB-backed soft switch for the user-facing
 	// subscription surface: sidebar entries, purchase-page subscription tab, header
 	// progress badge, usage billing-type filter and the /subscriptions route. When

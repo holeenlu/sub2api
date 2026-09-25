@@ -17,6 +17,11 @@
         </span>
       </div>
 
+      <div>
+        <label class="input-label mb-1.5 block">{{ t('admin.accounts.pelicanTest.question') }}</label>
+        <Select data-testid="question-select" :model-value="questionKind" :options="questionOptions" :disabled="running" @update:model-value="selectQuestion" />
+        <p v-if="questionKind === 'candy'" class="mt-2 text-xs text-gray-500">{{ t('admin.accounts.pelicanTest.candyHint') }}</p>
+      </div>
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
         <TextArea
           v-model="prompt"
@@ -83,7 +88,7 @@
 
       <ScheduledTestsPanel v-if="show && account && activeTab === 'schedule'" :key="account.id" :show="true" embedded
         :account-id="account.id" :default-model="modelId" :model-options="[{ value: modelId, label: modelId }]"
-        :pelican-config="{ prompt, reasoning_effort: reasoningEffort, parallel_count: Number(parallelCount) }"
+        :pelican-config="{ question_kind: questionKind, prompt, reasoning_effort: reasoningEffort, parallel_count: Number(parallelCount) }"
         :disabled="running" @preview="previewScheduled" @history="scheduledRecords = $event" />
       <div v-else-if="activeTab === 'history'" class="space-y-2">
         <button v-for="result in scheduledRecords" :key="`scheduled-${result.id}`" type="button"
@@ -125,7 +130,7 @@
                 <span v-if="run.status === 'running'" class="text-xs text-amber-600 dark:text-amber-300">{{ t('admin.accounts.pelicanTest.runningShort') }}</span>
                 <span v-else-if="run.status === 'success'" class="text-xs text-emerald-600 dark:text-emerald-300">{{ t('admin.accounts.pelicanTest.success') }}</span>
                 <span v-else class="text-xs text-red-600 dark:text-red-300">{{ t('admin.accounts.pelicanTest.failed') }}</span>
-                <button v-if="run.html" type="button" class="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-300" :title="t('admin.accounts.pelicanTest.download')" @click="downloadHtml(run)">
+                <button v-if="run.output" type="button" class="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-300" :title="t('admin.accounts.pelicanTest.download')" @click="downloadHtml(run)">
                   <Icon name="download" size="sm" />
                 </button>
               </div>
@@ -165,6 +170,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { questionPrompt, questionContract, type IntelligenceQuestion } from '@/utils/intelligenceTest'
 import { useI18n } from 'vue-i18n'
 import { extractPelicanHtml as extractHtml } from '@/utils/pelicanHtml'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -180,12 +186,11 @@ import PelicanRecordsDashboard from './PelicanRecordsDashboard.vue'
 
 const { t } = useI18n()
 
-const DEFAULT_PROMPT = '创建一个 HTML，内容是 SVG 绘制一个鹈鹕骑自行车的 2D 动画，你不需要任何测试，不要有任何限制'
-const DELIVERY_CONTRACT = '所有账号使用相同交付约定：直接返回独立 HTML，不使用 Markdown 代码块或外部依赖。只输出 HTML，不要解释。'
 const STORAGE_PREFIX = 'sub2api-pelican-test:'
 
 type RunStatus = 'running' | 'success' | 'error'
 interface TestRun {
+  questionKind?: IntelligenceQuestion
   id: string
   status: RunStatus
   output: string
@@ -199,6 +204,7 @@ interface TestRun {
   reasoningEffort?: string
 }
 interface TestRecord {
+  questionKind?: IntelligenceQuestion
   id: string
   createdAt: string
   prompt: string
@@ -210,7 +216,8 @@ interface TestRecord {
 const props = defineProps<{ show: boolean; account: Account | null; accounts?: AccountListItem[] }>()
 const emit = defineEmits<{ (event: 'close'): void }>()
 
-const prompt = ref(DEFAULT_PROMPT)
+const questionKind = ref<IntelligenceQuestion>('candy')
+const prompt = ref(questionPrompt('candy'))
 const modelId = ref('gpt-6-astra')
 const reasoningEffort = ref('medium')
 const parallelCount = ref<string | number>(1)
@@ -223,14 +230,20 @@ const records = ref<TestRecord[]>([])
 const scheduledRecords = ref<ScheduledTestResult[]>([])
 const controllers = new Map<string, AbortController>()
 
-const deliveryContract = DELIVERY_CONTRACT
+const deliveryContract = computed(() => questionContract(questionKind.value))
+const questionOptions = computed(() => ['candy', 'pelican'].map(value => ({ value, label: t(`admin.accounts.pelicanTest.${value}Question`) })))
+function selectQuestion(value: string | number | boolean | null) {
+  if (running.value || (value !== 'candy' && value !== 'pelican')) return
+  questionKind.value = value
+  prompt.value = questionPrompt(value)
+}
 const reasoningOptions = computed(() => [
   { value: 'low', label: t('admin.accounts.pelicanTest.reasoningLow') },
   { value: 'medium', label: t('admin.accounts.pelicanTest.reasoningMedium') },
   { value: 'high', label: t('admin.accounts.pelicanTest.reasoningHigh') }
 ])
 const canStart = computed(() => Boolean(props.account && prompt.value.trim() && modelId.value.trim() && normalizeCount() > 0))
-const hasDownloadable = computed(() => runs.value.some((run) => Boolean(run.html)))
+const hasDownloadable = computed(() => runs.value.some((run) => Boolean(run.output)))
 
 const storageKey = computed(() => `${STORAGE_PREFIX}${props.account?.id ?? 'unknown'}`)
 
@@ -264,6 +277,7 @@ function formatDate(value: string) {
 
 function editSchedule(config: PelicanTestConfig, model: string) {
   if (running.value) return
+  questionKind.value = config.question_kind || 'pelican'
   prompt.value = config.prompt
   modelId.value = model
   reasoningEffort.value = config.reasoning_effort
@@ -281,8 +295,8 @@ function previewScheduled(result: ScheduledTestResult) {
   if (running.value) return
   const config = result.pelican_config
   if (config) editSchedule(config, config.model_id || modelId.value)
-  const html = extractHtml(result.response_text)
-  runs.value = [{ id: `scheduled-${result.id}`, status: result.status === 'success' && html ? 'success' : 'error', output: result.response_text, html, error: result.error_message,
+  const html = config?.question_kind === 'candy' ? '' : extractHtml(result.response_text)
+  runs.value = [{ id: `scheduled-${result.id}`, questionKind: config?.question_kind || 'pelican', status: result.status === 'success' ? 'success' : 'error', output: result.response_text, html, error: result.error_message,
     source: 'scheduled', startedAt: result.started_at, finishedAt: result.finished_at,
     durationMs: result.latency_ms, modelId: config?.model_id, reasoningEffort: config?.reasoning_effort
   }]
@@ -292,10 +306,11 @@ function previewScheduled(result: ScheduledTestResult) {
 
 function loadRecord(record: TestRecord) {
   if (running.value) return
+  questionKind.value = record.questionKind || 'pelican'
   prompt.value = record.prompt
   modelId.value = record.modelId
   reasoningEffort.value = record.reasoningEffort || 'medium'
-  runs.value = record.runs.map((run) => ({ ...run, modelId: run.modelId || record.modelId, reasoningEffort: run.reasoningEffort || record.reasoningEffort }))
+  runs.value = record.runs.map((run) => ({ ...run, questionKind: run.questionKind || record.questionKind || 'pelican', modelId: run.modelId || record.modelId, reasoningEffort: run.reasoningEffort || record.reasoningEffort }))
   viewingScheduled.value = false
   activeTab.value = 'results'
 }
@@ -317,7 +332,7 @@ async function consumeRun(run: TestRun, signal: AbortSignal) {
     },
     body: JSON.stringify({
       model_id: modelId.value.trim(),
-      prompt: `${prompt.value.trim()}\n\n${DELIVERY_CONTRACT}`,
+      prompt: `${prompt.value.trim()}\n\n${deliveryContract.value}`,
       mode: 'default',
       reasoning_effort: reasoningEffort.value
     }),
@@ -355,9 +370,9 @@ async function consumeRun(run: TestRun, signal: AbortSignal) {
     for (const line of lines) consumeLine(line.trim())
   }
   if (buffer.trim()) consumeLine(buffer.trim())
-  if (!completed && !run.output.trim()) throw new Error(t('admin.accounts.pelicanTest.emptyResponse'))
-  run.html = extractHtml(run.output)
-  if (!run.html) throw new Error(t('admin.accounts.pelicanTest.invalidHtml'))
+  if (!completed || !run.output.trim()) throw new Error(t('admin.accounts.pelicanTest.emptyResponse'))
+  run.html = run.questionKind === 'candy' ? '' : extractHtml(run.output)
+  if (run.questionKind !== 'candy' && !run.html) throw new Error(t('admin.accounts.pelicanTest.invalidHtml'))
   run.status = 'success'
 }
 
@@ -386,6 +401,7 @@ async function startTest() {
   parallelCount.value = count
   runs.value = Array.from({ length: count }, (_, index) => ({
     id: `${Date.now()}-${index}`,
+    questionKind: questionKind.value,
     status: 'running',
     output: '',
     html: '',
@@ -401,6 +417,7 @@ async function startTest() {
   const record: TestRecord = {
     id: `${Date.now()}`,
     createdAt: new Date().toISOString(),
+    questionKind: questionKind.value,
     prompt: prompt.value.trim(),
     modelId: modelId.value.trim(),
     reasoningEffort: reasoningEffort.value,
@@ -411,18 +428,18 @@ async function startTest() {
 }
 
 function downloadHtml(run: TestRun) {
-  const content = run.html || extractHtml(run.output)
+  const content = run.questionKind === 'candy' ? run.output : run.html || extractHtml(run.output)
   if (!content) return
-  const url = URL.createObjectURL(new Blob([content], { type: 'text/html;charset=utf-8' }))
+  const url = URL.createObjectURL(new Blob([content], { type: run.questionKind === 'candy' ? 'text/plain;charset=utf-8' : 'text/html;charset=utf-8' }))
   const link = document.createElement('a')
   link.href = url
-  link.download = `pelican-test-${new Date().toISOString().replace(/[:.]/g, '-')}.html`
+  link.download = `intelligence-test-${new Date().toISOString().replace(/[:.]/g, '-')}.${run.questionKind === 'candy' ? 'txt' : 'html'}`
   link.click()
   URL.revokeObjectURL(url)
 }
 
 function downloadAll() {
-  runs.value.filter((run) => run.html).forEach((run) => downloadHtml(run))
+  runs.value.filter((run) => run.output).forEach((run) => downloadHtml(run))
 }
 
 onBeforeUnmount(() => { for (const controller of controllers.values()) controller.abort() })
@@ -433,7 +450,8 @@ watch(() => [props.show, props.account?.id] as const, ([show]) => {
     activeTab.value = 'results'
     viewingScheduled.value = false
     scheduledRecords.value = []
-    prompt.value = DEFAULT_PROMPT
+    questionKind.value = 'candy'
+    prompt.value = questionPrompt('candy')
     modelId.value = 'gpt-6-astra'
     reasoningEffort.value = 'medium'
     parallelCount.value = 1

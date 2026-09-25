@@ -110,6 +110,10 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 			response.BadRequest(c, "cannot change test type")
 			return
 		}
+		if (existing.PelicanConfig.Quality == nil) != (req.PelicanConfig.Quality == nil) {
+			response.BadRequest(c, "cannot change quality test type")
+			return
+		}
 		existing.PelicanConfig = req.PelicanConfig
 	}
 	if req.ModelID != "" {
@@ -204,6 +208,44 @@ func (h *ScheduledTestHandler) ListPelicanHistory(c *gin.Context) {
 	page, err := h.scheduledTestSvc.ListPelicanHistory(c.Request.Context(), beforeID, 100)
 	if err != nil {
 		response.InternalError(c, "Failed to load pelican history")
+		return
+	}
+	c.JSON(http.StatusOK, page)
+}
+
+func (h *ScheduledTestHandler) ListQualityPlans(c *gin.Context) {
+	plans, err := h.scheduledTestSvc.ListQualityPlans(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, "Failed to load quality plans")
+		return
+	}
+	if plans == nil {
+		plans = []*service.ScheduledTestPlan{}
+	}
+	c.JSON(http.StatusOK, plans)
+}
+func (h *ScheduledTestHandler) TriggerQuality(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "invalid plan id")
+		return
+	}
+	if err = h.scheduledTestSvc.TriggerQuality(c.Request.Context(), id); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "queued"})
+}
+
+func (h *ScheduledTestHandler) ListQualityHistory(c *gin.Context) {
+	beforeID, err := strconv.ParseInt(c.DefaultQuery("before_id", "0"), 10, 64)
+	if err != nil || beforeID < 0 {
+		response.BadRequest(c, "invalid before_id")
+		return
+	}
+	page, err := h.scheduledTestSvc.ListQualityHistory(c.Request.Context(), beforeID)
+	if err != nil {
+		response.InternalError(c, "Failed to load quality operation history")
 		return
 	}
 	c.JSON(http.StatusOK, page)

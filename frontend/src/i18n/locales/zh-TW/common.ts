@@ -215,6 +215,7 @@ export default {
     channelPricing: '通道定價',
     channelMonitor: '通道監控',
     channelStatus: '通道狀態',
+    pelicanShowcase: '鵜鶘測智',
     riskControl: '風控中心',
     securityAudit: '安全稽核',
     contentModeration: '內容稽核',

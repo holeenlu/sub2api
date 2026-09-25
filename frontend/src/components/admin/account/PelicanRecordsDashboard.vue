@@ -28,6 +28,7 @@
             <div class="mt-3 aspect-[4/3] overflow-hidden rounded-xl bg-gray-50">
               <iframe v-if="card.record.html" :srcdoc="card.record.html" class="pointer-events-none h-full w-full border-0" tabindex="-1" sandbox="allow-scripts" referrerpolicy="no-referrer" :title="card.account.name" />
               <p v-else-if="!card.loaded && !card.loadError" class="p-4 text-sm text-gray-500">{{ t('common.loading') }}...</p>
+              <pre v-else-if="card.record.output && !card.record.html" class="whitespace-pre-wrap break-words p-4 text-sm">{{ card.record.output }}</pre>
               <p v-else class="p-4 text-sm text-red-500">{{ card.loadError || card.record.error || t('admin.accounts.pelicanTest.invalidHtml') }}</p>
             </div>
             <p v-if="card.record.error" class="mt-2 line-clamp-2 break-words text-xs text-red-500">{{ card.record.error }}</p>
@@ -74,12 +75,14 @@ interface ManualRun {
   startedAt?: string
   modelId?: string
   reasoningEffort?: string
+  questionKind?: 'candy' | 'pelican'
 }
 interface ManualRecord {
   id?: string
   createdAt: string
   modelId: string
   reasoningEffort: string
+  questionKind?: 'candy' | 'pelican'
   runs: ManualRun[]
 }
 interface DisplayRecord {
@@ -152,7 +155,7 @@ function manualCards(server: PelicanHistoryResult[]): Card[] {
         const key = `manual:${id}:${record.id || record.createdAt}:${run.id || index}`
         if (results.has(key)) return
         const output = run.output || run.html || ''
-        const html = extractPelicanHtml(output)
+        const html = (run.questionKind || record.questionKind) === 'candy' ? '' : extractPelicanHtml(output)
         results.set(key, { key, account, loaded: true, record: {
           source: 'manual', startedAt: run.startedAt || record.createdAt, durationMs: run.durationMs,
           modelId: run.modelId || record.modelId, reasoningEffort: run.reasoningEffort || record.reasoningEffort,
@@ -166,7 +169,7 @@ function manualCards(server: PelicanHistoryResult[]): Card[] {
 function serverRecord(result: ScheduledTestResult): DisplayRecord {
   return { source: 'scheduled', startedAt: result.started_at, durationMs: result.latency_ms,
     modelId: result.pelican_config?.model_id, reasoningEffort: result.pelican_config?.reasoning_effort,
-    status: result.status, output: result.response_text || '', html: extractPelicanHtml(result.response_text || ''), error: result.error_message }
+    status: result.status, output: result.response_text || '', html: result.pelican_config?.question_kind === 'candy' ? '' : extractPelicanHtml(result.response_text || ''), error: result.error_message }
 }
 async function loadBody(card: Card) {
   if (card.loaded || !card.planId || !card.resultId || !alive) return

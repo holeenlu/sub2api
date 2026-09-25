@@ -47,6 +47,19 @@ describe('shared scheduled test plans for Pelican', () => {
     await vi.advanceTimersByTimeAsync(30000)
     expect(adminAPI.scheduledTests.listByAccount).toHaveBeenCalledTimes(1)
   })
+  it('persists candy question kind in new and edited plans', async () => {
+    vi.mocked(adminAPI.scheduledTests.create).mockResolvedValue(plan as any)
+    vi.mocked(adminAPI.scheduledTests.update).mockResolvedValue(plan as any)
+    const wrapper = mountPanel(); await flushPromises()
+    const vm = wrapper.vm as any
+    vm.newPelican = { ...config, question_kind: 'candy', prompt: 'candy question' }
+    await vm.handleCreate()
+    expect(adminAPI.scheduledTests.create).toHaveBeenLastCalledWith(expect.objectContaining({ pelican_config: { ...config, question_kind: 'candy', prompt: 'candy question' } }))
+    vm.startEdit({ ...plan, pelican_config: { ...config, question_kind: 'candy' } })
+    await vm.handleEdit()
+    expect(adminAPI.scheduledTests.update).toHaveBeenLastCalledWith(4, expect.objectContaining({ pelican_config: { ...config, question_kind: 'candy' } }))
+    wrapper.unmount()
+  })
   it('keeps ordinary connection tests free of Pelican options', async () => {
     const wrapper = mountPanel(false); await flushPromises()
     const vm = wrapper.vm as any

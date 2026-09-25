@@ -97,16 +97,17 @@ func NewScheduledTestResultRepository(db *sql.DB) service.ScheduledTestResultRep
 
 func (r *scheduledTestResultRepository) Create(ctx context.Context, result *service.ScheduledTestResult) (*service.ScheduledTestResult, error) {
 	row := r.db.QueryRowContext(ctx, `
-		INSERT INTO scheduled_test_results (plan_id, status, response_text, error_message, latency_ms, started_at, finished_at, created_at, pelican_config)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
-		RETURNING id, plan_id, status, response_text, error_message, latency_ms, started_at, finished_at, created_at, pelican_config
-	`, result.PlanID, result.Status, result.ResponseText, result.ErrorMessage, result.LatencyMs, result.StartedAt, result.FinishedAt, marshalPelicanConfig(result.PelicanConfig))
+		INSERT INTO scheduled_test_results (plan_id, status, response_text, error_message, latency_ms, started_at, finished_at, created_at, pelican_config, quality_action, quality_judgment, quality_round_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, $10, $11)
+		RETURNING id, plan_id, status, response_text, error_message, latency_ms, started_at, finished_at, created_at, pelican_config, quality_action, quality_judgment, quality_round_id
+	`, result.PlanID, result.Status, result.ResponseText, result.ErrorMessage, result.LatencyMs, result.StartedAt, result.FinishedAt, marshalPelicanConfig(result.PelicanConfig), result.QualityAction, marshalQualityJudgment(result.QualityJudgment), result.QualityRoundID)
 
 	out := &service.ScheduledTestResult{}
+	var judgment []byte
 	var config []byte
 	if err := row.Scan(
 		&out.ID, &out.PlanID, &out.Status, &out.ResponseText, &out.ErrorMessage,
-		&out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt, &config,
+		&out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt, &config, &out.QualityAction, &judgment, &out.QualityRoundID,
 	); err != nil {
 		return nil, err
 	}
@@ -115,12 +116,17 @@ func (r *scheduledTestResultRepository) Create(ctx context.Context, result *serv
 			return nil, err
 		}
 	}
+	if len(judgment) > 0 {
+		if err := json.Unmarshal(judgment, &out.QualityJudgment); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
 
 func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID int64, limit int, includeContent ...bool) ([]*service.ScheduledTestResult, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, plan_id, status, CASE WHEN $3 THEN response_text ELSE '' END, error_message, latency_ms, started_at, finished_at, created_at, pelican_config
+		SELECT id, plan_id, status, CASE WHEN $3 THEN response_text ELSE '' END, error_message, latency_ms, started_at, finished_at, created_at, pelican_config, quality_action, quality_judgment, quality_round_id
 		FROM scheduled_test_results
 		WHERE plan_id = $1
 		ORDER BY created_at DESC, id DESC
@@ -134,15 +140,21 @@ func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID
 	var results []*service.ScheduledTestResult
 	for rows.Next() {
 		r := &service.ScheduledTestResult{}
+		var judgment []byte
 		var config []byte
 		if err := rows.Scan(
 			&r.ID, &r.PlanID, &r.Status, &r.ResponseText, &r.ErrorMessage,
-			&r.LatencyMs, &r.StartedAt, &r.FinishedAt, &r.CreatedAt, &config,
+			&r.LatencyMs, &r.StartedAt, &r.FinishedAt, &r.CreatedAt, &config, &r.QualityAction, &judgment, &r.QualityRoundID,
 		); err != nil {
 			return nil, err
 		}
 		if len(config) > 0 {
 			if err := json.Unmarshal(config, &r.PelicanConfig); err != nil {
+				return nil, err
+			}
+		}
+		if len(judgment) > 0 {
+			if err := json.Unmarshal(judgment, &r.QualityJudgment); err != nil {
 				return nil, err
 			}
 		}
@@ -172,13 +184,17 @@ type scannable interface {
 	Scan(dest ...any) error
 }
 
-func scanPlan(row scannable) (*service.ScheduledTestPlan, error) {
+func scanPlan(row scannable, withAccountName ...bool) (*service.ScheduledTestPlan, error) {
 	p := &service.ScheduledTestPlan{}
 	var config []byte
-	if err := row.Scan(
+	dest := []any{
 		&p.ID, &p.AccountID, &p.ModelID, &p.CronExpression, &p.Enabled, &p.MaxResults, &p.AutoRecover,
 		&p.LastRunAt, &p.NextRunAt, &p.CreatedAt, &p.UpdatedAt, &config, &p.RunningUntil,
-	); err != nil {
+	}
+	if len(withAccountName) > 0 && withAccountName[0] {
+		dest = append(dest, &p.AccountName)
+	}
+	if err := row.Scan(dest...); err != nil {
 		return nil, err
 	}
 	if len(config) > 0 {
@@ -189,10 +205,10 @@ func scanPlan(row scannable) (*service.ScheduledTestPlan, error) {
 	return p, nil
 }
 
-func scanPlans(rows *sql.Rows) ([]*service.ScheduledTestPlan, error) {
+func scanPlans(rows *sql.Rows, withAccountName ...bool) ([]*service.ScheduledTestPlan, error) {
 	var plans []*service.ScheduledTestPlan
 	for rows.Next() {
-		p, err := scanPlan(rows)
+		p, err := scanPlan(rows, withAccountName...)
 		if err != nil {
 			return nil, err
 		}
@@ -261,16 +277,22 @@ func (r *scheduledTestResultRepository) PruneExpiredPelican(ctx context.Context,
 
 func (r *scheduledTestResultRepository) GetResult(ctx context.Context, planID, resultID int64) (*service.ScheduledTestResult, error) {
 	out := &service.ScheduledTestResult{}
+	var judgment []byte
 	var config []byte
-	err := r.db.QueryRowContext(ctx, `SELECT id, plan_id, status, response_text, error_message, latency_ms, started_at, finished_at, created_at, pelican_config
+	err := r.db.QueryRowContext(ctx, `SELECT id, plan_id, status, response_text, error_message, latency_ms, started_at, finished_at, created_at, pelican_config, quality_action, quality_judgment, quality_round_id
  FROM scheduled_test_results WHERE plan_id = $1 AND id = $2`, planID, resultID).Scan(
 		&out.ID, &out.PlanID, &out.Status, &out.ResponseText, &out.ErrorMessage,
-		&out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt, &config)
+		&out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt, &config, &out.QualityAction, &judgment, &out.QualityRoundID)
 	if err != nil {
 		return nil, err
 	}
 	if len(config) > 0 {
 		if err := json.Unmarshal(config, &out.PelicanConfig); err != nil {
+			return nil, err
+		}
+	}
+	if len(judgment) > 0 {
+		if err := json.Unmarshal(judgment, &out.QualityJudgment); err != nil {
 			return nil, err
 		}
 	}
@@ -285,7 +307,7 @@ func (r *scheduledTestResultRepository) ListPelicanHistory(ctx context.Context, 
  FROM scheduled_test_results r
  JOIN scheduled_test_plans p ON p.id = r.plan_id
  JOIN accounts a ON a.id = p.account_id
- WHERE p.pelican_config IS NOT NULL AND a.deleted_at IS NULL
+ WHERE p.pelican_config IS NOT NULL AND p.pelican_config->'quality' IS NULL AND a.deleted_at IS NULL
  AND ($1::bigint = 0 OR r.id < $1)
  ORDER BY r.id DESC LIMIT $2`, beforeID, limit)
 	if err != nil {
@@ -309,4 +331,12 @@ func (r *scheduledTestResultRepository) ListPelicanHistory(ctx context.Context, 
 		results = append(results, result)
 	}
 	return results, rows.Err()
+}
+
+func marshalQualityJudgment(judgment *service.QualityJudgment) any {
+	if judgment == nil {
+		return nil
+	}
+	data, _ := json.Marshal(judgment)
+	return string(data)
 }

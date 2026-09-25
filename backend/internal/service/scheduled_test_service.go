@@ -15,6 +15,8 @@ var scheduledTestCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom 
 type ScheduledTestService struct {
 	planRepo   ScheduledTestPlanRepository
 	resultRepo ScheduledTestResultRepository
+	// showcase copies successful Pelican HTML results to the user gallery; nil disables it.
+	showcase *PelicanShowcaseService
 }
 
 // NewScheduledTestService creates a new ScheduledTestService.
@@ -80,9 +82,11 @@ func (s *ScheduledTestService) ListResults(ctx context.Context, planID int64, li
 // SaveResult inserts a result and prunes old entries beyond maxResults.
 func (s *ScheduledTestService) SaveResult(ctx context.Context, planID int64, maxResults int, result *ScheduledTestResult) error {
 	result.PlanID = planID
-	if _, err := s.resultRepo.Create(ctx, result); err != nil {
+	saved, err := s.resultRepo.Create(ctx, result)
+	if err != nil {
 		return err
 	}
+	s.showcase.PublishScheduledResult(ctx, saved)
 	return s.resultRepo.PruneOldResults(ctx, planID, maxResults)
 }
 
@@ -98,6 +102,12 @@ func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
 	if cfg := plan.PelicanConfig; cfg != nil {
 		if strings.TrimSpace(cfg.Prompt) == "" || len(cfg.Prompt) > 32000 || strings.TrimSpace(plan.ModelID) == "" || len(plan.ModelID) > 100 {
 			return time.Time{}, fmt.Errorf("pelican prompt and model are required (maximum 32000/100 bytes)")
+		}
+		if err := validateQualityPolicy(plan); err != nil {
+			return time.Time{}, err
+		}
+		if cfg.QuestionKind != "" && cfg.QuestionKind != "pelican" && cfg.QuestionKind != "candy" {
+			return time.Time{}, fmt.Errorf("invalid question kind")
 		}
 		if cfg.ParallelCount < 1 || cfg.ParallelCount > 8 {
 			return time.Time{}, fmt.Errorf("parallel count must be 1–8")

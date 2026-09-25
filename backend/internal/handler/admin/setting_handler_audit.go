@@ -2,6 +2,7 @@ package admin
 
 import (
 	"log/slog"
+	"reflect"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -597,6 +598,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.AvailableChannelsEnabled != after.AvailableChannelsEnabled {
 		changed = append(changed, "available_channels_enabled")
 	}
+	if before.PelicanShowcaseEnabled != after.PelicanShowcaseEnabled {
+		changed = append(changed, "pelican_showcase_enabled")
+	}
+	if pelicanShowcaseConfigChanged(before.PelicanShowcase, after.PelicanShowcase) {
+		changed = append(changed, "pelican_showcase_config")
+	}
 	if before.SubscriptionEnabled != after.SubscriptionEnabled {
 		changed = append(changed, "subscription_enabled")
 	}
@@ -887,4 +894,12 @@ func stringSetting(value *string, fallback string) string {
 		return fallback
 	}
 	return *value
+}
+
+// pelicanShowcaseConfigChanged compares normalized configs: the request carries the
+// admin's raw group order, while the stored config is sorted and deduplicated.
+func pelicanShowcaseConfigChanged(before, after service.PelicanShowcaseConfig) bool {
+	normalizedBefore, errBefore := service.NormalizePelicanShowcaseConfig(before)
+	normalizedAfter, errAfter := service.NormalizePelicanShowcaseConfig(after)
+	return errBefore != nil || errAfter != nil || !reflect.DeepEqual(normalizedBefore, normalizedAfter)
 }

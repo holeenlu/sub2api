@@ -1,4 +1,6 @@
 import ui from './ui'
+import qualityOps from './qualityOps'
+import accountOps from './accountOps'
 import landing from './landing'
 import common from './common'
 import dashboard from './dashboard'
@@ -12,6 +14,8 @@ import requestTiming from './requestTiming'
 
 export default {
   ...ui,
+  qualityOps,
+  accountOps,
   requestTiming,
   ...landing,
   ...common,

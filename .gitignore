@@ -157,6 +157,8 @@ tools/tests/__pycache__/
 !docs/I18N_COMPLETENESS_AUDIT.md
 !docs/codex-credits.md
 !docs/cyber-session-blocking.md
+!docs/account-quality-operations.md
+!docs/pelican-scheduled-tests.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/
