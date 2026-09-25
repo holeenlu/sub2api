@@ -150,6 +150,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		Group:                       groupFromServiceBase(g),
 		ForceOpenAIFast:             g.ForceOpenAIFast,
 		FreeOpenAIFast:              g.FreeOpenAIFast,
+		StreamOnly:                  g.StreamOnly,
 		ProfitControlEnabled:        g.ProfitControlEnabled,
 		ProfitMinMargin:             g.ProfitMinMargin,
 		ProfitSafetyBuffer:          g.ProfitSafetyBuffer,
@@ -254,6 +255,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		Type:                    a.Type,
 		Credentials:             redactedCreds,
 		CredentialsStatus:       credsStatus,
+		BPSCredentialState:      a.OpenAIBPSCredentialState(time.Now()),
 		Extra:                   extra,
 		OllamaCloudUsage:        ollamaCloudUsage,
 		OpenCodeGoUsage:         openCodeGoUsage,
@@ -264,6 +266,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		LoadFactor:              a.LoadFactor,
 		Priority:                a.Priority,
 		RateMultiplier:          a.BillingRateMultiplier(),
+		GroupRateMultiplier:     a.UserGroupRateMultiplier(),
 		Status:                  a.Status,
 		ErrorMessage:            a.ErrorMessage,
 		LastUsedAt:              a.LastUsedAt,
@@ -422,7 +425,8 @@ func redactAccountManagedExtra(extra map[string]any) map[string]any {
 	redacted := make(map[string]any, len(extra))
 	for key, value := range extra {
 		switch {
-		case key == service.OllamaCloudUsageSessionExtraKey,
+		case key == service.OpenAIBPSCredentialStateExtraKey,
+			key == service.OllamaCloudUsageSessionExtraKey,
 			key == service.OllamaCloudUsageAutoRefreshExtraKey,
 			key == service.OllamaCloudUsageSnapshotExtraKey,
 			key == service.OpenCodeGoUsageAutoRefreshExtraKey,
@@ -467,10 +471,10 @@ func AccountListItemFromAccount(a *Account) *AccountListItem {
 	}
 	return &AccountListItem{
 		ID: a.ID, Name: a.Name, Notes: a.Notes, Platform: a.Platform, Type: a.Type,
-		Credentials: a.Credentials, CredentialsStatus: a.CredentialsStatus, Extra: a.Extra,
+		Credentials: a.Credentials, CredentialsStatus: a.CredentialsStatus, Extra: a.Extra, BPSCredentialState: a.BPSCredentialState,
 		OllamaCloudUsage: a.OllamaCloudUsage, OpenCodeGoUsage: a.OpenCodeGoUsage, CodexTurnTickets: a.CodexTurnTickets, CodexTicketLatestEvent: a.CodexTicketLatestEvent,
 		ProxyID: a.ProxyID, ProxyFallbackOriginID: a.ProxyFallbackOriginID, ProxyFallbackOriginName: a.ProxyFallbackOriginName,
-		Concurrency: a.Concurrency, LoadFactor: a.LoadFactor, Priority: a.Priority, RateMultiplier: a.RateMultiplier,
+		Concurrency: a.Concurrency, LoadFactor: a.LoadFactor, Priority: a.Priority, RateMultiplier: a.RateMultiplier, GroupRateMultiplier: a.GroupRateMultiplier,
 		Status: a.Status, ErrorMessage: a.ErrorMessage, LastUsedAt: a.LastUsedAt, ExpiresAt: a.ExpiresAt,
 		AutoPauseOnExpired: a.AutoPauseOnExpired, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
 		Schedulable: a.Schedulable, RateLimitedAt: a.RateLimitedAt, RateLimitResetAt: a.RateLimitResetAt,
@@ -512,12 +516,13 @@ func AccountGroupFromService(ag *service.AccountGroup) *AccountGroup {
 		return nil
 	}
 	return &AccountGroup{
-		AccountID: ag.AccountID,
-		GroupID:   ag.GroupID,
-		Priority:  ag.Priority,
-		CreatedAt: ag.CreatedAt,
-		Account:   AccountFromServiceShallow(ag.Account),
-		Group:     GroupFromServiceShallow(ag.Group),
+		AccountID:     ag.AccountID,
+		GroupID:       ag.GroupID,
+		Priority:      ag.Priority,
+		AllowedModels: ag.AllowedModels,
+		CreatedAt:     ag.CreatedAt,
+		Account:       AccountFromServiceShallow(ag.Account),
+		Group:         GroupFromServiceShallow(ag.Group),
 	}
 }
 

@@ -89,6 +89,9 @@ type Group struct {
 	// 但目标分组必须同平台（选号本身按平台过滤，异平台配了也选不出账号）。
 	FallbackGroupIDOnNoAccount *int64
 
+	// StreamOnly 仅允许流式请求：非流式的对话生成请求在网关入口拒绝（见 middleware.GroupStreamOnly）。
+	StreamOnly bool
+
 	// 模型路由配置
 	// key: 模型匹配模式（支持 * 通配符，如 "claude-opus-*"）
 	// value: 优先账号 ID 列表

@@ -377,6 +377,8 @@ export default {
     latency: 'レイテンシ',
     latencyFirstToken: '初回',
     latencyDuration: '合計',
+    latencyTps: '平均 TPS',
+    latencyTpsHint: '平均 TPS = 出力トークン ÷ 総所要時間（秒）。待機時間と、出力使用量に含まれる推論トークンを含みます。モデルの生成速度ではありません。',
     time: '時間',
     ws: 'WS',
     stream: 'ストリーム',
@@ -587,6 +589,47 @@ export default {
   },
 
   // Available Channels (user-facing)
+  // Pelican showcase (user-facing gallery)
+  pelicanShowcase: {
+    title: 'ペリカンショーケース',
+    description: '各グループが同じ描画プロンプトに定期的に回答します。結果を見比べてモデルの品質を比較できます。',
+    allGroups: 'すべてのグループ',
+    keepRule: 'グループごとに最新 {count} 件',
+    retentionRule: '{days} 日後に自動削除',
+    itemCount: '{count} 件',
+    latestAt: '{time} に更新',
+    groupEmpty: 'このグループにはまだ結果がありません。定期テストが成功するとここに表示されます。',
+    loadMore: 'さらに読み込む',
+    loadError: 'ペリカンショーケースを読み込めませんでした',
+    itemLoading: '読み込み中…',
+    itemLoadError: 'この結果を読み込めませんでした',
+    invalidHtml: 'この結果は表示できません',
+    duration: '{seconds} 秒',
+    reasoning: '推論 {effort}',
+    efforts: {
+      minimal: 'minimal',
+      low: 'low',
+      medium: 'medium',
+      high: 'high',
+      xhigh: 'xhigh'
+    },
+    preview: '原寸で表示',
+    previewTitle: '{group} · {model}',
+    sandboxNote: '結果はネットワークにアクセスできない隔離されたサンドボックスで実行され、あなたのアカウントを読み取ることはできません。',
+    remove: 'ショーケースから削除',
+    removeConfirm: 'この結果をペリカンショーケースから削除しますか？すべてのユーザーに表示されなくなります。この操作は元に戻せません。',
+    removed: 'ショーケースから削除しました',
+    removeFailed: '削除に失敗しました',
+    disabled: {
+      title: 'ペリカンショーケースは利用できません',
+      description: '管理者が有効にすると、各グループの定期テスト結果がここに表示されます。'
+    },
+    empty: {
+      title: 'まだ表示するものがありません',
+      description: '管理者が表示するグループをまだ選択していません。'
+    }
+  },
+
   availableChannels: {
     title: '利用可能なチャネル',
     description: 'アクセス可能なチャネルと、対応モデルおよび料金を確認できます',
