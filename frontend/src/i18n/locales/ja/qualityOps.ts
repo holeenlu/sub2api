@@ -63,7 +63,7 @@ export default {
   "selectJudgeGroup": "採点グループを選択",
   "selectJudgeModel": "このグループがサポートするモデルを選択または入力",
   "judgePrompt": "採点の指示",
-  "defaultJudgePrompt": "候補の回答が参照回答と意味的に一致しているかを判断してください。意味を変えない単位、句読点、言い回しの違いは無視します。結論が一致すれば correct、明らかに誤っていれば incorrect、不確かまたは判断できない場合は unknown を返してください。",
+  "defaultJudgePrompt": "reference_answer（参照値）と candidate_answer（候補値）の 2 つの値だけを比較してください。数値が等しい、または意味が等価なら correct、明らかに異なるなら incorrect、判断できない場合は unknown を返してください。単位、句読点、言い回しの違いは無視し、元の問題を引用したり推測したりしないでください。",
   "configureJudge": "採点グループとモデルを選び、採点の指示を入力してください",
   "judgeModelsUnavailable": "モデル候補を取得できません。採点グループがサポートするモデル ID を入力してください",
   "judgeReason": "採点理由",

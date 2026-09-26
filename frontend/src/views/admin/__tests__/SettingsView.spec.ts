@@ -800,7 +800,7 @@ describe("admin SettingsView payment visible method controls", () => {
     await card.get('#excel-bps-image-base-url').setValue(' https://images.example/ ');
     await card.get('#excel-bps-image-body-limit').setValue('32');
     await card.get('#excel-bps-image-budget').setValue('768');
-    await card.get('#excel-bps-image-max-requests').setValue('48');
+    await card.get('#excel-bps-image-max-requests').setValue('512');
     await wrapper.find('form').trigger('submit.prevent');
     await flushPromises();
     expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({
@@ -808,7 +808,7 @@ describe("admin SettingsView payment visible method controls", () => {
       excel_bps_image_base_url: 'https://images.example',
       excel_bps_image_body_limit_mib: 32,
       excel_bps_image_budget_mib: 768,
-      excel_bps_image_max_requests: 48,
+      excel_bps_image_max_requests: 512,
     });
     expect(showError).not.toHaveBeenCalled();
     expect(showSuccess).toHaveBeenCalledWith('admin.settings.settingsSaved');
@@ -853,6 +853,8 @@ describe("admin SettingsView payment visible method controls", () => {
       ['#excel-bps-image-body-limit', '129'],
       ['#excel-bps-image-budget', '511'],
       ['#excel-bps-image-max-requests', '0'],
+      ['#excel-bps-image-max-requests', '513'],
+      ['#excel-bps-image-max-requests', '1.5'],
     ]) {
       const input = wrapper.get(selector);
       const original = (input.element as HTMLInputElement).value;
@@ -864,6 +866,7 @@ describe("admin SettingsView payment visible method controls", () => {
       await input.setValue(original);
     }
     await wrapper.get('#excel-bps-image-body-limit').setValue('128');
+    await wrapper.get('#excel-bps-image-budget').setValue('512');
     await wrapper.find('form').trigger('submit.prevent');
     await flushPromises();
     expect(updateSettings).not.toHaveBeenCalled();

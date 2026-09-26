@@ -659,6 +659,8 @@ export default {
         apiKeyHint: 'OpenAIのAPIキー',
         oauthPassthrough: '自動パススルー（認証のみ）',
         excelBPS: 'Excel / BPS プロトコル',
+        excelBPSAutoDisableOn403: '403 エラー時に BPS を自動で無効化',
+        excelBPSAutoDisableOn403Desc: '既定では無効です。BPS アップストリームが basispoints_upstream_error に分類される HTTP 403 を返した場合、このアカウントの Excel / BPS プロトコルを無効にします。アカウント自体は有効なままで、現在のリクエストは再試行しません。モデルのアクセス権エラーは対象外です。403 だけでアカウント停止とは判断できません。',
         excelBPSCacheCreationAsInput: 'キャッシュ作成を通常の入力として課金',
         excelBPSCacheCreationAsInputDesc: '既定では無効です。BPS のキャッシュ作成トークンを通常の入力として課金し、ダウンストリームにはキャッシュ作成使用量を 0 として返します。入力の合計とキャッシュ読み取りは変わりません。アップストリームのキャッシュは無効になりません。',
         excelBPSDesc: 'このアカウントの既存の ChatGPT OAuth 認証情報を使い、Excel 経由で Responses を転送します。GitHub ログインや sidecar は不要です。無効にすると Codex のルーティングに戻ります。',
