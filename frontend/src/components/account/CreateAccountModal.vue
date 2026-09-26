@@ -3007,7 +3007,7 @@
         </div>
       </div>
 
-      <div>
+      <div v-if="!authStore.isObserver">
         <label class="input-label">{{ t('admin.accounts.proxy') }}</label>
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
@@ -3933,6 +3933,7 @@ import { newBPSAccountDraft, bpsCredentials } from '@/utils/openaiBps'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 import {
   claudeModels,
@@ -4135,6 +4136,7 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -4520,8 +4522,8 @@ const {
 } = useQuotaNotifyState()
 
 // Load global feature states once
-adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
-  webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
+adminAPI.accounts.getManagementCapabilities().then(cfg => {
+  webSearchGlobalEnabled.value = cfg?.web_search_enabled === true
 }).catch(() => { webSearchGlobalEnabled.value = false })
 
 loadQuotaNotifyGlobal()
@@ -6100,7 +6102,7 @@ const createAccountAndFinish = async (
     type,
     credentials,
     extra: finalExtra,
-    proxy_id: form.proxy_id,
+    proxy_id: authStore.isObserver ? undefined : form.proxy_id,
     concurrency: form.concurrency,
     load_factor: form.load_factor ?? undefined,
     priority: form.priority,

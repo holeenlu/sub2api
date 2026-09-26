@@ -27,6 +27,7 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
+      getManagementCapabilities: vi.fn().mockResolvedValue({ web_search_enabled: false, account_quota_notify_enabled: false }),
       update: updateAccountMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock
     },
@@ -516,7 +517,126 @@ describe('EditAccountModal', () => {
     }
   })
 
-  it('defaults new BPS settings to Astra only', async () => {
+  it.each([0, 7])('saves and restores BPS 403 group target %s independently of disabling BPS', async target => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { openai_excel_bps: true, unrelated: 'keep' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ groups: [{ id: 7, name: 'Quarantine', platform: 'openai' }, { id: 8, name: 'Other', platform: 'anthropic' }] as any })
+    const toggle = '[data-testid="excel-bps-auto-move-on-403"]'
+    expect(wrapper.get<HTMLInputElement>(toggle).element.checked).toBe(false)
+    await wrapper.get(toggle).setValue(true)
+    const selector = wrapper.get('[data-testid="excel-bps-403-target-group"]')
+    expect(selector.find('option[value="8"]').exists()).toBe(false)
+    await selector.setValue(String(target))
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.openai_excel_bps_auto_move_on_403).toBe(true)
+    expect(extra.openai_excel_bps_403_target_group_id).toBe(target)
+    expect(extra.openai_excel_bps_auto_disable_on_403).toBeUndefined()
+    expect(extra.unrelated).toBe('keep')
+    await wrapper.setProps({ account: { ...account, extra } })
+    expect(wrapper.get<HTMLInputElement>(toggle).element.checked).toBe(true)
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="excel-bps-403-target-group"]').element.value).toBe(String(target))
+    await wrapper.get(toggle).setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const cleared = updateAccountMock.mock.calls[1]?.[1]?.extra
+    expect(cleared.openai_excel_bps_auto_move_on_403).toBeUndefined()
+    expect(cleared.openai_excel_bps_403_target_group_id).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('requires an explicit BPS 403 group choice and resets it when changing accounts', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { openai_excel_bps: true }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="excel-bps-auto-move-on-403"]').setValue(true)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="excel-bps-403-target-group"]').setValue('0')
+    await wrapper.setProps({ account: { ...account, id: 2 } })
+    expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-auto-move-on-403"]').element.checked).toBe(false)
+    expect(wrapper.find('[data-testid="excel-bps-403-target-group"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('clears BPS 403 group settings when disabling BPS and hides them for ineligible accounts', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { openai_excel_bps: true, openai_excel_bps_auto_move_on_403: true, openai_excel_bps_403_target_group_id: 0 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="excel-bps-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.openai_excel_bps_auto_move_on_403).toBeUndefined()
+    expect(extra.openai_excel_bps_403_target_group_id).toBeUndefined()
+    wrapper.unmount()
+    for (const ineligible of [buildAccount(), buildOpenAISparkShadowAccount()]) {
+      ineligible.extra = account.extra
+      const hidden = mountModal(ineligible)
+      expect(hidden.find('[data-testid="excel-bps-auto-move-on-403"]').exists()).toBe(false)
+      hidden.unmount()
+    }
+  })
+
+  it('restores and saves both 403 options after re-enabling an automatically disabled protocol', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { openai_excel_bps: false, openai_excel_bps_auto_disable_on_403: true, openai_excel_bps_auto_move_on_403: true, openai_excel_bps_403_target_group_id: 0 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="excel-bps-toggle"]').trigger('click')
+    expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-auto-disable-on-403"]').element.checked).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-auto-move-on-403"]').element.checked).toBe(true)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      openai_excel_bps: true, openai_excel_bps_auto_disable_on_403: true,
+      openai_excel_bps_auto_move_on_403: true, openai_excel_bps_403_target_group_id: 0
+    })
+  })
+
+  it.each([false, true])('limits 403 destinations according to simple mode %s', async simpleMode => {
+    authIsSimpleMode.value = simpleMode
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { openai_excel_bps: true, openai_excel_bps_auto_move_on_403: true, openai_excel_bps_403_target_group_id: 8 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ groups: [{ id: 8, name: 'Composite', platform: 'composite' }] as any })
+    const selector = wrapper.get('[data-testid="excel-bps-403-target-group"]')
+    expect(selector.find('option[value="8"]').exists()).toBe(!simpleMode)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledTimes(simpleMode ? 0 : 1)
+  })
+
+  it('rejects a 403 destination removed while the edit modal is open', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { openai_excel_bps: true, openai_excel_bps_auto_move_on_403: true, openai_excel_bps_403_target_group_id: 7 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ groups: [{ id: 7, name: 'Quarantine', platform: 'openai' }] as any })
+    await wrapper.setProps({ groups: [] })
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).not.toHaveBeenCalled()
+  })
+
+  it('defaults new BPS settings to Astra, 5.6 Sol and 5.6 Terra', async () => {
     const account = buildAccount()
     account.type = 'oauth'
     account.extra = {}
@@ -527,7 +647,7 @@ describe('EditAccountModal', () => {
     expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-all-models"]').element.checked).toBe(false)
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()
-    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_excel_bps_models).toEqual(['gpt-6-astra'])
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_excel_bps_models).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'])
   })
 
   it('preserves legacy all-model settings and lets users select Astra only', async () => {
@@ -549,7 +669,24 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[1]?.[1]?.extra?.unrelated).toBe('preserve')
   })
 
-  it.each([{ models: [] }, { models: ['gpt-6-astra', 'gpt-6-sol'] }])('restores and saves explicit BPS selection $models', async ({ models }) => {
+  it('restores the default BPS models when switching to an unconfigured account', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { openai_excel_bps: true, openai_excel_bps_models: ['gpt-6-sol'] }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ account: { ...account, id: 2, extra: {} } })
+    await wrapper.get('[data-testid="excel-bps-toggle"]').trigger('click')
+    expect(wrapper.get('[data-testid="excel-bps-model-selection"]').text())
+      .toContain('gpt-6-astra,gpt-5.6-sol,gpt-5.6-terra')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_excel_bps_models)
+      .toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'])
+  })
+
+  it.each([{ models: [] }, { models: ['gpt-6-astra'] }, { models: ['gpt-6-astra', 'gpt-6-sol'] }])('restores and saves explicit BPS selection $models', async ({ models }) => {
     const account = buildAccount()
     account.type = 'oauth'
     account.extra = { openai_excel_bps: true, openai_excel_bps_models: models }

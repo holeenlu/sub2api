@@ -339,7 +339,14 @@ type SystemSettings struct {
 	ExcelBPSImageBudgetMiB      int
 	ExcelBPSImageMaxRequests    int
 	// 使用详情中长上下文计费 x2 徽标的展示开关（默认开启）
-	UsageShowLongContextBadge bool
+	UsageShowLongContextBadge   bool
+	ExcelBPSImageMaxImageMiB    int
+	ExcelBPSImageMaxImages      int
+	ExcelBPSImageMaxTotalMiB    int
+	ExcelBPSImageStorageMiB     int
+	ExcelBPSImageStorageEntries int
+	ExcelBPSImageTTLMinutes     int
+	ExcelBPSImageMode           string
 }
 
 type DefaultSubscriptionSetting struct {
