@@ -25,6 +25,9 @@ type Bridge struct {
 	structured       *structuredOutput
 	replay           *ReplayCache
 	scope            string
+	stagedReplays    *[]replayWrite
+	hasToolHistory   bool
+	disallowParallel bool
 }
 
 func decode(raw []byte, target any) error {
@@ -103,6 +106,21 @@ func Prepare(raw []byte, scope string, replay *ReplayCache) ([]byte, *Bridge, er
 	choice := source["tool_choice"]
 	if choice != nil && text(choice) != "auto" && text(choice) != "none" {
 		return nil, nil, fmt.Errorf("basispoints supports tool_choice auto or none only")
+	}
+	if parallel, exists := source["parallel_tool_calls"]; exists {
+		enabled, ok := parallel.(bool)
+		if !ok {
+			return nil, nil, fmt.Errorf("basispoints parallel_tool_calls must be a boolean")
+		}
+		b.disallowParallel = !enabled
+	}
+	if items, ok := source["input"].([]any); ok {
+		for _, v := range items {
+			item, _ := v.(object)
+			if isTool(item) || strings.HasSuffix(text(item["type"]), "_call_output") {
+				b.hasToolHistory = true
+			}
+		}
 	}
 	var catalog []any
 	if text(choice) != "none" {

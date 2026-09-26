@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 type tool struct {
@@ -14,12 +17,15 @@ type tool struct {
 	Kind       string
 	Definition string
 	Parameters object
+	Catalog    object
+	Schema     *jsonschema.Schema
 }
 
 type replayEntry struct {
 	key             string
 	raw             []byte
 	callFingerprint string
+	touched         time.Time
 }
 
 // ReplayCache retains native tool identities without mixing accounts or sessions.
@@ -29,6 +35,7 @@ type ReplayCache struct {
 	entries map[string]*list.Element
 	order   list.List
 	bytes   int
+	now     func() time.Time
 }
 
 func (c *ReplayCache) put(scope, id string, item object, clientCall ...object) {
@@ -39,11 +46,17 @@ func (c *ReplayCache) put(scope, id string, item object, clientCall ...object) {
 	if err != nil || len(raw) > 1<<20 {
 		return
 	}
+	var signature string
+	if len(clientCall) == 1 {
+		signature = historyCallFingerprint(clientCall[0])
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entries == nil {
 		c.entries = make(map[string]*list.Element)
 	}
+	now := c.clock()
+	c.pruneLocked(now)
 	key := scope + "\x00" + id
 	if old := c.entries[key]; old != nil {
 		// Only replayEntry values are inserted into this private list.
@@ -51,11 +64,7 @@ func (c *ReplayCache) put(scope, id string, item object, clientCall ...object) {
 		c.bytes -= len(entry.raw)
 		c.order.Remove(old)
 	}
-	var signature string
-	if len(clientCall) == 1 {
-		signature = historyCallFingerprint(clientCall[0])
-	}
-	c.entries[key] = c.order.PushBack(replayEntry{key: key, raw: raw, callFingerprint: signature})
+	c.entries[key] = c.order.PushBack(replayEntry{key: key, raw: raw, callFingerprint: signature, touched: now})
 	c.bytes += len(raw)
 	for len(c.entries) > 1024 || c.bytes > 16<<20 {
 		old := c.order.Front()
@@ -119,23 +128,52 @@ func (c *ReplayCache) getForCall(scope, id string, clientCall object) object {
 	return c.getMatching(scope, id, signature, true)
 }
 
+const replayIdleTTL = 2 * time.Hour
+
+func (c *ReplayCache) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+func (c *ReplayCache) pruneLocked(now time.Time) {
+	for first := c.order.Front(); first != nil; first = c.order.Front() {
+		entry, _ := first.Value.(replayEntry)
+		if now.Sub(entry.touched) < replayIdleTTL {
+			break
+		}
+		delete(c.entries, entry.key)
+		c.bytes -= len(entry.raw)
+		c.order.Remove(first)
+	}
+}
+
 func (c *ReplayCache) getMatching(scope, id, signature string, requireSignature bool) object {
 	if c == nil {
 		return nil
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	now := c.clock()
+	c.pruneLocked(now)
 	entry := c.entries[scope+"\x00"+id]
 	if entry == nil {
+		c.mu.Unlock()
 		return nil
 	}
-	cached, ok := entry.Value.(replayEntry)
-	if !ok || (requireSignature && cached.callFingerprint != signature) {
+	cached, _ := entry.Value.(replayEntry)
+	if requireSignature && cached.callFingerprint != signature {
+		c.mu.Unlock()
 		return nil
 	}
+	cached.touched = now
+	entry.Value = cached
 	c.order.MoveToBack(entry)
+	// Serialized entries are immutable. Decode the snapshot outside the lock.
+	raw := cached.raw
+	c.mu.Unlock()
 	var item object
-	if decode(cached.raw, &item) != nil {
+	if decode(raw, &item) != nil {
 		return nil
 	}
 	return item
@@ -143,7 +181,10 @@ func (c *ReplayCache) getMatching(scope, id, signature string, requireSignature 
 
 func (b *Bridge) collectTools(value any, namespace string) ([]any, error) {
 	var catalog []any
-	items, _ := value.([]any)
+	items, ok := value.([]any)
+	if value != nil && !ok {
+		return nil, fmt.Errorf("basispoints client tools must be an array")
+	}
 	for _, raw := range items {
 		item, ok := raw.(object)
 		if !ok {
@@ -201,8 +242,15 @@ func (b *Bridge) collectTools(value any, namespace string) ([]any, error) {
 			}
 			continue
 		}
-		parameters, _ := entry["parameters"].(object)
-		b.tools[key] = tool{Name: name, Namespace: namespace, Kind: kind, Definition: definition, Parameters: parameters}
+		parameters, ok := entry["parameters"].(object)
+		if entry["parameters"] != nil && !ok {
+			return nil, fmt.Errorf("basispoints function parameters must be a schema object")
+		}
+		schema, err := compileToolSchema(parameters)
+		if err != nil {
+			return nil, err
+		}
+		b.tools[key] = tool{Name: name, Namespace: namespace, Kind: kind, Definition: definition, Parameters: parameters, Schema: schema, Catalog: item}
 		catalog = append(catalog, entry)
 	}
 	return catalog, nil
@@ -422,14 +470,14 @@ func (b *Bridge) translateCall(native object) (object, error) {
 	}
 	info, allowed := b.tools[toolName]
 	if !allowed {
-		return nil, fmt.Errorf("basispoints returned a tool outside the client's catalog")
+		return nil, unknownClientToolError{}
 	}
 	result, err := b.finishClientToolCall(native, info, envelope, rawCustom)
 	if err != nil {
 		return nil, err
 	}
 	// run_officejs is a real BPS-native tool, so its item replays upstream verbatim.
-	b.replay.put(b.scope, text(native["call_id"]), native, result)
+	b.rememberReplay(text(native["call_id"]), native, result)
 	return result, nil
 }
 
@@ -487,7 +535,7 @@ func (b *Bridge) translateDirectCatalogCall(native object) (object, error) {
 	if err != nil {
 		return nil, err
 	}
-	b.replay.put(b.scope, text(native["call_id"]), wrapped, result)
+	b.rememberReplay(text(native["call_id"]), wrapped, result)
 	return result, nil
 }
 
@@ -541,6 +589,14 @@ func (b *Bridge) finishClientToolCall(native object, info tool, envelope object,
 		if _, ok := args.(object); !ok {
 			return nil, fmt.Errorf("basispoints function arguments must be an object")
 		}
+		if info.Schema != nil {
+			if err := validateToolNumberBudget(args); err != nil {
+				return nil, toolArgumentsSchemaError{}
+			}
+		}
+		if info.Schema != nil && info.Schema.Validate(args) != nil {
+			return nil, toolArgumentsSchemaError{}
+		}
 		encoded, _ := json.Marshal(args)
 		result["arguments"] = string(encoded)
 		// The relay envelope contains plaintext, even when a catalog parameter
@@ -552,6 +608,20 @@ func (b *Bridge) finishClientToolCall(native object, info tool, envelope object,
 	return result, nil
 }
 
+type replayWrite struct {
+	id             string
+	native, client object
+}
+
+func (b *Bridge) rememberReplay(id string, native, client object) {
+	if b.stagedReplays != nil {
+		*b.stagedReplays = append(*b.stagedReplays, replayWrite{id, native, client})
+		return
+	}
+	b.replay.put(b.scope, id, native, client)
+}
+
+// Validate the whole batch before changing output or committing any replay entry.
 func (b *Bridge) translateResponse(response object) error {
 	if response == nil {
 		return nil
@@ -561,16 +631,37 @@ func (b *Bridge) translateResponse(response object) error {
 		return err
 	}
 	output, _ := response["output"].([]any)
+	translated := make([]any, len(output))
+	var writes []replayWrite
+	staged := *b
+	staged.stagedReplays = &writes
+	ids := make(map[string]bool)
+	count := 0
 	for i, raw := range output {
 		item, _ := raw.(object)
 		if isTool(item) {
-			translated, err := b.translateCall(item)
+			count++
+			if count > 1024 || (b.disallowParallel && count > 1) {
+				return fmt.Errorf("basispoints response violates the tool call count limit")
+			}
+			id := text(item["call_id"])
+			if id == "" || ids[id] {
+				return fmt.Errorf("basispoints response contains a missing or duplicate tool call_id")
+			}
+			ids[id] = true
+			call, err := staged.translateCall(item)
 			if err != nil {
 				return err
 			}
-			output[i] = translated
+			translated[i] = call
+		} else {
+			translated[i] = raw
 		}
 	}
+	for _, write := range writes {
+		b.replay.put(b.scope, write.id, write.native, write.client)
+	}
+	response["output"] = translated
 	response["reasoning"] = object{"effort": b.Effort}
 	response["parallel_tool_calls"] = false
 	return nil

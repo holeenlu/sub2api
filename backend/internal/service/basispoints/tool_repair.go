@@ -75,6 +75,10 @@ func (b *Bridge) translateCompleted(ctx context.Context, response object, repair
 	if validation == nil {
 		return b.translateResponse(response)
 	}
+	var schemaError toolArgumentsSchemaError
+	if errors.As(validation, &schemaError) {
+		return validation
+	}
 	original, eligible := repairableTools(response)
 	if repair == nil || !eligible || b.structured != nil {
 		return validation

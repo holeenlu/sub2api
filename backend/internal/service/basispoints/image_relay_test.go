@@ -176,7 +176,7 @@ func TestImageRelayDisabledAndHTTPSPassthrough(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, raw, out)
 	_, _, err = Prepare(out, "scope", nil)
-	require.ErrorContains(t, err, "HTTPS image URL")
+	require.ErrorContains(t, err, "uploaded before")
 	r, err := newTestImageRelay(t, "https://images.example")
 	require.NoError(t, err)
 	raw = []byte(`{ "model":"gpt-6-astra", "input":[{"role":"user","content":[{"type":"input_image","image_url":"https://cdn.example/image.png?sig=a%2Fb"}]}] }`)
