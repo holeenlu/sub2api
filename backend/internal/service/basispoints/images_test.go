@@ -33,7 +33,7 @@ func TestUnsupportedImageFormsReturnActionableErrors(t *testing.T) {
 		"missing host":    {"image_url": "https:///photo.png"},
 		"credentials":     {"image_url": "https://private-secret:password@images.example/photo.png"},
 		"URL object":      {"image_url": object{"url": "https://images.example/photo.png"}},
-		"invalid file ID": {"file_id": "file private"},
+		"invalid file ID": {"file_id": "invalid-private"},
 		"mixed file ID":   {"image_url": "https://images.example/photo.png", "file_id": "file-private"},
 		"invalid detail":  {"image_url": "https://images.example/photo.png", "detail": "invalid"},
 	} {

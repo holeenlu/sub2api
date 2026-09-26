@@ -11,6 +11,9 @@ import (
 )
 
 const (
+	SettingKeyExcelBPSImageMode           = "excel_bps_image_mode"
+	ExcelBPSImageModeRelay                = "relay"
+	ExcelBPSImageModeNative               = "native"
 	SettingKeyExcelBPSImageRelayEnabled   = "excel_bps_image_relay_enabled"
 	SettingKeyExcelBPSImageBaseURL        = "excel_bps_image_base_url"
 	SettingKeyExcelBPSImageBodyLimitMiB   = "excel_bps_image_body_limit_mib"
@@ -29,6 +32,7 @@ const (
 )
 
 type ExcelBPSImageRelaySettings struct {
+	Mode         string
 	Enabled      bool
 	BaseURL      string
 	BodyLimitMiB int
@@ -37,15 +41,21 @@ type ExcelBPSImageRelaySettings struct {
 	Limits       basispoints.ImageRelayLimits
 }
 
-func normalizeExcelBPSImageRelaySettings(enabled bool, baseURL string) (ExcelBPSImageRelaySettings, error) {
+func normalizeExcelBPSImageRelaySettings(enabled bool, baseURL, mode string) (ExcelBPSImageRelaySettings, error) {
+	if mode == "" {
+		mode = ExcelBPSImageModeRelay
+	}
+	if mode != ExcelBPSImageModeRelay && mode != ExcelBPSImageModeNative {
+		return ExcelBPSImageRelaySettings{}, infraerrors.BadRequest("INVALID_EXCEL_BPS_IMAGE_MODE", "Image mode must be relay or native")
+	}
 	baseURL = strings.TrimSpace(baseURL)
-	if enabled || baseURL != "" {
+	if (enabled && mode == ExcelBPSImageModeRelay) || baseURL != "" {
 		if err := basispoints.ValidateImageRelayOrigin(baseURL); err != nil {
 			return ExcelBPSImageRelaySettings{}, infraerrors.BadRequest("INVALID_EXCEL_BPS_IMAGE_BASE_URL", err.Error())
 		}
 	}
 	return ExcelBPSImageRelaySettings{
-		Enabled: enabled, BaseURL: strings.TrimRight(baseURL, "/"),
+		Mode: mode, Enabled: enabled, BaseURL: strings.TrimRight(baseURL, "/"),
 		BodyLimitMiB: DefaultExcelBPSImageBodyLimitMiB,
 		BudgetMiB:    DefaultExcelBPSImageBudgetMiB,
 		MaxRequests:  DefaultExcelBPSImageMaxRequests,
@@ -86,14 +96,14 @@ func (s *SettingService) GetExcelBPSImageRelaySettings(ctx context.Context) (Exc
 	dbCtx, cancel := context.WithTimeout(ctx, gatewayForwardingDBTimeout)
 	defer cancel()
 	values, err := s.settingRepo.GetMultiple(dbCtx, []string{
-		SettingKeyExcelBPSImageRelayEnabled, SettingKeyExcelBPSImageBaseURL,
+		SettingKeyExcelBPSImageMode, SettingKeyExcelBPSImageRelayEnabled, SettingKeyExcelBPSImageBaseURL,
 		SettingKeyExcelBPSImageBodyLimitMiB, SettingKeyExcelBPSImageBudgetMiB, SettingKeyExcelBPSImageMaxRequests,
 		SettingKeyExcelBPSImageMaxImageMiB, SettingKeyExcelBPSImageMaxImages, SettingKeyExcelBPSImageMaxTotalMiB, SettingKeyExcelBPSImageStorageMiB, SettingKeyExcelBPSImageStorageEntries, SettingKeyExcelBPSImageTTLMinutes,
 	})
 	if err != nil {
 		return ExcelBPSImageRelaySettings{}, infraerrors.ServiceUnavailable("EXCEL_BPS_IMAGE_SETTINGS_UNAVAILABLE", "Excel BPS image settings are unavailable")
 	}
-	settings, err := normalizeExcelBPSImageRelaySettings(values[SettingKeyExcelBPSImageRelayEnabled] == "true", values[SettingKeyExcelBPSImageBaseURL])
+	settings, err := normalizeExcelBPSImageRelaySettings(values[SettingKeyExcelBPSImageRelayEnabled] == "true", values[SettingKeyExcelBPSImageBaseURL], values[SettingKeyExcelBPSImageMode])
 	if err != nil {
 		return ExcelBPSImageRelaySettings{}, err
 	}

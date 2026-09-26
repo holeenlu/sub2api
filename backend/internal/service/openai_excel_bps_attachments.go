@@ -2,46 +2,69 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
+	"io"
 	"net/http"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 )
 
-type excelBPSAttachmentError struct {
-	status  int
-	message string
+type excelBPSAttachmentError struct{ status int }
+
+func (e *excelBPSAttachmentError) Error() string {
+	return fmt.Sprintf("excel BPS attachment returned HTTP %d", e.status)
 }
 
-func (e *excelBPSAttachmentError) Error() string { return e.message }
-
-func (s *OpenAIGatewayService) uploadExcelBPSAttachment(ctx context.Context, headers http.Header, media, payload string, size int64, proxyURL string, account *Account) (string, error) {
-	req, err := basispoints.NewAttachmentRequest(ctx, headers, media, payload, size)
+func (s *OpenAIGatewayService) uploadExcelBPSAttachment(ctx context.Context, account *Account, token, accountID string, img basispoints.InlineAttachment) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	ctx = WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileLongStream))
+	reader, contentType, length, err := img.Multipart()
 	if err != nil {
-		return "", &excelBPSAttachmentError{502, "Excel BPS attachment request could not be built"}
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, basispoints.AttachmentsURL, reader)
+	if err != nil {
+		return "", err
+	}
+	auth, err := newExcelBPSRequest(ctx, nil, token, accountID)
+	if err != nil {
+		return "", err
+	}
+	req.Header = auth.Header
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "identity")
+	req.ContentLength = length
+	proxyURL := ""
+	if account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
 	}
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		return "", &excelBPSAttachmentError{502, "Excel BPS attachment upload failed"}
+		return "", fmt.Errorf("excel BPS attachment connection failed")
 	}
+	// Release the account's upstream connection slot before starting Responses.
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if resp.StatusCode == http.StatusTooManyRequests && s.rateLimitService != nil {
-			stateCtx, cancel := openAIAccountStateContext(ctx)
-			s.rateLimitService.handle429Cooldown(stateCtx, account, resp.Header, nil)
-			cancel()
-		}
-		if resp.StatusCode == http.StatusForbidden {
-			s.disableExcelBPSOn403(ctx, account)
-		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 		status := resp.StatusCode
 		if status < 400 || status > 599 {
 			status = http.StatusBadGateway
 		}
-		return "", &excelBPSAttachmentError{status, fmt.Sprintf("Excel BPS attachment upload returned HTTP %d; no generation was sent", resp.StatusCode)}
+		return "", &excelBPSAttachmentError{status: status}
 	}
-	id, err := basispoints.ReadAttachmentID(resp.Body)
-	if err != nil {
-		return "", &excelBPSAttachmentError{502, "Excel BPS attachment response has no valid file ID"}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
+	if err != nil || len(raw) > 64<<10 {
+		return "", fmt.Errorf("invalid Excel BPS attachment response")
 	}
-	return id, nil
+	var result struct {
+		OpenAIFileID string `json:"openai_file_id"`
+	}
+	if json.Unmarshal(raw, &result) != nil || !basispoints.ValidAttachmentID(result.OpenAIFileID) {
+		return "", fmt.Errorf("invalid Excel BPS attachment response")
+	}
+	return result.OpenAIFileID, nil
 }

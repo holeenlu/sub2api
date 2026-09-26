@@ -346,6 +346,7 @@ type SystemSettings struct {
 	ExcelBPSImageStorageMiB     int
 	ExcelBPSImageStorageEntries int
 	ExcelBPSImageTTLMinutes     int
+	ExcelBPSImageMode           string
 }
 
 type DefaultSubscriptionSetting struct {

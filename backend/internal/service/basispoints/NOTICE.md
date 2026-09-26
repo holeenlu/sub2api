@@ -38,3 +38,9 @@ behaviors were implemented independently using this project's existing bridge,
 HTTP transport, replay cache, and JSON Schema dependency; no source files or
 plugin ABI from that repository were copied. The original attribution above
 continues to apply to the existing adapter.
+
+Native attachment interoperability reference: zhu961212/sub2api-oai-basispoints
+at 6c611b2562a7a316184b0ec3b27473ab6e767e6e, for the multipart attachments
+endpoint and openai_file_id response field. The uploader and metadata cache
+are implemented in this package using Sub2API's existing image validation and
+account transport; no plugin runtime or deployment configuration is imported.
