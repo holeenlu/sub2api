@@ -155,6 +155,8 @@ tools/tests/__pycache__/
 !docs/SUB4API_MERGE_1_1_5.md
 !docs/RANXI2001_MERGE_2_8_13.md
 !docs/RANXI2001_MERGE_2_8_14.md
+!docs/RANXI2001_MERGE_2_8_17.md
+!docs/bps-image-relay-limits.md
 !docs/excel-bps-capacity-validation.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
