@@ -29,7 +29,6 @@ func RegisterAdminRoutes(
 	admin.Use(panelRateLimiter.Global())
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
-	admin.Use(h.Admin.Account.AuthorizeObserver)
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 	{
 		// 部署与运营合规确认
@@ -76,19 +75,6 @@ func RegisterAdminRoutes(
 
 		// 系统设置
 		registerSettingsRoutes(admin, h)
-		if h.Admin.RequestCapture != nil {
-			captures := admin.Group("/request-captures")
-			captures.Use(h.Admin.RequestCapture.Gate)
-			captures.GET("", h.Admin.RequestCapture.List)
-			captures.POST("", h.Admin.RequestCapture.Create)
-			captures.POST("/:task/stop", h.Admin.RequestCapture.Stop)
-			captures.DELETE("/:task", h.Admin.RequestCapture.Delete)
-			captures.GET("/:task/requests", h.Admin.RequestCapture.Records)
-			captures.GET("/:task/requests/:record", h.Admin.RequestCapture.Detail)
-			captures.GET("/:task/requests/:record/content/:part", h.Admin.RequestCapture.Content)
-			captures.GET("/:task/export", h.Admin.RequestCapture.Export)
-			captures.GET("/:task/requests/:record/export", h.Admin.RequestCapture.Export)
-		}
 
 		// 数据管理
 		registerDataManagementRoutes(admin, h, stepUpAuth)
@@ -125,9 +111,6 @@ func RegisterAdminRoutes(
 
 		// 定时测试计划
 		registerScheduledTestRoutes(admin, h)
-
-		// 鹈鹕测智用户展示
-		registerPelicanShowcaseRoutes(admin, h)
 
 		// 渠道管理
 		registerChannelRoutes(admin, h)
@@ -368,8 +351,6 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.DELETE("/:id/rate-multipliers", h.Admin.Group.ClearGroupRateMultipliers)
 		groups.PUT("/:id/rpm-overrides", h.Admin.Group.BatchSetGroupRPMOverrides)
 		groups.DELETE("/:id/rpm-overrides", h.Admin.Group.ClearGroupRPMOverrides)
-		groups.PUT("/:id/user-denied-models", h.Admin.Group.BatchSetGroupUserDeniedModels)
-		groups.DELETE("/:id/user-denied-models", h.Admin.Group.ClearGroupUserDeniedModels)
 		groups.GET("/:id/api-keys", h.Admin.Group.GetGroupAPIKeys)
 	}
 }
@@ -379,7 +360,6 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 	{
 		accounts.GET("", h.Admin.Account.List)
 		accounts.GET("/openai-request-timezones", h.Admin.Account.GetOpenAIRequestTimezones)
-		accounts.GET("/management-capabilities", h.Admin.Setting.GetAccountManagementCapabilities)
 		accounts.GET("/upstream-billing-rates", h.Admin.Account.GetUpstreamBillingRates)
 		accounts.GET("/upstream-billing-probe/settings", h.Admin.Account.GetUpstreamBillingProbeSettings)
 		accounts.PUT("/upstream-billing-probe/settings", h.Admin.Account.UpdateUpstreamBillingProbeSettings)
@@ -421,7 +401,6 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/opencode-go-usage/refresh", h.Admin.Account.RefreshOpenCodeGoUsage)
 		accounts.DELETE("/:id", h.Admin.Account.Delete)
 		accounts.POST("/:id/test", h.Admin.Account.Test)
-		accounts.POST("/:id/pelican-test", h.Admin.Account.PelicanTest)
 		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
 		accounts.POST("/:id/refresh", h.Admin.Account.Refresh)
 		accounts.POST("/:id/apply-oauth-credentials", h.Admin.Account.ApplyOAuthCredentials)
@@ -742,7 +721,6 @@ func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		usage.GET("", h.Admin.Usage.List)
 		usage.GET("/stats", h.Admin.Usage.Stats)
-		usage.GET("/:id/timing", h.Admin.Usage.Timing)
 		usage.GET("/search-users", h.Admin.Usage.SearchUsers)
 		usage.GET("/search-api-keys", h.Admin.Usage.SearchAPIKeys)
 		usage.GET("/cleanup-tasks", h.Admin.Usage.ListCleanupTasks)
@@ -764,35 +742,15 @@ func registerUserAttributeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	admin.GET("/account-ops/config", h.Admin.AccountOps.GetConfig)
-	admin.PUT("/account-ops/config", h.Admin.AccountOps.SaveConfig)
-	admin.GET("/account-ops/alerts", h.Admin.AccountOps.List)
-	// 智能运维 → 凭证守护：账号令牌巡检 / 自动重登 / 错误态自愈
-	admin.GET("/account-ops/token-guard/status", h.Admin.AccountTokenGuard.Status)
-	admin.PUT("/account-ops/token-guard/config", h.Admin.AccountTokenGuard.SaveConfig)
-	admin.POST("/account-ops/token-guard/run", h.Admin.AccountTokenGuard.Run)
-	admin.GET("/account-ops/token-guard/events", h.Admin.AccountTokenGuard.Events)
-	admin.POST("/account-ops/token-guard/accounts/:id/relogin", h.Admin.AccountTokenGuard.Relogin)
-	admin.GET("/account-quality-results", h.Admin.ScheduledTest.ListQualityHistory)
-	admin.GET("/account-quality-plans", h.Admin.ScheduledTest.ListQualityPlans)
-	admin.POST("/account-quality-plans/:id/run", h.Admin.ScheduledTest.TriggerQuality)
-	admin.GET("/pelican-test-results", h.Admin.ScheduledTest.ListPelicanHistory)
 	plans := admin.Group("/scheduled-test-plans")
-	plans.Use(h.Admin.ScheduledTest.ObserverGuard(h.Admin.Account))
 	{
 		plans.POST("", h.Admin.ScheduledTest.Create)
 		plans.PUT("/:id", h.Admin.ScheduledTest.Update)
 		plans.DELETE("/:id", h.Admin.ScheduledTest.Delete)
 		plans.GET("/:id/results", h.Admin.ScheduledTest.ListResults)
-		plans.GET("/:id/results/:resultID", h.Admin.ScheduledTest.GetResult)
 	}
 	// Nested under accounts
 	admin.GET("/accounts/:id/scheduled-test-plans", h.Admin.ScheduledTest.ListByAccount)
-}
-
-// Admins browse the gallery through the user page; this only takes a snapshot down.
-func registerPelicanShowcaseRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	admin.DELETE("/pelican-showcase/items/:id", h.PelicanShowcase.DeleteItem)
 }
 
 func registerErrorPassthroughRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

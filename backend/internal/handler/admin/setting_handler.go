@@ -266,7 +266,6 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		RiskControlEnabled:                                     settings.RiskControlEnabled,
 		CyberSessionBlockEnabled:                               settings.CyberSessionBlockEnabled,
 		CyberSessionBlockTTLSeconds:                            settings.CyberSessionBlockTTLSeconds,
-		CyberSessionIdentityStrictEnabled:                      settings.CyberSessionIdentityStrictEnabled,
 		AffiliateRebateRate:                                    settings.AffiliateRebateRate,
 		AffiliateRebateFreezeHours:                             settings.AffiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:                            settings.AffiliateRebateDurationDays,
@@ -394,8 +393,6 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		GrokDefaultBaseURLMode:         settings.GrokDefaultBaseURLMode,
 
 		AvailableChannelsEnabled: settings.AvailableChannelsEnabled,
-		PelicanShowcaseEnabled:   settings.PelicanShowcaseEnabled,
-		PelicanShowcase:          settings.PelicanShowcase,
 		SubscriptionEnabled:      settings.SubscriptionEnabled,
 
 		ModelPlazaEnabled:       settings.ModelPlazaEnabled,
@@ -407,22 +404,6 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 
 		AccountSchedulingThresholds: settings.AccountSchedulingThresholds,
 		AllowUserViewErrorRequests:  settings.AllowUserViewErrorRequests,
-		UsageShowLongContextBadge:   settings.UsageShowLongContextBadge,
-		RequestCaptureEnabled:       settings.RequestCaptureEnabled,
-		RequestCaptureQuotaMiB:      settings.RequestCaptureQuotaMiB,
-		RequestCaptureRetentionDays: settings.RequestCaptureRetentionDays,
-		ExcelBPSImageMode:           settings.ExcelBPSImageMode,
-		ExcelBPSImageRelayEnabled:   settings.ExcelBPSImageRelayEnabled,
-		ExcelBPSImageBaseURL:        settings.ExcelBPSImageBaseURL,
-		ExcelBPSImageBodyLimitMiB:   settings.ExcelBPSImageBodyLimitMiB,
-		ExcelBPSImageBudgetMiB:      settings.ExcelBPSImageBudgetMiB,
-		ExcelBPSImageMaxRequests:    settings.ExcelBPSImageMaxRequests,
-		ExcelBPSImageMaxImageMiB:    settings.ExcelBPSImageMaxImageMiB,
-		ExcelBPSImageMaxImages:      settings.ExcelBPSImageMaxImages,
-		ExcelBPSImageMaxTotalMiB:    settings.ExcelBPSImageMaxTotalMiB,
-		ExcelBPSImageStorageMiB:     settings.ExcelBPSImageStorageMiB,
-		ExcelBPSImageStorageEntries: settings.ExcelBPSImageStorageEntries,
-		ExcelBPSImageTTLMinutes:     settings.ExcelBPSImageTTLMinutes,
 	}
 
 	// OpenAI fast policy (stored under a dedicated setting key)

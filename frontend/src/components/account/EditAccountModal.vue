@@ -26,8 +26,6 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
-      <OpenAIBPSAccountFields v-if="account.platform === 'openai_bps'" v-model="bpsDraft" editing :expires-at="String(account.credentials?.expires_at ?? '')" :credential-state="account.bps_credential_state" :account-status="account.status" :schedulable="account.schedulable" />
-
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
@@ -1680,7 +1678,7 @@
         </div>
       </div>
 
-      <div v-if="!isSparkShadow && !authStore.isObserver">
+      <div v-if="!isSparkShadow">
         <label class="input-label">{{ t('admin.accounts.proxy') }}</label>
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
@@ -1755,18 +1753,6 @@
             />
           </div>
         </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.groupBillingRateMultiplier') }}</label>
-          <input
-            v-model.number="form.group_rate_multiplier"
-            type="number"
-            min="0"
-            step="0.01"
-            class="input"
-            data-testid="account-group-rate-multiplier"
-          />
-          <p class="input-hint">{{ t('admin.accounts.groupBillingRateMultiplierHint') }}</p>
-        </div>
       </div>
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
@@ -1783,77 +1769,6 @@
           {{ t('admin.accounts.expiresAtHint') }}
           {{ t('admin.accounts.expiresAtTimezoneHint', { timezone: browserTimeZone }) }}
         </p>
-      </div>
-
-      <div v-if="account?.platform === 'openai' && account?.type === 'apikey'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="flex items-center gap-2">
-          <input v-model="copilotSDKEnabled" type="checkbox" data-testid="copilot-sdk-toggle" />
-          <span>Copilot SDK</span>
-        </label>
-        <p class="input-hint">{{ t('admin.accounts.openai.copilotSDKDesc') }}</p>
-      </div>
-
-      <div v-if="account?.platform === 'openai' && account?.type === 'oauth' && !isSparkShadow"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.excelBPS') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSDesc') }}</p>
-          </div>
-          <button type="button" role="switch" :aria-checked="excelBPSEnabled"
-            :aria-label="t('admin.accounts.openai.excelBPS')" data-testid="excel-bps-toggle"
-            @click="excelBPSEnabled = !excelBPSEnabled"
-            :class="['relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2', excelBPSEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600']">
-            <span :class="['pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition', excelBPSEnabled ? 'translate-x-5' : 'translate-x-0']" />
-          </button>
-        </div>
-        <div v-if="excelBPSEnabled" class="mt-3 space-y-3">
-          <label class="flex items-center gap-2 text-sm">
-            <input v-model="excelBPSAllModels" type="checkbox" data-testid="excel-bps-all-models" />
-            <span>{{ t('admin.accounts.openai.excelBPSAllModels') }}</span>
-          </label>
-          <div v-if="!excelBPSAllModels" data-testid="excel-bps-model-selection">
-            <label class="input-label">{{ t('admin.accounts.openai.excelBPSModels') }}</label>
-            <ModelWhitelistSelector v-model="excelBPSModels" platform="openai" />
-            <button type="button" class="btn btn-secondary" data-testid="excel-bps-astra-only"
-              @click="excelBPSModels = ['gpt-6-astra']">{{ t('admin.accounts.openai.excelBPSAstraOnly') }}</button>
-            <p class="input-hint">{{ t('admin.accounts.openai.excelBPSModelsHint') }}</p>
-          </div>
-        </div>
-        <p v-if="excelBPSEnabled" class="mt-2 text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.excelBPSNotice') }}</p>
-        <div v-if="excelBPSEnabled" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSAutoDisableOn403" type="checkbox"
-              data-testid="excel-bps-auto-disable-on-403"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoDisableOn403') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoDisableOn403Desc') }}</p>
-        </div>
-        <div v-if="excelBPSEnabled" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSAutoMoveOn403" type="checkbox"
-              data-testid="excel-bps-auto-move-on-403"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoMoveOn403') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoMoveOn403Desc') }}</p>
-          <div v-if="excelBPSAutoMoveOn403" class="mt-2">
-            <label class="input-label">{{ t('admin.accounts.openai.excelBPS403TargetGroup') }}</label>
-            <Select v-model="excelBPS403TargetGroupID" :options="excelBPS403GroupOptions"
-              :aria-label="t('admin.accounts.openai.excelBPS403TargetGroup')"
-              data-testid="excel-bps-403-target-group" />
-          </div>
-        </div>
-        <div v-if="excelBPSEnabled" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSCacheCreationAsInput" type="checkbox"
-              data-testid="excel-bps-cache-creation-as-input"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInput') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInputDesc') }}</p>
-        </div>
       </div>
 
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
@@ -3184,13 +3099,6 @@
         data-tour="account-form-groups"
       />
 
-      <AccountGroupModelLimits
-        v-model="groupAllowedModels"
-        :groups="groupsForModelLimits"
-        :platform="account?.platform"
-        :account-id="account?.id"
-      />
-
     </form>
 
     <template #footer>
@@ -3198,14 +3106,9 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
-        <button v-if="account.platform === 'openai_bps'" type="submit" form="edit-account-form" :disabled="submitting"
-          class="btn btn-secondary" data-testid="bps-save-and-test" @click="bpsTestAfterSave = true">
-          {{ t('admin.accounts.bps.saveAndTest') }}
-        </button>
         <button
           type="submit"
           form="edit-account-form"
-          @click="bpsTestAfterSave = false"
           :disabled="submitting"
           class="btn btn-primary"
           data-tour="account-form-submit"
@@ -3250,12 +3153,9 @@
 </template>
 
 <script setup lang="ts">
-import OpenAIBPSAccountFields from './OpenAIBPSAccountFields.vue'
-import { newBPSAccountDraft, bpsCredentials } from '@/utils/openaiBps'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { useAuthStore } from '@/stores/auth'
 
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
@@ -3285,12 +3185,6 @@ import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
-import AccountGroupModelLimits from '@/components/account/AccountGroupModelLimits.vue'
-import {
-  buildGroupAllowedModelsPayload,
-  groupAllowedModelsFromAccount,
-  type GroupAllowedModels
-} from '@/components/account/groupAllowedModels'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
@@ -3337,7 +3231,7 @@ import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiErro
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { getAccountExpiryTimestamp } from '@/components/account/accountExpiry'
 import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
-import { DEFAULT_EXCEL_BPS_MODELS, VERTEX_LOCATION_OPTIONS } from '@/constants/account'
+import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
@@ -3366,14 +3260,12 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
-  test: [account: Account]
   updated: [account: Account]
   'codex-tickets': []
 }>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
-const authStore = useAuthStore()
 const browserTimeZone = getBrowserTimeZone()
 
 const selectableGroups = computed(() => {
@@ -3385,16 +3277,6 @@ const selectableGroups = computed(() => {
     }
   }
   return Array.from(groups.values())
-})
-
-// 各分组内的可用模型限制，按当前勾选的分组顺序展示
-const groupAllowedModels = ref<GroupAllowedModels>({})
-const groupsForModelLimits = computed(() => {
-  const byId = new Map(selectableGroups.value.map(group => [group.id, group]))
-  return form.group_ids.flatMap(id => {
-    const group = byId.get(id)
-    return group ? [{ id: group.id, name: group.name }] : []
-  })
 })
 
 // Spark 影子账号(parent_account_id 非空):代理恒继承母账号,不可独立编辑(外审 B/P1),
@@ -3880,21 +3762,6 @@ const customBaseUrlEnabled = ref(false)
 const customBaseUrl = ref('')
 
 // OpenAI 自动透传开关（OAuth/API Key）
-const excelBPSEnabled = ref(false)
-const excelBPSAllModels = ref(false)
-const excelBPSModels = ref<string[]>([...DEFAULT_EXCEL_BPS_MODELS])
-const excelBPSCacheCreationAsInput = ref(false)
-const excelBPSAutoDisableOn403 = ref(false)
-const excelBPSAutoMoveOn403 = ref(false)
-const excelBPS403TargetGroupID = ref<number | string>('')
-const excelBPS403GroupOptions = computed(() => [
-  { value: '', label: t('admin.accounts.openai.excelBPS403SelectTarget') },
-  { value: 0, label: t('admin.accounts.openai.excelBPS403LeaveAllGroups') },
-  ...props.groups
-    .filter(group => group.platform === 'openai' || (!authStore.isSimpleMode && group.platform === 'composite'))
-    .map(group => ({ value: group.id, label: group.name }))
-])
-const copilotSDKEnabled = ref(false)
 const openaiPassthroughEnabled = ref(false)
 const openAIRequestTimezone = ref('Asia/Singapore')
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
@@ -3933,8 +3800,8 @@ const {
 } = useQuotaNotifyState()
 
 // Load global feature states once
-adminAPI.accounts.getManagementCapabilities().then(cfg => {
-  webSearchGlobalEnabled.value = cfg?.web_search_enabled === true
+adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
+  webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
 
 loadQuotaNotifyGlobal()
@@ -4139,7 +4006,7 @@ const normalizeOpenAIResponsesMode = (mode: unknown): OpenAIResponsesMode => {
   return 'auto'
 }
 const isOpenAIModelRestrictionDisabled = computed(() =>
-  props.account?.platform === 'openai' && (openaiPassthroughEnabled.value || copilotSDKEnabled.value)
+  props.account?.platform === 'openai' && openaiPassthroughEnabled.value
 )
 const openAIResponsesStatusKey = computed(() => {
   if (openAIResponsesMode.value === 'force_responses') {
@@ -4228,9 +4095,6 @@ const mixedChannelWarningMessageText = computed(() => {
   return mixedChannelWarningRawMessage.value
 })
 
-const bpsDraft = ref(newBPSAccountDraft())
-const bpsTestAfterSave = ref(false)
-
 const form = reactive({
   name: '',
   notes: '',
@@ -4239,7 +4103,6 @@ const form = reactive({
   load_factor: null as number | null,
   priority: 1,
   rate_multiplier: 1,
-  group_rate_multiplier: 1,
   status: 'active' as 'active' | 'inactive' | 'error',
   group_ids: [] as number[],
   expires_at: null as number | null
@@ -4306,7 +4169,7 @@ const buildModelRestrictionMapping = () =>
   buildModelMappingObject('combined', allowedModels.value, modelMappings.value)
 
 const applyOpenAIModelMappingCredentials = (credentials: Record<string, unknown>) => {
-  const shouldApplyModelMapping = !(openaiPassthroughEnabled.value || copilotSDKEnabled.value)
+  const shouldApplyModelMapping = !openaiPassthroughEnabled.value
 
   if (shouldApplyModelMapping) {
     const modelMapping = buildModelRestrictionMapping()
@@ -4341,8 +4204,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningDetails.value = null
   mixedChannelWarningRawMessage.value = ''
   mixedChannelWarningAction.value = null
-  bpsDraft.value = newBPSAccountDraft(newAccount.credentials)
-  bpsTestAfterSave.value = false
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
@@ -4350,12 +4211,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
-  form.group_rate_multiplier = newAccount.group_rate_multiplier ?? 1
   form.status = (newAccount.status === 'active' || newAccount.status === 'inactive' || newAccount.status === 'error')
     ? newAccount.status
     : 'active'
   form.group_ids = newAccount.group_ids || []
-  groupAllowedModels.value = groupAllowedModelsFromAccount(newAccount)
   form.expires_at = newAccount.expires_at ?? null
 
   // Load intercept warmup requests setting (applies to all account types)
@@ -4394,14 +4253,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
-  excelBPSEnabled.value = false
-  excelBPSAllModels.value = false
-  excelBPSModels.value = [...DEFAULT_EXCEL_BPS_MODELS]
-  excelBPSCacheCreationAsInput.value = false
-  excelBPSAutoDisableOn403.value = false
-  excelBPSAutoMoveOn403.value = false
-  excelBPS403TargetGroupID.value = ''
-  copilotSDKEnabled.value = false
   openaiPassthroughEnabled.value = false
   openAIRequestTimezone.value = 'Asia/Singapore'
   openaiFlattenNamespacesEnabled.value = false
@@ -4422,19 +4273,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
-    excelBPSEnabled.value = newAccount.type === 'oauth' && extra?.openai_excel_bps === true
-    excelBPSAllModels.value = excelBPSEnabled.value && !Object.prototype.hasOwnProperty.call(extra ?? {}, 'openai_excel_bps_models')
-    if (Object.prototype.hasOwnProperty.call(extra ?? {}, 'openai_excel_bps_models')) {
-      excelBPSModels.value = Array.isArray(extra?.openai_excel_bps_models)
-        ? extra.openai_excel_bps_models.filter((model): model is string => typeof model === 'string')
-        : []
-    }
-    excelBPSCacheCreationAsInput.value = excelBPSEnabled.value && extra?.openai_excel_bps_cache_creation_as_input === true
-    excelBPSAutoDisableOn403.value = newAccount.type === 'oauth' && extra?.openai_excel_bps_auto_disable_on_403 === true
-    excelBPSAutoMoveOn403.value = newAccount.type === 'oauth' && extra?.openai_excel_bps_auto_move_on_403 === true
-    const targetGroupID = extra?.openai_excel_bps_403_target_group_id
-    excelBPS403TargetGroupID.value = typeof targetGroupID === 'number' && Number.isSafeInteger(targetGroupID) && targetGroupID >= 0 ? targetGroupID : ''
-    copilotSDKEnabled.value = newAccount.type === 'apikey' && extra?.openai_copilot_sdk === true
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
     openAIRequestTimezone.value = typeof extra?.openai_request_timezone === 'string' ? extra.openai_request_timezone : 'Asia/Singapore'
     openaiFlattenNamespacesEnabled.value =
@@ -5398,10 +5236,8 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
     let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
-    const openBPSTest = updatedAccount.platform === 'openai_bps' && bpsTestAfterSave.value
     emit('updated', updatedAccount)
     handleClose()
-    if (openBPSTest) emit('test', updatedAccount)
   } catch (error: any) {
     if (error.status === 409 && error.error === 'mixed_channel_warning' && needsMixedChannelCheck()) {
       openMixedChannelDialog({
@@ -5422,14 +5258,6 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 const handleSubmit = async () => {
   if (!props.account) return
   const accountID = props.account.id
-  if (props.account.platform === 'openai' && props.account.type === 'oauth' && !isSparkShadow.value && excelBPSEnabled.value && excelBPSAutoMoveOn403.value) {
-    const target = Number(excelBPS403TargetGroupID.value)
-    if (excelBPS403TargetGroupID.value === '' || !Number.isSafeInteger(target) || target < 0 ||
-      !excelBPS403GroupOptions.value.some(option => option.value === target)) {
-      appStore.showError(t('admin.accounts.openai.excelBPS403SelectTarget'))
-      return
-    }
-  }
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))
@@ -5445,9 +5273,6 @@ const handleSubmit = async () => {
 
   const updatePayload: Record<string, unknown> = { ...form }
   try {
-    if (authStore.isObserver) {
-      delete updatePayload.proxy_id
-    }
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     if (updatePayload.proxy_id === null) {
       updatePayload.proxy_id = 0
@@ -5461,8 +5286,6 @@ const handleSubmit = async () => {
       updatePayload.load_factor = 0
     }
     updatePayload.auto_pause_on_expired = autoPauseOnExpired.value
-    // 整体覆盖：只带仍勾选的分组，没有列出的分组由后端恢复为不限制
-    updatePayload.group_allowed_models = buildGroupAllowedModelsPayload(form.group_ids, groupAllowedModels.value)
     if (props.account.type === 'apikey') {
       updatePayload.upstream_billing_probe_enabled = upstreamBillingAutoProbeEnabled.value
       updatePayload.upstream_billing_rate_sync_enabled = upstreamBillingRateSyncEnabled.value
@@ -5471,15 +5294,11 @@ const handleSubmit = async () => {
       }
     }
 
-    if (props.account.platform === 'openai_bps') {
-      updatePayload.credentials = bpsCredentials(bpsDraft.value)
-    }
-
     // For apikey type, handle credentials update
     if (props.account.type === 'apikey') {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
       const newBaseUrl = editBaseUrl.value.trim() || defaultBaseUrl.value
-      const shouldApplyModelMapping = !(props.account.platform === 'openai' && (openaiPassthroughEnabled.value || copilotSDKEnabled.value))
+      const shouldApplyModelMapping = !(props.account.platform === 'openai' && openaiPassthroughEnabled.value)
 
       // Always update credentials for apikey type to handle model mapping changes
       const newCredentials: Record<string, unknown> = {
@@ -5975,34 +5794,6 @@ const handleSubmit = async () => {
       const newExtra: Record<string, unknown> = { ...currentExtra }
       newExtra.openai_request_timezone = openAIRequestTimezone.value
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
-      if (props.account.type === 'oauth' && !isSparkShadow.value && excelBPSEnabled.value) {
-        newExtra.openai_excel_bps = true
-        if (excelBPSAllModels.value) {
-          delete newExtra.openai_excel_bps_models
-        } else {
-          newExtra.openai_excel_bps_models = [...new Set(excelBPSModels.value.map(model => model.trim()).filter(Boolean))]
-        }
-      } else {
-        delete newExtra.openai_excel_bps
-        delete newExtra.openai_excel_bps_models
-      }
-      if (newExtra.openai_excel_bps === true && excelBPSCacheCreationAsInput.value) {
-        newExtra.openai_excel_bps_cache_creation_as_input = true
-      } else {
-        delete newExtra.openai_excel_bps_cache_creation_as_input
-      }
-      if (newExtra.openai_excel_bps === true && excelBPSAutoDisableOn403.value) {
-        newExtra.openai_excel_bps_auto_disable_on_403 = true
-      } else {
-        delete newExtra.openai_excel_bps_auto_disable_on_403
-      }
-      if (newExtra.openai_excel_bps === true && excelBPSAutoMoveOn403.value) {
-        newExtra.openai_excel_bps_auto_move_on_403 = true
-        newExtra.openai_excel_bps_403_target_group_id = Number(excelBPS403TargetGroupID.value)
-      } else {
-        delete newExtra.openai_excel_bps_auto_move_on_403
-        delete newExtra.openai_excel_bps_403_target_group_id
-      }
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
         newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
         newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -6012,11 +5803,6 @@ const handleSubmit = async () => {
       }
       delete newExtra.responses_websockets_v2_enabled
       delete newExtra.openai_ws_enabled
-      if (props.account.type === 'apikey' && copilotSDKEnabled.value) {
-        newExtra.openai_copilot_sdk = true
-      } else {
-        delete newExtra.openai_copilot_sdk
-      }
       if (openaiPassthroughEnabled.value) {
         newExtra.openai_passthrough = true
       } else {

@@ -450,12 +450,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/request-captures',
-    name: 'AdminRequestCaptures',
-    component: () => import('@/views/admin/RequestCaptureView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, requiresRequestCapture: true, titleKey: 'admin.requestCapture.title' }
-  },
-  {
     path: '/admin/ops',
     name: 'AdminOps',
     component: () => import('@/views/admin/ops/OpsDashboard.vue'),
@@ -543,18 +537,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/pelican-showcase',
-    name: 'PelicanShowcase',
-    component: () => import('@/views/user/PelicanShowcaseView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Pelican Showcase',
-      titleKey: 'pelicanShowcase.title',
-      descriptionKey: 'pelicanShowcase.description'
-    }
-  },
-  {
     path: '/admin/subscriptions',
     name: 'AdminSubscriptions',
     component: () => import('@/views/admin/SubscriptionsView.vue'),
@@ -566,22 +548,13 @@ const routes: RouteRecordRaw[] = [
       descriptionKey: 'admin.subscriptions.description'
     }
   },
-  { path: '/admin/smart-ops', redirect: '/admin/account-quality', meta: { requiresAuth: true, requiresAdmin: true } },
-  { path: '/admin/token-guard', name: 'AdminTokenGuard', component: () => import('@/views/admin/ops/TokenGuardView.vue'), meta: { requiresAuth: true, requiresAdmin: true, title: 'Credential Guard', titleKey: 'tokenGuard.title', descriptionKey: 'tokenGuard.description' } },
-  { path: '/admin/account-ops', name: 'AdminAccountOps', component: () => import('@/views/admin/AccountOpsView.vue'), meta: { requiresAuth: true, requiresAdmin: true, title: 'Account operations', titleKey: 'accountOps.title', descriptionKey: 'accountOps.description' } },
-  {
-    path: '/admin/account-quality',
-    name: 'AdminAccountQuality',
-    component: () => import('@/views/admin/AccountQualityView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Account Quality Operations', titleKey: 'qualityOps.title', descriptionKey: 'qualityOps.description' }
-  },
   {
     path: '/admin/accounts',
     name: 'AdminAccounts',
     component: () => import('@/views/admin/AccountsView.vue'),
     meta: {
       requiresAuth: true,
-      requiresAccountManagement: true,
+      requiresAdmin: true,
       title: 'Account Management',
       titleKey: 'admin.accounts.title',
       descriptionKey: 'admin.accounts.description'
@@ -872,7 +845,7 @@ router.beforeEach(async (to, _from, next) => {
     try {
       const status = await getSetupStatus()
       if (!status.needs_setup) {
-        next(resolveCompletedSetupRedirectPath(authStore.isAuthenticated, authStore.isAdmin, authStore.isObserver))
+        next(resolveCompletedSetupRedirectPath(authStore.isAuthenticated, authStore.isAdmin))
         return
       }
     } catch {
@@ -887,15 +860,11 @@ router.beforeEach(async (to, _from, next) => {
       // In backend mode, non-admin users should NOT be redirected away from login
       // (they are blocked from all protected routes, so redirecting would cause a loop)
       if (appStore.backendModeEnabled && !authStore.isAdmin) {
-        if (authStore.isObserver) {
-          next('/admin/accounts')
-        } else {
-          next()
-        }
+        next()
         return
       }
       // Admin users go to admin dashboard, regular users go to user dashboard
-      next(authStore.isAdmin ? '/admin/dashboard' : authStore.isObserver ? '/admin/accounts' : '/dashboard')
+      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
       return
     }
     // Model Plaza:公开路由但受「启用开关 + 可选强制登录」双重控制(后端同口径 fail-closed)
@@ -951,11 +920,6 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
-  if (to.meta.requiresAccountManagement && !authStore.canManageAccounts) {
-    next('/dashboard')
-    return
-  }
-
   // Check admin requirement
   if (requiresAdmin && !authStore.isAdmin) {
     // User is authenticated but not admin, redirect to user dashboard
@@ -963,12 +927,7 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
-  if (requiresAdmin && authStore.isAdmin && to.meta.requiresRequestCapture) {
-    await adminSettingsStore.fetch(true)
-    if (!adminSettingsStore.requestCaptureEnabled) { next('/admin/settings'); return }
-  }
-
-  if ((requiresAdmin || to.meta.requiresAccountManagement) && authStore.isAdmin) {
+  if (requiresAdmin && authStore.isAdmin) {
     const adminComplianceStore = useAdminComplianceStore()
     if (!adminComplianceStore.initialized) {
       try {
@@ -1040,9 +999,9 @@ router.beforeEach(async (to, _from, next) => {
     }
   }
 
-  // Backend mode: admins get full access; observers may use only account management.
+  // Backend mode: admin gets full access, non-admin blocked
   if (appStore.backendModeEnabled) {
-    if (authStore.isAuthenticated && (authStore.isAdmin || (authStore.isObserver && to.meta.requiresAccountManagement))) {
+    if (authStore.isAuthenticated && authStore.isAdmin) {
       next()
       return
     }

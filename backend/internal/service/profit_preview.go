@@ -130,7 +130,7 @@ func PreviewProfitAdmission(inputs []ProfitPreviewGroupInput, evalAt time.Time) 
 			admittedDefault := verdict.Class == ProfitPreviewClassAdmitted
 			admittedMinD := admittedDefault && !verdict.RejectedUnderMinD
 			for _, model := range in.Models {
-				if !account.IsModelSupportedInGroup(&group.ID, model) {
+				if !account.IsModelSupported(model) {
 					continue
 				}
 				verdict.SupportedModels = append(verdict.SupportedModels, model)

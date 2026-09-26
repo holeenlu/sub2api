@@ -186,7 +186,7 @@ func sanitizeUpdateGroupRequestForSimpleMode(req *UpdateGroupRequest) {
 type CreateGroupRequest struct {
 	Name                      string                        `json:"name" binding:"required"`
 	Description               string                        `json:"description"`
-	Platform                  string                        `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity grok kimi zhipu deepseek minimax opencode_go openai_bps composite"`
+	Platform                  string                        `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity grok kimi zhipu deepseek minimax opencode_go composite"`
 	RateMultiplier            float64                       `json:"rate_multiplier"`
 	IsExclusive               bool                          `json:"is_exclusive"`
 	SubscriptionType          string                        `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
@@ -224,7 +224,6 @@ type CreateGroupRequest struct {
 	AudioTtsPricePerMillionChars    *float64                      `json:"audio_tts_price_per_million_chars"`
 	AudioSttPricePerHour            *float64                      `json:"audio_stt_price_per_hour"`
 	ClaudeCodeOnly                  bool                          `json:"claude_code_only"`
-	StreamOnly                      bool                          `json:"stream_only"`
 	FallbackGroupID                 *int64                        `json:"fallback_group_id"`
 	FallbackGroupIDOnInvalidRequest *int64                        `json:"fallback_group_id_on_invalid_request"`
 	FallbackGroupIDOnNoAccount      *int64                        `json:"fallback_group_id_on_no_account"`
@@ -262,7 +261,7 @@ type CreateGroupRequest struct {
 type UpdateGroupRequest struct {
 	Name                      string                         `json:"name"`
 	Description               *string                        `json:"description"`
-	Platform                  string                         `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity grok kimi zhipu deepseek minimax opencode_go openai_bps composite"`
+	Platform                  string                         `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity grok kimi zhipu deepseek minimax opencode_go composite"`
 	RateMultiplier            *float64                       `json:"rate_multiplier"`
 	IsExclusive               *bool                          `json:"is_exclusive"`
 	Status                    string                         `json:"status" binding:"omitempty,oneof=active inactive"`
@@ -301,7 +300,6 @@ type UpdateGroupRequest struct {
 	AudioTtsPricePerMillionChars    *float64                      `json:"audio_tts_price_per_million_chars"`
 	AudioSttPricePerHour            *float64                      `json:"audio_stt_price_per_hour"`
 	ClaudeCodeOnly                  *bool                         `json:"claude_code_only"`
-	StreamOnly                      *bool                         `json:"stream_only"`
 	FallbackGroupID                 *int64                        `json:"fallback_group_id"`
 	FallbackGroupIDOnInvalidRequest *int64                        `json:"fallback_group_id_on_invalid_request"`
 	FallbackGroupIDOnNoAccount      *int64                        `json:"fallback_group_id_on_no_account"`
@@ -338,7 +336,7 @@ type UpdateGroupRequest struct {
 type CompositeRouteRequest struct {
 	PublicModel    string `json:"public_model" binding:"required"`
 	MatchType      string `json:"match_type" binding:"omitempty,oneof=exact prefix"`
-	TargetPlatform string `json:"target_platform" binding:"required,oneof=anthropic openai gemini antigravity grok kimi zhipu deepseek minimax opencode_go openai_bps"`
+	TargetPlatform string `json:"target_platform" binding:"required,oneof=anthropic openai gemini antigravity grok kimi zhipu deepseek minimax opencode_go"`
 	UpstreamModel  string `json:"upstream_model"`
 	Endpoint       string `json:"endpoint" binding:"omitempty,oneof=any messages count_tokens responses chat_completions embeddings images gemini"`
 	Priority       int    `json:"priority"`
@@ -569,15 +567,6 @@ func (h *GroupHandler) GetAll(c *gin.Context) {
 		return
 	}
 
-	if _, scoped := service.ObserverGroupIDs(c.Request.Context()); scoped {
-		visible := make([]service.Group, 0, len(groups))
-		for _, group := range groups {
-			if service.ObserverCanManageGroup(c.Request.Context(), group.ID) {
-				visible = append(visible, group)
-			}
-		}
-		groups = visible
-	}
 	if h.isSimpleMode() {
 		simpleGroups := make([]simpleModeGroupResponse, 0, len(groups))
 		for i := range groups {
@@ -782,7 +771,6 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		AudioTTSPricePerMillionChars:    req.AudioTtsPricePerMillionChars,
 		AudioSTTPricePerHour:            req.AudioSttPricePerHour,
 		ClaudeCodeOnly:                  req.ClaudeCodeOnly,
-		StreamOnly:                      req.StreamOnly,
 		FallbackGroupID:                 req.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: req.FallbackGroupIDOnInvalidRequest,
 		FallbackGroupIDOnNoAccount:      req.FallbackGroupIDOnNoAccount,
@@ -930,7 +918,6 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		AudioTTSPricePerMillionChars:    req.AudioTtsPricePerMillionChars,
 		AudioSTTPricePerHour:            req.AudioSttPricePerHour,
 		ClaudeCodeOnly:                  req.ClaudeCodeOnly,
-		StreamOnly:                      req.StreamOnly,
 		FallbackGroupID:                 req.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: req.FallbackGroupIDOnInvalidRequest,
 		FallbackGroupIDOnNoAccount:      req.FallbackGroupIDOnNoAccount,
@@ -1195,57 +1182,6 @@ func (h *GroupHandler) ClearGroupRPMOverrides(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "RPM overrides cleared successfully"})
-}
-
-// BatchSetGroupUserDeniedModelsRequest represents batch set user denied models request
-type BatchSetGroupUserDeniedModelsRequest struct {
-	Entries []service.GroupUserDeniedModelsInput `json:"entries" binding:"required"`
-}
-
-// BatchSetGroupUserDeniedModels replaces the models each user may not use in a group
-// PUT /api/v1/admin/groups/:id/user-denied-models
-func (h *GroupHandler) BatchSetGroupUserDeniedModels(c *gin.Context) {
-	if h.rejectUnsupportedSimpleModeOperation(c, "advanced") {
-		return
-	}
-	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "Invalid group ID")
-		return
-	}
-
-	var req BatchSetGroupUserDeniedModelsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
-		return
-	}
-
-	if err := h.adminService.BatchSetGroupUserDeniedModels(c.Request.Context(), groupID, req.Entries); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	response.Success(c, gin.H{"message": "User denied models updated successfully"})
-}
-
-// ClearGroupUserDeniedModels clears the denied models of every user in a group
-// DELETE /api/v1/admin/groups/:id/user-denied-models
-func (h *GroupHandler) ClearGroupUserDeniedModels(c *gin.Context) {
-	if h.rejectUnsupportedSimpleModeOperation(c, "advanced") {
-		return
-	}
-	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "Invalid group ID")
-		return
-	}
-
-	if err := h.adminService.ClearGroupUserDeniedModels(c.Request.Context(), groupID); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	response.Success(c, gin.H{"message": "User denied models cleared successfully"})
 }
 
 // UpdateSortOrderRequest represents the request to update group sort orders

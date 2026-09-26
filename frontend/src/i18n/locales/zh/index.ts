@@ -1,7 +1,4 @@
 import ui from './ui'
-import qualityOps from './qualityOps'
-import accountOps from './accountOps'
-import tokenGuard from './tokenGuard'
 import landing from './landing'
 import common from './common'
 import dashboard from './dashboard'
@@ -11,14 +8,8 @@ import admin from './admin'
 import misc from './misc'
 import docs from './docs'
 
-import requestTiming from './requestTiming'
-
 export default {
   ...ui,
-  qualityOps,
-  accountOps,
-  tokenGuard,
-  requestTiming,
   ...landing,
   ...common,
   ...dashboard,

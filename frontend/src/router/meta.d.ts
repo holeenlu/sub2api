@@ -18,8 +18,6 @@ declare module 'vue-router' {
      * @default false
      */
     requiresAdmin?: boolean
-    requiresAccountManagement?: boolean
-    requiresRequestCapture?: boolean
 
     /**
      * Page title for this route

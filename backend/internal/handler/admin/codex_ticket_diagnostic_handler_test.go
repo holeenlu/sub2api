@@ -85,7 +85,7 @@ func newCodexChallengeDiagnosticHandler(t *testing.T, models []string, router ht
 func newCodexDiagnosticHandlerForAccount(t *testing.T, models []string, router http.Handler, cfg *config.Config, account *service.Account, settingService *service.SettingService) (*AccountHandler, *gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	gateway := service.NewOpenAIGatewayService(
-		&codexDiagnosticChallengeAccountRepo{account: account}, nil, nil, nil, nil, nil, nil, nil, cfg,
+		&codexDiagnosticChallengeAccountRepo{account: account}, nil, nil, nil, nil, nil, nil, cfg,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, settingService, nil,
 	)
 	handler := &AccountHandler{

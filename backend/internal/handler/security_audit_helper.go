@@ -2,7 +2,6 @@ package handler
 
 import (
 	"crypto/sha256"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
 	"net/http"
 	"strings"
 
@@ -70,7 +69,6 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 	if c == nil || c.Request == nil {
 		return nil
 	}
-	defer requesttiming.Observe(c.Request.Context(), "security_audit")()
 	cacheCompletion := cachesSecurityAuditCompletion(stage)
 	if cacheCompletion {
 		if completed, exists := c.Get(securityAuditCompletedContextKey); exists && completed == true {

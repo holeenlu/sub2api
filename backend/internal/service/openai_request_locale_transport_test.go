@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -58,7 +57,7 @@ func (c *localeStagedWSConn) WriteJSON(ctx context.Context, value any) error {
 	return c.WriteFrame(ctx, coderws.MessageText, payload)
 }
 
-func TestOpenAIRequestLocaleWebSocketFirstAndLaterTurns(t *testing.T) {
+func TestOpenAIClientTimezonePreservedAcrossWebSocketTurns(t *testing.T) {
 	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(context.Background())
@@ -102,7 +101,7 @@ func TestOpenAIRequestLocaleWebSocketFirstAndLaterTurns(t *testing.T) {
 					require.NoError(t, err)
 				}
 				sent := requirePassthroughUpstreamWrite(t, upstream, 5*time.Second)
-				require.Equal(t, strings.Replace(text, "Asia/Shanghai", "America/New_York", 1), gjson.GetBytes(sent, "input.0.content.0.text").String())
+				require.Equal(t, text, gjson.GetBytes(sent, "input.0.content.0.text").String())
 				upstream.Send(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_locale_%d","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`, turn))
 				response, err := readPassthroughLifecycleFrame(t, client, 5*time.Second)
 				require.NoError(t, err)
@@ -117,4 +116,21 @@ func TestOpenAIRequestLocaleWebSocketFirstAndLaterTurns(t *testing.T) {
 			}
 		})
 	}
+}
+
+func localeTestBody(texts []string, kinds []string) []byte {
+	content := make([]any, 0, len(texts))
+	for _, text := range texts {
+		content = append(content, map[string]any{"type": "input_text", "text": text})
+	}
+	body, _ := json.Marshal(map[string]any{
+		"input": []any{map[string]any{
+			"role": "user", "content": content,
+			"internal_chat_message_metadata_passthrough": map[string]any{"content_item_kinds": kinds},
+		}},
+		"tools": []any{map[string]any{"type": "web_search", "user_location": map[string]any{
+			"country": "US", "city": "New York", "timezone": "America/New_York",
+		}}},
+	})
+	return body
 }

@@ -100,48 +100,6 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
-	captureConfig := settings.requestCaptureConfig()
-	if err := captureConfig.Validate(); err != nil {
-		return nil, infraerrors.BadRequest("INVALID_REQUEST_CAPTURE_SETTINGS", err.Error())
-	}
-	imageRelay, err := normalizeExcelBPSImageRelaySettings(settings.ExcelBPSImageRelayEnabled, settings.ExcelBPSImageBaseURL, settings.ExcelBPSImageMode)
-	if err != nil {
-		return nil, err
-	}
-	settings.ExcelBPSImageBaseURL = imageRelay.BaseURL
-	if settings.ExcelBPSImageBodyLimitMiB == 0 {
-		settings.ExcelBPSImageBodyLimitMiB = DefaultExcelBPSImageBodyLimitMiB
-	}
-	if settings.ExcelBPSImageBudgetMiB == 0 {
-		settings.ExcelBPSImageBudgetMiB = DefaultExcelBPSImageBudgetMiB
-	}
-	if settings.ExcelBPSImageMaxRequests == 0 {
-		settings.ExcelBPSImageMaxRequests = DefaultExcelBPSImageMaxRequests
-	}
-	if settings.ExcelBPSImageMaxImageMiB == 0 {
-		settings.ExcelBPSImageMaxImageMiB = imageRelay.Limits.MaxImageMiB
-	}
-	if settings.ExcelBPSImageMaxImages == 0 {
-		settings.ExcelBPSImageMaxImages = imageRelay.Limits.MaxImages
-	}
-	if settings.ExcelBPSImageMaxTotalMiB == 0 {
-		settings.ExcelBPSImageMaxTotalMiB = imageRelay.Limits.MaxTotalMiB
-	}
-	if settings.ExcelBPSImageStorageMiB == 0 {
-		settings.ExcelBPSImageStorageMiB = imageRelay.Limits.StorageMiB
-	}
-	if settings.ExcelBPSImageStorageEntries == 0 {
-		settings.ExcelBPSImageStorageEntries = imageRelay.Limits.StorageEntries
-	}
-	if settings.ExcelBPSImageTTLMinutes == 0 {
-		settings.ExcelBPSImageTTLMinutes = imageRelay.Limits.TTLMinutes
-	}
-	if err := settings.imageRelayLimits().Validate(); err != nil {
-		return nil, infraerrors.BadRequest("INVALID_EXCEL_BPS_IMAGE_LIMITS", err.Error())
-	}
-	if err := validateExcelBPSImageCapacity(settings.ExcelBPSImageBodyLimitMiB, settings.ExcelBPSImageBudgetMiB, settings.ExcelBPSImageMaxRequests); err != nil {
-		return nil, err
-	}
 	if err := s.validateDefaultSubscriptionGroups(ctx, settings.DefaultSubscriptions); err != nil {
 		return nil, err
 	}
@@ -475,18 +433,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// Available channels feature switch
 	updates[SettingKeyAvailableChannelsEnabled] = strconv.FormatBool(settings.AvailableChannelsEnabled)
 
-	// Pelican showcase switch + gallery limits
-	updates[SettingKeyPelicanShowcaseEnabled] = strconv.FormatBool(settings.PelicanShowcaseEnabled)
-	showcase, showcaseErr := NormalizePelicanShowcaseConfig(settings.PelicanShowcase)
-	if showcaseErr != nil {
-		return nil, infraerrors.BadRequest("INVALID_PELICAN_SHOWCASE", showcaseErr.Error())
-	}
-	if err := s.validateAddedPelicanShowcaseGroups(ctx, showcase.GroupIDs); err != nil {
-		return nil, err
-	}
-	showcaseJSON, _ := json.Marshal(showcase)
-	updates[SettingKeyPelicanShowcaseConfig] = string(showcaseJSON)
-
 	// Subscription feature switch
 	updates[SettingKeySubscriptionEnabled] = strconv.FormatBool(settings.SubscriptionEnabled)
 
@@ -507,7 +453,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if settings.CyberSessionBlockTTLSeconds > 0 {
 		updates[SettingKeyCyberSessionBlockTTLSeconds] = strconv.Itoa(settings.CyberSessionBlockTTLSeconds)
 	}
-	updates[SettingKeyCyberSessionIdentityStrictEnabled] = strconv.FormatBool(settings.CyberSessionIdentityStrictEnabled)
 
 	// Claude Code version check
 	updates[SettingKeyMinClaudeCodeVersion] = settings.MinClaudeCodeVersion
@@ -632,22 +577,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	}
 
 	updates[SettingKeyAllowUserViewErrorRequests] = strconv.FormatBool(settings.AllowUserViewErrorRequests)
-	updates[SettingKeyUsageShowLongContextBadge] = strconv.FormatBool(settings.UsageShowLongContextBadge)
-	updates[SettingKeyRequestCaptureEnabled] = strconv.FormatBool(captureConfig.Enabled)
-	updates[SettingKeyRequestCaptureQuotaMiB] = strconv.FormatInt(captureConfig.QuotaMiB, 10)
-	updates[SettingKeyRequestCaptureRetentionDays] = strconv.Itoa(captureConfig.RetentionDays)
-	updates[SettingKeyExcelBPSImageMode] = imageRelay.Mode
-	updates[SettingKeyExcelBPSImageRelayEnabled] = strconv.FormatBool(imageRelay.Enabled)
-	updates[SettingKeyExcelBPSImageBaseURL] = imageRelay.BaseURL
-	updates[SettingKeyExcelBPSImageBodyLimitMiB] = strconv.Itoa(settings.ExcelBPSImageBodyLimitMiB)
-	updates[SettingKeyExcelBPSImageBudgetMiB] = strconv.Itoa(settings.ExcelBPSImageBudgetMiB)
-	updates[SettingKeyExcelBPSImageMaxRequests] = strconv.Itoa(settings.ExcelBPSImageMaxRequests)
-	updates[SettingKeyExcelBPSImageMaxImageMiB] = strconv.Itoa(settings.ExcelBPSImageMaxImageMiB)
-	updates[SettingKeyExcelBPSImageMaxImages] = strconv.Itoa(settings.ExcelBPSImageMaxImages)
-	updates[SettingKeyExcelBPSImageMaxTotalMiB] = strconv.Itoa(settings.ExcelBPSImageMaxTotalMiB)
-	updates[SettingKeyExcelBPSImageStorageMiB] = strconv.Itoa(settings.ExcelBPSImageStorageMiB)
-	updates[SettingKeyExcelBPSImageStorageEntries] = strconv.Itoa(settings.ExcelBPSImageStorageEntries)
-	updates[SettingKeyExcelBPSImageTTLMinutes] = strconv.Itoa(settings.ExcelBPSImageTTLMinutes)
 
 	return updates, nil
 }
@@ -902,13 +831,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	// codex_cli_only 加固策略缓存：设置更新后强制下次重载（涉及 4 个键 + JSON 解析，直接置过期）。
 	s.codexRestrictionPolicySF.Forget("codex_restriction_policy")
 	s.codexRestrictionPolicyCache.Store(&cachedCodexRestrictionPolicy{expiresAt: 0})
-	// Cyber 会话屏蔽与严格身份门控必须在后台保存后立即生效，不能继续
-	// 使用最长 60 秒的旧开关快照。
-	s.cyberSessionBlockRuntimeSF.Forget("cyber_session_block_runtime")
-	s.cyberSessionBlockRuntimeCache.Store(&cachedCyberSessionBlockRuntime{expiresAt: 0})
-	if s.requestCapture != nil {
-		s.requestCapture.ApplyConfig(settings.requestCaptureConfig())
-	}
 	if s.onUpdate != nil {
 		s.onUpdate() // Invalidate cache after settings update
 	}

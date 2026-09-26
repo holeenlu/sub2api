@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -21,7 +20,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/platform/liveattestation"
-	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
@@ -300,19 +298,13 @@ type OpenAIForwardResult struct {
 	wsReplayInput                []json.RawMessage
 	wsReplayInputExists          bool
 	wsAccountFailoverReplayInput []json.RawMessage
-	// Local stream-read timeout is not an observed upstream terminal event.
-	// Keep observed partial usage without reporting a successful generation.
-	streamReadIncomplete bool
 }
 
 // SucceededForScheduling reports whether this result is an upstream success
 // that may clear model-scoped transient state. The zero value remains a success
 // for existing non-WS callers.
 func (r *OpenAIForwardResult) SucceededForScheduling() bool {
-	if r != nil && r.streamReadIncomplete {
-		return false
-	}
-	if r == nil || (!r.OpenAIWSMode && r.UpstreamEndpoint != "/basispoints/api/responses") || r.UpstreamTerminalEvent == "" {
+	if r == nil || !r.OpenAIWSMode || r.UpstreamTerminalEvent == "" {
 		return true
 	}
 	switch r.UpstreamTerminalEvent {
@@ -449,11 +441,7 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	excelBPSImagesMu      sync.Mutex
-	excelBPSImages        *basispoints.ImageRelay
-	excelBPSAttachments   basispoints.AttachmentCache
 	accountRepo           AccountRepository
-	proxyRepo             ProxyRepository
 	usageLogRepo          UsageLogRepository
 	usageBillingRepo      UsageBillingRepository
 	userRepo              UserRepository
@@ -522,6 +510,7 @@ type OpenAIGatewayService struct {
 	// openaiCodexTickets: accountID\x00model → ModelTrace-verified ticket generation.
 	openaiCodexTickets           sync.Map
 	openaiCodexTicketInFlight    sync.Map
+	openaiCodexTicketActive      atomic.Int32
 	openaiCodexTicketProxyTurns  sync.Map
 	openaiCodexTicketNextAttempt sync.Map
 	openaiCodexTicketHistory     CodexTicketAttemptRepository
@@ -536,7 +525,6 @@ type OpenAIGatewayService struct {
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
 func NewOpenAIGatewayService(
 	accountRepo AccountRepository,
-	proxyRepo ProxyRepository,
 	usageLogRepo UsageLogRepository,
 	usageBillingRepo UsageBillingRepository,
 	userRepo UserRepository,
@@ -566,7 +554,6 @@ func NewOpenAIGatewayService(
 	}
 	svc := &OpenAIGatewayService{
 		accountRepo:         accountRepo,
-		proxyRepo:           proxyRepo,
 		usageLogRepo:        usageLogRepo,
 		usageBillingRepo:    usageBillingRepo,
 		userRepo:            userRepo,
@@ -1226,7 +1213,6 @@ func hashSensitiveValueForLog(raw string) string {
 
 // GetAccessToken gets the access token for an OpenAI account
 func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Account) (string, string, error) {
-	defer requesttiming.Observe(ctx, "upstream_credentials")()
 	if account.IsShadow() {
 		credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 		if err != nil {

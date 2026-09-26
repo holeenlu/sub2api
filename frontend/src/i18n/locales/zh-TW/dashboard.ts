@@ -383,8 +383,6 @@ export default {
     latency: '延遲',
     latencyFirstToken: '首字',
     latencyDuration: '總耗時',
-    latencyTps: '平均 TPS',
-    latencyTpsHint: '平均 TPS = 輸出 Token ÷ 總耗時(秒). 包含等待時間及上游計入輸出用量的推理 Token, 不代表模型實際生成速度.',
     time: '時間',
     ws: 'WS',
     stream: '串流',
@@ -591,50 +589,6 @@ export default {
     empty: {
       title: '暫無可顯示的通道',
       description: '管理員尚未設定可監控的通道。'
-    }
-  },
-
-  // Pelican showcase (user-facing gallery)
-  pelicanShowcase: {
-    title: '鵜鶘測智',
-    description: '各分組的模型定時完成同一道繪圖題，直接看生成的作品，直觀比較模型水平',
-    allGroups: '全部分組',
-    keepRule: '每組保留最近 {count} 張',
-    retentionRule: '超過 {days} 天自動清理',
-    itemCount: '{count} 張',
-    latestAt: '最近更新 {time}',
-    groupEmpty: '該分組還沒有作品，定時測試成功生成後會出現在這裡',
-    loadMore: '載入更多',
-    loadError: '載入鵜鶘測智失敗',
-    itemLoading: '作品載入中…',
-    itemLoadError: '作品載入失敗',
-    invalidHtml: '這張作品無法顯示',
-    duration: '耗時 {seconds} 秒',
-    reasoning: '思考強度 {effort}',
-    efforts: {
-      minimal: '最低',
-      low: '低',
-      medium: '中',
-      high: '高',
-      xhigh: '極高'
-    },
-    preview: '檢視大圖',
-    previewTitle: '{group} · {model}',
-    fitArtwork: '適應視窗',
-    actualSize: '100%',
-    previewSizing: '預覽縮放',
-    sandboxNote: '作品在隔離沙箱中執行，不能聯網，也讀取不到你的帳號資訊。',
-    remove: '從展示中移除',
-    removeConfirm: '確定把這張作品從鵜鶘測智中移除嗎？移除後所有使用者都看不到它，此操作不能撤銷。',
-    removed: '已從展示中移除',
-    removeFailed: '移除失敗',
-    disabled: {
-      title: '鵜鶘測智暫未開放',
-      description: '管理員開啟後，這裡會展示各分組定時生成的作品。'
-    },
-    empty: {
-      title: '暫無作品',
-      description: '管理員還沒有選擇要展示的分組。'
     }
   },
 

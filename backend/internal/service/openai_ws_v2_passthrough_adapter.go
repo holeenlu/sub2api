@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"net/http"
 	"net/url"
 	"strings"
@@ -652,7 +651,7 @@ func (c *openAIWSClientFrameConn) WriteFrame(ctx context.Context, msgType coderw
 			payload = c.restoreToolNames(payload)
 		}
 	}
-	return WriteCapturedWSClient(ctx, c.conn, msgType, payload)
+	return c.conn.Write(ctx, msgType, payload)
 }
 
 func (c *openAIWSClientFrameConn) Close() error {
@@ -689,7 +688,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
-	firstClientMessage = normalizeOpenAIRequestLocale(ctx, account, firstClientMessage, "ws")
 	if isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
 		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(firstClientMessage, account)
 		if liteErr != nil {
@@ -743,7 +741,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			firstClientMessage = s.ReplaceModelInBody(firstClientMessage, mappedModel)
 		}
 	}
-	requestcapture.FromContext(ctx).BindAccount(account.ID)
 	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
 	if capturedSessionModel != "" && capturedSessionModel != strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String()) {
 		firstClientMessage = s.ReplaceModelInBody(firstClientMessage, capturedSessionModel)
@@ -788,7 +785,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked)
 		if eventBytes != nil {
 			writeCtx, cancelWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
-			_ = WriteCapturedWSClient(writeCtx, clientConn, coderws.MessageText, eventBytes)
+			_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
 			cancelWrite()
 		}
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
@@ -894,7 +891,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		if errors.As(err, &handshakeErr) && handshakeErr != nil {
 			responseBody = handshakeErr.Body
 		}
-		requestcapture.FromContext(ctx).SelectionFailed(account.ID, statusCode, handshakeHeaders, responseBody, err)
 		dialErr := &openAIWSDialError{StatusCode: statusCode, ResponseHeaders: cloneHeader(handshakeHeaders), ResponseBody: responseBody, Err: err}
 		if s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidWSDialError(dialErr) && !agentTaskRecoveryTried {
 			agentTaskRecoveryTried = true
@@ -929,9 +925,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	upstreamFrameConn, ok := upstreamConn.(openaiwsv2.FrameConn)
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
-	}
-	if capture := requestcapture.FromContext(ctx); capture != nil {
-		upstreamFrameConn = &captureUpstreamFrameConn{FrameConn: upstreamFrameConn, capture: capture, account: account.ID}
 	}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,
@@ -1010,7 +1003,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			responsesLite := isResponseCreate && isOpenAIResponsesLiteWebSocketPayload(payload)
 			if isResponseCreate {
-				payload = normalizeOpenAIRequestLocale(ctx, account, payload, "ws")
 				if normalized, compatibilityChanged, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBody(payload, account, responsesLite); normalizeErr != nil {
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", normalizeErr)
 				} else if compatibilityChanged {
@@ -1143,7 +1135,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return
 			}
 			writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
-			_ = WriteCapturedWSClient(writeCtx, clientConn, coderws.MessageText, eventBytes)
+			_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
 			cancel()
 		},
 	}
