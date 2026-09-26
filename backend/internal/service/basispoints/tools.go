@@ -344,6 +344,15 @@ func (b *Bridge) rebuildNativeHistoryCall(item object) (object, error) {
 			}
 		}
 	}
+	if info, ok := b.tools[name]; ok && text(item["type"]) == "function_call" && supportsFunctionCmdTransport(name, info.Kind, info.Parameters) {
+		args, _ := envelope["arguments"].(object)
+		if _, hasCmd := args["cmd"].(string); hasCmd {
+			outer, err = encodeFunctionCmdTransport(name, args)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	arguments, err := json.Marshal(outer)
 	if err != nil {
 		return nil, fmt.Errorf("basispoints history transport cannot be serialized")
@@ -459,6 +468,9 @@ func (b *Bridge) translateCall(native object) (object, error) {
 	rawCustom := marked
 	if !marked && err == nil {
 		envelope, marked, err = b.functionCodeTransportEnvelope(arguments)
+	}
+	if !marked && err == nil {
+		envelope, marked, err = b.functionCmdTransportEnvelope(arguments)
 	}
 	if !marked && err == nil {
 		envelope, err = decodeTransportEnvelope(arguments["code"])
