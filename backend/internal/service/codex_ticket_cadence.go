@@ -34,6 +34,11 @@ func (s *SettingService) GetCodexTicketCadence(ctx context.Context, fallback Cod
 	if cached, ok := s.codexTicketCadenceCache.Load().(*cachedCodexTicketCadence); ok && time.Now().Before(cached.expiresAt) {
 		return cached.value, nil
 	}
+	// Harvest completion and retry scheduling also call this with a background
+	// context. Never hold their worker or advisory-lock connection indefinitely
+	// while a setting read waits for the shared database pool.
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	raw, err := s.settingRepo.GetValue(ctx, codexTicketCadenceSettingKey)
 	if errors.Is(err, ErrSettingNotFound) {
 		return fallback, nil

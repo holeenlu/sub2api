@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	"hash/fnv"
 	"maps"
@@ -18,6 +19,7 @@ import (
 var (
 	ErrCodexTicketUnavailable = errors.New("codex ticket harvesting unavailable")
 	ErrCodexTicketBusy        = errors.New("codex ticket attempt already running")
+	ErrCodexTicketStale       = errors.New("account or ticket changed during codex ticket attempt")
 	ErrCodexTicketNoProxy     = errors.New("no available ticket proxy")
 	ErrCodexTicketModel       = errors.New("unsupported ticket model")
 	ErrCodexTicketRateLimited = errors.New("account or model is rate limited")
@@ -142,6 +144,24 @@ func (s *OpenAIGatewayService) runCodexTicketAttempt(ctx context.Context, accoun
 }
 
 func (s *OpenAIGatewayService) runCodexTicketAttemptWithChallengeGenerator(ctx context.Context, account *Account, model, trigger string, generateChallenge func() (ModelTraceChallenge, error)) (result CodexTicketHarvestResult, err error) {
+	if s == nil || account == nil || s.accountRepo == nil {
+		return result, ErrCodexTicketUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	cfg := s.openAICodexTicketConfig()
+	// Include database/lock acquisition and credential lookup in the same deadline
+	// as the upstream probe. A busy connection pool must not stall the harvester.
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.HarvestAttemptTimeoutSeconds)*time.Second)
+	defer cancel()
+	if s.codexTicketConcurrency() == 0 {
+		return result, fmt.Errorf("%w: database.max_open_conns must be at least 2", ErrCodexTicketUnavailable)
+	}
+	if !s.acquireCodexTicketAttempt() {
+		return result, ErrCodexTicketBusy
+	}
+	defer s.openaiCodexTicketActive.Add(-1)
 	key := openAICodexTicketKey(account.ID, model)
 	if _, loaded := s.openaiCodexTicketInFlight.LoadOrStore(key, true); loaded {
 		return result, ErrCodexTicketBusy
@@ -168,7 +188,6 @@ func (s *OpenAIGatewayService) runCodexTicketAttemptWithChallengeGenerator(ctx c
 		return result, ErrCodexTicketRateLimited
 	}
 	account = current
-	cfg := s.openAICodexTicketConfig()
 	start := time.Now()
 	a := &result.CodexTicketAttempt
 	a.AccountID, a.Model, a.Trigger = account.ID, model, trigger
@@ -313,6 +332,12 @@ func (s *OpenAIGatewayService) ManualCodexTicketHarvest(ctx context.Context, acc
 	cfg := s.openAICodexTicketConfig()
 	cfg.Enabled = s.openAICodexTicketEnabledContext(ctx)
 	cfg.FailClosed = !s.openAICodexAllowsWithoutTicket(ctx, nil, "")
+	// The attempt reloads its own account snapshot. Refresh the manual response
+	// too, so the first successful harvest reports the persisted generation.
+	account, err = s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return result, err
+	}
 	status := OpenAICodexTicketStatuses(account, cfg, time.Now())
 	for _, item := range status {
 		if item.Model == model {

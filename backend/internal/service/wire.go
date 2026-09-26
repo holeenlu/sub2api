@@ -518,10 +518,8 @@ func ProvideRateLimitService(
 	settingService *SettingService,
 	tokenCacheInvalidator TokenCacheInvalidator,
 	ollamaCloudUsage *OllamaCloudUsageService,
-	accountOps *AccountOpsService,
 ) *RateLimitService {
 	svc := NewRateLimitService(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
-	svc.accountOps = accountOps
 	if healthCache, ok := tempUnschedCache.(OpenAIAPIKeyHealthCache); ok {
 		svc.SetOpenAIAPIKeyHealthCache(healthCache)
 	}
@@ -655,11 +653,8 @@ func ProvideIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Co
 func ProvideScheduledTestService(
 	planRepo ScheduledTestPlanRepository,
 	resultRepo ScheduledTestResultRepository,
-	showcase *PelicanShowcaseService,
 ) *ScheduledTestService {
-	svc := NewScheduledTestService(planRepo, resultRepo)
-	svc.showcase = showcase
-	return svc
+	return NewScheduledTestService(planRepo, resultRepo)
 }
 
 // ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
@@ -669,10 +664,8 @@ func ProvideScheduledTestRunnerService(
 	accountTestSvc *AccountTestService,
 	rateLimitSvc *RateLimitService,
 	cfg *config.Config,
-	judge *QualityJudgeService,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
-	svc.judgeQuality = judge.Judge
 	svc.Start()
 	return svc
 }
@@ -865,7 +858,6 @@ func ProvideAPIKeyService(
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
-	ProvideRequestCaptureManager,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
@@ -937,8 +929,6 @@ var ProviderSet = wire.NewSet(
 	ProvideOpsAlertEvaluatorService,
 	ProvideOpsCleanupService,
 	ProvideOpsScheduledReportService,
-	ProvideAccountOpsService,
-	ProvideAccountTokenGuardService,
 	NewEmailService,
 	NewNotificationEmailService,
 	ProvideEmailQueueService,
@@ -977,10 +967,8 @@ var ProviderSet = wire.NewSet(
 	ProvideIdempotencyCoordinator,
 	ProvideSystemOperationLockService,
 	ProvideIdempotencyCleanupService,
-	NewPelicanShowcaseService,
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
-	NewQualityJudgeService,
 	NewGroupCapacityService,
 	NewChannelService,
 	wire.Bind(new(ChannelCacheInvalidator), new(*ChannelService)),
@@ -1090,18 +1078,4 @@ func ProvideChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.
 	}
 	aggregator.Start()
 	return aggregator
-}
-
-func ProvideAccountOpsService(settings SettingRepository, repo AccountOpsRepository, email *EmailService) *AccountOpsService {
-	svc := NewAccountOpsService(settings, repo, email)
-	svc.Start()
-	return svc
-}
-
-// ProvideAccountTokenGuardService 创建并启动「凭证守护」后台巡检（智能运维子页面）。
-func ProvideAccountTokenGuardService(settings SettingRepository, repo AccountTokenGuardRepository,
-	accounts AccountRepository, admin AdminService, invalidator TokenCacheInvalidator) *AccountTokenGuardService {
-	svc := NewAccountTokenGuardService(settings, repo, accounts, admin, invalidator)
-	svc.Start()
-	return svc
 }

@@ -515,7 +515,7 @@ func TestChatCompletionsToResponses_EmptyContentNeverNull(t *testing.T) {
 	}
 }
 
-func TestChatCompletionsResponseToResponses_DeepSeekReasoningOnlyFailsWithoutMessageText(t *testing.T) {
+func TestChatCompletionsResponseToResponses_DeepSeekReasoningOnlyFallsBackToMessageText(t *testing.T) {
 	content := json.RawMessage(`""`)
 	resp := &ChatCompletionsResponse{
 		ID:     "chatcmpl_deepseek_reasoning_only",
@@ -538,9 +538,7 @@ func TestChatCompletionsResponseToResponses_DeepSeekReasoningOnlyFailsWithoutMes
 	require.Equal(t, "reasoning", out.Output[0].Type)
 	require.Equal(t, "message", out.Output[1].Type)
 	require.Len(t, out.Output[1].Content, 1)
-	assert.Empty(t, out.Output[1].Content[0].Text)
-	require.Equal(t, "failed", out.Status)
-	require.Equal(t, "upstream_reasoning_only", out.Error.Code)
+	assert.Equal(t, "reasoning-only answer", out.Output[1].Content[0].Text)
 }
 
 func TestChatCompletionsResponseToResponses_DeepSeekReasoningToolCallDoesNotFallbackToMessageText(t *testing.T) {

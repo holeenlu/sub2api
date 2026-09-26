@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"regexp"
@@ -111,33 +112,26 @@ func (r *codexTicketAttemptRepository) List(ctx context.Context, accountID int64
 	return result, total, rows.Err()
 }
 
-func (r *codexTicketAttemptRepository) Cleanup(ctx context.Context) error {
+func (r *codexTicketAttemptRepository) Cleanup(ctx context.Context) (resultErr error) {
 	conn, err := r.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
 	var acquired bool
 	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", codexTicketMaintenanceLock).Scan(&acquired); err != nil {
+		// The server may have acquired the session lock before the query failed.
+		discardSQLConnection(conn)
 		return err
 	}
 	if !acquired {
-		return nil
+		return conn.Close()
 	}
 	defer func() {
-		unlockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		var unlocked bool
-		_ = conn.QueryRowContext(unlockCtx, "SELECT pg_advisory_unlock($1)", codexTicketMaintenanceLock).Scan(&unlocked)
+		resultErr = errors.Join(resultErr, releaseCodexTicketMaintenanceSession(conn))
 	}()
 	if _, err := conn.ExecContext(ctx, "SET lock_timeout = '2s'"); err != nil {
 		return err
 	}
-	defer func() {
-		resetCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_, _ = conn.ExecContext(resetCtx, "RESET lock_timeout")
-	}()
 	now := time.Now().UTC()
 	for offset := 0; offset <= 7; offset++ {
 		day := time.Date(now.Year(), now.Month(), now.Day()+offset, 0, 0, 0, 0, time.UTC)
@@ -232,18 +226,40 @@ func (r *codexTicketAttemptRepository) TryLock(ctx context.Context, accountID in
 	key := int64(h.Sum64())
 	var acquired bool
 	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&acquired); err != nil {
-		_ = conn.Close()
+		// An interrupted reply cannot prove that the session never took the lock.
+		discardSQLConnection(conn)
 		return nil, false, err
 	}
 	if !acquired {
 		_ = conn.Close()
 		return nil, false, nil
 	}
-	return func() {
-		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		var unlocked bool
-		_ = conn.QueryRowContext(unlockCtx, "SELECT pg_advisory_unlock($1)", key).Scan(&unlocked)
-		_ = conn.Close()
-	}, true, nil
+	return func() { _ = releaseCodexTicketLock(conn, key) }, true, nil
+}
+
+func releaseCodexTicketMaintenanceSession(conn *sql.Conn) error {
+	resetCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := conn.ExecContext(resetCtx, "RESET lock_timeout"); err != nil {
+		// Discarding also releases the session lock. Never return altered session
+		// settings to the shared pool, even if the original SET itself failed.
+		discardSQLConnection(conn)
+		return fmt.Errorf("reset ticket cleanup lock timeout: %w", err)
+	}
+	return releaseCodexTicketLock(conn, codexTicketMaintenanceLock)
+}
+
+func releaseCodexTicketLock(conn *sql.Conn, key int64) error {
+	unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var unlocked bool
+	if err := conn.QueryRowContext(unlockCtx, "SELECT pg_advisory_unlock($1)", key).Scan(&unlocked); err != nil {
+		discardSQLConnection(conn)
+		return fmt.Errorf("release ticket session lock: %w", err)
+	}
+	if !unlocked {
+		discardSQLConnection(conn)
+		return errors.New("ticket session lock ownership could not be confirmed")
+	}
+	return conn.Close()
 }

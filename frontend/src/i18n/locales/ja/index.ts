@@ -7,10 +7,6 @@ import batchImage from './batchImage'
 import admin from './admin'
 import misc from './misc'
 import docs from './docs'
-import requestTiming from './requestTiming'
-import qualityOps from './qualityOps'
-import accountOps from './accountOps'
-import tokenGuard from './tokenGuard'
 
 export default {
   ...ui,
@@ -22,8 +18,4 @@ export default {
   admin,
   ...misc,
   ...docs,
-  requestTiming,
-  qualityOps,
-  accountOps,
-  tokenGuard,
 }

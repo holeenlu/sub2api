@@ -27,7 +27,7 @@ func (u *codexTicketFuncUpstream) Do(req *http.Request, _ string, _ int64, _ int
 func codexTicketResponse() *http.Response {
 	h := http.Header{}
 	h.Set(openAICodexTurnStateHeader, fakeCodexTicketState(292))
-	return &http.Response{StatusCode: http.StatusOK, Header: h, Body: io.NopCloser(strings.NewReader("data: {}\n\n"))}
+	return &http.Response{StatusCode: http.StatusOK, Header: h, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"))}
 }
 
 func ticketProbeChallenge(t *testing.T) ModelTraceChallenge {
@@ -83,7 +83,7 @@ func TestCodexTicketProbeParsesNormalSSEAndCookies(t *testing.T) {
 		header.Set(openAICodexTurnStateHeader, "new-state")
 		header.Add("Set-Cookie", "session=first; HttpOnly")
 		header.Add("Set-Cookie", "route=second; Secure")
-		return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"1 2 3\"}\n\ndata: [DONE]\n\n"))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"1 2 3\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"))}, nil
 	}}
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, upstream)
 	output, state, cookie, status, err := svc.fireOpenAICodexTicketProbe(context.Background(), account, "token", "gpt-6-astra", "http://proxy.example.com:8080", ticketProbeChallenge(t), time.Second)

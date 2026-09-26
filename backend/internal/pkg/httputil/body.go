@@ -6,7 +6,6 @@ import (
 	"compress/zlib"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"io"
 	"net/http"
 	"strings"
@@ -64,23 +63,7 @@ func (p *PrereadBody) Bytes() []byte {
 // client used to compress the body (zstd, gzip, deflate).
 // 已由 PrereadBody 回填的请求体直接返回其完整切片（零拷贝），不检查内部
 // reader 是否已被消费——见 PrereadBody 的文档说明。
-func ReadRequestBodyWithPrealloc(req *http.Request) (result []byte, resultErr error) {
-	return readRequestBodyWithPrealloc(req, maxDecompressedBodySize, false)
-}
-
-// ReadRequestBodyWithPreallocLimit applies a caller-specific decoded body cap.
-// It rejects compressed input that exceeds the cap instead of truncating it.
-func ReadRequestBodyWithPreallocLimit(req *http.Request, maxDecodedBytes int64) (result []byte, resultErr error) {
-	return readRequestBodyWithPrealloc(req, maxDecodedBytes, true)
-}
-
-func readRequestBodyWithPrealloc(req *http.Request, maxDecodedBytes int64, strict bool) (result []byte, resultErr error) {
-	defer func() {
-		if resultErr == nil && req != nil {
-			requestcapture.FromContext(req.Context()).ClientRequest(result, req.Header.Get("Content-Type"), req.Header)
-		}
-	}()
-
+func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 	if req == nil || req.Body == nil {
 		return nil, nil
 	}
@@ -110,7 +93,7 @@ func readRequestBodyWithPrealloc(req *http.Request, maxDecodedBytes int64, stric
 		return raw, nil
 	}
 
-	decoded, err := decompressRequestBody(enc, raw, maxDecodedBytes, strict)
+	decoded, err := decompressRequestBody(enc, raw)
 	if err != nil {
 		return nil, fmt.Errorf("decode Content-Encoding %q: %w", enc, err)
 	}
@@ -182,18 +165,7 @@ func ReadLenientJSONRequestBodyWithPrealloc(req *http.Request, maxNormalizedByte
 	return NormalizeLenientJSONRequestBody(body, maxNormalizedBytes)
 }
 
-func decompressRequestBody(encoding string, raw []byte, maxDecodedBytes int64, strict bool) ([]byte, error) {
-	readDecoded := func(reader io.Reader) ([]byte, error) {
-		limit := maxDecodedBytes
-		if strict {
-			limit++
-		}
-		decoded, err := io.ReadAll(io.LimitReader(reader, limit))
-		if strict && int64(len(decoded)) > maxDecodedBytes {
-			return nil, &http.MaxBytesError{Limit: maxDecodedBytes}
-		}
-		return decoded, err
-	}
+func decompressRequestBody(encoding string, raw []byte) ([]byte, error) {
 	switch encoding {
 	case "zstd":
 		dec, err := zstd.NewReader(bytes.NewReader(raw))
@@ -201,21 +173,21 @@ func decompressRequestBody(encoding string, raw []byte, maxDecodedBytes int64, s
 			return nil, err
 		}
 		defer dec.Close()
-		return readDecoded(dec)
+		return io.ReadAll(io.LimitReader(dec, maxDecompressedBodySize))
 	case "gzip", "x-gzip":
 		gr, err := gzip.NewReader(bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
 		defer func() { _ = gr.Close() }()
-		return readDecoded(gr)
+		return io.ReadAll(io.LimitReader(gr, maxDecompressedBodySize))
 	case "deflate":
 		zr, err := zlib.NewReader(bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
 		defer func() { _ = zr.Close() }()
-		return readDecoded(zr)
+		return io.ReadAll(io.LimitReader(zr, maxDecompressedBodySize))
 	default:
 		return nil, errors.New("unsupported Content-Encoding")
 	}

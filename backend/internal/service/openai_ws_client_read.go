@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"time"
 
 	coderws "github.com/coder/websocket"
@@ -98,11 +97,6 @@ func readOpenAIWSClientMessageWithTimeoutStart(
 	for {
 		select {
 		case result := <-readDone:
-			if result.err == nil {
-				capture := requestcapture.FromContext(controlCtx)
-				capture.SetProtocol("websocket")
-				capture.ClientFrame(result.payload)
-			}
 			return result.messageType, result.payload, result.err
 		case <-timeoutStart:
 			startTimeout()

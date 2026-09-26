@@ -35,6 +35,14 @@ func (r *challengeHarvestAccountRepo) UpdateExtra(_ context.Context, _ int64, ex
 	return nil
 }
 
+func (r *challengeHarvestAccountRepo) StoreCodexTicketIfUnchanged(ctx context.Context, account *Account, model string, raw json.RawMessage) (bool, error) {
+	var ticket openAICodexTicket
+	if err := json.Unmarshal(raw, &ticket); err != nil {
+		return false, err
+	}
+	return true, r.UpdateExtra(ctx, account.ID, map[string]any{openAICodexTicketExtraKey(model): &ticket})
+}
+
 type challengeHarvestProxyRepo struct{ ProxyRepository }
 
 func (r *challengeHarvestProxyRepo) ListActive(context.Context) ([]Proxy, error) {
@@ -71,7 +79,7 @@ func challengeHarvestResponse(t *testing.T, text string) *http.Response {
 	payload, err := json.Marshal(map[string]string{"type": "response.output_text.delta", "delta": text})
 	require.NoError(t, err)
 	response := codexTicketResponse()
-	response.Body = io.NopCloser(strings.NewReader("data: " + string(payload) + "\n\ndata: [DONE]\n\n"))
+	response.Body = io.NopCloser(strings.NewReader("data: " + string(payload) + "\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"))
 	return response
 }
 

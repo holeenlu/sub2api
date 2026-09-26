@@ -1,11 +1,8 @@
 <template>
   <div ref="rootRef" v-if="showUsageWindows">
-    <template v-if="account.platform === 'openai_bps'">
-      <BPSCredentialStatus :state="bpsCredentialState" />
-    </template>
     <!-- Anthropic OAuth and Setup Token accounts: fetch real usage data -->
     <template
-      v-else-if="
+      v-if="
         account.platform === 'anthropic' &&
         (account.type === 'oauth' || account.type === 'setup-token')
       "
@@ -671,8 +668,6 @@
 </template>
 
 <script setup lang="ts">
-import BPSCredentialStatus from "./BPSCredentialStatus.vue"
-import { useBPSCredentialState } from "@/composables/useBPSCredentialState"
 import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
@@ -734,7 +729,6 @@ const usageInfo = ref<AccountUsageInfo | null>(null)
 watch(usageInfo, (usage) => {
   if (usage) emit('usage-loaded', usage)
 })
-const { state: bpsCredentialState } = useBPSCredentialState(() => props.account)
 const rootRef = ref<HTMLElement | null>(null)
 const isDesktopViewport = ref(
   typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches

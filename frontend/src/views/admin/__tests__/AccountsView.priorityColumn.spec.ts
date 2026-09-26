@@ -14,7 +14,6 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     settings: { getSettings },
     accounts: {
-      getManagementCapabilities: vi.fn().mockResolvedValue({ web_search_enabled: false, account_quota_notify_enabled: false }),
       list: listAccounts,
       listWithEtag,
       getById,

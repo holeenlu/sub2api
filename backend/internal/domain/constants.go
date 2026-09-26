@@ -12,16 +12,14 @@ const (
 
 // Role constants
 const (
-	RoleAdmin    = "admin"
-	RoleUser     = "user"
-	RoleObserver = "observer"
+	RoleAdmin = "admin"
+	RoleUser  = "user"
 )
 
 // Platform constants
 const (
 	PlatformAnthropic   = "anthropic"
 	PlatformOpenAI      = "openai"
-	PlatformOpenAIBPS   = "openai_bps"
 	PlatformGemini      = "gemini"
 	PlatformAntigravity = "antigravity"
 	PlatformGrok        = "grok"

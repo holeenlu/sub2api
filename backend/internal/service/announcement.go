@@ -23,7 +23,6 @@ const (
 const (
 	AnnouncementConditionTypeSubscription = domain.AnnouncementConditionTypeSubscription
 	AnnouncementConditionTypeBalance      = domain.AnnouncementConditionTypeBalance
-	AnnouncementConditionTypeUser         = domain.AnnouncementConditionTypeUser
 )
 
 const (

@@ -1,6 +1,6 @@
 <template>
   <BaseDialog
-    :show="show" :close-on-escape="!pendingBPSCreate"
+    :show="show"
     :title="t('admin.accounts.createAccount')"
     width="wide"
     @close="handleClose"
@@ -228,18 +228,8 @@
             <PlatformIcon platform="opencode_go" size="sm" />
             OpenCode
           </button>
-          <button type="button" @click="form.platform = 'openai_bps'"
-            :class="['flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium', form.platform === 'openai_bps' ? 'bg-white text-green-700 shadow-sm dark:bg-dark-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400']">
-            <PlatformIcon platform="openai_bps" size="sm" />OpenAI BPS
-          </button>
         </div>
       </div>
-
-      <div v-if="form.platform === 'openai_bps'" role="alert" data-testid="bps-risk-warning" class="mb-4 rounded-lg border-2 border-amber-500 bg-amber-50 p-4 text-amber-950 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-100">
-        <div class="mb-1 flex items-center gap-2 font-bold"><Icon name="exclamationTriangle" size="md" />{{ t('admin.accounts.bps.riskTitle') }}</div>
-        <p class="text-sm font-medium">{{ t('admin.accounts.bps.riskDescription') }}</p>
-      </div>
-      <OpenAIBPSAccountFields v-if="form.platform === 'openai_bps'" v-model="bpsDraft" />
 
       <!-- Account Type Selection (Anthropic) -->
       <div v-if="form.platform === 'anthropic'">
@@ -3007,7 +2997,7 @@
         </div>
       </div>
 
-      <div v-if="!authStore.isObserver">
+      <div>
         <label class="input-label">{{ t('admin.accounts.proxy') }}</label>
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
@@ -3063,14 +3053,6 @@
           {{ t('admin.accounts.expiresAtHint') }}
           {{ t('admin.accounts.expiresAtTimezoneHint', { timezone: browserTimeZone }) }}
         </p>
-      </div>
-
-      <div v-if="form.platform === 'openai' && accountCategory === 'apikey'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="flex items-center gap-2">
-          <input v-model="copilotSDKEnabled" type="checkbox" data-testid="copilot-sdk-toggle" />
-          <span>Copilot SDK</span>
-        </label>
-        <p class="input-hint">{{ t('admin.accounts.openai.copilotSDKDesc') }}</p>
       </div>
 
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
@@ -3604,14 +3586,9 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
-        <button v-if="form.platform === 'openai_bps'" type="submit" form="create-account-form" :disabled="submitting"
-          class="btn btn-secondary" data-testid="bps-save-and-test" @click="bpsTestAfterSave = true">
-          {{ t('admin.accounts.bps.saveAndTest') }}
-        </button>
         <button
           type="submit"
           form="create-account-form"
-          @click="bpsTestAfterSave = false"
           :disabled="submitting"
           class="btn btn-primary"
           data-tour="account-form-submit"
@@ -3903,17 +3880,6 @@
     </template>
   </BaseDialog>
 
-  <ConfirmDialog
-    :show="pendingBPSCreate !== null"
-    :title="t('admin.accounts.bps.riskConfirmTitle')"
-    :message="t('admin.accounts.bps.riskConfirmMessage')"
-    :confirm-text="t('admin.accounts.bps.riskConfirmButton')"
-    :cancel-text="t('common.cancel')"
-    :danger="true"
-    data-testid="bps-risk-confirmation"
-    @confirm="confirmBPSRisk"
-    @cancel="cancelBPSRisk"
-  />
   <!-- Mixed Channel Warning Dialog -->
   <ConfirmDialog
     :show="showMixedChannelWarning"
@@ -3928,12 +3894,9 @@
 </template>
 
 <script setup lang="ts">
-import OpenAIBPSAccountFields from './OpenAIBPSAccountFields.vue'
-import { newBPSAccountDraft, bpsCredentials } from '@/utils/openaiBps'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { useAuthStore } from '@/stores/auth'
 
 import {
   claudeModels,
@@ -3964,7 +3927,6 @@ import type {
   AdminGroup,
   AccountPlatform,
   AccountType,
-  Account,
   CheckMixedChannelResponse,
   CreateAccountRequest,
   CodexSessionImportMessage,
@@ -4131,12 +4093,10 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
-  test: [account: Account]
   created: []
 }>()
 
 const appStore = useAppStore()
-const authStore = useAuthStore()
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -4478,7 +4438,6 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
 }
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
-const copilotSDKEnabled = ref(false)
 const openaiPassthroughEnabled = ref(false)
 const openAIRequestTimezone = ref('Asia/Singapore')
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
@@ -4522,8 +4481,8 @@ const {
 } = useQuotaNotifyState()
 
 // Load global feature states once
-adminAPI.accounts.getManagementCapabilities().then(cfg => {
-  webSearchGlobalEnabled.value = cfg?.web_search_enabled === true
+adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
+  webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
 
 loadQuotaNotifyGlobal()
@@ -4717,7 +4676,7 @@ const openAIWSModeHintKey = computed(() =>
 )
 
 const isOpenAIModelRestrictionDisabled = computed(() =>
-  form.platform === 'openai' && (openaiPassthroughEnabled.value || copilotSDKEnabled.value)
+  form.platform === 'openai' && openaiPassthroughEnabled.value
 )
 
 const mixedChannelWarningMessageText = computed(() => {
@@ -4774,10 +4733,6 @@ const tempUnschedPresets = computed(() => [
   }
 ])
 
-const bpsDraft = ref(newBPSAccountDraft())
-const bpsTestAfterSave = ref(false)
-const pendingBPSCreate = ref<{ payload: CreateAccountRequest; testAfterSave: boolean } | null>(null)
-
 const form = reactive({
   name: '',
   notes: '',
@@ -4795,7 +4750,6 @@ const form = reactive({
 
 // Helper to check if current type needs OAuth flow
 const isOAuthFlow = computed(() => {
-  if (form.platform === 'openai_bps') return false
   // Antigravity upstream 类型不需要 OAuth 流程
   if (form.platform === 'antigravity' && antigravityAccountType.value === 'upstream') {
     return false
@@ -4959,7 +4913,6 @@ watch(
       interceptWarmupRequests.value = false
     }
     if (newPlatform !== 'openai') {
-      copilotSDKEnabled.value = false
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
@@ -5337,10 +5290,8 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       }
     }
     appStore.showSuccess(t('admin.accounts.accountCreated'))
-    const openBPSTest = payload.platform === 'openai_bps' && bpsTestAfterSave.value
     emit('created')
     handleClose()
-    if (openBPSTest) emit('test', account)
   } catch (error: any) {
     if (error.response?.status === 409 && error.response?.data?.error === 'mixed_channel_warning' && needsMixedChannelCheck(form.platform)) {
       openMixedChannelDialog({
@@ -5360,9 +5311,6 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
-  pendingBPSCreate.value = null
-  bpsDraft.value = newBPSAccountDraft()
-  bpsTestAfterSave.value = false
   step.value = 1
   form.name = ''
   form.notes = ''
@@ -5420,7 +5368,6 @@ const resetForm = () => {
   grokOAuthBaseUrl.value = ''
   interceptWarmupRequests.value = false
   autoPauseOnExpired.value = true
-  copilotSDKEnabled.value = false
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
@@ -5483,8 +5430,6 @@ const resetForm = () => {
 }
 
 const handleClose = () => {
-  pendingBPSCreate.value = null
-  bpsTestAfterSave.value = false
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
@@ -5507,11 +5452,6 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   // 清理兼容旧键，统一改用分类型开关。
   delete extra.responses_websockets_v2_enabled
   delete extra.openai_ws_enabled
-  if (accountCategory.value === 'apikey' && copilotSDKEnabled.value) {
-    extra.openai_copilot_sdk = true
-  } else {
-    delete extra.openai_copilot_sdk
-  }
   if (openaiPassthroughEnabled.value) {
     extra.openai_passthrough = true
   } else {
@@ -5612,28 +5552,7 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
 }
 
 // Helper function to create account with mixed channel warning handling
-const cancelBPSRisk = () => {
-  pendingBPSCreate.value = null
-  bpsTestAfterSave.value = false
-}
-watch(() => [props.show, form.platform] as const, ([shown, platform]) => {
-  if (!shown || platform !== 'openai_bps') cancelBPSRisk()
-})
-const confirmBPSRisk = async () => {
-  const pending = pendingBPSCreate.value
-  if (!pending || submitting.value || !props.show) return
-  pendingBPSCreate.value = null
-  bpsTestAfterSave.value = pending.testAfterSave
-  await doCreateAccount(pending.payload, true)
-}
-const doCreateAccount = async (payload: CreateAccountRequest, bpsRiskConfirmed = false) => {
-  if (payload.platform === 'openai_bps') {
-    if (submitting.value || pendingBPSCreate.value) return
-    if (!bpsRiskConfirmed) {
-      pendingBPSCreate.value = { payload: JSON.parse(JSON.stringify(payload)), testAfterSave: bpsTestAfterSave.value }
-      return
-    }
-  }
+const doCreateAccount = async (payload: CreateAccountRequest) => {
   const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
     await submitCreateAccount(payload)
   })
@@ -5724,11 +5643,6 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
-  if (form.platform === 'openai_bps') {
-    if (!bpsDraft.value.token.trim()) { appStore.showError(t('admin.accounts.bps.tokenRequired')); return }
-    await createAccountAndFinish('openai_bps', 'oauth', bpsCredentials(bpsDraft.value))
-    return
-  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {
@@ -6102,7 +6016,7 @@ const createAccountAndFinish = async (
     type,
     credentials,
     extra: finalExtra,
-    proxy_id: authStore.isObserver ? undefined : form.proxy_id,
+    proxy_id: form.proxy_id,
     concurrency: form.concurrency,
     load_factor: form.load_factor ?? undefined,
     priority: form.priority,

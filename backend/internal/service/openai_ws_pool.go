@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -210,7 +209,7 @@ func (l *openAIWSConnLease) WriteJSONWithContextTimeout(ctx context.Context, val
 	if err != nil {
 		return err
 	}
-	return captureWSLeaseWrite(ctx, l.accountID, l.HandshakeHeaders(), value, func() error { return conn.writeJSONWithTimeout(ctx, value, timeout) })
+	return conn.writeJSONWithTimeout(ctx, value, timeout)
 }
 
 func (l *openAIWSConnLease) WriteJSONContext(ctx context.Context, value any) error {
@@ -218,7 +217,7 @@ func (l *openAIWSConnLease) WriteJSONContext(ctx context.Context, value any) err
 	if err != nil {
 		return err
 	}
-	return captureWSLeaseWrite(ctx, l.accountID, l.HandshakeHeaders(), value, func() error { return conn.writeJSON(value, ctx) })
+	return conn.writeJSON(value, ctx)
 }
 
 func (l *openAIWSConnLease) ReadMessage(timeout time.Duration) ([]byte, error) {
@@ -234,7 +233,7 @@ func (l *openAIWSConnLease) ReadMessageContext(ctx context.Context) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	return captureWSLeaseRead(ctx, func() ([]byte, error) { return conn.readMessage(ctx) })
+	return conn.readMessage(ctx)
 }
 
 func (l *openAIWSConnLease) ReadMessageWithContextTimeout(ctx context.Context, timeout time.Duration) ([]byte, error) {
@@ -242,7 +241,7 @@ func (l *openAIWSConnLease) ReadMessageWithContextTimeout(ctx context.Context, t
 	if err != nil {
 		return nil, err
 	}
-	return captureWSLeaseRead(ctx, func() ([]byte, error) { return conn.readMessageWithContextTimeout(ctx, timeout) })
+	return conn.readMessageWithContextTimeout(ctx, timeout)
 }
 
 func (l *openAIWSConnLease) PingWithTimeout(timeout time.Duration) error {
@@ -1113,19 +1112,8 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 	if p != nil {
 		p.metrics.acquireTotal.Add(1)
 	}
-	if req.Account != nil {
-		requestcapture.FromContext(ctx).BindAccount(req.Account.ID)
-	}
 	queueWait := &openAIWSAcquireQueueWait{}
 	lease, err := p.acquire(ctx, cloneOpenAIWSAcquireRequest(req), 0, queueWait)
-	if err != nil && req.Account != nil {
-		var dial *openAIWSDialError
-		if errors.As(err, &dial) {
-			requestcapture.FromContext(ctx).SelectionFailed(req.Account.ID, dial.StatusCode, dial.ResponseHeaders, dial.ResponseBody, err)
-		} else {
-			requestcapture.FromContext(ctx).SelectionFailed(req.Account.ID, 0, nil, nil, err)
-		}
-	}
 	if lease != nil && queueWait.rewoken {
 		// 广播重选经 tryAcquire 拿令牌，不像排队分支那样在取得令牌后检查取消，
 		// 这里补上复查：上下文已取消就归还令牌并按取消返回。

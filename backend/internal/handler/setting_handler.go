@@ -112,7 +112,6 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		ChannelMonitorHideUserRanking:        settings.ChannelMonitorHideUserRanking,
 
 		AvailableChannelsEnabled: settings.AvailableChannelsEnabled,
-		PelicanShowcaseEnabled:   settings.PelicanShowcaseEnabled,
 		SubscriptionEnabled:      settings.SubscriptionEnabled,
 
 		ModelPlazaEnabled:       settings.ModelPlazaEnabled,
@@ -124,7 +123,6 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		RiskControlEnabled: settings.RiskControlEnabled,
 
 		AllowUserViewErrorRequests: settings.AllowUserViewErrorRequests,
-		UsageShowLongContextBadge:  settings.UsageShowLongContextBadge,
 	})
 }
 

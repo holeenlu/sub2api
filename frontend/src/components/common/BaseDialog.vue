@@ -4,17 +4,14 @@
       <div
         v-if="show"
         class="modal-overlay"
-        :class="{ 'drawer-overlay': placement === 'right' }"
         :style="zIndexStyle"
         :aria-labelledby="dialogId"
         role="dialog"
         aria-modal="true"
-        @mousedown="handleOverlayMousedown"
-        @mouseup="handleOverlayMouseup"
         @click.self="handleClose"
       >
         <!-- Modal panel -->
-        <div ref="dialogRef" :class="['modal-content', widthClasses, contentClass, { 'drawer-content': placement === 'right', 'modal-fullscreen': fullscreen }]" @click.stop>
+        <div ref="dialogRef" :class="['modal-content', widthClasses, contentClass]" @click.stop>
           <!-- Header -->
           <div class="modal-header">
             <slot name="header" :title-id="dialogId">
@@ -73,14 +70,12 @@ interface Props {
   show: boolean
   title: string
   width?: DialogWidth
-  placement?: 'center' | 'right'
   closeOnEscape?: boolean
   closeOnClickOutside?: boolean
   showCloseButton?: boolean
   zIndex?: number
   contentClass?: string
   bodyClass?: string
-  fullscreen?: boolean
 }
 
 interface Emits {
@@ -89,12 +84,10 @@ interface Emits {
 
 const props = withDefaults(defineProps<Props>(), {
   width: 'normal',
-  placement: 'center',
   closeOnEscape: true,
   closeOnClickOutside: false,
   showCloseButton: true,
-  zIndex: 50,
-  fullscreen: false
+  zIndex: 50
 })
 
 const emit = defineEmits<Emits>()
@@ -118,24 +111,8 @@ const widthClasses = computed(() => {
   return widths[props.width]
 })
 
-// 只有在遮罩上按下、也在遮罩上松开，才算点击空白处。在面板里拖选文字、松手落在遮罩上时，
-// 浏览器同样会把 click 派发给遮罩（按下和松开目标的共同祖先），不能因此关掉对话框。
-let pressStartedOnOverlay = false
-let pressEndedOnOverlay = false
-
-const handleOverlayMousedown = (event: MouseEvent) => {
-  pressStartedOnOverlay = event.target === event.currentTarget
-}
-
-const handleOverlayMouseup = (event: MouseEvent) => {
-  pressEndedOnOverlay = event.target === event.currentTarget
-}
-
 const handleClose = () => {
-  const clickedOverlay = pressStartedOnOverlay && pressEndedOnOverlay
-  pressStartedOnOverlay = false
-  pressEndedOnOverlay = false
-  if (props.closeOnClickOutside && clickedOverlay) {
+  if (props.closeOnClickOutside) {
     emit('close')
   }
 }
@@ -195,9 +172,3 @@ onUnmounted(() => {
   updateScrollLock(false)
 })
 </script>
-
-<style scoped>
-.modal-overlay.drawer-overlay { padding: 0; justify-content: flex-end; align-items: stretch; }
-.modal-content.drawer-content { border-radius: 0; height: 100dvh; max-height: 100dvh; margin: 0; }
-.modal-enter-from .drawer-content, .modal-leave-to .drawer-content { transform: translateX(100%); }
-</style>

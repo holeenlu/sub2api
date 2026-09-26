@@ -161,7 +161,6 @@ type cachedCodexRestrictionPolicy struct {
 // GetCyberSessionBlockRuntime 在网关请求热路径上被调用，避免每次访问 DB。
 type cachedCyberSessionBlockRuntime struct {
 	enabled   bool
-	strict    bool
 	ttl       time.Duration
 	expiresAt int64 // unix nano
 }
@@ -178,7 +177,7 @@ const openAIQuotaAutoPauseSettingsRefreshKey = "openai_quota_auto_pause_settings
 
 // GetCyberSessionBlockRuntime 返回 (开关, TTL)，进程内缓存 ~60s，
 // 供网关热路径读取时避免 DB 往返。
-// 三个 setting key 在单次 singleflight 里一起读取，减少 DB 往返。
+// 两个 setting key 在单次 singleflight 里一起读取，减少 DB 往返。
 // 默认值：开关 false，TTL 1h（与粘性会话对齐）。
 func (s *SettingService) GetCyberSessionBlockRuntime(ctx context.Context) (bool, time.Duration) {
 	if cached, ok := s.cyberSessionBlockRuntimeCache.Load().(*cachedCyberSessionBlockRuntime); ok && cached != nil {
@@ -197,13 +196,11 @@ func (s *SettingService) GetCyberSessionBlockRuntime(ctx context.Context) (bool,
 
 		enabledVal, enabledErr := s.settingRepo.GetValue(dbCtx, SettingKeyCyberSessionBlockEnabled)
 		ttlVal, ttlErr := s.settingRepo.GetValue(dbCtx, SettingKeyCyberSessionBlockTTLSeconds)
-		strictVal, strictErr := s.settingRepo.GetValue(dbCtx, SettingKeyCyberSessionIdentityStrictEnabled)
 
 		if enabledErr != nil && !errors.Is(enabledErr, ErrSettingNotFound) {
 			slog.Warn("failed to get cyber_session_block_enabled setting", "error", enabledErr)
 			entry := &cachedCyberSessionBlockRuntime{
 				enabled:   false,
-				strict:    false,
 				ttl:       time.Hour,
 				expiresAt: time.Now().Add(cyberSessionBlockRuntimeErrorTTL).UnixNano(),
 			}
@@ -211,15 +208,7 @@ func (s *SettingService) GetCyberSessionBlockRuntime(ctx context.Context) (bool,
 			return entry, nil
 		}
 
-		cacheTTL := cyberSessionBlockRuntimeCacheTTL
-		if strictErr != nil && !errors.Is(strictErr, ErrSettingNotFound) {
-			slog.Warn("failed to get cyber_session_identity_strict_enabled setting", "error", strictErr)
-			strictVal = "false"
-			cacheTTL = cyberSessionBlockRuntimeErrorTTL
-		}
-
 		enabled := enabledErr == nil && strings.TrimSpace(enabledVal) == "true"
-		strict := strictErr == nil && strings.TrimSpace(strictVal) == "true"
 
 		ttl := time.Hour
 		if ttlErr == nil {
@@ -230,9 +219,8 @@ func (s *SettingService) GetCyberSessionBlockRuntime(ctx context.Context) (bool,
 
 		entry := &cachedCyberSessionBlockRuntime{
 			enabled:   enabled,
-			strict:    strict,
 			ttl:       ttl,
-			expiresAt: time.Now().Add(cacheTTL).UnixNano(),
+			expiresAt: time.Now().Add(cyberSessionBlockRuntimeCacheTTL).UnixNano(),
 		}
 		s.cyberSessionBlockRuntimeCache.Store(entry)
 		return entry, nil
@@ -241,20 +229,6 @@ func (s *SettingService) GetCyberSessionBlockRuntime(ctx context.Context) (bool,
 		return entry.enabled, entry.ttl
 	}
 	return false, time.Hour
-}
-
-// GetCyberSessionIdentityStrictEnabled returns the default-off strict identity
-// gate. It shares the cyber runtime cache so the hot path does not add another
-// database round trip.
-func (s *SettingService) GetCyberSessionIdentityStrictEnabled(ctx context.Context) bool {
-	if s == nil || s.settingRepo == nil {
-		return false
-	}
-	_, _ = s.GetCyberSessionBlockRuntime(ctx)
-	if cached, ok := s.cyberSessionBlockRuntimeCache.Load().(*cachedCyberSessionBlockRuntime); ok && cached != nil {
-		return cached.strict
-	}
-	return false
 }
 
 // GetAntigravityUserAgentVersion 返回 Antigravity 上游请求使用的版本号。

@@ -79,8 +79,6 @@ type UserListFilters struct {
 	// For large datasets this can be expensive; admin list pages should enable it on demand.
 	// nil means not specified (default: load subscriptions for backward compatibility).
 	IncludeSubscriptions *bool
-	// UserIDs 只列出这些用户；为空表示不按用户 ID 过滤。
-	UserIDs []int64
 	// IncludeDeleted 为 true 时绕过软删除过滤，返回含已删除（deleted_at 非空）的用户。
 	// 仅供 /admin/usage 的 SearchUsers 端点使用，其他列表调用方不要设置。
 	IncludeDeleted bool
@@ -114,8 +112,7 @@ type UserUpdateFields struct {
 	// BalanceNotifyExtraEmails 与上一项分开，避免"改通知阈值"覆盖并发的"加通知邮箱"。
 	BalanceNotifyExtraEmails bool
 	// AllowedGroups 为 true 时才同步 user_allowed_groups 关联表。
-	AllowedGroups    bool
-	ObserverGroupIDs bool
+	AllowedGroups bool
 	// RestrictPublicGroups 覆盖 restrict_public_groups 列。
 	RestrictPublicGroups bool
 }
