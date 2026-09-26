@@ -24,11 +24,11 @@ export default {
           bodyLimit: '请求体上限 (MiB)',
           budget: '共享资源预算 (MiB)',
           maxRequests: '最大在途请求数',
-          budgetHint: '共享预算至少为请求体上限的 8 倍. 调高数值会增加内存压力.',
+          budgetHint: '共享预算至少为请求体上限的 8 倍. 实际预算取此值与在途上限 × 8 MiB 的较大值; 512 槽对应至少 4096 MiB 预算, 不等于实际内存占用. 默认在途 128、预算 1024 MiB, 范围 1–512, 保存后立即生效.',
           retentionHint: '支持 PNG, JPEG, GIF 和 WebP. 单张最多 20 MiB, 每请求最多 20 张且合计 32 MiB. 图片暂存于数据目录, 每进程最多 1 GiB / 512 张. 链接在最后一次提交 30 分钟后失效, 文件由后台清理. 链接持有者可在有效期内读取.',
           capacityHint: '上述限制覆盖 OpenAI/Composite 的 Responses、Chat 和 Messages HTTP 请求, 包括纯文本. 大请求可用并发更低; 超额返回 503, 不在内存中排队. 提高预算会增加内存压力.',
           invalidBaseUrl: '请填写有效的 HTTPS 访问地址, 不包含路径, 账号密码, 查询参数或片段.',
-          invalidCapacity: '请求体上限须为 1–128 MiB, 共享预算为 512–2048 MiB 且至少为请求体的 8 倍, 在途请求数为 1–128.',
+          invalidCapacity: '请求体上限须为 1–128 MiB, 共享预算为 512–2048 MiB 且至少为请求体的 8 倍, 在途请求数为 1–512.',
         },
         channelMonitor: {
           title: '渠道监控',

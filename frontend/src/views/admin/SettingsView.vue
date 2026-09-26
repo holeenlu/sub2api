@@ -7217,7 +7217,7 @@
                 </div>
                 <div class="space-y-1">
                   <label for="excel-bps-image-max-requests" class="input-label">{{ t('admin.settings.features.excelBpsImages.maxRequests') }}</label>
-                  <input id="excel-bps-image-max-requests" v-model.number="form.excel_bps_image_max_requests" class="input" type="number" min="1" max="128" step="1" required />
+                  <input id="excel-bps-image-max-requests" v-model.number="form.excel_bps_image_max_requests" class="input" type="number" min="1" max="512" step="1" required />
                 </div>
               </div>
               <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
@@ -10170,8 +10170,8 @@ const form = reactive<SettingsForm>({
   excel_bps_image_relay_enabled: false,
   excel_bps_image_base_url: '',
   excel_bps_image_body_limit_mib: 64,
-  excel_bps_image_budget_mib: 512,
-  excel_bps_image_max_requests: 32,
+  excel_bps_image_budget_mib: 1024,
+  excel_bps_image_max_requests: 128,
 });
 
 // 人机验证 UI 状态：单卡片「总开关 + 服务商单选」，落库仍是三个独立
@@ -11431,7 +11431,7 @@ async function saveSettings() {
     if (
       !Number.isInteger(form.excel_bps_image_body_limit_mib) || form.excel_bps_image_body_limit_mib < 1 || form.excel_bps_image_body_limit_mib > 128 ||
       !Number.isInteger(form.excel_bps_image_budget_mib) || form.excel_bps_image_budget_mib < 512 || form.excel_bps_image_budget_mib > 2048 || form.excel_bps_image_budget_mib < form.excel_bps_image_body_limit_mib * 8 ||
-      !Number.isInteger(form.excel_bps_image_max_requests) || form.excel_bps_image_max_requests < 1 || form.excel_bps_image_max_requests > 128
+      !Number.isInteger(form.excel_bps_image_max_requests) || form.excel_bps_image_max_requests < 1 || form.excel_bps_image_max_requests > 512
     ) {
       appStore.showError(t('admin.settings.features.excelBpsImages.invalidCapacity'));
       return;
