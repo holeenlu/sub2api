@@ -325,3 +325,33 @@ func TestFunctionCmdRealParametersAndSchemaRejection(t *testing.T) {
 		}
 	}
 }
+
+func TestFunctionCmdTransportAcceptsRedundantEqualDuplicate(t *testing.T) {
+	source := testSource()
+	source["tools"] = []any{functionCmdTestTool("exec_command")}
+	_, bridge := mustPrepare(t, source, "scope", nil)
+	const cmd = "printf \"duplicate-safe\""
+	metadata, _ := json.Marshal(object{"cmd": cmd, "description": "Keep the one exact command"})
+	call, err := bridge.translateCall(functionCmdTestNative(t, "exec_command", cmd, string(metadata)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := object{"cmd": cmd, "description": "Keep the one exact command"}
+	if got := functionCmdTestArguments(t, call); !reflect.DeepEqual(got, want) {
+		t.Fatal("identical duplicate cmd was not collapsed exactly")
+	}
+}
+
+func TestFunctionCmdTransportRejectsConflictingDuplicate(t *testing.T) {
+	source := testSource()
+	source["tools"] = []any{functionCmdTestTool("exec_command")}
+	_, bridge := mustPrepare(t, source, "scope", nil)
+	const cmd = "private-command-never-in-errors"
+	for _, duplicate := range []any{"different-command", nil, 7, object{}} {
+		metadata, _ := json.Marshal(object{"cmd": duplicate, "description": "Reject conflict"})
+		_, err := bridge.translateCall(functionCmdTestNative(t, "exec_command", cmd, string(metadata)))
+		if err == nil || strings.Contains(err.Error(), cmd) || strings.Contains(err.Error(), "different-command") {
+			t.Fatal("conflicting duplicate cmd was accepted or leaked")
+		}
+	}
+}

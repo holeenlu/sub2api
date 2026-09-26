@@ -52,8 +52,14 @@ func (b *Bridge) functionCmdTransportEnvelope(arguments object) (object, bool, e
 	if decode([]byte(metadata), &args) != nil || args == nil {
 		return nil, true, fmt.Errorf("basispoints function cmd transport extended_summary must contain one JSON object")
 	}
-	if _, exists := args["cmd"]; exists {
-		return nil, true, fmt.Errorf("basispoints function cmd transport must not duplicate cmd in extended_summary")
+	if duplicate, exists := args["cmd"]; exists {
+		duplicateText, ok := duplicate.(string)
+		if !ok || duplicateText != code {
+			return nil, true, fmt.Errorf("basispoints function cmd transport has conflicting duplicate cmd in extended_summary")
+		}
+		// Some upstreams redundantly repeat the exact same cmd in both fields.
+		// Dropping only an identical duplicate is safe; conflicting values remain rejected.
+		delete(args, "cmd")
 	}
 	args["cmd"] = code
 	encoded, err := json.Marshal(args)
