@@ -60,8 +60,9 @@ func (s *OpenAIGatewayService) excelBPSImageRelay(ctx context.Context) (*basispo
 			dataDir = "./data"
 		}
 		s.excelBPSImages, err = basispoints.NewImageRelay(settings.BaseURL, filepath.Join(dataDir, "bps-images"))
-	} else {
-		err = s.excelBPSImages.SetPublicOrigin(settings.BaseURL)
+	}
+	if err == nil {
+		err = s.excelBPSImages.Configure(settings.BaseURL, settings.Limits)
 	}
 	return s.excelBPSImages, err
 }
