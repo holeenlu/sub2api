@@ -66,6 +66,8 @@ func TestObserverRoutesDenyNewAndGlobalEndpoints(t *testing.T) {
 		"POST /api/v1/admin/accounts/future-global-feature", "PUT /api/v1/admin/groups/:id",
 		"POST /api/v1/admin/proxies", "GET /api/v1/admin/proxies/data", "GET /api/v1/admin/request-captures",
 		"POST /api/v1/admin/system/update", "POST /api/v1/admin/system/restart",
+		"POST /api/v1/admin/accounts/:id/codex-ticket-harvest",
+		"POST /api/v1/admin/accounts/:id/manual-harvest",
 	} {
 		method, path := route[:4], route[5:]
 		if route[:3] == "GET" || route[:3] == "PUT" {
@@ -74,6 +76,7 @@ func TestObserverRoutesDenyNewAndGlobalEndpoints(t *testing.T) {
 		require.False(t, ObserverAccountRouteAllowed(method, path), route)
 	}
 	require.True(t, ObserverAccountRouteAllowed("GET", "/api/v1/admin/accounts/data"))
+	require.True(t, ObserverAccountRouteAllowed("GET", "/api/v1/admin/accounts/openai-request-timezones"))
 	require.True(t, ObserverAccountRouteAllowed("POST", "/api/v1/admin/accounts/:id/test"))
 	require.True(t, ObserverAccountRouteAllowed("POST", "/api/v1/admin/accounts/bulk-update"))
 }

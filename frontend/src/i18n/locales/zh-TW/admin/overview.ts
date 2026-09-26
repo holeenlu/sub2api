@@ -627,7 +627,11 @@ export default {
       failedToToggle: '更新使用者狀態失敗',
       failedToLoadApiKeys: '載入使用者 API 金鑰失敗',
       deleteConfirm: "確定要刪除使用者 '{email}' 嗎？此操作無法撤銷。",
+      observerGroups: '可管理的帳號分組',
+      observerGroupsHint: '僅授權帳號管理, 不影響使用者呼叫 API 的分組權限. 未選擇分組時無帳號管理權限. 允許檢視和匯出帳號認證資訊; 共享帳號的操作也會影響其他分組.',
+      observerImportHint: '選擇匯入目標分組. 觀察者匯入不包含代理設定, 請使用不含代理的備份檔案.',
       roles: {
+        observer: '觀察者',
         admin: '管理員',
         user: '使用者'
       },

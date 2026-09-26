@@ -739,7 +739,11 @@ export default {
       failedToLoadBalanceHistory: '残高履歴の読み込みに失敗しました',
       createdAt: '作成日時',
       totalRecharged: 'チャージ合計',
+      observerGroups: '管理を許可するアカウントグループ',
+      observerGroupsHint: 'アカウント管理のみを許可し、API 利用のグループ権限には影響しません。未選択の場合は管理できません。認証情報の閲覧・エクスポートが可能です。共有アカウントの操作は他のグループにも影響します。',
+      observerImportHint: 'インポート先のグループを選択してください。オブザーバーはプロキシをインポートできません。プロキシを含まないバックアップを使用してください。',
       roles: {
+        observer: 'オブザーバー',
         admin: '管理者',
         user: 'ユーザー'
       },

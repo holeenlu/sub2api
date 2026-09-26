@@ -9,6 +9,7 @@ func ObserverAccountRouteAllowed(method, route string) bool {
 }
 
 var observerAccountRoutes = map[string]struct{}{
+	"GET /api/v1/admin/accounts/openai-request-timezones":            {},
 	"GET /api/v1/admin/accounts/:id/scheduled-test-plans":            {},
 	"POST /api/v1/admin/scheduled-test-plans":                        {},
 	"PUT /api/v1/admin/scheduled-test-plans/:id":                     {},
@@ -21,8 +22,6 @@ var observerAccountRoutes = map[string]struct{}{
 	"GET /api/v1/admin/accounts/upstream-billing-probe/settings":     {},
 	"POST /api/v1/admin/accounts/upstream-billing-probe/batch":       {},
 	"GET /api/v1/admin/accounts/ollama-cloud-usage/settings":         {},
-	"PUT /api/v1/admin/accounts/:id/codex-skip-harvest":              {},
-	"POST /api/v1/admin/accounts/:id/manual-harvest":                 {},
 	"GET /api/v1/admin/accounts/opencode-go-usage/settings":          {},
 	"GET /api/v1/admin/accounts/:id":                                 {},
 	"POST /api/v1/admin/accounts":                                    {},

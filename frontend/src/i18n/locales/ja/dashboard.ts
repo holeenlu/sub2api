@@ -614,6 +614,9 @@ export default {
       xhigh: 'xhigh'
     },
     preview: '原寸で表示',
+    fitArtwork: 'ウィンドウに合わせる',
+    actualSize: '100%',
+    previewSizing: 'プレビューの拡大率',
     previewTitle: '{group} · {model}',
     sandboxNote: '結果はネットワークにアクセスできない隔離されたサンドボックスで実行され、あなたのアカウントを読み取ることはできません。',
     remove: 'ショーケースから削除',
