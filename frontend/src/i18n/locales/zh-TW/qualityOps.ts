@@ -65,7 +65,7 @@ export default {
   "selectJudgeGroup": "請選擇判題分組",
   "selectJudgeModel": "選擇或輸入該分組支援的模型",
   "judgePrompt": "判題提示詞",
-  "defaultJudgePrompt": "判斷候選答案是否在語義上符合參考答案。忽略不影響含義的單位、標點和措辭差異，關注最終結論及題目要求。明確符合返回 correct，明確不符合返回 incorrect；無法確定或依據不足時返回 unknown。",
+  "defaultJudgePrompt": "只比較兩個值：reference_answer（參考值）與 candidate_answer（候選值）。數值相同或語義等價返回 correct，明確不同返回 incorrect，無法確定返回 unknown。忽略單位、標點和措辭差異，不要引用或推測題目內容。",
   "configureJudge": "請選擇判題分組、模型並填寫判題提示詞",
   "judgeModelsUnavailable": "暫時無法載入模型候選，可直接輸入判題分組支援的模型 ID",
   "judgeReason": "判題理由",
