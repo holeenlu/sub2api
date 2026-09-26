@@ -295,7 +295,7 @@ func TestFunctionCmdEligibilityAndLegacyCompatibility(t *testing.T) {
 	}
 }
 
-func TestFunctionCmdRealParametersAndSchemaRejection(t *testing.T) {
+func TestFunctionCmdRealParametersPassThrough(t *testing.T) {
 	params := object{"type": "object", "required": []any{"cmd"}, "additionalProperties": false,
 		"properties": object{
 			"cmd": object{"type": "string"}, "workdir": object{"type": "string"},
@@ -314,14 +314,20 @@ func TestFunctionCmdRealParametersAndSchemaRejection(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(functionCmdTestArguments(t, call), good) {
 		t.Fatal("real argument types changed", err)
 	}
-	for _, bad := range []object{
+	for _, extra := range []object{
 		{"workdir": 7}, {"login": "false"}, {"yield_time_ms": "1000"},
 		{"prefix_rule": []any{1}}, {"sandbox_permissions": "unknown"}, {"undeclared": true},
 	} {
-		raw, _ := json.Marshal(bad)
-		_, err := bridge.translateCall(functionCmdTestNative(t, "exec_command", cmd, string(raw)))
-		if err == nil || strings.Contains(err.Error(), cmd) {
-			t.Fatal("bad metadata accepted or command leaked")
+		raw, _ := json.Marshal(extra)
+		call, err := bridge.translateCall(functionCmdTestNative(t, "exec_command", cmd, string(raw)))
+		want := object{"cmd": cmd}
+		for key, value := range extra {
+			want[key] = value
+		}
+		gotRaw, _ := json.Marshal(functionCmdTestArguments(t, call))
+		wantRaw, _ := json.Marshal(want)
+		if err != nil || !bytes.Equal(gotRaw, wantRaw) {
+			t.Fatal("client-validated metadata was not passed through exactly")
 		}
 	}
 }

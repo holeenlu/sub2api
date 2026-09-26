@@ -66,12 +66,9 @@ func (b *Bridge) functionCmdTransportEnvelope(arguments object) (object, bool, e
 	if err != nil || len(encoded) > maxEnvelopeBytes {
 		return nil, true, fmt.Errorf("basispoints function cmd transport arguments exceed the size limit")
 	}
-	contract, schemaErr := prepareStructuredOutput(object{"format": object{
-		"type": "json_schema", "name": "exec_command_args", "schema": info.Parameters,
-	}})
-	if schemaErr != nil || contract.schema.Validate(args) != nil {
-		return nil, true, fmt.Errorf("basispoints function cmd transport arguments do not satisfy the client schema")
-	}
+	// The client is authoritative for the full tool schema. The relay only
+	// validates transport invariants above; rejecting here turns harmless extra
+	// or forward-compatible fields into a stream-level 502.
 	return object{"name": name, "arguments": args}, true, nil
 }
 
