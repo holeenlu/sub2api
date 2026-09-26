@@ -773,6 +773,8 @@ export default {
         oauthPassthrough: '自动透传（仅替换认证）',
         excelBPS: 'Excel / BPS 协议',
         excelBPSCacheCreationAsInput: '创建缓存按普通输入计费',
+        excelBPSAutoDisableOn403: '遇到 BPS 403 错误时自动关闭协议',
+        excelBPSAutoDisableOn403Desc: '默认关闭. 勾选后, 当 Excel / BPS 上游返回 HTTP 403 且错误为 basispoints_upstream_error 时, 自动关闭此账号的 Excel / BPS 协议. 不禁用账号, 不重试当前请求. 模型权限错误不触发, 403 也不代表已确认封禁.',
         excelBPSCacheCreationAsInputDesc: '默认关闭. 勾选后, BPS 缓存创建 token 计入普通输入并按输入价格计费, 返回下游的缓存创建用量同步归零. 总输入和缓存读取不变, 不影响上游实际缓存.',
         excelBPSDesc: '使用本账号已有的 ChatGPT OAuth 凭据，经 Excel 接口转发 Responses 请求。无需 GitHub 登录或 sidecar；关闭后恢复原 Codex 路径。',
         excelBPSAllModels: '对所有模型启用（兼容原设置）',
