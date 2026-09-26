@@ -6961,17 +6961,20 @@
 	              <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
 	                <div>
 	                  <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-	                    {{ t('ui.loginAgreement') }}
+	                    {{ localText("登录条款确认", "Login agreement") }}
 	                  </h2>
 	                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
 	                    {{
-	                      t('ui.controlWhetherTheLoginPageRequiresUsersToAccept')
+	                      localText(
+	                        "控制登录页是否要求用户先阅读并同意服务条款、隐私政策或其他 Markdown 文档。",
+	                        "Control whether the login page requires users to accept Markdown policy documents first.",
+	                      )
 	                    }}
 	                  </p>
 	                </div>
 	                <div class="flex items-center gap-3">
 	                  <span class="text-sm text-gray-600 dark:text-gray-300">
-	                    {{ form.login_agreement_enabled ? t('ui.enabled') : t('ui.disabled') }}
+	                    {{ form.login_agreement_enabled ? localText("已启用", "Enabled") : localText("未启用", "Disabled") }}
 	                  </span>
 	                  <Toggle v-model="form.login_agreement_enabled" />
 	                </div>
@@ -6982,7 +6985,7 @@
 	              <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
 	                <div>
 	                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-	                    {{ t('ui.displayMode') }}
+	                    {{ localText("展示形式", "Display mode") }}
 	                  </label>
 	                  <div class="grid grid-cols-2 gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
                     <button
@@ -6996,7 +6999,7 @@
                       @click="form.login_agreement_mode = 'modal'"
                     >
                       <Icon name="shield" size="sm" />
-                      {{ t('ui.modal') }}
+                      {{ localText("弹窗", "Modal") }}
                     </button>
                     <button
                       type="button"
@@ -7009,21 +7012,21 @@
                       @click="form.login_agreement_mode = 'checkbox'"
                     >
                       <Icon name="checkCircle" size="sm" />
-                      {{ t('ui.checkbox') }}
+                      {{ localText("复选框", "Checkbox") }}
                     </button>
                   </div>
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                     {{
                       form.login_agreement_mode === "checkbox"
-                        ? t('ui.theCheckboxAppearsBelowTheLoginButtonAndGates')
-                        : t('ui.theModalOpensOnTheLoginPageAndGates')
+                        ? localText("复选框会显示在登录按钮下方，未勾选前所有登录入口禁用。", "The checkbox appears below the login button and gates all login actions.")
+                        : localText("弹窗会在登录页打开，用户拒绝后所有登录入口保持禁用。", "The modal opens on the login page and gates all login actions until accepted.")
                     }}
                   </p>
                 </div>
 
                 <div>
                   <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {{ t('ui.updatedDate') }}
+                    {{ localText("条款更新日期", "Updated date") }}
                   </label>
                   <input
                     v-model="form.login_agreement_updated_at"
@@ -7031,7 +7034,7 @@
                     class="input"
                   />
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ t('ui.changingTheDateOrContentRequiresFreshConsent') }}
+                    {{ localText("日期或文档内容变化后，用户需要重新同意。", "Changing the date or content requires fresh consent.") }}
                   </p>
                 </div>
               </div>
@@ -7040,11 +7043,14 @@
                 <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h3 class="text-sm font-medium text-gray-900 dark:text-white">
-                      {{ t('ui.agreementDocuments') }}
+                      {{ localText("协议文档", "Agreement documents") }}
                     </h3>
                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                       {{
-                        t('ui.documentTitlesAreCustomizableAndContentIsSavedAs')
+                        localText(
+                          "文档名称可自定义，内容按 Markdown 保存。可参考：服务条款、使用政策、支持的国家和地区、服务特定条款。",
+                          "Document titles are customizable and content is saved as Markdown.",
+                        )
                       }}
                     </p>
                   </div>
@@ -7054,7 +7060,7 @@
                     @click="addLoginAgreementDocument"
                   >
                     <Icon name="plus" size="sm" />
-                    {{ t('ui.addDocument') }}
+                    {{ localText("添加文档", "Add document") }}
                   </button>
                 </div>
 
@@ -7082,7 +7088,7 @@
                         </span>
                         <div class="min-w-0">
                           <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">
-                            {{ doc.title || t('ui.untitledDocument') }}
+                            {{ doc.title || localText("未命名文档", "Untitled document") }}
                           </p>
                           <p class="truncate text-xs text-gray-500 dark:text-gray-400">
                             {{ loginAgreementRoutePath(doc, index) }}
@@ -7105,18 +7111,18 @@
                     <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
                       <div>
                         <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-                          {{ t('ui.documentTitle') }}
+                          {{ localText("文档名称", "Document title") }}
                         </label>
                         <input
                           v-model="doc.title"
                           type="text"
                           class="input text-sm"
-                          :placeholder="t('ui.exampleTermsOfService')"
+                          :placeholder="localText('例如：服务条款', 'Example: Terms of Service')"
                         />
                       </div>
                       <div>
                         <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-                          {{ t('ui.routeSlug') }}
+                          {{ localText("路由标识", "Route slug") }}
                         </label>
                         <div class="flex overflow-hidden rounded-lg border border-gray-300 bg-white focus-within:border-primary-500 focus-within:ring-1 focus-within:ring-primary-500 dark:border-dark-600 dark:bg-dark-900">
                           <span class="inline-flex flex-shrink-0 items-center border-r border-gray-200 bg-gray-50 px-3 text-sm text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400">
@@ -7133,13 +7139,13 @@
                     </div>
                     <div class="mt-3">
                       <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-                        {{ t('ui.markdownContent') }}
+                        {{ localText("Markdown 内容", "Markdown content") }}
                       </label>
                         <textarea
                           v-model="doc.content_md"
                           rows="8"
                           class="input font-mono text-sm"
-                          :placeholder="t('ui.writeTheFinalMarkdownContentHere')"
+                          :placeholder="localText('在这里填写正式 Markdown 内容。', 'Write the final Markdown content here.')"
                         ></textarea>
                     </div>
                   </div>
@@ -7217,7 +7223,7 @@
                 </p>
               </div>
               <h4 class="mt-6 input-label">{{ t('admin.settings.features.excelBpsImages.requestLimitsTitle') }}</h4>
-              <div class="mt-5 grid gap-4 sm:grid-cols-3">
+              <div class="mt-5 grid gap-4 sm:grid-cols-4">
                 <div class="space-y-1">
                   <label for="excel-bps-image-body-limit" class="input-label">{{ t('admin.settings.features.excelBpsImages.bodyLimit') }}</label>
                   <input id="excel-bps-image-body-limit" v-model.number="form.excel_bps_image_body_limit_mib" class="input" type="number" min="1" max="128" step="1" required />
@@ -7230,52 +7236,51 @@
                   <label for="excel-bps-image-max-requests" class="input-label">{{ t('admin.settings.features.excelBpsImages.maxRequests') }}</label>
                   <input id="excel-bps-image-max-requests" v-model.number="form.excel_bps_image_max_requests" class="input" type="number" min="1" max="512" step="1" required />
                 </div>
-              </div>
-              <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.settings.features.excelBpsImages.budgetHint') }}
-              </p>
-              <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                {{ t(form.excel_bps_image_mode === 'native' ? 'admin.settings.features.excelBpsImages.nativeRetentionHint' : 'admin.settings.features.excelBpsImages.retentionHint') }}
-              </p>
-              <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.settings.features.excelBpsImages.capacityHint') }}
-              </p>
-              <h4 class="mt-6 input-label">{{ t('admin.settings.features.excelBpsImages.imageLimitsTitle') }}</h4>
-              <div class="mt-3 grid gap-4 sm:grid-cols-3">
-                <div class="space-y-1">
-                  <label for="excel-bps-image-max-image-mib" class="input-label">{{ t('admin.settings.features.excelBpsImages.maxImageMiB') }}</label>
-                  <input id="excel-bps-image-max-image-mib" v-model.number="form.excel_bps_image_max_image_mib" class="input" type="number" min="1" max="128" step="1" required />
-                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 128 }) }}</p>
-                </div>
                 <div class="space-y-1">
                   <label for="excel-bps-image-max-images" class="input-label">{{ t('admin.settings.features.excelBpsImages.maxImages') }}</label>
                   <input id="excel-bps-image-max-images" v-model.number="form.excel_bps_image_max_images" class="input" type="number" min="1" max="4096" step="1" required />
                   <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 4096 }) }}</p>
                 </div>
-                <div class="space-y-1">
-                  <label for="excel-bps-image-max-total-mib" class="input-label">{{ t('admin.settings.features.excelBpsImages.maxTotalMiB') }}</label>
-                  <input id="excel-bps-image-max-total-mib" v-model.number="form.excel_bps_image_max_total_mib" class="input" type="number" min="1" max="128" step="1" required />
-                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 128 }) }}</p>
-                </div>
-                <div class="space-y-1">
-                  <label for="excel-bps-image-storage-mib" class="input-label">{{ t('admin.settings.features.excelBpsImages.storageMiB') }}</label>
-                  <input id="excel-bps-image-storage-mib" v-model.number="form.excel_bps_image_storage_mib" class="input" type="number" min="1" max="16384" step="1" required />
-                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 16384 }) }}</p>
-                </div>
-                <div class="space-y-1">
-                  <label for="excel-bps-image-storage-entries" class="input-label">{{ t('admin.settings.features.excelBpsImages.storageEntries') }}</label>
-                  <input id="excel-bps-image-storage-entries" v-model.number="form.excel_bps_image_storage_entries" class="input" type="number" min="1" max="65536" step="1" required />
-                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 65536 }) }}</p>
-                </div>
-                <div class="space-y-1">
-                  <label for="excel-bps-image-ttl-minutes" class="input-label">{{ t('admin.settings.features.excelBpsImages.ttlMinutes') }}</label>
-                  <input id="excel-bps-image-ttl-minutes" v-model.number="form.excel_bps_image_ttl_minutes" class="input" type="number" min="1" max="1440" step="1" required />
-                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 1440 }) }}</p>
-                </div>
               </div>
               <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.settings.features.excelBpsImages.retentionHint') }}
+                {{ t('admin.settings.features.excelBpsImages.budgetHint') }}
               </p>
+              <p v-if="form.excel_bps_image_mode === 'native'" class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.features.excelBpsImages.nativeRetentionHint', { maxImages: form.excel_bps_image_max_images }) }}
+              </p>
+              <template v-if="form.excel_bps_image_mode === 'relay'">
+                <h4 class="mt-6 input-label">{{ t('admin.settings.features.excelBpsImages.imageLimitsTitle') }}</h4>
+                <div class="mt-3 grid gap-4 sm:grid-cols-3">
+                  <div class="space-y-1">
+                    <label for="excel-bps-image-max-image-mib" class="input-label">{{ t('admin.settings.features.excelBpsImages.maxImageMiB') }}</label>
+                    <input id="excel-bps-image-max-image-mib" v-model.number="form.excel_bps_image_max_image_mib" class="input" type="number" min="1" max="128" step="1" required />
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 128 }) }}</p>
+                  </div>
+                  <div class="space-y-1">
+                    <label for="excel-bps-image-max-total-mib" class="input-label">{{ t('admin.settings.features.excelBpsImages.maxTotalMiB') }}</label>
+                    <input id="excel-bps-image-max-total-mib" v-model.number="form.excel_bps_image_max_total_mib" class="input" type="number" min="1" max="128" step="1" required />
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 128 }) }}</p>
+                  </div>
+                  <div class="space-y-1">
+                    <label for="excel-bps-image-storage-mib" class="input-label">{{ t('admin.settings.features.excelBpsImages.storageMiB') }}</label>
+                    <input id="excel-bps-image-storage-mib" v-model.number="form.excel_bps_image_storage_mib" class="input" type="number" min="1" max="16384" step="1" required />
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 16384 }) }}</p>
+                  </div>
+                  <div class="space-y-1">
+                    <label for="excel-bps-image-storage-entries" class="input-label">{{ t('admin.settings.features.excelBpsImages.storageEntries') }}</label>
+                    <input id="excel-bps-image-storage-entries" v-model.number="form.excel_bps_image_storage_entries" class="input" type="number" min="1" max="65536" step="1" required />
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 65536 }) }}</p>
+                  </div>
+                  <div class="space-y-1">
+                    <label for="excel-bps-image-ttl-minutes" class="input-label">{{ t('admin.settings.features.excelBpsImages.ttlMinutes') }}</label>
+                    <input id="excel-bps-image-ttl-minutes" v-model.number="form.excel_bps_image_ttl_minutes" class="input" type="number" min="1" max="1440" step="1" required />
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 1440 }) }}</p>
+                  </div>
+                </div>
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.excelBpsImages.retentionHint') }}
+                </p>
+              </template>
             </div>
           </div>
         </div>
