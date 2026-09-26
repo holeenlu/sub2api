@@ -26,11 +26,11 @@ export default {
           bodyLimit: '請求體上限 (MiB)',
           budget: '共享資源預算 (MiB)',
           maxRequests: '最大在途請求數',
-          budgetHint: '共享預算至少為請求體上限的 8 倍. 調高數值會增加記憶體壓力.',
+          budgetHint: '共享預算至少為請求體上限的 8 倍. 實際預算取此值與在途上限 × 8 MiB 的較大值; 512 槽對應至少 4096 MiB 預算, 不等於實際記憶體佔用. 預設在途 128、預算 1024 MiB, 範圍 1–512, 儲存後立即生效.',
           retentionHint: '支援 PNG, JPEG, GIF 和 WebP. 單張最多 20 MiB, 每請求最多 20 張且合計 32 MiB. 圖片暫存於資料目錄, 每程序最多 1 GiB / 512 張. 連結在最後一次提交 30 分鐘後失效, 檔案由後台清理. 連結持有者可在有效期內讀取.',
           capacityHint: '上述限制覆蓋 OpenAI/Composite 的 Responses、Chat 和 Messages HTTP 請求, 包括純文字. 大請求可用並行更低; 超額返回 503, 不在記憶體中排隊. 提高預算會增加記憶體壓力.',
           invalidBaseUrl: '請填寫有效的 HTTPS 存取地址, 不包含路徑, 帳號密碼, 查詢參數或片段.',
-          invalidCapacity: '請求體上限須為 1–128 MiB, 共享預算為 512–2048 MiB 且至少為請求體的 8 倍, 在途請求數為 1–128.',
+          invalidCapacity: '請求體上限須為 1–128 MiB, 共享預算為 512–2048 MiB 且至少為請求體的 8 倍, 在途請求數為 1–512.',
         },
         channelMonitor: {
           title: '通道監控',
@@ -1325,6 +1325,10 @@ export default {
       user_error_view: {
         label: '允許使用者檢視自己的錯誤請求',
         description: '開啟後，使用者可在用量頁檢視自己失敗請求的精簡資訊（不含內部/上游錯誤細節）。需維運監控開啟才有資料。',
+      },
+      long_context_badge: {
+        label: '展示長上下文計費標識',
+        description: '開啟後，使用詳情中觸發長上下文階梯計費的記錄會在費用旁顯示 x2 標識；預設開啟。',
       },
       saveSettings: '儲存設定',
       saving: '儲存中...',

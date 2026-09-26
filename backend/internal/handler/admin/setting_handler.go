@@ -407,6 +407,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 
 		AccountSchedulingThresholds: settings.AccountSchedulingThresholds,
 		AllowUserViewErrorRequests:  settings.AllowUserViewErrorRequests,
+		UsageShowLongContextBadge:   settings.UsageShowLongContextBadge,
 		RequestCaptureEnabled:       settings.RequestCaptureEnabled,
 		RequestCaptureQuotaMiB:      settings.RequestCaptureQuotaMiB,
 		RequestCaptureRetentionDays: settings.RequestCaptureRetentionDays,

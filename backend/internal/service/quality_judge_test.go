@@ -48,6 +48,8 @@ func TestQualityJudgeSemanticAnswerAndConfiguredGroupModel(t *testing.T) {
 		require.Equal(t, int64(2), id, "never self-grade")
 		require.Equal(t, "operator-selected-model", model)
 		require.Contains(t, prompt, `"candidate_answer":"21个。"`)
+		require.Contains(t, prompt, `"reference_answer":"21"`)
+		require.NotContains(t, prompt, cfg.Prompt, "the judge must not receive the original question")
 		require.Contains(t, prompt, "operator rubric")
 		return `{"verdict":"correct","reason":"21个与21含义一致"}`, nil
 	}
