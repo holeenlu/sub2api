@@ -26,6 +26,28 @@ import (
 var excelBPSReplay basispoints.ReplayCache
 var excelBPSCatalog basispoints.CatalogCache
 
+func (s *OpenAIGatewayService) moveExcelBPSOn403(ctx context.Context, account *Account) bool {
+	target, enabled := account.ExcelBPS403GroupTarget()
+	if !enabled {
+		return false
+	}
+	repo, ok := s.accountRepo.(AccountExcelBPSGroupRepository)
+	if !ok {
+		return false
+	}
+	stateCtx, cancel := openAIAccountStateContext(ctx)
+	defer cancel()
+	changed, err := repo.MoveExcelBPSOn403(stateCtx, account)
+	if err != nil {
+		logger.LegacyPrintf("service.openai_excel_bps", "automatic group action failed: account_id=%d error_type=%T", account.ID, err)
+		return false
+	}
+	if changed {
+		logger.LegacyPrintf("service.openai_excel_bps", "automatically updated groups after upstream HTTP 403: account_id=%d target_group_id=%d", account.ID, target)
+	}
+	return changed
+}
+
 func (s *OpenAIGatewayService) disableExcelBPSOn403(ctx context.Context, account *Account) bool {
 	if !account.IsExcelBPSAutoDisableOn403Enabled() {
 		return false
@@ -299,8 +321,18 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			errorCode = "basispoints_rate_limited"
 			message = "Excel BPS rate limit exceeded; Codex account scheduling was not changed"
 		}
-		if resp.StatusCode == http.StatusForbidden && s.disableExcelBPSOn403(ctx, account) {
-			message = "Excel BPS rejected this request; Excel BPS was automatically disabled for this account; request was not replayed"
+		if resp.StatusCode == http.StatusForbidden {
+			// Apply group routing before the independent protocol switch is disabled.
+			moved := s.moveExcelBPSOn403(ctx, account)
+			disabled := s.disableExcelBPSOn403(ctx, account)
+			switch {
+			case moved && disabled:
+				message = "Excel BPS rejected this request; Excel BPS was automatically disabled and account groups were updated; request was not replayed"
+			case disabled:
+				message = "Excel BPS rejected this request; Excel BPS was automatically disabled for this account; request was not replayed"
+			case moved:
+				message = "Excel BPS rejected this request; account groups were automatically updated; request was not replayed"
+			}
 		}
 		return fail(resp.StatusCode, errorCode, message)
 	}
@@ -327,8 +359,14 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		stop := context.AfterFunc(repairCtx, func() { _ = repairResp.Body.Close() })
 		defer stop()
 		if repairResp.StatusCode < 200 || repairResp.StatusCode >= 300 {
-			_, _ = io.Copy(io.Discard, io.LimitReader(repairResp.Body, 512<<10))
-			if repairResp.StatusCode == http.StatusForbidden {
+			raw, _ := io.ReadAll(io.LimitReader(repairResp.Body, 512<<10))
+			if repairResp.StatusCode == http.StatusTooManyRequests && s.rateLimitService != nil {
+				stateCtx, cancel := openAIAccountStateContext(repairCtx)
+				s.rateLimitService.handle429Cooldown(stateCtx, account, repairResp.Header, raw)
+				cancel()
+			}
+			if repairResp.StatusCode == http.StatusForbidden && gjson.GetBytes(raw, "error.code").String() != "basispoints_model_access_changed" {
+				s.moveExcelBPSOn403(repairCtx, account)
 				s.disableExcelBPSOn403(repairCtx, account)
 			}
 			return nil, fmt.Errorf("excel BPS correction returned HTTP %d", repairResp.StatusCode)
