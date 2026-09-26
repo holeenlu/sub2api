@@ -87,7 +87,7 @@ func TestOpenAIGatewayHandlerImages_RateLimitedPoolKeeps429Message(t *testing.T)
 
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	gatewayService := service.NewOpenAIGatewayService(
-		accountRepo, nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil,
+		accountRepo, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	billingService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)

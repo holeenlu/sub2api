@@ -644,7 +644,7 @@ func (s *BatchImagePublicService) ListModels(ctx context.Context, owner BatchIma
 				if _, err := s.Pricing.BatchImageUnitPrice(ctx, &BatchImageJob{Provider: providerName, Model: model}); err != nil {
 					continue
 				}
-				if !account.IsModelSupportedInGroup(owner.GroupID, model) {
+				if !account.IsModelSupported(model) {
 					continue
 				}
 				if modelsByProvider[providerName] == nil {
@@ -953,7 +953,7 @@ func (s *BatchImagePublicService) selectProviderAndAccount(ctx context.Context, 
 		})
 		for i := range accounts {
 			account := accounts[i]
-			if !account.IsSchedulable() || !account.IsModelSupportedInGroup(owner.GroupID, model) {
+			if !account.IsSchedulable() || !account.IsModelSupported(model) {
 				continue
 			}
 			if provider.SupportsAccount(&account) {

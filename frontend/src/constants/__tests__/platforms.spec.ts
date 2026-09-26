@@ -4,7 +4,6 @@ import { CONCRETE_PLATFORM_OPTIONS, GROUP_PLATFORM_OPTIONS } from '@/constants/p
 const concretePlatforms = [
   'anthropic',
   'openai',
-  'openai_bps',
   'gemini',
   'antigravity',
   'grok',

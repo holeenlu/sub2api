@@ -351,10 +351,6 @@ type UpdateSettingsRequest struct {
 	// Available Channels feature switch (user-facing)
 	AvailableChannelsEnabled *bool `json:"available_channels_enabled"`
 
-	// Pelican showcase switch + gallery limits (user-facing)
-	PelicanShowcaseEnabled *bool                          `json:"pelican_showcase_enabled"`
-	PelicanShowcase        *service.PelicanShowcaseConfig `json:"pelican_showcase_config"`
-
 	// Subscription feature switch (user-facing subscription surface; see SettingKeySubscriptionEnabled)
 	SubscriptionEnabled *bool `json:"subscription_enabled"`
 
@@ -373,9 +369,8 @@ type UpdateSettingsRequest struct {
 	RiskControlEnabled *bool `json:"risk_control_enabled"`
 
 	// cyber 会话屏蔽开关 + TTL
-	CyberSessionBlockEnabled          *bool `json:"cyber_session_block_enabled"`
-	CyberSessionBlockTTLSeconds       *int  `json:"cyber_session_block_ttl_seconds"`
-	CyberSessionIdentityStrictEnabled *bool `json:"cyber_session_identity_strict_enabled"`
+	CyberSessionBlockEnabled    *bool `json:"cyber_session_block_enabled"`
+	CyberSessionBlockTTLSeconds *int  `json:"cyber_session_block_ttl_seconds"`
 
 	// OpenAI fast/flex policy (optional, only updated when provided)
 	OpenAIFastPolicySettings *dto.OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
@@ -395,23 +390,7 @@ type UpdateSettingsRequest struct {
 	AuthSourceGooglePlatformQuotas   map[string]*service.DefaultPlatformQuotaSetting `json:"auth_source_default_google_platform_quotas"`
 	AuthSourceDingTalkPlatformQuotas map[string]*service.DefaultPlatformQuotaSetting `json:"auth_source_default_dingtalk_platform_quotas"`
 
-	AllowUserViewErrorRequests  *bool   `json:"allow_user_view_error_requests"`
-	UsageShowLongContextBadge   *bool   `json:"usage_show_long_context_badge"`
-	RequestCaptureEnabled       *bool   `json:"request_capture_enabled"`
-	RequestCaptureQuotaMiB      *int64  `json:"request_capture_quota_mib"`
-	RequestCaptureRetentionDays *int    `json:"request_capture_retention_days"`
-	ExcelBPSImageMode           *string `json:"excel_bps_image_mode"`
-	ExcelBPSImageRelayEnabled   *bool   `json:"excel_bps_image_relay_enabled"`
-	ExcelBPSImageBaseURL        *string `json:"excel_bps_image_base_url"`
-	ExcelBPSImageBodyLimitMiB   *int    `json:"excel_bps_image_body_limit_mib"`
-	ExcelBPSImageBudgetMiB      *int    `json:"excel_bps_image_budget_mib"`
-	ExcelBPSImageMaxRequests    *int    `json:"excel_bps_image_max_requests"`
-	ExcelBPSImageMaxImageMiB    *int    `json:"excel_bps_image_max_image_mib"`
-	ExcelBPSImageMaxImages      *int    `json:"excel_bps_image_max_images"`
-	ExcelBPSImageMaxTotalMiB    *int    `json:"excel_bps_image_max_total_mib"`
-	ExcelBPSImageStorageMiB     *int    `json:"excel_bps_image_storage_mib"`
-	ExcelBPSImageStorageEntries *int    `json:"excel_bps_image_storage_entries"`
-	ExcelBPSImageTTLMinutes     *int    `json:"excel_bps_image_ttl_minutes"`
+	AllowUserViewErrorRequests *bool `json:"allow_user_view_error_requests"`
 }
 
 // UpdateSettings 更新系统设置
@@ -520,50 +499,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	var req UpdateSettingsRequest
 	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
-		return
-	}
-	if req.ExcelBPSImageMaxImageMiB != nil && (*req.ExcelBPSImageMaxImageMiB < 1 || *req.ExcelBPSImageMaxImageMiB > 128) {
-		response.BadRequest(c, "Image relay max_image_mib must be 1-128")
-		return
-	}
-	if req.ExcelBPSImageMaxImages != nil && (*req.ExcelBPSImageMaxImages < 1 || *req.ExcelBPSImageMaxImages > 4096) {
-		response.BadRequest(c, "Image relay max_images must be 1-4096")
-		return
-	}
-	if req.ExcelBPSImageMaxTotalMiB != nil && (*req.ExcelBPSImageMaxTotalMiB < 1 || *req.ExcelBPSImageMaxTotalMiB > 128) {
-		response.BadRequest(c, "Image relay max_total_mib must be 1-128")
-		return
-	}
-	if req.ExcelBPSImageStorageMiB != nil && (*req.ExcelBPSImageStorageMiB < 1 || *req.ExcelBPSImageStorageMiB > 16384) {
-		response.BadRequest(c, "Image relay storage_mib must be 1-16384")
-		return
-	}
-	if req.ExcelBPSImageStorageEntries != nil && (*req.ExcelBPSImageStorageEntries < 1 || *req.ExcelBPSImageStorageEntries > 65536) {
-		response.BadRequest(c, "Image relay storage_entries must be 1-65536")
-		return
-	}
-	if req.ExcelBPSImageTTLMinutes != nil && (*req.ExcelBPSImageTTLMinutes < 1 || *req.ExcelBPSImageTTLMinutes > 1440) {
-		response.BadRequest(c, "Image relay ttl_minutes must be 1-1440")
-		return
-	}
-	if req.ExcelBPSImageBodyLimitMiB != nil && (*req.ExcelBPSImageBodyLimitMiB < 1 || *req.ExcelBPSImageBodyLimitMiB > 128) {
-		response.BadRequest(c, "Image request body limit must be 1-128 MiB")
-		return
-	}
-	if req.ExcelBPSImageBudgetMiB != nil && (*req.ExcelBPSImageBudgetMiB < 512 || *req.ExcelBPSImageBudgetMiB > 2048) {
-		response.BadRequest(c, "Image request budget must be 512-2048 MiB")
-		return
-	}
-	if req.ExcelBPSImageMaxRequests != nil && (*req.ExcelBPSImageMaxRequests < 1 || *req.ExcelBPSImageMaxRequests > 512) {
-		response.BadRequest(c, "Image concurrent requests must be 1-512")
-		return
-	}
-	if req.RequestCaptureQuotaMiB != nil && (*req.RequestCaptureQuotaMiB < 1 || *req.RequestCaptureQuotaMiB > (1<<63-1)/(1<<20)) {
-		response.BadRequest(c, "Capture quota must be positive MiB within int64 range")
-		return
-	}
-	if req.RequestCaptureRetentionDays != nil && (*req.RequestCaptureRetentionDays < 1 || *req.RequestCaptureRetentionDays > 30) {
-		response.BadRequest(c, "Capture retention must be 1-30 days")
 		return
 	}
 	auditReq := settingsAuditRequest(req)
@@ -1741,107 +1676,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		MaxClaudeCodeVersion:                   req.MaxClaudeCodeVersion,
 		AllowUngroupedKeyScheduling:            req.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                     req.BackendModeEnabled,
-		RequestCaptureEnabled: func() bool {
-			if req.RequestCaptureEnabled != nil {
-				return *req.RequestCaptureEnabled
-			}
-			return previousSettings.RequestCaptureEnabled
-		}(),
-		RequestCaptureQuotaMiB: func() int64 {
-			if req.RequestCaptureQuotaMiB != nil {
-				return *req.RequestCaptureQuotaMiB
-			}
-			return previousSettings.RequestCaptureQuotaMiB
-		}(),
-		RequestCaptureRetentionDays: func() int {
-			if req.RequestCaptureRetentionDays != nil {
-				return *req.RequestCaptureRetentionDays
-			}
-			return previousSettings.RequestCaptureRetentionDays
-		}(),
-		ExcelBPSImageMode: func() string {
-			if req.ExcelBPSImageMode != nil {
-				return *req.ExcelBPSImageMode
-			}
-			return previousSettings.ExcelBPSImageMode
-		}(),
-		ExcelBPSImageRelayEnabled: func() bool {
-			if req.ExcelBPSImageRelayEnabled != nil {
-				return *req.ExcelBPSImageRelayEnabled
-			}
-			return previousSettings.ExcelBPSImageRelayEnabled
-		}(),
-		ExcelBPSImageBaseURL: func() string {
-			if req.ExcelBPSImageBaseURL != nil {
-				return *req.ExcelBPSImageBaseURL
-			}
-			return previousSettings.ExcelBPSImageBaseURL
-		}(),
-		ExcelBPSImageBodyLimitMiB: func() int {
-			if req.ExcelBPSImageBodyLimitMiB != nil {
-				return *req.ExcelBPSImageBodyLimitMiB
-			}
-			return previousSettings.ExcelBPSImageBodyLimitMiB
-		}(),
-		ExcelBPSImageBudgetMiB: func() int {
-			if req.ExcelBPSImageBudgetMiB != nil {
-				return *req.ExcelBPSImageBudgetMiB
-			}
-			return previousSettings.ExcelBPSImageBudgetMiB
-		}(),
-		ExcelBPSImageMaxImageMiB: func() int {
-			if req.ExcelBPSImageMaxImageMiB != nil {
-				return *req.ExcelBPSImageMaxImageMiB
-			}
-			return previousSettings.ExcelBPSImageMaxImageMiB
-		}(),
-		ExcelBPSImageMaxImages: func() int {
-			if req.ExcelBPSImageMaxImages != nil {
-				return *req.ExcelBPSImageMaxImages
-			}
-			return previousSettings.ExcelBPSImageMaxImages
-		}(),
-		ExcelBPSImageMaxTotalMiB: func() int {
-			if req.ExcelBPSImageMaxTotalMiB != nil {
-				return *req.ExcelBPSImageMaxTotalMiB
-			}
-			return previousSettings.ExcelBPSImageMaxTotalMiB
-		}(),
-		ExcelBPSImageStorageMiB: func() int {
-			if req.ExcelBPSImageStorageMiB != nil {
-				return *req.ExcelBPSImageStorageMiB
-			}
-			return previousSettings.ExcelBPSImageStorageMiB
-		}(),
-		ExcelBPSImageStorageEntries: func() int {
-			if req.ExcelBPSImageStorageEntries != nil {
-				return *req.ExcelBPSImageStorageEntries
-			}
-			return previousSettings.ExcelBPSImageStorageEntries
-		}(),
-		ExcelBPSImageTTLMinutes: func() int {
-			if req.ExcelBPSImageTTLMinutes != nil {
-				return *req.ExcelBPSImageTTLMinutes
-			}
-			return previousSettings.ExcelBPSImageTTLMinutes
-		}(),
-		ExcelBPSImageMaxRequests: func() int {
-			if req.ExcelBPSImageMaxRequests != nil {
-				return *req.ExcelBPSImageMaxRequests
-			}
-			return previousSettings.ExcelBPSImageMaxRequests
-		}(),
 		AllowUserViewErrorRequests: func() bool {
 			if req.AllowUserViewErrorRequests != nil {
 				return *req.AllowUserViewErrorRequests
 			}
 			return previousSettings.AllowUserViewErrorRequests
-		}(),
-		UsageShowLongContextBadge: func() bool {
-			if req.UsageShowLongContextBadge != nil {
-				return *req.UsageShowLongContextBadge
-			}
-			return previousSettings.UsageShowLongContextBadge
 		}(),
 		OpsMonitoringEnabled: func() bool {
 			if req.OpsMonitoringEnabled != nil {
@@ -2171,18 +2010,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AvailableChannelsEnabled
 		}(),
-		PelicanShowcaseEnabled: func() bool {
-			if req.PelicanShowcaseEnabled != nil {
-				return *req.PelicanShowcaseEnabled
-			}
-			return previousSettings.PelicanShowcaseEnabled
-		}(),
-		PelicanShowcase: func() service.PelicanShowcaseConfig {
-			if req.PelicanShowcase != nil {
-				return *req.PelicanShowcase
-			}
-			return previousSettings.PelicanShowcase
-		}(),
 		SubscriptionEnabled: func() bool {
 			if req.SubscriptionEnabled != nil {
 				return *req.SubscriptionEnabled
@@ -2236,12 +2063,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.CyberSessionBlockTTLSeconds
 			}
 			return previousSettings.CyberSessionBlockTTLSeconds
-		}(),
-		CyberSessionIdentityStrictEnabled: func() bool {
-			if req.CyberSessionIdentityStrictEnabled != nil {
-				return *req.CyberSessionIdentityStrictEnabled
-			}
-			return previousSettings.CyberSessionIdentityStrictEnabled
 		}(),
 	}
 
@@ -2648,8 +2469,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		GrokDefaultBaseURLMode:         updatedSettings.GrokDefaultBaseURLMode,
 
 		AvailableChannelsEnabled: updatedSettings.AvailableChannelsEnabled,
-		PelicanShowcaseEnabled:   updatedSettings.PelicanShowcaseEnabled,
-		PelicanShowcase:          updatedSettings.PelicanShowcase,
 		SubscriptionEnabled:      updatedSettings.SubscriptionEnabled,
 
 		ModelPlazaEnabled:       updatedSettings.ModelPlazaEnabled,
@@ -2659,29 +2478,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 		AffiliateEnabled: updatedSettings.AffiliateEnabled,
 
-		RiskControlEnabled:                updatedSettings.RiskControlEnabled,
-		CyberSessionBlockEnabled:          updatedSettings.CyberSessionBlockEnabled,
-		CyberSessionBlockTTLSeconds:       updatedSettings.CyberSessionBlockTTLSeconds,
-		CyberSessionIdentityStrictEnabled: updatedSettings.CyberSessionIdentityStrictEnabled,
-		AccountSchedulingThresholds:       updatedSettings.AccountSchedulingThresholds,
-		AllowUserViewErrorRequests:        updatedSettings.AllowUserViewErrorRequests,
-		UsageShowLongContextBadge:         updatedSettings.UsageShowLongContextBadge,
-		RequestCaptureEnabled:             updatedSettings.RequestCaptureEnabled,
-		RequestCaptureQuotaMiB:            updatedSettings.RequestCaptureQuotaMiB,
-		RequestCaptureRetentionDays:       updatedSettings.RequestCaptureRetentionDays,
-		ExcelBPSImageMode:                 updatedSettings.ExcelBPSImageMode,
-		ExcelBPSImageRelayEnabled:         updatedSettings.ExcelBPSImageRelayEnabled,
-		ExcelBPSImageMaxImageMiB:          updatedSettings.ExcelBPSImageMaxImageMiB,
-		ExcelBPSImageMaxImages:            updatedSettings.ExcelBPSImageMaxImages,
-		ExcelBPSImageMaxTotalMiB:          updatedSettings.ExcelBPSImageMaxTotalMiB,
-		ExcelBPSImageStorageMiB:           updatedSettings.ExcelBPSImageStorageMiB,
-		ExcelBPSImageStorageEntries:       updatedSettings.ExcelBPSImageStorageEntries,
-		ExcelBPSImageTTLMinutes:           updatedSettings.ExcelBPSImageTTLMinutes,
-
-		ExcelBPSImageBaseURL:      updatedSettings.ExcelBPSImageBaseURL,
-		ExcelBPSImageBodyLimitMiB: updatedSettings.ExcelBPSImageBodyLimitMiB,
-		ExcelBPSImageBudgetMiB:    updatedSettings.ExcelBPSImageBudgetMiB,
-		ExcelBPSImageMaxRequests:  updatedSettings.ExcelBPSImageMaxRequests,
+		RiskControlEnabled:          updatedSettings.RiskControlEnabled,
+		CyberSessionBlockEnabled:    updatedSettings.CyberSessionBlockEnabled,
+		CyberSessionBlockTTLSeconds: updatedSettings.CyberSessionBlockTTLSeconds,
+		AccountSchedulingThresholds: updatedSettings.AccountSchedulingThresholds,
+		AllowUserViewErrorRequests:  updatedSettings.AllowUserViewErrorRequests,
 	}
 	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
 		slog.Error("openai_fast_policy_settings_get_failed", "error", err)

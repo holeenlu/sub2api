@@ -10,9 +10,14 @@ func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 // 插件返回标准 http.Response，响应解析、错误映射、SSE 和计费仍由现有核心链处理。
 func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
 	snapshot := snapshotCodexTicketHTTPRequest(request, account)
-	// Keep ticket observation around the final response, while every egress
-	// attempt retains its own plugin routing and trace.
-	response, err := s.doUpstreamWithProxyFallback(request.Context(), request, account, proxyURL)
+	if s.pluginManager != nil {
+		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
+		if handled {
+			s.observeCodexTicketHTTPResponse(snapshot, response)
+			return response, err
+		}
+	}
+	response, err := s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
 	s.observeCodexTicketHTTPResponse(snapshot, response)
 	return response, err
 }
