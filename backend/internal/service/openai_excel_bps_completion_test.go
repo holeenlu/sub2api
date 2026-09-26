@@ -34,6 +34,7 @@ func TestExcelBPSNativeAttachmentsUseSelectedTransport(t *testing.T) {
 				bpsCompletionResponse(200, "data: "+`{"type":"response.completed","response":{"id":"resp_image","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":1}}}`+"\n\n"),
 			}}
 			svc := openAIClientToolsTestService(upstream)
+			enableNativeAttachments(svc)
 			account := excelAccount()
 			body := []byte(fmt.Sprintf(`{"model":"gpt-6-astra","stream":%v,"input":[{"role":"user","content":[{"type":"input_image","image_url":%q,"detail":"high"}]}]}`, stream, imageURL))
 			rec := httptest.NewRecorder()
@@ -69,6 +70,7 @@ func TestExcelBPSNativeAttachmentFailureDoesNotGenerate(t *testing.T) {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			upstream := &httpUpstreamRecorder{resp: bpsCompletionResponse(status, "PRIVATE_RESPONSE")}
 			svc := openAIClientToolsTestService(upstream)
+			enableNativeAttachments(svc)
 			body := []byte(fmt.Sprintf(`{"model":"gpt-6-astra","input":[{"role":"user","content":[{"type":"input_image","image_url":%q}]}]}`, url))
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
@@ -95,6 +97,7 @@ func TestExcelBPSCorrectionUsesSameModelAndCountsBothAttempts(t *testing.T) {
 			}
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{response("missing", "original", 5), response("shell", "fixed", 7)}}
 			svc := openAIClientToolsTestService(upstream)
+			enableNativeAttachments(svc)
 			body := []byte(fmt.Sprintf(`{"model":"gpt-6-astra","stream":%v,"input":"run pwd","tools":[{"type":"function","name":"shell","parameters":{"type":"object","required":["cmd"],"properties":{"cmd":{"type":"string"}}}}]}`, stream))
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)

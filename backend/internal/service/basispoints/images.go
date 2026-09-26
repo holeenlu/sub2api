@@ -29,17 +29,6 @@ func validateImage(part object) error {
 			return fmt.Errorf("basispoints input_image requires an absolute HTTPS image URL without embedded credentials")
 		}
 	}
-	for _, c := range id {
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-func validateImageDetail(part object) error {
 	if detail, exists := part["detail"]; exists && detail != nil {
 		switch text(detail) {
 		case "auto", "low", "high", "original":

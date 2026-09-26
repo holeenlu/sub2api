@@ -43,7 +43,7 @@ func (c *CatalogCache) remove(e *list.Element) {
 func (c *CatalogCache) prune(now time.Time) {
 	for e := c.order.Front(); e != nil; e = c.order.Front() {
 		entry, _ := e.Value.(catalogEntry)
-		if now.Sub(entry.touched) < replayIdleTTL {
+		if now.Sub(entry.touched) < replayCacheIdleTTL {
 			break
 		}
 		c.remove(e)
@@ -158,4 +158,35 @@ func PrepareWithCatalog(raw []byte, scope string, replay *ReplayCache, cache *Ca
 		// Concurrent incremental declarations merge against a fresh snapshot.
 	}
 	return nil, nil, fmt.Errorf("basispoints tool catalog changed concurrently; retry request")
+}
+
+// Reprepare applies uploaded attachment references using this request's validated
+// catalog. It neither reads nor replaces a newer shared session catalog.
+func (b *Bridge) Reprepare(raw []byte) ([]byte, *Bridge, error) {
+	var source object
+	if err := decode(raw, &source); err != nil || source == nil {
+		return nil, nil, fmt.Errorf("invalid Basispoints request JSON")
+	}
+	if _, explicit := source["tools"]; !explicit {
+		keys := make([]string, 0, len(b.tools))
+		for key := range b.tools {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		declarations := make([]any, 0, len(keys))
+		for _, key := range keys {
+			info := b.tools[key]
+			var declaration any = info.Catalog
+			if info.Namespace != "" {
+				declaration = object{"type": "namespace", "name": info.Namespace, "tools": []any{declaration}}
+			}
+			declarations = append(declarations, declaration)
+		}
+		source["tools"] = declarations
+	}
+	encoded, err := json.Marshal(source)
+	if err != nil {
+		return nil, nil, err
+	}
+	return Prepare(encoded, b.scope, b.replay)
 }

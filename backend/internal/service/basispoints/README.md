@@ -50,7 +50,7 @@ the final response locally. This does not provide upstream constrained decoding.
 - Preserve intended operations and call order. Require the corrected batch to
   have the same number of calls and pass the current catalog's transport checks.
   Reject changes to previously valid operations. For an invalid raw call corrected
-  to an explicit CUSTOM or FUNCTION_CODE transport, bind its code field to the
+  to an explicit CUSTOM, FUNCTION_CODE or FUNCTION_CMD transport, bind its code field to the
   original bytes before checking the operation and size limits. Never dispatch
   source text rewritten by the correction model, including whitespace changes.
   Store the bound native call in replay history so later turns see the exact

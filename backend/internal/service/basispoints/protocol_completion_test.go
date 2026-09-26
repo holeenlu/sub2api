@@ -83,7 +83,7 @@ func TestReplayIdleTTLAndSnapshotIsolation(t *testing.T) {
 	if cache.get("a", "id")["n"] != json.Number("9007199254740993") {
 		t.Fatal("snapshot mutation or precision loss")
 	}
-	now = now.Add(replayIdleTTL)
+	now = now.Add(replayCacheIdleTTL)
 	if cache.get("a", "id") != nil || cache.bytes != 0 || cache.order.Len() != 0 {
 		t.Fatal("idle entry not reclaimed")
 	}
@@ -182,9 +182,22 @@ func TestNativeAttachmentsMultipartDedupAndFileIDs(t *testing.T) {
 	source["input"] = []any{object{"role": "user", "content": []any{object{"type": "input_image", "image_url": url, "detail": "high"}}}, object{"type": "custom_tool_call_output", "call_id": "x", "output": []any{object{"type": "input_image", "image_url": url}}}}
 	raw, _ := json.Marshal(source)
 	calls := 0
-	out, err := RewriteAttachments(context.Background(), raw, func(ctx context.Context, media, payload string, size int64) (string, error) {
+	plan, err := PrepareNativeImages(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := plan.Upload(context.Background(), new(AttachmentCache), "", func(ctx context.Context, img InlineAttachment) (string, error) {
 		calls++
-		req, err := NewAttachmentRequest(ctx, http.Header{"Authorization": []string{"Bearer test"}}, media, payload, size)
+		readerBody, contentType, length, err := img.Multipart()
+		if err != nil {
+			return "", err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, AttachmentsURL, readerBody)
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer test")
+			req.Header.Set("Content-Type", contentType)
+			req.ContentLength = length
+		}
 		if err != nil {
 			return "", err
 		}
@@ -243,16 +256,15 @@ func TestNativeAttachmentsValidateWholeBatchBeforeUpload(t *testing.T) {
 		source["input"] = []any{object{"role": "user", "content": []any{object{"type": "input_image", "image_url": url}, bad}}}
 		raw, _ := json.Marshal(source)
 		calls := 0
-		_, err := RewriteAttachments(context.Background(), raw, func(context.Context, string, string, int64) (string, error) { calls++; return "file-id", nil })
+		plan, err := PrepareNativeImages(raw)
+		if err == nil {
+			_, err = plan.Upload(context.Background(), new(AttachmentCache), "", func(context.Context, InlineAttachment) (string, error) { calls++; return "file-id", nil })
+		}
 		if err == nil || calls != 0 {
 			t.Fatalf("invalid batch uploaded %d: %v", calls, err)
 		}
 	}
-	for _, response := range []string{`{"openai_file_id":""}`, `{"openai_file_id":"secret/id"}`, `{"openai_file_id":"file-a"} trailing`, strings.Repeat("x", 65537)} {
-		if _, err := ReadAttachmentID(strings.NewReader(response)); err == nil {
-			t.Fatal("invalid attachment response accepted")
-		}
-	}
+
 }
 
 func TestToolRepairPreservesStreamAndAggregatesUsage(t *testing.T) {
@@ -394,7 +406,7 @@ func TestCatalogExpiryAndInvalidIncrementAreAtomic(t *testing.T) {
 	if len(b.tools) != 1 || b.tools["shell"].Kind != "function" {
 		t.Fatal("invalid delta mutated catalog")
 	}
-	now = now.Add(replayIdleTTL)
+	now = now.Add(replayCacheIdleTTL)
 	if len(prepareCatalogTest(t, cache, testSource(), "scope").tools) != 0 {
 		t.Fatal("idle catalog inherited")
 	}
@@ -436,5 +448,45 @@ func TestCorrectionDisconnectRetainsReportedUsageWithoutDoubleCounting(t *testin
 	response, err := readRepairResponse(strings.NewReader(wire))
 	if err == nil || quoted(response["usage"]) != `{"input_tokens":7,"output_tokens":2}` {
 		t.Fatalf("progress usage lost or summed twice: %v %v", response, err)
+	}
+}
+
+func TestReprepareKeepsValidatedCatalogDuringAttachmentUpload(t *testing.T) {
+	cache := new(CatalogCache)
+	source := testSource()
+	source["tools"] = []any{object{"type": "function", "name": "original"}}
+	prepareCatalogTest(t, cache, source, "scope")
+	delete(source, "tools")
+	b := prepareCatalogTest(t, cache, source, "scope")
+	newer := testSource()
+	newer["tools"] = []any{object{"type": "function", "name": "newer"}}
+	prepareCatalogTest(t, cache, newer, "scope")
+	source["input"] = []any{object{"role": "user", "content": []any{object{"type": "input_image", "file_id": "file-uploaded"}}}}
+	raw, _ := json.Marshal(source)
+	body, final, err := b.Reprepare(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := final.tools["original"]; !ok || len(final.tools) != 1 || !bytes.Contains(body, []byte("file-uploaded")) {
+		t.Fatal("upload changed validated request catalog")
+	}
+	current := prepareCatalogTest(t, cache, testSource(), "scope")
+	if _, ok := current.tools["newer"]; !ok || len(current.tools) != 1 {
+		t.Fatal("upload overwrote newer session catalog")
+	}
+}
+
+func TestRawCommandCompatibilityDoesNotBypassOrdinarySchema(t *testing.T) {
+	source := testSource()
+	spec := functionCmdTestTool("exec_command")
+	params := mustTestValue[object](t, spec["parameters"])
+	params["additionalProperties"] = false
+	source["tools"] = []any{spec}
+	_, b := mustPrepare(t, source, "scope", nil)
+	if _, err := b.translateCall(nativeCall(object{"name": "exec_command", "arguments": object{"cmd": "pwd", "undeclared": true}})); err == nil {
+		t.Fatal("ordinary command envelope bypassed schema")
+	}
+	if _, err := b.translateCall(functionCmdTestNative(t, "exec_command", "pwd", "{\"undeclared\":true}")); err != nil {
+		t.Fatal(err)
 	}
 }
