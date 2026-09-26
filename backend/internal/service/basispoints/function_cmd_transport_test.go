@@ -276,7 +276,14 @@ func TestFunctionCmdEligibilityAndLegacyCompatibility(t *testing.T) {
 		}
 	}
 	spec := functionCmdTestTool("exec_command")
-	props := spec["parameters"].(object)["properties"].(object)
+	parameters, ok := spec["parameters"].(object)
+	if !ok {
+		t.Fatal("expected command tool parameters object")
+	}
+	props, ok := parameters["properties"].(object)
+	if !ok {
+		t.Fatal("expected command tool properties object")
+	}
 	props["code"] = object{"type": "string"}
 	if supportsFunctionCmdTransport("exec_command", "function", spec["parameters"]) {
 		t.Fatal("existing code contract overridden")
