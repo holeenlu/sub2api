@@ -134,6 +134,18 @@ type AccountRepository interface {
 	ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error)
 }
 
+// AccountExcelBPSRepository disables only BPS, provided the account credentials
+// and both opt-in switches still match at the time of the write.
+type AccountExcelBPSRepository interface {
+	DisableExcelBPSOn403(ctx context.Context, account *Account) (bool, error)
+}
+
+// AccountExcelBPSGroupRepository applies an opted-in group action atomically
+// after rechecking the account identity, policy and current memberships.
+type AccountExcelBPSGroupRepository interface {
+	MoveExcelBPSOn403(ctx context.Context, account *Account) (bool, error)
+}
+
 type AccountDuplicateRepository interface {
 	// CreateWithAccountGroups atomically persists an account, its exact group priorities,
 	// and the scheduler outbox event for the new routing snapshot.
@@ -523,6 +535,9 @@ func (s *AccountService) TestCredentials(ctx context.Context, id int64) error {
 	case PlatformGrok:
 		// Grok OAuth credentials are validated via token exchange/refresh and request-path probes.
 		return nil
+	case PlatformOpenAIBPS:
+		_, err := NormalizeOpenAIBPSCredentials(account.Type, account.Credentials, nil)
+		return err
 	case PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo:
 		// 国产 OpenAI 兼容供应商与 OpenCode：凭证为 API Key，实际可用性经余额/额度探测与转发路径验证。
 		return nil
