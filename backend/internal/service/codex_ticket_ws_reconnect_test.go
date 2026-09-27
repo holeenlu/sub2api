@@ -38,7 +38,7 @@ func (d *codexTicketReconnectDialer) Dial(ctx context.Context, url string, heade
 	return conn, http.StatusSwitchingProtocols, response, err
 }
 
-func TestCodexTicketWSReusedHandshakeDoesNotInvalidateNewGeneration(t *testing.T) {
+func TestCodexTicketWSNewGenerationReconnectsWithoutOldHandshakeState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -183,18 +183,17 @@ func TestCodexTicketWSReusedHandshakeDoesNotInvalidateNewGeneration(t *testing.T
 
 	runSingleTurnSession("resp_retry_fresh")
 
-	require.Equal(t, 2, dialer.DialCount(), "首读失败后的重试应新建连接")
+	require.Equal(t, 2, dialer.DialCount(), "new generation must use a new connection")
 	fresh.mu.Lock()
 	freshWrites := len(fresh.writes)
 	fresh.mu.Unlock()
 	require.Equal(t, 1, freshWrites)
-	// Reusing the old connection must keep its continuation state, without
-	// attributing that state to the newly stored ticket generation.
+	// The new generation must send its own credentials and preserve its audit state.
 	dialer.mu.Lock()
 	sent := append([]http.Header(nil), dialer.sent...)
 	dialer.mu.Unlock()
 	require.Len(t, sent, 2)
-	require.Equal(t, "previous-connection-state", sent[1].Get(openAICodexTurnStateHeader))
+	require.Equal(t, freshTicket.State, sent[1].Get(openAICodexTurnStateHeader))
 	require.Equal(t, freshTicket.Cookie, sent[1].Get("Cookie"))
 	require.Empty(t, capture.events)
 	require.Same(t, freshTicket, capture.current)

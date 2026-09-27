@@ -19,6 +19,11 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	latest, admissionErr := s.latestOpenAITurnAccount(ctx, c, account)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+	account = latest
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
@@ -779,7 +784,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		imageSizeTier = imageCfg.SizeTier
 		imageInputSize = imageCfg.InputSize
 	}
-	// Get access token
+	// Get access token. Non-WS attempts re-read the authoritative account and
+	// refresh this token immediately before building the request below.
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
@@ -908,6 +914,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			)
 			if wsErr == nil {
 				break
+			}
+			if IsOpenAITurnAdmissionError(wsErr) {
+				return nil, wsErr
 			}
 			if c != nil && c.Writer != nil && c.Writer.Written() {
 				break
@@ -1038,6 +1047,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	agentTaskRecoveryTried := false
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	for {
+		latest, admissionErr := s.admitOpenAITurn(ctx, c, account, extractOpenAICodexTicketModel(body))
+		if admissionErr != nil {
+			return nil, admissionErr
+		}
+		account = latest
+		token, _, err = s.GetAccessToken(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		var headerGuard *openAIFirstOutputHeaderGuard

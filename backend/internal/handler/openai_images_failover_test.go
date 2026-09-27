@@ -27,6 +27,11 @@ type openAIImagesFailoverAccountRepo struct {
 	accounts []service.Account
 }
 
+func (r openAIImagesFailoverAccountRepo) GetOpenAITurnAdmission(ctx context.Context, id int64) (*service.Account, *service.Account, error) {
+	a, err := r.GetByID(ctx, id)
+	return a, nil, err
+}
+
 func (r openAIImagesFailoverAccountRepo) GetByID(_ context.Context, id int64) (*service.Account, error) {
 	for i := range r.accounts {
 		if r.accounts[i].ID == id {

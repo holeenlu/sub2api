@@ -1729,6 +1729,7 @@ export default {
         noModels: '目前沒有需要打票的模型',
         length: '票據長度',
         acquired: '取得於',
+        expires: '憑證到期',
         present: '已攜帶',
         absent: '未攜帶',
         accountParticipation: '此帳號參與打票',
@@ -1767,7 +1768,7 @@ export default {
       },
       codexTicketPool: {
         title: 'Codex 打票代理池',
-        description: '複用 IP 設定中的可用代理，按池輪換；無可用代理時不直連。',
+        description: '打票按池輪換；業務請求固定使用該票據的打票代理。代理停用、到期或地址變更時不回退直連。',
         save: '儲存代理池',
         saved: '代理池已儲存',
         all: '全部可用代理',
@@ -1778,7 +1779,7 @@ export default {
       },
       codexTicketCadence: {
         title: '打票間隔',
-        description: '失敗後隨機重試；主動重新整理預設 30 分鐘，填 0 關閉。使用頁面底部的「儲存設定」儲存。',
+        description: '失敗後隨機重試；綁定憑證最長 4 分鐘，到期前 30 秒嘗試更新，業務繁忙時暫停打票。主動重新整理可設定更短間隔，0 只關閉額外定時重新整理。使用頁面底部的「儲存設定」儲存。',
         retryMin: '最小重試（秒）',
         retryMax: '最大重試（秒）',
         refresh: '主動重新整理（秒，0=關閉）',

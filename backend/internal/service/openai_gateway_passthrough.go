@@ -336,17 +336,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 	}
 
-	// Get access token
-	token, _, err := s.GetAccessToken(ctx, account)
-	if err != nil {
-		return nil, err
-	}
-
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
-
 	if c != nil {
 		c.Set("openai_passthrough", true)
 	}
@@ -366,6 +355,25 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			actualModel = reqModel
 		}
 		SetOpsUpstreamModel(c, actualModel)
+
+		// Re-read account eligibility immediately before building the request.
+		// The returned snapshot is also the source for the token, proxy and
+		// ticket header so a token refresh or group change cannot leave this
+		// attempt using the stale scheduler snapshot.
+		latest, admissionErr := s.admitOpenAITurn(ctx, c, account, actualModel)
+		if admissionErr != nil {
+			return nil, admissionErr
+		}
+		account = latest
+		token, _, err := s.GetAccessToken(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+		proxyURL := ""
+		if account.ProxyID != nil && account.Proxy != nil {
+			proxyURL = account.Proxy.URL()
+		}
+
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
 		releaseUpstreamCtx()

@@ -108,6 +108,17 @@ func (s *OpenAIGatewayService) scheduleCodexTicketAfterSuccess(ticket *openAICod
 	}
 	key := openAICodexTicketKey(ticket.AccountID, ticket.Model)
 	seconds := s.codexTicketCadence(context.Background()).RefreshSeconds
+	if ticket.Binding != nil && !ticket.Binding.ExpiresAt.IsZero() {
+		next := ticket.Binding.ExpiresAt.Add(-30 * time.Second)
+		if seconds > 0 {
+			candidate := ticket.CapturedAt.Add(time.Duration(seconds) * time.Second)
+			if candidate.Before(next) {
+				next = candidate
+			}
+		}
+		s.openaiCodexTicketNextAttempt.Store(key, next)
+		return
+	}
 	if seconds <= 0 {
 		s.openaiCodexTicketNextAttempt.Delete(key)
 		return
@@ -133,8 +144,14 @@ func (s *OpenAIGatewayService) codexTicketAutomaticDue(account *Account, model s
 	}
 	if ticket.usable(now, 0, false, 0) {
 		s.scheduleCodexTicketAfterSuccess(ticket)
-		refreshSeconds := s.codexTicketCadence(context.Background()).RefreshSeconds
-		return refreshSeconds > 0 && !now.Before(ticket.CapturedAt.Add(time.Duration(refreshSeconds)*time.Second))
+		// Also honor credential freshness on the first scan after a restart,
+		// including when the optional proactive refresh timer is disabled.
+		if value, ok := s.openaiCodexTicketNextAttempt.Load(key); ok {
+			if next, valid := value.(time.Time); valid {
+				return !now.Before(next)
+			}
+		}
+		return false
 	}
 	return true
 }
@@ -188,6 +205,11 @@ func (s *OpenAIGatewayService) runCodexTicketAttemptWithChallengeGenerator(ctx c
 		return result, ErrCodexTicketRateLimited
 	}
 	account = current
+	ctx, finishActivity, activityErr := s.beginCodexTicketHarvest(ctx, account.ID)
+	if activityErr != nil {
+		return result, activityErr
+	}
+	defer finishActivity()
 	start := time.Now()
 	a := &result.CodexTicketAttempt
 	a.AccountID, a.Model, a.Trigger = account.ID, model, trigger
@@ -241,8 +263,9 @@ func (s *OpenAIGatewayService) runCodexTicketAttemptWithChallengeGenerator(ctx c
 		return result, nil
 	}
 	a.ChallengeExpectedCount = new(challenge.ExpectedCount)
+	binding := &codexTicketBinding{ProxyID: proxy.ID, ProxyFingerprint: codexTicketProxyFingerprint(proxyURL)}
 	output, state, cookie, status, probeErr := s.fireOpenAICodexTicketProbe(ctx, account, token, model, proxyURL,
-		challenge, time.Duration(cfg.HarvestAttemptTimeoutSeconds)*time.Second)
+		challenge, time.Duration(cfg.HarvestAttemptTimeoutSeconds)*time.Second, binding)
 	if status != 0 {
 		a.HTTPStatus = &status
 		length := len(state)
@@ -252,6 +275,9 @@ func (s *OpenAIGatewayService) runCodexTicketAttemptWithChallengeGenerator(ctx c
 	}
 	if probeErr != nil {
 		a.Outcome, a.ReasonCode = "error", "request"
+		if errors.Is(probeErr, context.Canceled) && s.codexTicketAccountBusy(context.Background(), account.ID) {
+			a.ReasonCode = "business_active"
+		}
 		if errors.Is(probeErr, ErrCodexProbeTemplateInvalid) {
 			a.ReasonCode = "template_invalid"
 		}
@@ -291,7 +317,15 @@ func (s *OpenAIGatewayService) runCodexTicketAttemptWithChallengeGenerator(ctx c
 	generation := uuid.NewString()
 	ticket := &openAICodexTicket{AccountID: account.ID, Model: model, State: state, Length: len(state),
 		GenerationID: generation, VerificationMethod: "modeltrace_v1", FingerprintCommit: commit,
-		CapturedAt: now, Attempts: 1, HTTPStatus: status, Cookie: cookie}
+		CapturedAt: now, Attempts: 1, HTTPStatus: status, Cookie: cookie, Binding: binding, ExpiresAt: binding.ExpiresAt}
+	if !ticket.usable(now, 0, false, 0) {
+		a.Outcome, a.ReasonCode = "miss", "credentials_expired"
+		return result, nil
+	}
+	if s.codexTicketAccountBusy(ctx, account.ID) {
+		a.Outcome, a.ReasonCode = "miss", "business_active"
+		return result, nil
+	}
 	if err := s.storeOpenAICodexTicket(ctx, account, ticket); err != nil {
 		a.Outcome, a.ReasonCode = "error", "persistence"
 		return result, nil
@@ -302,7 +336,7 @@ func (s *OpenAIGatewayService) runCodexTicketAttemptWithChallengeGenerator(ctx c
 		account.Extra = make(map[string]any)
 	}
 	account.Extra[openAICodexTicketExtraKey(model)] = ticket
-	a.Outcome, a.TicketGenerationID = "success", &generation
+	a.Outcome, a.TicketGenerationID, a.ExpiresAt = "success", &generation, &binding.ExpiresAt
 	return result, nil
 
 }
