@@ -241,7 +241,11 @@ export default {
       },
       codexModelCatalog: {
         title: 'Codexモデルカタログ',
-        description: 'このAPIキーで取得し、config.tomlで参照されているパスにカタログを保存してください。',
+        description: '開くたびに現在の API キーで利用可能なモデルを確認し、メインとレビューに最も高性能なモデルを選択します。カタログを config.toml が参照するパスに保存してください。',
+        loadingDescription: 'このキーで利用可能なモデルを確認し、設定を生成しています…',
+        refreshingDescription: 'このキーで前回保存したデータを使用しながら、モデルカタログを更新しています…',
+        cachedErrorDescription: 'モデルカタログを更新できませんでした。このキーで前回保存したデータを引き続き使用します。後ほど再試行できます。',
+        emptyDescription: 'このキーで利用可能な Codex モデルがありません。アカウントのモデル制限とグループのモデル許可リストを確認して再試行してください。',
         fetch: 'カタログを取得',
         retry: '再試行',
         download: 'カタログをダウンロード',
