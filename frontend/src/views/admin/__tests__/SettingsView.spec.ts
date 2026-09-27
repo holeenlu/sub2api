@@ -389,6 +389,16 @@ const baseSettingsResponse = {
   doc_url: "",
   home_content: "",
   compact_home_enabled: false,
+  excel_bps_image_mode: 'relay',
+  excel_bps_image_relay_enabled: false,
+  excel_bps_image_base_url: '',
+  excel_bps_image_max_image_mib: 20,
+  excel_bps_image_max_images: 20,
+  excel_bps_image_max_total_mib: 32,
+  excel_bps_image_storage_mib: 1024,
+  excel_bps_image_storage_entries: 512,
+  excel_bps_image_ttl_minutes: 30,
+
   hide_ccs_import_button: false,
   table_default_page_size: 20,
   table_page_size_options: [10, 20, 50, 100],
@@ -561,6 +571,7 @@ function mountView() {
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
         CodexTicketCadenceSettings: true,
+        EmailTemplateEditor: true,
       },
     },
   });
@@ -735,6 +746,154 @@ describe("admin SettingsView payment visible method controls", () => {
       expect(updateSettings.mock.calls.at(-1)?.[0].openai_codex_ticket_enabled).toBe(enabled ?? false);
       wrapper.unmount();
     }
+  });
+
+  it("saves Excel BPS image relay from the feature switches tab", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const tab = wrapper.findAll('button').find((node) => node.text().includes('admin.settings.tabs.features'));
+    expect(tab).toBeDefined();
+    await tab?.trigger('click');
+    const card = wrapper.get('[data-testid="excel-bps-image-settings"]');
+    expect(card.isVisible()).toBe(true);
+    expect(card.find('#excel-bps-image-base-url').exists()).toBe(false);
+    await card.get('#excel-bps-image-enabled').setValue(true);
+    await card.get('#excel-bps-image-base-url').setValue(' https://images.example/ ');
+    await card.get('#excel-bps-image-body-limit').setValue('32');
+    await card.get('#excel-bps-image-budget').setValue('768');
+    await card.get('#excel-bps-image-max-requests').setValue('512');
+    await card.get('#excel-bps-image-max-image-mib').setValue('30');
+    await card.get('#excel-bps-image-max-images').setValue('100');
+    await card.get('#excel-bps-image-max-total-mib').setValue('64');
+    await card.get('#excel-bps-image-storage-mib').setValue('2048');
+    await card.get('#excel-bps-image-storage-entries').setValue('2048');
+    await card.get('#excel-bps-image-ttl-minutes').setValue('60');
+
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({
+      excel_bps_image_relay_enabled: true,
+      excel_bps_image_base_url: 'https://images.example',
+      excel_bps_image_body_limit_mib: 32,
+      excel_bps_image_budget_mib: 768,
+      excel_bps_image_max_requests: 512,
+      excel_bps_image_max_image_mib: 30,
+      excel_bps_image_max_images: 100,
+      excel_bps_image_max_total_mib: 64,
+      excel_bps_image_storage_mib: 2048,
+      excel_bps_image_storage_entries: 2048,
+      excel_bps_image_ttl_minutes: 60,
+
+    });
+    expect(showError).not.toHaveBeenCalled();
+    expect(showSuccess).toHaveBeenCalledWith('admin.settings.settingsSaved');
+    wrapper.unmount();
+  });
+
+  it("saves native image uploads without a public origin and reloads the mode", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('#excel-bps-image-enabled').setValue(true);
+    await wrapper.get('#excel-bps-image-mode').setValue('native');
+    expect(wrapper.find('#excel-bps-image-base-url').exists()).toBe(false);
+    expect(wrapper.find('#excel-bps-image-max-images').exists()).toBe(true);
+    expect(wrapper.find('#excel-bps-image-storage-mib').exists()).toBe(false);
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({ excel_bps_image_mode: 'native', excel_bps_image_relay_enabled: true, excel_bps_image_base_url: '' });
+    expect(showError).not.toHaveBeenCalled();
+    wrapper.unmount();
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, excel_bps_image_mode: 'native', excel_bps_image_relay_enabled: true });
+    const loaded = mountView();
+    await flushPromises();
+    expect((loaded.get('#excel-bps-image-mode').element as HTMLSelectElement).value).toBe('native');
+    expect(loaded.find('#excel-bps-image-base-url').exists()).toBe(false);
+    expect(loaded.find('#excel-bps-image-max-images').exists()).toBe(true);
+    await loaded.get('#excel-bps-image-mode').setValue('relay');
+    expect(loaded.find('#excel-bps-image-max-images').exists()).toBe(true);
+    loaded.unmount();
+  });
+
+  it("loads saved Excel BPS image settings and preserves the address when disabled", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, excel_bps_image_relay_enabled: true, excel_bps_image_base_url: 'https://saved.example', excel_bps_image_body_limit_mib: 24, excel_bps_image_budget_mib: 896, excel_bps_image_max_requests: 40 });
+    const wrapper = mountView();
+    await flushPromises();
+    expect((wrapper.get('#excel-bps-image-base-url').element as HTMLInputElement).value).toBe('https://saved.example');
+    expect((wrapper.get('#excel-bps-image-body-limit').element as HTMLInputElement).value).toBe('24');
+    expect((wrapper.get('#excel-bps-image-budget').element as HTMLInputElement).value).toBe('896');
+    expect((wrapper.get('#excel-bps-image-max-requests').element as HTMLInputElement).value).toBe('40');
+    await wrapper.get('#excel-bps-image-enabled').setValue(false);
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({ excel_bps_image_relay_enabled: false, excel_bps_image_base_url: 'https://saved.example', excel_bps_image_body_limit_mib: 24, excel_bps_image_budget_mib: 896, excel_bps_image_max_requests: 40 });
+    wrapper.unmount();
+  });
+
+  it("rejects inconsistent image limits and preserves saved limits when disabling", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, excel_bps_image_relay_enabled: true, excel_bps_image_base_url: 'https://images.example', excel_bps_image_max_images: 100, excel_bps_image_ttl_minutes: 60 });
+    const wrapper = mountView();
+    await flushPromises();
+    expect((wrapper.get('#excel-bps-image-max-images').element as HTMLInputElement).value).toBe('100');
+    for (const [id, value, original] of [
+      ['max-images', '0', '100'], ['max-images', '4097', '100'], ['ttl-minutes', '1441', '60'],
+      ['max-total-mib', '1', '32'], ['storage-entries', '99', '512'], ['storage-mib', '1', '1024'],
+    ]) {
+      await wrapper.get(`#excel-bps-image-${id}`).setValue(value);
+      await wrapper.find('form').trigger('submit.prevent');
+      await flushPromises();
+      expect(updateSettings).not.toHaveBeenCalled();
+      expect(showError).toHaveBeenLastCalledWith('admin.settings.features.excelBpsImages.invalidLimits');
+      await wrapper.get(`#excel-bps-image-${id}`).setValue(original);
+    }
+    await wrapper.get('#excel-bps-image-enabled').setValue(false);
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({ excel_bps_image_relay_enabled: false, excel_bps_image_max_images: 100, excel_bps_image_ttl_minutes: 60 });
+    wrapper.unmount();
+  });
+
+  it("rejects missing or unsafe Excel BPS image origins before saving", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('#excel-bps-image-enabled').setValue(true);
+    for (const value of ['', 'http://images.example', 'https://images.example/v1', 'https://user:secret@images.example', 'https://images.example?token=secret', 'https://images.example#']) {
+      await wrapper.get('#excel-bps-image-base-url').setValue(value);
+      await wrapper.find('form').trigger('submit.prevent');
+      await flushPromises();
+      expect(updateSettings).not.toHaveBeenCalled();
+      expect(showError).toHaveBeenLastCalledWith('admin.settings.features.excelBpsImages.invalidBaseUrl');
+    }
+    wrapper.unmount();
+  });
+
+  it("rejects out-of-range image relay capacity before saving", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('#excel-bps-image-enabled').setValue(true);
+    await wrapper.get('#excel-bps-image-base-url').setValue('https://images.example');
+    for (const [selector, value] of [
+      ['#excel-bps-image-body-limit', '129'],
+      ['#excel-bps-image-budget', '511'],
+      ['#excel-bps-image-max-requests', '0'],
+      ['#excel-bps-image-max-requests', '513'],
+      ['#excel-bps-image-max-requests', '1.5'],
+    ]) {
+      const input = wrapper.get(selector);
+      const original = (input.element as HTMLInputElement).value;
+      await input.setValue(value);
+      await wrapper.find('form').trigger('submit.prevent');
+      await flushPromises();
+      expect(updateSettings).not.toHaveBeenCalled();
+      expect(showError).toHaveBeenLastCalledWith('admin.settings.features.excelBpsImages.invalidCapacity');
+      await input.setValue(original);
+    }
+    await wrapper.get('#excel-bps-image-body-limit').setValue('128');
+    await wrapper.get('#excel-bps-image-budget').setValue('512');
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenLastCalledWith('admin.settings.features.excelBpsImages.invalidCapacity');
+    wrapper.unmount();
   });
 
   it("submits the Codex ticket harvest toggle", async () => {

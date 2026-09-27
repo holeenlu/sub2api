@@ -249,6 +249,7 @@
               >
                 {{ accountDisplayEmail(row) }}
               </span>
+              <ExcelBPS403Badge :account="row" :groups="accountGroupsForRow(row)" />
             </div>
           </template>
           <template #cell-notes="{ value }">
@@ -460,10 +461,10 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" @codex-tickets="openEditCodexTickets" />
+    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" @test="handleTest" />
+    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" @codex-tickets="openEditCodexTickets" @test="handleTest" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
-    <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
+    <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" @completed="handleAccountTestCompleted" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <CodexTicketDashboard :show="showCodexTickets" :account="codexTicketAcc" @close="showCodexTickets = false" @updated="handleAccountUpdated" />
@@ -533,6 +534,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
+import ExcelBPS403Badge from '@/components/account/ExcelBPS403Badge.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -2357,7 +2359,22 @@ const handleExportData = async () => {
   }
 }
 const accountExportStepUp = useStepUp()
-const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
+const handleAccountTestCompleted = async (accountId: number) => {
+  try {
+    const fresh = await adminAPI.accounts.getById(accountId)
+    if (testingAcc.value?.id === accountId) testingAcc.value = fresh
+    await reload()
+  } catch (error) {
+    console.error('Failed to refresh tested account:', error)
+    appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  }
+}
+const closeTestModal = () => {
+  const account = testingAcc.value
+  showTest.value = false
+  testingAcc.value = null
+  if (account?.platform === 'openai_bps') void handleAccountTestCompleted(account.id)
+}
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
 const handleTest = async (a: AccountListItem) => {
