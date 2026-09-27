@@ -136,6 +136,7 @@ vite.config.js
 docs/*
 !docs/CHANGE_DELIVERY.md
 !docs/FORK_FEATURE_RETIREMENT.md
+!docs/RANXI2001_TICKET_INTEGRATION.md
 !tools/tests/
 !tools/tests/test_change_delivery.py
 tools/__pycache__/

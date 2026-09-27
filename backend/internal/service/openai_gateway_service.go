@@ -510,6 +510,7 @@ type OpenAIGatewayService struct {
 	// openaiCodexTickets: accountID\x00model → ModelTrace-verified ticket generation.
 	openaiCodexTickets           sync.Map
 	openaiCodexTicketInFlight    sync.Map
+	openaiCodexTicketActivity    sync.Map
 	openaiCodexTicketActive      atomic.Int32
 	openaiCodexTicketProxyTurns  sync.Map
 	openaiCodexTicketNextAttempt sync.Map
@@ -520,6 +521,7 @@ type OpenAIGatewayService struct {
 	openaiCodexTicketDone        chan struct{}
 	openaiCodexTicketWake        chan struct{}
 	openaiCodexTicketStopped     bool
+	requireLatestTurnAdmission   bool
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -589,6 +591,8 @@ func NewOpenAIGatewayService(
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 		openaiModelTransient:  newOpenAIAccountModelTransientState(openAIModelTransientDefaultMax),
+
+		requireLatestTurnAdmission: true,
 	}
 	if rateLimitService != nil {
 		rateLimitService.SetAccountRuntimeBlocker(svc)

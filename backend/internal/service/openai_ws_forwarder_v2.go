@@ -209,8 +209,52 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		WSURL:            wsURL,
 		Headers:          wsHeaders,
 		ObserveHandshake: s.codexTicketHandshakeObserver(ctx, ticket),
+		Ticket:           ticket,
+		TicketScope:      fmt.Sprintf("%d/%s", getAPIKeyIDFromContext(c), sessionHash),
+		PrepareTicket:    s.codexTicketProxy,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
+			_, err := s.admitOpenAITurnForGroup(factoryCtx, groupID, account, mappedModel)
+			if err != nil {
+				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
+					factoryCtx,
+					groupID,
+					sessionHash,
+					previousResponseID,
+					account.ID,
+					err,
+				)
+				return nil, err
+			}
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
+		},
+		BindHandshake: func(headers http.Header) *openAIWSTurnBinding {
+			return s.bindOpenAIWSHandshake(account, mappedModel, headers)
+		},
+		CheckBinding: func(checkCtx context.Context, b *openAIWSTurnBinding) error {
+			latest, err := s.admitOpenAITurnForGroup(checkCtx, groupID, account, mappedModel)
+			if err != nil {
+				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
+					checkCtx,
+					groupID,
+					sessionHash,
+					previousResponseID,
+					account.ID,
+					err,
+				)
+				return err
+			}
+			if err := s.checkOpenAIWSBinding(latest, mappedModel, b); err != nil {
+				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
+					checkCtx,
+					groupID,
+					sessionHash,
+					previousResponseID,
+					account.ID,
+					err,
+				)
+				return err
+			}
+			return nil
 		},
 		PreferredConnID: preferredConnID,
 		ForceNewConn:    forceNewConn,
@@ -222,6 +266,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}(),
 	})
 	if err != nil {
+		if IsOpenAITurnAdmissionError(err) {
+			return nil, err
+		}
 		var agentDialErr *openAIWSDialError
 		if s.isAgentIdentityAccount(ctx, account) && errors.As(err, &agentDialErr) && isAgentIdentityTaskInvalidWSDialError(agentDialErr) && agentTaskRecoveryTried != nil && !*agentTaskRecoveryTried {
 			*agentTaskRecoveryTried = true
@@ -331,6 +378,37 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 	}
 
+	releaseActivity := s.beginCodexTicketBusiness(account)
+	defer releaseActivity()
+	checkBeforeWrite := func() error {
+		latest, err := s.admitOpenAITurn(ctx, c, account, mappedModel)
+		if err == nil {
+			err = s.checkOpenAIWSBinding(latest, mappedModel, lease.conn.turnBinding)
+		}
+		if err != nil {
+			s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
+				ctx,
+				groupID,
+				sessionHash,
+				previousResponseID,
+				account.ID,
+				err,
+			)
+			lease.MarkBroken()
+		}
+		return err
+	}
+	if lease.conn.turnBinding != nil && lease.conn.turnBinding.ticket != nil && lease.conn.turnBinding.ticket.Binding != nil {
+		for _, key := range codexTicketIdentityBodyKeys {
+			delete(payload, key)
+			if value, exists := lease.conn.turnBinding.ticket.Binding.Body[key]; exists {
+				payload[key] = value
+			}
+		}
+	}
+	if err := checkBeforeWrite(); err != nil {
+		return nil, err
+	}
 	if err := s.performOpenAIWSGeneratePrewarm(
 		ctx,
 		lease,
@@ -345,6 +423,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 
+	if err := checkBeforeWrite(); err != nil {
+		return nil, err
+	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(

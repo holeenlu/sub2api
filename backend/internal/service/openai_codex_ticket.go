@@ -50,7 +50,8 @@ type openAICodexTicket struct {
 	HTTPStatus         int       `json:"http_status,omitempty"`
 	// Cookie 是打票成功时上游 Set-Cookie 的 name=value 拼装结果，
 	// 与 turn-state 同生命周期存取并在注入票据时一并复用。
-	Cookie string `json:"cookie,omitempty"`
+	Cookie  string              `json:"cookie,omitempty"`
+	Binding *codexTicketBinding `json:"binding,omitempty"`
 }
 
 func openAICodexTicketKey(accountID int64, model string) string {
@@ -71,7 +72,7 @@ func OpenAICodexTicketReadyModels(account *Account) map[string]bool {
 			continue
 		}
 		model := strings.TrimPrefix(key, openAICodexTicketExtraKeyPrefix)
-		if model != "" && parseOpenAICodexTicketFromAny(account.ID, model, raw) != nil {
+		if model != "" && parseOpenAICodexTicketFromAny(account.ID, model, raw).usable(time.Now(), 0, false, 0) {
 			ready[model] = true
 		}
 	}
@@ -164,7 +165,11 @@ func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketCon
 			ticket = parseOpenAICodexTicketFromAny(account.ID, model, account.Extra[openAICodexTicketExtraKey(model)])
 		}
 		if ticket.structurallyValid(0) {
-			status.Ready = true
+			status.Ready = ticket.usable(now, 0, false, 0)
+			if ticket.Binding != nil {
+				status.ExpiresAt = &ticket.Binding.ExpiresAt
+				status.RemainingSeconds = int64(max(0, int(ticket.Binding.ExpiresAt.Sub(now).Seconds())))
+			}
 			status.Length = ticket.Length
 			status.CapturedAt = &ticket.CapturedAt
 			status.TurnStatePresent = ticket.State != ""
@@ -224,8 +229,8 @@ func (t *openAICodexTicket) structurallyValid(_ int) bool {
 	return t != nil && t.GenerationID != "" && t.VerificationMethod == "modeltrace_v1" && t.FingerprintCommit != "" && (strings.TrimSpace(t.State) != "" || strings.TrimSpace(t.Cookie) != "")
 }
 
-func (t *openAICodexTicket) usable(_ time.Time, _ int, _ bool, _ time.Duration) bool {
-	return t.structurallyValid(0)
+func (t *openAICodexTicket) usable(now time.Time, _ int, _ bool, _ time.Duration) bool {
+	return t.structurallyValid(0) && (t.Binding == nil || t.Binding.ExpiresAt.IsZero() || now.Before(t.Binding.ExpiresAt))
 }
 
 func (s *OpenAIGatewayService) lookupOpenAICodexTicket(account *Account, model string) *openAICodexTicket {
@@ -292,6 +297,15 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 	if err != nil {
 		return err
 	}
+	activity := s.codexTicketActivity(account.ID)
+	activity.Lock()
+	defer activity.Unlock()
+	if activity.active > 0 {
+		return ErrCodexTicketBusy
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	stored, err := store.StoreCodexTicketIfUnchanged(ctx, account, model, raw)
 	if err != nil {
 		return err
@@ -347,13 +361,20 @@ func (s *OpenAIGatewayService) applyOpenAICodexTicketWithGeneration(ctx context.
 	if s.openAICodexAllowsWithoutTicket(ctx, account, model) {
 		return nil, nil
 	}
-	return nil, ErrOpenAICodexTicketUnavailable
+	return nil, denyOpenAITicket()
 }
 
 // applyOpenAICodexTicketCookie 把打票成功时捕获的 Cookie 与票据一并复用。
-// 已有 Cookie（当前出站路径默认不透传客户端 Cookie）按追加处理，避免覆盖其他来源。
+// 绑定票据只复用打票时的 Cookie，避免同名路由 Cookie 指向不同上游。
 func applyOpenAICodexTicketCookie(h http.Header, ticket *openAICodexTicket) {
 	if h == nil || ticket == nil {
+		return
+	}
+	if ticket.Binding != nil {
+		h.Del("Cookie")
+		if ticket.usable(time.Now(), 0, false, 0) && ticket.Cookie != "" {
+			h.Set("Cookie", ticket.Cookie)
+		}
 		return
 	}
 	cookie := strings.TrimSpace(ticket.Cookie)
@@ -424,7 +445,7 @@ func (s *OpenAIGatewayService) openAICodexTicketBlocksAccount(account *Account, 
 	return !ticket.usable(time.Now(), 0, false, 0)
 }
 
-func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, account *Account, token, model, proxyURL string, challenge ModelTraceChallenge, attemptTimeout time.Duration) (output string, state string, cookie string, status int, err error) {
+func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, account *Account, token, model, proxyURL string, challenge ModelTraceChallenge, attemptTimeout time.Duration, bindings ...*codexTicketBinding) (output string, state string, cookie string, status int, err error) {
 	attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
 	defer cancel()
 	body, replayHeaders, err := s.buildCodexProbeRequest(attemptCtx, account, model, challenge)
@@ -449,6 +470,11 @@ func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, a
 		return "", "", "", 0, err
 	}
 	applyOpenAICodexTicketHarvestIdentity(req.Header, model)
+	var binding *codexTicketBinding
+	if len(bindings) > 0 {
+		binding = bindings[0]
+		captureCodexTicketIdentity(binding, req.Header, body)
+	}
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return "", "", "", 0, err
@@ -462,6 +488,9 @@ func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, a
 		}
 	}()
 	state, cookie, status = extractOpenAICodexTurnState(resp.Header), extractOpenAICodexResponseCookies(resp.Header), resp.StatusCode
+	if binding != nil {
+		binding.ExpiresAt = codexTicketCredentialExpiry(resp.Header, time.Now())
+	}
 	if status != http.StatusOK {
 		return "", state, cookie, status, nil
 	}

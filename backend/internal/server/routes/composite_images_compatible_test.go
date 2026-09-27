@@ -26,6 +26,11 @@ type compatibleImagesAccounts struct {
 	accounts []service.Account
 }
 
+func (r compatibleImagesAccounts) GetOpenAITurnAdmission(ctx context.Context, id int64) (*service.Account, *service.Account, error) {
+	account, err := r.GetByID(ctx, id)
+	return account, nil, err
+}
+
 func (r compatibleImagesAccounts) GetByID(_ context.Context, id int64) (*service.Account, error) {
 	for _, account := range r.accounts {
 		if account.ID == id {

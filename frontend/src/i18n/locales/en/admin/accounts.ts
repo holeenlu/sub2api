@@ -1760,6 +1760,7 @@ export default {
         noModels: 'No models currently require tickets',
         length: 'Ticket length',
         acquired: 'Acquired',
+        expires: 'Credentials expire',
         present: 'Present',
         absent: 'Absent',
         accountParticipation: 'Include this account in ticket harvesting',
@@ -1798,7 +1799,7 @@ export default {
       },
       codexTicketPool: {
         title: 'Codex ticket proxy pool',
-        description: 'Rotate available proxies from IP settings; never connect directly without one.',
+        description: 'Harvest through the proxy pool; business requests reuse the issuing proxy. Disabled, expired or changed proxies never fall back to a direct connection.',
         save: 'Save pool',
         saved: 'Proxy pool saved',
         all: 'All available proxies',
@@ -1809,7 +1810,7 @@ export default {
       },
       codexTicketCadence: {
         title: 'Ticket cadence',
-        description: 'Random retry after failure; proactive refresh defaults to 30 minutes (0 disables it). Use Save settings below.',
+        description: 'Retry failures with jitter. Bound credentials last at most 4 minutes; refresh is attempted 30 seconds before expiry and pauses during business traffic. A shorter proactive interval is optional; 0 disables only that extra timer. Use Save settings below.',
         retryMin: 'Minimum retry (s)',
         retryMax: 'Maximum retry (s)',
         refresh: 'Proactive refresh (s; 0=off)',
