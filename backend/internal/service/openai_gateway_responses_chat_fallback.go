@@ -112,6 +112,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	if err != nil {
 		return nil, err
 	}
+	if _, err := s.admitOpenAITurn(ctx, c, account, upstreamModel); err != nil {
+		return nil, err
+	}
 	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
 	if err != nil {
 		return nil, err

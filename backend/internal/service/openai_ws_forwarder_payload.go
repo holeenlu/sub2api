@@ -215,6 +215,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithTicket(
 		"soft_routing_hint",
 	)
 
+	applyCodexTicketIdentityHeaders(headers, ticket)
 	return headers, sessionResolution, ticket, nil
 }
 
@@ -661,6 +662,55 @@ func openAIWSRawItemsHaveToolCallContextForOutputs(items []json.RawMessage) bool
 	return true
 }
 
+// openAIWSRawItemsContainNonPortableContext reports context that cannot be
+// safely replayed on a replacement credential.  previous_response_id is an
+// upstream-owned pointer, while encrypted reasoning/compaction content and
+// item_reference values are tied to the credential/session that produced them.
+// Treating those fields as ordinary JSON and silently sending them to another
+// account can turn a recoverable upstream failure into a corrupted or
+// unauthorized continuation.  This guard is intentionally used only for
+// cross-account current-turn retry; same-account continuation keeps its
+// existing, stricter upstream affinity rules.
+func openAIWSRawItemsContainNonPortableContext(items []json.RawMessage) bool {
+	var contains func(any) bool
+	contains = func(value any) bool {
+		switch typed := value.(type) {
+		case map[string]any:
+			if itemType, ok := typed["type"].(string); ok && strings.TrimSpace(itemType) == "item_reference" {
+				return true
+			}
+			if encrypted, ok := typed["encrypted_content"].(string); ok && strings.TrimSpace(encrypted) != "" {
+				return true
+			}
+			for _, child := range typed {
+				if contains(child) {
+					return true
+				}
+			}
+		case []any:
+			for _, child := range typed {
+				if contains(child) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	for _, item := range items {
+		var decoded any
+		if err := json.Unmarshal(item, &decoded); err != nil {
+			// The caller already validated the request.  If a replay item is
+			// malformed here, fail closed rather than infer portability.
+			return true
+		}
+		if contains(decoded) {
+			return true
+		}
+	}
+	return false
+}
+
 // sanitizeOpenAIWSHistoricalReplayToolCalls 返回的新头数组与 previousItems 共享正文。
 func sanitizeOpenAIWSHistoricalReplayToolCalls(
 	previousItems []json.RawMessage,
@@ -792,6 +842,12 @@ func buildOpenAIWSCurrentTurnRetryPayload(
 	originalModel string,
 ) ([]byte, bool, error) {
 	if !fullInputExists {
+		return nil, false, nil
+	}
+	if openAIWSRawItemsContainNonPortableContext(fullInput) {
+		// Do not strip previous_response_id and replay opaque account-bound
+		// material on a replacement account.  The caller will close/fail over
+		// conservatively and the client can reconnect with fresh context.
 		return nil, false, nil
 	}
 	retryPayload, err := setOpenAIWSPayloadInputSequence(payload, fullInput, true)

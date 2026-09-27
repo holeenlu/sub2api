@@ -47,6 +47,7 @@
                   <div><dt class="text-gray-500 dark:text-dark-400">{{ text.acquired }}</dt><dd class="mt-1 text-gray-800 dark:text-dark-200">{{ formatTime(status.captured_at) }}</dd></div>
                   <div><dt class="text-gray-500 dark:text-dark-400">{{ text.length }}</dt><dd class="mt-1 font-medium tabular-nums text-gray-800 dark:text-dark-200">{{ status.length ?? '—' }}</dd></div>
                   <div><dt class="text-gray-500 dark:text-dark-400">turn-state</dt><dd class="mt-1 text-gray-800 dark:text-dark-200">{{ status.turn_state_present ? text.present : text.absent }}</dd></div>
+                  <div v-if="status.expires_at"><dt class="text-gray-500 dark:text-dark-400">{{ text.expires }}</dt><dd class="mt-1 text-gray-800 dark:text-dark-200">{{ formatTime(status.expires_at) }}</dd></div>
                   <div><dt class="text-gray-500 dark:text-dark-400">Cookie</dt><dd class="mt-1 text-gray-800 dark:text-dark-200">{{ status.cookie_present ? text.present : text.absent }}</dd></div>
                 </dl>
                 <button type="button" class="btn btn-secondary mt-4 !px-3 !py-1.5 !text-xs" :disabled="busyModel !== '' || participationDisabled || !participation.enabled || participation.models[status.model] === false || !status.harvest_enabled" @click="harvestModel(status.model)">{{ busyModel === status.model ? text.running : text.manual }}</button>
@@ -131,6 +132,7 @@ const text = computed(() => ({
   noModels: t('admin.accounts.codexTickets.noModels'),
   length: t('admin.accounts.codexTickets.length'),
   acquired: t('admin.accounts.codexTickets.acquired'),
+  expires: t('admin.accounts.codexTickets.expires'),
   present: t('admin.accounts.codexTickets.present'),
   absent: t('admin.accounts.codexTickets.absent'),
   accountParticipation: t('admin.accounts.codexTickets.accountParticipation'),

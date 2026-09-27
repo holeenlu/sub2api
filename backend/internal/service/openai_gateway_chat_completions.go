@@ -71,6 +71,16 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
+	latest, admissionErr := s.admitOpenAITurn(
+		context.WithoutCancel(ctx),
+		c,
+		account,
+		gjson.GetBytes(body, "model").String(),
+	)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+	account = latest
 	rememberOpenCodeInboundBody(c, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)

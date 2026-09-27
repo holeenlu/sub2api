@@ -237,7 +237,10 @@ func TestOpenAIPassthroughAPIKeyRestoresClientToolsNonStreaming(t *testing.T) {
 			{"type":"function_call","id":"i2","call_id":"c2","name":"apply_patch","arguments":"{\"input\":\"*** Begin Patch\"}"}],"usage":{}}`)),
 	}}
 	svc := openAIClientToolsTestService(upstream)
-	account := &Account{ID: 5659, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+	account := &Account{
+		Status:      StatusActive,
+		Schedulable: true,
+		ID:          5659, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
 
 	result, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, body, "gpt-5.4", false, nil, false, time.Now())
 
@@ -263,7 +266,10 @@ func TestOpenAIPassthroughAPIKeyPreservesCustomToolOutputContentParts(t *testing
 		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_tools","status":"completed","output":[],"usage":{}}`)),
 	}}
 	svc := openAIClientToolsTestService(upstream)
-	account := &Account{ID: 6240, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+	account := &Account{
+		Status:      StatusActive,
+		Schedulable: true,
+		ID:          6240, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
 
 	result, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, body, "gpt-5.4", false, nil, false, time.Now())
 
@@ -293,7 +299,10 @@ func TestOpenAIPassthroughAPIKeyRestoresClientToolsStreaming(t *testing.T) {
 	}, "\n\n") + "\n\n"
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(sse))}}
 	svc := openAIClientToolsTestService(upstream)
-	account := &Account{ID: 5660, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+	account := &Account{
+		Status:      StatusActive,
+		Schedulable: true,
+		ID:          5660, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
 
 	result, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, body, "gpt-5.4", false, nil, true, time.Now())
 

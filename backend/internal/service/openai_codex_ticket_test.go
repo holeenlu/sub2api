@@ -20,7 +20,7 @@ func fakeCodexTicketState(length int) string {
 }
 
 func ticketTestAccount(id int64) *Account {
-	return &Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+	return &Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Extra: map[string]any{},
 		Credentials: map[string]any{"access_token": "tok", "chatgpt_account_id": "acc-1"}}
 }
 
