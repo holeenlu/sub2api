@@ -29,7 +29,7 @@ const codexTicketAccountEnabledKey = "codex_ticket_harvest_enabled"
 const codexTicketModelsEnabledKey = "codex_ticket_harvest_models"
 
 func CodexTicketHarvestEnabled(account *Account, model string) bool {
-	if account == nil || !isOpenAICodexTicketAccount(account) || !codexTicketEligibleModel(model) {
+	if account == nil || !isOpenAICodexTicketAccount(account, model) || !codexTicketEligibleModel(model) {
 		return false
 	}
 	return codexTicketAccountSupportsModel(account, model) && codexTicketParticipationEnabled(account, model)

@@ -166,6 +166,7 @@ func openAITurnRouteFingerprint(a *Account) [32]byte {
 	for _, key := range []string{
 		codexFingerprintSeedExtraKey, codexFingerprintModeExtraKey,
 		"openai_passthrough", "openai_oauth_passthrough",
+		"openai_excel_bps", "openai_excel_bps_models",
 		"openai_oauth_responses_websockets_v2_mode", "openai_apikey_responses_websockets_v2_mode",
 		"openai_oauth_responses_websockets_v2_enabled", "openai_apikey_responses_websockets_v2_enabled",
 		"responses_websockets_v2_enabled", "openai_ws_enabled", "openai_ws_force_http",
@@ -228,9 +229,8 @@ func (s *OpenAIGatewayService) latestOpenAITurnAccountForGroup(
 	if selected == nil {
 		return nil, denyOpenAITurn("account_unavailable")
 	}
-	if !selected.IsOpenAI() {
-		// This patch changes OpenAI Responses admission only, not other
-		// providers which share the generic forwarding implementation.
+	if !selected.IsOpenAI() && !selected.IsOpenAIBPS() {
+		// Other providers retain their existing admission policy.
 		return selected, nil
 	}
 	latest := selected
@@ -326,7 +326,7 @@ func (s *OpenAIGatewayService) admitOpenAITurnWithGroup(
 	if err != nil {
 		return nil, err
 	}
-	if !latest.IsOpenAI() {
+	if !latest.IsOpenAI() && !latest.IsOpenAIBPS() {
 		return latest, nil
 	}
 	if openAITurnRouteFingerprint(latest) != openAITurnRouteFingerprint(selected) {

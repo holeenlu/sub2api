@@ -17,7 +17,7 @@ export interface DefaultSubscriptionSetting {
 }
 
 // ── 平台限额类型 ──────────────────────────────────────────────────
-export type PlatformType = "anthropic" | "openai" | "gemini" | "antigravity" | "grok"
+export type PlatformType = "anthropic" | "openai" | "openai_bps" | "gemini" | "antigravity" | "grok"
 export type QuotaWindowType = "daily" | "weekly" | "monthly"
 
 /** 单平台三档限额；null = 不限制，undefined = 未填（等价 null） */
@@ -30,7 +30,7 @@ export interface PlatformQuotaLimits {
 /** 全平台默认限额 map（key = PlatformType） */
 export type DefaultPlatformQuotasMap = Partial<Record<PlatformType, PlatformQuotaLimits>>
 
-const PLATFORMS: PlatformType[] = ["anthropic", "openai", "gemini", "antigravity", "grok"]
+const PLATFORMS: PlatformType[] = ["anthropic", "openai", "openai_bps", "gemini", "antigravity", "grok"]
 
 export type SchedulingThresholdPlatformType =
   | "openai"
@@ -760,6 +760,18 @@ export interface SystemSettings {
 
   // Allow user view error requests
   allow_user_view_error_requests: boolean;
+  excel_bps_image_mode: 'relay' | 'native'
+  excel_bps_image_relay_enabled: boolean;
+  excel_bps_image_base_url: string;
+  excel_bps_image_body_limit_mib: number;
+  excel_bps_image_budget_mib: number;
+  excel_bps_image_max_requests: number;
+  excel_bps_image_max_image_mib: number;
+  excel_bps_image_max_images: number;
+  excel_bps_image_max_total_mib: number;
+  excel_bps_image_storage_mib: number;
+  excel_bps_image_storage_entries: number;
+  excel_bps_image_ttl_minutes: number;
 }
 
 export interface UpdateSettingsRequest {
@@ -1072,6 +1084,18 @@ export interface UpdateSettingsRequest {
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
 
   allow_user_view_error_requests?: boolean;
+  excel_bps_image_mode?: 'relay' | 'native'
+  excel_bps_image_relay_enabled?: boolean;
+  excel_bps_image_base_url?: string;
+  excel_bps_image_body_limit_mib?: number;
+  excel_bps_image_budget_mib?: number;
+  excel_bps_image_max_requests?: number;
+  excel_bps_image_max_image_mib?: number;
+  excel_bps_image_max_images?: number;
+  excel_bps_image_max_total_mib?: number;
+  excel_bps_image_storage_mib?: number;
+  excel_bps_image_storage_entries?: number;
+  excel_bps_image_ttl_minutes?: number;
 }
 
 /**

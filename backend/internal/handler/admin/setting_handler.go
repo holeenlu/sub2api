@@ -404,6 +404,18 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 
 		AccountSchedulingThresholds: settings.AccountSchedulingThresholds,
 		AllowUserViewErrorRequests:  settings.AllowUserViewErrorRequests,
+		ExcelBPSImageMode:           settings.ExcelBPSImageMode,
+		ExcelBPSImageRelayEnabled:   settings.ExcelBPSImageRelayEnabled,
+		ExcelBPSImageBaseURL:        settings.ExcelBPSImageBaseURL,
+		ExcelBPSImageBodyLimitMiB:   settings.ExcelBPSImageBodyLimitMiB,
+		ExcelBPSImageBudgetMiB:      settings.ExcelBPSImageBudgetMiB,
+		ExcelBPSImageMaxRequests:    settings.ExcelBPSImageMaxRequests,
+		ExcelBPSImageMaxImageMiB:    settings.ExcelBPSImageMaxImageMiB,
+		ExcelBPSImageMaxImages:      settings.ExcelBPSImageMaxImages,
+		ExcelBPSImageMaxTotalMiB:    settings.ExcelBPSImageMaxTotalMiB,
+		ExcelBPSImageStorageMiB:     settings.ExcelBPSImageStorageMiB,
+		ExcelBPSImageStorageEntries: settings.ExcelBPSImageStorageEntries,
+		ExcelBPSImageTTLMinutes:     settings.ExcelBPSImageTTLMinutes,
 	}
 
 	// OpenAI fast policy (stored under a dedicated setting key)
