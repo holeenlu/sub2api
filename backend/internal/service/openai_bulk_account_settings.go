@@ -80,7 +80,13 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 // A nil model scope removes the key (all models); an empty list selects no models.
 func normalizeBulkExcelBPSExtra(extra map[string]any) (bool, error) {
 	changed := false
-	for _, key := range []string{"openai_excel_bps", ExcelBPSIgnoreImagesKey, ExcelBPSIgnoreEncryptedContentKey, ExcelBPSOmitUnsupportedToolsKey, "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", ExcelBPSAutoMoveOn403Key} {
+	if _, exists := extra[ExcelBPS403RecoveryIntervalMinutesKey]; exists {
+		changed = true
+		if err := validateExcelBPS403RecoveryExtra(extra); err != nil {
+			return true, err
+		}
+	}
+	for _, key := range []string{"openai_excel_bps", ExcelBPSIgnoreImagesKey, ExcelBPSIgnoreEncryptedContentKey, ExcelBPSOmitUnsupportedToolsKey, "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", ExcelBPSAutoRecoverOn403Key, ExcelBPSAutoMoveOn403Key} {
 		if raw, exists := extra[key]; exists {
 			changed = true
 			if _, ok := raw.(bool); !ok {
@@ -138,6 +144,9 @@ func normalizeBulkExcelBPSExtra(extra map[string]any) (bool, error) {
 		}
 		if _, exists := extra["openai_excel_bps_auto_disable_on_403"]; exists {
 			extra["openai_excel_bps_auto_disable_on_403"] = false
+		}
+		if _, exists := extra[ExcelBPSAutoRecoverOn403Key]; exists {
+			extra[ExcelBPSAutoRecoverOn403Key] = false
 		}
 		if _, exists := extra[ExcelBPSAutoMoveOn403Key]; exists {
 			extra[ExcelBPSAutoMoveOn403Key] = false
