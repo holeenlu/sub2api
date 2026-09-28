@@ -46,6 +46,7 @@ func ProvideOpenAIGatewayService(
 		cancel()
 	}
 	s.StartOpenAICodexTicketHarvester()
+	s.StartBPS403Recovery()
 	return s
 }
 
