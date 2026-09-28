@@ -25,7 +25,7 @@ func StripInputImages(raw []byte) ([]byte, error) {
 		item, _ := rawItem.(object)
 		field := "content"
 		switch text(item["type"]) {
-		case "", "message":
+		case "", "message", "agent_message":
 		case "function_call_output", "custom_tool_call_output":
 			field = "output"
 		default:

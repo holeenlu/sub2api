@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -14,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"syscall"
@@ -27,7 +29,12 @@ func TestExcelBPSTransportDiagnosticsAreCredentialFree(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	account := excelAccount()
 	err := &url.Error{Op: "Post", URL: "https://secret-user:proxy-password@bps.openai.com/?token=secret-token", Err: fmt.Errorf("credential=raw-secret: %w", syscall.ECONNRESET)}
-	recordExcelBPSTransportFailure(ctx, c, account, "private-session-key", err, "transport", 1, false)
+	req, reqErr := newExcelBPSRequest(ctx, nil, "secret-token", "private-account")
+	require.NoError(t, reqErr)
+	trace := transportdiag.FromContext(req.Context())
+	require.NotNil(t, trace)
+	httptrace.ContextClientTrace(req.Context()).WroteRequest(httptrace.WroteRequestInfo{})
+	recordExcelBPSTransportFailure(ctx, c, account, "private-session-key", err, "transport", 1, false, trace)
 	events, ok := c.Get(OpsUpstreamErrorsKey)
 	require.True(t, ok)
 	attempts, ok := events.([]*OpsUpstreamErrorEvent)
@@ -35,6 +42,18 @@ func TestExcelBPSTransportDiagnosticsAreCredentialFree(t *testing.T) {
 	require.Len(t, attempts, 1)
 	require.Equal(t, "connection_reset", attempts[0].Reason)
 	require.Equal(t, 0, attempts[0].UpstreamStatusCode)
+	var detail map[string]any
+	require.NoError(t, json.Unmarshal([]byte(attempts[0].Detail), &detail))
+	snapshotJSON, marshalErr := json.Marshal(trace.Snapshot())
+	require.NoError(t, marshalErr)
+	transportJSON, marshalErr := json.Marshal(detail["transport"])
+	require.NoError(t, marshalErr)
+	require.JSONEq(t, string(snapshotJSON), string(transportJSON))
+	retry, reqErr := newExcelBPSRequest(req.Context(), nil, "secret-token", "private-account")
+	require.NoError(t, reqErr)
+	retryTrace := transportdiag.FromContext(retry.Context())
+	require.NotSame(t, trace, retryTrace, "each attempt needs independent evidence")
+	require.Equal(t, "unobserved", retryTrace.Snapshot()["phase"])
 	require.Equal(t, "req-43885", logs.All()[0].ContextMap()["request_id"])
 	all := fmt.Sprint(attempts[0], logs.All()[0].ContextMap())
 	for _, secret := range []string{"secret-user", "proxy-password", "secret-token", "raw-secret", "private-session-key"} {

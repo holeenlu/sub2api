@@ -30,7 +30,7 @@ func (s *OpenAIGatewayService) doExcelBPSSend(ctx context.Context, c *gin.Contex
 }
 
 // Retain sanitized diagnostics for the existing account proxy transport.
-func recordExcelBPSTransportFailure(ctx context.Context, c *gin.Context, account *Account, scope string, err error, stage string, attempt int, retry bool) {
+func recordExcelBPSTransportFailure(ctx context.Context, c *gin.Context, account *Account, scope string, err error, stage string, attempt int, retry bool, evidence ...*transportdiag.Trace) {
 	if isExcelBPSClientCancellation(c, err) {
 		logger.FromContext(ctx).Info("excel_bps.client_canceled",
 			zap.Int64("account_id", account.ID), zap.String("stage", stage))
@@ -39,10 +39,14 @@ func recordExcelBPSTransportFailure(ctx context.Context, c *gin.Context, account
 	kind := transportdiag.Classify(err)
 	digest := sha256.Sum256([]byte(scope))
 	sessionHash := hex.EncodeToString(digest[:8])
-	detail, _ := json.Marshal(map[string]any{
+	details := map[string]any{
 		"error_kind": kind, "error_type": fmt.Sprintf("%T", err),
 		"session_hash": sessionHash, "attempt": attempt, "retry_before_send": retry,
-	})
+	}
+	if len(evidence) > 0 && evidence[0] != nil {
+		details["transport"] = evidence[0].Snapshot()
+	}
+	detail, _ := json.Marshal(details)
 	message := "Excel BPS " + stage + " failed: " + kind
 	// Keep UI client errors generic; persist only explicitly safe diagnostics.
 	if !retry {
@@ -57,5 +61,5 @@ func recordExcelBPSTransportFailure(ctx context.Context, c *gin.Context, account
 		zap.Int64("account_id", account.ID), zap.String("stage", stage),
 		zap.String("error_kind", kind), zap.String("error_type", fmt.Sprintf("%T", err)),
 		zap.String("session_hash", sessionHash),
-		zap.Int("attempt", attempt), zap.Bool("retry_before_send", retry))
+		zap.Int("attempt", attempt), zap.Bool("retry_before_send", retry), zap.Any("transport", details["transport"]))
 }
