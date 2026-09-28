@@ -229,7 +229,7 @@ func (s *OpenAIGatewayService) latestOpenAITurnAccountForGroup(
 	if selected == nil {
 		return nil, denyOpenAITurn("account_unavailable")
 	}
-	if !selected.IsOpenAI() && !selected.IsOpenAIBPS() {
+	if !selected.IsOpenAI() {
 		// Other providers retain their existing admission policy.
 		return selected, nil
 	}
@@ -326,7 +326,7 @@ func (s *OpenAIGatewayService) admitOpenAITurnWithGroup(
 	if err != nil {
 		return nil, err
 	}
-	if !latest.IsOpenAI() && !latest.IsOpenAIBPS() {
+	if !latest.IsOpenAI() {
 		return latest, nil
 	}
 	if openAITurnRouteFingerprint(latest) != openAITurnRouteFingerprint(selected) {

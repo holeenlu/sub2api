@@ -1205,10 +1205,6 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
-	if platform == service.PlatformOpenAIBPS {
-		writeModelsList(c, platform, service.OpenAIBPSDefaultModels())
-		return
-	}
 	// Fallback to default models
 	if platform == service.PlatformOpenAI {
 		writeModelsListResponse(c, openai.DefaultModels)
@@ -1335,11 +1331,11 @@ func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *
 			models = append(models, model)
 		}
 	}
-	return h.gatewayService.CompleteCompositeBPSModelCatalog(ctx, groupID, models)
+	return models, nil
 }
 
 func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
-	if platform == service.PlatformOpenAI || platform == service.PlatformOpenAIBPS {
+	if platform == service.PlatformOpenAI {
 		writeOpenAIModelsList(c, modelIDs)
 		return
 	}
@@ -1360,7 +1356,7 @@ func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
 }
 
 func writeAllowlistedModelsList(c *gin.Context, platform string, modelIDs []string) {
-	if platform == service.PlatformOpenAI || platform == service.PlatformOpenAIBPS {
+	if platform == service.PlatformOpenAI {
 		writeOpenAIModelsList(c, modelIDs)
 		return
 	}
@@ -1477,8 +1473,7 @@ func defaultCodexModelIDsForPlatform(platform string) []string {
 
 func defaultModelIDsForPlatform(platform string) []string {
 	switch platform {
-	case service.PlatformOpenAIBPS:
-		return service.OpenAIBPSDefaultModels()
+
 	case service.PlatformOpenAI:
 		return openai.DefaultModelIDs()
 	case service.PlatformGemini:

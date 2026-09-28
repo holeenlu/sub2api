@@ -1,12 +1,8 @@
 <template>
   <div class="flex items-center gap-2">
-    <div v-if="bpsCredentialFailed" class="flex flex-col gap-1">
-      <BPSCredentialStatus :state="bpsCredentialState" :show-expiry="false" />
-      <span v-if="account.status !== 'active' && account.status !== 'error'" class="badge badge-gray text-xs">{{ t(`admin.accounts.status.${account.status}`) }}</span>
-      <span v-if="account.schedulable === false" class="text-[11px] text-gray-500">{{ t('admin.accounts.status.paused') }}</span>
-    </div>
+
     <!-- OpenAI OAuth RPM Display - keep the pause reason explicit -->
-    <div v-else-if="isRPMPaused" class="flex flex-col items-center gap-1">
+    <div v-if="isRPMPaused" class="flex flex-col items-center gap-1">
       <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rpmPaused') }}</span>
       <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ rpmResumeText }}</span>
     </div>
@@ -43,7 +39,6 @@
       </span>
     </template>
 
-    <p v-if="bpsCredentialState?.requires_manual_resume && !bpsCredentialFailed" class="max-w-[180px] text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.bps.manualResume') }}</p>
     <!-- Error Info Indicator -->
     <div v-if="hasError && account.error_message" class="group/error relative">
       <svg
@@ -172,8 +167,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import BPSCredentialStatus from './BPSCredentialStatus.vue'
-import { useBPSCredentialState } from '@/composables/useBPSCredentialState'
+
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { Account } from '@/types'
@@ -188,8 +182,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'show-temp-unsched', account: Account): void
 }>()
-
-const { state: bpsCredentialState, failed: bpsCredentialFailed } = useBPSCredentialState(() => props.account)
 
 // Computed: is rate limited (429)
 const isRateLimited = computed(() => {
