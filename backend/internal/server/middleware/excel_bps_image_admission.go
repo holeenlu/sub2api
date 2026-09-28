@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -102,6 +103,8 @@ func (r *bpsImageReservation) release() {
 
 var errBPSImageRequestBusy = errors.New("image relay request capacity is busy")
 
+const bpsImageRequestBusyMessage = "Request capacity is temporarily busy; retry later"
+
 type bpsImageBudgetedBody struct {
 	io.ReadCloser
 	reservation *bpsImageReservation
@@ -127,8 +130,9 @@ func (b *bpsImageBudgetedBody) Read(p []byte) (int, error) {
 
 // ExcelBPSImageAdmission must be shared across the gateway route aliases.
 // Account selection occurs after reading JSON, so enabling image relay applies
-// this guard to OpenAI/Composite Responses, Chat and Messages HTTP requests,
-// including text-only requests. Disabled relay leaves existing limits intact.
+// this guard to OpenAI/Composite Responses, Chat and Messages HTTP requests
+// while their bodies are read. Only bodies that may carry inline images keep
+// the reservation afterwards. Disabled relay leaves existing limits intact.
 func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax int64) gin.HandlerFunc {
 	budget := &bpsImageAdmissionBudget{}
 	return func(c *gin.Context) {
@@ -192,44 +196,86 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 		}
 		reservation, acquired := budget.acquire(accounted * bpsImageBodyMultiplier)
 		if !acquired {
-			bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "Image relay request capacity is busy; retry later")
+			bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", bpsImageRequestBusyMessage)
 			return
 		}
 		defer reservation.release()
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, readLimit)
-		if length <= 0 || compressed {
-			if !compressed {
-				c.Request.Body = &bpsImageBudgetedBody{ReadCloser: c.Request.Body, reservation: reservation, maxBody: maxBody}
-			}
-			body, err := httputil.ReadRequestBodyWithPreallocLimit(c.Request, maxBody)
-			_ = c.Request.Body.Close()
-			if err != nil {
-				switch {
-				case errors.Is(err, errBPSImageRequestBusy):
-					bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "Image relay request capacity is busy; retry later")
-				default:
-					var maxErr *http.MaxBytesError
-					if errors.As(err, &maxErr) {
-						bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the image relay ingress limit")
-					} else {
-						c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "Failed to read request body"}})
-					}
-				}
-				return
-			}
-			actual := int64(len(body))
-			if actual > maxBody {
-				bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the image relay ingress limit")
-				return
-			}
-			if actual < bpsImageMinBodyBytes {
-				actual = bpsImageMinBodyBytes
-			}
-			reservation.resize(actual * bpsImageBodyMultiplier)
-			c.Request.Body = httputil.NewPrereadBody(body)
-			c.Request.ContentLength = int64(len(body))
+		if length <= 0 && !compressed {
+			c.Request.Body = &bpsImageBudgetedBody{ReadCloser: c.Request.Body, reservation: reservation, maxBody: maxBody}
 		}
+		// Read here even when the length is known: only the complete body shows
+		// whether image processing can happen at all.
+		body, err := httputil.ReadRequestBodyWithPreallocLimit(c.Request, maxBody)
+		_ = c.Request.Body.Close()
+		if err != nil {
+			switch {
+			case errors.Is(err, errBPSImageRequestBusy):
+				bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", bpsImageRequestBusyMessage)
+			default:
+				var maxErr *http.MaxBytesError
+				if errors.As(err, &maxErr) {
+					bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the image relay ingress limit")
+				} else {
+					c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "Failed to read request body"}})
+				}
+			}
+			return
+		}
+		actual := int64(len(body))
+		if actual > maxBody {
+			bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the image relay ingress limit")
+			return
+		}
+		if bpsImageBodyMayContainInlineImages(body) {
+			// A known length was already reserved in full; unknown and compressed
+			// bodies shrink from their read-time estimate to the decoded size.
+			if length <= 0 || compressed {
+				if actual < bpsImageMinBodyBytes {
+					actual = bpsImageMinBodyBytes
+				}
+				reservation.resize(actual * bpsImageBodyMultiplier)
+			}
+		} else {
+			// Text-only bodies never reach image decoding, upload or relay
+			// storage. Leave the guard now rather than holding image budget and a
+			// request slot for the whole upstream stream.
+			reservation.release()
+		}
+		c.Request.Body = httputil.NewPrereadBody(body)
+		c.Request.ContentLength = int64(len(body))
 		c.Next()
+	}
+}
+
+// bpsImageBodyMayContainInlineImages over-approximates the bodies that can
+// reach inline image processing: data:image URLs (Responses and Chat content,
+// tool outputs) and Anthropic base64 sources. A false positive only keeps the
+// full reservation.
+func bpsImageBodyMayContainInlineImages(body []byte) bool {
+	for i := 0; ; {
+		j := bytes.IndexByte(body[i:], ':')
+		if j < 0 {
+			break
+		}
+		j += i
+		if j >= 4 && j+6 <= len(body) && bytes.EqualFold(body[j-4:j], []byte("data")) && bytes.EqualFold(body[j+1:j+6], []byte("image")) {
+			return true
+		}
+		i = j + 1
+	}
+	// A JSON string token, not the word inside text, where quotes are escaped.
+	token := []byte(`"base64"`)
+	for i := 0; ; {
+		j := bytes.Index(body[i:], token)
+		if j < 0 {
+			return false
+		}
+		j += i
+		if j == 0 || body[j-1] != '\\' {
+			return true
+		}
+		i = j + 1
 	}
 }
 
