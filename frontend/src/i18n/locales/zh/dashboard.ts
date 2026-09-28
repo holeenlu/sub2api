@@ -245,16 +245,13 @@ export default {
       },
       codexModelCatalog: {
         title: 'Codex 模型目录',
-        description: '每次打开时自动读取当前 API Key 可用的模型，选择最高能力型号用于主模型和审查模型。请将目录保存到 config.toml 引用的路径。',
-        loadingDescription: '正在检测当前密钥可用的模型并生成配置…',
-        refreshingDescription: '已使用此密钥上次保存的数据，正在刷新模型目录…',
-        cachedErrorDescription: '模型目录读取失败，继续使用此密钥上次保存的数据。可稍后重试。',
-        emptyDescription: '当前密钥没有可用的 Codex 模型，请检查账号模型限制和分组模型白名单后重试。',
+        description: '默认配置立即生成，主模型与审查模型使用本地模型选项中的最高档位，不会自动获取目录或后台刷新。如需当前 Key 的模型目录，请手动获取并下载；成功后可更新模型及推理设置。',
+        emptyDescription: '手动获取的目录没有可用的 Codex 模型，已保留默认配置。请检查账号模型限制和分组模型白名单。',
         fetch: '获取目录',
         retry: '重试',
         download: '下载目录',
         modelsCount: '已获取 {count} 个模型',
-        errorDescription: '无法使用当前 API Key 获取模型目录。'
+        errorDescription: '无法使用当前 API Key 获取模型目录，默认配置仍可用。'
       },
       opencode: {
         title: 'OpenCode 配置示例',

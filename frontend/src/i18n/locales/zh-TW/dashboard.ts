@@ -247,16 +247,13 @@ export default {
       },
       codexModelCatalog: {
         title: 'Codex 模型目錄',
-        description: '每次開啟時自動讀取目前 API Key 可用的模型，選擇最高能力型號用於主模型和審查模型。請將目錄儲存到 config.toml 引用的路徑。',
-        loadingDescription: '正在檢測目前金鑰可用的模型並生成設定…',
-        refreshingDescription: '已使用此金鑰上次儲存的資料，正在重新整理模型目錄…',
-        cachedErrorDescription: '模型目錄讀取失敗，繼續使用此金鑰上次儲存的資料。可稍後重試。',
-        emptyDescription: '目前金鑰沒有可用的 Codex 模型，請檢查帳號模型限制和分組模型白名單後重試。',
+        description: '預設設定立即生成，主模型與審查模型使用本地模型選項中的最高檔位，不會自動取得目錄或後台重新整理。如需目前 Key 的模型目錄，請手動取得並下載；成功後可更新模型及推理設定。',
+        emptyDescription: '手動取得的目錄沒有可用的 Codex 模型，已保留預設設定。請檢查帳號模型限制和分組模型白名單。',
         fetch: '取得目錄',
         retry: '重試',
         download: '下載目錄',
         modelsCount: '已取得 {count} 個模型',
-        errorDescription: '無法使用目前 API Key 取得模型目錄。'
+        errorDescription: '無法使用目前 API Key 取得模型目錄，預設設定仍可用。'
       },
       opencode: {
         title: 'OpenCode 設定範例',

@@ -105,6 +105,8 @@ func TestNativeImagesValidateAllBeforeUpload(t *testing.T) {
 	require.NoError(t, err)
 	_, err = PrepareNativeImagesWithLimit(nativeTestRequest(t, url, url), 1)
 	require.ErrorContains(t, err, "at most 1")
+	require.ErrorContains(t, err, "counting images in history and tool outputs")
+	require.NotContains(t, err.Error(), "excel_bps_image_max_images", "clients cannot change admin settings")
 	raw := nativeTestRequest(t, url)
 	_, err = PrepareNativeImages(bytes.ReplaceAll(raw, []byte("original"), []byte("invalid")))
 	require.Error(t, err)

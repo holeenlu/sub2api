@@ -220,7 +220,7 @@ func (r *ImageRelay) Rewrite(raw []byte, scope string) ([]byte, error) {
 					continue
 				}
 				if len(staged) >= limits.MaxImages {
-					return nil, fmt.Errorf("image relay is configured for at most %d inline images per request", limits.MaxImages)
+					return nil, fmt.Errorf("image relay accepts at most %d inline images per request, counting images in history and tool outputs; remove older images or ask the administrator to raise the limit", limits.MaxImages)
 				}
 				img, token, err := r.storeImageWithLimit(rawURL, scope, limits.MaxImageMiB)
 				if err != nil {

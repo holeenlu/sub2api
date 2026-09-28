@@ -2,17 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-const { copyToClipboardMock, saveAsMock, appState, catalogCache } = vi.hoisted(() => ({
+const { copyToClipboardMock, saveAsMock, appState } = vi.hoisted(() => ({
   copyToClipboardMock: vi.fn().mockResolvedValue(true),
   saveAsMock: vi.fn(),
-  appState: { siteName: 'Sub2API' },
-  catalogCache: new Map<string, { content: string; modelCount: number }>()
-}))
-
-vi.mock('@/utils/codexCatalogCache', () => ({
-  codexCatalogCacheKey: async (...parts: string[]) => JSON.stringify(parts),
-  readCodexCatalogCache: (key: string) => catalogCache.get(key) ?? null,
-  writeCodexCatalogCache: vi.fn((key: string, value: { content: string; modelCount: number }) => catalogCache.set(key, value))
+  appState: { siteName: 'Sub2API' }
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -36,7 +29,6 @@ vi.mock('file-saver', () => ({
 }))
 
 import UseKeyModal from '../UseKeyModal.vue'
-import { writeCodexCatalogCache } from '@/utils/codexCatalogCache'
 import type { GroupPlatform } from '@/types'
 import { parse as parseToml } from 'smol-toml'
 
@@ -78,6 +70,11 @@ async function clickButton(wrapper: ReturnType<typeof mountModal>, match: (text:
   await nextTick()
 }
 
+async function fetchCatalog(wrapper: ReturnType<typeof mountModal>) {
+  await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
+  await flushPromises()
+}
+
 function findCodeBlock(wrapper: ReturnType<typeof mountModal>, marker: string): string {
   const block = wrapper.findAll('pre code').map((code) => code.text()).find((content) => content.includes(marker))
   expect(block).toBeDefined()
@@ -108,7 +105,6 @@ function stubCatalog(slugs: string[] | 'error') {
 
 describe('UseKeyModal', () => {
   beforeEach(() => {
-    catalogCache.clear()
     stubCatalog(['gpt-6-astra'])
   })
 
@@ -888,6 +884,8 @@ describe('UseKeyModal', () => {
     await codexTab!.trigger('click')
     await flushPromises()
 
+    await fetchCatalog(wrapper)
+
     const unixConfig = wrapper.findAll('pre code')
       .map((code) => code.text())
       .find((content) => content.includes('[model_providers.tapmodels]'))
@@ -986,6 +984,7 @@ describe('UseKeyModal', () => {
 
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
     await flushPromises()
+    await fetchCatalog(wrapper)
     expect(findCodeBlock(wrapper, '[model_providers.tapmodels]')).toContain('model = "claude-opus-4-8"')
 
     await wrapper.setProps({ platform: 'deepseek' })
@@ -1039,6 +1038,8 @@ describe('UseKeyModal', () => {
     await codexTab!.trigger('click')
     await flushPromises()
 
+    await fetchCatalog(wrapper)
+
     const config = wrapper.findAll('pre code')
       .map((code) => code.text())
       .find((content) => content.includes('[model_providers.tapmodels]'))
@@ -1082,6 +1083,8 @@ describe('UseKeyModal', () => {
 
     await flushPromises()
 
+    await fetchCatalog(wrapper)
+
     const configToml = wrapper.findAll('pre code')
       .map((code) => code.text())
       .find((content) => content.includes('model_provider = "OpenAI"'))
@@ -1112,166 +1115,68 @@ describe('UseKeyModal', () => {
     expect(tomlValue(config, 'review_model')).toBe(tomlValue(config, 'model'))
   })
 
-  it('waits for the current key catalog before offering configuration files', async () => {
-    let resolveFetch!: (value: unknown) => void
-    const fetchMock = vi.fn().mockImplementation(() => new Promise((resolve) => { resolveFetch = resolve }))
-    vi.stubGlobal('fetch', fetchMock)
+  it('shows complete default configuration immediately without any request', () => {
     const wrapper = mountModal('openai')
-
-    await flushPromises()
-    expect(wrapper.find('[data-testid="codex-model-selection-loading"]').exists()).toBe(true)
-    expect(wrapper.findAll('pre code')).toHaveLength(0)
-    expect(wrapper.findAll('[data-testid="setup-file-download"]')).toHaveLength(0)
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://example.com/backend-api/codex/models',
-      expect.objectContaining({ cache: 'no-store', headers: expect.objectContaining({ Authorization: 'Bearer sk-test' }) })
-    )
-
-    resolveFetch({ ok: true, json: async () => ({ models: [{ slug: 'gpt-5.6-luna' }, { slug: 'gpt-5.6-terra' }] }) })
-    await flushPromises()
     const config = parseToml(findCodeBlock(wrapper, 'model_provider = "OpenAI"'))
-    expect(config.model).toBe('gpt-5.6-terra')
+    expect(config.model).toBe('gpt-6-astra')
     expect(config.review_model).toBe(config.model)
-    expect(wrapper.find('[data-testid="codex-model-selection-loading"]').exists()).toBe(false)
+    expect(config).not.toHaveProperty('model_catalog_json')
+    expect(wrapper.findAll('[data-testid="setup-file-download"]')).toHaveLength(2)
+    expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 
-  it('refreshes restrictions on each opening but reuses the result across configuration tabs', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ models: [{ slug: 'gpt-6-astra' }] }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ models: [{ slug: 'gpt-5.6-terra' }, { slug: 'gpt-5.6-sol' }] }) })
-    vi.stubGlobal('fetch', fetchMock)
+  it('does not fetch on reopening, changing keys or switching setup tabs', async () => {
     const wrapper = mountModal('openai')
-    await flushPromises()
-    expect(tomlValue(findCodeBlock(wrapper, 'model_provider = "OpenAI"'), 'model')).toBe('gpt-6-astra')
-
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await wrapper.setProps({ apiKey: 'sk-another', baseUrl: 'https://other.example/v1' })
     await clickButton(wrapper, (text) => text.trim() === 'Windows')
     await wrapper.get('[data-testid="codex-auth-mode-api-key"]').trigger('click')
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCliWs'))
     await flushPromises()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-
-    await wrapper.setProps({ show: false })
-    await wrapper.setProps({ show: true })
-    await flushPromises()
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    const config = parseToml(findCodeBlock(wrapper, 'model_provider = "OpenAI"'))
-    expect(config.model).toBe('gpt-5.6-sol')
-    expect(config.review_model).toBe(config.model)
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(tomlValue(findCodeBlock(wrapper, 'model_provider = "OpenAI"'), 'model')).toBe('gpt-6-astra')
   })
 
-  it('restores the last successful catalog after remount and keeps it when refreshing fails', async () => {
-    stubCatalog(['gpt-5.6-sol'])
-    const first = mountModal('openai')
-    await flushPromises()
-    first.unmount()
-
-    let rejectRefresh!: (reason: Error) => void
-    const fetchMock = vi.fn().mockImplementation(() => new Promise((_resolve, reject) => { rejectRefresh = reject }))
+  it('keeps default files usable while a manually requested catalog is pending', async () => {
+    let resolveFetch!: (value: unknown) => void
+    const fetchMock = vi.fn().mockImplementation(() => new Promise((resolve) => { resolveFetch = resolve }))
     vi.stubGlobal('fetch', fetchMock)
     const wrapper = mountModal('openai')
-    await flushPromises()
-    expect(wrapper.text()).toContain('keys.useKeyModal.codexModelCatalog.refreshingDescription')
-    expect(tomlValue(findCodeBlock(wrapper, 'model_provider = "OpenAI"'), 'model')).toBe('gpt-5.6-sol')
-
-    rejectRefresh(new Error('network unavailable'))
-    await flushPromises()
-    const config = parseToml(findCodeBlock(wrapper, 'model_provider = "OpenAI"'))
-    expect(config.model).toBe('gpt-5.6-sol')
-    expect(config.review_model).toBe(config.model)
-    expect(wrapper.text()).toContain('keys.useKeyModal.codexModelCatalog.cachedErrorDescription')
-    const files = await downloadAllCards(wrapper)
-    expect(parseToml(files.find((file) => file.name === 'config.toml')!.text).model).toBe('gpt-5.6-sol')
-    expect(wrapper.find('[data-testid="codex-model-catalog-fetch"]').exists()).toBe(true)
-  })
-
-  it('uses each key own saved catalog when switching keys and discovery fails', async () => {
-    stubCatalog(['gpt-6-astra'])
-    const wrapper = mountModal('openai', 'sk-first')
-    await flushPromises()
-    stubCatalog(['gpt-5.6-terra'])
-    await wrapper.setProps({ apiKey: 'sk-second' })
-    await flushPromises()
-    expect(tomlValue(findCodeBlock(wrapper, 'model_provider = "OpenAI"'), 'model')).toBe('gpt-5.6-terra')
-
-    stubCatalog('error')
-    for (const [apiKey, expected] of [['sk-first', 'gpt-6-astra'], ['sk-second', 'gpt-5.6-terra']]) {
-      await wrapper.setProps({ apiKey })
-      await flushPromises()
-      const config = parseToml(findCodeBlock(wrapper, 'model_provider = "OpenAI"'))
-      expect(config.model).toBe(expected)
-      expect(config.review_model).toBe(expected)
-    }
-    await wrapper.setProps({ apiKey: 'sk-never-saved' })
-    await flushPromises()
-    expect(wrapper.findAll('pre code')).toHaveLength(0)
-  })
-
-  it('replaces a saved catalog with a successful empty result after restrictions remove every model', async () => {
-    const wrapper = mountModal('openai')
-    await flushPromises()
-    await wrapper.setProps({ show: false })
-    stubCatalog([])
-    await wrapper.setProps({ show: true })
-    await flushPromises()
-    expect(wrapper.find('[data-testid="codex-model-selection-empty"]').exists()).toBe(true)
-    expect(wrapper.findAll('pre code')).toHaveLength(0)
-
-    await wrapper.setProps({ show: false })
-    stubCatalog('error')
-    await wrapper.setProps({ show: true })
-    await flushPromises()
-    expect(wrapper.findAll('pre code')).toHaveLength(0)
-  })
-
-  it('does not restore older saved permissions on retry after persisting the fresh catalog fails', async () => {
-    const wrapper = mountModal('openai')
-    await flushPromises()
-    await wrapper.setProps({ show: false })
-    // Simulate localStorage reads working while its quota prevents the next write.
-    vi.mocked(writeCodexCatalogCache).mockImplementationOnce(() => {})
-    stubCatalog([])
-    await wrapper.setProps({ show: true })
-    await flushPromises()
-    expect(wrapper.find('[data-testid="codex-model-selection-empty"]').exists()).toBe(true)
-
-    stubCatalog('error')
     await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.findAll('pre code')).toHaveLength(0)
-    expect(wrapper.text()).toContain('keys.useKeyModal.codexModelCatalog.errorDescription')
-  })
-
-  it.each(['apiKey', 'baseUrl'] as const)('discards a stale catalog when %s changes', async (prop) => {
-    let resolveOldFetch!: (value: unknown) => void
-    const fetchMock = vi.fn()
-      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldFetch = resolve }))
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ models: [{ slug: 'gpt-5.6-luna' }] }) })
-    vi.stubGlobal('fetch', fetchMock)
-    const wrapper = mountModal('openai')
-    await flushPromises()
-    const firstSignal = fetchMock.mock.calls[0][1].signal as AbortSignal
-
-    await wrapper.setProps(prop === 'apiKey' ? { apiKey: 'sk-other-key' } : { baseUrl: 'https://other.example/v1' })
-    await flushPromises()
-    expect(firstSignal.aborted).toBe(true)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock.mock.calls[1][0]).toBe(prop === 'apiKey'
-      ? 'https://example.com/backend-api/codex/models'
-      : 'https://other.example/backend-api/codex/models')
-    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe(prop === 'apiKey' ? 'Bearer sk-other-key' : 'Bearer sk-test')
-
-    resolveOldFetch({ ok: true, json: async () => ({ models: [{ slug: 'gpt-6-astra' }] }) })
+    expect(tomlValue(findCodeBlock(wrapper, 'model_provider = "OpenAI"'), 'model')).toBe('gpt-6-astra')
+    expect(wrapper.findAll('[data-testid="setup-file-download"]')).toHaveLength(2)
+    resolveFetch({ ok: true, json: async () => ({ models: [{ slug: 'gpt-5.6-terra' }] }) })
     await flushPromises()
     const config = parseToml(findCodeBlock(wrapper, 'model_provider = "OpenAI"'))
-    expect(config.model).toBe('gpt-5.6-luna')
+    expect(config.model).toBe('gpt-5.6-terra')
     expect(config.review_model).toBe(config.model)
+    expect(config.model_catalog_json).toBe('~/.codex/codex-models.json')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it.each(['close', 'unmount'] as const)('cancels model discovery on dialog %s', async (action) => {
+  it.each(['apiKey', 'baseUrl'] as const)('ignores a manual response after %s changes', async (prop) => {
+    let resolveFetch!: (value: unknown) => void
+    const fetchMock = vi.fn().mockImplementation(() => new Promise((resolve) => { resolveFetch = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mountModal('openai')
+    await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
+    const signal = fetchMock.mock.calls[0][1].signal as AbortSignal
+    await wrapper.setProps(prop === 'apiKey' ? { apiKey: 'sk-other' } : { baseUrl: 'https://other.example/v1' })
+    expect(signal.aborted).toBe(true)
+    resolveFetch({ ok: true, json: async () => ({ models: [{ slug: 'gpt-5.6-terra' }] }) })
+    await flushPromises()
+    const config = parseToml(findCodeBlock(wrapper, 'model_provider = "OpenAI"'))
+    expect(config.model).toBe('gpt-6-astra')
+    expect(config).not.toHaveProperty('model_catalog_json')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['close', 'unmount'] as const)('cancels a manual request on %s', async (action) => {
     const fetchMock = vi.fn().mockImplementation(() => new Promise(() => {}))
     vi.stubGlobal('fetch', fetchMock)
     const wrapper = mountModal('openai')
-    await flushPromises()
+    await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
     const signal = fetchMock.mock.calls[0][1].signal as AbortSignal
     if (action === 'close') await wrapper.setProps({ show: false })
     else wrapper.unmount()
@@ -1282,22 +1187,20 @@ describe('UseKeyModal', () => {
     ['empty', []],
     ['media only', ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst']],
     ['failed', 'error']
-  ] as const)('offers retry instead of a guessed model for a %s catalog', async (_label, catalog) => {
+  ] as const)('keeps default configuration after a %s manual lookup', async (_label, catalog) => {
     stubCatalog(catalog === 'error' ? 'error' : [...catalog])
     const wrapper = mountModal('openai')
-    await flushPromises()
-    expect(wrapper.findAll('pre code')).toHaveLength(0)
-    expect(wrapper.findAll('[data-testid="setup-file-download"]')).toHaveLength(0)
+    await fetchCatalog(wrapper)
+    const config = parseToml(findCodeBlock(wrapper, 'model_provider = "OpenAI"'))
+    expect(config.model).toBe('gpt-6-astra')
+    expect(config.review_model).toBe(config.model)
+    expect(config).not.toHaveProperty('model_catalog_json')
+    expect(wrapper.findAll('[data-testid="setup-file-download"]')).toHaveLength(2)
     if (catalog === 'error') expect(wrapper.text()).toContain('keys.useKeyModal.codexModelCatalog.errorDescription')
     else expect(wrapper.find('[data-testid="codex-model-selection-empty"]').exists()).toBe(true)
-
-    stubCatalog(['gpt-5.6-terra'])
-    await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
-    await flushPromises()
-    const config = parseToml(findCodeBlock(wrapper, 'model_provider = "OpenAI"'))
-    expect(config.model).toBe('gpt-5.6-terra')
-    expect(config.review_model).toBe(config.model)
-    expect(wrapper.find('[data-testid="codex-model-selection-empty"]').exists()).toBe(false)
+    stubCatalog(['gpt-5.6-sol'])
+    await fetchCatalog(wrapper)
+    expect(tomlValue(findCodeBlock(wrapper, 'model_provider = "OpenAI"'), 'model')).toBe('gpt-5.6-sol')
   })
 
   // Resolve the main model once; review_model must follow even when the catalog
@@ -1319,6 +1222,7 @@ describe('UseKeyModal', () => {
         await nextTick()
       }
       await flushPromises()
+      await fetchCatalog(wrapper)
       return findCodeBlock(wrapper, 'model_provider = "OpenAI"')
     }
 
@@ -1348,6 +1252,8 @@ describe('UseKeyModal', () => {
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
     await clickButton(wrapper, (text) => text.trim() === osTab)
     await flushPromises()
+
+    await fetchCatalog(wrapper)
 
     const config = findCodeBlock(wrapper, '[model_providers.tapmodels]')
     expectNoIgnoredCodexSettings(config)
@@ -1425,14 +1331,13 @@ describe('UseKeyModal', () => {
       expect(toml.cardPath).toMatch(/config\.toml$/)
       const parsed = parseToml(toml.text) as Record<string, unknown>
       // Root-level keys come before any [table]; the parser is the arbiter of that.
-      expectRootKeys(parsed, ['model_provider', 'model', 'review_model', 'model_catalog_json'])
+      expectRootKeys(parsed, ['model_provider', 'model', 'review_model'])
       expectNoIgnoredCodexSettings(toml.text)
       expect(parsed.model_provider).toBe('OpenAI')
       expect(parsed.model).toBe('gpt-6-astra')
       expect(parsed.review_model).toBe(parsed.model)
-      expect(parsed.model_catalog_json).toBe(
-        osTab === 'Windows' ? '%userprofile%\\.codex\\codex-models.json' : '~/.codex/codex-models.json'
-      )
+      expect(parsed).not.toHaveProperty('model_catalog_json')
+      expect(globalThis.fetch).not.toHaveBeenCalled()
       const providers = parsed.model_providers as Record<string, Record<string, unknown>>
       expect(providers.OpenAI.base_url).toBe('https://example.com/v1')
       expect(providers.OpenAI.wire_api).toBe('responses')

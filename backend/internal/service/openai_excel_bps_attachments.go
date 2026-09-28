@@ -61,7 +61,7 @@ func (s *OpenAIGatewayService) uploadExcelBPSAttachment(ctx context.Context, acc
 		if status < 400 || status > 599 {
 			status = http.StatusBadGateway
 		}
-		return "", &excelBPSAttachmentError{status: status, retryAfter: resp.Header.Get("Retry-After")}
+		return "", &excelBPSAttachmentError{status: status, retryAfter: excelBPSRateLimitRetryAfter(resp.Header.Get("Retry-After"), raw)}
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 	if err != nil || len(raw) > 64<<10 {
