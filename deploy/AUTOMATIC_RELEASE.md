@@ -1,6 +1,8 @@
-# 自动发布与 Docker Compose 在线更新
+# 手动发版与 Docker Compose 在线更新
 
-发布入口为 `.github/workflows/automatic-release.yml`。构建采用原作者 Sub2API 的 Release 流程和工具：前端构建一次 → GoReleaser 分平台构建二进制及安装包 → 校验完整构建矩阵 → 用同一批 Linux 二进制打包 Docker 镜像 → 发布 GitHub Release。每次推送正式交付分支后自动分配版本并运行，无需手动改 VERSION、打标签，也不需要 Docker Hub 凭据。
+发布入口为 `.github/workflows/automatic-release.yml`，GitHub 页面显示为 **Manual versioned release**，仅允许通过 `workflow_dispatch` 手动运行。提交、推送代码或标签、创建 PR、合并分支都不会触发此 Workflow，不会因此分配版本、构建或发布镜像。需要发版时，由用户在 Actions 页面点击 Run workflow，或明确授权后执行下方的 `gh workflow run` 命令。
+
+人工启动后，构建仍采用原作者 Sub2API 的 Release 流程和工具：自动分配版本 → 前端构建一次 → GoReleaser 分平台构建二进制及安装包 → 校验完整构建矩阵 → 用同一批 Linux 二进制打包 Docker 镜像 → 发布 GitHub Release。无需手动改 VERSION、打标签，也不需要 Docker Hub 凭据。单纯提交、推送不应调用手动发版命令；生产部署和数据库迁移仍需独立授权。
 
 复用 `.goreleaser.yaml`、`.github/release-tools/release_matrix.py`、`release-images.sh` 和 `Dockerfile.goreleaser`。标准矩阵与原作者相同：Linux amd64/arm64、macOS amd64/arm64、Windows amd64；镜像支持 Linux amd64/arm64。镜像构建不再重新编译前后端。参考源码：[原作者 Release 工作流](https://github.com/Wei-Shaw/sub2api/blob/a3eb7ef302961cba716dc78b39b93b60c467db0e/.github/workflows/release.yml)。
 
@@ -12,26 +14,26 @@
 | KDAN | holeenlu/sub2api / KDAN | kdan/v0.2.8.1 | ghcr.io/holeenlu/kdan |
 | TapModels | erwinlin/TapModels / main | tapmodels/v0.2.8.1 | ghcr.io/erwinlin/tapmodels |
 
-origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但界面版本和镜像标签仅显示数字。不会读取混入的 sub4api v1.1.4 标签，也不会把公共版安装到 KDAN。三个交付分支只保留 `automatic-release.yml`；独立 CI、安全扫描、CLA、上游定时监看、原作者手动发布和旧品牌镜像工作流均已移除，以减少 Actions 用量。发布所需的版本规则测试、更新界面/API 检查、类型检查、构建和产物校验仍由自动发布流程执行。
+origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但界面版本和镜像标签仅显示数字。不会读取混入的 sub4api v1.1.4 标签，也不会把公共版安装到 KDAN。三个交付分支只保留 `automatic-release.yml`；独立 CI、安全扫描、CLA、上游定时监看、原作者手动发布和旧品牌镜像工作流均已移除，以减少 Actions 用量。发布所需的版本规则测试、更新界面/API 检查、类型检查、构建和产物校验仍在人工启动的发布流程内执行。
 
 ## 版本规则
 
 - 从**已合入代码**可达的 Wei-Shaw/sub2api 官方稳定标签确定基准，不从远端最新版本或本地 VERSION 猜测。
-- 初次接入当前定制代码：0.2.8.1。之后每次推送：0.2.8.2 … 0.2.8.9、0.2.8.10。
+- 初次接入当前定制代码：0.2.8.1。之后针对新提交手动发版时递增：0.2.8.2 … 0.2.8.9、0.2.8.10。只推送代码不递增。
 - 合入新正式版本且上游进度正好停在该正式标签：0.2.9（保留现有品牌和定制）。若同时包含自上次发布以来的新定制提交，则首版为 0.2.9.1；同基准后续推送也递增第四位。
-- 合入超过正式标签的未发版提交：0.2.9.1。多个本地修改一次推送视为一次发布。
+- 合入超过正式标签的未发版提交：0.2.9.1。多次提交、推送可以累积到一次手动发版，发布人工选择的分支及本次运行固定的提交。
 - 每个渠道独立计数。失败保留 draft 和版本预留，同一 SHA 重试沿用原号；已发布同一 SHA 不重复构建。旧任务不会将 latest 倒退。
 - 同一仓库的发版任务由 GitHub Actions 的 `concurrency` 组串行处理，已完成任务不会被取消；GitHub Actions 不支持在工作流中声明 `queue:max`。草稿不是可更新版本。
 - VERSION 文件仍代表上游源码基准；实际运行版本、提交 SHA、上游版本由编译参数写入，不创建回写 VERSION 的循环提交。Git 标签不会自动改写已部署二进制的版本号；本地应急构建必须使用该渠道、该提交对应的发布计划版本，不能固定填写 `.1`。标签可能仅是失败构建预留，须核对正式 Release、清单和镜像后才能声称发布成功。
 
-仓库 Actions 需要允许 `contents: write` 和 `packages: write`，GHCR 包需要授予该仓库 Actions 写权限。默认使用 GITHUB_TOKEN；无需 PAT 发版。GitHub 的 token 创建标签不会再次触发普通 push 工作流，因此完整发布在同一流程完成。
+仓库 Actions 需要允许 `contents: write` 和 `packages: write`，GHCR 包需要授予该仓库 Actions 写权限。默认使用 GITHUB_TOKEN；无需 PAT 发版。完整发布在同一次人工启动的流程内完成；创建标签不会触发此 Workflow。
 
 ## Actions 用量控制
 
-- `.github/workflows/` 只保留 `automatic-release.yml`，不另开 PR 检查或定时任务。
+- `.github/workflows/` 只保留 `automatic-release.yml`，且触发器只能有 `workflow_dispatch`，不配置 push、PR、定时或其他自动触发事件。无需禁用仓库 Actions，否则人工 Run workflow 也不可用。
 - GitHub 端已登记但不再使用的工作流应同时停用，防止旧分支或后续合并意外重新触发；历史运行记录不会继续消耗 runner 分钟。
 - GitHub 内置的 `dynamic/dependabot/update-graph` 是 Dependabot graph job，不能通过普通工作流接口停用，且不计入 Actions 分钟，因此保留。它与会计费的 Automatic dependency submission 不同；后者如果另行启用，应在仓库设置中关闭。参见 [GitHub 依赖图计费说明](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependency-graph-data#dependabot-graph-jobs)。
-- 合并上游时复核 `.github/workflows/`，不要重新引入已移除的工作流；本地测试脚本和发布辅助工具继续保留。
+- 合并上游时复核三个分支的 `.github/workflows/`，不要重新引入自动触发器或已移除的工作流；`test_auto_release_workflow.py` 在本地和手动发版时检查此约束。本地测试脚本和发布辅助工具继续保留。
 - 需要额外检查时在本地运行 `make test-frontend`、后端 `make test-unit` 和 `golangci-lint run ./...`。
 
 ## 启用与排障
@@ -39,11 +41,12 @@ origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但
 1. 仓库 Settings → Actions → General 启用 Actions，并允许工作流使用其中的官方 Actions。工作流已按 job 声明所需写权限，不需要将仓库的默认 token 权限整体改成写入。
 2. 私有仓库必须有可用的 Actions 额度。若运行页面 Annotations 提示付款失败或 spending limit，且 job 没有执行步骤，需要账号持有人在 Billing & licensing / Billing & plans 处理付款或预算；更换 PAT 或修改构建脚本不能解除该限制。
 3. 首次发布会由仓库自身的 `GITHUB_TOKEN` 创建或写入对应 GHCR 包。若出现 package write denied，检查包设置中的 Manage Actions access，确保实际发布仓库具备写权限。
-4. 恢复运行条件后，在 Actions → Automatic versioned release → Run workflow 选择 `main` 或 `KDAN`。TapModels 在 `erwinlin/TapModels` 的 `main` 上运行。也可使用以下命令，重试同一提交会沿用已有草稿，不会重复分配版本：
+4. 需要发版时，在 Actions → Manual versioned release → Run workflow 中选择分支：公共版在 `holeenlu/sub2api` 选择 `main`，KDAN 选择 `KDAN`；TapModels 在 `erwinlin/TapModels` 选择 `main`。`origin/TapModels` 仅是镜像分支，不从这里发布。也可在明确授权发版后执行以下相应命令；这不是普通提交、推送步骤。重试同一提交会沿用已有草稿，不会重复分配版本：
 
    ```sh
    gh workflow run automatic-release.yml --repo holeenlu/sub2api --ref main
    gh workflow run automatic-release.yml --repo holeenlu/sub2api --ref KDAN
+   gh workflow run automatic-release.yml --repo erwinlin/TapModels --ref main
    gh run list --repo holeenlu/sub2api --workflow automatic-release.yml
    ```
 
