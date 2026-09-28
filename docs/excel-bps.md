@@ -6,17 +6,24 @@
 
 ## 托管工具策略
 
-账号编辑和批量编辑可开启 **省略不支持的托管工具**，对应 `extra.openai_excel_bps_omit_unsupported_tools: true`，默认关闭。仅影响该账号选定的 BPS 模型，分组中多个账号需要分别设置。
+**BPS 桥接不执行任何托管工具。** `web_search`（含所有变体）、`image_generation`、`file_search`、`code_interpreter`、`mcp` 等声明到了桥接层一律被省略，并在 developer 消息里告知模型"这些声明已省略，不要声称用过；任务需要时说明限制或改用已声明的客户端工具"。Codex 默认的 `web_search = "cached"` 也是如此：请求不报错，但搜索并没有发生。
 
-| 请求声明 | 默认行为 | 开启省略选项 |
+必须依赖原生能力的声明会让**同一个账号**改走原生 Codex 通道（`chatgpt.com/backend-api/codex/responses`），托管工具照常执行；账号选项 **保持 BPS，省略不支持的托管工具**（`extra.openai_excel_bps_omit_unsupported_tools`，默认关闭）开启后这些请求也留在 BPS。
+
+| 请求声明 | 默认（选项关闭） | 选项开启 |
 | --- | --- | --- |
-| `web_search` 及变体，`external_web_access=true` 或 `search_context_size=high` | HTTP 400 `basispoints_unsupported_tool` | 省略声明并告知模型能力不可用 |
-| `image_generation` | HTTP 400 `basispoints_unsupported_tool` | 省略声明并告知模型能力不可用 |
-| 普通搜索声明，无上述实时或高上下文字段 | 省略声明并告知模型能力不可用 | 相同行为 |
+| `web_search` 及变体，`external_web_access=true` 或 `search_context_size=high` | 同账号改走原生 Codex | 省略声明并告知模型能力不可用 |
+| `image_generation` | 同账号改走原生 Codex（仍受分组「允许图片生成」限制） | 省略声明并告知模型能力不可用 |
+| `tool_choice` 强制指定上述托管工具 | 同账号改走原生 Codex，`tool_choice` 原样透传 | 改写为 `auto` 后继续（日志 `relaxed forced hosted tool_choice to auto`） |
+| 普通 `web_search`（Codex 默认的 `cached` 模式） | 留在 BPS，省略声明并告知模型 | 相同行为 |
 | `tool_choice=none` | 本轮不启用工具 | 相同行为 |
-| 强制指定工具（包括 `required`） | HTTP 400 `basispoints_request_invalid` | 相同行为 |
+| `tool_choice=required` 或强制指定客户端函数 | 带上述托管工具时改走原生；否则 HTTP 400 `basispoints_request_invalid` | HTTP 400 `basispoints_request_invalid` |
 
-选定账号后不会因工具不支持而切换到 Codex。客户端 function/custom 工具继续可用；省略选项不会增加搜索或图片生成能力。原生 Codex 账号、既有粘性会话及账号优先级沿用项目现有调度策略，不因分组中新增 BPS 账号而被强行替换。
+原生回退的请求响应头带 `X-Codex2API-Upstream: codex` 和 `X-Codex2API-Basispoints-Bypass: <reason>`（`web_search` / `image_generation` / `tool_choice`），日志 `excel_bps.native_fallback` 记录 `account_id` 与 `reason`。回退不换账号、不参与 Codex 打票（BPS 账号本来就不采票，走原生时与其他不参与打票的账号相同）、仅限 HTTP（BPS 账号的 WS 已强制关闭）。Codex 默认的 `cached` 搜索不触发回退，否则几乎所有请求都会离开 BPS。
+
+以前 `external_web_access=true`、`search_context_size=high`、`image_generation` 会返回 400 `basispoints_unsupported_tool`，这道拦截已经取消。
+
+跨通道的会话可以续：原生轮次产生的加密推理到 BPS 会触发一次 `invalid_encrypted_content` 重试并剥离（或开启「忽略历史加密消息」提前剥离），反向同样有一次重试。Codex 会话内工具配置固定（live 模式一直 live），实际很少混用。客户端 function/custom 工具继续可用（Codex 的 MCP 工具属于此类，BPS 正常转发）。原生 Codex 账号、既有粘性会话及账号优先级沿用项目现有调度策略，不因分组中新增 BPS 账号而被强行替换。
 
 ## BPS 403 自动调整分组
 

@@ -632,7 +632,7 @@ export default {
         apiKeyHint: 'OpenAIのAPIキー',
         oauthPassthrough: '自動パススルー（認証のみ）',
         excelBPSOmitUnsupportedTools: "未対応のホスト型ツールを省略",
-        excelBPSOmitUnsupportedToolsDesc: "既定では無効です。外部 Web 検索、高い検索コンテキスト、画像生成を指定すると BPS は 400 を返します。有効にすると未対応のツールを省略し、その機能が利用できないことをモデルに通知します。Codex への自動切替は行いません。ツールの強制指定には対応せず、クライアント関数ツールには影響しません。",
+        excelBPSOmitUnsupportedToolsDesc: "既定では無効です。BPS はホスト型ツールを実行しないため、外部 Web 検索、高い検索コンテキスト、画像生成、またはそれらの強制指定を含むリクエストは、同じアカウントのネイティブ Codex 経路で実行されます（チケットなし、応答ヘッダー X-Codex2API-Upstream: codex）。有効にするとこれらのリクエストも BPS に留め、ツールを省略して利用できないことをモデルに通知し、強制指定は auto に変更されます。Codex 既定の cached 検索は常に BPS に留まり省略されます。クライアント関数ツールには影響しません。",
         excelBPSIgnoreImages: "画像機能が無効な場合に画像入力を省略",
         excelBPSIgnoreImagesDesc: "既定では無効です。システムの BPS 画像機能が無効な場合、現在・過去のメッセージやツール結果の画像を利用不可の通知に置き換えます。テキストとツール呼出しの対応を維持し、モデルに画像を読めないことと再読込しないことを伝えます。画像機能を有効にすると通常の処理に戻ります。",
         excelBPSAutoDisableOn403: "403 エラー時に BPS を自動で無効化",
