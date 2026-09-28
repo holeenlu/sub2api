@@ -1,6 +1,8 @@
 ## Prepare a key and model
 
-Create a key in [API keys](/keys), choose its group, and open **Use key → Codex**. Prefer the generated configuration; model catalogs are supported only for OpenAI/Composite groups. Replace the example `gpt-5.6-sol` with an enabled model. Back up existing configuration and merge these fields; do not replace the whole file. HTTP/SSE and WebSocket configurations occupy separate console tabs; start with HTTP/SSE.
+Create a key in [API keys](/keys), choose its group, and open **Use key → Codex**. Prefer the generated configuration; model catalogs are supported only for OpenAI/Composite groups. Replace the example `gpt-6-astra` with an enabled model. Back up existing configuration and merge these fields; do not replace the whole file. HTTP/SSE and WebSocket configurations occupy separate console tabs; start with HTTP/SSE.
+
+For OpenAI/Composite groups, each opening of **Use key** restores the last successful model catalog for the current key, then refreshes it. The highest available model tier and version are selected for both `model` and `review_model`. Reopen the dialog after changing account model restrictions or the group allowlist. If discovery fails, the saved catalog remains available and you can retry. Each site, platform and key has its own cache in the current browser; the API key is not stored in plaintext. If the first lookup fails and no cache exists, retry successfully before generating configuration.
 
 This guide covers local clients that read Codex configuration. Remote hosts, WSL and containers need configuration at their execution location; cloud tasks may not use your local file.
 
@@ -41,7 +43,7 @@ Merge this routed-group example into `~/.codex/config.toml`, or your `CODEX_HOME
 
 ```toml
 model_provider = "tapmodels"
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 
 [model_providers.tapmodels]
 name = "TapModels"
@@ -54,7 +56,7 @@ supports_websockets = false
 
 Run `codex` in the same terminal. Disabling WebSockets provides an HTTP/SSE starting point; it does not mean the gateway lacks WebSocket routes.
 
-The OpenAI group generates a different shape: provider ID `OpenAI`, response-storage and network settings, the model catalog, and `[features]`. The default **Legacy** mode downloads `config.toml` plus `auth.json` and sets `requires_openai_auth = true`. **API key** mode instead sets `requires_openai_auth = false` and `experimental_bearer_token`; fully restart Codex after switching. Do not combine the two modes or merge a routed `tapmodels` provider table into the OpenAI group's `OpenAI` provider.
+The OpenAI group generates a different shape: provider ID `OpenAI`, the main and review models, the model catalog, and `[features]`. The default **Legacy** mode downloads `config.toml` plus `auth.json` and sets `requires_openai_auth = true`. **API key** mode instead sets `requires_openai_auth = false` and `experimental_bearer_token`; fully restart Codex after switching. Do not combine the two modes or merge a routed `tapmodels` provider table into the OpenAI group's `OpenAI` provider.
 
 ## Desktop: make the key available
 

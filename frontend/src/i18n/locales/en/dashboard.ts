@@ -241,7 +241,11 @@ export default {
       },
       codexModelCatalog: {
         title: 'Codex model catalog',
-        description: 'Fetch with this API key, then save the catalog at the path referenced by config.toml.',
+        description: 'Each time this dialog opens, available models are checked for this API key and the most capable model is selected for both tasks and reviews. Save the catalog to the path referenced by config.toml.',
+        loadingDescription: 'Checking models available to this key and generating configuration…',
+        refreshingDescription: 'Using the last saved data for this key while refreshing the model catalog…',
+        cachedErrorDescription: 'The model catalog could not be refreshed. The last saved data for this key is still in use. You can retry later.',
+        emptyDescription: 'No Codex models are available for this key. Check account model restrictions and the group model allowlist, then retry.',
         fetch: 'Fetch catalog',
         retry: 'Retry',
         download: 'Download catalog',

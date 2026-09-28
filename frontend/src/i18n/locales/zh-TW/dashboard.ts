@@ -247,7 +247,11 @@ export default {
       },
       codexModelCatalog: {
         title: 'Codex 模型目錄',
-        description: '使用目前 API Key 取得目錄，並儲存到 config.toml 引用的路徑。',
+        description: '每次開啟時自動讀取目前 API Key 可用的模型，選擇最高能力型號用於主模型和審查模型。請將目錄儲存到 config.toml 引用的路徑。',
+        loadingDescription: '正在檢測目前金鑰可用的模型並生成設定…',
+        refreshingDescription: '已使用此金鑰上次儲存的資料，正在重新整理模型目錄…',
+        cachedErrorDescription: '模型目錄讀取失敗，繼續使用此金鑰上次儲存的資料。可稍後重試。',
+        emptyDescription: '目前金鑰沒有可用的 Codex 模型，請檢查帳號模型限制和分組模型白名單後重試。',
         fetch: '取得目錄',
         retry: '重試',
         download: '下載目錄',
