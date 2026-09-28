@@ -1457,6 +1457,10 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			filterStats.exclude("platform_mismatch")
 			continue
 		}
+		if s.service.isExcelBPSCoolingDownContext(ctx, account, req.RequestedModel) {
+			filterStats.exclude(excelBPSRateLimitedFilterReason)
+			continue
+		}
 		if s.service.isOpenAIAccountRequestRuntimeBlockedContext(ctx, account, req.RequestedModel, req.RequireCompact) {
 			filterStats.exclude("runtime_blocked")
 			continue
