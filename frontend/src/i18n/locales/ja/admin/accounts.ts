@@ -628,6 +628,17 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        autoBPS: 'Enable BPS automatically when degraded',
+        autoBPSDesc: 'A state probe checks this account every 30 minutes over the normal protocol (never through BPS) and turns BPS on once the degraded conditions below are met. This is a quality rule; its records and settings are also under Smart operations → Quality operations.',
+        autoBPSLoading: 'Loading this account’s auto-BPS rule…',
+        autoBPSLoadFailed: 'Failed to load the auto-BPS rule: {error}. Saving now will not change this rule.',
+        autoBPSPauseHint: 'Turning this off pauses the rule. Its settings and records are kept and it resumes with the same settings when turned back on; BPS that is already on stays on.',
+        autoBPSRuleConflict: 'This account already has a BPS quality rule (#{id}). Edit it in Quality operations. Group/scheduling rules can run alongside BPS rules.',
+        autoBPSManageRules: 'Manage quality rules',
+        autoBPSSaveFailed: 'The account was saved, but the auto-BPS rule was not: {error}. Fix it under Smart operations → Quality operations.',
+        autoBPSCreateFailed: 'The accounts were created, but {count} of them did not get the auto-BPS rule: {error}. Add it under Smart operations → Quality operations.',
+        autoBPSUnsupportedSkipped: 'Codex PAT and Agent Identity accounts do not support BPS, so no auto-BPS rule was added for them.',
+
         baseUrlHint: 'OpenAI公式APIを使用する場合はデフォルトのままにしてください',
         apiKeyHint: 'OpenAIのAPIキー',
         oauthPassthrough: '自動パススルー（認証のみ）',

@@ -247,7 +247,23 @@ func (s *OpenAIGatewayService) probeExcelBPS403Recovery(ctx context.Context, acc
 	if err != nil {
 		return err
 	}
-	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)
+	// A recovery scan/claim can become stale while credentials and the request
+	// are prepared. Read the primary immediately before sending, and do not
+	// charge RPM or probe an account whose recovery policy or identity changed.
+	latest, err := s.latestOpenAITurnAccount(ctx, nil, account)
+	if err != nil {
+		return err
+	}
+	if !latest.IsExcelBPS403RecoveryPending() ||
+		openAITurnRouteFingerprint(latest) != openAITurnRouteFingerprint(account) ||
+		latest.GetCredential("access_token") != account.GetCredential("access_token") ||
+		!sameExcelBPSRecoveryPolicy(latest.Extra, account.Extra) {
+		return denyOpenAITurn("account_binding_changed")
+	}
+	if err := s.acquireOpenAIRPMForSend(ctx, latest); err != nil {
+		return err
+	}
+	resp, err := s.httpUpstream.Do(req, proxy, latest.ID, latest.Concurrency)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
 	}
@@ -273,4 +289,20 @@ func (s *OpenAIGatewayService) probeExcelBPS403Recovery(ctx context.Context, acc
 		return errors.New("BPS recovery response mismatch")
 	}
 	return nil
+}
+
+// Compare JSON values rather than Go representations: SQL decodes numbers as
+// float64 and arrays as []any, while direct callers can supply ints/[]string.
+func sameExcelBPSRecoveryPolicy(a, b map[string]any) bool {
+	policy := func(extra map[string]any) []byte {
+		values := make(map[string]any)
+		for key, value := range extra {
+			if strings.HasPrefix(key, "openai_excel_bps") {
+				values[key] = value
+			}
+		}
+		raw, _ := json.Marshal(values)
+		return raw
+	}
+	return string(policy(a)) == string(policy(b))
 }
