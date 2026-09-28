@@ -18,27 +18,27 @@ func TestBulkUpdateExcelBPSExtra(t *testing.T) {
 		{
 			name:    "re-enabling clears 403 marker",
 			extra:   map[string]any{"openai_excel_bps": true},
-			removed: []string{service.ExcelBPS403DisabledAtKey},
+			removed: []string{service.ExcelBPS403DisabledAtKey, service.ExcelBPS403LastProbeAtKey},
 		},
 		{
 			name:    "all models removes scope key",
 			extra:   map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": nil, "openai_excel_bps_cache_creation_as_input": false},
-			removed: []string{service.ExcelBPS403DisabledAtKey, "openai_excel_bps_models", "openai_excel_bps_cache_creation_as_input"},
+			removed: []string{service.ExcelBPS403DisabledAtKey, service.ExcelBPS403LastProbeAtKey, "openai_excel_bps_models", "openai_excel_bps_cache_creation_as_input"},
 		},
 		{
 			name:    "empty scope remains explicit",
 			extra:   map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": []string{}, "openai_excel_bps_cache_creation_as_input": true},
-			removed: []string{service.ExcelBPS403DisabledAtKey},
+			removed: []string{service.ExcelBPS403DisabledAtKey, service.ExcelBPS403LastProbeAtKey},
 		},
 		{
 			name:    "selected scope remains explicit",
 			extra:   map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": []string{"gpt-6-astra"}},
-			removed: []string{service.ExcelBPS403DisabledAtKey},
+			removed: []string{service.ExcelBPS403DisabledAtKey, service.ExcelBPS403LastProbeAtKey},
 		},
 		{
 			name:    "disabled removes all BPS settings",
 			extra:   map[string]any{"openai_excel_bps": false},
-			removed: []string{"openai_excel_bps", "openai_excel_bps_models", "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", "openai_excel_bps_auto_move_on_403", "openai_excel_bps_403_target_group_id", service.ExcelBPSIgnoreImagesKey, service.ExcelBPSIgnoreEncryptedContentKey, service.ExcelBPSOmitUnsupportedToolsKey},
+			removed: []string{"openai_excel_bps", "openai_excel_bps_models", "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", service.ExcelBPSAutoRecoverOn403Key, service.ExcelBPS403RecoveryIntervalMinutesKey, "openai_excel_bps_auto_move_on_403", "openai_excel_bps_403_target_group_id", service.ExcelBPSIgnoreImagesKey, service.ExcelBPSIgnoreEncryptedContentKey, service.ExcelBPSOmitUnsupportedToolsKey},
 		},
 		{
 			name:  "unrelated changes preserve BPS settings",
@@ -75,7 +75,7 @@ func TestBulkUpdateExcelBPSExtra(t *testing.T) {
 			expression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
 			switch tt.name {
 			case "disabled removes all BPS settings":
-				expression = "(" + expression + ") - 'openai_excel_bps' - 'openai_excel_bps_models' - 'openai_excel_bps_cache_creation_as_input' - 'openai_excel_bps_auto_disable_on_403' - 'openai_excel_bps_auto_move_on_403' - 'openai_excel_bps_403_target_group_id' - 'openai_excel_bps_ignore_images' - 'openai_excel_bps_ignore_encrypted_content' - 'openai_excel_bps_omit_unsupported_tools'"
+				expression = "(" + expression + ") - 'openai_excel_bps' - 'openai_excel_bps_models' - 'openai_excel_bps_cache_creation_as_input' - 'openai_excel_bps_auto_disable_on_403' - 'openai_excel_bps_auto_recover_on_403' - 'openai_excel_bps_403_recovery_interval_minutes' - 'openai_excel_bps_auto_move_on_403' - 'openai_excel_bps_403_target_group_id' - 'openai_excel_bps_ignore_images' - 'openai_excel_bps_ignore_encrypted_content' - 'openai_excel_bps_omit_unsupported_tools'"
 			case "auto move false removes policy and destination":
 				expression = "(" + expression + ") - 'openai_excel_bps_auto_move_on_403' - 'openai_excel_bps_403_target_group_id'"
 			default:
