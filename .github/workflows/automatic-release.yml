@@ -9,7 +9,6 @@ permissions:
 concurrency:
   group: automatic-release-${{ github.repository }}
   cancel-in-progress: false
-  queue: max
 jobs:
   select:
     runs-on: ubuntu-latest
