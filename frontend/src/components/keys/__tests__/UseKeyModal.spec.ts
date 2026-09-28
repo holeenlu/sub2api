@@ -41,7 +41,6 @@ function readBlobAsText(blob: Blob): Promise<string> {
   })
 }
 
-
 const stubs = {
   BaseDialog: {
     template: '<div><slot /><slot name="footer" /></div>'
@@ -1467,21 +1466,5 @@ describe('UseKeyModal', () => {
     const auth = files.find((file) => file.name === 'auth.json')!
     expect(JSON.parse(auth.text)).toEqual({ OPENAI_API_KEY: 'sk-second' })
     expect(files.find((file) => file.name === 'config.toml')!.text).not.toContain('sk-first')
-  })
-})
-
-describe('OpenAI BPS configuration', () => {
-  it('offers HTTP Codex only and selects the BPS candidate model', async () => {
-    const wrapper = mount(UseKeyModal, {
-      props: { show: true, apiKey: 'sk-test', baseUrl: 'https://example.com/v1', platform: 'openai_bps' },
-      global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }, Icon: { template: '<span />' } } }
-    })
-    await nextTick()
-    expect(wrapper.text()).toContain('keys.useKeyModal.cliTabs.codexCli')
-    expect(wrapper.text()).not.toContain('keys.useKeyModal.cliTabs.codexCliWs')
-    expect(wrapper.text()).not.toContain('keys.useKeyModal.cliTabs.claudeCode')
-    expect(wrapper.text()).toContain('gpt-6-astra')
-    expect(wrapper.text()).toContain('supports_websockets = false')
-    wrapper.unmount()
   })
 })

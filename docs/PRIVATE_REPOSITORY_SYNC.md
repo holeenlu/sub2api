@@ -21,7 +21,7 @@
 ## 同步来源范围
 
 - `Wei-Shaw/sub2api` 的 `upstream/main` 是完整普通 merge 的上游；同步前核对 remote URL，不能换成 fork 后继续整分支合并。
-- `ranxi2001/sub2api` 与 `MACOS-DO/sub4api` 仅同步 Excel / BPS 相关功能、修复和严格必要的依赖。禁止整分支、整版本或整 tag 合入，也不能通过共享文件或依赖带入无关的打票、Mihomo、账号质量、部署等功能。
+- BPS 仅从 `ranxi2001/sub2api` 审查并同步 OpenAI OAuth Excel / BPS 相关功能、修复和严格必要的依赖。sub4api 独立 BPS 平台已移除，后续不得通过同步恢复。禁止整分支、整版本或整 tag 合入，也不能通过共享文件或依赖带入无关的打票、Mihomo、账号质量、部署等功能。
 - 从已有 Excel / BPS 整合记录的来源 SHA 审查到固定源 tip，按实际 diff 和调用依赖判断范围，记录采用与排除的来源提交；不能仅按提交标题或文件名筛选。已存在等价行为时不重复移植。
 - 完整属于 Excel / BPS 的提交可审查后使用 `cherry-pick -x`；混合提交仅适配必要代码块，在提交或整合记录中注明源 SHA 和排除内容。依赖无法独立分离时，先说明取舍并让用户选择。
 - 公共改动先落 `holeen/main`，再按 [需求交付规范](CHANGE_DELIVERY.md) 普通 merge 到 KDAN、TapModels，保留品牌及繁体中文。三个分支分别合并主上游，不代表已传播公共定制。
@@ -90,7 +90,7 @@ Docker CI 从 merge-base 最近的上游 `v*` tag 推导并注入 `main.Upstream
 
 ### Excel / BPS 关联依赖的判定
 
-除协议专属文件外，影响 Excel / BPS 实际请求的 OpenAI OAuth RPM、共享调度、重试/错误分类和同账号原生回退，属于可审查的必要依赖；不能仅按提交标题或文件名漏掉这些内容。OAuth 控制与独立 `openai_bps` 平台分开记录适用范围。
+除协议专属文件外，影响 Excel / BPS 实际请求的 OpenAI OAuth RPM、共享调度、重试/错误分类和同账号原生回退，属于可审查的必要依赖；不能仅按提交标题或文件名漏掉这些内容。这些控制仅用于保留的 OpenAI OAuth 路径，独立 `openai_bps` 平台已退役。
 
 RPM 应覆盖实际发送边界：主请求、重试、工具修复及已批准计入的附件上传；本地校验未通过、未发送和附件缓存命中不计数。保持并发原子性、父子账号共享、限流与上游错误区分，以及未配置限额账号在计数服务故障时的正常候选资格。RPM 不等于 TPM。
 
