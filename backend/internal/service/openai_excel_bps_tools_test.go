@@ -79,6 +79,9 @@ func TestExcelBPSToolFallbackPolicy(t *testing.T) {
 						require.Error(t, err)
 						require.Equal(t, http.StatusBadRequest, rec.Code)
 						require.Contains(t, rec.Body.String(), "basispoints_unsupported_tool")
+						require.Contains(t, rec.Body.String(), tc.nativeReason)
+						require.Contains(t, rec.Body.String(), "ask the administrator")
+						require.NotContains(t, rec.Body.String(), ExcelBPSOmitUnsupportedToolsKey, "clients cannot change account settings")
 						require.Empty(t, upstream.requests)
 					} else {
 						require.NoError(t, err)

@@ -110,7 +110,7 @@ func PrepareNativeImagesWithLimit(raw []byte, maxImages int) (*NativeImages, err
 				return nil, fmt.Errorf("basispoints input_image requires exactly one image reference")
 			}
 			if plan.inlineCount >= maxImages {
-				return nil, fmt.Errorf("basispoints accepts at most %d inline images per request", maxImages)
+				return nil, fmt.Errorf("BPS accepts at most %d inline images per request, counting images in history and tool outputs; remove older images or ask the administrator to raise the limit", maxImages)
 			}
 			plan.inlineCount++
 			// Native uploads use the configurable count with fixed 20 MiB

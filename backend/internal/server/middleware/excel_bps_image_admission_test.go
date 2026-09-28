@@ -56,6 +56,9 @@ func bpsImageTestRouter(settings bpsImageTestSettings, next gin.HandlerFunc) *gi
 	return r
 }
 
+// Bodies that may reach image processing keep their reservation after upload.
+const bpsImageTestBody = `{"input":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}`
+
 func TestExcelBPSImageAdmission200ConcurrentRequests(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
@@ -106,7 +109,7 @@ func TestExcelBPSImageAdmission200ConcurrentRequests(t *testing.T) {
 					req := httptest.NewRequest(http.MethodPost, paths[i%len(paths)], nil)
 					req.ContentLength = tt.length
 					req.Header.Set("Content-Encoding", tt.encoding)
-					req.Body = &bpsImageCountingBody{reads: &reads, reader: strings.NewReader("test")}
+					req.Body = &bpsImageCountingBody{reads: &reads, reader: strings.NewReader(bpsImageTestBody)}
 					w := httptest.NewRecorder()
 					r.ServeHTTP(w, req)
 					results <- w
@@ -238,7 +241,7 @@ func TestExcelBPSImageAdmissionConfiguredLimits(t *testing.T) {
 		}
 		c.Status(http.StatusNoContent)
 	})
-	first := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader("small"))
+	first := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(bpsImageTestBody))
 	first.Header.Set("Hold", "true")
 	firstResult := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -252,9 +255,10 @@ func TestExcelBPSImageAdmissionConfiguredLimits(t *testing.T) {
 		t.Fatal("first request did not reach handler")
 	}
 	second := httptest.NewRecorder()
-	r.ServeHTTP(second, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader("small")))
+	r.ServeHTTP(second, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(bpsImageTestBody)))
 	require.Equal(t, http.StatusServiceUnavailable, second.Code)
 	require.Contains(t, second.Body.String(), "basispoints_image_request_busy")
+	require.NotContains(t, second.Body.String(), "budget", "clients get no internal capacity details")
 	once.Do(func() { close(release) })
 	select {
 	case result := <-firstResult:
@@ -412,4 +416,87 @@ func TestExcelBPSImageAdmissionBudgetReconfiguration(t *testing.T) {
 	require.True(t, ok)
 	require.False(t, reservation.resize(520<<20), "lowered budget must apply after draining")
 	reservation.release()
+}
+
+func TestExcelBPSImageAdmissionTextOnlyReleasesAfterUpload(t *testing.T) {
+	// One slot: long-running text-only requests must not hold it through their
+	// upstream stream, while an image body still does.
+	settings := bpsImageTestSettings{enabled: true, bodyLimitMiB: 1, budgetMiB: 512, maxRequests: 1}
+	entered := make(chan string, 8)
+	release := make(chan struct{})
+	var once sync.Once
+	var wg sync.WaitGroup
+	t.Cleanup(func() { once.Do(func() { close(release) }); wg.Wait() })
+	r := bpsImageTestRouter(settings, func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.Status(http.StatusBadRequest)
+			return
+		}
+		entered <- string(body)
+		<-release
+		c.Status(http.StatusNoContent)
+	})
+	results := make(chan int, 8)
+	send := func(body string) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)))
+			results <- w.Code
+		}()
+	}
+	waitEntered := func(want string) {
+		t.Helper()
+		select {
+		case got := <-entered:
+			require.Equal(t, want, got, "the handler receives the complete preread body")
+		case code := <-results:
+			t.Fatalf("request finished early with %d", code)
+		case <-time.After(5 * time.Second):
+			t.Fatal("request did not reach the handler")
+		}
+	}
+	const text = `{"model":"gpt-6-astra","input":"explain \"base64\" and data: images"}`
+	for i := 0; i < 3; i++ {
+		send(text)
+		waitEntered(text)
+	}
+	send(bpsImageTestBody)
+	waitEntered(bpsImageTestBody)
+	busy := httptest.NewRecorder()
+	r.ServeHTTP(busy, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(bpsImageTestBody)))
+	require.Equal(t, http.StatusServiceUnavailable, busy.Code, "the image request keeps the only slot")
+	uploading := httptest.NewRecorder()
+	r.ServeHTTP(uploading, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(text)))
+	require.Equal(t, http.StatusServiceUnavailable, uploading.Code, "uploads are still admitted against the guard")
+	once.Do(func() { close(release) })
+	for i := 0; i < 4; i++ {
+		select {
+		case code := <-results:
+			require.Equal(t, http.StatusNoContent, code)
+		case <-time.After(5 * time.Second):
+			t.Fatal("held request did not finish")
+		}
+	}
+}
+
+func TestBPSImageBodyMayContainInlineImages(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{bpsImageTestBody, true},
+		{`{"messages":[{"content":[{"type":"image_url","image_url":{"url":"DATA:IMAGE/JPEG;base64,AAAA"}}]}]}`, true},
+		{`{"messages":[{"content":[{"type":"image","source":{"type": "base64","media_type":"image/png","data":"AAAA"}}]}]}`, true},
+		{`{"input":[{"type":"function_call_output","output":[{"type":"input_image","image_url":"data:image/webp;base64,AAAA"}]}]}`, true},
+		{`{"input":"plain text"}`, false},
+		{`{"input":"decode this \"base64\" string"}`, false},
+		{`{"input":"see data: image below"}`, false},
+		{`data:`, false},
+		{``, false},
+	} {
+		require.Equal(t, tc.want, bpsImageBodyMayContainInlineImages([]byte(tc.body)), tc.body)
+	}
 }
