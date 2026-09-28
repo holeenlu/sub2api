@@ -1310,7 +1310,7 @@ export interface Account {
   max_sessions?: number | null
   session_idle_timeout_minutes?: number | null
 
-  // RPM 限制（仅 Anthropic OAuth/SetupToken 账号有效）
+  // RPM 限制（Anthropic OAuth/SetupToken 和 OpenAI OAuth）
   base_rpm?: number | null
   rpm_strategy?: string | null
   rpm_sticky_buffer?: number | null
@@ -1354,6 +1354,9 @@ export interface Account {
   current_window_cost?: number | null // 当前窗口费用
   active_sessions?: number | null // 当前活跃会话数
   current_rpm?: number | null // 当前分钟 RPM 计数
+  effective_rpm_limit?: number | null // 父账号与影子账号限制取更严格值，不覆盖存储配置
+  rpm_paused?: boolean
+  rpm_reset_at?: number | null
 
   // 影子账号关系（spark 维度影子）
   parent_account_id?: number | null

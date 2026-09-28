@@ -210,21 +210,25 @@ type CheckMixedChannelRequest struct {
 
 // AccountWithConcurrency extends Account with real-time concurrency info
 type AccountWithConcurrency struct {
+	EffectiveRPMLimit *int `json:"effective_rpm_limit,omitempty"`
 	*dto.Account
 	simpleMode         bool                         `json:"-"`
 	CurrentConcurrency int                          `json:"current_concurrency"`
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
 	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
-	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
+	// 以下字段仅在对应账号启用运行时容量控制时返回；OpenAI OAuth 仅使用 RPM 字段
 	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
 	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
 	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+	RPMPaused         bool     `json:"rpm_paused,omitempty"`
+	RPMResetAt        *int64   `json:"rpm_reset_at,omitempty"`
 }
 
 // AccountListItemWithConcurrency is the compact account-list envelope used
 // for lite=1. It embeds dto.AccountListItem instead of the full dto.Account,
 // so groups/account_groups never appear in the list payload.
 type AccountListItemWithConcurrency struct {
+	EffectiveRPMLimit *int `json:"effective_rpm_limit,omitempty"`
 	*dto.AccountListItem
 	CurrentConcurrency int                          `json:"current_concurrency"`
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
@@ -232,6 +236,8 @@ type AccountListItemWithConcurrency struct {
 	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
 	ActiveSessions     *int                         `json:"active_sessions,omitempty"`
 	CurrentRPM         *int                         `json:"current_rpm,omitempty"`
+	RPMPaused          bool                         `json:"rpm_paused,omitempty"`
+	RPMResetAt         *int64                       `json:"rpm_reset_at,omitempty"`
 }
 
 type simpleModeGroupReference struct {
@@ -406,8 +412,8 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		}
 	}
 
-	if account.IsAnthropicOAuthOrSetupToken() {
-		if h.accountUsageService != nil && account.GetWindowCostLimit() > 0 {
+	if account.SupportsRPMLimit() {
+		if account.IsAnthropicOAuthOrSetupToken() && h.accountUsageService != nil && account.GetWindowCostLimit() > 0 {
 			startTime := account.GetCurrentWindowStartTime()
 			if stats, err := h.accountUsageService.GetAccountWindowStats(ctx, account.ID, startTime); err == nil && stats != nil {
 				cost := stats.StandardCost
@@ -415,7 +421,7 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 			}
 		}
 
-		if h.sessionLimitCache != nil && account.GetMaxSessions() > 0 {
+		if account.IsAnthropicOAuthOrSetupToken() && h.sessionLimitCache != nil && account.GetMaxSessions() > 0 {
 			idleTimeout := time.Duration(account.GetSessionIdleTimeoutMinutes()) * time.Minute
 			idleTimeouts := map[int64]time.Duration{account.ID: idleTimeout}
 			if sessions, err := h.sessionLimitCache.GetActiveSessionCountBatch(ctx, []int64{account.ID}, idleTimeouts); err == nil {
@@ -426,15 +432,24 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		}
 
 		if h.rpmCache != nil && account.GetBaseRPM() > 0 {
-			if rpm, err := h.rpmCache.GetRPM(ctx, account.ID); err == nil {
+			rpmAccountID := account.ID
+			if account.IsOpenAIOAuth() {
+				rpmAccountID = account.RPMAccountID()
+			}
+			if rpm, err := h.rpmCache.GetRPM(ctx, rpmAccountID); err == nil {
 				item.CurrentRPM = &rpm
+				if account.IsOpenAIOAuth() && rpm >= account.GetBaseRPM() {
+					item.RPMPaused = true
+					resetAt := time.Now().Truncate(time.Minute).Add(time.Minute).Unix()
+					item.RPMResetAt = &resetAt
+				}
 			}
 		}
 	}
 
-	h.enrichShadowParents(ctx, []AccountWithConcurrency{item})
-
-	return item
+	items := []AccountWithConcurrency{item}
+	h.enrichShadowParents(ctx, items)
+	return items[0]
 }
 
 // scoreOpenAIAccountSchedulerPool 对池内 OpenAI 账号计算调度分数快照。
@@ -757,23 +772,27 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	// 识别需要查询窗口费用、会话数和 RPM 的账号（Anthropic OAuth/SetupToken 且启用了相应功能）
+	// 识别需要查询窗口费用、会话数和 RPM 的账号；窗口/会话仅属于 Anthropic，RPM 也支持 OpenAI OAuth
 	windowCostAccountIDs := make([]int64, 0)
 	sessionLimitAccountIDs := make([]int64, 0)
 	rpmAccountIDs := make([]int64, 0)
 	sessionIdleTimeouts := make(map[int64]time.Duration) // 各账号的会话空闲超时配置
 	for i := range accounts {
 		acc := &accounts[i]
-		if acc.IsAnthropicOAuthOrSetupToken() {
-			if acc.GetWindowCostLimit() > 0 {
+		if acc.SupportsRPMLimit() {
+			if acc.IsAnthropicOAuthOrSetupToken() && acc.GetWindowCostLimit() > 0 {
 				windowCostAccountIDs = append(windowCostAccountIDs, acc.ID)
 			}
-			if acc.GetMaxSessions() > 0 {
+			if acc.IsAnthropicOAuthOrSetupToken() && acc.GetMaxSessions() > 0 {
 				sessionLimitAccountIDs = append(sessionLimitAccountIDs, acc.ID)
 				sessionIdleTimeouts[acc.ID] = time.Duration(acc.GetSessionIdleTimeoutMinutes()) * time.Minute
 			}
 			if acc.GetBaseRPM() > 0 {
-				rpmAccountIDs = append(rpmAccountIDs, acc.ID)
+				rpmAccountID := acc.ID
+				if acc.IsOpenAIOAuth() {
+					rpmAccountID = acc.RPMAccountID()
+				}
+				rpmAccountIDs = append(rpmAccountIDs, rpmAccountID)
 			}
 		}
 	}
@@ -876,8 +895,17 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 		// 添加 RPM 计数（仅当启用时）
 		if rpmCounts != nil {
-			if rpm, ok := rpmCounts[acc.ID]; ok {
+			rpmAccountID := acc.ID
+			if acc.IsOpenAIOAuth() {
+				rpmAccountID = acc.RPMAccountID()
+			}
+			if rpm, ok := rpmCounts[rpmAccountID]; ok {
 				item.CurrentRPM = &rpm
+				if acc.IsOpenAIOAuth() && acc.GetBaseRPM() > 0 && rpm >= acc.GetBaseRPM() {
+					item.RPMPaused = true
+					resetAt := time.Now().Truncate(time.Minute).Add(time.Minute).Unix()
+					item.RPMResetAt = &resetAt
+				}
 			}
 		}
 
@@ -898,6 +926,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 				CurrentWindowCost:  item.CurrentWindowCost,
 				ActiveSessions:     item.ActiveSessions,
 				CurrentRPM:         item.CurrentRPM,
+				EffectiveRPMLimit:  item.EffectiveRPMLimit,
+				RPMPaused:          item.RPMPaused,
+				RPMResetAt:         item.RPMResetAt,
 			}
 		}
 		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, true)

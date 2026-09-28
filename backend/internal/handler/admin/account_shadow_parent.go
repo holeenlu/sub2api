@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -23,6 +24,15 @@ func enrichShadowParentInfo(items []AccountWithConcurrency, parents map[int64]*s
 		a.ParentSubscriptionExpiresAt = p.GetCredential("subscription_expires_at")
 		a.ParentChatGPTAccountID = p.GetCredential("chatgpt_account_id")
 		a.ParentPrivacyMode = p.GetExtraString("privacy_mode")
+		if a.Platform == service.PlatformOpenAI && a.Type == service.AccountTypeOAuth && p.IsOpenAIOAuth() {
+			limit := p.GetBaseRPM()
+			if a.BaseRPM != nil && *a.BaseRPM > 0 && (limit == 0 || *a.BaseRPM < limit) {
+				limit = *a.BaseRPM
+			}
+			if limit > 0 {
+				items[i].EffectiveRPMLimit = &limit
+			}
+		}
 	}
 }
 
@@ -53,4 +63,25 @@ func (h *AccountHandler) enrichShadowParents(ctx context.Context, items []Accoun
 		pmap[p.ID] = p
 	}
 	enrichShadowParentInfo(items, pmap)
+	if h.rpmCache == nil {
+		return
+	}
+	counts, err := h.rpmCache.GetRPMBatch(ctx, parentIDs)
+	if err != nil {
+		return
+	}
+	for i := range items {
+		item := &items[i]
+		if item.Account == nil || item.ParentAccountID == nil || item.EffectiveRPMLimit == nil {
+			continue
+		}
+		if count, ok := counts[*item.ParentAccountID]; ok {
+			item.CurrentRPM = &count
+			item.RPMPaused = count >= *item.EffectiveRPMLimit
+			if item.RPMPaused {
+				reset := time.Now().Truncate(time.Minute).Add(time.Minute).Unix()
+				item.RPMResetAt = &reset
+			}
+		}
+	}
 }

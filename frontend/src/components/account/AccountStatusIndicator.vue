@@ -5,6 +5,12 @@
       <span v-if="account.status !== 'active' && account.status !== 'error'" class="badge badge-gray text-xs">{{ t(`admin.accounts.status.${account.status}`) }}</span>
       <span v-if="account.schedulable === false" class="text-[11px] text-gray-500">{{ t('admin.accounts.status.paused') }}</span>
     </div>
+    <!-- OpenAI OAuth RPM Display - keep the pause reason explicit -->
+    <div v-else-if="isRPMPaused" class="flex flex-col items-center gap-1">
+      <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rpmPaused') }}</span>
+      <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ rpmResumeText }}</span>
+    </div>
+
     <!-- Rate Limit Display (429) - Two-line layout -->
     <div v-else-if="isRateLimited" class="flex flex-col items-center gap-1">
       <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
@@ -280,6 +286,25 @@ const formatScopeName = (scope: string): string => {
 const isOverloaded = computed(() => {
   if (!props.account.overload_until) return false
   return new Date(props.account.overload_until) > new Date()
+})
+
+const effectiveRpmLimit = computed(() => props.account.effective_rpm_limit ?? props.account.base_rpm ?? 0)
+
+const isRPMPaused = computed(() =>
+  props.account.platform === 'openai' && props.account.type === 'oauth' &&
+  props.account.status === 'active' && props.account.schedulable &&
+  effectiveRpmLimit.value > 0 &&
+  (props.account.rpm_paused === true ||
+    (props.account.current_rpm ?? 0) >= effectiveRpmLimit.value)
+)
+
+const rpmResumeText = computed(() => {
+  if (props.account.rpm_reset_at) {
+    return t('admin.accounts.status.rpmPausedUntil', {
+      time: formatDateTime(new Date(props.account.rpm_reset_at * 1000).toISOString())
+    })
+  }
+  return t('admin.accounts.status.rpmPausedRetry')
 })
 
 // Computed: is temp unschedulable
