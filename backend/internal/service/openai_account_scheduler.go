@@ -139,6 +139,7 @@ type openAIAccountSchedulerMetrics struct {
 }
 
 type openAIAccountLoadPlan struct {
+	priorityScheduling        bool
 	allCandidates             []openAIAccountCandidateScore
 	candidates                []openAIAccountCandidateScore
 	staleSnapshotCompactRetry []openAIAccountCandidateScore
@@ -683,17 +684,19 @@ func (s *defaultOpenAIAccountScheduler) shouldEscapeStickyAccount(accountID int6
 }
 
 type openAIAccountCandidateScore struct {
-	account    *Account
-	loadInfo   *AccountLoadInfo
-	loadKnown  bool
-	score      float64
-	priority   int
-	errorRate  float64
-	ttft       float64
-	hasTTFT    bool
-	rpmCurrent int
-	rpmLimit   int
-	rpmEnabled bool
+	priorityRecovery         bool
+	priorityRecoveryPressure float64
+	account                  *Account
+	loadInfo                 *AccountLoadInfo
+	loadKnown                bool
+	score                    float64
+	priority                 int
+	errorRate                float64
+	ttft                     float64
+	hasTTFT                  bool
+	rpmCurrent               int
+	rpmLimit                 int
+	rpmEnabled               bool
 }
 
 type openAIAccountCandidateHeap []openAIAccountCandidateScore
@@ -1090,6 +1093,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		plan.topK = 1
 	}
 
+	s.applyPriorityScheduling(req, &plan)
 	plan.selectionOrder = s.buildOpenAISelectionOrder(req, plan)
 	return plan
 }
@@ -1101,6 +1105,26 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 	buildSelectionOrder := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
 		if len(pool) == 0 || plan.topK <= 0 {
 			return nil
+		}
+		if plan.priorityScheduling {
+			ranked := append([]openAIAccountCandidateScore(nil), pool...)
+			sort.SliceStable(ranked, func(i, j int) bool {
+				a, b := ranked[i], ranked[j]
+				if int(a.score/200) != int(b.score/200) {
+					return a.score > b.score
+				}
+				if a.priorityRecovery != b.priorityRecovery {
+					return a.priorityRecovery
+				}
+				if a.priorityRecovery && a.priorityRecoveryPressure != b.priorityRecoveryPressure {
+					return a.priorityRecoveryPressure > b.priorityRecoveryPressure
+				}
+				if openAIAccountSchedulingPriority(a.account) != openAIAccountSchedulingPriority(b.account) {
+					return openAIAccountSchedulingPriority(a.account) < openAIAccountSchedulingPriority(b.account)
+				}
+				return isOpenAIAccountCandidateBetter(a, b)
+			})
+			return ranked
 		}
 		groupTopK := plan.topK
 		if groupTopK > len(pool) {
@@ -2146,11 +2170,11 @@ func cloneOpenAIAdvancedSchedulerWeightOverrides(in map[string]float64) map[stri
 	return out
 }
 
-func (s *OpenAIGatewayService) getOpenAIAccountScheduler(ctx context.Context) OpenAIAccountScheduler {
+func (s *OpenAIGatewayService) getOpenAIAccountScheduler(ctx context.Context, priority bool) OpenAIAccountScheduler {
 	if s == nil {
 		return nil
 	}
-	if !s.isOpenAIAdvancedSchedulerEnabled(ctx) {
+	if !s.isOpenAIAdvancedSchedulerEnabled(ctx) && !priority {
 		return nil
 	}
 	s.openaiSchedulerOnce.Do(func() {
@@ -2283,7 +2307,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	// legacy 路径根本不读 previous_response_id（selectAccountWithLoadAwareness 没有这个
 	// 参数），那一跳只会按负载随机选一个再被判「不是绑定账号」放掉——白跑一次选号加一次
 	// 抢槽/释放。只有高级调度器在时才值得先去兜底分组找绑定。
-	if s.getOpenAIAccountScheduler(ctx) == nil {
+	if s.getOpenAIAccountScheduler(ctx, s.prioritySchedulingRuntimeConfig().Enabled) == nil {
 		// 走常规链。
 	} else if hop, boundAccountID := s.previousResponseBinding(ctx, groupID, previousResponseID); hop != nil && derefGroupID(hop) != derefGroupID(groupID) {
 		// A continuation may reuse the fallback account, but not bypass the origin's model policy.
@@ -2547,7 +2571,8 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	if strings.TrimSpace(previousResponseID) == "" {
 		guardianParentAccountID = s.resolveOpenAIGuardianParentAccountID(ctx, groupID)
 	}
-	scheduler := s.getOpenAIAccountScheduler(ctx)
+	priority := s.prioritySchedulingRuntimeConfig()
+	scheduler := s.getOpenAIAccountScheduler(ctx, platform == PlatformOpenAI && requiredImageCapability == "" && useUpstreamTokenCost && priority.applies(groupID, requestedModel))
 	if scheduler == nil {
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
 		if selection, hit, err := s.selectLegacyAccountByPreviousResponse(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform); err != nil {
@@ -2782,7 +2807,7 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 		s.openaiOAuth429RetryStartedAt.Delete(accountID)
 		s.clearOpenAIAccountModelTransientState(accountID, normalizeOpenAIAccountModelTransientModel(model))
 	}
-	scheduler := s.getOpenAIAccountScheduler(context.Background())
+	scheduler := s.getOpenAIAccountScheduler(context.Background(), s.prioritySchedulingRuntimeConfig().Enabled)
 	if scheduler == nil {
 		return healthTripped
 	}
@@ -2800,7 +2825,7 @@ func (s *OpenAIGatewayService) ObserveOpenAIAccountHealthFailure(ctx context.Con
 }
 
 func (s *OpenAIGatewayService) RecordOpenAIAccountSwitch() {
-	scheduler := s.getOpenAIAccountScheduler(context.Background())
+	scheduler := s.getOpenAIAccountScheduler(context.Background(), s.prioritySchedulingRuntimeConfig().Enabled)
 	if scheduler == nil {
 		return
 	}
@@ -2808,7 +2833,7 @@ func (s *OpenAIGatewayService) RecordOpenAIAccountSwitch() {
 }
 
 func (s *OpenAIGatewayService) SnapshotOpenAIAccountSchedulerMetrics() OpenAIAccountSchedulerMetricsSnapshot {
-	scheduler := s.getOpenAIAccountScheduler(context.Background())
+	scheduler := s.getOpenAIAccountScheduler(context.Background(), s.prioritySchedulingRuntimeConfig().Enabled)
 	if scheduler == nil {
 		return OpenAIAccountSchedulerMetricsSnapshot{}
 	}

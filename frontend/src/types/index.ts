@@ -2482,6 +2482,9 @@ export interface TotpLogin2FARequest {
 // ==================== Scheduled Test Types ====================
 
 export interface ScheduledTestPlan {
+  account_name?: string
+  pelican_config?: PelicanTestConfig
+  running_until?: string | null
   id: number
   account_id: number
   model_id: string
@@ -2496,6 +2499,10 @@ export interface ScheduledTestPlan {
 }
 
 export interface ScheduledTestResult {
+  quality_judgment?: QualityJudgment
+  quality_round_id?: string
+  quality_action?: string
+  pelican_config?: PelicanTestConfig
   id: number
   plan_id: number
   status: string
@@ -2508,6 +2515,7 @@ export interface ScheduledTestResult {
 }
 
 export interface CreateScheduledTestPlanRequest {
+  pelican_config?: PelicanTestConfig
   account_id: number
   model_id: string
   cron_expression: string
@@ -2517,6 +2525,7 @@ export interface CreateScheduledTestPlanRequest {
 }
 
 export interface UpdateScheduledTestPlanRequest {
+  pelican_config?: PelicanTestConfig
   model_id?: string
   cron_expression?: string
   enabled?: boolean
@@ -2534,3 +2543,62 @@ export type {
   PlatformQuotaWindow,
   PlatformQuotasResponse,
 } from '@/api/admin/users'
+
+
+export interface QualityJudgeConfig {
+  group_id: number
+  model_id: string
+  prompt: string
+}
+
+
+export interface QualityJudgment {
+  verdict: 'correct' | 'incorrect' | 'unknown'
+  reason: string
+  account_id?: number
+  group_id?: number
+  model_id?: string
+}
+
+
+export interface QualityBPSPolicy {
+  failure_threshold: number
+  usage_percent: number
+  require_all: boolean
+  all_models: boolean
+  models: string[]
+  omit_unsupported_tools: boolean
+  ignore_images: boolean
+  ignore_encrypted_content: boolean
+  auto_disable_on_403: boolean
+  auto_recover_on_403?: boolean
+  recovery_interval_minutes?: number
+  auto_move_on_403: boolean
+  target_group_id: number
+  session_proxy: boolean
+  proxy_source: 'mihomo' | 'ip_pool' | ''
+  cache_creation_as_input: boolean
+  // 规则开了 auto_restore 时：连续满血几轮才关 BPS；按用量开启时用量仍高是否先不关。
+  pass_threshold: number
+  hold_on_usage: boolean
+}
+
+
+export interface QualityPolicy {
+  judge?: QualityJudgeConfig
+  expected_answer: string
+  action: 'remove_groups' | 'disable_scheduling' | 'enable_bps'
+  remove_group_ids: number[]
+  auto_restore: boolean
+  bps?: QualityBPSPolicy
+}
+
+
+export interface PelicanTestConfig {
+  quality?: QualityPolicy
+  question_kind?: 'candy' | 'pelican' | 'state_probe'
+  prompt: string
+  reasoning_effort: string
+  parallel_count: number
+  model_id?: string
+}

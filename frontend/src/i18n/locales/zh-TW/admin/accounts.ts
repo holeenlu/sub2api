@@ -748,6 +748,17 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        autoBPS: '降智後自動開啟 BPS',
+        autoBPSDesc: '每 30 分鐘用狀態探針檢測一次（走正常協議，不經過 BPS），判定降智達到下面的條件時自動開啟 BPS。這是一條品質維運規則，也可在 智慧維運 → 品質維運 檢視記錄和修改。',
+        autoBPSLoading: '正在讀取本帳號的自動開啟 BPS 規則…',
+        autoBPSLoadFailed: '讀取自動開啟 BPS 規則失敗：{error}。本次儲存不會改動這條規則。',
+        autoBPSPauseHint: '關閉後規則暫停檢測，設定和記錄都保留，再開啟按原設定繼續；已經開啟的 BPS 不會被關閉。',
+        autoBPSRuleConflict: '本帳號已有 BPS 品質規則 #{id}，請前往品質維運修改。分組/排程規則可與 BPS 規則同時使用。',
+        autoBPSManageRules: '管理品質規則',
+        autoBPSSaveFailed: '帳號已儲存，但自動開啟 BPS 規則沒儲存成功：{error}。可到 智慧維運 → 品質維運 手動處理。',
+        autoBPSCreateFailed: '帳號已建立，但有 {count} 個帳號沒加上自動開啟 BPS 規則：{error}。可到 智慧維運 → 品質維運 為它們新建規則。',
+        autoBPSUnsupportedSkipped: 'Codex PAT 和 Agent Identity 帳號不支援 BPS，沒有為它們新增自動開啟 BPS 規則。',
+
         baseUrlHint: '留空使用官方 OpenAI API',
         apiKeyHint: '您的 OpenAI API Key',
         oauthPassthrough: '自動透傳（僅替換驗證）',

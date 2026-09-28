@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -29,9 +31,9 @@ func NewScheduledTestService(
 
 // CreatePlan validates the cron expression, computes next_run_at, and persists the plan.
 func (s *ScheduledTestService) CreatePlan(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestPlan, error) {
-	nextRun, err := computeNextRun(plan.CronExpression, time.Now())
+	nextRun, err := nextPlanRun(plan, time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("invalid cron expression: %w", err)
+		return nil, fmt.Errorf("invalid test schedule: %w", err)
 	}
 	plan.NextRunAt = &nextRun
 
@@ -54,9 +56,9 @@ func (s *ScheduledTestService) ListPlansByAccount(ctx context.Context, accountID
 
 // UpdatePlan validates cron and updates the plan.
 func (s *ScheduledTestService) UpdatePlan(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestPlan, error) {
-	nextRun, err := computeNextRun(plan.CronExpression, time.Now())
+	nextRun, err := nextPlanRun(plan, time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("invalid cron expression: %w", err)
+		return nil, fmt.Errorf("invalid test schedule: %w", err)
 	}
 	plan.NextRunAt = &nextRun
 
@@ -69,14 +71,15 @@ func (s *ScheduledTestService) DeletePlan(ctx context.Context, id int64) error {
 }
 
 // ListResults returns the most recent results for a plan.
-func (s *ScheduledTestService) ListResults(ctx context.Context, planID int64, limit int) ([]*ScheduledTestResult, error) {
+func (s *ScheduledTestService) ListResults(ctx context.Context, planID int64, limit int, includeContent ...bool) ([]*ScheduledTestResult, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	return s.resultRepo.ListByPlanID(ctx, planID, limit)
+	return s.resultRepo.ListByPlanID(ctx, planID, limit, includeContent...)
 }
 
-// SaveResult inserts a result and prunes old entries beyond maxResults.
+// SaveResult inserts a result and prunes old entries beyond maxResults. Account plans
+// only feed the admin history; the user showcase is fed by group tests.
 func (s *ScheduledTestService) SaveResult(ctx context.Context, planID int64, maxResults int, result *ScheduledTestResult) error {
 	result.PlanID = planID
 	if _, err := s.resultRepo.Create(ctx, result); err != nil {
@@ -91,4 +94,45 @@ func computeNextRun(cronExpr string, from time.Time) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return sched.Next(from), nil
+}
+
+func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
+	if cfg := plan.PelicanConfig; cfg != nil {
+		// 探针题型不需要题目文本；其余题型题目必填。
+		if isOpenAICodexStateProbePlan(cfg) {
+			if len(cfg.Prompt) > 32000 || strings.TrimSpace(plan.ModelID) == "" || len(plan.ModelID) > 100 {
+				return time.Time{}, fmt.Errorf("probe model is required (maximum 32000/100 bytes)")
+			}
+		} else if strings.TrimSpace(cfg.Prompt) == "" || len(cfg.Prompt) > 32000 || strings.TrimSpace(plan.ModelID) == "" || len(plan.ModelID) > 100 {
+			return time.Time{}, fmt.Errorf("pelican prompt and model are required (maximum 32000/100 bytes)")
+		}
+		if err := validateQualityPolicy(plan); err != nil {
+			return time.Time{}, err
+		}
+		if cfg.QuestionKind != "" && cfg.QuestionKind != "pelican" && cfg.QuestionKind != "candy" && cfg.QuestionKind != OpenAICodexStateProbeQuestionKind {
+			return time.Time{}, fmt.Errorf("invalid question kind")
+		}
+		// 同一账号同一时刻只允许一次探针，并行只会互相挤掉，直接禁止。
+		if isOpenAICodexStateProbePlan(cfg) && cfg.ParallelCount != 1 {
+			return time.Time{}, fmt.Errorf("state probe does not support parallel runs")
+		}
+		if cfg.ParallelCount < 1 || cfg.ParallelCount > 8 {
+			return time.Time{}, fmt.Errorf("parallel count must be 1–8")
+		}
+		if !slices.Contains([]string{"minimal", "low", "medium", "high", "xhigh"}, cfg.ReasoningEffort) {
+			return time.Time{}, fmt.Errorf("invalid reasoning effort")
+		}
+		if plan.MaxResults == 0 {
+			plan.MaxResults = 100
+		}
+		if plan.MaxResults < 1 || plan.MaxResults > 200 {
+			return time.Time{}, fmt.Errorf("pelican history retention must be 1–200 results")
+		}
+		cfg.ModelID = plan.ModelID
+	}
+	return computeNextRun(plan.CronExpression, now)
+}
+
+func (s *ScheduledTestService) GetResult(ctx context.Context, planID, resultID int64) (*ScheduledTestResult, error) {
+	return s.resultRepo.GetResult(ctx, planID, resultID)
 }

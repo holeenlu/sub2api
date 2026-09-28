@@ -23,6 +23,10 @@ func RegisterAdminRoutes(
 	// 插件 UI 使用短时能力 URL，仅提供经过安装校验的静态资源。
 	v1.GET("/plugin-ui/:token/*path", h.Admin.Plugin.ServeUIAsset)
 
+	if h != nil && h.Admin != nil && h.Admin.OpenAIOAuthReauth != nil {
+		registerOpenAIOAuthReauthWorkerRoutes(v1, h)
+	}
+
 	admin := v1.Group("/admin")
 	admin.Use(gin.HandlerFunc(adminAuth))
 	// 面板全局按用户限流（默认管理员豁免，可在系统设置中关闭豁免）
@@ -369,6 +373,11 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/opencode-go-usage/settings", h.Admin.Account.GetOpenCodeGoUsageSettings)
 		accounts.PUT("/opencode-go-usage/settings", h.Admin.Account.UpdateOpenCodeGoUsageSettings)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
+		if h.Admin.OpenAIOAuthReauth != nil {
+			accounts.GET("/:id/openai-reauth", h.Admin.OpenAIOAuthReauth.GetStatus)
+			accounts.PUT("/:id/openai-reauth/email", h.Admin.OpenAIOAuthReauth.SaveConfig)
+			accounts.POST("/:id/openai-reauth", h.Admin.OpenAIOAuthReauth.CreateTask)
+		}
 		accounts.GET("/codex-ticket-cadence", h.Admin.Account.GetCodexTicketCadence)
 		accounts.PUT("/codex-ticket-cadence", h.Admin.Account.UpdateCodexTicketCadence)
 		accounts.GET("/codex-ticket-fingerprint", h.Admin.Account.GetCodexFingerprintVersion)
@@ -742,6 +751,21 @@ func registerUserAttributeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	admin.GET("/account-quality-results", h.Admin.ScheduledTest.ListQualityHistory)
+	admin.GET("/account-quality-plans", h.Admin.ScheduledTest.ListQualityPlans)
+	admin.POST("/account-quality-plans/:id/run", h.Admin.ScheduledTest.TriggerQuality)
+	admin.GET("/scheduled-test-plans/:id/results/:result_id", h.Admin.ScheduledTest.GetResult)
+	admin.GET("/account-ops/token-guard-v2/accounts", h.Admin.AccountTokenGuardV2.List)
+	admin.PUT("/account-ops/token-guard-v2/rules", h.Admin.AccountTokenGuardV2.SaveRules)
+	admin.POST("/account-ops/token-guard-v2/accounts", h.Admin.AccountTokenGuardV2.Create)
+	admin.PUT("/account-ops/token-guard-v2/accounts/:id", h.Admin.AccountTokenGuardV2.Update)
+	admin.DELETE("/account-ops/token-guard-v2/accounts/:id", h.Admin.AccountTokenGuardV2.Delete)
+	admin.POST("/account-ops/token-guard-v2/accounts/:id/probe", h.Admin.AccountTokenGuardV2.Probe)
+	admin.POST("/account-ops/token-guard-v2/accounts/:id/relogin", h.Admin.AccountTokenGuardV2.Relogin)
+
+	admin.GET("/priority-scheduling/config", h.Admin.Setting.GetPriorityScheduling)
+	admin.PUT("/priority-scheduling/config", h.Admin.Setting.SavePriorityScheduling)
+	admin.GET("/priority-scheduling/snapshot", h.Admin.Account.PrioritySchedulingSnapshot)
 	plans := admin.Group("/scheduled-test-plans")
 	{
 		plans.POST("", h.Admin.ScheduledTest.Create)
@@ -912,5 +936,16 @@ func channelMonitorModeV2Guard(settingService *service.SettingService) gin.Handl
 			return
 		}
 		c.Next()
+	}
+}
+
+func registerOpenAIOAuthReauthWorkerRoutes(v1 *gin.RouterGroup, h *handler.Handlers) {
+	worker := v1.Group("/internal/openai-reauth")
+	{
+		worker.POST("/claim", h.Admin.OpenAIOAuthReauth.Claim)
+		worker.POST("/:task_id/progress", h.Admin.OpenAIOAuthReauth.Progress)
+		worker.POST("/:task_id/callback", h.Admin.OpenAIOAuthReauth.Callback)
+		worker.POST("/:task_id/credentials", h.Admin.OpenAIOAuthReauth.Credentials)
+		worker.POST("/:task_id/fail", h.Admin.OpenAIOAuthReauth.Fail)
 	}
 }

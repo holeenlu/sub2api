@@ -135,3 +135,7 @@
 | `8b339717302f47fec8de0dc748eb9dd9d74df823` | akihitohyh | fix(bps): 增加忽略历史加密消息的账号选项，避免旧多代理会话每轮报错 |
 | `fdd3532b822b8b8fb0a244e89c7fb218c6e589f7` | ranxi2001 | fix(bps): satisfy history message staticcheck |
 | `f593eeb76ddd741fc70e294364b99ba8856d021c` | ranxi2001 | test(bps): check compact failure payload type assertions |
+
+## 本次完整审计与运维增量
+
+详见 [BPS_AUDIT_AND_INCREMENT_2026_09_28.md](BPS_AUDIT_AND_INCREMENT_2026_09_28.md)：固定源、最新 tip 差异、图片策略、最小自动 BPS、优先调度、凭证运营、迁移、测试和未验证边界。仅本地提交与品牌普通合并，不推送或发版。

@@ -453,7 +453,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		cr, compactErr := s.doExcelBPSSend(requestCtx, c, account, model, compactReq, proxyURL)
 		var compactRateLimit []byte
 		if compactErr == nil {
-			compactReq, cr, compactRateLimit, compactErr = s.retryExcelBPSStartRateLimit(requestCtx, c, account, model, proxyURL, token, compactReq, cr, func() (*http.Request, error) {
+			_, cr, compactRateLimit, compactErr = s.retryExcelBPSStartRateLimit(requestCtx, c, account, model, proxyURL, token, compactReq, cr, func() (*http.Request, error) {
 				return newExcelBPSRequest(requestCtx, compactWire, token, accountID)
 			})
 		}
