@@ -25,6 +25,8 @@
 
 用户明确限定某个分支/远端时，以本次限定为准。“提交、推送”承接本次已确定的归属，公共需求默认包含两个品牌传播；“只提交”只创建本地提交。任何推送都不自动授权生产部署、数据库迁移或发布镜像。推送前核对目标分支 CI 的实际副作用；超出本次授权时先完成可审查准备。
 
+三个交付分支的 GitHub 发版 Workflow 仅保留 `workflow_dispatch`。普通提交、推送、合并和标签推送不启动 Actions 发版，不创建 Release，也不提高版本号。代理或脚本不得在推送后自动调用 `gh workflow run` 或 dispatch API；只有用户明确要求发版时才执行。人工入口为 Actions → Manual versioned release → Run workflow，渠道和分支见 `deploy/AUTOMATIC_RELEASE.md`。同步上游时保留此手动触发约束，并运行 `test_auto_release_workflow.py` 防止自动触发器回流。
+
 ## 2. 在正确分支形成提交
 
 先核对 `git status`、当前分支、已有暂存、merge/rebase 状态、worktree 占用和目标远端。只暂存本次范围，不使用 `git add .` 混入其他任务。
