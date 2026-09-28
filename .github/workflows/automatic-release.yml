@@ -1,7 +1,5 @@
-name: Automatic versioned release
+name: Manual versioned release
 on:
-  push:
-    branches: [main, KDAN]
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,6 +9,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   select:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       channel: ${{ steps.select.outputs.channel }}
