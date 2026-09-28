@@ -1,39 +1,6 @@
 export default {
     accounts: {
-      bps: {
-              "testInterrupted": "BPS テストが完了結果を返さずに終了しました。",
-              "riskTitle": "アカウント制限のリスク",
-              "riskDescription": "OpenAI BPS の利用により、アカウントが制限または停止される場合があります。",
-              "riskConfirmTitle": "この OpenAI BPS アカウントを追加しますか？",
-              "riskConfirmMessage": "OpenAI BPS の利用によるアカウントの制限・停止リスクを理解したうえで追加してください。",
-              "riskConfirmButton": "リスクを理解して追加",
-              "replaceToken": "アクセストークンを更新し、接続を再テストしてください。",
-              "errorCode": "エラーコード",
-              "manualResume": "スケジュールは停止中です。使用する場合は手動で有効にしてください。",
-              "newTokenPending": "保存済みの認証状態です。新しいトークンの保存後に更新されます。",
-              "requestingUpstream": "BPS にリクエスト中です。認証はまだ確認されていません…",
-              "upstreamResponse": "BPS から応答を受信しました",
-              "upstreamModelLabel": "送信先モデル",
-              "requestIdLabel": "リクエスト ID",
-              "testSucceeded": "BPS 接続テストに成功しました",
-              "credentialStatus": {
-                      "unknown": "トークンの有効期限は不明です",
-                      "not_expired": "トークンの期限内です（未検証）",
-                      "expired": "トークンの期限が切れています",
-                      "revoked": "トークンが失効しています",
-                      "auth_failed": "トークン認証に失敗しました"
-              },
-              "saveAndTest": "保存して接続をテスト",
-              "monitorHint": "このサイトのエンドポイントと BPS グループの API キーで Responses をテストします。上流の利用枠照会には対応していません。",
-              "keepToken": "空欄の場合は既存のトークンを保持",
-              "tokenHint": "ChatGPT の Access Token を入力してください。期限切れ時は手動で更新し、保存後にアカウント一覧から接続をテストします。",
-              "tokenRequired": "Access Token は必須です",
-              "accountHint": "空欄の場合は JWT から取得します。アカウント ID を指定して上書きできます。",
-              "expiresAt": "トークンの有効期限",
-              "modelsHint": "既定ではこの 2 モデルを許可します。クライアントのモデル名を上流モデルへ対応付けます。すべてのルールを削除すると全モデルを許可します。",
-              "clientModel": "クライアントのモデル",
-              "upstreamModel": "上流モデル"
-      },
+
       title: 'アカウント管理',
       description: 'AIプラットフォームのアカウントと認証情報を管理します',
       createAccount: 'アカウントを作成',

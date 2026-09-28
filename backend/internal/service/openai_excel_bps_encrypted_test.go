@@ -149,7 +149,8 @@ func TestExcelBPSInvalidEncryptedContentRecoversSameRoute(t *testing.T) {
 				}
 				events, exists := c.Get(OpsUpstreamErrorsKey)
 				require.True(t, exists)
-				attempts := bpsRequireType[[]*OpsUpstreamErrorEvent](t, events)
+				require.IsType(t, []*OpsUpstreamErrorEvent{}, events)
+				attempts := events.([]*OpsUpstreamErrorEvent)
 				require.Len(t, attempts, 1)
 				require.Equal(t, "invalid_encrypted_content_retry", attempts[0].Kind)
 				safe, err := json.Marshal(attempts)

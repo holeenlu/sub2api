@@ -268,7 +268,7 @@ var providerOpenAIResponsesAdapter = providerAdapter{
 
 // providerAdapterFor 按 provider + api_mode 选择具体 adapter。
 func providerAdapterFor(provider, apiMode string) (providerAdapter, string, bool) {
-	if (provider == MonitorProviderOpenAI || provider == MonitorProviderOpenAIBPS) && defaultAPIMode(apiMode) == MonitorAPIModeResponses {
+	if (provider == MonitorProviderOpenAI) && defaultAPIMode(apiMode) == MonitorAPIModeResponses {
 		return providerOpenAIResponsesAdapter, MonitorAPIModeResponses, true
 	}
 	adapter, ok := providerAdapters[provider]
@@ -292,11 +292,7 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 	if !ok {
 		return "", "", 0, fmt.Errorf("unsupported provider %q", provider)
 	}
-	if provider == MonitorProviderOpenAIBPS {
-		adapter.buildBody = func(model, prompt string) ([]byte, error) {
-			return json.Marshal(map[string]any{"model": model, "input": prompt, "stream": false})
-		}
-	}
+
 	body, err := buildRequestBody(adapter, provider, apiMode, model, prompt, opts)
 	if err != nil {
 		return "", "", 0, err
@@ -307,7 +303,7 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 	if err != nil {
 		return "", "", status, err
 	}
-	if (provider == MonitorProviderOpenAI || provider == MonitorProviderOpenAIBPS) && apiMode == MonitorAPIModeResponses {
+	if (provider == MonitorProviderOpenAI) && apiMode == MonitorAPIModeResponses {
 		return extractOpenAIResponsesText(respBytes), string(respBytes), status, nil
 	}
 	return extractMonitorResponseText(adapter, respBytes), string(respBytes), status, nil
@@ -459,7 +455,6 @@ func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt 
 //nolint:gochecknoglobals // 静态查表，初始化后不变。
 var bodyMergeKeyDenyList = map[string]map[string]bool{
 	MonitorProviderOpenAI + ":" + MonitorAPIModeChatCompletions: {"model": true, "messages": true, "stream": true},
-	MonitorProviderOpenAIBPS + ":" + MonitorAPIModeResponses:    {"model": true, "instructions": true, "input": true, "stream": true},
 	MonitorProviderOpenAI + ":" + MonitorAPIModeResponses:       {"model": true, "instructions": true, "input": true, "stream": true},
 	MonitorProviderGrok:      {"model": true, "messages": true, "stream": true},
 	MonitorProviderAnthropic: {"model": true, "messages": true},
@@ -479,7 +474,7 @@ func checkAPIMode(opts *CheckOptions) string {
 }
 
 func bodyMergeDenyKey(provider, apiMode string) string {
-	if provider == MonitorProviderOpenAI || provider == MonitorProviderOpenAIBPS {
+	if provider == MonitorProviderOpenAI {
 		return provider + ":" + defaultAPIMode(apiMode)
 	}
 	return provider
@@ -489,7 +484,7 @@ func bodyMergeDenyKey(provider, apiMode string) string {
 // Completions 同构（replace 模式的 body 校验按 messages 必填处理）。
 func isOpenAICompatibleChatProvider(provider string) bool {
 	switch provider {
-	case MonitorProviderOpenAI, MonitorProviderOpenAIBPS, MonitorProviderGrok,
+	case MonitorProviderOpenAI, MonitorProviderGrok,
 		MonitorProviderKimi, MonitorProviderZhipu, MonitorProviderDeepseek, MonitorProviderMiniMax:
 		return true
 	default:

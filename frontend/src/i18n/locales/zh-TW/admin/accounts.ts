@@ -2,35 +2,6 @@
 // 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
 export default {
     accounts: {
-      bps: {
-        testInterrupted: 'BPS 測試流已中斷，未收到完成結果。',
-        riskTitle: "封號風險提示",
-        riskDescription: "使用 OpenAI BPS 可能存在帳號被限制或封鎖的風險，請謹慎使用。",
-        riskConfirmTitle: "確認新增 OpenAI BPS 帳號？",
-        riskConfirmMessage: "使用 OpenAI BPS 可能導致帳號被限制或封鎖。請確認你已瞭解風險，再繼續新增帳號。",
-        riskConfirmButton: "我已瞭解風險，繼續新增",
-        replaceToken: "請更換 Access Token 後重新測試。",
-        errorCode: "錯誤碼",
-        manualResume: "排程開關仍為暫停；如需使用，請手動開啟。",
-        newTokenPending: "目前顯示的是已儲存憑證的狀態，新 Token 儲存後更新。",
-        requestingUpstream: "正在請求 BPS 上游，尚未確認驗證成功…",
-        upstreamResponse: "已收到 BPS 上游回應",
-        upstreamModelLabel: "上游請求模型",
-        requestIdLabel: "請求 ID",
-        testSucceeded: "BPS 連線測試通過",
-        credentialStatus: {"unknown": "Token 到期時間未知", "not_expired": "Token 未到期（不代表已通過驗證）", "expired": "Token 已過期", "revoked": "Token 已被撤銷", "auth_failed": "Token 驗證失敗"},
-
-        saveAndTest: '儲存並測試連線',
-        monitorHint: '填寫 本站地址和 BPS 分組的 API Key，使用 Responses 探活；不提供上游配額查詢。',
-        keepToken: "留空保留現有 Token",
-        tokenHint: "手動貼上 ChatGPT Access Token。到期後需在此替換；儲存後可在帳號列表測試連線。",
-        tokenRequired: "請輸入 Access Token",
-        accountHint: "留空時從 JWT 自動提取；也可填寫帳號 ID 覆蓋。",
-        expiresAt: "Token 到期時間",
-        modelsHint: "預設允許以下兩個候選模型；左側為用戶端名稱，右側為上游模型。刪除全部規則將允許任意模型。",
-        clientModel: "用戶端模型",
-        upstreamModel: "上游模型",
-      },
 
       title: '帳號管理',
       description: '管理 AI 平台帳號和 Cookie',

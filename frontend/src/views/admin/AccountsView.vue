@@ -2374,10 +2374,9 @@ const handleAccountTestCompleted = async (accountId: number) => {
   }
 }
 const closeTestModal = () => {
-  const account = testingAcc.value
   showTest.value = false
   testingAcc.value = null
-  if (account?.platform === 'openai_bps') void handleAccountTestCompleted(account.id)
+
 }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
