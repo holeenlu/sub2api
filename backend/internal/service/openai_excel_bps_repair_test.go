@@ -76,12 +76,15 @@ func TestExcelBPSToolCorrectionPreservesRouteAndUsage(t *testing.T) {
 				}
 				svc := openAIClientToolsTestService(upstream)
 				svc.httpUpstream = checked
+				cache := &openAIRPMTestCache{counts: map[int64]int{}}
+				svc.rpmCache = cache
 				body := []byte(fmt.Sprintf(`{"model":"gpt-5.6-sol","stream":%t,"reasoning":{"effort":"max"},"input":"test correction","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec"}]}]}`, stream))
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 				account := excelAccount()
 				account.Concurrency = 1
+				account.Extra["base_rpm"] = attempts
 				result, err := svc.Forward(context.Background(), c, account, body)
 				if corrected {
 					require.NoError(t, err)
@@ -99,6 +102,7 @@ func TestExcelBPSToolCorrectionPreservesRouteAndUsage(t *testing.T) {
 					require.NotContains(t, rec.Body.String(), "custom_tool_call")
 				}
 				require.Len(t, upstream.requests, attempts)
+				require.Equal(t, attempts, cache.counts[account.ID], "each tool repair sends a separately counted request")
 				require.NotNil(t, result)
 				require.Equal(t, attempts*10, result.Usage.InputTokens)
 				require.Equal(t, attempts*2, result.Usage.OutputTokens)

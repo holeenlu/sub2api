@@ -113,8 +113,11 @@ func TestExcelBPSInvalidEncryptedContentRecoversSameRoute(t *testing.T) {
 				checked := &excelBPSRepairUpstream{httpUpstreamRecorder: upstream, bodies: []*excelBPSRepairBody{first, second}}
 				svc := openAIClientToolsTestService(upstream)
 				svc.httpUpstream = checked
+				cache := &openAIRPMTestCache{counts: map[int64]int{}}
+				svc.rpmCache = cache
 				account := excelAccount()
 				account.Concurrency = 1
+				account.Extra["base_rpm"] = 2
 				account.Credentials["model_mapping"] = map[string]any{"gpt-5.4": "gpt-5.6-sol"}
 				account.Proxy = &Proxy{Protocol: "http", Host: "127.0.0.1", Port: 7890}
 				body := excelBPSEncryptedHistoryRequest(stream)
@@ -125,6 +128,7 @@ func TestExcelBPSInvalidEncryptedContentRecoversSameRoute(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, 200, rec.Code)
 				require.Len(t, upstream.requests, 2)
+				require.Equal(t, 2, cache.counts[account.ID], "encrypted-history retry must count both sends")
 				require.True(t, first.closed.Load())
 				require.True(t, second.closed.Load())
 				require.Equal(t, account.Proxy.URL(), upstream.lastProxyURL)

@@ -18,7 +18,11 @@ import (
 // Recheck every BPS generation, including repair attempts, against the current
 // primary snapshot. Never inject Codex ticket headers into a BPS request.
 func (s *OpenAIGatewayService) doExcelBPSSend(ctx context.Context, c *gin.Context, account *Account, model string, req *http.Request, proxy string) (*http.Response, error) {
-	if _, err := s.admitOpenAITurn(ctx, c, account, model); err != nil {
+	latest, err := s.admitOpenAITurn(ctx, c, account, model)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.acquireOpenAIRPMForSend(ctx, latest); err != nil {
 		return nil, err
 	}
 	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)

@@ -329,14 +329,15 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			attachmentScope = scope + "\x00" + accountID + "\x00" + token
 		}
 		body, err = images.Upload(ctx, &s.excelBPSAttachments, attachmentScope, func(uploadCtx context.Context, img basispoints.InlineAttachment) (string, error) {
-			if _, err := s.admitOpenAITurn(uploadCtx, c, account, model); err != nil {
+			latest, err := s.admitOpenAITurn(uploadCtx, c, account, model)
+			if err != nil {
 				return "", err
 			}
 			SetActualOpenAIUpstreamEndpoint(c, "/basispoints/api/attachments")
-			return s.uploadExcelBPSAttachment(uploadCtx, account, token, accountID, img)
+			return s.uploadExcelBPSAttachment(uploadCtx, latest, token, accountID, img)
 		})
 		if err != nil {
-			if IsOpenAITurnAdmissionError(err) {
+			if IsOpenAITurnAdmissionError(err) || IsOpenAIRPMError(err) {
 				return nil, err
 			}
 			if isExcelBPSClientCancellation(c, err) {
@@ -385,7 +386,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	resp, err := s.doExcelBPSSend(requestCtx, c, account, model, req, proxyURL)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(sent).Milliseconds())
 	if err != nil {
-		if IsOpenAITurnAdmissionError(err) {
+		if IsOpenAITurnAdmissionError(err) || IsOpenAIRPMError(err) {
 			return nil, err
 		}
 		if resp != nil && resp.Body != nil {
@@ -428,7 +429,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			resp, err = s.doExcelBPSSend(requestCtx, c, account, model, req, proxyURL)
 			SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(sent).Milliseconds())
 			if err != nil {
-				if IsOpenAITurnAdmissionError(err) {
+				if IsOpenAITurnAdmissionError(err) || IsOpenAIRPMError(err) {
 					return nil, err
 				}
 				if isExcelBPSClientCancellation(c, err) {
@@ -445,7 +446,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	})
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(sent).Milliseconds())
 	if err != nil {
-		if IsOpenAITurnAdmissionError(err) {
+		if IsOpenAITurnAdmissionError(err) || IsOpenAIRPMError(err) {
 			return nil, err
 		}
 		if isExcelBPSClientCancellation(c, err) {
@@ -542,7 +543,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 		repairResp, err := s.doExcelBPSSend(repairCtx, c, account, model, repairReq, proxyURL)
 		if err != nil {
-			if IsOpenAITurnAdmissionError(err) {
+			if IsOpenAITurnAdmissionError(err) || IsOpenAIRPMError(err) {
 				return nil, err
 			}
 			if repairCtx.Err() != nil {
@@ -580,7 +581,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 		repaired, err := s.doExcelBPSSend(repairCtx, c, account, model, retry, proxyURL)
 		if err != nil {
-			if IsOpenAITurnAdmissionError(err) {
+			if IsOpenAITurnAdmissionError(err) || IsOpenAIRPMError(err) {
 				return nil, err
 			}
 			return nil, fmt.Errorf("excel BPS tool correction transport failed")
