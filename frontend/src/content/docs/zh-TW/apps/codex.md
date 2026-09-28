@@ -2,7 +2,7 @@
 
 在 [API 金鑰](/keys) 建立 Key，選定分組，再點選“使用金鑰 → Codex”。優先使用控制台目前生成的設定；模型目錄僅對 OpenAI/Composite 分組開放。範例模型 `gpt-6-astra` 僅用於演示，請替換為該 Key 實際開放的模型。已有設定先備份，合併對應欄位，不要覆蓋整個檔案。控制台的普通 HTTP/SSE 與 WebSocket 設定是不同標籤；先用普萬用字元置驗證。
 
-OpenAI/Composite 分組開啟「使用金鑰」後會立即產生預設設定，依本機「模型限制（可選）」候選清單中的模型等級與版本，選擇適用於 Codex 的最高等級型號（目前為 `gpt-6-astra`），同時填入 `model` 和 `review_model`。這份清單是表單的內建選項，不代表目前帳號已勾選的限制或該 Key 實際可用的模型。開啟或切換金鑰不會自動請求模型目錄，不進行背景更新，也不持久儲存目錄快取。
+OpenAI/Composite 分組開啟“使用金鑰”後會立即生成預設設定，按本地“模型限制（可選）”候選列表中的模型檔位與版本，選擇適用於 Codex 的最高檔位型號（目前為 `gpt-6-astra`），同時填入 `model` 和 `review_model`。該列表是表單的內建選項，不代表目前帳號已勾選的限制或該 Key 實際可用的模型。開啟或切換金鑰不會自動請求模型目錄，不進行後台重新整理，也不持久儲存目錄快取。
 
 本文適用於本機讀取 Codex 設定的用戶端。雲端任務不一定讀取這份設定；需要在實際執行主機單獨設定。
 
@@ -58,7 +58,7 @@ supports_websockets = false
 
 在剛才設定環境變數的同一個終端機執行 `codex`。`supports_websockets = false` 是先驗證 HTTP/SSE 的設定，不代表本站沒有 WebSocket 路由。
 
-OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，包含主模型、審查模型和 `[features]`，模型目錄為手動取得後的選用設定。預設 **Legacy** 模式同時下載 `config.toml` 和 `auth.json`，其中 `requires_openai_auth = true`；**API key** 模式改用 `requires_openai_auth = false` 與 `experimental_bearer_token`，修改後必須完全重啟 Codex。兩種模式不要混合，也不要把路由分組的 `tapmodels` 表和 OpenAI 分組的 `OpenAI` 表拼成一個 Provider。
+OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，包含主模型、審查模型和 `[features]`，模型目錄為手動取得後的可選設定。預設 **Legacy** 模式同時下載 `config.toml` 和 `auth.json`，其中 `requires_openai_auth = true`；**API key** 模式改用 `requires_openai_auth = false` 與 `experimental_bearer_token`，修改後必須完全重啟 Codex。兩種模式不要混合，也不要把路由分組的 `tapmodels` 表和 OpenAI 分組的 `OpenAI` 表拼成一個 Provider。
 
 ## 桌面版：讓應用拿到 Key
 
@@ -78,7 +78,7 @@ OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，�
 
 本節只適用於 OpenAI/Composite 分組。其他路由分組不支援專用目錄下載，也不應新增 `model_catalog_json`。用普通 `GET /v1/models` 查詢精確 ID 後填入 `model`；不要把該列表回應儲存為 Codex manifest。
 
-在「API 金鑰 → 使用金鑰 → Codex」中手動點選「取得目錄」，成功取得包含可用 Codex 模型的目錄後，再點選「下載目錄」。手動取得的結果可更新 `model`、`review_model` 和推理設定；取得失敗或沒有可用模型時，預設設定仍可複製和下載。成功取得可用目錄前，產生的設定不包含 `model_catalog_json`。將下載的 `codex-models.json` 放在固定位置，並確認 `config.toml` 頂層的路徑與檔案實際位置一致，例如：
+在“API 金鑰 → 使用金鑰 → Codex”中手動點選“取得目錄”，成功取得包含可用 Codex 模型的目錄後，再點選“下載目錄”。手動取得的結果可更新 `model`、`review_model` 和推理設定；取得失敗或沒有可用模型時，預設設定仍可複製和下載。成功取得可用目錄前，生成的設定不包含 `model_catalog_json`。將下載的 `codex-models.json` 放在固定位置，並確保 `config.toml` 頂層的路徑與檔案實際位置一致，例如：
 
 ```toml
 model_catalog_json = "/你的絕對路徑/.codex/codex-models.json"

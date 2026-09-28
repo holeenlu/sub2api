@@ -16,6 +16,8 @@ func TestHTTPStatusToGoogleStatus(t *testing.T) {
 		http.StatusRequestTimeout:        "DEADLINE_EXCEEDED",
 		http.StatusUnsupportedMediaType:  "INVALID_ARGUMENT",
 		http.StatusTooManyRequests:       "RESOURCE_EXHAUSTED",
+		http.StatusServiceUnavailable:    "INTERNAL",
+		http.StatusConflict:              "UNKNOWN",
 		499:                              "CANCELLED",
 		http.StatusInternalServerError:   "INTERNAL",
 		http.StatusBadGateway:            "INTERNAL",
