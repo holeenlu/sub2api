@@ -1485,9 +1485,10 @@ func (h *AccountHandler) PreviewFromCRS(c *gin.Context) {
 // refreshSingleAccount refreshes credentials for a single refreshable OAuth account.
 // Returns (updatedAccount, warning, error) where warning is used for Antigravity ProjectIDMissing scenario.
 func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *service.Account) (*service.Account, string, error) {
-	if account.IsOpenAIBPS() {
-		return nil, "", infraerrors.BadRequest("BPS_MANUAL_TOKEN_ONLY", "Replace access_token in the BPS account settings; automatic refresh is unsupported")
+	if service.IsRetiredPlatform(account.Platform) {
+		return nil, "", service.ErrPlatformRetired
 	}
+
 	if !account.IsOAuth() {
 		return nil, "", infraerrors.BadRequest("NOT_OAUTH", "cannot refresh non-OAuth account")
 	}
@@ -1708,10 +1709,7 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		response.NotFound(c, "Account not found")
 		return
 	}
-	if existing.IsOpenAIBPS() {
-		response.BadRequest(c, "Replace access_token through the BPS account editor")
-		return
-	}
+
 	if !existing.IsOAuth() {
 		response.ErrorFrom(c, infraerrors.BadRequest("NOT_OAUTH", "cannot apply oauth credentials to non-OAuth account"))
 		return
@@ -2914,22 +2912,6 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
-	if account.IsOpenAIBPS() {
-		ids := service.OpenAIBPSDefaultModels()
-		if mapping := account.GetModelMapping(); len(mapping) > 0 {
-			ids = make([]string, 0, len(mapping))
-			for id := range mapping {
-				ids = append(ids, id)
-			}
-		}
-		sort.Strings(ids)
-		models := make([]openai.Model, 0, len(ids))
-		for _, id := range ids {
-			models = append(models, openai.Model{ID: id, Object: "model", Type: "model", DisplayName: id})
-		}
-		response.Success(c, models)
-		return
-	}
 	// Handle OpenAI accounts
 	if account.IsOpenAI() {
 		// Prefer the shared, account-keyed upstream catalog. If discovery fails,

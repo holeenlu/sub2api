@@ -26,8 +26,6 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
-      <OpenAIBPSAccountFields v-if="account.platform === 'openai_bps'" v-model="bpsDraft" editing :expires-at="String(account.credentials?.expires_at ?? '')" :credential-state="account.bps_credential_state" :account-status="account.status" :schedulable="account.schedulable" />
-
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
@@ -1580,7 +1578,6 @@
         </div>
       </div>
 
-
       <div
         v-if="supportsAccountSchedulingThresholdOverride"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -3127,14 +3124,11 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
-        <button v-if="account.platform === 'openai_bps'" type="submit" form="edit-account-form" :disabled="submitting"
-          class="btn btn-secondary" data-testid="bps-save-and-test" @click="bpsTestAfterSave = true">
-          {{ t('admin.accounts.bps.saveAndTest') }}
-        </button>
+
         <button
           type="submit"
           form="edit-account-form"
-          @click="bpsTestAfterSave = false"
+
           :disabled="submitting"
           class="btn btn-primary"
           data-tour="account-form-submit"
@@ -3179,8 +3173,7 @@
 </template>
 
 <script setup lang="ts">
-import OpenAIBPSAccountFields from './OpenAIBPSAccountFields.vue'
-import { newBPSAccountDraft, bpsCredentials } from '@/utils/openaiBps'
+
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3317,8 +3310,6 @@ const selectableGroups = computed(() => {
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
 const codexTurnTickets = computed(() => props.account?.codex_turn_tickets ?? [])
-
-
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -4145,9 +4136,6 @@ const mixedChannelWarningMessageText = computed(() => {
   return mixedChannelWarningRawMessage.value
 })
 
-const bpsDraft = ref(newBPSAccountDraft())
-const bpsTestAfterSave = ref(false)
-
 const form = reactive({
   name: '',
   notes: '',
@@ -4257,8 +4245,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningDetails.value = null
   mixedChannelWarningRawMessage.value = ''
   mixedChannelWarningAction.value = null
-  bpsDraft.value = newBPSAccountDraft(newAccount.credentials)
-  bpsTestAfterSave.value = false
+
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
@@ -4950,7 +4937,6 @@ const applyTempUnschedConfig = (credentials: Record<string, unknown>) => {
   return true
 }
 
-
 function supportsAccountSchedulingThresholdOverridePlatform(platform: Account['platform'] | undefined) {
   return platform === 'openai' || platform === 'anthropic' || platform === 'grok'
 }
@@ -5325,10 +5311,10 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
     let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
-    const openBPSTest = updatedAccount.platform === 'openai_bps' && bpsTestAfterSave.value
+
     emit('updated', updatedAccount)
     handleClose()
-    if (openBPSTest) emit('test', updatedAccount)
+
   } catch (error: any) {
     if (error.status === 409 && error.error === 'mixed_channel_warning' && needsMixedChannelCheck()) {
       openMixedChannelDialog({
@@ -5391,10 +5377,6 @@ const handleSubmit = async () => {
       if (upstreamBillingRateSyncEnabled.value) {
         delete updatePayload.rate_multiplier
       }
-    }
-
-    if (props.account.platform === 'openai_bps') {
-      updatePayload.credentials = bpsCredentials(bpsDraft.value)
     }
 
     // For apikey type, handle credentials update

@@ -1,29 +1,27 @@
-# Excel / BPS 独立整合记录
+# Excel / BPS 整合记录（仅 ranxi2001 模式）
 
-日期：2026-09-27。归属：公共功能，首次提交到 `holeen/main`，普通 merge 传播至 KDAN、TapModels。
+当前范围更新：2026-09-28；初次整合日期：2026-09-27。归属：公共功能，首次提交到 `holeen/main`，普通 merge 传播至 KDAN、TapModels。
 
-本次恢复 sub4api 的独立 BPS 平台和 ranxi2001 的 Excel/BPS 账号协议，并适配当前项目的打票、轮次准入、模型目录和后台设置。两种入口面向不同的账号管理方式，不应把它们的缓存、图片能力和限流策略混为一谈。
+当前只保留 ranxi2001 的 OpenAI OAuth Excel/BPS 协议及必要依赖。sub4api 的独立 OpenAI BPS 平台已移除。移除、升级迁移和最新源提交审查见 [2026-09-28 范围调整](BPS_RANXI_ONLY_2026_09_28.md)。
 
 后续协议增量见 [2026-09-28 ranxi2001 同步记录](EXCEL_BPS_SYNC_2026_09_28.md)。
 
 ## 接入入口
 
-| 项目 | 独立 OpenAI BPS 平台 | OpenAI OAuth 的 Excel / BPS 协议 |
-| --- | --- | --- |
-| 配置路径 | 账号管理 → 添加账号 → OpenAI BPS；分组管理 → OpenAI BPS | 账号管理 → 编辑 OpenAI OAuth 账号 → Excel / BPS 协议；支持批量编辑 |
-| 凭据 | 手动提供 Access Token，账号 ID 可从 JWT 提取；不会自动续期 | 复用原 OpenAI OAuth 凭据及刷新逻辑 |
-| 平台与分组 | `openai_bps`，绑定 BPS 或 Composite 分组；Composite 需显式路由 | `openai`，沿用账号现有分组、优先级与粘性会话 |
-| 协议 | HTTP Responses、SSE、compact；不支持 WebSocket | 选定模型强制 HTTP/SSE BPS；未选定模型沿用现有 Codex 路径 |
-| 工具与结构化输出 | function/custom/namespace、串行工具、Schema 校验、压缩引用 | function/custom/namespace、完整历史和工具往返、有限纠错、结构化输出 |
-| 图片 | 文本入口，不支持图片 | HTTPS 图片、原生附件，以及可选的 Base64 原生上传/临时中转 |
-| 状态 | Redis 保存会话绑定、原始工具和压缩状态，7 天闲置过期 | 进程内工具目录、回放、附件元数据；完整客户端历史可重建 |
-| 使用说明 | [OpenAI BPS](openai-bps.md) | [Excel / BPS](excel-bps.md) |
+| 项目 | 保留的 OpenAI OAuth Excel / BPS 协议 |
+| --- | --- |
+| 配置路径 | 账号管理 → 编辑 OpenAI OAuth 账号 → Excel / BPS 协议；支持批量编辑 |
+| 凭据 | 复用 OpenAI OAuth 凭据及刷新逻辑 |
+| 平台与分组 | `openai`，沿用现有分组、优先级与粘性会话 |
+| 协议 | 选定模型使用 HTTP/SSE BPS；范围外模型沿用现有 Codex 路径 |
+| 工具与图片 | function/custom/namespace、完整工具历史、结构化输出、HTTPS 图片及原生附件 |
+| 状态 | 进程内工具目录、回放和附件元数据；完整客户端历史可重建 |
+| 使用说明 | [Excel / BPS](excel-bps.md) |
 
 这是网关对 BPS 协议的适配，不包含 Microsoft Excel 桌面插件安装或工作簿编辑功能。
 
-## 合入的能力
+## 当前保留的能力
 
-- 独立 BPS 平台的账号创建/编辑、JWT 到期提示、撤销/认证失败状态、分组和 Composite 路由、渠道监测、API Key 使用说明、平台配额与计费。
 - Excel/BPS 账号开关及模型范围；作用于映射后的上游模型。未提供模型范围表示全部模型，空数组表示不选任何模型；范围外模型仍可走现有 Codex 通道。
 - 文本与 SSE、compact、function/custom/namespace 工具、JSON Schema 校验、完整工具结果回放、线程隔离、上下文目录增量合并，以及受限的工具封装修复和无效加密 reasoning 重试。
 - 缓存创建用量转普通输入的可选计费规则；BPS 限流独立处理，客户端取消保留真实耗时并从 SLA 错误中排除。
@@ -44,9 +42,9 @@
 
 ## 默认值与升级
 
-没有新增 SQL，也没有修改历史迁移。已有 `245_openai_bps_platform.sql` 提供平台枚举支持；此前退役迁移的结果不会被本次自动反转。
+新增 `254_retire_standalone_bps.sql`，只停用旧独立平台的账号、分组、路由、监测和定时测试，保留凭据与历史。历史迁移不修改；普通 OpenAI OAuth 的 Excel/BPS 设置不变。
 
-已暂停的旧 BPS 账号、分组、Composite 路由和监测计划需管理员逐项恢复；旧 OpenAI 账号的 Excel/BPS 开关也不会自动打开。新实例需要在正常初始化中执行仓库现有迁移。仅本机临时数据库执行了迁移，没有操作生产数据库。
+旧独立平台不可重新启用或自动改成 OAuth 账号。管理员如需继续使用，须新增或选择可用的 OpenAI OAuth 账号，在「Excel / BPS 协议」中配置，并把客户端 API Key 绑定到可用 OpenAI/Composite 分组。本次未操作生产数据库；上线启动时会执行尚未应用的迁移。
 
 图片开关位于“系统设置 → 功能开关 → Excel / BPS 图片支持”，默认关闭。打开后可选择原生附件或 HTTPS 中转；后者需填写本站公网 HTTPS origin，并将 `/api/bps-images/` 固定到生成链接的实例。临时链接的持有者可在有效期内取图。
 
@@ -56,18 +54,19 @@
 
 | 职责 | 文件/目录 |
 | --- | --- |
-| 独立平台、凭据和 Redis 会话 | `backend/internal/service/openai_bps_*.go`、`backend/internal/repository/gateway_cache_bps.go` |
 | Excel/BPS 转发、计费、诊断、探测 | `backend/internal/service/openai_excel_bps*.go`、`account_test_service_bps_probe.go` |
 | 工具/历史/结构化输出/图片协议 | `backend/internal/service/basispoints/`，协议出处和许可证见该目录 `NOTICE.md` |
 | 403 原子处理和分组 | `backend/internal/repository/account_repo_excel_bps*.go` |
 | 图片设置和入口准入 | `backend/internal/service/setting_excel_bps_image.go`、`backend/internal/server/middleware/excel_bps_image_admission.go` |
 | 打票与准入边界 | `backend/internal/service/openai_codex_ticket*.go`、`openai_turn_admission.go` |
-| 账号界面 | `frontend/src/components/account/` 的创建、编辑、批量编辑、连接测试和 BPS 状态组件 |
+| 账号界面 | `frontend/src/components/account/` 的创建、编辑、批量编辑、连接测试和 OAuth RPM 状态组件 |
 | 系统设置、使用说明和语言包 | `frontend/src/views/admin/SettingsView.vue`、`components/keys/UseKeyModal.vue`、`i18n/locales/` |
 
-## 验证
+## 历史验证（2026-09-27 初次整合）
 
-公共分支本机验证：
+以下为初次整合记录，不代表当前移除版本的验证结果；当前结果见范围调整记录。
+
+当时公共分支本机验证：
 
 - `go test -tags=unit ./...`：60 个测试包通过。
 - `go test -tags=integration -exec=/usr/bin/true ./...`：全仓库集成测试编译通过；该命令只编译，不执行测试。
@@ -79,7 +78,7 @@
 
 没有向真实 BPS/OpenAI 账号发送请求；实际账号权限、上游模型与工具/图片效果仍未验收。没有手工发布镜像或操作生产数据库。
 
-## 有限移植与出处
+## 历史移植与出处（保留可追溯性）
 
 基线 `aaf4cf9a35dd36a5d047ea768fbe44dce5abe78d` 已移除两个 fork 的非打票功能。直接合并完整 fork 或反转退役提交会恢复本次范围外的功能，因此采用带 `-x` 来源记录的选择性补丁适配，并把相互依赖的补丁整合提交。下表保留来源 SHA 与作者；不声称这些来源 SHA 成为本次提交的祖先。公共提交向品牌分支使用普通 merge，保留新的公共 SHA。
 
@@ -87,8 +86,8 @@
 
 | 来源提交 | 原作者 | 功能/修复 |
 | --- | --- | --- |
-| `200de9c989b40c0c63cf89ae0cf38a211c14d158` | Jobs | feat(bps): add OpenAI BPS support for 1.1.5 |
-| `775744a66771550aecf64757a177e2e4fb780344` | Jobs | fix(bps): show credential failures and confirm account risks |
+| `200de9c989b40c0c63cf89ae0cf38a211c14d158` | Jobs | 独立平台，2026-09-28 已移除 |
+| `775744a66771550aecf64757a177e2e4fb780344` | Jobs | 独立平台凭据诊断，2026-09-28 已移除 |
 | `5bb245bcc743fcbf0488b439864ac68b78796379` | ranxi2001 | feat(openai): add Excel / BPS protocol for OpenAI OAuth accounts |
 | `baa3336b9cd371467e90a5ab2b701d61fc942351` | akihito | feat: 支持 BPS 403 时自动关闭协议 |
 | `b36b139c5795d3a4b5dea3918df9738d7f730e44` | akihito | test: 清理 BPS 并发测试的调度事件 |

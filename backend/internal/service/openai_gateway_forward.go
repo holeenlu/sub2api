@@ -19,14 +19,15 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	if account != nil && IsRetiredPlatform(account.Platform) {
+		return nil, ErrPlatformRetired
+	}
 	latest, admissionErr := s.latestOpenAITurnAccount(ctx, c, account)
 	if admissionErr != nil {
 		return nil, admissionErr
 	}
 	account = latest
-	if account.IsOpenAIBPS() {
-		return s.forwardOpenAIBPS(ctx, c, account, body)
-	}
+
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	// A failed account attempt must not leave a bypass reason on a later BPS response.
