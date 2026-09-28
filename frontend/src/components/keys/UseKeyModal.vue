@@ -364,6 +364,10 @@ const codexModelCatalogPath = computed(() => {
   return joinConfigPath(configDir, 'codex-models.json', isWindows)
 })
 
+// Codex expands a leading ~/ on every platform but not %userprofile%, which it
+// resolves relative to the config directory, so config.toml always uses ~/.
+const CODEX_MODEL_CATALOG_CONFIG_PATH = '~/.codex/codex-models.json'
+
 const codexManifestContext = computed(() => {
   if (!props.show || !codexModelCatalogSupported.value || !props.apiKey) return ''
   return `${props.platform}|${props.baseUrl}|${props.apiKey}`
@@ -729,7 +733,7 @@ function selectCodexCatalogModel(preferredModel: string): string {
 
 function codexCatalogTomlLine(): string {
   if (!codexModelCatalogSupported.value || !selectedCodexCatalogModel.value) return ''
-  return `model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"\n`
+  return `model_catalog_json = "${CODEX_MODEL_CATALOG_CONFIG_PATH}"\n`
 }
 
 function codexReasoningEffortTomlLine(modelSlug: string): string {
