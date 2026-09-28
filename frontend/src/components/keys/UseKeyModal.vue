@@ -134,15 +134,6 @@
         </div>
 
         <!-- Code Blocks (Stacked for multi-file platforms) -->
-        <p
-          v-if="showCodexModelCatalog && codexModelManifestState === 'loading'"
-          data-testid="codex-model-selection-loading"
-          class="text-sm text-gray-500 dark:text-gray-400"
-        >
-          {{ t(selectedCodexCatalogModel
-            ? 'keys.useKeyModal.codexModelCatalog.refreshingDescription'
-            : 'keys.useKeyModal.codexModelCatalog.loadingDescription') }}
-        </p>
         <div class="space-y-4">
           <div
             v-for="(file, index) in currentFiles"
@@ -255,9 +246,7 @@
             v-else-if="codexModelManifestState === 'error'"
             class="border-t border-red-200 px-4 py-2 text-xs text-red-700 dark:border-red-900 dark:text-red-300"
           >
-            {{ t(selectedCodexCatalogModel
-              ? 'keys.useKeyModal.codexModelCatalog.cachedErrorDescription'
-              : 'keys.useKeyModal.codexModelCatalog.errorDescription') }}
+            {{ t('keys.useKeyModal.codexModelCatalog.errorDescription') }}
           </p>
         </section>
 
@@ -289,12 +278,12 @@ import { ref, computed, h, watch, onBeforeUnmount, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { BRAND_NAME } from '@/config/brand'
+import { OPENAI_MODEL_PRESETS } from '@/config/openaiModels'
 import { saveAs } from 'file-saver'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { fetchCodexModelsManifest } from '@/api/codex'
-import { codexCatalogCacheKey, readCodexCatalogCache, writeCodexCatalogCache } from '@/utils/codexCatalogCache'
 import type { GroupPlatform } from '@/types'
 import {
   findCodexCatalogModel,
@@ -352,7 +341,10 @@ type CodexModelManifestState = 'idle' | 'loading' | 'ready' | 'error'
 const codexModelManifestState = ref<CodexModelManifestState>('idle')
 const codexModelManifestContent = ref('')
 const codexModelManifestModelCount = ref(0)
-const DEFAULT_CODEX_MODEL = 'gpt-6-astra'
+// Use the same local choices as the model-restriction picker without a lookup.
+const DEFAULT_CODEX_MODEL = selectCodexConfigModel(
+  OPENAI_MODEL_PRESETS.map((slug) => ({ slug })), 'gpt-6-astra'
+) || 'gpt-6-astra'
 let codexModelManifestController: AbortController | null = null
 let codexModelManifestRequestID = 0
 
@@ -412,7 +404,6 @@ watch(() => props.show, (show) => {
 watch(codexManifestContext, (context, previousContext) => {
   if (context !== previousContext) {
     resetCodexModelManifest()
-    if (context) void loadCodexModelManifest()
   }
 }, { immediate: true })
 
@@ -682,7 +673,6 @@ function resetCodexModelManifest() {
 async function loadCodexModelManifest() {
   if (!codexManifestContext.value) return
 
-  const platform = props.platform!
   const baseUrl = props.baseUrl
   const apiKey = props.apiKey
   codexModelManifestController?.abort()
@@ -692,19 +682,11 @@ async function loadCodexModelManifest() {
   codexModelManifestState.value = 'loading'
 
   try {
-    const cacheKey = await codexCatalogCacheKey(platform, baseUrl, apiKey)
-    if (requestID !== codexModelManifestRequestID) return
-    const cached = readCodexCatalogCache(cacheKey)
-    if (cached && !codexModelManifestContent.value) {
-      codexModelManifestContent.value = cached.content
-      codexModelManifestModelCount.value = cached.modelCount
-    }
     const result = await fetchCodexModelsManifest(baseUrl, apiKey, controller.signal)
     if (requestID !== codexModelManifestRequestID) return
     codexModelManifestContent.value = result.content
     codexModelManifestModelCount.value = result.modelCount
     codexModelManifestState.value = 'ready'
-    writeCodexCatalogCache(cacheKey, result)
   } catch (error) {
     const errorName = error && typeof error === 'object' && 'name' in error
       ? String((error as { name?: unknown }).name || '')
@@ -741,8 +723,13 @@ const selectedCodexCatalogModel = computed(() =>
 )
 
 function selectCodexCatalogModel(preferredModel: string): string {
-  if (codexModelCatalogSupported.value) return selectedCodexCatalogModel.value || ''
+  if (codexModelCatalogSupported.value) return selectedCodexCatalogModel.value || preferredModel
   return preferredModel
+}
+
+function codexCatalogTomlLine(): string {
+  if (!codexModelCatalogSupported.value || !selectedCodexCatalogModel.value) return ''
+  return `model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"\n`
 }
 
 function codexReasoningEffortTomlLine(modelSlug: string): string {
@@ -770,8 +757,6 @@ const comment = (value: string) => wrapToken('text-slate-500', value)
 // Syntax highlighting helpers
 // Generate file configs based on platform and active tab
 const currentFiles = computed((): FileConfig[] => {
-  // Require a usable model from this key's fresh catalog or last saved catalog.
-  if (showCodexModelCatalog.value && !selectedCodexCatalogModel.value) return []
   const baseUrl = props.baseUrl || window.location.origin
   const apiKey = props.apiKey
   const baseRoot = baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '')
@@ -1028,7 +1013,7 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
+${reasoningEffortLine}${codexCatalogTomlLine()}
 
 [model_providers.OpenAI]
 name = "OpenAI"
@@ -1342,9 +1327,7 @@ function generateRoutedCodexFiles(
     ? `$env:TAPMODELS_API_KEY="${apiKey}"`
     : `export TAPMODELS_API_KEY="${apiKey}"`
 
-  const catalogLine = platform === 'openai' || platform === 'composite'
-    ? `model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"\n`
-    : ''
+  const catalogLine = codexCatalogTomlLine()
   const configContent = `# Codex CLI -> ${siteNameComment.value} ${label} group
 model_provider = "tapmodels"
 model = "${model}"
@@ -1384,7 +1367,7 @@ function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
+${reasoningEffortLine}${codexCatalogTomlLine()}
 
 [model_providers.OpenAI]
 name = "OpenAI"

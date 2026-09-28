@@ -2,7 +2,7 @@
 
 Create a key in [API keys](/keys), choose its group, and open **Use key → Codex**. Prefer the generated configuration; model catalogs are supported only for OpenAI/Composite groups. Replace the example `gpt-6-astra` with an enabled model. Back up existing configuration and merge these fields; do not replace the whole file. HTTP/SSE and WebSocket configurations occupy separate console tabs; start with HTTP/SSE.
 
-For OpenAI/Composite groups, each opening of **Use key** restores the last successful model catalog for the current key, then refreshes it. The highest available model tier and version are selected for both `model` and `review_model`. Reopen the dialog after changing account model restrictions or the group allowlist. If discovery fails, the saved catalog remains available and you can retry. Each site, platform and key has its own cache in the current browser; the API key is not stored in plaintext. If the first lookup fails and no cache exists, retry successfully before generating configuration.
+For OpenAI/Composite groups, opening **Use key** immediately generates a default configuration. It selects the highest Codex-capable model tier and version from the built-in options for **Model restrictions (optional)** (currently `gpt-6-astra`) for both `model` and `review_model`. These are local form options, not the account’s selected restrictions or a live check of models available to this key. Opening the dialog or switching keys does not fetch a catalog, refresh it in the background, or persist a catalog cache.
 
 This guide covers local clients that read Codex configuration. Remote hosts, WSL and containers need configuration at their execution location; cloud tasks may not use your local file.
 
@@ -56,7 +56,7 @@ supports_websockets = false
 
 Run `codex` in the same terminal. Disabling WebSockets provides an HTTP/SSE starting point; it does not mean the gateway lacks WebSocket routes.
 
-The OpenAI group generates a different shape: provider ID `OpenAI`, the main and review models, the model catalog, and `[features]`. The default **Legacy** mode downloads `config.toml` plus `auth.json` and sets `requires_openai_auth = true`. **API key** mode instead sets `requires_openai_auth = false` and `experimental_bearer_token`; fully restart Codex after switching. Do not combine the two modes or merge a routed `gateway` provider table into the OpenAI group's `OpenAI` provider.
+The OpenAI group generates a different shape: provider ID `OpenAI`, the main and review models, and `[features]`, with an optional model catalog after a manual fetch. The default **Legacy** mode downloads `config.toml` plus `auth.json` and sets `requires_openai_auth = true`. **API key** mode instead sets `requires_openai_auth = false` and `experimental_bearer_token`; fully restart Codex after switching. Do not combine the two modes or merge a routed `gateway` provider table into the OpenAI group's `OpenAI` provider.
 
 ## Desktop: make the key available
 
@@ -74,7 +74,7 @@ For an icon launch, select **API key** in the OpenAI group's Use key modal and d
 
 This section applies only to OpenAI/Composite groups. Other routed groups do not support dedicated catalog downloads and should not set `model_catalog_json`. Query ordinary `GET /v1/models` and set `model` to an exact ID; do not save that list response as a Codex manifest.
 
-Download `codex-models.json` from **API keys → Use key → Codex**, save it in a stable location, and add this at the top level:
+In **API keys → Use key → Codex**, click **Fetch catalog**, then **Download catalog** after a catalog with usable Codex models is returned. A successful manual fetch may update `model`, `review_model`, and reasoning settings. If fetching fails or returns no usable models, the default configuration remains available to copy and download. Generated configuration omits `model_catalog_json` until a usable catalog is fetched successfully. Save `codex-models.json` in a stable location and make sure its top-level path in `config.toml` matches the actual file location, for example:
 
 ```toml
 model_catalog_json = "/absolute/path/.codex/codex-models.json"
