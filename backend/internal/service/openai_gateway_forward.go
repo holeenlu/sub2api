@@ -76,7 +76,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, errors.New("bps probe path is unavailable")
 	}
 	if account.IsExcelBPSEnabledForModel(modelForBPS) {
-		return s.forwardExcelBPS(ctx, c, account, body, startTime)
+		reason := account.excelBPSNativeFallbackReason(body)
+		if reason == "" {
+			return s.forwardExcelBPS(ctx, c, account, body, startTime)
+		}
+		// The bridge cannot run this hosted capability. Keep the selected
+		// account and use its native Codex channel for this request instead of
+		// omitting the tool. BPS accounts do not take part in ticket harvesting,
+		// so the native request goes out like any non-participating account.
+		c.Header("X-Codex2API-Upstream", "codex")
+		c.Header("X-Codex2API-Basispoints-Bypass", reason)
+		recordExcelBPSNativeFallback(ctx, account, reason)
 	}
 
 	normalizedBody, normalized, err := normalizeOpenAICodexCompactReasoningEffortForAccount(c, account, body)

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -68,20 +69,29 @@ func TestExcelBPSToolFallbackPolicy(t *testing.T) {
 					c.Header("X-Codex2API-Upstream", "codex")
 					_, err = svc.Forward(ctx, c, account, body)
 					choice, _ := tc.choice.(string)
-					forced := tc.choice != nil && choice != "auto" && choice != "none"
-					if forced {
+					require.Equal(t, tc.nativeReason, basispoints.NativeFallbackReason(body))
+					// A capability the bridge cannot run moves the request to the same
+					// account's native channel unless the account opts to stay on BPS.
+					// On BPS the declaration is omitted with a notice and a forced hosted
+					// selection becomes auto; only "required" still fails validation.
+					native := !omit && tc.nativeReason != ""
+					if native {
+						require.NoError(t, err)
+						require.Equal(t, http.StatusOK, rec.Code)
+						require.Len(t, upstream.requests, 1)
+						require.Equal(t, "/backend-api/codex/responses", upstream.lastReq.URL.Path)
+						require.Equal(t, "codex", rec.Header().Get("X-Codex2API-Upstream"))
+						require.Equal(t, tc.nativeReason, rec.Header().Get("X-Codex2API-Basispoints-Bypass"))
+						require.NotContains(t, string(upstream.lastBody), "Hosted tools unavailable through Basispoints")
+						require.Contains(t, string(upstream.lastBody), fmt.Sprint(tc.tool["type"]), "the hosted tool reaches the native channel")
+						if tc.choice != nil {
+							require.Contains(t, string(upstream.lastBody), `"tool_choice"`, "the client's tool choice is passed through natively")
+						}
+					} else if choice == "required" {
 						require.Error(t, err)
 						require.Equal(t, http.StatusBadRequest, rec.Code)
 						require.Contains(t, rec.Body.String(), "basispoints supports tool_choice auto or none only")
 						require.True(t, IsResponseCommitted(c))
-						require.Empty(t, upstream.requests)
-					} else if !omit && tc.nativeReason != "" {
-						require.Error(t, err)
-						require.Equal(t, http.StatusBadRequest, rec.Code)
-						require.Contains(t, rec.Body.String(), "basispoints_unsupported_tool")
-						require.Contains(t, rec.Body.String(), tc.nativeReason)
-						require.Contains(t, rec.Body.String(), "ask the administrator")
-						require.NotContains(t, rec.Body.String(), ExcelBPSOmitUnsupportedToolsKey, "clients cannot change account settings")
 						require.Empty(t, upstream.requests)
 					} else {
 						require.NoError(t, err)
@@ -89,6 +99,7 @@ func TestExcelBPSToolFallbackPolicy(t *testing.T) {
 						require.Len(t, upstream.requests, 1)
 						require.Equal(t, "/basispoints/api/responses", upstream.lastReq.URL.Path)
 						require.Equal(t, "/basispoints/api/responses", GetActualOpenAIUpstreamEndpoint(c))
+						require.NotContains(t, rec.Body.String(), "basispoints_unsupported_tool")
 						if choice != "none" {
 							require.Contains(t, string(upstream.lastBody), "Hosted tools unavailable through Basispoints: "+fmt.Sprint(tc.tool["type"]))
 							require.Contains(t, string(upstream.lastBody), "Do not claim to have used them")
@@ -99,9 +110,19 @@ func TestExcelBPSToolFallbackPolicy(t *testing.T) {
 						}
 					}
 					entries := logs.FilterMessage("excel_bps.native_fallback").All()
-					require.Empty(t, entries)
-					require.Empty(t, rec.Header().Get("X-Codex2API-Basispoints-Bypass"))
-					require.Empty(t, rec.Header().Get("X-Codex2API-Upstream"))
+					if native {
+						require.Len(t, entries, 1)
+						require.Equal(t, tc.nativeReason, entries[0].ContextMap()["reason"])
+						require.Equal(t, "req-policy", entries[0].ContextMap()["request_id"])
+						require.Equal(t, account.ID, entries[0].ContextMap()["account_id"])
+						fields := fmt.Sprint(entries[0].ContextMap())
+						require.NotContains(t, fields, "private-user-prompt")
+						require.NotContains(t, fields, "test-token")
+					} else {
+						require.Empty(t, entries)
+						require.Empty(t, rec.Header().Get("X-Codex2API-Basispoints-Bypass"))
+						require.Empty(t, rec.Header().Get("X-Codex2API-Upstream"))
+					}
 				})
 			}
 		}
