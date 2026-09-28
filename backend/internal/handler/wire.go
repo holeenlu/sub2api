@@ -20,6 +20,8 @@ func ProvideAdminHandlers(
 	backupHandler *admin.BackupHandler,
 	oauthHandler *admin.OAuthHandler,
 	openaiOAuthHandler *admin.OpenAIOAuthHandler,
+	openaiOAuthReauthHandler *admin.OpenAIOAuthReauthHandler,
+	accountTokenGuardV2Handler *admin.AccountTokenGuardV2Handler,
 	geminiOAuthHandler *admin.GeminiOAuthHandler,
 	antigravityOAuthHandler *admin.AntigravityOAuthHandler,
 	grokOAuthHandler *admin.GrokOAuthHandler,
@@ -60,6 +62,8 @@ func ProvideAdminHandlers(
 	accountHandler.SetCodexTicketGateway(openAIGatewayService)
 	proxyHandler.SetCodexTicketSettings(settingService)
 	return &AdminHandlers{
+		OpenAIOAuthReauth:      openaiOAuthReauthHandler,
+		AccountTokenGuardV2:    accountTokenGuardV2Handler,
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,
 		Group:                  groupHandler,
@@ -264,6 +268,8 @@ var ProviderSet = wire.NewSet(
 	admin.NewBackupHandler,
 	admin.NewOAuthHandler,
 	admin.NewOpenAIOAuthHandler,
+	admin.NewOpenAIOAuthReauthHandler,
+	admin.NewAccountTokenGuardV2Handler,
 	admin.NewGeminiOAuthHandler,
 	admin.NewAntigravityOAuthHandler,
 	admin.NewGrokOAuthHandler,

@@ -1,0 +1,30 @@
+// 此檔案由 tools/zh-tw/gen-locale.mjs 依 locales/zh 自動產生，請勿手動修改。
+// 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
+export default {
+  "title": "自動 BPS",
+  "hint": "預設關閉。每輪用兩次極短 Codex 請求，根據門票頭推測狀態；這是啟發式判據，不代表模型品質保證。網路錯誤、速率限制和回應不完整時不會改變 BPS。請在帳號編輯頁建立規則。",
+  "rules": "自動規則",
+  "history": "最近探測記錄",
+  "account": "帳號",
+  "model": "探針模型",
+  "cron": "執行週期（伺服器時區）",
+  "state": "狀態",
+  "next": "下次執行",
+  "enabled": "已啟用",
+  "paused": "已暫停",
+  "edit": "編輯",
+  "run": "安排探測",
+  "pause": "暫停",
+  "resume": "啟用",
+  "save": "儲存",
+  "cancel": "取消",
+  "refresh": "重新整理",
+  "empty": "暫無自動 BPS 規則或記錄。",
+  "more": "載入更早記錄",
+  "details": "詳情",
+  "error": "操作失敗",
+  "notice": "暫停規則不會關閉帳號目前已啟用的 BPS。",
+  "accounts": "開啟帳號管理",
+  "saved": "已儲存",
+  "queued": "已排隊，等待排程器執行"
+}

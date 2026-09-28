@@ -549,6 +549,21 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/priority-scheduling', name: 'AdminPriorityScheduling',
+    component: () => import('@/views/admin/PrioritySchedulingView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'AdminPriorityScheduling', titleKey: 'priorityScheduling.title' }
+  },
+  {
+    path: '/admin/account-quality', name: 'AdminAutoBPS',
+    component: () => import('@/views/admin/AccountAutoBPSView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'AdminAutoBPS', titleKey: 'autoBPSOps.title' }
+  },
+  {
+    path: '/admin/token-guard-v2', name: 'AdminTokenGuardV2',
+    component: () => import('@/views/admin/ops/TokenGuardV2View.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'AdminTokenGuardV2', titleKey: 'tokenGuardV2.title' }
+  },
+  {
     path: '/admin/accounts',
     name: 'AdminAccounts',
     component: () => import('@/views/admin/AccountsView.vue'),
