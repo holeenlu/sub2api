@@ -134,6 +134,15 @@
         </div>
 
         <!-- Code Blocks (Stacked for multi-file platforms) -->
+        <p
+          v-if="showCodexModelCatalog && codexModelManifestState === 'loading'"
+          data-testid="codex-model-selection-loading"
+          class="text-sm text-gray-500 dark:text-gray-400"
+        >
+          {{ t(selectedCodexCatalogModel
+            ? 'keys.useKeyModal.codexModelCatalog.refreshingDescription'
+            : 'keys.useKeyModal.codexModelCatalog.loadingDescription') }}
+        </p>
         <div class="space-y-4">
           <div
             v-for="(file, index) in currentFiles"
@@ -202,7 +211,7 @@
               </p>
             </div>
             <button
-              v-if="codexModelManifestState === 'ready'"
+              v-if="selectedCodexCatalogModel"
               type="button"
               class="btn btn-primary min-h-9 flex-shrink-0 px-3 text-xs"
               @click="downloadCodexModelManifest"
@@ -211,7 +220,7 @@
               {{ t('keys.useKeyModal.codexModelCatalog.download') }}
             </button>
             <button
-              v-else
+              v-if="!selectedCodexCatalogModel || codexModelManifestState === 'error'"
               type="button"
               data-testid="codex-model-catalog-fetch"
               class="btn btn-primary min-h-9 flex-shrink-0 px-3 text-xs"
@@ -230,16 +239,25 @@
             </button>
           </div>
           <p
-            v-if="codexModelManifestState === 'ready'"
+            v-if="codexModelManifestState === 'ready' && selectedCodexCatalogModel"
             class="border-t border-gray-200 px-4 py-2 text-xs text-emerald-700 dark:border-dark-700 dark:text-emerald-300"
           >
             {{ t('keys.useKeyModal.codexModelCatalog.modelsCount', { count: codexModelManifestModelCount }) }}
           </p>
           <p
+            v-else-if="codexModelManifestState === 'ready'"
+            data-testid="codex-model-selection-empty"
+            class="border-t border-amber-200 px-4 py-2 text-xs text-amber-700 dark:border-amber-900 dark:text-amber-300"
+          >
+            {{ t('keys.useKeyModal.codexModelCatalog.emptyDescription') }}
+          </p>
+          <p
             v-else-if="codexModelManifestState === 'error'"
             class="border-t border-red-200 px-4 py-2 text-xs text-red-700 dark:border-red-900 dark:text-red-300"
           >
-            {{ t('keys.useKeyModal.codexModelCatalog.errorDescription') }}
+            {{ t(selectedCodexCatalogModel
+              ? 'keys.useKeyModal.codexModelCatalog.cachedErrorDescription'
+              : 'keys.useKeyModal.codexModelCatalog.errorDescription') }}
           </p>
         </section>
 
@@ -267,7 +285,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, h, watch, type Component } from 'vue'
+import { ref, computed, h, watch, onBeforeUnmount, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { BRAND_NAME } from '@/config/brand'
@@ -276,11 +294,13 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { fetchCodexModelsManifest } from '@/api/codex'
+import { codexCatalogCacheKey, readCodexCatalogCache, writeCodexCatalogCache } from '@/utils/codexCatalogCache'
 import type { GroupPlatform } from '@/types'
 import {
   findCodexCatalogModel,
   formatCodexReasoningEffortTomlLine,
   parseCodexCatalogModels,
+  selectCodexConfigModel,
   selectCodexConfigReasoningEffort
 } from '@/utils/codexCatalogConfig'
 
@@ -332,11 +352,16 @@ type CodexModelManifestState = 'idle' | 'loading' | 'ready' | 'error'
 const codexModelManifestState = ref<CodexModelManifestState>('idle')
 const codexModelManifestContent = ref('')
 const codexModelManifestModelCount = ref(0)
+const DEFAULT_CODEX_MODEL = 'gpt-6-astra'
 let codexModelManifestController: AbortController | null = null
 let codexModelManifestRequestID = 0
 
+const codexModelCatalogSupported = computed(() =>
+  props.platform === 'openai' || props.platform === 'composite'
+)
+
 const showCodexModelCatalog = computed(() =>
-  props.show &&
+  props.show && codexModelCatalogSupported.value &&
   (activeClientTab.value === 'codex' ||
     (props.platform === 'openai' && activeClientTab.value === 'codex-ws'))
 )
@@ -348,7 +373,7 @@ const codexModelCatalogPath = computed(() => {
 })
 
 const codexManifestContext = computed(() => {
-  if (!showCodexModelCatalog.value) return ''
+  if (!props.show || !codexModelCatalogSupported.value || !props.apiKey) return ''
   return `${props.platform}|${props.baseUrl}|${props.apiKey}`
 })
 
@@ -373,6 +398,7 @@ watch(() => props.platform, () => {
   activeTab.value = 'unix'
   activeClientTab.value = defaultClientTab.value
   codexAuthMode.value = 'legacy'
+  resetCodexModelManifest()
 }, { immediate: true })
 
 watch(() => props.show, (show) => {
@@ -386,8 +412,11 @@ watch(() => props.show, (show) => {
 watch(codexManifestContext, (context, previousContext) => {
   if (context !== previousContext) {
     resetCodexModelManifest()
+    if (context) void loadCodexModelManifest()
   }
-})
+}, { immediate: true })
+
+onBeforeUnmount(resetCodexModelManifest)
 
 // Reset shell tab when client changes
 watch(activeClientTab, () => {
@@ -651,8 +680,11 @@ function resetCodexModelManifest() {
 }
 
 async function loadCodexModelManifest() {
-  if (!showCodexModelCatalog.value || !props.apiKey) return
+  if (!codexManifestContext.value) return
 
+  const platform = props.platform!
+  const baseUrl = props.baseUrl
+  const apiKey = props.apiKey
   codexModelManifestController?.abort()
   const controller = new AbortController()
   const requestID = ++codexModelManifestRequestID
@@ -660,11 +692,19 @@ async function loadCodexModelManifest() {
   codexModelManifestState.value = 'loading'
 
   try {
-    const result = await fetchCodexModelsManifest(props.baseUrl, props.apiKey, controller.signal)
+    const cacheKey = await codexCatalogCacheKey(platform, baseUrl, apiKey)
+    if (requestID !== codexModelManifestRequestID) return
+    const cached = readCodexCatalogCache(cacheKey)
+    if (cached && !codexModelManifestContent.value) {
+      codexModelManifestContent.value = cached.content
+      codexModelManifestModelCount.value = cached.modelCount
+    }
+    const result = await fetchCodexModelsManifest(baseUrl, apiKey, controller.signal)
     if (requestID !== codexModelManifestRequestID) return
     codexModelManifestContent.value = result.content
     codexModelManifestModelCount.value = result.modelCount
     codexModelManifestState.value = 'ready'
+    writeCodexCatalogCache(cacheKey, result)
   } catch (error) {
     const errorName = error && typeof error === 'object' && 'name' in error
       ? String((error as { name?: unknown }).name || '')
@@ -696,13 +736,13 @@ function downloadCodexModelManifest() {
   )
 }
 
-const codexCatalogModelSlugs = computed(() =>
-  parseCodexCatalogModels(codexModelManifestContent.value).map((model) => model.slug)
+const selectedCodexCatalogModel = computed(() =>
+  selectCodexConfigModel(parseCodexCatalogModels(codexModelManifestContent.value), DEFAULT_CODEX_MODEL)
 )
 
 function selectCodexCatalogModel(preferredModel: string): string {
-  if (codexCatalogModelSlugs.value.includes(preferredModel)) return preferredModel
-  return codexCatalogModelSlugs.value[0] || preferredModel
+  if (codexModelCatalogSupported.value) return selectedCodexCatalogModel.value || ''
+  return preferredModel
 }
 
 function codexReasoningEffortTomlLine(modelSlug: string): string {
@@ -730,6 +770,8 @@ const comment = (value: string) => wrapToken('text-slate-500', value)
 // Syntax highlighting helpers
 // Generate file configs based on platform and active tab
 const currentFiles = computed((): FileConfig[] => {
+  // Require a usable model from this key's fresh catalog or last saved catalog.
+  if (showCodexModelCatalog.value && !selectedCodexCatalogModel.value) return []
   const baseUrl = props.baseUrl || window.location.origin
   const apiKey = props.apiKey
   const baseRoot = baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '')
@@ -979,17 +1021,14 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
 
-  const model = selectCodexCatalogModel('gpt-5.6-sol')
+  const model = selectCodexCatalogModel(DEFAULT_CODEX_MODEL)
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}disable_response_storage = true
-model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
-network_access = "enabled"
-windows_wsl_setup_acknowledged = true
+${reasoningEffortLine}model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
 
 [model_providers.OpenAI]
 name = "OpenAI"
@@ -1228,14 +1267,10 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
 
 model_provider = "kdan"
 model = "${model}"
-model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
 # Optional:
 # review_model = "${model}"
 # model_reasoning_effort = "medium"
 # model_context_window = 500000
-# disable_response_storage = true
-# network_access = "enabled"
-# windows_wsl_setup_acknowledged = true
 
 [model_providers.kdan]
 name = "${escapeTomlBasicString(siteName.value)} Grok"
@@ -1273,9 +1308,9 @@ function generateRoutedCodexFiles(
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
   const preferredModels: Partial<Record<GroupPlatform, string>> = {
-    openai: 'gpt-5.6-sol',
+    openai: DEFAULT_CODEX_MODEL,
     anthropic: 'claude-sonnet-5',
-    openai_bps: 'gpt-6-astra',
+    openai_bps: DEFAULT_CODEX_MODEL,
     gemini: 'gemini-2.5-pro',
     antigravity: 'claude-sonnet-5',
     grok: 'grok-4.5',
@@ -1284,7 +1319,7 @@ function generateRoutedCodexFiles(
     deepseek: 'deepseek-v4-pro',
     minimax: 'MiniMax-M3',
     opencode_go: 'glm-5.3',
-    composite: 'gpt-5.5'
+    composite: DEFAULT_CODEX_MODEL
   }
   const preferredModel = preferredModels[platform] || ''
   const model = selectCodexCatalogModel(preferredModel)
@@ -1307,12 +1342,14 @@ function generateRoutedCodexFiles(
     ? `$env:KDAN_API_KEY="${apiKey}"`
     : `export KDAN_API_KEY="${apiKey}"`
 
+  const catalogLine = platform === 'openai' || platform === 'composite'
+    ? `model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"\n`
+    : ''
   const configContent = `# Codex CLI -> ${siteNameComment.value} ${label} group
 model_provider = "kdan"
 model = "${model}"
 review_model = "${model}"
-disable_response_storage = true
-model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
+${catalogLine}
 
 [model_providers.kdan]
 name = "${escapeTomlBasicString(siteName.value)} ${label}"
@@ -1340,17 +1377,14 @@ supports_websockets = false`
 function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
-  const model = selectCodexCatalogModel('gpt-5.6-sol')
+  const model = selectCodexCatalogModel(DEFAULT_CODEX_MODEL)
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content with WebSocket v2
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}disable_response_storage = true
-model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
-network_access = "enabled"
-windows_wsl_setup_acknowledged = true
+${reasoningEffortLine}model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
 
 [model_providers.OpenAI]
 name = "OpenAI"

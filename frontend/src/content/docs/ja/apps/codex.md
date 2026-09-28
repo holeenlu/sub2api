@@ -1,6 +1,8 @@
 ## キーとモデルを準備する
 
-[API keys](/keys) でキーを作成し、グループを選択して **Use key → Codex** を開きます。生成された設定を使用することを推奨します。モデルカタログは OpenAI/Composite グループでのみサポートされています。例の `gpt-5.6-sol` を有効なモデルに置き換えてください。既存の設定をバックアップし、以下のフィールドをマージしてください。ファイル全体を置き換えないでください。HTTP/SSE と WebSocket の設定はコンソール上の別々のタブにあります。まずは HTTP/SSE から始めてください。
+[API keys](/keys) でキーを作成し、グループを選択して **Use key → Codex** を開きます。生成された設定を使用することを推奨します。モデルカタログは OpenAI/Composite グループでのみサポートされています。例の `gpt-6-astra` を有効なモデルに置き換えてください。既存の設定をバックアップし、以下のフィールドをマージしてください。ファイル全体を置き換えないでください。HTTP/SSE と WebSocket の設定はコンソール上の別々のタブにあります。まずは HTTP/SSE から始めてください。
+
+OpenAI/Composite グループでは、**Use key** を開くたびに現在のキーで前回保存したモデルカタログを復元し、再取得します。モデルのクラスとバージョンに基づいて最上位の利用可能なモデルを `model` と `review_model` の両方に設定します。アカウントのモデル制限やグループの許可リストを変更した場合は、ダイアログを開き直してください。取得に失敗した場合は保存済みデータを引き続き使用し、再試行できます。キャッシュはサイト、プラットフォーム、キーごとに現在のブラウザーに保存し、API キーの平文は保存しません。初回取得に失敗してキャッシュがない場合は、再試行が成功してから設定を生成します。
 
 このガイドでは、Codex の設定を読み取るローカルクライアントについて説明します。リモートホスト、WSL、コンテナでは実行場所に設定が必要です。クラウドタスクではローカルファイルが使用されない場合があります。
 
@@ -41,7 +43,7 @@ notepad (Join-Path $codexConfigDir 'config.toml')
 
 ```toml
 model_provider = "tapmodels"
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 
 [model_providers.tapmodels]
 name = "TapModels"
@@ -54,7 +56,7 @@ supports_websockets = false
 
 同じターミナルで `codex` を実行します。WebSockets を無効にすると HTTP/SSE の開始点になりますが、ゲートウェイに WebSocket のルートがないという意味ではありません。
 
-OpenAI グループでは、異なる形式が生成されます。プロバイダー ID `OpenAI`、レスポンス保存とネットワークの設定、モデルカタログ、`[features]` が含まれます。デフォルトの **Legacy** モードでは `config.toml` と `auth.json` がダウンロードされ、`requires_openai_auth = true` が設定されます。一方、**API key** モードでは `requires_openai_auth = false` と `experimental_bearer_token` が設定されます。切り替え後は Codex を完全に再起動してください。2 つのモードを組み合わせたり、ルーティングされた `tapmodels` プロバイダーテーブルを OpenAI グループの `OpenAI` プロバイダーにマージしたりしないでください。
+OpenAI グループでは、異なる形式が生成されます。プロバイダー ID `OpenAI`、メインモデルとレビューモデル、モデルカタログ、`[features]` が含まれます。デフォルトの **Legacy** モードでは `config.toml` と `auth.json` がダウンロードされ、`requires_openai_auth = true` が設定されます。一方、**API key** モードでは `requires_openai_auth = false` と `experimental_bearer_token` が設定されます。切り替え後は Codex を完全に再起動してください。2 つのモードを組み合わせたり、ルーティングされた `tapmodels` プロバイダーテーブルを OpenAI グループの `OpenAI` プロバイダーにマージしたりしないでください。
 
 ## デスクトップ: キーを利用可能にする
 

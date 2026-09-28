@@ -1,6 +1,8 @@
 ## 先準備好 Key 和模型
 
-在 [API 金鑰](/keys) 建立 Key，選定分組，再點選“使用金鑰 → Codex”。優先使用控制台目前生成的設定；模型目錄僅對 OpenAI/Composite 分組開放。範例模型 `gpt-5.6-sol` 僅用於演示，請替換為該 Key 實際開放的模型。已有設定先備份，合併對應欄位，不要覆蓋整個檔案。控制台的普通 HTTP/SSE 與 WebSocket 設定是不同標籤；先用普萬用字元置驗證。
+在 [API 金鑰](/keys) 建立 Key，選定分組，再點選“使用金鑰 → Codex”。優先使用控制台目前生成的設定；模型目錄僅對 OpenAI/Composite 分組開放。範例模型 `gpt-6-astra` 僅用於演示，請替換為該 Key 實際開放的模型。已有設定先備份，合併對應欄位，不要覆蓋整個檔案。控制台的普通 HTTP/SSE 與 WebSocket 設定是不同標籤；先用普萬用字元置驗證。
+
+OpenAI/Composite 分組每次開啟「使用金鑰」時，先使用目前 Key 上次成功儲存的模型目錄，再重新查詢。依型號層級與版本選擇可用的最高等級型號，同時填入 `model` 和 `review_model`。帳號模型限制或分組白名單調整後，重新開啟視窗即可更新；讀取失敗時繼續使用該 Key 的快取，並可重試。快取依站點、平台和金鑰分別儲存在目前瀏覽器，不儲存 API Key 明文；首次讀取失敗且沒有快取時，需要重試成功才能產生設定。
 
 本文適用於本機讀取 Codex 設定的用戶端。雲端任務不一定讀取這份設定；需要在實際執行主機單獨設定。
 
@@ -43,7 +45,7 @@ notepad (Join-Path $codexConfigDir 'config.toml')
 
 ```toml
 model_provider = "gateway"
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 
 [model_providers.gateway]
 name = "KDAN"
@@ -56,7 +58,7 @@ supports_websockets = false
 
 在剛才設定環境變數的同一個終端機執行 `codex`。`supports_websockets = false` 是先驗證 HTTP/SSE 的設定，不代表本站沒有 WebSocket 路由。
 
-OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，包含 `disable_response_storage`、`network_access`、模型目錄和 `[features]`。預設 **Legacy** 模式同時下載 `config.toml` 和 `auth.json`，其中 `requires_openai_auth = true`；**API key** 模式改用 `requires_openai_auth = false` 與 `experimental_bearer_token`，修改後必須完全重啟 Codex。兩種模式不要混合，也不要把路由分組的 `gateway` 表和 OpenAI 分組的 `OpenAI` 表拼成一個 Provider。
+OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，包含主模型、審查模型、模型目錄和 `[features]`。預設 **Legacy** 模式同時下載 `config.toml` 和 `auth.json`，其中 `requires_openai_auth = true`；**API key** 模式改用 `requires_openai_auth = false` 與 `experimental_bearer_token`，修改後必須完全重啟 Codex。兩種模式不要混合，也不要把路由分組的 `gateway` 表和 OpenAI 分組的 `OpenAI` 表拼成一個 Provider。
 
 ## 桌面版：讓應用拿到 Key
 
