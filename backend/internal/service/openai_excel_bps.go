@@ -217,6 +217,17 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	if err != nil {
 		return fail(400, "basispoints_request_invalid", "Invalid model request")
 	}
+	// BPS never runs hosted tools; the bridge omits their declarations and
+	// tells the model. A forced selection of one would otherwise fail the
+	// whole request, so let the model proceed in automatic mode instead.
+	var relaxedChoice string
+	body, relaxedChoice, err = basispoints.RelaxHostedToolChoice(body)
+	if err != nil {
+		return fail(400, "basispoints_request_invalid", "Invalid tool_choice request")
+	}
+	if relaxedChoice != "" {
+		logger.LegacyPrintf("service.openai_excel_bps", "relaxed forced hosted tool_choice to auto: account_id=%d tool=%s", account.ID, relaxedChoice)
+	}
 	identity, _ := resolveOpenAIWSExecutionScope(c, body, getAPIKeyIDFromContext(c))
 	if identity != "" {
 		body, err = sjson.SetBytes(body, "prompt_cache_key", identity)
@@ -308,9 +319,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			return fail(400, "basispoints_request_invalid", err.Error(), contentErr.Path)
 		}
 		return fail(400, "basispoints_request_invalid", err.Error())
-	}
-	if reason := account.excelBPSNativeFallbackReason(body); reason != "" {
-		return fail(400, "basispoints_unsupported_tool", fmt.Sprintf("Requested hosted tool (%s) is unavailable through BPS; remove it from the request or ask the administrator to allow omitting unsupported tools for this account", reason), "tools")
 	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {

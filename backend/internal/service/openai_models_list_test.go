@@ -346,3 +346,31 @@ func TestOpenAIModelsCacheSeparatesRepresentationsForIdenticalRequests(t *testin
 	require.JSONEq(t, manifestBody, string(manifest.Body))
 	require.EqualValues(t, 2, calls.Load())
 }
+
+// A caller can observe a miss, pause, and enter singleflight only after another
+// request has filled the cache and left the flight. It must reuse that result.
+func TestRefreshOpenAIModelsRechecksCacheAfterCompletedFlight(t *testing.T) {
+	s := &OpenAIGatewayService{}
+	request := openAIModelsRequest{url: "https://models.example/v1/models", accountID: 2}
+	key := buildOpenAIModelsCacheKey(request)
+	_, state := s.openAIModelsCache.get(key, time.Now())
+	require.Equal(t, openAIModelsCacheMiss, state)
+	var calls atomic.Int32
+	fetch := func(context.Context, string) (*OpenAIModelsResponse, error) {
+		calls.Add(1)
+		return &OpenAIModelsResponse{Body: []byte(`{"data":[{"id":"shared-model"}]}`), ETag: "shared-etag"}, nil
+	}
+	first, err := s.fetchCachedOpenAIModels(context.Background(), request, fetch, "")
+	require.NoError(t, err)
+	select {
+	case result := <-s.refreshCachedOpenAIModels(key, request, fetch):
+		require.NoError(t, result.Err)
+		manifest, ok := result.Val.(*OpenAIModelsResponse)
+		require.True(t, ok)
+		require.Equal(t, first.Body, manifest.Body)
+		require.Equal(t, first.ETag, manifest.ETag)
+	case <-time.After(time.Second):
+		t.Fatal("late cache refresh did not complete")
+	}
+	require.EqualValues(t, 1, calls.Load(), "the late caller must not send a duplicate request")
+}

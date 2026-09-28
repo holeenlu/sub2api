@@ -43,13 +43,9 @@
 
 ### 2. 托管工具不支持
 
-`basispoints_unsupported_tool` 是本地兼容性检查。当前会拒绝要求实时外网搜索（`external_web_access=true`）、高搜索上下文（`search_context_size=high`）或 `image_generation` 的请求。
+`basispoints_unsupported_tool` 这条 400 已经取消。BPS 桥接从不执行托管工具，所以必须原生的声明（`external_web_access=true`、`search_context_size=high`、`image_generation`、强制指定这些工具）默认由**同一个账号改走原生 Codex 通道**执行，响应头 `X-Codex2API-Upstream: codex`；账号选项「保持 BPS，省略不支持的托管工具」开启后才留在 BPS 省略。详见 `docs/excel-bps.md`「托管工具策略」。
 
-客户端看到的报错会写明被拒的工具类型（`tool_choice` / `web_search` / `image_generation`），并提示「请管理员为该账号允许省略不支持的工具」，不会出现内部配置键名。
-
-在「账号管理 → 编辑 OpenAI OAuth 账号 → Excel / BPS 协议」可以启用「保持 BPS，省略不支持的托管工具」（`openai_excel_bps_omit_unsupported_tools`）。启用后，请求继续走 BPS，但这些工具被省略，并向模型说明不可用；这不赋予 BPS 联网或生图能力。客户端函数工具不受此开关影响。强制工具选择仍须调整为支持的 `auto` / `none`，不能靠省略开关跳过。
-
-如果任务必须使用这些托管能力，应使用支持该能力的原生转发账号/模型路由，而不是省略工具。此开关默认关闭，修复不会替管理员改变工具策略。
+要注意 Codex 默认的 `web_search = "cached"`（`external_web_access=false`）不触发回退：请求留在 BPS，不报错，但也没有搜索。只有 `--search`、`--yolo` 或 `web_search = "live"` 才会带 `external_web_access=true`。搜索也可以改用 Codex 的 MCP 工具，它是客户端函数工具，BPS 正常转发。
 
 ### 3. 图片接入容量 503
 

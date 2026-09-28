@@ -753,7 +753,7 @@ export default {
         oauthPassthrough: '自動透傳（僅替換驗證）',
         excelBPS: 'Excel / BPS 協議',
         excelBPSOmitUnsupportedTools: '保持 BPS，省略不支援的託管工具',
-        excelBPSOmitUnsupportedToolsDesc: "預設關閉。不支援的即時聯網搜尋、高搜尋上下文和圖片生成會返回 400。開啟後省略這些工具，並明確告知模型能力不可用，請求仍走 BPS。強制指定工具仍返回 400；用戶端函式工具不受影響。",
+        excelBPSOmitUnsupportedToolsDesc: "預設關閉：BPS 不執行託管工具，帶即時聯網搜尋、高搜尋上下文、圖片生成或強制指定這些工具的請求由同一帳號改走原生 Codex 通道執行（不打票，回應標頭 X-Codex2API-Upstream: codex）。開啟後這些請求也留在 BPS，省略工具並明確告知模型不可用，強制指定改為 auto。Codex 預設的 cached 搜尋始終留在 BPS 省略；用戶端函式工具不受影響。",
         excelBPSIgnoreImages: '圖片支援關閉時忽略圖片輸入',
         excelBPSIgnoreImagesDesc: '預設關閉。僅在系統設定中的 Excel / BPS 圖片支援關閉時生效：轉發前將目前及歷史訊息、工具結果中的每張圖片替換為不可用提示，保留文字和工具呼叫關係，避免歷史截圖反覆錯誤導致工作階段無法繼續。圖片混合文字的結果也會明確告知模型無法看到圖片，圖片支援關閉期間不要重試 view_image 或其他讀圖工具。重新開啟圖片支援後恢復正常圖片處理。',
         excelBPSCacheCreationAsInput: '建立快取按普通輸入計費',
