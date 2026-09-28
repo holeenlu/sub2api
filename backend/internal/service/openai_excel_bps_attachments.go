@@ -45,6 +45,9 @@ func (s *OpenAIGatewayService) uploadExcelBPSAttachment(ctx context.Context, acc
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	if err := s.acquireOpenAIRPMForSend(ctx, account); err != nil {
+		return "", err
+	}
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		if resp != nil && resp.Body != nil {

@@ -16,6 +16,10 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 		releaseActivity()
 		return nil, prepareErr
 	}
+	if err := s.acquireOpenAIRPMForSend(request.Context(), account); err != nil {
+		releaseActivity()
+		return nil, err
+	}
 	snapshot := snapshotCodexTicketHTTPRequest(request, account)
 	if s.pluginManager != nil {
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
