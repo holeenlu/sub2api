@@ -1143,19 +1143,18 @@ export default {
       },
       modelAllowlist: {
         title: 'モデル許可リスト',
-        hint: '有効にすると、許可リスト外のモデルは404 model_not_foundで拒否され、モデル一覧エンドポイントには許可されたモデルのみが表示されます。エントリには完全一致のモデルIDと末尾の*ワイルドカードを使用できます。注：Claude Codeのプローブはタイトル／要約にhaikuファミリーのモデルを使用し、/messages/count_tokensも許可リストで制御されます。必要な小型モデルも選択してください。',
+        hint: '有効にすると、許可リスト外のモデルは404 model_not_foundで拒否され、モデル一覧エンドポイントには許可されたモデルのみが表示されます。エントリには完全一致のモデルIDと任意の位置の*ワイルドカード（例：gpt-*-codex）を使用できます。注：Claude Codeのプローブはタイトル／要約にhaikuファミリーのモデルを使用し、/messages/count_tokensも許可リストで制御されます。必要な小型モデルも選択してください。',
         loading: '候補モデルを読み込み中...',
         empty: '候補モデルがありません。下にカスタムエントリを追加してください',
         selectedSummary: '{selected} / {total}件を選択済み',
         selectAll: 'すべて選択',
         invertSelection: '反転',
         wildcardTag: 'ワイルドカード',
-        customPlaceholder: 'カスタムエントリ（例：claude-* または gpt-5.5-codex）',
+        customPlaceholder: 'カスタムエントリ（例：gpt-*-codex または claude-*）',
         addCustom: '追加',
         emptySelectionError: 'モデル許可リストが有効です。少なくとも1つのモデルエントリを選択または追加してください',
         errors: {
           empty: 'モデルエントリを入力してください',
-          invalidWildcard: 'ワイルドカード * はエントリ末尾でのみ使用できます',
           duplicate: 'このエントリはすでに存在します'
         }
       },
