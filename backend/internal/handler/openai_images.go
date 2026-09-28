@@ -148,6 +148,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var rpmAdmission openAIRPMAdmission
 	stopJSONKeepalive := func() {}
 	jsonKeepaliveStarted := false
 	defer func() { stopJSONKeepalive() }()
@@ -164,6 +165,13 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			parsed.RequiredCapabilityForModel(channelMapping.MappedModel),
 		)
 		if err != nil {
+			err = rpmAdmission.selectionError(err)
+			if isOpenAIRPMError(err) {
+				rpmAdmission.retryAfter(c, err)
+				cls := classifySelectionFailureError(err, noAccountErrorClassification{})
+				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
+				return
+			}
 			if failoverClientGone(c) {
 				reqLog.Info("openai.images.account_select_aborted_client_disconnected", zap.Error(err))
 				return
@@ -223,6 +231,15 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if slotResult != openAISlotAcquireOK {
 			return
 		}
+		retryRPM, rpmErr := rpmAdmission.acquire(c.Request.Context(), h.gatewayService, account, accountReleaseFunc, failedAccountIDs)
+		if retryRPM {
+			continue
+		}
+		if rpmErr != nil {
+			cls := classifySelectionFailureError(rpmErr, noAccountErrorClassification{})
+			h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
+			return
+		}
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		if !parsed.Stream && !jsonKeepaliveStarted {
@@ -239,6 +256,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
+		if h.handleOpenAIRPMForwardError(c, err, streamStarted, false) {
+			return
+		}
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs

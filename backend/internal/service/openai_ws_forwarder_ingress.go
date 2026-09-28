@@ -1082,6 +1082,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
+		if err := s.acquireOpenAIRPMForSend(ctx, latest); err != nil {
+			return nil, err
+		}
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -1974,7 +1977,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				continue
 			}
 			finalErr := relayErr
-			if unwrapped := errors.Unwrap(relayErr); unwrapped != nil && !IsOpenAITurnAdmissionError(relayErr) {
+			if unwrapped := errors.Unwrap(relayErr); unwrapped != nil && !IsOpenAITurnAdmissionError(relayErr) && !IsOpenAIRPMError(relayErr) {
 				finalErr = unwrapped
 			}
 			if hooks != nil && hooks.AfterTurn != nil {
