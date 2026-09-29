@@ -164,7 +164,7 @@
 
 同时按 ranxi2001 PR #219（合并提交 `b35f3d15e31ab82021279370002ff5346ca7a4dc`，变更头 `8ea71d7c7f1d0f6e54aace2f7d1cbda70a7e7c48`）适配 OAuth 初始模型映射。源 PR 依赖本项目已退役的整套通用自动账号配置，因此本地只引入其模型规则、校验、显式规则优先和凭据隔离语义，没有恢复自动并发、质量规则、分组调度或账号运维子系统。
 
-管理员入口位于“系统设置 → Excel / BPS”的“新建 OpenAI OAuth 模型映射”卡片，对应 `GET/PUT /api/v1/admin/settings/oauth-initial-model-mappings`，设置键为 `oauth_initial_model_mappings`。开关默认关闭；打开后只作用于新建 OpenAI OAuth 账号，API Key、重新认证和既有账号不受影响，已有 `model_mapping` 项优先，规则上限 100 条，源模型最多允许末尾通配符。删除全部规则表示不自动添加映射。当前未把本地 CRS 同步改造成源 PR 的自动配置入口，避免恢复已退役的通用自动配置依赖。
+管理员入口位于“系统设置 → Excel / BPS”的“新建 OpenAI OAuth 模型映射”卡片，对应 `GET/PUT /api/v1/admin/settings/oauth-initial-model-mappings`，设置键为 `oauth_initial_model_mappings`。开关默认关闭；打开后只作用于新建 OpenAI OAuth 账号，API Key、重新认证和既有账号不受影响。已有自定义 `model_mapping` 项优先；同名直通项（例如 `gpt-5.4 → gpt-5.4`）会被模板替换，已与模板相同的项保持不变。规则上限 100 条，源模型最多允许末尾通配符。删除全部规则表示不自动添加映射。当前未把本地 CRS 同步改造成源 PR 的自动配置入口，避免恢复已退役的通用自动配置依赖。
 
 ### 2026-09-29：#220–#222 BPS 链路增量
 
@@ -179,3 +179,9 @@
 ### 2026-09-29：运维入口退役
 
 自动 BPS `/admin/account-quality`、独立优先调度 `/admin/priority-scheduling` 和凭证运营 `/admin/token-guard-v2` 已整体移除，包括对应页面、API、后台任务、质量计划调度和自动重新登录 worker。手动 BPS 默认参数与 OAuth 初始模型映射保留，统一从“系统设置 → Excel / BPS”进入。历史迁移、旧字段和数据保留；详细范围见 [运维入口退役说明](OPS_FEATURE_RETIREMENT_2026_09_29.md)。
+
+### 2026-09-30：ranxi2001 最新提交审查
+
+本轮固定核对 `ranxi2001/production` `690758d22be0ed65b38b4d5261981d117d0d570f`。官方 `upstream/main` 在本轮无新提交。与当前 Excel/BPS 边界有关且本地尚未等价实现的 `a3c007b9fb2f228e7f293d6a521023ef364a8a5` 已适配：OAuth 初始模型模板现在会替换同源同目标的身份直通映射，同时保留已有自定义目标、已匹配模板的映射和非字符串异常值，并继续克隆凭据避免修改调用方对象。该修复保留在本地独立的 `oauth_initial_model_mappings` 设置中，没有恢复源项目已退役的通用自动配置、重新登录 worker、优先调度或质量运营入口。
+
+此前已适配的 #220（原生附件字段清理）、#221（流内错误分类）和 #222（BPS 托管代理获取错误与账号健康隔离）在最新源提交中没有新的等价差异，本轮不重复导入。源分支中的 reauth worker、账号分类优先级、自动计费映射、发布准备和其他运维增量均按既定范围排除。本轮无新增迁移、版本号或发布动作。

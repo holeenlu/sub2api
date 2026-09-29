@@ -30,9 +30,9 @@ type OAuthModelMappingRule struct {
 // preserves the existing account-creation behavior until an administrator
 // opts in.
 type OAuthInitialModelMappings struct {
-	Enabled  bool                     `json:"enabled"`
-	Platform string                   `json:"platform"`
-	Rules    []OAuthModelMappingRule  `json:"rules"`
+	Enabled  bool                    `json:"enabled"`
+	Platform string                  `json:"platform"`
+	Rules    []OAuthModelMappingRule `json:"rules"`
 }
 
 func defaultOAuthModelMappings(platform string) []OAuthModelMappingRule {
@@ -135,9 +135,10 @@ func (s *SettingService) SaveOAuthInitialModelMappings(ctx context.Context, inpu
 	return input, s.settingRepo.SetMultiple(ctx, map[string]string{SettingKeyOAuthInitialModelMappings: string(raw)})
 }
 
-// applyOAuthModelMappings mutates only a cloned credentials map.  Existing
-// explicit entries win, malformed mappings are left untouched, and callers
-// can safely reuse their original credentials map.
+// applyOAuthModelMappings mutates only a cloned credentials map. Templates
+// replace identity passthroughs, while explicit custom targets win. Malformed
+// mappings are left untouched, and callers can safely reuse their original
+// credentials map.
 func applyOAuthModelMappings(input *CreateAccountInput, rules []OAuthModelMappingRule) bool {
 	if input == nil || len(rules) == 0 {
 		return false
@@ -157,11 +158,15 @@ func applyOAuthModelMappings(input *CreateAccountInput, rules []OAuthModelMappin
 	}
 	applied := false
 	for _, rule := range rules {
-		from := strings.TrimSpace(rule.From)
-		if _, exists := mapping[from]; !exists {
-			mapping[from] = strings.TrimSpace(rule.To)
-			applied = true
+		from, to := strings.TrimSpace(rule.From), strings.TrimSpace(rule.To)
+		if current, exists := mapping[from]; exists {
+			target, ok := current.(string)
+			if !ok || target != from || target == to {
+				continue
+			}
 		}
+		mapping[from] = to
+		applied = true
 	}
 	if !applied {
 		return false
