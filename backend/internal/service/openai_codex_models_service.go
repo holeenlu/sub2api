@@ -540,6 +540,12 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 			if isOpenAIGPT56Model(modelID) || openai.IsGPT6SolOrLunaModelSpelling(modelID) {
 				descriptor.MaxContextWindow = configuredCodexGPT56MaxContext
 			}
+			if openai.IsGPT61SolModelSpelling(modelID) {
+				// https://developers.openai.com/api/docs/models/gpt-6.1-sol
+				descriptor.Description = "GPT-6.1 Sol handles complex coding, computer use, and professional tasks with performance approaching Astra at a lower cost."
+				descriptor.ContextWindow = 1_050_000
+				descriptor.MaxContextWindow = 1_050_000
+			}
 			if isOpenAIGPT6AstraModel(modelID) {
 				// Codex resolves the Ultra workflow to this effort before inference.
 				// openai/codex a9896da3: codex-rs/models-manager/models.json.
@@ -2190,6 +2196,7 @@ func CodexModelsManifestETag(body []byte) string {
 }
 
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
+	"gpt-6.1-sol":   {},
 	"gpt-6-astra":   {},
 	"gpt-5.6-sol":   {},
 	"gpt-5.6-terra": {},

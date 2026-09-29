@@ -241,13 +241,13 @@ export default {
       },
       codexModelCatalog: {
         title: 'Codexモデルカタログ',
-        description: 'ローカルのモデル候補一覧から最上位モデルを選び、メインとレビューの設定をすぐに表示します。カタログの自動取得やバックグラウンド更新は行いません。必要な場合はこのキーのカタログを手動で取得してダウンロードすると、モデルと推論設定を更新できます。',
+        description: 'カタログのパスを含む設定をすぐに表示します。自動取得やバックグラウンド更新は行いません。初回はカタログを取得し、codex-models.json を下記のパスに保存してから Codex を起動してください。取得成功時にモデルと推論設定を更新します。',
         emptyDescription: '手動で取得したカタログに利用可能な Codex モデルがないため、デフォルト設定を維持します。アカウントのモデル制限とグループのモデル許可リストを確認してください。',
         fetch: 'カタログを取得',
         retry: '再試行',
         download: 'カタログをダウンロード',
         modelsCount: 'ダウンロード可能なモデル: {count}件',
-        errorDescription: 'この API キーではカタログを取得できませんでした。デフォルト設定は引き続き利用できます。',
+        errorDescription: 'この API キーではカタログを取得できませんでした。設定とパスは維持されています。再試行するか、以前保存したカタログを使用してください。',
       },
       opencode: {
         title: 'OpenCodeの例',
@@ -643,7 +643,8 @@ export default {
     quote: {
       scopes: {group: 'グループ料金', personal: '個別料金', group_fallback: 'グループ参考料金'},
       sources: {media_billing: 'メディア料金ルール', group: 'グループ料金設定', channel: 'チャネル料金設定', billing_catalog: '料金カタログ / 代替料金'},
-      conditional: '標準時間帯の料金。リクエスト条件が適用されます',
+      conditional: '倍率反映済み。段階・時間帯の条件は明細を参照',
+      responseModel: 'このモデルの倍率適用料金。最終料金は応答モデルに基づきます',
       requestDependent: '料金は選択されたルートまたは応答モデルに依存します',
       personalUnavailable: '個別レートを取得できないため、グループ参考料金を表示しています。'
     },
@@ -709,8 +710,8 @@ export default {
         '。この行の料金にはピーク時間料金は含まれません。この期間がピーク時間 {window} と重なる場合、重複部分にはさらに ×{multiplier} が乗算されます',
       timePricingWeekdays: '平日',
       timePricingRateHint: '適用レート {rate} × 期間乗数 {multiplier}',
-      paidPrice: '標準時間帯の料金',
-      officialPrice: 'カタログ参考料金',
+      paidPrice: '適用料金（倍率反映済み）',
+      officialPrice: '公式料金',
       rate: 'レート',
       unitPerMillion: '$ / 100万トークン',
       perUnitRequest: '/ リクエスト',

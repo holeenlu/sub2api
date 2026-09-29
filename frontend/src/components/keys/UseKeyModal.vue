@@ -736,7 +736,7 @@ function selectCodexCatalogModel(preferredModel: string): string {
 }
 
 function codexCatalogTomlLine(): string {
-  if (!codexModelCatalogSupported.value || !selectedCodexCatalogModel.value) return ''
+  if (!codexModelCatalogSupported.value) return ''
   return `model_catalog_json = "${CODEX_MODEL_CATALOG_CONFIG_PATH}"\n`
 }
 
