@@ -78,7 +78,7 @@ OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，�
 
 本節只適用於 OpenAI/Composite 分組。其他路由分組不支援專用目錄下載，也不應新增 `model_catalog_json`。用普通 `GET /v1/models` 查詢精確 ID 後填入 `model`；不要把該列表回應儲存為 Codex manifest。
 
-在「API 金鑰 → 使用金鑰 → Codex」中手動點選「取得目錄」，成功取得包含可用 Codex 模型的目錄後，再點選「下載目錄」。手動取得的結果可更新 `model`、`review_model` 和推理設定；取得失敗或沒有可用模型時，預設設定仍可複製和下載。成功取得可用目錄前，產生的設定不包含 `model_catalog_json`。將下載的 `codex-models.json` 放在固定位置，並確認 `config.toml` 頂層的路徑與檔案實際位置一致，例如：
+在「API 金鑰 → 使用金鑰 → Codex」中手動點選「取得目錄」，成功取得包含可用 Codex 模型的目錄後，再點選「下載目錄」。手動取得的結果可更新 `model`、`review_model` 和推理設定；取得失敗或沒有可用模型時，預設設定仍可複製和下載。預設設定一律包含 `model_catalog_json = "~/.codex/codex-models.json"`，無需等待目錄請求。首次啟動 Codex 前須先下載並儲存該目錄檔案；重新取得失敗時可繼續使用之前儲存的檔案。將下載的 `codex-models.json` 放在固定位置，並確認 `config.toml` 頂層的路徑與檔案實際位置一致，例如：
 
 ```toml
 model_catalog_json = "/你的絕對路徑/.codex/codex-models.json"

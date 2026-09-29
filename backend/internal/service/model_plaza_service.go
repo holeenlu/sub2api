@@ -231,18 +231,21 @@ func (s *ModelPlazaService) ListVisibleGroups(ctx context.Context, visible func(
 			pg.Models = make([]PlazaModel, 0, len(catalog.Models))
 			for _, entry := range catalog.Models {
 				m := PlazaModel{Name: entry.Name, Platform: entry.Platform, Endpoint: entry.Endpoint, CatalogSource: entry.Source, ChannelName: entry.ChannelName}
-				if entry.ResponseDependent || len(entry.BillingModels) != 1 {
+				if len(entry.BillingModels) != 1 {
 					m.QuoteReason = "request_dependent_pricing"
 				} else {
 					m.Name = entry.BillingModels[0]
 					s.fillDisplayPricing(ctx, &m, groupEnt[gid])
 					s.fillMediaDisplayPricing(ctx, &m, groupEnt[gid])
 					m.Name = entry.Name
-					// A mapped model's reference must not be presented as the public alias's official price.
-					if entry.Name == entry.BillingModels[0] {
-						m.OfficialPricing = s.lookupOfficialPricing(ctx, entry.Name, officialMemo)
+					if entry.ResponseDependent && m.QuoteReason == "" {
+						// Keep configured prices visible; the response may select another billing model.
+						m.QuoteReason = "response_model_pricing"
 					}
 				}
+				// Official pricing belongs to the public model, independently of route
+				// ambiguity. Never substitute a different mapped target's official price.
+				m.OfficialPricing = s.lookupOfficialPricing(ctx, entry.Name, officialMemo)
 				pg.Models = append(pg.Models, m)
 			}
 			out = append(out, *pg)

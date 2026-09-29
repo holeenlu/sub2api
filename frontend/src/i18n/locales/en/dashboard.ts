@@ -241,13 +241,13 @@ export default {
       },
       codexModelCatalog: {
         title: 'Codex model catalog',
-        description: 'Configuration is ready immediately, with the highest-tier model from the local preset list for tasks and reviews. Catalogs are fetched only when requested, with no background refresh. Fetch and download this key’s catalog to update model and reasoning settings.',
+        description: 'Configuration is ready immediately and includes the catalog path, with no automatic fetching or background refresh. Before first use, fetch the catalog and save codex-models.json to the path below. A successful fetch updates model and reasoning settings.',
         emptyDescription: 'The fetched catalog contains no usable Codex models. The default configuration is retained. Check account model restrictions and the group model allowlist.',
         fetch: 'Fetch catalog',
         retry: 'Retry',
         download: 'Download catalog',
         modelsCount: '{count} models ready to download',
-        errorDescription: 'The catalog could not be fetched with this API key. The default configuration remains available.',
+        errorDescription: 'The catalog could not be fetched with this API key. Configuration and the catalog path are retained. Retry or use a previously saved catalog file.',
       },
       opencode: {
         title: 'OpenCode Example',
@@ -643,7 +643,8 @@ export default {
     quote: {
       scopes: {group: 'Group price', personal: 'Your quote', group_fallback: 'Group reference'},
       sources: {media_billing: 'Media billing rules', group: 'Group pricing', channel: 'Channel pricing', billing_catalog: 'Billing catalog / fallback'},
-      conditional: 'Standard-period quote; request conditions apply',
+      conditional: 'Rate applied; see tier and time conditions',
+      responseModel: 'Rate applied to this model; final billing follows the response model',
       requestDependent: 'Price depends on the selected route or response model',
       personalUnavailable: 'Personal rates are unavailable. Group reference prices are shown.'
     },
@@ -709,8 +710,8 @@ export default {
         '; prices in this row exclude the peak-hour rate — where this period overlaps the peak hours {window}, the overlapping portion is additionally multiplied by ×{multiplier}',
       timePricingWeekdays: 'Weekdays',
       timePricingRateHint: 'Effective rate {rate} × period multiplier {multiplier}',
-      paidPrice: 'Standard-period price',
-      officialPrice: 'Catalog reference price',
+      paidPrice: 'Your price (rate applied)',
+      officialPrice: 'Official price',
       rate: 'Rate',
       unitPerMillion: '$ / 1M tokens',
       perUnitRequest: '/ request',

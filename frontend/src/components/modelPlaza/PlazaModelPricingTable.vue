@@ -112,7 +112,7 @@
               </span>
             </div>
             <p v-if="m.quote" class="mt-1 text-[10px] text-gray-500 dark:text-dark-400">{{ t(`modelPlaza.quote.scopes.${m.quote.scope}`) }}<template v-if="m.quote.source"> · {{ t(`modelPlaza.quote.sources.${m.quote.source}`) }}</template></p>
-            <p v-if="m.quote?.status === 'conditional' && m.pricing" class="mt-1 text-[10px] text-gray-500 dark:text-dark-400">{{ t('modelPlaza.quote.conditional') }}</p>
+            <p v-if="m.quote?.status === 'conditional' && m.pricing" class="mt-1 text-[10px] text-gray-500 dark:text-dark-400">{{ t(m.quote.reason === 'response_model_pricing' ? 'modelPlaza.quote.responseModel' : 'modelPlaza.quote.conditional') }}</p>
           </td>
 
           <!-- token 计费:输入 / 输出 / 缓存(写/读),有阶梯时每档一行;档位标签只放输入列,其余列按行对齐 -->

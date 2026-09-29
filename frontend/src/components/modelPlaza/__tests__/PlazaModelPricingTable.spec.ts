@@ -762,6 +762,26 @@ describe('PlazaModelPricingTable 分时计价', () => {
 
 
 describe('resolved model quotes', () => {
+  it('shows conditional response-model prices with the multiplier applied exactly once', () => {
+    const m = tokenModel()
+    m.quote = {
+      status: 'conditional', scope: 'personal', source: 'channel',
+      basis: 'standard_period', rate_multiplier: 0.5, conditions: ['response_model'],
+      reason: 'response_model_pricing',
+      pricing: { ...m.pricing!, input_price: 1.5e-6, output_price: 7.5e-6 }
+    }
+    const wrapper = mountTable([m], 2, 0.5)
+    const cells = wrapper.findAll('tbody td')
+    expect(cells).toHaveLength(8)
+    expect(cells[1].text()).toBe('$1.50')
+    expect(cells[2].text()).toBe('$7.50')
+    expect(cells[4].text()).toBe('$3.00')
+    expect(cells[5].text()).toBe('$15.00')
+    expect(cells[7].text()).toBe('0.5x')
+    expect(wrapper.text()).toContain('modelPlaza.quote.responseModel')
+    wrapper.unmount()
+  })
+
   it('uses quoted values once and preserves media cache and zero prices', () => {
     const m = tokenModel()
     m.quote = { status: 'resolved', scope: 'personal', source: 'group', basis: 'standard_period', rate_multiplier: 0.5, conditions: [], pricing: { ...m.pricing!, input_price: 2e-6, output_price: 0 }, image_token_pricing: { input_price: 5e-6, output_price: 9e-6, cache_read_price: 7e-6 } }

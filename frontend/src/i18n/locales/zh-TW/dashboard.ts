@@ -247,13 +247,13 @@ export default {
       },
       codexModelCatalog: {
         title: 'Codex 模型目錄',
-        description: '預設設定立即生成，主模型與審查模型使用本地模型選項中的最高檔位，不會自動取得目錄或後台重新整理。如需目前 Key 的模型目錄，請手動取得並下載；成功後可更新模型及推理設定。',
+        description: '預設設定立即生成並包含模型目錄路徑，不會自動取得目錄或背景更新。首次使用請取得目錄，將 codex-models.json 儲存到下方路徑後啟動 Codex；取得成功後會更新模型及推理設定。',
         emptyDescription: '手動取得的目錄沒有可用的 Codex 模型，已保留預設設定。請檢查帳號模型限制和分組模型白名單。',
         fetch: '取得目錄',
         retry: '重試',
         download: '下載目錄',
         modelsCount: '已取得 {count} 個模型',
-        errorDescription: '無法使用目前 API Key 取得模型目錄，預設設定仍可用。'
+        errorDescription: '無法使用目前 API Key 取得模型目錄，已保留設定和目錄路徑。請重試，或使用之前儲存的目錄檔案。'
       },
       opencode: {
         title: 'OpenCode 設定範例',
@@ -649,7 +649,8 @@ export default {
     quote: {
       scopes: {group: '分組標準價', personal: '你的報價', group_fallback: '分組參考價'},
       sources: {media_billing: '媒體計費規則', group: '分組價卡', channel: '通道價卡', billing_catalog: '計費目錄/相容價'},
-      conditional: '標準時段報價；按請求條件計費',
+      conditional: '已套用倍率；階梯、時段等條件請見明細',
+      responseModel: '按目前模型顯示倍率價格；最終按回應模型計費',
       requestDependent: '價格取決於實際路由或上游回傳模型',
       personalUnavailable: '個人倍率暫不可用，以下為分組參考價。'
     },
@@ -714,8 +715,8 @@ export default {
       timePricingRowHintPeak: '；本行價格未含高峰倍率，與高峰時段 {window} 重疊的部分實付再乘 ×{multiplier}',
       timePricingWeekdays: '工作日',
       timePricingRateHint: '生效倍率 {rate} × 時段倍率 {multiplier}',
-      paidPrice: '標準時段價格',
-      officialPrice: '目錄參考價',
+      paidPrice: '實付價格（已套用倍率）',
+      officialPrice: '官方價格',
       rate: '折扣倍率',
       unitPerMillion: '$ / 1M token',
       perUnitRequest: '/ 次',
