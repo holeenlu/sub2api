@@ -53,11 +53,6 @@ func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 			proxyURL = proxy.URL()
 		}
 	}
-	return s.GenerateAuthURLWithProxyURL(ctx, proxyURL, redirectURI, platform)
-}
-
-// GenerateAuthURLWithProxyURL creates a session with an already resolved egress URL.
-func (s *OpenAIOAuthService) GenerateAuthURLWithProxyURL(ctx context.Context, proxyURL, redirectURI, platform string) (*OpenAIAuthURLResult, error) {
 	// Generate PKCE values
 	state, err := openai.GenerateState()
 	if err != nil {

@@ -1,7 +1,4 @@
 import autoBPSOps from './autoBPSOps'
-import qualityOps from './qualityOps'
-import tokenGuardV2 from './tokenGuardV2'
-import priorityScheduling from './priorityScheduling'
 import ui from './ui'
 import landing from './landing'
 import common from './common'
@@ -13,10 +10,7 @@ import misc from './misc'
 import docs from './docs'
 
 export default {
-  qualityOps,
-  tokenGuardV2,
   autoBPSOps,
-  priorityScheduling,
   ...ui,
   ...landing,
   ...common,

@@ -65,25 +65,6 @@ func TestExcelBPSFailureAfterCompactKeepalive(t *testing.T) {
 	require.Len(t, upstream.requests, 1)
 }
 
-func TestExcelBPSFailureQualityObservationDoesNotCoolAccount(t *testing.T) {
-	upstream := &httpUpstreamRecorder{resp: bpsCompletionResponse(http.StatusOK,
-		bpsFailureWire(t, "response.failed", "rate_limit_exceeded", "", 0))}
-	svc := openAIClientToolsTestService(upstream)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	ctx := withPelicanTestOptions(context.Background(), pelicanTestOptions{observeOnly: true})
-	body, err := json.Marshal(map[string]any{"model": "gpt-6-astra", "input": "observe"})
-	require.NoError(t, err)
-	account := excelAccount()
-	_, err = svc.Forward(ctx, c, account, body)
-	require.Error(t, err)
-	require.Equal(t, http.StatusTooManyRequests, rec.Code)
-	require.False(t, svc.isExcelBPSCoolingDown(account, "gpt-6-astra"))
-	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
-	require.Len(t, upstream.requests, 1)
-}
-
 func TestExcelBPSFailureClassification(t *testing.T) {
 	for _, tc := range []struct {
 		name, event, code, errorType string

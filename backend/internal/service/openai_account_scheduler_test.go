@@ -3989,7 +3989,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LegacyAccountModelRoute
 				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("false"),
 				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
 			}
-			require.Nil(t, svc.getOpenAIAccountScheduler(ctx, false), "test precondition: advanced scheduler disabled")
+			require.Nil(t, svc.getOpenAIAccountScheduler(ctx), "test precondition: advanced scheduler disabled")
 
 			selection, _, selectErr := svc.SelectAccountWithScheduler(
 				ctx, &groupID, "", tt.sessionHash, "team-alias", nil, tt.requiredTransport, false,
@@ -4043,7 +4043,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LegacyAccountModelRoute
 			acquiredIDs: &acquiredIDs, releasedIDs: &releasedIDs,
 		}),
 	}
-	require.Nil(t, svc.getOpenAIAccountScheduler(ctx, false), "test precondition: advanced scheduler disabled")
+	require.Nil(t, svc.getOpenAIAccountScheduler(ctx), "test precondition: advanced scheduler disabled")
 
 	selection, _, err := svc.SelectAccountWithScheduler(
 		ctx, &groupID, "", "", "team-alias", nil, OpenAIUpstreamTransportAny, false,

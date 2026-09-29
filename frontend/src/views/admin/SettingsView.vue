@@ -1422,6 +1422,11 @@
         <!-- /Tab: Gateway -->
 
         <!-- Tab: Security — Registration, Turnstile, LinuxDo -->
+        <div v-show="activeTab === 'bps'" class="space-y-6">
+          <BPSDefaultsPanel :groups="bpsGroups" />
+          <OAuthInitialModelMappingsPanel />
+        </div>
+
         <div v-show="activeTab === 'security'" class="space-y-6">
           <!-- Registration Settings -->
           <div class="card">
@@ -9066,6 +9071,8 @@
 <script setup lang="ts">
 import { excelBPSImageLimits } from "@/utils/excelBPSImageLimits";
 import CodexTicketCadenceSettings from '@/components/admin/account/CodexTicketCadenceSettings.vue'
+import BPSDefaultsPanel from '@/components/admin/operations/BPSDefaultsPanel.vue'
+import OAuthInitialModelMappingsPanel from '@/components/admin/operations/OAuthInitialModelMappingsPanel.vue'
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { isChineseLocale } from "@/i18n/localeUtils";
@@ -9162,6 +9169,7 @@ const appStore = useAppStore();
 // 关闭 step-up 开关是敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 码重试
 const settingsStepUp = useStepUp();
 const adminSettingsStore = useAdminSettingsStore();
+const bpsGroups = ref<AdminGroup[]>([]);
 const isZhLocale = computed(() => isChineseLocale(locale.value));
 
 const paymentGuideHref = computed(() =>
@@ -9184,6 +9192,7 @@ type SettingsTab =
   | "general"
   | "agreement"
   | "features"
+  | "bps"
   | "security"
   | "users"
   | "gateway"
@@ -9196,6 +9205,7 @@ const settingsTabs = [
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
   { key: "features" as SettingsTab, icon: "bolt" as const },
+  { key: "bps" as SettingsTab, icon: "document" as const },
   { key: "security" as SettingsTab, icon: "shield" as const },
   { key: "users" as SettingsTab, icon: "user" as const },
   { key: "gateway" as SettingsTab, icon: "server" as const },
@@ -13074,6 +13084,7 @@ async function handleDeleteProvider() {
 }
 
 onMounted(() => {
+  adminAPI.groups.getAll().then(groups => { bpsGroups.value = groups }).catch(() => { bpsGroups.value = [] })
   loadSettings();
   loadSubscriptionGroups();
   loadAdminApiKey();

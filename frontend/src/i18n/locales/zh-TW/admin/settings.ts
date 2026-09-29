@@ -7,6 +7,7 @@ export default {
       tabs: {
         general: '通用設定',
         agreement: '登入條款',
+        bps: 'Excel / BPS',
         features: '功能開關',
         security: '安全與驗證',
         users: '使用者預設值',

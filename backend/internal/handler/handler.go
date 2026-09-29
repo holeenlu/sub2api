@@ -7,8 +7,6 @@ import (
 
 // AdminHandlers contains all admin-related HTTP handlers
 type AdminHandlers struct {
-	OpenAIOAuthReauth      *admin.OpenAIOAuthReauthHandler
-	AccountTokenGuardV2    *admin.AccountTokenGuardV2Handler
 	Dashboard              *admin.DashboardHandler
 	User                   *admin.UserHandler
 	Group                  *admin.GroupHandler

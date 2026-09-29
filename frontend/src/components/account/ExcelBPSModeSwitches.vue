@@ -19,7 +19,6 @@
     </div>
     <div class="flex flex-wrap items-start justify-between gap-2 text-xs leading-5">
       <p class="text-gray-500 dark:text-gray-400">{{ t('autoBPSOps.defaults.modeHint') }}</p>
-      <a v-if="available" href="/admin/account-quality#bps-defaults" target="_blank" rel="noopener noreferrer" class="shrink-0 text-primary-600 hover:underline dark:text-primary-400">{{ t('autoBPSOps.defaults.manage') }} ↗</a>
     </div>
     <p v-if="loading" role="status" class="text-xs text-gray-500">{{ t('autoBPSOps.defaults.applying') }}</p>
     <p v-else-if="failed" role="alert" class="text-xs text-red-600 dark:text-red-400">{{ t('autoBPSOps.defaults.loadFailed') }}</p>
