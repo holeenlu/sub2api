@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import AccountAutoBPSView from '../AccountAutoBPSView.vue'
 import { reactive } from 'vue'
+import { adminAPI } from '@/api/admin'
 
 enableAutoUnmount(afterEach)
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), update: vi.fn(), delete: vi.fn() }))
@@ -26,10 +27,22 @@ beforeEach(() => {
   api.update.mockResolvedValue(plan)
 })
 async function open() {
-  const wrapper = mount(AccountAutoBPSView, { global: { stubs: { BaseDialog: { props: ['show'], template: '<section v-if="show"><slot /><slot name="footer" /></section>' }, AppLayout: { template: '<main><slot /></main>' }, SmartOpsNav: true, QualityBPSSettings: true, RouterLink: { template: '<a><slot /></a>' } } } })
+  const wrapper = mount(AccountAutoBPSView, { global: { stubs: { BaseDialog: { props: ['show'], template: '<section v-if="show"><slot /><slot name="footer" /></section>' }, AppLayout: { template: '<main><slot /></main>' }, SmartOpsNav: true, BPSDefaultsPanel: true, QualityBPSSettings: true, RouterLink: { template: '<a><slot /></a>' } } } })
   await flushPromises(); return wrapper
 }
 describe('Automatic BPS operations', () => {
+  it('offers composite destinations for templates while retaining the rule group scope', async () => {
+    const openai = { id: 1, name: 'OpenAI', platform: 'openai' }
+    const composite = { id: 2, name: 'Composite', platform: 'composite' }
+    vi.mocked(adminAPI.groups.getAll).mockResolvedValueOnce([openai, composite, { id: 3, name: 'Claude', platform: 'anthropic' }] as any)
+    const wrapper = await open()
+    expect(wrapper.findComponent({ name: 'BPSDefaultsPanel' }).props('groups')).toEqual([openai, composite])
+    await wrapper.get('[data-plan-id="3"] button').trigger('click')
+    expect(wrapper.findComponent({ name: 'QualityBPSSettings' }).props('targetGroups')).toEqual([openai])
+    state.auth.user.id = 2
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'BPSDefaultsPanel' }).props('groups')).toEqual([])
+  })
   it('pauses only the rule without mutating account options', async () => {
     const wrapper = await open()
     await wrapper.findAll('button').find(b => b.text() === 'autoBPSOps.pause')!.trigger('click')

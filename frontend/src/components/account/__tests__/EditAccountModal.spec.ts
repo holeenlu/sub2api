@@ -1,3 +1,7 @@
+import { getExcelBPSDefaults } from '@/api/admin/excelBPSDefaults'
+import { defaultExcelBPSDefaults } from '@/utils/excelBPSDefaults'
+vi.mock('@/api/admin/excelBPSDefaults', () => ({ getExcelBPSDefaults: vi.fn() }))
+beforeEach(() => { vi.mocked(getExcelBPSDefaults).mockResolvedValue(defaultExcelBPSDefaults()) })
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
@@ -18,6 +22,7 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
+    user: { id: 1, role: 'admin' },
     get isSimpleMode() {
       return authIsSimpleMode.value
     }
@@ -359,6 +364,39 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('defaults WS SSE acceleration off and persists the OAuth opt-in across edits', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { unrelated: 'preserve' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="openai-ws-sse-acceleration"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    await toggle.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.openai_oauth_ws_sse_acceleration).toBe(true)
+    expect(extra.unrelated).toBe('preserve')
+    wrapper.unmount()
+
+    const restored = mountModal({ ...account, extra })
+    expect(restored.get('[data-testid="openai-ws-sse-acceleration"]').attributes('aria-checked')).toBe('true')
+    await restored.get('[data-testid="openai-ws-sse-acceleration"]').trigger('click')
+    await restored.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[1]?.[1]?.extra).not.toHaveProperty('openai_oauth_ws_sse_acceleration')
+    restored.unmount()
+  })
+
+  it('does not offer OAuth WS SSE acceleration for API keys or setup tokens', () => {
+    for (const account of [buildAccount(), buildOpenAISetupTokenAccount()]) {
+      const wrapper = mountModal(account)
+      expect(wrapper.find('[data-testid="openai-ws-sse-acceleration"]').exists()).toBe(false)
+      wrapper.unmount()
+    }
+  })
+
   beforeEach(() => {
     authIsSimpleMode.value = true
   })
@@ -584,7 +622,7 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
-  it('restores the opt-in after automatic disable and resets it for another account', async () => {
+  it('explicit initial configuration clears old opt-ins and isolates account switching', async () => {
     const account = buildAccount()
     account.type = 'oauth'
     account.extra = { openai_excel_bps: false, openai_excel_bps_auto_disable_on_403: true }
@@ -592,7 +630,7 @@ describe('EditAccountModal', () => {
     const selector = '[data-testid="excel-bps-auto-disable-on-403"]'
     expect(wrapper.find(selector).exists()).toBe(false)
     await wrapper.get('[data-testid="excel-bps-toggle"]').trigger('click')
-    expect(wrapper.get<HTMLInputElement>(selector).element.checked).toBe(true)
+    expect(wrapper.get<HTMLInputElement>(selector).element.checked).toBe(false)
     await wrapper.setProps({ account: { ...account, id: 2, extra: { openai_excel_bps: true } } })
     expect(wrapper.get<HTMLInputElement>(selector).element.checked).toBe(false)
     wrapper.unmount()
@@ -679,7 +717,7 @@ describe('EditAccountModal', () => {
     }
   })
 
-  it('restores and saves both 403 options after re-enabling an automatically disabled protocol', async () => {
+  it('explicit initial configuration resets 403 actions and permits choosing them again', async () => {
     const account = buildAccount()
     account.type = 'oauth'
     account.extra = { openai_excel_bps: false, openai_excel_bps_auto_disable_on_403: true, openai_excel_bps_auto_move_on_403: true, openai_excel_bps_403_target_group_id: 0 }
@@ -687,8 +725,11 @@ describe('EditAccountModal', () => {
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
     await wrapper.get('[data-testid="excel-bps-toggle"]').trigger('click')
-    expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-auto-disable-on-403"]').element.checked).toBe(true)
-    expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-auto-move-on-403"]').element.checked).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-auto-disable-on-403"]').element.checked).toBe(false)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-auto-move-on-403"]').element.checked).toBe(false)
+    await wrapper.get('[data-testid="excel-bps-auto-disable-on-403"]').setValue(true)
+    await wrapper.get('[data-testid="excel-bps-auto-move-on-403"]').setValue(true)
+    await wrapper.get('[data-testid="excel-bps-403-target-group"]').setValue('0')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
@@ -2386,5 +2427,45 @@ describe('independent account cost multiplier', () => {
     await wrapper.get('[data-testid="account-cost-multiplier"]').setValue(-1)
     await wrapper.get('form#edit-account-form').trigger('submit.prevent'); await flushPromises()
     expect(updateAccountMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('Excel BPS default template integration', () => {
+  it('preselects the saved template and persists it with unrelated account options', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { unrelated: 'keep' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    vi.mocked(getExcelBPSDefaults).mockResolvedValueOnce({ ...defaultExcelBPSDefaults(), models: ['my-bps-model'] })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="excel-bps-defaults-toggle"]').trigger('click')
+    await flushPromises()
+    for (const field of ['ignore-encrypted-content', 'auto-disable-on-403', 'cache-creation-as-input']) {
+      expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-' + field + '"]').element.checked).toBe(true)
+    }
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent'); await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      unrelated: 'keep', openai_excel_bps: true, openai_excel_bps_config_mode: 'defaults', openai_excel_bps_models: ['my-bps-model'],
+      openai_excel_bps_ignore_encrypted_content: true, openai_excel_bps_auto_disable_on_403: true,
+      openai_excel_bps_cache_creation_as_input: true
+    })
+    const reads = vi.mocked(getExcelBPSDefaults).mock.calls.length
+    await wrapper.setProps({ account: { ...account, extra: updateAccountMock.mock.calls[0]?.[1]?.extra } })
+    expect(wrapper.get('[data-testid="excel-bps-defaults-toggle"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.get('[data-testid="excel-bps-toggle"]').attributes('aria-checked')).toBe('false')
+    expect(getExcelBPSDefaults).toHaveBeenCalledTimes(reads)
+  })
+
+  it('preserves saved account settings when opening and explicitly reapplies defaults on request', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { openai_excel_bps: true, openai_excel_bps_models: ['legacy-model'] }
+    vi.mocked(getExcelBPSDefaults).mockClear().mockResolvedValueOnce(defaultExcelBPSDefaults())
+    const wrapper = mountModal(account)
+    expect(getExcelBPSDefaults).not.toHaveBeenCalled()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-ignore-encrypted-content"]').element.checked).toBe(false)
+    await wrapper.get('[data-testid="excel-bps-defaults-toggle"]').trigger('click'); await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-ignore-encrypted-content"]').element.checked).toBe(true)
   })
 })
