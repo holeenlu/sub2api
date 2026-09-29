@@ -11,7 +11,7 @@ import (
 )
 
 func priorityCandidate(id int64, rate float64, load int) openAIAccountCandidateScore {
-	return openAIAccountCandidateScore{account: &Account{ID: id, Name: "test", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, RateMultiplier: &rate, Concurrency: 10}, loadKnown: true, loadInfo: &AccountLoadInfo{AccountID: id, LoadRate: load, CurrentConcurrency: load / 10}}
+	return openAIAccountCandidateScore{account: &Account{ID: id, Name: "test", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, RateMultiplier: &rate, Extra: map[string]any{AccountCostMultiplierExtraKey: rate}, Concurrency: 10}, loadKnown: true, loadInfo: &AccountLoadInfo{AccountID: id, LoadRate: load, CurrentConcurrency: load / 10}}
 }
 func TestPriorityScoringExperienceAndCost(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
@@ -262,22 +262,23 @@ func TestPriorityOAuthProfitUsesUserChargeAndTheoreticalCost(t *testing.T) {
 	c.Mode = "profit"
 	a := priorityCandidate(1, 0.001, 0)
 	a.account.Type = AccountTypeOAuth
-	signal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualityPassed: 10, QualitySamples: 10, ProfitSamples: 10, Revenue: 10, TheoreticalCost: 6}
+	a.account.Extra[AccountCostMultiplierExtraKey] = 0.1
+	signal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualityPassed: 10, QualitySamples: 10, ProfitSamples: 10, Revenue: 10, BaseCost: 60}
 	score := scorePriorityCandidate(c, a, signal, time.Now())
 	require.Equal(t, "usage", score.EconomicsSource)
-	require.Equal(t, 4.0, *score.Profit)
+	require.InDelta(t, 4.0, *score.Profit, 1e-12)
 	require.InDelta(t, 0.4, *score.Margin, 0.0001)
 	differentRate := 10.0
 	a.account.RateMultiplier = &differentRate
 	require.Equal(t, score.Score, scorePriorityCandidate(c, a, signal, time.Now()).Score, "OAuth profit must not be inferred from current account multiplier")
-	signal.TheoreticalCost = 12
+	signal.BaseCost = 120
 	loss := scorePriorityCandidate(c, a, signal, time.Now())
-	require.Equal(t, -2.0, *loss.Profit)
+	require.InDelta(t, -2.0, *loss.Profit, 1e-12)
 	require.Equal(t, "degraded", loss.Tier)
 	signal.Revenue = 0
 	zero := scorePriorityCandidate(c, a, signal, time.Now())
 	require.Nil(t, zero.Margin)
-	require.Equal(t, -12.0, *zero.Profit)
+	require.InDelta(t, -12.0, *zero.Profit, 1e-12)
 	require.False(t, math.IsNaN(zero.Score))
 	signal.ProfitSamples = 0
 	unknown := scorePriorityCandidate(c, a, signal, time.Now())
