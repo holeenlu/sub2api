@@ -26,5 +26,16 @@ export default {
   "notice": "暫停規則不會關閉帳號目前已啟用的 BPS。",
   "accounts": "開啟帳號管理",
   "saved": "已儲存",
-  "queued": "已排隊，等待排程器執行"
+  "queued": "已排隊，等待排程器執行",
+  "selectAll": "全選目前列表",
+  "selected": "已選 {count} 條",
+  "selectRule": "選擇規則 #{id}",
+  "delete": "刪除",
+  "bulkDelete": "刪除所選規則",
+  "deleteTitle": "刪除 {count} 條規則",
+  "deleteConfirm": "刪除所選 {count} 條規則及其探測記錄？帳號目前 BPS 設定不會改變；如需關閉 BPS，請在帳號設定中修改。",
+  "deleting": "正在刪除…",
+  "deleted": "已刪除 {count} 條規則。",
+  "deletePartial": "已刪除 {deleted} 筆，失敗 {failed} 筆。重試僅刪除下列失敗規則。",
+  "deleteProgress": "已處理 {completed} / {total} 條規則"
 }

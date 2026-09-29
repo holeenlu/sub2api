@@ -24,5 +24,16 @@ export default {
   "notice": "Pausing a rule leaves current BPS settings unchanged.",
   "accounts": "Open account management",
   "saved": "Saved",
-  "queued": "Probe queued for the scheduler"
+  "queued": "Probe queued for the scheduler",
+  "selectAll": "Select all listed rules",
+  "selected": "Selected: {count}",
+  "selectRule": "Select rule #{id}",
+  "delete": "Delete",
+  "bulkDelete": "Delete selected rules",
+  "deleteTitle": "Delete {count} rules",
+  "deleteConfirm": "Delete the {count} selected rules and their probe history? Current account BPS settings will stay unchanged. To turn BPS off, edit the account settings.",
+  "deleting": "Deleting…",
+  "deleted": "Deleted {count} rules.",
+  "deletePartial": "Deleted {deleted} rules; {failed} failed. Retry only deletes the failed rules listed below.",
+  "deleteProgress": "Processed {completed} of {total} rules"
 }
