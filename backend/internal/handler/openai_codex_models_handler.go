@@ -32,6 +32,14 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex models manifest is only available for OpenAI and Composite groups")
 		return
 	}
+	if apiKey.ConcurrencyLimit > 0 {
+		release, err := h.concurrencyHelper.AcquireAPIKeySlot(c.Request.Context(), apiKey.ID, apiKey.ConcurrencyLimit)
+		if err != nil {
+			h.handleConcurrencyError(c, err, "API key", false)
+			return
+		}
+		defer release()
+	}
 
 	if manifest, handled, err := h.gatewayService.PublishedCodexCatalog(c.Request.Context(), apiKey.Group); handled {
 		if err != nil {
