@@ -56,7 +56,7 @@ supports_websockets = false
 
 同じターミナルで `codex` を実行します。WebSockets を無効にすると HTTP/SSE の開始点になりますが、ゲートウェイに WebSocket のルートがないという意味ではありません。
 
-OpenAI グループでは、異なる形式が生成されます。プロバイダー ID `OpenAI`、メインモデルとレビューモデル、`[features]` が含まれます。モデルカタログは手動取得後に追加できる任意の設定です。デフォルトの **Legacy** モードでは `config.toml` と `auth.json` がダウンロードされ、`requires_openai_auth = true` が設定されます。一方、**API key** モードでは `requires_openai_auth = false` と `experimental_bearer_token` が設定されます。切り替え後は Codex を完全に再起動してください。2 つのモードを組み合わせたり、ルーティングされた `tapmodels` プロバイダーテーブルを OpenAI グループの `OpenAI` プロバイダーにマージしたりしないでください。
+OpenAI グループでは、異なる形式が生成されます。プロバイダー ID `OpenAI`、メインモデルとレビューモデル、`[features]`、デフォルトのモデルカタログのパスが含まれます。初回利用前にカタログを取得して保存してください。デフォルトの **Legacy** モードでは `config.toml` と `auth.json` がダウンロードされ、`requires_openai_auth = true` が設定されます。一方、**API key** モードでは `requires_openai_auth = false` と `experimental_bearer_token` が設定されます。切り替え後は Codex を完全に再起動してください。2 つのモードを組み合わせたり、ルーティングされた `tapmodels` プロバイダーテーブルを OpenAI グループの `OpenAI` プロバイダーにマージしたりしないでください。
 
 ## デスクトップ: キーを利用可能にする
 
