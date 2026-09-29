@@ -165,3 +165,13 @@
 同时按 ranxi2001 PR #219（合并提交 `b35f3d15e31ab82021279370002ff5346ca7a4dc`，变更头 `8ea71d7c7f1d0f6e54aace2f7d1cbda70a7e7c48`）适配 OAuth 初始模型映射。源 PR 依赖本项目已退役的整套通用自动账号配置，因此本地只引入其模型规则、校验、显式规则优先和凭据隔离语义，没有恢复自动并发、质量规则、分组调度或账号运维子系统。
 
 管理员入口位于“自动 BPS”页面的“新建 OpenAI OAuth 模型映射”卡片，对应 `GET/PUT /api/v1/admin/settings/oauth-initial-model-mappings`，设置键为 `oauth_initial_model_mappings`。开关默认关闭；打开后只作用于新建 OpenAI OAuth 账号，API Key、重新认证和既有账号不受影响，已有 `model_mapping` 项优先，规则上限 100 条，源模型最多允许末尾通配符。删除全部规则表示不自动添加映射。当前未把本地 CRS 同步改造成源 PR 的自动配置入口，避免恢复已退役的通用自动配置依赖。
+
+### 2026-09-29：#220–#222 BPS 链路增量
+
+继续同步 ranxi2001 的三个 BPS 修复：
+
+- PR #220，合并提交 `31d4cabc1fab5cf4cbe8eec05e1b5663d7ca049f`：在输入校验和历史翻译完成后，用户消息、历史附件及从工具输出移入的 `file_id` 图片只向 BPS 发送 `type` 与 `file_id`；HTTPS 图片和工具截图仍保留原有字段。不会在校验前清理字段，也不会修改调用方持有的历史对象。
+- PR #221，合并提交 `f364254c35a3c1b2a3001644a8bac3d2781cbaa9`：新增 BPS 流内失败分类，按鉴权、权限、限流、请求参数、上游服务和取消状态生成安全错误码；显式上游状态优先于错误码推断，运维记录保留真实 HTTP 状态，已接受的生成不会因分类而重放。
+- PR #222，合并提交 `8d19508a6deff99f2ef8c58c7c6393d318c5a5e3`：保留本地代理池错误的 typed sentinel 和调度健康隔离，使未来的托管代理获取失败不处罚账号。源 PR 中依赖 Mihomo 池的获取、切换和重试路径继续排除，符合本项目“不引入 Mihomo”的既定范围；当前普通账号代理路径不会伪造该错误。
+
+上述适配均保留源作者和 `cherry-pick -x` 记录；图片路径、流内分类和调度错误隔离分别覆盖 `backend/internal/service/basispoints`、`openai_excel_bps.go` 与 `openai_account_scheduler.go`，未恢复源项目的 Mihomo 管理页面或代理子系统。
