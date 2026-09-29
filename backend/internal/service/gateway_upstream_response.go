@@ -728,7 +728,7 @@ func FlushGatewayResponse(w gin.ResponseWriter) error {
 
 func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, mimicClaudeCode bool) (*streamingResult, error) {
 	// Stop the upstream read as soon as forwarding ends, including silent upstreams.
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)

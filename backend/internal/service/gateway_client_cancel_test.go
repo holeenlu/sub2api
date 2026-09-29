@@ -27,7 +27,7 @@ func TestClaudeClientCancelSilentStream(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest("POST", "/v1/messages", nil).WithContext(ctx)
 	pr, pw := io.Pipe()
-	defer pw.Close()
+	defer func() { _ = pw.Close() }()
 	watchdog := time.AfterFunc(3*time.Second, func() { _ = pw.CloseWithError(io.ErrUnexpectedEOF) })
 	defer watchdog.Stop()
 	finished := make(chan struct{})
@@ -96,7 +96,7 @@ func TestClaudeClientCancelWriteOrFlushPreservesCurrentUsage(t *testing.T) {
 			}
 			c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
 			pr, pw := io.Pipe()
-			defer pw.Close()
+			defer func() { _ = pw.Close() }()
 			watchdog := time.AfterFunc(3*time.Second, func() { _ = pw.CloseWithError(io.ErrUnexpectedEOF) })
 			defer watchdog.Stop()
 			producer := make(chan error, 1)
@@ -133,7 +133,7 @@ func TestClaudeClientCancelKeepaliveFlush(t *testing.T) {
 	c, _ := gin.CreateTestContext(&claudeFlushFailure{httptest.NewRecorder()})
 	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
 	pr, pw := io.Pipe()
-	defer pw.Close()
+	defer func() { _ = pw.Close() }()
 	watchdog := time.AfterFunc(3*time.Second, func() { _ = pw.CloseWithError(io.ErrUnexpectedEOF) })
 	defer watchdog.Stop()
 	svc := newStreamingResponseTestGatewayService()
@@ -172,7 +172,9 @@ func TestClaudeClientCancelForwardStopsActualHTTPAndDoesNotRetry(t *testing.T) {
 				if sendUsage {
 					w.Header().Set("Content-Type", "text/event-stream")
 					_, _ = io.WriteString(w, "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":11,\"cache_read_input_tokens\":7,\"output_tokens\":2}}}\n\n")
-					w.(http.Flusher).Flush()
+					if err := http.NewResponseController(w).Flush(); err != nil {
+						t.Errorf("flush synthetic upstream usage: %v", err)
+					}
 				}
 				close(started)
 				select {
