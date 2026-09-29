@@ -72,3 +72,12 @@ independently implemented using the existing native image validation and
 request-scoped bridge; no source files were copied. The cited official
 frontend asset could not be fetched from this development environment, and
 no authenticated upstream visual acceptance test is claimed.
+
+## 2026-09-29 message attachment references
+
+Behavioral reference: JaxsonWang/cpa-plugin-oai-basispoints v0.2.4, commit
+08e349cf20d12d721fd704c40654253f3db8a3b3, for the BPS message attachment
+contract: input_image file references contain only type and file_id. This is
+implemented independently at Sub2API's existing translated-history boundary
+after input validation; HTTPS image URLs and tool screenshot payloads retain
+their existing behavior. No source files or CPA plugin ABI were copied.
