@@ -1092,6 +1092,19 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 	}
 
 	s.applyPriorityScheduling(req, &plan)
+	// Keep overflow candidates without imposing a new BPS-first ranking. All
+	// eligibility filters and explicit subscription/priority policies still apply.
+	if NormalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI && req.RequiredImageCapability == "" {
+		hasBPS, hasNative := false, false
+		for _, candidate := range candidates {
+			if candidate.account.IsExcelBPSEnabledForModel(req.RequestedModel) {
+				hasBPS = true
+			} else {
+				hasNative = true
+			}
+		}
+		plan.includeOverflowFallback = plan.includeOverflowFallback || (hasBPS && hasNative)
+	}
 	plan.selectionOrder = s.buildOpenAISelectionOrder(req, plan)
 	return plan
 }

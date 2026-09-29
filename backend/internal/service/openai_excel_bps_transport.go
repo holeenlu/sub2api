@@ -35,6 +35,10 @@ func (s *OpenAIGatewayService) doExcelBPSSend(ctx context.Context, c *gin.Contex
 
 // Retain sanitized diagnostics for the existing account proxy transport.
 func recordExcelBPSTransportFailure(ctx context.Context, c *gin.Context, account *Account, scope string, err error, stage string, attempt int, retry bool, evidence ...*transportdiag.Trace) {
+	recordExcelBPSTransportFailureAt(ctx, c, account, scope, basispoints.ResponsesURL, err, stage, attempt, retry, evidence...)
+}
+
+func recordExcelBPSTransportFailureAt(ctx context.Context, c *gin.Context, account *Account, scope, upstreamURL string, err error, stage string, attempt int, retry bool, evidence ...*transportdiag.Trace) {
 	if isExcelBPSClientCancellation(c, err) {
 		logger.FromContext(ctx).Info("excel_bps.client_canceled",
 			zap.Int64("account_id", account.ID), zap.String("stage", stage))
@@ -58,7 +62,7 @@ func recordExcelBPSTransportFailure(ctx context.Context, c *gin.Context, account
 	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform: account.Platform, AccountID: account.ID,
-		UpstreamURL: basispoints.ResponsesURL, Kind: "request_error", Stage: stage,
+		UpstreamURL: upstreamURL, Kind: "request_error", Stage: stage,
 		Scope: "excel_bps", Reason: kind, Message: message, Detail: string(detail),
 	})
 	logger.FromContext(ctx).Warn("excel_bps.transport_failed",

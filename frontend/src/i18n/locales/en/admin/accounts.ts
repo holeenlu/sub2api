@@ -672,7 +672,7 @@ export default {
         excelBPSAllModels: 'Enable for all models (legacy behavior)',
         excelBPSModels: 'Select models for Excel / BPS',
         excelBPSAstraOnly: 'Astra only',
-        excelBPSModelsHint: 'Matches model names after account mapping. Selected models use Excel / BPS; other models retain their Codex, WS and passthrough settings. An empty selection disables BPS routing.',
+        excelBPSModelsHint: 'Matches model names after account mapping. Selected models use Excel / BPS; other models retain their Codex, WS and passthrough settings. An empty selection disables BPS routing. Explicitly selecting gpt-image-2 also enables BPS for non-streaming PNG generation and single-image edits without masks. Unsupported options stay on Codex; only explicit request-format rejections allow fallback. Authentication, network and server failures are not replayed. Other image models and legacy all-model routing do not enable BPS images.',
         excelBPSNotice: "Start a new conversation after saving. Selected models use HTTP/SSE. Supports Responses, client tools and HTTPS images. Enable base64 images and tool screenshots in system image settings. max / ultra use xhigh. Model access depends on upstream permissions.",
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',

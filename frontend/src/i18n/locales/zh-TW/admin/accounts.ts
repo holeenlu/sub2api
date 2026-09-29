@@ -792,7 +792,7 @@ export default {
         excelBPSAllModels: '對所有模型啟用（相容原設定）',
         excelBPSModels: '勾選使用 Excel / BPS 的模型',
         excelBPSAstraOnly: '僅選 Astra',
-        excelBPSModelsHint: '按帳號對應後的模型名稱匹配。僅勾選模型走 Excel / BPS；未選模型保留原 Codex、WS 和自動透傳設定。不勾選任何模型時不使用 BPS。',
+        excelBPSModelsHint: '按帳號對應後的模型名稱匹配。僅勾選模型走 Excel / BPS；未選模型保留原 Codex、WS 和自動透傳設定。不勾選任何模型時不使用 BPS。顯式勾選 gpt-image-2 後，非串流 PNG 文生圖和無蒙版單圖編輯也走 BPS。不支援的參數預先走 Codex；僅明確的請求格式拒絕允許回退，驗證、網路及伺服器錯誤不重放。其他生圖模型和「對所有模型啟用」不會開啟 BPS 生圖。',
         excelBPSNotice: "儲存後請新建工作階段。選定模型使用 HTTP/SSE，支援 Responses、用戶端工具和 HTTPS 圖片；Base64 圖片和工具截圖需在系統圖片設定中啟用。max / ultra 轉為 xhigh。模型是否可用由上游權限決定。",
         oauthPassthroughDesc:
           '開啟後，該 OpenAI 帳號將自動透傳請求與回應，僅替換驗證並保留計費/並行/稽核及必要安全過濾；如遇相容性問題可隨時關閉回滾。',
