@@ -14,7 +14,7 @@ class DeliveryReviewTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.repo = Path(self.temp.name)
-        self.git('init', '-q', '-b', 'KDAN')
+        self.git('init', '-q', '-b', 'main')
         self.git('config', 'user.email', 'test@example.invalid')
         self.git('config', 'user.name', 'Test')
         (self.repo / 'shared.txt').write_text('baseline\n')
@@ -27,26 +27,26 @@ class DeliveryReviewTest(unittest.TestCase):
     def test_brand_checkout_does_not_assign_scope(self):
         (self.repo / 'shared.txt').write_text('changed\n')
         result = delivery.review(self.repo)
-        self.assertEqual(result['current_branch'], 'KDAN')
+        self.assertEqual(result['current_branch'], 'main')
         self.assertEqual(result['scope'], 'unclassified')
         self.assertEqual(result['targets'], [])
 
-    def test_shared_targets_start_at_kdan_and_propagate_tapmodels(self):
+    def test_shared_targets_start_at_main_and_propagate_tapmodels(self):
         (self.repo / 'shared.txt').write_text('changed\n')
         result = delivery.review(self.repo, 'shared')
         self.assertEqual([t['push_command'] for t in result['targets']], [
-            'git push origin refs/heads/KDAN:refs/heads/KDAN',
+            'git push origin refs/heads/main:refs/heads/main',
             'git push origin refs/heads/TapModels:refs/heads/TapModels',
             'git push erwinlin refs/heads/TapModels:refs/heads/main',
         ])
 
-    def test_public_target_is_compatibility_branch_only(self):
+    def test_main_target_is_kdan_delivery_branch(self):
         self.git('config', 'push.default', 'upstream')
         (self.repo / 'shared.txt').write_text('changed\n')
         before = self.git('status', '--porcelain')
-        result = delivery.review(self.repo, 'public')
+        result = delivery.review(self.repo, 'main')
         self.assertEqual([t['push_command'] for t in result['targets']], [
-            'git push origin refs/heads/holeen/main:refs/heads/main',
+            'git push origin refs/heads/main:refs/heads/main',
         ])
         self.assertEqual(self.git('status', '--porcelain'), before)
         self.assertEqual(self.git('log', '--format=%s', '-1'), 'baseline')

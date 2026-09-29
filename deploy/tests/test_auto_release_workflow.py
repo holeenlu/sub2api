@@ -32,11 +32,11 @@ class ManualReleaseWorkflowTests(unittest.TestCase):
                     "github.event_name == 'workflow_dispatch'",
                 )
 
-    def test_manual_channel_selection_preserves_public_and_brand_targets(self):
+    def test_manual_channel_selection_preserves_brand_targets(self):
         config = json.loads((ROOT / 'scripts/release/channels.json').read_text())
         cases = [
-            ('holeenlu/sub2api', 'main', 'sub2api'),
-            ('holeenlu/sub2api', 'KDAN', 'kdan'),
+            ('holeenlu/sub2api', 'main', 'kdan'),
+            ('holeenlu/sub2api', 'KDAN', ''),
             ('erwinlin/TapModels', 'main', 'tapmodels'),
             ('holeenlu/sub2api', 'TapModels', ''),
             ('holeenlu/sub2api', 'feature/example', ''),

@@ -2,28 +2,28 @@
 
 ## 私有仓库与分支边界
 
-公共集成仓库 `holeenlu/sub2api` 已转为私有独立仓库，脱离 GitHub Fork 网络。
+KDAN 品牌仓库 `holeenlu/sub2api` 独立维护，脱离 GitHub Fork 网络。
 它仍通过保留的 Git 历史同步公开 `Wei-Shaw/sub2api`。
 详见[私有仓库同步说明](PRIVATE_REPOSITORY_SYNC.md)。
 
-- 公共代码：本地 `holeen/main` → `origin/main`。
-- 品牌代码：本地 `KDAN` → `origin/KDAN`，不覆盖公共 main。
+- KDAN 品牌主分支：本地 `main` → `origin/main`。
+- TapModels 品牌分支：本地 `TapModels` → `origin/TapModels` 与 `erwinlin/main`。
 - 同步入口：`deploy/sync-upstream.sh`，普通 merge 并保留原 SHA；检查点位于 `.release/upstream-sync/<id>/state.json`。
 - 推送、部署按该次明确授权分别执行；旧 `deploy/sync.sh` 已退役。
-- 不向公共 main 合入品牌提交，也不向公开 upstream 推送私有代码。
+- 不再维护独立 KDAN 或公共分支，也不向公开 upstream 推送私有代码。
 
 ## 工作流
 
 | 工作流 | 触发与发布目标 |
 | --- | --- |
-| `kdan-ci.yml` | push/PR 到 `KDAN` |
-| `kdan-docker-image.yml` | push `KDAN`、数字版本 tag、手动触发；仅在品牌发布仓库推镜像 |
-| 上游监看 | 每日公共监看位于 origin/main；KDAN 专属监看只保留手动入口，checkout KDAN |
+| `kdan-ci.yml` | push/PR 到 `main` |
+| `kdan-docker-image.yml` | push `main`、数字版本 tag、手动触发；仅在品牌发布仓库推镜像 |
+| 上游监看 | 每日比较 main 与官方 upstream；TapModels 传播保留手动入口 |
 
 CI 包含后端单元测试、生成代码检查、前端 lint/typecheck/测试/构建和繁中同步检查。
 监看只更新追踪 issue，不合并、不推送、不部署。
 定时和手动触发要求工作流已在默认分支注册；品牌分支 push 不依赖 Fork 网络。
-公共 `project-ci.yml`、`upstream-sync-watch.yml` 须先发布到 `origin/main`。
+`project-ci.yml`、`upstream-sync-watch.yml` 须先发布到 `origin/main`。
 不要假设新私有仓库已停用继承的上游工作流，须核对 Actions 设置。
 
 ## 镜像与发版
@@ -38,15 +38,15 @@ Compose 和版本界面统一使用 `ghcr.io/holeenlu/kdan`。
 带 build metadata 的版本将镜像 tag 中的 `+` 转为 `_`，Release 保留原始版本名。
 生产通过 `KDAN_IMAGE` 固定 release tag 或 digest，不应把分支推送当成 latest 更新。
 
-仅从已审查的品牌提交创建版本：
+仅从已审查的 KDAN 品牌提交创建版本：
 ```bash
-git switch KDAN
+git switch main
 git tag -a 1.0.0 -m "KDAN 1.0.0"
 git push origin refs/tags/1.0.0
 ```
 
-数字版本 tag 属于其发布仓库对应的品牌。KDAN tag 从 KDAN 分支推到 `origin`，
-品牌分支仍发布到 `origin/KDAN`。上游 `v*` tag 仅用于基线溯源，不是私有品牌发版。
+数字版本 tag 属于其发布仓库对应的品牌。KDAN tag 从 main 分支推到 `origin`，
+TapModels 版本从 `erwinlin/main` 发布。上游 `v*` tag 仅用于基线溯源，不是私有品牌发版。
 CI 不自动部署生产。
 
 ## 徽章中的编译提交
