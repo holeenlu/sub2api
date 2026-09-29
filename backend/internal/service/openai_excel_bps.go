@@ -410,15 +410,10 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 				status = http.StatusServiceUnavailable
 			}
 			if status == http.StatusTooManyRequests && uploadError != nil {
-				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-					Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
-					ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
-					UpstreamStatusCode: status, UpstreamURL: basispoints.AttachmentsURL, Kind: "failover",
-					Message: "Excel BPS attachment upload was rate limited",
-				})
+				recordExcelBPSAttachmentFailure(ctx, c, account, err, true)
 				return failoverRateLimited(uploadError.retryAfter)
 			}
-			setOpsUpstreamError(c, status, "Excel BPS attachment upload failed", "")
+			recordExcelBPSAttachmentFailure(ctx, c, account, err, false)
 			if status == http.StatusUnauthorized {
 				return fail(status, code, "Excel BPS attachment authentication failed; request was not replayed")
 			}
