@@ -1,3 +1,7 @@
+import { getExcelBPSDefaults } from '@/api/admin/excelBPSDefaults'
+import { defaultExcelBPSDefaults } from '@/utils/excelBPSDefaults'
+vi.mock('@/api/admin/excelBPSDefaults', () => ({ getExcelBPSDefaults: vi.fn() }))
+beforeEach(() => { vi.mocked(getExcelBPSDefaults).mockResolvedValue(defaultExcelBPSDefaults()) })
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
@@ -23,6 +27,7 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
+    user: { id: 1, role: 'admin' },
     get isSimpleMode() {
       return authIsSimpleMode.value
     }
@@ -137,6 +142,7 @@ describe('BulkEditAccountModal', () => {
   describe('Excel / BPS bulk settings', () => {
     const oauthProps = { selectedPlatforms: ['openai'], selectedTypes: ['oauth'] }
     const defaultExtra = {
+      openai_excel_bps_config_mode: 'initial',
       openai_excel_bps: true,
       openai_excel_bps_models: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'],
       openai_excel_bps_cache_creation_as_input: false,
@@ -272,6 +278,7 @@ describe('BulkEditAccountModal', () => {
       expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
         extra: {
           ...defaultExtra,
+          openai_excel_bps_config_mode: null,
           openai_excel_bps: false,
           openai_excel_bps_models: null
         }
@@ -1371,5 +1378,20 @@ describe('BulkEditAccountModal', () => {
         codex_cli_only: true
       }
     })
+  })
+})
+
+describe('bulk BPS defaults integration', () => {
+  it('applies saved default selections when enabling the bulk BPS edit', async () => {
+    vi.mocked(getExcelBPSDefaults).mockResolvedValueOnce(defaultExcelBPSDefaults())
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('#bulk-edit-excel-bps-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-excel-bps-defaults-toggle"]').trigger('click'); await flushPromises()
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent'); await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], expect.objectContaining({ extra: expect.objectContaining({
+      openai_excel_bps: true, openai_excel_bps_ignore_encrypted_content: true,
+      openai_excel_bps_auto_disable_on_403: true, openai_excel_bps_cache_creation_as_input: true
+    }) }))
+    wrapper.unmount()
   })
 })

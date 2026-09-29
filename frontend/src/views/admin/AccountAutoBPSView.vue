@@ -5,6 +5,7 @@
       <header><h1 class="text-2xl font-bold">{{ t('autoBPSOps.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('autoBPSOps.hint') }}</p></header>
       <RouterLink to="/admin/accounts" class="text-primary-600">{{ t('autoBPSOps.accounts') }}</RouterLink>
       <p v-if="error" role="alert" class="text-red-600">{{ error }}</p><p v-if="notice" role="status" class="text-emerald-600">{{ notice }}</p>
+      <BPSDefaultsPanel v-if="auth.user?.role === 'admin'" :key="auth.user.id" :groups="templateGroups" />
       <section class="card p-5">
         <header class="flex justify-between"><h2 class="font-semibold">{{ t('autoBPSOps.rules') }}</h2><button class="btn btn-secondary" :disabled="busy" @click="refresh">{{ t('autoBPSOps.refresh') }}</button></header>
         <p class="my-3 text-sm text-gray-500">{{ t('autoBPSOps.notice') }}</p>
@@ -47,6 +48,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import SmartOpsNav from '@/components/admin/operations/SmartOpsNav.vue'
 import QualityBPSSettings from '@/components/admin/operations/QualityBPSSettings.vue'
+import BPSDefaultsPanel from '@/components/admin/operations/BPSDefaultsPanel.vue'
 import QualityProbeSchedule from '@/components/admin/operations/QualityProbeSchedule.vue'
 import { apiClient } from '@/api/client'
 import { adminAPI } from '@/api/admin'
@@ -61,6 +63,7 @@ const detailText = ref<Record<number, string>>({})
 const busy = ref(false), error = ref(''), notice = ref(''), editing = ref<ScheduledTestPlan | null>(null)
 const bps = ref(defaultQualityBPS()), autoRestore = ref(true), model = ref(''), cron = ref('')
 const groups = ref<{ id: number; name: string }[]>([])
+const templateGroups = ref<{ id: number; name: string; platform: string }[]>([])
 const selectedRuleIds = ref<number[]>([]), deleteTargets = ref<ScheduledTestPlan[]>([])
 const deleting = ref(false), deleteError = ref(''), deleteProgress = ref('')
 const deletedPlanIds = new Set<number>()
@@ -168,13 +171,17 @@ async function confirmDelete() {
 }
 watch(() => [auth.user?.id, auth.user?.role], () => {
   generation++
-  plans.value = []; history.value = []; cursor.value = 0; groups.value = []; detailText.value = {}
+  plans.value = []; history.value = []; cursor.value = 0; groups.value = []; templateGroups.value = []; detailText.value = {}
   selectedRuleIds.value = []; deleteTargets.value = []; editing.value = null; deletedPlanIds.clear()
   error.value = notice.value = deleteError.value = deleteProgress.value = ''; busy.value = deleting.value = false
 }, { flush: 'sync' })
 onBeforeUnmount(() => { alive = false; generation++ })
 onMounted(async () => {
   const version = generation
-  await perform(async () => { await Promise.all([loadPlans(), loadHistory(), adminAPI.groups.getAll().then(data => { if (active(version)) groups.value = data.filter(g => g.platform === 'openai') })]) })
+  await perform(async () => { await Promise.all([loadPlans(), loadHistory(), adminAPI.groups.getAll().then(data => {
+    if (!active(version)) return
+    groups.value = data.filter(g => g.platform === 'openai')
+    templateGroups.value = data.filter(g => g.platform === 'openai' || g.platform === 'composite')
+  })]) })
 })
 </script>

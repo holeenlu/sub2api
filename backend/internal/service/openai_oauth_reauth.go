@@ -767,7 +767,7 @@ func directReauthTokenInfo(credentials, workerExtra map[string]any) (*OpenAIToke
 		info.ChatGPTAccountID = userInfo.ChatGPTAccountID
 		info.ChatGPTUserID = userInfo.ChatGPTUserID
 		info.OrganizationID = userInfo.OrganizationID
-		info.PlanType = userInfo.PlanType
+		info.PlanType = strings.TrimSpace(userInfo.PlanType)
 	}
 	if value := reauthMapString(workerExtra, "privacy_mode"); value != "" {
 		info.PrivacyMode = value
@@ -836,6 +836,11 @@ func (s *OpenAIOAuthReauthService) applyReauthTokenInfo(ctx context.Context, rec
 		if _, exists := extra[key]; !exists {
 			extra[key] = value
 		}
+	}
+	// A newly confirmed Free plan cannot keep the old BPS enable flag. Apply
+	// the downgrade through the existing credential/extra CAS transaction.
+	if strings.EqualFold(strings.TrimSpace(tokenInfo.PlanType), "free") {
+		extra["openai_excel_bps"] = false
 	}
 	if err := s.repo.UpdateStage(ctx, taskID, record.WorkerID, OpenAIOAuthReauthStageApplyingCredentials); err != nil {
 		return s.failCallback(ctx, taskID, "re-login task state changed unexpectedly", err)

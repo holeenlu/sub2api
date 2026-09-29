@@ -628,6 +628,8 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        wsSseAcceleration: "OAuth WS → SSE アクセラレーション",
+        wsSseAccelerationDesc: "通常の OAuth アカウントで明示的に有効化すると、対応する HTTP ストリーミング応答に既存の WebSocket 接続プールを使います。送信前の接続失敗のみ HTTP にフォールバックし、送信後は再実行しません。",
         autoBPS: 'Enable BPS automatically when degraded',
         autoBPSDesc: 'Checks at the configured interval (every 2 minutes for new rules) over the normal protocol, never BPS. The probe is only a heuristic; matching conditions enable BPS with the selected options. Network errors or incomplete results leave the account unchanged. Manage records on the Auto BPS page.',
         autoBPSLoading: 'Loading this account’s auto-BPS rule…',

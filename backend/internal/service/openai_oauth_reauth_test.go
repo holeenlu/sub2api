@@ -188,6 +188,7 @@ type reauthTestUpdater struct {
 	repo        *reauthTestRepo
 	applied     bool
 	credentials map[string]any
+	extra       map[string]any
 }
 
 type reauthTestRuntimeBlocker struct {
@@ -199,12 +200,13 @@ func (b *reauthTestRuntimeBlocker) ClearAccountSchedulingBlock(accountID int64) 
 	b.clearedAccountID = accountID
 }
 
-func (u *reauthTestUpdater) ApplyOpenAIOAuthReauth(_ context.Context, taskID int64, workerID string, accountID int64, _ map[string]any, credentials, _ map[string]any) (bool, error) {
+func (u *reauthTestUpdater) ApplyOpenAIOAuthReauth(_ context.Context, taskID int64, workerID string, accountID int64, _ map[string]any, credentials, extra map[string]any) (bool, error) {
 	if u.repo.task == nil || u.repo.task.ID != taskID || u.repo.task.AccountID != accountID || u.repo.task.WorkerID != workerID || u.repo.task.Status != OpenAIOAuthReauthStatusCallbackProcessing {
 		return false, nil
 	}
 	u.applied = true
 	u.credentials = cloneReauthMap(credentials)
+	u.extra = cloneReauthMap(extra)
 	u.repo.task.Status = OpenAIOAuthReauthStatusSucceeded
 	u.repo.task.Stage = OpenAIOAuthReauthStageSucceeded
 	return true, nil
@@ -652,4 +654,41 @@ func cloneReauthMap(source map[string]any) map[string]any {
 		clone[key] = value
 	}
 	return clone
+}
+
+func TestOpenAIOAuthReauthPlanRefreshAndBPSDowngrade(t *testing.T) {
+	for _, plan := range []string{"free", " Free ", "plus", ""} {
+		t.Run(plan, func(t *testing.T) {
+			svc, reader, repo, updater, _, _ := newReauthTestService("acct-1")
+			reader.account.Credentials["plan_type"] = "team"
+			reader.account.Extra = map[string]any{"openai_excel_bps": true, "unrelated": "keep"}
+			savePasswordReauthConfig(t, svc)
+			_, err := svc.CreateTask(context.Background(), 42)
+			require.NoError(t, err)
+			claim, err := svc.ClaimTask(context.Background(), "worker-a")
+			require.NoError(t, err)
+			credentials := directReauthCredentials("acct-1", "user-1", "user@example.com")
+			credentials["plan_type"] = "stale-provider-plan"
+			credentials["id_token"] = reauthTestJWT(map[string]any{
+				"email": "user@example.com", "sid": "acct-1", "exp": time.Now().Add(time.Hour).Unix(),
+				"https://api.openai.com/auth": map[string]any{"user_id": "user-1", "chatgpt_plan_type": plan},
+			})
+			_, err = svc.SubmitCredentials(context.Background(), claim.TaskID, "worker-a", credentials, nil)
+			require.NoError(t, err)
+			require.Equal(t, OpenAIOAuthReauthStatusSucceeded, repo.task.Status)
+			require.True(t, updater.applied)
+			if strings.TrimSpace(plan) == "" {
+				require.Equal(t, "team", updater.credentials["plan_type"], "unknown plan preserves the old value")
+			} else {
+				require.Equal(t, strings.TrimSpace(plan), updater.credentials["plan_type"])
+			}
+			if strings.EqualFold(strings.TrimSpace(plan), "free") {
+				require.Equal(t, false, updater.extra["openai_excel_bps"])
+			} else {
+				require.NotContains(t, updater.extra, "openai_excel_bps")
+			}
+			require.Equal(t, true, reader.account.Extra["openai_excel_bps"], "do not mutate the shared snapshot")
+			require.NotContains(t, updater.extra, "unrelated", "merge only the changed field in the existing CAS")
+		})
+	}
 }

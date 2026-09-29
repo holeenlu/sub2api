@@ -39,7 +39,7 @@ export default {
           bodyLimit: '請求體上限 (MiB)',
           budget: '共享資源預算 (MiB)',
           maxRequests: '最大在途請求數',
-          budgetHint: '共享預算至少為請求體上限的 8 倍. 實際預算取此值與在途上限 × 8 MiB 的較大值; 512 槽對應至少 4096 MiB 預算, 不等於實際記憶體佔用. 預設在途 128、預算 1024 MiB, 範圍 1–512, 儲存後立即生效.',
+          budgetHint: '共享預算至少為請求體上限的 8 倍. 實際預算取此值與在途上限 × 8 MiB 的較大值; 512 槽對應至少 4096 MiB 預算, 不等於實際記憶體佔用. 預設在途 128、預算 1024 MiB, 範圍 1–{requests}，儲存後立即生效。大請求還受 server.max_request_body_size、gateway.max_body_size 和反向代理限制；提高設定不會預分配資源，請按伺服器記憶體與磁碟容量設定。',
           requestLimitsTitle: '請求接入限制',
           imageLimitsTitle: '圖片轉換與暫存限制',
           limitRange: '範圍：1–{max}',
@@ -53,7 +53,7 @@ export default {
           retentionHint: '支援 PNG、JPEG、GIF 和 WebP，單張仍受 64 百萬畫素保護。圖片數量和總大小統計整份請求中的內嵌圖片（含歷史訊息、工具截圖和重複項），大小按解碼後計算。儲存後新轉換立即使用新限制；連結有效期從最後一次提交起算，已有連結在再次提交前保留原到期時間。降低暫存上限不會刪除有效圖片，佔用超限時拒絕新增轉換。連結持有者可在有效期內讀取。',
           capacityHint: '請求接入限制覆蓋 OpenAI/Composite 的 Responses、Chat 和 Messages HTTP 請求, 包括純文字. 大請求可用並行更低; 超額返回 503, 不在記憶體中排隊. 提高預算會增加記憶體壓力.',
           invalidBaseUrl: '請填寫有效的 HTTPS 存取地址, 不包含路徑, 帳號密碼, 查詢參數或片段.',
-          invalidCapacity: '請求體上限須為 1–128 MiB, 共享預算為 512–2048 MiB 且至少為請求體的 8 倍, 在途請求數為 1–512.',
+          invalidCapacity: '請求體上限須為 1–{bodyMiB} MiB，共享預算為 {minBudgetMiB}–{budgetMiB} MiB 且至少為請求體的 8 倍，在途請求數為 1–{requests}。',
         },
         channelMonitor: {
           title: '通道監控',

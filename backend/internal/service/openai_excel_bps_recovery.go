@@ -32,7 +32,7 @@ type AccountExcelBPSRecoveryRepository interface {
 
 func (a *Account) IsExcelBPS403RecoveryPending() bool {
 	if a == nil || a.Platform != PlatformOpenAI || a.Type != AccountTypeOAuth || a.IsShadow() ||
-		a.IsOpenAIAgentIdentity() || a.IsOpenAIPersonalAccessToken() || !a.IsActive() || !a.Schedulable || a.IsExcelBPSEnabled() {
+		a.IsOpenAIAgentIdentity() || a.IsOpenAIPersonalAccessToken() || strings.EqualFold(strings.TrimSpace(a.GetCredential("plan_type")), "free") || !a.IsActive() || !a.Schedulable || a.IsExcelBPSEnabled() {
 		return false
 	}
 	if a.Extra[ExcelBPSAutoRecoverOn403Key] != true || a.Extra["openai_excel_bps_auto_disable_on_403"] != true {

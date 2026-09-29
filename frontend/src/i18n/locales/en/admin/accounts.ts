@@ -686,6 +686,9 @@ export default {
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',
         wsMode: 'WS mode',
+        wsSseAcceleration: 'HTTP streaming over WS',
+        wsSseAccelerationDesc:
+          'Off by default. Stream Responses through the upstream WS pool for ordinary OAuth accounts, delivering early SSE events immediately. Use Context Pool mode and disable automatic passthrough. Global WS gates still apply and bound transport plugins take precedence. Only handshake failures fall back to HTTP; sent requests are not replayed. Early events do not mean text generation has started.',
         wsModeDesc:
           'Applies only to the current OpenAI account type. Select Off to disable WS. Other modes use the selected connection method only when gateway.openai_ws.mode_router_v2_enabled=true; otherwise, they use the context pool.',
         wsModeOff: 'Off (off)',
