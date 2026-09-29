@@ -2,28 +2,28 @@
 
 ## 私有仓库与分支边界
 
-公共集成仓库 `holeenlu/sub2api` 已转为私有独立仓库，脱离 GitHub Fork 网络。
+主仓库 `holeenlu/sub2api` 已转为私有独立仓库，脱离 GitHub Fork 网络。
 它仍通过保留的 Git 历史同步公开 `Wei-Shaw/sub2api`。
 详见[私有仓库同步说明](PRIVATE_REPOSITORY_SYNC.md)。
 
-- 公共代码：本地 `holeen/main` → `origin/main`。
+- 主线代码：本地 `main`（KDAN 品牌主分支）→ `origin/main`。
 - 品牌代码：本地 `TapModels` → `origin/TapModels`，另同步到 `erwinlin/main`。
 - 同步入口：`deploy/sync-upstream.sh`，普通 merge 并保留原 SHA；检查点位于 `.release/upstream-sync/<id>/state.json`。
 - 推送、部署按该次明确授权分别执行；旧 `deploy/sync.sh` 已退役。
-- 不向公共 main 合入品牌提交，也不向公开 upstream 推送私有代码。
+- `main` 的已验证内容先普通 merge 到 `TapModels`，再保留 TapModels 品牌覆盖；不向官方 upstream 推送私有代码。
 
 ## 工作流
 
 | 工作流 | 触发与发布目标 |
 | --- | --- |
-| `tapmodels-ci.yml` | push/PR 到 `main` 或 `TapModels` |
-| `tapmodels-docker-image.yml` | push `main`、数字版本 tag、手动触发；仅在品牌发布仓库推镜像 |
+| `tapmodels-ci.yml` | push/PR 到 `TapModels` |
+| `tapmodels-docker-image.yml` | push `TapModels`、数字版本 tag、手动触发；仅在品牌发布仓库推镜像 |
 | 上游监看 | 专属仓库默认 main 上每日运行 |
 
 CI 包含后端单元测试、生成代码检查、前端 lint/typecheck/测试/构建和繁中同步检查。
 监看只更新追踪 issue，不合并、不推送、不部署。
 定时和手动触发要求工作流已在默认分支注册；品牌分支 push 不依赖 Fork 网络。
-公共 `project-ci.yml`、`upstream-sync-watch.yml` 须先发布到 `origin/main`。
+主仓库 `project-ci.yml`、`upstream-sync-watch.yml` 发布在 `origin/main`；TapModels 品牌 CI 仍按 `TapModels` 触发。
 不要假设新私有仓库已停用继承的上游工作流，须核对 Actions 设置。
 
 ## 镜像与发版
