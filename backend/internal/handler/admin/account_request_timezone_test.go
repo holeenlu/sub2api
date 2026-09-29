@@ -27,8 +27,9 @@ func TestGetOpenAIRequestTimezones(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.Equal(t, service.DefaultOpenAIRequestTimezone, payload.Data.Default)
-	require.Len(t, payload.Data.Timezones, 30)
+	require.Len(t, payload.Data.Timezones, 31)
 	require.Contains(t, payload.Data.Timezones, "Europe/London")
+	require.Contains(t, payload.Data.Timezones, "Asia/Taipei")
 	require.NotContains(t, payload.Data.Timezones, "Europe/Oslo")
 	require.NotContains(t, payload.Data.Timezones, "Asia/Shanghai")
 }

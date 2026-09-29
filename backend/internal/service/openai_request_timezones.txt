@@ -18,6 +18,7 @@ Asia/Kuala_Lumpur
 Asia/Manila
 Asia/Seoul
 Asia/Singapore
+Asia/Taipei
 Asia/Tokyo
 Australia/Perth
 Australia/Sydney

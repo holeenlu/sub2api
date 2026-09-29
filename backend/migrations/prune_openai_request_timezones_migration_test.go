@@ -27,5 +27,10 @@ func TestMigration242PrunesUnsupportedOpenAIRequestTimezones(t *testing.T) {
 		options = append(options, match[1])
 	}
 	require.Len(t, options, 30)
-	require.ElementsMatch(t, strings.Fields(string(list)), options)
+	currentOptions := strings.Fields(string(list))
+	// Migration 242 is an immutable historical cleanup snapshot. New account
+	// options may be added without rewriting an already-applied migration.
+	require.Len(t, currentOptions, 31)
+	require.Subset(t, currentOptions, options)
+	require.Contains(t, currentOptions, "Asia/Taipei")
 }
