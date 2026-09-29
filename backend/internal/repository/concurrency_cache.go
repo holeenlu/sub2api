@@ -1202,6 +1202,56 @@ func (c *concurrencyCache) GetAPIKeyQueueStats(ctx context.Context, apiKeyID int
 	return int(active), int(waiting), nil
 }
 
+// Each script retains an atomic per-key snapshot; pipelining only removes the
+// round trip between keys. Retry NOSCRIPT commands alone after a cache flush.
+func (c *concurrencyCache) GetAPIKeyQueueStatsBatch(ctx context.Context, apiKeyIDs []int64) (map[int64]service.APIKeyQueueCounts, error) {
+	result := make(map[int64]service.APIKeyQueueCounts, len(apiKeyIDs))
+	if len(apiKeyIDs) == 0 {
+		return result, nil
+	}
+	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.Cmd, len(apiKeyIDs))
+	for i, id := range apiKeyIDs {
+		cmds[i] = apiKeyQueueStatsScript.EvalSha(ctx, pipe,
+			[]string{apiKeySlotKey(id), liveAPIKeySlotKey(id), apiKeyWaitKey(id), apiKeyWaitClosedKey(id)},
+			c.slotTTLSeconds, liveLeaseTTLSeconds)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && !redis.HasErrorPrefix(err, "NOSCRIPT") {
+		return nil, fmt.Errorf("read API key queue statistics: %w", err)
+	}
+	for i, cmd := range cmds {
+		if redis.HasErrorPrefix(cmd.Err(), "NOSCRIPT") {
+			id := apiKeyIDs[i]
+			cmds[i] = apiKeyQueueStatsScript.Eval(ctx, pipe,
+				[]string{apiKeySlotKey(id), liveAPIKeySlotKey(id), apiKeyWaitKey(id), apiKeyWaitClosedKey(id)},
+				c.slotTTLSeconds, liveLeaseTTLSeconds)
+		} else if err := cmd.Err(); err != nil {
+			return nil, fmt.Errorf("read API key %d queue statistics: %w", apiKeyIDs[i], err)
+		}
+	}
+	if pipe.Len() > 0 {
+		if _, err := pipe.Exec(ctx); err != nil {
+			return nil, fmt.Errorf("reload API key queue statistics script: %w", err)
+		}
+	}
+	for i, cmd := range cmds {
+		raw, err := cmd.Result()
+		if err != nil {
+			return nil, fmt.Errorf("read API key %d queue statistics: %w", apiKeyIDs[i], err)
+		}
+		active, err := redisScriptInt64At(raw, 0)
+		if err != nil {
+			return nil, fmt.Errorf("parse API key %d active count: %w", apiKeyIDs[i], err)
+		}
+		waiting, err := redisScriptInt64At(raw, 1)
+		if err != nil {
+			return nil, fmt.Errorf("parse API key %d waiting count: %w", apiKeyIDs[i], err)
+		}
+		result[apiKeyIDs[i]] = service.APIKeyQueueCounts{Active: int(active), Waiting: int(waiting)}
+	}
+	return result, nil
+}
+
 func (c *concurrencyCache) TrackAPIKeySlot(ctx context.Context, apiKeyID int64, requestID string) error {
 	key := apiKeySlotKey(apiKeyID)
 	_, err := trackSlotScript.Run(ctx, c.rdb, []string{key}, c.slotTTLSeconds, requestID).Result()

@@ -58,6 +58,7 @@ type APIKeySlotQueueCache interface {
 	AbortAPIKeyQueueAttempt(ctx context.Context, apiKeyID int64, requestID string, deadlineMs int64, removeSlot bool) error
 	// GetAPIKeyQueueStats returns active and waiting counts in one atomic read.
 	GetAPIKeyQueueStats(ctx context.Context, apiKeyID int64) (active int, waiting int, err error)
+	GetAPIKeyQueueStatsBatch(ctx context.Context, apiKeyIDs []int64) (map[int64]APIKeyQueueCounts, error)
 }
 
 // ErrAPIKeyReservationLost means a Live handoff could not find the regular key
@@ -483,16 +484,9 @@ func (s *ConcurrencyService) GetAPIKeyQueueStatsBatch(ctx context.Context, apiKe
 	if !ok {
 		return nil, errors.New("API key queue statistics unsupported")
 	}
-	redisCtx, cancel := context.WithTimeout(context.Background(), apiKeyConcurrencyFetchTimeout)
+	redisCtx, cancel := context.WithTimeout(ctx, apiKeyConcurrencyFetchTimeout)
 	defer cancel()
-	for _, apiKeyID := range apiKeyIDs {
-		active, waiting, err := cache.GetAPIKeyQueueStats(redisCtx, apiKeyID)
-		if err != nil {
-			return nil, fmt.Errorf("read api key %d queue statistics: %w", apiKeyID, err)
-		}
-		result[apiKeyID] = APIKeyQueueCounts{Active: active, Waiting: waiting}
-	}
-	return result, nil
+	return cache.GetAPIKeyQueueStatsBatch(redisCtx, apiKeyIDs)
 }
 
 // StopAPIKeyQueue cancels wait loops and in-flight admission operations.

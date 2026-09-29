@@ -108,6 +108,21 @@ func (c *apiKeyQueueCacheStub) GetAPIKeyQueueStats(context.Context, int64) (int,
 	}
 	return c.statsActive, c.statsWaiting, nil
 }
+func (c *apiKeyQueueCacheStub) GetAPIKeyQueueStatsBatch(ctx context.Context, ids []int64) (map[int64]APIKeyQueueCounts, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result := make(map[int64]APIKeyQueueCounts, len(ids))
+	for _, id := range ids {
+		active, waiting, err := c.GetAPIKeyQueueStats(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		result[id] = APIKeyQueueCounts{Active: active, Waiting: waiting}
+	}
+	return result, nil
+}
+
 func (c *apiKeyQueueCacheStub) ReleaseAPIKeySlot(_ context.Context, _ int64, requestID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
