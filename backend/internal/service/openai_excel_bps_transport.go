@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -14,6 +15,31 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
+
+// errExcelBPSProxyUnavailable is reserved for a local managed-proxy pool
+// outage. The current deployment uses its existing account proxy path and does
+// not enable the excluded Mihomo pool, but retaining a typed sentinel keeps
+// scheduler accounting correct for adapters that provide that pool.
+var errExcelBPSProxyUnavailable = errors.New("BPS proxy unavailable")
+
+type excelBPSForwardError struct{ code string }
+
+func (e *excelBPSForwardError) Error() string { return "excel BPS: " + e.code }
+
+func (e *excelBPSForwardError) Unwrap() error {
+	if e.code == "basispoints_proxy_unavailable" {
+		return errExcelBPSProxyUnavailable
+	}
+	return nil
+}
+
+type excelBPSAcquisitionFailure struct{ cause error }
+
+func (e *excelBPSAcquisitionFailure) Error() string { return errExcelBPSProxyUnavailable.Error() }
+
+func (e *excelBPSAcquisitionFailure) Unwrap() []error {
+	return []error{errExcelBPSProxyUnavailable, e.cause}
+}
 
 // Recheck every BPS generation, including repair attempts, against the current
 // primary snapshot. Never inject Codex ticket headers into a BPS request.

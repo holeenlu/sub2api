@@ -221,7 +221,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			}
 			c.JSON(status, gin.H{"error": errorBody})
 		}
-		return nil, fmt.Errorf("excel BPS: %s", code)
+		return nil, &excelBPSForwardError{code: code}
 	}
 	originalModel := gjson.GetBytes(body, "model").String()
 	model := account.GetMappedModel(originalModel)
@@ -778,7 +778,9 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 	}
 	var completed, lastResponse []byte
+	var upstreamFailure *basispoints.UpstreamFailure
 	terminal := ""
+	terminalSuccessful := false
 	pendingEvent := ""
 	cacheCreationAsInput := account.IsExcelBPSCacheCreationAsInputEnabled()
 	for scanner.Next(ctx, 0, heartbeat.C, keepalive) {
@@ -794,7 +796,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			payload := []byte(strings.TrimPrefix(line, "data: "))
 			kind := gjson.GetBytes(payload, "type").String()
 			s.parseSSEUsageBytes(payload, &result.Usage)
-			if len(compactOutput) > 0 && (kind == "response.completed" || kind == "response.failed" || kind == "response.incomplete") {
+			if len(compactOutput) > 0 && (kind == "response.completed" || kind == "response.failed" || kind == "response.cancelled" || kind == "response.incomplete") {
 				subtractImagePolicyUsage(&result.Usage, compactUsage)
 			}
 			if cacheCreationAsInput {
@@ -809,11 +811,28 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 				result.FirstTokenMs = &ms
 			}
 			switch kind {
-			case "response.completed", "response.failed", "response.incomplete", "error":
+			case "response.completed", "response.failed", "response.cancelled", "response.incomplete", "error":
+				if kind == "response.completed" && lease != nil {
+					lease.ReportSuccess()
+				}
 				terminal = kind
+				terminalSuccessful = IsSuccessfulStreamTerminal(payload)
 				completed = []byte(gjson.GetBytes(payload, "response").Raw)
 				result.ResponseID = gjson.GetBytes(payload, "response.id").String()
 				result.UpstreamResponseModel = gjson.GetBytes(payload, "response.model").String()
+				upstreamFailure = basispoints.ParseUpstreamFailure(payload)
+				if upstreamFailure != nil {
+					// Preserve the actual HTTP status separately from the event's
+					// semantic status. An accepted generation is never replayed.
+					setOpsUpstreamError(c, resp.StatusCode, upstreamFailure.Message, "")
+					MarkOpsStreamErrorValue(c, OpsStreamError{
+						ErrType: upstreamFailure.Type, Code: upstreamFailure.Code, Message: upstreamFailure.Message,
+						IntendedStatus: upstreamFailure.Status, CountTowardsSLA: true, NonStream: !stream,
+					})
+					if upstreamFailure.Status == http.StatusTooManyRequests && !isQualityObservation(ctx) {
+						s.coolDownExcelBPS(ctx, account, resp.Header.Get("Retry-After"))
+					}
+				}
 			}
 			if kind == "response.created" || kind == "response.in_progress" {
 				lastResponse = []byte(gjson.GetBytes(payload, "response").Raw)
@@ -903,7 +922,13 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		MarkResponseCommitted(c)
 	}
 	if !stream {
-		if terminal != "response.completed" {
+		if upstreamFailure != nil {
+			if StopOpenAICompactSSEKeepaliveCommitted(c) {
+				writeOpenAICompactSSEFailureMessage(c, upstreamFailure.Status, upstreamFailure.Code, upstreamFailure.Message)
+			} else {
+				c.JSON(upstreamFailure.Status, gin.H{"error": upstreamFailure.Details()})
+			}
+		} else if terminal != "response.completed" {
 			c.JSON(502, gin.H{"error": gin.H{"code": "basispoints_protocol_error", "message": "Excel BPS did not complete the response"}})
 		} else {
 			c.Data(200, "application/json", completed)
