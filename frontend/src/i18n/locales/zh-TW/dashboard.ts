@@ -637,6 +637,36 @@ export default {
 
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
+    catalog: {
+      disabled: '模型廣場尚未開啟',
+      loginRequired: '請登入後檢視模型廣場',
+      copyModel: '複製請求模型 ID',
+      count: '{count} 個模型項目',
+      updated: '目錄更新於 {time}',
+      stale: '目錄來自較早的發現快照，模型可用性可能已變化。',
+      unavailable: '模型目錄暫不可用，請管理員重新整理模型發現數據。'
+    },
+    quote: {
+      scopes: {group: '分組標準價', personal: '你的報價', group_fallback: '分組參考價'},
+      sources: {media_billing: '媒體計費規則', group: '分組價卡', channel: '通道價卡', billing_catalog: '計費目錄/相容價'},
+      conditional: '標準時段報價；按請求條件計費',
+      requestDependent: '價格取決於實際路由或上游回傳模型',
+      personalUnavailable: '個人倍率暫不可用，以下為分組參考價。'
+    },
+    preview: {
+      action: '模型預覽',
+      title: '分組模型與價格預覽',
+      hint: '按目前分組設定展示模型與標準時段價格。此預覽使用分組倍率；目錄不會在存取時自動探測上游。發現型帳號請先在帳號管理中重新整理模型列表。',
+      diagnostics: '目錄診斷',
+      reasons: {
+        wildcard_requires_concrete_models: '萬用字元規則需要具體模型對應或發現數據',
+        discovery_snapshot_missing: '尚無有效的模型發現快照',
+        group_policy_excluded: '被分組模型策略排除',
+        ambiguous_route: '多個平台宣告此模型，請設定明確路由',
+        no_configured_route: '沒有匹配的可用帳號與路由',
+        pricing_only_or_not_allowed: '僅設定了價格，或未通過分組路由與模型策略'
+      }
+    },
     title: '模型廣場',
     description: '按分組瀏覽可用模型與價格',
     loading: '載入中...',
@@ -663,6 +693,8 @@ export default {
       longContextDisabledNote: '該分組未啟用長上下文階梯計費，超閾值請求仍按基礎檔計費，官方階梯僅供參考'
     },
     table: {
+      perSecond: '按秒計費',
+      perUnitSecond: '/ 秒',
       model: '模型',
       input: '輸入',
       output: '輸出',
@@ -682,8 +714,8 @@ export default {
       timePricingRowHintPeak: '；本行價格未含高峰倍率，與高峰時段 {window} 重疊的部分實付再乘 ×{multiplier}',
       timePricingWeekdays: '工作日',
       timePricingRateHint: '生效倍率 {rate} × 時段倍率 {multiplier}',
-      paidPrice: '實付價格(折後)',
-      officialPrice: '官方價格',
+      paidPrice: '標準時段價格',
+      officialPrice: '目錄參考價',
       rate: '折扣倍率',
       unitPerMillion: '$ / 1M token',
       perUnitRequest: '/ 次',

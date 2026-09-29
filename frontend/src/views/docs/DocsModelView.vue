@@ -90,7 +90,7 @@ const model = computed<DocsModelCatalogEntry | undefined>(() => {
     sourceUrl: ''
   }
 })
-const available = computed<boolean | null>(() => props.selectedGroup ? props.selectedGroup.models.some((item) => item.name === props.modelId) : null)
+const available = computed<boolean | null>(() => props.selectedGroup && props.selectedGroup.catalog_status !== 'unavailable' ? props.selectedGroup.models.some((item) => item.name === props.modelId) : null)
 const exampleKind = computed<'image' | 'messages' | 'responses'>(() => model.value?.kind === 'image' ? 'image' : model.value?.platform === 'anthropic' ? 'messages' : 'responses')
 const examples = computed(() => buildDocsExamples(exampleKind.value, props.apiBaseUrl || window.location.origin, props.modelId))
 function formatTokens(value?: number) { return value ? `${(value / 1000).toLocaleString()}K` : '—' }

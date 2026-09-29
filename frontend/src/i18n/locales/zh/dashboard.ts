@@ -635,6 +635,36 @@ export default {
 
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
+    catalog: {
+      disabled: '模型广场尚未开启',
+      loginRequired: '请登录后查看模型广场',
+      copyModel: '复制请求模型 ID',
+      count: '{count} 个模型条目',
+      updated: '目录更新于 {time}',
+      stale: '目录来自较早的发现快照，模型可用性可能已变化。',
+      unavailable: '模型目录暂不可用，请管理员刷新模型发现数据。'
+    },
+    quote: {
+      scopes: {group: '分组标准价', personal: '你的报价', group_fallback: '分组参考价'},
+      sources: {media_billing: '媒体计费规则', group: '分组价卡', channel: '渠道价卡', billing_catalog: '计费目录/兼容价'},
+      conditional: '标准时段报价；按请求条件计费',
+      requestDependent: '价格取决于实际路由或上游返回模型',
+      personalUnavailable: '个人倍率暂不可用，以下为分组参考价。'
+    },
+    preview: {
+      action: '模型预览',
+      title: '分组模型与价格预览',
+      hint: '按当前分组配置展示模型与标准时段价格。此预览使用分组倍率；目录不会在访问时自动探测上游。发现型账号请先在账号管理中刷新模型列表。',
+      diagnostics: '目录诊断',
+      reasons: {
+        wildcard_requires_concrete_models: '通配规则需要具体模型映射或发现数据',
+        discovery_snapshot_missing: '尚无有效的模型发现快照',
+        group_policy_excluded: '被分组模型策略排除',
+        ambiguous_route: '多个平台声明此模型，请配置明确路由',
+        no_configured_route: '没有匹配的可用账号与路由',
+        pricing_only_or_not_allowed: '仅配置了价格，或未通过分组路由与模型策略'
+      }
+    },
     title: '模型广场',
     description: '按分组浏览可用模型与价格',
     loading: '加载中...',
@@ -661,6 +691,8 @@ export default {
       longContextDisabledNote: '该分组未启用长上下文阶梯计费，超阈值请求仍按基础档计费，官方阶梯仅供参考'
     },
     table: {
+      perSecond: '按秒计费',
+      perUnitSecond: '/ 秒',
       model: '模型',
       input: '输入',
       output: '输出',
@@ -680,8 +712,8 @@ export default {
       timePricingRowHintPeak: '；本行价格未含高峰倍率，与高峰时段 {window} 重叠的部分实付再乘 ×{multiplier}',
       timePricingWeekdays: '工作日',
       timePricingRateHint: '生效倍率 {rate} × 时段倍率 {multiplier}',
-      paidPrice: '实付价格(折后)',
-      officialPrice: '官方价格',
+      paidPrice: '标准时段价格',
+      officialPrice: '目录参考价',
       rate: '折扣倍率',
       unitPerMillion: '$ / 1M token',
       perUnitRequest: '/ 次',

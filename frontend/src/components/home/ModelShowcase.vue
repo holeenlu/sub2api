@@ -53,9 +53,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getModelPlaza, type ModelPlazaResponse } from '@/api/modelPlaza'
+import { useModelPlaza } from '@/composables/useModelPlaza'
 import type { GroupPlatform } from '@/types'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import { useClipboard } from '@/composables/useClipboard'
@@ -64,44 +64,30 @@ import { OFFICIAL_MODEL_GROUPS, PRICING_VERIFIED_AT } from './officialModels'
 
 const { t } = useI18n()
 const { copyToClipboard } = useClipboard()
-const plaza = ref<ModelPlazaResponse | null>(null)
-const loading = ref(true)
-const loadError = ref(false)
+const { data: plaza, loading, loadFailed: loadError, load } = useModelPlaza()
 const descriptions = OFFICIAL_MODEL_GROUPS.flatMap(group => group.models)
 const cards = computed(() => (plaza.value?.groups ?? []).flatMap(group =>
   group.models.map(model => {
     const fixed = descriptions.find(item => item.model === model.name)
     const provider = OFFICIAL_MODEL_GROUPS.find(item => item.platform === model.platform)
-    const rate = group.user_rate_multiplier ?? group.rate_multiplier
-    const tokenPricing = !model.pricing?.billing_mode || model.pricing.billing_mode === 'token'
+    const rate = model.quote ? 1 : (group.user_rate_multiplier ?? group.rate_multiplier)
+    const pricing = model.quote ? model.quote.pricing : model.pricing
+    const tokenPricing = !pricing?.billing_mode || pricing.billing_mode === 'token'
     const paid = (price: number | null | undefined) => tokenPricing && price != null ? price * rate : null
     return {
-      key: `${group.id}:${model.platform}:${model.name}`,
+      key: `${group.id}:${model.platform}:${model.name}:${model.endpoint ?? "any"}`,
       model: model.name,
       platform: model.platform as GroupPlatform,
       channelName: model.channel_name,
       descriptionKey: fixed?.descriptionKey ?? 'generic',
       source: fixed?.source ?? provider?.pricingSource,
-      input: paid(model.pricing?.input_price),
-      output: paid(model.pricing?.output_price),
-      cacheRead: paid(model.pricing?.cache_read_price)
+      input: paid(pricing?.input_price),
+      output: paid(pricing?.output_price),
+      cacheRead: paid(pricing?.cache_read_price)
     }
   })
 ).slice(0, 6))
 
-async function load() {
-  loading.value = true
-  loadError.value = false
-  try {
-    plaza.value = await getModelPlaza()
-  } catch {
-    plaza.value = null
-    loadError.value = true
-  } finally {
-    loading.value = false
-  }
-}
-onMounted(load)
 const priceFields = ['input', 'output', 'cacheRead'] as const
 const usd = (value: number | null) => value == null ? '—' : `US${formatScaled(value, 1_000_000, 2)}`
 const cardClass = 'flex min-w-0 flex-col rounded-2xl border border-gray-200/70 bg-white/80 p-4 shadow-sm backdrop-blur-sm transition duration-200 hover:border-primary-200 hover:shadow-md motion-reduce:transition-none dark:border-dark-700/70 dark:bg-dark-800/70'

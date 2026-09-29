@@ -631,6 +631,36 @@ export default {
 
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
+    catalog: {
+      disabled: 'Model plaza is disabled',
+      loginRequired: 'Sign in to view the model plaza',
+      copyModel: 'Copy request model ID',
+      count: '{count} model entries',
+      updated: 'Catalog updated {time}',
+      stale: 'This catalog uses an older discovery snapshot. Availability may have changed.',
+      unavailable: 'Model catalog unavailable. Ask an administrator to refresh model discovery.'
+    },
+    quote: {
+      scopes: {group: 'Group price', personal: 'Your quote', group_fallback: 'Group reference'},
+      sources: {media_billing: 'Media billing rules', group: 'Group pricing', channel: 'Channel pricing', billing_catalog: 'Billing catalog / fallback'},
+      conditional: 'Standard-period quote; request conditions apply',
+      requestDependent: 'Price depends on the selected route or response model',
+      personalUnavailable: 'Personal rates are unavailable. Group reference prices are shown.'
+    },
+    preview: {
+      action: 'Models',
+      title: 'Group models and pricing preview',
+      hint: 'Current group models and standard-period prices at group rates. Views do not probe upstream services. For discovery-based accounts, refresh the model list in account management first.',
+      diagnostics: 'Catalog diagnostics',
+      reasons: {
+        wildcard_requires_concrete_models: 'Wildcard rules require concrete mappings or discovery data',
+        discovery_snapshot_missing: 'No valid model discovery snapshot',
+        group_policy_excluded: 'Excluded by group model policy',
+        ambiguous_route: 'Multiple platforms claim this model; configure an explicit route',
+        no_configured_route: 'No matching eligible account and route',
+        pricing_only_or_not_allowed: 'Pricing only, or excluded by routing or model policy'
+      }
+    },
     title: 'Model Plaza',
     description: 'Browse available models and pricing by group',
     loading: 'Loading...',
@@ -657,6 +687,8 @@ export default {
       longContextDisabledNote: 'Long-context tier pricing is disabled for this group: requests above the threshold are billed at the base tier; official tiers are for reference only'
     },
     table: {
+      perSecond: 'Per second',
+      perUnitSecond: '/ second',
       model: 'Model',
       input: 'Input',
       output: 'Output',
@@ -677,8 +709,8 @@ export default {
         '; prices in this row exclude the peak-hour rate — where this period overlaps the peak hours {window}, the overlapping portion is additionally multiplied by ×{multiplier}',
       timePricingWeekdays: 'Weekdays',
       timePricingRateHint: 'Effective rate {rate} × period multiplier {multiplier}',
-      paidPrice: 'Your Price (Discounted)',
-      officialPrice: 'Official Price',
+      paidPrice: 'Standard-period price',
+      officialPrice: 'Catalog reference price',
       rate: 'Rate',
       unitPerMillion: '$ / 1M tokens',
       perUnitRequest: '/ request',

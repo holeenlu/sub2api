@@ -135,7 +135,24 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 		return nil, false, fmt.Errorf("load group configured Codex models: %w", err)
 	}
 	configuredModels := openAIConfiguredCodexModelIDsForGroup(visible, group)
-	if len(configuredModels) == 0 {
+	localConfigured := len(configuredModels) > 0
+	if s.groupModelCatalog != nil {
+		shared, err := s.groupModelCatalog.Resolve(ctx, group)
+		if err != nil {
+			return nil, false, err
+		}
+		localConfigured = localConfigured || group.ModelAllowlistEnabled()
+		for _, model := range shared.Models {
+			if model.Source != "discovery" {
+				localConfigured = true
+			}
+		}
+		if shared.Status == "unavailable" {
+			return nil, false, nil
+		}
+		configuredModels = FilterCodexModelIDsForGroup(shared.ModelIDs(), group)
+	}
+	if !localConfigured {
 		return nil, false, nil
 	}
 
@@ -195,12 +212,19 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	if !group.CodexModelsManifestConfig.Enabled {
 		configuredModels = openAIConfiguredCodexModelIDsForGroup(visible, group)
 	}
-	body, changed, err := mergeConfiguredCodexModelsManifest(
-		manifest.Body,
-		configuredModels,
-		group.ModelAllowlist.Models,
-		group.ModelAllowlistEnabled(),
-	)
+	selection, filter := group.ModelAllowlist.Models, group.ModelAllowlistEnabled()
+	if s.groupModelCatalog != nil && !group.CodexModelsManifestConfig.Enabled {
+		shared, err := s.groupModelCatalog.Resolve(ctx, group)
+		if err != nil {
+			return err
+		}
+		if shared.Status == "unavailable" {
+			return fmt.Errorf("group model catalog is unavailable")
+		}
+		configuredModels = FilterCodexModelIDsForGroup(shared.ModelIDs(), group)
+		selection, filter = configuredModels, true
+	}
+	body, changed, err := mergeConfiguredCodexModelsManifest(manifest.Body, configuredModels, selection, filter)
 	if err != nil {
 		return fmt.Errorf("merge group configured Codex models: %w", err)
 	}
@@ -1767,7 +1791,13 @@ func (c *openAIModelsCache) set(key string, manifest *OpenAIModelsResponse, now 
 // After validating the stable top-level envelope, OAuth response bodies are
 // passed through verbatim. Custom API key manifests receive only the narrowly
 // scoped compatibility adjustments required by custom-provider Codex clients.
-func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (catalogResponse *OpenAIModelsResponse, catalogErr error) {
+	var catalogSource *Account
+	defer func() {
+		if catalogErr == nil {
+			s.rememberModelCatalog(account, catalogSource, catalogResponse, true)
+		}
+	}()
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
@@ -1775,6 +1805,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_CREDENTIALS_FAILED", "resolve credential account: %v", err)
 	}
+	catalogSource = credAccount
 
 	clientVersion = strings.TrimSpace(clientVersion)
 	if clientVersion == "" {

@@ -76,7 +76,7 @@ import DocsHomeView from './DocsHomeView.vue'
 import DocsModelsView from './DocsModelsView.vue'
 import DocsModelView from './DocsModelView.vue'
 import DocsArticleView from './DocsArticleView.vue'
-import { getModelPlaza, type ModelPlazaGroup } from '@/api/modelPlaza'
+import { useModelPlaza } from '@/composables/useModelPlaza'
 import { docsItemByPath, navGroupsForPath, isAppsPath } from '@/content/docs/nav'
 import { docsModelCatalogById } from '@/content/docs/modelCatalog'
 import { useAppStore } from '@/stores/app'
@@ -89,10 +89,9 @@ const isApps = computed(() => isAppsPath(route.path))
 const searchLabel = computed(() => t(isApps.value ? 'docs.searchApps' : 'docs.search'))
 const appStore = useAppStore()
 const authStore = useAuthStore()
-const groups = ref<ModelPlazaGroup[]>([])
+const { data: plaza, loading, loadFailed } = useModelPlaza()
+const groups = computed(() => plaza.value?.groups ?? [])
 const selectedGroupId = ref<number | null>(null)
-const loading = ref(true)
-const loadFailed = ref(false)
 const mobileOpen = ref(false)
 const searchOpen = ref(false)
 const searchInput = ref<HTMLInputElement | null>(null)
@@ -111,11 +110,15 @@ const searchResults = computed(() => {
   const seen = new Set<string>()
   const modelResults = (isApps.value ? [] : groups.value).flatMap((group) => group.models).filter((model) => !seen.has(model.name) && seen.add(model.name)).map((model) => {
     const catalog = docsModelCatalogById.get(model.name)
-    return { path: `/docs/models/${model.name}`, title: catalog?.displayName ?? model.name, description: model.name, icon: 'cube' as const }
+    return { path: `/docs/models/${encodeURIComponent(model.name)}`, title: catalog?.displayName ?? model.name, description: model.name, icon: 'cube' as const }
   })
   return [...staticResults, ...modelResults].filter((item) => !needle || `${item.title} ${item.description}`.toLowerCase().includes(needle)).slice(0, 20)
 })
 
+watch(groups, (value) => {
+  const saved = Number(localStorage.getItem('docs_selected_group_id'))
+  selectedGroupId.value = value.some(group => group.id === saved) ? saved : (value[0]?.id ?? null)
+})
 watch(searchOpen, async (open) => { if (open) { query.value = ''; await nextTick(); searchInput.value?.focus() } })
 watch(selectedGroupId, (value) => { if (value != null) localStorage.setItem('docs_selected_group_id', String(value)) })
 watch(() => route.path, () => { mobileOpen.value = false })
@@ -151,12 +154,7 @@ onMounted(async () => {
   await nextTick()
   collectToc()
   void appStore.fetchPublicSettings()
-  try {
-    const response = await getModelPlaza()
-    groups.value = response.groups
-    const saved = Number(localStorage.getItem('docs_selected_group_id'))
-    selectedGroupId.value = groups.value.some((group) => group.id === saved) ? saved : (groups.value[0]?.id ?? null)
-  } catch { loadFailed.value = true } finally { loading.value = false }
+
 })
 onBeforeUnmount(() => { window.removeEventListener('keydown', onKeydown); contentObserver?.disconnect() })
 </script>

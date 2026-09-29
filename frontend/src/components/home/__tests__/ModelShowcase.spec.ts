@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
+import { createPinia } from 'pinia'
 import ModelShowcase from '../ModelShowcase.vue'
 import en from '@/i18n/locales/en/landing'
 import zh from '@/i18n/locales/zh/landing'
@@ -18,7 +19,7 @@ const model = (name = 'claude-fable-5-1') => ({
 })
 const group = (id = 1, models = [model()]) => ({ id, name: 'Not the channel', rate_multiplier: 2, models })
 function render(locale = 'en') {
-  return mount(ModelShowcase, { global: { plugins: [createI18n({ legacy: false, locale, messages: { en, zh, 'zh-TW': zhTW, ja } })] } })
+  return mount(ModelShowcase, { global: { plugins: [createPinia(), createI18n({ legacy: false, locale, messages: { en, zh, 'zh-TW': zhTW, ja } })] } })
 }
 beforeEach(() => { vi.clearAllMocks(); getModelPlaza.mockResolvedValue({ groups: [group()] }) })
 

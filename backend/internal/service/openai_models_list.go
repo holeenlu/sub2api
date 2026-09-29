@@ -15,7 +15,13 @@ import (
 // FetchOpenAIModelsList discovers a single account's raw public model catalog.
 // API keys use the standard endpoint; OAuth reuses the authenticated, cached
 // Codex source. Account mappings and group policy are applied after this cache.
-func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (catalogResponse *OpenAIModelsResponse, catalogErr error) {
+	var catalogSource *Account
+	defer func() {
+		if catalogErr == nil {
+			s.rememberModelCatalog(account, catalogSource, catalogResponse, false)
+		}
+	}()
 	if s == nil || account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_MODELS_ACCOUNT_REQUIRED", "OpenAI account is required")
 	}
@@ -23,6 +29,7 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 	if err != nil {
 		return nil, fmt.Errorf("resolve model list credentials: %w", err)
 	}
+	catalogSource = credentialAccount
 	if credentialAccount.IsOpenAIOAuth() {
 		clientVersion := CodexCanonicalClientVersion()
 		if s.settingService != nil {

@@ -270,3 +270,20 @@ func TestFilterPlazaVisibleGroups_SubscribedExclusiveGroup(t *testing.T) {
 		require.Equal(t, int64(42), visible[0].ID)
 	}
 }
+
+func TestToModelPlazaQuotePreservesBasePricingAndHidesInternalIdentity(t *testing.T) {
+	input, output := 2e-6, 6e-6
+	g := &service.PlazaGroup{ID: 1, CatalogStatus: "ready", RateMultiplier: 3, Models: []service.PlazaModel{{Name: "public-alias", Endpoint: "responses", Platform: service.PlatformOpenAI, CatalogSource: "discovery", PricingSource: "group", Pricing: &service.ChannelModelPricing{ID: 99, ChannelID: 123, Models: []string{"secret-upstream"}, InputPrice: &input, OutputPrice: &output}}}}
+	dto := toModelPlazaGroupDTO(g, map[int64]float64{1: 0.5})
+	require.InDelta(t, 2e-6, *dto.Models[0].Pricing.InputPrice, 1e-12)
+	require.InDelta(t, 1e-6, *dto.Models[0].Quote.Pricing.InputPrice, 1e-12)
+	require.Equal(t, "personal", dto.Models[0].Quote.Scope)
+	data, err := json.Marshal(dto)
+	require.NoError(t, err)
+	for _, hidden := range []string{"secret-upstream", "channel_id", "credentials", "billing_models", "catalog_issues"} {
+		require.NotContains(t, string(data), hidden)
+	}
+	fallback := toModelPlazaGroupDTO(g, nil, true)
+	require.True(t, fallback.PersonalQuoteUnavailable)
+	require.Equal(t, "group_fallback", fallback.Models[0].Quote.Scope)
+}
