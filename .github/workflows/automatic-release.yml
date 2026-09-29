@@ -246,7 +246,9 @@ jobs:
           python3 scripts/release/notes.py
           gh release upload "$RELEASE_TAG" dist/release/* --clobber
           gh release edit "$RELEASE_TAG" --notes-file release-notes.md
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -f make_latest=false
+          # GitHub's Latest marker is repository-wide. Mark the release just
+          # published so the newest successful channel build is discoverable.
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -F make_latest=true
 
   promote:
     needs: [prepare, publish]

@@ -6,7 +6,9 @@
 
 复用 `.goreleaser.yaml`、`.github/release-tools/release_matrix.py`、`release-images.sh` 和 `Dockerfile.goreleaser`。标准矩阵与原作者相同：Linux amd64/arm64、macOS amd64/arm64、Windows amd64；镜像支持 Linux amd64/arm64。镜像构建不再重新编译前后端。参考源码：[原作者 Release 工作流](https://github.com/Wei-Shaw/sub2api/blob/a3eb7ef302961cba716dc78b39b93b60c467db0e/.github/workflows/release.yml)。
 
-定制部分仅负责自动版本分配、渠道信息、发布草稿和在线更新清单。四段版本通过 GoReleaser snapshot 的版本模板打包，以独立的发布步骤上传到预留的正式 Release；不会把四段版本交给严格的 SemVer 标签解析。所有平台产物验证完成后才发布，GitHub Release 发布成功后才将对应镜像摘要提升为 `latest`。
+定制部分仅负责自动版本分配、渠道信息、发布草稿和在线更新清单。四段版本通过 GoReleaser snapshot 的版本模板打包，以独立的发布步骤上传到预留的正式 Release；不会把四段版本交给严格的 SemVer 标签解析。所有平台产物验证完成后才发布，GitHub Release 发布成功后才将对应镜像摘要提升为 `latest`，并把本次 Release 标为仓库级 `Latest`。
+
+GitHub 的 `Latest` 是整个仓库共用的单一标记，不能同时为公共版和 KDAN 版分别维护一个 `Latest`。`holeenlu/sub2api` 中最后一次成功发布的渠道会成为仓库 `Latest`；需要固定渠道版本时，应使用完整标签，例如 `kdan/v0.2.9.3`。TapModels 单独使用 `erwinlin/TapModels`，其 `Latest` 独立计算。
 
 | 渠道 | 仓库 / 分支 | Release 标签 | GHCR 镜像 |
 | --- | --- | --- | --- |
