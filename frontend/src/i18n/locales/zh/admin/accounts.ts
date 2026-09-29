@@ -747,7 +747,7 @@ export default {
       // OpenAI specific hints
       openai: {
         autoBPS: '降智后自动开启 BPS',
-        autoBPSDesc: '每 30 分钟用状态探针检测一次（走正常协议，不经过 BPS），判定降智达到下面的条件时自动开启 BPS。这是一条质量运维规则，也可在 智能运维 → 质量运维 查看记录和修改。',
+        autoBPSDesc: '按下方配置的间隔检测（新规则默认每 2 分钟，走正常协议，不经过 BPS）。探针仅作启发式判断，达到条件后按所选设置开启 BPS；网络错误或结果不完整时不改账号。可在自动 BPS 页面查看记录。',
         autoBPSLoading: '正在读取本账号的自动开启 BPS 规则…',
         autoBPSLoadFailed: '读取自动开启 BPS 规则失败：{error}。本次保存不会改动这条规则。',
         autoBPSPauseHint: '关闭后规则暂停检测，设置和记录都保留，再打开按原设置继续；已经开启的 BPS 不会被关闭。',

@@ -45,7 +45,7 @@ describe('Automatic BPS operations', () => {
     await wrapper.findAll('button').find(b => b.text() === 'autoBPSOps.edit')!.trigger('click')
     const inputs = wrapper.findAll('form input')
     await inputs[0]!.setValue('gpt-5.6-sol')
-    await inputs[1]!.setValue('*/15 * * * *')
+    await wrapper.get('[data-testid="quality-probe-interval"]').setValue('*/15 * * * *')
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(api.update).toHaveBeenCalledWith(3, expect.objectContaining({ model_id: 'gpt-5.6-sol', cron_expression: '*/15 * * * *', auto_recover: false,
       pelican_config: expect.objectContaining({ question_kind: 'state_probe', parallel_count: 1, quality: expect.objectContaining({ action: 'enable_bps', remove_group_ids: [], bps: expect.objectContaining({ session_proxy: false, proxy_source: '' }) }) }) }))

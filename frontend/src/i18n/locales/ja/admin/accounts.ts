@@ -629,7 +629,7 @@ export default {
       // OpenAI specific hints
       openai: {
         autoBPS: 'Enable BPS automatically when degraded',
-        autoBPSDesc: 'A state probe checks this account every 30 minutes over the normal protocol (never through BPS) and turns BPS on once the degraded conditions below are met. This is a quality rule; its records and settings are also under Smart operations → Quality operations.',
+        autoBPSDesc: 'Checks at the configured interval (every 2 minutes for new rules) over the normal protocol, never BPS. The probe is only a heuristic; matching conditions enable BPS with the selected options. Network errors or incomplete results leave the account unchanged. Manage records on the Auto BPS page.',
         autoBPSLoading: 'Loading this account’s auto-BPS rule…',
         autoBPSLoadFailed: 'Failed to load the auto-BPS rule: {error}. Saving now will not change this rule.',
         autoBPSPauseHint: 'Turning this off pauses the rule. Its settings and records are kept and it resumes with the same settings when turned back on; BPS that is already on stays on.',

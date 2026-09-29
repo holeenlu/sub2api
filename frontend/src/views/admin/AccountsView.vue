@@ -1181,6 +1181,7 @@ useSwipeSelect(accountTableRef, {
 const resetAutoRefreshCache = () => {
   autoRefreshETag.value = null
   upstreamBillingRateETag.value = null
+  upstreamBillingRateAbortController?.abort()
 }
 
 type AccountLoadOptions = {
@@ -1231,25 +1232,35 @@ const upstreamBillingRateContextKey = () => JSON.stringify({
 })
 
 const applyUpstreamBillingRateSnapshots = async (
-  result: NonNullable<Awaited<ReturnType<typeof adminAPI.accounts.getUpstreamBillingRatesWithEtag>>['data']>
+  result: NonNullable<Awaited<ReturnType<typeof adminAPI.accounts.getUpstreamBillingRatesWithEtag>>['data']>,
+  requestContextKey: string,
+  signal: AbortSignal
 ) => {
   const nextIDs = result.items.map(item => item.account_id)
   const currentIDs = accounts.value.map(account => account.id)
+  const currentByID = new Map(accounts.value.map(account => [account.id, account]))
 
-  // The compact response cannot fill a row that crossed a page boundary.
-  // Only that case needs the expensive, full account-list request.
-  if (result.total !== pagination.total || !sameAccountIDOrder(nextIDs, currentIDs)) {
-    try {
-      await load({ refreshTodayStats: false })
-    } catch (error) {
-      console.error('Failed to reconcile upstream billing sort:', error)
-    }
+  // Fetch missing rows without replacing the table with its loading skeleton.
+  if (result.total !== pagination.total || nextIDs.length !== currentIDs.length || nextIDs.some(id => !currentByID.has(id))) {
+    const page = await adminAPI.accounts.list(
+      pagination.page,
+      pagination.page_size,
+      { ...toRaw(params), lite: '1' },
+      { signal }
+    )
+    if (signal.aborted || loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
+    pagination.total = page.total
+    pagination.pages = page.pages
+    mergeAccountsIncrementally(page.items)
+    hasPendingListSync.value = false
+    upstreamBillingNow.value = Date.now()
     return
   }
 
   const itemsByID = new Map(result.items.map(item => [item.account_id, item]))
-  let changed = false
-  const nextAccounts = accounts.value.map(account => {
+  let changed = !sameAccountIDOrder(nextIDs, currentIDs)
+  const nextAccounts = nextIDs.map(id => {
+    const account = currentByID.get(id)!
     const item = itemsByID.get(account.id)
     if (!item) return account
     const nextSnapshot = item.snapshot ?? null
@@ -1300,10 +1311,13 @@ const refreshUpstreamBillingRates = async (force = false) => {
       buildUpstreamBillingRateFilters(),
       { etag: force ? null : upstreamBillingRateETag.value, signal: controller.signal }
     )
-    if (loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
+    if (controller.signal.aborted || loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
     if (result.etag) upstreamBillingRateETag.value = result.etag
-    if (!result.notModified && result.data) await applyUpstreamBillingRateSnapshots(result.data)
+    if (!result.notModified && result.data) {
+      await applyUpstreamBillingRateSnapshots(result.data, requestContextKey, controller.signal)
+    }
   } catch (error) {
+    upstreamBillingRateETag.value = null
     const refreshError = error as { name?: string; code?: string }
     if (refreshError.name !== 'AbortError' && refreshError.name !== 'CanceledError' && refreshError.code !== 'ERR_CANCELED') {
       console.error('Failed to refresh upstream billing rates:', error)
@@ -1315,7 +1329,8 @@ const refreshUpstreamBillingRates = async (force = false) => {
 }
 
 const refreshUpstreamBillingSortedList = async (force = false) => {
-  if (!force && sortState.sort_by !== 'upstream_billing_rate') return
+  // A probe cannot change recent-use, name, or status ordering.
+  if (sortState.sort_by !== 'upstream_billing_rate' && sortState.sort_by !== 'rate_multiplier') return
   await refreshUpstreamBillingRates(force)
 }
 
@@ -2286,6 +2301,7 @@ const patchUpstreamBillingSnapshot = (accountID: number, snapshot: UpstreamBilli
   })
 }
 const refreshAccountsAfterUpstreamBillingProbe = async () => {
+  enterAutoRefreshSilentWindow()
   await refreshUpstreamBillingSortedList(true)
 }
 const handleProbeUpstreamBilling = async (account: Account) => {
