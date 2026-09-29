@@ -77,6 +77,14 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 		}
 		applyCodexToolCapabilities(capabilities, defaults, false)
 	}
+	if account.IsOpenAI() && normalizeKnownOpenAICodexModel(modelID) == "gpt-6.1-sol" && official {
+		// Public Sol 6.1 capabilities do not imply ChatGPT-only Lite or Ultra support.
+		applyCodexToolCapabilities(capabilities, map[string]json.RawMessage{
+			"supports_search_tool":  json.RawMessage("true"),
+			"apply_patch_tool_type": json.RawMessage(`"freeform"`),
+			"use_responses_lite":    json.RawMessage("false"),
+		}, false)
+	}
 	if account.IsOpenAIApiKey() {
 		target := modelID
 		if isOpenAIGPT6AstraModel(target) {

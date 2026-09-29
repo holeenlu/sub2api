@@ -74,7 +74,7 @@ For an icon launch, select **API key** in the OpenAI group's Use key modal and d
 
 This section applies only to OpenAI/Composite groups. Other routed groups do not support dedicated catalog downloads and should not set `model_catalog_json`. Query ordinary `GET /v1/models` and set `model` to an exact ID; do not save that list response as a Codex manifest.
 
-In **API keys → Use key → Codex**, click **Fetch catalog**, then **Download catalog** after a catalog with usable Codex models is returned. A successful manual fetch may update `model`, `review_model`, and reasoning settings. If fetching fails or returns no usable models, the default configuration remains available to copy and download. Generated configuration omits `model_catalog_json` until a usable catalog is fetched successfully. Save `codex-models.json` in a stable location and make sure its top-level path in `config.toml` matches the actual file location, for example:
+In **API keys → Use key → Codex**, click **Fetch catalog**, then **Download catalog** after a catalog with usable Codex models is returned. A successful manual fetch may update `model`, `review_model`, and reasoning settings. If fetching fails or returns no usable models, the default configuration remains available to copy and download. Generated configuration always includes `model_catalog_json = "~/.codex/codex-models.json"` without waiting for a catalog request. Download and save the catalog before starting Codex for the first time; if a refresh fails, keep using your previously saved file. Save `codex-models.json` in a stable location and make sure its top-level path in `config.toml` matches the actual file location, for example:
 
 ```toml
 model_catalog_json = "/absolute/path/.codex/codex-models.json"

@@ -27,7 +27,10 @@ func QuotePlazaModel(model *PlazaModel, group *PlazaGroup, personalRate *float64
 	if model.QuoteReason != "" {
 		quote.Status = "conditional"
 		quote.Reason = model.QuoteReason
-		return quote
+		if model.QuoteReason != "response_model_pricing" || model.Pricing == nil {
+			return quote
+		}
+		quote.Conditions = append(quote.Conditions, "response_model")
 	}
 	if model.Pricing == nil || (pricingNeedsFallback(model.Pricing) && model.Pricing.ImageInputPrice == nil) {
 		quote.Status = "unavailable"

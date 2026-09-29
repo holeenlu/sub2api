@@ -23,6 +23,7 @@ var DefaultModels = []Model{
 	{ID: "gpt-5.6", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 (Sol)"},
 	{ID: "gpt-5.6-terra", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Terra"},
 	{ID: "gpt-5.6-luna", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Luna"},
+	{ID: "gpt-6.1-sol", Object: "model", OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.1 Sol"},
 	{ID: "gpt-6-sol", Object: "model", Created: 1790035200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Sol"},
 	{ID: "gpt-6-luna", Object: "model", Created: 1790035200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Luna"},
 	{ID: "gpt-6-astra", Object: "model", Created: 1788480000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Astra"},
@@ -130,6 +131,7 @@ func CanonicalizeOpenAIModelAliasSpelling(model string) string {
 
 // CodexBaseInstructionsForModel 按模型返回最匹配的真实 Codex base instructions：
 //   - gpt-6 / gpt-6-astra（含供应商前缀与日期变体）→ GPT-6 Astra prompt
+//   - gpt-6.1-sol → GPT-6 family offline compatibility prompt
 //   - 含 "codex" 的模型（gpt-5-codex / gpt-5.x-codex / codex-max / spark 等）→ GPT-5-Codex prompt
 //   - gpt-5.5 系非 codex 模型 → GPT-5.5 prompt
 //   - gpt-5.2 系非 codex 模型 → GPT-5.2 prompt
@@ -140,7 +142,9 @@ func CanonicalizeOpenAIModelAliasSpelling(model string) string {
 func CodexBaseInstructionsForModel(model string) string {
 	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
 	switch {
-	case canonical == "gpt-6" || canonical == "gpt-6-astra" || strings.HasPrefix(canonical, "gpt-6-astra-"):
+	case canonical == "gpt-6" || canonical == "gpt-6-astra" || strings.HasPrefix(canonical, "gpt-6-astra-") || IsGPT61SolModelSpelling(canonical):
+		// Sol 6.1 uses the bundled GPT-6 family prompt as an offline fallback;
+		// a live Codex manifest's model_messages remain authoritative.
 		if v := strings.TrimSpace(instructionsGPT6Astra); v != "" {
 			return instructionsGPT6Astra
 		}
@@ -158,6 +162,23 @@ func CodexBaseInstructionsForModel(model string) string {
 		}
 	}
 	return latestCodexInstructions()
+}
+
+// IsGPT61SolModelSpelling keeps this model separate from GPT-6 Sol and GPT-5 fallbacks.
+func IsGPT61SolModelSpelling(model string) bool {
+	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
+	if canonical == "gpt-6.1-sol" {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(canonical, "gpt-6.1-sol-")
+	if !ok {
+		return false
+	}
+	switch suffix {
+	case "low", "medium", "high", "xhigh", "max", "openai-compact":
+		return true
+	}
+	return false
 }
 
 // IsGPT6SolOrLunaModelSpelling recognizes official IDs and existing local effort/compact suffixes.
