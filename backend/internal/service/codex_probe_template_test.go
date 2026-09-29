@@ -134,6 +134,10 @@ func TestCodexProbeAccountIdentityAndDefaultTimezone(t *testing.T) {
 	require.NoError(t, err)
 	assertCodexProbeIdentity(t, body, first)
 	require.Contains(t, gjson.GetBytes(body, "input.3.content.0.text").String(), "<timezone>Asia/Singapore</timezone>")
+	account.Extra[openAIRequestTimezoneExtraKey] = "Asia/Taipei"
+	body, _, err = svc.buildCodexProbeRequest(context.Background(), account, "gpt-6-astra", challenge)
+	require.NoError(t, err)
+	require.Contains(t, gjson.GetBytes(body, "input.3.content.0.text").String(), "<timezone>Asia/Taipei</timezone>")
 	_, second, err := svc.buildCodexProbeRequest(context.Background(), account, "gpt-5.6-sol", challenge)
 	require.NoError(t, err)
 	require.Equal(t, first.Get("x-codex-installation-id"), second.Get("x-codex-installation-id"))
