@@ -24,5 +24,16 @@ export default {
   "notice": "暂停规则不会关闭账号当前已启用的 BPS。",
   "accounts": "打开账号管理",
   "saved": "已保存",
-  "queued": "已排队，等待调度器执行"
+  "queued": "已排队，等待调度器执行",
+  "selectAll": "全选当前列表",
+  "selected": "已选 {count} 条",
+  "selectRule": "选择规则 #{id}",
+  "delete": "删除",
+  "bulkDelete": "删除所选规则",
+  "deleteTitle": "删除 {count} 条规则",
+  "deleteConfirm": "删除所选 {count} 条规则及其探测记录？账号当前 BPS 设置不会改变；如需关闭 BPS，请在账号设置中修改。",
+  "deleting": "正在删除…",
+  "deleted": "已删除 {count} 条规则。",
+  "deletePartial": "已删除 {deleted} 条，失败 {failed} 条。重试仅删除下列失败规则。",
+  "deleteProgress": "已处理 {completed} / {total} 条规则"
 }
