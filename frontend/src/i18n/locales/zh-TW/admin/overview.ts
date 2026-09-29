@@ -52,6 +52,7 @@ export default {
       tokens: 'Token',
       cache: '快取',
       recentUsage: '最近使用',
+      actualSpending: '實際消費 ($)',
       viewModelDistribution: '模型分佈',
       viewSpendingRanking: '使用者消費榜',
       spendingRankingTitle: '使用者消費榜',

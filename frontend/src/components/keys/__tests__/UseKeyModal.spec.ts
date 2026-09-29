@@ -113,6 +113,44 @@ describe('UseKeyModal', () => {
     appState.siteName = 'Sub2API'
   })
 
+  it('shows only Claude Code for Claude Code-only groups', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: {
+        show: true,
+        apiKey: 'sk-anthropic-test',
+        baseUrl: 'https://example.com/v1',
+        platform: 'anthropic'
+      },
+      global: {
+        stubs: {
+          BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+          Icon: { template: '<span />' }
+        }
+      }
+    })
+
+    const clientTabs = () => wrapper.find('nav[aria-label="Client"]').text()
+    expect(clientTabs()).toContain('keys.useKeyModal.cliTabs.codexCli')
+    expect(clientTabs()).toContain('keys.useKeyModal.cliTabs.opencode')
+
+    const codexTab = wrapper.find('nav[aria-label="Client"]').findAll('button').find(
+      (button) => button.text().includes('keys.useKeyModal.cliTabs.codexCli')
+    )
+    await codexTab!.trigger('click')
+    await wrapper.setProps({ claudeCodeOnly: true })
+
+    expect(clientTabs()).toContain('keys.useKeyModal.cliTabs.claudeCode')
+    expect(clientTabs()).not.toContain('keys.useKeyModal.cliTabs.codexCli')
+    expect(clientTabs()).not.toContain('keys.useKeyModal.cliTabs.opencode')
+    expect(wrapper.find('pre code').text()).toContain('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')
+
+    await wrapper.setProps({ platform: 'openai' })
+    expect(clientTabs()).toContain('keys.useKeyModal.cliTabs.claudeCode')
+    expect(clientTabs()).not.toContain('keys.useKeyModal.cliTabs.codexCli')
+    expect(clientTabs()).not.toContain('keys.useKeyModal.cliTabs.opencode')
+    expect(wrapper.find('pre code').text()).toContain('ANTHROPIC_BASE_URL')
+  })
+
   it('omits the attribution override from every standard Claude Code setup form', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
@@ -767,7 +805,7 @@ describe('UseKeyModal', () => {
     expect(models['gpt-6-sol'].variants).toHaveProperty('none')
   })
 
-  it('exports Opus 5.5 only on the Anthropic provider with adaptive defaults', async () => {
+  it('exports Claude 5.5 models on the Anthropic provider with adaptive defaults', async () => {
     const wrapper = mount(UseKeyModal, {
       props: { show: true, apiKey: 'sk-test', baseUrl: 'https://example.com/v1', platform: 'anthropic' },
       global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }, Icon: { template: '<span />' } } }
@@ -776,11 +814,15 @@ describe('UseKeyModal', () => {
     expect(tab).toBeDefined()
     await tab!.trigger('click')
     await nextTick()
-    const model = JSON.parse(wrapper.find('pre code').text()).provider.anthropic.models['claude-opus-5-5']
-    expect(model.limit).toEqual({ context: 1000000, output: 128000 })
-    expect(model.options).toEqual({ thinking: { type: 'adaptive' }, effort: 'medium' })
-    expect(model.variants.xhigh.effort).toBe('xhigh')
-    expect(model.variants).not.toHaveProperty('none')
+    const models = JSON.parse(wrapper.find('pre code').text()).provider.anthropic.models
+    expect(models['claude-opus-5-5'].limit).toEqual({ context: 1000000, output: 128000 })
+    expect(models['claude-opus-5-5'].options).toEqual({ thinking: { type: 'adaptive' }, effort: 'medium' })
+    expect(models['claude-opus-5-5'].variants.xhigh.effort).toBe('xhigh')
+    expect(models['claude-opus-5-5'].variants).not.toHaveProperty('none')
+    expect(models['claude-sonnet-5-5'].limit).toEqual({ context: 1000000, output: 128000 })
+    expect(models['claude-sonnet-5-5'].options).toEqual({ thinking: { type: 'adaptive' }, effort: 'high' })
+    expect(models['claude-sonnet-5-5'].variants.xhigh.effort).toBe('xhigh')
+    expect(models['claude-sonnet-5-5'].variants).not.toHaveProperty('none')
   })
 
   it('renders Claude Fable 5 OpenCode config with adaptive thinking', async () => {
@@ -1053,16 +1095,9 @@ describe('UseKeyModal', () => {
       ok: true,
       status: 200,
       json: async () => ({
-        models: [
-          {
-            slug: 'glm-5.3',
-            default_reasoning_level: 'none',
-            supported_reasoning_levels: [{ effort: 'none' }]
-          }
-        ]
+        models: [{ slug: 'glm-5.3', default_reasoning_level: 'none', supported_reasoning_levels: [{ effort: 'none' }] }]
       })
     }))
-
     const wrapper = mount(UseKeyModal, {
       props: {
         show: true,

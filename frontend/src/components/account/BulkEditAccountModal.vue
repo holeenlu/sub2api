@@ -459,6 +459,7 @@
               <ModelWhitelistSelector
                 v-if="show"
                 v-model="allowedModels"
+                :model-mappings="modelMappings"
                 :platforms="targetSelectedPlatforms"
                 :account-ids="targetMode === 'selected' ? accountIds : undefined"
                 :sync-filters="liveModelSyncFilters"

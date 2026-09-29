@@ -122,6 +122,8 @@ export default {
           enabled: 'リスク管理を有効化',
           enabledHint: '無効にすると、管理者サイドバー項目が非表示になり、ゲートウェイのモデレーションがスキップされます。',
           cyberSessionBlock: 'サイバーセッションの自動ブロック',
+          riskControlUserAllowlist: 'リスク管理の許可リスト',
+          riskControlUserAllowlistHint: 'メールアドレスのキーワードでユーザーを検索します。許可されたユーザーはローカルのブロックやアカウント停止の対象外になりますが、アップストリームの制限は引き続き適用されます。通常は信頼できる下流の中継サービスに使用します。',
           cyberSessionBlockHint: '有効にすると、アップストリームの cyber_policy によって検出されたセッションがTTLの期間ローカルでブロックされ、転送されなくなります。ブロックされるのは該当セッションのみで、同じキーを使用する他のセッションには影響しません。',
           cyberSessionBlockTTL: 'ブロックTTL（秒）',
         },

@@ -878,6 +878,7 @@ export default {
       modelRestriction: 'モデル制限 (任意)',
       modelWhitelist: 'モデル許可リスト',
       modelMapping: 'モデルマッピング',
+      modelMappingConflict: '{from} → {to} のマッピングが既に存在します。許可リストに追加する前に、モデルマッピングで変更または削除してください',
       fromModel: 'リクエストモデル',
       toModel: '対象モデル',
       selectAllowedModels: '許可するモデルを選択します。空欄の場合はすべてのモデルをサポートします。',
@@ -1018,6 +1019,20 @@ export default {
 	  autoPause5hDisabled: '5hの自動一時停止を無効化',
 	  autoPause7dDisabled: '7dの自動一時停止を無効化',
 	  autoPauseDisabledHint: '有効にすると、グローバルのデフォルトしきい値が設定されていても、このアカウントは自動一時停止されません。',
+	  claudeResetCredits: {
+	    count: 'リセット回数',
+	    countTooltipLoad: 'Claude の残りリセット回数を確認（読み取り専用、回数は消費しません）',
+	    countTooltipRefresh: 'Claude の残りリセット回数を更新（読み取り専用、回数は消費しません）',
+	    fetched: '確認時刻: {time}',
+	    error: 'リセットクレジットを確認できませんでした',
+	    ineligible: 'このアカウントは現在リセットを利用できません',
+	    cooldown: '{time} までクールダウン中',
+	    expiresAt: '有効期限: {time}',
+	    expiresAtFull: 'リセットクレジットの有効期限: {time}',
+	    clears: 'リセット対象: {windows}',
+	    notUsableNow: '現在利用できません',
+	    requiresLimit: '上限に達した場合のみ利用できます'
+	  },
 	  autoResetCredit: {
 	    title: 'リセットクレジットを自動使用',
 	    hint: '実際の使用量がしきい値に達した場合に限り、有効期限が最も早い利用可能なクレジットを使用します。デフォルトではオフです。クレジットがない場合やリセットに失敗した場合、アカウントは一時停止状態のままです。',
