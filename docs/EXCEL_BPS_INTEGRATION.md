@@ -1,6 +1,6 @@
 # Excel / BPS 整合记录（仅 ranxi2001 模式）
 
-当前范围更新：2026-09-28；初次整合日期：2026-09-27。归属：公共功能，首次提交到 `holeen/main`，普通 merge 传播至 KDAN、TapModels。
+当前范围更新：2026-09-28；初次整合日期：2026-09-27。归属：主线能力，先提交到 `main`（KDAN 品牌主分支），验证后普通 merge 传播至 TapModels。
 
 当前只保留 ranxi2001 的 OpenAI OAuth Excel/BPS 协议及必要依赖。sub4api 的独立 OpenAI BPS 平台已移除。移除、升级迁移和最新源提交审查见 [2026-09-28 范围调整](BPS_RANXI_ONLY_2026_09_28.md)。
 
@@ -66,7 +66,7 @@
 
 以下为初次整合记录，不代表当前移除版本的验证结果；当前结果见范围调整记录。
 
-当时公共分支本机验证：
+当时主线分支本机验证：
 
 - `go test -tags=unit ./...`：60 个测试包通过。
 - `go test -tags=integration -exec=/usr/bin/true ./...`：全仓库集成测试编译通过；该命令只编译，不执行测试。
