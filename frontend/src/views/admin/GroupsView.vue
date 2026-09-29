@@ -410,6 +410,15 @@
                 </span>
               </button>
               <button
+                v-if="row.status === 'active'"
+                data-testid="group-model-preview"
+                @click="previewGroupId = row.id"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700"
+              >
+                <Icon name="eye" size="sm" />
+                <span class="text-xs">{{ t('modelPlaza.preview.action') }}</span>
+              </button>
+              <button
                 v-if="!authStore.isSimpleMode && row.platform === 'composite'"
                 data-testid="group-composite-routes"
                 @click="handleCompositeRoutes(row)"
@@ -4291,6 +4300,7 @@
       @close="showRPMOverridesModal = false"
       @success="loadGroups"
     />
+    <GroupModelPreviewDialog :group-id="previewGroupId" @close="previewGroupId = null" />
   </AppLayout>
 </template>
 
@@ -4329,6 +4339,7 @@ import Select from "@/components/common/Select.vue";
 import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
+import GroupModelPreviewDialog from "@/components/admin/group/GroupModelPreviewDialog.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
@@ -4921,6 +4932,7 @@ const sortState = reactive({
 let abortController: AbortController | null = null;
 
 const showCreateModal = ref(false);
+const previewGroupId = ref<number | null>(null);
 const showEditModal = ref(false);
 const showDeleteDialog = ref(false);
 const pendingLiveForm = ref<"create" | "edit" | null>(null);

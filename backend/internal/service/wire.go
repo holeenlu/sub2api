@@ -976,7 +976,8 @@ var ProviderSet = wire.NewSet(
 	NewChannelService,
 	wire.Bind(new(ChannelCacheInvalidator), new(*ChannelService)),
 	NewModelPricingResolver,
-	NewModelPlazaService,
+	ProvideModelPlazaService,
+	NewGroupModelCatalogService,
 	NewContentModerationService,
 	NewAffiliateService,
 	ProvidePaymentConfigService,
@@ -1102,4 +1103,11 @@ func ProvideAccountTokenGuardV2Service(repo AccountTokenGuardV2Repository, setti
 	svc := NewAccountTokenGuardV2Service(repo, settings, admin, openAIGateway, reauth)
 	svc.Start()
 	return svc
+}
+
+// ProvideModelPlazaService shares the group catalog with API model discovery.
+func ProvideModelPlazaService(channels ChannelRepository, groups GroupRepository, prices *PricingService, billing *BillingService, resolver *ModelPricingResolver, catalog *GroupModelCatalogService) *ModelPlazaService {
+	s := NewModelPlazaService(channels, groups, prices, billing, resolver)
+	s.catalog = catalog
+	return s
 }

@@ -2,6 +2,8 @@ package handler
 
 import (
 	"log/slog"
+	"strconv"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -66,7 +68,23 @@ type modelPlazaTimePricing struct {
 }
 
 // modelPlazaModel 广场模型条目：实收口径展示定价（白名单形态）+ 官方参考价。
+type modelPlazaQuote struct {
+	Unit              string                          `json:"unit"`
+	ImageTokenPricing *service.PlazaImageTokenPricing `json:"image_token_pricing,omitempty"`
+	Status            string                          `json:"status"`
+	Scope             string                          `json:"scope"`
+	Source            string                          `json:"source"`
+	Reason            string                          `json:"reason,omitempty"`
+	Basis             string                          `json:"basis"`
+	RateMultiplier    float64                         `json:"rate_multiplier"`
+	Pricing           *userSupportedModelPricing      `json:"pricing"`
+	Conditions        []string                        `json:"conditions"`
+}
+
 type modelPlazaModel struct {
+	Endpoint string           `json:"endpoint,omitempty"`
+	Quote    *modelPlazaQuote `json:"quote,omitempty"`
+
 	Name            string                     `json:"name"`
 	ChannelName     string                     `json:"channel_name"`
 	Platform        string                     `json:"platform"`
@@ -80,6 +98,10 @@ type modelPlazaModel struct {
 
 // modelPlazaGroup 广场分组条目（白名单字段）。
 type modelPlazaGroup struct {
+	CatalogStatus            string    `json:"catalog_status,omitempty"`
+	CatalogUpdatedAt         time.Time `json:"catalog_updated_at"`
+	PersonalQuoteUnavailable bool      `json:"personal_quote_unavailable,omitempty"`
+
 	ID                 int64    `json:"id"`
 	Name               string   `json:"name"`
 	Description        string   `json:"description"`
@@ -112,6 +134,7 @@ type modelPlazaResponse struct {
 // Get 返回模型广场数据。
 // GET /api/v1/model-plaza
 func (h *ModelPlazaHandler) Get(c *gin.Context) {
+	c.Header("Cache-Control", "private, no-store")
 	if h.settingService == nil {
 		response.NotFound(c, "Model plaza is not enabled")
 		return
@@ -128,12 +151,8 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 		return
 	}
 
-	groups, err := h.plazaService.ListGroups(c.Request.Context())
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
+	var err error
+	personalUnavailable := false
 	// allowedGroups == nil 表示匿名；登录用户恒为非 nil（可能为空集合）。
 	var allowedGroups map[int64]struct{}
 	var restrictPublicGroups bool
@@ -150,14 +169,25 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 			// 专属倍率仅是展示增强，失败降级为分组默认倍率。
 			slog.Warn("model_plaza_user_rates_failed", "error", err, "user_id", subject.UserID)
 			userRates = nil
+			personalUnavailable = true
 		}
 	}
 
-	visible := filterPlazaVisibleGroups(groups, allowedGroups, restrictPublicGroups)
+	visible, err := h.plazaService.ListVisibleGroups(c.Request.Context(), func(g *service.Group) bool {
+		if g.IsExclusive || (restrictPublicGroups && allowedGroups != nil) {
+			_, ok := allowedGroups[g.ID]
+			return ok
+		}
+		return true
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	out := make([]modelPlazaGroup, 0, len(visible))
 	for i := range visible {
-		out = append(out, toModelPlazaGroupDTO(&visible[i], userRates))
+		out = append(out, toModelPlazaGroupDTO(&visible[i], userRates, personalUnavailable))
 	}
 	response.Success(c, modelPlazaResponse{
 		Description: rt.Description,
@@ -190,11 +220,23 @@ func filterPlazaVisibleGroups(
 }
 
 // toModelPlazaGroupDTO 将 service 层广场分组映射为白名单 DTO,并合并用户专属倍率。
-func toModelPlazaGroupDTO(g *service.PlazaGroup, userRates map[int64]float64) modelPlazaGroup {
+func toModelPlazaGroupDTO(g *service.PlazaGroup, userRates map[int64]float64, unavailable ...bool) modelPlazaGroup {
+	personalUnavailable := len(unavailable) > 0 && unavailable[0]
+	var personalRate *float64
+	if rate, ok := userRates[g.ID]; ok {
+		personalRate = &rate
+	}
 	models := make([]modelPlazaModel, 0, len(g.Models))
 	for i := range g.Models {
 		m := &g.Models[i]
+		var quote *modelPlazaQuote
+		if g.CatalogStatus != "" {
+			q := service.QuotePlazaModel(m, g, personalRate, personalUnavailable)
+			quote = &modelPlazaQuote{Unit: q.Unit, ImageTokenPricing: q.ImageTokenPricing, Status: q.Status, Scope: q.Scope, Source: q.Source, Reason: q.Reason, Basis: "standard_period", RateMultiplier: q.RateMultiplier, Pricing: toUserPricing(q.Pricing), Conditions: q.Conditions}
+		}
 		models = append(models, modelPlazaModel{
+			Endpoint:         m.Endpoint,
+			Quote:            quote,
 			Name:             m.Name,
 			ChannelName:      m.ChannelName,
 			Platform:         m.Platform,
@@ -205,6 +247,7 @@ func toModelPlazaGroupDTO(g *service.PlazaGroup, userRates map[int64]float64) mo
 		})
 	}
 	dto := modelPlazaGroup{
+		CatalogStatus: g.CatalogStatus, CatalogUpdatedAt: g.CatalogUpdatedAt, PersonalQuoteUnavailable: personalUnavailable,
 		ID:                        g.ID,
 		Name:                      g.Name,
 		Description:               g.Description,
@@ -261,4 +304,27 @@ func toModelPlazaOfficialPricing(p *service.PlazaOfficialPricing) *modelPlazaOff
 		ImageCacheReadPrice: p.ImageCacheReadPrice,
 		Intervals:           toUserPricingIntervals(p.Intervals),
 	}
+}
+
+// Preview uses admin authentication, not the public feature switch or user rates.
+func (h *ModelPlazaHandler) Preview(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	c.Header("Cache-Control", "private, no-store")
+	groups, err := h.plazaService.ListVisibleGroups(c.Request.Context(), func(g *service.Group) bool { return g.ID == id })
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if len(groups) == 0 {
+		response.NotFound(c, "Active group not found")
+		return
+	}
+	response.Success(c, struct {
+		Group  modelPlazaGroup             `json:"group"`
+		Issues []service.GroupCatalogIssue `json:"issues"`
+	}{Group: toModelPlazaGroupDTO(&groups[0], nil), Issues: groups[0].CatalogIssues})
 }

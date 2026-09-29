@@ -3,6 +3,8 @@ import { mount } from '@vue/test-utils'
 import PlazaModelPricingTable from '../PlazaModelPricingTable.vue'
 import type { PlazaModel } from '@/api/modelPlaza'
 
+vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copyToClipboard: vi.fn() }) }))
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {
@@ -755,5 +757,39 @@ describe('PlazaModelPricingTable 分时计价', () => {
     const wrapper = mountTable([tokenModel()], 1)
     expect(wrapper.findAll('tbody tr')).toHaveLength(1)
     expect(wrapper.find('[title*="modelPlaza.table.timePricingRowHint"]').exists()).toBe(false)
+  })
+})
+
+
+describe('resolved model quotes', () => {
+  it('uses quoted values once and preserves media cache and zero prices', () => {
+    const m = tokenModel()
+    m.quote = { status: 'resolved', scope: 'personal', source: 'group', basis: 'standard_period', rate_multiplier: 0.5, conditions: [], pricing: { ...m.pricing!, input_price: 2e-6, output_price: 0 }, image_token_pricing: { input_price: 5e-6, output_price: 9e-6, cache_read_price: 7e-6 } }
+    const wrapper = mountTable([m], 9, 0.5)
+    const cells = wrapper.findAll('tbody td')
+    expect(cells[1].text()).toContain('$2.00')
+    expect(cells[1].text()).toContain('$5.00')
+    expect(cells[2].text()).toContain('$0.00')
+    expect(cells[2].text()).toContain('$9.00')
+    expect(cells[3].text()).toContain('$7.00')
+    wrapper.unmount()
+  })
+
+  it('never falls back to a legacy price when the quote is unavailable', () => {
+    const m = tokenModel()
+    m.quote = { status: 'unavailable', scope: 'group', source: '', basis: 'standard_period', rate_multiplier: 1, conditions: [], pricing: null }
+    const wrapper = mountTable([m], 5)
+    const paid = wrapper.get('tbody td[colspan="3"]')
+    expect(paid.text()).toContain('modelPlaza.detail.noPricing')
+    expect(paid.text()).not.toContain('$')
+    wrapper.unmount()
+  })
+
+  it('keeps independent media quotes intact', () => {
+    const m = tokenModel()
+    m.quote = { status: 'resolved', scope: 'personal', source: 'group', basis: 'standard_period', rate_multiplier: 0.3, conditions: [], pricing: { ...m.pricing!, billing_mode: 'image', per_request_price: 0.06, intervals: [] } }
+    const wrapper = mountTable([m], 9, 0.5, { imageRateIndependent: true, imageRateMultiplier: 0.3 })
+    expect(wrapper.get('tbody td[colspan="3"]').text()).toContain('$0.06')
+    wrapper.unmount()
   })
 })

@@ -49,7 +49,23 @@ export interface PlazaTimePricing {
   periods: PlazaTimePricingPeriod[]
 }
 
+export interface PlazaQuote {
+  unit?: 'token' | 'image' | 'second' | 'request'
+  image_token_pricing?: { input_price: number | null; output_price: number | null; cache_read_price: number | null }
+  status: 'resolved' | 'conditional' | 'unavailable'
+  scope: 'group' | 'personal' | 'group_fallback'
+  source: string
+  reason?: string
+  basis: 'standard_period'
+  rate_multiplier: number
+  /** Already includes the effective group, personal or independent media rate. */
+  pricing: UserSupportedModelPricing | null
+  conditions: string[]
+}
+
 export interface PlazaModel {
+  endpoint?: string
+  quote?: PlazaQuote
   name: string
   /** 渠道管理名称；旧版后端可能未返回。 */
   channel_name?: string
@@ -64,6 +80,9 @@ export interface PlazaModel {
 }
 
 export interface ModelPlazaGroup {
+  catalog_status?: 'ready' | 'stale' | 'unavailable'
+  catalog_updated_at?: string
+  personal_quote_unavailable?: boolean
   id: number
   name: string
   description: string
@@ -100,6 +119,16 @@ export async function getModelPlaza(options?: { signal?: AbortSignal }): Promise
   const { data } = await apiClient.get<ModelPlazaResponse>('/model-plaza', {
     signal: options?.signal
   })
+  return data
+}
+
+export interface ModelPlazaPreview {
+  group: ModelPlazaGroup
+  issues: Array<{ model: string; reason: string }>
+}
+
+export async function getModelPlazaPreview(groupId: number, signal?: AbortSignal): Promise<ModelPlazaPreview> {
+  const { data } = await apiClient.get<ModelPlazaPreview>(`/admin/groups/${groupId}/model-plaza-preview`, { signal })
   return data
 }
 

@@ -631,6 +631,36 @@ export default {
 
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
+    catalog: {
+      disabled: 'モデル広場は無効です',
+      loginRequired: 'モデル広場を表示するにはログインしてください',
+      copyModel: 'リクエストモデル ID をコピー',
+      count: '{count} 件のモデル',
+      updated: 'カタログ更新日時：{time}',
+      stale: '古い検出スナップショットを使用しています。利用状況が変わっている可能性があります。',
+      unavailable: 'モデルカタログを取得できません。管理者によるモデル検出の更新が必要です。'
+    },
+    quote: {
+      scopes: {group: 'グループ料金', personal: '個別料金', group_fallback: 'グループ参考料金'},
+      sources: {media_billing: 'メディア料金ルール', group: 'グループ料金設定', channel: 'チャネル料金設定', billing_catalog: '料金カタログ / 代替料金'},
+      conditional: '標準時間帯の料金。リクエスト条件が適用されます',
+      requestDependent: '料金は選択されたルートまたは応答モデルに依存します',
+      personalUnavailable: '個別レートを取得できないため、グループ参考料金を表示しています。'
+    },
+    preview: {
+      action: 'モデル確認',
+      title: 'グループのモデルと料金プレビュー',
+      hint: '現在のグループ設定に基づくモデルと標準時間帯の料金です。閲覧時には上流を検出しません。検出型アカウントは、先にアカウント管理でモデル一覧を更新してください。',
+      diagnostics: 'カタログ診断',
+      reasons: {
+        wildcard_requires_concrete_models: 'ワイルドカードには具体的なモデル設定または検出データが必要です',
+        discovery_snapshot_missing: '有効なモデル検出スナップショットがありません',
+        group_policy_excluded: 'グループのモデルポリシーにより除外',
+        ambiguous_route: '複数のプラットフォームがこのモデルを指定しています。明示的なルートを設定してください',
+        no_configured_route: '一致する有効なアカウントとルートがありません',
+        pricing_only_or_not_allowed: '料金のみの設定、またはルートやモデルポリシーにより除外'
+      }
+    },
     title: 'モデルプラザ',
     description: 'グループ別に利用可能なモデルと料金を確認',
     loading: '読み込み中...',
@@ -657,6 +687,8 @@ export default {
       longContextDisabledNote: 'このグループでは長文コンテキストの段階料金が無効です。しきい値を超えるリクエストは基本段階の料金で請求され、公式の段階料金は参考情報としてのみ表示されます'
     },
     table: {
+      perSecond: '秒単位',
+      perUnitSecond: '/ 秒',
       model: 'モデル',
       input: '入力',
       output: '出力',
@@ -677,8 +709,8 @@ export default {
         '。この行の料金にはピーク時間料金は含まれません。この期間がピーク時間 {window} と重なる場合、重複部分にはさらに ×{multiplier} が乗算されます',
       timePricingWeekdays: '平日',
       timePricingRateHint: '適用レート {rate} × 期間乗数 {multiplier}',
-      paidPrice: 'お客様の料金（割引後）',
-      officialPrice: '公式料金',
+      paidPrice: '標準時間帯の料金',
+      officialPrice: 'カタログ参考料金',
       rate: 'レート',
       unitPerMillion: '$ / 100万トークン',
       perUnitRequest: '/ リクエスト',

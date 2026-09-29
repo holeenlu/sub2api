@@ -1522,3 +1522,25 @@ func TestGatewayModels_GPT6SolLunaDiscoveryRespectsGroupAndAccountRestrictions(t
 		})
 	}
 }
+
+type sharedCatalogChannelRepo struct{ service.ChannelRepository }
+
+func (sharedCatalogChannelRepo) ListAll(context.Context) ([]service.Channel, error) { return nil, nil }
+
+func TestGatewayUsesSharedCatalogForListRetrieveAndCodex(t *testing.T) {
+	group := &service.Group{ID: 71, Platform: service.PlatformOpenAI, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"custom-model", "gpt-5.4"}}}
+	repo := &gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{71: {{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"model_mapping": map[string]any{"custom-model": "upstream-only", "gpt-5.4": "gpt-5.4", "hidden-model": "hidden"}}}}}}
+	h := newGatewayModelsHandlerForTest(repo)
+	h.modelCatalog = service.NewGroupModelCatalogService(repo, sharedCatalogChannelRepo{}, nil, nil)
+	result := requestModelForTest(h, group, "", "")
+	require.Equal(t, http.StatusOK, result.Code)
+	var response gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(result.Body.Bytes(), &response))
+	require.Len(t, response.Data, 2)
+	require.Equal(t, "custom-model", response.Data[0].ID)
+	require.Equal(t, http.StatusOK, requestModelForTest(h, group, "custom-model", "").Code)
+	require.Equal(t, http.StatusNotFound, requestModelForTest(h, group, "upstream-only", "").Code)
+	ids, err := h.codexModelIDsForGroup(context.Background(), group, "")
+	require.NoError(t, err)
+	require.Equal(t, []string{"custom-model", "gpt-5.4"}, ids)
+}

@@ -49,6 +49,12 @@
         <Icon name="infoCircle" size="xs" class="h-3 w-3" />
         {{ longContextNote }}
       </p>
+      <p v-if="group.catalog_status" class="mt-2 text-xs text-gray-500 dark:text-dark-400">
+        {{ t('modelPlaza.catalog.count', { count: group.models.length }) }}
+        <span v-if="updatedAt"> · {{ t('modelPlaza.catalog.updated', { time: updatedAt }) }}</span>
+      </p>
+      <p v-if="group.catalog_status === 'stale'" role="status" class="mt-2 text-xs text-amber-700 dark:text-amber-400">{{ t(`modelPlaza.catalog.${group.catalog_status}`) }}</p>
+      <p v-if="group.personal_quote_unavailable" role="status" class="mt-2 text-xs text-amber-700 dark:text-amber-400">{{ t('modelPlaza.quote.personalUnavailable') }}</p>
     </header>
 
     <!-- 模型价格表:整行(含 hover 底色/分区底色)顶到卡片边缘,左右留白由表格首列/末列的 padding 提供 -->
@@ -67,7 +73,7 @@
         :peak-rate-multiplier="group.peak_rate_multiplier"
       />
       <p v-else class="px-5 py-4 text-center text-sm text-gray-400 dark:text-dark-500">
-        {{ t('modelPlaza.detail.noModels') }}
+        {{ t(group.catalog_status === 'unavailable' ? 'modelPlaza.catalog.unavailable' : 'modelPlaza.detail.noModels') }}
       </p>
     </div>
   </section>
@@ -89,7 +95,11 @@ const props = defineProps<{
   group: ModelPlazaGroup
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const updatedAt = computed(() => {
+  if (!props.group.catalog_updated_at || props.group.catalog_updated_at.startsWith('0001')) return ''
+  return new Date(props.group.catalog_updated_at).toLocaleString(locale.value)
+})
 const appStore = useAppStore()
 
 /** 高峰窗口描述(含倍率与服务器时区标注);分组未启用高峰为空串。 */

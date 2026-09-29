@@ -54,6 +54,8 @@ var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 
 // GatewayHandler handles API gateway requests
 type GatewayHandler struct {
+	modelCatalog *service.GroupModelCatalogService
+
 	gatewayService            *service.GatewayService
 	openAIGatewayService      *service.OpenAIGatewayService
 	geminiCompatService       *service.GeminiMessagesCompatService
@@ -1170,6 +1172,20 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
+	if h.modelCatalog != nil && apiKey != nil && apiKey.Group != nil && (platform == apiKey.Group.Platform || platform == "") {
+		catalog, err := h.modelCatalog.Resolve(c.Request.Context(), apiKey.Group)
+		if err != nil {
+			h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to load group model catalog")
+			return
+		}
+		if catalog.Status == "unavailable" {
+			h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "Group model catalog is not available")
+			return
+		}
+		writeModelsList(c, platform, catalogModelIDs(catalog))
+		return
+	}
+
 	if platform == service.PlatformComposite {
 		availableModels, err := h.compositeAvailableModels(c.Request.Context(), groupID)
 		if err != nil {
@@ -1266,6 +1282,17 @@ func (h *GatewayHandler) CodexModels(c *gin.Context) {
 func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *service.Group, platformOverride string) ([]string, error) {
 	if h == nil || h.gatewayService == nil || group == nil {
 		return nil, nil
+	}
+
+	if h.modelCatalog != nil && (platformOverride == "" || platformOverride == group.Platform) {
+		catalog, err := h.modelCatalog.Resolve(ctx, group)
+		if err != nil {
+			return nil, err
+		}
+		if catalog.Status == "unavailable" {
+			return nil, fmt.Errorf("group model catalog is not available")
+		}
+		return service.FilterCodexModelIDsForGroup(catalogModelIDs(catalog), group), nil
 	}
 
 	groupID := &group.ID
@@ -2637,4 +2664,8 @@ func (h *GatewayHandler) getUserMsgQueueMode(account *service.Account, parsed *s
 		mode = h.cfg.Gateway.UserMessageQueue.GetEffectiveMode()
 	}
 	return mode
+}
+
+func catalogModelIDs(catalog *service.GroupModelCatalog) []string {
+	return catalog.ModelIDs()
 }

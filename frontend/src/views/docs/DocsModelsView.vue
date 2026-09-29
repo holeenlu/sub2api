@@ -12,7 +12,7 @@
       <div v-for="i in 6" :key="i" class="h-36 animate-pulse rounded-lg bg-gray-100 dark:bg-dark-800"></div>
     </div>
     <div v-else class="grid gap-3 pt-8 sm:grid-cols-2">
-      <RouterLink v-for="model in models" :key="model.id" :to="`/docs/models/${model.id}`" class="rounded-lg border border-gray-200 bg-white p-5 transition hover:border-primary-300 hover:shadow-card dark:border-dark-700 dark:bg-dark-800 dark:hover:border-primary-700">
+      <RouterLink v-for="model in models" :key="model.id" :to="`/docs/models/${encodeURIComponent(model.id)}`" class="rounded-lg border border-gray-200 bg-white p-5 transition hover:border-primary-300 hover:shadow-card dark:border-dark-700 dark:bg-dark-800 dark:hover:border-primary-700">
         <div class="flex items-start gap-3">
           <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gray-50 dark:bg-dark-900"><ModelIcon :model="model.id" size="24px" /></span>
           <div class="min-w-0 flex-1">
@@ -36,14 +36,15 @@ import { useI18n } from 'vue-i18n'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import DocsGroupSelect from '@/components/docs/DocsGroupSelect.vue'
 import type { ModelPlazaGroup } from '@/api/modelPlaza'
-import { docsModelCatalog, docsModelCatalogById } from '@/content/docs/modelCatalog'
+import { docsModelCatalogById } from '@/content/docs/modelCatalog'
 
 const props = defineProps<{ groups: ModelPlazaGroup[]; selectedGroup: ModelPlazaGroup | null; selectedGroupId: number | null; loading: boolean; loadFailed: boolean }>()
 defineEmits<{ 'update:selectedGroupId': [value: number] }>()
 const { t } = useI18n()
 const models = computed(() => {
-  if (!props.selectedGroup) return docsModelCatalog
-  return props.selectedGroup.models.map((live) => docsModelCatalogById.get(live.name) ?? {
+  if (!props.selectedGroup) return []
+  const seen = new Set<string>()
+  return props.selectedGroup.models.filter(model => !seen.has(model.name) && seen.add(model.name)).map((live) => docsModelCatalogById.get(live.name) ?? {
     id: live.name, displayName: live.name, platform: live.platform === 'anthropic' ? 'anthropic' : 'openai', kind: 'chat',
     summaryKey: 'docs.modelDetailsPending', endpoints: live.platform === 'anthropic' ? ['/v1/messages'] : ['/v1/responses', '/v1/chat/completions'], features: [], sourceUrl: ''
   })
