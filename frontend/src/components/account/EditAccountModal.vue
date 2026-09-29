@@ -1911,10 +1911,6 @@
         </div>
       </div>
 
-      <AccountAutoBPSSection v-if="autoBPSSupported" v-model:draft="autoBPS.draft.value" :groups="groups"
-        :loading="autoBPS.loading.value" :load-error="autoBPS.loadError.value" :has-rule="!!autoBPS.rule.value"
-        :conflicting-rule-id="autoBPS.conflictingRule.value?.id" />
-
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div
         v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
@@ -3246,8 +3242,6 @@ import { useAuthStore } from '@/stores/auth'
 
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
-import { useAccountAutoBPS } from '@/composables/useAccountAutoBPS'
-import AccountAutoBPSSection from '@/components/account/AccountAutoBPSSection.vue'
 import type {
   Account,
   Proxy,
@@ -3375,19 +3369,6 @@ const selectableGroups = computed(() => {
 // Spark 影子账号(parent_account_id 非空):代理恒继承母账号,不可独立编辑(外审 B/P1),
 // 故隐藏代理选择器。
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
-
-const autoBPS = useAccountAutoBPS()
-const autoBPSSupported = computed(() => {
-  const account = props.account
-  if (account?.platform !== 'openai' || account.type !== 'oauth' || isSparkShadow.value) return false
-  const credentials = (account.credentials ?? {}) as Record<string, unknown>
-  const modes = [credentials.auth_mode, credentials.openai_auth_mode].map(mode => String(mode ?? '').trim().toLowerCase())
-  return !modes.some(mode => mode === 'agentidentity' || mode === 'personalaccesstoken' || mode === 'personal_access_token')
-})
-watch(() => [props.show, props.account?.id, autoBPSSupported.value] as const, ([show, id, supported]) => {
-  if (show && id && supported) void autoBPS.load(id)
-  else autoBPS.reset()
-}, { immediate: true })
 
 const codexTurnTickets = computed(() => props.account?.codex_turn_tickets ?? [])
 
@@ -5419,26 +5400,15 @@ const persistGrokMediaEligibility = async (accountID: number, updatedAccount: Ac
   return updatedAccount
 }
 
-const saveAutoBPSRule = async (accountID: number) => {
-  try {
-    await autoBPS.saveFor(accountID)
-  } catch (error) {
-    appStore.showWarning(t('admin.accounts.openai.autoBPSSaveFailed', { error: extractApiErrorMessage(error, t('common.error')) }), 8000)
-  }
-}
-
-
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
   submitting.value = true
   try {
     let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
-    if (autoBPSSupported.value) await saveAutoBPSRule(accountID)
 
     emit('updated', updatedAccount)
     handleClose()
-
   } catch (error: any) {
     if (error.status === 409 && error.error === 'mixed_channel_warning' && needsMixedChannelCheck()) {
       openMixedChannelDialog({
@@ -5446,7 +5416,7 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
         onConfirm: async () => {
           antigravityMixedChannelConfirmed.value = true
           await submitUpdateAccount(accountID, updatePayload)
-        }
+        },
       })
       return
     }
@@ -5458,8 +5428,6 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 
 const handleSubmit = async () => {
   if (bpsDefaults.loading.value) return
-  const autoBPSError = autoBPSSupported.value ? autoBPS.validate() : ''
-  if (autoBPSError) { appStore.showError(t(autoBPSError)); return }
   if (!props.account) return
   const accountID = props.account.id
   if (props.account.platform === 'openai' && props.account.type === 'oauth' && !isSparkShadow.value && (excelBPSEnabled.value || excelBPS403RecoveryPending.value) && excelBPSAutoDisableOn403.value && excelBPSAutoRecoverOn403.value && !isValidBPSRecoveryInterval(excelBPSRecoveryIntervalMinutes.value)) {

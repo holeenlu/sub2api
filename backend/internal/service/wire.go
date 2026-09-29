@@ -891,8 +891,6 @@ var ProviderSet = wire.NewSet(
 	NewOAuthService,
 	NewClaudeResetCreditService,
 	ProvideOpenAIOAuthService,
-	ProvideOpenAIOAuthReauthService,
-	ProvideAccountTokenGuardV2Service,
 	ProvideGrokOAuthService,
 	wire.Bind(new(GrokOAuthTokenService), new(*GrokOAuthService)),
 	NewGeminiOAuthService,
@@ -1082,27 +1080,6 @@ func ProvideChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.
 	}
 	aggregator.Start()
 	return aggregator
-}
-
-func ProvideOpenAIOAuthReauthService(
-	repo OpenAIOAuthReauthRepository,
-	adminService AdminService,
-	accountRepo AccountRepository,
-	openaiOAuthService *OpenAIOAuthService,
-	secretEncryptor SecretEncryptor,
-	cfg *config.Config,
-	tokenCacheInvalidator TokenCacheInvalidator,
-	runtimeBlocker AccountRuntimeBlocker,
-) *OpenAIOAuthReauthService {
-	credentialUpdater, _ := accountRepo.(OpenAIOAuthReauthCredentialUpdater)
-	return NewOpenAIOAuthReauthService(repo, adminService, credentialUpdater, openaiOAuthService, secretEncryptor, cfg != nil && cfg.Totp.EncryptionKeyConfigured, tokenCacheInvalidator, runtimeBlocker)
-}
-
-func ProvideAccountTokenGuardV2Service(repo AccountTokenGuardV2Repository, settings SettingRepository, admin AdminService,
-	openAIGateway *OpenAIGatewayService, reauth *OpenAIOAuthReauthService) *AccountTokenGuardV2Service {
-	svc := NewAccountTokenGuardV2Service(repo, settings, admin, openAIGateway, reauth)
-	svc.Start()
-	return svc
 }
 
 // ProvideModelPlazaService shares the group catalog with API model discovery.

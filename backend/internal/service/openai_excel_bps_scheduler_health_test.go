@@ -18,9 +18,12 @@ import (
 func TestOpenAIAccountSchedulingIgnoresBPSProxyAcquisitionFailures(t *testing.T) {
 	for _, existingFailure := range []bool{false, true} {
 		t.Run(fmt.Sprintf("existing_failure_%t", existingFailure), func(t *testing.T) {
-			cfg := DefaultPrioritySchedulingConfig()
-			cfg.Enabled = true
-			svc := priorityGateway(cfg, &priorityReaderStub{})
+			rls := newOpenAIAdvancedSchedulerRateLimitService("true")
+			svc := &OpenAIGatewayService{
+				settingService:     rls.settingService,
+				rateLimitService:   rls,
+				openaiAccountStats: newOpenAIAccountRuntimeStats(),
+			}
 			account := excelAccount()
 			ttft := 450
 			svc.ReportOpenAIAccountScheduleResult(account, "gpt-6-astra", true, &ttft)
@@ -58,9 +61,9 @@ func TestExcelBPSUpstreamFailuresStillPenalizeScheduling(t *testing.T) {
 				Body: io.NopCloser(strings.NewReader(`{"error":{"type":"api_error","message":"test upstream failure"}}`)),
 			}}
 			svc := openAIClientToolsTestService(upstream)
-			cfg := DefaultPrioritySchedulingConfig()
-			cfg.Enabled = true
-			svc.settingService = priorityGateway(cfg, &priorityReaderStub{}).settingService
+			rls := newOpenAIAdvancedSchedulerRateLimitService("true")
+			svc.settingService = rls.settingService
+			svc.rateLimitService = rls
 			account := excelAccount()
 			account.Extra["openai_excel_bps_mihomo"] = false
 			body := []byte(`{"model":"gpt-6-astra","input":"test"}`)

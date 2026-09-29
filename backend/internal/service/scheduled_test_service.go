@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -97,38 +95,8 @@ func computeNextRun(cronExpr string, from time.Time) (time.Time, error) {
 }
 
 func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
-	if cfg := plan.PelicanConfig; cfg != nil {
-		// 探针题型不需要题目文本；其余题型题目必填。
-		if isOpenAICodexStateProbePlan(cfg) {
-			if len(cfg.Prompt) > 32000 || strings.TrimSpace(plan.ModelID) == "" || len(plan.ModelID) > 100 {
-				return time.Time{}, fmt.Errorf("probe model is required (maximum 32000/100 bytes)")
-			}
-		} else if strings.TrimSpace(cfg.Prompt) == "" || len(cfg.Prompt) > 32000 || strings.TrimSpace(plan.ModelID) == "" || len(plan.ModelID) > 100 {
-			return time.Time{}, fmt.Errorf("pelican prompt and model are required (maximum 32000/100 bytes)")
-		}
-		if err := validateQualityPolicy(plan); err != nil {
-			return time.Time{}, err
-		}
-		if cfg.QuestionKind != "" && cfg.QuestionKind != "pelican" && cfg.QuestionKind != "candy" && cfg.QuestionKind != OpenAICodexStateProbeQuestionKind {
-			return time.Time{}, fmt.Errorf("invalid question kind")
-		}
-		// 同一账号同一时刻只允许一次探针，并行只会互相挤掉，直接禁止。
-		if isOpenAICodexStateProbePlan(cfg) && cfg.ParallelCount != 1 {
-			return time.Time{}, fmt.Errorf("state probe does not support parallel runs")
-		}
-		if cfg.ParallelCount < 1 || cfg.ParallelCount > 8 {
-			return time.Time{}, fmt.Errorf("parallel count must be 1–8")
-		}
-		if !slices.Contains([]string{"minimal", "low", "medium", "high", "xhigh"}, cfg.ReasoningEffort) {
-			return time.Time{}, fmt.Errorf("invalid reasoning effort")
-		}
-		if plan.MaxResults == 0 {
-			plan.MaxResults = 100
-		}
-		if plan.MaxResults < 1 || plan.MaxResults > 200 {
-			return time.Time{}, fmt.Errorf("pelican history retention must be 1–200 results")
-		}
-		cfg.ModelID = plan.ModelID
+	if plan.PelicanConfig != nil {
+		return time.Time{}, fmt.Errorf("automatic BPS and quality test plans have been retired")
 	}
 	return computeNextRun(plan.CronExpression, now)
 }

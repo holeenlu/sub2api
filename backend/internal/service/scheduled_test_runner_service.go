@@ -14,7 +14,6 @@ const scheduledTestDefaultMaxWorkers = 10
 
 // ScheduledTestRunnerService periodically scans due test plans and executes them.
 type ScheduledTestRunnerService struct {
-	runPelican     func(context.Context, int64, string, *PelicanTestConfig) (*ScheduledTestResult, error)
 	planRepo       ScheduledTestPlanRepository
 	scheduledSvc   *ScheduledTestService
 	accountTestSvc *AccountTestService
@@ -38,7 +37,6 @@ func NewScheduledTestRunnerService(
 		planRepo:       planRepo,
 		scheduledSvc:   scheduledSvc,
 		accountTestSvc: accountTestSvc,
-		runPelican:     accountTestSvc.runOpenAICodexStateProbeScheduled,
 		rateLimitSvc:   rateLimitSvc,
 		cfg:            cfg,
 	}
@@ -94,9 +92,6 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	defer cancel()
 
 	now := time.Now()
-	if err := s.scheduledSvc.resultRepo.PruneExpiredPelican(ctx, now.Add(-7*24*time.Hour)); err != nil {
-		logger.LegacyPrintf("service.scheduled_test_runner", "auto BPS history prune failed: %v", err)
-	}
 	plans, err := s.planRepo.ListDue(ctx, now)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] ListDue error: %v", err)
@@ -132,9 +127,7 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 		}
 	}()
 	if plan.PelicanConfig != nil {
-		if validateQualityPolicy(plan) == nil {
-			s.runPelicanPlan(ctx, plan)
-		}
+		// Never reinterpret a retired quality plan as a connectivity test.
 		return
 	}
 	result, err := s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
