@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"testing"
@@ -193,6 +194,35 @@ func TestOpenAIIPUnauthorizedShadowSharesCredentialOwnerStreak(t *testing.T) {
 	require.Equal(t, 1, repo.tempCalls)
 	require.Equal(t, parent.ID, repo.lastTempID)
 	require.Zero(t, repo.setErrorCalls)
+}
+
+func TestOpenAIIPUnauthorizedGatewayEarlyReturnsBreakStreak(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"ordinary_400_control", 400, "{\"error\":{\"message\":\"Invalid parameter\"}}"},
+		{"context_window_400", 400, "{\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"maximum context length exceeded\"}}"},
+		{"capacity_shed_503", 503, "{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"The server is overloaded\"}}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &ipUnauthorizedAccountRepo{}
+			rateLimits := NewRateLimitService(repo, nil, &config.Config{RateLimit: config.RateLimitConfig{OAuth401CooldownMinutes: 1}}, nil, nil)
+			gateway := &OpenAIGatewayService{rateLimitService: rateLimits}
+			rateLimits.SetAccountRuntimeBlocker(gateway)
+			account := &Account{ID: 10, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"refresh_token": "test-refresh"}}
+			ctx := context.Background()
+			firstHeaders := http.Header{"X-Request-Id": []string{"first-ip-401"}}
+			secondHeaders := http.Header{"X-Request-Id": []string{"second-ip-401"}}
+			require.False(t, gateway.handleOpenAIAccountUpstreamError(ctx, account, 401, firstHeaders, []byte(ipUnauthorizedTestBody)))
+			require.False(t, gateway.handleOpenAIAccountUpstreamError(ctx, account, tc.status, nil, []byte(tc.body)))
+			gateway.ReportOpenAIAccountScheduleResult(account, "test-model", false, nil, errors.New("intervening upstream HTTP error"))
+			require.False(t, gateway.handleOpenAIAccountUpstreamError(ctx, account, 401, secondHeaders, []byte(ipUnauthorizedTestBody)), "an intervening upstream HTTP error must break the consecutive IP-401 streak")
+			require.Zero(t, repo.tempCalls)
+			require.False(t, gateway.isOpenAIAccountRuntimeBlocked(account))
+		})
+	}
 }
 
 func TestOpenAIIPUnauthorizedOtherAccountTypesUnchanged(t *testing.T) {
