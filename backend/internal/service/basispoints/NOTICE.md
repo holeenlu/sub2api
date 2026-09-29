@@ -91,3 +91,13 @@ contract to its existing BPS SSE bridge and buffered JSON responses, preserves
 the actual upstream HTTP status in diagnostics, and uses its own BPS-only
 cooldown without replaying accepted generations. No CPA ABI or WS transport
 implementation is imported.
+
+## 2026-09-29 CPA v0.2.8 behavioral review
+
+Reviewed JaxsonWang/cpa-plugin-oai-basispoints v0.2.8, commit
+280e28b0bcfd38431d851e22c853417c690455ff (MIT, Copyright (c) 2026 JaxsonWang).
+Its catalog-driven relay examples and terminal reconciliation rules were
+implemented independently in this package using the existing tool schema,
+HTTP/SSE bridge and scoped replay cache. No source files, CPA plugin ABI,
+WebSocket transport or host configuration were copied. The comparison and
+adoption boundaries are recorded in `docs/BPS_CPA_COMPARISON_2026_09_29.md`.

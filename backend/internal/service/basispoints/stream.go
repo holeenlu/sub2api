@@ -93,6 +93,7 @@ func (b *Bridge) transformWithRepairs(ctx context.Context, reader io.Reader, wri
 	terminal := false
 	visibleContent := false
 	var terminalResponse object
+	progress := newStreamProgress()
 	emitted := make(map[string]bool)
 	pendingTools := make(map[string]bool)
 	emit := func(kind string, payload object) error {
@@ -147,6 +148,9 @@ func (b *Bridge) transformWithRepairs(ctx context.Context, reader io.Reader, wri
 		if kind == "" {
 			kind = event
 		}
+		if err := progress.observe(kind, payload); err != nil {
+			return err
+		}
 		if b.structured != nil && kind == "response.completed" {
 			if response, ok := payload["response"].(object); !ok || response == nil {
 				return fmt.Errorf("basispoints structured output is missing its terminal response")
@@ -182,6 +186,9 @@ func (b *Bridge) transformWithRepairs(ctx context.Context, reader io.Reader, wri
 			}
 			if kind == "response.completed" {
 				terminalResponse = response
+				if err := progress.validate(response); err != nil {
+					return err
+				}
 				if b.structured != nil {
 					if err := b.structured.validate(response); err != nil {
 						return err
