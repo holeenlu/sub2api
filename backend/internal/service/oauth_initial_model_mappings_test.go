@@ -50,7 +50,7 @@ func TestOAuthInitialModelMappingsDefaultsAndRoundTrip(t *testing.T) {
 
 	saved, err := svc.SaveOAuthInitialModelMappings(t.Context(), OAuthInitialModelMappings{
 		Enabled: true,
-		Rules: []OAuthModelMappingRule{{From: " gpt-5.4* ", To: " gpt-5.5 "}},
+		Rules:   []OAuthModelMappingRule{{From: " gpt-5.4* ", To: " gpt-5.5 "}},
 	})
 	require.NoError(t, err)
 	require.Equal(t, PlatformOpenAI, saved.Platform)
@@ -99,6 +99,37 @@ func TestApplyOAuthModelMappingsPreservesExplicitRulesAndCaller(t *testing.T) {
 	malformed := &CreateAccountInput{Credentials: map[string]any{"model_mapping": "invalid"}}
 	require.False(t, applyOAuthModelMappings(malformed, rules))
 	require.Equal(t, "invalid", malformed.Credentials["model_mapping"])
+}
+
+func TestApplyOAuthModelMappingsIdentityPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mapping any
+		target  string
+		want    any
+		applied bool
+	}{
+		{"decoded identity", map[string]any{"gpt-5.4": "gpt-5.4"}, "gpt-5.5", "gpt-5.5", true},
+		{"typed identity", map[string]string{"gpt-5.4": "gpt-5.4"}, "gpt-5.5", "gpt-5.5", true},
+		{"custom mapping", map[string]any{"gpt-5.4": "custom-upstream"}, "gpt-5.5", "custom-upstream", false},
+		{"already matches template", map[string]any{"gpt-5.4": "gpt-5.5"}, "gpt-5.5", "gpt-5.5", false},
+		{"identity template no-op", map[string]any{"gpt-5.4": "gpt-5.4"}, "gpt-5.4", "gpt-5.4", false},
+		{"non-string target", map[string]any{"gpt-5.4": []string{"invalid"}}, "gpt-5.5", []string{"invalid"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before, err := json.Marshal(tc.mapping)
+			require.NoError(t, err)
+			input := &CreateAccountInput{Credentials: map[string]any{"model_mapping": tc.mapping}}
+			applied := applyOAuthModelMappings(input, []OAuthModelMappingRule{{From: "gpt-5.4", To: tc.target}})
+			require.Equal(t, tc.applied, applied)
+			mapping, ok := input.Credentials["model_mapping"].(map[string]any)
+			require.True(t, ok)
+			require.Equal(t, tc.want, mapping["gpt-5.4"])
+			after, err := json.Marshal(tc.mapping)
+			require.NoError(t, err)
+			require.JSONEq(t, string(before), string(after), "caller-owned mapping must be unchanged")
+		})
+	}
 }
 
 func TestOAuthInitialModelMappingsAreOptInAndScoped(t *testing.T) {

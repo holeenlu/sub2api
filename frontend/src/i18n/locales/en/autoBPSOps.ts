@@ -36,7 +36,7 @@ export default {
   "oauthMappings": {
   "title": "New OpenAI OAuth model mappings",
   "subtitle": "Adapted from ranxi2001 PR #219. The rules are applied only when a new OpenAI OAuth account is created.",
-  "scope": "Existing account mappings win. API keys, reauthentication and existing accounts are unchanged. The switch is off by default.",
+  "scope": "Existing custom mappings win. Identity passthroughs for the same source may be replaced by the template. API keys, reauthentication and existing accounts are unchanged. The switch is off by default.",
   "enabled": "Apply these mappings to new OpenAI OAuth accounts",
   "from": "Requested model (optional trailing *)",
   "to": "Upstream model",

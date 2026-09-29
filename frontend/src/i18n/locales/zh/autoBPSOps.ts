@@ -36,7 +36,7 @@ export default {
   "oauthMappings": {
   "title": "新建 OpenAI OAuth 模型映射",
   "subtitle": "适配 ranxi2001 #219。规则只在新建 OpenAI OAuth 账号时应用。",
-  "scope": "已有账号的显式映射优先；API Key、重新认证和已有账号不受影响。开关默认关闭。",
+  "scope": "已有自定义映射优先；同名直通映射可能会被模板替换。API Key、重新认证和已有账号不受影响。开关默认关闭。",
   "enabled": "对新建 OpenAI OAuth 账号应用这些映射",
   "from": "请求模型（可在末尾使用 *）",
   "to": "上游模型",
