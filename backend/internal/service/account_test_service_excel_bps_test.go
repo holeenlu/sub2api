@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"github.com/gin-gonic/gin"
@@ -11,6 +12,19 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestExcelBPSAccountTestPreservesRequestContext(t *testing.T) {
+	type probeContextKey struct{}
+	upstream := &httpUpstreamRecorder{err: errors.New("mock upstream failure")}
+	svc := &AccountTestService{openaiGatewayService: openAIClientToolsTestService(upstream)}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx := context.WithValue(context.Background(), probeContextKey{}, "probe-context")
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/300/test", nil).WithContext(ctx)
+
+	require.Error(t, svc.testExcelBPSAccountConnection(c, excelAccount(), "gpt-6-astra", "Reply OK"))
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "probe-context", upstream.lastReq.Context().Value(probeContextKey{}))
+}
 
 func TestBuildExcelBPSAccountTestBodyUsesResponsesContract(t *testing.T) {
 	raw, err := buildExcelBPSAccountTestBody("gpt-6-astra", "糖果题")

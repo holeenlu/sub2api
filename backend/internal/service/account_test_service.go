@@ -1011,7 +1011,7 @@ func (s *AccountTestService) testExcelBPSAccountConnection(c *gin.Context, accou
 	if probeCtx.Request.Header == nil {
 		probeCtx.Request.Header = make(http.Header)
 	}
-	result, err := s.openaiGatewayService.Forward(probeCtx, probeCtx, account, body)
+	result, err := s.openaiGatewayService.Forward(probeCtx.Request.Context(), probeCtx, account, body)
 	if err != nil {
 		// A single-account test has no other account to fail over to.
 		var failover *UpstreamFailoverError
