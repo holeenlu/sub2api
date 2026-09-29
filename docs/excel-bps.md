@@ -187,7 +187,7 @@ python backend/scripts/e2e-bps-ignore-images.py --expect ignore --stream --outpu
 
 在管理员后台的 **系统设置 > 功能开关 > Excel / BPS 图片支持** 中启用图片支持，并将图片传输方式设为 **BPS 原生附件上传** 后保存。原有开关和容量限制继续生效；未配置传输方式时仍使用原来的 HTTPS 中转。原生模式不要求填写公网图片地址，不会自动切换已有部署。
 
-- 先校验完整请求与所有内联图片，再使用选中账号的 OAuth、ChatGPT Account ID 和业务代理向固定的 BPS attachments 端点提交 multipart 文件，将图片替换为上游返回的附件 ID，最后发送 Responses。用户消息中的内联图片转换为附件 ID；function/custom 工具截图通过相同的字节、格式和容量校验后保留 data URL，不调用附件上传。原生内联图片的 detail 缺失或为 null 时补为 auto，显式 low/high/original 保持原值；HTTPS URL、相邻文本及工具参数保持原值。
+- 先校验完整请求与所有内联图片，再使用选中账号的 OAuth、ChatGPT Account ID 和业务代理向固定的 BPS attachments 端点提交 multipart 文件，将图片替换为上游返回的附件 ID，最后发送 Responses。用户消息中的内联图片转换为附件 ID；function/custom 工具截图通过相同的字节、格式和容量校验后保留 data URL，不调用附件上传。原生内联图片的 detail 缺失或为 null 时补为 auto，显式 low/high/original 保持原值。用户消息中的附件引用（新上传、历史已有或从工具结果移入）在校验后只发送 type 和 file_id，不向 BPS 发送 detail 或其他附加字段；HTTPS URL、相邻文本及工具参数保持原值。
 - 上传过程流式解码，不在本地保存图片文件。仍执行 PNG/JPEG/GIF/WebP、20 MiB 单图、32 MiB 每请求、64 Mi 像素限制；图片数量沿用后台设置（默认 20 张）；重复图片也计入请求限制，但同一请求只上传一次。完整请求不合法时不会先上传图片。
 - 每个网关实例最多 32 个实际上传；满额返回 503。每次上传最多 60 秒，跟随请求取消，并禁止重定向。上传响应体关闭后才开始 Responses，兼容账号并发为 1。上传失败立即结束当前账号的尝试，不回退中转、不重放 Responses；上传返回 429 时按「BPS 限流与账号状态」切换账号并记录 BPS 冷却，其他失败直接返回、不切换账号。两者都不修改 Codex 用量、冷却或运行时封禁。
 - 附件 ID 缓存只保存元数据，最多 512 条，上传开始 30 分钟后到期，读取不续期。键包含图片内容、MIME、账号、凭据、API Key 和会话作用域；同一作用域的并发上传可合并，没有会话标识时仅在当前请求内去重。凭据或账号变化、缓存过期/淘汰、重启后，客户端重发原图会重新上传。附件 ID 在 BPS 错误日志中脱敏。

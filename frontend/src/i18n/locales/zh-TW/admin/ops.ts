@@ -2,6 +2,14 @@
 // 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
 export default {
     ops: {
+      balanceError: {
+        user: '使用者餘額不足',
+        userHint: '本站使用者餘額未達到請求要求。請儲值該使用者餘額後重試。',
+        upstream: '上游帳戶餘額不足',
+        upstreamHint: '上游服務報告帳戶餘額不足。請管理員檢查並儲值或更換上游帳戶。',
+        unknown: '餘額不足（來源未確認）',
+        unknownHint: '這條日誌缺少足夠的來源資訊，請結合原始錯誤和上游回應確認餘額歸屬。',
+      },
       title: '維運監控',
       description: '維運監控與故障排除',
       // Dashboard

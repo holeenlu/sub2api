@@ -526,6 +526,13 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		}
 	}
 
+	// PR #219's model mappings are an opt-in setting for newly created OpenAI
+	// OAuth accounts. Apply them before credential sanitization so the mapping
+	// remains part of the account credentials; existing explicit mappings win.
+	if err := s.applyOAuthInitialModelMappings(ctx, input); err != nil {
+		return nil, err
+	}
+
 	// 校验并规范化请求头覆写配置（header 名小写化、格式检查）
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
 		return nil, err

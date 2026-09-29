@@ -6,6 +6,7 @@
       <RouterLink to="/admin/accounts" class="text-primary-600">{{ t('autoBPSOps.accounts') }}</RouterLink>
       <p v-if="error" role="alert" class="text-red-600">{{ error }}</p><p v-if="notice" role="status" class="text-emerald-600">{{ notice }}</p>
       <BPSDefaultsPanel v-if="auth.user?.role === 'admin'" :key="auth.user.id" :groups="templateGroups" />
+      <OAuthInitialModelMappingsPanel v-if="auth.user?.role === 'admin'" :key="`oauth-mappings-${auth.user.id}`" />
       <section class="card p-5">
         <header class="flex justify-between"><h2 class="font-semibold">{{ t('autoBPSOps.rules') }}</h2><button class="btn btn-secondary" :disabled="busy" @click="refresh">{{ t('autoBPSOps.refresh') }}</button></header>
         <p class="my-3 text-sm text-gray-500">{{ t('autoBPSOps.notice') }}</p>
@@ -49,6 +50,7 @@ import { useAuthStore } from '@/stores/auth'
 import SmartOpsNav from '@/components/admin/operations/SmartOpsNav.vue'
 import QualityBPSSettings from '@/components/admin/operations/QualityBPSSettings.vue'
 import BPSDefaultsPanel from '@/components/admin/operations/BPSDefaultsPanel.vue'
+import OAuthInitialModelMappingsPanel from '@/components/admin/operations/OAuthInitialModelMappingsPanel.vue'
 import QualityProbeSchedule from '@/components/admin/operations/QualityProbeSchedule.vue'
 import { apiClient } from '@/api/client'
 import { adminAPI } from '@/api/admin'
