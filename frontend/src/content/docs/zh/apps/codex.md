@@ -58,7 +58,7 @@ supports_websockets = false
 
 在刚才设置环境变量的同一个终端运行 `codex`。`supports_websockets = false` 是先验证 HTTP/SSE 的配置，不代表本站没有 WebSocket 路由。
 
-OpenAI 分组由弹窗生成另一种配置：Provider ID 是 `OpenAI`，包含主模型、审查模型和 `[features]`，模型目录为手动获取后的可选配置。默认 **Legacy** 模式同时下载 `config.toml` 和 `auth.json`，其中 `requires_openai_auth = true`；**API key** 模式改用 `requires_openai_auth = false` 与 `experimental_bearer_token`，修改后必须完全重启 Codex。两种模式不要混合，也不要把路由分组的 `tapmodels` 表和 OpenAI 分组的 `OpenAI` 表拼成一个 Provider。
+OpenAI 分组由弹窗生成另一种配置：Provider ID 是 `OpenAI`，包含主模型、审查模型、`[features]` 和默认模型目录路径；首次使用前需要获取并保存目录文件。默认 **Legacy** 模式同时下载 `config.toml` 和 `auth.json`，其中 `requires_openai_auth = true`；**API key** 模式改用 `requires_openai_auth = false` 与 `experimental_bearer_token`，修改后必须完全重启 Codex。两种模式不要混合，也不要把路由分组的 `tapmodels` 表和 OpenAI 分组的 `OpenAI` 表拼成一个 Provider。
 
 ## 桌面端：让应用拿到 Key
 
