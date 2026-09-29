@@ -31,16 +31,22 @@ class DeliveryReviewTest(unittest.TestCase):
         self.assertEqual(result['scope'], 'unclassified')
         self.assertEqual(result['targets'], [])
 
-    def test_public_targets_ignore_upstream_config_and_do_not_mutate_repo(self):
+    def test_shared_targets_start_at_kdan_and_propagate_tapmodels(self):
+        (self.repo / 'shared.txt').write_text('changed\n')
+        result = delivery.review(self.repo, 'shared')
+        self.assertEqual([t['push_command'] for t in result['targets']], [
+            'git push origin refs/heads/KDAN:refs/heads/KDAN',
+            'git push origin refs/heads/TapModels:refs/heads/TapModels',
+            'git push erwinlin refs/heads/TapModels:refs/heads/main',
+        ])
+
+    def test_public_target_is_compatibility_branch_only(self):
         self.git('config', 'push.default', 'upstream')
         (self.repo / 'shared.txt').write_text('changed\n')
         before = self.git('status', '--porcelain')
         result = delivery.review(self.repo, 'public')
         self.assertEqual([t['push_command'] for t in result['targets']], [
             'git push origin refs/heads/holeen/main:refs/heads/main',
-            'git push origin refs/heads/KDAN:refs/heads/KDAN',
-            'git push origin refs/heads/TapModels:refs/heads/TapModels',
-            'git push erwinlin refs/heads/TapModels:refs/heads/main',
         ])
         self.assertEqual(self.git('status', '--porcelain'), before)
         self.assertEqual(self.git('log', '--format=%s', '-1'), 'baseline')

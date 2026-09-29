@@ -21,9 +21,9 @@ def render_instructions(branch):
         "./deploy/sync-upstream.sh status",
         "```",
         "",
-        f"本機分支：{local}；發布目標：{destinations}。",
+        f"本機分支：{local}；發布目標：{destinations}。KDAN 是主整合分支；公共分支只在明確要求公共版本時更新。",
         "prepare 只完成本機合併與驗證；發布需使用該檢查點 ID 及明確的推送授權。",
-        "此工具同步公開上游，公共層新增的客製化修正是否已納入品牌仍須另行驗收。",
+        "官方上游先在 KDAN 完成普通 merge 和驗證，再傳播到 TapModels；公共 main 只作兼容快照。",
         "",
     ])
 
