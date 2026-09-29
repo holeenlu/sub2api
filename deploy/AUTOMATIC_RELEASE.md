@@ -8,7 +8,7 @@
 
 定制部分仅负责自动版本分配、渠道信息、发布草稿和在线更新清单。四段版本通过 GoReleaser snapshot 的版本模板打包，以独立的发布步骤上传到预留的正式 Release；不会把四段版本交给严格的 SemVer 标签解析。所有平台产物验证完成后才发布，GitHub Release 发布成功后才将对应镜像摘要提升为 `latest`，并把本次 Release 标为仓库级 `Latest`。
 
-GitHub 的 `Latest` 是整个仓库共用的单一标记，不能同时为公共版和 KDAN 版分别维护一个 `Latest`。`holeenlu/sub2api` 中最后一次成功发布的渠道会成为仓库 `Latest`；需要固定渠道版本时，应使用完整标签，例如 `kdan/v0.2.9.3`。TapModels 单独使用 `erwinlin/TapModels`，其 `Latest` 独立计算。
+GitHub 的 `Latest` 是整个仓库共用的单一标记。当前 `holeenlu/sub2api/main` 只发布 KDAN，因此其 `Latest` 直接对应最新成功的 KDAN Release；需要固定版本时，应使用完整标签，例如 `kdan/v0.2.9.3`。TapModels 单独使用 `erwinlin/TapModels`，其 `Latest` 独立计算。
 
 | 渠道 | 仓库 / 分支 | Release 标签 | GHCR 镜像 |
 | --- | --- | --- | --- |
