@@ -50,6 +50,7 @@ export default {
       accountCost: 'コスト',
       noDataAvailable: 'データがありません',
       recentUsage: '最近の使用量',
+      actualSpending: '実際の支出 ($)',
       viewModelDistribution: 'モデル分布',
       viewSpendingRanking: 'ユーザー支出ランキング',
       spendingRankingTitle: 'ユーザー支出ランキング',

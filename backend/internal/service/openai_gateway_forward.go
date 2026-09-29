@@ -24,7 +24,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	latest, admissionErr := s.latestOpenAITurnAccount(ctx, c, account)
 	if admissionErr != nil {
-		return nil, admissionErr
+		return nil, markOpenAIInitialAdmissionError(admissionErr)
+	}
+	// Compare routing before adopting the fresh snapshot. Model-specific
+	// admission stays at the existing post-normalization send boundary.
+	if latest.IsOpenAI() && openAITurnRouteFingerprint(latest) != openAITurnRouteFingerprint(account) {
+		return nil, markOpenAIInitialAdmissionError(denyOpenAITurn("account_binding_changed"))
 	}
 	account = latest
 

@@ -672,7 +672,7 @@ export default {
         excelBPSAllModels: 'Enable for all models (legacy behavior)',
         excelBPSModels: 'Select models for Excel / BPS',
         excelBPSAstraOnly: 'Astra only',
-        excelBPSModelsHint: 'Matches model names after account mapping. Selected models use Excel / BPS; other models retain their Codex, WS and passthrough settings. An empty selection disables BPS routing.',
+        excelBPSModelsHint: 'Matches model names after account mapping. Selected models use Excel / BPS; other models retain their Codex, WS and passthrough settings. An empty selection disables BPS routing. Explicitly selecting gpt-image-2 also enables BPS for non-streaming PNG generation and single-image edits without masks. Unsupported options stay on Codex; only explicit request-format rejections allow fallback. Authentication, network and server failures are not replayed. Other image models and legacy all-model routing do not enable BPS images.',
         excelBPSNotice: "Start a new conversation after saving. Selected models use HTTP/SSE. Supports Responses, client tools and HTTPS images. Enable base64 images and tool screenshots in system image settings. max / ultra use xhigh. Model access depends on upstream permissions.",
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
@@ -922,6 +922,7 @@ export default {
       enterCustomModelName: 'Enter custom model name',
       addModel: 'Add',
       modelExists: 'Model already exists',
+      modelMappingConflict: 'A mapping already exists for {from} → {to}. Modify or remove it under Model Mapping before adding this whitelist model',
       modelCount: '{count} models',
       poolMode: 'Pool Mode',
       poolModeHint: 'Enable when upstream is an account pool; errors won\'t mark local account status',
@@ -1019,7 +1020,21 @@ export default {
 	  autoPause5hDisabled: 'Disable 5h auto-pause',
 	  autoPause7dDisabled: 'Disable 7d auto-pause',
 	  autoPauseDisabledHint: 'When enabled, this account is never auto-paused (even if a global default threshold is configured).',
-	  autoResetCredit: {
+	  claudeResetCredits: {
+	    count: 'Resets',
+	    countTooltipLoad: 'Check remaining Claude resets (read-only, never consumes one)',
+	    countTooltipRefresh: 'Refresh remaining Claude resets (read-only, never consumes one)',
+	    fetched: 'Checked at {time}',
+	    error: 'Could not check reset credits',
+	    ineligible: 'This account cannot use resets right now',
+	    cooldown: 'Cooldown until {time}',
+	    expiresAt: 'Expires {time}',
+	    expiresAtFull: 'Reset credit expires at: {time}',
+	    clears: 'Clears windows: {windows}',
+	    notUsableNow: 'Not usable now',
+	    requiresLimit: 'Usable only after hitting a limit'
+	  },
+      autoResetCredit: {
 	    title: 'Automatically use reset credits',
 	    hint: 'Uses the earliest-expiring available credit only when actual usage reaches a threshold. Off by default; the account remains paused if no credit is available or reset fails.',
 	    threshold5h: '5h auto-reset threshold (%)',

@@ -674,7 +674,7 @@ export default {
         excelBPSAllModels: 'すべてのモデルで有効化（従来の動作）',
         excelBPSModels: 'Excel / BPS を使うモデルを選択',
         excelBPSAstraOnly: 'Astra のみ',
-        excelBPSModelsHint: 'アカウントのマッピング後のモデル名で照合します。選択したモデルは Excel / BPS を使い、ほかのモデルは Codex、WS、パススルーの設定を維持します。何も選択しないと BPS ルーティングは無効になります。',
+        excelBPSModelsHint: 'マッピング後のモデル名で照合し、選択したモデルのみ Excel / BPS を使います。未選択のモデルは従来の Codex、WS、パススルー設定を維持します。gpt-image-2 を明示的に選択すると、非ストリーミング PNG 生成とマスクなしの単一画像編集も BPS を使います。非対応のオプションは Codex を使い、明確なリクエスト形式の拒否のみフォールバックします。認証、ネットワーク、サーバーエラー時は再送しません。他の画像モデルと従来の全モデル設定では BPS 画像生成は有効になりません。',
         excelBPSNotice: "保存後は新しい会話を開始してください。選択したモデルは HTTP/SSE を使用します。Responses、クライアントツール、HTTPS 画像に対応します。Base64 画像とツールのスクリーンショットはシステムの画像設定で有効化します。max / ultra は xhigh に変換します。モデルの利用可否は上流の権限に依存します。",
         oauthPassthroughDesc:
           '有効にすると、このOpenAIアカウントは自動パススルーを使用します。ゲートウェイは認証情報のみを差し替えてリクエスト/レスポンスをそのまま転送し、請求、同時実行数、監査、および必要な安全フィルタリングは維持します。',
@@ -878,6 +878,7 @@ export default {
       modelRestriction: 'モデル制限 (任意)',
       modelWhitelist: 'モデル許可リスト',
       modelMapping: 'モデルマッピング',
+      modelMappingConflict: '{from} → {to} のマッピングが既に存在します。許可リストに追加する前に、モデルマッピングで変更または削除してください',
       fromModel: 'リクエストモデル',
       toModel: '対象モデル',
       selectAllowedModels: '許可するモデルを選択します。空欄の場合はすべてのモデルをサポートします。',
@@ -1018,6 +1019,20 @@ export default {
 	  autoPause5hDisabled: '5hの自動一時停止を無効化',
 	  autoPause7dDisabled: '7dの自動一時停止を無効化',
 	  autoPauseDisabledHint: '有効にすると、グローバルのデフォルトしきい値が設定されていても、このアカウントは自動一時停止されません。',
+	  claudeResetCredits: {
+	    count: 'リセット回数',
+	    countTooltipLoad: 'Claude の残りリセット回数を確認（読み取り専用、回数は消費しません）',
+	    countTooltipRefresh: 'Claude の残りリセット回数を更新（読み取り専用、回数は消費しません）',
+	    fetched: '確認時刻: {time}',
+	    error: 'リセットクレジットを確認できませんでした',
+	    ineligible: 'このアカウントは現在リセットを利用できません',
+	    cooldown: '{time} までクールダウン中',
+	    expiresAt: '有効期限: {time}',
+	    expiresAtFull: 'リセットクレジットの有効期限: {time}',
+	    clears: 'リセット対象: {windows}',
+	    notUsableNow: '現在利用できません',
+	    requiresLimit: '上限に達した場合のみ利用できます'
+	  },
 	  autoResetCredit: {
 	    title: 'リセットクレジットを自動使用',
 	    hint: '実際の使用量がしきい値に達した場合に限り、有効期限が最も早い利用可能なクレジットを使用します。デフォルトではオフです。クレジットがない場合やリセットに失敗した場合、アカウントは一時停止状態のままです。',

@@ -298,6 +298,7 @@ interface Props {
   apiKey: string
   baseUrl: string
   platform: GroupPlatform | null
+  claudeCodeOnly?: boolean
   allowMessagesDispatch?: boolean
 }
 
@@ -375,6 +376,7 @@ const codexManifestContext = computed(() => {
 
 // Reset tabs when platform changes
 const defaultClientTab = computed(() => {
+  if (props.claudeCodeOnly) return 'claude'
   switch (props.platform) {
 
     case 'openai':
@@ -390,7 +392,7 @@ const defaultClientTab = computed(() => {
   }
 })
 
-watch(() => props.platform, () => {
+watch(() => [props.platform, props.claudeCodeOnly], () => {
   activeTab.value = 'unix'
   activeClientTab.value = defaultClientTab.value
   codexAuthMode.value = 'legacy'
@@ -483,6 +485,9 @@ const SparkleIcon = {
 
 const clientTabs = computed((): TabConfig[] => {
   if (!props.platform) return []
+  if (props.claudeCodeOnly) {
+    return [{ id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon }]
+  }
   switch (props.platform) {
 
     case 'openai': {
@@ -1909,6 +1914,19 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         limit: { context: 1000000, output: 128000 },
         modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
         options: { thinking: { type: 'adaptive' }, effort: 'medium' },
+        variants: {
+          low: { effort: 'low' },
+          medium: { effort: 'medium' },
+          high: { effort: 'high' },
+          xhigh: { effort: 'xhigh' },
+          max: { effort: 'max' }
+        }
+      },
+      'claude-sonnet-5-5': {
+        name: 'Claude Sonnet 5.5',
+        limit: { context: 1000000, output: 128000 },
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
+        options: { thinking: { type: 'adaptive' }, effort: 'high' },
         variants: {
           low: { effort: 'low' },
           medium: { effort: 'medium' },

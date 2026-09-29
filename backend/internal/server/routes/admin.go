@@ -389,6 +389,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/codex-ticket-harvest", h.Admin.Account.HarvestCodexTicket)
 		accounts.POST("/:id/codex-ticket-diagnostic", h.Admin.Account.DiagnoseCodexModels)
 		accounts.PUT("/:id/codex-ticket-participation", h.Admin.Account.SetCodexTicketParticipation)
+		accounts.GET("/:id/claude/reset-credits", h.Admin.Account.ClaudeResetCredits)
 		accounts.POST("", h.Admin.Account.Create)
 		accounts.POST("/:id/duplicate", h.Admin.Account.Duplicate)
 		accounts.POST("/check-mixed-channel", h.Admin.Account.CheckMixedChannel)

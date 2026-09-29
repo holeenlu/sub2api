@@ -125,6 +125,8 @@ export default {
           enabledHint: '關閉後管理員側邊欄入口隱藏，閘道器內容稽核不會執行。',
           cyberSessionBlock: 'cyber 工作階段自動遮蔽',
           cyberSessionBlockHint: '開啟後,被上游網路安全策略(cyber_policy)攔截的工作階段將在 TTL 內被本地遮蔽,不再發往上游。僅遮蔽該工作階段,不影響同 Key 其他工作階段。',
+          riskControlUserAllowlist: '風控白名單',
+          riskControlUserAllowlistHint: '輸入任意電子郵件關鍵詞進行模糊搜尋。 白名單中的使用者不會觸發封號或本地遮蔽，但仍然無法突破上游攔截。該功能通常用於可信的下游中轉站。',
           cyberSessionBlockTTL: '遮蔽時長(秒)',
         },
         affiliate: {

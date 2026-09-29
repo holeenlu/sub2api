@@ -54,6 +54,7 @@ func ProvideAdminHandlers(
 	opencodeGoUsage *service.OpenCodeGoUsageService,
 	settingService *service.SettingService,
 	openAIGatewayService *service.OpenAIGatewayService,
+	claudeResetCredits *service.ClaudeResetCreditService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
@@ -61,6 +62,7 @@ func ProvideAdminHandlers(
 	accountHandler.SetCodexTicketSettings(settingService)
 	accountHandler.SetCodexTicketGateway(openAIGatewayService)
 	proxyHandler.SetCodexTicketSettings(settingService)
+	accountHandler.SetClaudeResetCreditService(claudeResetCredits)
 	return &AdminHandlers{
 		OpenAIOAuthReauth:      openaiOAuthReauthHandler,
 		AccountTokenGuardV2:    accountTokenGuardV2Handler,
@@ -141,10 +143,12 @@ func ProvideOpenAIGatewayHandler(
 	grokQuotaService *service.GrokQuotaService,
 	cfg *config.Config,
 	coordinator *securityaudit.Coordinator,
+	compositeResolver *service.CompositeRouteResolver,
 ) *OpenAIGatewayHandler {
 	gatewayService.SetPluginManager(pluginManager)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, apiKeyService,
 		usageRecordWorkerPool, errorPassthroughService, contentModerationService, opsService, cfg)
+	h.compositeResolver = compositeResolver
 	h.securityAuditCoordinator = coordinator
 	h.grokMediaEligibilityProber = grokQuotaService
 	return h

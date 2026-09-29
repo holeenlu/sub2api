@@ -792,7 +792,7 @@ export default {
         excelBPSAllModels: '對所有模型啟用（相容原設定）',
         excelBPSModels: '勾選使用 Excel / BPS 的模型',
         excelBPSAstraOnly: '僅選 Astra',
-        excelBPSModelsHint: '按帳號對應後的模型名稱匹配。僅勾選模型走 Excel / BPS；未選模型保留原 Codex、WS 和自動透傳設定。不勾選任何模型時不使用 BPS。',
+        excelBPSModelsHint: '按帳號對應後的模型名稱匹配。僅勾選模型走 Excel / BPS；未選模型保留原 Codex、WS 和自動透傳設定。不勾選任何模型時不使用 BPS。顯式勾選 gpt-image-2 後，非串流 PNG 文生圖和無蒙版單圖編輯也走 BPS。不支援的參數預先走 Codex；僅明確的請求格式拒絕允許回退，驗證、網路及伺服器錯誤不重放。其他生圖模型和「對所有模型啟用」不會開啟 BPS 生圖。',
         excelBPSNotice: "儲存後請新建工作階段。選定模型使用 HTTP/SSE，支援 Responses、用戶端工具和 HTTPS 圖片；Base64 圖片和工具截圖需在系統圖片設定中啟用。max / ultra 轉為 xhigh。模型是否可用由上游權限決定。",
         oauthPassthroughDesc:
           '開啟後，該 OpenAI 帳號將自動透傳請求與回應，僅替換驗證並保留計費/並行/稽核及必要安全過濾；如遇相容性問題可隨時關閉回滾。',
@@ -1027,6 +1027,7 @@ export default {
       enterCustomModelName: '輸入自訂模型名稱',
       addModel: '填入',
       modelExists: '該模型已存在',
+      modelMappingConflict: '該模型已設定對應 {from} → {to}，請在模型對應中修改或刪除後再新增白名單模型',
       modelCount: '{count} 個模型',
       poolMode: '池模式',
       poolModeHint: '上游為帳號池時啟用，錯誤不標記本地帳號狀態',
@@ -1120,7 +1121,21 @@ export default {
 	  autoPause5hDisabled: '停用 5h 自動暫停',
 	  autoPause7dDisabled: '停用 7d 自動暫停',
 	  autoPauseDisabledHint: '開啟後該帳號永不進入自動暫停（即使全域預設閾值已設定）。',
-	  autoResetCredit: {
+	  claudeResetCredits: {
+	    count: '次數',
+	    countTooltipLoad: '點選查詢 Claude 剩餘重設次數（只讀，不會消耗）',
+	    countTooltipRefresh: '點選重新整理 Claude 剩餘重設次數（只讀，不會消耗）',
+	    fetched: '查詢時間：{time}',
+	    error: '無法查詢重設次數',
+	    ineligible: '此帳號目前不可使用重設',
+	    cooldown: '冷卻至 {time}',
+	    expiresAt: '到期 {time}',
+	    expiresAtFull: '重設次數到期時間：{time}',
+	    clears: '可清除視窗：{windows}',
+	    notUsableNow: '暫不可用',
+	    requiresLimit: '需達到限額後才能使用'
+	  },
+      autoResetCredit: {
 	    title: '自動使用重設卡',
 	    hint: '僅在實際用量達到閾值時使用最早到期的可用卡；預設關閉。無卡或失敗時帳號保持暫停。',
 	    threshold5h: '5h 自動用卡閾值(%)',
