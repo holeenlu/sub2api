@@ -1,14 +1,6 @@
 // 此檔案由 tools/zh-tw/gen-locale.mjs 依 locales/zh 自動產生，請勿手動修改。
 // 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
 export default {
-  teams: {
-    enabled: 'Teams 固定成本回本優先', cost: '單號成本（元）', hours: '有效視窗（小時）', conversion: '每扣費單位摺合人民幣', window: '視窗起點',
-    sources: { explicit: '帳號明確啟用時間', expiry: '帳號到期時間往前推', first_usage: '首次使用時間（持久儲存）' },
-    hint: '預設從帳號首次使用開始，4 小時固定成本 50；與使用者扣費同單位直接比較。統計該視窗內跨模型、跨分組的使用者扣費，未超過成本時優先回本；回本後恢復優先順序和動態收益排序。品質和並行限制始終生效。',
-    windowHint: '同幣種填 1；美元扣費填寫每美元對應人民幣金額。明確啟用時間可在下方批次設定。視窗到期不會自動滾動重設；首次使用時間確定後持久儲存；已有帳號首次初始化使用最早留存記錄。',
-    setStart: '同時設定選中 Teams 的啟用時間', startHint: '只寫入選中的 Teams；重新設定會改變這次成本視窗，請使用該帳號本次實際啟用時間。',
-    recovering: '回本優先', recovered: '已超過成本', progress: '距回本 ¥{gap} · 剩餘 {minutes} 分鐘', windowProfit: '本視窗利潤 ¥{profit}'
-  },
 
   profit: '近期利潤 / 利潤率',
   economics: { usage: '使用記錄', rate: '倍率估算', unknown: '利潤樣本不足' },
@@ -38,12 +30,12 @@ export default {
   groupIds: '生效分組 ID', groupHint: '逗號分隔；留空表示所有分組。',
   models: '生效模型', modelHint: '每行一個請求模型名，精確匹配；留空表示所有模型。',
   rule: '排序順序：體驗達標 → 資料不足 → 體驗未達標；同檔先按優先順序（越小越先），再按策略評分。擁堵或品質不佳時，低倍率不會越過體驗分檔。',
-  costHint: '利潤＝使用者扣費−理論成本；理論成本沿用使用記錄的成本列（（帳號統計定價或基礎費用）× 當次帳號倍率）。按同分組、同模型彙總，利潤率＝利潤÷使用者扣費。Teams 啟用固定成本模式時另按單號成本視窗計算；其他 OAuth 缺少樣本時不以倍率代替利潤，API 可回退倍率估算。',
+  costHint: '利潤＝使用者扣費−估算成本；估算成本＝同分組、同模型的（帳號統計定價或基礎費用）合計 × 帳號目前成本倍率。成本倍率在帳號編輯中設定，預設 0.1，獨立於帳號計費和使用者扣費；修改後重估近期利潤，不改歷史帳單。利潤率＝利潤÷使用者扣費。',
   save: '儲存設定', saving: '儲存中…', saved: '設定已儲存', loading: '載入中…', retry: '重試', error: '讀取或儲存失敗，請重試', invalid: '請檢查分組 ID 和參數範圍',
   recent: '最近一次候選評分', refresh: '重新整理評分', empty: '暫無評分。啟用後，符合範圍且需要自由選路的請求會生成評分。',
   historyPending: '歷史統計尚未就緒，目前使用原有評分；後台每 30 秒重新整理統計。',
   snapshotHint: '僅展示目前服務實例最近一次候選池，最多 100 個帳號。分數用於同一協議與訂閱優先池內排序，不代表最終選中；即時並行可能繼續變化。',
   model: '模型', group: '分組', account: '帳號', score: '得分', tier: '狀態', latency: 'P90 首 token', load: '並行佔用', rate: '成本倍率', quality: '品質通過', samples: '條樣本', unknown: '未知',
   tiers: { eligible: '體驗達標', insufficient: '資料不足', degraded: '體驗未達標' },
-  reasons: { quality_below_target: '品質低於目標', quality_unknown: '無有效品質結果', latency_above_target: '延遲超過目標', latency_insufficient: '延遲樣本不足', busy: '並行偏高或有排隊', load_unknown: '並行資料未知', cost_unknown: '成本未知', recent_errors: '近期錯誤偏多', historical_loss: '近期使用者扣費低於理論成本', profit_insufficient: '利潤樣本不足', teams_recovery: '本視窗收入尚未超過單號成本', teams_window_unavailable: 'Teams 成本視窗未設定或已失效' }
+  reasons: { quality_below_target: '品質低於目標', quality_unknown: '無有效品質結果', latency_above_target: '延遲超過目標', latency_insufficient: '延遲樣本不足', busy: '並行偏高或有排隊', load_unknown: '並行資料未知', cost_unknown: '成本未知', recent_errors: '近期錯誤偏多', historical_loss: '近期使用者扣費低於理論成本', profit_insufficient: '利潤樣本不足' }
 }
