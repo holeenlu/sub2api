@@ -780,7 +780,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	var completed, lastResponse []byte
 	var upstreamFailure *basispoints.UpstreamFailure
 	terminal := ""
-	terminalSuccessful := false
 	pendingEvent := ""
 	cacheCreationAsInput := account.IsExcelBPSCacheCreationAsInputEnabled()
 	for scanner.Next(ctx, 0, heartbeat.C, keepalive) {
@@ -812,11 +811,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			}
 			switch kind {
 			case "response.completed", "response.failed", "response.cancelled", "response.incomplete", "error":
-				if kind == "response.completed" && lease != nil {
-					lease.ReportSuccess()
-				}
 				terminal = kind
-				terminalSuccessful = IsSuccessfulStreamTerminal(payload)
 				completed = []byte(gjson.GetBytes(payload, "response").Raw)
 				result.ResponseID = gjson.GetBytes(payload, "response.id").String()
 				result.UpstreamResponseModel = gjson.GetBytes(payload, "response.model").String()
@@ -829,7 +824,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 						ErrType: upstreamFailure.Type, Code: upstreamFailure.Code, Message: upstreamFailure.Message,
 						IntendedStatus: upstreamFailure.Status, CountTowardsSLA: true, NonStream: !stream,
 					})
-					if upstreamFailure.Status == http.StatusTooManyRequests && !isQualityObservation(ctx) {
+					if upstreamFailure.Status == http.StatusTooManyRequests {
 						s.coolDownExcelBPS(ctx, account, resp.Header.Get("Retry-After"))
 					}
 				}
