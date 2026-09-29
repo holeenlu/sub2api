@@ -51,7 +51,7 @@ func TestToolExamplesUseCallableCatalog(t *testing.T) {
 					continue
 				}
 				for _, part := range mustTestValue[[]any](t, item["content"]) {
-					protocol.WriteString(text(mustTestValue[object](t, part)["text"]))
+					_, _ = protocol.WriteString(text(mustTestValue[object](t, part)["text"]))
 				}
 			}
 			if strings.Contains(protocol.String(), "For example, custom functions.exec") {

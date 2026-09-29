@@ -67,8 +67,8 @@ func (b *Bridge) toolExamples() string {
 		if err != nil {
 			continue
 		}
-		examples.WriteString("\nExample native run_officejs arguments: ")
-		examples.Write(encoded)
+		_, _ = examples.WriteString("\nExample native run_officejs arguments: ")
+		_, _ = examples.Write(encoded)
 		count++
 	}
 	return examples.String()
