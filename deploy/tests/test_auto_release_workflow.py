@@ -55,6 +55,11 @@ class ManualReleaseWorkflowTests(unittest.TestCase):
                 self.assertEqual(output.getvalue().strip(), 'channel=' + expected)
                 run.assert_not_called()
 
+    def test_published_release_is_marked_latest(self):
+        workflow = (ROOT / '.github/workflows/automatic-release.yml').read_text()
+        self.assertIn('gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -F make_latest=true', workflow)
+        self.assertNotIn('make_latest=false', workflow)
+
 
 if __name__ == '__main__':
     unittest.main()
