@@ -27,8 +27,7 @@ class BrandReleaseTests(unittest.TestCase):
 
     def test_watch_instructions_preserve_branches_and_history(self):
         for branch, local, destinations in (
-            ('public', 'holeen/main', ['origin/main']),
-            ('kdan', 'KDAN', ['origin/KDAN']),
+            ('main', 'main', ['origin/main']),
             ('tapmodels', 'TapModels', ['origin/TapModels', 'erwinlin/main']),
         ):
             with self.subTest(branch=branch):
@@ -105,7 +104,7 @@ class BrandReleaseTests(unittest.TestCase):
 
     def test_workflow_branch_and_image_contract(self):
         for brand, branches, image in (
-            ('kdan', ['KDAN'], 'ghcr.io/holeenlu/kdan'),
+            ('kdan', ['main'], 'ghcr.io/holeenlu/kdan'),
             ('tapmodels', ['main', 'TapModels'], 'ghcr.io/erwinlin/tapmodels'),
         ):
             ci_path = f'.github/workflows/{brand}-ci.yml'
@@ -118,7 +117,7 @@ class BrandReleaseTests(unittest.TestCase):
                 self.assertEqual(events['pull_request']['branches'], branches)
                 workflow = self.read_yaml(f'.github/workflows/{brand}-docker-image.yml')
                 events = workflow.get('on', workflow.get('true'))
-                self.assertEqual(events['push']['branches'], ['KDAN'] if brand == 'kdan' else ['main'])
+                self.assertEqual(events['push']['branches'], ['main'])
                 self.assertIn('github.repository ==', workflow['jobs']['build']['if'])
                 for filename in ('docker-compose.yml', 'docker-compose.local.yml', 'docker-compose.standalone.yml'):
                     service = self.read_yaml('deploy/' + filename)['services'][brand]

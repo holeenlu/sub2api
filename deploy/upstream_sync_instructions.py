@@ -2,8 +2,7 @@
 import argparse
 
 BRANCHES = {
-    "public": ("holeen/main", "origin/main"),
-    "kdan": ("KDAN", "origin/KDAN"),
+    "main": ("main", "origin/main"),
     "tapmodels": ("TapModels", "origin/TapModels, erwinlin/main"),
 }
 
@@ -21,9 +20,9 @@ def render_instructions(branch):
         "./deploy/sync-upstream.sh status",
         "```",
         "",
-        f"本機分支：{local}；發布目標：{destinations}。KDAN 是主整合分支；公共分支只在明確要求公共版本時更新。",
+        f"本機分支：{local}；發布目標：{destinations}。main 是 KDAN 品牌主整合分支；不維護獨立 KDAN 或公共分支。",
         "prepare 只完成本機合併與驗證；發布需使用該檢查點 ID 及明確的推送授權。",
-        "官方上游先在 KDAN 完成普通 merge 和驗證，再傳播到 TapModels；公共 main 只作兼容快照。",
+        "官方上游先在 main 完成普通 merge 和驗證，再傳播到 TapModels。",
         "",
     ])
 

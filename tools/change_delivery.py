@@ -8,10 +8,9 @@ from pathlib import Path
 
 
 TARGETS = {
-    'shared': [('KDAN', 'origin', 'KDAN'), ('TapModels', 'origin', 'TapModels'),
+    'shared': [('main', 'origin', 'main'), ('TapModels', 'origin', 'TapModels'),
                ('TapModels', 'erwinlin', 'main')],
-    'public': [('holeen/main', 'origin', 'main')],
-    'kdan': [('KDAN', 'origin', 'KDAN')],
+    'main': [('main', 'origin', 'main')],
     'tapmodels': [('TapModels', 'origin', 'TapModels'), ('TapModels', 'erwinlin', 'main')],
 }
 
@@ -59,7 +58,7 @@ def review(repo, scope=None, staged=False, commit=None):
         'scope_status': ('No changes selected' if not files else
                          'Split common and brand changes before committing' if scope == 'mixed' else
                          'Declared scope; verify semantic ownership and authorization before executing' if scope else
-                         'Choose shared/public/kdan/tapmodels/mixed after reviewing the actual diff'),
+                         'Choose shared/main/tapmodels/mixed after reviewing the actual diff'),
         'files': files,
         'review_clues': clues,
         'targets': [{'source': branch, 'remote': remote, 'destination': f'refs/heads/{dest}',
