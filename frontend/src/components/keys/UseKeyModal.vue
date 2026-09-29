@@ -1235,16 +1235,16 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
   switch (shell) {
     case 'cmd':
       envPath = 'Command Prompt'
-      envContent = `set TAPMODELS_API_KEY=${apiKey}`
+      envContent = `set KDAN_API_KEY=${apiKey}`
       break
     case 'powershell':
     case 'windows':
       envPath = 'PowerShell'
-      envContent = `$env:TAPMODELS_API_KEY="${apiKey}"`
+      envContent = `$env:KDAN_API_KEY="${apiKey}"`
       break
     default:
       envPath = 'Terminal'
-      envContent = `export TAPMODELS_API_KEY="${apiKey}"`
+      envContent = `export KDAN_API_KEY="${apiKey}"`
   }
 
   const configContent = `# Codex CLI → ${siteNameComment.value} Grok group
@@ -1253,18 +1253,18 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
 # Text models only. Image/video: grok-imagine-image / grok-imagine-video on media endpoints.
 # Switch model: grok-4.5 | grok-4.3 | grok-build-0.1 | grok-4.20-multi-agent-0309 (text / web_search)
 
-model_provider = "tapmodels"
+model_provider = "kdan"
 model = "${model}"
 # Optional:
 # review_model = "${model}"
 # model_reasoning_effort = "medium"
 # model_context_window = 500000
 
-[model_providers.tapmodels]
+[model_providers.kdan]
 name = "${escapeTomlBasicString(siteName.value)} Grok"
 base_url = "${baseUrl}"
 # Prefer env_key (variable NAME). Do not combine with experimental_bearer_token.
-env_key = "TAPMODELS_API_KEY"
+env_key = "KDAN_API_KEY"
 # Fallback only if you cannot set env (discouraged — keeps secret on disk):
 # experimental_bearer_token = "${apiKey}"
 wire_api = "responses"
@@ -1327,20 +1327,20 @@ function generateRoutedCodexFiles(
   }
   const label = labels[platform]
   const envContent = isWindows
-    ? `$env:TAPMODELS_API_KEY="${apiKey}"`
-    : `export TAPMODELS_API_KEY="${apiKey}"`
+    ? `$env:KDAN_API_KEY="${apiKey}"`
+    : `export KDAN_API_KEY="${apiKey}"`
 
   const catalogLine = codexCatalogTomlLine()
   const configContent = `# Codex CLI -> ${siteNameComment.value} ${label} group
-model_provider = "tapmodels"
+model_provider = "kdan"
 model = "${model}"
 review_model = "${model}"
 ${catalogLine}
 
-[model_providers.tapmodels]
+[model_providers.kdan]
 name = "${escapeTomlBasicString(siteName.value)} ${label}"
 base_url = "${baseUrl}"
-env_key = "TAPMODELS_API_KEY"
+env_key = "KDAN_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false`

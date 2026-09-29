@@ -1,9 +1,9 @@
-# Sub2API online installers
+# KDAN online installers
 
-Set `API_KEY` before running an installer. Existing client files are backed up first.
+Set `KDAN_API_KEY` before running an installer. Existing client files are backed up first.
 
 ```bash
-export API_KEY='your-key'
+export KDAN_API_KEY='your-key'
 curl -fsSL https://your-domain.example/install/codex.sh | bash
 curl -fsSL https://your-domain.example/install/claude-code.sh | bash
 ```

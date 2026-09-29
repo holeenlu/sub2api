@@ -18,10 +18,14 @@
  * RELEASE_REPO / RELEASE_DOCKER_IMAGE mirror service.DefaultReleaseRepo and the
  * image published by the release pipeline; the version badge builds rollback
  * commands from them.
+ *
+ * TODO(brand): the KDAN name, tagline and links below are PLACEHOLDERS pending
+ * the final wording and domains. Only the product name has been substituted so
+ * far; the surrounding copy is still the neutral upstream text.
  */
 
 /** Product name, used wherever the configured site name is missing. */
-export const BRAND_NAME = 'Sub2API'
+export const BRAND_NAME = 'KDAN'
 
 /** Suffix appended to the site name in the document title (index.html, main.ts). */
 export const BRAND_TITLE_SUFFIX_EN = 'AI API Gateway'
@@ -30,23 +34,23 @@ export const BRAND_TITLE_SUFFIX_EN = 'AI API Gateway'
 export const BRAND_TAGLINE_EN = 'Subscription to API Conversion Platform'
 
 /** Project home (header / footer link). Empty string hides the link. */
-export const BRAND_SITE_URL = 'https://github.com/Wei-Shaw/sub2api'
+export const BRAND_SITE_URL = 'https://kdan.com'
 
 /** Base URL of the shipped documentation. */
-export const BRAND_DOCS_URL = 'https://github.com/Wei-Shaw/sub2api/blob/main/docs'
+export const BRAND_DOCS_URL = 'https://docs.kdan.com'
 
 /** Payment integration guide, per UI language. */
 export const BRAND_PAYMENT_GUIDE_URL = {
-  zh: `${BRAND_DOCS_URL}/PAYMENT_CN.md`,
-  ja: `${BRAND_DOCS_URL}/PAYMENT.md`,
-  en: `${BRAND_DOCS_URL}/PAYMENT.md`
+  zh: `${BRAND_DOCS_URL}/zh/payment`,
+  ja: `${BRAND_DOCS_URL}/ja/payment`,
+  en: `${BRAND_DOCS_URL}/payment`
 } as const
 
 /** "Supported payment methods" section of the payment guide, per UI language. */
 export const BRAND_PAYMENT_METHODS_URL = {
-  zh: `${BRAND_DOCS_URL}/PAYMENT_CN.md#支持的支付方式`,
-  ja: `${BRAND_DOCS_URL}/PAYMENT.md#supported-payment-methods`,
-  en: `${BRAND_DOCS_URL}/PAYMENT.md#supported-payment-methods`
+  zh: `${BRAND_DOCS_URL}/zh/payment#supported-payment-methods`,
+  ja: `${BRAND_DOCS_URL}/ja/payment#supported-payment-methods`,
+  en: `${BRAND_DOCS_URL}/payment#supported-payment-methods`
 } as const
 
 /**
@@ -55,13 +59,16 @@ export const BRAND_PAYMENT_METHODS_URL = {
  */
 export const BRAND_COMPLIANCE_DOCUMENT_URL = {
   zh: `${BRAND_DOCS_URL}/legal/admin-compliance.zh.md`,
-  'zh-TW': 'https://github.com/holeenlu/sub2api/blob/main/docs/legal/admin-compliance.zh-TW.md',
+  'zh-TW': `${BRAND_DOCS_URL}/legal/admin-compliance.zh-TW.md`,
   ja: `${BRAND_DOCS_URL}/legal/admin-compliance.ja.md`,
   en: `${BRAND_DOCS_URL}/legal/admin-compliance.en.md`
 } as const
 
-/** GitHub "owner/repo" whose releases the version badge follows (= service.DefaultReleaseRepo). */
+/**
+ * GitHub "owner/repo" whose releases the version badge follows (= service.DefaultReleaseRepo).
+ * KDAN uses the kdan/v* release channel in this shared repository.
+ */
 export const RELEASE_REPO = 'holeenlu/sub2api'
 
 /** Container image published by the release pipeline (tags carry no "v" prefix). */
-export const RELEASE_DOCKER_IMAGE = 'ghcr.io/holeenlu/sub2api'
+export const RELEASE_DOCKER_IMAGE = 'ghcr.io/holeenlu/kdan'

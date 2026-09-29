@@ -218,32 +218,32 @@ export default {
         claudeNote:
           '二選一：終端機環境變數僅目前工作階段；~/.claude/settings.json 可持久化。請勿把含 API Key 的檔案提交到儲存庫。',
         codexNote:
-          '匯出 SUB2API_API_KEY，將 config.toml 儲存到 ~/.codex（可用 mkdir -p ~/.codex）。優先 env_key，勿提交金鑰。',
+          '匯出 KDAN_API_KEY，將 config.toml 儲存到 ~/.codex（可用 mkdir -p ~/.codex）。優先 env_key，勿提交金鑰。',
         codexNoteWindows:
-          '設定 $env:SUB2API_API_KEY，將 config.toml 儲存到 %USERPROFILE%\\.codex。優先 env_key，勿提交金鑰。'
+          '設定 $env:KDAN_API_KEY，將 config.toml 儲存到 %USERPROFILE%\\.codex。優先 env_key，勿提交金鑰。'
       },
       deepseek: {
         description: '透過目前 DeepSeek 分組設定 Claude Code、Codex 或 OpenCode。',
         codexDescription: '使用 API Key 設定 Codex，並透過目前 DeepSeek 分組傳送請求。',
         codexConfigTomlHint: '下載下方模型目錄，將兩個檔案儲存到 Codex 設定目錄後重啟 Codex。',
-        codexNote: '啟動 Codex 前先匯出 SUB2API_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
+        codexNote: '啟動 Codex 前先匯出 KDAN_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
       },
       minimax: {
         description: '透過目前 MiniMax 分組設定 Claude Code、Codex 或 OpenCode。',
         codexDescription: '使用 API Key 設定 Codex，並透過目前 MiniMax 分組傳送請求。',
         codexConfigTomlHint: '下載下方模型目錄，將兩個檔案儲存到 Codex 設定目錄後重啟 Codex。',
-        codexNote: '啟動 Codex 前先匯出 SUB2API_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
+        codexNote: '啟動 Codex 前先匯出 KDAN_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
       },
       composite: {
         description: '透過目前 Composite 路由分組設定受支援的用戶端。',
         codexDescription: '使用 API Key 和目前 Composite 分組的完整模型目錄設定 Codex。',
         codexConfigTomlHint: '下載下方模型目錄，將兩個檔案儲存到 Codex 設定目錄後重啟 Codex。',
-        codexNote: '啟動 Codex 前先匯出 SUB2API_API_KEY；分組會根據目錄中選中的模型路由請求。'
+        codexNote: '啟動 Codex 前先匯出 KDAN_API_KEY；分組會根據目錄中選中的模型路由請求。'
       },
       routedCodex: {
         description: '使用目前路由分組的完整模型目錄設定 Codex。',
         configTomlHint: '下載下方模型目錄，將兩個檔案儲存到 Codex 設定目錄後重啟 Codex。',
-        note: '啟動 Codex 前先匯出 SUB2API_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
+        note: '啟動 Codex 前先匯出 KDAN_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
       },
       codexModelCatalog: {
         title: 'Codex 模型目錄',

@@ -2,7 +2,7 @@
 
 This guide applies to Claude desktop builds with **Third-Party Inference** configuration. Desktop routing is separate from Claude Code CLI; shell exports and `~/.claude/settings.json` do not configure it.
 
-These steps follow official documentation and the this project Messages routes. A real desktop-to-production-key test has not been completed. If your build lacks this setting, use [Claude Code](/apps/claude-code).
+These steps follow official documentation and the KDAN Messages routes. A real desktop-to-production-key test has not been completed. If your build lacks this setting, use [Claude Code](/apps/claude-code).
 
 ## Connect
 
@@ -15,7 +15,7 @@ These steps follow official documentation and the this project Messages routes. 
 | --- | --- |
 | Gateway base URL | `{{API_ROOT}}` |
 | Credential kind | Static API key |
-| Gateway API key | Your this project key |
+| Gateway API key | Your KDAN key |
 | Gateway auth scheme | Bearer; the project also accepts x-api-key |
 | Model | An enabled Messages-compatible model in the key's group |
 
@@ -23,7 +23,7 @@ Managed settings can make the form read-only; contact your administrator. Do not
 
 ## Verify
 
-Match the test request in this project usage records. Model access follows the key's group. Messages compatibility does not establish compatibility with every desktop plugin or cloud feature.
+Match the test request in KDAN usage records. Model access follows the key's group. Messages compatibility does not establish compatibility with every desktop plugin or cloud feature.
 
 For Gateway was unreachable, check the root URL and network. For 401, check the key. For missing models, inspect group access and explicit client model settings. See official guidance for remote/cloud restrictions. Official account cloud history and local gateway sessions are not guaranteed to migrate; our repair package handles only Codex local indexes.
 

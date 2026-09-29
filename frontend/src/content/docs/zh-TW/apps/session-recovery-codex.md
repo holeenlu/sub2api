@@ -18,13 +18,13 @@ Claude Code 使用者請使用 [Claude Code 工作階段恢復](/apps/session-re
 
 ## Provider 切換的處理
 
-若只是把 `model_provider = "舊名稱"` 改成新名稱，先在舊設定備份中核對舊 Provider 的 ID、模型、地址及認證資訊來源。在同一個舊 Provider 設定項目內更新正確的本專案地址/Key，並恢復頂層原 ID，再重啟嘗試開啟舊工作階段。不要為了顯示歷史把新的 Key 發往舊服務商地址。
+若只是把 `model_provider = "舊名稱"` 改成新名稱，先在舊設定備份中核對舊 Provider 的 ID、模型、地址及認證資訊來源。在同一個舊 Provider 設定項目內更新正確的 KDAN 地址/Key，並恢復頂層原 ID，再重啟嘗試開啟舊工作階段。不要為了顯示歷史把新的 Key 發往舊服務商地址。
 
 不同用戶端版本對帳號/Provider 的篩選不同。本站工具只報告 Provider 分佈，不批次改寫 Provider，也不把一個官方帳號的資料歸給另一個帳號。仍不可見時保留報告聯絡支援。
 
 ## 下載與唯讀診斷
 
-要求 Python 3.10+。[下載 Codex 工作階段修復工具](/downloads/session-repair.zip)，解壓後進入 `session-repair` 目錄。
+要求 Python 3.10+。[下載 KDAN Codex 工作階段修復工具](/downloads/kdan-codex-session-repair.zip)，解壓後進入 `kdan-codex-session-repair` 目錄。
 
 macOS / Linux：
 

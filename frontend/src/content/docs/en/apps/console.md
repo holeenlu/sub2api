@@ -15,9 +15,9 @@
 | --- | --- | --- |
 | OpenAI | Codex CLI, Codex WebSocket, Claude Code (when Messages dispatch is enabled), OpenCode | `config.toml`, `auth.json` or `experimental_bearer_token`, Anthropic environment files, `opencode.json` |
 | Anthropic | Claude Code, routed Codex, OpenCode | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, Codex Responses provider, OpenCode provider |
-| Gemini | Gemini CLI, routed Codex, OpenCode | `GOOGLE_GEMINI_BASE_URL`, `GEMINI_API_KEY`, `GEMINI_MODEL` |
+| Gemini | Gemini CLI, routed Codex, OpenCode | `GOOGLE_GEMINI_BASE_URL`, `GEMINI_KDAN_API_KEY`, `GEMINI_MODEL` |
 | Antigravity | Claude Code, Gemini CLI, routed Codex, OpenCode | `/antigravity` base path; Gemini uses `/v1beta` |
-| Grok | Grok CLI, Claude Code, Codex, OpenCode | `GROK_MODELS_BASE_URL`, `XAI_API_KEY`, or the client-specific config |
+| Grok | Grok CLI, Claude Code, Codex, OpenCode | `GROK_MODELS_BASE_URL`, `XAI_KDAN_API_KEY`, or the client-specific config |
 | DeepSeek, MiniMax, Composite, Kimi, Zhipu, OpenCode | Claude Code, routed Codex, OpenCode | Use the generated group URL; only Composite offers a Codex catalog |
 
 ## Codex authentication modes
@@ -27,7 +27,7 @@ OpenAI's Codex tab exposes two modes:
 - **Legacy** sets `requires_openai_auth = true` and offers `auth.json`. Use it only for Codex versions that require that login shape.
 - **API key** sets `requires_openai_auth = false`, writes `experimental_bearer_token`, and adds the local image extension header. This stores the secret on disk; restrict permissions and never commit it.
 
-Routed Codex tabs default to `env_key = "API_KEY"`, `wire_api = "responses"`, and `supports_websockets = false`. The WebSocket tab enables WebSocket transport only for the OpenAI Responses path.
+Routed Codex tabs default to `env_key = "KDAN_API_KEY"`, `wire_api = "responses"`, and `supports_websockets = false`. The WebSocket tab enables WebSocket transport only for the OpenAI Responses path.
 
 ## Model catalog
 

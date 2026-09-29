@@ -1,2 +1,2 @@
-1c24eae181ad302359bd19a07d7b5d20f1dac2789a5383f1f73ebc0115c40ba8  claude-session-recovery.zip
-d6e2bb7704dba788a525055e22676c8fa584f121502193166a9edb70348c3357  session-repair.zip
+94e6371d0a63a24149823bb10895d9ad22aedb0c313f7e6431bb1028540d354b  kdan-claude-session-recovery.zip
+a4184580ab7538afc2cba66a8234569cb0c1745ead3578d381ea39f182226bee  kdan-codex-session-repair.zip

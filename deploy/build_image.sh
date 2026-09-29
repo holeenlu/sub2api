@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-docker build -t sub2api:latest \
+docker build -t ghcr.io/holeenlu/kdan:latest \
     --build-arg COMMIT="$(git -C "${REPO_ROOT}" rev-parse HEAD)" \
     --build-arg GOPROXY=https://goproxy.cn,direct \
     --build-arg GOSUMDB=sum.golang.google.cn \

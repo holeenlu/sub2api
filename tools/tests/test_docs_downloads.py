@@ -40,7 +40,7 @@ class DocsDownloadsTest(unittest.TestCase):
     def test_extracted_recovery_entrypoint_is_callable_without_user_data(self):
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary)
-            name = "session-repair"
+            name = "kdan-codex-session-repair"
             with zipfile.ZipFile(builder.DOWNLOADS / f"{name}.zip") as archive:
                 archive.extractall(target)
             result = subprocess.run(["bash", "repair-sessions.sh", "--help"], cwd=target / name, capture_output=True, text=True, timeout=10)
@@ -50,7 +50,7 @@ class DocsDownloadsTest(unittest.TestCase):
     def test_extracted_claude_recovery_entrypoint_is_read_only_and_callable(self):
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary)
-            name = "claude-session-recovery"
+            name = "kdan-claude-session-recovery"
             with zipfile.ZipFile(builder.DOWNLOADS / f"{name}.zip") as archive:
                 archive.extractall(target)
             result = subprocess.run(

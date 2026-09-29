@@ -1,11 +1,11 @@
-# Claude Code session recovery
+# KDAN Claude Code session recovery
 
 This package scans Claude Code's local transcript directory and prints exact
 commands for sessions that can still be resumed. It is useful when a session is
 not visible after changing an API key, account, project directory, or
 `CLAUDE_CONFIG_DIR`.
 
-The scanner is read-only. It does not contact this service or Anthropic, start a
+The scanner is read-only. It does not contact KDAN or Anthropic, start a
 Claude session, read message text, or change transcripts, settings, credentials,
 retention, or account data. Its report contains local project paths and session
 IDs, so review it before sharing.

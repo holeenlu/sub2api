@@ -1334,7 +1334,7 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
-  it("links payment guidance to README sections instead of removed payment docs", async () => {
+  it("links payment guidance to the KDAN docs site", async () => {
     const wrapper = mountView();
 
     await flushPromises();
@@ -1348,13 +1348,13 @@ describe("admin SettingsView payment visible method controls", () => {
 
     expect(paymentLinks).toHaveLength(2);
     expect(paymentLinks[0]?.attributes("href")).toBe(
-      "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md",
+      "https://docs.kdan.com/zh/payment",
     );
     expect(paymentLinks[1]?.attributes("href")).toBe(
-      "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md#支持的支付方式",
+      "https://docs.kdan.com/zh/payment#supported-payment-methods",
     );
     for (const link of paymentLinks) {
-      expect(link.attributes("href")).toContain("docs/PAYMENT");
+      expect(link.attributes("href")).toContain("https://docs.kdan.com/");
     }
   });
 

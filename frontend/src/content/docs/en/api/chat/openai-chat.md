@@ -2,7 +2,7 @@
 
 ```http
 POST /v1/chat/completions
-Authorization: Bearer $API_KEY
+Authorization: Bearer $KDAN_API_KEY
 Content-Type: application/json
 ```
 
@@ -31,8 +31,8 @@ User messages can contain `text` and `image_url` parts. Compatibility types also
 ## Minimal request
 
 ```bash
-curl "$API_BASE_URL/v1/chat/completions" \
-  -H "Authorization: Bearer $API_KEY" \
+curl "$KDAN_BASE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $KDAN_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"YOUR_MODEL_ID","messages":[{"role":"user","content":"Explain idempotency in one sentence."}]}'
 ```

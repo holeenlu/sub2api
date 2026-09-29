@@ -942,8 +942,8 @@ export default {
         searchTestHint:
           '獨立網頁搜尋探測（與閘道器 /v1/web_search 語義一致），不是帶 tools 的自由對話。',
         ttsTextLabel: 'TTS 文字',
-        ttsTextPlaceholder: '例如：Hello from Sub2API connectivity test.',
-        ttsTextDefault: 'Hello from Sub2API account connectivity test.',
+        ttsTextPlaceholder: '例如：Hello from KDAN connectivity test.',
+        ttsTextDefault: 'Hello from KDAN account connectivity test.',
         ttsTestHint: '獨立呼叫 /v1/tts（language=en）；成功時顯示音訊位元組數。',
         sttTestHint: '獨立呼叫 /v1/stt，使用合成靜音 WAV；成功表示介面可達。',
         realtimeTestHint:

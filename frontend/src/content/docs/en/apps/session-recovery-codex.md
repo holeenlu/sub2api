@@ -18,13 +18,13 @@ Use `codex resume` in the original project, `codex resume --all` across director
 
 ## Provider changes
 
-If only `model_provider` changed, inspect the original configuration backup. Restore that identifier, update the corresponding provider endpoint/key to this service, restart, and try the old task. Never send a new key to an old provider's unrelated endpoint.
+If only `model_provider` changed, inspect the original configuration backup. Restore that identifier, update the corresponding provider endpoint/key to KDAN, restart, and try the old task. Never send a new key to an old provider's unrelated endpoint.
 
 Account/provider filtering varies by client version. The utility reports provider distribution without rewriting provider identities or assigning one official account's data to another.
 
 ## Download and diagnose
 
-Python 3.10+ is required. [Download the Codex session repair utility](/downloads/session-repair.zip), extract it, and enter `session-repair`.
+Python 3.10+ is required. [Download the KDAN Codex session repair utility](/downloads/kdan-codex-session-repair.zip), extract it, and enter `kdan-codex-session-repair`.
 
 macOS / Linux:
 

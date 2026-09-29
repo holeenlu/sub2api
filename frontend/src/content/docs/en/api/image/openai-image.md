@@ -3,7 +3,7 @@
 ```http
 POST /v1/images/generations
 POST /v1/images/edits
-Authorization: Bearer $API_KEY
+Authorization: Bearer $KDAN_API_KEY
 ```
 
 The currently showcased image models include `gpt-image-2.5-flare` and `gpt-image-2.5-sunburst`; access is determined by the API key's group and available compatible accounts. The gateway validates the `gpt-image-*` family. If `model` is omitted, code defaults to `gpt-image-2`, but that default is not proof of schedulability, so production clients should send an exact ID returned by `GET /v1/models`.
@@ -13,8 +13,8 @@ The currently showcased image models include `gpt-image-2.5-flare` and `gpt-imag
 Generation uses JSON:
 
 ```bash
-curl "$API_BASE_URL/v1/images/generations" \
-  -H "Authorization: Bearer $API_KEY" \
+curl "$KDAN_BASE_URL/v1/images/generations" \
+  -H "Authorization: Bearer $KDAN_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-image-2.5-flare","prompt":"A clean product photo of a red desk lamp on a white background","n":1,"response_format":"b64_json"}'
 ```
@@ -40,8 +40,8 @@ Do not infer quality, size, format, or multi-image limits from another GPT Image
 The edit endpoint accepts one or more `image` / `image[n]` parts and an optional `mask`. Each uploaded part is read up to 20 MiB; the total request is also bounded by gateway configuration.
 
 ```bash
-curl "$API_BASE_URL/v1/images/edits" \
-  -H "Authorization: Bearer $API_KEY" \
+curl "$KDAN_BASE_URL/v1/images/edits" \
+  -H "Authorization: Bearer $KDAN_API_KEY" \
   -F "model=gpt-image-2.5-flare" \
   -F "prompt=Replace the background with a quiet library" \
   -F "image=@input.png;type=image/png" \

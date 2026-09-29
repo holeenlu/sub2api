@@ -7,7 +7,7 @@ Codex 使用者請使用 [Codex 工作階段恢復](/apps/session-recovery-codex
 | 目前專案的選擇器為空 | 回到原專案執行 `claude --resume`；按 `Ctrl+W` 或 `Ctrl+A` 擴大範圍 |
 | 換作業系統使用者、主機或 `CLAUDE_CONFIG_DIR` 後不見 | 找回原來的 Claude 設定目錄；本機工作階段不會自動跨主機同步 |
 | 專案或 worktree 路徑改變 | 恢復原工作目錄，再按工作階段 ID 恢復 |
-| 切換本專案 Key 或登入帳號後不見 | Key 不會搬走本地檔案；檢查實際 OS 使用者、設定目錄和專案路徑 |
+| 切換 KDAN Key 或登入帳號後不見 | Key 不會搬走本地檔案；檢查實際 OS 使用者、設定目錄和專案路徑 |
 | 檔案已刪除、過期或只存在雲端 | 本地掃描工具無法重建，需使用原主機、原用戶端或備份 |
 
 Claude Code CLI 會把工作階段儲存在本機 `~/.claude/projects/<專案>/<工作階段ID>.jsonl`；設定 `CLAUDE_CONFIG_DIR` 後則儲存在對應目錄。預設情況下，超過 30 天的本地記錄可能被清理。
@@ -28,21 +28,21 @@ claude --resume <工作階段ID>
 
 ## 下載唯讀恢復工具
 
-[下載 Claude Code 工作階段恢復包](/downloads/claude-session-recovery.zip)。macOS / Linux：
+[下載 KDAN Claude Code 工作階段恢復包](/downloads/kdan-claude-session-recovery.zip)。macOS / Linux：
 
 ```bash
-curl -fsSLO https://your-domain.example/downloads/claude-session-recovery.zip
-unzip claude-session-recovery.zip
-cd claude-session-recovery
+curl -fsSLO https://nextcode.buildtoconnect.com/downloads/kdan-claude-session-recovery.zip
+unzip kdan-claude-session-recovery.zip
+cd kdan-claude-session-recovery
 bash find-claude-sessions.sh
 ```
 
 Windows PowerShell：
 
 ```powershell
-Invoke-WebRequest https://your-domain.example/downloads/claude-session-recovery.zip -OutFile claude-session-recovery.zip
-Expand-Archive .\claude-session-recovery.zip -DestinationPath . -Force
-Set-Location .\claude-session-recovery
+Invoke-WebRequest https://nextcode.buildtoconnect.com/downloads/kdan-claude-session-recovery.zip -OutFile kdan-claude-session-recovery.zip
+Expand-Archive .\kdan-claude-session-recovery.zip -DestinationPath . -Force
+Set-Location .\kdan-claude-session-recovery
 .\Find-ClaudeSessions.ps1
 ```
 

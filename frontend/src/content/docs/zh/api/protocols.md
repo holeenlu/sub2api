@@ -16,7 +16,7 @@
 
 ## 鉴权和调用约束
 
-OpenAI 风格使用 `Authorization: Bearer $API_KEY`；Anthropic SDK 使用 `x-api-key` 和 `anthropic-version`；Gemini SDK 使用 `x-goog-api-key`。Gemini 鉴权也接受 Bearer、`x-api-key`、URL 查询参数 `key`，但 URL Key 容易进入代理日志。网关按端点执行部署配置的请求体上限、分组模型白名单，以及适用的额度、并发和内容策略。模型的工具、图像输入、结构化输出、缓存和内置工具还受具体账号与上游实现限制。
+OpenAI 风格使用 `Authorization: Bearer $KDAN_API_KEY`；Anthropic SDK 使用 `x-api-key` 和 `anthropic-version`；Gemini SDK 使用 `x-goog-api-key`。Gemini 鉴权也接受 Bearer、`x-api-key`、URL 查询参数 `key`，但 URL Key 容易进入代理日志。网关按端点执行部署配置的请求体上限、分组模型白名单，以及适用的额度、并发和内容策略。模型的工具、图像输入、结构化输出、缓存和内置工具还受具体账号与上游实现限制。
 
 主要 OpenAI/Anthropic `/v1` 接口注册了若干无 `/v1` 别名供客户端兼容，新集成建议使用 `/v1`。`/backend-api/codex/*` 和 `/antigravity/*` 属于专用客户端/平台路径。`GET /v1/responses` 是 WebSocket Upgrade 入口，不是 Retrieve Response；未升级的普通 GET 返回 426。
 

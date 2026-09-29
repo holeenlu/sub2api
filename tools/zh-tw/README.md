@@ -6,14 +6,13 @@ git 裡的中文原始碼**保持簡體**，與上游 `Wei-Shaw/sub2api` 及其�
 | 層 | 機制 | 何時發生 | 產物在哪 |
 |---|---|---|---|
 | 前端介面文案 | `gen-locale.mjs` 依 `locales/zh` 產生 `zh-TW` 語言包 | 開發者改了 zh 之後手動跑一次 | **提交進 git**：`frontend/src/i18n/locales/zh-TW/`、`docs/legal/admin-compliance.zh-TW.md` |
-| 後端字串（API 錯誤訊息等） | `convert-go.mjs` 轉換 Go 字串字面值 | 根目錄 `Dockerfile` 的 `zh-tw-converter` 階段，`--build-arg ZH_TW=true` 時 | 只在建置用的副本樹，不進 git |
+| 後端字串（API 錯誤訊息等） | `convert-go.mjs` 轉換 Go 字串字面值 | 根目錄 `Dockerfile` 的 `zh-tw-converter` 階段，每次建映像 | 只在建置用的副本樹，不進 git |
 
 兩層共用同一份字典（`convert.mjs` 的 `CORRECTIONS` 與 `TW_VOCAB`），改字典兩邊同時受惠。
 
 為什麼分兩層：前端本來就有語言包系統，產生真檔可以在 PR 裡審、測試跑在真檔上、
 使用者可在簡體與繁體之間切換；後端沒有語言包系統，建置時轉是唯一不改原始碼的做法。
-後端轉換預設**關閉**（`Dockerfile` 的 `ARG ZH_TW=false`）：預設映像的後端訊息與上游逐字相同（簡體）。
-要出繁體後端訊息就帶 `docker build --build-arg ZH_TW=true`。前端 zh-TW 語言包不受此開關影響，一律提供。
+後端轉換預設**開啟**（`Dockerfile` 的 `ARG ZH_TW=true`）；帶 `docker build --build-arg ZH_TW=false` 可建出後端訊息與上游相同（簡體）的映像。前端 zh-TW 語言包不受此開關影響，一律提供。
 
 ## 本機安裝
 
@@ -31,7 +30,7 @@ node tools/zh-tw/gen-locale.mjs --check   # 只比對不寫檔，不同步時離
 ```
 
 `frontend/src/i18n/__tests__/zhTwLocale.spec.ts` 會檢查 zh-TW 的 key 集合與 zh 完全一致、
-沒有殘留簡體字；忘了重跑時 `pnpm run test:run` 與 fork 的 CI 都會失敗。
+沒有殘留簡體字；忘了重跑時 `pnpm run test:run` 與 `kdan-ci.yml` 都會失敗。
 
 語言選單有「简体中文」「繁體中文」，`zh-TW` 缺 key 時依序回退 `zh` → `en`（`frontend/src/i18n/index.ts`）。
 
@@ -43,7 +42,7 @@ node tools/zh-tw/gen-locale.mjs --check   # 只比對不寫檔，不同步時離
 |---|---|
 | OpenCC 轉錯字／詞（例：账号→賬號、回调→回撥） | `convert.mjs` 的 `CORRECTIONS` |
 | 簡繁同形的中國用語（例：配置→設定、令牌→權杖、當前→目前） | `convert.mjs` 的 `TW_VOCAB`，長詞放前面 |
-| 只對特定句子成立的修正（例：計量詞 條→筆／則） | `gen-locale.mjs` 的 `OVERRIDES` |
+| 只對特定句子成立的修正（例：計量詞 條→筆／則、品牌標語） | `gen-locale.mjs` 的 `OVERRIDES` |
 
 用稽核工具找候選：
 
@@ -80,7 +79,7 @@ Go 檔裡混有「給人看的訊息」與「程式比對用的值」。後者�
 原因：資料庫裡的歷史日誌是簡體，而訊息的產生端（`internal/server/middleware/api_key_auth*.go`）建置後會輸出繁體，兩種都要能歸類。這兩個檔案在 `PROTECTED_FILES` 裡，建置時不會被動到。
 
 **新增了拿中文去比對外部系統回應的程式碼時**（自己寫的或上游同步進來的），要把它加進 `PROTECTED_LITERALS`。
-fork 若有每日同步上游的自動化流程，可用 `node convert-go.mjs --list-protected` 列出候選；手動稽核：
+上游監看 issue（`kdan-sync-upstream.yml`）會列出候選；實際同步由本機普通 merge 完成。手動稽核：
 
 ```bash
 cd tools/zh-tw
@@ -95,6 +94,17 @@ node convert-go.mjs --list-protected               # 印出保護清單（backen
 轉換後的後端樹**只用來 `go build`**，不支援 `go test`：測試一律在簡體原始碼上跑。
 `convert-go.mjs` 轉換完成後會在目標樹寫入 `.zh-tw-converted` 標記；對同一棵樹再跑一次會直接拒絕
 （轉換不是嚴格冪等，這是硬性防護）。Docker 每次都從乾淨原始碼複製所以不受影響。
+
+## 站點名稱（品牌）
+
+品牌文案不寫死，用 vue-i18n 的 linked message `@:common.siteName`；
+`frontend/src/i18n/index.ts` 的 `setSiteName()` 會在後台設定載入後、以及每次載入語言包後套用。
+語言包裡 `common.siteName` 的預設值是品牌名（與 `frontend/src/config/brand.ts`、
+`backend/internal/service/brand.go` 一致），設定尚未載入時也不會露出上游品牌。
+
+**寫法注意**：`@:common.siteName` 後面必須是空白或字串結尾；緊接標點（`，`、`。`、`｜`、`.`、`,`）時
+vue-i18n 會把標點吃進 key 而整段消失，要改用 `@:{'common.siteName'}`。
+`siteNameLinked.spec.ts` 釘住了這些寫法。設定欄位的 placeholder（顯示預設值）與 TTS 測試 payload 例外，維持字面值。
 
 ## 已知取捨
 

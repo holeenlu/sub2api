@@ -16,7 +16,7 @@ Models and permissions depend on the API key's live group. Discover models with 
 
 ## Authentication and limits
 
-OpenAI-style clients use `Authorization: Bearer $API_KEY`; Anthropic SDKs use `x-api-key` plus `anthropic-version`; Gemini SDKs use `x-goog-api-key`. Gemini auth also accepts Bearer, `x-api-key`, and query parameter `key`, but URL keys can leak to proxy logs. Each endpoint applies its relevant deployment body limit and group allowlist, plus billing, concurrency, and content policy where applicable. Tools, images, schema output, caching, and built-in capabilities depend on the actual account and upstream model.
+OpenAI-style clients use `Authorization: Bearer $KDAN_API_KEY`; Anthropic SDKs use `x-api-key` plus `anthropic-version`; Gemini SDKs use `x-goog-api-key`. Gemini auth also accepts Bearer, `x-api-key`, and query parameter `key`, but URL keys can leak to proxy logs. Each endpoint applies its relevant deployment body limit and group allowlist, plus billing, concurrency, and content policy where applicable. Tools, images, schema output, caching, and built-in capabilities depend on the actual account and upstream model.
 
 Several `/v1` routes have unprefixed compatibility aliases; new integrations should use `/v1`. `/backend-api/codex/*` and `/antigravity/*` are client/platform-specific. `GET /v1/responses` requires a WebSocket upgrade and is not Retrieve Response; plain GET returns 426.
 

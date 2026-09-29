@@ -181,9 +181,10 @@ type GeminiTierQuotaConfig struct {
 }
 
 type UpdateConfig struct {
-	// CheckEnabled 控制是否允许在线版本检查与自更新（默认 true，与上游行为一致）。
-	// 设为 false 时版本检查、自更新和版本回滚接口直接返回 disabled，
-	// 不会向 GitHub 发起任何请求；不发布 release 的品牌构建应关闭。
+	// CheckEnabled 控制是否允许在线版本检查与自更新（本品牌构建默认 false）。
+	// 为 false 时版本检查、自更新和版本回滚接口直接返回 disabled，不会向 GitHub
+	// 发起任何请求；KDAN 目前没有自己的发版通道，要查 holeenlu/sub2api 的 release
+	// 时才显式设为 true。
 	CheckEnabled bool `mapstructure:"check_enabled"`
 
 	// ProxyURL 用于访问 GitHub 的代理地址
@@ -2051,7 +2052,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 	addConfigPath("/app/data")
 	addConfigPath(".")
 	addConfigPath("./config")
-	addConfigPath("/etc/sub2api")
+	addConfigPath("/etc/kdan")
 }
 
 func setDefaults() {
@@ -2080,7 +2081,7 @@ func setDefaults() {
 	// Log
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.format", "console")
-	viper.SetDefault("log.service_name", "sub2api")
+	viper.SetDefault("log.service_name", "kdan")
 	viper.SetDefault("log.env", "production")
 	viper.SetDefault("log.caller", true)
 	viper.SetDefault("log.stacktrace_level", "error")
@@ -2100,14 +2101,13 @@ func setDefaults() {
 	viper.SetDefault("cors.allowed_origins", []string{})
 	viper.SetDefault("cors.allow_credentials", true)
 
-	// Update: online version check / self-update against the release repository.
-	// Reachable from the environment as UPDATE_CHECK_ENABLED.
+	// Online checks follow the isolated KDAN release channel.
 	viper.SetDefault("update.check_enabled", true)
 
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
 	// declare its relying-party domain and trusted browser origins.
 	viper.SetDefault("webauthn.enabled", false)
-	viper.SetDefault("webauthn.rp_display_name", "Sub2API")
+	viper.SetDefault("webauthn.rp_display_name", "KDAN")
 	viper.SetDefault("webauthn.rp_id", "")
 	viper.SetDefault("webauthn.rp_origins", []string{})
 
@@ -2232,7 +2232,7 @@ func setDefaults() {
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")
 	viper.SetDefault("database.password", "postgres")
-	viper.SetDefault("database.dbname", "sub2api")
+	viper.SetDefault("database.dbname", "kdan")
 	viper.SetDefault("database.sslmode", "prefer")
 	viper.SetDefault("database.max_open_conns", 256)
 	viper.SetDefault("database.max_idle_conns", 128)
