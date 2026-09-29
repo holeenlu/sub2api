@@ -51,14 +51,16 @@ fetch 只更新引用，不会自动更新应用代码。在维护者整合工�
 ```
 
 prepare 先把固定上游 SHA 普通 merge 到 KDAN，保留原提交并运行验证，
-不执行历史重写或自动推送。KDAN 检查点验证完成后，再在已更新的 KDAN 基础上执行：
+不执行历史重写或自动推送。KDAN 检查点完成后，再为 TapModels 建立独立检查点：
 
 ```bash
 ./deploy/sync-upstream.sh prepare --branches tapmodels
 ./deploy/sync-upstream.sh status
 ```
 
-出现冲突后按检查点处理。两个检查点都验证完成并获得该次推送授权后，
+每次 prepare 都会完成所选分支的合并和验证并回到原工作分支；出现冲突后按对应检查点处理。
+公共 KDAN 提交向 TapModels 的传播仍按 [需求交付规范](CHANGE_DELIVERY.md) 审查后执行，
+不能用 TapModels 的上游检查点替代。两个检查点都验证完成并获得该次推送授权后，
 再分别使用检查点 ID 执行 publish；公共 `main` 不会因上游或品牌同步自动更新，
 只有明确需要公共兼容版本时才单独生成快照。
 数据库迁移与部署另行验收。
