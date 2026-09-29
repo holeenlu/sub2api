@@ -33,7 +33,11 @@ func BenchmarkAPIKeyQueueStats(b *testing.B) {
 		for _, size := range []int{1, 20, 100} {
 			b.Run(fmt.Sprintf("delay=%s/keys=%d", delay, size), func(b *testing.B) {
 				client := newBenchmarkRedisClient(b)
-				defer client.Close()
+				b.Cleanup(func() {
+					if err := client.Close(); err != nil {
+						b.Errorf("close benchmark Redis client: %v", err)
+					}
+				})
 				client.AddHook(queueStatsLatencyHook{delay})
 				cache := NewConcurrencyCache(client, 15, 60)
 				svc := service.NewConcurrencyService(cache)

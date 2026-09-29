@@ -14,7 +14,8 @@ func TestAPIKeyQueueStatsBatch(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr(), ContextTimeoutEnabled: true})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
-	cache := NewConcurrencyCache(client, 15, 60).(*concurrencyCache)
+	cache, ok := NewConcurrencyCache(client, 15, 60).(*concurrencyCache)
+	require.True(t, ok, "expected Redis concurrency cache")
 	ctx := context.Background()
 	now := time.Now()
 	for _, id := range []int64{1, 2} {
