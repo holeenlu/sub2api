@@ -157,3 +157,11 @@
 图片端点、安全重选和工具流修复已在 `3e157e83e` 适配，审查至 `30a06848bc5365ce414825bcc2c9464aaaef5d95`，见 [图片增量记录](EXCEL_BPS_SYNC_2026_09_29_IMAGES.md)。
 
 本轮继续审查至 `faf58e440b1bddb07429f74ed63b570c11d1c0f8`，适配会影响 BPS/原生混合池优先调度的成本持久化与手动覆盖保护。按用户选择，“跟随上游”默认关闭，已有成本和扣费保持原样。来源、调用链、配置与验证见 [成本同步记录](EXCEL_BPS_SYNC_2026_09_29_COST_SYNC.md)。
+
+### 2026-09-29：余额来源诊断与 OAuth 初始模型映射
+
+本轮同步了 ranxi2001 的余额错误来源诊断提交 `c92647ed6889a04048f611299052aba260ddb5fa`，保留原作者并用 `cherry-pick -x` 记录来源。后端统一用户余额错误文案，运维错误分类与前端明细页依据明确的 `error_owner`、`error_source`、`upstream_status_code` 和账号标识区分“用户余额不足”“上游余额/响应”及未知来源；未知情况保留原始诊断，不通过用户 ID 或单独 HTTP 状态码猜测归属。
+
+同时按 ranxi2001 PR #219（合并提交 `b35f3d15e31ab82021279370002ff5346ca7a4dc`，变更头 `8ea71d7c7f1d0f6e54aace2f7d1cbda70a7e7c48`）适配 OAuth 初始模型映射。源 PR 依赖本项目已退役的整套通用自动账号配置，因此本地只引入其模型规则、校验、显式规则优先和凭据隔离语义，没有恢复自动并发、质量规则、分组调度或账号运维子系统。
+
+管理员入口位于“自动 BPS”页面的“新建 OpenAI OAuth 模型映射”卡片，对应 `GET/PUT /api/v1/admin/settings/oauth-initial-model-mappings`，设置键为 `oauth_initial_model_mappings`。开关默认关闭；打开后只作用于新建 OpenAI OAuth 账号，API Key、重新认证和既有账号不受影响，已有 `model_mapping` 项优先，规则上限 100 条，源模型最多允许末尾通配符。删除全部规则表示不自动添加映射。当前未把本地 CRS 同步改造成源 PR 的自动配置入口，避免恢复已退役的通用自动配置依赖。
