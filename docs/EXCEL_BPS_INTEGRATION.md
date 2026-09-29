@@ -164,7 +164,7 @@
 
 同时按 ranxi2001 PR #219（合并提交 `b35f3d15e31ab82021279370002ff5346ca7a4dc`，变更头 `8ea71d7c7f1d0f6e54aace2f7d1cbda70a7e7c48`）适配 OAuth 初始模型映射。源 PR 依赖本项目已退役的整套通用自动账号配置，因此本地只引入其模型规则、校验、显式规则优先和凭据隔离语义，没有恢复自动并发、质量规则、分组调度或账号运维子系统。
 
-管理员入口位于“自动 BPS”页面的“新建 OpenAI OAuth 模型映射”卡片，对应 `GET/PUT /api/v1/admin/settings/oauth-initial-model-mappings`，设置键为 `oauth_initial_model_mappings`。开关默认关闭；打开后只作用于新建 OpenAI OAuth 账号，API Key、重新认证和既有账号不受影响，已有 `model_mapping` 项优先，规则上限 100 条，源模型最多允许末尾通配符。删除全部规则表示不自动添加映射。当前未把本地 CRS 同步改造成源 PR 的自动配置入口，避免恢复已退役的通用自动配置依赖。
+管理员入口位于“系统设置 → Excel / BPS”的“新建 OpenAI OAuth 模型映射”卡片，对应 `GET/PUT /api/v1/admin/settings/oauth-initial-model-mappings`，设置键为 `oauth_initial_model_mappings`。开关默认关闭；打开后只作用于新建 OpenAI OAuth 账号，API Key、重新认证和既有账号不受影响，已有 `model_mapping` 项优先，规则上限 100 条，源模型最多允许末尾通配符。删除全部规则表示不自动添加映射。当前未把本地 CRS 同步改造成源 PR 的自动配置入口，避免恢复已退役的通用自动配置依赖。
 
 ### 2026-09-29：#220–#222 BPS 链路增量
 
@@ -175,3 +175,7 @@
 - PR #222，合并提交 `8d19508a6deff99f2ef8c58c7c6393d318c5a5e3`：保留本地代理池错误的 typed sentinel 和调度健康隔离，使未来的托管代理获取失败不处罚账号。源 PR 中依赖 Mihomo 池的获取、切换和重试路径继续排除，符合本项目“不引入 Mihomo”的既定范围；当前普通账号代理路径不会伪造该错误。
 
 上述适配均保留源作者和 `cherry-pick -x` 记录；图片路径、流内分类和调度错误隔离分别覆盖 `backend/internal/service/basispoints`、`openai_excel_bps.go` 与 `openai_account_scheduler.go`，未恢复源项目的 Mihomo 管理页面或代理子系统。
+
+### 2026-09-29：运维入口退役
+
+自动 BPS `/admin/account-quality`、独立优先调度 `/admin/priority-scheduling` 和凭证运营 `/admin/token-guard-v2` 已整体移除，包括对应页面、API、后台任务、质量计划调度和自动重新登录 worker。手动 BPS 默认参数与 OAuth 初始模型映射保留，统一从“系统设置 → Excel / BPS”进入。历史迁移、旧字段和数据保留；详细范围见 [运维入口退役说明](OPS_FEATURE_RETIREMENT_2026_09_29.md)。

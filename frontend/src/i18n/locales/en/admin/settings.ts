@@ -5,6 +5,7 @@ export default {
       tabs: {
         general: 'General',
         agreement: 'Agreement',
+        bps: 'Excel / BPS',
         features: 'Feature Switches',
         security: 'Security',
         users: 'Users',
