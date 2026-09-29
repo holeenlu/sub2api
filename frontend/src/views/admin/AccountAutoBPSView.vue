@@ -14,7 +14,7 @@
       </section>
       <form v-if="editing" class="card space-y-4 p-5" @submit.prevent="save">
         <h2 class="font-semibold">{{ t('autoBPSOps.edit') }} #{{ editing.account_id }}</h2>
-        <fieldset :disabled="busy" class="space-y-4"><div class="grid gap-4 sm:grid-cols-2"><label>{{ t('autoBPSOps.model') }}<input v-model="model" required class="input w-full" /></label><label>{{ t('autoBPSOps.cron') }}<input v-model="cron" required class="input w-full" /></label></div>
+        <fieldset :disabled="busy" class="space-y-4"><div class="grid gap-4 sm:grid-cols-2"><label>{{ t('autoBPSOps.model') }}<input v-model="model" required class="input w-full" /></label><QualityProbeSchedule v-model="cron" /></div>
           <QualityBPSSettings v-model:bps="bps" v-model:auto-restore="autoRestore" :target-groups="groups" />
           <div class="flex gap-2"><button class="btn btn-primary" type="submit">{{ t('autoBPSOps.save') }}</button><button class="btn btn-secondary" type="button" @click="editing = null">{{ t('autoBPSOps.cancel') }}</button></div>
         </fieldset>
@@ -33,6 +33,7 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SmartOpsNav from '@/components/admin/operations/SmartOpsNav.vue'
 import QualityBPSSettings from '@/components/admin/operations/QualityBPSSettings.vue'
+import QualityProbeSchedule from '@/components/admin/operations/QualityProbeSchedule.vue'
 import { apiClient } from '@/api/client'
 import { adminAPI } from '@/api/admin'
 import type { ScheduledTestPlan, ScheduledTestResult } from '@/types'

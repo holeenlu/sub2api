@@ -749,7 +749,7 @@ export default {
       // OpenAI specific hints
       openai: {
         autoBPS: '降智後自動開啟 BPS',
-        autoBPSDesc: '每 30 分鐘用狀態探針檢測一次（走正常協議，不經過 BPS），判定降智達到下面的條件時自動開啟 BPS。這是一條品質維運規則，也可在 智慧維運 → 品質維運 檢視記錄和修改。',
+        autoBPSDesc: '按下方設定的間隔檢測（新規則預設每 2 分鐘，走正常協議，不經過 BPS）。探針僅作啟發式判斷，達到條件後按所選設定開啟 BPS；網路錯誤或結果不完整時不改帳號。可在自動 BPS 頁面檢視記錄。',
         autoBPSLoading: '正在讀取本帳號的自動開啟 BPS 規則…',
         autoBPSLoadFailed: '讀取自動開啟 BPS 規則失敗：{error}。本次儲存不會改動這條規則。',
         autoBPSPauseHint: '關閉後規則暫停檢測，設定和記錄都保留，再開啟按原設定繼續；已經開啟的 BPS 不會被關閉。',
