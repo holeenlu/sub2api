@@ -3,6 +3,7 @@ import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 
 import AccountsView from '../AccountsView.vue'
+import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 
 const {
@@ -11,6 +12,8 @@ const {
   getById,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
+  getUpstreamBillingRatesWithEtag,
+  probeUpstreamBilling,
   getAllProxies,
   getAllGroups,
   refreshCredentials,
@@ -22,6 +25,8 @@ const {
   getById: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
+  getUpstreamBillingRatesWithEtag: vi.fn(),
+  probeUpstreamBilling: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
   refreshCredentials: vi.fn(),
@@ -38,6 +43,8 @@ vi.mock('@/api/admin', () => ({
       listWithEtag,
       getBatchTodayStats,
       getUpstreamBillingProbeSettings,
+      getUpstreamBillingRatesWithEtag,
+      probeUpstreamBilling,
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
@@ -68,6 +75,7 @@ const DataTableStub = defineComponent({
     <div>
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
         <slot name="cell-groups" :row="row" />
+        <slot name="cell-upstream_billing_rate" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div>
     </div>
@@ -167,6 +175,8 @@ describe('admin AccountsView lite account list', () => {
     getUpstreamBillingProbeSettings.mockReset().mockResolvedValue({ enabled: true })
     getAllProxies.mockReset().mockResolvedValue([])
     getAllGroups.mockReset().mockResolvedValue([{ id: 7, name: 'codex', platform: 'openai' }])
+    getUpstreamBillingRatesWithEtag.mockReset().mockResolvedValue({ notModified: true, data: null })
+    probeUpstreamBilling.mockReset()
     refreshCredentials.mockReset()
     showError.mockReset()
     showWarning.mockReset()
@@ -175,6 +185,24 @@ describe('admin AccountsView lite account list', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('refreshes the saved cost after probing even with unchanged snapshot and default sorting', async () => {
+    const snapshot = { status: 'ok', data: { effective_rate_multiplier: 0.14 } }
+    const row = { ...listRow, type: 'apikey', extra: { cost_multiplier: 0.1, upstream_billing_probe: snapshot } }
+    listAccounts.mockResolvedValue({ items: [row], total: 1, page: 1, page_size: 20, pages: 1 })
+    probeUpstreamBilling.mockResolvedValue({ account_id: row.id, snapshot })
+    getUpstreamBillingRatesWithEtag.mockResolvedValue({ notModified: false, data: {
+      items: [{ account_id: row.id, snapshot, cost_multiplier: 0.14 }], total: 1, page: 1, page_size: 20
+    } })
+    const wrapper = mountView()
+    await flushPromises()
+    wrapper.findComponent(UpstreamBillingRateCell).vm.$emit('probe')
+    await flushPromises()
+    expect(probeUpstreamBilling).toHaveBeenCalledWith(row.id)
+    expect(getUpstreamBillingRatesWithEtag).toHaveBeenCalled()
+    expect(wrapper.findComponent(UpstreamBillingRateCell).props('account').extra?.cost_multiplier).toBe(0.14)
+    wrapper.unmount()
   })
 
   it('keeps lite=1 on the initial list request', async () => {
