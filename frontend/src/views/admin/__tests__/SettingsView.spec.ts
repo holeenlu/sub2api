@@ -868,6 +868,18 @@ describe("admin SettingsView payment visible method controls", () => {
     loaded.unmount();
   });
 
+  it("defaults unset BPS image settings to enabled native uploads", async () => {
+    const settings = { ...baseSettingsResponse } as Partial<typeof baseSettingsResponse>;
+    delete settings.excel_bps_image_mode;
+    delete settings.excel_bps_image_relay_enabled;
+    getSettings.mockResolvedValueOnce(settings);
+    const wrapper = mountView();
+    await flushPromises();
+    expect((wrapper.get('#excel-bps-image-enabled').element as HTMLInputElement).checked).toBe(true);
+    expect((wrapper.get('#excel-bps-image-mode').element as HTMLSelectElement).value).toBe('native');
+    wrapper.unmount();
+  });
+
   it("defaults the image policy off and saves auto compaction", async () => {
     const wrapper = mountView();
     await flushPromises();
