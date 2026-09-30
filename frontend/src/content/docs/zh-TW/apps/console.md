@@ -22,7 +22,7 @@
 
 ## Codex 驗證模式
 
-OpenAI 分組的 Codex 標籤提供兩種模式：
+OpenAI 分組的 Codex 標籤提供兩種模式，開啟“使用金鑰”時預設選中 **Codex CLI (WebSocket)**、**API key** 和 **macOS / Linux**：
 
 - **Legacy**：`config.toml` 使用 `requires_openai_auth = true`，並下載 `auth.json`。只在 Codex 版本需要該登入形態時使用。
 - **API key**：`requires_openai_auth = false`，把 Key 寫入 `experimental_bearer_token`，並附加本地圖片擴充套件所需的請求標頭。該模式會把金鑰儲存在磁碟，限制檔案權限且不要提交到儲存庫。
@@ -31,15 +31,15 @@ OpenAI 分組的 Codex 標籤提供兩種模式：
 
 ## 模型目錄
 
-僅 OpenAI/Composite 分組支援 Codex 專用模型目錄。其他分組不顯示取得按鈕，也不生成 `model_catalog_json`，請查詢普通 `GET /v1/models` 後手動填寫模型 ID。
+僅 OpenAI/Composite 分組支援 Codex 專用模型目錄。其他分組不生成 `model_catalog_url`，請查詢普通 `GET /v1/models` 後手動填寫模型 ID。
 
-支援的 Codex 標籤中的 **取得模型目錄** 會使用目前 Key 請求專用入口 `/backend-api/codex/models`，下載 `codex-models.json`。將其放在穩定的絕對路徑，並在 `config.toml` 設定 `model_catalog_json`。普通 `GET /v1/models` 返回通用模型列表，不能直接當成這個目錄檔案。分組權限變化後重新取得；不要手工改模型 slug 繞過分組策略。
+支援的 Codex 標籤生成的 `config.toml` 在 Provider 中包含 `model_catalog_url`，Codex 0.156.0 及以上版本啟動時直接讀取本站為該 Key 計算的目錄，無需下載檔案。**檢查連線 / 檢視此 Key 可用模型** 只用於核對，不是使用前置步驟。本站已停止支援本地目錄檔案：舊設定中的 `model_catalog_json` 請刪除後重新複製設定。不要手工改模型 slug 繞過分組策略。
 
 ## 本專案介面操作
 
 以下截圖來自目前專案的“使用金鑰”元件，使用無效範例 Key 和 `api.example.com` 演示地址。實際接入請複製自己控制台生成的值，不要抄錄圖片中的地址或 Key。
 
-1. OpenAI 分組選擇 **Codex CLI**，按所用用戶端選擇 Legacy 或 API key 驗證；兩種模式對應的檔案不同。
+1. OpenAI 分組預設即為 **Codex CLI (WebSocket)** + API key 驗證；網路不支援 WebSocket 時改選 **Codex CLI**，需要 `auth.json` 登入形態時改選 Legacy。兩種驗證模式對應的檔案不同。
 
 ![本專案 Codex Legacy 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
 

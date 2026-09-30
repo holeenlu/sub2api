@@ -1103,7 +1103,7 @@ export default {
       },
       modelPricing: {
         title: 'Per-model group pricing',
-        description: 'Overrides channel and built-in prices for matching models. Long-context tiers come from official presets — do not enter custom intervals. Use per-request tiers such as realtime, tts, and stt for audio.',
+        description: 'Set separate prices only for exception models; empty fields keep inheriting the channel price card or reference price, so the group multiplier is usually enough. Long-context tiers come from official presets — do not enter custom intervals. Use per-request tiers such as realtime, tts, and stt for audio.',
         longContext: 'Enable long-context tier pricing',
         longContextHint: 'When checked, channel intervals or official preset tiers apply. Otherwise the first tier is used unless the account explicitly enables long-context billing.',
         add: 'Add model price'
@@ -1151,6 +1151,7 @@ export default {
         selectAll: 'Select all',
         invertSelection: 'Invert',
         wildcardTag: 'wildcard',
+        pricingPendingTag: 'pricing pending',
         customPlaceholder: 'Custom entry, e.g. gpt-*-codex or claude-*',
         addCustom: 'Add',
         emptySelectionError: 'The model allowlist is enabled; select or add at least one model entry',

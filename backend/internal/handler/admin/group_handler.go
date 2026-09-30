@@ -651,7 +651,8 @@ func (h *GroupHandler) GetGroupModelAllowlistCandidates(c *gin.Context) {
 			response.InternalError(c, "Failed to read group catalog")
 			return
 		}
-		response.Success(c, gin.H{"models": catalog.ModelIDs(), "source": "model_catalog", "status": catalog.Status, "issues": catalog.Issues})
+		models, pending := catalogAllowlistCandidates(catalog)
+		response.Success(c, gin.H{"models": models, "pricing_pending": pending, "source": "model_catalog", "status": catalog.Status, "issues": catalog.Issues})
 		return
 	}
 	// 平台解析（空则读分组、再空则默认 anthropic）由 service 一处完成并回传，
@@ -682,6 +683,29 @@ func (h *GroupHandler) GetGroupModelAllowlistCandidates(c *gin.Context) {
 		"live_models": live,
 		"source":      "static+anthropic_v1_models",
 	})
+}
+
+// catalogAllowlistCandidates keeps unpriced models in the administrator's
+// candidates so they can be selected and priced; the published catalog
+// (ModelIDs) still omits them until a complete price exists.
+func catalogAllowlistCandidates(catalog *service.GroupModelCatalog) (models, pending []string) {
+	models, pending = []string{}, []string{}
+	priced, seen := map[string]bool{}, map[string]bool{}
+	for _, m := range catalog.Models {
+		if m.PricingStatus != "unavailable" {
+			priced[m.Name] = true
+		}
+		if !seen[m.Name] {
+			seen[m.Name] = true
+			models = append(models, m.Name)
+		}
+	}
+	for _, name := range models {
+		if !priced[name] {
+			pending = append(pending, name)
+		}
+	}
+	return models, pending
 }
 
 // liveAnthropicModelCandidates 汇总分组内账号上游支持的模型。任何失败都降级为空

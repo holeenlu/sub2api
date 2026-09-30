@@ -1102,7 +1102,7 @@ export default {
       },
       modelPricing: {
         title: '分組逐模型定價',
-        description: '匹配模型後覆蓋通道和內建價格。長上下文階梯沿用官方/預設價卡，無需再手填區間。音訊可用按次層級設定 realtime、tts、stt。',
+        description: '只為例外模型設定獨立售價；留空的欄位繼續繼承通道價卡或參考價，平時用分組倍率即可。長上下文階梯沿用官方/預設價卡，無需再手填區間。音訊可用按次層級設定 realtime、tts、stt。',
         longContext: '啟用長上下文階梯定價',
         longContextHint: '勾選後按通道區間或官方預設階梯計費；關閉後預設按第一檔，帳號顯式開啟時除外。',
         add: '新增模型價格'
@@ -1150,6 +1150,7 @@ export default {
         selectAll: '全選',
         invertSelection: '反選',
         wildcardTag: '萬用字元',
+        pricingPendingTag: '待定價',
         customPlaceholder: '自訂項目，如 gpt-*-codex 或 claude-*',
         addCustom: '新增',
         emptySelectionError: '模型白名單已開啟，請至少選擇或新增一個模型項目',

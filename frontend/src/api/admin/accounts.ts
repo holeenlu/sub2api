@@ -4,6 +4,7 @@
  */
 
 import { apiClient } from '../client'
+import { withCreatedAccountPolicy } from '@/utils/accountModelPolicy'
 import type { OpenAIReferralRefreshResult, OpenAIReferralSendResult } from '@/types/openaiReferrals'
 import type {
   Account,
@@ -184,7 +185,7 @@ export async function getById(id: number): Promise<Account> {
  * @returns Created account
  */
 export async function create(accountData: CreateAccountRequest): Promise<Account> {
-  const { data } = await apiClient.post<Account>('/admin/accounts', accountData)
+  const { data } = await apiClient.post<Account>('/admin/accounts', withCreatedAccountPolicy(accountData))
   return data
 }
 
@@ -498,7 +499,7 @@ export async function batchCreate(accounts: CreateAccountRequest[]): Promise<{
     success: number
     failed: number
     results: Array<{ success: boolean; account?: Account; error?: string }>
-  }>('/admin/accounts/batch', { accounts })
+  }>('/admin/accounts/batch', { accounts: accounts.map(withCreatedAccountPolicy) })
   return data
 }
 

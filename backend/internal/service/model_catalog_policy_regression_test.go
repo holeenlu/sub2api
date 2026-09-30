@@ -111,3 +111,56 @@ func TestModelCatalogOAuthRotationPreservesPrincipalScope(t *testing.T) {
 	a.Credentials["access_token"] = token("principal-b", "models", 200)
 	require.NotEqual(t, first, modelCatalogScope(a, a))
 }
+
+func TestModelCatalogFixedPolicyDoesNotUnionStaleWhitelist(t *testing.T) {
+	a := catalogAccount(1, PlatformOpenAI, map[string]any{"stale": "stale", "alias": "allowed"})
+	a.Extra = map[string]any{ModelCatalogPolicyExtraKey: ModelCatalogPolicy{Mode: "fixed", Models: []string{"allowed"}}}
+	require.True(t, a.IsModelSupported("allowed"))
+	require.True(t, a.IsModelSupported("alias"))
+	require.False(t, a.IsModelSupported("stale"), "stale credentials whitelist must not expand the fixed policy")
+	a.Extra[ModelCatalogPolicyExtraKey] = ModelCatalogPolicy{Mode: "fixed"}
+	for _, platform := range []string{PlatformOpenAI, PlatformGrok, PlatformAntigravity} {
+		a.Platform = platform
+		require.False(t, a.IsModelSupported("alias"), "empty fixed list must deny aliases")
+		for model := range a.GetModelMapping() {
+			require.False(t, a.IsModelSupported(model))
+		}
+	}
+}
+
+func TestAdminAccountPolicyValidatedWithCredentials(t *testing.T) {
+	account := catalogAccount(311, PlatformOpenAI, map[string]any{"stale": "stale"})
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: &account}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	policy := ModelCatalogPolicy{Mode: "fixed", Models: []string{"new-model"}}
+	updated, err := svc.UpdateAccount(context.Background(), account.ID, &UpdateAccountInput{
+		Credentials: map[string]any{"model_mapping": map[string]any{"alias": "new-model"}}, ModelCatalogPolicy: &policy,
+	})
+	require.NoError(t, err)
+	require.True(t, updated.IsModelSupported("alias"))
+	require.False(t, updated.IsModelSupported("stale"))
+	require.ElementsMatch(t, []string{"new-model"}, configuredUpstreamModelsForCapabilitySync(updated))
+	follow := ModelCatalogPolicy{Mode: "follow"}
+	_, err = svc.UpdateAccount(context.Background(), account.ID, &UpdateAccountInput{ModelCatalogPolicy: &follow})
+	require.ErrorContains(t, err, "refresh the account catalog")
+	require.Equal(t, "fixed", accountModelCatalogPolicy(updated).Mode)
+}
+
+func TestAdminAccountEditsCannotOverwriteCatalogPolicy(t *testing.T) {
+	policy := map[string]any{"mode": "fixed", "models": []any{}, "excluded": []any{}}
+	account := catalogAccount(310, PlatformOpenAI, nil)
+	account.Extra = map[string]any{ModelCatalogPolicyExtraKey: policy}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: &account}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	updated, err := svc.UpdateAccount(context.Background(), account.ID, &UpdateAccountInput{Extra: map[string]any{
+		ModelCatalogPolicyExtraKey:     map[string]any{"mode": "legacy"},
+		modelCatalogVisibilityExtraKey: map[string]any{"models": map[string]any{"forged": true}},
+	}})
+	require.NoError(t, err)
+	require.Equal(t, policy, updated.Extra[ModelCatalogPolicyExtraKey])
+	require.NotContains(t, updated.Extra, modelCatalogVisibilityExtraKey)
+
+	require.NoError(t, svc.UpdateAccountExtra(context.Background(), account.ID, map[string]any{ModelCatalogPolicyExtraKey: map[string]any{"mode": "legacy"}, "custom": "value"}))
+	persisted := repo.updates[account.ID][len(repo.updates[account.ID])-1]
+	require.NotContains(t, persisted, ModelCatalogPolicyExtraKey)
+}

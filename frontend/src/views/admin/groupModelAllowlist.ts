@@ -68,7 +68,7 @@ export const setModelAllowlistCandidates = (
   state.items = selectionOrder.map(id => {
     const selected = hasExistingItems
       ? currentSelected.has(id)
-      : state.savedModels.length > 0
+      : state.mode === 'fixed' || state.savedModels.length > 0
         ? savedSelected.has(id)
         : normalizedCandidates.includes(id)
 

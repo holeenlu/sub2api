@@ -163,32 +163,12 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 			candidates[key] = candidate{name, platform, source}
 		}
 	}
-	pinned := group.Platform == PlatformOpenAI && group.CodexModelsManifestConfig.Enabled
-	pinnedIDs := map[int64]bool{}
-	for _, id := range group.CodexModelsManifestConfig.AccountIDs {
-		pinnedIDs[id] = true
-	}
-	if pinned && s.registry != nil && group.CodexModelsManifestConfig.FallbackToScheduler {
-		usable := false
-		for _, a := range active {
-			if pinnedIDs[a.ID] {
-				usable = true
-				break
-			}
-		}
-		if !usable {
-			pinned = false
-			issue("", "discovery_fallback_used")
-		}
-	}
-	snapshotModels := map[string]bool{}
+	// Every active member contributes its persisted snapshot; pinned catalog
+	// sources are retired (see RetiredCodexModelsManifestConfig).
 	foundSnapshots := 0
 	var oldestSnapshot time.Time
 	for i := range active {
 		a := &active[i]
-		if pinned && !pinnedIDs[a.ID] {
-			continue
-		}
 		platform := a.Platform
 		if group.Platform != PlatformComposite {
 			platform = group.Platform
@@ -198,11 +178,6 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 		var found bool
 		if s.snapshots != nil {
 			ids, at, found = s.snapshots.ModelCatalogSnapshot(ctx, a)
-		}
-		if pinned && !found {
-			out.Status = "unavailable"
-			issue("", "discovery_snapshot_missing")
-			continue
 		}
 		if found {
 			foundSnapshots++
@@ -218,11 +193,7 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 					continue
 				}
 				add(id, platform, "discovery")
-				snapshotModels[strings.ToLower(platform+"\x00"+id)] = true
 			}
-		}
-		if pinned {
-			continue
 		}
 		if !a.IsOpenAIPassthroughEnabled() {
 			for id, target := range stringMappingFromRaw(a.Credentials["model_mapping"]) {
@@ -239,35 +210,29 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 	if !oldestSnapshot.IsZero() {
 		out.UpdatedAt = oldestSnapshot
 	}
-	if pinned && foundSnapshots == 0 {
-		out.Status = "unavailable"
-		issue("", "discovery_snapshot_missing")
+	if channel != nil {
+		for platform, mapping := range channel.ModelMapping {
+			if group.Platform != PlatformComposite && platform != group.Platform {
+				continue
+			}
+			for id := range mapping {
+				add(id, platform, "channel_mapping")
+			}
+		}
 	}
-	if !pinned {
-		if channel != nil {
-			for platform, mapping := range channel.ModelMapping {
-				if group.Platform != PlatformComposite && platform != group.Platform {
-					continue
-				}
-				for id := range mapping {
-					add(id, platform, "channel_mapping")
-				}
-			}
+	for _, route := range routes {
+		if route.Enabled && route.MatchType == CompositeRouteMatchExact {
+			add(route.PublicModel, route.TargetPlatform, "route")
 		}
-		for _, route := range routes {
-			if route.Enabled && route.MatchType == CompositeRouteMatchExact {
-				add(route.PublicModel, route.TargetPlatform, "route")
-			}
-		}
-		if group.ModelAllowlistEnabled() {
-			for _, id := range group.ModelAllowlist.Models {
-				if group.Platform == PlatformComposite {
-					for p := range platforms {
-						add(id, p, "group_selection")
-					}
-				} else {
-					add(id, group.Platform, "group_selection")
+	}
+	if group.ModelAllowlistEnabled() {
+		for _, id := range group.ModelAllowlist.Models {
+			if group.Platform == PlatformComposite {
+				for p := range platforms {
+					add(id, p, "group_selection")
 				}
+			} else {
+				add(id, group.Platform, "group_selection")
 			}
 		}
 	}
@@ -350,9 +315,8 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 				if a.Platform != platform && !(mixedListingAccountAllowed(platform, a) && mixedListingModelAllowed(platform, mapped)) {
 					continue
 				}
-				if pinned && !pinnedIDs[a.ID] {
-					continue
-				}
+				// Pinned accounts only choose where the listing comes from; every
+				// active group member that supports the model remains routable.
 				if !a.IsModelSupported(mapped) {
 					continue
 				}
@@ -404,9 +368,6 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 			if len(billingSet) == 0 {
 				continue
 			}
-			if pinned && !snapshotModels[strings.ToLower(platform+"\x00"+c.name)] {
-				continue
-			}
 			key := c.name + "\x00" + platform + "\x00" + endpoint
 			if s.registry == nil {
 				key = strings.ToLower(key)
@@ -456,13 +417,9 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 		}
 		return out.Issues[i].Reason < out.Issues[j].Reason
 	})
-	if !pinned && len(candidates) == 0 && len(active) > 0 && foundSnapshots == 0 {
+	if len(candidates) == 0 && len(active) > 0 && foundSnapshots == 0 {
 		out.Status = "unavailable"
 		issue("", "discovery_snapshot_missing")
-	}
-	if pinned && out.Status == "unavailable" {
-		// Never publish an incomplete pinned union as a complete directory.
-		out.Models = []GroupCatalogModel{}
 	}
 	if group.ModelAllowlistEnabled() {
 		// Keep the configured selection order, expanding patterns in place.

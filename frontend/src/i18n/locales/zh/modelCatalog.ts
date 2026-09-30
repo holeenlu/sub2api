@@ -44,7 +44,6 @@ export default {
   "referencePrice": "参考价格",
   "priceSource": "价格来源",
   "catalogVersion": "目录版本",
-  "downloadUpdater": "下载目录更新工具",
   "setupUnavailable": "当前密钥尚无已发布的可用 Codex 模型，请刷新账号目录或检查分组权限。",
   "capabilitiesPending": "部分模型能力资料尚未齐全，请在选择客户端前查看目录详情。"
 ,
@@ -64,5 +63,10 @@ export default {
   "priorityInterval":"重点来源同步间隔（秒）"
 ,
   "deletionAlert":"目录减少提醒阈值（%）",
-  "visibilityDrop":"上游目录中较多模型已不再列出，请检查来源历史。已撤销的访问仍会被拒绝。"
+  "visibilityDrop":"上游目录中较多模型已不再列出，请检查来源历史。已撤销的访问仍会被拒绝。",
+  "policyModeHint":{"legacy": "沿用账号原有白名单、别名与平台默认规则；切换到固定或跟随后，由开放策略决定允许范围。", "follow": "开放上游已列出或已有成功调用记录的模型，排除项优先。需要先刷新一次模型资料。下方白名单不限制范围，映射仍用于改名。", "fixed": "只开放下方白名单中的模型，留空表示全部拒绝；排除项优先。"},
+  "excludedCount":"排除 {count} 项",
+  "policyOnAccountPage":"账号的开放策略、白名单和排除项统一在账号编辑页维护。",
+  "openAccounts":"前往账号管理",
+  "passthroughPolicyHint": "透传保持请求模型名不变，别名映射不生效；固定或跟随策略仍会限制可访问的模型。"
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
 const ModelCatalogPolicyExtraKey = "model_catalog_policy"
@@ -43,6 +45,15 @@ func catalogPolicyMatch(patterns []string, model string) bool {
 	return false
 }
 
+// Passthrough forwards the original model; a dormant mapping must not grant
+// access to an alias or make a permitted request depend on its old target.
+func accountCatalogPolicyModel(a *Account, model string) string {
+	if a.IsOpenAIPassthroughEnabled() {
+		return model
+	}
+	return a.GetMappedModel(model)
+}
+
 func accountCatalogPolicyAllows(a *Account, model string) (bool, bool) {
 	p := accountModelCatalogPolicy(a)
 	if p.Mode == "" || p.Mode == "legacy" {
@@ -52,16 +63,18 @@ func accountCatalogPolicyAllows(a *Account, model string) (bool, bool) {
 		return false, true
 	}
 	if p.Mode == "fixed" {
-		actual := a.GetMappedModel(model)
+		actual := accountCatalogPolicyModel(a, model)
 		if catalogPolicyMatch(p.Excluded, actual) {
 			return false, true
 		}
+		// The policy owns access. Alias mappings never grant additional access,
+		// and a fixed empty list must stay empty even on platforms with defaults.
 		return catalogPolicyMatch(p.Models, model) || catalogPolicyMatch(p.Models, actual), true
 	}
 	if p.Mode != "follow" {
 		return false, true
 	}
-	actual := a.GetMappedModel(model)
+	actual := accountCatalogPolicyModel(a, model)
 	if catalogPolicyMatch(p.Excluded, actual) {
 		return false, true
 	}
@@ -75,13 +88,13 @@ func accountCatalogPolicyAllows(a *Account, model string) (bool, bool) {
 		return false, true
 	}
 	// Parent credentials are rechecked by the registry at the request boundary.
-	if visibility.Scope != modelCatalogScope(a, a) || (!visibility.ExpiresAt.IsZero() && !visibility.ExpiresAt.After(time.Now())) {
+	if visibility.Scope != modelCatalogScope(a, a) || !visibility.ExpiresAt.After(time.Now()) {
 		return false, true
 	}
 	return visibility.Models[actual], true
 }
 
-func (s *ModelCatalogService) SaveAccountPolicy(ctx context.Context, id int64, p ModelCatalogPolicy) error {
+func validateModelCatalogPolicy(p ModelCatalogPolicy) error {
 	if p.Mode != "legacy" && p.Mode != "fixed" && p.Mode != "follow" {
 		return fmt.Errorf("invalid catalog policy mode")
 	}
@@ -95,15 +108,53 @@ func (s *ModelCatalogService) SaveAccountPolicy(ctx context.Context, id int64, p
 			}
 		}
 	}
+	return nil
+}
+
+// Validate against the proposed credentials as well as the saved visibility,
+// so a credential change cannot activate follow mode using another scope.
+func validateAccountCatalogPolicy(a *Account, p ModelCatalogPolicy) error {
+	if err := validateModelCatalogPolicy(p); err != nil {
+		return err
+	}
+	if p.Mode == "follow" {
+		var visibility struct {
+			ExpiresAt time.Time `json:"expires_at"`
+			Scope     string    `json:"scope"`
+		}
+		raw, err := json.Marshal(a.Extra[modelCatalogVisibilityExtraKey])
+		if err != nil || json.Unmarshal(raw, &visibility) != nil ||
+			visibility.Scope != modelCatalogScope(a, a) || !visibility.ExpiresAt.After(time.Now()) {
+			return fmt.Errorf("refresh the account catalog before enabling follow mode")
+		}
+	}
+	return nil
+}
+
+func applyAccountCatalogPolicy(a *Account, p *ModelCatalogPolicy) error {
+	if p == nil {
+		return nil // Unrelated edits must not migrate or broaden legacy permissions.
+	}
+	if err := validateAccountCatalogPolicy(a, *p); err != nil {
+		return infraerrors.BadRequest("INVALID_MODEL_CATALOG_POLICY", err.Error())
+	}
+	if a.Extra == nil {
+		a.Extra = make(map[string]any)
+	}
+	a.Extra[ModelCatalogPolicyExtraKey] = *p
+	return nil
+}
+
+func (s *ModelCatalogService) SaveAccountPolicy(ctx context.Context, id int64, p ModelCatalogPolicy) error {
+	if err := validateModelCatalogPolicy(p); err != nil {
+		return err
+	}
 	a, err := s.accounts.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	if p.Mode == "follow" {
-		snapshot, err := s.Account(ctx, a)
-		if err != nil || snapshot.Status == "unavailable" {
-			return fmt.Errorf("refresh the account catalog before enabling follow mode")
-		}
+	if err := validateAccountCatalogPolicy(a, p); err != nil {
+		return err
 	}
 	return s.accounts.UpdateExtra(ctx, id, map[string]any{ModelCatalogPolicyExtraKey: p})
 }
@@ -148,7 +199,7 @@ func (s *ModelCatalogService) accountRouteAllowed(ctx context.Context, a *Accoun
 	if !a.IsModelSupported(requested) {
 		return false
 	}
-	allowed, known := s.ModelIsPublished(ctx, a, a.GetMappedModel(requested))
+	allowed, known := s.ModelIsPublished(ctx, a, accountCatalogPolicyModel(a, requested))
 	return known && allowed
 }
 

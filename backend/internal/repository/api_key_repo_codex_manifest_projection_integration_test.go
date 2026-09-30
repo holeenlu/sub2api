@@ -46,7 +46,8 @@ func TestGetByKeyForAuthCarriesGroupCodexModelsManifestConfig(t *testing.T) {
 	got, err := apiKeyRepo.GetByKeyForAuth(ctx, keyValue)
 	require.NoError(t, err)
 	require.NotNil(t, got.Group)
-	require.True(t, got.Group.CodexModelsManifestConfig.Enabled, "codex_models_manifest_config 必须进入认证投影（投影漏列会让固定账号模式静默失效）")
-	require.Equal(t, []int64{11, 22}, got.Group.CodexModelsManifestConfig.AccountIDs)
-	require.True(t, got.Group.CodexModelsManifestConfig.FallbackToScheduler)
+	// 固定目录来源账号已退役：投影保留历史账号 ID 供审计，但读取时一律不启用。
+	require.False(t, got.Group.CodexModelsManifestConfig.Enabled)
+	require.Equal(t, []int64{11, 22}, got.Group.CodexModelsManifestConfig.AccountIDs, "codex_models_manifest_config 仍须进入认证投影")
+	require.False(t, got.Group.CodexModelsManifestConfig.FallbackToScheduler)
 }

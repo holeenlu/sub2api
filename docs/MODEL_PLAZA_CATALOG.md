@@ -1,6 +1,6 @@
 # 模型广场：分组目录与报价
 
-`/model-plaza`、文档中的分组模型/价格和客户端模型目录共用 `GroupModelCatalogService`。Codex 本机的 `model_catalog_json` 只控制客户端读取哪个 JSON；它不是服务器模型广场的配置入口。
+`/model-plaza`、文档中的分组模型/价格和客户端模型目录共用 `GroupModelCatalogService`。Codex 配置里的 `model_catalog_url` 只是客户端读取本站目录的地址；它不是服务器模型广场的配置入口。
 
 ## 配置入口
 

@@ -673,6 +673,10 @@ func (s *ModelCatalogService) Start() {
 		go func() {
 			defer s.wg.Done()
 			ctx := s.workerCtx
+			if s.prices != nil {
+				s.prices.catalogRefreshManaged.Store(s.Settings(ctx).Enabled)
+				defer s.prices.catalogRefreshManaged.Store(false)
+			}
 			s.restoreReferencePrices(ctx)
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()

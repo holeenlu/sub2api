@@ -1100,7 +1100,7 @@ export default {
       },
       modelPricing: {
         title: '分组逐模型定价',
-        description: '匹配模型后覆盖渠道和内置价格。长上下文阶梯沿用官方/预设价卡，无需再手填区间。音频可用按次层级配置 realtime、tts、stt。',
+        description: '只为例外模型设置独立售价；留空的字段继续继承渠道价卡或参考价，平时用分组倍率即可。长上下文阶梯沿用官方/预设价卡，无需再手填区间。音频可用按次层级配置 realtime、tts、stt。',
         longContext: '启用长上下文阶梯定价',
         longContextHint: '勾选后按渠道区间或官方预设阶梯计费；关闭后默认按第一档，账号显式开启时除外。',
         add: '添加模型价格'
@@ -1148,6 +1148,7 @@ export default {
         selectAll: '全选',
         invertSelection: '反选',
         wildcardTag: '通配',
+        pricingPendingTag: '待定价',
         customPlaceholder: '自定义条目，如 gpt-*-codex 或 claude-*',
         addCustom: '添加',
         emptySelectionError: '模型白名单已开启，请至少选择或添加一个模型条目',

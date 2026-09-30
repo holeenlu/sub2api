@@ -8,6 +8,15 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
+// RetiredCodexModelsManifestConfig disables pinned catalog sources on read.
+// Group listings aggregate every member's persisted catalog snapshot, so the
+// pinned paths stay unreachable; stored account IDs are kept only for audit.
+func RetiredCodexModelsManifestConfig(cfg GroupCodexModelsManifestConfig) GroupCodexModelsManifestConfig {
+	cfg.Enabled = false
+	cfg.FallbackToScheduler = false
+	return cfg
+}
+
 // maxCodexModelsManifestAccounts is the upper bound of pinned accounts per group.
 const maxCodexModelsManifestAccounts = 10
 

@@ -27,7 +27,7 @@
       </div>
 
       <div
-        v-if="account.platform === 'openai' && account.type === 'oauth' && !isSparkShadow"
+        v-if="account.platform === 'openai' && account.type === 'oauth' && !isSparkShadow && catalogPolicy.mode === 'legacy'"
         class="rounded-lg bg-gray-50 p-3 dark:bg-dark-800"
       >
         <label for="edit-openai-model-aliases" class="flex items-center gap-2 text-sm">
@@ -250,13 +250,15 @@
         <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
 
+          <AccountCatalogPolicyField :model-value="catalogPolicy" @update:model-value="updateCatalogPolicy" />
           <div
             v-if="isOpenAIModelRestrictionDisabled"
             class="mb-3 rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
           >
             <p class="text-xs text-amber-700 dark:text-amber-400">
-              {{ t('admin.accounts.openai.modelRestrictionDisabledByPassthrough') }}
+              {{ t('modelCatalog.passthroughPolicyHint') }}
             </p>
+            <ModelWhitelistSelector v-if="catalogPolicy.mode === 'fixed'" v-model="allowedModels" platform="openai" :account-id="account.id" />
           </div>
 
           <template v-else>
@@ -264,7 +266,8 @@
             <div class="mb-4 flex gap-2">
               <button
                 type="button"
-                @click="modelRestrictionMode = 'whitelist'"
+                :disabled="catalogPolicy.mode === 'follow'"
+              @click="modelRestrictionMode = 'whitelist'"
                 :class="[
                   'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
                   modelRestrictionMode === 'whitelist'
@@ -319,7 +322,7 @@
               <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-                <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
+                <span v-if="allowedModels.length === 0 && modelMappings.length === 0 && catalogPolicy.mode === 'legacy'">{{
                   t('admin.accounts.supportsAllModels')
                 }}</span>
               </p>
@@ -757,13 +760,15 @@
       >
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
 
+        <AccountCatalogPolicyField :model-value="catalogPolicy" @update:model-value="updateCatalogPolicy" />
         <div
           v-if="isOpenAIModelRestrictionDisabled"
           class="mb-3 rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
         >
           <p class="text-xs text-amber-700 dark:text-amber-400">
-            {{ t('admin.accounts.openai.modelRestrictionDisabledByPassthrough') }}
+            {{ t('modelCatalog.passthroughPolicyHint') }}
           </p>
+          <ModelWhitelistSelector v-if="catalogPolicy.mode === 'fixed'" v-model="allowedModels" platform="openai" :account-id="account.id" />
         </div>
 
         <template v-else>
@@ -771,6 +776,7 @@
           <div class="mb-4 flex gap-2">
             <button
               type="button"
+              :disabled="catalogPolicy.mode === 'follow'"
               @click="modelRestrictionMode = 'whitelist'"
               :class="[
                 'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
@@ -800,7 +806,7 @@
             <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
+              <span v-if="allowedModels.length === 0 && modelMappings.length === 0 && catalogPolicy.mode === 'legacy'">{{
                 t('admin.accounts.supportsAllModels')
               }}</span>
             </p>
@@ -953,10 +959,12 @@
         <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
 
+          <AccountCatalogPolicyField :model-value="catalogPolicy" @update:model-value="updateCatalogPolicy" />
           <!-- Mode Toggle -->
           <div class="mb-4 flex gap-2">
             <button
               type="button"
+              :disabled="catalogPolicy.mode === 'follow'"
               @click="modelRestrictionMode = 'whitelist'"
               :class="[
                 'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
@@ -1012,7 +1020,7 @@
             <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
+              <span v-if="allowedModels.length === 0 && modelMappings.length === 0 && catalogPolicy.mode === 'legacy'">{{
                 t('admin.accounts.supportsAllModels')
               }}</span>
             </p>
@@ -1201,10 +1209,12 @@
         <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
 
+          <AccountCatalogPolicyField :model-value="catalogPolicy" @update:model-value="updateCatalogPolicy" />
           <!-- Mode Toggle -->
           <div class="mb-4 flex gap-2">
             <button
               type="button"
+              :disabled="catalogPolicy.mode === 'follow'"
               @click="modelRestrictionMode = 'whitelist'"
               :class="[
                 'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
@@ -1234,7 +1244,7 @@
             <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" platform="anthropic" />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{ t('admin.accounts.supportsAllModels') }}</span>
+              <span v-if="allowedModels.length === 0 && modelMappings.length === 0 && catalogPolicy.mode === 'legacy'">{{ t('admin.accounts.supportsAllModels') }}</span>
             </p>
           </div>
 
@@ -1350,6 +1360,9 @@
       <!-- Antigravity 只支持模型映射模式，不支持白名单模式 -->
       <div v-if="account.platform === 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
+
+        <AccountCatalogPolicyField :model-value="catalogPolicy" @update:model-value="updateCatalogPolicy" />
+        <ModelWhitelistSelector v-if="catalogPolicy.mode === 'fixed'" v-model="allowedModels" platform="antigravity" :account-id="account.id" />
 
         <!-- Mapping Mode Only (no toggle for Antigravity) -->
         <div>
@@ -3287,6 +3300,10 @@ import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import AccountCatalogPolicyField from '@/components/account/AccountCatalogPolicyField.vue'
+import type { AccountCatalogPolicyForm } from '@/components/account/accountCatalogPolicy'
+import type { CatalogPolicy } from '@/api/admin/modelCatalog'
+import { modelRoutingAliases } from '@/utils/accountModelPolicy'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
@@ -3491,7 +3508,7 @@ const baseUrlHint = computed(() => {
 const antigravityPresetMappings = computed(() => getPresetMappingsByPlatform('antigravity'))
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
 
-// 模型白名单/映射存在 credentials.model_mapping，后端 IsModelSupported 与平台无关。
+// 新策略的权限存入 model_catalog_policy；旧账号保留原 model_mapping 语义。
 // OAuth 家族的账号没有 apikey 表单容器，需要这个独立的模型限制区域。
 const supportsDedicatedModelRestriction = (account: Account) =>
   ((account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth') ||
@@ -3680,6 +3697,51 @@ const openaiModelAliases = ref(false)
 const openAICompactModelMappings = ref<ModelMapping[]>([])
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
+// 账号模型开放策略与白名单在同一处维护：固定模式的名单就是上面的白名单。
+const catalogPolicy = ref<AccountCatalogPolicyForm>({ mode: 'legacy', excludedText: '' })
+const savedCatalogPolicy = ref<CatalogPolicy>({ mode: 'legacy', models: [], excluded: [] })
+const catalogPolicyLines = (value: string) => [...new Set(value.split(/\r?\n/).map(v => v.trim()).filter(Boolean))]
+const readCatalogPolicy = (extra: Record<string, unknown> | undefined): CatalogPolicy => {
+  const raw = extra?.model_catalog_policy as Partial<CatalogPolicy> | undefined
+  const mode = raw?.mode === 'follow' || raw?.mode === 'fixed' ? raw.mode : 'legacy'
+  return {
+    mode,
+    models: Array.isArray(raw?.models) ? raw.models.filter((v): v is string => typeof v === 'string') : [],
+    excluded: Array.isArray(raw?.excluded) ? raw.excluded.filter((v): v is string => typeof v === 'string') : [],
+  }
+}
+const loadCatalogPolicyFromAccount = (account: Account) => {
+  const policy = readCatalogPolicy(account.extra as Record<string, unknown> | undefined)
+  savedCatalogPolicy.value = policy
+  catalogPolicy.value = { mode: policy.mode, excludedText: policy.excluded.join('\n') }
+  // 已有策略是权限的唯一来源，不能把旧 model_mapping 中的名单并入而扩大范围。
+  if (policy.mode !== 'legacy') allowedModels.value = [...policy.models]
+  if (policy.mode === 'follow') modelRestrictionMode.value = 'mapping'
+  if (policy.mode === 'fixed') modelRestrictionMode.value = 'whitelist'
+}
+const catalogPolicyForSave = (): CatalogPolicy => ({
+  mode: catalogPolicy.value.mode,
+  models: catalogPolicy.value.mode === 'fixed' ? [...allowedModels.value] : [],
+  excluded: catalogPolicy.value.mode === 'legacy' ? [] : catalogPolicyLines(catalogPolicy.value.excludedText),
+})
+const catalogPolicyNeedsSave = () => {
+  const next = catalogPolicyForSave()
+  const saved = savedCatalogPolicy.value
+  return next.mode !== saved.mode ||
+    next.models.join('\n') !== saved.models.join('\n') ||
+    next.excluded.join('\n') !== saved.excluded.join('\n')
+}
+function updateCatalogPolicy(next: AccountCatalogPolicyForm) {
+  if (next.mode === 'fixed' && catalogPolicy.value.mode === 'legacy') {
+    const aliases = props.account?.platform === 'antigravity' ? antigravityModelMappings.value : modelMappings.value
+    const names = isOpenAIModelRestrictionDisabled.value ? [] : aliases.map(m => m.from.trim()).filter(Boolean)
+    allowedModels.value = [...new Set([...allowedModels.value, ...names])]
+  }
+  catalogPolicy.value = next
+  if (next.mode === 'follow') modelRestrictionMode.value = 'mapping'
+  if (next.mode === 'fixed') modelRestrictionMode.value = 'whitelist'
+}
+
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
 const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
@@ -4309,8 +4371,14 @@ const loadModelRestrictionFromMapping = (rawMapping?: Record<string, unknown>) =
       : 'whitelist'
 }
 
-const buildModelRestrictionMapping = () =>
-  buildModelMappingObject('combined', allowedModels.value, modelMappings.value)
+const buildModelRestrictionMapping = () => {
+  if (catalogPolicy.value.mode === 'legacy') return buildModelMappingObject('combined', allowedModels.value, modelMappings.value)
+  const aliases = buildModelMappingObject('mapping', [], modelMappings.value) ?? {}
+  // Preserve explicit identity routes on platforms whose empty map enables defaults.
+  const raw = props.account?.credentials?.model_mapping as Record<string, unknown> | undefined
+  const identityRoutes = Object.fromEntries(Object.entries(raw ?? {}).filter(([from, to]) => typeof to === 'string' && from === to)) as Record<string, string>
+  return { ...modelRoutingAliases(props.account?.platform ?? '', identityRoutes), ...aliases }
+}
 
 const applyOpenAIModelMappingCredentials = (credentials: Record<string, unknown>) => {
   if (props.account?.type === 'oauth' && !isSparkShadow.value) {
@@ -4811,6 +4879,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     selectedErrorCodes.value = []
   }
   editApiKey.value = ''
+  loadCatalogPolicyFromAccount(newAccount)
 }
 
 async function loadTLSProfiles() {
@@ -5427,7 +5496,13 @@ const persistGrokMediaEligibility = async (accountID: number, updatedAccount: Ac
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
   submitting.value = true
   try {
-    let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
+    const payload = { ...updatePayload }
+    if (catalogPolicyNeedsSave()) payload.model_catalog_policy = catalogPolicyForSave()
+    if (catalogPolicy.value.mode !== 'legacy' && payload.credentials && props.account?.platform !== 'antigravity' && !openaiPassthroughEnabled.value) {
+      // Whitelists live in the policy; credentials hold aliases only.
+      payload.credentials = { ...(payload.credentials as Record<string, unknown>), model_mapping: buildModelRestrictionMapping() ?? {} }
+    }
+    let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(payload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
 
