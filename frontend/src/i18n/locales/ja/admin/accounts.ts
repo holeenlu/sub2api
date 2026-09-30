@@ -1035,7 +1035,33 @@ export default {
 	    expiresAtFull: 'リセットクレジットの有効期限: {time}',
 	    clears: 'リセット対象: {windows}',
 	    notUsableNow: '現在利用できません',
-	    requiresLimit: '上限に達した場合のみ利用できます'
+	    requiresLimit: '上限に達した場合のみ利用できます',
+        reset: 'リセット',
+        resetTooltipNeedQuery: '回数を確認し、利用可能なクレジットがあればリセットできます',
+        resetTooltipNone: '現在利用可能なリセットはありません',
+        resetTooltipReady: 'リセットを1回消費して上限を解除します（確認が必要）',
+        confirmTitle: 'Claude リセットの確認',
+        confirmMessage: 'リセットを1回消費し、{windows}の上限を解除します（残り{count}回）。この操作は取り消せません。続行しますか？',
+        windows: {
+          fiveHour: '5時間',
+          sevenDay: '7日間',
+          sevenDayOverage: '7日間の超過枠'
+        },
+        outcome: {
+          reset: 'リセット完了: {windows}',
+          alreadyUsed: 'このリセットは使用済みです。状態を再確認します',
+          cooldown: 'クールダウン中です。後ほど再試行してください',
+          cooldownUntil: '{time}までクールダウン中です',
+          notLimited: '上限に達していないため、リセットも消費も行いませんでした',
+          ineligible: 'このアカウントは現在リセットを利用できません',
+          unknown: '結果が未確認のため、追加のリセットを一時停止しています。後ほど確認してください',
+          unavailable: 'リセットサービスが一時的に利用できません',
+          inProgress: 'リセット処理中です。しばらくしてから確認してください',
+          retryBackoff: '直前の処理が失敗しました。少し待って再試行してください',
+          busy: '別のリセットが進行中です',
+          notAvailable: '利用可能なリセットはありません。クレジットは消費していません',
+          failed: 'リセット要求に失敗しました'
+        }
 	  },
 	  autoResetCredit: {
 	    title: 'リセットクレジットを自動使用',

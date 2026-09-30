@@ -88,6 +88,8 @@
 
 “使用 API 密钥”由该 Key 的服务端 setup profile 生成默认配置，弹窗不等外部模型同步。下载的 catalog 是数据快照；文件不会让正在运行的客户端必然热加载。
 
+保留新版已有的远程目录可选项：使用 provider 内的 `model_catalog_url`，默认仍为本地文件；不会把 `model_catalog_json` 写成 HTTP URL。超过客户端大小限制的目录回退本地文件，实际客户端兼容性仍需按版本验证。
+
 可从弹窗下载 `update-codex-models.py`，需要 Python 3.11 以上：
 
 ```bash

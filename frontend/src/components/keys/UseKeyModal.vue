@@ -199,7 +199,19 @@
                 {{ t('keys.useKeyModal.codexModelCatalog.description') }}
               </p>
               <p class="mt-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300">
-                {{ codexModelCatalogPath }}
+                {{ codexModelCatalogMode === 'remote' ? codexModelCatalogUrl : codexModelCatalogPath }}
+              </p>
+              <select
+                v-model="codexModelCatalogMode"
+                data-testid="codex-model-catalog-mode"
+                :aria-label="t('keys.useKeyModal.codexModelCatalog.mode')"
+                class="input mt-2 text-sm"
+              >
+                <option value="remote" :disabled="codexModelCatalogOversized">{{ t('keys.useKeyModal.codexModelCatalog.remote') }}</option>
+                <option value="file">{{ t('keys.useKeyModal.codexModelCatalog.local') }}</option>
+              </select>
+              <p v-if="codexModelCatalogOversized" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                {{ t('keys.useKeyModal.codexModelCatalog.oversized') }}
               </p>
             </div>
             <button
@@ -284,7 +296,7 @@ import { saveAs } from 'file-saver'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useClipboard } from '@/composables/useClipboard'
-import { fetchCodexModelsManifest } from '@/api/codex'
+import { buildCodexModelCatalogUrl, fetchCodexModelsManifest } from '@/api/codex'
 import type { GroupPlatform } from '@/types'
 import {
   findCodexCatalogModel,
@@ -346,6 +358,10 @@ const codexModelManifestContent = ref('')
 const codexModelManifestModelCount = ref(0)
 // Defaults are precomputed from this key's published group catalog.
 const DEFAULT_CODEX_MODEL = computed(() => props.setupProfile?.model ?? '')
+const codexModelCatalogMode = ref<'remote' | 'file'>('file')
+const codexModelManifestResponseBytes = ref(0)
+const codexModelCatalogOversized = computed(() => codexModelManifestResponseBytes.value > 1024 * 1024)
+const codexModelCatalogUrl = computed(() => buildCodexModelCatalogUrl(props.baseUrl))
 let codexModelManifestController: AbortController | null = null
 let codexModelManifestRequestID = 0
 
@@ -676,6 +692,8 @@ function resetCodexModelManifest() {
   codexModelManifestState.value = 'idle'
   codexModelManifestContent.value = ''
   codexModelManifestModelCount.value = 0
+  codexModelManifestResponseBytes.value = 0
+  codexModelCatalogMode.value = 'file'
 }
 
 async function loadCodexModelManifest() {
@@ -694,6 +712,8 @@ async function loadCodexModelManifest() {
     if (requestID !== codexModelManifestRequestID) return
     codexModelManifestContent.value = result.content
     codexModelManifestModelCount.value = result.modelCount
+    codexModelManifestResponseBytes.value = result.responseBytes
+    if (codexModelCatalogOversized.value) codexModelCatalogMode.value = 'file'
     codexModelManifestState.value = 'ready'
   } catch (error) {
     const errorName = error && typeof error === 'object' && 'name' in error
@@ -736,8 +756,13 @@ function selectCodexCatalogModel(preferredModel: string): string {
 }
 
 function codexCatalogTomlLine(): string {
-  if (!codexModelCatalogSupported.value) return ''
+  if (!codexModelCatalogSupported.value || codexModelCatalogMode.value !== 'file') return ''
   return `model_catalog_json = "${CODEX_MODEL_CATALOG_CONFIG_PATH}"\n`
+}
+
+function codexRemoteCatalogTomlLine(baseUrl: string): string {
+  if (!codexModelCatalogSupported.value || codexModelCatalogMode.value !== 'remote' || codexModelCatalogOversized.value) return ''
+  return `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n`
 }
 
 function codexReasoningEffortTomlLine(modelSlug: string): string {
@@ -1028,7 +1053,7 @@ ${reasoningEffortLine}${codexCatalogTomlLine()}
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
-wire_api = "responses"
+${codexRemoteCatalogTomlLine(baseUrl)}wire_api = "responses"
 ${generateCodexProviderAuthConfig(apiKey)}
 
 [features]
@@ -1347,7 +1372,7 @@ ${catalogLine}
 [model_providers.kdan]
 name = "${escapeTomlBasicString(siteName.value)} ${label}"
 base_url = "${baseUrl}"
-env_key = "KDAN_API_KEY"
+${codexRemoteCatalogTomlLine(baseUrl)}env_key = "KDAN_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false`
@@ -1382,7 +1407,7 @@ ${reasoningEffortLine}${codexCatalogTomlLine()}
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
-wire_api = "responses"
+${codexRemoteCatalogTomlLine(baseUrl)}wire_api = "responses"
 supports_websockets = true
 ${generateCodexProviderAuthConfig(apiKey)}
 
@@ -1457,6 +1482,23 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
     },
     'gpt-5.6': {
       name: 'GPT-5.6 (Sol)',
+      limit: {
+        context: 1050000,
+        output: 128000
+      },
+      options: {
+        store: false
+      },
+      variants: {
+        low: {},
+        medium: {},
+        high: {},
+        xhigh: {},
+        max: {}
+      }
+    },
+    'gpt-6.1-sol': {
+      name: 'GPT-6.1 Sol',
       limit: {
         context: 1050000,
         output: 128000
