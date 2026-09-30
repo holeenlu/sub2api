@@ -319,10 +319,10 @@ export default {
       apiKeyAcl: {
         title: 'APIキーIPアクセス制御',
         description:
-          'APIキーの許可リスト／拒否リスト、管理者監査ログ、セッションのIP／UAバインディングで使用するクライアントIPを選択します',
-        trustForwardedIp: '転送されたクライアントIPを信頼',
+          '認証、IP制限、レート制限、セッションバインディングは常に設定済みの信頼プロキシチェーンを使用します',
+        trustForwardedIp: '従来の転送IPメタデータ',
         trustForwardedIpHint:
-          'アップグレード互換性のため、デフォルトで有効です。有効にすると、CF-Connecting-IP、X-Real-IP、X-Forwarded-Forの生の値がserver.trusted_proxiesに代わってクライアントIPの解決に使用されます。無効にすると、server.trusted_proxiesで設定されたGinの信頼プロキシチェーンが適用されます。オリジンに直接アクセスできない場合のみ、引き継ぎモードを有効にしてください。この切り替えを変更すると、既存のセッションIPフィンガープリントが変更されます。',
+          'デフォルトでは無効です。この互換オプションはリクエストと使用量のメタデータのみに影響し、安全性の検証は変更しません。認証とアクセス制御には、server.trusted_proxies に実際のプロキシアドレスを設定してください。',
         forwardedClientIpHeaders: 'カスタムクライアントIPヘッダー',
         forwardedClientIpHeadersHint: '組み込みヘッダーより先に確認するCDNまたはプロキシのヘッダー名を追加します。',
         forwardedClientIpHeadersPlaceholder: 'X-Client-IP',

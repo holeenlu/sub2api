@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -379,20 +380,9 @@ func (s *AffiliateService) AccrueInviteRebateForOrder(ctx context.Context, invit
 		return 0, nil
 	}
 
-	// 单人上限检查：精确截断到剩余额度
+	var perInviteeCap float64
 	if s.settingService != nil {
-		if perInviteeCap := s.settingService.GetAffiliateRebatePerInviteeCap(ctx); perInviteeCap > 0 {
-			existing, err := s.repo.GetAccruedRebateFromInvitee(ctx, *inviteeSummary.InviterID, inviteeUserID)
-			if err != nil {
-				return 0, err
-			}
-			if existing >= perInviteeCap {
-				return 0, nil
-			}
-			if remaining := perInviteeCap - existing; rebate > remaining {
-				rebate = roundTo(remaining, 8)
-			}
-		}
+		perInviteeCap = s.settingService.GetAffiliateRebatePerInviteeCap(ctx)
 	}
 
 	var freezeHours int
@@ -400,6 +390,14 @@ func (s *AffiliateService) AccrueInviteRebateForOrder(ctx context.Context, invit
 		freezeHours = s.settingService.GetAffiliateRebateFreezeHours(ctx)
 	}
 
+	if atomicRepo, ok := s.repo.(interface {
+		AccrueQuotaCapped(context.Context, int64, int64, float64, int, *int64, float64) (float64, error)
+	}); ok {
+		return atomicRepo.AccrueQuotaCapped(ctx, *inviteeSummary.InviterID, inviteeUserID, rebate, freezeHours, sourceOrderID, perInviteeCap)
+	}
+	if perInviteeCap > 0 {
+		return 0, fmt.Errorf("affiliate repository does not support atomic caps")
+	}
 	applied, err := s.repo.AccrueQuota(ctx, *inviteeSummary.InviterID, inviteeUserID, rebate, freezeHours, sourceOrderID)
 	if err != nil {
 		return 0, err
@@ -682,4 +680,19 @@ func normalizeAffiliateRecordFilter(filter AffiliateRecordFilter) AffiliateRecor
 	filter.Search = strings.TrimSpace(filter.Search)
 	filter.SortBy = strings.TrimSpace(filter.SortBy)
 	return filter
+}
+
+// ReverseOrderRebate participates in the refund transaction even when new rebates
+// have been disabled. Existing liabilities must still be recovered.
+func (s *AffiliateService) ReverseOrderRebate(ctx context.Context, orderID int64, refunded, original float64) error {
+	if s == nil || s.repo == nil {
+		return nil
+	}
+	repo, ok := s.repo.(interface {
+		ReverseOrderRebate(context.Context, int64, float64, float64) error
+	})
+	if !ok {
+		return fmt.Errorf("affiliate repository does not support refund reversal")
+	}
+	return repo.ReverseOrderRebate(ctx, orderID, refunded, original)
 }

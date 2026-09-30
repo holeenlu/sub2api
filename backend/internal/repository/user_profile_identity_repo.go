@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"hash/fnv"
 	"reflect"
 	"sort"
@@ -368,6 +369,12 @@ func (r *userRepository) UnbindUserAuthProvider(ctx context.Context, userID int6
 
 	return r.WithUserProfileIdentityTx(ctx, func(txCtx context.Context) error {
 		client := clientFromContext(txCtx, r.client)
+		if err := client.User.UpdateOneID(userID).AddSessionGeneration(1).Exec(txCtx); err != nil {
+			return err
+		}
+		if err := client.PendingAuthSession.Update().Where(pendingauthsession.TargetUserIDEQ(userID), pendingauthsession.ConsumedAtIsNil()).SetConsumedAt(time.Now()).Exec(txCtx); err != nil {
+			return err
+		}
 		identityIDs, err := client.AuthIdentity.Query().
 			Where(
 				authidentity.UserIDEQ(userID),

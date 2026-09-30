@@ -87,7 +87,12 @@ func jwtAuth(
 
 		// Security: Validate TokenVersion to ensure token hasn't been invalidated
 		// This check ensures tokens issued before a password change are rejected
-		if claims.TokenVersion != user.TokenVersion {
+		if err := authService.ValidateAccessSession(c.Request.Context(), claims, user); err != nil {
+			if errors.Is(err, service.ErrServiceUnavailable) {
+				AbortWithError(c, 503, "AUTH_UNAVAILABLE", "Session validation is unavailable")
+				return
+			}
+
 			AbortWithError(c, 401, "TOKEN_REVOKED", "Token has been revoked (password changed)")
 			return
 		}
@@ -113,3 +118,8 @@ func jwtAuth(
 }
 
 // Deprecated: prefer GetAuthSubjectFromContext in auth_subject.go.
+
+// EnforceOAuthSessionBinding uses exactly the ordinary JWT fingerprint enforcement.
+func EnforceOAuthSessionBinding(c *gin.Context, auth *service.AuthService, settings *service.SettingService, claims *service.JWTClaims) bool {
+	return enforceSessionBinding(c, auth, settings, nil, claims)
+}

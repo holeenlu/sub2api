@@ -69,6 +69,7 @@ func (e *openAIWSDialError) Unwrap() error {
 
 type openAIWSAcquireRequest struct {
 	Ticket        *openAICodexTicket
+	TenantScope   string
 	TicketScope   string
 	PrepareTicket func(context.Context, *openAICodexTicket, string) (string, error)
 	Account       *Account
@@ -91,6 +92,7 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
+	tenantScope         string
 	ticketGeneration    string
 	ticketScope         string
 	betaFeatures        string
@@ -2503,6 +2505,7 @@ func stringsTrim(value string) string {
 
 func normalizeOpenAIWSAcquireCompatibility(req openAIWSAcquireRequest, headers http.Header) openAIWSHandshakeCompatibilityKey {
 	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, headers)
+	key.tenantScope = req.TenantScope
 	if req.Ticket != nil {
 		key.ticketGeneration, key.ticketScope = req.Ticket.GenerationID, req.TicketScope
 	}

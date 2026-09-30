@@ -175,3 +175,14 @@ func (c *emailCache) GetNotifyCodeUserRate(ctx context.Context, userID int64) (i
 	}
 	return count, nil
 }
+
+// Atomic comparison preserves the capability on a wrong token and fails closed on Redis errors.
+func (c *emailCache) ConsumePasswordResetToken(ctx context.Context, email, token string) (bool, error) {
+	result, err := c.rdb.Eval(ctx, `
+ local raw = redis.call('GET', KEYS[1])
+ if not raw then return 0 end
+ local data = cjson.decode(raw)
+ if data.Token ~= ARGV[1] then return 0 end
+ return redis.call('DEL', KEYS[1])`, []string{passwordResetKey(email)}, token).Int64()
+	return result == 1, err
+}

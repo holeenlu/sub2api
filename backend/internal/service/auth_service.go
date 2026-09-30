@@ -1499,8 +1499,8 @@ func (s *AuthService) RefreshToken(ctx context.Context, oldTokenString string) (
 
 	// Security: Check TokenVersion to prevent refreshing revoked tokens
 	// This ensures tokens issued before a password change cannot be refreshed
-	if claims.TokenVersion != resolvedTokenVersion(user) {
-		return "", ErrTokenRevoked
+	if err := s.ValidateAccessSession(ctx, claims, user); err != nil {
+		return "", err
 	}
 
 	// 会话绑定检查：指纹变化的旧 token 不允许换发新 token。
@@ -1511,8 +1511,8 @@ func (s *AuthService) RefreshToken(ctx context.Context, oldTokenString string) (
 		}
 	}
 
-	// 生成新token
-	return s.GenerateToken(ctx, user)
+	// Preserve the originating family so legacy refresh cannot escape family revocation.
+	return s.generateAccessToken(user, claims.SessionID, sessionBindingHashFromContext(ctx))
 }
 
 // IsPasswordResetEnabled 检查是否启用密码重置功能
@@ -1745,30 +1745,23 @@ func (s *AuthService) generateRefreshToken(ctx context.Context, user *User, fami
 	now := time.Now()
 	ttl := time.Duration(s.cfg.JWT.RefreshTokenExpireDays) * 24 * time.Hour
 
+	familyTTL := ttl.Milliseconds()
+	if accessTTL := int64(s.GetAccessTokenExpiresIn()) * 1000; accessTTL > familyTTL {
+		familyTTL = accessTTL
+	}
 	data := &RefreshTokenData{
-		UserID:       user.ID,
-		TokenVersion: resolvedTokenVersion(user),
-		FamilyID:     familyID,
-		BindingHash:  sessionBindingHashFromContext(ctx),
-		CreatedAt:    now,
-		ExpiresAt:    now.Add(ttl),
+		FamilyTTLMillis: familyTTL,
+		UserID:          user.ID,
+		TokenVersion:    resolvedTokenVersion(user),
+		FamilyID:        familyID,
+		BindingHash:     sessionBindingHashFromContext(ctx),
+		CreatedAt:       now,
+		ExpiresAt:       now.Add(ttl),
 	}
 
 	// 存储Token数据
 	if err := s.refreshTokenCache.StoreRefreshToken(ctx, tokenHash, data, ttl); err != nil {
 		return "", fmt.Errorf("store refresh token: %w", err)
-	}
-
-	// 添加到用户Token集合
-	if err := s.refreshTokenCache.AddToUserTokenSet(ctx, user.ID, tokenHash, ttl); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to add token to user set: %v", err)
-		// 不影响主流程
-	}
-
-	// 添加到家族Token集合
-	if err := s.refreshTokenCache.AddToFamilyTokenSet(ctx, familyID, tokenHash, ttl); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to add token to family set: %v", err)
-		// 不影响主流程
 	}
 
 	return rawToken, nil
@@ -1794,6 +1787,13 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 	if err != nil {
 		if errors.Is(err, ErrRefreshTokenNotFound) {
 			// Token不存在，可能是已被使用（Token轮转）或已过期
+			if consumer, ok := s.refreshTokenCache.(interface {
+				ConsumeRefreshToken(context.Context, string) (*RefreshTokenData, error)
+			}); ok {
+				if _, claimErr := consumer.ConsumeRefreshToken(ctx, tokenHash); claimErr != nil && !errors.Is(claimErr, ErrRefreshTokenNotFound) && !errors.Is(claimErr, ErrRefreshTokenReused) {
+					return nil, ErrServiceUnavailable
+				}
+			}
 			logger.LegacyPrintf("service.auth", "[Auth] Refresh token not found, possible reuse attack")
 			return nil, ErrRefreshTokenInvalid
 		}
@@ -1813,7 +1813,7 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			// 用户已删除，撤销整个Token家族
-			_ = s.refreshTokenCache.DeleteTokenFamily(ctx, data.FamilyID)
+			_ = s.RevokeSessionFamily(ctx, data.FamilyID)
 			return nil, ErrRefreshTokenInvalid
 		}
 		logger.LegacyPrintf("service.auth", "[Auth] Database error getting user for token refresh: %v", err)
@@ -1823,14 +1823,14 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 	// 检查用户状态
 	if !user.IsActive() {
 		// 用户被禁用，撤销整个Token家族
-		_ = s.refreshTokenCache.DeleteTokenFamily(ctx, data.FamilyID)
+		_ = s.RevokeSessionFamily(ctx, data.FamilyID)
 		return nil, ErrUserNotActive
 	}
 
 	// 检查TokenVersion（密码更改后所有Token失效）
 	if data.TokenVersion != resolvedTokenVersion(user) {
 		// TokenVersion不匹配，撤销整个Token家族
-		_ = s.refreshTokenCache.DeleteTokenFamily(ctx, data.FamilyID)
+		_ = s.RevokeSessionFamily(ctx, data.FamilyID)
 		return nil, ErrTokenRevoked
 	}
 
@@ -1838,16 +1838,24 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 	// data.BindingHash 为空表示功能开启前签发的旧会话，放行并在轮转时补齐绑定。
 	if s.settingService != nil && s.settingService.IsSessionBindingEnabled(ctx) && data.BindingHash != "" {
 		if current := sessionBindingHashFromContext(ctx); current != "" && current != data.BindingHash {
-			_ = s.refreshTokenCache.DeleteTokenFamily(ctx, data.FamilyID)
+			_ = s.RevokeSessionFamily(ctx, data.FamilyID)
 			logger.LegacyPrintf("service.auth", "[Auth] Session binding mismatch on refresh for user %d, family revoked", data.UserID)
 			return nil, ErrSessionBindingMismatch
 		}
 	}
 
-	// Token轮转：立即使旧Token失效
-	if err := s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to delete old refresh token: %v", err)
-		// 继续处理，不影响主流程
+	// Claim only after credential checks. No non-atomic fallback is safe.
+	consumer, ok := s.refreshTokenCache.(interface {
+		ConsumeRefreshToken(context.Context, string) (*RefreshTokenData, error)
+	})
+	if !ok {
+		return nil, ErrServiceUnavailable
+	}
+	if _, err := consumer.ConsumeRefreshToken(ctx, tokenHash); err != nil {
+		if errors.Is(err, ErrRefreshTokenNotFound) || errors.Is(err, ErrRefreshTokenReused) {
+			return nil, ErrRefreshTokenReused
+		}
+		return nil, ErrServiceUnavailable
 	}
 
 	// 生成新的Token对，保持同一个家族ID
@@ -1880,6 +1888,11 @@ func (s *AuthService) RevokeSessionFamily(ctx context.Context, familyID string) 
 	if s.refreshTokenCache == nil || familyID == "" {
 		return nil
 	}
+	if cache, ok := s.refreshTokenCache.(interface {
+		RevokeTokenFamily(context.Context, string, time.Duration) error
+	}); ok {
+		return cache.RevokeTokenFamily(ctx, familyID, time.Duration(s.GetAccessTokenExpiresIn())*time.Second)
+	}
 	return s.refreshTokenCache.DeleteTokenFamily(ctx, familyID)
 }
 
@@ -1892,22 +1905,19 @@ func (s *AuthService) RevokeAllUserSessions(ctx context.Context, userID int64) e
 	return s.refreshTokenCache.DeleteUserRefreshTokens(ctx, userID)
 }
 
-// RevokeAllUserTokens invalidates both stateless access tokens and refresh sessions.
-//
-// 注意：users 表没有 token_version 列（resolvedTokenVersion 由 email+password_hash
-// 指纹推导），因此对 user.TokenVersion 自增只影响内存副本。之前紧跟其后的整行
-// Update 不写任何有效数据，却会用旧快照覆盖并发写入的列，故已移除。
-// 会话撤销由下面的 refresh session 清理承担；改密路径通过 password_hash 变化
-// 改变指纹，从而使旧 token 失效。
+// RevokeAllUserTokens advances a durable generation before best-effort cache cleanup.
+// Failure is returned; the generation already makes old access/refresh credentials unusable.
 func (s *AuthService) RevokeAllUserTokens(ctx context.Context, userID int64) error {
-	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
-		return fmt.Errorf("get user: %w", err)
+	repo, ok := s.userRepo.(interface {
+		RevokeUserSessions(context.Context, int64) error
+	})
+	if !ok {
+		return ErrServiceUnavailable
 	}
-
-	if err := s.RevokeAllUserSessions(ctx, userID); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to revoke refresh sessions after token invalidation for user %d: %v", userID, err)
+	if err := repo.RevokeUserSessions(ctx, userID); err != nil {
+		return err
 	}
-	return nil
+	return s.RevokeAllUserSessions(ctx, userID)
 }
 
 // hashToken 计算Token的SHA256哈希
@@ -1925,6 +1935,9 @@ func resolvedTokenVersion(user *User) int64 {
 	}
 
 	material := strings.ToLower(strings.TrimSpace(user.Email)) + "\n" + user.PasswordHash
+	if user.SessionGeneration != 0 {
+		material += fmt.Sprintf("\n%d", user.SessionGeneration)
+	}
 	sum := sha256.Sum256([]byte(material))
 	fingerprint := int64(binary.BigEndian.Uint64(sum[:8]) & 0x7fffffffffffffff)
 	return user.TokenVersion ^ fingerprint
@@ -1965,3 +1978,30 @@ func (s *AuthService) snapshotPlatformQuotaDefaults(ctx context.Context, userID 
 	}
 	return nil
 }
+
+// ValidateAccessSession applies the current credential and family lifecycle to all JWT consumers.
+func (s *AuthService) ValidateAccessSession(ctx context.Context, claims *JWTClaims, user *User) error {
+	if claims == nil || user == nil || !user.IsActive() {
+		return ErrInvalidToken
+	}
+	if claims.TokenVersion != resolvedTokenVersion(user) {
+		return ErrTokenRevoked
+	}
+	if claims.SessionID != "" && s.refreshTokenCache != nil {
+		if cache, ok := s.refreshTokenCache.(interface {
+			IsFamilyRevoked(context.Context, string) (bool, error)
+		}); ok {
+			revoked, err := cache.IsFamilyRevoked(ctx, claims.SessionID)
+			if err != nil {
+				return ErrServiceUnavailable
+			}
+			if revoked {
+				return ErrTokenRevoked
+			}
+		}
+	}
+	return nil
+}
+
+// CredentialVersion preserves the original email/password fingerprint at generation zero.
+func CredentialVersion(user *User) int64 { return resolvedTokenVersion(user) }

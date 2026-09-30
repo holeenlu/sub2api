@@ -119,6 +119,7 @@ func (s *OpenAIGatewayService) ForwardSeedance(ctx context.Context, c *gin.Conte
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxy = account.Proxy.URL()
 	}
+	s.mediaSubmissionStarting(ctx)
 	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(started).Milliseconds())
 	if err != nil {
@@ -132,6 +133,7 @@ func (s *OpenAIGatewayService) ForwardSeedance(ctx context.Context, c *gin.Conte
 	// Do not retry ambiguous asynchronous creates: the upstream may already have
 	// accepted a billable job. Preserve native error codes and response bodies.
 	if resp.StatusCode >= 300 {
+		s.mediaSubmissionRejected(ctx, resp.StatusCode)
 		writeGrokMediaResponse(c, resp, responseBody, s.responseHeaderFilter)
 		return nil, fmt.Errorf("seedance upstream status %d", resp.StatusCode)
 	}
@@ -142,6 +144,9 @@ func (s *OpenAIGatewayService) ForwardSeedance(ctx context.Context, c *gin.Conte
 			return nil, fmt.Errorf("seedance create response missing task ID")
 		}
 		result.ResponseID = SeedanceTaskKey(id)
+		if err := s.acceptGatewayVideo(ctx, result.ResponseID); err != nil {
+			return nil, err
+		}
 	}
 	if endpoint == SeedanceEndpointStatus {
 		result.ResponseID = taskID

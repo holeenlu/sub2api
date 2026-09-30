@@ -373,20 +373,50 @@ func (s *httpUpstreamService) httpClientForUpstreamRequest(client *http.Client, 
 		return client
 	}
 	ctx := req.Context()
-	switch {
-	case service.HTTPUpstreamRedirectsDisabled(ctx):
-		clone := *client
+	publicOnly := service.HTTPUpstreamPublicHostsOnly(ctx)
+	redirectsDisabled := service.HTTPUpstreamRedirectsDisabled(ctx)
+	if !publicOnly && !redirectsDisabled {
+		return client
+	}
+	clone := *client
+	if publicOnly {
+		// Pin validated destination IPs in the request sent to the transport.
+		// In particular a configured proxy must receive the approved IP, not a
+		// hostname it could independently resolve to a private destination.
+		transport, ok := client.Transport.(*http.Transport)
+		if client.Transport != nil && !ok {
+			clone.Transport = rejectedPublicDownloadTransport{}
+		} else {
+			clone.Transport = urlvalidator.NewPublicTransport(transport)
+		}
+		clone.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if next == nil || next.URL == nil {
+				return errors.New("public download redirect URL is invalid")
+			}
+			if len(via) > 0 && (via[len(via)-1] == nil || via[len(via)-1].URL == nil) {
+				return errors.New("public download redirect history is invalid")
+			}
+			if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && next.URL.Scheme != "https" {
+				return errors.New("public download cannot downgrade HTTPS")
+			}
+			return s.redirectChecker(next, via)
+		}
+	}
+	if redirectsDisabled {
 		clone.CheckRedirect = func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
-		return &clone
-	case service.HTTPUpstreamPublicHostsOnly(ctx) && client.CheckRedirect == nil:
-		clone := *client
-		clone.CheckRedirect = s.redirectChecker
-		return &clone
-	default:
-		return client
 	}
+	return &clone
+}
+
+type rejectedPublicDownloadTransport struct{}
+
+func (rejectedPublicDownloadTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("unsupported transport for public-only download")
 }
 
 // grokAccessDeniedFallbackTransport preserves the subscription CLI proxy as

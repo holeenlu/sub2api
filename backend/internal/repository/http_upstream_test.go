@@ -1048,6 +1048,8 @@ func TestHTTPUpstreamPublicHostsOnlyValidatesEveryRedirectHop(t *testing.T) {
 	}
 	publicHop, err := http.NewRequestWithContext(guarded.Context(), http.MethodGet, "http://93.184.216.34/a.png", nil)
 	require.NoError(t, err)
+	require.ErrorContains(t, client.CheckRedirect(publicHop, via), "downgrade HTTPS")
+	publicHop.URL.Scheme = "https"
 	require.NoError(t, client.CheckRedirect(publicHop, via))
 	require.Error(t, client.CheckRedirect(publicHop, make([]*http.Request, 10)), "redirect chain stays capped")
 }
