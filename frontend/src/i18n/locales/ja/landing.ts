@@ -262,6 +262,9 @@ export default {
 
   // Setup Wizard
   setup: {
+    bootstrapToken: 'セットアップ認証トークン',
+    bootstrapTokenPlaceholder: 'サーバー起動時に表示されたトークンを入力',
+    bootstrapTokenHint: '起動ログのトークン、または設定済みの SETUP_BOOTSTRAP_TOKEN を使用してください。ブラウザーには保存されず、インストール完了後は無効になります。',
     pageTitle: 'セットアップ',
     title: '@:{\'common.siteName\'} セットアップ',
     description: '@:{\'common.siteName\'} インスタンスを設定します',

@@ -233,6 +233,10 @@ func (h *UserHandler) GetByID(c *gin.Context) {
 // BindAuthIdentity manually binds a canonical auth identity to a user.
 // POST /api/v1/admin/users/:id/auth-identities
 func (h *UserHandler) BindAuthIdentity(c *gin.Context) {
+	if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
+		return
+	}
+
 	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid user ID")
@@ -328,15 +332,15 @@ func (h *UserHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// 把普通用户提升为管理员属权限敏感操作：需最近完成 step-up 2FA 验证。
-	// 目标已是管理员时（前端编辑表单总是携带 role）不触发，避免日常编辑被打断。
-	if req.Role == service.RoleAdmin {
+	if req.Role == service.RoleAdmin || req.Password != "" || req.Email != "" || req.Role == service.RoleUser {
 		target, err := h.adminService.GetUser(c.Request.Context(), userID)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
 		}
-		if target.Role != service.RoleAdmin {
+		promoting := req.Role == service.RoleAdmin && target.Role != service.RoleAdmin
+		replacingAdminCredential := target.Role == service.RoleAdmin && (req.Password != "" || (req.Email != "" && req.Email != target.Email) || req.Role == service.RoleUser)
+		if promoting || replacingAdminCredential {
 			if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
 				return
 			}

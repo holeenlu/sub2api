@@ -150,7 +150,7 @@ func (h *AuthHandler) OIDCOAuthStart(c *gin.Context) {
 	setOAuthPendingBrowserCookie(c, browserSessionKey, secureCookie)
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	if intent == oauthIntentBindCurrentUser {
-		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c)
+		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c, oidcOAuthBindUserCookieName, state, browserSessionKey)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return

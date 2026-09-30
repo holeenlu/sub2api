@@ -128,7 +128,11 @@ func runSetupServer() {
 	r.Use(middleware.SecurityHeaders(config.CSPConfig{Enabled: true, Policy: config.DefaultCSPPolicy}, nil))
 
 	// Register setup routes
-	setup.RegisterRoutes(r)
+	bootstrapToken, err := setup.RegisterRoutes(r)
+	if err != nil {
+		log.Fatalf("Failed to initialize setup authorization: %v", err)
+	}
+	log.Printf("Setup authorization token (operator only): %s", bootstrapToken)
 
 	// Serve embedded frontend if available
 	if web.HasEmbeddedFrontend() {

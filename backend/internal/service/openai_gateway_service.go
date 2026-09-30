@@ -457,6 +457,10 @@ type OpenAIGatewayService struct {
 	accountRepo             AccountRepository
 	usageLogRepo            UsageLogRepository
 	usageBillingRepo        UsageBillingRepository
+	mediaAPIKeyService      *APIKeyService
+	mediaRepo               GatewayMediaRepository
+	mediaSettlementCancel   context.CancelFunc
+	mediaSettlementDone     chan struct{}
 	userRepo                UserRepository
 	userSubRepo             UserSubscriptionRepository
 	cache                   GatewayCache

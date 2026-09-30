@@ -262,6 +262,9 @@ export default {
 
   // Setup Wizard
   setup: {
+    bootstrapToken: 'Setup authorization token',
+    bootstrapTokenPlaceholder: 'Enter the token shown when the server started',
+    bootstrapTokenHint: 'Use the token from the server startup log, or the configured SETUP_BOOTSTRAP_TOKEN. It is not saved in this browser and stops working after installation.',
     pageTitle: 'Setup',
     title: '@:common.siteName Setup',
     description: 'Configure your @:common.siteName instance',

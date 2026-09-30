@@ -83,6 +83,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	if err := s.validateWSContinuation(ctx, c, firstClientMessage); err != nil {
+		return err
+	}
 	latest, admissionErr := s.latestOpenAITurnAccount(ctx, c, account)
 	if admissionErr != nil {
 		s.invalidateOpenAIWSTurnStateAfterAdmissionFailureForRequest(
@@ -255,6 +258,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	parseClientPayload := func(turn int, raw []byte) (openAIWSClientPayload, error) {
+		if err := s.validateWSContinuation(ctx, c, raw); err != nil {
+			return openAIWSClientPayload{}, err
+		}
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "empty websocket request payload", nil)
@@ -510,6 +516,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	writeClientMessage := func(message []byte) error {
+		if id := strings.TrimSpace(gjson.GetBytes(message, "response.id").String()); id != "" {
+			s.bindHTTPResponseAccount(ctx, c, account, id)
+		}
 		writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
 		defer cancel()
 		message = restoreCodexToolNamesFromContext(c, message)
@@ -837,6 +846,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		ObserveHandshake: s.codexTicketHandshakeObserver(ctx, ticket),
 		Ticket:           ticket,
 		TicketScope:      fmt.Sprintf("%d/%s", getAPIKeyIDFromContext(c), sessionHash),
+		TenantScope:      openAIWSTenantScope(c),
 		PrepareTicket:    s.codexTicketProxy,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			_, err := s.latestOpenAITurnAccountForGroup(factoryCtx, account, groupID, true)

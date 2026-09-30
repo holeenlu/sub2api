@@ -22,6 +22,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if account != nil && IsRetiredPlatform(account.Platform) {
 		return nil, ErrPlatformRetired
 	}
+	if err := s.validateWSContinuation(ctx, c, body); err != nil {
+		return nil, err
+	}
 	latest, admissionErr := s.latestOpenAITurnAccount(ctx, c, account)
 	if admissionErr != nil {
 		return nil, markOpenAIInitialAdmissionError(admissionErr)
@@ -767,6 +770,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			requestView = newOpenAIRequestView(body)
 		}
 	}
+	if err := s.validateWSContinuation(ctx, c, body); err != nil {
+		return nil, err
+	}
 	// Run after orphan-output filtering and all request-map rebuilds so a
 	// compaction trigger cannot remain ahead of surviving history items.
 	if normalizedBody, changed, normalizeErr := NormalizeCompactionTriggerInputOrder(body); normalizeErr != nil {
@@ -1465,6 +1471,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// DeepSeek / Kimi 原生 Responses 端点为无状态实现：强制 store=false、清除
 	// previous_response_id，避免携带状态字段被上游拒绝。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
+	if err := s.validateWSContinuation(ctx, c, body); err != nil {
+		return nil, err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {

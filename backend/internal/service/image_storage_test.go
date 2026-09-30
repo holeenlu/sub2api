@@ -1,12 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -73,16 +74,14 @@ func TestImageResultUploaderRewritesB64JSON(t *testing.T) {
 }
 
 func TestImageResultUploaderRewritesURL(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write(pngBytes)
-	}))
-	defer upstream.Close()
-
 	storage := &fakeImageStorage{}
-	uploader := NewImageResultUploader(storage, "images/", 0, nil)
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		require.Equal(t, "https://cdn.example/a%2Fb?signature=keep%2Fexact", req.URL.String())
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"image/png"}}, Body: io.NopCloser(bytes.NewReader(pngBytes))}, nil
+	})}
+	uploader := NewImageResultUploader(storage, "images/", 0, client)
 
-	result := json.RawMessage(`{"created":1,"data":[{"url":"` + upstream.URL + `/pic.png"}]}`)
+	result := json.RawMessage(`{"created":1,"data":[{"url":"https://cdn.example/a%2Fb?signature=keep%2Fexact"}]}`)
 	out, err := uploader.Rewrite(context.Background(), "imgtask_xyz", result)
 	require.NoError(t, err)
 

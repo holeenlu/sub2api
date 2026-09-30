@@ -15,6 +15,7 @@ import (
 )
 
 var pendingAuthIntents = map[string]struct{}{
+	"authorize_bind":               {},
 	"login":                        {},
 	"bind_current_user":            {},
 	"adopt_existing_user_by_email": {},

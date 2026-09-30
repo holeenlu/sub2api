@@ -72,6 +72,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
 	applyStagedCodexFingerprintClientMetadata(c, account, payload)
+	if err := s.validateWSContinuation(ctx, c, payloadAsJSONBytes(payload)); err != nil {
+		return nil, err
+	}
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
 	previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	promptCacheKey := strings.TrimSpace(clientPromptCacheKey)
@@ -211,6 +214,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		ObserveHandshake: s.codexTicketHandshakeObserver(ctx, ticket),
 		Ticket:           ticket,
 		TicketScope:      fmt.Sprintf("%d/%s", getAPIKeyIDFromContext(c), sessionHash),
+		TenantScope:      openAIWSTenantScope(c),
 		PrepareTicket:    s.codexTicketProxy,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			_, err := s.admitOpenAITurnForGroup(factoryCtx, groupID, account, mappedModel)
@@ -709,6 +713,7 @@ readLoop:
 		lastEventType = eventType
 
 		if responseID == "" && eventResponseID != "" {
+			s.bindHTTPResponseAccount(ctx, c, account, eventResponseID)
 			responseID = eventResponseID
 		}
 

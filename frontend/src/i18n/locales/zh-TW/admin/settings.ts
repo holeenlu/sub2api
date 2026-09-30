@@ -320,10 +320,10 @@ export default {
       },
       apiKeyAcl: {
         title: 'API Key IP 存取控制',
-        description: '控制 API Key 白/黑名單、操作稽核日誌與工作階段 IP/UA 綁定使用哪個用戶端 IP 判斷',
-        trustForwardedIp: '信任反代傳遞的用戶端 IP',
+        description: '驗證、IP 限制、速率限制與工作階段綁定一律使用已設定的可信代理鏈',
+        trustForwardedIp: '舊版轉發 IP 中繼資料相容',
         trustForwardedIpHint:
-          '為保證升級相容預設開啟。開啟後 CF-Connecting-IP、X-Real-IP 或 X-Forwarded-For 會直接接管用戶端 IP 解析並覆蓋 server.trusted_proxies；關閉後嚴格使用 server.trusted_proxies 設定的 Gin 可信代理鏈。僅在源站無法被直接存取時開啟接管模式。切換會改變現有工作階段的 IP 指紋。',
+          '預設關閉。此相容選項僅影響請求與用量中繼資料，不能覆蓋安全檢查。請在 server.trusted_proxies 中設定實際代理位址，供驗證和存取控制使用。',
         forwardedClientIpHeaders: '自訂用戶端 IP 請求標頭',
         forwardedClientIpHeadersHint: '新增 CDN 或反代請求標頭名稱，解析時優先於內建請求標頭。',
         forwardedClientIpHeadersPlaceholder: 'X-Client-IP',

@@ -132,7 +132,7 @@ func (h *AuthHandler) WeChatOAuthStart(c *gin.Context) {
 	setOAuthPendingBrowserCookie(c, browserSessionKey, secureCookie)
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	if intent == oauthIntentBindCurrentUser {
-		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c)
+		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c, wechatOAuthBindUserCookieName, state, browserSessionKey)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -280,7 +280,7 @@ func (h *AuthHandler) WeChatOAuthCallback(c *gin.Context) {
 		}
 	}
 	if existingIdentityUser != nil {
-		if err := h.ensureWeChatRuntimeIdentityBinding(c.Request.Context(), existingIdentityUser.ID, identityRef, upstreamClaims); err != nil {
+		if err := h.ensureWeChatRuntimeIdentityBinding(c.Request.Context(), existingIdentityUser, identityRef, upstreamClaims); err != nil {
 			redirectOAuthError(c, frontendCallback, "session_error", infraerrors.Reason(err), infraerrors.Message(err))
 			return
 		}
@@ -574,17 +574,12 @@ func (h *AuthHandler) CompleteWeChatOAuthRegistration(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if err := applyPendingOAuthAdoption(c.Request.Context(), h.entClient(), h.authService, h.userService, session, decision, &user.ID); err != nil {
+	if err := applyPendingOAuthAdoptionAndConsumeSession(c.Request.Context(), h.entClient(), h.authService, h.userService, session, decision, user.ID); err != nil {
 		response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_ADOPTION_APPLY_FAILED", "failed to apply oauth profile adoption").WithCause(err))
 		return
 	}
 	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
-	if _, err := pendingSvc.ConsumeBrowserSession(c.Request.Context(), sessionToken, browserSessionKey); err != nil {
-		clearOAuthPendingSessionCookie(c, secureCookie)
-		clearOAuthPendingBrowserCookie(c, secureCookie)
-		response.ErrorFrom(c, err)
-		return
-	}
+
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	clearOAuthPendingBrowserCookie(c, secureCookie)
 
@@ -946,7 +941,7 @@ func singleWeChatChannelUser(records []*dbent.AuthIdentityChannel) (*dbent.User,
 
 func (h *AuthHandler) ensureWeChatRuntimeIdentityBinding(
 	ctx context.Context,
-	userID int64,
+	expectedUser *dbent.User,
 	identity service.PendingAuthIdentityKey,
 	upstreamClaims map[string]any,
 ) error {
@@ -961,12 +956,22 @@ func (h *AuthHandler) ensureWeChatRuntimeIdentityBinding(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if expectedUser == nil {
+		return service.ErrInvalidToken
+	}
+	current, err := service.LockAuthLifecycleUser(ctx, tx.Client(), expectedUser.ID)
+	if err != nil {
+		return err
+	}
+	if current.SessionGeneration != expectedUser.SessionGeneration || current.PasswordHash != expectedUser.PasswordHash || current.Email != expectedUser.Email {
+		return service.ErrTokenRevoked
+	}
 	_, err = ensurePendingOAuthIdentityForUser(dbent.NewTxContext(ctx, tx), tx, &dbent.PendingAuthSession{
 		ProviderType:           strings.TrimSpace(identity.ProviderType),
 		ProviderKey:            strings.TrimSpace(identity.ProviderKey),
 		ProviderSubject:        strings.TrimSpace(identity.ProviderSubject),
 		UpstreamIdentityClaims: cloneOAuthMetadata(upstreamClaims),
-	}, userID)
+	}, expectedUser.ID)
 	if err != nil {
 		return err
 	}
