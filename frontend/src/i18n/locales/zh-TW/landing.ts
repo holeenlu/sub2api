@@ -254,6 +254,9 @@ export default {
 
   // Setup Wizard
   setup: {
+    bootstrapToken: '安裝授權權杖',
+    bootstrapTokenPlaceholder: '輸入伺服器啟動時顯示的權杖',
+    bootstrapTokenHint: '請使用伺服器啟動日誌中的權杖，或已設定的 SETUP_BOOTSTRAP_TOKEN。權杖不會儲存在瀏覽器中，安裝完成後即失效。',
     pageTitle: '安裝嚮導',
     title: '@:common.siteName 安裝嚮導',
     description: '設定您的 @:common.siteName 實例',

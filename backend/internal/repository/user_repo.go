@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/authidentitychannel"
 	dbgroup "github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
@@ -182,7 +183,7 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
 
-	out := userEntityToService(m)
+	out := userEntityToAuthService(m)
 	groups, err := r.loadAllowedGroups(ctx, []int64{id})
 	if err != nil {
 		return nil, err
@@ -199,7 +200,7 @@ func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
-	out := userEntityToService(m)
+	out := userEntityToAuthService(m)
 	groups, err := r.loadAllowedGroups(ctx, []int64{id})
 	if err != nil {
 		return nil, err
@@ -226,7 +227,7 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service
 	}
 	m := matches[0]
 
-	out := userEntityToService(m)
+	out := userEntityToAuthService(m)
 	groups, err := r.loadAllowedGroups(ctx, []int64{m.ID})
 	if err != nil {
 		return nil, err
@@ -291,6 +292,7 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 		return translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
 	oldEmail := existing.Email
+	credentialsChanged := (fields.PasswordHash && existing.PasswordHash != userIn.PasswordHash) || (fields.Email && existing.Email != userIn.Email)
 
 	updateOp := txClient.User.UpdateOneID(userIn.ID)
 	if fields.Email {
@@ -341,11 +343,19 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	if fields.LastActiveAt && userIn.LastActiveAt != nil {
 		updateOp = updateOp.SetLastActiveAt(*userIn.LastActiveAt)
 	}
+	if credentialsChanged {
+		updateOp = updateOp.AddSessionGeneration(1)
+	}
 	updated, err := updateOp.Save(txCtx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
 	}
 
+	if credentialsChanged {
+		if err := txClient.PendingAuthSession.Update().Where(pendingauthsession.TargetUserIDEQ(userIn.ID), pendingauthsession.ConsumedAtIsNil()).SetConsumedAt(time.Now()).Exec(txCtx); err != nil {
+			return err
+		}
+	}
 	if fields.AllowedGroups {
 		if err := r.syncUserAllowedGroupsWithClient(txCtx, txClient, updated.ID, userIn.AllowedGroups); err != nil {
 			return err
@@ -364,6 +374,11 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 
 	userIn.UpdatedAt = updated.UpdatedAt
+	userIn.SessionGeneration = updated.SessionGeneration
+	if credentialsChanged {
+		userIn.TokenVersion = 0
+		userIn.TokenVersionResolved = false
+	}
 	return nil
 }
 
@@ -607,7 +622,7 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	userMap := make(map[int64]*service.User, len(users))
 	for i := range users {
 		userIDs = append(userIDs, users[i].ID)
-		u := userEntityToService(users[i])
+		u := userEntityToAuthService(users[i])
 		outUsers = append(outUsers, *u)
 		userMap[u.ID] = &outUsers[len(outUsers)-1]
 	}
@@ -1248,7 +1263,9 @@ func (r *userRepository) UpdateEmailWithAliasGuard(
 		Save(ctx); err != nil {
 		return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
 	}
-	return nil
+	// Email/password fingerprints already invalidate sessions atomically. Keep the
+	// generation unchanged so the existing email-binding return value can issue fresh tokens.
+	return client.PendingAuthSession.Update().Where(pendingauthsession.TargetUserIDEQ(userID), pendingauthsession.ConsumedAtIsNil()).SetConsumedAt(time.Now()).Exec(ctx)
 }
 
 // dotStrippedEmailExpr 渲染下面的表达式：去掉存量邮箱的大小写、首尾空白（与
@@ -1432,7 +1449,7 @@ func (r *userRepository) GetFirstAdmin(ctx context.Context) (*service.User, erro
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
 
-	out := userEntityToService(m)
+	out := userEntityToAuthService(m)
 	groups, err := r.loadAllowedGroups(ctx, []int64{m.ID})
 	if err != nil {
 		return nil, err
@@ -1528,6 +1545,9 @@ func (r *userRepository) syncUserAllowedGroupsWithClient(ctx context.Context, cl
 }
 
 func applyUserEntityToService(dst *service.User, src *dbent.User) {
+	if dst != nil && src != nil {
+		dst.SessionGeneration = src.SessionGeneration
+	}
 	if dst == nil || src == nil {
 		return
 	}
@@ -1589,11 +1609,46 @@ func (r *userRepository) DisableTotp(ctx context.Context, userID int64) error {
 	client := clientFromContext(ctx, r.client)
 	_, err := client.User.UpdateOneID(userID).
 		SetTotpEnabled(false).
+		AddSessionGeneration(1).
 		ClearTotpEnabledAt().
 		ClearTotpSecretEncrypted().
 		Save(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrUserNotFound, nil)
+	}
+	return nil
+}
+
+// Keep auth lifecycle state in every user-repository read without changing API-key DTOs.
+func userEntityToAuthService(u *dbent.User) *service.User {
+	out := userEntityToService(u)
+	if out != nil {
+		out.SessionGeneration = u.SessionGeneration
+	}
+	return out
+}
+
+func (r *userRepository) RevokeUserSessions(ctx context.Context, userID int64) error {
+	return r.WithUserProfileIdentityTx(ctx, func(ctx context.Context) error {
+		client := clientFromContext(ctx, r.client)
+		if err := client.User.UpdateOneID(userID).AddSessionGeneration(1).Exec(ctx); err != nil {
+			return err
+		}
+		return client.PendingAuthSession.Update().Where(pendingauthsession.TargetUserIDEQ(userID), pendingauthsession.ConsumedAtIsNil()).SetConsumedAt(time.Now()).Exec(ctx)
+	})
+}
+
+// ActivateTotp is a compare-and-set: a stale setup cannot overwrite an existing factor.
+func (r *userRepository) ActivateTotp(ctx context.Context, expected *service.User, secret string) error {
+	n, err := clientFromContext(ctx, r.client).User.Update().Where(
+		dbuser.IDEQ(expected.ID), dbuser.TotpEnabledEQ(false),
+		dbuser.SessionGenerationEQ(expected.SessionGeneration), dbuser.PasswordHashEQ(expected.PasswordHash), dbuser.EmailEQ(expected.Email),
+	).SetTotpSecretEncrypted(secret).SetTotpEnabled(true).SetTotpEnabledAt(time.Now()).Save(ctx)
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return service.ErrTokenRevoked
 	}
 	return nil
 }

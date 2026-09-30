@@ -422,6 +422,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
+	if err := service.ValidateGatewaySecurityJSON(body); err != nil {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return
+	}
 	setOpsRequestContext(c, "", false)
 	sessionHashBody := body
 
@@ -2448,6 +2452,22 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	if !gjson.ValidBytes(firstMessage) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "invalid JSON payload")
 		return
+	}
+	if err := service.ValidateGatewaySecurityJSON(firstMessage); err != nil {
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, err.Error())
+		return
+	}
+	service.SetOpenAIHTTPResponseOwner(c, subject.UserID, apiKey.ID)
+	if id := strings.TrimSpace(gjson.GetBytes(firstMessage, "previous_response_id").String()); id != "" {
+		groupID := int64(0)
+		if apiKey.GroupID != nil {
+			groupID = *apiKey.GroupID
+		}
+		owned, err := h.gatewayService.ValidateOpenAIHTTPResponseOwner(ctx, groupID, id, subject.UserID, apiKey.ID)
+		if err != nil || !owned {
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "previous_response_id is not available for this user")
+			return
+		}
 	}
 	reqModel := strings.TrimSpace(gjson.GetBytes(firstMessage, "model").String())
 	if reqModel == "" {

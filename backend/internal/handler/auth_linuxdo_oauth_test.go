@@ -145,6 +145,7 @@ func TestLinuxDoOAuthBindStartRedirectsAndSetsBindCookies(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/linuxdo/bind/start?intent=bind_current_user&redirect=/settings/connections", nil)
 	c.Request = req
 	c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 42})
+	seedUserID := lifecycleSeedAuth(t, handler, c, 42)
 
 	handler.LinuxDoOAuthStart(c)
 
@@ -166,9 +167,8 @@ func TestLinuxDoOAuthBindStartRedirectsAndSetsBindCookies(t *testing.T) {
 
 	bindCookie := findCookie(cookies, linuxDoOAuthBindUserCookieName)
 	require.NotNil(t, bindCookie)
-	userID, err := parseOAuthBindUserCookieValue(decodeCookieValueForTest(t, bindCookie.Value), "test-secret")
-	require.NoError(t, err)
-	require.Equal(t, int64(42), userID)
+	userID := lifecycleBindCookieUser(t, handler, decodeCookieValueForTest(t, bindCookie.Value))
+	require.Equal(t, seedUserID, userID)
 }
 
 func TestLinuxDoOAuthStartOmitsPKCEWhenDisabled(t *testing.T) {
@@ -304,8 +304,7 @@ func TestLinuxDoOAuthBindStartAcceptsAccessTokenCookie(t *testing.T) {
 
 	bindCookie := findCookie(recorder.Result().Cookies(), linuxDoOAuthBindUserCookieName)
 	require.NotNil(t, bindCookie)
-	userID, err := parseOAuthBindUserCookieValue(decodeCookieValueForTest(t, bindCookie.Value), "test-secret")
-	require.NoError(t, err)
+	userID := lifecycleBindCookieUser(t, handler, decodeCookieValueForTest(t, bindCookie.Value))
 	require.Equal(t, user.ID, userID)
 
 	accessTokenCookie := findCookie(recorder.Result().Cookies(), oauthBindAccessTokenCookieName)
@@ -856,8 +855,9 @@ func TestLinuxDoOAuthCallbackCreatesBindPendingSessionForCurrentUser(t *testing.
 	req.AddCookie(encodedCookie(linuxDoOAuthRedirectCookie, "/settings/connections"))
 	req.AddCookie(encodedCookie(linuxDoOAuthVerifierCookie, "verifier-bind"))
 	req.AddCookie(encodedCookie(linuxDoOAuthIntentCookieName, oauthIntentBindCurrentUser))
-	req.AddCookie(encodedCookie(linuxDoOAuthBindUserCookieName, buildEncodedOAuthBindUserCookie(t, currentUser.ID, "test-secret")))
 	req.AddCookie(encodedCookie(oauthPendingBrowserCookieName, "browser-bind"))
+
+	lifecycleAddBindCapability(t, handler, req, linuxDoOAuthBindUserCookieName, currentUser.ID)
 	c.Request = req
 
 	handler.LinuxDoOAuthCallback(c)

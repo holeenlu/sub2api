@@ -998,7 +998,7 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	// Candidate admission and sticky routing must evaluate the same account-level
 	// threshold overrides before the full account snapshot is hydrated.
 	keys := []string{
-		"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type",
+		"model_mapping", "model_mapping_mode", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type",
 		"account_scheduling_threshold",
 		"anthropic_fable_scheduling_threshold",
 		"chatgpt_account_id", "expires_at",

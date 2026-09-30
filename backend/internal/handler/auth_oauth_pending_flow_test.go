@@ -91,7 +91,7 @@ func TestExchangePendingOAuthCompletionPreviewThenFinalizeAppliesAdoptionDecisio
 
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("pending-session-token").
-		SetIntent("login").
+		SetIntent("bind_current_user").
 		SetProviderType("linuxdo").
 		SetProviderKey("linuxdo").
 		SetProviderSubject("123").
@@ -112,6 +112,7 @@ func TestExchangePendingOAuthCompletionPreviewThenFinalizeAppliesAdoptionDecisio
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	previewRecorder := httptest.NewRecorder()
 	previewCtx, _ := gin.CreateTestContext(previewRecorder)
@@ -203,7 +204,7 @@ func TestExchangePendingOAuthCompletionSkipsInvalidAvatarAdoptionWithoutBlocking
 
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("pending-invalid-avatar-token").
-		SetIntent("login").
+		SetIntent("bind_current_user").
 		SetProviderType("linuxdo").
 		SetProviderKey("linuxdo").
 		SetProviderSubject("invalid-avatar-123").
@@ -224,6 +225,7 @@ func TestExchangePendingOAuthCompletionSkipsInvalidAvatarAdoptionWithoutBlocking
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	body := bytes.NewBufferString(`{"adopt_display_name":true,"adopt_avatar":true}`)
 	recorder := httptest.NewRecorder()
@@ -296,6 +298,7 @@ func TestExchangePendingOAuthCompletionBindCurrentUserPreviewThenFinalizeBindsId
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	previewRecorder := httptest.NewRecorder()
 	previewCtx, _ := gin.CreateTestContext(previewRecorder)
@@ -429,6 +432,7 @@ func TestExchangePendingOAuthCompletionBindCurrentUserOwnershipConflict(t *testi
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	body := bytes.NewBufferString(`{"adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
@@ -464,7 +468,7 @@ func TestExchangePendingOAuthCompletionBindCurrentUserOwnershipConflict(t *testi
 	require.Nil(t, storedSession.ConsumedAt)
 }
 
-func TestExchangePendingOAuthCompletionLoginFalseFalseBindsIdentityWithoutAdoption(t *testing.T) {
+func TestExchangePendingOAuthCompletionLoginFalseFalsePreservesLinkedIdentity(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandler(t, false)
 	ctx := context.Background()
 
@@ -498,6 +502,7 @@ func TestExchangePendingOAuthCompletionLoginFalseFalseBindsIdentityWithoutAdopti
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	body := bytes.NewBufferString(`{"adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
@@ -607,6 +612,7 @@ func TestExchangePendingOAuthCompletionLoginReassignsExistingDecisionIdentityRef
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	_, err = client.IdentityAdoptionDecision.Create().
 		SetPendingAuthSessionID(session.ID).
@@ -646,7 +652,7 @@ func TestExchangePendingOAuthCompletionLoginReassignsExistingDecisionIdentityRef
 	require.NotNil(t, storedSession.ConsumedAt)
 }
 
-func TestExchangePendingOAuthCompletionLoginWithoutDecisionStillBindsIdentity(t *testing.T) {
+func TestExchangePendingOAuthCompletionLoginWithoutDecisionPreservesLinkedIdentity(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandler(t, false)
 	ctx := context.Background()
 
@@ -679,6 +685,7 @@ func TestExchangePendingOAuthCompletionLoginWithoutDecisionStillBindsIdentity(t 
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
@@ -757,6 +764,7 @@ func TestExchangePendingOAuthCompletionExistingLoginWithSuggestedProfileSkipsAdo
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
@@ -2411,10 +2419,13 @@ func TestLogin2FACompletesPendingOAuthBindAndConsumesSession(t *testing.T) {
 		Save(ctx)
 	require.NoError(t, err)
 
+	proofUser, err := handler.authService.ValidatePasswordCredentials(ctx, existingUser.Email, "secret-123")
+	require.NoError(t, err)
 	tempToken, err := handler.totpService.CreatePendingOAuthBindLoginSession(
 		ctx,
 		existingUser.ID,
 		existingUser.Email,
+		service.CredentialVersion(proofUser),
 		session.SessionToken,
 		session.BrowserSessionKey,
 	)

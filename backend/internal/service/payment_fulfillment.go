@@ -150,16 +150,13 @@ func expectedNotificationProviderKey(registry *payment.Registry, orderPaymentTyp
 func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, tradeNo string, paid float64, pk string) error {
 	previousStatus := o.Status
 	now := time.Now()
-	grace := now.Add(-paymentGraceMinutes * time.Minute)
 	c, err := s.entClient.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
 		paymentorder.Or(
 			paymentorder.StatusEQ(OrderStatusPending),
 			paymentorder.StatusEQ(OrderStatusCancelled),
-			paymentorder.And(
-				paymentorder.StatusEQ(OrderStatusExpired),
-				paymentorder.UpdatedAtGTE(grace),
-			),
+			paymentorder.StatusEQ(OrderStatusExpired),
+			paymentorder.And(paymentorder.StatusEQ(OrderStatusFailed), paymentorder.PaidAtIsNil()),
 		),
 	).SetStatus(OrderStatusPaid).SetPayAmount(paid).SetPaymentTradeNo(tradeNo).SetPaidAt(now).ClearFailedAt().ClearFailedReason().Save(ctx)
 	if err != nil {
@@ -218,16 +215,23 @@ func (s *PaymentService) executeFulfillment(ctx context.Context, oid int64) erro
 	if err != nil {
 		return fmt.Errorf("get order: %w", err)
 	}
-	if o.OrderType == payment.OrderTypeSubscription {
+	switch o.OrderType {
+	case payment.OrderTypeSubscription:
 		return s.ExecuteSubscriptionFulfillment(ctx, oid)
+	case payment.OrderTypeBalance:
+		return s.ExecuteBalanceFulfillment(ctx, oid)
+	default:
+		return infraerrors.BadRequest("INVALID_ORDER_TYPE", "unknown order type")
 	}
-	return s.ExecuteBalanceFulfillment(ctx, oid)
 }
 
 func (s *PaymentService) ExecuteBalanceFulfillment(ctx context.Context, oid int64) error {
 	o, err := s.entClient.PaymentOrder.Get(ctx, oid)
 	if err != nil {
 		return infraerrors.NotFound("NOT_FOUND", "order not found")
+	}
+	if o.OrderType != payment.OrderTypeBalance {
+		return infraerrors.BadRequest("INVALID_ORDER_TYPE", "order type does not match fulfillment")
 	}
 	if o.Status == OrderStatusCompleted {
 		return nil
@@ -256,49 +260,82 @@ func (s *PaymentService) acquirePaymentFulfillmentLease(ctx context.Context, o *
 	if o == nil {
 		return nil, infraerrors.BadRequest("INVALID_STATUS", "nil payment order")
 	}
-
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	staleBefore := now.Add(-paymentFulfillmentLeaseDuration)
-	updated, err := s.entClient.PaymentOrder.Update().
-		Where(
-			paymentorder.IDEQ(o.ID),
-			paymentorder.Or(
-				paymentorder.StatusIn(OrderStatusPaid, OrderStatusFailed),
-				paymentorder.And(
-					paymentorder.StatusEQ(OrderStatusRecharging),
-					paymentorder.UpdatedAtLTE(staleBefore),
-				),
-			),
-		).
-		SetStatus(OrderStatusRecharging).
-		SetUpdatedAt(now).
-		ClearFailedAt().
-		ClearFailedReason().
-		Save(ctx)
+	limit, err := s.fulfillmentDailyLimit(ctx, o)
 	if err != nil {
-		return nil, fmt.Errorf("acquire fulfillment lease: %w", err)
+		return nil, err
 	}
-	if updated == 0 {
-		current, getErr := s.entClient.PaymentOrder.Get(ctx, o.ID)
-		if getErr != nil {
-			return nil, fmt.Errorf("reload fulfillment lease: %w", getErr)
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Same user-first lock order as checkout creation. The provider payment has
+	// already been persisted; quota failure must never roll that payment back.
+	if _, err := tx.User.UpdateOneID(o.UserID).AddBalance(0).Save(ctx); err != nil {
+		return nil, err
+	}
+	current, err := tx.PaymentOrder.Get(ctx, o.ID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if current.Status == OrderStatusCompleted {
+		return nil, nil
+	}
+	if current.Status == OrderStatusRecharging && current.UpdatedAt.After(now.Add(-paymentFulfillmentLeaseDuration)) {
+		return nil, infraerrors.Conflict("CONFLICT", "order is being processed")
+	}
+	if current.Status != OrderStatusPaid && current.Status != OrderStatusFailed && current.Status != OrderStatusRecharging {
+		return nil, infraerrors.Conflict("CONFLICT", "order status changed")
+	}
+	// The user lock serializes lease claimers; the status predicate also
+	// prevents an old worker completing/failing after our read from being overwritten.
+	// Avoid timestamp round-trip equality on initial claims (SQLite text precision).
+	snapshot := current.ProviderSnapshot
+	if snapshot == nil {
+		snapshot = map[string]any{}
+	}
+	state, _ := snapshot[paymentAllowanceStateKey].(string)
+	if state != "admitted" {
+		amount := paymentAllowanceAmount(current)
+		if !isValidProviderAmount(amount) {
+			return nil, fmt.Errorf("invalid order allowance")
 		}
-		if current.Status == OrderStatusCompleted {
+		if err := s.checkDailyAllowance(ctx, tx, current.UserID, current.ID, amount, limit, now); err != nil {
+			if infraerrors.Reason(err) != "DAILY_LIMIT_EXCEEDED" {
+				return nil, err
+			}
+			snapshot[paymentAllowanceStateKey] = "deferred"
+			updated, err := tx.PaymentOrder.Update().Where(paymentorder.IDEQ(current.ID), paymentorder.StatusEQ(current.Status)).
+				SetStatus(OrderStatusPaid).SetProviderSnapshot(snapshot).SetUpdatedAt(now).SetFailedReason("DAILY_ALLOWANCE_DEFERRED").Save(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if updated != 1 {
+				return nil, infraerrors.Conflict("CONFLICT", "order changed during allowance admission")
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
 			return nil, nil
 		}
-		if current.Status == OrderStatusRecharging {
-			return nil, infraerrors.Conflict("CONFLICT", "order is being processed")
-		}
-		return nil, infraerrors.Conflict("CONFLICT", "order status changed while acquiring fulfillment lease")
+		snapshot[paymentAllowanceStateKey] = "admitted"
+		snapshot[paymentAllowanceDayKey] = psStartOfDayUTC(now).Format("2006-01-02")
 	}
-
-	// Reload the persisted timestamp instead of trusting application clock precision.
-	claimed, err := s.entClient.PaymentOrder.Get(ctx, o.ID)
+	updated, err := tx.PaymentOrder.Update().Where(paymentorder.IDEQ(current.ID), paymentorder.StatusEQ(current.Status)).
+		SetStatus(OrderStatusRecharging).SetProviderSnapshot(snapshot).SetUpdatedAt(now).ClearFailedAt().ClearFailedReason().Save(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("reload acquired fulfillment lease: %w", err)
+		return nil, err
 	}
-	if claimed.Status != OrderStatusRecharging {
-		return nil, infraerrors.Conflict("CONFLICT", "fulfillment lease was lost")
+	if updated != 1 {
+		return nil, infraerrors.Conflict("CONFLICT", "fulfillment lease changed")
+	}
+	claimed, err := tx.PaymentOrder.Get(ctx, current.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return &paymentFulfillmentLease{version: claimed.UpdatedAt}, nil
 }
@@ -510,6 +547,9 @@ func (s *PaymentService) ExecuteSubscriptionFulfillment(ctx context.Context, oid
 	o, err := s.entClient.PaymentOrder.Get(ctx, oid)
 	if err != nil {
 		return infraerrors.NotFound("NOT_FOUND", "order not found")
+	}
+	if o.OrderType != payment.OrderTypeSubscription {
+		return infraerrors.BadRequest("INVALID_ORDER_TYPE", "order type does not match fulfillment")
 	}
 	if o.Status == OrderStatusCompleted {
 		return nil

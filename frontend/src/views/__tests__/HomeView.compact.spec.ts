@@ -29,6 +29,11 @@ vi.mock('@/stores/app', () => ({
   useAppStore: () => appStore,
 }))
 
+// The model showcase reads auth through its direct store import.
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authStore,
+}))
+
 // 首页模型区会打模型广场公开端点；组件行为另有测试，这里只要求不发真实请求。
 vi.mock('@/api/modelPlaza', () => ({
   getModelPlaza: vi.fn().mockResolvedValue({ description: '', groups: [] }),

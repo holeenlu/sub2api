@@ -247,7 +247,7 @@ export default {
       },
       codexModelCatalog: {
         title: 'Codex 模型目錄',
-        description: '預設設定立即生成並包含模型目錄路徑，不會自動取得目錄或背景更新。首次使用請取得目錄，將 codex-models.json 儲存到下方路徑後啟動 Codex；取得成功後會更新模型及推理設定。',
+        description: '預設設定立即生成並包含模型目錄路徑，不會自動取得目錄或後台重新整理。首次使用請取得目錄，將 codex-models.json 儲存到下方路徑後啟動 Codex；取得成功後會更新模型及推理設定。',
         emptyDescription: '手動取得的目錄沒有可用的 Codex 模型，已保留預設設定。請檢查帳號模型限制和分組模型白名單。',
         fetch: '取得目錄',
         retry: '重試',
@@ -649,8 +649,8 @@ export default {
     quote: {
       scopes: {group: '分組標準價', personal: '你的報價', group_fallback: '分組參考價'},
       sources: {media_billing: '媒體計費規則', group: '分組價卡', channel: '通道價卡', billing_catalog: '計費目錄/相容價'},
-      conditional: '已套用倍率；階梯、時段等條件請見明細',
-      responseModel: '按目前模型顯示倍率價格；最終按回應模型計費',
+      conditional: '已套用倍率；階梯、時段等條件見明細',
+      responseModel: '按目前模型展示倍率價格；最終按回應模型計費',
       requestDependent: '價格取決於實際路由或上游回傳模型',
       personalUnavailable: '個人倍率暫不可用，以下為分組參考價。'
     },

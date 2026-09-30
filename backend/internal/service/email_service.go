@@ -583,14 +583,18 @@ func (s *EmailService) VerifyPasswordResetToken(ctx context.Context, email, toke
 
 // ConsumePasswordResetToken verifies and deletes the token (one-time use)
 func (s *EmailService) ConsumePasswordResetToken(ctx context.Context, email, token string) error {
-	// Verify first
-	if err := s.VerifyPasswordResetToken(ctx, email, token); err != nil {
-		return err
+	consumer, ok := s.cache.(interface {
+		ConsumePasswordResetToken(context.Context, string, string) (bool, error)
+	})
+	if !ok {
+		return ErrServiceUnavailable
 	}
-
-	// Delete after verification (one-time use)
-	if err := s.cache.DeletePasswordResetToken(ctx, email); err != nil {
-		slog.Error("failed to delete password reset token after consumption", "email", email, "error", err)
+	consumed, err := consumer.ConsumePasswordResetToken(ctx, email, token)
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+	if !consumed {
+		return ErrInvalidResetToken
 	}
 	return nil
 }

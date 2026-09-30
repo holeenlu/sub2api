@@ -319,10 +319,10 @@ export default {
       apiKeyAcl: {
         title: 'API Key IP Access Control',
         description:
-          'Choose which client IP is used by API Key allowlists/denylists, admin audit logs, and session IP/UA binding',
-        trustForwardedIp: 'Trust forwarded client IP',
+          'Authentication, IP restrictions, rate limits and session binding always use the configured trusted proxy chain',
+        trustForwardedIp: 'Legacy forwarded IP metadata',
         trustForwardedIpHint:
-          'Enabled by default for upgrade compatibility. When enabled, raw CF-Connecting-IP, X-Real-IP, or X-Forwarded-For values take over server.trusted_proxies for client-IP resolution. Disable it to enforce the Gin trusted-proxy chain configured by server.trusted_proxies. Only enable takeover mode when the origin cannot be reached directly. Changing this switch changes existing session IP fingerprints.',
+          'Disabled by default. This compatibility option affects request and usage metadata only; it cannot override security checks. Configure server.trusted_proxies with the actual proxy addresses for authentication and access control.',
         forwardedClientIpHeaders: 'Custom client-IP headers',
         forwardedClientIpHeadersHint: 'Add CDN or proxy header names to check before the built-in headers.',
         forwardedClientIpHeadersPlaceholder: 'X-Client-IP',

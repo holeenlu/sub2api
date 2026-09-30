@@ -703,6 +703,9 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		bodyReader = bytes.NewReader(body)
 	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	if poll, _ := ctx.Value(gatewayMediaPollKey{}).(bool); poll {
+		upstreamCtx = ctx
+	}
 	defer releaseUpstreamCtx()
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, endpoint.httpMethod(), targetURL, bodyReader)
 	if err != nil {
@@ -728,6 +731,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		proxyURL = account.Proxy.URL()
 	}
 	upstreamStart := time.Now()
+	s.mediaSubmissionStarting(ctx)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
@@ -738,6 +742,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	requestIDHeader := firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id"))
 	requestModel := requestInfo.Model
 	if resp.StatusCode >= 400 {
+		s.mediaSubmissionRejected(ctx, resp.StatusCode)
 		return s.handleGrokMediaErrorResponse(ctx, resp, c, account, requestIDHeader, requestModel)
 	}
 
@@ -762,6 +767,11 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 			requestID,
 			grokMediaContentProxyURL(c, requestID),
 		)
+	}
+	if IsAsyncVideoCreate(endpoint) {
+		if err := s.acceptGatewayVideo(ctx, extractGrokMediaVideoRequestID(respBody)); err != nil {
+			return nil, err
+		}
 	}
 	writeGrokMediaResponse(c, resp, respBody, s.responseHeaderFilter)
 	usage := grokMediaUsageFromResponse(endpoint, requestInfo, respBody)

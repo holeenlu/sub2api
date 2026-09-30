@@ -546,8 +546,9 @@ func TestWeChatOAuthCallbackBindUsesUnionCanonicalIdentityAcrossChannels(t *test
 			req.AddCookie(encodedCookie(wechatOAuthRedirectCookieName, "/dashboard"))
 			req.AddCookie(encodedCookie(wechatOAuthIntentCookieName, wechatOAuthIntentBind))
 			req.AddCookie(encodedCookie(wechatOAuthModeCookieName, tc.mode))
-			req.AddCookie(encodedCookie(wechatOAuthBindUserCookieName, buildEncodedOAuthBindUserCookie(t, currentUser.ID, "test-secret")))
 			req.AddCookie(encodedCookie(oauthPendingBrowserCookieName, "browser-123"))
+
+			lifecycleAddBindCapability(t, handler, req, wechatOAuthBindUserCookieName, currentUser.ID)
 			c.Request = req
 
 			handler.WeChatOAuthCallback(c)
@@ -645,8 +646,9 @@ func TestWeChatOAuthCallbackBindRejectsCanonicalOwnershipConflict(t *testing.T) 
 	req.AddCookie(encodedCookie(wechatOAuthRedirectCookieName, "/dashboard"))
 	req.AddCookie(encodedCookie(wechatOAuthIntentCookieName, wechatOAuthIntentBind))
 	req.AddCookie(encodedCookie(wechatOAuthModeCookieName, "open"))
-	req.AddCookie(encodedCookie(wechatOAuthBindUserCookieName, buildEncodedOAuthBindUserCookie(t, currentUser.ID, "test-secret")))
 	req.AddCookie(encodedCookie(oauthPendingBrowserCookieName, "browser-123"))
+
+	lifecycleAddBindCapability(t, handler, req, wechatOAuthBindUserCookieName, currentUser.ID)
 	c.Request = req
 
 	handler.WeChatOAuthCallback(c)
@@ -655,7 +657,7 @@ func TestWeChatOAuthCallbackBindRejectsCanonicalOwnershipConflict(t *testing.T) 
 	require.Nil(t, findCookie(recorder.Result().Cookies(), oauthPendingSessionCookieName))
 	assertOAuthRedirectError(t, recorder.Header().Get("Location"), "ownership_conflict", "AUTH_IDENTITY_OWNERSHIP_CONFLICT")
 
-	count, err := client.PendingAuthSession.Query().Count(ctx)
+	count, err := client.PendingAuthSession.Query().Where(pendingauthsession.ConsumedAtIsNil()).Count(ctx)
 	require.NoError(t, err)
 	require.Zero(t, count)
 }
@@ -734,8 +736,9 @@ func TestWeChatOAuthCallbackBindRejectsChannelOwnershipConflict(t *testing.T) {
 	req.AddCookie(encodedCookie(wechatOAuthRedirectCookieName, "/dashboard"))
 	req.AddCookie(encodedCookie(wechatOAuthIntentCookieName, wechatOAuthIntentBind))
 	req.AddCookie(encodedCookie(wechatOAuthModeCookieName, "open"))
-	req.AddCookie(encodedCookie(wechatOAuthBindUserCookieName, buildEncodedOAuthBindUserCookie(t, currentUser.ID, "test-secret")))
 	req.AddCookie(encodedCookie(oauthPendingBrowserCookieName, "browser-123"))
+
+	lifecycleAddBindCapability(t, handler, req, wechatOAuthBindUserCookieName, currentUser.ID)
 	c.Request = req
 
 	handler.WeChatOAuthCallback(c)
@@ -744,7 +747,7 @@ func TestWeChatOAuthCallbackBindRejectsChannelOwnershipConflict(t *testing.T) {
 	require.Nil(t, findCookie(recorder.Result().Cookies(), oauthPendingSessionCookieName))
 	assertOAuthRedirectError(t, recorder.Header().Get("Location"), "ownership_conflict", "AUTH_IDENTITY_CHANNEL_OWNERSHIP_CONFLICT")
 
-	count, err := client.PendingAuthSession.Query().Count(ctx)
+	count, err := client.PendingAuthSession.Query().Where(pendingauthsession.ConsumedAtIsNil()).Count(ctx)
 	require.NoError(t, err)
 	require.Zero(t, count)
 }
@@ -812,8 +815,9 @@ func TestWeChatOAuthCallbackBindRejectsLegacyProviderKeyOwnershipConflict(t *tes
 	req.AddCookie(encodedCookie(wechatOAuthRedirectCookieName, "/dashboard"))
 	req.AddCookie(encodedCookie(wechatOAuthIntentCookieName, wechatOAuthIntentBind))
 	req.AddCookie(encodedCookie(wechatOAuthModeCookieName, "open"))
-	req.AddCookie(encodedCookie(wechatOAuthBindUserCookieName, buildEncodedOAuthBindUserCookie(t, currentUser.ID, "test-secret")))
 	req.AddCookie(encodedCookie(oauthPendingBrowserCookieName, "browser-123"))
+
+	lifecycleAddBindCapability(t, handler, req, wechatOAuthBindUserCookieName, currentUser.ID)
 	c.Request = req
 
 	handler.WeChatOAuthCallback(c)
@@ -822,7 +826,7 @@ func TestWeChatOAuthCallbackBindRejectsLegacyProviderKeyOwnershipConflict(t *tes
 	require.Nil(t, findCookie(recorder.Result().Cookies(), oauthPendingSessionCookieName))
 	assertOAuthRedirectError(t, recorder.Header().Get("Location"), "ownership_conflict", "AUTH_IDENTITY_OWNERSHIP_CONFLICT")
 
-	count, err := client.PendingAuthSession.Query().Count(ctx)
+	count, err := client.PendingAuthSession.Query().Where(pendingauthsession.ConsumedAtIsNil()).Count(ctx)
 	require.NoError(t, err)
 	require.Zero(t, count)
 }

@@ -177,9 +177,24 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	boundLookupAccountID := int64(0)
 	if endpoint.IsVideoLookupRequest() {
 		sessionHash = service.GrokMediaVideoRequestSessionHash(requestID, subject.UserID, apiKey.ID)
-		boundLookupAccountID, err = h.gatewayService.ResolveGrokMediaVideoRequestAccount(
-			c.Request.Context(), apiKey.GroupID, requestID, subject.UserID, apiKey.ID,
-		)
+		groupID := int64(0)
+		if apiKey.GroupID != nil {
+			groupID = *apiKey.GroupID
+		}
+		durableJob, durableErr := h.gatewayService.DurableGatewayVideo(c.Request.Context(), groupID, subject.UserID, requestID)
+		if durableErr == nil && durableJob != nil {
+			boundLookupAccountID = durableJob.AccountID
+		} else {
+			boundLookupAccountID, err = h.gatewayService.ResolveGrokMediaVideoRequestAccount(
+				c.Request.Context(), apiKey.GroupID, requestID, subject.UserID, apiKey.ID,
+			)
+		}
+		// Deleting an unfinished upstream task can erase the only billing
+		// evidence. Reconcile it first; completed/failed tasks remain deletable.
+		if endpoint == service.SeedanceEndpointDelete && durableJob != nil && durableJob.State != "settled" && durableJob.State != "failed" {
+			h.errorResponse(c, http.StatusConflict, "invalid_request_error", "Video settlement is pending; retry deletion after settlement")
+			return
+		}
 		if err != nil || boundLookupAccountID <= 0 {
 			reqLog.Info("grok_media.video_lookup_owner_binding_missing", zap.Error(err))
 			h.errorResponse(c, http.StatusNotFound, "not_found_error", "Video request not found")
@@ -364,6 +379,21 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			return
 		}
 
+		var durableJob *service.GatewayMediaJob
+		if service.IsAsyncVideoCreate(endpoint) {
+			durableJob, err = h.gatewayService.PrepareGatewayVideoJob(requestCtx, apiKey, subscription, account, endpoint, requestInfo, clientRequestedModel(c, requestModel), GetInboundEndpoint(c), service.QuotaPlatform(requestCtx, apiKey))
+			if err != nil {
+				status := http.StatusServiceUnavailable
+				code := "api_error"
+				if errors.Is(err, service.ErrMediaPendingCapacity) {
+					status = http.StatusTooManyRequests
+					code = "rate_limit_error"
+				}
+				h.errorResponse(c, status, code, "Video submission capacity or billing is unavailable")
+				return
+			}
+			requestCtx = service.WithGatewayMediaJob(requestCtx, durableJob)
+		}
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		writerSizeBeforeForward := c.Writer.Size()
@@ -375,6 +405,13 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			return h.gatewayService.ForwardGrokMedia(requestCtx, c, account, endpoint, requestID, body, contentType)
 		}()
 
+		h.gatewayService.FinishGatewayVideoAttempt(requestCtx, durableJob, err)
+		if err != nil && durableJob != nil && durableJob.State != "failed" {
+			if !service.IsResponseCommitted(c) {
+				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Video submission failed or requires reconciliation")
+			}
+			return
+		}
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -506,7 +543,14 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		}
 		// Status poll OR content download can observe official done+video.url.
 		// Both paths share the same claim key so the customer is charged once.
-		if endpoint == service.SeedanceEndpointStatus {
+		ownerGroup := int64(0)
+		if apiKey.GroupID != nil {
+			ownerGroup = *apiKey.GroupID
+		}
+		ownedJob, _ := h.gatewayService.DurableGatewayVideo(requestCtx, ownerGroup, subject.UserID, requestID)
+		if ownedJob != nil {
+			// This task's durable worker owns settlement, regardless of polls.
+		} else if endpoint == service.SeedanceEndpointStatus {
 			if billResult := prepareSeedanceCompletionBilling(requestCtx, h, apiKey, subject, requestID, result); billResult != nil {
 				recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, billResult, billResult.Model, body, requestID)
 			}

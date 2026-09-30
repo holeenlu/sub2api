@@ -80,6 +80,11 @@ func PasswordHash(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldPasswordHash, v))
 }
 
+// SessionGeneration applies equality check predicate on the "session_generation" field. It's identical to SessionGenerationEQ.
+func SessionGeneration(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldSessionGeneration, v))
+}
+
 // Role applies equality check predicate on the "role" field. It's identical to RoleEQ.
 func Role(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRole, v))
@@ -438,6 +443,46 @@ func PasswordHashEqualFold(v string) predicate.User {
 // PasswordHashContainsFold applies the ContainsFold predicate on the "password_hash" field.
 func PasswordHashContainsFold(v string) predicate.User {
 	return predicate.User(sql.FieldContainsFold(FieldPasswordHash, v))
+}
+
+// SessionGenerationEQ applies the EQ predicate on the "session_generation" field.
+func SessionGenerationEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldSessionGeneration, v))
+}
+
+// SessionGenerationNEQ applies the NEQ predicate on the "session_generation" field.
+func SessionGenerationNEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldSessionGeneration, v))
+}
+
+// SessionGenerationIn applies the In predicate on the "session_generation" field.
+func SessionGenerationIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldIn(FieldSessionGeneration, vs...))
+}
+
+// SessionGenerationNotIn applies the NotIn predicate on the "session_generation" field.
+func SessionGenerationNotIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldSessionGeneration, vs...))
+}
+
+// SessionGenerationGT applies the GT predicate on the "session_generation" field.
+func SessionGenerationGT(v int64) predicate.User {
+	return predicate.User(sql.FieldGT(FieldSessionGeneration, v))
+}
+
+// SessionGenerationGTE applies the GTE predicate on the "session_generation" field.
+func SessionGenerationGTE(v int64) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldSessionGeneration, v))
+}
+
+// SessionGenerationLT applies the LT predicate on the "session_generation" field.
+func SessionGenerationLT(v int64) predicate.User {
+	return predicate.User(sql.FieldLT(FieldSessionGeneration, v))
+}
+
+// SessionGenerationLTE applies the LTE predicate on the "session_generation" field.
+func SessionGenerationLTE(v int64) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldSessionGeneration, v))
 }
 
 // RoleEQ applies the EQ predicate on the "role" field.

@@ -1,9 +1,11 @@
 package setup
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"net/mail"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -18,8 +20,19 @@ import (
 // installMutex prevents concurrent installation attempts (TOCTOU protection)
 var installMutex sync.Mutex
 
-// RegisterRoutes registers setup wizard routes
-func RegisterRoutes(r *gin.Engine) {
+// RegisterRoutes creates a process-scoped bootstrap capability. It is returned
+// only to the local operator, never through a public setup response.
+func RegisterRoutes(r *gin.Engine) (string, error) {
+	token := strings.TrimSpace(os.Getenv("SETUP_BOOTSTRAP_TOKEN"))
+	if token == "" {
+		var err error
+		token, err = generateSecret(32)
+		if err != nil {
+			return "", err
+		}
+	} else if len(token) < 32 {
+		return "", fmt.Errorf("SETUP_BOOTSTRAP_TOKEN must contain at least 32 characters")
+	}
 	setup := r.Group("/setup")
 	{
 		// Status endpoint is always accessible (read-only)
@@ -27,13 +40,14 @@ func RegisterRoutes(r *gin.Engine) {
 
 		// All modification endpoints are protected by setupGuard
 		protected := setup.Group("")
-		protected.Use(setupGuard())
+		protected.Use(setupGuard(token))
 		{
 			protected.POST("/test-db", testDatabase)
 			protected.POST("/test-redis", testRedis)
 			protected.POST("/install", install)
 		}
 	}
+	return token, nil
 }
 
 // SetupStatus represents the current setup state
@@ -51,10 +65,16 @@ func getStatus(c *gin.Context) {
 }
 
 // setupGuard middleware ensures setup endpoints are only accessible during setup mode
-func setupGuard() gin.HandlerFunc {
+func setupGuard(token string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !NeedsSetup() {
 			response.Error(c, http.StatusForbidden, "Setup is not allowed: system is already installed")
+			c.Abort()
+			return
+		}
+		provided := c.GetHeader("X-Setup-Token")
+		if token == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+			response.Error(c, http.StatusUnauthorized, "A valid setup authorization token is required")
 			c.Abort()
 			return
 		}

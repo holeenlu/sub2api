@@ -33,12 +33,17 @@ func ProvideOpenAIGatewayService(
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
 	history CodexTicketAttemptRepository,
 	rpmCache RPMCache,
+	mediaRepo GatewayMediaRepository,
+	mediaAPIKeyService *APIKeyService,
 ) *OpenAIGatewayService {
 	s := NewOpenAIGatewayService(accountRepo, usageLogRepo, usageBillingRepo, userRepo,
 		userSubRepo, userGroupRateRepo, cache, cfg, schedulerSnapshot, concurrencyService,
 		billingService, rateLimitService, billingCacheService, httpUpstream, deferredService,
 		openAITokenProvider, grokTokenProvider, resolver, channelService, balanceNotifyService,
 		settingService, userPlatformQuotaRepo, WithOpenAIRPMCache(rpmCache))
+	s.mediaAPIKeyService = mediaAPIKeyService
+	s.mediaRepo = mediaRepo
+	s.StartGatewayMediaSettlement()
 	s.SetCodexTicketHistory(history)
 	if settingService != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

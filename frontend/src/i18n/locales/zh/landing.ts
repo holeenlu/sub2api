@@ -252,6 +252,9 @@ export default {
 
   // Setup Wizard
   setup: {
+    bootstrapToken: '安装授权令牌',
+    bootstrapTokenPlaceholder: '输入服务器启动时显示的令牌',
+    bootstrapTokenHint: '请使用服务器启动日志中的令牌，或已配置的 SETUP_BOOTSTRAP_TOKEN。令牌不会保存在浏览器中，安装完成后即失效。',
     pageTitle: '安装向导',
     title: '@:common.siteName 安装向导',
     description: '配置您的 @:common.siteName 实例',

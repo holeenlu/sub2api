@@ -350,6 +350,12 @@ func provideCleanup(
 				}
 				return nil
 			}},
+			{"GatewayMediaSettlement", func() error {
+				if openAIGateway != nil {
+					openAIGateway.StopGatewayMediaSettlement()
+				}
+				return nil
+			}},
 			{"OpenAICodexTicketHarvester", func() error {
 				if openAIGateway != nil {
 					openAIGateway.StopOpenAICodexTicketHarvester()

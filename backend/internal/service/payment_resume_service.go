@@ -254,6 +254,9 @@ func CanonicalizeReturnURL(raw string, srcHost string, srcURL string) (string, e
 	if !allowedReturnURLHost(parsed.Host, srcHost, srcURL) {
 		return "", infraerrors.BadRequest("INVALID_RETURN_URL", "return_url must use the same host as the current site or browser origin")
 	}
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.User = nil
 	return parsed.String(), nil
 }
 
@@ -288,7 +291,8 @@ func buildPaymentReturnURL(base string, orderID int64, outTradeNo string, resume
 	}
 	parsed.Fragment = ""
 
-	query := parsed.Query()
+	// Only server-owned result fields may enter the provider signing input.
+	query := url.Values{}
 	if orderID > 0 {
 		query.Set("order_id", strconv.FormatInt(orderID, 10))
 	}
