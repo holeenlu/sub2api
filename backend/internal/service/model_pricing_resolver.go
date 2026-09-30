@@ -17,6 +17,7 @@ const (
 
 // ResolvedPricing 统一定价解析结果
 type ResolvedPricing struct {
+	PriceRevision string
 	// Mode 计费模式
 	Mode BillingMode
 
@@ -60,6 +61,8 @@ func NewModelPricingResolver(channelService *ChannelService, billingService *Bil
 }
 
 // PricingInput 定价解析输入
+type catalogPriceOrderKey struct{}
+
 type PricingInput struct {
 	Model   string
 	GroupID *int64 // nil 表示不检查渠道
@@ -70,6 +73,22 @@ type PricingInput struct {
 // 1. 获取基础定价（LiteLLM → Fallback）
 // 2. 如果指定了 GroupID，查找渠道定价并覆盖
 func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) *ResolvedPricing {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if CatalogEnforced(input.Group) || ctx.Value(catalogPreviewKey{}) == true {
+		ctx = context.WithValue(ctx, catalogPriceOrderKey{}, true)
+	}
+	if RequestPricingFromContext(ctx) == nil && (CatalogEnforced(input.Group) || ctx.Value(catalogPreviewKey{}) == true) && r.billingService != nil && r.billingService.pricingService != nil {
+		prices := r.billingService.pricingService.catalogPricingGeneration()
+		ctx = context.WithValue(ctx, requestPricingContextKey{}, &RequestPricingSnapshot{prices: prices, Revision: prices.PriceRevision()})
+	}
+	if RequestPricingFromContext(ctx) != nil {
+		return r.resolvePinned(ctx, input)
+	}
+	return r.resolveCurrent(ctx, input)
+}
+func (r *ModelPricingResolver) resolveCurrent(ctx context.Context, input PricingInput) *ResolvedPricing {
 	longContextPricingEnabled := input.Group == nil || input.Group.LongContextPricingEnabled
 	if groupPricing := matchGroupModelPricing(input.Group, input.Model); groupPricing != nil {
 		// Group token cards only override the first-tier / flat rates.
@@ -79,7 +98,39 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 			stripped.Intervals = nil
 			groupPricing = &stripped
 		}
-		resolved := r.resolveConfiguredPricing(groupPricing, input.Model, PricingSourceGroup)
+		var resolved *ResolvedPricing
+		if groupPricing.BillingMode == "" || groupPricing.BillingMode == BillingModeToken {
+			lowerGroup := *input.Group
+			lowerGroup.ModelPricing = nil
+			resolved = r.resolveCurrent(ctx, PricingInput{Model: input.Model, GroupID: input.GroupID, Group: &lowerGroup})
+			resolved.Mode = BillingModeToken
+			resolved.Source = PricingSourceGroup
+			effective := groupPricing.Clone()
+			if lower := resolved.channelPricing; lower != nil {
+				if effective.InputPrice == nil {
+					effective.InputPrice = lower.InputPrice
+				}
+				if effective.OutputPrice == nil {
+					effective.OutputPrice = lower.OutputPrice
+				}
+				if effective.CacheWritePrice == nil {
+					effective.CacheWritePrice = lower.CacheWritePrice
+				}
+				if effective.CacheWrite1hPrice == nil {
+					effective.CacheWrite1hPrice = lower.CacheWrite1hPrice
+				}
+				if effective.CacheReadPrice == nil {
+					effective.CacheReadPrice = lower.CacheReadPrice
+				}
+			}
+			if resolved.channelPricing != nil && effective.TimePricing == nil {
+				effective.TimePricing = resolved.channelPricing.TimePricing
+			}
+			resolved.channelPricing = &effective
+			r.applyTokenOverrides(&effective, resolved)
+		} else {
+			resolved = r.resolveConfiguredPricing(groupPricing, input.Model, PricingSourceGroup)
+		}
 		resolved.longContextPricingEnabled = longContextPricingEnabled
 		return resolved
 	}
@@ -150,6 +201,7 @@ func matchGroupModelPricing(group *Group, model string) *ChannelModelPricing {
 	}
 	model = normalizeChannelPricingModelName(model)
 	var wildcard *ChannelModelPricing
+	bestLength := 0
 	for i := range group.ModelPricing {
 		entry := &group.ModelPricing[i]
 		for _, pattern := range entry.Models {
@@ -158,9 +210,10 @@ func matchGroupModelPricing(group *Group, model string) *ChannelModelPricing {
 				cp := entry.Clone()
 				return &cp
 			}
-			if strings.HasSuffix(normalized, "*") && strings.HasPrefix(model, strings.TrimSuffix(normalized, "*")) && wildcard == nil {
+			if strings.HasSuffix(normalized, "*") && strings.HasPrefix(model, strings.TrimSuffix(normalized, "*")) && (wildcard == nil || len(normalized) > bestLength) {
 				cp := entry.Clone()
 				wildcard = &cp
+				bestLength = len(normalized)
 			}
 		}
 	}
@@ -169,6 +222,11 @@ func matchGroupModelPricing(group *Group, model string) *ChannelModelPricing {
 
 // resolveBasePricing 从 LiteLLM 或 Fallback 获取基础定价
 func (r *ModelPricingResolver) resolveBasePricing(model string) (*ModelPricing, string) {
+	if r.billingService.pricingService != nil && r.billingService.pricingService.CatalogManaged() {
+		if r.billingService.pricingService.GetExactModelPricing(model) == nil && r.billingService.fallbackPrices[model] == nil {
+			return nil, PricingSourceFallback
+		}
+	}
 	pricing, err := r.billingService.GetModelPricing(model)
 	if err != nil {
 		slog.Debug("failed to get model pricing from LiteLLM, using fallback",
@@ -246,9 +304,15 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 			break
 		}
 	}
-	resolved.BasePricing.FastMultiplier = chPricing.FastMultiplier
-	resolved.BasePricing.FlexMultiplier = chPricing.FlexMultiplier
-	resolved.BasePricing.ReasoningEffortMultipliers = maps.Clone(chPricing.ReasoningEffortMultipliers)
+	if chPricing.FastMultiplier != nil {
+		resolved.BasePricing.FastMultiplier = chPricing.FastMultiplier
+	}
+	if chPricing.FlexMultiplier != nil {
+		resolved.BasePricing.FlexMultiplier = chPricing.FlexMultiplier
+	}
+	if chPricing.ReasoningEffortMultipliers != nil {
+		resolved.BasePricing.ReasoningEffortMultipliers = maps.Clone(chPricing.ReasoningEffortMultipliers)
+	}
 	applyChannelImagePriceOverrides(chPricing, resolved.BasePricing)
 
 	// 区间未命中时回退到上面已经应用渠道覆盖的基础价。

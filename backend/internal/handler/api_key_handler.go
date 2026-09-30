@@ -20,6 +20,7 @@ import (
 
 // APIKeyHandler handles API key-related requests
 type APIKeyHandler struct {
+	modelCatalog  *service.ModelCatalogService
 	apiKeyService *service.APIKeyService
 }
 
@@ -141,8 +142,23 @@ func (h *APIKeyHandler) List(c *gin.Context) {
 	}
 
 	out := make([]dto.APIKey, 0, len(keys))
+	profiles := map[int64]*service.CodexSetupProfile{}
 	for i := range keys {
-		out = append(out, *dto.APIKeyFromService(&keys[i]))
+		item := dto.APIKeyFromService(&keys[i])
+		if h.modelCatalog != nil && keys[i].Group != nil {
+			id := keys[i].Group.ID
+			if profile, ok := profiles[id]; ok {
+				item.ModelSetup = profile
+			} else {
+				profile, err := h.modelCatalog.SetupProfile(c.Request.Context(), &keys[i])
+				if err != nil {
+					profile = &service.CodexSetupProfile{Status: "unavailable"}
+				}
+				profiles[id] = profile
+				item.ModelSetup = profile
+			}
+		}
+		out = append(out, *item)
 	}
 	response.Paginated(c, out, result.Total, page, pageSize)
 }
@@ -174,7 +190,11 @@ func (h *APIKeyHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.APIKeyFromService(key))
+	item := dto.APIKeyFromService(key)
+	if h.modelCatalog != nil {
+		item.ModelSetup, _ = h.modelCatalog.SetupProfile(c.Request.Context(), key)
+	}
+	response.Success(c, item)
 }
 
 // Create handles creating a new API key

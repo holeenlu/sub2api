@@ -1077,6 +1077,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
 		"codex_allow_without_ticket",
+		"model_catalog_policy", "model_catalog_visibility",
 		"codex_ticket_harvest_enabled",
 		"codex_ticket_harvest_models",
 		"codex_5h_used_percent",

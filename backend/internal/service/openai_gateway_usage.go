@@ -118,6 +118,9 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 
 // ResolveUserGroupRateMultiplier resolves the same cached multiplier used by OpenAI usage billing.
 func (s *OpenAIGatewayService) ResolveUserGroupRateMultiplier(ctx context.Context, userID, groupID int64, groupDefaultMultiplier float64) float64 {
+	if p := RequestPricingFromContext(ctx); p != nil && p.group != nil && p.group.ID == groupID && p.userID == userID && p.rateReady {
+		return p.rate
+	}
 	if s == nil {
 		return groupDefaultMultiplier
 	}
@@ -168,6 +171,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}
 
+	if result.RequestPricing != nil {
+		ctx = context.WithValue(ctx, requestPricingContextKey{}, result.RequestPricing)
+	}
 	apiKey := input.APIKey
 	user := input.User
 	account := input.Account
@@ -180,6 +186,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ApplyOpenAIImageBillingResolution(result)
 	}
 	logServiceTierBillingDowngrade("service.openai_gateway", account, result.RequestID, ApplyOpenAIServiceTierBillingResolution(billingAccount, result))
+	if s.modelCatalog != nil && result.ImageCount > 0 {
+		_ = s.modelCatalog.RecordMediaSuccess(ctx, account, result, input.InboundEndpoint)
+	}
 
 	// OpenAI input_tokens 是总输入，包含缓存读取和缓存写入明细。
 	// 将三类 token 拆成互斥桶，避免缓存写入同时按普通输入和 cache_write 重复计费。
@@ -250,6 +259,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		serviceTier = strings.TrimSpace(*result.ServiceTier)
 	}
 	longContextBillingGate := openAILongContextBillingGate(billingAccount)
+	if input.DeferredMediaCost == nil && !catalogUsagePriced(ctx, s.resolver, s.billingService, apiKey.Group, firstUsageBillingModel(billingModels), tokens) {
+		return pendingCatalogPricing(ctx, s.usageLogRepo, apiKey.ID, result.RequestID, firstUsageBillingModel(billingModels), result.Usage)
+	}
 	if input.DeferredMediaCost != nil {
 		snapshot := *input.DeferredMediaCost
 		cost = &snapshot
@@ -269,6 +281,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			pricingAt,
 		)
 		if err != nil {
+			if isUsagePricingUnavailableError(err) && CatalogEnforced(apiKey.Group) {
+				return pendingCatalogPricing(ctx, s.usageLogRepo, apiKey.ID, result.RequestID, firstUsageBillingModel(billingModels), result.Usage)
+			}
 			if !isUsagePricingUnavailableError(err) {
 				return err
 			}
@@ -295,7 +310,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			result.ImageCount > 0 || result.VideoCount > 0 || result.WebSearchCalls > 0 ||
 				result.AudioUsage != nil || result.SearchCount > 0,
 		); responseModel != "" && !strings.EqualFold(responseModel, baselineBillingModel) {
-			if identified, responseChannelPriced := s.hasIdentifiedOpenAIResponsePricing(ctx, responseModel, apiKey); identified {
+			identified, responseChannelPriced := s.hasIdentifiedOpenAIResponsePricing(ctx, responseModel, apiKey)
+			if CatalogEnforced(apiKey.Group) && (!identified || !catalogUsagePriced(ctx, s.resolver, s.billingService, apiKey.Group, responseModel, tokens)) {
+				return pendingCatalogPricing(ctx, s.usageLogRepo, apiKey.ID, result.RequestID, responseModel, result.Usage)
+			}
+			if identified {
 				responseModels := s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, usageBillingModelCandidates(responseModel))
 				responseCost, responseErr := s.calculateOpenAIRecordUsageCost(
 					ctx, result, apiKey, responseModels, multiplier, imageMultiplier,

@@ -15,6 +15,7 @@ import (
 
 // ChannelHandler handles admin channel management
 type ChannelHandler struct {
+	modelRegistry  *service.ModelCatalogService
 	channelService *service.ChannelService
 	billingService *service.BillingService
 	pricingService *service.PricingService
@@ -664,6 +665,25 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 		return
 	}
 
+	if h.modelRegistry != nil {
+		catalog, err := h.modelRegistry.Platform(c.Request.Context(), platform)
+		if err != nil {
+			response.InternalError(c, "Failed to read model catalog")
+			return
+		}
+		models := []string{}
+		for _, entry := range catalog.Models {
+			if entry.Lifecycle != "retired" {
+				models = append(models, entry.ID)
+			}
+		}
+		response.Success(c, gin.H{"models": models, "source": "model_catalog", "updated_at": catalog.UpdatedAt})
+		return
+	}
 	models := h.pricingService.ListModelNamesByProvider(provider)
 	response.Success(c, gin.H{"models": models})
+}
+
+func (h *ChannelHandler) SetModelCatalog(registry *service.ModelCatalogService) {
+	h.modelRegistry = registry
 }

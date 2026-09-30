@@ -1,4 +1,6 @@
 export interface ModelAllowlistConfig {
+  mode?: 'legacy' | 'follow' | 'fixed'
+  excluded?: string[]
   enabled: boolean
   models: string[]
 }
@@ -9,6 +11,8 @@ export interface ModelAllowlistItem {
 }
 
 export interface ModelAllowlistState {
+  mode?: 'legacy' | 'follow' | 'fixed'
+  excludedText?: string
   enabled: boolean
   savedModels: string[]
   items: ModelAllowlistItem[]
@@ -21,6 +25,7 @@ export const createModelAllowlistState = (
   config?: Partial<ModelAllowlistConfig> | null,
 ): ModelAllowlistState => ({
   enabled: config?.enabled ?? false,
+  ...(config?.mode ? { mode: config.mode, excludedText: (config.excluded ?? []).join('\n') } : {}),
   savedModels: normalizeModels(config?.models ?? []),
   items: [],
 })
@@ -137,7 +142,8 @@ export const addCustomModelAllowlistItem = (
 export const buildModelAllowlistConfig = (
   state: ModelAllowlistState,
 ): ModelAllowlistConfig => ({
-  enabled: state.enabled,
+  enabled: state.mode === 'follow' || state.mode === 'fixed' || state.enabled,
+  ...(state.mode && state.mode !== 'legacy' ? { mode: state.mode, excluded: normalizeModels((state.excludedText ?? '').split('\n')) } : {}),
   models: state.items.length > 0
     ? state.items.filter(item => item.selected).map(item => item.id)
     : [...state.savedModels],

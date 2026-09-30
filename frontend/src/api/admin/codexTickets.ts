@@ -2,6 +2,7 @@ import { apiClient } from '../client'
 import type { Account, ApiKey } from '@/types'
 
 export type TicketStatus = NonNullable<Account['codex_turn_tickets']>[number] & {
+  fingerprint_pending?: boolean
   captured_at?: string
   turn_state_present: boolean
   cookie_present: boolean

@@ -787,10 +787,19 @@
                 {{ t("admin.groups.modelAllowlist.hint") }}
               </p>
             </div>
-            <Toggle v-model="createModelAllowlistState.enabled" />
+            <div class="space-y-2">
+              <label class="block text-xs">{{ t('modelCatalog.accountPolicy') }}</label>
+              <select :value="createModelAllowlistState.mode || 'legacy'" @change="createModelAllowlistState.mode = ($event.target as HTMLSelectElement).value as 'legacy' | 'follow' | 'fixed'" class="input text-sm">
+                <option :value="undefined">{{ t('modelCatalog.legacy') }}</option>
+                <option value="follow">{{ t('modelCatalog.follow') }}</option>
+                <option value="fixed">{{ t('modelCatalog.fixed') }}</option>
+              </select>
+              <textarea v-if="createModelAllowlistState.mode === 'follow' || createModelAllowlistState.mode === 'fixed'" v-model="createModelAllowlistState.excludedText" class="input text-xs" :placeholder="t('modelCatalog.exclude')" />
+              <Toggle v-if="!createModelAllowlistState.mode || createModelAllowlistState.mode === 'legacy'" v-model="createModelAllowlistState.enabled" />
+            </div>
           </div>
           <div
-            v-if="createModelAllowlistState.enabled"
+            v-if="createModelAllowlistState.mode === 'fixed' || (createModelAllowlistState.mode !== 'follow' && createModelAllowlistState.enabled)"
             class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
           >
             <div
@@ -2442,10 +2451,19 @@
                 {{ t("admin.groups.modelAllowlist.hint") }}
               </p>
             </div>
-            <Toggle v-model="editModelAllowlistState.enabled" />
+            <div class="space-y-2">
+              <label class="block text-xs">{{ t('modelCatalog.accountPolicy') }}</label>
+              <select :value="editModelAllowlistState.mode || 'legacy'" @change="editModelAllowlistState.mode = ($event.target as HTMLSelectElement).value as 'legacy' | 'follow' | 'fixed'" class="input text-sm">
+                <option :value="undefined">{{ t('modelCatalog.legacy') }}</option>
+                <option value="follow">{{ t('modelCatalog.follow') }}</option>
+                <option value="fixed">{{ t('modelCatalog.fixed') }}</option>
+              </select>
+              <textarea v-if="editModelAllowlistState.mode === 'follow' || editModelAllowlistState.mode === 'fixed'" v-model="editModelAllowlistState.excludedText" class="input text-xs" :placeholder="t('modelCatalog.exclude')" />
+              <Toggle v-if="!editModelAllowlistState.mode || editModelAllowlistState.mode === 'legacy'" v-model="editModelAllowlistState.enabled" />
+            </div>
           </div>
           <div
-            v-if="editModelAllowlistState.enabled"
+            v-if="editModelAllowlistState.mode === 'fixed' || (editModelAllowlistState.mode !== 'follow' && editModelAllowlistState.enabled)"
             class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
           >
             <div
@@ -5334,6 +5352,8 @@ const resetModelAllowlistState = (
 ) => {
   const fresh = createInitialModelAllowlistState(config);
   state.enabled = fresh.enabled;
+  state.mode = fresh.mode;
+  state.excludedText = fresh.excludedText;
   state.savedModels = fresh.savedModels;
   state.items = fresh.items;
 };

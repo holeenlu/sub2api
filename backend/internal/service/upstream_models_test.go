@@ -484,7 +484,7 @@ func TestSyncUpstreamModelCatalogEnrichesOpenCodeIDOnlyListAndPersistsSnapshot(t
 	require.NotNil(t, metadata.Reasoning)
 	require.True(t, *metadata.Reasoning)
 	require.Equal(t, []string{"low", "high", "max"}, metadata.SupportedReasoningLevels)
-	require.Equal(t, []string{"text", "image"}, metadata.InputModalities)
+	require.Equal(t, []string{"text", "image", "video"}, metadata.InputModalities)
 	require.Equal(t, int64(1_000_000), metadata.ContextWindow)
 	require.Equal(t, int64(131_072), metadata.MaxOutputTokens)
 	require.Equal(t, int64(91), repo.accountID)

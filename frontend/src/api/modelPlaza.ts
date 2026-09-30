@@ -9,6 +9,8 @@ import type { UserPricingInterval, UserSupportedModelPricing } from './channels'
 
 /** 官方参考价（USD per token，与计费目录同源；字段缺失 = 目录未覆盖）。 */
 export interface PlazaOfficialPricing {
+  source?: string
+  revision?: string
   input_price: number | null
   output_price: number | null
   /** 5m 缓存写入（= LiteLLM cache_creation）。 */

@@ -34,6 +34,19 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		return
 	}
 
+	if manifest, handled, err := h.gatewayService.PublishedCodexCatalog(c.Request.Context(), apiKey.Group); handled {
+		if err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "Published model catalog is unavailable")
+			return
+		}
+		c.Header("ETag", manifest.ETag)
+		if service.CodexModelsManifestETagMatches(c.GetHeader("If-None-Match"), manifest.ETag) {
+			c.Status(http.StatusNotModified)
+			return
+		}
+		writeOpenAIModelsResponse(c, manifest)
+		return
+	}
 	ifNoneMatch := c.GetHeader("If-None-Match")
 	// 固定账号分支：开启后只用选定账号拉取 manifest，不经过调度器；
 	// 全部不可用/全部失败时按 FallbackToScheduler 决定回退调度器或返回错误。

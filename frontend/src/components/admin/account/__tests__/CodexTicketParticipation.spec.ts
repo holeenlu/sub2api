@@ -8,6 +8,7 @@ const { getById, saveParticipation, fingerprint, events, harvest } = vi.hoisted(
   getById: vi.fn(), saveParticipation: vi.fn(), fingerprint: vi.fn(), events: vi.fn(), harvest: vi.fn()
 }))
 vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { getById } } }))
+vi.mock('@/api/admin/modelCatalog',()=>({getCatalogTicketModels:vi.fn().mockRejectedValue(new Error('no saved catalog'))}))
 vi.mock('@/api/admin/codexTickets', () => ({
   saveParticipation, fingerprint, events, harvest, refreshFingerprint: vi.fn(), ownKeys: vi.fn(), invalidation: vi.fn(), diagnose: vi.fn()
 }))

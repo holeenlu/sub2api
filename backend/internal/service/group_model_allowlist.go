@@ -14,18 +14,20 @@ import (
 // GroupModelAllowlist 是 service 层的分组模型白名单（与 domain.GroupModelAllowlist
 // 字段一致，ent 持久化用 domain 类型，边界处显式转换）。
 type GroupModelAllowlist struct {
-	Enabled bool     `json:"enabled"`
-	Models  []string `json:"models,omitempty"`
+	Mode     string   `json:"mode,omitempty"`
+	Excluded []string `json:"excluded,omitempty"`
+	Enabled  bool     `json:"enabled"`
+	Models   []string `json:"models,omitempty"`
 }
 
 // DomainGroupModelAllowlist 把 service 白名单转换为 ent 持久化使用的 domain 类型。
 func DomainGroupModelAllowlist(cfg GroupModelAllowlist) domain.GroupModelAllowlist {
-	return domain.GroupModelAllowlist{Enabled: cfg.Enabled, Models: cfg.Models}
+	return domain.GroupModelAllowlist{Enabled: cfg.Enabled, Models: cfg.Models, Mode: cfg.Mode, Excluded: cfg.Excluded}
 }
 
 // GroupModelAllowlistFromDomain 把 ent 读出的 domain 白名单转换为 service 类型。
 func GroupModelAllowlistFromDomain(cfg domain.GroupModelAllowlist) GroupModelAllowlist {
-	return GroupModelAllowlist{Enabled: cfg.Enabled, Models: cfg.Models}
+	return GroupModelAllowlist{Enabled: cfg.Enabled, Models: cfg.Models, Mode: cfg.Mode, Excluded: cfg.Excluded}
 }
 
 // supplementUnmappedOpenAIModels ensures a partial mapping catalog does not
@@ -50,9 +52,15 @@ func supplementUnmappedOpenAIModels(accounts []Account, models []string) []strin
 // 条目 TrimSpace、按小写去重保序；`*` 可出现在任意位置；
 // enabled=true 且列表为空视为配置错误，返回 400 而不是运行时静默放行/拒绝。
 func normalizeGroupModelAllowlist(cfg GroupModelAllowlist) (GroupModelAllowlist, error) {
-	out := GroupModelAllowlist{Enabled: cfg.Enabled}
+	out := GroupModelAllowlist{Enabled: cfg.Enabled, Mode: cfg.Mode, Excluded: dedupeAndSortModelIDs(cfg.Excluded)}
+	if out.Mode != "" && out.Mode != "legacy" && out.Mode != "fixed" && out.Mode != "follow" {
+		return out, infraerrors.BadRequest("INVALID_MODEL_ALLOWLIST", "invalid model access mode")
+	}
+	if out.Mode == "follow" || out.Mode == "fixed" {
+		out.Enabled = true
+	}
 	if len(cfg.Models) == 0 {
-		if out.Enabled {
+		if out.Enabled && out.Mode != "follow" && out.Mode != "fixed" {
 			return out, infraerrors.New(http.StatusBadRequest, "INVALID_MODEL_ALLOWLIST", "model allowlist cannot be enabled with an empty model list")
 		}
 		return out, nil
@@ -73,7 +81,7 @@ func normalizeGroupModelAllowlist(cfg GroupModelAllowlist) (GroupModelAllowlist,
 		out.Models = append(out.Models, model)
 	}
 	if len(out.Models) == 0 {
-		if out.Enabled {
+		if out.Enabled && out.Mode != "follow" && out.Mode != "fixed" {
 			return out, infraerrors.New(http.StatusBadRequest, "INVALID_MODEL_ALLOWLIST", "model allowlist cannot be enabled with an empty model list")
 		}
 		out.Models = nil
@@ -97,6 +105,12 @@ func (a GroupModelAllowlist) Allows(model string) bool {
 	}
 	model = strings.TrimSpace(model)
 	if model == "" {
+		return true
+	}
+	if catalogPolicyMatch(a.Excluded, model) {
+		return false
+	}
+	if a.Mode == "follow" {
 		return true
 	}
 	candidates := groupModelAllowlistCandidates(model)
@@ -167,6 +181,15 @@ func groupModelAllowlistCandidates(model string) []string {
 // 可直接输出白名单模式：它的所有实例都属于 source。其他未处理的无限
 // 交集不会被枚举为模型 ID，列表可能省略仍可请求的模型。
 func (a GroupModelAllowlist) FilterForListing(source []string) []string {
+	if a.Enabled && a.Mode == "follow" {
+		out := []string{}
+		for _, id := range source {
+			if a.Allows(id) {
+				out = append(out, id)
+			}
+		}
+		return out
+	}
 	if !a.Enabled {
 		return source
 	}
@@ -190,6 +213,9 @@ func (a GroupModelAllowlist) FilterForListing(source []string) []string {
 	seen := make(map[string]struct{}, len(a.Models)+len(patterns))
 	filtered := make([]string, 0, len(patterns))
 	add := func(model string) {
+		if catalogPolicyMatch(a.Excluded, model) {
+			return
+		}
 		key := strings.ToLower(model)
 		if _, ok := seen[key]; ok {
 			return

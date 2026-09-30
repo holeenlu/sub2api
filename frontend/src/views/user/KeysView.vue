@@ -1062,6 +1062,7 @@
 
     <!-- Use Key Modal -->
     <UseKeyModal
+      :setup-profile="selectedKey?.model_setup"
       :show="showUseKeyModal"
       :api-key="selectedKey?.key || ''"
       :base-url="publicSettings?.api_base_url || ''"

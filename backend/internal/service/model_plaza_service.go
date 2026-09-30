@@ -11,6 +11,8 @@ import (
 // PlazaOfficialPricing 模型广场展示用的官方参考价（USD per token），与计费同源：
 // LiteLLM → 内置兜底价卡 → 模型策略。字段为 nil 表示该项缺失（0 视为未配置）。
 type PlazaOfficialPricing struct {
+	Source              string
+	Revision            string
 	InputPrice          *float64
 	OutputPrice         *float64
 	CacheWritePrice     *float64 // 5m 缓存写入（= LiteLLM cache_creation）
@@ -231,7 +233,9 @@ func (s *ModelPlazaService) ListVisibleGroups(ctx context.Context, visible func(
 			pg.Models = make([]PlazaModel, 0, len(catalog.Models))
 			for _, entry := range catalog.Models {
 				m := PlazaModel{Name: entry.Name, Platform: entry.Platform, Endpoint: entry.Endpoint, CatalogSource: entry.Source, ChannelName: entry.ChannelName}
-				if len(entry.BillingModels) != 1 {
+				if entry.PricingStatus == "unavailable" {
+					m.QuoteReason = "pricing_unavailable"
+				} else if len(entry.BillingModels) != 1 {
 					m.QuoteReason = "request_dependent_pricing"
 				} else {
 					m.Name = entry.BillingModels[0]
@@ -420,6 +424,14 @@ func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName
 	}
 	if cached, ok := memo[modelName]; ok {
 		return cached
+	}
+	if s.pricingService != nil {
+		raw, revision, source := s.pricingService.ReferencePrice(modelName)
+		if revision != "" {
+			result := catalogPlazaReference(raw, revision, source)
+			memo[modelName] = result
+			return result
+		}
 	}
 	var result *PlazaOfficialPricing
 	if mp, err := s.billingService.GetModelPricing(modelName); err == nil && mp != nil {

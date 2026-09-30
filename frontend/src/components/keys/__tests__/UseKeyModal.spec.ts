@@ -53,6 +53,7 @@ const stubs = {
 function mountModal(platform: GroupPlatform, apiKey = 'sk-test') {
   return mount(UseKeyModal, {
     props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
       show: true,
       apiKey,
       baseUrl: 'https://example.com/v1',
@@ -103,6 +104,25 @@ function stubCatalog(slugs: string[] | 'error') {
 }
 
 describe('UseKeyModal', () => {
+  it('uses a server-published future model and never consults static presets', () => {
+    const wrapper = mount(UseKeyModal, {
+      props: { show: true, apiKey: 'sk-profile', baseUrl: 'https://example.com/v1', platform: 'openai', setupProfile: { model: 'opaque-next-model', review_model: 'opaque-next-model', reasoning_effort: 'high', status: 'ready', catalog_revision: 'next' } },
+      global: { stubs }
+    })
+    const config = parseToml(findCodeBlock(wrapper, 'model_provider = "OpenAI"'))
+    expect(config.model).toBe('opaque-next-model')
+    expect(config.review_model).toBe('opaque-next-model')
+    expect(config.model_reasoning_effort).toBe('high')
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  it('does not invent a default model when this key has no published catalog', () => {
+    const wrapper = mount(UseKeyModal, { props: { show: true, apiKey: 'sk-unavailable', baseUrl: 'https://example.com/v1', platform: 'openai', setupProfile: null }, global: { stubs } })
+    expect(wrapper.text()).toContain('modelCatalog.setupUnavailable')
+    expect(wrapper.findAll('[data-testid="setup-file-download"]')).toHaveLength(0)
+    expect(wrapper.find('[data-testid="codex-model-catalog-fetch"]').exists()).toBe(true)
+  })
+
   beforeEach(() => {
     stubCatalog(['gpt-6-astra'])
   })
@@ -116,6 +136,7 @@ describe('UseKeyModal', () => {
   it('shows only Claude Code for Claude Code-only groups', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-anthropic-test',
         baseUrl: 'https://example.com/v1',
@@ -154,6 +175,7 @@ describe('UseKeyModal', () => {
   it('omits the attribution override from every standard Claude Code setup form', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-anthropic-test',
         baseUrl: 'https://example.com/v1',
@@ -199,6 +221,7 @@ describe('UseKeyModal', () => {
   it('renders Grok Build and OpenCode setup for Grok groups', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-grok-test',
         baseUrl: 'https://example.com/v1',
@@ -292,6 +315,7 @@ describe('UseKeyModal', () => {
     copyToClipboardMock.mockClear()
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-grok-claude-test',
         baseUrl: 'https://example.com/v1',
@@ -395,6 +419,7 @@ describe('UseKeyModal', () => {
   it('renders Codex custom provider setup through the Grok Responses gateway', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-grok-codex-test',
         baseUrl: 'https://example.com/v1',
@@ -455,6 +480,7 @@ describe('UseKeyModal', () => {
   it('keeps legacy OpenAI Codex config as the default', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-test',
         baseUrl: 'https://example.com/v1',
@@ -499,6 +525,7 @@ describe('UseKeyModal', () => {
   it('normalizes OpenAI Codex and Claude base URLs independently', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-test',
         baseUrl: 'https://example.com',
@@ -539,6 +566,7 @@ describe('UseKeyModal', () => {
   it('renders API Key Mode authorization in OpenAI Codex config', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-test',
         baseUrl: 'https://example.com/v1',
@@ -592,6 +620,7 @@ describe('UseKeyModal', () => {
   it('keeps legacy OpenAI Codex WebSocket config as the default', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-test',
         baseUrl: 'https://example.com/v1',
@@ -640,6 +669,7 @@ describe('UseKeyModal', () => {
   it('preserves API Key Mode when switching to OpenAI Codex WebSocket config', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-test',
         baseUrl: 'https://example.com/v1',
@@ -688,6 +718,7 @@ describe('UseKeyModal', () => {
   it('resets Codex authentication mode when the modal reopens or platform changes', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-test',
         baseUrl: 'https://example.com/v1',
@@ -762,6 +793,7 @@ describe('UseKeyModal', () => {
   it('renders GPT-5.6 and GPT-6 Astra capabilities in OpenCode config', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-test',
         baseUrl: 'https://example.com/v1',
@@ -834,6 +866,7 @@ describe('UseKeyModal', () => {
   it('renders Claude Fable 5 OpenCode config with adaptive thinking', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-test',
         baseUrl: 'https://example.com/v1',
@@ -907,6 +940,7 @@ describe('UseKeyModal', () => {
 
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-composite-test',
         baseUrl: 'https://example.com/v1',
@@ -986,6 +1020,7 @@ describe('UseKeyModal', () => {
     async (platform) => {
       const wrapper = mount(UseKeyModal, {
         props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
           show: true,
           apiKey: `sk-${platform}-test`,
           baseUrl: 'https://example.com/v1',
@@ -1063,6 +1098,7 @@ describe('UseKeyModal', () => {
 
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-composite-test',
         baseUrl: 'https://example.com/v1',
@@ -1106,6 +1142,7 @@ describe('UseKeyModal', () => {
     }))
     const wrapper = mount(UseKeyModal, {
       props: {
+        setupProfile: { model: 'gpt-6-astra', review_model: 'gpt-6-astra', catalog_revision: 'fixture-v1', status: 'ready' },
         show: true,
         apiKey: 'sk-openai-test',
         baseUrl: 'https://example.com/v1',

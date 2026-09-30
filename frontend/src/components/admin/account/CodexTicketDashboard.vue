@@ -42,6 +42,7 @@
                   <span class="text-xs text-gray-700 dark:text-dark-200">{{ text.modelParticipation }}</span>
                   <Toggle :model-value="participation.models[status.model] !== false" :disabled="participationDisabled" :aria-label="text.modelParticipation + ' · ' + status.model" class="disabled:cursor-not-allowed disabled:opacity-50" @update:model-value="saveParticipation($event, status.model)" />
                 </div>
+                <p v-if="status.fingerprint_pending" class="mt-2 text-xs text-amber-600">{{ t('modelCatalog.fingerprintPending') }}</p>
                 <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">{{ status.harvest_enabled ? text.harvestActive : text.harvestInactive }}</p>
                 <dl class="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
                   <div><dt class="text-gray-500 dark:text-dark-400">{{ text.acquired }}</dt><dd class="mt-1 text-gray-800 dark:text-dark-200">{{ formatTime(status.captured_at) }}</dd></div>
@@ -103,6 +104,7 @@
 </template>
 
 <script setup lang="ts">
+import { getCatalogTicketModels, type CatalogTicketCandidate } from '@/api/admin/modelCatalog'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getIntlLocale } from '@/i18n/localeUtils'
@@ -187,6 +189,7 @@ const total = ref(0)
 const loading = ref(false)
 const error = ref('')
 const fingerprintCommit = ref('')
+const catalogCandidates=ref<CatalogTicketCandidate[]|null>(null)
 const refreshingBank = ref(false)
 const accountDetail = ref<Account | null>(null)
 const participation = ref<tickets.TicketParticipation>({ enabled: true, models: {} })
@@ -205,7 +208,11 @@ const rawDetail = ref<tickets.TicketInvalidation | null>(null)
 const detailLoading = ref(false)
 const detailError = ref('')
 let loadSerial = 0
-const statuses = computed(() => (accountDetail.value ?? props.account)?.codex_turn_tickets as tickets.TicketStatus[] | undefined ?? [])
+const statuses = computed(() => {
+ const current=(accountDetail.value ?? props.account)?.codex_turn_tickets as tickets.TicketStatus[] | undefined ?? []
+ if(!Array.isArray(catalogCandidates.value))return current
+ return catalogCandidates.value.map(candidate=>current.find(status=>status.model===candidate.model)??({model:candidate.model,ready:false,harvest_enabled:false,harvest_paused:false,turn_state_present:false,cookie_present:false,fingerprint_pending:!candidate.fingerprint_available} as tickets.TicketStatus))
+})
 const attemptOptions = computed(() => [
   { value: 'all', label: text.value.all }, { value: 'success', label: text.value.success }, { value: 'failure', label: text.value.failure }
 ])
@@ -368,10 +375,14 @@ async function updateFingerprint() {
   await loadFingerprint(true)
   await loadAccount()
 }
+async function loadCatalogCandidates(){
+ if(!props.account)return;const id=props.account.id;const session=accountSessionSerial
+ try{const value=await getCatalogTicketModels(id);if(isCurrentAccount(session,id)&&Array.isArray(value))catalogCandidates.value=value}catch{/* Existing account status stays visible on catalog failure. */}
+}
 async function reload() {
   if (!props.show || !props.account) return
   error.value = ''
-  await Promise.all([loadAccount(), loadFingerprint(), loadEvents()])
+  await Promise.all([loadAccount(), loadFingerprint(), loadEvents(), loadCatalogCandidates()])
 }
 async function harvestModel(model: string) {
   if (!props.account || busyModel.value || participationDisabled.value) return
@@ -412,7 +423,7 @@ watch(() => [props.show, props.account?.id], () => {
   participationError.value = ''
   refreshingBank.value = false
   busyModel.value = ''
-  fingerprintCommit.value = ''
+  fingerprintCommit.value = '';catalogCandidates.value=null
   error.value = ''
   loading.value = false
   ++loadSerial

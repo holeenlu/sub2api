@@ -22,6 +22,8 @@ import (
 
 // GroupHandler handles admin group management
 type GroupHandler struct {
+	modelCatalog         *service.GroupModelCatalogService
+	modelRegistry        *service.ModelCatalogService
 	adminService         service.AdminService
 	dashboardService     *service.DashboardService
 	groupCapacityService *service.GroupCapacityService
@@ -621,6 +623,37 @@ func (h *GroupHandler) GetGroupModelAllowlistCandidates(c *gin.Context) {
 		return
 	}
 
+	if h.modelRegistry != nil {
+		if groupID == 0 {
+			catalog, err := h.modelRegistry.Platform(c.Request.Context(), c.Query("platform"))
+			if err != nil {
+				response.InternalError(c, "Failed to read model catalog")
+				return
+			}
+			ids := []string{}
+			for _, entry := range catalog.Models {
+				if entry.Lifecycle != "retired" {
+					ids = append(ids, entry.ID)
+				}
+			}
+			response.Success(c, gin.H{"models": ids, "source": "model_catalog", "status": catalog.Status})
+			return
+		}
+		group, err := h.adminService.GetGroup(c.Request.Context(), groupID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		candidates := *group
+		candidates.ModelAllowlist = service.GroupModelAllowlist{}
+		catalog, err := h.modelCatalog.Preview(c.Request.Context(), &candidates)
+		if err != nil {
+			response.InternalError(c, "Failed to read group catalog")
+			return
+		}
+		response.Success(c, gin.H{"models": catalog.ModelIDs(), "source": "model_catalog", "status": catalog.Status, "issues": catalog.Issues})
+		return
+	}
 	// 平台解析（空则读分组、再空则默认 anthropic）由 service 一处完成并回传，
 	// 免得 handler 为了拿一个 group.Platform 再打一次带账号计数聚合的 GetGroup。
 	models, platform, err := h.adminService.GetGroupModelsListCandidates(
@@ -1218,4 +1251,9 @@ func (h *GroupHandler) UpdateSortOrder(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "Sort order updated successfully"})
+}
+
+func (h *GroupHandler) SetModelCatalog(catalog *service.GroupModelCatalogService, registry *service.ModelCatalogService) {
+	h.modelCatalog = catalog
+	h.modelRegistry = registry
 }

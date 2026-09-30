@@ -1321,8 +1321,13 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 // 驱动 DeepSeek pro→Flash 切换判定（切换点前 Pro 价、之后 Flash 价），使
 // 展示/估算路径可与历史补账同刻复算，测试也能用固定时点钉住断言。
 func (s *BillingService) getModelPricingAt(model string, pricingAt time.Time) (*ModelPricing, error) {
-	// 标准化模型名称（转小写）
-	model = strings.ToLower(model)
+	if s.pricingService != nil && s.pricingService.CatalogManaged() && s.pricingService.GetExactModelPricing(model) == nil && s.fallbackPrices[model] == nil {
+		return nil, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)
+	}
+	// Compatibility normalization stays in legacy mode; catalog IDs are exact.
+	if s.pricingService == nil || !s.pricingService.CatalogManaged() {
+		model = strings.ToLower(model)
+	}
 
 	// 1. 优先从动态价格服务获取
 	if s.pricingService != nil {
@@ -1473,6 +1478,9 @@ type CostInput struct {
 // CalculateCostUnified 统一计费入口，支持三种计费模式。
 // 使用 ModelPricingResolver 解析定价，然后根据 BillingMode 分发计算。
 func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, error) {
+	if pinned := s.pinnedPriceService(input.Ctx); pinned != s {
+		return pinned.CalculateCostUnified(input)
+	}
 	if input.Resolver == nil {
 		// 无 Resolver，回退到旧路径
 		applyLongContextBilling := true

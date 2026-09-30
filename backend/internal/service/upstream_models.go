@@ -21,13 +21,22 @@ import (
 const (
 	upstreamModelsBodyLimit             int64 = 8 << 20
 	modelsDevRegistryURL                      = "https://models.dev/api.json"
-	modelsDevRegistryTTL                      = 6 * time.Hour
+	modelsDevRegistryTTL                      = 15 * time.Minute
 	UpstreamModelMetadataExtraKey             = "upstream_model_metadata"
 	UpstreamModelMetadataIncompleteCode       = "upstream_model_metadata_incomplete"
 	UpstreamModelMetadataPartialCode          = "upstream_model_metadata_partial"
 )
 
 type UpstreamModelMetadata struct {
+	OutputModalities    []string                   `json:"output_modalities,omitempty"`
+	ModelKind           string                     `json:"model_kind,omitempty"`
+	Endpoints           []string                   `json:"endpoints,omitempty"`
+	ShutdownDate        string                     `json:"shutdown_date,omitempty"`
+	Deprecated          *bool                      `json:"deprecated,omitempty"`
+	RecommendedPriority *int                       `json:"recommended_priority,omitempty"`
+	FieldSources        map[string]string          `json:"field_sources,omitempty"`
+	MediaCapabilities   map[string]json.RawMessage `json:"media_capabilities,omitempty"`
+
 	ID                       string                     `json:"id"`
 	DisplayName              string                     `json:"display_name,omitempty"`
 	Description              string                     `json:"description,omitempty"`
@@ -48,6 +57,9 @@ type UpstreamModelMetadataSnapshot struct {
 }
 
 type UpstreamModelCatalog struct {
+	Descriptors     map[string]json.RawMessage `json:"-"`
+	DiscoverySource string                     `json:"source,omitempty"`
+
 	Models   []string                         `json:"models"`
 	Metadata map[string]UpstreamModelMetadata `json:"metadata,omitempty"`
 	Warnings []UpstreamModelSyncWarning       `json:"warnings,omitempty"`
@@ -146,6 +158,7 @@ const (
 type UpstreamModelSyncError struct {
 	Kind       UpstreamModelSyncErrorKind
 	Message    string
+	RetryAfter string
 	StatusCode int
 	Err        error
 }
@@ -194,6 +207,19 @@ func newUpstreamModelSyncInternalError(message string, err error) error {
 // FetchUpstreamSupportedModels fetches only live model IDs. The admin sync path
 // uses SyncUpstreamModelCatalog so capability metadata can also be persisted.
 func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, account *Account) ([]string, error) {
+	if s.modelCatalog != nil && account != nil && account.ID > 0 {
+		snapshot, err := s.modelCatalog.Refresh(ctx, account.ID, true)
+		if err != nil {
+			return nil, err
+		}
+		ids := []string{}
+		for _, e := range snapshot.Models {
+			if (e.Access == "listed" || e.Access == "observed") && e.Lifecycle != "retired" {
+				ids = append(ids, e.ID)
+			}
+		}
+		return ids, nil
+	}
 	models, _, err := s.fetchUpstreamModelList(ctx, account)
 	return models, err
 }
@@ -224,7 +250,10 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 			"model_count", len(models),
 		)
 	}
-	catalog := &UpstreamModelCatalog{Models: models, Metadata: make(map[string]UpstreamModelMetadata)}
+	catalog := &UpstreamModelCatalog{Models: models, Metadata: make(map[string]UpstreamModelMetadata), DiscoverySource: "upstream", Descriptors: catalogCodexDescriptors(body)}
+	if !liveListAvailable {
+		catalog.DiscoverySource = "configured"
+	}
 	if len(body) > 0 {
 		_, directMetadata, parseErr := extractUpstreamModelCatalog(body, account != nil && account.IsGrok())
 		if parseErr == nil {
@@ -383,7 +412,7 @@ func upstreamCatalogNeedsRegistry(models []string, metadata map[string]UpstreamM
 }
 
 func upstreamModelMetadataIsUseful(metadata UpstreamModelMetadata) bool {
-	return strings.TrimSpace(metadata.DisplayName) != "" ||
+	return metadata.ShutdownDate != "" || metadata.Deprecated != nil || metadata.ModelKind != "" || len(metadata.OutputModalities) > 0 || len(metadata.Endpoints) > 0 || strings.TrimSpace(metadata.DisplayName) != "" ||
 		strings.TrimSpace(metadata.Description) != "" ||
 		metadata.Reasoning != nil ||
 		len(metadata.SupportedReasoningLevels) > 0 ||
@@ -460,11 +489,11 @@ func mergeUpstreamModelMetadata(primary, fallback UpstreamModelMetadata) (Upstre
 		merged.Reasoning = &reasoning
 		changed = true
 	}
-	if strings.TrimSpace(merged.DefaultReasoningLevel) == "" && strings.TrimSpace(fallback.DefaultReasoningLevel) != "" {
+	if (merged.Reasoning == nil || *merged.Reasoning) && strings.TrimSpace(merged.DefaultReasoningLevel) == "" && strings.TrimSpace(fallback.DefaultReasoningLevel) != "" {
 		merged.DefaultReasoningLevel = strings.TrimSpace(fallback.DefaultReasoningLevel)
 		changed = true
 	}
-	if len(merged.SupportedReasoningLevels) == 0 && len(fallback.SupportedReasoningLevels) > 0 {
+	if (merged.Reasoning == nil || *merged.Reasoning) && len(merged.SupportedReasoningLevels) == 0 && len(fallback.SupportedReasoningLevels) > 0 {
 		merged.SupportedReasoningLevels = append([]string(nil), fallback.SupportedReasoningLevels...)
 		changed = true
 	}
@@ -485,6 +514,40 @@ func mergeUpstreamModelMetadata(primary, fallback UpstreamModelMetadata) (Upstre
 		merged.MaxOutputTokens = fallback.MaxOutputTokens
 		changed = true
 	}
+	if len(merged.OutputModalities) == 0 && len(fallback.OutputModalities) > 0 {
+		merged.OutputModalities = append([]string(nil), fallback.OutputModalities...)
+		changed = true
+	}
+	if merged.ModelKind == "" && fallback.ModelKind != "" {
+		merged.ModelKind = fallback.ModelKind
+		changed = true
+	}
+	if len(merged.Endpoints) == 0 && len(fallback.Endpoints) > 0 {
+		merged.Endpoints = append([]string(nil), fallback.Endpoints...)
+		changed = true
+	}
+	if merged.ShutdownDate == "" && fallback.ShutdownDate != "" {
+		merged.ShutdownDate = fallback.ShutdownDate
+		changed = true
+	}
+	if merged.Deprecated == nil && fallback.Deprecated != nil {
+		v := *fallback.Deprecated
+		merged.Deprecated = &v
+		changed = true
+	}
+	if merged.RecommendedPriority == nil && fallback.RecommendedPriority != nil {
+		v := *fallback.RecommendedPriority
+		merged.RecommendedPriority = &v
+		changed = true
+	}
+	if merged.FieldSources == nil && len(fallback.FieldSources) > 0 {
+		merged.FieldSources = make(map[string]string)
+	}
+	for field, source := range fallback.FieldSources {
+		if _, ok := merged.FieldSources[field]; !ok {
+			merged.FieldSources[field] = source
+		}
+	}
 	return merged, changed
 }
 
@@ -496,6 +559,18 @@ func (s *AccountTestService) fetchModelsDevMetadata(
 	if s == nil || s.httpUpstream == nil || account == nil {
 		return nil, fmt.Errorf("model metadata registry is not configured")
 	}
+	s.modelMetadataRegistryMu.Lock()
+	if time.Since(s.modelMetadataRegistryAt) > time.Minute && len(s.modelMetadataRegistry) > 0 {
+		if provider, ok := matchModelsDevProvider(s.modelMetadataRegistry, upstreamModelRegistryBaseURL(account)); ok {
+			for _, id := range modelIDs {
+				if _, known := provider.Models[id]; !known {
+					s.modelMetadataRegistryAt = time.Time{}
+					break
+				}
+			}
+		}
+	}
+	s.modelMetadataRegistryMu.Unlock()
 	registry, err := s.fetchModelsDevRegistry(ctx, account)
 	if err != nil {
 		return nil, err
@@ -582,12 +657,13 @@ func upstreamMetadataFromModelsDevModel(modelID string, model modelsDevModel) Up
 		reasoning = &inferred
 	}
 	metadata := UpstreamModelMetadata{
+		OutputModalities:         model.Modalities.Output,
 		ID:                       strings.TrimSpace(modelID),
 		DisplayName:              strings.TrimSpace(model.Name),
 		Description:              strings.TrimSpace(model.Description),
 		Reasoning:                reasoning,
 		SupportedReasoningLevels: levels,
-		InputModalities:          normalizeCodexInputModalities(model.Modalities.Input),
+		InputModalities:          normalizeCatalogModalities(model.Modalities.Input),
 		ContextWindow:            model.Limit.Context,
 		MaxContextWindow:         model.Limit.Context,
 		MaxOutputTokens:          model.Limit.Output,
@@ -745,7 +821,10 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 	if err != nil {
 		return nil, nil, err
 	}
+	return s.fetchPaginatedModelCatalog(ctx, account, req)
+}
 
+func (s *AccountTestService) fetchSingleUpstreamModelPage(ctx context.Context, account *Account, req *http.Request) ([]string, []byte, error) {
 	proxyURL := upstreamModelsProxyURL(account)
 	resp, err := s.doUpstreamModelsRequest(req, proxyURL, account)
 	if err != nil {
@@ -767,6 +846,7 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 			Kind:       UpstreamModelSyncErrorUpstream,
 			Message:    fmt.Sprintf("Upstream model list request failed with HTTP %d", resp.StatusCode),
 			StatusCode: resp.StatusCode,
+			RetryAfter: resp.Header.Get("Retry-After"),
 			Err:        fmt.Errorf("upstream model list returned HTTP %d", resp.StatusCode),
 		}
 	}
@@ -778,9 +858,6 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 	models, err := extractModels(body)
 	if err != nil {
 		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream model list response was not valid JSON", err)
-	}
-	if len(models) == 0 {
-		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream returned no supported models", nil)
 	}
 
 	return models, body, nil
@@ -1250,6 +1327,20 @@ type upstreamModelEntryMetadata struct {
 }
 
 type upstreamModelCapabilityEntry struct {
+	OutputModalities  []string                   `json:"output_modalities"`
+	ModelKind         string                     `json:"model_kind"`
+	Mode              string                     `json:"mode"`
+	Endpoints         []string                   `json:"endpoints"`
+	ShutdownDate      string                     `json:"shutdown_date"`
+	Deprecated        *bool                      `json:"deprecated"`
+	Priority          *int                       `json:"priority"`
+	Capabilities      map[string]json.RawMessage `json:"capabilities"`
+	MaxInputTokens    int64                      `json:"max_input_tokens"`
+	NativeMaxTokens   int64                      `json:"max_tokens"`
+	InputTokenLimit   int64                      `json:"inputTokenLimit"`
+	OutputTokenLimit  int64                      `json:"outputTokenLimit"`
+	GenerationMethods []string                   `json:"supportedGenerationMethods"`
+
 	upstreamModelEntry
 	DisplayName              string                     `json:"display_name"`
 	Description              string                     `json:"description"`
@@ -1295,7 +1386,7 @@ func extractUpstreamModelCatalog(body []byte, grok bool) ([]string, map[string]U
 			continue
 		}
 		models = append(models, modelID)
-		entry := upstreamMetadataFromCapabilityEntry(modelID, capability)
+		entry := enrichNativeCatalogMetadata(upstreamMetadataFromCapabilityEntry(modelID, capability), capability)
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &fields); err == nil {
 			entry.CodexToolCapabilities = make(map[string]json.RawMessage)
@@ -1366,7 +1457,7 @@ func upstreamMetadataFromCapabilityEntry(modelID string, entry upstreamModelCapa
 		Reasoning:                reasoning,
 		DefaultReasoningLevel:    defaultReasoningLevel,
 		SupportedReasoningLevels: levels,
-		InputModalities:          normalizeCodexInputModalities(modalities),
+		InputModalities:          normalizeCatalogModalities(modalities),
 		ContextWindow:            contextWindow,
 		MaxContextWindow:         entry.MaxContextWindow,
 		MaxOutputTokens:          maxOutputTokens,

@@ -659,6 +659,8 @@ export interface AdminGroup extends Group {
 }
 
 export interface ModelAllowlist {
+  mode?: 'legacy' | 'follow' | 'fixed'
+  excluded?: string[]
   enabled: boolean
   models: string[]
 }
@@ -728,6 +730,7 @@ export interface CompositeRouteDecision {
 }
 
 export interface ApiKey {
+  model_setup?: { model: string; review_model: string; reasoning_effort?: string; catalog_revision: string; status: string }
   id: number
   user_id: number
   key: string

@@ -138,6 +138,7 @@ func normalizeGrokAccountTestMode(mode string) string {
 
 // AccountTestService handles account testing operations
 type AccountTestService struct {
+	modelCatalog              *ModelCatalogService
 	stateProbeAccounts        sync.Map
 	accountRepo               AccountRepository
 	geminiTokenProvider       *GeminiTokenProvider
@@ -3480,4 +3481,11 @@ func excelBPSTestPrompt(prompt string) string {
 		return value
 	}
 	return "hi"
+}
+
+func (s *AccountTestService) ModelCatalog() *ModelCatalogService {
+	if s == nil {
+		return nil
+	}
+	return s.modelCatalog
 }

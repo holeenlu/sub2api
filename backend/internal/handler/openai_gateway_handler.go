@@ -255,7 +255,7 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if requestID, _ := parent.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 		base = context.WithValue(base, ctxkey.RequestID, strings.TrimSpace(requestID))
 	}
-	return base
+	return service.CopyRequestPricingContext(parent, base)
 }
 
 // wrapUsageRecordTaskContext 包装计费任务：复制请求级 context 值，并接管请求的在途余额预留引用。
@@ -2960,6 +2960,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 		// Passthrough rejects overlapping response.create frames, so one immutable
 		// turn-tagged slot preserves the exact mapping used for the in-flight request.
+		var catalogTurnContexts sync.Map
 		var turnChannelMapping atomic.Pointer[openAIWSTurnChannelMappingSnapshot]
 		turnChannelMapping.Store(&openAIWSTurnChannelMappingSnapshot{turn: 1, mapping: channelMappingWS})
 		// turn 级定价：首轮回退到 TurnStarted 的所属 turn 时刻；后续 turn 由
@@ -3033,7 +3034,18 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					}
 					routeModel = wsRouteModel
 				}
-				mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, routeModel)
+				turnCtx := ctx
+				if saved, ok := catalogTurnContexts.Load(turn); ok {
+					turnCtx = saved.(context.Context)
+				} else {
+					prepared, err := h.gatewayService.PrepareCatalogTurn(ctx, apiKey, []string{model})
+					if err != nil || !service.CatalogAccountAllowed(prepared, account) {
+						return "", service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model catalog or pricing is not ready", err)
+					}
+					catalogTurnContexts.Store(turn, prepared)
+					turnCtx = prepared
+				}
+				mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(turnCtx, apiKey.GroupID, routeModel)
 				mappedModelUnchanged := false
 				if previous := turnChannelMapping.Load(); previous != nil && previous.turn < turn {
 					mappedModelUnchanged = strings.TrimSpace(previous.mapping.MappedModel) == strings.TrimSpace(mapping.MappedModel)
@@ -3119,6 +3131,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return checkSimpleModeTurnBilling()
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
+				if result != nil {
+					if saved, ok := catalogTurnContexts.Load(turn); ok {
+						result.RequestPricing = service.RequestPricingFromContext(saved.(context.Context))
+						if turnErr == nil {
+							catalogTurnContexts.Delete(turn)
+						}
+					}
+				}
 				turnStart := getTurnStart(turn)
 				cyberBlockBody := takeCyberTurnBody(turn)
 				// 每次 attempt 都清 cyber mark；failover 链结束前保留 recorded guard，
