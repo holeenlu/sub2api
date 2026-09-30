@@ -3169,11 +3169,6 @@
           </div>
         </div>
 
-        <p v-if="editForm.platform === 'openai' && editingGroup" class="mt-4 text-xs text-gray-500">
-          <router-link :to="`/admin/model-catalog?group_id=${editingGroup.id}`" class="text-primary-600 hover:underline">
-            {{ t("admin.groups.codexModelsManifest.advancedTitle") }}
-          </router-link>
-        </p>
 
 
         <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">

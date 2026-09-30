@@ -45,7 +45,6 @@
           <button type="button" class="btn btn-secondary" :disabled="busy || release.revision===catalog.revision" @click="restore(release.revision)">{{ t('modelCatalog.restore') }}</button>
         </div>
       </section>
-      <GroupCatalogSources :initial-group-id="String(route.query.group_id ?? '')" />
       <form class="card space-y-3 p-5" @submit.prevent="compare">
         <h2 class="font-semibold">{{ t('modelCatalog.compare') }}</h2>
         <p class="text-sm text-gray-500">{{ t('modelCatalog.compareHint') }}</p>
@@ -75,7 +74,6 @@ import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import GroupCatalogSources from '@/components/admin/group/GroupCatalogSources.vue'
 import { getModelCatalog, refreshModelCatalog, getCatalogSettings, saveCatalogSettings, getCatalogRegistry, saveCatalogRegistry, getCatalogHistory, rollbackCatalog, getCatalogPrices, saveCatalogPrices, explainCatalog, type CatalogPolicy, type CatalogRelease, type ModelCatalog, type CatalogSyncSettings } from '@/api/admin/modelCatalog'
 const { t } = useI18n()
 const settings = ref<CatalogSyncSettings | null>(null)

@@ -252,14 +252,15 @@ describe("GroupsView Codex manifest binding", () => {
     getLiveCapability.mockResolvedValue({ supported: false });
   });
 
-  it("links to advanced catalog sources instead of editing them in the group", async () => {
+  it("no longer offers catalog source accounts for a group", async () => {
     const wrapper = mountView();
     await flushPromises();
     const editButton = wrapper.findAll("button").find(button => button.text().includes("common.edit"));
     await editButton!.trigger("click");
     await flushPromises();
     expect(wrapper.find('[data-testid="codex-manifest-value"]').exists()).toBe(false);
-    expect(wrapper.find(`router-link[to="/admin/model-catalog?group_id=${sourceGroup.id}"]`).exists()).toBe(true);
+    expect(wrapper.find('router-link[to^="/admin/model-catalog?group_id="]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("admin.groups.codexModelsManifest");
     wrapper.unmount();
   });
 });

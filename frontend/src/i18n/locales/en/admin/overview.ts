@@ -1161,8 +1161,6 @@ export default {
         }
       },
       codexModelsManifest: {
-        advancedTitle: 'Advanced: model catalog source accounts',
-        advancedHint: 'Only for upstreams without a complete catalog or when a fixed reference source is needed. This only chooses which accounts the model list is read from; it does not limit which accounts can serve requests, and a reference account does not prove other accounts have the same access.',
         title: 'Pinned Accounts for Model Lists',
         hint: 'When enabled, ordinary model lists and Codex Model Manifest are discovered from the pinned accounts first, then merged and filtered using account mappings and the group model list. Rate-limited or overloaded pinned accounts are still used.',
         enable: 'Fetch model lists with specific accounts',
