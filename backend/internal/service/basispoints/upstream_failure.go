@@ -2,22 +2,97 @@ package basispoints
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // UpstreamFailure is a safe interpretation of an in-band error. Status is a
 // semantic status, not evidence of the HTTP status returned by the upstream.
 type UpstreamFailure struct {
-	Status  int
-	Code    string
-	Type    string
-	Message string
+	Status       int
+	Code         string
+	Type         string
+	Message      string
+	RetryAfterMS int64
 }
 
 func (f *UpstreamFailure) Error() string { return f.Message }
 
 func (f *UpstreamFailure) Details() map[string]any {
-	return object{"status": f.Status, "code": f.Code, "type": f.Type, "message": f.Message}
+	detail := object{"status": f.Status, "code": f.Code, "type": f.Type, "message": f.Message}
+	if f.RetryAfterMS > 0 {
+		detail["headers"] = object{"retry-after-ms": strconv.FormatInt(f.RetryAfterMS, 10)}
+	}
+	return detail
+}
+
+// IsOrganizationRateLimitMessage recognizes the provider's RPM/TPM rejection
+// only inside an error envelope. Callers must independently check its status.
+func IsOrganizationRateLimitMessage(message string) bool {
+	if len(message) > 4096 {
+		return false
+	}
+	message = strings.ToLower(strings.TrimSpace(message))
+	return strings.HasPrefix(message, "rate limit reached for ") &&
+		(strings.Contains(message, "tokens per min") || strings.Contains(message, "requests per min"))
+}
+
+var upstreamRetryDelayPattern = regexp.MustCompile(`(?i)\btry again in\s+([0-9]+(?:\.[0-9]+)?)\s*(milliseconds?|ms|seconds?|secs?|s|minutes?|mins?|m)\b`)
+
+// Preserve a bounded numeric hint through redaction without copying headers,
+// URLs, account identifiers, or the upstream's arbitrary error text.
+func upstreamRetryAfterMS(detail object) int64 {
+	bound := func(value string, multiplier float64) int64 {
+		number, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err != nil || number <= 0 || math.IsNaN(number) || math.IsInf(number, 0) {
+			return 0
+		}
+		return int64(math.Ceil(math.Min(number*multiplier, 7_200_000)))
+	}
+	if headers, ok := detail["headers"].(object); ok {
+		if ms := bound(upstreamRetryValue(headers["retry-after-ms"]), 1); ms > 0 {
+			return ms
+		}
+		value := upstreamRetryValue(headers["retry-after"])
+		if ms := bound(value, 1000); ms > 0 {
+			return ms
+		}
+		if deadline, err := http.ParseTime(value); err == nil && deadline.After(time.Now()) {
+			return int64(math.Ceil(math.Min(time.Until(deadline).Seconds()*1000, 7_200_000)))
+		}
+	}
+	message := text(detail["message"])
+	if len(message) > 4096 {
+		return 0
+	}
+	match := upstreamRetryDelayPattern.FindStringSubmatch(message)
+	if len(match) != 3 {
+		return 0
+	}
+	multiplier := float64(1000)
+	unit := strings.ToLower(match[2])
+	switch {
+	case unit == "ms" || strings.HasPrefix(unit, "millisecond"):
+		multiplier = 1
+	case strings.HasPrefix(unit, "m"):
+		multiplier = 60_000
+	}
+	return bound(match[1], multiplier)
+}
+
+func upstreamRetryValue(value any) string {
+	switch value := value.(type) {
+	case string:
+		return value
+	case json.Number:
+		return value.String()
+	default:
+		return ""
+	}
 }
 
 // ParseUpstreamFailure recognizes failure terminals only. Unknown identifiers
@@ -46,6 +121,13 @@ func classifyUpstreamFailure(kind string, payload object) *UpstreamFailure {
 	}
 	code := text(detail["code"])
 	status := failureIdentifierStatus(code)
+	if code == "" && text(detail["type"]) == "rate_limit_error" {
+		code, status = "rate_limit_exceeded", http.StatusTooManyRequests
+	}
+	if code == "" && status == 0 && failureIdentifierStatus(text(detail["type"])) == 0 &&
+		IsOrganizationRateLimitMessage(text(detail["message"])) {
+		code, status = "rate_limit_exceeded", http.StatusTooManyRequests
+	}
 	if status == 0 {
 		code = "basispoints_upstream_error"
 		if kind == "response.cancelled" {
@@ -76,8 +158,12 @@ func classifyUpstreamFailure(kind string, payload object) *UpstreamFailure {
 			errorType = "invalid_request_error"
 		}
 	}
-	return &UpstreamFailure{Status: status, Code: code, Type: errorType,
+	failure := &UpstreamFailure{Status: status, Code: code, Type: errorType,
 		Message: "Excel BPS upstream failure: " + code + "; request was not replayed"}
+	if status == http.StatusTooManyRequests {
+		failure.RetryAfterMS = upstreamRetryAfterMS(detail)
+	}
+	return failure
 }
 
 func failureStatus(value any) int {

@@ -78,7 +78,11 @@ func (p *excelBPSStartPeek) run() {
 				switch kind {
 				case "response.created", "response.in_progress", "response.queued":
 				default:
-					if isExcelBPSStreamRateLimit(payload) {
+					hasOutput := len(gjson.GetBytes(payload, "response.output").Array()) > 0 ||
+						gjson.GetBytes(payload, "response.usage.output_tokens").Int() > 0 ||
+						gjson.GetBytes(payload, "usage.output_tokens").Int() > 0
+					if !hasOutput && isExcelBPSStreamRateLimit(payload) &&
+						basispoints.IsOrganizationRateLimitMessage(excelBPSUpstreamError(payload).Get("message").String()) {
 						p.rateLimit = bytes.Clone(payload)
 					}
 					return

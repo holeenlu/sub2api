@@ -819,7 +819,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 						ErrType: upstreamFailure.Type, Code: upstreamFailure.Code, Message: upstreamFailure.Message,
 						IntendedStatus: upstreamFailure.Status, CountTowardsSLA: true, NonStream: !stream,
 					})
-					if upstreamFailure.Status == http.StatusTooManyRequests {
+					if upstreamFailure.Status == http.StatusTooManyRequests && !isExcelBPSStreamRateLimit(payload) {
 						s.coolDownExcelBPS(ctx, account, resp.Header.Get("Retry-After"))
 					}
 				}
@@ -832,7 +832,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 				// withheld it, so this stage never replays. The limit belongs to the
 				// provider organization shared by all BPS accounts: no cooldown.
 				message, detail := s.excelBPSRateLimitOpsDetail(payload, token, account)
-				setOpsUpstreamError(c, http.StatusTooManyRequests, message, detail)
+				setOpsUpstreamError(c, resp.StatusCode, message, detail)
 				delay := excelBPSClientRateLimitDelay(resp.Header.Get("Retry-After"), payload)
 				clientMessage := excelBPSClientRateLimitMessage(delay)
 				MarkResponseCommitted(c)
@@ -843,8 +843,12 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 				})
 				result.Duration = time.Since(start)
 				result.UpstreamTerminalEvent = terminal
-				safeError := gin.H{"type": "rate_limit_error", "code": excelBPSClientRateLimitCode, "message": clientMessage}
+				safeError := gin.H{"type": "rate_limit_error", "code": excelBPSClientRateLimitCode, "message": clientMessage, "status": http.StatusTooManyRequests}
 				if !stream || !c.Writer.Written() {
+					if StopOpenAICompactSSEKeepaliveCommitted(c) {
+						writeOpenAICompactSSEFailureMessage(c, http.StatusTooManyRequests, excelBPSClientRateLimitCode, clientMessage)
+						return result, fmt.Errorf("excel BPS: %s", excelBPSClientRateLimitCode)
+					}
 					c.Header("Retry-After", strconv.FormatInt(excelBPSCeilSeconds(delay), 10))
 					c.Header("Content-Type", "application/json")
 					c.JSON(http.StatusTooManyRequests, gin.H{"error": safeError})

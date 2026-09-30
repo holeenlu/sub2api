@@ -117,18 +117,23 @@ func TestExcelBPSFailureClassification(t *testing.T) {
 				if stream {
 					require.Equal(t, http.StatusOK, rec.Code)
 					require.Contains(t, rec.Body.String(), "already delivered")
+					wantEvent := tc.event
+					if tc.event == "error" && tc.code == "rate_limit_exceeded" {
+						// Codex clients consume rate limits from response.failed.
+						wantEvent = "response.failed"
+					}
 					found := 0
 					for _, line := range strings.Split(rec.Body.String(), "\n") {
 						if !strings.HasPrefix(line, "data: ") {
 							continue
 						}
 						raw := strings.TrimPrefix(line, "data: ")
-						if gjson.Get(raw, "type").String() != tc.event {
+						if gjson.Get(raw, "type").String() != wantEvent {
 							continue
 						}
 						found++
 						path := "error"
-						if tc.event != "error" {
+						if wantEvent != "error" {
 							path = "response.error"
 						}
 						require.Equal(t, tc.wantCode, gjson.Get(raw, path+".code").String())
@@ -146,7 +151,8 @@ func TestExcelBPSFailureClassification(t *testing.T) {
 				require.Equal(t, tc.status, observed.IntendedStatus)
 				require.Equal(t, tc.wantCode, observed.Code)
 				require.Equal(t, http.StatusOK, c.GetInt(OpsUpstreamStatusCodeKey), "mapped status is not an upstream HTTP status")
-				require.Equal(t, tc.status == 429, svc.isExcelBPSCoolingDown(account, "gpt-6-astra"))
+				wantCooldown := tc.status == 429 && (tc.code != "rate_limit_exceeded" || tc.event == "response.cancelled")
+				require.Equal(t, wantCooldown, svc.isExcelBPSCoolingDown(account, "gpt-6-astra"))
 				require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 				require.True(t, account.IsSchedulable())
 				require.True(t, account.IsExcelBPSEnabled(), "an in-band 403 must not disable the account")

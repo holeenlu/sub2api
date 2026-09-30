@@ -25,7 +25,9 @@ func TestUpstreamFailureClassificationBoundaries(t *testing.T) {
 		{"invalid range", object{"type": "error", "status": 600}, 502, "basispoints_upstream_error"},
 		{"invalid fraction", object{"type": "error", "status": 429.5}, 502, "basispoints_upstream_error"},
 		{"invalid string", object{"type": "error", "status": "429 PRIVATE"}, 502, "basispoints_upstream_error"},
-		{"type only", object{"type": "response.failed", "response": object{"error": object{"type": "rate_limit_error"}}}, 429, "basispoints_upstream_error"},
+		{"type only", object{"type": "response.failed", "response": object{"error": object{"type": "rate_limit_error"}}}, 429, "rate_limit_exceeded"},
+		{"code-less TPM", object{"type": "response.failed", "response": object{"error": object{"message": "Rate limit reached for PRIVATE on tokens per min (TPM). Please try again in 173ms."}}}, 429, "rate_limit_exceeded"},
+		{"parameter code wins over message", object{"type": "response.failed", "response": object{"error": object{"code": "context_length_exceeded", "message": "Rate limit reached for PRIVATE on tokens per min (TPM)."}}}, 400, "context_length_exceeded"},
 		{"no error", object{"type": "response.cancelled"}, 502, "basispoints_upstream_cancelled"},
 		{"not failure", object{"type": "response.completed", "error": object{"code": "rate_limit_exceeded"}}, 0, ""},
 	} {
@@ -44,6 +46,34 @@ func TestUpstreamFailureClassificationBoundaries(t *testing.T) {
 		})
 	}
 	require.Nil(t, ParseUpstreamFailure([]byte("invalid JSON")))
+}
+
+func TestUpstreamFailureRetainsOnlyBoundedRetryHints(t *testing.T) {
+	for _, tc := range []struct {
+		name, header, message string
+		wantMS                int64
+	}{
+		{"milliseconds header", "2400", "PRIVATE", 2400},
+		{"bounded header", "999999999999", "PRIVATE", 7_200_000},
+		{"message fallback", "PRIVATE_HEADER", "PRIVATE Please try again in 173ms.", 173},
+		{"invalid", "NaN", "PRIVATE", 0},
+		{"negative", "-1", "PRIVATE", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(object{"type": "response.failed", "response": object{"error": object{
+				"code": "rate_limit_exceeded", "message": tc.message,
+				"headers": object{"retry-after-ms": tc.header, "authorization": "PRIVATE_TOKEN"},
+			}}})
+			require.NoError(t, err)
+			failure := ParseUpstreamFailure(raw)
+			require.NotNil(t, failure)
+			require.Equal(t, tc.wantMS, failure.RetryAfterMS)
+			safe, err := json.Marshal(failure.Details())
+			require.NoError(t, err)
+			require.NotContains(t, string(safe), "PRIVATE")
+			require.NotContains(t, string(safe), "authorization")
+		})
+	}
 }
 
 func TestUpstreamFailureStopsReadersWithoutEOF(t *testing.T) {
