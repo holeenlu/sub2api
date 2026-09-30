@@ -1,6 +1,6 @@
 //go:build unit
 
-package handler
+package middleware
 
 import (
 	"context"

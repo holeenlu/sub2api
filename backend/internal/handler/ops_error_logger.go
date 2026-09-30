@@ -31,10 +31,6 @@ const (
 	opsAccountIDKey              = "ops_account_id"
 	opsRoutingCapacityLimitedKey = "ops_routing_capacity_limited"
 	opsDedicatedErrorRecordedKey = "ops_dedicated_error_recorded"
-	// handler 已把这次失败判定为运维无法处置的（目前只有客户端中途断开上传）
-	// 时置位。结构化日志仍带完整原因；这里只是不让它进 ops_error_logs 抬高
-	// 错误率或触发告警。
-	opsSkipErrorRecordKey = "ops_skip_error_record"
 
 	opsUpstreamModelKey = service.OpsUpstreamModelKey
 	opsRequestTypeKey   = "ops_request_type"
@@ -1662,20 +1658,8 @@ func applyOpsStreamErrorSnapshot(entry *service.OpsInsertErrorLogInput, streamEr
 	}
 }
 
-// markOpsSkipErrorRecord 让 OpsErrorLoggerMiddleware 不把本次请求写进
-// ops_error_logs。只用于 handler 已分类为运维无法处置的失败。
-func markOpsSkipErrorRecord(c *gin.Context) {
-	if c == nil {
-		return
-	}
-	c.Set(opsSkipErrorRecordKey, true)
-}
-
 func shouldSkipOpsErrorRecord(c *gin.Context) bool {
-	if c == nil {
-		return false
-	}
-	return c.GetBool(opsSkipErrorRecordKey)
+	return middleware2.ShouldSkipOpsErrorRecord(c)
 }
 
 func shouldSkipFinalOpsFailure(c *gin.Context) bool {
