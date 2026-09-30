@@ -236,3 +236,17 @@
 本轮 main 验证：全量 `go test -tags unit -timeout 10m ./...`、`go vet -tags unit ./...` 通过；别名与衰减的 service/repository 定向 race 通过。前端类型检查、371 文件/3027 用例、生产构建与繁体生成检查通过。另补齐两个旧页面测试对直接 store 导入的模拟路径，保留原有断言。未执行真实上游账号或生产数据库测试。
 
 推送前审查继续推进到 `fdd376481856182ee3142fd013c4593ea85640d7`；`8faa54e0b` 之后只有 `fdd376481` 将源 fork 的 VERSION 改为 `2.9.5`，未包含新的功能代码。本轮不导入 fork 版本号、不修改本项目发布版本；功能适配范围仍以 #230 的上述两项为准。
+
+### 2026-09-30：官方 96f4c115 与 fork 范围复核
+
+官方上游从 a0f41f95a07ee6ca0b1300d3c96ce4b62e24724b 普通合并至 96f4c115c9749078f90cbf210a01d39baf3f53b6。按用户确认，将余额在途预留、Claude 手动兑换重置、API Key 创建限制及模型目录更新与已有安全修复组合，不重写分支历史。
+
+- API Keys → 使用 → Codex（/keys）：目录默认仍为本地文件、立即生成配置、手动获取；新增可选远程目录，仅作用于现有 OpenAI/Composite 范围。远程配置使用鉴权的 /v1/models；手动下载仍使用 /backend-api/codex/models。模式切换不自动请求，API Key/分组变化会取消旧请求并恢复本地模式；超出远程大小上限时回退本地。保留品牌、Windows 路径和精简配置。
+- 新版 Sol 6.1 使用独立 Codex 元数据和指令。Codex 目录的默认/最大上下文为上游描述中的 272000/872000，与 API/OpenCode 原有上下文及计费口径分别保留；不把客户端默认窗口当作价格阈值。真实账号元数据仍优先；BPS 不宣称原生 Responses Lite 或加密 multi-agent 能力。Astra Ultrafast 遵循账号能力，而非仅凭订阅类型放行。
+- 账号管理 → Anthropic 账号 → 重置次数旁的重置按钮（/admin/accounts）新增二次确认。POST /api/v1/admin/accounts/:id/claude/reset-credits/redeem 由服务端选取 grant，使用幂等和租约；结果不确定时阻止重复兑换，不自动消耗次数。
+- 余额预留仅新增后端 billing.inflight_reservation.* 配置，默认启用；默认 Redis 故障或无法估价时沿用旧准入，非绝对透支保证。保留语音归属隔离、模型白名单、异步媒体持久计费与安全校验，预留不替代真实扣费。
+- API Key 数量/创建频次限制采用后端 api_key_create.max_active_per_user=200、max_per_user_per_hour=60；0 可关闭对应限制，删除 Key 不返还创建次数。配置示例位于 deploy/config.example.yaml，无新增前端管理开关。
+
+ranxi2001/production 审计推进到 a53a7ff163d9337a094e7537df3aac2b31f308b7。相对 fdd376481856182ee3142fd013c4593ea85640d7，唯一非 merge 提交 c28a9f3c6bff6f25f31f86cee64c4799c7aaf6e3 新增已退役的重新登录引擎、TokenGuardV2 设置与并行 worker，并非当前 BPS 请求的必要依赖，因此整项排除，包括其迁移。未恢复 Mihomo、凭证运营或 sub4api。
+
+官方增量无新迁移、依赖及发版 Workflow 变更；本地此前未推送的安全修复包含 258/259/260 三个迁移，本轮保留但不在生产执行。实际验证和逐远端 SHA 见 .release/upstream-sync/20260930-isolated-96f4c115/；本次仅提交/推送，不发版、不部署。

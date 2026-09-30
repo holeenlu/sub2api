@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,22 +21,35 @@ func TestGPT61SolConfiguredCatalogCapabilities(t *testing.T) {
 			models := decodeCodexManifestModels(t, body)
 			require.Len(t, models, 1)
 			model := models[0]
-			require.Equal(t, "GPT-6.1 Sol", model["display_name"])
-			require.Contains(t, model["description"], "GPT-6.1 Sol")
+			require.Equal(t, "GPT-6.1-Sol", model["display_name"])
+			require.Contains(t, model["description"], "workhorse model")
 			require.Equal(t, []any{"text", "image"}, model["input_modalities"])
-			require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromManifestModel(t, model))
-			require.Equal(t, "medium", model["default_reasoning_level"])
-			require.Equal(t, float64(1_050_000), model["context_window"])
-			require.Equal(t, float64(1_050_000), model["max_context_window"])
+			require.Equal(t, []string{"low", "medium", "high", "xhigh", "max", "ultra"}, effortsFromManifestModel(t, model))
+			require.Equal(t, "low", model["default_reasoning_level"])
+			require.Equal(t, float64(272_000), model["context_window"])
+			require.Equal(t, float64(872_000), model["max_context_window"])
 			require.Equal(t, true, model["supports_search_tool"])
 			require.Equal(t, "freeform", model["apply_patch_tool_type"])
-			require.Equal(t, false, model["use_responses_lite"])
-			require.Nil(t, model["multi_agent_version"], "do not invent an Ultra workflow")
+			require.Equal(t, accountType == AccountTypeOAuth, model["use_responses_lite"])
+			require.Equal(t, "v2", model["multi_agent_version"])
 			messages := model["model_messages"].(map[string]any)
-			require.Contains(t, messages["instructions_template"], "based on GPT-6")
-			require.NotContains(t, messages["instructions_template"], "based on GPT-5")
+			require.Equal(t, openai.CodexBaseInstructionsForModel("gpt-6.1-sol"), messages["instructions_template"])
 		})
 	}
+}
+
+func TestGPT61SolBPSKeepsProtocolRestrictions(t *testing.T) {
+	account := Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Extra:       map[string]any{"openai_excel_bps": true},
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-6.1-sol": "gpt-6.1-sol"}},
+	}
+	body, err := buildCodexModelsManifestForAccounts(PlatformOpenAI, []string{"gpt-6.1-sol"}, []Account{account}, nil, nil, true)
+	require.NoError(t, err)
+	model := decodeCodexManifestModels(t, body)[0]
+	require.Nil(t, model["multi_agent_version"])
+	require.Nil(t, model["multi_agent_reasoning_effort"])
+	require.Equal(t, false, model["use_responses_lite"])
+	require.Equal(t, true, model["supports_search_tool"])
 }
 
 func TestGPT61SolManifestKeepsProviderMetadata(t *testing.T) {
