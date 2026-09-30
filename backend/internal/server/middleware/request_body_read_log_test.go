@@ -1,6 +1,6 @@
 //go:build unit
 
-package handler
+package middleware
 
 import (
 	"context"
@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestLogRequestBodyReadFailureClassifiesWithoutPayload(t *testing.T) {
@@ -39,4 +41,10 @@ func TestRequestBodyReadErrorKind(t *testing.T) {
 	require.Equal(t, "truncated_body", requestBodyReadErrorKind(context.Background(), io.ErrUnexpectedEOF))
 	require.Equal(t, "max_bytes", requestBodyReadErrorKind(context.Background(), &http.MaxBytesError{Limit: 10}))
 	require.Equal(t, "other", requestContentEncodingCategory("private-payload-marker"))
+}
+
+func newObservedLogger(t *testing.T) (*zap.Logger, *observer.ObservedLogs) {
+	t.Helper()
+	core, logs := observer.New(zap.WarnLevel)
+	return zap.New(core), logs
 }

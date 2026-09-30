@@ -1,6 +1,6 @@
 //go:build unit
 
-package handler
+package middleware
 
 import (
 	"context"
@@ -79,9 +79,9 @@ func TestRespondRequestBodyReadFailure_UnexpectedEOFAfterDisconnectSkipsOpsRecor
 			gotStatus, gotType = status, errType
 		})
 
-	require.Equal(t, statusClientClosedRequest, gotStatus)
+	require.Equal(t, 499, gotStatus)
 	require.Equal(t, "invalid_request_error", gotType)
-	require.True(t, shouldSkipOpsErrorRecord(c))
+	require.True(t, ShouldSkipOpsErrorRecord(c))
 }
 
 // 端到端守卫：真实 HTTP/1.1 连接上声明 Content-Length 后只发一部分请求体再

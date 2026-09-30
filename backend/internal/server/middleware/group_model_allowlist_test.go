@@ -141,7 +141,7 @@ func TestGroupModelAllowlistRequestBodyTooLargePassesThrough413(t *testing.T) {
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("expected 413, got %d: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "Request body is too large") {
+	if !strings.Contains(w.Body.String(), "Request body too large, limit is 64B") {
 		t.Fatalf("expected too-large message, got %s", w.Body.String())
 	}
 	if len(*calls) != 0 {

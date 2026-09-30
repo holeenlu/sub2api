@@ -138,8 +138,9 @@ type FailoverState struct {
 	// SwitchCount 也不前进的活锁。清空后必须把它们放回排除集。
 	profitVetoedAccountIDs map[int64]struct{}
 	// profitVetoCount 本次请求累计的利润否决次数，用于 maxProfitVetoAttempts 上限。
-	profitVetoCount int
-	request         *gin.Context
+	profitVetoCount     int
+	request             *gin.Context
+	capacityRetryBudget openAICapacityRetryBudget
 }
 
 // NewFailoverState 创建 failover 状态。
@@ -221,7 +222,7 @@ func (s *FailoverState) HandleFailoverError(
 	}
 	s.LastFailoverErr = failoverErr
 	service.AnnotateLastOpsUpstreamFailure(s.request, failoverErr)
-	if failoverErr == nil || !failoverErr.ShouldRetryNextAccount() {
+	if failoverErr == nil || !failoverErr.ShouldRetryNextAccount() || !s.capacityRetryBudget.allow(s.request, failoverErr, s.SwitchCount) {
 		return FailoverExhausted
 	}
 
