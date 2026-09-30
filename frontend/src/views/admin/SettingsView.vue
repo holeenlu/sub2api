@@ -10170,8 +10170,8 @@ const form = reactive<SettingsForm>({
   affiliate_enabled: false,
   // Allow user view error requests
   allow_user_view_error_requests: false,
-  excel_bps_image_mode: 'relay' as 'relay' | 'native',
-  excel_bps_image_relay_enabled: false,
+  excel_bps_image_mode: 'native' as 'relay' | 'native',
+  excel_bps_image_relay_enabled: true,
   excel_bps_image_base_url: '',
   excel_bps_image_body_limit_mib: 64,
   excel_bps_image_budget_mib: 1024,
