@@ -160,3 +160,9 @@ func pendingCatalogPricing(ctx context.Context, repo UsageLogRepository, keyID i
 	}
 	return fmt.Errorf("pricing pending settlement for request %s", requestID)
 }
+
+func (s *PricingService) catalogPricingGeneration() *PricingService {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return &PricingService{cfg: s.cfg, catalogManaged: true, pricingData: s.pricingData, localHash: s.localHash, customFilesHash: s.customFilesHash, referencePrices: s.referencePrices, referenceSupplementHash: s.referenceSupplementHash}
+}

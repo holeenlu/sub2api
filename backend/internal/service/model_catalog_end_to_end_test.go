@@ -27,7 +27,7 @@ func (r *catalogAccountRepository) ListByGroup(context.Context, int64) ([]Accoun
 func TestModelCatalogNovelModelDiscoveryPublicationForwardAndSettlement(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	// The ID is created at runtime, and cannot be in any compiled model table.
-	id := fmt.Sprintf("opaque-vendor-%d", time.Now().UnixNano())
+	id := fmt.Sprintf("Opaque-Vendor-%d", time.Now().UnixNano())
 	discovery := fmt.Sprintf(`{"data":[{"id":%q,"model_kind":"chat","reasoning":true,"supported_reasoning_levels":["medium","high"],"default_reasoning_level":"high","input_modalities":["text","image"],"context_window":222222,"endpoints":["responses"]}]}`, id)
 	registry, _, a, _ := newCatalogTestService(catalogResponse(200, discovery))
 	a.Schedulable = true

@@ -23,7 +23,10 @@ func (s *ModelCatalogService) RecordMediaSuccess(ctx context.Context, a *Account
 	if model == "" {
 		return nil
 	}
-	operation := "images/generations"
+	operation := "responses/image_generation"
+	if strings.Contains(endpoint, "images/generations") {
+		operation = "images/generations"
+	}
 	if strings.Contains(endpoint, "edits") {
 		operation = "images/edits"
 	}

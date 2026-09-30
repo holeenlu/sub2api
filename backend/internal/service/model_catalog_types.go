@@ -30,6 +30,8 @@ type CatalogFieldEvidence struct {
 	ExpiresAt  time.Time       `json:"expires_at"`
 }
 type ModelCatalogEntry struct {
+	UpstreamNamespace   string                          `json:"upstream_namespace,omitempty"`
+	SourceAccountID     int64                           `json:"source_account_id,omitempty"`
 	Observations        []CatalogMediaObservation       `json:"observations,omitempty"`
 	Fields              map[string]CatalogFieldEvidence `json:"fields,omitempty"`
 	ID                  string                          `json:"id"`
@@ -48,6 +50,7 @@ type ModelCatalogEntry struct {
 }
 
 type ModelCatalogSnapshot struct {
+	Warnings      []string            `json:"warnings,omitempty"`
 	Policy        *ModelCatalogPolicy `json:"policy,omitempty"`
 	Revision      string              `json:"revision"`
 	ScopeRevision string              `json:"-"`
@@ -87,6 +90,7 @@ type ModelCatalogRepository interface {
 }
 
 type ModelCatalogSettings struct {
+	DeletionAlertPercent    int     `json:"deletion_alert_percent"`
 	PriorityAccountIDs      []int64 `json:"priority_account_ids,omitempty"`
 	PriorityIntervalSeconds int     `json:"priority_interval_seconds"`
 	PriceIntervalSeconds    int     `json:"price_interval_seconds"`
@@ -109,12 +113,17 @@ func modelCatalogScope(account, source *Account) string {
 		}
 		credentials[key] = value
 	}
+	catalogStableOAuthCredentials(source, credentials)
+	proxyID := account.ProxyID
+	if proxyID == nil {
+		proxyID = source.ProxyID
+	}
 	return modelCatalogHash(struct {
 		Credentials    map[string]any
 		SourceID       int64
 		Platform, Type string
 		ProxyID        *int64
-	}{credentials, source.ID, account.Platform, source.Type, account.ProxyID})
+	}{credentials, source.ID, account.Platform, source.Type, proxyID})
 }
 
 func modelCatalogHash(v any) string {

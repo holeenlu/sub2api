@@ -62,4 +62,7 @@ export default {
 ,
   "priorityAccounts":"優先アカウントID（カンマ区切り）",
   "priorityInterval":"優先ソースの更新間隔（秒）"
+,
+  "deletionAlert":"カタログ減少の通知しきい値（%）",
+  "visibilityDrop":"上流カタログから多数のモデルが非掲載になりました。ソース履歴を確認してください。撤回されたアクセスは引き続き拒否されます。"
 }

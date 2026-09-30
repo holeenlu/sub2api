@@ -73,7 +73,7 @@ func (s *ModelCatalogService) Settings(ctx context.Context) ModelCatalogSettings
 	return s.settingsUncached(ctx)
 }
 func (s *ModelCatalogService) settingsUncached(ctx context.Context) ModelCatalogSettings {
-	out := ModelCatalogSettings{Enabled: true, IntervalSeconds: 300, TimeoutSeconds: 45, Concurrency: 2, StaleSeconds: 86400, PriceIntervalSeconds: 600, PriorityIntervalSeconds: 60}
+	out := ModelCatalogSettings{Enabled: true, IntervalSeconds: 300, TimeoutSeconds: 45, Concurrency: 2, StaleSeconds: 86400, PriceIntervalSeconds: 600, PriorityIntervalSeconds: 60, DeletionAlertPercent: 50}
 	if s != nil && s.settings != nil && s.settings.settingRepo != nil {
 		if raw, err := s.settings.settingRepo.GetValue(ctx, ModelCatalogSettingsKey); err == nil {
 			_ = json.Unmarshal([]byte(raw), &out)
@@ -91,6 +91,9 @@ func (s *ModelCatalogService) settingsUncached(ctx context.Context) ModelCatalog
 	if out.StaleSeconds < 300 || out.StaleSeconds > 604800 {
 		out.StaleSeconds = 86400
 	}
+	if out.DeletionAlertPercent < 1 || out.DeletionAlertPercent > 100 {
+		out.DeletionAlertPercent = 50
+	}
 	if out.PriorityIntervalSeconds < 60 || out.PriorityIntervalSeconds > 86400 {
 		out.PriorityIntervalSeconds = 60
 	}
@@ -101,6 +104,12 @@ func (s *ModelCatalogService) settingsUncached(ctx context.Context) ModelCatalog
 }
 
 func (s *ModelCatalogService) SaveSettings(ctx context.Context, cfg ModelCatalogSettings) error {
+	if cfg.DeletionAlertPercent == 0 {
+		cfg.DeletionAlertPercent = 50
+	}
+	if cfg.DeletionAlertPercent < 1 || cfg.DeletionAlertPercent > 100 {
+		return fmt.Errorf("invalid deletion alert threshold")
+	}
 	if cfg.PriorityIntervalSeconds == 0 {
 		cfg.PriorityIntervalSeconds = 60
 	}
@@ -157,7 +166,17 @@ func (s *ModelCatalogService) SaveRegistry(ctx context.Context, entries []ModelC
 	for i := range entries {
 		e := &entries[i]
 		e.ID = strings.TrimSpace(e.ID)
-		key := e.Platform + "\x00" + e.ID
+		if e.SourceAccountID < 0 {
+			return fmt.Errorf("invalid source account ID")
+		}
+		if e.UpstreamNamespace != "" {
+			normalized := normalizeModelRegistryBaseURL(e.UpstreamNamespace)
+			if normalized == "" {
+				return fmt.Errorf("invalid upstream namespace")
+			}
+			e.UpstreamNamespace = normalized
+		}
+		key := e.Platform + "\x00" + e.ID + "\x00" + e.UpstreamNamespace + fmt.Sprint(e.SourceAccountID)
 		if e.ID == "" || len(e.ID) > 256 || strings.ContainsAny(e.ID, "*\r\n") || !isConcreteRequestPlatform(e.Platform) || seen[key] {
 			return fmt.Errorf("invalid or duplicate registry model")
 		}
@@ -172,6 +191,13 @@ func (s *ModelCatalogService) SaveRegistry(ctx context.Context, entries []ModelC
 			if _, err := time.Parse("2006-01-02", e.ShutdownDate); err != nil {
 				return fmt.Errorf("invalid shutdown date")
 			}
+		}
+		if e.Lifecycle != "" && e.Lifecycle != "active" && e.Lifecycle != "unknown" && e.Lifecycle != "deprecated" && e.Lifecycle != "retired" {
+			return fmt.Errorf("invalid lifecycle state")
+		}
+		if e.Lifecycle == "deprecated" {
+			deprecated := true
+			e.Metadata.Deprecated = &deprecated
 		}
 		e.Access = "candidate"
 		e.Source = "registry"
@@ -246,7 +272,7 @@ func (s *ModelCatalogService) Account(ctx context.Context, account *Account) (*M
 		}
 	}
 	for _, candidate := range s.Registry(ctx) {
-		if candidate.Platform != account.Platform {
+		if !catalogRegistryApplies(candidate, account, source) {
 			continue
 		}
 		if known[candidate.ID] {
@@ -262,13 +288,18 @@ func (s *ModelCatalogService) Account(ctx context.Context, account *Account) (*M
 					e.Metadata.ShutdownDate = candidate.ShutdownDate
 				}
 				e.Lifecycle = modelCatalogLifecycle(e.Metadata, time.Now())
+				if candidate.Lifecycle == "retired" {
+					e.Lifecycle = "retired"
+				}
 				e.Missing = modelCatalogMissing(e.Kind, e.Metadata)
 			}
 			continue
 		}
 		candidate.Access = "candidate"
 		candidate.Source = "registry"
-		candidate.Lifecycle = modelCatalogLifecycle(candidate.Metadata, time.Now())
+		if candidate.Lifecycle != "retired" {
+			candidate.Lifecycle = modelCatalogLifecycle(candidate.Metadata, time.Now())
+		}
 		snapshot.Models = append(snapshot.Models, candidate)
 		known[candidate.ID] = true
 	}
@@ -443,6 +474,11 @@ func (s *ModelCatalogService) Refresh(ctx context.Context, id int64, force bool)
 		var catalog *UpstreamModelCatalog
 		if err == nil {
 			catalog = fetched.(*UpstreamModelCatalog)
+			if catalog.DiscoverySource == "configured" {
+				copy := *catalog
+				copy.Models = configuredUpstreamModelsForCapabilitySync(a)
+				catalog = &copy
+			}
 		}
 		if err != nil {
 			code := catalogSyncErrorCode(err)
@@ -503,8 +539,9 @@ func (s *ModelCatalogService) snapshot(ctx context.Context, a *Account, catalog 
 	ttl := time.Duration(s.Settings(ctx).StaleSeconds) * time.Second
 	out := &ModelCatalogSnapshot{AccountID: a.ID, Platform: a.Platform, ScopeRevision: scope, Status: "ready", UpdatedAt: now, CheckedAt: now, Models: []ModelCatalogEntry{}}
 	registry := map[string]ModelCatalogEntry{}
+	source, _ := resolveCredentialAccount(ctx, s.accounts, a)
 	for _, entry := range s.Registry(ctx) {
-		if entry.Platform == a.Platform {
+		if catalogRegistryApplies(entry, a, source) {
 			registry[entry.ID] = entry
 		}
 	}
@@ -515,6 +552,9 @@ func (s *ModelCatalogService) snapshot(ctx context.Context, a *Account, catalog 
 		}
 		kind := modelCatalogEntryKind(id, m)
 		e := ModelCatalogEntry{ID: id, DisplayName: m.DisplayName, Platform: a.Platform, Kind: kind, Lifecycle: modelCatalogLifecycle(m, now), ShutdownDate: m.ShutdownDate, Access: "listed", Source: "upstream", Metadata: m, Missing: modelCatalogMissing(kind, m), Endpoints: m.Endpoints, CodexModel: catalog.Descriptors[id]}
+		if fallback, ok := registry[id]; ok && fallback.Lifecycle == "retired" {
+			e.Lifecycle = "retired"
+		}
 		if m.RecommendedPriority != nil {
 			e.RecommendedPriority = *m.RecommendedPriority
 		}
@@ -530,11 +570,21 @@ func (s *ModelCatalogService) snapshot(ctx context.Context, a *Account, catalog 
 		for _, entry := range out.Models {
 			seen[entry.ID] = true
 		}
+		previousVisible, removed := 0, 0
 		for _, entry := range previous.Models {
+			if entry.Access == "listed" && entry.Lifecycle != "retired" {
+				previousVisible++
+				if !seen[entry.ID] {
+					removed++
+				}
+			}
 			if !seen[entry.ID] {
 				entry.Access = "unlisted"
 				out.Models = append(out.Models, entry)
 			}
+		}
+		if previousVisible > 0 && removed > 0 && removed*100 >= previousVisible*s.Settings(ctx).DeletionAlertPercent {
+			out.Warnings = append(out.Warnings, "large_visibility_drop")
 		}
 	}
 	if s.prices != nil {

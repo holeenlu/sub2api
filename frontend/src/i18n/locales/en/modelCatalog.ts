@@ -62,4 +62,7 @@ export default {
 ,
   "priorityAccounts":"Priority account IDs (comma-separated)",
   "priorityInterval":"Priority interval (seconds)"
+,
+  "deletionAlert":"Visibility drop alert (%)",
+  "visibilityDrop":"A large part of the upstream catalog became unlisted. Review the source history; revoked access remains blocked."
 }

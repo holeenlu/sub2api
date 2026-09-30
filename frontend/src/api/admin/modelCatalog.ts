@@ -18,6 +18,7 @@ export interface CatalogModel {
 export interface CatalogPolicy { mode: "legacy" | "fixed" | "follow"; models: string[]; excluded: string[] }
 export interface CatalogRelease { revision:string; created_at:string; operation:string }
 export interface ModelCatalog {
+  warnings?: string[]
   policy?: CatalogPolicy
   revision: string
   account_id?: number
@@ -63,6 +64,7 @@ export async function refreshModelCatalog(accountID: number, signal?: AbortSigna
 }
 
 export interface CatalogSyncSettings {
+  deletion_alert_percent?: number
   priority_account_ids?: number[]
   priority_interval_seconds?: number
   price_interval_seconds?: number

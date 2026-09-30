@@ -73,8 +73,15 @@ type PricingInput struct {
 // 1. 获取基础定价（LiteLLM → Fallback）
 // 2. 如果指定了 GroupID，查找渠道定价并覆盖
 func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) *ResolvedPricing {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if CatalogEnforced(input.Group) || ctx.Value(catalogPreviewKey{}) == true {
 		ctx = context.WithValue(ctx, catalogPriceOrderKey{}, true)
+	}
+	if RequestPricingFromContext(ctx) == nil && (CatalogEnforced(input.Group) || ctx.Value(catalogPreviewKey{}) == true) && r.billingService != nil && r.billingService.pricingService != nil {
+		prices := r.billingService.pricingService.catalogPricingGeneration()
+		ctx = context.WithValue(ctx, requestPricingContextKey{}, &RequestPricingSnapshot{prices: prices, Revision: prices.PriceRevision()})
 	}
 	if RequestPricingFromContext(ctx) != nil {
 		return r.resolvePinned(ctx, input)

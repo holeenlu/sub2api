@@ -259,6 +259,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		serviceTier = strings.TrimSpace(*result.ServiceTier)
 	}
 	longContextBillingGate := openAILongContextBillingGate(billingAccount)
+	if input.DeferredMediaCost == nil && !catalogUsagePriced(ctx, s.resolver, s.billingService, apiKey.Group, firstUsageBillingModel(billingModels), tokens) {
+		return pendingCatalogPricing(ctx, s.usageLogRepo, apiKey.ID, result.RequestID, firstUsageBillingModel(billingModels), result.Usage)
+	}
 	if input.DeferredMediaCost != nil {
 		snapshot := *input.DeferredMediaCost
 		cost = &snapshot
@@ -308,7 +311,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 				result.AudioUsage != nil || result.SearchCount > 0,
 		); responseModel != "" && !strings.EqualFold(responseModel, baselineBillingModel) {
 			identified, responseChannelPriced := s.hasIdentifiedOpenAIResponsePricing(ctx, responseModel, apiKey)
-			if !identified && CatalogEnforced(apiKey.Group) {
+			if CatalogEnforced(apiKey.Group) && (!identified || !catalogUsagePriced(ctx, s.resolver, s.billingService, apiKey.Group, responseModel, tokens)) {
 				return pendingCatalogPricing(ctx, s.usageLogRepo, apiKey.ID, result.RequestID, responseModel, result.Usage)
 			}
 			if identified {

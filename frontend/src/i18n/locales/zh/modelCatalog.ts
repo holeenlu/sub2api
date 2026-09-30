@@ -62,4 +62,7 @@ export default {
 ,
   "priorityAccounts":"重点账号 ID（逗号分隔）",
   "priorityInterval":"重点来源同步间隔（秒）"
+,
+  "deletionAlert":"目录减少提醒阈值（%）",
+  "visibilityDrop":"上游目录中较多模型已不再列出，请检查来源历史。已撤销的访问仍会被拒绝。"
 }

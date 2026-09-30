@@ -62,4 +62,7 @@ export default {
 ,
   "priorityAccounts":"重點帳號 ID（逗號分隔）",
   "priorityInterval":"重點來源同步間隔（秒）"
+,
+  "deletionAlert":"目錄減少提醒閾值（%）",
+  "visibilityDrop":"上游目錄中較多模型已不再列出，請檢查來源歷史。已撤銷的存取仍會被拒絕。"
 }

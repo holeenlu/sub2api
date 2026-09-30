@@ -30,6 +30,11 @@ func (s *ModelCatalogService) quoteStatus(ctx context.Context, model *GroupCatal
 					(p.Mode == "embedding" && p.ProvidedFields["input_cost_per_token"])
 			}
 		}
+		if s.prices != nil {
+			if p := s.prices.GetExactModelPricing(id); p != nil && p.ProvidedFields != nil && p.SupportsPromptCaching && !p.ProvidedFields["cache_read_input_token_cost"] {
+				ready = ready && r != nil && r.channelPricing != nil && r.channelPricing.CacheReadPrice != nil
+			}
+		}
 		if !ready && s.pricingResolver.billingService != nil {
 			ready = s.pricingResolver.billingService.fallbackPrices[id] != nil
 		}

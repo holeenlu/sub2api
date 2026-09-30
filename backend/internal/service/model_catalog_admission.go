@@ -8,7 +8,10 @@ import (
 
 type catalogPreviewKey struct{}
 type catalogAdmissionKey struct{}
-type CatalogAdmission struct{ Models []GroupCatalogModel }
+type CatalogAdmission struct {
+	Models   []GroupCatalogModel
+	Required []string
+}
 
 // Existing groups keep their compatibility semantics until an administrator
 // explicitly saves one of the new access modes. This is the rollout boundary.
@@ -28,7 +31,7 @@ func (s *GroupModelCatalogService) Admit(ctx context.Context, g *Group, ids []st
 	if err != nil {
 		return ctx, err
 	}
-	admission := &CatalogAdmission{}
+	admission := &CatalogAdmission{Required: append([]string(nil), ids...)}
 	for _, id := range ids {
 		found := false
 		for _, m := range view.Models {
@@ -55,12 +58,22 @@ func CatalogAccountAllowed(ctx context.Context, a *Account) bool {
 	if a == nil {
 		return false
 	}
-	for _, m := range admission.Models {
-		if _, ok := m.AccountModels[a.ID]; ok {
-			return true
+	for _, id := range admission.Required {
+		found := false
+		for _, m := range admission.Models {
+			if m.Name != id {
+				continue
+			}
+			if _, ok := m.AccountModels[a.ID]; ok {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func normalizeCatalogModalities(in []string) []string {

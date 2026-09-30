@@ -59,7 +59,7 @@ func accountCatalogPolicyAllows(a *Account, model string) (bool, bool) {
 		return catalogPolicyMatch(p.Models, model) || catalogPolicyMatch(p.Models, actual), true
 	}
 	if p.Mode != "follow" {
-		return false, false
+		return false, true
 	}
 	actual := a.GetMappedModel(model)
 	if catalogPolicyMatch(p.Excluded, actual) {
@@ -136,4 +136,38 @@ func (s *ModelCatalogService) ModelIsPublished(ctx context.Context, a *Account, 
 		}
 	}
 	return false, true
+}
+
+// Follow/fixed policies must recheck the credential parent, expiration and
+// explicit revocations even when used by a legacy group or a sticky session.
+func (s *ModelCatalogService) accountRouteAllowed(ctx context.Context, a *Account, requested string) bool {
+	mode := accountModelCatalogPolicy(a).Mode
+	if mode != "follow" && mode != "fixed" {
+		return true
+	}
+	if !a.IsModelSupported(requested) {
+		return false
+	}
+	allowed, known := s.ModelIsPublished(ctx, a, a.GetMappedModel(requested))
+	return known && allowed
+}
+
+func catalogRegistryApplies(e ModelCatalogEntry, a, source *Account) bool {
+	if a == nil || e.Platform != a.Platform {
+		return false
+	}
+	if e.SourceAccountID != 0 && (source == nil || source.ID != e.SourceAccountID) {
+		return false
+	}
+	if e.UpstreamNamespace == "" {
+		return true
+	}
+	if source == nil {
+		return false
+	}
+	namespace := upstreamModelRegistryBaseURL(source)
+	if source.IsOpenAIOAuth() {
+		namespace = "https://chatgpt.com/backend-api/codex"
+	}
+	return normalizeModelRegistryBaseURL(namespace) == normalizeModelRegistryBaseURL(e.UpstreamNamespace)
 }

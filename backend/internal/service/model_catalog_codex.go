@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -211,18 +212,43 @@ func (s *ModelCatalogService) SetupProfile(ctx context.Context, key *APIKey) (*C
 			Slug             string `json:"slug"`
 			Visibility       string `json:"visibility"`
 			DefaultReasoning string `json:"default_reasoning_level"`
+			Priority         int    `json:"priority"`
 		} `json:"models"`
 	}
 	if err = json.Unmarshal(body, &envelope); err != nil {
 		return out, err
 	}
-	for _, m := range envelope.Models {
+	preferred := ""
+	preferenceKey := fmt.Sprintf("model_catalog_default_group_%d", key.Group.ID)
+	if s.settings != nil && s.settings.settingRepo != nil {
+		preferred, _ = s.settings.settingRepo.GetValue(ctx, preferenceKey)
+	}
+	selected := -1
+	for i, m := range envelope.Models {
+		if m.Visibility == "hide" || strings.HasPrefix(m.Slug, "codex-auto-") {
+			continue
+		}
+		if selected < 0 {
+			selected = i
+		}
+		if m.Slug == preferred && m.Priority == envelope.Models[selected].Priority {
+			selected = i
+			break
+		}
+	}
+	for i, m := range envelope.Models {
+		if i != selected {
+			continue
+		}
 		if m.Visibility == "hide" || strings.HasPrefix(m.Slug, "codex-auto-") {
 			continue
 		}
 		out.Model = m.Slug
 		out.ReviewModel = m.Slug
 		out.Status = "ready"
+		if out.Model != preferred && s.settings != nil && s.settings.settingRepo != nil {
+			_ = s.settings.settingRepo.Set(ctx, preferenceKey, out.Model)
+		}
 		if m.DefaultReasoning != "none" {
 			out.ReasoningEffort = m.DefaultReasoning
 		}

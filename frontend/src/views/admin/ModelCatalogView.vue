@@ -9,6 +9,7 @@
         <label class="flex items-center gap-2"><input v-model="settings.enabled" type="checkbox" />{{ t('modelCatalog.enabled') }}</label>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label>{{ t('modelCatalog.interval') }}<input v-model.number="settings.interval_seconds" class="input mt-1" type="number" min="60" max="86400" required /></label>
+          <label>{{ t('modelCatalog.deletionAlert') }}<input v-model.number="settings.deletion_alert_percent" class="input mt-1" type="number" min="1" max="100" required /></label>
           <label>{{ t('modelCatalog.priorityAccounts') }}<input :value="settings.priority_account_ids?.join(', ')" class="input mt-1" @change="settings.priority_account_ids=($event.target as HTMLInputElement).value.split(',').map(v=>Number(v.trim())).filter(v=>v>0)" /></label>
           <label>{{ t('modelCatalog.priorityInterval') }}<input v-model.number="settings.priority_interval_seconds" class="input mt-1" type="number" min="60" max="86400" required /></label>
           <label>{{ t('modelCatalog.priceInterval') }}<input v-model.number="settings.price_interval_seconds" class="input mt-1" type="number" min="60" max="86400" required /></label>
@@ -26,6 +27,7 @@
           <button v-if="accountID" class="btn btn-primary" :disabled="busy" @click="refreshCatalog">{{ t('modelCatalog.refresh') }}</button>
         </div>
         <p v-if="catalog" class="text-xs text-gray-500">{{ t('modelCatalog.updated', { time: catalog.checked_at ? new Date(catalog.checked_at).toLocaleString() : '—' }) }} · {{ catalog.status }} · {{ catalog.revision?.slice(0, 12) }}</p>
+        <p v-if="catalog?.warnings?.length" role="status" class="text-sm text-amber-600">{{ t('modelCatalog.visibilityDrop') }}</p>
         <div class="overflow-auto">
           <table class="w-full text-left text-sm">
             <thead><tr><th class="p-2">{{ t('modelCatalog.model') }}</th><th class="p-2">{{ t('modelCatalog.kind') }}</th><th class="p-2">{{ t('modelCatalog.state') }}</th><th class="p-2">{{ t('modelCatalog.source') }}</th></tr></thead>
@@ -38,7 +40,7 @@
         <p class="text-sm text-gray-500">{{ t('modelCatalog.policyHint') }}</p>
         <select v-model="policy.mode" class="input"><option value="legacy">{{ t('modelCatalog.legacy') }}</option><option value="follow">{{ t('modelCatalog.follow') }}</option><option value="fixed">{{ t('modelCatalog.fixed') }}</option></select>
         <label v-if="policy.mode === 'fixed'" class="block">{{ t('modelCatalog.allowed') }}<textarea v-model="allowedText" class="input h-32 font-mono text-xs" /></label>
-        <label class="block">{{ t('modelCatalog.exclude') }}<textarea v-model="excludedText" class="input h-24 font-mono text-xs" /></label>
+        <label v-if="policy.mode !== 'legacy'" class="block">{{ t('modelCatalog.exclude') }}<textarea v-model="excludedText" class="input h-24 font-mono text-xs" /></label>
         <button class="btn btn-primary" :disabled="busy">{{ t('modelCatalog.save') }}</button>
         <h3 class="font-medium">{{ t('modelCatalog.history') }}</h3>
         <div v-for="release in history" :key="release.revision + release.created_at" class="flex items-center gap-3 text-xs">

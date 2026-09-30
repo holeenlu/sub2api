@@ -112,7 +112,7 @@
       <button
         type="button"
         @click="fillRelated"
-        :disabled="catalogLoading || !availableOptions.length"
+        :disabled="catalogLoading || !availableOptions.some(model => !model.pending)"
         class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
       >
         {{ t('modelCatalog.selectAvailable') }}
@@ -332,7 +332,7 @@ const retiredModels = computed(() => new Set(catalogModels.value.filter(m => m.l
 const selectedRetiredModels = computed(() => props.modelValue.filter(id => retiredModels.value.has(id)))
 const availableOptions = computed(() => catalogModels.value
   .filter(m => m.lifecycle !== 'retired')
-  .map(m => ({ value: m.id, label: m.display_name || m.id, pending: m.access !== 'listed' && m.access !== 'observed', lifecycle: m.lifecycle })))
+  .map(m => ({ value: m.id, label: m.display_name || m.id, pending: catalog.value?.status === 'unavailable' || (m.access !== 'listed' && m.access !== 'observed'), lifecycle: m.lifecycle })))
 
 async function loadCatalog(refresh = false) {
   const serial = ++catalogRequest

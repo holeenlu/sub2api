@@ -1882,6 +1882,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.C
 // openAISelectionFilterStats so that "no available accounts" errors state why
 // each candidate was dropped instead of failing silently (#4599).
 func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (bool, string) {
+	if account != nil && s != nil && s.service != nil && s.service.modelCatalog != nil && !s.service.modelCatalog.accountRouteAllowed(ctx, account, req.RequestedModel) {
+		return false, "catalog_scope_unavailable"
+	}
 
 	if !CatalogAccountAllowed(ctx, account) {
 		return false, "catalog_route_not_published"

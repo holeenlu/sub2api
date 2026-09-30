@@ -1240,6 +1240,9 @@ func (s *PricingService) validatePricingURL(raw string) (string, error) {
 
 // GetModelPricing 获取模型价格（带模糊匹配）
 func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing {
+	if s.CatalogManaged() {
+		return s.GetExactModelPricing(modelName)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

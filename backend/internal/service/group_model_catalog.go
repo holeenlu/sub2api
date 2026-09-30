@@ -168,6 +168,19 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 	for _, id := range group.CodexModelsManifestConfig.AccountIDs {
 		pinnedIDs[id] = true
 	}
+	if pinned && s.registry != nil && group.CodexModelsManifestConfig.FallbackToScheduler {
+		usable := false
+		for _, a := range active {
+			if pinnedIDs[a.ID] {
+				usable = true
+				break
+			}
+		}
+		if !usable {
+			pinned = false
+			issue("", "discovery_fallback_used")
+		}
+	}
 	snapshotModels := map[string]bool{}
 	foundSnapshots := 0
 	var oldestSnapshot time.Time

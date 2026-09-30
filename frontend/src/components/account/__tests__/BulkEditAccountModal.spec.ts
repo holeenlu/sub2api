@@ -1,3 +1,4 @@
+import { getModelCatalog } from '@/api/admin/modelCatalog'
 import { getExcelBPSDefaults } from '@/api/admin/excelBPSDefaults'
 import { defaultExcelBPSDefaults } from '@/utils/excelBPSDefaults'
 vi.mock('@/api/admin/excelBPSDefaults', () => ({ getExcelBPSDefaults: vi.fn() }))
@@ -34,6 +35,7 @@ vi.mock('@/stores/auth', () => ({
   })
 }))
 
+vi.mock('@/api/admin/modelCatalog',()=>({getModelCatalog:vi.fn(),refreshModelCatalog:vi.fn()}))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
@@ -475,7 +477,9 @@ describe('BulkEditAccountModal', () => {
   })
 
   it('antigravity 白名单包含 Gemini 图片模型且过滤掉普通 GPT 模型', async () => {
+    vi.mocked(getModelCatalog).mockResolvedValue({status:'ready',revision:'live',platform:'antigravity',updated_at:'',checked_at:'',models:['gemini-3.1-flash-image','gemini-2.5-flash-image'].map(id=>({id,display_name:id,platform:'antigravity',kind:'image',lifecycle:'active',access:'listed',source:'upstream',metadata:{id},missing:[],endpoints:[]}))})
     const wrapper = mountModal()
+    await flushPromises()
     const selector = wrapper.findComponent(ModelWhitelistSelector)
     expect(selector.exists()).toBe(true)
 
@@ -486,11 +490,13 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.text()).not.toContain('gpt-5.3-codex')
   })
 
-  it('OpenAI 批量同步补入实时白名单，保存前不更新账号', async () => {
+  it('OpenAI 批量同步后显式应用实时白名单，保存前不更新账号', async () => {
     vi.mocked(accountsAPI.syncUpstreamModelsBulk).mockResolvedValue({ models: ['gpt-upstream-new'], failures: [], account_count: 2, aggregation: 'intersection', source: 'upstream_models' })
     const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
     await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
     await flushPromises()
+    expect(wrapper.findComponent(ModelWhitelistSelector).props('modelValue')).toEqual([])
+    await wrapper.findAll('button').find(button=>button.text()==='modelCatalog.selectAvailable')!.trigger('click')
     expect(wrapper.findComponent(ModelWhitelistSelector).props('modelValue')).toEqual(['gpt-upstream-new'])
     expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
     await wrapper.setProps({ show: false })
