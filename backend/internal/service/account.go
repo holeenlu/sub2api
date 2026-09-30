@@ -907,7 +907,13 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 		return true
 	}
 	normalized := normalizeRequestedModelForLookup(a.Platform, requestedModel)
-	return normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized)
+	if normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized) {
+		return true
+	}
+	if a.IsOpenAIModelMappingAliases() {
+		return isOpenAIOAuthServableModel(requestedModel)
+	}
+	return false
 }
 
 // GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）

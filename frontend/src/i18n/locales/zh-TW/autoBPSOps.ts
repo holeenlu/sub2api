@@ -38,7 +38,7 @@ export default {
   "oauthMappings": {
   "title": "新建 OpenAI OAuth 模型對應",
   "subtitle": "適配 ranxi2001 #219。規則只在新建 OpenAI OAuth 帳號時套用。",
-  "scope": "已有自訂對應優先；同名直通對應可能會被範本替換。API Key、重新驗證和已有帳號不受影響。開關預設關閉。",
+  "scope": "已有自訂對應優先；同名直通對應可能會被範本替換。原本沒有對應的新 OAuth 帳號將範本作為別名，保留其它原生模型；已有對應範圍保留。API Key、重新驗證和已有帳號不受影響。開關預設關閉。",
   "enabled": "對新建 OpenAI OAuth 帳號套用這些對應",
   "from": "請求模型（可在末尾使用 *）",
   "to": "上游模型",

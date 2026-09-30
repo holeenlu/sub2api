@@ -130,6 +130,18 @@ vi.mock("@/stores", () => ({
   }),
 }));
 
+// Nested model selectors use the direct store import. Share the same fixture
+// callbacks so mounting settings does not instantiate an unconfigured Pinia.
+vi.mock("@/stores/app", () => ({
+  useAppStore: () => ({
+    showError,
+    showSuccess,
+    showWarning: vi.fn(),
+    showInfo: vi.fn(),
+    fetchPublicSettings,
+  }),
+}));
+
 vi.mock("@/stores/adminSettings", () => ({
   useAdminSettingsStore: () => ({
     fetch: adminSettingsFetch,

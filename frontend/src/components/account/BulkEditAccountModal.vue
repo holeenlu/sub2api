@@ -346,6 +346,31 @@
         </p>
       </div>
 
+      <div v-if="allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label for="bulk-model-scope-enabled" class="flex items-center gap-2 text-sm">
+          <input
+            id="bulk-model-scope-enabled"
+            v-model="enableOpenAIModelAliases"
+            type="checkbox"
+            data-testid="enable-model-aliases"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+          {{ t('admin.accounts.openai.changeModelMappingScope') }}
+        </label>
+        <label for="bulk-model-aliases" class="mt-3 flex items-center gap-2 text-sm">
+          <input
+            id="bulk-model-aliases"
+            v-model="openaiModelAliases"
+            :disabled="!enableOpenAIModelAliases"
+            type="checkbox"
+            data-testid="bulk-model-aliases"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+          {{ t('admin.accounts.openai.modelMappingAliases') }}
+        </label>
+        <p class="input-hint">{{ t('admin.accounts.openai.bulkModelMappingAliasesHint') }}</p>
+      </div>
+
       <!-- Model restriction -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1731,6 +1756,8 @@ interface ModelMapping {
 // State - field enable flags
 const enableBaseUrl = ref(false)
 const enableModelRestriction = ref(false)
+const enableOpenAIModelAliases = ref(false)
+const openaiModelAliases = ref(true)
 const enableCustomErrorCodes = ref(false)
 const enableInterceptWarmup = ref(false)
 const enableHeaderOverride = ref(false)
@@ -2182,6 +2209,11 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
+  if (enableOpenAIModelAliases.value && allOpenAIOAuthOnly.value) {
+    credentials.model_mapping_mode = openaiModelAliases.value ? 'aliases' : 'whitelist'
+    credentialsChanged = true
+  }
+
   if (enableCustomErrorCodes.value) {
     credentials.custom_error_codes_enabled = true
     credentials.custom_error_codes = [...selectedErrorCodes.value]
@@ -2352,6 +2384,7 @@ const handleSubmit = async () => {
     (enableOpenAIEndpointCapabilities.value && allOpenAIAPIKey.value) ||
     (enableOpenAIResponsesMode.value && allOpenAIAPIKey.value) ||
     enableModelRestriction.value ||
+    (enableOpenAIModelAliases.value && allOpenAIOAuthOnly.value) ||
     enableCustomErrorCodes.value ||
     enableInterceptWarmup.value ||
     enableHeaderOverride.value ||
@@ -2518,6 +2551,8 @@ watch(
       // Reset all enable flags
       enableBaseUrl.value = false
       enableModelRestriction.value = false
+      enableOpenAIModelAliases.value = false
+      openaiModelAliases.value = true
       enableCustomErrorCodes.value = false
       enableInterceptWarmup.value = false
       enableHeaderOverride.value = false

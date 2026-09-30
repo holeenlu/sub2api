@@ -365,6 +365,65 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('round-trips OAuth aliases and restores an explicit whitelist without replacing mappings', async () => {
+    const account = {
+      ...buildOpenAIOAuthParentAccount(),
+      credentials: { model_mapping_mode: 'aliases', model_mapping: { 'gpt-5.4': 'gpt-5.5' } }
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="openai-model-aliases"]').element.checked).toBe(true)
+    await wrapper.get('[data-testid="openai-model-aliases"]').setValue(false)
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({
+      credentials: expect.objectContaining({
+        model_mapping_mode: 'whitelist',
+        model_mapping: { 'gpt-5.4': 'gpt-5.5' }
+      })
+    }))
+    wrapper.unmount()
+  })
+
+  it('keeps legacy OAuth mappings scoped until an operator explicitly enables aliases', async () => {
+    const account = {
+      ...buildOpenAIOAuthParentAccount(),
+      credentials: { model_mapping: { 'gpt-5.4': 'gpt-5.5' } }
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="openai-model-aliases"]').element.checked).toBe(false)
+    await wrapper.get('[data-testid="openai-model-aliases"]').setValue(true)
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.model_mapping_mode).toBe('aliases')
+    wrapper.unmount()
+  })
+
+  it('does not offer OAuth aliases to API keys, setup tokens or credential shadows', () => {
+    for (const account of [buildAccount(), buildOpenAISetupTokenAccount(), buildOpenAISparkShadowAccount()]) {
+      const wrapper = mountModal(account)
+      expect(wrapper.find('[data-testid="openai-model-aliases"]').exists()).toBe(false)
+      wrapper.unmount()
+    }
+  })
+
+  it('does not persist an unchanged default scope on legacy OAuth edits', async () => {
+    const account = {
+      ...buildOpenAIOAuthParentAccount(),
+      credentials: { model_mapping: { 'gpt-5.4': 'gpt-5.5' } }
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty('model_mapping_mode')
+    wrapper.unmount()
+  })
+
   it('defaults WS SSE acceleration off and persists the OAuth opt-in across edits', async () => {
     const account = buildOpenAIOAuthParentAccount()
     account.extra = { unrelated: 'preserve' }

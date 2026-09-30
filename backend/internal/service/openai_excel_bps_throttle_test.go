@@ -56,8 +56,8 @@ func TestExcelBPSSuccessAndUnrelatedErrorsDoNotCoolDown(t *testing.T) {
 		wantStatus int
 	}{
 		{`{"type":"response.completed","response":{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Rate limit reached for model on tokens per min. Please try again in 173ms."}]}]}}`, http.StatusOK},
-		{`{"type":"response.failed","response":{"status":"failed","error":{"code":"context_length_exceeded","message":"Rate limit reached for model on tokens per min. Please try again in 173ms."}}}`, http.StatusBadGateway},
-		{`{"type":"error","error":{"code":"server_error","message":"an unrelated failure"}}`, http.StatusBadGateway},
+		{`{"type":"response.failed","response":{"status":"failed","error":{"code":"context_length_exceeded","message":"Rate limit reached for model on tokens per min. Please try again in 173ms."}}}`, http.StatusBadRequest},
+		{`{"type":"error","error":{"code":"server_error","message":"an unrelated failure"}}`, http.StatusInternalServerError},
 	} {
 		upstream := &httpUpstreamRecorder{resp: bpsCompletionResponse(http.StatusOK, "data: "+tc.event+"\n\n")}
 		svc := openAIClientToolsTestService(upstream)
@@ -273,6 +273,30 @@ func TestExcelBPSRateLimitAfterOutputIsNotReplayed(t *testing.T) {
 				require.Equal(t, !stream, marked.NonStream)
 			})
 		}
+	}
+}
+
+func TestExcelBPSTPMWithMeteredOutputIsNotRetried(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			wire := `{"type":"response.failed","response":{"id":"resp_metered","status":"failed","output":[],"usage":{"input_tokens":12,"output_tokens":3},"error":{"message":"Rate limit reached for PRIVATE on tokens per min (TPM). Please try again in 173ms.","headers":{"retry-after-ms":"2400","authorization":"PRIVATE_TOKEN"}}}}`
+			upstream := &httpUpstreamRecorder{resp: bpsCompletionResponse(http.StatusOK, "data: "+wire+"\n\n")}
+			svc := openAIClientToolsTestService(upstream)
+			account := excelAccount()
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			result, err := svc.Forward(context.Background(), c, account, []byte(fmt.Sprintf(`{"model":"gpt-6-astra","input":"test","stream":%t}`, stream)))
+			require.Error(t, err)
+			require.NotNil(t, result)
+			require.Len(t, upstream.requests, 1, "metered generation is never resent")
+			require.EqualValues(t, 3, result.Usage.OutputTokens)
+			require.Equal(t, http.StatusTooManyRequests, rec.Code)
+			require.Equal(t, "3", rec.Header().Get("Retry-After"), "redaction must preserve the validated retry delay")
+			require.NotContains(t, rec.Body.String(), "PRIVATE")
+			require.Equal(t, http.StatusOK, c.GetInt(OpsUpstreamStatusCodeKey))
+			require.False(t, svc.isExcelBPSCoolingDown(account, "gpt-6-astra"))
+		})
 	}
 }
 

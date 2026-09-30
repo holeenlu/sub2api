@@ -325,7 +325,19 @@ func TestGatewayModels_UnmappedOpenAIAccountsSupplementMappedModels(t *testing.T
 				require.ElementsMatch(t, tt.want, modelIDsForTest(got.Data))
 				for _, model := range got.Data {
 					require.Equal(t, "model", model.Object, model.ID)
-					require.Positive(t, model.Created, model.ID)
+					knownDefault := false
+					for _, defaultModel := range openai.DefaultModels {
+						if defaultModel.ID == model.ID {
+							// Preserve catalog metadata, including zero when the
+							// upstream creation timestamp is not published.
+							require.Equal(t, defaultModel.Created, model.Created, model.ID)
+							knownDefault = true
+							break
+						}
+					}
+					if !knownDefault {
+						require.Positive(t, model.Created, model.ID)
+					}
 					require.Equal(t, "openai", model.OwnedBy, model.ID)
 					require.Empty(t, model.CreatedAt, model.ID)
 				}

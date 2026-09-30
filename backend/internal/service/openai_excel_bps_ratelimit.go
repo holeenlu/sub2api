@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"github.com/tidwall/gjson"
 )
 
@@ -157,6 +158,20 @@ func isExcelBPSStreamRateLimit(payload []byte) bool {
 		return false
 	}
 	upstreamError := excelBPSUpstreamError(payload)
+	// Explicit semantic status wins over an inconsistent error identifier.
+	for _, path := range []string{"status", "status_code", "error.status", "error.status_code", "response.error.status", "response.error.status_code", "response.status_code"} {
+		status := gjson.GetBytes(payload, path)
+		if status.Type == gjson.Number && status.Int() >= 400 && status.Int() <= 599 && status.Float() == float64(status.Int()) {
+			if status.Int() != http.StatusTooManyRequests {
+				return false
+			}
+			break
+		}
+	}
+	code := strings.ToLower(upstreamError.Get("code").String())
+	if code != "" && code != "rate_limit_exceeded" && code != "rate_limit_error" && code != "basispoints_upstream_error" {
+		return false
+	}
 	for _, field := range []string{"code", "type"} {
 		switch strings.ToLower(upstreamError.Get(field).String()) {
 		case "rate_limit_exceeded", "rate_limit_error":
@@ -168,9 +183,7 @@ func isExcelBPSStreamRateLimit(payload []byte) bool {
 	if upstreamError.Get("code").String() != "" {
 		return false
 	}
-	message := strings.ToLower(strings.TrimSpace(upstreamError.Get("message").String()))
-	return strings.HasPrefix(message, "rate limit reached for ") &&
-		(strings.Contains(message, "tokens per min") || strings.Contains(message, "requests per min"))
+	return basispoints.IsOrganizationRateLimitMessage(upstreamError.Get("message").String())
 }
 
 // BPS throttles its own endpoint independently of the account's Codex quota.
