@@ -326,6 +326,61 @@ describe('GroupsView duplicate action', () => {
     wrapper.unmount()
   })
 
+  it.each(['follow', 'fixed'] as const)('saves legacy model restrictions after switching from %s', async (mode) => {
+    const group = {
+      ...sourceGroup,
+      model_allowlist: { mode, enabled: true, models: ['saved-alias'], excluded: ['blocked-model'] }
+    }
+    listGroups.mockResolvedValue({ items: [group], total: 1, page: 1, page_size: 20, pages: 1 })
+    updateGroup.mockResolvedValue(group)
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+
+    const select = wrapper.get('#edit-group-form').findAll('select')
+      .find(select => select.findAll('option').some(option => option.text() === 'modelCatalog.legacy'))!
+    expect(select.element.value).toBe(mode)
+    // Select by its displayed label, as a user does. A missing option value
+    // otherwise leaks the translated text into the API's mode enum.
+    const legacy = select.findAll('option').find(option => option.text() === 'modelCatalog.legacy')!
+    await select.setValue((legacy.element as HTMLOptionElement).value)
+    await wrapper.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+
+    expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining({
+      model_allowlist: { enabled: true, models: ['saved-alias'] }
+    }))
+    expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('creates a group after switching back to legacy model restrictions', async () => {
+    const createGroup = vi.mocked(adminAPI.groups.create)
+    createGroup.mockReset().mockResolvedValue(sourceGroup)
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-tour="groups-create-btn"]').trigger('click')
+    await flushPromises()
+
+    const form = wrapper.get('#create-group-form')
+    await form.get('input[type="text"]').setValue('New group')
+    const select = form.findAll('select')
+      .find(select => select.findAll('option').some(option => option.text() === 'modelCatalog.legacy'))!
+    expect(select.element.value).toBe('legacy')
+    await select.setValue('follow')
+    const legacy = select.findAll('option').find(option => option.text() === 'modelCatalog.legacy')!
+    await select.setValue((legacy.element as HTMLOptionElement).value)
+    await form.trigger('submit')
+    await flushPromises()
+
+    expect(createGroup).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'New group', model_allowlist: { enabled: false, models: [] }
+    }))
+    expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('loads, edits, and saves custom reasoning multipliers for group pricing', async () => {
     const group = {
       ...sourceGroup,

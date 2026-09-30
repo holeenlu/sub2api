@@ -790,7 +790,7 @@
             <div class="space-y-2">
               <label class="block text-xs">{{ t('modelCatalog.accountPolicy') }}</label>
               <select :value="createModelAllowlistState.mode || 'legacy'" @change="createModelAllowlistState.mode = ($event.target as HTMLSelectElement).value as 'legacy' | 'follow' | 'fixed'" class="input text-sm">
-                <option :value="undefined">{{ t('modelCatalog.legacy') }}</option>
+                <option value="legacy">{{ t('modelCatalog.legacy') }}</option>
                 <option value="follow">{{ t('modelCatalog.follow') }}</option>
                 <option value="fixed">{{ t('modelCatalog.fixed') }}</option>
               </select>
@@ -2454,7 +2454,7 @@
             <div class="space-y-2">
               <label class="block text-xs">{{ t('modelCatalog.accountPolicy') }}</label>
               <select :value="editModelAllowlistState.mode || 'legacy'" @change="editModelAllowlistState.mode = ($event.target as HTMLSelectElement).value as 'legacy' | 'follow' | 'fixed'" class="input text-sm">
-                <option :value="undefined">{{ t('modelCatalog.legacy') }}</option>
+                <option value="legacy">{{ t('modelCatalog.legacy') }}</option>
                 <option value="follow">{{ t('modelCatalog.follow') }}</option>
                 <option value="fixed">{{ t('modelCatalog.fixed') }}</option>
               </select>
