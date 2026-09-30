@@ -11,13 +11,15 @@ import (
 // GroupCatalogModel is a public request identity. BillingModels and account
 // details never cross the public HTTP boundary.
 type GroupCatalogModel struct {
-	Name              string   `json:"name"`
-	Platform          string   `json:"platform"`
-	Endpoint          string   `json:"endpoint"`
-	Source            string   `json:"source"`
-	BillingModels     []string `json:"-"`
-	ResponseDependent bool     `json:"-"`
-	ChannelName       string   `json:"-"`
+	PricingStatus     string           `json:"pricing_status,omitempty"`
+	AccountModels     map[int64]string `json:"-"`
+	Name              string           `json:"name"`
+	Platform          string           `json:"platform"`
+	Endpoint          string           `json:"endpoint"`
+	Source            string           `json:"source"`
+	BillingModels     []string         `json:"-"`
+	ResponseDependent bool             `json:"-"`
+	ChannelName       string           `json:"-"`
 }
 
 type GroupCatalogIssue struct {
@@ -26,6 +28,7 @@ type GroupCatalogIssue struct {
 }
 
 type GroupModelCatalog struct {
+	Revision  string              `json:"revision"`
 	Models    []GroupCatalogModel `json:"models"`
 	Issues    []GroupCatalogIssue `json:"issues"`
 	Status    string              `json:"status"`
@@ -42,14 +45,16 @@ type groupCatalogSnapshots interface {
 // GroupModelCatalogService reads configuration and existing discovery snapshots.
 // Public page loads never fetch upstream catalogs or probe inference endpoints.
 type GroupModelCatalogService struct {
-	accounts  groupCatalogAccounts
-	channels  ChannelRepository
-	routes    CompositeModelRouteRepository
-	snapshots groupCatalogSnapshots
+	legacySnapshots groupCatalogSnapshots
+	registry        *ModelCatalogService
+	accounts        groupCatalogAccounts
+	channels        ChannelRepository
+	routes          CompositeModelRouteRepository
+	snapshots       groupCatalogSnapshots
 }
 
 func NewGroupModelCatalogService(accounts AccountRepository, channels ChannelRepository, routes CompositeModelRouteRepository, upstream *OpenAIGatewayService) *GroupModelCatalogService {
-	catalog := &GroupModelCatalogService{accounts: accounts, channels: channels, routes: routes, snapshots: upstream}
+	catalog := &GroupModelCatalogService{accounts: accounts, channels: channels, routes: routes, snapshots: upstream, legacySnapshots: upstream}
 	if upstream != nil {
 		upstream.groupModelCatalog = catalog
 	}
@@ -65,6 +70,13 @@ func (s *GroupModelCatalogService) Resolve(ctx context.Context, group *Group) (*
 }
 
 func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, channels []Channel) (*GroupModelCatalog, error) {
+	if s.registry != nil && !CatalogEnforced(group) && ctx.Value(catalogPreviewKey{}) != true {
+		legacy := *s
+		legacy.registry = nil
+		legacy.snapshots = s.legacySnapshots
+		return legacy.resolve(ctx, group, channels)
+	}
+	ctx = withCatalogReadCache(ctx)
 	if group == nil {
 		return nil, fmt.Errorf("catalog group is required")
 	}
@@ -143,7 +155,10 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 			issue(name, "wildcard_requires_concrete_models")
 			return
 		}
-		key := strings.ToLower(platform + "\x00" + name)
+		key := platform + "\x00" + name
+		if s.registry == nil {
+			key = strings.ToLower(key)
+		}
 		if _, ok := candidates[key]; !ok {
 			candidates[key] = candidate{name, platform, source}
 		}
@@ -315,6 +330,7 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 				}
 			}
 			billingSet := map[string]bool{}
+			accountModels := map[int64]string{}
 			responseDependent := channel != nil && channel.BillingModelSource == BillingModelSourceResponse
 			for i := range active {
 				a := &active[i]
@@ -331,9 +347,16 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 				if platform == PlatformOpenAI {
 					billing = resolveOpenAIAccountUpstreamModelForRequest(a, mapped, false)
 				}
+				if s.registry != nil {
+					allowed, known := s.registry.ModelIsPublished(ctx, a, billing)
+					if !known || !allowed {
+						continue
+					}
+				}
 				if a.IsOpenAIPassthroughEnabled() {
 					billing = mapped
 				}
+				actualModel := billing
 				if channel != nil {
 					switch channel.BillingModelSource {
 					case BillingModelSourceRequested:
@@ -355,6 +378,7 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 				}
 				if strings.TrimSpace(billing) != "" {
 					billingSet[billing] = true
+					accountModels[a.ID] = actualModel
 				}
 			}
 			if !GroupAllowsImageGeneration(group) {
@@ -370,19 +394,28 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 			if pinned && !snapshotModels[strings.ToLower(platform+"\x00"+c.name)] {
 				continue
 			}
-			key := strings.ToLower(c.name + "\x00" + platform + "\x00" + endpoint)
+			key := c.name + "\x00" + platform + "\x00" + endpoint
+			if s.registry == nil {
+				key = strings.ToLower(key)
+			}
 			accepted = true
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
-			m := GroupCatalogModel{Name: c.name, Platform: platform, Endpoint: endpoint, Source: c.source, ResponseDependent: responseDependent}
+			m := GroupCatalogModel{AccountModels: accountModels, Name: c.name, Platform: platform, Endpoint: endpoint, Source: c.source, ResponseDependent: responseDependent}
 			for name := range billingSet {
 				m.BillingModels = append(m.BillingModels, name)
 			}
 			sort.Strings(m.BillingModels)
 			if channel != nil {
 				m.ChannelName = channel.Name
+			}
+			if s.registry != nil {
+				m.PricingStatus = s.registry.quoteStatus(ctx, &m, group)
+				if m.PricingStatus == "unavailable" {
+					issue(m.Name, "pricing_unavailable")
+				}
 			}
 			out.Models = append(out.Models, m)
 		}
@@ -430,6 +463,16 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 		}
 		sort.SliceStable(out.Models, func(i, j int) bool { return rank(out.Models[i].Name) < rank(out.Models[j].Name) })
 	}
+	priceRevision := ""
+	if s.registry != nil && s.registry.prices != nil {
+		priceRevision = s.registry.prices.PriceRevision()
+	}
+	out.Revision = modelCatalogHash(struct {
+		Models []GroupCatalogModel
+		Issues []GroupCatalogIssue
+		Policy GroupModelAllowlist
+		Price  string
+	}{out.Models, out.Issues, group.ModelAllowlist, priceRevision})
 	return out, nil
 }
 
@@ -438,6 +481,9 @@ func (c *GroupModelCatalog) ModelIDs() []string {
 	ids := make([]string, 0, len(c.Models))
 	seen := map[string]bool{}
 	for _, m := range c.Models {
+		if m.PricingStatus == "unavailable" {
+			continue
+		}
 		if !seen[m.Name] {
 			seen[m.Name] = true
 			ids = append(ids, m.Name)

@@ -60,9 +60,11 @@ func (s *ChannelService) ListAvailable(ctx context.Context) ([]AvailableChannel,
 	if err != nil {
 		return nil, fmt.Errorf("list active groups: %w", err)
 	}
+	groupEntities := map[int64]*Group{}
 	groupByID := make(map[int64]AvailableGroupRef, len(groups))
 	for i := range groups {
 		g := groups[i]
+		groupEntities[g.ID] = &groups[i]
 		groupByID[g.ID] = AvailableGroupRef{
 			ID:                 g.ID,
 			Name:               g.Name,
@@ -91,6 +93,25 @@ func (s *ChannelService) ListAvailable(ctx context.Context) ([]AvailableChannel,
 		ch.normalizeBillingModelSource()
 
 		supported := ch.SupportedModels()
+		if s.modelCatalog != nil {
+			supported = []SupportedModel{}
+			seen := map[string]bool{}
+			for _, ref := range groups {
+				g := groupEntities[ref.ID]
+				view, err := s.modelCatalog.Resolve(ctx, g)
+				if err != nil {
+					return nil, err
+				}
+				for _, m := range view.Models {
+					key := m.Platform + "\x00" + m.Name
+					if seen[key] || m.PricingStatus == "unavailable" {
+						continue
+					}
+					seen[key] = true
+					supported = append(supported, SupportedModel{Name: m.Name, Platform: m.Platform})
+				}
+			}
+		}
 		fillGlobalPricingFallback(s.pricingService, supported)
 
 		out = append(out, AvailableChannel{

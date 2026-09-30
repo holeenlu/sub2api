@@ -11,6 +11,9 @@ import (
 
 // ProvideAdminHandlers creates the AdminHandlers struct
 func ProvideAdminHandlers(
+	registry *service.ModelCatalogService,
+	groupCatalog *service.GroupModelCatalogService,
+	modelCatalogHandler *admin.ModelCatalogHandler,
 	dashboardHandler *admin.DashboardHandler,
 	userHandler *admin.UserHandler,
 	groupHandler *admin.GroupHandler,
@@ -54,6 +57,8 @@ func ProvideAdminHandlers(
 	openAIGatewayService *service.OpenAIGatewayService,
 	claudeResetCredits *service.ClaudeResetCreditService,
 ) *AdminHandlers {
+	groupHandler.SetModelCatalog(groupCatalog, registry)
+	channelHandler.SetModelCatalog(registry)
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
@@ -62,6 +67,7 @@ func ProvideAdminHandlers(
 	proxyHandler.SetCodexTicketSettings(settingService)
 	accountHandler.SetClaudeResetCreditService(claudeResetCredits)
 	return &AdminHandlers{
+		ModelCatalog:           modelCatalogHandler,
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,
 		Group:                  groupHandler,
@@ -186,6 +192,7 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 
 // ProvideHandlers creates the Handlers struct
 func ProvideHandlers(
+	modelRegistry *service.ModelCatalogService,
 	authHandler *AuthHandler,
 	userHandler *UserHandler,
 	apiKeyHandler *APIKeyHandler,
@@ -211,6 +218,7 @@ func ProvideHandlers(
 	_ *service.IdempotencyCleanupService,
 	_ *service.OpenAIQuotaAutoResetService,
 ) *Handlers {
+	apiKeyHandler.modelCatalog = modelRegistry
 	return &Handlers{
 		Auth:             authHandler,
 		User:             userHandler,
@@ -238,6 +246,7 @@ func ProvideHandlers(
 
 // ProviderSet is the Wire provider set for all handlers
 var ProviderSet = wire.NewSet(
+	admin.NewModelCatalogHandler,
 	// Top-level handlers
 	NewAuthHandler,
 	NewUserHandler,

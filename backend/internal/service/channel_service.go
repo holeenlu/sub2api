@@ -159,6 +159,7 @@ type ChannelCachePubSub interface {
 
 // ChannelService 渠道管理服务
 type ChannelService struct {
+	modelCatalog         *GroupModelCatalogService
 	repo                 ChannelRepository
 	groupRepo            GroupRepository
 	authCacheInvalidator APIKeyAuthCacheInvalidator
@@ -433,14 +434,26 @@ func (s *ChannelService) subscribeCacheUpdates(ctx context.Context) {
 
 // matchWildcard 在通配符定价中查找匹配项（最先匹配到优先）
 func (c *channelCache) matchWildcard(groupID int64, platform, modelLower string) *ChannelModelPricing {
-	gpKey := channelGroupPlatformKey{groupID: groupID, platform: platform}
-	wildcards := c.wildcardByGroupPlatform[gpKey]
-	for _, wc := range wildcards {
+	for _, wc := range c.wildcardByGroupPlatform[channelGroupPlatformKey{groupID: groupID, platform: platform}] {
 		if strings.HasPrefix(modelLower, wc.prefix) {
 			return wc.pricing
 		}
 	}
 	return nil
+}
+
+func (c *channelCache) matchNarrowestWildcard(groupID int64, platform, modelLower string) *ChannelModelPricing {
+	gpKey := channelGroupPlatformKey{groupID: groupID, platform: platform}
+	wildcards := c.wildcardByGroupPlatform[gpKey]
+	var match *ChannelModelPricing
+	longest := -1
+	for _, wc := range wildcards {
+		if strings.HasPrefix(modelLower, wc.prefix) && len(wc.prefix) > longest {
+			match = wc.pricing
+			longest = len(wc.prefix)
+		}
+	}
+	return match
 }
 
 // matchWildcardMapping 在通配符映射中查找匹配项（最先匹配到优先）
@@ -525,6 +538,13 @@ type channelLookup struct {
 // lookupGroupChannel 加载缓存并查找分组对应的渠道信息（公共热路径前置逻辑）。
 // 返回 nil 且 err==nil 表示分组无活跃渠道；err!=nil 表示缓存加载失败。
 func (s *ChannelService) lookupGroupChannel(ctx context.Context, groupID int64) (*channelLookup, error) {
+	if p := RequestPricingFromContext(ctx); p != nil && p.channels != nil {
+		ch := p.channels.channelByGroupID[groupID]
+		if ch == nil || !ch.IsActive() {
+			return nil, nil
+		}
+		return &channelLookup{cache: p.channels, channel: ch, platform: channelLookupPlatform(ctx, p.channels.groupPlatform[groupID])}, nil
+	}
 	cache, err := s.loadCache(ctx)
 	if err != nil {
 		return nil, err
@@ -554,6 +574,24 @@ func (s *ChannelService) GetChannelModelPricing(ctx context.Context, groupID int
 
 	modelLower := strings.ToLower(model)
 	pricing := lookupPricingAcrossPlatforms(lk.cache, groupID, lk.platform, modelLower)
+	if ctx.Value(catalogPriceOrderKey{}) == true {
+		exact := false
+		for _, platform := range matchingPlatforms(lk.platform) {
+			if value := lk.cache.pricingByGroupModel[channelModelKey{groupID: groupID, platform: platform, model: normalizeChannelPricingModelName(model)}]; value != nil {
+				pricing = value
+				exact = true
+				break
+			}
+		}
+		if !exact {
+			for _, platform := range matchingPlatforms(lk.platform) {
+				if value := lk.cache.matchNarrowestWildcard(groupID, platform, normalizeChannelPricingModelName(model)); value != nil {
+					pricing = value
+					break
+				}
+			}
+		}
+	}
 	if pricing == nil {
 		return nil
 	}

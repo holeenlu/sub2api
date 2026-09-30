@@ -695,7 +695,7 @@ var codexGPTIdentityPatterns = []struct {
 // cooldown. Codex sends this template as `instructions` for the selected model.
 func codexInstructionsTemplateForModel(modelID string) string {
 	base := openai.CodexBaseInstructionsForModel(modelID)
-	if codexModelKeepsGPTIdentity(modelID) {
+	if codexModelKeepsGPTIdentity(modelID) && normalizeKnownOpenAICodexModel(modelID) != "" {
 		return base
 	}
 	for _, p := range codexGPTIdentityPatterns {
@@ -881,6 +881,9 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 	modelIDs []string,
 ) ([]byte, error) {
 
+	if s != nil && s.modelCatalog != nil && CatalogEnforced(group) {
+		return s.modelCatalog.CodexManifest(ctx, group)
+	}
 	if s == nil || s.accountRepo == nil || group == nil {
 		return BuildCodexModelsManifest(modelIDs)
 	}

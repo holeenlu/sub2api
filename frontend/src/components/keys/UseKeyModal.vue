@@ -133,6 +133,7 @@
           </nav>
         </div>
 
+        <p v-if="codexModelCatalogSupported && ['codex','codex-ws'].includes(activeClientTab) && !currentFiles.length" role="status" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">{{ t('modelCatalog.setupUnavailable') }}</p>
         <!-- Code Blocks (Stacked for multi-file platforms) -->
         <div class="space-y-4">
           <div
@@ -250,6 +251,7 @@
           </p>
         </section>
 
+        <a v-if="showCodexModelCatalog" href="/install/update-codex-models.py" download class="text-sm text-primary-600 underline">{{ t('modelCatalog.downloadUpdater') }}</a>
         <!-- Usage Note -->
         <div v-if="showPlatformNote" class="flex items-start gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
           <Icon name="infoCircle" size="md" class="text-blue-500 flex-shrink-0 mt-0.5" />
@@ -278,7 +280,6 @@ import { ref, computed, h, watch, onBeforeUnmount, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { BRAND_NAME } from '@/config/brand'
-import { OPENAI_MODEL_PRESETS } from '@/config/openaiModels'
 import { saveAs } from 'file-saver'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -294,6 +295,7 @@ import {
 } from '@/utils/codexCatalogConfig'
 
 interface Props {
+  setupProfile?: { model: string; review_model: string; reasoning_effort?: string; catalog_revision: string; status: string } | null
   show: boolean
   apiKey: string
   baseUrl: string
@@ -342,10 +344,8 @@ type CodexModelManifestState = 'idle' | 'loading' | 'ready' | 'error'
 const codexModelManifestState = ref<CodexModelManifestState>('idle')
 const codexModelManifestContent = ref('')
 const codexModelManifestModelCount = ref(0)
-// Use the same local choices as the model-restriction picker without a lookup.
-const DEFAULT_CODEX_MODEL = selectCodexConfigModel(
-  OPENAI_MODEL_PRESETS.map((slug) => ({ slug })), 'gpt-6-astra'
-) || 'gpt-6-astra'
+// Defaults are precomputed from this key's published group catalog.
+const DEFAULT_CODEX_MODEL = computed(() => props.setupProfile?.model ?? '')
 let codexModelManifestController: AbortController | null = null
 let codexModelManifestRequestID = 0
 
@@ -727,7 +727,7 @@ function downloadCodexModelManifest() {
 }
 
 const selectedCodexCatalogModel = computed(() =>
-  selectCodexConfigModel(parseCodexCatalogModels(codexModelManifestContent.value), DEFAULT_CODEX_MODEL)
+  selectCodexConfigModel(parseCodexCatalogModels(codexModelManifestContent.value), DEFAULT_CODEX_MODEL.value)
 )
 
 function selectCodexCatalogModel(preferredModel: string): string {
@@ -741,6 +741,7 @@ function codexCatalogTomlLine(): string {
 }
 
 function codexReasoningEffortTomlLine(modelSlug: string): string {
+  if (!codexModelManifestContent.value && props.setupProfile?.model === modelSlug) return formatCodexReasoningEffortTomlLine(props.setupProfile.reasoning_effort || null)
   return formatCodexReasoningEffortTomlLine(
     selectCodexConfigReasoningEffort(findCodexCatalogModel(codexModelManifestContent.value, modelSlug))
   )
@@ -765,6 +766,7 @@ const comment = (value: string) => wrapToken('text-slate-500', value)
 // Syntax highlighting helpers
 // Generate file configs based on platform and active tab
 const currentFiles = computed((): FileConfig[] => {
+  if (codexModelCatalogSupported.value && ['codex','codex-ws'].includes(activeClientTab.value) && !selectedCodexCatalogModel.value && !DEFAULT_CODEX_MODEL.value) return []
   const baseUrl = props.baseUrl || window.location.origin
   const apiKey = props.apiKey
   const baseRoot = baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '')
@@ -1014,7 +1016,7 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
 
-  const model = selectCodexCatalogModel(DEFAULT_CODEX_MODEL)
+  const model = selectCodexCatalogModel(DEFAULT_CODEX_MODEL.value)
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content
@@ -1301,7 +1303,7 @@ function generateRoutedCodexFiles(
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
   const preferredModels: Partial<Record<GroupPlatform, string>> = {
-    openai: DEFAULT_CODEX_MODEL,
+    openai: DEFAULT_CODEX_MODEL.value,
     anthropic: 'claude-sonnet-5',
 
     gemini: 'gemini-2.5-pro',
@@ -1312,7 +1314,7 @@ function generateRoutedCodexFiles(
     deepseek: 'deepseek-v4-pro',
     minimax: 'MiniMax-M3',
     opencode_go: 'glm-5.3',
-    composite: DEFAULT_CODEX_MODEL
+    composite: DEFAULT_CODEX_MODEL.value
   }
   const preferredModel = preferredModels[platform] || ''
   const model = selectCodexCatalogModel(preferredModel)
@@ -1368,7 +1370,7 @@ supports_websockets = false`
 function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
-  const model = selectCodexCatalogModel(DEFAULT_CODEX_MODEL)
+  const model = selectCodexCatalogModel(DEFAULT_CODEX_MODEL.value)
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content with WebSocket v2

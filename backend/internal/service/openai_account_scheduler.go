@@ -1863,6 +1863,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.C
 // each candidate was dropped instead of failing silently (#4599).
 func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (bool, string) {
 
+	if !CatalogAccountAllowed(ctx, account) {
+		return false, "catalog_route_not_published"
+	}
 	if account == nil {
 		return false, "account_nil"
 	}

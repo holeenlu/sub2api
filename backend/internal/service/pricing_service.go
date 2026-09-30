@@ -204,27 +204,28 @@ var (
 // LiteLLMModelPricing LiteLLM价格数据结构
 // 只保留我们需要的字段，使用指针来处理可能缺失的值
 type LiteLLMModelPricing struct {
-	CacheCreationInputTokenCostExplicit bool    `json:"-"`
-	InputCostPerToken                   float64 `json:"input_cost_per_token"`
-	InputCostPerTokenPriority           float64 `json:"input_cost_per_token_priority"`
-	OutputCostPerToken                  float64 `json:"output_cost_per_token"`
-	OutputCostPerTokenPriority          float64 `json:"output_cost_per_token_priority"`
-	CacheCreationInputTokenCost         float64 `json:"cache_creation_input_token_cost"`
-	CacheCreationInputTokenCostPriority float64 `json:"cache_creation_input_token_cost_priority"`
-	CacheCreationInputTokenCostAbove1hr float64 `json:"cache_creation_input_token_cost_above_1hr"`
-	CacheReadInputTokenCost             float64 `json:"cache_read_input_token_cost"`
-	CacheReadInputTokenCostPriority     float64 `json:"cache_read_input_token_cost_priority"`
-	LongContextInputTokenThreshold      int     `json:"long_context_input_token_threshold,omitempty"`
-	LongContextInputCostMultiplier      float64 `json:"long_context_input_cost_multiplier,omitempty"`
-	LongContextOutputCostMultiplier     float64 `json:"long_context_output_cost_multiplier,omitempty"`
-	SupportsServiceTier                 bool    `json:"supports_service_tier"`
-	LiteLLMProvider                     string  `json:"litellm_provider"`
-	Mode                                string  `json:"mode"`
-	SupportsPromptCaching               bool    `json:"supports_prompt_caching"`
-	OutputCostPerImage                  float64 `json:"output_cost_per_image"`       // 图片生成模型每张图片价格
-	OutputCostPerImageToken             float64 `json:"output_cost_per_image_token"` // 图片输出 token 价格
-	InputCostPerImageToken              float64 `json:"input_cost_per_image_token"`  // 图片输入 token 价格（如 gpt-image-2 图片编辑）
-	CacheReadInputImageTokenCost        float64 `json:"cache_read_input_image_token_cost"`
+	ProvidedFields                      map[string]bool `json:"-"`
+	CacheCreationInputTokenCostExplicit bool            `json:"-"`
+	InputCostPerToken                   float64         `json:"input_cost_per_token"`
+	InputCostPerTokenPriority           float64         `json:"input_cost_per_token_priority"`
+	OutputCostPerToken                  float64         `json:"output_cost_per_token"`
+	OutputCostPerTokenPriority          float64         `json:"output_cost_per_token_priority"`
+	CacheCreationInputTokenCost         float64         `json:"cache_creation_input_token_cost"`
+	CacheCreationInputTokenCostPriority float64         `json:"cache_creation_input_token_cost_priority"`
+	CacheCreationInputTokenCostAbove1hr float64         `json:"cache_creation_input_token_cost_above_1hr"`
+	CacheReadInputTokenCost             float64         `json:"cache_read_input_token_cost"`
+	CacheReadInputTokenCostPriority     float64         `json:"cache_read_input_token_cost_priority"`
+	LongContextInputTokenThreshold      int             `json:"long_context_input_token_threshold,omitempty"`
+	LongContextInputCostMultiplier      float64         `json:"long_context_input_cost_multiplier,omitempty"`
+	LongContextOutputCostMultiplier     float64         `json:"long_context_output_cost_multiplier,omitempty"`
+	SupportsServiceTier                 bool            `json:"supports_service_tier"`
+	LiteLLMProvider                     string          `json:"litellm_provider"`
+	Mode                                string          `json:"mode"`
+	SupportsPromptCaching               bool            `json:"supports_prompt_caching"`
+	OutputCostPerImage                  float64         `json:"output_cost_per_image"`       // 图片生成模型每张图片价格
+	OutputCostPerImageToken             float64         `json:"output_cost_per_image_token"` // 图片输出 token 价格
+	InputCostPerImageToken              float64         `json:"input_cost_per_image_token"`  // 图片输入 token 价格（如 gpt-image-2 图片编辑）
+	CacheReadInputImageTokenCost        float64         `json:"cache_read_input_image_token_cost"`
 
 	// TokenPricingAbsent 表示源数据中 input/output token 价格均缺失（仅有图片价）。
 	// 此类条目只可用于图片计费，token 计费必须回退到 fallback 或 fail-closed，
@@ -264,12 +265,18 @@ type LiteLLMRawEntry struct {
 
 // PricingService 动态价格服务
 type PricingService struct {
-	cfg          *config.Config
-	remoteClient PricingRemoteClient
-	mu           sync.RWMutex
-	pricingData  map[string]*LiteLLMModelPricing
-	lastUpdated  time.Time
-	localHash    string
+	publicationMu           sync.Mutex
+	catalogManaged          bool
+	referencePrices         *CatalogReferencePrices
+	referenceBase           json.RawMessage
+	referenceSupplement     map[string]json.RawMessage
+	referenceSupplementHash string
+	cfg                     *config.Config
+	remoteClient            PricingRemoteClient
+	mu                      sync.RWMutex
+	pricingData             map[string]*LiteLLMModelPricing
+	lastUpdated             time.Time
+	localHash               string
 	// fallback/override 文件在最近一次成功重建时的内容指纹，定时器据此判断是否
 	// 需要从本地目录缓存重建叠加层。
 	customFilesHash string
@@ -534,6 +541,8 @@ func (s *PricingService) reloadIfCustomFilesChanged() {
 // reloadCustomPricingLayers 读取本地目录缓存并重新叠加 fallback/override，只替换内存数据
 // 与叠加层指纹。
 func (s *PricingService) reloadCustomPricingLayers() error {
+	s.publicationMu.Lock()
+	defer s.publicationMu.Unlock()
 	pricingFile := s.getPricingFilePath()
 	// 定价层文件可能在读取期间被替换。只有构建前后指纹一致时才提交，
 	// 否则丢弃这次混合快照并重试，避免短暂应用不匹配的 fallback/override。
@@ -577,6 +586,8 @@ func (s *PricingService) reloadCustomPricingLayers() error {
 
 // downloadPricingData 从远程下载价格数据
 func (s *PricingService) downloadPricingData() error {
+	s.publicationMu.Lock()
+	defer s.publicationMu.Unlock()
 	remoteURL, err := s.validatePricingURL(s.cfg.Pricing.RemoteURL)
 	if err != nil {
 		return err
@@ -635,6 +646,7 @@ func (s *PricingService) downloadPricingData() error {
 	s.mu.Lock()
 	warnDroppedLongContextLadders(s.pricingData, data)
 	s.pricingData = data
+	s.setCatalogReferenceLocked(body)
 	s.lastUpdated = time.Now()
 	s.localHash = syncHash
 	s.customFilesHash = customFilesHash
@@ -675,7 +687,7 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			continue
 		}
 
-		pricing := &LiteLLMModelPricing{
+		pricing := &LiteLLMModelPricing{ProvidedFields: make(map[string]bool),
 			LiteLLMProvider:       entry.LiteLLMProvider,
 			Mode:                  entry.Mode,
 			SupportsPromptCaching: entry.SupportsPromptCaching,
@@ -683,6 +695,13 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			TokenPricingAbsent:    entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil,
 		}
 
+		var fieldPresence map[string]json.RawMessage
+		_ = json.Unmarshal(rawEntry, &fieldPresence)
+		for name, value := range fieldPresence {
+			if string(value) != "null" {
+				pricing.ProvidedFields[name] = true
+			}
+		}
 		if entry.InputCostPerToken != nil {
 			pricing.InputCostPerToken = *entry.InputCostPerToken
 		}
@@ -1031,6 +1050,28 @@ func (s *PricingService) mergeOverrideOnlyModels(data map[string]*LiteLLMModelPr
 // 叠加层文件指纹。指纹在合并读取之前采样：并发改文件只会让存下的指纹落后于实际
 // 合并的数据、不会领先，下一轮定时比对因此会再次重建。
 func (s *PricingService) buildPricingData(body []byte) (map[string]*LiteLLMModelPricing, string, error) {
+	s.mu.RLock()
+	supplement := s.referenceSupplement
+	s.mu.RUnlock()
+	if len(supplement) > 0 {
+		var base map[string]json.RawMessage
+		if err := json.Unmarshal(body, &base); err != nil {
+			return nil, "", err
+		}
+		if base == nil {
+			base = make(map[string]json.RawMessage)
+		}
+		for id, value := range supplement {
+			if _, exists := base[id]; !exists {
+				base[id] = value
+			}
+		}
+		combined, err := json.Marshal(base)
+		if err != nil {
+			return nil, "", err
+		}
+		body = combined
+	}
 	fingerprint := s.customPricingFilesFingerprint()
 	data, err := s.parsePricingData(body)
 	if err != nil {
@@ -1043,6 +1084,8 @@ func (s *PricingService) buildPricingData(body []byte) (map[string]*LiteLLMModel
 
 // loadPricingData 从本地文件加载价格数据
 func (s *PricingService) loadPricingData(filePath string) error {
+	s.publicationMu.Lock()
+	defer s.publicationMu.Unlock()
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("read file failed: %w", err)
@@ -1060,6 +1103,7 @@ func (s *PricingService) loadPricingData(filePath string) error {
 	s.mu.Lock()
 	warnDroppedLongContextLadders(s.pricingData, pricingData)
 	s.pricingData = pricingData
+	s.setCatalogReferenceLocked(data)
 	s.localHash = hashStr
 	s.customFilesHash = customFilesHash
 

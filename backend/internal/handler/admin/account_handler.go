@@ -2913,6 +2913,25 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
+	if h.accountTestService != nil && h.accountTestService.ModelCatalog() != nil {
+		catalog, err := h.accountTestService.ModelCatalog().Account(c.Request.Context(), account)
+		if err != nil {
+			response.InternalError(c, "Failed to read saved model catalog")
+			return
+		}
+		models := []openai.Model{}
+		for _, entry := range catalog.Models {
+			if entry.Lifecycle == "retired" || (entry.Access != "listed" && entry.Access != "observed") {
+				continue
+			}
+			if !account.IsModelSupported(entry.ID) {
+				continue
+			}
+			models = append(models, openai.Model{ID: entry.ID, Object: "model", Type: "model", DisplayName: entry.DisplayName, OwnedBy: entry.Platform})
+		}
+		response.Success(c, models)
+		return
+	}
 	// Handle OpenAI accounts
 	if account.IsOpenAI() {
 		// Prefer the shared, account-keyed upstream catalog. If discovery fails,
@@ -3121,6 +3140,23 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 		return
 	}
 
+	if registry := h.accountTestService.ModelCatalog(); registry != nil {
+		snapshot, err := registry.Refresh(c.Request.Context(), account.ID, true)
+		if err != nil {
+			response.Error(c, http.StatusBadGateway, "Model catalog refresh failed; previous snapshot retained")
+			return
+		}
+		models := []string{}
+		metadata := map[string]service.UpstreamModelMetadata{}
+		for _, entry := range snapshot.Models {
+			if entry.Access == "listed" && entry.Lifecycle != "retired" {
+				models = append(models, entry.ID)
+				metadata[entry.ID] = entry.Metadata
+			}
+		}
+		response.Success(c, gin.H{"models": models, "metadata": metadata, "revision": snapshot.Revision, "updated_at": snapshot.UpdatedAt})
+		return
+	}
 	catalog, err := h.accountTestService.SyncUpstreamModelCatalog(c.Request.Context(), account)
 	if err != nil {
 		var syncErr *service.UpstreamModelSyncError

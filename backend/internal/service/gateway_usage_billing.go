@@ -14,6 +14,9 @@ import (
 )
 
 func (s *GatewayService) getUserGroupRateMultiplier(ctx context.Context, userID, groupID int64, groupDefaultMultiplier float64) float64 {
+	if p := RequestPricingFromContext(ctx); p != nil && p.rateReady && p.userID == userID && p.group != nil && p.group.ID == groupID {
+		return p.rate
+	}
 	if s == nil {
 		return groupDefaultMultiplier
 	}
@@ -608,6 +611,9 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 	}
 	usageCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
+	if err := journalUsagePricing(servicePricingContext(ctx, usageCtx), repo, usageLog); err != nil {
+		slog.Warn("usage_pricing_journal_failed", "request_id", usageLog.RequestID, "error", err)
+	}
 
 	if writer, ok := repo.(usageLogBestEffortWriter); ok {
 		if err := writer.CreateBestEffort(usageCtx, usageLog); err != nil {
@@ -820,6 +826,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		requestedModel = input.OriginalModel
 	}
 
+	if CatalogEnforced(apiKey.Group) {
+		if identified, _ := s.hasIdentifiedResponseModelPricing(ctx, billingModel, apiKey); !identified && result.ImageCount == 0 && result.AudioUsage == nil && result.SearchCount == 0 {
+			return pendingCatalogPricing(ctx, s.usageLogRepo, apiKey.ID, result.RequestID, billingModel, result.Usage)
+		}
+	}
 	// 计算费用
 	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, pricingAt)
 	// response_model：按上游成功响应自报的模型计费（渠道显式开启才生效）。
@@ -832,7 +843,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		result.UpstreamResponseModelConflict,
 		result.ImageCount > 0 || result.AudioUsage != nil || result.SearchCount > 0,
 	); responseModel != "" && !strings.EqualFold(responseModel, strings.TrimSpace(billingModel)) {
-		if identified, responseChannelPriced := s.hasIdentifiedResponseModelPricing(ctx, responseModel, apiKey); identified {
+		identified, responseChannelPriced := s.hasIdentifiedResponseModelPricing(ctx, responseModel, apiKey)
+		if !identified && CatalogEnforced(apiKey.Group) {
+			return pendingCatalogPricing(ctx, s.usageLogRepo, apiKey.ID, result.RequestID, responseModel, result.Usage)
+		}
+		if identified {
 			responseCost := s.calculateRecordUsageCost(ctx, result, apiKey, responseModel, multiplier, imageMultiplier, pricingAt)
 			baselineChannelPriced := s.resolveChannelPricing(ctx, billingModel, apiKey) != nil
 			if responseModelBillingAdoptable(cost, responseCost, baselineChannelPriced, responseChannelPriced) {

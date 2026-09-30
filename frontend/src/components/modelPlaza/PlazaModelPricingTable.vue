@@ -33,7 +33,7 @@
             class="border-l border-gray-100 pt-2 text-center dark:border-dark-700/60"
           >
             <div class="border-b border-gray-200 pb-2 text-gray-400 dark:border-dark-600 dark:text-dark-500">
-              {{ t('modelPlaza.table.officialPrice') }}
+              {{ t(models.some(model => model.official_pricing?.source === 'pricing_catalog') ? 'modelCatalog.referencePrice' : 'modelPlaza.table.officialPrice') }}
               <span class="ml-1 normal-case font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.unitPerMillion') }}</span>
             </div>
           </th>

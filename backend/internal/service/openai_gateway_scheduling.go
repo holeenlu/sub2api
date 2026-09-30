@@ -480,6 +480,9 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 			return "quota_auto_pause"
 		}
 	}
+	if !CatalogAccountAllowed(ctx, account) {
+		return "catalog_route_not_published"
+	}
 	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
 		return "model_not_supported"
 	}

@@ -858,6 +858,7 @@ func ProvideAPIKeyService(
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	ProvideModelCatalogService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
@@ -975,7 +976,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(ChannelCacheInvalidator), new(*ChannelService)),
 	NewModelPricingResolver,
 	ProvideModelPlazaService,
-	NewGroupModelCatalogService,
+	ProvideGroupModelCatalogService,
 	NewContentModerationService,
 	NewAffiliateService,
 	ProvidePaymentConfigService,
@@ -1087,4 +1088,21 @@ func ProvideModelPlazaService(channels ChannelRepository, groups GroupRepository
 	s := NewModelPlazaService(channels, groups, prices, billing, resolver)
 	s.catalog = catalog
 	return s
+}
+
+func ProvideModelCatalogService(repo ModelCatalogRepository, accounts AccountRepository, test *AccountTestService, settings *SettingService, prices *PricingService, resolver *ModelPricingResolver) *ModelCatalogService {
+	catalog := NewModelCatalogService(repo, accounts, test, settings, prices)
+	catalog.pricingResolver = resolver
+
+	catalog.Start()
+	return catalog
+}
+func ProvideGroupModelCatalogService(accounts AccountRepository, channels ChannelRepository, routes CompositeModelRouteRepository, gateway *OpenAIGatewayService, registry *ModelCatalogService, generic *GatewayService, channelService *ChannelService) *GroupModelCatalogService {
+	catalog := NewGroupModelCatalogService(accounts, channels, routes, gateway)
+	catalog.snapshots = registry
+	catalog.registry = registry
+	registry.groupCatalog = catalog
+	generic.modelCatalog = registry
+	channelService.modelCatalog = catalog
+	return catalog
 }

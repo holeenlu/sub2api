@@ -7,6 +7,7 @@ import Select from '@/components/common/Select.vue'
 const { events, fingerprint, ownKeys, invalidation, diagnose, getById, harvest } = vi.hoisted(() => ({
   events: vi.fn(), fingerprint: vi.fn(), ownKeys: vi.fn(), invalidation: vi.fn(), diagnose: vi.fn(), getById: vi.fn(), harvest: vi.fn()
 }))
+vi.mock('@/api/admin/modelCatalog',()=>({getCatalogTicketModels:vi.fn().mockRejectedValue(new Error('no saved catalog'))}))
 vi.mock('@/api/admin/codexTickets', () => ({
   events, fingerprint, ownKeys, invalidation, diagnose, harvest, refreshFingerprint: vi.fn()
 }))

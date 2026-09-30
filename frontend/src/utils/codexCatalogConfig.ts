@@ -90,6 +90,13 @@ export function selectCodexConfigModel(
   preferredModel: string
 ): string | null {
   const selectable = models.filter(isSelectableCodexModel)
+  const ranked=selectable.filter(model=>typeof model.priority==='number'&&Number.isFinite(model.priority))
+  if(ranked.length){
+    const bestPriority=Math.min(...ranked.map(model=>model.priority as number))
+    const best=ranked.filter(model=>model.priority===bestPriority)
+    return best.find(model=>model.slug===preferredModel)?.slug??best[0].slug
+  }
+  // Compatibility for old downloaded manifests without a recommendation field.
   let best: { model: CodexCatalogModel; rank: CodexModelRank } | null = null
   for (const model of selectable) {
     const rank = rankCodexModel(model.slug)

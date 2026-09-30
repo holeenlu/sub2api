@@ -9,7 +9,7 @@ const {
   showWarning,
   syncUpstreamModelsBulk,
   syncUpstreamModels,
-  syncUpstreamModelsPreview
+  syncUpstreamModelsPreview, getModelCatalog, refreshModelCatalog
 } = vi.hoisted(() => ({
   copyToClipboard: vi.fn().mockResolvedValue(true),
   showError: vi.fn(),
@@ -18,7 +18,7 @@ const {
   showWarning: vi.fn(),
   syncUpstreamModelsBulk: vi.fn(),
   syncUpstreamModels: vi.fn(),
-  syncUpstreamModelsPreview: vi.fn()
+  syncUpstreamModelsPreview: vi.fn(), getModelCatalog: vi.fn(), refreshModelCatalog: vi.fn()
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -53,6 +53,8 @@ vi.mock('@/api/admin/accounts', () => ({
     syncUpstreamModelsPreview
   }
 }))
+
+vi.mock('@/api/admin/modelCatalog', () => ({ getModelCatalog, refreshModelCatalog }))
 
 vi.mock('@/composables/useClipboard', () => ({
   useClipboard: () => ({
@@ -91,6 +93,11 @@ function findModelRow(wrapper: ReturnType<typeof mountSelector>, modelId: string
 
 describe('ModelWhitelistSelector', () => {
   beforeEach(() => {
+    getModelCatalog.mockReset().mockResolvedValue({ status: 'ready', revision: 'saved-v1', checked_at: '2026-09-30T00:00:00Z', models: [{ id: 'gpt-5.6-sol', display_name: 'Sol', lifecycle: 'active', access: 'listed', missing: [], endpoints: [] }] })
+    refreshModelCatalog.mockReset().mockImplementation(async (id: number) => {
+      const result = await syncUpstreamModels(id)
+      return { status: 'ready', revision: 'saved-v2', warnings: result.warnings ?? [], models: result.models.map((model: string) => ({ id: model, display_name: model, lifecycle: 'active', access: 'listed', missing: result.warnings?.length ? ['context_window'] : [], endpoints: [] })) }
+    })
     copyToClipboard.mockClear()
     showError.mockReset()
     showSuccess.mockReset()
@@ -134,6 +141,7 @@ describe('ModelWhitelistSelector', () => {
 
   it('copies a model ID without selecting the model', async () => {
     const wrapper = mountSelector()
+    await flushPromises()
     await wrapper.get('div.cursor-pointer').trigger('click')
 
     const row = findModelRow(wrapper, 'gpt-5.6-sol')
@@ -150,6 +158,7 @@ describe('ModelWhitelistSelector', () => {
 
   it('keeps the existing model selection behavior', async () => {
     const wrapper = mountSelector()
+    await flushPromises()
     await wrapper.get('div.cursor-pointer').trigger('click')
 
     const row = findModelRow(wrapper, 'gpt-5.6-sol')
@@ -161,7 +170,7 @@ describe('ModelWhitelistSelector', () => {
 
   // 实时交集是「上游现在支持什么」，不是「白名单应该是什么」：映射别名与刚下架
   // 的旧模型都不在里面，所以默认只做合并。
-  it('merges the live Anthropic intersection into the existing whitelist', async () => {
+  it('requires selecting the refreshed Anthropic intersection before changing the whitelist', async () => {
     syncUpstreamModelsBulk.mockResolvedValue({
       models: ['claude-sonnet-5', 'claude-opus-5'],
       failures: [],
@@ -182,6 +191,8 @@ describe('ModelWhitelistSelector', () => {
       account_ids: [11, 12],
       filters: undefined
     })
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await wrapper.findAll('button').find(button=>button.text()==='modelCatalog.selectAvailable')!.trigger('click')
     expect(wrapper.emitted('update:modelValue')).toEqual([
       [['claude-alias', 'claude-sonnet-5', 'claude-opus-5']]
     ])
@@ -208,11 +219,11 @@ describe('ModelWhitelistSelector', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     await wrapper.get('[data-testid="replace-with-live-models"]').trigger('click')
     expect(confirmSpy).toHaveBeenCalled()
-    expect(wrapper.emitted('update:modelValue')).toHaveLength(1)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
 
     confirmSpy.mockReturnValue(true)
     await wrapper.get('[data-testid="replace-with-live-models"]').trigger('click')
-    expect(wrapper.emitted('update:modelValue')?.[1]).toEqual([['claude-sonnet-5']])
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([['claude-sonnet-5']])
     confirmSpy.mockRestore()
   })
 
@@ -329,14 +340,13 @@ describe('ModelWhitelistSelector', () => {
     })
 
     const syncButton = wrapper
-      .findAll('button')
-      .find(button => button.text() === 'admin.accounts.syncUpstreamModels')
-    expect(syncButton).toBeDefined()
+      .find('[data-testid="sync-upstream-models"]')
+    expect(syncButton.exists()).toBe(true)
     await syncButton!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.emitted('update:modelValue')).toEqual([[['x-preview-f-free']]])
-    expect(showWarning).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsMetadataIncomplete')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.find('[data-testid="catalog-incomplete"]').exists()).toBe(true)
     expect(showSuccess).not.toHaveBeenCalled()
   })
 
@@ -364,15 +374,14 @@ describe('ModelWhitelistSelector', () => {
     })
 
     const syncButton = wrapper
-      .findAll('button')
-      .find(button => button.text() === 'admin.accounts.syncUpstreamModels')
-    expect(syncButton).toBeDefined()
+      .find('[data-testid="sync-upstream-models"]')
+    expect(syncButton.exists()).toBe(true)
     await syncButton!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.emitted('update:modelValue')).toEqual([[['gpt-6-astra', 'gpt-image-2']]])
-    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsSuccess')
-    expect(showWarning).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsMetadataPartial')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(refreshModelCatalog).toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="catalog-incomplete"]').exists()).toBe(true)
   })
 
   it('reports a successful preview so account creation can persist metadata', async () => {
@@ -395,16 +404,15 @@ describe('ModelWhitelistSelector', () => {
       },
     })
     const syncButton = wrapper
-      .findAll('button')
-      .find(button => button.text() === 'admin.accounts.syncUpstreamModels')
+      .find('[data-testid="sync-upstream-models"]')
 
-    expect(syncButton).toBeDefined()
+    expect(syncButton.exists()).toBe(true)
     await syncButton?.trigger('click')
     await flushPromises()
 
     expect(syncUpstreamModelsPreview).toHaveBeenCalledOnce()
     expect(wrapper.emitted('upstream-synced')).toEqual([[]])
-    expect(wrapper.emitted('update:modelValue')).toEqual([[['x-preview-f-free']]])
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
 
   it('shows the upstream sync button for OpenCode Go create-account credentials', () => {
@@ -418,10 +426,9 @@ describe('ModelWhitelistSelector', () => {
       },
     })
     const syncButton = wrapper
-      .findAll('button')
-      .find(button => button.text() === 'admin.accounts.syncUpstreamModels')
+      .find('[data-testid="sync-upstream-models"]')
 
-    expect(syncButton).toBeDefined()
+    expect(syncButton.exists()).toBe(true)
     expect(syncButton?.exists()).toBe(true)
   })
   it('fetches the live OpenAI batch catalog and preserves existing whitelist entries', async () => {
@@ -433,6 +440,8 @@ describe('ModelWhitelistSelector', () => {
     await flushPromises()
     expect(syncUpstreamModelsBulk).toHaveBeenCalledWith({ account_ids: [41, 42], filters: undefined })
     expect(syncUpstreamModels).not.toHaveBeenCalled()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await wrapper.findAll('button').find(button=>button.text()==='modelCatalog.selectAvailable')!.trigger('click')
     expect(wrapper.emitted('update:modelValue')).toEqual([[['custom-alias', 'gpt-new']]])
   })
 
@@ -443,7 +452,7 @@ describe('ModelWhitelistSelector', () => {
     await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
     await flushPromises()
     expect(syncUpstreamModelsBulk).toHaveBeenCalledWith({ account_ids: undefined, filters })
-    expect(wrapper.emitted('update:modelValue')).toEqual([[['gpt-new']]])
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
 
   it('does not offer replacement from a failed partial result', async () => {

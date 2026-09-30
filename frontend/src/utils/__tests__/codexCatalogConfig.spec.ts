@@ -37,13 +37,13 @@ describe('codexCatalogConfig', () => {
       expect(selectCodexConfigModel(catalog(...slugs), slugs[0])).toBe(slugs[1])
     })
 
-    it('does not treat manifest priority as intelligence or mutate its order', () => {
+    it('uses the published recommendation priority without mutating catalog order', () => {
       const models = [
         { slug: 'gpt-6-luna', priority: 0 },
         { slug: 'gpt-6-astra', priority: 99 },
         { slug: 'gpt-6-sol', priority: 1 }
       ]
-      expect(selectCodexConfigModel(models, 'gpt-6-sol')).toBe('gpt-6-astra')
+      expect(selectCodexConfigModel(models, 'gpt-6-sol')).toBe('gpt-6-luna')
       expect(models.map((model) => model.slug)).toEqual(['gpt-6-luna', 'gpt-6-astra', 'gpt-6-sol'])
     })
 

@@ -73,6 +73,8 @@
               </span>
               <ModelIcon :model="model.value" size="18px" />
               <span class="truncate text-gray-900 dark:text-white">{{ model.value }}</span>
+              <span v-if="model.pending" class="text-xs text-amber-600">{{ t('modelCatalog.pending') }}</span>
+              <span v-else-if="model.lifecycle === 'deprecated'" class="text-xs text-amber-600">{{ t('modelCatalog.deprecated') }}</span>
             </button>
             <button
               type="button"
@@ -92,23 +94,38 @@
       </div>
     </div>
 
+    <p v-if="catalogLoading" class="mb-2 text-xs text-gray-500" role="status">{{ t('modelCatalog.loading') }}</p>
+    <p v-else-if="catalogError" class="mb-2 text-xs text-amber-600" role="alert">{{ catalogError }}</p>
+    <p v-else-if="!catalogModels.length" class="mb-2 text-xs text-gray-500">{{ t('modelCatalog.notSynced') }}</p>
+    <p v-else class="mb-2 text-xs text-gray-500" data-testid="catalog-status">
+      {{ t('modelCatalog.updated', { time: catalog?.checked_at ? new Date(catalog.checked_at).toLocaleString() : '—' }) }}
+      <span v-if="catalog?.status === 'stale'"> · {{ t('modelCatalog.stale') }}</span>
+    </p>
+    <p v-if="selectedRetiredModels.length" class="mb-2 text-xs text-amber-600" data-testid="retired-models">
+      {{ t('modelCatalog.retiredSelected', { models: selectedRetiredModels.join(', ') }) }}
+      <button type="button" class="ml-2 underline" @click="removeRetiredModels">{{ t('modelCatalog.removeRetired') }}</button>
+    </p>
+    <p v-if="catalogModels.some(model => model.missing?.length)" data-testid="catalog-incomplete" class="mb-2 text-xs text-amber-600">{{ t('modelCatalog.capabilitiesPending') }}</p>
+    <a v-if="accountId" :href="`/admin/model-catalog?account_id=${accountId}`" target="_blank" rel="noopener" class="mb-3 inline-block text-xs text-primary-600 underline">{{ t('modelCatalog.manage') }}</a>
     <!-- Quick Actions -->
     <div class="mb-4 flex flex-wrap gap-2">
       <button
         type="button"
         @click="fillRelated"
+        :disabled="catalogLoading || !availableOptions.length"
         class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
       >
-        {{ t('admin.accounts.fillRelatedModels') }}
+        {{ t('modelCatalog.selectAvailable') }}
       </button>
       <button
         v-if="canSyncUpstream"
         type="button"
+        data-testid="sync-upstream-models"
         @click="syncUpstreamModels"
         :disabled="isSyncingUpstream"
         class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
       >
-        {{ isSyncingUpstream ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
+        {{ isSyncingUpstream || catalogLoading ? t('admin.accounts.syncUpstreamModelsLoading') : t('modelCatalog.refresh') }}
       </button>
       <button
         v-if="canSyncBatch"
@@ -158,6 +175,7 @@
       </ul>
     </div>
 
+    <button v-if="!canSyncUpstream && !canSyncBatch" type="button" class="mb-3 text-xs text-primary-600 underline" :disabled="catalogLoading" @click="loadCatalog()">{{ t('modelCatalog.refresh') }}</button>
     <!-- Custom Model Input -->
     <div class="mb-3">
       <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.accounts.customModelName') }}</label>
@@ -197,7 +215,7 @@ import { useClipboard } from '@/composables/useClipboard'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { allModels, getModelsByPlatform } from '@/composables/useModelWhitelist'
+import { getModelCatalog, refreshModelCatalog, type ModelCatalog, type CatalogModel } from '@/api/admin/modelCatalog'
 
 const { t } = useI18n()
 
@@ -304,20 +322,48 @@ watch(
   { deep: true, flush: 'sync' }
 )
 
-const availableOptions = computed(() => {
-  if (normalizedPlatforms.value.length === 0) {
-    return allModels
-  }
+const catalog = ref<ModelCatalog | null>(null)
+const catalogModels = ref<CatalogModel[]>([])
+const catalogLoading = ref(false)
+const catalogError = ref('')
+let catalogRequest = 0
+let catalogController: AbortController | undefined
+const retiredModels = computed(() => new Set(catalogModels.value.filter(m => m.lifecycle === 'retired').map(m => m.id)))
+const selectedRetiredModels = computed(() => props.modelValue.filter(id => retiredModels.value.has(id)))
+const availableOptions = computed(() => catalogModels.value
+  .filter(m => m.lifecycle !== 'retired')
+  .map(m => ({ value: m.id, label: m.display_name || m.id, pending: m.access !== 'listed' && m.access !== 'observed', lifecycle: m.lifecycle })))
 
-  const allowedModels = new Set<string>()
-  for (const platform of normalizedPlatforms.value) {
-    for (const model of getModelsByPlatform(platform)) {
-      allowedModels.add(model)
+async function loadCatalog(refresh = false) {
+  const serial = ++catalogRequest
+  catalogController?.abort()
+  catalogController = new AbortController()
+  const signal = catalogController.signal
+  catalogLoading.value = true
+  catalogError.value = ''
+  try {
+    const results = props.accountId
+      ? [await (refresh ? refreshModelCatalog(props.accountId, signal) : getModelCatalog({ account_id: props.accountId }, signal))]
+      : await Promise.all((normalizedPlatforms.value.length ? normalizedPlatforms.value : ['']).map(platform => getModelCatalog({ platform }, signal)))
+    if (serial !== catalogRequest) return
+    catalog.value = results[0] ?? null
+    const entries = new Map<string, CatalogModel>()
+    for (const result of results) for (const entry of result.models) if (!entries.has(entry.id)) entries.set(entry.id, entry)
+    catalogModels.value = [...entries.values()]
+  } catch (error) {
+    if (serial === catalogRequest && !(error instanceof DOMException && error.name === 'AbortError')) {
+      catalogError.value = t('modelCatalog.loadFailed')
     }
-  }
+  } finally { if (serial === catalogRequest) catalogLoading.value = false }
+}
+watch(() => [props.accountId, normalizedPlatforms.value.join(',')], () => {
+  catalog.value = null
+  catalogModels.value = []
+  void loadCatalog()
+}, { immediate: true })
+onBeforeUnmount(() => { ++catalogRequest; catalogController?.abort() })
 
-  return allModels.filter(model => allowedModels.has(model.value))
-})
+const removeRetiredModels = () => emit('update:modelValue', props.modelValue.filter(id => !retiredModels.value.has(id)))
 
 const filteredModels = computed(() => {
   const query = searchQuery.value.toLowerCase().trim()
@@ -369,15 +415,13 @@ const handleEnter = () => {
 }
 
 const fillRelated = () => {
-  const newModels = [...props.modelValue]
-  for (const platform of normalizedPlatforms.value) {
-    for (const model of getModelsByPlatform(platform)) {
-      if (!newModels.includes(model)) {
-        newModels.push(model)
-      }
-    }
+  const values = new Set(props.modelValue)
+  for (const model of availableOptions.value) {
+    if (model.pending) continue
+    const conflict = props.modelMappings?.some(mapping => mapping.from.trim() === model.value && mapping.to.trim() !== model.value)
+    if (!conflict) values.add(model.value)
   }
-  emit('update:modelValue', newModels)
+  emit('update:modelValue', [...values])
 }
 
 const syncUpstreamModels = async () => {
@@ -388,7 +432,8 @@ const syncUpstreamModels = async () => {
   try {
     let result
     if (props.accountId) {
-      result = await accountsAPI.syncUpstreamModels(props.accountId)
+      await loadCatalog(true)
+      return
     } else if (props.syncCredentials) {
       result = await accountsAPI.syncUpstreamModelsPreview(props.syncCredentials as SyncUpstreamPreviewParams)
     } else {
@@ -405,16 +450,8 @@ const syncUpstreamModels = async () => {
       emit('upstream-synced')
     }
 
-    const newModels = [...props.modelValue]
-    let addedCount = 0
-    for (const model of upstreamModels) {
-      if (!newModels.includes(model)) {
-        newModels.push(model)
-        addedCount += 1
-      }
-    }
-
-    emit('update:modelValue', newModels)
+    catalogModels.value = upstreamModels.map(id => ({ id, display_name: id, platform: props.platform || '', kind: 'unknown', lifecycle: 'active', access: 'listed', source: 'upstream_preview', metadata: result.metadata?.[id] ?? { id }, missing: [], endpoints: [] }))
+    const addedCount = upstreamModels.filter(id => !props.modelValue.includes(id)).length
     const warnings = result.warnings ?? []
     const hasPartialMetadata = warnings.some(
       warning => warning.code === 'upstream_model_metadata_partial'
@@ -445,6 +482,7 @@ const syncBatchModels = async () => {
   if (isSyncingBatch.value || !canSyncBatch.value) return
 
   const requestVersion = ++batchRequestVersion
+  ++catalogRequest;catalogController?.abort();catalogLoading.value=false
   isSyncingBatch.value = true
   liveModels.value = []
   liveFailures.value = []
@@ -473,26 +511,11 @@ const syncBatchModels = async () => {
 
     liveModels.value = models
 
-    // 默认合并：实时列表是「上游现在确实支持什么」，不是「这个白名单应该是
-    // 什么」。整体替换要管理员在看到差异之后再确认一次。
-    const merged = [...props.modelValue]
-    let addedCount = 0
-    for (const model of models) {
-      if (!merged.includes(model)) {
-        merged.push(model)
-        addedCount += 1
-      }
-    }
-    emit('update:modelValue', merged)
-
-    if (addedCount > 0) {
-      appStore.showSuccess(t('admin.accounts.syncLiveAnthropicModelsSuccess', {
-        count: addedCount,
-        total: models.length
-      }))
-    } else {
-      appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: models.length }))
-    }
+    // A successful bulk intersection updates candidates only. Applying it to
+    // account restrictions remains an explicit form action.
+    catalog.value = { revision: '', platform: props.platform ?? '', status: 'ready', checked_at: new Date().toISOString(), updated_at: new Date().toISOString(), models: models.map(id => ({ id, display_name: id, platform: props.platform ?? '', kind: 'unknown', lifecycle: 'unknown', access: 'listed', source: 'upstream_bulk', metadata: {id}, missing: [], endpoints: [] })) }
+    catalogModels.value=catalog.value.models
+    appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: models.length }))
   } catch (error) {
     if (requestVersion !== batchRequestVersion) return
     appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message: extractApiErrorMessage(error, t('admin.accounts.syncUpstreamModelsFailed')) }))
