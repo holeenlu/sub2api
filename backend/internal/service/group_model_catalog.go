@@ -350,9 +350,8 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 				if a.Platform != platform && !(mixedListingAccountAllowed(platform, a) && mixedListingModelAllowed(platform, mapped)) {
 					continue
 				}
-				if pinned && !pinnedIDs[a.ID] {
-					continue
-				}
+				// Pinned accounts only choose where the listing comes from; every
+				// active group member that supports the model remains routable.
 				if !a.IsModelSupported(mapped) {
 					continue
 				}

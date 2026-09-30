@@ -566,7 +566,7 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.text()).not.toContain('GPT-5.3 Codex Spark')
   })
 
-  it('仅勾选模型限制且白名单留空时，应提交空 model_mapping 以支持所有模型', async () => {
+  it('批量固定空名单明确拒绝全部，并保留每个账号的别名', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['anthropic'],
       selectedTypes: ['apikey']
@@ -578,10 +578,21 @@ describe('BulkEditAccountModal', () => {
 
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
-      credentials: {
-        model_mapping: {}
-      }
+      model_catalog_policy: { mode: 'fixed', models: [], excluded: [] }
     })
+  })
+
+  it('批量跟随策略保存排除项，并保留各账号已有别名', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-model-restriction-enabled').setValue(true)
+    await wrapper.get('#bulk-account-policy').setValue('follow')
+    await wrapper.get('[data-testid="account-catalog-policy"] textarea').setValue('blocked\n blocked ')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      model_catalog_policy: { mode: 'follow', models: [], excluded: ['blocked'] }
+    })
+    expect(wrapper.findComponent(ModelWhitelistSelector).exists()).toBe(false)
   })
 
   it('全部目标为 Grok OAuth 时，官方主机 base_url 作为手动端点切换正常提交', async () => {
@@ -1292,7 +1303,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('开启 OpenAI 自动透传时不再同时提交模型限制', async () => {
+  it('开启 OpenAI 自动透传时仍可保存固定访问策略', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -1308,9 +1319,10 @@ describe('BulkEditAccountModal', () => {
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
       extra: {
         openai_passthrough: true
-      }
+      },
+      model_catalog_policy: { mode: 'fixed', models: [], excluded: [] }
     })
-    expect(wrapper.text()).toContain('admin.accounts.openai.modelRestrictionDisabledByPassthrough')
+    expect(wrapper.find('[data-testid="account-catalog-policy"]').exists()).toBe(true)
   })
 
   it('filtered-results 模式下应提交 filters 而不是 account_ids', async () => {

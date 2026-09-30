@@ -17,6 +17,12 @@ import {
 } from "../groupModelAllowlist";
 
 describe("groupModelAllowlist", () => {
+  it("keeps a fixed empty whitelist empty after loading candidates", () => {
+    const state = createModelAllowlistState({ mode: "fixed", enabled: true, models: [] });
+    setModelAllowlistCandidates(state, ["new-model"]);
+    expect(state.items).toEqual([{ id: "new-model", selected: false }]);
+    expect(buildModelAllowlistConfig(state).models).toEqual([]);
+  });
   it("selects all default candidates for a new disabled config", () => {
     const state = createModelAllowlistState();
 

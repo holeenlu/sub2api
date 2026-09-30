@@ -56,7 +56,7 @@ supports_websockets = false
 
 Run `codex` in the same terminal. Disabling WebSockets provides an HTTP/SSE starting point; it does not mean the gateway lacks WebSocket routes.
 
-The OpenAI group generates a different shape: provider ID `OpenAI`, the main and review models, `[features]`, and the default model catalog path. Fetch and save the catalog before first use. The default **Legacy** mode downloads `config.toml` plus `auth.json` and sets `requires_openai_auth = true`. **API key** mode instead sets `requires_openai_auth = false` and `experimental_bearer_token`; fully restart Codex after switching. Do not combine the two modes or merge a routed `gateway` provider table into the OpenAI group's `OpenAI` provider.
+The OpenAI group generates a different shape: provider ID `OpenAI`, the main and review models, `[features]`, and the remote catalog address `model_catalog_url`; copy it and it is ready to use. The dialog defaults to **Codex CLI (WebSocket)** and **API key** mode, which sets `requires_openai_auth = false` and `experimental_bearer_token`, so only `config.toml` is needed. **Legacy** mode sets `requires_openai_auth = true` and also downloads `auth.json`. Fully restart Codex after switching. Do not combine the two modes or merge a routed `gateway` provider table into the OpenAI group's `OpenAI` provider.
 
 ## Desktop: make the key available
 
@@ -72,15 +72,15 @@ For an icon launch, select **API key** in the OpenAI group's Use key modal and d
 
 ## Group model catalog
 
-This section applies only to OpenAI/Composite groups. Other routed groups do not support dedicated catalog downloads and should not set `model_catalog_json`. Query ordinary `GET /v1/models` and set `model` to an exact ID; do not save that list response as a Codex manifest.
+This section applies only to OpenAI/Composite groups. Other routed groups have no dedicated catalog and should not set `model_catalog_url`. Query ordinary `GET /v1/models` and set `model` to an exact ID; do not treat that list response as a Codex manifest.
 
-In **API keys → Use key → Codex**, click **Fetch catalog**, then **Download catalog** after a catalog with usable Codex models is returned. A successful manual fetch may update `model`, `review_model`, and reasoning settings. If fetching fails or returns no usable models, the default configuration remains available to copy and download. Generated configuration always includes `model_catalog_json = "~/.codex/codex-models.json"` without waiting for a catalog request. Download and save the catalog before starting Codex for the first time; if a refresh fails, keep using your previously saved file. Save `codex-models.json` in a stable location and make sure its top-level path in `config.toml` matches the actual file location, for example:
+The generated `config.toml` includes this in the provider table:
 
 ```toml
-model_catalog_json = "/absolute/path/.codex/codex-models.json"
+model_catalog_url = "{{API_ROOT}}/v1/models"
 ```
 
-Windows TOML can use a literal path such as `model_catalog_json = 'C:\Users\your-name\.codex\codex-models.json'`. Refresh the catalog when group access changes. If download fails, diagnose with the minimal configuration first.
+Codex 0.156.0 or later reads that address with the current key at startup and receives the catalog this site computes for the key; restart Codex after group access changes to pick up the new catalog. **Check connection / view models for this key** is only a check; it may update `model`, `review_model`, and reasoning settings in the dialog but is not a setup step. Local catalog files are no longer supported, and the `codex-models.json` download and update script have been removed; delete `model_catalog_json` from older configurations. Do not edit model names to bypass access rules.
 
 ## Verify and troubleshoot
 

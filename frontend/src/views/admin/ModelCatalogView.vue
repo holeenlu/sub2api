@@ -35,19 +35,17 @@
           </table>
         </div>
       </section>
-      <form v-if="catalog?.account_id && catalog.account_id === Number(accountID)" class="card space-y-3 p-5" @submit.prevent="savePolicy">
+      <section v-if="catalog?.account_id && catalog.account_id === Number(accountID)" class="card space-y-3 p-5">
         <h2 class="font-semibold">{{ t('modelCatalog.accountPolicy') }}</h2>
-        <p class="text-sm text-gray-500">{{ t('modelCatalog.policyHint') }}</p>
-        <select v-model="policy.mode" class="input"><option value="legacy">{{ t('modelCatalog.legacy') }}</option><option value="follow">{{ t('modelCatalog.follow') }}</option><option value="fixed">{{ t('modelCatalog.fixed') }}</option></select>
-        <label v-if="policy.mode === 'fixed'" class="block">{{ t('modelCatalog.allowed') }}<textarea v-model="allowedText" class="input h-32 font-mono text-xs" /></label>
-        <label v-if="policy.mode !== 'legacy'" class="block">{{ t('modelCatalog.exclude') }}<textarea v-model="excludedText" class="input h-24 font-mono text-xs" /></label>
-        <button class="btn btn-primary" :disabled="busy">{{ t('modelCatalog.save') }}</button>
+        <p class="text-sm">{{ t(`modelCatalog.${policy.mode}`) }}<span v-if="policy.mode !== 'legacy' && policy.excluded.length"> · {{ t('modelCatalog.excludedCount', { count: policy.excluded.length }) }}</span></p>
+        <p class="text-sm text-gray-500">{{ t('modelCatalog.policyOnAccountPage') }} <router-link class="text-primary-600 hover:underline" to="/admin/accounts">{{ t('modelCatalog.openAccounts') }}</router-link></p>
         <h3 class="font-medium">{{ t('modelCatalog.history') }}</h3>
         <div v-for="release in history" :key="release.revision + release.created_at" class="flex items-center gap-3 text-xs">
           <time>{{ new Date(release.created_at).toLocaleString() }}</time><code>{{ release.revision.slice(0,12) }}</code><span>{{ release.operation }}</span>
           <button type="button" class="btn btn-secondary" :disabled="busy || release.revision===catalog.revision" @click="restore(release.revision)">{{ t('modelCatalog.restore') }}</button>
         </div>
-      </form>
+      </section>
+      <GroupCatalogSources :initial-group-id="String(route.query.group_id ?? '')" />
       <form class="card space-y-3 p-5" @submit.prevent="compare">
         <h2 class="font-semibold">{{ t('modelCatalog.compare') }}</h2>
         <p class="text-sm text-gray-500">{{ t('modelCatalog.compareHint') }}</p>
@@ -77,7 +75,8 @@ import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import { getModelCatalog, refreshModelCatalog, getCatalogSettings, saveCatalogSettings, getCatalogRegistry, saveCatalogRegistry, saveAccountCatalogPolicy, getCatalogHistory, rollbackCatalog, getCatalogPrices, saveCatalogPrices, explainCatalog, type CatalogPolicy, type CatalogRelease, type ModelCatalog, type CatalogSyncSettings } from '@/api/admin/modelCatalog'
+import GroupCatalogSources from '@/components/admin/group/GroupCatalogSources.vue'
+import { getModelCatalog, refreshModelCatalog, getCatalogSettings, saveCatalogSettings, getCatalogRegistry, saveCatalogRegistry, getCatalogHistory, rollbackCatalog, getCatalogPrices, saveCatalogPrices, explainCatalog, type CatalogPolicy, type CatalogRelease, type ModelCatalog, type CatalogSyncSettings } from '@/api/admin/modelCatalog'
 const { t } = useI18n()
 const settings = ref<CatalogSyncSettings | null>(null)
 const catalog = ref<ModelCatalog | null>(null)
@@ -86,13 +85,11 @@ const platform = ref('openai')
 const route=useRoute()
 const accountID = ref(typeof route.query.account_id==='string'?route.query.account_id:'')
 const policy=ref<CatalogPolicy>({mode:'legacy',models:[],excluded:[]})
-const allowedText=ref('');const excludedText=ref('');const history=ref<CatalogRelease[]>([])
+const history=ref<CatalogRelease[]>([])
 const prices=ref('{}');const priceRevision=ref('');const groupID=ref('');const comparison=ref('')
-function lines(value:string){return [...new Set(value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean))]}
 async function loadAccountState(){if(!catalog.value?.account_id){history.value=[];return}
- policy.value=catalog.value.policy??{mode:'legacy',models:[],excluded:[]};allowedText.value=policy.value.models.join('\n');excludedText.value=policy.value.excluded.join('\n');history.value=await getCatalogHistory(catalog.value.account_id)
+ policy.value=catalog.value.policy??{mode:'legacy',models:[],excluded:[]};history.value=await getCatalogHistory(catalog.value.account_id)
 }
-async function savePolicy(){await action(async()=>{await saveAccountCatalogPolicy(Number(accountID.value),{mode:policy.value.mode,models:lines(allowedText.value),excluded:lines(excludedText.value)});saved.value=true})}
 async function restore(revision:string){await action(async()=>{await rollbackCatalog(Number(accountID.value),revision);catalog.value=await getModelCatalog({account_id:Number(accountID.value)});await loadAccountState();saved.value=true})}
 async function savePrices(){await action(async()=>{const entries:unknown=JSON.parse(prices.value);if(!entries||typeof entries!=='object'||Array.isArray(entries))throw new Error('invalid prices');await saveCatalogPrices(entries as Record<string,unknown>);priceRevision.value=(await getCatalogPrices()).revision;saved.value=true})}
 async function compare(){await action(async()=>{comparison.value=JSON.stringify(await explainCatalog(Number(groupID.value)),null,2)})}

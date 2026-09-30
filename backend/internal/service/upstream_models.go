@@ -364,6 +364,15 @@ func configuredUpstreamModelsForCapabilitySync(account *Account) []string {
 		return nil
 	}
 	models := make([]string, 0)
+	policy := accountModelCatalogPolicy(account)
+	if policy.Mode == "fixed" {
+		for _, model := range policy.Models {
+			mapped := strings.TrimSpace(accountCatalogPolicyModel(account, model))
+			if mapped != "" && !strings.Contains(mapped, "*") {
+				models = append(models, mapped)
+			}
+		}
+	}
 	for _, mappedModel := range account.GetModelMapping() {
 		mappedModel = strings.TrimSpace(mappedModel)
 		if mappedModel == "" || strings.Contains(mappedModel, "*") {

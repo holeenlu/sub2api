@@ -749,7 +749,7 @@ export default {
         modelMappingAliases: '模型映射仅作别名，允许其它原生模型',
         modelMappingAliasesHint: '仅适用于普通 OpenAI OAuth 账号。开启后映射只改写指定模型，其他原生模型仍可用；关闭后非空映射仍作为模型白名单。分组白名单始终生效，已有账号不会自动切换。',
         changeModelMappingScope: '修改模型映射范围',
-        bulkModelMappingAliasesHint: '仅修改此项时保留已有映射和 BPS 设置；关闭别名模式恢复白名单。修改影子账号请使用其专属模型配置。',
+        bulkModelMappingAliasesHint: '此兼容选项仅影响“沿用原有模型限制”的账号；固定或跟随策略仍决定允许范围。仅修改此项会保留已有映射和 BPS 设置。',
         autoBPS: '降智后自动开启 BPS',
         autoBPSDesc: '按下方配置的间隔检测（新规则默认每 2 分钟，走正常协议，不经过 BPS）。探针仅作启发式判断，达到条件后按所选设置开启 BPS；网络错误或结果不完整时不改账号。可在自动 BPS 页面查看记录。',
         autoBPSLoading: '正在读取本账号的自动开启 BPS 规则…',

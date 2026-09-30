@@ -1103,7 +1103,7 @@ export default {
       },
       modelPricing: {
         title: 'Per-model group pricing',
-        description: 'Overrides channel and built-in prices for matching models. Long-context tiers come from official presets — do not enter custom intervals. Use per-request tiers such as realtime, tts, and stt for audio.',
+        description: 'Set separate prices only for exception models; empty fields keep inheriting the channel price card or reference price, so the group multiplier is usually enough. Long-context tiers come from official presets — do not enter custom intervals. Use per-request tiers such as realtime, tts, and stt for audio.',
         longContext: 'Enable long-context tier pricing',
         longContextHint: 'When checked, channel intervals or official preset tiers apply. Otherwise the first tier is used unless the account explicitly enables long-context billing.',
         add: 'Add model price'
@@ -1151,6 +1151,7 @@ export default {
         selectAll: 'Select all',
         invertSelection: 'Invert',
         wildcardTag: 'wildcard',
+        pricingPendingTag: 'pricing pending',
         customPlaceholder: 'Custom entry, e.g. gpt-*-codex or claude-*',
         addCustom: 'Add',
         emptySelectionError: 'The model allowlist is enabled; select or add at least one model entry',
@@ -1160,6 +1161,8 @@ export default {
         }
       },
       codexModelsManifest: {
+        advancedTitle: 'Advanced: model catalog source accounts',
+        advancedHint: 'Only for upstreams without a complete catalog or when a fixed reference source is needed. This only chooses which accounts the model list is read from; it does not limit which accounts can serve requests, and a reference account does not prove other accounts have the same access.',
         title: 'Pinned Accounts for Model Lists',
         hint: 'When enabled, ordinary model lists and Codex Model Manifest are discovered from the pinned accounts first, then merged and filtered using account mappings and the group model list. Rate-limited or overloaded pinned accounts are still used.',
         enable: 'Fetch model lists with specific accounts',

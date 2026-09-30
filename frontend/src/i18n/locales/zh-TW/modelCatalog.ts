@@ -1,14 +1,16 @@
+// 此檔案由 tools/zh-tw/gen-locale.mjs 依 locales/zh 自動產生，請勿手動修改。
+// 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
 export default {
   "title": "模型與同步",
   "refresh": "重新整理可用模型",
   "selectAvailable": "全選目前可用模型",
   "loading": "正在讀取已儲存的模型目錄…",
-  "loadFailed": "無法重新整理目錄，已保留先前載入的資料。",
+  "loadFailed": "無法重新整理目錄，已保留此前載入的資料。",
   "notSynced": "尚無已儲存目錄，請重新整理上游資料或手動新增模型。",
   "updated": "目錄檢查時間：{time}",
   "stale": "使用上次成功的目錄",
   "retiredSelected": "目前選擇包含已停服模型：{models}",
-  "removeRetired": "移除已停服項目",
+  "removeRetired": "移除已停服項",
   "pending": "帳號權限待確認",
   "deprecated": "即將停服",
   "settings": "同步設定",
@@ -21,7 +23,7 @@ export default {
   "saved": "已儲存",
   "error": "操作失敗",
   "registry": "補充模型資料",
-  "registryHint": "按供應商填寫 JSON 模型記錄，用於補充缺少的能力和圖片等模型，不代表帳號已取得權限。",
+  "registryHint": "按供應商填寫 JSON 模型記錄，用於補充缺失能力和圖片等模型，不代表帳號已經獲得權限。",
   "registryInvalid": "請輸入有效的模型記錄 JSON 陣列。",
   "platform": "平台",
   "accountID": "帳號 ID（可選）",
@@ -30,39 +32,43 @@ export default {
   "kind": "模型類型",
   "source": "來源",
   "model": "模型",
-  "empty": "沒有符合的目錄記錄",
+  "empty": "沒有匹配的目錄記錄",
   "history": "歷史版本",
   "revision": "版本",
   "accountPolicy": "模型開放策略",
   "legacy": "沿用原有模型限制",
   "follow": "跟隨已發現模型",
-  "fixed": "固定模型清單",
+  "fixed": "固定模型列表",
   "exclude": "排除模型（每行一個）",
   "policyHint": "重新整理模型資料不會覆蓋已儲存的權限規則。",
-  "manage": "管理模型資料來源",
+  "manage": "管理模型資料源",
   "retired": "已停服",
   "referencePrice": "參考價格",
   "priceSource": "價格來源",
   "catalogVersion": "目錄版本",
-  "downloadUpdater": "下載目錄更新工具",
-  "setupUnavailable": "目前金鑰尚無已發布的可用 Codex 模型，請重新整理帳號目錄或檢查分組權限。",
-  "capabilitiesPending": "部分模型能力資料尚未齊全，請在選擇用戶端前查看目錄詳情。"
+  "setupUnavailable": "目前金鑰尚無已釋出的可用 Codex 模型，請重新整理帳號目錄或檢查分組權限。",
+  "capabilitiesPending": "部分模型能力資料尚未齊全，請在選擇用戶端前檢視目錄詳情。"
 ,
   "allowed": "允許模型（每行一個）",
   "restore": "恢復資料版本",
   "compare": "分組目錄對比",
-  "compareHint": "先比較舊行為與新目錄，再選擇跟隨或固定模式。這兩種模式將啟用目錄和價格准入檢查。",
+  "compareHint": "先比較舊行為與新目錄，再選擇跟隨或固定模式。這兩種模式將啟用目錄和價格准入驗證。",
   "groupID": "分組 ID",
   "priceData": "補充參考價格",
-  "priceHint": "使用 JSON 物件補充已核實的缺失型號價格。除欄位另有單位外，價格單位為美元/token；銷售覆蓋仍在分組和渠道中設定。"
+  "priceHint": "使用 JSON 物件補充已核實的缺失型號價格。除欄位另有單位外，價格單位為美元/token；銷售覆蓋仍在分組和通道中設定。"
 ,
   "fingerprintPending":"指紋資料待更新，仍遵守目前票據策略。"
 ,
-  "priceInterval":"價格更新間隔（秒）"
+  "priceInterval":"價格重新整理間隔（秒）"
 ,
   "priorityAccounts":"重點帳號 ID（逗號分隔）",
   "priorityInterval":"重點來源同步間隔（秒）"
 ,
   "deletionAlert":"目錄減少提醒閾值（%）",
-  "visibilityDrop":"上游目錄中較多模型已不再列出，請檢查來源歷史。已撤銷的存取仍會被拒絕。"
+  "visibilityDrop":"上游目錄中較多模型已不再列出，請檢查來源歷史。已撤銷的存取仍會被拒絕。",
+  "policyModeHint":{"legacy": "沿用帳號原有白名單、別名與平台預設規則；切換到固定或跟隨後，由開放策略決定允許範圍。", "follow": "開放上游已列出或已有成功呼叫記錄的模型，排除項優先。需要先重新整理一次模型資料。下方白名單不限制範圍，對應仍用於改名。", "fixed": "只開放下方白名單中的模型，留空表示全部拒絕；排除項優先。"},
+  "excludedCount":"排除 {count} 項",
+  "policyOnAccountPage":"帳號的開放策略、白名單和排除項統一在帳號編輯頁維護。",
+  "openAccounts":"前往帳號管理",
+  "passthroughPolicyHint": "透傳保持請求模型名不變，別名對應不生效；固定或跟隨策略仍會限制可存取的模型。"
 }

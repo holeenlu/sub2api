@@ -269,7 +269,7 @@ describe('GroupsView no-account fallback', () => {
     wrapper.unmount()
   })
 
-  it('keeps the Codex manifest toggle reactive and submits the enabled config', async () => {
+  it('preserves directory sources when updating fallback settings', async () => {
     const groupWithPinnedAccount: AdminGroup = {
       ...sourceGroup,
       codex_models_manifest_config: {
@@ -297,14 +297,7 @@ describe('GroupsView no-account fallback', () => {
     await flushPromises()
     await nextTick()
 
-    const toggle = wrapper.find('[data-testid="codex-manifest-toggle"]')
-    expect(toggle.exists()).toBe(true)
-    expect(wrapper.find('[data-testid="codex-manifest-search"]').exists()).toBe(false)
-
-    await toggle.trigger('click')
-    await nextTick()
-
-    expect(wrapper.find('[data-testid="codex-manifest-search"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="codex-manifest-toggle"]').exists()).toBe(false)
 
     const forms = wrapper.findAll('form')
     expect(forms.length).toBeGreaterThan(0)
@@ -312,13 +305,7 @@ describe('GroupsView no-account fallback', () => {
     await flushPromises()
 
     expect(updateGroup).toHaveBeenCalledTimes(1)
-    expect(updateGroup.mock.calls[0][1]).toMatchObject({
-      codex_models_manifest_config: {
-        enabled: true,
-        account_ids: [101],
-        fallback_to_scheduler: false
-      }
-    })
+    expect(updateGroup.mock.calls[0][1]).not.toHaveProperty('codex_models_manifest_config')
     wrapper.unmount()
   })
 })

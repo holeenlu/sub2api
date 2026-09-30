@@ -1100,7 +1100,7 @@ export default {
       },
       modelPricing: {
         title: '分组逐模型定价',
-        description: '匹配模型后覆盖渠道和内置价格。长上下文阶梯沿用官方/预设价卡，无需再手填区间。音频可用按次层级配置 realtime、tts、stt。',
+        description: '只为例外模型设置独立售价；留空的字段继续继承渠道价卡或参考价，平时用分组倍率即可。长上下文阶梯沿用官方/预设价卡，无需再手填区间。音频可用按次层级配置 realtime、tts、stt。',
         longContext: '启用长上下文阶梯定价',
         longContextHint: '勾选后按渠道区间或官方预设阶梯计费；关闭后默认按第一档，账号显式开启时除外。',
         add: '添加模型价格'
@@ -1148,6 +1148,7 @@ export default {
         selectAll: '全选',
         invertSelection: '反选',
         wildcardTag: '通配',
+        pricingPendingTag: '待定价',
         customPlaceholder: '自定义条目，如 gpt-*-codex 或 claude-*',
         addCustom: '添加',
         emptySelectionError: '模型白名单已开启，请至少选择或添加一个模型条目',
@@ -1157,6 +1158,8 @@ export default {
         }
       },
       codexModelsManifest: {
+        advancedTitle: '高级：指定模型目录来源账号',
+        advancedHint: '仅用于上游不提供完整目录或需要固定参考来源的情况。这里只决定模型列表从哪些账号读取，不限制请求可以交给哪些账号；参考账号也不代表其他账号具备同样权限。',
         title: '固定账号获取模型列表',
         hint: '开启后，普通模型列表与 Codex Model Manifest 均优先从选定账号获取并合并，再应用账号映射和分组列表过滤；限流/过载中的选定账号仍会被使用。',
         enable: '使用特定账号获取模型列表',

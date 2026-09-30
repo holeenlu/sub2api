@@ -170,8 +170,8 @@ export default {
       openai: {
         description: '將以下設定檔新增到 Codex CLI 設定目錄中。',
         authModeTitle: 'Codex 驗證模式',
-        authModeDescription: '相容模式保留舊版 Codex 設定；API Key Mode 用於授權用戶端圖片執行器。',
-        authModeLegacy: '相容模式',
+        authModeDescription: 'API Key Mode 將金鑰寫入 config.toml；auth.json 模式單獨儲存認證資訊。兩者均使用遠端模型目錄，需要 Codex 0.156.0 或更新版本。',
+        authModeLegacy: 'auth.json',
         authModeApiKey: 'API Key Mode',
         authModeApiKeyRestartNotice: '儲存此設定後，必須完全退出並重啟 Codex Desktop 或 CLI，然後新建 task，讓用戶端重新建置工具註冊表。',
         configTomlHint: '請確保以下內容位於 config.toml 檔案的開頭部分',
@@ -246,18 +246,14 @@ export default {
         note: '啟動 Codex 前先匯出 KDAN_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
       },
       codexModelCatalog: {
-        mode: '目錄來源',
-        remote: '遠端目錄（Codex 0.156.0+）',
-        local: '本地檔案（舊版用戶端）',
-        oversized: '完整目錄超過遠端載入的 1 MiB 限制，已改為本地檔案。請下載目錄並儲存到設定中的路徑。',
+        oversized: '此 Key 的完整目錄超過用戶端遠端載入的 1 MiB 限制，用戶端可能無法讀取。請在分組中減少開放的模型。',
         title: 'Codex 模型目錄',
-        description: '預設使用本地檔案並手動取得。遠端目錄需主動選擇，沿用用戶端鑑權；切換 API Key 或分組後恢復本地模式。',
-        emptyDescription: '手動取得的目錄沒有可用的 Codex 模型，已保留預設設定。請檢查帳號模型限制和分組模型白名單。',
-        fetch: '取得目錄',
+        description: '設定已包含遠端目錄地址，用戶端直接讀取本站為此 Key 計算的模型目錄（需 Codex 0.156.0 及以上）。下方按鈕僅用於核對連線和可用模型。',
+        emptyDescription: '目前沒有可用的 Codex 模型，已保留預設設定。請檢查帳號模型限制和分組模型白名單。',
+        fetch: '檢查連線 / 檢視此 Key 可用模型',
         retry: '重試',
-        download: '下載目錄',
-        modelsCount: '已取得 {count} 個模型',
-        errorDescription: '無法使用目前 API Key 取得模型目錄，已保留設定和目錄路徑。請重試，或使用之前儲存的目錄檔案。'
+        modelsCount: '此 Key 目前可用 {count} 個模型',
+        errorDescription: '無法使用目前 API Key 讀取模型目錄，設定保持不變。請檢查 Key 狀態和網路後重試。'
       },
       opencode: {
         title: 'OpenCode 設定範例',

@@ -198,33 +198,14 @@
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('keys.useKeyModal.codexModelCatalog.description') }}
               </p>
-              <p class="mt-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300">
-                {{ codexModelCatalogMode === 'remote' ? codexModelCatalogUrl : codexModelCatalogPath }}
+              <p class="mt-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300" data-testid="codex-model-catalog-url">
+                {{ codexModelCatalogUrl }}
               </p>
-              <select
-                v-model="codexModelCatalogMode"
-                data-testid="codex-model-catalog-mode"
-                :aria-label="t('keys.useKeyModal.codexModelCatalog.mode')"
-                class="input mt-2 text-sm"
-              >
-                <option value="remote" :disabled="codexModelCatalogOversized">{{ t('keys.useKeyModal.codexModelCatalog.remote') }}</option>
-                <option value="file">{{ t('keys.useKeyModal.codexModelCatalog.local') }}</option>
-              </select>
               <p v-if="codexModelCatalogOversized" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
                 {{ t('keys.useKeyModal.codexModelCatalog.oversized') }}
               </p>
             </div>
             <button
-              v-if="selectedCodexCatalogModel"
-              type="button"
-              class="btn btn-primary min-h-9 flex-shrink-0 px-3 text-xs"
-              @click="downloadCodexModelManifest"
-            >
-              <Icon name="download" size="sm" class="mr-1.5" />
-              {{ t('keys.useKeyModal.codexModelCatalog.download') }}
-            </button>
-            <button
-              v-if="!selectedCodexCatalogModel || codexModelManifestState === 'error'"
               type="button"
               data-testid="codex-model-catalog-fetch"
               class="btn btn-primary min-h-9 flex-shrink-0 px-3 text-xs"
@@ -242,12 +223,15 @@
                 : t('keys.useKeyModal.codexModelCatalog.fetch') }}
             </button>
           </div>
-          <p
+          <div
             v-if="codexModelManifestState === 'ready' && selectedCodexCatalogModel"
             class="border-t border-gray-200 px-4 py-2 text-xs text-emerald-700 dark:border-dark-700 dark:text-emerald-300"
           >
-            {{ t('keys.useKeyModal.codexModelCatalog.modelsCount', { count: codexModelManifestModelCount }) }}
-          </p>
+            <p>{{ t('keys.useKeyModal.codexModelCatalog.modelsCount', { count: codexModelManifestModelCount }) }}</p>
+            <ul data-testid="codex-model-catalog-preview" class="mt-2 flex max-h-40 flex-wrap gap-2 overflow-auto">
+              <li v-for="model in codexCatalogModels" :key="model.slug" class="rounded bg-gray-100 px-2 py-1 font-mono text-gray-700 dark:bg-dark-800 dark:text-gray-300">{{ model.slug }}</li>
+            </ul>
+          </div>
           <p
             v-else-if="codexModelManifestState === 'ready'"
             data-testid="codex-model-selection-empty"
@@ -263,7 +247,6 @@
           </p>
         </section>
 
-        <a v-if="showCodexModelCatalog" href="/install/update-codex-models.py" download class="text-sm text-primary-600 underline">{{ t('modelCatalog.downloadUpdater') }}</a>
         <!-- Usage Note -->
         <div v-if="showPlatformNote" class="flex items-start gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
           <Icon name="infoCircle" size="md" class="text-blue-500 flex-shrink-0 mt-0.5" />
@@ -351,14 +334,14 @@ const copiedIndex = ref<number | null>(null)
 const activeTab = ref<string>('unix')
 const activeClientTab = ref<string>('claude')
 type CodexAuthMode = 'legacy' | 'api-key'
-const codexAuthMode = ref<CodexAuthMode>('legacy')
+const codexAuthMode = ref<CodexAuthMode>('api-key')
 type CodexModelManifestState = 'idle' | 'loading' | 'ready' | 'error'
 const codexModelManifestState = ref<CodexModelManifestState>('idle')
 const codexModelManifestContent = ref('')
 const codexModelManifestModelCount = ref(0)
 // Defaults are precomputed from this key's published group catalog.
 const DEFAULT_CODEX_MODEL = computed(() => props.setupProfile?.model ?? '')
-const codexModelCatalogMode = ref<'remote' | 'file'>('file')
+// 只支持远程目录：客户端直接读取本站按 Key 计算的目录（Codex 0.156.0+，已停止支持本地目录文件）。
 const codexModelManifestResponseBytes = ref(0)
 const codexModelCatalogOversized = computed(() => codexModelManifestResponseBytes.value > 1024 * 1024)
 const codexModelCatalogUrl = computed(() => buildCodexModelCatalogUrl(props.baseUrl))
@@ -371,19 +354,8 @@ const codexModelCatalogSupported = computed(() =>
 
 const showCodexModelCatalog = computed(() =>
   props.show && codexModelCatalogSupported.value &&
-  (activeClientTab.value === 'codex' ||
-    (props.platform === 'openai' && activeClientTab.value === 'codex-ws'))
+  (activeClientTab.value === 'codex' || activeClientTab.value === 'codex-ws')
 )
-
-const codexModelCatalogPath = computed(() => {
-  const isWindows = activeTab.value === 'windows'
-  const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
-  return joinConfigPath(configDir, 'codex-models.json', isWindows)
-})
-
-// Codex expands a leading ~/ on every platform but not %userprofile%, which it
-// resolves relative to the config directory, so config.toml always uses ~/.
-const CODEX_MODEL_CATALOG_CONFIG_PATH = '~/.codex/codex-models.json'
 
 const codexManifestContext = computed(() => {
   if (!props.show || !codexModelCatalogSupported.value || !props.apiKey) return ''
@@ -396,7 +368,7 @@ const defaultClientTab = computed(() => {
   switch (props.platform) {
 
     case 'openai':
-      return 'codex'
+      return 'codex-ws'
     case 'grok':
       return 'grok'
     case 'gemini':
@@ -408,16 +380,21 @@ const defaultClientTab = computed(() => {
   }
 })
 
-watch(() => [props.platform, props.claudeCodeOnly], () => {
-  activeTab.value = 'unix'
+// 每次打开都回到默认组合：OpenAI 为 Codex CLI (WebSocket) + API Key Mode + macOS / Linux。
+const resetSetupSelection = () => {
   activeClientTab.value = defaultClientTab.value
-  codexAuthMode.value = 'legacy'
+  activeTab.value = 'unix'
+  codexAuthMode.value = 'api-key'
+}
+
+watch(() => [props.platform, props.claudeCodeOnly, props.apiKey], () => {
+  resetSetupSelection()
   resetCodexModelManifest()
 }, { immediate: true })
 
 watch(() => props.show, (show) => {
   if (show) {
-    codexAuthMode.value = 'legacy'
+    resetSetupSelection()
   } else {
     resetCodexModelManifest()
   }
@@ -693,7 +670,6 @@ function resetCodexModelManifest() {
   codexModelManifestContent.value = ''
   codexModelManifestModelCount.value = 0
   codexModelManifestResponseBytes.value = 0
-  codexModelCatalogMode.value = 'file'
 }
 
 async function loadCodexModelManifest() {
@@ -713,7 +689,6 @@ async function loadCodexModelManifest() {
     codexModelManifestContent.value = result.content
     codexModelManifestModelCount.value = result.modelCount
     codexModelManifestResponseBytes.value = result.responseBytes
-    if (codexModelCatalogOversized.value) codexModelCatalogMode.value = 'file'
     codexModelManifestState.value = 'ready'
   } catch (error) {
     const errorName = error && typeof error === 'object' && 'name' in error
@@ -738,16 +713,9 @@ function downloadFile(file: FileConfig) {
   saveAs(new Blob([file.content], { type: mime }), file.downloadName)
 }
 
-function downloadCodexModelManifest() {
-  if (!codexModelManifestContent.value) return
-  saveAs(
-    new Blob([codexModelManifestContent.value], { type: 'application/json;charset=utf-8' }),
-    'codex-models.json'
-  )
-}
-
+const codexCatalogModels = computed(() => parseCodexCatalogModels(codexModelManifestContent.value))
 const selectedCodexCatalogModel = computed(() =>
-  selectCodexConfigModel(parseCodexCatalogModels(codexModelManifestContent.value), DEFAULT_CODEX_MODEL.value)
+  selectCodexConfigModel(codexCatalogModels.value, DEFAULT_CODEX_MODEL.value)
 )
 
 function selectCodexCatalogModel(preferredModel: string): string {
@@ -755,13 +723,8 @@ function selectCodexCatalogModel(preferredModel: string): string {
   return preferredModel
 }
 
-function codexCatalogTomlLine(): string {
-  if (!codexModelCatalogSupported.value || codexModelCatalogMode.value !== 'file') return ''
-  return `model_catalog_json = "${CODEX_MODEL_CATALOG_CONFIG_PATH}"\n`
-}
-
 function codexRemoteCatalogTomlLine(baseUrl: string): string {
-  if (!codexModelCatalogSupported.value || codexModelCatalogMode.value !== 'remote' || codexModelCatalogOversized.value) return ''
+  if (!codexModelCatalogSupported.value) return ''
   return `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n`
 }
 
@@ -1048,8 +1011,7 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}${codexCatalogTomlLine()}
-
+${reasoningEffortLine}
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
@@ -1362,12 +1324,10 @@ function generateRoutedCodexFiles(
     ? `$env:KDAN_API_KEY="${apiKey}"`
     : `export KDAN_API_KEY="${apiKey}"`
 
-  const catalogLine = codexCatalogTomlLine()
   const configContent = `# Codex CLI -> ${siteNameComment.value} ${label} group
 model_provider = "kdan"
 model = "${model}"
 review_model = "${model}"
-${catalogLine}
 
 [model_providers.kdan]
 name = "${escapeTomlBasicString(siteName.value)} ${label}"
@@ -1402,8 +1362,7 @@ function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}${codexCatalogTomlLine()}
-
+${reasoningEffortLine}
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"

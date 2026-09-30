@@ -44,7 +44,6 @@ export default {
   "referencePrice": "Reference price",
   "priceSource": "Pricing source",
   "catalogVersion": "Catalog version",
-  "downloadUpdater": "Download catalog updater",
   "setupUnavailable": "No eligible Codex model is published for this key yet. Refresh the account catalog or review group access.",
   "capabilitiesPending": "Some model capabilities are incomplete; review the catalog details before choosing a client."
 ,
@@ -64,5 +63,10 @@ export default {
   "priorityInterval":"Priority interval (seconds)"
 ,
   "deletionAlert":"Visibility drop alert (%)",
-  "visibilityDrop":"A large part of the upstream catalog became unlisted. Review the source history; revoked access remains blocked."
+  "visibilityDrop":"A large part of the upstream catalog became unlisted. Review the source history; revoked access remains blocked.",
+  "policyModeHint":{"legacy": "Keep the existing allowlist, alias mode and platform defaults. Fixed and follow modes use the access policy instead.", "follow": "Opens models the upstream lists or that already served successful requests; exclusions win. Refresh the model data once first. The whitelist below does not limit the scope; mappings still rename models.", "fixed": "Opens only the models in the whitelist below; an empty list denies everything. Exclusions win."},
+  "excludedCount":"{count} excluded",
+  "policyOnAccountPage":"Account access mode, whitelist and exclusions are all edited on the account edit page.",
+  "openAccounts":"Open accounts",
+  "passthroughPolicyHint": "Passthrough keeps the requested model name and ignores aliases. Fixed or follow policies still control model access."
 }

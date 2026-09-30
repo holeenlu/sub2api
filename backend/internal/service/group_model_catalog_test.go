@@ -125,6 +125,18 @@ func TestGroupModelCatalogPinnedSnapshotAuthority(t *testing.T) {
 	require.Empty(t, result.Models, "authoritative empty is not default models")
 }
 
+func TestGroupModelCatalogPinnedSourceDoesNotRestrictRoutes(t *testing.T) {
+	repo := &catalogAccountRepo{accounts: []Account{catalogAccount(1, PlatformOpenAI, nil), catalogAccount(2, PlatformOpenAI, nil)}}
+	group := &Group{ID: 10, Platform: PlatformOpenAI}
+	group.CodexModelsManifestConfig.Enabled = true
+	group.CodexModelsManifestConfig.AccountIDs = []int64{1}
+	catalog := &GroupModelCatalogService{accounts: repo, snapshots: catalogSnapshotsStub{1: {"gpt-5"}, 2: {"gpt-5", "gpt-other"}}}
+	result, err := catalog.resolve(context.Background(), group, nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"gpt-5"}, catalogNames(result), "only the pinned source decides the listing")
+	require.Len(t, result.Models[0].AccountModels, 2, "the listing source must not narrow request routing")
+}
+
 func TestModelPlazaSharedCatalogFiltersVisibilityBeforeAccounts(t *testing.T) {
 	repo := &catalogAccountRepo{accounts: []Account{catalogAccount(1, PlatformOpenAI, map[string]any{"unknown-price": "unknown-price"})}}
 	groups := []Group{{ID: 10, Platform: PlatformOpenAI, RateMultiplier: 1}, {ID: 20, Platform: PlatformOpenAI, IsExclusive: true, RateMultiplier: 1}}

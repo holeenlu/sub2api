@@ -196,3 +196,14 @@ func TestGetGroupModelAllowlistCandidatesKeepsNonAnthropicShape(t *testing.T) {
 	require.NotContains(t, data, "source")
 	require.NotContains(t, data, "live_models")
 }
+
+func TestCatalogAllowlistCandidatesKeepUnpricedModelsAsPending(t *testing.T) {
+	models, pending := catalogAllowlistCandidates(&service.GroupModelCatalog{Models: []service.GroupCatalogModel{
+		{Name: "priced", PricingStatus: "ready"},
+		{Name: "new-model", PricingStatus: "unavailable"},
+		{Name: "split", Endpoint: "responses", PricingStatus: "unavailable"},
+		{Name: "split", Endpoint: "messages", PricingStatus: "ready"},
+	}})
+	require.Equal(t, []string{"priced", "new-model", "split"}, models)
+	require.Equal(t, []string{"new-model"}, pending, "a model priced on any route is not pending")
+}

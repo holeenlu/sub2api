@@ -401,11 +401,11 @@
             class="rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
           >
             <p class="text-xs text-amber-700 dark:text-amber-400">
-              {{ t('admin.accounts.openai.modelRestrictionDisabledByPassthrough') }}
+              {{ t('modelCatalog.passthroughPolicyHint') }}
             </p>
           </div>
 
-          <template v-else>
+          <div>
             <!-- Mode Toggle -->
             <div class="mb-4 flex gap-2">
               <button
@@ -441,6 +441,7 @@
                     ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
                 ]"
+                :disabled="isOpenAIModelRestrictionDisabled"
                 @click="modelRestrictionMode = 'mapping'"
               >
                 <svg
@@ -462,6 +463,7 @@
 
             <!-- Whitelist Mode -->
             <div v-if="modelRestrictionMode === 'whitelist'">
+              <AccountCatalogPolicyField v-model="catalogPolicy" :allow-legacy="false" select-id="bulk-account-policy" />
               <div class="mb-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
                 <p class="text-xs text-blue-700 dark:text-blue-400">
                   <svg
@@ -482,7 +484,7 @@
               </div>
 
               <ModelWhitelistSelector
-                v-if="show"
+                v-if="show && catalogPolicy.mode === 'fixed'"
                 v-model="allowedModels"
                 :model-mappings="modelMappings"
                 :platforms="targetSelectedPlatforms"
@@ -490,16 +492,16 @@
                 :sync-filters="liveModelSyncFilters"
               />
 
-              <p class="text-xs text-gray-500 dark:text-gray-400">
+              <p v-if="catalogPolicy.mode === 'fixed'" class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
                 <span v-if="allowedModels.length === 0">{{
-                  t('admin.accounts.supportsAllModels')
+                  t('modelCatalog.policyModeHint.fixed')
                 }}</span>
               </p>
             </div>
 
             <!-- Mapping Mode -->
-            <div v-else>
+            <div v-else-if="!isOpenAIModelRestrictionDisabled">
               <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
                 <p class="text-xs text-purple-700 dark:text-purple-400">
                   <svg
@@ -602,7 +604,7 @@
                 </button>
               </div>
             </div>
-          </template>
+          </div>
         </div>
       </div>
 
@@ -1581,6 +1583,8 @@ import Select from '@/components/common/Select.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import AccountCatalogPolicyField from './AccountCatalogPolicyField.vue'
+import type { AccountCatalogPolicyForm } from './accountCatalogPolicy'
 import AccountRpmSettings from '@/components/account/AccountRpmSettings.vue'
 import { applyAccountRPMSettings } from '@/components/account/accountRpm'
 import Icon from '@/components/icons/Icon.vue'
@@ -1793,6 +1797,7 @@ const pendingUpdatesForConfirm = ref<Record<string, unknown> | null>(null)
 const baseUrl = ref('')
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
+const catalogPolicy = ref<AccountCatalogPolicyForm>({ mode: 'fixed', excludedText: '' })
 const modelMappings = ref<ModelMapping[]>([])
 const selectedErrorCodes = ref<number[]>([])
 const customErrorCodeInput = ref<number | null>(null)
@@ -2190,21 +2195,16 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
         : openAIResponsesMode.value
   }
 
-  if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value) {
-    // 统一使用 model_mapping 字段
+  if (enableModelRestriction.value) {
     if (modelRestrictionMode.value === 'whitelist') {
-      // 白名单模式：将模型转换为 model_mapping 格式（key=value）
-      // 空白名单表示“支持所有模型”，需显式发送空对象以覆盖已有限制。
-      const mapping: Record<string, string> = {}
-      for (const m of allowedModels.value) {
-        mapping[m] = m
+      // Change access without overwriting each account's existing aliases.
+      updates.model_catalog_policy = {
+        mode: catalogPolicy.value.mode,
+        models: catalogPolicy.value.mode === 'fixed' ? [...allowedModels.value] : [],
+        excluded: [...new Set(catalogPolicy.value.excludedText.split(/\r?\n/).map(v => v.trim()).filter(Boolean))]
       }
-      credentials.model_mapping = mapping
-      credentialsChanged = true
-    } else {
-      // 映射模式下空配置同样表示“支持所有模型”。
-      const modelMapping = buildModelMappingObject()
-      credentials.model_mapping = modelMapping ?? {}
+    } else if (!isOpenAIModelRestrictionDisabled.value) {
+      credentials.model_mapping = buildModelMappingObject() ?? {}
       credentialsChanged = true
     }
   }
@@ -2551,6 +2551,7 @@ watch(
       // Reset all enable flags
       enableBaseUrl.value = false
       enableModelRestriction.value = false
+      catalogPolicy.value = { mode: 'fixed', excludedText: '' }
       enableOpenAIModelAliases.value = false
       openaiModelAliases.value = true
       enableCustomErrorCodes.value = false

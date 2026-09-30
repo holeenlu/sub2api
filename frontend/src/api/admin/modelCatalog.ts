@@ -1,5 +1,6 @@
 import { apiClient } from '../client'
 import type { UpstreamModelMetadata } from './accounts'
+import type { AccountModelCatalogPolicy } from '@/types'
 
 export interface CatalogModel {
   id: string
@@ -15,7 +16,8 @@ export interface CatalogModel {
   endpoints: string[]
 }
 
-export interface CatalogPolicy { mode: "legacy" | "fixed" | "follow"; models: string[]; excluded: string[] }
+export type CatalogPolicyMode = AccountModelCatalogPolicy['mode']
+export type CatalogPolicy = AccountModelCatalogPolicy
 export interface CatalogRelease { revision:string; created_at:string; operation:string }
 export interface ModelCatalog {
   warnings?: string[]

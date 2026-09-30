@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -629,4 +632,28 @@ func TestGetModelDefaultPricing_OmitsUnsupportedCache1hPrice(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.True(t, body.Data.Found)
 	require.Nil(t, body.Data.CacheWrite1hPrice)
+}
+
+func TestGetModelDefaultPricing_DistinguishesUnknownAndZero(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "model_pricing.json"), []byte(`{"new-preview-model":{"input_cost_per_token":0.000002,"output_cost_per_token":0.00001,"cache_read_input_token_cost":0,"litellm_provider":"openai","mode":"chat"}}`), 0600))
+	cfg := &config.Config{Pricing: config.PricingConfig{DataDir: dir, UpdateIntervalHours: 24}}
+	prices := service.NewPricingService(cfg, nil)
+	require.NoError(t, prices.Initialize())
+	t.Cleanup(prices.Stop)
+	h := &ChannelHandler{billingService: service.NewBillingService(cfg, prices), pricingService: prices}
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/prices", h.GetModelDefaultPricing)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/prices?model=new-preview-model", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, true, body.Data["found"])
+	require.Equal(t, 0.0, body.Data["cache_read_price"], "explicit zero remains available to fill")
+	require.Nil(t, body.Data["cache_write_price"], "missing rates must not be offered as free")
+	require.Nil(t, body.Data["image_input_price"])
 }

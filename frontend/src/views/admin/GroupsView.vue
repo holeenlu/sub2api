@@ -861,6 +861,12 @@
                   >
                     {{ t("admin.groups.modelAllowlist.wildcardTag") }}
                   </span>
+                  <span
+                    v-if="modelAllowlistPricingPending.create.has(item.id)"
+                    class="ml-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                  >
+                    {{ t("admin.groups.modelAllowlist.pricingPendingTag") }}
+                  </span>
                 </span>
                 <button
                   type="button"
@@ -2525,6 +2531,12 @@
                   >
                     {{ t("admin.groups.modelAllowlist.wildcardTag") }}
                   </span>
+                  <span
+                    v-if="modelAllowlistPricingPending.edit.has(item.id)"
+                    class="ml-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                  >
+                    {{ t("admin.groups.modelAllowlist.pricingPendingTag") }}
+                  </span>
                 </span>
                 <button
                   type="button"
@@ -3157,15 +3169,11 @@
           </div>
         </div>
 
-        <!-- 固定账号获取 Codex Model Manifest（仅 openai 平台，仅编辑对话框） -->
-        <CodexManifestAccountsField
-          v-if="editForm.platform === 'openai' && editingGroup"
-          ref="editCodexManifestRef"
-          :group-id="editingGroup.id"
-          :model-value="editCodexManifestConfig"
-          :account-names="editCodexManifestAccountNames"
-          @update:model-value="setEditCodexManifestConfig"
-        />
+        <p v-if="editForm.platform === 'openai' && editingGroup" class="mt-4 text-xs text-gray-500">
+          <router-link :to="`/admin/model-catalog?group_id=${editingGroup.id}`" class="text-primary-600 hover:underline">
+            {{ t("admin.groups.codexModelsManifest.advancedTitle") }}
+          </router-link>
+        </p>
 
 
         <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
@@ -4361,7 +4369,6 @@ import GroupModelPreviewDialog from "@/components/admin/group/GroupModelPreviewD
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
-import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
 import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
 import type { PricingFormEntry } from "@/components/admin/channel/types";
 import {
@@ -5018,26 +5025,11 @@ type ReasoningEffortPolicyFieldsExpose = {
 const createReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 const editReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 
-// 固定账号获取 Codex Model Manifest（仅 openai 分组编辑对话框）
-type CodexManifestAccountsFieldExpose = {
-  validate: () => boolean;
-  resetValidation: () => void;
-};
-const editCodexManifestRef = ref<CodexManifestAccountsFieldExpose | null>(null);
 const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
   enabled: false,
   account_ids: [],
   fallback_to_scheduler: false,
 });
-const editCodexManifestConfig = ref<CodexModelsManifestConfig>(createCodexManifestDefaults());
-const editCodexManifestAccountNames = ref<Record<number, string>>({});
-const setEditCodexManifestConfig = (config: CodexModelsManifestConfig) => {
-  editCodexManifestConfig.value = {
-    enabled: config.enabled ?? false,
-    account_ids: [...(config.account_ids ?? [])],
-    fallback_to_scheduler: config.fallback_to_scheduler ?? false,
-  };
-};
 const modelAllowlistCandidatesTracker = createModelAllowlistCandidatesTracker();
 const createModelAllowlistSelectedCount = computed(
   () => createModelAllowlistState.items.filter((item) => item.selected).length,
@@ -5358,6 +5350,12 @@ const resetModelAllowlistState = (
   state.items = fresh.items;
 };
 
+// 缺价候选仍列出供管理员勾选和定价，只是标注“待定价”；发布目录会等价格齐备后才开放。
+const modelAllowlistPricingPending = reactive<Record<"create" | "edit", Set<string>>>({
+  create: new Set(),
+  edit: new Set(),
+});
+
 const loadModelAllowlistCandidates = async (
   mode: "create" | "edit",
   groupID: number,
@@ -5370,11 +5368,12 @@ const loadModelAllowlistCandidates = async (
   const loadingRef = mode === "create" ? createModelAllowlistLoading : editModelAllowlistLoading;
   loadingRef.value = true;
   try {
-    const models = await adminAPI.groups.getModelAllowlistCandidates(groupID, platform);
+    const { models, pricingPending } = await adminAPI.groups.getModelAllowlistCandidates(groupID, platform);
     if (!modelAllowlistCandidatesTracker.isCurrent(requestID, request)) {
       return;
     }
     setModelAllowlistCandidates(state, models);
+    modelAllowlistPricingPending[mode] = new Set(pricingPending);
   } catch (error) {
     if (!modelAllowlistCandidatesTracker.isCurrent(requestID, request)) {
       return;
@@ -6039,6 +6038,8 @@ const handleCreateGroup = async () => {
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
   if (
     createModelAllowlistState.enabled &&
+    createModelAllowlistState.mode !== 'fixed' &&
+    createModelAllowlistState.mode !== 'follow' &&
     createModelAllowlistSelectedCount.value === 0
   ) {
     appStore.showError(t("admin.groups.modelAllowlist.emptySelectionError"));
@@ -6281,24 +6282,6 @@ const handleEdit = async (group: AdminGroup) => {
     group.platform,
   );
   resetModelAllowlistState(editModelAllowlistState, group.model_allowlist);
-  // 固定账号 manifest 配置：回显配置并异步解析已存账号名称（失败显示 #<id>）
-  const savedCodexManifestConfig =
-    group.codex_models_manifest_config ?? createCodexManifestDefaults();
-  setEditCodexManifestConfig(savedCodexManifestConfig);
-  editCodexManifestAccountNames.value = {};
-  for (const id of editCodexManifestConfig.value.account_ids) {
-    adminAPI.accounts
-      .getById(id)
-      .then((account) => {
-        editCodexManifestAccountNames.value = {
-          ...editCodexManifestAccountNames.value,
-          [id]: account.name,
-        };
-      })
-      .catch(() => {
-        // 无法解析名称时由组件回退展示 #<id>，提示管理员清理脏 ID。
-      });
-  }
   // 加载模型路由规则（异步加载账号名称）
   editModelRoutingRules.value = await convertApiFormatToRoutingRules(
     group.model_routing,
@@ -6345,9 +6328,6 @@ const closeEditModal = () => {
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
   resetModelAllowlistState(editModelAllowlistState);
-  setEditCodexManifestConfig(createCodexManifestDefaults());
-  editCodexManifestAccountNames.value = {};
-  editCodexManifestRef.value?.resetValidation?.();
 };
 
 const handleUpdateGroup = async () => {
@@ -6370,19 +6350,11 @@ const handleUpdateGroup = async () => {
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
   if (
     editModelAllowlistState.enabled &&
+    editModelAllowlistState.mode !== 'fixed' &&
+    editModelAllowlistState.mode !== 'follow' &&
     editModelAllowlistSelectedCount.value === 0
   ) {
     appStore.showError(t("admin.groups.modelAllowlist.emptySelectionError"));
-    return;
-  }
-  // 固定账号 manifest：开启后至少一个账号，前端阻止提交并提示。
-  if (
-    editForm.platform === "openai" &&
-    editCodexManifestConfig.value.enabled &&
-    editCodexManifestConfig.value.account_ids.length === 0
-  ) {
-    appStore.showError(t("admin.groups.codexModelsManifest.selectAtLeastOne"));
-    editCodexManifestRef.value?.validate();
     return;
   }
 
@@ -6429,15 +6401,6 @@ const handleUpdateGroup = async () => {
         editModelRoutingRules.value,
       ),
       model_allowlist: buildModelAllowlistConfig(editModelAllowlistState),
-      // 非 openai 平台提交关闭状态，与后端归一化一致
-      codex_models_manifest_config:
-        editForm.platform === "openai"
-          ? {
-              enabled: editCodexManifestConfig.value.enabled,
-              account_ids: [...editCodexManifestConfig.value.account_ids],
-              fallback_to_scheduler: editCodexManifestConfig.value.fallback_to_scheduler,
-            }
-          : createCodexManifestDefaults(),
       supported_model_scopes: normalizeSupportedModelScopesForPlatform(
         editForm.platform,
         editForm.supported_model_scopes,
