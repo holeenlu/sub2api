@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -24,6 +25,9 @@ func TestOpenAIAccountSchedulingIgnoresBPSProxyAcquisitionFailures(t *testing.T)
 				rateLimitService:   rls,
 				openaiAccountStats: newOpenAIAccountRuntimeStats(),
 			}
+			now := time.Now()
+			svc.openaiAccountStats = newOpenAIAccountRuntimeStats()
+			svc.openaiAccountStats.now = func() time.Time { return now }
 			account := excelAccount()
 			ttft := 450
 			svc.ReportOpenAIAccountScheduleResult(account, "gpt-6-astra", true, &ttft)
@@ -64,6 +68,9 @@ func TestExcelBPSUpstreamFailuresStillPenalizeScheduling(t *testing.T) {
 			rls := newOpenAIAdvancedSchedulerRateLimitService("true")
 			svc.settingService = rls.settingService
 			svc.rateLimitService = rls
+			now := time.Now()
+			svc.openaiAccountStats = newOpenAIAccountRuntimeStats()
+			svc.openaiAccountStats.now = func() time.Time { return now }
 			account := excelAccount()
 			account.Extra["openai_excel_bps_mihomo"] = false
 			body := []byte(`{"model":"gpt-6-astra","input":"test"}`)
