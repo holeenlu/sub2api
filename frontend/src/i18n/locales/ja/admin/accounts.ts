@@ -628,6 +628,10 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        modelMappingAliases: 'モデルマッピングを別名として使い、他のネイティブモデルも許可',
+        modelMappingAliasesHint: '通常のOpenAI OAuthアカウントのみ。オンの場合は指定モデルだけを変換し、他のネイティブモデルも利用できます。オフの場合、空でないマッピングは許可リストとして扱います。グループの許可リストは常に適用され、既存アカウントは自動変更されません。',
+        changeModelMappingScope: 'モデルマッピングの適用範囲を変更',
+        bulkModelMappingAliasesHint: 'この項目だけを変更した場合、既存マッピングとBPS設定を保持します。別名モードをオフにすると許可リストに戻ります。シャドウアカウントは専用のモデル設定から変更してください。',
         wsSseAcceleration: "OAuth WS → SSE アクセラレーション",
         wsSseAccelerationDesc: "通常の OAuth アカウントで明示的に有効化すると、対応する HTTP ストリーミング応答に既存の WebSocket 接続プールを使います。送信前の接続失敗のみ HTTP にフォールバックし、送信後は再実行しません。",
         autoBPS: 'Enable BPS automatically when degraded',

@@ -101,6 +101,41 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 }
 
 describe('BulkEditAccountModal', () => {
+  it.each([
+    { aliases: true, mode: 'aliases' },
+    { aliases: false, mode: 'whitelist' }
+  ])('updates only the OAuth mapping scope when selected: $mode', async ({ aliases, mode }) => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('[data-testid="enable-model-aliases"]').setValue(true)
+    await wrapper.get('[data-testid="bulk-model-aliases"]').setValue(aliases)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      credentials: { model_mapping_mode: mode }
+    })
+    wrapper.unmount()
+  })
+
+  it.each([
+    { selectedPlatforms: ['openai'], selectedTypes: ['apikey'] },
+    { selectedPlatforms: ['openai'], selectedTypes: ['setup-token'] },
+    { selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'apikey'] },
+    { selectedPlatforms: ['openai', 'anthropic'], selectedTypes: ['oauth'] }
+  ])('hides OAuth alias scope for incompatible targets: %j', (props) => {
+    const wrapper = mountModal(props)
+    expect(wrapper.find('[data-testid="enable-model-aliases"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('leaves the mapping scope unchanged when only BPS is edited', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('#bulk-edit-excel-bps-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate.mock.calls[0]?.[1]?.credentials).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('applies only the independent cost multiplier when selected', async () => {
     const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
     expect(wrapper.get<HTMLInputElement>('#bulk-edit-cost-multiplier').element.value).toBe('0.1')
