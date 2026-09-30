@@ -223,29 +223,33 @@ export default {
       deepseek: {
         description: '通过当前 DeepSeek 分组配置 Claude Code、Codex 或 OpenCode。',
         codexDescription: '使用 API Key 配置 Codex，并通过当前 DeepSeek 分组发送请求。',
-        codexConfigTomlHint: '下载下方模型目录，将两个文件保存到 Codex 配置目录后重启 Codex。',
+        codexConfigTomlHint: '默认使用本地目录文件；支持的分组可改选远程目录。',
         codexNote: '启动 Codex 前先导出 TAPMODELS_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
       },
       minimax: {
         description: '通过当前 MiniMax 分组配置 Claude Code、Codex 或 OpenCode。',
         codexDescription: '使用 API Key 配置 Codex，并通过当前 MiniMax 分组发送请求。',
-        codexConfigTomlHint: '下载下方模型目录，将两个文件保存到 Codex 配置目录后重启 Codex。',
-        codexNote: '启动 Codex 前先导出 SUB2API_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
+        codexConfigTomlHint: '默认使用本地目录文件；支持的分组可改选远程目录。',
+        codexNote: '启动 Codex 前先导出 TAPMODELS_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
       },
       composite: {
         description: '通过当前 Composite 路由分组配置受支持的客户端。',
         codexDescription: '使用 API Key 和当前 Composite 分组的完整模型目录配置 Codex。',
-        codexConfigTomlHint: '下载下方模型目录，将两个文件保存到 Codex 配置目录后重启 Codex。',
+        codexConfigTomlHint: '默认使用本地目录文件；支持的分组可改选远程目录。',
         codexNote: '启动 Codex 前先导出 TAPMODELS_API_KEY；分组会根据目录中选中的模型路由请求。'
       },
       routedCodex: {
         description: '使用当前路由分组的完整模型目录配置 Codex。',
-        configTomlHint: '下载下方模型目录，将两个文件保存到 Codex 配置目录后重启 Codex。',
+        configTomlHint: '默认使用本地目录文件；支持的分组可改选远程目录。',
         note: '启动 Codex 前先导出 TAPMODELS_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
       },
       codexModelCatalog: {
+        mode: '目录来源',
+        remote: '远程目录（Codex 0.156.0+）',
+        local: '本地文件（旧版客户端）',
+        oversized: '完整目录超过远程加载的 1 MiB 限制，已改为本地文件。请下载目录并保存到配置中的路径。',
         title: 'Codex 模型目录',
-        description: '默认配置立即生成并包含模型目录路径，不会自动获取目录或后台刷新。首次使用请获取目录，将 codex-models.json 保存到下方路径后启动 Codex；获取成功后会更新模型及推理设置。',
+        description: '默认使用本地文件并手动获取。远程目录需主动选择，沿用客户端鉴权；切换 API Key 或分组后恢复本地模式。',
         emptyDescription: '手动获取的目录没有可用的 Codex 模型，已保留默认配置。请检查账号模型限制和分组模型白名单。',
         fetch: '获取目录',
         retry: '重试',

@@ -1137,7 +1137,33 @@ export default {
 	    expiresAtFull: '重設次數到期時間：{time}',
 	    clears: '可清除視窗：{windows}',
 	    notUsableNow: '暫不可用',
-	    requiresLimit: '需達到限額後才能使用'
+	    requiresLimit: '需達到限額後才能使用',
+	    reset: '重設',
+	    resetTooltipNeedQuery: '請先點「次數」查詢；查詢到可用的重設後才能使用',
+	    resetTooltipNone: '目前沒有可立即使用的重設',
+	    resetTooltipReady: '消耗 1 次重設，清除限額視窗（需確認）',
+	    confirmTitle: '確認使用 Claude 重設',
+	    confirmMessage: '將消耗 1 次重設次數，立即恢復 {windows} 視窗，剩餘 {count} 次。此操作不可撤銷，確定繼續嗎？',
+	    windows: {
+	      fiveHour: '5h',
+	      sevenDay: '7d',
+	      sevenDayOverage: '7d 超額'
+	    },
+	    outcome: {
+	      reset: '重設成功，已清除：{windows}',
+	      alreadyUsed: '該重設已被使用，正在重新整理確認',
+	      cooldown: '重設處於冷卻中，請稍後再試',
+	      cooldownUntil: '重設處於冷卻中，冷卻至 {time}',
+	      notLimited: '目前未達到限額，無需重設，未消耗次數',
+	      ineligible: '此帳號目前不可使用重設',
+	      unknown: '結果未確認，已阻止再次兌換，請稍後查詢',
+	      unavailable: '重設服務暫時不可用，未確認消耗，請稍後再試',
+	      inProgress: '該重設請求仍在處理中，請稍後查詢結果',
+	      retryBackoff: '該重設請求剛剛失敗，請稍後再試',
+	      busy: '另一個重設正在進行中，請稍後再試',
+	      notAvailable: '目前沒有可立即使用的重設，未消耗次數',
+	      failed: '重設請求失敗'
+	    }
 	  },
       autoResetCredit: {
 	    title: '自動使用重設卡',

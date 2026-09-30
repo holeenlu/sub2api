@@ -1,6 +1,7 @@
 export interface CodexModelsManifestResult {
   content: string
   modelCount: number
+  responseBytes: number
 }
 
 function normalizeCodexApiRoot(baseUrl: string): string {
@@ -12,6 +13,10 @@ function normalizeCodexApiRoot(baseUrl: string): string {
 export function buildCodexModelsManifestUrl(baseUrl: string): string {
   const apiRoot = normalizeCodexApiRoot(baseUrl)
   return `${apiRoot}/backend-api/codex/models`
+}
+
+export function buildCodexModelCatalogUrl(baseUrl: string): string {
+  return `${normalizeCodexApiRoot(baseUrl)}/v1/models`
 }
 
 function isCodexModelsManifest(value: unknown): value is { models: unknown[] } {
@@ -37,13 +42,15 @@ export async function fetchCodexModelsManifest(
     throw new Error(`Codex models request failed with status ${response.status}`)
   }
 
-  const payload: unknown = await response.json()
+  const text = await response.text()
+  const payload: unknown = JSON.parse(text)
   if (!isCodexModelsManifest(payload)) {
     throw new Error('Codex models response is not a valid manifest')
   }
 
   return {
     content: JSON.stringify(payload, null, 2),
-    modelCount: payload.models.length
+    modelCount: payload.models.length,
+    responseBytes: new TextEncoder().encode(text).byteLength
   }
 }

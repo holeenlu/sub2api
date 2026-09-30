@@ -225,29 +225,33 @@ export default {
       deepseek: {
         description: '透過目前 DeepSeek 分組設定 Claude Code、Codex 或 OpenCode。',
         codexDescription: '使用 API Key 設定 Codex，並透過目前 DeepSeek 分組傳送請求。',
-        codexConfigTomlHint: '下載下方模型目錄，將兩個檔案儲存到 Codex 設定目錄後重啟 Codex。',
+        codexConfigTomlHint: '預設使用本地目錄檔案；支援的分組可改選遠端目錄。',
         codexNote: '啟動 Codex 前先匯出 TAPMODELS_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
       },
       minimax: {
         description: '透過目前 MiniMax 分組設定 Claude Code、Codex 或 OpenCode。',
         codexDescription: '使用 API Key 設定 Codex，並透過目前 MiniMax 分組傳送請求。',
-        codexConfigTomlHint: '下載下方模型目錄，將兩個檔案儲存到 Codex 設定目錄後重啟 Codex。',
-        codexNote: '啟動 Codex 前先匯出 SUB2API_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
+        codexConfigTomlHint: '預設使用本地目錄檔案；支援的分組可改選遠端目錄。',
+        codexNote: '啟動 Codex 前先匯出 TAPMODELS_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
       },
       composite: {
         description: '透過目前 Composite 路由分組設定受支援的用戶端。',
         codexDescription: '使用 API Key 和目前 Composite 分組的完整模型目錄設定 Codex。',
-        codexConfigTomlHint: '下載下方模型目錄，將兩個檔案儲存到 Codex 設定目錄後重啟 Codex。',
+        codexConfigTomlHint: '預設使用本地目錄檔案；支援的分組可改選遠端目錄。',
         codexNote: '啟動 Codex 前先匯出 TAPMODELS_API_KEY；分組會根據目錄中選中的模型路由請求。'
       },
       routedCodex: {
         description: '使用目前路由分組的完整模型目錄設定 Codex。',
-        configTomlHint: '下載下方模型目錄，將兩個檔案儲存到 Codex 設定目錄後重啟 Codex。',
+        configTomlHint: '預設使用本地目錄檔案；支援的分組可改選遠端目錄。',
         note: '啟動 Codex 前先匯出 TAPMODELS_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
       },
       codexModelCatalog: {
+        mode: '目錄來源',
+        remote: '遠端目錄（Codex 0.156.0+）',
+        local: '本地檔案（舊版用戶端）',
+        oversized: '完整目錄超過遠端載入的 1 MiB 限制，已改為本地檔案。請下載目錄並儲存到設定中的路徑。',
         title: 'Codex 模型目錄',
-        description: '預設設定立即生成並包含模型目錄路徑，不會自動取得目錄或後台重新整理。首次使用請取得目錄，將 codex-models.json 儲存到下方路徑後啟動 Codex；取得成功後會更新模型及推理設定。',
+        description: '預設使用本地檔案並手動取得。遠端目錄需主動選擇，沿用用戶端鑑權；切換 API Key 或分組後恢復本地模式。',
         emptyDescription: '手動取得的目錄沒有可用的 Codex 模型，已保留預設設定。請檢查帳號模型限制和分組模型白名單。',
         fetch: '取得目錄',
         retry: '重試',

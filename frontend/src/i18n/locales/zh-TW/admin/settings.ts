@@ -320,10 +320,10 @@ export default {
       },
       apiKeyAcl: {
         title: 'API Key IP 存取控制',
-        description: '驗證、IP 限制、速率限制與工作階段綁定一律使用已設定的可信代理鏈',
-        trustForwardedIp: '舊版轉發 IP 中繼資料相容',
+        description: '驗證、IP 限制、速率限制與工作階段綁定始終使用已設定的可信代理鏈',
+        trustForwardedIp: '舊版轉發 IP 後設資料相容',
         trustForwardedIpHint:
-          '預設關閉。此相容選項僅影響請求與用量中繼資料，不能覆蓋安全檢查。請在 server.trusted_proxies 中設定實際代理位址，供驗證和存取控制使用。',
+          '預設關閉。該相容選項僅影響請求與用量後設資料，不能覆蓋安全驗證。請在 server.trusted_proxies 中設定實際代理地址，供驗證和存取控制使用。',
         forwardedClientIpHeaders: '自訂用戶端 IP 請求標頭',
         forwardedClientIpHeadersHint: '新增 CDN 或反代請求標頭名稱，解析時優先於內建請求標頭。',
         forwardedClientIpHeadersPlaceholder: 'X-Client-IP',

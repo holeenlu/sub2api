@@ -3,11 +3,13 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"net/url"
 	"strings"
 )
 
 var codexToolCapabilityFields = []string{
+	"service_tiers",
 	"supports_search_tool", "apply_patch_tool_type", "comp_hash", "tool_mode", "use_responses_lite",
 	"multi_agent_reasoning_effort", "multi_agent_version",
 }
@@ -21,7 +23,12 @@ func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite b
 		}
 		// These Codex fields are nullable booleans or strings, never arbitrary objects.
 		if !bytes.Equal(value, []byte("null")) {
-			if field == "supports_search_tool" || field == "use_responses_lite" {
+			if field == "service_tiers" {
+				var tiers []configuredCodexServiceTier
+				if json.Unmarshal(value, &tiers) != nil {
+					continue
+				}
+			} else if field == "supports_search_tool" || field == "use_responses_lite" {
 				if !bytes.Equal(value, []byte("true")) && !bytes.Equal(value, []byte("false")) {
 					continue
 				}
@@ -63,7 +70,7 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	parsed, err := url.Parse(baseURL)
 	official := err == nil && (strings.EqualFold(parsed.Hostname(), "api.openai.com") ||
 		(account.IsOpenAIOAuth() && strings.EqualFold(parsed.Hostname(), "chatgpt.com")))
-	if account.IsOpenAI() && isOpenAIGPT6AstraModel(modelID) && official {
+	if account.IsOpenAI() && (isOpenAIGPT6AstraModel(modelID) || openai.IsGPT61SolModelSpelling(modelID)) && official {
 		defaults := map[string]json.RawMessage{
 			"supports_search_tool":  json.RawMessage("true"),
 			"apply_patch_tool_type": json.RawMessage(`"freeform"`),
@@ -76,14 +83,6 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 			defaults["use_responses_lite"] = json.RawMessage("true")
 		}
 		applyCodexToolCapabilities(capabilities, defaults, false)
-	}
-	if account.IsOpenAI() && normalizeKnownOpenAICodexModel(modelID) == "gpt-6.1-sol" && official {
-		// Public Sol 6.1 capabilities do not imply ChatGPT-only Lite or Ultra support.
-		applyCodexToolCapabilities(capabilities, map[string]json.RawMessage{
-			"supports_search_tool":  json.RawMessage("true"),
-			"apply_patch_tool_type": json.RawMessage(`"freeform"`),
-			"use_responses_lite":    json.RawMessage("false"),
-		}, false)
 	}
 	if account.IsOpenAIApiKey() {
 		target := modelID
@@ -102,6 +101,18 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	if account.isExcelBPSUpstreamModelEnabled(modelID) {
 		capabilities["multi_agent_version"] = json.RawMessage("null")
 		capabilities["multi_agent_reasoning_effort"] = json.RawMessage("null")
+		capabilities["use_responses_lite"] = json.RawMessage("false")
+	}
+	// API Astra publicly supports Ultrafast. OAuth must advertise it in its
+	// account manifest; a subscription label alone does not grant the capability.
+	if account.IsOpenAIApiKey() && isOfficialOpenAIModelsBaseURL(baseURL) && isOpenAIGPT6AstraModel(modelID) {
+		tiers := configuredCodexServiceTiersForModel(modelID)
+		tiers = append(tiers, configuredCodexServiceTier{ID: OpenAIFastTierUltrafast, Name: "Ultrafast", Description: "Lowest latency; 6x Standard token pricing."})
+		encoded, err := json.Marshal(tiers)
+		if err != nil {
+			panic(err)
+		}
+		applyCodexToolCapabilities(capabilities, map[string]json.RawMessage{"service_tiers": encoded}, false)
 	}
 	return capabilities
 }
