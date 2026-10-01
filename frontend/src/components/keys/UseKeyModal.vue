@@ -792,11 +792,28 @@ function codexCatalogTomlLine(): string {
   return `model_catalog_json = "${CODEX_MODEL_CATALOG_CONFIG_PATH}"\n`
 }
 
+function defaultCodexContextWindow(modelSlug: string): number {
+  const normalized = modelSlug.trim().toLowerCase()
+  if (/^glm-5\.3(?:-|$)/.test(normalized)) return 1_000_000
+  if (normalized === 'glm-4.7') return 200_000
+  if (/^deepseek-v4(?:-|$)/.test(normalized)) return 1_000_000
+  if (/^claude-(?:opus|sonnet)-5(?:-|$)/.test(normalized)) return 1_000_000
+  if (/^gemini-2\.5-pro(?:-|$)/.test(normalized)) return 2_097_152
+  if (/^gemini-/.test(normalized)) return 1_048_576
+  if (normalized === 'grok-4.20-multi-agent-0309' || normalized === 'grok-4.3') return 1_000_000
+  if (normalized === 'grok-4.5') return 500_000
+  if (normalized === 'grok-build-0.1') return 256_000
+  return 0
+}
+
 function codexContextWindowTomlLine(modelSlug: string): string {
   const model = findCodexCatalogModel(codexModelManifestContent.value, modelSlug)
-  const contextWindow = Number(
+  const configuredContextWindow = Number(
     model?.context_window ?? props.setupProfile?.context_window ?? 0
   )
+  const contextWindow = configuredContextWindow > 0
+    ? configuredContextWindow
+    : defaultCodexContextWindow(modelSlug)
   if (!Number.isFinite(contextWindow) || contextWindow <= 0) return ''
   return `model_context_window = ${contextWindow}\n`
 }
@@ -1041,7 +1058,7 @@ function generateGrokClaudeFiles(baseUrl: string, apiKey: string): FileConfig[] 
 function generateZhipuClaudeFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const model = DEFAULT_CODEX_MODEL.value.startsWith('glm-')
     ? DEFAULT_CODEX_MODEL.value
-    : 'glm-4.7'
+    : 'glm-5.3'
   const environment = {
     ANTHROPIC_BASE_URL: baseUrl,
     ANTHROPIC_AUTH_TOKEN: apiKey,
@@ -1396,7 +1413,7 @@ model = "${model}"
 # Optional:
 # review_model = "${model}"
 # model_reasoning_effort = "medium"
-# model_context_window = 500000
+model_context_window = ${defaultCodexContextWindow(model) || 500000}
 
 [model_providers.tapmodels]
 name = "${escapeTomlBasicString(siteName.value)} Grok"
@@ -1441,7 +1458,7 @@ function generateRoutedCodexFiles(
     antigravity: 'claude-sonnet-5',
     grok: 'grok-4.5',
     kimi: 'kimi-k2.5',
-    zhipu: 'glm-4.7',
+    zhipu: 'glm-5.3',
     deepseek: 'deepseek-v4-pro',
     minimax: 'MiniMax-M3',
     opencode_go: 'glm-5.3',
@@ -1465,9 +1482,13 @@ function generateRoutedCodexFiles(
     composite: 'Composite'
   }
   const label = labels[platform]
+  const usesEmbeddedApiKey = platform === 'zhipu'
   const envContent = isWindows
     ? `$env:TAPMODELS_API_KEY="${apiKey}"`
     : `export TAPMODELS_API_KEY="${apiKey}"`
+  const authConfig = usesEmbeddedApiKey
+    ? `experimental_bearer_token = "${escapeTomlBasicString(apiKey)}"`
+    : 'env_key = "TAPMODELS_API_KEY"'
 
   const configContent = `# Codex CLI -> ${siteNameComment.value} ${label} group
 model_provider = "tapmodels"
@@ -1478,14 +1499,12 @@ ${contextWindowLine}${codexCatalogTomlLine()}
 [model_providers.tapmodels]
 name = "${escapeTomlBasicString(siteName.value)} ${label}"
 base_url = "${baseUrl}"
-${codexRemoteCatalogTomlLine(baseUrl)}env_key = "TAPMODELS_API_KEY"
+${codexRemoteCatalogTomlLine(baseUrl)}${authConfig}
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false`
 
-  return [
-    { path: isWindows ? 'PowerShell' : 'Terminal', content: envContent },
-    {
+  const files: FileConfig[] = [{
       path: joinConfigPath(configDir, 'config.toml', isWindows),
       content: configContent,
       hint: t(
@@ -1496,6 +1515,8 @@ supports_websockets = false`
       downloadName: 'config.toml'
     }
   ]
+  if (!usesEmbeddedApiKey) files.unshift({ path: isWindows ? 'PowerShell' : 'Terminal', content: envContent })
+  return files
 }
 
 function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
@@ -1525,17 +1546,25 @@ goals = true`
   return buildOpenAICodexFileConfigs(configDir, configContent, apiKey)
 }
 
+function defaultCodexOutputTokens(modelSlug: string): number {
+  return modelSlug.trim().toLowerCase() === 'glm-4.7' ? 128_000 : 131_072
+}
+
 function buildZhipuOpenCodeModels(): Record<string, Record<string, unknown>> {
   const fallbackSlug = DEFAULT_CODEX_MODEL.value.startsWith('glm-')
     ? DEFAULT_CODEX_MODEL.value
-    : 'glm-4.7'
+    : 'glm-5.3'
   const fallbackContextWindow = Number(props.setupProfile?.context_window)
+  const fallbackContext = Number.isFinite(fallbackContextWindow) && fallbackContextWindow > 0
+    ? fallbackContextWindow
+    : defaultCodexContextWindow(fallbackSlug)
   const fallback: Record<string, Record<string, unknown>> = {
     [fallbackSlug]: {
       name: fallbackSlug,
-      ...(Number.isFinite(fallbackContextWindow) && fallbackContextWindow > 0
-        ? { limit: { context: fallbackContextWindow } }
-        : { limit: { context: 1_000_000 } })
+      limit: {
+        context: fallbackContext > 0 ? fallbackContext : 1_000_000,
+        output: defaultCodexOutputTokens(fallbackSlug)
+      }
     }
   }
   const models = codexCatalogModels.value.filter((model) =>
@@ -1544,11 +1573,18 @@ function buildZhipuOpenCodeModels(): Record<string, Record<string, unknown>> {
   if (!models.length) return fallback
 
   return Object.fromEntries(models.map((model: CodexCatalogModel) => {
-    const contextWindow = Number(model.context_window)
+    const configuredContextWindow = Number(model.context_window)
+    const contextWindow = Number.isFinite(configuredContextWindow) && configuredContextWindow > 0
+      ? configuredContextWindow
+      : defaultCodexContextWindow(model.slug)
     const maxOutputTokens = Number(model.max_output_tokens)
     const limit: Record<string, number> = {}
-    if (Number.isFinite(contextWindow) && contextWindow > 0) limit.context = contextWindow
-    if (Number.isFinite(maxOutputTokens) && maxOutputTokens > 0) limit.output = maxOutputTokens
+    if (contextWindow > 0) {
+      limit.context = contextWindow
+      limit.output = Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
+        ? maxOutputTokens
+        : defaultCodexOutputTokens(model.slug)
+    }
     return [model.slug, {
       name: typeof model.display_name === 'string' && model.display_name.trim()
         ? model.display_name.trim()

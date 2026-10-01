@@ -27,13 +27,13 @@ OpenAI's Codex tab exposes two modes. Opening **Use key** selects **Codex CLI (W
 - **Legacy** sets `requires_openai_auth = true` and offers `auth.json`. Use it only for Codex versions that require that login shape.
 - **API key** sets `requires_openai_auth = false`, writes `experimental_bearer_token`, and adds the local image extension header. This stores the secret on disk; restrict permissions and never commit it.
 
-Routed Codex tabs default to `env_key = "TAPMODELS_API_KEY"`, `wire_api = "responses"`, and `supports_websockets = false`. The WebSocket tab enables WebSocket transport only for the OpenAI Responses path.
+Routed Codex tabs default to `env_key = "TAPMODELS_API_KEY"`, `wire_api = "responses"`, and `supports_websockets = false`; the Zhipu tab embeds its API key as `experimental_bearer_token`, so its standalone `config.toml` does not depend on `TAPMODELS_API_KEY`. The WebSocket tab enables WebSocket transport only for the OpenAI Responses path.
 
 ## Model catalog
 
 Only OpenAI/Composite groups and Zhipu API-key groups support the dedicated Codex catalog. Other groups get no `model_catalog_url` or `model_catalog_json`; query ordinary `GET /v1/models` and enter an exact model ID manually.
 
-In a supported Codex tab, the generated `config.toml` includes `model_catalog_json = "~/.codex/codex-models.json"` at the root. Use **Get model catalog and download** to fetch the current key's catalog, save the JSON to that path, and restart Codex. OpenAI/Composite groups may select the remote catalog; Zhipu always uses the local file, and `GLM-4.7 / GLM-5.3` descriptors and `config.toml` advertise a 1,000,000-token context. Do not edit slugs to bypass group policy.
+In a supported Codex tab, the generated `config.toml` includes `model_catalog_json = "~/.codex/codex-models.json"` at the root. Use **Get model catalog and download** to fetch the current key's catalog, save the JSON to that path, and restart Codex. OpenAI/Composite groups may select the remote catalog; Zhipu always uses the local file, and the `GLM-5.3` family descriptor and `config.toml` advertise a 1,000,000-token context; `GLM-4.7` remains at its 200,000-token upstream limit. Do not edit slugs to bypass group policy.
 
 ## Follow the project UI
 

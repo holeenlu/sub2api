@@ -27,13 +27,13 @@ OpenAI の Codex タブには 2 つのモードがあります。「キーを使
 - **Legacy** は `requires_openai_auth = true` を設定し、`auth.json` を提供します。このログイン形式を必要とする Codex バージョンでのみ使用してください。
 - **API key** は `requires_openai_auth = false` を設定し、`experimental_bearer_token` を書き込み、ローカル画像拡張ヘッダーを追加します。これによりシークレットがディスクに保存されるため、アクセス権を制限し、決してコミットしないでください。
 
-ルーティング済み Codex タブでは、デフォルトで `env_key = "TAPMODELS_API_KEY"`、`wire_api = "responses"`、`supports_websockets = false` が設定されます。WebSocket タブでは、OpenAI Responses パスでのみ WebSocket トランスポートが有効になります。
+ルーティング済み Codex タブでは、デフォルトで `env_key = "TAPMODELS_API_KEY"`、`wire_api = "responses"`、`supports_websockets = false` が設定されます。Zhipu タブは API キーを生成した `experimental_bearer_token` に埋め込むため、単独の `config.toml` では `TAPMODELS_API_KEY` に依存しません。WebSocket タブでは、OpenAI Responses パスでのみ WebSocket トランスポートが有効になります。
 
 ## モデルカタログ
 
 OpenAI/Composite グループと Zhipu API キーグループが専用 Codex カタログに対応します。その他のグループでは `model_catalog_url` と `model_catalog_json` は生成されません。通常の `GET /v1/models` を実行し、正確なモデル ID を手動で入力してください。
 
-対応している Codex タブで生成される `config.toml` のルートには `model_catalog_json = "~/.codex/codex-models.json"` が含まれます。**モデルカタログの取得とダウンロード** で現在のキーのカタログを取得し、そのパスへ保存して Codex を再起動してください。OpenAI/Composite ではリモートカタログも選択できます。Zhipu は常にローカルファイルを使用し、`GLM-4.7 / GLM-5.3` と `config.toml` は 1,000,000 トークンのコンテキストを宣言します。グループポリシーを回避するためにスラッグを編集しないでください。
+対応している Codex タブで生成される `config.toml` のルートには `model_catalog_json = "~/.codex/codex-models.json"` が含まれます。**モデルカタログの取得とダウンロード** で現在のキーのカタログを取得し、そのパスへ保存して Codex を再起動してください。OpenAI/Composite ではリモートカタログも選択できます。Zhipu は常にローカルファイルを使用し、`GLM-5.3` 系列のディスクリプタと `config.toml` は 1,000,000 トークンのコンテキストを宣言し、`GLM-4.7` は上流の 200,000 トークン制限を維持します。グループポリシーを回避するためにスラッグを編集しないでください。
 
 ## プロジェクトの UI に従う
 
