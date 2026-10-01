@@ -328,8 +328,11 @@ func (c *stubAPIKeyAuthCache) GetCreateAttemptCount(context.Context, int64) (int
 	return 0, nil
 }
 func (c *stubAPIKeyAuthCache) IncrementCreateAttemptCount(context.Context, int64) error { return nil }
-func (c *stubAPIKeyAuthCache) DeleteCreateAttemptCount(context.Context, int64) error    { return nil }
-func (c *stubAPIKeyAuthCache) IncrementDailyUsage(context.Context, string) error        { return nil }
+func (c *stubAPIKeyAuthCache) IncrementCreateCount(context.Context, int64, time.Duration) (int64, error) {
+	return 0, nil
+}
+func (c *stubAPIKeyAuthCache) DeleteCreateAttemptCount(context.Context, int64) error { return nil }
+func (c *stubAPIKeyAuthCache) IncrementDailyUsage(context.Context, string) error     { return nil }
 func (c *stubAPIKeyAuthCache) SetDailyUsageExpiry(context.Context, string, time.Duration) error {
 	return nil
 }
