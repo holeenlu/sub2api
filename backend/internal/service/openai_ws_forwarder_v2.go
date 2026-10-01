@@ -124,6 +124,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	// previous_response_id → 账号粘连要写进账号真正的来源分组（可能是无可用账号
 	// 兜底分组），否则续写命中的是起点命名空间，账号又不在起点池里而被丢弃。
 	groupID := openAIResponseAccountGroupID(c)
+	_, enforceGroup := openAITurnAdmissionGroupFromContext(c)
 	sessionHash := s.GenerateSessionHash(c, nil)
 	if sessionHash == "" {
 		var legacySessionHash string
@@ -217,7 +218,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		TenantScope:      openAIWSTenantScope(c),
 		PrepareTicket:    s.codexTicketProxy,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
-			_, err := s.admitOpenAITurnForGroup(factoryCtx, groupID, account, mappedModel)
+			_, err := s.admitOpenAITurnForGroup(factoryCtx, groupID, enforceGroup, account, mappedModel)
 			if err != nil {
 				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
 					factoryCtx,
@@ -235,7 +236,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			return s.bindOpenAIWSHandshake(account, mappedModel, headers)
 		},
 		CheckBinding: func(checkCtx context.Context, b *openAIWSTurnBinding) error {
-			latest, err := s.admitOpenAITurnForGroup(checkCtx, groupID, account, mappedModel)
+			latest, err := s.admitOpenAITurnForGroup(checkCtx, groupID, enforceGroup, account, mappedModel)
 			if err != nil {
 				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
 					checkCtx,

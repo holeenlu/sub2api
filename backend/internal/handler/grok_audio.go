@@ -40,7 +40,7 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 		return
 	}
 	var userStreamStarted bool
-	userRelease, userSlotErr := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, false, &userStreamStarted)
+	userRelease, userSlotErr := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, apiKey.ID, apiKey.ConcurrencyLimit, false, &userStreamStarted)
 	if userSlotErr != nil {
 		h.handleConcurrencyError(c, userSlotErr, "user", false)
 		return
@@ -85,6 +85,13 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	}
 	defer inflightDone()
 	// Keep the HTTP response uncommitted while selecting and probing an account.
+	keyRelease, keyErr := h.concurrencyHelper.AcquireAPIKeySlot(c.Request.Context(), apiKey.ID, apiKey.ConcurrencyLimit)
+	if keyErr != nil {
+		h.handleConcurrencyError(c, keyErr, "API key", false)
+		return
+	}
+	defer keyRelease()
+
 	// Realtime is not an HTTP streaming response; using reqStream=true here would
 	// let the wait queue flush an SSE ping before the WebSocket handshake succeeds.
 	failed := map[int64]struct{}{}
@@ -276,7 +283,7 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		return
 	}
 	var userStreamStarted bool
-	userRelease, userSlotErr := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, false, &userStreamStarted)
+	userRelease, userSlotErr := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, apiKey.ID, apiKey.ConcurrencyLimit, false, &userStreamStarted)
 	if userSlotErr != nil {
 		h.handleConcurrencyError(c, userSlotErr, "user", false)
 		return
@@ -354,6 +361,12 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 	failed := map[int64]struct{}{}
 	var last *service.UpstreamFailoverError
 	selectionModel := "grok-4.5"
+	keyRelease, keyErr := h.concurrencyHelper.AcquireAPIKeySlot(c.Request.Context(), apiKey.ID, apiKey.ConcurrencyLimit)
+	if keyErr != nil {
+		h.handleConcurrencyError(c, keyErr, "API key", false)
+		return
+	}
+	defer keyRelease()
 
 	for attempts := 0; attempts < 4; attempts++ {
 		var selection *service.AccountSelectionResult

@@ -282,3 +282,51 @@ ranxi2001/production 审计推进到 a53a7ff163d9337a094e7537df3aac2b31f308b7。
 按共享审查文档落地 `main`，普通 merge 到 TapModels，保持来源 SHA 和品牌文件；推送目标为 `origin/main`、`origin/TapModels`、`erwinlin/main`。检查文档差异、固定来源范围、两品牌运行代码树未变化及手动发版 Workflow 回归；文档改动不重复全量业务测试。仅提交/推送，不发版、不部署，不混入当前模型目录任务的未提交代码。
 
 实际验证：`git diff --check` 与仅文档范围检查通过；逐文件确认两品牌发版 Workflow 保持仅 `workflow_dispatch`。`test_auto_release_workflow.py` 因现有 Python 环境缺少 PyYAML 未能启动，未安装依赖；未重复业务测试，也未使用真实 BPS 账号、Redis 或生产数据库。
+
+## 2026-10-01：无 Key 的 WS 测试与 API Key 并发/排队（#259、#263）
+
+审查范围从 `c2e3e098f7a8cb6a88666574ed050d58be922aa3` 到固定来源 `ranxi2001/production@a7263faa247b74edd9e2bc8671a17ad96b3a1237`，交付前再次查询来源远端仍为此 SHA。普通 ranxi 同步继续只覆盖 OAuth Excel/BPS 与必要依赖；本轮用户另行明确批准扩大到全协议 API Key 并发与排队。没有整体合入 fork，Merge 包装不重复导入。
+
+### 新增功能
+
+- API Key 的 `concurrency_limit`（默认 `0` 无额外限制）及 Redis 原子准入、续租、失租终止、取消清理；队列覆盖 HTTP/SSE、Responses WebSocket 每轮和 Live 等入口。默认每个受限 Key 额外等待容量 `5`、单次 `30` 秒，不保证 FIFO。用户/账号等原有额度仍生效，Key 排队不占用户或账号槽。
+- 用户「API 密钥」(`/keys`) → 创建/编辑、批量编辑 →「并发上限」；页面展示活跃与等待统计。只读接口 `GET /api/v1/keys/concurrency?ids=...` 先核对 Key 所有权，统计不可用时显示未知/过期，不显示虚假的零。繁体由生成器输出，日语补齐。
+- 全局队列仅有进程启动配置：`gateway.api_key_queue.max_waiting` / `GATEWAY_API_KEY_QUEUE_MAX_WAITING` 默认 `5`（`0` 关闭排队但仍限并发）；`gateway.api_key_queue.timeout_seconds` / `GATEWAY_API_KEY_QUEUE_TIMEOUT_SECONDS` 默认 `30`、必须为正整数。配置与升级说明见 [API Key 并发限制与等待队列](API_KEY_CONCURRENCY.md)。
+
+### 优化改进
+
+- 排队/WS 轮次复核现有 Key、用户、IP、模型和当前请求所用能力；换组/平台/计费模式时返回 `503 / API_KEY_GROUP_CHANGED`，不混用新权限与旧路由。队列满 `429 / api_key_queue_full`，超时 `429 / api_key_queue_timeout`；WS 权限失败 `1008`，容量/临时错误 `1013`。Key 级本地容量错误仍有诊断，不当作上游账号故障。
+- WebSocket 继续只用一个 reader，在准入等待时处理断连/待发送取消/重叠请求。槽位随实际请求工作结束释放；失租取消上游，先等待工作停止再释放，Live 转移准确的 Key/用户/账号成员避免重复占用。
+- 统计查询改用 Redis Pipeline；鉴权快照版本由本地 `27` 提升到 `28`，包含并发字段，使旧缓存回源重建。未恢复已退役字段。
+
+### Bug 修复
+
+- #259：没有 API Key 的内部账号测试不再被 WS 回调按分组 `0` 误拒绝；账号存在/启用/平台、主库资格与 RPM 等保护仍在。**无需配置，部署后自动生效**。账号测试入口为管理后台 → 账号管理 (`/admin/accounts`) → 测试。
+- 本地组合适配保留实际选号分组的粘连和准入命名空间、当前轮次模型、逐次 RPM、已有容量重试预算及 BPS 保护。WS 后续轮次按 Key → 有界等待绑定账号 → 用户准入，账号等待不占用户槽；准入后冻结利润计价时刻。模型目录路由/价格仍保留同轮映射快照。已发送/输出的请求不因新容量错误重放。
+- 保留 Grok 自定义语音归属和双向退出后统计用量；新 Key 限额补到本地新增的两个 Grok 上游入口。修正源测试构造器与本地没有 `proxyRepo` 的差异。为执行集成验证，修复两处既有测试编译问题：退役投影测试残留 import、模型目录测试重名变量；没有删除测试用例。
+
+### 来源与本地提交
+
+| 源提交 | 行为 | 本地提交 |
+| --- | --- | --- |
+| `f98a370825602a4512a7c201da925b325b7d0bdb` | #259 无 Key WS 测试 | `e862b6a22` |
+| `cbb8ef3ed36dc4d7b4b5e8355e59d2de666660c8` | #263 API Key 并发/排队、前后端和迁移，经本地组合适配 | `9ac3bf7c5` |
+| `467f5497354bafbcbd1b328052fa22d70171de81` | 批量统计与旧版本升级验证 | `bcfd5ba5c` |
+| `95fcb3995a31a45f4d53f6a889e516ebc804327d` | Redis 断言与 benchmark 清理错误处理 | `32a0daec6` |
+| `75481943141ffdb342fdef619b1f7f60ff669341` | 鉴权缓存测试 stub 接口 | `8f1a706d3` |
+| `15bf3cd838bbad243e548212c4dee44d04b54ae4` | 轮次准入测试夹具 | `f799d8b83` |
+| 上述 #263 本地兼容修正 | 构造器、Grok 入口、绑定账号等待回归及集成夹具修复 | `d52c9b9cd` |
+
+六份源提交保留原作者和 `cherry-pick -x` 来源：akihitohyh、InCerry。冲突按用户确认方案逐块组合：没有套用整文件 ours/theirs，没有导入 fork README 中品牌/采集/运维方向。
+
+排除：`67266c9cbade43a4f73534cc6fdabab7190badae` 的 Grok CLI `1.0.44`（本地官方同步已有 `1.0.46`，不降级）；`c885caa4f77e650f88b0efa8c9a647f6376ba7e8` 鹈鹕 HTTP 预览与 BPS 无关。Prism 新平台/浏览器桥、票据和文档均排除，涉及 `cd1aa7db8`、`4482c64f8`、`6709d529a`、`27b20d536`、`bfb2cc57b`、`8ff9b9a6f`、`8d053f79e`、`648ac02af`、`47dcb323b`、`01ccb05d9`；其所谓 OAuth 生命周期/账号设置修改实际依赖 Prism，不抽取缺少消费者的代码。共享冲突夹带的 Cyber 新身份口径、请求采集和用户禁用模型未恢复；Mihomo、独立 sub4api BPS、自动 BPS/优先调度/凭证运营仍退役。
+
+### 迁移、兼容与验证
+
+新增 `237_add_api_key_concurrency_limit.sql`：`api_keys.concurrency_limit BIGINT NOT NULL DEFAULT 0` 及非负约束，保留源 SQL；按完整文件名记录，与 `237_add_minimax_platform.sql` 并存，不修改历史迁移。已有 Key **无需配置，部署后保留原并发限制**；启用 Key 级上限需主动设正数。设置修改使鉴权缓存失效。需完成全实例升级后启用，统一 Redis 和队列配置；扩大等待时间需核对客户端/代理首字节超时。二进制回退不自动删除新列。本次未执行生产迁移。
+
+未修改依赖版本、Go 模块/前端锁文件或发版 Workflow。用户确认后按 pnpm 9.15.9 与既有锁文件准备前端依赖；Ent、Wire 重新生成没有差异。仅代码推送，不发版、不构建镜像、不部署。
+
+main 验证：后端 `go test -tags=unit ./...` 全量、`go vet -tags=unit ./...` 和 Key/轮次/租约的四包 `-race` 定向检查通过；新增绑定账号等待与断连回收回归通过。前端类型检查、377 文件/3177 用例全量、ESLint、生产构建、四语完整性与繁体生成检查通过。手动发版 Workflow 的三个回归用例通过。
+
+真实本机 Docker PostgreSQL 18.1 与 Redis 8.4：`TestAPIKeyConcurrencyLimitMigration` 和 `TestAPIKeyAdmissionDockerCompetition` 通过，验证新列默认/约束、多客户端原子限额、Live 共享上限及失租停止上游后再释放。使用全量历史 SQL 在临时库应用迁移；不接触应用或生产数据库。另外在独立临时 PostgreSQL 上运行 `TestAPIKeyConcurrencyUpgradePaths`：首次升级旧 Key 默认为 `0`、已部署源 PR 的手填 `9` 在重复迁移后保留、文件名/校验和并存、负数拒绝和新建默认值两条路径均通过。临时容器测试后已清理。TapModels 执行同套分支检查后才推送，具体分支 SHA 与结果以交付报告为准。未使用真实 BPS、OAuth 或其他上游账号验证。

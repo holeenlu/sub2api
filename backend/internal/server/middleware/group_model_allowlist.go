@@ -31,7 +31,14 @@ import (
 func GroupModelAllowlist(checkers ...func(*gin.Context, *service.Group, []string) error) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apiKey, ok := GetAPIKeyFromContext(c)
-		if !ok || apiKey == nil || apiKey.Group == nil || (!apiKey.Group.ModelAllowlistEnabled() && !service.CatalogEnforced(apiKey.Group)) {
+		if !ok || apiKey == nil || apiKey.Group == nil {
+			c.Next()
+			return
+		}
+		// Capture models even if the initial allowlist is off: queued requests
+		// must honor permission changes before admission.
+		captureForQueue := apiKey.ConcurrencyLimit > 0
+		if !apiKey.Group.ModelAllowlistEnabled() && !service.CatalogEnforced(apiKey.Group) && !captureForQueue {
 			c.Next()
 			return
 		}
@@ -68,7 +75,9 @@ func GroupModelAllowlist(checkers ...func(*gin.Context, *service.Group, []string
 				}
 			}
 		}
-
+		if captureForQueue && len(models) > 0 {
+			c.Request = c.Request.WithContext(service.WithAPIKeyQueueRequestPermissions(c.Request.Context(), service.APIKeyQueueRequestPermissions{Models: models}))
+		}
 		blocked := ""
 		for _, candidate := range models {
 			if !allowlist.Allows(candidate) {
