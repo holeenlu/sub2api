@@ -1,11 +1,13 @@
 import { apiClient } from '../client'
 import type { UpstreamModelMetadata } from './accounts'
+import type { AccountModelCatalogPolicy } from '@/types'
 
 export interface CatalogModel {
   id: string
   display_name: string
   platform: string
   kind: string
+  disabled?: boolean
   lifecycle: 'active' | 'deprecated' | 'retired' | 'unknown'
   shutdown_date?: string
   access: 'listed' | 'configured' | 'candidate' | 'observed' | 'unlisted'
@@ -15,11 +17,9 @@ export interface CatalogModel {
   endpoints: string[]
 }
 
-export interface CatalogPolicy { mode: "legacy" | "fixed" | "follow"; models: string[]; excluded: string[] }
-export interface CatalogRelease { revision:string; created_at:string; operation:string }
+export type CatalogPolicy = AccountModelCatalogPolicy
 export interface ModelCatalog {
   warnings?: string[]
-  policy?: CatalogPolicy
   revision: string
   account_id?: number
   platform: string
@@ -36,16 +36,29 @@ export interface CatalogJob {
   status: 'running' | 'complete' | 'failed'
   revision?: string
   error?: string
+  succeeded?: number
+  failed?: number
 }
 
-export async function getModelCatalog(params: { account_id?: number; platform?: string }, signal?: AbortSignal): Promise<ModelCatalog> {
+export async function getModelCatalog(params: { account_id?: number; platform?: string; view?: 'selection' }, signal?: AbortSignal): Promise<ModelCatalog> {
   const { data } = await apiClient.get<ModelCatalog>('/admin/model-catalog', { params, signal })
   return data
 }
 
-export async function refreshModelCatalog(accountID: number, signal?: AbortSignal): Promise<ModelCatalog> {
+export async function refreshModelCatalog(accountID: number, signal?: AbortSignal, view?: 'selection'): Promise<ModelCatalog> {
   const { data: job } = await apiClient.post<CatalogJob>('/admin/model-catalog/refresh', { account_id: accountID }, { signal })
-  const deadline = Date.now() + 125000
+  await waitForCatalogJob(job, 125000, signal)
+  return getModelCatalog({ account_id: accountID, ...(view ? { view } : {}) }, signal)
+}
+
+export async function syncModelCatalog(signal?: AbortSignal): Promise<CatalogJob> {
+  const { data: job } = await apiClient.post<CatalogJob>('/admin/model-catalog/sync', {}, { signal })
+  // A global sync may take longer than one account. The server owns the job.
+  return waitForCatalogJob(job, 31 * 60 * 1000, signal, true)
+}
+
+async function waitForCatalogJob(job: CatalogJob, timeout: number, signal?: AbortSignal, allowPartial = false): Promise<CatalogJob> {
+  const deadline = Date.now() + timeout
   let current = job
   while (current.status === 'running') {
     if (Date.now() >= deadline) throw new Error('model_catalog_refresh_timeout')
@@ -59,20 +72,13 @@ export async function refreshModelCatalog(accountID: number, signal?: AbortSigna
     const { data } = await apiClient.get<CatalogJob>(`/admin/model-catalog/jobs/${job.id}`, { signal })
     current = data
   }
-  if (current.status === 'failed') throw new Error(current.error || 'model_catalog_refresh_failed')
-  return getModelCatalog({ account_id: accountID }, signal)
+  if (current.status === 'failed' && !allowPartial) throw new Error(current.error || 'model_catalog_refresh_failed')
+  return current
 }
 
 export interface CatalogSyncSettings {
-  deletion_alert_percent?: number
-  priority_account_ids?: number[]
-  priority_interval_seconds?: number
-  price_interval_seconds?: number
   enabled: boolean
   interval_seconds: number
-  timeout_seconds: number
-  concurrency: number
-  stale_seconds: number
 }
 export async function getCatalogSettings(): Promise<CatalogSyncSettings> {
   const { data } = await apiClient.get<CatalogSyncSettings>('/admin/model-catalog/settings'); return data
@@ -80,19 +86,16 @@ export async function getCatalogSettings(): Promise<CatalogSyncSettings> {
 export async function saveCatalogSettings(value: CatalogSyncSettings): Promise<void> {
   await apiClient.put('/admin/model-catalog/settings', value)
 }
-export async function getCatalogRegistry(): Promise<CatalogModel[]> {
-  const { data } = await apiClient.get<CatalogModel[]>('/admin/model-catalog/registry'); return data
+export interface CatalogModelInput {
+  id: string
+  platform: string
+  display_name: string
+  kind: string
+  disabled: boolean
 }
-export async function saveCatalogRegistry(models: unknown[]): Promise<void> {
-  await apiClient.put('/admin/model-catalog/registry', { models })
+export async function saveCatalogModel(model: CatalogModelInput): Promise<void> {
+  await apiClient.put('/admin/model-catalog/models', model)
 }
-
-export async function saveAccountCatalogPolicy(id:number,policy:CatalogPolicy):Promise<void>{await apiClient.put(`/admin/model-catalog/accounts/${id}/policy`,policy)}
-export async function getCatalogHistory(id:number):Promise<CatalogRelease[]>{const {data}=await apiClient.get<{items:CatalogRelease[]}>(`/admin/model-catalog/accounts/${id}/history`);return data.items}
-export async function rollbackCatalog(id:number,revision:string):Promise<void>{await apiClient.post(`/admin/model-catalog/accounts/${id}/rollback`,{revision})}
-export async function getCatalogPrices():Promise<{revision:string;updated_at:string;supplemental:Record<string,unknown>}>{const {data}=await apiClient.get('/admin/model-catalog/prices');return data??{supplemental:{}}}
-export async function saveCatalogPrices(models:Record<string,unknown>):Promise<void>{await apiClient.put('/admin/model-catalog/prices',{models})}
-export async function explainCatalog(groupID:number):Promise<unknown>{const {data}=await apiClient.get('/admin/model-catalog/explain',{params:{group_id:groupID}});return data}
 
 export interface CatalogTicketCandidate {model:string; fingerprint_available:boolean; access:string}
 export async function getCatalogTicketModels(id:number):Promise<CatalogTicketCandidate[]>{const {data}=await apiClient.get(`/admin/model-catalog/accounts/${id}/ticket-models`);return data}

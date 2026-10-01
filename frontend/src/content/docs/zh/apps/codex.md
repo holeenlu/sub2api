@@ -58,7 +58,7 @@ supports_websockets = false
 
 在刚才设置环境变量的同一个终端运行 `codex`。`supports_websockets = false` 是先验证 HTTP/SSE 的配置，不代表本站没有 WebSocket 路由。
 
-OpenAI 分组由弹窗生成另一种配置：Provider ID 是 `OpenAI`，包含主模型、审查模型、`[features]` 和默认模型目录路径；首次使用前需要获取并保存目录文件。默认 **Legacy** 模式同时下载 `config.toml` 和 `auth.json`，其中 `requires_openai_auth = true`；**API key** 模式改用 `requires_openai_auth = false` 与 `experimental_bearer_token`，修改后必须完全重启 Codex。两种模式不要混合，也不要把路由分组的 `tapmodels` 表和 OpenAI 分组的 `OpenAI` 表拼成一个 Provider。
+OpenAI 分组由弹窗生成另一种配置：Provider ID 是 `OpenAI`，包含主模型、审查模型、`[features]` 和远程模型目录地址 `model_catalog_url`，复制即可使用。弹窗默认选中 **Codex CLI (WebSocket)** 与 **API key** 模式：`requires_openai_auth = false` 并写入 `experimental_bearer_token`，只需下载 `config.toml`；**Legacy** 模式改为 `requires_openai_auth = true` 并同时下载 `auth.json`。切换后必须完全重启 Codex。两种模式不要混合，也不要把路由分组的 `tapmodels` 表和 OpenAI 分组的 `OpenAI` 表拼成一个 Provider。
 
 ## 桌面端：让应用拿到 Key
 
@@ -74,17 +74,17 @@ OpenAI 分组由弹窗生成另一种配置：Provider ID 是 `OpenAI`，包含�
 
 如果必须使用图标启动，可在 OpenAI 分组的“使用密钥”弹窗选择 **API key**，下载其完整 `config.toml`。它会把凭据保存在配置文件中，注意文件权限与备份，勿提交到仓库。对于其他分组，优先使用弹窗生成的 `env_key` 配置；不要自行把两种认证字段并列。
 
-## 获取当前分组模型目录
+## 当前分组模型目录
 
-本节只适用于 OpenAI/Composite 分组。其他路由分组不支持专用目录下载，也不应添加 `model_catalog_json`。用普通 `GET /v1/models` 查询精确 ID 后填入 `model`；不要把该列表响应保存为 Codex manifest。
+本节只适用于 OpenAI/Composite 分组。其他路由分组不提供专用目录，也不应添加 `model_catalog_url`。用普通 `GET /v1/models` 查询精确 ID 后填入 `model`；不要把该列表响应当作 Codex manifest。
 
-在“API 密钥 → 使用密钥 → Codex”中手动点击“获取目录”，成功获取包含可用 Codex 模型的目录后，再点击“下载目录”。手动获取的结果可更新 `model`、`review_model` 和推理设置；获取失败或没有可用模型时，默认配置仍可复制和下载。默认配置始终包含 `model_catalog_json = "~/.codex/codex-models.json"`，无需等待目录请求。首次启动 Codex 前须先下载并保存该目录文件；重新获取失败时可继续使用之前保存的文件。将下载的 `codex-models.json` 放在固定位置，并确保 `config.toml` 顶层的路径与文件实际位置一致，例如：
+弹窗生成的 `config.toml` 在 Provider 表中包含：
 
 ```toml
-model_catalog_json = "/你的绝对路径/.codex/codex-models.json"
+model_catalog_url = "{{API_ROOT}}/v1/models"
 ```
 
-Windows TOML 使用单引号路径，例如 `model_catalog_json = 'C:\Users\你的用户名\.codex\codex-models.json'`。目录下载失败时先用最小配置排查。分组或开放模型变化后重新获取目录，不要编辑本地模型名称来绕过权限。
+Codex 0.156.0 及以上版本启动时用当前 Key 读取该地址，得到本站为该 Key 计算的目录；分组或开放模型变化后重启 Codex 即可取得新目录。“检查连接 / 查看此 Key 可用模型”只用于核对，可能更新弹窗中的 `model`、`review_model` 和推理设置，不是使用前置步骤。本站已停止支持本地目录文件，不再提供 `codex-models.json` 下载和更新脚本；旧配置中的 `model_catalog_json` 请删除。不要编辑模型名称来绕过权限。
 
 ## 验证接入
 

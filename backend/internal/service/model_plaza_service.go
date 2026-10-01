@@ -267,6 +267,7 @@ func (s *ModelPlazaService) ListVisibleGroups(ctx context.Context, visible func(
 		g := groupEnt[gid]
 		for j := range pg.Models {
 			s.fillDisplayPricing(ctx, &pg.Models[j], g)
+			s.fillMediaDisplayPricing(ctx, &pg.Models[j], g)
 			pg.Models[j].OfficialPricing = s.lookupOfficialPricing(ctx, pg.Models[j].Name, officialMemo)
 		}
 		out = append(out, *pg)
@@ -507,12 +508,21 @@ func (s *ModelPlazaService) fillMediaDisplayPricing(ctx context.Context, m *Plaz
 		mode = m.Pricing.BillingMode
 	}
 	video := mode == BillingModeVideo || isGrokVideoBillingModel(m.Name)
-	if !video && mode != BillingModeImage {
-		return
-	}
 	ctx = WithResolvedTargetPlatform(ctx, m.Platform)
 	gateway := &OpenAIGatewayService{billingService: s.billingService, resolver: s.resolver}
 	key := &APIKey{Group: group, GroupID: &group.ID}
+	explicit := gateway.resolveOpenAIChannelPricing(ctx, m.Name, key)
+	if explicit != nil && explicit.Mode == BillingModeToken {
+		return
+	}
+	image := mode == BillingModeImage || IsImageGenerationIntent("", m.Name, nil)
+	if !video && !image {
+		return
+	}
+	// Do not carry token-only prices or tiers into an image quote.
+	m.ImageTokenPricing = nil
+	m.LongContextBasis = ""
+	m.TimePricing = nil
 	resolved := s.resolver.Resolve(ctx, PricingInput{Model: m.Name, Group: group, GroupID: &group.ID})
 	raw := &ChannelModelPricing{BillingMode: BillingModeImage}
 	m.PriceUnit, m.MediaKind = "image", BillingModeImage

@@ -1163,8 +1163,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 // Models lists visible models, or retrieves the exact list entry for a model path parameter.
 // GET /v1/models and /v1/models/:model (also exposed through root aliases)
-// Returns models based on account configurations (model_mapping whitelist)
-// Falls back to default models if no whitelist is configured
+// Uses the authenticated key's effective group catalog: group access policy
+// intersected with account supply and channel routing, never the admin inventory.
+// Compatibility fallbacks below also apply the group's allowlist.
 func (h *GatewayHandler) Models(c *gin.Context) {
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
 
@@ -1177,12 +1178,6 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 	if forcedPlatform, ok := middleware2.GetForcePlatformFromContext(c); ok && strings.TrimSpace(forcedPlatform) != "" {
 		platform = forcedPlatform
-	}
-
-	if platform == service.PlatformOpenAI && apiKey != nil && apiKey.Group != nil &&
-		apiKey.Group.Platform == service.PlatformOpenAI && apiKey.Group.CodexModelsManifestConfig.Enabled && h.modelCatalog == nil {
-		h.pinnedOpenAIModels(c, apiKey.Group)
-		return
 	}
 
 	if h.modelCatalog != nil && apiKey != nil && apiKey.Group != nil && (platform == apiKey.Group.Platform || platform == "") {

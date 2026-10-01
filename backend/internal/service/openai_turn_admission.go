@@ -357,8 +357,7 @@ func (s *OpenAIGatewayService) admitOpenAITurnWithGroup(
 		return nil, err
 	}
 	if s.modelCatalog != nil {
-		mode := accountModelCatalogPolicy(latest).Mode
-		if mode == "follow" || mode == "fixed" {
+		if accountHasModelSelection(latest) {
 			allowed, known := s.modelCatalog.ModelIsPublished(ctx, latest, outboundModel)
 			if !known || !allowed {
 				return nil, denyOpenAITurn("catalog_scope_unavailable")

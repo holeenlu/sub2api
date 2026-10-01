@@ -50,16 +50,17 @@ func (s *ModelCatalogService) CodexManifest(ctx context.Context, group *Group) (
 	known := map[int64]map[string]ModelCatalogEntry{}
 	for i := range accounts {
 		a := &accounts[i]
-		if !isPinnedCodexModelsAccountUsable(a) {
+		if !isCatalogAccountActive(a) {
 			continue
 		}
 		snapshot, err := s.Account(ctx, a)
-		if err != nil || snapshot.Status == "unavailable" {
+		if err != nil {
 			continue
 		}
 		known[a.ID] = map[string]ModelCatalogEntry{}
 		for _, entry := range snapshot.Models {
-			if entry.Access == "listed" && entry.Lifecycle != "retired" {
+			allowed, _ := s.ModelIsPublished(ctx, a, entry.ID)
+			if allowed && entry.Lifecycle != "retired" {
 				known[a.ID][entry.ID] = entry
 			}
 		}

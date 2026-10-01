@@ -401,11 +401,11 @@
             class="rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
           >
             <p class="text-xs text-amber-700 dark:text-amber-400">
-              {{ t('admin.accounts.openai.modelRestrictionDisabledByPassthrough') }}
+              {{ t('modelCatalog.passthroughPolicyHint') }}
             </p>
           </div>
 
-          <template v-else>
+          <div>
             <!-- Mode Toggle -->
             <div class="mb-4 flex gap-2">
               <button
@@ -441,6 +441,7 @@
                     ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
                 ]"
+                :disabled="isOpenAIModelRestrictionDisabled"
                 @click="modelRestrictionMode = 'mapping'"
               >
                 <svg
@@ -499,7 +500,7 @@
             </div>
 
             <!-- Mapping Mode -->
-            <div v-else>
+            <div v-else-if="!isOpenAIModelRestrictionDisabled">
               <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
                 <p class="text-xs text-purple-700 dark:text-purple-400">
                   <svg
@@ -602,7 +603,7 @@
                 </button>
               </div>
             </div>
-          </template>
+          </div>
         </div>
       </div>
 
@@ -2190,21 +2191,14 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
         : openAIResponsesMode.value
   }
 
-  if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value) {
-    // 统一使用 model_mapping 字段
+  if (enableModelRestriction.value) {
     if (modelRestrictionMode.value === 'whitelist') {
-      // 白名单模式：将模型转换为 model_mapping 格式（key=value）
-      // 空白名单表示“支持所有模型”，需显式发送空对象以覆盖已有限制。
-      const mapping: Record<string, string> = {}
-      for (const m of allowedModels.value) {
-        mapping[m] = m
+      // Change access without overwriting each account's existing aliases.
+      updates.model_catalog_policy = {
+        models: [...allowedModels.value],
       }
-      credentials.model_mapping = mapping
-      credentialsChanged = true
-    } else {
-      // 映射模式下空配置同样表示“支持所有模型”。
-      const modelMapping = buildModelMappingObject()
-      credentials.model_mapping = modelMapping ?? {}
+    } else if (!isOpenAIModelRestrictionDisabled.value) {
+      credentials.model_mapping = buildModelMappingObject() ?? {}
       credentialsChanged = true
     }
   }

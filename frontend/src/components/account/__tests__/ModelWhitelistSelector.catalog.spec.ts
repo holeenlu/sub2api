@@ -34,12 +34,13 @@ describe('dynamic model selector', () => {
     expect(wrapper.text()).toContain('opaque-future-from-upstream')
     expect(wrapper.text()).not.toContain('gpt-5.2')
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(getModelCatalog).toHaveBeenCalledWith({ account_id: 17, view: 'selection' }, expect.any(AbortSignal))
     await click(wrapper, 'modelCatalog.selectAvailable')
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['manual-alias', 'opaque-future-from-upstream']])
     wrapper.unmount()
   })
 
-  it('never reintroduces retired or unconfirmed models through select-all', async () => {
+  it('allows explicit selection of inventory candidates without reintroducing retired models', async () => {
     getModelCatalog.mockResolvedValue(snapshot([entry('old-retired', 'retired'), entry('active-new'), entry('image-reference', 'active', 'candidate')]))
     const wrapper = mountEditor(['old-retired'])
     await flushPromises()
@@ -48,7 +49,7 @@ describe('dynamic model selector', () => {
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([[]])
     await wrapper.setProps({ modelValue: [] })
     await click(wrapper, 'modelCatalog.selectAvailable')
-    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['active-new']])
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['active-new', 'image-reference']])
     wrapper.unmount()
   })
 
@@ -63,6 +64,31 @@ describe('dynamic model selector', () => {
     expect(wrapper.text()).toContain('second-future-model')
     expect(wrapper.text()).toContain('modelCatalog.loadFailed')
     expect(wrapper.text()).not.toContain('gpt-5.2')
+    wrapper.unmount()
+  })
+
+  it('enables select-all after a first successful sync without replacing the fixed list', async () => {
+    getModelCatalog.mockResolvedValueOnce({ status: 'unavailable', models: [] })
+    const wrapper = mountEditor(['fixed-choice'])
+    await flushPromises()
+    const button = wrapper.findAll('button').find(b => b.text() === 'modelCatalog.selectAvailable')!
+    expect(button.attributes('disabled')).toBeDefined()
+    refreshModelCatalog.mockResolvedValueOnce(snapshot([entry('new-model')]))
+    await click(wrapper, 'modelCatalog.refresh')
+    expect(button.attributes('disabled')).toBeUndefined()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await click(wrapper, 'modelCatalog.selectAvailable')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['fixed-choice', 'new-model']])
+    wrapper.unmount()
+  })
+
+  it('explains an authentication failure while preserving the last successful choices', async () => {
+    const wrapper = mountEditor(['fixed-choice'])
+    await flushPromises()
+    refreshModelCatalog.mockRejectedValueOnce(new Error('authentication_unavailable'))
+    await click(wrapper, 'modelCatalog.refresh')
+    expect(wrapper.text()).toContain('modelCatalog.syncErrors.authentication_unavailable')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -88,6 +114,28 @@ describe('dynamic model selector', () => {
     expect(wrapper.findAll('[data-testid="model-option"]')).toHaveLength(0)
     expect(wrapper.text()).toContain('saved-custom')
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('offers image and video inventory in bulk editing without permission badges or automatic selection', async () => {
+    getModelCatalog.mockResolvedValue({ status: 'unavailable', models: [
+      { ...entry('gpt-image-new', 'active', 'candidate'), kind: 'image' },
+      { ...entry('sora-new', 'active', 'candidate'), kind: 'video' }
+    ] })
+    const wrapper = mount(ModelWhitelistSelector, {
+      props: { platform: 'openai', accountIds: [17, 18], modelValue: [] },
+      global: { stubs: { ModelIcon: true, Icon: true } }
+    })
+    await flushPromises()
+    expect(getModelCatalog).toHaveBeenCalledWith({ platform: 'openai', view: 'selection' }, expect.any(AbortSignal))
+    await wrapper.get('div.cursor-pointer').trigger('click')
+    expect(wrapper.text()).toContain('gpt-image-new')
+    expect(wrapper.text()).toContain('sora-new')
+    expect(wrapper.text()).not.toContain('modelCatalog.pending')
+    expect(wrapper.text()).not.toContain('modelCatalog.noVerifiedModels')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await click(wrapper, 'modelCatalog.selectAvailable')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['gpt-image-new', 'sora-new']])
     wrapper.unmount()
   })
 })

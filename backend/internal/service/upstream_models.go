@@ -272,7 +272,14 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 
 	source := "upstream"
 	if upstreamCatalogNeedsRegistry(capabilityIDs, catalog.Metadata) {
-		if registryMetadata, registryErr := s.fetchModelsDevMetadata(ctx, account, enrichIDs); registryErr == nil {
+		enrichmentBudget := 8 * time.Second
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline)/2 < enrichmentBudget {
+			enrichmentBudget = time.Until(deadline) / 2
+		}
+		enrichmentCtx, cancelEnrichment := context.WithTimeout(ctx, enrichmentBudget)
+		registryMetadata, registryErr := s.fetchModelsDevMetadata(enrichmentCtx, account, enrichIDs)
+		cancelEnrichment()
+		if registryErr == nil {
 			for modelID, fallback := range registryMetadata {
 				current := catalog.Metadata[modelID]
 				merged, changed := mergeUpstreamModelMetadata(current, fallback)
@@ -364,6 +371,15 @@ func configuredUpstreamModelsForCapabilitySync(account *Account) []string {
 		return nil
 	}
 	models := make([]string, 0)
+	policy := accountModelCatalogPolicy(account)
+	if accountHasModelSelection(account) {
+		for _, model := range policy.Models {
+			mapped := strings.TrimSpace(accountCatalogPolicyModel(account, model))
+			if mapped != "" && !strings.Contains(mapped, "*") {
+				models = append(models, mapped)
+			}
+		}
+	}
 	for _, mappedModel := range account.GetModelMapping() {
 		mappedModel = strings.TrimSpace(mappedModel)
 		if mappedModel == "" || strings.Contains(mappedModel, "*") {
@@ -1164,6 +1180,20 @@ func (s *AccountTestService) buildOpenAIOAuthUpstreamModelsRequest(ctx context.C
 		}
 	} else {
 		accessToken := strings.TrimSpace(credentialAccount.GetOpenAIAccessToken())
+		if s.openaiGatewayService != nil && s.openaiGatewayService.openAITokenProvider != nil {
+			// Refresh can fail while the stored token still works. Try it once;
+			// the discovery endpoint remains authoritative and any 401/403 is
+			// propagated to catalog revocation handling.
+			token, tokenErr := s.openaiGatewayService.openAITokenProvider.GetAccessToken(ctx, credentialAccount)
+			switch {
+			case tokenErr != nil && accessToken == "":
+				return nil, newUpstreamModelSyncUpstreamError("Failed to refresh OpenAI access token", tokenErr)
+			case tokenErr != nil:
+				slog.Warn("upstream_models_openai_token_refresh_failed", "account_id", credentialAccount.ID, "error", tokenErr)
+			case strings.TrimSpace(token) != "":
+				accessToken = strings.TrimSpace(token)
+			}
+		}
 		if accessToken == "" {
 			return nil, newUpstreamModelSyncConfigError("No OpenAI access token is available", nil)
 		}

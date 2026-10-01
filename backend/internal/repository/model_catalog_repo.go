@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -72,9 +71,9 @@ func (r *modelCatalogRepository) Publish(ctx context.Context, key, token string,
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var previous sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT current_revision FROM model_catalog_sources
-		WHERE source_key=$1 AND lease_token=$2 AND scope_revision=$3 FOR UPDATE`, key, token, snapshot.ScopeRevision).Scan(&previous)
+	var sourceKey string
+	err = tx.QueryRowContext(ctx, `SELECT source_key FROM model_catalog_sources
+		WHERE source_key=$1 AND lease_token=$2 AND scope_revision=$3 FOR UPDATE`, key, token, snapshot.ScopeRevision).Scan(&sourceKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return service.ErrModelCatalogScopeChanged
 	}
@@ -97,13 +96,6 @@ func (r *modelCatalogRepository) Publish(ctx context.Context, key, token string,
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO model_catalog_entries(source_key,revision,model_id,payload)
 			VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, key, snapshot.Revision, entry.ID, encoded)
-		if err != nil {
-			return err
-		}
-	}
-	if !previous.Valid || previous.String != snapshot.Revision {
-		_, err = tx.ExecContext(ctx, `INSERT INTO model_catalog_releases(source_key,revision,previous_revision,price_revision)
-			VALUES($1,$2,$3,$4)`, key, snapshot.Revision, previous, snapshot.PriceRevision)
 		if err != nil {
 			return err
 		}
@@ -148,72 +140,6 @@ func (r *modelCatalogRepository) ListPlatform(ctx context.Context, platform stri
 	return out, rows.Err()
 }
 
-func (r *modelCatalogRepository) History(ctx context.Context, key string, limit int) ([]service.ModelCatalogRelease, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 30
-	}
-	rows, err := r.db.QueryContext(ctx, `SELECT id,revision,COALESCE(previous_revision,''),price_revision,created_at,operation
-		FROM model_catalog_releases WHERE source_key=$1 ORDER BY id DESC LIMIT $2`, key, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	out := []service.ModelCatalogRelease{}
-	for rows.Next() {
-		var item service.ModelCatalogRelease
-		if err = rows.Scan(&item.ID, &item.Revision, &item.PreviousRevision, &item.PriceRevision, &item.CreatedAt, &item.Operation); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (r *modelCatalogRepository) Rollback(ctx context.Context, key, scope, revision string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var previous sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT current_revision FROM model_catalog_sources WHERE source_key=$1 AND scope_revision=$2
-		AND (lease_until IS NULL OR lease_until<NOW()) FOR UPDATE`, key, scope).Scan(&previous)
-	if err != nil {
-		return err
-	}
-	var exists bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM model_catalog_snapshots
-		WHERE source_key=$1 AND scope_revision=$2 AND revision=$3)`, key, scope, revision).Scan(&exists)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("catalog revision not in current credential scope")
-	}
-	// Rollback cannot reintroduce models retired/revoked in the current revision.
-	var expands bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM model_catalog_entries old
-		WHERE old.source_key=$1 AND old.revision=$2 AND old.payload->>'access'='listed'
-		AND NOT EXISTS(SELECT 1 FROM model_catalog_entries cur WHERE cur.source_key=$1 AND cur.revision=$3
-		AND cur.model_id=old.model_id AND cur.payload->>'access'='listed' AND cur.payload->>'lifecycle'<>'retired'))`, key, revision, previous).Scan(&expands)
-	if err != nil {
-		return err
-	}
-	if expands {
-		return fmt.Errorf("rollback would restore revoked or retired models")
-	}
-	_, err = tx.ExecContext(ctx, `UPDATE model_catalog_sources SET current_revision=$2,last_error='' WHERE source_key=$1`, key, revision)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO model_catalog_releases(source_key,revision,previous_revision,operation)
-		VALUES($1,$2,$3,'rollback')`, key, revision, previous)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func (r *modelCatalogRepository) SavePrices(ctx context.Context, revision string, payload json.RawMessage) error {
 	_, err := r.db.ExecContext(ctx, `INSERT INTO official_price_versions(revision,payload) VALUES($1,$2) ON CONFLICT DO NOTHING`, revision, []byte(payload))
 	return err
@@ -225,7 +151,7 @@ func (r *modelCatalogRepository) SaveJob(ctx context.Context, job service.ModelC
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, `INSERT INTO model_catalog_jobs(id,account_id,payload) VALUES($1,$2,$3)
+	_, err = r.db.ExecContext(ctx, `INSERT INTO model_catalog_jobs(id,account_id,payload) VALUES($1,NULLIF($2::bigint,0),$3)
  ON CONFLICT(id) DO UPDATE SET payload=EXCLUDED.payload,updated_at=NOW()`, job.ID, job.AccountID, body)
 	return err
 }

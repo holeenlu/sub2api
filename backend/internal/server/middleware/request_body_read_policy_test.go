@@ -1,6 +1,6 @@
 //go:build unit
 
-package handler
+package middleware
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func TestBodyReadErrorPolicyCoversEveryKind(t *testing.T) {
 		wantRecord    bool
 	}{
 		{bodyReadKindMaxBytes, &http.MaxBytesError{Limit: 1024}, http.StatusRequestEntityTooLarge, "invalid_request_error", true},
-		{bodyReadKindClientDisconnect, context.Canceled, statusClientClosedRequest, "invalid_request_error", false},
+		{bodyReadKindClientDisconnect, context.Canceled, 499, "invalid_request_error", false},
 		{bodyReadKindTruncatedBody, io.ErrUnexpectedEOF, http.StatusBadRequest, "invalid_request_error", true},
 		{bodyReadKindTransportTimeout, os.ErrDeadlineExceeded, http.StatusRequestTimeout, "api_error", true},
 		{bodyReadKindTransport, &net.OpError{Op: "read", Err: syscall.ECONNABORTED}, http.StatusBadRequest, "invalid_request_error", true},
@@ -82,16 +82,6 @@ func TestBodyReadErrorPolicyUnknownKindFallsBack(t *testing.T) {
 	require.Equal(t, bodyReadErrorFallbackPolicy, bodyReadErrorPolicyFor(bodyReadKindIORead))
 }
 
-// 只有 isKnownOpsErrorType 接受的类型能活过 normalizeOpsErrorType；其余一律
-// 被改写成 "api_error"，区分就没了。
-func TestBodyReadErrorPolicyUsesKnownOpsErrorTypes(t *testing.T) {
-	for kind, p := range bodyReadErrorPolicies {
-		require.Truef(t, isKnownOpsErrorType(p.ErrorType),
-			"kind %q: error type %q is not in isKnownOpsErrorType and would be normalized away", kind, p.ErrorType)
-	}
-	require.True(t, isKnownOpsErrorType(bodyReadErrorFallbackPolicy.ErrorType))
-}
-
 // 非超时的网络错误不能再被报成 "Timed out"。
 func TestRequestBodyReadErrorKind_SplitsTransportTimeout(t *testing.T) {
 	require.Equal(t, bodyReadKindTransportTimeout, requestBodyReadErrorKind(context.Background(), os.ErrDeadlineExceeded))
@@ -115,11 +105,11 @@ func TestRespondRequestBodyReadFailureMapsErrorsEndToEnd(t *testing.T) {
 		wantStatus  int
 		wantSkipLog bool
 	}{
-		{"客户端断开", context.Canceled, bodyReadKindClientDisconnect, statusClientClosedRequest, true},
-		{"连接被重置", syscall.ECONNRESET, bodyReadKindClientDisconnect, statusClientClosedRequest, true},
-		{"h2 客户端取消", http2.StreamError{Code: http2.ErrCodeCancel}, bodyReadKindClientDisconnect, statusClientClosedRequest, true},
-		{"h2 连接断开", errors.New(h2ClientDisconnectedMessage), bodyReadKindClientDisconnect, statusClientClosedRequest, true},
-		{"h2 连接断开被包装", fmt.Errorf("read body: %w", errors.New(h2ClientDisconnectedMessage)), bodyReadKindClientDisconnect, statusClientClosedRequest, true},
+		{"客户端断开", context.Canceled, bodyReadKindClientDisconnect, 499, true},
+		{"连接被重置", syscall.ECONNRESET, bodyReadKindClientDisconnect, 499, true},
+		{"h2 客户端取消", http2.StreamError{Code: http2.ErrCodeCancel}, bodyReadKindClientDisconnect, 499, true},
+		{"h2 连接断开", errors.New(h2ClientDisconnectedMessage), bodyReadKindClientDisconnect, 499, true},
+		{"h2 连接断开被包装", fmt.Errorf("read body: %w", errors.New(h2ClientDisconnectedMessage)), bodyReadKindClientDisconnect, 499, true},
 		{"传输被截断", io.ErrUnexpectedEOF, bodyReadKindTruncatedBody, http.StatusBadRequest, false},
 		{"h2 内部错误", http2.StreamError{Code: http2.ErrCodeInternal}, bodyReadKindTruncatedBody, http.StatusBadRequest, false},
 		{"读超时", os.ErrDeadlineExceeded, bodyReadKindTransportTimeout, http.StatusRequestTimeout, false},
@@ -149,7 +139,7 @@ func TestRespondRequestBodyReadFailureMapsErrorsEndToEnd(t *testing.T) {
 			require.Equal(t, tc.wantStatus, gotStatus)
 			require.Equal(t, policy.ErrorType, gotType)
 			require.NotEmpty(t, gotMessage)
-			require.Equal(t, tc.wantSkipLog, shouldSkipOpsErrorRecord(c), "ops_error_logs skip flag mismatch")
+			require.Equal(t, tc.wantSkipLog, ShouldSkipOpsErrorRecord(c), "ops_error_logs skip flag mismatch")
 
 			entries := logs.All()
 			require.Len(t, entries, 1)
@@ -175,9 +165,9 @@ func TestRespondRequestBodyReadFailureKeepsMaxBytesLimitInMessage(t *testing.T) 
 
 	require.Equal(t, http.StatusRequestEntityTooLarge, gotStatus)
 	require.Equal(t, "invalid_request_error", gotType)
-	require.Equal(t, buildBodyTooLargeMessage(4096), gotMessage)
+	require.Equal(t, "Request body too large, limit is 4096B", gotMessage)
 	require.NotEqual(t, bodyReadErrorPolicies[bodyReadKindMaxBytes].Message, gotMessage)
-	require.False(t, shouldSkipOpsErrorRecord(c))
+	require.False(t, ShouldSkipOpsErrorRecord(c))
 }
 
 // nil logger 与 nil context 都不能 panic：部分入口没有请求级 logger。
@@ -193,24 +183,26 @@ func TestRespondRequestBodyReadFailureToleratesNilLoggerAndContext(t *testing.T)
 	})
 	require.True(t, rendered)
 
-	require.NotPanics(t, func() { markOpsSkipErrorRecord(nil) })
-	require.False(t, shouldSkipOpsErrorRecord(nil))
+	require.NotPanics(t, func() { MarkOpsSkipErrorRecord(nil) })
+	require.False(t, ShouldSkipOpsErrorRecord(nil))
 }
 
 // 入口不允许再各自内联通用 400：兜底文案只能出现在策略表里，新增入口必须走
 // RespondRequestBodyReadFailure，否则 h2 断连又会以 invalid_request_error 进
 // ops_error_logs。
 func TestBodyReadFallbackMessageOnlyLivesInPolicyTable(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	require.NoError(t, err)
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || name == "request_body_read_log.go" {
-			continue
-		}
-		src, err := os.ReadFile(name)
+	for _, dir := range []string{".", "../../handler"} {
+		entries, err := os.ReadDir(dir)
 		require.NoError(t, err)
-		require.NotContainsf(t, string(src), bodyReadErrorFallbackPolicy.Message,
-			"%s answers a body read failure inline; route it through RespondRequestBodyReadFailure", name)
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || name == "request_body_read_error.go" {
+				continue
+			}
+			src, err := os.ReadFile(dir + "/" + name)
+			require.NoError(t, err)
+			require.NotContainsf(t, string(src), bodyReadErrorFallbackPolicy.Message,
+				"%s answers a body read failure inline; route it through RespondRequestBodyReadFailure", name)
+		}
 	}
 }

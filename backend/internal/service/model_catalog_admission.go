@@ -4,44 +4,68 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"go.uber.org/zap"
 )
 
-type catalogPreviewKey struct{}
 type catalogAdmissionKey struct{}
 type CatalogAdmission struct {
 	Models   []GroupCatalogModel
 	Required []string
 }
 
-// Existing groups keep their compatibility semantics until an administrator
-// explicitly saves one of the new access modes. This is the rollout boundary.
-func CatalogEnforced(group *Group) bool {
-	return group != nil && (group.ModelAllowlist.Mode == "follow" || group.ModelAllowlist.Mode == "fixed")
+// CatalogAdmissionError separates publication and pricing failures for
+// operators while public responses retain the protocol's generic 503 message.
+type CatalogAdmissionError struct {
+	Reason, Model, Revision string
+	Cause                   error
 }
 
-func (s *GroupModelCatalogService) Preview(ctx context.Context, g *Group) (*GroupModelCatalog, error) {
-	return s.Resolve(context.WithValue(ctx, catalogPreviewKey{}, true), g)
+func (e *CatalogAdmissionError) Error() string {
+	return fmt.Sprintf("model catalog admission: %s (model %q)", e.Reason, e.Model)
+}
+func (e *CatalogAdmissionError) Unwrap() error { return e.Cause }
+
+func catalogAdmissionFailure(ctx context.Context, g *Group, model, reason, revision string, cause error) error {
+	logger.FromContext(ctx).Warn("model_catalog_admission_rejected",
+		zap.Int64("group_id", g.ID),
+		zap.String("model", model), zap.String("reason", reason), zap.String("catalog_revision", revision))
+	return &CatalogAdmissionError{Reason: reason, Model: model, Revision: revision, Cause: cause}
+}
+
+// Every enabled group whitelist uses the same admission path.
+func CatalogEnforced(group *Group) bool {
+	return group != nil && group.ModelAllowlist.Enabled
 }
 
 func (s *GroupModelCatalogService) Admit(ctx context.Context, g *Group, ids []string) (context.Context, error) {
+	// Each turn starts with its own admission, including compatibility mode.
+	ctx = context.WithValue(ctx, catalogAdmissionKey{}, (*CatalogAdmission)(nil))
 	if !CatalogEnforced(g) {
 		return ctx, nil
 	}
 	view, err := s.Resolve(ctx, g)
 	if err != nil {
-		return ctx, err
+		return ctx, catalogAdmissionFailure(ctx, g, "", "catalog_lookup_failed", "", err)
 	}
 	admission := &CatalogAdmission{Required: append([]string(nil), ids...)}
 	for _, id := range ids {
 		found := false
+		reason := "no_published_route"
 		for _, m := range view.Models {
-			if m.Name == id && m.PricingStatus != "unavailable" {
+			if m.Name != id || len(m.AccountModels) == 0 {
+				continue
+			}
+			if m.PricingStatus == "unavailable" {
+				reason = "pricing_unavailable"
+			} else {
 				admission.Models = append(admission.Models, m)
 				found = true
 			}
 		}
 		if !found {
-			return ctx, fmt.Errorf("model %q has no published priced route", id)
+			return ctx, catalogAdmissionFailure(ctx, g, id, reason, view.Revision, nil)
 		}
 	}
 	return context.WithValue(ctx, catalogAdmissionKey{}, admission), nil

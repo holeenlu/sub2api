@@ -334,6 +334,15 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err != nil {
 		return nil, err
 	}
+	// Preserve the selected supply independently of discovery snapshots.
+	policy := accountModelCatalogPolicy(source)
+	if accountHasModelSelection(source) {
+		if duplicate.Extra == nil {
+			duplicate.Extra = make(map[string]any)
+		}
+		policy.Models = append([]string{}, policy.Models...)
+		duplicate.Extra[ModelCatalogPolicyExtraKey] = policy
+	}
 	// A copied credential must be reviewed before it can share live traffic with its source.
 	duplicate.Schedulable = false
 	if s.accountDuplicateRepo == nil {
@@ -429,6 +438,8 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
 	delete(accountExtra, OpenCodeGoUsageAutoRefreshExtraKey)
 	delete(accountExtra, OpenCodeGoUsageSnapshotExtraKey)
+	delete(accountExtra, ModelCatalogPolicyExtraKey)
+	delete(accountExtra, "model_catalog_visibility")
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
 	account := &Account{
 		Name:        input.Name,
@@ -442,6 +453,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Priority:    input.Priority,
 		Status:      StatusActive,
 		Schedulable: true,
+	}
+	if err := applyAccountCatalogPolicy(account, input.ModelCatalogPolicy); err != nil {
+		return nil, err
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -755,6 +769,9 @@ func (s *adminServiceImpl) updateAccount(
 		delete(normalizedExtra, OllamaCloudUsageSnapshotExtraKey)
 		delete(normalizedExtra, OpenCodeGoUsageAutoRefreshExtraKey)
 		delete(normalizedExtra, OpenCodeGoUsageSnapshotExtraKey)
+		// 模型供应名单通过专用字段校验，不接受旧可见性授权缓存。
+		delete(normalizedExtra, ModelCatalogPolicyExtraKey)
+		delete(normalizedExtra, "model_catalog_visibility")
 		// 保留配额用量和专用服务受管字段，防止普通账号编辑意外覆盖。
 		for _, key := range []string{
 			"quota_used",
@@ -772,6 +789,7 @@ func (s *adminServiceImpl) updateAccount(
 			OpenAIAutoResetCreditStateExtraKey,
 			OpenCodeGoUsageAutoRefreshExtraKey,
 			OpenCodeGoUsageSnapshotExtraKey,
+			ModelCatalogPolicyExtraKey,
 		} {
 			if v, ok := account.Extra[key]; ok {
 				normalizedExtra[key] = v
@@ -843,6 +861,9 @@ func (s *adminServiceImpl) updateAccount(
 			account.ProxyID = input.ProxyID
 		}
 		account.Proxy = nil // 清除关联对象，防止 GORM Save 时根据 Proxy.ID 覆盖 ProxyID
+	}
+	if err := applyAccountCatalogPolicy(account, input.ModelCatalogPolicy); err != nil {
+		return nil, err
 	}
 	if !reflect.DeepEqual(previousProbeIdentity, upstreamBillingProbeIdentity(account)) && account.Extra != nil {
 		delete(account.Extra, UpstreamBillingProbeExtraKey)
@@ -1034,6 +1055,8 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	delete(updates, OllamaCloudUsageSnapshotExtraKey)
 	delete(updates, OpenCodeGoUsageAutoRefreshExtraKey)
 	delete(updates, OpenCodeGoUsageSnapshotExtraKey)
+	delete(updates, ModelCatalogPolicyExtraKey)
+	delete(updates, "model_catalog_visibility")
 	if _, exists := updates[openAILongContextBillingEnabledKey]; exists {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {
@@ -1067,6 +1090,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	delete(input.Extra, OllamaCloudUsageSnapshotExtraKey)
 	delete(input.Extra, OpenCodeGoUsageAutoRefreshExtraKey)
 	delete(input.Extra, OpenCodeGoUsageSnapshotExtraKey)
+	delete(input.Extra, ModelCatalogPolicyExtraKey)
+	delete(input.Extra, "model_catalog_visibility")
 
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
 		accountIDs, err := s.ResolveBulkUpdateTargetIDs(ctx, input.Filters)
@@ -1102,7 +1127,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || input.GroupIDs != nil || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if input.ModelCatalogPolicy != nil || len(input.Credentials) > 0 || input.ProxyID != nil || input.GroupIDs != nil || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1116,6 +1141,30 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 		if account != nil {
 			targetsByID[account.ID] = account
+		}
+	}
+	// Validate every proposed credential scope before writing any account. The
+	// policy is merged into the same JSONB update as credentials below.
+	if input.ModelCatalogPolicy != nil {
+		for _, id := range input.AccountIDs {
+			account := targetsByID[id]
+			if account == nil {
+				return nil, ErrAccountNotFound
+			}
+			proposed := *account
+			// Bulk persistence merges all JSONB keys, unlike the single-account PUT.
+			proposed.Credentials = make(map[string]any, len(account.Credentials)+len(input.Credentials))
+			maps.Copy(proposed.Credentials, account.Credentials)
+			maps.Copy(proposed.Credentials, input.Credentials)
+			if input.ProxyID != nil {
+				proposed.ProxyID = input.ProxyID
+				if *input.ProxyID == 0 {
+					proposed.ProxyID = nil
+				}
+			}
+			if err := validateAccountCatalogPolicy(&proposed, *input.ModelCatalogPolicy); err != nil {
+				return nil, infraerrors.BadRequest("INVALID_MODEL_CATALOG_POLICY", fmt.Sprintf("account %d: %s", id, err))
+			}
 		}
 	}
 	if openAISettings.any() {
@@ -1256,6 +1305,13 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		Extra:                      input.Extra,
 		ProbeEnabled:               input.ProbeEnabled,
 		EnsureCodexFingerprintSeed: ShouldEnsureCodexFingerprintSeedForExtraUpdates(input.Extra),
+	}
+	if input.ModelCatalogPolicy != nil {
+		repoUpdates.Extra = maps.Clone(repoUpdates.Extra)
+		if repoUpdates.Extra == nil {
+			repoUpdates.Extra = make(map[string]any)
+		}
+		repoUpdates.Extra[ModelCatalogPolicyExtraKey] = *input.ModelCatalogPolicy
 	}
 	if input.ProbeEnabled != nil {
 		if repoUpdates.Extra == nil {

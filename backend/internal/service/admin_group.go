@@ -392,11 +392,6 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 
 	platform := NormalizeGroupPlatform(input.Platform)
-	// 固定账号 manifest 配置：账号绑定发生在创建之后，创建时无法校验成员关系，
-	// 拒绝开启并在创建后的编辑里配置。
-	if normalizeCodexModelsManifestConfig(platform, input.CodexModelsManifestConfig).Enabled {
-		return nil, infraerrors.New(http.StatusBadRequest, "INVALID_CODEX_MODELS_MANIFEST_CONFIG", "codex models manifest config cannot be enabled at group creation; configure it after creation in the group editor")
-	}
 	modelPricing, err := normalizeGroupModelPricing(platform, input.ModelPricing)
 	if err != nil {
 		return nil, err
@@ -626,7 +621,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ModelAllowlist:                  modelAllowlist,
 		// 固定账号 manifest 配置：账号绑定发生在分组创建之后，创建路径禁止开启，
 		// 成员关系无从校验（前端创建对话框也不展示）。
-		CodexModelsManifestConfig:   normalizeCodexModelsManifestConfig(platform, input.CodexModelsManifestConfig),
+		CodexModelsManifestConfig:   RetiredCodexModelsManifestConfig(input.CodexModelsManifestConfig),
 		RPMLimit:                    input.RPMLimit,
 		MaxReasoningEffort:          maxReasoningEffort,
 		MaxReasoningEffortOverLimit: maxReasoningEffortOverLimit,
@@ -1160,15 +1155,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.AllowLive = false
 	}
 	sanitizeGroupReasoningEffortPolicy(group)
-	// 固定账号 manifest 配置：按最终平台归一化（切出 openai 平台时静默归零，
-	// 与 ForceOpenAIFast 同一收口）；校验仅在本次显式携带配置时进行，
-	// 避免脏 ID 阻塞无关字段更新。
-	group.CodexModelsManifestConfig = normalizeCodexModelsManifestConfig(group.Platform, group.CodexModelsManifestConfig)
-	if input.CodexModelsManifestConfig != nil {
-		if err := s.validateCodexModelsManifestConfig(ctx, id, group.CodexModelsManifestConfig); err != nil {
-			return nil, err
-		}
-	}
+	group.CodexModelsManifestConfig = RetiredCodexModelsManifestConfig(group.CodexModelsManifestConfig)
 
 	if err := s.groupRepo.Update(ctx, group); err != nil {
 		return nil, err

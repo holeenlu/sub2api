@@ -92,6 +92,13 @@ function mountSection(g: ModelPlazaGroup) {
 const NOTE = 'modelPlaza.detail.longContextDisabledNote'
 
 describe('PlazaGroupSection 长上下文说明', () => {
+  it('does not expose discovery timestamps or stale snapshot notices on the public plaza', () => {
+    const wrapper = mountSection(group({ catalog_status: 'stale', catalog_updated_at: '2026-10-01T08:32:42Z' }))
+    expect(wrapper.text()).not.toContain('modelPlaza.catalog.count')
+    expect(wrapper.text()).not.toContain('modelPlaza.catalog.updated')
+    expect(wrapper.text()).not.toContain('modelPlaza.catalog.stale')
+    wrapper.unmount()
+  })
   it('passes video-specific rates to the pricing table', () => {
     const wrapper = mountSection(group({ video_rate_independent: true, video_rate_multiplier: 0 }))
     expect(wrapper.findComponent(PlazaModelPricingTable).props()).toMatchObject({

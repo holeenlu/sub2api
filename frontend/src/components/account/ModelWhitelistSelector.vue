@@ -73,8 +73,6 @@
               </span>
               <ModelIcon :model="model.value" size="18px" />
               <span class="truncate text-gray-900 dark:text-white">{{ model.value }}</span>
-              <span v-if="model.pending" class="text-xs text-amber-600">{{ t('modelCatalog.pending') }}</span>
-              <span v-else-if="model.lifecycle === 'deprecated'" class="text-xs text-amber-600">{{ t('modelCatalog.deprecated') }}</span>
             </button>
             <button
               type="button"
@@ -97,22 +95,17 @@
     <p v-if="catalogLoading" class="mb-2 text-xs text-gray-500" role="status">{{ t('modelCatalog.loading') }}</p>
     <p v-else-if="catalogError" class="mb-2 text-xs text-amber-600" role="alert">{{ catalogError }}</p>
     <p v-else-if="!catalogModels.length" class="mb-2 text-xs text-gray-500">{{ t('modelCatalog.notSynced') }}</p>
-    <p v-else class="mb-2 text-xs text-gray-500" data-testid="catalog-status">
-      {{ t('modelCatalog.updated', { time: catalog?.checked_at ? new Date(catalog.checked_at).toLocaleString() : '—' }) }}
-      <span v-if="catalog?.status === 'stale'"> · {{ t('modelCatalog.stale') }}</span>
-    </p>
     <p v-if="selectedRetiredModels.length" class="mb-2 text-xs text-amber-600" data-testid="retired-models">
       {{ t('modelCatalog.retiredSelected', { models: selectedRetiredModels.join(', ') }) }}
       <button type="button" class="ml-2 underline" @click="removeRetiredModels">{{ t('modelCatalog.removeRetired') }}</button>
     </p>
-    <p v-if="catalogModels.some(model => model.missing?.length)" data-testid="catalog-incomplete" class="mb-2 text-xs text-amber-600">{{ t('modelCatalog.capabilitiesPending') }}</p>
-    <a v-if="accountId" :href="`/admin/model-catalog?account_id=${accountId}`" target="_blank" rel="noopener" class="mb-3 inline-block text-xs text-primary-600 underline">{{ t('modelCatalog.manage') }}</a>
+    <a href="/admin/model-catalog" target="_blank" rel="noopener" class="mb-3 inline-block text-xs text-primary-600 underline">{{ t('modelCatalog.manage') }}</a>
     <!-- Quick Actions -->
     <div class="mb-4 flex flex-wrap gap-2">
       <button
         type="button"
         @click="fillRelated"
-        :disabled="catalogLoading || !availableOptions.some(model => !model.pending)"
+        :disabled="catalogLoading || !availableOptions.length"
         class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
       >
         {{ t('modelCatalog.selectAvailable') }}
@@ -215,7 +208,7 @@ import { useClipboard } from '@/composables/useClipboard'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { getModelCatalog, refreshModelCatalog, type ModelCatalog, type CatalogModel } from '@/api/admin/modelCatalog'
+import { getModelCatalog, refreshModelCatalog, type CatalogModel } from '@/api/admin/modelCatalog'
 
 const { t } = useI18n()
 
@@ -305,7 +298,7 @@ const liveFailures = ref<AnthropicModelSyncFailure[]>([])
 // 会落在这里），所以只提示、不自动删除。
 const modelsOutsideLiveIntersection = computed(() => {
   if (liveModels.value.length === 0) return []
-  return props.modelValue.filter(model => !liveModels.value.includes(model))
+  return props.modelValue.filter(model => !liveModels.value.includes(model) && !isMediaChoice(model))
 })
 
 let batchRequestVersion = 0
@@ -322,7 +315,6 @@ watch(
   { deep: true, flush: 'sync' }
 )
 
-const catalog = ref<ModelCatalog | null>(null)
 const catalogModels = ref<CatalogModel[]>([])
 const catalogLoading = ref(false)
 const catalogError = ref('')
@@ -330,9 +322,11 @@ let catalogRequest = 0
 let catalogController: AbortController | undefined
 const retiredModels = computed(() => new Set(catalogModels.value.filter(m => m.lifecycle === 'retired').map(m => m.id)))
 const selectedRetiredModels = computed(() => props.modelValue.filter(id => retiredModels.value.has(id)))
+// These choices configure account supply; discovery evidence is shown in the
+// catalog admin page. Loading candidates never changes the saved policy.
 const availableOptions = computed(() => catalogModels.value
-  .filter(m => m.lifecycle !== 'retired')
-  .map(m => ({ value: m.id, label: m.display_name || m.id, pending: catalog.value?.status === 'unavailable' || (m.access !== 'listed' && m.access !== 'observed'), lifecycle: m.lifecycle })))
+  .filter(m => m.lifecycle !== 'retired' && m.access !== 'unlisted')
+  .map(m => ({ value: m.id, label: m.display_name || m.id })))
 
 async function loadCatalog(refresh = false) {
   const serial = ++catalogRequest
@@ -343,21 +337,22 @@ async function loadCatalog(refresh = false) {
   catalogError.value = ''
   try {
     const results = props.accountId
-      ? [await (refresh ? refreshModelCatalog(props.accountId, signal) : getModelCatalog({ account_id: props.accountId }, signal))]
-      : await Promise.all((normalizedPlatforms.value.length ? normalizedPlatforms.value : ['']).map(platform => getModelCatalog({ platform }, signal)))
+      ? [await (refresh ? refreshModelCatalog(props.accountId, signal, 'selection') : getModelCatalog({ account_id: props.accountId, view: 'selection' }, signal))]
+      : await Promise.all((normalizedPlatforms.value.length ? normalizedPlatforms.value : ['']).map(platform => getModelCatalog({ platform, view: 'selection' }, signal)))
     if (serial !== catalogRequest) return
-    catalog.value = results[0] ?? null
     const entries = new Map<string, CatalogModel>()
     for (const result of results) for (const entry of result.models) if (!entries.has(entry.id)) entries.set(entry.id, entry)
     catalogModels.value = [...entries.values()]
   } catch (error) {
     if (serial === catalogRequest && !(error instanceof DOMException && error.name === 'AbortError')) {
+      const reason = extractApiErrorMessage(error, '')
+      const knownReasons = ['authentication_unavailable', 'upstream_rate_limited', 'discovery_not_supported', 'upstream_timeout', 'catalog_busy', 'scope_changed', 'upstream_unavailable', 'catalog_unavailable']
       catalogError.value = t('modelCatalog.loadFailed')
+      if (reason) catalogError.value += ` ${knownReasons.includes(reason) ? t(`modelCatalog.syncErrors.${reason}`) : reason}`
     }
   } finally { if (serial === catalogRequest) catalogLoading.value = false }
 }
 watch(() => [props.accountId, normalizedPlatforms.value.join(',')], () => {
-  catalog.value = null
   catalogModels.value = []
   void loadCatalog()
 }, { immediate: true })
@@ -417,11 +412,33 @@ const handleEnter = () => {
 const fillRelated = () => {
   const values = new Set(props.modelValue)
   for (const model of availableOptions.value) {
-    if (model.pending) continue
     const conflict = props.modelMappings?.some(mapping => mapping.from.trim() === model.value && mapping.to.trim() !== model.value)
     if (!conflict) values.add(model.value)
   }
   emit('update:modelValue', [...values])
+}
+
+function isMediaChoice(id: string): boolean {
+  return catalogModels.value.some(model => model.id === id && ['image', 'video'].includes(model.kind))
+}
+
+function applyDiscoveredChoices(models: CatalogModel[]) {
+  // Chat discovery may omit media endpoints. Keep media inventory visible;
+  // refreshing is not evidence that image/video supply has been withdrawn.
+  const existing = new Map(catalogModels.value.map(model => [model.id, model]))
+  const incoming = new Set(models.map(model => model.id))
+  catalogModels.value = [
+    ...catalogModels.value.filter(model => ['image', 'video'].includes(model.kind) && !incoming.has(model.id)),
+    ...models.map(model => {
+      const previous = existing.get(model.id)
+      return previous ? {
+        ...model,
+        kind: previous.kind === 'unknown' ? model.kind : previous.kind,
+        lifecycle: previous.lifecycle === 'retired' ? previous.lifecycle : model.lifecycle,
+        metadata: { ...previous.metadata, ...model.metadata }
+      } : model
+    })
+  ]
 }
 
 const syncUpstreamModels = async () => {
@@ -450,7 +467,7 @@ const syncUpstreamModels = async () => {
       emit('upstream-synced')
     }
 
-    catalogModels.value = upstreamModels.map(id => ({ id, display_name: id, platform: props.platform || '', kind: 'unknown', lifecycle: 'active', access: 'listed', source: 'upstream_preview', metadata: result.metadata?.[id] ?? { id }, missing: [], endpoints: [] }))
+    applyDiscoveredChoices(upstreamModels.map(id => ({ id, display_name: id, platform: props.platform || '', kind: result.metadata?.[id]?.model_kind ?? 'unknown', lifecycle: 'active', access: 'listed', source: 'upstream_preview', metadata: result.metadata?.[id] ?? { id }, missing: [], endpoints: [] })))
     const addedCount = upstreamModels.filter(id => !props.modelValue.includes(id)).length
     const warnings = result.warnings ?? []
     const hasPartialMetadata = warnings.some(
@@ -513,8 +530,9 @@ const syncBatchModels = async () => {
 
     // A successful bulk intersection updates candidates only. Applying it to
     // account restrictions remains an explicit form action.
-    catalog.value = { revision: '', platform: props.platform ?? '', status: 'ready', checked_at: new Date().toISOString(), updated_at: new Date().toISOString(), models: models.map(id => ({ id, display_name: id, platform: props.platform ?? '', kind: 'unknown', lifecycle: 'unknown', access: 'listed', source: 'upstream_bulk', metadata: {id}, missing: [], endpoints: [] })) }
-    catalogModels.value=catalog.value.models
+    await loadCatalog()
+    if (requestVersion !== batchRequestVersion) return
+    applyDiscoveredChoices(models.map(id => ({ id, display_name: id, platform: props.platform ?? '', kind: 'unknown', lifecycle: 'unknown', access: 'listed', source: 'upstream_bulk', metadata: {id}, missing: [], endpoints: [] })))
     appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: models.length }))
   } catch (error) {
     if (requestVersion !== batchRequestVersion) return
@@ -533,7 +551,7 @@ const replaceWithLiveModels = () => {
   }))) {
     return
   }
-  emit('update:modelValue', [...liveModels.value])
+  emit('update:modelValue', [...new Set([...liveModels.value, ...props.modelValue.filter(isMediaChoice)])])
 }
 
 const clearAll = () => {

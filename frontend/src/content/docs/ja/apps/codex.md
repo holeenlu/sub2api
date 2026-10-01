@@ -56,7 +56,7 @@ supports_websockets = false
 
 同じターミナルで `codex` を実行します。WebSockets を無効にすると HTTP/SSE の開始点になりますが、ゲートウェイに WebSocket のルートがないという意味ではありません。
 
-OpenAI グループでは、異なる形式が生成されます。プロバイダー ID `OpenAI`、メインモデルとレビューモデル、`[features]`、デフォルトのモデルカタログのパスが含まれます。初回利用前にカタログを取得して保存してください。デフォルトの **Legacy** モードでは `config.toml` と `auth.json` がダウンロードされ、`requires_openai_auth = true` が設定されます。一方、**API key** モードでは `requires_openai_auth = false` と `experimental_bearer_token` が設定されます。切り替え後は Codex を完全に再起動してください。2 つのモードを組み合わせたり、ルーティングされた `tapmodels` プロバイダーテーブルを OpenAI グループの `OpenAI` プロバイダーにマージしたりしないでください。
+OpenAI グループでは、異なる形式が生成されます。プロバイダー ID `OpenAI`、メインモデルとレビューモデル、`[features]`、リモートカタログのアドレス `model_catalog_url` が含まれ、コピーするだけで使えます。ダイアログの既定は **Codex CLI (WebSocket)** と **API key** モードで、`requires_openai_auth = false` と `experimental_bearer_token` が設定されるため `config.toml` だけで済みます。**Legacy** モードでは `requires_openai_auth = true` が設定され、`auth.json` もダウンロードされます。切り替え後は Codex を完全に再起動してください。2 つのモードを組み合わせたり、ルーティングされた `tapmodels` プロバイダーテーブルを OpenAI グループの `OpenAI` プロバイダーにマージしたりしないでください。
 
 ## デスクトップ: キーを利用可能にする
 
@@ -72,15 +72,15 @@ Dock またはスタートメニューから起動したデスクトップアプ
 
 ## グループモデルカタログ
 
-このセクションは OpenAI/Composite グループにのみ適用されます。その他のルーティングされたグループは専用のカタログダウンロードをサポートしていないため、`model_catalog_json` を設定しないでください。通常の `GET /v1/models` を実行して `model` に完全一致する ID を設定してください。そのリストのレスポンスを Codex マニフェストとして保存しないでください。
+このセクションは OpenAI/Composite グループにのみ適用されます。その他のルーティングされたグループには専用カタログがないため、`model_catalog_url` を設定しないでください。通常の `GET /v1/models` を実行して `model` に完全一致する ID を設定してください。そのリストのレスポンスを Codex マニフェストとして扱わないでください。
 
-**API keys → Use key → Codex** で「カタログを取得」を手動でクリックし、利用可能な Codex モデルを含むカタログを取得できたら「カタログをダウンロード」をクリックします。手動取得の結果に応じて `model`、`review_model`、推論設定が更新される場合があります。取得に失敗した場合や利用可能なモデルがない場合も、デフォルト設定をコピーしてダウンロードできます。生成される設定には、取得前から `model_catalog_json = "~/.codex/codex-models.json"` が含まれます。Codex を初めて起動する前にカタログを保存してください。再取得に失敗した場合は以前保存したファイルを使用できます。`codex-models.json` を固定の場所に保存し、`config.toml` のトップレベルのパスを実際の保存先に合わせてください。例:
+生成される `config.toml` のプロバイダーテーブルには次が含まれます。
 
 ```toml
-model_catalog_json = "/absolute/path/.codex/codex-models.json"
+model_catalog_url = "{{API_ROOT}}/v1/models"
 ```
 
-Windows の TOML では、`model_catalog_json = 'C:\Users\your-name\.codex\codex-models.json'` のようなリテラルパスを使用できます。グループへのアクセス権が変更されたらカタログを更新してください。ダウンロードに失敗した場合は、まず最小構成で診断します。
+Codex 0.156.0 以降は起動時に現在のキーでこのアドレスを読み込み、このサイトがキーごとに算出したカタログを取得します。グループのアクセス権が変わったら Codex を再起動すると新しいカタログが反映されます。「接続確認 / このキーで使えるモデルを表示」は確認用で、ダイアログの `model`、`review_model`、推論設定を更新する場合がありますが、必須手順ではありません。ローカルのカタログファイルはサポートを終了し、`codex-models.json` のダウンロードと更新スクリプトは削除されました。古い設定の `model_catalog_json` は削除してください。権限を回避するためにモデル名を編集しないでください。
 
 ## 確認とトラブルシューティング
 

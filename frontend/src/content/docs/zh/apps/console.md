@@ -22,7 +22,7 @@
 
 ## Codex 认证模式
 
-OpenAI 分组的 Codex 标签提供两种模式：
+OpenAI 分组的 Codex 标签提供两种模式，打开“使用密钥”时默认选中 **Codex CLI (WebSocket)**、**API key** 和 **macOS / Linux**：
 
 - **Legacy**：`config.toml` 使用 `requires_openai_auth = true`，并下载 `auth.json`。只在 Codex 版本需要该登录形态时使用。
 - **API key**：`requires_openai_auth = false`，把 Key 写入 `experimental_bearer_token`，并附加本地图片扩展所需的请求头。该模式会把密钥保存在磁盘，限制文件权限且不要提交到仓库。
@@ -31,15 +31,15 @@ OpenAI 分组的 Codex 标签提供两种模式：
 
 ## 模型目录
 
-仅 OpenAI/Composite 分组支持 Codex 专用模型目录。其他分组不显示获取按钮，也不生成 `model_catalog_json`，请查询普通 `GET /v1/models` 后手动填写模型 ID。
+仅 OpenAI/Composite 分组支持 Codex 专用模型目录。其他分组不生成 `model_catalog_url`，请查询普通 `GET /v1/models` 后手动填写模型 ID。
 
-支持的 Codex 标签中的 **获取模型目录** 会使用当前 Key 请求专用入口 `/backend-api/codex/models`，下载 `codex-models.json`。将其放在稳定的绝对路径，并在 `config.toml` 设置 `model_catalog_json`。普通 `GET /v1/models` 返回通用模型列表，不能直接当成这个目录文件。分组权限变化后重新获取；不要手工改模型 slug 绕过分组策略。
+支持的 Codex 标签生成的 `config.toml` 在 Provider 中包含 `model_catalog_url`，Codex 0.156.0 及以上版本启动时直接读取本站为该 Key 计算的目录，无需下载文件。**检查连接 / 查看此 Key 可用模型** 只用于核对，不是使用前置步骤。本站已停止支持本地目录文件：旧配置中的 `model_catalog_json` 请删除后重新复制配置。不要手工改模型 slug 绕过分组策略。
 
 ## 本项目界面操作
 
 以下截图来自当前项目的“使用密钥”组件，使用无效示例 Key 和 `api.example.com` 演示地址。实际接入请复制自己控制台生成的值，不要抄录图片中的地址或 Key。
 
-1. OpenAI 分组选择 **Codex CLI**，按所用客户端选择 Legacy 或 API key 认证；两种模式对应的文件不同。
+1. OpenAI 分组默认即为 **Codex CLI (WebSocket)** + API key 认证；网络不支持 WebSocket 时改选 **Codex CLI**，需要 `auth.json` 登录形态时改选 Legacy。两种认证模式对应的文件不同。
 
 ![本项目 Codex Legacy 配置器（示例数据）](/docs-assets/client-codex-zh.png)
 

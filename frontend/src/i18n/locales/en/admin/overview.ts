@@ -1103,7 +1103,7 @@ export default {
       },
       modelPricing: {
         title: 'Per-model group pricing',
-        description: 'Overrides channel and built-in prices for matching models. Long-context tiers come from official presets — do not enter custom intervals. Use per-request tiers such as realtime, tts, and stt for audio.',
+        description: 'Set separate prices only for exception models; empty fields keep inheriting the channel price card or reference price, so the group multiplier is usually enough. Long-context tiers come from official presets — do not enter custom intervals. Use per-request tiers such as realtime, tts, and stt for audio.',
         longContext: 'Enable long-context tier pricing',
         longContextHint: 'When checked, channel intervals or official preset tiers apply. Otherwise the first tier is used unless the account explicitly enables long-context billing.',
         add: 'Add model price'
@@ -1144,13 +1144,14 @@ export default {
       },
       modelAllowlist: {
         title: 'Model Allowlist',
-        hint: 'When enabled, models outside the allowlist are rejected with 404 model_not_found, and model listing endpoints only show allowlisted models. Entries support exact model IDs and * wildcards anywhere (e.g., gpt-*-codex). Note: Claude Code probes with haiku-family models for titles/summaries and /messages/count_tokens is also allowlist-controlled, so make sure the small models you need are selected too.',
+        hint: 'Select the models to enable for this group from the model catalog. Unselected models are unavailable; an empty list enables none. Newly synced models are not selected automatically. Include small models needed for client titles, summaries, and other auxiliary tasks.',
         loading: 'Loading candidate models...',
         empty: 'No candidate models; add custom entries below',
         selectedSummary: 'Selected {selected} / {total}',
         selectAll: 'Select all',
         invertSelection: 'Invert',
         wildcardTag: 'wildcard',
+        pricingPendingTag: 'pricing pending',
         customPlaceholder: 'Custom entry, e.g. gpt-*-codex or claude-*',
         addCustom: 'Add',
         emptySelectionError: 'The model allowlist is enabled; select or add at least one model entry',

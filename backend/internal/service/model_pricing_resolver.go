@@ -76,10 +76,10 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if CatalogEnforced(input.Group) || ctx.Value(catalogPreviewKey{}) == true {
+	if CatalogEnforced(input.Group) {
 		ctx = context.WithValue(ctx, catalogPriceOrderKey{}, true)
 	}
-	if RequestPricingFromContext(ctx) == nil && (CatalogEnforced(input.Group) || ctx.Value(catalogPreviewKey{}) == true) && r.billingService != nil && r.billingService.pricingService != nil {
+	if RequestPricingFromContext(ctx) == nil && CatalogEnforced(input.Group) && r.billingService != nil && r.billingService.pricingService != nil {
 		prices := r.billingService.pricingService.catalogPricingGeneration()
 		ctx = context.WithValue(ctx, requestPricingContextKey{}, &RequestPricingSnapshot{prices: prices, Revision: prices.PriceRevision()})
 	}

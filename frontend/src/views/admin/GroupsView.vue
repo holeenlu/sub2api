@@ -778,28 +778,14 @@
         </div>
 
         <div class="border-t pt-4">
-          <div class="mb-3 flex items-center justify-between gap-3">
+          <div class="mb-4 space-y-3">
             <div>
-              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                {{ t("admin.groups.modelAllowlist.title") }}
-              </label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t("admin.groups.modelAllowlist.hint") }}
-              </p>
+              <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.groups.modelAllowlist.title') }}</h3>
+              <p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ t('admin.groups.modelAllowlist.hint') }}</p>
             </div>
-            <div class="space-y-2">
-              <label class="block text-xs">{{ t('modelCatalog.accountPolicy') }}</label>
-              <select :value="createModelAllowlistState.mode || 'legacy'" @change="createModelAllowlistState.mode = ($event.target as HTMLSelectElement).value as 'legacy' | 'follow' | 'fixed'" class="input text-sm">
-                <option :value="undefined">{{ t('modelCatalog.legacy') }}</option>
-                <option value="follow">{{ t('modelCatalog.follow') }}</option>
-                <option value="fixed">{{ t('modelCatalog.fixed') }}</option>
-              </select>
-              <textarea v-if="createModelAllowlistState.mode === 'follow' || createModelAllowlistState.mode === 'fixed'" v-model="createModelAllowlistState.excludedText" class="input text-xs" :placeholder="t('modelCatalog.exclude')" />
-              <Toggle v-if="!createModelAllowlistState.mode || createModelAllowlistState.mode === 'legacy'" v-model="createModelAllowlistState.enabled" />
-            </div>
+
           </div>
           <div
-            v-if="createModelAllowlistState.mode === 'fixed' || (createModelAllowlistState.mode !== 'follow' && createModelAllowlistState.enabled)"
             class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
           >
             <div
@@ -860,6 +846,12 @@
                     class="ml-1 rounded bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
                   >
                     {{ t("admin.groups.modelAllowlist.wildcardTag") }}
+                  </span>
+                  <span
+                    v-if="modelAllowlistPricingPending.create.has(item.id)"
+                    class="ml-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                  >
+                    {{ t("admin.groups.modelAllowlist.pricingPendingTag") }}
                   </span>
                 </span>
                 <button
@@ -2442,28 +2434,14 @@
         </div>
 
         <div class="border-t pt-4">
-          <div class="mb-3 flex items-center justify-between gap-3">
+          <div class="mb-4 space-y-3">
             <div>
-              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                {{ t("admin.groups.modelAllowlist.title") }}
-              </label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t("admin.groups.modelAllowlist.hint") }}
-              </p>
+              <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.groups.modelAllowlist.title') }}</h3>
+              <p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ t('admin.groups.modelAllowlist.hint') }}</p>
             </div>
-            <div class="space-y-2">
-              <label class="block text-xs">{{ t('modelCatalog.accountPolicy') }}</label>
-              <select :value="editModelAllowlistState.mode || 'legacy'" @change="editModelAllowlistState.mode = ($event.target as HTMLSelectElement).value as 'legacy' | 'follow' | 'fixed'" class="input text-sm">
-                <option :value="undefined">{{ t('modelCatalog.legacy') }}</option>
-                <option value="follow">{{ t('modelCatalog.follow') }}</option>
-                <option value="fixed">{{ t('modelCatalog.fixed') }}</option>
-              </select>
-              <textarea v-if="editModelAllowlistState.mode === 'follow' || editModelAllowlistState.mode === 'fixed'" v-model="editModelAllowlistState.excludedText" class="input text-xs" :placeholder="t('modelCatalog.exclude')" />
-              <Toggle v-if="!editModelAllowlistState.mode || editModelAllowlistState.mode === 'legacy'" v-model="editModelAllowlistState.enabled" />
-            </div>
+
           </div>
           <div
-            v-if="editModelAllowlistState.mode === 'fixed' || (editModelAllowlistState.mode !== 'follow' && editModelAllowlistState.enabled)"
             class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
           >
             <div
@@ -2524,6 +2502,12 @@
                     class="ml-1 rounded bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
                   >
                     {{ t("admin.groups.modelAllowlist.wildcardTag") }}
+                  </span>
+                  <span
+                    v-if="modelAllowlistPricingPending.edit.has(item.id)"
+                    class="ml-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                  >
+                    {{ t("admin.groups.modelAllowlist.pricingPendingTag") }}
                   </span>
                 </span>
                 <button
@@ -3157,15 +3141,6 @@
           </div>
         </div>
 
-        <!-- 固定账号获取 Codex Model Manifest（仅 openai 平台，仅编辑对话框） -->
-        <CodexManifestAccountsField
-          v-if="editForm.platform === 'openai' && editingGroup"
-          ref="editCodexManifestRef"
-          :group-id="editingGroup.id"
-          :model-value="editCodexManifestConfig"
-          :account-names="editCodexManifestAccountNames"
-          @update:model-value="setEditCodexManifestConfig"
-        />
 
 
         <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
@@ -4331,7 +4306,6 @@ import { useOnboardingStore } from "@/stores/onboarding";
 import { adminAPI } from "@/api/admin";
 import type {
   AdminGroup,
-  CodexModelsManifestConfig,
   CompositeModelRoute,
   CompositeModelRouteInput,
   CompositeRouteDecision,
@@ -4361,7 +4335,6 @@ import GroupModelPreviewDialog from "@/components/admin/group/GroupModelPreviewD
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
-import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
 import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
 import type { PricingFormEntry } from "@/components/admin/channel/types";
 import {
@@ -5018,26 +4991,6 @@ type ReasoningEffortPolicyFieldsExpose = {
 const createReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 const editReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 
-// 固定账号获取 Codex Model Manifest（仅 openai 分组编辑对话框）
-type CodexManifestAccountsFieldExpose = {
-  validate: () => boolean;
-  resetValidation: () => void;
-};
-const editCodexManifestRef = ref<CodexManifestAccountsFieldExpose | null>(null);
-const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
-  enabled: false,
-  account_ids: [],
-  fallback_to_scheduler: false,
-});
-const editCodexManifestConfig = ref<CodexModelsManifestConfig>(createCodexManifestDefaults());
-const editCodexManifestAccountNames = ref<Record<number, string>>({});
-const setEditCodexManifestConfig = (config: CodexModelsManifestConfig) => {
-  editCodexManifestConfig.value = {
-    enabled: config.enabled ?? false,
-    account_ids: [...(config.account_ids ?? [])],
-    fallback_to_scheduler: config.fallback_to_scheduler ?? false,
-  };
-};
 const modelAllowlistCandidatesTracker = createModelAllowlistCandidatesTracker();
 const createModelAllowlistSelectedCount = computed(
   () => createModelAllowlistState.items.filter((item) => item.selected).length,
@@ -5351,12 +5304,15 @@ const resetModelAllowlistState = (
   config?: Parameters<typeof createInitialModelAllowlistState>[0],
 ) => {
   const fresh = createInitialModelAllowlistState(config);
-  state.enabled = fresh.enabled;
-  state.mode = fresh.mode;
-  state.excludedText = fresh.excludedText;
   state.savedModels = fresh.savedModels;
   state.items = fresh.items;
 };
+
+// 缺价候选仍列出供管理员勾选和定价，只是标注“待定价”；发布目录会等价格齐备后才开放。
+const modelAllowlistPricingPending = reactive<Record<"create" | "edit", Set<string>>>({
+  create: new Set(),
+  edit: new Set(),
+});
 
 const loadModelAllowlistCandidates = async (
   mode: "create" | "edit",
@@ -5370,11 +5326,12 @@ const loadModelAllowlistCandidates = async (
   const loadingRef = mode === "create" ? createModelAllowlistLoading : editModelAllowlistLoading;
   loadingRef.value = true;
   try {
-    const models = await adminAPI.groups.getModelAllowlistCandidates(groupID, platform);
+    const { models, pricingPending } = await adminAPI.groups.getModelAllowlistCandidates(groupID, platform);
     if (!modelAllowlistCandidatesTracker.isCurrent(requestID, request)) {
       return;
     }
     setModelAllowlistCandidates(state, models);
+    modelAllowlistPricingPending[mode] = new Set(pricingPending);
   } catch (error) {
     if (!modelAllowlistCandidatesTracker.isCurrent(requestID, request)) {
       return;
@@ -6036,14 +5993,6 @@ const handleCreateGroup = async () => {
     return;
   }
   if (!validateGroupReasoningMultipliers(createForm.model_pricing)) return;
-  // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
-  if (
-    createModelAllowlistState.enabled &&
-    createModelAllowlistSelectedCount.value === 0
-  ) {
-    appStore.showError(t("admin.groups.modelAllowlist.emptySelectionError"));
-    return;
-  }
   submitting.value = true;
   try {
     const {
@@ -6085,7 +6034,6 @@ const handleCreateGroup = async () => {
       ),
       model_allowlist: buildModelAllowlistConfig(createModelAllowlistState),
       // 创建时固定账号 manifest 固定发送关闭状态（后端创建路径禁止开启）
-      codex_models_manifest_config: createCodexManifestDefaults(),
       supported_model_scopes: normalizeSupportedModelScopesForPlatform(
         createForm.platform,
         createForm.supported_model_scopes,
@@ -6281,24 +6229,6 @@ const handleEdit = async (group: AdminGroup) => {
     group.platform,
   );
   resetModelAllowlistState(editModelAllowlistState, group.model_allowlist);
-  // 固定账号 manifest 配置：回显配置并异步解析已存账号名称（失败显示 #<id>）
-  const savedCodexManifestConfig =
-    group.codex_models_manifest_config ?? createCodexManifestDefaults();
-  setEditCodexManifestConfig(savedCodexManifestConfig);
-  editCodexManifestAccountNames.value = {};
-  for (const id of editCodexManifestConfig.value.account_ids) {
-    adminAPI.accounts
-      .getById(id)
-      .then((account) => {
-        editCodexManifestAccountNames.value = {
-          ...editCodexManifestAccountNames.value,
-          [id]: account.name,
-        };
-      })
-      .catch(() => {
-        // 无法解析名称时由组件回退展示 #<id>，提示管理员清理脏 ID。
-      });
-  }
   // 加载模型路由规则（异步加载账号名称）
   editModelRoutingRules.value = await convertApiFormatToRoutingRules(
     group.model_routing,
@@ -6345,9 +6275,6 @@ const closeEditModal = () => {
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
   resetModelAllowlistState(editModelAllowlistState);
-  setEditCodexManifestConfig(createCodexManifestDefaults());
-  editCodexManifestAccountNames.value = {};
-  editCodexManifestRef.value?.resetValidation?.();
 };
 
 const handleUpdateGroup = async () => {
@@ -6367,24 +6294,6 @@ const handleUpdateGroup = async () => {
     return;
   }
   if (!validateGroupReasoningMultipliers(editForm.model_pricing)) return;
-  // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
-  if (
-    editModelAllowlistState.enabled &&
-    editModelAllowlistSelectedCount.value === 0
-  ) {
-    appStore.showError(t("admin.groups.modelAllowlist.emptySelectionError"));
-    return;
-  }
-  // 固定账号 manifest：开启后至少一个账号，前端阻止提交并提示。
-  if (
-    editForm.platform === "openai" &&
-    editCodexManifestConfig.value.enabled &&
-    editCodexManifestConfig.value.account_ids.length === 0
-  ) {
-    appStore.showError(t("admin.groups.codexModelsManifest.selectAtLeastOne"));
-    editCodexManifestRef.value?.validate();
-    return;
-  }
 
   submitting.value = true;
   try {
@@ -6429,15 +6338,6 @@ const handleUpdateGroup = async () => {
         editModelRoutingRules.value,
       ),
       model_allowlist: buildModelAllowlistConfig(editModelAllowlistState),
-      // 非 openai 平台提交关闭状态，与后端归一化一致
-      codex_models_manifest_config:
-        editForm.platform === "openai"
-          ? {
-              enabled: editCodexManifestConfig.value.enabled,
-              account_ids: [...editCodexManifestConfig.value.account_ids],
-              fallback_to_scheduler: editCodexManifestConfig.value.fallback_to_scheduler,
-            }
-          : createCodexManifestDefaults(),
       supported_model_scopes: normalizeSupportedModelScopesForPlatform(
         editForm.platform,
         editForm.supported_model_scopes,

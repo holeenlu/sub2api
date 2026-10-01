@@ -38,6 +38,7 @@ type ModelCatalogEntry struct {
 	DisplayName         string                          `json:"display_name"`
 	Platform            string                          `json:"platform"`
 	Kind                string                          `json:"kind"`
+	Disabled            bool                            `json:"disabled,omitempty"`
 	Lifecycle           string                          `json:"lifecycle"`
 	ShutdownDate        string                          `json:"shutdown_date,omitempty"`
 	Access              string                          `json:"access"`
@@ -51,7 +52,6 @@ type ModelCatalogEntry struct {
 
 type ModelCatalogSnapshot struct {
 	Warnings      []string            `json:"warnings,omitempty"`
-	Policy        *ModelCatalogPolicy `json:"policy,omitempty"`
 	Revision      string              `json:"revision"`
 	ScopeRevision string              `json:"-"`
 	AccountID     int64               `json:"account_id,omitempty"`
@@ -64,16 +64,8 @@ type ModelCatalogSnapshot struct {
 	Models        []ModelCatalogEntry `json:"models"`
 }
 
-type ModelCatalogRelease struct {
-	ID               int64     `json:"id"`
-	Revision         string    `json:"revision"`
-	PreviousRevision string    `json:"previous_revision,omitempty"`
-	PriceRevision    string    `json:"price_revision,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	Operation        string    `json:"operation"`
-}
-
 type ModelCatalogRepository interface {
+	UpdateRegistry(context.Context, func([]ModelCatalogEntry) ([]ModelCatalogEntry, error)) error
 	PricingAudits(context.Context, bool) ([]map[string]any, error)
 	ObserveMedia(context.Context, int64, string, CatalogMediaObservation) error
 	MediaObservations(context.Context, int64, string) ([]CatalogMediaObservation, error)
@@ -84,8 +76,6 @@ type ModelCatalogRepository interface {
 	Publish(context.Context, string, string, *ModelCatalogSnapshot, time.Time) error
 	Fail(context.Context, string, string, string, time.Time) error
 	ListPlatform(context.Context, string) ([]ModelCatalogSnapshot, error)
-	History(context.Context, string, int) ([]ModelCatalogRelease, error)
-	Rollback(context.Context, string, string, string) error
 	SavePrices(context.Context, string, json.RawMessage) error
 }
 

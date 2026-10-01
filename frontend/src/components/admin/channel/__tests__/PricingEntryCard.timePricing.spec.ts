@@ -144,18 +144,34 @@ describe('PricingEntryCard request multipliers', () => {
       .toBe('admin.channels.form.reasoningEffortMultiplierDefault')
   })
 
-  it('keeps custom effort multipliers when auto-filling model token prices', async () => {
+  it('keeps new models inheriting reference prices until the admin copies them', async () => {
     vi.mocked(channelsAPI.getModelDefaultPricing).mockResolvedValue({
-      found: true, input_price: 3e-6, output_price: 15e-6,
+      found: true, input_price: 3e-6, output_price: 15e-6, reasoning_effort_multipliers: { max: 2 },
     })
     const wrapper = shallowMount(PricingEntryCard, {
       props: { entry: { ...createEntry(), reasoning_effort_multipliers: { high: 0.5 } } },
     })
     wrapper.findComponent({ name: 'ModelTagInput' }).vm.$emit('update:models', ['example-model'])
+    const added = wrapper.emitted('update')!.at(-1)![0] as PricingFormEntry
+    expect(added).toMatchObject({ models: ['example-model'], input_price: null, output_price: null })
+    await wrapper.setProps({ entry: added })
     await flushPromises()
+    expect(wrapper.emitted('update')).toHaveLength(1)
+    expect(wrapper.get('[data-price-field="input_price"]').attributes('placeholder')).toBe('admin.channels.form.inheritPlaceholder')
+
+    await wrapper.get('[data-testid="fill-reference-prices"]').trigger('click')
     expect(wrapper.emitted('update')!.at(-1)![0]).toMatchObject({
-      models: ['example-model'], input_price: 3, output_price: 15,
-      reasoning_effort_multipliers: { high: 0.5 },
+      input_price: 3, output_price: 15, reasoning_effort_multipliers: { high: 0.5 },
     })
+  })
+
+  it('does not replace explicit zero prices when copying the reference', async () => {
+    vi.mocked(channelsAPI.getModelDefaultPricing).mockResolvedValue({ found: true, input_price: 3e-6, output_price: 15e-6 })
+    const wrapper = shallowMount(PricingEntryCard, {
+      props: { entry: { ...createEntry(), models: ['example-model'], input_price: 0 } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-testid="fill-reference-prices"]').trigger('click')
+    expect(wrapper.emitted('update')!.at(-1)![0]).toMatchObject({ input_price: 0, output_price: 15 })
   })
 })

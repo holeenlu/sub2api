@@ -624,34 +624,33 @@ func (h *GroupHandler) GetGroupModelAllowlistCandidates(c *gin.Context) {
 	}
 
 	if h.modelRegistry != nil {
-		if groupID == 0 {
-			catalog, err := h.modelRegistry.Platform(c.Request.Context(), c.Query("platform"))
+		platform := c.Query("platform")
+		if groupID != 0 {
+			group, err := h.adminService.GetGroup(c.Request.Context(), groupID)
 			if err != nil {
-				response.InternalError(c, "Failed to read model catalog")
+				response.ErrorFrom(c, err)
 				return
 			}
-			ids := []string{}
-			for _, entry := range catalog.Models {
-				if entry.Lifecycle != "retired" {
-					ids = append(ids, entry.ID)
-				}
+			platform = group.Platform
+		}
+		if platform == service.PlatformComposite {
+			platform = ""
+		}
+		// Selecting access must not depend on existing account assignments or
+		// sale prices. Use the same inventory as the model catalog administrator.
+		catalog, err := h.modelRegistry.SelectionCatalog(c.Request.Context(), nil, platform)
+		if err != nil {
+			response.InternalError(c, "Failed to read model catalog")
+			return
+		}
+		ids, seen := []string{}, map[string]bool{}
+		for _, entry := range catalog.Models {
+			if entry.Lifecycle != "retired" && !seen[entry.ID] {
+				ids = append(ids, entry.ID)
+				seen[entry.ID] = true
 			}
-			response.Success(c, gin.H{"models": ids, "source": "model_catalog", "status": catalog.Status})
-			return
 		}
-		group, err := h.adminService.GetGroup(c.Request.Context(), groupID)
-		if err != nil {
-			response.ErrorFrom(c, err)
-			return
-		}
-		candidates := *group
-		candidates.ModelAllowlist = service.GroupModelAllowlist{}
-		catalog, err := h.modelCatalog.Preview(c.Request.Context(), &candidates)
-		if err != nil {
-			response.InternalError(c, "Failed to read group catalog")
-			return
-		}
-		response.Success(c, gin.H{"models": catalog.ModelIDs(), "source": "model_catalog", "status": catalog.Status, "issues": catalog.Issues})
+		response.Success(c, gin.H{"models": ids, "source": "model_catalog", "status": catalog.Status})
 		return
 	}
 	// 平台解析（空则读分组、再空则默认 anthropic）由 service 一处完成并回传，
@@ -684,10 +683,6 @@ func (h *GroupHandler) GetGroupModelAllowlistCandidates(c *gin.Context) {
 	})
 }
 
-// liveAnthropicModelCandidates 汇总分组内账号上游支持的模型。任何失败都降级为空
-// 列表：候选只是辅助输入，让整个弹窗因为一个账号的 token 过期而打不开，代价远
-// 大于收益——弹窗打不开时前端拿不到候选，保存路径会把已配置的 models_list 一并
-// 带走。
 func (h *GroupHandler) liveAnthropicModelCandidates(c *gin.Context, groupID int64) []string {
 	// groupID=0 是「新建分组」流程，没有账号池可言。此时不扫全库——那会对系统里
 	// 每个 Anthropic 账号各发一次 /v1/models。

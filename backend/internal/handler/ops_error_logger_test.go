@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -361,7 +363,7 @@ func TestOpsErrorLoggerMiddleware_SkipsBodyReadClientDisconnectOnly(t *testing.T
 	job := <-opsErrorLogQueue
 	require.Equal(t, "invalid_request_error", job.entry.ErrorType)
 	require.Equal(t, http.StatusBadRequest, job.entry.StatusCode)
-	require.Equal(t, bodyReadErrorPolicies[bodyReadKindTruncatedBody].Message, job.entry.ErrorMessage)
+	require.Equal(t, "Request body ended prematurely; the declared Content-Length was not received", job.entry.ErrorMessage)
 }
 
 func TestOpsErrorLoggerMiddleware_RecordsRecoveredUpstreamTelemetryOutsideFailureSLA(t *testing.T) {
@@ -2036,29 +2038,31 @@ func TestOpsErrorClassifiersAcceptBothChineseScripts(t *testing.T) {
 // 留在 request/P3，只有我们该负责的读超时才是 internal/P2；兜底策略尤其不能
 // 被抬成 P2，否则未分类的客户端中断会触发告警。
 func TestBodyReadErrorPoliciesOpsClassification(t *testing.T) {
-	type want struct{ phase, severity string }
-	expectations := map[string]want{
-		bodyReadKindMaxBytes:                   {"request", "P3"},
-		bodyReadKindClientDisconnect:           {"request", "P3"},
-		bodyReadKindTruncatedBody:              {"request", "P3"},
-		bodyReadKindTransportTimeout:           {"internal", "P2"},
-		bodyReadKindTransport:                  {"request", "P3"},
-		bodyReadKindUnsupportedContentEncoding: {"request", "P3"},
-		bodyReadKindDecodeContentEncoding:      {"request", "P3"},
-		bodyReadKindIORead:                     {"request", "P3"},
+	cases := []struct {
+		name            string
+		err             error
+		phase, severity string
+	}{
+		{"max_bytes", &http.MaxBytesError{Limit: 1024}, "request", "P3"},
+		{"client_disconnect", context.Canceled, "request", "P3"},
+		{"truncated_body", io.ErrUnexpectedEOF, "request", "P3"},
+		{"transport_timeout", os.ErrDeadlineExceeded, "internal", "P2"},
+		{"unsupported_content_encoding", errors.New("decode content-encoding: unsupported content-encoding"), "request", "P3"},
+		{"decode_content_encoding", errors.New("decode content-encoding: invalid header"), "request", "P3"},
+		{"io_read", errors.New("unknown read error"), "request", "P3"},
 	}
-	for kind, policy := range bodyReadErrorPolicies {
-		exp, ok := expectations[kind]
-		require.Truef(t, ok, "policy %q has no ops classification expectation", kind)
-		require.Equal(t, policy.ErrorType, normalizeOpsErrorType(policy.ErrorType, ""), "kind %s", kind)
-		require.Equal(t, exp.phase, classifyOpsPhase(policy.ErrorType, policy.Message, ""), "kind %s", kind)
-		require.Equal(t, exp.severity, classifyOpsSeverity(policy.ErrorType, policy.Status), "kind %s", kind)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			RespondRequestBodyReadFailure(c, nil, tc.err, func(_ *gin.Context, status int, errType, message string) {
+				require.True(t, isKnownOpsErrorType(errType))
+				require.Equal(t, errType, normalizeOpsErrorType(errType, ""))
+				require.Equal(t, tc.phase, classifyOpsPhase(errType, message, ""))
+				require.Equal(t, tc.severity, classifyOpsSeverity(errType, status))
+			})
+		})
 	}
-	require.Len(t, expectations, len(bodyReadErrorPolicies))
-
-	fallback := bodyReadErrorFallbackPolicy
-	require.Equal(t, "request", classifyOpsPhase(fallback.ErrorType, fallback.Message, ""))
-	require.Equal(t, "P3", classifyOpsSeverity(fallback.ErrorType, fallback.Status))
 }
 
 // 分组模型白名单入口拒绝：业务限流原因复用 local_model_configuration，但

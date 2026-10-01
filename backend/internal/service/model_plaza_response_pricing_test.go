@@ -55,3 +55,46 @@ func TestModelPlazaAmbiguousRoutesKeepOnlyPublicOfficialPrice(t *testing.T) {
 	require.Nil(t, QuotePlazaModel(&sol, &groups[0], nil, false).Pricing)
 	require.Nil(t, models["custom-alias"].OfficialPricing, "do not label an upstream target price as a custom alias's official price")
 }
+
+func TestModelPlazaDefaultImageBillingMatchesSettlement(t *testing.T) {
+	for _, model := range []string{"gpt-image-2.5-flare", "gpt-image-2.5-sunburst"} {
+		t.Run(model, func(t *testing.T) {
+			group := Group{ID: 10, Platform: PlatformOpenAI, RateMultiplier: 0.5, AllowImageGeneration: true}
+			svc := newPlazaServiceWithBilling(nil, []Group{group}, nil, nil)
+			svc.catalog = &GroupModelCatalogService{accounts: &catalogAccountRepo{accounts: []Account{catalogAccount(1, PlatformOpenAI, map[string]any{model: model})}}}
+			groups, err := svc.ListGroups(context.Background())
+			require.NoError(t, err)
+			require.Len(t, groups[0].Models, 1)
+			m := groups[0].Models[0]
+			require.Equal(t, BillingModeImage, m.Pricing.BillingMode)
+			require.Equal(t, "image", m.PriceUnit)
+			require.Nil(t, m.ImageTokenPricing)
+			require.Len(t, m.Pricing.Intervals, 3)
+			gateway := &OpenAIGatewayService{billingService: svc.billingService, resolver: svc.resolver}
+			for _, tier := range m.Pricing.Intervals {
+				charged := gateway.calculateOpenAIImageCost(context.Background(), model, &APIKey{Group: &group, GroupID: &group.ID}, &OpenAIForwardResult{ImageCount: 1, ImageSize: tier.TierLabel}, 0.5)
+				require.InDelta(t, charged.ActualCost, *tier.PerRequestPrice*0.5, 1e-12)
+			}
+		})
+	}
+}
+
+func TestModelPlazaExplicitTokenImageBillingStaysToken(t *testing.T) {
+	const model = "gpt-image-2.5-flare"
+	channel := plazaPricedChannel(1, "images", []int64{10}, PlatformOpenAI, model)
+	group := Group{ID: 10, Platform: PlatformOpenAI, RateMultiplier: 1, AllowImageGeneration: true}
+	svc := newPlazaServiceWithBilling([]Channel{channel}, []Group{group}, map[int64]string{10: PlatformOpenAI}, nil)
+	svc.catalog = &GroupModelCatalogService{accounts: &catalogAccountRepo{accounts: []Account{catalogAccount(1, PlatformOpenAI, map[string]any{model: model})}}}
+	groups, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, groups[0].Models, 1)
+	require.Equal(t, BillingModeToken, groups[0].Models[0].Pricing.BillingMode)
+	require.NotEqual(t, "image", groups[0].Models[0].PriceUnit)
+}
+
+func TestModelCatalogDefaultImagePricingDoesNotRequireRemoteTokenPrice(t *testing.T) {
+	svc := newPlazaServiceWithBilling(nil, nil, nil, nil)
+	catalog := &ModelCatalogService{pricingResolver: svc.resolver}
+	group := &Group{ID: 10, Platform: PlatformOpenAI, AllowImageGeneration: true}
+	require.Equal(t, "ready", catalog.quoteStatus(context.Background(), &GroupCatalogModel{BillingModels: []string{"gpt-image-2.5-flare"}}, group))
+}

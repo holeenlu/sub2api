@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,12 +12,11 @@ import (
 
 type ModelCatalogHandler struct {
 	catalog  *service.ModelCatalogService
-	groups   service.GroupRepository
 	accounts service.AccountRepository
 }
 
-func NewModelCatalogHandler(catalog *service.ModelCatalogService, accounts service.AccountRepository, groups service.GroupRepository) *ModelCatalogHandler {
-	return &ModelCatalogHandler{catalog: catalog, accounts: accounts, groups: groups}
+func NewModelCatalogHandler(catalog *service.ModelCatalogService, accounts service.AccountRepository) *ModelCatalogHandler {
+	return &ModelCatalogHandler{catalog: catalog, accounts: accounts}
 }
 
 func (h *ModelCatalogHandler) Catalog(c *gin.Context) {
@@ -37,7 +35,12 @@ func (h *ModelCatalogHandler) Catalog(c *gin.Context) {
 			response.NotFound(c, "Account not found")
 			return
 		}
-		snapshot, err := h.catalog.Account(c.Request.Context(), a)
+		var snapshot *service.ModelCatalogSnapshot
+		if c.Query("view") == "selection" {
+			snapshot, err = h.catalog.SelectionCatalog(c.Request.Context(), a, a.Platform)
+		} else {
+			snapshot, err = h.catalog.Account(c.Request.Context(), a)
+		}
 		if err != nil {
 			response.InternalError(c, "Failed to read model catalog")
 			return
@@ -47,7 +50,13 @@ func (h *ModelCatalogHandler) Catalog(c *gin.Context) {
 		return
 	}
 	platform := strings.TrimSpace(c.Query("platform"))
-	snapshot, err := h.catalog.Platform(c.Request.Context(), platform)
+	var snapshot *service.ModelCatalogSnapshot
+	var err error
+	if c.Query("view") == "selection" {
+		snapshot, err = h.catalog.SelectionCatalog(c.Request.Context(), nil, platform)
+	} else {
+		snapshot, err = h.catalog.Inventory(c.Request.Context(), platform)
+	}
 	if err != nil {
 		response.InternalError(c, "Failed to read model catalog")
 		return
@@ -72,6 +81,10 @@ func (h *ModelCatalogHandler) Refresh(c *gin.Context) {
 	response.Success(c, h.catalog.QueueRefresh(input.AccountID))
 }
 
+func (h *ModelCatalogHandler) Sync(c *gin.Context) {
+	response.Success(c, h.catalog.QueueSync())
+}
+
 func (h *ModelCatalogHandler) Job(c *gin.Context) {
 	job, ok := h.catalog.Job(c.Request.Context(), c.Param("job_id"))
 	if !ok {
@@ -82,124 +95,26 @@ func (h *ModelCatalogHandler) Job(c *gin.Context) {
 }
 
 func (h *ModelCatalogHandler) Settings(c *gin.Context) {
-	response.Success(c, h.catalog.Settings(c.Request.Context()))
+	cfg := h.catalog.Settings(c.Request.Context())
+	response.Success(c, gin.H{"enabled": cfg.Enabled, "interval_seconds": cfg.IntervalSeconds})
 }
 func (h *ModelCatalogHandler) SaveSettings(c *gin.Context) {
-	var input service.ModelCatalogSettings
+	var input struct {
+		Enabled         bool `json:"enabled"`
+		IntervalSeconds int  `json:"interval_seconds"`
+	}
 	if c.ShouldBindJSON(&input) != nil {
 		response.BadRequest(c, "Invalid synchronization settings")
 		return
 	}
-	if err := h.catalog.SaveSettings(c.Request.Context(), input); err != nil {
+	cfg := h.catalog.Settings(c.Request.Context())
+	cfg.Enabled, cfg.IntervalSeconds = input.Enabled, input.IntervalSeconds
+	if err := h.catalog.SaveSettings(c.Request.Context(), cfg); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
 	response.Success(c, input)
 }
-func (h *ModelCatalogHandler) Prices(c *gin.Context) {
-	response.Success(c, h.catalog.ReferencePrices())
-}
-func (h *ModelCatalogHandler) SavePrices(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<20)
-	var input struct {
-		Models json.RawMessage `json:"models"`
-	}
-	if c.ShouldBindJSON(&input) != nil {
-		response.BadRequest(c, "Invalid supplemental reference prices")
-		return
-	}
-	if err := h.catalog.ImportPrices(c.Request.Context(), input.Models); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	response.Success(c, h.catalog.ReferencePrices())
-}
-func (h *ModelCatalogHandler) Registry(c *gin.Context) {
-	response.Success(c, h.catalog.Registry(c.Request.Context()))
-}
-func (h *ModelCatalogHandler) SaveRegistry(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<20)
-	var input struct {
-		Models []service.ModelCatalogEntry `json:"models"`
-	}
-	if c.ShouldBindJSON(&input) != nil {
-		response.BadRequest(c, "Invalid model registry")
-		return
-	}
-	if err := h.catalog.SaveRegistry(c.Request.Context(), input.Models); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	response.Success(c, gin.H{"models": h.catalog.Registry(c.Request.Context())})
-}
-
-func (h *ModelCatalogHandler) SaveAccountPolicy(c *gin.Context) {
-	id, ok := codexTicketAccountID(c)
-	if !ok {
-		return
-	}
-	var input service.ModelCatalogPolicy
-	if c.ShouldBindJSON(&input) != nil {
-		response.BadRequest(c, "Invalid model policy")
-		return
-	}
-	if err := h.catalog.SaveAccountPolicy(c.Request.Context(), id, input); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	response.Success(c, input)
-}
-
-func (h *ModelCatalogHandler) History(c *gin.Context) {
-	id, ok := codexTicketAccountID(c)
-	if !ok {
-		return
-	}
-	items, err := h.catalog.History(c.Request.Context(), id)
-	if err != nil {
-		response.BadRequest(c, "Catalog history unavailable")
-		return
-	}
-	response.Success(c, gin.H{"items": items})
-}
-func (h *ModelCatalogHandler) Rollback(c *gin.Context) {
-	id, ok := codexTicketAccountID(c)
-	if !ok {
-		return
-	}
-	var input struct {
-		Revision string `json:"revision" binding:"required"`
-	}
-	if c.ShouldBindJSON(&input) != nil {
-		response.BadRequest(c, "revision is required")
-		return
-	}
-	if err := h.catalog.Rollback(c.Request.Context(), id, input.Revision); err != nil {
-		response.BadRequest(c, "Cannot restore revision outside the current account access scope")
-		return
-	}
-	response.Success(c, gin.H{"revision": input.Revision})
-}
-
-func (h *ModelCatalogHandler) Explain(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Query("group_id"), 10, 64)
-	if err != nil || id <= 0 {
-		response.BadRequest(c, "group_id is required")
-		return
-	}
-	group, err := h.groups.GetByID(c.Request.Context(), id)
-	if err != nil || group == nil {
-		response.NotFound(c, "Group not found")
-		return
-	}
-	result, err := h.catalog.Explain(c.Request.Context(), group)
-	if err != nil {
-		response.InternalError(c, "Catalog comparison unavailable")
-		return
-	}
-	response.Success(c, result)
-}
-
 func (h *ModelCatalogHandler) TicketModels(c *gin.Context) {
 	id, ok := codexTicketAccountID(c)
 	if !ok {
@@ -225,4 +140,18 @@ func (h *ModelCatalogHandler) PricingAudits(c *gin.Context) {
 		return
 	}
 	response.Success(c, rows)
+}
+
+func (h *ModelCatalogHandler) SaveModel(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	var input service.CatalogModelInput
+	if c.ShouldBindJSON(&input) != nil {
+		response.BadRequest(c, "Invalid model")
+		return
+	}
+	if err := h.catalog.SaveInventoryModel(c.Request.Context(), input); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, input)
 }

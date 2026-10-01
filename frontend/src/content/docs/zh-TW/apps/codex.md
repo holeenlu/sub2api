@@ -58,7 +58,7 @@ supports_websockets = false
 
 在剛才設定環境變數的同一個終端機執行 `codex`。`supports_websockets = false` 是先驗證 HTTP/SSE 的設定，不代表本站沒有 WebSocket 路由。
 
-OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，包含主模型、審查模型、`[features]` 和預設模型目錄路徑；首次使用前需要取得並儲存目錄檔案。預設 **Legacy** 模式同時下載 `config.toml` 和 `auth.json`，其中 `requires_openai_auth = true`；**API key** 模式改用 `requires_openai_auth = false` 與 `experimental_bearer_token`，修改後必須完全重啟 Codex。兩種模式不要混合，也不要把路由分組的 `tapmodels` 表和 OpenAI 分組的 `OpenAI` 表拼成一個 Provider。
+OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，包含主模型、審查模型、`[features]` 和遠端模型目錄地址 `model_catalog_url`，複製即可使用。彈出視窗預設選中 **Codex CLI (WebSocket)** 與 **API key** 模式：`requires_openai_auth = false` 並寫入 `experimental_bearer_token`，只需下載 `config.toml`；**Legacy** 模式改為 `requires_openai_auth = true` 並同時下載 `auth.json`。切換後必須完全重啟 Codex。兩種模式不要混合，也不要把路由分組的 `tapmodels` 表和 OpenAI 分組的 `OpenAI` 表拼成一個 Provider。
 
 ## 桌面版：讓應用拿到 Key
 
@@ -74,17 +74,17 @@ OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，�
 
 如果必須使用圖示啟動，可在 OpenAI 分組的“使用金鑰”彈出視窗選擇 **API key**，下載其完整 `config.toml`。它會把認證資訊儲存在設定檔中，注意檔案權限與備份，勿提交到儲存庫。對於其他分組，優先使用彈出視窗生成的 `env_key` 設定；不要自行把兩種驗證欄位並列。
 
-## 取得目前分組模型目錄
+## 目前分組模型目錄
 
-本節只適用於 OpenAI/Composite 分組。其他路由分組不支援專用目錄下載，也不應新增 `model_catalog_json`。用普通 `GET /v1/models` 查詢精確 ID 後填入 `model`；不要把該列表回應儲存為 Codex manifest。
+本節只適用於 OpenAI/Composite 分組。其他路由分組不提供專用目錄，也不應新增 `model_catalog_url`。用普通 `GET /v1/models` 查詢精確 ID 後填入 `model`；不要把該列表回應當作 Codex manifest。
 
-在“API 金鑰 → 使用金鑰 → Codex”中手動點選“取得目錄”，成功取得包含可用 Codex 模型的目錄後，再點選“下載目錄”。手動取得的結果可更新 `model`、`review_model` 和推理設定；取得失敗或沒有可用模型時，預設設定仍可複製和下載。預設設定始終包含 `model_catalog_json = "~/.codex/codex-models.json"`，無需等待目錄請求。首次啟動 Codex 前須先下載並儲存該目錄檔案；重新取得失敗時可繼續使用之前儲存的檔案。將下載的 `codex-models.json` 放在固定位置，並確保 `config.toml` 頂層的路徑與檔案實際位置一致，例如：
+彈出視窗生成的 `config.toml` 在 Provider 表中包含：
 
 ```toml
-model_catalog_json = "/你的絕對路徑/.codex/codex-models.json"
+model_catalog_url = "{{API_ROOT}}/v1/models"
 ```
 
-Windows TOML 使用單引號路徑，例如 `model_catalog_json = 'C:\Users\你的使用者名稱\.codex\codex-models.json'`。目錄下載失敗時先用最小設定檢查。分組或開放模型變化後重新取得目錄，不要編輯本地模型名稱來繞過權限。
+Codex 0.156.0 及以上版本啟動時用目前 Key 讀取該地址，得到本站為該 Key 計算的目錄；分組或開放模型變化後重啟 Codex 即可取得新目錄。“檢查連線 / 檢視此 Key 可用模型”只用於核對，可能更新彈出視窗中的 `model`、`review_model` 和推理設定，不是使用前置步驟。本站已停止支援本地目錄檔案，不再提供 `codex-models.json` 下載和更新腳本；舊設定中的 `model_catalog_json` 請刪除。不要編輯模型名稱來繞過權限。
 
 ## 驗證接入
 

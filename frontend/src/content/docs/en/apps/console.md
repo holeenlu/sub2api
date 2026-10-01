@@ -22,7 +22,7 @@
 
 ## Codex authentication modes
 
-OpenAI's Codex tab exposes two modes:
+OpenAI's Codex tab exposes two modes. Opening **Use key** selects **Codex CLI (WebSocket)**, **API key** and **macOS / Linux** by default:
 
 - **Legacy** sets `requires_openai_auth = true` and offers `auth.json`. Use it only for Codex versions that require that login shape.
 - **API key** sets `requires_openai_auth = false`, writes `experimental_bearer_token`, and adds the local image extension header. This stores the secret on disk; restrict permissions and never commit it.
@@ -31,15 +31,15 @@ Routed Codex tabs default to `env_key = "TAPMODELS_API_KEY"`, `wire_api = "respo
 
 ## Model catalog
 
-Only OpenAI/Composite groups support the dedicated Codex catalog. Other groups have no fetch button or generated `model_catalog_json`; query ordinary `GET /v1/models` and enter an exact model ID manually.
+Only OpenAI/Composite groups support the dedicated Codex catalog. Other groups get no `model_catalog_url`; query ordinary `GET /v1/models` and enter an exact model ID manually.
 
-In a supported Codex tab, **Fetch model catalog** calls the dedicated `/backend-api/codex/models` endpoint with the current key and downloads `codex-models.json`. Keep it at a stable absolute path and set `model_catalog_json` in `config.toml`. The ordinary `GET /v1/models` response is a generic list, not this catalog file. Refresh it when group access changes; do not edit slugs to bypass group policy.
+In a supported Codex tab, the generated `config.toml` includes `model_catalog_url` in the provider table. Codex 0.156.0 or later reads the catalog this site computes for the key at startup; there is no file to download. **Check connection / view models for this key** is only a check, not a setup step. Local catalog files are no longer supported: remove `model_catalog_json` from older configurations and copy the configuration again. Do not edit slugs to bypass group policy.
 
 ## Follow the project UI
 
 These screenshots render the current project's Use key component with an invalid sample key and `api.example.com`. Copy values from your own console, not the images.
 
-1. For an OpenAI group, select **Codex CLI**, then choose the Legacy or API key authentication mode appropriate for your client. Each mode produces different files.
+1. OpenAI groups open on **Codex CLI (WebSocket)** with API key authentication. Choose **Codex CLI** if your network does not support WebSocket, or Legacy if you need the `auth.json` login shape. Each authentication mode produces different files.
 
 ![Project Codex Legacy configuration with sample data](/docs-assets/client-codex-en.png)
 

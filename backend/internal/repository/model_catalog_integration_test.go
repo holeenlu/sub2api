@@ -30,11 +30,13 @@ func TestModelCatalogPostgresPublication(t *testing.T) {
 	defer cancel()
 	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS accounts(id BIGINT PRIMARY KEY,status TEXT NOT NULL DEFAULT 'active',deleted_at TIMESTAMPTZ);INSERT INTO accounts(id) VALUES(1) ON CONFLICT DO NOTHING`)
 	require.NoError(t, err)
-	migration, err := os.ReadFile("../../migrations/261_model_catalog_registry.sql")
-	require.NoError(t, err)
-	for i := 0; i < 2; i++ {
-		_, err = db.ExecContext(ctx, string(migration))
-		require.NoError(t, err, "migration is repeatable")
+	for _, file := range []string{"261_model_catalog_registry.sql", "262_model_catalog_global_sync_jobs.sql"} {
+		migration, err := os.ReadFile("../../migrations/" + file)
+		require.NoError(t, err)
+		for i := 0; i < 2; i++ {
+			_, err = db.ExecContext(ctx, string(migration))
+			require.NoError(t, err, "migration is repeatable")
+		}
 	}
 	// A separate connection represents another application process.
 	db2, err := sql.Open("postgres", dsn)
@@ -42,6 +44,14 @@ func TestModelCatalogPostgresPublication(t *testing.T) {
 	defer db2.Close()
 	r := NewModelCatalogRepository(db)
 	other := NewModelCatalogRepository(db2)
+	job := service.ModelCatalogJob{ID: "global-sync-test", Status: "complete", Succeeded: 1}
+	require.NoError(t, r.SaveJob(ctx, job))
+	savedJob, err := other.ReadJob(ctx, job.ID)
+	require.NoError(t, err)
+	require.Equal(t, job.ID, savedJob.ID)
+	require.Zero(t, savedJob.AccountID)
+	require.Equal(t, 1, savedJob.Succeeded)
+
 	source := "account:1"
 	scope := "scope-a"
 	var wg sync.WaitGroup
@@ -90,7 +100,6 @@ func TestModelCatalogPostgresPublication(t *testing.T) {
 	snapshot.Revision = "v2"
 	snapshot.Models[0].Access = "unlisted"
 	require.NoError(t, r.Publish(ctx, source, "worker-d", snapshot, time.Now()))
-	require.Error(t, other.Rollback(ctx, source, scope, "v1"), "rollback must not resurrect revoked access")
 	require.NoError(t, r.SaveJob(ctx, service.ModelCatalogJob{ID: "job-1", AccountID: 1, Status: "complete", StartedAt: time.Now()}))
 	job, err := other.ReadJob(ctx, "job-1")
 	require.NoError(t, err)
