@@ -562,6 +562,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	// 与 HTTP 入口一致：绑定与会话状态都落在实际选号分组的命名空间下（见
 	// openAIResponseAccountGroupID），兜底借来的账号才能被后续续写找到。
 	groupID := openAIResponseAccountGroupID(c)
+	_, enforceGroup := openAITurnAdmissionGroupFromContext(c)
 	apiKeyID := getAPIKeyIDFromContext(c)
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	sessionHash := ""
@@ -849,7 +850,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		TenantScope:      openAIWSTenantScope(c),
 		PrepareTicket:    s.codexTicketProxy,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
-			_, err := s.latestOpenAITurnAccountForGroup(factoryCtx, account, groupID, true)
+			_, err := s.latestOpenAITurnAccountForGroup(factoryCtx, account, groupID, enforceGroup)
 			if err != nil {
 				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
 					factoryCtx,
@@ -871,7 +872,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if binding != nil {
 				model = binding.model
 			}
-			latest, err := s.admitOpenAITurnForGroup(checkCtx, groupID, account, model)
+			latest, err := s.admitOpenAITurnForGroup(checkCtx, groupID, enforceGroup, account, model)
 			if err != nil {
 				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
 					checkCtx,
