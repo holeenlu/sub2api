@@ -346,7 +346,10 @@ const (
 	configuredCodexCustomDescription   = "Custom model routed through " + DefaultSiteName + "."
 	configuredCodexFallbackContext     = 272_000
 	configuredCodexDeepSeekV4Context   = 1_000_000
+	configuredCodexZhipuGLM47Context   = 200_000
+	configuredCodexZhipuGLM47MaxOutput = 128_000
 	configuredCodexZhipuContext        = 1_000_000
+	configuredCodexZhipuMaxOutput      = 131_072
 	configuredCodexGrokContext         = 500_000
 	configuredCodexGrokBuildContext    = 256_000
 	configuredCodexGPT56MaxContext     = 872_000
@@ -418,6 +421,7 @@ type configuredCodexModelDescriptor struct {
 	SupportsParallelToolCalls         bool                            `json:"supports_parallel_tool_calls"`
 	ContextWindow                     int64                           `json:"context_window"`
 	MaxContextWindow                  int64                           `json:"max_context_window"`
+	MaxOutputTokens                   int64                           `json:"max_output_tokens,omitempty"`
 	AutoCompactTokenLimit             any                             `json:"auto_compact_token_limit"`
 	CompHash                          any                             `json:"comp_hash"`
 	EffectiveContextWindowPercent     int64                           `json:"effective_context_window_percent"`
@@ -496,9 +500,16 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		}
 	}
 
+	if isZhipuCodexGLM47Model(modelID) {
+		descriptor.ContextWindow = configuredCodexZhipuGLM47Context
+		descriptor.MaxContextWindow = configuredCodexZhipuGLM47Context
+		descriptor.MaxOutputTokens = configuredCodexZhipuGLM47MaxOutput
+	}
+
 	if isZhipuCodexLongContextModel(modelID) {
 		descriptor.ContextWindow = configuredCodexZhipuContext
 		descriptor.MaxContextWindow = configuredCodexZhipuContext
+		descriptor.MaxOutputTokens = configuredCodexZhipuMaxOutput
 	}
 
 	if isClaudeCodexModel(modelID) {
@@ -795,9 +806,13 @@ func isGrokCodexModel(modelID string) bool {
 	return xai.IsGrokModelID(modelID)
 }
 
+func isZhipuCodexGLM47Model(modelID string) bool {
+	return strings.EqualFold(strings.TrimSpace(modelID), "glm-4.7")
+}
+
 func isZhipuCodexLongContextModel(modelID string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(modelID))
-	return normalized == "glm-4.7" || normalized == "glm-5.3"
+	return normalized == "glm-5.3" || normalized == "glm-5.3-flash"
 }
 
 func grokCodexSupportsReasoningEffort(modelID string) bool {

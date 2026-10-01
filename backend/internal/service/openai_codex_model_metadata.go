@@ -451,6 +451,9 @@ func applyUpstreamModelMetadataToCodexDescriptor(
 		descriptor.MaxContextWindow = metadata.MaxContextWindow
 		descriptor.ContextWindow = min(descriptor.ContextWindow, metadata.MaxContextWindow)
 	}
+	if metadata.MaxOutputTokens > 0 {
+		descriptor.MaxOutputTokens = metadata.MaxOutputTokens
+	}
 }
 
 func configuredCodexReasoningLevelDescription(level string) string {

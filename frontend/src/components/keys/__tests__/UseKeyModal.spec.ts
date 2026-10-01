@@ -1094,12 +1094,22 @@ describe('UseKeyModal', () => {
     const manifest = {
       models: [
         {
-          slug: 'glm-4.7',
-          display_name: 'GLM 4.7',
+          slug: 'glm-5.3',
+          display_name: 'GLM 5.3',
           context_window: 1_000_000,
           max_context_window: 1_000_000,
-          supported_reasoning_levels: [{ effort: 'none' }],
-          default_reasoning_level: 'none'
+          max_output_tokens: 131_072,
+          supported_reasoning_levels: [{ effort: 'low' }],
+          default_reasoning_level: 'low'
+        },
+        {
+          slug: 'glm-5.3-flash',
+          display_name: 'GLM 5.3 Flash',
+          context_window: 1_000_000,
+          max_context_window: 1_000_000,
+          max_output_tokens: 131_072,
+          supported_reasoning_levels: [{ effort: 'low' }],
+          default_reasoning_level: 'low'
         }
       ]
     }
@@ -1111,8 +1121,8 @@ describe('UseKeyModal', () => {
     const wrapper = mount(UseKeyModal, {
       props: {
         setupProfile: {
-          model: 'glm-4.7',
-          review_model: 'glm-4.7',
+          model: 'glm-5.3',
+          review_model: 'glm-5.3',
           context_window: 1_000_000,
           catalog_revision: 'zhipu-v1',
           status: 'ready'
@@ -1130,20 +1140,20 @@ describe('UseKeyModal', () => {
     expect(claudeConfig).toContain('ANTHROPIC_AUTH_TOKEN="sk-zhipu-test"')
     const claudeSettings = JSON.parse(claudeConfig.slice(claudeConfig.indexOf('{')))
     expect(claudeSettings.env.ANTHROPIC_AUTH_TOKEN).toBe('sk-zhipu-test')
-    expect(claudeSettings.env.ANTHROPIC_MODEL).toBe('glm-4.7')
-    expect(claudeSettings.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('glm-4.7')
+    expect(claudeSettings.env.ANTHROPIC_MODEL).toBe('glm-5.3')
+    expect(claudeSettings.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('glm-5.3')
     expect(claudeSettings.env.ANTHROPIC_BASE_URL).toBe('https://example.com')
 
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
     expect(wrapper.find('[data-testid="codex-model-catalog-mode"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="codex-model-catalog-path"]').text()).toBe('~/.codex/codex-models.json')
     const codexConfig = findCodeBlock(wrapper, '[model_providers.kdan]')
-    expect(codexConfig).toContain('model = "glm-4.7"')
-    expect(codexConfig).toContain('review_model = "glm-4.7"')
+    expect(codexConfig).toContain('model = "glm-5.3"')
+    expect(codexConfig).toContain('review_model = "glm-5.3"')
     expect(codexConfig).toContain('model_context_window = 1000000')
     expect(codexConfig).toContain('model_catalog_json = "~/.codex/codex-models.json"')
     expect(codexConfig).not.toContain('model_catalog_url')
-    expect(codexConfig).toContain('env_key = "KDAN_API_KEY"')
+    expect(codexConfig).toContain('experimental_bearer_token = "sk-zhipu-test"')
 
     await fetchCatalog(wrapper)
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -1163,7 +1173,42 @@ describe('UseKeyModal', () => {
       baseURL: 'https://example.com/v1',
       apiKey: 'sk-zhipu-test'
     })
-    expect(provider.models['glm-4.7'].limit.context).toBe(1_000_000)
+    expect(provider.models['glm-5.3'].limit).toEqual({ context: 1_000_000, output: 131_072 })
+    expect(provider.models['glm-5.3-flash'].limit).toEqual({ context: 1_000_000, output: 131_072 })
+  })
+
+  it('defaults Zhipu Codex config to the authorized GLM-5.3 1M model before fetching a catalog', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: { show: true, apiKey: 'sk-zhipu-test', baseUrl: 'https://example.com/v1', platform: 'zhipu' },
+      global: { stubs }
+    })
+    await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
+    const config = findCodeBlock(wrapper, '[model_providers.kdan]')
+    expect(config).toContain('model = "glm-5.3"')
+    expect(config).toContain('model_context_window = 1000000')
+    expect(config).toContain('model_catalog_json = "~/.codex/codex-models.json"')
+    expect(config).toContain('experimental_bearer_token = "sk-zhipu-test"')
+    expect(config).not.toContain('KDAN_API_KEY')
+
+    await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.opencode'))
+    const opencodeConfig = JSON.parse(findCodeBlock(wrapper, '"provider"'))
+    expect(opencodeConfig.provider.zhipu.models['glm-5.3'].limit).toEqual({
+      context: 1_000_000,
+      output: 131_072
+    })
+  })
+
+  it.each([
+    ['deepseek', 'deepseek-v4-pro', 1_000_000],
+    ['gemini', 'gemini-2.5-pro', 2_097_152],
+    ['grok', 'grok-4.5', 500_000]
+  ] as const)('keeps the %s Codex default context scoped to its own model', async (platform, model, contextWindow) => {
+    const wrapper = mountModal(platform)
+    await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
+    const config = findCodeBlock(wrapper, '[model_providers.kdan]')
+    expect(config).toContain(`model = "${model}"`)
+    expect(config).toContain(`model_context_window = ${contextWindow}`)
+    expect(config).not.toContain('model_catalog_json')
   })
 
   it('clears a loaded Composite catalog when switching to an unsupported platform', async () => {

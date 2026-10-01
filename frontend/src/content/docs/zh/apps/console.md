@@ -27,13 +27,13 @@ OpenAI 分组的 Codex 标签提供两种模式，打开“使用密钥”时默
 - **Legacy**：`config.toml` 使用 `requires_openai_auth = true`，并下载 `auth.json`。只在 Codex 版本需要该登录形态时使用。
 - **API key**：`requires_openai_auth = false`，把 Key 写入 `experimental_bearer_token`，并附加本地图片扩展所需的请求头。该模式会把密钥保存在磁盘，限制文件权限且不要提交到仓库。
 
-其他分组的 Codex 路由默认使用 `env_key = "KDAN_API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`。WebSocket 标签只对 OpenAI Responses WebSocket 路径启用。
+其他分组的 Codex 路由默认使用 `env_key = "KDAN_API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`；智谱分组把 API Key 写入生成的 `experimental_bearer_token`，因此单独复制 `config.toml` 也不会依赖 `KDAN_API_KEY`。WebSocket 标签只对 OpenAI Responses WebSocket 路径启用。
 
 ## 模型目录
 
 OpenAI/Composite 分组和智谱 API Key 分组支持 Codex 专用模型目录。其他分组不生成 `model_catalog_url` 或 `model_catalog_json`，请查询普通 `GET /v1/models` 后手动填写模型 ID。
 
-支持的 Codex 标签生成的 `config.toml` 在根级包含 `model_catalog_json = "~/.codex/codex-models.json"`。在 **获取模型目录及下载** 区域获取当前 Key 的目录并下载到该路径，重启 Codex 后即可显示模型列表。OpenAI/Composite 可切换远程目录；智谱始终使用本地文件，`GLM-4.7 / GLM-5.3` 目录与 `config.toml` 声明 1,000,000 token 上下文。不要手工改模型 slug 绕过分组策略。
+支持的 Codex 标签生成的 `config.toml` 在根级包含 `model_catalog_json = "~/.codex/codex-models.json"`。在 **获取模型目录及下载** 区域获取当前 Key 的目录并下载到该路径，重启 Codex 后即可显示模型列表。OpenAI/Composite 可切换远程目录；智谱始终使用本地文件，`GLM-5.3` 系列目录与 `config.toml` 声明 1,000,000 token 上下文；`GLM-4.7` 保留上游的 200,000 token 限制。不要手工改模型 slug 绕过分组策略。
 
 ## KDAN界面操作
 
