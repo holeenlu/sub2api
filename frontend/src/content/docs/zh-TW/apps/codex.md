@@ -58,7 +58,7 @@ supports_websockets = false
 
 在剛才設定環境變數的同一個終端機執行 `codex`。`supports_websockets = false` 是先驗證 HTTP/SSE 的設定，不代表本站沒有 WebSocket 路由。
 
-OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，包含主模型、審查模型、`[features]` 和遠端模型目錄地址 `model_catalog_url`，複製即可使用。彈出視窗預設選中 **Codex CLI (WebSocket)** 與 **API key** 模式：`requires_openai_auth = false` 並寫入 `experimental_bearer_token`，只需下載 `config.toml`；**Legacy** 模式改為 `requires_openai_auth = true` 並同時下載 `auth.json`。切換後必須完全重啟 Codex。兩種模式不要混合，也不要把路由分組的 `gateway` 表和 OpenAI 分組的 `OpenAI` 表拼成一個 Provider。
+OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，包含主模型、審查模型、`[features]` 和本地模型目錄路徑 `model_catalog_json`，請取得並保存目錄檔案。彈出視窗預設選中 **Codex CLI (WebSocket)** 與 **API key** 模式：`requires_openai_auth = false` 並寫入 `experimental_bearer_token`，只需下載 `config.toml`；**Legacy** 模式改為 `requires_openai_auth = true` 並同時下載 `auth.json`。切換後必須完全重啟 Codex。兩種模式不要混合，也不要把路由分組的 `gateway` 表和 OpenAI 分組的 `OpenAI` 表拼成一個 Provider。
 
 ## 桌面版：讓應用拿到 Key
 
@@ -76,15 +76,15 @@ OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，�
 
 ## 目前分組模型目錄
 
-本節只適用於 OpenAI/Composite 分組。其他路由分組不提供專用目錄，也不應新增 `model_catalog_url`。用普通 `GET /v1/models` 查詢精確 ID 後填入 `model`；不要把該列表回應當作 Codex manifest。
+本節適用於 OpenAI/Composite 分組和智譜 API Key 分組。其他路由分組不提供專用目錄，也不應新增 `model_catalog_url` 或 `model_catalog_json`。用普通 `GET /v1/models` 查詢精確 ID 後填入 `model`；不要把該列表回應當作 Codex manifest。
 
-彈出視窗生成的 `config.toml` 在 Provider 表中包含：
+彈出視窗生成的 `config.toml` 在根級包含：
 
 ```toml
-model_catalog_url = "{{API_ROOT}}/v1/models"
+model_catalog_json = "~/.codex/codex-models.json"
 ```
 
-Codex 0.156.0 及以上版本啟動時用目前 Key 讀取該地址，得到本站為該 Key 計算的目錄；分組或開放模型變化後重啟 Codex 即可取得新目錄。“檢查連線 / 檢視此 Key 可用模型”只用於核對，可能更新彈出視窗中的 `model`、`review_model` 和推理設定，不是使用前置步驟。本站已停止支援本地目錄檔案，不再提供 `codex-models.json` 下載和更新腳本；舊設定中的 `model_catalog_json` 請刪除。不要編輯模型名稱來繞過權限。
+在「取得模型目錄及下載」區域取得目前 Key 的目錄，下載 `codex-models.json` 到上述路徑後重啟 Codex。OpenAI/Composite 可切換遠端目錄；智譜始終使用本地檔案，`GLM-4.7 / GLM-5.3` 目錄與 `config.toml` 宣告 1,000,000 token 上下文。不要編輯模型名稱來繞過權限。
 
 ## 驗證接入
 

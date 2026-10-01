@@ -346,6 +346,7 @@ const (
 	configuredCodexCustomDescription   = "Custom model routed through " + DefaultSiteName + "."
 	configuredCodexFallbackContext     = 272_000
 	configuredCodexDeepSeekV4Context   = 1_000_000
+	configuredCodexZhipuContext        = 1_000_000
 	configuredCodexGrokContext         = 500_000
 	configuredCodexGrokBuildContext    = 256_000
 	configuredCodexGPT56MaxContext     = 872_000
@@ -493,6 +494,11 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 			descriptor.DefaultReasoningLevel = &defaultReasoningLevel
 			descriptor.SupportedReasoningLevels = configuredCodexGrokReasoningLevels(modelID)
 		}
+	}
+
+	if isZhipuCodexLongContextModel(modelID) {
+		descriptor.ContextWindow = configuredCodexZhipuContext
+		descriptor.MaxContextWindow = configuredCodexZhipuContext
 	}
 
 	if isClaudeCodexModel(modelID) {
@@ -787,6 +793,11 @@ func isDeepSeekCodexModel(modelID string) bool {
 
 func isGrokCodexModel(modelID string) bool {
 	return xai.IsGrokModelID(modelID)
+}
+
+func isZhipuCodexLongContextModel(modelID string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(modelID))
+	return normalized == "glm-4.7" || normalized == "glm-5.3"
 }
 
 func grokCodexSupportsReasoningEffort(modelID string) bool {

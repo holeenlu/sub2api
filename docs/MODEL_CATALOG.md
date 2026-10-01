@@ -71,7 +71,7 @@ flowchart TD
 
 ## Codex 与媒体
 
-“使用 API 密钥”由当前 Key 的 setup profile 生成配置；默认 Codex CLI (WebSocket)、API Key Mode、macOS / Linux。配置使用 provider 内的 `model_catalog_url`，需要 Codex 0.156.0+。本地 JSON 下载、`model_catalog_json` 和更新脚本已移除。
+“使用 API 密钥”由当前 Key 的 setup profile 生成配置；默认 Codex CLI (WebSocket)、API Key Mode、macOS / Linux。配置默认使用根级 `model_catalog_json = "~/.codex/codex-models.json"`，用户在弹窗获取并下载目录文件；OpenAI/Composite 可切换 provider 内 `model_catalog_url`（Codex 0.156.0+），智谱 API Key 分组使用本地目录。
 
 普通 `/v1/models` 可以列出已开放且有供应的图片、视频模型。带 `client_version` 的 Codex 目录只输出能力资料齐备的对话模型，专用生图/视频模型不进入主对话选择器。新模型缺资料时不套旧型号能力或提示词。模型能力按实际可路由账号取交集，原生资料优先。
 

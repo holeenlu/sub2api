@@ -31,9 +31,9 @@ OpenAI 分組的 Codex 標籤提供兩種模式，開啟“使用金鑰”時預
 
 ## 模型目錄
 
-僅 OpenAI/Composite 分組支援 Codex 專用模型目錄。其他分組不生成 `model_catalog_url`，請查詢普通 `GET /v1/models` 後手動填寫模型 ID。
+OpenAI/Composite 分組和智譜 API Key 分組支援 Codex 專用模型目錄。其他分組不生成 `model_catalog_url` 或 `model_catalog_json`，請查詢普通 `GET /v1/models` 後手動填寫模型 ID。
 
-支援的 Codex 標籤生成的 `config.toml` 在 Provider 中包含 `model_catalog_url`，Codex 0.156.0 及以上版本啟動時直接讀取本站為該 Key 計算的目錄，無需下載檔案。**檢查連線 / 檢視此 Key 可用模型** 只用於核對，不是使用前置步驟。本站已停止支援本地目錄檔案：舊設定中的 `model_catalog_json` 請刪除後重新複製設定。不要手工改模型 slug 繞過分組策略。
+支援的 Codex 標籤生成的 `config.toml` 在根級包含 `model_catalog_json = "~/.codex/codex-models.json"`。在 **取得模型目錄及下載** 區域取得目前 Key 的目錄並下載到該路徑，重啟 Codex 後即可顯示模型列表。OpenAI/Composite 可切換遠端目錄；智譜始終使用本地檔案，`GLM-4.7 / GLM-5.3` 目錄與 `config.toml` 宣告 1,000,000 token 上下文。不要手工改模型 slug 繞過分組策略。
 
 ## KDAN介面操作
 

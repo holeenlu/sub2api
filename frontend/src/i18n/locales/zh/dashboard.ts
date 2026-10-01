@@ -244,14 +244,19 @@ export default {
         note: '启动 Codex 前先导出 KDAN_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
       },
       codexModelCatalog: {
-        oversized: '此 Key 的完整目录超过客户端远程加载的 1 MiB 限制，客户端可能无法读取。请在分组中减少开放的模型。',
-        title: 'Codex 模型目录',
-        description: '配置已包含远程目录地址，客户端直接读取本站为此 Key 计算的模型目录（需 Codex 0.156.0 及以上）。下方按钮仅用于核对连接和可用模型。',
-        emptyDescription: '当前没有可用的 Codex 模型，已保留默认配置。请检查账号模型限制和分组模型白名单。',
-        fetch: '检查连接 / 查看此 Key 可用模型',
+        mode: '目录来源',
+        remote: '远程目录（Codex 0.156.0+）',
+        local: '本地文件（旧版客户端）',
+        oversized: '完整目录超过远程加载的 1 MiB 限制，已改为本地文件。请下载目录并保存到配置中的路径。',
+        title: '获取模型目录及下载',
+        description: 'config.toml 默认指向 codex-models.json。先获取当前 Key 的目录，下载到配置路径后重启 Codex；支持的分组可选择远程目录。',
+        emptyDescription: '获取的目录没有可用的 Codex 模型，已保留默认配置。请检查账号模型限制和分组模型白名单。',
+        fetch: '获取目录',
+        refetch: '重新获取',
         retry: '重试',
-        modelsCount: '此 Key 当前可用 {count} 个模型',
-        errorDescription: '无法使用当前 API Key 读取模型目录，配置保持不变。请检查 Key 状态和网络后重试。'
+        download: '下载 codex-models.json',
+        modelsCount: '已获取 {count} 个模型',
+        errorDescription: '无法使用当前 API Key 获取模型目录，已保留配置和目录路径。请重试，或使用之前保存的目录文件。'
       },
       opencode: {
         title: 'OpenCode 配置示例',

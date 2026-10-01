@@ -56,7 +56,7 @@ supports_websockets = false
 
 同じターミナルで `codex` を実行します。WebSockets を無効にすると HTTP/SSE の開始点になりますが、ゲートウェイに WebSocket のルートがないという意味ではありません。
 
-OpenAI グループでは、異なる形式が生成されます。プロバイダー ID `OpenAI`、メインモデルとレビューモデル、`[features]`、リモートカタログのアドレス `model_catalog_url` が含まれ、コピーするだけで使えます。ダイアログの既定は **Codex CLI (WebSocket)** と **API key** モードで、`requires_openai_auth = false` と `experimental_bearer_token` が設定されるため `config.toml` だけで済みます。**Legacy** モードでは `requires_openai_auth = true` が設定され、`auth.json` もダウンロードされます。切り替え後は Codex を完全に再起動してください。2 つのモードを組み合わせたり、ルーティングされた `tapmodels` プロバイダーテーブルを OpenAI グループの `OpenAI` プロバイダーにマージしたりしないでください。
+OpenAI グループでは、異なる形式が生成されます。プロバイダー ID `OpenAI`、メインモデルとレビューモデル、`[features]`、ローカルカタログパス `model_catalog_json` が含まれます。カタログを取得して保存してください。ダイアログの既定は **Codex CLI (WebSocket)** と **API key** モードで、`requires_openai_auth = false` と `experimental_bearer_token` が設定されるため `config.toml` だけで済みます。**Legacy** モードでは `requires_openai_auth = true` が設定され、`auth.json` もダウンロードされます。切り替え後は Codex を完全に再起動してください。2 つのモードを組み合わせたり、ルーティングされた `tapmodels` プロバイダーテーブルを OpenAI グループの `OpenAI` プロバイダーにマージしたりしないでください。
 
 ## デスクトップ: キーを利用可能にする
 
@@ -72,15 +72,15 @@ Dock またはスタートメニューから起動したデスクトップアプ
 
 ## グループモデルカタログ
 
-このセクションは OpenAI/Composite グループにのみ適用されます。その他のルーティングされたグループには専用カタログがないため、`model_catalog_url` を設定しないでください。通常の `GET /v1/models` を実行して `model` に完全一致する ID を設定してください。そのリストのレスポンスを Codex マニフェストとして扱わないでください。
+このセクションは OpenAI/Composite グループと Zhipu API キーグループに適用されます。その他のルーティンググループには専用カタログがないため、`model_catalog_url` と `model_catalog_json` を設定しないでください。通常の `GET /v1/models` を実行して `model` に完全一致する ID を設定してください。そのリストのレスポンスを Codex マニフェストとして扱わないでください。
 
-生成される `config.toml` のプロバイダーテーブルには次が含まれます。
+生成される `config.toml` のルートには次が含まれます。
 
 ```toml
-model_catalog_url = "{{API_ROOT}}/v1/models"
+model_catalog_json = "~/.codex/codex-models.json"
 ```
 
-Codex 0.156.0 以降は起動時に現在のキーでこのアドレスを読み込み、このサイトがキーごとに算出したカタログを取得します。グループのアクセス権が変わったら Codex を再起動すると新しいカタログが反映されます。「接続確認 / このキーで使えるモデルを表示」は確認用で、ダイアログの `model`、`review_model`、推論設定を更新する場合がありますが、必須手順ではありません。ローカルのカタログファイルはサポートを終了し、`codex-models.json` のダウンロードと更新スクリプトは削除されました。古い設定の `model_catalog_json` は削除してください。権限を回避するためにモデル名を編集しないでください。
+「モデルカタログの取得とダウンロード」で現在のキーのカタログを取得し、`codex-models.json` を設定済みパスへ保存して Codex を再起動してください。OpenAI/Composite ではリモートカタログも選択できます。Zhipu は常にローカルファイルを使用し、`GLM-4.7 / GLM-5.3` と `config.toml` は 1,000,000 トークンのコンテキストを宣言します。権限を回避するためにモデル名を編集しないでください。
 
 ## 確認とトラブルシューティング
 

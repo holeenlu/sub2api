@@ -30,6 +30,7 @@ type CodexSetupProfile struct {
 	Model           string `json:"model"`
 	ReviewModel     string `json:"review_model"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ContextWindow   int64  `json:"context_window,omitempty"`
 	CatalogRevision string `json:"catalog_revision"`
 	Status          string `json:"status"`
 }
@@ -214,6 +215,7 @@ func (s *ModelCatalogService) SetupProfile(ctx context.Context, key *APIKey) (*C
 			Visibility       string `json:"visibility"`
 			DefaultReasoning string `json:"default_reasoning_level"`
 			Priority         int    `json:"priority"`
+			ContextWindow    int64  `json:"context_window"`
 		} `json:"models"`
 	}
 	if err = json.Unmarshal(body, &envelope); err != nil {
@@ -246,6 +248,7 @@ func (s *ModelCatalogService) SetupProfile(ctx context.Context, key *APIKey) (*C
 		}
 		out.Model = m.Slug
 		out.ReviewModel = m.Slug
+		out.ContextWindow = m.ContextWindow
 		out.Status = "ready"
 		if out.Model != preferred && s.settings != nil && s.settings.settingRepo != nil {
 			_ = s.settings.settingRepo.Set(ctx, preferenceKey, out.Model)

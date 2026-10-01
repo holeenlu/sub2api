@@ -51,6 +51,7 @@ func TestModelCatalogNovelModelDiscoveryPublicationForwardAndSettlement(t *testi
 	require.NoError(t, err)
 	require.Equal(t, id, profile.Model)
 	require.Equal(t, "high", profile.ReasoningEffort)
+	require.Equal(t, int64(222222), profile.ContextWindow)
 	manifest, err := registry.CodexManifest(context.Background(), group)
 	require.NoError(t, err)
 	require.Contains(t, string(manifest), "222222")

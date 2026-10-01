@@ -26,6 +26,7 @@ export default {
   "referencePrice": "参考料金",
   "priceSource": "料金の情報源",
   "catalogVersion": "カタログのバージョン",
+  "downloadUpdater": "カタログ更新ツールをダウンロード",
   "setupUnavailable": "このキーで利用できる Codex モデルはまだ公開されていません。アカウントのカタログまたはグループ権限を確認してください。",
   "capabilitiesPending": "一部のモデル能力情報が不足しています。クライアントを選ぶ前に詳細を確認してください。",
   "fingerprintPending": "フィンガープリントの更新待ちです。既存のチケット方針は維持されます。",

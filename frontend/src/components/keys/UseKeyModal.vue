@@ -133,7 +133,7 @@
           </nav>
         </div>
 
-        <p v-if="codexModelCatalogSupported && ['codex','codex-ws'].includes(activeClientTab) && !currentFiles.length" role="status" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">{{ t('modelCatalog.setupUnavailable') }}</p>
+        <p v-if="codexSetupProfileRequired && ['codex','codex-ws'].includes(activeClientTab) && !currentFiles.length" role="status" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">{{ t('modelCatalog.setupUnavailable') }}</p>
         <!-- Code Blocks (Stacked for multi-file platforms) -->
         <div class="space-y-4">
           <div
@@ -198,13 +198,33 @@
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('keys.useKeyModal.codexModelCatalog.description') }}
               </p>
-              <p class="mt-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300" data-testid="codex-model-catalog-url">
-                {{ codexModelCatalogUrl }}
+              <p class="mt-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300" data-testid="codex-model-catalog-path">
+                {{ codexModelCatalogMode === 'remote' ? codexModelCatalogUrl : codexModelCatalogPath }}
               </p>
+              <select
+                v-if="codexModelCatalogRemoteSupported"
+                v-model="codexModelCatalogMode"
+                data-testid="codex-model-catalog-mode"
+                :aria-label="t('keys.useKeyModal.codexModelCatalog.mode')"
+                class="input mt-2 text-sm"
+              >
+                <option value="remote" :disabled="codexModelCatalogOversized">{{ t('keys.useKeyModal.codexModelCatalog.remote') }}</option>
+                <option value="file">{{ t('keys.useKeyModal.codexModelCatalog.local') }}</option>
+              </select>
               <p v-if="codexModelCatalogOversized" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
                 {{ t('keys.useKeyModal.codexModelCatalog.oversized') }}
               </p>
             </div>
+            <button
+              v-if="codexModelManifestState === 'ready' && selectedCodexCatalogModel"
+              type="button"
+              data-testid="codex-model-catalog-download"
+              class="btn btn-primary min-h-9 flex-shrink-0 px-3 text-xs"
+              @click="downloadCodexModelManifest"
+            >
+              <Icon name="download" size="sm" class="mr-1.5" />
+              {{ t('keys.useKeyModal.codexModelCatalog.download') }}
+            </button>
             <button
               type="button"
               data-testid="codex-model-catalog-fetch"
@@ -218,7 +238,9 @@
                 class="mr-1.5"
                 :class="codexModelManifestState === 'loading' ? 'animate-spin' : ''"
               />
-              {{ codexModelManifestState === 'error'
+              {{ codexModelManifestState === 'ready'
+                ? t('keys.useKeyModal.codexModelCatalog.refetch')
+                : codexModelManifestState === 'error'
                 ? t('keys.useKeyModal.codexModelCatalog.retry')
                 : t('keys.useKeyModal.codexModelCatalog.fetch') }}
             </button>
@@ -247,6 +269,7 @@
           </p>
         </section>
 
+        <a v-if="showCodexModelCatalog" href="/install/update-codex-models.py" download class="text-sm text-primary-600 underline">{{ t('modelCatalog.downloadUpdater') }}</a>
         <!-- Usage Note -->
         <div v-if="showPlatformNote" class="flex items-start gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
           <Icon name="infoCircle" size="md" class="text-blue-500 flex-shrink-0 mt-0.5" />
@@ -286,11 +309,19 @@ import {
   formatCodexReasoningEffortTomlLine,
   parseCodexCatalogModels,
   selectCodexConfigModel,
-  selectCodexConfigReasoningEffort
+  selectCodexConfigReasoningEffort,
+  type CodexCatalogModel
 } from '@/utils/codexCatalogConfig'
 
 interface Props {
-  setupProfile?: { model: string; review_model: string; reasoning_effort?: string; catalog_revision: string; status: string } | null
+  setupProfile?: {
+    model: string
+    review_model: string
+    reasoning_effort?: string
+    context_window?: number
+    catalog_revision: string
+    status: string
+  } | null
   show: boolean
   apiKey: string
   baseUrl: string
@@ -341,7 +372,7 @@ const codexModelManifestContent = ref('')
 const codexModelManifestModelCount = ref(0)
 // Defaults are precomputed from this key's published group catalog.
 const DEFAULT_CODEX_MODEL = computed(() => props.setupProfile?.model ?? '')
-// 只支持远程目录：客户端直接读取本站按 Key 计算的目录（Codex 0.156.0+，已停止支持本地目录文件）。
+const codexModelCatalogMode = ref<'remote' | 'file'>('file')
 const codexModelManifestResponseBytes = ref(0)
 const codexModelCatalogOversized = computed(() => codexModelManifestResponseBytes.value > 1024 * 1024)
 const codexModelCatalogUrl = computed(() => buildCodexModelCatalogUrl(props.baseUrl))
@@ -349,6 +380,14 @@ let codexModelManifestController: AbortController | null = null
 let codexModelManifestRequestID = 0
 
 const codexModelCatalogSupported = computed(() =>
+  props.platform === 'openai' || props.platform === 'composite' || props.platform === 'zhipu'
+)
+
+const codexModelCatalogRemoteSupported = computed(() =>
+  props.platform === 'openai' || props.platform === 'composite'
+)
+
+const codexSetupProfileRequired = computed(() =>
   props.platform === 'openai' || props.platform === 'composite'
 )
 
@@ -361,6 +400,16 @@ const codexManifestContext = computed(() => {
   if (!props.show || !codexModelCatalogSupported.value || !props.apiKey) return ''
   return `${props.platform}|${props.baseUrl}|${props.apiKey}`
 })
+
+const codexModelCatalogPath = computed(() => {
+  const isWindows = activeTab.value === 'windows'
+  const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
+  return joinConfigPath(configDir, 'codex-models.json', isWindows)
+})
+
+// Codex expands a leading ~/ on every platform but not %userprofile%, which it
+// resolves relative to the config directory, so config.toml always uses ~/.
+const CODEX_MODEL_CATALOG_CONFIG_PATH = '~/.codex/codex-models.json'
 
 // Reset tabs when platform changes
 const defaultClientTab = computed(() => {
@@ -670,6 +719,7 @@ function resetCodexModelManifest() {
   codexModelManifestContent.value = ''
   codexModelManifestModelCount.value = 0
   codexModelManifestResponseBytes.value = 0
+  codexModelCatalogMode.value = 'file'
 }
 
 async function loadCodexModelManifest() {
@@ -689,6 +739,7 @@ async function loadCodexModelManifest() {
     codexModelManifestContent.value = result.content
     codexModelManifestModelCount.value = result.modelCount
     codexModelManifestResponseBytes.value = result.responseBytes
+    if (codexModelCatalogOversized.value) codexModelCatalogMode.value = 'file'
     codexModelManifestState.value = 'ready'
   } catch (error) {
     const errorName = error && typeof error === 'object' && 'name' in error
@@ -713,6 +764,14 @@ function downloadFile(file: FileConfig) {
   saveAs(new Blob([file.content], { type: mime }), file.downloadName)
 }
 
+function downloadCodexModelManifest() {
+  if (!codexModelManifestContent.value) return
+  saveAs(
+    new Blob([codexModelManifestContent.value], { type: 'application/json;charset=utf-8' }),
+    'codex-models.json'
+  )
+}
+
 const codexCatalogModels = computed(() => parseCodexCatalogModels(codexModelManifestContent.value))
 const selectedCodexCatalogModel = computed(() =>
   selectCodexConfigModel(codexCatalogModels.value, DEFAULT_CODEX_MODEL.value)
@@ -724,8 +783,22 @@ function selectCodexCatalogModel(preferredModel: string): string {
 }
 
 function codexRemoteCatalogTomlLine(baseUrl: string): string {
-  if (!codexModelCatalogSupported.value) return ''
+  if (!codexModelCatalogRemoteSupported.value || codexModelCatalogMode.value !== 'remote' || codexModelCatalogOversized.value) return ''
   return `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n`
+}
+
+function codexCatalogTomlLine(): string {
+  if (!codexModelCatalogSupported.value || codexModelCatalogMode.value !== 'file') return ''
+  return `model_catalog_json = "${CODEX_MODEL_CATALOG_CONFIG_PATH}"\n`
+}
+
+function codexContextWindowTomlLine(modelSlug: string): string {
+  const model = findCodexCatalogModel(codexModelManifestContent.value, modelSlug)
+  const contextWindow = Number(
+    model?.context_window ?? props.setupProfile?.context_window ?? 0
+  )
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return ''
+  return `model_context_window = ${contextWindow}\n`
 }
 
 function codexReasoningEffortTomlLine(modelSlug: string): string {
@@ -754,7 +827,7 @@ const comment = (value: string) => wrapToken('text-slate-500', value)
 // Syntax highlighting helpers
 // Generate file configs based on platform and active tab
 const currentFiles = computed((): FileConfig[] => {
-  if (codexModelCatalogSupported.value && ['codex','codex-ws'].includes(activeClientTab.value) && !selectedCodexCatalogModel.value && !DEFAULT_CODEX_MODEL.value) return []
+  if (codexSetupProfileRequired.value && ['codex','codex-ws'].includes(activeClientTab.value) && !selectedCodexCatalogModel.value && !DEFAULT_CODEX_MODEL.value) return []
   const baseUrl = props.baseUrl || window.location.origin
   const apiKey = props.apiKey
   const baseRoot = baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '')
@@ -788,6 +861,8 @@ const currentFiles = computed((): FileConfig[] => {
         ]
       case 'grok':
         return [generateOpenCodeConfig('grok', apiBase, apiKey)]
+      case 'zhipu':
+        return [generateOpenCodeConfig('zhipu', apiBase, apiKey)]
       default:
         return [generateOpenCodeConfig('openai', apiBase, apiKey)]
     }
@@ -825,6 +900,14 @@ const currentFiles = computed((): FileConfig[] => {
         return generateGrokCodexFiles(apiBase, apiKey)
       }
       return generateGrokFiles(apiBase, apiKey)
+    case 'zhipu':
+      if (activeClientTab.value === 'claude') {
+        return generateZhipuClaudeFiles(baseRoot, apiKey)
+      }
+      if (activeClientTab.value === 'codex') {
+        return generateRoutedCodexFiles(apiBase, apiKey, 'zhipu')
+      }
+      return generateAnthropicFiles(baseRoot, apiKey)
     case 'deepseek':
       if (activeClientTab.value === 'codex') {
         return generateRoutedCodexFiles(apiBase, apiKey, 'deepseek')
@@ -844,7 +927,7 @@ const currentFiles = computed((): FileConfig[] => {
       if (activeClientTab.value === 'codex' && props.platform) {
         return generateRoutedCodexFiles(apiBase, apiKey, props.platform)
       }
-      return generateAnthropicFiles(baseUrl, apiKey)
+      return generateAnthropicFiles(baseRoot, apiKey)
   }
 })
 
@@ -955,6 +1038,65 @@ function generateGrokClaudeFiles(baseUrl: string, apiKey: string): FileConfig[] 
   ]
 }
 
+function generateZhipuClaudeFiles(baseUrl: string, apiKey: string): FileConfig[] {
+  const model = DEFAULT_CODEX_MODEL.value.startsWith('glm-')
+    ? DEFAULT_CODEX_MODEL.value
+    : 'glm-4.7'
+  const environment = {
+    ANTHROPIC_BASE_URL: baseUrl,
+    ANTHROPIC_AUTH_TOKEN: apiKey,
+    ANTHROPIC_MODEL: model,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: model,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: model,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
+    ANTHROPIC_DEFAULT_FABLE_MODEL: model,
+    CLAUDE_CODE_SUBAGENT_MODEL: model,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+  }
+  let path: string
+  let content: string
+
+  switch (activeTab.value) {
+    case 'unix':
+      path = 'Terminal'
+      content = Object.entries(environment)
+        .map(([name, value]) => `export ${name}="${value}"`)
+        .join('\n')
+      break
+    case 'cmd':
+      path = 'Command Prompt'
+      content = Object.entries(environment)
+        .map(([name, value]) => `set ${name}=${value}`)
+        .join('\n')
+      break
+    case 'powershell':
+      path = 'PowerShell'
+      content = Object.entries(environment)
+        .map(([name, value]) => `$env:${name}="${value}"`)
+        .join('\n')
+      break
+    default:
+      path = 'Terminal'
+      content = ''
+  }
+
+  const settingsPath = activeTab.value === 'unix'
+    ? '~/.claude/settings.json'
+    : '%USERPROFILE%\\.claude\\settings.json'
+
+  return [
+    { path, content },
+    {
+      path: settingsPath,
+      content: JSON.stringify({
+        $schema: 'https://json.schemastore.org/claude-code-settings.json',
+        env: environment
+      }, null, 2),
+      hint: t('keys.useKeyModal.claudeSettingsHint')
+    }
+  ]
+}
+
 function generateGeminiCliContent(baseUrl: string, apiKey: string): FileConfig {
   const model = 'gemini-2.0-flash'
   const modelComment = t('keys.useKeyModal.gemini.modelComment')
@@ -1006,12 +1148,14 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
 
   const model = selectCodexCatalogModel(DEFAULT_CODEX_MODEL.value)
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
+  const contextWindowLine = codexContextWindowTomlLine(model)
 
   // config.toml content
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}
+${reasoningEffortLine}${contextWindowLine}${codexCatalogTomlLine()}
+
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
@@ -1305,6 +1449,7 @@ function generateRoutedCodexFiles(
   }
   const preferredModel = preferredModels[platform] || ''
   const model = selectCodexCatalogModel(preferredModel)
+  const contextWindowLine = codexContextWindowTomlLine(model)
   const labels: Record<GroupPlatform, string> = {
     anthropic: 'Anthropic',
     openai: 'OpenAI',
@@ -1328,6 +1473,7 @@ function generateRoutedCodexFiles(
 model_provider = "kdan"
 model = "${model}"
 review_model = "${model}"
+${contextWindowLine}${codexCatalogTomlLine()}
 
 [model_providers.kdan]
 name = "${escapeTomlBasicString(siteName.value)} ${label}"
@@ -1357,12 +1503,14 @@ function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
   const model = selectCodexCatalogModel(DEFAULT_CODEX_MODEL.value)
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
+  const contextWindowLine = codexContextWindowTomlLine(model)
 
   // config.toml content with WebSocket v2
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}
+${reasoningEffortLine}${contextWindowLine}${codexCatalogTomlLine()}
+
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
@@ -1375,6 +1523,39 @@ responses_websockets_v2 = true
 goals = true`
 
   return buildOpenAICodexFileConfigs(configDir, configContent, apiKey)
+}
+
+function buildZhipuOpenCodeModels(): Record<string, Record<string, unknown>> {
+  const fallbackSlug = DEFAULT_CODEX_MODEL.value.startsWith('glm-')
+    ? DEFAULT_CODEX_MODEL.value
+    : 'glm-4.7'
+  const fallbackContextWindow = Number(props.setupProfile?.context_window)
+  const fallback: Record<string, Record<string, unknown>> = {
+    [fallbackSlug]: {
+      name: fallbackSlug,
+      ...(Number.isFinite(fallbackContextWindow) && fallbackContextWindow > 0
+        ? { limit: { context: fallbackContextWindow } }
+        : { limit: { context: 1_000_000 } })
+    }
+  }
+  const models = codexCatalogModels.value.filter((model) =>
+    model.slug.startsWith('glm-') && !model.slug.includes('*')
+  )
+  if (!models.length) return fallback
+
+  return Object.fromEntries(models.map((model: CodexCatalogModel) => {
+    const contextWindow = Number(model.context_window)
+    const maxOutputTokens = Number(model.max_output_tokens)
+    const limit: Record<string, number> = {}
+    if (Number.isFinite(contextWindow) && contextWindow > 0) limit.context = contextWindow
+    if (Number.isFinite(maxOutputTokens) && maxOutputTokens > 0) limit.output = maxOutputTokens
+    return [model.slug, {
+      name: typeof model.display_name === 'string' && model.display_name.trim()
+        ? model.display_name.trim()
+        : model.slug,
+      ...(Object.keys(limit).length ? { limit } : {})
+    }]
+  }))
 }
 
 function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: string, pathLabel?: string): FileConfig {
@@ -1954,6 +2135,10 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
     provider[platform].npm = '@ai-sdk/openai-compatible'
     provider[platform].name = `Grok via ${siteName.value}`
     provider[platform].models = grokModels
+  } else if (platform === 'zhipu') {
+    provider[platform].npm = '@ai-sdk/openai-compatible'
+    provider[platform].name = `Zhipu GLM via ${siteName.value}`
+    provider[platform].models = buildZhipuOpenCodeModels()
   }
 
   const agent =

@@ -56,7 +56,7 @@ supports_websockets = false
 
 Run `codex` in the same terminal. Disabling WebSockets provides an HTTP/SSE starting point; it does not mean the gateway lacks WebSocket routes.
 
-The OpenAI group generates a different shape: provider ID `OpenAI`, the main and review models, `[features]`, and the remote catalog address `model_catalog_url`; copy it and it is ready to use. The dialog defaults to **Codex CLI (WebSocket)** and **API key** mode, which sets `requires_openai_auth = false` and `experimental_bearer_token`, so only `config.toml` is needed. **Legacy** mode sets `requires_openai_auth = true` and also downloads `auth.json`. Fully restart Codex after switching. Do not combine the two modes or merge a routed `gateway` provider table into the OpenAI group's `OpenAI` provider.
+The OpenAI group generates a different shape: provider ID `OpenAI`, the main and review models, `[features]`, and the local catalog path `model_catalog_json`; copy it and fetch the catalog file. The dialog defaults to **Codex CLI (WebSocket)** and **API key** mode, which sets `requires_openai_auth = false` and `experimental_bearer_token`, so only `config.toml` is needed. **Legacy** mode sets `requires_openai_auth = true` and also downloads `auth.json`. Fully restart Codex after switching. Do not combine the two modes or merge a routed `gateway` provider table into the OpenAI group's `OpenAI` provider.
 
 ## Desktop: make the key available
 
@@ -72,15 +72,15 @@ For an icon launch, select **API key** in the OpenAI group's Use key modal and d
 
 ## Group model catalog
 
-This section applies only to OpenAI/Composite groups. Other routed groups have no dedicated catalog and should not set `model_catalog_url`. Query ordinary `GET /v1/models` and set `model` to an exact ID; do not treat that list response as a Codex manifest.
+This section applies to OpenAI/Composite groups and Zhipu API-key groups. Other routed groups have no dedicated catalog and should not set `model_catalog_url` or `model_catalog_json`. Query ordinary `GET /v1/models` and set `model` to an exact ID; do not treat that list response as a Codex manifest.
 
-The generated `config.toml` includes this in the provider table:
+The generated `config.toml` includes this at the root:
 
 ```toml
-model_catalog_url = "{{API_ROOT}}/v1/models"
+model_catalog_json = "~/.codex/codex-models.json"
 ```
 
-Codex 0.156.0 or later reads that address with the current key at startup and receives the catalog this site computes for the key; restart Codex after group access changes to pick up the new catalog. **Check connection / view models for this key** is only a check; it may update `model`, `review_model`, and reasoning settings in the dialog but is not a setup step. Local catalog files are no longer supported, and the `codex-models.json` download and update script have been removed; delete `model_catalog_json` from older configurations. Do not edit model names to bypass access rules.
+In **Get model catalog and download**, fetch the current key's catalog, download `codex-models.json` to the configured path, and restart Codex. OpenAI/Composite groups may select the remote catalog; Zhipu always uses the local file, and `GLM-4.7 / GLM-5.3` descriptors and `config.toml` advertise a 1,000,000-token context. Do not edit model names to bypass access rules.
 
 ## Verify and troubleshoot
 

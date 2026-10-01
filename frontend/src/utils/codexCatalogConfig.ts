@@ -8,6 +8,10 @@ export interface CodexCatalogModel {
   priority?: unknown
   default_reasoning_level?: unknown
   supported_reasoning_levels?: CodexCatalogReasoningLevel[]
+  context_window?: unknown
+  max_context_window?: unknown
+  max_output_tokens?: unknown
+  display_name?: unknown
 }
 
 function trimEffort(value: unknown): string {

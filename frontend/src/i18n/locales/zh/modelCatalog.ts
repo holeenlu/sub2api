@@ -26,6 +26,7 @@ export default {
   "referencePrice": "参考价格",
   "priceSource": "价格来源",
   "catalogVersion": "目录版本",
+  "downloadUpdater": "下载目录更新工具",
   "setupUnavailable": "当前密钥尚无已发布的可用 Codex 模型，请刷新账号目录或检查分组权限。",
   "capabilitiesPending": "部分模型能力资料尚未齐全，请在选择客户端前查看目录详情。",
   "fingerprintPending": "指纹资料待更新，仍遵守当前票据策略。",

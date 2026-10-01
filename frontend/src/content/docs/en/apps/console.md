@@ -31,9 +31,9 @@ Routed Codex tabs default to `env_key = "KDAN_API_KEY"`, `wire_api = "responses"
 
 ## Model catalog
 
-Only OpenAI/Composite groups support the dedicated Codex catalog. Other groups get no `model_catalog_url`; query ordinary `GET /v1/models` and enter an exact model ID manually.
+Only OpenAI/Composite groups and Zhipu API-key groups support the dedicated Codex catalog. Other groups get no `model_catalog_url` or `model_catalog_json`; query ordinary `GET /v1/models` and enter an exact model ID manually.
 
-In a supported Codex tab, the generated `config.toml` includes `model_catalog_url` in the provider table. Codex 0.156.0 or later reads the catalog this site computes for the key at startup; there is no file to download. **Check connection / view models for this key** is only a check, not a setup step. Local catalog files are no longer supported: remove `model_catalog_json` from older configurations and copy the configuration again. Do not edit slugs to bypass group policy.
+In a supported Codex tab, the generated `config.toml` includes `model_catalog_json = "~/.codex/codex-models.json"` at the root. Use **Get model catalog and download** to fetch the current key's catalog, save the JSON to that path, and restart Codex. OpenAI/Composite groups may select the remote catalog; Zhipu always uses the local file, and `GLM-4.7 / GLM-5.3` descriptors and `config.toml` advertise a 1,000,000-token context. Do not edit slugs to bypass group policy.
 
 ## Follow the project UI
 

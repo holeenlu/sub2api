@@ -58,7 +58,7 @@ supports_websockets = false
 
 在刚才设置环境变量的同一个终端运行 `codex`。`supports_websockets = false` 是先验证 HTTP/SSE 的配置，不代表本站没有 WebSocket 路由。
 
-OpenAI 分组由弹窗生成另一种配置：Provider ID 是 `OpenAI`，包含主模型、审查模型、`[features]` 和远程模型目录地址 `model_catalog_url`，复制即可使用。弹窗默认选中 **Codex CLI (WebSocket)** 与 **API key** 模式：`requires_openai_auth = false` 并写入 `experimental_bearer_token`，只需下载 `config.toml`；**Legacy** 模式改为 `requires_openai_auth = true` 并同时下载 `auth.json`。切换后必须完全重启 Codex。两种模式不要混合，也不要把路由分组的 `gateway` 表和 OpenAI 分组的 `OpenAI` 表拼成一个 Provider。
+OpenAI 分组由弹窗生成另一种配置：Provider ID 是 `OpenAI`，包含主模型、审查模型、`[features]` 和本地目录路径 `model_catalog_json`，复制即可使用。弹窗默认选中 **Codex CLI (WebSocket)** 与 **API key** 模式：`requires_openai_auth = false` 并写入 `experimental_bearer_token`，只需下载 `config.toml`；**Legacy** 模式改为 `requires_openai_auth = true` 并同时下载 `auth.json`。切换后必须完全重启 Codex。两种模式不要混合，也不要把路由分组的 `gateway` 表和 OpenAI 分组的 `OpenAI` 表拼成一个 Provider。
 
 ## 桌面端：让应用拿到 Key
 
@@ -76,15 +76,15 @@ OpenAI 分组由弹窗生成另一种配置：Provider ID 是 `OpenAI`，包含�
 
 ## 当前分组模型目录
 
-本节只适用于 OpenAI/Composite 分组。其他路由分组不提供专用目录，也不应添加 `model_catalog_url`。用普通 `GET /v1/models` 查询精确 ID 后填入 `model`；不要把该列表响应当作 Codex manifest。
+本节适用于 OpenAI/Composite 分组和智谱 API Key 分组。其他路由分组不提供专用目录，也不应添加 `model_catalog_url` 或 `model_catalog_json`。用普通 `GET /v1/models` 查询精确 ID 后填入 `model`；不要把该列表响应当作 Codex manifest。
 
-弹窗生成的 `config.toml` 在 Provider 表中包含：
+弹窗生成的 `config.toml` 在根级包含：
 
 ```toml
-model_catalog_url = "{{API_ROOT}}/v1/models"
+model_catalog_json = "~/.codex/codex-models.json"
 ```
 
-Codex 0.156.0 及以上版本启动时用当前 Key 读取该地址，得到本站为该 Key 计算的目录；分组或开放模型变化后重启 Codex 即可取得新目录。“检查连接 / 查看此 Key 可用模型”只用于核对，可能更新弹窗中的 `model`、`review_model` 和推理设置，不是使用前置步骤。本站已停止支持本地目录文件，不再提供 `codex-models.json` 下载和更新脚本；旧配置中的 `model_catalog_json` 请删除。不要编辑模型名称来绕过权限。
+在“获取模型目录及下载”区域点击获取，下载 `codex-models.json` 并保存到上述路径，重启 Codex 后模型列表即来自本站为该 Key 计算的目录。OpenAI/Composite 可切换远程目录；智谱始终使用本地文件，`GLM-4.7 / GLM-5.3` 目录与 `config.toml` 声明 1,000,000 token 上下文。不要编辑模型名称来绕过权限。
 
 ## 验证接入
 
