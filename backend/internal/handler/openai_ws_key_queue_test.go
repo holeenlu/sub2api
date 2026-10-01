@@ -544,6 +544,7 @@ func TestOpenAIResponsesWebSocketFirstTurnKeyWaitEndsWithoutUpstream(t *testing.
 			billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 			gatewaySvc := service.NewOpenAIGatewayService(
 				&openAIWSUsageHandlerAccountRepoStub{account: account},
+				nil,
 				&openAIWSUsageHandlerUsageLogRepoStub{},
 				nil, nil, nil, nil, nil,
 				cfg,
@@ -659,6 +660,7 @@ func TestOpenAIResponsesWebSocketFirstTurnCarriesPermissionsToWorker(t *testing.
 	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	gatewaySvc := service.NewOpenAIGatewayService(
 		&openAIWSUsageHandlerAccountRepoStub{account: account},
+		nil,
 		&openAIWSUsageHandlerUsageLogRepoStub{},
 		nil, nil, nil, nil, nil,
 		cfg,
