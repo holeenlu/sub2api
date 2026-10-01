@@ -26,6 +26,7 @@ export default {
   "referencePrice": "Reference price",
   "priceSource": "Pricing source",
   "catalogVersion": "Catalog version",
+  "downloadUpdater": "Download catalog updater",
   "setupUnavailable": "No eligible Codex model is published for this key yet. Refresh the account catalog or review group access.",
   "capabilitiesPending": "Some model capabilities are incomplete; review the catalog details before choosing a client.",
   "fingerprintPending": "Fingerprint data pending; ticket policy is unchanged.",

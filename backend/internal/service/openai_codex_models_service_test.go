@@ -440,6 +440,27 @@ func TestBuildCodexModelsManifestUsesGPT6AstraInstructions(t *testing.T) {
 	))
 }
 
+func TestBuildCodexModelsManifestAdvertisesOneMillionTokenContextForZhipuGLM(t *testing.T) {
+	body, err := BuildCodexModelsManifest([]string{"glm-4.7", "glm-5.3"})
+	require.NoError(t, err)
+
+	var manifest struct {
+		Models []struct {
+			Slug          string `json:"slug"`
+			ContextWindow int64  `json:"context_window"`
+			MaxContext    int64  `json:"max_context_window"`
+		} `json:"models"`
+	}
+	require.NoError(t, json.Unmarshal(body, &manifest))
+	require.Len(t, manifest.Models, 2)
+	require.Equal(t, "glm-4.7", manifest.Models[0].Slug)
+	require.Equal(t, int64(1_000_000), manifest.Models[0].ContextWindow)
+	require.Equal(t, int64(1_000_000), manifest.Models[0].MaxContext)
+	require.Equal(t, "glm-5.3", manifest.Models[1].Slug)
+	require.Equal(t, int64(1_000_000), manifest.Models[1].ContextWindow)
+	require.Equal(t, int64(1_000_000), manifest.Models[1].MaxContext)
+}
+
 func effortsFromConfiguredCodexLevels(levels []configuredCodexReasoningLevel) []string {
 	efforts := make([]string, 0, len(levels))
 	for _, level := range levels {

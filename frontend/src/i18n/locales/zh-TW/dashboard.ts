@@ -246,14 +246,19 @@ export default {
         note: '啟動 Codex 前先匯出 TAPMODELS_API_KEY。下載的目錄只包含模型後設資料，不包含 API Key。'
       },
       codexModelCatalog: {
-        oversized: '此 Key 的完整目錄超過用戶端遠端載入的 1 MiB 限制，用戶端可能無法讀取。請在分組中減少開放的模型。',
-        title: 'Codex 模型目錄',
-        description: '設定已包含遠端目錄地址，用戶端直接讀取本站為此 Key 計算的模型目錄（需 Codex 0.156.0 及以上）。下方按鈕僅用於核對連線和可用模型。',
-        emptyDescription: '目前沒有可用的 Codex 模型，已保留預設設定。請檢查帳號模型限制和分組模型白名單。',
-        fetch: '檢查連線 / 檢視此 Key 可用模型',
+        mode: '目錄來源',
+        remote: '遠端目錄（Codex 0.156.0+）',
+        local: '本地檔案（舊版用戶端）',
+        oversized: '完整目錄超過遠端載入的 1 MiB 限制，已改為本地檔案。請下載目錄並儲存到設定中的路徑。',
+        title: '取得模型目錄及下載',
+        description: 'config.toml 預設指向 codex-models.json。先取得目前 Key 的目錄，下載到設定路徑後重啟 Codex；支援的分組可選擇遠端目錄。',
+        emptyDescription: '取得的目錄沒有可用的 Codex 模型，已保留預設設定。請檢查帳號模型限制和分組模型白名單。',
+        fetch: '取得目錄',
+        refetch: '重新取得',
         retry: '重試',
-        modelsCount: '此 Key 目前可用 {count} 個模型',
-        errorDescription: '無法使用目前 API Key 讀取模型目錄，設定保持不變。請檢查 Key 狀態和網路後重試。'
+        download: '下載 codex-models.json',
+        modelsCount: '已取得 {count} 個模型',
+        errorDescription: '無法使用目前 API Key 取得模型目錄，已保留設定和目錄路徑。請重試，或使用之前儲存的目錄檔案。'
       },
       opencode: {
         title: 'OpenCode 設定範例',

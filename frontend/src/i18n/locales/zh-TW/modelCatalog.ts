@@ -28,6 +28,7 @@ export default {
   "referencePrice": "參考價格",
   "priceSource": "價格來源",
   "catalogVersion": "目錄版本",
+  "downloadUpdater": "下載目錄更新工具",
   "setupUnavailable": "目前金鑰尚無已釋出的可用 Codex 模型，請重新整理帳號目錄或檢查分組權限。",
   "capabilitiesPending": "部分模型能力資料尚未齊全，請在選擇用戶端前檢視目錄詳情。",
   "fingerprintPending": "指紋資料待更新，仍遵守目前票據策略。",

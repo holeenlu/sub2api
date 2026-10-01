@@ -31,9 +31,9 @@ OpenAI 分组的 Codex 标签提供两种模式，打开“使用密钥”时默
 
 ## 模型目录
 
-仅 OpenAI/Composite 分组支持 Codex 专用模型目录。其他分组不生成 `model_catalog_url`，请查询普通 `GET /v1/models` 后手动填写模型 ID。
+OpenAI/Composite 分组和智谱 API Key 分组支持 Codex 专用模型目录。其他分组不生成 `model_catalog_url` 或 `model_catalog_json`，请查询普通 `GET /v1/models` 后手动填写模型 ID。
 
-支持的 Codex 标签生成的 `config.toml` 在 Provider 中包含 `model_catalog_url`，Codex 0.156.0 及以上版本启动时直接读取本站为该 Key 计算的目录，无需下载文件。**检查连接 / 查看此 Key 可用模型** 只用于核对，不是使用前置步骤。本站已停止支持本地目录文件：旧配置中的 `model_catalog_json` 请删除后重新复制配置。不要手工改模型 slug 绕过分组策略。
+支持的 Codex 标签生成的 `config.toml` 在根级包含 `model_catalog_json = "~/.codex/codex-models.json"`。在 **获取模型目录及下载** 区域获取当前 Key 的目录并下载到该路径，重启 Codex 后即可显示模型列表。OpenAI/Composite 可切换远程目录；智谱始终使用本地文件，`GLM-4.7 / GLM-5.3` 目录与 `config.toml` 声明 1,000,000 token 上下文。不要手工改模型 slug 绕过分组策略。
 
 ## 本项目界面操作
 

@@ -728,7 +728,14 @@ export interface CompositeRouteDecision {
 }
 
 export interface ApiKey {
-  model_setup?: { model: string; review_model: string; reasoning_effort?: string; catalog_revision: string; status: string }
+  model_setup?: {
+    model: string
+    review_model: string
+    reasoning_effort?: string
+    context_window?: number
+    catalog_revision: string
+    status: string
+  }
   id: number
   user_id: number
   key: string
