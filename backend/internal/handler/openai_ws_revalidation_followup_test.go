@@ -195,17 +195,27 @@ func newWSRevalidationHarness(t *testing.T, initial *service.APIKey, policy serv
 	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	gatewaySvc := service.NewOpenAIGatewayService(
 		&openAIWSUsageHandlerAccountRepoStub{account: account},
-		nil,
 		&openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 4)},
-		nil, nil, nil, nil, nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
 		cfg,
-		nil, nil,
+		nil,
+		nil,
 		service.NewBillingService(cfg, nil),
 		nil,
 		billingCacheSvc,
 		nil,
 		&service.DeferredService{},
-		nil, nil, nil, nil, nil, nil, nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
 	)
 	rawCache := testutil.NewRedisConcurrencyCache(t)
 	queueCache, ok := rawCache.(service.APIKeySlotQueueCache)

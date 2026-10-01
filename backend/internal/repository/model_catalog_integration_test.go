@@ -101,9 +101,9 @@ func TestModelCatalogPostgresPublication(t *testing.T) {
 	snapshot.Models[0].Access = "unlisted"
 	require.NoError(t, r.Publish(ctx, source, "worker-d", snapshot, time.Now()))
 	require.NoError(t, r.SaveJob(ctx, service.ModelCatalogJob{ID: "job-1", AccountID: 1, Status: "complete", StartedAt: time.Now()}))
-	job, err := other.ReadJob(ctx, "job-1")
+	storedJob, err := other.ReadJob(ctx, "job-1")
 	require.NoError(t, err)
-	require.Equal(t, "complete", job.Status)
+	require.Equal(t, "complete", storedJob.Status)
 	require.NoError(t, r.ObserveMedia(ctx, 1, scope, service.CatalogMediaObservation{Model: "picture-next", Operation: "images/generations", ObservedAt: time.Now()}))
 	observations, err := other.MediaObservations(ctx, 1, scope)
 	require.NoError(t, err)

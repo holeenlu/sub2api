@@ -40,7 +40,7 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 		return
 	}
 	var userStreamStarted bool
-	userRelease, userSlotErr := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, false, &userStreamStarted)
+	userRelease, userSlotErr := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, apiKey.ID, apiKey.ConcurrencyLimit, false, &userStreamStarted)
 	if userSlotErr != nil {
 		h.handleConcurrencyError(c, userSlotErr, "user", false)
 		return
@@ -283,7 +283,7 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		return
 	}
 	var userStreamStarted bool
-	userRelease, userSlotErr := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, false, &userStreamStarted)
+	userRelease, userSlotErr := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, apiKey.ID, apiKey.ConcurrencyLimit, false, &userStreamStarted)
 	if userSlotErr != nil {
 		h.handleConcurrencyError(c, userSlotErr, "user", false)
 		return
