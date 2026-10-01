@@ -440,25 +440,30 @@ func TestBuildCodexModelsManifestUsesGPT6AstraInstructions(t *testing.T) {
 	))
 }
 
-func TestBuildCodexModelsManifestAdvertisesOneMillionTokenContextForZhipuGLM(t *testing.T) {
-	body, err := BuildCodexModelsManifest([]string{"glm-4.7", "glm-5.3"})
+func TestBuildCodexModelsManifestAdvertisesOneMillionTokenContextForZhipuGLM53Family(t *testing.T) {
+	body, err := BuildCodexModelsManifest([]string{"glm-4.7", "glm-5.3", "glm-5.3-flash"})
 	require.NoError(t, err)
 
 	var manifest struct {
 		Models []struct {
-			Slug          string `json:"slug"`
-			ContextWindow int64  `json:"context_window"`
-			MaxContext    int64  `json:"max_context_window"`
+			Slug            string `json:"slug"`
+			ContextWindow   int64  `json:"context_window"`
+			MaxContext      int64  `json:"max_context_window"`
+			MaxOutputTokens int64  `json:"max_output_tokens"`
 		} `json:"models"`
 	}
 	require.NoError(t, json.Unmarshal(body, &manifest))
-	require.Len(t, manifest.Models, 2)
+	require.Len(t, manifest.Models, 3)
 	require.Equal(t, "glm-4.7", manifest.Models[0].Slug)
-	require.Equal(t, int64(1_000_000), manifest.Models[0].ContextWindow)
-	require.Equal(t, int64(1_000_000), manifest.Models[0].MaxContext)
-	require.Equal(t, "glm-5.3", manifest.Models[1].Slug)
-	require.Equal(t, int64(1_000_000), manifest.Models[1].ContextWindow)
-	require.Equal(t, int64(1_000_000), manifest.Models[1].MaxContext)
+	require.Equal(t, int64(200_000), manifest.Models[0].ContextWindow)
+	require.Equal(t, int64(200_000), manifest.Models[0].MaxContext)
+	require.Equal(t, int64(128_000), manifest.Models[0].MaxOutputTokens)
+	for _, model := range manifest.Models[1:] {
+		require.Contains(t, []string{"glm-5.3", "glm-5.3-flash"}, model.Slug)
+		require.Equal(t, int64(1_000_000), model.ContextWindow)
+		require.Equal(t, int64(1_000_000), model.MaxContext)
+		require.Equal(t, int64(131_072), model.MaxOutputTokens)
+	}
 }
 
 func effortsFromConfiguredCodexLevels(levels []configuredCodexReasoningLevel) []string {

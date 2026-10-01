@@ -72,7 +72,7 @@ OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，�
 
 安裝名稱或路徑不同，請在 Finder 中確認後替換。Windows 在設定 `$env:KDAN_API_KEY` 的 PowerShell 中執行實際安裝的 Codex `.exe` 路徑。遠端主機、WSL 和容器有各自的環境與使用者目錄，需要在執行位置設定。
 
-如果必須使用圖示啟動，可在 OpenAI 分組的“使用金鑰”彈出視窗選擇 **API key**，下載其完整 `config.toml`。它會把認證資訊儲存在設定檔中，注意檔案權限與備份，勿提交到儲存庫。對於其他分組，優先使用彈出視窗生成的 `env_key` 設定；不要自行把兩種驗證欄位並列。
+如果必須使用圖示啟動，可在 OpenAI 分組的“使用金鑰”彈出視窗選擇 **API key**，下載其完整 `config.toml`。它會把認證資訊儲存在設定檔中，注意檔案權限與備份，勿提交到儲存庫。智譜分組的 Codex 設定會直接把 API Key 寫入 `experimental_bearer_token`，複製 `config.toml` 即可使用；其他分組優先使用彈出視窗生成的 `env_key` 設定。不要自行把兩種驗證欄位並列。
 
 ## 目前分組模型目錄
 
@@ -84,7 +84,7 @@ OpenAI 分組由彈出視窗生成另一種設定：Provider ID 是 `OpenAI`，�
 model_catalog_json = "~/.codex/codex-models.json"
 ```
 
-在「取得模型目錄及下載」區域取得目前 Key 的目錄，下載 `codex-models.json` 到上述路徑後重啟 Codex。OpenAI/Composite 可切換遠端目錄；智譜始終使用本地檔案，`GLM-4.7 / GLM-5.3` 目錄與 `config.toml` 宣告 1,000,000 token 上下文。不要編輯模型名稱來繞過權限。
+在「取得模型目錄及下載」區域取得目前 Key 的目錄，下載 `codex-models.json` 到上述路徑後重啟 Codex。OpenAI/Composite 可切換遠端目錄；智譜始終使用本地檔案，`GLM-5.3` 系列目錄與 `config.toml` 宣告 1,000,000 token 上下文；`GLM-4.7` 保留上游的 200,000 token 限制。不要編輯模型名稱來繞過權限。
 
 ## 驗證接入
 

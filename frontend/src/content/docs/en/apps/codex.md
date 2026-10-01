@@ -68,7 +68,7 @@ A desktop app opened from the Dock or Start menu does not automatically inherit 
 
 Check the actual installation path first. On Windows, invoke the installed Codex `.exe` from the PowerShell that contains `$env:KDAN_API_KEY`.
 
-For an icon launch, select **API key** in the OpenAI group's Use key modal and download its complete `config.toml`. This stores a secret in the file; restrict access and never commit it. For other groups, keep the generated `env_key` configuration and do not add a second authentication field yourself.
+For an icon launch, select **API key** in the OpenAI group's Use key modal and download its complete `config.toml`. This stores a secret in the file; restrict access and never commit it. The Zhipu Codex configuration embeds its API key in `experimental_bearer_token`, so the downloaded `config.toml` works on its own; for other groups, keep the generated `env_key` configuration and do not add a second authentication field yourself.
 
 ## Group model catalog
 
@@ -80,7 +80,7 @@ The generated `config.toml` includes this at the root:
 model_catalog_json = "~/.codex/codex-models.json"
 ```
 
-In **Get model catalog and download**, fetch the current key's catalog, download `codex-models.json` to the configured path, and restart Codex. OpenAI/Composite groups may select the remote catalog; Zhipu always uses the local file, and `GLM-4.7 / GLM-5.3` descriptors and `config.toml` advertise a 1,000,000-token context. Do not edit model names to bypass access rules.
+In **Get model catalog and download**, fetch the current key's catalog, download `codex-models.json` to the configured path, and restart Codex. OpenAI/Composite groups may select the remote catalog; Zhipu always uses the local file, and the `GLM-5.3` family descriptor and `config.toml` advertise a 1,000,000-token context; `GLM-4.7` remains at its 200,000-token upstream limit. Do not edit model names to bypass access rules.
 
 ## Verify and troubleshoot
 
