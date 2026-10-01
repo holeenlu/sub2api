@@ -260,3 +260,25 @@ ranxi2001/production 审计推进到 a53a7ff163d9337a094e7537df3aac2b31f308b7。
 - `2ecd5b7d5`、`04e76d18d`、`aa95c14f9`、`2d55b424e` 是后台功能搜索和合并包装，不属于 Excel/BPS 协议；`e52bf01b1` 仅绕过 SPA 的裸 API 别名，也不属于本次范围。
 
 本轮无可安全落地的 BPS 代码增量、迁移、版本号或发布动作；保留上一轮已合入的原生图片默认、图片容量、附件字段清理、流内错误分类、BPS 代理错误隔离和账号 BPS 徽章。该审查记录随本次提交推送，不恢复自动 BPS、凭证运营、重新登录 worker、Mihomo 或独立 sub4api BPS。
+
+
+### 2026-10-01：ranxi2001 `c2e3e098f` Serverless 增量复核
+
+固定来源：`ranxi2001/production@c2e3e098f7a8cb6a88666574ed050d58be922aa3`；定向 fetch 与 `git ls-remote` 核对一致。审查区间为此前已记录的 `2d55b424e` → 此 SHA，包含五个非合并提交与 PR #251 包装提交。本轮仅同步 fork 审查进度，不进行官方 upstream 整合。
+
+| 来源提交 | 实际行为和本轮处理 |
+| --- | --- |
+| `520d74e10eb93eb9e4c5a8542cff1a97a0015f19` | 新增 Serverless 地区到 gateway Pod 路由、注册/心跳、API Key 实例绑定、签名转发和图片归属下载。属于新分布式运行架构，排除。 |
+| `b86adf3e18cb516502ee97e5a4fe79dec7cdb543` | 说明上述 Pod 入口、地区查询、会话排空和运维边界；未引入该系统，不复制其运行说明。 |
+| `f56180dd6591f424a12fdf808e06dd78b906000a` | 修正上述转发的可信 IP、会话绑定和路由前模型准入；只服务新 Serverless 链，排除。 |
+| `f17a8d5c43aa62f91dfe786ae4653eb6af78ff28` | Serverless 设置页面截图及清单，排除。 |
+| `4f651425a9f530290f662d5ab77e8ca6e10bf28e` | 通用前端 Axios 依赖由 1.18.1 更新到 1.20.0；未更改 BPS 后端传输或专属管理协议，也不是此次必需依赖，留待独立依赖维护审核，不导入。提交标题中的安全声明不作为本项目已确认的漏洞结论。 |
+| `c2e3e098f7a8cb6a88666574ed050d58be922aa3` | PR #251 合并包装；remerge-diff 无额外内容，不整体合入 fork。 |
+
+**BPS 调用链复核：** `basispoints/image_relay.go` 的 `SetURLDecorator` 与 `openai_excel_bps.go` 的装饰器接入，仅调用 `Serverless.ImageOwnerURL`，为图片能力 URL 添加 `sl_node` / `sl_boot` / `sl_proof`；下载由新 `ImageRoute` 检查签名、实例与注册信息后转发原 Pod。这不是独立的图片容量、上传协议、RPM、重试或调度修复；脱离该系统导入会形成没有接收端的设置/链接，因此两处 BPS 文件的变化亦排除。
+
+**交付与配置：** 本轮只追加本文审查记录，无新增或修改的功能、配置入口、环境变量、迁移、依赖或运行行为；现有设置和默认值保持。没有部署后新增生效事项，无需管理员操作。保留原生图片默认、图片容量、逐次 RPM/资格保护、附件清理、流内错误分类和 BPS 代理错误隔离；不恢复已退役运维系统、Mihomo 或独立 sub4api BPS。
+
+按共享审查文档落地 `main`，普通 merge 到 TapModels，保持来源 SHA 和品牌文件；推送目标为 `origin/main`、`origin/TapModels`、`erwinlin/main`。检查文档差异、固定来源范围、两品牌运行代码树未变化及手动发版 Workflow 回归；文档改动不重复全量业务测试。仅提交/推送，不发版、不部署，不混入当前模型目录任务的未提交代码。
+
+实际验证：`git diff --check` 与仅文档范围检查通过；逐文件确认两品牌发版 Workflow 保持仅 `workflow_dispatch`。`test_auto_release_workflow.py` 因现有 Python 环境缺少 PyYAML 未能启动，未安装依赖；未重复业务测试，也未使用真实 BPS 账号、Redis 或生产数据库。
