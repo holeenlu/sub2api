@@ -631,7 +631,7 @@ export default {
         modelMappingAliases: 'Use model mappings as aliases and allow other native models',
         modelMappingAliasesHint: 'Regular OpenAI OAuth accounts only. Enabled mappings rewrite selected models while other native models remain available; disabled nonempty mappings remain allowlists. Group allowlists always apply. Existing accounts are not switched automatically.',
         changeModelMappingScope: 'Change model mapping scope',
-        bulkModelMappingAliasesHint: 'Changing only this option preserves existing mappings and BPS settings. Disable aliases to restore an allowlist. Edit shadow accounts through their dedicated model settings.',
+        bulkModelMappingAliasesHint: 'This compatibility option only affects accounts using legacy model restrictions. Fixed and follow policies still control access. Existing mappings and BPS settings are preserved.',
         autoBPS: 'Enable BPS automatically when degraded',
         autoBPSDesc: 'Checks at the configured interval (every 2 minutes for new rules) over the normal protocol, never BPS. The probe is only a heuristic; matching conditions enable BPS with the selected options. Network errors or incomplete results leave the account unchanged. Manage records on the Auto BPS page.',
         autoBPSLoading: 'Loading this account’s auto-BPS rule…',
@@ -885,7 +885,7 @@ export default {
       modelMapping: 'Model Mapping',
       fromModel: 'Request model',
       toModel: 'Target model',
-      selectAllowedModels: 'Select allowed models. Leave empty to support all models.',
+      selectAllowedModels: 'Select the models this account can serve. Leave empty to accept all models. The group whitelist still determines which models clients may request.',
       mapRequestModels:
         'Map request models to actual models. Left is the requested model, right is the actual model sent to API.',
       selectedModels: 'Selected {count} model(s)',

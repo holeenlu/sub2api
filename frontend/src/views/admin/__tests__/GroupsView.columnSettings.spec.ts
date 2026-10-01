@@ -259,7 +259,7 @@ describe('admin GroupsView column settings', () => {
       pages: 1,
     })
     getAllGroups.mockResolvedValue([])
-    getModelAllowlistCandidates.mockResolvedValue([])
+    getModelAllowlistCandidates.mockResolvedValue({ models: [], pricingPending: [] })
     getUsageSummary.mockResolvedValue([])
     getCapacitySummary.mockResolvedValue([])
     getLiveCapability.mockResolvedValue({ supported: false })

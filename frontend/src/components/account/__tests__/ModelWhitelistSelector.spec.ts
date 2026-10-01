@@ -316,7 +316,7 @@ describe('ModelWhitelistSelector', () => {
     expect(wrapper.find('[data-testid="sync-upstream-models-bulk"]').exists()).toBe(false)
   })
 
-  it('warns when model IDs sync but capability metadata is incomplete', async () => {
+  it('keeps selections unchanged without capability badges when metadata is incomplete', async () => {
     syncUpstreamModels.mockResolvedValue({
       models: ['x-preview-f-free'],
       warnings: [
@@ -346,11 +346,11 @@ describe('ModelWhitelistSelector', () => {
     await flushPromises()
 
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
-    expect(wrapper.find('[data-testid="catalog-incomplete"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="catalog-incomplete"]').exists()).toBe(false)
     expect(showSuccess).not.toHaveBeenCalled()
   })
 
-  it('shows success and a partial warning when some capabilities were saved', async () => {
+  it('leaves capability details in catalog administration after a saved account refresh', async () => {
     syncUpstreamModels.mockResolvedValue({
       models: ['gpt-6-astra', 'gpt-image-2'],
       warnings: [
@@ -381,7 +381,7 @@ describe('ModelWhitelistSelector', () => {
 
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
     expect(refreshModelCatalog).toHaveBeenCalled()
-    expect(wrapper.find('[data-testid="catalog-incomplete"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="catalog-incomplete"]').exists()).toBe(false)
   })
 
   it('reports a successful preview so account creation can persist metadata', async () => {
@@ -453,6 +453,29 @@ describe('ModelWhitelistSelector', () => {
     await flushPromises()
     expect(syncUpstreamModelsBulk).toHaveBeenCalledWith({ account_ids: undefined, filters })
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('retains media inventory and selections when bulk chat discovery omits image and video models', async () => {
+    getModelCatalog.mockResolvedValue({ status: 'ready', models: [
+      { id: 'gpt-image-next', kind: 'image', lifecycle: 'active', access: 'candidate', metadata: { id: 'gpt-image-next' } },
+      { id: 'sora-next', kind: 'video', lifecycle: 'active', access: 'candidate', metadata: { id: 'sora-next' } }
+    ] })
+    syncUpstreamModelsBulk.mockResolvedValue({ models: ['chat-next'], failures: [] })
+    const wrapper = mountSelector({ accountIds: [41, 42], modelValue: ['gpt-image-next', 'sora-next'] })
+    await flushPromises()
+    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('div.cursor-pointer').trigger('click')
+    expect(findModelRow(wrapper, 'gpt-image-next').exists()).toBe(true)
+    expect(findModelRow(wrapper, 'sora-next').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="replace-with-live-models"]').exists()).toBe(false)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await wrapper.setProps({ modelValue: ['gpt-image-next', 'sora-next', 'old-chat'] })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await wrapper.get('[data-testid="replace-with-live-models"]').trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['chat-next', 'gpt-image-next', 'sora-next']])
+    confirm.mockRestore()
+    wrapper.unmount()
   })
 
   it('does not offer replacement from a failed partial result', async () => {

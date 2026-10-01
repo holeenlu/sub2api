@@ -17,15 +17,20 @@ import {
 } from "../groupModelAllowlist";
 
 describe("groupModelAllowlist", () => {
-  it("selects all default candidates for a new disabled config", () => {
+  it("keeps a fixed empty whitelist empty after loading candidates", () => {
+    const state = createModelAllowlistState({ enabled: true, models: [] });
+    setModelAllowlistCandidates(state, ["new-model"]);
+    expect(state.items).toEqual([{ id: "new-model", selected: false }]);
+    expect(buildModelAllowlistConfig(state).models).toEqual([]);
+  });
+  it("does not grant newly discovered models in a new group", () => {
     const state = createModelAllowlistState();
 
     setModelAllowlistCandidates(state, ["gpt-5.5", "gpt-5.4"]);
 
-    expect(state.enabled).toBe(false);
     expect(state.items).toEqual([
-      { id: "gpt-5.5", selected: true },
-      { id: "gpt-5.4", selected: true },
+      { id: "gpt-5.5", selected: false },
+      { id: "gpt-5.4", selected: false },
     ]);
   });
 
@@ -37,7 +42,6 @@ describe("groupModelAllowlist", () => {
 
     setModelAllowlistCandidates(state, ["gpt-5.4", "legacy-gpt", "gpt-5.5"]);
 
-    expect(state.enabled).toBe(true);
     expect(state.items).toEqual([
       { id: "gpt-5.5", selected: true },
       { id: "gpt-5.4", selected: true },
@@ -69,20 +73,18 @@ describe("groupModelAllowlist", () => {
     moveModelAllowlistItem(state, 1, 0);
 
     expect(buildModelAllowlistConfig(state)).toEqual({
-      enabled: true,
-      models: ["gpt-5.4", "gpt-5.5"],
+      enabled: true, models: ["gpt-5.4", "gpt-5.5"],
     });
   });
 
-  it("keeps selected models in payload even when disabled so reopening can restore choices", () => {
+  it("saves formerly disabled groups using the visible selections", () => {
     const state = hydrateModelAllowlistState({
       enabled: false,
       models: ["gpt-5.5"],
     }, ["gpt-5.5", "gpt-5.4"]);
 
     expect(buildModelAllowlistConfig(state)).toEqual({
-      enabled: false,
-      models: ["gpt-5.5"],
+      enabled: true, models: ["gpt-5.5"],
     });
   });
 
@@ -93,8 +95,7 @@ describe("groupModelAllowlist", () => {
     });
 
     expect(buildModelAllowlistConfig(state)).toEqual({
-      enabled: true,
-      models: ["gpt-5.5", "gpt-5.4"],
+      enabled: true, models: ["gpt-5.5", "gpt-5.4"],
     });
   });
 
@@ -114,8 +115,7 @@ describe("groupModelAllowlist", () => {
       { id: "claude-sonnet-5", selected: true },
     ]);
     expect(buildModelAllowlistConfig(state)).toEqual({
-      enabled: true,
-      models: ["claude-alias", "claude-sonnet-5"],
+      enabled: true, models: ["claude-alias", "claude-sonnet-5"],
     });
   });
 

@@ -491,6 +491,7 @@ describe('BulkEditAccountModal', () => {
   })
 
   it('OpenAI 批量同步后显式应用实时白名单，保存前不更新账号', async () => {
+    vi.mocked(getModelCatalog).mockResolvedValue({ status: 'ready', revision: 'openai-inventory', platform: 'openai', updated_at: '', checked_at: '', models: [] })
     vi.mocked(accountsAPI.syncUpstreamModelsBulk).mockResolvedValue({ models: ['gpt-upstream-new'], failures: [], account_count: 2, aggregation: 'intersection', source: 'upstream_models' })
     const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
     await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
@@ -566,7 +567,7 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.text()).not.toContain('GPT-5.3 Codex Spark')
   })
 
-  it('仅勾选模型限制且白名单留空时，应提交空 model_mapping 以支持所有模型', async () => {
+  it('批量清空限制接受全部模型，并保留每个账号的别名', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['anthropic'],
       selectedTypes: ['apikey']
@@ -578,10 +579,21 @@ describe('BulkEditAccountModal', () => {
 
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
-      credentials: {
-        model_mapping: {}
-      }
+      model_catalog_policy: { models: [], }
     })
+  })
+
+  it('批量账号仅保存勾选模型，不提供策略或排除项', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-model-restriction-enabled').setValue(true)
+    expect(wrapper.find('#bulk-account-policy').exists()).toBe(false)
+    wrapper.findComponent(ModelWhitelistSelector).vm.$emit('update:modelValue', ['gpt-image-selected'])
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      model_catalog_policy: { models: ['gpt-image-selected'], }
+    })
+    expect(wrapper.findComponent(ModelWhitelistSelector).exists()).toBe(true)
   })
 
   it('全部目标为 Grok OAuth 时，官方主机 base_url 作为手动端点切换正常提交', async () => {
@@ -1292,7 +1304,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('开启 OpenAI 自动透传时不再同时提交模型限制', async () => {
+  it('开启 OpenAI 自动透传时仍可保存固定访问策略', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -1308,9 +1320,10 @@ describe('BulkEditAccountModal', () => {
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
       extra: {
         openai_passthrough: true
-      }
+      },
+      model_catalog_policy: { models: [], }
     })
-    expect(wrapper.text()).toContain('admin.accounts.openai.modelRestrictionDisabledByPassthrough')
+    expect(wrapper.find('[data-testid="account-catalog-policy"]').exists()).toBe(false)
   })
 
   it('filtered-results 模式下应提交 filters 而不是 account_ids', async () => {

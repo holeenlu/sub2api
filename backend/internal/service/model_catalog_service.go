@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +23,7 @@ type ModelCatalogService struct {
 	stopped               bool
 	workerCtx             context.Context
 	activeJobs            int
+	manualSyncID          string
 	startOnce             sync.Once
 	priceRefreshRequested atomic.Bool
 	lastPriceCheck        time.Time
@@ -48,6 +48,8 @@ type ModelCatalogJob struct {
 	AccountID  int64      `json:"account_id"`
 	Status     string     `json:"status"`
 	Revision   string     `json:"revision,omitempty"`
+	Succeeded  int        `json:"succeeded"`
+	Failed     int        `json:"failed"`
 	Error      string     `json:"error,omitempty"`
 	StartedAt  time.Time  `json:"started_at"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
@@ -158,77 +160,6 @@ func (s *ModelCatalogService) registryUncached(ctx context.Context) []ModelCatal
 	return entries
 }
 
-func (s *ModelCatalogService) SaveRegistry(ctx context.Context, entries []ModelCatalogEntry) error {
-	if len(entries) > 5000 {
-		return fmt.Errorf("model registry exceeds 5000 entries")
-	}
-	seen := map[string]bool{}
-	for i := range entries {
-		e := &entries[i]
-		e.ID = strings.TrimSpace(e.ID)
-		if e.SourceAccountID < 0 {
-			return fmt.Errorf("invalid source account ID")
-		}
-		if e.UpstreamNamespace != "" {
-			normalized := normalizeModelRegistryBaseURL(e.UpstreamNamespace)
-			if normalized == "" {
-				return fmt.Errorf("invalid upstream namespace")
-			}
-			e.UpstreamNamespace = normalized
-		}
-		key := e.Platform + "\x00" + e.ID + "\x00" + e.UpstreamNamespace + fmt.Sprint(e.SourceAccountID)
-		if e.ID == "" || len(e.ID) > 256 || strings.ContainsAny(e.ID, "*\r\n") || !isConcreteRequestPlatform(e.Platform) || seen[key] {
-			return fmt.Errorf("invalid or duplicate registry model")
-		}
-		seen[key] = true
-		if len(e.CodexModel) > 1<<18 {
-			return fmt.Errorf("model descriptor too large")
-		}
-		if e.ShutdownDate == "" {
-			e.ShutdownDate = e.Metadata.ShutdownDate
-		}
-		if e.ShutdownDate != "" {
-			if _, err := time.Parse("2006-01-02", e.ShutdownDate); err != nil {
-				return fmt.Errorf("invalid shutdown date")
-			}
-		}
-		if e.Lifecycle != "" && e.Lifecycle != "active" && e.Lifecycle != "unknown" && e.Lifecycle != "deprecated" && e.Lifecycle != "retired" {
-			return fmt.Errorf("invalid lifecycle state")
-		}
-		if e.Lifecycle == "deprecated" {
-			deprecated := true
-			e.Metadata.Deprecated = &deprecated
-		}
-		e.Access = "candidate"
-		e.Source = "registry"
-		e.Metadata.ID = e.ID
-		if e.Kind == "" {
-			e.Kind = modelCatalogEntryKind(e.ID, e.Metadata)
-		}
-		if e.Metadata.RecommendedPriority == nil && e.RecommendedPriority != 0 {
-			v := e.RecommendedPriority
-			e.Metadata.RecommendedPriority = &v
-		}
-		e.Metadata.ModelKind = e.Kind
-		if len(e.Endpoints) > 0 {
-			e.Metadata.Endpoints = append([]string(nil), e.Endpoints...)
-		}
-		e.Metadata.ShutdownDate = e.ShutdownDate
-		if e.DisplayName == "" {
-			e.DisplayName = e.ID
-		}
-		e.Missing = modelCatalogMissing(e.Kind, e.Metadata)
-	}
-	if s.settings == nil || s.settings.settingRepo == nil {
-		return ErrModelCatalogUnavailable
-	}
-	body, err := json.Marshal(entries)
-	if err != nil {
-		return err
-	}
-	return s.settings.settingRepo.Set(ctx, ModelCatalogRegistryKey, string(body))
-}
-
 func (s *ModelCatalogService) Account(ctx context.Context, account *Account) (*ModelCatalogSnapshot, error) {
 	if account != nil {
 		if cache, ok := ctx.Value(catalogReadContextKey{}).(*catalogReadCache); ok {
@@ -308,7 +239,7 @@ func (s *ModelCatalogService) Account(ctx context.Context, account *Account) (*M
 			continue
 		}
 		m, _ := account.GetUpstreamModelMetadata(id)
-		snapshot.Models = append(snapshot.Models, ModelCatalogEntry{ID: id, DisplayName: id, Platform: account.Platform, Kind: modelCatalogEntryKind(id, m), Lifecycle: "unknown", Access: "configured", Source: "administrator", Metadata: m, Missing: modelCatalogMissing(modelCatalogEntryKind(id, m), m)})
+		snapshot.Models = append(snapshot.Models, ModelCatalogEntry{ID: id, DisplayName: id, Platform: account.Platform, Kind: modelCatalogEntryKind(id, m), Lifecycle: modelCatalogLifecycle(m, time.Now()), ShutdownDate: m.ShutdownDate, Access: "configured", Source: "administrator", Metadata: m, Missing: modelCatalogMissing(modelCatalogEntryKind(id, m), m)})
 	}
 	if observations, err := s.repo.MediaObservations(ctx, account.ID, scope); err == nil {
 		for _, o := range observations {
@@ -332,8 +263,6 @@ func (s *ModelCatalogService) Account(ctx context.Context, account *Account) (*M
 			}
 		}
 	}
-	policy := accountModelCatalogPolicy(account)
-	snapshot.Policy = &policy
 	if s.prices != nil {
 		snapshot.PriceRevision = s.prices.PriceRevision()
 	}
@@ -400,7 +329,22 @@ func (s *ModelCatalogService) Platform(ctx context.Context, platform string) (*M
 	return out, nil
 }
 
+type catalogRefreshError struct{ code string }
+
+func (e *catalogRefreshError) Error() string { return e.code }
+func (e *catalogRefreshError) Unwrap() error { return ErrModelCatalogUnavailable }
+
 func catalogSyncErrorCode(err error) string {
+	var refresh *catalogRefreshError
+	if errors.As(err, &refresh) {
+		return refresh.code
+	}
+	if errors.Is(err, ErrModelCatalogBusy) {
+		return "catalog_busy"
+	}
+	if errors.Is(err, ErrModelCatalogScopeChanged) {
+		return "scope_changed"
+	}
 	var upstream *UpstreamModelSyncError
 	if errors.As(err, &upstream) {
 		if upstream.StatusCode == 401 || upstream.StatusCode == 403 {
@@ -420,6 +364,9 @@ func catalogSyncErrorCode(err error) string {
 }
 
 func (s *ModelCatalogService) Refresh(ctx context.Context, id int64, force bool) (*ModelCatalogSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if s == nil || s.repo == nil || s.accounts == nil || s.syncer == nil {
 		return nil, ErrModelCatalogUnavailable
 	}
@@ -482,17 +429,12 @@ func (s *ModelCatalogService) Refresh(ctx context.Context, id int64, force bool)
 		}
 		if err != nil {
 			code := catalogSyncErrorCode(err)
-			if code == "authentication_unavailable" {
-				deny, stopDeny := context.WithTimeout(context.Background(), 3*time.Second)
-				_ = s.accounts.UpdateExtra(deny, id, map[string]any{modelCatalogVisibilityExtraKey: map[string]any{"scope": scope, "models": map[string]bool{}}})
-				stopDeny()
-			}
 			cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
 			defer stop()
 			if s.repo.Fail(cleanup, key, lease, code, catalogNextRetry(err, cfg.IntervalSeconds)) == nil {
 				published = true
 			}
-			return nil, fmt.Errorf("%s: %w", code, ErrModelCatalogUnavailable)
+			return nil, &catalogRefreshError{code: code}
 		}
 		latest, err := s.accounts.GetByID(work, id)
 		if err != nil {
@@ -517,9 +459,6 @@ func (s *ModelCatalogService) Refresh(ctx context.Context, id int64, force bool)
 					break
 				}
 			}
-		}
-		if err := s.saveVisibility(work, latest, snapshot); err != nil {
-			return nil, err
 		}
 		return snapshot, nil
 	})
@@ -599,14 +538,28 @@ func (s *ModelCatalogService) snapshot(ctx context.Context, a *Account, catalog 
 }
 
 func (s *ModelCatalogService) QueueRefresh(id int64) ModelCatalogJob {
+	return s.queueJob(id)
+}
+
+// QueueSync refreshes every active account and reference prices on demand,
+// independent of the automatic schedule. Repeated requests on this process are
+// coalesced; individual sources also use the shared database leases.
+func (s *ModelCatalogService) QueueSync() ModelCatalogJob { return s.queueJob(0) }
+
+func (s *ModelCatalogService) queueJob(id int64) ModelCatalogJob {
 	s.lifecycleMu.Lock()
+	if id == 0 && s.manualSyncID != "" {
+		if previous, ok := s.jobs.Load(s.manualSyncID); ok && previous.(ModelCatalogJob).Status == "running" {
+			s.lifecycleMu.Unlock()
+			return previous.(ModelCatalogJob)
+		}
+	}
 	if s.stopped || s.activeJobs >= 32 {
 		s.lifecycleMu.Unlock()
 		return ModelCatalogJob{Status: "failed", Error: "catalog_busy"}
 	}
 	s.activeJobs++
 	s.wg.Add(1)
-	s.lifecycleMu.Unlock()
 	now := time.Now().UTC()
 	s.jobs.Range(func(key, value any) bool {
 		j := value.(ModelCatalogJob)
@@ -620,19 +573,33 @@ func (s *ModelCatalogService) QueueRefresh(id int64) ModelCatalogJob {
 	err := s.repo.SaveJob(persist, job)
 	stopPersist()
 	if err != nil {
-		s.lifecycleMu.Lock()
 		s.activeJobs--
 		s.lifecycleMu.Unlock()
 		s.wg.Done()
 		return ModelCatalogJob{Status: "failed", Error: "catalog_unavailable"}
 	}
 	s.jobs.Store(job.ID, job)
+	if id == 0 {
+		s.manualSyncID = job.ID
+	}
+	s.lifecycleMu.Unlock()
+	initialJob := job
 	go func() {
 		defer s.wg.Done()
 		defer func() { s.lifecycleMu.Lock(); s.activeJobs--; s.lifecycleMu.Unlock() }()
-		ctx, cancel := context.WithTimeout(s.workerCtx, 2*time.Minute)
+		timeout := 2 * time.Minute
+		if id == 0 {
+			timeout = 30 * time.Minute
+		}
+		ctx, cancel := context.WithTimeout(s.workerCtx, timeout)
 		defer cancel()
-		snapshot, err := s.Refresh(ctx, id, true)
+		var snapshot *ModelCatalogSnapshot
+		var err error
+		if id == 0 {
+			job.Succeeded, job.Failed, err = s.syncManually(ctx)
+		} else {
+			snapshot, err = s.Refresh(ctx, id, true)
+		}
 		done := time.Now().UTC()
 		job.FinishedAt = &done
 		if err != nil {
@@ -640,14 +607,64 @@ func (s *ModelCatalogService) QueueRefresh(id int64) ModelCatalogJob {
 			job.Error = catalogSyncErrorCode(err)
 		} else {
 			job.Status = "complete"
-			job.Revision = snapshot.Revision
+			if snapshot != nil {
+				job.Revision = snapshot.Revision
+			}
 		}
 		s.jobs.Store(job.ID, job)
 		saved, stop := context.WithTimeout(context.Background(), 3*time.Second)
 		defer stop()
 		_ = s.repo.SaveJob(saved, job)
 	}()
-	return job
+	return initialJob
+}
+
+func (s *ModelCatalogService) syncManually(ctx context.Context) (int, int, error) {
+	accounts, err := s.accounts.ListActive(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	cfg := s.Settings(ctx)
+	var succeeded, failed atomic.Int64
+	workers, work := errgroup.WithContext(ctx)
+	workers.SetLimit(cfg.Concurrency)
+	for _, account := range accounts {
+		if work.Err() != nil {
+			break
+		}
+		if IsRetiredPlatform(account.Platform) {
+			continue
+		}
+		id := account.ID
+		workers.Go(func() error {
+			if _, err := s.Refresh(work, id, true); err != nil {
+				failed.Add(1)
+			} else {
+				succeeded.Add(1)
+			}
+			return nil
+		})
+	}
+	_ = workers.Wait()
+	if ctx.Err() != nil {
+		return int(succeeded.Load()), int(failed.Load()), ctx.Err()
+	}
+	// A failed price download never replaces the last successful prices.
+	if s.prices != nil && s.prices.cfg != nil && s.prices.cfg.Pricing.RemoteURL != "" {
+		if err := s.prices.ForceUpdate(); err != nil {
+			return int(succeeded.Load()), int(failed.Load()), err
+		}
+		if prices := s.prices.ReferencePrices(); prices != nil {
+			raw, err := json.Marshal(prices.Models)
+			if err != nil {
+				return int(succeeded.Load()), int(failed.Load()), err
+			}
+			if err := s.repo.SavePrices(ctx, prices.Revision, raw); err != nil {
+				return int(succeeded.Load()), int(failed.Load()), err
+			}
+		}
+	}
+	return int(succeeded.Load()), int(failed.Load()), nil
 }
 
 func (s *ModelCatalogService) Job(ctx context.Context, id string) (ModelCatalogJob, bool) {
@@ -673,6 +690,10 @@ func (s *ModelCatalogService) Start() {
 		go func() {
 			defer s.wg.Done()
 			ctx := s.workerCtx
+			if s.prices != nil {
+				s.prices.catalogRefreshManaged.Store(true)
+				defer s.prices.catalogRefreshManaged.Store(false)
+			}
 			s.restoreReferencePrices(ctx)
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()
@@ -741,13 +762,16 @@ func (s *ModelCatalogService) runSync(ctx context.Context) {
 // Implements the existing shared group snapshot port. It reads persisted data,
 // honors aliases and never makes an upstream request while rendering a page.
 func (s *ModelCatalogService) ModelCatalogSnapshot(ctx context.Context, a *Account) ([]string, time.Time, bool) {
+	ctx = withCatalogReadCache(ctx)
 	snapshot, err := s.Account(ctx, a)
-	if err != nil || snapshot.Status == "unavailable" {
+	fixed := accountHasModelSelection(a)
+	if err != nil || (snapshot.Status == "unavailable" && !fixed) {
 		return nil, time.Time{}, false
 	}
 	ids := []string{}
 	for _, entry := range snapshot.Models {
-		if (entry.Access == "listed" || entry.Access == "observed") && entry.Lifecycle != "retired" {
+		allowed, _ := s.ModelIsPublished(ctx, a, entry.ID)
+		if allowed && ((entry.Access == "listed" || entry.Access == "observed") || fixed) {
 			ids = append(ids, entry.ID)
 		}
 	}
@@ -769,32 +793,4 @@ func catalogModelIDObjects(ids []string) []map[string]string {
 		out = append(out, map[string]string{"id": id})
 	}
 	return out
-}
-
-func (s *ModelCatalogService) History(ctx context.Context, id int64) ([]ModelCatalogRelease, error) {
-	if _, err := s.accounts.GetByID(ctx, id); err != nil {
-		return nil, err
-	}
-	return s.repo.History(ctx, modelCatalogSourceKey(id), 30)
-}
-func (s *ModelCatalogService) Rollback(ctx context.Context, id int64, revision string) error {
-	a, err := s.accounts.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if a == nil || !a.IsActive() {
-		return ErrModelCatalogUnavailable
-	}
-	source, err := resolveCredentialAccount(ctx, s.accounts, a)
-	if err != nil {
-		return err
-	}
-	if err := s.repo.Rollback(ctx, modelCatalogSourceKey(id), modelCatalogScope(a, source), revision); err != nil {
-		return err
-	}
-	snapshot, err := s.Account(ctx, a)
-	if err != nil {
-		return err
-	}
-	return s.saveVisibility(ctx, a, snapshot)
 }

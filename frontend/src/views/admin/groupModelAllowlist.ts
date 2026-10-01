@@ -1,6 +1,4 @@
 export interface ModelAllowlistConfig {
-  mode?: 'legacy' | 'follow' | 'fixed'
-  excluded?: string[]
   enabled: boolean
   models: string[]
 }
@@ -11,9 +9,6 @@ export interface ModelAllowlistItem {
 }
 
 export interface ModelAllowlistState {
-  mode?: 'legacy' | 'follow' | 'fixed'
-  excludedText?: string
-  enabled: boolean
   savedModels: string[]
   items: ModelAllowlistItem[]
 }
@@ -24,8 +19,6 @@ export type ModelAllowlistAddError = 'empty' | 'duplicate'
 export const createModelAllowlistState = (
   config?: Partial<ModelAllowlistConfig> | null,
 ): ModelAllowlistState => ({
-  enabled: config?.enabled ?? false,
-  ...(config?.mode ? { mode: config.mode, excludedText: (config.excluded ?? []).join('\n') } : {}),
   savedModels: normalizeModels(config?.models ?? []),
   items: [],
 })
@@ -39,15 +32,8 @@ export const hydrateModelAllowlistState = (
   return state
 }
 
-/**
- * 候选列表只做「补充」，不做「裁剪」。
- *
- * 候选的三个来源（平台默认模型、账号 model_mapping 的 key、上游 /v1/models）
- * 都不是分组 model_allowlist 的全集：网关对 anthropic 的允许集就是 mapping key ∪
- * 默认列表，上游列表里也不会有已下架的旧模型，偶发少返回一个同样常见。按候选
- * 反向裁剪已保存项，会让管理员打开编辑弹窗、什么都不改直接保存，就把这些条目
- * 永久删掉。
- */
+// The catalog adds candidates; saved selections survive incomplete refreshes.
+// New models are never selected implicitly, including when the saved list is empty.
 export const setModelAllowlistCandidates = (
   state: ModelAllowlistState,
   candidates: string[],
@@ -68,9 +54,7 @@ export const setModelAllowlistCandidates = (
   state.items = selectionOrder.map(id => {
     const selected = hasExistingItems
       ? currentSelected.has(id)
-      : state.savedModels.length > 0
-        ? savedSelected.has(id)
-        : normalizedCandidates.includes(id)
+      : savedSelected.has(id)
 
     return {
       id,
@@ -142,8 +126,7 @@ export const addCustomModelAllowlistItem = (
 export const buildModelAllowlistConfig = (
   state: ModelAllowlistState,
 ): ModelAllowlistConfig => ({
-  enabled: state.mode === 'follow' || state.mode === 'fixed' || state.enabled,
-  ...(state.mode && state.mode !== 'legacy' ? { mode: state.mode, excluded: normalizeModels((state.excludedText ?? '').split('\n')) } : {}),
+  enabled: true,
   models: state.items.length > 0
     ? state.items.filter(item => item.selected).map(item => item.id)
     : [...state.savedModels],

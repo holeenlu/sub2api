@@ -103,23 +103,27 @@ export async function getById(id: number): Promise<AdminGroup> {
 }
 
 /**
- * Get candidate models for the group model allowlist and custom /v1/models list.
- * id=0 returns platform default models for create flow. For an existing
- * Anthropic group the candidates also include the live /v1/models union of the
- * group's accounts. Candidates only ever add: they are not the complete set of
- * legal entries, so saved models must never be filtered against them.
+ * Get selection inventory from the unified model catalog. New and existing
+ * groups share the same platform candidates, independent of account assignment
+ * and pricing. Preserve saved selections when a catalog item is absent.
  */
+export interface ModelAllowlistCandidates {
+  models: string[]
+  /** Candidates without a complete sale price yet; shown as pending pricing. */
+  pricingPending: string[]
+}
+
 export async function getModelAllowlistCandidates(
   id: number,
   platform?: GroupPlatform
-): Promise<string[]> {
-  const { data } = await apiClient.get<{ models: string[] }>(
+): Promise<ModelAllowlistCandidates> {
+  const { data } = await apiClient.get<{ models: string[]; pricing_pending?: string[] }>(
     `/admin/groups/${id}/model-allowlist-candidates`,
     {
       params: platform ? { platform } : undefined
     }
   )
-  return data.models || []
+  return { models: data.models || [], pricingPending: data.pricing_pending || [] }
 }
 
 /**

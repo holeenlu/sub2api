@@ -360,20 +360,14 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 	if h.Admin.ModelCatalog != nil {
 		catalog := admin.Group("/model-catalog")
 		catalog.GET("", h.Admin.ModelCatalog.Catalog)
-		catalog.GET("/explain", h.Admin.ModelCatalog.Explain)
+		catalog.PUT("/models", h.Admin.ModelCatalog.SaveModel)
 		catalog.GET("/pricing-audit", h.Admin.ModelCatalog.PricingAudits)
 		catalog.POST("/refresh", h.Admin.ModelCatalog.Refresh)
+		catalog.POST("/sync", h.Admin.ModelCatalog.Sync)
 		catalog.GET("/jobs/:job_id", h.Admin.ModelCatalog.Job)
 		catalog.GET("/settings", h.Admin.ModelCatalog.Settings)
 		catalog.PUT("/settings", h.Admin.ModelCatalog.SaveSettings)
-		catalog.GET("/registry", h.Admin.ModelCatalog.Registry)
-		catalog.GET("/prices", h.Admin.ModelCatalog.Prices)
-		catalog.PUT("/prices", h.Admin.ModelCatalog.SavePrices)
-		catalog.PUT("/registry", h.Admin.ModelCatalog.SaveRegistry)
-		catalog.GET("/accounts/:id/history", h.Admin.ModelCatalog.History)
 		catalog.GET("/accounts/:id/ticket-models", h.Admin.ModelCatalog.TicketModels)
-		catalog.PUT("/accounts/:id/policy", h.Admin.ModelCatalog.SaveAccountPolicy)
-		catalog.POST("/accounts/:id/rollback", h.Admin.ModelCatalog.Rollback)
 	}
 	accounts := admin.Group("/accounts")
 	{

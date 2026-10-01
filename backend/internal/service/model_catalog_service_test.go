@@ -205,3 +205,22 @@ func (r *catalogMemoryRepo) MediaObservations(context.Context, int64, string) ([
 func (r *catalogMemoryRepo) ObserveMedia(context.Context, int64, string, CatalogMediaObservation) error {
 	return nil
 }
+
+func setCatalogRegistryFixture(ctx context.Context, s *ModelCatalogService, entries []ModelCatalogEntry) error {
+	for i := range entries {
+		e := &entries[i]
+		e.Access, e.Source = "candidate", "registry"
+		e.Metadata.ID = e.ID
+		if e.Kind == "" {
+			e.Kind = modelCatalogEntryKind(e.ID, e.Metadata)
+		}
+		e.Metadata.ModelKind = e.Kind
+		e.Metadata.ShutdownDate = e.ShutdownDate
+		e.Missing = modelCatalogMissing(e.Kind, e.Metadata)
+	}
+	body, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	return s.settings.settingRepo.Set(ctx, ModelCatalogRegistryKey, string(body))
+}

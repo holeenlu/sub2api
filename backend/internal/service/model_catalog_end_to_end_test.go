@@ -31,7 +31,7 @@ func TestModelCatalogNovelModelDiscoveryPublicationForwardAndSettlement(t *testi
 	discovery := fmt.Sprintf(`{"data":[{"id":%q,"model_kind":"chat","reasoning":true,"supported_reasoning_levels":["medium","high"],"default_reasoning_level":"high","input_modalities":["text","image"],"context_window":222222,"endpoints":["responses"]}]}`, id)
 	registry, _, a, _ := newCatalogTestService(catalogResponse(200, discovery))
 	a.Schedulable = true
-	a.Extra = map[string]any{ModelCatalogPolicyExtraKey: ModelCatalogPolicy{Mode: "follow"}}
+	a.Extra = map[string]any{ModelCatalogPolicyExtraKey: ModelCatalogPolicy{}}
 	_, err := registry.Refresh(context.Background(), a.ID, true)
 	require.NoError(t, err)
 	prices := &PricingService{pricingData: map[string]*LiteLLMModelPricing{id: {InputCostPerToken: 2e-6, OutputCostPerToken: 8e-6, Mode: "chat", ProvidedFields: map[string]bool{"input_cost_per_token": true, "output_cost_per_token": true}}}, localHash: "price-v1"}
@@ -42,7 +42,7 @@ func TestModelCatalogNovelModelDiscoveryPublicationForwardAndSettlement(t *testi
 	channelRepo := &mockChannelRepository{listAllFn: func(context.Context) ([]Channel, error) { return nil, nil }}
 	catalog := &GroupModelCatalogService{accounts: registry.accounts, channels: channelRepo, snapshots: registry, registry: registry}
 	registry.groupCatalog = catalog
-	group := &Group{ID: 101, Platform: PlatformOpenAI, RateMultiplier: 1, ModelAllowlist: GroupModelAllowlist{Mode: "follow", Enabled: true}}
+	group := &Group{ID: 101, Platform: PlatformOpenAI, RateMultiplier: 1, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{id}}}
 	view, err := catalog.Resolve(context.Background(), group)
 	require.NoError(t, err)
 	require.Equal(t, []string{id}, view.ModelIDs())
@@ -100,7 +100,7 @@ func TestModelCatalogNovelModelDiscoveryPublicationForwardAndSettlement(t *testi
 	require.NoError(t, err)
 	require.InDelta(t, 52e-6, newCost.ActualCost, 1e-12)
 	require.NotEqual(t, RequestPricingFromContext(pinned).Revision, RequestPricingFromContext(newCtx).Revision)
-	group.ModelAllowlist = GroupModelAllowlist{Mode: "fixed", Enabled: true, Models: []string{"another"}}
+	group.ModelAllowlist = GroupModelAllowlist{Enabled: true, Models: []string{"another"}}
 	restricted, err := catalog.Resolve(context.Background(), group)
 	require.NoError(t, err)
 	require.Empty(t, restricted.ModelIDs())

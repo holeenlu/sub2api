@@ -100,28 +100,24 @@ func TestGroupModelCatalogCompositeEndpointsAndAmbiguity(t *testing.T) {
 	require.Contains(t, result.Issues, GroupCatalogIssue{Model: "ambiguous", Reason: "ambiguous_route"})
 }
 
-func TestGroupModelCatalogPinnedSnapshotAuthority(t *testing.T) {
+func TestGroupModelCatalogAggregatesAllMembersRegardlessOfPinnedConfig(t *testing.T) {
 	repo := &catalogAccountRepo{accounts: []Account{catalogAccount(1, PlatformOpenAI, nil), catalogAccount(2, PlatformOpenAI, nil)}}
 	group := &Group{ID: 10, Platform: PlatformOpenAI}
 	group.CodexModelsManifestConfig.Enabled = true
-	group.CodexModelsManifestConfig.AccountIDs = []int64{1, 2}
+	group.CodexModelsManifestConfig.AccountIDs = []int64{1}
 	group.UpdatedAt = time.Now().Add(-time.Hour)
-	snapshots := catalogSnapshotsStub{1: {"gpt-5"}}
+	snapshots := catalogSnapshotsStub{1: {"gpt-5"}, 2: {"gpt-5", "gpt-other"}}
 	catalog := &GroupModelCatalogService{accounts: repo, snapshots: snapshots}
 	result, err := catalog.resolve(context.Background(), group, nil)
 	require.NoError(t, err)
-	require.Equal(t, "unavailable", result.Status)
-	require.Empty(t, result.Models)
-	snapshots[2] = []string{}
-	result, err = catalog.resolve(context.Background(), group, nil)
-	require.NoError(t, err)
 	require.Equal(t, "ready", result.Status)
-	require.Equal(t, []string{"gpt-5"}, catalogNames(result))
+	require.Equal(t, []string{"gpt-5", "gpt-other"}, catalogNames(result), "every member snapshot contributes to the listing")
+	require.Len(t, result.Models[0].AccountModels, 2, "every supporting member stays routable")
 	require.True(t, result.UpdatedAt.After(group.UpdatedAt), "fresh discovery must not inherit an old configuration timestamp")
-	snapshots[1] = []string{}
+
+	snapshots[1], snapshots[2] = []string{}, []string{}
 	result, err = catalog.resolve(context.Background(), group, nil)
 	require.NoError(t, err)
-	require.Equal(t, "ready", result.Status)
 	require.Empty(t, result.Models, "authoritative empty is not default models")
 }
 

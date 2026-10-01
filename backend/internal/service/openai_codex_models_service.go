@@ -93,9 +93,10 @@ func FilterCodexModelIDsForGroup(modelIDs []string, group *Group) []string {
 
 func isCodexDedicatedMediaModel(modelID string) bool {
 	canonical := codexProviderQualifiedModelID(modelID)
+	kind := modelCatalogEntryKind(canonical, UpstreamModelMetadata{})
 	return IsGPTImageGenerationModel(canonical) ||
 		isImageGenerationModel(canonical) ||
-		xai.IsGrokImagineModel(modelID)
+		xai.IsGrokImagineModel(modelID) || kind == "image" || kind == "video"
 }
 
 func codexProviderQualifiedModelID(modelID string) string {
@@ -208,12 +209,9 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	if err != nil {
 		return fmt.Errorf("load group configured Codex capabilities: %w", err)
 	}
-	var configuredModels []string
-	if !group.CodexModelsManifestConfig.Enabled {
-		configuredModels = openAIConfiguredCodexModelIDsForGroup(visible, group)
-	}
+	configuredModels := openAIConfiguredCodexModelIDsForGroup(visible, group)
 	selection, filter := group.ModelAllowlist.Models, group.ModelAllowlistEnabled()
-	if s.groupModelCatalog != nil && !group.CodexModelsManifestConfig.Enabled {
+	if s.groupModelCatalog != nil {
 		shared, err := s.groupModelCatalog.Resolve(ctx, group)
 		if err != nil {
 			return err
@@ -227,13 +225,6 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	body, changed, err := mergeConfiguredCodexModelsManifest(manifest.Body, configuredModels, selection, filter)
 	if err != nil {
 		return fmt.Errorf("merge group configured Codex models: %w", err)
-	}
-	if group.CodexModelsManifestConfig.Enabled && group.ModelAllowlistEnabled() {
-		body, err = orderPinnedCodexModelsBySelection(body, group.ModelAllowlist)
-		if err != nil {
-			return fmt.Errorf("order pinned Codex models: %w", err)
-		}
-		changed = true
 	}
 	body, restricted, err := restrictExcelBPSCodexModelsManifest(body, catalog, group)
 	if err != nil {

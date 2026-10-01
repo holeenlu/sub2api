@@ -134,63 +134,66 @@ func NewAccountHandler(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
-	Name                    string         `json:"name" binding:"required"`
-	Notes                   *string        `json:"notes"`
-	Platform                string         `json:"platform" binding:"required"`
-	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials             map[string]any `json:"credentials" binding:"required"`
-	Extra                   map[string]any `json:"extra"`
-	ProxyID                 *int64         `json:"proxy_id"`
-	Concurrency             int            `json:"concurrency"`
-	Priority                int            `json:"priority"`
-	RateMultiplier          *float64       `json:"rate_multiplier"`
-	LoadFactor              *int           `json:"load_factor"`
-	GroupIDs                []int64        `json:"group_ids"`
-	ExpiresAt               *int64         `json:"expires_at"`
-	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
-	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled"`
-	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	ModelCatalogPolicy      *service.ModelCatalogPolicy `json:"model_catalog_policy"`
+	Name                    string                      `json:"name" binding:"required"`
+	Notes                   *string                     `json:"notes"`
+	Platform                string                      `json:"platform" binding:"required"`
+	Type                    string                      `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Credentials             map[string]any              `json:"credentials" binding:"required"`
+	Extra                   map[string]any              `json:"extra"`
+	ProxyID                 *int64                      `json:"proxy_id"`
+	Concurrency             int                         `json:"concurrency"`
+	Priority                int                         `json:"priority"`
+	RateMultiplier          *float64                    `json:"rate_multiplier"`
+	LoadFactor              *int                        `json:"load_factor"`
+	GroupIDs                []int64                     `json:"group_ids"`
+	ExpiresAt               *int64                      `json:"expires_at"`
+	AutoPauseOnExpired      *bool                       `json:"auto_pause_on_expired"`
+	ProbeEnabled            *bool                       `json:"upstream_billing_probe_enabled"`
+	ConfirmMixedChannelRisk *bool                       `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
-	Name                    string         `json:"name"`
-	Notes                   *string        `json:"notes"`
-	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials             map[string]any `json:"credentials"`
-	Extra                   map[string]any `json:"extra"`
-	ProxyID                 *int64         `json:"proxy_id"`
-	Concurrency             *int           `json:"concurrency"`
-	Priority                *int           `json:"priority"`
-	RateMultiplier          *float64       `json:"rate_multiplier"`
-	LoadFactor              *int           `json:"load_factor"`
-	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive error"`
-	GroupIDs                *[]int64       `json:"group_ids"`
-	ExpiresAt               *int64         `json:"expires_at"`
-	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
-	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled"`
-	RateSyncEnabled         *bool          `json:"upstream_billing_rate_sync_enabled"`
-	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	ModelCatalogPolicy      *service.ModelCatalogPolicy `json:"model_catalog_policy"`
+	Name                    string                      `json:"name"`
+	Notes                   *string                     `json:"notes"`
+	Type                    string                      `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Credentials             map[string]any              `json:"credentials"`
+	Extra                   map[string]any              `json:"extra"`
+	ProxyID                 *int64                      `json:"proxy_id"`
+	Concurrency             *int                        `json:"concurrency"`
+	Priority                *int                        `json:"priority"`
+	RateMultiplier          *float64                    `json:"rate_multiplier"`
+	LoadFactor              *int                        `json:"load_factor"`
+	Status                  string                      `json:"status" binding:"omitempty,oneof=active inactive error"`
+	GroupIDs                *[]int64                    `json:"group_ids"`
+	ExpiresAt               *int64                      `json:"expires_at"`
+	AutoPauseOnExpired      *bool                       `json:"auto_pause_on_expired"`
+	ProbeEnabled            *bool                       `json:"upstream_billing_probe_enabled"`
+	RateSyncEnabled         *bool                       `json:"upstream_billing_rate_sync_enabled"`
+	ConfirmMixedChannelRisk *bool                       `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
-	AccountIDs              []int64                   `json:"account_ids"`
-	Filters                 *BulkUpdateAccountFilters `json:"filters"`
-	Name                    string                    `json:"name"`
-	ProxyID                 *int64                    `json:"proxy_id"`
-	Concurrency             *int                      `json:"concurrency"`
-	Priority                *int                      `json:"priority"`
-	RateMultiplier          *float64                  `json:"rate_multiplier"`
-	LoadFactor              *int                      `json:"load_factor"`
-	Status                  string                    `json:"status" binding:"omitempty,oneof=active inactive error"`
-	Schedulable             *bool                     `json:"schedulable"`
-	GroupIDs                *[]int64                  `json:"group_ids"`
-	Credentials             map[string]any            `json:"credentials"`
-	Extra                   map[string]any            `json:"extra"`
-	ProbeEnabled            *bool                     `json:"upstream_billing_probe_enabled"`
-	ConfirmMixedChannelRisk *bool                     `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	ModelCatalogPolicy      *service.ModelCatalogPolicy `json:"model_catalog_policy"`
+	AccountIDs              []int64                     `json:"account_ids"`
+	Filters                 *BulkUpdateAccountFilters   `json:"filters"`
+	Name                    string                      `json:"name"`
+	ProxyID                 *int64                      `json:"proxy_id"`
+	Concurrency             *int                        `json:"concurrency"`
+	Priority                *int                        `json:"priority"`
+	RateMultiplier          *float64                    `json:"rate_multiplier"`
+	LoadFactor              *int                        `json:"load_factor"`
+	Status                  string                      `json:"status" binding:"omitempty,oneof=active inactive error"`
+	Schedulable             *bool                       `json:"schedulable"`
+	GroupIDs                *[]int64                    `json:"group_ids"`
+	Credentials             map[string]any              `json:"credentials"`
+	Extra                   map[string]any              `json:"extra"`
+	ProbeEnabled            *bool                       `json:"upstream_billing_probe_enabled"`
+	ConfirmMixedChannelRisk *bool                       `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 type BulkUpdateAccountFilters struct {
@@ -1126,6 +1129,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 
 	result, err := executeAdminIdempotent(c, "admin.accounts.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		account, execErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+			ModelCatalogPolicy:    req.ModelCatalogPolicy,
 			Name:                  req.Name,
 			Notes:                 req.Notes,
 			Platform:              req.Platform,
@@ -1179,7 +1183,22 @@ func (h *AccountHandler) Create(c *gin.Context) {
 	// 探测失败不影响账号创建响应。
 	h.scheduleOpenAIResponsesProbe(createdAccount)
 	h.scheduleGrokImportProbe(createdAccount)
+	h.scheduleAccountCatalogRefresh(createdAccount)
 	response.Success(c, result.Data)
+}
+
+// New fixed-policy accounts need their own discovery snapshot before routing.
+// Queue discovery without making the create response wait for upstream models.
+func (h *AccountHandler) scheduleAccountCatalogRefresh(account *service.Account) {
+	if account == nil || h.accountTestService == nil {
+		return
+	}
+	if _, configured := account.Extra[service.ModelCatalogPolicyExtraKey]; !configured {
+		return
+	}
+	if catalog := h.accountTestService.ModelCatalog(); catalog != nil && catalog.Settings(context.Background()).Enabled {
+		catalog.QueueRefresh(account.ID)
+	}
 }
 
 // Duplicate handles creating an independent account from an existing account's configuration.
@@ -1258,6 +1277,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
 	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
+		ModelCatalogPolicy:    req.ModelCatalogPolicy,
 		Name:                  req.Name,
 		Notes:                 req.Notes,
 		Type:                  req.Type,
@@ -2223,6 +2243,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 			skipCheck := item.ConfirmMixedChannelRisk != nil && *item.ConfirmMixedChannelRisk
 
 			account, err := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+				ModelCatalogPolicy:    item.ModelCatalogPolicy,
 				Name:                  item.Name,
 				Notes:                 item.Notes,
 				Platform:              item.Platform,
@@ -2260,6 +2281,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 			// OpenAI APIKey 账号异步探测 /v1/responses 能力。
 			h.scheduleOpenAIResponsesProbe(account)
 			h.scheduleGrokImportProbe(account)
+			h.scheduleAccountCatalogRefresh(account)
 			success++
 			results = append(results, gin.H{
 				"name":    item.Name,
@@ -2422,7 +2444,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	// 确定是否跳过混合渠道检查
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
-	hasUpdates := req.Name != "" ||
+	hasUpdates := req.ModelCatalogPolicy != nil || req.Name != "" ||
 		req.ProxyID != nil ||
 		req.Concurrency != nil ||
 		req.Priority != nil ||
@@ -2441,6 +2463,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	}
 
 	result, err := h.adminService.BulkUpdateAccounts(c.Request.Context(), &service.BulkUpdateAccountsInput{
+		ModelCatalogPolicy:    req.ModelCatalogPolicy,
 		AccountIDs:            req.AccountIDs,
 		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
 		Name:                  req.Name,

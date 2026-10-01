@@ -3,6 +3,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,40 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type selectionInventoryRepo struct{ service.ModelCatalogRepository }
+
+func (*selectionInventoryRepo) ListPlatform(context.Context, string) ([]service.ModelCatalogSnapshot, error) {
+	return nil, nil
+}
+
+type selectionInventoryAccounts struct{ service.AccountRepository }
+
+func (*selectionInventoryAccounts) ListActive(context.Context) ([]service.Account, error) {
+	return []service.Account{
+		{Platform: service.PlatformOpenAI, Extra: map[string]any{service.ModelCatalogPolicyExtraKey: service.ModelCatalogPolicy{Models: []string{"gpt-new", "gpt-image-new", "sora-new"}}}},
+		{Platform: service.PlatformAnthropic, Extra: map[string]any{service.ModelCatalogPolicyExtraKey: service.ModelCatalogPolicy{Models: []string{"claude-new"}}}},
+	}, nil
+}
+
+type selectionInventoryAdmin struct{ service.AdminService }
+
+func (*selectionInventoryAdmin) GetGroup(context.Context, int64) (*service.Group, error) {
+	return &service.Group{ID: 2, Platform: service.PlatformOpenAI}, nil
+}
+
+func TestGroupAllowlistCandidatesUseInventoryWithoutMembersOrPrices(t *testing.T) {
+	registry := service.NewModelCatalogService(&selectionInventoryRepo{}, &selectionInventoryAccounts{}, nil, nil, nil)
+	t.Cleanup(registry.Stop)
+	h := &GroupHandler{modelRegistry: registry, adminService: &selectionInventoryAdmin{}}
+	router := gin.New()
+	router.GET("/groups/:id/models", h.GetGroupModelAllowlistCandidates)
+	for _, url := range []string{"/groups/0/models?platform=openai", "/groups/2/models?platform=anthropic"} {
+		data := fetchModelsListCandidates(t, router, url)
+		require.ElementsMatch(t, []any{"gpt-new", "gpt-image-new", "sora-new"}, data["models"])
+		require.Equal(t, "model_catalog", data["source"])
+	}
+}
 
 // hangingUpstream 模拟一个吊死的代理：请求一直不返回，直到 ctx 被取消。
 type hangingUpstream struct{}

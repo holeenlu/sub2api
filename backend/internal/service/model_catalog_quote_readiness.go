@@ -9,10 +9,21 @@ func (s *ModelCatalogService) quoteStatus(ctx context.Context, model *GroupCatal
 	if len(model.BillingModels) == 0 {
 		return "unavailable"
 	}
+	prices := s.prices
+	if pinned := RequestPricingFromContext(ctx); pinned != nil && pinned.prices != nil {
+		prices = pinned.prices
+	}
 	for _, id := range model.BillingModels {
 		ready := false
 		inputKnown, outputKnown := false, false
 		r := s.pricingResolver.Resolve(ctx, PricingInput{Model: id, Group: group, GroupID: &group.ID})
+		// Image settlement has per-image fallback prices even when a new image
+		// ID has no token entry in the remote reference catalog. Only an explicit
+		// group/channel token override opts out of those defaults.
+		explicitToken := r != nil && (r.Source == PricingSourceGroup || r.Source == PricingSourceChannel) && r.Mode == BillingModeToken
+		if IsImageGenerationIntent("", id, nil) && !explicitToken && s.pricingResolver.billingService != nil {
+			continue
+		}
 		if r != nil && r.channelPricing != nil {
 			p := r.channelPricing
 			if r.Mode == BillingModeImage || r.Mode == BillingModeVideo || r.Mode == BillingModePerRequest {
@@ -23,15 +34,15 @@ func (s *ModelCatalogService) quoteStatus(ctx context.Context, model *GroupCatal
 				ready = inputKnown && outputKnown
 			}
 		}
-		if !ready && s.prices != nil {
-			if p := s.prices.GetExactModelPricing(id); p != nil {
+		if !ready && prices != nil {
+			if p := prices.GetExactModelPricing(id); p != nil {
 				ready = p.ProvidedFields == nil || ((inputKnown || p.ProvidedFields["input_cost_per_token"]) && (outputKnown || p.ProvidedFields["output_cost_per_token"])) ||
 					p.ProvidedFields["output_cost_per_image"] || p.ProvidedFields["output_cost_per_image_token"] ||
 					(p.Mode == "embedding" && p.ProvidedFields["input_cost_per_token"])
 			}
 		}
-		if s.prices != nil {
-			if p := s.prices.GetExactModelPricing(id); p != nil && p.ProvidedFields != nil && p.SupportsPromptCaching && !p.ProvidedFields["cache_read_input_token_cost"] {
+		if prices != nil {
+			if p := prices.GetExactModelPricing(id); p != nil && p.ProvidedFields != nil && p.SupportsPromptCaching && !p.ProvidedFields["cache_read_input_token_cost"] {
 				ready = ready && r != nil && r.channelPricing != nil && r.channelPricing.CacheReadPrice != nil
 			}
 		}

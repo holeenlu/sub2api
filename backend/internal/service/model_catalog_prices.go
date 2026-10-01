@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
-	"strings"
 	"time"
 )
 
@@ -78,53 +76,6 @@ func (s *PricingService) PriceRevision() string {
 	return modelCatalogHash([]string{s.localHash, s.customFilesHash, s.referenceSupplementHash})
 }
 
-// Import validated data without rebuilding the server. The administrator's
-// configured fallback/override files are still applied only to the sales layer.
-func (s *ModelCatalogService) ImportPrices(ctx context.Context, body json.RawMessage) error {
-	if s.prices == nil {
-		return ErrModelCatalogUnavailable
-	}
-	var entries map[string]json.RawMessage
-	if json.Unmarshal(body, &entries) != nil || len(entries) > 20000 {
-		return fmt.Errorf("invalid reference price object")
-	}
-	for id, raw := range entries {
-		if strings.TrimSpace(id) == "" || len(id) > 256 {
-			return fmt.Errorf("invalid pricing model ID")
-		}
-		var fields map[string]json.RawMessage
-		if json.Unmarshal(raw, &fields) != nil {
-			return fmt.Errorf("invalid price record")
-		}
-		for key, value := range fields {
-			if !strings.Contains(key, "cost_per_") && !strings.Contains(key, "multiplier") {
-				continue
-			}
-			var n float64
-			if string(value) == "null" {
-				continue
-			}
-			if json.Unmarshal(value, &n) != nil || n < 0 || math.IsNaN(n) || math.IsInf(n, 0) {
-				return fmt.Errorf("invalid nonnegative price field %s", key)
-			}
-		}
-	}
-	// Validate the same parser used by billing before persisting the supplement.
-	if _, _, err := s.prices.buildPricingData(body); err != nil {
-		return err
-	}
-	if s.settings == nil || s.settings.settingRepo == nil {
-		return ErrModelCatalogUnavailable
-	}
-	if err := s.repo.SavePrices(ctx, modelCatalogHash(entries), body); err != nil {
-		return err
-	}
-	if err := s.settings.settingRepo.Set(ctx, "model_catalog_reference_prices", string(body)); err != nil {
-		return err
-	}
-	return s.prices.applyReferenceSupplement(body)
-}
-
 func (s *PricingService) applyReferenceSupplement(body []byte) error {
 	s.publicationMu.Lock()
 	defer s.publicationMu.Unlock()
@@ -160,10 +111,6 @@ func (s *PricingService) applyReferenceSupplement(body []byte) error {
 	s.customFilesHash = fingerprint
 	s.setCatalogReferenceLocked(base)
 	return nil
-}
-
-func (s *ModelCatalogService) ReferencePrices() *CatalogReferencePrices {
-	return s.prices.ReferencePrices()
 }
 
 func (s *ModelCatalogService) restoreReferencePrices(ctx context.Context) {
@@ -239,6 +186,9 @@ func catalogPlazaReference(raw json.RawMessage, revision, source string) *PlazaO
 // Called by the bounded background loop. New IDs bypass the ordinary interval,
 // but refresh attempts are still coalesced to at most once per minute.
 func (s *ModelCatalogService) refreshPricesIfDue(cfg ModelCatalogSettings) {
+	if s.prices != nil {
+		s.prices.catalogRefreshManaged.Store(true)
+	}
 	if !cfg.Enabled || s.prices == nil || s.prices.cfg == nil || s.prices.remoteClient == nil || s.prices.cfg.Pricing.RemoteURL == "" {
 		return
 	}

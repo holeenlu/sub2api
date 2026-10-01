@@ -1102,7 +1102,7 @@ export default {
       },
       modelPricing: {
         title: '分組逐模型定價',
-        description: '匹配模型後覆蓋通道和內建價格。長上下文階梯沿用官方/預設價卡，無需再手填區間。音訊可用按次層級設定 realtime、tts、stt。',
+        description: '只為例外模型設定獨立售價；留空的欄位繼續繼承通道價卡或參考價，平時用分組倍率即可。長上下文階梯沿用官方/預設價卡，無需再手填區間。音訊可用按次層級設定 realtime、tts、stt。',
         longContext: '啟用長上下文階梯定價',
         longContextHint: '勾選後按通道區間或官方預設階梯計費；關閉後預設按第一檔，帳號顯式開啟時除外。',
         add: '新增模型價格'
@@ -1143,13 +1143,14 @@ export default {
       },
       modelAllowlist: {
         title: '模型白名單',
-        hint: '開啟後，不在白名單中的模型會被拒絕（404 model_not_found），模型列表介面也只展示白名單內的模型。項目支援精確模型 ID 與任意位置的 * 萬用字元（如 gpt-*-codex）。注意：Claude Code 會用 haiku 系小模型做標題/摘要等探測，/messages/count_tokens 同樣受白名單控制，請一併勾選所需的小模型。',
+        hint: '從模型目錄勾選此分組要開放的模型；未勾選的模型不開放，留空則不開放任何模型。新同步的模型不會自動勾選。請一併選擇用戶端標題、摘要等輔助任務需要的小模型。',
         loading: '正在載入候選模型...',
         empty: '暫無候選模型，可在下方手工新增項目',
         selectedSummary: '已選 {selected} / {total}',
         selectAll: '全選',
         invertSelection: '反選',
         wildcardTag: '萬用字元',
+        pricingPendingTag: '待定價',
         customPlaceholder: '自訂項目，如 gpt-*-codex 或 claude-*',
         addCustom: '新增',
         emptySelectionError: '模型白名單已開啟，請至少選擇或新增一個模型項目',

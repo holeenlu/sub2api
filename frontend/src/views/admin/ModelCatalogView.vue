@@ -1,123 +1,166 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
-      <h1 class="text-2xl font-semibold">{{ t('modelCatalog.title') }}</h1>
-      <p v-if="error" role="alert" class="text-red-600">{{ error }}</p>
-      <p v-if="saved" role="status" class="text-emerald-600">{{ t('modelCatalog.saved') }}</p>
-      <form v-if="settings" class="card space-y-4 p-5" @submit.prevent="saveSettings">
-        <h2 class="font-semibold">{{ t('modelCatalog.settings') }}</h2>
-        <label class="flex items-center gap-2"><input v-model="settings.enabled" type="checkbox" />{{ t('modelCatalog.enabled') }}</label>
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <label>{{ t('modelCatalog.interval') }}<input v-model.number="settings.interval_seconds" class="input mt-1" type="number" min="60" max="86400" required /></label>
-          <label>{{ t('modelCatalog.deletionAlert') }}<input v-model.number="settings.deletion_alert_percent" class="input mt-1" type="number" min="1" max="100" required /></label>
-          <label>{{ t('modelCatalog.priorityAccounts') }}<input :value="settings.priority_account_ids?.join(', ')" class="input mt-1" @change="settings.priority_account_ids=($event.target as HTMLInputElement).value.split(',').map(v=>Number(v.trim())).filter(v=>v>0)" /></label>
-          <label>{{ t('modelCatalog.priorityInterval') }}<input v-model.number="settings.priority_interval_seconds" class="input mt-1" type="number" min="60" max="86400" required /></label>
-          <label>{{ t('modelCatalog.priceInterval') }}<input v-model.number="settings.price_interval_seconds" class="input mt-1" type="number" min="60" max="86400" required /></label>
-          <label>{{ t('modelCatalog.timeout') }}<input v-model.number="settings.timeout_seconds" class="input mt-1" type="number" min="5" max="120" required /></label>
-          <label>{{ t('modelCatalog.concurrency') }}<input v-model.number="settings.concurrency" class="input mt-1" type="number" min="1" max="8" required /></label>
-          <label>{{ t('modelCatalog.staleLimit') }}<input v-model.number="settings.stale_seconds" class="input mt-1" type="number" min="300" max="604800" required /></label>
+    <div class="space-y-5">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 class="text-2xl font-semibold">{{ t('modelCatalog.title') }}</h1>
+          <p class="mt-2 max-w-3xl text-sm text-gray-500 dark:text-dark-400">{{ t('modelCatalog.inventoryHint') }}</p>
         </div>
-        <button class="btn btn-primary" :disabled="busy">{{ t('modelCatalog.save') }}</button>
-      </form>
-      <section class="card space-y-4 p-5">
-        <div class="flex flex-wrap items-end gap-3">
-          <label>{{ t('modelCatalog.platform') }}<input :disabled="busy" v-model="platform" class="input mt-1" placeholder="openai" /></label>
-          <label>{{ t('modelCatalog.accountID') }}<input :disabled="busy" v-model="accountID" class="input mt-1" type="number" min="1" /></label>
-          <button class="btn btn-secondary" :disabled="busy" @click="readCatalog">{{ t('modelCatalog.inspect') }}</button>
-          <button v-if="accountID" class="btn btn-primary" :disabled="busy" @click="refreshCatalog">{{ t('modelCatalog.refresh') }}</button>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary" :disabled="busy" @click="syncNow">{{ t('modelCatalog.syncNow') }}</button>
+          <button class="btn btn-primary" :disabled="busy" @click="editModel()">{{ t('modelCatalog.addModel') }}</button>
         </div>
-        <p v-if="catalog" class="text-xs text-gray-500">{{ t('modelCatalog.updated', { time: catalog.checked_at ? new Date(catalog.checked_at).toLocaleString() : '—' }) }} · {{ catalog.status }} · {{ catalog.revision?.slice(0, 12) }}</p>
-        <p v-if="catalog?.warnings?.length" role="status" class="text-sm text-amber-600">{{ t('modelCatalog.visibilityDrop') }}</p>
-        <div class="overflow-auto">
+      </div>
+      <p v-if="error && !editor" role="alert" class="text-sm text-red-600">{{ error }}</p>
+      <p v-if="notice" role="status" class="text-sm text-primary-600">{{ notice }}</p>
+      <details v-if="settings" class="card p-4">
+        <summary class="cursor-pointer text-sm font-medium">{{ t('modelCatalog.settings') }}</summary>
+        <form class="mt-4 space-y-3" @submit.prevent="saveSettings">
+          <p class="text-sm text-gray-500">{{ t('modelCatalog.syncHint') }}</p>
+          <div class="flex flex-wrap items-end gap-4">
+            <label class="flex items-center gap-2 py-2"><input v-model="settings.enabled" type="checkbox" :disabled="busy" />{{ t('modelCatalog.enabled') }}</label>
+            <label class="text-sm">{{ t('modelCatalog.interval') }}<input v-model.number="settings.interval_seconds" class="input mt-1 w-40" type="number" min="60" max="86400" required :disabled="busy || !settings.enabled" /></label>
+            <button class="btn btn-secondary" :disabled="busy">{{ t('modelCatalog.save') }}</button>
+          </div>
+        </form>
+      </details>
+      <section class="card overflow-hidden">
+        <div class="flex flex-wrap gap-3 p-4">
+          <div class="w-full sm:w-48"><label class="sr-only" for="catalog-platform">{{ t('modelCatalog.platform') }}</label><Select id="catalog-platform" v-model="platform" :options="platformOptions" searchable /></div>
+          <div class="w-full sm:w-40"><label class="sr-only" for="catalog-kind">{{ t('modelCatalog.kind') }}</label><Select id="catalog-kind" v-model="kind" :options="kindFilterOptions" /></div>
+          <input v-model="search" class="input min-w-48 flex-1" type="search" :aria-label="t('modelCatalog.search')" :placeholder="t('modelCatalog.search')" />
+          <label class="flex items-center gap-2 text-sm"><input v-model="showDisabled" type="checkbox" />{{ t('modelCatalog.showDisabled') }}</label>
+        </div>
+        <div class="overflow-x-auto">
           <table class="w-full text-left text-sm">
-            <thead><tr><th class="p-2">{{ t('modelCatalog.model') }}</th><th class="p-2">{{ t('modelCatalog.kind') }}</th><th class="p-2">{{ t('modelCatalog.state') }}</th><th class="p-2">{{ t('modelCatalog.source') }}</th></tr></thead>
-            <tbody><tr v-for="model in catalog?.models ?? []" :key="model.platform + ':' + model.id" class="border-t dark:border-dark-600"><td class="p-2 font-mono">{{ model.id }}</td><td class="p-2">{{ model.kind }}</td><td class="p-2">{{ model.lifecycle }} · {{ model.access }}<span v-if="model.missing?.length"> · {{ model.missing.join(', ') }}</span></td><td class="p-2">{{ model.source }}</td></tr></tbody>
+            <thead class="bg-gray-50 text-gray-500 dark:bg-dark-800"><tr><th class="px-4 py-3">{{ t('modelCatalog.model') }}</th><th class="px-4 py-3">{{ t('modelCatalog.platform') }}</th><th class="px-4 py-3">{{ t('modelCatalog.kind') }}</th><th class="px-4 py-3">{{ t('modelCatalog.state') }}</th><th class="px-4 py-3 text-right">{{ t('modelCatalog.actions') }}</th></tr></thead>
+            <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+              <tr v-for="model in visibleModels" :key="model.platform + ':' + model.id">
+                <td class="px-4 py-3"><div class="break-all font-mono">{{ model.id }}</div><div v-if="model.display_name && model.display_name !== model.id" class="mt-1 text-xs text-gray-500">{{ model.display_name }}</div></td>
+                <td class="px-4 py-3">{{ platformLabel(model.platform) }}</td>
+                <td class="px-4 py-3">{{ kindLabel(model.kind) }}</td>
+                <td class="whitespace-nowrap px-4 py-3" :class="inactive(model) ? 'text-gray-400' : 'text-emerald-600'">{{ t(model.lifecycle === 'retired' ? 'modelCatalog.retired' : model.disabled ? 'modelCatalog.disabled' : 'modelCatalog.available') }}</td>
+                <td class="whitespace-nowrap px-4 py-3 text-right"><button class="btn btn-ghost btn-sm" :disabled="busy" @click="editModel(model)">{{ t('modelCatalog.edit') }}</button></td>
+              </tr>
+              <tr v-if="!visibleModels.length"><td colspan="5" class="p-8 text-center text-gray-500">{{ t(busy ? 'modelCatalog.loading' : 'modelCatalog.empty') }}</td></tr>
+            </tbody>
           </table>
         </div>
+        <Pagination v-if="filteredModels.length > pageSize" :page="page" :page-size="pageSize" :total="filteredModels.length" :show-page-size-selector="false" @update:page="page = $event" />
       </section>
-      <form v-if="catalog?.account_id && catalog.account_id === Number(accountID)" class="card space-y-3 p-5" @submit.prevent="savePolicy">
-        <h2 class="font-semibold">{{ t('modelCatalog.accountPolicy') }}</h2>
-        <p class="text-sm text-gray-500">{{ t('modelCatalog.policyHint') }}</p>
-        <select v-model="policy.mode" class="input"><option value="legacy">{{ t('modelCatalog.legacy') }}</option><option value="follow">{{ t('modelCatalog.follow') }}</option><option value="fixed">{{ t('modelCatalog.fixed') }}</option></select>
-        <label v-if="policy.mode === 'fixed'" class="block">{{ t('modelCatalog.allowed') }}<textarea v-model="allowedText" class="input h-32 font-mono text-xs" /></label>
-        <label v-if="policy.mode !== 'legacy'" class="block">{{ t('modelCatalog.exclude') }}<textarea v-model="excludedText" class="input h-24 font-mono text-xs" /></label>
-        <button class="btn btn-primary" :disabled="busy">{{ t('modelCatalog.save') }}</button>
-        <h3 class="font-medium">{{ t('modelCatalog.history') }}</h3>
-        <div v-for="release in history" :key="release.revision + release.created_at" class="flex items-center gap-3 text-xs">
-          <time>{{ new Date(release.created_at).toLocaleString() }}</time><code>{{ release.revision.slice(0,12) }}</code><span>{{ release.operation }}</span>
-          <button type="button" class="btn btn-secondary" :disabled="busy || release.revision===catalog.revision" @click="restore(release.revision)">{{ t('modelCatalog.restore') }}</button>
-        </div>
-      </form>
-      <form class="card space-y-3 p-5" @submit.prevent="compare">
-        <h2 class="font-semibold">{{ t('modelCatalog.compare') }}</h2>
-        <p class="text-sm text-gray-500">{{ t('modelCatalog.compareHint') }}</p>
-        <label>{{ t('modelCatalog.groupID') }}<input v-model="groupID" class="input" type="number" min="1" required /></label>
-        <button class="btn btn-secondary" :disabled="busy">{{ t('modelCatalog.inspect') }}</button>
-        <pre v-if="comparison" class="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{{ comparison }}</pre>
-      </form>
-      <form class="card space-y-3 p-5" @submit.prevent="savePrices">
-        <h2 class="font-semibold">{{ t('modelCatalog.priceData') }}</h2>
-        <p class="text-sm text-gray-500">{{ t('modelCatalog.priceHint') }}</p>
-        <p class="text-xs text-gray-500">{{ priceRevision.slice(0,12) }}</p>
-        <textarea v-model="prices" class="input h-48 font-mono text-xs" spellcheck="false" :aria-label="t('modelCatalog.priceData')" />
-        <button class="btn btn-primary" :disabled="busy">{{ t('modelCatalog.save') }}</button>
-      </form>
-      <form class="card space-y-3 p-5" @submit.prevent="saveRegistry">
-        <h2 class="font-semibold">{{ t('modelCatalog.registry') }}</h2>
-        <p class="text-sm text-gray-500">{{ t('modelCatalog.registryHint') }}</p>
-        <textarea v-model="registry" class="input h-64 font-mono text-xs" spellcheck="false" :aria-label="t('modelCatalog.registry')" />
-        <button class="btn btn-primary" :disabled="busy">{{ t('modelCatalog.save') }}</button>
-      </form>
     </div>
+    <BaseDialog :show="!!editor" :title="t(editingExisting ? 'modelCatalog.edit' : 'modelCatalog.addModel')" width="normal" @close="closeEditor">
+      <form v-if="editor" class="space-y-4" @submit.prevent="saveModel">
+        <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
+        <div><label class="input-label" for="model-platform">{{ t('modelCatalog.platform') }}</label><Select id="model-platform" v-model="editor.platform" :disabled="editingExisting || busy" :options="concretePlatforms" searchable /></div>
+        <label class="block text-sm" for="model-id">{{ t('modelCatalog.model') }}<input id="model-id" v-model.trim="editor.id" class="input mt-1 font-mono" maxlength="256" pattern="[^\s*]+" required :disabled="editingExisting || busy" /></label>
+        <label class="block text-sm" for="model-display-name">{{ t('modelCatalog.displayName') }}<input id="model-display-name" v-model.trim="editor.display_name" class="input mt-1" maxlength="256" :disabled="busy" /></label>
+        <div><label class="input-label" for="model-kind">{{ t('modelCatalog.kind') }}</label><Select id="model-kind" v-model="editor.kind" :options="kindOptions" :disabled="busy" /></div>
+        <label class="flex items-center gap-2 text-sm"><input v-model="editor.disabled" type="checkbox" :disabled="busy" />{{ t('modelCatalog.disableModel') }}</label>
+        <p class="text-xs text-gray-500">{{ t('modelCatalog.disableHint') }}</p>
+        <div class="flex justify-end gap-2"><button type="button" class="btn btn-secondary" :disabled="busy" @click="closeEditor">{{ t('modelCatalog.cancel') }}</button><button class="btn btn-primary" :disabled="busy">{{ t('modelCatalog.save') }}</button></div>
+      </form>
+    </BaseDialog>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import { getModelCatalog, refreshModelCatalog, getCatalogSettings, saveCatalogSettings, getCatalogRegistry, saveCatalogRegistry, saveAccountCatalogPolicy, getCatalogHistory, rollbackCatalog, getCatalogPrices, saveCatalogPrices, explainCatalog, type CatalogPolicy, type CatalogRelease, type ModelCatalog, type CatalogSyncSettings } from '@/api/admin/modelCatalog'
+import BaseDialog from '@/components/common/BaseDialog.vue'
+import Pagination from '@/components/common/Pagination.vue'
+import Select from '@/components/common/Select.vue'
+import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
+import { extractApiErrorMessage } from '@/utils/apiError'
+import { getModelCatalog, syncModelCatalog, getCatalogSettings, saveCatalogSettings, saveCatalogModel, type CatalogModel, type CatalogModelInput, type ModelCatalog, type CatalogSyncSettings } from '@/api/admin/modelCatalog'
+
 const { t } = useI18n()
-const settings = ref<CatalogSyncSettings | null>(null)
 const catalog = ref<ModelCatalog | null>(null)
-const registry = ref('[]')
-const platform = ref('openai')
-const route=useRoute()
-const accountID = ref(typeof route.query.account_id==='string'?route.query.account_id:'')
-const policy=ref<CatalogPolicy>({mode:'legacy',models:[],excluded:[]})
-const allowedText=ref('');const excludedText=ref('');const history=ref<CatalogRelease[]>([])
-const prices=ref('{}');const priceRevision=ref('');const groupID=ref('');const comparison=ref('')
-function lines(value:string){return [...new Set(value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean))]}
-async function loadAccountState(){if(!catalog.value?.account_id){history.value=[];return}
- policy.value=catalog.value.policy??{mode:'legacy',models:[],excluded:[]};allowedText.value=policy.value.models.join('\n');excludedText.value=policy.value.excluded.join('\n');history.value=await getCatalogHistory(catalog.value.account_id)
-}
-async function savePolicy(){await action(async()=>{await saveAccountCatalogPolicy(Number(accountID.value),{mode:policy.value.mode,models:lines(allowedText.value),excluded:lines(excludedText.value)});saved.value=true})}
-async function restore(revision:string){await action(async()=>{await rollbackCatalog(Number(accountID.value),revision);catalog.value=await getModelCatalog({account_id:Number(accountID.value)});await loadAccountState();saved.value=true})}
-async function savePrices(){await action(async()=>{const entries:unknown=JSON.parse(prices.value);if(!entries||typeof entries!=='object'||Array.isArray(entries))throw new Error('invalid prices');await saveCatalogPrices(entries as Record<string,unknown>);priceRevision.value=(await getCatalogPrices()).revision;saved.value=true})}
-async function compare(){await action(async()=>{comparison.value=JSON.stringify(await explainCatalog(Number(groupID.value)),null,2)})}
+const settings = ref<CatalogSyncSettings | null>(null)
+const platform = ref('')
+const kind = ref('')
+const search = ref('')
+const showDisabled = ref(false)
+const page = ref(1)
+const pageSize = 50
 const busy = ref(false)
 const error = ref('')
-const saved = ref(false)
+const notice = ref('')
+const editor = ref<CatalogModelInput | null>(null)
+const editingExisting = ref(false)
+const concretePlatforms = [...CONCRETE_PLATFORM_OPTIONS]
+const platformOptions = computed(() => [{ value: '', label: t('modelCatalog.allPlatforms') }, ...concretePlatforms])
+const kinds = ['chat', 'image', 'video', 'audio', 'embedding', 'other']
+const kindLabel = (value: string) => t(`modelCatalog.kinds.${kinds.includes(value) ? value : 'other'}`)
+const kindOptions = computed(() => kinds.map(value => ({ value, label: kindLabel(value) })))
+const kindFilterOptions = computed(() => [{ value: '', label: t('modelCatalog.allKinds') }, ...kindOptions.value])
+const platformLabel = (value: string) => concretePlatforms.find(option => option.value === value)?.label ?? value
+const inactive = (model: CatalogModel) => model.disabled || model.lifecycle === 'retired'
+const filteredModels = computed(() => {
+  const term = search.value.trim().toLowerCase()
+  return (catalog.value?.models ?? []).filter(model =>
+    (!platform.value || model.platform === platform.value) &&
+    (!kind.value || model.kind === kind.value) &&
+    (showDisabled.value || !inactive(model)) &&
+    (!term || `${model.id} ${model.display_name ?? ''}`.toLowerCase().includes(term))
+  )
+})
+const visibleModels = computed(() => filteredModels.value.slice((page.value - 1) * pageSize, page.value * pageSize))
+watch([platform, kind, search, showDisabled], () => { page.value = 1 })
+const controller = new AbortController()
+onBeforeUnmount(() => controller.abort())
 async function action(operation: () => Promise<void>) {
   if (busy.value) return
-  busy.value = true; error.value = ''; saved.value = false
-  try { await operation() } catch { error.value = t('modelCatalog.error') } finally { busy.value = false }
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try { await operation() } catch (cause) {
+    if (!controller.signal.aborted) error.value = extractApiErrorMessage(cause, t('modelCatalog.error'))
+  } finally { busy.value = false }
 }
-async function readCatalog() { await action(async () => { catalog.value = await getModelCatalog({ account_id: accountID.value ? Number(accountID.value) : undefined, platform: platform.value });await loadAccountState() }) }
-async function refreshCatalog() { await action(async () => { catalog.value = await refreshModelCatalog(Number(accountID.value));await loadAccountState() }) }
-async function saveSettings() { if (settings.value) await action(async () => { await saveCatalogSettings(settings.value!); saved.value = true }) }
-async function saveRegistry() {
-  let models: unknown
-  try { models = JSON.parse(registry.value) } catch { error.value = t('modelCatalog.registryInvalid'); return }
-  if (!Array.isArray(models)) { error.value = t('modelCatalog.registryInvalid'); return }
-  const entries = models
-  await action(async () => { await saveCatalogRegistry(entries); saved.value = true })
+async function readCatalog() {
+  catalog.value = await getModelCatalog({}, controller.signal)
+  page.value = Math.min(page.value, Math.max(1, Math.ceil(filteredModels.value.length / pageSize)))
+}
+async function syncNow() {
+  await action(async () => {
+    notice.value = t('modelCatalog.syncRunning')
+    const result = await syncModelCatalog(controller.signal)
+    await readCatalog()
+    notice.value = t('modelCatalog.syncSummary', { success: result.succeeded ?? 0, failed: result.failed ?? 0 })
+    if (result.error) notice.value += ` ${t('modelCatalog.syncPartialFailure')}`
+  })
+}
+async function saveSettings() {
+  if (settings.value) await action(async () => {
+    await saveCatalogSettings(settings.value!)
+    notice.value = t('modelCatalog.saved')
+  })
+}
+function editModel(model?: CatalogModel) {
+  error.value = ''
+  editingExisting.value = !!model
+  editor.value = { id: model?.id ?? '', platform: model?.platform ?? (platform.value || 'openai'), display_name: model?.display_name ?? '', kind: kinds.includes(model?.kind ?? '') ? model!.kind : 'chat', disabled: !!model?.disabled }
+}
+function closeEditor() { if (!busy.value) editor.value = null }
+async function saveModel() {
+  if (!editor.value) return
+  const input = { ...editor.value }
+  if (!editingExisting.value && catalog.value?.models.some(model => model.platform === input.platform && model.id === input.id)) {
+    error.value = t('modelCatalog.duplicateModel')
+    return
+  }
+  await action(async () => {
+    await saveCatalogModel(input)
+    await readCatalog()
+    editor.value = null
+    notice.value = t('modelCatalog.saved')
+  })
 }
 onMounted(() => action(async () => {
-  const [config, entries, priceData] = await Promise.all([getCatalogSettings(), getCatalogRegistry(),getCatalogPrices()])
-  settings.value = config; registry.value = JSON.stringify(entries, null, 2)
-  prices.value=JSON.stringify(priceData.supplemental??{},null,2);priceRevision.value=priceData.revision??''
-  catalog.value = await getModelCatalog({ account_id:accountID.value?Number(accountID.value):undefined, platform: platform.value });await loadAccountState()
+  const [inventory, config] = await Promise.all([getModelCatalog({}, controller.signal), getCatalogSettings()])
+  catalog.value = inventory
+  settings.value = config
 }))
 </script>

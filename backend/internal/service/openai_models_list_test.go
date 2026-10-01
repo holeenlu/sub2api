@@ -231,67 +231,6 @@ func TestFetchOpenAIModelsListEmptyAndMalformedResponses(t *testing.T) {
 	}
 }
 
-func TestPinnedOpenAIModelsListMixedAccountsShareColdCacheAcrossGroups(t *testing.T) {
-	_, oauthCalls := newCodexModelsOAuthCacheServer(t, `{"models":[{"slug":"shared-model"},{"slug":"oauth-special"}]}`)
-	var apiCalls atomic.Int32
-	s := newCodexModelsAPIKeyTestService(&codexModelsHTTPUpstreamStub{do: func(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-		apiCalls.Add(1)
-		return ordinaryModelsUpstreamResponse(`{"data":[{"id":"shared-model","owned_by":"api-provider"},{"id":"api-special"}]}`), nil
-	}})
-	apiAccount := newCodexModelsAPIKeyTestAccount("https://models.example/v1")
-	oauthAccount := newCodexModelsTestAccount()
-	for _, account := range []*Account{apiAccount, oauthAccount} {
-		account.Status, account.Schedulable = StatusActive, true
-	}
-	accounts := []Account{*apiAccount, *oauthAccount}
-	s.accountRepo = splitCodexModelsAccountRepo{all: map[int64][]Account{10: accounts, 11: accounts}}
-	groups := []*Group{
-		{ID: 10, Platform: PlatformOpenAI, CodexModelsManifestConfig: GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{2, 1}},
-			ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"oauth-special", "shared-model"}}},
-		{ID: 11, Platform: PlatformOpenAI, CodexModelsManifestConfig: GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{2, 1}}},
-	}
-	type result struct {
-		response *OpenAIModelsResponse
-		account  *Account
-		err      error
-	}
-	results := make([]result, len(groups))
-	var wait sync.WaitGroup
-	for i, group := range groups {
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			results[i].response, results[i].account, results[i].err = s.FetchPinnedOpenAIModelsList(context.Background(), group, 3, "")
-		}()
-	}
-	wait.Wait()
-	for i, result := range results {
-		require.NoError(t, result.err)
-		require.EqualValues(t, 2, result.account.ID)
-		var catalog struct {
-			Data []struct {
-				ID    string `json:"id"`
-				Owner string `json:"owned_by"`
-			} `json:"data"`
-		}
-		require.NoError(t, json.Unmarshal(result.response.Body, &catalog))
-		ids := make([]string, 0, len(catalog.Data))
-		for _, model := range catalog.Data {
-			ids = append(ids, model.ID)
-			if model.ID == "shared-model" {
-				require.Equal(t, "api-provider", model.Owner)
-			}
-		}
-		if i == 0 {
-			require.Equal(t, []string{"oauth-special", "shared-model"}, ids)
-		} else {
-			require.Equal(t, []string{"shared-model", "api-special", "oauth-special"}, ids)
-		}
-	}
-	require.EqualValues(t, 1, apiCalls.Load())
-	require.EqualValues(t, 1, oauthCalls.Load())
-}
-
 func TestFetchOpenAIModelsListResolvesShadowOAuthCredentials(t *testing.T) {
 	_, calls := newCodexModelsOAuthCacheServer(t, `{"models":[{"slug":"parent-model"}]}`)
 	parent := newCodexModelsTestAccount()

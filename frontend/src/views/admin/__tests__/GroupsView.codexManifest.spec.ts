@@ -246,45 +246,21 @@ describe("GroupsView Codex manifest binding", () => {
       page_size: 20,
       pages: 1,
     });
-    getModelAllowlistCandidates.mockResolvedValue([]);
+    getModelAllowlistCandidates.mockResolvedValue({ models: [], pricingPending: [] });
     getUsageSummary.mockResolvedValue([]);
     getCapacitySummary.mockResolvedValue([]);
     getLiveCapability.mockResolvedValue({ supported: false });
   });
 
-  it("preserves consecutive child updates on the reactive edit config", async () => {
+  it("no longer offers catalog source accounts for a group", async () => {
     const wrapper = mountView();
     await flushPromises();
-
-    const editButton = wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("common.edit"));
-    expect(editButton).toBeTruthy();
+    const editButton = wrapper.findAll("button").find(button => button.text().includes("common.edit"));
     await editButton!.trigger("click");
     await flushPromises();
-
-    expect(wrapper.get('[data-testid="codex-manifest-value"]').text()).toBe(
-      JSON.stringify(sourceGroup.codex_models_manifest_config),
-    );
-
-    await wrapper.get('[data-testid="codex-manifest-enable"]').trigger("click");
-    await flushPromises();
-    expect(wrapper.get('[data-testid="codex-manifest-value"]').text()).toContain(
-      '"enabled":true',
-    );
-
-    await wrapper
-      .get('[data-testid="codex-manifest-select-account"]')
-      .trigger("click");
-    await flushPromises();
-    expect(wrapper.get('[data-testid="codex-manifest-value"]').text()).toBe(
-      JSON.stringify({
-        enabled: true,
-        account_ids: [17],
-        fallback_to_scheduler: false,
-      }),
-    );
-
+    expect(wrapper.find('[data-testid="codex-manifest-value"]').exists()).toBe(false);
+    expect(wrapper.find('router-link[to^="/admin/model-catalog?group_id="]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("admin.groups.codexModelsManifest");
     wrapper.unmount();
   });
 });

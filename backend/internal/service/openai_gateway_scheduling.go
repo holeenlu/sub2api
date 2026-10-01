@@ -1731,6 +1731,9 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, fresh, platform, requestedModel, requireCompact, requiredCapability) {
 		return nil
 	}
+	if s.modelCatalog != nil && !s.modelCatalog.accountRouteAllowed(ctx, fresh, requestedModel) {
+		return nil
+	}
 	if !parentHealthyForShadow(fresh, s.parentAccountLookup(ctx)) {
 		return nil
 	}
@@ -1783,6 +1786,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, account, platform, requestedModel, requireCompact, requiredCapability) {
 			return nil
 		}
+		if s.modelCatalog != nil && !s.modelCatalog.accountRouteAllowed(ctx, account, requestedModel) {
+			return nil
+		}
 		if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
 			return nil
 		}
@@ -1806,6 +1812,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		return nil
 	}
 	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, latest, platform, requestedModel, requireCompact, requiredCapability) {
+		return nil
+	}
+	if s.modelCatalog != nil && !s.modelCatalog.accountRouteAllowed(ctx, latest, requestedModel) {
 		return nil
 	}
 	if !parentHealthyForShadow(latest, s.parentAccountLookup(ctx)) {
