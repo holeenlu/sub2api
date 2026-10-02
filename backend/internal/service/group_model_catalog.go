@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
 )
 
 // GroupCatalogModel is a public request identity. BillingModels and account
@@ -173,6 +175,9 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 		if group.Platform != PlatformComposite {
 			platform = group.Platform
 		}
+		if platform == PlatformTypeSafe && a.Type == AccountTypeAPIKey {
+			add(typesafe.JevLatestModel, platform, "native_protocol")
+		}
 		var ids []string
 		var at time.Time
 		var found bool
@@ -312,6 +317,12 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 			if !isConcreteRequestPlatform(platform) {
 				continue
 			}
+			if platform == PlatformTypeSafe {
+				if requestModel != typesafe.JevLatestModel || c.name != typesafe.JevLatestModel {
+					continue
+				}
+				endpoint = "systemone"
+			}
 			mapped := requestModel
 			if channel != nil {
 				if m := lookupMappingAcrossPlatforms(channelIndex, group.ID, platform, strings.ToLower(requestModel)); m != "" {
@@ -323,6 +334,9 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 			responseDependent := channel != nil && channel.BillingModelSource == BillingModelSourceResponse
 			for i := range active {
 				a := &active[i]
+				if platform == PlatformTypeSafe && a.Type != AccountTypeAPIKey {
+					continue
+				}
 				if a.Platform != platform && !(mixedListingAccountAllowed(platform, a) && mixedListingModelAllowed(platform, mapped)) {
 					continue
 				}
@@ -471,6 +485,17 @@ func (c *GroupModelCatalog) ModelIDs() []string {
 		}
 	}
 	return ids
+}
+
+// CodexModelIDs excludes native System One entries, including configured aliases.
+func (c *GroupModelCatalog) CodexModelIDs() []string {
+	llm := &GroupModelCatalog{Models: make([]GroupCatalogModel, 0, len(c.Models))}
+	for _, model := range c.Models {
+		if model.Platform != PlatformTypeSafe {
+			llm.Models = append(llm.Models, model)
+		}
+	}
+	return llm.ModelIDs()
 }
 
 // Catalog visibility ignores transient load/rate limits, but respects persistent

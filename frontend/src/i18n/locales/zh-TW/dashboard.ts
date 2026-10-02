@@ -203,7 +203,12 @@ export default {
         codexCli: 'Codex CLI',
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
+        systemOne: 'System One',
         opencode: 'OpenCode'
+      },
+      typesafe: {
+        description: '透過 TypeSafe 原生 System One 端點呼叫 Jev。',
+        note: 'System One 不支援串流請求，也不相容 Chat Completions、Responses、Claude Code 或 Codex 用戶端。'
       },
       antigravity: {
         description: '為 Antigravity 分組設定 API 存取。請根據您使用的用戶端選擇對應的設定方式。',

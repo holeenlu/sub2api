@@ -151,7 +151,7 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 		if shared.Status == "unavailable" {
 			return nil, false, nil
 		}
-		configuredModels = FilterCodexModelIDsForGroup(shared.ModelIDs(), group)
+		configuredModels = FilterCodexModelIDsForGroup(shared.CodexModelIDs(), group)
 	}
 	if !localConfigured {
 		return nil, false, nil
@@ -219,7 +219,7 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		if shared.Status == "unavailable" {
 			return fmt.Errorf("group model catalog is unavailable")
 		}
-		configuredModels = FilterCodexModelIDsForGroup(shared.ModelIDs(), group)
+		configuredModels = FilterCodexModelIDsForGroup(shared.CodexModelIDs(), group)
 		selection, filter = configuredModels, true
 	}
 	body, changed, err := mergeConfiguredCodexModelsManifest(manifest.Body, configuredModels, selection, filter)

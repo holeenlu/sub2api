@@ -97,6 +97,12 @@ export default {
       schedulableEnabled: '排程已開啟',
       schedulableDisabled: '排程已關閉',
       failedToToggleSchedulable: '切換排程狀態失敗',
+      priorityQuick: {
+        raise: '提高優先順序（數值 -1）',
+        lower: '降低優先順序（數值 +1）',
+        editHint: '點選直接輸入；數值越小越優先',
+        failed: '更新優先順序失敗'
+      },
       groupCountTotal: '共 {count} 個分組',
       columns: {
         name: '名稱',
@@ -319,6 +325,7 @@ export default {
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
         opencode_go: 'OpenCode',
+        typesafe: 'TypeSafe / Jev',
       },
       cnProviders: {
         accountMode: {
@@ -1043,7 +1050,8 @@ export default {
       poolModeRetryStatusCodesHint: '僅在池模式下生效。以英文逗號分隔的 HTTP 狀態碼（100-599），命中時觸發同帳號重試。留空使用預設值（{default}）。',
       customErrorCodes: '自訂錯誤碼',
       customErrorCodesHint: '僅對選中的錯誤碼停止排程',
-      customErrorCodesWarning: '僅選中的錯誤碼會停止排程，其他錯誤將返回 500。',
+      customErrorCodesWarning:
+        '自訂錯誤碼僅用於篩選常規的帳號錯誤處理（如停止排程、速率限制標記），不決定請求是否重試或切換帳號。未選中的錯誤仍可能觸發重試或切換帳號，最終返回給用戶端的狀態碼取決於閘道器路徑和錯誤透傳規則，並非統一返回 500。列表為空時不做篩選。',
       customErrorCodes429Warning:
         '429 已有內建的速率限制處理機制。新增到自訂錯誤碼後，將直接停止排程而非臨時速率限制。確定要新增嗎？',
       customErrorCodes529Warning:
