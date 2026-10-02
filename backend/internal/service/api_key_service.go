@@ -815,6 +815,27 @@ func (s *APIKeyService) GetByKey(ctx context.Context, key string) (*APIKey, erro
 	return apiKey, nil
 }
 
+// GetByKeyUncached reads the current authorization state directly from the
+// repository. Long-lived WebSocket sessions use this at turn boundaries so a
+// delayed or lost cache invalidation cannot keep a revoked key authorized.
+// It deliberately bypasses the auth cache and singleflight path while keeping
+// the same input validation and derived IP rule preparation as GetByKey.
+func (s *APIKeyService) GetByKeyUncached(ctx context.Context, key string) (*APIKey, error) {
+	if len(key) == 0 || len(key) > MaxAPIKeyCredentialBytes {
+		return nil, ErrAPIKeyNotFound
+	}
+	apiKey, err := s.lookupAPIKeyForAuth(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("get api key: %w", err)
+	}
+	if apiKey == nil {
+		return nil, ErrAPIKeyNotFound
+	}
+	apiKey.Key = key
+	s.compileAPIKeyIPRules(apiKey)
+	return apiKey, nil
+}
+
 // Update 更新API Key
 func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req UpdateAPIKeyRequest) (*APIKey, error) {
 	if req.ConcurrencyLimit != nil && *req.ConcurrencyLimit < 0 {
