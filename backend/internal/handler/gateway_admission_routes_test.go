@@ -4,9 +4,14 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,6 +61,114 @@ func TestAPIKeyAdmissionRealForwardingHandlersRejectBeforeUpstream(t *testing.T)
 			require.Empty(t, upstream.calls())
 		})
 	}
+}
+
+// grokMediaSlotKeyCount reports the slots held by grokMediaSlotContext's key.
+func grokMediaSlotKeyCount(t *testing.T, cache service.ConcurrencyCache) int {
+	t.Helper()
+	keyCache, ok := cache.(service.APIKeyConcurrencyCache)
+	require.True(t, ok)
+	counts, err := keyCache.GetAPIKeyConcurrencyBatch(context.Background(), []int64{20})
+	require.NoError(t, err)
+	return counts[20]
+}
+
+// Grok voice admits the key once, inside AcquireUserSlotWithWait. A second
+// admission doubled the key's count and made a limit-1 key reject its only
+// request before upstream.
+func TestAPIKeyAdmissionGrokVoiceHoldsOneKeySlot(t *testing.T) {
+	for _, limit := range []int{0, 1, 2} {
+		t.Run(fmt.Sprintf("limit_%d", limit), func(t *testing.T) {
+			h, slots, _, up := newGrokMediaSlotHandler(t, false, false)
+			helper, cache := newAPIKeyAdmissionHelper(t)
+			h.concurrencyHelper = helper
+			entered := make(chan struct{})
+			finish := make(chan struct{})
+			finishUpstream := sync.OnceFunc(func() { close(finish) })
+			defer finishUpstream()
+			var calls atomic.Int32
+			up.call = func(*http.Request, int64) (*http.Response, error) {
+				// Only the first call parks; an over-admitted request fails fast.
+				if calls.Add(1) > 1 {
+					return nil, errors.New("unexpected upstream call")
+				}
+				close(entered)
+				<-finish
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"audio/mpeg"}},
+					Body: io.NopCloser(strings.NewReader("audio"))}, nil
+			}
+			newTTS := func() (*gin.Context, *httptest.ResponseRecorder) {
+				ctx := context.Background()
+				if limit > 0 {
+					// Auth installs the admission owner only for limited keys.
+					var cancel context.CancelFunc
+					ctx, cancel = service.WithAPIKeyAdmissionOwner(ctx)
+					t.Cleanup(cancel)
+				}
+				c, w := grokMediaSlotContext(ctx, true)
+				c.Request = httptest.NewRequest(http.MethodPost, "/tts", strings.NewReader(`{"input":"hello","voice":"Ara"}`)).WithContext(ctx)
+				key, _ := middleware2.GetAPIKeyFromContext(c)
+				key.ConcurrencyLimit = limit
+				return c, w
+			}
+
+			first, firstW := newTTS()
+			done := make(chan struct{})
+			go func() { defer close(done); h.GrokVoice(first, "tts") }()
+			select {
+			case <-entered:
+			case <-done:
+				t.Fatalf("sole request did not reach upstream: %d %s", firstW.Code, firstW.Body.String())
+			case <-time.After(5 * time.Second):
+				t.Fatal("sole request did not reach upstream")
+			}
+			require.Equal(t, 1, grokMediaSlotKeyCount(t, cache), "a forwarding request holds exactly one key slot")
+			if limit == 1 {
+				second, secondW := newTTS()
+				h.GrokVoice(second, "tts")
+				require.Equal(t, http.StatusTooManyRequests, secondW.Code, secondW.Body.String())
+				require.Contains(t, secondW.Body.String(), "API key")
+				require.EqualValues(t, 1, calls.Load(), "the rejected request must not reach upstream")
+				require.Equal(t, 1, grokMediaSlotKeyCount(t, cache), "the rejected request must neither keep nor free a key slot")
+			}
+			finishUpstream()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("sole request did not return")
+			}
+			require.Equal(t, http.StatusOK, firstW.Code, firstW.Body.String())
+			require.Equal(t, "audio", firstW.Body.String())
+			require.Zero(t, grokMediaSlotKeyCount(t, cache))
+			users, err := cache.GetUserConcurrency(context.Background(), 10)
+			require.NoError(t, err)
+			require.Zero(t, users)
+			slots.assertReleased(t)
+		})
+	}
+}
+
+// Realtime shares the single admission: a limit-1 key's only session must get
+// past it. Non-Grok accounts stop the request at account selection, after
+// admission and before any upstream dial.
+func TestAPIKeyAdmissionGrokRealtimeAdmitsSoleRequest(t *testing.T) {
+	h, slots, _, _ := newGrokMediaSlotHandler(t, false, false, service.PlatformOpenAI)
+	helper, cache := newAPIKeyAdmissionHelper(t)
+	h.concurrencyHelper = helper
+	ctx, cancel := service.WithAPIKeyAdmissionOwner(context.Background())
+	defer cancel()
+	c, w := grokMediaSlotContext(ctx, false)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/realtime", nil).WithContext(ctx)
+	c.Request.Header.Set("Connection", "Upgrade")
+	c.Request.Header.Set("Upgrade", "websocket")
+	key, _ := middleware2.GetAPIKeyFromContext(c)
+	key.ConcurrencyLimit = 1
+
+	h.GrokRealtime(c)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "No available Grok accounts")
+	require.Zero(t, grokMediaSlotKeyCount(t, cache))
+	slots.assertReleased(t)
 }
 
 func TestAPIKeyAdmissionPrecedesUserQueueAndSSE(t *testing.T) {
