@@ -24,6 +24,33 @@
           </div>
         </form>
       </details>
+      <section class="card p-4">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 class="font-semibold">{{ t('modelCatalog.codexSourceTitle') }}</h2>
+            <p class="mt-1 max-w-3xl text-sm text-gray-500 dark:text-dark-400">{{ t('modelCatalog.codexSourceHint') }}</p>
+          </div>
+          <div class="w-full sm:w-72">
+            <label class="input-label" for="catalog-group">{{ t('modelCatalog.codexSourceGroup') }}</label>
+            <Select id="catalog-group" v-model="selectedGroupID" :options="groupOptions" :disabled="sourceBusy" />
+          </div>
+        </div>
+        <div v-if="selectedGroup" class="mt-2">
+          <CodexManifestAccountsField
+            :key="selectedGroup.id"
+            ref="sourceField"
+            :group-id="selectedGroup.id"
+            v-model="sourceConfig"
+            :disabled="sourceBusy"
+          />
+          <p v-if="sourceError" role="alert" class="mt-3 text-sm text-red-600">{{ sourceError }}</p>
+          <p v-if="sourceNotice" role="status" class="mt-3 text-sm text-primary-600">{{ sourceNotice }}</p>
+          <div class="mt-4 flex justify-end">
+            <button class="btn btn-primary" :disabled="sourceBusy" @click="saveSourceConfig">{{ t('modelCatalog.saveCodexSource') }}</button>
+          </div>
+        </div>
+        <p v-else class="mt-4 text-sm text-gray-500">{{ t('modelCatalog.noOpenAIGroups') }}</p>
+      </section>
       <section class="card overflow-hidden">
         <div class="flex flex-wrap gap-3 p-4">
           <div class="w-full sm:w-48"><label class="sr-only" for="catalog-platform">{{ t('modelCatalog.platform') }}</label><Select id="catalog-platform" v-model="platform" :options="platformOptions" searchable /></div>
@@ -71,9 +98,12 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
+import CodexManifestAccountsField from '@/components/admin/group/CodexManifestAccountsField.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { getModelCatalog, syncModelCatalog, getCatalogSettings, saveCatalogSettings, saveCatalogModel, type CatalogModel, type CatalogModelInput, type ModelCatalog, type CatalogSyncSettings } from '@/api/admin/modelCatalog'
+import { adminAPI } from '@/api/admin'
+import type { AdminGroup, CodexModelsManifestConfig } from '@/types'
 
 const { t } = useI18n()
 const catalog = ref<ModelCatalog | null>(null)
@@ -89,8 +119,17 @@ const error = ref('')
 const notice = ref('')
 const editor = ref<CatalogModelInput | null>(null)
 const editingExisting = ref(false)
+const groups = ref<AdminGroup[]>([])
+const selectedGroupID = ref<number | string | null>(null)
+const selectedGroup = ref<AdminGroup | null>(null)
+const sourceConfig = ref<CodexModelsManifestConfig>({ enabled: false, account_ids: [], fallback_to_scheduler: false })
+const sourceBusy = ref(false)
+const sourceError = ref('')
+const sourceNotice = ref('')
+const sourceField = ref<{ validate: () => boolean; resetValidation: () => void } | null>(null)
 const concretePlatforms = [...CONCRETE_PLATFORM_OPTIONS]
 const platformOptions = computed(() => [{ value: '', label: t('modelCatalog.allPlatforms') }, ...concretePlatforms])
+const groupOptions = computed(() => groups.value.map(group => ({ value: group.id, label: `${group.name} (#${group.id})` })))
 const kinds = ['chat', 'image', 'video', 'audio', 'embedding', 'other']
 const kindLabel = (value: string) => t(`modelCatalog.kinds.${kinds.includes(value) ? value : 'other'}`)
 const kindOptions = computed(() => kinds.map(value => ({ value, label: kindLabel(value) })))
@@ -158,9 +197,54 @@ async function saveModel() {
     notice.value = t('modelCatalog.saved')
   })
 }
+function copySourceConfig(config?: CodexModelsManifestConfig): CodexModelsManifestConfig {
+  return {
+    enabled: !!config?.enabled,
+    account_ids: [...(config?.account_ids ?? [])],
+    fallback_to_scheduler: !!config?.fallback_to_scheduler
+  }
+}
+function selectSourceGroup(id: number | string | null) {
+  const numericID = id === null || id === '' ? null : Number(id)
+  selectedGroup.value = groups.value.find(group => group.id === numericID) ?? null
+  sourceConfig.value = copySourceConfig(selectedGroup.value?.codex_models_manifest_config)
+  sourceError.value = ''
+  sourceNotice.value = ''
+}
+watch(selectedGroupID, selectSourceGroup)
+async function saveSourceConfig() {
+  if (!selectedGroup.value || sourceBusy.value) return
+  sourceError.value = ''
+  sourceNotice.value = ''
+  sourceField.value?.resetValidation()
+  if (!sourceField.value?.validate()) return
+  sourceBusy.value = true
+  try {
+    const updated = await adminAPI.groups.update(
+      selectedGroup.value.id,
+      { codex_models_manifest_config: copySourceConfig(sourceConfig.value) },
+      { signal: controller.signal }
+    )
+    selectedGroup.value = updated
+    groups.value = groups.value.map(group => group.id === updated.id ? updated : group)
+    sourceConfig.value = copySourceConfig(updated.codex_models_manifest_config)
+    sourceNotice.value = t('modelCatalog.saved')
+  } catch (cause) {
+    if (!controller.signal.aborted) sourceError.value = extractApiErrorMessage(cause, t('modelCatalog.error'))
+  } finally {
+    sourceBusy.value = false
+  }
+}
 onMounted(() => action(async () => {
-  const [inventory, config] = await Promise.all([getModelCatalog({}, controller.signal), getCatalogSettings()])
+  const [inventory, config, openAIGroups] = await Promise.all([
+    getModelCatalog({}, controller.signal),
+    getCatalogSettings(),
+    adminAPI.groups.getAll('openai', { signal: controller.signal })
+  ])
   catalog.value = inventory
   settings.value = config
+  groups.value = openAIGroups
+  selectedGroupID.value = openAIGroups[0]?.id ?? null
+  selectSourceGroup(selectedGroupID.value)
 }))
 </script>

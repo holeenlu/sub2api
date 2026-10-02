@@ -165,8 +165,9 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 			candidates[key] = candidate{name, platform, source}
 		}
 	}
-	// Every active member contributes its persisted snapshot; pinned catalog
-	// sources are retired; every active member can supply the catalog.
+	// Every active member contributes its persisted snapshot. A fixed Codex
+	// source only chooses the live manifest fetch accounts; it never narrows
+	// this shared inventory or changes the inference account pool.
 	foundSnapshots := 0
 	var oldestSnapshot time.Time
 	for i := range active {

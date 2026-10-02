@@ -36,10 +36,10 @@ func TestAPIKeyAuthSnapshotGroupCodexModelsManifestRoundtrip(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, used)
 	require.NotNil(t, materialized.Group)
-	// Pinned catalog sources are retired: cached snapshots from before the
-	// retirement must not re-enable them, while the stored IDs stay auditable.
-	require.False(t, materialized.Group.CodexModelsManifestConfig.Enabled)
+	// The source configuration must survive the auth-cache round trip so the
+	// /models handler does not silently switch back to scheduler discovery.
+	require.True(t, materialized.Group.CodexModelsManifestConfig.Enabled)
 	require.Equal(t, []int64{7, 8}, materialized.Group.CodexModelsManifestConfig.AccountIDs)
-	require.False(t, materialized.Group.CodexModelsManifestConfig.FallbackToScheduler)
+	require.True(t, materialized.Group.CodexModelsManifestConfig.FallbackToScheduler)
 	require.Equal(t, apiKeyAuthSnapshotVersion, cached.Snapshot.Version)
 }

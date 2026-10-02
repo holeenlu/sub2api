@@ -2161,14 +2161,14 @@ func openAIGroupCodexManifestAccounts(ids ...int64) []Account {
 	return accounts
 }
 
-func TestRetiredPinnedSourceCannotBeReenabledByOldAdminPayload(t *testing.T) {
+func TestCreateGroupRequiresPostBindingForPinnedSource(t *testing.T) {
 	repo := &groupRepoStubForAdmin{createID: 61}
 	svc := &adminServiceImpl{groupRepo: repo}
 	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
 		Name: "catalog-members", Platform: PlatformOpenAI, RateMultiplier: 1,
 		CodexModelsManifestConfig: GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{1}, FallbackToScheduler: true},
 	})
-	require.NoError(t, err)
-	require.False(t, group.CodexModelsManifestConfig.Enabled)
-	require.False(t, group.CodexModelsManifestConfig.FallbackToScheduler)
+	require.Error(t, err)
+	require.Nil(t, group)
+	require.Contains(t, err.Error(), "configure it after binding accounts")
 }

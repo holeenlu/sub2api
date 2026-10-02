@@ -59,9 +59,10 @@ export async function list(
  * @param platform - Optional platform filter
  * @returns List of all active groups
  */
-export async function getAll(platform?: GroupPlatform): Promise<AdminGroup[]> {
+export async function getAll(platform?: GroupPlatform, options?: { signal?: AbortSignal }): Promise<AdminGroup[]> {
   const { data } = await apiClient.get<AdminGroup[]>('/admin/groups/all', {
-    params: platform ? { platform } : undefined
+    params: platform ? { platform } : undefined,
+    signal: options?.signal
   })
   return data
 }
@@ -97,8 +98,8 @@ export async function getLiveCapability(): Promise<LiveCapability> {
  * @param id - Group ID
  * @returns Group details
  */
-export async function getById(id: number): Promise<AdminGroup> {
-  const { data } = await apiClient.get<AdminGroup>(`/admin/groups/${id}`)
+export async function getById(id: number, options?: { signal?: AbortSignal }): Promise<AdminGroup> {
+  const { data } = await apiClient.get<AdminGroup>(`/admin/groups/${id}`, { signal: options?.signal })
   return data
 }
 
@@ -222,8 +223,8 @@ export async function duplicate(id: number): Promise<AdminGroup> {
  * @param updates - Fields to update
  * @returns Updated group
  */
-export async function update(id: number, updates: UpdateGroupRequest): Promise<AdminGroup> {
-  const { data } = await apiClient.put<AdminGroup>(`/admin/groups/${id}`, updates)
+export async function update(id: number, updates: UpdateGroupRequest, options?: { signal?: AbortSignal }): Promise<AdminGroup> {
+  const { data } = await apiClient.put<AdminGroup>(`/admin/groups/${id}`, updates, { signal: options?.signal })
   return data
 }
 

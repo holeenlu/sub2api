@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 28 // v28: include API key concurrency limit; keep retired fork fields excluded
+const apiKeyAuthSnapshotVersion = 29 // v29: restore persisted Codex manifest source configuration
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -529,7 +529,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelAllowlist:                  snapshot.Group.ModelAllowlist,
-			CodexModelsManifestConfig:       RetiredCodexModelsManifestConfig(snapshot.Group.CodexModelsManifestConfig),
+			CodexModelsManifestConfig:       snapshot.Group.CodexModelsManifestConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
 			MaxReasoningEffort:              snapshot.Group.MaxReasoningEffort,
 			MaxReasoningEffortOverLimit:     snapshot.Group.MaxReasoningEffortOverLimit,

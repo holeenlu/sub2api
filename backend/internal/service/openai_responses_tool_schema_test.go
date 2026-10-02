@@ -590,12 +590,19 @@ func TestSanitizeOpenAIResponsesToolParameterTypes_RewriteCountIndependentOfHits
 	small := buildToolSchemaNullTypeBody(t, 4)
 	large := buildToolSchemaNullTypeBody(t, 2000)
 
-	smallAllocs := testing.AllocsPerRun(2, func() {
-		_, _, _ = sanitizeOpenAIResponsesToolParameterTypes(small)
-	})
-	largeAllocs := testing.AllocsPerRun(2, func() {
-		_, _, _ = sanitizeOpenAIResponsesToolParameterTypes(large)
-	})
+	// AllocsPerRun 统计的是进程级 Mallocs，包内其他测试遗留的后台 goroutine 会
+	// 污染单次测量（-race 下执行变慢时尤甚）。取多次测量的最小值滤掉这类突发噪声；
+	// 真正退回逐路径全量重写时每次测量都会稳定超标。
+	minAllocs := func(body []byte) float64 {
+		run := func() { _, _, _ = sanitizeOpenAIResponsesToolParameterTypes(body) }
+		lowest := testing.AllocsPerRun(2, run)
+		for range 4 {
+			lowest = min(lowest, testing.AllocsPerRun(2, run))
+		}
+		return lowest
+	}
+	smallAllocs := minAllocs(small)
+	largeAllocs := minAllocs(large)
 
 	// 命中切片扩容是对数级，留出充裕余量；线性写法在这里会是 2000 量级。
 	// 干净环境实测 large 约 17 allocs，200 是 10 倍余量，同时容忍 CI 慢 pod 上

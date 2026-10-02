@@ -1162,16 +1162,17 @@ export default {
       },
       codexModelsManifest: {
         title: '固定帳號取得模型列表',
-        hint: '開啟後，普通模型列表與 Codex Model Manifest 均優先從選定帳號取得併合並，再套用帳號對應和分組列表過濾；速率限制/過載中的選定帳號仍會被使用。',
-        enable: '使用特定帳號取得模型列表',
+        hint: '開啟後，Codex Model Manifest 只從選定帳號取得併合並；最終仍經過模型目錄、帳號限制、分組白名單與定價治理，不改變推理請求的帳號排程。速率限制/過載中的選定帳號仍會被使用。',
+        enable: '使用特定帳號取得 Codex Model Manifest',
         enabledHint: '帳號來源限定為目前分組內的 OpenAI 帳號，最多選擇 10 個。',
-        disabledHint: '未啟用：普通列表使用本地對應或預設模型；Codex 優先使用本地目錄，無本地目錄時由排程器選帳。',
+        disabledHint: '未啟用：Codex 使用統一模型目錄；若目錄未設定，則沿用現有排程器發現路徑。',
         accounts: '選定帳號',
         searchPlaceholder: '搜尋帳號（目前分組內 OpenAI 帳號）',
         searchEmpty: '未找到匹配帳號',
         fallback: '選定帳號全部不可用時回退排程器',
         fallbackHint: '關閉時返回 503 / 上游錯誤；開啟時回退到現有排程器選帳路徑。',
-        selectAtLeastOne: '開啟固定帳號後至少選擇一個帳號'
+        selectAtLeastOne: '開啟固定帳號後至少選擇一個帳號',
+        selectAtMostTen: '固定帳號最多選擇 10 個'
       },
       compositeRoutes: {
         action: '路由',

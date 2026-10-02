@@ -1,6 +1,6 @@
 # 模型清单、开放范围与定价
 
-共享实现先在 main（KDAN）完成，再同步到 TapModels。本文是 2026-10-01 最终业务约定；取代此前的跟随策略、排除规则、固定账号来源及本地 Codex JSON 方案。
+共享实现先在 main（KDAN）完成，再同步到 TapModels。本文描述统一目录与 Codex 固定来源的分层方案；固定来源只控制清单发现，不替代目录治理或推理调度。
 
 ## 每个入口只负责一件事
 
@@ -37,6 +37,8 @@ flowchart TD
 
 清单合并同平台的持久发现结果、已有配置型号、管理员补充，以及价格资料中的图片和视频身份。后台保留原生能力元数据，页面不再展示账号权限待确认、JSON 资料编辑、账号快照历史、回滚、策略编辑或分组策略对比。
 
+OpenAI 分组可在本页配置「固定账号获取 Codex Model Manifest」。开启后，Codex `/models` 只并发请求选定的、仍绑定且长期可调度的账号，并按配置顺序以 slug 合并；临时限流、过载和短暂不可调度不会把账号从发现源剔除。最终响应仍经过统一目录、账号模型限制、分组白名单、价格就绪和 Excel/BPS 能力过滤，固定账号不会扩大用户可见模型，也不会改变推理请求的账号池。选定账号部分失败时合并成功结果并记录告警；全部不可用或失败时，`fallback_to_scheduler` 开启则沿用原目录/调度流程，否则返回 503。关闭时保持原有目录与调度行为。
+
 停用只影响新勾选的候选，不改变已有分组/账号选择。要停止提供服务，应修改分组或账号名单，或关闭账号调度。停用标记与上游快照独立存储，后续同步不会自动重新启用；账号编辑时仍保留此前已保存的型号，避免读目录失败或候选变化导致丢失选择。
 
 补充和编辑复用 `model_catalog_registry`，不另建平行模型数据源。更新单个条目时在数据库事务内锁定该行，保留其他模型、能力资料和旧来源范围，防止多个管理端相互覆盖。同步不覆盖管理员决定，也不自动增加分组勾选。
@@ -71,7 +73,7 @@ flowchart TD
 
 ## Codex 与媒体
 
-“使用 API 密钥”由当前 Key 的 setup profile 生成配置；默认 Codex CLI (WebSocket)、API Key Mode、macOS / Linux。配置默认使用根级 `model_catalog_json = "~/.codex/codex-models.json"`，用户在弹窗获取并下载目录文件；OpenAI/Composite 可切换 provider 内 `model_catalog_url`（Codex 0.156.0+），智谱 API Key 分组使用本地目录。
+“使用 API 密钥”由当前 Key 的 setup profile 生成配置；默认 Codex CLI (WebSocket)、API Key Mode、macOS / Linux。配置默认使用根级 `model_catalog_json = "~/.codex/codex-models.json"`，用户在弹窗获取并下载目录文件；OpenAI/Composite 可切换 provider 内 `model_catalog_url`（Codex 0.156.0+），智谱 API Key 分组使用本地目录。固定账号来源在 `/admin/model-catalog` 的 OpenAI 分组选择器中设置；它只影响 Codex `/models` 的上游发现，不影响 `/responses`、聊天请求或实际账号粘性。
 
 普通 `/v1/models` 可以列出已开放且有供应的图片、视频模型。带 `client_version` 的 Codex 目录只输出能力资料齐备的对话模型，专用生图/视频模型不进入主对话选择器。新模型缺资料时不套旧型号能力或提示词。模型能力按实际可路由账号取交集，原生资料优先。
 

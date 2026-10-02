@@ -1160,16 +1160,17 @@ export default {
       },
       codexModelsManifest: {
         title: '固定账号获取模型列表',
-        hint: '开启后，普通模型列表与 Codex Model Manifest 均优先从选定账号获取并合并，再应用账号映射和分组列表过滤；限流/过载中的选定账号仍会被使用。',
-        enable: '使用特定账号获取模型列表',
+        hint: '开启后，Codex Model Manifest 只从选定账号获取并合并；最终仍经过模型目录、账号限制、分组白名单与定价治理，不改变推理请求的账号调度。限流/过载中的选定账号仍会被使用。',
+        enable: '使用特定账号获取 Codex Model Manifest',
         enabledHint: '账号来源限定为当前分组内的 OpenAI 账号，最多选择 10 个。',
-        disabledHint: '未启用：普通列表使用本地映射或默认模型；Codex 优先使用本地目录，无本地目录时由调度器选账。',
+        disabledHint: '未启用：Codex 使用统一模型目录；若目录未配置，则沿用现有调度器发现路径。',
         accounts: '选定账号',
         searchPlaceholder: '搜索账号（当前分组内 OpenAI 账号）',
         searchEmpty: '未找到匹配账号',
         fallback: '选定账号全部不可用时回退调度器',
         fallbackHint: '关闭时返回 503 / 上游错误；开启时回退到现有调度器选账路径。',
-        selectAtLeastOne: '开启固定账号后至少选择一个账号'
+        selectAtLeastOne: '开启固定账号后至少选择一个账号',
+        selectAtMostTen: '固定账号最多选择 10 个'
       },
       compositeRoutes: {
         action: '路由',

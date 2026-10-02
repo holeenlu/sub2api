@@ -3258,6 +3258,64 @@ func TestFetchCodexModelsManifestAPIKeyServesStaleWhileRefreshing(t *testing.T) 
 	}
 }
 
+// A stale manifest is returned at once while the refresh converts the new one
+// on a background goroutine, and the handler keeps using the request's account
+// to complete the stale manifest. Converting fills the Account's lazy
+// model-mapping cache, so the refresh must work on its own copy.
+func TestFetchCodexModelsManifestAPIKeyStaleRefreshDoesNotShareRequestAccount(t *testing.T) {
+	var calls atomic.Int32
+	refreshStarted := make(chan struct{})
+	releaseRefresh := make(chan struct{})
+	upstream := &codexModelsHTTPUpstreamStub{do: func(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+		call := calls.Add(1)
+		body := `{"models":[{"slug":"old"}]}`
+		if call > 1 {
+			if call == 2 {
+				close(refreshStarted)
+			}
+			<-releaseRefresh
+			body = `{"models":[{"slug":"new"}]}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	}}
+	s := newCodexModelsAPIKeyTestService(upstream)
+	_, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example"), "0.144.0", "")
+	require.NoError(t, err)
+
+	s.openAIModelsCache.mu.Lock()
+	for key, entry := range s.openAIModelsCache.entries {
+		entry.expiresAt = time.Now().Add(-time.Second)
+		s.openAIModelsCache.entries[key] = entry
+	}
+	s.openAIModelsCache.mu.Unlock()
+
+	// Each request loads its own Account, so its lazy caches start empty.
+	account := newCodexModelsAPIKeyTestAccount("https://upstream.example")
+	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+	require.NoError(t, err)
+	require.Equal(t, `{"models":[{"slug":"old"}]}`, string(manifest.Body))
+	select {
+	case <-refreshStarted:
+	case <-time.After(time.Second):
+		t.Fatal("background refresh did not start")
+	}
+
+	close(releaseRefresh)
+	require.Eventually(t, func() bool {
+		refreshed, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example"), "0.144.0", "")
+		return err == nil && string(refreshed.Body) == `{"models":[{"slug":"new"}]}`
+	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, int32(2), calls.Load())
+	require.False(t, account.modelMappingCacheReady, "background refresh must not fill the request's Account cache")
+
+	require.NoError(t, s.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+	require.True(t, account.modelMappingCacheReady)
+}
+
 func TestFetchCodexModelsManifestAPIKeyRevalidatesStaleETag(t *testing.T) {
 	var calls atomic.Int32
 	refreshDone := make(chan struct{})

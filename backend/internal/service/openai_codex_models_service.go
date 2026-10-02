@@ -1920,13 +1920,25 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		proxyURL = account.Proxy.URL()
 	}
 
+	// A stale cache entry is returned at once while the refresh keeps running on
+	// a background singleflight goroutine, and this request goes on using
+	// account (catalog snapshot, API-key manifest completion). The upstream
+	// fetch fills the accounts' lazy caches and may swap agent-identity
+	// credentials, so it works on its own copies instead of sharing them.
+	fetchAccount := *account
+	fetchCredAccount := &fetchAccount
+	if credAccount != account {
+		credCopy := *credAccount
+		fetchCredAccount = &credCopy
+	}
+
 	request := openAIModelsRequest{
 		url:                 requestURL.String(),
 		headers:             headers,
 		proxyURL:            proxyURL,
 		accountID:           account.ID,
 		credentialAccountID: credAccount.ID,
-		credentialAccount:   credAccount,
+		credentialAccount:   fetchCredAccount,
 		accountConcurrency:  account.Concurrency,
 		useAPIKeyUpstream:   useAPIKeyUpstream,
 	}
@@ -1937,15 +1949,15 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	// 错误时仍交给 handleCodexModelsManifestAccountAuthError 处理账号状态。
 	oauthFetch := func(fetchCtx context.Context, ifNoneMatch string) (*OpenAIModelsResponse, error) {
 		manifest, fetchErr := s.fetchCodexModelsManifestUpstream(fetchCtx, request, ifNoneMatch)
-		if !credAccount.IsOpenAIAgentIdentity() || !isAgentIdentityTaskInvalidCodexModelsError(fetchErr) {
-			s.handleCodexModelsManifestAccountAuthError(fetchCtx, account, credAccount, fetchErr)
+		if !fetchCredAccount.IsOpenAIAgentIdentity() || !isAgentIdentityTaskInvalidCodexModelsError(fetchErr) {
+			s.handleCodexModelsManifestAccountAuthError(fetchCtx, &fetchAccount, fetchCredAccount, fetchErr)
 			return manifest, fetchErr
 		}
-		expectedTaskID := strings.TrimSpace(credAccount.GetCredential("task_id"))
-		if recoverErr := s.recoverAgentIdentityTask(fetchCtx, credAccount, expectedTaskID); recoverErr != nil {
+		expectedTaskID := strings.TrimSpace(fetchCredAccount.GetCredential("task_id"))
+		if recoverErr := s.recoverAgentIdentityTask(fetchCtx, fetchCredAccount, expectedTaskID); recoverErr != nil {
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_AUTH_FAILED", "agent identity task recovery failed: %v", recoverErr)
 		}
-		authHeaders, authErr := s.buildOpenAIAuthenticationHeaders(fetchCtx, credAccount, "")
+		authHeaders, authErr := s.buildOpenAIAuthenticationHeaders(fetchCtx, fetchCredAccount, "")
 		if authErr != nil {
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_AUTH_FAILED", "build Codex models authentication after task recovery: %v", authErr)
 		}
@@ -1956,7 +1968,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 				request.headers.Add(key, value)
 			}
 		}
-		setOpenAIChatGPTAccountHeaders(request.headers, credAccount)
+		setOpenAIChatGPTAccountHeaders(request.headers, fetchCredAccount)
 		return s.fetchCodexModelsManifestUpstream(fetchCtx, request, ifNoneMatch)
 	}
 	return s.fetchCachedOpenAIModels(ctx, request, oauthFetch, ifNoneMatch)

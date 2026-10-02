@@ -411,6 +411,35 @@ func TestAcquireUserSlotWithWait_RequestCancelDecrementsWaitQueue(t *testing.T) 
 	require.Equal(t, 0, cache.userReleaseCalls)
 }
 
+// Grok voice keeps its user slot until a detached upstream call returns; call
+// sites that free on client cancellation opt in with wrapReleaseOnDone.
+func TestAcquireUserSlotWithWait_ReleaseOutlivesRequestCancel(t *testing.T) {
+	cache := &helperConcurrencyCacheStub{userSeq: []bool{true}}
+	helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, 5*time.Millisecond)
+	c, _ := newHelperTestContext(http.MethodPost, "/v1/tts")
+	reqCtx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+	c.Request = c.Request.WithContext(reqCtx)
+	streamStarted := false
+
+	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, 77, 0, time.Second, false, &streamStarted)
+	require.NoError(t, err)
+	require.NotNil(t, release)
+	cancel()
+	require.Never(t, func() bool {
+		cache.mu.Lock()
+		defer cache.mu.Unlock()
+		return cache.userReleaseCalls > 0 || cache.apiKeyReleaseCalls > 0
+	}, 50*time.Millisecond, time.Millisecond, "request cancellation must not release user or key slots by itself")
+
+	release()
+	release()
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	require.Equal(t, 1, cache.userReleaseCalls)
+	require.Equal(t, 1, cache.apiKeyReleaseCalls)
+}
+
 func TestWaitForSlotWithPingTimeout_TimeoutAndStreamPing(t *testing.T) {
 	cache := &helperConcurrencyCacheStub{
 		accountSeq: []bool{false, false, false},

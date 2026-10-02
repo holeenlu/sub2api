@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,10 +42,17 @@ func TestSecurityVoiceConcurrencyHeldThroughCanceledUpstream(t *testing.T) {
 			h.concurrencyHelper = NewConcurrencyHelper(service.NewConcurrencyService(&securityVoiceConcurrency{slots}), SSEPingFormatComment, 0)
 			entered := make(chan struct{})
 			finish := make(chan struct{})
+			finishUpstream := sync.OnceFunc(func() { close(finish) })
+			defer finishUpstream()
 			done := make(chan struct{})
-			var once sync.Once
+			var calls atomic.Int32
 			up.call = func(*http.Request, int64) (*http.Response, error) {
-				once.Do(func() { close(entered) })
+				// Only the first call parks; a request admitted through a leaked
+				// slot fails fast instead of deadlocking the package.
+				if calls.Add(1) > 1 {
+					return nil, errors.New("unexpected upstream call")
+				}
+				close(entered)
 				<-finish
 				return nil, errors.New("upstream disconnected")
 			}
@@ -60,15 +68,19 @@ func TestSecurityVoiceConcurrencyHeldThroughCanceledUpstream(t *testing.T) {
 				t.Fatal("voice did not reach upstream")
 			}
 			cancel()
-			slots.mu.Lock()
-			require.Len(t, slots.users, 1, "canceling the client must not free the user while upstream is still draining")
-			slots.mu.Unlock()
+			// A cancel-triggered release runs on its own goroutine; one snapshot could miss it.
+			require.Never(t, func() bool {
+				slots.mu.Lock()
+				defer slots.mu.Unlock()
+				return len(slots.users) != 1
+			}, 50*time.Millisecond, time.Millisecond, "canceling the client must not free the user while upstream is still draining")
 			second, w := grokMediaSlotContext(context.Background(), true)
 			second.Request = httptest.NewRequest(http.MethodPost, "/"+endpoint, strings.NewReader(`{"input":"hello","voice":"Ara"}`))
 			second.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 10, Concurrency: 1})
 			h.GrokVoice(second, endpoint)
 			require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
-			close(finish)
+			require.EqualValues(t, 1, calls.Load(), "the rejected request must not reach upstream")
+			finishUpstream()
 			select {
 			case <-done:
 			case <-time.After(time.Second):

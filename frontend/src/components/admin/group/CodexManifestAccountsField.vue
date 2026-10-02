@@ -11,6 +11,7 @@
       </div>
       <Toggle
         data-testid="codex-manifest-toggle"
+        :disabled="disabled"
         :aria-label="t('admin.groups.codexModelsManifest.enable')"
         :model-value="config.enabled"
         @update:model-value="emitUpdate({ enabled: $event })"
@@ -46,6 +47,7 @@
             class="ml-0.5 text-primary-500 hover:text-primary-700 dark:hover:text-primary-200"
             :aria-label="`remove account ${id}`"
             @click="removeAccount(id)"
+            :disabled="disabled"
           >
             <Icon name="x" size="xs" />
           </button>
@@ -60,6 +62,7 @@
           class="input text-sm"
           data-testid="codex-manifest-search"
           :placeholder="t('admin.groups.codexModelsManifest.searchPlaceholder')"
+          :disabled="disabled || config.account_ids.length >= maxAccounts"
           @input="searchAccounts"
           @focus="onSearchFocus"
         />
@@ -83,7 +86,7 @@
             :class="{
               'opacity-50': config.account_ids.includes(account.id),
             }"
-            :disabled="config.account_ids.includes(account.id)"
+            :disabled="disabled || config.account_ids.includes(account.id)"
             @click="selectAccount(account)"
           >
             <span>{{ account.name }}</span>
@@ -104,6 +107,7 @@
         </div>
         <Toggle
           data-testid="codex-manifest-fallback-toggle"
+          :disabled="disabled"
           :aria-label="t('admin.groups.codexModelsManifest.fallback')"
           :model-value="config.fallback_to_scheduler"
           @update:model-value="emitUpdate({ fallback_to_scheduler: $event })"
@@ -117,6 +121,14 @@
         data-testid="codex-manifest-validation-error"
       >
         {{ t("admin.groups.codexModelsManifest.selectAtLeastOne") }}
+      </p>
+      <p
+        v-if="showMaxValidationError"
+        class="mt-2 text-xs text-red-600 dark:text-red-400"
+        role="alert"
+        data-testid="codex-manifest-max-validation-error"
+      >
+        {{ t("admin.groups.codexModelsManifest.selectAtMostTen") }}
       </p>
     </div>
     <p v-else class="text-xs text-gray-500 dark:text-gray-400">
@@ -144,6 +156,7 @@ const props = defineProps<{
   modelValue: CodexModelsManifestConfig;
   /** 已选账号 ID → 名称映射；无法解析的 ID 以 #<id> 展示 */
   accountNames?: Record<number, string>;
+  disabled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -169,7 +182,9 @@ const searchKeyword = ref("");
 const searchResults = ref<SimpleAccount[]>([]);
 const showDropdown = ref(false);
 const showValidationError = ref(false);
+const showMaxValidationError = ref(false);
 const searchContainerRef = ref<HTMLElement | null>(null);
+const maxAccounts = 10;
 
 // 点击下拉容器外部时收起（与 GroupsView 模型路由下拉同一模式）。
 const handleDocumentClick = (event: MouseEvent) => {
@@ -194,6 +209,7 @@ const searchRunner = useKeyedDebouncedSearch<SimpleAccount[]>({
       {
         search: keyword,
         platform: "openai",
+        status: "active",
         group: String(props.groupId),
       },
       { signal },
@@ -223,7 +239,7 @@ const onSearchFocus = () => {
 };
 
 const selectAccount = (account: SimpleAccount) => {
-  if (props.modelValue.account_ids.includes(account.id)) return;
+  if (props.disabled || props.modelValue.account_ids.includes(account.id) || props.modelValue.account_ids.length >= maxAccounts) return;
   localNames.value[account.id] = account.name;
   emitUpdate({
     account_ids: [...props.modelValue.account_ids, account.id],
@@ -234,6 +250,7 @@ const selectAccount = (account: SimpleAccount) => {
 };
 
 const removeAccount = (id: number) => {
+  if (props.disabled) return;
   emitUpdate({
     account_ids: props.modelValue.account_ids.filter(
       (accountId) => accountId !== id,
@@ -243,16 +260,18 @@ const removeAccount = (id: number) => {
 
 /** 校验：开启后至少一个账号。返回是否通过；不通过时展示错误提示。 */
 const validate = (): boolean => {
+  showMaxValidationError.value = props.modelValue.account_ids.length > maxAccounts;
   if (props.modelValue.enabled && props.modelValue.account_ids.length === 0) {
     showValidationError.value = true;
     return false;
   }
   showValidationError.value = false;
-  return true;
+  return !showMaxValidationError.value;
 };
 
 const resetValidation = () => {
   showValidationError.value = false;
+  showMaxValidationError.value = false;
 };
 
 defineExpose({ validate, resetValidation });
