@@ -260,3 +260,20 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 	}
 	return json.Marshal(envelope)
 }
+
+// ApplyPinnedCodexModelsMapping applies the selected source account's public
+// aliases and account model policy before the manifests are merged. The final
+// response still goes through the shared group catalog in
+// MergeGroupConfiguredCodexModels, so this source cannot widen group access.
+func ApplyPinnedCodexModelsMapping(response *OpenAIModelsResponse, account *Account, group *Group) error {
+	if response == nil || group == nil || group.Platform != PlatformOpenAI || !group.CodexModelsManifestConfig.Enabled {
+		return nil
+	}
+	body, err := projectAccountModelsBody(response.Body, account, group, true)
+	if err != nil {
+		return err
+	}
+	response.Body = body
+	response.ETag = codexModelsManifestBodyETag(body)
+	return nil
+}

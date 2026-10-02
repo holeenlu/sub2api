@@ -115,8 +115,8 @@ type Group struct {
 	DefaultMappedModel          string
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig
 	ModelAllowlist              GroupModelAllowlist
-	// CodexModelsManifestConfig 开启后，普通模型列表与 Codex manifest 优先使用
-	// 固定账号列表拉取并合并，不经过调度器（仅 openai 平台）。
+	// CodexModelsManifestConfig 开启后，OpenAI Codex manifest 只从固定账号
+	// 拉取并合并；最终仍经过共享目录治理，推理请求不改变调度账号池。
 	CodexModelsManifestConfig GroupCodexModelsManifestConfig
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制）。

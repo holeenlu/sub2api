@@ -126,7 +126,7 @@ describe("CodexManifestAccountsField", () => {
     expect(adminAPI.accounts.list).toHaveBeenCalledWith(
       1,
       20,
-      { search: "oauth", platform: "openai", group: "7" },
+      { search: "oauth", platform: "openai", status: "active", group: "7" },
       expect.anything(),
     );
 

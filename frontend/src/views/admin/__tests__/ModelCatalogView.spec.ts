@@ -4,7 +4,9 @@ import { defineComponent } from 'vue'
 import ModelCatalogView from '../ModelCatalogView.vue'
 
 const mocks = vi.hoisted(() => ({ getModelCatalog: vi.fn(), getCatalogSettings: vi.fn(), saveCatalogSettings: vi.fn(), syncModelCatalog: vi.fn(), saveCatalogModel: vi.fn() }))
+const groupMocks = vi.hoisted(() => ({ getAll: vi.fn(), update: vi.fn() }))
 vi.mock('@/api/admin/modelCatalog', () => mocks)
+vi.mock('@/api/admin', () => ({ adminAPI: { groups: groupMocks } }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual('vue-i18n'), useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<div><slot /></div>' } }))
 const Select = defineComponent({ props: ['modelValue', 'options', 'disabled'], emits: ['update:modelValue'], template: `<select :value="modelValue" :disabled="disabled" @change="$emit('update:modelValue', $event.target.value)"><option v-for="option in options" :value="option.value">{{ option.label }}</option></select>` })
@@ -22,6 +24,8 @@ beforeEach(() => {
   mocks.getModelCatalog.mockResolvedValue({ models, status: 'ready', revision: 'one' })
   mocks.syncModelCatalog.mockResolvedValue({ status: 'complete', succeeded: 2, failed: 0 })
   mocks.saveCatalogModel.mockResolvedValue(undefined)
+  groupMocks.getAll.mockResolvedValue([])
+  groupMocks.update.mockResolvedValue(undefined)
 })
 describe('model inventory', () => {
   it('lists all platforms and media without permissions, policy or JSON editors', async () => {
@@ -32,7 +36,7 @@ describe('model inventory', () => {
     expect(wrapper.text()).not.toContain('disabled-model')
     expect(wrapper.findAll('textarea')).toHaveLength(0)
     expect(wrapper.text()).not.toContain('modelCatalog.compare')
-    expect(wrapper.findAll('select')).toHaveLength(2)
+    expect(wrapper.findAll('select')).toHaveLength(3)
     wrapper.unmount()
   })
   it('filters by platform, kind and search without loading account lists', async () => {
@@ -83,6 +87,27 @@ describe('model inventory', () => {
     await wrapper.findAll('form')[1].trigger('submit'); await flushPromises()
     expect((wrapper.find('#model-display-name').element as HTMLInputElement).value).toBe('Edited')
     expect(wrapper.find('[role="alert"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+  it('loads the saved fixed source and updates only that group config', async () => {
+    groupMocks.getAll.mockResolvedValue([{
+      id: 7,
+      name: 'Codex source',
+      codex_models_manifest_config: { enabled: true, account_ids: [11, 12], fallback_to_scheduler: true }
+    }])
+    groupMocks.update.mockResolvedValue({
+      id: 7,
+      name: 'Codex source',
+      codex_models_manifest_config: { enabled: true, account_ids: [11, 12], fallback_to_scheduler: true }
+    })
+    const wrapper = render(); await flushPromises()
+    expect(wrapper.find('#catalog-group').exists()).toBe(true)
+    expect(wrapper.text()).toContain('#11')
+    expect(wrapper.text()).toContain('#12')
+    await button(wrapper, 'modelCatalog.saveCodexSource').trigger('click'); await flushPromises()
+    expect(groupMocks.update).toHaveBeenCalledWith(7, {
+      codex_models_manifest_config: { enabled: true, account_ids: [11, 12], fallback_to_scheduler: true }
+    }, { signal: expect.any(AbortSignal) })
     wrapper.unmount()
   })
 })

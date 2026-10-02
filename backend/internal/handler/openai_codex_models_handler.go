@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -15,8 +16,10 @@ import (
 // Codex CLI and the Codex desktop app refresh their model picker from
 // GET {base_url}/models?client_version=... (custom provider mode) or
 // GET /backend-api/codex/models (chatgpt_base_url mode). Both routes land
-// here. The published group catalog is authoritative; compatibility groups
-// with explicit mappings are generated locally;
+// here. An enabled fixed-source configuration fetches only its selected
+// accounts, then the shared catalog remains authoritative for visibility and
+// capability policy. When disabled, the published catalog or scheduler path
+// is unchanged.
 // otherwise ChatGPT manifests are proxied verbatim and custom API key manifests
 // receive provider-compatibility normalization plus short-lived caching.
 func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
@@ -41,21 +44,60 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		defer release()
 	}
 
-	if manifest, handled, err := h.gatewayService.PublishedCodexCatalog(c.Request.Context(), apiKey.Group); handled {
-		if err != nil {
-			h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "Published model catalog is unavailable")
+	pinnedFallback := false
+	if apiKey.Group.Platform == service.PlatformOpenAI && apiKey.Group.CodexModelsManifestConfig.Enabled {
+		manifest, account, err := h.gatewayService.FetchPinnedCodexModelsManifest(
+			c.Request.Context(), apiKey.Group, c.Query("client_version"),
+		)
+		if err == nil {
+			setOpsSelectedAccount(c, account.ID, account.Platform)
+			if err := h.gatewayService.ApplyPinnedCodexCatalogPolicy(
+				c.Request.Context(), apiKey.Group, manifest, c.GetHeader("If-None-Match"),
+			); err != nil {
+				h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to apply model catalog policy")
+				return
+			}
+			if c.Request.Context().Err() != nil {
+				return
+			}
+			writeOpenAIModelsResponse(c, manifest)
 			return
 		}
-		c.Header("ETag", manifest.ETag)
-		if service.CodexModelsManifestETagMatches(c.GetHeader("If-None-Match"), manifest.ETag) {
-			c.Status(http.StatusNotModified)
+		if c.Request.Context().Err() != nil {
 			return
 		}
-		writeOpenAIModelsResponse(c, manifest)
-		return
+		if !apiKey.Group.CodexModelsManifestConfig.FallbackToScheduler {
+			if errors.Is(err, service.ErrNoPinnedCodexModelsAccounts) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "No available pinned OpenAI accounts")
+				return
+			}
+			h.errorResponse(c, infraerrors.Code(err), "upstream_error", infraerrors.Message(err))
+			return
+		}
+		// Explicit fallback preserves the existing published/catalog/scheduler
+		// flow, but skips the cached published response so the scheduler really
+		// selects a live account. It is the only path that may select a
+		// non-pinned account.
+		pinnedFallback = true
+	}
+
+	if !pinnedFallback {
+		if manifest, handled, err := h.gatewayService.PublishedCodexCatalog(c.Request.Context(), apiKey.Group); handled {
+			if err != nil {
+				h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "Published model catalog is unavailable")
+				return
+			}
+			c.Header("ETag", manifest.ETag)
+			if service.CodexModelsManifestETagMatches(c.GetHeader("If-None-Match"), manifest.ETag) {
+				c.Status(http.StatusNotModified)
+				return
+			}
+			writeOpenAIModelsResponse(c, manifest)
+			return
+		}
 	}
 	ifNoneMatch := c.GetHeader("If-None-Match")
-	{
+	if !pinnedFallback {
 		configuredManifest, configured, err := h.gatewayService.BuildGroupConfiguredCodexModelsManifest(
 			c.Request.Context(),
 			apiKey.Group,
