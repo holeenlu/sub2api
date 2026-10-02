@@ -30,7 +30,7 @@ export default {
     },
     models: {
       title: "Models & pricing",
-      description: "One API, leading models. Compare capabilities and prices to find the right fit for every task.",
+      description: "Choose models using current group prices for input, output, cache, and other billing units.",
       rateNote: "The first 6 model catalog entries at standard-period rates, including group multipliers (personal rates take precedence). See the catalog for tiers, time-based and per-request pricing. Official links are for reference.",
       loading: "Loading channel models…",
       error: "Channel models could not be loaded.",
@@ -46,8 +46,8 @@ export default {
       cacheRead: "Cache read",
       copyModel: "Copy model ID: {model}",
       verifiedAt: "Official prices verified: {date}",
-      anthropicNote: "Global standard API pricing includes the full 1M-token context window. Cache writes, fast mode, and regional inference are priced separately.",
-      openaiNote: "Standard prices for up to 272K input tokens. Above that threshold, the entire request uses 2× input and cache read rates and 1.5× output rates. Sol promotional pricing lasts at least through 2026-11-21. Cache writes, fast mode, and regional processing are priced separately.",
+      anthropicNote: 'Prices and applicable rules follow current group settings. Check the model plaza for long-context, cache, fast-mode, and tool charges.',
+      openaiNote: 'Prices and applicable rules follow current group settings. Check the model plaza for long-context, cache, fast-mode, and tool charges.',
       introductions: {
         generic: "Access this model through a unified API. Capabilities and availability depend on the model and channel configuration.",
         fable51: "Demanding reasoning, autonomous coding, multistep research, and work with documents, spreadsheets, and slides. 1M-token context.",

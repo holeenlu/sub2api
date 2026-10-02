@@ -1,63 +1,58 @@
-Codex 使用者請使用 [Codex 工作階段恢復](/apps/session-recovery-codex)。Claude Code 工作階段不是 Codex SQLite 資料，不能用 Codex 修復工具處理。
+此工具用於 Claude Code 的本機 JSONL 工作階段。Codex 請使用 [Codex 恢復工具](/apps/session-recovery-codex)；官方雲端歷史需要回到原帳號或主機。
 
-## 先判斷是哪一種“丟失”
+## 先排除連線問題
 
-| 現象 | 優先處理 |
-| --- | --- |
-| 目前專案的選擇器為空 | 回到原專案執行 `claude --resume`；按 `Ctrl+W` 或 `Ctrl+A` 擴大範圍 |
-| 換作業系統使用者、主機或 `CLAUDE_CONFIG_DIR` 後不見 | 找回原來的 Claude 設定目錄；本機工作階段不會自動跨主機同步 |
-| 專案或 worktree 路徑改變 | 恢復原工作目錄，再按工作階段 ID 恢復 |
-| 切換 TapModels Key 或登入帳號後不見 | Key 不會搬走本地檔案；檢查實際 OS 使用者、設定目錄和專案路徑 |
-| 檔案已刪除、過期或只存在雲端 | 本地掃描工具無法重建，需使用原主機、原用戶端或備份 |
+用目前 Key 與模型建立新工作階段。401、503、模型不可用或餘額不足屬於連線、權限或伺服器問題，無法靠工作階段掃描解決。若只有舊記錄找不到，再依下列步驟處理。
 
-Claude Code CLI 會把工作階段儲存在本機 `~/.claude/projects/<專案>/<工作階段ID>.jsonl`；設定 `CLAUDE_CONFIG_DIR` 後則儲存在對應目錄。預設情況下，超過 30 天的本地記錄可能被清理。
+## 直接恢復原始記錄
 
-## 先用 Claude Code 找回
-
-回到原專案目錄執行：
+先執行 claude --resume 尋找工作階段。已知 ID 時可指定 ID；跨專案或目錄遷移後，也可使用完整 JSONL 路徑，避免選擇器範圍造成找不到記錄：
 
 ```bash
-claude --resume
+claude --resume "/absolute/path/to/SESSION_ID.jsonl"
 ```
 
-`claude --continue` 會恢復目前目錄最近一次工作階段；工作階段內可用 `/resume`。選擇器預設顯示目前專案，按 `Ctrl+W` 檢視同一儲存庫的其他 worktree，按 `Ctrl+A` 檢視本機全部專案。知道 ID 時使用：
+
+請在要繼續工作的專案目錄執行。路徑必須是實際存在的本機檔案，不能直接使用範例文字。用戶端須支援以絕對檔案路徑恢復；舊版請先更新。
+
+## 下載與掃描
+
+需要 Python 3.10+。[下載 Claude Code 恢復工具](/downloads/tapmodels-claude-session-recovery.zip)，解壓縮後進入 tapmodels-claude-session-recovery 目錄：
 
 ```bash
-claude --resume <工作階段ID>
-```
-
-## 下載只讀恢復工具
-
-[下載 TapModels Claude Code 工作階段恢復包](/downloads/tapmodels-claude-session-recovery.zip)。macOS / Linux：
-
-```bash
-curl -fsSLO https://tapmodels.ai/downloads/tapmodels-claude-session-recovery.zip
-unzip tapmodels-claude-session-recovery.zip
-cd tapmodels-claude-session-recovery
 bash find-claude-sessions.sh
 ```
 
-Windows PowerShell：
 
 ```powershell
-Invoke-WebRequest https://tapmodels.ai/downloads/tapmodels-claude-session-recovery.zip -OutFile tapmodels-claude-session-recovery.zip
-Expand-Archive .\tapmodels-claude-session-recovery.zip -DestinationPath . -Force
-Set-Location .\tapmodels-claude-session-recovery
 .\Find-ClaudeSessions.ps1
 ```
 
-腳本只列出檔名 UUID 與檔案內 `sessionId` 一致的記錄，並輸出帶原工作目錄的 `claude --resume <工作階段ID>` 命令。它不會啟動 Claude、讀取或輸出訊息正文，也不會修改 JSONL、帳號、Key 或設定。報告包含本機路徑與工作階段 ID，分享前檢查隱私。
 
-## 掃描其他目錄與恢復
+掃描預設使用 CLAUDE_CONFIG_DIR 或 ~/.claude。工具核對檔名 UUID 與記錄中的 sessionId，輸出已驗證的絕對路徑及恢復命令，不輸出訊息內文或 Key，不修改記錄，也不會自動啟動 Claude。
 
-掃描舊設定目錄：
+## 專案遷移或舊設定目錄
+
+掃描另一份歷史時，以 --claude-home 指定包含 projects 的設定目錄；專案已搬移時，用 --project-dir 指定目前存在的目錄：
 
 ```bash
-bash find-claude-sessions.sh --claude-home "/原來的/.claude"
+bash find-claude-sessions.sh --claude-home "/path/to/.claude" --project-dir "/path/to/project"
 ```
 
-PowerShell 使用 `-ClaudeHome`。若報告提示原工作目錄不存在，先恢復原目錄或把專案放回該路徑，再手動執行生成的命令。開啟工作階段本身不會發送訊息；繼續輸入並行送後會產生模型請求。
 
-工具不能重建已刪除、已過期、另一台主機或雲端專屬工作階段，也不會改變 Claude 的保留週期或帳號歸屬。
+```powershell
+.\Find-ClaudeSessions.ps1 -ClaudeHome "C:\path\to\.claude" -ProjectDir "C:\path\to\project"
+```
 
-依據：[Claude Code 工作階段管理](https://code.claude.com/docs/en/sessions)、[Claude 本地資料目錄](https://code.claude.com/docs/en/claude-directory)。工具經過臨時夾具測試，沒有修改本機真實 Claude 工作階段檔案。
+
+PowerShell 使用 -ClaudeHome 與 -ProjectDir。原工作目錄不存在且未指定新目錄時，工具會提示補充目錄，不再產生無法執行的 cd 命令。
+
+產生的命令會設定 CLAUDE_CONFIG_DIR，並以 JSONL 絕對路徑恢復。請先確認掃描目錄中的 settings.json 對應目前要使用的服務商與憑證。若要保留目前的用戶端設定，也可在已設定的終端手動執行 claude --resume 並加上報告中的絕對檔案路徑。
+
+## 執行與驗證
+
+將報告中的命令複製到對應 shell 執行。看到原對話後，再傳送明確的新訊息驗證呼叫；繼續對話會產生 API 用量。PowerShell 命令在切換專案失敗時會停止。
+
+此工具無法還原刪除的檔案，不會下載其他主機或雲端記錄，也不承諾將官方帳號的雲端歷史遷移至閘道。掃描為空時請檢查作業系統使用者、原主機、設定目錄及自己的備份。
+
+[Claude Code CLI --resume](https://code.claude.com/docs/en/cli-reference) · 2026-10-02

@@ -3,6 +3,12 @@ param(
   [string]$CodexHome = "",
   [string]$Database = "",
   [string]$Rollback = "",
+  [switch]$List,
+  [string]$Resume = "",
+  [string]$Provider = "",
+  [string]$Model = "",
+  [string]$ProjectDir = "",
+  [switch]$Run,
   [switch]$DryRun,
   [switch]$Apply,
   [switch]$ClientClosed,
@@ -16,6 +22,13 @@ if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }
 if (-not $python) { throw "Python 3 is required. Install Python, then run this script again." }
 
 $arguments = @((Join-Path $scriptDir "repair_sessions.py"))
+if ($List) { $arguments += "--list" }
+if ($Resume) { $arguments += @("--resume", $Resume) }
+if ($Provider) { $arguments += @("--provider", $Provider) }
+if ($Model) { $arguments += @("--model", $Model) }
+if ($ProjectDir) { $arguments += @("--project-dir", $ProjectDir) }
+if ($Run) { $arguments += "--run" }
+$arguments += @("--shell", "powershell")
 if ($CodexHome) { $arguments += @("--codex-home", $CodexHome) }
 if ($Database) { $arguments += @("--database", $Database) }
 if ($Rollback) { $arguments += @("--rollback", $Rollback) }

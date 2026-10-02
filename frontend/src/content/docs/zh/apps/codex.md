@@ -1,8 +1,8 @@
 ## 先准备好 Key 和模型
 
-在 [API 密钥](/keys) 创建 Key，选定分组，再点击“使用密钥 → Codex”。优先使用控制台当前生成的配置；模型目录仅对 OpenAI/Composite 分组开放。示例模型 `gpt-6-astra` 仅用于演示，请替换为该 Key 实际开放的模型。已有配置先备份，合并对应字段，不要覆盖整个文件。控制台的普通 HTTP/SSE 与 WebSocket 配置是不同标签；先用普通配置验证。
+在 [API 密钥](/keys) 选择要使用的 Key，点击“使用密钥 → Codex”。分组决定开放模型与接入范围，优先复制当前弹窗生成的配置。本文型号仅为示例，不保证当前 Key 可用。已有配置先备份，再合并所需字段。
 
-OpenAI/Composite 分组打开“使用密钥”后会立即生成默认配置，按本地“模型限制（可选）”候选列表中的模型档位与版本，选择适用于 Codex 的最高档位型号（目前为 `gpt-6-astra`），同时填入 `model` 和 `review_model`。该列表是表单的内置选项，不代表当前账号已勾选的限制或该 Key 实际可用的模型。打开或切换密钥不会自动请求模型目录，不进行后台刷新，也不持久保存目录缓存。
+主模型与审查模型由当前 Key 的配置资料提供；获取模型目录后，可按目录中的可用型号更新选择。不要把文档示例、前端候选项或厂商全部型号视为这把 Key 的授权清单。
 
 本文适用于本机读取 Codex 配置的客户端。云端任务不一定读取这份配置；需要在实际执行主机单独配置。
 
@@ -19,9 +19,9 @@ curl -fsSL https://tapmodels.ai/install/codex.sh | bash
 
 脚本会备份已有 `config.toml`、写入 Responses Provider，并设置 `600` 权限。执行前应审阅脚本内容；不要把 API Key 写进命令历史或提交到仓库。需要自定义地址时额外设置 `TAPMODELS_BASE_URL`，模型可用 `TAPMODELS_MODEL` 覆盖。
 
-下图为本项目 OpenAI 分组的 API key 模式配置器，使用无效示例 Key 和演示地址。根据自己的分组复制实际配置；[控制台配置器](/apps/console) 展示了另一种 Legacy 模式及操作步骤，截图可点击放大。
+下图为 TapModels OpenAI 分组的 API key 模式配置器，使用无效示例 Key 和演示地址。根据自己的分组复制实际配置；[控制台配置器](/apps/console) 说明认证模式与操作步骤，截图可点击放大。
 
-![本项目 Codex API key 配置器（示例数据）](/docs-assets/client-codex-zh.png)
+![TapModels Codex API key 配置器（示例数据）](/docs-assets/client-codex-zh.png)
 
 需要已安装 Codex CLI，可按 [官方 CLI 安装说明](https://developers.openai.com/codex/cli/) 安装，再运行 `codex --version` 确认。
 
@@ -58,7 +58,7 @@ supports_websockets = false
 
 在刚才设置环境变量的同一个终端运行 `codex`。`supports_websockets = false` 是先验证 HTTP/SSE 的配置，不代表本站没有 WebSocket 路由。
 
-OpenAI 分组由弹窗生成另一种配置：Provider ID 是 `OpenAI`，包含主模型、审查模型、`[features]` 和本地目录路径 `model_catalog_json`，复制即可使用。弹窗默认选中 **Codex CLI (WebSocket)** 与 **API key** 模式：`requires_openai_auth = false` 并写入 `experimental_bearer_token`，只需下载 `config.toml`；**Legacy** 模式改为 `requires_openai_auth = true` 并同时下载 `auth.json`。切换后必须完全重启 Codex。两种模式不要混合，也不要把路由分组的 `tapmodels` 表和 OpenAI 分组的 `OpenAI` 表拼成一个 Provider。
+OpenAI 分组的配置使用弹窗显示的 Provider ID。该 ID 区分大小写，必须与 model_providers 下的表名一致。API key 模式使用直接令牌；Legacy 模式同时需要对应的 auth.json。模型目录若选本地文件，还必须下载目录 JSON，不能只保存 config.toml。切换配置后完全重启客户端。
 
 ## 桌面端：让应用拿到 Key
 
@@ -76,15 +76,12 @@ OpenAI 分组由弹窗生成另一种配置：Provider ID 是 `OpenAI`，包含�
 
 ## 当前分组模型目录
 
-本节适用于 OpenAI/Composite 分组和智谱 API Key 分组。其他路由分组不提供专用目录，也不应添加 `model_catalog_url` 或 `model_catalog_json`。用普通 `GET /v1/models` 查询精确 ID 后填入 `model`；不要把该列表响应当作 Codex manifest。
+若当前 Codex 标签提供模型目录，按弹窗所选方式配置：
 
-弹窗生成的 `config.toml` 在根级包含：
+- **本地文件**：获取并下载 codex-models.json，保存到生成配置的 model_catalog_json 所指路径。修改文件名或 CODEX_HOME 后须同步修改路径。
+- **远程目录**：客户端和分组支持时，可使用弹窗生成的 model_catalog_url，由客户端请求当前 Key 的目录。不要自行改变该字段在配置中的位置。
 
-```toml
-model_catalog_json = "~/.codex/codex-models.json"
-```
-
-在“获取模型目录及下载”区域点击获取，下载 `codex-models.json` 并保存到上述路径，重启 Codex 后模型列表即来自本站为该 Key 计算的目录。OpenAI/Composite 可切换远程目录；智谱始终使用本地文件，`GLM-5.3` 系列目录与 `config.toml` 声明 1,000,000 token 上下文；`GLM-4.7` 保留上游的 200,000 token 限制。不要编辑模型名称来绕过权限。
+不支持目录的标签使用该分组开放的精确模型 ID。模型目录、账号可调度状态和请求协议是不同条件；列表可见不保证所有工具与接口可用。配置来源以当前弹窗为准，不把普通模型列表 JSON 当作 Codex 专用目录。
 
 ## 验证接入
 
@@ -100,4 +97,4 @@ model_catalog_json = "~/.codex/codex-models.json"
 | Speed/Fast 入口不出现 | 模型目录是否声明对应能力；价格倍率不会自动创建客户端入口 |
 | 旧任务不可见 | 原项目、归档、Provider 与本地数据目录；先诊断，不删除历史 |
 
-配置基于项目“使用密钥”生成器；字段含义见 [Codex 配置参考](https://developers.openai.com/codex/config-reference/)，核对于 2026-09-15。
+配置由当前“使用密钥”窗口生成。字段说明见 [Codex 配置参考](https://developers.openai.com/codex/config-reference/)。

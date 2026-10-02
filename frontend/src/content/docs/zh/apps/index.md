@@ -1,6 +1,6 @@
 ## 从 API Key 到应用
 
-本项目 提供 OpenAI Responses、Chat Completions、Anthropic Messages 与图像兼容接口。第三方应用的字段名称不同，但都需要三项真实配置：控制台显示的 API 基础地址、本项目 API Key、当前 Key 分组开放的模型 ID。
+TapModels 提供 OpenAI Responses、Chat Completions、Anthropic Messages 与图像兼容接口。第三方应用的字段名称不同，但都需要三项真实配置：控制台显示的 API 基础地址、TapModels API Key、当前 Key 分组开放的模型 ID。
 
 | 应用 | 协议 | 基础地址 | 认证方式 |
 | --- | --- | --- | --- |
@@ -12,9 +12,9 @@
 
 ## 创建专用 Key
 
-在 [API 密钥](/keys) 点击创建，选择你实际要使用的分组。下面为本项目控制台截图，选项以当前版本为准。
+在 [API 密钥](/keys) 点击创建，选择你实际要使用的分组。下面为TapModels控制台截图，选项以当前版本为准。
 
-![本项目 创建 API 密钥：选择分组与限额](/docs-assets/create-api-key.png)
+![TapModels 创建 API 密钥：选择分组与限额](/docs-assets/create-api-key.png)
 
 ## 推荐接入顺序
 

@@ -20,9 +20,9 @@ curl -fsSL https://tapmodels.ai/install/claude-code.sh | bash
 
 脚本会备份 `~/.claude/settings.json` 后写入 Messages 环境变量并限制权限。执行前请审阅脚本；需要自定义地址时设置 `TAPMODELS_BASE_URL`。
 
-下图来自本项目“使用密钥 → Claude Code”，使用无效示例 Key 与演示地址。选择与你操作系统一致的标签，并复制自己控制台里的值；[配置器教程](/apps/console) 也提供了 PowerShell 截图。
+下图来自TapModels“使用密钥 → Claude Code”，使用无效示例 Key 与演示地址。选择与你操作系统一致的标签，并复制自己控制台里的值；[配置器教程](/apps/console) 也提供了 PowerShell 截图。
 
-![本项目 Claude Code 配置器（示例数据）](/docs-assets/client-claude-zh.png)
+![TapModels Claude Code 配置器（示例数据）](/docs-assets/client-claude-zh.png)
 
 已安装 Claude Code 后运行 `claude --version`。安装步骤见 [Claude Code 官方说明](https://code.claude.com/docs/en/setup)。
 

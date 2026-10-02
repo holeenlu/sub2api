@@ -1,63 +1,58 @@
-Codex ユーザーは [Codex セッションの復旧](/apps/session-recovery-codex) に従ってください。Claude Code のセッションは Codex の SQLite データではないため、Codex の修復ユーティリティに渡してはなりません。
+このツールは Claude Code のローカル JSONL 履歴用です。Codex は [専用ツール](/apps/session-recovery-codex) を使用してください。公式クラウド履歴には元のアカウントまたはホストが必要です。
 
-## 何が見つからないのかを特定する
+## 先に接続の問題を確認
 
-| 症状 | 最初に行うこと |
-| --- | --- |
-| 現在のプロジェクトでピッカーが空 | プロジェクトに戻り、`claude --resume` を実行する。`Ctrl+W` または `Ctrl+A` で範囲を広げる |
-| OS ユーザー、ホスト、または `CLAUDE_CONFIG_DIR` が異なる | 元の Claude 設定ディレクトリを特定する。ローカルセッションはホスト間で自動的に移行されない |
-| プロジェクトまたは worktree のパスが変更された | 元の作業ディレクトリを復元し、セッション ID で再開する |
-| TapModels のキーまたはログインを変更した後に見つからない | キーによってローカルファイルが移動することはない。OS ユーザー、設定ディレクトリ、プロジェクトパスを確認する |
-| 削除済み、期限切れ、またはクラウドのみの履歴 | ローカルスキャナーでは再作成できない。元のホスト、クライアント、またはバックアップを使用する |
+現在のキーとモデルで新しいセッションを確認します。401、503、モデル利用不可、残高不足は接続・権限・サーバー側の問題です。既存のローカル履歴だけが見つからない場合に、以下の手順を使用してください。
 
-Claude Code CLI はセッションを `~/.claude/projects/<project>/<session-id>.jsonl` に保存します。`CLAUDE_CONFIG_DIR` が設定されている場合は、その配下に保存されます。デフォルトでは、30 日を超えたローカルレコードがクリーンアップされることがあります。
+## 履歴ファイルを直接再開
 
-## まず Claude Code を試す
-
-元のプロジェクトディレクトリに戻り、次を実行します。
+claude --resume でセッションを探すか、既知の ID を指定します。プロジェクトや保存先を移動した場合は、JSONL の絶対パスを指定すると選択範囲による問題を避けられます。
 
 ```bash
-claude --resume
+claude --resume "/absolute/path/to/SESSION_ID.jsonl"
 ```
 
-`claude --continue` は現在のディレクトリで最新のセッションを再開し、`/resume` はセッションからピッカーを開きます。ピッカーは現在のプロジェクトから開始します。リポジトリ内の他の worktree を表示するには `Ctrl+W`、このマシン上のすべてのプロジェクトを表示するには `Ctrl+A` を押します。ID が分かっている場合は、次を使用します。
+
+作業を続けるプロジェクトディレクトリで実行し、例のパスを実在するファイルに置き換えてください。絶対パスによる再開に対応する Claude Code が必要です。古いクライアントは先に更新してください。
+
+## ダウンロードとスキャン
+
+Python 3.10 以降が必要です。[Claude Code ツールをダウンロード](/downloads/tapmodels-claude-session-recovery.zip)して展開し、tapmodels-claude-session-recovery に移動します。
 
 ```bash
-claude --resume <session-id>
-```
-
-## 読み取り専用の復旧ユーティリティをダウンロードする
-
-[TapModels Claude Code セッション復旧バンドルをダウンロードする](/downloads/tapmodels-claude-session-recovery.zip)。macOS または Linux では、次を実行します。
-
-```bash
-curl -fsSLO https://tapmodels.ai/downloads/tapmodels-claude-session-recovery.zip
-unzip tapmodels-claude-session-recovery.zip
-cd tapmodels-claude-session-recovery
 bash find-claude-sessions.sh
 ```
 
-Windows PowerShell:
 
 ```powershell
-Invoke-WebRequest https://tapmodels.ai/downloads/tapmodels-claude-session-recovery.zip -OutFile tapmodels-claude-session-recovery.zip
-Expand-Archive .\tapmodels-claude-session-recovery.zip -DestinationPath . -Force
-Set-Location .\tapmodels-claude-session-recovery
 .\Find-ClaudeSessions.ps1
 ```
 
-スキャナーは、埋め込まれた `sessionId` と一致するトランスクリプトのファイル名 UUID のみを受け付け、元の作業ディレクトリを含む正確な `claude --resume <session-id>` コマンドを出力します。Claude を起動したり、メッセージ本文を読み取ったり出力したり、JSONL、アカウント、キー、設定を変更したりすることはありません。レポートにはローカルパスとセッション ID が含まれるため、共有する前に内容を確認してください。
 
-## 別のディレクトリをスキャンして再開する
+CLAUDE_CONFIG_DIR または ~/.claude を使用します。ファイル名の UUID と記録された sessionId を照合し、絶対パスと再開コマンドを出力します。本文やキーの出力、履歴の変更、Claude の自動起動は行いません。
 
-以前の設定ディレクトリをスキャンするには、次を実行します。
+## 移動したプロジェクトと以前の設定ディレクトリ
+
+--claude-home には projects を含む設定ディレクトリを指定します。プロジェクトを移動した場合は、--project-dir に現在存在するディレクトリを指定してください。
 
 ```bash
-bash find-claude-sessions.sh --claude-home "/old/.claude"
+bash find-claude-sessions.sh --claude-home "/path/to/.claude" --project-dir "/path/to/project"
 ```
 
-PowerShell では `-ClaudeHome` を使用します。レポートに記録された作業ディレクトリが見つからないと表示された場合は、生成されたコマンドを手動で実行する前に、そのパスにプロジェクトを復元してください。セッションを開くだけではメッセージは送信されません。フォローアップを送信すると、モデルへのリクエストが発生します。
 
-このユーティリティでは、削除済み、期限切れ、別のホストにある、またはクラウドのみのセッションを再作成できません。また、Claude の保持期間やアカウントの所有権を変更することもありません。
+```powershell
+.\Find-ClaudeSessions.ps1 -ClaudeHome "C:\path\to\.claude" -ProjectDir "C:\path\to\project"
+```
 
-出典: [Claude Code のセッション管理](https://code.claude.com/docs/en/sessions) および [Claude のローカルデータディレクトリ](https://code.claude.com/docs/en/claude-directory)。このユーティリティは一時的なフィクスチャでテストされており、実際のローカル Claude 履歴ではテストされていません。
+
+PowerShell は -ClaudeHome と -ProjectDir を使用します。元の作業ディレクトリがなく移動先の指定もない場合、実行できない cd コマンドを出力せず、ディレクトリの指定を案内します。
+
+生成するコマンドは CLAUDE_CONFIG_DIR を設定し、JSONL の絶対パスで再開します。そのディレクトリの settings.json が目的のサービスと認証情報を使うことを確認してください。現在の設定を維持する場合は、設定済みの端末で claude --resume にレポートの絶対パスを指定して実行できます。
+
+## 実行と確認
+
+生成されたコマンドを対応する shell にコピーします。元の会話を確認してから、新しいメッセージを明示的に送信して API 接続を確認してください。続行には API 使用量が発生します。PowerShell はディレクトリ変更に失敗すると停止します。
+
+削除済みのファイルの再作成、他のホストやクラウドからの履歴ダウンロード、公式クラウド履歴のゲートウェイへの移行はできません。結果が空の場合は OS ユーザー、元のホスト、設定ディレクトリ、自身のバックアップを確認してください。
+
+[Claude Code CLI --resume](https://code.claude.com/docs/en/cli-reference) · 2026-10-02

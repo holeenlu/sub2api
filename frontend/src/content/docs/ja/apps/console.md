@@ -18,7 +18,7 @@
 | Gemini | Gemini CLI、ルーティング済み Codex、OpenCode | `GOOGLE_GEMINI_BASE_URL`、`GEMINI_API_KEY`、`GEMINI_MODEL` |
 | Antigravity | Claude Code、Gemini CLI、ルーティング済み Codex、OpenCode | `/antigravity` ベースパス、Gemini は `/v1beta` を使用 |
 | Grok | Grok CLI、Claude Code、Codex、OpenCode | `GROK_MODELS_BASE_URL`、`XAI_API_KEY`、またはクライアント固有の設定 |
-| DeepSeek、MiniMax、Composite、Kimi、Zhipu、OpenCode | Claude Code、ルーティング済み Codex、OpenCode | 生成されたグループ URL を使用します。Codex カタログを提供するのは Composite のみです |
+| DeepSeek、MiniMax、Composite、Kimi、Zhipu、OpenCode | Claude Code、ルーティング済み Codex、OpenCode | 生成されたグループ URL を使用します。カタログ対応は以下を参照してください |
 
 ## Codex の認証モード
 
@@ -31,17 +31,20 @@ OpenAI の Codex タブには 2 つのモードがあります。「キーを使
 
 ## モデルカタログ
 
-OpenAI/Composite グループと Zhipu API キーグループが専用 Codex カタログに対応します。その他のグループでは `model_catalog_url` と `model_catalog_json` は生成されません。通常の `GET /v1/models` を実行し、正確なモデル ID を手動で入力してください。
+選択した Codex タブにカタログ機能がある場合は、表示された方式に従います。
 
-対応している Codex タブで生成される `config.toml` のルートには `model_catalog_json = "~/.codex/codex-models.json"` が含まれます。**モデルカタログの取得とダウンロード** で現在のキーのカタログを取得し、そのパスへ保存して Codex を再起動してください。OpenAI/Composite ではリモートカタログも選択できます。Zhipu は常にローカルファイルを使用し、`GLM-5.3` 系列のディスクリプタと `config.toml` は 1,000,000 トークンのコンテキストを宣言し、`GLM-4.7` は上流の 200,000 トークン制限を維持します。グループポリシーを回避するためにスラッグを編集しないでください。
+- **ローカルファイル**：codex-models.json を取得し、生成された model_catalog_json のパスに保存します。ファイル名や CODEX_HOME を変更した場合はパスも合わせてください。
+- **リモートカタログ**：クライアントとグループが対応する場合、生成された model_catalog_url からキーのカタログを取得できます。設定内のフィールド位置は変更しないでください。
 
-## プロジェクトの UI に従う
+カタログ非対応のタブでは、グループで利用できる正確なモデル ID を指定します。一覧への表示、利用可能なアカウント、プロトコル対応は別の条件です。すべてのツールやエンドポイントの利用を保証しません。通常のモデル一覧 JSON を Codex 専用カタログとして保存しないでください。
+
+## TapModels の UI に従う
 
 以下のスクリーンショットには、無効なサンプルキーと `api.example.com` を使用した、現在のプロジェクトの「キーを使用」コンポーネントが表示されています。画像ではなく、ご自身のコンソールから値をコピーしてください。
 
 1. OpenAI グループでは既定で **Codex CLI (WebSocket)** と API key 認証が選択されます。ネットワークが WebSocket に対応していない場合は **Codex CLI**、`auth.json` のログイン形式が必要な場合は Legacy を選びます。各認証モードで生成されるファイルは異なります。
 
-![サンプルデータを使用したプロジェクトの Codex Legacy 設定](/docs-assets/client-codex-en.png)
+![サンプルデータを使用したプロジェクトの Codex 設定](/docs-assets/client-codex-en.png)
 
 2. API key モードでは、キーが設定ファイルに保存されます。ファイルのアクセス権を制限し、ダウンロード後にクライアントを完全に再起動してください。
 

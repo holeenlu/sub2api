@@ -17,7 +17,7 @@ PACKAGES = {
     "gpt-image-sunburst": ("tapmodels-image-skills/gpt-image-sunburst", SKILL_FILES),
     "tapmodels-codex-session-repair": (
         "tapmodels-session-repair",
-        ("README.md", "repair_sessions.py", "repair-sessions.sh", "Repair-TapModelsSessions.ps1"),
+        ("README.md", "repair_sessions.py", "resume_sessions.py", "repair-sessions.sh", "Repair-TapModelsSessions.ps1"),
     ),
     "tapmodels-claude-session-recovery": (
         "tapmodels-claude-session-recovery",

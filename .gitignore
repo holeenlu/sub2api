@@ -127,6 +127,10 @@ CLAUDE.md
 scripts
 !backend/scripts/
 !backend/scripts/resolve-version.sh
+!frontend/public/downloads/tapmodels-image-skills/gpt-image-flare/scripts/
+!frontend/public/downloads/tapmodels-image-skills/gpt-image-flare/scripts/generate.py
+!frontend/public/downloads/tapmodels-image-skills/gpt-image-sunburst/scripts/
+!frontend/public/downloads/tapmodels-image-skills/gpt-image-sunburst/scripts/generate.py
 .code-review-state
 #openspec/
 code-reviews/

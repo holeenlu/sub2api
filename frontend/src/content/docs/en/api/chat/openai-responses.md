@@ -26,7 +26,7 @@ Use `POST /v1/responses/input_tokens` for input-only counting. It requires a non
 | `parallel_tool_calls` | boolean | no | Allows parallel calls |
 | `previous_response_id` | string | no | Must be an accessible `resp_*`, not a message ID |
 | `include` | string[] | no | Requests extra fields supported by the selected upstream path |
-| `store` | boolean | no | A passthrough intent; it does not create a this project retrieve-history API |
+| `store` | boolean | no | A passthrough intent; it does not create a TapModels retrieve-history API |
 | `stream` | boolean | no | Emits Responses SSE events; must be a JSON boolean |
 
 Common array parts include `input_text`, `input_image`, and `input_file`. Image URLs and file data/IDs remain subject to upstream type and size restrictions.

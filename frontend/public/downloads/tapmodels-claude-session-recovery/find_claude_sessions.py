@@ -18,13 +18,14 @@ from typing import Iterable
 UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
-MAX_RECORDS = 256
 MAX_LINE_BYTES = 2 * 1024 * 1024
 
 
 @dataclass(frozen=True)
 class Session:
     session_id: str
+    transcript_path: str
+    claude_home: str
     project_key: str
     working_directory: str | None
     working_directory_exists: bool | None
@@ -59,22 +60,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--commands-only", action="store_true", help="Print only resume commands")
     parser.add_argument("--json", action="store_true", help="Print machine-readable metadata")
+    parser.add_argument("--project-dir", type=Path, help="Existing project directory after moving a project")
     return parser.parse_args(argv)
 
 
 def read_metadata(path: Path) -> tuple[str | None, str | None]:
     session_id = None
     cwd = None
-    with path.open("r", encoding="utf-8", errors="replace") as stream:
-        for _ in range(MAX_RECORDS):
+    with path.open("rb") as stream:
+        while True:
             line = stream.readline(MAX_LINE_BYTES + 1)
             if not line:
                 break
             if len(line) > MAX_LINE_BYTES:
+                # Drain the physical line, without loading a large message into memory.
+                while line and not line.endswith(b"\n"):
+                    line = stream.readline(MAX_LINE_BYTES + 1)
                 continue
             try:
                 record = json.loads(line)
-            except (json.JSONDecodeError, TypeError):
+            except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
                 continue
             if not isinstance(record, dict):
                 continue
@@ -116,6 +121,8 @@ def scan_sessions(claude_home: Path) -> tuple[list[Session], list[str]]:
             sessions.append(
                 Session(
                     session_id=session_id,
+                    transcript_path=str(transcript),
+                    claude_home=str(projects.parent),
                     project_key=project.name,
                     working_directory=cwd,
                     working_directory_exists=Path(cwd).is_dir() if cwd else None,
@@ -131,15 +138,19 @@ def powershell_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def resume_command(session: Session, shell: str) -> str:
-    cwd = session.working_directory
+def resume_command(session: Session, shell: str, project_dir: Path | None = None) -> str | None:
+    cwd = str(project_dir) if project_dir else session.working_directory
+    if not cwd or not Path(cwd).is_dir():
+        return None
     if shell == "powershell":
-        prefix = f"Set-Location -LiteralPath {powershell_quote(cwd)}; " if cwd else ""
+        return (f"& {{ Set-Location -LiteralPath {powershell_quote(cwd)} -ErrorAction Stop; "
+                f"$env:CLAUDE_CONFIG_DIR = {powershell_quote(session.claude_home)}; "
+                f"claude --resume {powershell_quote(session.transcript_path)} }}")
     elif shell == "posix":
-        prefix = f"cd -- {shlex.quote(cwd)} && " if cwd else ""
-    else:
-        prefix = f"[{cwd}] " if cwd else ""
-    return f"{prefix}claude --resume {session.session_id}"
+        return (f"cd -- {shlex.quote(cwd)} && "
+                f"env CLAUDE_CONFIG_DIR={shlex.quote(session.claude_home)} "
+                f"claude --resume {shlex.quote(session.transcript_path)}")
+    return f"cwd={cwd}; CLAUDE_CONFIG_DIR={session.claude_home}; claude --resume {session.transcript_path}"
 
 
 def selected_sessions(sessions: list[Session], limit: int) -> Iterable[Session]:
@@ -151,9 +162,12 @@ def selected_sessions(sessions: list[Session], limit: int) -> Iterable[Session]:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
+        project_dir = args.project_dir.expanduser().resolve() if args.project_dir else None
+        if project_dir and not project_dir.is_dir():
+            raise RuntimeError("--project-dir must be an existing directory")
         sessions, warnings = scan_sessions(args.claude_home)
         selected = list(selected_sessions(sessions, args.limit))
-    except RuntimeError as exc:
+    except (OSError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
@@ -162,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
             "claude_home": str(args.claude_home.expanduser().resolve()),
             "session_count": len(sessions),
             "sessions": [
-                {**asdict(session), "resume_command": resume_command(session, args.shell)}
+                {**asdict(session), "resume_command": resume_command(session, args.shell, project_dir)}
                 for session in selected
             ],
             "warnings": warnings,
@@ -175,10 +189,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Validated local sessions: {len(sessions)}; showing: {len(selected)}")
         print("Run a command below yourself. Opening a session is not automated.")
     for session in selected:
-        print(resume_command(session, args.shell))
+        command = resume_command(session, args.shell, project_dir)
+        if command:
+            print(command)
+        else:
+            print(f"warning: {session.session_id}: supply --project-dir with an existing project directory", file=sys.stderr)
     if not args.commands_only:
         for session in selected:
-            if session.working_directory and not session.working_directory_exists:
+            if not project_dir and session.working_directory and not session.working_directory_exists:
                 print(
                     f"warning: recorded working directory no longer exists for {session.session_id}: "
                     f"{session.working_directory}",

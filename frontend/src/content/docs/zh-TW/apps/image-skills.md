@@ -72,7 +72,7 @@ Windows 用 `py -3 -m venv "$env:USERPROFILE\.agents\skills\gpt-image-flare\.ven
 
 明確設定 `TAPMODELS_BASE_URL` 時啟用完整環境覆蓋，並要求同時設定 `TAPMODELS_API_KEY`；沒有該 URL 時讀取目前 Codex Provider 的地址及上述認證資訊欄位。缺少指定環境變數會錯誤，不回退到其他帳號 Key。`--check-config` 只檢查設定結構；`--dry-run` 還會驗證請求參數和輸入圖片但不聯網。實際呼叫還需要認證資訊、網路和模型權限。輸出檔案必須使用絕對路徑，已有檔案需顯式 `--force` 覆蓋。
 
-新版官方推薦 `~/.agents/skills`。使用舊版或本專案既有 `~/.codex/skills` 的用戶端，可保留其實際發現路徑；同名 Skill 不要裝兩份。安裝後在任務輸入框輸入 `$gpt-image-flare` 檢查是否出現，未出現則重啟並檢查目錄層級。
+新版官方推薦 `~/.agents/skills`。使用舊版或TapModels既有 `~/.codex/skills` 的用戶端，可保留其實際發現路徑；同名 Skill 不要裝兩份。安裝後在任務輸入框輸入 `$gpt-image-flare` 檢查是否出現，未出現則重啟並檢查目錄層級。
 
 ## 使用
 

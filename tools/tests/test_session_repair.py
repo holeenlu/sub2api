@@ -57,6 +57,22 @@ class SessionRepairTest(unittest.TestCase):
         self.assertEqual(report["repairable_rollout_paths"], [])
         self.assertEqual(report["missing_rollout_paths"][0]["candidates"], [])
 
+    def test_renamed_transcript_and_windows_source_path_are_repaired_by_id(self):
+        self.add_thread("thread-moved", r"C:\Users\old\.codex\sessions\old-name.jsonl")
+        target = self.add_rollout("new-name.jsonl", "thread-moved")
+        _, count, _ = repair.apply_repairs(self.home, self.db)
+        self.assertEqual(count, 1)
+        with sqlite3.connect(self.db) as connection:
+            self.assertEqual(connection.execute("SELECT rollout_path FROM threads").fetchone()[0], str(target))
+
+    def test_same_id_under_different_names_is_ambiguous(self):
+        self.add_thread("thread-duplicate", "/old/missing.jsonl")
+        self.add_rollout("one.jsonl", "thread-duplicate")
+        self.add_rollout("two.jsonl", "thread-duplicate")
+        report = repair.snapshot(self.home, self.db)
+        self.assertEqual(report["repairable_rollout_paths"], [])
+        self.assertEqual(len(report["ambiguous_rollout_paths"]), 1)
+
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_candidate_rejects_symlink_escape(self):
         outside = self.home / "outside"
