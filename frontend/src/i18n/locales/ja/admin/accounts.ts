@@ -97,6 +97,12 @@ export default {
       schedulableEnabled: 'スケジューリング有効',
       schedulableDisabled: 'スケジューリング無効',
       failedToToggleSchedulable: 'スケジューリング状態の切り替えに失敗しました',
+      priorityQuick: {
+        raise: '優先度を上げる（値 -1）',
+        lower: '優先度を下げる（値 +1）',
+        editHint: 'クリックして値を入力。小さい値が優先されます',
+        failed: '優先度の更新に失敗しました'
+      },
       groupCountTotal: 'グループ合計{count}件',
       platforms: {
         anthropic: 'Anthropic',
@@ -110,6 +116,7 @@ export default {
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
         opencode_go: 'OpenCode',
+        typesafe: 'TypeSafe / Jev',
       },
       cnProviders: {
         accountMode: {
@@ -940,7 +947,7 @@ export default {
       customErrorCodes: 'カスタムエラーコード',
       customErrorCodesHint: '選択したエラーコードのみスケジュールを停止',
       customErrorCodesWarning:
-        '選択したエラーコードの場合のみスケジュールを停止します。それ以外のエラーは500を返します。',
+        'カスタムエラーコードは通常のアカウントエラー処理（スケジューリング停止やレート制限の記録など）のみを絞り込みます。リクエストの再試行や別アカウントへの切り替えを決めるものではありません。未選択のエラーでも再試行や切り替えが発生する場合があり、返されるステータスはゲートウェイ経路とエラー透過ルールによって異なり、常に500とは限りません。空のリストでは絞り込みません。',
       customErrorCodes429Warning:
         '429にはレート制限の組み込み処理がすでにあります。カスタムエラーコードに追加すると、一時的なレート制限ではなくアカウントが無効になります。続行しますか？',
       customErrorCodes529Warning:

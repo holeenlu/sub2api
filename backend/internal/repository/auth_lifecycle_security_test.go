@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +36,11 @@ func TestAuthLifecycleAtomicPasswordReset(t *testing.T) {
 	cache := &emailCache{rdb: client}
 	svc := service.NewEmailService(nil, cache)
 	ctx := context.Background()
-	require.NoError(t, cache.SetPasswordResetToken(ctx, "Owner@example.com", &service.PasswordResetTokenData{Token: "correct", CreatedAt: time.Now()}, time.Minute))
+	tokenHash := func(token string) string {
+		sum := sha256.Sum256([]byte(token))
+		return hex.EncodeToString(sum[:])
+	}
+	require.NoError(t, cache.SetPasswordResetToken(ctx, "Owner@example.com", &service.PasswordResetTokenData{Token: tokenHash("correct"), CreatedAt: time.Now()}, time.Minute))
 	require.ErrorIs(t, svc.ConsumePasswordResetToken(ctx, "owner@example.com", "wrong"), service.ErrInvalidResetToken)
 	var wins atomic.Int32
 	var wg sync.WaitGroup
@@ -51,7 +56,7 @@ func TestAuthLifecycleAtomicPasswordReset(t *testing.T) {
 	wg.Wait()
 	require.EqualValues(t, 1, wins.Load())
 	require.ErrorIs(t, svc.ConsumePasswordResetToken(ctx, "owner@example.com", "correct"), service.ErrInvalidResetToken)
-	require.NoError(t, cache.SetPasswordResetToken(ctx, "owner@example.com", &service.PasswordResetTokenData{Token: "new"}, time.Second))
+	require.NoError(t, cache.SetPasswordResetToken(ctx, "owner@example.com", &service.PasswordResetTokenData{Token: tokenHash("new")}, time.Second))
 	server.FastForward(2 * time.Second)
 	require.ErrorIs(t, svc.ConsumePasswordResetToken(ctx, "owner@example.com", "new"), service.ErrInvalidResetToken)
 	server.SetError("storage unavailable")

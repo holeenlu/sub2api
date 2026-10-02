@@ -83,7 +83,7 @@ func allowancePaymentService(client *dbent.Client) *PaymentService {
 	return &PaymentService{entClient: client, userRepo: users, redeemService: NewRedeemService(&allowanceRedeemRepository{client: client}, users, nil, nil, nil, client, nil, nil)}
 }
 func allowanceCreateOrder(ctx context.Context, s *PaymentService, u *dbent.User) (*dbent.PaymentOrder, error) {
-	return s.createOrderInTx(ctx, CreateOrderRequest{UserID: u.ID, OrderType: payment.OrderTypeBalance, PaymentType: payment.TypeStripe}, &User{ID: u.ID, Email: u.Email}, nil, &PaymentConfig{DailyLimit: 100, MaxPendingOrders: 3}, 100, 100, 0, 100, nil)
+	return s.createOrderInTx(ctx, CreateOrderRequest{UserID: u.ID, OrderType: payment.OrderTypeBalance, PaymentType: payment.TypeStripe}, &User{ID: u.ID, Email: u.Email}, nil, &PaymentConfig{DailyLimit: 100, MaxPendingOrders: 3}, 100, 100, 0, 100, 0, nil)
 }
 
 func TestPaymentAllowanceBoundsUnpaidReservations(t *testing.T) {
