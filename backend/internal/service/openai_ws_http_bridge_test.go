@@ -869,6 +869,25 @@ func openAIWSHTTPBridgeSSEResponse(events ...string) *http.Response {
 // and waits for that turn's response.completed before sending the next frame.
 func runOpenAIWSIngressTurns(t *testing.T, svc *OpenAIGatewayService, account *Account, token string, frames ...string) {
 	t.Helper()
+	builders := make([]func(string) string, 0, len(frames))
+	for _, frame := range frames {
+		builders = append(builders, func(string) string { return frame })
+	}
+	runOpenAIWSIngressConversation(t, svc, account, token, nil, builders...)
+}
+
+// runOpenAIWSIngressConversation is runOpenAIWSIngressTurns with ingress
+// hooks. Each frame is built from the previous turn's response id, so it can
+// continue from an id the gateway generated. It returns every turn's events.
+func runOpenAIWSIngressConversation(
+	t *testing.T,
+	svc *OpenAIGatewayService,
+	account *Account,
+	token string,
+	hooks *OpenAIWSIngressHooks,
+	frames ...func(previousResponseID string) string,
+) [][][]byte {
+	t.Helper()
 
 	errCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -888,7 +907,7 @@ func runOpenAIWSIngressTurns(t *testing.T, svc *OpenAIGatewayService, account *A
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 		ginCtx.Request = r.Clone(r.Context())
-		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, token, firstMessage, nil)
+		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, token, firstMessage, hooks)
 	}))
 	defer wsServer.Close()
 
@@ -898,21 +917,27 @@ func runOpenAIWSIngressTurns(t *testing.T, svc *OpenAIGatewayService, account *A
 	require.NoError(t, err)
 	defer func() { _ = clientConn.CloseNow() }()
 
+	turns := make([][][]byte, 0, len(frames))
+	previousResponseID := ""
 	for _, frame := range frames {
 		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-		require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(frame)))
+		require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(frame(previousResponseID))))
 		cancelWrite()
+		var events [][]byte
 		for {
 			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
 			_, event, readErr := clientConn.Read(readCtx)
 			cancelRead()
 			require.NoError(t, readErr)
+			events = append(events, event)
 			eventType := gjson.GetBytes(event, "type").String()
 			require.NotContains(t, []string{"error", "response.failed"}, eventType, string(event))
 			if eventType == "response.completed" {
+				previousResponseID = gjson.GetBytes(event, "response.id").String()
 				break
 			}
 		}
+		turns = append(turns, events)
 	}
 
 	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
@@ -922,6 +947,7 @@ func runOpenAIWSIngressTurns(t *testing.T, svc *OpenAIGatewayService, account *A
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for websocket bridge proxy to finish")
 	}
+	return turns
 }
 
 func newOpenAIWSHTTPBridgeThresholdTestService(upstream HTTPUpstream) *OpenAIGatewayService {
@@ -1116,6 +1142,132 @@ func TestOpenAIWSHTTPBridgeGrokContinuationReplaysPreviousAssistantOutput(t *tes
 	require.Equal(t, "First answer.", secondInput[1].Get("content.0.text").String())
 	require.Equal(t, "Second question.", secondInput[2].Get("content").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
+}
+
+// Codex prewarms each WebSocket connection with its next request and
+// generate=false, drains it to response.completed, then continues from that
+// response id with only the input added since. A bridge has no upstream socket
+// to warm. Forwarding the prewarm would bill and wait for a real generation,
+// and Codex would count its output as context and resend everything without
+// previous_response_id.
+func TestOpenAIWSHTTPBridgeAnswersCodexPrewarmLocally(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	message := func(role, text string) string {
+		part := "input_text"
+		if role == "assistant" {
+			part = "output_text"
+		}
+		return `{"type":"message","role":"` + role + `","content":[{"type":"` + part + `","text":"` + text + `"}]}`
+	}
+	answer := message("assistant", "Berlin.")
+	for _, platform := range []struct {
+		model   string
+		account *Account
+	}{
+		{model: "gpt-5.1", account: &Account{
+			ID: 9007, Name: "oauth-prewarm", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+			Concurrency: 1, Status: StatusActive, Schedulable: true,
+		}},
+		// Grok connections are always bridged.
+		{model: "grok-4.3", account: &Account{
+			ID: 73, Name: "grok-prewarm", Platform: PlatformGrok, Type: AccountTypeOAuth,
+			Concurrency: 1, Status: StatusActive, Credentials: map[string]any{"base_url": xai.DefaultCLIBaseURL},
+		}},
+	} {
+		for _, tc := range []struct {
+			name    string
+			prewarm []string
+			delta   []string
+			want    []string
+		}{
+			// A turn prewarms with its own request, which then adds nothing.
+			{
+				name:    "turn",
+				prewarm: []string{message("user", "Capital of Germany?")},
+				want:    []string{"Capital of Germany?"},
+			},
+			// A resumed session prewarms with its history; the next turn adds its message.
+			{
+				name:    "resume",
+				prewarm: []string{message("user", "Capital of France?"), message("assistant", "Paris.")},
+				delta:   []string{message("user", "And of Germany?")},
+				want:    []string{"Capital of France?", "Paris.", "And of Germany?"},
+			},
+		} {
+			t.Run(platform.account.Platform+"/"+tc.name, func(t *testing.T) {
+				completed := func(id string) *http.Response {
+					return openAIWSHTTPBridgeSSEResponse(
+						`{"type":"response.output_item.done","output_index":0,"item":`+answer+`}`,
+						`{"type":"response.completed","response":{"id":"`+id+`","model":"`+platform.model+`","output":[`+answer+`],"usage":{"input_tokens":7,"output_tokens":2}}}`,
+					)
+				}
+				// The second response is only consumed if the prewarm is forwarded.
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{completed("resp_upstream_1"), completed("resp_upstream_2")}}
+				svc := newOpenAIWSHTTPBridgeThresholdTestService(upstream)
+				type turnOutcome struct {
+					result *OpenAIForwardResult
+					err    error
+				}
+				outcomes := make(chan turnOutcome, 4)
+				hooks := &OpenAIWSIngressHooks{AfterTurn: func(_ int, result *OpenAIForwardResult, err error) {
+					outcomes <- turnOutcome{result: result, err: err}
+				}}
+				frame := func(fields string, items []string) string {
+					return `{"type":"response.create","model":"` + platform.model + `","store":false,"stream":true,` + fields +
+						`"input":[` + strings.Join(items, ",") + `]}`
+				}
+
+				turns := runOpenAIWSIngressConversation(t, svc, platform.account, "test-token", hooks,
+					func(string) string { return frame(`"generate":false,`, tc.prewarm) },
+					func(prewarmID string) string { return frame(`"previous_response_id":"`+prewarmID+`",`, tc.delta) },
+				)
+
+				require.Len(t, turns[0], 2)
+				created, prewarmed := turns[0][0], turns[0][1]
+				require.Equal(t, "response.created", gjson.GetBytes(created, "type").String())
+				prewarmID := gjson.GetBytes(prewarmed, "response.id").String()
+				require.True(t, strings.HasPrefix(prewarmID, "resp_"), prewarmID)
+				require.Equal(t, prewarmID, gjson.GetBytes(created, "response.id").String())
+				require.Equal(t, "completed", gjson.GetBytes(prewarmed, "response.status").String())
+				require.JSONEq(t, `[]`, gjson.GetBytes(prewarmed, "response.output").Raw)
+				require.Equal(t, platform.model, gjson.GetBytes(prewarmed, "response.model").String())
+
+				// Only the business request reached upstream, as one stateless request.
+				require.Len(t, upstream.bodies, 1)
+				body := upstream.bodies[0]
+				require.False(t, gjson.GetBytes(body, "previous_response_id").Exists())
+				require.False(t, gjson.GetBytes(body, "generate").Exists())
+				var texts []string
+				for _, item := range gjson.GetBytes(body, "input").Array() {
+					text := item.Get("content.0.text")
+					if !text.Exists() {
+						// Grok collapses assistant history to string content.
+						text = item.Get("content")
+					}
+					texts = append(texts, text.String())
+				}
+				require.Equal(t, tc.want, texts, gjson.GetBytes(body, "input").Raw)
+				require.Equal(t, "resp_upstream_1", gjson.GetBytes(turns[1][len(turns[1])-1], "response.id").String())
+
+				prewarm := <-outcomes
+				require.NoError(t, prewarm.err)
+				require.NotNil(t, prewarm.result)
+				require.True(t, prewarm.result.LocalPrewarm)
+				require.Zero(t, prewarm.result.Usage)
+				usageRepo := &openAIRecordUsageLogRepoStub{}
+				svc.usageLogRepo = usageRepo
+				require.NoError(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{Result: prewarm.result}))
+				require.Zero(t, usageRepo.calls, "a local prewarm must not be billed")
+
+				generated := <-outcomes
+				require.NoError(t, generated.err)
+				require.False(t, generated.result.LocalPrewarm)
+				require.Equal(t, 7, generated.result.Usage.InputTokens)
+			})
+		}
+	}
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurnReplayInputFollowsStoreMode(t *testing.T) {
