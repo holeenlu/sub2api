@@ -1163,16 +1163,17 @@ export default {
       },
       codexModelsManifest: {
         title: 'Pinned Accounts for Model Lists',
-        hint: 'When enabled, ordinary model lists and Codex Model Manifest are discovered from the pinned accounts first, then merged and filtered using account mappings and the group model list. Rate-limited or overloaded pinned accounts are still used.',
-        enable: 'Fetch model lists with specific accounts',
+        hint: 'When enabled, Codex Model Manifest is fetched only from the selected accounts. The shared inventory, account policy, group allowlist, and pricing checks still govern the final response; inference scheduling is unchanged. Rate-limited or overloaded selected accounts are still used.',
+        enable: 'Fetch Codex Model Manifest with specific accounts',
         enabledHint: 'Accounts are limited to OpenAI accounts bound to this group, at most 10.',
-        disabledHint: 'Disabled: ordinary lists use local mappings or defaults; Codex uses a local catalog when configured, otherwise scheduler discovery.',
+        disabledHint: 'Disabled: Codex uses the shared model inventory; when no catalog is configured, the existing scheduler discovery path is used.',
         accounts: 'Pinned accounts',
         searchPlaceholder: 'Search accounts (OpenAI accounts in this group)',
         searchEmpty: 'No matching accounts',
         fallback: 'Fall back to the scheduler when all pinned accounts are unavailable',
         fallbackHint: 'Off: return 503 / the upstream error. On: fall back to the existing scheduler path.',
-        selectAtLeastOne: 'Select at least one account after enabling pinned accounts'
+        selectAtLeastOne: 'Select at least one account after enabling pinned accounts',
+        selectAtMostTen: 'Select no more than 10 pinned accounts'
       },
       compositeRoutes: {
         action: 'Routes',

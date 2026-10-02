@@ -271,3 +271,76 @@ func (s *OpenAIGatewayService) PublishedCodexCatalog(ctx context.Context, group 
 	}
 	return &OpenAIModelsResponse{Body: body, ETag: codexModelsManifestBodyETag(body)}, true, nil
 }
+
+// ApplyPinnedCodexCatalogPolicy keeps the selected live source as the
+// discovery boundary while using the persisted model catalog as the
+// authoritative descriptor and capability boundary for enforced groups. This
+// prevents a pinned upstream response from advertising capabilities that the
+// routed account intersection has not published.
+func (s *OpenAIGatewayService) ApplyPinnedCodexCatalogPolicy(ctx context.Context, group *Group, source *OpenAIModelsResponse, ifNoneMatch string) error {
+	if source == nil || source.NotModified || group == nil {
+		return nil
+	}
+	if s.modelCatalog == nil || !CatalogEnforced(group) {
+		return s.MergeGroupConfiguredCodexModels(ctx, group, source, ifNoneMatch)
+	}
+	governed, err := s.modelCatalog.CodexManifest(ctx, group)
+	if err != nil {
+		return err
+	}
+	body, err := restrictCodexManifestToSource(governed, source.Body)
+	if err != nil {
+		return err
+	}
+	source.Body = body
+	source.ETag = codexModelsManifestBodyETag(body)
+	if codexModelsManifestETagMatches(ifNoneMatch, source.ETag) {
+		source.Body = nil
+		source.NotModified = true
+	}
+	return nil
+}
+
+// restrictCodexManifestToSource intersects a governed manifest with the live
+// selected-source slugs. The governed descriptors and order are retained; the
+// source only decides which of those published models may be returned.
+func restrictCodexManifestToSource(governed, source []byte) ([]byte, error) {
+	governedEnvelope, governedEntries, err := modelCatalogEntries(governed, "models")
+	if err != nil {
+		return nil, err
+	}
+	_, sourceEntries, err := modelCatalogEntries(source, "models")
+	if err != nil {
+		return nil, err
+	}
+	allowed := make(map[string]struct{}, len(sourceEntries))
+	for _, raw := range sourceEntries {
+		var model struct {
+			Slug string `json:"slug"`
+		}
+		if err := json.Unmarshal(raw, &model); err != nil {
+			return nil, err
+		}
+		if slug := strings.TrimSpace(model.Slug); slug != "" {
+			allowed[slug] = struct{}{}
+		}
+	}
+	filtered := make([]json.RawMessage, 0, len(governedEntries))
+	for _, raw := range governedEntries {
+		var model struct {
+			Slug string `json:"slug"`
+		}
+		if err := json.Unmarshal(raw, &model); err != nil {
+			return nil, err
+		}
+		if _, ok := allowed[strings.TrimSpace(model.Slug)]; ok {
+			filtered = append(filtered, raw)
+		}
+	}
+	encoded, err := json.Marshal(filtered)
+	if err != nil {
+		return nil, err
+	}
+	governedEnvelope["models"] = encoded
+	return json.Marshal(governedEnvelope)
+}

@@ -1172,7 +1172,8 @@ export default {
         searchEmpty: '一致するアカウントがありません',
         fallback: 'すべての固定アカウントが利用できない場合はスケジューラにフォールバック',
         fallbackHint: 'オフ：503またはアップストリームエラーを返します。オン：既存のスケジューラ経路にフォールバックします。',
-        selectAtLeastOne: '固定アカウントを有効にした後、少なくとも1つのアカウントを選択してください'
+        selectAtLeastOne: '固定アカウントを有効にした後、少なくとも1つのアカウントを選択してください',
+        selectAtMostTen: '固定アカウントは最大10件まで選択できます'
       },
       compositeRoutes: {
         action: 'ルート',
