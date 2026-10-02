@@ -48,6 +48,13 @@ func (l *bpsWSMemoryListener) Addr() net.Addr {
 
 func startBPSWSMemorySession(t *testing.T, svc *OpenAIGatewayService, account *Account, payload string, hooks *OpenAIWSIngressHooks) (*coderws.Conn, <-chan error) {
 	t.Helper()
+	return startOpenAIWSMemorySession(t, svc, account, nil, payload, hooks)
+}
+
+// startOpenAIWSMemorySession dials with the given handshake headers, which the
+// ingress reads from the upgrade request (User-Agent, originator, x-codex-*).
+func startOpenAIWSMemorySession(t *testing.T, svc *OpenAIGatewayService, account *Account, header http.Header, payload string, hooks *OpenAIWSIngressHooks) (*coderws.Conn, <-chan error) {
+	t.Helper()
 	clientPipe, serverPipe := net.Pipe()
 	listener := &bpsWSMemoryListener{conn: serverPipe, done: make(chan struct{})}
 	serverErr := make(chan error, 1)
@@ -74,7 +81,7 @@ func startBPSWSMemorySession(t *testing.T, svc *OpenAIGatewayService, account *A
 	t.Cleanup(transport.CloseIdleConnections)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	client, _, err := coderws.Dial(ctx, "ws://bps-ws-test/v1/responses", &coderws.DialOptions{HTTPClient: &http.Client{Transport: transport}})
+	client, _, err := coderws.Dial(ctx, "ws://bps-ws-test/v1/responses", &coderws.DialOptions{HTTPClient: &http.Client{Transport: transport}, HTTPHeader: header})
 	require.NoError(t, err)
 	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(payload)))
 	return client, serverErr

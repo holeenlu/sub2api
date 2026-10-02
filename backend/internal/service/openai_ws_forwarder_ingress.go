@@ -602,6 +602,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return admissionErr
 	}
 	account = latest
+	writeCodexRestrictionEvent := func(event []byte) error {
+		writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
+		defer cancel()
+		return clientConn.Write(writeCtx, coderws.MessageText, event)
+	}
+	// Covers every ingress path; follow-up turns are checked as they are parsed.
+	if err := s.checkOpenAIWSCodexClientRestriction(ctx, c, account, firstClientMessage, writeCodexRestrictionEvent); err != nil {
+		return err
+	}
 	// A handler may reuse the same gin context across account failover attempts.
 	// Never let an OAuth attempt's response aliases leak into the next account.
 	setCodexToolNameReverse(c, nil)
@@ -852,6 +861,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				fmt.Sprintf("unsupported websocket request type: %s", eventType),
 				nil,
 			)
+		}
+		if turn > 1 {
+			if err := s.checkOpenAIWSCodexClientRestriction(ctx, c, account, trimmed, writeCodexRestrictionEvent); err != nil {
+				return openAIWSClientPayload{}, err
+			}
 		}
 		requestedReasoningEffort := CanonicalRequestedReasoningEffort(normalized, strings.TrimSpace(values[1].String()))
 		if next, policyErr := applyOpenAIWSReasoningEffortPolicy(normalized, hooks); policyErr != nil {

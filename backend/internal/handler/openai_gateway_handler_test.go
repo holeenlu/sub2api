@@ -1779,6 +1779,15 @@ func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
 		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
 	})
 
+	t.Run("codex_cli_only rejection does not penalize account", func(t *testing.T) {
+		err := service.NewOpenAIWSClientCloseError(
+			coderws.StatusPolicyViolation,
+			service.CodexOfficialClientsOnlyMessage,
+			fmt.Errorf("%w: %s", service.ErrOpenAIWSCodexClientRestricted, service.CodexClientRestrictionReasonNotMatchedUA),
+		)
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+	})
+
 	t.Run("upstream policy violation still penalizes account", func(t *testing.T) {
 		err := service.NewOpenAIWSClientCloseError(
 			coderws.StatusPolicyViolation,
