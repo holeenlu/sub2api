@@ -17,8 +17,8 @@
 | Anthropic | Claude Code、Codex（路由）、OpenCode | `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、Codex Responses provider、OpenCode provider |
 | Gemini | Gemini CLI、Codex（路由）、OpenCode | `GOOGLE_GEMINI_BASE_URL`、`GEMINI_KDAN_API_KEY`、`GEMINI_MODEL` |
 | Antigravity | Claude Code、Gemini CLI、Codex（路由）、OpenCode | 地址自动追加 `/antigravity`，Gemini 使用 `/v1beta` |
-| Grok | Grok CLI、Claude Code、Codex、OpenCode | `GROK_MODELS_BASE_URL`、`XAI_KDAN_API_KEY` 或对应客户端配置 |
-| DeepSeek、MiniMax、Composite、Kimi、Zhipu、OpenCode | Claude Code、Codex（路由）、OpenCode | 以弹窗生成的分组地址为准；Codex 目录仅 Composite 提供 |
+| Grok | Grok CLI、Claude Code、Codex、OpenCode | `GROK_MODELS_BASE_URL`、`XAI_API_KEY` 或对应客户端配置 |
+| DeepSeek、MiniMax、Composite、Kimi、Zhipu、OpenCode | Claude Code、Codex（路由）、OpenCode | 以弹窗生成的分组地址为准；目录支持范围见下节 |
 
 ## Codex 认证模式
 
@@ -31,17 +31,20 @@ OpenAI 分组的 Codex 标签提供两种模式，打开“使用密钥”时默
 
 ## 模型目录
 
-OpenAI/Composite 分组和智谱 API Key 分组支持 Codex 专用模型目录。其他分组不生成 `model_catalog_url` 或 `model_catalog_json`，请查询普通 `GET /v1/models` 后手动填写模型 ID。
+若当前 Codex 标签提供模型目录，按弹窗所选方式配置：
 
-支持的 Codex 标签生成的 `config.toml` 在根级包含 `model_catalog_json = "~/.codex/codex-models.json"`。在 **获取模型目录及下载** 区域获取当前 Key 的目录并下载到该路径，重启 Codex 后即可显示模型列表。OpenAI/Composite 可切换远程目录；智谱始终使用本地文件，`GLM-5.3` 系列目录与 `config.toml` 声明 1,000,000 token 上下文；`GLM-4.7` 保留上游的 200,000 token 限制。不要手工改模型 slug 绕过分组策略。
+- **本地文件**：获取并下载 codex-models.json，保存到生成配置的 model_catalog_json 所指路径。修改文件名或 CODEX_HOME 后须同步修改路径。
+- **远程目录**：客户端和分组支持时，可使用弹窗生成的 model_catalog_url，由客户端请求当前 Key 的目录。不要自行改变该字段在配置中的位置。
 
-## KDAN界面操作
+不支持目录的标签使用该分组开放的精确模型 ID。模型目录、账号可调度状态和请求协议是不同条件；列表可见不保证所有工具与接口可用。配置来源以当前弹窗为准，不把普通模型列表 JSON 当作 Codex 专用目录。
+
+## KDAN 界面操作
 
 以下截图来自当前项目的“使用密钥”组件，使用无效示例 Key 和 `api.example.com` 演示地址。实际接入请复制自己控制台生成的值，不要抄录图片中的地址或 Key。
 
 1. OpenAI 分组默认即为 **Codex CLI (WebSocket)** + API key 认证；网络不支持 WebSocket 时改选 **Codex CLI**，需要 `auth.json` 登录形态时改选 Legacy。两种认证模式对应的文件不同。
 
-![KDAN Codex Legacy 配置器（示例数据）](/docs-assets/client-codex-zh.png)
+![KDAN Codex 配置器（示例数据）](/docs-assets/client-codex-zh.png)
 
 2. API key 模式会把 Key 写入配置文件；下载后限制文件权限，并完全重启客户端。
 

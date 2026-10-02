@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$ClaudeHome = "",
+  [string]$ProjectDir = "",
   [int]$Limit = 20,
   [switch]$CommandsOnly,
   [switch]$Json
@@ -14,6 +15,7 @@ if (-not $python) { throw "Python 3 is required. Install Python, then run this s
 
 $arguments = @((Join-Path $scriptDir "find_claude_sessions.py"), "--shell", "powershell", "--limit", $Limit)
 if ($ClaudeHome) { $arguments += @("--claude-home", $ClaudeHome) }
+if ($ProjectDir) { $arguments += @("--project-dir", $ProjectDir) }
 if ($CommandsOnly) { $arguments += "--commands-only" }
 if ($Json) { $arguments += "--json" }
 & $python.Source @arguments

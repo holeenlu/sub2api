@@ -1,63 +1,58 @@
-Codex users should follow [Codex session recovery](/apps/session-recovery-codex). Claude Code sessions are not Codex SQLite data and must not be passed to the Codex repair utility.
+This tool works with local Claude Code JSONL transcripts. For Codex, use the [Codex tool](/apps/session-recovery-codex). Official cloud history requires the original account or host.
 
-## Identify what disappeared
+## Rule out connection problems first
 
-| Symptom | First action |
-| --- | --- |
-| Empty picker in the current project | Return to the project and run `claude --resume`; widen with `Ctrl+W` or `Ctrl+A` |
-| Different OS user, host, or `CLAUDE_CONFIG_DIR` | Locate the original Claude config directory; local sessions do not automatically move between hosts |
-| Project or worktree path changed | Restore the original working directory, then resume by session ID |
-| Missing after changing a KDAN key or login | Keys do not move local files; check the OS user, config directory, and project path |
-| Deleted, expired, or cloud-only history | The local scanner cannot recreate it; use the original host, client, or backup |
+Check a new session with your current key and model. Authentication, 503, unavailable-model, and balance errors need connection, permission, or server troubleshooting. Use the steps below when existing local history is missing from the session list.
 
-Claude Code CLI stores sessions at `~/.claude/projects/<project>/<session-id>.jsonl`, or below `CLAUDE_CONFIG_DIR` when configured. Local records older than 30 days can be cleaned up by default.
+## Resume a transcript directly
 
-## Try Claude Code first
-
-Return to the original project directory and run:
+Run claude --resume to find a session, or provide a known ID. For a moved project or history in another directory, use an absolute JSONL path to avoid picker scope issues:
 
 ```bash
-claude --resume
+claude --resume "/absolute/path/to/SESSION_ID.jsonl"
 ```
 
-`claude --continue` resumes the newest session in the current directory, and `/resume` opens the picker from a session. The picker starts with the current project; press `Ctrl+W` for other worktrees in the repository or `Ctrl+A` for every project on this machine. With a known ID, use:
+
+Run this in the project directory where you want to continue. Replace the example with a real local file. Your Claude Code version must support resuming by absolute transcript path; update older clients first.
+
+## Download and scan
+
+Requires Python 3.10+. [Download the Claude Code tool](/downloads/kdan-claude-session-recovery.zip), extract it, and enter kdan-claude-session-recovery:
 
 ```bash
-claude --resume <session-id>
-```
-
-## Download the read-only recovery utility
-
-[Download the KDAN Claude Code session recovery bundle](/downloads/kdan-claude-session-recovery.zip). On macOS or Linux:
-
-```bash
-curl -fsSLO https://nextcode.buildtoconnect.com/downloads/kdan-claude-session-recovery.zip
-unzip kdan-claude-session-recovery.zip
-cd kdan-claude-session-recovery
 bash find-claude-sessions.sh
 ```
 
-Windows PowerShell:
 
 ```powershell
-Invoke-WebRequest https://nextcode.buildtoconnect.com/downloads/kdan-claude-session-recovery.zip -OutFile kdan-claude-session-recovery.zip
-Expand-Archive .\kdan-claude-session-recovery.zip -DestinationPath . -Force
-Set-Location .\kdan-claude-session-recovery
 .\Find-ClaudeSessions.ps1
 ```
 
-The scanner accepts only transcript filename UUIDs that match their embedded `sessionId`, then prints an exact `claude --resume <session-id>` command with the original working directory. It does not start Claude, read or print message text, or change JSONL, accounts, keys, or settings. Reports contain local paths and session IDs, so review them before sharing.
 
-## Scan another directory and resume
+The scan uses CLAUDE_CONFIG_DIR or ~/.claude. It checks each filename UUID against the recorded sessionId and prints verified absolute paths and resume commands. It does not print message content or keys, edit transcripts, or automatically launch Claude.
 
-To scan an older config directory:
+## Moved projects and old configuration directories
+
+Use --claude-home to select a configuration directory containing projects. If the project moved, use --project-dir for its existing current directory:
 
 ```bash
-bash find-claude-sessions.sh --claude-home "/old/.claude"
+bash find-claude-sessions.sh --claude-home "/path/to/.claude" --project-dir "/path/to/project"
 ```
 
-PowerShell uses `-ClaudeHome`. If the report says the recorded working directory is missing, restore the project at that path before manually running the generated command. Opening a session does not send a message; sending a follow-up makes a model request.
 
-The utility cannot recreate deleted, expired, other-host, or cloud-only sessions, and it does not alter Claude retention or account ownership.
+```powershell
+.\Find-ClaudeSessions.ps1 -ClaudeHome "C:\path\to\.claude" -ProjectDir "C:\path\to\project"
+```
 
-Sources: [Claude Code session management](https://code.claude.com/docs/en/sessions) and [Claude's local data directory](https://code.claude.com/docs/en/claude-directory). The utility was tested on temporary fixtures, not real local Claude history.
+
+PowerShell uses -ClaudeHome and -ProjectDir. If the original project directory is missing and no replacement is supplied, the tool asks for a directory instead of printing a broken cd command.
+
+Generated commands set CLAUDE_CONFIG_DIR and resume by absolute transcript path. Check that settings.json in that directory uses your intended provider and credentials. To keep your current client configuration, you can instead run claude --resume with the absolute transcript path in an already configured terminal.
+
+## Run and verify
+
+Copy a generated command into the matching shell. Check that the original conversation opens, then send an explicit new message to verify the API connection. Continuing creates API usage. PowerShell commands stop if changing directories fails.
+
+The tool cannot recreate deleted files, download remote or cloud history, or guarantee migration of official-account cloud conversations to a gateway. An empty scan requires checking the OS user, original host, configuration directory, and your backups.
+
+[Claude Code CLI --resume](https://code.claude.com/docs/en/cli-reference) · 2026-10-02

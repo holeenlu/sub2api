@@ -17,8 +17,8 @@
 | Anthropic | Claude Code, routed Codex, OpenCode | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, Codex Responses provider, OpenCode provider |
 | Gemini | Gemini CLI, routed Codex, OpenCode | `GOOGLE_GEMINI_BASE_URL`, `GEMINI_KDAN_API_KEY`, `GEMINI_MODEL` |
 | Antigravity | Claude Code, Gemini CLI, routed Codex, OpenCode | `/antigravity` base path; Gemini uses `/v1beta` |
-| Grok | Grok CLI, Claude Code, Codex, OpenCode | `GROK_MODELS_BASE_URL`, `XAI_KDAN_API_KEY`, or the client-specific config |
-| DeepSeek, MiniMax, Composite, Kimi, Zhipu, OpenCode | Claude Code, routed Codex, OpenCode | Use the generated group URL; only Composite offers a Codex catalog |
+| Grok | Grok CLI, Claude Code, Codex, OpenCode | `GROK_MODELS_BASE_URL`, `XAI_API_KEY`, or the client-specific config |
+| DeepSeek, MiniMax, Composite, Kimi, Zhipu, OpenCode | Claude Code, routed Codex, OpenCode | Use the generated group URL; see catalog support below |
 
 ## Codex authentication modes
 
@@ -31,17 +31,20 @@ Routed Codex tabs default to `env_key = "KDAN_API_KEY"`, `wire_api = "responses"
 
 ## Model catalog
 
-Only OpenAI/Composite groups and Zhipu API-key groups support the dedicated Codex catalog. Other groups get no `model_catalog_url` or `model_catalog_json`; query ordinary `GET /v1/models` and enter an exact model ID manually.
+If the selected Codex tab offers a catalog, follow the mode shown in the dialog:
 
-In a supported Codex tab, the generated `config.toml` includes `model_catalog_json = "~/.codex/codex-models.json"` at the root. Use **Get model catalog and download** to fetch the current key's catalog, save the JSON to that path, and restart Codex. OpenAI/Composite groups may select the remote catalog; Zhipu always uses the local file, and the `GLM-5.3` family descriptor and `config.toml` advertise a 1,000,000-token context; `GLM-4.7` remains at its 200,000-token upstream limit. Do not edit slugs to bypass group policy.
+- **Local file**: fetch and download codex-models.json to the path generated in model_catalog_json. Keep the path consistent if you rename the file or change CODEX_HOME.
+- **Remote catalog**: when supported by the client and group, use the generated model_catalog_url to let the client request this key’s catalog. Preserve the field’s position in the generated configuration.
 
-## Follow the project UI
+For tabs without a catalog, use an exact model ID available to that group. Catalog visibility, routable accounts, and protocol support are separate conditions. A visible model does not guarantee every tool or endpoint. Use the current dialog as the configuration source; a plain model-list JSON response is not a Codex manifest.
+
+## Follow the KDAN UI
 
 These screenshots render the current project's Use key component with an invalid sample key and `api.example.com`. Copy values from your own console, not the images.
 
 1. OpenAI groups open on **Codex CLI (WebSocket)** with API key authentication. Choose **Codex CLI** if your network does not support WebSocket, or Legacy if you need the `auth.json` login shape. Each authentication mode produces different files.
 
-![Project Codex Legacy configuration with sample data](/docs-assets/client-codex-en.png)
+![Project Codex configuration with sample data](/docs-assets/client-codex-en.png)
 
 2. API key mode stores the key in the configuration file. Restrict file permissions and fully restart the client after downloading.
 

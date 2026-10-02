@@ -1,6 +1,6 @@
 <template>
   <section class="space-y-3">
-    <h2 class="text-lg font-semibold text-gray-950 dark:text-white">{{ t('docs.currentGroup') }}</h2>
+    <h2 class="text-lg font-semibold text-gray-950 dark:text-white">{{ t(`docs.models.${kind}`) }} · {{ t('docs.livePrice') }}</h2>
     <PlazaGroupSection v-if="displayGroup" :group="displayGroup" />
     <p v-else class="text-sm text-gray-500 dark:text-dark-400">{{ t('modelPlaza.empty') }}</p>
   </section>

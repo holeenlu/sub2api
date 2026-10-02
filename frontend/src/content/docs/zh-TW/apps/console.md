@@ -17,8 +17,8 @@
 | Anthropic | Claude Code、Codex（路由）、OpenCode | `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、Codex Responses provider、OpenCode provider |
 | Gemini | Gemini CLI、Codex（路由）、OpenCode | `GOOGLE_GEMINI_BASE_URL`、`GEMINI_KDAN_API_KEY`、`GEMINI_MODEL` |
 | Antigravity | Claude Code、Gemini CLI、Codex（路由）、OpenCode | 地址自動追加 `/antigravity`，Gemini 使用 `/v1beta` |
-| Grok | Grok CLI、Claude Code、Codex、OpenCode | `GROK_MODELS_BASE_URL`、`XAI_KDAN_API_KEY` 或對應用戶端設定 |
-| DeepSeek、MiniMax、Composite、Kimi、Zhipu、OpenCode | Claude Code、Codex（路由）、OpenCode | 以彈出視窗生成的分組地址為準；Codex 目錄僅 Composite 提供 |
+| Grok | Grok CLI、Claude Code、Codex、OpenCode | `GROK_MODELS_BASE_URL`、`XAI_API_KEY` 或對應用戶端設定 |
+| DeepSeek、MiniMax、Composite、Kimi、Zhipu、OpenCode | Claude Code、Codex（路由）、OpenCode | 以彈出視窗生成的分組地址為準；目錄支援範圍見下節 |
 
 ## Codex 驗證模式
 
@@ -31,17 +31,20 @@ OpenAI 分組的 Codex 標籤提供兩種模式，開啟“使用金鑰”時預
 
 ## 模型目錄
 
-OpenAI/Composite 分組和智譜 API Key 分組支援 Codex 專用模型目錄。其他分組不生成 `model_catalog_url` 或 `model_catalog_json`，請查詢普通 `GET /v1/models` 後手動填寫模型 ID。
+若目前 Codex 分頁提供模型目錄，請依視窗選取的方式設定：
 
-支援的 Codex 標籤生成的 `config.toml` 在根級包含 `model_catalog_json = "~/.codex/codex-models.json"`。在 **取得模型目錄及下載** 區域取得目前 Key 的目錄並下載到該路徑，重啟 Codex 後即可顯示模型列表。OpenAI/Composite 可切換遠端目錄；智譜始終使用本地檔案，`GLM-5.3` 系列目錄與 `config.toml` 宣告 1,000,000 token 上下文；`GLM-4.7` 保留上游的 200,000 token 限制。不要手工改模型 slug 繞過分組策略。
+- **本機檔案**：取得並下載 codex-models.json，儲存至產生設定中 model_catalog_json 指向的路徑。變更檔名或 CODEX_HOME 後須同步修改路徑。
+- **遠端目錄**：用戶端與群組支援時，可使用視窗產生的 model_catalog_url，由用戶端請求目前 Key 的目錄。不要自行改變此欄位在設定中的位置。
 
-## KDAN介面操作
+不支援目錄的分頁請使用該群組開放的精確模型 ID。模型目錄、帳號可調度狀態與請求協定是不同條件；清單可見不保證所有工具與介面可用。設定以目前視窗為準，不要將一般模型清單 JSON 當成 Codex 專用目錄。
+
+## KDAN 介面操作
 
 以下截圖來自目前專案的“使用金鑰”元件，使用無效範例 Key 和 `api.example.com` 演示地址。實際接入請複製自己控制台生成的值，不要抄錄圖片中的地址或 Key。
 
 1. OpenAI 分組預設即為 **Codex CLI (WebSocket)** + API key 驗證；網路不支援 WebSocket 時改選 **Codex CLI**，需要 `auth.json` 登入形態時改選 Legacy。兩種驗證模式對應的檔案不同。
 
-![KDAN Codex Legacy 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
+![KDAN Codex 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
 
 2. API key 模式會把 Key 寫入設定檔；下載後限制檔案權限，並完全重啟用戶端。
 

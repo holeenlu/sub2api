@@ -1,77 +1,76 @@
-Claude Code のユーザーは、[Claude Code セッションの復旧](/apps/session-recovery-claude)に従ってください。クライアントは異なるデータ形式を使用しており、修復ツールに互換性はありません。
+既存のローカルセッションを再開するための手順です。通信障害や削除済みのメッセージは復旧できません。Claude Code は [専用ツール](/apps/session-recovery-claude) を使用してください。
 
-## 消えたデータを特定する
+## 準備と復旧方法の選択
 
-| 症状 | 最初に行う操作 |
-| --- | --- |
-| プロジェクトを変更した後に一覧が空になる | プロジェクトに戻り、`codex resume --all` を試して、アーカイブを確認する |
-| OS ユーザー、ホスト、または CODEX_HOME が異なる | 元のデータディレクトリを特定する。リモートとローカルの履歴は異なる |
-| プロバイダー名を変更した後に古いタスクが表示されない | 以前の設定と現在の設定を比較し、元のプロバイダー識別子を復元する |
-| JSONL は存在するが、インデックスが古いパスを指している | ユーティリティで診断し、存在が確認できたパスのみ修復する |
-| ファイルを削除した、または公式アカウントのクラウド履歴が必要 | ローカルインデックスの修復では復元できない。元のアカウントまたはバックアップを使用する |
+[API キー](/keys) から現在のグループの有効な設定をコピーし、新しいセッションが動作することを確認します。401、503、残高不足、上流エラーは設定またはサーバー側の調査が必要です。元のセッションディレクトリは保持してください。
 
-キーのローテーションは、アカウント、プロバイダー ID、またはデータディレクトリの変更とは異なります。トラブルシューティング中に認証ファイル、SQLite データベース、または `.codex` を削除しないでください。
+Python 3.11 以降と Codex CLI が必要です。[ツールをダウンロード](/downloads/kdan-codex-session-repair.zip)して展開し、kdan-codex-session-repair に移動します。macOS、Linux、Windows に対応します。
 
-## まず Codex を試す
+## セッションを探して再開コマンドを確認
 
-元のプロジェクトでは `codex resume`、ディレクトリをまたいで検索する場合は `codex resume --all`、特定のセッションを指定する場合は `codex resume <session-id>` を使用します。デスクトップでは、元のプロジェクトとアーカイブ済みタスクを確認してください。新しいメッセージを送るとモデルへのリクエストが発生するため、フォローアップの送信を自動化しないでください。
+最初に読み取り専用のスキャンを実行します。SQLite インデックスがなくても sessions と archived_sessions を直接確認します。メッセージ本文やキーは出力しません。レポートには ID とローカルパスが含まれるため、共有前に確認してください。
 
-## プロバイダーの変更
+```bash
+bash repair-sessions.sh --list
+```
 
-`model_provider` だけが変更された場合は、元の設定バックアップを確認してください。その識別子を復元し、対応するプロバイダーのエンドポイントとキーを TapModels に更新して再起動し、古いタスクを試してください。古いプロバイダーの無関係なエンドポイントに新しいキーを送信しないでください。
 
-アカウントやプロバイダーによるフィルタリングの動作は、クライアントのバージョンによって異なります。ユーティリティは、プロバイダーの識別子を書き換えたり、ある公式アカウントのデータを別のアカウントに割り当てたりせずに、プロバイダーの分布を報告します。
+```powershell
+.\RepairSessions.ps1 -List
+```
 
-## ダウンロードと診断
 
-Python 3.10 以降が必要です。[TapModels Codex セッション修復ユーティリティをダウンロード](/downloads/tapmodels-codex-session-repair.zip)し、展開して `tapmodels-codex-session-repair` に移動します。
+レポート内の ID を指定します。プロジェクトを移動した場合は現在のパスを指定してください。次のコマンドはプレビューのみで、クライアントを起動しません。
 
-macOS / Linux:
+```bash
+bash repair-sessions.sh --resume "SESSION_ID" --project-dir "/path/to/project"
+```
+
+
+```powershell
+.\RepairSessions.ps1 -Resume "SESSION_ID" -ProjectDir "C:\path\to\project"
+```
+
+
+現在の config.toml と選択中の profile の Provider・モデルを、今回の CLI 起動用パラメーターとして指定します。--provider は設定済み Provider ID、--model はキーで利用できるモデルを指定します。ID は大文字と小文字を区別します。設定の不足や構文エラーは先に修正してください。
+
+Provider、モデル、ディレクトリを確認後、--run を追加すると CLI セッションを開きます。プロンプトは自動送信しません。会話を続けると通常の API 使用量が発生します。デスクトップの Provider フィルター、履歴、アーカイブ状態は書き換えません。
+
+## インデックスのパスが無効な場合
+
+JSONL は存在するのにインデックスが古いディレクトリを指す場合は、次の診断を実行します。CODEX_HOME または ~/.codex を使用し、--codex-home で別の場所を指定できます。state_*.sqlite が複数ある場合は --database で現在のクライアントのデータベースを明示してください。
 
 ```bash
 bash repair-sessions.sh --dry-run
 ```
 
-Windows PowerShell:
 
-```powershell
-.\Repair-TapModelsSessions.ps1 -DryRun
-```
-
-デフォルトのホームディレクトリは CODEX_HOME、それ以外の場合は `~/.codex` です。`--codex-home` または `-CodexHome` で上書きできます。ユーティリティは一意の `state_*.sqlite` を選択します。複数存在する場合は、アクティブなデータベースを特定し、実際のファイル名を指定して `--database state_5.sqlite` または `-Database` を使用してください。
-
-レポートには、スキーマと整合性、スレッド数とアーカイブ数、プロバイダーの分布、存在しないパスが含まれます。メッセージ本文とキーは除外されますが、ローカルパスとセッション ID は含まれます。
-
-## 確認済みのパスを修復する
-
-レポートを確認し、適用する前に、そのディレクトリを使用しているすべてのデスクトップ、CLI、IDE のプロセスを終了してください。
+repairable_rollout_paths を確認し、そのディレクトリを使用する Codex デスクトップ、CLI、IDE をすべて終了してから適用します。
 
 ```bash
 bash repair-sessions.sh --apply --client-closed
 ```
 
+
 ```powershell
-.\Repair-TapModelsSessions.ps1 -Apply -ClientClosed
+.\Repair-KDANSessions.ps1 -Apply -ClientClosed
 ```
 
-スレッドと一致する最初の `session_meta.payload.id` を持つ、ツリー内で一意の JSONL だけが `rollout_path` を置き換えられます。ツールは書き込みロックを取得し、再スキャンを実行し、一貫性のある SQLite バックアップを作成してから、コミット前にすべてのテーブルとカラムを検証します。データベース、ロールアウト、バックアップのパスでは、`..`、シンボリックリンク、操作中に置き換えられたファイルが拒否されます。会話、認証情報、設定、プロバイダー、アーカイブフラグは変更されません。検証に失敗した場合、トランザクションはロールバックされます。
 
-存在しないファイル、不明なスキーマ、破損、候補の特定が不可能な状態、シンボリックリンクについて推測による処理は行われません。削除されたメッセージを再作成したり、すべてのクライアントバージョンにおけるアカウントフィルタリングを修復したりすることはできません。
+JSONL 内のセッション ID で一意の候補を検証するため、ファイル名の変更や OS 間の移動に対応します。一貫した SQLite バックアップを作成し、rollout_path のみを変更します。重複候補、シンボリックリンク、不明なスキーマ、破損に対して推測で変更しません。
 
-## 検証とロールバック
+## 結果の確認とロールバック
 
-`repaired_rollout_paths` を確認し、診断を再実行してからクライアントを開きます。まずロールバックをプレビューします。
+repaired_rollout_paths が 0 の場合は変更がなかったという意味で、復旧成功を意味しません。診断を再実行し、セッションを開いて確認してください。ロールバックをプレビューし、クライアントを終了して適用します。
 
 ```bash
-bash repair-sessions.sh --rollback "/path/from/the/backup/report"
+bash repair-sessions.sh --rollback "/path/from/backup/report"
+bash repair-sessions.sh --rollback "/path/from/backup/report" --apply --client-closed
 ```
 
-プレビューを確認し、すべてのクライアントを終了した後、明示的に適用します。
 
-```bash
-bash repair-sessions.sh --rollback "/path/from/the/backup/report" --apply --client-closed
-```
+PowerShell は -Database、-CodexHome、-Rollback、-Apply、-ClientClosed を使用します。再開用は -Resume、-Provider、-Model、-ProjectDir、-Run です。ロールバックはその修復で変更し、現在も一致するパスだけを戻し、後の無関係な変更は保持します。
 
-PowerShell では `-Rollback "path" -Apply -ClientClosed` を使用します。比較と設定のチェックにより、その修復で書き込まれたパスだけが復元されます。変更されたパス、置き換えられたバックアップ、または所有権の不一致がある場合、ロールバックは中止されます。
+削除済みの会話、別のホストまたは公式クラウドだけに保存された会話は、元のホストや自身のバックアップが必要です。不明なデータベース形式は報告のみで、強制的に変更しません。
 
-出典: [Codex CLI resume リファレンス](https://developers.openai.com/codex/cli/reference/)。このユーティリティは一時データベースでテストされており、実際のローカルセッションデータではテストされていません。
+[Codex CLI resume](https://developers.openai.com/codex/cli/reference/) · 2026-10-02

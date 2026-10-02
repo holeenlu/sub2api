@@ -1,31 +1,24 @@
-## Pricing basis
+## Prices for your selected group
 
-KDAN reference prices multiply each official direct-API Standard item by `0.5`. Batch, Flex, Fast, Priority, regional processing, and built-in tool fees are separate from Standard inference pricing.
+KDAN offers flexible model choices and clear group pricing. The table below loads the selected group's prices. Offers, multipliers, and model-specific rates follow that group's current settings; no fixed discount is promised.
+
+The group selected on a public page may differ from the one assigned to your API key. Confirm it in [API Keys](/keys) and check billing units and rates in the [Model Plaza](/model-plaza). Charges follow the rules applicable to each request and its usage record.
+
+## Reading the table
+
+- **Group price**: the rate after the group's multiplier or model-specific pricing. Do not apply another discount to an already adjusted price.
+- **Official reference price**: upstream pricing information for comparison, not an additional charge or a guarantee of your key's rate.
+- **Token billing**: input, output, cache reads, and applicable cache writes are billed separately, usually per million tokens.
+- **Per-image billing**: multiply the billed image count by the effective price for the model, size, or configured tier. Do not use the token formula.
+- **Missing price**: does not mean free. Confirm configuration and availability before making a request.
 
 ```text
-Item cost = item tokens / 1,000,000 × KDAN item price
-Request cost = input + cache reads + cache writes + output + disclosed extras
+Token charge = billed tokens for an item / 1,000,000 × its effective unit price
+Image charge = billed image count × the effective price for the applicable tier
 ```
 
-Regular input, cache reads, and cache writes are distinct categories. Do not bill the same tokens as both regular and cached input. Reasoning tokens already included in output usage are not added a second time.
+## Tiers and additional charges
 
-## Long context and images
+Long context, cache duration, service tiers, and tools can have different rates. Apply these only when the model and group define them; one model's threshold or multiplier does not apply to every model. Avoid counting the same billing item twice. Retried requests may create additional usage.
 
-For the OpenAI models shown here, a full request over 272,000 input tokens uses the long-context tier: input and cache are 2x, output is 1.5x. The target group must also enable its pricing ladder.
-
-GPT-Image-2.5 has five items: text input, cached text input, image input, cached image input, and image output. Equal rates do not imply equal token consumption between Flare and Sunburst, and the GPT Image 2 calculator does not estimate 2.5 usage.
-
-## Price state
-
-The table below compares dated official 0.5x references with selected-group prices. Differences stay visible. Actual charges follow the target group configuration and usage records.
-
-## Worked examples
-
-- For 10,000 regular input, 5,000 cached input, and 2,000 output tokens on Sol, the official cost is `$0.082` and the KDAN 0.5x reference is `$0.041`.
-- For 100 regular text input, 200 regular image input, and 1,000 image output tokens on Flare or Sunburst, the official cost is `$0.0321` and the KDAN 0.5x reference is `$0.01605`.
-
-These examples use the stated token counts only. They exclude cache writes, tools, service tiers, and other fees, and do not represent a fixed image size.
-
-## Sources and updates
-
-The snapshot was checked against [OpenAI models and pricing](https://developers.openai.com/api/docs/models), [GPT-Image-2.5 Flare](https://developers.openai.com/api/docs/models/gpt-image-2.5-flare), [GPT-Image-2.5 Sunburst](https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst), and [Claude models and pricing](https://platform.claude.com/docs/en/models/overview). When official prices change, update the snapshot and verification date instead of retaining stale 0.5x results.
+Official references: [OpenAI pricing](https://openai.com/api/pricing/) and [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing). KDAN rates may differ from direct API prices.

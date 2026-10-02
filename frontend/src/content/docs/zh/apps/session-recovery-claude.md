@@ -1,63 +1,58 @@
-Codex 用户请使用 [Codex 会话恢复](/apps/session-recovery-codex)。Claude Code 会话不是 Codex SQLite 数据，不能用 Codex 修复工具处理。
+本工具用于 Claude Code 的本地 JSONL 会话。Codex 请使用 [Codex 恢复工具](/apps/session-recovery-codex)；官方云端历史需要回到原账号或主机。
 
-## 先判断是哪一种“丢失”
+## 先排除连接问题
 
-| 现象 | 优先处理 |
-| --- | --- |
-| 当前项目的选择器为空 | 回到原项目运行 `claude --resume`；按 `Ctrl+W` 或 `Ctrl+A` 扩大范围 |
-| 换操作系统用户、主机或 `CLAUDE_CONFIG_DIR` 后不见 | 找回原来的 Claude 配置目录；本机会话不会自动跨主机同步 |
-| 项目或 worktree 路径改变 | 恢复原工作目录，再按会话 ID 恢复 |
-| 切换 KDAN Key 或登录账号后不见 | Key 不会搬走本地文件；检查实际 OS 用户、配置目录和项目路径 |
-| 文件已删除、过期或只存在云端 | 本地扫描工具无法重建，需使用原主机、原客户端或备份 |
+用当前 Key 和模型新建一个会话。401、503、模型不可用或余额不足属于连接、权限或服务端问题，不能靠会话扫描解决。若只有旧会话找不到，再按下面步骤处理。
 
-Claude Code CLI 会把会话保存在本机 `~/.claude/projects/<项目>/<会话ID>.jsonl`；设置 `CLAUDE_CONFIG_DIR` 后则保存在对应目录。默认情况下，超过 30 天的本地记录可能被清理。
+## 直接恢复原始记录
 
-## 先用 Claude Code 找回
-
-回到原项目目录运行：
+先运行 claude --resume 查找会话。已知 ID 时可指定 ID；跨项目或目录迁移后，也可使用完整 JSONL 路径，避免选择器范围导致找不到记录：
 
 ```bash
-claude --resume
+claude --resume "/absolute/path/to/SESSION_ID.jsonl"
 ```
 
-`claude --continue` 会恢复当前目录最近一次会话；会话内可用 `/resume`。选择器默认显示当前项目，按 `Ctrl+W` 查看同一仓库的其他 worktree，按 `Ctrl+A` 查看本机全部项目。知道 ID 时使用：
+
+请在要继续工作的项目目录运行命令。这里的路径必须是实际存在的本地文件，不是示例文字。客户端需要支持按绝对文件路径恢复；旧版本请先更新。
+
+## 下载与扫描
+
+需要 Python 3.10+。[下载 Claude Code 恢复工具](/downloads/kdan-claude-session-recovery.zip)，解压后进入 kdan-claude-session-recovery 目录：
 
 ```bash
-claude --resume <会话ID>
-```
-
-## 下载只读恢复工具
-
-[下载 KDAN Claude Code 会话恢复包](/downloads/kdan-claude-session-recovery.zip)。macOS / Linux：
-
-```bash
-curl -fsSLO https://nextcode.buildtoconnect.com/downloads/kdan-claude-session-recovery.zip
-unzip kdan-claude-session-recovery.zip
-cd kdan-claude-session-recovery
 bash find-claude-sessions.sh
 ```
 
-Windows PowerShell：
 
 ```powershell
-Invoke-WebRequest https://nextcode.buildtoconnect.com/downloads/kdan-claude-session-recovery.zip -OutFile kdan-claude-session-recovery.zip
-Expand-Archive .\kdan-claude-session-recovery.zip -DestinationPath . -Force
-Set-Location .\kdan-claude-session-recovery
 .\Find-ClaudeSessions.ps1
 ```
 
-脚本只列出文件名 UUID 与文件内 `sessionId` 一致的记录，并输出带原工作目录的 `claude --resume <会话ID>` 命令。它不会启动 Claude、读取或输出消息正文，也不会修改 JSONL、账号、Key 或设置。报告包含本机路径与会话 ID，分享前检查隐私。
 
-## 扫描其他目录与恢复
+扫描默认使用 CLAUDE_CONFIG_DIR 或 ~/.claude。工具核对文件名 UUID 与记录内的 sessionId，输出已验证的文件绝对路径及恢复命令，不输出消息正文或 Key，不修改记录，也不会自动启动 Claude。
 
-扫描旧配置目录：
+## 项目迁移或旧配置目录
+
+扫描另一份历史时，--claude-home 指定包含 projects 的配置目录；项目已搬家时，用 --project-dir 指定当前存在的目录：
 
 ```bash
-bash find-claude-sessions.sh --claude-home "/原来的/.claude"
+bash find-claude-sessions.sh --claude-home "/path/to/.claude" --project-dir "/path/to/project"
 ```
 
-PowerShell 使用 `-ClaudeHome`。若报告提示原工作目录不存在，先恢复原目录或把项目放回该路径，再手动运行生成的命令。打开会话本身不会发送消息；继续输入并发送后会产生模型请求。
 
-工具不能重建已删除、已过期、另一台主机或云端专属会话，也不会改变 Claude 的保留周期或账号归属。
+```powershell
+.\Find-ClaudeSessions.ps1 -ClaudeHome "C:\path\to\.claude" -ProjectDir "C:\path\to\project"
+```
 
-依据：[Claude Code 会话管理](https://code.claude.com/docs/en/sessions)、[Claude 本地数据目录](https://code.claude.com/docs/en/claude-directory)。工具经过临时夹具测试，没有修改本机真实 Claude 会话文件。
+
+PowerShell 使用 -ClaudeHome 和 -ProjectDir。原工作目录不存在且没有指定新目录时，工具会提示补充目录，不再生成无法执行的 cd 命令。
+
+生成的命令会设置 CLAUDE_CONFIG_DIR，并使用 JSONL 绝对路径恢复。因此请先确认扫描目录里的 settings.json 对应你现在要使用的服务商和凭据。若希望保留当前客户端配置，也可在已配置好的终端手动执行 claude --resume 加报告中的绝对文件路径。
+
+## 运行与验证
+
+复制报告中的命令到对应 shell 执行。看到原对话后，再发送一条明确的新消息验证调用；继续会话会产生 API 用量。PowerShell 命令在切换项目失败时会停止。
+
+此工具不会恢复删除的文件，不会下载其他主机或云端记录，也不承诺把官方账号的云端历史迁移到网关。扫描为空时检查操作系统用户、原主机、配置目录和自己的备份。
+
+[Claude Code CLI --resume](https://code.claude.com/docs/en/cli-reference) · 2026-10-02
