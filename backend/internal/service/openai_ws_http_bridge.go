@@ -491,6 +491,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
+	if gjson.GetBytes(payload, "generate").Type == gjson.False {
+		return answerOpenAIWSHTTPBridgePrewarm(account.ID, originalModel, turn, writeClientMessage)
+	}
 	responseModelObserver := &upstreamResponseModelObserver{}
 
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)
