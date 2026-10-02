@@ -332,6 +332,19 @@ main 验证：后端 `go test -tags=unit ./...` 全量、`go vet -tags=unit ./..
 真实本机 Docker PostgreSQL 18.1 与 Redis 8.4：`TestAPIKeyConcurrencyLimitMigration` 和 `TestAPIKeyAdmissionDockerCompetition` 通过，验证新列默认/约束、多客户端原子限额、Live 共享上限及失租停止上游后再释放。使用全量历史 SQL 在临时库应用迁移；不接触应用或生产数据库。另外在独立临时 PostgreSQL 上运行 `TestAPIKeyConcurrencyUpgradePaths`：首次升级旧 Key 默认为 `0`、已部署源 PR 的手填 `9` 在重复迁移后保留、文件名/校验和并存、负数拒绝和新建默认值两条路径均通过。临时容器测试后已清理。TapModels 执行同套分支检查后才推送，具体分支 SHA 与结果以交付报告为准。未使用真实 BPS、OAuth 或其他上游账号验证。
 
 
+## 2026-10-02：WebSocket 客户端桥接 Excel BPS
+
+问题：分组内全部账号对某模型开启 BPS 后，Codex 的 WebSocket 请求要么被调度排除，要么首帧命中 BPS 后被 1008 `Excel BPS models require HTTP/SSE` 关闭；客户端一直“思考中”并反复重试，直至退回 HTTP。`ranxi2001/production`（至 `0994fe0f1`）仍是同样的拒绝，本功能为本地实现，不改变 BPS 上游只用 HTTP/SSE 的约束。
+
+- 调度：客户端 WebSocket 入口把 BPS 账号视为可用；原生上游 WebSocket 仍不可用。首帧（经渠道与账号映射后）为 BPS 模型时，整条连接走 HTTP bridge，与账号的 WS mode 设置无关。
+- 每轮复用 `forwardExcelBPS`：把 `response.create` 转为 BPS HTTP 请求，SSE 逐条转回 WebSocket；图片、托管工具回退、403/429、工具修复与用量逻辑与 HTTP 入口一致。前置拒绝以带真实状态码的 `error` 事件返回，输出前 429 仍走换号。
+- 续写：`previous_response_id` 在连接内重建完整历史（与通用桥共用全量输出回放和 store=false 规则）；省略的工具声明沿用本连接上一份并按本轮权限复检，`tools: []` 清除；`generate=false` 预热由通用桥本地应答、不计费。
+- 保活：桥接回合 15 秒无输出即发 `{"type":"keepalive"}`，避免 BPS 迟迟不出首事件时被 Codex 的 5 分钟空闲断开。
+- 模型切换：首轮走原生 WebSocket 的连接若后续切到 BPS 模型，在准入前以 1008 `model switch requires reconnect` 关闭（不计账号故障），Codex 重连后新连接直接桥接。
+- 用量：失败或未完成回合中已返回的 token 用量照常入账，与 HTTP 入口一致。
+
+实现最初由 Codex 线程完成，审查后与上述通用桥回放、预热修复合并，补充保活、模型切换与回放规则。说明见 [Excel / BPS 协议](excel-bps.md)。
+
 ## 2026-10-02：Codex 目录兼容与 WebSocket 轮次写入状态
 
 固定审查区间：`ranxi2001/production@a7263faa247b74edd9e2bc8671a17ad96b3a1237` → `bf9405e4ab58c1be4fc8ec2101371753a016908e`。共 17 个非合并提交；5 个合并包装的 remerge-diff 无独立修改。没有整体合入 fork。本轮共享后端修复在隔离工作目录适配，先普通 merge 到 main，再普通 merge 到 TapModels；主目录其他任务未提交的 BPS/WS 桥接修改保留，不计入本轮交付。

@@ -78,7 +78,8 @@ func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 }
 
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
-	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) && !service.IsOpenAIWSSessionPreemptedError(err)
+	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
+		!errors.Is(err, service.ErrOpenAIWSModelSwitchRequiresReconnect) && !service.IsOpenAIWSSessionPreemptedError(err)
 }
 
 // openAIWSIngressEndedByClient reports whether a finished ingress WebSocket turn
@@ -3633,7 +3634,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					turnErr,
 				)
 				if turnErr != nil {
-					if result == nil || result.ImageCount <= 0 {
+					if result == nil || (result.ImageCount <= 0 && !result.HasTokenUsage()) {
 						return
 					}
 					// cyber 命中时该 turn 的用量已由 recordCyberPolicyIfMarked(forwardErrored=true)
@@ -3641,9 +3642,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					if service.GetOpsCyberPolicy(c) != nil {
 						return
 					}
-					reqLog.Warn("openai.websocket_partial_error_with_image_result",
+					reqLog.Warn("openai.websocket_partial_error_with_usage",
 						zap.Int64("account_id", account.ID),
 						zap.Int("image_count", result.ImageCount),
+						zap.Int("input_tokens", result.Usage.InputTokens),
+						zap.Int("output_tokens", result.Usage.OutputTokens),
 						zap.Error(turnErr),
 					)
 				}

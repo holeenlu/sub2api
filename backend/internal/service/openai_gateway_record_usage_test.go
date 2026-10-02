@@ -69,6 +69,15 @@ func TestOpenAIGatewayServiceRecordUsage_RejectsNilInput(t *testing.T) {
 	require.Error(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{}))
 }
 
+func TestOpenAIGatewayServiceRecordUsage_LocalPrewarmHasNoSideEffects(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	// No account, pricing or persistence dependencies may be touched for a
+	// locally acknowledged prewarm, even if another caller submits it directly.
+	require.NoError(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{OpenAIWSMode: true, LocalPrewarm: true},
+	}))
+}
+
 func TestRecordCyberPolicyUsageLog_BillsRealUpstreamTokens(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}

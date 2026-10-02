@@ -2795,7 +2795,9 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 		return false
 	}
 	if len(requestedModels) > 0 && account.IsExcelBPSEnabledForModel(requestedModels[0]) {
-		return false
+		// Client WS ingress can bridge to BPS HTTP/SSE. Native upstream WS
+		// remains unavailable; those are distinct transport requirements.
+		return requiredTransport == OpenAIUpstreamTransportResponsesWebsocketV2Ingress
 	}
 	if requiredTransport == OpenAIUpstreamTransportResponsesWebsocketV2Ingress {
 		if s.cfg == nil || !s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled {

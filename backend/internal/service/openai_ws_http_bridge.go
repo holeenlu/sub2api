@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -472,6 +473,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	payload []byte,
 	payloadBytes int,
 	originalModel string,
+	excelBPS bool,
 	imageBillingModel string,
 	imageSizeTier string,
 	imageInputSize string,
@@ -499,6 +501,22 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
+	}
+	// The ingress parser selects the protocol from the request model. Native
+	// payloads already contain the final model and must never be mapped again.
+	if excelBPS {
+		reason := account.excelBPSNativeFallbackReason(body)
+		if reason == "" {
+			return s.proxyOpenAIWSExcelBPSTurn(ctx, c, account, body, originalModel, writeClientMessage)
+		}
+		// Hosted capabilities retain the existing same-account native
+		// fallback, over HTTP/SSE on this bridged client connection. BPS
+		// payloads keep the unmapped model, so map it once for the native path.
+		recordExcelBPSNativeFallback(ctx, account, reason)
+		body, err = sjson.SetBytes(body, "model", normalizeOpenAIModelForUpstream(account, account.GetMappedModel(gjson.GetBytes(body, "model").String())))
+		if err != nil {
+			return nil, err
+		}
 	}
 	grokIntentSourceBody := append([]byte(nil), body...)
 	_, grokExplicitToolsField := openAIWSHTTPBridgeRawField(grokIntentSourceBody, "tools")

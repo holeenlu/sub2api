@@ -79,7 +79,7 @@ func TestExcelBPSSelectedModelsPreserveCodexTransportAndTickets(t *testing.T) {
 	require.True(t, a.IsOpenAIResponsesWebSocketV2Enabled())
 	require.Equal(t, OpenAIWSIngressModeCtxPool, a.ResolveOpenAIResponsesWebSocketV2Mode("off"))
 	for _, transport := range []OpenAIUpstreamTransport{OpenAIUpstreamTransportResponsesWebsocketV2, OpenAIUpstreamTransportResponsesWebsocketV2Ingress} {
-		require.False(t, svc.isOpenAIAccountTransportCompatible(a, transport, "gpt-6-astra"))
+		require.Equal(t, transport == OpenAIUpstreamTransportResponsesWebsocketV2Ingress, svc.isOpenAIAccountTransportCompatible(a, transport, "gpt-6-astra"))
 		require.True(t, svc.isOpenAIAccountTransportCompatible(a, transport, "gpt-6-sol"))
 	}
 	require.True(t, svc.isOpenAIAccountTransportCompatible(a, OpenAIUpstreamTransportHTTPSSE, "gpt-6-astra"))

@@ -2,7 +2,15 @@
 
 在账号管理 → 编辑现有 OpenAI OAuth 账号 → 打开“Excel / BPS 协议”并保存。使用该账号已有的 ChatGPT access token/account ID，不需要 GitHub 登录、sidecar 或新建 API Key 上游账号。原有凭据刷新逻辑继续生效。默认关闭；切换后新开 Codex 会话。
 
-本入口面向 HTTP `/v1/responses` 和 `/v1/responses/compact`。强制上游 HTTP/SSE，优先于账号的自动透传、WS mode 和 Codex ticket 注入。保持原始模型名或显式账号映射，不因模型权限不足偷偷切换模型。现有调度、分组授权和并发额度继续生效；开关不会重新启用已停用的账号。
+本入口支持 HTTP `/v1/responses`、`/v1/responses/compact`，以及客户端 WebSocket `/v1/responses`。BPS 上游仍强制使用 HTTP/SSE，优先于账号的自动透传、WS mode 和 Codex ticket 注入。保持原始模型名或显式账号映射，不因模型权限不足偷偷切换模型。现有调度、分组授权和并发额度继续生效；开关不会重新启用已停用的账号。
+
+Codex 客户端可以保留 `supports_websockets = true`。即使分组内全部账号开启 BPS，调度器也允许选中它们，并由网关把客户端的 `response.create` 转为 BPS HTTP 请求、把 SSE 响应事件逐条转回 WebSocket。多轮 `previous_response_id` 和客户端工具调用在同一连接内重建完整历史；后续省略的工具声明沿用本连接的上一份配置，并按本轮最新权限重新检查，显式 `tools: []` 会清除配置。`generate=false` 预热在网关本地应答，不发起 BPS 生成请求、不计费，也不更新账号健康状态。失败或未完成回合中上游已返回的 token 用量仍会入账。前置拒绝通过带真实 HTTP 状态的 WebSocket `error` 事件返回；403 自动处理、429 冷却/切换账号及用量统计复用既有 BPS 流程。
+
+BPS 可能几分钟后才返回首个事件（排队、附件上传、图片历史压缩），而 Codex 在 WebSocket 上 5 分钟收不到任何事件就会断开重试。桥接回合在 15 秒内没有向客户端写出任何事件时，会补发一个 `{"type":"keepalive"}` 事件（OpenAI Responses 的标准保活事件，客户端忽略其内容），直到本回合结束。
+
+Codex 会在同一 WebSocket 上切换模型。若连接首轮走原生 WebSocket（该模型未开 BPS），后续轮次切到本账号开启 BPS 的模型时，网关在该轮准入和计费之前以 1008 `model switch requires reconnect` 关闭连接，不计为账号故障；Codex 自动重连后，新连接首帧即为 BPS 模型并走桥接。首轮已走桥接的连接切回原生模型时，仍在同一连接内经 HTTP/SSE 转发。
+
+未开启 BPS 的常规 Codex OAuth 账号继续使用原有 WebSocket 路径（`ctx_pool` / `passthrough`）；客户端 HTTP 请求仍可使用 BPS 的流式 SSE 和非流式 JSON 响应。两种客户端连接方式不需要相互切换。
 
 ## 托管工具策略
 
@@ -19,7 +27,7 @@
 | `tool_choice=none` | 本轮不启用工具 | 相同行为 |
 | `tool_choice=required` 或强制指定客户端函数 | 带上述托管工具时改走原生；否则 HTTP 400 `basispoints_request_invalid` | HTTP 400 `basispoints_request_invalid` |
 
-原生回退的请求响应头带 `X-Codex2API-Upstream: codex` 和 `X-Codex2API-Basispoints-Bypass: <reason>`（`web_search` / `image_generation` / `tool_choice`），日志 `excel_bps.native_fallback` 记录 `account_id` 与 `reason`。回退不换账号、不参与 Codex 打票（BPS 账号本来就不采票，走原生时与其他不参与打票的账号相同）、仅限 HTTP（BPS 账号的 WS 已强制关闭）。Codex 默认的 `cached` 搜索不触发回退，否则几乎所有请求都会离开 BPS。
+HTTP 原生回退的请求响应头带 `X-Codex2API-Upstream: codex` 和 `X-Codex2API-Basispoints-Bypass: <reason>`（`web_search` / `image_generation` / `tool_choice`），日志 `excel_bps.native_fallback` 记录 `account_id` 与 `reason`。回退不换账号、不参与 Codex 打票（BPS 账号本来就不采票，走原生时与其他不参与打票的账号相同）。WebSocket 客户端的回退同样经网关桥接，上游使用 HTTP/SSE。Codex 默认的 `cached` 搜索不触发回退，否则几乎所有请求都会离开 BPS。
 
 以前 `external_web_access=true`、`search_context_size=high`、`image_generation` 会返回 400 `basispoints_unsupported_tool`，这道拦截已经取消。
 
