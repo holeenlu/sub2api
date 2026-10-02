@@ -642,7 +642,15 @@ func openAIWSInputIsPrefixExtended(previousPayload, currentPayload []byte) (bool
 	return true, nil
 }
 
+// openAIWSRawItemsHasPrefix reports whether a client's input already starts
+// with the replayed history. The history holds upstream output under the
+// store=false replay contract, while the client resends its own copies, so
+// items compare by identity: reasoning by its encrypted_content (empty
+// reasoning is dropped from the cache, so it is skipped on both sides), and
+// other items without server-only fields.
 func openAIWSRawItemsHasPrefix(items []json.RawMessage, prefix []json.RawMessage) bool {
+	items = openAIWSReplayComparableItems(items)
+	prefix = openAIWSReplayComparableItems(prefix)
 	if len(prefix) == 0 {
 		return true
 	}
@@ -654,13 +662,63 @@ func openAIWSRawItemsHasPrefix(items []json.RawMessage, prefix []json.RawMessage
 		if bytes.Equal(bytes.TrimSpace(prefix[idx]), bytes.TrimSpace(items[idx])) {
 			continue
 		}
-		previousNormalized := normalizeOpenAIWSJSONForCompareOrRaw(prefix[idx])
-		currentNormalized := normalizeOpenAIWSJSONForCompareOrRaw(items[idx])
-		if !bytes.Equal(previousNormalized, currentNormalized) {
+		if !bytes.Equal(openAIWSReplayItemIdentity(prefix[idx]), openAIWSReplayItemIdentity(items[idx])) {
 			return false
 		}
 	}
 	return true
+}
+
+// openAIWSReplayComparableItems drops reasoning without encrypted_content,
+// which the store=false replay contract never keeps.
+func openAIWSReplayComparableItems(items []json.RawMessage) []json.RawMessage {
+	var comparable []json.RawMessage // copied only once an item is skipped
+	for idx, item := range items {
+		reasoning := gjson.GetBytes(item, "type").String() == "reasoning"
+		if reasoning && strings.TrimSpace(gjson.GetBytes(item, "encrypted_content").String()) == "" {
+			if comparable == nil {
+				comparable = append(make([]json.RawMessage, 0, len(items)), items[:idx]...)
+			}
+			continue
+		}
+		if comparable != nil {
+			comparable = append(comparable, item)
+		}
+	}
+	if comparable == nil {
+		return items
+	}
+	return comparable
+}
+
+// openAIWSReplayItemIdentity keeps what identifies a conversation item across
+// upstream output and a client resend: ids, statuses and content annotations
+// are server-assigned, and store=false reasoning is identified by its
+// encrypted_content alone.
+func openAIWSReplayItemIdentity(item json.RawMessage) []byte {
+	var decoded map[string]any
+	if err := decodeOpenAIJSONUseNumber(bytes.TrimSpace(item), &decoded); err != nil || decoded == nil {
+		return normalizeOpenAIWSJSONForCompareOrRaw(item)
+	}
+	if decoded["type"] == "reasoning" {
+		encrypted, _ := decoded["encrypted_content"].(string)
+		return []byte("reasoning:" + encrypted)
+	}
+	delete(decoded, "id")
+	delete(decoded, "status")
+	if parts, ok := decoded["content"].([]any); ok {
+		for _, part := range parts {
+			if fields, ok := part.(map[string]any); ok {
+				delete(fields, "annotations")
+				delete(fields, "logprobs")
+			}
+		}
+	}
+	identity, err := json.Marshal(decoded)
+	if err != nil {
+		return normalizeOpenAIWSJSONForCompareOrRaw(item)
+	}
+	return identity
 }
 
 func openAIWSRawItemsHasFunctionCallOutput(items []json.RawMessage) bool {

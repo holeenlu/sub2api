@@ -222,6 +222,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSExcelBPSTurn(ctx context.Context, c 
 	if writer.err != nil {
 		return result, writer.err
 	}
+	if err == nil {
+		// The drain window may close right after the final event; that must
+		// not turn a completed turn into a timeout.
+		return result, nil
+	}
 	if upstreamCtx.Err() != nil {
 		return result, context.Cause(upstreamCtx)
 	}

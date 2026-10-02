@@ -79,7 +79,8 @@ func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
 	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
-		!errors.Is(err, service.ErrOpenAIWSModelSwitchRequiresReconnect) && !service.IsOpenAIWSSessionPreemptedError(err)
+		!errors.Is(err, service.ErrOpenAIWSModelSwitchRequiresReconnect) &&
+		!errors.Is(err, service.ErrOpenAIWSCodexClientRestricted) && !service.IsOpenAIWSSessionPreemptedError(err)
 }
 
 // openAIWSIngressEndedByClient reports whether a finished ingress WebSocket turn
