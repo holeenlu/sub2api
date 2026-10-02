@@ -21,9 +21,19 @@ func nextWithAPIKeyAdmissionOwner(c *gin.Context, apiKeyService *service.APIKeyS
 	// HTTP non-queue requests keep their existing shape.
 	installRevalidator := key.ConcurrencyLimit > 0 || isResponsesWebSocketRoute(c)
 	if installRevalidator {
+		var lookup func(context.Context, string) (*service.APIKey, error)
+		if apiKeyService != nil {
+			lookup = apiKeyService.GetByKey
+		}
+		if isResponsesWebSocketRoute(c) && apiKeyService != nil {
+			// A WebSocket session can outlive the normal auth-cache TTL. Use an
+			// authoritative lookup at each turn so revocation does not depend on
+			// a cache invalidation reaching this process.
+			lookup = apiKeyService.GetByKeyUncached
+		}
 		base := service.WithAPIKeyQueueAuthRevalidator(
 			c.Request.Context(),
-			newAPIKeyQueueAuthRevalidator(apiKeyService, credential, trustedClientIP, key),
+			newAPIKeyAuthRevalidator(lookup, credential, trustedClientIP, key),
 		)
 		base = service.WithAPIKeyQueueImagePermission(base, service.NewAPIKeyQueueImagePermission())
 		ctx, cancel := service.WithAPIKeyAdmissionOwner(base)
@@ -52,12 +62,20 @@ func nextWithAPIKeyAdmissionOwner(c *gin.Context, apiKeyService *service.APIKeyS
 // queue wait with the same application error the middleware would return; any
 // other failure is classified by the queue as a service error.
 func newAPIKeyQueueAuthRevalidator(apiKeyService *service.APIKeyService, credential string, trustedClientIP string, initial *service.APIKey) service.APIKeyQueueAuthRevalidator {
+	var lookup func(context.Context, string) (*service.APIKey, error)
+	if apiKeyService != nil {
+		lookup = apiKeyService.GetByKey
+	}
+	return newAPIKeyAuthRevalidator(lookup, credential, trustedClientIP, initial)
+}
+
+func newAPIKeyAuthRevalidator(lookup func(context.Context, string) (*service.APIKey, error), credential string, trustedClientIP string, initial *service.APIKey) service.APIKeyQueueAuthRevalidator {
 	identity := captureAPIKeyQueueIdentity(initial)
 	return func(ctx context.Context) (int, error) {
-		if apiKeyService == nil || credential == "" || initial == nil {
+		if lookup == nil || credential == "" || initial == nil {
 			return 0, service.NewAPIKeyQueueAuthRejected(infraerrors.ServiceUnavailable("API_KEY_AUTH_UNAVAILABLE", "API key authentication is temporarily unavailable"))
 		}
-		latest, err := apiKeyService.GetByKey(ctx, credential)
+		latest, err := lookup(ctx, credential)
 		if err != nil {
 			if errors.Is(err, service.ErrAPIKeyNotFound) {
 				return 0, service.NewAPIKeyQueueAuthRejected(infraerrors.Unauthorized("INVALID_API_KEY", "Invalid API key"))

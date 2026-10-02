@@ -23,6 +23,31 @@ type authRepoStub struct {
 	listKeysByGroupID func(ctx context.Context, groupID int64) ([]string, error)
 }
 
+func TestAPIKeyServiceGetByKeyUncachedBypassesAuthCache(t *testing.T) {
+	ctx := context.Background()
+	current := &APIKey{ID: 7, UserID: 11, Status: StatusActive, User: &User{ID: 11, Status: StatusActive}}
+	var lookups atomic.Int32
+	repo := &authRepoStub{getByKeyForAuth: func(context.Context, string) (*APIKey, error) {
+		lookups.Add(1)
+		copy := *current
+		user := *current.User
+		copy.User = &user
+		return &copy, nil
+	}}
+	svc := NewAPIKeyService(repo, nil, nil, nil, nil, nil, &config.Config{
+		APIKeyAuth: config.APIKeyAuthCacheConfig{L1Size: 32, L1TTLSeconds: 60, Singleflight: true},
+	})
+	t.Cleanup(func() { svc.authCacheL1.Close() })
+
+	_, err := svc.GetByKey(ctx, "uncached-test-key")
+	require.NoError(t, err)
+	current.Status = StatusDisabled
+	got, err := svc.GetByKeyUncached(ctx, "uncached-test-key")
+	require.NoError(t, err)
+	require.Equal(t, StatusDisabled, got.Status)
+	require.Equal(t, int32(2), lookups.Load(), "uncached lookup must bypass the warm auth cache")
+}
+
 func (s *authRepoStub) Create(ctx context.Context, key *APIKey) error {
 	panic("unexpected Create call")
 }

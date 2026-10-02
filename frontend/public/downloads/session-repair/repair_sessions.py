@@ -55,6 +55,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Confirm all Codex desktop, CLI, and IDE processes using this home are closed",
     )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable diagnostics")
+    parser.add_argument("--list", action="store_true", help="List local transcripts and CLI resume commands without a state database")
+    parser.add_argument("--resume", metavar="SESSION_ID", help="Prepare a CLI resume command with the current configured provider")
+    parser.add_argument("--provider", help="Use this existing provider ID from config.toml for CLI resume")
+    parser.add_argument("--model", help="Use this accessible model for CLI resume")
+    parser.add_argument("--project-dir", type=Path, help="Current project path if the original directory moved")
+    parser.add_argument("--run", action="store_true", help="Launch the selected CLI session; requires --resume")
+    parser.add_argument("--shell", choices=("posix", "powershell"), default="powershell" if os.name == "nt" else "posix")
     return parser.parse_args(argv)
 
 
@@ -157,15 +164,12 @@ def find_candidate_records(home: Path, rollout_path: str, thread_id: str) -> lis
     raw = Path(rollout_path).expanduser()
     if ".." in raw.parts:
         return []
-    basename = raw.name
-    if not basename or basename in {".", ".."}:
-        return []
     candidates: dict[Path, RolloutCandidate] = {}
     for root in rollout_roots(home):
         try:
             for path in root.rglob("*.jsonl"):
-                if path.name != basename:
-                    continue
+                # A copied/renamed transcript (including Windows -> Unix moves)
+                # is identified by session_meta.id, never by its old basename.
                 candidate = safe_rollout_candidate(path, root, thread_id)
                 if candidate is not None:
                     candidates[candidate.path] = candidate
@@ -526,9 +530,9 @@ def resolve_backup(home: Path, db: Path, requested: Path) -> tuple[dict[str, Any
             raise RuntimeError("backup manifest is not a supported repair backup")
         if manifest.get("codex_home") != str(home) or manifest.get("database_name") != db.name:
             raise RuntimeError("backup belongs to a different Codex home or database")
-        source_identity = FileIdentity(manifest.get("source_device"), manifest.get("source_inode"))
-        if not all(isinstance(value, int) for value in source_identity):
+        if not all(type(manifest.get(key)) is int for key in ("source_device", "source_inode")):
             raise RuntimeError("backup source database identity is invalid")
+        source_identity = FileIdentity(manifest["source_device"], manifest["source_inode"])
         if file_identity(db) != source_identity:
             raise RuntimeError("current database identity differs from the repair backup manifest")
         repairs = manifest.get("repairs")
@@ -632,6 +636,12 @@ def apply_rollback(
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.list or args.resume:
+        from resume_sessions import run
+        return run(args)
+    if args.run or args.provider or args.model or args.project_dir:
+        print(json.dumps({"error": "Resume options require --list or --resume SESSION_ID"}))
+        return 2
     if args.dry_run and args.apply:
         print(json.dumps({"error": "--dry-run and --apply cannot be combined"}, indent=2))
         return 2
