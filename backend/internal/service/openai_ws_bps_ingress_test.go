@@ -811,3 +811,43 @@ func TestOpenAIWSBPSTurnSuccessSurvivesDrainExpiry(t *testing.T) {
 	require.Equal(t, "resp_done", result.ResponseID)
 	require.Equal(t, 10, result.Usage.InputTokens)
 }
+
+// Usage logs label a turn by result.UpstreamEndpoint, else by the endpoint
+// recorded on the connection's gin context. A native turn that follows a BPS
+// turn on the same bridged connection must not inherit the BPS label.
+func TestOpenAIWSBridgeNativeTurnAfterBPSDropsBPSEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name, nextModel string
+		nextBPS         bool
+		nextTools       string
+	}{
+		{name: "hosted tool fallback", nextModel: "gpt-6-astra", nextBPS: true, nextTools: `,"tools":[{"type":"web_search","external_web_access":true}]`},
+		{name: "switch to a non-BPS model", nextModel: "gpt-6-sol"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				bpsCompletionResponse(200, bpsCompletedStream("resp_bps", "from bps")),
+				bpsCompletionResponse(200, bpsCompletedStream("resp_native", "from native")),
+			}}
+			svc := openAIClientToolsTestService(upstream)
+			svc.cfg = passthroughLifecycleConfig()
+			account := excelAccount()
+			account.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			write := func([]byte) error { return nil }
+
+			first := []byte(`{"type":"response.create","model":"gpt-6-astra","stream":true,"input":"first"}`)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", first, len(first), "gpt-6-astra", true, "", "", "", "", 1, write)
+			require.NoError(t, err)
+			require.Equal(t, "/basispoints/api/responses", result.UpstreamEndpoint)
+
+			next := []byte(`{"type":"response.create","model":"` + tc.nextModel + `","stream":true,"input":"second"` + tc.nextTools + `}`)
+			result, err = svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", next, len(next), tc.nextModel, tc.nextBPS, "", "", "", "", 2, write)
+			require.NoError(t, err)
+			require.Equal(t, "chatgpt.com", upstream.lastReq.URL.Host, "the second turn used the native channel")
+			require.NotEqual(t, "/basispoints/api/responses", result.UpstreamEndpoint)
+			require.Empty(t, GetActualOpenAIUpstreamEndpoint(c), "the BPS turn's endpoint must not label the native turn")
+		})
+	}
+}

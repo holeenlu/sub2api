@@ -493,6 +493,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
+	// One gin context serves every turn of the connection. As Forward does per
+	// request, drop the previous turn's upstream endpoint: a BPS turn records
+	// its own, and a native turn must not inherit it in usage logs.
+	ClearActualOpenAIUpstreamEndpoint(c)
 	prewarm := gjson.GetBytes(payload, "generate").Type == gjson.False
 	responseModelObserver := &upstreamResponseModelObserver{}
 
