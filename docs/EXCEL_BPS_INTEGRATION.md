@@ -330,3 +330,46 @@ ranxi2001/production 审计推进到 a53a7ff163d9337a094e7537df3aac2b31f308b7。
 main 验证：后端 `go test -tags=unit ./...` 全量、`go vet -tags=unit ./...` 和 Key/轮次/租约的四包 `-race` 定向检查通过；新增绑定账号等待与断连回收回归通过。前端类型检查、377 文件/3177 用例全量、ESLint、生产构建、四语完整性与繁体生成检查通过。手动发版 Workflow 的三个回归用例通过。
 
 真实本机 Docker PostgreSQL 18.1 与 Redis 8.4：`TestAPIKeyConcurrencyLimitMigration` 和 `TestAPIKeyAdmissionDockerCompetition` 通过，验证新列默认/约束、多客户端原子限额、Live 共享上限及失租停止上游后再释放。使用全量历史 SQL 在临时库应用迁移；不接触应用或生产数据库。另外在独立临时 PostgreSQL 上运行 `TestAPIKeyConcurrencyUpgradePaths`：首次升级旧 Key 默认为 `0`、已部署源 PR 的手填 `9` 在重复迁移后保留、文件名/校验和并存、负数拒绝和新建默认值两条路径均通过。临时容器测试后已清理。TapModels 执行同套分支检查后才推送，具体分支 SHA 与结果以交付报告为准。未使用真实 BPS、OAuth 或其他上游账号验证。
+
+
+## 2026-10-02：Codex 目录兼容与 WebSocket 轮次写入状态
+
+固定审查区间：`ranxi2001/production@a7263faa247b74edd9e2bc8671a17ad96b3a1237` → `bf9405e4ab58c1be4fc8ec2101371753a016908e`。共 17 个非合并提交；5 个合并包装的 remerge-diff 无独立修改。没有整体合入 fork。本轮共享后端修复在隔离工作目录适配，先普通 merge 到 main，再普通 merge 到 TapModels；主目录其他任务未提交的 BPS/WS 桥接修改保留，不计入本轮交付。
+
+### Bug 修复
+
+- Codex 生成目录的 `service_tiers` 始终是数组：上游显式 `null`、混合账号声明不一致或部分账号缺少声明时输出 `[]`，避免客户端解码失败或展示只有部分账号支持的档位。已有按实际模型路由选择账号的本地目录逻辑保留。
+- OpenAI API Key 账号的 GPT-6.1 Sol 及 `openai/`、`-max` 别名使用完整 Responses；即使没有上游快照或快照宣称 Lite，生成目录也固定 `use_responses_lite=false`。OAuth 原生账号继续按其原生能力声明；BPS 仍禁用 Lite 及原生加密多代理能力，不关闭普通明文工具。
+- 每个 WebSocket `response.create` 拥有独立下游写入状态。上一轮 terminal 已被客户端收到、旧写回调尚未结束时，新一轮不会被旧写入标成已输出；本地下一轮输出前限流能正确走原有重连/错误路径。连接整体诊断仍保留曾输出的信息；已有输出的请求不重放，也不把后续轮次改为自动整段重试。
+
+### 来源与本地提交
+
+| 源提交 | 本地提交 | 处理 |
+| --- | --- | --- |
+| `1c018400ba6d7962d881d05dc28428e14498b82a` | `2d80836a3` | Codex 目录数组、API Key Sol 及别名的完整 Responses 修复，含 OAuth/混合账号回归 |
+| `11e2c024d035deccecaf7a8aee9256a5e9336303` | `e883a709c` | 上述能力交集回落改用 switch，行为一致 |
+| `1fd3c958f325cc7e41be7673501420942f820aea` | `f013b5389` | WS 各轮次写入状态隔离，含前轮写回延迟与下一轮输出前错误竞态回归 |
+
+三份源提交保留 ranxi2001 原作者和 `cherry-pick -x` 记录，均无 Git 冲突；保留本地 BPS 保护与模型目录路由、提供商上下文配置。来源 PR #267 的标题虽为 Prism，其内 `1fd3c958f` 实际只修改现有共享 WS relay 和测试，可独立导入。
+
+### 已有等价功能与排除范围
+
+下列 7 个源补丁的原始官方提交已是 main 祖先，且复核现有调用点、配置和测试确认行为仍在，不重复应用：
+
+| ranxi 源提交 | 原始官方提交 | 已有行为证据 |
+| --- | --- | --- |
+| `59d80e919c33ef7bae6f4c88e5485dab348a2631` | `9688571a83775b87db85917398c628b7cdfe8276` | GPT-6.1 Sol 常量、模型映射、原生与兼容协议、定价和 Codex 目录测试已存在 |
+| `6d0ff27b5271db5354f8c499d4838b518b67fbc3` | `b5efbe3f4c6c026d94a1c9e2a804d23d04e91b75` | UseKeyModal 的远程/本地目录入口、catalog URL 与测试已存在，保留本地智谱强制文件目录适配 |
+| `c6ee0f51c6b46caeb2594384daf969cccc9b68f6` | `c91bb6124a71920e8f9ef91103518556076c7e8b` | planType、credentialsBuilder、PlatformTypeBadge 与 PAT 测试已识别新订阅 SKU |
+| `a3f89b49513606e90365362f431ab0358699b165` | `b31b435091709920c87c2b5d4d66bf9e8d25134b` | 两个 OpenAI 兼容 handler 只在 ClaudeCodeOnly 且无 FallbackGroupID 时直接拒绝 |
+| `df5b9721572cbb658eb0cac45d5f4f5a03bd6bb3` | `e6d191a83f0b37df3cb5b183e9cfd42e47b47a1d` | Astra Ultrafast 账号能力与模型专属 6 倍计价、服务档位降级测试已存在 |
+| `d00a5babd2d397c71de9fa152b3470bec3fee27b` | `9ecb3408223bbfc6a2fde9f60b7ddd24d622a8ab` | Key 创建总量/频率限制、独立创建计数及回归已存在 |
+| `32a7b4a91e36cd201849b8a51e6bf9efd59fcd97` | `017bbcb901c6f030992a84fffad2f309d20bb7a6` | `api_key_create.max_per_user_per_hour` 默认仍为 60，活跃 Key 默认 200；本轮不改默认值 |
+
+排除 `c36c79f6cc3ea40b0c12362c0c57695768d87da7` 源项目截图，避免复制不对应本项目品牌和 UI 的验证图。Prism 会话缓存、浏览器路由、CI 和错误样式排除：`bb3014258bf4c694c5e543fc105f138ea2b43511`、`a52305a169ec9829a98a26c2bc37716ff07e11e5`、`af96148c22c9a3d6719d6c5ec6df51b47179d306`、`849577e62d2c64d7fdc919066ea7292cf6c1b7a1`。鹈鹕结果 API/缓存修复排除：`31b9dcedea064763e84a47e3669887c6d3aef7d7`、`f87f224c3bac74d2eea4ad4a12d7658c5264fdb7`。未恢复 Prism、Mihomo、独立 sub4api BPS 或已退役运维系统。
+
+### 配置、运维和验证
+
+本轮无新增设置、环境变量、迁移、依赖或工作流，**无需配置，部署后自动生效**。受影响的既有入口为用户「API 密钥」(`/keys`) →「使用密钥」→ Codex 模型目录获取/下载，以及客户端的远程目录；目录接口为 `/backend-api/codex/models` 和现有 Codex 格式的 `/v1/models`。需要更新已有离线目录的客户端重新获取并保存目录文件；远程模式沿用其正常刷新行为。重启/部署仍按项目既有运维流程，本轮仅提交与推送，不发版、不部署、不执行生产迁移。
+
+隔离 main 代码：后端 `go test -tags=unit ./...` 全量、`go vet -tags=unit ./...` 和整个 `openai_ws_v2` 包的 `-race` 检查通过，包含新目录兼容与轮次写回竞态回归。手动发版 Workflow 的三个回归通过，使用本机已有 PyYAML 导入路径，未安装依赖。无前端代码、构造器、DTO、Wire/Ent 输入变化，不重复前端测试/构建或生成；本轮未使用真实上游账号、Redis、PostgreSQL，也未执行生产迁移。TapModels 普通合并后单独验证后端和品牌差异，再推送三个远端；最终 SHA、分支检查及推送结果见交付报告。
