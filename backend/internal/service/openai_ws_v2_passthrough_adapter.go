@@ -1092,6 +1092,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						turnLifecycle.cancelResponseCreate()
 					}
 				}()
+				if err := s.checkOpenAIWSCodexClientRestriction(ctx, c, account, payload, func(event []byte) error {
+					writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
+					defer cancel()
+					return clientConn.Write(writeCtx, coderws.MessageText, event)
+				}); err != nil {
+					return payload, nil, err
+				}
 			}
 			responsesLite := isResponseCreate && isOpenAIResponsesLiteWebSocketPayload(payload)
 			if isResponseCreate {

@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,14 +11,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type bpsWSTestTurn struct {
@@ -48,6 +53,13 @@ func (l *bpsWSMemoryListener) Addr() net.Addr {
 
 func startBPSWSMemorySession(t *testing.T, svc *OpenAIGatewayService, account *Account, payload string, hooks *OpenAIWSIngressHooks) (*coderws.Conn, <-chan error) {
 	t.Helper()
+	return startOpenAIWSMemorySession(t, svc, account, nil, payload, hooks)
+}
+
+// startOpenAIWSMemorySession dials with the given handshake headers, which the
+// ingress reads from the upgrade request (User-Agent, originator, x-codex-*).
+func startOpenAIWSMemorySession(t *testing.T, svc *OpenAIGatewayService, account *Account, header http.Header, payload string, hooks *OpenAIWSIngressHooks) (*coderws.Conn, <-chan error) {
+	t.Helper()
 	clientPipe, serverPipe := net.Pipe()
 	listener := &bpsWSMemoryListener{conn: serverPipe, done: make(chan struct{})}
 	serverErr := make(chan error, 1)
@@ -74,7 +86,7 @@ func startBPSWSMemorySession(t *testing.T, svc *OpenAIGatewayService, account *A
 	t.Cleanup(transport.CloseIdleConnections)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	client, _, err := coderws.Dial(ctx, "ws://bps-ws-test/v1/responses", &coderws.DialOptions{HTTPClient: &http.Client{Transport: transport}})
+	client, _, err := coderws.Dial(ctx, "ws://bps-ws-test/v1/responses", &coderws.DialOptions{HTTPClient: &http.Client{Transport: transport}, HTTPHeader: header})
 	require.NoError(t, err)
 	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(payload)))
 	return client, serverErr
@@ -698,6 +710,144 @@ func TestOpenAIWSNativeIngressSwitchToBPSModelRequiresReconnect(t *testing.T) {
 				t.Fatalf("the BPS turn must not reach the native upstream: %s", payload)
 			default:
 			}
+		})
+	}
+}
+
+// ctxBlockingBody stalls a generation until its request context ends.
+type ctxBlockingBody struct{ ctx context.Context }
+
+func (b ctxBlockingBody) Read([]byte) (int, error) { <-b.ctx.Done(); return 0, b.ctx.Err() }
+func (b ctxBlockingBody) Close() error             { return nil }
+
+// Image-history compaction is billed before generation starts. When the client
+// then leaves and the usage drain expires, the turn still reports that usage.
+func TestOpenAIWSBPSDrainExpiryKeepsCompactionUsage(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	svc := openAIClientToolsTestService(nil)
+	t.Cleanup(func() { _ = svc.CloseExcelBPSImages() })
+	svc.cfg = passthroughLifecycleConfig()
+	svc.cache = newImagePolicyMemoryCache()
+	svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{
+		SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageMode: ExcelBPSImageModeNative, SettingKeyExcelBPSImageLimitPolicy: "auto_compact",
+	}}, svc.cfg)
+	_, pixels := nativeGatewayBody(t)
+	frame := bytes.ReplaceAll(imagePolicyRequest(t, 19, 2), []byte("data:image/png;base64,synthetic"), []byte("data:image/png;base64,"+base64.StdEncoding.EncodeToString(pixels)))
+	for path, value := range map[string]any{"type": "response.create", "model": "gpt-6-astra", "stream": true} {
+		var err error
+		frame, err = sjson.SetBytes(frame, path, value)
+		require.NoError(t, err)
+	}
+	generating := make(chan struct{})
+	phase := 0
+	svc.httpUpstream = &nativeAttachmentUpstream{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+		_, _ = io.ReadAll(req.Body)
+		if req.URL.String() == basispoints.AttachmentsURL {
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"openai_file_id":"file-drain"}`))}, nil
+		}
+		phase++
+		if phase == 1 {
+			compaction := `{"type":"response.completed","response":{"id":"resp-compact","status":"completed","model":"gpt-6-astra","output":[{"type":"compaction","id":"cmp-drain","encrypted_content":"opaque-drain-state"}],"usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}}`
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: &nativeAttachmentBody{Reader: strings.NewReader("data: " + compaction + "\n\n")}}, nil
+		}
+		close(generating)
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: ctxBlockingBody{req.Context()}}, nil
+	}}
+	turns := make(chan bpsWSTestTurn, 2)
+	header := http.Header{"User-Agent": {"codex_cli_rs/0.116.0"}, "Session_id": {"drain-session"}}
+	client, serverErr := startOpenAIWSMemorySession(t, svc, excelAccount(), header, string(frame), &OpenAIWSIngressHooks{
+		AfterTurn: func(_ int, result *OpenAIForwardResult, err error) { turns <- bpsWSTestTurn{result, err} },
+	})
+	select {
+	case <-generating:
+	case <-time.After(5 * time.Second):
+		t.Fatal("generation did not start after compaction")
+	}
+	_ = client.CloseNow() // the client leaves while BPS is still generating
+
+	select {
+	case turn := <-turns:
+		require.NoError(t, turn.err, "a departed client is not a turn failure")
+		require.NotNil(t, turn.result, "compaction usage must reach billing")
+		require.Equal(t, 7, turn.result.Usage.InputTokens)
+		require.Equal(t, 3, turn.result.Usage.OutputTokens)
+	case <-time.After(10 * time.Second):
+		t.Fatal("turn did not finish after the usage drain expired")
+	}
+	select {
+	case err := <-serverErr:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("ingress did not exit")
+	}
+	require.Empty(t, turns, "the turn is settled once: no second bill, slots released once")
+}
+
+// slowBindStateStore holds the response binding a successful BPS forward
+// performs last, so the usage drain can expire after the stream completed.
+type slowBindStateStore struct {
+	OpenAIWSStateStore
+	delay time.Duration
+}
+
+func (s slowBindStateStore) BindResponseAccount(ctx context.Context, groupID int64, responseID string, accountID int64, ttl time.Duration) error {
+	time.Sleep(s.delay)
+	return s.OpenAIWSStateStore.BindResponseAccount(ctx, groupID, responseID, accountID, ttl)
+}
+
+// A completed forward stays successful even if the drain window closes right
+// after its final event.
+func TestOpenAIWSBPSTurnSuccessSurvivesDrainExpiry(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: bpsCompletionResponse(200, bpsCompletedStream("resp_done", "done"))}
+	svc := openAIClientToolsTestService(upstream)
+	svc.openaiWSStateStore = slowBindStateStore{OpenAIWSStateStore: NewOpenAIWSStateStore(nil), delay: openAIWSUsageDrainTimeout + 300*time.Millisecond}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	gone := make(chan struct{})
+	close(gone) // the client has already left: the drain window is running
+	ctx := context.WithValue(context.Background(), openAIWSDisconnectKey{}, (<-chan struct{})(gone))
+	result, err := svc.proxyOpenAIWSExcelBPSTurn(ctx, c, excelAccount(), []byte(`{"model":"gpt-6-astra","stream":true,"input":"test"}`), "gpt-6-astra", func([]byte) error { return nil })
+	require.NoError(t, err, "the stream completed before the drain expired")
+	require.Equal(t, "resp_done", result.ResponseID)
+	require.Equal(t, 10, result.Usage.InputTokens)
+}
+
+// Usage logs label a turn by result.UpstreamEndpoint, else by the endpoint
+// recorded on the connection's gin context. A native turn that follows a BPS
+// turn on the same bridged connection must not inherit the BPS label.
+func TestOpenAIWSBridgeNativeTurnAfterBPSDropsBPSEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name, nextModel string
+		nextBPS         bool
+		nextTools       string
+	}{
+		{name: "hosted tool fallback", nextModel: "gpt-6-astra", nextBPS: true, nextTools: `,"tools":[{"type":"web_search","external_web_access":true}]`},
+		{name: "switch to a non-BPS model", nextModel: "gpt-6-sol"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				bpsCompletionResponse(200, bpsCompletedStream("resp_bps", "from bps")),
+				bpsCompletionResponse(200, bpsCompletedStream("resp_native", "from native")),
+			}}
+			svc := openAIClientToolsTestService(upstream)
+			svc.cfg = passthroughLifecycleConfig()
+			account := excelAccount()
+			account.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			write := func([]byte) error { return nil }
+
+			first := []byte(`{"type":"response.create","model":"gpt-6-astra","stream":true,"input":"first"}`)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", first, len(first), "gpt-6-astra", true, "", "", "", "", 1, write)
+			require.NoError(t, err)
+			require.Equal(t, "/basispoints/api/responses", result.UpstreamEndpoint)
+
+			next := []byte(`{"type":"response.create","model":"` + tc.nextModel + `","stream":true,"input":"second"` + tc.nextTools + `}`)
+			result, err = svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", next, len(next), tc.nextModel, tc.nextBPS, "", "", "", "", 2, write)
+			require.NoError(t, err)
+			require.Equal(t, "chatgpt.com", upstream.lastReq.URL.Host, "the second turn used the native channel")
+			require.NotEqual(t, "/basispoints/api/responses", result.UpstreamEndpoint)
+			require.Empty(t, GetActualOpenAIUpstreamEndpoint(c), "the BPS turn's endpoint must not label the native turn")
 		})
 	}
 }

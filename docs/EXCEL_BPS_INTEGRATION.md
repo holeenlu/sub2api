@@ -342,6 +342,7 @@ main 验证：后端 `go test -tags=unit ./...` 全量、`go vet -tags=unit ./..
 - 保活：桥接回合 15 秒无输出即发 `{"type":"keepalive"}`，避免 BPS 迟迟不出首事件时被 Codex 的 5 分钟空闲断开。
 - 模型切换：首轮走原生 WebSocket 的连接若后续切到 BPS 模型，在准入前以 1008 `model switch requires reconnect` 关闭（不计账号故障），Codex 重连后新连接直接桥接。
 - 用量：失败或未完成回合中已返回的 token 用量照常入账，与 HTTP 入口一致。
+- 客户端限制：账号开启「仅允许 Codex 官方客户端」（`codex_cli_only`）时，WebSocket 与 HTTP 一样按同一规则逐轮校验（握手头固定身份，请求体指纹与全局策略每轮读取）；拒绝时先发 403 `error` 事件再以 1008 关闭，不发上游请求、不计用量、不计账号故障。此前 WebSocket 入口（含原生 ctx_pool/passthrough）从未执行该限制。
 
 实现最初由 Codex 线程完成，审查后与上述通用桥回放、预热修复合并，补充保活、模型切换与回放规则。说明见 [Excel / BPS 协议](excel-bps.md)。
 

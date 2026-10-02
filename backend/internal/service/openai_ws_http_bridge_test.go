@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -3009,4 +3010,84 @@ func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
 		t.Fatal("timed out waiting for idle HTTP bridge session to close")
 	}
 	require.Len(t, upstream.bodies, 1, "an idle client must not leave a continuation request running")
+}
+
+// A client may continue with previous_response_id while resending its full
+// history. The replay cache keeps the previous output under the store=false
+// contract (reasoning without its rs_* id), and clients may drop server-only
+// fields, so the history must still be recognized instead of sent twice.
+func TestOpenAIWSHTTPBridgeContinuationRecognizesResentHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	reasoning := `{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"enc-1"}`
+	answer := `{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","annotations":[],"text":"Paris."}]}`
+	question := `{"type":"message","role":"user","content":[{"type":"input_text","text":"Capital of France?"}]}`
+	followUp := `{"type":"message","role":"user","content":[{"type":"input_text","text":"And of Germany?"}]}`
+	for _, tc := range []struct {
+		name               string
+		resentReasoning    string
+		resentAnswer       string
+		wantReasoningID    string
+		wantAnswerHasState bool
+	}{
+		{name: "verbatim resend", resentReasoning: reasoning, resentAnswer: answer, wantReasoningID: "rs_1", wantAnswerHasState: true},
+		{name: "server-only fields dropped", resentReasoning: `{"type":"reasoning","summary":[],"encrypted_content":"enc-1"}`,
+			resentAnswer: `{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Paris."}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				openAIWSHTTPBridgeSSEResponse(
+					`{"type":"response.output_item.done","output_index":0,"item":`+reasoning+`}`,
+					`{"type":"response.output_item.done","output_index":1,"item":`+answer+`}`,
+					`{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.1","output":[`+reasoning+`,`+answer+`],"usage":{"input_tokens":5,"output_tokens":2}}}`,
+				),
+				openAIWSHTTPBridgeSSEResponse(
+					`{"type":"response.completed","response":{"id":"resp_2","model":"gpt-5.1","output":[],"usage":{"input_tokens":9,"output_tokens":1}}}`,
+				),
+			}}
+			svc := newOpenAIWSHTTPBridgeThresholdTestService(upstream)
+			account := &Account{
+				ID: 9007, Name: "oauth-resent-history", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+				Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+				Concurrency: 1, Status: StatusActive, Schedulable: true,
+			}
+			runOpenAIWSIngressTurns(t, svc, account, "test-token",
+				`{"type":"response.create","model":"gpt-5.1","store":false,"stream":true,"input":[`+question+`]}`,
+				`{"type":"response.create","model":"gpt-5.1","store":false,"stream":true,"previous_response_id":"resp_1","input":[`+question+`,`+tc.resentReasoning+`,`+tc.resentAnswer+`,`+followUp+`]}`,
+			)
+
+			require.Len(t, upstream.bodies, 2)
+			input := gjson.GetBytes(upstream.bodies[1], "input").Array()
+			require.Len(t, input, 4, "the resent history must not be prepended again: %s", gjson.GetBytes(upstream.bodies[1], "input").Raw)
+			require.Equal(t, "Capital of France?", input[0].Get("content.0.text").String())
+			require.Equal(t, "enc-1", input[1].Get("encrypted_content").String())
+			require.Equal(t, "Paris.", input[2].Get("content.0.text").String())
+			require.Equal(t, "And of Germany?", input[3].Get("content.0.text").String())
+		})
+	}
+}
+
+// The ctx_pool fallbacks and the BPS bridge share this helper.
+func TestBuildOpenAIWSReplayInputSequenceRecognizesStoreDisabledHistory(t *testing.T) {
+	question := json.RawMessage(`{"type":"message","role":"user","content":"Capital of France?"}`)
+	answer := json.RawMessage(`{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","annotations":[],"text":"Paris."}]}`)
+	followUp := json.RawMessage(`{"type":"message","role":"user","content":"And of Germany?"}`)
+	cached := []json.RawMessage{question, json.RawMessage(`{"type":"reasoning","summary":[],"encrypted_content":"enc-1"}`), answer}
+	resent := []json.RawMessage{
+		question,
+		json.RawMessage(`{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"enc-1"}`),
+		json.RawMessage(`{"id":"rs_0","type":"reasoning","summary":[]}`), // dropped by the store=false cache
+		answer, followUp,
+	}
+	items, exists := buildOpenAIWSReplayInputSequenceFromItems(cached, true, resent, true, true)
+	require.True(t, exists)
+	require.Equal(t, resent, items, "the client's own full history is sent as-is")
+
+	delta := []json.RawMessage{followUp}
+	items, _ = buildOpenAIWSReplayInputSequenceFromItems(cached, true, delta, true, true)
+	require.Len(t, items, 4, "a delta still gets the cached history")
+
+	edited := []json.RawMessage{question, cached[1], json.RawMessage(`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Lyon."}]}`), followUp}
+	items, _ = buildOpenAIWSReplayInputSequenceFromItems(cached, true, edited, true, true)
+	require.Len(t, items, 7, "a different history is not mistaken for the cached one")
 }

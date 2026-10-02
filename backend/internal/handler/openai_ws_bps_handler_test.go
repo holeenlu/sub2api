@@ -53,7 +53,7 @@ type bpsWSHandlerHarness struct {
 
 // Mount real auth, turn admission, WS/HTTP handlers and usage recording. Only
 // the BPS network and persistence boundaries are stubbed.
-func newBPSWSHandlerHarness(t *testing.T, terminal string) *bpsWSHandlerHarness {
+func newBPSWSHandlerHarness(t *testing.T, terminal string, configure ...func(*service.Account)) *bpsWSHandlerHarness {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	key := wsRevalidationKey(0, false, nil, true)
@@ -68,6 +68,9 @@ func newBPSWSHandlerHarness(t *testing.T, terminal string) *bpsWSHandlerHarness 
 		Status: service.StatusActive, Schedulable: true, Concurrency: 4, GroupIDs: []int64{key.Group.ID},
 		Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"},
 		Extra:       map[string]any{"openai_excel_bps": true, "openai_oauth_responses_websockets_v2_mode": service.OpenAIWSIngressModeOff},
+	}
+	for _, apply := range configure {
+		apply(&account)
 	}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.Default.RateMultiplier = 1
@@ -110,10 +113,17 @@ func newBPSWSHandlerHarness(t *testing.T, terminal string) *bpsWSHandlerHarness 
 
 func (h *bpsWSHandlerHarness) dial(t *testing.T) *coderws.Conn {
 	t.Helper()
+	return h.dialWithHeader(t, http.Header{})
+}
+
+func (h *bpsWSHandlerHarness) dialWithHeader(t *testing.T, header http.Header) *coderws.Conn {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	header = header.Clone()
+	header.Set("Authorization", "Bearer sk-ws-revalidation-followup")
 	conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(h.server.URL, "http")+"/v1/responses", &coderws.DialOptions{
-		HTTPHeader: http.Header{"Authorization": {"Bearer sk-ws-revalidation-followup"}},
+		HTTPHeader: header,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.CloseNow() })
@@ -252,4 +262,43 @@ func TestHTTPBPSHandlerCompatibility(t *testing.T) {
 			require.Equal(t, 3, logs[0].OutputTokens)
 		})
 	}
+}
+
+// The same codex_cli_only account answers a non-Codex client identically over
+// HTTP and WebSocket: 403 with the shared message, no upstream request and no
+// usage. WS adds the policy close after the error event.
+func TestCodexCLIOnlyHandlerRejectsNonCodexClientOnBothTransports(t *testing.T) {
+	codexCLIOnly := func(a *service.Account) { a.Extra["codex_cli_only"] = true }
+	t.Run("websocket", func(t *testing.T) {
+		h := newBPSWSHandlerHarness(t, "response.completed", codexCLIOnly)
+		conn := h.dialWithHeader(t, http.Header{"User-Agent": {"curl/8.0"}})
+		writeBPSHandlerTurn(t, conn, `{"type":"response.create","model":"gpt-6-astra","input":"hello"}`)
+		event := readBPSHandlerTerminal(t, conn)
+		require.Equal(t, "error", gjson.GetBytes(event, "type").String())
+		require.Equal(t, int64(http.StatusForbidden), gjson.GetBytes(event, "status").Int())
+		require.Equal(t, service.CodexOfficialClientsOnlyMessage, gjson.GetBytes(event, "error.message").String())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _, err := conn.Read(ctx)
+		require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err))
+		require.Empty(t, h.finishedLogs(t))
+		require.Empty(t, h.upstream.requests())
+	})
+	t.Run("http", func(t *testing.T) {
+		h := newBPSWSHandlerHarness(t, "response.completed", codexCLIOnly)
+		req, err := http.NewRequest(http.MethodPost, h.server.URL+"/v1/responses", strings.NewReader(`{"model":"gpt-6-astra","input":"hello","stream":true}`))
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer sk-ws-revalidation-followup")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "curl/8.0")
+		resp, err := h.server.Client().Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusForbidden, resp.StatusCode, "%s", body)
+		require.Equal(t, service.CodexOfficialClientsOnlyMessage, gjson.GetBytes(body, "error.message").String())
+		require.Empty(t, h.finishedLogs(t))
+		require.Empty(t, h.upstream.requests())
+	})
 }

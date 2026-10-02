@@ -493,9 +493,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
-	if gjson.GetBytes(payload, "generate").Type == gjson.False {
-		return answerOpenAIWSHTTPBridgePrewarm(account.ID, originalModel, turn, writeClientMessage)
-	}
+	// One gin context serves every turn of the connection. As Forward does per
+	// request, drop the previous turn's upstream endpoint: a BPS turn records
+	// its own, and a native turn must not inherit it in usage logs.
+	ClearActualOpenAIUpstreamEndpoint(c)
+	prewarm := gjson.GetBytes(payload, "generate").Type == gjson.False
 	responseModelObserver := &upstreamResponseModelObserver{}
 
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)
@@ -504,7 +506,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 	// The ingress parser selects the protocol from the request model. Native
 	// payloads already contain the final model and must never be mapped again.
-	if excelBPS {
+	if excelBPS && !prewarm {
 		reason := account.excelBPSNativeFallbackReason(body)
 		if reason == "" {
 			return s.proxyOpenAIWSExcelBPSTurn(ctx, c, account, body, originalModel, writeClientMessage)
@@ -557,6 +559,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			ClientMapping: clientToolMapping,
 			LoweredTools:  loweredTools,
 		})
+	}
+	if prewarm {
+		// Answered locally, after the tool state above: the continuation may
+		// omit tools and inherit them, exactly as after a generated turn.
+		return answerOpenAIWSHTTPBridgePrewarm(account.ID, originalModel, turn, writeClientMessage)
 	}
 	if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
 		liteBody, liteChanged, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(body, account)
