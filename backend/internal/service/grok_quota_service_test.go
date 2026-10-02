@@ -1029,6 +1029,37 @@ func TestGrokQuotaServiceProbeFlightsDeduplicateBillingAndSeparateActive(t *test
 	require.Equal(t, 1, activeCalls)
 }
 
+// The weekly and monthly billing probes run concurrently and both apply the
+// account's header overrides, which fill a lazy cache on the Account. Under
+// -race this also guards against the two probes sharing one Account again.
+func TestGrokQuotaServiceProbeBillingAppliesHeaderOverridesToBothWindows(t *testing.T) {
+	t.Parallel()
+
+	account := healthyGrokQuotaOAuthAccount(56)
+	account.Credentials[credKeyHeaderOverrideEnabled] = true
+	account.Credentials[credKeyHeaderOverrides] = map[string]any{"x-relay-admission": "probe"}
+	repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
+		accountsByID: map[int64]*Account{account.ID: account},
+	}}
+	upstream := &grokHybridUpstream{}
+	svc := NewGrokQuotaService(repo, nil, NewGrokTokenProvider(repo, nil), upstream, nil)
+
+	result, err := svc.ProbeBilling(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, result.Billing)
+
+	requests, _ := upstream.snapshot()
+	billingCalls := 0
+	for _, req := range requests {
+		if req.URL.Path != "/v1/billing" {
+			continue
+		}
+		billingCalls++
+		require.Equal(t, "probe", getHeaderRaw(req.Header, "x-relay-admission"))
+	}
+	require.Equal(t, 2, billingCalls)
+}
+
 func TestGrokQuotaServiceBilling429DoesNotPauseModelScheduling(t *testing.T) {
 	t.Parallel()
 
