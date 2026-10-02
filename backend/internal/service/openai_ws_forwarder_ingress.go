@@ -602,9 +602,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return admissionErr
 	}
 	account = latest
-	if account.IsExcelBPSEnabledForModel(extractOpenAICodexTicketModel(firstClientMessage)) {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "Excel BPS models require HTTP/SSE", nil)
-	}
 	// A handler may reuse the same gin context across account failover attempts.
 	// Never let an OAuth attempt's response aliases leak into the next account.
 	setCodexToolNameReverse(c, nil)
@@ -636,6 +633,30 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}()
 	}
 
+	// Resolve the channel model once before selecting the ingress path. BPS
+	// scope is evaluated after channel and account mappings, even when the
+	// client calls the model by an alias. The parser reuses this first-turn map.
+	firstRequestModel := extractOpenAICodexTicketModel(firstClientMessage)
+	if hooks != nil && hooks.MapRequestModel != nil {
+		mapped, err := hooks.MapRequestModel(1, firstRequestModel)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(mapped) != "" {
+			firstRequestModel = strings.TrimSpace(mapped)
+		}
+		// Passthrough owns its first-frame parser. Reuse this resolution there
+		// too, without invoking the mapping/admission hook twice.
+		originalMap := hooks.MapRequestModel
+		wrapped := *hooks
+		wrapped.MapRequestModel = func(turn int, model string) (string, error) {
+			if turn == 1 {
+				return firstRequestModel, nil
+			}
+			return originalMap(turn, model)
+		}
+		hooks = &wrapped
+	}
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	// One reader owns the downstream socket for the whole connection. A
 	// passthrough attempt consumes cancel/overlap frames through it, established
@@ -645,7 +666,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	// a later bridge/ctx_pool account retry.
 	ingressReader := openAIWSGetIngressReader(c, clientConn)
 	ingressReader.setWaitFrameMode(false)
-	forceHTTPBridge := account.Platform == PlatformGrok ||
+	forceHTTPBridge := account.IsExcelBPSEnabledForModel(firstRequestModel) || account.Platform == PlatformGrok ||
 		(s.pluginManager != nil && s.pluginManager.ShouldRouteOpenAIOAuth(account))
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
 	ingressMode := OpenAIWSIngressModeCtxPool
@@ -732,6 +753,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if forceHTTPBridge {
 		wsHost = "xai-http-bridge"
 		wsPath = "/v1/responses"
+		if account.IsExcelBPSEnabledForModel(firstRequestModel) {
+			wsHost = "bps.openai.com"
+			wsPath = "/basispoints/api/responses"
+		}
 	} else {
 		var err error
 		wsURL, err = s.buildOpenAIResponsesWSURL(account)
@@ -753,6 +778,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		promptCacheKey           string
 		previousResponseID       string
 		originalModel            string
+		excelBPS                 bool
 		imageBillingModel        string
 		imageSizeTier            string
 		imageInputSize           string
@@ -760,6 +786,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		requestedReasoningEffort *string
 	}
 	ingressSessionOriginalModel := ""
+	// Settled once the first frame picks the ingress path; follow-up frames
+	// on a native upstream socket cannot switch to a BPS model.
+	ingressBridged := forceHTTPBridge
 
 	applyPayloadMutation := func(current []byte, path string, value any) ([]byte, error) {
 		next, err := sjson.SetBytes(current, path, value)
@@ -900,6 +929,22 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			normalized = litePayload
 		}
+		requestModel := originalModel
+		if turn == 1 {
+			requestModel = firstRequestModel
+		} else if hooks != nil && hooks.MapRequestModel != nil {
+			mappedModel, mapErr := hooks.MapRequestModel(turn, originalModel)
+			if mapErr != nil {
+				return openAIWSClientPayload{}, mapErr
+			}
+			if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
+				requestModel = mappedModel
+			}
+		}
+		excelBPS := account.IsExcelBPSEnabledForModel(requestModel)
+		if excelBPS && turn > 1 && !ingressBridged {
+			return openAIWSClientPayload{}, newOpenAIWSBPSModelSwitchError(requestModel)
+		}
 		apiKey := getAPIKeyFromContext(c)
 		imageGenerationAllowed := GroupAllowsImageGenerationLatest(ctx, apiKeyGroup(apiKey))
 		codexImageGenerationExplicitToolPolicy := codexImageGenerationExplicitToolPolicyAllow
@@ -907,6 +952,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			codexImageGenerationExplicitToolPolicy = account.CodexImageGenerationExplicitToolPolicy()
 		}
 		codexBridgeEnabled := isCodexCLI &&
+			(!excelBPS || account.excelBPSNativeFallbackReason(normalized) != "") &&
 			!isOpenAIResponsesLiteWebSocketPayload(normalized) &&
 			imageGenerationAllowed &&
 			codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip &&
@@ -940,19 +986,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				normalized = rebuilt
 			}
 		}
-		requestModel := originalModel
-		if hooks != nil && hooks.MapRequestModel != nil {
-			mappedModel, mapErr := hooks.MapRequestModel(turn, originalModel)
-			if mapErr != nil {
-				return openAIWSClientPayload{}, mapErr
-			}
-			if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
-				requestModel = mappedModel
-			}
-		}
 		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestModel))
-		if modelMissing || upstreamModel != originalModel {
-			next, setErr := applyPayloadMutation(normalized, "model", upstreamModel)
+		payloadModel := upstreamModel
+		if excelBPS {
+			// The BPS forwarder owns account mapping and preserves Excel model
+			// names; do not map twice or normalize them as native Codex aliases.
+			upstreamModel = account.GetMappedModel(requestModel)
+			payloadModel = requestModel
+		}
+		if modelMissing || payloadModel != originalModel {
+			next, setErr := applyPayloadMutation(normalized, "model", payloadModel)
 			if setErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
 			}
@@ -1037,6 +1080,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			promptCacheKey:           promptCacheKey,
 			previousResponseID:       previousResponseID,
 			originalModel:            originalModel,
+			excelBPS:                 excelBPS,
 			imageBillingModel:        imageBillingModel,
 			imageSizeTier:            imageSizeTier,
 			imageInputSize:           imageInputSize,
@@ -1113,6 +1157,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	useHTTPBridge := forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID)
+	ingressBridged = useHTTPBridge
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 	stateStore := s.getOpenAIWSStateStore()
 	// 与 HTTP 入口一致：绑定与会话状态都落在实际选号分组的命名空间下（见
@@ -1177,6 +1222,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		bridgeReplayInputExists := false
 		var bridgeAccountFailoverInput []json.RawMessage
 		bridgeAccountFailoverInputExists := false
+		var bridgeBPSTools json.RawMessage
 		for turn := 1; ; turn++ {
 			if turn > 1 && hooks != nil && hooks.BeforeRequest != nil {
 				if err := hooks.BeforeRequest(turn, currentBridgePayload.rawForHash, currentBridgePayload.originalModel); err != nil {
@@ -1227,6 +1273,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			bridgePayloadRaw := currentBridgePayload.payloadRaw
 			bridgePayloadBytes := currentBridgePayload.payloadBytes
+			if currentBridgePayload.excelBPS || len(bridgeBPSTools) > 0 {
+				// Save client declarations before tool aliases and permission-dependent
+				// transformations. Follow-ups inherit them before their auth preflight.
+				if tools, present := openAIWSHTTPBridgeRawField(currentBridgePayload.rawForHash, "tools"); present {
+					bridgeBPSTools = tools
+				}
+			}
 			toolOutputCoverage := AnalyzeToolCallOutputContextCoverageBytes(currentBridgePayload.payloadRaw)
 			needsBridgeReplay := currentBridgePayload.previousResponseID != "" ||
 				(toolOutputCoverage.HasFunctionCallOutput && !toolOutputCoverage.ContextCoversAllCallIDs)
@@ -1236,6 +1289,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 			if extractErr != nil {
 				return fmt.Errorf("build websocket http bridge replay input: %w", extractErr)
+			}
+			if input := gjson.GetBytes(currentBridgePayload.payloadRaw, "input"); currentBridgePayload.excelBPS && input.Type == gjson.String {
+				// A standalone Responses string is valid, but a replay array
+				// must contain message objects, including its conversation seed.
+				message, marshalErr := json.Marshal(gin.H{"type": "message", "role": "user", "content": input.String()})
+				if marshalErr != nil {
+					return marshalErr
+				}
+				bridgeCurrentItems = []json.RawMessage{message}
 			}
 			turnReplayInput, turnReplayInputExists := buildOpenAIWSReplayInputSequenceFromItems(
 				bridgeReplayInput,
@@ -1253,7 +1315,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 			if needsBridgeReplay && turnReplayInputExists {
 				updatedPayload, setInputErr := setOpenAIWSPayloadInputSequence(
-					currentBridgePayload.payloadRaw,
+					bridgePayloadRaw,
 					turnReplayInput,
 					true,
 				)
@@ -1292,6 +1354,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				bridgePayloadRaw,
 				bridgePayloadBytes,
 				currentBridgePayload.originalModel,
+				currentBridgePayload.excelBPS,
 				currentBridgePayload.imageBillingModel,
 				currentBridgePayload.imageSizeTier,
 				currentBridgePayload.imageInputSize,
@@ -1299,6 +1362,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				turn,
 				writeClientMessage,
 			)
+			if result != nil {
+				result.RequestedReasoningEffort = currentBridgePayload.requestedReasoningEffort
+			}
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
 				return errOpenAIWSSessionPreempted
 			}
@@ -1325,8 +1391,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if bridgeErr != nil {
 				var failoverErr *UpstreamFailoverError
 				if turn > 1 && errors.As(bridgeErr, &failoverErr) && failoverErr != nil {
+					retrySource := currentBridgePayload.accountIdentitySourceRaw
+					if currentBridgePayload.excelBPS && len(bridgeBPSTools) > 0 {
+						// A replacement account cannot use this account's catalog
+						// cache. Carry the connection's effective declarations too.
+						retrySource, err = sjson.SetRawBytes(retrySource, "tools", bridgeBPSTools)
+						if err != nil {
+							return fmt.Errorf("build websocket BPS failover tools: %w", err)
+						}
+					}
 					retryPayload, retrySafe, retryPayloadErr := buildOpenAIWSCurrentTurnRetryPayload(
-						currentBridgePayload.accountIdentitySourceRaw,
+						retrySource,
 						turnAccountFailoverInput,
 						turnAccountFailoverInputExists,
 						currentBridgePayload.originalModel,
@@ -1387,6 +1462,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					return nil
 				}
 				return fmt.Errorf("read client websocket request: %w", readErr)
+			}
+			if len(bridgeBPSTools) > 0 && gjson.ValidBytes(nextClientMessage) {
+				if _, present := openAIWSHTTPBridgeRawField(nextClientMessage, "tools"); !present {
+					nextClientMessage, err = sjson.SetRawBytes(nextClientMessage, "tools", bridgeBPSTools)
+					if err != nil {
+						return fmt.Errorf("inherit websocket BPS tools: %w", err)
+					}
+				}
 			}
 			if err := preflightFollowupPayload(turn+1, nextClientMessage); err != nil {
 				return err

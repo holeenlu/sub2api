@@ -1168,6 +1168,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				// capability decision one step stale.  Keep the client-facing
 				// request model separate in requestModelForThisFrame; only the
 				// payload sent upstream is rewritten here.
+				switchModel := requestModelForThisFrame
 				if hooks != nil && hooks.MapRequestModel != nil {
 					upstreamModel, err := hooks.MapRequestModel(turnNo, requestModelForThisFrame)
 					if err != nil {
@@ -1175,7 +1176,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 					if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
 						payload = s.ReplaceModelInBody(payload, upstreamModel)
+						switchModel = upstreamModel
 					}
+				}
+				if account.IsExcelBPSEnabledForModel(switchModel) {
+					return payload, nil, newOpenAIWSBPSModelSwitchError(switchModel)
 				}
 				if hooks != nil && hooks.BeforeTurn != nil {
 					if err := hooks.BeforeTurn(turnNo); err != nil {

@@ -306,6 +306,11 @@ type OpenAIForwardResult struct {
 	wsAccountFailoverReplayInput []json.RawMessage
 }
 
+// HasTokenUsage reports metered tokens even when the upstream turn failed.
+func (r *OpenAIForwardResult) HasTokenUsage() bool {
+	return r != nil && openAIUsageHasTokens(&r.Usage)
+}
+
 // SucceededForScheduling reports whether this result is an upstream success
 // that may clear model-scoped transient state. The zero value remains a success
 // for existing non-WS callers.
