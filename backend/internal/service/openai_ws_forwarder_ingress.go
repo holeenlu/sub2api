@@ -1971,7 +1971,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					Duration:                      time.Since(turnStart),
 					FirstTokenMs:                  firstTokenMs,
 				}
-				if replayInput := replayCollector.Items(); len(replayInput) > 0 {
+				// Recovery, preflight-ping and strict full-create fallbacks drop
+				// previous_response_id and send the replayed history as input.
+				if replayInput := replayCollector.ReplayItems(turnStoreDisabled); len(replayInput) > 0 {
 					result.wsReplayInput = replayInput
 					result.wsReplayInputExists = true
 				}

@@ -865,9 +865,9 @@ func openAIWSHTTPBridgeSSEResponse(events ...string) *http.Response {
 	}
 }
 
-// runOpenAIWSHTTPBridgeTurns sends each client frame on one ingress connection
+// runOpenAIWSIngressTurns sends each client frame on one ingress connection
 // and waits for that turn's response.completed before sending the next frame.
-func runOpenAIWSHTTPBridgeTurns(t *testing.T, svc *OpenAIGatewayService, account *Account, token string, frames ...string) {
+func runOpenAIWSIngressTurns(t *testing.T, svc *OpenAIGatewayService, account *Account, token string, frames ...string) {
 	t.Helper()
 
 	errCh := make(chan error, 1)
@@ -981,7 +981,7 @@ func TestOpenAIWSHTTPBridgeContinuationReplaysPreviousAssistantOutput(t *testing
 		return `{"type":"response.create","model":"gpt-5.1","store":false,"stream":true,"include":["reasoning.encrypted_content"],` + previous +
 			`"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`
 	}
-	runOpenAIWSHTTPBridgeTurns(t, svc, account, "test-token",
+	runOpenAIWSIngressTurns(t, svc, account, "test-token",
 		userFrame("", "Capital of France?"),
 		userFrame("resp_1", "And of Germany?"),
 		userFrame("resp_2", "Thanks."),
@@ -1051,7 +1051,7 @@ func TestOpenAIWSHTTPBridgeContinuationReplaysToolLoopOutput(t *testing.T) {
 		}
 		return `{"type":"response.create","model":"gpt-5.1","store":false,"stream":true,` + previous + `"input":` + input + `}`
 	}
-	runOpenAIWSHTTPBridgeTurns(t, svc, account, "test-token",
+	runOpenAIWSIngressTurns(t, svc, account, "test-token",
 		frame("", `[{"type":"message","role":"user","content":[{"type":"input_text","text":"Inspect the repo."}]}]`),
 		frame("resp_1", `[{"type":"function_call_output","call_id":"call_1","output":"README.md"}]`),
 		frame("resp_2", `[{"type":"message","role":"user","content":[{"type":"input_text","text":"Stop. Summarize instead."}]}]`),
@@ -1103,7 +1103,7 @@ func TestOpenAIWSHTTPBridgeGrokContinuationReplaysPreviousAssistantOutput(t *tes
 		Credentials: map[string]any{"base_url": xai.DefaultCLIBaseURL},
 	}
 
-	runOpenAIWSHTTPBridgeTurns(t, svc, account, "access-token",
+	runOpenAIWSIngressTurns(t, svc, account, "access-token",
 		`{"type":"response.create","model":"grok-4.3","store":false,"stream":true,"input":[{"type":"message","role":"user","content":"First question."}]}`,
 		`{"type":"response.create","model":"grok-4.3","store":false,"stream":true,"previous_response_id":"resp_grok_1","input":[{"type":"message","role":"user","content":"Second question."}]}`,
 	)
