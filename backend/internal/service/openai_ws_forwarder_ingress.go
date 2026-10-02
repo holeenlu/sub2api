@@ -533,6 +533,16 @@ func openAIWSRejectedFieldRetryHTTPStatus(message []byte) int {
 	return openAIWSErrorHTTPStatus(message)
 }
 
+// openAIWSMeteredResult keeps a turn's result for billing when the client left
+// mid-turn only if the upstream already metered something. Without usage there
+// is nothing to bill, and the departure itself is not a turn failure.
+func openAIWSMeteredResult(result *OpenAIForwardResult) *OpenAIForwardResult {
+	if result == nil || (!result.HasTokenUsage() && result.ImageCount <= 0) {
+		return nil
+	}
+	return result
+}
+
 func (s *OpenAIGatewayService) openAIWSIngressInterTurnIdleTimeout() time.Duration {
 	if s == nil || s.cfg == nil || s.cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds <= 0 {
 		return 0
@@ -1385,8 +1395,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if bridgeErr != nil && ctx.Err() != nil {
 				bridgeErr = clientReader.closeForControl(ctx)
 			} else if errors.Is(bridgeErr, errOpenAIWSUsageDrainExpired) && clientReader.disconnected() {
+				// The client left, which is not a turn failure; usage already
+				// metered (e.g. image compaction) is still billed once.
 				if hooks != nil && hooks.AfterTurn != nil {
-					hooks.AfterTurn(turn, nil, nil)
+					hooks.AfterTurn(turn, openAIWSMeteredResult(result), nil)
 				}
 				return nil
 			} else if errors.Is(bridgeErr, errOpenAIWSUsageDrainExpired) {
@@ -2668,8 +2680,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			if errors.Is(relayErr, errOpenAIWSUsageDrainExpired) && clientReader.disconnected() {
 				sessionLease.MarkBroken()
+				// As on the bridge: bill usage the upstream already reported.
 				if hooks != nil && hooks.AfterTurn != nil {
-					hooks.AfterTurn(turn, nil, nil)
+					hooks.AfterTurn(turn, openAIWSMeteredResult(result), nil)
 				}
 				return nil
 			}
