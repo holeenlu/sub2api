@@ -307,6 +307,24 @@ func (c *openAIWSToolCallReplayCollector) AllItems() []json.RawMessage {
 	return slices.Clone(c.allItems)
 }
 
+// ReplayItems returns what a later request must replay once it reaches
+// upstream without previous_response_id. Codex sends only the delta after this
+// response's output, so tool calls alone would lose assistant messages and
+// reasoning. Without stored items, reasoning follows the store=false contract.
+func (c *openAIWSToolCallReplayCollector) ReplayItems(storeDisabled bool) []json.RawMessage {
+	items := c.AllItems()
+	if !storeDisabled {
+		return items
+	}
+	stateless, err := openAIWSStoreDisabledReplayItems(items)
+	if err != nil {
+		// Unparseable output: keep at least the calls a later tool output
+		// must pair with.
+		return c.Items()
+	}
+	return stateless
+}
+
 func (c *openAIWSToolCallReplayCollector) addAllItem(item gjson.Result) {
 	if !item.Exists() || item.Type != gjson.JSON {
 		return
@@ -737,20 +755,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			Duration:                      time.Since(turnStart),
 			FirstTokenMs:                  firstTokenMs,
 		}
-		// The next bridged turn reaches upstream without previous_response_id,
-		// while Codex sends only the delta after this response's output. Replay
-		// all of it; tool calls alone would lose assistant messages and reasoning.
-		replayInput := replayCollector.AllItems()
-		if s.isOpenAIWSStoreDisabledInRequestRaw(body, account) {
-			if stateless, err := openAIWSStoreDisabledReplayItems(replayInput); err == nil {
-				replayInput = stateless
-			} else {
-				// Unparseable output: keep at least the calls a later tool
-				// output must pair with, as before.
-				replayInput = replayCollector.Items()
-			}
-		}
-		if len(replayInput) > 0 {
+		// The next bridged turn always reaches upstream without previous_response_id.
+		if replayInput := replayCollector.ReplayItems(s.isOpenAIWSStoreDisabledInRequestRaw(body, account)); len(replayInput) > 0 {
 			result.wsReplayInput = replayInput
 			result.wsReplayInputExists = true
 		}
