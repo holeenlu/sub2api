@@ -405,3 +405,5 @@ main 验证：后端 `go test -tags=unit ./...` 全量、`go vet -tags=unit ./..
 - `e1290d54` 的账号白名单映射界面修复、`9699d9ee`/`7d532bd`/`09d2262` 的删除 Key 计费结算、Grok、支付、邮件、TypeSafe、Prism、Pelican 及风险控制提交不属于本轮 Excel/BPS 必要依赖，全部排除。未恢复 Prism、Mihomo、独立 sub4api BPS、自动 BPS、优先调度或凭证运营。
 
 本轮新增回归测试覆盖热缓存存在时的无缓存 API Key 读取。由于当前工作机没有可用 Go SDK，无法在本机启动 `go test`；已完成代码审阅、`git diff --check`，前端与数据库结构未改动，因此不重复前端构建或迁移验证。未使用真实 OAuth/BPS 账号、生产数据库或 Redis。
+
+远端复核补充：审查完成后 `ranxi2001/production` 又前进到 `bc83ff9c367883e5b7d0140e6bb42e2e7cc5239c`，仅包含源项目版本文件 `backend/cmd/server/VERSION` 的 `v2.9.7` 发版改动。版本号不属于本项目同步范围，未导入，也不改变本轮代码提交与本地版本。
