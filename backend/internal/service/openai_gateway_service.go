@@ -272,6 +272,9 @@ type OpenAIForwardResult struct {
 	RequestedReasoningEffort *string
 	Stream                   bool
 	OpenAIWSMode             bool
+	// LocalPrewarm acknowledges a client WS prewarm without an upstream request.
+	// It must not create usage, deduct balance, or update account health.
+	LocalPrewarm bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
 	UpstreamTerminalEvent string

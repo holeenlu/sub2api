@@ -3601,6 +3601,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					clearCyberPolicyAttemptState(c, !cyberBlockPendingAfterFailover)
 				}()
 				releaseTurnSlots()
+				if result != nil && result.LocalPrewarm {
+					return
+				}
 				turnRequestedModel := reqModel
 				turnUpstreamModel := ""
 				if result != nil && turn > 1 {
