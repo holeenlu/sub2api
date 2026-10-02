@@ -360,6 +360,31 @@ func (c *openAIWSToolCallReplayCollector) addItem(item gjson.Result) {
 	c.items = append(c.items, json.RawMessage(raw))
 }
 
+// openAIWSStoreDisabledReplayItems applies the store=false replay contract of
+// normalizeOpenAIAPIKeyStoreFalseReasoningReplay to collected output items.
+// Without stored items an rs_* id lookup 404s, so reasoning is replayed by its
+// encrypted_content alone and dropped when it has none. Changed items get new
+// bodies; the collector's bodies are never modified.
+func openAIWSStoreDisabledReplayItems(items []json.RawMessage) ([]json.RawMessage, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	input, err := json.Marshal(items)
+	if err != nil {
+		return nil, err
+	}
+	body := make([]byte, 0, len(input)+len(`{"input":}`))
+	body = append(body, `{"input":`...)
+	body = append(body, input...)
+	body = append(body, '}')
+	normalized, changed, err := normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body, true)
+	if err != nil || !changed {
+		return items, err
+	}
+	replay, _, err := openAIWSExtractNormalizedInputSequence(normalized)
+	return replay, err
+}
+
 func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
 	message = strings.TrimSpace(message)
 	if message == "" {
@@ -712,7 +737,20 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			Duration:                      time.Since(turnStart),
 			FirstTokenMs:                  firstTokenMs,
 		}
-		if replayInput := replayCollector.Items(); len(replayInput) > 0 {
+		// The next bridged turn reaches upstream without previous_response_id,
+		// while Codex sends only the delta after this response's output. Replay
+		// all of it; tool calls alone would lose assistant messages and reasoning.
+		replayInput := replayCollector.AllItems()
+		if s.isOpenAIWSStoreDisabledInRequestRaw(body, account) {
+			if stateless, err := openAIWSStoreDisabledReplayItems(replayInput); err == nil {
+				replayInput = stateless
+			} else {
+				// Unparseable output: keep at least the calls a later tool
+				// output must pair with, as before.
+				replayInput = replayCollector.Items()
+			}
+		}
+		if len(replayInput) > 0 {
 			result.wsReplayInput = replayInput
 			result.wsReplayInputExists = true
 		}

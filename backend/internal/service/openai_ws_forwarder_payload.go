@@ -780,6 +780,11 @@ func sanitizeOpenAIWSHistoricalReplayToolCalls(
 		if isCodexToolCallContextItemType(gjson.GetBytes(item, "type").String()) {
 			callID := strings.TrimSpace(gjson.GetBytes(item, "call_id").String())
 			if _, paired := outputCallIDs[callID]; !paired {
+				// 紧邻其前的 reasoning 只引出了这次未应答的调用，一并丢弃：上游拒绝
+				// 缺少后续项的 reasoning（"provided without its required following item"）。
+				for len(sanitized) > 0 && strings.TrimSpace(gjson.GetBytes(sanitized[len(sanitized)-1], "type").String()) == "reasoning" {
+					sanitized = sanitized[:len(sanitized)-1]
+				}
 				continue
 			}
 		}
