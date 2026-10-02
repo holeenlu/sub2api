@@ -853,6 +853,321 @@ func TestOpenAIWSHTTPBridgeObjectToolOutputWithoutPreviousResponseIDReplaysMatch
 	require.Equal(t, "call_1", secondInput[2].Get("call_id").String())
 }
 
+func openAIWSHTTPBridgeSSEResponse(events ...string) *http.Response {
+	var body strings.Builder
+	for _, event := range events {
+		_, _ = body.WriteString("data: " + event + "\n\n")
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body.String())),
+	}
+}
+
+// runOpenAIWSHTTPBridgeTurns sends each client frame on one ingress connection
+// and waits for that turn's response.completed before sending the next frame.
+func runOpenAIWSHTTPBridgeTurns(t *testing.T, svc *OpenAIGatewayService, account *Account, token string, frames ...string) {
+	t.Helper()
+
+	errCh := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		readCtx, cancelRead := context.WithTimeout(r.Context(), 3*time.Second)
+		_, firstMessage, err := conn.Read(readCtx)
+		cancelRead()
+		if err != nil {
+			errCh <- err
+			return
+		}
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+		ginCtx.Request = r.Clone(r.Context())
+		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, token, firstMessage, nil)
+	}))
+	defer wsServer.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	for _, frame := range frames {
+		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+		require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(frame)))
+		cancelWrite()
+		for {
+			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+			_, event, readErr := clientConn.Read(readCtx)
+			cancelRead()
+			require.NoError(t, readErr)
+			eventType := gjson.GetBytes(event, "type").String()
+			require.NotContains(t, []string{"error", "response.failed"}, eventType, string(event))
+			if eventType == "response.completed" {
+				break
+			}
+		}
+	}
+
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	select {
+	case proxyErr := <-errCh:
+		require.NoError(t, proxyErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for websocket bridge proxy to finish")
+	}
+}
+
+func newOpenAIWSHTTPBridgeThresholdTestService(upstream HTTPUpstream) *OpenAIGatewayService {
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
+	cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 1
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+	return &OpenAIGatewayService{
+		cfg: cfg, httpUpstream: upstream, cache: &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(),
+	}
+}
+
+// Codex responses_websockets_v2 treats the previous request input plus every
+// item of the previous response as its baseline and sends only the delta after
+// it. The bridge removes previous_response_id before the stateless HTTP request,
+// so it must restore the previous assistant output itself.
+func TestOpenAIWSHTTPBridgeContinuationReplaysPreviousAssistantOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	reasoning := `{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Recall geography."}],"encrypted_content":"enc-1"}`
+	message1 := `{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","annotations":[],"text":"Paris."}]}`
+	message2 := `{"id":"msg_2","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","annotations":[],"text":"Berlin."}]}`
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		openAIWSHTTPBridgeSSEResponse(
+			`{"type":"response.output_item.done","output_index":0,"item":`+reasoning+`}`,
+			`{"type":"response.output_item.done","output_index":1,"item":`+message1+`}`,
+			`{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.1","output":[`+reasoning+`,`+message1+`],"usage":{"input_tokens":5,"output_tokens":2}}}`,
+		),
+		openAIWSHTTPBridgeSSEResponse(
+			`{"type":"response.output_item.done","output_index":0,"item":`+message2+`}`,
+			`{"type":"response.completed","response":{"id":"resp_2","model":"gpt-5.1","output":[`+message2+`],"usage":{"input_tokens":9,"output_tokens":2}}}`,
+		),
+		openAIWSHTTPBridgeSSEResponse(
+			`{"type":"response.completed","response":{"id":"resp_3","model":"gpt-5.1","output":[],"usage":{"input_tokens":13,"output_tokens":1}}}`,
+		),
+	}}
+	svc := newOpenAIWSHTTPBridgeThresholdTestService(upstream)
+	account := &Account{
+		ID: 9004, Name: "oauth-chat-continuation", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+		Concurrency: 1, Status: StatusActive, Schedulable: true,
+	}
+
+	userFrame := func(previousResponseID, text string) string {
+		previous := ""
+		if previousResponseID != "" {
+			previous = `"previous_response_id":"` + previousResponseID + `",`
+		}
+		return `{"type":"response.create","model":"gpt-5.1","store":false,"stream":true,"include":["reasoning.encrypted_content"],` + previous +
+			`"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`
+	}
+	runOpenAIWSHTTPBridgeTurns(t, svc, account, "test-token",
+		userFrame("", "Capital of France?"),
+		userFrame("resp_1", "And of Germany?"),
+		userFrame("resp_2", "Thanks."),
+	)
+
+	require.Len(t, upstream.bodies, 3)
+	secondInput := gjson.GetBytes(upstream.bodies[1], "input").Array()
+	require.Len(t, secondInput, 4, gjson.GetBytes(upstream.bodies[1], "input").Raw)
+	require.Equal(t, "Capital of France?", secondInput[0].Get("content.0.text").String())
+	require.Equal(t, "reasoning", secondInput[1].Get("type").String())
+	require.Equal(t, "enc-1", secondInput[1].Get("encrypted_content").String())
+	require.Equal(t, "Recall geography.", secondInput[1].Get("summary.0.text").String())
+	// ChatGPT Codex runs store=false: a replayed rs_* id would be looked up and 404.
+	require.False(t, secondInput[1].Get("id").Exists())
+	require.Equal(t, "assistant", secondInput[2].Get("role").String())
+	require.Equal(t, "Paris.", secondInput[2].Get("content.0.text").String())
+	require.Equal(t, "And of Germany?", secondInput[3].Get("content.0.text").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
+
+	thirdInput := gjson.GetBytes(upstream.bodies[2], "input").Array()
+	require.Len(t, thirdInput, 6, gjson.GetBytes(upstream.bodies[2], "input").Raw)
+	require.Equal(t, "reasoning", thirdInput[1].Get("type").String())
+	require.Equal(t, "Paris.", thirdInput[2].Get("content.0.text").String())
+	require.Equal(t, "And of Germany?", thirdInput[3].Get("content.0.text").String())
+	require.Equal(t, "Berlin.", thirdInput[4].Get("content.0.text").String())
+	require.Equal(t, "Thanks.", thirdInput[5].Get("content.0.text").String())
+}
+
+// A tool loop replays the reasoning and commentary around each call too. A call
+// the client never answers is still dropped, along with the reasoning that only
+// led to it.
+func TestOpenAIWSHTTPBridgeContinuationReplaysToolLoopOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	reasoning1 := `{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"enc-1"}`
+	commentary := `{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","annotations":[],"text":"Checking the tree."}]}`
+	call1 := `{"id":"fc_1","type":"function_call","status":"completed","call_id":"call_1","name":"exec","arguments":"{\"cmd\":\"ls\"}"}`
+	reasoning2 := `{"id":"rs_2","type":"reasoning","summary":[],"encrypted_content":"enc-2"}`
+	call2 := `{"id":"fc_2","type":"function_call","status":"completed","call_id":"call_2","name":"exec","arguments":"{\"cmd\":\"rm -rf build\"}"}`
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		openAIWSHTTPBridgeSSEResponse(
+			`{"type":"response.output_item.done","output_index":0,"item":`+reasoning1+`}`,
+			`{"type":"response.output_item.done","output_index":1,"item":`+commentary+`}`,
+			`{"type":"response.output_item.done","output_index":2,"item":`+call1+`}`,
+			`{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.1","output":[`+reasoning1+`,`+commentary+`,`+call1+`],"usage":{"input_tokens":5,"output_tokens":2}}}`,
+		),
+		openAIWSHTTPBridgeSSEResponse(
+			`{"type":"response.output_item.done","output_index":0,"item":`+reasoning2+`}`,
+			`{"type":"response.output_item.done","output_index":1,"item":`+call2+`}`,
+			`{"type":"response.completed","response":{"id":"resp_2","model":"gpt-5.1","output":[`+reasoning2+`,`+call2+`],"usage":{"input_tokens":9,"output_tokens":2}}}`,
+		),
+		openAIWSHTTPBridgeSSEResponse(
+			`{"type":"response.completed","response":{"id":"resp_3","model":"gpt-5.1","output":[],"usage":{"input_tokens":13,"output_tokens":1}}}`,
+		),
+	}}
+	svc := newOpenAIWSHTTPBridgeThresholdTestService(upstream)
+	account := &Account{
+		ID: 9005, Name: "oauth-tool-continuation", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+		Concurrency: 1, Status: StatusActive, Schedulable: true,
+	}
+
+	frame := func(previousResponseID, input string) string {
+		previous := ""
+		if previousResponseID != "" {
+			previous = `"previous_response_id":"` + previousResponseID + `",`
+		}
+		return `{"type":"response.create","model":"gpt-5.1","store":false,"stream":true,` + previous + `"input":` + input + `}`
+	}
+	runOpenAIWSHTTPBridgeTurns(t, svc, account, "test-token",
+		frame("", `[{"type":"message","role":"user","content":[{"type":"input_text","text":"Inspect the repo."}]}]`),
+		frame("resp_1", `[{"type":"function_call_output","call_id":"call_1","output":"README.md"}]`),
+		frame("resp_2", `[{"type":"message","role":"user","content":[{"type":"input_text","text":"Stop. Summarize instead."}]}]`),
+	)
+
+	require.Len(t, upstream.bodies, 3)
+	types := func(body []byte) []string {
+		var out []string
+		for _, item := range gjson.GetBytes(body, "input").Array() {
+			out = append(out, item.Get("type").String())
+		}
+		return out
+	}
+	require.Equal(t, []string{"message", "reasoning", "message", "function_call", "function_call_output"}, types(upstream.bodies[1]))
+	secondInput := gjson.GetBytes(upstream.bodies[1], "input").Array()
+	require.Equal(t, "enc-1", secondInput[1].Get("encrypted_content").String())
+	require.Equal(t, "Checking the tree.", secondInput[2].Get("content.0.text").String())
+	require.Equal(t, "call_1", secondInput[3].Get("call_id").String())
+
+	// call_2 never got an output, so it and the reasoning that produced it are
+	// not replayed; the answered call_1 exchange stays intact.
+	require.Equal(t, []string{"message", "reasoning", "message", "function_call", "function_call_output", "message"}, types(upstream.bodies[2]))
+	require.NotContains(t, gjson.GetBytes(upstream.bodies[2], "input").Raw, "call_2")
+	require.NotContains(t, gjson.GetBytes(upstream.bodies[2], "input").Raw, "enc-2")
+}
+
+// Grok accounts always use the HTTP bridge, so their continuations depend on the
+// same replay.
+func TestOpenAIWSHTTPBridgeGrokContinuationReplaysPreviousAssistantOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	answer := `{"id":"msg_grok_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","annotations":[],"text":"First answer."}]}`
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		openAIWSHTTPBridgeSSEResponse(
+			`{"type":"response.output_item.done","output_index":0,"item":`+answer+`}`,
+			`{"type":"response.completed","response":{"id":"resp_grok_1","model":"grok-4.3","output":[`+answer+`],"usage":{"input_tokens":4,"output_tokens":2}}}`,
+		),
+		openAIWSHTTPBridgeSSEResponse(
+			`{"type":"response.completed","response":{"id":"resp_grok_2","model":"grok-4.3","output":[],"usage":{"input_tokens":8,"output_tokens":1}}}`,
+		),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID: 72, Name: "grok", Platform: PlatformGrok, Type: AccountTypeOAuth,
+		Concurrency: 1, Status: StatusActive,
+		Credentials: map[string]any{"base_url": xai.DefaultCLIBaseURL},
+	}
+
+	runOpenAIWSHTTPBridgeTurns(t, svc, account, "access-token",
+		`{"type":"response.create","model":"grok-4.3","store":false,"stream":true,"input":[{"type":"message","role":"user","content":"First question."}]}`,
+		`{"type":"response.create","model":"grok-4.3","store":false,"stream":true,"previous_response_id":"resp_grok_1","input":[{"type":"message","role":"user","content":"Second question."}]}`,
+	)
+
+	require.Len(t, upstream.bodies, 2)
+	secondInput := gjson.GetBytes(upstream.bodies[1], "input").Array()
+	require.Len(t, secondInput, 3, gjson.GetBytes(upstream.bodies[1], "input").Raw)
+	require.Equal(t, "First question.", secondInput[0].Get("content").String())
+	require.Equal(t, "assistant", secondInput[1].Get("role").String())
+	require.Equal(t, "First answer.", secondInput[1].Get("content.0.text").String())
+	require.Equal(t, "Second question.", secondInput[2].Get("content").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
+}
+
+func TestProxyOpenAIWSHTTPBridgeTurnReplayInputFollowsStoreMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	encrypted := `{"id":"rs_enc","type":"reasoning","summary":[],"encrypted_content":"enc"}`
+	bare := `{"id":"rs_bare","type":"reasoning","summary":[{"type":"summary_text","text":"thinking"}]}`
+	message := `{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","annotations":[],"text":"done"}]}`
+	completed := `{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.1","output":[` + encrypted + `,` + bare + `,` + message + `],"usage":{"input_tokens":1,"output_tokens":1}}}`
+
+	for _, tc := range []struct {
+		name    string
+		store   string
+		wantIDs []string
+	}{
+		// Stored items stay resolvable, so the output is replayed verbatim.
+		{name: "store_enabled", store: "", wantIDs: []string{"rs_enc", "rs_bare", "msg_1"}},
+		{name: "store_disabled", store: `"store":false,`, wantIDs: []string{"", "msg_1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: openAIWSHTTPBridgeSSEResponse(completed)}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{
+				ID: 9006, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+				Status: StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "sk-upstream"},
+			}
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			payload := []byte(`{"type":"response.create","model":"gpt-5.1",` + tc.store + `"input":[{"type":"message","role":"user","content":"hi"}]}`)
+
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+				context.Background(), c, account, "sk-upstream", payload, len(payload),
+				"gpt-5.1", "", "", "", "", 1,
+				func([]byte) error { return nil },
+			)
+
+			require.NoError(t, err)
+			require.True(t, result.wsReplayInputExists)
+			var ids []string
+			for _, item := range result.wsReplayInput {
+				ids = append(ids, gjson.GetBytes(item, "id").String())
+			}
+			require.Equal(t, tc.wantIDs, ids)
+			require.Equal(t, "enc", gjson.GetBytes(result.wsReplayInput[0], "encrypted_content").String())
+			// Account failover replays on another credential and keeps its own
+			// portability checks over the untouched output.
+			require.Len(t, result.wsAccountFailoverReplayInput, 3)
+		})
+	}
+}
+
 func TestOpenAIWSHTTPBridgeDecisionKeepsSmallFramesOnWS(t *testing.T) {
 	svc := &OpenAIGatewayService{
 		cfg: &config.Config{
