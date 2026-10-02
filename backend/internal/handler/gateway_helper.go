@@ -331,6 +331,7 @@ func (h *ConcurrencyHelper) TryAcquireAccountSlot(ctx context.Context, accountID
 // AcquireUserSlotWithWait acquires a user concurrency slot, waiting if necessary.
 // For streaming requests, sends ping events during the wait.
 // streamStarted is updated if streaming response has begun.
+// The returned release is not tied to request cancellation; callers decide.
 func (h *ConcurrencyHelper) AcquireUserSlotWithWait(c *gin.Context, userID int64, maxConcurrency int, apiKeyID int64, keyLimit int, isStream bool, streamStarted *bool) (func(), error) {
 	return h.acquireUserSlotWithWaitTimeout(c, userID, maxConcurrency, apiKeyID, keyLimit, maxConcurrencyWait, isStream, streamStarted)
 }
@@ -348,14 +349,17 @@ func (h *ConcurrencyHelper) acquireUserSlotWithWaitTimeout(c *gin.Context, userI
 			keyRelease()
 		}
 	}()
+	// Not bound to ctx: gateway handlers opt into release-on-disconnect with
+	// wrapReleaseOnDone, while Grok voice holds the slot until its detached
+	// upstream call returns so a disconnect cannot admit a replacement early.
 	combine := func(userRelease func()) func() {
 		transferred = true
-		return wrapReleaseOnDone(ctx, sync.OnceFunc(func() {
+		return sync.OnceFunc(func() {
 			if userRelease != nil {
 				userRelease()
 			}
 			keyRelease()
-		}))
+		})
 	}
 
 	// Try to acquire immediately
