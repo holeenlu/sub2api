@@ -26,6 +26,9 @@ class ImageSkillTest(unittest.TestCase):
         self.flare = load_script("gpt-image-flare")
         self.sunburst = load_script("gpt-image-sunburst")
         self.old_env = os.environ.copy()
+        # The fixture server must stay local even on hosts with an HTTP proxy.
+        os.environ["no_proxy"] = "localhost,127.0.0.1"
+        os.environ["NO_PROXY"] = "localhost,127.0.0.1"
         self.temp = tempfile.TemporaryDirectory()
         self.home = Path(self.temp.name)
         os.environ["CODEX_HOME"] = str(self.home)
