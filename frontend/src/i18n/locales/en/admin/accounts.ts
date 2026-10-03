@@ -656,8 +656,8 @@ export default {
         excelBPS: 'Excel / BPS protocol',
         excelBPSOmitUnsupportedTools: 'Keep BPS and omit unsupported hosted tools',
         excelBPSOmitUnsupportedToolsDesc: "Off by default: BPS never runs hosted tools, so requests with live web search, high search context, image generation or a forced choice of those tools use this account's native Codex channel instead (no ticket; response header X-Codex2API-Upstream: codex). Enable to keep such requests on BPS, omit the tools and tell the model they are unavailable; a forced choice becomes auto. Codex's default cached search always stays on BPS and is omitted; client function tools are unaffected.",
-        excelBPSIgnoreImages: 'Ignore image inputs when image support is disabled',
-        excelBPSIgnoreImagesDesc: 'Disabled by default. Only applies while Excel / BPS image support is off in system settings. Replaces every image in current and historical messages and tool results with an unavailable notice before forwarding, preserving text and tool call pairing so old screenshots cannot repeatedly block the conversation. Even mixed text/image results tell the model it cannot see the image and should not retry view_image or other image-reading tools while image support is disabled. Enabling image support restores normal image handling.',
+        excelBPSIgnoreImages: 'Text-only continuation while image support is off (images not visible)',
+        excelBPSIgnoreImagesDesc: 'Compatibility fallback, disabled by default and not needed for normal use. Only applies while Excel / BPS image support is off in system settings. Replaces every image in current and historical messages and tool results with an unavailable notice before forwarding, preserving text and tool call pairing so old screenshots cannot repeatedly block the conversation. Even mixed text/image results tell the model it cannot see the image and should not retry view_image or other image-reading tools while image support is disabled. Enabling image support restores normal image handling.',
         excelBPSCacheCreationAsInput: 'Bill cache creation as regular input',
         excelBPSAutoDisableOn403: 'Automatically disable BPS on a 403 error',
         excelBPSAutoRecoverOn403: 'Automatically probe BPS recovery after a 403 error',
@@ -699,7 +699,7 @@ export default {
         wsMode: 'WS mode',
         wsSseAcceleration: 'HTTP streaming over WS',
         wsSseAccelerationDesc:
-          'Off by default. Stream Responses through the upstream WS pool for ordinary OAuth accounts, delivering early SSE events immediately. Use Context Pool mode and disable automatic passthrough. Global WS gates still apply and bound transport plugins take precedence. Only handshake failures fall back to HTTP; sent requests are not replayed. Early events do not mean text generation has started.',
+          'Off by default. Stream Responses through the upstream WS pool for ordinary OAuth accounts, delivering early SSE events immediately. Use Context Pool mode and disable automatic passthrough. Global WS gates still apply and bound transport plugins take precedence. Only handshake failures fall back to HTTP; sent requests are not replayed. Early events do not mean text generation has started. Requests routed to Excel / BPS do not use this acceleration.',
         wsModeDesc:
           'Applies only to the current OpenAI account type. Select Off to disable WS. Other modes use the selected connection method only when gateway.openai_ws.mode_router_v2_enabled=true; otherwise, they use the context pool.',
         wsModeOff: 'Off (off)',

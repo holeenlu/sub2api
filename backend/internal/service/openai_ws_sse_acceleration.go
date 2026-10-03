@@ -10,17 +10,24 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const openAIOAuthWSSSEAccelerationReason = "oauth_http_sse_acceleration"
+const (
+	openAIOAuthWSSSEAccelerationReason = "oauth_http_sse_acceleration"
+	OpenAIOAuthWSSSEAccelerationKey    = "openai_oauth_ws_sse_acceleration"
+)
 
 // IsOpenAIOAuthWSSSEAccelerationEnabled is deliberately opt-in and limited to
 // ordinary OAuth accounts. Other credentials and adapters keep their transport.
 func (a *Account) IsOpenAIOAuthWSSSEAccelerationEnabled() bool {
-	if a == nil || a.Platform != PlatformOpenAI || a.Type != AccountTypeOAuth ||
-		a.IsShadow() || a.IsOpenAIAgentIdentity() || a.IsOpenAIPersonalAccessToken() {
+	if !a.supportsOpenAIOAuthWSSSEAcceleration() {
 		return false
 	}
-	enabled, _ := a.Extra["openai_oauth_ws_sse_acceleration"].(bool)
+	enabled, _ := a.Extra[OpenAIOAuthWSSSEAccelerationKey].(bool)
 	return enabled
+}
+
+func (a *Account) supportsOpenAIOAuthWSSSEAcceleration() bool {
+	return a != nil && a.Platform == PlatformOpenAI && a.Type == AccountTypeOAuth &&
+		!a.IsShadow() && !a.IsOpenAIAgentIdentity() && !a.IsOpenAIPersonalAccessToken()
 }
 
 // resolveOpenAIHTTPWSSSEDecision preserves the existing account/global WS gates.

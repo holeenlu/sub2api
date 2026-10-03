@@ -68,7 +68,7 @@ func validateImage(part object) error {
 			return fmt.Errorf("basispoints input_image requires an HTTPS image_url or file_id")
 		}
 		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), "data:") {
-			return fmt.Errorf("basispoints does not accept data:image input while image support is disabled; ask an administrator to enable the selected BPS account's 'Ignore image inputs when image support is disabled' option (openai_excel_bps_ignore_images), enable BPS image support, provide an HTTPS image URL, or disable Basispoints and start a new conversation")
+			return fmt.Errorf("basispoints does not accept data:image input while image support is disabled; ask an administrator to enable BPS image support, provide an HTTPS image URL, or disable Basispoints and start a new conversation. As a lossy fallback, the selected BPS account's 'Text-only continuation while image support is off' option (openai_excel_bps_ignore_images) continues text-only and the model will not see the images")
 		}
 		parsed, err := url.Parse(raw)
 		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Opaque != "" || strings.TrimSpace(raw) != raw {

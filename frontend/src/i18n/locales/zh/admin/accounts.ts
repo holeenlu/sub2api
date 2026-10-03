@@ -774,8 +774,8 @@ export default {
         excelBPS: 'Excel / BPS 协议',
         excelBPSOmitUnsupportedTools: '保持 BPS，省略不支持的托管工具',
         excelBPSOmitUnsupportedToolsDesc: "默认关闭：BPS 不执行托管工具，带实时联网搜索、高搜索上下文、图片生成或强制指定这些工具的请求由同一账号改走原生 Codex 通道执行（不打票，响应头 X-Codex2API-Upstream: codex）。开启后这些请求也留在 BPS，省略工具并明确告知模型不可用，强制指定改为 auto。Codex 默认的 cached 搜索始终留在 BPS 省略；客户端函数工具不受影响。",
-        excelBPSIgnoreImages: '图片支持关闭时忽略图片输入',
-        excelBPSIgnoreImagesDesc: '默认关闭。仅在系统设置中的 Excel / BPS 图片支持关闭时生效：转发前将当前及历史消息、工具结果中的每张图片替换为不可用提示，保留文本和工具调用关系，避免历史截图反复报错导致会话无法继续。图片混合文本的结果也会明确告知模型无法看到图片，图片支持关闭期间不要重试 view_image 或其他读图工具。重新开启图片支持后恢复正常图片处理。',
+        excelBPSIgnoreImages: '图片处理关闭时仅文本续聊（图片不可见）',
+        excelBPSIgnoreImagesDesc: '故障兼容选项，默认关闭，正常使用无需开启。仅在系统设置中的 Excel / BPS 图片支持关闭时生效：转发前将当前及历史消息、工具结果中的每张图片替换为不可用提示，保留文本和工具调用关系，避免历史截图反复报错导致会话无法继续。图片混合文本的结果也会明确告知模型无法看到图片，图片支持关闭期间不要重试 view_image 或其他读图工具。重新开启图片支持后恢复正常图片处理。',
         excelBPSCacheCreationAsInput: '创建缓存按普通输入计费',
         excelBPSAutoDisableOn403: '遇到 BPS 403 错误时自动关闭协议',
         excelBPSAutoRecoverOn403: 'BPS 403 错误后自动探测是否恢复',
@@ -816,7 +816,7 @@ export default {
         wsMode: 'WS mode',
         wsSseAcceleration: 'HTTP 流式 WS 加速',
         wsSseAccelerationDesc:
-          '默认关闭。普通 OAuth 账号的流式 Responses 可通过上游 WS 连接池返回 SSE，并立即发送前置事件。建议选择上下文池模式，需关闭自动透传；全局 WS 开关仍生效，已绑定的传输插件优先。仅握手失败时回退 HTTP，请求发送后不自动重放。前置事件不代表正文已开始生成。',
+          '默认关闭。普通 OAuth 账号的流式 Responses 可通过上游 WS 连接池返回 SSE，并立即发送前置事件。建议选择上下文池模式，需关闭自动透传；全局 WS 开关仍生效，已绑定的传输插件优先。仅握手失败时回退 HTTP，请求发送后不自动重放。前置事件不代表正文已开始生成。实际走 Excel / BPS 的请求不使用此加速。',
         wsModeDesc:
           '仅对当前 OpenAI 账号类型生效。选择“关闭”可禁用 WS；其余模式需全局 gateway.openai_ws.mode_router_v2_enabled=true 才按所选方式连接，未开启时统一使用上下文池。',
         wsModeOff: '关闭（off）',

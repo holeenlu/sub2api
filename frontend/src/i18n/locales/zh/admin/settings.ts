@@ -17,8 +17,8 @@ export default {
       features: {
         excelBpsImages: {
           mode: '图片传输方式',
-          modeRelay: '临时 HTTPS 中转（默认）',
-          modeNative: 'BPS 原生附件上传',
+          modeRelay: '临时 HTTPS 中转',
+          modeNative: 'BPS 原生附件上传（默认）',
           nativeHint: '直接通过选中账号的 OAuth 和代理上传至 BPS，无需公网图片域名。上传失败会终止当前请求。',
           policyTitle: "图片限额处理策略",
           policyOff: "保持现状",
@@ -32,7 +32,7 @@ export default {
           title: 'Excel / BPS 图片支持',
           description: '为 base64 图片和工具截图选择临时 HTTPS 中转或 BPS 原生附件上传。',
           enabled: '启用图片支持',
-          enabledHint: '保存后立即生效, 无需重启服务. 关闭后停止转换并禁止访问临时图片.',
+          enabledHint: '未设置时默认开启。控制 base64 内联图片和工具截图的上传/中转。关闭后，HTTPS 图片链接与有效附件 ID 照常转发；但账号启用「图片处理关闭时仅文本续聊」时，所有图片（含 HTTPS 与附件 ID）都会替换为不可见提示。保存后立即生效，无需重启；关闭后停止转换并禁止访问临时图片。',
           baseUrl: '公网 HTTPS 访问地址',
           baseUrlHint: '填写可从公网访问当前服务的 HTTPS 域名, 不要附加 /v1 或其他路径. 账号仍需开启 Excel / BPS 协议.',
           bodyLimit: '请求体上限 (MiB)',

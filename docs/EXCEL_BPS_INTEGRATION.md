@@ -407,3 +407,29 @@ main 验证：后端 `go test -tags=unit ./...` 全量、`go vet -tags=unit ./..
 本轮新增回归测试覆盖热缓存存在时的无缓存 API Key 读取。由于当前工作机没有可用 Go SDK，无法在本机启动 `go test`；已完成代码审阅、`git diff --check`，前端与数据库结构未改动，因此不重复前端构建或迁移验证。未使用真实 OAuth/BPS 账号、生产数据库或 Redis。
 
 远端复核补充：审查完成后 `ranxi2001/production` 又前进到 `bc83ff9c367883e5b7d0140e6bb42e2e7cc5239c`，仅包含源项目版本文件 `backend/cmd/server/VERSION` 的 `v2.9.7` 发版改动。版本号不属于本项目同步范围，未导入，也不改变本轮代码提交与本地版本。
+
+## 2026-10-03：#242 图片兼容与原生 OAuth 批量 WS→SSE 开关
+
+本次交付先前审计并经复审修正的工作区实现。来源固定为 ranxi2001/production `bc83ff9c367883e5b7d0140e6bb42e2e7cc5239c`；不整体合并 fork。#242 的 `0e1cad458abc56a987aff14959491d06915dc6d0`、`8519ded9010c09a7f755e78852466e2fc6e68cf1` 图片默认值已由本地 `540552219` 适配，本轮补齐说明和基于 `8cd0c6c99277e87cdd65b1df68f1263125646e65` 的图片 HTTP 测试矩阵，保留原作者 psyche314 的来源归属。
+
+### 新增功能
+
+管理后台 → 账号管理 (`/admin/accounts`) → 批量编辑新增独立的「HTTP 流式 WS 加速」。外层未勾选表示不改原值；勾选后可明确开启或关闭，写入 `extra.openai_oauth_ws_sse_acceleration`。后端要求 bool，且所有目标必须满足与网关相同的普通 OpenAI OAuth 资格；影子、PAT、Agent Identity、API Key 或其他不适用目标会使本次批量修改在写入前整体拒绝。关闭 BPS 不会连带清除该独立字段。按钮使用共享 Toggle，具备可访问名称/状态及真正的 disabled。
+
+这是现有账号级传输设置的批量入口；部署后不会自动开启，需要管理员明确操作。它只作用于满足全局 WS、账号模式、非自动透传和插件等条件的原生 HTTP 流式请求。实际 BPS 请求不使用该加速，客户端已使用 WS 的请求也不会由此再加速。
+
+### 优化改进
+
+系统设置 (`/admin/settings`) → 功能开关 → Excel / BPS 图片支持，统一标注缺省 native + 开启。`excel_bps_image_mode=relay` 和 `excel_bps_image_relay_enabled=false` 等已保存设置保留；旧部署曾保存关闭值时，需要手动启用图片并保存。切换传输方式不会改写资源预算：原生附件仍固定单图 20 MiB / 每请求合计 32 MiB，HTTPS 中转使用中转专属容量。
+
+账号的 `extra.openai_excel_bps_ignore_images` 更名为「图片处理关闭时仅文本续聊（图片不可见）」，明确其默认关闭且属于有损故障兼容；全局图片处理关闭且该账号明确开启时，内联、HTTPS 和 file_id 图片都会被替换成不可见提示。未开启该选项时 HTTPS/有效附件引用按原协议处理，内联图片被拒绝。上传失败、容量不足或限流不会自动触发丢图。报错优先建议开启图片支持，再说明纯文本兼容选项。上述文案修正**无需配置，部署后自动生效**，运行策略不变。
+
+### 最终取舍与范围
+
+#249 `978c8a91b1e08c160594fcf4efd2ccd5b49a5d27` 仅保存 `ws_sse_acceleration` / `auto_enable_on_degradation`，账号尚不消费。经用户选择采用「批量编辑独立开关」，不把原生加速与 BPS 启用模板绑定，不新增模板三态，也不引入两个只保存而不生效的字段。自动 BPS、质量计划、凭证运营、重登 Worker、Mihomo 和独立 sub4api BPS 继续退役。
+
+图片取舍为合并两侧：正常路径采用已落地的原生默认，保留账号显式授权的纯文本续聊能力。测试移植时不采用源 PR 的「旧 ignore=true 必须失效」断言，改为验证「图片处理开启时，即使账号 ignore=true，历史、agent、用户和工具图片也完整保留」。
+
+本次无新增迁移、依赖、Wire/Ent 输入、版本号或 Workflow 变更。en/zh/ja 同步，涉及的两个 zh-TW admin 文件由生成器生成；全仓已有 docs.ts / landing.ts 生成漂移单独记录，不覆盖品牌润色。共享代码先 main，再普通 merge 到 TapModels；本轮只提交、推送，不发版或部署。
+
+main 交付验证：Go 全量 `go test -tags=unit ./...`、全量 `go vet -tags=unit ./...` 通过；前端全量 379 文件 / 3216 用例、类型检查、相关 ESLint、生产构建通过；手动发版 Workflow 3 项回归通过。使用本机已有 SDK、锁定依赖和 PyYAML，不安装或升级。两品牌分别验证，日志与最终 SHA 保存在本机 `.release/upstream-sync/20261003-bps-delivery/`。本次未做真实上游账号、浏览器手测或生产迁移；此前新会话延迟的只读排查没有产生运行代码补丁，不包含在本次功能修复中。

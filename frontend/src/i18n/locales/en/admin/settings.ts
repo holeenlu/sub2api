@@ -17,8 +17,8 @@ export default {
       features: {
         excelBpsImages: {
           mode: 'Image transport',
-          modeRelay: 'Temporary HTTPS relay (default)',
-          modeNative: 'BPS native attachments',
+          modeRelay: 'Temporary HTTPS relay',
+          modeNative: 'BPS native attachments (default)',
           nativeHint: 'Upload directly to BPS using the selected account OAuth credential and proxy. No public image domain is needed. Upload failure stops the request.',
           policyTitle: "Image limit policy",
           policyOff: "Keep existing behavior",
@@ -32,7 +32,7 @@ export default {
           title: 'Excel / BPS Images',
           description: 'Choose temporary HTTPS relay links or BPS native attachments for base64 images and tool screenshots.',
           enabled: 'Enable image support',
-          enabledHint: 'Changes apply immediately after saving, without restarting. Disabling stops conversion and blocks temporary image access.',
+          enabledHint: 'On by default when unset. Controls uploading or relaying base64 inline images and tool screenshots. While off, HTTPS image URLs and valid attachment IDs are still forwarded, but accounts with "Text-only continuation while image support is off" enabled replace every image (including HTTPS and attachment IDs) with an unavailable notice. Changes apply immediately after saving, without restarting. Disabling stops conversion and blocks temporary image access.',
           baseUrl: 'Public HTTPS address',
           baseUrlHint: 'Enter the public HTTPS origin of this service, without /v1 or another path. The account must still have the Excel / BPS protocol enabled.',
           bodyLimit: 'Request body limit (MiB)',
