@@ -16,7 +16,7 @@ services:
   # TapModels Application
   # ===========================================================================
   tapmodels:
-    image: ${TAPMODELS_IMAGE:-ghcr.io/erwinlin/tapmodels:latest}
+    image: ${TAPMODELS_IMAGE:-ghcr.io/holeenlu/tapmodels:latest}
     container_name: tapmodels
     restart: unless-stopped
     security_opt:

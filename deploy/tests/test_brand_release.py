@@ -105,7 +105,7 @@ class BrandReleaseTests(unittest.TestCase):
     def test_workflow_branch_and_image_contract(self):
         for brand, branches, image in (
             ('kdan', ['main'], 'ghcr.io/holeenlu/kdan'),
-            ('tapmodels', ['main', 'TapModels'], 'ghcr.io/erwinlin/tapmodels'),
+            ('tapmodels', ['main', 'TapModels'], 'ghcr.io/holeenlu/tapmodels'),
         ):
             ci_path = f'.github/workflows/{brand}-ci.yml'
             if not (ROOT / ci_path).exists():

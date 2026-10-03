@@ -185,7 +185,7 @@ type GeminiTierQuotaConfig struct {
 type UpdateConfig struct {
 	// CheckEnabled 控制是否允许在线版本检查与自更新（本品牌构建默认 false）。
 	// 为 false 时版本检查、自更新和版本回滚接口直接返回 disabled，不会向 GitHub
-	// 发起任何请求；要查 erwinlin/TapModels 的 release 时显式设为 true。
+	// 发起任何请求；要查 holeenlu/sub2api 的 release 时显式设为 true。
 	CheckEnabled bool `mapstructure:"check_enabled"`
 
 	// ProxyURL 用于访问 GitHub 的代理地址

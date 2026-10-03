@@ -102,7 +102,7 @@ docker compose -f docker-compose.local.yml logs -f tapmodels
 
 **Recommendation:** Use `docker-compose.local.yml` (deployed by `docker-deploy.sh`) for easier data management and migration.
 
-Both Compose files take the application image from `TAPMODELS_IMAGE` (default `ghcr.io/erwinlin/tapmodels:latest`), so you can pin a specific tag or digest in `.env` without editing the Compose file.
+Both Compose files take the application image from `TAPMODELS_IMAGE` (default `ghcr.io/holeenlu/tapmodels:latest`), so you can pin a specific tag or digest in `.env` without editing the Compose file.
 
 ### How Auto-Setup Works
 
@@ -236,7 +236,7 @@ docker compose down -v
 | `ADMIN_EMAIL` | No | `admin@tapmodels.local` | Admin email |
 | `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password |
 | `TZ` | No | `Asia/Shanghai` | Timezone |
-| `TAPMODELS_IMAGE` | No | `ghcr.io/erwinlin/tapmodels:latest` | Application image used by Docker Compose |
+| `TAPMODELS_IMAGE` | No | `ghcr.io/holeenlu/tapmodels:latest` | Application image used by Docker Compose |
 | `UPDATE_CHECK_ENABLED` | No | `true` | Check the isolated tapmodels/v* release channel; Docker online updates require the host updater. |
 | `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for GitHub Release checks and private API asset downloads; never forwarded to storage redirects. |
 | `GEMINI_OAUTH_CLIENT_ID` | No | *(builtin)* | Google OAuth client ID (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |

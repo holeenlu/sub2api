@@ -1304,7 +1304,7 @@ gemini:
 # =============================================================================
 update:
   # Release check behind the version badge (queries this fork's own releases,
-  # erwinlin/TapModels). Off by default for white-label deployments: version check,
+  # holeenlu/sub2api). Off by default for white-label deployments: version check,
   # self-update and rollback endpoints return "disabled" and no request is made to
   # GitHub. Set true to allow the online check.
   # 版本徽章的线上版本检查（查本 fork 自己的 release）。默认关闭（白标部署）：
