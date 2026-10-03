@@ -12,14 +12,14 @@ describe('Codex models API', () => {
 
   it('builds the authenticated Codex manifest endpoint from the public API base', () => {
     expect(buildCodexModelsManifestUrl('https://example.com/api/v1/')).toBe(
-      'https://example.com/api/backend-api/codex/models'
+      'https://example.com/api/backend-api/codex/models?catalog_view=client'
     )
   })
 
   it.each([
-    ['https://example.com', 'https://example.com/v1/models'],
-    ['https://example.com/api/v1/', 'https://example.com/api/v1/models'],
-    ['', `${window.location.origin}/v1/models`]
+    ['https://example.com', 'https://example.com/v1/models?catalog_view=client'],
+    ['https://example.com/api/v1/', 'https://example.com/api/v1/models?catalog_view=client'],
+    ['', `${window.location.origin}/v1/models?catalog_view=client`]
   ])('builds a version-free provider catalog URL from %s', (baseUrl, expected) => {
     expect(buildCodexModelCatalogUrl(baseUrl)).toBe(expected)
   })
@@ -59,7 +59,7 @@ describe('Codex models API', () => {
     const result = await fetchCodexModelsManifest('https://example.com/v1', 'sk-user-test')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://example.com/backend-api/codex/models',
+      'https://example.com/backend-api/codex/models?catalog_view=client',
       expect.objectContaining({
         headers: {
           Accept: 'application/json',
@@ -74,6 +74,20 @@ describe('Codex models API', () => {
     expect(result.content).toContain('"input_modalities"')
     expect(result.content).toContain('"instructions_template"')
     expect(result.content).not.toContain('sk-user-test')
+  })
+
+  it('exports only visible models when an older server ignores the view parameter', async () => {
+    const visible = { slug: 'gpt-6-sol', visibility: 'list', extra: { retained: true } }
+    const payload = { revision: 'upstream-revision', models: [visible,
+      { slug: 'codex-auto-review', visibility: 'list' }, { slug: 'vendor/gpt-reserve' },
+      { slug: 'hidden-model', visibility: 'hide' }, { slug: 'alias', model_purpose: 'background' }
+    ] }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => JSON.stringify(payload) }))
+    const result = await fetchCodexModelsManifest('https://example.com', 'sk-test')
+    expect(result.modelCount).toBe(1)
+    expect(JSON.parse(result.content)).toEqual({ ...payload, models: [visible] })
+    expect(result.content).not.toContain('codex-auto-review')
+    expect(result.content).not.toContain('gpt-reserve')
   })
 
   it('rejects a successful response that is not a Codex manifest', async () => {

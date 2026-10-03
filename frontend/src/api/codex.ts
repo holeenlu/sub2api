@@ -1,3 +1,5 @@
+import { isClientVisibleCodexModel, type CodexCatalogModel } from '@/utils/codexCatalogConfig'
+
 export interface CodexModelsManifestResult {
   content: string
   modelCount: number
@@ -12,11 +14,11 @@ function normalizeCodexApiRoot(baseUrl: string): string {
 
 export function buildCodexModelsManifestUrl(baseUrl: string): string {
   const apiRoot = normalizeCodexApiRoot(baseUrl)
-  return `${apiRoot}/backend-api/codex/models`
+  return `${apiRoot}/backend-api/codex/models?catalog_view=client`
 }
 
 export function buildCodexModelCatalogUrl(baseUrl: string): string {
-  return `${normalizeCodexApiRoot(baseUrl)}/v1/models`
+  return `${normalizeCodexApiRoot(baseUrl)}/v1/models?catalog_view=client`
 }
 
 function isCodexModelsManifest(value: unknown): value is { models: unknown[] } {
@@ -48,9 +50,18 @@ export async function fetchCodexModelsManifest(
     throw new Error('Codex models response is not a valid manifest')
   }
 
+  // Older gateways may ignore the client projection parameter. Preview, count
+  // and download must still share the same filtered data.
+  const models = payload.models.filter((model): model is CodexCatalogModel =>
+    typeof model === 'object' && model !== null && 'slug' in model &&
+    typeof model.slug === 'string' && !!model.slug.trim() &&
+    isClientVisibleCodexModel(model as CodexCatalogModel)
+  )
+  const clientCatalog = { ...payload, models }
+
   return {
-    content: JSON.stringify(payload, null, 2),
-    modelCount: payload.models.length,
+    content: JSON.stringify(clientCatalog, null, 2),
+    modelCount: models.length,
     responseBytes: new TextEncoder().encode(text).byteLength
   }
 }
