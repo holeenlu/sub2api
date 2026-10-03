@@ -263,6 +263,10 @@ export default {
         codexConfigTomlHint: '預設使用本地目錄檔案；支援的分組可改選遠端目錄。',
         codexNote: '啟動 Codex 前先匯出 TAPMODELS_API_KEY；分組會根據目錄中選中的模型路由請求。'
       },
+      zhipu: {
+        codexConfigTomlHint: '設定已包含 API Key。請同時下載 codex-models.json，儲存到 model_catalog_json 指定路徑後重啟 Codex。推理檔位及預設值以目前模型目錄為準。',
+        codexNote: '合併舊設定前請備份，並刪除 [features.guardianv2] 及所有 profile 覆蓋中的 thread_context 欄位；用戶端已自動啟用執行緒上下文，無需設定此欄位。'
+      },
       routedCodex: {
         description: '使用目前路由分組的完整模型目錄設定 Codex。',
         configTomlHint: '預設使用本地目錄檔案；支援的分組可改選遠端目錄。',

@@ -661,6 +661,9 @@ const platformDescription = computed(() => {
 })
 
 const platformNote = computed(() => {
+  if (activeClientTab.value === 'codex' && props.platform === 'zhipu') {
+    return t('keys.useKeyModal.zhipu.codexNote')
+  }
   if (activeClientTab.value === 'codex' &&
     props.platform !== 'openai' &&
     props.platform !== 'grok' &&
@@ -828,8 +831,11 @@ function codexContextWindowTomlLine(modelSlug: string): string {
   return `model_context_window = ${contextWindow}\n`
 }
 
-function codexReasoningEffortTomlLine(modelSlug: string): string {
-  if (!codexModelManifestContent.value && props.setupProfile?.model === modelSlug) return formatCodexReasoningEffortTomlLine(props.setupProfile.reasoning_effort || null)
+function codexReasoningEffortTomlLine(modelSlug: string, fallbackEffort: string | null = null): string {
+  if (!codexModelManifestContent.value) {
+    const profileEffort = props.setupProfile?.model === modelSlug ? props.setupProfile.reasoning_effort : null
+    return formatCodexReasoningEffortTomlLine(profileEffort || fallbackEffort)
+  }
   return formatCodexReasoningEffortTomlLine(
     selectCodexConfigReasoningEffort(findCodexCatalogModel(codexModelManifestContent.value, modelSlug))
   )
@@ -1510,7 +1516,7 @@ function generateRoutedCodexFiles(
     antigravity: 'claude-sonnet-5',
     grok: 'grok-4.5',
     kimi: 'kimi-k2.5',
-    zhipu: 'glm-5.3',
+    zhipu: DEFAULT_CODEX_MODEL.value || 'glm-5.3',
     deepseek: 'deepseek-v4-pro',
     minimax: 'MiniMax-M3',
     opencode_go: 'glm-5.3',
@@ -1519,6 +1525,11 @@ function generateRoutedCodexFiles(
   const preferredModel = preferredModels[platform] || ''
   const model = selectCodexCatalogModel(preferredModel)
   const contextWindowLine = codexContextWindowTomlLine(model)
+  // Z.ai documents max for these exact models; do not infer capabilities for future GLM variants.
+  // https://docs.z.ai/guides/llm/glm-5.3 and /guides/vlm/glm-5.3-flash
+  const zhipuDefaultEffort = ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx'].includes(model.trim().toLowerCase())
+    ? 'max' : null
+  const reasoningEffortLine = platform === 'zhipu' ? codexReasoningEffortTomlLine(model, zhipuDefaultEffort) : ''
   const labels: Record<GroupPlatform, string> = {
     anthropic: 'Anthropic',
     openai: 'OpenAI',
@@ -1547,7 +1558,7 @@ function generateRoutedCodexFiles(
 model_provider = "tapmodels"
 model = "${model}"
 review_model = "${model}"
-${contextWindowLine}${codexCatalogTomlLine()}
+${reasoningEffortLine}${contextWindowLine}${codexCatalogTomlLine()}
 
 [model_providers.tapmodels]
 name = "${escapeTomlBasicString(siteName.value)} ${label}"
@@ -1561,7 +1572,7 @@ supports_websockets = false`
       path: joinConfigPath(configDir, 'config.toml', isWindows),
       content: configContent,
       hint: t(
-        platform === 'deepseek' || platform === 'minimax' || platform === 'composite'
+        platform === 'zhipu' || platform === 'deepseek' || platform === 'minimax' || platform === 'composite'
           ? `keys.useKeyModal.${platform}.codexConfigTomlHint`
           : 'keys.useKeyModal.routedCodex.configTomlHint'
       ),
