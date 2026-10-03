@@ -11,7 +11,7 @@ import subprocess
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--channel', required=True, choices=['sub2api', 'kdan', 'tapmodels'])
+    parser.add_argument('--channel', required=True, choices=['sub2api', 'kdan', 'tapmodels', 'tokensavy'])
     parser.add_argument('--directory', required=True)
     parser.add_argument('--project-name', required=True, help='Existing Compose project name; never guess it')
     parser.add_argument('--service', help='Existing Compose application service name (defaults to channel)')
@@ -38,8 +38,8 @@ def main():
     services = subprocess.check_output(compose + ['config', '--services'], text=True).splitlines()
     if service not in services:
         parser.error(f'Application service {service!r} is absent from the existing Compose project; use --service')
-    repository = 'erwinlin/TapModels' if channel == 'tapmodels' else 'holeenlu/sub2api'
-    image = 'ghcr.io/' + ('erwinlin/' if channel == 'tapmodels' else 'holeenlu/') + channel
+    repository = 'holeenlu/sub2api'
+    image = 'ghcr.io/holeenlu/' + channel
     cfg_dir = Path('/etc/sub2api-updater')
     cfg_dir.mkdir(mode=0o700, exist_ok=True)
     runtime = Path('/opt/sub2api-updater')

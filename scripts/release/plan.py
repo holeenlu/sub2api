@@ -29,8 +29,14 @@ def parts(version):
     return tuple(map(int, version.split("."))) + ((0,) if version.count(".") == 2 else ())
 
 
-def next_version(base, previous, exact_upstream, new_base):
+def next_version(base, previous, exact_upstream, new_base, floor=None):
     """A formal upstream bump resets the suffix; subsequent pushes increment it."""
+    # A brand moving repositories must not restart below its last published
+    # version. The floor is metadata only; old assets are never reused.
+    if floor:
+        if parts(base)[:3] < parts(floor)[:3]:
+            raise ValueError("Integrated upstream version is below the migration floor")
+        previous = [*previous, floor]
     same_base = [v for v in previous if parts(v)[:3] == parts(base)[:3]]
     if same_base:
         return base + "." + str(max(parts(v)[3] for v in same_base) + 1)
@@ -124,7 +130,7 @@ def main():
         custom_since_release = bool(previous and git("rev-list", "--no-merges", head,
             "^" + previous[0]["commit"], "^" + frontier))
         version = next_version(base, [p["version"] for p, _ in history],
-                               release_only and not custom_since_release, new_base or pristine)
+                               release_only and not custom_since_release, new_base or pristine, floor=cfg.get("version_floor"))
         tag = channel + "/v" + version
         if any(r["tag_name"] == tag for r in releases):
             raise ValueError("Release tag already exists without matching provenance")

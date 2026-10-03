@@ -8,14 +8,15 @@
 
 定制部分仅负责自动版本分配、渠道信息、发布草稿和在线更新清单。四段版本通过 GoReleaser snapshot 的版本模板打包，以独立的发布步骤上传到预留的正式 Release；不会把四段版本交给严格的 SemVer 标签解析。所有平台产物验证完成后才发布，GitHub Release 发布成功后才将对应镜像摘要提升为 `latest`，并把本次 Release 标为仓库级 `Latest`。
 
-GitHub 的 `Latest` 是整个仓库共用的单一标记。当前 `holeenlu/sub2api/main` 只发布 KDAN，因此其 `Latest` 直接对应最新成功的 KDAN Release；需要固定版本时，应使用完整标签，例如 `kdan/v0.2.9.3`。TapModels 单独使用 `erwinlin/TapModels`，其 `Latest` 独立计算。
+GitHub 的 `Latest` 是整个仓库共用的单一标记，可能指向最近发版的任一品牌。三个品牌均在 `holeenlu/sub2api` 发版；在线检查和回滚必须按 `kdan/v*`、`tapmodels/v*`、`tokensavy/v*` 渠道筛选，不能使用仓库 Latest 判断本品牌版本。GHCR 则按品牌使用独立镜像及独立 `latest` 标签。
 
 | 渠道 | 仓库 / 分支 | Release 标签 | GHCR 镜像 |
 | --- | --- | --- | --- |
 | KDAN | holeenlu/sub2api / main | kdan/v0.2.8.1 | ghcr.io/holeenlu/kdan |
-| TapModels | erwinlin/TapModels / main | tapmodels/v0.2.8.1 | ghcr.io/erwinlin/tapmodels |
+| TapModels | holeenlu/sub2api / TapModels | tapmodels/v0.2.8.1 | ghcr.io/holeenlu/tapmodels |
+| Tokensavy | holeenlu/sub2api / tokensavy | tokensavy/v0.2.8.1 | ghcr.io/holeenlu/tokensavy |
 
-`main` 是 KDAN 品牌默认、主开发和发布分支；不再维护独立 KDAN 或公共发布分支。origin/TapModels 是代码镜像，不重复发布。标签包含渠道名，但界面版本和镜像标签仅显示数字。不会读取混入的 sub4api v1.1.4 标签，也不会把 TapModels 版安装到 KDAN。两个交付分支只保留 `automatic-release.yml`；独立 CI、安全扫描、CLA、上游定时监看、原作者手动发布和旧品牌镜像工作流均已移除，以减少 Actions 用量。发布所需的版本规则测试、更新界面/API 检查、类型检查、构建和产物校验仍在人工启动的发布流程内执行。
+`main` 是 KDAN 品牌默认、主开发和发布分支；不再维护独立 KDAN 或公共发布分支。TapModels 与 tokensavy 从本仓库对应品牌分支的固定提交构建并发布。`erwinlin/TapModels` 不再是发版入口；从该仓库运行此 workflow 会跳过发版。标签包含渠道名，但界面版本和镜像标签仅显示数字。不会读取混入的 sub4api v1.1.4 标签，也不会把 TapModels 版安装到 KDAN。三个品牌分支只保留 `automatic-release.yml`；独立 CI、安全扫描、CLA、上游定时监看、原作者手动发布和旧品牌镜像工作流均已移除，以减少 Actions 用量。发布所需的版本规则测试、更新界面/API 检查、类型检查、构建和产物校验仍在人工启动的发布流程内执行。
 
 ## 版本规则
 
@@ -34,7 +35,7 @@ GitHub 的 `Latest` 是整个仓库共用的单一标记。当前 `holeenlu/sub2
 - `.github/workflows/` 只保留 `automatic-release.yml`，且触发器只能有 `workflow_dispatch`，不配置 push、PR、定时或其他自动触发事件。无需禁用仓库 Actions，否则人工 Run workflow 也不可用。
 - GitHub 端已登记但不再使用的工作流应同时停用，防止旧分支或后续合并意外重新触发；历史运行记录不会继续消耗 runner 分钟。
 - GitHub 内置的 `dynamic/dependabot/update-graph` 是 Dependabot graph job，不能通过普通工作流接口停用，且不计入 Actions 分钟，因此保留。它与会计费的 Automatic dependency submission 不同；后者如果另行启用，应在仓库设置中关闭。参见 [GitHub 依赖图计费说明](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependency-graph-data#dependabot-graph-jobs)。
-- 合并上游时复核两个交付分支的 `.github/workflows/`，不要重新引入自动触发器或已移除的工作流；`test_auto_release_workflow.py` 在本地和手动发版时检查此约束。本地测试脚本和发布辅助工具继续保留。
+- 合并上游时复核三个品牌分支的 `.github/workflows/`，不要重新引入自动触发器或已移除的工作流；`test_auto_release_workflow.py` 在本地和手动发版时检查此约束。本地测试脚本和发布辅助工具继续保留。
 - 需要额外检查时在本地运行 `make test-frontend`、后端 `make test-unit` 和 `golangci-lint run ./...`。
 
 ## 启用与排障
@@ -42,11 +43,12 @@ GitHub 的 `Latest` 是整个仓库共用的单一标记。当前 `holeenlu/sub2
 1. 仓库 Settings → Actions → General 启用 Actions，并允许工作流使用其中的官方 Actions。工作流已按 job 声明所需写权限，不需要将仓库的默认 token 权限整体改成写入。
 2. 私有仓库必须有可用的 Actions 额度。若运行页面 Annotations 提示付款失败或 spending limit，且 job 没有执行步骤，需要账号持有人在 Billing & licensing / Billing & plans 处理付款或预算；更换 PAT 或修改构建脚本不能解除该限制。
 3. 首次发布会由仓库自身的 `GITHUB_TOKEN` 创建或写入对应 GHCR 包。若出现 package write denied，检查包设置中的 Manage Actions access，确保实际发布仓库具备写权限。
-4. 需要发版时，在 Actions → Manual versioned release → Run workflow 中选择分支：KDAN 在 `holeenlu/sub2api` 选择 `main`；TapModels 在 `erwinlin/TapModels` 选择 `main`。`origin/TapModels` 仅是镜像分支，不从这里发布。也可在明确授权发版后执行以下相应命令；这不是普通提交、推送步骤。重试同一提交会沿用已有草稿，不会重复分配版本：
+4. 需要发版时，在 `holeenlu/sub2api` 的 Actions → Manual versioned release → Run workflow 中，通过 **Use workflow from** 选择分支：KDAN 选 `main`、TapModels 选 `TapModels`、Tokensavy 选 `tokensavy`。workflow 按仓库和分支精确匹配品牌，不接受标签、错误大小写或其他分支作为发版入口。也可在明确授权发版后执行以下相应命令；这不是普通提交、推送步骤。重试同一提交会沿用已有草稿，不会重复分配版本：
 
    ```sh
    gh workflow run automatic-release.yml --repo holeenlu/sub2api --ref main
-   gh workflow run automatic-release.yml --repo erwinlin/TapModels --ref main
+   gh workflow run automatic-release.yml --repo holeenlu/sub2api --ref TapModels
+   gh workflow run automatic-release.yml --repo holeenlu/sub2api --ref tokensavy
    gh run list --repo holeenlu/sub2api --workflow automatic-release.yml
    ```
 
@@ -87,4 +89,23 @@ GitHub 的 `Latest` 是整个仓库共用的单一标记。当前 `holeenlu/sub2
 
 ### 私有仓库返回 404
 
-GitHub 会对无权访问的私有仓库返回 404。先核对应用 `UPDATE_GITHUB_TOKEN` 是否配置，以及该 Token 是否能读取**本品牌的仓库**；能读取 `holeenlu/sub2api` 不代表能读取 `erwinlin/TapModels`。服务器的应用检查、宿主机 Release 清单下载、GHCR 镜像拉取是三个独立连接，分别需要应用环境变量、`--github-token-file` 和宿主机 Docker 登录。无成功发布的渠道也没有可安装版本；创建 Git 标签或提高页面版本号不能代替发布镜像。
+GitHub 会对无权访问的私有仓库返回 404。先核对应用 `UPDATE_GITHUB_TOKEN` 是否配置，以及该 Token 是否能读取 `holeenlu/sub2api`；仅能读取旧 `erwinlin/TapModels` 的 Token 不再适用。服务器的应用检查、宿主机 Release 清单下载、GHCR 镜像拉取是三个独立连接，分别需要应用环境变量、`--github-token-file` 和宿主机 Docker 登录。无成功发布的渠道也没有可安装版本；创建 Git 标签或提高页面版本号不能代替发布镜像。
+
+## TapModels 迁移与 Tokensavy 首次启用
+
+代码提交、推送本身不会创建上述新镜像；首次人工发版成功后镜像才可拉取。旧站不会因本次代码修改自动切换仓库或升级，Tokensavy 也不会继续发布本地 `tokensavy:local` 镜像。
+
+1. 在本仓库对应分支手动发版，核对该渠道正式 Release 和 GHCR 镜像已存在。TapModels 原仓库已发布至 `0.2.13.2`（2026-10-03 核对）；渠道配置保留该版本下限，相同上游基准的首次新仓库发布从 `0.2.13.3` 起，避免版本倒退。原仓库的历史标签和产物不自动迁入本仓库，回滚列表只包含新仓库本渠道的已发布版本；首次迁移保留旧镜像摘要用于人工恢复。
+2. TapModels 已部署旧版本时，先备份，并将 `.env` 中 `TAPMODELS_IMAGE` 改为 `ghcr.io/holeenlu/tapmodels:<已发布版本>`。清除或更新已有 `compose.online-update.json` 中的旧镜像固定值时，保留其余配置、服务名、项目名和数据卷；使用完整 Compose 文件列表部署一次含新仓库配置的版本。这是生产操作，不由代码推送自动执行。
+3. 在部署主机重新运行此版本的 `install-compose-updater.py --channel tapmodels`，沿用原来的 `--directory`、`--project-name`、`--service` 和所有 `--compose-file` 参数。安装器会把宿主机配置中的仓库和镜像迁移到 `holeenlu/sub2api` / `ghcr.io/holeenlu/tapmodels`，并重启更新服务。旧应用只改 updater 配置不足以切换应用自身的版本检查来源。
+4. Tokensavy 首次部署使用 `deploy/tokensavy/compose.yaml` 的 GHCR 镜像，然后在 Linux 宿主机安装 updater（用实际绝对路径替换示例）：
+
+   ```sh
+   sudo python3 /opt/tokensavy/deploy/install-compose-updater.py \
+     --channel tokensavy --directory /opt/tokensavy/deploy/tokensavy \
+     --project-name tokensavy --service tokensavy --compose-file compose.yaml \
+     --github-token-file /etc/sub2api-updater.github-token
+   ```
+
+   公开仓库可省略 token 文件参数。安装器只配置宿主机服务；随后执行它打印的完整 Compose 命令连接应用。应用只挂载受限 Unix socket，数据库、Redis 和 Caddy 不参与在线升级。后续手动维护也保留生成的 socket 和 online-update 两个 override。
+5. Tokensavy 无已发布镜像时仍可通过 `compose.source.yaml` 显式构建源码镜像作首次安装；之后接入在线更新时必须切回镜像部署配置，不能继续使用源码 override。不会重新生成账号密码或修改已有 `.env` 中的密钥。

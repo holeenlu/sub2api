@@ -66,6 +66,19 @@ class ReleaseMatrixTest(unittest.TestCase):
         self.assertIn('service.ReleaseChannel=kdan', flags)
         self.assertEqual(release.archive_name('0.2.8.10', {'goos': 'windows', 'goarch': 'amd64'}, 'kdan'), 'kdan_0.2.8.10_windows_amd64.zip')
 
+    def test_tokensavy_snapshot_and_archive_channel(self):
+        release.generate_config(argparse.Namespace(mode='build', simple=False, channel='tokensavy', goos='linux', goarch='amd64', output='tokensavy.yaml'))
+        data = yaml.safe_load(Path('tokensavy.yaml').read_text())
+        self.assertEqual(data['project_name'], 'tokensavy')
+        self.assertEqual(data['builds'][0]['binary'], 'sub2api')
+        self.assertIn('service.ReleaseChannel=tokensavy', '\n'.join(data['builds'][0]['ldflags']))
+        self.assertEqual(release.archive_name('0.2.9.3', {'goos': 'linux', 'goarch': 'amd64'}, 'tokensavy'), 'tokensavy_0.2.9.3_linux_amd64.tar.gz')
+        args = self.fixture_artifacts(channel='tokensavy', version='0.2.9.3')
+        release.verify(args)
+        args.channel = 'tapmodels'
+        with self.assertRaises(FileNotFoundError):
+            release.verify(args)
+
     def test_channel_matrix_rejects_other_brand_assets(self):
         args = self.fixture_artifacts(channel='kdan', version='0.2.8.1')
         release.verify(args)

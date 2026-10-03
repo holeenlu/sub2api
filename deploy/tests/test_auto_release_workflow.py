@@ -37,8 +37,11 @@ class ManualReleaseWorkflowTests(unittest.TestCase):
         cases = [
             ('holeenlu/sub2api', 'main', 'kdan'),
             ('holeenlu/sub2api', 'KDAN', ''),
-            ('erwinlin/TapModels', 'main', 'tapmodels'),
-            ('holeenlu/sub2api', 'TapModels', ''),
+            ('erwinlin/TapModels', 'main', ''),
+            ('holeenlu/sub2api', 'TapModels', 'tapmodels'),
+            ('holeenlu/sub2api', 'tokensavy', 'tokensavy'),
+            ('holeenlu/sub2api', 'tapmodels', ''),
+            ('holeenlu/sub2api', 'Tokensavy', ''),
             ('holeenlu/sub2api', 'feature/example', ''),
         ]
         for repository, branch, expected in cases:
@@ -54,6 +57,20 @@ class ManualReleaseWorkflowTests(unittest.TestCase):
                     plan.main()
                 self.assertEqual(output.getvalue().strip(), 'channel=' + expected)
                 run.assert_not_called()
+
+    def test_channels_are_unique_and_stay_in_this_repository(self):
+        config = json.loads((ROOT / 'scripts/release/channels.json').read_text())
+        self.assertEqual(set(config), {'kdan', 'tapmodels', 'tokensavy'})
+        for channel, branch in [('kdan', 'main'), ('tapmodels', 'TapModels'), ('tokensavy', 'tokensavy')]:
+            self.assertEqual(config[channel]['repository'], 'holeenlu/sub2api')
+            self.assertEqual(config[channel]['branch'], branch)
+            self.assertEqual(config[channel]['image'], 'ghcr.io/holeenlu/' + channel)
+        workflow = yaml.load((ROOT / '.github/workflows/automatic-release.yml').read_text(), Loader=yaml.BaseLoader)
+        # Preparation uses the selected workflow branch. Every build/publication
+        # job thereafter pins the commit resolved by that preparation job.
+        for job in ('build-frontend', 'build-binaries', 'publish', 'promote'):
+            checkout = workflow['jobs'][job]['steps'][0]
+            self.assertEqual(checkout['with']['ref'], '${{ needs.prepare.outputs.commit }}')
 
     def test_published_release_is_marked_latest(self):
         workflow = (ROOT / '.github/workflows/automatic-release.yml').read_text()
