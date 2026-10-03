@@ -433,3 +433,33 @@ main 验证：后端 `go test -tags=unit ./...` 全量、`go vet -tags=unit ./..
 本次无新增迁移、依赖、Wire/Ent 输入、版本号或 Workflow 变更。en/zh/ja 同步，涉及的两个 zh-TW admin 文件由生成器生成；全仓已有 docs.ts / landing.ts 生成漂移单独记录，不覆盖品牌润色。共享代码先 main，再普通 merge 到 TapModels；本轮只提交、推送，不发版或部署。
 
 main 交付验证：Go 全量 `go test -tags=unit ./...`、全量 `go vet -tags=unit ./...` 通过；前端全量 379 文件 / 3216 用例、类型检查、相关 ESLint、生产构建通过；手动发版 Workflow 3 项回归通过。使用本机已有 SDK、锁定依赖和 PyYAML，不安装或升级。两品牌分别验证，日志与最终 SHA 保存在本机 `.release/upstream-sync/20261003-bps-delivery/`。本次未做真实上游账号、浏览器手测或生产迁移；此前新会话延迟的只读排查没有产生运行代码补丁，不包含在本次功能修复中。
+
+## 2026-10-03：ranxi2001 `5bed80886` 增量审查
+
+固定范围：`bc83ff9c367883e5b7d0140e6bb42e2e7cc5239c` → `5bed80886e4b6e48b2e8825c93f7ad6b6e275eb1`，共 5 个非合并提交、3 个合并包装；remerge-diff 未发现合并包装的独立逻辑。定向 fetch 后对照实际 diff 与调用链，原审查结论是无须新增 OAuth Excel/BPS 运行补丁；随后用户明确扩大范围，批准适配下面两项 OpenAI API Key 身份能力，最终行为见本节补充。
+
+| 来源提交 | 实际行为 | 本轮处理与依据 |
+| --- | --- | --- |
+| `d1f355aa0b3a0bbee086a3712a51b97eb12247a0` | Prism 增加按模型选择、工具请求修正、账号编辑选项；调度/WS/打票守卫从账号级 Prism 标记改为模型级判断，自动并发观察排除 Prism | 排除。共享文件的变更均服务 Prism 适配器，不是 BPS 的模型路由修复；本地未引入 Prism，无相应消费者 |
+| `b39ffd33c1d9a6099e7922db513f664d421dfde8` | 识别 Prism 适配器拒绝，补充 issue #280 升级说明 | 排除。依赖上述 Prism 运行链，不恢复浏览器适配器 |
+| `bf6856d6a5beaaaf030791a03b70624b4072bb6c` | 给服务就绪探针增加 `server.readiness_timeout_seconds`，默认仍 1 秒，调整 Lifecycle 构造器和 Kubernetes 说明 | 排除。属于源部署生命周期功能，本地不存在源 `Lifecycle` 实现，不是 BPS 请求或恢复探测的超时配置；不能将其理解为 BPS 403 恢复修复 |
+| `4549f519e2f97b3f2fbfffd9055fe352ec5d4689` | 在 OpenAI API Key 的 Responses、WS、图片、Embeddings、搜索、测试等出口统一 UA/originator/version，保留供应商头与管理员覆写优先级 | 原先因超出 BPS 范围排除；用户另行批准后适配为账号级 opt-in，缺省关闭，不共享 OAuth 的全局开关。详见下文 |
+| `64885197d8eabb39256b5ab6023f11fa91e37654` | 调整 API Key 出站身份测试断言，同时确认入站 UA 未改写 | 随前项适配测试判据：开启时验证规范身份和入站头不变；原有默认透传测试仍保留，避免默认行为改变 |
+
+合并包装分别为 `f34d998838cdac08fc114027c4f1c8a0313d6026`、`cf7398431cfd82ec1a9c7feca8a7b2b7f439d5c7`、`5bed80886e4b6e48b2e8825c93f7ad6b6e275eb1`，不整体合入 fork。上述来源作者均为 ranxi2001；Prism 与 readiness 仍仅审查排除；API Key 两项按下述行为适配，源 SHA 不因此成为本地祖先。
+
+最终范围已扩展为 API Key 账号身份 opt-in；原有 OAuth/BPS 策略不变，无迁移或依赖升级。原先的仅文档验证不再覆盖最终交付，须以本次实现的后端全量测试/vet、前端类型/测试/构建及品牌检查为准。
+
+原审查记录已按 2026-10-03 最新规则交付到本仓库 `origin/main`、`origin/TapModels`、`origin/tokensavy`，原交付证据见 `.release/upstream-sync/20261003-ranxi-5bed80886/`。本次功能扩展及历史整理另见下文，保留工作区无关未跟踪文件，不访问生产或发布镜像。
+
+### 用户批准的 API Key 身份适配与 rebase 整理
+
+来源 `4549f519e2f97b3f2fbfffd9055fe352ec5d4689` 与 `64885197d8eabb39256b5ab6023f11fa91e37654`，作者 ranxi2001。原方案默认改写全部 API Key，最终选用账号级显式 opt-in，存量账号不变。新增 `accounts.extra.openai_apikey_codex_identity` 布尔字段，不需要数据库迁移；账号管理 `/admin/accounts` → 编辑 OpenAI API Key →「使用规范 Codex 出站身份」，或批量编辑同名选项。批量外层未勾选不改原值；勾选后 true/false 明确更新，任何不合格账号整批拒绝。新建 API 可携带该 bool；界面可在创建后编辑。
+
+开启后覆盖 Responses、Chat Completions、WS 握手、图片、Embeddings、独立搜索、输入 token 查询及相关账号测试/探测的标准 OpenAI 构造链。身份由现有 Codex 版本解析器生成；供应商专用头和管理员显式 header_overrides 保留最终优先级，搜索继续过滤其原有不支持头。该选项与 `gateway.disable_codex_identity_enforcement` 解耦：后者维持原来的 OAuth 行为，不用于关闭 API Key 新选项。关闭账号新选项恢复既有路径；不承诺提高限额、规避风控或改善首字延迟。
+
+启用只修改出站请求，客户端入站头和审计归属不变；不加入 OAuth/BPS 身份逻辑、票据或插件依赖。WS 绑定指纹包含新开关，既有连接配置变化后按现有资格检查重连，避免继续使用旧握手身份。没有自动重放、模型/提供商变更、版本号或发版 Workflow 改动。
+
+原审查提交 `1665420d5` 与本实现按用户要求通过 interactive rebase 合为一个提交，备份保留于本机 `codex/backup-apikey-identity-*` 和 `.release/apikey-identity-rebase/`。品牌仅重建上一次文档 merge，保留之前的品牌历史和文件；重写后的远端覆盖另需明确授权，不能沿用旧的普通推送授权直接强推。
+
+main 验证：Go 全量 unit/vet 通过，前端 379 文件 / 3228 用例、类型检查、相关 ESLint、生产构建、zh-TW 生成检查通过，手动发版工作流 4 项回归通过。使用既有 SDK 与依赖，未安装升级；未测试真实上游账号或执行生产迁移。各品牌合并检查、日志及历史前后 SHA 记录于 `.release/apikey-identity-rebase/`。

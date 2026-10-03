@@ -635,6 +635,8 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        apiKeyCodexIdentity: "標準 Codex 送信元識別を使用",
+        apiKeyCodexIdentityHint: "既定は無効で、既存の送信ヘッダーを維持します。有効時はこの OpenAI API キーアカウントの User-Agent、originator、version を Codex バージョン設定に統一します。提供元専用ヘッダーと管理者の明示的な上書きを優先します。OAuth/BPS と受信ログは変更せず、レート制限の軽減は保証しません。",
         modelMappingAliases: 'モデルマッピングを別名として使い、他のネイティブモデルも許可',
         modelMappingAliasesHint: '通常のOpenAI OAuthアカウントのみ。オンの場合は指定モデルだけを変換し、他のネイティブモデルも利用できます。オフの場合、空でないマッピングは許可リストとして扱います。グループの許可リストは常に適用され、既存アカウントは自動変更されません。',
         changeModelMappingScope: 'モデルマッピングの適用範囲を変更',
