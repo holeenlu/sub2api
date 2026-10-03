@@ -32,7 +32,7 @@ func writeOpenAIModelsResponse(c *gin.Context, manifest *service.OpenAIModelsRes
 // Both discovery endpoints consume the same final catalogue, after group/platform
 // selection and allowlist filtering. Preserve every field on the selected entry.
 func writeModelsListResponse(c *gin.Context, models any, capabilities ...map[string]service.ModelListCapabilities) {
-	if len(capabilities) > 0 && len(capabilities[0]) > 0 {
+	{
 		var entries []map[string]json.RawMessage
 		encoded, err := json.Marshal(models)
 		if err != nil || json.Unmarshal(encoded, &entries) != nil {
@@ -42,7 +42,8 @@ func writeModelsListResponse(c *gin.Context, models any, capabilities ...map[str
 		for _, entry := range entries {
 			var id string
 			_ = json.Unmarshal(entry["id"], &id)
-			if fields, ok := capabilities[0][id]; ok {
+			if len(capabilities) > 0 {
+				fields := capabilities[0][id]
 				// The dedicated DTO contains capability fields only. Keep existing
 				// identifiers and provider-specific response fields unchanged.
 				body, _ := json.Marshal(fields)
@@ -51,6 +52,16 @@ func writeModelsListResponse(c *gin.Context, models any, capabilities ...map[str
 				for key, value := range extra {
 					entry[key] = value
 				}
+			}
+			var visibility, purpose string
+			_ = json.Unmarshal(entry["visibility"], &visibility)
+			_ = json.Unmarshal(entry["model_purpose"], &purpose)
+			visibility, purpose = service.ModelPresentation(id, visibility, purpose)
+			if visibility != "" {
+				entry["visibility"], _ = json.Marshal(visibility)
+			}
+			if purpose != "" {
+				entry["model_purpose"], _ = json.Marshal(purpose)
 			}
 		}
 		models = entries

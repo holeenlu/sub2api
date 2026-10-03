@@ -1,6 +1,6 @@
 # 模型清单、开放范围与定价
 
-共享实现先在 main（KDAN）完成，再同步到 TapModels。本文描述统一目录与 Codex 固定来源的分层方案；固定来源只控制清单发现，不替代目录治理或推理调度。
+共享实现先在 main（KDAN）完成，再同步到 TapModels、tokensavy。本文描述统一目录与 Codex 固定来源的分层方案；固定来源只控制清单发现，不替代目录治理或推理调度。
 
 ## 每个入口只负责一件事
 
@@ -72,6 +72,18 @@ OpenAI 分组可在本页配置「固定账号获取 Codex Model Manifest」。�
 旧参考价补充数据继续读取，避免升级改变既有账单；不再提供原始 JSON 导入入口。价格修订和历史请求核算证据继续持久化，不因页面精简删除。管理端 `GET /api/v1/admin/model-catalog/pricing-audit?pending=true` 用于核算。
 
 ## Codex 与媒体
+
+### 隐藏后台模型与 API Key 级联
+
+调用授权和客户端显示是独立属性。已发现或由管理员声明的 `codex-auto-*`、`gpt-reserve` 标记为 `model_purpose: "background"`、`visibility: "hide"`；其他模型的上游隐藏属性同样保留。标记不凭空增加模型供应、推理能力或价格，也不默认授权所有 OpenAI API Key 账号。
+
+- 管理后台 → 模型清单（`/admin/model-catalog`）保留记录，标注“后台模型 · 客户端隐藏”或“客户端隐藏”。
+- 管理后台 → 账号管理（`/admin/accounts`）→ 编辑账号 → 模型限制：确认该账号允许供应后台模型；旧上游未提供它时，可按实际支持情况在清单添加原名并显式选择。
+- 管理后台 → 分组管理（`/admin/groups`）→ 模型白名单：授权对应 Key 使用后台模型。级联两端都必须满足各自账号、分组、渠道和定价限制；缺价需在渠道/分组定价中补齐，不能用隐藏标记绕过准入。
+- 普通 `/v1/models` 在原有鉴权后的条目上附加 `visibility`、`model_purpose`，只提供安全显示元数据，不暴露账号身份或原生指令。下游 sub2api 的 API Key 账号同步目录后保存这些属性。别名仍继承目标的隐藏属性。
+- Codex Manifest / `/keys` 下载的 `codex-models.json` 保留隐藏描述与必要的原生字段；不把后台模型选作 `config.toml` 主模型、评审默认模型或推荐模型。隐藏不是删除描述，也不是禁止调用。
+
+已有账号权限及分组白名单不自动扩展；通配授权遵循原有匹配规则，不再为了显示后台模型额外要求精确选中。上游原生隐藏信息跨级联传递，旧快照也会读取已有描述中的 visibility；新版元数据可通过现有“同步模型”刷新。请求继续使用原始模型名，后台用途/客户端请求头不构成权限证明。用户无需新增环境变量或数据库迁移；旧版级联上游需要升级才能完整传递这些元数据。
 
 “使用 API 密钥”由当前 Key 的 setup profile 生成配置；默认 Codex CLI (WebSocket)、API Key Mode、macOS / Linux。配置默认使用根级 `model_catalog_json = "~/.codex/codex-models.json"`，用户在弹窗获取并下载目录文件；OpenAI/Composite 可切换 provider 内 `model_catalog_url`（Codex 0.156.0+），智谱 API Key 分组使用本地目录。固定账号来源在 `/admin/model-catalog` 的 OpenAI 分组选择器中设置；它只影响 Codex `/models` 的上游发现，不影响 `/responses`、聊天请求或实际账号粘性。
 

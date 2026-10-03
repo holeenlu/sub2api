@@ -21,6 +21,8 @@ export default {
   "platform": "平台",
   "state": "狀態",
   "kind": "模型類型",
+  "backgroundModel": "後台模型 · 用戶端隱藏",
+  "clientHidden": "用戶端隱藏",
   "model": "模型",
   "empty": "沒有匹配的目錄記錄",
   "manage": "維護模型清單",

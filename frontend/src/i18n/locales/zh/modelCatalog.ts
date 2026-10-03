@@ -19,6 +19,8 @@ export default {
   "platform": "平台",
   "state": "状态",
   "kind": "模型类型",
+  "backgroundModel": "后台模型 · 客户端隐藏",
+  "clientHidden": "客户端隐藏",
   "model": "模型",
   "empty": "没有匹配的目录记录",
   "manage": "维护模型清单",

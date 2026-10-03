@@ -19,6 +19,8 @@ export default {
   "platform": "プラットフォーム",
   "state": "状態",
   "kind": "モデル種別",
+  "backgroundModel": "バックグラウンドモデル · クライアント非表示",
+  "clientHidden": "クライアント非表示",
   "model": "モデル",
   "empty": "該当するモデルがありません",
   "manage": "モデル一覧を管理",

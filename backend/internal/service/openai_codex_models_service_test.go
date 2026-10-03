@@ -1284,10 +1284,14 @@ func TestBuildGroupConfiguredCodexModelsManifestUsesAdministratorConfiguration(t
 	require.NoError(t, err)
 	require.True(t, configured)
 	models := decodeCodexManifestModels(t, manifest.Body)
+	// Hidden background entries can precede the first selectable model.
+	for len(models) > 0 && models[0]["visibility"] == "hide" {
+		models = models[1:]
+	}
 	require.Equal(t, "glm-5.3", models[0]["slug"])
 	require.Contains(t, codexManifestModelSlugs(t, manifest.Body), "gpt-5.6-sol")
 	require.NotContains(t, codexManifestModelSlugs(t, manifest.Body), "gpt-image-2")
-	require.NotContains(t, codexManifestModelSlugs(t, manifest.Body), "codex-auto-review")
+	require.Contains(t, codexManifestModelSlugs(t, manifest.Body), "codex-auto-review")
 	require.Equal(t, "GLM 5.3", models[0]["display_name"])
 	require.Equal(t, []string{"low", "medium", "high"}, effortsFromManifestModel(t, models[0]))
 	require.Equal(t, "medium", models[0]["default_reasoning_level"])
@@ -1453,7 +1457,7 @@ func TestBuildGroupConfiguredCodexModelsManifestFallsThroughWithoutConfiguration
 	require.Nil(t, manifest)
 }
 
-func TestMergeGroupConfiguredCodexModelsFiltersAutoReviewByDefault(t *testing.T) {
+func TestMergeGroupConfiguredCodexModelsHidesAutoReviewByDefault(t *testing.T) {
 	t.Parallel()
 
 	const groupID int64 = 74
@@ -1469,13 +1473,15 @@ func TestMergeGroupConfiguredCodexModelsFiltersAutoReviewByDefault(t *testing.T)
 		"",
 	))
 	models := decodeCodexManifestModels(t, manifest.Body)
-	require.Len(t, models, 1)
-	require.Equal(t, "gpt-5.6", models[0]["slug"])
+	require.Len(t, models, 3)
+	require.Equal(t, "hide", models[0]["visibility"])
+	require.Equal(t, "hide", models[1]["visibility"])
+	require.Equal(t, "gpt-5.6", models[2]["slug"])
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
 }
 
-// Scenario: OpenAI 账号映射不启用 Auto Review。
-func TestMergeGroupConfiguredCodexModelsFiltersAccountMappedAutoReviewByDefault(t *testing.T) {
+// An available background model keeps its native contract without appearing in the picker.
+func TestMergeGroupConfiguredCodexModelsPreservesHiddenAutoReviewContract(t *testing.T) {
 	t.Parallel()
 
 	const groupID int64 = 75
@@ -1503,7 +1509,9 @@ func TestMergeGroupConfiguredCodexModelsFiltersAccountMappedAutoReviewByDefault(
 		manifest,
 		"",
 	))
-	require.Equal(t, []string{"gpt-5.6"}, codexManifestModelSlugs(t, manifest.Body))
+	require.Equal(t, []string{"codex-auto-review", "gpt-5.6"}, codexManifestModelSlugs(t, manifest.Body))
+	require.Contains(t, string(manifest.Body), `"auto_review":{"enabled":true}`)
+	require.Equal(t, "hide", decodeCodexManifestModels(t, manifest.Body)[0]["visibility"])
 }
 
 // Scenario: 启用的分组自定义列表允许 Auto Review。
@@ -1526,6 +1534,7 @@ func TestMergeGroupConfiguredCodexModelsKeepsExplicitAutoReviewSelection(t *test
 
 	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, manifest, ""))
 	require.Equal(t, []string{"codex-auto-review"}, codexManifestModelSlugs(t, manifest.Body))
+	require.Equal(t, "hide", decodeCodexManifestModels(t, manifest.Body)[0]["visibility"])
 }
 
 func TestMergeGroupConfiguredCodexModelsHonorsCustomListAndFinalETag(t *testing.T) {
