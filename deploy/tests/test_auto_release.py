@@ -117,8 +117,26 @@ class ComposeUpdateTests(unittest.TestCase):
             SafeRedirect().redirect_request(request, None, 302, '', {}, 'https://evil.test/asset')
 
 
+class MigrationVersionTests(unittest.TestCase):
+    def test_floor_preserves_version_order_across_repositories(self):
+        self.assertEqual(next_version('0.2.13', [], False, False, floor='0.2.13.2'), '0.2.13.3')
+        self.assertEqual(next_version('0.2.13', ['0.2.13.5'], False, False, floor='0.2.13.2'), '0.2.13.6')
+        self.assertEqual(next_version('0.2.14', [], False, False, floor='0.2.13.2'), '0.2.14.1')
+        with self.assertRaises(ValueError):
+            next_version('0.2.11', [], False, False, floor='0.2.13.2')
+
+
 class PlannerIntegrationTests(unittest.TestCase):
     def test_draft_retry_published_retry_and_next_push(self):
+        self.assert_channel_lifecycle('kdan', 'main')
+
+    def test_tapmodels_uses_this_repository_branch_and_image(self):
+        self.assert_channel_lifecycle('tapmodels', 'TapModels')
+
+    def test_tokensavy_uses_its_own_release_history(self):
+        self.assert_channel_lifecycle('tokensavy', 'tokensavy')
+
+    def assert_channel_lifecycle(self, channel, branch):
         import subprocess
         import shutil
         import scripts.release.plan as planner
@@ -158,14 +176,17 @@ class PlannerIntegrationTests(unittest.TestCase):
                 if args[1] == 'api':
                     return json.dumps([releases])
                 raise AssertionError(args)
-            env = {'GITHUB_REPOSITORY':'holeenlu/sub2api','GITHUB_REF':'refs/heads/main',
+            env = {'GITHUB_REPOSITORY':'holeenlu/sub2api','GITHUB_REF':'refs/heads/' + branch,
                    'GITHUB_OUTPUT':str(Path(directory)/'output')}
             with patch.dict(os.environ,env), patch('sys.argv',['plan.py']), \
                  patch.object(planner,'run',side_effect=fake_run), \
-                 patch.object(planner,'official_base',return_value=('0.2.8',base,base)):
+                 patch.object(planner,'official_base',return_value=('0.2.13',base,base)):
                 planner.main()
                 first = json.loads(Path('release-plan.json').read_text())
-                self.assertEqual(first['version'],'0.2.8.1')
+                self.assertEqual(first['version'], '0.2.13.3' if channel == 'tapmodels' else '0.2.13.1')
+                self.assertEqual(first['channel'], channel)
+                self.assertEqual(first['image'], 'ghcr.io/holeenlu/' + channel)
+                self.assertEqual(first['tag'], channel + '/v' + first['version'])
                 planner.main()  # Failed build resumes its draft without allocating again.
                 self.assertEqual(len(releases),1)
                 releases[0]['draft'] = False
@@ -177,7 +198,7 @@ class PlannerIntegrationTests(unittest.TestCase):
                 Path('custom').write_text('second')
                 git('add','custom'); git('commit','-m','second')
                 planner.main()
-                self.assertEqual(json.loads(Path('release-plan.json').read_text())['version'],'0.2.8.2')
+                self.assertEqual(json.loads(Path('release-plan.json').read_text())['version'], '0.2.13.4' if channel == 'tapmodels' else '0.2.13.2')
             os.chdir(original)
 
 if __name__ == '__main__':

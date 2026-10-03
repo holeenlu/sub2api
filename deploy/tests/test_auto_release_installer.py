@@ -14,6 +14,15 @@ spec.loader.exec_module(installer)
 
 class InstallerTests(unittest.TestCase):
     def test_legacy_service_and_reinstallation(self):
+        self.assert_installation('kdan', 'sub2api')
+
+    def test_tapmodels_reinstallation_migrates_release_repository(self):
+        self.assert_installation('tapmodels', 'tapmodels')
+
+    def test_tokensavy_installs_an_independent_updater(self):
+        self.assert_installation('tokensavy', 'tokensavy')
+
+    def assert_installation(self, channel, service):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             project = root / 'legacy-deploy'
@@ -31,7 +40,7 @@ class InstallerTests(unittest.TestCase):
                 values = list(original_stat(path, *args, **kwargs))
                 values[4] = 0  # Owner of the simulated production configuration.
                 return os.stat_result(values)
-            argv = ['installer', '--channel', 'kdan', '--service', 'sub2api',
+            argv = ['installer', '--channel', channel, '--service', service,
                     '--directory', str(project), '--project-name', 'existing', '--compose-file', 'compose.yml']
             original_copy = installer.shutil.copyfile
             def copy(source, target):
@@ -39,18 +48,20 @@ class InstallerTests(unittest.TestCase):
             with patch('sys.argv', argv), patch.object(installer.os, 'geteuid', return_value=0), \
                  patch.object(installer, 'Path', side_effect=mapped_path), patch.object(Path, 'stat', root_stat), \
                  patch.object(installer.shutil, 'copyfile', side_effect=copy), \
-                 patch.object(installer.subprocess, 'check_output', return_value='sub2api\npostgres\n'), \
+                 patch.object(installer.subprocess, 'check_output', return_value=service+'\npostgres\n'), \
                  patch.object(installer.subprocess, 'run') as run:
                 installer.main()
                 installer.main()
-            config = json.loads((root / 'etc/sub2api-updater/kdan.json').read_text())
-            self.assertEqual(config['service'], 'sub2api')
-            self.assertEqual(config['channel'], 'kdan')
+            config = json.loads((root / ('etc/sub2api-updater/' + channel + '.json')).read_text())
+            self.assertEqual(config['service'], service)
+            self.assertEqual(config['repository'], 'holeenlu/sub2api')
+            self.assertEqual(config['image'], 'ghcr.io/holeenlu/' + channel)
+            self.assertEqual(config['channel'], channel)
             override = json.loads((project / 'compose.updater-socket.yml').read_text())
-            self.assertEqual(list(override['services']), ['sub2api'])
-            self.assertEqual(override['services']['sub2api']['environment']['UPDATE_GITHUB_TOKEN'], '${UPDATE_GITHUB_TOKEN:-}')
-            self.assertIn(str(project), (root / 'etc/systemd/system/sub2api-compose-updater@kdan.service.d/deployment.conf').read_text())
-            self.assertEqual(sum(call.args[0] == ['systemctl', 'restart', 'sub2api-compose-updater@kdan'] for call in run.call_args_list), 2)
+            self.assertEqual(list(override['services']), [service])
+            self.assertEqual(override['services'][service]['environment']['UPDATE_GITHUB_TOKEN'], '${UPDATE_GITHUB_TOKEN:-}')
+            self.assertIn(str(project), (root / ('etc/systemd/system/sub2api-compose-updater@' + channel + '.service.d/deployment.conf')).read_text())
+            self.assertEqual(sum(call.args[0] == ['systemctl', 'restart', 'sub2api-compose-updater@' + channel] for call in run.call_args_list), 2)
 
     def test_missing_service_rejected_before_writing(self):
         with tempfile.TemporaryDirectory() as temporary:

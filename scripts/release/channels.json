@@ -1,4 +1,21 @@
 {
-  "kdan": {"repository": "holeenlu/sub2api", "branch": "main", "image": "ghcr.io/holeenlu/kdan", "zh_tw": true},
-  "tapmodels": {"repository": "erwinlin/TapModels", "branch": "main", "image": "ghcr.io/erwinlin/tapmodels", "zh_tw": true}
+  "kdan": {
+    "repository": "holeenlu/sub2api",
+    "branch": "main",
+    "image": "ghcr.io/holeenlu/kdan",
+    "zh_tw": true
+  },
+  "tapmodels": {
+    "repository": "holeenlu/sub2api",
+    "branch": "TapModels",
+    "image": "ghcr.io/holeenlu/tapmodels",
+    "zh_tw": true,
+    "version_floor": "0.2.13.2"
+  },
+  "tokensavy": {
+    "repository": "holeenlu/sub2api",
+    "branch": "tokensavy",
+    "image": "ghcr.io/holeenlu/tokensavy",
+    "zh_tw": true
+  }
 }
