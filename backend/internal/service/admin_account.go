@@ -571,6 +571,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	if err := validateOpenAIAPIKeyIdentityExtra(account, account.Extra); err != nil {
+		return nil, err
+	}
 	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
 		return nil, err
 	}
@@ -963,6 +966,9 @@ func (s *adminServiceImpl) updateAccount(
 		}
 	}
 
+	if err := validateOpenAIAPIKeyIdentityExtra(account, account.Extra); err != nil {
+		return nil, err
+	}
 	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
 		return nil, err
 	}
@@ -1033,6 +1039,15 @@ func (s *adminServiceImpl) updateAccount(
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
 	if err := ValidateAccountCostMultiplierExtra(updates); err != nil {
 		return err
+	}
+	if _, exists := updates[OpenAIAPIKeyCodexIdentityKey]; exists {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := validateOpenAIAPIKeyIdentityExtra(account, updates); err != nil {
+			return err
+		}
 	}
 	_, moveChanged := updates[ExcelBPSAutoMoveOn403Key]
 	_, targetChanged := updates[ExcelBPS403TargetGroupIDKey]

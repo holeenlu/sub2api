@@ -635,6 +635,8 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        apiKeyCodexIdentity: "Use canonical Codex outbound identity",
+        apiKeyCodexIdentityHint: "Off by default, preserving existing outbound headers. Enable to normalize User-Agent, originator and version for this OpenAI API-key account, following the configured Codex version. Provider headers and explicit administrator overrides take precedence. OAuth/BPS and inbound audit headers are unchanged; this does not guarantee fewer rate limits.",
         modelMappingAliases: 'Use model mappings as aliases and allow other native models',
         modelMappingAliasesHint: 'Regular OpenAI OAuth accounts only. Enabled mappings rewrite selected models while other native models remain available; disabled nonempty mappings remain allowlists. Group allowlists always apply. Existing accounts are not switched automatically.',
         changeModelMappingScope: 'Change model mapping scope',
