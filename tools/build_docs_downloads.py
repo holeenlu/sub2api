@@ -11,7 +11,10 @@ import stat
 import zipfile
 
 DOWNLOADS = Path(__file__).resolve().parents[1] / "frontend/public/downloads"
+SKILL_FILES = ("SKILL.md", "agents/openai.yaml", "requirements.txt", "scripts/generate.py")
 PACKAGES = {
+    "gpt-image-flare": ("kdan-image-skills/gpt-image-flare", SKILL_FILES),
+    "gpt-image-sunburst": ("kdan-image-skills/gpt-image-sunburst", SKILL_FILES),
     "kdan-codex-session-repair": (
         "kdan-codex-session-repair",
         ("README.md", "repair_sessions.py", "resume_sessions.py", "repair-sessions.sh", "RepairSessions.ps1"),

@@ -27,16 +27,16 @@ OpenAI 分組的 Codex 標籤提供兩種模式，開啟“使用金鑰”時預
 - **Legacy**：`config.toml` 使用 `requires_openai_auth = true`，並下載 `auth.json`。只在 Codex 版本需要該登入形態時使用。
 - **API key**：`requires_openai_auth = false`，把 Key 寫入 `experimental_bearer_token`，並附加本地圖片擴充套件所需的請求標頭。該模式會把金鑰儲存在磁碟，限制檔案權限且不要提交到儲存庫。
 
-其他分組的 Codex 路由預設使用 `env_key = "KDAN_API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`；智譜標籤會把 API Key 寫入生成的 `experimental_bearer_token`，因此單獨複製 `config.toml` 也不依賴 `KDAN_API_KEY`。WebSocket 標籤只對 OpenAI Responses WebSocket 路徑啟用。
+其他分組的 Codex 路由預設使用 `env_key = "KDAN_API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`；智譜分組把 API Key 寫入生成的 `experimental_bearer_token`，因此單獨複製 `config.toml` 也不會依賴 `KDAN_API_KEY`。WebSocket 標籤只對 OpenAI Responses WebSocket 路徑啟用。
 
 ## 模型目錄
 
-若目前 Codex 分頁提供模型目錄，請依視窗選取的方式設定：
+若目前 Codex 標籤提供模型目錄，按彈出視窗所選方式設定：
 
-- **本機檔案**：取得並下載 codex-models.json，儲存至產生設定中 model_catalog_json 指向的路徑。變更檔名或 CODEX_HOME 後須同步修改路徑。
-- **遠端目錄**：用戶端與群組支援時，可使用視窗產生的 model_catalog_url，由用戶端請求目前 Key 的目錄。不要自行改變此欄位在設定中的位置。
+- **本地檔案**：取得並下載 codex-models.json，儲存到生成設定的 model_catalog_json 所指路徑。修改檔名或 CODEX_HOME 後須同步修改路徑。
+- **遠端目錄**：用戶端和分組支援時，可使用彈出視窗生成的 model_catalog_url，由用戶端請求目前 Key 的目錄。不要自行改變該欄位在設定中的位置。
 
-不支援目錄的分頁請使用該群組開放的精確模型 ID。模型目錄、帳號可調度狀態與請求協定是不同條件；清單可見不保證所有工具與介面可用。設定以目前視窗為準，不要將一般模型清單 JSON 當成 Codex 專用目錄。
+不支援目錄的標籤使用該分組開放的精確模型 ID。模型目錄、帳號可排程狀態和請求協議是不同條件；列表可見不保證所有工具與介面可用。設定來源以目前彈出視窗為準，不把普通模型列表 JSON 當作 Codex 專用目錄。
 
 ## KDAN 介面操作
 

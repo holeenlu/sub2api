@@ -1,8 +1,8 @@
 ## 先準備好 Key 和模型
 
-在 [API 金鑰](/keys) 選擇要使用的 Key，點選「使用金鑰 → Codex」。群組決定開放模型與接入範圍，優先複製目前視窗產生的設定。本文型號僅為範例，不保證目前 Key 可用。既有設定先備份，再合併所需欄位。
+在 [API 金鑰](/keys) 選擇要使用的 Key，點選“使用金鑰 → Codex”。分組決定開放模型與接入範圍，優先複製目前彈出視窗生成的設定。本文型號僅為範例，不保證目前 Key 可用。已有設定先備份，再合併所需欄位。
 
-主模型與審查模型由目前 Key 的設定資料提供；取得模型目錄後，可依目錄中的可用型號更新選擇。不要將文件範例、前端候選項或廠商所有型號視為這把 Key 的授權清單。
+主模型與審查模型由目前 Key 的設定資料提供；取得模型目錄後，可按目錄中的可用型號更新選擇。不要把文件範例、前端候選項或廠商全部型號視為這把 Key 的授權清單。
 
 本文適用於本機讀取 Codex 設定的用戶端。雲端任務不一定讀取這份設定；需要在實際執行主機單獨設定。
 
@@ -58,7 +58,7 @@ supports_websockets = false
 
 在剛才設定環境變數的同一個終端機執行 `codex`。`supports_websockets = false` 是先驗證 HTTP/SSE 的設定，不代表本站沒有 WebSocket 路由。
 
-OpenAI 群組設定使用視窗顯示的 Provider ID。此 ID 區分大小寫，必須與 model_providers 下的表名一致。API key 模式使用直接權杖；Legacy 模式同時需要對應的 auth.json。模型目錄若選本機檔案，還須下載目錄 JSON，不能只儲存 config.toml。切換設定後請完全重啟用戶端。
+OpenAI 分組的設定使用彈出視窗顯示的 Provider ID。該 ID 區分大小寫，必須與 model_providers 下的表名一致。API key 模式使用直接權杖；Legacy 模式同時需要對應的 auth.json。模型目錄若選本地檔案，還必須下載目錄 JSON，不能只儲存 config.toml。切換設定後完全重啟用戶端。
 
 ## 桌面版：讓應用拿到 Key
 
@@ -72,16 +72,16 @@ OpenAI 群組設定使用視窗顯示的 Provider ID。此 ID 區分大小寫，
 
 安裝名稱或路徑不同，請在 Finder 中確認後替換。Windows 在設定 `$env:KDAN_API_KEY` 的 PowerShell 中執行實際安裝的 Codex `.exe` 路徑。遠端主機、WSL 和容器有各自的環境與使用者目錄，需要在執行位置設定。
 
-如果必須使用圖示啟動，可在 OpenAI 分組的“使用金鑰”彈出視窗選擇 **API key**，下載其完整 `config.toml`。它會把認證資訊儲存在設定檔中，注意檔案權限與備份，勿提交到儲存庫。智譜分組的 Codex 設定會直接把 API Key 寫入 `experimental_bearer_token`，複製 `config.toml` 即可使用；其他分組優先使用彈出視窗生成的 `env_key` 設定。不要自行把兩種驗證欄位並列。
+如果必須使用圖示啟動，可在 OpenAI 分組的“使用金鑰”彈出視窗選擇 **API key**，下載其完整 `config.toml`。它會把認證資訊儲存在設定檔中，注意檔案權限與備份，勿提交到儲存庫。智譜分組的 Codex 設定直接把 API Key 寫入 `experimental_bearer_token`，複製 `config.toml` 即可使用；其他分組優先使用彈出視窗生成的 `env_key` 設定。不要自行把兩種驗證欄位並列。
 
-## 目前群組模型目錄
+## 目前分組模型目錄
 
-若目前 Codex 分頁提供模型目錄，請依視窗選取的方式設定：
+若目前 Codex 標籤提供模型目錄，按彈出視窗所選方式設定：
 
-- **本機檔案**：取得並下載 codex-models.json，儲存至產生設定中 model_catalog_json 指向的路徑。變更檔名或 CODEX_HOME 後須同步修改路徑。
-- **遠端目錄**：用戶端與群組支援時，可使用視窗產生的 model_catalog_url，由用戶端請求目前 Key 的目錄。不要自行改變此欄位在設定中的位置。
+- **本地檔案**：取得並下載 codex-models.json，儲存到生成設定的 model_catalog_json 所指路徑。修改檔名或 CODEX_HOME 後須同步修改路徑。
+- **遠端目錄**：用戶端和分組支援時，可使用彈出視窗生成的 model_catalog_url，由用戶端請求目前 Key 的目錄。不要自行改變該欄位在設定中的位置。
 
-不支援目錄的分頁請使用該群組開放的精確模型 ID。模型目錄、帳號可調度狀態與請求協定是不同條件；清單可見不保證所有工具與介面可用。設定以目前視窗為準，不要將一般模型清單 JSON 當成 Codex 專用目錄。
+不支援目錄的標籤使用該分組開放的精確模型 ID。模型目錄、帳號可排程狀態和請求協議是不同條件；列表可見不保證所有工具與介面可用。設定來源以目前彈出視窗為準，不把普通模型列表 JSON 當作 Codex 專用目錄。
 
 ## 驗證接入
 
@@ -97,4 +97,4 @@ OpenAI 群組設定使用視窗顯示的 Provider ID。此 ID 區分大小寫，
 | Speed/Fast 入口不出現 | 模型目錄是否宣告對應能力；價格倍率不會自動建立用戶端入口 |
 | 舊任務不可見 | 原專案、封存、Provider 與本地資料目錄；先診斷，不刪除歷史 |
 
-設定由目前「使用金鑰」視窗產生。欄位說明請見 [Codex 設定參考](https://developers.openai.com/codex/config-reference/)。
+設定由目前“使用金鑰”視窗生成。欄位說明見 [Codex 設定參考](https://developers.openai.com/codex/config-reference/)。
