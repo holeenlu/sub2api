@@ -26,7 +26,7 @@ func (s *ModelCatalogService) TicketCandidates(ctx context.Context, a *Account) 
 		if !codexTicketAccountSupportsModel(a, e.ID) {
 			continue
 		}
-		if allowed, handled := accountCatalogPolicyAllows(a, e.ID); handled && !allowed {
+		if !a.IsModelSupported(e.ID) {
 			continue
 		}
 		out = append(out, CatalogTicketCandidate{e.ID, fingerprints[normalizeOpenAICodexTicketModel(e.ID)], e.Access})

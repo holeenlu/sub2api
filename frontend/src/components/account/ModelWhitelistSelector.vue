@@ -325,7 +325,6 @@ const selectedRetiredModels = computed(() => props.modelValue.filter(id => retir
 // These choices configure account supply; discovery evidence is shown in the
 // catalog admin page. Loading candidates never changes the saved policy.
 const availableOptions = computed(() => catalogModels.value
-  .filter(m => m.lifecycle !== 'retired' && m.access !== 'unlisted')
   .map(m => ({ value: m.id, label: m.display_name || m.id })))
 
 async function loadCatalog(refresh = false) {

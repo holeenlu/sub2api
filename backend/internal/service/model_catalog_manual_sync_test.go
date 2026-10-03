@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,6 +19,8 @@ func (r *manualCatalogRepo) SaveJob(context.Context, ModelCatalogJob) error { re
 func TestModelCatalogManualSyncWorksWithoutAutomaticSchedule(t *testing.T) {
 	s, repo, a, _ := newCatalogTestService(catalogResponse(http.StatusOK, `{"data":[{"id":"gpt-image-future"}]}`))
 	s.repo = &manualCatalogRepo{repo}
+	// Model discovery must finish even when the independent pricing client is unavailable.
+	s.prices = &PricingService{cfg: &config.Config{Pricing: config.PricingConfig{RemoteURL: "https://pricing.invalid"}}}
 	s.settings = &SettingService{settingRepo: &catalogSettingsMemory{values: map[string]string{ModelCatalogSettingsKey: `{"enabled":false}`}}}
 	require.False(t, s.Settings(context.Background()).Enabled)
 	// Manual sync must bypass due-date scheduling, and does not need Start().
@@ -43,12 +46,6 @@ func TestModelCatalogRefreshPreservesFailureReasonForJob(t *testing.T) {
 	_, err := s.Refresh(context.Background(), a.ID, true)
 	require.ErrorIs(t, err, ErrModelCatalogUnavailable)
 	require.Equal(t, "authentication_unavailable", catalogSyncErrorCode(err))
-}
-
-func TestModelCatalogDisabledScheduleKeepsPricingSchedulerOwnership(t *testing.T) {
-	s := &ModelCatalogService{prices: &PricingService{}}
-	s.refreshPricesIfDue(ModelCatalogSettings{Enabled: false})
-	require.True(t, s.prices.catalogRefreshManaged.Load(), "disabling automatic sync must not restart the older pricing scheduler")
 }
 
 // Building a discovery request can fall back to the stored token. This does

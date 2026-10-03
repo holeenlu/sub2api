@@ -86,10 +86,26 @@ func (r *catalogAccountRepository) UpdateExtra(_ context.Context, _ int64, extra
 	}
 	return nil
 }
+func (r *catalogAccountRepository) ListModelAvailabilityCandidates(ctx context.Context, id *int64, platforms []string, mixed bool) ([]Account, error) {
+	return []Account{*r.a}, nil
+}
 func (r *catalogAccountRepository) ListActive(context.Context) ([]Account, error) {
 	return []Account{*r.a}, nil
 }
 
+func setTestModelWhitelist(a *Account, ids []string) {
+	if a.Credentials == nil {
+		a.Credentials = map[string]any{}
+	}
+	mapping := map[string]any{}
+	for _, id := range ids {
+		mapping[id] = id
+	}
+	a.Credentials["model_mapping"] = mapping
+}
+func (r *catalogAccountRepository) ListSchedulableByGroupID(ctx context.Context, id int64) ([]Account, error) {
+	return r.ListByGroup(ctx, id)
+}
 func catalogResponse(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
 }
@@ -118,9 +134,7 @@ func TestModelCatalogDiscoversNovelModelWithoutPresetOrRestart(t *testing.T) {
 	current, err := restarted.Account(context.Background(), a)
 	require.NoError(t, err)
 	require.Equal(t, snapshot.Revision, current.Revision)
-	ids, _, ok := restarted.ModelCatalogSnapshot(context.Background(), a)
-	require.True(t, ok)
-	require.Equal(t, []string{"opaque-new-model-731"}, ids)
+	require.Equal(t, []string{"opaque-new-model-731"}, inventoryIDs(current))
 }
 
 func TestModelCatalogRetirementAndPartialMediaPersistIndependently(t *testing.T) {
@@ -136,9 +150,7 @@ func TestModelCatalogRetirementAndPartialMediaPersistIndependently(t *testing.T)
 	require.Equal(t, "retired", byID["custom-old"].Lifecycle)
 	require.Equal(t, "image", byID["vendor-picture-731"].Kind)
 	require.Empty(t, byID["vendor-picture-731"].Missing, "media does not require text context or reasoning")
-	ids, _, ok := s.ModelCatalogSnapshot(context.Background(), a)
-	require.True(t, ok)
-	require.Equal(t, []string{"vendor-picture-731"}, ids)
+	require.True(t, a.IsModelSupported("custom-old"), "retirement metadata cannot change account admission")
 }
 
 func TestModelCatalogCredentialChangesInvalidateButPolicyEditsDoNot(t *testing.T) {
@@ -147,13 +159,11 @@ func TestModelCatalogCredentialChangesInvalidateButPolicyEditsDoNot(t *testing.T
 	_, err := s.Refresh(context.Background(), a.ID, true)
 	require.NoError(t, err)
 	a.Credentials["model_mapping"] = map[string]any{"public-image": "gpt-image-novel"}
-	ids, _, ok := s.ModelCatalogSnapshot(context.Background(), a)
-	require.True(t, ok)
-	require.Equal(t, []string{"public-image"}, ids)
-	a.Credentials["api_key"] = "new-scope"
-	_, _, ok = s.ModelCatalogSnapshot(context.Background(), a)
-	require.False(t, ok)
 	current, err := s.Account(context.Background(), a)
+	require.NoError(t, err)
+	require.Equal(t, "ready", current.Status)
+	a.Credentials["api_key"] = "new-scope"
+	current, err = s.Account(context.Background(), a)
 	require.NoError(t, err)
 	require.Equal(t, "unavailable", current.Status)
 }
@@ -172,9 +182,7 @@ func TestModelCatalogFailedRefreshKeepsSnapshotAndEmptySuccessClearsVisibility(t
 	require.NoError(t, err)
 	require.Len(t, empty.Models, 1)
 	require.Equal(t, "unlisted", empty.Models[0].Access)
-	ids, _, ok := s.ModelCatalogSnapshot(context.Background(), a)
-	require.True(t, ok)
-	require.Empty(t, ids)
+	require.True(t, a.IsModelSupported("gpt-image-novel"), "refresh cannot revoke native account permission")
 }
 
 func TestModelCatalogPaginationRetainsPagesAndRejectsMissingCursor(t *testing.T) {

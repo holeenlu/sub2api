@@ -111,20 +111,19 @@ export async function getById(id: number, options?: { signal?: AbortSignal }): P
 export interface ModelAllowlistCandidates {
   models: string[]
   /** Candidates without a complete sale price yet; shown as pending pricing. */
-  pricingPending: string[]
 }
 
 export async function getModelAllowlistCandidates(
   id: number,
   platform?: GroupPlatform
 ): Promise<ModelAllowlistCandidates> {
-  const { data } = await apiClient.get<{ models: string[]; pricing_pending?: string[] }>(
+  const { data } = await apiClient.get<{ models: string[] }>(
     `/admin/groups/${id}/model-allowlist-candidates`,
     {
       params: platform ? { platform } : undefined
     }
   )
-  return { models: data.models || [], pricingPending: data.pricing_pending || [] }
+  return { models: data.models || [] }
 }
 
 /**

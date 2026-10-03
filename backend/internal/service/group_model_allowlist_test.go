@@ -26,14 +26,14 @@ func TestNormalizeGroupModelAllowlist(t *testing.T) {
 			want: GroupModelAllowlist{Enabled: false},
 		},
 		{
-			name: "enabled empty list denies all",
-			in:   GroupModelAllowlist{Enabled: true},
-			want: GroupModelAllowlist{Enabled: true},
+			name:    "enabled empty list is invalid on save",
+			in:      GroupModelAllowlist{Enabled: true},
+			wantErr: "empty model list",
 		},
 		{
-			name: "blank selection normalizes to deny all",
-			in:   GroupModelAllowlist{Enabled: true, Models: []string{" ", ""}},
-			want: GroupModelAllowlist{Enabled: true},
+			name:    "blank selection is invalid on save",
+			in:      GroupModelAllowlist{Enabled: true, Models: []string{" ", ""}},
+			wantErr: "empty model list",
 		},
 		{
 			name: "trailing wildcard is accepted",

@@ -452,9 +452,8 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	modelCatalog      *ModelCatalogService
-	catalogSnapshots  sync.Map // successful discovery snapshots; no public upstream fetch
-	groupModelCatalog *GroupModelCatalogService
+	modelCatalog     *ModelCatalogService
+	catalogSnapshots sync.Map // successful discovery snapshots; no public upstream fetch
 
 	excelBPSRecoveryMu      sync.Mutex
 	excelBPSRecoveryCancel  context.CancelFunc

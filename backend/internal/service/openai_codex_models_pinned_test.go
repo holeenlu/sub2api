@@ -35,17 +35,6 @@ func TestMergeCodexModelsManifestBodiesUnionAndConfigOrder(t *testing.T) {
 	require.Contains(t, string(merged), `"slug":"model-c"`)
 }
 
-func TestRestrictCodexManifestToSourceKeepsGovernedDescriptors(t *testing.T) {
-	governed := []byte(`{"models":[{"slug":"model-a","capability":"published"},{"slug":"model-b","capability":"published"}]}`)
-	source := []byte(`{"models":[{"slug":"model-b","capability":"live"},{"slug":"model-c"}]}`)
-	filtered, err := restrictCodexManifestToSource(governed, source)
-	require.NoError(t, err)
-	require.Contains(t, string(filtered), `"slug":"model-b"`)
-	require.Contains(t, string(filtered), `"capability":"published"`)
-	require.NotContains(t, string(filtered), `"slug":"model-a"`)
-	require.NotContains(t, string(filtered), `"slug":"model-c"`)
-}
-
 func TestFetchPinnedOpenAIModelsIgnoresTransientAccountState(t *testing.T) {
 	rateLimited := pinnedOpenAIAccount(1)
 	now := time.Now()

@@ -83,7 +83,6 @@ type ModelCatalogSettings struct {
 	DeletionAlertPercent    int     `json:"deletion_alert_percent"`
 	PriorityAccountIDs      []int64 `json:"priority_account_ids,omitempty"`
 	PriorityIntervalSeconds int     `json:"priority_interval_seconds"`
-	PriceIntervalSeconds    int     `json:"price_interval_seconds"`
 	Enabled                 bool    `json:"enabled"`
 	IntervalSeconds         int     `json:"interval_seconds"`
 	TimeoutSeconds          int     `json:"timeout_seconds"`
@@ -221,5 +220,41 @@ func modelCatalogNormalizeEntries(entries []ModelCatalogEntry) []ModelCatalogEnt
 		}
 		return out[i].ID < out[j].ID
 	})
+	return out
+}
+
+func catalogRegistryApplies(e ModelCatalogEntry, a, source *Account) bool {
+	if a == nil || e.Platform != a.Platform {
+		return false
+	}
+	if e.SourceAccountID != 0 && (source == nil || source.ID != e.SourceAccountID) {
+		return false
+	}
+	if e.UpstreamNamespace == "" {
+		return true
+	}
+	if source == nil {
+		return false
+	}
+	namespace := upstreamModelRegistryBaseURL(source)
+	if source.IsOpenAIOAuth() {
+		namespace = "https://chatgpt.com/backend-api/codex"
+	}
+	return normalizeModelRegistryBaseURL(namespace) == normalizeModelRegistryBaseURL(e.UpstreamNamespace)
+}
+
+func normalizeCatalogModalities(in []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, value := range in {
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch value {
+		case "text", "image", "audio", "video":
+			if !seen[value] {
+				out = append(out, value)
+				seen[value] = true
+			}
+		}
+	}
 	return out
 }

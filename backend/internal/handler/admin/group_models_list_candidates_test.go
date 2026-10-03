@@ -28,8 +28,8 @@ type selectionInventoryAccounts struct{ service.AccountRepository }
 
 func (*selectionInventoryAccounts) ListActive(context.Context) ([]service.Account, error) {
 	return []service.Account{
-		{Platform: service.PlatformOpenAI, Extra: map[string]any{service.ModelCatalogPolicyExtraKey: service.ModelCatalogPolicy{Models: []string{"gpt-new", "gpt-image-new", "sora-new"}}}},
-		{Platform: service.PlatformAnthropic, Extra: map[string]any{service.ModelCatalogPolicyExtraKey: service.ModelCatalogPolicy{Models: []string{"claude-new"}}}},
+		{Platform: service.PlatformOpenAI, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-new": "gpt-new", "gpt-image-new": "gpt-image-new", "sora-new": "sora-new"}}},
+		{Platform: service.PlatformAnthropic, Credentials: map[string]any{"model_mapping": map[string]any{"claude-new": "claude-new"}}},
 	}, nil
 }
 
@@ -47,7 +47,10 @@ func TestGroupAllowlistCandidatesUseInventoryWithoutMembersOrPrices(t *testing.T
 	router.GET("/groups/:id/models", h.GetGroupModelAllowlistCandidates)
 	for _, url := range []string{"/groups/0/models?platform=openai", "/groups/2/models?platform=anthropic"} {
 		data := fetchModelsListCandidates(t, router, url)
-		require.ElementsMatch(t, []any{"gpt-new", "gpt-image-new", "sora-new"}, data["models"])
+		for _, id := range []string{"gpt-new", "gpt-image-new", "sora-new"} {
+			require.Contains(t, data["models"], id)
+		}
+		require.NotContains(t, data["models"], "claude-new")
 		require.Equal(t, "model_catalog", data["source"])
 	}
 }

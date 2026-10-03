@@ -15,10 +15,12 @@ import (
 )
 
 const (
-	schedulerBucketSetKey          = "sched:buckets"
-	schedulerOutboxWatermarkKey    = "sched:outbox:watermark"
-	schedulerAccountPrefix         = "sched:acc:"
-	schedulerAccountMetaPrefix     = "sched:meta:"
+	schedulerBucketSetKey       = "sched:buckets"
+	schedulerOutboxWatermarkKey = "sched:outbox:watermark"
+	// Old snapshots omit whitelist identities stored by migration 263. A cache
+	// miss reloads the migrated account instead of reusing the old permission set.
+	schedulerAccountPrefix         = "sched:acc:v2:"
+	schedulerAccountMetaPrefix     = "sched:meta:v2:"
 	schedulerAccountLastUsedPrefix = "sched:acc:last_used:"
 	schedulerActivePrefix          = "sched:active:"
 	schedulerReadyPrefix           = "sched:ready:"
@@ -292,8 +294,6 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 	}
 
 	accounts := make([]*service.Account, 0, len(values))
-	catalogIndexes := make([]int, 0)
-	catalogKeys := make([]string, 0)
 	for _, val := range values {
 		if val == nil {
 			return nil, false, nil
@@ -315,36 +315,7 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 			}
 			account.SchedulerTicketProjection = true
 		}
-		if _, ok := account.Extra[service.ModelCatalogPolicyExtraKey]; ok {
-			catalogIndexes = append(catalogIndexes, len(accounts))
-			catalogKeys = append(catalogKeys, schedulerAccountKey(strconv.FormatInt(account.ID, 10)))
-		}
 		accounts = append(accounts, account)
-	}
-	// Catalog scope depends on the full credential principal and proxy. The
-	// compact projection intentionally omits these, so checking it against a
-	// discovery snapshot rejects otherwise healthy accounts as scope-changed.
-	// Reuse the paired full cache in one batched read; do not copy secrets into
-	// metadata or perform a database lookup for every candidate.
-	if len(catalogKeys) > 0 {
-		fullValues, err := c.mgetChunked(ctx, catalogKeys)
-		if err != nil {
-			return nil, false, err
-		}
-		for i, value := range fullValues {
-			if value == nil {
-				return nil, false, nil
-			}
-			full, err := decodeCachedAccount(value)
-			if err != nil {
-				return nil, false, err
-			}
-			index := catalogIndexes[i]
-			if full.ID != accounts[index].ID {
-				return nil, false, nil
-			}
-			accounts[index] = full
-		}
 	}
 	for i, account := range accounts {
 		if err := applySchedulerLastUsed(account, lastUsedValues[i]); err != nil {
@@ -1110,7 +1081,6 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
 		"codex_allow_without_ticket",
-		"model_catalog_policy",
 		"codex_ticket_harvest_enabled",
 		"codex_ticket_harvest_models",
 		"codex_5h_used_percent",

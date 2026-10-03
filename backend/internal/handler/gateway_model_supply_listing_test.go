@@ -14,8 +14,7 @@ func TestGatewayModelCatalogUsesKeyGroupWhitelistInsteadOfAccountInventory(t *te
 		ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"chat-open", "gpt-image-supply", "sora-supply", "not-provided"}},
 	}
 	account := service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
-		Credentials: map[string]any{"model_mapping": map[string]any{"mapping-only": "hidden-target", "chat-hidden": "chat-hidden"}},
-		Extra:       map[string]any{service.ModelCatalogPolicyExtraKey: service.ModelCatalogPolicy{Models: []string{"chat-open", "chat-hidden", "gpt-image-supply", "sora-supply"}}},
+		Credentials: map[string]any{"model_mapping": map[string]any{"chat-open": "chat-open", "chat-hidden": "chat-hidden", "gpt-image-supply": "gpt-image-supply", "sora-supply": "sora-supply"}},
 	}
 	repo := &gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{71: {account}}}
 	h := newGatewayModelsHandlerForTest(repo)
@@ -35,5 +34,5 @@ func TestGatewayModelCatalogUsesKeyGroupWhitelistInsteadOfAccountInventory(t *te
 	group.ModelAllowlist = service.GroupModelAllowlist{}
 	result = requestModelForTest(h, group, "", "")
 	require.NoError(t, json.Unmarshal(result.Body.Bytes(), &response))
-	require.ElementsMatch(t, []string{"chat-open", "chat-hidden", "gpt-image-supply", "sora-supply"}, modelIDsForTest(response.Data), "an unrestricted group still lists account policy supply rather than stale mapping keys")
+	require.ElementsMatch(t, []string{"chat-open", "chat-hidden", "gpt-image-supply", "sora-supply"}, modelIDsForTest(response.Data), "an unrestricted group uses the native account mapping list")
 }

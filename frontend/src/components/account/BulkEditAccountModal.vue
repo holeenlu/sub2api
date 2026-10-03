@@ -401,11 +401,11 @@
             class="rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
           >
             <p class="text-xs text-amber-700 dark:text-amber-400">
-              {{ t('modelCatalog.passthroughPolicyHint') }}
+              {{ t('admin.accounts.openai.modelRestrictionDisabledByPassthrough') }}
             </p>
           </div>
 
-          <div>
+          <div v-else>
             <!-- Mode Toggle -->
             <div class="mb-4 flex gap-2">
               <button
@@ -2240,16 +2240,9 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
         : openAIResponsesMode.value
   }
 
-  if (enableModelRestriction.value) {
-    if (modelRestrictionMode.value === 'whitelist') {
-      // Change access without overwriting each account's existing aliases.
-      updates.model_catalog_policy = {
-        models: [...allowedModels.value],
-      }
-    } else if (!isOpenAIModelRestrictionDisabled.value) {
-      credentials.model_mapping = buildModelMappingObject() ?? {}
-      credentialsChanged = true
-    }
+  if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value) {
+    credentials.model_mapping = buildModelMappingObject() ?? {}
+    credentialsChanged = true
   }
 
   if (enableOpenAIModelAliases.value && allOpenAIOAuthOnly.value) {

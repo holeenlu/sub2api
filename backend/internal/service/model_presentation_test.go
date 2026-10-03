@@ -19,7 +19,7 @@ func TestHiddenModelsCascadeWithoutChangingAccess(t *testing.T) {
 	group.ModelAllowlist.Models = ids
 	for i := range accounts.accounts {
 		a := &accounts.accounts[i]
-		a.Extra[ModelCatalogPolicyExtraKey] = ModelCatalogPolicy{Models: ids}
+		setTestModelWhitelist(a, ids)
 		snapshot := repo.snapshots[modelCatalogSourceKey(a.ID)]
 		base := snapshot.Models[0]
 		snapshot.Models = nil
@@ -53,14 +53,13 @@ func TestHiddenModelsCascadeWithoutChangingAccess(t *testing.T) {
 	// Real API-key discovery persists the upstream's safe display metadata.
 	downstream, _, account, transport := newCatalogTestService(catalogResponse(200, string(body)))
 	account.Schedulable = true
-	account.Extra = map[string]any{ModelCatalogPolicyExtraKey: ModelCatalogPolicy{Models: ids}}
+	setTestModelWhitelist(account, ids)
 	snapshot, err := downstream.Refresh(ctx, account.ID, true)
 	require.NoError(t, err)
 	require.Equal(t, "/v1/models", transport.lastReq.URL.Path)
 	require.Len(t, snapshot.Models, 3)
 	downstream.prices, downstream.pricingResolver = upstream.registry.prices, upstream.registry.pricingResolver
-	downstream.groupCatalog = &GroupModelCatalogService{accounts: downstream.accounts, channels: upstream.channels, snapshots: downstream, registry: downstream}
-	manifest, err := downstream.CodexManifest(ctx, group)
+	manifest, err := (&GatewayService{accountRepo: downstream.accounts}).BuildCodexModelsManifestForGroup(ctx, group, "", ids)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, gjson.GetBytes(manifest, "models.#").Int())
 	for _, model := range gjson.GetBytes(manifest, "models").Array() {
@@ -69,28 +68,17 @@ func TestHiddenModelsCascadeWithoutChangingAccess(t *testing.T) {
 	profile, err := downstream.SetupProfile(ctx, &APIKey{Group: group})
 	require.NoError(t, err)
 	require.Empty(t, profile.Model, "background-only catalogs cannot generate a main model")
-	for _, catalog := range []*GroupModelCatalogService{upstream, downstream.groupCatalog} {
-		supplier := account
-		if catalog == upstream {
-			supplier = &accounts.accounts[0]
-		}
+	for _, supplier := range []*Account{&accounts.accounts[0], account} {
 		for _, id := range ids {
-			admitted, err := catalog.Admit(ctx, group, []string{id})
-			require.NoError(t, err)
-			require.True(t, CatalogAccountAllowed(admitted, supplier))
+			require.True(t, group.ModelAllowlist.Allows(id))
+			require.True(t, supplier.IsModelSupported(id))
 		}
-		denied := *group
-		denied.ModelAllowlist.Models = []string{"other"}
-		_, err := catalog.Admit(ctx, &denied, []string{"codex-auto-review"})
-		require.Error(t, err, "hidden status is not an authorization bypass")
 	}
-	account.Extra[ModelCatalogPolicyExtraKey] = ModelCatalogPolicy{Models: []string{"other"}}
-	_, err = downstream.groupCatalog.Admit(ctx, group, []string{"gpt-reserve"})
-	require.Error(t, err, "account restrictions still apply")
-	account.Extra[ModelCatalogPolicyExtraKey] = ModelCatalogPolicy{Models: ids}
-	delete(downstream.prices.pricingData, "vendor-hidden")
-	_, err = downstream.groupCatalog.Admit(ctx, group, []string{"vendor-hidden"})
-	require.Error(t, err, "hidden models still require valid pricing")
+	denied := *group
+	denied.ModelAllowlist.Models = []string{"other"}
+	require.False(t, denied.ModelAllowlist.Allows("codex-auto-review"), "hidden status cannot bypass a group restriction")
+	setTestModelWhitelist(account, []string{"other"})
+	require.False(t, account.IsModelSupported("gpt-reserve"), "hidden status cannot bypass an account restriction")
 }
 
 func TestHiddenManifestContractsSurviveConversionAndSelection(t *testing.T) {

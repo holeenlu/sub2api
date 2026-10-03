@@ -1567,12 +1567,7 @@ export interface OpenAIResponsesState {
   openai_responses_supported?: boolean
 }
 
-export interface AccountModelCatalogPolicy {
-  models: string[]
-}
-
 export interface CreateAccountRequest {
-  model_catalog_policy?: AccountModelCatalogPolicy
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1592,7 +1587,6 @@ export interface CreateAccountRequest {
 }
 
 export interface UpdateAccountRequest {
-  model_catalog_policy?: AccountModelCatalogPolicy
   name?: string
   notes?: string | null
   type?: AccountType

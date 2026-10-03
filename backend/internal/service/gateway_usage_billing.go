@@ -842,14 +842,6 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		requestedModel = input.OriginalModel
 	}
 
-	if CatalogEnforced(apiKey.Group) {
-		if identified, _ := s.hasIdentifiedResponseModelPricing(ctx, billingModel, apiKey); !identified && result.ImageCount == 0 && result.AudioUsage == nil && result.SearchCount == 0 {
-			return pendingCatalogPricing(ctx, s.usageLogRepo, apiKey.ID, result.RequestID, billingModel, result.Usage)
-		}
-	}
-	if !catalogUsagePriced(ctx, s.resolver, s.billingService, apiKey.Group, billingModel, UsageTokens{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens, CacheReadTokens: result.Usage.CacheReadInputTokens, CacheCreationTokens: result.Usage.CacheCreationInputTokens, CacheCreation5mTokens: result.Usage.CacheCreation5mTokens, CacheCreation1hTokens: result.Usage.CacheCreation1hTokens, ImageOutputTokens: result.Usage.ImageOutputTokens}) {
-		return pendingCatalogPricing(ctx, s.usageLogRepo, apiKey.ID, result.RequestID, billingModel, result.Usage)
-	}
 	// 计算费用
 	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, pricingAt)
 	// response_model：按上游成功响应自报的模型计费（渠道显式开启才生效）。
@@ -863,9 +855,6 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		result.ImageCount > 0 || result.AudioUsage != nil || result.SearchCount > 0,
 	); responseModel != "" && !strings.EqualFold(responseModel, strings.TrimSpace(billingModel)) {
 		identified, responseChannelPriced := s.hasIdentifiedResponseModelPricing(ctx, responseModel, apiKey)
-		if !identified && CatalogEnforced(apiKey.Group) {
-			return pendingCatalogPricing(ctx, s.usageLogRepo, apiKey.ID, result.RequestID, responseModel, result.Usage)
-		}
 		if identified {
 			responseCost := s.calculateRecordUsageCost(ctx, result, apiKey, responseModel, multiplier, imageMultiplier, pricingAt)
 			baselineChannelPriced := s.resolveChannelPricing(ctx, billingModel, apiKey) != nil

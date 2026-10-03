@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 )
@@ -44,7 +43,7 @@ func (s *GatewayService) PinRequestPricing(ctx context.Context, key *APIKey) con
 	p := &RequestPricingSnapshot{StartedAt: time.Now().UTC()}
 	if prices := s.billingService.pricingService; prices != nil {
 		prices.mu.RLock()
-		p.prices = &PricingService{cfg: prices.cfg, catalogManaged: key != nil && CatalogEnforced(key.Group), pricingData: prices.pricingData, localHash: prices.localHash, customFilesHash: prices.customFilesHash, referencePrices: prices.referencePrices, referenceSupplementHash: prices.referenceSupplementHash}
+		p.prices = &PricingService{cfg: prices.cfg, pricingData: prices.pricingData, localHash: prices.localHash, customFilesHash: prices.customFilesHash, referencePrices: prices.referencePrices, referenceSupplementHash: prices.referenceSupplementHash}
 		prices.mu.RUnlock()
 		p.Revision = p.prices.PriceRevision()
 	}
@@ -130,35 +129,10 @@ func servicePricingContext(parent, base context.Context) context.Context {
 	return CopyRequestPricingContext(parent, base)
 }
 
-func (s *OpenAIGatewayService) PrepareCatalogTurn(ctx context.Context, key *APIKey, models []string) (context.Context, error) {
+func (s *OpenAIGatewayService) PreparePricingTurn(ctx context.Context, key *APIKey) context.Context {
 	ctx = context.WithValue(ctx, requestPricingContextKey{}, (*RequestPricingSnapshot)(nil))
 	gateway := &GatewayService{billingService: s.billingService, channelService: s.channelService, userGroupRateResolver: s.userGroupRateResolver}
-	ctx = gateway.PinRequestPricing(ctx, key)
-	if key != nil && s.groupModelCatalog != nil {
-		return s.groupModelCatalog.Admit(ctx, key.Group, models)
-	}
-	return ctx, nil
-}
-
-// Unknown response-model prices are queued for operator settlement. The request
-// already ran: do not replay generation or report an implicit free charge.
-func pendingCatalogPricing(ctx context.Context, repo UsageLogRepository, keyID int64, requestID, model string, usage any) error {
-	revision := ""
-	if p := RequestPricingFromContext(ctx); p != nil {
-		revision = p.Revision
-	}
-	raw, err := json.Marshal(map[string]any{"status": "pending", "reason": "pricing_unavailable", "model": model, "usage": usage})
-	if err != nil {
-		return err
-	}
-	audit, ok := repo.(UsagePricingAuditRepository)
-	if !ok {
-		return fmt.Errorf("pricing unavailable for %s; audit repository unavailable", model)
-	}
-	if err := audit.SaveUsagePricingAudit(ctx, keyID, requestID, revision, raw); err != nil {
-		return err
-	}
-	return fmt.Errorf("pricing pending settlement for request %s", requestID)
+	return gateway.PinRequestPricing(ctx, key)
 }
 
 func (s *PricingService) catalogPricingGeneration() *PricingService {

@@ -213,7 +213,7 @@ func TestGroupModelCatalogSharedCodexPreservesMetadataAndETag(t *testing.T) {
 	gateway := &OpenAIGatewayService{accountRepo: accounts}
 	channels := &mockChannelRepository{listAllFn: func(context.Context) ([]Channel, error) { return nil, nil }}
 	catalog := NewGroupModelCatalogService(accounts, channels, nil, gateway)
-	group := &Group{ID: 10, Platform: PlatformOpenAI}
+	group := &Group{ID: 10, Platform: PlatformOpenAI, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"alias"}}}
 	shared, err := catalog.Resolve(context.Background(), group)
 	require.NoError(t, err)
 	manifest, configured, err := gateway.BuildGroupConfiguredCodexModelsManifest(context.Background(), group, "")

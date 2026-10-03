@@ -16,6 +16,74 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestModelCatalogPolicyMigration(t *testing.T) {
+	dsn := os.Getenv("CATALOG_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set CATALOG_TEST_DATABASE_URL to a disposable PostgreSQL database")
+	}
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	defer db.Close()
+	migration, err := os.ReadFile("../../migrations/263_model_catalog_candidates_only.sql")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, policy, mapping, extra, mode, want string
+		invalid                                  bool
+	}{
+		{name: "identities and authorized aliases", policy: `{"models":["selected"]}`, mapping: `{"alias":"selected","stale":"blocked"}`, want: `{"selected":"selected","alias":"selected"}`},
+		{name: "selected alias retains target", policy: `{"models":["alias"]}`, mapping: `{"alias":"target"}`, want: `{"alias":"target"}`},
+		{name: "empty unrestricted", policy: `{"models":[]}`, mapping: `{"stale":"stale"}`, want: `{}`},
+		{name: "legacy", policy: `{"mode":"legacy"}`, mapping: `{"old":"target"}`, want: `{"old":"target"}`},
+		{name: "null", policy: `null`, mapping: `{"old":"target"}`, want: `{"old":"target"}`},
+		{name: "restricted explicit alias mode", policy: `{"models":["selected"]}`, mapping: `{"alias":"selected"}`, mode: "aliases", want: `{"selected":"selected","alias":"selected"}`},
+		{name: "wildcard requires review", policy: `{"models":["gpt-*"]}`, mapping: `{}`, invalid: true},
+		{name: "passthrough requires review", policy: `{"models":["selected"]}`, mapping: `{}`, extra: `"openai_oauth_passthrough":true`, invalid: true},
+		{name: "unrestricted aliases require review", policy: `{"models":[]}`, mapping: `{"alias":"target"}`, invalid: true},
+		{name: "malformed stays denied", policy: `{"models":42}`, mapping: `{}`, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, err := db.Begin()
+			require.NoError(t, err)
+			defer tx.Rollback()
+			_, err = tx.Exec(`CREATE TEMP TABLE accounts(id BIGINT PRIMARY KEY, platform TEXT, type TEXT, parent_account_id BIGINT, credentials JSONB, extra JSONB, updated_at TIMESTAMPTZ);
+CREATE TEMP TABLE scheduler_outbox(event_type TEXT, account_id BIGINT);
+INSERT INTO accounts VALUES(1,'openai','oauth',NULL,'{}','{"model_catalog_policy":{"models":["safe"]}}',NOW());`)
+			require.NoError(t, err)
+			extra := `{"model_catalog_policy":` + tc.policy
+			if tc.extra != "" {
+				extra += "," + tc.extra
+			}
+			extra += "}"
+			credentials := `{"model_mapping":` + tc.mapping + `,"model_mapping_mode":"` + tc.mode + `"}`
+			_, err = tx.Exec(`INSERT INTO accounts VALUES(2,'openai','oauth',NULL,$1,$2,NOW());`, credentials, extra)
+			require.NoError(t, err)
+			_, err = tx.Exec("SAVEPOINT migration_start")
+			require.NoError(t, err)
+			_, err = tx.Exec(string(migration))
+			if tc.invalid {
+				require.ErrorContains(t, err, "accounts {2}")
+				_, err = tx.Exec("ROLLBACK TO SAVEPOINT migration_start")
+				require.NoError(t, err)
+				var unchanged, events int
+				require.NoError(t, tx.QueryRow(`SELECT count(*) FROM accounts WHERE extra ? 'model_catalog_policy'`).Scan(&unchanged))
+				require.NoError(t, tx.QueryRow(`SELECT count(*) FROM scheduler_outbox`).Scan(&events))
+				require.Equal(t, 2, unchanged, "even the valid first row must roll back")
+				require.Zero(t, events)
+				return
+			}
+			require.NoError(t, err)
+			var got string
+			require.NoError(t, tx.QueryRow(`SELECT credentials->'model_mapping' FROM accounts WHERE id=2`).Scan(&got))
+			require.JSONEq(t, tc.want, got)
+			var remaining int
+			require.NoError(t, tx.QueryRow(`SELECT count(*) FROM accounts WHERE extra ? 'model_catalog_policy'`).Scan(&remaining))
+			require.Zero(t, remaining)
+			_, err = tx.Exec(string(migration))
+			require.NoError(t, err, "repeat execution is harmless")
+		})
+	}
+}
+
 // Uses a disposable database only; the explicit variable is never sourced
 // from the application's production database configuration.
 func TestModelCatalogPostgresPublication(t *testing.T) {

@@ -19,16 +19,13 @@ import (
 // ModelCatalogService is the shared discovery control plane. Read APIs never
 // perform upstream I/O. Refreshes use both local singleflight and a database lease.
 type ModelCatalogService struct {
-	lifecycleMu           sync.Mutex
-	stopped               bool
-	workerCtx             context.Context
-	activeJobs            int
-	manualSyncID          string
-	startOnce             sync.Once
-	priceRefreshRequested atomic.Bool
-	lastPriceCheck        time.Time
+	lifecycleMu  sync.Mutex
+	stopped      bool
+	workerCtx    context.Context
+	activeJobs   int
+	manualSyncID string
+	startOnce    sync.Once
 
-	groupCatalog    *GroupModelCatalogService
 	pricingResolver *ModelPricingResolver
 	repo            ModelCatalogRepository
 	accounts        AccountRepository
@@ -75,7 +72,7 @@ func (s *ModelCatalogService) Settings(ctx context.Context) ModelCatalogSettings
 	return s.settingsUncached(ctx)
 }
 func (s *ModelCatalogService) settingsUncached(ctx context.Context) ModelCatalogSettings {
-	out := ModelCatalogSettings{Enabled: true, IntervalSeconds: 300, TimeoutSeconds: 45, Concurrency: 2, StaleSeconds: 86400, PriceIntervalSeconds: 600, PriorityIntervalSeconds: 60, DeletionAlertPercent: 50}
+	out := ModelCatalogSettings{Enabled: true, IntervalSeconds: 300, TimeoutSeconds: 45, Concurrency: 2, StaleSeconds: 86400, PriorityIntervalSeconds: 60, DeletionAlertPercent: 50}
 	if s != nil && s.settings != nil && s.settings.settingRepo != nil {
 		if raw, err := s.settings.settingRepo.GetValue(ctx, ModelCatalogSettingsKey); err == nil {
 			_ = json.Unmarshal([]byte(raw), &out)
@@ -99,9 +96,6 @@ func (s *ModelCatalogService) settingsUncached(ctx context.Context) ModelCatalog
 	if out.PriorityIntervalSeconds < 60 || out.PriorityIntervalSeconds > 86400 {
 		out.PriorityIntervalSeconds = 60
 	}
-	if out.PriceIntervalSeconds < 60 || out.PriceIntervalSeconds > 86400 {
-		out.PriceIntervalSeconds = 600
-	}
 	return out
 }
 
@@ -122,12 +116,6 @@ func (s *ModelCatalogService) SaveSettings(ctx context.Context, cfg ModelCatalog
 		if id <= 0 {
 			return fmt.Errorf("invalid priority account ID")
 		}
-	}
-	if cfg.PriceIntervalSeconds == 0 {
-		cfg.PriceIntervalSeconds = 600
-	}
-	if cfg.PriceIntervalSeconds < 60 || cfg.PriceIntervalSeconds > 86400 {
-		return fmt.Errorf("invalid price refresh interval")
 	}
 	if cfg.IntervalSeconds < 60 || cfg.IntervalSeconds > 86400 || cfg.TimeoutSeconds < 5 || cfg.TimeoutSeconds > 120 || cfg.Concurrency < 1 || cfg.Concurrency > 8 || cfg.StaleSeconds < 300 || cfg.StaleSeconds > 604800 {
 		return fmt.Errorf("invalid model catalog synchronization settings")
@@ -452,14 +440,7 @@ func (s *ModelCatalogService) Refresh(ctx context.Context, id int64, force bool)
 			return nil, err
 		}
 		published = true
-		if s.prices != nil {
-			for _, id := range catalog.Models {
-				if s.prices.GetExactModelPricing(id) == nil {
-					s.priceRefreshRequested.Store(true)
-					break
-				}
-			}
-		}
+
 		return snapshot, nil
 	})
 	select {
@@ -649,21 +630,6 @@ func (s *ModelCatalogService) syncManually(ctx context.Context) (int, int, error
 	if ctx.Err() != nil {
 		return int(succeeded.Load()), int(failed.Load()), ctx.Err()
 	}
-	// A failed price download never replaces the last successful prices.
-	if s.prices != nil && s.prices.cfg != nil && s.prices.cfg.Pricing.RemoteURL != "" {
-		if err := s.prices.ForceUpdate(); err != nil {
-			return int(succeeded.Load()), int(failed.Load()), err
-		}
-		if prices := s.prices.ReferencePrices(); prices != nil {
-			raw, err := json.Marshal(prices.Models)
-			if err != nil {
-				return int(succeeded.Load()), int(failed.Load()), err
-			}
-			if err := s.repo.SavePrices(ctx, prices.Revision, raw); err != nil {
-				return int(succeeded.Load()), int(failed.Load()), err
-			}
-		}
-	}
 	return int(succeeded.Load()), int(failed.Load()), nil
 }
 
@@ -690,10 +656,6 @@ func (s *ModelCatalogService) Start() {
 		go func() {
 			defer s.wg.Done()
 			ctx := s.workerCtx
-			if s.prices != nil {
-				s.prices.catalogRefreshManaged.Store(true)
-				defer s.prices.catalogRefreshManaged.Store(false)
-			}
 			s.restoreReferencePrices(ctx)
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()
@@ -728,7 +690,6 @@ func (s *ModelCatalogService) runSync(ctx context.Context) {
 		}
 	}
 	cfg := s.Settings(ctx)
-	s.refreshPricesIfDue(cfg)
 	if !cfg.Enabled {
 		return
 	}
@@ -757,40 +718,4 @@ func (s *ModelCatalogService) runSync(ctx context.Context) {
 		})
 	}
 	_ = workers.Wait()
-}
-
-// Implements the existing shared group snapshot port. It reads persisted data,
-// honors aliases and never makes an upstream request while rendering a page.
-func (s *ModelCatalogService) ModelCatalogSnapshot(ctx context.Context, a *Account) ([]string, time.Time, bool) {
-	ctx = withCatalogReadCache(ctx)
-	snapshot, err := s.Account(ctx, a)
-	fixed := accountHasModelSelection(a)
-	if err != nil || (snapshot.Status == "unavailable" && !fixed) {
-		return nil, time.Time{}, false
-	}
-	ids := []string{}
-	for _, entry := range snapshot.Models {
-		allowed, _ := s.ModelIsPublished(ctx, a, entry.ID)
-		if allowed && ((entry.Access == "listed" || entry.Access == "observed") || fixed) {
-			ids = append(ids, entry.ID)
-		}
-	}
-	body, err := json.Marshal(map[string]any{"data": catalogModelIDObjects(ids)})
-	if err != nil {
-		return nil, time.Time{}, false
-	}
-	body, err = projectAccountModelsBody(body, a, nil, false)
-	if err != nil {
-		return nil, time.Time{}, false
-	}
-	ids, err = extractUpstreamModelIDs(body)
-	return ids, snapshot.UpdatedAt, err == nil
-}
-
-func catalogModelIDObjects(ids []string) []map[string]string {
-	out := make([]map[string]string, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, map[string]string{"id": id})
-	}
-	return out
 }
