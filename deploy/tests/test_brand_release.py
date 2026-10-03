@@ -28,7 +28,8 @@ class BrandReleaseTests(unittest.TestCase):
     def test_watch_instructions_preserve_branches_and_history(self):
         for branch, local, destinations in (
             ('main', 'main', ['origin/main']),
-            ('tapmodels', 'TapModels', ['origin/TapModels', 'erwinlin/main']),
+            ('tapmodels', 'TapModels', ['origin/TapModels']),
+            ('tokensavy', 'tokensavy', ['origin/tokensavy']),
         ):
             with self.subTest(branch=branch):
                 instructions = render_instructions(branch)
@@ -41,6 +42,7 @@ class BrandReleaseTests(unittest.TestCase):
                 self.assertNotIn('--force', instructions)
                 self.assertNotIn('deploy/sync.sh', instructions)
                 self.assertNotIn('KDAN:main', instructions)
+                self.assertNotIn('erwinlin', instructions)
         for path in (ROOT / '.github/workflows').glob('*sync*.yml'):
             source = path.read_text()
             if '上游更新監看' not in source:
@@ -105,7 +107,8 @@ class BrandReleaseTests(unittest.TestCase):
     def test_workflow_branch_and_image_contract(self):
         for brand, branches, image in (
             ('kdan', ['main'], 'ghcr.io/holeenlu/kdan'),
-            ('tapmodels', ['main', 'TapModels'], 'ghcr.io/holeenlu/tapmodels'),
+            ('tapmodels', ['TapModels'], 'ghcr.io/holeenlu/tapmodels'),
+            ('tokensavy', ['tokensavy'], 'ghcr.io/holeenlu/tokensavy'),
         ):
             ci_path = f'.github/workflows/{brand}-ci.yml'
             if not (ROOT / ci_path).exists():

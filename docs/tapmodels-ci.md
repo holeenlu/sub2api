@@ -1,53 +1,22 @@
-# TapModels CI 与发布
+# TapModels 持续集成与发布
 
-## 私有仓库与分支边界
+TapModels 代码、版本发布和在线更新统一使用 `holeenlu/sub2api` 的 `TapModels` 分支。共享改动先在 `main` 验证，再普通 merge 到品牌分支并保留品牌配置。详见[需求交付规范](CHANGE_DELIVERY.md)与[私有仓库同步说明](PRIVATE_REPOSITORY_SYNC.md)。
 
-主仓库 `holeenlu/sub2api` 已转为私有独立仓库，脱离 GitHub Fork 网络。
-它仍通过保留的 Git 历史同步公开 `Wei-Shaw/sub2api`。
-详见[私有仓库同步说明](PRIVATE_REPOSITORY_SYNC.md)。
-
-- 主线代码：本地 `main`（KDAN 品牌主分支）→ `origin/main`。
-- 品牌代码：本地 `TapModels` → `origin/TapModels`，另同步到 `erwinlin/main`。
-- 同步入口：`deploy/sync-upstream.sh`，普通 merge 并保留原 SHA；检查点位于 `.release/upstream-sync/<id>/state.json`。
-- 推送、部署按该次明确授权分别执行；旧 `deploy/sync.sh` 已退役。
-- `main` 的已验证内容先普通 merge 到 `TapModels`，再保留 TapModels 品牌覆盖；不向官方 upstream 推送私有代码。
+- KDAN：本地 `main` → `origin/main`。
+- TapModels：本地 `TapModels` → `origin/TapModels`。
+- Tokensavy：本地 `tokensavy` → `origin/tokensavy`。
+- 同步入口：`deploy/sync-upstream.sh`，普通 merge 保留来源 SHA；旧 `deploy/sync.sh` 已退役。
+- 不向旧品牌仓库或官方 upstream 推送交付代码；推送、版本发布、生产部署分别授权。
 
 ## 工作流
 
-| 工作流 | 触发与发布目标 |
-| --- | --- |
-| `tapmodels-ci.yml` | push/PR 到 `TapModels` |
-| `tapmodels-docker-image.yml` | push `TapModels`、数字版本 tag、手动触发；仅在品牌发布仓库推镜像 |
-| 上游监看 | 专属仓库默认 main 上每日运行 |
-
-CI 包含后端单元测试、生成代码检查、前端 lint/typecheck/测试/构建和繁中同步检查。
-监看只更新追踪 issue，不合并、不推送、不部署。
-定时和手动触发要求工作流已在默认分支注册；品牌分支 push 不依赖 Fork 网络。
-主仓库 `project-ci.yml`、`upstream-sync-watch.yml` 发布在 `origin/main`；TapModels 品牌 CI 仍按 `TapModels` 触发。
-不要假设新私有仓库已停用继承的上游工作流，须核对 Actions 设置。
+仓库仅保留 `automatic-release.yml`（Manual versioned release），由 `workflow_dispatch` 手动触发。普通提交、分支推送和标签推送都不会发版或部署。检查源码与品牌产物后，在本仓库 Actions → Manual versioned release → Run workflow 选择 `TapModels`；工作流根据仓库及分支选择 `tapmodels` 渠道。渠道配置见 `scripts/release/channels.json`。
 
 ## 镜像与发版
 
-Compose 和版本界面统一使用 `ghcr.io/erwinlin/tapmodels`。
-私有源码须使用认证 Git；匿名 raw GitHub 安装命令不适用。
-私有 GHCR 包须登录并具备读取权限，CI 则使用仓库自带的 `GITHUB_TOKEN`。
+Compose 和版本界面统一使用 `ghcr.io/holeenlu/tapmodels`，版本和在线更新来源为 `holeenlu/sub2api` 的 `tapmodels` 渠道。私有 GHCR 包须登录并具备读取权限；发布工作流使用仓库配置的认证。
 
-分支构建发布分支 tag 和 SHA tag；仅正式发版更新 `latest`。
-数字 SemVer tag（如 `1.0.0-rc.1`）中的预发布标识同时决定镜像通道与 GitHub prerelease。
-预发布不更新 `latest`；非法版本在构建前拒绝，手动选择不推送时也不创建 Release。
-带 build metadata 的版本将镜像 tag 中的 `+` 转为 `_`，Release 保留原始版本名。
-生产通过 `TAPMODELS_IMAGE` 固定 release tag 或 digest，不应把分支推送当成 latest 更新。
-
-仅从已审查的品牌提交创建版本：
-```bash
-git switch TapModels
-git tag -a 1.0.0 -m "TapModels 1.0.0"
-git push erwinlin refs/tags/1.0.0
-```
-
-数字版本 tag 属于其发布仓库对应的品牌。TapModels tag 必须推到 `erwinlin`，
-不能推到公共 `origin`。上游 `v*` tag 仅用于基线溯源，不是私有品牌发版。
-CI 不自动部署生产。
+人工发布通过渠道前缀隔离品牌版本；预发布不更新稳定版 `latest`。生产通过 `TAPMODELS_IMAGE` 固定已发布 tag 或 digest。分支推送不提高版本号、不发布镜像，也不自动升级生产。上游 `v*` tag 仅用于基线溯源。
 
 ## 徽章中的编译提交
 
