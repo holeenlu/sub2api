@@ -117,22 +117,6 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 	}
 	configuredModels := openAIConfiguredCodexModelIDsForGroup(visible, group)
 	localConfigured := len(configuredModels) > 0
-	if s.groupModelCatalog != nil {
-		shared, err := s.groupModelCatalog.Resolve(ctx, group)
-		if err != nil {
-			return nil, false, err
-		}
-		localConfigured = localConfigured || group.ModelAllowlistEnabled()
-		for _, model := range shared.Models {
-			if model.Source != "discovery" {
-				localConfigured = true
-			}
-		}
-		if shared.Status == "unavailable" {
-			return nil, false, nil
-		}
-		configuredModels = FilterCodexModelIDsForGroup(shared.CodexModelIDs(), group)
-	}
 	if !localConfigured {
 		return nil, false, nil
 	}
@@ -191,17 +175,6 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	}
 	configuredModels := openAIConfiguredCodexModelIDsForGroup(visible, group)
 	selection, filter := group.ModelAllowlist.Models, group.ModelAllowlistEnabled()
-	if s.groupModelCatalog != nil {
-		shared, err := s.groupModelCatalog.Resolve(ctx, group)
-		if err != nil {
-			return err
-		}
-		if shared.Status == "unavailable" {
-			return fmt.Errorf("group model catalog is unavailable")
-		}
-		configuredModels = FilterCodexModelIDsForGroup(shared.CodexModelIDs(), group)
-		selection, filter = configuredModels, true
-	}
 	body, changed, err := mergeConfiguredCodexModelsManifest(manifest.Body, configuredModels, selection, filter)
 	if err != nil {
 		return fmt.Errorf("merge group configured Codex models: %w", err)
@@ -889,9 +862,6 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 	modelIDs []string,
 ) ([]byte, error) {
 
-	if s != nil && s.modelCatalog != nil && CatalogEnforced(group) {
-		return s.modelCatalog.CodexManifest(ctx, group)
-	}
 	if s == nil || s.accountRepo == nil || group == nil {
 		return BuildCodexModelsManifest(modelIDs)
 	}

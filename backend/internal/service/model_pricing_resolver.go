@@ -61,8 +61,6 @@ func NewModelPricingResolver(channelService *ChannelService, billingService *Bil
 }
 
 // PricingInput 定价解析输入
-type catalogPriceOrderKey struct{}
-
 type PricingInput struct {
 	Model   string
 	GroupID *int64 // nil 表示不检查渠道
@@ -75,13 +73,6 @@ type PricingInput struct {
 func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) *ResolvedPricing {
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	if CatalogEnforced(input.Group) {
-		ctx = context.WithValue(ctx, catalogPriceOrderKey{}, true)
-	}
-	if RequestPricingFromContext(ctx) == nil && CatalogEnforced(input.Group) && r.billingService != nil && r.billingService.pricingService != nil {
-		prices := r.billingService.pricingService.catalogPricingGeneration()
-		ctx = context.WithValue(ctx, requestPricingContextKey{}, &RequestPricingSnapshot{prices: prices, Revision: prices.PriceRevision()})
 	}
 	if RequestPricingFromContext(ctx) != nil {
 		return r.resolvePinned(ctx, input)

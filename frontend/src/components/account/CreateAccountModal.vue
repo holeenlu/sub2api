@@ -3863,7 +3863,6 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
 import {
-  claudeModels,
   getPresetMappingsByPlatform,
   commonErrorCodes,
   buildModelMappingObject,
@@ -5341,7 +5340,7 @@ const resetForm = () => {
   modelMappings.value = []
   openAICompactModelMappings.value = []
   modelRestrictionMode.value = 'whitelist'
-  allowedModels.value = [...claudeModels] // Default fill related models
+  allowedModels.value = []
 
   antigravityModelRestrictionMode.value = 'mapping'
   antigravityWhitelistModels.value = []

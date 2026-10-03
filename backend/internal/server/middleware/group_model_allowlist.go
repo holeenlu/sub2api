@@ -28,7 +28,7 @@ import (
 //     `model`/`session.model` 或 multipart `model`/`session` 后回填请求体。
 //   - 拒绝：按入口协议格式返回 404，并标记运维业务限流原因
 //     local_model_configuration 与 ingress 拒绝原因 model_not_allowed。
-func GroupModelAllowlist(checkers ...func(*gin.Context, *service.Group, []string) error) gin.HandlerFunc {
+func GroupModelAllowlist() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apiKey, ok := GetAPIKeyFromContext(c)
 		if !ok || apiKey == nil || apiKey.Group == nil {
@@ -38,7 +38,7 @@ func GroupModelAllowlist(checkers ...func(*gin.Context, *service.Group, []string
 		// Capture models even if the initial allowlist is off: queued requests
 		// must honor permission changes before admission.
 		captureForQueue := apiKey.ConcurrencyLimit > 0
-		if !apiKey.Group.ModelAllowlistEnabled() && !service.CatalogEnforced(apiKey.Group) && !captureForQueue {
+		if !apiKey.Group.ModelAllowlistEnabled() && !captureForQueue {
 			c.Next()
 			return
 		}
@@ -83,15 +83,6 @@ func GroupModelAllowlist(checkers ...func(*gin.Context, *service.Group, []string
 			if !allowlist.Allows(candidate) {
 				blocked = candidate
 				break
-			}
-		}
-		if blocked == "" && service.CatalogEnforced(apiKey.Group) && len(models) > 0 {
-			for _, check := range checkers {
-				if err := check(c, apiKey.Group, models); err != nil {
-					groupModelAllowlistErrorWriter(c)(c, http.StatusServiceUnavailable, "Model catalog or pricing is not ready for this request")
-					c.Abort()
-					return
-				}
 			}
 		}
 		if blocked == "" {

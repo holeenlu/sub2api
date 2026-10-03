@@ -23,14 +23,14 @@ describe("groupModelAllowlist", () => {
     expect(state.items).toEqual([{ id: "new-model", selected: false }]);
     expect(buildModelAllowlistConfig(state).models).toEqual([]);
   });
-  it("does not grant newly discovered models in a new group", () => {
+  it("starts disabled with the upstream default candidates selected", () => {
     const state = createModelAllowlistState();
 
     setModelAllowlistCandidates(state, ["gpt-5.5", "gpt-5.4"]);
 
     expect(state.items).toEqual([
-      { id: "gpt-5.5", selected: false },
-      { id: "gpt-5.4", selected: false },
+      { id: "gpt-5.5", selected: true },
+      { id: "gpt-5.4", selected: true },
     ]);
   });
 
@@ -77,14 +77,14 @@ describe("groupModelAllowlist", () => {
     });
   });
 
-  it("saves formerly disabled groups using the visible selections", () => {
+  it("keeps disabled groups disabled when saved", () => {
     const state = hydrateModelAllowlistState({
       enabled: false,
       models: ["gpt-5.5"],
     }, ["gpt-5.5", "gpt-5.4"]);
 
     expect(buildModelAllowlistConfig(state)).toEqual({
-      enabled: true, models: ["gpt-5.5"],
+      enabled: false, models: ["gpt-5.5"],
     });
   });
 

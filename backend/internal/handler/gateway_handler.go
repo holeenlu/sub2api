@@ -1192,18 +1192,10 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		platform = forcedPlatform
 	}
 
+	var capabilities map[string]service.ModelListCapabilities
 	if h.modelCatalog != nil && apiKey != nil && apiKey.Group != nil && (platform == apiKey.Group.Platform || platform == "") {
-		catalog, capabilities, err := h.modelCatalog.ResolveForListing(c.Request.Context(), apiKey.Group)
-		if err != nil {
-			h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to load group model catalog")
-			return
-		}
-		if catalog.Status == "unavailable" {
-			h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "Group model catalog is not available")
-			return
-		}
-		writeModelsList(c, platform, catalogModelIDs(catalog), capabilities)
-		return
+		// Optional metadata must not control which models the native list exposes.
+		_, capabilities, _ = h.modelCatalog.ResolveForListing(c.Request.Context(), apiKey.Group)
 	}
 
 	if platform == service.PlatformComposite {
@@ -1217,14 +1209,14 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 			if source == nil {
 				source = defaultModelIDsForPlatform(service.PlatformComposite)
 			}
-			writeAllowlistedModelsList(c, service.PlatformComposite, apiKey.Group.ModelAllowlist.FilterForListing(source))
+			writeModelsList(c, service.PlatformComposite, apiKey.Group.ModelAllowlist.FilterForListing(source), capabilities)
 			return
 		}
 		if availableModels != nil {
-			writeModelsList(c, service.PlatformComposite, availableModels)
+			writeModelsList(c, service.PlatformComposite, availableModels, capabilities)
 			return
 		}
-		writeModelsList(c, service.PlatformComposite, defaultModelIDsForPlatform(service.PlatformComposite))
+		writeModelsList(c, service.PlatformComposite, defaultModelIDsForPlatform(service.PlatformComposite), capabilities)
 		return
 	}
 
@@ -1232,35 +1224,35 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 		source := modelListingSource(platform, availableModels, defaultModelIDsForPlatform(platform))
-		writeAllowlistedModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(source))
+		writeModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(source), capabilities)
 		return
 	}
 
 	if len(availableModels) > 0 {
-		writeModelsList(c, platform, availableModels)
+		writeModelsList(c, platform, availableModels, capabilities)
 		return
 	}
 
 	// Fallback to default models
 	if platform == service.PlatformOpenAI {
-		writeModelsListResponse(c, openai.DefaultModels)
+		writeModelsListResponse(c, openai.DefaultModels, capabilities)
 		return
 	}
 
 	if platform == service.PlatformGemini {
-		writeModelsListResponse(c, geminicli.DefaultModels)
+		writeModelsListResponse(c, geminicli.DefaultModels, capabilities)
 		return
 	}
 	if platform == service.PlatformGrok {
-		writeGrokModelsList(c, xai.DefaultModelIDs())
+		writeGrokModelsList(c, xai.DefaultModelIDs(), capabilities)
 		return
 	}
 	if platform == service.PlatformTypeSafe {
-		writeModelsList(c, platform, []string{typesafe.JevLatestModel})
+		writeModelsList(c, platform, []string{typesafe.JevLatestModel}, capabilities)
 		return
 	}
 
-	writeModelsListResponse(c, claude.DefaultModels)
+	writeModelsListResponse(c, claude.DefaultModels, capabilities)
 }
 
 // CodexModels returns the effective group model list using the manifest shape
@@ -1309,21 +1301,13 @@ func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *servi
 		return nil, nil
 	}
 
-	if h.modelCatalog != nil && (platformOverride == "" || platformOverride == group.Platform) {
-		catalog, err := h.modelCatalog.Resolve(ctx, group)
-		if err != nil {
-			return nil, err
-		}
-		if catalog.Status == "unavailable" {
-			return nil, fmt.Errorf("group model catalog is not available")
-		}
-		return service.FilterCodexModelIDsForGroup(catalog.CodexModelIDs(), group), nil
-	}
-
 	groupID := &group.ID
 	platform := strings.TrimSpace(platformOverride)
 	if platform == "" {
 		platform = group.Platform
+	}
+	if platform == service.PlatformTypeSafe {
+		return []string{}, nil
 	}
 	if platform == service.PlatformComposite {
 		availableModels, err := h.compositeAvailableModels(ctx, groupID, false)

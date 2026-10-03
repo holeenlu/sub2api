@@ -1,11 +1,13 @@
 package service
 
 import (
+	"net/http"
 	"slices"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
@@ -46,7 +48,7 @@ func supplementUnmappedOpenAIModels(accounts []Account, models []string) []strin
 
 // normalizeGroupModelAllowlist 归一化管理端提交的分组模型白名单：
 // 条目 TrimSpace、按小写去重保序；`*` 可出现在任意位置；
-// enabled=true 且列表为空时不开放任何模型。
+// An enabled whitelist must contain at least one model, as in upstream.
 func normalizeGroupModelAllowlist(cfg GroupModelAllowlist) (GroupModelAllowlist, error) {
 	out := GroupModelAllowlist{Enabled: cfg.Enabled}
 	seen := map[string]bool{}
@@ -57,6 +59,9 @@ func normalizeGroupModelAllowlist(cfg GroupModelAllowlist) (GroupModelAllowlist,
 			out.Models = append(out.Models, model)
 			seen[key] = true
 		}
+	}
+	if out.Enabled && len(out.Models) == 0 {
+		return out, infraerrors.New(http.StatusBadRequest, "INVALID_MODEL_ALLOWLIST", "model allowlist cannot be enabled with an empty model list")
 	}
 	return out, nil
 }

@@ -240,9 +240,6 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 		target, matched := account.ResolveMappedModel(id)
 		raw, available := byID[strings.TrimSpace(target)]
 		allowed := matched || (account.IsOpenAIModelMappingAliases() && account.IsModelSupported(id))
-		if accountHasModelSelection(account) {
-			allowed = account.IsModelSupported(id)
-		}
 		if !available || !allowed {
 			continue
 		}

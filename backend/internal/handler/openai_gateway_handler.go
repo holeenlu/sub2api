@@ -3504,10 +3504,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if saved, ok := catalogTurnContexts.Load(turn); ok {
 					turnCtx = saved.(context.Context)
 				} else {
-					prepared, err := h.gatewayService.PrepareCatalogTurn(ctx, apiKey, []string{model})
-					if err != nil || !service.CatalogAccountAllowed(prepared, account) {
-						return "", service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model catalog or pricing is not ready", err)
-					}
+					prepared := h.gatewayService.PreparePricingTurn(ctx, apiKey)
 					catalogTurnContexts.Store(turn, prepared)
 					turnCtx = prepared
 				}

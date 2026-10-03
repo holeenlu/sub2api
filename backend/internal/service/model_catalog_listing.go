@@ -60,9 +60,6 @@ func (s *GroupModelCatalogService) ResolveForListing(ctx context.Context, group 
 	// all suppliers so one route cannot advertise another route's larger limits.
 	candidates := map[string][]UpstreamModelMetadata{}
 	for _, model := range view.Models {
-		if model.PricingStatus == "unavailable" {
-			continue
-		}
 		ids := make([]int64, 0, len(model.AccountModels))
 		for id := range model.AccountModels {
 			ids = append(ids, id)

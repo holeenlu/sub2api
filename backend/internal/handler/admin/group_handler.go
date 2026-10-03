@@ -645,7 +645,7 @@ func (h *GroupHandler) GetGroupModelAllowlistCandidates(c *gin.Context) {
 		}
 		ids, seen := []string{}, map[string]bool{}
 		for _, entry := range catalog.Models {
-			if entry.Lifecycle != "retired" && !seen[entry.ID] {
+			if !seen[entry.ID] {
 				ids = append(ids, entry.ID)
 				seen[entry.ID] = true
 			}

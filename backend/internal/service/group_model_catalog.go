@@ -47,19 +47,15 @@ type groupCatalogSnapshots interface {
 // GroupModelCatalogService reads configuration and existing discovery snapshots.
 // Public page loads never fetch upstream catalogs or probe inference endpoints.
 type GroupModelCatalogService struct {
-	legacySnapshots groupCatalogSnapshots
-	registry        *ModelCatalogService
-	accounts        groupCatalogAccounts
-	channels        ChannelRepository
-	routes          CompositeModelRouteRepository
-	snapshots       groupCatalogSnapshots
+	registry  *ModelCatalogService
+	accounts  groupCatalogAccounts
+	channels  ChannelRepository
+	routes    CompositeModelRouteRepository
+	snapshots groupCatalogSnapshots
 }
 
 func NewGroupModelCatalogService(accounts AccountRepository, channels ChannelRepository, routes CompositeModelRouteRepository, upstream *OpenAIGatewayService) *GroupModelCatalogService {
-	catalog := &GroupModelCatalogService{accounts: accounts, channels: channels, routes: routes, snapshots: upstream, legacySnapshots: upstream}
-	if upstream != nil {
-		upstream.groupModelCatalog = catalog
-	}
+	catalog := &GroupModelCatalogService{accounts: accounts, channels: channels, routes: routes, snapshots: upstream}
 	return catalog
 }
 
@@ -72,12 +68,6 @@ func (s *GroupModelCatalogService) Resolve(ctx context.Context, group *Group) (*
 }
 
 func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, channels []Channel) (*GroupModelCatalog, error) {
-	if s.registry != nil && !CatalogEnforced(group) {
-		legacy := *s
-		legacy.registry = nil
-		legacy.snapshots = s.legacySnapshots
-		return legacy.resolve(ctx, group, channels)
-	}
 	ctx = withCatalogReadCache(ctx)
 	if group == nil {
 		return nil, fmt.Errorf("catalog group is required")
@@ -201,17 +191,7 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 				add(id, platform, "discovery")
 			}
 		}
-		// Fixed supply is owned by the account policy, not by model_mapping or
-		// by the chat-only discovery manifest. Include literal declarations in
-		// compatibility groups too; route and group checks below remain final.
-		if policy := accountModelCatalogPolicy(a); accountHasModelSelection(a) {
-			for _, id := range policy.Models {
-				if a.Platform != platform && !mixedListingModelAllowed(platform, id) {
-					continue
-				}
-				add(id, platform, "account_policy")
-			}
-		}
+		// Include configured account whitelist and alias names independently of discovery.
 		if !a.IsOpenAIPassthroughEnabled() {
 			for id, target := range stringMappingFromRaw(a.Credentials["model_mapping"]) {
 				if strings.TrimSpace(target) == "" {
@@ -350,12 +330,6 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 				if platform == PlatformOpenAI {
 					billing = resolveOpenAIAccountUpstreamModelForRequest(a, mapped, false)
 				}
-				if s.registry != nil {
-					allowed, known := s.registry.ModelIsPublished(ctx, a, billing)
-					if !known || !allowed {
-						continue
-					}
-				}
 				if a.IsOpenAIPassthroughEnabled() {
 					billing = mapped
 				}
@@ -477,26 +451,12 @@ func (c *GroupModelCatalog) ModelIDs() []string {
 	ids := make([]string, 0, len(c.Models))
 	seen := map[string]bool{}
 	for _, m := range c.Models {
-		if m.PricingStatus == "unavailable" {
-			continue
-		}
 		if !seen[m.Name] {
 			seen[m.Name] = true
 			ids = append(ids, m.Name)
 		}
 	}
 	return ids
-}
-
-// CodexModelIDs excludes native System One entries, including configured aliases.
-func (c *GroupModelCatalog) CodexModelIDs() []string {
-	llm := &GroupModelCatalog{Models: make([]GroupCatalogModel, 0, len(c.Models))}
-	for _, model := range c.Models {
-		if model.Platform != PlatformTypeSafe {
-			llm.Models = append(llm.Models, model)
-		}
-	}
-	return llm.ModelIDs()
 }
 
 // Catalog visibility ignores transient load/rate limits, but respects persistent

@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -281,9 +280,6 @@ type PricingService struct {
 	// fallback/override 文件在最近一次成功重建时的内容指纹，定时器据此判断是否
 	// 需要从本地目录缓存重建叠加层。
 	customFilesHash string
-	// The catalog owns remote cadence while enabled. This service still watches
-	// local override files, and resumes remote updates when catalog sync is off.
-	catalogRefreshManaged atomic.Bool
 
 	// 停止信号
 	stopCh chan struct{}
@@ -359,7 +355,7 @@ func (s *PricingService) startUpdateScheduler() {
 		for {
 			select {
 			case <-ticker.C:
-				if remoteEnabled && !s.catalogRefreshManaged.Load() {
+				if remoteEnabled {
 					if err := s.syncWithRemote(); err != nil {
 						logger.LegacyPrintf("service.pricing", "[Pricing] Sync failed: %v", err)
 					}
