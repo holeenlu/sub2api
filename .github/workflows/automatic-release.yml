@@ -1,4 +1,7 @@
 name: Manual versioned release
+run-name: Manual release · ${{ github.ref_name }}
+# Use workflow from main (KDAN), TapModels or tokensavy in holeenlu/sub2api.
+# Repository + selected branch determine the channel; pushes never publish.
 on:
   workflow_dispatch:
 permissions:
@@ -9,6 +12,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   select:
+    name: Select brand from source branch
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
