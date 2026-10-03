@@ -42,7 +42,7 @@ def load_configuration(path: Path):
         raise ValueError("No gateway API key found in the active provider, its environment variable or auth.json")
     # OAuth access/refresh tokens are intentionally not repurposed for a gateway.
     root = base[:-3] if base.endswith("/v1") else base
-    endpoint = root + "/backend-api/codex/models"
+    endpoint = root + "/backend-api/codex/models?catalog_view=client"
     configured_path = config.get("model_catalog_json", "~/.codex/codex-models.json")
     output = Path(os.path.expanduser(str(configured_path)))
     if not output.is_absolute():
@@ -55,13 +55,20 @@ def validate_manifest(body: bytes, config: dict) -> dict:
     if not isinstance(value, dict) or not isinstance(value.get("models"), list) or not value["models"]:
         raise ValueError("The gateway did not return a nonempty Codex models manifest")
     seen = set()
+    visible = []
     for model in value["models"]:
         if not isinstance(model, dict):
             raise ValueError("Invalid model entry")
         slug = model.get("slug")
         if not isinstance(slug, str) or not slug.strip() or slug in seen or "*" in slug:
             raise ValueError("Missing, duplicate or wildcard model ID")
+        name = slug.strip().rsplit('/', 1)[-1].lower()
+        if (str(model.get('visibility', '')).strip().lower() == 'hide'
+                or str(model.get('model_purpose', '')).strip().lower() == 'background'
+                or name.startswith('codex-auto-') or name == 'gpt-reserve'):
+            continue
         seen.add(slug)
+        visible.append(model)
         if not isinstance(model.get("input_modalities"), list) or not model["input_modalities"]:
             raise ValueError("A model is missing input modalities")
         levels = model.get("supported_reasoning_levels")
@@ -80,7 +87,9 @@ def validate_manifest(body: bytes, config: dict) -> dict:
         selected = config.get(key)
         if selected and selected not in seen:
             raise ValueError("The configured main or review model is absent; select an authorized model before updating")
-    return value
+    if not visible:
+        raise ValueError("The gateway returned no client-selectable models")
+    return {**value, 'models': visible}
 
 
 def atomic_catalog_write(path: Path, value: dict):

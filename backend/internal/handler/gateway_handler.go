@@ -1267,6 +1267,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 // expected by Codex custom providers. Official OpenAI groups continue to use
 // OpenAIGatewayHandler.CodexModels so their live upstream metadata is preserved.
 func (h *GatewayHandler) CodexModels(c *gin.Context) {
+	prepareClientCatalogValidation(c)
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey == nil || apiKey.Group == nil {
 		h.errorResponse(c, http.StatusUnauthorized, "invalid_request_error", "API key group is required")
@@ -1294,13 +1295,13 @@ func (h *GatewayHandler) CodexModels(c *gin.Context) {
 		return
 	}
 	etag := service.CodexModelsManifestETag(body)
-	c.Header("ETag", etag)
-	if service.CodexModelsManifestETagMatches(c.GetHeader("If-None-Match"), etag) {
+	if !isClientModelCatalog(c) && service.CodexModelsManifestETagMatches(c.GetHeader("If-None-Match"), etag) {
+		c.Header("ETag", etag)
 		c.Status(http.StatusNotModified)
 		c.Writer.WriteHeaderNow()
 		return
 	}
-	c.Data(http.StatusOK, "application/json", body)
+	writeOpenAIModelsResponse(c, &service.OpenAIModelsResponse{Body: body, ETag: etag})
 }
 
 func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *service.Group, platformOverride string) ([]string, error) {

@@ -14,6 +14,17 @@ func writeOpenAIModelsError(c *gin.Context, status int, errorType, message strin
 }
 
 func writeOpenAIModelsResponse(c *gin.Context, manifest *service.OpenAIModelsResponse) {
+	if isClientModelCatalog(c) {
+		body, err := projectClientModelCatalog(manifest.Body)
+		if err != nil || manifest.NotModified {
+			writeOpenAIModelsError(c, http.StatusBadGateway, "upstream_error", "Failed to build client model catalog")
+			return
+		}
+		copy := *manifest
+		copy.Body, copy.ETag = body, service.CodexModelsManifestETag(body)
+		copy.NotModified = service.CodexModelsManifestETagMatches(clientCatalogValidator(c), copy.ETag)
+		manifest = &copy
+	}
 	if c.Param("model") != "" {
 		writeRetrievedModel(c, manifest.Body)
 		return
@@ -67,13 +78,24 @@ func writeModelsListResponse(c *gin.Context, models any, capabilities ...map[str
 		models = entries
 	}
 	response := gin.H{"object": "list", "data": models}
-	if c.Param("model") == "" {
+	if c.Param("model") == "" && !isClientModelCatalog(c) {
 		c.JSON(http.StatusOK, response)
 		return
 	}
 	body, err := json.Marshal(response)
 	if err != nil {
 		writeOpenAIModelsError(c, http.StatusInternalServerError, "api_error", "Failed to encode model catalogue")
+		return
+	}
+	if isClientModelCatalog(c) {
+		body, err = projectClientModelCatalog(body)
+		if err != nil {
+			writeOpenAIModelsError(c, http.StatusInternalServerError, "api_error", "Failed to build client model catalog")
+			return
+		}
+	}
+	if c.Param("model") == "" {
+		c.Data(http.StatusOK, "application/json", body)
 		return
 	}
 	writeRetrievedModel(c, body)
