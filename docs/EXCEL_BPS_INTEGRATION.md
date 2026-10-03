@@ -463,3 +463,28 @@ main 交付验证：Go 全量 `go test -tags=unit ./...`、全量 `go vet -tags=
 原审查提交 `1665420d5` 与本实现按用户要求通过 interactive rebase 合为一个提交，备份保留于本机 `codex/backup-apikey-identity-*` 和 `.release/apikey-identity-rebase/`。品牌仅重建上一次文档 merge，保留之前的品牌历史和文件；重写后的远端覆盖另需明确授权，不能沿用旧的普通推送授权直接强推。
 
 main 验证：Go 全量 unit/vet 通过，前端 379 文件 / 3228 用例、类型检查、相关 ESLint、生产构建、zh-TW 生成检查通过，手动发版工作流 4 项回归通过。使用既有 SDK 与依赖，未安装升级；未测试真实上游账号或执行生产迁移。各品牌合并检查、日志及历史前后 SHA 记录于 `.release/apikey-identity-rebase/`。
+
+## 2026-10-04：ranxi2001 v2.9.8 增量审查
+
+固定来源范围：`ranxi2001/production@5bed80886e4b6e48b2e8825c93f7ad6b6e275eb1` → `a146fb98dd2da8cb4ae5eeeb8279e9767d379009`（v2.9.8）。定向 fetch 后共 6 个非合并提交、4 个合并包装；四个包装的 `git show --remerge-diff` 没有独立改动。官方 `upstream/main` 仍为 `b8dece9000c68815a5b867ca5a1e6f236e173905`，没有新的官方增量。
+
+本轮按已确认的 OAuth Excel/BPS 及严格必要依赖范围核查实际调用链，没有适用的新增运行补丁，不整体合入 fork。来源有新提交不等于本地 BPS 缺少功能；下表记录排除依据，推进审查检查点以避免重复审查。
+
+| 完整来源 SHA | 来源行为 | 处理及代码依据 |
+| --- | --- | --- |
+| `c90f2f34f298035a7b30cedc0f7457a8358488ed` | 将请求采集和打票流程移入智能运维导航，调整标签栏和截图测试 | 排除。只修改源智能运维 UI、请求采集/打票入口和 CI 测试清单；没有 Excel/BPS 行为修复，不恢复已退役运维入口。作者 akihitohyh，含 Claude Opus 5.5 co-author |
+| `bbdb7058ba7064e0be8142c48b7a2adf68de3aab` | 按上游域名选择区域出口；增加配置、HTTP/WS 路由器、TLS 代理连接取消与代理日志脱敏 | 排除区域路由及其配套代码。源 `http_upstream_regional.go:useRegionalEgress` 明确排除 `HTTPUpstreamProfileExcelBPS` 和打票 profile；本地 BPS 生成、附件上传、恢复探测均走既有 `HTTPUpstream.Do` 与账号代理。源 TLS 指纹代理拨号修复作用 `DoWithTLS`；本地原生 OAuth/BPS 同账号回退的 `doOpenAIUpstream` 也调用 `Do`，因此不是该链路的必要修复。`DoWithTLS` 的代理/连接池日志脱敏属于另一个调用路径，不以同文件重叠为由导入。作者 ranxi2001 |
+| `7195cdec2a0b6d28689c4e21f86f4d5449759ada` | 拒绝 WS 重定向绕过区域出口，补充区域 HTTP 公网地址及非法代理检查 | 排除。依赖上一项 `upstreamroute.Router` 和配置后的 WS dialer；本地没有该区域策略，不能把新增功能的配套守卫作为独立 BPS 修复导入。作者 ranxi2001 |
+| `8d61a4f4f77cb4140136f7b6ede158a73efcd4bd` | Astra 网关借用、共享状态探测、出口节点轮换、调度状态、私有 WS 锚点及管理 UI，新增两项迁移 | 排除。92 文件、约 7500 行，依赖 Mihomo、Astra 节点/网关状态及打票探针。共享 `Forward`、WS 池和上游模型观察字段实际服务借用锚点/失败切换，没有独立 Excel/BPS 修复；不引入 `244_astra_gateway_history.sql`、`249_astra_scheduling_states.sql`。作者 ranxi2001 |
+| `e6bd2627d4f247c19e7e7a112cf94e615909581a` | 网关借用 UI 截图与轮换缓存测试夹具 | 排除。仅验证上一项未引入功能。作者 ranxi2001 |
+| `a146fb98dd2da8cb4ae5eeeb8279e9767d379009` | 源 VERSION 更新为 2.9.8 | 排除。保留本项目官方基线版本和独立品牌发布渠道，不将 fork 发版号写入本项目。作者 ranxi2001 |
+
+合并包装：`9715ef9497e7593a2fadee9a06051291c678de10`、`f5a29383a9e0d7b20776b709e30eb979db956a82`、`dd1d9bdf5d996254a56e967a5c3b8e81039c48a3`、`403d040cacc8207b088cbf46a2dcf26d1c470af3`。没有来源运行提交被复制，保留实际来源作者归属，不宣称上述 SHA 已成为本地祖先。
+
+### 配置、兼容与交付
+
+本轮仅更新审查记录，**无需配置**；没有新增功能、Bug 修复、运行行为变化、迁移、依赖、Wire/Ent 输入、多语文案或工作流改动。既有配置入口仍为账号管理 `/admin/accounts` → 编辑 OpenAI OAuth → Excel/BPS；请求生成、图片、RPM、原生回退、403 恢复和既有账号代理保持当前实现。sub4api 独立 BPS、Prism、Mihomo、自动 BPS/优先调度/凭证运营继续不恢复。
+
+审查开始时主工作目录有正在进行的模型目录重构，后由该任务自行提交到 `main@5bd077621`；本轮隔离到该已发布提交审查，不改写其实现、不混入其他任务文件。本次审查共享先在 main 形成提交，再普通 merge 到 TapModels、tokensavy，只推送本仓库 origin 对应分支，不发版、构建镜像、部署或访问生产。
+
+验证：`sync-upstream` 在独立干净 checkout 固定官方 upstream 和 origin 目标，确认三个分支官方合并均无增量。逐项检查来源 diff、HTTP/BPS/WS 调用链、四份合并 remerge-diff、最终文档 diff 与品牌合并差异；文档内容检查和 `git diff --check` 通过。只有文档变更，未重跑后端/前端测试、真实数据库或真实上游请求，也没有自动安装依赖。来源 tip、本地提交/merge SHA 和远端核对结果写入本次交付证据。
