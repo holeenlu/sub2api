@@ -1,42 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
-  <title id="title">TapModels</title>
-  <desc id="desc">A finger-tap ripple over a model card: pick a model, start building.</desc>
-  <defs>
-    <linearGradient id="tm-bg" x1="72" y1="44" x2="442" y2="478" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#142B56"/>
-      <stop offset=".52" stop-color="#0A1A39"/>
-      <stop offset="1" stop-color="#061127"/>
-    </linearGradient>
-    <radialGradient id="tm-ambient" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(168 92) rotate(51) scale(342 382)">
-      <stop stop-color="#3E68B0" stop-opacity=".28"/>
-      <stop offset="1" stop-color="#3E68B0" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="tm-brand" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#79F4BD"/>
-      <stop offset=".48" stop-color="#39D9E7"/>
-      <stop offset="1" stop-color="#3875F6"/>
-    </linearGradient>
-    <filter id="tm-shadow" x="-25%" y="-25%" width="150%" height="165%" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy=".55" stdDeviation=".65" flood-color="#020817" flood-opacity=".34"/>
-    </filter>
-  </defs>
-
-  <rect x="16" y="16" width="480" height="480" rx="120" fill="url(#tm-bg)"/>
-  <rect x="16" y="16" width="480" height="480" rx="120" fill="url(#tm-ambient)"/>
-  <rect x="16.75" y="16.75" width="478.5" height="478.5" rx="119.25" fill="none" stroke="#A5BFFF" stroke-opacity=".16" stroke-width="1.5"/>
-
-  <!-- 24-unit grid, scaled like the previous mark. Three stacked "model cards"
-       fanned to the left, a bold T-bar on top (Tap), and a tap point with two
-       ripple arcs at the bar's end. -->
-  <g transform="translate(52 52) scale(17)" fill="none" stroke="url(#tm-brand)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" filter="url(#tm-shadow)">
-    <!-- stacked cards (Models): front card + two fanned edges -->
-    <path d="M5.4 10.2h9.2a1.6 1.6 0 0 1 1.6 1.6v6.6a1.6 1.6 0 0 1-1.6 1.6H5.4a1.6 1.6 0 0 1-1.6-1.6v-6.6a1.6 1.6 0 0 1 1.6-1.6Z"/>
-    <path d="M6.6 7.4h8.2" stroke-opacity=".55"/>
-    <path d="M7.8 4.6h7.4" stroke-opacity=".28"/>
-    <!-- tap point + ripples (Tap) -->
-    <circle cx="19.4" cy="7.4" r="1.45" fill="url(#tm-brand)" stroke="none"/>
-    <path d="M16.9 4.75a3.6 3.6 0 0 0 0 5.3" stroke-width="1.9"/>
-    <path d="M21.9 4.75a3.6 3.6 0 0 1 0 5.3" stroke-width="1.9"/>
-
-  </g>
+  <title id="title">Tokensavy</title>
+  <desc id="desc">A T monogram inside a token, in mint and indigo.</desc>
+  <defs><linearGradient id="token" x2="1" y2="1"><stop stop-color="#6ee7b7"/><stop offset="1" stop-color="#818cf8"/></linearGradient></defs>
+  <rect x="16" y="16" width="480" height="480" rx="120" fill="#111827"/>
+  <path d="M256 78 410 167v178L256 434 102 345V167Z" fill="none" stroke="url(#token)" stroke-width="24" stroke-linejoin="round"/>
+  <path d="M170 190h172M256 190v150" fill="none" stroke="url(#token)" stroke-width="38" stroke-linecap="round"/>
+  <circle cx="356" cy="341" r="16" fill="#6ee7b7"/>
 </svg>

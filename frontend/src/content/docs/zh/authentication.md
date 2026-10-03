@@ -1,6 +1,6 @@
 ## 接入地址
 
-TapModels 的实际接入地址来自系统公开设置和控制台。原始 HTTP 请求使用 `{根地址}/v1/...`。OpenAI SDK 的 `base_url` 通常使用 `{根地址}/v1`；Anthropic SDK 使用根地址，由 SDK 添加 `/v1/messages`。
+Tokensavy 的实际接入地址来自系统公开设置和控制台。原始 HTTP 请求使用 `{根地址}/v1/...`。OpenAI SDK 的 `base_url` 通常使用 `{根地址}/v1`；Anthropic SDK 使用根地址，由 SDK 添加 `/v1/messages`。
 
 文档会对配置地址做归一化，避免出现 `/v1/v1`。自定义部署域名、反向代理路径和运行配置优先于示例占位域名。
 

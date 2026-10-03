@@ -4,7 +4,7 @@
 
 先在 [API 金鑰](/keys) 複製目前群組的有效設定，確認新工作階段可用。401、503、餘額不足與上游錯誤需要排查設定或伺服器，歷史工具無法解決。請保留原始工作階段目錄。
 
-需要 Python 3.11+ 與已安裝的 Codex CLI。[下載恢復工具](/downloads/tapmodels-codex-session-repair.zip)，解壓縮後進入 tapmodels-codex-session-repair 目錄。支援 macOS、Linux 與 Windows。
+需要 Python 3.11+ 與已安裝的 Codex CLI。[下載恢復工具](/downloads/tokensavy-codex-session-repair.zip)，解壓縮後進入 tokensavy-codex-session-repair 目錄。支援 macOS、Linux 與 Windows。
 
 ## 找回工作階段並產生恢復命令
 
@@ -16,7 +16,7 @@ bash repair-sessions.sh --list
 
 
 ```powershell
-.\Repair-TapModelsSessions.ps1 -List
+.\Repair-TokensavySessions.ps1 -List
 ```
 
 
@@ -28,7 +28,7 @@ bash repair-sessions.sh --resume "SESSION_ID" --project-dir "/path/to/project"
 
 
 ```powershell
-.\Repair-TapModelsSessions.ps1 -Resume "SESSION_ID" -ProjectDir "C:\path\to\project"
+.\Repair-TokensavySessions.ps1 -Resume "SESSION_ID" -ProjectDir "C:\path\to\project"
 ```
 
 
@@ -53,7 +53,7 @@ bash repair-sessions.sh --apply --client-closed
 
 
 ```powershell
-.\Repair-TapModelsSessions.ps1 -Apply -ClientClosed
+.\Repair-TokensavySessions.ps1 -Apply -ClientClosed
 ```
 
 

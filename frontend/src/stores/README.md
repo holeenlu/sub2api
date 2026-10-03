@@ -1,6 +1,6 @@
 # Pinia Stores Documentation
 
-This directory contains all Pinia stores for the TapModels frontend application.
+This directory contains all Pinia stores for the Tokensavy frontend application.
 
 ## Stores Overview
 

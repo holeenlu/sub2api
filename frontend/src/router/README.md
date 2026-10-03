@@ -2,7 +2,7 @@
 
 ## Overview
 
-This directory contains the Vue Router configuration for the TapModels frontend application. The router implements a comprehensive navigation system with authentication guards, role-based access control, and lazy loading.
+This directory contains the Vue Router configuration for the Tokensavy frontend application. The router implements a comprehensive navigation system with authentication guards, role-based access control, and lazy loading.
 
 ## Files
 

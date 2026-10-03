@@ -27,7 +27,7 @@ OpenAI's Codex tab exposes two modes. Opening **Use key** selects **Codex CLI (W
 - **Legacy** sets `requires_openai_auth = true` and offers `auth.json`. Use it only for Codex versions that require that login shape.
 - **API key** sets `requires_openai_auth = false`, writes `experimental_bearer_token`, and adds the local image extension header. This stores the secret on disk; restrict permissions and never commit it.
 
-Routed Codex tabs default to `env_key = "TAPMODELS_API_KEY"`, `wire_api = "responses"`, and `supports_websockets = false`; the Zhipu tab embeds its API key as `experimental_bearer_token`, so its standalone `config.toml` does not depend on `TAPMODELS_API_KEY`. The WebSocket tab enables WebSocket transport only for the OpenAI Responses path.
+Routed Codex tabs default to `env_key = "TOKENSAVY_API_KEY"`, `wire_api = "responses"`, and `supports_websockets = false`; the Zhipu tab embeds its API key as `experimental_bearer_token`, so its standalone `config.toml` does not depend on `TOKENSAVY_API_KEY`. The WebSocket tab enables WebSocket transport only for the OpenAI Responses path.
 
 ## Model catalog
 
@@ -38,7 +38,7 @@ If the selected Codex tab offers a catalog, follow the mode shown in the dialog:
 
 For tabs without a catalog, use an exact model ID available to that group. Catalog visibility, routable accounts, and protocol support are separate conditions. A visible model does not guarantee every tool or endpoint. Use the current dialog as the configuration source; a plain model-list JSON response is not a Codex manifest.
 
-## Follow the TapModels UI
+## Follow the Tokensavy UI
 
 These screenshots render the current project's Use key component with an invalid sample key and `api.example.com`. Copy values from your own console, not the images.
 

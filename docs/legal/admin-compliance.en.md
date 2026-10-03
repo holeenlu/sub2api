@@ -1,12 +1,12 @@
-# TapModels Deployment and Operation Compliance Commitment
+# Tokensavy Deployment and Operation Compliance Commitment
 
 Version: v2026.06.10
 
-This document applies to any individual, organization, or authorized representative that deploys, configures, manages, operates, or effectively controls a TapModels instance. Before continuing to access or use console functions, the acknowledging party must read, understand, and accept this document in full.
+This document applies to any individual, organization, or authorized representative that deploys, configures, manages, operates, or effectively controls a Tokensavy instance. Before continuing to access or use console functions, the acknowledging party must read, understand, and accept this document in full.
 
 ## 1. Scope
 
-TapModels is built on the open-source project Sub2API (https://github.com/Wei-Shaw/sub2api, licensed under LGPL-3.0). Any self-hosted deployment, modification, hosted operation, external service, commercial use, user management, content processing, data processing, payment settlement, customer support, or upstream account/API usage based on TapModels is the sole responsibility of the party that deploys, operates, or controls the relevant instance.
+Tokensavy is built on the open-source project Sub2API (https://github.com/Wei-Shaw/sub2api, licensed under LGPL-3.0). Any self-hosted deployment, modification, hosted operation, external service, commercial use, user management, content processing, data processing, payment settlement, customer support, or upstream account/API usage based on Tokensavy is the sole responsibility of the party that deploys, operates, or controls the relevant instance.
 
 This document does not replace the open-source license, upstream terms of service, user agreements, privacy policies, data processing agreements, commercial contracts, regulatory filings, administrative permits, security assessments, or any other documents, procedures, or obligations required by applicable law or contract.
 
@@ -40,7 +40,7 @@ By continuing to use console functions, the acknowledging party makes the follow
 
 ## 5. Risk and Responsibility Notice
 
-Using TapModels for public API services, commercial relay, quota distribution, team sharing, paid calls, or similar purposes may involve risks relating to terms of service, contractual breach, data protection, content safety, consumer protection, payment settlement, taxes, export controls, sanctions compliance, cybersecurity, industry access, and administrative regulation. Requirements vary by jurisdiction and business model and may change over time.
+Using Tokensavy for public API services, commercial relay, quota distribution, team sharing, paid calls, or similar purposes may involve risks relating to terms of service, contractual breach, data protection, content safety, consumer protection, payment settlement, taxes, export controls, sanctions compliance, cybersecurity, industry access, and administrative regulation. Requirements vary by jurisdiction and business model and may change over time.
 
 The mandatory notice, document link, exact-phrase acknowledgment, and local acknowledgment record in the console are intended to provide clear, conspicuous, and reproducible notice of deployment and operation risks, confirm that the console user has read the current version of this document, and create a clear responsibility-separation record between the open-source project, copyright holders, contributors, maintainers and any third-party deploying, operating, or controlling party.
 

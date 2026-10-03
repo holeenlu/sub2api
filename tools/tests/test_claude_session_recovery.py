@@ -10,7 +10,7 @@ import unittest
 
 SCRIPT = (
     Path(__file__).parents[2]
-    / "frontend/public/downloads/tapmodels-claude-session-recovery/find_claude_sessions.py"
+    / "frontend/public/downloads/tokensavy-claude-session-recovery/find_claude_sessions.py"
 )
 
 

@@ -235,15 +235,15 @@ export default {
         claudeNote:
           'Choose one method: terminal env for this session, or ~/.claude/settings.json for persistence. Do not commit files that contain your API key.',
         codexNote:
-          'Export TAPMODELS_API_KEY, save config.toml under ~/.codex (mkdir -p ~/.codex). Prefer env_key auth; do not commit secrets.',
+          'Export TOKENSAVY_API_KEY, save config.toml under ~/.codex (mkdir -p ~/.codex). Prefer env_key auth; do not commit secrets.',
         codexNoteWindows:
-          'Set $env:TAPMODELS_API_KEY, save config.toml under %USERPROFILE%\\.codex. Prefer env_key auth; do not commit secrets.',
+          'Set $env:TOKENSAVY_API_KEY, save config.toml under %USERPROFILE%\\.codex. Prefer env_key auth; do not commit secrets.',
       },
       deepseek: {
         description: 'Configure Claude Code, Codex, or OpenCode through the current DeepSeek group.',
         codexDescription: 'Configure Codex with API key authentication through the current DeepSeek group.',
         codexConfigTomlHint: 'Local catalog file by default; remote catalog is optional for supported groups.',
-        codexNote: 'Export TAPMODELS_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
+        codexNote: 'Export TOKENSAVY_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
       },
       minimax: {
         description: 'Configure Claude Code, Codex, or OpenCode through the current MiniMax group.',
@@ -255,12 +255,12 @@ export default {
         description: 'Configure supported clients through the current Composite routing group.',
         codexDescription: 'Configure Codex with API key authentication and the complete model catalog for this Composite group.',
         codexConfigTomlHint: 'Local catalog file by default; remote catalog is optional for supported groups.',
-        codexNote: 'Export TAPMODELS_API_KEY before starting Codex. Model requests are routed by the selected catalog slug.',
+        codexNote: 'Export TOKENSAVY_API_KEY before starting Codex. Model requests are routed by the selected catalog slug.',
       },
       routedCodex: {
         description: 'Configure Codex with the complete model catalog for the current routed group.',
         configTomlHint: 'Local catalog file by default; remote catalog is optional for supported groups.',
-        note: 'Export TAPMODELS_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
+        note: 'Export TOKENSAVY_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
       },
       codexModelCatalog: {
         mode: 'Catalog source',

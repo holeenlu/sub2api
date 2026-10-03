@@ -1,3 +1,11 @@
+# Tokensavy
+
+Tokensavy 品牌分支，基于 TapModels；域名 `tokensavy.ai`。
+
+**全新服务器请使用 [Tokensavy 部署指南](deploy/tokensavy/README.md)。** 下方保留继承的项目说明，其中旧品牌部署/发版命令不适用于本分支。
+
+---
+
 <div align="center">
 
 <img src="assets/logo.svg" alt="TapModels Logo" width="128" />

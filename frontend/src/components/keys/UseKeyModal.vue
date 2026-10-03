@@ -1442,16 +1442,16 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
   switch (shell) {
     case 'cmd':
       envPath = 'Command Prompt'
-      envContent = `set TAPMODELS_API_KEY=${apiKey}`
+      envContent = `set TOKENSAVY_API_KEY=${apiKey}`
       break
     case 'powershell':
     case 'windows':
       envPath = 'PowerShell'
-      envContent = `$env:TAPMODELS_API_KEY="${apiKey}"`
+      envContent = `$env:TOKENSAVY_API_KEY="${apiKey}"`
       break
     default:
       envPath = 'Terminal'
-      envContent = `export TAPMODELS_API_KEY="${apiKey}"`
+      envContent = `export TOKENSAVY_API_KEY="${apiKey}"`
   }
 
   const configContent = `# Codex CLI → ${siteNameComment.value} Grok group
@@ -1460,18 +1460,18 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
 # Text models only. Image/video: grok-imagine-image / grok-imagine-video on media endpoints.
 # Switch model: grok-4.5 | grok-4.3 | grok-build-0.1 | grok-4.20-multi-agent-0309 (text / web_search)
 
-model_provider = "tapmodels"
+model_provider = "tokensavy"
 model = "${model}"
 # Optional:
 # review_model = "${model}"
 # model_reasoning_effort = "medium"
 model_context_window = ${defaultCodexContextWindow(model) || 500000}
 
-[model_providers.tapmodels]
+[model_providers.tokensavy]
 name = "${escapeTomlBasicString(siteName.value)} Grok"
 base_url = "${baseUrl}"
 # Prefer env_key (variable NAME). Do not combine with experimental_bearer_token.
-env_key = "TAPMODELS_API_KEY"
+env_key = "TOKENSAVY_API_KEY"
 # Fallback only if you cannot set env (discouraged — keeps secret on disk):
 # experimental_bearer_token = "${apiKey}"
 wire_api = "responses"
@@ -1537,19 +1537,19 @@ function generateRoutedCodexFiles(
   const label = labels[platform]
   const usesEmbeddedApiKey = platform === 'zhipu'
   const envContent = isWindows
-    ? `$env:TAPMODELS_API_KEY="${apiKey}"`
-    : `export TAPMODELS_API_KEY="${apiKey}"`
+    ? `$env:TOKENSAVY_API_KEY="${apiKey}"`
+    : `export TOKENSAVY_API_KEY="${apiKey}"`
   const authConfig = usesEmbeddedApiKey
     ? `experimental_bearer_token = "${escapeTomlBasicString(apiKey)}"`
-    : 'env_key = "TAPMODELS_API_KEY"'
+    : 'env_key = "TOKENSAVY_API_KEY"'
 
   const configContent = `# Codex CLI -> ${siteNameComment.value} ${label} group
-model_provider = "tapmodels"
+model_provider = "tokensavy"
 model = "${model}"
 review_model = "${model}"
 ${contextWindowLine}${codexCatalogTomlLine()}
 
-[model_providers.tapmodels]
+[model_providers.tokensavy]
 name = "${escapeTomlBasicString(siteName.value)} ${label}"
 base_url = "${baseUrl}"
 ${codexRemoteCatalogTomlLine(baseUrl)}${authConfig}

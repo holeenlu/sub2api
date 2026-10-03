@@ -44,15 +44,15 @@ class DocsDownloadsTest(unittest.TestCase):
             home = Path(temporary)
             config_home = home / ".codex"
             config_home.mkdir()
-            (config_home / "config.toml").write_text('''model_provider = "tapmodels"
-[model_providers.tapmodels]
-name = "TapModels"
+            (config_home / "config.toml").write_text('''model_provider = "tokensavy"
+[model_providers.tokensavy]
+name = "Tokensavy"
 base_url = "https://example.test/v1"
 wire_api = "responses"
-env_key = "TAPMODELS_API_KEY"
+env_key = "TOKENSAVY_API_KEY"
 ''')
-            env = {k: v for k, v in os.environ.items() if k not in {"TAPMODELS_BASE_URL", "OPENAI_API_KEY"}}
-            env.update(CODEX_HOME=str(config_home), TAPMODELS_API_KEY="fixture-only-key", PYTHONDONTWRITEBYTECODE="1")
+            env = {k: v for k, v in os.environ.items() if k not in {"TOKENSAVY_BASE_URL", "OPENAI_API_KEY"}}
+            env.update(CODEX_HOME=str(config_home), TOKENSAVY_API_KEY="fixture-only-key", PYTHONDONTWRITEBYTECODE="1")
             skills = home / ".agents/skills"
             for name in ("gpt-image-flare", "gpt-image-sunburst"):
                 with zipfile.ZipFile(builder.DOWNLOADS / f"{name}.zip") as archive:
@@ -72,7 +72,7 @@ env_key = "TAPMODELS_API_KEY"
     def test_extracted_recovery_entrypoint_is_callable_without_user_data(self):
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary)
-            name = "tapmodels-codex-session-repair"
+            name = "tokensavy-codex-session-repair"
             with zipfile.ZipFile(builder.DOWNLOADS / f"{name}.zip") as archive:
                 archive.extractall(target)
             result = subprocess.run(["bash", "repair-sessions.sh", "--help"], cwd=target / name, capture_output=True, text=True, timeout=10)
@@ -82,7 +82,7 @@ env_key = "TAPMODELS_API_KEY"
     def test_extracted_claude_recovery_entrypoint_is_read_only_and_callable(self):
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary)
-            name = "tapmodels-claude-session-recovery"
+            name = "tokensavy-claude-session-recovery"
             with zipfile.ZipFile(builder.DOWNLOADS / f"{name}.zip") as archive:
                 archive.extractall(target)
             result = subprocess.run(

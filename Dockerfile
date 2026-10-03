@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# TapModels Multi-Stage Dockerfile
+# Tokensavy Multi-Stage Dockerfile
 # =============================================================================
 # Stage 1: Build frontend
 # Stage 2: Build Go backend with embedded frontend
@@ -34,7 +34,7 @@ ARG ZH_TW
 WORKDIR /work
 
 COPY tools/zh-tw/package.json tools/zh-tw/package-lock.json ./tools/zh-tw/
-RUN --mount=type=cache,id=tapmodels-zhtw-npm,target=/root/.npm \
+RUN --mount=type=cache,id=tokensavy-zhtw-npm,target=/root/.npm \
     if [ -n "${NPM_CONFIG_REGISTRY}" ]; then npm config set registry "${NPM_CONFIG_REGISTRY}"; fi && \
     npm ci --prefix ./tools/zh-tw --omit=dev
 COPY tools/zh-tw/ ./tools/zh-tw/
@@ -53,11 +53,11 @@ ARG NPM_CONFIG_REGISTRY
 WORKDIR /app/frontend
 
 # Install pnpm (pinned to v9 to match CI and keep builds reproducible)
-RUN corepack enable && corepack prepare pnpm@9 --activate
+RUN corepack enable && COREPACK_NPM_REGISTRY=${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org} corepack prepare pnpm@9.15.9 --activate
 
 # Install dependencies first (better caching)
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN --mount=type=cache,id=tapmodels-pnpm-store,target=/root/.local/share/pnpm/store \
+RUN --mount=type=cache,id=tokensavy-pnpm-store,target=/root/.local/share/pnpm/store \
     if [ -n "${NPM_CONFIG_REGISTRY}" ]; then pnpm config set registry "${NPM_CONFIG_REGISTRY}"; fi && \
     pnpm install --frozen-lockfile --prefer-offline
 
@@ -81,7 +81,7 @@ FROM --platform=${BUILDPLATFORM} ${GOLANG_IMAGE} AS backend-builder
 
 # Build arguments for version info (set by CI)
 ARG VERSION=
-ARG RELEASE_CHANNEL=tapmodels
+ARG RELEASE_CHANNEL=tokensavy
 ARG COMMIT=docker
 ARG DATE
 ARG UPSTREAM_VERSION=
@@ -103,7 +103,7 @@ WORKDIR /app/backend
 COPY backend/go.mod backend/go.sum ./
 # Cache mount keeps the module cache across builds so a transient CDN blip on
 # retry resumes instead of re-fetching every zip from scratch.
-RUN --mount=type=cache,id=tapmodels-gomod,target=/go/pkg/mod \
+RUN --mount=type=cache,id=tokensavy-gomod,target=/go/pkg/mod \
     go mod download
 
 # Copy backend source first (already converted to zh-TW by the converter stage
@@ -115,8 +115,8 @@ COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
 
 # Build the binary (BuildType=release for CI builds, embed frontend)
 # Version precedence: build arg VERSION > exact git tag > cmd/server/VERSION
-RUN --mount=type=cache,id=tapmodels-gomod,target=/go/pkg/mod \
-    --mount=type=cache,id=tapmodels-gobuild,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=tokensavy-gomod,target=/go/pkg/mod \
+    --mount=type=cache,id=tokensavy-gobuild,target=/root/.cache/go-build \
     VERSION_VALUE="${VERSION}" && \
     if [ -z "${VERSION_VALUE}" ]; then VERSION_VALUE="$(./scripts/resolve-version.sh)"; fi && \
     DATE_VALUE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
@@ -124,7 +124,7 @@ RUN --mount=type=cache,id=tapmodels-gomod,target=/go/pkg/mod \
     -tags embed \
     -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=release -X main.UpstreamVersion=${UPSTREAM_VERSION} -X github.com/Wei-Shaw/sub2api/internal/service.ReleaseChannel=${RELEASE_CHANNEL}" \
     -trimpath \
-    -o /app/tapmodels \
+    -o /app/tokensavy \
     ./cmd/server
 
 # -----------------------------------------------------------------------------
@@ -138,8 +138,8 @@ FROM ${POSTGRES_IMAGE} AS pg-client
 FROM ${ALPINE_IMAGE}
 
 # Labels
-LABEL maintainer="TapModels <https://tapmodels.ai>"
-LABEL description="TapModels - Pick a model. Start building."
+LABEL maintainer="Tokensavy <https://tokensavy.ai>"
+LABEL description="Tokensavy - Smart tokens. More possibilities."
 LABEL org.opencontainers.image.source="https://github.com/holeenlu/sub2api"
 
 # Install runtime dependencies
@@ -162,21 +162,21 @@ COPY --from=pg-client /usr/local/bin/psql /usr/local/bin/psql
 COPY --from=pg-client /usr/local/lib/libpq.so.5* /usr/local/lib/
 
 # Create non-root user
-RUN addgroup -g 1000 tapmodels && \
-    adduser -u 1000 -G tapmodels -s /bin/sh -D tapmodels
+RUN addgroup -g 1000 tokensavy && \
+    adduser -u 1000 -G tokensavy -s /bin/sh -D tokensavy
 
 # Set working directory
 WORKDIR /app
 
 # Copy binary/resources with ownership to avoid extra full-layer chown copy
-COPY --from=backend-builder --chown=tapmodels:tapmodels --chmod=755 /app/tapmodels /app/tapmodels
-RUN ln -s /app/tapmodels /app/sub2api
-COPY --from=backend-builder --chown=tapmodels:tapmodels /app/backend/resources /app/resources
+COPY --from=backend-builder --chown=tokensavy:tokensavy --chmod=755 /app/tokensavy /app/tokensavy
+RUN ln -s /app/tokensavy /app/sub2api
+COPY --from=backend-builder --chown=tokensavy:tokensavy /app/backend/resources /app/resources
 
 # Create data directory
-RUN mkdir -p /app/data && chown tapmodels:tapmodels /app /app/data
+RUN mkdir -p /app/data && chown tokensavy:tokensavy /app /app/data
 
-# Copy entrypoint script (fixes volume permissions then drops to tapmodels)
+# Copy entrypoint script (fixes volume permissions then drops to tokensavy)
 COPY --chmod=755 deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # Expose port (can be overridden by SERVER_PORT env var)
@@ -186,6 +186,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD wget -q -T 5 -O /dev/null http://localhost:${SERVER_PORT:-8080}/health || exit 1
 
-# Run the application (entrypoint fixes /app/data ownership then execs as tapmodels)
+# Run the application (entrypoint fixes /app/data ownership then execs as tokensavy)
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["/app/tapmodels"]
+CMD ["/app/tokensavy"]

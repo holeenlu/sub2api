@@ -11,14 +11,14 @@ package service
 // nil/empty fallback paths (emails, payment product names, public settings).
 const (
 	// DefaultSiteName is the product name used as the site-name fallback.
-	DefaultSiteName = "TapModels"
+	DefaultSiteName = "Tokensavy"
 	// DefaultSiteTagline is the product tagline used as the site-subtitle
 	// fallback.
-	DefaultSiteTagline = "Pick a model. Start building."
+	DefaultSiteTagline = "Smart tokens. More possibilities."
 	// DefaultDocsBaseURL is where the shipped documentation is published.
-	DefaultDocsBaseURL = "https://docs.tapmodels.ai"
+	DefaultDocsBaseURL = "https://tokensavy.ai/docs"
 	// DefaultReleaseRepo is the GitHub "owner/repo" whose releases the online
 	// update check and self-update follow. Keep in sync with RELEASE_REPO in
 	// frontend/src/config/brand.ts.
-	DefaultReleaseRepo = "erwinlin/TapModels"
+	DefaultReleaseRepo = ""
 )

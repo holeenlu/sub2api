@@ -459,12 +459,12 @@ describe('UseKeyModal', () => {
     await nextTick()
 
     let codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
-    const configToml = codeBlocks.find((content) => content.includes('[model_providers.tapmodels]'))
+    const configToml = codeBlocks.find((content) => content.includes('[model_providers.tokensavy]'))
     expect(configToml).toBeDefined()
-    expect(configToml).toContain('model_provider = "tapmodels"')
+    expect(configToml).toContain('model_provider = "tokensavy"')
     expect(configToml).toContain('model = "grok-4.5"')
     expect(configToml).toContain('base_url = "https://example.com/v1"')
-    expect(configToml).toContain('env_key = "TAPMODELS_API_KEY"')
+    expect(configToml).toContain('env_key = "TOKENSAVY_API_KEY"')
     expect(configToml).toContain('wire_api = "responses"')
     // API-key provider: Codex must not require a ChatGPT OAuth login.
     expect(configToml).toContain('requires_openai_auth = false')
@@ -477,7 +477,7 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('supports_websockets = true')
     expect(configToml).not.toContain('responses_websockets_v2')
     expect(wrapper.text()).not.toContain('auth.json')
-    expect(codeBlocks.join('\n')).toContain('TAPMODELS_API_KEY')
+    expect(codeBlocks.join('\n')).toContain('TOKENSAVY_API_KEY')
 
     const windowsTab = wrapper.findAll('button').find(
       (button) => button.text().trim() === 'Windows'
@@ -1006,10 +1006,10 @@ describe('UseKeyModal', () => {
 
     const unixConfig = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.tapmodels]'))
+      .find((content) => content.includes('[model_providers.tokensavy]'))
     expect(unixConfig).toContain('model_catalog_json = "~/.codex/codex-models.json"')
     expect(unixConfig).not.toContain('model_catalog_url')
-    expect(unixConfig).toContain('env_key = "TAPMODELS_API_KEY"')
+    expect(unixConfig).toContain('env_key = "TOKENSAVY_API_KEY"')
 
     await flushPromises()
 
@@ -1030,7 +1030,7 @@ describe('UseKeyModal', () => {
 
     const loadedUnixConfig = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.tapmodels]'))
+      .find((content) => content.includes('[model_providers.tokensavy]'))
     expect(loadedUnixConfig).toContain('model = "claude-opus-4-8"')
     expect(loadedUnixConfig).toContain('review_model = "claude-opus-4-8"')
     expect(loadedUnixConfig).not.toContain('model = "gpt-5.6-sol"')
@@ -1042,7 +1042,7 @@ describe('UseKeyModal', () => {
 
     const windowsConfig = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.tapmodels]'))
+      .find((content) => content.includes('[model_providers.tokensavy]'))
     expect(windowsConfig).toContain('model_catalog_json = "~/.codex/codex-models.json"')
     expect(windowsConfig).not.toContain('model_catalog_url')
     expect(wrapper.get('[data-testid="codex-model-catalog-path"]').text()).toBe('%userprofile%\\.codex\\codex-models.json')
@@ -1082,7 +1082,7 @@ describe('UseKeyModal', () => {
       expect(wrapper.find('[data-testid="codex-model-catalog-fetch"]').exists()).toBe(false)
       const config = wrapper.findAll('pre code')
         .map((code) => code.text())
-        .find((content) => content.includes('[model_providers.tapmodels]'))
+        .find((content) => content.includes('[model_providers.tokensavy]'))
       expect(config).toBeDefined()
       expect(config).not.toContain('model_catalog_json')
       expect(config).toContain('base_url = "https://example.com/v1"')
@@ -1147,7 +1147,7 @@ describe('UseKeyModal', () => {
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
     expect(wrapper.find('[data-testid="codex-model-catalog-mode"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="codex-model-catalog-path"]').text()).toBe('~/.codex/codex-models.json')
-    const codexConfig = findCodeBlock(wrapper, '[model_providers.tapmodels]')
+    const codexConfig = findCodeBlock(wrapper, '[model_providers.tokensavy]')
     expect(codexConfig).toContain('model = "glm-5.3"')
     expect(codexConfig).toContain('review_model = "glm-5.3"')
     expect(codexConfig).toContain('model_context_window = 1000000')
@@ -1183,12 +1183,12 @@ describe('UseKeyModal', () => {
       global: { stubs }
     })
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
-    const config = findCodeBlock(wrapper, '[model_providers.tapmodels]')
+    const config = findCodeBlock(wrapper, '[model_providers.tokensavy]')
     expect(config).toContain('model = "glm-5.3"')
     expect(config).toContain('model_context_window = 1000000')
     expect(config).toContain('model_catalog_json = "~/.codex/codex-models.json"')
     expect(config).toContain('experimental_bearer_token = "sk-zhipu-test"')
-    expect(config).not.toContain('TAPMODELS_API_KEY')
+    expect(config).not.toContain('TOKENSAVY_API_KEY')
 
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.opencode'))
     const opencodeConfig = JSON.parse(findCodeBlock(wrapper, '"provider"'))
@@ -1205,7 +1205,7 @@ describe('UseKeyModal', () => {
   ] as const)('keeps the %s Codex default context scoped to its own model', async (platform, model, contextWindow) => {
     const wrapper = mountModal(platform)
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
-    const config = findCodeBlock(wrapper, '[model_providers.tapmodels]')
+    const config = findCodeBlock(wrapper, '[model_providers.tokensavy]')
     expect(config).toContain(`model = "${model}"`)
     expect(config).toContain(`model_context_window = ${contextWindow}`)
     expect(config).not.toContain('model_catalog_json')
@@ -1223,14 +1223,14 @@ describe('UseKeyModal', () => {
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
     await flushPromises()
     await fetchCatalog(wrapper)
-    expect(findCodeBlock(wrapper, '[model_providers.tapmodels]')).toContain('model = "claude-opus-4-8"')
+    expect(findCodeBlock(wrapper, '[model_providers.tokensavy]')).toContain('model = "claude-opus-4-8"')
 
     await wrapper.setProps({ platform: 'deepseek' })
     await nextTick()
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
 
     expect(wrapper.find('[data-testid="codex-model-catalog"]').exists()).toBe(false)
-    const deepSeekConfig = findCodeBlock(wrapper, '[model_providers.tapmodels]')
+    const deepSeekConfig = findCodeBlock(wrapper, '[model_providers.tokensavy]')
     expect(deepSeekConfig).toContain('model = "deepseek-v4-pro"')
     expect(deepSeekConfig).not.toContain('claude-opus-4-8')
     expect(deepSeekConfig).not.toContain('model_catalog_json')
@@ -1281,7 +1281,7 @@ describe('UseKeyModal', () => {
 
     const config = wrapper.findAll('pre code')
       .map((code) => code.text())
-      .find((content) => content.includes('[model_providers.tapmodels]'))
+      .find((content) => content.includes('[model_providers.tokensavy]'))
     expect(config).toContain('model = "gpt-6-astra"')
     expect(config).toContain('review_model = "gpt-6-astra"')
   })
@@ -1334,7 +1334,7 @@ describe('UseKeyModal', () => {
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))
     await clickButton(wrapper, (text) => text.trim() === osTab)
 
-    const config = findCodeBlock(wrapper, '[model_providers.tapmodels]')
+    const config = findCodeBlock(wrapper, '[model_providers.tokensavy]')
     expect(tomlValue(config, 'model')).toBe('claude-sonnet-5')
     expect(tomlValue(config, 'review_model')).toBe('claude-sonnet-5')
     expect(config).not.toContain('claude-sonnet-4-6')
@@ -1488,7 +1488,7 @@ describe('UseKeyModal', () => {
 
     await fetchCatalog(wrapper)
 
-    const config = findCodeBlock(wrapper, '[model_providers.tapmodels]')
+    const config = findCodeBlock(wrapper, '[model_providers.tokensavy]')
     expectNoIgnoredCodexSettings(config)
     expect(tomlValue(config, 'model')).toBe(expectedModel)
     expect(tomlValue(config, 'review_model')).toBe(tomlValue(config, 'model'))
@@ -1609,11 +1609,11 @@ describe('UseKeyModal', () => {
       const parsed = parseToml(files[0].text) as Record<string, unknown>
       expectRootKeys(parsed, ['model_provider', 'model', 'review_model'])
       expectNoIgnoredCodexSettings(files[0].text)
-      expect(parsed.model_provider).toBe('tapmodels')
+      expect(parsed.model_provider).toBe('tokensavy')
       expect(parsed.model).toBe('claude-sonnet-5')
       const providers = parsed.model_providers as Record<string, Record<string, unknown>>
-      expect(providers.tapmodels.env_key).toBe('TAPMODELS_API_KEY')
-      expect(providers.tapmodels.requires_openai_auth).toBe(false)
+      expect(providers.tokensavy.env_key).toBe('TOKENSAVY_API_KEY')
+      expect(providers.tokensavy.requires_openai_auth).toBe(false)
     }
   })
 
@@ -1658,7 +1658,7 @@ describe('UseKeyModal', () => {
     parsed = parseToml(files[0].text) as Record<string, unknown>
     expectRootKeys(parsed, ['model_provider', 'model'])
     expectNoIgnoredCodexSettings(files[0].text)
-    expect(parsed.model_provider).toBe('tapmodels')
+    expect(parsed.model_provider).toBe('tokensavy')
   })
 
   it.each(['Acme "Lab"', 'Acme\\Lab', 'Acme\r\nLab\t\u0001\u007f\u2028Line'])('preserves special site names in downloaded TOML: %j', async (name) => {

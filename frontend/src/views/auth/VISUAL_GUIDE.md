@@ -11,8 +11,8 @@ Both LoginView and RegisterView use the AuthLayout component, which provides:
 │                                             │
 │  ┌─────────────────────────────────────┐   │
 │  │                                     │   │
-│  │         TapModels Logo              │   │
-│  │  "Pick a model. Start building."    │   │
+│  │         Tokensavy Logo              │   │
+│  │  "Smart tokens. More possibilities."    │   │
 │  │                                     │   │
 │  └─────────────────────────────────────┘   │
 │                                             │
@@ -39,8 +39,8 @@ Centered: Both horizontally and vertically
 ```
 ┌─────────────────────────────────────────────┐
 │                                             │
-│         🔷 TapModels                        │
-│         Pick a model. Start building.       │
+│         🔷 Tokensavy                        │
+│         Smart tokens. More possibilities.       │
 │                                             │
 │  ┌─────────────────────────────────────┐   │
 │  │                                     │   │
@@ -133,13 +133,13 @@ Centered: Both horizontally and vertically
 ```
 ┌─────────────────────────────────────────────┐
 │                                             │
-│         🔷 TapModels                        │
-│         Pick a model. Start building.       │
+│         🔷 Tokensavy                        │
+│         Smart tokens. More possibilities.       │
 │                                             │
 │  ┌─────────────────────────────────────┐   │
 │  │                                     │   │
 │  │        Create Account               │   │
-│  │   Sign up to start using TapModels  │   │
+│  │   Sign up to start using Tokensavy  │   │
 │  │                                     │   │
 │  │  Username                           │   │
 │  │  ┌────────────────────────────────┐ │   │

@@ -27,7 +27,7 @@ OpenAI 分組的 Codex 標籤提供兩種模式，開啟“使用金鑰”時預
 - **Legacy**：`config.toml` 使用 `requires_openai_auth = true`，並下載 `auth.json`。只在 Codex 版本需要該登入形態時使用。
 - **API key**：`requires_openai_auth = false`，把 Key 寫入 `experimental_bearer_token`，並附加本地圖片擴充套件所需的請求標頭。該模式會把金鑰儲存在磁碟，限制檔案權限且不要提交到儲存庫。
 
-其他分組的 Codex 路由預設使用 `env_key = "TAPMODELS_API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`；智譜分組把 API Key 寫入生成的 `experimental_bearer_token`，因此單獨複製 `config.toml` 也不會依賴 `TAPMODELS_API_KEY`。WebSocket 標籤只對 OpenAI Responses WebSocket 路徑啟用。
+其他分組的 Codex 路由預設使用 `env_key = "TOKENSAVY_API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`；智譜分組把 API Key 寫入生成的 `experimental_bearer_token`，因此單獨複製 `config.toml` 也不會依賴 `TOKENSAVY_API_KEY`。WebSocket 標籤只對 OpenAI Responses WebSocket 路徑啟用。
 
 ## 模型目錄
 
@@ -38,23 +38,23 @@ OpenAI 分組的 Codex 標籤提供兩種模式，開啟“使用金鑰”時預
 
 不支援目錄的分頁請使用該群組開放的精確模型 ID。模型目錄、帳號可調度狀態與請求協定是不同條件；清單可見不保證所有工具與介面可用。設定以目前視窗為準，不要將一般模型清單 JSON 當成 Codex 專用目錄。
 
-## TapModels 介面操作
+## Tokensavy 介面操作
 
 以下截圖來自目前專案的“使用金鑰”元件，使用無效範例 Key 和 `api.example.com` 演示地址。實際接入請複製自己控制台生成的值，不要抄錄圖片中的地址或 Key。
 
 1. OpenAI 分組預設即為 **Codex CLI (WebSocket)** + API key 驗證；網路不支援 WebSocket 時改選 **Codex CLI**，需要 `auth.json` 登入形態時改選 Legacy。兩種驗證模式對應的檔案不同。
 
-![TapModels Codex 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
+![Tokensavy Codex 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
 
 2. API key 模式會把 Key 寫入設定檔；下載後限制檔案權限，並完全重啟用戶端。
 
-![TapModels Codex API key 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
+![Tokensavy Codex API key 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
 
 3. Anthropic 分組選擇 **Claude Code**，根據作業系統切換命令。複製目前標籤下完整命令，在同一個終端機執行用戶端。
 
-![TapModels Claude Code macOS / Linux 設定器（範例資料）](/docs-assets/client-claude-zh-TW.png)
+![Tokensavy Claude Code macOS / Linux 設定器（範例資料）](/docs-assets/client-claude-zh-TW.png)
 
-![TapModels Claude Code PowerShell 設定器（範例資料）](/docs-assets/client-claude-zh-TW.png)
+![Tokensavy Claude Code PowerShell 設定器（範例資料）](/docs-assets/client-claude-zh-TW.png)
 
 ## 驗證與檢查
 

@@ -702,10 +702,10 @@ export default {
         backendModeDescription:
           'ユーザー登録、公開サイト、セルフサービス機能を無効にします。管理者のみがログインしてプラットフォームを管理できます。',
         siteName: 'サイト名',
-        siteNamePlaceholder: 'TapModels',
+        siteNamePlaceholder: 'Tokensavy',
         siteNameHint: 'メールとページタイトルに表示されます',
         siteSubtitle: 'サイトのサブタイトル',
-        siteSubtitlePlaceholder: 'モデルを選択してください。構築を始めましょう。',
+        siteSubtitlePlaceholder: 'トークンを賢く、可能性をもっと。',
         siteSubtitleHint: 'ログインページと登録ページに表示されます',
         apiBaseUrl: 'APIベースURL',
         apiBaseUrlPlaceholder: 'https://api.example.com',
@@ -1036,7 +1036,7 @@ export default {
         fromEmail: '送信元メールアドレス',
         fromEmailPlaceholder: "noreply{'@'}example.com",
         fromName: '送信元名',
-        fromNamePlaceholder: 'TapModels',
+        fromNamePlaceholder: 'Tokensavy',
         useTls: 'TLSを使用',
         useTlsHint: 'SMTP接続のTLS暗号化を有効にします'
       },

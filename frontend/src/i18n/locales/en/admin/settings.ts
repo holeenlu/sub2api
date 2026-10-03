@@ -702,10 +702,10 @@ export default {
         backendModeDescription:
           'Disables user registration, public site, and self-service features. Only admin can log in and manage the platform.',
         siteName: 'Site Name',
-        siteNamePlaceholder: 'TapModels',
+        siteNamePlaceholder: 'Tokensavy',
         siteNameHint: 'Displayed in emails and page titles',
         siteSubtitle: 'Site Subtitle',
-        siteSubtitlePlaceholder: 'Pick a model. Start building.',
+        siteSubtitlePlaceholder: 'Smart tokens. More possibilities.',
         siteSubtitleHint: 'Displayed on login and register pages',
         apiBaseUrl: 'API Base URL',
         apiBaseUrlPlaceholder: 'https://api.example.com',
@@ -1036,7 +1036,7 @@ export default {
         fromEmail: 'From Email',
         fromEmailPlaceholder: "noreply{'@'}example.com",
         fromName: 'From Name',
-        fromNamePlaceholder: 'TapModels',
+        fromNamePlaceholder: 'Tokensavy',
         useTls: 'Use TLS',
         useTlsHint: 'Enable TLS encryption for SMTP connection'
       },

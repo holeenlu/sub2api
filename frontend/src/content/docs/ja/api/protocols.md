@@ -16,7 +16,7 @@
 
 ## 認証と制限
 
-OpenAI スタイルのクライアントでは `Authorization: Bearer $TAPMODELS_API_KEY` を使用し、Anthropic SDK では `x-api-key` と `anthropic-version` を使用します。Gemini SDK では `x-goog-api-key` を使用します。Gemini の認証では Bearer、`x-api-key`、クエリパラメータ `key` も使用できますが、URL に含めたキーはプロキシのログに漏洩する可能性があります。各エンドポイントには、該当するデプロイのリクエストボディ制限とグループの許可リストが適用され、必要に応じて請求、同時実行数、コンテンツポリシーも適用されます。ツール、画像、スキーマ出力、キャッシュ、組み込み機能は、実際のアカウントとアップストリームモデルによって異なります。
+OpenAI スタイルのクライアントでは `Authorization: Bearer $TOKENSAVY_API_KEY` を使用し、Anthropic SDK では `x-api-key` と `anthropic-version` を使用します。Gemini SDK では `x-goog-api-key` を使用します。Gemini の認証では Bearer、`x-api-key`、クエリパラメータ `key` も使用できますが、URL に含めたキーはプロキシのログに漏洩する可能性があります。各エンドポイントには、該当するデプロイのリクエストボディ制限とグループの許可リストが適用され、必要に応じて請求、同時実行数、コンテンツポリシーも適用されます。ツール、画像、スキーマ出力、キャッシュ、組み込み機能は、実際のアカウントとアップストリームモデルによって異なります。
 
 複数の `/v1` ルートにはプレフィックスなしの互換エイリアスがあります。新しい統合では `/v1` を使用してください。`/backend-api/codex/*` と `/antigravity/*` はクライアント/プラットフォーム固有です。`GET /v1/responses` には WebSocket upgrade が必要で、Retrieve Response ではありません。通常の GET は 426 を返します。
 

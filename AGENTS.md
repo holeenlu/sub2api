@@ -1,3 +1,7 @@
+# Tokensavy 分支范围
+
+本分支 `codex/tokensavy` 基于 TapModels 创建，专用于 Tokensavy (`tokensavy.ai`)。Tokensavy 品牌变更只落此分支，不传播到 main / TapModels。部署使用 `deploy/tokensavy/README.md`；独立远端和发版渠道尚未配置，不使用下文旧品牌的推送映射。公共功能需求仍须依照下文规则另行归属。
+
 # 需求归属与交付
 
 新增、修改、修复及合并需求，开始时判断 KDAN/TapModels 品牌归属，完成后依据实际 diff 复核。当前检出分支不是归属依据。

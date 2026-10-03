@@ -18,9 +18,9 @@ func TestResolveLogFilePath_Default(t *testing.T) {
 }
 
 func TestResolveLogFilePath_WithDataDir(t *testing.T) {
-	t.Setenv("DATA_DIR", "/tmp/tapmodels-data")
+	t.Setenv("DATA_DIR", "/tmp/tokensavy-data")
 	got := resolveLogFilePath("")
-	want := filepath.Join("/tmp/tapmodels-data", "logs", "tapmodels.log")
+	want := filepath.Join("/tmp/tokensavy-data", "logs", "tokensavy.log")
 	if got != want {
 		t.Fatalf("resolveLogFilePath() = %q, want %q", got, want)
 	}

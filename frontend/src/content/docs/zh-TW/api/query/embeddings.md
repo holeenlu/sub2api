@@ -2,7 +2,7 @@
 
 ```http
 POST /v1/embeddings
-Authorization: Bearer $TAPMODELS_API_KEY
+Authorization: Bearer $TOKENSAVY_API_KEY
 Content-Type: application/json
 ```
 
@@ -11,8 +11,8 @@ Content-Type: application/json
 ## 請求與回應
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/embeddings" \
-  -H "Authorization: Bearer $TAPMODELS_API_KEY" \
+curl "$TOKENSAVY_BASE_URL/v1/embeddings" \
+  -H "Authorization: Bearer $TOKENSAVY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"YOUR_EMBEDDING_MODEL_ID","input":"Idempotency means repeatable effects."}'
 ```

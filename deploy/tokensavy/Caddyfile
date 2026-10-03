@@ -1,0 +1,10 @@
+{
+    email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+    encode zstd gzip
+    reverse_proxy tokensavy:8080 {
+        flush_interval -1
+    }
+}

@@ -23,9 +23,9 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
-// ReleaseChannel is injected by the release build, e.g. sub2api, kdan or tapmodels.
-// Empty retains compatibility with the official upstream release format.
-var ReleaseChannel string
+// ReleaseChannel identifies this brand even when building directly from source.
+// A release build may override it with ldflags.
+var ReleaseChannel = "tokensavy"
 
 var (
 	ErrNoUpdateAvailable         = infraerrors.Conflict("ALREADY_UP_TO_DATE", "no update available; current version is latest")

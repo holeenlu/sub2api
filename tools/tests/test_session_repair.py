@@ -10,8 +10,8 @@ import unittest
 from unittest import mock
 
 
-SCRIPT = Path(__file__).parents[2] / "frontend/public/downloads/tapmodels-session-repair/repair_sessions.py"
-spec = importlib.util.spec_from_file_location("tapmodels_session_repair", SCRIPT)
+SCRIPT = Path(__file__).parents[2] / "frontend/public/downloads/tokensavy-session-repair/repair_sessions.py"
+spec = importlib.util.spec_from_file_location("tokensavy_session_repair", SCRIPT)
 repair = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(repair)
 
@@ -111,7 +111,7 @@ class SessionRepairTest(unittest.TestCase):
         with sqlite3.connect(self.db) as connection:
             row = connection.execute("SELECT rollout_path, archived, model_provider FROM threads").fetchone()
         self.assertEqual(row, (str(rollout.resolve()), 1, "openai"))
-        backups = list((self.home / "backups").glob("tapmodels-session-repair-*"))
+        backups = list((self.home / "backups").glob("tokensavy-session-repair-*"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].stat().st_mode & 0o777, 0o700)
         backup_db = backups[0] / "state_5.sqlite"

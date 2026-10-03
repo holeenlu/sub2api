@@ -33,9 +33,9 @@ GET  /v1/videos/{request_id}/content
 ## 独立搜索
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/web_search" \
-  -H "Authorization: Bearer $TAPMODELS_API_KEY" -H "Content-Type: application/json" \
-  -d '{"query":"TapModels API updates","max_results":5}'
+curl "$TOKENSAVY_BASE_URL/v1/web_search" \
+  -H "Authorization: Bearer $TOKENSAVY_API_KEY" -H "Content-Type: application/json" \
+  -d '{"query":"Tokensavy API updates","max_results":5}'
 ```
 
 `query` 必填，也支持 `input`；`max_results` 默认 5、上限 20。`/v1/x_search` 另支持 `allowed_x_handles`、`excluded_x_handles`、`from_date`、`to_date`、`enable_image_understanding`、`enable_video_understanding`。响应是网关聚合的 `query/results/provider/max_results`，不是 Responses 工具事件原样透传；应用应验证 URL 和去重。

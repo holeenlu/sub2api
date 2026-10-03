@@ -17,10 +17,10 @@ export default {
     exploreModels: '探索模型',
     goToDashboard: '进入控制台',
     // 首页主视觉文案
-    heroSubtitle: '选个模型，开始开发。',
+    heroSubtitle: '精用 Token，释放更多可能。',
     heroDescription: '通过一个 API 使用不同 AI 模型。\n减少接入与管理的负担，把时间留给产品开发。',
     heroEyebrow: '多模型 AI API 网关',
-    heroTitle: '选个模型，开始开发。',
+    heroTitle: '精用 Token，释放更多可能。',
     contactIntegration: '接入咨询',
     quickInstall: { eyebrow: '几分钟完成接入', title: '从 API Key 直接开始', description: 'Codex CLI 与 Claude Code 提供安全备份、环境变量和配置文件安装指引。' },
     terminal: {

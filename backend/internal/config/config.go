@@ -185,7 +185,7 @@ type GeminiTierQuotaConfig struct {
 type UpdateConfig struct {
 	// CheckEnabled 控制是否允许在线版本检查与自更新（本品牌构建默认 false）。
 	// 为 false 时版本检查、自更新和版本回滚接口直接返回 disabled，不会向 GitHub
-	// 发起任何请求；要查 erwinlin/TapModels 的 release 时显式设为 true。
+	// 发起任何请求；Tokensavy 尚未配置独立发布仓库。
 	CheckEnabled bool `mapstructure:"check_enabled"`
 
 	// ProxyURL 用于访问 GitHub 的代理地址
@@ -2202,7 +2202,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 	addConfigPath("/app/data")
 	addConfigPath(".")
 	addConfigPath("./config")
-	addConfigPath("/etc/tapmodels")
+	addConfigPath("/etc/tokensavy")
 }
 
 func setDefaults() {
@@ -2231,7 +2231,7 @@ func setDefaults() {
 	// Log
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.format", "console")
-	viper.SetDefault("log.service_name", "tapmodels")
+	viper.SetDefault("log.service_name", "tokensavy")
 	viper.SetDefault("log.env", "production")
 	viper.SetDefault("log.caller", true)
 	viper.SetDefault("log.stacktrace_level", "error")
@@ -2251,13 +2251,13 @@ func setDefaults() {
 	viper.SetDefault("cors.allowed_origins", []string{})
 	viper.SetDefault("cors.allow_credentials", true)
 
-	// Online checks follow the isolated TapModels release channel.
-	viper.SetDefault("update.check_enabled", true)
+	// Tokensavy is source-built until an independent release repository is configured.
+	viper.SetDefault("update.check_enabled", false)
 
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
 	// declare its relying-party domain and trusted browser origins.
 	viper.SetDefault("webauthn.enabled", false)
-	viper.SetDefault("webauthn.rp_display_name", "TapModels")
+	viper.SetDefault("webauthn.rp_display_name", "Tokensavy")
 	viper.SetDefault("webauthn.rp_id", "")
 	viper.SetDefault("webauthn.rp_origins", []string{})
 
@@ -2389,7 +2389,7 @@ func setDefaults() {
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")
 	viper.SetDefault("database.password", "postgres")
-	viper.SetDefault("database.dbname", "tapmodels")
+	viper.SetDefault("database.dbname", "tokensavy")
 	viper.SetDefault("database.sslmode", "prefer")
 	viper.SetDefault("database.max_open_conns", 256)
 	viper.SetDefault("database.max_idle_conns", 128)

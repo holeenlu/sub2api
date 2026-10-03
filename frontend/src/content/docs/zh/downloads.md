@@ -4,8 +4,8 @@
 
 | 文件 | 用途 | 默认行为 |
 | --- | --- | --- |
-| [TapModels Codex 会话修复包](/downloads/tapmodels-codex-session-repair.zip) | macOS、Linux、Windows Codex 会话诊断与修复 | 只读诊断，显式 Apply 才修改 |
-| [TapModels Claude Code 会话恢复包](/downloads/tapmodels-claude-session-recovery.zip) | 查找本机 Claude 会话并生成精确恢复命令 | 只读扫描，不启动 Claude、不修改会话 |
+| [Tokensavy Codex 会话修复包](/downloads/tokensavy-codex-session-repair.zip) | macOS、Linux、Windows Codex 会话诊断与修复 | 只读诊断，显式 Apply 才修改 |
+| [Tokensavy Claude Code 会话恢复包](/downloads/tokensavy-claude-session-recovery.zip) | 查找本机 Claude 会话并生成精确恢复命令 | 只读扫描，不启动 Claude、不修改会话 |
 | [GPT Image 2.5 Flare Skill](/downloads/gpt-image-flare.zip) | Codex 图片生成与编辑 | 固定 Flare 模型 |
 | [GPT Image 2.5 Sunburst Skill](/downloads/gpt-image-sunburst.zip) | Codex 图片生成与编辑 | 固定 Sunburst 模型 |
 

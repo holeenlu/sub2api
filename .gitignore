@@ -127,10 +127,10 @@ CLAUDE.md
 scripts
 !backend/scripts/
 !backend/scripts/resolve-version.sh
-!frontend/public/downloads/tapmodels-image-skills/gpt-image-flare/scripts/
-!frontend/public/downloads/tapmodels-image-skills/gpt-image-flare/scripts/generate.py
-!frontend/public/downloads/tapmodels-image-skills/gpt-image-sunburst/scripts/
-!frontend/public/downloads/tapmodels-image-skills/gpt-image-sunburst/scripts/generate.py
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-flare/scripts/
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-flare/scripts/generate.py
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-sunburst/scripts/
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-sunburst/scripts/generate.py
 .code-review-state
 #openspec/
 code-reviews/
@@ -200,3 +200,8 @@ issues/
 !docs/TAPMODELS_DOCS_ACCEPTANCE.md
 # Python release/update tooling bytecode
 __pycache__/
+
+# Tokensavy generated deployment secrets and local binaries
+deploy/tokensavy/credentials.txt
+/backend/tokensavy
+/tokensavy

@@ -87,3 +87,15 @@ CLAUDE.md
 # node_modules 一律不進建置上下文：tools/zh-tw 的依賴由 Dockerfile 的 zh-tw-converter 階段自行 npm ci，
 # 從 Windows 磁碟經 WSL 傳送成千上萬個小檔會讓 context 傳輸看似停滯。
 **/node_modules/
+
+# Never send deployment credentials into the build context.
+deploy/tokensavy/credentials.txt
+
+# Shipped tutorials, download instructions and payment guides are runtime assets.
+!frontend/**/*.md
+# Local deployment and handoff material
+**/*.env
+**/credentials.txt
+output/
+.codex/
+docs-local/

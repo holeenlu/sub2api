@@ -235,15 +235,15 @@ export default {
         claudeNote:
           '方法を1つ選択してください。このセッション用のターミナル環境変数、または永続化用の ~/.claude/settings.json です。APIキーを含むファイルをコミットしないでください。',
         codexNote:
-          'TAPMODELS_API_KEY をエクスポートし、config.tomlを ~/.codex に保存してください（mkdir -p ~/.codex）。env_key認証を優先し、シークレットをコミットしないでください。',
+          'TOKENSAVY_API_KEY をエクスポートし、config.tomlを ~/.codex に保存してください（mkdir -p ~/.codex）。env_key認証を優先し、シークレットをコミットしないでください。',
         codexNoteWindows:
-          '$env:TAPMODELS_API_KEY を設定し、config.tomlを %USERPROFILE%\\.codex に保存してください。env_key認証を優先し、シークレットをコミットしないでください。',
+          '$env:TOKENSAVY_API_KEY を設定し、config.tomlを %USERPROFILE%\\.codex に保存してください。env_key認証を優先し、シークレットをコミットしないでください。',
       },
       deepseek: {
         description: '現在のDeepSeekグループ経由でClaude Code、Codex、またはOpenCodeを設定します。',
         codexDescription: '現在のDeepSeekグループ経由でAPIキー認証を使用するようCodexを設定します。',
         codexConfigTomlHint: '以下のモデルカタログをダウンロードし、両方のファイルをCodexの設定ディレクトリに保存して、Codexを再起動してください。',
-        codexNote: 'Codexの起動前にTAPMODELS_API_KEYをエクスポートしてください。ダウンロードしたカタログにはモデルのメタデータのみが含まれ、APIキーは含まれません。',
+        codexNote: 'Codexの起動前にTOKENSAVY_API_KEYをエクスポートしてください。ダウンロードしたカタログにはモデルのメタデータのみが含まれ、APIキーは含まれません。',
       },
       minimax: {
         description: '現在のMiniMaxグループを通じてClaude Code、Codex、またはOpenCodeを設定します。',
@@ -255,12 +255,12 @@ export default {
         description: '現在のCompositeルーティンググループを通じて、サポートされているクライアントを設定します。',
         codexDescription: 'このCompositeグループ用の完全なモデルカタログとAPIキー認証を使用してCodexを設定します。',
         codexConfigTomlHint: '以下のモデルカタログをダウンロードし、両方のファイルをCodexの設定ディレクトリに保存して、Codexを再起動してください。',
-        codexNote: 'Codexの起動前にTAPMODELS_API_KEYをエクスポートしてください。モデルリクエストは、選択したカタログスラッグによってルーティングされます。',
+        codexNote: 'Codexの起動前にTOKENSAVY_API_KEYをエクスポートしてください。モデルリクエストは、選択したカタログスラッグによってルーティングされます。',
       },
       routedCodex: {
         description: '現在のルーティンググループ用の完全なモデルカタログでCodexを設定します。',
         configTomlHint: '以下のモデルカタログをダウンロードし、両方のファイルをCodexの設定ディレクトリに保存して、Codexを再起動してください。',
-        note: 'Codexの起動前にTAPMODELS_API_KEYをエクスポートしてください。ダウンロードしたカタログにはモデルのメタデータのみが含まれ、APIキーは含まれません。',
+        note: 'Codexの起動前にTOKENSAVY_API_KEYをエクスポートしてください。ダウンロードしたカタログにはモデルのメタデータのみが含まれ、APIキーは含まれません。',
       },
       codexModelCatalog: {
         mode: 'カタログ取得元',
