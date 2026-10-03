@@ -11,6 +11,7 @@ import (
 
 type bulkOpenAISettings struct {
 	excelBPS                bool
+	apiKeyCodexIdentity     bool
 	wsSSEAcceleration       bool
 	longContextBilling      bool
 	endpointCapabilities    bool
@@ -20,7 +21,7 @@ type bulkOpenAISettings struct {
 }
 
 func (s bulkOpenAISettings) any() bool {
-	return s.excelBPS || s.wsSSEAcceleration || s.longContextBilling || s.endpointCapabilities || s.responsesMode
+	return s.apiKeyCodexIdentity || s.excelBPS || s.wsSSEAcceleration || s.longContextBilling || s.endpointCapabilities || s.responsesMode
 }
 
 func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISettings, error) {
@@ -32,6 +33,12 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 	settings.excelBPS, err = normalizeBulkExcelBPSExtra(input.Extra)
 	if err != nil {
 		return settings, err
+	}
+	if raw, exists := input.Extra[OpenAIAPIKeyCodexIdentityKey]; exists {
+		if _, ok := raw.(bool); !ok {
+			return settings, infraerrors.BadRequest("OPENAI_APIKEY_IDENTITY_INVALID", "openai_apikey_codex_identity must be a boolean")
+		}
+		settings.apiKeyCodexIdentity = true
 	}
 	if raw, exists := input.Extra[OpenAIOAuthWSSSEAccelerationKey]; exists {
 		if _, ok := raw.(bool); !ok {
@@ -266,6 +273,10 @@ func validateBulkOpenAISettingsTargets(
 		// Ineligible accounts would store a flag the gateway never honours.
 		if settings.wsSSEAcceleration && !account.supportsOpenAIOAuthWSSSEAcceleration() {
 			return 0, invalidBulkOpenAITarget(accountID, "HTTP SSE WS acceleration requires a regular ChatGPT OAuth account")
+		}
+
+		if settings.apiKeyCodexIdentity && !account.IsOpenAIApiKey() {
+			return 0, invalidBulkOpenAITarget(accountID, "Codex identity requires an OpenAI API-key account")
 		}
 
 		if settings.longContextBilling {

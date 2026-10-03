@@ -2597,3 +2597,28 @@ describe('Excel BPS default template integration', () => {
     expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-ignore-encrypted-content"]').element.checked).toBe(true)
   })
 })
+
+describe('API key canonical identity account editing', () => {
+ it('defaults off, saves opt-in, reads back, and disables without altering OAuth', async () => {
+  const account=buildAccount()
+  account.extra={}
+  updateAccountMock.mockReset().mockResolvedValue(account)
+  const wrapper=mountModal(account)
+  await flushPromises()
+  const toggle=wrapper.get('[data-testid="apikey-codex-identity"]')
+  expect(toggle.attributes('aria-checked')).toBe('false')
+  await toggle.trigger('click')
+  await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+  await flushPromises()
+  expect(updateAccountMock.mock.calls[0]?.[1]?.extra.openai_apikey_codex_identity).toBe(true)
+  await wrapper.setProps({account:{...account,id:2,extra:{openai_apikey_codex_identity:true}}})
+  expect(toggle.attributes('aria-checked')).toBe('true')
+  await toggle.trigger('click')
+  await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+  await flushPromises()
+  expect(updateAccountMock.mock.calls[1]?.[1]?.extra).not.toHaveProperty('openai_apikey_codex_identity')
+  await wrapper.setProps({account:{...account,id:3,type:'oauth'}})
+  expect(wrapper.find('[data-testid="apikey-codex-identity"]').exists()).toBe(false)
+  wrapper.unmount()
+ })
+})

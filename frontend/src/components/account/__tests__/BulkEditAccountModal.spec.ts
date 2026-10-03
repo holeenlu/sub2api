@@ -1494,3 +1494,22 @@ describe('bulk BPS defaults integration', () => {
     wrapper.unmount()
   })
 })
+
+describe('API key Codex outbound identity', () => {
+ it.each([true, false])('applies only the opted-in bulk change: %s', async value => {
+  const wrapper=mountModal({selectedPlatforms:['openai'],selectedTypes:['apikey']})
+  const toggle=wrapper.get('[data-testid="bulk-apikey-identity"]')
+  expect(toggle.attributes('disabled')).toBeDefined()
+  await wrapper.get('#bulk-apikey-identity-enabled').setValue(true)
+  if(value) await toggle.trigger('click')
+  await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+  await flushPromises()
+  expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1,2],{extra:{openai_apikey_codex_identity:value}})
+  wrapper.unmount()
+ })
+ it('does not expose the setting for OAuth accounts',()=>{
+  const wrapper=mountModal({selectedPlatforms:['openai'],selectedTypes:['oauth']})
+  expect(wrapper.find('#bulk-apikey-identity-enabled').exists()).toBe(false)
+  wrapper.unmount()
+ })
+})

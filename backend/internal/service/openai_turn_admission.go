@@ -193,7 +193,7 @@ func openAITurnRouteFingerprint(a *Account) [32]byte {
 		"openai_oauth_responses_websockets_v2_enabled", "openai_apikey_responses_websockets_v2_enabled",
 		"responses_websockets_v2_enabled", "openai_ws_enabled", "openai_ws_force_http",
 		"openai_compact_mode", "openai_compact_supported",
-		"openai_responses_mode", "openai_responses_supported",
+		"openai_responses_mode", "openai_responses_supported", OpenAIAPIKeyCodexIdentityKey,
 		"openai_responses_flatten_namespaces", "enable_tls_fingerprint", "tls_fingerprint_profile_id",
 		"codex_cli_only", "codex_cli_only_allow_app_server",
 	} {

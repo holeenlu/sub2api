@@ -1586,6 +1586,8 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		req.Header.Set("content-type", "application/json")
 	}
 
+	applyOpenAIAPIKeyIdentityHeaders(req.Header, account, s.codexIdentityOverrideUA(account))
+
 	// 官方 OpenCode / Command Code 上游收敛为规范客户端 UA：客户端透传的编程库
 	// UA 会命中其前置 Cloudflare bot 拦截（CF 1010/403），并被计入账号 403 strike。
 	applyOpenCodeUpstreamUserAgent(account, targetURL, req.Header)
@@ -1609,6 +1611,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 // ForceCodexCLI 语义是「强制使用 Codex CLI 身份」，等价于使用网关规范身份，故返回空串；
 // 该优先级与历史行为一致（ForceCodexCLI 在账号自定义 UA 之后生效）。
 func (s *OpenAIGatewayService) codexIdentityOverrideUA(account *Account) string {
+	if account == nil {
+		return ""
+	}
 	if s != nil && s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		return ""
 	}

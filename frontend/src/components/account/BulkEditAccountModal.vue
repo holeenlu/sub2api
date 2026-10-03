@@ -1317,6 +1317,12 @@
         </div>
       </div>
 
+      <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label" for="bulk-apikey-identity-enabled"><input id="bulk-apikey-identity-enabled" v-model="enableAPIKeyCodexIdentity" type="checkbox" class="mr-2" />{{ t('admin.accounts.openai.apiKeyCodexIdentity') }}</label>
+        <p class="input-hint">{{ t('admin.accounts.openai.apiKeyCodexIdentityHint') }}</p>
+        <Toggle v-model="apiKeyCodexIdentity" :disabled="!enableAPIKeyCodexIdentity" data-testid="bulk-apikey-identity" :aria-label="t('admin.accounts.openai.apiKeyCodexIdentity')" />
+      </div>
+
       <!-- OpenAI API Key WS mode -->
       <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1818,6 +1824,8 @@ const enableOpenAIEndpointCapabilities = ref(false)
 const enableOpenAIResponsesMode = ref(false)
 const enableOpenAIWSMode = ref(false)
 const enableOpenAIWSSSEAcceleration = ref(false)
+const enableAPIKeyCodexIdentity = ref(false)
+const apiKeyCodexIdentity = ref(false)
 const enableOpenAIAPIKeyWSMode = ref(false)
 const enableUpstreamBillingAutoProbe = ref(false)
 const enableCodexCLIOnly = ref(false)
@@ -2283,6 +2291,10 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     extra.openai_oauth_ws_sse_acceleration = openaiWSSSEAccelerationEnabled.value
   }
 
+  if (enableAPIKeyCodexIdentity.value && allOpenAIAPIKey.value) {
+    ensureExtra().openai_apikey_codex_identity = apiKeyCodexIdentity.value
+  }
+
   if (enableOpenAIAPIKeyWSMode.value) {
     const extra = ensureExtra()
     extra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
@@ -2439,6 +2451,7 @@ const handleSubmit = async () => {
     enableGroups.value ||
     enableOpenAIWSMode.value ||
     (enableOpenAIWSSSEAcceleration.value && allOpenAIOAuthOnly.value) ||
+    (enableAPIKeyCodexIdentity.value && allOpenAIAPIKey.value) ||
     enableOpenAIAPIKeyWSMode.value ||
     enableUpstreamBillingAutoProbe.value ||
     enableCodexCLIOnly.value ||
@@ -2615,6 +2628,8 @@ watch(
       enableOpenAIResponsesMode.value = false
       enableOpenAIWSMode.value = false
       enableOpenAIWSSSEAcceleration.value = false
+      enableAPIKeyCodexIdentity.value = false
+      apiKeyCodexIdentity.value = false
       enableOpenAIAPIKeyWSMode.value = false
       enableUpstreamBillingAutoProbe.value = false
       enableCodexCLIOnly.value = false

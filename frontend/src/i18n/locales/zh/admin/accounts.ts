@@ -753,6 +753,8 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        apiKeyCodexIdentity: "使用规范 Codex 出站身份",
+        apiKeyCodexIdentityHint: "默认关闭，保留现有上游请求头。开启后统一 API Key 出站的 User-Agent、originator 和 version，版本跟随 Codex 版本设置；供应商专用头和管理员显式覆写优先。仅影响此 OpenAI API Key 账号，不改变 OAuth/BPS 或客户端原始日志，不保证减少限流。",
         modelMappingAliases: '模型映射仅作别名，允许其它原生模型',
         modelMappingAliasesHint: '仅适用于普通 OpenAI OAuth 账号。开启后映射只改写指定模型，其他原生模型仍可用；关闭后非空映射仍作为模型白名单。分组白名单始终生效，已有账号不会自动切换。',
         changeModelMappingScope: '修改模型映射范围',
