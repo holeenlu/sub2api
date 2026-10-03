@@ -57,14 +57,19 @@ function codexModelName(slug: string): string {
   return slug.trim().split('/').at(-1)!.toLowerCase()
 }
 
-function isSelectableCodexModel(model: CodexCatalogModel): boolean {
-  if (typeof model.slug !== 'string' || !model.slug.trim() || model.slug.includes('*')) return false
+export function isClientVisibleCodexModel(model: CodexCatalogModel): boolean {
   if (trimEffort(model.visibility).toLowerCase() === 'hide') return false
   if (trimEffort(model.model_purpose).toLowerCase() === 'background') return false
   const name = codexModelName(model.slug)
+  return !/^codex-auto-/.test(name) && name !== 'gpt-reserve'
+}
+
+function isSelectableCodexModel(model: CodexCatalogModel): boolean {
+  if (typeof model.slug !== 'string' || !model.slug.trim() || model.slug.includes('*')) return false
+  if (!isClientVisibleCodexModel(model)) return false
+  const name = codexModelName(model.slug)
   // Dedicated media/tool endpoints cannot serve as a Codex conversation model.
   if (/^(?:gpt-image|dall-e|sora|whisper|tts|text-embedding|omni-moderation|grok-imagine|imagen|veo)(?:-|$)/.test(name)) return false
-  if (/^codex-auto-/.test(name) || name === 'gpt-reserve') return false
   return !/^(?:gpt|gemini|grok)-(?:.*-)?(?:image|video|audio|realtime|tts|transcribe|transcription|embedding|moderation)(?:-|$)/.test(name)
 }
 

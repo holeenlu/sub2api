@@ -1014,7 +1014,7 @@ describe('UseKeyModal', () => {
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://example.com/backend-api/codex/models',
+      'https://example.com/backend-api/codex/models?catalog_view=client',
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer sk-composite-test' })
       })
@@ -1157,7 +1157,7 @@ describe('UseKeyModal', () => {
 
     await fetchCatalog(wrapper)
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'https://example.com/backend-api/codex/models',
+      'https://example.com/backend-api/codex/models?catalog_view=client',
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer sk-zhipu-test' }) })
     )
     await wrapper.get('[data-testid="codex-model-catalog-download"]').trigger('click')
@@ -1763,6 +1763,22 @@ describe('UseKeyModal', () => {
     grok.unmount()
   })
 
+  it('excludes background models from the preview and actual downloaded file', async () => {
+    const visible = { slug: 'gpt-6-sol', visibility: 'list', priority: 10 }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => JSON.stringify({ models: [
+      visible, { slug: 'codex-auto-review', visibility: 'hide' }, { slug: 'gpt-reserve' }
+    ] }) }))
+    const wrapper = mountModal('openai', 'sk-client-view')
+    await fetchCatalog(wrapper)
+    const preview = wrapper.get('[data-testid="codex-model-catalog-preview"]')
+    expect(preview.findAll('li')).toHaveLength(1)
+    expect(preview.text()).toBe('gpt-6-sol')
+    await wrapper.get('[data-testid="codex-model-catalog-download"]').trigger('click')
+    const blob = saveAsMock.mock.calls.at(-1)![0] as Blob
+    expect(JSON.parse(await readBlobAsText(blob))).toEqual({ models: [visible] })
+    wrapper.unmount()
+  })
+
   it('downloads the current key, not a stale one, after the apiKey prop changes', async () => {
     const wrapper = mountModal('openai', 'sk-first')
     await selectLegacyAuth(wrapper)
@@ -1796,9 +1812,9 @@ describe('UseKeyModal', () => {
 
     await mode.setValue('remote')
     const parsed = parseToml(currentConfig()) as Record<string, unknown>
-    expect(codexCatalogUrl(parsed)).toBe('https://example.com/v1/models')
+    expect(codexCatalogUrl(parsed)).toBe('https://example.com/v1/models?catalog_view=client')
     expect(parsed).not.toHaveProperty('model_catalog_json')
-    expect(wrapper.get('[data-testid="codex-model-catalog-path"]').text()).toBe('https://example.com/v1/models')
+    expect(wrapper.get('[data-testid="codex-model-catalog-path"]').text()).toBe('https://example.com/v1/models?catalog_view=client')
     expect(fetchMock).not.toHaveBeenCalled()
 
     await wrapper.setProps({ apiKey: 'sk-other' })
@@ -1840,7 +1856,7 @@ describe('UseKeyModal', () => {
         expect(wrapper.text()).not.toContain('keys.useKeyModal.codexModelCatalog.oversized')
       } else {
         expect((wrapper.get('[data-testid="codex-model-catalog-mode"]').element as HTMLSelectElement).value).toBe('remote')
-        expect(config).toContain('model_catalog_url = "https://example.com/v1/models"')
+        expect(config).toContain('model_catalog_url = "https://example.com/v1/models?catalog_view=client"')
         expect(config).not.toContain('model_catalog_json')
       }
     }

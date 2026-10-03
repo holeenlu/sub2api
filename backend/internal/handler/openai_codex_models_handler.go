@@ -23,6 +23,7 @@ import (
 // otherwise ChatGPT manifests are proxied verbatim and custom API key manifests
 // receive provider-compatibility normalization plus short-lived caching.
 func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
+	prepareClientCatalogValidation(c)
 	if c.Request.Context().Err() != nil {
 		return
 	}

@@ -36,7 +36,7 @@ class CodexCatalogUpdaterTests(unittest.TestCase):
             config.write_text(original)
             with patch.dict(os.environ, {'CATALOG_TEST_KEY': 'test-key'}):
                 parsed, endpoint, token, output = UPDATER.load_configuration(config)
-            self.assertEqual(endpoint, 'https://gateway.example/backend-api/codex/models')
+            self.assertEqual(endpoint, 'https://gateway.example/backend-api/codex/models?catalog_view=client')
             self.assertEqual(token, 'test-key')
             self.assertEqual(output, config.parent / 'models.json')
             self.assertEqual(config.read_text(), original)
@@ -60,6 +60,18 @@ class CodexCatalogUpdaterTests(unittest.TestCase):
     def test_redirects_cannot_forward_the_credential_to_another_origin(self):
         with self.assertRaises(ValueError):
             UPDATER.NoRedirect().redirect_request(None, None, 302, '', {}, 'https://other.example')
+
+    def test_background_entries_are_not_written_back_by_the_updater(self):
+        visible = model('gpt-6-sol')
+        payload = {'models': [visible, {'slug': 'codex-auto-review'}, {'slug': 'gpt-reserve'},
+                              {'slug': 'opaque-hidden', 'visibility': 'hide'},
+                              {'slug': 'review-alias', 'model_purpose': 'background'}]}
+        result = UPDATER.validate_manifest(json.dumps(payload).encode(), {'model': 'gpt-6-sol'})
+        self.assertEqual(result, {'models': [visible]})
+        with self.assertRaises(ValueError):
+            UPDATER.validate_manifest(json.dumps(payload).encode(), {'model': 'gpt-reserve'})
+        with self.assertRaises(ValueError):
+            UPDATER.validate_manifest(json.dumps({'models': payload['models'][1:]}).encode(), {})
 
 
 if __name__ == '__main__':
