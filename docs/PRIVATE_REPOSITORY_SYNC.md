@@ -8,12 +8,13 @@
 
 | 本地分支 | 发布目标 | 用途 |
 | --- | --- | --- |
-| `upstream-base` | `origin/upstream-base`，来源为 `upstream/main` | 官方上游基线，只供审查和普通 merge |
+| `upstream-base` | 不作代码交付目标，来源为 `upstream/main` | 官方上游本地基线，只供审查和普通 merge |
 | `main` | `origin/main` | KDAN 品牌主开发、默认分支和最终交付 |
-| `TapModels` | `origin/TapModels`、`erwinlin/main` | 从 main 派生的品牌交付 |
+| `TapModels` | `origin/TapModels` | 从 main 派生的品牌交付 |
+| `tokensavy` | `origin/tokensavy` | 从 main 派生的 Tokensavy 品牌交付 |
 
 不再维护独立 `KDAN` 或公共分支。现行入口是 `deploy/sync-upstream.sh`，
-调用个人 `sync-upstream` 技能；官方更新先进入 `main`，再传播到 TapModels。
+调用个人 `sync-upstream` 技能；官方更新先进入 `main`，再传播到 TapModels、tokensavy。仅向本仓库 origin 的三个交付分支推送，不再向 erwinlin 或其他仓库交付。
 检查点保存在 `.release/upstream-sync/<id>/state.json`。技能及入口属于本地文件，
 新工作站须另行配置；不能只靠 clone 恢复。旧 `deploy/sync.sh` 已退役。
 推送与部署仍需分别批准，不向公开 upstream 推送私有代码。
@@ -24,7 +25,7 @@
 - BPS 仅从 `ranxi2001/sub2api` 审查并同步 OpenAI OAuth Excel / BPS 相关功能、修复和严格必要的依赖。sub4api 独立 BPS 平台已移除，后续不得通过同步恢复。禁止整分支、整版本或整 tag 合入，也不能通过共享文件或依赖带入无关的打票、Mihomo、账号质量、部署等功能。
 - 从已有 Excel / BPS 整合记录的来源 SHA 审查到固定源 tip，按实际 diff 和调用依赖判断范围，记录采用与排除的来源提交；不能仅按提交标题或文件名筛选。已存在等价行为时不重复移植。
 - 完整属于 Excel / BPS 的提交可审查后使用 `cherry-pick -x`；混合提交仅适配必要代码块，在提交或整合记录中注明源 SHA 和排除内容。依赖无法独立分离时，先说明取舍并让用户选择。
-- 所有新增和修复先落 `main`，再按 [需求交付规范](CHANGE_DELIVERY.md) 普通 merge 到 TapModels，保留品牌及繁体中文。
+- 共享新增和修复先落 `main`，再按 [需求交付规范](CHANGE_DELIVERY.md) 普通 merge 到 TapModels、tokensavy，保留品牌及繁体中文。
 
 此规则限制后续同步范围，不自动删除现有功能，也不改写既有历史。早先对两个 fork 的全量同步授权不能作为后续全量合并依据。
 
@@ -55,7 +56,7 @@ fetch 只更新引用，不会自动更新应用代码。在维护者整合工�
 ```
 
 prepare 先把固定上游 SHA 普通 merge 到 `main`，保留原提交并运行验证，
-不执行历史重写或自动推送。完成检查点后，再按需求交付规范把验证后的 `main` 传播到 TapModels。
+不执行历史重写或自动推送。完成检查点后，再按需求交付规范把验证后的 `main` 传播到 TapModels、tokensavy。
 
 出现冲突后按检查点处理。验证完成并获得该次推送授权后，再使用检查点 ID 执行 publish；
 数据库迁移与部署另行验收。

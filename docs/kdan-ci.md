@@ -7,7 +7,8 @@ KDAN 品牌仓库 `holeenlu/sub2api` 独立维护，脱离 GitHub Fork 网络。
 详见[私有仓库同步说明](PRIVATE_REPOSITORY_SYNC.md)。
 
 - KDAN 品牌主分支：本地 `main` → `origin/main`。
-- TapModels 品牌分支：本地 `TapModels` → `origin/TapModels` 与 `erwinlin/main`。
+- TapModels 品牌分支：本地 `TapModels` → `origin/TapModels`。
+- Tokensavy 品牌分支：本地 `tokensavy` → `origin/tokensavy`。
 - 同步入口：`deploy/sync-upstream.sh`，普通 merge 并保留原 SHA；检查点位于 `.release/upstream-sync/<id>/state.json`。
 - 推送、部署按该次明确授权分别执行；旧 `deploy/sync.sh` 已退役。
 - 不再维护独立 KDAN 或公共分支，也不向公开 upstream 推送私有代码。
@@ -46,7 +47,7 @@ git push origin refs/tags/1.0.0
 ```
 
 数字版本 tag 属于其发布仓库对应的品牌。KDAN tag 从 main 分支推到 `origin`，
-TapModels 版本从 `erwinlin/main` 发布。上游 `v*` tag 仅用于基线溯源，不是私有品牌发版。
+三个品牌只从 `holeenlu/sub2api` 对应分支手动发布：KDAN/main、TapModels/TapModels、Tokensavy/tokensavy。更新按渠道前缀隔离；不向旧品牌仓库推送或发版。上游 `v*` tag 仅用于基线溯源，不是私有品牌发版。
 CI 不自动部署生产。
 
 ## 徽章中的编译提交
