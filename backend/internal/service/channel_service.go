@@ -442,20 +442,6 @@ func (c *channelCache) matchWildcard(groupID int64, platform, modelLower string)
 	return nil
 }
 
-func (c *channelCache) matchNarrowestWildcard(groupID int64, platform, modelLower string) *ChannelModelPricing {
-	gpKey := channelGroupPlatformKey{groupID: groupID, platform: platform}
-	wildcards := c.wildcardByGroupPlatform[gpKey]
-	var match *ChannelModelPricing
-	longest := -1
-	for _, wc := range wildcards {
-		if strings.HasPrefix(modelLower, wc.prefix) && len(wc.prefix) > longest {
-			match = wc.pricing
-			longest = len(wc.prefix)
-		}
-	}
-	return match
-}
-
 // matchWildcardMapping 在通配符映射中查找匹配项（最先匹配到优先）
 func (c *channelCache) matchWildcardMapping(groupID int64, platform, modelLower string) string {
 	gpKey := channelGroupPlatformKey{groupID: groupID, platform: platform}
@@ -574,24 +560,7 @@ func (s *ChannelService) GetChannelModelPricing(ctx context.Context, groupID int
 
 	modelLower := strings.ToLower(model)
 	pricing := lookupPricingAcrossPlatforms(lk.cache, groupID, lk.platform, modelLower)
-	if ctx.Value(catalogPriceOrderKey{}) == true {
-		exact := false
-		for _, platform := range matchingPlatforms(lk.platform) {
-			if value := lk.cache.pricingByGroupModel[channelModelKey{groupID: groupID, platform: platform, model: normalizeChannelPricingModelName(model)}]; value != nil {
-				pricing = value
-				exact = true
-				break
-			}
-		}
-		if !exact {
-			for _, platform := range matchingPlatforms(lk.platform) {
-				if value := lk.cache.matchNarrowestWildcard(groupID, platform, normalizeChannelPricingModelName(model)); value != nil {
-					pricing = value
-					break
-				}
-			}
-		}
-	}
+
 	if pricing == nil {
 		return nil
 	}

@@ -784,8 +784,10 @@
               <p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ t('admin.groups.modelAllowlist.hint') }}</p>
             </div>
 
+            <Toggle v-model="createModelAllowlistState.enabled" />
           </div>
           <div
+            v-if="createModelAllowlistState.enabled"
             class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
           >
             <div
@@ -846,12 +848,6 @@
                     class="ml-1 rounded bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
                   >
                     {{ t("admin.groups.modelAllowlist.wildcardTag") }}
-                  </span>
-                  <span
-                    v-if="modelAllowlistPricingPending.create.has(item.id)"
-                    class="ml-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
-                  >
-                    {{ t("admin.groups.modelAllowlist.pricingPendingTag") }}
                   </span>
                 </span>
                 <button
@@ -2440,8 +2436,10 @@
               <p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ t('admin.groups.modelAllowlist.hint') }}</p>
             </div>
 
+            <Toggle v-model="editModelAllowlistState.enabled" />
           </div>
           <div
+            v-if="editModelAllowlistState.enabled"
             class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
           >
             <div
@@ -2502,12 +2500,6 @@
                     class="ml-1 rounded bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
                   >
                     {{ t("admin.groups.modelAllowlist.wildcardTag") }}
-                  </span>
-                  <span
-                    v-if="modelAllowlistPricingPending.edit.has(item.id)"
-                    class="ml-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
-                  >
-                    {{ t("admin.groups.modelAllowlist.pricingPendingTag") }}
                   </span>
                 </span>
                 <button
@@ -5304,15 +5296,10 @@ const resetModelAllowlistState = (
   config?: Parameters<typeof createInitialModelAllowlistState>[0],
 ) => {
   const fresh = createInitialModelAllowlistState(config);
+  state.enabled = fresh.enabled;
   state.savedModels = fresh.savedModels;
   state.items = fresh.items;
 };
-
-// 缺价候选仍列出供管理员勾选和定价，只是标注“待定价”；发布目录会等价格齐备后才开放。
-const modelAllowlistPricingPending = reactive<Record<"create" | "edit", Set<string>>>({
-  create: new Set(),
-  edit: new Set(),
-});
 
 const loadModelAllowlistCandidates = async (
   mode: "create" | "edit",
@@ -5326,12 +5313,11 @@ const loadModelAllowlistCandidates = async (
   const loadingRef = mode === "create" ? createModelAllowlistLoading : editModelAllowlistLoading;
   loadingRef.value = true;
   try {
-    const { models, pricingPending } = await adminAPI.groups.getModelAllowlistCandidates(groupID, platform);
+    const { models } = await adminAPI.groups.getModelAllowlistCandidates(groupID, platform);
     if (!modelAllowlistCandidatesTracker.isCurrent(requestID, request)) {
       return;
     }
     setModelAllowlistCandidates(state, models);
-    modelAllowlistPricingPending[mode] = new Set(pricingPending);
   } catch (error) {
     if (!modelAllowlistCandidatesTracker.isCurrent(requestID, request)) {
       return;
@@ -5978,6 +5964,10 @@ const validateGroupReasoningMultipliers = (pricing: PricingFormEntry[]): boolean
 };
 
 const handleCreateGroup = async () => {
+  if (createModelAllowlistState.enabled && createModelAllowlistSelectedCount.value === 0) {
+    appStore.showError(t("admin.groups.modelAllowlist.emptySelectionError"));
+    return;
+  }
   if (!createForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
@@ -6278,6 +6268,10 @@ const closeEditModal = () => {
 };
 
 const handleUpdateGroup = async () => {
+  if (editModelAllowlistState.enabled && editModelAllowlistSelectedCount.value === 0) {
+    appStore.showError(t("admin.groups.modelAllowlist.emptySelectionError"));
+    return;
+  }
   if (!editingGroup.value) return;
   if (!editForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));

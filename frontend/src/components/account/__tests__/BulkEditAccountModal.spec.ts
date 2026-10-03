@@ -567,7 +567,7 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.text()).not.toContain('GPT-5.3 Codex Spark')
   })
 
-  it('批量清空限制接受全部模型，并保留每个账号的别名', async () => {
+  it('批量清空模型限制使用原有空映射', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['anthropic'],
       selectedTypes: ['apikey']
@@ -579,7 +579,7 @@ describe('BulkEditAccountModal', () => {
 
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
-      model_catalog_policy: { models: [], }
+      credentials: { model_mapping: {} }
     })
   })
 
@@ -591,7 +591,7 @@ describe('BulkEditAccountModal', () => {
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
-      model_catalog_policy: { models: ['gpt-image-selected'], }
+      credentials: { model_mapping: { 'gpt-image-selected': 'gpt-image-selected' } }
     })
     expect(wrapper.findComponent(ModelWhitelistSelector).exists()).toBe(true)
   })
@@ -1349,7 +1349,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('开启 OpenAI 自动透传时仍可保存固定访问策略', async () => {
+  it('开启 OpenAI 自动透传时不提交无效的模型限制', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -1365,8 +1365,7 @@ describe('BulkEditAccountModal', () => {
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
       extra: {
         openai_passthrough: true
-      },
-      model_catalog_policy: { models: [], }
+      }
     })
     expect(wrapper.find('[data-testid="account-catalog-policy"]').exists()).toBe(false)
   })

@@ -365,7 +365,7 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
-  it('preserves unrestricted legacy OAuth aliases when moving supply to the selection', async () => {
+  it('preserves explicit OAuth alias mappings without a parallel policy', async () => {
     const account = {
       ...buildOpenAIOAuthParentAccount(),
       credentials: { model_mapping_mode: 'aliases', model_mapping: { 'gpt-5.4': 'gpt-5.5' } }
@@ -374,7 +374,7 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
     await flushPromises()
     expect(wrapper.find('[data-testid="openai-model-aliases"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('')
+    expect(wrapper.find('[data-testid="model-whitelist-value"]').exists()).toBe(false)
     await wrapper.get('#edit-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({
@@ -383,7 +383,7 @@ describe('EditAccountModal', () => {
         model_mapping: { 'gpt-5.4': 'gpt-5.5' }
       })
     }))
-    expect(updateAccountMock.mock.calls[0]?.[1]?.model_catalog_policy).toEqual({ models: [], })
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('model_catalog_policy')
     wrapper.unmount()
   })
 
@@ -398,7 +398,7 @@ describe('EditAccountModal', () => {
     expect(wrapper.find('[data-testid="openai-model-aliases"]').exists()).toBe(false)
     await wrapper.get('#edit-account-form').trigger('submit.prevent')
     await flushPromises()
-    expect(updateAccountMock.mock.calls[0]?.[1]?.model_catalog_policy).toEqual({ models: ['gpt-5.4'], })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.model_mapping).toEqual({ 'gpt-5.4': 'gpt-5.5' })
     wrapper.unmount()
   })
 
@@ -909,8 +909,7 @@ describe('EditAccountModal', () => {
       { from: 'gpt-latest', to: 'deepseek-chat' }
     ])
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({ 'gpt-latest': 'deepseek-chat' })
-    expect(updateAccountMock.mock.calls[0]?.[1]?.model_catalog_policy.models).toEqual(['gpt-5.2', 'gpt-latest'])
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({ 'gpt-5.2': 'gpt-5.2', 'gpt-latest': 'deepseek-chat' })
     await wrapper.setProps({ show: false })
     await wrapper.setProps({ show: true, account: { ...account } })
     expect(wrapper.getComponent(ModelWhitelistSelectorStub).props('modelMappings')).toEqual([
@@ -1028,8 +1027,7 @@ describe('EditAccountModal', () => {
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({})
-    expect(updateAccountMock.mock.calls[0]?.[1]?.model_catalog_policy.models).toEqual(['gpt-5.2'])
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({ 'gpt-5.2': 'gpt-5.2' })
   })
 
   it.each(['oauth', 'setup-token'] as const)(
@@ -1042,21 +1040,21 @@ describe('EditAccountModal', () => {
       const wrapper = mountModal(account)
 
       expect(wrapper.find('[data-testid="edit-dedicated-model-restriction"]').exists()).toBe(true)
-      expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('claude-sonnet-5,claude-latest')
+      expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('claude-sonnet-5')
 
       // Reopening must rehydrate from props rather than keep stale local state.
       await wrapper.setProps({ show: false })
       await wrapper.setProps({ show: true })
-      expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('claude-sonnet-5,claude-latest')
+      expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('claude-sonnet-5')
 
       await wrapper.get('form#edit-account-form').trigger('submit.prevent')
       await flushPromises()
 
       expect(updateAccountMock).toHaveBeenCalledTimes(1)
       expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
-        'claude-latest': 'claude-opus-5'
+        'claude-latest': 'claude-opus-5',
+        'claude-sonnet-5': 'claude-sonnet-5'
       })
-      expect(updateAccountMock.mock.calls[0]?.[1]?.model_catalog_policy.models).toEqual(['claude-sonnet-5', 'claude-latest'])
     }
   )
 
@@ -1376,16 +1374,16 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
 
-    expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('gpt-5.2,gpt-latest')
+    expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('gpt-5.2')
 
     await wrapper.get('[data-testid="rewrite-to-snapshot"]').trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
-      'gpt-latest': 'gpt-5.2'
+      'gpt-latest': 'gpt-5.2',
+      'gpt-5.2-2025-12-11': 'gpt-5.2-2025-12-11'
     })
-    expect(updateAccountMock.mock.calls[0]?.[1]?.model_catalog_policy.models).toEqual(['gpt-5.2-2025-12-11'])
   })
 
   it('submits OpenAI compact mode and compact-only model mapping', async () => {
@@ -1707,10 +1705,9 @@ describe('EditAccountModal', () => {
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     const payload = updateAccountMock.mock.calls[0]?.[1]
-    expect(payload?.model_catalog_policy.models).toEqual(['gpt-5.3-codex-spark'])
     expect(payload?.group_ids).toEqual([7])
     expect(payload?.credentials).toEqual({
-      model_mapping: {},
+      model_mapping: { 'gpt-5.3-codex-spark': 'gpt-5.3-codex-spark' },
       compact_model_mapping: {
         'gpt-5.3-codex-spark': 'gpt-5.3-codex-spark-compact'
       }

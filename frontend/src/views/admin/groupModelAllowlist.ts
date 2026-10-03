@@ -9,6 +9,7 @@ export interface ModelAllowlistItem {
 }
 
 export interface ModelAllowlistState {
+  enabled: boolean
   savedModels: string[]
   items: ModelAllowlistItem[]
 }
@@ -19,6 +20,7 @@ export type ModelAllowlistAddError = 'empty' | 'duplicate'
 export const createModelAllowlistState = (
   config?: Partial<ModelAllowlistConfig> | null,
 ): ModelAllowlistState => ({
+  enabled: config?.enabled ?? false,
   savedModels: normalizeModels(config?.models ?? []),
   items: [],
 })
@@ -33,7 +35,7 @@ export const hydrateModelAllowlistState = (
 }
 
 // The catalog adds candidates; saved selections survive incomplete refreshes.
-// New models are never selected implicitly, including when the saved list is empty.
+// An enabled empty legacy list stays empty; opening it must not grant every model.
 export const setModelAllowlistCandidates = (
   state: ModelAllowlistState,
   candidates: string[],
@@ -54,7 +56,7 @@ export const setModelAllowlistCandidates = (
   state.items = selectionOrder.map(id => {
     const selected = hasExistingItems
       ? currentSelected.has(id)
-      : savedSelected.has(id)
+      : savedSelected.has(id) || (!state.enabled && state.savedModels.length === 0)
 
     return {
       id,
@@ -126,7 +128,7 @@ export const addCustomModelAllowlistItem = (
 export const buildModelAllowlistConfig = (
   state: ModelAllowlistState,
 ): ModelAllowlistConfig => ({
-  enabled: true,
+  enabled: state.enabled,
   models: state.items.length > 0
     ? state.items.filter(item => item.selected).map(item => item.id)
     : [...state.savedModels],

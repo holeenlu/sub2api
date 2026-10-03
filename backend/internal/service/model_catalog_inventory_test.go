@@ -33,22 +33,29 @@ func (r *inventoryMemoryRepo) UpdateRegistry(ctx context.Context, update func([]
 	}
 	return r.settings.Set(ctx, ModelCatalogRegistryKey, string(rawBytes))
 }
+func inventoryIDs(snapshot *ModelCatalogSnapshot) []string {
+	ids := make([]string, 0, len(snapshot.Models))
+	for _, model := range snapshot.Models {
+		ids = append(ids, model.ID)
+	}
+	return ids
+}
 func TestModelCatalogInventoryMaintenanceNeverGrantsAccessOrLosesDisabledState(t *testing.T) {
 	ctx := context.Background()
 	s, repo, a, _ := newCatalogTestService(catalogResponse(200, `{"data":[{"id":"new-chat","model_kind":"chat","reasoning":false,"context_window":100000,"input_modalities":["text"]}]}`))
 	settings := &catalogSettingsMemory{values: map[string]string{}}
 	s.settings = &SettingService{settingRepo: settings}
 	s.repo = &inventoryMemoryRepo{selectionCatalogRepo: &selectionCatalogRepo{repo}, settings: settings}
-	a.Extra = map[string]any{ModelCatalogPolicyExtraKey: ModelCatalogPolicy{Models: []string{"new-chat"}}}
+	a.Credentials["model_mapping"] = map[string]any{"new-chat": "new-chat"}
 	_, err := s.Refresh(ctx, a.ID, true)
 	require.NoError(t, err)
 	require.NoError(t, s.SaveInventoryModel(ctx, CatalogModelInput{ID: "future-image", Platform: PlatformOpenAI, Kind: "image", DisplayName: "Future picture"}))
-	allowed, _ := s.ModelIsPublished(ctx, a, "future-image")
+	allowed := a.IsModelSupported("future-image")
 	require.False(t, allowed, "editing the inventory cannot expand account supply")
 	require.NoError(t, s.SaveInventoryModel(ctx, CatalogModelInput{ID: "new-chat", Platform: PlatformOpenAI, Kind: "chat", DisplayName: "Curated name", Disabled: true}))
 	inventory, err := s.Inventory(ctx, PlatformOpenAI)
 	require.NoError(t, err)
-	require.Len(t, inventory.Models, 2)
+	require.Greater(t, len(inventory.Models), 2, "upstream presets are available before discovery")
 	for _, model := range inventory.Models {
 		if model.ID == "new-chat" {
 			require.True(t, model.Disabled)
@@ -58,10 +65,11 @@ func TestModelCatalogInventoryMaintenanceNeverGrantsAccessOrLosesDisabledState(t
 	for _, account := range []*Account{nil, a} {
 		candidates, err := s.SelectionCatalog(ctx, account, PlatformOpenAI)
 		require.NoError(t, err)
-		require.Len(t, candidates.Models, 1)
-		require.Equal(t, "future-image", candidates.Models[0].ID)
+		ids := inventoryIDs(candidates)
+		require.Contains(t, ids, "future-image")
+		require.NotContains(t, ids, "new-chat")
 	}
-	allowed, _ = s.ModelIsPublished(ctx, a, "new-chat")
+	allowed = a.IsModelSupported("new-chat")
 	require.True(t, allowed, "inventory maintenance cannot revoke a saved group/account selection")
 	stored, err := repo.Current(ctx, modelCatalogSourceKey(a.ID))
 	require.NoError(t, err)
@@ -72,12 +80,12 @@ func TestModelCatalogInventoryMaintenanceNeverGrantsAccessOrLosesDisabledState(t
 	restarted := NewModelCatalogService(s.repo, s.accounts, nil, s.settings, nil)
 	candidates, err := restarted.SelectionCatalog(ctx, nil, PlatformOpenAI)
 	require.NoError(t, err)
-	require.Len(t, candidates.Models, 1)
-	require.Equal(t, "Updated", candidates.Models[0].DisplayName)
+	require.Contains(t, inventoryIDs(candidates), "future-image")
+	require.NotContains(t, inventoryIDs(candidates), "new-chat")
 	require.NoError(t, s.SaveInventoryModel(ctx, CatalogModelInput{ID: "new-chat", Platform: PlatformOpenAI, Kind: "chat"}))
 	candidates, err = s.SelectionCatalog(ctx, nil, PlatformOpenAI)
 	require.NoError(t, err)
-	require.Len(t, candidates.Models, 2)
+	require.Contains(t, inventoryIDs(candidates), "new-chat")
 }
 func TestModelCatalogInventoryRejectsInvalidIdentityWithoutWriting(t *testing.T) {
 	s := &ModelCatalogService{}

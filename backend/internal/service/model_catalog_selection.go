@@ -7,8 +7,7 @@ import (
 )
 
 // SelectionCatalog is an administrator's inventory for configuring supply,
-// never evidence that an account can serve a model. Keep it separate from the
-// account discovery snapshot consumed by routing and public catalogs.
+// never evidence that an account can serve a model.
 func (s *ModelCatalogService) SelectionCatalog(ctx context.Context, account *Account, platform string) (*ModelCatalogSnapshot, error) {
 	return s.selectionCatalog(ctx, account, platform, false)
 }
@@ -20,14 +19,10 @@ func (s *ModelCatalogService) Inventory(ctx context.Context, platform string) (*
 }
 
 func (s *ModelCatalogService) selectionCatalog(ctx context.Context, account *Account, platform string, includeDisabled bool) (*ModelCatalogSnapshot, error) {
-	var snapshot *ModelCatalogSnapshot
-	var err error
 	if account != nil {
 		platform = account.Platform
-		snapshot, err = s.Account(ctx, account)
-	} else {
-		snapshot, err = s.Platform(ctx, platform)
 	}
+	snapshot, err := s.Platform(ctx, platform)
 	if err != nil {
 		return nil, err
 	}
@@ -46,17 +41,6 @@ func (s *ModelCatalogService) selectionCatalog(ctx context.Context, account *Acc
 		entry.Access = "candidate"
 		out.Models = append(out.Models, entry)
 	}
-	// A single-account editor can also choose platform inventory. This avoids
-	// hiding models omitted by the OAuth Codex manifest (notably media models).
-	if account != nil {
-		inventory, err := s.Platform(ctx, platform)
-		if err != nil {
-			return nil, err
-		}
-		for _, entry := range inventory.Models {
-			add(entry)
-		}
-	}
 	accounts, err := s.accounts.ListActive(ctx)
 	if err != nil {
 		return nil, err
@@ -66,43 +50,28 @@ func (s *ModelCatalogService) selectionCatalog(ctx context.Context, account *Acc
 		if platform != "" && a.Platform != platform {
 			continue
 		}
-		for _, id := range configuredUpstreamModelsForCapabilitySync(a) {
+		ids := configuredUpstreamModelsForCapabilitySync(a)
+		for alias := range a.GetModelMapping() {
+			if !strings.Contains(alias, "*") {
+				ids = append(ids, alias)
+			}
+		}
+		for _, id := range ids {
 			m, _ := a.GetUpstreamModelMetadata(id)
 			kind := modelCatalogEntryKind(id, m)
 			add(ModelCatalogEntry{ID: id, Platform: a.Platform, Kind: kind, Metadata: m, Lifecycle: modelCatalogLifecycle(m, time.Now()), Source: "administrator", Missing: modelCatalogMissing(kind, m)})
 		}
 	}
-	// Price identities can fill holes in upstream discovery, but only in this
-	// admin inventory. Neither prices nor another account grant access.
-	if s.prices != nil {
-		s.prices.mu.RLock()
-		for id, price := range s.prices.pricingData {
-			if price == nil {
-				continue
-			}
-			provider := strings.ToLower(strings.TrimSpace(price.LiteLLMProvider))
-			switch provider {
-			case "vertex_ai", "vertex_ai-image-models", "gemini":
-				provider = PlatformGemini
-			case "xai":
-				provider = PlatformGrok
-			case PlatformOpenAI, PlatformGrok, PlatformAnthropic:
-			default:
-				continue // Do not guess ownership from an opaque model name.
-			}
-			kind := modelCatalogEntryKind(codexProviderQualifiedModelID(id), UpstreamModelMetadata{})
-			if strings.Contains(price.Mode, "image") {
-				kind = "image"
-			} else if strings.Contains(price.Mode, "video") {
-				kind = "video"
-			}
-			if kind != "image" && kind != "video" {
-				continue
-			}
-			m := UpstreamModelMetadata{ID: id, ModelKind: kind, OutputModalities: []string{kind}}
-			add(ModelCatalogEntry{ID: id, Platform: provider, Kind: kind, Metadata: m, Lifecycle: "unknown", Source: "pricing_catalog", Missing: []string{}})
+	// Reuse the upstream group presets; administrators extend this inventory at runtime.
+	platforms := []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok, PlatformOpenCodeGo, PlatformTypeSafe}
+	for _, p := range platforms {
+		if platform != "" && platform != p {
+			continue
 		}
-		s.prices.mu.RUnlock()
+		for _, id := range defaultModelsListCandidateIDs(p) {
+			m := UpstreamModelMetadata{ID: id}
+			add(ModelCatalogEntry{ID: id, Platform: p, Kind: modelCatalogEntryKind(id, m), Lifecycle: "unknown", Source: "preset", Metadata: m})
+		}
 	}
 	curated := map[string]ModelCatalogEntry{}
 	for _, entry := range s.Registry(ctx) {
@@ -127,6 +96,7 @@ func (s *ModelCatalogService) selectionCatalog(ctx context.Context, account *Acc
 		models = append(models, entry)
 	}
 	out.Models = modelCatalogNormalizeEntries(models)
+	out.Status = "ready"
 	out.Revision = modelCatalogHash(out.Models)
 	return &out, nil
 }

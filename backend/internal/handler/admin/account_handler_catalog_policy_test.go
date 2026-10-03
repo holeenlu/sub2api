@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -37,16 +36,9 @@ func TestAccountHandlerCatalogPolicyWriteBoundaries(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/accounts", bytes.NewBufferString(body))
 			req.Header.Set("Content-Type", "application/json")
 			router.ServeHTTP(rec, req)
-			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-			var saved *service.ModelCatalogPolicy
-			if kind == "bulk" {
-				require.NotNil(t, stub.lastBulkUpdateAccountInput)
-				saved = stub.lastBulkUpdateAccountInput.ModelCatalogPolicy
-			} else {
-				require.Len(t, stub.createdAccounts, 1)
-				saved = stub.createdAccounts[0].ModelCatalogPolicy
-			}
-			require.Equal(t, &service.ModelCatalogPolicy{Models: []string{}}, saved)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			require.Empty(t, stub.createdAccounts)
+			require.Nil(t, stub.lastBulkUpdateAccountInput)
 		})
 	}
 }

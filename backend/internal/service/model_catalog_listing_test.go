@@ -20,6 +20,12 @@ type listingAccounts struct {
 func (r *listingAccounts) ListByGroup(context.Context, int64) ([]Account, error) {
 	return r.accounts, nil
 }
+func (r *listingAccounts) ListSchedulableByGroupID(ctx context.Context, id int64) ([]Account, error) {
+	return r.ListByGroup(ctx, id)
+}
+func (r *listingAccounts) ListModelAvailabilityCandidates(ctx context.Context, id *int64, platforms []string, mixed bool) ([]Account, error) {
+	return r.accounts, nil
+}
 func (r *listingAccounts) GetByID(_ context.Context, id int64) (*Account, error) {
 	for i := range r.accounts {
 		if r.accounts[i].ID == id {
@@ -36,7 +42,8 @@ func newListingFixture(t *testing.T) (*GroupModelCatalogService, *catalogMemoryR
 	accounts := &listingAccounts{}
 	repo := &catalogMemoryRepo{snapshots: map[string]*ModelCatalogSnapshot{}}
 	for i, typ := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
-		a := Account{ID: int64(i + 1), Platform: PlatformOpenAI, Type: typ, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "private-key", "access_token": "private-token"}, Extra: map[string]any{ModelCatalogPolicyExtraKey: ModelCatalogPolicy{Models: models}}}
+		a := Account{ID: int64(i + 1), Platform: PlatformOpenAI, Type: typ, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "private-key", "access_token": "private-token"}}
+		setTestModelWhitelist(&a, models)
 		entries := []ModelCatalogEntry{}
 		for _, id := range models {
 			m := UpstreamModelMetadata{ID: id, ModelKind: "chat", Reasoning: &yes, SupportedReasoningLevels: []string{"low", "high", "max"}, DefaultReasoningLevel: "high", InputModalities: []string{"text", "image"}, OutputModalities: []string{"text"}, ContextWindow: 200000, MaxContextWindow: 800000, MaxOutputTokens: 16000, Description: "private upstream description", CodexToolCapabilities: map[string]json.RawMessage{"instructions": json.RawMessage(`"private instructions"`)}}
@@ -65,8 +72,7 @@ func newListingFixture(t *testing.T) (*GroupModelCatalogService, *catalogMemoryR
 	registry := NewModelCatalogService(repo, accounts, nil, nil, prices)
 	registry.pricingResolver = NewModelPricingResolver(nil, NewBillingService(&config.Config{}, prices))
 	channelRepo := &mockChannelRepository{listAllFn: func(context.Context) ([]Channel, error) { return nil, nil }}
-	catalog := &GroupModelCatalogService{accounts: accounts, channels: channelRepo, snapshots: registry, registry: registry}
-	registry.groupCatalog = catalog
+	catalog := &GroupModelCatalogService{accounts: accounts, channels: channelRepo, registry: registry}
 	group := &Group{ID: 71, Platform: PlatformOpenAI, AllowImageGeneration: true, RateMultiplier: 1, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: models}}
 	return catalog, repo, accounts, group
 }
@@ -102,7 +108,7 @@ func TestModelListCapabilitiesCascadeThroughAPIKeySync(t *testing.T) {
 	require.NoError(t, err)
 	downstream, downstreamRepo, a, transport := newCatalogTestService(catalogResponse(200, string(completeBody)))
 	a.Schedulable = true
-	a.Extra = map[string]any{ModelCatalogPolicyExtraKey: ModelCatalogPolicy{Models: group.ModelAllowlist.Models[:2]}}
+	setTestModelWhitelist(a, group.ModelAllowlist.Models[:2])
 	snapshot, err := downstream.Refresh(context.Background(), a.ID, true)
 	require.NoError(t, err)
 	require.Len(t, snapshot.Models, 2)
@@ -122,12 +128,11 @@ func TestModelListCapabilitiesCascadeThroughAPIKeySync(t *testing.T) {
 	downstream.accounts = &listingAccounts{accounts: []Account{*a, oauth}}
 	downstream.prices = catalog.registry.prices
 	downstream.pricingResolver = catalog.registry.pricingResolver
-	downstream.groupCatalog = &GroupModelCatalogService{accounts: downstream.accounts, channels: catalog.channels, snapshots: downstream, registry: downstream}
-	manifest, err := downstream.CodexManifest(context.Background(), group)
+	manifest, err := (&GatewayService{accountRepo: downstream.accounts}).BuildCodexModelsManifestForGroup(context.Background(), group, "", group.ModelAllowlist.Models)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), gjson.GetBytes(manifest, "models.#").Int())
-	require.Equal(t, "vendor-chat-z", gjson.GetBytes(manifest, "models.0.slug").String())
-	require.Equal(t, int64(100000), gjson.GetBytes(manifest, "models.0.context_window").Int())
+	require.Equal(t, int64(2), gjson.GetBytes(manifest, "models.#").Int(), "native manifest generation retains names without metadata")
+	require.True(t, gjson.GetBytes(manifest, `models.#(slug=="vendor-chat-z")`).Exists())
+	require.Equal(t, int64(100000), gjson.GetBytes(manifest, `models.#(slug=="vendor-chat-z").context_window`).Int())
 }
 
 func TestModelListCapabilitiesDoNotRequireGroupWhitelist(t *testing.T) {
@@ -169,7 +174,7 @@ func TestModelListCapabilitiesMissingSupplierKeepsNamesAndWithholdsClaims(t *tes
 func TestModelListCapabilitiesRespectAliasGroupAndInactiveAccount(t *testing.T) {
 	catalog, repo, accounts, group := newListingFixture(t)
 	accounts.accounts[0].Credentials["model_mapping"] = map[string]any{"public-alias": "vendor-chat-z"}
-	accounts.accounts[0].Extra[ModelCatalogPolicyExtraKey] = ModelCatalogPolicy{Models: []string{"public-alias", "vendor-chat-z"}}
+	accounts.accounts[0].Credentials["model_mapping"] = map[string]any{"public-alias": "vendor-chat-z", "vendor-chat-z": "vendor-chat-z"}
 	accounts.accounts[1].Schedulable = false
 	a := &accounts.accounts[0]
 	repo.snapshots[modelCatalogSourceKey(a.ID)].ScopeRevision = modelCatalogScope(a, a)

@@ -52,7 +52,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		)
 		if err == nil {
 			setOpsSelectedAccount(c, account.ID, account.Platform)
-			if err := h.gatewayService.ApplyPinnedCodexCatalogPolicy(
+			if err := h.gatewayService.MergeGroupConfiguredCodexModels(
 				c.Request.Context(), apiKey.Group, manifest, c.GetHeader("If-None-Match"),
 			); err != nil {
 				h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to apply model catalog policy")
@@ -82,21 +82,6 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		pinnedFallback = true
 	}
 
-	if !pinnedFallback {
-		if manifest, handled, err := h.gatewayService.PublishedCodexCatalog(c.Request.Context(), apiKey.Group); handled {
-			if err != nil {
-				h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "Published model catalog is unavailable")
-				return
-			}
-			c.Header("ETag", manifest.ETag)
-			if service.CodexModelsManifestETagMatches(c.GetHeader("If-None-Match"), manifest.ETag) {
-				c.Status(http.StatusNotModified)
-				return
-			}
-			writeOpenAIModelsResponse(c, manifest)
-			return
-		}
-	}
 	ifNoneMatch := c.GetHeader("If-None-Match")
 	if !pinnedFallback {
 		configuredManifest, configured, err := h.gatewayService.BuildGroupConfiguredCodexModelsManifest(

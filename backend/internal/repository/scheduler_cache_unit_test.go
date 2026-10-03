@@ -23,6 +23,25 @@ func newSchedulerCacheUnit(t *testing.T) *schedulerCache {
 	return cache
 }
 
+func TestSchedulerCacheIgnoresPreWhitelistMigrationAccounts(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	legacy := service.Account{ID: 17, Platform: service.PlatformOpenAI,
+		Credentials: map[string]any{"model_mapping": map[string]any{"stale": "target"}}}
+	raw, err := json.Marshal(legacy)
+	require.NoError(t, err)
+	require.NoError(t, cache.rdb.Set(ctx, "sched:acc:17", raw, 0).Err())
+	account, err := cache.GetAccount(ctx, legacy.ID)
+	require.NoError(t, err)
+	require.Nil(t, account, "read through to migrated database state until the new cache is populated")
+	legacy.Credentials["model_mapping"] = map[string]any{"selected": "selected"}
+	require.NoError(t, cache.SetAccount(ctx, &legacy))
+	account, err = cache.GetAccount(ctx, legacy.ID)
+	require.NoError(t, err)
+	require.True(t, account.IsModelSupported("selected"))
+	require.False(t, account.IsModelSupported("stale"))
+}
+
 func newSchedulerCacheUnitWithRedis(t *testing.T) (*schedulerCache, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)

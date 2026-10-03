@@ -182,21 +182,3 @@ func catalogPlazaReference(raw json.RawMessage, revision, source string) *PlazaO
 	}
 	return out
 }
-
-// Called by the bounded background loop. New IDs bypass the ordinary interval,
-// but refresh attempts are still coalesced to at most once per minute.
-func (s *ModelCatalogService) refreshPricesIfDue(cfg ModelCatalogSettings) {
-	if s.prices != nil {
-		s.prices.catalogRefreshManaged.Store(true)
-	}
-	if !cfg.Enabled || s.prices == nil || s.prices.cfg == nil || s.prices.remoteClient == nil || s.prices.cfg.Pricing.RemoteURL == "" {
-		return
-	}
-	due := time.Since(s.lastPriceCheck)
-	if due < time.Minute || (!s.priceRefreshRequested.Load() && due < time.Duration(cfg.PriceIntervalSeconds)*time.Second) {
-		return
-	}
-	s.lastPriceCheck = time.Now()
-	s.priceRefreshRequested.Store(false)
-	_ = s.prices.ForceUpdate() // Last successful prices remain active on error.
-}

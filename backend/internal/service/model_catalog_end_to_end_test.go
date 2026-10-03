@@ -42,7 +42,7 @@ func testCatalogModelDiscoveryForwardAndSettlement(t *testing.T, id string) {
 	discovery := fmt.Sprintf(`{"data":[{"id":%q,"model_kind":"chat","reasoning":true,"supported_reasoning_levels":["medium","high"],"default_reasoning_level":"high","input_modalities":["text","image"],"context_window":222222,"endpoints":["responses"]}]}`, id)
 	registry, _, a, _ := newCatalogTestService(catalogResponse(200, discovery))
 	a.Schedulable = true
-	a.Extra = map[string]any{ModelCatalogPolicyExtraKey: ModelCatalogPolicy{}}
+	setTestModelWhitelist(a, []string{id})
 	_, err := registry.Refresh(context.Background(), a.ID, true)
 	require.NoError(t, err)
 	prices := &PricingService{pricingData: map[string]*LiteLLMModelPricing{id: {InputCostPerToken: 2e-6, OutputCostPerToken: 8e-6, Mode: "chat", ProvidedFields: map[string]bool{"input_cost_per_token": true, "output_cost_per_token": true}}}, localHash: "price-v1"}
@@ -51,8 +51,7 @@ func testCatalogModelDiscoveryForwardAndSettlement(t *testing.T, id string) {
 	registry.prices = prices
 	registry.pricingResolver = resolver
 	channelRepo := &mockChannelRepository{listAllFn: func(context.Context) ([]Channel, error) { return nil, nil }}
-	catalog := &GroupModelCatalogService{accounts: registry.accounts, channels: channelRepo, snapshots: registry, registry: registry}
-	registry.groupCatalog = catalog
+	catalog := &GroupModelCatalogService{accounts: registry.accounts, channels: channelRepo, registry: registry}
 	group := &Group{ID: 101, Platform: PlatformOpenAI, RateMultiplier: 1, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{id}}}
 	view, err := catalog.Resolve(context.Background(), group)
 	require.NoError(t, err)
@@ -68,7 +67,7 @@ func testCatalogModelDiscoveryForwardAndSettlement(t *testing.T, id string) {
 		require.Equal(t, "high", profile.ReasoningEffort)
 		require.Equal(t, int64(222222), profile.ContextWindow)
 	}
-	manifest, err := registry.CodexManifest(context.Background(), group)
+	manifest, err := (&GatewayService{accountRepo: registry.accounts}).BuildCodexModelsManifestForGroup(context.Background(), group, "", []string{id})
 	require.NoError(t, err)
 	require.Contains(t, string(manifest), "222222")
 	if isBackgroundCodexModel(id) {
@@ -77,10 +76,9 @@ func testCatalogModelDiscoveryForwardAndSettlement(t *testing.T, id string) {
 	require.NotContains(t, string(manifest), "You are GPT-5")
 	gateway := &GatewayService{billingService: billing}
 	pinned := gateway.PinRequestPricing(context.Background(), key)
-	admitted, err := catalog.Admit(pinned, group, []string{id})
-	require.NoError(t, err)
-	require.True(t, CatalogAccountAllowed(admitted, a))
-	require.False(t, CatalogAccountAllowed(admitted, &Account{ID: 99}))
+	admitted := pinned
+	require.True(t, group.ModelAllowlist.Allows(id))
+	require.True(t, a.IsModelSupported(id))
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprint(stream), func(t *testing.T) {
 			response := fmt.Sprintf(`{"id":"resp_test","object":"response","model":%q,"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}],"status":"completed"}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}`, id)

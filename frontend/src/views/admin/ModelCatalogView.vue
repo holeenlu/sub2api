@@ -59,7 +59,7 @@
           <label class="flex items-center gap-2 text-sm"><input v-model="showDisabled" type="checkbox" />{{ t('modelCatalog.showDisabled') }}</label>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-left text-sm">
+          <table class="w-full min-w-[640px] text-left text-sm">
             <thead class="bg-gray-50 text-gray-500 dark:bg-dark-800"><tr><th class="px-4 py-3">{{ t('modelCatalog.model') }}</th><th class="px-4 py-3">{{ t('modelCatalog.platform') }}</th><th class="px-4 py-3">{{ t('modelCatalog.kind') }}</th><th class="px-4 py-3">{{ t('modelCatalog.state') }}</th><th class="px-4 py-3 text-right">{{ t('modelCatalog.actions') }}</th></tr></thead>
             <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
               <tr v-for="model in visibleModels" :key="model.platform + ':' + model.id">
@@ -135,7 +135,7 @@ const kindLabel = (value: string) => t(`modelCatalog.kinds.${kinds.includes(valu
 const kindOptions = computed(() => kinds.map(value => ({ value, label: kindLabel(value) })))
 const kindFilterOptions = computed(() => [{ value: '', label: t('modelCatalog.allKinds') }, ...kindOptions.value])
 const platformLabel = (value: string) => concretePlatforms.find(option => option.value === value)?.label ?? value
-const inactive = (model: CatalogModel) => model.disabled || model.lifecycle === 'retired'
+const inactive = (model: CatalogModel) => model.disabled
 const filteredModels = computed(() => {
   const term = search.value.trim().toLowerCase()
   return (catalog.value?.models ?? []).filter(model =>

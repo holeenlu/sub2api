@@ -348,7 +348,7 @@ describe('GroupsView duplicate action', () => {
     wrapper.unmount()
   })
 
-  it('creates an empty group whitelist without granting catalog candidates', async () => {
+  it('creates a disabled whitelist with upstream default candidates', async () => {
     const createGroup = vi.mocked(adminAPI.groups.create)
     createGroup.mockReset().mockResolvedValue(sourceGroup)
     getModelAllowlistCandidates.mockResolvedValue({ models: ['gpt-new'], pricingPending: [] })
@@ -362,7 +362,7 @@ describe('GroupsView duplicate action', () => {
     await form.trigger('submit')
     await flushPromises()
     expect(createGroup).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'New group', model_allowlist: { enabled: true, models: [], }
+      name: 'New group', model_allowlist: { enabled: false, models: ['gpt-new'], }
     }))
     expect(showError).not.toHaveBeenCalled()
     wrapper.unmount()
