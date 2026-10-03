@@ -740,6 +740,51 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
+  it.each([true, false])('OpenAI OAuth 批量编辑可独立设置 HTTP 流式 WS 加速为 %s', async (enabled) => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth']
+    })
+
+    await wrapper.get('#bulk-edit-openai-ws-sse-acceleration-enabled').setValue(true)
+    if (enabled) await wrapper.get('#bulk-edit-openai-ws-sse-acceleration-toggle').trigger('click')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    // Only the transport flag is sent; Excel / BPS fields stay untouched.
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra: { openai_oauth_ws_sse_acceleration: enabled }
+    })
+  })
+
+  it('HTTP 流式 WS 加速未勾选时保持原值，且不对非 OAuth 选择展示', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth']
+    })
+    const toggle = wrapper.get('#bulk-edit-openai-ws-sse-acceleration-toggle')
+    expect(toggle.attributes('role')).toBe('switch')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    expect(toggle.attributes('aria-labelledby')).toBe('bulk-edit-openai-ws-sse-acceleration-label')
+    expect(toggle.attributes('disabled')).toBeDefined()
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+
+    await wrapper.get('#bulk-edit-openai-ws-sse-acceleration-enabled').setValue(true)
+    expect(toggle.attributes('disabled')).toBeUndefined()
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+
+    const mixed = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth', 'apikey']
+    })
+    expect(mixed.find('#bulk-edit-openai-ws-sse-acceleration-enabled').exists()).toBe(false)
+  })
+
   it('namespace 摊平开关不对 setup-token 等非 OAuth 选择展示', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],

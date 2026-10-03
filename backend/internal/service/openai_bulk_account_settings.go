@@ -11,6 +11,7 @@ import (
 
 type bulkOpenAISettings struct {
 	excelBPS                bool
+	wsSSEAcceleration       bool
 	longContextBilling      bool
 	endpointCapabilities    bool
 	responsesMode           bool
@@ -19,7 +20,7 @@ type bulkOpenAISettings struct {
 }
 
 func (s bulkOpenAISettings) any() bool {
-	return s.excelBPS || s.longContextBilling || s.endpointCapabilities || s.responsesMode
+	return s.excelBPS || s.wsSSEAcceleration || s.longContextBilling || s.endpointCapabilities || s.responsesMode
 }
 
 func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISettings, error) {
@@ -31,6 +32,12 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 	settings.excelBPS, err = normalizeBulkExcelBPSExtra(input.Extra)
 	if err != nil {
 		return settings, err
+	}
+	if raw, exists := input.Extra[OpenAIOAuthWSSSEAccelerationKey]; exists {
+		if _, ok := raw.(bool); !ok {
+			return settings, infraerrors.BadRequest("OPENAI_WS_SSE_ACCELERATION_INVALID", OpenAIOAuthWSSSEAccelerationKey+" must be a boolean")
+		}
+		settings.wsSSEAcceleration = true
 	}
 
 	if _, exists := input.Extra[openAILongContextBillingEnabledKey]; exists {
@@ -254,6 +261,11 @@ func validateBulkOpenAISettingsTargets(
 		if settings.excelBPS && (account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth ||
 			account.IsShadow() || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken()) {
 			return 0, invalidBulkOpenAITarget(accountID, "Excel / BPS requires a regular ChatGPT OAuth account")
+		}
+
+		// Ineligible accounts would store a flag the gateway never honours.
+		if settings.wsSSEAcceleration && !account.supportsOpenAIOAuthWSSSEAcceleration() {
+			return 0, invalidBulkOpenAITarget(accountID, "HTTP SSE WS acceleration requires a regular ChatGPT OAuth account")
 		}
 
 		if settings.longContextBilling {
