@@ -31,7 +31,30 @@ func writeOpenAIModelsResponse(c *gin.Context, manifest *service.OpenAIModelsRes
 
 // Both discovery endpoints consume the same final catalogue, after group/platform
 // selection and allowlist filtering. Preserve every field on the selected entry.
-func writeModelsListResponse(c *gin.Context, models any) {
+func writeModelsListResponse(c *gin.Context, models any, capabilities ...map[string]service.ModelListCapabilities) {
+	if len(capabilities) > 0 && len(capabilities[0]) > 0 {
+		var entries []map[string]json.RawMessage
+		encoded, err := json.Marshal(models)
+		if err != nil || json.Unmarshal(encoded, &entries) != nil {
+			writeOpenAIModelsError(c, http.StatusInternalServerError, "api_error", "Failed to encode model catalogue")
+			return
+		}
+		for _, entry := range entries {
+			var id string
+			_ = json.Unmarshal(entry["id"], &id)
+			if fields, ok := capabilities[0][id]; ok {
+				// The dedicated DTO contains capability fields only. Keep existing
+				// identifiers and provider-specific response fields unchanged.
+				body, _ := json.Marshal(fields)
+				var extra map[string]json.RawMessage
+				_ = json.Unmarshal(body, &extra)
+				for key, value := range extra {
+					entry[key] = value
+				}
+			}
+		}
+		models = entries
+	}
 	response := gin.H{"object": "list", "data": models}
 	if c.Param("model") == "" {
 		c.JSON(http.StatusOK, response)

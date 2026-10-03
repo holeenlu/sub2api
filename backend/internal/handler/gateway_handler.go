@@ -1193,7 +1193,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 
 	if h.modelCatalog != nil && apiKey != nil && apiKey.Group != nil && (platform == apiKey.Group.Platform || platform == "") {
-		catalog, err := h.modelCatalog.Resolve(c.Request.Context(), apiKey.Group)
+		catalog, capabilities, err := h.modelCatalog.ResolveForListing(c.Request.Context(), apiKey.Group)
 		if err != nil {
 			h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to load group model catalog")
 			return
@@ -1202,7 +1202,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 			h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "Group model catalog is not available")
 			return
 		}
-		writeModelsList(c, platform, catalogModelIDs(catalog))
+		writeModelsList(c, platform, catalogModelIDs(catalog), capabilities)
 		return
 	}
 
@@ -1391,13 +1391,13 @@ func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *
 	return models, nil
 }
 
-func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
+func writeModelsList(c *gin.Context, platform string, modelIDs []string, capabilities ...map[string]service.ModelListCapabilities) {
 	if platform == service.PlatformOpenAI {
-		writeOpenAIModelsList(c, modelIDs)
+		writeOpenAIModelsList(c, modelIDs, capabilities...)
 		return
 	}
 	if platform == service.PlatformGrok {
-		writeGrokModelsList(c, modelIDs)
+		writeGrokModelsList(c, modelIDs, capabilities...)
 		return
 	}
 	models := make([]claude.Model, 0, len(modelIDs))
@@ -1409,7 +1409,7 @@ func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
 			CreatedAt:   "2024-01-01T00:00:00Z",
 		})
 	}
-	writeModelsListResponse(c, models)
+	writeModelsListResponse(c, models, capabilities...)
 }
 
 func writeAllowlistedModelsList(c *gin.Context, platform string, modelIDs []string) {
@@ -1433,7 +1433,7 @@ type grokModelListItem struct {
 	ReasoningEfforts        []grokReasoningEffortOption `json:"reasoningEfforts,omitempty"`
 }
 
-func writeGrokModelsList(c *gin.Context, modelIDs []string) {
+func writeGrokModelsList(c *gin.Context, modelIDs []string, capabilities ...map[string]service.ModelListCapabilities) {
 	defaults := xai.DefaultModels()
 	defaultsByID := make(map[string]xai.Model, len(defaults))
 	for _, model := range defaults {
@@ -1468,7 +1468,7 @@ func writeGrokModelsList(c *gin.Context, modelIDs []string) {
 		models = append(models, item)
 	}
 
-	writeModelsListResponse(c, models)
+	writeModelsListResponse(c, models, capabilities...)
 }
 
 func grokModelSupportsConfigurableReasoning(modelID string) bool {
@@ -1480,7 +1480,7 @@ func grokModelSupportsConfigurableReasoning(modelID string) bool {
 	}
 }
 
-func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
+func writeOpenAIModelsList(c *gin.Context, modelIDs []string, capabilities ...map[string]service.ModelListCapabilities) {
 	defaultsByID := make(map[string]openai.Model, len(openai.DefaultModels))
 	for _, model := range openai.DefaultModels {
 		defaultsByID[model.ID] = model
@@ -1501,7 +1501,7 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
 			DisplayName: modelID,
 		})
 	}
-	writeModelsListResponse(c, models)
+	writeModelsListResponse(c, models, capabilities...)
 }
 
 // modelListingSource 汇总模型列表过滤的候选来源：账号映射键（availableModels）
