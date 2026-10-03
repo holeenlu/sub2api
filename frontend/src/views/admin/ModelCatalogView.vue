@@ -65,7 +65,7 @@
               <tr v-for="model in visibleModels" :key="model.platform + ':' + model.id">
                 <td class="px-4 py-3"><div class="break-all font-mono">{{ model.id }}</div><div v-if="model.display_name && model.display_name !== model.id" class="mt-1 text-xs text-gray-500">{{ model.display_name }}</div></td>
                 <td class="px-4 py-3">{{ platformLabel(model.platform) }}</td>
-                <td class="px-4 py-3">{{ kindLabel(model.kind) }}</td>
+                <td class="px-4 py-3">{{ kindLabel(model.kind) }}<div v-if="model.metadata?.visibility === 'hide'" class="mt-1 text-xs text-gray-500">{{ t(model.metadata?.model_purpose === 'background' ? 'modelCatalog.backgroundModel' : 'modelCatalog.clientHidden') }}</div></td>
                 <td class="whitespace-nowrap px-4 py-3" :class="inactive(model) ? 'text-gray-400' : 'text-emerald-600'">{{ t(model.lifecycle === 'retired' ? 'modelCatalog.retired' : model.disabled ? 'modelCatalog.disabled' : 'modelCatalog.available') }}</td>
                 <td class="whitespace-nowrap px-4 py-3 text-right"><button class="btn btn-ghost btn-sm" :disabled="busy" @click="editModel(model)">{{ t('modelCatalog.edit') }}</button></td>
               </tr>

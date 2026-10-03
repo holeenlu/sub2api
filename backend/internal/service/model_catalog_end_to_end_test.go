@@ -28,6 +28,17 @@ func TestModelCatalogNovelModelDiscoveryPublicationForwardAndSettlement(t *testi
 	gin.SetMode(gin.TestMode)
 	// The ID is created at runtime, and cannot be in any compiled model table.
 	id := fmt.Sprintf("Opaque-Vendor-%d", time.Now().UnixNano())
+	testCatalogModelDiscoveryForwardAndSettlement(t, id)
+}
+
+func TestHiddenModelDiscoveryForwardAndSettlement(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, id := range []string{"codex-auto-review", "gpt-reserve"} {
+		t.Run(id, func(t *testing.T) { testCatalogModelDiscoveryForwardAndSettlement(t, id) })
+	}
+}
+
+func testCatalogModelDiscoveryForwardAndSettlement(t *testing.T, id string) {
 	discovery := fmt.Sprintf(`{"data":[{"id":%q,"model_kind":"chat","reasoning":true,"supported_reasoning_levels":["medium","high"],"default_reasoning_level":"high","input_modalities":["text","image"],"context_window":222222,"endpoints":["responses"]}]}`, id)
 	registry, _, a, _ := newCatalogTestService(catalogResponse(200, discovery))
 	a.Schedulable = true
@@ -49,12 +60,20 @@ func TestModelCatalogNovelModelDiscoveryPublicationForwardAndSettlement(t *testi
 	key := &APIKey{ID: 9, UserID: 4, GroupID: &group.ID, Group: group}
 	profile, err := registry.SetupProfile(context.Background(), key)
 	require.NoError(t, err)
-	require.Equal(t, id, profile.Model)
-	require.Equal(t, "high", profile.ReasoningEffort)
-	require.Equal(t, int64(222222), profile.ContextWindow)
+	if isBackgroundCodexModel(id) {
+		require.Empty(t, profile.Model)
+		require.Empty(t, profile.ReviewModel)
+	} else {
+		require.Equal(t, id, profile.Model)
+		require.Equal(t, "high", profile.ReasoningEffort)
+		require.Equal(t, int64(222222), profile.ContextWindow)
+	}
 	manifest, err := registry.CodexManifest(context.Background(), group)
 	require.NoError(t, err)
 	require.Contains(t, string(manifest), "222222")
+	if isBackgroundCodexModel(id) {
+		require.Equal(t, "hide", gjson.GetBytes(manifest, "models.0.visibility").String())
+	}
 	require.NotContains(t, string(manifest), "You are GPT-5")
 	gateway := &GatewayService{billingService: billing}
 	pinned := gateway.PinRequestPricing(context.Background(), key)

@@ -75,6 +75,20 @@ describe('codexCatalogConfig', () => {
         ...catalog('', '  ', 'gpt-*', 'gpt-image-2.5-sunburst', 'whisper-1')
       ], 'gpt-6-astra')).toBeNull()
     })
+
+    it('retains background entries for downloads but never chooses them for configuration', () => {
+      const content = JSON.stringify({ models: [
+        { slug: 'gpt-reserve', priority: -10, visibility: 'list' },
+        { slug: 'codex-auto-review', priority: -9 },
+        { slug: 'review-alias', priority: -8, model_purpose: 'background' },
+        { slug: 'vendor-hidden', visibility: 'hide' },
+        { slug: 'gpt-6-sol', priority: 10 }
+      ] })
+      const parsed = parseCodexCatalogModels(content)
+      expect(parsed).toHaveLength(5)
+      expect(selectCodexConfigModel(parsed, 'gpt-reserve')).toBe('gpt-6-sol')
+      expect(selectCodexConfigModel(parsed.slice(0, 4), 'gpt-reserve')).toBeNull()
+    })
   })
 
   it('parses catalog slugs and finds a model by id', () => {

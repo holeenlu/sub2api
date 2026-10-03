@@ -620,6 +620,8 @@ export interface UpstreamModelSyncWarning {
 }
 
 export interface UpstreamModelMetadata {
+  visibility?: 'list' | 'hide'
+  model_purpose?: 'background'
   id: string
   model_kind?: string
   display_name?: string

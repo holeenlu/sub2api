@@ -175,6 +175,14 @@ func (s *ModelCatalogService) CodexManifest(ctx context.Context, group *Group) (
 		if value := nativeMessages[slug]; len(value) > 0 {
 			model["model_messages"] = value
 		}
+		// A supplier's display restriction survives native-contract intersection.
+		visibility, purpose := ModelPresentation(slug, metadata[slug].Visibility, metadata[slug].ModelPurpose)
+		if visibility == "hide" {
+			model["visibility"] = json.RawMessage(`"hide"`)
+		}
+		if purpose == "background" {
+			model["model_purpose"] = json.RawMessage(`"background"`)
+		}
 		model["priority"], _ = json.Marshal(priorities[slug])
 	}
 	sort.SliceStable(envelope.Models, func(i, j int) bool {
@@ -228,7 +236,7 @@ func (s *ModelCatalogService) SetupProfile(ctx context.Context, key *APIKey) (*C
 	}
 	selected := -1
 	for i, m := range envelope.Models {
-		if m.Visibility == "hide" || strings.HasPrefix(m.Slug, "codex-auto-") {
+		if m.Visibility == "hide" || isBackgroundCodexModel(m.Slug) {
 			continue
 		}
 		if selected < 0 {
@@ -243,7 +251,7 @@ func (s *ModelCatalogService) SetupProfile(ctx context.Context, key *APIKey) (*C
 		if i != selected {
 			continue
 		}
-		if m.Visibility == "hide" || strings.HasPrefix(m.Slug, "codex-auto-") {
+		if m.Visibility == "hide" || isBackgroundCodexModel(m.Slug) {
 			continue
 		}
 		out.Model = m.Slug

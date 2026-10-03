@@ -9,6 +9,8 @@ import (
 // standard model-list entry. Never serialize snapshots or upstream descriptors:
 // those also contain account identities, routing details and instructions.
 type ModelListCapabilities struct {
+	Visibility               string   `json:"visibility,omitempty"`
+	ModelPurpose             string   `json:"model_purpose,omitempty"`
 	ModelKind                string   `json:"model_kind,omitempty"`
 	Reasoning                *bool    `json:"reasoning,omitempty"`
 	SupportedReasoningLevels []string `json:"supported_reasoning_levels,omitempty"`
@@ -77,7 +79,9 @@ func (s *GroupModelCatalogService) ResolveForListing(ctx context.Context, group 
 	}
 	capabilities := make(map[string]ModelListCapabilities, len(candidates))
 	for name, entries := range candidates {
-		capabilities[name] = intersectModelListCapabilities(entries)
+		capability := intersectModelListCapabilities(entries)
+		capability.Visibility, capability.ModelPurpose = ModelPresentation(name, capability.Visibility, capability.ModelPurpose)
+		capabilities[name] = capability
 	}
 	return view, capabilities, nil
 }
@@ -88,6 +92,7 @@ func intersectModelListCapabilities(entries []UpstreamModelMetadata) ModelListCa
 	}
 	shared := intersectUpstreamModelMetadata("", entries)
 	out := ModelListCapabilities{
+		Visibility: shared.Visibility, ModelPurpose: shared.ModelPurpose,
 		Reasoning: shared.Reasoning, SupportedReasoningLevels: shared.SupportedReasoningLevels,
 		DefaultReasoningLevel: shared.DefaultReasoningLevel,
 		ContextWindow:         shared.ContextWindow, MaxContextWindow: shared.MaxContextWindow,

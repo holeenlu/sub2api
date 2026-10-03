@@ -168,6 +168,7 @@ func catalogCodexDescriptors(body []byte) map[string]json.RawMessage {
 	_ = json.Unmarshal(defaults, &allowed)
 	allowed["default_reasoning_level"] = nil
 	allowed["multi_agent_reasoning_effort"] = nil
+	allowed["model_purpose"] = nil
 	for _, raw := range entries {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(raw, &fields) != nil {

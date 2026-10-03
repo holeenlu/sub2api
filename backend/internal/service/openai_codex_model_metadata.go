@@ -305,6 +305,13 @@ func intersectUpstreamModelMetadata(modelID string, candidates []UpstreamModelMe
 		}
 	}
 	for _, candidate := range candidates {
+		visibility, purpose := ModelPresentation(candidate.ID, candidate.Visibility, candidate.ModelPurpose)
+		if visibility == "hide" {
+			result.Visibility = "hide"
+		}
+		if purpose == "background" {
+			result.ModelPurpose = "background"
+		}
 		if result.DisplayName == "" && strings.TrimSpace(candidate.DisplayName) != "" {
 			result.DisplayName = strings.TrimSpace(candidate.DisplayName)
 		}
@@ -412,6 +419,13 @@ func applyUpstreamModelMetadataToCodexDescriptor(
 ) {
 	if descriptor == nil {
 		return
+	}
+	visibility, purpose := ModelPresentation(descriptor.Slug, metadata.Visibility, metadata.ModelPurpose)
+	if visibility == "hide" {
+		descriptor.Visibility = "hide"
+	}
+	if purpose == "background" {
+		descriptor.ModelPurpose = purpose
 	}
 	if strings.TrimSpace(metadata.DisplayName) != "" {
 		descriptor.DisplayName = strings.TrimSpace(metadata.DisplayName)

@@ -180,7 +180,7 @@ func TestCodexModelsAppliesLocalFiltersBeforeClientETag(t *testing.T) {
 		t.Fatal("first response did not include an ETag")
 	}
 
-	group.ModelAllowlist.Enabled = false
+	group.ModelAllowlist.Models = []string{"gpt-5.6"}
 	second := performCodexModelsRequestForGroup(t, handler, group, oldETag)
 	if second.Code != http.StatusOK {
 		t.Fatalf("second status: got %d, want %d; body=%s", second.Code, http.StatusOK, second.Body.String())
@@ -551,7 +551,7 @@ func TestCodexModelsUnmappedParentAndSparkShadowHonorCustomListAndETag(t *testin
 	require.Contains(t, slugs, "gpt-5.6-sol")
 	require.Contains(t, slugs, sparkModel)
 	require.NotContains(t, slugs, "gpt-image-2")
-	require.NotContains(t, slugs, "codex-auto-review")
+	require.Contains(t, slugs, "codex-auto-review")
 	firstETag := first.Header().Get("ETag")
 	require.NotEmpty(t, firstETag)
 
