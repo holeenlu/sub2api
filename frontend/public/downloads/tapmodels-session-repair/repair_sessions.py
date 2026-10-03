@@ -532,6 +532,9 @@ def resolve_backup(home: Path, db: Path, requested: Path) -> tuple[dict[str, Any
             raise RuntimeError("backup belongs to a different Codex home or database")
         if not all(type(manifest.get(key)) is int for key in ("source_device", "source_inode")):
             raise RuntimeError("backup source database identity is invalid")
+        source_identity = FileIdentity(manifest["source_device"], manifest["source_inode"])
+        if file_identity(db) != source_identity:
+            raise RuntimeError("current database identity differs from the repair backup manifest")
         repairs = manifest.get("repairs")
         if not isinstance(repairs, list) or not all(
             isinstance(item, dict)
@@ -557,9 +560,9 @@ def resolve_backup(home: Path, db: Path, requested: Path) -> tuple[dict[str, Any
             "manifest_identity": manifest_identity,
             "database": backup_db,
             "database_identity": backup_identity,
-            "source_identity": FileIdentity(manifest["source_device"], manifest["source_inode"]),
             "database_digest": manifest["database_digest"],
             "database_sha256": manifest["backup_sha256"],
+            "expected_source_identity": source_identity,
             "repairs": repairs,
         }, None
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError, sqlite3.Error) as exc:
@@ -572,21 +575,22 @@ def apply_rollback(
     db_identity: FileIdentity,
     backup: dict[str, Any],
 ) -> tuple[Path, int]:
-    if db_identity != backup["source_identity"]:
-        raise RuntimeError("current database identity differs from the original repair")
-    verify_identity(db, db_identity, "state database")
     verify_identity(backup["directory"], backup["directory_identity"], "backup directory")
     verify_identity(backup["manifest"], backup["manifest_identity"], "backup manifest")
     verify_identity(backup["database"], backup["database_identity"], "backup database")
+    expected_source_identity = backup["expected_source_identity"]
+    if db_identity != expected_source_identity:
+        raise RuntimeError("current database identity differs from the repair backup manifest")
+    verify_identity(db, expected_source_identity, "state database from repair backup")
     writer = sqlite3.connect(db, timeout=5)
     try:
-        verify_identity(db, db_identity, "state database")
+        verify_identity(db, expected_source_identity, "state database from repair backup")
         writer.execute("BEGIN IMMEDIATE")
-        verify_identity(db, db_identity, "state database")
+        verify_identity(db, expected_source_identity, "state database from repair backup")
         supported, _ = schema_status(writer)
         if not supported or integrity(writer) != "ok":
             raise RuntimeError("current database schema or integrity is unsupported")
-        safety = create_locked_backup(home, db, writer, db_identity, SAFETY_PREFIX)
+        safety = create_locked_backup(home, db, writer, expected_source_identity, SAFETY_PREFIX)
         repairs = backup["repairs"]
         seen: set[str] = set()
         for item in repairs:
@@ -611,7 +615,7 @@ def apply_rollback(
             row = writer.execute("SELECT rollout_path FROM threads WHERE id = ?", (item["id"],)).fetchone()
             if row is None or row[0] != item["old_path"]:
                 raise RuntimeError(f"thread path validation failed after rollback: {item['id']}")
-        verify_identity(db, db_identity, "state database")
+        verify_identity(db, expected_source_identity, "state database from repair backup")
         verify_identity(backup["database"], backup["database_identity"], "backup database")
         if sha256_file(backup["database"]) != backup["database_sha256"]:
             raise RuntimeError("backup database changed during rollback")
@@ -619,9 +623,9 @@ def apply_rollback(
             raise RuntimeError("database content outside the approved rollback paths changed")
         if integrity(writer) != "ok":
             raise RuntimeError("database failed integrity_check after rollback")
-        write_backup_manifest(home, db, db_identity, safety, [], "rollback-safety")
+        write_backup_manifest(home, db, expected_source_identity, safety, [], "rollback-safety")
         writer.commit()
-        verify_identity(db, db_identity, "state database")
+        verify_identity(db, expected_source_identity, "state database from repair backup")
         return safety["directory"], len(repairs)
     except Exception:
         writer.rollback()

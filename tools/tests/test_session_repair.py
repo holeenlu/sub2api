@@ -399,6 +399,26 @@ class SessionRepairTest(unittest.TestCase):
         with sqlite3.connect(self.db) as connection:
             self.assertEqual(connection.execute("SELECT rollout_path FROM threads").fetchone()[0], str(rollout.resolve()))
 
+    def test_rollback_preview_refuses_replaced_current_database(self):
+        self.add_rollout("rollout-one.jsonl", "thread-one")
+        self.add_thread("thread-one", "/stale/rollout-one.jsonl")
+        backup_dir, _, _ = repair.apply_repairs(self.home.resolve(), self.db.resolve())
+        repaired_bytes = self.db.read_bytes()
+        replacement = self.home / "replacement.sqlite"
+        replacement.write_bytes(repaired_bytes)
+        os.replace(replacement, self.db)
+
+        backup, error = repair.resolve_backup(self.home.resolve(), self.db.resolve(), backup_dir)
+        self.assertIsNone(backup)
+        self.assertIn("current database identity differs", error)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(repair.main([
+                "--codex-home", str(self.home), "--rollback", str(backup_dir),
+            ]), 2)
+        self.assertIn("current database identity differs", output.getvalue())
+        self.assertEqual(self.db.read_bytes(), repaired_bytes)
+        self.assertEqual(list((self.home / "backups").iterdir()), [backup_dir])
+
     def test_rollback_refuses_backup_from_another_home(self):
         self.add_rollout("rollout-one.jsonl", "thread-one")
         self.add_thread("thread-one", "/stale/rollout-one.jsonl")
