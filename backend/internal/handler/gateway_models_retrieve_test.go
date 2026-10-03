@@ -78,3 +78,26 @@ func TestRetrieveModelPreservesMetadata(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.JSONEq(t, `{"id":"special-model","owned_by":"source-owner","created":123,"extra":{"context":999}}`, recorder.Body.String())
 }
+
+func TestHiddenModelsListAndRetrieveExposePresentationNotExtraGrants(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 71, Platform: service.PlatformOpenAI,
+		ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"codex-auto-review", "gpt-reserve"}}}
+	h := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{
+		group.ID: {{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+			Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{
+				"model_mapping": map[string]any{"codex-auto-review": "codex-auto-review", "gpt-reserve": "gpt-reserve"},
+			}}},
+	}})
+	for _, id := range group.ModelAllowlist.Models {
+		rec := requestModelForTest(h, group, id, "")
+		require.Equal(t, http.StatusOK, rec.Code)
+		var model map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &model))
+		require.Equal(t, id, model["id"])
+		require.Equal(t, "hide", model["visibility"])
+		require.Equal(t, "background", model["model_purpose"])
+	}
+	group.ModelAllowlist.Models = []string{"codex-auto-review"}
+	require.Equal(t, http.StatusNotFound, requestModelForTest(h, group, "gpt-reserve", "").Code)
+}

@@ -191,6 +191,19 @@ func modelCatalogNormalizeEntries(entries []ModelCatalogEntry) []ModelCatalogEnt
 			continue
 		}
 		seen[entry.Platform+"\x00"+entry.ID] = true
+		// Read old snapshots' native visibility too, without a forced upstream refresh.
+		var presentation struct {
+			Visibility string `json:"visibility"`
+			Purpose    string `json:"model_purpose"`
+		}
+		_ = json.Unmarshal(entry.CodexModel, &presentation)
+		if presentation.Visibility == "hide" || entry.Metadata.Visibility == "" {
+			entry.Metadata.Visibility = presentation.Visibility
+		}
+		if presentation.Purpose == "background" {
+			entry.Metadata.ModelPurpose = presentation.Purpose
+		}
+		entry.Metadata.Visibility, entry.Metadata.ModelPurpose = ModelPresentation(entry.ID, entry.Metadata.Visibility, entry.Metadata.ModelPurpose)
 		if entry.DisplayName == "" {
 			entry.DisplayName = entry.ID
 		}

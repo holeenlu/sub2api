@@ -132,6 +132,10 @@ func standardOpenAIModelsBody(body []byte, fromManifest bool) ([]byte, error) {
 			continue
 		}
 		seen[id] = struct{}{}
+		var visibility, purpose string
+		_ = json.Unmarshal(entry["visibility"], &visibility)
+		_ = json.Unmarshal(entry["model_purpose"], &purpose)
+		visibility, purpose = ModelPresentation(id, visibility, purpose)
 		if fromManifest {
 			// Codex manifest entries carry dozens of client-only fields (instructions,
 			// model_messages, reasoning levels) that must not reach the public catalog,
@@ -148,6 +152,12 @@ func standardOpenAIModelsBody(body []byte, fromManifest bool) ([]byte, error) {
 			}
 		}
 		entry["id"], _ = json.Marshal(id)
+		if visibility != "" {
+			entry["visibility"], _ = json.Marshal(visibility)
+		}
+		if purpose != "" {
+			entry["model_purpose"], _ = json.Marshal(purpose)
+		}
 		entry["object"] = json.RawMessage(`"model"`)
 		if len(entry["created"]) == 0 || string(entry["created"]) == "null" {
 			entry["created"] = json.RawMessage(`0`)
@@ -202,9 +212,6 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 			if isCodexDedicatedMediaModel(id) {
 				continue
 			}
-			if strings.HasPrefix(id, codexAutoModelPrefix) && len(FilterCodexModelIDsForGroup([]string{id}, group)) == 0 {
-				continue
-			}
 		}
 		if _, ok := byID[id]; !ok {
 			byID[id] = raw
@@ -243,6 +250,16 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 		var entry map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &entry); err != nil {
 			return nil, err
+		}
+		var visibility, purpose string
+		_ = json.Unmarshal(entry["visibility"], &visibility)
+		_ = json.Unmarshal(entry["model_purpose"], &purpose)
+		visibility, purpose = ModelPresentation(target, visibility, purpose)
+		if visibility != "" {
+			entry["visibility"], _ = json.Marshal(visibility)
+		}
+		if purpose != "" {
+			entry["model_purpose"], _ = json.Marshal(purpose)
 		}
 		entry[idField], _ = json.Marshal(id)
 		if id != target {

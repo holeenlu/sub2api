@@ -28,6 +28,18 @@ beforeEach(() => {
   groupMocks.update.mockResolvedValue(undefined)
 })
 describe('model inventory', () => {
+  it('shows background and hidden models without removing them from administrator inventory', async () => {
+    mocks.getModelCatalog.mockResolvedValue({ models: [
+      { ...models[0], id: 'gpt-reserve', metadata: { visibility: 'hide', model_purpose: 'background' } },
+      { ...models[0], id: 'vendor-hidden', metadata: { visibility: 'hide' } }
+    ] })
+    const wrapper = render(); await flushPromises()
+    expect(wrapper.text()).toContain('gpt-reserve')
+    expect(wrapper.text()).toContain('modelCatalog.backgroundModel')
+    expect(wrapper.text()).toContain('vendor-hidden')
+    expect(wrapper.text()).toContain('modelCatalog.clientHidden')
+    wrapper.unmount()
+  })
   it('lists all platforms and media without permissions, policy or JSON editors', async () => {
     const wrapper = render(); await flushPromises()
     expect(wrapper.text()).toContain('Anthropic')

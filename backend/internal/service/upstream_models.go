@@ -28,6 +28,8 @@ const (
 )
 
 type UpstreamModelMetadata struct {
+	Visibility          string                     `json:"visibility,omitempty"`
+	ModelPurpose        string                     `json:"model_purpose,omitempty"`
 	OutputModalities    []string                   `json:"output_modalities,omitempty"`
 	ModelKind           string                     `json:"model_kind,omitempty"`
 	Endpoints           []string                   `json:"endpoints,omitempty"`
@@ -428,7 +430,7 @@ func upstreamCatalogNeedsRegistry(models []string, metadata map[string]UpstreamM
 }
 
 func upstreamModelMetadataIsUseful(metadata UpstreamModelMetadata) bool {
-	return metadata.ShutdownDate != "" || metadata.Deprecated != nil || metadata.ModelKind != "" || len(metadata.OutputModalities) > 0 || len(metadata.Endpoints) > 0 || strings.TrimSpace(metadata.DisplayName) != "" ||
+	return metadata.Visibility != "" || metadata.ModelPurpose != "" || metadata.ShutdownDate != "" || metadata.Deprecated != nil || metadata.ModelKind != "" || len(metadata.OutputModalities) > 0 || len(metadata.Endpoints) > 0 || strings.TrimSpace(metadata.DisplayName) != "" ||
 		strings.TrimSpace(metadata.Description) != "" ||
 		metadata.Reasoning != nil ||
 		len(metadata.SupportedReasoningLevels) > 0 ||
@@ -1357,6 +1359,8 @@ type upstreamModelEntryMetadata struct {
 }
 
 type upstreamModelCapabilityEntry struct {
+	Visibility        string                     `json:"visibility"`
+	ModelPurpose      string                     `json:"model_purpose"`
 	OutputModalities  []string                   `json:"output_modalities"`
 	ModelKind         string                     `json:"model_kind"`
 	Mode              string                     `json:"mode"`
@@ -1448,6 +1452,7 @@ func extractUpstreamModelRawEntries(body []byte) ([]json.RawMessage, error) {
 }
 
 func upstreamMetadataFromCapabilityEntry(modelID string, entry upstreamModelCapabilityEntry) UpstreamModelMetadata {
+	visibility, purpose := ModelPresentation(modelID, entry.Visibility, entry.ModelPurpose)
 	levels := reasoningLevelsFromRawEntries(entry.SupportedReasoningLevels)
 	if len(levels) == 0 {
 		levels = reasoningLevelsFromModelsDevOptions(entry.ReasoningOptions)
@@ -1482,6 +1487,8 @@ func upstreamMetadataFromCapabilityEntry(modelID string, entry upstreamModelCapa
 	}
 	return UpstreamModelMetadata{
 		ID:                       modelID,
+		Visibility:               visibility,
+		ModelPurpose:             purpose,
 		DisplayName:              displayName,
 		Description:              strings.TrimSpace(entry.Description),
 		Reasoning:                reasoning,

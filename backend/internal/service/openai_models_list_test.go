@@ -248,7 +248,7 @@ func TestProjectAccountModelsCannotExposeCodexMediaThroughAlias(t *testing.T) {
 	body := []byte(`{"models":[{"slug":"gpt-image-1"},{"slug":"codex-auto-fast"}]}`)
 	projected, err := projectAccountModelsBody(body, account, &Group{}, true)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"models":[]}`, string(projected))
+	require.JSONEq(t, `{"models":[{"slug":"auto-alias","display_name":"auto-alias","visibility":"hide","model_purpose":"background"}]}`, string(projected))
 }
 
 func TestFetchOpenAIModelsListRejectsUnexpectedCold304(t *testing.T) {

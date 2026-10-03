@@ -19,6 +19,8 @@ export default {
   "platform": "Platform",
   "state": "Status",
   "kind": "Model type",
+  "backgroundModel": "Background model · hidden in client",
+  "clientHidden": "Hidden in client",
   "model": "Model",
   "empty": "No matching catalog records",
   "manage": "Manage model inventory",

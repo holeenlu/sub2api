@@ -47,25 +47,10 @@ const (
 	codexAutoModelPrefix              = "codex-auto-"
 )
 
-// FilterCodexModelIDsForGroup removes dedicated media-generation models,
-// wildcard mapping keys, and Codex automatic modes from a client catalog.
-// Automatic modes are retained only when the group's enabled model allowlist
-// explicitly selects the exact slug; account model mappings describe routing
-// and are not feature opt-ins. Wildcard keys such as "foo-*" are routing
-// patterns, not concrete Codex models. When the allowlist is enabled the
-// catalog is additionally restricted by FilterForListing (wildcard entries
-// expand against the catalog).
+// FilterCodexModelIDsForGroup filters incompatible endpoints and group access.
+// Background models remain discoverable; their descriptors hide them from the
+// client picker without removing permission to call them.
 func FilterCodexModelIDsForGroup(modelIDs []string, group *Group) []string {
-	explicitlyEnabled := make(map[string]struct{})
-	if group != nil && group.ModelAllowlistEnabled() {
-		for _, modelID := range group.ModelAllowlist.Models {
-			modelID = strings.TrimSpace(modelID)
-			if strings.HasPrefix(modelID, codexAutoModelPrefix) {
-				explicitlyEnabled[modelID] = struct{}{}
-			}
-		}
-	}
-
 	filtered := make([]string, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
 		modelID = strings.TrimSpace(modelID)
@@ -77,11 +62,6 @@ func FilterCodexModelIDsForGroup(modelIDs []string, group *Group) []string {
 		}
 		if strings.Contains(modelID, "*") {
 			continue
-		}
-		if strings.HasPrefix(modelID, codexAutoModelPrefix) {
-			if _, ok := explicitlyEnabled[modelID]; !ok {
-				continue
-			}
 		}
 		filtered = append(filtered, modelID)
 	}
@@ -399,6 +379,7 @@ type configuredCodexModelDescriptor struct {
 	MultiAgentReasoningEffort         *string                         `json:"multi_agent_reasoning_effort,omitempty"`
 	ShellType                         string                          `json:"shell_type"`
 	Visibility                        string                          `json:"visibility"`
+	ModelPurpose                      string                          `json:"model_purpose,omitempty"`
 	SupportedInAPI                    bool                            `json:"supported_in_api"`
 	Priority                          int                             `json:"priority"`
 	AdditionalSpeedTiers              []string                        `json:"additional_speed_tiers"`
@@ -446,6 +427,7 @@ type codexModelMetadataOverride struct {
 func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescriptor {
 	modelID = strings.TrimSpace(modelID)
 	noReasoningLevel := "none"
+	visibility, purpose := ModelPresentation(modelID, "list", "")
 	descriptor := configuredCodexModelDescriptor{
 		Slug:                  modelID,
 		DisplayName:           modelID,
@@ -455,7 +437,8 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 			{Effort: "none", Description: configuredCodexReasoningLevelDescription("none")},
 		},
 		ShellType:                         "unified_exec",
-		Visibility:                        "list",
+		Visibility:                        visibility,
+		ModelPurpose:                      purpose,
 		SupportedInAPI:                    true,
 		Priority:                          configuredCodexModelPriority,
 		AdditionalSpeedTiers:              []string{},
@@ -1417,7 +1400,7 @@ func mergeConfiguredCodexModelsManifest(
 		return nil, false, err
 	}
 
-	// Auto models still require an explicit selection, even with a wildcard allowlist.
+	// Group access remains independent of presentation, including wildcard grants.
 	selected := make(map[string]struct{}, len(selectedModels))
 	for _, modelID := range selectedModels {
 		modelID = strings.TrimSpace(modelID)
@@ -1436,7 +1419,9 @@ func mergeConfiguredCodexModelsManifest(
 	changed := false
 	for _, rawModel := range upstreamModels {
 		var descriptor struct {
-			Slug string `json:"slug"`
+			Slug       string `json:"slug"`
+			Visibility string `json:"visibility"`
+			Purpose    string `json:"model_purpose"`
 		}
 		if err := json.Unmarshal(rawModel, &descriptor); err != nil || strings.TrimSpace(descriptor.Slug) == "" {
 			if filterBySelection {
@@ -1456,14 +1441,8 @@ func mergeConfiguredCodexModelsManifest(
 			changed = true
 			continue
 		}
-		if strings.HasPrefix(descriptor.Slug, codexAutoModelPrefix) {
-			_, explicitlyEnabled := selected[descriptor.Slug]
-			explicitlyEnabled = filterBySelection && explicitlyEnabled
-			if !explicitlyEnabled {
-				changed = true
-				continue
-			}
-			visibleModel, visibilityChanged, err := codexModelWithVisibility(rawModel, "list")
+		if visibility, _ := ModelPresentation(descriptor.Slug, descriptor.Visibility, descriptor.Purpose); visibility == "hide" {
+			visibleModel, visibilityChanged, err := codexModelWithVisibility(rawModel, "hide")
 			if err != nil {
 				return nil, false, err
 			}
@@ -1481,11 +1460,6 @@ func mergeConfiguredCodexModelsManifest(
 		}
 		if filterBySelection && !allowlist.Allows(modelID) {
 			continue
-		}
-		if strings.HasPrefix(modelID, codexAutoModelPrefix) {
-			if _, explicitlyEnabled := selected[modelID]; !filterBySelection || !explicitlyEnabled {
-				continue
-			}
 		}
 		if _, exists := seen[modelID]; exists {
 			continue
@@ -2382,6 +2356,12 @@ func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Accou
 		modelMetadata[id] = codexModelMetadataOverride{UpstreamModelMetadata: UpstreamModelMetadata{
 			CodexToolCapabilities: capabilities,
 		}}
+		var visibility, purpose string
+		_ = json.Unmarshal(entry["visibility"], &visibility)
+		_ = json.Unmarshal(entry["model_purpose"], &purpose)
+		m := modelMetadata[id]
+		m.Visibility, m.ModelPurpose = ModelPresentation(id, visibility, purpose)
+		modelMetadata[id] = m
 	}
 	if len(modelIDs) == 0 {
 		return body
