@@ -52,7 +52,7 @@ func (u *selectedModelsRoutesUpstream) Do(req *http.Request, _ string, _ int64, 
 	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 }
 
-func TestGatewayRoutesSelectedModelsDispatchesOrdinaryAndCodexRequests(t *testing.T) {
+func newSelectedModelsRoutesRouter(manifest service.GroupCodexModelsManifestConfig) (*gin.Engine, *selectedModelsRoutesUpstream) {
 	gin.SetMode(gin.TestMode)
 	repo := &selectedModelsRoutesRepository{account: service.Account{
 		ID: 7, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
@@ -72,14 +72,18 @@ func TestGatewayRoutesSelectedModelsDispatchesOrdinaryAndCodexRequests(t *testin
 		AsyncImage:    handler.NewAsyncImageHandler(nil, nil),
 	}
 	group := &service.Group{ID: 1, Platform: service.PlatformOpenAI,
-		ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.5"}},
-		// Obsolete pinned source IDs cannot affect the selected model list.
-		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{999}}}
+		ModelAllowlist:            service.GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.5"}},
+		CodexModelsManifestConfig: manifest}
 	router := gin.New()
 	RegisterGatewayRoutes(router, h, servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
 		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{GroupID: &group.ID, Group: group})
 		c.Next()
 	}), nil, nil, nil, nil, nil, cfg)
+	return router, upstream
+}
+
+func requireSelectedOrdinaryModels(t *testing.T, router *gin.Engine) {
+	t.Helper()
 	for _, path := range []string{"/v1/models", "/models", "/v1/models?client_version=", "/models?client_version="} {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
@@ -95,7 +99,15 @@ func TestGatewayRoutesSelectedModelsDispatchesOrdinaryAndCodexRequests(t *testin
 		require.Len(t, response.Data, 1)
 		require.Equal(t, "gpt-5.5", response.Data[0].ID)
 	}
-	for _, path := range []string{"/v1/models?client_version=" + service.CodexCanonicalClientVersion(), "/models?client_version=" + service.CodexCanonicalClientVersion(), "/backend-api/codex/models"} {
+}
+
+var selectedModelsCodexPaths = []string{"/v1/models?client_version=" + service.CodexCanonicalClientVersion(), "/models?client_version=" + service.CodexCanonicalClientVersion(), "/backend-api/codex/models"}
+
+func TestGatewayRoutesSelectedModelsDispatchesOrdinaryAndCodexRequests(t *testing.T) {
+	// A disabled fixed source keeps its saved IDs but has no runtime effect.
+	router, upstream := newSelectedModelsRoutesRouter(service.GroupCodexModelsManifestConfig{AccountIDs: []int64{999}})
+	requireSelectedOrdinaryModels(t, router)
+	for _, path := range selectedModelsCodexPaths {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 		require.Equal(t, http.StatusOK, w.Code, "%s: %s", path, w.Body.String())
@@ -104,6 +116,21 @@ func TestGatewayRoutesSelectedModelsDispatchesOrdinaryAndCodexRequests(t *testin
 	}
 	require.Zero(t, upstream.ordinaryCalls.Load(), "reading group selections never fetches a pinned upstream")
 	require.Zero(t, upstream.codexCalls.Load(), "configured capabilities are resolved locally")
+}
+
+func TestGatewayRoutesSelectedModelsEnabledFixedSourceOnlyGovernsCodexManifest(t *testing.T) {
+	// An enabled fixed source whose accounts left the group fails closed for
+	// Codex discovery without fallback, and never touches the ordinary list.
+	router, upstream := newSelectedModelsRoutesRouter(service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{999}})
+	requireSelectedOrdinaryModels(t, router)
+	for _, path := range selectedModelsCodexPaths {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		require.Equal(t, http.StatusServiceUnavailable, w.Code, "%s: %s", path, w.Body.String())
+		require.Contains(t, w.Body.String(), "No available pinned OpenAI accounts")
+	}
+	require.Zero(t, upstream.ordinaryCalls.Load(), "the ordinary list never fetches a pinned upstream")
+	require.Zero(t, upstream.codexCalls.Load(), "non-member pinned IDs are never fetched")
 }
 
 func TestGatewayRoutesRetrieveSelectedModel(t *testing.T) {
