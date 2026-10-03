@@ -9,9 +9,10 @@ from pathlib import Path
 
 TARGETS = {
     'shared': [('main', 'origin', 'main'), ('TapModels', 'origin', 'TapModels'),
-               ('TapModels', 'erwinlin', 'main')],
+               ('tokensavy', 'origin', 'tokensavy')],
     'main': [('main', 'origin', 'main')],
-    'tapmodels': [('TapModels', 'origin', 'TapModels'), ('TapModels', 'erwinlin', 'main')],
+    'tapmodels': [('TapModels', 'origin', 'TapModels')],
+    'tokensavy': [('tokensavy', 'origin', 'tokensavy')],
 }
 
 
@@ -44,6 +45,8 @@ def review(repo, scope=None, staged=False, commit=None):
             tags.append('KDAN path: inspect whether change is brand-specific')
         if 'tapmodels' in lower:
             tags.append('TapModels path: inspect whether change is brand-specific')
+        if 'tokensavy' in lower:
+            tags.append('Tokensavy path: inspect whether change is brand-specific')
         if ('brand' in lower or lower.startswith(('docs/legal/', 'assets/', 'frontend/public/'))
                 or name.endswith('HomeView.vue') or '/i18n/' in name):
             tags.append('Brand/content boundary: inspect actual diff, not the whole file')
@@ -58,7 +61,7 @@ def review(repo, scope=None, staged=False, commit=None):
         'scope_status': ('No changes selected' if not files else
                          'Split common and brand changes before committing' if scope == 'mixed' else
                          'Declared scope; verify semantic ownership and authorization before executing' if scope else
-                         'Choose shared/main/tapmodels/mixed after reviewing the actual diff'),
+                         'Choose shared/main/tapmodels/tokensavy/mixed after reviewing the actual diff'),
         'files': files,
         'review_clues': clues,
         'targets': [{'source': branch, 'remote': remote, 'destination': f'refs/heads/{dest}',

@@ -257,6 +257,10 @@ export default {
         codexConfigTomlHint: 'Local catalog file by default; remote catalog is optional for supported groups.',
         codexNote: 'Export TOKENSAVY_API_KEY before starting Codex. Model requests are routed by the selected catalog slug.',
       },
+      zhipu: {
+        codexConfigTomlHint: 'This config includes your API key. Also download codex-models.json, save it at model_catalog_json, and restart Codex. Reasoning levels and defaults follow the current model catalog.',
+        codexNote: 'Back up before merging an existing config. Remove thread_context from [features.guardianv2] and every profile override; thread-owned context is already enabled by the client.',
+      },
       routedCodex: {
         description: 'Configure Codex with the complete model catalog for the current routed group.',
         configTomlHint: 'Local catalog file by default; remote catalog is optional for supported groups.',

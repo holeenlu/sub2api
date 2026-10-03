@@ -31,13 +31,13 @@ class DeliveryReviewTest(unittest.TestCase):
         self.assertEqual(result['scope'], 'unclassified')
         self.assertEqual(result['targets'], [])
 
-    def test_shared_targets_start_at_main_and_propagate_tapmodels(self):
+    def test_shared_targets_start_at_main_and_propagate_brand_branches(self):
         (self.repo / 'shared.txt').write_text('changed\n')
         result = delivery.review(self.repo, 'shared')
         self.assertEqual([t['push_command'] for t in result['targets']], [
             'git push origin refs/heads/main:refs/heads/main',
             'git push origin refs/heads/TapModels:refs/heads/TapModels',
-            'git push erwinlin refs/heads/TapModels:refs/heads/main',
+            'git push origin refs/heads/tokensavy:refs/heads/tokensavy',
         ])
 
     def test_main_target_is_kdan_delivery_branch(self):
@@ -68,7 +68,14 @@ class DeliveryReviewTest(unittest.TestCase):
         (self.repo / 'another.txt').write_text('untracked\n')
         result = delivery.review(self.repo, 'tapmodels', commit='HEAD')
         self.assertEqual(result['files'], ['shared.txt'])
-        self.assertEqual(len(result['targets']), 2)
+        self.assertEqual(len(result['targets']), 1)
+
+    def test_tokensavy_has_only_its_same_repository_target(self):
+        (self.repo / 'shared.txt').write_text('changed\n')
+        result = delivery.review(self.repo, 'tokensavy')
+        self.assertEqual([t['push_command'] for t in result['targets']], [
+            'git push origin refs/heads/tokensavy:refs/heads/tokensavy',
+        ])
 
 
 if __name__ == '__main__':

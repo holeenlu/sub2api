@@ -1189,6 +1189,7 @@ describe('UseKeyModal', () => {
     expect(config).toContain('model_catalog_json = "~/.codex/codex-models.json"')
     expect(config).toContain('experimental_bearer_token = "sk-zhipu-test"')
     expect(config).not.toContain('TOKENSAVY_API_KEY')
+    expect(parseToml(config).model_reasoning_effort).toBe('max')
 
     await clickButton(wrapper, (text) => text.includes('keys.useKeyModal.cliTabs.opencode'))
     const opencodeConfig = JSON.parse(findCodeBlock(wrapper, '"provider"'))
@@ -1197,6 +1198,79 @@ describe('UseKeyModal', () => {
       output: 131_072
     })
   })
+
+  it.each([
+    ['glm-5.3', 'max'],
+    ['glm-5.3-flash', 'max'],
+    ['glm-5.3-flashx', 'max'],
+    ['glm-4.7', undefined],
+    ['glm-5.3-preview', undefined],
+    ['custom-coder', undefined]
+  ] as const)('uses the documented Zhipu default only for known models: %s', async (model, expectedEffort) => {
+    const wrapper = mount(UseKeyModal, {
+      props: {
+        show: true, platform: 'zhipu', apiKey: 'sk-zhipu-test', baseUrl: 'https://example.com/v1',
+        setupProfile: { model, review_model: model, catalog_revision: 'zhipu-v1', status: 'ready' }
+      },
+      global: { stubs }
+    })
+    await selectCodexCli(wrapper)
+    const config = parseToml(findCodeBlock(wrapper, 'wire_api = "responses"'))
+    expect(config.model).toBe(model)
+    expect(config.model_reasoning_effort).toBe(expectedEffort)
+  })
+
+  it.each(['macOS / Linux', 'Windows'] as const)(
+    'downloads Zhipu config with the published reasoning default and no deprecated Guardian settings on %s',
+    async (osTab) => {
+      const manifest = {
+        models: [{
+          slug: 'glm-5.3',
+          default_reasoning_level: 'max',
+          supported_reasoning_levels: ['low', 'high', 'max'].map((effort) => ({ effort }))
+        }]
+      }
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true, status: 200, text: async () => JSON.stringify(manifest)
+      }))
+      const wrapper = mount(UseKeyModal, {
+        props: {
+          show: true, platform: 'zhipu', apiKey: 'sk-zhipu-test', baseUrl: 'https://example.com/v1',
+          setupProfile: {
+            model: 'glm-5.3', review_model: 'glm-5.3', reasoning_effort: 'high',
+            catalog_revision: 'zhipu-v1', status: 'ready'
+          }
+        },
+        global: { stubs }
+      })
+      await selectCodexCli(wrapper)
+      await clickButton(wrapper, (text) => text.trim() === osTab)
+      expect(parseToml(findCodeBlock(wrapper, 'wire_api = "responses"')).model_reasoning_effort).toBe('high')
+      expect(wrapper.text()).toContain('keys.useKeyModal.zhipu.codexNote')
+      expect(wrapper.text()).not.toContain('keys.useKeyModal.routedCodex.note')
+
+      await fetchCatalog(wrapper)
+      const files = await downloadAllCards(wrapper)
+      expect(files.map((file) => file.name)).toEqual(['config.toml'])
+      expect(files[0].text).toBe(files[0].cardText)
+      const config = parseToml(files[0].text)
+      expect(config.model_reasoning_effort).toBe('max')
+      expect(config.model_catalog_json).toBe('~/.codex/codex-models.json')
+      expect(config.model_providers).toEqual({ [String(config.model_provider)]: {
+        name: 'Sub2API Zhipu', base_url: 'https://example.com/v1',
+        experimental_bearer_token: 'sk-zhipu-test', wire_api: 'responses',
+        requires_openai_auth: false, supports_websockets: false
+      } })
+      expect(files[0].text).not.toMatch(/guardianv2|thread_context/)
+
+      // A refreshed model without effort control must not retain the profile's old default.
+      manifest.models[0].slug = 'custom-coder'
+      manifest.models[0].default_reasoning_level = 'none'
+      manifest.models[0].supported_reasoning_levels = [{ effort: 'none' }]
+      await fetchCatalog(wrapper)
+      expect(parseToml(findCodeBlock(wrapper, 'wire_api = "responses"'))).not.toHaveProperty('model_reasoning_effort')
+    }
+  )
 
   it.each([
     ['deepseek', 'deepseek-v4-pro', 1_000_000],

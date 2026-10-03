@@ -3,7 +3,8 @@ import argparse
 
 BRANCHES = {
     "main": ("main", "origin/main"),
-    "tapmodels": ("TapModels", "origin/TapModels, erwinlin/main"),
+    "tapmodels": ("TapModels", "origin/TapModels"),
+    "tokensavy": ("tokensavy", "origin/tokensavy"),
 }
 
 
@@ -12,7 +13,7 @@ def render_instructions(branch):
     return "\n".join([
         "## 同步步驟（在維護者整合工作區執行）",
         "",
-        "工作區須已安裝 sync-upstream 技能及本機入口，並配置 origin、upstream、erwinlin 遠端。",
+        "工作區須已安裝 sync-upstream 技能及本機入口，並配置 origin（holeenlu/sub2api）、upstream 遠端。",
         "以普通 Git Merge 保留原始提交；先審閱衝突與驗證結果，再依該次授權發布。",
         "",
         "```bash",
@@ -22,7 +23,7 @@ def render_instructions(branch):
         "",
         f"本機分支：{local}；發布目標：{destinations}。main 是 KDAN 品牌主整合分支；不維護獨立 KDAN 或公共分支。",
         "prepare 只完成本機合併與驗證；發布需使用該檢查點 ID 及明確的推送授權。",
-        "官方上游先在 main 完成普通 merge 和驗證，再傳播到 TapModels。",
+        "官方上游先在 main 完成普通 merge 和驗證，再傳播到 TapModels、tokensavy；僅推送本倉庫，不向其他倉庫發布。",
         "",
     ])
 
