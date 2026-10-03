@@ -1,19 +1,12 @@
 name: tokensavy
 
-# Source-built Tokensavy deployment. See README.md in this directory.
+# Tokensavy release-image deployment. See README.md in this directory.
 services:
   # ===========================================================================
   # Tokensavy Application
   # ===========================================================================
   tokensavy:
-    image: tokensavy:local
-    pull_policy: never
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-      args:
-        RELEASE_CHANNEL: tokensavy
-        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-}
+    image: ${TOKENSAVY_IMAGE:-ghcr.io/holeenlu/tokensavy:latest}
     container_name: tokensavy
     restart: unless-stopped
     security_opt:
@@ -176,7 +169,7 @@ services:
       # =======================================================================
       # Enable checking GitHub releases for updates and the self-update UI
       # 是否检查上游发布并显示自更新入口，白标构建默认关闭
-      - UPDATE_CHECK_ENABLED=false
+      - UPDATE_CHECK_ENABLED=${UPDATE_CHECK_ENABLED:-true}
       # Proxy for accessing GitHub (online updates + pricing data)
       # Examples: http://host:port, socks5://host:port
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}

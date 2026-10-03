@@ -183,9 +183,9 @@ type GeminiTierQuotaConfig struct {
 }
 
 type UpdateConfig struct {
-	// CheckEnabled 控制是否允许在线版本检查与自更新（本品牌构建默认 false）。
+	// CheckEnabled 控制是否允许在线版本检查与自更新（本品牌构建默认 true）。
 	// 为 false 时版本检查、自更新和版本回滚接口直接返回 disabled，不会向 GitHub
-	// 发起任何请求；Tokensavy 尚未配置独立发布仓库。
+	// 发起任何请求；Tokensavy 仅使用本仓库 tokensavy/v* 发布渠道。
 	CheckEnabled bool `mapstructure:"check_enabled"`
 
 	// ProxyURL 用于访问 GitHub 的代理地址
@@ -2251,8 +2251,8 @@ func setDefaults() {
 	viper.SetDefault("cors.allowed_origins", []string{})
 	viper.SetDefault("cors.allow_credentials", true)
 
-	// Tokensavy is source-built until an independent release repository is configured.
-	viper.SetDefault("update.check_enabled", false)
+	// Tokensavy releases are built from the tokensavy branch in holeenlu/sub2api.
+	viper.SetDefault("update.check_enabled", true)
 
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
 	// declare its relying-party domain and trusted browser origins.

@@ -63,8 +63,8 @@ export const BRAND_COMPLIANCE_DOCUMENT_URL = {
   en: '/legal/admin-compliance'
 } as const
 
-/** No release repository yet; online updates are disabled for this source-built brand. */
-export const RELEASE_REPO = ''
+/** Releases from the tokensavy branch, isolated by the tokensavy/v* channel. */
+export const RELEASE_REPO = 'holeenlu/sub2api'
 
-/** Local image built by deploy/tokensavy/compose.yaml. */
-export const RELEASE_DOCKER_IMAGE = 'tokensavy'
+/** GHCR image built manually from this repository’s tokensavy branch. */
+export const RELEASE_DOCKER_IMAGE = 'ghcr.io/holeenlu/tokensavy'

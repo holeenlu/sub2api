@@ -48,7 +48,7 @@ class TokensavyDeploymentTests(unittest.TestCase):
             self.assertFalse((directory / '.env').exists())
 
     @unittest.skipUnless(shutil.which('docker'), 'Docker CLI required for Compose rendering')
-    def test_compose_uses_only_fresh_local_brand_and_private_database(self):
+    def test_compose_uses_brand_release_image_and_private_database(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             values = self.initialize(directory)
@@ -59,9 +59,10 @@ class TokensavyDeploymentTests(unittest.TestCase):
             config = json.loads(rendered)
             app = config['services']['tokensavy']
             self.assertEqual(config['name'], 'tokensavy')
-            self.assertEqual(app['image'], 'tokensavy:local')
-            self.assertEqual(app['build']['args']['RELEASE_CHANNEL'], 'tokensavy')
-            self.assertEqual(app['environment']['UPDATE_CHECK_ENABLED'], 'false')
+            self.assertEqual(app['image'], 'ghcr.io/holeenlu/tokensavy:latest')
+            self.assertNotIn('build', app)
+            self.assertNotEqual(app.get('pull_policy'), 'never')
+            self.assertEqual(app['environment']['UPDATE_CHECK_ENABLED'], 'true')
             self.assertEqual(app['environment']['ADMIN_EMAIL'], 'ikung1970@gmail.com')
             self.assertEqual(app['environment']['ADMIN_PASSWORD'], values['ADMIN_PASSWORD'])
             self.assertEqual(app['ports'][0]['host_ip'], '127.0.0.1')
