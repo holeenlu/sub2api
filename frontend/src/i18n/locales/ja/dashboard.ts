@@ -257,6 +257,10 @@ export default {
         codexConfigTomlHint: '以下のモデルカタログをダウンロードし、両方のファイルをCodexの設定ディレクトリに保存して、Codexを再起動してください。',
         codexNote: 'Codexの起動前にTAPMODELS_API_KEYをエクスポートしてください。モデルリクエストは、選択したカタログスラッグによってルーティングされます。',
       },
+      zhipu: {
+        codexConfigTomlHint: 'この設定には API キーが含まれています。codex-models.json もダウンロードし、model_catalog_json で指定した場所に保存して Codex を再起動してください。推論レベルと既定値は現在のモデルカタログに従います。',
+        codexNote: '既存の設定に統合する前にバックアップしてください。[features.guardianv2] とすべてのプロファイル上書きから thread_context を削除してください。スレッドコンテキストはクライアントが自動で有効にします。',
+      },
       routedCodex: {
         description: '現在のルーティンググループ用の完全なモデルカタログでCodexを設定します。',
         configTomlHint: '以下のモデルカタログをダウンロードし、両方のファイルをCodexの設定ディレクトリに保存して、Codexを再起動してください。',

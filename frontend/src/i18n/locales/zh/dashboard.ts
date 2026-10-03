@@ -261,6 +261,10 @@ export default {
         codexConfigTomlHint: '默认使用本地目录文件；支持的分组可改选远程目录。',
         codexNote: '启动 Codex 前先导出 KDAN_API_KEY；分组会根据目录中选中的模型路由请求。'
       },
+      zhipu: {
+        codexConfigTomlHint: '配置已包含 API Key。请同时下载 codex-models.json，保存到 model_catalog_json 指定路径后重启 Codex。推理档位及默认值以当前模型目录为准。',
+        codexNote: '合并旧配置前请备份，并删除 [features.guardianv2] 及所有 profile 覆盖中的 thread_context 字段；客户端已自动启用线程上下文，无需设置此字段。'
+      },
       routedCodex: {
         description: '使用当前路由分组的完整模型目录配置 Codex。',
         configTomlHint: '默认使用本地目录文件；支持的分组可改选远程目录。',
