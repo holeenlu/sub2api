@@ -23,6 +23,28 @@ func resetViperWithJWTSecret(t *testing.T) {
 	t.Setenv("JWT_SECRET", strings.Repeat("x", 32))
 }
 
+func TestLoadRetiredAutomaticWSBridgeSettingsPreservesManualMode(t *testing.T) {
+	for _, mode := range []string{"ctx_pool", "http_bridge"} {
+		t.Run(mode, func(t *testing.T) {
+			resetViperWithJWTSecret(t)
+			file := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(file, []byte(fmt.Sprintf(`gateway:
+  openai_ws:
+    mode_router_v2_enabled: true
+    ingress_mode_default: %s
+    http_bridge_enabled: true
+    http_bridge_threshold_bytes: 1
+`, mode)), 0600))
+			t.Setenv("CONFIG_FILE", file)
+			cfg, err := Load()
+			require.NoError(t, err, "retired automatic-bridge keys must not prevent startup")
+			require.True(t, cfg.Gateway.OpenAIWS.ModeRouterV2Enabled)
+			require.Equal(t, mode, cfg.Gateway.OpenAIWS.IngressModeDefault)
+			require.Equal(t, int64(64*1024*1024), cfg.Gateway.OpenAIWS.ClientReadLimitBytes)
+		})
+	}
+}
+
 func TestLoadDefaultModelsListReadMaxBytes(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	cfg, err := Load()
@@ -524,12 +546,6 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	}
 	if cfg.Gateway.OpenAIWS.ClientReadLimitBytes != 64*1024*1024 {
 		t.Fatalf("Gateway.OpenAIWS.ClientReadLimitBytes = %d, want %d", cfg.Gateway.OpenAIWS.ClientReadLimitBytes, 64*1024*1024)
-	}
-	if !cfg.Gateway.OpenAIWS.HTTPBridgeEnabled {
-		t.Fatalf("Gateway.OpenAIWS.HTTPBridgeEnabled = false, want true")
-	}
-	if cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes != 15*1024*1024 {
-		t.Fatalf("Gateway.OpenAIWS.HTTPBridgeThresholdBytes = %d, want %d", cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes, 15*1024*1024)
 	}
 	if cfg.Gateway.OpenAIWS.RetryBackoffInitialMS != 120 {
 		t.Fatalf("Gateway.OpenAIWS.RetryBackoffInitialMS = %d, want 120", cfg.Gateway.OpenAIWS.RetryBackoffInitialMS)

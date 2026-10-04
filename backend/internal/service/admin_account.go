@@ -434,6 +434,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OpenCodeGoUsageSnapshotExtraKey)
 	delete(accountExtra, "model_catalog_policy")
 	delete(accountExtra, "model_catalog_visibility")
+	delete(accountExtra, "openai_oauth_ws_sse_acceleration")
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
 	account := &Account{
 		Name:        input.Name,
@@ -769,6 +770,7 @@ func (s *adminServiceImpl) updateAccount(
 		// Retired catalogue permissions cannot be restored through arbitrary extra fields.
 		delete(normalizedExtra, "model_catalog_policy")
 		delete(normalizedExtra, "model_catalog_visibility")
+		delete(normalizedExtra, "openai_oauth_ws_sse_acceleration")
 		// 保留配额用量和专用服务受管字段，防止普通账号编辑意外覆盖。
 		for _, key := range []string{
 			"quota_used",
@@ -1097,6 +1099,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	delete(input.Extra, OpenCodeGoUsageSnapshotExtraKey)
 	delete(input.Extra, "model_catalog_policy")
 	delete(input.Extra, "model_catalog_visibility")
+	delete(input.Extra, "openai_oauth_ws_sse_acceleration")
 
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
 		accountIDs, err := s.ResolveBulkUpdateTargetIDs(ctx, input.Filters)

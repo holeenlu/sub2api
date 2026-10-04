@@ -2066,23 +2066,6 @@
         </div>
       </div>
 
-      <div
-        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
-        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div>
-          <label class="input-label mb-0">{{ t('admin.accounts.openai.wsSseAcceleration') }}</label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.openai.wsSseAccelerationDesc') }}
-          </p>
-        </div>
-        <Toggle
-          v-model="openaiOAuthWSSSEAcceleration"
-          data-testid="openai-ws-sse-acceleration"
-          :aria-label="t('admin.accounts.openai.wsSseAcceleration')"
-        />
-      </div>
-
       <div v-if="account?.platform === 'openai' && account?.type === 'apikey'" class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600">
         <div><label id="apikey-codex-identity-label" class="input-label mb-0">{{ t('admin.accounts.openai.apiKeyCodexIdentity') }}</label>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.apiKeyCodexIdentityHint') }}</p></div>
@@ -3915,7 +3898,6 @@ const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIImagesUrlToB64JsonEnabled = ref(false)
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
-const openaiOAuthWSSSEAcceleration = ref(false)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 type CodexTicketAccountPolicy = 'inherit' | 'allow' | 'deny'
 const codexTicketAccountPolicy = ref<CodexTicketAccountPolicy>('inherit')
@@ -4430,7 +4412,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   apiKeyCodexIdentity.value = false
-  openaiOAuthWSSSEAcceleration.value = false
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
@@ -4490,7 +4471,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       codexImageToolMode.value = 'disabled'
     }
     apiKeyCodexIdentity.value = newAccount.type === 'apikey' && extra?.openai_apikey_codex_identity === true
-    openaiOAuthWSSSEAcceleration.value = newAccount.type === 'oauth' && extra?.openai_oauth_ws_sse_acceleration === true
     openaiOAuthResponsesWebSocketV2Mode.value = resolveOpenAIWSModeFromExtra(extra, {
       modeKey: 'openai_oauth_responses_websockets_v2_mode',
       enabledKey: 'openai_oauth_responses_websockets_v2_enabled',
@@ -6077,11 +6057,7 @@ const handleSubmit = async () => {
         if (apiKeyCodexIdentity.value) newExtra.openai_apikey_codex_identity = true
         else delete newExtra.openai_apikey_codex_identity
       }
-      if (props.account.type === 'oauth' && openaiOAuthWSSSEAcceleration.value) {
-        newExtra.openai_oauth_ws_sse_acceleration = true
-      } else {
-        delete newExtra.openai_oauth_ws_sse_acceleration
-      }
+      delete newExtra.openai_oauth_ws_sse_acceleration
       delete newExtra.responses_websockets_v2_enabled
       delete newExtra.openai_ws_enabled
       if (openaiPassthroughEnabled.value) {
