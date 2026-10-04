@@ -31,14 +31,9 @@ func (s *GroupModelCatalogService) ResolveForListing(ctx context.Context, group 
 	if err != nil || s.registry == nil {
 		return view, nil, err
 	}
-	accounts, err := s.accounts.ListByGroup(ctx, group.ID)
-	if err != nil {
-		// Capability lookup must not turn a usable name list into an outage.
-		return view, nil, nil
-	}
 	known := map[int64]map[string]UpstreamModelMetadata{}
-	for i := range accounts {
-		a := &accounts[i]
+	for _, account := range view.accounts {
+		a := &account
 		if !isCatalogAccountActive(a) {
 			continue
 		}

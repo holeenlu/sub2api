@@ -116,6 +116,9 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 		return nil, false, fmt.Errorf("load group configured Codex models: %w", err)
 	}
 	configuredModels := openAIConfiguredCodexModelIDsForGroup(visible, group)
+	if s.modelCatalog != nil {
+		configuredModels, catalog = s.modelCatalog.groupCatalog.fallbackCodexInputs(ctx, group, configuredModels, catalog)
+	}
 	localConfigured := len(configuredModels) > 0
 	if !localConfigured {
 		return nil, false, nil
@@ -174,6 +177,21 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		return fmt.Errorf("load group configured Codex capabilities: %w", err)
 	}
 	configuredModels := openAIConfiguredCodexModelIDsForGroup(visible, group)
+	if s.modelCatalog != nil && group.FallbackGroupIDOnNoAccount != nil {
+		var borrowed []string
+		borrowed, catalog = s.modelCatalog.groupCatalog.fallbackCodexInputs(ctx, group, nil, catalog)
+		if len(borrowed) > 0 {
+			additional, err := buildCodexModelsManifestForAccounts(PlatformOpenAI, borrowed, catalog, group, nil, true)
+			if err != nil {
+				return err
+			}
+			manifest.Body, err = mergeCodexModelsManifestBodies([][]byte{manifest.Body, additional})
+			if err != nil {
+				return err
+			}
+			manifest.ETag = codexModelsManifestBodyETag(manifest.Body)
+		}
+	}
 	selection, filter := group.ModelAllowlist.Models, group.ModelAllowlistEnabled()
 	body, changed, err := mergeConfiguredCodexModelsManifest(manifest.Body, configuredModels, selection, filter)
 	if err != nil {
@@ -876,6 +894,9 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 	_, catalog, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
 	if err != nil {
 		return BuildCodexModelsManifest(modelIDs)
+	}
+	if effectivePlatform == group.Platform {
+		modelIDs, catalog = s.groupCatalog.fallbackCodexInputs(ctx, group, modelIDs, catalog)
 	}
 	var compositeRoutes []CompositeModelRoute
 	compositeRoutesAvailable := true

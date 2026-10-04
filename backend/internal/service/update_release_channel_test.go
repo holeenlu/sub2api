@@ -21,6 +21,20 @@ func TestUpdateFourPartVersions(t *testing.T) {
 	require.Equal(t, 0, compareVersions("v0.2.8", "0.2.8.0"))
 }
 
+func TestSourceBuildUsesBrandUpdateChannel(t *testing.T) {
+	client := &updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "foreign/v99.0.0"}, recentReleases: []*GitHubRelease{
+		{TagName: "foreign/v99.0.0"}, {TagName: DefaultReleaseChannel + "/v0.2.13.6"},
+	}}
+	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.2.13.5", "source")
+	require.NotEmpty(t, DefaultReleaseChannel)
+	require.Equal(t, DefaultReleaseChannel, svc.releaseChannel)
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, "0.2.13.6", info.LatestVersion)
+	require.Zero(t, client.latestCalls)
+	require.Equal(t, 1, client.recentCalls)
+}
+
 func TestUpdateReleaseChannelIsolation(t *testing.T) {
 	svc := newRollbackTestService("0.2.8.1", []*GitHubRelease{
 		{TagName: "v1.1.4"}, {TagName: "sub2api/v0.3.0"},

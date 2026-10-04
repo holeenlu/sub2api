@@ -90,6 +90,70 @@ class ComposeUpdateTests(unittest.TestCase):
         self.assertEqual(command.call_count, 1)
         self.assertEqual(u.state['status'], 'failed')
 
+    @patch('deploy.compose_updater.time.sleep')
+    def test_preflight_failure_never_replaces_application(self, _):
+        u = self.updater
+        before = u.override.read_bytes()
+        u.lock.acquire()
+        with patch.object(u, 'image_for', return_value='image'), \
+             patch.object(u, 'container', return_value='app'), \
+             patch.object(u, 'inspect', side_effect=[{'Image': 'old', 'Config': {'Healthcheck': {'Test': ['CMD', 'true']}}}, {'Id': 'new'}]), \
+             patch.object(u, 'command') as command, \
+             patch.object(u, 'preflight', side_effect=RuntimeError('preflight failed')):
+            u.apply('0.2.13.6')
+        self.assertEqual(u.override.read_bytes(), before)
+        self.assertEqual(u.state['phase'], 'preflight')
+        self.assertEqual(u.state['previous_image'], 'old')
+        self.assertFalse(any('up' in c.args for c in command.call_args_list))
+
+    def test_restart_recovers_each_durable_phase(self):
+        for phase in ('preparing', 'pulling', 'preflight', 'switching', 'checking', 'recovering'):
+            with self.subTest(phase=phase):
+                u = self.updater
+                u.save(status='running', phase=phase, version='0.2.13.6', image='target',
+                       target_id='new', previous_image='old', recovery_required=phase in ('switching', 'checking', 'recovering'))
+                calls = [RuntimeError('target not healthy'), None] if phase in ('switching', 'checking') else [None]
+                with patch.object(Updater, 'command') as command, patch.object(Updater, 'container', return_value='app'), \
+                     patch.object(Updater, 'inspect', return_value={'Image': 'new'}), patch.object(Updater, 'wait_healthy', side_effect=calls):
+                    restarted = Updater(u.config)
+                self.assertEqual(restarted.state['version'], '0.2.13.6')
+                self.assertEqual(restarted.state['previous_image'], 'old')
+                self.assertFalse(restarted.state['recovery_required'])
+                if phase in ('preparing', 'pulling', 'preflight'):
+                    command.assert_not_called()
+                else:
+                    self.assertEqual(json.loads(u.override.read_text())['services']['kdan']['image'], 'old')
+                    self.assertIn('--no-deps', command.call_args.args)
+
+    def test_restart_keeps_healthy_target_and_blocks_failed_recovery(self):
+        u = self.updater
+        u.save(status='running', phase='checking', target_id='new', previous_image='old', version='0.2.13.6')
+        with patch.object(Updater, 'wait_healthy'), patch.object(Updater, 'command') as command, \
+             patch.object(Updater, 'container', return_value='app'), patch.object(Updater, 'inspect', return_value={'Image': 'new'}):
+            restarted = Updater(u.config)
+        self.assertEqual(restarted.state['status'], 'succeeded')
+        command.assert_not_called()
+        u.save(status='running', phase='switching', recovery_required=True)
+        with patch.object(Updater, 'wait_healthy', side_effect=RuntimeError('unhealthy')), patch.object(Updater, 'command'):
+            restarted = Updater(u.config)
+        self.assertTrue(restarted.state['recovery_required'])
+        with self.assertRaisesRegex(RuntimeError, 'requires recovery'):
+            restarted.start('0.2.13.7')
+        self.assertEqual(restarted.state['previous_image'], 'old')
+        self.assertFalse(restarted.lock.locked())
+
+    def test_candidate_check_does_not_overwrite_live_override(self):
+        u = self.updater
+        before = u.override.read_bytes()
+        def command(*args, **kwargs):
+            self.assertEqual(u.override.read_bytes(), before)
+            self.assertEqual(args[-1], '--check-model-policy-migration')
+            self.assertIn('--no-deps', args)
+            candidate_path = Path(args[len(u.compose) + 1])
+            self.assertEqual(json.loads(candidate_path.read_text())['services']['kdan']['image'], 'candidate')
+        with patch.object(u, 'command', side_effect=command):
+            u.preflight('candidate')
+
     def test_manifest_cannot_change_brand_or_image(self):
         release = {'tag_name':'kdan/v0.2.8.1', 'assets':[{'name':'release-manifest.json', 'id':42,
             'url':'https://api.github.com/repos/holeenlu/sub2api/releases/assets/42'}]}

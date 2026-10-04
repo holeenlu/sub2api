@@ -27,6 +27,7 @@ type ModelCatalogService struct {
 	startOnce    sync.Once
 
 	pricingResolver *ModelPricingResolver
+	groupCatalog    *GroupModelCatalogService
 	repo            ModelCatalogRepository
 	accounts        AccountRepository
 	syncer          *AccountTestService

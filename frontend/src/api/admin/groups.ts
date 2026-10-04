@@ -110,7 +110,6 @@ export async function getById(id: number, options?: { signal?: AbortSignal }): P
  */
 export interface ModelAllowlistCandidates {
   models: string[]
-  /** Candidates without a complete sale price yet; shown as pending pricing. */
 }
 
 export async function getModelAllowlistCandidates(

@@ -98,7 +98,7 @@ func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id 
 		platform = PlatformAnthropic
 	}
 
-	candidates := defaultModelsListCandidateIDs(platform)
+	candidates := DefaultModelsListCandidateIDs(platform)
 	if id <= 0 || s.accountRepo == nil {
 		return candidates, platform, nil
 	}
@@ -278,7 +278,7 @@ func compositeRouteFromInput(groupID int64, input CompositeRouteInput) (*Composi
 	}, nil
 }
 
-func defaultModelsListCandidateIDs(platform string) []string {
+func DefaultModelsListCandidateIDs(platform string) []string {
 	switch platform {
 
 	case PlatformOpenAI:
@@ -300,16 +300,26 @@ func defaultModelsListCandidateIDs(platform string) []string {
 		return xai.DefaultModelIDs()
 	case PlatformOpenCodeGo:
 		return DefaultOpenCodeGoModelIDs()
+	case PlatformKimi:
+		return []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "kimi-k2", "kimi-for-coding", "kimi-latest", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"}
+	case PlatformZhipu:
+		return []string{"glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-x", "glm-4.5-air", "glm-4.5-flash", "glm-4", "glm-4v", "glm-4-plus", "glm-4-0520", "glm-4-air", "glm-4-airx", "glm-4-long", "glm-4-flash", "glm-4v-plus", "glm-3-turbo", "glm-4-alltools", "chatglm_turbo", "chatglm_pro", "chatglm_std", "chatglm_lite", "cogview-3", "cogvideo"}
+	case PlatformDeepseek:
+		return []string{"deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-flash", "deepseek-coder", "deepseek-v3", "deepseek-v3-0324", "deepseek-r1", "deepseek-r1-0528", "deepseek-r1-distill-qwen-32b", "deepseek-r1-distill-qwen-14b", "deepseek-r1-distill-qwen-7b", "deepseek-r1-distill-llama-70b", "deepseek-r1-distill-llama-8b"}
+	case PlatformMiniMax:
+		return []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2", "abab6.5-chat", "abab6.5s-chat", "abab6.5s-chat-pro", "abab6-chat", "abab5.5-chat", "abab5.5s-chat"}
 	case PlatformTypeSafe:
 		return []string{typesafe.JevLatestModel}
 	case PlatformComposite:
 		return compositeDefaultModelsListCandidateIDs()
-	default:
+	case PlatformAnthropic, "":
 		ids := make([]string, 0, len(claude.DefaultModels))
 		for _, model := range claude.DefaultModels {
 			ids = append(ids, model.ID)
 		}
 		return ids
+	default:
+		return nil
 	}
 }
 
@@ -326,7 +336,7 @@ func compositeDefaultModelsListCandidateIDs() []string {
 	// through /v1/systemone); groups with TypeSafe accounts still get it from the
 	// account model mappings collected by GetGroupModelsListCandidates.
 	for _, platform := range []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo} {
-		for _, id := range defaultModelsListCandidateIDs(platform) {
+		for _, id := range DefaultModelsListCandidateIDs(platform) {
 			if _, ok := seen[id]; ok {
 				continue
 			}

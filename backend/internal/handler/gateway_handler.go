@@ -1193,9 +1193,18 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 
 	var capabilities map[string]service.ModelListCapabilities
+	var fallbackModels []string
 	if h.modelCatalog != nil && apiKey != nil && apiKey.Group != nil && (platform == apiKey.Group.Platform || platform == "") {
 		// Optional metadata must not control which models the native list exposes.
-		_, capabilities, _ = h.modelCatalog.ResolveForListing(c.Request.Context(), apiKey.Group)
+		var view *service.GroupModelCatalog
+		view, capabilities, _ = h.modelCatalog.ResolveForListing(c.Request.Context(), apiKey.Group)
+		if view != nil {
+			for _, model := range view.Models {
+				if model.Source == "fallback" {
+					fallbackModels = append(fallbackModels, model.Name)
+				}
+			}
+		}
 	}
 
 	if platform == service.PlatformComposite {
@@ -1203,6 +1212,9 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		if err != nil {
 			h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to load composite model catalog")
 			return
+		}
+		if len(fallbackModels) > 0 {
+			availableModels = mergeModelIDs(modelListingSource(platform, availableModels, defaultModelIDsForPlatform(platform)), fallbackModels)
 		}
 		if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 			source := availableModels
@@ -1222,6 +1234,9 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 
 	// Get available models from account configurations for the selected group platform.
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
+	if len(fallbackModels) > 0 {
+		availableModels = mergeModelIDs(modelListingSource(platform, availableModels, defaultModelIDsForPlatform(platform)), fallbackModels)
+	}
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 		source := modelListingSource(platform, availableModels, defaultModelIDsForPlatform(platform))
 		writeModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(source), capabilities)
@@ -1514,54 +1529,7 @@ func defaultCodexModelIDsForPlatform(platform string) []string {
 }
 
 func defaultModelIDsForPlatform(platform string) []string {
-	switch platform {
-
-	case service.PlatformOpenAI:
-		return openai.DefaultModelIDs()
-	case service.PlatformGemini:
-		ids := make([]string, 0, len(geminicli.DefaultModels))
-		for _, model := range geminicli.DefaultModels {
-			ids = append(ids, model.ID)
-		}
-		return ids
-	case service.PlatformAntigravity:
-		models := antigravity.DefaultModels()
-		ids := make([]string, 0, len(models))
-		for _, model := range models {
-			ids = append(ids, model.ID)
-		}
-		return ids
-	case service.PlatformAnthropic:
-		return claude.DefaultModelIDs()
-	case service.PlatformGrok:
-		return xai.DefaultModelIDs()
-	case service.PlatformOpenCodeGo:
-		return service.DefaultOpenCodeGoModelIDs()
-	case service.PlatformTypeSafe:
-		return []string{"jev-latest"}
-	case service.PlatformComposite:
-		ids := make([]string, 0)
-		seen := make(map[string]struct{})
-		// TypeSafe is deliberately absent: jev-latest only works through
-		// /v1/systemone, so the static fallback never advertises it to LLM
-		// clients. compositeAvailableModels lists it when the group can serve it.
-		for _, concretePlatform := range []string{service.PlatformAnthropic, service.PlatformGemini, service.PlatformOpenAI, service.PlatformAntigravity, service.PlatformGrok, service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek, service.PlatformMiniMax, service.PlatformOpenCodeGo} {
-			for _, id := range defaultModelIDsForPlatform(concretePlatform) {
-				if _, ok := seen[id]; ok {
-					continue
-				}
-				seen[id] = struct{}{}
-				ids = append(ids, id)
-			}
-		}
-		return ids
-	default:
-		ids := make([]string, 0, len(claude.DefaultModels))
-		for _, model := range claude.DefaultModels {
-			ids = append(ids, model.ID)
-		}
-		return ids
-	}
+	return service.DefaultModelsListCandidateIDs(platform)
 }
 
 func mergeModelIDs(primary, secondary []string) []string {
