@@ -1,8 +1,10 @@
 > Fork releases and Docker Compose online updates: [setup guide](AUTOMATIC_RELEASE.md).
 
-# TapModels Deployment Files
+# Tokensavy Deployment Files
 
-This directory contains files for deploying TapModels on Linux servers and Apple-silicon Macs.
+Production installations should use [tokensavy/README.md](tokensavy/README.md). The root Compose examples are alternative fresh-install layouts with the same Tokensavy image/channel. Keep an existing installation's project name, full Compose file list and data mounts when updating; do not switch layouts to perform an upgrade.
+
+This directory contains files for deploying Tokensavy on Linux servers and Apple-silicon Macs.
 
 ## Deployment Methods
 
@@ -23,10 +25,10 @@ This directory contains files for deploying TapModels on Linux servers and Apple
 | `APPLE_CONTAINER.md` | Apple `container` deployment and operations guide |
 | `.env.example` | Container environment variables template |
 | `DOCKER.md` | Docker Hub documentation |
-| `install.sh` | Legacy binary installer (disabled unless `TAPMODELS_INSTALLER_ENABLED=true`; no TapModels releases published) |
+| `install.sh` | Retired; use the Tokensavy release-image installation above |
 | `install-datamanagementd.sh` | datamanagementd 一键安装脚本 |
-| `tapmodels.service` | Systemd service unit file |
-| `tapmodels-datamanagementd.service` | datamanagementd systemd service unit file |
+| `tokensavy.service` | Systemd service unit file |
+| `tokensavy-datamanagementd.service` | datamanagementd systemd service unit file |
 | `DATAMANAGEMENTD_CN.md` | datamanagementd 部署与联动说明（中文） |
 | `config.example.yaml` | Example configuration file |
 | `EDGE_SECURITY.md` | Reverse proxy, CDN/WAF, trusted proxy, and ingress hardening guide |
@@ -35,7 +37,7 @@ This directory contains files for deploying TapModels on Linux servers and Apple
 
 ## Apple container Deployment
 
-Apple-silicon Macs running macOS 26 can run the complete TapModels, PostgreSQL, and Redis stack with Apple `container` 1.1.0 or newer:
+Apple-silicon Macs running macOS 26 can run the complete Tokensavy, PostgreSQL, and Redis stack with Apple `container` 1.1.0 or newer:
 
 ```bash
 ./apple-container.sh init
@@ -66,7 +68,7 @@ If you prefer manual control:
 
 ```bash
 # Clone repository
-git clone -b TapModels https://github.com/holeenlu/sub2api.git
+git clone -b tokensavy https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 
 # Configure environment
@@ -87,7 +89,7 @@ mkdir -p data postgres_data redis_data
 docker compose -f docker-compose.local.yml up -d
 
 # View logs (check for auto-generated admin password)
-docker compose -f docker-compose.local.yml logs -f tapmodels
+docker compose -f docker-compose.local.yml logs -f tokensavy
 
 # Access Web UI
 # http://localhost:8080
@@ -102,7 +104,7 @@ docker compose -f docker-compose.local.yml logs -f tapmodels
 
 **Recommendation:** Use `docker-compose.local.yml` (deployed by `docker-deploy.sh`) for easier data management and migration.
 
-Both Compose files take the application image from `TAPMODELS_IMAGE` (default `ghcr.io/erwinlin/tapmodels:latest`), so you can pin a specific tag or digest in `.env` without editing the Compose file.
+Both Compose files take the application image from `TOKENSAVY_IMAGE` (default `ghcr.io/holeenlu/tokensavy:latest`), so you can pin a specific tag or digest in `.env` without editing the Compose file.
 
 ### How Auto-Setup Works
 
@@ -119,12 +121,12 @@ When using Docker Compose with `AUTO_SETUP=true`:
 
 3. If `ADMIN_PASSWORD` is not set, check logs for the generated password:
    ```bash
-   docker compose logs tapmodels | grep "admin password"
+   docker compose logs tokensavy | grep "admin password"
    ```
 
 ### Startup and Database Recovery
 
-TapModels applies database migrations during application startup. PostgreSQL can
+Tokensavy applies database migrations during application startup. PostgreSQL can
 remain in its recovery/startup phase briefly after a host or Docker daemon
 restart. The application retries transient PostgreSQL startup and connection
 errors with bounded exponential backoff, then starts automatically when the
@@ -138,9 +140,9 @@ replacement for application-level retries when Docker restores existing
 containers after a host restart.
 
 For systemd deployments, keep `Restart=always` and `RestartSec` configured in
-`tapmodels.service`; the application retry covers transient database startup,
+`tokensavy.service`; the application retry covers transient database startup,
 while systemd remains the supervisor for permanent process exits. For
-Kubernetes, use a PostgreSQL readiness probe and retain the TapModels startup
+Kubernetes, use a PostgreSQL readiness probe and retain the Tokensavy startup
 retry behavior; configure the application liveness probe separately so a
 database recovery period is not treated as a permanent process failure.
 
@@ -172,7 +174,7 @@ SELECT
 
 如需启用管理后台“数据管理”功能，请额外部署宿主机 `datamanagementd`：
 
-- 主进程固定探测 `/tmp/tapmodels-datamanagement.sock`
+- 主进程固定探测 `/tmp/tokensavy-datamanagement.sock`
 - Docker 场景下需把宿主机 Socket 挂载到容器内同路径
 - 详细步骤见：`deploy/DATAMANAGEMENTD_CN.md`
 
@@ -188,10 +190,10 @@ docker compose -f docker-compose.local.yml up -d
 docker compose -f docker-compose.local.yml down
 
 # View logs
-docker compose -f docker-compose.local.yml logs -f tapmodels
+docker compose -f docker-compose.local.yml logs -f tokensavy
 
-# Restart TapModels only
-docker compose -f docker-compose.local.yml restart tapmodels
+# Restart Tokensavy only
+docker compose -f docker-compose.local.yml restart tokensavy
 
 # Update to latest version
 docker compose -f docker-compose.local.yml pull
@@ -212,10 +214,10 @@ docker compose up -d
 docker compose down
 
 # View logs
-docker compose logs -f tapmodels
+docker compose logs -f tokensavy
 
-# Restart TapModels only
-docker compose restart tapmodels
+# Restart Tokensavy only
+docker compose restart tokensavy
 
 # Update to latest version
 docker compose pull
@@ -233,11 +235,11 @@ docker compose down -v
 | `JWT_SECRET` | **Recommended** | *(auto-generated)* | JWT secret (fixed for persistent sessions) |
 | `TOTP_ENCRYPTION_KEY` | **Recommended** | *(auto-generated)* | TOTP encryption key (fixed for persistent 2FA) |
 | `SERVER_PORT` | No | `8080` | Server port |
-| `ADMIN_EMAIL` | No | `admin@tapmodels.local` | Admin email |
+| `ADMIN_EMAIL` | No | `admin@tokensavy.local` | Admin email |
 | `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password |
 | `TZ` | No | `Asia/Shanghai` | Timezone |
-| `TAPMODELS_IMAGE` | No | `ghcr.io/erwinlin/tapmodels:latest` | Application image used by Docker Compose |
-| `UPDATE_CHECK_ENABLED` | No | `true` | Check the isolated tapmodels/v* release channel; Docker online updates require the host updater. |
+| `TOKENSAVY_IMAGE` | No | `ghcr.io/holeenlu/tokensavy:latest` | Application image used by Docker Compose |
+| `UPDATE_CHECK_ENABLED` | No | `true` | Check the isolated tokensavy/v* release channel; Docker online updates require the host updater. |
 | `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for GitHub Release checks and private API asset downloads; never forwarded to storage redirects. |
 | `GEMINI_OAUTH_CLIENT_ID` | No | *(builtin)* | Google OAuth client ID (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_CLIENT_SECRET` | No | *(builtin)* | Google OAuth client secret (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
@@ -259,13 +261,13 @@ When using `docker-compose.local.yml`, all data is stored in local directories, 
 cd /path/to/deployment
 docker compose -f docker-compose.local.yml down
 cd ..
-tar czf tapmodels-complete.tar.gz deployment/
+tar czf tokensavy-complete.tar.gz deployment/
 
 # Transfer to new server
-scp tapmodels-complete.tar.gz user@new-server:/path/to/destination/
+scp tokensavy-complete.tar.gz user@new-server:/path/to/destination/
 
 # On new server: Extract and start
-tar xzf tapmodels-complete.tar.gz
+tar xzf tokensavy-complete.tar.gz
 cd deployment/
 docker compose -f docker-compose.local.yml up -d
 ```
@@ -276,7 +278,7 @@ Your entire deployment (configuration + data) is migrated!
 
 ## Gemini OAuth Configuration
 
-TapModels supports three methods to connect to Gemini:
+Tokensavy supports three methods to connect to Gemini:
 
 ### Method 1: Code Assist OAuth (Recommended for GCP Users)
 
@@ -321,7 +323,7 @@ Requires your own OAuth client credentials.
    - Go to "APIs & Services" → "Credentials"
    - Click "Create Credentials" → "OAuth client ID"
    - Application type: **Web application** (or **Desktop app**)
-   - Name: e.g., "TapModels Gemini"
+   - Name: e.g., "Tokensavy Gemini"
    - Authorized redirect URIs: Add `http://localhost:1455/auth/callback`
 6. Copy the **Client ID** and **Client Secret**
 7. **⚠️ Publish to Production (IMPORTANT):**
@@ -375,21 +377,20 @@ GEMINI_OAUTH_CLIENT_SECRET=GOCSPX-your-client-secret
 
 For production servers using systemd.
 
-> **No TapModels release artifacts are published.** `install.sh` therefore
-> refuses to download anything unless `TAPMODELS_INSTALLER_ENABLED=true` is set,
-> and the only assets it could fetch are upstream tapmodels builds. Use the
-> Docker Compose deployment above, or build the binary from source.
+> The inherited `install.sh` is retired because it selected repository-wide
+> Latest instead of the Tokensavy channel. Use the release-image deployment
+> above, or install a verified Tokensavy channel binary manually.
 
 ### Manual Installation
 
-1. Download the latest release from [GitHub Releases](https://github.com/holeenlu/sub2api/releases)
-2. Extract and copy the binary to `/opt/tapmodels/`
-3. Copy `tapmodels.service` to `/etc/systemd/system/`
+1. Select a `tokensavy/v*` release from [GitHub Releases](https://github.com/holeenlu/sub2api/releases); do not use the repository-wide Latest label.
+2. Extract and copy the binary to `/opt/tokensavy/`
+3. Copy `tokensavy.service` to `/etc/systemd/system/`
 4. Run:
    ```bash
    sudo systemctl daemon-reload
-   sudo systemctl enable tapmodels
-   sudo systemctl start tapmodels
+   sudo systemctl enable tokensavy
+   sudo systemctl start tokensavy
    ```
 5. Open the Setup Wizard in your browser to complete configuration
 
@@ -410,22 +411,22 @@ sudo ./install.sh uninstall
 
 ```bash
 # Start the service
-sudo systemctl start tapmodels
+sudo systemctl start tokensavy
 
 # Stop the service
-sudo systemctl stop tapmodels
+sudo systemctl stop tokensavy
 
 # Restart the service
-sudo systemctl restart tapmodels
+sudo systemctl restart tokensavy
 
 # Check status
-sudo systemctl status tapmodels
+sudo systemctl status tokensavy
 
 # View logs
-sudo journalctl -u tapmodels -f
+sudo journalctl -u tokensavy -f
 
 # Enable auto-start on boot
-sudo systemctl enable tapmodels
+sudo systemctl enable tokensavy
 ```
 
 ### Configuration
@@ -438,7 +439,7 @@ To change after installation:
 
 1. Edit the systemd service:
    ```bash
-   sudo systemctl edit tapmodels
+   sudo systemctl edit tokensavy
    ```
 
 2. Add or modify:
@@ -451,7 +452,7 @@ To change after installation:
 3. Reload and restart:
    ```bash
    sudo systemctl daemon-reload
-   sudo systemctl restart tapmodels
+   sudo systemctl restart tokensavy
    ```
 
 #### Gemini OAuth Configuration
@@ -460,7 +461,7 @@ If you need to use AI Studio OAuth for Gemini accounts, add the OAuth client cre
 
 1. Edit the service file:
    ```bash
-   sudo nano /etc/systemd/system/tapmodels.service
+   sudo nano /etc/systemd/system/tokensavy.service
    ```
 
 2. Add your OAuth credentials in the `[Service]` section (after the existing `Environment=` lines):
@@ -477,7 +478,7 @@ If you need to use AI Studio OAuth for Gemini accounts, add the OAuth client cre
 3. Reload and restart:
    ```bash
    sudo systemctl daemon-reload
-   sudo systemctl restart tapmodels
+   sudo systemctl restart tokensavy
    ```
 
 > **Note:** Code Assist OAuth does not require any configuration - it uses the built-in Gemini CLI client.
@@ -485,7 +486,7 @@ If you need to use AI Studio OAuth for Gemini accounts, add the OAuth client cre
 
 #### Application Configuration
 
-The main config file is at `/etc/tapmodels/config.yaml` (created by Setup Wizard).
+The main config file is at `/etc/tokensavy/config.yaml` (created by Setup Wizard).
 
 ### Prerequisites
 
@@ -497,12 +498,12 @@ The main config file is at `/etc/tapmodels/config.yaml` (created by Setup Wizard
 ### Directory Structure
 
 ```
-/opt/tapmodels/
-├── tapmodels              # Main binary
-├── tapmodels.backup       # Backup (after upgrade)
+/opt/tokensavy/
+├── tokensavy              # Main binary
+├── tokensavy.backup       # Backup (after upgrade)
 └── data/                # Runtime data
 
-/etc/tapmodels/
+/etc/tokensavy/
 └── config.yaml          # Configuration file
 ```
 
@@ -519,7 +520,7 @@ For **local directory version**:
 docker compose -f docker-compose.local.yml ps
 
 # View detailed logs
-docker compose -f docker-compose.local.yml logs --tail=100 tapmodels
+docker compose -f docker-compose.local.yml logs --tail=100 tokensavy
 
 # Check database connection
 docker compose -f docker-compose.local.yml exec postgres pg_isready
@@ -541,7 +542,7 @@ For **named volumes version**:
 docker compose ps
 
 # View detailed logs
-docker compose logs --tail=100 tapmodels
+docker compose logs --tail=100 tokensavy
 
 # Check database connection
 docker compose exec postgres pg_isready
@@ -557,13 +558,13 @@ docker compose restart
 
 ```bash
 # Check service status
-sudo systemctl status tapmodels
+sudo systemctl status tokensavy
 
 # View recent logs
-sudo journalctl -u tapmodels -n 50
+sudo journalctl -u tokensavy -n 50
 
 # Check config file
-sudo cat /etc/tapmodels/config.yaml
+sudo cat /etc/tokensavy/config.yaml
 
 # Check PostgreSQL
 sudo systemctl status postgresql
@@ -583,7 +584,7 @@ sudo systemctl status redis
 
 ## TLS Fingerprint Configuration
 
-TapModels supports TLS fingerprint simulation to make requests appear as if they come from the official Claude CLI (Node.js client).
+Tokensavy supports TLS fingerprint simulation to make requests appear as if they come from the official Claude CLI (Node.js client).
 
 ### Default Behavior
 

@@ -1,17 +1,17 @@
-# WSL/Windows 开发环境覆盖文件（服务名对齐 docker-compose.dev.yml：tapmodels/postgres/redis）：
+# WSL/Windows 开发环境覆盖文件（服务名对齐 docker-compose.dev.yml：tokensavy/postgres/redis）：
 # postgres/redis 数据改用 Docker named volume（WSL ext4），避免数据目录落在 /mnt/c (drvfs)
 # 时 initdb 无法设置文件权限而失败、容器持续重启，fsync 性能也差。
 # 用法: docker compose -f docker-compose.dev.yml -f docker-compose.wsl.yml up -d
 services:
-  tapmodels:
+  tokensavy:
     build:
       args:
         # 构建上下文不含 .git 时 resolve-version.sh 取不到 tag，版本号由外面带进来。
-        VERSION: ${TAPMODELS_VERSION:-}
+        VERSION: ${TOKENSAVY_VERSION:-}
         # 本次构建所基于的上游 Sub2API 版本，由 git 推导：
         #   git describe --tags --match 'v*' --abbrev=0 $(git merge-base HEAD upstream/main)
         # 留空时后端退回 cmd/server/VERSION。
-        UPSTREAM_VERSION: ${TAPMODELS_UPSTREAM_VERSION:-}
+        UPSTREAM_VERSION: ${TOKENSAVY_UPSTREAM_VERSION:-}
     environment:
       - UPDATE_GITHUB_TOKEN=${UPDATE_GITHUB_TOKEN:-}
     # 补上 IPv6 绑定：Windows 浏览器解析 localhost 时常优先走 ::1，只绑 IPv4 连不上。
@@ -20,11 +20,11 @@ services:
 
   postgres:
     volumes:
-      - tapmodels_pg_data:/var/lib/postgresql/data
+      - tokensavy_pg_data:/var/lib/postgresql/data
   redis:
     volumes:
-      - tapmodels_redis_data:/data
+      - tokensavy_redis_data:/data
 
 volumes:
-  tapmodels_pg_data:
-  tapmodels_redis_data:
+  tokensavy_pg_data:
+  tokensavy_redis_data:

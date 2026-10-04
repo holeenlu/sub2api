@@ -1,27 +1,27 @@
 [Unit]
-Description=TapModels - Pick a model. Start building.
-Documentation=https://docs.tapmodels.ai
+Description=Tokensavy - Smart tokens. More possibilities.
+Documentation=https://tokensavy.ai/docs
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
 
 [Service]
 Type=simple
-User=tapmodels
-Group=tapmodels
-WorkingDirectory=/opt/tapmodels
-ExecStart=/opt/tapmodels/tapmodels
+User=tokensavy
+Group=tokensavy
+WorkingDirectory=/opt/tokensavy
+ExecStart=/opt/tokensavy/tokensavy
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=tapmodels
+SyslogIdentifier=tokensavy
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/opt/tapmodels
+ReadWritePaths=/opt/tokensavy
 
 # Environment - Server configuration
 # Modify these values to change listen address and port

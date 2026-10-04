@@ -1,10 +1,10 @@
-# TapModels Configuration File
-# TapModels 配置文件
+# Tokensavy Configuration File
+# Tokensavy 配置文件
 #
-# Copy this file to /etc/tapmodels/config.yaml and modify as needed
-# 复制此文件到 /etc/tapmodels/config.yaml 并根据需要修改
+# Copy this file to /etc/tokensavy/config.yaml and modify as needed
+# 复制此文件到 /etc/tokensavy/config.yaml 并根据需要修改
 #
-# Documentation / 文档: https://docs.tapmodels.ai
+# Documentation / 文档: https://tokensavy.ai/docs
 
 # =============================================================================
 # Server Configuration
@@ -37,10 +37,10 @@ server:
   # Keep-Alive 空闲连接超时（秒）。
   idle_timeout: 120
   # Trusted proxies used when security.trust_forwarded_ip_for_api_key_acl is false.
-  # List only the exact proxy addresses that connect directly to TapModels.
+  # List only the exact proxy addresses that connect directly to Tokensavy.
   # Set [] explicitly to disable forwarded-IP trust in high-security mode.
   # security.trust_forwarded_ip_for_api_key_acl=false 时使用的可信代理。
-  # 只填写直接连接 TapModels 的精确代理地址；显式设置 [] 可在高安全模式下
+  # 只填写直接连接 Tokensavy 的精确代理地址；显式设置 [] 可在高安全模式下
   # 禁用转发 IP 信任。
   trusted_proxies:
     - 127.0.0.1/32
@@ -82,10 +82,10 @@ server:
 # 填写浏览器访问使用的完整 Origin。
 webauthn:
   enabled: false
-  rp_display_name: "TapModels"
-  # Example / 示例: "console.tapmodels.ai"
+  rp_display_name: "Tokensavy"
+  # Example / 示例: "console.tokensavy.ai"
   rp_id: ""
-  # Example / 示例: ["https://console.tapmodels.ai"]
+  # Example / 示例: ["https://console.tokensavy.ai"]
   rp_origins: []
 
 # =============================================================================
@@ -655,7 +655,7 @@ log:
   format: "console"
   # Service name field written into each log line
   # 每条日志都会附带 service 字段
-  service_name: "tapmodels"
+  service_name: "tokensavy"
   # Environment field written into each log line
   # 每条日志都会附带 env 字段
   env: "production"
@@ -673,11 +673,11 @@ log:
     # 启用文件输出（默认路径自动推导）
     to_file: true
     # Empty means:
-    # - DATA_DIR set: {{DATA_DIR}}/logs/tapmodels.log
-    # - otherwise: /app/data/logs/tapmodels.log
+    # - DATA_DIR set: {{DATA_DIR}}/logs/tokensavy.log
+    # - otherwise: /app/data/logs/tokensavy.log
     # 留空时：
-    # - 设置 DATA_DIR：{{DATA_DIR}}/logs/tapmodels.log
-    # - 否则：/app/data/logs/tapmodels.log
+    # - 设置 DATA_DIR：{{DATA_DIR}}/logs/tokensavy.log
+    # - 否则：/app/data/logs/tokensavy.log
     file_path: ""
   rotation:
     # Max file size before rotation (MB)
@@ -912,7 +912,7 @@ database:
   password: "your_secure_password_here"
   # Database name
   # 数据库名称
-  dbname: "tapmodels"
+  dbname: "tokensavy"
   # SSL mode: disable, prefer, require, verify-ca, verify-full
   # SSL 模式：disable（禁用）, prefer（优先加密，默认）, require（要求）, verify-ca（验证CA）, verify-full（完全验证）
   # 默认值为 "prefer"，数据库支持 SSL 时自动使用加密连接，不支持时回退明文
@@ -1008,7 +1008,7 @@ totp:
 
 # =============================================================================
 # LinuxDo Connect OAuth Login (SSO)
-# LinuxDo Connect OAuth 登录（用于 TapModels 用户登录）
+# LinuxDo Connect OAuth 登录（用于 Tokensavy 用户登录）
 # =============================================================================
 linuxdo_connect:
   enabled: false
@@ -1033,7 +1033,7 @@ linuxdo_connect:
 
 # =============================================================================
 # Generic OIDC OAuth Login (SSO)
-# 通用 OIDC OAuth 登录（用于 TapModels 用户登录）
+# 通用 OIDC OAuth 登录（用于 Tokensavy 用户登录）
 # =============================================================================
 oidc_connect:
   enabled: false
@@ -1234,8 +1234,8 @@ turnstile:
 # Gemini OAuth (Required for Gemini accounts)
 # Gemini OAuth 配置（Gemini 账户必需）
 # =============================================================================
-# TapModels supports TWO Gemini OAuth modes:
-# TapModels 支持两种 Gemini OAuth 模式：
+# Tokensavy supports TWO Gemini OAuth modes:
+# Tokensavy 支持两种 Gemini OAuth 模式：
 #
 # 1. Code Assist OAuth (requires GCP project_id)
 # 1. Code Assist OAuth（需要 GCP project_id）
@@ -1304,7 +1304,7 @@ gemini:
 # =============================================================================
 update:
   # Release check behind the version badge (queries this fork's own releases,
-  # erwinlin/TapModels). Off by default for white-label deployments: version check,
+  # holeenlu/sub2api). Off by default for white-label deployments: version check,
   # self-update and rollback endpoints return "disabled" and no request is made to
   # GitHub. Set true to allow the online check.
   # 版本徽章的线上版本检查（查本 fork 自己的 release）。默认关闭（白标部署）：

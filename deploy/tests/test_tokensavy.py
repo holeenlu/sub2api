@@ -18,6 +18,26 @@ SPEC.loader.exec_module(INIT)
 
 
 class TokensavyDeploymentTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('docker'), 'Docker CLI required for Compose rendering')
+    def test_root_compose_examples_cannot_install_another_brand(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            values = self.initialize(directory)
+            for filename in ['docker-compose.yml', 'docker-compose.local.yml', 'docker-compose.standalone.yml', 'docker-compose.dev.yml']:
+                with self.subTest(filename=filename):
+                    env = {key: value for key, value in os.environ.items() if key not in values}
+                    env.update(DATABASE_HOST='postgres', DATABASE_PASSWORD='fixture-only', REDIS_HOST='redis')
+                    rendered = subprocess.check_output([
+                        'docker', 'compose', '--env-file', str(directory / '.env'), '-f',
+                        str(ROOT / 'deploy' / filename), 'config', '--format', 'json'
+                    ], text=True, env=env)
+                    self.assertNotIn('erwinlin', rendered.lower())
+                    self.assertNotIn('tapmodels', rendered.lower())
+                    app = json.loads(rendered)['services']['tokensavy']
+                    if 'image' in app:
+                        self.assertEqual(app['image'], 'ghcr.io/holeenlu/tokensavy:latest')
+                    self.assertEqual(app['environment']['DATABASE_DBNAME'], 'tokensavy')
+
     def initialize(self, directory):
         with contextlib.redirect_stdout(io.StringIO()):
             INIT.initialize(directory, 'tokensavy.ai', 'ikung1970@gmail.com')

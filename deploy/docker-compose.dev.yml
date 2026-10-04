@@ -1,5 +1,5 @@
 # =============================================================================
-# TapModels Docker Compose - Local Development Build
+# Tokensavy Docker Compose - Local Development Build
 # =============================================================================
 # Build from local source code for testing changes.
 #
@@ -9,13 +9,13 @@
 # =============================================================================
 
 services:
-  tapmodels:
+  tokensavy:
     build:
       context: ..
       dockerfile: Dockerfile
       args:
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
-    container_name: tapmodels-dev
+    container_name: tokensavy-dev
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -34,16 +34,16 @@ services:
       - SIMPLE_MODE_KEY_RATE_LIMIT_ENABLED=${SIMPLE_MODE_KEY_RATE_LIMIT_ENABLED:-false}
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
-      - DATABASE_USER=${POSTGRES_USER:-tapmodels}
+      - DATABASE_USER=${POSTGRES_USER:-tokensavy}
       - DATABASE_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - DATABASE_DBNAME=${POSTGRES_DB:-tapmodels}
+      - DATABASE_DBNAME=${POSTGRES_DB:-tokensavy}
       - DATABASE_SSLMODE=disable
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_USERNAME=${REDIS_USERNAME:-}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
-      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@tapmodels.local}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@tokensavy.local}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - JWT_SECRET=${JWT_SECRET:-}
       - SETUP_MIGRATION_TIMEOUT_SECONDS=${SETUP_MIGRATION_TIMEOUT_SECONDS:-0}
@@ -51,12 +51,12 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       # Local mainland-China development proxy. Containers cannot use
       # 127.0.0.1 for the host proxy, so default to Docker Desktop's host name.
-      - HTTP_PROXY=${TAPMODELS_DEV_HTTP_PROXY:-http://host.docker.internal:7897}
-      - HTTPS_PROXY=${TAPMODELS_DEV_HTTPS_PROXY:-http://host.docker.internal:7897}
-      - ALL_PROXY=${TAPMODELS_DEV_ALL_PROXY:-socks5://host.docker.internal:7897}
-      - NO_PROXY=${TAPMODELS_DEV_NO_PROXY:-127.0.0.1,localhost,::1,postgres,redis,tapmodels,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.local}
+      - HTTP_PROXY=${TOKENSAVY_DEV_HTTP_PROXY:-http://host.docker.internal:7897}
+      - HTTPS_PROXY=${TOKENSAVY_DEV_HTTPS_PROXY:-http://host.docker.internal:7897}
+      - ALL_PROXY=${TOKENSAVY_DEV_ALL_PROXY:-socks5://host.docker.internal:7897}
+      - NO_PROXY=${TOKENSAVY_DEV_NO_PROXY:-127.0.0.1,localhost,::1,postgres,redis,tokensavy,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.local}
       # Gateway values come from Compose .env or the shell.
-      # Fallbacks mirror TapModels backend defaults so omitted values preserve behavior.
+      # Fallbacks mirror Tokensavy backend defaults so omitted values preserve behavior.
       - GATEWAY_FORCE_CODEX_CLI=${GATEWAY_FORCE_CODEX_CLI:-false}
       - GATEWAY_OPENAI_COMPACT_MODEL=${GATEWAY_OPENAI_COMPACT_MODEL:-gpt-5.5}
       - SUB2API_IMAGES_MAIN_MODEL=${SUB2API_IMAGES_MAIN_MODEL:-gpt-5.6-luna}
@@ -117,7 +117,7 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - tapmodels-network
+      - tokensavy-network
     healthcheck:
       test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/health"]
       interval: 30s
@@ -127,20 +127,20 @@ services:
 
   postgres:
     image: postgres:18-alpine
-    container_name: tapmodels-postgres-dev
+    container_name: tokensavy-postgres-dev
     restart: unless-stopped
     volumes:
       - ./postgres_data:/var/lib/postgresql/data:Z
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-tapmodels}
+      - POSTGRES_USER=${POSTGRES_USER:-tokensavy}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - POSTGRES_DB=${POSTGRES_DB:-tapmodels}
+      - POSTGRES_DB=${POSTGRES_DB:-tokensavy}
       - PGDATA=/var/lib/postgresql/data
       - TZ=${TZ:-Asia/Shanghai}
     networks:
-      - tapmodels-network
+      - tokensavy-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tapmodels} -d ${POSTGRES_DB:-tapmodels}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tokensavy} -d ${POSTGRES_DB:-tokensavy}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -148,7 +148,7 @@ services:
 
   redis:
     image: redis:8-alpine
-    container_name: tapmodels-redis-dev
+    container_name: tokensavy-redis-dev
     restart: unless-stopped
     volumes:
       - ./redis_data:/data:Z
@@ -167,7 +167,7 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}
     networks:
-      - tapmodels-network
+      - tokensavy-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -176,5 +176,5 @@ services:
       start_period: 5s
 
 networks:
-  tapmodels-network:
+  tokensavy-network:
     driver: bridge

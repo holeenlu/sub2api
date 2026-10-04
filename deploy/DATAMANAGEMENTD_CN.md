@@ -4,44 +4,44 @@
 
 ## 1. 关键约束
 
-- 主进程固定探测路径：`/tmp/tapmodels-datamanagement.sock`
+- 主进程固定探测路径：`/tmp/tokensavy-datamanagement.sock`
 - 仅当该 Unix Socket 可连通且 `Health` 成功时，后台“数据管理”才会启用
 - `datamanagementd` 使用 SQLite 持久化元数据，不依赖主库
 
 ## 2. 宿主机构建与运行
 
 ```bash
-cd /opt/tapmodels-src/datamanagement
-go build -o /opt/tapmodels/datamanagementd ./cmd/datamanagementd
+cd /opt/tokensavy-src/datamanagement
+go build -o /opt/tokensavy/datamanagementd ./cmd/datamanagementd
 
-mkdir -p /var/lib/tapmodels/datamanagement
-chown -R tapmodels:tapmodels /var/lib/tapmodels/datamanagement
+mkdir -p /var/lib/tokensavy/datamanagement
+chown -R tokensavy:tokensavy /var/lib/tokensavy/datamanagement
 ```
 
 手动启动示例：
 
 ```bash
-/opt/tapmodels/datamanagementd \
-  -socket-path /tmp/tapmodels-datamanagement.sock \
-  -sqlite-path /var/lib/tapmodels/datamanagement/datamanagementd.db \
+/opt/tokensavy/datamanagementd \
+  -socket-path /tmp/tokensavy-datamanagement.sock \
+  -sqlite-path /var/lib/tokensavy/datamanagement/datamanagementd.db \
   -version 1.0.0
 ```
 
 ## 3. systemd 托管（推荐）
 
-仓库已提供示例服务文件：`deploy/tapmodels-datamanagementd.service`
+仓库已提供示例服务文件：`deploy/tokensavy-datamanagementd.service`
 
 ```bash
-sudo cp deploy/tapmodels-datamanagementd.service /etc/systemd/system/
+sudo cp deploy/tokensavy-datamanagementd.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now tapmodels-datamanagementd
-sudo systemctl status tapmodels-datamanagementd
+sudo systemctl enable --now tokensavy-datamanagementd
+sudo systemctl status tokensavy-datamanagementd
 ```
 
 查看日志：
 
 ```bash
-sudo journalctl -u tapmodels-datamanagementd -f
+sudo journalctl -u tokensavy-datamanagementd -f
 ```
 
 也可以使用一键安装脚本（自动安装二进制 + 注册 systemd）：
@@ -51,18 +51,18 @@ sudo journalctl -u tapmodels-datamanagementd -f
 sudo ./deploy/install-datamanagementd.sh --binary /path/to/datamanagementd
 
 # 方式二：从源码构建后安装
-sudo ./deploy/install-datamanagementd.sh --source /path/to/tapmodels
+sudo ./deploy/install-datamanagementd.sh --source /path/to/tokensavy
 ```
 
 ## 4. Docker 部署联动
 
-若 `tapmodels` 运行在 Docker 容器中，需要将宿主机 Socket 挂载到容器同路径：
+若 `tokensavy` 运行在 Docker 容器中，需要将宿主机 Socket 挂载到容器同路径：
 
 ```yaml
 services:
-  tapmodels:
+  tokensavy:
     volumes:
-      - /tmp/tapmodels-datamanagement.sock:/tmp/tapmodels-datamanagement.sock
+      - /tmp/tokensavy-datamanagement.sock:/tmp/tokensavy-datamanagement.sock
 ```
 
 建议在 `docker-compose.override.yml` 中维护该挂载，避免覆盖主 compose 文件。

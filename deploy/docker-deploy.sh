@@ -1,8 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# TapModels Docker Deployment Preparation Script
+# Tokensavy Docker Deployment Preparation Script
 # =============================================================================
-# This script prepares deployment files for TapModels:
+# This script prepares deployment files for Tokensavy:
 #   - Downloads docker-compose.local.yml and .env.example
 #   - Generates secure secrets (JWT_SECRET, TOTP_ENCRYPTION_KEY, POSTGRES_PASSWORD)
 #   - Creates necessary data directories
@@ -21,7 +21,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # GitHub raw content base URL
-GITHUB_RAW_URL="https://raw.githubusercontent.com/holeenlu/sub2api/TapModels/deploy"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/holeenlu/sub2api/tokensavy/deploy"
 
 # Print colored message
 print_info() {
@@ -54,7 +54,7 @@ command_exists() {
 main() {
     echo ""
     echo "=========================================="
-    echo "  TapModels Deployment Preparation"
+    echo "  Tokensavy Deployment Preparation"
     echo "=========================================="
     echo ""
 
@@ -157,7 +157,7 @@ main() {
     echo "     docker-compose up -d"
     echo ""
     echo "  3. View logs:"
-    echo "     docker-compose logs -f tapmodels"
+    echo "     docker-compose logs -f tokensavy"
     echo ""
     echo "  4. Access Web UI:"
     echo "     http://localhost:8080"

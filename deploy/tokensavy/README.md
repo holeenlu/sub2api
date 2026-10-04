@@ -2,7 +2,7 @@
 
 Tokensavy 从 TapModels 提交 `798c65276` 派生，分支 `tokensavy`。本站域名为 `tokensavy.ai`，管理员为 `ikung1970@gmail.com`。品牌、示例和下载工具独立；上游 Sub2API 来源和许可证保留。
 
-本目录是 Tokensavy 的部署入口。仓库其他 Compose 文件是继承的 TapModels/KDAN 配置，不用于 Tokensavy。Actions → Manual versioned release → Use workflow from `tokensavy` 手动发布 `ghcr.io/holeenlu/tokensavy`（Linux amd64/arm64），在线更新使用 `holeenlu/sub2api` 的 `tokensavy/v*` 渠道。提交、推送或标签不会触发发版。完整规则见 [手动发版与在线更新](../AUTOMATIC_RELEASE.md)。
+本目录是 Tokensavy 的推荐生产部署入口。根目录 Compose 示例也已对齐 Tokensavy 品牌与本仓库镜像，但采用不同的数据布局，现有部署不能通过切换 Compose 文件来升级。Actions → Manual versioned release → Use workflow from `tokensavy` 手动发布 `ghcr.io/holeenlu/tokensavy`（Linux amd64/arm64），在线更新使用 `holeenlu/sub2api` 的 `tokensavy/v*` 渠道。提交、推送或标签不会触发发版。完整规则见 [手动发版与在线更新](../AUTOMATIC_RELEASE.md)。
 
 ## 1. 准备服务器
 
