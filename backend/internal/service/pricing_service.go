@@ -266,7 +266,6 @@ type LiteLLMRawEntry struct {
 // PricingService 动态价格服务
 type PricingService struct {
 	publicationMu           sync.Mutex
-	catalogManaged          bool
 	referencePrices         *CatalogReferencePrices
 	referenceBase           json.RawMessage
 	referenceSupplement     map[string]json.RawMessage
@@ -1240,9 +1239,6 @@ func (s *PricingService) validatePricingURL(raw string) (string, error) {
 
 // GetModelPricing 获取模型价格（带模糊匹配）
 func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing {
-	if s.CatalogManaged() {
-		return s.GetExactModelPricing(modelName)
-	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

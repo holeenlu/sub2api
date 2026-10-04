@@ -97,3 +97,26 @@ func TestModelCatalogInventoryRejectsInvalidIdentityWithoutWriting(t *testing.T)
 		require.Error(t, s.SaveInventoryModel(context.Background(), input))
 	}
 }
+
+func TestInventoryNativeProviderDefaultsAndRetirement(t *testing.T) {
+	s, repo, _, _ := newCatalogTestService()
+	s.repo = &selectionCatalogRepo{repo}
+	ctx := context.Background()
+	for platform, expected := range map[string]string{PlatformKimi: "kimi-for-coding", PlatformZhipu: "glm-5.3", PlatformDeepseek: "deepseek-v4-flash", PlatformMiniMax: "MiniMax-M3"} {
+		choices, err := s.SelectionCatalog(ctx, nil, platform)
+		require.NoError(t, err)
+		require.Contains(t, inventoryIDs(choices), expected)
+		for _, model := range choices.Models {
+			require.Equal(t, platform, model.Platform)
+			require.NotContains(t, model.ID, "claude-")
+		}
+	}
+	require.Empty(t, DefaultModelsListCandidateIDs("not-a-provider"))
+	s.settings = &SettingService{settingRepo: &catalogSettingsMemory{values: map[string]string{ModelCatalogRegistryKey: `[{"id":"retired","platform":"openai","lifecycle":"retired"},{"id":"active","platform":"openai"}]`}}}
+	choices, err := s.SelectionCatalog(ctx, nil, PlatformOpenAI)
+	require.NoError(t, err)
+	require.NotContains(t, inventoryIDs(choices), "retired")
+	inventory, err := s.Inventory(ctx, PlatformOpenAI)
+	require.NoError(t, err)
+	require.Contains(t, inventoryIDs(inventory), "retired", "administrators can still inspect historic entries")
+}

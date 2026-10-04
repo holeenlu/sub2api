@@ -77,7 +77,11 @@ GitHub 的 `Latest` 是整个仓库共用的单一标记，可能指向最近发
 
 应用只挂载受限 Unix socket，**不挂载 Docker socket**。更新服务只接受版本号，不接收命令、镜像地址或 Compose 参数。私有 Release 通过 GitHub API 下载；token 不随跳转发给资产存储域名。
 
-健康检查超时会尝试恢复原镜像 ID。状态持久化在 `/var/lib/sub2api-updater/<渠道>/state.json`，日志用 `journalctl -u sub2api-compose-updater@kdan` 查看。后台也显示失败信息。宿主机更新服务意外中断会标记失败，需检查容器实际状态后重试。
+先完成数据库备份及校验，再点击在线更新。更新器拉取候选镜像后，通过当前 Compose 连接参数运行 `--check-model-policy-migration`；预检失败时保留原应用和镜像配置，账号 ID 与原因见宿主机日志。候选二进制不支持此命令时也会在切换前停止，这类旧版本需人工预检、备份后部署。
+
+切换前，新旧镜像、版本和阶段持久化到 `/var/lib/sub2api-updater/<渠道>/state.json`。健康检查失败恢复原镜像；更新器重启后保留健康的新镜像，否则恢复记录的旧镜像。恢复失败或历史记录缺少旧镜像时拒绝后续更新，避免覆盖恢复证据。日志用 `journalctl -u sub2api-compose-updater@kdan` 查看。镜像恢复不等于数据库回滚，不兼容迁移仍需人工恢复备份。
+
+已有服务器须重新安装本版本宿主机 updater 才能使用预检与中断恢复；仅更新应用镜像不会替换宿主机 Python 服务。源码/SDK 编译默认渠道取 `brand.go`，与正式镜像一致，ldflags 可以显式覆盖。
 
 生成的 `compose.online-update.json` 保存当前固定镜像；之后的**所有手动维护命令**也必须包含安装器打印的全部 `-f` 文件（含 socket 和 online-update 文件），否则可能恢复旧镜像。不要删除该文件或以旧的单文件命令重建应用。可以把完整文件列表配置到运维入口的 COMPOSE_FILE。
 

@@ -1330,13 +1330,7 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 // 驱动 DeepSeek pro→Flash 切换判定（切换点前 Pro 价、之后 Flash 价），使
 // 展示/估算路径可与历史补账同刻复算，测试也能用固定时点钉住断言。
 func (s *BillingService) getModelPricingAt(model string, pricingAt time.Time) (*ModelPricing, error) {
-	if s.pricingService != nil && s.pricingService.CatalogManaged() && s.pricingService.GetExactModelPricing(model) == nil && s.fallbackPrices[model] == nil {
-		return nil, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)
-	}
-	// Compatibility normalization stays in legacy mode; catalog IDs are exact.
-	if s.pricingService == nil || !s.pricingService.CatalogManaged() {
-		model = strings.ToLower(model)
-	}
+	model = strings.ToLower(model)
 
 	// 1. 优先从动态价格服务获取
 	if s.pricingService != nil {

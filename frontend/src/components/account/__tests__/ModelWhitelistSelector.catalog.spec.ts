@@ -138,4 +138,20 @@ describe('dynamic model selector', () => {
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['gpt-image-new', 'sora-new']])
     wrapper.unmount()
   })
+
+  it('deduplicates names only after checking each platform candidate', async () => {
+    getModelCatalog.mockImplementation(({ platform }) => Promise.resolve(snapshot([
+      { ...entry('shared-name', platform === 'openai' ? 'retired' : 'active'), platform }
+    ])))
+    const wrapper = mount(ModelWhitelistSelector, {
+      props: { platforms: ['openai', 'grok'], modelValue: [] },
+      global: { stubs: { ModelIcon: true, Icon: true } }
+    })
+    await flushPromises()
+    await wrapper.get('div.cursor-pointer').trigger('click')
+    expect(wrapper.findAll('[data-testid="model-option"]')).toHaveLength(1)
+    await click(wrapper, 'modelCatalog.selectAvailable')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['shared-name']])
+    wrapper.unmount()
+  })
 })

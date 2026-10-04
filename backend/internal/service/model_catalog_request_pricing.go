@@ -134,9 +134,3 @@ func (s *OpenAIGatewayService) PreparePricingTurn(ctx context.Context, key *APIK
 	gateway := &GatewayService{billingService: s.billingService, channelService: s.channelService, userGroupRateResolver: s.userGroupRateResolver}
 	return gateway.PinRequestPricing(ctx, key)
 }
-
-func (s *PricingService) catalogPricingGeneration() *PricingService {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return &PricingService{cfg: s.cfg, catalogManaged: true, pricingData: s.pricingData, localHash: s.localHash, customFilesHash: s.customFilesHash, referencePrices: s.referencePrices, referenceSupplementHash: s.referenceSupplementHash}
-}

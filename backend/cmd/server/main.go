@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	_ "embed"
 	"errors"
 	"flag"
@@ -19,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/setup"
@@ -86,10 +88,29 @@ func main() {
 	// Parse command line flags
 	setupMode := flag.Bool("setup", false, "Run setup wizard in CLI mode")
 	showVersion := flag.Bool("version", false, "Show version information")
+	checkModelPolicy := flag.Bool("check-model-policy-migration", false, "Validate migration 263 using temporary tables; do not start or modify the application")
 	flag.Parse()
 
 	if *showVersion {
 		log.Printf(service.DefaultSiteName+" %s (commit: %s, built: %s)\n", Version, Commit, Date)
+		return
+	}
+	if *checkModelPolicy {
+		cfg, err := config.LoadForBootstrap()
+		if err != nil {
+			log.Fatalf("Preflight configuration: %v", err)
+		}
+		db, err := sql.Open("postgres", cfg.Database.DSN())
+		if err != nil {
+			log.Fatal("Cannot open database for migration preflight")
+		}
+		defer db.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := repository.CheckModelPolicyMigration(ctx, db); err != nil {
+			log.Fatalf("PREFLIGHT FAILED: %v", err)
+		}
+		log.Print("PREFLIGHT OK: model policy migration; application data unchanged")
 		return
 	}
 

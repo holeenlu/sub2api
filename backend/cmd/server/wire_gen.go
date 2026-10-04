@@ -191,7 +191,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	channelMonitorV2Repository := repository.NewChannelMonitorV2Repository(db)
 	channelMonitorV2Service := service.ProvideChannelMonitorV2Service(channelMonitorV2Repository, settingService)
 	channelMonitorV2Handler := handler.NewChannelMonitorV2Handler(channelMonitorV2Service, apiKeyService)
-	groupModelCatalogService := service.ProvideGroupModelCatalogService(accountRepository, channelRepository, compositeModelRouteRepository, openAIGatewayService, modelCatalogService, channelService)
+	groupModelCatalogService := service.ProvideGroupModelCatalogService(accountRepository, groupRepository, channelRepository, compositeModelRouteRepository, openAIGatewayService, modelCatalogService, gatewayService, channelService)
 	modelCatalogHandler := admin.NewModelCatalogHandler(modelCatalogService, accountRepository)
 	dashboardAggregationRepository := repository.NewDashboardAggregationRepository(db)
 	dashboardStatsCache := repository.NewDashboardCache(redisClient, configConfig)

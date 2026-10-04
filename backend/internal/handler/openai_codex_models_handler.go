@@ -16,12 +16,9 @@ import (
 // Codex CLI and the Codex desktop app refresh their model picker from
 // GET {base_url}/models?client_version=... (custom provider mode) or
 // GET /backend-api/codex/models (chatgpt_base_url mode). Both routes land
-// here. An enabled fixed-source configuration fetches only its selected
-// accounts, then the shared catalog remains authoritative for visibility and
-// capability policy. When disabled, the published catalog or scheduler path
-// is unchanged.
-// otherwise ChatGPT manifests are proxied verbatim and custom API key manifests
-// receive provider-compatibility normalization plus short-lived caching.
+// here. Fixed sources fetch their selected accounts and retain upstream metadata,
+// with native account mappings and group filters applied. Otherwise the native
+// configured-manifest or scheduler discovery path supplies the response.
 func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	prepareClientCatalogValidation(c)
 	if c.Request.Context().Err() != nil {
@@ -55,7 +52,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			if err := h.gatewayService.MergeGroupConfiguredCodexModels(
 				c.Request.Context(), apiKey.Group, manifest, c.GetHeader("If-None-Match"),
 			); err != nil {
-				h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to apply model catalog policy")
+				h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to build Codex models manifest")
 				return
 			}
 			if c.Request.Context().Err() != nil {
@@ -75,10 +72,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			h.errorResponse(c, infraerrors.Code(err), "upstream_error", infraerrors.Message(err))
 			return
 		}
-		// Explicit fallback preserves the existing published/catalog/scheduler
-		// flow, but skips the cached published response so the scheduler really
-		// selects a live account. It is the only path that may select a
-		// non-pinned account.
+		// Explicit fallback bypasses the configured manifest and selects a live account.
 		pinnedFallback = true
 	}
 

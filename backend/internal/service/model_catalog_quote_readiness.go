@@ -71,12 +71,3 @@ func (s *PricingService) GetExactModelPricing(model string) *LiteLLMModelPricing
 	}
 	return nil
 }
-
-func (s *PricingService) CatalogManaged() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.catalogManaged
-}
