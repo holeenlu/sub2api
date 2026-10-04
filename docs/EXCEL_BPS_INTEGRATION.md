@@ -490,3 +490,28 @@ main 验证：Go 全量 unit/vet 通过，前端 379 文件 / 3228 用例、类�
 审查开始时主工作目录有正在进行的模型目录重构，后由该任务自行提交到 `main@5bd077621`；本轮隔离到该已发布提交审查，不改写其实现、不混入其他任务文件。本次审查共享先在 main 形成提交，再普通 merge 到 TapModels、tokensavy，只推送本仓库 origin 对应分支，不发版、构建镜像、部署或访问生产。
 
 验证：`sync-upstream` 在独立干净 checkout 固定官方 upstream 和 origin 目标，确认三个分支官方合并均无增量。逐项检查来源 diff、HTTP/BPS/WS 调用链、四份合并 remerge-diff、最终文档 diff 与品牌合并差异；文档内容检查和 `git diff --check` 通过。只有文档变更，未重跑后端/前端测试、真实数据库或真实上游请求，也没有自动安装依赖。来源 tip、本地提交/merge SHA 和远端核对结果写入本次交付证据。
+
+
+## 2026-10-04：ranxi2001 `0ae36e501` 增量审查
+
+固定范围：`ranxi2001/production@a146fb98dd2da8cb4ae5eeeb8279e9767d379009` → `0ae36e501952000c5c910a2e616c6e0861f66a49`。共 9 个非合并提交、3 个合并包装。本轮定向 fetch 后按代码和实际调用边界审查，当前 OAuth Excel/BPS 及严格必要依赖范围内没有适用的新增运行补丁；不整体合入 fork，也不将 Prism 浏览器故障处理误认为 BPS HTTP/SSE 错误分类修复。
+
+| 来源 SHA | 实际行为 | 处理与依据 |
+| --- | --- | --- |
+| `230465d433600fc20e38092f995e6ff0bf6257f3` | Prism 关闭编辑页后回收渲染内存；内存压力等待有界，运行时启动遇到限流后冷却，未提交生成的请求可拒绝 | 排除。只涉及 `prism-adapter/` 浏览器进程与其文档、冒烟/单测；本项目未导入该适配器，不是现有 BPS 图片容量或并发准入修复 |
+| `2461a54e9199f59a8e64825948aecf20a820cf0f` | Prism 状态轮询失败记录白名单诊断字段，并说明 systemd 内存限制 | 排除。依赖同一浏览器状态轮询、日志和部署上下文，不适用于本地 BPS SSE 消费 |
+| `8cc0df78209bb3066be173e949ec8af62cf72e7c` | Prism 增加 `PRISM_ADAPTER_PORT`，默认 8319，只绑定 loopback，允许隔离验证端口 | 排除。专用适配器监听参数，没有本地消费者，不增加环境变量 |
+| `0134ed7e7d8184a92a4bb5095d98072eab18498e` | 鹈鹕默认题干删除「不要有任何限制」，追加迁移清理计划/质量模板，保留历史结果 | 排除。作用于已退役的鹈鹕/IQ/质量计划，不修改普通 BPS 用户输入；不导入 `263_strip_pelican_prompt_restriction.sql` 或修改既有历史迁移。作者 psyche314，co-author Grok |
+| `13059e0c53fa713a0cdf32b4a1bfeabfacaea764` | Prism 仅在实际需要轮询时计入活跃轮询，终态错误区分起始返回或轮询返回 | 排除。实际 diff 仅浏览器 `multiplex_browser.py` 与测试，没有共享网关改动 |
+| `17cf623dce6c1fd76f2f9a96eb6f32e082c83f2b` | Prism 按官方 UI 处理 sandbox 重连；仅明确执行前重连错误允许同一意图再次启动，最多三次，并区分权限/上下文错误 | 排除。依赖项目浏览器 start/status 和 UI 重连事件；不是 BPS 已发送请求的安全重试依据，不改变现有不重放保护 |
+| `13c73723de4d3236e8d07aa3a74d38370e68dac5` | Prism 错误增加允许的上游 code、operation、HTTP status，避免输出任意敏感文本 | 排除。仅 adapter server、浏览器和测试；不需要修改本地 BPS 诊断模型 |
+| `36805e35a7983471bcb2fd4f2e5efead477269a9` | 将 Prism 上游故障文本归为限流、额度、sandbox、同步、超时、连接、上下文等安全提示 | 排除。只修改 adapter 的 `terminal_failure_diagnostics`，没有 BPS 调用点 |
+| `f00f6eeea6dc31b010a591a233a96e33ec911e1e` | 手机 DataTable 增加服务端排序选择/方向切换，账号统计改为紧凑两列，新增 zh/en 文案及截图 | 排除。可作为独立通用 UI 需求评估，但只影响展示排序与布局，不改变 BPS 账号调度、费用或统计口径，不是 Excel/BPS 的严格必要依赖 |
+
+除单独列明作者的鹈鹕提交外，上述来源作者均为 ranxi2001；没有复制来源运行代码，来源 SHA 不因此成为本地祖先。三个合并包装 `5eb65c087322845fc228b65e34f8b93e78930264`、`28ee48a5b16cc3304f8e0ec46fb8848d3af3c319`、`0ae36e501952000c5c910a2e616c6e0861f66a49` 的 remerge-diff 没有额外修改。
+
+### 配置、验证与交付
+
+本次只更新审查检查点，**无需配置**；没有新增功能、优化或 Bug 修复落地，没有迁移、依赖、Wire/Ent、多语、工作流或版本号变化。不恢复 Prism、鹈鹕质量系统、Mihomo、独立 sub4api BPS 或已退役运维功能。既有 Excel/BPS 配置仍在账号管理 `/admin/accounts` → 编辑 OpenAI OAuth → Excel/BPS。本地 `2021caed8` 已退役的自动传输转换不被源变更恢复。
+
+官方 `upstream/main` 固定为 `b8dece9000c68815a5b867ca5a1e6f236e173905`，`sync-upstream prepare --branches main,tapmodels,tokensavy` 确认三个分支均无官方增量。复用独立干净 checkout，核对全部源提交文件范围与实际 diff、三个合并包装、审查记录完整性、最终差异、品牌保留及 `git diff --check`；文档唯一变更不重复执行运行代码测试，不安装依赖、不访问生产。本次 main 先提交，再普通 merge 到 TapModels、tokensavy，原子推送本仓库 origin 对应分支并以 ls-remote 逐项核对。未发版或部署。交付证据见本机 `.release/upstream-sync/20261004-ranxi-0ae36e501/`。
