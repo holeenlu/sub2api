@@ -21,6 +21,7 @@ class ComposeIntegrationTests(unittest.TestCase):
             try:
                 for index, tag in enumerate(tags):
                     (root/'Dockerfile').write_text('FROM alpine:3.21\n' +
+                        'RUN mkdir -p /app && printf "#!/bin/sh\\nexit 0\\n" >/app/sub2api && chmod 755 /app/sub2api\n' +
                         ('RUN touch /healthy\n' if index < 2 else '') +
                         f'RUN echo {index} >/version\n' +
                         'HEALTHCHECK --interval=1s --timeout=1s --retries=1 CMD test -f /healthy\nCMD ["sleep", "3600"]\n')

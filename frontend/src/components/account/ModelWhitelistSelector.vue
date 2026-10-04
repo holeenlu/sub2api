@@ -320,12 +320,24 @@ const catalogLoading = ref(false)
 const catalogError = ref('')
 let catalogRequest = 0
 let catalogController: AbortController | undefined
-const retiredModels = computed(() => new Set(catalogModels.value.filter(m => m.lifecycle === 'retired').map(m => m.id)))
+const retiredModels = computed(() => {
+  const available = new Set(availableOptions.value.map(model => model.value))
+  return new Set(catalogModels.value.filter(m => m.lifecycle === 'retired' && !available.has(m.id)).map(m => m.id))
+})
 const selectedRetiredModels = computed(() => props.modelValue.filter(id => retiredModels.value.has(id)))
 // These choices configure account supply; discovery evidence is shown in the
 // catalog admin page. Loading candidates never changes the saved policy.
-const availableOptions = computed(() => catalogModels.value
-  .map(m => ({ value: m.id, label: m.display_name || m.id })))
+const availableOptions = computed(() => {
+  // Bulk model_mapping still uses names. Filter each platform's candidate
+  // before deduplicating names, so an active provider is not hidden by a retired peer.
+  const choices = new Map<string, { value: string; label: string }>()
+  for (const m of catalogModels.value) {
+    if (!m.disabled && m.lifecycle !== 'retired' && !choices.has(m.id)) {
+      choices.set(m.id, { value: m.id, label: m.display_name || m.id })
+    }
+  }
+  return [...choices.values()]
+})
 
 async function loadCatalog(refresh = false) {
   const serial = ++catalogRequest
@@ -340,7 +352,7 @@ async function loadCatalog(refresh = false) {
       : await Promise.all((normalizedPlatforms.value.length ? normalizedPlatforms.value : ['']).map(platform => getModelCatalog({ platform, view: 'selection' }, signal)))
     if (serial !== catalogRequest) return
     const entries = new Map<string, CatalogModel>()
-    for (const result of results) for (const entry of result.models) if (!entries.has(entry.id)) entries.set(entry.id, entry)
+    for (const result of results) for (const entry of result.models) entries.set(`${entry.platform}\0${entry.id}`, entry)
     catalogModels.value = [...entries.values()]
   } catch (error) {
     if (serial === catalogRequest && !(error instanceof DOMException && error.name === 'AbortError')) {

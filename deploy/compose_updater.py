@@ -10,6 +10,7 @@ import socketserver
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import urllib.request
 from urllib.parse import quote, urlsplit
@@ -49,9 +50,17 @@ def read_json(url, token='', asset=False):
 def atomic_json(path, data):
     path = Path(path)
     temporary = path.with_suffix(path.suffix + '.tmp')
-    temporary.write_text(json.dumps(data, indent=2) + '\n')
-    os.chmod(temporary, 0o600)
+    with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as output:
+        json.dump(data, output, indent=2)
+        output.write('\n')
+        output.flush()
+        os.fsync(output.fileno())
     temporary.replace(path)
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 class Updater:
@@ -64,9 +73,6 @@ class Updater:
         self.state = {'status': 'idle'}
         if self.state_path.exists():
             self.state = json.loads(self.state_path.read_text())
-            if self.state.get('status') == 'running':
-                self.state = {'status': 'failed', 'message': 'Updater interrupted; inspect containers before retrying'}
-                atomic_json(self.state_path, self.state)
         self.compose = ['docker', 'compose', '--project-directory', str(self.directory),
                         '--project-name', config['project_name']]
         for file in config['compose_files']:
@@ -78,6 +84,8 @@ class Updater:
         if not self.override.exists():
             atomic_json(self.override, {'services': {}})
         self.compose += ['-f', str(self.override)]
+        if self.state.get('status') == 'running' or self.state.get('recovery_required'):
+            self.recover_interrupted()
 
     def command(self, *args, timeout=600):
         result = subprocess.run(args, cwd=self.directory, text=True, capture_output=True, timeout=timeout)
@@ -89,8 +97,55 @@ class Updater:
         return result.stdout.strip()
 
     def save(self, **state):
-        self.state = state
+        state = {**self.state, **state}
         atomic_json(self.state_path, state)
+        self.state = state
+
+    def preflight(self, image):
+        # The candidate reads the deployed DB through the same Compose config,
+        # without starting workers or modifying the live image override.
+        with tempfile.TemporaryDirectory(prefix='.update-preflight-', dir=self.directory) as tmp:
+            candidate = Path(tmp) / 'candidate.json'
+            atomic_json(candidate, {'services': {self.config['service']: {'image': image}}})
+            self.command(*self.compose, '-f', str(candidate), 'run', '--rm', '--no-deps',
+                         '--pull', 'never', '-T', '--entrypoint', '/app/sub2api',
+                         self.config['service'], '--check-model-policy-migration')
+
+    def restore_previous(self, message):
+        previous = self.state.get('previous_image')
+        if not previous:
+            self.save(status='failed', recovery_required=True,
+                      message=message + '; old image unknown; inspect the host before retrying')
+            return
+        self.save(status='running', phase='recovering', recovery_required=True, message=message)
+        try:
+            atomic_json(self.override, {'services': {self.config['service']: {'image': previous}}})
+            self.command(*self.compose, 'up', '-d', '--no-deps', '--pull', 'never', self.config['service'])
+            self.wait_healthy(previous)
+        except Exception:
+            self.save(status='failed', recovery_required=True,
+                      message=message + '; automatic image recovery failed; inspect the host journal')
+            return
+        self.save(status='failed', phase='rolled_back', recovery_required=False,
+                  message=message + '; previous image restored (database migrations are not rolled back)')
+
+    def recover_interrupted(self):
+        phase = self.state.get('phase')
+        if phase in ('preparing', 'pulling', 'preflight'):
+            self.save(status='failed', recovery_required=False,
+                      message='Updater interrupted before application replacement; retry after checking the host')
+            return
+        if phase in ('switching', 'checking') and self.state.get('target_id'):
+            try:
+                info = self.inspect(self.container())
+                if info['Image'] == self.state['target_id']:
+                    self.wait_healthy(self.state['target_id'])
+                    self.save(status='succeeded', phase='complete', recovery_required=False,
+                              message='Recovered interrupted update; target image is healthy')
+                    return
+            except Exception:
+                pass
+        self.restore_previous('Updater interrupted')
 
     def image_for(self, version):
         cfg = self.config
@@ -132,8 +187,6 @@ class Updater:
         raise RuntimeError('Application health check timed out')
 
     def apply(self, version):
-        previous_image = None
-        changed = False
         try:
             # Let the web server return its accepted response before replacement.
             time.sleep(2)
@@ -142,25 +195,24 @@ class Updater:
             if not old.get('Config', {}).get('Healthcheck'):
                 raise ValueError('A Docker health check is required for online updates')
             previous_image = old['Image']
+            self.save(status='running', version=version, phase='pulling', image=image,
+                      previous_image=previous_image, recovery_required=False)
             self.command('docker', 'pull', image)
             new_image = self.inspect(image)['Id']
+            self.save(phase='preflight', target_id=new_image)
+            self.preflight(image)
+            self.save(phase='switching', recovery_required=True)
             atomic_json(self.override, {'services': {self.config['service']: {'image': image}}})
-            changed = True
             self.command(*self.compose, 'up', '-d', '--no-deps', '--pull', 'never', self.config['service'])
+            self.save(phase='checking')
             self.wait_healthy(new_image)
-            self.save(status='succeeded', version=version, image=image, previous_image=previous_image)
+            self.save(status='succeeded', phase='complete', recovery_required=False)
         except Exception as error:
             message = str(error)
-            if changed and previous_image:
-                try:
-                    # Pin the exact old image, even if the original config used latest.
-                    atomic_json(self.override, {'services': {self.config['service']: {'image': previous_image}}})
-                    self.command(*self.compose, 'up', '-d', '--no-deps', '--pull', 'never', self.config['service'])
-                    self.wait_healthy(previous_image)
-                    message += '; previous image restored (database migrations are not rolled back)'
-                except Exception:
-                    message += '; automatic image recovery failed; inspect the host journal'
-            self.save(status='failed', version=version, message=message)
+            if self.state.get('recovery_required'):
+                self.restore_previous(message)
+            else:
+                self.save(status='failed', version=version, message=message)
         finally:
             self.lock.release()
 
@@ -170,7 +222,10 @@ class Updater:
         if not self.lock.acquire(blocking=False):
             raise RuntimeError('Another update is already running')
         try:
-            self.save(status='running', version=version)
+            if self.state.get('recovery_required'):
+                raise RuntimeError('Interrupted update requires recovery; inspect the host journal')
+            self.state = {}
+            self.save(status='running', version=version, phase='preparing', recovery_required=False)
             threading.Thread(target=self.apply, args=(version,), daemon=False).start()
         except Exception:
             self.lock.release()
@@ -212,8 +267,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.respond(202, self.server.updater.state)
         except (ValueError, KeyError, TypeError):
             self.respond(400, {'error': 'Invalid version request'})
-        except RuntimeError:
-            self.respond(409, {'error': 'Another update is already running'})
+        except RuntimeError as error:
+            self.respond(409, {'error': str(error)})
 
 
 def prepare_socket_directory(path, gid):

@@ -6,7 +6,7 @@ import { analyzeGlobalOutputs, parseNumbers } from './fingerprint-core.mjs';
 globalThis.crypto ??= webcrypto;
 
 try {
-  const bank = JSON.parse(await readFile(new URL('./unified_bank.json', import.meta.url), 'utf8'));
+  const bank = JSON.parse(await readFile(new URL('../../../internal/service/modeltrace_unified_bank.json', import.meta.url), 'utf8'));
   if (!Array.isArray(bank.models) || bank.models.length === 0) {
     throw new Error('ModelTrace fingerprint bank is empty');
   }

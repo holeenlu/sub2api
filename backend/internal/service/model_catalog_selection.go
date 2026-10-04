@@ -63,12 +63,12 @@ func (s *ModelCatalogService) selectionCatalog(ctx context.Context, account *Acc
 		}
 	}
 	// Reuse the upstream group presets; administrators extend this inventory at runtime.
-	platforms := []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok, PlatformOpenCodeGo, PlatformTypeSafe}
+	platforms := []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe}
 	for _, p := range platforms {
 		if platform != "" && platform != p {
 			continue
 		}
-		for _, id := range defaultModelsListCandidateIDs(p) {
+		for _, id := range DefaultModelsListCandidateIDs(p) {
 			m := UpstreamModelMetadata{ID: id}
 			add(ModelCatalogEntry{ID: id, Platform: p, Kind: modelCatalogEntryKind(id, m), Lifecycle: "unknown", Source: "preset", Metadata: m})
 		}
@@ -90,7 +90,7 @@ func (s *ModelCatalogService) selectionCatalog(ctx context.Context, account *Acc
 				entry.Kind = override.Kind
 			}
 		}
-		if !includeDisabled && entry.Disabled {
+		if !includeDisabled && (entry.Disabled || entry.Lifecycle == "retired") {
 			continue
 		}
 		models = append(models, entry)

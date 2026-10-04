@@ -213,11 +213,6 @@ func matchGroupModelPricing(group *Group, model string) *ChannelModelPricing {
 
 // resolveBasePricing 从 LiteLLM 或 Fallback 获取基础定价
 func (r *ModelPricingResolver) resolveBasePricing(model string) (*ModelPricing, string) {
-	if r.billingService.pricingService != nil && r.billingService.pricingService.CatalogManaged() {
-		if r.billingService.pricingService.GetExactModelPricing(model) == nil && r.billingService.fallbackPrices[model] == nil {
-			return nil, PricingSourceFallback
-		}
-	}
 	pricing, err := r.billingService.GetModelPricing(model)
 	if err != nil {
 		slog.Debug("failed to get model pricing from LiteLLM, using fallback",

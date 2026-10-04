@@ -38,10 +38,10 @@ func (s *ModelCatalogService) SetupProfile(ctx context.Context, key *APIKey) (*C
 	if key == nil || key.Group == nil || key.Group.Platform == PlatformTypeSafe {
 		return out, nil
 	}
-	gateway := &GatewayService{accountRepo: s.accounts}
+	gateway := &GatewayService{accountRepo: s.accounts, groupCatalog: s.groupCatalog}
 	ids := gateway.GetAvailableModels(ctx, &key.Group.ID, key.Group.Platform)
 	if len(ids) == 0 {
-		ids = defaultModelsListCandidateIDs(key.Group.Platform)
+		ids = DefaultModelsListCandidateIDs(key.Group.Platform)
 	}
 	ids = FilterCodexModelIDsForGroup(key.Group.ModelAllowlist.FilterForListing(ids), key.Group)
 	body, err := gateway.BuildCodexModelsManifestForGroup(ctx, key.Group, "", ids)

@@ -31,9 +31,9 @@ func TestCodexHypothesisBundledModelTraceAssets(t *testing.T) {
 	_, source, _, ok := runtime.Caller(0)
 	require.True(t, ok)
 	assets := map[string]string{
-		"challenge-browser.mjs": "4a3868c9fe237cabde92f0d2bffaf32118f558f7a43fcc336874fecd2bf6be39",
-		"fingerprint-core.mjs":  "83fa5bd611e18f8339122582335123c8ea168ed242298bb31f4e363abeeb6e4a",
-		"unified_bank.json":     "1c2cb74d372f9f0f30d0dabbb7b7a838660d2f769a88d0c8489e4c662e088c21",
+		"challenge-browser.mjs":                                  "4a3868c9fe237cabde92f0d2bffaf32118f558f7a43fcc336874fecd2bf6be39",
+		"fingerprint-core.mjs":                                   "83fa5bd611e18f8339122582335123c8ea168ed242298bb31f4e363abeeb6e4a",
+		"../../../internal/service/modeltrace_unified_bank.json": "1c2cb74d372f9f0f30d0dabbb7b7a838660d2f769a88d0c8489e4c662e088c21",
 	}
 	for name, expected := range assets {
 		data, err := os.ReadFile(filepath.Join(filepath.Dir(source), "modeltrace", name))

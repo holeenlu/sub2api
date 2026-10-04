@@ -23,9 +23,9 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
-// ReleaseChannel identifies this brand even when building directly from source.
-// A release build may override it with ldflags.
-var ReleaseChannel = "tokensavy"
+// ReleaseChannel may be overridden by a release build. Plain SDK builds retain
+// the brand's channel rather than querying the shared repository Latest tag.
+var ReleaseChannel = DefaultReleaseChannel
 
 var (
 	ErrNoUpdateAvailable         = infraerrors.Conflict("ALREADY_UP_TO_DATE", "no update available; current version is latest")

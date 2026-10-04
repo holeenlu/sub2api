@@ -12,6 +12,8 @@ package service
 const (
 	// DefaultSiteName is the product name used as the site-name fallback.
 	DefaultSiteName = "Tokensavy"
+	// Source builds use the same update channel as release builds.
+	DefaultReleaseChannel = "tokensavy"
 	// DefaultSiteTagline is the product tagline used as the site-subtitle
 	// fallback.
 	DefaultSiteTagline = "Smart tokens. More possibilities."

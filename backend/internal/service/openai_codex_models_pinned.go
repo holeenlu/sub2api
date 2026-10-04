@@ -97,7 +97,7 @@ func mergeCodexModelsManifestBodies(bodies [][]byte) ([]byte, error) {
 
 // FetchPinnedCodexModelsManifest fetches only the configured OpenAI accounts,
 // in parallel, and merges successful responses in configuration order. The
-// caller applies catalog governance after this source stage.
+// caller applies native group filters after this source stage.
 func (s *OpenAIGatewayService) FetchPinnedCodexModelsManifest(ctx context.Context, group *Group, clientVersion string) (*OpenAIModelsResponse, *Account, error) {
 	results, err := s.fetchPinnedOpenAIModels(ctx, group, func(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
 		manifest, err := s.FetchCodexModelsManifest(ctx, account, clientVersion, "")

@@ -55,7 +55,7 @@ func (s *updateServiceGitHubClientStub) FetchChecksumFile(context.Context, strin
 }
 
 func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
-	svc := newUpstreamFormatUpdateService(
+	svc := newUpstreamUpdateTestService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{
 			release: &GitHubRelease{
@@ -74,8 +74,14 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
 }
 
+func newUpstreamUpdateTestService(cache UpdateCache, client GitHubReleaseClient, version, buildType string) *UpdateService {
+	svc := NewUpdateService(cache, client, version, buildType)
+	svc.releaseChannel = ""
+	return svc
+}
+
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
-	return newUpstreamFormatUpdateService(
+	return newUpstreamUpdateTestService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{recentReleases: releases},
 		current,
@@ -137,7 +143,7 @@ func TestUpdateServiceListRollbackVersionsEmptyWhenNoneOlder(t *testing.T) {
 }
 
 func TestUpdateServiceListRollbackVersionsPropagatesFetchError(t *testing.T) {
-	svc := newUpstreamFormatUpdateService(
+	svc := newUpstreamUpdateTestService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{recentErr: errors.New("github unavailable")},
 		"0.1.147",
@@ -198,7 +204,7 @@ func TestUpdateServiceCheckDisabledSkipsGitHub(t *testing.T) {
 		release:        &GitHubRelease{TagName: "v9.9.9", Name: "v9.9.9"},
 		recentReleases: []*GitHubRelease{{TagName: "v0.1.146"}},
 	}
-	svc := newUpstreamFormatUpdateService(&updateServiceCacheStub{}, client, "0.1.147", "release").WithCheckEnabled(false)
+	svc := newUpstreamUpdateTestService(&updateServiceCacheStub{}, client, "0.1.147", "release").WithCheckEnabled(false)
 
 	info, err := svc.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
@@ -223,7 +229,7 @@ func TestUpdateServiceCheckEnabledByDefault(t *testing.T) {
 	client := &updateServiceGitHubClientStub{
 		release: &GitHubRelease{TagName: "v9.9.9", Name: "v9.9.9"},
 	}
-	svc := newUpstreamFormatUpdateService(&updateServiceCacheStub{}, client, "0.1.147", "release")
+	svc := newUpstreamUpdateTestService(&updateServiceCacheStub{}, client, "0.1.147", "release")
 
 	info, err := svc.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
@@ -238,7 +244,7 @@ func TestUpdateServiceReportsUpstreamVersion(t *testing.T) {
 	client := &updateServiceGitHubClientStub{
 		release: &GitHubRelease{TagName: "v9.9.9", Name: "v9.9.9"},
 	}
-	svc := newUpstreamFormatUpdateService(&updateServiceCacheStub{}, client, "0.1.147", "release").
+	svc := newUpstreamUpdateTestService(&updateServiceCacheStub{}, client, "0.1.147", "release").
 		WithUpstreamVersion(" v0.2.1 ")
 
 	info, err := svc.CheckUpdate(context.Background(), true)
@@ -250,7 +256,7 @@ func TestUpdateServiceReportsUpstreamVersion(t *testing.T) {
 	require.True(t, disabled.Disabled)
 	require.Equal(t, "v0.2.1", disabled.UpstreamVersion)
 
-	plain := newUpstreamFormatUpdateService(&updateServiceCacheStub{}, client, "0.1.147", "release")
+	plain := newUpstreamUpdateTestService(&updateServiceCacheStub{}, client, "0.1.147", "release")
 	info, err = plain.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Empty(t, info.UpstreamVersion, "upstream builds inject nothing and must omit the field")
@@ -260,7 +266,7 @@ func TestUpdateServiceReportsRunningBuildCommit(t *testing.T) {
 	const commit = "2776c84a5ebcc94d2fba1f551c200ab1d9ffe149"
 	cache := &updateServiceCacheStub{}
 	client := &updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v9.9.9"}}
-	svc := newUpstreamFormatUpdateService(cache, client, "0.2.1", "release").WithBuildCommit(commit)
+	svc := newUpstreamUpdateTestService(cache, client, "0.2.1", "release").WithBuildCommit(commit)
 	info, err := svc.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, commit, info.BuildCommit)
@@ -290,11 +296,6 @@ func TestUpdateServiceReportsRunningBuildCommit(t *testing.T) {
 
 // These fixtures exercise the upstream, unprefixed version format independently
 // of the default channel compiled into this brand's production service.
-func newUpstreamFormatUpdateService(cache UpdateCache, client GitHubReleaseClient, version, buildType string) *UpdateService {
-	svc := NewUpdateService(cache, client, version, buildType)
-	svc.releaseChannel = ""
-	return svc
-}
 
 func TestUpdateTokensavyDefaultChannel(t *testing.T) {
 	svc := NewUpdateService(nil, nil, "0.2.13.1", "release")

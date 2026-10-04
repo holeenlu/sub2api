@@ -30,6 +30,7 @@ type GroupCatalogIssue struct {
 }
 
 type GroupModelCatalog struct {
+	accounts  map[int64]Account
 	Revision  string              `json:"revision"`
 	Models    []GroupCatalogModel `json:"models"`
 	Issues    []GroupCatalogIssue `json:"issues"`
@@ -47,6 +48,7 @@ type groupCatalogSnapshots interface {
 // GroupModelCatalogService reads configuration and existing discovery snapshots.
 // Public page loads never fetch upstream catalogs or probe inference endpoints.
 type GroupModelCatalogService struct {
+	groups    GroupRepository
 	registry  *ModelCatalogService
 	accounts  groupCatalogAccounts
 	channels  ChannelRepository
@@ -72,7 +74,7 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 	if group == nil {
 		return nil, fmt.Errorf("catalog group is required")
 	}
-	out := &GroupModelCatalog{Models: []GroupCatalogModel{}, Issues: []GroupCatalogIssue{}, Status: "ready", UpdatedAt: group.UpdatedAt}
+	out := &GroupModelCatalog{accounts: map[int64]Account{}, Models: []GroupCatalogModel{}, Issues: []GroupCatalogIssue{}, Status: "ready", UpdatedAt: group.UpdatedAt}
 	accounts, err := s.accounts.ListByGroup(ctx, group.ID)
 	if err != nil {
 		return nil, fmt.Errorf("catalog accounts: %w", err)
@@ -87,6 +89,7 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 			continue
 		}
 		active = append(active, a)
+		out.accounts[a.ID] = a
 		platforms[a.Platform] = true
 		if a.UpdatedAt.After(out.UpdatedAt) {
 			out.UpdatedAt = a.UpdatedAt
@@ -191,9 +194,9 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 				add(id, platform, "discovery")
 			}
 		}
-		// Include configured account whitelist and alias names independently of discovery.
+		// Use native mappings, including platform defaults, independently of discovery.
 		if !a.IsOpenAIPassthroughEnabled() {
-			for id, target := range stringMappingFromRaw(a.Credentials["model_mapping"]) {
+			for id, target := range a.GetModelMapping() {
 				if strings.TrimSpace(target) == "" {
 					continue
 				}
@@ -201,6 +204,11 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 					continue
 				}
 				add(id, platform, "account_mapping")
+			}
+		}
+		if !found && (a.IsOpenAIPassthroughEnabled() || len(a.GetModelMapping()) == 0) {
+			for _, id := range DefaultModelsListCandidateIDs(platform) {
+				add(id, platform, "platform_default")
 			}
 		}
 	}
@@ -397,6 +405,90 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 			issue(c.name, "no_configured_route")
 		}
 	}
+	if group.FallbackGroupIDOnNoAccount != nil && s.groups != nil {
+		chain := newNoAccountFallbackChain(&group.ID, s.groups.GetByIDLite, nil)
+		chain.source = group
+		for target := chain.next(ctx); target != nil; target = chain.next(ctx) {
+			if target.ClaudeCodeOnly && !IsClaudeCodeClient(ctx) {
+				continue
+			}
+			borrowed := *target
+			borrowed.FallbackGroupIDOnNoAccount = nil
+			// The target supplies capacity; the requesting key owns model access.
+			borrowed.ModelAllowlist = group.ModelAllowlist
+			borrowed.RequireOAuthOnly = group.RequireOAuthOnly || target.RequireOAuthOnly
+			view, err := s.resolve(ctx, &borrowed, channels)
+			if err != nil {
+				return nil, err
+			}
+			for id, account := range view.accounts {
+				out.accounts[id] = account
+			}
+			for _, entry := range view.Models {
+				if !group.ModelAllowlist.Allows(entry.Name) || (!GroupAllowsImageGeneration(group) && IsImageGenerationIntent("", entry.Name, nil)) {
+					continue
+				}
+				mapped := entry.Name
+				if channel != nil {
+					if value := lookupMappingAcrossPlatforms(channelIndex, group.ID, entry.Platform, strings.ToLower(entry.Name)); value != "" {
+						mapped = value
+					}
+					restricted := billingModelForRestriction(channel.BillingModelSource, entry.Name, mapped)
+					if restricted != "" && channel.RestrictModels && lookupPricingAcrossPlatforms(channelIndex, group.ID, entry.Platform, strings.ToLower(restricted)) == nil {
+						continue
+					}
+				}
+				// Reprice with the origin group. Never advertise the target group's tariff.
+				billing := make([]string, 0, len(entry.AccountModels))
+				for _, model := range entry.AccountModels {
+					billing = append(billing, model)
+				}
+				entry.BillingModels = dedupeAndSortModelIDs(billing)
+				entry.ChannelName, entry.ResponseDependent = "", false
+				if channel != nil {
+					entry.ChannelName = channel.Name
+					switch channel.BillingModelSource {
+					case BillingModelSourceRequested:
+						entry.BillingModels = []string{entry.Name}
+					case BillingModelSourceChannelMapped, BillingModelSourceResponse:
+						entry.BillingModels = []string{mapped}
+					}
+					entry.ResponseDependent = channel.BillingModelSource == BillingModelSourceResponse
+				}
+				entry.Source = "fallback"
+				if s.registry != nil {
+					entry.PricingStatus = s.registry.quoteStatus(ctx, &entry, group)
+				}
+				merged := false
+				for i := range out.Models {
+					current := &out.Models[i]
+					if current.Name != entry.Name || current.Platform != entry.Platform || current.Endpoint != entry.Endpoint {
+						continue
+					}
+					for id, model := range entry.AccountModels {
+						current.AccountModels[id] = model
+					}
+					current.BillingModels = dedupeAndSortModelIDs(append(current.BillingModels, entry.BillingModels...))
+					current.ResponseDependent = current.ResponseDependent || entry.ResponseDependent
+					if s.registry != nil {
+						current.PricingStatus = s.registry.quoteStatus(ctx, current, group)
+					}
+					merged = true
+					break
+				}
+				if !merged {
+					out.Models = append(out.Models, entry)
+				}
+			}
+			if view.UpdatedAt.After(out.UpdatedAt) {
+				out.UpdatedAt = view.UpdatedAt
+			}
+		}
+		if chain.loadFailed {
+			out.Status = "stale"
+			issue("", "fallback_group_unavailable")
+		}
+	}
 	if channel != nil {
 		for _, m := range channel.SupportedModels() {
 			found := false
@@ -417,7 +509,7 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 		}
 		return out.Issues[i].Reason < out.Issues[j].Reason
 	})
-	if !group.ModelAllowlistEnabled() && len(candidates) == 0 && len(active) > 0 && foundSnapshots == 0 {
+	if !group.ModelAllowlistEnabled() && len(out.Models) == 0 && len(candidates) == 0 && len(active) > 0 && foundSnapshots == 0 {
 		out.Status = "unavailable"
 		issue("", "discovery_snapshot_missing")
 	}
@@ -444,6 +536,35 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 		Price  string
 	}{out.Models, out.Issues, group.ModelAllowlist, priceRevision})
 	return out, nil
+}
+
+func (s *GroupModelCatalogService) fallbackCodexInputs(ctx context.Context, group *Group, ids []string, accounts []Account) ([]string, []Account) {
+	if s == nil || group == nil || group.FallbackGroupIDOnNoAccount == nil {
+		return ids, accounts
+	}
+	view, err := s.Resolve(ctx, group)
+	if err != nil {
+		return ids, accounts
+	}
+	seen := map[int64]bool{}
+	for _, account := range accounts {
+		seen[account.ID] = true
+	}
+	for _, model := range view.Models {
+		if model.Platform == PlatformTypeSafe {
+			continue
+		}
+		if model.Source == "fallback" {
+			ids = append(ids, model.Name)
+		}
+		for id := range model.AccountModels {
+			if !seen[id] {
+				accounts = append(accounts, view.accounts[id])
+				seen[id] = true
+			}
+		}
+	}
+	return FilterCodexModelIDsForGroup(ids, group), accounts
 }
 
 // ModelIDs deduplicates endpoint variants without losing group selection order.

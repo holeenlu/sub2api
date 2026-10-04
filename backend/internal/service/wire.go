@@ -1101,9 +1101,12 @@ func ProvideModelCatalogService(repo ModelCatalogRepository, accounts AccountRep
 	catalog.Start()
 	return catalog
 }
-func ProvideGroupModelCatalogService(accounts AccountRepository, channels ChannelRepository, routes CompositeModelRouteRepository, gateway *OpenAIGatewayService, registry *ModelCatalogService, channelService *ChannelService) *GroupModelCatalogService {
+func ProvideGroupModelCatalogService(accounts AccountRepository, groups GroupRepository, channels ChannelRepository, routes CompositeModelRouteRepository, gateway *OpenAIGatewayService, registry *ModelCatalogService, generic *GatewayService, channelService *ChannelService) *GroupModelCatalogService {
 	catalog := NewGroupModelCatalogService(accounts, channels, routes, gateway)
+	catalog.groups = groups
 	catalog.registry = registry
+	registry.groupCatalog = catalog
+	generic.groupCatalog = catalog
 	channelService.modelCatalog = catalog
 	return catalog
 }
