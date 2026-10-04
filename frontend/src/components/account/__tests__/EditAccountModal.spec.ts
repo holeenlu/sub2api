@@ -424,37 +424,19 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
-  it('defaults WS SSE acceleration off and persists the OAuth opt-in across edits', async () => {
+  it('removes retired acceleration settings when saving an existing OAuth account', async () => {
     const account = buildOpenAIOAuthParentAccount()
-    account.extra = { unrelated: 'preserve' }
+    account.extra = { unrelated: 'preserve', openai_oauth_ws_sse_acceleration: true }
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
-    const toggle = wrapper.get('[data-testid="openai-ws-sse-acceleration"]')
-    expect(toggle.attributes('aria-checked')).toBe('false')
-    await toggle.trigger('click')
+    expect(wrapper.find('[data-testid="openai-ws-sse-acceleration"]').exists()).toBe(false)
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()
     const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
-    expect(extra.openai_oauth_ws_sse_acceleration).toBe(true)
+    expect(extra).not.toHaveProperty('openai_oauth_ws_sse_acceleration')
     expect(extra.unrelated).toBe('preserve')
     wrapper.unmount()
-
-    const restored = mountModal({ ...account, extra })
-    expect(restored.get('[data-testid="openai-ws-sse-acceleration"]').attributes('aria-checked')).toBe('true')
-    await restored.get('[data-testid="openai-ws-sse-acceleration"]').trigger('click')
-    await restored.get('form#edit-account-form').trigger('submit.prevent')
-    await flushPromises()
-    expect(updateAccountMock.mock.calls[1]?.[1]?.extra).not.toHaveProperty('openai_oauth_ws_sse_acceleration')
-    restored.unmount()
-  })
-
-  it('does not offer OAuth WS SSE acceleration for API keys or setup tokens', () => {
-    for (const account of [buildAccount(), buildOpenAISetupTokenAccount()]) {
-      const wrapper = mountModal(account)
-      expect(wrapper.find('[data-testid="openai-ws-sse-acceleration"]').exists()).toBe(false)
-      wrapper.unmount()
-    }
   })
 
   beforeEach(() => {

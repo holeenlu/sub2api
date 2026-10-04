@@ -207,7 +207,11 @@ func TestOpenAIWSBPSHandlerBillsPartialUsage(t *testing.T) {
 func TestOpenAIWSBPSHandlerRevalidatesInheritedTools(t *testing.T) {
 	for _, clearTools := range []bool{false, true} {
 		t.Run(fmt.Sprint(clearTools), func(t *testing.T) {
-			h := newBPSWSHandlerHarness(t, "response.completed")
+			h := newBPSWSHandlerHarness(t, "response.completed", func(account *service.Account) {
+				// This case exercises BPS-only admission with native WS disabled.
+				// Hosted-tool native fallback has separate transport coverage.
+				account.Extra[service.ExcelBPSOmitUnsupportedToolsKey] = true
+			})
 			conn := h.dial(t)
 			writeBPSHandlerTurn(t, conn, `{"type":"response.create","model":"gpt-6-astra","generate":false,"input":[],"tools":[{"type":"image_generation"}]}`)
 			readBPSHandlerTerminal(t, conn)

@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -20,6 +22,49 @@ import (
 // ErrOpenAIWSModelSwitchRequiresReconnect marks a follow-up turn that the open
 // connection cannot carry. It is a routing decision, not an account failure.
 var ErrOpenAIWSModelSwitchRequiresReconnect = errors.New("websocket model switch requires reconnect")
+
+// Incremental WS turns may omit tools. Routing must inherit the declarations
+// just as the upstream does; an explicit empty list clears that inheritance.
+type openAIWSBPSRouting struct{ tools gjson.Result }
+
+func (s *openAIWSBPSRouting) resolve(account *Account, model string, payload []byte) (bridge bool, fallbackReason string) {
+	if !account.IsExcelBPSEnabled() {
+		return false, ""
+	}
+	fields := gjson.GetManyBytes(payload, "tool_choice", "tools")
+	if fields[1].Exists() {
+		s.tools = fields[1]
+	}
+	if !account.IsExcelBPSEnabledForModel(model) {
+		return false, ""
+	}
+	if account.IsExcelBPSOmitUnsupportedToolsEnabled() {
+		return true, ""
+	}
+	// Prewarm and generation must choose the same transport. Forcing every
+	// generate=false frame onto BPS can make the following hosted-tool turn
+	// request a reconnect on every attempt.
+	fallbackReason = basispoints.NativeFallbackReasonFromFields(fields[0], s.tools)
+	return fallbackReason == "", fallbackReason
+}
+
+// Only protocol selection ignores the BPS-wide force-HTTP policy when a hosted
+// capability requires the native channel. Admission and connection bindings
+// still receive the original account snapshot and detect real configuration changes.
+func nativeOpenAIWSRoutingAccount(account *Account) *Account {
+	if account == nil || !account.isExcelBPSAllModelsEnabled() {
+		return account
+	}
+	native := *account
+	native.Extra = maps.Clone(account.Extra)
+	native.Extra["openai_excel_bps"] = false
+	return &native
+}
+
+func newOpenAIWSNativeModelSwitchError(model string) error {
+	return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model switch requires reconnect",
+		fmt.Errorf("%w: native model %q requires upstream WebSocket", ErrOpenAIWSModelSwitchRequiresReconnect, model))
+}
 
 // newOpenAIWSBPSModelSwitchError closes a native upstream WS connection whose
 // follow-up turn switches to a BPS model. Codex switches models on an open

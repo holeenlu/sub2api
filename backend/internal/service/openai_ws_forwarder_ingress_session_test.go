@@ -1124,41 +1124,38 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughBridg
 	tests := []struct {
 		name            string
 		payload         string
-		threshold       int64
 		wantRelayReject bool
 	}{
 		{
-			name:      "small response create",
-			payload:   `{"type":"response.create","model":"gpt-5.1"}`,
-			threshold: 1024,
+			name:    "small response create",
+			payload: `{"type":"response.create","model":"gpt-5.1"}`,
 		},
 		{
-			name:      "continuation response create",
-			payload:   `{"type":"response.create","previous_response_id":"resp_previous","model":"gpt-5.1"}`,
-			threshold: 1,
+			name:    "large fresh response stays on websocket",
+			payload: `{"type":"response.create","model":"gpt-5.1","input":"` + strings.Repeat("x", 16*1024*1024) + `"}`,
 		},
 		{
-			name:      "other event type",
-			payload:   `{"type":"session.update","padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`,
-			threshold: 1,
+			name:    "continuation response create",
+			payload: `{"type":"response.create","previous_response_id":"resp_previous","model":"gpt-5.1"}`,
+		},
+		{
+			name:    "other event type",
+			payload: `{"type":"session.update","padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`,
 		},
 		{
 			name:            "malformed data",
 			payload:         `{"type":"response.create","padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"`,
-			threshold:       1,
 			wantRelayReject: true,
 		},
 		{
 			name:            "duplicate type",
 			wantRelayReject: true,
 			payload:         `{"type":"response.create","type":"response.create","model":"gpt-5.1"}`,
-			threshold:       1,
 		},
 		{
 			name:            "duplicate previous response id",
 			wantRelayReject: true,
 			payload:         `{"type":"response.create","previous_response_id":null,"previous_response_id":null,"model":"gpt-5.1"}`,
-			threshold:       1,
 		},
 	}
 
@@ -1173,8 +1170,6 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughBridg
 			cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
 			cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
 			cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeCtxPool
-			cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
-			cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = tt.threshold
 
 			upstreamConn := &openAIWSCaptureConn{events: [][]byte{
 				[]byte(`{"type":"response.completed","response":{"id":"resp_duplicate_keys","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
@@ -1210,6 +1205,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughBridg
 					return
 				}
 				defer func() { _ = conn.CloseNow() }()
+				conn.SetReadLimit(ResolveOpenAIWSClientReadLimitBytes(cfg))
 				_, firstMessage, err := conn.Read(r.Context())
 				if err != nil {
 					errCh <- err

@@ -8,7 +8,7 @@ Codex 客户端可以保留 `supports_websockets = true`。即使分组内全部
 
 BPS 可能几分钟后才返回首个事件（排队、附件上传、图片历史压缩），而 Codex 在 WebSocket 上 5 分钟收不到任何事件就会断开重试。桥接回合在 15 秒内没有向客户端写出任何事件时，会补发一个 `{"type":"keepalive"}` 事件（OpenAI Responses 的标准保活事件，客户端忽略其内容），直到本回合结束。
 
-Codex 会在同一 WebSocket 上切换模型。若连接首轮走原生 WebSocket（该模型未开 BPS），后续轮次切到本账号开启 BPS 的模型时，网关在该轮准入和计费之前以 1008 `model switch requires reconnect` 关闭连接，不计为账号故障；Codex 自动重连后，新连接首帧即为 BPS 模型并走桥接。首轮已走桥接的连接切回原生模型时，仍在同一连接内经 HTTP/SSE 转发。
+Codex 会在同一 WebSocket 上切换模型。原生 WS 与 BPS 通道之间切换时，网关在新一轮发送前以 1008 `model switch requires reconnect` 关闭连接，不计为账号故障；客户端重连后按首帧选择原生 WS 或 BPS HTTP/SSE 适配。已经使用 BPS 的连接切回普通模型或原生托管能力时，也要求重连；显式选择手动 `http_bridge` 模式则保留同一连接内的 HTTP/SSE 转发。完整规则见 [OpenAI 客户端与上游协议](openai-transports.md)。
 
 未开启 BPS 的常规 Codex OAuth 账号继续使用原有 WebSocket 路径（`ctx_pool` / `passthrough`）；客户端 HTTP 请求仍可使用 BPS 的流式 SSE 和非流式 JSON 响应。两种客户端连接方式不需要相互切换。
 
@@ -27,7 +27,7 @@ Codex 会在同一 WebSocket 上切换模型。若连接首轮走原生 WebSocke
 | `tool_choice=none` | 本轮不启用工具 | 相同行为 |
 | `tool_choice=required` 或强制指定客户端函数 | 带上述托管工具时改走原生；否则 HTTP 400 `basispoints_request_invalid` | HTTP 400 `basispoints_request_invalid` |
 
-HTTP 原生回退的请求响应头带 `X-Codex2API-Upstream: codex` 和 `X-Codex2API-Basispoints-Bypass: <reason>`（`web_search` / `image_generation` / `tool_choice`），日志 `excel_bps.native_fallback` 记录 `account_id` 与 `reason`。回退不换账号、不参与 Codex 打票（BPS 账号本来就不采票，走原生时与其他不参与打票的账号相同）。WebSocket 客户端的回退同样经网关桥接，上游使用 HTTP/SSE。Codex 默认的 `cached` 搜索不触发回退，否则几乎所有请求都会离开 BPS。
+HTTP 原生回退的请求响应头带 `X-Codex2API-Upstream: codex` 和 `X-Codex2API-Basispoints-Bypass: <reason>`（`web_search` / `image_generation` / `tool_choice`），日志 `excel_bps.native_fallback` 记录 `account_id` 与 `reason`。回退不换账号、不参与 Codex 打票（BPS 账号本来就不采票，走原生时与其他不参与打票的账号相同）。WebSocket 客户端需要原生回退时默认使用上游 WS；若本连接已经使用 BPS，则先要求重连。显式选择手动 `http_bridge` 时保留原有 HTTP/SSE 回退。Codex 默认的 `cached` 搜索不触发回退，否则几乎所有请求都会离开 BPS。
 
 以前 `external_web_access=true`、`search_context_size=high`、`image_generation` 会返回 400 `basispoints_unsupported_tool`，这道拦截已经取消。
 

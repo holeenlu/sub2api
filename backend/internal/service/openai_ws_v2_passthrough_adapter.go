@@ -816,6 +816,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstClientMessage = accountScopedFirst
 	}
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
+	var bpsRouting openAIWSBPSRouting
+	bpsRouting.resolve(account, initialRequestModel, firstClientMessage)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
 		return fmt.Errorf("apply openai fast policy on first ws frame: %w", policyErr)
@@ -1186,7 +1188,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						switchModel = upstreamModel
 					}
 				}
-				if account.IsExcelBPSEnabledForModel(switchModel) {
+				if bridgeBPS, _ := bpsRouting.resolve(account, switchModel, payload); bridgeBPS {
 					return payload, nil, newOpenAIWSBPSModelSwitchError(switchModel)
 				}
 				if hooks != nil && hooks.BeforeTurn != nil {

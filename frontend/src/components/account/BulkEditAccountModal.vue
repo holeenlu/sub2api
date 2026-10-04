@@ -1038,44 +1038,6 @@
         </div>
       </div>
 
-      <!-- OpenAI OAuth HTTP SSE over WS (regular OAuth only) -->
-      <div v-if="allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
-          <div class="flex-1 pr-4">
-            <label
-              id="bulk-edit-openai-ws-sse-acceleration-label"
-              class="input-label mb-0"
-              for="bulk-edit-openai-ws-sse-acceleration-enabled"
-            >
-              {{ t('admin.accounts.openai.wsSseAcceleration') }}
-            </label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.wsSseAccelerationDesc') }}
-            </p>
-          </div>
-          <input
-            v-model="enableOpenAIWSSSEAcceleration"
-            id="bulk-edit-openai-ws-sse-acceleration-enabled"
-            type="checkbox"
-            aria-controls="bulk-edit-openai-ws-sse-acceleration-body"
-            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-          />
-        </div>
-        <div
-          id="bulk-edit-openai-ws-sse-acceleration-body"
-          :class="!enableOpenAIWSSSEAcceleration && 'pointer-events-none opacity-50'"
-          role="group"
-          aria-labelledby="bulk-edit-openai-ws-sse-acceleration-label"
-        >
-          <Toggle
-            id="bulk-edit-openai-ws-sse-acceleration-toggle"
-            v-model="openaiWSSSEAccelerationEnabled"
-            :disabled="!enableOpenAIWSSSEAcceleration"
-            aria-labelledby="bulk-edit-openai-ws-sse-acceleration-label"
-          />
-        </div>
-      </div>
-
       <!-- OpenAI OAuth Codex CLI only -->
       <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1823,7 +1785,6 @@ const enableOpenAILongContextBilling = ref(false)
 const enableOpenAIEndpointCapabilities = ref(false)
 const enableOpenAIResponsesMode = ref(false)
 const enableOpenAIWSMode = ref(false)
-const enableOpenAIWSSSEAcceleration = ref(false)
 const enableAPIKeyCodexIdentity = ref(false)
 const apiKeyCodexIdentity = ref(false)
 const enableOpenAIAPIKeyWSMode = ref(false)
@@ -1894,7 +1855,6 @@ const excelBPS403GroupOptions = computed(() => [
 const openaiPassthroughEnabled = ref(false)
 // Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
-const openaiWSSSEAccelerationEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>([
   'chat_completions',
@@ -2278,12 +2238,6 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     )
   }
 
-  // Independent of Excel / BPS: the gateway routes BPS before this transport.
-  if (enableOpenAIWSSSEAcceleration.value && allOpenAIOAuthOnly.value) {
-    const extra = ensureExtra()
-    extra.openai_oauth_ws_sse_acceleration = openaiWSSSEAccelerationEnabled.value
-  }
-
   if (enableAPIKeyCodexIdentity.value && allOpenAIAPIKey.value) {
     ensureExtra().openai_apikey_codex_identity = apiKeyCodexIdentity.value
   }
@@ -2443,7 +2397,6 @@ const handleSubmit = async () => {
     enableStatus.value ||
     enableGroups.value ||
     enableOpenAIWSMode.value ||
-    (enableOpenAIWSSSEAcceleration.value && allOpenAIOAuthOnly.value) ||
     (enableAPIKeyCodexIdentity.value && allOpenAIAPIKey.value) ||
     enableOpenAIAPIKeyWSMode.value ||
     enableUpstreamBillingAutoProbe.value ||
@@ -2620,7 +2573,6 @@ watch(
       enableOpenAIEndpointCapabilities.value = false
       enableOpenAIResponsesMode.value = false
       enableOpenAIWSMode.value = false
-      enableOpenAIWSSSEAcceleration.value = false
       enableAPIKeyCodexIdentity.value = false
       apiKeyCodexIdentity.value = false
       enableOpenAIAPIKeyWSMode.value = false
@@ -2650,7 +2602,6 @@ watch(
       excelBPS403TargetGroupID.value = ''
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
-      openaiWSSSEAccelerationEnabled.value = false
       openAILongContextBillingEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
       openAIResponsesMode.value = 'auto'

@@ -676,7 +676,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		hooks = &wrapped
 	}
-	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
+	var bpsRouting openAIWSBPSRouting
+	bridgeBPS, _ := bpsRouting.resolve(account, firstRequestModel, firstClientMessage)
+	routingAccount := nativeOpenAIWSRoutingAccount(account)
+	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(routingAccount)
 	// One reader owns the downstream socket for the whole connection. A
 	// passthrough attempt consumes cancel/overlap frames through it, established
 	// native/bridge only needs its disconnect signal, and the first-turn wait
@@ -685,12 +688,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	// a later bridge/ctx_pool account retry.
 	ingressReader := openAIWSGetIngressReader(c, clientConn)
 	ingressReader.setWaitFrameMode(false)
-	forceHTTPBridge := account.IsExcelBPSEnabledForModel(firstRequestModel) || account.Platform == PlatformGrok ||
-		(s.pluginManager != nil && s.pluginManager.ShouldRouteOpenAIOAuth(account))
+	forceHTTPBridge := bridgeBPS || account.Platform == PlatformGrok
+	manualHTTPBridge := s.openAIWSManualHTTPBridge(routingAccount)
+	if !forceHTTPBridge && !manualHTTPBridge && s.pluginManager != nil && s.pluginManager.ShouldRouteOpenAIOAuth(account) {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation,
+			"this account's transport plugin requires an HTTP client", nil)
+	}
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
 	ingressMode := OpenAIWSIngressModeCtxPool
 	if modeRouterV2Enabled && !forceHTTPBridge {
-		ingressMode = account.ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault)
+		ingressMode = routingAccount.ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault)
 		if ingressMode == OpenAIWSIngressModeOff {
 			return NewOpenAIWSClientCloseError(
 				coderws.StatusPolicyViolation,
@@ -702,10 +709,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		case OpenAIWSIngressModePassthrough:
 			if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 				return fmt.Errorf("websocket ingress requires ws_v2 transport, got=%s", wsDecision.Transport)
-			}
-			if s.shouldBridgeOpenAIWSPassthroughFirstMessage(account, firstClientMessage) {
-				forceHTTPBridge = true
-				break
 			}
 			// 首轮准入由握手路径完成；后续 response.create 会在写入上游前
 			// 依次回调 BeforeRequest 和 BeforeTurn，并在终止或失败时回调
@@ -772,7 +775,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if forceHTTPBridge {
 		wsHost = "xai-http-bridge"
 		wsPath = "/v1/responses"
-		if account.IsExcelBPSEnabledForModel(firstRequestModel) {
+		if bridgeBPS {
 			wsHost = "bps.openai.com"
 			wsPath = "/basispoints/api/responses"
 		}
@@ -805,9 +808,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		requestedReasoningEffort *string
 	}
 	ingressSessionOriginalModel := ""
-	// Settled once the first frame picks the ingress path; follow-up frames
-	// on a native upstream socket cannot switch to a BPS model.
-	ingressBridged := forceHTTPBridge
 
 	applyPayloadMutation := func(current []byte, path string, value any) ([]byte, error) {
 		next, err := sjson.SetBytes(current, path, value)
@@ -965,9 +965,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				requestModel = mappedModel
 			}
 		}
-		excelBPS := account.IsExcelBPSEnabledForModel(requestModel)
-		if excelBPS && turn > 1 && !ingressBridged {
+		excelBPS, bpsFallbackReason := bpsRouting.resolve(account, requestModel, normalized)
+		if excelBPS && turn > 1 && !forceHTTPBridge {
 			return openAIWSClientPayload{}, newOpenAIWSBPSModelSwitchError(requestModel)
+		}
+		if !excelBPS && turn > 1 && forceHTTPBridge && account.IsOpenAI() && !manualHTTPBridge {
+			return openAIWSClientPayload{}, newOpenAIWSNativeModelSwitchError(requestModel)
+		}
+		if bpsFallbackReason != "" {
+			recordExcelBPSNativeFallback(ctx, account, bpsFallbackReason)
 		}
 		apiKey := getAPIKeyFromContext(c)
 		imageGenerationAllowed := GroupAllowsImageGenerationLatest(ctx, apiKeyGroup(apiKey))
@@ -976,7 +982,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			codexImageGenerationExplicitToolPolicy = account.CodexImageGenerationExplicitToolPolicy()
 		}
 		codexBridgeEnabled := isCodexCLI &&
-			(!excelBPS || account.excelBPSNativeFallbackReason(normalized) != "") &&
+			!excelBPS &&
 			!isOpenAIResponsesLiteWebSocketPayload(normalized) &&
 			imageGenerationAllowed &&
 			codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip &&
@@ -1180,8 +1186,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return err
 	}
 
-	useHTTPBridge := forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID)
-	ingressBridged = useHTTPBridge
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 	stateStore := s.getOpenAIWSStateStore()
 	// 与 HTTP 入口一致：绑定与会话状态都落在实际选号分组的命名空间下（见
@@ -1202,7 +1206,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		preferredConnID = ""
 		storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(payload.payloadRaw, account)
-		if useHTTPBridge {
+		if forceHTTPBridge {
 			// Sticky account affinity may be shared, but an HTTP bridge must not
 			// inherit another connection's native WS turn state or socket binding.
 			return
@@ -1227,13 +1231,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 	refreshIngressRouteState(firstPayload)
 
-	if useHTTPBridge {
+	if forceHTTPBridge {
 		logOpenAIWSModeInfo(
-			"ingress_ws_http_bridge_start account_id=%d account_type=%s payload_bytes=%d threshold_bytes=%d has_session_hash=%v store_disabled=%v",
+			"ingress_ws_http_bridge_start account_id=%d account_type=%s payload_bytes=%d has_session_hash=%v store_disabled=%v",
 			account.ID,
 			account.Type,
 			firstPayload.payloadBytes,
-			s.openAIWSHTTPBridgeThresholdBytes(),
 			sessionHash != "",
 			storeDisabled,
 		)

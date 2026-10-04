@@ -43,14 +43,20 @@ func NativeFallbackReason(body []byte) string {
 	if !gjson.ValidBytes(body) {
 		return ""
 	}
-	choice := gjson.GetBytes(body, "tool_choice")
+	fields := gjson.GetManyBytes(body, "tool_choice", "tools")
+	return NativeFallbackReasonFromFields(fields[0], fields[1])
+}
+
+// NativeFallbackReasonFromFields also supports WS turns whose tools are
+// inherited from an earlier frame, without serializing another request body.
+func NativeFallbackReasonFromFields(choice, tools gjson.Result) string {
 	if choice.Type == gjson.String && choice.String() == "none" {
 		return ""
 	}
 	if isHostedToolChoice(choice.Get("type").String()) {
 		return "tool_choice"
 	}
-	if tools := gjson.GetBytes(body, "tools"); tools.IsArray() {
+	if tools.IsArray() {
 		fallback := ""
 		tools.ForEach(func(_, tool gjson.Result) bool {
 			kind := strings.ToLower(strings.TrimSpace(tool.Get("type").String()))

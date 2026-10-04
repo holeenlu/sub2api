@@ -54,6 +54,8 @@
 
 ## 新增功能：可选 OAuth WS→SSE 加速
 
+> 2026-10-04 更新：此可选加速及其配置入口已移除。以下为历史引入记录，当前行为见 [OpenAI 客户端与上游协议](openai-transports.md)。
+
 入口：**账号管理 → 编辑普通 OpenAI OAuth 账号 → HTTP 流式 WS 加速**，`/admin/accounts`；字段 `accounts.extra.openai_oauth_ws_sse_acceleration`，新增开关默认关闭，需手动开启。WS mode 与全局 `gateway.openai_ws` 的已有开关、force_http、插件/透传优先级仍有效。只覆盖符合条件的 HTTP 流式 Responses；BPS 生成请求继续优先走 BPS，本开关用于普通 OAuth 路径及适用的原生回退。
 
 只在握手失败且尚未发送请求时允许 HTTP 回退，不因认证/权限/限流错误绕过控制，不在发送后重放；前置元数据立即刷出但不计为首 token。详见 [实现与条件](openai-ws-sse-acceleration.md)。

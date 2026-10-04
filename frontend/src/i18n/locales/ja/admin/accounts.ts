@@ -641,8 +641,6 @@ export default {
         modelMappingAliasesHint: '通常のOpenAI OAuthアカウントのみ。オンの場合は指定モデルだけを変換し、他のネイティブモデルも利用できます。オフの場合、空でないマッピングは許可リストとして扱います。グループの許可リストは常に適用され、既存アカウントは自動変更されません。',
         changeModelMappingScope: 'モデルマッピングの適用範囲を変更',
         bulkModelMappingAliasesHint: 'この互換オプションは旧モデル制限を使用するアカウントにのみ適用されます。固定・追従ポリシーの許可範囲は変わらず、既存マッピングとBPS設定も保持されます。',
-        wsSseAcceleration: "OAuth WS → SSE アクセラレーション",
-        wsSseAccelerationDesc: "通常の OAuth アカウントで明示的に有効化すると、対応する HTTP ストリーミング応答に既存の WebSocket 接続プールを使います。送信前の接続失敗のみ HTTP にフォールバックし、送信後は再実行しません。Excel / BPS に送られるリクエストにはこの高速化は使われません。",
         autoBPS: 'Enable BPS automatically when degraded',
         autoBPSDesc: 'Checks at the configured interval (every 2 minutes for new rules) over the normal protocol, never BPS. The probe is only a heuristic; matching conditions enable BPS with the selected options. Network errors or incomplete results leave the account unchanged. Manage records on the Auto BPS page.',
         autoBPSLoading: 'Loading this account’s auto-BPS rule…',

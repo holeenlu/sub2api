@@ -12,7 +12,6 @@ import (
 type bulkOpenAISettings struct {
 	excelBPS                bool
 	apiKeyCodexIdentity     bool
-	wsSSEAcceleration       bool
 	longContextBilling      bool
 	endpointCapabilities    bool
 	responsesMode           bool
@@ -21,7 +20,7 @@ type bulkOpenAISettings struct {
 }
 
 func (s bulkOpenAISettings) any() bool {
-	return s.apiKeyCodexIdentity || s.excelBPS || s.wsSSEAcceleration || s.longContextBilling || s.endpointCapabilities || s.responsesMode
+	return s.apiKeyCodexIdentity || s.excelBPS || s.longContextBilling || s.endpointCapabilities || s.responsesMode
 }
 
 func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISettings, error) {
@@ -39,12 +38,6 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 			return settings, infraerrors.BadRequest("OPENAI_APIKEY_IDENTITY_INVALID", "openai_apikey_codex_identity must be a boolean")
 		}
 		settings.apiKeyCodexIdentity = true
-	}
-	if raw, exists := input.Extra[OpenAIOAuthWSSSEAccelerationKey]; exists {
-		if _, ok := raw.(bool); !ok {
-			return settings, infraerrors.BadRequest("OPENAI_WS_SSE_ACCELERATION_INVALID", OpenAIOAuthWSSSEAccelerationKey+" must be a boolean")
-		}
-		settings.wsSSEAcceleration = true
 	}
 
 	if _, exists := input.Extra[openAILongContextBillingEnabledKey]; exists {
@@ -268,11 +261,6 @@ func validateBulkOpenAISettingsTargets(
 		if settings.excelBPS && (account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth ||
 			account.IsShadow() || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken()) {
 			return 0, invalidBulkOpenAITarget(accountID, "Excel / BPS requires a regular ChatGPT OAuth account")
-		}
-
-		// Ineligible accounts would store a flag the gateway never honours.
-		if settings.wsSSEAcceleration && !account.supportsOpenAIOAuthWSSSEAcceleration() {
-			return 0, invalidBulkOpenAITarget(accountID, "HTTP SSE WS acceleration requires a regular ChatGPT OAuth account")
 		}
 
 		if settings.apiKeyCodexIdentity && !account.IsOpenAIApiKey() {
