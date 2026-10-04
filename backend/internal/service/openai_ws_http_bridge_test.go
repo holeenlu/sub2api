@@ -567,8 +567,8 @@ func TestOpenAIWSHTTPBridgeAPIKeyReusesClientToolMappingWhenFollowupOmitsTools(t
 	cfg.Gateway.OpenAIWS.Enabled = true
 	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 1
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeHTTPBridge
 	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
 	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
 	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
@@ -581,7 +581,7 @@ func TestOpenAIWSHTTPBridgeAPIKeyReusesClientToolMappingWhenFollowupOmitsTools(t
 	}
 	account := &Account{
 		ID: 9001, Name: "api-key-custom-followup", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
-		Credentials: map[string]any{"api_key": "sk-upstream"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+		Credentials: map[string]any{"api_key": "sk-upstream"}, Extra: map[string]any{"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
 		Concurrency: 1, Status: StatusActive, Schedulable: true,
 	}
 
@@ -682,8 +682,8 @@ func TestOpenAIWSHTTPBridgeFullCustomToolHistoryWithoutPreviousResponseIDDoesNot
 	cfg.Gateway.OpenAIWS.Enabled = true
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 1
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeHTTPBridge
 	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
 
@@ -693,7 +693,7 @@ func TestOpenAIWSHTTPBridgeFullCustomToolHistoryWithoutPreviousResponseIDDoesNot
 	}
 	account := &Account{
 		ID: 9002, Name: "oauth-full-context", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
-		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
 		Concurrency: 1, Status: StatusActive, Schedulable: true,
 	}
 
@@ -781,8 +781,8 @@ func TestOpenAIWSHTTPBridgeObjectToolOutputWithoutPreviousResponseIDReplaysMatch
 	cfg.Gateway.OpenAIWS.Enabled = true
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 1
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeHTTPBridge
 	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
 
@@ -792,7 +792,7 @@ func TestOpenAIWSHTTPBridgeObjectToolOutputWithoutPreviousResponseIDReplaysMatch
 	}
 	account := &Account{
 		ID: 9003, Name: "oauth-output-only", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
-		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
 		Concurrency: 1, Status: StatusActive, Schedulable: true,
 	}
 
@@ -952,7 +952,7 @@ func runOpenAIWSIngressConversation(
 	return turns
 }
 
-func newOpenAIWSHTTPBridgeThresholdTestService(upstream HTTPUpstream) *OpenAIGatewayService {
+func newOpenAIWSManualHTTPBridgeTestService(upstream HTTPUpstream) *OpenAIGatewayService {
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
@@ -960,8 +960,8 @@ func newOpenAIWSHTTPBridgeThresholdTestService(upstream HTTPUpstream) *OpenAIGat
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 1
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeHTTPBridge
 	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
 	return &OpenAIGatewayService{
@@ -994,10 +994,10 @@ func TestOpenAIWSHTTPBridgeContinuationReplaysPreviousAssistantOutput(t *testing
 			`{"type":"response.completed","response":{"id":"resp_3","model":"gpt-5.1","output":[],"usage":{"input_tokens":13,"output_tokens":1}}}`,
 		),
 	}}
-	svc := newOpenAIWSHTTPBridgeThresholdTestService(upstream)
+	svc := newOpenAIWSManualHTTPBridgeTestService(upstream)
 	account := &Account{
 		ID: 9004, Name: "oauth-chat-continuation", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
-		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
 		Concurrency: 1, Status: StatusActive, Schedulable: true,
 	}
 
@@ -1065,10 +1065,10 @@ func TestOpenAIWSHTTPBridgeContinuationReplaysToolLoopOutput(t *testing.T) {
 			`{"type":"response.completed","response":{"id":"resp_3","model":"gpt-5.1","output":[],"usage":{"input_tokens":13,"output_tokens":1}}}`,
 		),
 	}}
-	svc := newOpenAIWSHTTPBridgeThresholdTestService(upstream)
+	svc := newOpenAIWSManualHTTPBridgeTestService(upstream)
 	account := &Account{
 		ID: 9005, Name: "oauth-tool-continuation", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
-		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
 		Concurrency: 1, Status: StatusActive, Schedulable: true,
 	}
 
@@ -1169,7 +1169,7 @@ func TestOpenAIWSHTTPBridgeAnswersCodexPrewarmLocally(t *testing.T) {
 	}{
 		{model: "gpt-5.1", account: &Account{
 			ID: 9007, Name: "oauth-prewarm", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
-			Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+			Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
 			Concurrency: 1, Status: StatusActive, Schedulable: true,
 		}},
 		// Grok connections are always bridged.
@@ -1207,7 +1207,7 @@ func TestOpenAIWSHTTPBridgeAnswersCodexPrewarmLocally(t *testing.T) {
 				}
 				// The second response is only consumed if the prewarm is forwarded.
 				upstream := &httpUpstreamRecorder{responses: []*http.Response{completed("resp_upstream_1"), completed("resp_upstream_2")}}
-				svc := newOpenAIWSHTTPBridgeThresholdTestService(upstream)
+				svc := newOpenAIWSManualHTTPBridgeTestService(upstream)
 				type turnOutcome struct {
 					result *OpenAIForwardResult
 					err    error
@@ -1318,64 +1318,6 @@ func TestProxyOpenAIWSHTTPBridgeTurnReplayInputFollowsStoreMode(t *testing.T) {
 			// Account failover replays on another credential and keeps its own
 			// portability checks over the untouched output.
 			require.Len(t, result.wsAccountFailoverReplayInput, 3)
-		})
-	}
-}
-
-func TestOpenAIWSHTTPBridgeDecisionKeepsSmallFramesOnWS(t *testing.T) {
-	svc := &OpenAIGatewayService{
-		cfg: &config.Config{
-			Gateway: config.GatewayConfig{
-				OpenAIWS: config.GatewayOpenAIWSConfig{
-					HTTPBridgeEnabled:        true,
-					HTTPBridgeThresholdBytes: 100,
-				},
-			},
-		},
-	}
-
-	require.False(t, svc.shouldBridgeOpenAIWSHTTP(nil, 99, ""))
-	require.True(t, svc.shouldBridgeOpenAIWSHTTP(nil, 100, ""))
-	require.False(t, svc.shouldBridgeOpenAIWSHTTP(nil, 1000, "resp_existing"))
-
-	svc.cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = false
-	require.False(t, svc.shouldBridgeOpenAIWSHTTP(nil, 1000, ""))
-	require.True(t, svc.shouldBridgeOpenAIWSHTTP(&Account{Platform: PlatformGrok}, 1, "resp_existing"))
-}
-
-func TestOpenAIWSPassthroughFirstMessageBridgeDecision(t *testing.T) {
-	const threshold = 100
-	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
-		OpenAIWS: config.GatewayOpenAIWSConfig{
-			HTTPBridgeEnabled:        true,
-			HTTPBridgeThresholdBytes: threshold,
-		},
-	}}}
-	exactThresholdPayload := `{"type":"response.create","input":"` +
-		strings.Repeat("x", threshold-len(`{"type":"response.create","input":""}`)) + `"}`
-
-	tests := []struct {
-		name    string
-		payload string
-		want    bool
-	}{
-		{name: "oversized without previous response id bridges", payload: `{"type":"response.create","input":"` + strings.Repeat("x", 100) + `"}`, want: true},
-		{name: "omitted type bridges as response create", payload: `{"input":"` + strings.Repeat("x", 100) + `"}`, want: true},
-		{name: "blank type bridges as response create", payload: `{"type":"   ","padding":"` + strings.Repeat("x", 100) + `"}`, want: true},
-		{name: "exact threshold bridges", payload: exactThresholdPayload, want: true},
-		{name: "small stays passthrough", payload: `{"type":"response.create","input":"x"}`},
-		{name: "previous response id stays passthrough", payload: `{"type":"response.create","previous_response_id":"resp_previous","input":"` + strings.Repeat("x", 100) + `"}`},
-		{name: "duplicate type stays passthrough", payload: `{"type":"response.create","type":"response.create","input":"` + strings.Repeat("x", 100) + `"}`},
-		{name: "duplicate previous response id stays passthrough", payload: `{"type":"response.create","previous_response_id":null,"previous_response_id":null,"input":"` + strings.Repeat("x", 100) + `"}`},
-		{name: "null type bridges as response create", payload: `{"type":null,"padding":"` + strings.Repeat("x", 100) + `"}`, want: true},
-		{name: "non-string type stays passthrough", payload: `{"type":123,"padding":"` + strings.Repeat("x", 100) + `"}`},
-		{name: "oversized response cancel stays passthrough", payload: `{"type":"response.cancel","padding":"` + strings.Repeat("x", 100) + `"}`},
-		{name: "oversized other event stays passthrough", payload: `{"type":"session.update","padding":"` + strings.Repeat("x", 100) + `"}`},
-		{name: "oversized malformed JSON stays passthrough", payload: `{"type":"response.create","padding":"` + strings.Repeat("x", 100)},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, svc.shouldBridgeOpenAIWSPassthroughFirstMessage(nil, []byte(tt.payload)))
 		})
 	}
 }
@@ -2177,8 +2119,8 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 			Gateway: config.GatewayConfig{
 				MaxLineSize: defaultMaxLineSize,
 				OpenAIWS: config.GatewayOpenAIWSConfig{
-					HTTPBridgeEnabled:        true,
-					HTTPBridgeThresholdBytes: 1,
+					ModeRouterV2Enabled: true,
+					IngressModeDefault:  OpenAIWSIngressModeHTTPBridge,
 				},
 			},
 		},
@@ -2582,7 +2524,7 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_retention").Exists())
 }
 
-func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
+func TestOpenAIWSManualHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	sseBody := strings.Join([]string{
@@ -2603,14 +2545,12 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 		Gateway: config.GatewayConfig{
 			MaxLineSize: defaultMaxLineSize,
 			OpenAIWS: config.GatewayOpenAIWSConfig{
-				Enabled:                  true,
-				APIKeyEnabled:            true,
-				ResponsesWebsocketsV2:    true,
-				ModeRouterV2Enabled:      true,
-				IngressModeDefault:       OpenAIWSIngressModeCtxPool,
-				ClientReadLimitBytes:     64 * 1024 * 1024,
-				HTTPBridgeEnabled:        true,
-				HTTPBridgeThresholdBytes: 17*1024*1024 + 512,
+				Enabled:               true,
+				APIKeyEnabled:         true,
+				ResponsesWebsocketsV2: true,
+				ModeRouterV2Enabled:   true,
+				IngressModeDefault:    OpenAIWSIngressModeHTTPBridge,
+				ClientReadLimitBytes:  64 * 1024 * 1024,
 			},
 		},
 	}
@@ -2633,7 +2573,7 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 		},
 		Extra: map[string]any{
 			"openai_apikey_responses_websockets_v2_enabled": true,
-			"openai_apikey_responses_websockets_v2_mode":    OpenAIWSIngressModePassthrough,
+			"openai_apikey_responses_websockets_v2_mode":    OpenAIWSIngressModeHTTPBridge,
 		},
 		Concurrency: 1,
 		Status:      StatusActive,
@@ -2642,7 +2582,6 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 	account.Schedulable = true
 	payload := []byte(strings.Repeat(" ", 1024) + `{"type":"response.create","generate":true,"model":"gpt-5","stream":true,"input":"` + strings.Repeat("x", 17*1024*1024) + `"}`)
 	require.Greater(t, len(payload), 16*1024*1024)
-	require.GreaterOrEqual(t, int64(len(payload)), cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes)
 	require.Less(t, int64(len(payload)), ResolveOpenAIWSClientReadLimitBytes(cfg))
 
 	type turnOutcome struct {
@@ -2744,7 +2683,6 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 	require.Equal(t, http.MethodPost, upstream.lastReq.Method)
 	require.Equal(t, "https://env-openai.example/v1/responses", upstream.lastReq.URL.String())
 	require.Equal(t, "env-openai", account.GetCredential("model_provider"))
-	require.Less(t, int64(len(upstream.lastBody)), cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes)
 	require.Greater(t, len(upstream.lastBody), 16*1024*1024)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "type").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "generate").Exists())
@@ -2786,8 +2724,8 @@ func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseI
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 1
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeHTTPBridge
 	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
 	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
 	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
@@ -2816,7 +2754,7 @@ func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseI
 		Type:        AccountTypeAPIKey,
 		Credentials: map[string]any{"api_key": "sk-upstream"},
 		Extra: map[string]any{
-			"responses_websockets_v2_enabled": true,
+			"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge,
 		},
 		Concurrency: 1,
 		Status:      StatusActive,
@@ -2925,8 +2863,8 @@ func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
 	cfg.Gateway.OpenAIWS.Enabled = true
 	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
-	cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 1
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeHTTPBridge
 	cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 1
 	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
 	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
@@ -2946,7 +2884,7 @@ func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeAPIKey,
 		Credentials: map[string]any{"api_key": "sk-upstream"},
-		Extra:       map[string]any{"responses_websockets_v2_enabled": true},
+		Extra:       map[string]any{"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
 		Concurrency: 1,
 		Status:      StatusActive,
 		Schedulable: true,
@@ -3045,10 +2983,10 @@ func TestOpenAIWSHTTPBridgeContinuationRecognizesResentHistory(t *testing.T) {
 					`{"type":"response.completed","response":{"id":"resp_2","model":"gpt-5.1","output":[],"usage":{"input_tokens":9,"output_tokens":1}}}`,
 				),
 			}}
-			svc := newOpenAIWSHTTPBridgeThresholdTestService(upstream)
+			svc := newOpenAIWSManualHTTPBridgeTestService(upstream)
 			account := &Account{
 				ID: 9007, Name: "oauth-resent-history", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
-				Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+				Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
 				Concurrency: 1, Status: StatusActive, Schedulable: true,
 			}
 			runOpenAIWSIngressTurns(t, svc, account, "test-token",

@@ -20,9 +20,8 @@ import (
 )
 
 const (
-	openAIWSClientReadLimitBytesDefault     int64 = 64 * 1024 * 1024
-	openAIWSHTTPBridgeThresholdBytesDefault int64 = 15 * 1024 * 1024
-	openAIWSHTTPBridgeErrorBodyLimitBytes         = 64 * 1024
+	openAIWSClientReadLimitBytesDefault   int64 = 64 * 1024 * 1024
+	openAIWSHTTPBridgeErrorBodyLimitBytes       = 64 * 1024
 )
 
 const openAIWSHTTPBridgeToolStateContextKey = "openai_ws_http_bridge_tool_state"
@@ -107,154 +106,10 @@ func ResolveOpenAIWSClientReadLimitBytes(cfg *config.Config) int64 {
 	return cfg.Gateway.OpenAIWS.ClientReadLimitBytes
 }
 
-func (s *OpenAIGatewayService) openAIWSHTTPBridgeEnabled() bool {
-	return s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.HTTPBridgeEnabled
-}
-
-func (s *OpenAIGatewayService) openAIWSHTTPBridgeThresholdBytes() int64 {
-	if s == nil || s.cfg == nil || s.cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes <= 0 {
-		return openAIWSHTTPBridgeThresholdBytesDefault
-	}
-	return s.cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes
-}
-
-func (s *OpenAIGatewayService) shouldBridgeOpenAIWSHTTP(account *Account, payloadBytes int, previousResponseID string) bool {
-	if account != nil && account.Platform == PlatformGrok {
-		return true
-	}
-	if !s.openAIWSHTTPBridgeEnabled() {
-		return false
-	}
-	if strings.TrimSpace(previousResponseID) != "" {
-		return false
-	}
-	threshold := s.openAIWSHTTPBridgeThresholdBytes()
-	return threshold > 0 && int64(payloadBytes) >= threshold
-}
-
-func (s *OpenAIGatewayService) shouldBridgeOpenAIWSPassthroughFirstMessage(account *Account, payload []byte) bool {
-	if account != nil && account.Platform == PlatformGrok {
-		return true
-	}
-	if !s.openAIWSHTTPBridgeEnabled() || int64(len(payload)) < s.openAIWSHTTPBridgeThresholdBytes() {
-		return false
-	}
-	if !json.Valid(payload) {
-		return false
-	}
-
-	i := skipOpenAIWSJSONSpace(payload, 0)
-	if i >= len(payload) || payload[i] != '{' {
-		return false
-	}
-	i++
-	eventType := "response.create"
-	previousResponseID := ""
-	typeSeen, previousResponseIDSeen := false, false
-	for {
-		i = skipOpenAIWSJSONSpace(payload, i)
-		if payload[i] == '}' {
-			break
-		}
-		keyStart := i
-		keyEnd := scanOpenAIWSJSONString(payload, keyStart)
-		i = skipOpenAIWSJSONSpace(payload, keyEnd)
-		i++ // json.Valid guarantees the colon.
-		i = skipOpenAIWSJSONSpace(payload, i)
-		valueStart := i
-		i = skipOpenAIWSJSONValue(payload, i)
-
-		key := ""
-		// A critical key is at most 20 decoded bytes. The generous encoded bound
-		// covers escaped spellings without allocating attacker-sized key strings.
-		if keyEnd-keyStart <= 128 {
-			_ = json.Unmarshal(payload[keyStart:keyEnd], &key)
-		}
-		switch key {
-		case "type":
-			if typeSeen {
-				return false
-			}
-			typeSeen = true
-			var value *string
-			if err := json.Unmarshal(payload[valueStart:i], &value); err != nil {
-				return false
-			}
-			if value == nil || strings.TrimSpace(*value) == "" {
-				eventType = "response.create"
-			} else {
-				eventType = strings.TrimSpace(*value)
-			}
-		case "previous_response_id":
-			if previousResponseIDSeen {
-				return false
-			}
-			previousResponseIDSeen = true
-			var value *string
-			if err := json.Unmarshal(payload[valueStart:i], &value); err != nil {
-				return false
-			}
-			if value != nil {
-				previousResponseID = strings.TrimSpace(*value)
-			}
-		}
-		i = skipOpenAIWSJSONSpace(payload, i)
-		if payload[i] == ',' {
-			i++
-		}
-	}
-	return eventType == "response.create" && previousResponseID == ""
-}
-
-func skipOpenAIWSJSONSpace(payload []byte, i int) int {
-	for i < len(payload) {
-		switch payload[i] {
-		case ' ', '\t', '\r', '\n':
-			i++
-		default:
-			return i
-		}
-	}
-	return i
-}
-
-func scanOpenAIWSJSONString(payload []byte, i int) int {
-	for i++; i < len(payload); i++ {
-		switch payload[i] {
-		case '\\':
-			i++
-		case '"':
-			return i + 1
-		}
-	}
-	return len(payload)
-}
-
-func skipOpenAIWSJSONValue(payload []byte, i int) int {
-	if payload[i] == '"' {
-		return scanOpenAIWSJSONString(payload, i)
-	}
-	if payload[i] != '{' && payload[i] != '[' {
-		for i < len(payload) && payload[i] != ',' && payload[i] != '}' {
-			i++
-		}
-		return i
-	}
-	depth := 0
-	for ; i < len(payload); i++ {
-		switch payload[i] {
-		case '"':
-			i = scanOpenAIWSJSONString(payload, i) - 1
-		case '{', '[':
-			depth++
-		case '}', ']':
-			depth--
-			if depth == 0 {
-				return i + 1
-			}
-		}
-	}
-	return len(payload)
+func (s *OpenAIGatewayService) openAIWSManualHTTPBridge(account *Account) bool {
+	return s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled &&
+		account != nil && account.IsOpenAI() &&
+		nativeOpenAIWSRoutingAccount(account).ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault) == OpenAIWSIngressModeHTTPBridge
 }
 
 func prepareOpenAIWSHTTPBridgeBody(account *Account, payload []byte) ([]byte, error) {
@@ -511,9 +366,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if reason == "" {
 			return s.proxyOpenAIWSExcelBPSTurn(ctx, c, account, body, originalModel, writeClientMessage)
 		}
-		// Hosted capabilities retain the existing same-account native
-		// fallback, over HTTP/SSE on this bridged client connection. BPS
-		// payloads keep the unmapped model, so map it once for the native path.
+		if !s.openAIWSManualHTTPBridge(account) {
+			return nil, newOpenAIWSNativeModelSwitchError(originalModel)
+		}
+		// Explicit manual bridge mode keeps the original native HTTP fallback.
 		recordExcelBPSNativeFallback(ctx, account, reason)
 		body, err = sjson.SetBytes(body, "model", normalizeOpenAIModelForUpstream(account, account.GetMappedModel(gjson.GetBytes(body, "model").String())))
 		if err != nil {

@@ -410,6 +410,8 @@ main 验证：后端 `go test -tags=unit ./...` 全量、`go vet -tags=unit ./..
 
 ## 2026-10-03：#242 图片兼容与原生 OAuth 批量 WS→SSE 开关
 
+> 2026-10-04 更新：下述批量 WS→SSE 开关已移除，历史字段不再影响路由。当前协议及 BPS 适配规则见 [OpenAI 客户端与上游协议](openai-transports.md)。本节保留引入时的来源和验证记录。
+
 本次交付先前审计并经复审修正的工作区实现。来源固定为 ranxi2001/production `bc83ff9c367883e5b7d0140e6bb42e2e7cc5239c`；不整体合并 fork。#242 的 `0e1cad458abc56a987aff14959491d06915dc6d0`、`8519ded9010c09a7f755e78852466e2fc6e68cf1` 图片默认值已由本地 `540552219` 适配，本轮补齐说明和基于 `8cd0c6c99277e87cdd65b1df68f1263125646e65` 的图片 HTTP 测试矩阵，保留原作者 psyche314 的来源归属。
 
 ### 新增功能

@@ -818,11 +818,8 @@ export default {
         responsesWebsocketsV2Desc:
           '預設關閉。開啟後可啟用 responses_websockets_v2 協議能力（受閘道器全域開關與帳號類型開關約束）。',
         wsMode: 'WS mode',
-        wsSseAcceleration: 'HTTP 串流 WS 加速',
-        wsSseAccelerationDesc:
-          '預設關閉。普通 OAuth 帳號的串流 Responses 可透過上游 WS 連線池返回 SSE，並立即傳送前置事件。建議選擇上下文池模式，需關閉自動透傳；全域 WS 開關仍生效，已綁定的傳輸外掛優先。僅握手失敗時回退 HTTP，請求傳送後不自動重放。前置事件不代表正文已開始生成。實際走 Excel / BPS 的請求不使用此加速。',
         wsModeDesc:
-          '僅對目前 OpenAI 帳號類型生效。選擇“關閉”可停用 WS；其餘模式需全域 gateway.openai_ws.mode_router_v2_enabled=true 才按所選方式連線，未開啟時統一使用上下文池。',
+          'HTTP 用戶端固定使用上游 HTTP；本設定僅對目前 OpenAI 帳號類型的 WS 用戶端生效。選擇“關閉”可停用 WS；其餘模式需全域 gateway.openai_ws.mode_router_v2_enabled=true 才按所選方式連線，未開啟時統一使用上下文池。',
         wsModeOff: '關閉（off）',
         wsModeCtxPool: '上下文池（ctx_pool）',
         wsModePassthrough: '透傳（passthrough）',

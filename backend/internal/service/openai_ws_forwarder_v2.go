@@ -468,7 +468,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		mappedModelBytes = []byte(mappedModel)
 	}
 	bufferedStreamEvents := make([][]byte, 0, 4)
-	flushEarlyEvents := reqStream && decision.Reason == openAIOAuthWSSSEAccelerationReason
 	eventCount := 0
 	tokenEventCount := 0
 	terminalEventCount := 0
@@ -834,9 +833,8 @@ readLoop:
 		}
 
 		if reqStream {
-			// 默认缓冲首 token 前的事件，保留既有的早期错误处理窗口。
-			// 显式开启 HTTP SSE 加速时立即刷出，之后不再重放请求。
-			shouldBuffer := !flushEarlyEvents && firstTokenMs == nil && !isTokenEvent && !isTerminalEvent
+			// 缓冲首 token 前的事件，保留既有的早期错误处理窗口。
+			shouldBuffer := firstTokenMs == nil && !isTokenEvent && !isTerminalEvent
 			if shouldBuffer {
 				buffered := make([]byte, len(message))
 				copy(buffered, message)
@@ -855,7 +853,7 @@ readLoop:
 				}
 			} else {
 				flushBufferedStreamEvents(eventType)
-				emitStreamMessage(message, isTerminalEvent || flushEarlyEvents)
+				emitStreamMessage(message, isTerminalEvent)
 			}
 		} else {
 			if responseField.Exists() && responseField.Type == gjson.JSON {

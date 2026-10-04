@@ -178,6 +178,12 @@ func TestOpenAIWSBPSBridgePreservesHostedToolPolicyAndPrewarm(t *testing.T) {
 			require.Len(t, events, 2)
 			events = nil
 			result, err = svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", payload, len(payload), "gpt-6-astra", true, "", "", "", "", 2, write)
+			if !omit {
+				require.ErrorIs(t, err, ErrOpenAIWSModelSwitchRequiresReconnect)
+				require.Nil(t, result)
+				require.Empty(t, upstream.requests, "hosted fallback must not use native HTTP on a WS request")
+				return
+			}
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.False(t, result.LocalPrewarm)
@@ -438,32 +444,41 @@ func TestOpenAIWSBPSIngressSchedulerAllowsAllBPSAccountPool(t *testing.T) {
 	}
 }
 
-func TestOpenAIWSBPSIngressSwitchToNativeMapsModelOnce(t *testing.T) {
-	upstream := &httpUpstreamRecorder{resp: bpsCompletionResponse(200, bpsCompletedStream("resp_native", "hello"))}
-	svc := openAIClientToolsTestService(upstream)
-	svc.cfg = passthroughLifecycleConfig()
-	account := excelAccount()
-	account.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
-	account.Credentials["model_mapping"] = map[string]any{"alias": "gpt-6-sol", "gpt-6-sol": "gpt-6-astra"}
-	turns := make(chan bpsWSTestTurn, 2)
-	client, serverErr := startBPSWSMemorySession(t, svc, account, `{"type":"response.create","model":"gpt-6-astra","generate":false,"input":[]}`, &OpenAIWSIngressHooks{
-		AfterTurn: func(_ int, result *OpenAIForwardResult, err error) { turns <- bpsWSTestTurn{result, err} },
-	})
-	defer client.CloseNow()
-	readBPSWSTestTurn(t, client)
-	prewarm := <-turns
-	require.NoError(t, prewarm.err)
-	require.True(t, prewarm.result.LocalPrewarm)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"alias","input":"hello"}`)))
-	readBPSWSTestTurn(t, client)
-	turn := <-turns
-	require.NoError(t, turn.err)
-	require.Equal(t, "chatgpt.com", upstream.lastReq.URL.Host)
-	require.Equal(t, "gpt-6-sol", gjson.GetBytes(upstream.lastBody, "model").String())
-	require.Equal(t, "gpt-6-sol", turn.result.UpstreamModel)
-	requireBPSWSTestServerExit(t, client, serverErr)
+func TestOpenAIWSBPSIngressSwitchToNativeRequiresReconnect(t *testing.T) {
+	for _, nextPayload := range []string{
+		`{"type":"response.create","model":"alias","input":"hello"}`,
+		`{"type":"response.create","model":"gpt-6-astra","input":"hello","tools":[{"type":"web_search","external_web_access":true}]}`,
+	} {
+		t.Run(nextPayload, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: bpsCompletionResponse(200, bpsCompletedStream("resp_bps", "hello"))}
+			svc := openAIClientToolsTestService(upstream)
+			svc.cfg = passthroughLifecycleConfig()
+			account := excelAccount()
+			account.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
+			account.Credentials["model_mapping"] = map[string]any{"alias": "gpt-6-sol", "gpt-6-sol": "gpt-6-astra"}
+			client, serverErr := startBPSWSMemorySession(t, svc, account, `{"type":"response.create","model":"gpt-6-astra","input":"first"}`, nil)
+			defer client.CloseNow()
+			readBPSWSTestTurn(t, client)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(nextPayload)))
+			go func() {
+				for {
+					if _, _, err := client.Read(context.Background()); err != nil {
+						return
+					}
+				}
+			}()
+			select {
+			case err := <-serverErr:
+				require.ErrorIs(t, err, ErrOpenAIWSModelSwitchRequiresReconnect)
+			case <-time.After(3 * time.Second):
+				t.Fatal("BPS connection did not stop before a native turn")
+			}
+			require.Len(t, upstream.requests, 1, "only the BPS turn may use HTTP")
+			require.Equal(t, "bps.openai.com", upstream.lastReq.URL.Host)
+		})
+	}
 }
 
 type nativeCodexStagedConn struct{ *stagedPassthroughConn }
@@ -815,39 +830,22 @@ func TestOpenAIWSBPSTurnSuccessSurvivesDrainExpiry(t *testing.T) {
 // Usage logs label a turn by result.UpstreamEndpoint, else by the endpoint
 // recorded on the connection's gin context. A native turn that follows a BPS
 // turn on the same bridged connection must not inherit the BPS label.
-func TestOpenAIWSBridgeNativeTurnAfterBPSDropsBPSEndpoint(t *testing.T) {
-	for _, tc := range []struct {
-		name, nextModel string
-		nextBPS         bool
-		nextTools       string
-	}{
-		{name: "hosted tool fallback", nextModel: "gpt-6-astra", nextBPS: true, nextTools: `,"tools":[{"type":"web_search","external_web_access":true}]`},
-		{name: "switch to a non-BPS model", nextModel: "gpt-6-sol"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			upstream := &httpUpstreamRecorder{responses: []*http.Response{
-				bpsCompletionResponse(200, bpsCompletedStream("resp_bps", "from bps")),
-				bpsCompletionResponse(200, bpsCompletedStream("resp_native", "from native")),
-			}}
-			svc := openAIClientToolsTestService(upstream)
-			svc.cfg = passthroughLifecycleConfig()
-			account := excelAccount()
-			account.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
-			write := func([]byte) error { return nil }
-
-			first := []byte(`{"type":"response.create","model":"gpt-6-astra","stream":true,"input":"first"}`)
-			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", first, len(first), "gpt-6-astra", true, "", "", "", "", 1, write)
-			require.NoError(t, err)
-			require.Equal(t, "/basispoints/api/responses", result.UpstreamEndpoint)
-
-			next := []byte(`{"type":"response.create","model":"` + tc.nextModel + `","stream":true,"input":"second"` + tc.nextTools + `}`)
-			result, err = svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", next, len(next), tc.nextModel, tc.nextBPS, "", "", "", "", 2, write)
-			require.NoError(t, err)
-			require.Equal(t, "chatgpt.com", upstream.lastReq.URL.Host, "the second turn used the native channel")
-			require.NotEqual(t, "/basispoints/api/responses", result.UpstreamEndpoint)
-			require.Empty(t, GetActualOpenAIUpstreamEndpoint(c), "the BPS turn's endpoint must not label the native turn")
-		})
-	}
+func TestOpenAIWSBPSRejectedNativeFallbackClearsEndpoint(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: bpsCompletionResponse(200, bpsCompletedStream("resp_bps", "from bps"))}
+	svc := openAIClientToolsTestService(upstream)
+	svc.cfg = passthroughLifecycleConfig()
+	account := excelAccount()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	write := func([]byte) error { return nil }
+	first := []byte(`{"type":"response.create","model":"gpt-6-astra","input":"first"}`)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", first, len(first), "gpt-6-astra", true, "", "", "", "", 1, write)
+	require.NoError(t, err)
+	require.Equal(t, "/basispoints/api/responses", result.UpstreamEndpoint)
+	next := []byte(`{"type":"response.create","model":"gpt-6-astra","input":"second","tools":[{"type":"web_search","external_web_access":true}]}`)
+	result, err = svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", next, len(next), "gpt-6-astra", true, "", "", "", "", 2, write)
+	require.ErrorIs(t, err, ErrOpenAIWSModelSwitchRequiresReconnect)
+	require.Nil(t, result)
+	require.Len(t, upstream.requests, 1)
+	require.Empty(t, GetActualOpenAIUpstreamEndpoint(c))
 }

@@ -148,9 +148,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
-	// HTTP SSE may opt into the native WS pool on ordinary OAuth accounts.
-	wsDecision = s.resolveOpenAIHTTPWSSSEDecision(c, account, body, wsDecision)
-	accelerateHTTPSSE := wsDecision.Reason == openAIOAuthWSSSEAccelerationReason
+	// HTTP ingress always stays on HTTP, including accounts with the retired
+	// OAuth WS-to-SSE acceleration flag in their saved extra settings.
+	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
 	compactPath := isOpenAIResponsesCompactPath(c)
 	if shouldFlattenOpenAIResponsesNamespaces(account, wsDecision.Transport, passthroughEnabled, compactPath) {
@@ -959,9 +959,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if c != nil && c.Writer != nil && c.Writer.Written() {
 				break
 			}
-			if accelerateHTTPSSE {
-				break
-			}
 			var taskRecoveredErr *agentIdentityTaskRecoveredError
 			if errors.As(wsErr, &taskRecoveredErr) {
 				continue
@@ -1070,12 +1067,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if IsOpenAIRPMError(wsErr) {
 			return nil, wsErr
 		}
-		if !accelerateHTTPSSE || !canFallbackOpenAIWSSSEHandshake(ctx, c, wsErr) {
-			s.writeOpenAIWSFallbackErrorResponse(c, account, wsErr)
-			return nil, wsErr
-		}
-		c.Set("openai_ws_transport_decision", string(OpenAIUpstreamTransportHTTPSSE))
-		c.Set("openai_ws_transport_reason", "oauth_ws_sse_handshake_fallback")
+		s.writeOpenAIWSFallbackErrorResponse(c, account, wsErr)
+		return nil, wsErr
 	}
 
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
