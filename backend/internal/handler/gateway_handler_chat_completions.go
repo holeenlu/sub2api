@@ -47,7 +47,11 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	// Read request body
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		RespondRequestBodyReadFailure(c, reqLog, err, h.chatCompletionsErrorResponse)
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.chatCompletionsErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
 
@@ -109,9 +113,6 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			"This group is restricted to Claude Code clients (/v1/messages only)")
 		return
 	}
-	if apiKey.Group != nil {
-		requireAPIKeyQueueCapability(c, service.APIKeyQueueCapabilityForbiddenWhenClaudeCodeOnly)
-	}
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIChat, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.openAISecurityAuditError(c, decision)
@@ -127,7 +128,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 
-	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, apiKey.ID, apiKey.ConcurrencyLimit, reqStream, &streamStarted)
+	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted)
 	if err != nil {
 		reqLog.Warn("gateway.cc.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", streamStarted)
@@ -180,9 +181,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		selectionSessionHash = "gemini:" + selectionSessionHash
 	}
 	// 3. Account selection + failover loop
-	fs := NewFailoverState(h.maxAccountSwitches, false, c)
+	fs := NewFailoverState(h.maxAccountSwitches, false)
 	if groupPlatform == service.PlatformGemini {
-		fs = NewFailoverState(h.maxAccountSwitchesGemini, false, c)
+		fs = NewFailoverState(h.maxAccountSwitchesGemini, false)
 	}
 
 	for {
@@ -196,11 +197,15 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				return
 			}
 			if len(fs.FailedAccountIDs) == 0 {
-				cls := classifySelectionErrorFromGin(c, err, h.gatewayService, apiKey, reqModel, reqModel, groupPlatform)
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, groupPlatform)
+				cls = classifySelectionFailureError(err, cls)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
-				message := cls.messageWithSelectionDetail("No available accounts: ", err)
+				message := cls.Message
+				if !cls.ModelNotFound {
+					message = "No available accounts: " + err.Error()
+				}
 				h.chatCompletionsErrorResponse(c, cls.Status, cls.ErrType, message)
 				return
 			}
@@ -263,7 +268,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		account = latest
 		selection.Account = latest
 		if selection.ProfitGateActive() {
-			if err := h.gatewayService.BindSelectionStickySessionAfterProfitAdmission(admissionCtx, selection, apiKey.GroupID, selectionSessionHash, account.ID); err != nil {
+			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, selectionSessionHash, account.ID); err != nil {
 				reqLog.Warn("gateway.cc.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
@@ -385,13 +390,11 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 // chatCompletionsErrorResponse writes an error in OpenAI Chat Completions format.
 func (h *GatewayHandler) chatCompletionsErrorResponse(c *gin.Context, status int, errType, message string) {
-	errorObject := gin.H{
-		"type":    errType,
-		"message": message,
-	}
-	applyNoAccountClientErrorFields(c, errorObject)
 	c.JSON(status, gin.H{
-		"error": errorObject,
+		"error": gin.H{
+			"type":    errType,
+			"message": message,
+		},
 	})
 }
 
@@ -402,10 +405,6 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	}
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
-		service.AnnotateLastOpsUpstreamFailure(c, lastErr)
-		// 覆盖上一次写下的 account_switch：本次请求到此为止，不再换号。
-		// 少了这一步，ops 里最后一条事件会停在「切换中」，与实际结果矛盾。
-		service.MarkLastOpsUpstreamErrorExhausted(c)
 	}
 	if lastErr != nil && lastErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(lastErr)
@@ -420,21 +419,14 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		h.chatCompletionsErrorResponse(c, status, "server_error", lastErr.ClientMessage)
 		return
 	}
-	// 上游原始状态码进 ops，映射后的才给客户端——与 /v1/messages 的
-	// handleFailoverExhausted 同一套约定。两者若合用一个变量，ops 里记的就是
-	// 网关自己的 502/503，排障时看不出上游到底返回了什么。
-	upstreamStatus := 0
-	if lastErr != nil {
-		upstreamStatus = lastErr.StatusCode
-	}
-	statusCode, errType, errMessage := http.StatusBadGateway, "server_error", "All available accounts exhausted"
-	if upstreamStatus > 0 {
-		statusCode, errType, errMessage = h.mapUpstreamError(upstreamStatus)
+	statusCode := http.StatusBadGateway
+	if lastErr != nil && lastErr.StatusCode > 0 {
+		statusCode = lastErr.StatusCode
 	}
 	if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
-		service.SetOpsUpstreamError(c, upstreamStatus, service.OpenAISilentRefusalClientMessage(), "")
+		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
 		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
 		return
 	}
-	h.chatCompletionsErrorResponse(c, statusCode, errType, errMessage)
+	h.chatCompletionsErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")
 }

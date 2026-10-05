@@ -13,25 +13,24 @@ vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copyToClip
 vi.mock('@/api/modelPlaza', () => ({ getModelPlaza }))
 
 const model = (name = 'claude-fable-5-1') => ({
-  name, platform: 'anthropic', channel_name: 'Premium channel',
+  name, platform: 'anthropic',
   pricing: { billing_mode: 'token', input_price: 0.000004, output_price: 0.00002, cache_read_price: 0.0000004 },
   official_pricing: { input_price: 99, output_price: 99, cache_read_price: 99 }
 })
-const group = (id = 1, models = [model()]) => ({ id, name: 'Not the channel', rate_multiplier: 2, models })
+const group = (id = 1, models = [model()]) => ({ id, name: 'Native group', rate_multiplier: 2, models })
 function render(locale = 'en') {
   return mount(ModelShowcase, { global: { plugins: [createPinia(), createI18n({ legacy: false, locale, messages: { en, zh, 'zh-TW': zhTW, ja } })] } })
 }
 beforeEach(() => { vi.clearAllMocks(); getModelPlaza.mockResolvedValue({ groups: [group()] }) })
 
 describe('ModelShowcase channel data', () => {
-  it('uses channel name and model pricing times group rate, not official prices', async () => {
+  it('uses native group name and model pricing with the group rate', async () => {
     const wrapper = render()
     expect(wrapper.find('[role="status"]').exists()).toBe(true)
     await flushPromises()
     const card = wrapper.get('article')
     expect(card.get('h4').text()).toBe('claude-fable-5-1')
-    expect(card.text()).toContain('Premium channel')
-    expect(card.text()).not.toContain('Not the channel')
+    expect(card.text()).toContain('Native group')
     expect(card.findAll('dd').map(el => el.text())).toEqual(['US$8.00', 'US$40.00', 'US$0.80'])
     expect(card.get('a').attributes('href')).toBe('https://platform.claude.com/docs/en/models/fable-5-1/overview')
   })
@@ -50,7 +49,7 @@ describe('ModelShowcase channel data', () => {
   })
 
   it('preserves zero prices and shows missing data as unknown', async () => {
-    getModelPlaza.mockResolvedValue({ groups: [{ ...group(), models: [{ ...model(), channel_name: '', pricing: { billing_mode: 'token', input_price: 0, output_price: null, cache_read_price: null } }] }] })
+    getModelPlaza.mockResolvedValue({ groups: [{ ...group(), name: '', models: [{ ...model(), pricing: { billing_mode: 'token', input_price: 0, output_price: null, cache_read_price: null } }] }] })
     const wrapper = render(); await flushPromises()
     expect(wrapper.findAll('dd').map(el => el.text())).toEqual(['US$0.00', '—', '—'])
     expect(wrapper.text()).toContain('Channel name unavailable')

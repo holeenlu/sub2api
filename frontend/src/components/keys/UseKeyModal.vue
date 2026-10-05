@@ -133,7 +133,6 @@
           </nav>
         </div>
 
-        <p v-if="codexSetupProfileRequired && ['codex','codex-ws'].includes(activeClientTab) && !currentFiles.length" role="status" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">{{ t('modelCatalog.setupUnavailable') }}</p>
         <!-- Code Blocks (Stacked for multi-file platforms) -->
         <div class="space-y-4">
           <div
@@ -150,17 +149,6 @@
               <!-- Code Header -->
               <div class="flex items-center justify-between px-4 py-2 bg-gray-800 dark:bg-dark-800 border-b border-gray-700 dark:border-dark-700">
                 <span class="min-w-0 truncate text-xs text-gray-400 font-mono">{{ file.path }}</span>
-                <div class="flex flex-shrink-0 items-center gap-1.5">
-                <button
-                  v-if="file.downloadName"
-                  type="button"
-                  data-testid="setup-file-download"
-                  @click="downloadFile(file)"
-                  class="flex flex-shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white"
-                >
-                  <Icon name="download" size="xs" />
-                  {{ t('keys.useKeyModal.download') }}
-                </button>
                 <button
                   type="button"
                   @click="copyContent(file.content, index)"
@@ -177,7 +165,6 @@
                   </svg>
                   {{ copiedIndex === index ? t('keys.useKeyModal.copied') : t('keys.useKeyModal.copy') }}
                 </button>
-                </div>
               </div>
               <!-- Code Content -->
               <pre class="p-4 text-sm font-mono text-gray-100 overflow-x-auto"><code v-if="file.highlighted" v-html="file.highlighted"></code><code v-else v-text="file.content"></code></pre>
@@ -198,11 +185,10 @@
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('keys.useKeyModal.codexModelCatalog.description') }}
               </p>
-              <p class="mt-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300" data-testid="codex-model-catalog-path">
+              <p class="mt-1 truncate font-mono text-xs text-gray-700 dark:text-gray-300">
                 {{ codexModelCatalogMode === 'remote' ? codexModelCatalogUrl : codexModelCatalogPath }}
               </p>
               <select
-                v-if="codexModelCatalogRemoteSupported"
                 v-model="codexModelCatalogMode"
                 data-testid="codex-model-catalog-mode"
                 :aria-label="t('keys.useKeyModal.codexModelCatalog.mode')"
@@ -216,9 +202,8 @@
               </p>
             </div>
             <button
-              v-if="codexModelManifestState === 'ready' && selectedCodexCatalogModel"
+              v-if="codexModelManifestState === 'ready'"
               type="button"
-              data-testid="codex-model-catalog-download"
               class="btn btn-primary min-h-9 flex-shrink-0 px-3 text-xs"
               @click="downloadCodexModelManifest"
             >
@@ -226,6 +211,7 @@
               {{ t('keys.useKeyModal.codexModelCatalog.download') }}
             </button>
             <button
+              v-else
               type="button"
               data-testid="codex-model-catalog-fetch"
               class="btn btn-primary min-h-9 flex-shrink-0 px-3 text-xs"
@@ -238,28 +224,16 @@
                 class="mr-1.5"
                 :class="codexModelManifestState === 'loading' ? 'animate-spin' : ''"
               />
-              {{ codexModelManifestState === 'ready'
-                ? t('keys.useKeyModal.codexModelCatalog.refetch')
-                : codexModelManifestState === 'error'
+              {{ codexModelManifestState === 'error'
                 ? t('keys.useKeyModal.codexModelCatalog.retry')
                 : t('keys.useKeyModal.codexModelCatalog.fetch') }}
             </button>
           </div>
-          <div
-            v-if="codexModelManifestState === 'ready' && selectedCodexCatalogModel"
+          <p
+            v-if="codexModelManifestState === 'ready'"
             class="border-t border-gray-200 px-4 py-2 text-xs text-emerald-700 dark:border-dark-700 dark:text-emerald-300"
           >
-            <p>{{ t('keys.useKeyModal.codexModelCatalog.modelsCount', { count: codexModelManifestModelCount }) }}</p>
-            <ul data-testid="codex-model-catalog-preview" class="mt-2 flex max-h-40 flex-wrap gap-2 overflow-auto">
-              <li v-for="model in codexCatalogModels" :key="model.slug" class="rounded bg-gray-100 px-2 py-1 font-mono text-gray-700 dark:bg-dark-800 dark:text-gray-300">{{ model.slug }}</li>
-            </ul>
-          </div>
-          <p
-            v-else-if="codexModelManifestState === 'ready'"
-            data-testid="codex-model-selection-empty"
-            class="border-t border-amber-200 px-4 py-2 text-xs text-amber-700 dark:border-amber-900 dark:text-amber-300"
-          >
-            {{ t('keys.useKeyModal.codexModelCatalog.emptyDescription') }}
+            {{ t('keys.useKeyModal.codexModelCatalog.modelsCount', { count: codexModelManifestModelCount }) }}
           </p>
           <p
             v-else-if="codexModelManifestState === 'error'"
@@ -269,7 +243,6 @@
           </p>
         </section>
 
-        <a v-if="showCodexModelCatalog" href="/install/update-codex-models.py" download class="text-sm text-primary-600 underline">{{ t('modelCatalog.downloadUpdater') }}</a>
         <!-- Usage Note -->
         <div v-if="showPlatformNote" class="flex items-start gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
           <Icon name="infoCircle" size="md" class="text-blue-500 flex-shrink-0 mt-0.5" />
@@ -294,10 +267,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, h, watch, onBeforeUnmount, type Component } from 'vue'
+import { ref, computed, h, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAppStore } from '@/stores/app'
-import { BRAND_NAME } from '@/config/brand'
 import { saveAs } from 'file-saver'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -308,20 +279,10 @@ import {
   findCodexCatalogModel,
   formatCodexReasoningEffortTomlLine,
   parseCodexCatalogModels,
-  selectCodexConfigModel,
-  selectCodexConfigReasoningEffort,
-  type CodexCatalogModel
+  selectCodexConfigReasoningEffort
 } from '@/utils/codexCatalogConfig'
 
 interface Props {
-  setupProfile?: {
-    model: string
-    review_model: string
-    reasoning_effort?: string
-    context_window?: number
-    catalog_revision: string
-    status: string
-  } | null
   show: boolean
   apiKey: string
   baseUrl: string
@@ -345,61 +306,38 @@ interface FileConfig {
   content: string
   hint?: string  // Optional hint message for this file
   highlighted?: string
-  // File name offered by the per-card "Download" button. Left unset for shell
-  // snippets (Terminal / PowerShell / Command Prompt), which are not files.
-  downloadName?: string
 }
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const { t } = useI18n()
-// 產生給 CLI 的設定檔片段裡的站名，跟隨後台設定而不是寫死品牌名
-const appStore = useAppStore()
-const siteName = computed(() => appStore.siteName || BRAND_NAME)
-// eslint-disable-next-line no-control-regex -- TOML comments cannot contain raw control characters.
-const siteNameComment = computed(() => siteName.value.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' '))
 const { copyToClipboard: clipboardCopy } = useClipboard()
 
 const copiedIndex = ref<number | null>(null)
 const activeTab = ref<string>('unix')
 const activeClientTab = ref<string>('claude')
 type CodexAuthMode = 'legacy' | 'api-key'
-const codexAuthMode = ref<CodexAuthMode>('api-key')
+const codexAuthMode = ref<CodexAuthMode>('legacy')
 type CodexModelManifestState = 'idle' | 'loading' | 'ready' | 'error'
 const codexModelManifestState = ref<CodexModelManifestState>('idle')
 const codexModelManifestContent = ref('')
 const codexModelManifestModelCount = ref(0)
-// Defaults are precomputed from this key's published group catalog.
-const DEFAULT_CODEX_MODEL = computed(() => props.setupProfile?.model ?? '')
-const codexModelCatalogMode = ref<'remote' | 'file'>('file')
+const codexModelCatalogMode = ref<'remote' | 'file'>('remote')
 const codexModelManifestResponseBytes = ref(0)
 const codexModelCatalogOversized = computed(() => codexModelManifestResponseBytes.value > 1024 * 1024)
 const codexModelCatalogUrl = computed(() => buildCodexModelCatalogUrl(props.baseUrl))
+const codexLocalCatalogToml = computed(() => codexModelCatalogMode.value === 'file'
+  ? `model_catalog_json = "${CODEX_MODEL_CATALOG_CONFIG_PATH}"\n`
+  : '')
 let codexModelManifestController: AbortController | null = null
 let codexModelManifestRequestID = 0
 
-const codexModelCatalogSupported = computed(() =>
-  props.platform === 'openai' || props.platform === 'composite' || props.platform === 'zhipu'
-)
-
-const codexModelCatalogRemoteSupported = computed(() =>
-  props.platform === 'openai' || props.platform === 'composite'
-)
-
-const codexSetupProfileRequired = computed(() =>
-  props.platform === 'openai' || props.platform === 'composite'
-)
-
 const showCodexModelCatalog = computed(() =>
-  props.show && codexModelCatalogSupported.value &&
-  (activeClientTab.value === 'codex' || activeClientTab.value === 'codex-ws')
+  props.show &&
+  (activeClientTab.value === 'codex' ||
+    (props.platform === 'openai' && activeClientTab.value === 'codex-ws'))
 )
-
-const codexManifestContext = computed(() => {
-  if (!props.show || !codexModelCatalogSupported.value || !props.apiKey) return ''
-  return `${props.platform}|${props.baseUrl}|${props.apiKey}`
-})
 
 const codexModelCatalogPath = computed(() => {
   const isWindows = activeTab.value === 'windows'
@@ -411,13 +349,17 @@ const codexModelCatalogPath = computed(() => {
 // resolves relative to the config directory, so config.toml always uses ~/.
 const CODEX_MODEL_CATALOG_CONFIG_PATH = '~/.codex/codex-models.json'
 
+const codexManifestContext = computed(() => {
+  if (!showCodexModelCatalog.value) return ''
+  return `${props.platform}|${props.baseUrl}|${props.apiKey}`
+})
+
 // Reset tabs when platform changes
 const defaultClientTab = computed(() => {
   if (props.claudeCodeOnly) return 'claude'
   switch (props.platform) {
-
     case 'openai':
-      return 'codex-ws'
+      return 'codex'
     case 'grok':
       return 'grok'
     case 'gemini':
@@ -431,21 +373,15 @@ const defaultClientTab = computed(() => {
   }
 })
 
-// 每次打开都回到默认组合：OpenAI 为 Codex CLI (WebSocket) + API Key Mode + macOS / Linux。
-const resetSetupSelection = () => {
-  activeClientTab.value = defaultClientTab.value
+watch(() => [props.platform, props.claudeCodeOnly], () => {
   activeTab.value = 'unix'
-  codexAuthMode.value = 'api-key'
-}
-
-watch(() => [props.platform, props.claudeCodeOnly, props.apiKey], () => {
-  resetSetupSelection()
-  resetCodexModelManifest()
+  activeClientTab.value = defaultClientTab.value
+  codexAuthMode.value = 'legacy'
 }, { immediate: true })
 
 watch(() => props.show, (show) => {
   if (show) {
-    resetSetupSelection()
+    codexAuthMode.value = 'legacy'
   } else {
     resetCodexModelManifest()
   }
@@ -455,9 +391,7 @@ watch(codexManifestContext, (context, previousContext) => {
   if (context !== previousContext) {
     resetCodexModelManifest()
   }
-}, { immediate: true })
-
-onBeforeUnmount(resetCodexModelManifest)
+})
 
 // Reset shell tab when client changes
 watch(activeClientTab, () => {
@@ -533,7 +467,6 @@ const clientTabs = computed((): TabConfig[] => {
     return [{ id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon }]
   }
   switch (props.platform) {
-
     case 'openai': {
       const tabs: TabConfig[] = [
         { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
@@ -661,9 +594,6 @@ const platformDescription = computed(() => {
 })
 
 const platformNote = computed(() => {
-  if (activeClientTab.value === 'codex' && props.platform === 'zhipu') {
-    return t('keys.useKeyModal.zhipu.codexNote')
-  }
   if (activeClientTab.value === 'codex' &&
     props.platform !== 'openai' &&
     props.platform !== 'grok' &&
@@ -732,14 +662,11 @@ function resetCodexModelManifest() {
   codexModelManifestContent.value = ''
   codexModelManifestModelCount.value = 0
   codexModelManifestResponseBytes.value = 0
-  codexModelCatalogMode.value = 'file'
 }
 
 async function loadCodexModelManifest() {
-  if (!codexManifestContext.value) return
+  if (!showCodexModelCatalog.value || !props.apiKey) return
 
-  const baseUrl = props.baseUrl
-  const apiKey = props.apiKey
   codexModelManifestController?.abort()
   const controller = new AbortController()
   const requestID = ++codexModelManifestRequestID
@@ -747,7 +674,7 @@ async function loadCodexModelManifest() {
   codexModelManifestState.value = 'loading'
 
   try {
-    const result = await fetchCodexModelsManifest(baseUrl, apiKey, controller.signal)
+    const result = await fetchCodexModelsManifest(props.baseUrl, props.apiKey, controller.signal)
     if (requestID !== codexModelManifestRequestID) return
     codexModelManifestContent.value = result.content
     codexModelManifestModelCount.value = result.modelCount
@@ -767,16 +694,6 @@ async function loadCodexModelManifest() {
   }
 }
 
-// downloadFile saves the exact text shown in the card. Display, copy and download
-// all read file.content, so there is never a second template to drift.
-function downloadFile(file: FileConfig) {
-  if (!file.downloadName) return
-  const mime = file.downloadName.endsWith('.json')
-    ? 'application/json;charset=utf-8'
-    : 'text/plain;charset=utf-8'
-  saveAs(new Blob([file.content], { type: mime }), file.downloadName)
-}
-
 function downloadCodexModelManifest() {
   if (!codexModelManifestContent.value) return
   saveAs(
@@ -785,57 +702,16 @@ function downloadCodexModelManifest() {
   )
 }
 
-const codexCatalogModels = computed(() => parseCodexCatalogModels(codexModelManifestContent.value))
-const selectedCodexCatalogModel = computed(() =>
-  selectCodexConfigModel(codexCatalogModels.value, DEFAULT_CODEX_MODEL.value)
+const codexCatalogModelSlugs = computed(() =>
+  parseCodexCatalogModels(codexModelManifestContent.value).map((model) => model.slug)
 )
 
 function selectCodexCatalogModel(preferredModel: string): string {
-  if (codexModelCatalogSupported.value) return selectedCodexCatalogModel.value || preferredModel
-  return preferredModel
+  if (codexCatalogModelSlugs.value.includes(preferredModel)) return preferredModel
+  return codexCatalogModelSlugs.value[0] || preferredModel
 }
 
-function codexRemoteCatalogTomlLine(baseUrl: string): string {
-  if (!codexModelCatalogRemoteSupported.value || codexModelCatalogMode.value !== 'remote' || codexModelCatalogOversized.value) return ''
-  return `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n`
-}
-
-function codexCatalogTomlLine(): string {
-  if (!codexModelCatalogSupported.value || codexModelCatalogMode.value !== 'file') return ''
-  return `model_catalog_json = "${CODEX_MODEL_CATALOG_CONFIG_PATH}"\n`
-}
-
-function defaultCodexContextWindow(modelSlug: string): number {
-  const normalized = modelSlug.trim().toLowerCase()
-  if (/^glm-5\.3(?:-|$)/.test(normalized)) return 1_000_000
-  if (normalized === 'glm-4.7') return 200_000
-  if (/^deepseek-v4(?:-|$)/.test(normalized)) return 1_000_000
-  if (/^claude-(?:opus|sonnet)-5(?:-|$)/.test(normalized)) return 1_000_000
-  if (/^gemini-2\.5-pro(?:-|$)/.test(normalized)) return 2_097_152
-  if (/^gemini-/.test(normalized)) return 1_048_576
-  if (normalized === 'grok-4.20-multi-agent-0309' || normalized === 'grok-4.3') return 1_000_000
-  if (normalized === 'grok-4.5') return 500_000
-  if (normalized === 'grok-build-0.1') return 256_000
-  return 0
-}
-
-function codexContextWindowTomlLine(modelSlug: string): string {
-  const model = findCodexCatalogModel(codexModelManifestContent.value, modelSlug)
-  const configuredContextWindow = Number(
-    model?.context_window ?? props.setupProfile?.context_window ?? 0
-  )
-  const contextWindow = configuredContextWindow > 0
-    ? configuredContextWindow
-    : defaultCodexContextWindow(modelSlug)
-  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return ''
-  return `model_context_window = ${contextWindow}\n`
-}
-
-function codexReasoningEffortTomlLine(modelSlug: string, fallbackEffort: string | null = null): string {
-  if (!codexModelManifestContent.value) {
-    const profileEffort = props.setupProfile?.model === modelSlug ? props.setupProfile.reasoning_effort : null
-    return formatCodexReasoningEffortTomlLine(profileEffort || fallbackEffort)
-  }
+function codexReasoningEffortTomlLine(modelSlug: string): string {
   return formatCodexReasoningEffortTomlLine(
     selectCodexConfigReasoningEffort(findCodexCatalogModel(codexModelManifestContent.value, modelSlug))
   )
@@ -860,7 +736,6 @@ const comment = (value: string) => wrapToken('text-slate-500', value)
 // Syntax highlighting helpers
 // Generate file configs based on platform and active tab
 const currentFiles = computed((): FileConfig[] => {
-  if (codexSetupProfileRequired.value && ['codex','codex-ws'].includes(activeClientTab.value) && !selectedCodexCatalogModel.value && !DEFAULT_CODEX_MODEL.value) return []
   const baseUrl = props.baseUrl || window.location.origin
   const apiKey = props.apiKey
   const baseRoot = baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '')
@@ -894,8 +769,6 @@ const currentFiles = computed((): FileConfig[] => {
         ]
       case 'grok':
         return [generateOpenCodeConfig('grok', apiBase, apiKey)]
-      case 'zhipu':
-        return [generateOpenCodeConfig('zhipu', apiBase, apiKey)]
       default:
         return [generateOpenCodeConfig('openai', apiBase, apiKey)]
     }
@@ -935,14 +808,6 @@ const currentFiles = computed((): FileConfig[] => {
         return generateGrokCodexFiles(apiBase, apiKey)
       }
       return generateGrokFiles(apiBase, apiKey)
-    case 'zhipu':
-      if (activeClientTab.value === 'claude') {
-        return generateZhipuClaudeFiles(baseRoot, apiKey)
-      }
-      if (activeClientTab.value === 'codex') {
-        return generateRoutedCodexFiles(apiBase, apiKey, 'zhipu')
-      }
-      return generateAnthropicFiles(baseRoot, apiKey)
     case 'deepseek':
       if (activeClientTab.value === 'codex') {
         return generateRoutedCodexFiles(apiBase, apiKey, 'deepseek')
@@ -962,7 +827,7 @@ const currentFiles = computed((): FileConfig[] => {
       if (activeClientTab.value === 'codex' && props.platform) {
         return generateRoutedCodexFiles(apiBase, apiKey, props.platform)
       }
-      return generateAnthropicFiles(baseRoot, apiKey)
+      return generateAnthropicFiles(baseUrl, apiKey)
   }
 })
 
@@ -1113,65 +978,6 @@ function generateGrokClaudeFiles(baseUrl: string, apiKey: string): FileConfig[] 
   ]
 }
 
-function generateZhipuClaudeFiles(baseUrl: string, apiKey: string): FileConfig[] {
-  const model = DEFAULT_CODEX_MODEL.value.startsWith('glm-')
-    ? DEFAULT_CODEX_MODEL.value
-    : 'glm-5.3'
-  const environment = {
-    ANTHROPIC_BASE_URL: baseUrl,
-    ANTHROPIC_AUTH_TOKEN: apiKey,
-    ANTHROPIC_MODEL: model,
-    ANTHROPIC_DEFAULT_OPUS_MODEL: model,
-    ANTHROPIC_DEFAULT_SONNET_MODEL: model,
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
-    ANTHROPIC_DEFAULT_FABLE_MODEL: model,
-    CLAUDE_CODE_SUBAGENT_MODEL: model,
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
-  }
-  let path: string
-  let content: string
-
-  switch (activeTab.value) {
-    case 'unix':
-      path = 'Terminal'
-      content = Object.entries(environment)
-        .map(([name, value]) => `export ${name}="${value}"`)
-        .join('\n')
-      break
-    case 'cmd':
-      path = 'Command Prompt'
-      content = Object.entries(environment)
-        .map(([name, value]) => `set ${name}=${value}`)
-        .join('\n')
-      break
-    case 'powershell':
-      path = 'PowerShell'
-      content = Object.entries(environment)
-        .map(([name, value]) => `$env:${name}="${value}"`)
-        .join('\n')
-      break
-    default:
-      path = 'Terminal'
-      content = ''
-  }
-
-  const settingsPath = activeTab.value === 'unix'
-    ? '~/.claude/settings.json'
-    : '%USERPROFILE%\\.claude\\settings.json'
-
-  return [
-    { path, content },
-    {
-      path: settingsPath,
-      content: JSON.stringify({
-        $schema: 'https://json.schemastore.org/claude-code-settings.json',
-        env: environment
-      }, null, 2),
-      hint: t('keys.useKeyModal.claudeSettingsHint')
-    }
-  ]
-}
-
 function generateGeminiCliContent(baseUrl: string, apiKey: string): FileConfig {
   const model = 'gemini-2.0-flash'
   const modelComment = t('keys.useKeyModal.gemini.modelComment')
@@ -1221,20 +1027,21 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
 
-  const model = selectCodexCatalogModel(DEFAULT_CODEX_MODEL.value)
+  const model = selectCodexCatalogModel('gpt-5.5')
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
-  const contextWindowLine = codexContextWindowTomlLine(model)
 
   // config.toml content
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}${contextWindowLine}${codexCatalogTomlLine()}
+${reasoningEffortLine}disable_response_storage = true
+${codexLocalCatalogToml.value}network_access = "enabled"
+windows_wsl_setup_acknowledged = true
 
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
-${codexRemoteCatalogTomlLine(baseUrl)}wire_api = "responses"
+${codexModelCatalogMode.value === 'remote' ? `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n` : ''}wire_api = "responses"
 ${generateCodexProviderAuthConfig(apiKey)}
 
 [features]
@@ -1262,16 +1069,14 @@ function buildOpenAICodexFileConfigs(
     {
       path: `${configDir}/config.toml`,
       content: configContent,
-      hint: t('keys.useKeyModal.openai.configTomlHint'),
-      downloadName: 'config.toml'
+      hint: t('keys.useKeyModal.openai.configTomlHint')
     }
   ]
 
   if (codexAuthMode.value === 'legacy') {
     files.push({
       path: `${configDir}/auth.json`,
-      content: JSON.stringify({ OPENAI_API_KEY: apiKey }, null, 2),
-      downloadName: 'auth.json'
+      content: JSON.stringify({ OPENAI_API_KEY: apiKey }, null, 2)
     })
   }
 
@@ -1284,12 +1089,7 @@ function joinConfigPath(dir: string, file: string, windows: boolean): string {
 }
 
 function escapeTomlBasicString(value: string): string {
-  // eslint-disable-next-line no-control-regex -- TOML basic strings require escaped control characters.
-  return value.replace(/[\\"\u0000-\u001f\u007f]/g, (char) => {
-    if (char === '\\') return '\\\\'
-    if (char === '"') return '\\"'
-    return '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0')
-  })
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
 function generateGrokFiles(baseUrl: string, apiKey: string): FileConfig[] {
@@ -1318,15 +1118,15 @@ $env:XAI_API_KEY="${apiKey}"`
 export XAI_API_KEY="${apiKey}"`
   }
 
-  // Shape follows Grok Build user guide (~/.grok/docs + custom-models) and production-ready Sub2API setups.
+  // Shape follows Grok Build user guide (~/.grok/docs + custom-models) and production-ready Tokensavy setups.
   // Text models only (Responses). Image/video: Imagine model IDs on media endpoints / feature overrides.
   // Credential order: api_key field → env_key → signed-in session → XAI_API_KEY global fallback.
   const modelsListUrl = `${baseUrl.replace(/\/+$/, '')}/models`
-  const configContent = `# Grok Build CLI → ${siteNameComment.value} Grok group (API key auth).
+  const configContent = `# Grok Build CLI → Tokensavy Grok group (API key auth).
 # Docs: ~/.grok/docs/user-guide/05-configuration.md + 11-custom-models.md
 # Verify after save: grok inspect
 #
-# IMPORTANT: api_backend must be "responses" for ${siteNameComment.value} Grok (POST /v1/responses).
+# IMPORTANT: api_backend must be "responses" for Tokensavy Grok (POST /v1/responses).
 # If omitted, Grok Build defaults to chat_completions (/v1/chat/completions).
 # Keep api_backend = "responses" on every model entry.
 #
@@ -1341,7 +1141,7 @@ models_list_url = "${modelsListUrl}"        # optional override (env: GROK_MODEL
 xai_api_base_url = "${baseUrl}"             # public xAI API base override for gateway routing
 cli_chat_proxy_base_url = "${baseUrl}"      # CLI chat-proxy base (env: GROK_CLI_CHAT_PROXY_BASE_URL)
 
-# Prefer API key when using a custom gateway (matches ${siteNameComment.value}).
+# Prefer API key when using a custom gateway (matches Tokensavy).
 # Requires XAI_API_KEY env or per-model env_key / api_key.
 [auth]
 preferred_method = "api_key"
@@ -1349,7 +1149,7 @@ preferred_method = "api_key"
 [model."grok-4.5"]
 model = "grok-4.5"                          # id sent to the API
 name = "Grok 4.5"                           # shown in /model picker
-description = "Grok 4.5 via ${escapeTomlBasicString(siteName.value)} (Responses)"
+description = "Grok 4.5 via Tokensavy (Responses)"
 # base_url inherits from [endpoints].models_base_url; override only if needed:
 # base_url = "${baseUrl}"
 env_key = "XAI_API_KEY"                     # or: api_key = "${apiKey}"  (not recommended)
@@ -1412,7 +1212,7 @@ image_description = "grok-4.5"              # vision/describe-image helper model
 [session]
 auto_compact_threshold_percent = 80         # auto-compact at this % of context_window (default 85)
 
-# Imagine tools: model IDs go to ${siteNameComment.value} media endpoints (not the text [model.*] catalog).
+# Imagine tools: model IDs go to Tokensavy media endpoints (not the text [model.*] catalog).
 # Enable only if the Grok group allows image/video generation.
 [features]
 image_gen = true
@@ -1429,8 +1229,7 @@ image_edit_model_override = "grok-imagine-edit"
     {
       path: joinConfigPath(configDir, 'config.toml', isWindowsPath),
       content: configContent,
-      hint: t('keys.useKeyModal.grok.configTomlHint'),
-      downloadName: 'config.toml'
+      hint: t('keys.useKeyModal.grok.configTomlHint')
     }
   ]
 }
@@ -1460,7 +1259,7 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
       envContent = `export TOKENSAVY_API_KEY="${apiKey}"`
   }
 
-  const configContent = `# Codex CLI → ${siteNameComment.value} Grok group
+  const configContent = `# Codex CLI → Tokensavy Grok group
 # Docs: Codex config reference (model_providers.*, wire_api = "responses")
 #
 # Text models only. Image/video: grok-imagine-image / grok-imagine-video on media endpoints.
@@ -1468,22 +1267,25 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
 
 model_provider = "tokensavy"
 model = "${model}"
-# Optional:
+${codexLocalCatalogToml.value}# Optional:
 # review_model = "${model}"
 # model_reasoning_effort = "medium"
-model_context_window = ${defaultCodexContextWindow(model) || 500000}
+# model_context_window = 500000
+# disable_response_storage = true
+# network_access = "enabled"
+# windows_wsl_setup_acknowledged = true
 
 [model_providers.tokensavy]
-name = "${escapeTomlBasicString(siteName.value)} Grok"
+name = "Tokensavy Grok"
 base_url = "${baseUrl}"
-# Prefer env_key (variable NAME). Do not combine with experimental_bearer_token.
+${codexModelCatalogMode.value === 'remote' ? `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n` : ''}# Prefer env_key (variable NAME). Do not combine with experimental_bearer_token.
 env_key = "TOKENSAVY_API_KEY"
 # Fallback only if you cannot set env (discouraged — keeps secret on disk):
 # experimental_bearer_token = "${apiKey}"
 wire_api = "responses"
 # API-key providers: do not require ChatGPT OAuth login
 requires_openai_auth = false
-# Grok/${siteNameComment.value} path is HTTP/SSE; disable WS (Codex may otherwise try WebSocket first)
+# Grok/Tokensavy path is HTTP/SSE; disable WS (Codex may otherwise try WebSocket first)
 supports_websockets = false
 
 # Optional:
@@ -1495,8 +1297,7 @@ supports_websockets = false
     {
       path: joinConfigPath(configDir, 'config.toml', isWindowsPath),
       content: configContent,
-      hint: t('keys.useKeyModal.grok.codexConfigTomlHint'),
-      downloadName: 'config.toml'
+      hint: t('keys.useKeyModal.grok.codexConfigTomlHint')
     }
   ]
 }
@@ -1509,31 +1310,23 @@ function generateRoutedCodexFiles(
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
   const preferredModels: Partial<Record<GroupPlatform, string>> = {
-    openai: DEFAULT_CODEX_MODEL.value,
-    anthropic: 'claude-sonnet-5',
-
+    openai: 'gpt-5.5',
+    anthropic: 'claude-sonnet-4-6',
     gemini: 'gemini-2.5-pro',
-    antigravity: 'claude-sonnet-5',
+    antigravity: 'claude-sonnet-4-6',
     grok: 'grok-4.5',
     kimi: 'kimi-k2.5',
-    zhipu: DEFAULT_CODEX_MODEL.value || 'glm-5.3',
+    zhipu: 'glm-4.7',
     deepseek: 'deepseek-v4-pro',
     minimax: 'MiniMax-M3',
     opencode_go: 'glm-5.3',
-    composite: DEFAULT_CODEX_MODEL.value
+    composite: 'gpt-5.5'
   }
   const preferredModel = preferredModels[platform] || ''
   const model = selectCodexCatalogModel(preferredModel)
-  const contextWindowLine = codexContextWindowTomlLine(model)
-  // Z.ai documents max for these exact models; do not infer capabilities for future GLM variants.
-  // https://docs.z.ai/guides/llm/glm-5.3 and /guides/vlm/glm-5.3-flash
-  const zhipuDefaultEffort = ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx'].includes(model.trim().toLowerCase())
-    ? 'max' : null
-  const reasoningEffortLine = platform === 'zhipu' ? codexReasoningEffortTomlLine(model, zhipuDefaultEffort) : ''
   const labels: Record<GroupPlatform, string> = {
     anthropic: 'Anthropic',
     openai: 'OpenAI',
-
     gemini: 'Gemini',
     antigravity: 'Antigravity',
     grok: 'Grok',
@@ -1546,60 +1339,56 @@ function generateRoutedCodexFiles(
     composite: 'Composite'
   }
   const label = labels[platform]
-  const usesEmbeddedApiKey = platform === 'zhipu'
   const envContent = isWindows
     ? `$env:TOKENSAVY_API_KEY="${apiKey}"`
     : `export TOKENSAVY_API_KEY="${apiKey}"`
-  const authConfig = usesEmbeddedApiKey
-    ? `experimental_bearer_token = "${escapeTomlBasicString(apiKey)}"`
-    : 'env_key = "TOKENSAVY_API_KEY"'
 
-  const configContent = `# Codex CLI -> ${siteNameComment.value} ${label} group
+  const configContent = `# Codex CLI -> Tokensavy ${label} group
 model_provider = "tokensavy"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}${contextWindowLine}${codexCatalogTomlLine()}
-
+disable_response_storage = true
+${codexLocalCatalogToml.value}
 [model_providers.tokensavy]
-name = "${escapeTomlBasicString(siteName.value)} ${label}"
+name = "Tokensavy ${label}"
 base_url = "${baseUrl}"
-${codexRemoteCatalogTomlLine(baseUrl)}${authConfig}
+${codexModelCatalogMode.value === 'remote' ? `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n` : ''}env_key = "TOKENSAVY_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false`
 
-  const files: FileConfig[] = [{
+  return [
+    { path: isWindows ? 'PowerShell' : 'Terminal', content: envContent },
+    {
       path: joinConfigPath(configDir, 'config.toml', isWindows),
       content: configContent,
       hint: t(
-        platform === 'zhipu' || platform === 'deepseek' || platform === 'minimax' || platform === 'composite'
+        platform === 'deepseek' || platform === 'minimax' || platform === 'composite'
           ? `keys.useKeyModal.${platform}.codexConfigTomlHint`
           : 'keys.useKeyModal.routedCodex.configTomlHint'
-      ),
-      downloadName: 'config.toml'
+      )
     }
   ]
-  if (!usesEmbeddedApiKey) files.unshift({ path: isWindows ? 'PowerShell' : 'Terminal', content: envContent })
-  return files
 }
 
 function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
-  const model = selectCodexCatalogModel(DEFAULT_CODEX_MODEL.value)
+  const model = selectCodexCatalogModel('gpt-5.5')
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
-  const contextWindowLine = codexContextWindowTomlLine(model)
 
   // config.toml content with WebSocket v2
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}${contextWindowLine}${codexCatalogTomlLine()}
+${reasoningEffortLine}disable_response_storage = true
+${codexLocalCatalogToml.value}network_access = "enabled"
+windows_wsl_setup_acknowledged = true
 
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
-${codexRemoteCatalogTomlLine(baseUrl)}wire_api = "responses"
+${codexModelCatalogMode.value === 'remote' ? `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n` : ''}wire_api = "responses"
 supports_websockets = true
 ${generateCodexProviderAuthConfig(apiKey)}
 
@@ -1608,54 +1397,6 @@ responses_websockets_v2 = true
 goals = true`
 
   return buildOpenAICodexFileConfigs(configDir, configContent, apiKey)
-}
-
-function defaultCodexOutputTokens(modelSlug: string): number {
-  return modelSlug.trim().toLowerCase() === 'glm-4.7' ? 128_000 : 131_072
-}
-
-function buildZhipuOpenCodeModels(): Record<string, Record<string, unknown>> {
-  const fallbackSlug = DEFAULT_CODEX_MODEL.value.startsWith('glm-')
-    ? DEFAULT_CODEX_MODEL.value
-    : 'glm-5.3'
-  const fallbackContextWindow = Number(props.setupProfile?.context_window)
-  const fallbackContext = Number.isFinite(fallbackContextWindow) && fallbackContextWindow > 0
-    ? fallbackContextWindow
-    : defaultCodexContextWindow(fallbackSlug)
-  const fallback: Record<string, Record<string, unknown>> = {
-    [fallbackSlug]: {
-      name: fallbackSlug,
-      limit: {
-        context: fallbackContext > 0 ? fallbackContext : 1_000_000,
-        output: defaultCodexOutputTokens(fallbackSlug)
-      }
-    }
-  }
-  const models = codexCatalogModels.value.filter((model) =>
-    model.slug.startsWith('glm-') && !model.slug.includes('*')
-  )
-  if (!models.length) return fallback
-
-  return Object.fromEntries(models.map((model: CodexCatalogModel) => {
-    const configuredContextWindow = Number(model.context_window)
-    const contextWindow = Number.isFinite(configuredContextWindow) && configuredContextWindow > 0
-      ? configuredContextWindow
-      : defaultCodexContextWindow(model.slug)
-    const maxOutputTokens = Number(model.max_output_tokens)
-    const limit: Record<string, number> = {}
-    if (contextWindow > 0) {
-      limit.context = contextWindow
-      limit.output = Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
-        ? maxOutputTokens
-        : defaultCodexOutputTokens(model.slug)
-    }
-    return [model.slug, {
-      name: typeof model.display_name === 'string' && model.display_name.trim()
-        ? model.display_name.trim()
-        : model.slug,
-      ...(Object.keys(limit).length ? { limit } : {})
-    }]
-  }))
 }
 
 function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: string, pathLabel?: string): FileConfig {
@@ -1667,13 +1408,11 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
       }
     }
   }
-  // Context limits follow backend/resources/model-pricing; GPT-6 aliases use
-  // the 922k input limit, while GPT-5.6 variants use their current 1.05m limit.
   const openaiModels = {
     'gpt-6': {
       name: 'GPT-6 (Astra)',
       limit: {
-        context: 922000,
+        context: 1050000,
         output: 128000
       },
       options: {
@@ -1690,7 +1429,7 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
     'gpt-6-astra': {
       name: 'GPT-6 Astra',
       limit: {
-        context: 922000,
+        context: 1050000,
         output: 128000
       },
       options: {
@@ -1707,7 +1446,7 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
     'gpt-5.2': {
       name: 'GPT-5.2',
       limit: {
-        context: 272000,
+        context: 400000,
         output: 128000
       },
       options: {
@@ -1757,7 +1496,7 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
     'gpt-6-sol': {
       name: 'GPT-6 Sol',
       limit: {
-        context: 922000,
+        context: 1050000,
         output: 128000
       },
       options: {
@@ -1809,7 +1548,7 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
     'gpt-6-luna': {
       name: 'GPT-6 Luna',
       limit: {
-        context: 922000,
+        context: 1050000,
         output: 128000
       },
       options: {
@@ -1855,6 +1594,69 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         medium: {},
         high: {},
         xhigh: {}
+      }
+    },
+    'gpt-5.4': {
+      name: 'GPT-5.4',
+      limit: {
+        context: 1050000,
+        output: 128000
+      },
+      options: {
+        store: false
+      },
+      variants: {
+        low: {},
+        medium: {},
+        high: {},
+        xhigh: {}
+      }
+    },
+    'gpt-5.4-mini': {
+      name: 'GPT-5.4 Mini',
+      limit: {
+        context: 400000,
+        output: 128000
+      },
+      options: {
+        store: false
+      },
+      variants: {
+        low: {},
+        medium: {},
+        high: {},
+        xhigh: {}
+      }
+    },
+    'gpt-5.3-codex-spark': {
+      name: 'GPT-5.3 Codex Spark',
+      limit: {
+        context: 128000,
+        output: 32000
+      },
+      options: {
+        store: false
+      },
+      variants: {
+        low: {},
+        medium: {},
+        high: {},
+        xhigh: {}
+      }
+    },
+    'codex-mini-latest': {
+      name: 'Codex Mini',
+      limit: {
+        context: 200000,
+        output: 100000
+      },
+      options: {
+        store: false
+      },
+      variants: {
+        low: {},
+        medium: {},
+        high: {}
       }
     }
   }
@@ -2231,14 +2033,10 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
   } else if (platform === 'openai') {
     provider[platform].models = openaiModels
   } else if (platform === 'grok') {
-    // Custom provider pointing at Sub2API OpenAI-compatible Responses/Chat endpoints.
+    // Custom provider pointing at Tokensavy OpenAI-compatible Responses/Chat endpoints.
     provider[platform].npm = '@ai-sdk/openai-compatible'
-    provider[platform].name = `Grok via ${siteName.value}`
+    provider[platform].name = 'Grok via Tokensavy'
     provider[platform].models = grokModels
-  } else if (platform === 'zhipu') {
-    provider[platform].npm = '@ai-sdk/openai-compatible'
-    provider[platform].name = `Zhipu GLM via ${siteName.value}`
-    provider[platform].models = buildZhipuOpenCodeModels()
   }
 
   const agent =
@@ -2270,8 +2068,7 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
   return {
     path: pathLabel ?? 'opencode.json',
     content,
-    hint: t('keys.useKeyModal.opencode.hint'),
-    downloadName: 'opencode.json'
+    hint: t('keys.useKeyModal.opencode.hint')
   }
 }
 

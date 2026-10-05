@@ -3550,21 +3550,12 @@ func TestOpenAIWSHTTPBridgeGrok429PersistsRateLimit(t *testing.T) {
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
-type bridgeErrorAdmissionRepo struct {
-	*grokQuotaAccountRepo
-	account *Account
-}
-
-func (r *bridgeErrorAdmissionRepo) GetOpenAITurnAdmission(context.Context, int64) (*Account, *Account, error) {
-	return r.account, nil, nil
-}
-
 func TestOpenAIWSHTTPBridgeSSEErrorSideEffectsRunOncePerPlatform(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	for _, platform := range []string{PlatformOpenAI, PlatformGrok} {
 		t.Run(platform, func(t *testing.T) {
-			repo := &bridgeErrorAdmissionRepo{grokQuotaAccountRepo: &grokQuotaAccountRepo{}}
+			repo := &grokQuotaAccountRepo{}
 			cfg := &config.Config{}
 			upstream := &httpUpstreamRecorder{resp: &http.Response{
 				StatusCode: http.StatusOK,
@@ -3581,8 +3572,7 @@ func TestOpenAIWSHTTPBridgeSSEErrorSideEffectsRunOncePerPlatform(t *testing.T) {
 			if platform == PlatformOpenAI {
 				svc.rateLimitService = NewRateLimitService(repo, nil, cfg, nil, nil)
 			}
-			account := &Account{ID: 70, Platform: platform, Type: AccountTypeOAuth, Concurrency: 1, Status: StatusActive, Schedulable: true}
-			repo.account = account
+			account := &Account{ID: 70, Platform: platform, Type: AccountTypeOAuth, Concurrency: 1}
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)

@@ -232,7 +232,6 @@
         <!-- Model Restriction Section (不适用于 Antigravity) -->
         <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
-        <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.selectAllowedModels') }}</p>
 
           <div
             v-if="isOpenAIModelRestrictionDisabled"
@@ -248,8 +247,7 @@
             <div class="mb-4 flex gap-2">
               <button
                 type="button"
-
-              @click="modelRestrictionMode = 'whitelist'"
+                @click="modelRestrictionMode = 'whitelist'"
                 :class="[
                   'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
                   modelRestrictionMode === 'whitelist'
@@ -304,7 +302,7 @@
               <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-                <span v-if="allowedModels.length === 0">{{
+                <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
                   t('admin.accounts.supportsAllModels')
                 }}</span>
               </p>
@@ -734,14 +732,12 @@
         </div>
       </div>
 
-      <!-- OAuth/Setup Token Model Restriction（这些类型没有 apikey 容器，需要独立区域） -->
+      <!-- OpenAI/Grok OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
       <div
-        v-if="dedicatedModelRestrictionCapable"
+        v-if="(account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
-        data-testid="edit-dedicated-model-restriction"
       >
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
-        <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.selectAllowedModels') }}</p>
 
         <div
           v-if="isOpenAIModelRestrictionDisabled"
@@ -757,7 +753,6 @@
           <div class="mb-4 flex gap-2">
             <button
               type="button"
-
               @click="modelRestrictionMode = 'whitelist'"
               :class="[
                 'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
@@ -787,7 +782,7 @@
             <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0">{{
+              <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
                 t('admin.accounts.supportsAllModels')
               }}</span>
             </p>
@@ -939,13 +934,11 @@
         <!-- Model Restriction Section for Service Account -->
         <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
-        <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.selectAllowedModels') }}</p>
 
           <!-- Mode Toggle -->
           <div class="mb-4 flex gap-2">
             <button
               type="button"
-
               @click="modelRestrictionMode = 'whitelist'"
               :class="[
                 'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
@@ -1001,7 +994,7 @@
             <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0">{{
+              <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
                 t('admin.accounts.supportsAllModels')
               }}</span>
             </p>
@@ -1189,13 +1182,11 @@
         <!-- Model Restriction for Bedrock -->
         <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
-        <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.selectAllowedModels') }}</p>
 
           <!-- Mode Toggle -->
           <div class="mb-4 flex gap-2">
             <button
               type="button"
-
               @click="modelRestrictionMode = 'whitelist'"
               :class="[
                 'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
@@ -1222,10 +1213,10 @@
 
           <!-- Whitelist Mode -->
           <div v-if="modelRestrictionMode === 'whitelist'">
-            <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" platform="anthropic" :account-id="account?.id" />
+            <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" platform="anthropic" />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0">{{ t('admin.accounts.supportsAllModels') }}</span>
+              <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{ t('admin.accounts.supportsAllModels') }}</span>
             </p>
           </div>
 
@@ -1338,12 +1329,9 @@
       </div>
 
       <!-- Antigravity model restriction (applies to all antigravity types) -->
-      <!-- Account supply is independent of Antigravity routing mappings. -->
+      <!-- Antigravity 只支持模型映射模式，不支持白名单模式 -->
       <div v-if="account.platform === 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
-        <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.selectAllowedModels') }}</p>
-
-        <ModelWhitelistSelector v-model="allowedModels" platform="antigravity" :account-id="account.id" />
 
         <!-- Mapping Mode Only (no toggle for Antigravity) -->
         <div>
@@ -1589,6 +1577,7 @@
         </div>
       </div>
 
+
       <div
         v-if="supportsAccountSchedulingThresholdOverride"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -1619,40 +1608,6 @@
             class="input"
           />
           <p class="input-hint">{{ t('admin.accounts.accountSchedulingThresholdOverrideDisabledHint') }}</p>
-        </div>
-      </div>
-
-      <!-- Anthropic 7d Fable 阈值覆盖：只拦 Fable 模型，不停整个账号 -->
-      <div
-        v-if="supportsAnthropicFableSchedulingThresholdOverride"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-        data-testid="anthropic-fable-scheduling-threshold-section"
-      >
-        <div class="mb-3 flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverride') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideHint') }}
-            </p>
-          </div>
-          <input
-            v-model="anthropicFableSchedulingThresholdOverrideEnabled"
-            data-testid="anthropic-fable-scheduling-threshold-override-enabled"
-            type="checkbox"
-            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-          />
-        </div>
-        <div v-if="anthropicFableSchedulingThresholdOverrideEnabled">
-          <label class="input-label">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideValue') }}</label>
-          <input
-            v-model.number="anthropicFableSchedulingThresholdOverrideValue"
-            data-testid="anthropic-fable-scheduling-threshold-override-value"
-            type="number"
-            min="1"
-            max="100"
-            class="input"
-          />
-          <p class="input-hint">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideDisabledHint') }}</p>
         </div>
       </div>
 
@@ -1689,7 +1644,10 @@
       </div>
 
       <div v-if="!isSparkShadow">
-        <label class="input-label">{{ t('admin.accounts.proxy') }}</label>
+        <div class="mb-1 flex items-center gap-2">
+          <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
+
+        </div>
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
@@ -1699,7 +1657,7 @@
         :type="account.type"
       />
 
-      <div class="grid grid-cols-2 gap-4 lg:grid-cols-3">
+      <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div>
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
           <input v-model.number="form.concurrency" type="number" min="1" class="input"
@@ -1723,7 +1681,6 @@
           />
           <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
         </div>
-
         <div>
           <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
           <input
@@ -1765,18 +1722,6 @@
           </div>
         </div>
       </div>
-      <!-- OpenAI OAuth RPM limit -->
-      <div
-        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <AccountRpmSettings
-          v-model:enabled="rpmLimitEnabled"
-          v-model:base-rpm="baseRpm"
-          strict
-        />
-      </div>
-
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
@@ -1823,8 +1768,6 @@
           </button>
         </div>
       </div>
-
-      <OpenAIRequestTimezoneField v-if="account?.platform === 'openai'" v-model="openAIRequestTimezone" />
 
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
@@ -1936,12 +1879,6 @@
             <Select v-model="openaiResponsesWebSocketV2Mode" data-testid="edit-openai-ws-mode-select" :options="openAIWSModeOptions" />
           </div>
         </div>
-      </div>
-
-      <div v-if="account?.platform === 'openai' && account?.type === 'apikey'" class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div><label id="apikey-codex-identity-label" class="input-label mb-0">{{ t('admin.accounts.openai.apiKeyCodexIdentity') }}</label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.apiKeyCodexIdentityHint') }}</p></div>
-        <Toggle v-model="apiKeyCodexIdentity" data-testid="apikey-codex-identity" aria-labelledby="apikey-codex-identity-label" />
       </div>
 
       <!-- OpenAI APIKey Responses API support mode -->
@@ -2399,21 +2336,6 @@
         </div>
       </div>
 
-      <div v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && !isSparkShadow" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="input-label" for="codex-ticket-account-policy">{{ t('admin.accounts.openai.codexTicketAccountPolicy') }}</label>
-        <select id="codex-ticket-account-policy" v-model="codexTicketAccountPolicy" class="input" data-testid="codex-ticket-account-policy">
-          <option value="inherit">{{ t('admin.accounts.openai.codexTicketPolicyInherit') }}</option>
-          <option value="allow">{{ t('admin.accounts.openai.codexTicketPolicyAllow') }}</option>
-          <option value="deny">{{ t('admin.accounts.openai.codexTicketPolicyDeny') }}</option>
-        </select>
-        <p class="input-hint">{{ t('admin.accounts.openai.codexTicketAccountPolicyDesc') }}</p>
-      </div>
-
-      <div v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && codexTurnTickets.length" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="flex items-center justify-between gap-3"><label class="input-label mb-0">{{ t('admin.accounts.openai.codexTicketHistory') }}</label><button type="button" class="text-xs font-semibold text-indigo-600 dark:text-indigo-400" @click="emit('codex-tickets')">{{ t('admin.accounts.openai.codexTicketHistory') }} →</button></div>
-        <div class="mt-3 grid gap-2 sm:grid-cols-2"><div v-for="ticket in codexTurnTickets" :key="ticket.model" class="rounded-lg border border-gray-200 p-3 text-xs dark:border-dark-600"><div class="flex justify-between gap-2"><span class="break-all font-mono font-semibold">{{ ticket.model }}</span><span :class="ticket.ready ? 'text-emerald-600' : 'text-amber-600'">{{ ticket.ready ? '●' : '○' }} {{ t(ticket.ready ? 'admin.accounts.openai.codexTicketReadyShort' : 'admin.accounts.openai.codexTicketMissingShort') }}</span></div><p class="mt-2 text-gray-500">{{ ticket.length }} bytes · turn-state {{ ticket.turn_state_present ? '✓' : '—' }} · Cookie {{ ticket.cookie_present ? '✓' : '—' }}</p></div></div>
-      </div>
-
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
@@ -2805,12 +2727,95 @@
 
         <!-- RPM Limit -->
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <AccountRpmSettings
-            v-model:enabled="rpmLimitEnabled"
-            v-model:base-rpm="baseRpm"
-            v-model:strategy="rpmStrategy"
-            v-model:sticky-buffer="rpmStickyBuffer"
-          />
+          <div class="mb-3 flex items-center justify-between">
+            <div>
+              <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.rpmLimit.label') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.quotaControl.rpmLimit.hint') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="rpmLimitEnabled = !rpmLimitEnabled"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                rpmLimitEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+              ]"
+            >
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  rpmLimitEnabled ? 'translate-x-5' : 'translate-x-0'
+                ]"
+              />
+            </button>
+          </div>
+
+          <div v-if="rpmLimitEnabled" class="space-y-4">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpm') }}</label>
+              <input
+                v-model.number="baseRpm"
+                type="number"
+                min="1"
+                max="1000"
+                step="1"
+                class="input"
+                :placeholder="t('admin.accounts.quotaControl.rpmLimit.baseRpmPlaceholder')"
+              />
+              <p class="input-hint">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpmHint') }}</p>
+            </div>
+
+            <div>
+              <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.strategy') }}</label>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  @click="rpmStrategy = 'tiered'"
+                  :class="[
+                    'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-all',
+                    rpmStrategy === 'tiered'
+                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+                  <div class="text-center">
+                    <div>{{ t('admin.accounts.quotaControl.rpmLimit.strategyTiered') }}</div>
+                    <div class="mt-0.5 text-[10px] opacity-70">{{ t('admin.accounts.quotaControl.rpmLimit.strategyTieredHint') }}</div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  @click="rpmStrategy = 'sticky_exempt'"
+                  :class="[
+                    'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-all',
+                    rpmStrategy === 'sticky_exempt'
+                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+                  <div class="text-center">
+                    <div>{{ t('admin.accounts.quotaControl.rpmLimit.strategyStickyExempt') }}</div>
+                    <div class="mt-0.5 text-[10px] opacity-70">{{ t('admin.accounts.quotaControl.rpmLimit.strategyStickyExemptHint') }}</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <div v-if="rpmStrategy === 'tiered'">
+              <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBuffer') }}</label>
+              <input
+                v-model.number="rpmStickyBuffer"
+                type="number"
+                min="1"
+                step="1"
+                class="input"
+                :placeholder="t('admin.accounts.quotaControl.rpmLimit.stickyBufferPlaceholder')"
+              />
+              <p class="input-hint">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBufferHint') }}</p>
+            </div>
+
+          </div>
 
           <!-- 用户消息限速模式（独立于 RPM 开关，始终可见） -->
           <div class="mt-4">
@@ -3052,11 +3057,9 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
-
         <button
           type="submit"
           form="edit-account-form"
-
           :disabled="submitting"
           class="btn btn-primary"
           data-tour="account-form-submit"
@@ -3101,10 +3104,8 @@
 </template>
 
 <script setup lang="ts">
-
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-
 import { useAppStore } from '@/stores/app'
 
 import { adminAPI } from '@/api/admin'
@@ -3129,10 +3130,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
-import OpenAIRequestTimezoneField from '@/components/account/OpenAIRequestTimezoneField.vue'
 import Toggle from '@/components/common/Toggle.vue'
-import AccountRpmSettings from '@/components/account/AccountRpmSettings.vue'
-import { applyAccountRPMSettings } from '@/components/account/accountRpm'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
@@ -3183,7 +3181,7 @@ import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiErro
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { getAccountExpiryTimestamp } from '@/components/account/accountExpiry'
 import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
-import {  VERTEX_LOCATION_OPTIONS } from '@/constants/account'
+import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
@@ -3212,9 +3210,7 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
-  test: [account: Account]
   updated: [account: Account]
-  'codex-tickets': []
 }>()
 
 const { t } = useI18n()
@@ -3235,8 +3231,6 @@ const selectableGroups = computed(() => {
 // Spark 影子账号(parent_account_id 非空):代理恒继承母账号,不可独立编辑(外审 B/P1),
 // 故隐藏代理选择器。
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
-
-const codexTurnTickets = computed(() => props.account?.codex_turn_tickets ?? [])
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -3340,14 +3334,6 @@ const baseUrlHint = computed(() => {
 const antigravityPresetMappings = computed(() => getPresetMappingsByPlatform('antigravity'))
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
 
-// OAuth 家族的账号没有 apikey 表单容器，需要这个独立的模型限制区域。
-const supportsDedicatedModelRestriction = (account: Account) =>
-  ((account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth') ||
-  (account.platform === 'anthropic' && (account.type === 'oauth' || account.type === 'setup-token'))
-
-const dedicatedModelRestrictionCapable = computed(
-  () => props.account != null && supportsDedicatedModelRestriction(props.account)
-)
 // Model mapping type
 interface ModelMapping {
   from: string
@@ -3523,7 +3509,6 @@ const isBedrockAPIKeyMode = computed(() =>
   (props.account?.credentials as Record<string, unknown>)?.auth_mode === 'apikey'
 )
 const modelMappings = ref<ModelMapping[]>([])
-
 const openAICompactModelMappings = ref<ModelMapping[]>([])
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
@@ -3648,28 +3633,11 @@ const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
 const isSyncingAntigravityUpstream = ref(false)
 const tempUnschedEnabled = ref(false)
+const accountSchedulingThresholdOverrideEnabled = ref(false)
+const accountSchedulingThresholdOverrideValue = ref(100)
 const ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY = 'account_scheduling_threshold'
-const ANTHROPIC_FABLE_SCHEDULING_THRESHOLD_CREDENTIAL_KEY = 'anthropic_fable_scheduling_threshold'
-
-const accountSchedulingThresholdOverride = createSchedulingThresholdOverrideBinding(
-  ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY,
-  supportsAccountSchedulingThresholdOverridePlatform
-)
-// Fable 是 Anthropic 独有的模型家族，其他平台没有这个概念。
-const anthropicFableSchedulingThresholdOverride = createSchedulingThresholdOverrideBinding(
-  ANTHROPIC_FABLE_SCHEDULING_THRESHOLD_CREDENTIAL_KEY,
-  supportsAnthropicFableSchedulingThresholdAccount
-)
-
-const accountSchedulingThresholdOverrideEnabled = accountSchedulingThresholdOverride.enabled
-const accountSchedulingThresholdOverrideValue = accountSchedulingThresholdOverride.value
 const supportsAccountSchedulingThresholdOverride = computed(() =>
   supportsAccountSchedulingThresholdOverridePlatform(props.account?.platform)
-)
-const anthropicFableSchedulingThresholdOverrideEnabled = anthropicFableSchedulingThresholdOverride.enabled
-const anthropicFableSchedulingThresholdOverrideValue = anthropicFableSchedulingThresholdOverride.value
-const supportsAnthropicFableSchedulingThresholdOverride = computed(() =>
-  supportsAnthropicFableSchedulingThresholdAccount(props.account?.platform, props.account?.type)
 )
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-model-mapping')
@@ -3712,9 +3680,7 @@ const customBaseUrlEnabled = ref(false)
 const customBaseUrl = ref('')
 
 // OpenAI 自动透传开关（OAuth/API Key）
-
 const openaiPassthroughEnabled = ref(false)
-const openAIRequestTimezone = ref('Asia/Singapore')
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -3722,15 +3688,12 @@ const openAILongContextBillingEnabled = ref(false)
 // 存于 credentials.plan_type;'' 表示清空/自动识别
 const editPlanType = ref<string>('')
 const openAICompactMode = ref<OpenAICompactMode>('auto')
-const apiKeyCodexIdentity = ref(false)
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 // Images 非流式响应缺 b64_json 时由网关下载 url 回填（仅 OpenAI API Key）。
 const openAIImagesUrlToB64JsonEnabled = ref(false)
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
-type CodexTicketAccountPolicy = 'inherit' | 'allow' | 'deny'
-const codexTicketAccountPolicy = ref<CodexTicketAccountPolicy>('inherit')
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
@@ -4147,7 +4110,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   if (!newAccount) {
     return
   }
-
   // 进入回填窗口：抑制 CN 模式/协议 watcher 联动重置 base_url（见 syncingForm 注释）。
   syncingForm.value = true
   void nextTick(() => {
@@ -4158,14 +4120,12 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningDetails.value = null
   mixedChannelWarningRawMessage.value = ''
   mixedChannelWarningAction.value = null
-
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
-
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
   form.status = (newAccount.status === 'active' || newAccount.status === 'inactive' || newAccount.status === 'error')
     ? newAccount.status
@@ -4209,9 +4169,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
-
   openaiPassthroughEnabled.value = false
-  openAIRequestTimezone.value = 'Asia/Singapore'
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   editPlanType.value = ''
@@ -4220,20 +4178,16 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
-  apiKeyCodexIdentity.value = false
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
-  codexTicketAccountPolicy.value = 'inherit'
   codexFingerprintMode.value = 'off'
   codexImageToolMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
-
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
-    openAIRequestTimezone.value = typeof extra?.openai_request_timezone === 'string' ? extra.openai_request_timezone : 'Asia/Singapore'
     openaiFlattenNamespacesEnabled.value =
       newAccount.type === 'oauth' && extra?.openai_responses_flatten_namespaces === true
     const longContextBillingValue = extra?.openai_long_context_billing_enabled
@@ -4262,7 +4216,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     } else if (codexImageGenerationBridgeValue === false) {
       codexImageToolMode.value = 'disabled'
     }
-    apiKeyCodexIdentity.value = newAccount.type === 'apikey' && extra?.openai_apikey_codex_identity === true
     openaiOAuthResponsesWebSocketV2Mode.value = resolveOpenAIWSModeFromExtra(extra, {
       modeKey: 'openai_oauth_responses_websockets_v2_mode',
       enabledKey: 'openai_oauth_responses_websockets_v2_enabled',
@@ -4276,7 +4229,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       defaultMode: OPENAI_WS_MODE_OFF
     })
     if (newAccount.type === 'oauth' || newAccount.type === 'setup-token') {
-      codexTicketAccountPolicy.value = extra?.codex_allow_without_ticket === true ? 'allow' : extra?.codex_allow_without_ticket === false ? 'deny' : 'inherit'
       codexCLIOnlyEnabled.value = extra?.codex_cli_only === true
       codexCLIOnlyAppServerEnabled.value =
         extra?.codex_cli_only_allow_app_server === true
@@ -4376,7 +4328,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   loadQuotaControlSettings(newAccount)
 
   loadTempUnschedRules(credentials)
-  loadAccountSchedulingThresholdOverride(newAccount.platform, newAccount.type, credentials)
+  loadAccountSchedulingThresholdOverride(newAccount.platform, credentials)
 
   // Load header override state for eligible account platforms/types
   headerOverrideEnabled.value = false
@@ -4571,8 +4523,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
             : 'https://api.anthropic.com'
     editBaseUrl.value = platformDefaultUrl
 
-    // Load model mappings for the OAuth-family accounts that get a dedicated section.
-    if (supportsDedicatedModelRestriction(newAccount) && newAccount.credentials) {
+    // Load model mappings for OpenAI/Grok OAuth accounts
+    if ((newAccount.platform === 'openai' || newAccount.platform === 'grok') && newAccount.credentials) {
       const oauthCredentials = newAccount.credentials as Record<string, unknown>
       loadModelRestrictionFromMapping(oauthCredentials.model_mapping as Record<string, unknown> | undefined)
     } else {
@@ -4832,18 +4784,9 @@ const applyTempUnschedConfig = (credentials: Record<string, unknown>) => {
   return true
 }
 
+
 function supportsAccountSchedulingThresholdOverridePlatform(platform: Account['platform'] | undefined) {
   return platform === 'openai' || platform === 'anthropic' || platform === 'grok'
-}
-
-// 7d / 7d_oi 窗口只来自 Anthropic OAuth 类账号的被动采样（后端
-// supportsAnthropicPassiveUsage 同样只认 oauth / setup-token），apikey 与 bedrock
-// 永远没有窗口样本，覆盖写进去也不会生效，入口就不该出现。
-function supportsAnthropicFableSchedulingThresholdAccount(
-  platform: Account['platform'] | undefined,
-  type: Account['type'] | undefined
-) {
-  return platform === 'anthropic' && (type === 'oauth' || type === 'setup-token')
 }
 
 function normalizeAccountSchedulingThresholdOverride(value: unknown): number | null {
@@ -4865,76 +4808,43 @@ function clampAccountSchedulingThresholdOverride(value: unknown): number {
   return Math.min(100, Math.max(1, Math.trunc(Number(value) || 100)))
 }
 
-// 通用阈值覆盖与 Fable 阈值覆盖只差一个 credentials 键和一个适用性判定，其余（回填、
-// 关闭时发 null 删键、无变化不进 patch）逐字相同，因此按键参数化成一个工厂。
-function createSchedulingThresholdOverrideBinding(
-  credentialKey: string,
-  supportsAccount: (
-    platform: Account['platform'] | undefined,
-    type: Account['type'] | undefined
-  ) => boolean
-) {
-  const enabled = ref(false)
-  const value = ref(100)
-
-  const load = (
-    platform: Account['platform'] | undefined,
-    type: Account['type'] | undefined,
-    credentials: Record<string, unknown> | undefined
-  ) => {
-    if (!supportsAccount(platform, type)) {
-      enabled.value = false
-      value.value = 100
-      return
-    }
-    const stored = normalizeAccountSchedulingThresholdOverride(credentials?.[credentialKey])
-    enabled.value = stored !== null
-    value.value = stored ?? 100
-  }
-
-  const applyPatch = (
-    credentials: Record<string, unknown>,
-    currentCredentials: Record<string, unknown>,
-    platform: Account['platform'] | undefined = props.account?.platform,
-    type: Account['type'] | undefined = props.account?.type
-  ) => {
-    if (!supportsAccount(platform, type)) {
-      return
-    }
-    const current = normalizeAccountSchedulingThresholdOverride(currentCredentials[credentialKey])
-    if (!enabled.value) {
-      // 显式发 null 才能让后端删掉这个键；本来就没有则不进 patch。
-      if (current !== null) {
-        credentials[credentialKey] = null
-      }
-      return
-    }
-    const next = clampAccountSchedulingThresholdOverride(value.value)
-    if (current !== next) {
-      credentials[credentialKey] = next
-    }
-  }
-
-  return { enabled, value, load, applyPatch }
-}
-
 function loadAccountSchedulingThresholdOverride(
   platform: Account['platform'] | undefined,
-  type: Account['type'] | undefined,
   credentials: Record<string, unknown> | undefined
 ) {
-  accountSchedulingThresholdOverride.load(platform, type, credentials)
-  anthropicFableSchedulingThresholdOverride.load(platform, type, credentials)
+  if (!supportsAccountSchedulingThresholdOverridePlatform(platform)) {
+    accountSchedulingThresholdOverrideEnabled.value = false
+    accountSchedulingThresholdOverrideValue.value = 100
+    return
+  }
+  const value = normalizeAccountSchedulingThresholdOverride(
+    credentials?.[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY]
+  )
+  accountSchedulingThresholdOverrideEnabled.value = value !== null
+  accountSchedulingThresholdOverrideValue.value = value ?? 100
 }
 
 const applyAccountSchedulingThresholdOverridePatch = (
   credentials: Record<string, unknown>,
   currentCredentials: Record<string, unknown>,
-  platform: Account['platform'] | undefined = props.account?.platform,
-  type: Account['type'] | undefined = props.account?.type
+  platform: Account['platform'] | undefined = props.account?.platform
 ) => {
-  accountSchedulingThresholdOverride.applyPatch(credentials, currentCredentials, platform, type)
-  anthropicFableSchedulingThresholdOverride.applyPatch(credentials, currentCredentials, platform, type)
+  if (!supportsAccountSchedulingThresholdOverridePlatform(platform)) {
+    return
+  }
+  const current = normalizeAccountSchedulingThresholdOverride(
+    currentCredentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY]
+  )
+  if (!accountSchedulingThresholdOverrideEnabled.value) {
+    if (current !== null) {
+      credentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY] = null
+    }
+    return
+  }
+  const next = clampAccountSchedulingThresholdOverride(accountSchedulingThresholdOverrideValue.value)
+  if (current !== next) {
+    credentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY] = next
+  }
 }
 
 function loadTempUnschedRules(credentials?: Record<string, unknown>) {
@@ -4977,15 +4887,6 @@ function loadQuotaControlSettings(account: Account) {
   cacheTTLOverrideTarget.value = '5m'
   customBaseUrlEnabled.value = false
   customBaseUrl.value = ''
-
-  // OpenAI OAuth only uses the shared RPM fields; Anthropic uses the full quota controls below.
-  if (account.platform === 'openai' && account.type === 'oauth') {
-    if (account.base_rpm != null && account.base_rpm > 0) {
-      rpmLimitEnabled.value = true
-      baseRpm.value = account.base_rpm
-    }
-    return
-  }
 
   // Remaining quota control settings only apply to Anthropic accounts
   if (account.platform !== 'anthropic') {
@@ -5203,11 +5104,9 @@ const persistGrokMediaEligibility = async (accountID: number, updatedAccount: Ac
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
   submitting.value = true
   try {
-    const payload = { ...updatePayload }
-    let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(payload))
+    let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
-
     emit('updated', updatedAccount)
     handleClose()
   } catch (error: any) {
@@ -5217,7 +5116,7 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
         onConfirm: async () => {
           antigravityMixedChannelConfirmed.value = true
           await submitUpdateAccount(accountID, updatePayload)
-        },
+        }
       })
       return
     }
@@ -5228,7 +5127,6 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 }
 
 const handleSubmit = async () => {
-
   if (!props.account) return
   const accountID = props.account.id
 
@@ -5532,8 +5430,8 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
     }
 
-    // OAuth-family accounts with a dedicated section: persist model mapping to credentials.
-    if (supportsDedicatedModelRestriction(props.account)) {
+    // OpenAI/Grok OAuth: persist model mapping to credentials
+    if ((props.account.platform === 'openai' || props.account.platform === 'grok') && props.account.type === 'oauth') {
       const currentCredentials = isSparkShadow.value
         ? {}
         : (updatePayload.credentials as Record<string, unknown>) ||
@@ -5672,12 +5570,23 @@ const handleSubmit = async () => {
         delete newExtra.session_idle_timeout_minutes
       }
 
-      applyAccountRPMSettings(newExtra, {
-        enabled: rpmLimitEnabled.value,
-        baseRpm: baseRpm.value,
-        strategy: rpmStrategy.value,
-        stickyBuffer: rpmStickyBuffer.value
-      })
+      // RPM limit settings
+      if (rpmLimitEnabled.value) {
+        const DEFAULT_BASE_RPM = 15
+        newExtra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
+          ? baseRpm.value
+          : DEFAULT_BASE_RPM
+        newExtra.rpm_strategy = rpmStrategy.value
+        if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
+          newExtra.rpm_sticky_buffer = rpmStickyBuffer.value
+        } else {
+          delete newExtra.rpm_sticky_buffer
+        }
+      } else {
+        delete newExtra.base_rpm
+        delete newExtra.rpm_strategy
+        delete newExtra.rpm_sticky_buffer
+      }
 
       // UMQ mode（独立于 RPM 保存）
       if (userMsgQueueMode.value) {
@@ -5754,16 +5663,7 @@ const handleSubmit = async () => {
     if (props.account.platform === 'openai' && (props.account.type === 'oauth' || props.account.type === 'setup-token' || props.account.type === 'apikey')) {
       const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
-      newExtra.openai_request_timezone = openAIRequestTimezone.value
-      if (props.account.type === 'oauth') {
-        applyAccountRPMSettings(newExtra, {
-          enabled: rpmLimitEnabled.value,
-          baseRpm: baseRpm.value,
-          strict: true
-        })
-      }
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
-
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
         newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
         newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -5771,11 +5671,6 @@ const handleSubmit = async () => {
         newExtra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
         newExtra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
       }
-      if (props.account.type === 'apikey') {
-        if (apiKeyCodexIdentity.value) newExtra.openai_apikey_codex_identity = true
-        else delete newExtra.openai_apikey_codex_identity
-      }
-      delete newExtra.openai_oauth_ws_sse_acceleration
       delete newExtra.responses_websockets_v2_enabled
       delete newExtra.openai_ws_enabled
       if (openaiPassthroughEnabled.value) {
@@ -5857,11 +5752,6 @@ const handleSubmit = async () => {
       }
 
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
-        if (codexTicketAccountPolicy.value === 'inherit') {
-          delete newExtra.codex_allow_without_ticket
-        } else {
-          newExtra.codex_allow_without_ticket = codexTicketAccountPolicy.value === 'allow'
-        }
         if (codexCLIOnlyEnabled.value) {
           newExtra.codex_cli_only = true
         } else if (hadCodexCLIOnlyEnabled) {

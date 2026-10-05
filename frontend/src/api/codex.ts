@@ -1,24 +1,28 @@
-import { isClientVisibleCodexModel, type CodexCatalogModel } from '@/utils/codexCatalogConfig'
-
 export interface CodexModelsManifestResult {
   content: string
   modelCount: number
   responseBytes: number
 }
 
-function normalizeCodexApiRoot(baseUrl: string): string {
+const DEFAULT_CODEX_CLIENT_VERSION = '0.158.0'
+
+function normalizeCodexBaseUrl(baseUrl: string): string {
   const fallback = typeof window !== 'undefined' ? window.location.origin : ''
   const value = (baseUrl || fallback).trim().replace(/\/+$/, '')
-  return value.replace(/\/v1$/i, '')
+  if (!value) return '/v1'
+  return /\/v1$/i.test(value) ? value : `${value}/v1`
 }
 
-export function buildCodexModelsManifestUrl(baseUrl: string): string {
-  const apiRoot = normalizeCodexApiRoot(baseUrl)
-  return `${apiRoot}/backend-api/codex/models?catalog_view=client`
+export function buildCodexModelsManifestUrl(
+  baseUrl: string,
+  clientVersion = DEFAULT_CODEX_CLIENT_VERSION
+): string {
+  const params = new URLSearchParams({ client_version: clientVersion })
+  return `${buildCodexModelCatalogUrl(baseUrl)}?${params.toString()}`
 }
 
 export function buildCodexModelCatalogUrl(baseUrl: string): string {
-  return `${normalizeCodexApiRoot(baseUrl)}/v1/models?catalog_view=client`
+  return `${normalizeCodexBaseUrl(baseUrl)}/models`
 }
 
 function isCodexModelsManifest(value: unknown): value is { models: unknown[] } {
@@ -50,18 +54,9 @@ export async function fetchCodexModelsManifest(
     throw new Error('Codex models response is not a valid manifest')
   }
 
-  // Older gateways may ignore the client projection parameter. Preview, count
-  // and download must still share the same filtered data.
-  const models = payload.models.filter((model): model is CodexCatalogModel =>
-    typeof model === 'object' && model !== null && 'slug' in model &&
-    typeof model.slug === 'string' && !!model.slug.trim() &&
-    isClientVisibleCodexModel(model as CodexCatalogModel)
-  )
-  const clientCatalog = { ...payload, models }
-
   return {
-    content: JSON.stringify(clientCatalog, null, 2),
-    modelCount: models.length,
+    content: JSON.stringify(payload, null, 2),
+    modelCount: payload.models.length,
     responseBytes: new TextEncoder().encode(text).byteLength
   }
 }

@@ -2,11 +2,8 @@ package handler
 
 import (
 	"context"
-	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -332,38 +329,6 @@ func TestOpsErrorLoggerMiddleware_OrdinaryPermissionStillRecords(t *testing.T) {
 	job := <-opsErrorLogQueue
 	require.Equal(t, "permission_error", job.entry.ErrorType)
 	require.Equal(t, http.StatusForbidden, job.entry.StatusCode)
-}
-
-// 客户端中途断开上传是运维无法处置的失败：handler 打了跳过标记，中间件不能
-// 再把它写进 ops_error_logs；同一入口的其他读取失败仍照常记录。
-func TestOpsErrorLoggerMiddleware_SkipsBodyReadClientDisconnectOnly(t *testing.T) {
-	setupOpsErrorLogTestQueue(t, 4)
-	gin.SetMode(gin.TestMode)
-	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	h := &OpenAIGatewayHandler{}
-
-	var readErr error
-	router := gin.New()
-	router.Use(OpsErrorLoggerMiddleware(ops))
-	router.POST("/v1/responses", func(c *gin.Context) {
-		RespondRequestBodyReadFailure(c, nil, readErr, h.errorResponse)
-	})
-
-	readErr = context.Canceled
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
-	require.Equal(t, statusClientClosedRequest, recorder.Code)
-	require.Zero(t, OpsErrorLogQueueLength(), "client_disconnect must stay out of ops_error_logs")
-
-	readErr = io.ErrUnexpectedEOF
-	recorder = httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
-	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	require.Equal(t, int64(1), OpsErrorLogQueueLength(), "truncated_body must still be recorded")
-	job := <-opsErrorLogQueue
-	require.Equal(t, "invalid_request_error", job.entry.ErrorType)
-	require.Equal(t, http.StatusBadRequest, job.entry.StatusCode)
-	require.Equal(t, "Request body ended prematurely; the declared Content-Length was not received", job.entry.ErrorMessage)
 }
 
 func TestOpsErrorLoggerMiddleware_RecordsRecoveredUpstreamTelemetryOutsideFailureSLA(t *testing.T) {
@@ -1198,15 +1163,6 @@ func TestClassifyOpsLocalBusinessLimitErrorsExcludedFromSLA(t *testing.T) {
 			wantPhase:   "request",
 		},
 		{
-			name:        "explicit local user balance",
-			errType:     "billing_error",
-			message:     service.InsufficientUserBalanceMessage,
-			code:        "",
-			status:      http.StatusForbidden,
-			wantErrType: "billing_error",
-			wantPhase:   "request",
-		},
-		{
 			name:        "gemini group platform mismatch",
 			errType:     "api_error",
 			message:     "API key group platform is not gemini",
@@ -1999,72 +1955,6 @@ func TestGetOpsAPIKeyPrefersPrimaryContextKey(t *testing.T) {
 	require.Equal(t, int64(1), got.ID, "已鉴权请求应优先使用正式 api key")
 }
 
-// 後端訊息已由簡體轉為繁體（見 internal/service/api_key_service.go、
-// internal/server/middleware/api_key_auth*.go），但資料庫裡既有的 ops_error_logs
-// 仍是簡體。分類器必須同時吃得下兩種寫法，否則歷史資料會被誤判成上游錯誤而計入 SLA。
-func TestOpsErrorClassifiersAcceptBothChineseScripts(t *testing.T) {
-	authMessages := []string{
-		// 歷史資料（簡體）
-		"API Key 所属分组已删除",
-		"API Key 所属分组已停用",
-		// 轉繁後產生端的新訊息
-		"API Key 所屬分組已刪除",
-		"API Key 所屬分組已停用",
-	}
-	for _, m := range authMessages {
-		require.Truef(t, isOpsClientAuthError("", strings.ToLower(m)),
-			"isOpsClientAuthError 應辨識 %q", m)
-	}
-
-	limitMessages := []string{
-		// 歷史資料（簡體）
-		"API key 额度已用完",
-		"api key 5小时限额已用完",
-		"api key 日限额已用完",
-		"api key 7天限额已用完",
-		// 轉繁後產生端的新訊息
-		"API key 額度已用完",
-		"api key 5小時限額已用完",
-		"api key 日限額已用完",
-		"api key 7天限額已用完",
-	}
-	for _, m := range limitMessages {
-		require.Truef(t, isOpsLocalBusinessLimitError("", strings.ToLower(m)),
-			"isOpsLocalBusinessLimitError 應辨識 %q", m)
-	}
-}
-
-// 每条 body read 策略进 ops_error_logs 后的归因必须是有意的：客户端侧的失败
-// 留在 request/P3，只有我们该负责的读超时才是 internal/P2；兜底策略尤其不能
-// 被抬成 P2，否则未分类的客户端中断会触发告警。
-func TestBodyReadErrorPoliciesOpsClassification(t *testing.T) {
-	cases := []struct {
-		name            string
-		err             error
-		phase, severity string
-	}{
-		{"max_bytes", &http.MaxBytesError{Limit: 1024}, "request", "P3"},
-		{"client_disconnect", context.Canceled, "request", "P3"},
-		{"truncated_body", io.ErrUnexpectedEOF, "request", "P3"},
-		{"transport_timeout", os.ErrDeadlineExceeded, "internal", "P2"},
-		{"unsupported_content_encoding", errors.New("decode content-encoding: unsupported content-encoding"), "request", "P3"},
-		{"decode_content_encoding", errors.New("decode content-encoding: invalid header"), "request", "P3"},
-		{"io_read", errors.New("unknown read error"), "request", "P3"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			RespondRequestBodyReadFailure(c, nil, tc.err, func(_ *gin.Context, status int, errType, message string) {
-				require.True(t, isKnownOpsErrorType(errType))
-				require.Equal(t, errType, normalizeOpsErrorType(errType, ""))
-				require.Equal(t, tc.phase, classifyOpsPhase(errType, message, ""))
-				require.Equal(t, tc.severity, classifyOpsSeverity(errType, status))
-			})
-		})
-	}
-}
-
 // 分组模型白名单入口拒绝：业务限流原因复用 local_model_configuration，但
 // 携带 ingress 拒绝原因 model_not_allowed，阶段应保持自然分类（request /
 // client），不落到 routing。
@@ -2357,40 +2247,4 @@ func TestOpsErrorLoggerMiddleware_RecordsClientClosedWhenIgnoreContextCanceledDi
 	require.Equal(t, int64(1), OpsErrorLogQueueLength())
 	job := <-opsErrorLogQueue
 	require.Equal(t, statusClientClosedRequest, job.entry.StatusCode)
-}
-
-func TestOpsBalanceFilterRecognizesExplicitUserMessage(t *testing.T) {
-	settings := &opsAdvancedSettingsRepoStub{advanced: `{"ignore_insufficient_balance_errors":true}`}
-	ops := service.NewOpsService(nil, settings, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	require.True(t, ops.OpsAdvancedSettingsSnapshot().IgnoreInsufficientBalanceErrors)
-	for _, message := range []string{"insufficient balance", "Insufficient account balance", service.InsufficientUserBalanceMessage} {
-		require.True(t, shouldSkipOpsErrorLog(context.Background(), ops, message, "", "/v1/responses"))
-		require.True(t, shouldSkipOpsErrorLog(context.Background(), ops, "", message, "/v1/responses"))
-	}
-}
-
-type opsFlushFailureRecorder struct {
-	*httptest.ResponseRecorder
-	calls int
-}
-
-func (w *opsFlushFailureRecorder) FlushError() error {
-	w.calls++
-	return io.ErrClosedPipe
-}
-
-func TestOpsCaptureWriterFlushErrorPropagatesAndHonorsLease(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	rec := &opsFlushFailureRecorder{ResponseRecorder: httptest.NewRecorder()}
-	c, _ := gin.CreateTestContext(rec)
-	writer := acquireOpsCaptureWriter(c.Writer)
-	defer releaseOpsCaptureWriter(writer)
-	writer.WriteHeader(http.StatusAccepted)
-	require.ErrorIs(t, service.FlushGatewayResponse(writer), io.ErrClosedPipe)
-	require.True(t, writer.Written(), "flush must preserve Gin header bookkeeping")
-	require.Equal(t, http.StatusAccepted, rec.Code)
-	require.Equal(t, 1, rec.calls)
-	releaseOpsCaptureWriter(writer)
-	require.ErrorContains(t, writer.FlushError(), "released")
-	require.Equal(t, 1, rec.calls, "released handles must not reach the old transport")
 }

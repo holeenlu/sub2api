@@ -281,7 +281,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		attemptImageIntentInvalidated,
 		IsImageGenerationIntent,
 	)
-	if imageIntent && !GroupAllowsImageGenerationLatest(c.Request.Context(), apiKeyGroup(apiKey)) {
+	if imageIntent && !GroupAllowsImageGeneration(apiKeyGroup(apiKey)) {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
 		c.JSON(http.StatusForbidden, gin.H{
 			"error": gin.H{
@@ -336,6 +336,17 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 	}
 
+	// Get access token
+	token, _, err := s.GetAccessToken(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+
 	if c != nil {
 		c.Set("openai_passthrough", true)
 	}
@@ -355,25 +366,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			actualModel = reqModel
 		}
 		SetOpsUpstreamModel(c, actualModel)
-
-		// Re-read account eligibility immediately before building the request.
-		// The returned snapshot is also the source for the token, proxy and
-		// ticket header so a token refresh or group change cannot leave this
-		// attempt using the stale scheduler snapshot.
-		latest, admissionErr := s.admitOpenAITurn(ctx, c, account, actualModel)
-		if admissionErr != nil {
-			return nil, admissionErr
-		}
-		account = latest
-		token, _, err := s.GetAccessToken(ctx, account)
-		if err != nil {
-			return nil, err
-		}
-		proxyURL := ""
-		if account.ProxyID != nil && account.Proxy != nil {
-			proxyURL = account.Proxy.URL()
-		}
-
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
 		releaseUpstreamCtx()
@@ -431,7 +423,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			// 透传模式默认保持原样代理；容量错误以及 API-key 上游的瞬时
 			// 5xx 应先触发多账号 failover，且此时尚未写入下游响应。
 			// probeBody 已在上方任务探测时读取过一次，直接复用避免重复读取。
-			if shouldFailoverOpenAIPassthroughResponse(s.settingService, account, resp.StatusCode, probeBody) {
+			if shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, probeBody) {
 				return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 			}
 			return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
@@ -466,7 +458,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				if signal, ok := asOpenAICompactFallbackSignal(handleErr); ok {
 					_ = resp.Body.Close()
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
-					if shouldFailoverOpenAIPassthroughResponse(s.settingService, account, compactResp.StatusCode, compactBody) {
+					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
 						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 					}
 					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
@@ -493,7 +485,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				if signal, ok := asOpenAICompactFallbackSignal(handleErr); ok {
 					_ = resp.Body.Close()
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
-					if shouldFailoverOpenAIPassthroughResponse(s.settingService, account, compactResp.StatusCode, compactBody) {
+					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
 						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 					}
 					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
@@ -639,11 +631,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	// 客户端回带的 x-codex-turn-state 若已知由其他账号铸造（failover 换号），
 	// 剥离后再出站（openai_codex_turn_state.go）。
 	s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
-	if ticket, err := s.applyOpenAICodexTicketWithGeneration(ctx, account, extractOpenAICodexTicketModel(body), req.Header); err != nil {
-		return nil, err
-	} else if ticket != nil {
-		req = req.WithContext(context.WithValue(req.Context(), codexTicketRequestContextKey{}, ticket))
-	}
 
 	// 覆盖入站鉴权残留，并注入上游认证
 	req.Header.Del("authorization")
@@ -732,8 +719,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		req.Header.Set("content-type", "application/json")
 	}
 
-	applyOpenAIAPIKeyIdentityHeaders(req.Header, account, s.codexIdentityOverrideUA(account))
-
 	// 官方 OpenCode / Command Code 上游收敛为规范客户端 UA：客户端透传的编程库
 	// UA 会命中其前置 Cloudflare bot 拦截（CF 1010/403），并被计入账号 403 strike。
 	applyOpenCodeUpstreamUserAgent(account, targetURL, req.Header)
@@ -784,7 +769,7 @@ func stripOpenAILegacyResponsesBeta(headers http.Header) {
 	}
 }
 
-func shouldFailoverOpenAIPassthroughResponse(settingService *SettingService, account *Account, statusCode int, responseBody []byte) bool {
+func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, responseBody []byte) bool {
 	if hit, _, _ := detectOpenAICyberPolicy(responseBody); hit {
 		return false
 	}
@@ -800,30 +785,23 @@ func shouldFailoverOpenAIPassthroughResponse(settingService *SettingService, acc
 	if account != nil && account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode) {
 		return true
 	}
-	// 非 API Key 账号（OAuth 等）除 429/529 外不换号：透传路径下它们多是会话级问题，
-	// 换账号重放会话反而制造新的失败。这是账号级规则，必须放在状态码判定之外——
-	// 写进 platformDefault 闭包的话，管理员一配置 upstream_failover_status_codes
-	// 闭包就不再被调用，规则会被一个只看状态码的设置静默覆盖。
-	if statusCode != http.StatusTooManyRequests && statusCode != 529 &&
-		(account == nil || account.Type != AccountTypeAPIKey) {
+	switch statusCode {
+	case http.StatusTooManyRequests, 529:
+		return true
+	}
+	if account == nil || account.Type != AccountTypeAPIKey {
 		return false
 	}
-	return shouldFailoverStatusCode(settingService, statusCode, func(statusCode int) bool {
-		switch statusCode {
-		case http.StatusTooManyRequests, 529:
-			return true
-		}
-		switch statusCode {
-		case http.StatusInternalServerError,
-			http.StatusBadGateway,
-			http.StatusServiceUnavailable,
-			http.StatusGatewayTimeout,
-			520, 521, 522, 523, 524:
-			return true
-		default:
-			return false
-		}
-	})
+	switch statusCode {
+	case http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+		520, 521, 522, 523, 524:
+		return true
+	default:
+		return false
+	}
 }
 
 func writeOpenAIPassthroughErrorHeaders(dst, src http.Header) {

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -31,14 +32,7 @@ import (
 func GroupModelAllowlist() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apiKey, ok := GetAPIKeyFromContext(c)
-		if !ok || apiKey == nil || apiKey.Group == nil {
-			c.Next()
-			return
-		}
-		// Capture models even if the initial allowlist is off: queued requests
-		// must honor permission changes before admission.
-		captureForQueue := apiKey.ConcurrencyLimit > 0
-		if !apiKey.Group.ModelAllowlistEnabled() && !captureForQueue {
+		if !ok || apiKey == nil || apiKey.Group == nil || !apiKey.Group.ModelAllowlistEnabled() {
 			c.Next()
 			return
 		}
@@ -75,9 +69,7 @@ func GroupModelAllowlist() gin.HandlerFunc {
 				}
 			}
 		}
-		if captureForQueue && len(models) > 0 {
-			c.Request = c.Request.WithContext(service.WithAPIKeyQueueRequestPermissions(c.Request.Context(), service.APIKeyQueueRequestPermissions{Models: models}))
-		}
+
 		blocked := ""
 		for _, candidate := range models {
 			if !allowlist.Allows(candidate) {
@@ -112,7 +104,8 @@ func isResponsesWebSocketRoute(c *gin.Context) bool {
 }
 
 // groupModelAllowlistModelsFromBody 读取请求体并提取客户端模型名，随后把请求体
-// 回填（PrereadBody），保证后续 handler 零拷贝重读。读取失败按网关统一策略分类并返回错误（返回 false 表示已写出响应并 Abort）。
+// 回填（PrereadBody），保证后续 handler 零拷贝重读。读取失败按现有合成中间件
+// 的方式返回 400/413（返回 false 表示已写出响应并 Abort）。
 //
 // 下游同时存在 gjson（首个、大小写敏感）、encoding/json 绑定（末值、大小写
 // 不敏感）与 multipart 表单（首/末字段）三类解析器，这里返回「任一解析器可能
@@ -120,7 +113,15 @@ func isResponsesWebSocketRoute(c *gin.Context) bool {
 func groupModelAllowlistModelsFromBody(c *gin.Context) ([]string, bool) {
 	body, err := httputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		abortRequestBodyReadFailure(c, err)
+		status := http.StatusBadRequest
+		message := "Failed to read request body"
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			status = http.StatusRequestEntityTooLarge
+			message = "Request body is too large"
+		}
+		c.JSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
+		c.Abort()
 		return nil, false
 	}
 	requestmodel.ResetRequestBody(c.Request, body)

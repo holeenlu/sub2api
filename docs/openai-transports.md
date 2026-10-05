@@ -12,17 +12,17 @@
 
 ## 手动桥接与续聊
 
-账号创建、编辑、批量设置以及历史配置中的 `http_bridge` 模式继续有效。它仍受 `mode_router_v2_enabled` 开关控制，不改为 `ctx_pool`。客户端 WS 请求经 HTTP Responses 转发，SSE 事件转换成 WS 帧；工具续聊、previous_response_id 历史重建、发送前准入和 RPM 校验保持。
+账号创建、编辑、批量设置以及历史配置中的 `http_bridge` 模式继续有效。它仍受 `mode_router_v2_enabled` 开关控制，不改为 `ctx_pool`。客户端 WS 请求经 HTTP Responses 转发，SSE 事件转换成 WS 帧；工具续聊、previous_response_id 历史重建、原生账号资格和 RPM 校验保持。
 
 手动桥接的 `generate=false` 预热在桥接器本地应答；原生 WS 的预热保留 `generate=false` 并发往上游。取消和连接结束仍执行已有的用量收尾，避免把正常客户端退出归为账号故障。
 
 ## 已移除的转换
 
 - 2026-10-04：移除账号“HTTP 流式 WS 加速”和按 WS 首包大小自动改走 HTTP 的策略。旧 `openai_oauth_ws_sse_acceleration` 不再影响路由；旧 `http_bridge_enabled` / `http_bridge_threshold_bytes` 配置按未使用字段忽略。
-- 2026-10-05：移除 Excel/BPS 和旧独立平台的全部运行路径，参见 [升级说明](BPS_REMOVAL.md)。保留 Codex 降智检测、打票、原生工具与图片能力。
+- 2026-10-05：移除 Excel/BPS 和旧独立平台的全部运行路径，参见 [升级说明](BPS_REMOVAL.md)。保留 Codex 降智检测、原生工具与图片能力；打票、Cookie/票据绑定及额外轮次准入也已随原生恢复移除。
 
 通用 WS 帧大小限制、`client_first_message_timeout_seconds`、上游读写超时和客户端重试各自生效。移除旧转换不会回退首包超时设置，也不改变模型的实际生成速度。
 
 ## 来源边界
 
-手动模式沿用官方方案的 WS mode、选择器和显式桥接逻辑。2026-10-04 的源码对照基准为官方 `b8dece9000c68815a5b867ca5a1e6f236e173905` 与 ranxi `0ae36e501952000c5c910a2e616c6e0861f66a49`；来源与历史比较可从对应 Git 提交查阅。本仓库还保留自己的预热、续聊、准入、工具状态和用量收尾，不能把整个实现描述为上游逐字副本。
+手动模式沿用官方方案的 WS mode、选择器和显式桥接逻辑。2026-10-04 的源码对照基准为官方 `b8dece9000c68815a5b867ca5a1e6f236e173905` 与 ranxi `0ae36e501952000c5c910a2e616c6e0861f66a49`；来源与历史比较可从对应 Git 提交查阅。本轮恢复后的转发、连接池、预热、续聊、工具处理与用量收尾使用固定官方版本；检测及品牌/安全等保留边界见 [原生恢复说明](FORK_FEATURE_RETIREMENT.md)。

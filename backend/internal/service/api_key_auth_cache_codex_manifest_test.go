@@ -36,8 +36,6 @@ func TestAPIKeyAuthSnapshotGroupCodexModelsManifestRoundtrip(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, used)
 	require.NotNil(t, materialized.Group)
-	// The source configuration must survive the auth-cache round trip so the
-	// /models handler does not silently switch back to scheduler discovery.
 	require.True(t, materialized.Group.CodexModelsManifestConfig.Enabled)
 	require.Equal(t, []int64{7, 8}, materialized.Group.CodexModelsManifestConfig.AccountIDs)
 	require.True(t, materialized.Group.CodexModelsManifestConfig.FallbackToScheduler)

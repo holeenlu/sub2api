@@ -103,7 +103,6 @@ const (
 	upstreamProtocolModeOpenAIH1         = "openai_h1"
 	upstreamProtocolModeOpenAIH2         = "openai_h2"
 	upstreamProtocolModeOpenAIH1Fallback = "openai_h1_fallback"
-	upstreamProtocolModeOpenAIH1NoReuse  = "openai_h1_noreuse"
 	upstreamProtocolModeGrok             = "grok"
 )
 
@@ -220,7 +219,6 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	// 执行请求
 	client := s.httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
-
 	resp, err := doUpstreamRequest(client, req)
 	if err != nil {
 		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
@@ -355,50 +353,20 @@ func (s *httpUpstreamService) httpClientForUpstreamRequest(client *http.Client, 
 		return client
 	}
 	ctx := req.Context()
-	publicOnly := service.HTTPUpstreamPublicHostsOnly(ctx)
-	redirectsDisabled := service.HTTPUpstreamRedirectsDisabled(ctx)
-	if !publicOnly && !redirectsDisabled {
-		return client
-	}
-	clone := *client
-	if publicOnly {
-		// Pin validated destination IPs in the request sent to the transport.
-		// In particular a configured proxy must receive the approved IP, not a
-		// hostname it could independently resolve to a private destination.
-		transport, ok := client.Transport.(*http.Transport)
-		if client.Transport != nil && !ok {
-			clone.Transport = rejectedPublicDownloadTransport{}
-		} else {
-			clone.Transport = urlvalidator.NewPublicTransport(transport)
-		}
-		clone.CheckRedirect = func(next *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return errors.New("stopped after 10 redirects")
-			}
-			if next == nil || next.URL == nil {
-				return errors.New("public download redirect URL is invalid")
-			}
-			if len(via) > 0 && (via[len(via)-1] == nil || via[len(via)-1].URL == nil) {
-				return errors.New("public download redirect history is invalid")
-			}
-			if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && next.URL.Scheme != "https" {
-				return errors.New("public download cannot downgrade HTTPS")
-			}
-			return s.redirectChecker(next, via)
-		}
-	}
-	if redirectsDisabled {
+	switch {
+	case service.HTTPUpstreamRedirectsDisabled(ctx):
+		clone := *client
 		clone.CheckRedirect = func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
+		return &clone
+	case service.HTTPUpstreamPublicHostsOnly(ctx) && client.CheckRedirect == nil:
+		clone := *client
+		clone.CheckRedirect = s.redirectChecker
+		return &clone
+	default:
+		return client
 	}
-	return &clone
-}
-
-type rejectedPublicDownloadTransport struct{}
-
-func (rejectedPublicDownloadTransport) RoundTrip(*http.Request) (*http.Response, error) {
-	return nil, errors.New("unsupported transport for public-only download")
 }
 
 // grokAccessDeniedFallbackTransport preserves the subscription CLI proxy as
@@ -1092,15 +1060,11 @@ func (s *httpUpstreamService) resolveOpenAIHTTP2Settings() openAIHTTP2Settings {
 }
 
 func (s *httpUpstreamService) resolveProtocolMode(profile service.HTTPUpstreamProfile, proxyKey string, parsedProxy *url.URL) string {
-
 	if profile == service.HTTPUpstreamProfileLongStream {
 		return upstreamProtocolModeLongStreamH2
 	}
 	if profile == service.HTTPUpstreamProfileGrok {
 		return upstreamProtocolModeGrok
-	}
-	if profile == service.HTTPUpstreamProfileOpenAIHarvest {
-		return upstreamProtocolModeOpenAIH1NoReuse
 	}
 	if profile != service.HTTPUpstreamProfileOpenAI {
 		return upstreamProtocolModeDefault
@@ -1433,13 +1397,6 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 		}
 	case upstreamProtocolModeOpenAIH1:
 		transport.ForceAttemptHTTP2 = false
-		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
-	case upstreamProtocolModeOpenAIH1NoReuse:
-		// Harvest must open a fresh CONNECT each attempt so the harvest proxy can rotate egress IPs.
-		transport.ForceAttemptHTTP2 = false
-		transport.DisableKeepAlives = true
-		transport.MaxIdleConns = 0
-		transport.MaxIdleConnsPerHost = 0
 		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
 	case upstreamProtocolModeOpenAIH1Fallback:
 		// 显式禁用 HTTP/2，确保代理不兼容场景回退到 HTTP/1.1。

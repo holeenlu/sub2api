@@ -1,13 +1,5 @@
 export default {
     ops: {
-      balanceError: {
-        user: 'ユーザー残高不足',
-        userHint: 'ローカルユーザーの残高がリクエスト要件を満たしていません。残高を追加してから再試行してください。',
-        upstream: '上流アカウント残高不足',
-        upstreamHint: '上流サービスがアカウント残高不足を報告しました。管理者にチャージまたは上流アカウントの交換を依頼してください。',
-        unknown: '残高不足（原因未確認）',
-        unknownHint: 'このログには原因を特定する情報が不足しています。元のエラーと上流レスポンスを確認してください。',
-      },
       title: '運用監視',
       description: '運用状況の監視とトラブルシューティング',
       // Dashboard
@@ -31,8 +23,6 @@ export default {
       lastRun: '最終実行：',
       lastSuccess: '最終成功：',
       lastError: '最終エラー：',
-      jobFailed: '失敗中',
-      jobStale: 'オフラインの疑い',
       result: '結果',
       noData: 'データがありません。',
       loadingText: '読み込み中',
@@ -157,17 +147,6 @@ export default {
       healthyStatus: '正常',
       riskyStatus: '要注意',
       idleStatus: 'アイドル',
-      healthBreakdown: {
-        business: '業務 {score}/100（重み70%）',
-        errorRate: '・エラー率 {score}/100',
-        ttft: '・TTFT {score}/100（{threshold}msで満点）',
-        infra: 'インフラ {score}/100（重み30%）',
-        storage: '・ストレージ {score}/100',
-        compute: '・コンピューティング {score}/100',
-        jobs: '・バックグラウンドジョブ {score}/100',
-        failedJobs: '失敗中のジョブ：{jobs}',
-        staleJobs: 'オフラインの疑いがあるジョブ：{jobs}'
-      },
       timeRange: {
         '5m': '過去5分',
         '30m': '過去30分',

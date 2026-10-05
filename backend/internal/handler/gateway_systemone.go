@@ -56,7 +56,11 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		RespondRequestBodyReadFailure(c, reqLog, err, h.errorResponse)
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
 	model, err := typesafe.ValidateSystemOneRequest(body)
@@ -84,7 +88,7 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 
 	streamStarted := false
-	userRelease, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, apiKey.ID, apiKey.ConcurrencyLimit, false, &streamStarted)
+	userRelease, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, false, &streamStarted)
 	if err != nil {
 		reqLog.Warn("systemone.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", false)
@@ -117,7 +121,7 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 	}
 	defer inflightRelease()
 
-	fs := NewFailoverState(h.maxAccountSwitches, false, c)
+	fs := NewFailoverState(h.maxAccountSwitches, false)
 	for {
 		if failoverClientGone(c) {
 			return

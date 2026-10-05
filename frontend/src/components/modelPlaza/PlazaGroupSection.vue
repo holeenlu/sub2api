@@ -49,7 +49,6 @@
         <Icon name="infoCircle" size="xs" class="h-3 w-3" />
         {{ longContextNote }}
       </p>
-      <p v-if="group.personal_quote_unavailable" role="status" class="mt-2 text-xs text-amber-700 dark:text-amber-400">{{ t('modelPlaza.quote.personalUnavailable') }}</p>
     </header>
 
     <!-- 模型价格表:整行(含 hover 底色/分区底色)顶到卡片边缘,左右留白由表格首列/末列的 padding 提供 -->
@@ -68,7 +67,7 @@
         :peak-rate-multiplier="group.peak_rate_multiplier"
       />
       <p v-else class="px-5 py-4 text-center text-sm text-gray-400 dark:text-dark-500">
-        {{ t(group.catalog_status === 'unavailable' ? 'modelPlaza.catalog.unavailable' : 'modelPlaza.detail.noModels') }}
+        {{ t('modelPlaza.detail.noModels') }}
       </p>
     </div>
   </section>

@@ -46,8 +46,7 @@ type Account struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 
-	Schedulable               bool
-	SchedulerTicketProjection bool `json:"-"`
+	Schedulable bool
 
 	RateLimitedAt    *time.Time
 	RateLimitResetAt *time.Time
@@ -181,17 +180,6 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
-	return a.isSchedulableIgnoringRateLimit() && !a.IsRateLimited()
-}
-
-// isSchedulableIgnoringRateLimit 是 IsSchedulable 去掉账号级限流窗口后的判定：
-// 回答"限流冷却结束后这个账号能否被调度"。过载、临时停调、到期自动暂停、
-// 额度超限这些状态的恢复时刻都与限流无关，全池冷却诊断据此把它们排除在
-// Retry-After 的计算之外。
-func (a *Account) isSchedulableIgnoringRateLimit() bool {
-	if IsUnsupportedPlatform(a.Platform) {
-		return false
-	}
 	if !a.IsActive() || !a.Schedulable {
 		return false
 	}
@@ -200,6 +188,9 @@ func (a *Account) isSchedulableIgnoringRateLimit() bool {
 		return false
 	}
 	if a.OverloadUntil != nil && now.Before(*a.OverloadUntil) {
+		return false
+	}
+	if a.RateLimitResetAt != nil && now.Before(*a.RateLimitResetAt) {
 		return false
 	}
 	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
@@ -253,30 +244,6 @@ func (a *Account) IsOverloaded() bool {
 
 func (a *Account) IsOAuth() bool {
 	return a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken
-}
-
-// CanRefreshToken 报告账号的凭据是否参与 OAuth 续期生命周期。
-//
-// Anthropic setup-token 分两种来源：直接粘贴导入的 `claude setup-token` 是作为
-// CLAUDE_CODE_OAUTH_TOKEN 使用的长期凭据，没有过期时间，不参与 OAuth refresh_token
-// 续期，残留的 refresh_token 也不能拿去换一个 8 小时令牌。而旧版浏览器交换流程
-// （exchange-setup-token-code / setup-token-cookie-auth）写入的行本身就是 8 小时
-// 令牌（expires_in=28800）并带 refresh_token，只有续期才能活过到期时间——把它们
-// 一并排除会让这些账号到期后持续 401（上游 99da30819 修的正是这个）。两者以
-// expires_at 是否存在区分：直接导入不写 expires_at。
-//
-// 此谓词由手动刷新入口、后台刷新器、CRS 同步与前端能力字段共用。
-func (a *Account) CanRefreshToken() bool {
-	if a == nil || !a.IsOAuth() {
-		return false
-	}
-	if a.Platform == PlatformAnthropic && a.Type == AccountTypeSetupToken && a.GetCredentialAsTime("expires_at") == nil {
-		return false
-	}
-	if a.Type == AccountTypeSetupToken && strings.TrimSpace(a.GetCredential("refresh_token")) == "" {
-		return false
-	}
-	return true
 }
 
 // IsPrivacySet 检查账号的 privacy 是否已成功设置。
@@ -912,11 +879,7 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 		return true
 	}
 	normalized := normalizeRequestedModelForLookup(a.Platform, requestedModel)
-	if normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized) {
-		return true
-	}
-
-	return false
+	return normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized)
 }
 
 // GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）
@@ -1907,7 +1870,6 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if !a.IsOpenAICompatible() {
 		return false
 	}
-
 	if a.IsGrok() {
 		switch capability {
 		case OpenAIEndpointCapabilityChatCompletions:
@@ -2192,7 +2154,6 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 // 1. 按账号类型读取分类型字段
 // 2. 分类型字段缺失时，回退兼容字段
 func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
-
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
@@ -2261,7 +2222,6 @@ func normalizeOpenAIWSIngressDefaultMode(mode string) string {
 // 3. 兼容 enabled 旧字段（bool）
 // 4. defaultMode（非法时回退 ctx_pool）
 func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) string {
-
 	resolvedDefault := normalizeOpenAIWSIngressDefaultMode(defaultMode)
 	if a == nil || !a.IsOpenAI() {
 		return OpenAIWSIngressModeOff
@@ -2332,7 +2292,6 @@ func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) stri
 // IsOpenAIWSForceHTTPEnabled 返回账号级"强制 HTTP"开关。
 // 字段：accounts.extra.openai_ws_force_http。
 func (a *Account) IsOpenAIWSForceHTTPEnabled() bool {
-
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
@@ -3155,11 +3114,8 @@ func (a *Account) GetBaseRPM() int {
 }
 
 // GetRPMStrategy 获取 RPM 策略
-// "strict" = OpenAI OAuth 硬上限；Anthropic 使用 "tiered" 或 "sticky_exempt"。
+// "tiered" = 三区模型（默认）, "sticky_exempt" = 粘性豁免
 func (a *Account) GetRPMStrategy() string {
-	if a.IsOpenAIOAuth() {
-		return "strict"
-	}
 	if a.Extra == nil {
 		return "tiered"
 	}
@@ -3229,9 +3185,6 @@ func (a *Account) CheckRPMSchedulability(currentRPM int) WindowCostSchedulabilit
 	}
 
 	strategy := a.GetRPMStrategy()
-	if strategy == "strict" {
-		return WindowCostNotSchedulable
-	}
 	if strategy == "sticky_exempt" {
 		return WindowCostStickyOnly // 粘性豁免无红区
 	}
@@ -3347,18 +3300,6 @@ func parseExtraInt(value any) int {
 
 // IsShadow 报告账号是否为影子账号（parent_account_id 非空；当前唯一预设是 spark 维度）。
 func (a *Account) IsShadow() bool { return a != nil && a.ParentAccountID != nil }
-
-// RPMAccountID returns the counter owner for per-minute limits. Credential
-// shadows intentionally share their parent account's upstream quota.
-func (a *Account) RPMAccountID() int64 {
-	if a == nil {
-		return 0
-	}
-	if a.IsOpenAIOAuth() && a.ParentAccountID != nil && *a.ParentAccountID > 0 {
-		return *a.ParentAccountID
-	}
-	return a.ID
-}
 
 // IsCredentialShadow 语义别名，供「凭据消费者跳过影子」处使用（管理/后台 OAuth 路径）。
 func (a *Account) IsCredentialShadow() bool { return a.IsShadow() }

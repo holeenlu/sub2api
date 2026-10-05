@@ -62,11 +62,6 @@ func CORS(cfg config.CORSConfig) gin.HandlerFunc {
 	for _, prop := range openAIProperties {
 		allowHeaders = append(allowHeaders, "x-stainless-"+prop)
 	}
-	// Anthropic SDK / Vercel AI SDK（@ai-sdk/anthropic）浏览器端会发送 anthropic-* 请求头；
-	// user-agent 由 @ai-sdk/provider-utils 设置，需在 CORS 中显式放行。
-	allowHeaders = append(allowHeaders,
-		"anthropic-version", "anthropic-beta", "anthropic-dangerous-direct-browser-access", "user-agent",
-	)
 	allowHeadersValue := strings.Join(allowHeaders, ", ")
 
 	return func(c *gin.Context) {

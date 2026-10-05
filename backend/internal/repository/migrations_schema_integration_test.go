@@ -59,8 +59,6 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "groups", "allow_live", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "force_openai_fast", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "free_openai_fast", "boolean", 0, false)
-	// groups: 无可用账号兜底分组，未配置时为 NULL，目标分组删除后由外键置空。
-	requireColumn(t, tx, "groups", "fallback_group_id_on_no_account", "bigint", 0, true)
 
 	// api_keys: key length should be 128
 	requireColumn(t, tx, "api_keys", "key", "character varying", 128, false)
@@ -158,9 +156,6 @@ WHERE ns.nspname = 'public'
 	// ops_system_logs: API key id index for operational log triage
 	requireColumn(t, tx, "ops_system_logs", "api_key_id", "bigint", 0, true)
 	requireIndex(t, tx, "ops_system_logs", "idx_ops_system_logs_api_key_id_created_at")
-
-	// ops_job_heartbeats: 判活按任务自报周期，旧行为 NULL。
-	requireColumn(t, tx, "ops_job_heartbeats", "expected_interval_seconds", "bigint", 0, true)
 
 	// Bounded ingress rejection security aggregates.
 	requireColumn(t, tx, "ops_ingress_reject_aggregates", "bucket_start", "timestamp with time zone", 0, false)

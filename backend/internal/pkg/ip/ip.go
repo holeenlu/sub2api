@@ -157,10 +157,17 @@ func GetTrustedClientIP(c *gin.Context) string {
 	return normalizeIP(c.ClientIP())
 }
 
-// GetSecurityClientIP always uses the authenticated proxy chain. The legacy
-// argument is retained for source compatibility, but neither it nor a request
-// metadata snapshot can authorize untrusted forwarding headers for security.
-func GetSecurityClientIP(c *gin.Context, _ bool) string {
+// GetSecurityClientIP returns the address used by security-sensitive paths.
+// When legacy forwarded-IP trust is enabled, raw forwarding headers take over
+// client-IP resolution. When disabled, Gin's server.trusted_proxies chain is
+// authoritative.
+func GetSecurityClientIP(c *gin.Context, trustForwarded bool) string {
+	if requestSettings, ok := requestForwardedIPSettings(c); ok {
+		trustForwarded = requestSettings.trustForwarded
+	}
+	if trustForwarded {
+		return GetClientIP(c)
+	}
 	return GetTrustedClientIP(c)
 }
 

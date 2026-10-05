@@ -1,13 +1,5 @@
 export default {
     ops: {
-      balanceError: {
-        user: 'Insufficient user balance',
-        userHint: 'The local user balance does not meet the request requirement. Top up this user’s balance before retrying.',
-        upstream: 'Insufficient upstream account balance',
-        upstreamHint: 'The upstream service reports insufficient account balance. Ask an administrator to top up or replace the upstream account.',
-        unknown: 'Insufficient balance (source unconfirmed)',
-        unknownHint: 'This log has insufficient source information. Check the original error and upstream response to identify whose balance is insufficient.',
-      },
       title: 'Ops Monitoring',
       description: 'Operational monitoring and troubleshooting',
       // Dashboard
@@ -31,8 +23,6 @@ export default {
       lastRun: 'last_run:',
       lastSuccess: 'last_success:',
       lastError: 'last_error:',
-      jobFailed: 'Failing',
-      jobStale: 'Suspected offline',
       result: 'Result',
       noData: 'No data.',
       loadingText: 'loading',
@@ -157,17 +147,6 @@ export default {
       healthyStatus: 'Healthy',
       riskyStatus: 'At Risk',
       idleStatus: 'Idle',
-      healthBreakdown: {
-        business: 'Business {score}/100 (70% weight)',
-        errorRate: '· Error rate {score}/100',
-        ttft: '· TTFT {score}/100 (full score at {threshold}ms)',
-        infra: 'Infrastructure {score}/100 (30% weight)',
-        storage: '· Storage {score}/100',
-        compute: '· Compute {score}/100',
-        jobs: '· Background jobs {score}/100',
-        failedJobs: 'Failing jobs: {jobs}',
-        staleJobs: 'Jobs suspected offline: {jobs}'
-      },
       timeRange: {
         '5m': 'Last 5 minutes',
         '30m': 'Last 30 minutes',
@@ -733,7 +712,7 @@ export default {
         slaMinPercent: 'SLA Minimum Percentage',
         slaMinPercentHint: 'SLA below this value will be displayed in red (default: 99.5%)',
         ttftP99MaxMs: 'TTFT P99 Maximum (ms)',
-        ttftP99MaxMsHint: 'TTFT P99 above this value is displayed in red; it is also the full-score point of the health score TTFT scale (default: 10000ms)',
+        ttftP99MaxMsHint: 'TTFT P99 above this value will be displayed in red (default: 500ms)',
         requestErrorRateMaxPercent: 'Request Error Rate Maximum (%)',
         requestErrorRateMaxPercentHint: 'Request error rate above this value will be displayed in red (default: 5%)',
         upstreamErrorRateMaxPercent: 'Upstream Error Rate Maximum (%)',

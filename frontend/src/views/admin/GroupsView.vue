@@ -410,15 +410,6 @@
                 </span>
               </button>
               <button
-                v-if="row.status === 'active'"
-                data-testid="group-model-preview"
-                @click="previewGroupId = row.id"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700"
-              >
-                <Icon name="eye" size="sm" />
-                <span class="text-xs">{{ t('modelPlaza.preview.action') }}</span>
-              </button>
-              <button
                 v-if="!authStore.isSimpleMode && row.platform === 'composite'"
                 data-testid="group-composite-routes"
                 @click="handleCompositeRoutes(row)"
@@ -778,12 +769,15 @@
         </div>
 
         <div class="border-t pt-4">
-          <div class="mb-4 space-y-3">
+          <div class="mb-3 flex items-center justify-between gap-3">
             <div>
-              <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.groups.modelAllowlist.title') }}</h3>
-              <p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ t('admin.groups.modelAllowlist.hint') }}</p>
+              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t("admin.groups.modelAllowlist.title") }}
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.modelAllowlist.hint") }}
+              </p>
             </div>
-
             <Toggle v-model="createModelAllowlistState.enabled" />
           </div>
           <div
@@ -1902,21 +1896,6 @@
           </p>
         </div>
 
-        <!-- 无可用账号兜底（所有平台，目标分组必须同平台） -->
-        <div class="border-t pt-4">
-          <label class="input-label">{{
-            t("admin.groups.noAccountFallback.title")
-          }}</label>
-          <Select
-            v-model="createForm.fallback_group_id_on_no_account"
-            :options="noAccountFallbackOptions"
-            :placeholder="t('admin.groups.noAccountFallback.noFallback')"
-          />
-          <p class="input-hint">
-            {{ t("admin.groups.noAccountFallback.hint") }}
-          </p>
-        </div>
-
         <!-- 模型路由配置（仅 anthropic 平台） -->
         <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -2430,12 +2409,15 @@
         </div>
 
         <div class="border-t pt-4">
-          <div class="mb-4 space-y-3">
+          <div class="mb-3 flex items-center justify-between gap-3">
             <div>
-              <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.groups.modelAllowlist.title') }}</h3>
-              <p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ t('admin.groups.modelAllowlist.hint') }}</p>
+              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t("admin.groups.modelAllowlist.title") }}
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.modelAllowlist.hint") }}
+              </p>
             </div>
-
             <Toggle v-model="editModelAllowlistState.enabled" />
           </div>
           <div
@@ -3133,6 +3115,15 @@
           </div>
         </div>
 
+        <!-- 固定账号获取 Codex Model Manifest（仅 openai 平台，仅编辑对话框） -->
+        <CodexManifestAccountsField
+          v-if="editForm.platform === 'openai' && editingGroup"
+          ref="editCodexManifestRef"
+          :group-id="editingGroup.id"
+          :model-value="editCodexManifestConfig"
+          @update:model-value="Object.assign(editCodexManifestConfig, $event)"
+          :account-names="editCodexManifestAccountNames"
+        />
 
 
         <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
@@ -3551,21 +3542,6 @@
           />
           <p class="input-hint">
             {{ t("admin.groups.invalidRequestFallback.hint") }}
-          </p>
-        </div>
-
-        <!-- 无可用账号兜底（所有平台，目标分组必须同平台） -->
-        <div class="border-t pt-4">
-          <label class="input-label">{{
-            t("admin.groups.noAccountFallback.title")
-          }}</label>
-          <Select
-            v-model="editForm.fallback_group_id_on_no_account"
-            :options="noAccountFallbackOptionsForEdit"
-            :placeholder="t('admin.groups.noAccountFallback.noFallback')"
-          />
-          <p class="input-hint">
-            {{ t("admin.groups.noAccountFallback.hint") }}
           </p>
         </div>
 
@@ -4285,7 +4261,6 @@
       @close="showRPMOverridesModal = false"
       @success="loadGroups"
     />
-    <GroupModelPreviewDialog :group-id="previewGroupId" @close="previewGroupId = null" />
   </AppLayout>
 </template>
 
@@ -4298,6 +4273,7 @@ import { useOnboardingStore } from "@/stores/onboarding";
 import { adminAPI } from "@/api/admin";
 import type {
   AdminGroup,
+  CodexModelsManifestConfig,
   CompositeModelRoute,
   CompositeModelRouteInput,
   CompositeRouteDecision,
@@ -4323,10 +4299,10 @@ import Select from "@/components/common/Select.vue";
 import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
-import GroupModelPreviewDialog from "@/components/admin/group/GroupModelPreviewDialog.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
+import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
 import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
 import type { PricingFormEntry } from "@/components/admin/channel/types";
 import {
@@ -4367,11 +4343,6 @@ import {
   setModelAllowlistCandidates,
 } from "./groupModelAllowlist";
 import { createModelAllowlistCandidatesTracker } from "./modelAllowlistCandidates";
-import {
-  noAccountFallbackCandidates,
-  reconcileNoAccountFallbackForPlatform,
-  withSelectedGroup,
-} from "./groupsNoAccountFallback";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
 import {
   isProfitControlPlatform,
@@ -4696,38 +4667,12 @@ const subscriptionTypeOptions = computed(() => [
   { value: "subscription", label: t("admin.groups.subscription.subscription") },
 ]);
 
-// 兜底类下拉的候选来源。groups 只是分页 + 筛选后的当前页，目标分组不在当前页时
-// 下拉里就没有它；打开弹窗时补一份全量目录（含停用分组），拿不到就退回当前页。
-const fallbackGroupDirectory = ref<AdminGroup[]>([]);
-let fallbackGroupDirectoryLoaded = false;
-const ensureFallbackGroupDirectory = async () => {
-  if (fallbackGroupDirectoryLoaded) return;
-  fallbackGroupDirectoryLoaded = true;
-  try {
-    fallbackGroupDirectory.value =
-      await adminAPI.groups.getAllIncludingInactive();
-  } catch (error) {
-    // 目录只是补全下拉，拿不到不该挡住弹窗；下次打开再试。
-    fallbackGroupDirectoryLoaded = false;
-    console.error("Error loading groups for fallback selectors:", error);
-  }
-};
-
-// 当前页的分组排在前面（数据最新），目录补上不在当前页的那些。
-const fallbackGroupPool = computed<AdminGroup[]>(() => {
-  const onPage = new Set(groups.value.map((g) => g.id));
-  return [
-    ...groups.value,
-    ...fallbackGroupDirectory.value.filter((g) => !onPage.has(g.id)),
-  ];
-});
-
 // 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
 const fallbackGroupOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.claudeCode.noFallback") },
   ];
-  const eligibleGroups = fallbackGroupPool.value.filter(
+  const eligibleGroups = groups.value.filter(
     (g) =>
       g.platform === "anthropic" &&
       !g.claude_code_only &&
@@ -4745,18 +4690,14 @@ const fallbackGroupOptionsForEdit = computed(() => {
     { value: null, label: t("admin.groups.claudeCode.noFallback") },
   ];
   const currentId = editingGroup.value?.id;
-  const eligibleGroups = fallbackGroupPool.value.filter(
+  const eligibleGroups = groups.value.filter(
     (g) =>
       g.platform === "anthropic" &&
       !g.claude_code_only &&
       g.status === "active" &&
       g.id !== currentId,
   );
-  withSelectedGroup(
-    eligibleGroups,
-    fallbackGroupPool.value,
-    editForm.fallback_group_id,
-  ).forEach((g) => {
+  eligibleGroups.forEach((g) => {
     options.push({ value: g.id, label: g.name });
   });
   return options;
@@ -4767,7 +4708,7 @@ const invalidRequestFallbackOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.invalidRequestFallback.noFallback") },
   ];
-  const eligibleGroups = fallbackGroupPool.value.filter(
+  const eligibleGroups = groups.value.filter(
     (g) =>
       g.platform === "anthropic" &&
       g.status === "active" &&
@@ -4786,7 +4727,7 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
     { value: null, label: t("admin.groups.invalidRequestFallback.noFallback") },
   ];
   const currentId = editingGroup.value?.id;
-  const eligibleGroups = fallbackGroupPool.value.filter(
+  const eligibleGroups = groups.value.filter(
     (g) =>
       g.platform === "anthropic" &&
       g.status === "active" &&
@@ -4794,42 +4735,7 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
       g.fallback_group_id_on_invalid_request === null &&
       g.id !== currentId,
   );
-  withSelectedGroup(
-    eligibleGroups,
-    fallbackGroupPool.value,
-    editForm.fallback_group_id_on_invalid_request,
-  ).forEach((g) => {
-    options.push({ value: g.id, label: g.name });
-  });
-  return options;
-});
-
-// 无可用账号兜底分组选项（创建时）- 同平台且启用中的分组。
-// 后端按平台过滤账号，异平台分组永远选不出账号，这里就不展示。
-const noAccountFallbackOptions = computed(() => {
-  const options: { value: number | null; label: string }[] = [
-    { value: null, label: t("admin.groups.noAccountFallback.noFallback") },
-  ];
-  noAccountFallbackCandidates(fallbackGroupPool.value, createForm.platform).forEach((g) => {
-    options.push({ value: g.id, label: g.name });
-  });
-  return options;
-});
-
-// 无可用账号兜底分组选项（编辑时）- 排除自身
-const noAccountFallbackOptionsForEdit = computed(() => {
-  const options: { value: number | null; label: string }[] = [
-    { value: null, label: t("admin.groups.noAccountFallback.noFallback") },
-  ];
-  withSelectedGroup(
-    noAccountFallbackCandidates(
-      fallbackGroupPool.value,
-      editForm.platform,
-      editingGroup.value?.id,
-    ),
-    fallbackGroupPool.value,
-    editForm.fallback_group_id_on_no_account,
-  ).forEach((g) => {
+  eligibleGroups.forEach((g) => {
     options.push({ value: g.id, label: g.name });
   });
   return options;
@@ -4915,7 +4821,6 @@ const sortState = reactive({
 let abortController: AbortController | null = null;
 
 const showCreateModal = ref(false);
-const previewGroupId = ref<number | null>(null);
 const showEditModal = ref(false);
 const showDeleteDialog = ref(false);
 const pendingLiveForm = ref<"create" | "edit" | null>(null);
@@ -4983,6 +4888,19 @@ type ReasoningEffortPolicyFieldsExpose = {
 const createReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 const editReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 
+// 固定账号获取 Codex Model Manifest（仅 openai 分组编辑对话框）
+type CodexManifestAccountsFieldExpose = {
+  validate: () => boolean;
+  resetValidation: () => void;
+};
+const editCodexManifestRef = ref<CodexManifestAccountsFieldExpose | null>(null);
+const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
+  enabled: false,
+  account_ids: [],
+  fallback_to_scheduler: false,
+});
+const editCodexManifestConfig = ref<CodexModelsManifestConfig>(createCodexManifestDefaults());
+const editCodexManifestAccountNames = ref<Record<number, string>>({});
 const modelAllowlistCandidatesTracker = createModelAllowlistCandidatesTracker();
 const createModelAllowlistSelectedCount = computed(
   () => createModelAllowlistState.items.filter((item) => item.selected).length,
@@ -5069,7 +4987,6 @@ const createForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
-  fallback_group_id_on_no_account: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
@@ -5313,7 +5230,7 @@ const loadModelAllowlistCandidates = async (
   const loadingRef = mode === "create" ? createModelAllowlistLoading : editModelAllowlistLoading;
   loadingRef.value = true;
   try {
-    const { models } = await adminAPI.groups.getModelAllowlistCandidates(groupID, platform);
+    const models = await adminAPI.groups.getModelAllowlistCandidates(groupID, platform);
     if (!modelAllowlistCandidatesTracker.isCurrent(requestID, request)) {
       return;
     }
@@ -5435,7 +5352,6 @@ const editForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
-  fallback_group_id_on_no_account: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
@@ -5840,7 +5756,6 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 
 const openCreateModal = () => {
   showCreateModal.value = true;
-  void ensureFallbackGroupDirectory();
   loadModelAllowlistCandidates("create", 0, createForm.platform);
 };
 
@@ -5893,7 +5808,6 @@ const closeCreateModal = () => {
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
-  createForm.fallback_group_id_on_no_account = null;
   resetMessagesDispatchFormState(createForm);
   createForm.allow_live = false;
   createForm.require_oauth_only = false;
@@ -5964,10 +5878,6 @@ const validateGroupReasoningMultipliers = (pricing: PricingFormEntry[]): boolean
 };
 
 const handleCreateGroup = async () => {
-  if (createModelAllowlistState.enabled && createModelAllowlistSelectedCount.value === 0) {
-    appStore.showError(t("admin.groups.modelAllowlist.emptySelectionError"));
-    return;
-  }
   if (!createForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
@@ -5983,6 +5893,14 @@ const handleCreateGroup = async () => {
     return;
   }
   if (!validateGroupReasoningMultipliers(createForm.model_pricing)) return;
+  // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
+  if (
+    createModelAllowlistState.enabled &&
+    createModelAllowlistSelectedCount.value === 0
+  ) {
+    appStore.showError(t("admin.groups.modelAllowlist.emptySelectionError"));
+    return;
+  }
   submitting.value = true;
   try {
     const {
@@ -6024,6 +5942,7 @@ const handleCreateGroup = async () => {
       ),
       model_allowlist: buildModelAllowlistConfig(createModelAllowlistState),
       // 创建时固定账号 manifest 固定发送关闭状态（后端创建路径禁止开启）
+      codex_models_manifest_config: createCodexManifestDefaults(),
       supported_model_scopes: normalizeSupportedModelScopesForPlatform(
         createForm.platform,
         createForm.supported_model_scopes,
@@ -6126,7 +6045,6 @@ const handleCreateGroup = async () => {
 };
 
 const handleEdit = async (group: AdminGroup) => {
-  void ensureFallbackGroupDirectory();
   editingGroup.value = group;
   editForm.name = group.name;
   editForm.description = group.description || "";
@@ -6182,8 +6100,6 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
     group.fallback_group_id_on_invalid_request;
-  editForm.fallback_group_id_on_no_account =
-    group.fallback_group_id_on_no_account;
   const messagesDispatchFormState = messagesDispatchConfigToFormState(
     group.messages_dispatch_model_config,
   );
@@ -6219,6 +6135,28 @@ const handleEdit = async (group: AdminGroup) => {
     group.platform,
   );
   resetModelAllowlistState(editModelAllowlistState, group.model_allowlist);
+  // 固定账号 manifest 配置：回显配置并异步解析已存账号名称（失败显示 #<id>）
+  const savedCodexManifestConfig =
+    group.codex_models_manifest_config ?? createCodexManifestDefaults();
+  editCodexManifestConfig.value = {
+    enabled: savedCodexManifestConfig.enabled ?? false,
+    account_ids: [...(savedCodexManifestConfig.account_ids ?? [])],
+    fallback_to_scheduler: savedCodexManifestConfig.fallback_to_scheduler ?? false,
+  };
+  editCodexManifestAccountNames.value = {};
+  for (const id of editCodexManifestConfig.value.account_ids) {
+    adminAPI.accounts
+      .getById(id)
+      .then((account) => {
+        editCodexManifestAccountNames.value = {
+          ...editCodexManifestAccountNames.value,
+          [id]: account.name,
+        };
+      })
+      .catch(() => {
+        // 无法解析名称时由组件回退展示 #<id>，提示管理员清理脏 ID。
+      });
+  }
   // 加载模型路由规则（异步加载账号名称）
   editModelRoutingRules.value = await convertApiFormatToRoutingRules(
     group.model_routing,
@@ -6265,13 +6203,12 @@ const closeEditModal = () => {
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
   resetModelAllowlistState(editModelAllowlistState);
+  editCodexManifestConfig.value = createCodexManifestDefaults();
+  editCodexManifestAccountNames.value = {};
+  editCodexManifestRef.value?.resetValidation?.();
 };
 
 const handleUpdateGroup = async () => {
-  if (editModelAllowlistState.enabled && editModelAllowlistSelectedCount.value === 0) {
-    appStore.showError(t("admin.groups.modelAllowlist.emptySelectionError"));
-    return;
-  }
   if (!editingGroup.value) return;
   if (!editForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
@@ -6288,6 +6225,24 @@ const handleUpdateGroup = async () => {
     return;
   }
   if (!validateGroupReasoningMultipliers(editForm.model_pricing)) return;
+  // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
+  if (
+    editModelAllowlistState.enabled &&
+    editModelAllowlistSelectedCount.value === 0
+  ) {
+    appStore.showError(t("admin.groups.modelAllowlist.emptySelectionError"));
+    return;
+  }
+  // 固定账号 manifest：开启后至少一个账号，前端阻止提交并提示。
+  if (
+    editForm.platform === "openai" &&
+    editCodexManifestConfig.value.enabled &&
+    editCodexManifestConfig.value.account_ids.length === 0
+  ) {
+    appStore.showError(t("admin.groups.codexModelsManifest.selectAtLeastOne"));
+    editCodexManifestRef.value?.validate();
+    return;
+  }
 
   submitting.value = true;
   try {
@@ -6324,14 +6279,19 @@ const handleUpdateGroup = async () => {
         editForm.fallback_group_id_on_invalid_request === null
           ? 0
           : editForm.fallback_group_id_on_invalid_request,
-      fallback_group_id_on_no_account:
-        editForm.fallback_group_id_on_no_account === null
-          ? 0
-          : editForm.fallback_group_id_on_no_account,
       model_routing: convertRoutingRulesToApiFormat(
         editModelRoutingRules.value,
       ),
       model_allowlist: buildModelAllowlistConfig(editModelAllowlistState),
+      // 非 openai 平台提交关闭状态，与后端归一化一致
+      codex_models_manifest_config:
+        editForm.platform === "openai"
+          ? {
+              enabled: editCodexManifestConfig.value.enabled,
+              account_ids: [...editCodexManifestConfig.value.account_ids],
+              fallback_to_scheduler: editCodexManifestConfig.value.fallback_to_scheduler,
+            }
+          : createCodexManifestDefaults(),
       supported_model_scopes: normalizeSupportedModelScopesForPlatform(
         editForm.platform,
         editForm.supported_model_scopes,
@@ -6721,15 +6681,6 @@ watch(
     if (!["anthropic", "antigravity"].includes(newVal)) {
       createForm.fallback_group_id_on_invalid_request = null;
     }
-    // 只有确认所选分组换了平台才清空。无条件清空会把编辑弹窗刚回填的值冲掉
-    //（watcher 是 pre-flush，跑在 handleEdit 的同步赋值之后），管理员不改
-    // 兜底项直接保存就等于把它删了。
-    createForm.fallback_group_id_on_no_account =
-      reconcileNoAccountFallbackForPlatform(
-        createForm.fallback_group_id_on_no_account,
-        newVal,
-        fallbackGroupPool.value,
-      );
     if (!supportsMessagesDispatchPlatform(newVal)) {
       resetMessagesDispatchFormState(createForm);
     }
@@ -6787,15 +6738,8 @@ watch(
     if (!["anthropic", "antigravity"].includes(newVal)) {
       editForm.fallback_group_id_on_invalid_request = null;
     }
-    editForm.fallback_group_id_on_no_account =
-      reconcileNoAccountFallbackForPlatform(
-        editForm.fallback_group_id_on_no_account,
-        newVal,
-        fallbackGroupPool.value,
-      );
     if (!supportsMessagesDispatchPlatform(newVal)) {
       resetMessagesDispatchFormState(editForm);
-      editForm.default_mapped_model = "";
     }
     if (!supportsLivePlatform(newVal)) {
       editForm.allow_live = false;
@@ -6846,6 +6790,22 @@ watch(
     resetDisabledBatchImagePricing(editForm);
   },
 );
+
+watch(
+  () => editForm.platform,
+  (newVal) => {
+    if (!['anthropic', 'antigravity'].includes(newVal)) {
+      editForm.fallback_group_id_on_invalid_request = null
+    }
+    if (!supportsMessagesDispatchPlatform(newVal)) {
+      editForm.allow_messages_dispatch = false
+      editForm.default_mapped_model = ''
+    }
+    if (!supportsLivePlatform(newVal)) {
+      editForm.allow_live = false
+    }
+  }
+)
 
 // 点击外部关闭账号搜索下拉框
 const handleClickOutside = (event: MouseEvent) => {

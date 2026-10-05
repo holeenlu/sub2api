@@ -86,7 +86,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 // it omitted, so in that case the caches are rebuilt from storage rather than
 // from the request struct.
 func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
-	s.InvalidateCodexProbeTemplateCache()
+	if _, skip := omitted[SettingKeyCodexDiagnosticPromptTemplate]; !skip {
+		s.InvalidateCodexProbeTemplateCache()
+	}
 	if len(omitted) == 0 {
 		s.refreshCachedSettings(settings)
 		return
@@ -163,6 +165,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates := make(map[string]string)
 
 	// 注册设置
+	if _, err := ParseCodexProbeTemplate(settings.OpenAICodexDiagnosticPromptTemplate); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_CODEX_PROBE_TEMPLATE", err.Error())
+	}
+	updates[SettingKeyCodexDiagnosticPromptTemplate] = settings.OpenAICodexDiagnosticPromptTemplate
 	updates[SettingKeyRegistrationEnabled] = strconv.FormatBool(settings.RegistrationEnabled)
 	updates[SettingKeyEmailVerifyEnabled] = strconv.FormatBool(settings.EmailVerifyEnabled)
 	registrationEmailSuffixWhitelistJSON, err := json.Marshal(settings.RegistrationEmailSuffixWhitelist)
@@ -487,31 +493,9 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyRewriteMessageCacheControl] = strconv.FormatBool(settings.RewriteMessageCacheControl)
 	updates[SettingKeyEnableClientDatelineNormalization] = strconv.FormatBool(settings.EnableClientDatelineNormalization)
 	updates[SettingKeyAntigravityUserAgentVersion] = antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)
-	// 保存前归一化：解析出的区间重新序列化写回，库里存的永远是规范形式（已排序、
-	// 已合并），运维下次打开面板看到的就是生效值。
-	//
-	// 空串表示「用平台默认集」，是合法输入；但填了内容却一个有效片段都没有，说明
-	// 是输入错误——静默存成空串会让管理员以为配置生效了，实际仍走默认集。
-	failoverCodes := strings.TrimSpace(settings.UpstreamFailoverStatusCodes)
-	failoverRanges := ParseStatusCodeRanges(failoverCodes)
-	if failoverCodes != "" && len(failoverRanges) == 0 {
-		return nil, fmt.Errorf("%s has no valid entry: expected status codes or ranges like \"401,403,429,500-599\"",
-			SettingKeyUpstreamFailoverStatusCodes)
-	}
-	updates[SettingKeyUpstreamFailoverStatusCodes] = FormatStatusCodeRanges(failoverRanges)
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)
 	updates[SettingKeyOpenAICodexClientVersion] = NormalizeCodexClientVersion(settings.OpenAICodexClientVersion)
 	updates[SettingKeyOpenAICodexVersionAutoSyncEnabled] = strconv.FormatBool(settings.OpenAICodexVersionAutoSyncEnabled)
-	updates[SettingKeyOpenAICodexTicketEnabled] = strconv.FormatBool(settings.OpenAICodexTicketEnabled)
-	updates[SettingKeyOpenAICodexTicketAllowWithoutTicket] = strconv.FormatBool(settings.OpenAICodexTicketAllowWithoutTicket)
-	if _, err := ParseCodexProbeTemplate(settings.OpenAICodexTicketPromptTemplate); err != nil {
-		return nil, infraerrors.BadRequest("INVALID_CODEX_PROBE_TEMPLATE", err.Error())
-	}
-	updates[SettingKeyOpenAICodexTicketPromptTemplate] = settings.OpenAICodexTicketPromptTemplate
-	if err := ValidateOpenAICodexTicketHarvestProxyURL(settings.OpenAICodexTicketHarvestProxyURL); err != nil {
-		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY", err.Error())
-	}
-	updates[SettingKeyOpenAICodexTicketHarvestProxyURL] = strings.TrimSpace(settings.OpenAICodexTicketHarvestProxyURL)
 	// SettingKeyOpenAICodexClientVersionSynced 由自动同步任务独占写入，此处不得覆盖，
 	// 否则面板保存会把同步结果清空。
 	updates[SettingKeyClaudeCodeClientVersion] = NormalizeClaudeCodeClientVersion(settings.ClaudeCodeClientVersion)
@@ -590,28 +574,26 @@ func defaultAccountSchedulingThresholds() map[string]int {
 		PlatformOpenAI:    100,
 		PlatformAnthropic: 100,
 		PlatformGrok:      100,
-		// 100 = 不在 Anthropic 通用阈值之外单独限制 Fable。
-		SchedulingThresholdScopeAnthropicFable: 100,
 	}
 }
 
 func validateAndNormalizeAccountSchedulingThresholds(input map[string]int) (map[string]int, error) {
 	normalized := defaultAccountSchedulingThresholds()
-	for scope, value := range input {
+	for platform, value := range input {
 		allowed := false
-		for _, item := range AllowedSchedulingThresholdScopes {
-			if item == scope {
+		for _, item := range AllowedSchedulingThresholdPlatforms {
+			if item == platform {
 				allowed = true
 				break
 			}
 		}
 		if !allowed {
-			return nil, infraerrors.BadRequest("INVALID_ACCOUNT_SCHEDULING_THRESHOLDS", fmt.Sprintf("unknown scope %q", scope))
+			return nil, infraerrors.BadRequest("INVALID_ACCOUNT_SCHEDULING_THRESHOLDS", fmt.Sprintf("unknown platform %q", platform))
 		}
 		if value < 1 || value > 100 {
-			return nil, infraerrors.BadRequest("INVALID_ACCOUNT_SCHEDULING_THRESHOLDS", "scheduling threshold must be between 1 and 100")
+			return nil, infraerrors.BadRequest("INVALID_ACCOUNT_SCHEDULING_THRESHOLDS", "platform scheduling threshold must be between 1 and 100")
 		}
-		normalized[scope] = value
+		normalized[platform] = value
 	}
 	return normalized, nil
 }
@@ -626,9 +608,9 @@ func parseAccountSchedulingThresholdsSetting(raw string) (map[string]int, error)
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return thresholds, err
 	}
-	for _, scope := range AllowedSchedulingThresholdScopes {
-		if value, ok := parsed[scope]; ok {
-			thresholds[scope] = boundedIntOrDefault(value, 1, 100, 100)
+	for _, platform := range AllowedSchedulingThresholdPlatforms {
+		if value, ok := parsed[platform]; ok {
+			thresholds[platform] = boundedIntOrDefault(value, 1, 100, 100)
 		}
 	}
 	return thresholds, nil
@@ -728,8 +710,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		return
 	}
 
-	storeUpstreamFailoverStatusCodes(settings.UpstreamFailoverStatusCodes)
-
 	// 先使 inflight singleflight 失效，再刷新缓存，缩小旧值覆盖新值的竞态窗口
 	versionBoundsSF.Forget("version_bounds")
 	versionBoundsCache.Store(&cachedVersionBounds{
@@ -778,9 +758,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	// 这里没有它的最新值，重算会把同步结果覆盖成陈旧值。
 	s.InvalidateOpenAICodexClientVersionCache()
 	s.InvalidateClaudeCodeClientVersionCache()
-	s.InvalidateOpenAICodexTicketEnabledCache()
-	s.InvalidateOpenAICodexTicketAllowCache()
-	s.InvalidateOpenAICodexTicketHarvestProxyCache()
 	openAIAdvancedSchedulerSettingSF.Forget(openAIAdvancedSchedulerSettingKey)
 	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
 		lowUpstreamRatePriorityEnabled: settings.OpenAILowUpstreamRatePriorityEnabled,
@@ -822,7 +799,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		}
 		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
 			thresholds: cloneAccountSchedulingThresholds(normalizedThresholds),
-			resolved:   true,
 			expiresAt:  time.Now().Add(accountSchedulingThresholdsCacheTTL).UnixNano(),
 		})
 	} else {

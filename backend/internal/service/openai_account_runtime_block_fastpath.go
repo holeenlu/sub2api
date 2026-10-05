@@ -93,11 +93,6 @@ func isOpenAIAccount(account *Account) bool {
 // handleOpenAIAccountUpstreamError expects canonicalModel to be the model used
 // for scheduling after applying account mapping exactly once.
 func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, canonicalModel ...string) bool {
-	// Observe other HTTP responses before request/model-scoped policies return.
-	// The shared handler below skips this reset to keep one observation per response.
-	if s != nil && s.rateLimitService != nil && !isOpenAIIPUnauthorizedResponse(statusCode, responseBody) {
-		s.rateLimitService.resetOpenAIIPUnauthorizedStreak(account)
-	}
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}
@@ -177,7 +172,7 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if s.rateLimitService == nil {
 		return false
 	}
-	shouldDisable := s.rateLimitService.handleUpstreamErrorAfterStreakReset(stateCtx, account, statusCode, headers, responseBody)
+	shouldDisable := s.rateLimitService.HandleUpstreamError(stateCtx, account, statusCode, headers, responseBody)
 	modelTempMatched := statusCode != http.StatusUnauthorized && tempUnschedulableModel(stateCtx, nil) != "" &&
 		len(matchTempUnschedulableRules(account, statusCode, responseBody)) > 0
 	if shouldDisable && !modelTempMatched {
@@ -556,28 +551,11 @@ func (s *OpenAIGatewayService) clearOpenAIAccountRuntimeBlockIfUnchanged(account
 // scheduling Account as source of truth. When TempUnschedulableUntil,
 // RateLimitResetAt, and OverloadUntil are all inactive, a stale local account
 // block is dropped with generation+deadline CAS. Model-scoped transient blocks
-// are left alone. This can fail open if a DB write failed or the snapshot has not caught up yet: empty
-// cooldown fields drop the local account-level block.
-// requireCompact 必须与 Forward 的 /responses/compact 判定同源（两侧都来自
-// IsOpenAIResponsesCompactPath）：门票门控按真正出站的模型名判定，否则 compact
-// 请求会被按客户端原始模型误拦（见 openAICodexTicketOutboundModel）。
-func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlocked(account *Account, requestedModel string, requireCompact bool) bool {
-	return s.isOpenAIAccountRequestRuntimeBlockedContext(context.Background(), account, requestedModel, requireCompact)
-}
-
-func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlockedContext(ctx context.Context, account *Account, requestedModel string, requireCompact bool) bool {
+// are left alone. This is fail-open if a DB write failed or the snapshot has
+// not caught up yet: empty cooldown fields drop the local account-level block.
+func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlocked(account *Account, requestedModel string) bool {
 	if s == nil {
 		return false
-	}
-
-	outboundModel := s.openAICodexTicketOutboundModel(account, requestedModel, requireCompact)
-	// Capability rechecks may temporarily pass requireCompact=false. Ticket checks
-	// must still follow the actual forwarded model, including channel mappings.
-	if forward, ok := openAIForwardModelFromContext(ctx); ok {
-		outboundModel = s.openAICodexTicketOutboundModel(account, forward.model, forward.useCompactModelMapping)
-	}
-	if s.openAICodexTicketBlocksAccount(account, outboundModel) {
-		return true
 	}
 	snapshot := s.peekOpenAIAccountRuntimeBlock(account)
 	if snapshot.blocked {

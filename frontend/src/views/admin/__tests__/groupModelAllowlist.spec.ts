@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   addCustomModelAllowlistItem,
+  createModelAllowlistState,
   type ModelAllowlistAddError,
 } from "../groupModelAllowlist";
 
@@ -17,17 +18,12 @@ import {
 } from "../groupModelAllowlist";
 
 describe("groupModelAllowlist", () => {
-  it("keeps a fixed empty whitelist empty after loading candidates", () => {
-    const state = createModelAllowlistState({ enabled: true, models: [] });
-    setModelAllowlistCandidates(state, ["new-model"]);
-    expect(state.items).toEqual([{ id: "new-model", selected: false }]);
-    expect(buildModelAllowlistConfig(state).models).toEqual([]);
-  });
-  it("starts disabled with the upstream default candidates selected", () => {
+  it("selects all default candidates for a new disabled config", () => {
     const state = createModelAllowlistState();
 
     setModelAllowlistCandidates(state, ["gpt-5.5", "gpt-5.4"]);
 
+    expect(state.enabled).toBe(false);
     expect(state.items).toEqual([
       { id: "gpt-5.5", selected: true },
       { id: "gpt-5.4", selected: true },
@@ -42,6 +38,7 @@ describe("groupModelAllowlist", () => {
 
     setModelAllowlistCandidates(state, ["gpt-5.4", "legacy-gpt", "gpt-5.5"]);
 
+    expect(state.enabled).toBe(true);
     expect(state.items).toEqual([
       { id: "gpt-5.5", selected: true },
       { id: "gpt-5.4", selected: true },
@@ -73,18 +70,20 @@ describe("groupModelAllowlist", () => {
     moveModelAllowlistItem(state, 1, 0);
 
     expect(buildModelAllowlistConfig(state)).toEqual({
-      enabled: true, models: ["gpt-5.4", "gpt-5.5"],
+      enabled: true,
+      models: ["gpt-5.4", "gpt-5.5"],
     });
   });
 
-  it("keeps disabled groups disabled when saved", () => {
+  it("keeps selected models in payload even when disabled so reopening can restore choices", () => {
     const state = hydrateModelAllowlistState({
       enabled: false,
       models: ["gpt-5.5"],
     }, ["gpt-5.5", "gpt-5.4"]);
 
     expect(buildModelAllowlistConfig(state)).toEqual({
-      enabled: false, models: ["gpt-5.5"],
+      enabled: false,
+      models: ["gpt-5.5"],
     });
   });
 
@@ -95,27 +94,8 @@ describe("groupModelAllowlist", () => {
     });
 
     expect(buildModelAllowlistConfig(state)).toEqual({
-      enabled: true, models: ["gpt-5.5", "gpt-5.4"],
-    });
-  });
-
-  // Candidate discovery is additive: aliases and retired models may be absent
-  // from the current upstream catalog but must survive an unchanged edit/save.
-  it("keeps saved models that the candidate list does not contain", () => {
-    const state = createModelAllowlistState({
       enabled: true,
-      models: ["claude-alias", "claude-sonnet-5"],
-    });
-
-    setModelAllowlistCandidates(state, ["claude-sonnet-5"]);
-
-    expect(state.savedModels).toEqual(["claude-alias", "claude-sonnet-5"]);
-    expect(state.items).toEqual([
-      { id: "claude-alias", selected: true },
-      { id: "claude-sonnet-5", selected: true },
-    ]);
-    expect(buildModelAllowlistConfig(state)).toEqual({
-      enabled: true, models: ["claude-alias", "claude-sonnet-5"],
+      models: ["gpt-5.5", "gpt-5.4"],
     });
   });
 

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -180,7 +181,7 @@ func TestCodexModelsAppliesLocalFiltersBeforeClientETag(t *testing.T) {
 		t.Fatal("first response did not include an ETag")
 	}
 
-	group.ModelAllowlist.Models = []string{"gpt-5.6"}
+	group.ModelAllowlist.Enabled = false
 	second := performCodexModelsRequestForGroup(t, handler, group, oldETag)
 	if second.Code != http.StatusOK {
 		t.Fatalf("second status: got %d, want %d; body=%s", second.Code, http.StatusOK, second.Body.String())
@@ -198,167 +199,6 @@ func TestCodexModelsAppliesLocalFiltersBeforeClientETag(t *testing.T) {
 	}
 	if third.Body.Len() != 0 {
 		t.Fatalf("third body: got %q, want empty", third.Body.String())
-	}
-}
-
-// Scenario: the Codex picker follows the administrator's custom-list order for
-// OpenAI groups served from an upstream catalog, and an order-only edit is a real
-// change to the client — old ETag → 200 with the new order, new ETag → 304.
-func TestCodexModelsFollowsCustomListOrderAndRefreshesETag(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	repo := &codexModelsFailoverAccountRepo{accounts: []service.Account{
-		{
-			ID:          1,
-			Name:        "custom-openai",
-			Platform:    service.PlatformOpenAI,
-			Type:        service.AccountTypeAPIKey,
-			Status:      service.StatusActive,
-			Schedulable: true,
-			Concurrency: 1,
-			Credentials: map[string]any{
-				"api_key":  "sk-test",
-				"base_url": "https://upstream.example/v1",
-			},
-		},
-	}}
-	upstream := &codexModelsFailoverHTTPUpstream{
-		firstBody: `{"models":[{"slug":"model-a","priority":0},{"slug":"model-b","priority":1},{"slug":"model-c","priority":2,"unknown":{"kept":true}}]}`,
-	}
-	gatewayService := service.NewOpenAIGatewayService(
-		repo,
-		nil, nil, nil, nil, nil, nil, &config.Config{RunMode: config.RunModeSimple}, nil, nil, nil, nil, nil,
-		upstream,
-		nil, nil, nil, nil, nil, nil, nil, nil,
-	)
-	handler := &OpenAIGatewayHandler{gatewayService: gatewayService}
-	group := &service.Group{
-		ID:       95,
-		Platform: service.PlatformOpenAI,
-		ModelAllowlist: service.GroupModelAllowlist{
-			Enabled: true,
-			Models:  []string{"model-c", "model-b", "model-a"},
-		},
-	}
-
-	reversed := performCodexModelsRequestForGroup(t, handler, group, "")
-	require.Equal(t, http.StatusOK, reversed.Code, reversed.Body.String())
-	require.Equal(t, []string{"model-c", "model-b", "model-a"}, codexHandlerManifestSlugs(t, reversed))
-	var clientCatalog struct {
-		Models []struct {
-			Slug     string          `json:"slug"`
-			Priority int             `json:"priority"`
-			Unknown  json.RawMessage `json:"unknown"`
-		} `json:"models"`
-	}
-	require.NoError(t, json.Unmarshal(reversed.Body.Bytes(), &clientCatalog))
-	// Codex sorts by priority after loading either a remote or downloaded catalog.
-	sort.SliceStable(clientCatalog.Models, func(i, j int) bool {
-		return clientCatalog.Models[i].Priority < clientCatalog.Models[j].Priority
-	})
-	require.Equal(t, "model-c", clientCatalog.Models[0].Slug)
-	require.Equal(t, "model-b", clientCatalog.Models[1].Slug)
-	require.Equal(t, "model-a", clientCatalog.Models[2].Slug)
-	require.JSONEq(t, `{"kept":true}`, string(clientCatalog.Models[0].Unknown))
-	reversedETag := reversed.Header().Get("ETag")
-	require.NotEmpty(t, reversedETag)
-	require.Equal(t, service.CodexModelsManifestETag(reversed.Body.Bytes()), reversedETag)
-
-	// Same model set, different order: the client's ETag must not yield 304.
-	group.ModelAllowlist.Models = []string{"model-a", "model-b", "model-c"}
-	natural := performCodexModelsRequestForGroup(t, handler, group, reversedETag)
-	require.Equal(t, http.StatusOK, natural.Code, natural.Body.String())
-	require.Equal(t, []string{"model-a", "model-b", "model-c"}, codexHandlerManifestSlugs(t, natural))
-	naturalETag := natural.Header().Get("ETag")
-	require.NotEmpty(t, naturalETag)
-	require.NotEqual(t, reversedETag, naturalETag)
-
-	notModified := performCodexModelsRequestForGroup(t, handler, group, naturalETag)
-	require.Equal(t, http.StatusNotModified, notModified.Code, notModified.Body.String())
-	require.Empty(t, notModified.Body.Bytes())
-	require.Equal(t, naturalETag, notModified.Header().Get("ETag"))
-
-	// Turning the custom list off restores the upstream order.
-	group.ModelAllowlist.Enabled = false
-	off := performCodexModelsRequestForGroup(t, handler, group, "")
-	require.Equal(t, http.StatusOK, off.Code, off.Body.String())
-	require.Equal(t, []string{"model-a", "model-b", "model-c"}, codexHandlerManifestSlugs(t, off))
-}
-
-// Scenario: two groups share one upstream account (and therefore one cached
-// upstream manifest) but order the same models differently. Each response must
-// carry its own group's order, sequentially and interleaved — the merge works on
-// a clone of the cache entry and must keep doing so.
-func TestCodexModelsCustomListOrderIsIsolatedPerGroup(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	repo := &codexModelsFailoverAccountRepo{accounts: []service.Account{
-		{
-			ID:          1,
-			Name:        "shared-api-key",
-			Platform:    service.PlatformOpenAI,
-			Type:        service.AccountTypeAPIKey,
-			Status:      service.StatusActive,
-			Schedulable: true,
-			Concurrency: 1,
-			Credentials: map[string]any{
-				"api_key":  "sk-shared",
-				"base_url": "https://upstream.example/v1",
-			},
-		},
-	}}
-	upstream := &codexModelsFailoverHTTPUpstream{
-		firstBody: `{"object":"list","data":[{"id":"model-a"},{"id":"model-b"},{"id":"model-c"}]}`,
-	}
-	gatewayService := service.NewOpenAIGatewayService(
-		repo,
-		nil, nil, nil, nil, nil, nil, &config.Config{RunMode: config.RunModeSimple}, nil, nil, nil, nil, nil,
-		upstream,
-		nil, nil, nil, nil, nil, nil, nil, nil,
-	)
-	handler := &OpenAIGatewayHandler{gatewayService: gatewayService}
-	groupA := &service.Group{
-		ID:             96,
-		Platform:       service.PlatformOpenAI,
-		ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"model-b", "model-a", "model-c"}},
-	}
-	groupB := &service.Group{
-		ID:             97,
-		Platform:       service.PlatformOpenAI,
-		ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"model-c", "model-a", "model-b"}},
-	}
-	orderA := []string{"model-b", "model-a", "model-c"}
-	orderB := []string{"model-c", "model-a", "model-b"}
-
-	for i := 0; i < 3; i++ {
-		a := performCodexModelsRequestForGroup(t, handler, groupA, "")
-		require.Equal(t, http.StatusOK, a.Code, a.Body.String())
-		require.Equal(t, orderA, codexHandlerManifestSlugs(t, a))
-		b := performCodexModelsRequestForGroup(t, handler, groupB, "")
-		require.Equal(t, http.StatusOK, b.Code, b.Body.String())
-		require.Equal(t, orderB, codexHandlerManifestSlugs(t, b))
-	}
-
-	var wg sync.WaitGroup
-	results := make([]*httptest.ResponseRecorder, 8)
-	for i := range results {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			if index%2 == 0 {
-				results[index] = performCodexModelsRequestForGroup(t, handler, groupA, "")
-				return
-			}
-			results[index] = performCodexModelsRequestForGroup(t, handler, groupB, "")
-		}(i)
-	}
-	wg.Wait()
-	for i, recorder := range results {
-		require.NotNil(t, recorder)
-		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-		want := orderA
-		if i%2 == 1 {
-			want = orderB
-		}
-		require.Equal(t, want, codexHandlerManifestSlugs(t, recorder))
 	}
 }
 
@@ -551,7 +391,7 @@ func TestCodexModelsUnmappedParentAndSparkShadowHonorCustomListAndETag(t *testin
 	require.Contains(t, slugs, "gpt-5.6-sol")
 	require.Contains(t, slugs, sparkModel)
 	require.NotContains(t, slugs, "gpt-image-2")
-	require.Contains(t, slugs, "codex-auto-review")
+	require.NotContains(t, slugs, "codex-auto-review")
 	firstETag := first.Header().Get("ETag")
 	require.NotEmpty(t, firstETag)
 
@@ -847,4 +687,317 @@ func equalInt64Slices(got, want []int64) bool {
 		}
 	}
 	return true
+}
+
+// --- 固定账号 manifest 模式 ---
+
+// codexModelsPinnedHTTPUpstream 按账号返回不同 manifest/状态的测试上游。
+type codexModelsPinnedHTTPUpstream struct {
+	service.HTTPUpstream
+	mu       sync.Mutex
+	calls    []int64
+	bodies   map[int64]string
+	statuses map[int64]int
+}
+
+func (u *codexModelsPinnedHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	u.mu.Lock()
+	u.calls = append(u.calls, accountID)
+	u.mu.Unlock()
+	if status, ok := u.statuses[accountID]; ok {
+		return &http.Response{
+			StatusCode: status,
+			Status:     http.StatusText(status),
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"upstream boom"}}`)),
+		}, nil
+	}
+	body, ok := u.bodies[accountID]
+	if !ok {
+		body = `{"models":[]}`
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Status:     "200 OK",
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}, nil
+}
+
+func (u *codexModelsPinnedHTTPUpstream) accountIDs() []int64 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	ids := append([]int64(nil), u.calls...)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
+func newPinnedCodexAccount(id int64, status string, schedulable bool, rateLimited bool) service.Account {
+	account := service.Account{
+		ID:          id,
+		Name:        fmt.Sprintf("pinned-%d", id),
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      status,
+		Schedulable: schedulable,
+		Priority:    int(id),
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  fmt.Sprintf("sk-pinned-%d", id),
+			"base_url": fmt.Sprintf("https://pinned-%d.example/v1", id),
+		},
+	}
+	if rateLimited {
+		reset := time.Now().Add(10 * time.Minute)
+		account.RateLimitResetAt = &reset
+	}
+	return account
+}
+
+func newPinnedCodexTestHandler(accounts []service.Account, upstream *codexModelsPinnedHTTPUpstream, maxSwitches int) *OpenAIGatewayHandler {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	gatewayService := service.NewOpenAIGatewayService(
+		codexModelsFailoverAccountRepo{accounts: accounts},
+		nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil,
+		upstream,
+		nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	return &OpenAIGatewayHandler{gatewayService: gatewayService, maxAccountSwitches: maxSwitches}
+}
+
+func performPinnedCodexModelsRequest(t *testing.T, handler *OpenAIGatewayHandler, group *service.Group, etag string) *httptest.ResponseRecorder {
+	return performCodexModelsRequestForGroup(t, handler, group, etag)
+}
+
+func TestCodexModelsPinnedAccountsMergeUnionWithoutScheduler(t *testing.T) {
+	// 账号 1 优先级最高（调度器会先选它）；固定配置只用 2、3，
+	// 返回并集且不打账号 1，即可证明没有经过调度器。
+	accounts := []service.Account{
+		newPinnedCodexAccount(1, service.StatusActive, true, false),
+		newPinnedCodexAccount(2, service.StatusActive, true, false),
+		newPinnedCodexAccount(3, service.StatusActive, true, false),
+	}
+	upstream := &codexModelsPinnedHTTPUpstream{bodies: map[int64]string{
+		1: `{"models":[{"slug":"scheduler-only"}]}`,
+		2: `{"models":[{"slug":"model-a"}]}`,
+		3: `{"models":[{"slug":"model-a"},{"slug":"model-c"}]}`,
+	}}
+	handler := newPinnedCodexTestHandler(accounts, upstream, 3)
+	group := &service.Group{
+		ID:       77,
+		Platform: service.PlatformOpenAI,
+		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{
+			Enabled:    true,
+			AccountIDs: []int64{2, 3},
+		},
+	}
+
+	recorder := performPinnedCodexModelsRequest(t, handler, group, "")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []string{"model-a", "model-c"}, codexHandlerManifestSlugs(t, recorder))
+	require.Equal(t, []int64{2, 3}, upstream.accountIDs(), "固定账号模式不得调用调度器或非固定账号")
+}
+
+func TestCodexModelsPinnedAccountsUseRateLimitedAccountAndSkipUnavailable(t *testing.T) {
+	accounts := []service.Account{
+		newPinnedCodexAccount(2, service.StatusActive, true, true),    // 限流中：仍被使用
+		newPinnedCodexAccount(3, service.StatusActive, false, false),  // 调度开关关闭：跳过
+		newPinnedCodexAccount(4, service.StatusDisabled, true, false), // 停用：跳过
+		newPinnedCodexAccount(5, service.StatusActive, true, false),   // 正常
+	}
+	upstream := &codexModelsPinnedHTTPUpstream{bodies: map[int64]string{
+		2: `{"models":[{"slug":"from-rate-limited"}]}`,
+		5: `{"models":[{"slug":"model-five"}]}`,
+	}}
+	handler := newPinnedCodexTestHandler(accounts, upstream, 3)
+	group := &service.Group{
+		ID:       78,
+		Platform: service.PlatformOpenAI,
+		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{
+			Enabled:    true,
+			AccountIDs: []int64{2, 3, 4, 5, 99}, // 99 不在分组：跳过
+		},
+	}
+
+	recorder := performPinnedCodexModelsRequest(t, handler, group, "")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []string{"from-rate-limited", "model-five"}, codexHandlerManifestSlugs(t, recorder))
+	require.Equal(t, []int64{2, 5}, upstream.accountIDs())
+}
+
+func TestCodexModelsPinnedAccountsPartialFailureStillSucceeds(t *testing.T) {
+	accounts := []service.Account{
+		newPinnedCodexAccount(2, service.StatusActive, true, false),
+		newPinnedCodexAccount(3, service.StatusActive, true, false),
+	}
+	upstream := &codexModelsPinnedHTTPUpstream{
+		bodies:   map[int64]string{2: `{"models":[{"slug":"model-a"}]}`},
+		statuses: map[int64]int{3: http.StatusServiceUnavailable},
+	}
+	handler := newPinnedCodexTestHandler(accounts, upstream, 3)
+	group := &service.Group{
+		ID:       79,
+		Platform: service.PlatformOpenAI,
+		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{
+			Enabled:    true,
+			AccountIDs: []int64{2, 3},
+		},
+	}
+
+	recorder := performPinnedCodexModelsRequest(t, handler, group, "")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []string{"model-a"}, codexHandlerManifestSlugs(t, recorder))
+}
+
+func TestCodexModelsPinnedAccountsAllUnavailableReturns503ByDefault(t *testing.T) {
+	accounts := []service.Account{
+		newPinnedCodexAccount(2, service.StatusActive, false, false),
+	}
+	upstream := &codexModelsPinnedHTTPUpstream{}
+	handler := newPinnedCodexTestHandler(accounts, upstream, 3)
+	group := &service.Group{
+		ID:       80,
+		Platform: service.PlatformOpenAI,
+		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{
+			Enabled:    true,
+			AccountIDs: []int64{2},
+		},
+	}
+
+	recorder := performPinnedCodexModelsRequest(t, handler, group, "")
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Empty(t, upstream.accountIDs())
+}
+
+func TestCodexModelsPinnedAccountsAllFailedReturnsUpstreamError(t *testing.T) {
+	accounts := []service.Account{
+		newPinnedCodexAccount(2, service.StatusActive, true, false),
+		newPinnedCodexAccount(3, service.StatusActive, true, false),
+	}
+	upstream := &codexModelsPinnedHTTPUpstream{statuses: map[int64]int{
+		2: http.StatusServiceUnavailable,
+		3: http.StatusGatewayTimeout,
+	}}
+	handler := newPinnedCodexTestHandler(accounts, upstream, 3)
+	group := &service.Group{
+		ID:       81,
+		Platform: service.PlatformOpenAI,
+		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{
+			Enabled:    true,
+			AccountIDs: []int64{2, 3},
+		},
+	}
+
+	recorder := performPinnedCodexModelsRequest(t, handler, group, "")
+	require.Equal(t, http.StatusBadGateway, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "upstream error 504", "全部失败时返回最后一个上游错误")
+}
+
+func TestCodexModelsPinnedAccountsFallbackToScheduler(t *testing.T) {
+	// 固定账号 2 不可用且回退开启：跌入调度器，选中优先级最高的账号 1。
+	accounts := []service.Account{
+		newPinnedCodexAccount(1, service.StatusActive, true, false),
+		newPinnedCodexAccount(2, service.StatusActive, false, false),
+	}
+	upstream := &codexModelsPinnedHTTPUpstream{bodies: map[int64]string{
+		1: `{"models":[{"slug":"from-scheduler"}]}`,
+	}}
+	handler := newPinnedCodexTestHandler(accounts, upstream, 3)
+	group := &service.Group{
+		ID:       82,
+		Platform: service.PlatformOpenAI,
+		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{
+			Enabled:             true,
+			AccountIDs:          []int64{2},
+			FallbackToScheduler: true,
+		},
+	}
+
+	recorder := performPinnedCodexModelsRequest(t, handler, group, "")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []string{"from-scheduler"}, codexHandlerManifestSlugs(t, recorder))
+	require.Equal(t, []int64{1}, upstream.accountIDs())
+}
+
+func TestCodexModelsPinnedAccountsFallbackToSchedulerOnAllFailed(t *testing.T) {
+	accounts := []service.Account{
+		newPinnedCodexAccount(1, service.StatusActive, true, false),
+		newPinnedCodexAccount(2, service.StatusActive, true, false),
+	}
+	upstream := &codexModelsPinnedHTTPUpstream{
+		bodies:   map[int64]string{1: `{"models":[{"slug":"from-scheduler"}]}`},
+		statuses: map[int64]int{2: http.StatusServiceUnavailable},
+	}
+	handler := newPinnedCodexTestHandler(accounts, upstream, 3)
+	group := &service.Group{
+		ID:       83,
+		Platform: service.PlatformOpenAI,
+		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{
+			Enabled:             true,
+			AccountIDs:          []int64{2},
+			FallbackToScheduler: true,
+		},
+	}
+
+	recorder := performPinnedCodexModelsRequest(t, handler, group, "")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []string{"from-scheduler"}, codexHandlerManifestSlugs(t, recorder))
+}
+
+func TestCodexModelsPinnedAccountsStillApplyCustomModelsListFilter(t *testing.T) {
+	accounts := []service.Account{
+		newPinnedCodexAccount(2, service.StatusActive, true, false),
+		newPinnedCodexAccount(3, service.StatusActive, true, false),
+	}
+	upstream := &codexModelsPinnedHTTPUpstream{bodies: map[int64]string{
+		2: `{"models":[{"slug":"model-a"}]}`,
+		3: `{"models":[{"slug":"model-b"}]}`,
+	}}
+	handler := newPinnedCodexTestHandler(accounts, upstream, 3)
+	group := &service.Group{
+		ID:       84,
+		Platform: service.PlatformOpenAI,
+		ModelAllowlist: service.GroupModelAllowlist{
+			Enabled: true,
+			Models:  []string{"model-b"},
+		},
+		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{
+			Enabled:    true,
+			AccountIDs: []int64{2, 3},
+		},
+	}
+
+	recorder := performPinnedCodexModelsRequest(t, handler, group, "")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []string{"model-b"}, codexHandlerManifestSlugs(t, recorder), "分组自定义模型列表过滤仍生效")
+}
+
+func TestCodexModelsPinnedAccountsETagMatchReturns304(t *testing.T) {
+	accounts := []service.Account{
+		newPinnedCodexAccount(2, service.StatusActive, true, false),
+		newPinnedCodexAccount(3, service.StatusActive, true, false),
+	}
+	upstream := &codexModelsPinnedHTTPUpstream{bodies: map[int64]string{
+		2: `{"models":[{"slug":"model-a"}]}`,
+		3: `{"models":[{"slug":"model-c"}]}`,
+	}}
+	handler := newPinnedCodexTestHandler(accounts, upstream, 3)
+	group := &service.Group{
+		ID:       85,
+		Platform: service.PlatformOpenAI,
+		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{
+			Enabled:    true,
+			AccountIDs: []int64{2, 3},
+		},
+	}
+
+	first := performPinnedCodexModelsRequest(t, handler, group, "")
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+	etag := first.Header().Get("ETag")
+	require.NotEmpty(t, etag)
+
+	second := performPinnedCodexModelsRequest(t, handler, group, etag)
+	require.Equal(t, http.StatusNotModified, second.Code, second.Body.String())
+	require.Empty(t, second.Body.Bytes())
 }

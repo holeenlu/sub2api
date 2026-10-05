@@ -1,5 +1,4 @@
 import { defineComponent, h, type PropType } from "vue";
-import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -124,7 +123,7 @@ const sourceGroup = {
   account_count: 1,
   active_account_count: 1,
   rate_limited_account_count: 0,
-  model_allowlist: undefined,
+  models_list_config: undefined,
   codex_models_manifest_config: {
     enabled: false,
     account_ids: [],
@@ -231,7 +230,6 @@ const mountView = () =>
 
 describe("GroupsView Codex manifest binding", () => {
   beforeEach(() => {
-    setActivePinia(createPinia());
     localStorage.clear();
     listGroups.mockReset();
     getModelAllowlistCandidates.mockReset();
@@ -246,21 +244,45 @@ describe("GroupsView Codex manifest binding", () => {
       page_size: 20,
       pages: 1,
     });
-    getModelAllowlistCandidates.mockResolvedValue({ models: [], pricingPending: [] });
+    getModelAllowlistCandidates.mockResolvedValue([]);
     getUsageSummary.mockResolvedValue([]);
     getCapacitySummary.mockResolvedValue([]);
     getLiveCapability.mockResolvedValue({ supported: false });
   });
 
-  it("no longer offers catalog source accounts for a group", async () => {
+  it("preserves consecutive child updates on the reactive edit config", async () => {
     const wrapper = mountView();
     await flushPromises();
-    const editButton = wrapper.findAll("button").find(button => button.text().includes("common.edit"));
+
+    const editButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("common.edit"));
+    expect(editButton).toBeTruthy();
     await editButton!.trigger("click");
     await flushPromises();
-    expect(wrapper.find('[data-testid="codex-manifest-value"]').exists()).toBe(false);
-    expect(wrapper.find('router-link[to^="/admin/model-catalog?group_id="]').exists()).toBe(false);
-    expect(wrapper.text()).not.toContain("admin.groups.codexModelsManifest");
+
+    expect(wrapper.get('[data-testid="codex-manifest-value"]').text()).toBe(
+      JSON.stringify(sourceGroup.codex_models_manifest_config),
+    );
+
+    await wrapper.get('[data-testid="codex-manifest-enable"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="codex-manifest-value"]').text()).toContain(
+      '"enabled":true',
+    );
+
+    await wrapper
+      .get('[data-testid="codex-manifest-select-account"]')
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="codex-manifest-value"]').text()).toBe(
+      JSON.stringify({
+        enabled: true,
+        account_ids: [17],
+        fallback_to_scheduler: false,
+      }),
+    );
+
     wrapper.unmount();
   });
 });

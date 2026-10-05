@@ -1,17 +1,15 @@
-import { getModelCatalog } from '@/api/admin/modelCatalog'
+import { i18n } from '@/i18n'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import BulkEditAccountModal from '../BulkEditAccountModal.vue'
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
 import { adminAPI } from '@/api/admin'
-import { accountsAPI } from '@/api/admin/accounts'
 
-const { showError, showSuccess, translate, authIsSimpleMode } = vi.hoisted(() => ({
+const { showError, showSuccess, translate } = vi.hoisted(() => ({
   showError: vi.fn(),
   showSuccess: vi.fn(),
-  translate: vi.fn((key: string) => key),
-  authIsSimpleMode: { value: true }
+  translate: vi.fn((key: string) => key)
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -22,16 +20,6 @@ vi.mock('@/stores/app', () => ({
   })
 }))
 
-vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({
-    user: { id: 1, role: 'admin' },
-    get isSimpleMode() {
-      return authIsSimpleMode.value
-    }
-  })
-}))
-
-vi.mock('@/api/admin/modelCatalog',()=>({getModelCatalog:vi.fn(),refreshModelCatalog:vi.fn()}))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
@@ -42,12 +30,7 @@ vi.mock('@/api/admin', () => ({
 }))
 
 vi.mock('@/api/admin/accounts', () => ({
-  getAntigravityDefaultModelMapping: vi.fn(),
-  accountsAPI: {
-    syncUpstreamModelsBulk: vi.fn(),
-    syncUpstreamModels: vi.fn(),
-    syncUpstreamModelsPreview: vi.fn()
-  }
+  getAntigravityDefaultModelMapping: vi.fn()
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -99,9 +82,7 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 }
 
 describe('BulkEditAccountModal', () => {
-
   beforeEach(() => {
-    authIsSimpleMode.value = true
     vi.mocked(adminAPI.accounts.bulkUpdate).mockReset()
     vi.mocked(adminAPI.accounts.checkMixedChannelRisk).mockReset()
     showError.mockReset()
@@ -146,9 +127,7 @@ describe('BulkEditAccountModal', () => {
   })
 
   it('antigravity 白名单包含 Gemini 图片模型且过滤掉普通 GPT 模型', async () => {
-    vi.mocked(getModelCatalog).mockResolvedValue({status:'ready',revision:'live',platform:'antigravity',updated_at:'',checked_at:'',models:['gemini-3.1-flash-image','gemini-2.5-flash-image'].map(id=>({id,display_name:id,platform:'antigravity',kind:'image',lifecycle:'active',access:'listed',source:'upstream',metadata:{id},missing:[],endpoints:[]}))})
     const wrapper = mountModal()
-    await flushPromises()
     const selector = wrapper.findComponent(ModelWhitelistSelector)
     expect(selector.exists()).toBe(true)
 
@@ -159,84 +138,19 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.text()).not.toContain('gpt-5.3-codex')
   })
 
-  it('OpenAI 批量同步后显式应用实时白名单，保存前不更新账号', async () => {
-    vi.mocked(getModelCatalog).mockResolvedValue({ status: 'ready', revision: 'openai-inventory', platform: 'openai', updated_at: '', checked_at: '', models: [] })
-    vi.mocked(accountsAPI.syncUpstreamModelsBulk).mockResolvedValue({ models: ['gpt-upstream-new'], failures: [], account_count: 2, aggregation: 'intersection', source: 'upstream_models' })
-    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
-    await wrapper.get('[data-testid="sync-upstream-models-bulk"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.findComponent(ModelWhitelistSelector).props('modelValue')).toEqual([])
-    await wrapper.findAll('button').find(button=>button.text()==='modelCatalog.selectAvailable')!.trigger('click')
-    expect(wrapper.findComponent(ModelWhitelistSelector).props('modelValue')).toEqual(['gpt-upstream-new'])
-    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
-    await wrapper.setProps({ show: false })
-    expect(wrapper.findComponent(ModelWhitelistSelector).exists()).toBe(false)
-  })
-
-  it('选中模式把账号 ID 交给实时模型同步组件', async () => {
-    const wrapper = mountModal({
-      accountIds: [11, 12],
-      selectedPlatforms: ['anthropic'],
-      selectedTypes: ['oauth']
-    })
-
-    const selector = wrapper.findComponent(ModelWhitelistSelector)
-    expect(selector.props('accountIds')).toEqual([11, 12])
-    expect(selector.props('syncFilters')).toBeUndefined()
-  })
-
-  // 筛选快照里还带着 sort_by / sort_order 等展示状态，后端的批量筛选只认六个字段。
-  it('筛选模式只把六个筛选字段交给实时模型同步组件', async () => {
-    const wrapper = mountModal({
-      accountIds: [],
-      selectedPlatforms: ['anthropic'],
-      selectedTypes: ['oauth'],
-      target: {
-        mode: 'filtered',
-        filters: {
-          platform: 'anthropic',
-          type: 'oauth',
-          status: 'active',
-          group: 'ungrouped',
-          search: 'prod',
-          privacy_mode: '',
-          sort_by: 'created_at',
-          sort_order: 'desc'
-        },
-        previewCount: 7,
-        selectedPlatforms: ['anthropic'],
-        selectedTypes: ['oauth']
-      }
-    })
-
-    const selector = wrapper.findComponent(ModelWhitelistSelector)
-    expect(selector.props('accountIds')).toBeUndefined()
-    expect(selector.props('syncFilters')).toEqual({
-      platform: 'anthropic',
-      type: 'oauth',
-      status: 'active',
-      group: 'ungrouped',
-      search: 'prod',
-      privacy_mode: undefined
-    })
-  })
-
   it('antigravity 映射预设包含图片映射并过滤 OpenAI 预设', async () => {
-    const { i18n, loadLocaleMessages } = await import('@/i18n')
-    await loadLocaleMessages('zh')
-    i18n.global.locale.value = 'zh'
     const wrapper = mountModal()
 
     const mappingTab = wrapper.findAll('button').find((btn) => btn.text().includes('admin.accounts.modelMapping'))
     expect(mappingTab).toBeTruthy()
     await mappingTab!.trigger('click')
 
-    expect(wrapper.text()).toContain('3.1-Flash-Image 透传')
+    expect(wrapper.text()).toContain(i18n.global.t('ui.passthroughModel', { model: '3.1-Flash-Image' }))
     expect(wrapper.text()).toContain('3-Pro-Image→3.1')
     expect(wrapper.text()).not.toContain('GPT-5.3 Codex Spark')
   })
 
-  it('批量清空模型限制使用原有空映射', async () => {
+  it('仅勾选模型限制且白名单留空时，应提交空 model_mapping 以支持所有模型', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['anthropic'],
       selectedTypes: ['apikey']
@@ -248,21 +162,10 @@ describe('BulkEditAccountModal', () => {
 
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
-      credentials: { model_mapping: {} }
+      credentials: {
+        model_mapping: {}
+      }
     })
-  })
-
-  it('批量账号仅保存勾选模型，不提供策略或排除项', async () => {
-    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
-    await wrapper.get('#bulk-edit-model-restriction-enabled').setValue(true)
-    expect(wrapper.find('#bulk-account-policy').exists()).toBe(false)
-    wrapper.findComponent(ModelWhitelistSelector).vm.$emit('update:modelValue', ['gpt-image-selected'])
-    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
-    await flushPromises()
-    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
-      credentials: { model_mapping: { 'gpt-image-selected': 'gpt-image-selected' } }
-    })
-    expect(wrapper.findComponent(ModelWhitelistSelector).exists()).toBe(true)
   })
 
   it('全部目标为 Grok OAuth 时，官方主机 base_url 作为手动端点切换正常提交', async () => {
@@ -371,7 +274,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('OpenAI 账号批量编辑可开启自动透传', async () => {
+  it(i18n.global.t('ui.passthroughModel', { model: 'OpenAI 账号批量编辑可开启自动' }), async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -954,7 +857,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('OpenAI 账号批量编辑可关闭自动透传', async () => {
+  it(i18n.global.t('ui.passthroughModel', { model: 'OpenAI 账号批量编辑可关闭自动' }), async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['apikey']
@@ -973,7 +876,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('开启 OpenAI 自动透传时不提交无效的模型限制', async () => {
+  it('开启 OpenAI 自动透传时不再同时提交模型限制', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -991,7 +894,7 @@ describe('BulkEditAccountModal', () => {
         openai_passthrough: true
       }
     })
-    expect(wrapper.find('[data-testid="account-catalog-policy"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.accounts.openai.modelRestrictionDisabledByPassthrough')
   })
 
   it('filtered-results 模式下应提交 filters 而不是 account_ids', async () => {
@@ -1101,23 +1004,4 @@ describe('BulkEditAccountModal', () => {
       }
     })
   })
-})
-
-describe('API key Codex outbound identity', () => {
- it.each([true, false])('applies only the opted-in bulk change: %s', async value => {
-  const wrapper=mountModal({selectedPlatforms:['openai'],selectedTypes:['apikey']})
-  const toggle=wrapper.get('[data-testid="bulk-apikey-identity"]')
-  expect(toggle.attributes('disabled')).toBeDefined()
-  await wrapper.get('#bulk-apikey-identity-enabled').setValue(true)
-  if(value) await toggle.trigger('click')
-  await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
-  await flushPromises()
-  expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1,2],{extra:{openai_apikey_codex_identity:value}})
-  wrapper.unmount()
- })
- it('does not expose the setting for OAuth accounts',()=>{
-  const wrapper=mountModal({selectedPlatforms:['openai'],selectedTypes:['oauth']})
-  expect(wrapper.find('#bulk-apikey-identity-enabled').exists()).toBe(false)
-  wrapper.unmount()
- })
 })

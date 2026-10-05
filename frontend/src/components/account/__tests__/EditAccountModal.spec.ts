@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 
 const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
@@ -18,7 +18,6 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
-    user: { id: 1, role: 'admin' },
     get isSimpleMode() {
       return authIsSimpleMode.value
     }
@@ -86,9 +85,6 @@ const ModelWhitelistSelectorStub = defineComponent({
         @click="$emit('update:modelValue', ['gpt-5.2-2025-12-11'])"
       >
         rewrite
-      </button>
-      <button type="button" data-testid="clear-model-whitelist" @click="$emit('update:modelValue', [])">
-        clear
       </button>
       <span data-testid="model-whitelist-value">
         {{ Array.isArray(modelValue) ? modelValue.join(',') : '' }}
@@ -307,38 +303,6 @@ function buildOpenAIOAuthParentAccount() {
   } as any
 }
 
-function buildAnthropicRestrictedAccount(type: 'oauth' | 'setup-token') {
-  return {
-    ...buildAccount(),
-    id: type === 'oauth' ? 8 : 9,
-    name: type === 'oauth' ? 'Anthropic OAuth' : 'Anthropic Setup Token',
-    platform: 'anthropic',
-    type,
-    credentials: {
-      access_token: 'redacted-in-responses',
-      model_mapping: {
-        'claude-sonnet-5': 'claude-sonnet-5',
-        'claude-latest': 'claude-opus-5'
-      }
-    }
-  } as any
-}
-
-function buildAnthropicOAuthAccount(credentials: Record<string, unknown> = {}) {
-  return {
-    ...buildAccount(),
-    id: 11,
-    name: 'Anthropic OAuth',
-    platform: 'anthropic',
-    type: 'oauth',
-    credentials: {
-      access_token: 'anthropic-access-token',
-      ...credentials
-    },
-    extra: {}
-  } as any
-}
-
 function mountModal(account = buildAccount(), renderGroupSelector = false) {
   return mount(EditAccountModal, {
     props: {
@@ -361,37 +325,6 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
-  it('preserves saved OAuth account model mappings', async () => {
-    const account = {
-      ...buildOpenAIOAuthParentAccount(),
-      credentials: { model_mapping: { 'gpt-5.4': 'gpt-5.5' } }
-    }
-    updateAccountMock.mockReset().mockResolvedValue(account)
-    const wrapper = mountModal(account)
-    await flushPromises()
-    expect(wrapper.find('[data-testid="openai-model-aliases"]').exists()).toBe(false)
-    await wrapper.get('#edit-account-form').trigger('submit.prevent')
-    await flushPromises()
-    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.model_mapping).toEqual({ 'gpt-5.4': 'gpt-5.5' })
-    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('model_catalog_policy')
-    wrapper.unmount()
-  })
-
-  it('removes retired acceleration settings when saving an existing OAuth account', async () => {
-    const account = buildOpenAIOAuthParentAccount()
-    account.extra = { unrelated: 'preserve', openai_oauth_ws_sse_acceleration: true }
-    updateAccountMock.mockReset().mockResolvedValue(account)
-    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
-    const wrapper = mountModal(account)
-    expect(wrapper.find('[data-testid="openai-ws-sse-acceleration"]').exists()).toBe(false)
-    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-    await flushPromises()
-    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
-    expect(extra).not.toHaveProperty('openai_oauth_ws_sse_acceleration')
-    expect(extra.unrelated).toBe('preserve')
-    wrapper.unmount()
-  })
-
   beforeEach(() => {
     authIsSimpleMode.value = true
   })
@@ -408,7 +341,7 @@ describe('EditAccountModal', () => {
       { from: 'gpt-latest', to: 'deepseek-chat' }
     ])
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({ 'gpt-5.2': 'gpt-5.2', 'gpt-latest': 'deepseek-chat' })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual(account.credentials.model_mapping)
     await wrapper.setProps({ show: false })
     await wrapper.setProps({ show: true, account: { ...account } })
     expect(wrapper.getComponent(ModelWhitelistSelectorStub).props('modelMappings')).toEqual([
@@ -526,59 +459,9 @@ describe('EditAccountModal', () => {
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({ 'gpt-5.2': 'gpt-5.2' })
-  })
-
-  it.each(['oauth', 'setup-token'] as const)(
-    'shows and persists the saved Anthropic %s model restriction',
-    async (type) => {
-      const account = buildAnthropicRestrictedAccount(type)
-      updateAccountMock.mockReset().mockResolvedValue(account)
-      checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
-
-      const wrapper = mountModal(account)
-
-      expect(wrapper.find('[data-testid="edit-dedicated-model-restriction"]').exists()).toBe(true)
-      expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('claude-sonnet-5')
-
-      // Reopening must rehydrate from props rather than keep stale local state.
-      await wrapper.setProps({ show: false })
-      await wrapper.setProps({ show: true })
-      expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('claude-sonnet-5')
-
-      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-      await flushPromises()
-
-      expect(updateAccountMock).toHaveBeenCalledTimes(1)
-      expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
-        'claude-latest': 'claude-opus-5',
-        'claude-sonnet-5': 'claude-sonnet-5'
-      })
-    }
-  )
-
-  it('rewrites the Anthropic model restriction when the whitelist is edited', async () => {
-    const account = buildAnthropicRestrictedAccount('setup-token')
-    updateAccountMock.mockReset().mockResolvedValue(account)
-    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
-
-    const wrapper = mountModal(account)
-    // Clearing the whitelist drops its self-mapping; explicit mappings stay.
-    await wrapper.get('[data-testid="clear-model-whitelist"]').trigger('click')
-    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-    await flushPromises()
-
-    expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
-      'claude-latest': 'claude-opus-5'
+      'gpt-5.2': 'gpt-5.2'
     })
-  })
-
-  it('keeps the dedicated section hidden for an Anthropic API-key account', () => {
-    const account = { ...buildAnthropicRestrictedAccount('oauth'), id: 10, type: 'apikey' }
-    const wrapper = mountModal(account as any)
-
-    expect(wrapper.find('[data-testid="edit-dedicated-model-restriction"]').exists()).toBe(false)
   })
 
   it('preserves OpenCode Zen account type and endpoints on submit', async () => {
@@ -880,8 +763,8 @@ describe('EditAccountModal', () => {
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
-      'gpt-latest': 'gpt-5.2',
-      'gpt-5.2-2025-12-11': 'gpt-5.2-2025-12-11'
+      'gpt-5.2-2025-12-11': 'gpt-5.2-2025-12-11',
+      'gpt-latest': 'gpt-5.2'
     })
   })
 
@@ -1149,7 +1032,6 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockResolvedValue(account)
 
     const wrapper = mountModal(account)
-    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.modelMapping')!.trigger('click')
     expect(wrapper.text()).toContain('Imagine Image')
     expect(wrapper.text()).toContain('Imagine Video')
 
@@ -1206,7 +1088,9 @@ describe('EditAccountModal', () => {
     const payload = updateAccountMock.mock.calls[0]?.[1]
     expect(payload?.group_ids).toEqual([7])
     expect(payload?.credentials).toEqual({
-      model_mapping: { 'gpt-5.3-codex-spark': 'gpt-5.3-codex-spark' },
+      model_mapping: {
+        'gpt-5.3-codex-spark': 'gpt-5.3-codex-spark'
+      },
       compact_model_mapping: {
         'gpt-5.3-codex-spark': 'gpt-5.3-codex-spark-compact'
       }
@@ -1846,151 +1730,4 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     expect(updateAccountMock).not.toHaveBeenCalled()
     wrapper.unmount()
   })
-})
-
-describe('EditAccountModal 7d Fable 阈值覆盖', () => {
-  beforeEach(() => {
-    authIsSimpleMode.value = true
-    updateAccountMock.mockReset().mockResolvedValue({})
-    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
-  })
-
-  // Fable 是 Anthropic 独有的模型家族，其他平台没有这个概念。
-  it('只对 Anthropic 账号显示覆盖开关', () => {
-    const anthropic = mountModal(buildAnthropicOAuthAccount())
-    expect(
-      anthropic.find('[data-testid="anthropic-fable-scheduling-threshold-section"]').exists()
-    ).toBe(true)
-    anthropic.unmount()
-
-    const openai = mountModal(buildOpenAIOAuthParentAccount())
-    expect(
-      openai.find('[data-testid="anthropic-fable-scheduling-threshold-section"]').exists()
-    ).toBe(false)
-    openai.unmount()
-  })
-
-  // setup-token 与 OAuth 一样有 7d/7d_oi 窗口样本，覆盖对它有效。
-  it('对 Anthropic setup-token 账号同样显示覆盖开关', () => {
-    const wrapper = mountModal({
-      ...buildAnthropicOAuthAccount(),
-      type: 'setup-token'
-    } as any)
-    expect(
-      wrapper.find('[data-testid="anthropic-fable-scheduling-threshold-section"]').exists()
-    ).toBe(true)
-    wrapper.unmount()
-  })
-
-  // 7d/7d_oi 窗口只来自 OAuth 类账号的被动采样，apikey / bedrock 永远没有候选，
-  // 写进去的键永远不会生效——界面却显示"已启用"。
-  it.each(['apikey', 'bedrock'])('不对 Anthropic %s 账号显示覆盖开关', (type) => {
-    const wrapper = mountModal({
-      ...buildAnthropicOAuthAccount(),
-      type,
-      credentials: { api_key: 'sk-ant-test' }
-    } as any)
-    expect(
-      wrapper.find('[data-testid="anthropic-fable-scheduling-threshold-section"]').exists()
-    ).toBe(false)
-    wrapper.unmount()
-  })
-
-  // 隐藏入口不等于清理数据：已存在的键原样留着，交由后端/运维处理。
-  it('对不支持的类型保留已存的覆盖键不动', async () => {
-    const wrapper = mountModal({
-      ...buildAnthropicOAuthAccount(),
-      type: 'apikey',
-      credentials: { api_key: 'sk-ant-test', anthropic_fable_scheduling_threshold: 50 }
-    } as any)
-
-    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-
-    expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(
-      updateAccountMock.mock.calls[0]?.[1]?.credentials?.anthropic_fable_scheduling_threshold
-    ).toBe(50)
-    wrapper.unmount()
-  })
-
-  it('回填已保存的覆盖值并提交修改后的值', async () => {
-    const wrapper = mountModal(buildAnthropicOAuthAccount({ anthropic_fable_scheduling_threshold: 50 }))
-
-    expect(
-      (wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-enabled"]')
-        .element as HTMLInputElement).checked
-    ).toBe(true)
-    expect(
-      (wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-value"]')
-        .element as HTMLInputElement).value
-    ).toBe('50')
-
-    await wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-value"]').setValue('70')
-    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-
-    expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.anthropic_fable_scheduling_threshold).toBe(70)
-    wrapper.unmount()
-  })
-
-  // 关闭开关必须显式提交 null，后端据此删掉这个键；否则账号会一直带着旧覆盖。
-  it('关闭开关时提交 null 删键', async () => {
-    const wrapper = mountModal(buildAnthropicOAuthAccount({ anthropic_fable_scheduling_threshold: 50 }))
-
-    await wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-enabled"]').setValue(false)
-    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-
-    expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.anthropic_fable_scheduling_threshold).toBeNull()
-    wrapper.unmount()
-  })
-
-  // 两个覆盖共用同一个 binding 工厂，各写各的键：动 Fable 不该改到通用阈值。
-  it('与通用阈值覆盖互不影响', async () => {
-    const wrapper = mountModal(buildAnthropicOAuthAccount({ account_scheduling_threshold: 80 }))
-
-    expect(
-      (wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-enabled"]')
-        .element as HTMLInputElement).checked
-    ).toBe(false)
-    expect(
-      (wrapper.get('[data-testid="account-scheduling-threshold-override-value"]')
-        .element as HTMLInputElement).value
-    ).toBe('80')
-
-    await wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-enabled"]').setValue(true)
-    await wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-value"]').setValue('40')
-    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-
-    expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
-    expect(credentials?.anthropic_fable_scheduling_threshold).toBe(40)
-    expect(credentials?.account_scheduling_threshold).toBe(80)
-    wrapper.unmount()
-  })
-})
-
-describe('API key canonical identity account editing', () => {
- it('defaults off, saves opt-in, reads back, and disables without altering OAuth', async () => {
-  const account=buildAccount()
-  account.extra={}
-  updateAccountMock.mockReset().mockResolvedValue(account)
-  const wrapper=mountModal(account)
-  await flushPromises()
-  const toggle=wrapper.get('[data-testid="apikey-codex-identity"]')
-  expect(toggle.attributes('aria-checked')).toBe('false')
-  await toggle.trigger('click')
-  await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-  await flushPromises()
-  expect(updateAccountMock.mock.calls[0]?.[1]?.extra.openai_apikey_codex_identity).toBe(true)
-  await wrapper.setProps({account:{...account,id:2,extra:{openai_apikey_codex_identity:true}}})
-  expect(toggle.attributes('aria-checked')).toBe('true')
-  await toggle.trigger('click')
-  await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-  await flushPromises()
-  expect(updateAccountMock.mock.calls[1]?.[1]?.extra).not.toHaveProperty('openai_apikey_codex_identity')
-  await wrapper.setProps({account:{...account,id:3,type:'oauth'}})
-  expect(wrapper.find('[data-testid="apikey-codex-identity"]').exists()).toBe(false)
-  wrapper.unmount()
- })
 })

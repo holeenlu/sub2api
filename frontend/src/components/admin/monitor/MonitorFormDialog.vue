@@ -515,7 +515,7 @@ const checkModeOptions = computed<CheckModeOption[]>(() => [
     value: CHECK_MODE_QUOTA_PROBE,
     label: t('admin.channelMonitor.form.checkModeQuotaProbe'),
     hint: t('admin.channelMonitor.form.checkModeQuotaProbeHint'),
-
+    // antigravity 无探活 adapter，只支持配额模式。
     disabled: form.provider === PROVIDER_ANTIGRAVITY,
   },
 ])
@@ -675,7 +675,6 @@ function selectProvider(provider: Provider) {
   const clearPrevDefaultEndpoint =
     !!PROVIDER_DEFAULT_ENDPOINTS[previousProvider] && form.endpoint === PROVIDER_DEFAULT_ENDPOINTS[previousProvider]
   form.provider = provider
-
   // 关联账号与平台绑定：切换 provider 时显式清空（这是唯一主动清空的入口）。
   form.account_id = null
   pinnedAccount.value = null

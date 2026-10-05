@@ -576,7 +576,6 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
-        CodexTicketCadenceSettings: true,
         EmailTemplateEditor: true,
       },
     },
@@ -739,50 +738,8 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
-  it("defaults ticket harvesting to off and preserves a saved enabled value", async () => {
-    for (const enabled of [undefined, true, false]) {
-      const settings = { ...baseSettingsResponse };
-      if (enabled !== undefined) Object.assign(settings, { openai_codex_ticket_enabled: enabled });
-      getSettings.mockResolvedValueOnce(settings);
-      const wrapper = mountView();
-      await flushPromises();
-      expect((wrapper.get("#codex-ticket-enabled").element as HTMLInputElement).checked).toBe(enabled ?? false);
-      await wrapper.find("form").trigger("submit.prevent");
-      await flushPromises();
-      expect(updateSettings.mock.calls.at(-1)?.[0].openai_codex_ticket_enabled).toBe(enabled ?? false);
-      wrapper.unmount();
-    }
-  });
 
-  it("submits the Codex ticket harvest toggle", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      openai_codex_ticket_enabled: false,
-    });
-    const wrapper = mountView();
-    await flushPromises();
-    const toggle = wrapper.get("#codex-ticket-enabled");
-    await toggle.setValue(true);
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    expect(updateSettings.mock.calls[0]?.[0].openai_codex_ticket_enabled).toBe(true);
-    wrapper.unmount();
-  });
 
-  it("does not expose or submit the legacy manually entered ticket proxy", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      openai_codex_ticket_harvest_proxy_url: "http://user:***@old.example.com:8080",
-      openai_codex_ticket_harvest_proxy_configured: true,
-    });
-    const wrapper = mountView();
-    await flushPromises();
-    expect(wrapper.find("#codex-ticket-harvest-proxy").exists()).toBe(false);
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_url");
-    wrapper.unmount();
-  });
 
   it("loads and saves the open button visibility for each custom menu", async () => {
     const menuItems = [
@@ -1306,20 +1263,19 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
-  it("loads, edits and restores the shared Codex probe template", async () => {
+  it("loads, edits and restores the Codex diagnostic template", async () => {
     const defaultTemplate = '{"type":"session_meta","payload":{"base_instructions":{"text":"Default instructions"}}}\n';
     const customTemplate = defaultTemplate.replace("Default instructions", "Custom instructions");
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      openai_codex_ticket_allow_without_ticket: true,
-      openai_codex_ticket_prompt_template: defaultTemplate,
-      openai_codex_ticket_prompt_template_default: defaultTemplate,
+      openai_codex_diagnostic_prompt_template: defaultTemplate,
+      openai_codex_diagnostic_prompt_template_default: defaultTemplate,
     });
     updateSettings.mockImplementation(async (payload) => ({
       ...baseSettingsResponse,
       ...payload,
-      openai_codex_ticket_prompt_template: payload.openai_codex_ticket_prompt_template || defaultTemplate,
-      openai_codex_ticket_prompt_template_default: defaultTemplate,
+      openai_codex_diagnostic_prompt_template: payload.openai_codex_diagnostic_prompt_template || defaultTemplate,
+      openai_codex_diagnostic_prompt_template_default: defaultTemplate,
     }));
     const wrapper = mountView();
     await flushPromises();
@@ -1331,16 +1287,15 @@ describe("admin SettingsView payment visible method controls", () => {
     await wrapper.get("form").trigger("submit.prevent");
     await flushPromises();
     expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
-      openai_codex_ticket_prompt_template: customTemplate,
-      openai_codex_ticket_allow_without_ticket: true,
+      openai_codex_diagnostic_prompt_template: customTemplate,
     }));
-    expect(updateSettings.mock.lastCall?.[0]).not.toHaveProperty("openai_codex_ticket_prompt_template_default");
+    expect(updateSettings.mock.lastCall?.[0]).not.toHaveProperty("openai_codex_diagnostic_prompt_template_default");
     await wrapper.get('[data-testid="codex-probe-template-reset"]').trigger("click");
     expect((editor.element as HTMLTextAreaElement).value).toBe(defaultTemplate);
     expect(updateSettings).toHaveBeenCalledTimes(1);
     await wrapper.get("form").trigger("submit.prevent");
     await flushPromises();
-    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ openai_codex_ticket_prompt_template: "" }));
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ openai_codex_diagnostic_prompt_template: "" }));
     expect((editor.element as HTMLTextAreaElement).value).toBe(defaultTemplate);
     wrapper.unmount();
   });

@@ -34,7 +34,7 @@ func TestSeedanceHandlerLifecycleAndOwnership(t *testing.T) {
 		key.Group.Platform = service.PlatformOpenAI
 		body := ""
 		if method == http.MethodPost {
-			body = `{"model":"gpt-5.1","content":[{"type":"text","text":"waves"}]}`
+			body = `{"model":"doubao-seedance","content":[{"type":"text","text":"waves"}]}`
 		}
 		c.Request = httptest.NewRequest(method, "/api/v3/contents/generations/tasks", strings.NewReader(body))
 		c.Params = gin.Params{{Key: "task_id", Value: "task-ark"}}
@@ -49,11 +49,7 @@ func TestSeedanceHandlerLifecycleAndOwnership(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodDelete} {
 		c, w = newContext(method)
 		h.SeedanceTasks(c)
-		if method == http.MethodDelete {
-			require.Equal(t, 409, w.Code, w.Body.String())
-		} else {
-			require.Equal(t, 200, w.Code, w.Body.String())
-		}
+		require.Equal(t, 200, w.Code, w.Body.String())
 		slots.assertReleased(t)
 	}
 	for _, other := range []string{"user", "key", "group", "task", "provider"} {
@@ -78,10 +74,6 @@ func TestSeedanceHandlerLifecycleAndOwnership(t *testing.T) {
 		} else {
 			h.SeedanceTasks(c)
 		}
-		if other == "key" {
-			require.Equal(t, 200, w.Code, w.Body.String())
-			continue
-		}
 		require.Equal(t, 404, w.Code, other+": "+w.Body.String())
 		require.Equal(t, before, upstream.calls)
 		slots.assertReleased(t)
@@ -94,7 +86,7 @@ func TestSeedanceHandlerLifecycleAndOwnership(t *testing.T) {
 		billed := prepareSeedanceCompletionBilling(context.Background(), h, key, subject, result.ResponseID, result)
 		if i == 0 {
 			require.NotNil(t, billed)
-			require.Equal(t, "gpt-5.1", billed.BillingModel)
+			require.Equal(t, "doubao-seedance", billed.BillingModel)
 			require.Equal(t, 12345, billed.Usage.OutputTokens)
 			require.Zero(t, billed.VideoCount)
 		} else {

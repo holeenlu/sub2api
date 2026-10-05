@@ -111,8 +111,6 @@ type OpsInsertErrorLogInput struct {
 	// It is set by OpsService.RecordError before persisting.
 	UpstreamErrorsJSON *string
 
-	// DurationMs is measured before enqueueing, excluding async logging time.
-	DurationMs         *int64
 	AuthLatencyMs      *int64
 	RoutingLatencyMs   *int64
 	UpstreamLatencyMs  *int64
@@ -290,14 +288,6 @@ type OpsUpsertJobHeartbeatInput struct {
 
 	// LastResult is an optional human-readable summary of the last successful run.
 	LastResult *string
-
-	// ExpectedIntervalSeconds 是任务自报的预期执行间隔，判活阈值由它派生。
-	// nil 表示不更新已存的值；0 表示任务当前没有调度（例如被设置关闭），不参与失联判定。
-	ExpectedIntervalSeconds *int64
-
-	// ClearLastError 为 true 时清掉已存的 last_error_at/last_error，而不伪造一次成功：
-	// 用于"调度曾建不起来（已记 error 心跳）、现在重新建好了"这类状态修复。
-	ClearLastError bool
 }
 
 type OpsJobHeartbeat struct {
@@ -309,9 +299,6 @@ type OpsJobHeartbeat struct {
 	LastError      *string    `json:"last_error"`
 	LastDurationMs *int64     `json:"last_duration_ms"`
 	LastResult     *string    `json:"last_result"`
-
-	// ExpectedIntervalSeconds 为 nil 时是尚未自报周期的旧行；0 表示任务当前没有调度。
-	ExpectedIntervalSeconds *int64 `json:"expected_interval_seconds"`
 
 	UpdatedAt time.Time `json:"updated_at"`
 }

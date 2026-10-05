@@ -95,7 +95,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import * as api from '@/api/admin/codexTickets'
+import * as api from '@/api/admin/codexDiagnostics'
 import type { Account, ApiKey } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'

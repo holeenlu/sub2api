@@ -51,10 +51,6 @@ func (m *sessionWindowMockRepo) ClearRateLimit(_ context.Context, id int64) erro
 func (m *sessionWindowMockRepo) ClearAntigravityQuotaScopes(_ context.Context, _ int64) error {
 	return nil
 }
-func (m *sessionWindowMockRepo) ClearModelRateLimit(_ context.Context, _ int64, _ string, _ string) (bool, error) {
-	return true, nil
-}
-
 func (m *sessionWindowMockRepo) ClearModelRateLimits(_ context.Context, _ int64) error {
 	return nil
 }

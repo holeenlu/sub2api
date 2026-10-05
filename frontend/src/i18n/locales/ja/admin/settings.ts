@@ -1,3 +1,5 @@
+import { BRAND_NAME } from '@/config/brand'
+
 export default {
     settings: {
       title: 'システム設定',
@@ -457,9 +459,6 @@ export default {
         accountSchedulingThresholdsGlobalHint: 'そのプラットフォームのすべてのアカウントに適用されるシステム全体のデフォルト値です。個別のアカウントでは、アカウント編集画面でこの値を上書きできます。',
         accountSchedulingThresholdsDisabledHint: '100にするとプラットフォームの自動一時停止を無効にします。1～99を指定すると、使用率がその割合に達した時点でスケジューリングを一時停止します。',
         accountSchedulingThresholdsRangeHint: '1～100の整数（パーセント）。OpenAI/Anthropic/Grokのみ。',
-        accountSchedulingThresholdsFableLabel: 'anthropic · 7d Fable',
-        accountSchedulingThresholdsFableHint:
-          '1～100の整数（パーセント）。Fable専用の7d Fウィンドウのみがチェックされ、この値に達するとFableモデルのスケジューリングを停止します。他のモデルは引き続き利用できます。共有7dウィンドウは通常のAnthropicしきい値でのみ制御されます。100にすると個別の値を使用せず、Anthropicのしきい値を使用します。'
       },
       upstreamBillingProbe: {
         title: 'アップストリームレート自動検出',
@@ -551,9 +550,6 @@ export default {
         antigravityUserAgentVersion: 'Antigravity UAバージョン',
         antigravityUserAgentVersionPlaceholder: '1.23.2',
         antigravityUserAgentVersionHint: '空欄にするとANTIGRAVITY_USER_AGENT_VERSIONまたは組み込みのデフォルト1.23.2を使用します。値を設定した場合は、管理者設定が優先されます。',
-        upstreamFailoverStatusCodes: 'アップストリームフェイルオーバーのステータスコード',
-        upstreamFailoverStatusCodesPlaceholder: '401,403,429,500-599',
-        upstreamFailoverStatusCodesHint: 'カンマ区切りのステータスコードまたは閉区間を指定すると、別のアカウントに切り替えます。空欄にすると各プラットフォームの組み込みセットを使用します。400/404/408/413/422/499は、いかなる場合も切り替えません。',
         openaiCodexUserAgent: 'OpenAI Codex UA',
         openaiCodexUserAgentPlaceholder: 'codex-tui/0.146.1 (Ubuntu 22.4.0; x86_64) WindowsTerminal (codex-tui; 0.146.1)',
         openaiCodexUserAgentHint: 'すべての外向きリクエストで使用する完全なCodex User-Agentです。OS、アーキテクチャ、ターミナルのフィンガープリントをカスタマイズできます。空欄にすると、下記のバージョンから標準のcodex-tui識別情報を構築します（推奨）。値を設定すると、先頭と末尾の両方のバージョン宣言が下記のバージョンに同期されるため、UAがここで入力したリリースに固定されることはありません。容量が逼迫すると、アップストリームはクライアント識別情報によって負荷を切り離し、古い識別情報または非公式の識別情報をserver_is_overloadedで優先的に切断します。',
@@ -568,15 +564,7 @@ export default {
         claudeCodeVersionAutoSync: 'Claude Codeバージョンを自動同期',
         claudeCodeVersionAutoSyncHint: '公式リリースから最新バージョンを1時間ごとに取得します。無効化すると取得は停止しますが、以前の同期値は残ります。手動設定が常に優先されます。',
         claudeCodeVersionSyncedValue: '現在同期済み：{version}',
-        codexHardeningTitle: "Codex設定",
-        codexTicketEnabled: "292チケット収集",
-        codexTicketEnabledDesc:
-          'チケット取得は既定で無効です。必要に応じて手動で有効にしてください。無効時は通常経路で転送します。有効時はアカウントとモデルの参加設定に従って取得し、保存済みチケットをリクエストに注入します。この機能の導入時にスイッチは一度だけ無効になります。その後の手動設定は保持されます。',
-        codexTicketHarvestProxy: "292収集プロキシ",
-        codexTicketHarvestProxyDesc:
-          "チケット機能が有効な場合に、292チケットの発行にのみ使用します。変更は再起動なしで後続のプローブに適用されます。本番トラフィックでは引き続き各アカウントの住宅用プロキシを使用します。ユーザー名とパスワードを含む完全なHTTPまたはSOCKS5hプロキシURLを貼り付けてください。プロキシプロバイダーはIPローテーションに対応している必要があります。保存時に空欄にすると、保存済みの値を維持します。",
-        codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
-        codexTicketHarvestProxyConfigured: "設定済み（パスワードは非表示）。置き換えるには、新しい完全なプロキシURLを貼り付けてください。",
+        codexHardeningTitle: 'モデル品質検査のテンプレート',
         codexClientRestrictionTitle: "Codexクライアント制限",
         codexHardeningDesc:
           "グローバル設定で「Codex公式クライアントのみ」が有効なOpenAI OAuthアカウントにのみ適用されます。User-Agent/Originatorに加えて、バージョン範囲、エンジンフィンガープリントゲート、ブラックリスト/ホワイトリストで判定を強化します。",
@@ -611,17 +599,21 @@ export default {
         codexUaContainsPlaceholder: "User-Agentに含まれるマーカー（カンマ区切り、例：opencode/）",
         codexAddRow: "エントリを追加",
         codexRemoveRow: "削除",
-        codexProbeTemplate: 'Codex チケット取得・劣化チェック共通テンプレート',
-        codexProbeTemplateReset: '既定値に戻す',
-        codexProbeTemplateDesc: 'チケット取得と劣化チェックで共用する JSONL テンプレートです。メッセージ構造、タグ、プレースホルダーを保持してください。上限256 KiBです。保存すると変更や既定値への復元が適用されます。既定の固定指示は英語、ランダムな課題は中国語です。',
-        codexProbeTimezone: 'アカウントのリクエストタイムゾーン',
-        codexProbeDate: 'アカウントのタイムゾーンでの現在日付',
-        codexProbeModel: '対象モデル',
-        codexProbeChallenge: '新しいランダム課題',
-        codexTicketAllowWithoutTicket: '既定でチケットなしのリクエストを許可',
-        codexTicketAllowWithoutTicketDesc: '未設定時は有効で、チケットがなくても通常のリクエストを妨げません。既存ポリシーは保持されます。制限は全体の取得機能が有効でアカウントとモデルが参加している場合にのみ適用され、アカウントの明示的設定が優先されます。',
-        codexAdditionalSettingsFailed: '基本設定は保存されましたが、追加設定の保存に失敗しました：',
-      },
+
+codexProbeTemplate: 'Codex 劣化チェックテンプレート',
+
+codexProbeTemplateReset: '既定値に戻す',
+
+codexProbeTemplateDesc: '劣化チェックで使用する JSONL テンプレートです。メッセージ構造、タグ、プレースホルダーを保持してください。上限256 KiBです。保存すると変更や既定値への復元が適用されます。既定の固定指示は英語、ランダムな課題は中国語です。',
+
+codexProbeTimezone: 'アカウントのリクエストタイムゾーン',
+
+codexProbeDate: 'アカウントのタイムゾーンでの現在日付',
+
+codexProbeModel: '対象モデル',
+
+codexProbeChallenge: '新しいランダム課題',
+},
       webSearchEmulation: {
         title: 'Web検索エミュレーション',
         description: 'ネイティブでWeb検索をサポートしていないAnthropic APIキーアカウントにWeb検索機能を挿入します',
@@ -663,7 +655,7 @@ export default {
         backendModeDescription:
           'ユーザー登録、公開サイト、セルフサービス機能を無効にします。管理者のみがログインしてプラットフォームを管理できます。',
         siteName: 'サイト名',
-        siteNamePlaceholder: 'Tokensavy',
+        siteNamePlaceholder: BRAND_NAME,
         siteNameHint: 'メールとページタイトルに表示されます',
         siteSubtitle: 'サイトのサブタイトル',
         siteSubtitlePlaceholder: 'トークンを賢く、可能性をもっと。',
@@ -712,7 +704,10 @@ export default {
         homeContentIframeWarning: '⚠️ iframeモードに関する注意：X-Frame-OptionsまたはCSPのセキュリティポリシーにより、iframeへの埋め込みを禁止しているウェブサイトがあります。ページが空白になるかエラーが表示される場合は、対象サイトが埋め込みを許可しているか確認するか、HTMLモードで独自のコンテンツを作成してください。',
         compactHome: 'コンパクトホームページ',
         compactHomeHint: 'カスタムホームページのコンテンツが設定されていない場合に、簡潔なサイト情報ページを表示します。'
-      },
+      ,
+hideCcsImportButton: 'Hide CCS Import Button',
+hideCcsImportButtonHint: 'When enabled, the "Import to CCS" button will be hidden on the API Keys page',
+},
       purchase: {
         title: 'チャージ / サブスクリプションページ',
         description: 'サイドバーに「チャージ / サブスクリプション」を表示し、設定したURLをiframeで開きます',
@@ -1016,8 +1011,8 @@ export default {
         event: 'イベント',
         locale: 'ロケール',
         localeEn: '英語',
-        localeZh: '中国語',
         localeJa: '日本語',
+        localeZh: '中国語',
         subject: '件名',
         subjectPlaceholder: 'メールの件名を入力',
         html: 'HTMLテンプレート',

@@ -70,15 +70,15 @@ const cards = computed(() => (plaza.value?.groups ?? []).flatMap(group =>
   group.models.map(model => {
     const fixed = descriptions.find(item => item.model === model.name)
     const provider = OFFICIAL_MODEL_GROUPS.find(item => item.platform === model.platform)
-    const rate = model.quote ? 1 : (group.user_rate_multiplier ?? group.rate_multiplier)
-    const pricing = model.quote ? model.quote.pricing : model.pricing
+    const rate = group.user_rate_multiplier ?? group.rate_multiplier
+    const pricing = model.pricing
     const tokenPricing = !pricing?.billing_mode || pricing.billing_mode === 'token'
     const paid = (price: number | null | undefined) => tokenPricing && price != null ? price * rate : null
     return {
-      key: `${group.id}:${model.platform}:${model.name}:${model.endpoint ?? "any"}`,
+      key: `${group.id}:${model.platform}:${model.name}`,
       model: model.name,
       platform: model.platform as GroupPlatform,
-      channelName: model.channel_name,
+      channelName: group.name,
       descriptionKey: fixed?.descriptionKey ?? 'generic',
       source: fixed?.source ?? provider?.pricingSource,
       input: paid(pricing?.input_price),

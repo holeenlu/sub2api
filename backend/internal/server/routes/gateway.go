@@ -17,24 +17,6 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// Unknown stored platforms must not fall through to a supported upstream.
-func supportedPlatformGuard(c *gin.Context) {
-	key, _ := middleware.GetAPIKeyFromContext(c)
-	unsupportedGroup := key != nil && key.Group != nil && service.IsUnsupportedPlatform(key.Group.Platform)
-	if !unsupportedGroup && !service.IsUnsupportedPlatform(getGroupPlatform(c)) {
-		c.Next()
-		return
-	}
-	abortUnsupportedPlatform(c)
-}
-
-func abortUnsupportedPlatform(c *gin.Context) {
-	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-	c.AbortWithStatusJSON(http.StatusGone, gin.H{"error": gin.H{
-		"type": "invalid_request_error", "code": "unsupported_platform", "message": service.ErrUnsupportedPlatform.Message,
-	}})
-}
-
 // RegisterGatewayRoutes 注册 API 网关路由（Claude/OpenAI/Gemini 兼容）
 func RegisterGatewayRoutes(
 	r *gin.Engine,
@@ -51,8 +33,7 @@ func RegisterGatewayRoutes(
 	textBodyLimit := middleware.RequestBodyLimit(cfg.Gateway.TextMaxBodySize)
 	clientRequestID := middleware.ClientRequestID()
 	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
-	endpointNormalizer := handler.InboundEndpointMiddleware()
-	endpointNorm := endpointNormalizer
+	endpointNorm := handler.InboundEndpointMiddleware()
 	compositeTarget := compositeTargetPlatformMiddleware(compositeResolver)
 	compositeGeminiTarget := compositeGeminiTargetPlatformMiddleware(compositeResolver)
 
@@ -62,8 +43,7 @@ func RegisterGatewayRoutes(
 
 	// 分组级模型白名单准入：在 apiKeyAuth 之后、compositeTarget 之前，
 	// 保证校验发生在合成路由改写与调度之前，且只看客户端书写的模型名。
-	catalogAllowlist := middleware.GroupModelAllowlist()
-	groupModelAllowlist := func(c *gin.Context) { h.Gateway.PinRequestPricing(c); catalogAllowlist(c) }
+	groupModelAllowlist := middleware.GroupModelAllowlist()
 
 	isOpenAIResponsesCompatibleGatewayPlatform := func(c *gin.Context) bool {
 		switch getGroupPlatform(c) {
@@ -208,11 +188,10 @@ func RegisterGatewayRoutes(
 	gateway.Use(clientRequestID)
 	gateway.Use(opsErrorLogger)
 	gateway.Use(endpointNorm)
-	gateway.Use(gin.HandlerFunc(apiKeyAuth), supportedPlatformGuard)
+	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
 	gateway.Use(groupModelAllowlist)
 	gateway.Use(compositeTarget)
-	gateway.Use(supportedPlatformGuard)
 	gateway.Use(requireGroupAnthropic)
 	{
 		// /v1/messages: auto-route based on group platform
@@ -367,7 +346,7 @@ func RegisterGatewayRoutes(
 	gemini.Use(clientRequestID)
 	gemini.Use(opsErrorLogger)
 	gemini.Use(endpointNorm)
-	gemini.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg), supportedPlatformGuard)
+	gemini.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
 	gemini.Use(groupModelAllowlist)
 	gemini.Use(compositeGeminiTarget)
 	gemini.Use(requireGroupGoogle)
@@ -389,7 +368,7 @@ func RegisterGatewayRoutes(
 	// 根路径别名共用中间件链：白名单准入在 apiKeyAuth 之后、compositeTarget
 	// 之前，避免逐条路由手工维护链导致漏挂。
 	rootRoute := func(method, path string, limit gin.HandlerFunc, handler gin.HandlerFunc) {
-		r.Handle(method, path, limit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), supportedPlatformGuard, groupModelAllowlist, compositeTarget, supportedPlatformGuard, requireGroupAnthropic, handler)
+		r.Handle(method, path, limit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), groupModelAllowlist, compositeTarget, requireGroupAnthropic, handler)
 	}
 	for _, prefix := range []string{"/api/v3", "/v3", "/v1", ""} {
 		rootRoute(http.MethodPost, prefix+"/contents/generations/tasks", bodyLimit, h.OpenAIGateway.SeedanceTasks)
@@ -406,7 +385,7 @@ func RegisterGatewayRoutes(
 	rootRoute(http.MethodGet, "/models/:model", bodyLimit, h.Gateway.Models)
 	rootRoute(http.MethodPost, "/messages/count_tokens", bodyLimit, countTokensHandler)
 	codexDirect := r.Group("/backend-api/codex")
-	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), supportedPlatformGuard, groupModelAllowlist, compositeTarget, supportedPlatformGuard, requireGroupAnthropic)
+	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), groupModelAllowlist, compositeTarget, requireGroupAnthropic)
 	{
 		codexDirect.POST("/realtime/calls", h.OpenAIGateway.Live)
 		codexDirect.GET("/:call_id", h.OpenAIGateway.LiveSideband)
@@ -509,7 +488,7 @@ func RegisterGatewayRoutes(
 	})
 
 	// Antigravity 模型列表
-	r.GET("/antigravity/models", gin.HandlerFunc(apiKeyAuth), supportedPlatformGuard, requireGroupAnthropic, h.Gateway.AntigravityModels)
+	r.GET("/antigravity/models", gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.Gateway.AntigravityModels)
 
 	// Antigravity 专用路由（仅使用 antigravity 账户，不混合调度）
 	antigravityV1 := r.Group("/antigravity/v1")
@@ -518,7 +497,7 @@ func RegisterGatewayRoutes(
 	antigravityV1.Use(opsErrorLogger)
 	antigravityV1.Use(endpointNorm)
 	antigravityV1.Use(middleware.ForcePlatform(service.PlatformAntigravity))
-	antigravityV1.Use(gin.HandlerFunc(apiKeyAuth), supportedPlatformGuard)
+	antigravityV1.Use(gin.HandlerFunc(apiKeyAuth))
 	antigravityV1.Use(groupModelAllowlist)
 	antigravityV1.Use(requireGroupAnthropic)
 	{
@@ -534,7 +513,7 @@ func RegisterGatewayRoutes(
 	antigravityV1Beta.Use(opsErrorLogger)
 	antigravityV1Beta.Use(endpointNorm)
 	antigravityV1Beta.Use(middleware.ForcePlatform(service.PlatformAntigravity))
-	antigravityV1Beta.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg), supportedPlatformGuard)
+	antigravityV1Beta.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
 	antigravityV1Beta.Use(groupModelAllowlist)
 	antigravityV1Beta.Use(requireGroupGoogle)
 	{
@@ -584,11 +563,15 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 
 		body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 		if err != nil {
-			// 这里比 handler 先读请求体，读失败的分类与响应要和 handler 内的入口
-			// 一致，否则 composite 分组的客户端断连会以 400 进 ops_error_logs。
-			handler.RespondRequestBodyReadFailure(c, nil, err, func(c *gin.Context, status int, errType, message string) {
-				c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"type": errType, "message": message}})
-			})
+			status := http.StatusBadRequest
+			message := "Failed to read request body"
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				status = http.StatusRequestEntityTooLarge
+				message = "Request body is too large"
+			}
+			c.JSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
+			c.Abort()
 			return
 		}
 
@@ -599,10 +582,6 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 		if model != "" {
 			decision, err := resolver.Resolve(c.Request.Context(), apiKey.Group.ID, model, compositeRouteEndpointForPath(c.Request.URL.Path))
 			if err != nil {
-				if errors.Is(err, service.ErrUnsupportedPlatform) {
-					abortUnsupportedPlatform(c)
-					return
-				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"type": "server_error", "message": "Failed to resolve composite model route"}})
 				c.Abort()
 				return
@@ -634,10 +613,6 @@ func compositeGeminiTargetPlatformMiddleware(resolver *service.CompositeRouteRes
 			if model != "" {
 				decision, err := resolver.Resolve(c.Request.Context(), apiKey.Group.ID, model, service.CompositeRouteEndpointGemini)
 				if err != nil {
-					if errors.Is(err, service.ErrUnsupportedPlatform) {
-						abortUnsupportedPlatform(c)
-						return
-					}
 					c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"type": "server_error", "message": "Failed to resolve composite model route"}})
 					c.Abort()
 					return

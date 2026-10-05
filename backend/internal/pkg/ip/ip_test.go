@@ -73,7 +73,7 @@ func TestCheckIPRestrictionWithCompiledRules_InvalidWhitelistStillDenies(t *test
 	require.Equal(t, "access denied", reason)
 }
 
-func TestGetSecurityClientIPSwitchCannotTrustUnverifiedPeer(t *testing.T) {
+func TestGetSecurityClientIPSwitchEnabledUsesLegacyHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	r := gin.New()
@@ -89,10 +89,10 @@ func TestGetSecurityClientIPSwitchCannotTrustUnverifiedPeer(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, 200, w.Code)
-	require.Equal(t, "9.9.9.9", w.Body.String())
+	require.Equal(t, "1.2.3.4", w.Body.String())
 }
 
-func TestGetClientIPMetadataCustomHeaderPrecedenceAndFallback(t *testing.T) {
+func TestGetSecurityClientIPCustomHeaderPrecedenceAndFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
@@ -191,7 +191,7 @@ func TestGetClientIPMetadataCustomHeaderPrecedenceAndFallback(t *testing.T) {
 			require.NoError(t, r.SetTrustedProxies(nil))
 			r.GET("/t", func(c *gin.Context) {
 				SetForwardedIPSettings(c, test.trustForward, test.headers)
-				c.String(200, GetClientIP(c))
+				c.String(200, GetSecurityClientIP(c, !test.trustForward))
 			})
 
 			w := httptest.NewRecorder()
@@ -240,7 +240,7 @@ func TestGetClientIPSwitchDisabledUsesTrustedProxyChain(t *testing.T) {
 	require.Equal(t, "9.9.9.9", w.Body.String())
 }
 
-func TestGetClientIPMetadataRequestSnapshotCopiesCustomHeaders(t *testing.T) {
+func TestGetSecurityClientIPRequestSnapshotCopiesCustomHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	r := gin.New()
@@ -249,7 +249,7 @@ func TestGetClientIPMetadataRequestSnapshotCopiesCustomHeaders(t *testing.T) {
 		headers := []string{"X-Original-IP"}
 		SetForwardedIPSettings(c, true, headers)
 		headers[0] = "X-Mutated-IP"
-		c.String(200, GetClientIP(c))
+		c.String(200, GetSecurityClientIP(c, false))
 	})
 
 	w := httptest.NewRecorder()
@@ -262,7 +262,7 @@ func TestGetClientIPMetadataRequestSnapshotCopiesCustomHeaders(t *testing.T) {
 	require.Equal(t, "1.2.3.4", w.Body.String())
 }
 
-func TestGetSecurityClientIPRequestSnapshotCannotWeakenProxyTrust(t *testing.T) {
+func TestGetSecurityClientIPRequestSnapshotOverridesLiveFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
@@ -272,7 +272,7 @@ func TestGetSecurityClientIPRequestSnapshotCannotWeakenProxyTrust(t *testing.T) 
 		want          string
 	}{
 		{name: "captured secure mode wins", requestTrust: false, fallbackTrust: true, want: "9.9.9.9"},
-		{name: "captured compatibility mode cannot weaken security", requestTrust: true, fallbackTrust: false, want: "9.9.9.9"},
+		{name: "captured compatibility mode wins", requestTrust: true, fallbackTrust: false, want: "1.2.3.4"},
 	}
 
 	for _, test := range tests {

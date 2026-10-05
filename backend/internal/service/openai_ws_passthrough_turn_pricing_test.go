@@ -126,43 +126,6 @@ func TestPassthroughIngressFollowUpCallsBeforeTurnAfterBeforeRequest(t *testing.
 	require.Equal(t, 2, gotAfter)
 }
 
-func TestOpenAIRPMPassthroughRejectsFollowUpBeforeUpstreamWrite(t *testing.T) {
-	controlCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	upstream := newStagedPassthroughConn()
-	upstream.Send(`{"type":"response.completed","response":{"id":"resp_rpm_1","model":"gpt-5.1"}}`)
-	account := passthroughLifecycleAccount()
-	account.Type = AccountTypeOAuth
-	account.Extra = map[string]any{"base_rpm": 1, "openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough}
-	cfg := passthroughLifecycleConfig()
-	cfg.Gateway.OpenAIWS.OAuthEnabled = true
-	svc := newPassthroughLifecycleService(cfg, upstream)
-	svc.rpmCache = &openAIRPMTestCache{counts: map[int64]int{}}
-	server, result := startPassthroughHookRecordingServer(t, controlCtx, svc, account, nil)
-	defer server.Close()
-	client := dialPassthroughLifecycleClient(t, server)
-	defer func() { _ = client.CloseNow() }()
-	requirePassthroughUpstreamWrite(t, upstream, time.Second)
-	_, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
-	require.NoError(t, err)
-	writeCtx, writeCancel := context.WithTimeout(context.Background(), time.Second)
-	err = client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1"}`))
-	writeCancel()
-	require.NoError(t, err)
-	select {
-	case err := <-result:
-		require.ErrorIs(t, err, ErrOpenAIRPMExhausted)
-	case <-time.After(3 * time.Second):
-		t.Fatal("RPM rejection did not terminate the follow-up")
-	}
-	cache, ok := svc.rpmCache.(*openAIRPMTestCache)
-	require.True(t, ok)
-	if got := cache.counts[account.ID]; got != 1 {
-		t.Fatalf("expected one RPM reservation, got %d", got)
-	}
-	require.Empty(t, upstream.writes, "the exhausted follow-up must not reach the upstream")
-}
-
 func TestPassthroughIngressBeforeTurnRejectionDoesNotForwardFollowUp(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	controlCtx, cancelControl := context.WithCancelCause(context.Background())
@@ -222,64 +185,6 @@ func TestPassthroughIngressBeforeTurnRejectionDoesNotForwardFollowUp(t *testing.
 	require.Equal(t, 2, gotBeforeTurn)
 	require.Equal(t, 2, gotAfter, "each started turn must be finalized exactly once")
 	require.ErrorIs(t, gotFinalErr, rejection)
-}
-
-func TestPassthroughIngressMapsModelBeforeBeforeTurn(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	controlCtx, cancelControl := context.WithCancelCause(context.Background())
-	defer cancelControl(context.Canceled)
-
-	upstream := newStagedPassthroughConn()
-	upstream.Send(`{"type":"response.completed","response":{"id":"resp_map_order_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
-
-	var mappedBeforeTurn bool
-	hooks := &OpenAIWSIngressHooks{
-		MapRequestModel: func(_ int, originalModel string) (string, error) {
-			require.Equal(t, "gpt-5.1", originalModel)
-			mappedBeforeTurn = true
-			return "gpt-5.6-sol", nil
-		},
-		BeforeTurn: func(_ int) error {
-			require.True(t, mappedBeforeTurn, "BeforeTurn must see the current turn's mapped model")
-			return nil
-		},
-	}
-
-	server, serverErr := startPassthroughHookRecordingServer(
-		t,
-		controlCtx,
-		newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream),
-		passthroughLifecycleAccount(),
-		hooks,
-	)
-	defer server.Close()
-	clientConn := dialPassthroughLifecycleClient(t, server)
-	defer func() { _ = clientConn.CloseNow() }()
-
-	firstWrite := requirePassthroughUpstreamWrite(t, upstream, time.Second)
-	require.Equal(t, "response.create", gjson.GetBytes(firstWrite, "type").String())
-	_, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
-	require.NoError(t, err)
-
-	writeCtx, cancelWrite := context.WithTimeout(context.Background(), time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1"}`))
-	cancelWrite()
-	require.NoError(t, err)
-
-	followUp := requirePassthroughUpstreamWrite(t, upstream, time.Second)
-	require.Equal(t, "response.create", gjson.GetBytes(followUp, "type").String())
-	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(followUp, "model").String())
-	upstream.Send(`{"type":"response.completed","response":{"id":"resp_map_order_2","model":"gpt-5.6-sol","usage":{"input_tokens":1,"output_tokens":1}}}`)
-	_, err = readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
-	require.NoError(t, err)
-
-	select {
-	case err := <-serverErr:
-		require.NoError(t, err)
-	case <-time.After(100 * time.Millisecond):
-		// The server remains open for another client frame; the assertions
-		// above are sufficient for this ordering test.
-	}
 }
 
 func TestPassthroughIngressFreezesSubsequentTurnBeforeRequestPolicy(t *testing.T) {

@@ -15,7 +15,6 @@ import (
 
 // ChannelHandler handles admin channel management
 type ChannelHandler struct {
-	modelRegistry  *service.ModelCatalogService
 	channelService *service.ChannelService
 	billingService *service.BillingService
 	pricingService *service.PricingService
@@ -594,7 +593,7 @@ func (h *ChannelHandler) Delete(c *gin.Context) {
 	response.Success(c, gin.H{"message": "Channel deleted successfully"})
 }
 
-// GetModelDefaultPricing 获取模型的默认定价（用于只读参考，管理员可显式填入）
+// GetModelDefaultPricing 获取模型的默认定价（用于前端自动填充）
 // GET /api/v1/admin/channels/model-pricing?model=claude-sonnet-4
 func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 	model := strings.TrimSpace(c.Query("model"))
@@ -619,7 +618,7 @@ func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 		cacheWrite1hPrice = &pricing.CacheCreation1hPrice
 	}
 
-	values := gin.H{
+	response.Success(c, gin.H{
 		"found":                        true,
 		"input_price":                  pricing.InputPricePerToken,
 		"output_price":                 pricing.OutputPricePerToken,
@@ -629,30 +628,7 @@ func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 		"reasoning_effort_multipliers": pricing.ReasoningEffortMultipliers,
 		"image_input_price":            pricing.ImageInputPricePerToken,
 		"image_output_price":           pricing.ImageOutputPricePerToken,
-	}
-	if h.pricingService != nil {
-		if source := h.pricingService.GetIdentifiedModelPricing(model); source != nil && source.ProvidedFields != nil {
-			fields := map[string][]string{
-				"input_price":          {"input_cost_per_token"},
-				"output_price":         {"output_cost_per_token"},
-				"cache_write_price":    {"cache_creation_input_token_cost"},
-				"cache_write_1h_price": {"cache_creation_input_token_cost_above_1hr"},
-				"cache_read_price":     {"cache_read_input_token_cost"},
-				"image_input_price":    {"input_cost_per_image_token"},
-				"image_output_price":   {"output_cost_per_image_token"},
-			}
-			for field, sources := range fields {
-				present := false
-				for _, name := range sources {
-					present = present || source.ProvidedFields[name]
-				}
-				if !present {
-					values[field] = nil
-				}
-			}
-		}
-	}
-	response.Success(c, values)
+	})
 }
 
 // platformToLiteLLMProvider maps a channel platform name to the corresponding
@@ -689,25 +665,6 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 		return
 	}
 
-	if h.modelRegistry != nil {
-		catalog, err := h.modelRegistry.Platform(c.Request.Context(), platform)
-		if err != nil {
-			response.InternalError(c, "Failed to read model catalog")
-			return
-		}
-		models := []string{}
-		for _, entry := range catalog.Models {
-			if entry.Lifecycle != "retired" {
-				models = append(models, entry.ID)
-			}
-		}
-		response.Success(c, gin.H{"models": models, "source": "model_catalog", "updated_at": catalog.UpdatedAt})
-		return
-	}
 	models := h.pricingService.ListModelNamesByProvider(provider)
 	response.Success(c, gin.H{"models": models})
-}
-
-func (h *ChannelHandler) SetModelCatalog(registry *service.ModelCatalogService) {
-	h.modelRegistry = registry
 }

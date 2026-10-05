@@ -54,39 +54,37 @@ type AdminUser struct {
 }
 
 type APIKey struct {
-	ModelSetup  *service.CodexSetupProfile `json:"model_setup,omitempty"`
-	ID          int64                      `json:"id"`
-	UserID      int64                      `json:"user_id"`
-	Key         string                     `json:"key"`
-	Name        string                     `json:"name"`
-	GroupID     *int64                     `json:"group_id"`
-	Status      string                     `json:"status"`
-	IPWhitelist []string                   `json:"ip_whitelist"`
-	IPBlacklist []string                   `json:"ip_blacklist"`
-	LastUsedAt  *time.Time                 `json:"last_used_at"`
-	LastUsedIP  *string                    `json:"last_used_ip"`
-	Quota       float64                    `json:"quota"`      // Quota limit in USD (0 = unlimited)
-	QuotaUsed   float64                    `json:"quota_used"` // Used quota amount in USD
-	ExpiresAt   *time.Time                 `json:"expires_at"` // Expiration time (nil = never expires)
-	CreatedAt   time.Time                  `json:"created_at"`
-	UpdatedAt   time.Time                  `json:"updated_at"`
+	ID          int64      `json:"id"`
+	UserID      int64      `json:"user_id"`
+	Key         string     `json:"key"`
+	Name        string     `json:"name"`
+	GroupID     *int64     `json:"group_id"`
+	Status      string     `json:"status"`
+	IPWhitelist []string   `json:"ip_whitelist"`
+	IPBlacklist []string   `json:"ip_blacklist"`
+	LastUsedAt  *time.Time `json:"last_used_at"`
+	LastUsedIP  *string    `json:"last_used_ip"`
+	Quota       float64    `json:"quota"`      // Quota limit in USD (0 = unlimited)
+	QuotaUsed   float64    `json:"quota_used"` // Used quota amount in USD
+	ExpiresAt   *time.Time `json:"expires_at"` // Expiration time (nil = never expires)
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 	// CurrentConcurrency is the real-time active request count for this API key.
 	CurrentConcurrency int `json:"current_concurrency"`
 
 	// Rate limit fields
-	ConcurrencyLimit int        `json:"concurrency_limit"`
-	RateLimit5h      float64    `json:"rate_limit_5h"`
-	RateLimit1d      float64    `json:"rate_limit_1d"`
-	RateLimit7d      float64    `json:"rate_limit_7d"`
-	Usage5h          float64    `json:"usage_5h"`
-	Usage1d          float64    `json:"usage_1d"`
-	Usage7d          float64    `json:"usage_7d"`
-	Window5hStart    *time.Time `json:"window_5h_start"`
-	Window1dStart    *time.Time `json:"window_1d_start"`
-	Window7dStart    *time.Time `json:"window_7d_start"`
-	Reset5hAt        *time.Time `json:"reset_5h_at,omitempty"`
-	Reset1dAt        *time.Time `json:"reset_1d_at,omitempty"`
-	Reset7dAt        *time.Time `json:"reset_7d_at,omitempty"`
+	RateLimit5h   float64    `json:"rate_limit_5h"`
+	RateLimit1d   float64    `json:"rate_limit_1d"`
+	RateLimit7d   float64    `json:"rate_limit_7d"`
+	Usage5h       float64    `json:"usage_5h"`
+	Usage1d       float64    `json:"usage_1d"`
+	Usage7d       float64    `json:"usage_7d"`
+	Window5hStart *time.Time `json:"window_5h_start"`
+	Window1dStart *time.Time `json:"window_1d_start"`
+	Window7dStart *time.Time `json:"window_7d_start"`
+	Reset5hAt     *time.Time `json:"reset_5h_at,omitempty"`
+	Reset1dAt     *time.Time `json:"reset_1d_at,omitempty"`
+	Reset7dAt     *time.Time `json:"reset_7d_at,omitempty"`
 
 	User  *User  `json:"user,omitempty"`
 	Group *Group `json:"group,omitempty"`
@@ -141,8 +139,6 @@ type Group struct {
 	FallbackGroupID *int64 `json:"fallback_group_id"`
 	// 无效请求兜底分组
 	FallbackGroupIDOnInvalidRequest *int64 `json:"fallback_group_id_on_invalid_request"`
-	// 无可用账号兜底分组
-	FallbackGroupIDOnNoAccount *int64 `json:"fallback_group_id_on_no_account"`
 
 	// OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
 	AllowMessagesDispatch bool `json:"allow_messages_dispatch"`
@@ -216,33 +212,27 @@ type Account struct {
 	Type     string  `json:"type"`
 	// Credentials 经 RedactCredentials 处理后只含非敏感子键；敏感 token / api_key / 私钥
 	// 的存在性通过 CredentialsStatus（has_<key>）暴露，原始值不返回前端。
-	Credentials             map[string]any                    `json:"credentials"`
-	CredentialsStatus       map[string]bool                   `json:"credentials_status,omitempty"`
-	Extra                   map[string]any                    `json:"extra"`
-	OllamaCloudUsage        *service.OllamaCloudUsageState    `json:"ollama_cloud_usage,omitempty"`
-	OpenCodeGoUsage         *service.OpenCodeGoUsageState     `json:"opencode_go_usage,omitempty"`
-	ProxyID                 *int64                            `json:"proxy_id"`
-	ProxyFallbackOriginID   *int64                            `json:"proxy_fallback_origin_id"`
-	ProxyFallbackOriginName *string                           `json:"proxy_fallback_origin_name,omitempty"`
-	Concurrency             int                               `json:"concurrency"`
-	LoadFactor              *int                              `json:"load_factor,omitempty"`
-	Priority                int                               `json:"priority"`
-	RateMultiplier          float64                           `json:"rate_multiplier"`
-	Status                  string                            `json:"status"`
-	ErrorMessage            string                            `json:"error_message"`
-	LastUsedAt              *time.Time                        `json:"last_used_at"`
-	ExpiresAt               *int64                            `json:"expires_at"`
-	AutoPauseOnExpired      bool                              `json:"auto_pause_on_expired"`
-	CreatedAt               time.Time                         `json:"created_at"`
-	UpdatedAt               time.Time                         `json:"updated_at"`
-	CodexTurnTickets        []service.OpenAICodexTicketStatus `json:"codex_turn_tickets,omitempty"`
-	CodexTicketLatestEvent  *service.CodexTicketRecentEvent   `json:"codex_ticket_latest_event,omitempty"`
+	Credentials             map[string]any                 `json:"credentials"`
+	CredentialsStatus       map[string]bool                `json:"credentials_status,omitempty"`
+	Extra                   map[string]any                 `json:"extra"`
+	OllamaCloudUsage        *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
+	OpenCodeGoUsage         *service.OpenCodeGoUsageState  `json:"opencode_go_usage,omitempty"`
+	ProxyID                 *int64                         `json:"proxy_id"`
+	ProxyFallbackOriginID   *int64                         `json:"proxy_fallback_origin_id"`
+	ProxyFallbackOriginName *string                        `json:"proxy_fallback_origin_name,omitempty"`
+	Concurrency             int                            `json:"concurrency"`
+	LoadFactor              *int                           `json:"load_factor,omitempty"`
+	Priority                int                            `json:"priority"`
+	RateMultiplier          float64                        `json:"rate_multiplier"`
+	Status                  string                         `json:"status"`
+	ErrorMessage            string                         `json:"error_message"`
+	LastUsedAt              *time.Time                     `json:"last_used_at"`
+	ExpiresAt               *int64                         `json:"expires_at"`
+	AutoPauseOnExpired      bool                           `json:"auto_pause_on_expired"`
+	CreatedAt               time.Time                      `json:"created_at"`
+	UpdatedAt               time.Time                      `json:"updated_at"`
 
 	Schedulable bool `json:"schedulable"`
-
-	// CanRefreshToken 是后端下发的能力位（Account.CanRefreshToken）：账号的凭据是否
-	// 参与 OAuth 续期。前端据此决定是否显示"刷新 token"入口，不再自行复刻规则。
-	CanRefreshToken bool `json:"can_refresh_token"`
 
 	RateLimitedAt    *time.Time `json:"rate_limited_at"`
 	RateLimitResetAt *time.Time `json:"rate_limit_reset_at"`
@@ -265,7 +255,7 @@ type Account struct {
 	MaxSessions           *int `json:"max_sessions,omitempty"`
 	SessionIdleTimeoutMin *int `json:"session_idle_timeout_minutes,omitempty"`
 
-	// RPM 限制（Anthropic OAuth/SetupToken 与 OpenAI OAuth 账号有效）
+	// RPM 限制（仅 Anthropic OAuth/SetupToken 账号有效）
 	// 从 extra 字段提取，方便前端显示和编辑
 	BaseRPM          *int    `json:"base_rpm,omitempty"`
 	RPMStrategy      *string `json:"rpm_strategy,omitempty"`
@@ -347,13 +337,11 @@ type AccountListItem struct {
 	Platform string  `json:"platform"`
 	Type     string  `json:"type"`
 
-	Credentials            map[string]any                    `json:"credentials,omitempty"`
-	CredentialsStatus      map[string]bool                   `json:"credentials_status,omitempty"`
-	Extra                  map[string]any                    `json:"extra,omitempty"`
-	OllamaCloudUsage       *service.OllamaCloudUsageState    `json:"ollama_cloud_usage,omitempty"`
-	OpenCodeGoUsage        *service.OpenCodeGoUsageState     `json:"opencode_go_usage,omitempty"`
-	CodexTurnTickets       []service.OpenAICodexTicketStatus `json:"codex_turn_tickets,omitempty"`
-	CodexTicketLatestEvent *service.CodexTicketRecentEvent   `json:"codex_ticket_latest_event,omitempty"`
+	Credentials       map[string]any                 `json:"credentials,omitempty"`
+	CredentialsStatus map[string]bool                `json:"credentials_status,omitempty"`
+	Extra             map[string]any                 `json:"extra,omitempty"`
+	OllamaCloudUsage  *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
+	OpenCodeGoUsage   *service.OpenCodeGoUsageState  `json:"opencode_go_usage,omitempty"`
 
 	ProxyID                 *int64     `json:"proxy_id"`
 	ProxyFallbackOriginID   *int64     `json:"proxy_fallback_origin_id"`

@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
 // Status constants
@@ -56,14 +55,6 @@ const (
 	// account rows. Scheduling-threshold evaluation never pauses kiro accounts.
 	PlatformKiro = "kiro"
 )
-
-// IsUnsupportedPlatform rejects unknown stored or requested providers. An empty
-// platform retains the existing caller-specific default for omitted inputs.
-func IsUnsupportedPlatform(platform string) bool {
-	return platform != "" && platform != PlatformComposite && !isConcreteRequestPlatform(platform)
-}
-
-var ErrUnsupportedPlatform = infraerrors.BadRequest("UNSUPPORTED_PLATFORM", "This platform is not supported")
 
 // 账号接入模式（国产供应商）：按量付费 vs Coding Plan。
 const (
@@ -160,20 +151,6 @@ var AllowedSchedulingThresholdPlatforms = []string{
 	PlatformMiniMax,
 	PlatformOpenCodeGo,
 }
-
-// SchedulingThresholdScopeAnthropicFable 是 Anthropic Fable 模型家族的独立停调阈值
-// scope。它不是平台——account.Platform 永远不会等于它，只在
-// account_scheduling_thresholds 这张 map 里多占一个 key。越线只对 Fable 打模型级
-// 限流，账号对其他模型仍可调度。
-const SchedulingThresholdScopeAnthropicFable = "anthropic_fable"
-
-// AllowedSchedulingThresholdScopes 是 account_scheduling_thresholds 允许出现的全部
-// key：平台 + 非平台 scope。设置的校验/解析/审计遍历用它；判定「某账号平台是否支持
-// 阈值停调」仍用 AllowedSchedulingThresholdPlatforms。
-var AllowedSchedulingThresholdScopes = append(
-	append([]string{}, AllowedSchedulingThresholdPlatforms...),
-	SchedulingThresholdScopeAnthropicFable,
-)
 
 // IsAllowedQuotaPlatform 报告 s 是否为合法的 quota platform 标识。
 func IsAllowedQuotaPlatform(s string) bool {
@@ -644,11 +621,6 @@ const (
 	// Claude Code Version Check
 	// =========================
 
-	// SettingKeyUpstreamFailoverStatusCodes 覆盖「上游返回哪些状态码才换账号重试」。
-	// 取值是状态码与闭区间的逗号列表，如 "401,403,429,500-599"；空值 = 用各平台的
-	// 内置默认集。无论怎么配，upstreamFailoverAlwaysSkipStatusCodes 里的码永不重试。
-	SettingKeyUpstreamFailoverStatusCodes = "upstream_failover_status_codes"
-
 	// SettingKeyMinClaudeCodeVersion 最低 Claude Code 版本号要求 (semver, 如 "2.1.0"，空值=不检查)
 	SettingKeyMinClaudeCodeVersion = "min_claude_code_version"
 	// SettingKeyMinCodexVersion 最低 Codex 引擎版本要求 (semver, 如 "0.141.0"，空值=不检查)
@@ -741,12 +713,6 @@ const (
 	SettingKeyOpenAICodexClientVersionSynced = "openai_codex_client_version_synced"
 	// SettingKeyOpenAICodexVersionAutoSyncEnabled 是否启用 Codex 客户端版本号自动同步（默认 true）。
 	SettingKeyOpenAICodexVersionAutoSyncEnabled = "openai_codex_version_auto_sync_enabled"
-	// SettingKeyOpenAICodexTicketEnabled Codex 292 打票总开关（后台可改、热更新）。
-	// 关闭：不打票、不注入 x-codex-turn-state，按原链路转发。
-	// 开启：后台打票并在业务请求中覆盖该头。
-	SettingKeyOpenAICodexTicketEnabled = "openai_codex_ticket_enabled"
-	// SettingKeyOpenAICodexTicketHarvestProxyURL 保留旧单代理配置兼容性；打票改用独立代理池。
-	SettingKeyOpenAICodexTicketHarvestProxyURL = "openai_codex_ticket_harvest_proxy_url"
 	// SettingKeyClaudeCodeClientVersion 网关对 Anthropic 上游声明的 Claude Code CLI 客户端版本号（管理员覆写）。
 	// 空值表示跟随自动同步值；自动同步也没有结果时回退到 claude.CLIVersion()（环境变量覆盖 + 内置基线）。
 	// 版本太旧会被 Anthropic 拒绝（claude_code_version_too_old），故该值需保持跟随官方发布。
@@ -756,9 +722,6 @@ const (
 	SettingKeyClaudeCodeClientVersionSynced = "claude_code_client_version_synced"
 	// SettingKeyClaudeCodeVersionAutoSyncEnabled 是否启用 Claude Code 客户端版本号自动同步（默认 true）。
 	SettingKeyClaudeCodeVersionAutoSyncEnabled = "claude_code_version_auto_sync_enabled"
-	// 打票/诊断共用模板与全局无票放行策略。
-	SettingKeyOpenAICodexTicketPromptTemplate     = "openai_codex_ticket_prompt_template"
-	SettingKeyOpenAICodexTicketAllowWithoutTicket = "openai_codex_ticket_allow_without_ticket"
 	// SettingKeyOpenAIAllowClaudeCodeCodexPlugin 已废弃：历史全局开关只作为升级迁移输入读取。
 	// 迁移后等价规则写入 SettingKeyCodexCLIOnlyWhitelist，不再参与运行时判定。
 	SettingKeyOpenAIAllowClaudeCodeCodexPlugin = "openai_allow_claude_code_codex_plugin"

@@ -594,8 +594,8 @@ func TestGrokFreeClientToolCacheClaudeDesktopResponsesAutoOptIn(t *testing.T) {
 	for _, xApp := range []string{"cli", "cli-bg"} {
 		t.Run(xApp, func(t *testing.T) {
 			c := newGrokCacheTestContext(90141)
-			// The desktop marker text is intentionally not required because desktop
-			// clients may change the descriptive User-Agent suffix.
+			// The desktop marker text is intentionally not required; CC Switch and
+			// Claude Desktop may change the descriptive User-Agent suffix.
 			c.Request.Header.Set("User-Agent", "claude-cli/2.1.215 (external, future-desktop, agent-sdk/0.3.215)")
 			c.Request.Header.Set("X-App", xApp)
 			c.Request.Header.Set("anthropic-client-platform", "desktop_app")

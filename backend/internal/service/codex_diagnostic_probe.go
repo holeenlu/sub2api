@@ -133,9 +133,9 @@ func RunCodexDiagnosticProbe(ctx context.Context, gateway *OpenAIGatewayService,
 		}
 		return item
 	}
-	// The normal gateway owns ticket policy, scheduling, injection and invalidation.
+	// The native gateway owns authentication, scheduling, forwarding and billing.
 	// Diagnostics only pin the target account and analyze the model response.
-	modelCtx, cancel := context.WithTimeout(WithCodexTicketDiagnostic(probeCtx, accountID), 120*time.Second)
+	modelCtx, cancel := context.WithTimeout(withCodexDiagnosticAccount(probeCtx, accountID), 120*time.Second)
 	request, requestErr := http.NewRequestWithContext(modelCtx, http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	if requestErr != nil {
 		cancel()
@@ -202,3 +202,9 @@ func (w *diagnosticRecorder) Write(b []byte) (int, error) {
 	return w.ResponseRecorder.Write(b)
 }
 func (w *diagnosticRecorder) WriteString(v string) (int, error) { return w.Write([]byte(v)) }
+
+type codexDiagnosticTargetKey struct{}
+
+func withCodexDiagnosticAccount(ctx context.Context, accountID int64) context.Context {
+	return context.WithValue(ctx, codexDiagnosticTargetKey{}, accountID)
+}

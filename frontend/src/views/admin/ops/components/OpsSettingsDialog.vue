@@ -7,7 +7,6 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import type { OpsAlertRuntimeSettings, EmailNotificationConfig, AlertSeverity, OpsAdvancedSettings, OpsMetricThresholds } from '../types'
-import { DEFAULT_TTFT_P99_MS_MAX } from '../utils/opsThresholds'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -33,7 +32,7 @@ const advancedSettings = ref<OpsAdvancedSettings | null>(null)
 // 指标阈值配置
 const metricThresholds = ref<OpsMetricThresholds>({
   sla_percent_min: 99.5,
-  ttft_p99_ms_max: DEFAULT_TTFT_P99_MS_MAX,
+  ttft_p99_ms_max: 500,
   request_error_rate_percent_max: 5,
   upstream_error_rate_percent_max: 5
 })
@@ -59,7 +58,7 @@ async function loadAllSettings() {
     if (thresholds && Object.keys(thresholds).length > 0) {
         metricThresholds.value = {
           sla_percent_min: thresholds.sla_percent_min ?? 99.5,
-          ttft_p99_ms_max: thresholds.ttft_p99_ms_max ?? DEFAULT_TTFT_P99_MS_MAX,
+          ttft_p99_ms_max: thresholds.ttft_p99_ms_max ?? 500,
           request_error_rate_percent_max: thresholds.request_error_rate_percent_max ?? 5,
           upstream_error_rate_percent_max: thresholds.upstream_error_rate_percent_max ?? 5
         }

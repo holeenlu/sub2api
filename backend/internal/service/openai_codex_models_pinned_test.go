@@ -3,68 +3,80 @@
 package service
 
 import (
-	"context"
-	"errors"
+	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-type pinnedAccountRepoStub struct {
-	AccountRepository
-	members []Account
-}
-
-func (r *pinnedAccountRepoStub) ListByGroup(context.Context, int64) ([]Account, error) {
-	return append([]Account(nil), r.members...), nil
-}
-
-func pinnedOpenAIAccount(id int64) Account {
-	return Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true}
-}
-
-func TestMergeCodexModelsManifestBodiesUnionAndConfigOrder(t *testing.T) {
+func TestMergeCodexModelsManifestBodiesUnionAndOrder(t *testing.T) {
 	first := `{"object":"codex.manifest","models":[{"slug":"model-a","display_name":"A from first"},{"slug":"model-b"}]}`
 	second := `{"object":"codex.manifest","models":[{"slug":"model-a","display_name":"A from second"},{"slug":"model-c"}]}`
 
 	merged, err := mergeCodexModelsManifestBodies([][]byte{[]byte(first), []byte(second)})
 	require.NoError(t, err)
-	require.Contains(t, string(merged), `"display_name":"A from first"`)
-	require.NotContains(t, string(merged), `"display_name":"A from second"`)
-	require.Contains(t, string(merged), `"slug":"model-c"`)
+
+	var envelope map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(merged, &envelope))
+	var objectField string
+	require.NoError(t, json.Unmarshal(envelope["object"], &objectField))
+	require.Equal(t, "codex.manifest", objectField)
+
+	var models []map[string]any
+	require.NoError(t, json.Unmarshal(envelope["models"], &models))
+	require.Len(t, models, 3)
+	require.Equal(t, "model-a", models[0]["slug"])
+	require.Equal(t, "A from first", models[0]["display_name"], "重复 slug 必须取配置顺序靠前账号的条目")
+	require.Equal(t, "model-b", models[1]["slug"])
+	require.Equal(t, "model-c", models[2]["slug"])
 }
 
-func TestFetchPinnedOpenAIModelsIgnoresTransientAccountState(t *testing.T) {
-	rateLimited := pinnedOpenAIAccount(1)
-	now := time.Now()
-	rateLimited.RateLimitedAt = &now
-	rateLimited.RateLimitResetAt = func() *time.Time { value := now.Add(time.Hour); return &value }()
-	unschedulable := pinnedOpenAIAccount(2)
-	unschedulable.Schedulable = false
-	expired := pinnedOpenAIAccount(3)
-	expired.AutoPauseOnExpired = true
-	expired.ExpiresAt = func() *time.Time { value := now.Add(-time.Minute); return &value }()
-	repo := &pinnedAccountRepoStub{members: []Account{rateLimited, unschedulable, expired}}
-	gateway := &OpenAIGatewayService{accountRepo: repo}
-	group := &Group{ID: 9, Platform: PlatformOpenAI, CodexModelsManifestConfig: GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{2, 1, 3}}}
-	var fetched []int64
-	results, err := gateway.fetchPinnedOpenAIModels(context.Background(), group, func(_ context.Context, account *Account) (*OpenAIModelsResponse, error) {
-		fetched = append(fetched, account.ID)
-		return &OpenAIModelsResponse{Body: []byte(`{"models":[]}`)}, nil
-	})
+func TestMergeCodexModelsManifestBodiesEnvelopeFromFirstBody(t *testing.T) {
+	first := `{"object":"codex.manifest","extra_field":"from-first","models":[{"slug":"model-a"}]}`
+	second := `{"object":"other","extra_field":"from-second","another":"only-in-second","models":[]}`
+
+	merged, err := mergeCodexModelsManifestBodies([][]byte{[]byte(first), []byte(second)})
 	require.NoError(t, err)
-	require.Len(t, results, 1)
-	require.Equal(t, []int64{1}, fetched)
+
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(merged, &envelope))
+	require.Equal(t, "codex.manifest", envelope["object"])
+	require.Equal(t, "from-first", envelope["extra_field"], "顶层字段以第一个信封为基底")
+	require.NotContains(t, envelope, "another")
 }
 
-func TestFetchPinnedOpenAIModelsReturnsLastErrorWhenAllFetchesFail(t *testing.T) {
-	repo := &pinnedAccountRepoStub{members: []Account{pinnedOpenAIAccount(1), pinnedOpenAIAccount(2)}}
-	gateway := &OpenAIGatewayService{accountRepo: repo}
-	group := &Group{ID: 9, Platform: PlatformOpenAI, CodexModelsManifestConfig: GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{1, 2}}}
-	want := errors.New("upstream down")
-	_, err := gateway.fetchPinnedOpenAIModels(context.Background(), group, func(_ context.Context, _ *Account) (*OpenAIModelsResponse, error) {
-		return nil, want
-	})
-	require.ErrorIs(t, err, want)
+func TestMergeCodexModelsManifestBodiesHandlesSluglessEntries(t *testing.T) {
+	first := `{"models":[{"slug":"model-a"},{"display_name":"no slug one"}]}`
+	second := `{"models":[{"display_name":"no slug one"},{"display_name":"no slug two"},{"slug":"model-a"}]}`
+
+	merged, err := mergeCodexModelsManifestBodies([][]byte{[]byte(first), []byte(second)})
+	require.NoError(t, err)
+
+	var envelope struct {
+		Models []map[string]any `json:"models"`
+	}
+	require.NoError(t, json.Unmarshal(merged, &envelope))
+	require.Len(t, envelope.Models, 3)
+	require.Equal(t, "model-a", envelope.Models[0]["slug"])
+	require.Equal(t, "no slug one", envelope.Models[1]["display_name"], "无 slug 条目按出现顺序保留一次")
+	require.Equal(t, "no slug two", envelope.Models[2]["display_name"])
+}
+
+func TestMergeCodexModelsManifestBodiesSingleBody(t *testing.T) {
+	body := `{"models":[{"slug":"model-a"}]}`
+
+	merged, err := mergeCodexModelsManifestBodies([][]byte{[]byte(body)})
+	require.NoError(t, err)
+	require.JSONEq(t, body, string(merged))
+}
+
+func TestMergeCodexModelsManifestBodiesRejectsInvalidInput(t *testing.T) {
+	_, err := mergeCodexModelsManifestBodies(nil)
+	require.Error(t, err)
+
+	_, err = mergeCodexModelsManifestBodies([][]byte{[]byte(`{`)})
+	require.Error(t, err)
+
+	_, err = mergeCodexModelsManifestBodies([][]byte{[]byte(`{}`), []byte(`{"models":{}`)})
+	require.Error(t, err, "models 非数组必须报错")
 }

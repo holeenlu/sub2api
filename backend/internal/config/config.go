@@ -10,7 +10,6 @@ import (
 	"net/textproto"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -183,11 +182,7 @@ type GeminiTierQuotaConfig struct {
 }
 
 type UpdateConfig struct {
-	// CheckEnabled 控制是否允许在线版本检查与自更新（本品牌构建默认 true）。
-	// 为 false 时版本检查、自更新和版本回滚接口直接返回 disabled，不会向 GitHub
-	// 发起任何请求；Tokensavy 仅使用本仓库 tokensavy/v* 发布渠道。
 	CheckEnabled bool `mapstructure:"check_enabled"`
-
 	// ProxyURL 用于访问 GitHub 的代理地址
 	// 支持 http/https/socks5/socks5h 协议
 	// 例如: "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"
@@ -983,102 +978,6 @@ const (
 	ImageConcurrencyOverflowModeWait   = "wait"
 )
 
-// APIKeyQueueConfig 是 Key 级并发等待队列的全局只读策略。
-//
-// 与逐 Key 的 concurrency_limit 相互独立：Key 上限为 0 时不进入队列；
-// MaxWaiting 为 0 时关闭 Key 排队但保留并发上限。
-type APIKeyQueueConfig struct {
-	// MaxWaiting 是每个受限 Key 允许额外等待的请求数，0 表示关闭 Key 排队。
-	MaxWaiting int `mapstructure:"max_waiting"`
-	// TimeoutSeconds 是单个请求等待 Key 容量的最长秒数，必须为正整数。
-	TimeoutSeconds int `mapstructure:"timeout_seconds"`
-}
-
-// Timeout 返回已校验的等待预算。仅在配置通过校验后调用。
-func (c APIKeyQueueConfig) Timeout() time.Duration {
-	return time.Duration(c.TimeoutSeconds) * time.Second
-}
-
-const (
-	// APIKeyQueueMaxWaitingEnv / APIKeyQueueTimeoutSecondsEnv 是部署环境变量名。
-	APIKeyQueueMaxWaitingEnv     = "GATEWAY_API_KEY_QUEUE_MAX_WAITING"
-	APIKeyQueueTimeoutSecondsEnv = "GATEWAY_API_KEY_QUEUE_TIMEOUT_SECONDS"
-
-	defaultAPIKeyQueueMaxWaiting     = 5
-	defaultAPIKeyQueueTimeoutSeconds = 30
-	// Keep seconds*time.Second and seconds*1000 inside int64/float64 exact range.
-	maxAPIKeyQueueTimeoutSeconds = math.MaxInt64 / int64(time.Second)
-)
-
-// loadAPIKeyQueueConfig 从严解析两个全局参数：拒绝负数、小数、非法字符串和溢出，
-// 即使关闭排队也要求时长为正数。
-func loadAPIKeyQueueConfig() (APIKeyQueueConfig, error) {
-	maxWaiting, err := strictConfigInt(viper.Get("gateway.api_key_queue.max_waiting"))
-	if err != nil {
-		return APIKeyQueueConfig{}, fmt.Errorf("gateway.api_key_queue.max_waiting: %w", err)
-	}
-	if maxWaiting < 0 {
-		return APIKeyQueueConfig{}, fmt.Errorf("gateway.api_key_queue.max_waiting must be non-negative")
-	}
-	timeoutSeconds, err := strictConfigInt(viper.Get("gateway.api_key_queue.timeout_seconds"))
-	if err != nil {
-		return APIKeyQueueConfig{}, fmt.Errorf("gateway.api_key_queue.timeout_seconds: %w", err)
-	}
-	if timeoutSeconds <= 0 {
-		return APIKeyQueueConfig{}, fmt.Errorf("gateway.api_key_queue.timeout_seconds must be a positive integer")
-	}
-	if int64(timeoutSeconds) > maxAPIKeyQueueTimeoutSeconds {
-		return APIKeyQueueConfig{}, fmt.Errorf("gateway.api_key_queue.timeout_seconds exceeds the supported duration range")
-	}
-	return APIKeyQueueConfig{MaxWaiting: maxWaiting, TimeoutSeconds: timeoutSeconds}, nil
-}
-
-// strictConfigInt 只接受整数语义的值：环境变量是字符串，配置文件可能是 int 或 float。
-// 显式拒绝小数，避免 20.9 被静默截断为 20。
-func strictConfigInt(value any) (int, error) {
-	switch v := value.(type) {
-	case int:
-		return v, nil
-	case int32:
-		return int(v), nil
-	case int64:
-		if v < math.MinInt || v > math.MaxInt {
-			return 0, fmt.Errorf("value %d overflows int", v)
-		}
-		return int(v), nil
-	case uint:
-		if uint64(v) > uint64(math.MaxInt) {
-			return 0, fmt.Errorf("value %d overflows int", v)
-		}
-		return int(v), nil
-	case uint64:
-		if v > uint64(math.MaxInt) {
-			return 0, fmt.Errorf("value %d overflows int", v)
-		}
-		return int(v), nil
-	case float64:
-		if math.IsNaN(v) || math.IsInf(v, 0) || v != math.Trunc(v) {
-			return 0, fmt.Errorf("must be a whole number, got %v", v)
-		}
-		if v < float64(math.MinInt) || v > float64(math.MaxInt) {
-			return 0, fmt.Errorf("value %v overflows int", v)
-		}
-		return int(v), nil
-	case string:
-		trimmed := strings.TrimSpace(v)
-		if trimmed == "" {
-			return 0, fmt.Errorf("must be an integer")
-		}
-		n, err := strconv.ParseInt(trimmed, 10, strconv.IntSize)
-		if err != nil {
-			return 0, fmt.Errorf("must be an integer, got %q", v)
-		}
-		return int(n), nil
-	default:
-		return 0, fmt.Errorf("unsupported value type %T", value)
-	}
-}
-
 // GatewayConfig API网关相关配置
 type GatewayConfig struct {
 	// 等待上游响应头的超时时间（秒），0表示无超时
@@ -1139,9 +1038,6 @@ type GatewayConfig struct {
 	// OpenAICompactModel: /responses/compact 上游使用的模型。
 	// compact 端点支持模型滞后于普通 /responses 时，可用该配置降级规避上游错误。
 	OpenAICompactModel string `mapstructure:"openai_compact_model"`
-	// OpenAICodexTicket: ChatGPT OAuth 账号按 (账号, 模型) 捕获 292 长度
-	// x-codex-turn-state，并在住宅 IP 业务请求中注入该头。默认关闭。
-	OpenAICodexTicket OpenAICodexTicketConfig `mapstructure:"openai_codex_ticket"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
 	// Live: ChatGPT Frameless Live 会话配置。
@@ -1154,8 +1050,6 @@ type GatewayConfig struct {
 	OpenAIProxyStreamCircuit GatewayOpenAIProxyStreamCircuitConfig `mapstructure:"openai_proxy_stream_circuit"`
 	// ImageConcurrency: 图片生成独立并发限制配置（默认关闭）
 	ImageConcurrency ImageConcurrencyConfig `mapstructure:"image_concurrency"`
-	// APIKeyQueue: Key 级并发等待队列的全局策略（仅环境变量/配置文件，无数据库字段）
-	APIKeyQueue APIKeyQueueConfig `mapstructure:"api_key_queue"`
 
 	// HTTP 上游连接池配置（性能优化：支持高并发场景调优）
 	// MaxIdleConns: 所有主机的最大空闲连接总数
@@ -1358,32 +1252,8 @@ func (c *UserMessageQueueConfig) GetEffectiveMode() string {
 	return ""
 }
 
-// OpenAICodexTicketConfig 控制 ChatGPT OAuth 的 x-codex-turn-state 门票。
-// 打票走 harvest_proxy_url（SOCKS），业务出站仍用账号住宅 proxy_id，只替换该请求头。
-// 门票默认有效 3600 秒，临近过期前 refresh_before_seconds 重新打票。
-type OpenAICodexTicketConfig struct {
-	Enabled                      bool     `mapstructure:"enabled"`
-	TargetLength                 int      `mapstructure:"target_length"`
-	TTLSeconds                   int      `mapstructure:"ttl_seconds"`
-	RefreshBeforeSeconds         int      `mapstructure:"refresh_before_seconds"`
-	HarvestProxyURL              string   `mapstructure:"harvest_proxy_url"`
-	HarvestProbeIntervalSeconds  int      `mapstructure:"harvest_probe_interval_seconds"`
-	HarvestAttemptTimeoutSeconds int      `mapstructure:"harvest_attempt_timeout_seconds"`
-	FailClosed                   bool     `mapstructure:"fail_closed"`
-	Models                       []string `mapstructure:"models"`
-	HarvestRetryMinSeconds       int      `mapstructure:"harvest_retry_min_seconds"`
-	HarvestRetryMaxSeconds       int      `mapstructure:"harvest_retry_max_seconds"`
-	HarvestRefreshSeconds        int      `mapstructure:"harvest_refresh_seconds"`
-}
-
 // DefaultOpenAIWSClientFirstMessageTimeoutSeconds preserves the legacy ingress deadline.
 const DefaultOpenAIWSClientFirstMessageTimeoutSeconds = 30
-
-// DefaultOpenAIWSTurnSlotWaitTimeoutSeconds bounds how long an ingress turn may
-// wait for the connection's bound account to free a concurrency slot. It is kept
-// well below the HTTP sticky wait because a WebSocket turn holds a client that is
-// already waiting on a reply; a long wait reads as a hang rather than as queuing.
-const DefaultOpenAIWSTurnSlotWaitTimeoutSeconds = 30
 
 // GatewayOpenAIWSConfig OpenAI Responses WebSocket 配置。
 // 注意：默认全局开启；如需回滚可使用 force_http 或关闭 enabled。
@@ -1398,12 +1268,6 @@ type GatewayOpenAIWSConfig struct {
 	// IngressInterTurnIdleTimeoutSeconds bounds the time a client may remain idle
 	// between completed ingress turns. Zero disables this protection.
 	IngressInterTurnIdleTimeoutSeconds int `mapstructure:"ingress_inter_turn_idle_timeout_seconds"`
-	// TurnSlotWaitTimeoutSeconds bounds how long an ingress turn waits for the
-	// account concurrency slot it must re-acquire. A WebSocket connection is bound
-	// to one upstream account and cannot switch mid-session, so a busy account has
-	// to be waited out rather than routed around. Zero keeps the legacy behavior of
-	// a single non-blocking attempt followed by a 1013 close.
-	TurnSlotWaitTimeoutSeconds int `mapstructure:"turn_slot_wait_timeout_seconds"`
 	// MaxIngressConnectionsPerAPIKey bounds live client WebSocket ingress sessions
 	// per API key across all instances. Zero disables this protection.
 	MaxIngressConnectionsPerAPIKey int `mapstructure:"max_ingress_connections_per_api_key"`
@@ -1431,6 +1295,11 @@ type GatewayOpenAIWSConfig struct {
 	PrewarmGenerateEnabled bool `mapstructure:"prewarm_generate_enabled"`
 	// ClientReadLimitBytes: 入站客户端 WS 单帧读取上限。
 	ClientReadLimitBytes int64 `mapstructure:"client_read_limit_bytes"`
+	// HTTPBridgeEnabled: 首包过大时，保持客户端 WS，改用 HTTP Responses 上游。
+	HTTPBridgeEnabled bool `mapstructure:"http_bridge_enabled"`
+	// HTTPBridgeThresholdBytes: 触发 HTTP bridge 的入站 WS payload 阈值。
+	HTTPBridgeThresholdBytes int64 `mapstructure:"http_bridge_threshold_bytes"`
+
 	// Feature 开关：v2 优先于 v1
 	ResponsesWebsockets   bool `mapstructure:"responses_websockets"`
 	ResponsesWebsocketsV2 bool `mapstructure:"responses_websockets_v2"`
@@ -1617,31 +1486,6 @@ type TLSProfileConfig struct {
 
 // GatewaySchedulingConfig accounts scheduling configuration.
 type GatewaySchedulingConfig struct {
-	// StickySessionTTLSeconds: session_hash -> account_id 粘连 TTL（滑动窗口，
-	// 每次成功选号或粘性命中都会续期）。默认 3600 与历史硬编码值一致，升级不改
-	// 变任何实例的行为；调大后同一会话隔夜/跨周末回来仍会落回原账号，避免在多个
-	// 账号之间反复重建上游 prompt cache。
-	//
-	// 只作用于 GatewayService 的 Anthropic 账号路径。Gemini、Antigravity 以及
-	// OpenAI 各自保留原有的 TTL 常量/配置，不受此项影响。
-	//
-	// 注意这只延长「同一会话优先复用同一账号」的记忆时长，不会绕过任何调度闸门：
-	// 账号停调、限流、模型不支持、配额或利润门不通过时依旧照常换号。
-	StickySessionTTLSeconds int `mapstructure:"sticky_session_ttl_seconds"`
-
-	// SessionAccountHistoryTTLSeconds: 长周期「会话账号历史」亲和键的 TTL（秒）。
-	// 0（默认）为关闭，保持升级前行为。
-	//
-	// 短期粘性键过期后，自由选号会按优先级重新挑账号，同一个会话隔天回来极可能
-	// 落到另一个账号上并重建整份上游 prompt cache。开启后会额外写一个寿命长得多
-	// 的亲和键：短期键 miss 时先试历史账号，历史账号同样要过全部调度闸门，过不了
-	// 才进入自由选号。
-	//
-	// 与直接把 StickySessionTTLSeconds 拉到几天相比，两级结构保留了「短期内严格
-	// 粘住、长期只是优先建议」的区分，也不会让一次会话把某个账号锁定数天。
-	// 同样只作用于 Anthropic 账号。
-	SessionAccountHistoryTTLSeconds int `mapstructure:"session_account_history_ttl_seconds"`
-
 	// 粘性会话排队配置
 	StickySessionMaxWaiting  int           `mapstructure:"sticky_session_max_waiting"`
 	StickySessionWaitTimeout time.Duration `mapstructure:"sticky_session_wait_timeout"`
@@ -2041,14 +1885,6 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 	}
 
-	// 从严解析 Key 等待队列参数：环境变量/配置文件的小数、负数、非法字符串
-	// 或溢出必须在启动时失败，不能被 viper 静默截断。
-	apiKeyQueueConfig, err := loadAPIKeyQueueConfig()
-	if err != nil {
-		return nil, fmt.Errorf("validate config error: %w", err)
-	}
-	cfg.Gateway.APIKeyQueue = apiKeyQueueConfig
-
 	cfg.RunMode = NormalizeRunMode(cfg.RunMode)
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
 	if cfg.Server.Mode == "" {
@@ -2245,9 +2081,6 @@ func setDefaults() {
 	// CORS
 	viper.SetDefault("cors.allowed_origins", []string{})
 	viper.SetDefault("cors.allow_credentials", true)
-
-	// Tokensavy releases are built from the tokensavy branch in holeenlu/sub2api.
-	viper.SetDefault("update.check_enabled", true)
 
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
 	// declare its relying-party domain and trusted browser origins.
@@ -2599,27 +2432,12 @@ func setDefaults() {
 	viper.SetDefault("gateway.failover_on_400", false)
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
-	viper.SetDefault("gateway.api_key_queue.max_waiting", defaultAPIKeyQueueMaxWaiting)
-	viper.SetDefault("gateway.api_key_queue.timeout_seconds", defaultAPIKeyQueueTimeoutSeconds)
 	viper.SetDefault("gateway.force_codex_cli", false)
 	viper.SetDefault("gateway.disable_codex_identity_enforcement", false)
 	viper.SetDefault("gateway.disable_codex_originator_normalization", false)
 	viper.SetDefault("gateway.codex_image_generation_bridge_enabled", false)
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.5")
-	// Ticket harvesting is opt-in; explicit settings or YAML/env can enable it.
-	viper.SetDefault("gateway.openai_codex_ticket.enabled", false)
-	viper.SetDefault("gateway.openai_codex_ticket.target_length", 292)
-	viper.SetDefault("gateway.openai_codex_ticket.ttl_seconds", 3600)
-	viper.SetDefault("gateway.openai_codex_ticket.refresh_before_seconds", 600)
-	viper.SetDefault("gateway.openai_codex_ticket.harvest_proxy_url", "")
-	viper.SetDefault("gateway.openai_codex_ticket.harvest_probe_interval_seconds", 6)
-	viper.SetDefault("gateway.openai_codex_ticket.harvest_attempt_timeout_seconds", 90)
-	viper.SetDefault("gateway.openai_codex_ticket.fail_closed", false)
-	viper.SetDefault("gateway.openai_codex_ticket.models", []string{"gpt-6-astra", "gpt-5.6-sol"})
-	viper.SetDefault("gateway.openai_codex_ticket.harvest_retry_min_seconds", 10)
-	viper.SetDefault("gateway.openai_codex_ticket.harvest_retry_max_seconds", 30)
-	viper.SetDefault("gateway.openai_codex_ticket.harvest_refresh_seconds", 1800)
 	viper.SetDefault("gateway.live.max_session_duration_seconds", 3600)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）
 	viper.SetDefault("gateway.openai_ws.enabled", true)
@@ -2627,7 +2445,6 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.ingress_mode_default", "ctx_pool")
 	viper.SetDefault("gateway.openai_ws.client_first_message_timeout_seconds", DefaultOpenAIWSClientFirstMessageTimeoutSeconds)
 	viper.SetDefault("gateway.openai_ws.ingress_inter_turn_idle_timeout_seconds", 300)
-	viper.SetDefault("gateway.openai_ws.turn_slot_wait_timeout_seconds", DefaultOpenAIWSTurnSlotWaitTimeoutSeconds)
 	viper.SetDefault("gateway.openai_ws.max_ingress_connections_per_api_key", 64)
 	viper.SetDefault("gateway.openai_ws.oauth_enabled", true)
 	viper.SetDefault("gateway.openai_ws.apikey_enabled", true)
@@ -2638,6 +2455,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.store_disabled_force_new_conn", true)
 	viper.SetDefault("gateway.openai_ws.prewarm_generate_enabled", false)
 	viper.SetDefault("gateway.openai_ws.client_read_limit_bytes", 64*1024*1024)
+	viper.SetDefault("gateway.openai_ws.http_bridge_enabled", true)
+	viper.SetDefault("gateway.openai_ws.http_bridge_threshold_bytes", 15*1024*1024)
 	viper.SetDefault("gateway.openai_ws.responses_websockets", false)
 	viper.SetDefault("gateway.openai_ws.responses_websockets_v2", true)
 	viper.SetDefault("gateway.openai_ws.max_conns_per_account", 128)
@@ -2728,8 +2547,6 @@ func setDefaults() {
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_nonstream_keepalive_interval", 0)
 	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
-	viper.SetDefault("gateway.scheduling.sticky_session_ttl_seconds", 3600)
-	viper.SetDefault("gateway.scheduling.session_account_history_ttl_seconds", 0)
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)
 	viper.SetDefault("gateway.scheduling.fallback_wait_timeout", 30*time.Second)
@@ -2830,6 +2647,7 @@ func setEnvReachableDefaults() {
 	viper.SetDefault("gateway.forced_codex_instructions_template_file", "")
 	viper.SetDefault("gateway.session_idle_timeout_minutes", 0)
 	viper.SetDefault("gateway.user_message_queue.mode", "")
+	viper.SetDefault("update.check_enabled", true)
 	viper.SetDefault("update.proxy_url", "")
 
 	// sticky_escape_enabled is the one exception to the zero-value rule: its
@@ -3654,9 +3472,6 @@ func (c *Config) Validate() error {
 	if c.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds < 0 {
 		return fmt.Errorf("gateway.openai_ws.ingress_inter_turn_idle_timeout_seconds must be non-negative")
 	}
-	if c.Gateway.OpenAIWS.TurnSlotWaitTimeoutSeconds < 0 {
-		return fmt.Errorf("gateway.openai_ws.turn_slot_wait_timeout_seconds must be non-negative")
-	}
 	if c.Gateway.OpenAIWS.MaxIngressConnectionsPerAPIKey < 0 {
 		return fmt.Errorf("gateway.openai_ws.max_ingress_connections_per_api_key must be non-negative")
 	}
@@ -3704,6 +3519,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIWS.ClientReadLimitBytes <= 0 {
 		return fmt.Errorf("gateway.openai_ws.client_read_limit_bytes must be positive")
+	}
+	if c.Gateway.OpenAIWS.HTTPBridgeThresholdBytes < 0 {
+		return fmt.Errorf("gateway.openai_ws.http_bridge_threshold_bytes must be non-negative")
+	}
+	if c.Gateway.OpenAIWS.HTTPBridgeEnabled && c.Gateway.OpenAIWS.HTTPBridgeThresholdBytes == 0 {
+		return fmt.Errorf("gateway.openai_ws.http_bridge_threshold_bytes must be positive when http_bridge_enabled is true")
 	}
 	if c.Gateway.OpenAIWS.FallbackCooldownSeconds < 0 {
 		return fmt.Errorf("gateway.openai_ws.fallback_cooldown_seconds must be non-negative")
@@ -3868,18 +3689,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ModelsListCacheTTLSeconds < 10 || c.Gateway.ModelsListCacheTTLSeconds > 30 {
 		return fmt.Errorf("gateway.models_list_cache_ttl_seconds must be between 10-30")
-	}
-	if c.Gateway.Scheduling.StickySessionTTLSeconds <= 0 {
-		return fmt.Errorf("gateway.scheduling.sticky_session_ttl_seconds must be positive")
-	}
-	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds < 0 {
-		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must not be negative")
-	}
-	// 历史键比短期粘性键还短就毫无意义：短期键还在时根本不会去读它，短期键一过期
-	// 它也已经跟着没了。这种配置一定是写错了，直接拒绝而不是静默失效。
-	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds > 0 &&
-		c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds < c.Gateway.Scheduling.StickySessionTTLSeconds {
-		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must be >= gateway.scheduling.sticky_session_ttl_seconds")
 	}
 	if c.Gateway.Scheduling.StickySessionMaxWaiting <= 0 {
 		return fmt.Errorf("gateway.scheduling.sticky_session_max_waiting must be positive")

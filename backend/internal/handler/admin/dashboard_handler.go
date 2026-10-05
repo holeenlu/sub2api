@@ -668,14 +668,13 @@ func (h *DashboardHandler) GetBatchAPIKeysUsage(c *gin.Context) {
 	response.Success(c, payload)
 }
 
-// parseBreakdownRequest 解析排行类端点共用的筛选参数与 limit。
-//
-// 用户排行与后续按其他维度聚合的排行在前端共用同一套筛选栏，筛选语义必须完全一致，
-// 所以解析逻辑收口在这里。ok=false 表示已经写过 400 响应，调用方直接 return。
-// Query params: group_id, model, model_source, endpoint, endpoint_type, user_id,
-// api_key_id, account_id, request_type, stream, native_compaction_v2, billing_type,
-// sort_by, limit
-func parseBreakdownRequest(c *gin.Context) (dim usagestats.UserBreakdownDimension, limit int, ok bool) {
+// GetUserBreakdown handles getting per-user usage breakdown within a dimension.
+// GET /api/v1/admin/dashboard/user-breakdown
+// Query params: start_date, end_date, group_id, model, endpoint, endpoint_type, limit
+func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
+	startTime, endTime := parseTimeRange(c)
+
+	dim := usagestats.UserBreakdownDimension{}
 	if v := c.Query("group_id"); v != "" {
 		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
 			dim.GroupID = id
@@ -685,7 +684,7 @@ func parseBreakdownRequest(c *gin.Context) (dim usagestats.UserBreakdownDimensio
 	rawModelSource := strings.TrimSpace(c.DefaultQuery("model_source", usagestats.ModelSourceRequested))
 	if !usagestats.IsValidModelSource(rawModelSource) {
 		response.BadRequest(c, "Invalid model_source, use requested/upstream/mapping")
-		return dim, 0, false
+		return
 	}
 	dim.ModelType = rawModelSource
 	dim.Endpoint = c.Query("endpoint")
@@ -711,7 +710,7 @@ func parseBreakdownRequest(c *gin.Context) (dim usagestats.UserBreakdownDimensio
 		parsed, err := service.ParseUsageRequestType(v)
 		if err != nil {
 			response.BadRequest(c, err.Error())
-			return dim, 0, false
+			return
 		}
 		rtVal := int16(parsed)
 		dim.RequestType = &rtVal
@@ -725,7 +724,7 @@ func parseBreakdownRequest(c *gin.Context) (dim usagestats.UserBreakdownDimensio
 		value, err := strconv.ParseBool(v)
 		if err != nil {
 			response.BadRequest(c, "Invalid native_compaction_v2 value, use true or false")
-			return dim, 0, false
+			return
 		}
 		dim.NativeCompactionV2 = &value
 	}
@@ -739,24 +738,11 @@ func parseBreakdownRequest(c *gin.Context) (dim usagestats.UserBreakdownDimensio
 	// sort_by 由 repo 层 allowlist 校验;非法值静默回退默认排序(actual_cost)。
 	dim.SortBy = strings.TrimSpace(c.Query("sort_by"))
 
-	limit = 50
+	limit := 50
 	if v := c.Query("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
 			limit = n
 		}
-	}
-	return dim, limit, true
-}
-
-// GetUserBreakdown handles getting per-user usage breakdown within a dimension.
-// GET /api/v1/admin/dashboard/user-breakdown
-// Query params: start_date, end_date plus everything parseBreakdownRequest accepts.
-func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
-	startTime, endTime := parseTimeRange(c)
-
-	dim, limit, ok := parseBreakdownRequest(c)
-	if !ok {
-		return
 	}
 
 	stats, err := h.dashboardService.GetUserBreakdownStats(
@@ -769,32 +755,6 @@ func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
 
 	response.Success(c, gin.H{
 		"users":      stats,
-		"start_date": startTime.Format("2006-01-02"),
-		"end_date":   endTime.Add(-24 * time.Hour).Format("2006-01-02"),
-	})
-}
-
-// GetAPIKeyBreakdown handles getting per-API-key usage breakdown within a dimension.
-// GET /api/v1/admin/dashboard/api-key-breakdown
-// 与 user-breakdown 共用全部筛选参数，只是聚合维度换成 api_key_id。
-func (h *DashboardHandler) GetAPIKeyBreakdown(c *gin.Context) {
-	startTime, endTime := parseTimeRange(c)
-
-	dim, limit, ok := parseBreakdownRequest(c)
-	if !ok {
-		return
-	}
-
-	stats, err := h.dashboardService.GetAPIKeyBreakdownStats(
-		c.Request.Context(), startTime, endTime, dim, limit,
-	)
-	if err != nil {
-		response.Error(c, 500, "Failed to get api key breakdown stats")
-		return
-	}
-
-	response.Success(c, gin.H{
-		"api_keys":   stats,
 		"start_date": startTime.Format("2006-01-02"),
 		"end_date":   endTime.Add(-24 * time.Hour).Format("2006-01-02"),
 	})

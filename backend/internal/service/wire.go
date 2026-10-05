@@ -29,10 +29,10 @@ func ProvideGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthCli
 
 // BuildInfo contains build information
 type BuildInfo struct {
+	UpstreamVersion string
 	BuildCommit     string
 	Version         string
 	BuildType       string
-	UpstreamVersion string // upstream Sub2API version this build is based on, e.g. "v0.2.1"
 }
 
 // ProvidePricingService creates and initializes PricingService
@@ -45,16 +45,9 @@ func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient)
 	return svc, nil
 }
 
-// ProvideUpdateService creates UpdateService with BuildInfo. Online update
-// checks follow update.check_enabled (default false for this brand).
+// ProvideUpdateService creates UpdateService with BuildInfo
 func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo, cfg *config.Config) *UpdateService {
-	svc := NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType).
-		WithUpstreamVersion(buildInfo.UpstreamVersion).
-		WithBuildCommit(buildInfo.BuildCommit)
-	if cfg != nil {
-		svc = svc.WithCheckEnabled(cfg.Update.CheckEnabled)
-	}
-	return svc
+	return NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType).WithUpstreamVersion(buildInfo.UpstreamVersion).WithBuildCommit(buildInfo.BuildCommit).WithCheckEnabled(cfg == nil || cfg.Update.CheckEnabled)
 }
 
 // ProvideEmailQueueService creates EmailQueueService with default worker count
@@ -478,10 +471,6 @@ func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountReposi
 		logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
 	}
 	if cfg != nil {
-		svc.SetAPIKeyQueuePolicy(APIKeyQueuePolicy{
-			MaxWaiting: cfg.Gateway.APIKeyQueue.MaxWaiting,
-			Timeout:    cfg.Gateway.APIKeyQueue.Timeout(),
-		})
 		svc.SetAccountLoadBatchCacheTTL(time.Duration(cfg.Gateway.Scheduling.LoadBatchCacheTTLMS) * time.Millisecond)
 		svc.StartSlotCleanupWorker(accountRepo, cfg.Gateway.Scheduling.SlotCleanupInterval)
 	}
@@ -656,15 +645,20 @@ func ProvideIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Co
 // ProvideScheduledTestService creates ScheduledTestService.
 func ProvideScheduledTestService(
 	planRepo ScheduledTestPlanRepository, resultRepo ScheduledTestResultRepository,
-	accounts AccountRepository, keys *APIKeyService, users UserRepository, gateway *OpenAIGatewayService,
+	accounts AccountRepository, keys *APIKeyService, users UserRepository,
+	gateway *OpenAIGatewayService,
 ) *ScheduledTestService {
 	svc := NewScheduledTestService(planRepo, resultRepo)
 	svc.accounts, svc.keys, svc.users, svc.gateway = accounts, keys, users, gateway
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if gateway != nil && gateway.settingService != nil {
+		_ = gateway.settingService.LoadModelTraceBank(ctx)
+	}
 	return svc
 }
 
-// ProvideScheduledTestRunnerService creates the shared runner. Routing starts it
-// after both connectivity and billed diagnostic endpoints are ready.
+// ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
 func ProvideScheduledTestRunnerService(
 	planRepo ScheduledTestPlanRepository,
 	scheduledSvc *ScheduledTestService,
@@ -864,7 +858,6 @@ func ProvideAPIKeyService(
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
-	ProvideModelCatalogService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
@@ -886,7 +879,7 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementService,
 	NewAdminService,
 	NewGatewayService,
-	ProvideOpenAIGatewayService,
+	NewOpenAIGatewayService,
 	ProvideImageStorageSettingService,
 	ProvideImageTaskService,
 	ProvideBatchImageModelPricingResolver,
@@ -981,8 +974,7 @@ var ProviderSet = wire.NewSet(
 	NewChannelService,
 	wire.Bind(new(ChannelCacheInvalidator), new(*ChannelService)),
 	NewModelPricingResolver,
-	ProvideModelPlazaService,
-	ProvideGroupModelCatalogService,
+	NewModelPlazaService,
 	NewContentModerationService,
 	NewAffiliateService,
 	ProvidePaymentConfigService,
@@ -1087,30 +1079,6 @@ func ProvideChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.
 	}
 	aggregator.Start()
 	return aggregator
-}
-
-// ProvideModelPlazaService shares the group catalog with API model discovery.
-func ProvideModelPlazaService(channels ChannelRepository, groups GroupRepository, prices *PricingService, billing *BillingService, resolver *ModelPricingResolver, catalog *GroupModelCatalogService) *ModelPlazaService {
-	s := NewModelPlazaService(channels, groups, prices, billing, resolver)
-	s.catalog = catalog
-	return s
-}
-
-func ProvideModelCatalogService(repo ModelCatalogRepository, accounts AccountRepository, test *AccountTestService, settings *SettingService, prices *PricingService, resolver *ModelPricingResolver) *ModelCatalogService {
-	catalog := NewModelCatalogService(repo, accounts, test, settings, prices)
-	catalog.pricingResolver = resolver
-
-	catalog.Start()
-	return catalog
-}
-func ProvideGroupModelCatalogService(accounts AccountRepository, groups GroupRepository, channels ChannelRepository, routes CompositeModelRouteRepository, gateway *OpenAIGatewayService, registry *ModelCatalogService, generic *GatewayService, channelService *ChannelService) *GroupModelCatalogService {
-	catalog := NewGroupModelCatalogService(accounts, channels, routes, gateway)
-	catalog.groups = groups
-	catalog.registry = registry
-	registry.groupCatalog = catalog
-	generic.groupCatalog = catalog
-	channelService.modelCatalog = catalog
-	return catalog
 }
 
 // ProvideClaudeResetCreditService wires the Claude reset query and, with the

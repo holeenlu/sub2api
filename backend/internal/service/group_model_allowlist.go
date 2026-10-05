@@ -48,20 +48,35 @@ func supplementUnmappedOpenAIModels(accounts []Account, models []string) []strin
 
 // normalizeGroupModelAllowlist 归一化管理端提交的分组模型白名单：
 // 条目 TrimSpace、按小写去重保序；`*` 可出现在任意位置；
-// An enabled whitelist must contain at least one model, as in upstream.
+// enabled=true 且列表为空视为配置错误，返回 400 而不是运行时静默放行/拒绝。
 func normalizeGroupModelAllowlist(cfg GroupModelAllowlist) (GroupModelAllowlist, error) {
 	out := GroupModelAllowlist{Enabled: cfg.Enabled}
-	seen := map[string]bool{}
+	if len(cfg.Models) == 0 {
+		if out.Enabled {
+			return out, infraerrors.New(http.StatusBadRequest, "INVALID_MODEL_ALLOWLIST", "model allowlist cannot be enabled with an empty model list")
+		}
+		return out, nil
+	}
+
+	seen := make(map[string]struct{}, len(cfg.Models))
+	out.Models = make([]string, 0, len(cfg.Models))
 	for _, model := range cfg.Models {
 		model = strings.TrimSpace(model)
-		key := strings.ToLower(model)
-		if model != "" && !seen[key] {
-			out.Models = append(out.Models, model)
-			seen[key] = true
+		if model == "" {
+			continue
 		}
+		key := strings.ToLower(model)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out.Models = append(out.Models, model)
 	}
-	if out.Enabled && len(out.Models) == 0 {
-		return out, infraerrors.New(http.StatusBadRequest, "INVALID_MODEL_ALLOWLIST", "model allowlist cannot be enabled with an empty model list")
+	if len(out.Models) == 0 {
+		if out.Enabled {
+			return out, infraerrors.New(http.StatusBadRequest, "INVALID_MODEL_ALLOWLIST", "model allowlist cannot be enabled with an empty model list")
+		}
+		out.Models = nil
 	}
 	return out, nil
 }
@@ -156,7 +171,7 @@ func (a GroupModelAllowlist) FilterForListing(source []string) []string {
 		return source
 	}
 	if len(a.Models) == 0 {
-		// 分组开启但未勾选模型时，
+		// 开启但为空的配置在管理端已被拒绝；对遗留脏数据保持“看到什么 = 能调什么”，
 		// 列表与准入同时返回空。
 		return nil
 	}

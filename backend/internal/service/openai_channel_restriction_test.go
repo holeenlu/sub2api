@@ -86,13 +86,6 @@ func TestOpenAISelectAccountForModelWithExclusions_UpstreamRestrictionSkipsDisal
 	require.Equal(t, int64(2), account.ID)
 }
 
-// copyAccountForSubtest gives a parallel subtest its own copy of a shared
-// Account fixture: GetModelMapping caches its result on the Account itself.
-func copyAccountForSubtest(account *Account) *Account {
-	cloned := *account
-	return &cloned
-}
-
 func TestIsUpstreamModelRestrictedByChannel_CompactMappingMatchesForwardPath(t *testing.T) {
 	t.Parallel()
 
@@ -124,7 +117,6 @@ func TestIsUpstreamModelRestrictedByChannel_CompactMappingMatchesForwardPath(t *
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			account := copyAccountForSubtest(account)
 
 			channelSvc := newTestChannelService(makeStandardRepo(Channel{
 				ID:                 1,
@@ -194,7 +186,6 @@ func TestIsUpstreamModelRestrictedByChannel_PassthroughMatchesForwardPath(t *tes
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			account := copyAccountForSubtest(account)
 
 			channelSvc := newTestChannelService(makeStandardRepo(Channel{
 				ID:                 1,
@@ -252,7 +243,6 @@ func TestIsUpstreamModelRestrictedByChannel_PassthroughFlagWithRawChatFallbackMa
 		}
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			account := copyAccountForSubtest(account)
 
 			channelSvc := newTestChannelService(makeStandardRepo(Channel{
 				ID:                 1,

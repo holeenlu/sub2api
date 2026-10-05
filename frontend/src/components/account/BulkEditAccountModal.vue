@@ -265,7 +265,7 @@
             </p>
           </div>
 
-          <div v-else>
+          <template v-else>
             <!-- Mode Toggle -->
             <div class="mb-4 flex gap-2">
               <button
@@ -301,7 +301,6 @@
                     ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
                 ]"
-                :disabled="isOpenAIModelRestrictionDisabled"
                 @click="modelRestrictionMode = 'mapping'"
               >
                 <svg
@@ -343,12 +342,9 @@
               </div>
 
               <ModelWhitelistSelector
-                v-if="show"
                 v-model="allowedModels"
                 :model-mappings="modelMappings"
                 :platforms="targetSelectedPlatforms"
-                :account-ids="targetMode === 'selected' ? accountIds : undefined"
-                :sync-filters="liveModelSyncFilters"
               />
 
               <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -360,7 +356,7 @@
             </div>
 
             <!-- Mapping Mode -->
-            <div v-else-if="!isOpenAIModelRestrictionDisabled">
+            <div v-else>
               <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
                 <p class="text-xs text-purple-700 dark:text-purple-400">
                   <svg
@@ -463,7 +459,7 @@
                 </button>
               </div>
             </div>
-          </div>
+          </template>
         </div>
       </div>
 
@@ -824,7 +820,6 @@
             <span>{{ t('admin.accounts.bulkEdit.rateSyncWarning') }}</span>
           </p>
         </div>
-
       </div>
 
       <!-- Status -->
@@ -1132,12 +1127,6 @@
         </div>
       </div>
 
-      <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="input-label" for="bulk-apikey-identity-enabled"><input id="bulk-apikey-identity-enabled" v-model="enableAPIKeyCodexIdentity" type="checkbox" class="mr-2" />{{ t('admin.accounts.openai.apiKeyCodexIdentity') }}</label>
-        <p class="input-hint">{{ t('admin.accounts.openai.apiKeyCodexIdentityHint') }}</p>
-        <Toggle v-model="apiKeyCodexIdentity" :disabled="!enableAPIKeyCodexIdentity" data-testid="bulk-apikey-identity" :aria-label="t('admin.accounts.openai.apiKeyCodexIdentity')" />
-      </div>
-
       <!-- OpenAI API Key WS mode -->
       <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1279,8 +1268,8 @@
         </div>
       </div>
 
-      <!-- RPM Limit (Anthropic OAuth/SetupToken or OpenAI OAuth) -->
-      <div v-if="allAnthropicOAuthOrSetupToken || allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <!-- RPM Limit (仅全部为 Anthropic OAuth/SetupToken 时显示) -->
+      <div v-if="allAnthropicOAuthOrSetupToken" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-rpm-limit-label"
@@ -1304,18 +1293,88 @@
           role="group"
           aria-labelledby="bulk-edit-rpm-limit-label"
         >
-          <AccountRpmSettings
-            v-model:enabled="rpmLimitEnabled"
-            v-model:base-rpm="bulkBaseRpm"
-            v-model:strategy="bulkRpmStrategy"
-            v-model:sticky-buffer="bulkRpmStickyBuffer"
-            :strict="allOpenAIOAuthOnly"
-            :show-title="false"
-          />
-        </div>
+          <div class="mb-3 flex items-center justify-between">
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.quotaControl.rpmLimit.hint') }}</span>
+            <button
+              type="button"
+              @click="rpmLimitEnabled = !rpmLimitEnabled"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                rpmLimitEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+              ]"
+            >
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  rpmLimitEnabled ? 'translate-x-5' : 'translate-x-0'
+                ]"
+              />
+            </button>
+          </div>
+
+          <div v-if="rpmLimitEnabled" class="space-y-3">
+            <div>
+              <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpm') }}</label>
+              <input
+                v-model.number="bulkBaseRpm"
+                type="number"
+                min="1"
+                max="1000"
+                step="1"
+                class="input"
+                :placeholder="t('admin.accounts.quotaControl.rpmLimit.baseRpmPlaceholder')"
+              />
+              <p class="input-hint">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpmHint') }}</p>
+            </div>
+
+            <div>
+              <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.rpmLimit.strategy') }}</label>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  @click="bulkRpmStrategy = 'tiered'"
+                  :class="[
+                    'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-all',
+                    bulkRpmStrategy === 'tiered'
+                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+                  {{ t('admin.accounts.quotaControl.rpmLimit.strategyTiered') }}
+                </button>
+                <button
+                  type="button"
+                  @click="bulkRpmStrategy = 'sticky_exempt'"
+                  :class="[
+                    'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-all',
+                    bulkRpmStrategy === 'sticky_exempt'
+                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+                  {{ t('admin.accounts.quotaControl.rpmLimit.strategyStickyExempt') }}
+                </button>
+              </div>
+            </div>
+
+            <div v-if="bulkRpmStrategy === 'tiered'">
+              <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBuffer') }}</label>
+              <input
+                v-model.number="bulkRpmStickyBuffer"
+                type="number"
+                min="1"
+                step="1"
+                class="input"
+                :placeholder="t('admin.accounts.quotaControl.rpmLimit.stickyBufferPlaceholder')"
+              />
+              <p class="input-hint">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBufferHint') }}</p>
+            </div>
+
+            </div>
+          </div>
 
         <!-- 用户消息限速模式（独立于 RPM 开关，始终可见） -->
-        <div v-if="allAnthropicOAuthOrSetupToken" class="mt-4">
+        <div class="mt-4">
           <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.userMsgQueue') }}</label>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 mb-2">
             {{ t('admin.accounts.quotaControl.rpmLimit.userMsgQueueHint') }}
@@ -1415,13 +1474,10 @@
 </template>
 
 <script setup lang="ts">
-
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import {  } from '@/constants/account'
 import type {
   Proxy as ProxyConfig,
   AdminGroup,
@@ -1434,12 +1490,9 @@ import type {
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
-import Toggle from '@/components/common/Toggle.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
-import AccountRpmSettings from '@/components/account/AccountRpmSettings.vue'
-import { applyAccountRPMSettings } from '@/components/account/accountRpm'
 import Icon from '@/components/icons/Icon.vue'
 import {
   buildModelMappingObject as buildModelMappingPayload,
@@ -1464,7 +1517,6 @@ import {
   resolveOpenAIWSModeHintKey
 } from '@/utils/openaiWsMode'
 import type { OpenAIWSMode } from '@/utils/openaiWsMode'
-import type { SyncUpstreamModelsBulkFilters } from '@/api/admin/accounts'
 interface Props {
   show: boolean
   accountIds: number[]
@@ -1495,22 +1547,6 @@ const targetMode = computed(() => props.target?.mode ?? 'selected')
 const targetPreviewCount = computed(() => props.target?.previewCount ?? props.accountIds.length)
 const targetSelectedPlatforms = computed(() => props.target?.selectedPlatforms ?? props.selectedPlatforms)
 const targetSelectedTypes = computed(() => props.target?.selectedTypes ?? props.selectedTypes)
-// 筛选模式下只把后端 BulkUpdateAccountFilters 认识的六个字段传下去；筛选快照里
-// 还带着 sort_by / sort_order 这类与选中集合无关的展示状态。
-const liveModelSyncFilters = computed<SyncUpstreamModelsBulkFilters | undefined>(() => {
-  if (targetMode.value !== 'filtered') return undefined
-  const filters = props.target?.filters
-  if (!filters) return undefined
-  const asString = (value: unknown) => (typeof value === 'string' && value !== '' ? value : undefined)
-  return {
-    platform: asString(filters.platform),
-    type: asString(filters.type),
-    status: asString(filters.status),
-    group: asString(filters.group),
-    search: asString(filters.search),
-    privacy_mode: asString(filters.privacy_mode)
-  }
-})
 // Grok 快捷端点仅在所选账号全部为 grok 平台时展示（其他平台不显示）
 const allTargetsGrok = computed(
   () =>
@@ -1578,7 +1614,7 @@ const allHeaderOverrideCapable = computed(() => {
   )
 })
 
-// 是否全部为 Anthropic OAuth/SetupToken（显示完整配额控制）
+// 是否全部为 Anthropic OAuth/SetupToken（RPM 配置仅在此条件下显示）
 const allAnthropicOAuthOrSetupToken = computed(() => {
   return (
     targetSelectedPlatforms.value.length === 1 &&
@@ -1612,7 +1648,6 @@ interface ModelMapping {
 // State - field enable flags
 const enableBaseUrl = ref(false)
 const enableModelRestriction = ref(false)
-
 const enableCustomErrorCodes = ref(false)
 const enableInterceptWarmup = ref(false)
 const enableHeaderOverride = ref(false)
@@ -1620,19 +1655,15 @@ const enableProxy = ref(false)
 const enableConcurrency = ref(false)
 const enableLoadFactor = ref(false)
 const enablePriority = ref(false)
-
 const enableRateMultiplier = ref(false)
 const enableStatus = ref(false)
 const enableGroups = ref(false)
-
 const enableOpenAIPassthrough = ref(false)
 const enableOpenAIFlattenNamespaces = ref(false)
 const enableOpenAILongContextBilling = ref(false)
 const enableOpenAIEndpointCapabilities = ref(false)
 const enableOpenAIResponsesMode = ref(false)
 const enableOpenAIWSMode = ref(false)
-const enableAPIKeyCodexIdentity = ref(false)
-const apiKeyCodexIdentity = ref(false)
 const enableOpenAIAPIKeyWSMode = ref(false)
 const enableUpstreamBillingAutoProbe = ref(false)
 const enableCodexCLIOnly = ref(false)
@@ -1662,7 +1693,6 @@ const priority = ref(1)
 const rateMultiplier = ref(1)
 const status = ref<'active' | 'inactive'>('active')
 const groupIds = ref<number[]>([])
-
 const openaiPassthroughEnabled = ref(false)
 // Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
@@ -1986,8 +2016,22 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   }
 
   if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value) {
-    credentials.model_mapping = buildModelMappingObject() ?? {}
-    credentialsChanged = true
+    // 统一使用 model_mapping 字段
+    if (modelRestrictionMode.value === 'whitelist') {
+      // 白名单模式：将模型转换为 model_mapping 格式（key=value）
+      // 空白名单表示“支持所有模型”，需显式发送空对象以覆盖已有限制。
+      const mapping: Record<string, string> = {}
+      for (const m of allowedModels.value) {
+        mapping[m] = m
+      }
+      credentials.model_mapping = mapping
+      credentialsChanged = true
+    } else {
+      // 映射模式下空配置同样表示“支持所有模型”。
+      const modelMapping = buildModelMappingObject()
+      credentials.model_mapping = modelMapping ?? {}
+      credentialsChanged = true
+    }
   }
 
   if (enableCustomErrorCodes.value) {
@@ -2016,10 +2060,6 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(
       openaiOAuthResponsesWebSocketV2Mode.value
     )
-  }
-
-  if (enableAPIKeyCodexIdentity.value && allOpenAIAPIKey.value) {
-    ensureExtra().openai_apikey_codex_identity = apiKeyCodexIdentity.value
   }
 
   if (enableOpenAIAPIKeyWSMode.value) {
@@ -2082,15 +2122,22 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   }
 
   // RPM limit settings (写入 extra 字段)
-  if (enableRpmLimit.value && (allAnthropicOAuthOrSetupToken.value || allOpenAIOAuthOnly.value)) {
+  if (enableRpmLimit.value) {
     const extra = ensureExtra()
-    applyAccountRPMSettings(extra, {
-      enabled: rpmLimitEnabled.value && bulkBaseRpm.value != null && bulkBaseRpm.value > 0,
-      baseRpm: bulkBaseRpm.value,
-      strict: allOpenAIOAuthOnly.value,
-      strategy: bulkRpmStrategy.value,
-      stickyBuffer: bulkRpmStickyBuffer.value
-    }, 'merge')
+    if (rpmLimitEnabled.value && bulkBaseRpm.value != null && bulkBaseRpm.value > 0) {
+      extra.base_rpm = bulkBaseRpm.value
+      extra.rpm_strategy = bulkRpmStrategy.value
+      if (bulkRpmStickyBuffer.value != null && bulkRpmStickyBuffer.value > 0) {
+        extra.rpm_sticky_buffer = bulkRpmStickyBuffer.value
+      }
+    } else {
+      // 关闭 RPM 限制 - 设置 base_rpm 为 0，并用空值覆盖关联字段
+      // 后端使用 JSONB || merge 语义，不会删除已有 key，
+      // 所以必须显式发送空值来重置（后端读取时会 fallback 到默认值）
+      extra.base_rpm = 0
+      extra.rpm_strategy = ''
+      extra.rpm_sticky_buffer = 0
+    }
     updates.extra = extra
   }
 
@@ -2149,7 +2196,6 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
-
   if (targetMode.value === 'selected' && props.accountIds.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
@@ -2174,7 +2220,6 @@ const handleSubmit = async () => {
     enableStatus.value ||
     enableGroups.value ||
     enableOpenAIWSMode.value ||
-    (enableAPIKeyCodexIdentity.value && allOpenAIAPIKey.value) ||
     enableOpenAIAPIKeyWSMode.value ||
     enableUpstreamBillingAutoProbe.value ||
     enableCodexCLIOnly.value ||
@@ -2310,7 +2355,6 @@ watch(
       // Reset all enable flags
       enableBaseUrl.value = false
       enableModelRestriction.value = false
-
       enableCustomErrorCodes.value = false
       enableInterceptWarmup.value = false
       enableHeaderOverride.value = false
@@ -2318,19 +2362,15 @@ watch(
       enableConcurrency.value = false
       enableLoadFactor.value = false
       enablePriority.value = false
-
       enableRateMultiplier.value = false
       enableStatus.value = false
       enableGroups.value = false
-
       enableOpenAIPassthrough.value = false
       enableOpenAIFlattenNamespaces.value = false
       enableOpenAILongContextBilling.value = false
       enableOpenAIEndpointCapabilities.value = false
       enableOpenAIResponsesMode.value = false
       enableOpenAIWSMode.value = false
-      enableAPIKeyCodexIdentity.value = false
-      apiKeyCodexIdentity.value = false
       enableOpenAIAPIKeyWSMode.value = false
       enableUpstreamBillingAutoProbe.value = false
       enableCodexCLIOnly.value = false
@@ -2343,7 +2383,6 @@ watch(
 
       // Reset all values
       baseUrl.value = ''
-
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
       openAILongContextBillingEnabled.value = false

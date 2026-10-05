@@ -43,16 +43,6 @@ type OpenAIAuthURLResult struct {
 
 // GenerateAuthURL generates an OpenAI OAuth authorization URL
 func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, redirectURI, platform string) (*OpenAIAuthURLResult, error) {
-	var proxyURL string
-	if proxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
-		if err != nil {
-			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_NOT_FOUND", "proxy not found: %v", err)
-		}
-		if proxy != nil {
-			proxyURL = proxy.URL()
-		}
-	}
 	// Generate PKCE values
 	state, err := openai.GenerateState()
 	if err != nil {
@@ -72,6 +62,18 @@ func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_OAUTH_SESSION_FAILED", "failed to generate session ID: %v", err)
 	}
 
+	// Get proxy URL if specified
+	var proxyURL string
+	if proxyID != nil {
+		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
+		if err != nil {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_NOT_FOUND", "proxy not found: %v", err)
+		}
+		if proxy != nil {
+			proxyURL = proxy.URL()
+		}
+	}
+
 	// Use default redirect URI if not specified
 	if redirectURI == "" {
 		redirectURI = openai.DefaultRedirectURI
@@ -85,7 +87,7 @@ func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 		CodeVerifier: codeVerifier,
 		ClientID:     clientID,
 		RedirectURI:  redirectURI,
-		ProxyURL:     strings.TrimSpace(proxyURL),
+		ProxyURL:     proxyURL,
 		CreatedAt:    time.Now(),
 	}
 	s.sessionStore.Set(sessionID, session)

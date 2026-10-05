@@ -57,10 +57,6 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 	"codex_5h_",
 	"codex_7d_",
 	"codex_reset_credit_",
-	// 292 门票是纯运行态凭据：它不在 filterSchedulerExtra 的投影白名单里，
-	// 因此 bucket 重建事件永远搬不动门票状态，续期时开事务+发 outbox 是白干。
-	// 归为观测型后仍会同步单账号快照（见 UpdateExtra），不丢任何新鲜度。
-	"codex_turn_ticket:",
 	"passive_usage_",
 	"upstream_billing_probe",
 	"upstream_billing_rate_sync",
@@ -110,7 +106,7 @@ func stripCodexFingerprintSeedFromExtraUpdate(extra map[string]any) map[string]a
 	return stripped
 }
 
-// Reject removed settings at the shared persistence boundary. Migration 265/266
+// Reject removed settings at the shared persistence boundary. Migrations 265/266/268
 // cleans stored data; stale editors/imports must fail instead of silently changing
 // protocol, model access, or billing semantics. Do not repeat this policy in readers.
 func validateAccountWriteFields(credentials, extra map[string]any) error {
@@ -120,7 +116,11 @@ func validateAccountWriteFields(credentials, extra map[string]any) error {
 	for key := range extra {
 		if key == "openai_excel_bps" || strings.HasPrefix(key, "openai_excel_bps_") ||
 			key == "openai_bps" || strings.HasPrefix(key, "openai_bps_") ||
-			key == "cost_multiplier" || key == "cost_multiplier_auto_sync" {
+			key == "cost_multiplier" || key == "cost_multiplier_auto_sync" ||
+			strings.HasPrefix(key, "codex_turn_ticket:") || strings.HasPrefix(key, "codex_ticket_") ||
+			strings.HasPrefix(key, "openai_codex_ticket_") || key == "codex_allow_without_ticket" ||
+			key == "codex_harvest_proxy_url" || key == "openai_apikey_codex_identity" ||
+			key == "openai_oauth_ws_sse_acceleration" || key == "model_catalog_snapshot" || key == "model_catalog_policy" {
 			return service.ErrUnsupportedAccountField.WithMetadata(map[string]string{"field": "extra." + key})
 		}
 	}
@@ -159,10 +159,10 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
-
 	if err := validateAccountWriteFields(account.Credentials, account.Extra); err != nil {
 		return err
 	}
+
 	builder := client.Account.Create().
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
@@ -697,8 +697,7 @@ func lockAndMergeAccountProbeExtra(
 				false
 			),
 			extra -> 'opencode_go_usage_auto_refresh',
-			extra -> 'opencode_go_usage_snapshot',
-			COALESCE(extra, '{}'::jsonb)
+			extra -> 'opencode_go_usage_snapshot'
 		FROM accounts
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR NO KEY UPDATE
@@ -727,7 +726,6 @@ func lockAndMergeAccountProbeExtra(
 		currentOllamaSnapshot          []byte
 		currentOpenCodeAutoRefresh     []byte
 		currentOpenCodeSnapshot        []byte
-		currentExtraJSON               []byte
 	)
 	if err := rows.Scan(
 		&identityUnchanged,
@@ -742,7 +740,6 @@ func lockAndMergeAccountProbeExtra(
 		&opencodeGroupIdentityUnchanged,
 		&currentOpenCodeAutoRefresh,
 		&currentOpenCodeSnapshot,
-		&currentExtraJSON,
 	); err != nil {
 		return nil, err
 	}
@@ -750,20 +747,7 @@ func lockAndMergeAccountProbeExtra(
 		return nil, err
 	}
 
-	// extra 理论上恒为 JSON 对象，但历史数据若存成非对象（数组/标量），在此硬失败
-	// 会让该账号的任何编辑都保存不了——而这条路径覆盖所有平台的账号更新。
-	// 门票是 1 小时 TTL 的临时凭据，下个打票周期会自动补回，因此解析失败时降级为
-	// 「无门票可保留」继续完成编辑，不要把整个账号更新拖垮。
-	var currentExtra map[string]any
-	if len(currentExtraJSON) > 0 {
-		if err := json.Unmarshal(currentExtraJSON, &currentExtra); err != nil {
-			logger.LegacyPrintf("repository.account",
-				"[Account] current extra unmarshal failed, codex ticket preservation skipped: id=%d err=%v",
-				account.ID, err)
-			currentExtra = nil
-		}
-	}
-	extra := service.MergeOpenAICodexTicketExtra(copyJSONMap(normalizeJSONMap(account.Extra)), currentExtra)
+	extra := copyJSONMap(normalizeJSONMap(account.Extra))
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
 		service.UpstreamBillingRateSyncEnabledExtraKey,
@@ -1838,10 +1822,6 @@ func (r *accountRepository) syncSchedulerAccountSnapshot(ctx context.Context, ac
 	}
 }
 
-func (r *accountRepository) RefreshSchedulerAccount(ctx context.Context, accountID int64) {
-	r.syncSchedulerAccountSnapshotDetached(ctx, accountID)
-}
-
 func (r *accountRepository) syncSchedulerAccountSnapshotDetached(ctx context.Context, accountID int64) {
 	base := context.Background()
 	if ctx != nil {
@@ -2663,56 +2643,6 @@ func (r *accountRepository) ClearAntigravityQuotaScopes(ctx context.Context, id 
 	return nil
 }
 
-// ClearModelRateLimit 只摘掉 model_rate_limits 里的一个 scope，其余保留，且只在该
-// scope 当前的 reason 与 expectedReason 逐字相同时才动手。
-// 与 SetModelRateLimit 对称：同样要 enqueue outbox + 同步调度快照，否则调度侧读到的
-// 仍是清除前的限流。
-//
-// expectedReason 让清除成为一次 compare-and-swap。调用方拿到的是选号时刻从 Redis
-// 拷贝的账号副本，它判断「这条限流是我打的」与真正执行 UPDATE 之间隔着整个转发过程；
-// 期间上游 429 完全可能把同一个 scope 改写成窗口耗尽限流，那条限流绝不能被顺手删掉。
-// 谓词放在 DB 层而不是调用方，是因为并发的清除请求各持一份快照，只有数据库能串行化。
-// 返回值表示是否确实清除了 scope；CAS 未命中时调用方必须保留本次请求的限流快照。
-func (r *accountRepository) ClearModelRateLimit(ctx context.Context, id int64, scope string, expectedReason string) (bool, error) {
-	if strings.TrimSpace(scope) == "" {
-		return false, nil
-	}
-	client := clientFromContext(ctx, r.client)
-	// 谓词里还带上「该 scope 确实存在」：没有它，清除一个本就不存在的 scope 也会 bump
-	// updated_at、入 outbox 并触发 bucket 重建。解除路径每次选号都会走到，无变化时
-	// 必须是真正的空操作。
-	result, err := client.ExecContext(
-		ctx,
-		`UPDATE accounts
-		SET extra = COALESCE(extra, '{}'::jsonb) #- ARRAY['model_rate_limits', $1]::text[],
-			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
-			AND extra #> ARRAY['model_rate_limits', $1]::text[] IS NOT NULL
-			AND COALESCE(extra #>> ARRAY['model_rate_limits', $1, 'reason']::text[], '') = $3`,
-		scope,
-		id,
-		expectedReason,
-	)
-	if err != nil {
-		return false, err
-	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if affected == 0 {
-		// 没有匹配的行：账号不存在，该 scope 本来就没有限流，或 reason 已经被改写。
-		// 不能据此清除请求内的旧快照：新 reason 可能代表仍然有效的上游 429。
-		return false, nil
-	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear model rate limit scope failed: account=%d scope=%s err=%v", id, scope, err)
-	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
-	return true, nil
-}
-
 func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) error {
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(
@@ -2957,9 +2887,7 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 	snapshot *service.UpstreamBillingProbeSnapshot,
 	rateMultiplier *float64,
 ) error {
-	updates := map[string]any{service.UpstreamBillingProbeExtraKey: snapshot}
-
-	payload, err := json.Marshal(updates)
+	payload, err := json.Marshal(map[string]any{service.UpstreamBillingProbeExtraKey: snapshot})
 	if err != nil {
 		return err
 	}
@@ -3113,11 +3041,11 @@ func ollamaCloudUsageSnapshotClearRequested(extra map[string]any) bool {
 }
 
 func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates service.AccountBulkUpdate) (int64, error) {
-	if len(ids) == 0 {
-		return 0, nil
-	}
 	if err := validateAccountWriteFields(updates.Credentials, updates.Extra); err != nil {
 		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
 	}
 	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
 
@@ -3249,7 +3177,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			extraExpression += " || $" + itoa(idx) + "::jsonb"
 			args = append(args, payload)
 			idx++
-
 			if upstreamBillingProbeExplicitlyDisabled(updates.Extra) || upstreamBillingProbeSnapshotClearRequested(updates.Extra) {
 				extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 			}

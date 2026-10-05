@@ -69,10 +69,10 @@ func providePrivacyClientFactory() service.PrivacyClientFactory {
 
 func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 	return service.BuildInfo{
-		Version:         buildInfo.Version,
-		BuildType:       buildInfo.BuildType,
 		UpstreamVersion: buildInfo.UpstreamVersion,
 		BuildCommit:     buildInfo.BuildCommit,
+		Version:         buildInfo.Version,
+		BuildType:       buildInfo.BuildType,
 	}
 }
 
@@ -95,7 +95,6 @@ func provideCleanup(
 	opsService *service.OpsService,
 	opsIngressReject *service.OpsIngressRejectAggregator,
 	apiKeyService *service.APIKeyService,
-	concurrencyService *service.ConcurrencyService,
 	authCacheInvalidationWorker *service.AuthCacheInvalidationWorker,
 	schedulerSnapshot *service.SchedulerSnapshotService,
 	tokenRefresh *service.TokenRefreshService,
@@ -110,7 +109,6 @@ func provideCleanup(
 	batchImageCleanup *service.BatchImageCleanupService,
 	batchImageWorker *service.BatchImageWorkerRuntime,
 	pricing *service.PricingService,
-	modelCatalog *service.ModelCatalogService,
 	emailQueue *service.EmailQueueService,
 	billingCache *service.BillingCacheService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
@@ -179,12 +177,6 @@ func provideCleanup(
 			{"OpsRuntimeSettingsRefresh", func() error {
 				if opsService != nil {
 					opsService.StopRuntimeSettingsRefresh()
-				}
-				return nil
-			}},
-			{"APIKeyQueueWaiters", func() error {
-				if concurrencyService != nil {
-					concurrencyService.StopAPIKeyQueue()
 				}
 				return nil
 			}},
@@ -302,12 +294,6 @@ func provideCleanup(
 				}
 				return nil
 			}},
-			{"ModelCatalogService", func() error {
-				if modelCatalog != nil {
-					modelCatalog.Stop()
-				}
-				return nil
-			}},
 			{"PricingService", func() error {
 				pricing.Stop()
 				return nil
@@ -351,18 +337,6 @@ func provideCleanup(
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()
-				}
-				return nil
-			}},
-			{"GatewayMediaSettlement", func() error {
-				if openAIGateway != nil {
-					openAIGateway.StopGatewayMediaSettlement()
-				}
-				return nil
-			}},
-			{"OpenAICodexTicketHarvester", func() error {
-				if openAIGateway != nil {
-					openAIGateway.StopOpenAICodexTicketHarvester()
 				}
 				return nil
 			}},

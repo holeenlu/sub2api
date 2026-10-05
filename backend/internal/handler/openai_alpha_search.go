@@ -52,7 +52,11 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		RespondRequestBodyReadFailure(c, reqLog, err, h.errorResponse)
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
 	if len(body) == 0 {
@@ -88,7 +92,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 
-	userRelease, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, apiKey.ID, apiKey.ConcurrencyLimit, false, &streamStarted, reqLog)
+	userRelease, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, false, &streamStarted, reqLog)
 	if !acquired {
 		return
 	}
@@ -123,7 +127,6 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
-	var rpmAdmission openAIRPMAdmission
 	switchCount := 0
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	routingStart := time.Now()
@@ -149,19 +152,12 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			service.PlatformOpenAI,
 		)
 		if err != nil || selection == nil || selection.Account == nil {
-			err = rpmAdmission.selectionError(err)
-			if isOpenAIRPMError(err) {
-				rpmAdmission.retryAfter(c, err)
-				cls := classifySelectionFailureError(err, noAccountErrorClassification{})
-				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
-				return
-			}
 			if failoverClientGone(c) {
 				reqLog.Info("openai_alpha_search.account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
 			if len(failedAccountIDs) == 0 {
-				cls := classifySelectionErrorFromGin(c, err, h.gatewayService, apiKey, requestedModel, requestedModel, service.PlatformOpenAI)
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, requestedModel, requestedModel, service.PlatformOpenAI)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
@@ -190,15 +186,6 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		if slotResult != openAISlotAcquireOK {
 			return
 		}
-		retryRPM, rpmErr := rpmAdmission.acquire(c.Request.Context(), h.gatewayService, account, accountRelease, failedAccountIDs)
-		if retryRPM {
-			continue
-		}
-		if rpmErr != nil {
-			cls := classifySelectionFailureError(rpmErr, noAccountErrorClassification{})
-			h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
-			return
-		}
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
@@ -209,9 +196,6 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			}
 			return h.gatewayService.ForwardAlphaSearch(c.Request.Context(), c, account, forwardBody)
 		}()
-		if h.handleOpenAIRPMForwardError(c, err, streamStarted, false) {
-			return
-		}
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
 
 		if err == nil {
@@ -253,8 +237,6 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
 				sameAccountRetryCount[account.ID]++
 				retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
-				service.AnnotateLastOpsUpstreamFailure(c, failoverErr)
-				service.AnnotateLastOpsUpstreamError(c, "same_account_retry", sameAccountRetryCount[account.ID], retryLimit, switchCount, retryDelay, true)
 				reqLog.Warn("openai_alpha_search.same_account_retry",
 					zap.Int64("account_id", account.ID),
 					zap.Int("upstream_status", failoverErr.StatusCode),
@@ -278,8 +260,6 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			return
 		}
 		switchCount++
-		service.AnnotateLastOpsUpstreamFailure(c, failoverErr)
-		service.AnnotateLastOpsUpstreamError(c, "account_switch", 0, account.GetPoolModeRetryCount(), switchCount, 0, true)
 		if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 			h.handleFailoverExhausted(c, failoverErr, false)
 			return

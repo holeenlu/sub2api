@@ -280,9 +280,6 @@ func (s *GrokQuotaService) probeBilling(ctx context.Context, accountID int64) (*
 		err     error
 	}
 	var weekly, monthly billingResult
-	// fetchBilling fills the account's header-override cache, so the two
-	// concurrent probes must not share one Account: the monthly probe gets a copy.
-	monthlyAccount := *account
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -291,7 +288,7 @@ func (s *GrokQuotaService) probeBilling(ctx context.Context, accountID int64) (*
 	}()
 	go func() {
 		defer wg.Done()
-		monthly.summary, monthly.status, monthly.err = s.fetchBilling(probeCtx, &monthlyAccount, token, proxyURL, false)
+		monthly.summary, monthly.status, monthly.err = s.fetchBilling(probeCtx, account, token, proxyURL, false)
 	}()
 	wg.Wait()
 

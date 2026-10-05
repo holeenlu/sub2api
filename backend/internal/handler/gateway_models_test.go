@@ -325,19 +325,7 @@ func TestGatewayModels_UnmappedOpenAIAccountsSupplementMappedModels(t *testing.T
 				require.ElementsMatch(t, tt.want, modelIDsForTest(got.Data))
 				for _, model := range got.Data {
 					require.Equal(t, "model", model.Object, model.ID)
-					knownDefault := false
-					for _, defaultModel := range openai.DefaultModels {
-						if defaultModel.ID == model.ID {
-							// Preserve catalog metadata, including zero when the
-							// upstream creation timestamp is not published.
-							require.Equal(t, defaultModel.Created, model.Created, model.ID)
-							knownDefault = true
-							break
-						}
-					}
-					if !knownDefault {
-						require.Positive(t, model.Created, model.ID)
-					}
+					require.Positive(t, model.Created, model.ID)
 					require.Equal(t, "openai", model.OwnedBy, model.ID)
 					require.Empty(t, model.CreatedAt, model.ID)
 				}
@@ -1539,28 +1527,6 @@ func TestGatewayModels_GPT6SolLunaDiscoveryRespectsGroupAndAccountRestrictions(t
 	}
 }
 
-type sharedCatalogChannelRepo struct{ service.ChannelRepository }
-
-func (sharedCatalogChannelRepo) ListAll(context.Context) ([]service.Channel, error) { return nil, nil }
-
-func TestGatewayUsesSharedCatalogForListRetrieveAndCodex(t *testing.T) {
-	group := &service.Group{ID: 71, Platform: service.PlatformOpenAI, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"custom-model", "gpt-5.4"}}}
-	repo := &gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{71: {{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"model_mapping": map[string]any{"custom-model": "upstream-only", "gpt-5.4": "gpt-5.4", "hidden-model": "hidden"}}}}}}
-	h := newGatewayModelsHandlerForTest(repo)
-	h.modelCatalog = service.NewGroupModelCatalogService(repo, sharedCatalogChannelRepo{}, nil, nil)
-	result := requestModelForTest(h, group, "", "")
-	require.Equal(t, http.StatusOK, result.Code)
-	var response gatewayModelsResponseForTest
-	require.NoError(t, json.Unmarshal(result.Body.Bytes(), &response))
-	require.Len(t, response.Data, 2)
-	require.Equal(t, "custom-model", response.Data[0].ID)
-	require.Equal(t, http.StatusOK, requestModelForTest(h, group, "custom-model", "").Code)
-	require.Equal(t, http.StatusNotFound, requestModelForTest(h, group, "upstream-only", "").Code)
-	ids, err := h.codexModelIDsForGroup(context.Background(), group, "")
-	require.NoError(t, err)
-	require.Equal(t, []string{"custom-model", "gpt-5.4"}, ids)
-}
-
 // Scenario: jev-latest only works through /v1/systemone, so Composite groups list
 // it in /v1/models only when they can serve it, and never in the Codex manifest.
 func TestGatewayModels_CompositeTypeSafeListingScope(t *testing.T) {
@@ -1603,26 +1569,4 @@ func TestGatewayModels_CompositeTypeSafeListingScope(t *testing.T) {
 func TestDefaultModelIDsForPlatform_CompositeFallbackExcludesTypeSafe(t *testing.T) {
 	require.NotContains(t, defaultModelIDsForPlatform(service.PlatformComposite), "jev-latest")
 	require.NotContains(t, defaultCodexModelIDsForPlatform(service.PlatformComposite), "jev-latest")
-}
-
-func TestGatewaySharedCatalog_TypeSafeNativeModelsNotInCodex(t *testing.T) {
-	for _, platform := range []string{service.PlatformTypeSafe, service.PlatformComposite} {
-		t.Run(platform, func(t *testing.T) {
-			group := &service.Group{ID: 72, Platform: platform}
-			repo := &gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{72: {{
-				ID: 1, Platform: service.PlatformTypeSafe, Type: service.AccountTypeAPIKey,
-				Status: service.StatusActive, Schedulable: true,
-			}}}}
-			h := newGatewayModelsHandlerForTest(repo)
-			h.modelCatalog = service.NewGroupModelCatalogService(repo, sharedCatalogChannelRepo{}, nil, nil)
-			result := requestModelForTest(h, group, "", "")
-			require.Equal(t, http.StatusOK, result.Code)
-			var response gatewayModelsResponseForTest
-			require.NoError(t, json.Unmarshal(result.Body.Bytes(), &response))
-			require.Equal(t, []string{"jev-latest"}, modelIDsForTest(response.Data))
-			ids, err := h.codexModelIDsForGroup(context.Background(), group, "")
-			require.NoError(t, err)
-			require.Empty(t, ids)
-		})
-	}
 }

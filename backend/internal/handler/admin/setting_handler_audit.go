@@ -482,18 +482,6 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.AntigravityUserAgentVersion != after.AntigravityUserAgentVersion {
 		changed = append(changed, "antigravity_user_agent_version")
 	}
-	if before.UpstreamFailoverStatusCodes != after.UpstreamFailoverStatusCodes {
-		changed = append(changed, "upstream_failover_status_codes")
-	}
-	if before.OpenAICodexTicketPromptTemplate != after.OpenAICodexTicketPromptTemplate {
-		changed = append(changed, "openai_codex_ticket_prompt_template")
-	}
-	if before.OpenAICodexTicketEnabled != after.OpenAICodexTicketEnabled {
-		changed = append(changed, "openai_codex_ticket_enabled")
-	}
-	if before.OpenAICodexTicketHarvestProxyURL != after.OpenAICodexTicketHarvestProxyURL {
-		changed = append(changed, "openai_codex_ticket_harvest_proxy_url")
-	}
 	if before.OpenAICodexUserAgent != after.OpenAICodexUserAgent {
 		changed = append(changed, "openai_codex_user_agent")
 	}
@@ -845,16 +833,16 @@ func slotOf(s *service.DefaultPlatformQuotaSetting, win string) *float64 {
 
 // equalPlatformQuotaSettings reports whether two platform-quota maps are identical across all allowed slots.
 func equalAccountSchedulingThresholds(before, after map[string]int) bool {
-	for _, scope := range service.AllowedSchedulingThresholdScopes {
+	for _, platform := range service.AllowedSchedulingThresholdPlatforms {
 		beforeValue := 100
 		if before != nil {
-			if value, ok := before[scope]; ok {
+			if value, ok := before[platform]; ok {
 				beforeValue = value
 			}
 		}
 		afterValue := 100
 		if after != nil {
-			if value, ok := after[scope]; ok {
+			if value, ok := after[platform]; ok {
 				afterValue = value
 			}
 		}

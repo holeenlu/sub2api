@@ -1104,7 +1104,7 @@ export default {
       },
       modelPricing: {
         title: 'Per-model group pricing',
-        description: 'Set separate prices only for exception models; empty fields keep inheriting the channel price card or reference price, so the group multiplier is usually enough. Long-context tiers come from official presets — do not enter custom intervals. Use per-request tiers such as realtime, tts, and stt for audio.',
+        description: 'Overrides channel and built-in prices for matching models. Long-context tiers come from official presets — do not enter custom intervals. Use per-request tiers such as realtime, tts, and stt for audio.',
         longContext: 'Enable long-context tier pricing',
         longContextHint: 'When checked, channel intervals or official preset tiers apply. Otherwise the first tier is used unless the account explicitly enables long-context billing.',
         add: 'Add model price'
@@ -1145,7 +1145,7 @@ export default {
       },
       modelAllowlist: {
         title: 'Model Allowlist',
-        hint: "When enabled, only models matching the allowlist are allowed. When disabled, it adds no restriction. New candidates do not change saved selections; include models used by client background tasks.",
+        hint: 'When enabled, models outside the allowlist are rejected with 404 model_not_found, and model listing endpoints only show allowlisted models. Entries support exact model IDs and * wildcards anywhere (e.g., gpt-*-codex). Note: Claude Code probes with haiku-family models for titles/summaries and /messages/count_tokens is also allowlist-controlled, so make sure the small models you need are selected too.',
         loading: 'Loading candidate models...',
         empty: 'No candidate models; add custom entries below',
         selectedSummary: 'Selected {selected} / {total}',
@@ -1162,17 +1162,16 @@ export default {
       },
       codexModelsManifest: {
         title: 'Pinned Accounts for Model Lists',
-        hint: "When enabled, Codex Model Manifest is fetched from the selected accounts and merged using existing account mappings and the group allowlist. Selected accounts under rate limits or overload are still used; inference scheduling is unchanged.",
-        enable: 'Fetch Codex Model Manifest with specific accounts',
+        hint: 'When enabled, ordinary model lists and Codex Model Manifest are discovered from the pinned accounts first, then merged and filtered using account mappings and the group model list. Rate-limited or overloaded pinned accounts are still used.',
+        enable: 'Fetch model lists with specific accounts',
         enabledHint: 'Accounts are limited to OpenAI accounts bound to this group, at most 10.',
-        disabledHint: "Disabled: use the existing configured catalog or scheduler discovery path.",
+        disabledHint: 'Disabled: ordinary lists use local mappings or defaults; Codex uses a local catalog when configured, otherwise scheduler discovery.',
         accounts: 'Pinned accounts',
         searchPlaceholder: 'Search accounts (OpenAI accounts in this group)',
         searchEmpty: 'No matching accounts',
         fallback: 'Fall back to the scheduler when all pinned accounts are unavailable',
         fallbackHint: 'Off: return 503 / the upstream error. On: fall back to the existing scheduler path.',
-        selectAtLeastOne: 'Select at least one account after enabling pinned accounts',
-        selectAtMostTen: 'Select no more than 10 pinned accounts'
+        selectAtLeastOne: 'Select at least one account after enabling pinned accounts'
       },
       compositeRoutes: {
         action: 'Routes',
@@ -1273,11 +1272,6 @@ export default {
       invalidRequestFallback: {
         title: 'Invalid Request Fallback Group',
         hint: 'Triggered only when upstream explicitly returns prompt too long. Leave empty to disable fallback.',
-        noFallback: 'No Fallback'
-      },
-      noAccountFallback: {
-        title: 'No Available Account Fallback Group',
-        hint: 'When this group has no schedulable account (banned / quota exhausted / rate limited / unschedulable), borrow the account pool of the selected group. Billing still uses the current group; only same-platform groups are allowed. Leave empty to disable fallback.',
         noFallback: 'No Fallback'
       },
       copyAccounts: {

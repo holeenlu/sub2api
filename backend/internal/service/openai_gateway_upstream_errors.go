@@ -242,14 +242,12 @@ func isOpenAIContextWindowError(upstreamMsg string, upstreamBody []byte) bool {
 }
 
 func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool {
-	return shouldFailoverStatusCode(s.settingService, statusCode, func(statusCode int) bool {
-		switch statusCode {
-		case 401, 402, 403, 405, 429, 529:
-			return true
-		default:
-			return statusCode >= 500
-		}
-	})
+	switch statusCode {
+	case 401, 402, 403, 405, 429, 529:
+		return true
+	default:
+		return statusCode >= 500
+	}
 }
 
 func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Account, statusCode int, upstreamMsg string, upstreamBody []byte) bool {

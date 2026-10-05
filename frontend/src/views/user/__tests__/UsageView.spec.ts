@@ -3,7 +3,6 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
-import ui from '@/i18n/locales/en/ui'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'
 
@@ -34,7 +33,6 @@ const {
 }))
 
 const messages: Record<string, string> = {
-  ...Object.fromEntries(Object.entries(ui.ui).map(([key, value]) => [`ui.${key}`, value])),
   'admin.dashboard.timeRange': 'Time range',
   'admin.dashboard.granularity': 'Granularity',
   'admin.dashboard.day': 'Day',

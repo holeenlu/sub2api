@@ -12,10 +12,6 @@
     </div>
 
     <div v-else class="space-y-6 p-6">
-      <div v-if="balanceSource" class="rounded-xl bg-amber-50 p-4 dark:bg-amber-900/10" data-testid="balance-source">
-        <div class="font-semibold text-amber-900 dark:text-amber-200">{{ t(`admin.ops.balanceError.${balanceSource}`) }}</div>
-        <p class="mt-1 text-sm text-amber-800 dark:text-amber-100">{{ t(`admin.ops.balanceError.${balanceSource}Hint`) }}</p>
-      </div>
       <!-- Summary -->
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
@@ -229,7 +225,6 @@
 </template>
 
 <script setup lang="ts">
-import { balanceErrorSource } from '../utils/balanceError'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -261,8 +256,6 @@ const loading = ref(false)
 const detail = ref<OpsErrorDetail | null>(null)
 
 const showUpstreamList = computed(() => props.errorType === 'request')
-
-const balanceSource = computed(() => balanceErrorSource(detail.value))
 
 const requestId = computed(() => detail.value?.request_id || detail.value?.client_request_id || '')
 
@@ -313,7 +306,7 @@ function isUpstreamError(d: OpsErrorDetail | null): boolean {
   if (!d) return false
   const phase = String(d.phase || '').toLowerCase()
   const owner = String(d.error_owner || '').toLowerCase()
-  return balanceErrorSource(d) === 'upstream' || (phase === 'upstream' && owner === 'provider')
+  return phase === 'upstream' && owner === 'provider'
 }
 
 function formatRequestTypeLabel(type: number | null | undefined): string {

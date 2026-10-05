@@ -19,7 +19,6 @@ type tempUnschedReasonPayload struct {
 	Platform         string  `json:"platform,omitempty"`
 	Window           string  `json:"window,omitempty"`
 	Scope            string  `json:"scope,omitempty"`
-	UntilSource      string  `json:"until_source,omitempty"`
 	ThresholdPercent int     `json:"threshold_percent,omitempty"`
 	UsedPercent      float64 `json:"used_percent,omitempty"`
 	UntilUnix        int64   `json:"until_unix,omitempty"`
@@ -28,12 +27,9 @@ type tempUnschedReasonPayload struct {
 }
 
 type AccountSchedulingThresholdReasonInput struct {
-	Platform string
-	Window   string
-	Scope    string
-	// UntilSource 非空表示 Until 借自另一个窗口的 reset 采样，见
-	// accountSchedulingThresholdCandidate.untilSource。
-	UntilSource      string
+	Platform         string
+	Window           string
+	Scope            string
 	ThresholdPercent int
 	UsedPercent      float64
 	Until            time.Time
@@ -70,7 +66,6 @@ func BuildDetailedAccountSchedulingThresholdReason(input AccountSchedulingThresh
 		Platform:         strings.TrimSpace(input.Platform),
 		Window:           strings.TrimSpace(input.Window),
 		Scope:            strings.TrimSpace(input.Scope),
-		UntilSource:      strings.TrimSpace(input.UntilSource),
 		ThresholdPercent: input.ThresholdPercent,
 		UsedPercent:      input.UsedPercent,
 		TriggeredAtUnix:  triggeredAt.Unix(),

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/server/routes"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -237,7 +239,6 @@ func TestAPIContracts(t *testing.T) {
 					"last_used_at": null,
 					"last_used_ip": null,
 					"current_concurrency": 0,
-					"concurrency_limit":   0,
 					"quota": 0,
 					"quota_used": 0,
 					"rate_limit_5h": 0,
@@ -289,7 +290,6 @@ func TestAPIContracts(t *testing.T) {
 							"last_used_at": null,
 							"last_used_ip": null,
 							"current_concurrency": 0,
-							"concurrency_limit":   0,
 							"quota": 0,
 							"quota_used": 0,
 							"rate_limit_5h": 0,
@@ -392,7 +392,6 @@ func TestAPIContracts(t *testing.T) {
 						"allow_live": false,
 						"fallback_group_id": null,
 						"fallback_group_id_on_invalid_request": null,
-						"fallback_group_id_on_no_account": null,
 						"require_oauth_only": false,
 						"require_privacy_set": false,
 						"max_reasoning_effort": "",
@@ -753,7 +752,6 @@ func TestAPIContracts(t *testing.T) {
 					"turnstile_enabled": true,
 					"turnstile_site_key": "site-key",
 					"turnstile_secret_key_configured": true,
-					"upstream_failover_status_codes": "",
 					"tencent_captcha_enabled": false,
 					"tencent_captcha_app_id": "",
 					"tencent_captcha_app_secret_key_configured": false,
@@ -884,7 +882,6 @@ func TestAPIContracts(t *testing.T) {
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
 					"enable_model_fallback": false,
-
 					"fallback_model_anthropic": "claude-3-5-sonnet-20241022",
 					"fallback_model_antigravity": "gemini-2.5-pro",
 					"fallback_model_gemini": "gemini-2.5-pro",
@@ -903,9 +900,6 @@ func TestAPIContracts(t *testing.T) {
 						"table_page_size_options": [10, 20, 50, 100],
 					"min_claude_code_version": "",
 					"max_claude_code_version": "",
-					"openai_codex_ticket_enabled": false,
-					"openai_codex_ticket_harvest_proxy_url": "",
-					"openai_codex_ticket_harvest_proxy_configured": false,
 					"min_codex_version": "",
 					"max_codex_version": "",
 					"codex_cli_only_blacklist": "",
@@ -998,7 +992,7 @@ func TestAPIContracts(t *testing.T) {
 					"payment_alipay_mobile_precreate_deep_link": false,
 					"balance_low_notify_enabled": false,
 					"account_quota_notify_enabled": false,
-					"account_scheduling_thresholds": {"anthropic":100,"anthropic_fable":100,"grok":100,"openai":100},
+					"account_scheduling_thresholds": {"anthropic":100,"grok":100,"openai":100},
 					"subscription_expiry_notify_enabled": true,
 					"balance_low_notify_threshold": 0,
 					"balance_low_notify_recharge_url": "",
@@ -1117,7 +1111,6 @@ func TestAPIContracts(t *testing.T) {
 					"turnstile_enabled": false,
 					"turnstile_site_key": "",
 					"turnstile_secret_key_configured": false,
-					"upstream_failover_status_codes": "",
 					"tencent_captcha_enabled": false,
 					"tencent_captcha_app_id": "",
 					"tencent_captcha_app_secret_key_configured": false,
@@ -1219,7 +1212,6 @@ func TestAPIContracts(t *testing.T) {
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
 					"enable_model_fallback": false,
-
 					"fallback_model_anthropic": "claude-3-5-sonnet-20241022",
 					"fallback_model_openai": "gpt-4o",
 					"fallback_model_gemini": "gemini-2.5-pro",
@@ -1244,9 +1236,6 @@ func TestAPIContracts(t *testing.T) {
 					"rewrite_message_cache_control": false,
 					"enable_client_dateline_normalization": true,
 					"antigravity_user_agent_version": "",
-					"openai_codex_ticket_enabled": false,
-					"openai_codex_ticket_harvest_proxy_url": "",
-					"openai_codex_ticket_harvest_proxy_configured": false,
 					"min_codex_version": "",
 					"max_codex_version": "",
 					"codex_cli_only_blacklist": "",
@@ -1325,7 +1314,7 @@ func TestAPIContracts(t *testing.T) {
 					"payment_alipay_mobile_precreate_deep_link": false,
 					"balance_low_notify_enabled": false,
 					"account_quota_notify_enabled": false,
-					"account_scheduling_thresholds": {"anthropic":100,"anthropic_fable":100,"grok":100,"openai":100},
+					"account_scheduling_thresholds": {"anthropic":100,"grok":100,"openai":100},
 					"subscription_expiry_notify_enabled": true,
 					"balance_low_notify_threshold": 0,
 					"balance_low_notify_recharge_url": "",
@@ -1440,19 +1429,54 @@ func TestAPIContracts(t *testing.T) {
 			require.Equal(t, tt.wantStatus, status)
 			wantJSON := tt.wantJSON
 			if tt.method == http.MethodGet && tt.path == "/api/v1/admin/settings" {
-				// The shared template is large; keep the settings contract explicit without
-				// duplicating its embedded JSONL in each fixture.
 				var expected map[string]any
 				require.NoError(t, json.Unmarshal([]byte(wantJSON), &expected))
 				data := expected["data"].(map[string]any)
-				data["openai_codex_ticket_allow_without_ticket"] = true
-				data["openai_codex_ticket_prompt_template"] = service.DefaultCodexProbeTemplate()
-				data["openai_codex_ticket_prompt_template_default"] = service.DefaultCodexProbeTemplate()
+				data["openai_codex_diagnostic_prompt_template"] = service.DefaultCodexProbeTemplate()
+				data["openai_codex_diagnostic_prompt_template_default"] = service.DefaultCodexProbeTemplate()
+				if strings.Contains(tt.name, "falls back to config oauth defaults") {
+					data["site_name"] = service.DefaultSiteName
+				}
 				encoded, err := json.Marshal(expected)
 				require.NoError(t, err)
 				wantJSON = string(encoded)
 			}
 			require.JSONEq(t, wantJSON, body)
+		})
+	}
+}
+
+func TestCodexDiagnosticRoutesRetireTicketEndpoints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handlers := &handler.Handlers{Admin: &handler.AdminHandlers{Account: &adminhandler.AccountHandler{}}}
+	pass := func(c *gin.Context) { c.Next() }
+	routes.RegisterAdminRoutes(router.Group("/api/v1"), handlers,
+		middleware.AdminAuthMiddleware(pass), middleware.AuditLogMiddleware(pass), middleware.StepUpAuthMiddleware(pass), nil, nil)
+	for _, tc := range []struct {
+		method, current, retired string
+	}{
+		{http.MethodGet, "/1/codex-diagnostic", "/1/codex-ticket-diagnostic"},
+		{http.MethodPut, "/1/codex-diagnostic", "/1/codex-ticket-diagnostic"},
+		{http.MethodPost, "/1/codex-diagnostic", "/1/codex-ticket-diagnostic"},
+		{http.MethodGet, "/1/codex-diagnostic/history", "/1/codex-ticket-diagnostic/history"},
+		{http.MethodPost, "/1/codex-diagnostic/2/cancel", "/1/codex-ticket-diagnostic/2/cancel"},
+		{http.MethodPost, "/codex-diagnostic-fingerprint/refresh", "/codex-ticket-fingerprint/refresh"},
+	} {
+		t.Run(tc.method+tc.current, func(t *testing.T) {
+			status, body := doRequest(t, router, tc.method, "/api/v1/admin/accounts"+tc.current, "", nil)
+			// Reach the diagnostic handler without a runner or a paid upstream request.
+			require.Equal(t, http.StatusServiceUnavailable, status, body)
+			require.Contains(t, body, "Diagnostic monitor unavailable")
+			status, body = doRequest(t, router, tc.method, "/api/v1/admin/accounts"+tc.retired, "", nil)
+			if tc.retired == "/codex-ticket-fingerprint/refresh" {
+				// The native /:id/refresh route rejects this nonnumeric account ID.
+				// Do not add a retired-route alias just to change its error status.
+				require.Equal(t, http.StatusBadRequest, status, body)
+				require.Contains(t, body, "Invalid account ID")
+				return
+			}
+			require.Equal(t, http.StatusNotFound, status, body)
 		})
 	}
 }
@@ -2068,10 +2092,6 @@ func (s *stubAccountRepo) ClearAntigravityQuotaScopes(ctx context.Context, id in
 	return errors.New("not implemented")
 }
 
-func (s *stubAccountRepo) ClearModelRateLimit(ctx context.Context, id int64, scope string, _ string) (bool, error) {
-	return false, errors.New("not implemented")
-}
-
 func (s *stubAccountRepo) ClearModelRateLimits(ctx context.Context, id int64) error {
 	return errors.New("not implemented")
 }
@@ -2685,10 +2705,6 @@ func (r *stubUsageLogRepo) GetGroupStatsWithFilters(ctx context.Context, startTi
 }
 
 func (r *stubUsageLogRepo) GetUserBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) ([]usagestats.UserBreakdownItem, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (r *stubUsageLogRepo) GetAPIKeyBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) ([]usagestats.APIKeyBreakdownItem, error) {
 	return nil, errors.New("not implemented")
 }
 
