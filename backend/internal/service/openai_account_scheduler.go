@@ -1111,19 +1111,6 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		plan.topK = 1
 	}
 
-	// Keep overflow candidates without imposing a new BPS-first ranking. All
-	// eligibility filters and explicit subscription/priority policies still apply.
-	if NormalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI && req.RequiredImageCapability == "" {
-		hasBPS, hasNative := false, false
-		for _, candidate := range candidates {
-			if candidate.account.IsExcelBPSEnabledForModel(req.RequestedModel) {
-				hasBPS = true
-			} else {
-				hasNative = true
-			}
-		}
-		plan.includeOverflowFallback = plan.includeOverflowFallback || (hasBPS && hasNative)
-	}
 	plan.selectionOrder = s.buildOpenAISelectionOrder(req, plan)
 	return plan
 }
@@ -1555,10 +1542,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			filterStats.exclude("platform_mismatch")
 			continue
 		}
-		if s.service.isExcelBPSCoolingDownContext(ctx, account, req.RequestedModel) {
-			filterStats.exclude(excelBPSRateLimitedFilterReason)
-			continue
-		}
+
 		if s.service.isOpenAIAccountRequestRuntimeBlockedContext(ctx, account, req.RequestedModel, req.RequireCompact) {
 			filterStats.exclude("runtime_blocked")
 			continue
@@ -2761,12 +2745,7 @@ func accountSupportsOpenAICapabilities(account *Account, requiredCapability Open
 }
 
 func accountSupportsOpenAICapabilitiesForRequest(account *Account, requestedModel string, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {
-	if account != nil && requiredImageCapability == "" && account.IsExcelBPSEnabledForModel(requestedModel) {
-		switch requiredCapability {
-		case OpenAIEndpointCapabilityChatCompletions, OpenAIEndpointCapabilityResponses:
-			return true
-		}
-	}
+
 	return accountSupportsOpenAICapabilities(account, requiredCapability, requiredImageCapability)
 }
 
@@ -2788,11 +2767,7 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 	if s == nil || account == nil {
 		return false
 	}
-	if len(requestedModels) > 0 && account.IsExcelBPSEnabledForModel(requestedModels[0]) {
-		// Client WS ingress can bridge to BPS HTTP/SSE. Native upstream WS
-		// remains unavailable; those are distinct transport requirements.
-		return requiredTransport == OpenAIUpstreamTransportResponsesWebsocketV2Ingress
-	}
+
 	if requiredTransport == OpenAIUpstreamTransportResponsesWebsocketV2Ingress {
 		if s.cfg == nil || !s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled {
 			return s.getOpenAIWSProtocolResolver().Resolve(account).Transport == OpenAIUpstreamTransportResponsesWebsocketV2
@@ -2815,9 +2790,7 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 	// A failed managed proxy acquisition says nothing about account health.
 	// Keep the existing error response and diagnostics, but do not turn a local
 	// pool outage into an account penalty (or a successful recovery sample).
-	if !success && len(observedErr) > 0 && errors.Is(observedErr[0], errExcelBPSProxyUnavailable) {
-		return false
-	}
+
 	accountID := account.ID
 	healthTripped := false
 	if s != nil && s.rateLimitService != nil {

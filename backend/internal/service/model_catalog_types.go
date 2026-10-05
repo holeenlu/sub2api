@@ -97,7 +97,7 @@ func modelCatalogScope(account, source *Account) string {
 	}
 	credentials := make(map[string]any)
 	for key, value := range source.Credentials {
-		if key == "model_mapping" || key == "compact_model_mapping" || key == "model_mapping_mode" {
+		if key == "model_mapping" || key == "compact_model_mapping" {
 			continue
 		}
 		credentials[key] = value

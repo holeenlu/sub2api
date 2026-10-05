@@ -188,7 +188,6 @@ func openAITurnRouteFingerprint(a *Account) [32]byte {
 	for _, key := range []string{
 		codexFingerprintSeedExtraKey, codexFingerprintModeExtraKey,
 		"openai_passthrough", "openai_oauth_passthrough",
-		"openai_excel_bps", "openai_excel_bps_models",
 		"openai_oauth_responses_websockets_v2_mode", "openai_apikey_responses_websockets_v2_mode",
 		"openai_oauth_responses_websockets_v2_enabled", "openai_apikey_responses_websockets_v2_enabled",
 		"responses_websockets_v2_enabled", "openai_ws_enabled", "openai_ws_force_http",
@@ -207,14 +206,7 @@ func openAITurnRouteFingerprint(a *Account) [32]byte {
 	}
 	routeCredentials := make(map[string]any)
 	for key, value := range a.Credentials {
-		if key == OpenAIModelMappingModeKey {
-			// Missing/empty/whitelist are the same legacy admission policy.
-			// Persisting that default must not break an unchanged WS binding.
-			if a.IsOpenAIModelMappingAliases() {
-				routeCredentials[key] = "aliases"
-			}
-			continue
-		}
+
 		switch key {
 		case "access_token", "refresh_token", "id_token", "_token_version",
 			"expires_at", "expires_in", "token_type", "scope":

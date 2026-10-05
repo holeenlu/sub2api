@@ -286,17 +286,10 @@ const testPrompt = ref('')
 const loadingModels = ref(false)
 let abortController: AbortController | null = null
 const generatedImages = ref<PreviewImage[]>([])
-const testMode = ref<'default' | 'compact' | 'bps_tools'>('default')
+const testMode = ref<'default' | 'compact'>('default')
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
-const isBPSAccount = computed(() =>
-  isOpenAIAccount.value && props.account?.type === 'oauth' && props.account?.extra?.openai_excel_bps === true
-)
-const openAITestModeOptions = computed(() => isBPSAccount.value
-  ? [
-      { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
-      { value: 'bps_tools', label: t('admin.accounts.openai.testModeBPSTools') }
-    ]
-  : [
+
+const openAITestModeOptions = computed(() => [
       { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
       { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
     ])

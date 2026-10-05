@@ -22,7 +22,7 @@
 - 排队及 WebSocket 轮次通过现有鉴权缓存复核 Key 禁用/删除/过期/额度、用户、IP、分组、模型及实际使用的能力。绑定、平台或计费模式改变返回可重试的 `503 / API_KEY_GROUP_CHANGED`，不会把旧路由和新授权混用。鉴权缓存版本提升到 `28`，旧快照自动失效。
 - Key 槽由 Redis 原子脚本分配，有请求 ID、续租和失租停上游机制。先停止并等待上游工作结束，再释放容量，避免断连释放过早导致超限。Live 原有 Key/用户/账号槽转入联合租约，避免重复计数；进程停机取消等待任务。
 - 达上限且关闭排队：`429 / gateway_concurrency_limit`；队列满：`429 / api_key_queue_full`；超时：`429 / api_key_queue_timeout`。WebSocket 鉴权/权限错误关闭码 `1008`，容量或临时故障为 `1013`。Redis 不可用的受限 Key 拒绝准入；Key 级本地容量错误保留诊断，不视为上游账号故障。
-- 同组模型目录发布/定价校验、实际选号分组粘连、已有容量重试预算、BPS 主库资格检查和逐次 RPM、TPM 有界重试保持。没有恢复独立 BPS、Prism、Mihomo、请求采集、用户禁用模型、自动 BPS/优先调度/凭证运营。
+- 同组模型目录发布/定价校验、实际选号分组粘连、已有容量重试预算、原生请求主库资格检查和逐次 RPM保持。没有恢复独立 BPS、Prism、Mihomo、请求采集、用户禁用模型、自动 BPS/优先调度/凭证运营。
 
 ## 升级与兼容
 
@@ -30,4 +30,4 @@
 
 没有修改依赖版本、锁文件或发版触发器；仅使用现有锁文件准备前端验证依赖。共享代码变更仍需要正常滚动部署并确认多实例使用同一 Redis；Key 限制只对已升级进程生效，须完成全实例升级后启用。默认值不同的实例不应混用不同排队策略。
 
-代码入口：`api_key_queue.go`、`api_key_slot_lease.go`、`api_key_admission_owner.go`、`concurrency_cache.go`、`gateway_helper.go`、`openai_gateway_handler.go`、`openai_ws_forwarder_ingress.go`、`openai_live.go`、`KeysView.vue`。本轮验证结果见 `docs/EXCEL_BPS_INTEGRATION.md` 最新记录。
+代码入口：`api_key_queue.go`、`api_key_slot_lease.go`、`api_key_admission_owner.go`、`concurrency_cache.go`、`gateway_helper.go`、`openai_gateway_handler.go`、`openai_ws_forwarder_ingress.go`、`openai_live.go`、`KeysView.vue`。本轮验证结果见 项目对应提交的验证记录。

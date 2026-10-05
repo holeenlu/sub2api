@@ -14,9 +14,7 @@ import (
 const requestIDHeader = "X-Request-ID"
 
 func requestLogPath(path string) string {
-	if strings.HasPrefix(path, "/api/bps-images/") {
-		return "/api/bps-images/[redacted]"
-	}
+
 	return path
 }
 

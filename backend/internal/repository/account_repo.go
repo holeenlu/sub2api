@@ -110,6 +110,23 @@ func stripCodexFingerprintSeedFromExtraUpdate(extra map[string]any) map[string]a
 	return stripped
 }
 
+// Reject removed settings at the shared persistence boundary. Migration 265/266
+// cleans stored data; stale editors/imports must fail instead of silently changing
+// protocol, model access, or billing semantics. Do not repeat this policy in readers.
+func validateAccountWriteFields(credentials, extra map[string]any) error {
+	if _, exists := credentials["model_mapping_mode"]; exists {
+		return service.ErrUnsupportedAccountField.WithMetadata(map[string]string{"field": "credentials.model_mapping_mode"})
+	}
+	for key := range extra {
+		if key == "openai_excel_bps" || strings.HasPrefix(key, "openai_excel_bps_") ||
+			key == "openai_bps" || strings.HasPrefix(key, "openai_bps_") ||
+			key == "cost_multiplier" || key == "cost_multiplier_auto_sync" {
+			return service.ErrUnsupportedAccountField.WithMetadata(map[string]string{"field": "extra." + key})
+		}
+	}
+	return nil
+}
+
 // NewAccountRepository 创建账户仓储实例。
 // 这是对外暴露的构造函数，返回接口类型以便于依赖注入。
 func NewAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCache service.SchedulerCache) service.AccountRepository {
@@ -143,6 +160,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		return service.ErrAccountNilInput
 	}
 
+	if err := validateAccountWriteFields(account.Credentials, account.Extra); err != nil {
+		return err
+	}
 	builder := client.Account.Create().
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
@@ -469,6 +489,9 @@ func (r *accountRepository) updateAccount(
 	if account == nil {
 		return nil
 	}
+	if err := validateAccountWriteFields(account.Credentials, account.Extra); err != nil {
+		return err
+	}
 
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
@@ -741,19 +764,6 @@ func lockAndMergeAccountProbeExtra(
 		}
 	}
 	extra := service.MergeOpenAICodexTicketExtra(copyJSONMap(normalizeJSONMap(account.Extra)), currentExtra)
-	extra = service.MergeExcelBPS403Marker(extra, currentExtra)
-	// Omitted cost means an unrelated edit. Keep the value under the row lock,
-	// including a probe update committed after the edit form was loaded.
-	for _, key := range []string{service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey} {
-		if _, provided := extra[key]; !provided {
-			if value, exists := currentExtra[key]; exists {
-				if extra == nil {
-					extra = make(map[string]any)
-				}
-				extra[key] = value
-			}
-		}
-	}
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
 		service.UpstreamBillingRateSyncEnabledExtraKey,
@@ -874,6 +884,9 @@ func decodeAccountExtraJSON(raw []byte) (any, bool, error) {
 }
 
 func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
+	if err := validateAccountWriteFields(credentials, nil); err != nil {
+		return err
+	}
 	payload, err := json.Marshal(normalizeJSONMap(credentials))
 	if err != nil {
 		return err
@@ -1629,6 +1642,9 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 	expectedProxyID *int64,
 	credentials map[string]any,
 ) (bool, error) {
+	if err := validateAccountWriteFields(credentials, nil); err != nil {
+		return false, err
+	}
 	if r == nil || r.sql == nil {
 		return false, errors.New("account repository SQL executor is not configured")
 	}
@@ -2469,7 +2485,7 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(
 		ctx,
-		`UPDATE accounts SET 
+		`UPDATE accounts SET
 			extra = jsonb_set(
 				jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_rate_limits}'::text[], COALESCE(extra->'model_rate_limits', '{}'::jsonb), true),
 				ARRAY['model_rate_limits', $1]::text[],
@@ -2818,6 +2834,9 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 }
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if err := validateAccountWriteFields(nil, updates); err != nil {
+		return err
+	}
 	updates = stripCodexFingerprintSeedFromExtraUpdate(updates)
 	if len(updates) == 0 {
 		return nil
@@ -2939,11 +2958,7 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 	rateMultiplier *float64,
 ) error {
 	updates := map[string]any{service.UpstreamBillingProbeExtraKey: snapshot}
-	if service.IsUpstreamBillingProbeIdentity(account.Platform, account.Type) {
-		if cost, ok := snapshot.CostMultiplierToSync(); ok {
-			updates[service.AccountCostMultiplierExtraKey] = cost
-		}
-	}
+
 	payload, err := json.Marshal(updates)
 	if err != nil {
 		return err
@@ -2991,11 +3006,7 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 	result, err := client.ExecContext(ctx, `
 		UPDATE accounts
 		SET
-			extra = COALESCE(extra, '{}'::jsonb) || CASE
-				WHEN extra @> '{"cost_multiplier_auto_sync": true}'::jsonb
-				THEN $1::jsonb
-				ELSE $1::jsonb - 'cost_multiplier'
-			END,
+			extra = COALESCE(extra, '{}'::jsonb) || $1::jsonb,
 			rate_multiplier = CASE
 				WHEN $10::numeric IS NOT NULL
 					AND extra @> '{"upstream_billing_probe_enabled": true}'::jsonb
@@ -3104,6 +3115,9 @@ func ollamaCloudUsageSnapshotClearRequested(extra map[string]any) bool {
 func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates service.AccountBulkUpdate) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
+	}
+	if err := validateAccountWriteFields(updates.Credentials, updates.Extra); err != nil {
+		return 0, err
 	}
 	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
 
@@ -3235,34 +3249,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			extraExpression += " || $" + itoa(idx) + "::jsonb"
 			args = append(args, payload)
 			idx++
-			if enabled, exists := updates.Extra["openai_excel_bps"].(bool); exists && !enabled {
-				extraExpression = "(" + extraExpression + ") - 'openai_excel_bps' - 'openai_excel_bps_models' - 'openai_excel_bps_cache_creation_as_input' - 'openai_excel_bps_auto_disable_on_403' - 'openai_excel_bps_auto_recover_on_403' - 'openai_excel_bps_403_recovery_interval_minutes' - 'openai_excel_bps_auto_move_on_403' - 'openai_excel_bps_403_target_group_id' - 'openai_excel_bps_ignore_images' - 'openai_excel_bps_ignore_encrypted_content' - 'openai_excel_bps_omit_unsupported_tools'"
-			} else {
-				// Turning the protocol back on acknowledges an automatic 403 shutdown.
-				if enabled {
-					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_403_disabled_at'"
-					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_403_last_probe_at'"
-				}
-				// JSON null is a present scope and would disable every model.
-				// Remove the key to restore the all-models routing contract.
-				if scope, exists := updates.Extra["openai_excel_bps_models"]; exists && scope == nil {
-					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_models'"
-				}
-				if enabled, exists := updates.Extra["openai_excel_bps_cache_creation_as_input"].(bool); exists && !enabled {
-					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_cache_creation_as_input'"
-				}
-				if enabled, exists := updates.Extra["openai_excel_bps_auto_disable_on_403"].(bool); exists && !enabled {
-					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_auto_disable_on_403'"
-				}
-				if enabled, exists := updates.Extra[service.ExcelBPSAutoRecoverOn403Key].(bool); exists && !enabled {
-					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_auto_recover_on_403'"
-				}
-				if enabled, exists := updates.Extra[service.ExcelBPSAutoMoveOn403Key].(bool); exists && !enabled {
-					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_auto_move_on_403' - 'openai_excel_bps_403_target_group_id'"
-				} else if target, exists := updates.Extra[service.ExcelBPS403TargetGroupIDKey]; exists && target == nil {
-					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_403_target_group_id'"
-				}
-			}
+
 			if upstreamBillingProbeExplicitlyDisabled(updates.Extra) || upstreamBillingProbeSnapshotClearRequested(updates.Extra) {
 				extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 			}

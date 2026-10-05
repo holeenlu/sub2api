@@ -1,5 +1,4 @@
 import modelCatalog from './modelCatalog'
-import autoBPSOps from './autoBPSOps'
 import ui from './ui'
 import landing from './landing'
 import common from './common'
@@ -12,7 +11,6 @@ import docs from './docs'
 
 export default {
   modelCatalog,
-  autoBPSOps,
   ...ui,
   ...landing,
   ...common,

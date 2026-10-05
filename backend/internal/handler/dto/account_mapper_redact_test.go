@@ -128,34 +128,3 @@ func TestAccountFromServiceShallow_NilCredentialsOmitsStatus(t *testing.T) {
 	require.Nil(t, got.Credentials)
 	require.Nil(t, got.CredentialsStatus)
 }
-
-func TestRetiredAccountDTORedactsTokenKeepsExpiry(t *testing.T) {
-	src := &service.Account{ID: 42, Platform: "openai_bps", Type: service.AccountTypeOAuth, Credentials: map[string]any{"access_token": "bps-test-secret", "chatgpt_account_id": "workspace", "expires_at": "2026-10-01T00:00:00Z"}}
-	dto := AccountFromServiceShallow(src)
-	require.NotContains(t, dto.Credentials, "access_token")
-	require.True(t, dto.CredentialsStatus["has_access_token"])
-	require.Equal(t, "workspace", dto.Credentials["chatgpt_account_id"])
-	require.Equal(t, "2026-10-01T00:00:00Z", dto.Credentials["expires_at"])
-	data, err := json.Marshal(dto)
-	require.NoError(t, err)
-	require.NotContains(t, string(data), "bps-test-secret")
-}
-
-func TestRetiredAccountDTOHidesLegacyCredentialDiagnostics(t *testing.T) {
-	now := time.Now().UTC()
-	source := &service.Account{ID: 42, Platform: "openai_bps", Type: service.AccountTypeOAuth, Status: service.StatusError, Schedulable: true, Credentials: map[string]any{"access_token": "private-bps-token", "chatgpt_account_id": "workspace", "expires_at": now.Add(time.Hour).Format(time.RFC3339)}, Extra: map[string]any{"openai_bps_credential_state": map[string]any{"status": "revoked", "error_code": "token_revoked", "observed_at": now.Format(time.RFC3339Nano), "managed_status_error": true, "credential_identity": "private-fingerprint"}}}
-	full := AccountFromService(source)
-	lite := AccountListItemFromAccount(full)
-	require.True(t, full.CredentialsStatus["has_access_token"])
-	require.NotContains(t, full.Credentials, "access_token")
-	require.NotContains(t, full.Extra, "openai_bps_credential_state")
-	data, err := json.Marshal(lite)
-	require.NoError(t, err)
-	require.NotContains(t, string(data), "private-bps-token")
-	require.NotContains(t, string(data), "private-fingerprint")
-	require.NotContains(t, string(data), "bps_credential_state")
-	source.Extra = nil
-	source.Status = service.StatusActive
-	source.Credentials["expires_at"] = now.Add(-time.Hour).Format(time.RFC3339)
-	require.Equal(t, service.StatusActive, source.Status)
-}

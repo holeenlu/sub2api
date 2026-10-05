@@ -82,7 +82,7 @@ func (s *GroupModelCatalogService) resolve(ctx context.Context, group *Group, ch
 	active := make([]Account, 0, len(accounts))
 	platforms := map[string]bool{}
 	for _, a := range accounts {
-		if !isCatalogAccountActive(&a) || IsRetiredPlatform(a.Platform) || (group.RequireOAuthOnly && a.Type == AccountTypeAPIKey) {
+		if !isCatalogAccountActive(&a) || IsUnsupportedPlatform(a.Platform) || (group.RequireOAuthOnly && a.Type == AccountTypeAPIKey) {
 			continue
 		}
 		if group.Platform != PlatformComposite && a.Platform != group.Platform && !mixedListingAccountAllowed(group.Platform, &a) {

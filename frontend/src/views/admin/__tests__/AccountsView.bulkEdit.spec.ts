@@ -100,7 +100,7 @@ const ProbeDataTableStub = {
       <div v-for="row in loading ? [] : data" :key="row.id" :data-account-id="row.id">
         <div data-test="select-row"><slot name="cell-select" :row="row" /></div>
         <div data-test="account-rate"><slot name="cell-rate_multiplier" :row="row" /></div>
-        <span data-test="account-cost">{{ row.extra?.cost_multiplier }}</span>
+        <span data-test="account-snapshot-rate">{{ row.extra?.upstream_billing_probe?.data?.effective_rate_multiplier }}</span>
         <slot name="cell-upstream_billing_rate" :row="row" />
       </div>
     </div>
@@ -131,7 +131,7 @@ const BulkEditAccountModalStub = {
 const makeProbeAccount = (id: number, rate = 0.25) => ({
   id, name: 'account-' + id, platform: 'openai', type: 'apikey',
   status: 'active', schedulable: true, rate_multiplier: rate,
-  extra: { upstream_billing_probe_enabled: true, cost_multiplier: 0.1 },
+  extra: { upstream_billing_probe_enabled: true },
   created_at: '2026-07-13T00:00:00Z', updated_at: '2026-07-13T00:00:00Z'
 })
 
@@ -147,7 +147,7 @@ const probePage = (ids: number[], total = ids.length, page = 1) => ({
 const mockRatePage = (ids: number[], total = ids.length) => {
   getUpstreamBillingRatesWithEtag.mockResolvedValue({
     notModified: false, etag: 'rates-etag',
-    data: { items: ids.map(account_id => ({ account_id, snapshot: probeSnapshot, cost_multiplier: 0.065 })), total, page: 1, page_size: 20 }
+    data: { items: ids.map(account_id => ({ account_id, snapshot: probeSnapshot })), total, page: 1, page_size: 20 }
   })
 }
 
@@ -672,7 +672,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.065x')
   })
 
-  it.each(['last_used_at', 'name', 'status'])('refreshes saved cost under %s sorting without reloading the table', async (sortBy) => {
+  it.each(['last_used_at', 'name', 'status'])('refreshes billing snapshots under %s sorting without reloading the table', async (sortBy) => {
     localStorage.setItem('account-table-sort', JSON.stringify({ key: sortBy, order: 'desc' }))
     listAccounts.mockResolvedValue(probePage([7, 11]))
     probeUpstreamBilling.mockResolvedValue({ account_id: 7, snapshot: probeSnapshot })
@@ -690,7 +690,7 @@ describe('admin AccountsView bulk edit scope', () => {
       1, 20, expect.objectContaining({ sort_by: sortBy, sort_order: 'desc' }),
       expect.objectContaining({ etag: null, signal: expect.any(AbortSignal) })
     )
-    expect(wrapper.get('[data-account-id="7"] [data-test="account-cost"]').text()).toBe('0.065')
+    expect(wrapper.get('[data-account-id="7"] [data-test="account-snapshot-rate"]').text()).toBe('0.065')
     expect(wrapper.findAll('[data-account-id]').map(item => item.attributes('data-account-id'))).toEqual(['7', '11'])
     expect(listAccounts).toHaveBeenCalledTimes(1)
     expect(getBatchTodayStats).toHaveBeenCalledTimes(statsCalls)
@@ -808,7 +808,7 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
     expect(probeUpstreamBillingBatch).toHaveBeenCalledWith([7])
     expect(getUpstreamBillingRatesWithEtag).toHaveBeenCalledTimes(1)
-    expect(wrapper.get('[data-account-id="7"] [data-test="account-cost"]').text()).toBe('0.065')
+    expect(wrapper.get('[data-account-id="7"] [data-test="account-snapshot-rate"]').text()).toBe('0.065')
     expect(wrapper.get('[data-account-id="11"]').element).toBe(row)
     expect(wrapper.findAll('[data-account-id]').map(item => item.attributes('data-account-id'))).toEqual(['7', '11'])
     expect(getBatchTodayStats).toHaveBeenCalledTimes(statsCalls)

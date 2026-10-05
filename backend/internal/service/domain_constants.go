@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
 // Status constants
@@ -55,6 +56,14 @@ const (
 	// account rows. Scheduling-threshold evaluation never pauses kiro accounts.
 	PlatformKiro = "kiro"
 )
+
+// IsUnsupportedPlatform rejects unknown stored or requested providers. An empty
+// platform retains the existing caller-specific default for omitted inputs.
+func IsUnsupportedPlatform(platform string) bool {
+	return platform != "" && platform != PlatformComposite && !isConcreteRequestPlatform(platform)
+}
+
+var ErrUnsupportedPlatform = infraerrors.BadRequest("UNSUPPORTED_PLATFORM", "This platform is not supported")
 
 // 账号接入模式（国产供应商）：按量付费 vs Coding Plan。
 const (

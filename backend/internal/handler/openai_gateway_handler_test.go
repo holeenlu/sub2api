@@ -1770,15 +1770,6 @@ func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
 		require.Equal(t, "model switch requires reconnect", closeErr.Reason())
 	})
 
-	t.Run("switch onto a BPS model does not penalize account", func(t *testing.T) {
-		err := fmt.Errorf("wrapped ingress turn: %w", service.NewOpenAIWSClientCloseError(
-			coderws.StatusPolicyViolation,
-			"model switch requires reconnect",
-			fmt.Errorf("%w: Excel BPS model %q needs the HTTP/SSE bridge", service.ErrOpenAIWSModelSwitchRequiresReconnect, "gpt-6-astra"),
-		))
-		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
-	})
-
 	t.Run("codex_cli_only rejection does not penalize account", func(t *testing.T) {
 		err := service.NewOpenAIWSClientCloseError(
 			coderws.StatusPolicyViolation,

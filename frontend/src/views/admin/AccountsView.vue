@@ -249,7 +249,6 @@
               >
                 {{ accountDisplayEmail(row) }}
               </span>
-              <ExcelBPS403Badge :account="row" :groups="accountGroupsForRow(row)" />
               <CodexDiagnosticBadge :summary="row.codex_diagnostic" @open="openCodexDiagnostic(row)" />
             </div>
           </template>
@@ -504,7 +503,7 @@
 </template>
 
 <script setup lang="ts">
-import { isValidAccountCostMultiplier } from '@/utils/accountCost'
+
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
@@ -541,7 +540,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
-import ExcelBPS403Badge from '@/components/account/ExcelBPS403Badge.vue'
+
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
@@ -1273,12 +1272,9 @@ const applyUpstreamBillingRateSnapshots = async (
     if (!item) return account
     const nextSnapshot = item.snapshot ?? null
     const previousSnapshot = account.extra?.upstream_billing_probe ?? null
-    const costChanged = isValidAccountCostMultiplier(item.cost_multiplier)
-      && account.extra?.cost_multiplier !== item.cost_multiplier
-    if (!costChanged && JSON.stringify(previousSnapshot) === JSON.stringify(nextSnapshot)) return account
+    if (JSON.stringify(previousSnapshot) === JSON.stringify(nextSnapshot)) return account
 
     const nextExtra = { ...(account.extra ?? {}) }
-    if (costChanged) nextExtra.cost_multiplier = item.cost_multiplier
     if (nextSnapshot) nextExtra.upstream_billing_probe = nextSnapshot
     else delete nextExtra.upstream_billing_probe
     const nextAccount = {

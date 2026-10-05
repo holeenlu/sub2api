@@ -1517,8 +1517,8 @@ func (h *AccountHandler) PreviewFromCRS(c *gin.Context) {
 // refreshSingleAccount refreshes credentials for a single refreshable OAuth account.
 // Returns (updatedAccount, warning, error) where warning is used for Antigravity ProjectIDMissing scenario.
 func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *service.Account) (*service.Account, string, error) {
-	if service.IsRetiredPlatform(account.Platform) {
-		return nil, "", service.ErrPlatformRetired
+	if service.IsUnsupportedPlatform(account.Platform) {
+		return nil, "", service.ErrUnsupportedPlatform
 	}
 
 	if !account.IsOAuth() {
@@ -2990,16 +2990,12 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 
 		// Return mapped models
 		var models []openai.Model
-		if account.IsOpenAIModelMappingAliases() {
-			models = append(models, openai.DefaultModels...)
-		}
+
 		for requestedModel := range mapping {
 			var found bool
 			for _, dm := range openai.DefaultModels {
 				if dm.ID == requestedModel {
-					if !account.IsOpenAIModelMappingAliases() {
-						models = append(models, dm)
-					}
+					models = append(models, dm)
 					found = true
 					break
 				}

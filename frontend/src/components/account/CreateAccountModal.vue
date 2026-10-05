@@ -2941,7 +2941,7 @@
         :type="form.type"
       />
 
-      <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div class="grid grid-cols-2 gap-4 lg:grid-cols-3">
         <div>
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
           <input v-model.number="form.concurrency" type="number" min="1" class="input"
@@ -2970,21 +2970,7 @@
           <input v-model.number="form.rate_multiplier" type="number" min="0" step="0.001" class="input" />
           <p class="input-hint">{{ t('admin.accounts.billingRateMultiplierHint') }}</p>
         </div>
-        <div>
-          <label class="input-label" for="account-cost-multiplier">{{ t('admin.accounts.costMultiplier') }}</label>
-          <input
-            id="account-cost-multiplier"
-            v-model.number="costMultiplier"
-            type="number"
-            min="0"
-            max="1000000"
-            step="0.001"
-            required
-            class="input"
-            data-testid="account-cost-multiplier"
-          />
-          <p class="input-hint">{{ t('admin.accounts.costMultiplierHint') }}</p>
-        </div>
+
       </div>
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
@@ -3856,7 +3842,6 @@
 </template>
 
 <script setup lang="ts">
-import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier } from '@/utils/accountCost'
 
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -3988,14 +3973,12 @@ const oauthStepTitle = computed(() => {
 
 // Platform-specific hints for API Key type
 // 上游ID：直接上游声明请求标识的响应头名，留空不记录。
-const costMultiplier = ref(DEFAULT_ACCOUNT_COST_MULTIPLIER)
+
 const upstreamRequestIdHeader = ref('')
 const withAccountExtraSettings = (extra?: Record<string, unknown>): Record<string, unknown> => {
-  if (!isValidAccountCostMultiplier(costMultiplier.value)) {
-    throw new Error(t('admin.accounts.costMultiplierInvalid'))
-  }
+
   const name = upstreamRequestIdHeader.value.trim()
-  return { ...(extra || {}), cost_multiplier: costMultiplier.value, ...(name ? { upstream_request_id_header: name } : {}) }
+  return { ...(extra || {}), ...(name ? { upstream_request_id_header: name } : {}) }
 }
 
 const baseUrlHint = computed(() => {
@@ -5313,7 +5296,7 @@ const resetForm = () => {
   form.concurrency = 10
   form.load_factor = null
   form.priority = 1
-  costMultiplier.value = DEFAULT_ACCOUNT_COST_MULTIPLIER
+
   form.rate_multiplier = 1
   form.group_ids = []
   form.expires_at = null
@@ -5643,10 +5626,7 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
-  if (!isValidAccountCostMultiplier(costMultiplier.value)) {
-    appStore.showError(t('admin.accounts.costMultiplierInvalid'))
-    return
-  }
+
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {
@@ -6309,7 +6289,6 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
   }
 }
 
-
 // OpenAI OAuth 授权码兑换
 const handleOpenAIExchange = async (authCode: string) => {
   const oauthClient = openaiOAuth
@@ -6665,7 +6644,6 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         errors.push(`#${i + 1}: ${errMsg}`)
       }
     }
-
 
     // Show results
     if (successCount > 0 && failedCount === 0) {

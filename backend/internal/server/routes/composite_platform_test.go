@@ -3,6 +3,7 @@ package routes
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -317,6 +318,39 @@ func TestCompositeGeminiTargetPlatformMiddlewareUsesPathRoute(t *testing.T) {
 }
 
 type failingBodyReader struct{ err error }
+
+func TestCompositeUnsupportedTargetUsesGatewayErrorContract(t *testing.T) {
+	for _, gemini := range []bool{false, true} {
+		t.Run(fmt.Sprintf("gemini=%t", gemini), func(t *testing.T) {
+			resolver := service.NewCompositeRouteResolver(compositeRouteRepoStub{routes: []service.CompositeModelRoute{{
+				GroupID: 1, PublicModel: "legacy-model", MatchType: service.CompositeRouteMatchExact,
+				TargetPlatform: "unsupported-provider", Endpoint: service.CompositeRouteEndpointAny, Enabled: true,
+			}}})
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{ID: 1, Platform: service.PlatformComposite}})
+				c.Next()
+			})
+			path := "/v1/responses"
+			if gemini {
+				router.Use(compositeGeminiTargetPlatformMiddleware(resolver))
+				path = "/v1beta/models/*modelAction"
+			} else {
+				router.Use(compositeTargetPlatformMiddleware(resolver))
+			}
+			forwarded := false
+			router.POST(path, func(c *gin.Context) { forwarded = true; c.Status(http.StatusNoContent) })
+			if gemini {
+				path = "/v1beta/models/legacy-model:generateContent"
+			}
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"legacy-model"}`)))
+			require.Equal(t, http.StatusGone, w.Code)
+			require.JSONEq(t, `{"error":{"type":"invalid_request_error","code":"unsupported_platform","message":"This platform is not supported"}}`, w.Body.String())
+			require.False(t, forwarded)
+		})
+	}
+}
 
 func (r failingBodyReader) Read([]byte) (int, error) { return 0, r.err }
 
