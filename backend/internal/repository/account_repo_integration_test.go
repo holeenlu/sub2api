@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"maps"
 	"strings"
 	"testing"
@@ -1818,4 +1819,33 @@ func (s *AccountRepoSuite) TestRemovedAccountFieldsRejectWritesWithoutPartialCha
 			s.Require().Equal(before, after, "rejected writes must preserve mappings, diagnostics, and the complete account")
 		})
 	}
+}
+
+func TestAccountRepositoryGrokVoiceOwnershipRemainsTenantBound(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	_, err := tx.ExecContext(ctx, `CREATE TEMP TABLE gateway_media_voices (
+ account_id BIGINT,voice_id TEXT,user_id BIGINT,group_id BIGINT,metadata JSONB,created_at TIMESTAMPTZ DEFAULT NOW(),
+ PRIMARY KEY(account_id,voice_id)) ON COMMIT DROP`)
+	require.NoError(t, err)
+	repo := &accountRepository{sql: tx}
+	voice := &service.GatewayMediaVoice{ID: "voice-one", AccountID: 10, UserID: 20, GroupID: 30, Metadata: json.RawMessage(`{"voice_id":"voice-one"}`)}
+	require.NoError(t, repo.PutVoice(ctx, voice))
+	owned, err := repo.GetVoice(ctx, 30, 20, "voice-one")
+	require.NoError(t, err)
+	require.Equal(t, int64(10), owned.AccountID)
+	_, err = repo.GetVoice(ctx, 30, 21, "voice-one")
+	require.ErrorIs(t, err, service.ErrMediaNotOwned)
+	stolen := *voice
+	stolen.UserID = 21
+	require.ErrorIs(t, repo.PutVoice(ctx, &stolen), service.ErrMediaNotOwned)
+	require.NoError(t, repo.DeleteVoice(ctx, 30, 21, "voice-one"))
+	_, err = repo.GetVoice(ctx, 30, 20, "voice-one")
+	require.NoError(t, err)
+	foreign, err := repo.ListVoices(ctx, 31, 20)
+	require.NoError(t, err)
+	require.Empty(t, foreign)
+	require.NoError(t, repo.DeleteVoice(ctx, 30, 20, "voice-one"))
+	_, err = repo.GetVoice(ctx, 30, 20, "voice-one")
+	require.ErrorIs(t, err, service.ErrMediaNotOwned)
 }

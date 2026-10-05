@@ -452,7 +452,10 @@ export default {
         accountSchedulingThresholdsDescription: '當帳號目前原生用量視窗（OpenAI Codex/Anthropic 工作階段，或 Grok 請求/Token 利用率）達到該百分比時，@:common.siteName 會臨時將其移出排程，直到視窗重設。填 100 表示停用。',
         accountSchedulingThresholdsGlobalHint: '系統級預設值，作用於該平台全部帳號。可在帳號編輯頁對單個帳號覆蓋。',
         accountSchedulingThresholdsDisabledHint: '100 表示停用該平台自動停調；1–99 表示達到該利用率後暫停排程。',
-        accountSchedulingThresholdsRangeHint: '整數 1–100（百分比）。僅 OpenAI / Anthropic / Grok。'
+        accountSchedulingThresholdsRangeHint: '整數 1–100（百分比）。僅 OpenAI / Anthropic / Grok。',
+        accountSchedulingThresholdsFableLabel: 'anthropic · 7d Fable',
+        accountSchedulingThresholdsFableHint:
+          '整數 1–100（百分比）。只檢查 7d F（Fable 專屬）視窗；達到該值後僅停調 Fable 模型，帳號對其他模型照常可用。共享 7d 視窗只由普通 Anthropic 閾值控制。100 表示不單獨設定，沿用 Anthropic 閾值。'
       },
       upstreamBillingProbe: {
         title: '上游倍率自動探測',

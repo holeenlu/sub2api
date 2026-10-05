@@ -210,3 +210,30 @@ func setAccountModelRateLimitSnapshot(account *Account, scope string, resetAt ti
 	}
 	limits[scope] = payload
 }
+
+func (a *Account) modelRateLimitReason(scope string) string {
+	if a == nil || a.Extra == nil || scope == "" {
+		return ""
+	}
+	rawLimits, ok := a.Extra[modelRateLimitsKey].(map[string]any)
+	if !ok {
+		return ""
+	}
+	rawLimit, ok := rawLimits[scope].(map[string]any)
+	if !ok {
+		return ""
+	}
+	reason, _ := rawLimit["reason"].(string)
+	return reason
+}
+
+func clearAccountModelRateLimitSnapshot(account *Account, scope string) {
+	if account == nil || account.Extra == nil || strings.TrimSpace(scope) == "" {
+		return
+	}
+	limits, ok := account.Extra[modelRateLimitsKey].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(limits, scope)
+}

@@ -154,3 +154,14 @@ func resolveOpenAIWSExecutionScope(c *gin.Context, body []byte, apiKeyID int64) 
 	}
 	return "", ""
 }
+
+func openAIWSTenantScope(c *gin.Context) string {
+	if c != nil {
+		if raw, ok := c.Get(openAIHTTPResponseOwnerContextKey); ok {
+			if owner, ok := raw.(openAIHTTPResponseOwner); ok && owner.userID > 0 {
+				return fmt.Sprintf("%d/user/%d", getOpenAIGroupIDFromContext(c), owner.userID)
+			}
+		}
+	}
+	return fmt.Sprintf("%d/key/%d", getOpenAIGroupIDFromContext(c), getAPIKeyIDFromContext(c))
+}

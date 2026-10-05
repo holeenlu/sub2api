@@ -26,9 +26,10 @@ func TestPlatformSchedulingThresholds_RoundTrip_DefaultsAndStoredValues(t *testi
 
 	got := svc.parseSettings(map[string]string{})
 	require.Equal(t, map[string]int{
-		PlatformOpenAI:    100,
-		PlatformAnthropic: 100,
-		PlatformGrok:      100,
+		PlatformOpenAI:                         100,
+		PlatformAnthropic:                      100,
+		SchedulingThresholdScopeAnthropicFable: 100,
+		PlatformGrok:                           100,
 	}, got.AccountSchedulingThresholds)
 
 	got = svc.parseSettings(map[string]string{
@@ -52,7 +53,7 @@ func TestBuildSystemSettingsUpdates_PersistsAccountSchedulingThresholds(t *testi
 		},
 	})
 	require.NoError(t, err)
-	require.JSONEq(t, `{"openai":91,"anthropic":88,"grok":77}`, updates[SettingKeyAccountSchedulingThresholds])
+	require.JSONEq(t, `{"openai":91,"anthropic":88,"anthropic_fable":100,"grok":77}`, updates[SettingKeyAccountSchedulingThresholds])
 }
 
 func TestValidateAndNormalizeAccountSchedulingThresholds_FillsMissingPlatforms(t *testing.T) {
@@ -101,7 +102,7 @@ func TestGetAccountSchedulingThresholds_ReadsStoredValue(t *testing.T) {
 		SettingKeyAccountSchedulingThresholds: `{"openai":93,"grok":88,"kiro":87}`,
 	})
 
-	got := svc.GetAccountSchedulingThresholds(context.Background())
+	got, _ := svc.GetAccountSchedulingThresholds(context.Background())
 
 	require.Equal(t, 93, got[PlatformOpenAI])
 	require.Equal(t, 100, got[PlatformAnthropic])
@@ -114,12 +115,12 @@ func TestGetAccountSchedulingThresholds_MissingSettingUsesDefaultsAndNormalCache
 	repo := svc.settingRepo.(*mockSettingRepo)
 	repo.getValueErr = ErrSettingNotFound
 
-	got := svc.GetAccountSchedulingThresholds(context.Background())
+	got, _ := svc.GetAccountSchedulingThresholds(context.Background())
 	require.Equal(t, defaultAccountSchedulingThresholds(), got)
 	require.Equal(t, 1, repo.getValueCalls)
 
 	repo.data[SettingKeyAccountSchedulingThresholds] = `{"openai":91}`
-	got = svc.GetAccountSchedulingThresholds(context.Background())
+	got, _ = svc.GetAccountSchedulingThresholds(context.Background())
 	require.Equal(t, 100, got[PlatformOpenAI], "missing-setting defaults should remain cached for the normal TTL")
 	require.Equal(t, 1, repo.getValueCalls)
 
@@ -138,7 +139,7 @@ func TestUpdateSettings_OmittedAccountSchedulingThresholdsDoesNotCacheDefaults(t
 	})
 	require.NoError(t, err)
 
-	got := svc.GetAccountSchedulingThresholds(context.Background())
+	got, _ := svc.GetAccountSchedulingThresholds(context.Background())
 	require.Equal(t, 85, got[PlatformOpenAI])
 	require.Equal(t, 88, got[PlatformGrok])
 	require.NotContains(t, got, "kiro")
@@ -152,7 +153,7 @@ func TestAccountSchedulingThresholds_InvalidStoredValueUsesSameDefaultsInSetting
 	settings := svc.parseSettings(map[string]string{
 		SettingKeyAccountSchedulingThresholds: `{"openai":0,"grok":88,"kiro":87}`,
 	})
-	cached := svc.GetAccountSchedulingThresholds(context.Background())
+	cached, _ := svc.GetAccountSchedulingThresholds(context.Background())
 
 	require.Equal(t, settings.AccountSchedulingThresholds, cached)
 	require.Equal(t, 100, cached[PlatformOpenAI])
@@ -162,10 +163,11 @@ func TestAccountSchedulingThresholds_InvalidStoredValueUsesSameDefaultsInSetting
 
 func TestGetAccountSchedulingThresholds_NilRepoReturnsDefaults(t *testing.T) {
 	svc := &SettingService{}
-	got := svc.GetAccountSchedulingThresholds(context.Background())
+	got, _ := svc.GetAccountSchedulingThresholds(context.Background())
 	require.Equal(t, map[string]int{
-		PlatformOpenAI:    100,
-		PlatformAnthropic: 100,
-		PlatformGrok:      100,
+		PlatformOpenAI:                         100,
+		PlatformAnthropic:                      100,
+		SchedulingThresholdScopeAnthropicFable: 100,
+		PlatformGrok:                           100,
 	}, got)
 }
