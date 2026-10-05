@@ -11,6 +11,8 @@ import (
 
 // ProvideAdminHandlers creates the AdminHandlers struct
 func ProvideAdminHandlers(
+	scheduledTests *service.ScheduledTestService,
+	scheduledRunner *service.ScheduledTestRunnerService,
 	registry *service.ModelCatalogService,
 	groupCatalog *service.GroupModelCatalogService,
 	modelCatalogHandler *admin.ModelCatalogHandler,
@@ -57,6 +59,7 @@ func ProvideAdminHandlers(
 	openAIGatewayService *service.OpenAIGatewayService,
 	claudeResetCredits *service.ClaudeResetCreditService,
 ) *AdminHandlers {
+	accountHandler.SetScheduledTests(scheduledTests, scheduledRunner)
 	groupHandler.SetModelCatalog(groupCatalog, registry)
 	channelHandler.SetModelCatalog(registry)
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)

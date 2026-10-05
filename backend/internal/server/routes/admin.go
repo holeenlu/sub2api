@@ -392,7 +392,11 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/:id/codex-ticket-invalidations", h.Admin.Account.ListCodexTicketInvalidations)
 		accounts.GET("/:id/codex-ticket-invalidations/:event_id", h.Admin.Account.GetCodexTicketInvalidation)
 		accounts.POST("/:id/codex-ticket-harvest", h.Admin.Account.HarvestCodexTicket)
-		accounts.POST("/:id/codex-ticket-diagnostic", h.Admin.Account.DiagnoseCodexModels)
+		accounts.POST("/:id/codex-ticket-diagnostic", h.Admin.Account.StartCodexDiagnosticRun)
+		accounts.GET("/:id/codex-ticket-diagnostic", h.Admin.Account.GetCodexDiagnosticPlan)
+		accounts.PUT("/:id/codex-ticket-diagnostic", h.Admin.Account.SaveCodexDiagnosticPlan)
+		accounts.GET("/:id/codex-ticket-diagnostic/history", h.Admin.Account.ListCodexDiagnosticRuns)
+		accounts.POST("/:id/codex-ticket-diagnostic/:run_id/cancel", h.Admin.Account.CancelCodexDiagnosticRun)
 		accounts.PUT("/:id/codex-ticket-participation", h.Admin.Account.SetCodexTicketParticipation)
 		accounts.GET("/:id/claude/reset-credits", h.Admin.Account.ClaudeResetCredits)
 		// Same protection as the Codex reset-quota route (admin auth, audit, compliance guard).

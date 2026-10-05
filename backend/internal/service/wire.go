@@ -655,13 +655,16 @@ func ProvideIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Co
 
 // ProvideScheduledTestService creates ScheduledTestService.
 func ProvideScheduledTestService(
-	planRepo ScheduledTestPlanRepository,
-	resultRepo ScheduledTestResultRepository,
+	planRepo ScheduledTestPlanRepository, resultRepo ScheduledTestResultRepository,
+	accounts AccountRepository, keys *APIKeyService, users UserRepository, gateway *OpenAIGatewayService,
 ) *ScheduledTestService {
-	return NewScheduledTestService(planRepo, resultRepo)
+	svc := NewScheduledTestService(planRepo, resultRepo)
+	svc.accounts, svc.keys, svc.users, svc.gateway = accounts, keys, users, gateway
+	return svc
 }
 
-// ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
+// ProvideScheduledTestRunnerService creates the shared runner. Routing starts it
+// after both connectivity and billed diagnostic endpoints are ready.
 func ProvideScheduledTestRunnerService(
 	planRepo ScheduledTestPlanRepository,
 	scheduledSvc *ScheduledTestService,
@@ -670,7 +673,6 @@ func ProvideScheduledTestRunnerService(
 	cfg *config.Config,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
-	svc.Start()
 	return svc
 }
 

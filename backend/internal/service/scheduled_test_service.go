@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -12,8 +13,14 @@ var scheduledTestCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom 
 
 // ScheduledTestService provides CRUD operations for scheduled test plans and results.
 type ScheduledTestService struct {
-	planRepo   ScheduledTestPlanRepository
-	resultRepo ScheduledTestResultRepository
+	accounts         AccountRepository
+	keys             *APIKeyService
+	users            UserRepository
+	gateway          *OpenAIGatewayService
+	diagnosticRouter http.Handler
+	diagnosticProbe  func(context.Context, *APIKey, int64, string) CodexDiagnosticItem
+	planRepo         ScheduledTestPlanRepository
+	resultRepo       ScheduledTestResultRepository
 }
 
 // NewScheduledTestService creates a new ScheduledTestService.

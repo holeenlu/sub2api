@@ -1223,6 +1223,8 @@ export interface OpenCodeGoUsageSettings {
 }
 
 export interface Account {
+  codex_diagnostic?: import("@/api/admin/codexTickets").DiagnosticSummary
+
   id: number
   name: string
   notes?: string | null
