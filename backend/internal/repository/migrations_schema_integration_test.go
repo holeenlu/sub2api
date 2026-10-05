@@ -5,12 +5,73 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMigrationsRunner_BPSUpgradePreservesVarcharProviderConstraints(t *testing.T) {
+	prepare, err := migrations.FS.ReadFile("265_prepare_bps_provider_constraints.sql")
+	require.NoError(t, err)
+	remove, err := migrations.FS.ReadFile("265_remove_bps_protocols.sql")
+	require.NoError(t, err)
+	for _, providers := range []string{
+		"'openai_bps'::varchar, 'anthropic'::varchar, 'future_native'::varchar, 'blocked_native'::varchar",
+		"'anthropic'::varchar, 'openai_bps'::varchar, 'future_native'::varchar, 'blocked_native'::varchar",
+		"'anthropic'::varchar, 'future_native'::varchar, 'blocked_native'::varchar, 'openai_bps'::varchar",
+	} {
+		t.Run(providers, func(t *testing.T) {
+			ctx := context.Background()
+			tx := testTx(t)
+			for _, table := range []string{"accounts", "groups", "account_groups", "scheduled_test_plans",
+				"composite_model_routes", "channel_monitors", "channel_monitor_request_templates",
+				"user_platform_quotas", "model_catalog_sources", "model_catalog_jobs",
+				"model_catalog_observations", "settings", "scheduler_outbox"} {
+				_, err = tx.ExecContext(ctx, fmt.Sprintf("CREATE TEMP TABLE %s (LIKE public.%s INCLUDING DEFAULTS) ON COMMIT DROP", table, table))
+				require.NoError(t, err)
+			}
+			for _, table := range []struct{ name, field string }{
+				{"user_platform_quotas", "platform"}, {"composite_model_routes", "target_platform"},
+				{"channel_monitors", "provider"}, {"channel_monitor_request_templates", "provider"},
+			} {
+				_, err = tx.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT provider_upgrade_check CHECK (%s::text IN (%s) AND %s <> 'blocked_native')", table.name, table.field, providers, table.field))
+				require.NoError(t, err)
+			}
+			// Reproduce the deployed varchar constraint failure before applying the fix.
+			_, err = tx.ExecContext(ctx, "SAVEPOINT broken_upgrade")
+			require.NoError(t, err)
+			_, err = tx.ExecContext(ctx, string(remove))
+			require.ErrorContains(t, err, "Cannot safely remove retired provider")
+			_, err = tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT broken_upgrade")
+			require.NoError(t, err)
+			for range 2 {
+				_, err = tx.ExecContext(ctx, string(prepare))
+				require.NoError(t, err)
+			}
+			for range 2 {
+				_, err = tx.ExecContext(ctx, string(remove))
+				require.NoError(t, err)
+			}
+			for _, table := range []struct{ name, field string }{
+				{"user_platform_quotas", "platform"}, {"composite_model_routes", "target_platform"},
+				{"channel_monitors", "provider"}, {"channel_monitor_request_templates", "provider"},
+			} {
+				var expression string
+				require.NoError(t, tx.QueryRowContext(ctx, "SELECT pg_get_expr(conbin,conrelid) FROM pg_constraint WHERE conname='provider_upgrade_check' AND conrelid=$1::regclass", table.name).Scan(&expression))
+				require.NotContains(t, expression, "openai_bps")
+				for provider, allowed := range map[string]bool{"anthropic": true, "future_native": true, "blocked_native": false, "unknown": false, "openai_bps": false} {
+					var actual bool
+					require.NoError(t, tx.QueryRowContext(ctx, fmt.Sprintf("SELECT %s FROM (VALUES ($1::varchar)) AS candidate(%s)", expression, table.field), provider).Scan(&actual))
+					require.Equal(t, allowed, actual, table.name+": "+provider)
+				}
+			}
+		})
+	}
+}
 
 func TestMigrationsRunner_ConcurrentInstancesSerializeOnSessionLock(t *testing.T) {
 	const instances = 2
