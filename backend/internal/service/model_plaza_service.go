@@ -33,7 +33,7 @@ type PlazaModel struct {
 
 // PlazaGroup 模型广场中以分组为顶层的条目。
 //
-// 与 AvailableGroupRef 相比多了 Description 与 Models；Models 来自该分组关联渠道的
+// 与 AvailableGroupRef 相比多了 Description 与 Models；Models 受分组模型白名单控制，价格来自该分组关联渠道的
 // 支持模型（普通分组按分组平台隔离，Composite 分组展开关联渠道已配置的
 // 具体平台），与「可用渠道」页口径一致。
 type PlazaGroup struct {
@@ -62,7 +62,7 @@ type PlazaGroup struct {
 
 // ModelPlazaService 聚合模型广场数据。
 //
-// 模型枚举来自渠道配置；token 模型的展示单价与阶梯由 BillingService 的阶梯表
+// 模型范围由生效的分组白名单确定，未启用白名单时沿用渠道枚举；token 模型的展示单价与阶梯由 BillingService 的阶梯表
 // 查询给出（与扣费走同一条解析链与计费函数），图片/按次模型沿用渠道/分组档位价。
 type ModelPlazaService struct {
 	channelRepo    ChannelRepository
@@ -91,8 +91,8 @@ func NewModelPlazaService(
 
 // ListGroups 返回模型广场数据：每个活跃分组附带其可用模型与定价。
 //
-// 模型枚举口径与 ListAvailable 一致（Active 渠道、SupportedModels ∪ 全局定价回落、
-// 平台隔离），仅把顶层从渠道换成分组：
+// 模型按分组白名单过滤渠道候选，普通分组补入明确勾选但无渠道价卡的模型；
+// 通配符展开已有候选，复合分组沿用渠道的具体平台归属：
 //   - 渠道按 lower(name) 排序后遍历，保证同名模型去重结果确定；
 //   - 同分组同名模型「先见者胜」，仅当已存条目无定价而新条目有定价时升级替换；
 //   - token 模型的单价与阶梯按实收口径合成（见 ResolveContextPricingSchedule），
@@ -199,6 +199,37 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 	out := make([]PlazaGroup, 0, len(order))
 	for _, gid := range order {
 		pg := byGroup[gid]
+		g := groupEnt[gid]
+		if g.ModelAllowlist.Enabled {
+			// Exact whitelist entries may be served without a channel card.
+			// Wildcards expand only known channel models, never become display IDs.
+			source := make([]string, 0, len(pg.Models)+len(g.ModelAllowlist.Models))
+			for _, m := range pg.Models {
+				source = append(source, m.Name)
+			}
+			if pg.Platform != PlatformComposite {
+				for _, name := range g.ModelAllowlist.Models {
+					if !strings.Contains(name, "*") {
+						source = append(source, name)
+					}
+				}
+			}
+			allowed := g.ModelAllowlist.FilterForListing(source)
+			models := make([]PlazaModel, 0, len(allowed))
+			for _, name := range allowed {
+				found := false
+				for _, m := range pg.Models {
+					if strings.EqualFold(m.Name, name) {
+						models = append(models, m)
+						found = true
+					}
+				}
+				if !found && pg.Platform != PlatformComposite {
+					models = append(models, PlazaModel{Name: name, Platform: pg.Platform})
+				}
+			}
+			pg.Models = models
+		}
 		if len(pg.Models) == 0 {
 			continue
 		}
@@ -208,7 +239,6 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 			}
 			return pg.Models[i].Platform < pg.Models[j].Platform
 		})
-		g := groupEnt[gid]
 		for j := range pg.Models {
 			s.fillDisplayPricing(ctx, &pg.Models[j], g)
 			pg.Models[j].OfficialPricing = s.lookupOfficialPricing(ctx, pg.Models[j].Name, officialMemo)
@@ -227,10 +257,37 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 
 // fillDisplayPricing 把模型的展示定价换成实收口径：
 // token 模型取计费阶梯表（单价与档位均由真实计费函数得出），
-// 图片/按次模型（或阶梯表不可用时）沿用渠道定价与分组图片档位价。
+// 图片/按次模型沿用显式价卡，默认图片档位价复用实际计费函数。
 func (s *ModelPlazaService) fillDisplayPricing(ctx context.Context, m *PlazaModel, g *Group) {
-	if groupPricing := matchGroupModelPricing(g, m.Name); groupPricing != nil {
+	groupPricing := matchGroupModelPricing(g, m.Name)
+	if groupPricing != nil {
 		m.Pricing = groupPricing
+	}
+	if s.billingService != nil && s.resolver != nil {
+		resolved := s.resolver.Resolve(ctx, PricingInput{Model: m.Name, GroupID: &g.ID, Group: g})
+		configured := resolved.Source == PricingSourceGroup || resolved.Source == PricingSourceChannel
+		if configured {
+			m.Pricing = resolved.channelPricing
+		} else if isOpenAIImageGenerationModel(m.Name) || isGeminiCompatibleImageModel(m.Name) {
+			// Global token reference prices alone do not override native
+			// per-image billing. Use the same unit-price function as the gateway.
+			config := &ImagePriceConfig{Price1K: g.ImagePrice1K, Price2K: g.ImagePrice2K, Price4K: g.ImagePrice4K}
+			pricing := &ChannelModelPricing{Platform: m.Platform, Models: []string{m.Name}, BillingMode: BillingModeImage}
+			for i, tier := range []string{ImageBillingSize1K, ImageBillingSize2K, ImageBillingSize4K} {
+				price := s.billingService.getImageUnitPrice(m.Name, tier, config)
+				pricing.Intervals = append(pricing.Intervals, PricingInterval{TierLabel: tier, PerRequestPrice: &price, SortOrder: i})
+			}
+			m.Pricing = pricing
+			return
+		}
+	}
+	// Non-token cards must never be rewritten as token schedules.
+	if m.Pricing != nil && m.Pricing.BillingMode != "" && m.Pricing.BillingMode != BillingModeToken {
+		// Explicit per-model group cards take precedence over group size prices.
+		if groupPricing == nil {
+			m.Pricing = plazaImageDisplayPricing(m.Pricing, g)
+		}
+		return
 	}
 	if s.billingService != nil && s.resolver != nil {
 		sched, err := s.billingService.ResolveContextPricingSchedule(ctx, s.resolver, ContextPricingScheduleInput{
