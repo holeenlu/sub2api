@@ -229,6 +229,12 @@ export default {
       accountSchedulingThresholdOverrideValue: 'アカウントしきい値（%）',
       accountSchedulingThresholdOverrideDisabledHint:
         '1～100を指定してください。この使用量の割合に達すると、アカウントは一時的にスケジュール不可になります。100にすると、このアカウントでは無効になります。',
+      anthropicFableSchedulingThresholdOverride: '7日間Fableしきい値の上書き',
+      anthropicFableSchedulingThresholdOverrideHint:
+        'このアカウントのみ、グローバルの7日間Fableしきい値を上書きします。無効にするとシステム設定を使用します。',
+      anthropicFableSchedulingThresholdOverrideValue: '7日間Fableしきい値（%）',
+      anthropicFableSchedulingThresholdOverrideDisabledHint:
+        '1～100を指定してください。Fable専用の7日間Fウィンドウのみがチェックされます。この割合に達すると、ウィンドウがリセットされるまでアカウントはFableモデルへの提供を停止します（他のモデルには影響しません）。共有7日間使用量は通常のAnthropicしきい値で制御されます。',
       status: {
         active: '有効',
         inactive: '無効',

@@ -14,21 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNativeGatewayRetirementPreservesDiagnosticsAndBilling(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		hasCurrent bool
-		current    string
-		want       string
-	}{
-		{name: "migrate saved template", want: "keep-template"},
-		{name: "keep current template", hasCurrent: true, current: "current-template", want: "current-template"},
-		{name: "keep explicit default", hasCurrent: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
-			tx := testTx(t)
-			_, err := tx.ExecContext(ctx, `
+const nativeGatewayRetirementFixture = `
 		CREATE TEMP TABLE accounts (id BIGINT PRIMARY KEY, credentials JSONB, extra JSONB, updated_at TIMESTAMPTZ) ON COMMIT DROP;
 		CREATE TEMP TABLE settings (key TEXT PRIMARY KEY, value TEXT) ON COMMIT DROP;
 		CREATE TEMP TABLE scheduler_outbox (event_type TEXT, account_id BIGINT) ON COMMIT DROP;
@@ -50,7 +36,23 @@ func TestNativeGatewayRetirementPreservesDiagnosticsAndBilling(t *testing.T) {
 		INSERT INTO codex_ticket_invalidations VALUES (7,'keep-audit','erase','erase','erase','erase','["erase"]');
 		INSERT INTO scheduled_test_plans VALUES (9,1,'{"models":["gpt-6-astra"],"enabled":true}');
 		INSERT INTO scheduled_test_results VALUES (9,'{"status":"normal","probability":0.99}');
-		INSERT INTO usage_logs VALUES (1,12.34);`)
+		INSERT INTO usage_logs VALUES (1,12.34);`
+
+func TestNativeGatewayRetirementPreservesDiagnosticsAndBilling(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		hasCurrent bool
+		current    string
+		want       string
+	}{
+		{name: "migrate saved template", want: "keep-template"},
+		{name: "keep current template", hasCurrent: true, current: "current-template", want: "current-template"},
+		{name: "keep explicit default", hasCurrent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			tx := testTx(t)
+			_, err := tx.ExecContext(ctx, nativeGatewayRetirementFixture)
 			require.NoError(t, err)
 			if tc.hasCurrent {
 				_, err = tx.ExecContext(ctx, `INSERT INTO settings (key,value) VALUES($1,$2)`, service.SettingKeyCodexDiagnosticPromptTemplate, tc.current)
@@ -289,4 +291,58 @@ func TestDiagnosticMigrationPreservesEvidenceAndConnectivity(t *testing.T) {
 	require.Equal(t, "removed", legacy)
 	require.NoError(t, tx.QueryRowContext(ctx, "SELECT response_text FROM scheduled_test_results WHERE diagnostic_run IS NULL").Scan(&connectivity))
 	require.Equal(t, "keep connectivity result", connectivity)
+}
+
+func TestFableThresholdUpgradePreservesExistingConfiguration(t *testing.T) {
+	ctx := context.Background()
+	prepare, err := os.ReadFile("../../migrations/267_preserve_fable_threshold.sql")
+	require.NoError(t, err)
+	retire, err := os.ReadFile("../../migrations/268_retire_fork_gateway_runtime.sql")
+	require.NoError(t, err)
+	restore, err := os.ReadFile("../../migrations/269_restore_fable_threshold.sql")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name                          string
+		alreadyUpgraded, newerDefault bool
+		want                          string
+	}{
+		{name: "preserve old value", want: "60"}, {name: "keep newer explicit default", newerDefault: true, want: "100"}, {name: "already upgraded does not invent deleted value", alreadyUpgraded: true, want: "missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx := testTx(t)
+			_, err := tx.ExecContext(ctx, nativeGatewayRetirementFixture)
+			require.NoError(t, err)
+			_, err = tx.ExecContext(ctx, "CREATE TEMP TABLE schema_migrations(filename TEXT PRIMARY KEY) ON COMMIT DROP")
+			require.NoError(t, err)
+			if tc.alreadyUpgraded {
+				_, err = tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES('268_retire_fork_gateway_runtime.sql'); UPDATE settings SET value=(value::jsonb-'anthropic_fable')::text WHERE key='account_scheduling_thresholds'")
+				require.NoError(t, err)
+			}
+			for range 2 {
+				_, err = tx.ExecContext(ctx, string(prepare))
+				require.NoError(t, err)
+			}
+			if !tc.alreadyUpgraded {
+				_, err = tx.ExecContext(ctx, string(retire))
+				require.NoError(t, err)
+			}
+			if tc.newerDefault {
+				_, err = tx.ExecContext(ctx, "UPDATE settings SET value=jsonb_set(value::jsonb,'{anthropic_fable}','100')::text WHERE key='account_scheduling_thresholds'")
+				require.NoError(t, err)
+			}
+			for range 2 {
+				_, err = tx.ExecContext(ctx, string(restore))
+				require.NoError(t, err)
+			}
+			var value string
+			require.NoError(t, tx.QueryRowContext(ctx, "SELECT COALESCE(value::jsonb->>'anthropic_fable','missing') FROM settings WHERE key='account_scheduling_thresholds'").Scan(&value))
+			require.Equal(t, tc.want, value)
+			var backups int
+			require.NoError(t, tx.QueryRowContext(ctx, "SELECT count(*) FROM settings WHERE key='migration_fable_threshold_before_268'").Scan(&backups))
+			require.Zero(t, backups)
+			var ordinary string
+			require.NoError(t, tx.QueryRowContext(ctx, "SELECT value::jsonb->>'anthropic' FROM settings WHERE key='account_scheduling_thresholds'").Scan(&ordinary))
+			require.Equal(t, "90", ordinary)
+		})
+	}
 }

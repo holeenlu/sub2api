@@ -275,3 +275,25 @@ func TestWithOpenAIWSStateStoreRedisTimeout_WithParentContext(t *testing.T) {
 	_, ok := ctx.Deadline()
 	require.True(t, ok, "应附加短超时")
 }
+
+func TestSecurityContinuationJSONAndTenantPool(t *testing.T) {
+	for _, body := range []string{`{"previous_response_id":"","previous_response_id":"resp_victim"}`, `{"previous_response_id":"","previous_response_\u0069d":"resp_victim"}`, `{"Previous_Response_ID":"resp_victim"}`, `{"previous_response_id":123}`, `{"response":{"previous_response_id":"resp_victim"}}`} {
+		require.Error(t, ValidateGatewaySecurityJSON([]byte(body)), body)
+	}
+	require.NoError(t, ValidateGatewaySecurityJSON([]byte(`{"model":"gpt-5.4","previous_response_id":"resp_own","text":{"format":{"type":"json_schema","schema":{"type":"object"}}}}`)))
+	a := openAIWSAcquireRequest{TenantScope: "10/user/1"}
+	b := openAIWSAcquireRequest{TenantScope: "10/user/2"}
+	require.NotEqual(t, normalizeOpenAIWSAcquireCompatibility(a, nil), normalizeOpenAIWSAcquireCompatibility(b, nil))
+	svc := &OpenAIGatewayService{}
+	ctx := context.Background()
+	owner := securityVoiceContext(1, 11)
+	SetOpenAIHTTPResponseOwner(owner, 1, 11)
+	require.NoError(t, svc.BindOpenAIHTTPResponseOwner(ctx, 10, "resp_owned", 1, 11))
+	otherKey := securityVoiceContext(1, 99)
+	SetOpenAIHTTPResponseOwner(otherKey, 1, 99)
+	require.NoError(t, svc.validateWSContinuation(ctx, otherKey, []byte(`{"previous_response_id":"resp_owned"}`)))
+	require.Equal(t, openAIWSTenantScope(owner), openAIWSTenantScope(otherKey))
+	attacker := securityVoiceContext(2, 22)
+	SetOpenAIHTTPResponseOwner(attacker, 2, 22)
+	require.Error(t, svc.validateWSContinuation(ctx, attacker, []byte(`{"previous_response_id":"resp_owned"}`)))
+}

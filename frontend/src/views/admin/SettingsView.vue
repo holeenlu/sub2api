@@ -5004,11 +5004,11 @@
                         <label
                           class="font-mono text-sm font-medium text-gray-900 dark:text-white"
                         >
-                          {{ scope }}
+                          {{ schedulingThresholdScopeLabel(scope) }}
                         </label>
                         <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                           {{
-                            t("admin.settings.scheduling.accountSchedulingThresholdsRangeHint")
+                            scope === "anthropic_fable" ? t("admin.settings.scheduling.accountSchedulingThresholdsFableHint") : t("admin.settings.scheduling.accountSchedulingThresholdsRangeHint")
                           }}
                         </p>
                       </div>
@@ -8908,7 +8908,7 @@ import {
   normalizePlatformQuotasMap,
   sanitizeAccountSchedulingThresholdsMap,
   sanitizePlatformQuotasMap,
-  SCHEDULING_THRESHOLD_PLATFORMS,
+  SCHEDULING_THRESHOLD_SCOPES,
   defaultWeChatConnectScopesForMode,
   deriveWeChatConnectStoredMode,
   normalizeDefaultSubscriptionSettings,
@@ -9695,7 +9695,8 @@ type SettingsForm = Omit<
   account_scheduling_thresholds: ReturnType<typeof normalizeAccountSchedulingThresholdsMap>;
 };
 
-const schedulingThresholdPlatforms = SCHEDULING_THRESHOLD_PLATFORMS;
+const schedulingThresholdPlatforms = SCHEDULING_THRESHOLD_SCOPES;
+const schedulingThresholdScopeLabel = (scope: string) => scope === "anthropic_fable" ? t("admin.settings.scheduling.accountSchedulingThresholdsFableLabel") : scope;
 
 const form = reactive<SettingsForm>({
   registration_enabled: true,

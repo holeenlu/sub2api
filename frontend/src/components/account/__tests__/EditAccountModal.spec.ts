@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 
 const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
@@ -325,6 +325,29 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('edits and removes the Fable override independently from the account threshold', async () => {
+    const account = buildAccount()
+    account.platform = 'anthropic'
+    account.type = 'oauth'
+    account.credentials = { access_token: 'token', account_scheduling_threshold: 70, anthropic_fable_scheduling_threshold: 95 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const enabled = wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-enabled"]')
+    expect((enabled.element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-value"]').setValue(90)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls.at(-1)?.[1]?.credentials).toEqual(expect.objectContaining({ anthropic_fable_scheduling_threshold: 90 }))
+    expect(updateAccountMock.mock.calls.at(-1)?.[1]?.credentials?.account_scheduling_threshold).toBe(70)
+    await enabled.setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls.at(-1)?.[1]?.credentials).toEqual(expect.objectContaining({ anthropic_fable_scheduling_threshold: null }))
+    wrapper.unmount()
+  })
+
+
   beforeEach(() => {
     authIsSimpleMode.value = true
   })

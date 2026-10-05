@@ -433,6 +433,12 @@ export default {
       accountSchedulingThresholdOverrideValue: '帳號閾值百分比',
       accountSchedulingThresholdOverrideDisabledHint:
         '1-100，達到該用量百分比後臨時不可排程；100 表示停用目前帳號自動停調。',
+      anthropicFableSchedulingThresholdOverride: '7d Fable 閾值覆蓋',
+      anthropicFableSchedulingThresholdOverrideHint:
+        '僅對目前帳號覆蓋全域的 7d Fable 閾值；關閉後使用系統設定。',
+      anthropicFableSchedulingThresholdOverrideValue: '7d Fable 閾值百分比',
+      anthropicFableSchedulingThresholdOverrideDisabledHint:
+        '1-100，只檢查 7d F（Fable 專屬）視窗。達到該百分比後，該帳號不再排程 Fable 模型（其他模型不受影響），直到視窗重設；共享 7d 仍由普通 Anthropic 閾值控制。',
       status: {
         active: '正常',
         inactive: '停用',

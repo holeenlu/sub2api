@@ -571,9 +571,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 func defaultAccountSchedulingThresholds() map[string]int {
 	return map[string]int{
-		PlatformOpenAI:    100,
-		PlatformAnthropic: 100,
-		PlatformGrok:      100,
+		PlatformOpenAI:                         100,
+		PlatformAnthropic:                      100,
+		SchedulingThresholdScopeAnthropicFable: 100,
+		PlatformGrok:                           100,
 	}
 }
 
@@ -581,7 +582,7 @@ func validateAndNormalizeAccountSchedulingThresholds(input map[string]int) (map[
 	normalized := defaultAccountSchedulingThresholds()
 	for platform, value := range input {
 		allowed := false
-		for _, item := range AllowedSchedulingThresholdPlatforms {
+		for _, item := range AllowedSchedulingThresholdScopes {
 			if item == platform {
 				allowed = true
 				break
@@ -608,7 +609,7 @@ func parseAccountSchedulingThresholdsSetting(raw string) (map[string]int, error)
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return thresholds, err
 	}
-	for _, platform := range AllowedSchedulingThresholdPlatforms {
+	for _, platform := range AllowedSchedulingThresholdScopes {
 		if value, ok := parsed[platform]; ok {
 			thresholds[platform] = boundedIntOrDefault(value, 1, 100, 100)
 		}
@@ -799,6 +800,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		}
 		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
 			thresholds: cloneAccountSchedulingThresholds(normalizedThresholds),
+			resolved:   true,
 			expiresAt:  time.Now().Add(accountSchedulingThresholdsCacheTTL).UnixNano(),
 		})
 	} else {
