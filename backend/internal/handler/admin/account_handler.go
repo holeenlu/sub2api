@@ -217,12 +217,13 @@ type AccountWithConcurrency struct {
 // so groups/account_groups never appear in the list payload.
 type AccountListItemWithConcurrency struct {
 	*dto.AccountListItem
-	CurrentConcurrency int                          `json:"current_concurrency"`
-	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
-	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
-	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
-	ActiveSessions     *int                         `json:"active_sessions,omitempty"`
-	CurrentRPM         *int                         `json:"current_rpm,omitempty"`
+	CodexDiagnostic    *service.CodexDiagnosticSummary `json:"codex_diagnostic,omitempty"`
+	CurrentConcurrency int                             `json:"current_concurrency"`
+	SchedulerScore     *AccountSchedulerScore          `json:"scheduler_score,omitempty"`
+	SchedulerScores    []AccountSchedulerGroupScore    `json:"scheduler_scores,omitempty"`
+	CurrentWindowCost  *float64                        `json:"current_window_cost,omitempty"`
+	ActiveSessions     *int                            `json:"active_sessions,omitempty"`
+	CurrentRPM         *int                            `json:"current_rpm,omitempty"`
 }
 
 type simpleModeGroupReference struct {
@@ -874,6 +875,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 			item := result[i]
 			compact[i] = AccountListItemWithConcurrency{
 				AccountListItem:    dto.AccountListItemFromAccount(item.Account),
+				CodexDiagnostic:    item.CodexDiagnostic,
 				CurrentConcurrency: item.CurrentConcurrency,
 				SchedulerScore:     item.SchedulerScore,
 				SchedulerScores:    item.SchedulerScores,

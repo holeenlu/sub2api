@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
@@ -79,6 +81,20 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 	require.Contains(t, fullPayload.Data.Items[0], "account_groups")
 }
 
+func TestAccountHandlerListLiteIncludesDiagnosticSummary(t *testing.T) {
+	repo := &accountListDiagnosticRepo{summaries: map[int64]service.CodexDiagnosticSummary{
+		501: {Status: "degraded", RunID: 12},
+	}}
+	router, adminSvc := setupAccountListRouterWithScheduledTests(service.ProvideScheduledTestService(repo, nil, nil, nil, nil, nil))
+	now := time.Now().UTC()
+	adminSvc.accounts = []service.Account{{ID: 501, Name: "diagnostic-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, CreatedAt: now, UpdatedAt: now}}
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20&lite=1", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "degraded", gjson.GetBytes(rec.Body.Bytes(), "data.items.0.codex_diagnostic.status").String())
+}
+
 func TestAccountHandlerListLiteStaysBelowResponseBudget(t *testing.T) {
 	router, adminSvc := setupAccountListRouter()
 	now := time.Now().UTC()
@@ -112,12 +128,26 @@ func TestAccountHandlerListLiteStaysBelowResponseBudget(t *testing.T) {
 }
 
 func setupAccountListRouter() (*gin.Engine, *stubAdminService) {
+	return setupAccountListRouterWithScheduledTests(nil)
+}
+
+func setupAccountListRouterWithScheduledTests(scheduledTests *service.ScheduledTestService) (*gin.Engine, *stubAdminService) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	adminSvc := newStubAdminService()
 	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler.SetScheduledTests(scheduledTests, nil)
 	router.GET("/api/v1/admin/accounts", handler.List)
 	return router, adminSvc
+}
+
+type accountListDiagnosticRepo struct {
+	service.ScheduledTestPlanRepository
+	summaries map[int64]service.CodexDiagnosticSummary
+}
+
+func (r *accountListDiagnosticRepo) Summaries(context.Context, []int64) (map[int64]service.CodexDiagnosticSummary, error) {
+	return r.summaries, nil
 }
 
 func TestAccountHandlerListIncludesCreatedAt(t *testing.T) {
