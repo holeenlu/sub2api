@@ -8,7 +8,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { DiagnosticSummary } from '@/api/admin/codexTickets'
+import type { DiagnosticSummary } from '@/api/admin/codexDiagnostics'
 const props = defineProps<{ summary?: DiagnosticSummary | null }>()
 defineEmits<{ open: [] }>()
 const { t } = useI18n()

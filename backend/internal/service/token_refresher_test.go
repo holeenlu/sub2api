@@ -183,11 +183,10 @@ func TestClaudeTokenRefresher_CanRefresh(t *testing.T) {
 	refresher := &ClaudeTokenRefresher{}
 
 	tests := []struct {
-		name        string
-		platform    string
-		accType     string
-		credentials map[string]any
-		want        bool
+		name     string
+		platform string
+		accType  string
+		want     bool
 	}{
 		{
 			name:     "anthropic oauth - can refresh",
@@ -196,29 +195,10 @@ func TestClaudeTokenRefresher_CanRefresh(t *testing.T) {
 			want:     true,
 		},
 		{
-			// 直接粘贴导入的 `claude setup-token` 是长期凭据，没有 refresh_token，
-			// 既不需要也无法续期；到期该重新导入。
-			name:        "anthropic setup-token imported directly - cannot refresh",
-			platform:    PlatformAnthropic,
-			accType:     AccountTypeSetupToken,
-			credentials: map[string]any{"access_token": "sk-ant-oat01-direct"},
-			want:        false,
-		},
-		{
-			// 历史残留 refresh_token 不能把长期 setup-token 重新纳入 OAuth 刷新。
-			name:        "anthropic setup-token with legacy refresh token - cannot refresh",
-			platform:    PlatformAnthropic,
-			accType:     AccountTypeSetupToken,
-			credentials: map[string]any{"access_token": "short", "refresh_token": "legacy-refresh"},
-			want:        false,
-		},
-		{
-			// 旧版交换流程写入的 8 小时令牌行（带 expires_at）必须继续续期，否则到期后持续 401。
-			name:        "anthropic setup-token from the legacy exchange flow - can refresh",
-			platform:    PlatformAnthropic,
-			accType:     AccountTypeSetupToken,
-			credentials: map[string]any{"access_token": "short", "refresh_token": "legacy-refresh", "expires_at": float64(1_800_000_000)},
-			want:        true,
+			name:     "anthropic setup-token - can refresh",
+			platform: PlatformAnthropic,
+			accType:  AccountTypeSetupToken,
+			want:     true,
 		},
 		{
 			name:     "anthropic api-key - cannot refresh",
@@ -243,9 +223,8 @@ func TestClaudeTokenRefresher_CanRefresh(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			account := &Account{
-				Platform:    tt.platform,
-				Type:        tt.accType,
-				Credentials: tt.credentials,
+				Platform: tt.platform,
+				Type:     tt.accType,
 			}
 
 			got := refresher.CanRefresh(account)

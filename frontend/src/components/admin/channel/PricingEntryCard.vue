@@ -110,51 +110,38 @@
             <div>
               <label class="text-xs text-gray-400">{{ t('admin.channels.form.inputPrice') }}</label>
               <input :value="entry.input_price" @input="emitField('input_price', ($event.target as HTMLInputElement).value)"
-                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="tokenPricePlaceholder('input_price')" :data-price-field="'input_price'" />
+                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
             <div>
               <label class="text-xs text-gray-400">{{ t('admin.channels.form.outputPrice') }}</label>
               <input :value="entry.output_price" @input="emitField('output_price', ($event.target as HTMLInputElement).value)"
-                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="tokenPricePlaceholder('output_price')" :data-price-field="'output_price'" />
+                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
             <div>
               <label class="text-xs text-gray-400">{{ t('admin.channels.form.cacheWrite5mPrice') }}</label>
               <input :value="entry.cache_write_price" @input="emitField('cache_write_price', ($event.target as HTMLInputElement).value)"
-                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="tokenPricePlaceholder('cache_write_price')" :data-price-field="'cache_write_price'" />
+                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
             <div>
               <label class="text-xs text-gray-400">{{ t('admin.channels.form.cacheWrite1hPrice') }}</label>
               <input :value="entry.cache_write_1h_price" @input="emitField('cache_write_1h_price', ($event.target as HTMLInputElement).value)"
-                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="tokenPricePlaceholder('cache_write_1h_price')" :data-price-field="'cache_write_1h_price'" />
+                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
             <div>
               <label class="text-xs text-gray-400">{{ t('admin.channels.form.cacheReadPrice') }}</label>
               <input :value="entry.cache_read_price" @input="emitField('cache_read_price', ($event.target as HTMLInputElement).value)"
-                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="tokenPricePlaceholder('cache_read_price')" :data-price-field="'cache_read_price'" />
+                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
             <div>
               <label class="text-xs text-gray-400">{{ t('admin.channels.form.imageInputPrice') }}</label>
               <input :value="entry.image_input_price" @input="emitField('image_input_price', ($event.target as HTMLInputElement).value)"
-                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="tokenPricePlaceholder('image_input_price')" :data-price-field="'image_input_price'" />
+                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
             <div>
               <label class="text-xs text-gray-400">{{ t('admin.channels.form.imageTokenPrice') }}</label>
               <input :value="entry.image_output_price" @input="emitField('image_output_price', ($event.target as HTMLInputElement).value)"
-                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="tokenPricePlaceholder('image_output_price')" :data-price-field="'image_output_price'" />
+                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
-          </div>
-
-          <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400" data-testid="price-inheritance">
-            <span>{{ t('admin.channels.form.inheritHint') }}</span>
-            <button
-              v-if="referenceHasFillableField"
-              type="button"
-              class="text-primary-600 hover:text-primary-700"
-              data-testid="fill-reference-prices"
-              @click="fillFromReference"
-            >
-              {{ t('admin.channels.form.fillFromReference') }}
-            </button>
           </div>
 
           <div v-if="enableTierMultipliers" class="mt-3 grid max-w-md grid-cols-1 gap-2 sm:grid-cols-2">
@@ -312,7 +299,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -420,64 +407,40 @@ function removeInterval(idx: number) {
   emit('update', { ...props.entry, intervals })
 }
 
-type TokenPriceField = 'input_price' | 'output_price' | 'cache_write_price' | 'cache_write_1h_price' |
-  'cache_read_price' | 'image_input_price' | 'image_output_price'
-const TOKEN_PRICE_FIELDS: TokenPriceField[] = [
-  'input_price', 'output_price', 'cache_write_price', 'cache_write_1h_price',
-  'cache_read_price', 'image_input_price', 'image_output_price',
-]
-
-// 当前参考价只用于提示。留空的字段保存为 null，由后端按渠道价卡/参考价持续继承；
-// 只有管理员主动填写或点击“以参考价填写”才会成为本卡的自定义价格。
-const reference = ref<{ prices: Partial<Record<TokenPriceField, number>>; multipliers: Record<string, number> | null } | null>(null)
-let referenceRequest = 0
-
-watch(() => [props.entry.models[0], props.entry.billing_mode] as const, async ([model, mode]) => {
-  const request = ++referenceRequest
-  reference.value = null
-  if (!model || mode !== 'token') return
-  try {
-    const result = await channelsAPI.getModelDefaultPricing(model)
-    if (request !== referenceRequest || !result.found) return
-    const prices: Partial<Record<TokenPriceField, number>> = {}
-    for (const field of TOKEN_PRICE_FIELDS) {
-      const value = perTokenToMTok(result[field] ?? null)
-      if (value != null) prices[field] = value
-    }
-    reference.value = { prices, multipliers: result.reasoning_effort_multipliers ?? null }
-  } catch {
-    // 参考价读取失败不影响编辑；字段仍按继承保存。
-  }
-}, { immediate: true })
-
-function tokenPricePlaceholder(field: TokenPriceField) {
-  const value = reference.value?.prices[field]
-  return value == null
-    ? t('admin.channels.form.pricePlaceholder')
-    : t('admin.channels.form.inheritPlaceholder', { price: value })
-}
-
-const referenceHasFillableField = computed(() => {
-  const current = reference.value
-  if (!current) return false
-  return TOKEN_PRICE_FIELDS.some(field => current.prices[field] != null && props.entry[field] == null)
-})
-
-function fillFromReference() {
-  const current = reference.value
-  if (!current) return
-  const next: PricingFormEntry = { ...props.entry }
-  for (const field of TOKEN_PRICE_FIELDS) {
-    if (next[field] == null && current.prices[field] != null) next[field] = current.prices[field]!
-  }
-  if (next.reasoning_effort_multipliers == null && current.multipliers) {
-    next.reasoning_effort_multipliers = { ...current.multipliers }
-  }
-  emit('update', next)
-}
-
-function onModelsUpdate(newModels: string[]) {
+async function onModelsUpdate(newModels: string[]) {
+  const oldModels = props.entry.models
   emit('update', { ...props.entry, models: newModels })
+
+  // 只在新增模型且当前无价格时自动填充
+  const addedModels = newModels.filter(m => !oldModels.includes(m))
+  if (addedModels.length === 0) return
+
+  // 检查是否所有价格字段都为空
+  const e = props.entry
+  const hasPrice = e.input_price != null || e.output_price != null ||
+                   e.cache_write_price != null || e.cache_write_1h_price != null || e.cache_read_price != null
+  if (hasPrice) return
+
+  // 查询第一个新增模型的默认价格
+  try {
+    const result = await channelsAPI.getModelDefaultPricing(addedModels[0])
+    if (result.found) {
+      emit('update', {
+        ...props.entry,
+        models: newModels,
+        input_price: perTokenToMTok(result.input_price ?? null),
+        output_price: perTokenToMTok(result.output_price ?? null),
+        cache_write_price: perTokenToMTok(result.cache_write_price ?? null),
+        cache_write_1h_price: perTokenToMTok(result.cache_write_1h_price ?? null),
+        cache_read_price: perTokenToMTok(result.cache_read_price ?? null),
+        image_input_price: perTokenToMTok(result.image_input_price ?? null),
+        image_output_price: perTokenToMTok(result.image_output_price ?? null),
+        reasoning_effort_multipliers: props.entry.reasoning_effort_multipliers ?? result.reasoning_effort_multipliers ?? null,
+      })
+    }
+  } catch {
+    // 查询失败不影响用户操作
+  }
 }
 </script>
 

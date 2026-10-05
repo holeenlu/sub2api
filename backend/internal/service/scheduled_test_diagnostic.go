@@ -414,3 +414,15 @@ func diagnosticConclusion(model, predicted string, probability float64) (string,
 	}
 	return "degraded", "fingerprint_mismatch"
 }
+
+func (s *ScheduledTestService) RefreshDiagnosticFingerprint(ctx context.Context) (string, []string, error) {
+	if s.gateway == nil || s.gateway.settingService == nil {
+		return "", nil, ErrSettingNotFound
+	}
+	commit, err := s.gateway.settingService.RefreshModelTraceBank(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	models, err := ModelTraceGPTModels()
+	return commit, models, err
+}

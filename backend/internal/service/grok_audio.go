@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -56,28 +55,6 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 	for _, part := range parts[1:] {
 		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "?#\\") {
 			return nil, fmt.Errorf("invalid grok voice endpoint path")
-		}
-	}
-	if baseEndpoint == "custom-voices" && (s.mediaRepo == nil || c == nil || c.Request == nil) {
-		return nil, fmt.Errorf("voice ownership unavailable")
-	}
-	if baseEndpoint == "custom-voices" && len(parts) == 1 && c.Request.Method == http.MethodGet {
-		voices, err := s.ListOwnedGrokVoices(ctx, c)
-		if err != nil {
-			return nil, err
-		}
-		c.JSON(http.StatusOK, gin.H{"voices": voices})
-		return &OpenAIForwardResult{}, nil
-	}
-	if c != nil {
-		if _, exists := c.Get("api_key"); exists {
-			bound, err := s.ResolveGrokVoiceAccount(ctx, c, endpoint, body)
-			if err != nil {
-				return nil, err
-			}
-			if bound > 0 && bound != account.ID {
-				return nil, ErrMediaNotOwned
-			}
 		}
 	}
 	token, _, err := s.getRequestCredential(ctx, c, account)
@@ -129,12 +106,6 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 	if err != nil {
 		return nil, err
 	}
-	durableCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	err = s.persistGrokVoice(durableCtx, c, account, endpoint, data)
-	cancel()
-	if err != nil {
-		return nil, err
-	}
 	writeGrokMediaResponse(c, resp, data, s.responseHeaderFilter)
 	audioUsage := estimateGrokVoiceAudioUsage(baseEndpoint, body, contentType, data, time.Since(started))
 	upstreamID := firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id"))
@@ -167,33 +138,7 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 	return s.ProxyGrokRealtimeConn(ctx, c, client, upstream)
 }
 
-// GrokRealtimeVoiceAccountChange requests a pre-audio rebind to a voice owner.
-// No part of Payload has been forwarded to the old account.
-type GrokRealtimeVoiceAccountChange struct {
-	AccountID int64
-	Payload   []byte
-}
-
-func (e *GrokRealtimeVoiceAccountChange) Error() string {
-	return "custom voice requires its owning upstream account"
-}
-func (s *OpenAIGatewayService) ReplayGrokRealtimeVoiceSetup(ctx context.Context, c *gin.Context, u *GrokRealtimeUpstream, change *GrokRealtimeVoiceAccountChange) error {
-	if u == nil || change == nil || u.accountID != change.AccountID {
-		return ErrMediaNotOwned
-	}
-	bound, err := s.ResolveGrokVoiceAccount(ctx, c, "realtime", change.Payload)
-	if err != nil || bound != u.accountID {
-		return ErrMediaNotOwned
-	}
-	return u.conn.WriteJSON(ctx, json.RawMessage(change.Payload))
-}
-
-type GrokRealtimeUpstream struct {
-	conn      openAIWSClientConn
-	accountID int64
-	closeOnce sync.Once
-	closeErr  error
-}
+type GrokRealtimeUpstream struct{ conn openAIWSClientConn }
 
 // GrokRealtimeDialError preserves an HTTP status returned before WebSocket
 // upgrade so handlers can apply the normal Grok account policy.
@@ -209,8 +154,7 @@ func (u *GrokRealtimeUpstream) Close() error {
 	if u == nil || u.conn == nil {
 		return nil
 	}
-	u.closeOnce.Do(func() { u.closeErr = u.conn.Close() })
-	return u.closeErr
+	return u.conn.Close()
 }
 
 func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Account, token, model string) (*GrokRealtimeUpstream, error) {
@@ -242,7 +186,7 @@ func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Ac
 	if err != nil {
 		return nil, &GrokRealtimeDialError{StatusCode: status, Err: err}
 	}
-	return &GrokRealtimeUpstream{conn: conn, accountID: account.ID}, nil
+	return &GrokRealtimeUpstream{conn: conn}, nil
 }
 
 // HandleGrokRealtimeUpstreamError applies the shared Grok account policy to a
@@ -263,13 +207,10 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	errCh := make(chan error, 2)
-	var readers sync.WaitGroup
-	readers.Add(2)
 	var audioObserved atomic.Bool
 
 	// Upstream → client
 	go func() {
-		defer readers.Done()
 		for {
 			msg, readErr := conn.ReadMessage(ctx)
 			if readErr != nil {
@@ -288,7 +229,6 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 
 	// Client → upstream (JSON events only)
 	go func() {
-		defer readers.Done()
 		for {
 			kind, msg, readErr := client.Read(ctx)
 			if readErr != nil {
@@ -306,35 +246,6 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 				errCh <- fmt.Errorf("invalid realtime event: %w", unmarshalErr)
 				return
 			}
-			if c != nil {
-				if _, ok := c.Get("api_key"); ok {
-					key, keyErr := mediaPrincipal(c)
-					if keyErr != nil {
-						errCh <- keyErr
-						return
-					}
-					for _, path := range []string{"model", "session.model", "response.model"} {
-						model := strings.TrimSpace(gjson.GetBytes(msg, path).String())
-						if model != "" && key.Group != nil && !key.Group.ModelAllowlist.Allows(model) {
-							errCh <- fmt.Errorf("model is not available for this group")
-							return
-						}
-					}
-					bound, err := s.ResolveGrokVoiceAccount(ctx, c, "realtime", msg)
-					if err != nil {
-						errCh <- err
-						return
-					}
-					if bound > 0 && bound != upstream.accountID {
-						if !audioObserved.Load() {
-							errCh <- &GrokRealtimeVoiceAccountChange{AccountID: bound, Payload: append([]byte(nil), msg...)}
-						} else {
-							errCh <- ErrMediaNotOwned
-						}
-						return
-					}
-				}
-			}
 			if writeErr := conn.WriteJSON(ctx, raw); writeErr != nil {
 				errCh <- writeErr
 				return
@@ -342,12 +253,7 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 		}
 	}()
 
-	err := <-errCh
-	cancel()
-	_ = upstream.Close()
-	// Join both pumps before reading usage and releasing the key reservation.
-	readers.Wait()
-	return audioObserved.Load(), err
+	return awaitGrokRealtimeAudioObserved(errCh, &audioObserved)
 }
 
 // ProbeGrokRealtime performs the upstream WebSocket handshake without sending

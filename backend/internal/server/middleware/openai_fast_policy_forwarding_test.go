@@ -18,15 +18,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-type openAIFastPolicyAdmissionRepo struct {
-	service.AccountRepository
-	account *service.Account
-}
-
-func (r *openAIFastPolicyAdmissionRepo) GetOpenAITurnAdmission(context.Context, int64) (*service.Account, *service.Account, error) {
-	return r.account, nil, nil
-}
-
 func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -68,9 +59,8 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
 	settingService := service.NewSettingService(&openAIFastPolicyForwardingSettingRepo{
 		value: string(settingsJSON),
 	}, cfg)
-	admissionRepo := &openAIFastPolicyAdmissionRepo{}
 	gatewayService := service.NewOpenAIGatewayService(
-		admissionRepo, nil, nil, nil, nil, nil, nil, cfg,
+		nil, nil, nil, nil, nil, nil, nil, cfg,
 		nil, nil, nil, nil, nil, &openAIFastPolicyForwardingHTTPUpstream{client: upstreamServer.Client()},
 		nil, nil, nil, nil, nil, nil, settingService, nil,
 	)
@@ -90,7 +80,6 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
 	apiKeyService := service.NewAPIKeyService(&openAIFastPolicyForwardingAPIKeyRepo{apiKeys: apiKeys}, nil, nil, nil, nil, nil, cfg)
 	account := &service.Account{
 		ID:          900,
-		GroupIDs:    []int64{groupID},
 		Name:        "openai-upstream",
 		Platform:    service.PlatformOpenAI,
 		Type:        service.AccountTypeAPIKey,
@@ -103,7 +92,6 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
 		},
 		Extra: map[string]any{"use_responses_api": true},
 	}
-	admissionRepo.account = account
 
 	router := gin.New()
 	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, nil, cfg)))

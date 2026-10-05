@@ -178,16 +178,11 @@ func historicalIngressRejectReason(item candidate) (string, bool) {
 		return "key_disabled", true
 	case normalized == "User account is not active":
 		return "user_inactive", true
-	// 這支工具清理的是資料庫裡的歷史日誌，既有資料為簡體；產生端
-	// （internal/server/middleware/api_key_auth*.go）已轉繁，故簡繁都要比對。
-	case normalized == "API Key 所属分组已删除",
-		normalized == "API Key 所屬分組已刪除":
+	case normalized == "API Key 所属分组已删除":
 		return "group_deleted", true
-	case normalized == "API Key 所属分组已停用",
-		normalized == "API Key 所屬分組已停用":
+	case normalized == "API Key 所属分组已停用":
 		return "group_disabled", true
-	case normalized == "API Key 所属专属分组不再允许当前用户使用",
-		normalized == "API Key 所屬專屬分組不再允許當前使用者使用":
+	case normalized == "API Key 所属专属分组不再允许当前用户使用":
 		return "group_forbidden", true
 	case normalized == "API Key is not assigned to any group and cannot be used. Please contact the administrator to assign it to a group.":
 		return "group_unassigned", true

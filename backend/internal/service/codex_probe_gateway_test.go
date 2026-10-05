@@ -18,32 +18,23 @@ import (
 
 func TestCodexProbeBuildersHonorTemplateSnapshot(t *testing.T) {
 	custom := strings.Replace(DefaultCodexProbeTemplate(), "anonymous workspace", "pinned workspace", 1)
-	repo := &codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAICodexTicketPromptTemplate: custom}}
-	var harvestHeaders http.Header
-	upstream := &codexTicketFuncUpstream{do: func(req *http.Request) (*http.Response, error) {
-		body, err := io.ReadAll(req.Body)
-		require.NoError(t, err)
-		assertCodexProbeIdentity(t, body, req.Header)
-		require.Contains(t, string(body), "pinned workspace")
-		require.Equal(t, "harvest challenge", gjson.GetBytes(body, "input.4.content.0.text").String())
-		harvestHeaders = req.Header.Clone()
-		return codexTicketResponse(), nil
-	}}
-	svc, account, _ := challengeHarvestService(t, upstream)
-	svc.settingService.settingRepo = repo
+	repo := &diagnosticSettingsRepoStub{values: map[string]string{SettingKeyCodexDiagnosticPromptTemplate: custom}}
+	account := diagnosticTestAccount(41)
+	svc := &OpenAIGatewayService{settingService: &SettingService{settingRepo: repo}, accountRepo: diagnosticAccounts{account: account}}
 	pinned, err := svc.PrepareCodexProbeContext(context.Background())
 	require.NoError(t, err)
-	_, _, _, _, err = svc.fireOpenAICodexTicketProbe(pinned, account, "test-token", "gpt-6-astra", "", ModelTraceChallenge{Prompt: "harvest challenge"}, time.Second)
+	initialBody, initialHeaders, err := svc.BuildCodexDiagnosticRequest(pinned, account.ID, "gpt-6-astra", ModelTraceChallenge{Prompt: "initial challenge"})
 	require.NoError(t, err)
-	repo.values[SettingKeyOpenAICodexTicketPromptTemplate] = strings.Replace(custom, "pinned workspace", "updated workspace", 1)
+	require.Contains(t, string(initialBody), "pinned workspace")
+	repo.values[SettingKeyCodexDiagnosticPromptTemplate] = strings.Replace(custom, "pinned workspace", "updated workspace", 1)
 	svc.settingService.InvalidateCodexProbeTemplateCache()
 	body, headers, err := svc.BuildCodexDiagnosticRequest(pinned, account.ID, "gpt-6-astra", ModelTraceChallenge{Prompt: "diagnostic challenge"})
 	require.NoError(t, err)
 	assertCodexProbeIdentity(t, body, headers)
 	require.Contains(t, string(body), "pinned workspace")
 	require.Equal(t, "diagnostic challenge", gjson.GetBytes(body, "input.4.content.0.text").String())
-	require.NotEqual(t, harvestHeaders.Get("session-id"), headers.Get("session-id"))
-	require.Equal(t, harvestHeaders.Get("x-codex-installation-id"), headers.Get("x-codex-installation-id"))
+	require.NotEqual(t, initialHeaders.Get("session-id"), headers.Get("session-id"))
+	require.Equal(t, initialHeaders.Get("x-codex-installation-id"), headers.Get("x-codex-installation-id"))
 	body, _, err = svc.BuildCodexDiagnosticRequest(context.Background(), account.ID, "gpt-5.4", ModelTraceChallenge{Prompt: "next model challenge"})
 	require.NoError(t, err)
 	require.Contains(t, string(body), "updated workspace")
@@ -110,7 +101,7 @@ func TestDiagnosticFailedTerminalNeverBecomesNormal(t *testing.T) {
 // handler or separate parsing policy is needed to test these boundaries.
 func TestCodexDiagnosticProbeGatewayContract(t *testing.T) {
 	account := &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Credentials: map[string]any{"chatgpt_account_id": "fixture"}}
-	settingsRepo := &codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAICodexTicketPromptTemplate: strings.Replace(DefaultCodexProbeTemplate(), "anonymous workspace", "custom workspace", 1)}}
+	settingsRepo := &diagnosticSettingsRepoStub{values: map[string]string{SettingKeyCodexDiagnosticPromptTemplate: strings.Replace(DefaultCodexProbeTemplate(), "anonymous workspace", "custom workspace", 1)}}
 	gateway := &OpenAIGatewayService{accountRepo: diagnosticAccounts{account: account}, settingService: NewSettingService(settingsRepo, nil)}
 	for _, tc := range []struct {
 		name          string
@@ -123,7 +114,7 @@ func TestCodexDiagnosticProbeGatewayContract(t *testing.T) {
 			calls := 0
 			router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
-				require.True(t, isCodexTicketDiagnostic(r.Context()))
+				require.Equal(t, account.ID, r.Context().Value(codexDiagnosticTargetKey{}))
 				require.Equal(t, "/v1/responses", r.URL.Path)
 				require.Equal(t, "Bearer fixture-key", r.Header.Get("Authorization"))
 				deadline, ok := r.Context().Deadline()
@@ -154,7 +145,7 @@ func TestCodexDiagnosticProbeGatewayContract(t *testing.T) {
 			}
 		})
 	}
-	settingsRepo.values[SettingKeyOpenAICodexTicketPromptTemplate] = "{private-secret"
+	settingsRepo.values[SettingKeyCodexDiagnosticPromptTemplate] = "{private-secret"
 	gateway.settingService.InvalidateCodexProbeTemplateCache()
 	item := RunCodexDiagnosticProbe(context.Background(), gateway, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("invalid template entered gateway") }), &APIKey{Key: "fixture"}, 41, "gpt-5.4", "", "", NewModelTraceChallenge)
 	require.Equal(t, "template_invalid", item.Reason)

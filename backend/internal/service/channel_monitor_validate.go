@@ -75,7 +75,6 @@ func monitorCheckModeUsesQuota(checkMode string) bool {
 //	antigravity（无 adapter）|  N    |  Y    |  N
 func validateCheckMode(provider, checkMode string) error {
 	checkMode = defaultCheckMode(checkMode)
-
 	switch checkMode {
 	case MonitorCheckModeProbe, MonitorCheckModeQuota, MonitorCheckModeQuotaProbe:
 	default:
@@ -91,7 +90,6 @@ func validateCheckMode(provider, checkMode string) error {
 // responses 只对 OpenAI 有意义；其它 provider 使用 chat_completions 作为默认占位。
 func validateAPIMode(provider, apiMode string) error {
 	apiMode = defaultAPIMode(apiMode)
-
 	switch apiMode {
 	case MonitorAPIModeChatCompletions:
 		return nil
@@ -130,35 +128,25 @@ func validateJitter(jitterSec, intervalSec int) error {
 //
 // 错误信息不暴露具体 IP / hostname，避免泄露内网拓扑。
 func validateEndpoint(ep string) error {
-	hostname, err := validateEndpointFormat(ep)
-	if err != nil {
-		return err
-	}
-	return validateEndpointHost(hostname)
-}
-
-func validateEndpointFormat(ep string) (string, error) {
 	ep = strings.TrimSpace(ep)
 	if ep == "" {
-		return "", ErrChannelMonitorInvalidEndpoint
+		return ErrChannelMonitorInvalidEndpoint
 	}
 	u, err := url.Parse(ep)
 	if err != nil {
-		return "", ErrChannelMonitorInvalidEndpoint
+		return ErrChannelMonitorInvalidEndpoint
 	}
 	if u.Scheme != "https" {
-		return "", ErrChannelMonitorEndpointScheme
+		return ErrChannelMonitorEndpointScheme
 	}
 	if u.Host == "" {
-		return "", ErrChannelMonitorInvalidEndpoint
+		return ErrChannelMonitorInvalidEndpoint
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		return "", ErrChannelMonitorEndpointPath
+		return ErrChannelMonitorEndpointPath
 	}
-	return u.Hostname(), nil
-}
 
-func validateEndpointHost(hostname string) error {
+	hostname := u.Hostname()
 	ctx, cancel := context.WithTimeout(context.Background(), monitorEndpointResolveTimeout)
 	defer cancel()
 	blocked, err := isPrivateOrLoopbackHost(ctx, hostname)

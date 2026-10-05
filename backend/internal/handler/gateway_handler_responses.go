@@ -47,7 +47,11 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	// Read request body
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		RespondRequestBodyReadFailure(c, reqLog, err, h.responsesErrorResponse)
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.responsesErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
 
@@ -113,9 +117,6 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			"This group is restricted to Claude Code clients (/v1/messages only)")
 		return
 	}
-	if apiKey.Group != nil {
-		requireAPIKeyQueueCapability(c, service.APIKeyQueueCapabilityForbiddenWhenClaudeCodeOnly)
-	}
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.responsesSecurityAuditError(c, decision)
@@ -131,7 +132,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 
-	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, apiKey.ID, apiKey.ConcurrencyLimit, reqStream, &streamStarted)
+	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted)
 	if err != nil {
 		reqLog.Warn("gateway.responses.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", streamStarted)
@@ -180,7 +181,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 
 	// 3. Account selection + failover loop
-	fs := NewFailoverState(h.maxAccountSwitches, false, c)
+	fs := NewFailoverState(h.maxAccountSwitches, false)
 
 	for {
 		if failoverClientGone(c) {
@@ -193,11 +194,15 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				return
 			}
 			if len(fs.FailedAccountIDs) == 0 {
-				cls := classifySelectionErrorFromGin(c, err, h.gatewayService, apiKey, reqModel, reqModel, effectiveAPIKeyPlatform(c, apiKey))
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, effectiveAPIKeyPlatform(c, apiKey))
+				cls = classifySelectionFailureError(err, cls)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
-				message := cls.messageWithSelectionDetail("No available accounts: ", err)
+				message := cls.Message
+				if !cls.ModelNotFound {
+					message = "No available accounts: " + err.Error()
+				}
 				h.responsesErrorResponse(c, cls.Status, cls.ErrType, message)
 				return
 			}
@@ -262,7 +267,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		account = latest
 		selection.Account = latest
 		if selection.ProfitGateActive() {
-			if err := h.gatewayService.BindSelectionStickySessionAfterProfitAdmission(admissionCtx, selection, apiKey.GroupID, sessionHash, account.ID); err != nil {
+			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionHash, account.ID); err != nil {
 				reqLog.Warn("gateway.responses.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
@@ -368,13 +373,11 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 // responsesErrorResponse writes an error in OpenAI Responses API format.
 func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code, message string) {
-	errorObject := gin.H{
-		"code":    code,
-		"message": message,
-	}
-	applyNoAccountClientErrorFields(c, errorObject)
 	c.JSON(status, gin.H{
-		"error": errorObject,
+		"error": gin.H{
+			"code":    code,
+			"message": message,
+		},
 	})
 }
 
@@ -382,33 +385,25 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
-		service.AnnotateLastOpsUpstreamFailure(c, lastErr)
 	}
-	service.MarkLastOpsUpstreamErrorExhausted(c)
-	// 上游原始状态码进 ops（AnnotateLastOpsUpstreamFailure 已记），映射后的状态码/
-	// 类型/文案才给客户端——与 /v1/messages 与 CC 耗尽路径同一套约定。此前这里把
-	// 最后一次上游状态原样透出：529 变成裸 529 server_error，401/403 会让 Codex
-	// 一类客户端误以为是自己的 key 被拒。
-	upstreamStatus := 0
+	statusCode := http.StatusBadGateway
 	if lastErr != nil && lastErr.StatusCode > 0 {
-		upstreamStatus = lastErr.StatusCode
+		statusCode = lastErr.StatusCode
 	}
-	status, code, message := http.StatusBadGateway, "server_error", "All available accounts exhausted"
-	if upstreamStatus > 0 {
-		status, code, message = h.mapUpstreamError(upstreamStatus)
-	}
+	status, code, message := statusCode, "server_error", "All available accounts exhausted"
 	if lastErr != nil && lastErr.IsCredentialFailure() {
 		status, message = credentialFailoverClientResponse(lastErr)
-		code = "server_error"
 	} else if lastErr != nil && lastErr.IsOpenAICapacityShed() && strings.TrimSpace(lastErr.ClientMessage) != "" {
 		status = lastErr.ClientStatusCode
 		if status <= 0 {
 			status = http.StatusServiceUnavailable
 		}
-		code, message = "server_error", lastErr.ClientMessage
+		message = lastErr.ClientMessage
 	} else if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
-		service.SetOpsUpstreamError(c, upstreamStatus, service.OpenAISilentRefusalClientMessage(), "")
+		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
 		status, code, message = http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage()
+	} else if lastErr != nil && statusCode == http.StatusTooManyRequests {
+		status, code, message = http.StatusTooManyRequests, "rate_limit_error", "All available accounts are currently rate-limited. Please retry later."
 	}
 	if streamStarted {
 		// A slot-wait heartbeat commits HTTP 200 before any upstream response.

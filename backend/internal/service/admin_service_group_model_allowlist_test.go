@@ -4,12 +4,14 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
-func TestAdminService_CreateGroup_RejectsEnabledEmptyAllowlist(t *testing.T) {
+func TestAdminService_CreateGroup_RejectsEmptyEnabledModelAllowlist(t *testing.T) {
 	repo := &groupRepoStubForAdmin{createID: 51}
 	svc := &adminServiceImpl{groupRepo: repo}
 
@@ -20,8 +22,11 @@ func TestAdminService_CreateGroup_RejectsEnabledEmptyAllowlist(t *testing.T) {
 		ModelAllowlist: GroupModelAllowlist{Enabled: true},
 	})
 
-	require.ErrorContains(t, err, "empty model list")
-	require.Nil(t, repo.created)
+	require.Error(t, err)
+	appErr := infraerrors.FromError(err)
+	require.Equal(t, int32(http.StatusBadRequest), appErr.Code)
+	require.Equal(t, "INVALID_MODEL_ALLOWLIST", appErr.Reason)
+	require.Nil(t, repo.created, "拒绝时不得落库")
 }
 
 func TestAdminService_CreateGroup_AcceptsInteriorAllowlistWildcard(t *testing.T) {
@@ -60,7 +65,7 @@ func TestAdminService_CreateGroup_NormalizesModelAllowlist(t *testing.T) {
 	require.Equal(t, []string{"gpt-5.4", "claude-*"}, repo.created.ModelAllowlist.Models)
 }
 
-func TestAdminService_UpdateGroup_RejectsEnabledEmptyAllowlist(t *testing.T) {
+func TestAdminService_UpdateGroup_RejectsEmptyEnabledModelAllowlist(t *testing.T) {
 	existing := &Group{ID: 1, Name: "existing", Platform: PlatformOpenAI, Status: StatusActive}
 	repo := &groupRepoStubForAdmin{getByID: existing}
 	svc := &adminServiceImpl{groupRepo: repo}
@@ -69,8 +74,11 @@ func TestAdminService_UpdateGroup_RejectsEnabledEmptyAllowlist(t *testing.T) {
 		ModelAllowlist: &GroupModelAllowlist{Enabled: true},
 	})
 
-	require.ErrorContains(t, err, "empty model list")
-	require.Nil(t, repo.updated)
+	require.Error(t, err)
+	appErr := infraerrors.FromError(err)
+	require.Equal(t, int32(http.StatusBadRequest), appErr.Code)
+	require.Equal(t, "INVALID_MODEL_ALLOWLIST", appErr.Reason)
+	require.Nil(t, repo.updated, "拒绝时不得落库")
 }
 
 func TestAdminService_UpdateGroup_AcceptsInteriorAllowlistWildcard(t *testing.T) {

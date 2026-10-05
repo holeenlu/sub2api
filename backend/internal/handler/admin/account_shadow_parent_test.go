@@ -40,19 +40,3 @@ func TestEnrichShadowParentInfo(t *testing.T) {
 }
 
 func ptrInt64(v int64) *int64 { return &v }
-
-func TestEnrichShadowParentRPMKeepsConfiguredValue(t *testing.T) {
-	parent := &service.Account{ID: 100, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Extra: map[string]any{"base_rpm": 10}}
-	for _, own := range []int{0, 5, 20} {
-		limit := own
-		items := []AccountWithConcurrency{{Account: &dto.Account{ID: 200, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, ParentAccountID: &parent.ID, BaseRPM: &limit}}}
-		enrichShadowParentInfo(items, map[int64]*service.Account{parent.ID: parent})
-		want := 10
-		if own > 0 && own < want {
-			want = own
-		}
-		require.NotNil(t, items[0].EffectiveRPMLimit)
-		require.Equal(t, want, *items[0].EffectiveRPMLimit)
-		require.Equal(t, own, *items[0].BaseRPM, "displaying inheritance must not rewrite the stored limit")
-	}
-}

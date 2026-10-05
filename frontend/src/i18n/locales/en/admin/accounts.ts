@@ -1,6 +1,5 @@
 export default {
     accounts: {
-
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',
@@ -229,12 +228,6 @@ export default {
       accountSchedulingThresholdOverrideValue: 'Account threshold percent',
       accountSchedulingThresholdOverrideDisabledHint:
         'Use 1-100. The account becomes temporarily unschedulable after reaching this usage percent; 100 disables it for this account.',
-      anthropicFableSchedulingThresholdOverride: '7d Fable Threshold Override',
-      anthropicFableSchedulingThresholdOverrideHint:
-        'Override the global 7d Fable threshold for this account only. Disable to use the system setting.',
-      anthropicFableSchedulingThresholdOverrideValue: '7d Fable threshold percent',
-      anthropicFableSchedulingThresholdOverrideDisabledHint:
-        'Use 1-100. Only the Fable-specific 7d F window is checked. Once it reaches this percent, the account stops serving Fable models (other models are unaffected) until the window resets; shared 7d usage remains controlled by the regular Anthropic threshold.',
       status: {
         active: 'Active',
         inactive: 'Inactive',
@@ -250,9 +243,6 @@ export default {
         unschedulable: 'Unschedulable',
         rateLimitedUntil: 'Rate limited and removed from scheduling. Auto resumes at {time}',
         rateLimitedAutoResume: 'Auto resumes in {time}',
-        rpmPaused: 'Paused: RPM limit reached',
-        rpmPausedUntil: 'OpenAI OAuth RPM limit reached. Scheduling resumes at {time}',
-        rpmPausedRetry: 'OpenAI OAuth RPM limit reached. Scheduling resumes when the current minute resets',
         modelRateLimitedUntil: '{model} rate limited until {time}',
         modelCreditOveragesUntil: '{model} using AI Credits until {time}',
         creditsExhausted: 'Credits Exhausted',
@@ -283,8 +273,7 @@ export default {
         lastUsed: 'Last Used',
         createdAt: 'Created',
         expiresAt: 'Expires At',
-        actions: 'Actions',
-        codexTicket: 'Tickets',
+        actions: 'Actions'
       },
       schedulerScore: {
         baseShort: 'Base',
@@ -292,7 +281,7 @@ export default {
         ungrouped: 'Ungrouped',
         hint: 'Displayed as "group / base score / sticky bonus". The base score is computed within the current filtered candidate set and includes priority, load, queue depth, error rate, first-token latency, reset window, quota headroom, billing rate, and related factors. The sticky bonus applies only when sticky weighting is enabled for previous_response_id or session_hash. Higher scores are preferred.'
       },
-      usageWindowsHint: '"5h / 7d" are the upstream account\'s official rolling usage windows (e.g. OpenAI ChatGPT, Claude). They are imposed by the upstream provider on the account itself — not configured by @:{\'common.siteName\'}, and unrelated to the models you map. Usage resets automatically once each window rolls over, and the limit cannot be lifted from within @:{\'common.siteName\'}.',
+      usageWindowsHint: '"5h / 7d" are the upstream account\'s official rolling usage windows (e.g. OpenAI ChatGPT, Claude). They are imposed by the upstream provider on the account itself — not configured by @:common.siteName itself, and unrelated to the models you map. Usage resets automatically once each window rolls over, and the limit cannot be lifted from within @:common.siteName itself.',
       ollamaCloud: {
         title: 'Ollama Cloud usage',
         sessionSecurityHint: 'The browser session is encrypted at rest and sent only to the fixed official settings URL.',
@@ -404,9 +393,6 @@ export default {
           full: 'RPM limit reached',
           warning: 'RPM approaching limit',
           normal: 'RPM normal',
-          openaiPaused: 'OpenAI OAuth RPM limit reached',
-          openaiWarning: 'OpenAI OAuth RPM approaching limit',
-          openaiNormal: 'OpenAI OAuth RPM normal',
           tieredNormal: 'RPM limit (Tiered) - Normal',
           tieredWarning: 'RPM limit (Tiered) - Approaching limit',
           tieredStickyOnly: 'RPM limit (Tiered) - Sticky only | Buffer: {buffer}',
@@ -635,13 +621,9 @@ export default {
       },
       // OpenAI specific hints
       openai: {
-        apiKeyCodexIdentity: "Use canonical Codex outbound identity",
-        apiKeyCodexIdentityHint: "Off by default, preserving existing outbound headers. Enable to normalize User-Agent, originator and version for this OpenAI API-key account, following the configured Codex version. Provider headers and explicit administrator overrides take precedence. OAuth and inbound audit headers are unchanged; this does not guarantee fewer rate limits.",
-
         baseUrlHint: 'Leave default for official OpenAI API',
         apiKeyHint: 'Your OpenAI API Key',
         oauthPassthrough: 'Auto passthrough (auth only)',
-
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
         flattenNamespaces: 'Flatten Codex namespace tools (compatibility)',
@@ -655,7 +637,7 @@ export default {
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',
         wsMode: 'WS mode',
         wsModeDesc:
-          'HTTP clients always use upstream HTTP. This setting applies only to WebSocket clients of the current OpenAI account type. Select Off to disable WS. Other modes use the selected connection method only when gateway.openai_ws.mode_router_v2_enabled=true; otherwise, they use the context pool.',
+          'Applies only to the current OpenAI account type. Select Off to disable WS. Other modes use the selected connection method only when gateway.openai_ws.mode_router_v2_enabled=true; otherwise, they use the context pool.',
         wsModeOff: 'Off (off)',
         wsModeCtxPool: 'Context Pool (ctx_pool)',
         wsModePassthrough: 'Passthrough (passthrough)',
@@ -717,11 +699,6 @@ export default {
         codexFingerprintDevice: 'Device only',
         codexFingerprintSession: 'Device + Session',
         codexFingerprintFull: 'Full convergence',
-        codexTurnTicket: 'Codex 292 ticket',
-        codexTurnTicketDesc: 'Ticket status for the configured models. Requests are paused without a valid ticket only when fail-closed is enabled.',
-        codexTurnTicketMissing: 'No valid ticket; requests remain allowed',
-        codexTurnTicketReady: '{time} left',
-        codexTurnTicketPaused: 'No 292 ticket; this model is paused',
         codexImageTool: 'Codex image bridge policy',
         codexImageToolDesc:
           'Controls the hosted image_generation bridge and client-declared image tools on Codex /responses text requests. Hosted auto-injection applies only to non-Responses Lite requests. Account policy takes precedence over channel and global settings; standalone image-generation endpoints are unaffected.',
@@ -754,26 +731,10 @@ export default {
         testMode: 'Test mode',
         testModeDefault: 'Default request',
         testModeCompact: 'Compact probe',
-
         modelRestrictionDisabledByPassthrough: 'Automatic passthrough is enabled: model whitelist/mapping will not take effect.',
-        requestTimezone: 'Ticket and diagnostic timezone',
-        requestTimezoneDesc: 'Timezone used by ticket acquisition and diagnostic request templates for this OpenAI account. Defaults to Singapore; normal forwarded requests keep their original dates, times and language preferences.',
-        requestTimezoneLoadFailed: 'Timezone choices could not be loaded. The default Singapore timezone remains available.',
-        codexDiagnostic: 'Model degradation check',
-        codexTicketAccountPolicy: 'Requests without a ticket',
-        codexTicketAccountPolicyDesc: 'Missing-ticket restrictions apply only when global harvesting is enabled and both this account and the current model participate. Account overrides take precedence over the global default; existing tickets follow the normal injection rules.',
-        codexTicketPolicyInherit: 'Inherit global default',
-        codexTicketPolicyAllow: 'Allow without a ticket',
-        codexTicketPolicyDeny: 'Require a ticket',
-        codexTicketHistory: 'Tickets & activity',
-        codexTicketSummary: '{ready} ready / {total} models',
-        codexTicketReadyShort: 'Ready',
-        codexTicketMissingShort: 'Missing',
-        codexTicketEventSuccess: 'Ticket acquired',
-        codexTicketEventMiss: 'Ticket missed',
-        codexTicketEventError: 'Ticket error',
-        codexTicketEventInvalidation: 'Ticket invalidated',
-      },
+
+codexDiagnostic: 'Model degradation check',
+},
       grok: {
         baseUrlHint: 'Grok OAuth accounts forward to the official xAI API base URL.',
         apiKeyHint: 'Grok subscription support uses OAuth refresh tokens; API keys are out of scope for this account type.',
@@ -846,7 +807,7 @@ export default {
       modelMapping: 'Model Mapping',
       fromModel: 'Request model',
       toModel: 'Target model',
-      selectAllowedModels: 'Select the models this account can serve. Leave empty to accept all models. The group whitelist still determines which models clients may request.',
+      selectAllowedModels: 'Select allowed models. Leave empty to support all models.',
       mapRequestModels:
         'Map request models to actual models. Left is the requested model, right is the actual model sent to API.',
       selectedModels: 'Selected {count} model(s)',
@@ -860,7 +821,6 @@ export default {
       searchModels: 'Search models...',
       noMatchingModels: 'No matching models',
       fillRelatedModels: 'Sync latest supported models',
-      syncBulkUpstreamModelsHint: 'Fetch the latest upstream lists for every target and add only models supported by all of them. Existing entries are kept; changes apply when you save.',
       syncUpstreamModels: 'Sync upstream supported models',
       syncUpstreamModelsLoading: 'Syncing upstream...',
       syncUpstreamModelsSuccess: 'Synced {count} new model(s) from upstream ({total} upstream total)',
@@ -872,16 +832,6 @@ export default {
         'Model IDs were synced, but no capability metadata could be updated.',
       syncUpstreamModelsMetadataPartial:
         'Some model capabilities were updated; remaining models are still incomplete.',
-      syncLiveAnthropicModels: 'Sync live intersection',
-      syncLiveAnthropicModelsLoading: 'Querying selected accounts...',
-      syncLiveAnthropicModelsSuccess:
-        'Added {count} model(s) from the live intersection ({total} supported by every account)',
-      syncLiveAnthropicModelsPartial:
-        'Added {count} of {total} live model(s); {failed} account(s) did not answer',
-      syncLiveAnthropicModelsFailures: '{count} account(s) did not answer and were left out:',
-      syncLiveAnthropicModelsReplace: 'Replace with live list ({count} would be removed)',
-      syncLiveAnthropicModelsReplaceConfirm:
-        'Replace the whitelist with the live intersection? {count} entry/entries not returned by every account will be removed: {models}',
       clearAllModels: 'Clear all models',
       customModelName: 'Custom model name',
       enterCustomModelName: 'Enter custom model name',
@@ -1060,8 +1010,6 @@ export default {
         rpmLimit: {
           label: 'RPM Limit',
           hint: 'Limit requests per minute to protect upstream accounts',
-          openaiBaseRpmHint: 'Enter a positive integer after enabling; an empty value uses 15. Disabling removes this account setting, but credential shadows still respect the parent limit.',
-          openaiHint: 'Limit actual OpenAI OAuth upstream attempts per calendar minute. Pre-send validation failures do not count; attempted requests still count on failure. Resume next minute after reaching the limit.',
           baseRpm: 'Base RPM',
           baseRpmPlaceholder: '15',
           baseRpmHint: 'Max requests per minute, 0 or empty means no limit',
@@ -1130,7 +1078,6 @@ export default {
       priorityHint: 'Lower value accounts are used first',
       billingRateMultiplier: 'Billing Rate Multiplier',
       billingRateMultiplierHint: '0 = free, affects account billing only',
-
       expiresAt: 'Expires At',
       expiresAtHint: 'Leave empty for no expiration',
       expiresAtTimezoneHint: 'Input is interpreted in your browser time zone ({timezone}).',
@@ -1193,18 +1140,6 @@ export default {
         cookieAutoAuth: 'Cookie Auto-Auth',
         cookieAutoAuthDesc:
           'Use claude.ai sessionKey to automatically complete OAuth authorization without manually opening browser.',
-        setupTokenDirectDesc:
-          'Run claude setup-token in a terminal with Claude Code installed, complete authorization, then paste the generated long-lived OAuth token below.',
-        setupTokenLabel: 'Claude Setup Token',
-        setupTokenPlaceholder:
-          'One Setup Token per line, e.g.:\nsk-ant-oat01-xxxxx...\nsk-ant-oat01-yyyyy...',
-        setupTokenPlaceholderSingle: 'sk-ant-oat01-xxxxx...',
-        setupTokenCommandHint: 'Generate with:',
-        saveSetupToken: 'Save Setup Token',
-        savingSetupToken: 'Saving...',
-        pleaseEnterSetupToken: 'Please enter one valid Claude Setup Token',
-        invalidSetupToken:
-          'Invalid Setup Token format. Expected an sk-ant-oat01-... token generated by claude setup-token.',
         sessionKey: 'sessionKey',
         keysCount: '{count} keys',
         batchCreateAccounts: 'Will batch create {count} accounts',
@@ -1807,81 +1742,9 @@ export default {
       linkCopied: 'Link Copied',
       needsReauth: 'Re-auth Required',
       rateLimited: 'Rate Limited',
-      usageError: 'Fetch Error',
-      codexTickets: {
-        title: 'Ticket center',
-        retention: 'Records retained for 90 days · credentials visible to admins only',
-        refresh: 'Refresh',
-        close: 'Close',
-        available: 'Ready / models',
-        fingerprint: 'Fingerprint version',
-        updateBank: 'Verify & update',
-        tabs: 'Ticket center navigation',
-        current: 'Current tickets',
-        attempts: 'Ticket attempts',
-        invalidations: 'Ticket expiry history',
-        noModels: 'No models currently require tickets',
-        length: 'Ticket length',
-        acquired: 'Acquired',
-        expires: 'Credentials expire',
-        present: 'Present',
-        absent: 'Absent',
-        accountParticipation: 'Include this account in ticket harvesting',
-        modelParticipation: 'Include this model in ticket harvesting',
-        participationHint: 'Switches show saved participation settings and save immediately. Model choices remain editable when account participation is off. Disabling account or model participation bypasses missing-ticket restrictions for the affected requests. Re-enabling restores the saved policy. Harvesting also depends on the global switch, account status and existing runtime conditions.',
-        savingParticipation: 'Saving participation…',
-        participationSaved: 'Participation saved',
-        participationRefreshError: 'Participation was saved, but account details could not be refreshed. Select Refresh to retry.',
-        harvestActive: 'Runtime: harvesting allowed',
-        harvestInactive: 'Runtime: harvesting currently disabled',
-        credentialsChanged: 'Both turn-state and __oailb changed',
-        legacyStateChanged: 'Legacy rule: turn-state changed',
-        ready: 'Ready',
-        missing: 'Missing',
-        paused: 'Paused',
-        manual: 'Harvest',
-        running: 'Running…',
-        attemptsDesc: 'Success, misses and errors are shown here; failed attempts do not mean the current ticket is invalid.',
-        invalidationsDesc: 'New events require both turn-state and __oailb to change on a request carrying a saved ticket. Legacy events only compared turn-state. Neither is an inferred TTL expiry.',
-        filter: 'Result',
-        model: 'Model',
-        all: 'All results',
-        success: 'Success',
-        failure: 'Failures & errors',
-        invalidation: 'Invalidation',
-        allModels: 'All models',
-        loading: 'Loading…',
-        empty: 'No matching records (90-day retention)',
-        records: 'records',
-        legacy: 'Legacy length check',
-        details: 'Event details',
-        copy: 'Copy',
-        notCarried: 'Not carried',
-        notReturned: 'Not returned by upstream',
-        error: 'Operation failed',
-      },
-      codexTicketPool: {
-        title: 'Codex ticket proxy pool',
-        description: 'Harvest through the proxy pool; business requests reuse the issuing proxy. Disabled, expired or changed proxies never fall back to a direct connection.',
-        save: 'Save pool',
-        saved: 'Proxy pool saved',
-        all: 'All available proxies',
-        custom: 'Custom selection',
-        empty: 'No available proxies; add one first.',
-        loadFailed: 'Unable to load proxy pool',
-        saveFailed: 'Unable to save proxy pool',
-      },
-      codexTicketCadence: {
-        title: 'Ticket cadence',
-        description: 'Retry failures with jitter. Bound credentials last at most 4 minutes; refresh is attempted 30 seconds before expiry and pauses during business traffic. A shorter proactive interval is optional; 0 disables only that extra timer. Use Save settings below.',
-        retryMin: 'Minimum retry (s)',
-        retryMax: 'Maximum retry (s)',
-        refresh: 'Proactive refresh (s; 0=off)',
-        loading: 'Ticket cadence is still loading',
-        invalid: 'Check ticket cadence intervals',
-        loadFailed: 'Unable to load cadence',
-      },
-      codexMonitor: {
+      usageError: 'Fetch Error'
+    ,
+codexMonitor: {
   "groupSource": "Selected key group whitelist",
   "eligibleCount": "testable models",
   "fingerprint_unavailable": "No fingerprint data; cannot check yet",
@@ -1964,7 +1827,8 @@ export default {
     "internal_error": "Diagnostic worker failed."
   }
 },
-      codexDiagnosticDialog: {
+
+codexDiagnosticDialog: {
         title: 'Model degradation check',
         steps: 'Check steps',
         setup: 'Select models',
@@ -1975,7 +1839,7 @@ export default {
         chooseKey: 'Select an API key',
         keyHint: 'Send checks through this account and bill the selected API key normally.',
         info: 'Check information',
-        templateHint: 'Uses the shared Codex ticket and degradation check template from system settings.',
+        templateHint: 'Uses the Codex degradation check template from system settings.',
         fingerprint: 'Fingerprint version',
         updateBank: 'Update fingerprints',
         retry: 'Retry loading',
@@ -2048,7 +1912,7 @@ export default {
           not_run: 'Request not sent after cancellation',
         },
       },
-    },
+},
 
     // Scheduled Tests
 }

@@ -1,3 +1,5 @@
+import { BRAND_NAME } from '@/config/brand'
+
 export default {
     settings: {
       title: '系统设置',
@@ -14,7 +16,6 @@ export default {
         payment: '支付设置',
       },
       features: {
-
         channelMonitor: {
           title: '渠道监控',
           description: '启用后在 V1 主动探测与 V2 被动用量监控中二选一。关闭后两种模式的后台任务均停止，用户端入口隐藏。',
@@ -279,10 +280,10 @@ export default {
       },
       apiKeyAcl: {
         title: 'API Key IP 访问控制',
-        description: '认证、IP 限制、限流与会话绑定始终使用已配置的可信代理链',
-        trustForwardedIp: '旧版转发 IP 元数据兼容',
+        description: '控制 API Key 白/黑名单、操作审计日志与会话 IP/UA 绑定使用哪个客户端 IP 判断',
+        trustForwardedIp: '信任反代传递的客户端 IP',
         trustForwardedIpHint:
-          '默认关闭。该兼容选项仅影响请求与用量元数据，不能覆盖安全校验。请在 server.trusted_proxies 中配置实际代理地址，供认证和访问控制使用。',
+          '为保证升级兼容默认开启。开启后 CF-Connecting-IP、X-Real-IP 或 X-Forwarded-For 会直接接管客户端 IP 解析并覆盖 server.trusted_proxies；关闭后严格使用 server.trusted_proxies 配置的 Gin 可信代理链。仅在源站无法被直接访问时开启接管模式。切换会改变现有会话的 IP 指纹。',
         forwardedClientIpHeaders: '自定义客户端 IP 请求头',
         forwardedClientIpHeadersHint: '添加 CDN 或反代请求头名称，解析时优先于内置请求头。',
         forwardedClientIpHeadersPlaceholder: 'X-Client-IP',
@@ -449,10 +450,7 @@ export default {
         accountSchedulingThresholdsDescription: '当账号当前原生用量窗口（OpenAI Codex/Anthropic 会话，或 Grok 请求/Token 利用率）达到该百分比时，@:common.siteName 会临时将其移出调度，直到窗口重置。填 100 表示禁用。',
         accountSchedulingThresholdsGlobalHint: '系统级默认值，作用于该平台全部账号。可在账号编辑页对单个账号覆盖。',
         accountSchedulingThresholdsDisabledHint: '100 表示禁用该平台自动停调；1–99 表示达到该利用率后暂停调度。',
-        accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。',
-        accountSchedulingThresholdsFableLabel: 'anthropic · 7d Fable',
-        accountSchedulingThresholdsFableHint:
-          '整数 1–100（百分比）。只检查 7d F（Fable 专属）窗口；达到该值后仅停调 Fable 模型，账号对其他模型照常可用。共享 7d 窗口只由普通 Anthropic 阈值控制。100 表示不单独配置，沿用 Anthropic 阈值。'
+        accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。'
       },
       upstreamBillingProbe: {
         title: '上游倍率自动探测',
@@ -544,9 +542,6 @@ export default {
         antigravityUserAgentVersion: 'Antigravity UA 版本',
         antigravityUserAgentVersionPlaceholder: '1.23.2',
         antigravityUserAgentVersionHint: '留空时使用 ANTIGRAVITY_USER_AGENT_VERSION 或内置默认值 1.23.2；填写后后台设置优先。',
-        upstreamFailoverStatusCodes: '上游换号状态码',
-        upstreamFailoverStatusCodesPlaceholder: '401,403,429,500-599',
-        upstreamFailoverStatusCodesHint: '逗号分隔的状态码或闭区间，上游返回这些状态码时换账号重试；留空沿用各平台内置集合，400/404/408/413/422/499 无论如何都不换号。',
         openaiCodexUserAgent: 'OpenAI Codex UA',
         openaiCodexUserAgentPlaceholder: 'codex-tui/0.146.1 (Ubuntu 22.4.0; x86_64) WindowsTerminal (codex-tui; 0.146.1)',
         openaiCodexUserAgentHint: '出站统一使用的完整 Codex User-Agent，用于自定义 OS / 架构 / 终端指纹。留空则按下方版本号拼出标准 codex-tui 形态（推荐）。填写后首段和尾部的版本号仍会被下方版本号同步覆盖，避免这条 UA 停在填写时的旧版本——上游在容量紧张时按客户端身份分优先级降载，陈旧或非官方形态的身份会被优先丢弃并回 server_is_overloaded。',
@@ -561,15 +556,7 @@ export default {
         claudeCodeVersionAutoSync: '自动同步 Claude Code 版本号',
         claudeCodeVersionAutoSyncHint: '每小时从官方发布渠道获取最新版本的 Claude Code 客户端版本号，无需为了跟版本而升级本服务。关闭后停止获取新版本，已同步的版本仍可使用；上方手填版本始终优先。',
         claudeCodeVersionSyncedValue: '当前同步到：{version}',
-        codexHardeningTitle: 'Codex 设置',
-        codexTicketEnabled: '292 打票',
-        codexTicketEnabledDesc:
-          '打票默认关闭，需要时手动开启。关闭后按原链路转发；开启后按账号和模型参与设置后台打票，并在业务请求中注入票据。引入此功能时会一次性关闭此开关；之后手动开启的选择会保留。',
-        codexTicketHarvestProxy: '292 打票代理',
-        codexTicketHarvestProxyDesc:
-          '仅在门票功能开启时用于打票，保存后后续探测会使用新代理，无需重启。日常业务仍走账号自己的住宅代理。填写完整代理 URL（http 或 socks5h，含用户名和密码）。代理服务商需自行负责出口 IP 轮换。留空并保存表示不改已保存的值。',
-        codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
-        codexTicketHarvestProxyConfigured: '已配置（密码已隐藏）。要更换请整段粘贴新的代理 URL。',
+        codexHardeningTitle: '降智检测模板',
         codexClientRestrictionTitle: 'Codex 客户端限制',
         codexHardeningDesc:
           '仅对已开启「仅允许 Codex 官方客户端」的 OpenAI OAuth 账号生效（全局）。在 User-Agent/Originator 之外，用版本区间、引擎指纹门与黑/白名单巩固判定。',
@@ -604,17 +591,21 @@ export default {
         codexUaContainsPlaceholder: 'User-Agent 包含标记，逗号分隔（如 opencode/）',
         codexAddRow: '添加一条',
         codexRemoveRow: '删除',
-        codexAdditionalSettingsFailed: '普通设置已保存，但打票间隔或其他附加设置保存失败：',
-        codexProbeTemplate: 'Codex 打票与降智检测模板',
-        codexProbeTemplateReset: '恢复默认',
-        codexProbeTemplateDesc: '打票和降智检测共用此 JSONL 模板。保留消息结构、标签和占位符，最大 256 KiB；恢复默认后点击保存生效。默认固定文案为英文，动态随机挑战仍为中文。',
-        codexProbeTimezone: '账号请求时区',
-        codexProbeDate: '账号时区下的当前日期',
-        codexProbeModel: '目标模型',
-        codexProbeChallenge: '本次随机挑战',
-        codexTicketAllowWithoutTicket: '默认允许无票请求',
-        codexTicketAllowWithoutTicketDesc: '未配置时默认开启，缺票不会阻断正常请求；已有全局和账号策略会保留。无票限制仅在全局打票开启且账号及当前模型均参与打票时生效，账号单独设置优先生效。',
-      },
+
+codexProbeTemplate: 'Codex 降智检测模板',
+
+codexProbeTemplateReset: '恢复默认',
+
+codexProbeTemplateDesc: '降智检测使用此 JSONL 模板。保留消息结构、标签和占位符，最大 256 KiB；恢复默认后点击保存生效。默认固定文案为英文，动态随机挑战仍为中文。',
+
+codexProbeTimezone: '账号请求时区',
+
+codexProbeDate: '账号时区下的当前日期',
+
+codexProbeModel: '目标模型',
+
+codexProbeChallenge: '本次随机挑战',
+},
       webSearchEmulation: {
         title: 'Web Search 模拟',
         description: '为不原生支持搜索的 Anthropic API Key 账号注入 web search 能力',
@@ -657,12 +648,12 @@ export default {
           '禁用用户注册、公开页面和自助服务功能。仅管理员可以登录和管理平台。',
         siteName: '站点名称',
         siteNameHint: '显示在邮件和页面标题中',
-        siteNamePlaceholder: 'TapModels',
+        siteNamePlaceholder: BRAND_NAME,
         siteSubtitle: '站点副标题',
         siteSubtitleHint: '显示在登录和注册页面',
         siteSubtitlePlaceholder: '选个模型，开始开发。',
         apiBaseUrl: 'API 端点地址',
-        apiBaseUrlHint: '用于"使用密钥"和回调地址建议，留空则使用当前站点地址',
+        apiBaseUrlHint: '用于"使用密钥"、"导入到 CC Switch"和回调地址建议，留空则使用当前站点地址',
         apiBaseUrlPlaceholder: 'https://api.example.com',
         tablePreferencesTitle: '通用表格设置',
         tablePreferencesDescription: '设置后台与用户侧表格组件的默认分页行为',
@@ -706,7 +697,9 @@ export default {
         homeContentIframeWarning:
           '⚠️ iframe 模式提示：部分网站设置了 X-Frame-Options 或 CSP 安全策略，禁止被嵌入到 iframe 中。如果页面显示空白或报错，请确认目标网站允许被嵌入，或考虑使用 HTML 模式自行构建页面内容。',
         compactHome: '简洁首页',
-        compactHomeHint: '未设置自定义首页内容时，展示简洁的站点信息页面。'
+        compactHomeHint: '未设置自定义首页内容时，展示简洁的站点信息页面。',
+        hideCcsImportButton: '隐藏 CCS 导入按钮',
+        hideCcsImportButtonHint: '启用后将在 API Keys 页面隐藏"导入 CCS"按钮'
       },
       purchase: {
         title: '充值/订阅页面',
@@ -1011,8 +1004,8 @@ export default {
         event: '事件',
         locale: '语言',
         localeEn: '英文',
-        localeZh: '中文',
         localeJa: '日文',
+        localeZh: '中文',
         subject: '主题',
         subjectPlaceholder: '输入邮件主题',
         html: 'HTML 模板',

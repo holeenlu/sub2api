@@ -13,9 +13,6 @@ import (
 func ProvideAdminHandlers(
 	scheduledTests *service.ScheduledTestService,
 	scheduledRunner *service.ScheduledTestRunnerService,
-	registry *service.ModelCatalogService,
-	groupCatalog *service.GroupModelCatalogService,
-	modelCatalogHandler *admin.ModelCatalogHandler,
 	dashboardHandler *admin.DashboardHandler,
 	userHandler *admin.UserHandler,
 	groupHandler *admin.GroupHandler,
@@ -55,22 +52,14 @@ func ProvideAdminHandlers(
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
-	settingService *service.SettingService,
-	openAIGatewayService *service.OpenAIGatewayService,
 	claudeResetCredits *service.ClaudeResetCreditService,
 ) *AdminHandlers {
 	accountHandler.SetScheduledTests(scheduledTests, scheduledRunner)
-	groupHandler.SetModelCatalog(groupCatalog, registry)
-	channelHandler.SetModelCatalog(registry)
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
-	accountHandler.SetCodexTicketSettings(settingService)
-	accountHandler.SetCodexTicketGateway(openAIGatewayService)
-	proxyHandler.SetCodexTicketSettings(settingService)
 	accountHandler.SetClaudeResetCreditService(claudeResetCredits)
 	return &AdminHandlers{
-		ModelCatalog:           modelCatalogHandler,
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,
 		Group:                  groupHandler,
@@ -127,13 +116,11 @@ func ProvideGatewayHandler(
 	cfg *config.Config,
 	settingService *service.SettingService,
 	coordinator *securityaudit.Coordinator,
-	catalog *service.GroupModelCatalogService,
 ) *GatewayHandler {
 	h := NewGatewayHandler(gatewayService, openAIGatewayService, geminiCompatService, antigravityGatewayService,
 		userService, concurrencyService, billingCacheService, usageService, apiKeyService, usageRecordWorkerPool,
 		errorPassthroughService, contentModerationService, userMsgQueueService, cfg, settingService)
 	h.securityAuditCoordinator = coordinator
-	h.modelCatalog = catalog
 	return h
 }
 
@@ -195,7 +182,6 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 
 // ProvideHandlers creates the Handlers struct
 func ProvideHandlers(
-	modelRegistry *service.ModelCatalogService,
 	authHandler *AuthHandler,
 	userHandler *UserHandler,
 	apiKeyHandler *APIKeyHandler,
@@ -221,7 +207,6 @@ func ProvideHandlers(
 	_ *service.IdempotencyCleanupService,
 	_ *service.OpenAIQuotaAutoResetService,
 ) *Handlers {
-	apiKeyHandler.modelCatalog = modelRegistry
 	return &Handlers{
 		Auth:             authHandler,
 		User:             userHandler,
@@ -249,7 +234,6 @@ func ProvideHandlers(
 
 // ProviderSet is the Wire provider set for all handlers
 var ProviderSet = wire.NewSet(
-	admin.NewModelCatalogHandler,
 	// Top-level handlers
 	NewAuthHandler,
 	NewUserHandler,

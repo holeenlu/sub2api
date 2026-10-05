@@ -610,7 +610,6 @@ export interface Group {
   claude_code_only: boolean
   fallback_group_id: number | null
   fallback_group_id_on_invalid_request: number | null
-  fallback_group_id_on_no_account: number | null
   // OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
   allow_messages_dispatch?: boolean
   // OpenAI Live 接口开关
@@ -728,14 +727,6 @@ export interface CompositeRouteDecision {
 }
 
 export interface ApiKey {
-  model_setup?: {
-    model: string
-    review_model: string
-    reasoning_effort?: string
-    context_window?: number
-    catalog_revision: string
-    status: string
-  }
   id: number
   user_id: number
   key: string
@@ -752,7 +743,6 @@ export interface ApiKey {
   created_at: string
   updated_at: string
   current_concurrency: number
-  concurrency_limit: number // 0 = no additional key limit
   group?: Group
   rate_limit_5h: number
   rate_limit_1d: number
@@ -768,21 +758,8 @@ export interface ApiKey {
   reset_7d_at: string | null
 }
 
-export interface ApiKeyConcurrencySnapshot {
-  queue_policy: {
-    max_waiting: number
-    timeout_seconds: number
-  }
-  items: Array<{
-    id: number
-    current_concurrency: number
-    current_waiting: number
-  }>
-}
-
 export interface CreateApiKeyRequest {
   name: string
-  concurrency_limit?: number // 0 = no additional key limit
   group_id?: number | null
   custom_key?: string // Optional custom API Key
   ip_whitelist?: string[]
@@ -796,7 +773,6 @@ export interface CreateApiKeyRequest {
 
 export interface UpdateApiKeyRequest {
   name?: string
-  concurrency_limit?: number // Omitted = no change, 0 = no additional key limit
   group_id?: number | null
   status?: 'active' | 'inactive'
   ip_whitelist?: string[]
@@ -855,7 +831,6 @@ export interface CreateGroupRequest {
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
-  fallback_group_id_on_no_account?: number | null
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   model_allowlist?: ModelAllowlist
@@ -922,7 +897,6 @@ export interface UpdateGroupRequest {
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
-  fallback_group_id_on_no_account?: number | null
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   model_allowlist?: ModelAllowlist
@@ -1120,7 +1094,6 @@ export interface UpstreamBillingProbeResult {
 }
 
 export interface UpstreamBillingRateSnapshotItem {
-
   account_id: number
   snapshot?: UpstreamBillingProbeSnapshot | null
 }
@@ -1223,8 +1196,7 @@ export interface OpenCodeGoUsageSettings {
 }
 
 export interface Account {
-  codex_diagnostic?: import("@/api/admin/codexTickets").DiagnosticSummary
-
+  codex_diagnostic?: import('@/api/admin/codexDiagnostics').DiagnosticSummary | null
   id: number
   name: string
   notes?: string | null
@@ -1236,27 +1208,10 @@ export interface Account {
   // 改为通过 credentials_status.has_<key> 暴露存在性。
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
-
   ollama_cloud_usage?: OllamaCloudUsageState
   opencode_go_usage?: OpenCodeGoUsageState
-  codex_ticket_latest_event?: { model: string; kind: string; occurred_at: string }
-  codex_turn_tickets?: Array<{
-    model: string
-    length?: number
-    ready: boolean
-    remaining_seconds: number
-    blocked: boolean
-    captured_at?: string
-    turn_state_present?: boolean
-    cookie_present?: boolean
-    fingerprint_commit?: string
-    harvest_enabled?: boolean
-    harvest_paused?: boolean
-    expires_at?: string
-  }>
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
-    openai_request_timezone?: string
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
     upstream_billing_probe_enabled?: boolean
@@ -1309,10 +1264,6 @@ export interface Account {
   group_ids?: number[] // Groups this account belongs to
   groups?: Group[] // Preloaded group objects
 
-  // 后端下发的能力位：账号的凭据是否参与 OAuth 续期（直接导入的 setup-token 没有
-  // refresh_token，恒为 false）。前端据此决定是否显示"刷新 token"入口。
-  can_refresh_token?: boolean
-
   // Rate limit & scheduling fields
   schedulable: boolean
   rate_limited_at: string | null
@@ -1334,7 +1285,7 @@ export interface Account {
   max_sessions?: number | null
   session_idle_timeout_minutes?: number | null
 
-  // RPM 限制（Anthropic OAuth/SetupToken 和 OpenAI OAuth）
+  // RPM 限制（仅 Anthropic OAuth/SetupToken 账号有效）
   base_rpm?: number | null
   rpm_strategy?: string | null
   rpm_sticky_buffer?: number | null
@@ -1378,9 +1329,6 @@ export interface Account {
   current_window_cost?: number | null // 当前窗口费用
   active_sessions?: number | null // 当前活跃会话数
   current_rpm?: number | null // 当前分钟 RPM 计数
-  effective_rpm_limit?: number | null // 父账号与影子账号限制取更严格值，不覆盖存储配置
-  rpm_paused?: boolean
-  rpm_reset_at?: number | null
 
   // 影子账号关系（spark 维度影子）
   parent_account_id?: number | null
@@ -2083,25 +2031,6 @@ export interface UserBreakdownItem {
   account_cost: number
 }
 
-/** 与 UserBreakdownItem 同构，聚合维度换成 api_key_id。 */
-export interface APIKeyBreakdownItem {
-  api_key_id: number
-  /** Key 已被物理删除时为空 */
-  key_name: string
-  /** Key 已软删除或已不存在；历史用量仍会统计进来，只是标记出来 */
-  key_deleted: boolean
-  user_id: number
-  email: string
-  requests: number
-  input_tokens: number
-  output_tokens: number
-  cache_tokens: number
-  total_tokens: number
-  cost: number
-  actual_cost: number
-  account_cost: number
-}
-
 export interface UserUsageTrendPoint {
   date: string
   user_id: number
@@ -2508,7 +2437,6 @@ export interface TotpLogin2FARequest {
 // ==================== Scheduled Test Types ====================
 
 export interface ScheduledTestPlan {
-  account_name?: string
   id: number
   account_id: number
   model_id: string

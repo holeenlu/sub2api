@@ -196,7 +196,7 @@ func TestAdminService_CompositeModelsListCandidatesIncludeConcreteAccountMapping
 	}
 	svc := &adminServiceImpl{accountRepo: accountRepo, groupRepo: groupRepo}
 
-	candidates, _, err := svc.GetGroupModelsListCandidates(context.Background(), 99, PlatformComposite)
+	candidates, err := svc.GetGroupModelsListCandidates(context.Background(), 99, PlatformComposite)
 
 	require.NoError(t, err)
 	require.Contains(t, candidates, "gpt-custom")
@@ -214,6 +214,6 @@ func TestAdminService_CNProviderModelsListCandidatesKeepClaudeDefaults(t *testin
 		want = append(want, model.ID)
 	}
 	for _, platform := range []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax} {
-		require.Equal(t, want, DefaultModelsListCandidateIDs(platform), "platform=%s", platform)
+		require.Equal(t, want, defaultModelsListCandidateIDs(platform), "platform=%s", platform)
 	}
 }

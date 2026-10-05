@@ -291,7 +291,7 @@ func parseAuditLogRetentionDays(value string) int {
 func (s *SettingService) GetSiteName(ctx context.Context) string {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeySiteName)
 	if err != nil || value == "" {
-		return DefaultSiteName
+		return "Sub2API"
 	}
 	return value
 }
@@ -1124,35 +1124,22 @@ func (s *SettingService) GetDefaultPlatformQuotas(ctx context.Context) (map[stri
 	return out, nil // 补齐全部允许 platform key，保持与旧实现一致的下游契约
 }
 
-// accountSchedulingThresholdsSnapshot 是一次阈值读取的结果：阈值本身，加上「这份值
-// 是否真的来自配置」。见 cachedAccountSchedulingThresholds.resolved。
-type accountSchedulingThresholdsSnapshot struct {
-	thresholds map[string]int
-	resolved   bool
-}
-
 // GetAccountSchedulingThresholds returns per-platform auto-pause thresholds (1..100).
 // 100 disables the threshold for that platform. Hot-path cached with singleflight.
-//
-// 第二个返回值报告这份阈值是否可信：读取或解析失败时返回的是全 100 的兜底默认值，
-// 与「运维把阈值全部关掉」取值相同却含义相反，调用方必须自己区分。
-func (s *SettingService) GetAccountSchedulingThresholds(ctx context.Context) (map[string]int, bool) {
+func (s *SettingService) GetAccountSchedulingThresholds(ctx context.Context) map[string]int {
 	if s == nil || s.settingRepo == nil {
-		return defaultAccountSchedulingThresholds(), false
+		return defaultAccountSchedulingThresholds()
 	}
 	if cached, ok := accountSchedulingThresholdsCache.Load().(*cachedAccountSchedulingThresholds); ok {
 		if cached != nil && len(cached.thresholds) > 0 && time.Now().UnixNano() < cached.expiresAt {
-			return cloneAccountSchedulingThresholds(cached.thresholds), cached.resolved
+			return cloneAccountSchedulingThresholds(cached.thresholds)
 		}
 	}
 
 	result, err, _ := accountSchedulingThresholdsSF.Do(SettingKeyAccountSchedulingThresholds, func() (any, error) {
 		if cached, ok := accountSchedulingThresholdsCache.Load().(*cachedAccountSchedulingThresholds); ok {
 			if cached != nil && len(cached.thresholds) > 0 && time.Now().UnixNano() < cached.expiresAt {
-				return accountSchedulingThresholdsSnapshot{
-					thresholds: cloneAccountSchedulingThresholds(cached.thresholds),
-					resolved:   cached.resolved,
-				}, nil
+				return cloneAccountSchedulingThresholds(cached.thresholds), nil
 			}
 		}
 
@@ -1163,44 +1150,41 @@ func (s *SettingService) GetAccountSchedulingThresholds(ctx context.Context) (ma
 		raw, err := s.settingRepo.GetValue(dbCtx, SettingKeyAccountSchedulingThresholds)
 		if err != nil {
 			if errors.Is(err, ErrSettingNotFound) {
-				// 「这一项没配过」是配置本身给出的答案，与读不到配置不同。
-				return storeAccountSchedulingThresholdsCache(thresholds, true, accountSchedulingThresholdsCacheTTL), nil
+				accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
+					thresholds: cloneAccountSchedulingThresholds(thresholds),
+					expiresAt:  time.Now().Add(accountSchedulingThresholdsCacheTTL).UnixNano(),
+				})
+				return cloneAccountSchedulingThresholds(thresholds), nil
 			}
 			slog.Warn("failed to get account scheduling thresholds, falling back to defaults", "error", err)
-			return storeAccountSchedulingThresholdsCache(thresholds, false, accountSchedulingThresholdsErrorTTL), nil
+			accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
+				thresholds: cloneAccountSchedulingThresholds(thresholds),
+				expiresAt:  time.Now().Add(accountSchedulingThresholdsErrorTTL).UnixNano(),
+			})
+			return cloneAccountSchedulingThresholds(thresholds), nil
 		}
 
-		resolved := true
 		if trimmed := strings.TrimSpace(raw); trimmed != "" {
 			if parsed, err := parseAccountSchedulingThresholdsSetting(trimmed); err != nil {
 				slog.Warn("failed to parse account scheduling thresholds, falling back to defaults", "error", err)
-				resolved = false
 			} else {
 				thresholds = parsed
 			}
 		}
 
-		return storeAccountSchedulingThresholdsCache(thresholds, resolved, accountSchedulingThresholdsCacheTTL), nil
+		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
+			thresholds: cloneAccountSchedulingThresholds(thresholds),
+			expiresAt:  time.Now().Add(accountSchedulingThresholdsCacheTTL).UnixNano(),
+		})
+		return cloneAccountSchedulingThresholds(thresholds), nil
 	})
 	if err != nil {
-		return defaultAccountSchedulingThresholds(), false
+		return defaultAccountSchedulingThresholds()
 	}
-	if snapshot, ok := result.(accountSchedulingThresholdsSnapshot); ok {
-		return cloneAccountSchedulingThresholds(snapshot.thresholds), snapshot.resolved
+	if thresholds, ok := result.(map[string]int); ok {
+		return cloneAccountSchedulingThresholds(thresholds)
 	}
-	return defaultAccountSchedulingThresholds(), false
-}
-
-func storeAccountSchedulingThresholdsCache(thresholds map[string]int, resolved bool, ttl time.Duration) accountSchedulingThresholdsSnapshot {
-	accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
-		thresholds: cloneAccountSchedulingThresholds(thresholds),
-		resolved:   resolved,
-		expiresAt:  time.Now().Add(ttl).UnixNano(),
-	})
-	return accountSchedulingThresholdsSnapshot{
-		thresholds: cloneAccountSchedulingThresholds(thresholds),
-		resolved:   resolved,
-	}
+	return defaultAccountSchedulingThresholds()
 }
 
 // GetAuthSourcePlatformQuotas 读取指定 auth source 的 platform quota 覆盖（仅返回有配置的平台，override 语义）。

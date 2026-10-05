@@ -49,6 +49,9 @@ export default {
       createProxy: '新增代理',
       editProxy: '編輯代理',
       deleteProxy: '刪除代理',
+      ad: {
+        inline: '正在尋找合適的代理 IP？'
+      },
       deleteConfirmMessage: "確定要刪除代理 '{name}' 嗎？",
       testProxy: '測試代理',
       dataImport: '匯入',
@@ -553,15 +556,6 @@ export default {
       clickToViewBalance: '點選檢視儲值記錄',
       failedToLoadUser: '載入使用者資訊失敗',
       userDeletedBadge: '已刪除',
-      keyRanking: {
-        subtitle: '按目前篩選與時間範圍統計每把 API 金鑰的 Token 用量',
-        rowHint: '點選檢視該金鑰的用量明細',
-        keyCount: '共 {count} 把金鑰',
-        columns: {
-          key: '金鑰',
-          user: '所屬使用者'
-        }
-      },
       tokenRanking: {
         subtitle: '按目前篩選與時間範圍統計每個使用者的 Token 用量',
         rowHint: '點選檢視該使用者的用量明細',

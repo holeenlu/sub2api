@@ -88,23 +88,6 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	routingModel string,
 	routingServiceTier string,
 ) (http.Header, openAIWSSessionHeaderResolution, error) {
-	headers, resolution, _, err := s.buildOpenAIWSHeadersWithTicket(ctx, c, account, token, decision, isCodexCLI, turnState, turnMetadata, promptCacheKey, routingModel, routingServiceTier)
-	return headers, resolution, err
-}
-
-func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithTicket(
-	ctx context.Context,
-	c *gin.Context,
-	account *Account,
-	token string,
-	decision OpenAIWSProtocolDecision,
-	isCodexCLI bool,
-	turnState string,
-	turnMetadata string,
-	promptCacheKey string,
-	routingModel string,
-	routingServiceTier string,
-) (http.Header, openAIWSSessionHeaderResolution, *openAICodexTicket, error) {
 	headers := make(http.Header)
 	if account == nil || !account.IsOpenAIAgentIdentity() {
 		headers.Set("authorization", "Bearer "+token)
@@ -158,10 +141,6 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithTicket(
 	if state := strings.TrimSpace(turnState); state != "" {
 		headers.Set(openAIWSTurnStateHeader, state)
 	}
-	ticket, err := s.applyOpenAICodexTicketWithGeneration(ctx, account, routingModel, headers)
-	if err != nil {
-		return nil, sessionResolution, nil, err
-	}
 	if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
 		headers.Set(openAIWSTurnMetadataHeader, metadata)
 	}
@@ -170,7 +149,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithTicket(
 
 	if account != nil && account.UsesOpenAICodexProtocol() {
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, headers, account); err != nil {
-			return nil, sessionResolution, nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
+			return nil, sessionResolution, fmt.Errorf("resolve chatgpt account headers: %w", err)
 		}
 		headers.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
 	}
@@ -203,7 +182,6 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithTicket(
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。
-	applyOpenAIAPIKeyIdentityHeaders(headers, account, s.codexIdentityOverrideUA(account))
 	account.ApplyHeaderOverrides(headers)
 	setOpenAICodexRoutingHint(headers, account, routingModel, routingServiceTier)
 	logOpenAIRoutingDiagnostics(
@@ -216,8 +194,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithTicket(
 		"soft_routing_hint",
 	)
 
-	applyCodexTicketIdentityHeaders(headers, ticket)
-	return headers, sessionResolution, ticket, nil
+	return headers, sessionResolution, nil
 }
 
 func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any, account *Account) map[string]any {
@@ -643,15 +620,7 @@ func openAIWSInputIsPrefixExtended(previousPayload, currentPayload []byte) (bool
 	return true, nil
 }
 
-// openAIWSRawItemsHasPrefix reports whether a client's input already starts
-// with the replayed history. The history holds upstream output under the
-// store=false replay contract, while the client resends its own copies, so
-// items compare by identity: reasoning by its encrypted_content (empty
-// reasoning is dropped from the cache, so it is skipped on both sides), and
-// other items without server-only fields.
 func openAIWSRawItemsHasPrefix(items []json.RawMessage, prefix []json.RawMessage) bool {
-	items = openAIWSReplayComparableItems(items)
-	prefix = openAIWSReplayComparableItems(prefix)
 	if len(prefix) == 0 {
 		return true
 	}
@@ -663,63 +632,13 @@ func openAIWSRawItemsHasPrefix(items []json.RawMessage, prefix []json.RawMessage
 		if bytes.Equal(bytes.TrimSpace(prefix[idx]), bytes.TrimSpace(items[idx])) {
 			continue
 		}
-		if !bytes.Equal(openAIWSReplayItemIdentity(prefix[idx]), openAIWSReplayItemIdentity(items[idx])) {
+		previousNormalized := normalizeOpenAIWSJSONForCompareOrRaw(prefix[idx])
+		currentNormalized := normalizeOpenAIWSJSONForCompareOrRaw(items[idx])
+		if !bytes.Equal(previousNormalized, currentNormalized) {
 			return false
 		}
 	}
 	return true
-}
-
-// openAIWSReplayComparableItems drops reasoning without encrypted_content,
-// which the store=false replay contract never keeps.
-func openAIWSReplayComparableItems(items []json.RawMessage) []json.RawMessage {
-	var comparable []json.RawMessage // copied only once an item is skipped
-	for idx, item := range items {
-		reasoning := gjson.GetBytes(item, "type").String() == "reasoning"
-		if reasoning && strings.TrimSpace(gjson.GetBytes(item, "encrypted_content").String()) == "" {
-			if comparable == nil {
-				comparable = append(make([]json.RawMessage, 0, len(items)), items[:idx]...)
-			}
-			continue
-		}
-		if comparable != nil {
-			comparable = append(comparable, item)
-		}
-	}
-	if comparable == nil {
-		return items
-	}
-	return comparable
-}
-
-// openAIWSReplayItemIdentity keeps what identifies a conversation item across
-// upstream output and a client resend: ids, statuses and content annotations
-// are server-assigned, and store=false reasoning is identified by its
-// encrypted_content alone.
-func openAIWSReplayItemIdentity(item json.RawMessage) []byte {
-	var decoded map[string]any
-	if err := decodeOpenAIJSONUseNumber(bytes.TrimSpace(item), &decoded); err != nil || decoded == nil {
-		return normalizeOpenAIWSJSONForCompareOrRaw(item)
-	}
-	if decoded["type"] == "reasoning" {
-		encrypted, _ := decoded["encrypted_content"].(string)
-		return []byte("reasoning:" + encrypted)
-	}
-	delete(decoded, "id")
-	delete(decoded, "status")
-	if parts, ok := decoded["content"].([]any); ok {
-		for _, part := range parts {
-			if fields, ok := part.(map[string]any); ok {
-				delete(fields, "annotations")
-				delete(fields, "logprobs")
-			}
-		}
-	}
-	identity, err := json.Marshal(decoded)
-	if err != nil {
-		return normalizeOpenAIWSJSONForCompareOrRaw(item)
-	}
-	return identity
 }
 
 func openAIWSRawItemsHasFunctionCallOutput(items []json.RawMessage) bool {
@@ -763,55 +682,6 @@ func openAIWSRawItemsHaveToolCallContextForOutputs(items []json.RawMessage) bool
 	return true
 }
 
-// openAIWSRawItemsContainNonPortableContext reports context that cannot be
-// safely replayed on a replacement credential.  previous_response_id is an
-// upstream-owned pointer, while encrypted reasoning/compaction content and
-// item_reference values are tied to the credential/session that produced them.
-// Treating those fields as ordinary JSON and silently sending them to another
-// account can turn a recoverable upstream failure into a corrupted or
-// unauthorized continuation.  This guard is intentionally used only for
-// cross-account current-turn retry; same-account continuation keeps its
-// existing, stricter upstream affinity rules.
-func openAIWSRawItemsContainNonPortableContext(items []json.RawMessage) bool {
-	var contains func(any) bool
-	contains = func(value any) bool {
-		switch typed := value.(type) {
-		case map[string]any:
-			if itemType, ok := typed["type"].(string); ok && strings.TrimSpace(itemType) == "item_reference" {
-				return true
-			}
-			if encrypted, ok := typed["encrypted_content"].(string); ok && strings.TrimSpace(encrypted) != "" {
-				return true
-			}
-			for _, child := range typed {
-				if contains(child) {
-					return true
-				}
-			}
-		case []any:
-			for _, child := range typed {
-				if contains(child) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-
-	for _, item := range items {
-		var decoded any
-		if err := json.Unmarshal(item, &decoded); err != nil {
-			// The caller already validated the request.  If a replay item is
-			// malformed here, fail closed rather than infer portability.
-			return true
-		}
-		if contains(decoded) {
-			return true
-		}
-	}
-	return false
-}
-
 // sanitizeOpenAIWSHistoricalReplayToolCalls 返回的新头数组与 previousItems 共享正文。
 func sanitizeOpenAIWSHistoricalReplayToolCalls(
 	previousItems []json.RawMessage,
@@ -839,11 +709,6 @@ func sanitizeOpenAIWSHistoricalReplayToolCalls(
 		if isCodexToolCallContextItemType(gjson.GetBytes(item, "type").String()) {
 			callID := strings.TrimSpace(gjson.GetBytes(item, "call_id").String())
 			if _, paired := outputCallIDs[callID]; !paired {
-				// 紧邻其前的 reasoning 只引出了这次未应答的调用，一并丢弃：上游拒绝
-				// 缺少后续项的 reasoning（"provided without its required following item"）。
-				for len(sanitized) > 0 && strings.TrimSpace(gjson.GetBytes(sanitized[len(sanitized)-1], "type").String()) == "reasoning" {
-					sanitized = sanitized[:len(sanitized)-1]
-				}
 				continue
 			}
 		}
@@ -948,12 +813,6 @@ func buildOpenAIWSCurrentTurnRetryPayload(
 	originalModel string,
 ) ([]byte, bool, error) {
 	if !fullInputExists {
-		return nil, false, nil
-	}
-	if openAIWSRawItemsContainNonPortableContext(fullInput) {
-		// Do not strip previous_response_id and replay opaque account-bound
-		// material on a replacement account.  The caller will close/fail over
-		// conservatively and the client can reconnect with fresh context.
 		return nil, false, nil
 	}
 	retryPayload, err := setOpenAIWSPayloadInputSequence(payload, fullInput, true)

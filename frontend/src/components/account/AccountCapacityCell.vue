@@ -22,7 +22,7 @@
     </CapacityBadge>
 
     <!-- RPM 限制 -->
-    <CapacityBadge v-if="showRpmLimit" :color-class="rpmClass" :tooltip="rpmTooltip" :current="currentRPM" :max="effectiveRpmLimit" :suffix="isOpenAIOAuth ? '' : rpmStrategyTag">
+    <CapacityBadge v-if="showRpmLimit" :color-class="rpmClass" :tooltip="rpmTooltip" :current="currentRPM" :max="account.base_rpm!" :suffix="rpmStrategyTag">
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
       </svg>
@@ -122,15 +122,10 @@ const sessionLimitTooltip = computed(() => {
 })
 
 // ====== RPM ======
-const isOpenAIOAuth = computed(() =>
-  props.account.platform === 'openai' && props.account.type === 'oauth'
-)
-
-const effectiveRpmLimit = computed(() => props.account.effective_rpm_limit ?? props.account.base_rpm ?? 0)
-
 const showRpmLimit = computed(() =>
-  (isAnthropicOAuthOrSetupToken.value || isOpenAIOAuth.value) &&
-  effectiveRpmLimit.value > 0
+  isAnthropicOAuthOrSetupToken.value &&
+  props.account.base_rpm != null &&
+  props.account.base_rpm > 0
 )
 
 const currentRPM = computed(() => props.account.current_rpm ?? 0)
@@ -145,13 +140,8 @@ const rpmBuffer = computed(() => {
 const rpmClass = computed(() => {
   if (!showRpmLimit.value) return ''
   const current = currentRPM.value
-  const base = effectiveRpmLimit.value
+  const base = props.account.base_rpm ?? 0
   const buffer = rpmBuffer.value
-  if (isOpenAIOAuth.value) {
-    if (current >= base) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-    if (current >= base * 0.8) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-    return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-  }
   if (rpmStrategy.value === 'tiered') {
     if (current >= base + buffer) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
     if (current >= base) return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
@@ -165,13 +155,8 @@ const rpmClass = computed(() => {
 const rpmTooltip = computed(() => {
   if (!showRpmLimit.value) return ''
   const current = currentRPM.value
-  const base = effectiveRpmLimit.value
+  const base = props.account.base_rpm ?? 0
   const buffer = rpmBuffer.value
-  if (isOpenAIOAuth.value) {
-    if (current >= base) return t('admin.accounts.capacity.rpm.openaiPaused')
-    if (current >= base * 0.8) return t('admin.accounts.capacity.rpm.openaiWarning')
-    return t('admin.accounts.capacity.rpm.openaiNormal')
-  }
   if (rpmStrategy.value === 'tiered') {
     if (current >= base + buffer) return t('admin.accounts.capacity.rpm.tieredBlocked', { buffer })
     if (current >= base) return t('admin.accounts.capacity.rpm.tieredStickyOnly', { buffer })

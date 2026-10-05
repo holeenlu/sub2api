@@ -15,22 +15,30 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
-// ErrNoPinnedCodexModelsAccounts means that an enabled source has no account
-// that can be used after membership, status, scheduling and expiry checks.
-// Temporary rate-limit, overload and cooldown state is intentionally ignored:
-// this source controls discovery only, not inference scheduling.
+// ErrNoPinnedCodexModelsAccounts signals that an enabled pinned-accounts
+// manifest config has no usable account right now (inactive, unschedulable,
+// or expired members are skipped, and remaining IDs are no longer bound).
 var ErrNoPinnedCodexModelsAccounts = errors.New("no usable pinned codex models manifest accounts")
 
+// isPinnedCodexModelsAccountUsable decides whether a pinned account may fetch
+// the manifest. Deliberately narrower than Account.IsSchedulable(): priority,
+// load factor, rate-limit windows, overload windows and temporary
+// unschedulable cooldowns are ignored, because the pinned mode exists to keep
+// the manifest deterministic regardless of scheduler state.
 func isPinnedCodexModelsAccountUsable(account *Account) bool {
 	if account == nil || !account.IsActive() || !account.Schedulable {
 		return false
 	}
-	return !account.AutoPauseOnExpired || account.ExpiresAt == nil || account.ExpiresAt.After(time.Now())
+	if account.AutoPauseOnExpired && account.ExpiresAt != nil && !account.ExpiresAt.After(time.Now()) {
+		return false
+	}
+	return true
 }
 
-// mergeCodexModelsManifestBodies keeps the first response envelope and unions
-// model descriptors in configured account order. A duplicate slug is resolved
-// by the first successful account; malformed envelopes fail closed.
+// mergeCodexModelsManifestBodies merges manifest bodies from the pinned
+// accounts: the first body's top-level envelope is the base, and the models
+// arrays are unioned by slug with first-seen (config-order) entries winning.
+// Entries without a usable slug are kept once in order of appearance.
 func mergeCodexModelsManifestBodies(bodies [][]byte) ([]byte, error) {
 	if len(bodies) == 0 {
 		return nil, errors.New("no codex models manifest bodies to merge")
@@ -45,7 +53,7 @@ func mergeCodexModelsManifestBodies(bodies [][]byte) ([]byte, error) {
 
 	mergedModels := make([]json.RawMessage, 0, len(bodies)*8)
 	seenSlug := make(map[string]struct{})
-	seenSlugless := make(map[string]struct{})
+	seenSlugLess := make(map[string]struct{})
 	for _, body := range bodies {
 		var envelope map[string]json.RawMessage
 		if err := json.Unmarshal(body, &envelope); err != nil {
@@ -74,10 +82,10 @@ func mergeCodexModelsManifestBodies(bodies [][]byte) ([]byte, error) {
 				seenSlug[slug] = struct{}{}
 			} else {
 				fingerprint := string(bytes.TrimSpace(raw))
-				if _, exists := seenSlugless[fingerprint]; exists {
+				if _, exists := seenSlugLess[fingerprint]; exists {
 					continue
 				}
-				seenSlugless[fingerprint] = struct{}{}
+				seenSlugLess[fingerprint] = struct{}{}
 			}
 			mergedModels = append(mergedModels, raw)
 		}
@@ -95,9 +103,17 @@ func mergeCodexModelsManifestBodies(bodies [][]byte) ([]byte, error) {
 	return merged, nil
 }
 
-// FetchPinnedCodexModelsManifest fetches only the configured OpenAI accounts,
-// in parallel, and merges successful responses in configuration order. The
-// caller applies native group filters after this source stage.
+// FetchPinnedCodexModelsManifest fetches the Codex models manifest using only
+// the accounts pinned on the group's codex_models_manifest_config, ignoring
+// scheduler priorities, load factors and rate-limit/overload windows. All
+// usable accounts are fetched concurrently; successful bodies are merged by
+// slug with config-order precedence. It returns the merged manifest and the
+// first successful account (in config order) for ops attribution.
+//
+//   - no usable account → ErrNoPinnedCodexModelsAccounts
+//   - every fetch failed → the last upstream error
+//   - partial failure → successful accounts are still merged and a warning
+//     naming the failed account IDs is logged.
 func (s *OpenAIGatewayService) FetchPinnedCodexModelsManifest(ctx context.Context, group *Group, clientVersion string) (*OpenAIModelsResponse, *Account, error) {
 	results, err := s.fetchPinnedOpenAIModels(ctx, group, func(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
 		manifest, err := s.FetchCodexModelsManifest(ctx, account, clientVersion, "")
@@ -131,9 +147,8 @@ type pinnedOpenAIModelsResult struct {
 	response *OpenAIModelsResponse
 }
 
-// fetchPinnedOpenAIModels centralizes membership and partial-failure policy.
-// It deliberately does not use scheduler selection, so discovery remains
-// deterministic even while a selected account is temporarily rate-limited.
+// fetchPinnedOpenAIModels shares membership, eligibility, fanout and partial
+// failure policy between ordinary model lists and Codex manifests.
 func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, group *Group, fetch func(context.Context, *Account) (*OpenAIModelsResponse, error)) ([]pinnedOpenAIModelsResult, error) {
 	if s == nil || s.accountRepo == nil || group == nil {
 		return nil, ErrNoPinnedCodexModelsAccounts
@@ -142,6 +157,7 @@ func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, grou
 	if group.Platform != PlatformOpenAI || !cfg.Enabled || len(cfg.AccountIDs) == 0 {
 		return nil, ErrNoPinnedCodexModelsAccounts
 	}
+
 	members, err := s.accountRepo.ListByGroup(ctx, group.ID)
 	if err != nil {
 		return nil, fmt.Errorf("load pinned codex models manifest accounts: %w", err)
@@ -150,10 +166,15 @@ func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, grou
 	for _, member := range members {
 		memberByID[member.ID] = member
 	}
+
+	// 按配置顺序筛选可用账号；已解绑/已删除的 ID 直接跳过。
 	usable := make([]Account, 0, len(cfg.AccountIDs))
 	for _, id := range cfg.AccountIDs {
 		member, ok := memberByID[id]
-		if !ok || member.Platform != PlatformOpenAI || !isPinnedCodexModelsAccountUsable(&member) {
+		if !ok || member.Platform != PlatformOpenAI {
+			continue
+		}
+		if !isPinnedCodexModelsAccountUsable(&member) {
 			continue
 		}
 		usable = append(usable, member)
@@ -164,22 +185,20 @@ func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, grou
 
 	results := make([]pinnedOpenAIModelsResult, len(usable))
 	fetchErrs := make([]error, len(usable))
-	var wg sync.WaitGroup
+	var fetchGroup sync.WaitGroup
 	for i := range usable {
-		index := i
-		wg.Add(1)
+		fetchGroup.Add(1)
 		go func() {
-			defer wg.Done()
-			response, fetchErr := fetch(ctx, &usable[index])
-			results[index] = pinnedOpenAIModelsResult{account: &usable[index], response: response}
-			fetchErrs[index] = fetchErr
+			defer fetchGroup.Done()
+			response, err := fetch(ctx, &usable[i])
+			results[i] = pinnedOpenAIModelsResult{account: &usable[i], response: response}
+			fetchErrs[i] = err
 		}()
 	}
-	wg.Wait()
+	fetchGroup.Wait()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
 	successes := make([]pinnedOpenAIModelsResult, 0, len(results))
 	failedIDs := make([]int64, 0)
 	var lastErr error

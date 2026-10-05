@@ -15,12 +15,10 @@ import (
 )
 
 const (
-	schedulerBucketSetKey       = "sched:buckets"
-	schedulerOutboxWatermarkKey = "sched:outbox:watermark"
-	// Old snapshots omit whitelist identities stored by migration 263. A cache
-	// miss reloads the migrated account instead of reusing the old permission set.
-	schedulerAccountPrefix         = "sched:acc:v2:"
-	schedulerAccountMetaPrefix     = "sched:meta:v2:"
+	schedulerBucketSetKey          = "sched:buckets"
+	schedulerOutboxWatermarkKey    = "sched:outbox:watermark"
+	schedulerAccountPrefix         = "sched:acc:v3:"
+	schedulerAccountMetaPrefix     = "sched:meta:v3:"
 	schedulerAccountLastUsedPrefix = "sched:acc:last_used:"
 	schedulerActivePrefix          = "sched:active:"
 	schedulerReadyPrefix           = "sched:ready:"
@@ -294,7 +292,7 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 	}
 
 	accounts := make([]*service.Account, 0, len(values))
-	for _, val := range values {
+	for i, val := range values {
 		if val == nil {
 			return nil, false, nil
 		}
@@ -302,25 +300,10 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 		if err != nil {
 			return nil, false, err
 		}
-		if account.IsOpenAIOAuthLike() && !account.IsShadow() {
-			if _, ok := account.Extra[service.CodexTicketReadyModelsExtraKey]; !ok {
-				return nil, false, nil
-			}
-			// Older projections omitted participation and could wrongly block excluded accounts.
-			if _, ok := account.Extra["codex_ticket_harvest_enabled"].(bool); !ok {
-				return nil, false, nil
-			}
-			if _, ok := account.Extra["codex_ticket_harvest_models"].(map[string]any); !ok {
-				return nil, false, nil
-			}
-			account.SchedulerTicketProjection = true
-		}
-		accounts = append(accounts, account)
-	}
-	for i, account := range accounts {
 		if err := applySchedulerLastUsed(account, lastUsedValues[i]); err != nil {
 			return nil, false, err
 		}
+		accounts = append(accounts, account)
 	}
 
 	return accounts, true, nil
@@ -880,16 +863,6 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 }
 
 func buildSchedulerMetadataAccount(account service.Account) service.Account {
-	extra := filterSchedulerExtra(account.Extra)
-	if account.IsOpenAIOAuthLike() && !account.IsShadow() {
-		if extra == nil {
-			extra = make(map[string]any)
-		}
-		extra[service.CodexTicketReadyModelsExtraKey] = service.OpenAICodexTicketReadyModels(&account)
-		// Materialize the default so readers can distinguish old projections from accounts with default participation.
-		extra["codex_ticket_harvest_enabled"] = account.Extra["codex_ticket_harvest_enabled"] != false
-		extra["codex_ticket_harvest_models"] = filterSchedulerCodexTicketModels(account.Extra["codex_ticket_harvest_models"])
-	}
 	return service.Account{
 		ID:                      account.ID,
 		Name:                    account.Name,
@@ -917,26 +890,8 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		AccountGroups:           filterSchedulerAccountGroups(account.AccountGroups),
 		GroupIDs:                filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
 		Credentials:             filterSchedulerCredentials(account.Credentials),
-		Extra:                   extra,
+		Extra:                   filterSchedulerExtra(account.Extra),
 	}
-}
-
-// Always emit an object, including for absent settings, so old projections can be rebuilt.
-func filterSchedulerCodexTicketModels(raw any) map[string]bool {
-	models := make(map[string]bool)
-	switch values := raw.(type) {
-	case map[string]bool:
-		for model, enabled := range values {
-			models[model] = enabled
-		}
-	case map[string]any:
-		for model, value := range values {
-			if enabled, ok := value.(bool); ok {
-				models[model] = enabled
-			}
-		}
-	}
-	return models
 }
 
 func filterSchedulerAccountGroups(accountGroups []service.AccountGroup) []service.AccountGroup {
@@ -999,14 +954,9 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	if len(credentials) == 0 {
 		return nil
 	}
-	// Candidate admission and sticky routing must evaluate the same account-level
-	// threshold overrides before the full account snapshot is hydrated.
-	keys := []string{
-		"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type",
-		"account_scheduling_threshold",
-		"anthropic_fable_scheduling_threshold",
-		"chatgpt_account_id", "expires_at",
-	}
+	// Candidate-list admission evaluates the account override before hydrating
+	// the full account. Dropping it silently falls back to the platform threshold.
+	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold"}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {
@@ -1073,9 +1023,6 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"openai_oauth_passthrough",
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
-		"codex_allow_without_ticket",
-		"codex_ticket_harvest_enabled",
-		"codex_ticket_harvest_models",
 		"codex_5h_used_percent",
 		"codex_7d_used_percent",
 		"codex_5h_reset_at",
@@ -1087,18 +1034,6 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"auto_pause_7d_threshold",
 		"auto_pause_5h_disabled",
 		"auto_pause_7d_disabled",
-		// Anthropic 阈值停调读的用量采样。这些键属于 schedulerNeutralExtraKeyPrefixes
-		// （被动采样每个响应都写，不值得为它重建 bucket），但 UpdateExtra 仍然会
-		// syncSchedulerAccountSnapshot，而 SetAccount 同时写完整键与本投影——所以进了
-		// 白名单就是即时可见，无需在选号时回源补读。
-		// 裁掉它们，候选过滤看不到用量却看得到 model_rate_limits，会把限流当成无依据的
-		// 残留而解除。
-		"session_window_utilization",
-		"passive_usage_7d_utilization",
-		"passive_usage_7d_reset",
-		"passive_usage_7d_oi_utilization",
-		"passive_usage_7d_oi_reset",
-		"passive_usage_sampled_at",
 		// 自动用卡：卡可用的 OpenAI 号在暂停阈值与用卡阈值之间继续调度。
 		// 候选过滤读的是本投影，缺这几个键时放行分支永远不会生效，
 		// 账号会在暂停阈值处被一刀切停调，直到窗口自然重置。

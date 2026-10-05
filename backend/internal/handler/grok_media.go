@@ -90,7 +90,11 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	if endpoint.RequiresRequestBody() {
 		body, err = pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 		if err != nil {
-			RespondRequestBodyReadFailure(c, reqLog, err, h.errorResponse)
+			if maxErr, ok := extractMaxBytesError(err); ok {
+				h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+				return
+			}
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 			return
 		}
 		if len(body) == 0 {
@@ -128,7 +132,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 			return
 		}
-		requireAPIKeyQueueCapability(c, service.APIKeyQueueCapabilityImageGeneration)
 		if moderationBody := requestInfo.ModerationBody(); len(moderationBody) > 0 {
 			decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody)
 			if decision != nil && !decision.AllowNextStage {
@@ -152,7 +155,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 
-	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, apiKey.ID, apiKey.ConcurrencyLimit, false, &streamStarted, reqLog)
+	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, false, &streamStarted, reqLog)
 	if !acquired {
 		return
 	}
@@ -190,24 +193,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	boundLookupAccountID := int64(0)
 	if endpoint.IsVideoLookupRequest() {
 		sessionHash = service.GrokMediaVideoRequestSessionHash(requestID, subject.UserID, apiKey.ID)
-		groupID := int64(0)
-		if apiKey.GroupID != nil {
-			groupID = *apiKey.GroupID
-		}
-		durableJob, durableErr := h.gatewayService.DurableGatewayVideo(c.Request.Context(), groupID, subject.UserID, requestID)
-		if durableErr == nil && durableJob != nil {
-			boundLookupAccountID = durableJob.AccountID
-		} else {
-			boundLookupAccountID, err = h.gatewayService.ResolveGrokMediaVideoRequestAccount(
-				c.Request.Context(), apiKey.GroupID, requestID, subject.UserID, apiKey.ID,
-			)
-		}
-		// Deleting an unfinished upstream task can erase the only billing
-		// evidence. Reconcile it first; completed/failed tasks remain deletable.
-		if endpoint == service.SeedanceEndpointDelete && durableJob != nil && durableJob.State != "settled" && durableJob.State != "failed" {
-			h.errorResponse(c, http.StatusConflict, "invalid_request_error", "Video settlement is pending; retry deletion after settlement")
-			return
-		}
+		boundLookupAccountID, err = h.gatewayService.ResolveGrokMediaVideoRequestAccount(
+			c.Request.Context(), apiKey.GroupID, requestID, subject.UserID, apiKey.ID,
+		)
 		if err != nil || boundLookupAccountID <= 0 {
 			reqLog.Info("grok_media.video_lookup_owner_binding_missing", zap.Error(err))
 			h.errorResponse(c, http.StatusNotFound, "not_found_error", "Video request not found")
@@ -297,7 +285,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				return
 			}
 			if len(failedAccountIDs) == 0 {
-				cls := classifySelectionErrorFromGin(c, err, h.gatewayService, apiKey, requestModel, routingModel, platform)
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, requestModel, routingModel, platform)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
@@ -392,21 +380,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			return
 		}
 
-		var durableJob *service.GatewayMediaJob
-		if service.IsAsyncVideoCreate(endpoint) {
-			durableJob, err = h.gatewayService.PrepareGatewayVideoJob(requestCtx, apiKey, subscription, account, endpoint, requestInfo, clientRequestedModel(c, requestModel), GetInboundEndpoint(c), service.QuotaPlatform(requestCtx, apiKey))
-			if err != nil {
-				status := http.StatusServiceUnavailable
-				code := "api_error"
-				if errors.Is(err, service.ErrMediaPendingCapacity) {
-					status = http.StatusTooManyRequests
-					code = "rate_limit_error"
-				}
-				h.errorResponse(c, status, code, "Video submission capacity or billing is unavailable")
-				return
-			}
-			requestCtx = service.WithGatewayMediaJob(requestCtx, durableJob)
-		}
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		writerSizeBeforeForward := c.Writer.Size()
@@ -418,13 +391,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			return h.gatewayService.ForwardGrokMedia(requestCtx, c, account, endpoint, requestID, body, contentType)
 		}()
 
-		h.gatewayService.FinishGatewayVideoAttempt(requestCtx, durableJob, err)
-		if err != nil && durableJob != nil && durableJob.State != "failed" {
-			if !service.IsResponseCommitted(c) {
-				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Video submission failed or requires reconciliation")
-			}
-			return
-		}
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -463,8 +429,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 					if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
 						sameAccountRetryCount[account.ID]++
 						retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
-						service.AnnotateLastOpsUpstreamFailure(c, failoverErr)
-						service.AnnotateLastOpsUpstreamError(c, "same_account_retry", sameAccountRetryCount[account.ID], retryLimit, switchCount, retryDelay, true)
 						reqLog.Warn("grok_media.pool_mode_same_account_retry",
 							zap.Int64("account_id", account.ID),
 							zap.Int("upstream_status", failoverErr.StatusCode),
@@ -488,8 +452,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 					return
 				}
 				switchCount++
-				service.AnnotateLastOpsUpstreamFailure(c, failoverErr)
-				service.AnnotateLastOpsUpstreamError(c, "account_switch", 0, account.GetPoolModeRetryCount(), switchCount, 0, true)
 				if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 					h.handleFailoverExhausted(c, failoverErr, false)
 					return
@@ -556,14 +518,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		}
 		// Status poll OR content download can observe official done+video.url.
 		// Both paths share the same claim key so the customer is charged once.
-		ownerGroup := int64(0)
-		if apiKey.GroupID != nil {
-			ownerGroup = *apiKey.GroupID
-		}
-		ownedJob, _ := h.gatewayService.DurableGatewayVideo(requestCtx, ownerGroup, subject.UserID, requestID)
-		if ownedJob != nil {
-			// This task's durable worker owns settlement, regardless of polls.
-		} else if endpoint == service.SeedanceEndpointStatus {
+		if endpoint == service.SeedanceEndpointStatus {
 			if billResult := prepareSeedanceCompletionBilling(requestCtx, h, apiKey, subject, requestID, result); billResult != nil {
 				recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, billResult, billResult.Model, body, requestID)
 			}

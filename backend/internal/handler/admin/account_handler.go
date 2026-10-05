@@ -49,6 +49,8 @@ func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
 
 // AccountHandler handles admin account management
 type AccountHandler struct {
+	scheduledTests          *service.ScheduledTestService
+	scheduledRunner         *service.ScheduledTestRunnerService
 	claudeResetCredits      claudeResetReader
 	adminService            service.AdminService
 	oauthService            *service.OAuthService
@@ -67,10 +69,6 @@ type AccountHandler struct {
 	grokImportProber        grokImportProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
-	scheduledTests          *service.ScheduledTestService
-	scheduledRunner         *service.ScheduledTestRunnerService
-	codexTicketSettings     *service.SettingService
-	codexTicketGateway      *service.OpenAIGatewayService
 	cfg                     *config.Config
 	opencodeGoUsage         *service.OpenCodeGoUsageService
 }
@@ -84,18 +82,8 @@ func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUs
 	h.ollamaCloudUsage = usage
 }
 
-// SetCodexTicketSettings supplies the live policy without mutating shared config.
-
 func (h *AccountHandler) SetOpenCodeGoUsageService(usage *service.OpenCodeGoUsageService) {
 	h.opencodeGoUsage = usage
-}
-
-// SetCodexTicketSettings supplies the live policy without mutating shared config.
-func (h *AccountHandler) SetCodexTicketSettings(settings *service.SettingService) {
-	h.codexTicketSettings = settings
-}
-func (h *AccountHandler) SetCodexTicketGateway(gateway *service.OpenAIGatewayService) {
-	h.codexTicketGateway = gateway
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -135,66 +123,63 @@ func NewAccountHandler(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
-	RetiredModelCatalogPolicy json.RawMessage `json:"model_catalog_policy" binding:"len=0"`
-	Name                      string          `json:"name" binding:"required"`
-	Notes                     *string         `json:"notes"`
-	Platform                  string          `json:"platform" binding:"required"`
-	Type                      string          `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials               map[string]any  `json:"credentials" binding:"required"`
-	Extra                     map[string]any  `json:"extra"`
-	ProxyID                   *int64          `json:"proxy_id"`
-	Concurrency               int             `json:"concurrency"`
-	Priority                  int             `json:"priority"`
-	RateMultiplier            *float64        `json:"rate_multiplier"`
-	LoadFactor                *int            `json:"load_factor"`
-	GroupIDs                  []int64         `json:"group_ids"`
-	ExpiresAt                 *int64          `json:"expires_at"`
-	AutoPauseOnExpired        *bool           `json:"auto_pause_on_expired"`
-	ProbeEnabled              *bool           `json:"upstream_billing_probe_enabled"`
-	ConfirmMixedChannelRisk   *bool           `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	Name                    string         `json:"name" binding:"required"`
+	Notes                   *string        `json:"notes"`
+	Platform                string         `json:"platform" binding:"required"`
+	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Credentials             map[string]any `json:"credentials" binding:"required"`
+	Extra                   map[string]any `json:"extra"`
+	ProxyID                 *int64         `json:"proxy_id"`
+	Concurrency             int            `json:"concurrency"`
+	Priority                int            `json:"priority"`
+	RateMultiplier          *float64       `json:"rate_multiplier"`
+	LoadFactor              *int           `json:"load_factor"`
+	GroupIDs                []int64        `json:"group_ids"`
+	ExpiresAt               *int64         `json:"expires_at"`
+	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
+	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled"`
+	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
-	RetiredModelCatalogPolicy json.RawMessage `json:"model_catalog_policy" binding:"len=0"`
-	Name                      string          `json:"name"`
-	Notes                     *string         `json:"notes"`
-	Type                      string          `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials               map[string]any  `json:"credentials"`
-	Extra                     map[string]any  `json:"extra"`
-	ProxyID                   *int64          `json:"proxy_id"`
-	Concurrency               *int            `json:"concurrency"`
-	Priority                  *int            `json:"priority"`
-	RateMultiplier            *float64        `json:"rate_multiplier"`
-	LoadFactor                *int            `json:"load_factor"`
-	Status                    string          `json:"status" binding:"omitempty,oneof=active inactive error"`
-	GroupIDs                  *[]int64        `json:"group_ids"`
-	ExpiresAt                 *int64          `json:"expires_at"`
-	AutoPauseOnExpired        *bool           `json:"auto_pause_on_expired"`
-	ProbeEnabled              *bool           `json:"upstream_billing_probe_enabled"`
-	RateSyncEnabled           *bool           `json:"upstream_billing_rate_sync_enabled"`
-	ConfirmMixedChannelRisk   *bool           `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	Name                    string         `json:"name"`
+	Notes                   *string        `json:"notes"`
+	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Credentials             map[string]any `json:"credentials"`
+	Extra                   map[string]any `json:"extra"`
+	ProxyID                 *int64         `json:"proxy_id"`
+	Concurrency             *int           `json:"concurrency"`
+	Priority                *int           `json:"priority"`
+	RateMultiplier          *float64       `json:"rate_multiplier"`
+	LoadFactor              *int           `json:"load_factor"`
+	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive error"`
+	GroupIDs                *[]int64       `json:"group_ids"`
+	ExpiresAt               *int64         `json:"expires_at"`
+	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
+	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled"`
+	RateSyncEnabled         *bool          `json:"upstream_billing_rate_sync_enabled"`
+	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
-	RetiredModelCatalogPolicy json.RawMessage           `json:"model_catalog_policy" binding:"len=0"`
-	AccountIDs                []int64                   `json:"account_ids"`
-	Filters                   *BulkUpdateAccountFilters `json:"filters"`
-	Name                      string                    `json:"name"`
-	ProxyID                   *int64                    `json:"proxy_id"`
-	Concurrency               *int                      `json:"concurrency"`
-	Priority                  *int                      `json:"priority"`
-	RateMultiplier            *float64                  `json:"rate_multiplier"`
-	LoadFactor                *int                      `json:"load_factor"`
-	Status                    string                    `json:"status" binding:"omitempty,oneof=active inactive error"`
-	Schedulable               *bool                     `json:"schedulable"`
-	GroupIDs                  *[]int64                  `json:"group_ids"`
-	Credentials               map[string]any            `json:"credentials"`
-	Extra                     map[string]any            `json:"extra"`
-	ProbeEnabled              *bool                     `json:"upstream_billing_probe_enabled"`
-	ConfirmMixedChannelRisk   *bool                     `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	AccountIDs              []int64                   `json:"account_ids"`
+	Filters                 *BulkUpdateAccountFilters `json:"filters"`
+	Name                    string                    `json:"name"`
+	ProxyID                 *int64                    `json:"proxy_id"`
+	Concurrency             *int                      `json:"concurrency"`
+	Priority                *int                      `json:"priority"`
+	RateMultiplier          *float64                  `json:"rate_multiplier"`
+	LoadFactor              *int                      `json:"load_factor"`
+	Status                  string                    `json:"status" binding:"omitempty,oneof=active inactive error"`
+	Schedulable             *bool                     `json:"schedulable"`
+	GroupIDs                *[]int64                  `json:"group_ids"`
+	Credentials             map[string]any            `json:"credentials"`
+	Extra                   map[string]any            `json:"extra"`
+	ProbeEnabled            *bool                     `json:"upstream_billing_probe_enabled"`
+	ConfirmMixedChannelRisk *bool                     `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 type BulkUpdateAccountFilters struct {
@@ -215,26 +200,22 @@ type CheckMixedChannelRequest struct {
 
 // AccountWithConcurrency extends Account with real-time concurrency info
 type AccountWithConcurrency struct {
-	CodexDiagnostic   *service.CodexDiagnosticSummary `json:"codex_diagnostic,omitempty"`
-	EffectiveRPMLimit *int                            `json:"effective_rpm_limit,omitempty"`
+	CodexDiagnostic *service.CodexDiagnosticSummary `json:"codex_diagnostic,omitempty"`
 	*dto.Account
 	simpleMode         bool                         `json:"-"`
 	CurrentConcurrency int                          `json:"current_concurrency"`
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
 	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
-	// 以下字段仅在对应账号启用运行时容量控制时返回；OpenAI OAuth 仅使用 RPM 字段
+	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
 	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
 	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
 	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
-	RPMPaused         bool     `json:"rpm_paused,omitempty"`
-	RPMResetAt        *int64   `json:"rpm_reset_at,omitempty"`
 }
 
 // AccountListItemWithConcurrency is the compact account-list envelope used
 // for lite=1. It embeds dto.AccountListItem instead of the full dto.Account,
 // so groups/account_groups never appear in the list payload.
 type AccountListItemWithConcurrency struct {
-	EffectiveRPMLimit *int `json:"effective_rpm_limit,omitempty"`
 	*dto.AccountListItem
 	CurrentConcurrency int                          `json:"current_concurrency"`
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
@@ -242,8 +223,6 @@ type AccountListItemWithConcurrency struct {
 	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
 	ActiveSessions     *int                         `json:"active_sessions,omitempty"`
 	CurrentRPM         *int                         `json:"current_rpm,omitempty"`
-	RPMPaused          bool                         `json:"rpm_paused,omitempty"`
-	RPMResetAt         *int64                       `json:"rpm_reset_at,omitempty"`
 }
 
 type simpleModeGroupReference struct {
@@ -368,7 +347,6 @@ const accountListGroupUngroupedQueryValue = "ungrouped"
 
 func (h *AccountHandler) accountResponseFromService(account *service.Account) *dto.Account {
 	out := dto.AccountFromService(account)
-	h.enrichCodexTicketStatus(account, out)
 	if h != nil && h.ollamaCloudUsage != nil && out != nil {
 		h.ollamaCloudUsage.EnrichState(out.OllamaCloudUsage)
 	}
@@ -377,7 +355,6 @@ func (h *AccountHandler) accountResponseFromService(account *service.Account) *d
 
 func (h *AccountHandler) accountListResponseFromService(account *service.Account) *dto.Account {
 	out := dto.AccountFromServiceShallow(account)
-	h.enrichCodexTicketStatus(account, out)
 	if out != nil && account != nil {
 		out.Proxy = dto.ProxyFromService(account.Proxy)
 	}
@@ -385,17 +362,6 @@ func (h *AccountHandler) accountListResponseFromService(account *service.Account
 		h.ollamaCloudUsage.EnrichState(out.OllamaCloudUsage)
 	}
 	return out
-}
-
-func (h *AccountHandler) enrichCodexTicketStatus(account *service.Account, out *dto.Account) {
-	if h != nil && h.cfg != nil && out != nil {
-		cfg := h.cfg.Gateway.OpenAICodexTicket
-		if h.codexTicketSettings != nil {
-			cfg.Enabled = h.codexTicketSettings.GetOpenAICodexTicketEnabled(context.Background(), cfg.Enabled)
-			cfg.FailClosed = !h.codexTicketSettings.GetOpenAICodexTicketAllowWithoutTicket(context.Background(), !cfg.FailClosed)
-		}
-		out.CodexTurnTickets = service.OpenAICodexTicketStatuses(account, cfg, time.Now())
-	}
 }
 
 func (h *AccountHandler) isSimpleMode() bool {
@@ -418,8 +384,8 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		}
 	}
 
-	if account.SupportsRPMLimit() {
-		if account.IsAnthropicOAuthOrSetupToken() && h.accountUsageService != nil && account.GetWindowCostLimit() > 0 {
+	if account.IsAnthropicOAuthOrSetupToken() {
+		if h.accountUsageService != nil && account.GetWindowCostLimit() > 0 {
 			startTime := account.GetCurrentWindowStartTime()
 			if stats, err := h.accountUsageService.GetAccountWindowStats(ctx, account.ID, startTime); err == nil && stats != nil {
 				cost := stats.StandardCost
@@ -427,7 +393,7 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 			}
 		}
 
-		if account.IsAnthropicOAuthOrSetupToken() && h.sessionLimitCache != nil && account.GetMaxSessions() > 0 {
+		if h.sessionLimitCache != nil && account.GetMaxSessions() > 0 {
 			idleTimeout := time.Duration(account.GetSessionIdleTimeoutMinutes()) * time.Minute
 			idleTimeouts := map[int64]time.Duration{account.ID: idleTimeout}
 			if sessions, err := h.sessionLimitCache.GetActiveSessionCountBatch(ctx, []int64{account.ID}, idleTimeouts); err == nil {
@@ -438,17 +404,8 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		}
 
 		if h.rpmCache != nil && account.GetBaseRPM() > 0 {
-			rpmAccountID := account.ID
-			if account.IsOpenAIOAuth() {
-				rpmAccountID = account.RPMAccountID()
-			}
-			if rpm, err := h.rpmCache.GetRPM(ctx, rpmAccountID); err == nil {
+			if rpm, err := h.rpmCache.GetRPM(ctx, account.ID); err == nil {
 				item.CurrentRPM = &rpm
-				if account.IsOpenAIOAuth() && rpm >= account.GetBaseRPM() {
-					item.RPMPaused = true
-					resetAt := time.Now().Truncate(time.Minute).Add(time.Minute).Unix()
-					item.RPMResetAt = &resetAt
-				}
 			}
 		}
 	}
@@ -785,27 +742,23 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	// 识别需要查询窗口费用、会话数和 RPM 的账号；窗口/会话仅属于 Anthropic，RPM 也支持 OpenAI OAuth
+	// 识别需要查询窗口费用、会话数和 RPM 的账号（Anthropic OAuth/SetupToken 且启用了相应功能）
 	windowCostAccountIDs := make([]int64, 0)
 	sessionLimitAccountIDs := make([]int64, 0)
 	rpmAccountIDs := make([]int64, 0)
 	sessionIdleTimeouts := make(map[int64]time.Duration) // 各账号的会话空闲超时配置
 	for i := range accounts {
 		acc := &accounts[i]
-		if acc.SupportsRPMLimit() {
-			if acc.IsAnthropicOAuthOrSetupToken() && acc.GetWindowCostLimit() > 0 {
+		if acc.IsAnthropicOAuthOrSetupToken() {
+			if acc.GetWindowCostLimit() > 0 {
 				windowCostAccountIDs = append(windowCostAccountIDs, acc.ID)
 			}
-			if acc.IsAnthropicOAuthOrSetupToken() && acc.GetMaxSessions() > 0 {
+			if acc.GetMaxSessions() > 0 {
 				sessionLimitAccountIDs = append(sessionLimitAccountIDs, acc.ID)
 				sessionIdleTimeouts[acc.ID] = time.Duration(acc.GetSessionIdleTimeoutMinutes()) * time.Minute
 			}
 			if acc.GetBaseRPM() > 0 {
-				rpmAccountID := acc.ID
-				if acc.IsOpenAIOAuth() {
-					rpmAccountID = acc.RPMAccountID()
-				}
-				rpmAccountIDs = append(rpmAccountIDs, rpmAccountID)
+				rpmAccountIDs = append(rpmAccountIDs, acc.ID)
 			}
 		}
 	}
@@ -854,22 +807,6 @@ func (h *AccountHandler) List(c *gin.Context) {
 		_ = g.Wait()
 	}
 
-	var ticketEvents map[int64]service.CodexTicketRecentEvent
-	if pageHasOpenAIAccounts && h.codexTicketGateway != nil {
-		var ticketAccountIDs []int64
-		for _, account := range accounts {
-			if account.Platform == service.PlatformOpenAI {
-				ticketAccountIDs = append(ticketAccountIDs, account.ID)
-			}
-		}
-		var err error
-		ticketEvents, err = h.codexTicketGateway.CodexTicketLatestEvents(c.Request.Context(), ticketAccountIDs)
-		if err != nil {
-			response.ErrorFrom(c, err)
-			return
-		}
-	}
-
 	var diagnostics map[int64]service.CodexDiagnosticSummary
 	if h.scheduledTests != nil {
 		ids := make([]int64, 0, len(accounts))
@@ -893,9 +830,6 @@ func (h *AccountHandler) List(c *gin.Context) {
 			if h.isSimpleMode() {
 				accountResponse.GroupIDs = filterSimpleModeGroupIDs(accountResponse.GroupIDs, simpleModeCompositeServiceGroupIDs(acc))
 			}
-		}
-		if event, ok := ticketEvents[acc.ID]; ok {
-			accountResponse.CodexTicketLatestEvent = &event
 		}
 		item := AccountWithConcurrency{
 			Account:            accountResponse,
@@ -924,17 +858,8 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 		// 添加 RPM 计数（仅当启用时）
 		if rpmCounts != nil {
-			rpmAccountID := acc.ID
-			if acc.IsOpenAIOAuth() {
-				rpmAccountID = acc.RPMAccountID()
-			}
-			if rpm, ok := rpmCounts[rpmAccountID]; ok {
+			if rpm, ok := rpmCounts[acc.ID]; ok {
 				item.CurrentRPM = &rpm
-				if acc.IsOpenAIOAuth() && acc.GetBaseRPM() > 0 && rpm >= acc.GetBaseRPM() {
-					item.RPMPaused = true
-					resetAt := time.Now().Truncate(time.Minute).Add(time.Minute).Unix()
-					item.RPMResetAt = &resetAt
-				}
 			}
 		}
 
@@ -955,9 +880,6 @@ func (h *AccountHandler) List(c *gin.Context) {
 				CurrentWindowCost:  item.CurrentWindowCost,
 				ActiveSessions:     item.ActiveSessions,
 				CurrentRPM:         item.CurrentRPM,
-				EffectiveRPMLimit:  item.EffectiveRPMLimit,
-				RPMPaused:          item.RPMPaused,
-				RPMResetAt:         item.RPMResetAt,
 			}
 		}
 		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, true)
@@ -1043,13 +965,6 @@ func ifNoneMatchMatched(ifNoneMatch, etag string) bool {
 
 // GetByID handles getting an account by ID
 // GET /api/v1/admin/accounts/:id
-func (h *AccountHandler) GetOpenAIRequestTimezones(c *gin.Context) {
-	response.Success(c, gin.H{
-		"default":   service.DefaultOpenAIRequestTimezone,
-		"timezones": service.OpenAIRequestTimezoneOptions(),
-	})
-}
-
 func (h *AccountHandler) GetByID(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -1154,7 +1069,6 @@ func (h *AccountHandler) Create(c *gin.Context) {
 
 	result, err := executeAdminIdempotent(c, "admin.accounts.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		account, execErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
-
 			Name:                  req.Name,
 			Notes:                 req.Notes,
 			Platform:              req.Platform,
@@ -1208,7 +1122,6 @@ func (h *AccountHandler) Create(c *gin.Context) {
 	// 探测失败不影响账号创建响应。
 	h.scheduleOpenAIResponsesProbe(createdAccount)
 	h.scheduleGrokImportProbe(createdAccount)
-
 	response.Success(c, result.Data)
 }
 
@@ -1288,7 +1201,6 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
 	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
-
 		Name:                  req.Name,
 		Notes:                 req.Notes,
 		Type:                  req.Type,
@@ -1514,13 +1426,9 @@ func (h *AccountHandler) PreviewFromCRS(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// refreshSingleAccount refreshes credentials for a single refreshable OAuth account.
+// refreshSingleAccount refreshes credentials for a single OAuth account.
 // Returns (updatedAccount, warning, error) where warning is used for Antigravity ProjectIDMissing scenario.
 func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *service.Account) (*service.Account, string, error) {
-	if service.IsUnsupportedPlatform(account.Platform) {
-		return nil, "", service.ErrUnsupportedPlatform
-	}
-
 	if !account.IsOAuth() {
 		return nil, "", infraerrors.BadRequest("NOT_OAUTH", "cannot refresh non-OAuth account")
 	}
@@ -1529,12 +1437,6 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 	if account.IsCredentialShadow() {
 		return nil, "", infraerrors.BadRequest("SPARK_SHADOW_NO_REFRESH",
 			"cannot refresh spark shadow account; its credentials are managed by the parent account")
-	}
-	// Anthropic setup-token 是 `claude setup-token` 生成的长期凭据，不参与 OAuth
-	// refresh_token 续期。即使旧记录残留 refresh_token，也必须在调用上游前拒绝。
-	if !account.CanRefreshToken() {
-		return nil, "", infraerrors.BadRequest("SETUP_TOKEN_NO_REFRESH",
-			"this credential does not support refresh-token renewal; re-authorize and import a new token instead")
 	}
 
 	var newCredentials map[string]any
@@ -1741,7 +1643,6 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		response.NotFound(c, "Account not found")
 		return
 	}
-
 	if !existing.IsOAuth() {
 		response.ErrorFrom(c, infraerrors.BadRequest("NOT_OAUTH", "cannot apply oauth credentials to non-OAuth account"))
 		return
@@ -1762,9 +1663,7 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	// Drop SSO/password residue; re-auth must leave only OAuth tokens on disk.
 	req.Credentials = service.SanitizeStoredCredentials(existing.Platform, req.Credentials)
 
-	// 换发凭据走整套替换而不是通用 UpdateAccount 的"缺失即保留"：把 OAuth 账号重新授权
-	// 成直接导入的 setup-token 时，新凭据只有 access_token，旧 refresh_token 不得留下。
-	updatedAccount, err := h.adminService.ApplyOAuthCredentials(ctx, accountID, &service.ApplyOAuthCredentialsInput{
+	updatedAccount, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
 		Type:        req.Type,
 		Credentials: req.Credentials,
 	})
@@ -2199,7 +2098,7 @@ func (h *AccountHandler) BatchRefresh(c *gin.Context) {
 // POST /api/v1/admin/accounts/batch
 func (h *AccountHandler) BatchCreate(c *gin.Context) {
 	var req struct {
-		Accounts []CreateAccountRequest `json:"accounts" binding:"required,min=1,dive"`
+		Accounts []CreateAccountRequest `json:"accounts" binding:"required,min=1"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -2254,7 +2153,6 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 			skipCheck := item.ConfirmMixedChannelRisk != nil && *item.ConfirmMixedChannelRisk
 
 			account, err := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
-
 				Name:                  item.Name,
 				Notes:                 item.Notes,
 				Platform:              item.Platform,
@@ -2263,7 +2161,6 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				Extra:                 item.Extra,
 				ProxyID:               item.ProxyID,
 				Concurrency:           item.Concurrency,
-				LoadFactor:            item.LoadFactor,
 				Priority:              item.Priority,
 				RateMultiplier:        item.RateMultiplier,
 				GroupIDs:              item.GroupIDs,
@@ -2292,7 +2189,6 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 			// OpenAI APIKey 账号异步探测 /v1/responses 能力。
 			h.scheduleOpenAIResponsesProbe(account)
 			h.scheduleGrokImportProbe(account)
-
 			success++
 			results = append(results, gin.H{
 				"name":    item.Name,
@@ -2474,7 +2370,6 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	}
 
 	result, err := h.adminService.BulkUpdateAccounts(c.Request.Context(), &service.BulkUpdateAccountsInput{
-
 		AccountIDs:            req.AccountIDs,
 		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
 		Name:                  req.Name,
@@ -2552,12 +2447,7 @@ func (h *OAuthHandler) GenerateAuthURL(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// GenerateSetupTokenURL generates OAuth authorization URL for setup token (inference only).
-//
-// Legacy: the admin UI no longer calls this. Setup Token accounts are created by
-// pasting the output of `claude setup-token` (POST /admin/accounts with
-// type=setup-token), so no browser round-trip is involved. The endpoint is kept
-// for API compatibility with older clients.
+// GenerateSetupTokenURL generates OAuth authorization URL for setup token (inference only)
 // POST /api/v1/admin/accounts/generate-setup-token-url
 func (h *OAuthHandler) GenerateSetupTokenURL(c *gin.Context) {
 	var req GenerateAuthURLRequest
@@ -2604,11 +2494,7 @@ func (h *OAuthHandler) ExchangeCode(c *gin.Context) {
 	response.Success(c, tokenInfo)
 }
 
-// ExchangeSetupTokenCode exchanges authorization code for setup token.
-//
-// Legacy: kept for API compatibility with older clients; see
-// GenerateSetupTokenURL. Tokens minted here carry expires_at/refresh_token but
-// are still long-lived credentials, so they are excluded from refreshing.
+// ExchangeSetupTokenCode exchanges authorization code for setup token
 // POST /api/v1/admin/accounts/exchange-setup-token-code
 func (h *OAuthHandler) ExchangeSetupTokenCode(c *gin.Context) {
 	var req ExchangeCodeRequest
@@ -2658,10 +2544,7 @@ func (h *OAuthHandler) CookieAuth(c *gin.Context) {
 	response.Success(c, tokenInfo)
 }
 
-// SetupTokenCookieAuth performs OAuth using sessionKey for setup token (inference only).
-//
-// Legacy: kept for API compatibility with older clients. The admin UI no longer
-// accepts a claude.ai sessionKey for Setup Token accounts.
+// SetupTokenCookieAuth performs OAuth using sessionKey for setup token (inference only)
 // POST /api/v1/admin/accounts/setup-token-cookie-auth
 func (h *OAuthHandler) SetupTokenCookieAuth(c *gin.Context) {
 	var req CookieAuthRequest
@@ -2947,25 +2830,6 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
-	if h.accountTestService != nil && h.accountTestService.ModelCatalog() != nil {
-		catalog, err := h.accountTestService.ModelCatalog().Account(c.Request.Context(), account)
-		if err != nil {
-			response.InternalError(c, "Failed to read saved model catalog")
-			return
-		}
-		models := []openai.Model{}
-		for _, entry := range catalog.Models {
-			if entry.Lifecycle == "retired" || (entry.Access != "listed" && entry.Access != "observed") {
-				continue
-			}
-			if !account.IsModelSupported(entry.ID) {
-				continue
-			}
-			models = append(models, openai.Model{ID: entry.ID, Object: "model", Type: "model", DisplayName: entry.DisplayName, OwnedBy: entry.Platform})
-		}
-		response.Success(c, models)
-		return
-	}
 	// Handle OpenAI accounts
 	if account.IsOpenAI() {
 		// Prefer the shared, account-keyed upstream catalog. If discovery fails,
@@ -2990,7 +2854,6 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 
 		// Return mapped models
 		var models []openai.Model
-
 		for requestedModel := range mapping {
 			var found bool
 			for _, dm := range openai.DefaultModels {
@@ -3181,23 +3044,6 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 		return
 	}
 
-	if registry := h.accountTestService.ModelCatalog(); registry != nil {
-		snapshot, err := registry.Refresh(c.Request.Context(), account.ID, true)
-		if err != nil {
-			response.Error(c, http.StatusBadGateway, "Model catalog refresh failed; previous snapshot retained")
-			return
-		}
-		models := []string{}
-		metadata := map[string]service.UpstreamModelMetadata{}
-		for _, entry := range snapshot.Models {
-			if entry.Access == "listed" && entry.Lifecycle != "retired" {
-				models = append(models, entry.ID)
-				metadata[entry.ID] = entry.Metadata
-			}
-		}
-		response.Success(c, gin.H{"models": models, "metadata": metadata, "revision": snapshot.Revision, "updated_at": snapshot.UpdatedAt})
-		return
-	}
 	catalog, err := h.accountTestService.SyncUpstreamModelCatalog(c.Request.Context(), account)
 	if err != nil {
 		var syncErr *service.UpstreamModelSyncError

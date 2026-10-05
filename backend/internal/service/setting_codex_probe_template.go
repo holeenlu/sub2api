@@ -31,7 +31,7 @@ func (s *SettingService) GetCodexProbeTemplate(ctx context.Context) (*CodexProbe
 	}
 	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	raw, err := s.settingRepo.GetValue(readCtx, SettingKeyOpenAICodexTicketPromptTemplate)
+	raw, err := s.settingRepo.GetValue(readCtx, SettingKeyCodexDiagnosticPromptTemplate)
 	if err != nil && !errors.Is(err, ErrSettingNotFound) {
 		return nil, errors.New("codex probe template settings unavailable")
 	}

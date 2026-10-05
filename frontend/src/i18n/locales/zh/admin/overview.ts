@@ -1101,7 +1101,7 @@ export default {
       },
       modelPricing: {
         title: '分组逐模型定价',
-        description: '只为例外模型设置独立售价；留空的字段继续继承渠道价卡或参考价，平时用分组倍率即可。长上下文阶梯沿用官方/预设价卡，无需再手填区间。音频可用按次层级配置 realtime、tts、stt。',
+        description: '匹配模型后覆盖渠道和内置价格。长上下文阶梯沿用官方/预设价卡，无需再手填区间。音频可用按次层级配置 realtime、tts、stt。',
         longContext: '启用长上下文阶梯定价',
         longContextHint: '勾选后按渠道区间或官方预设阶梯计费；关闭后默认按第一档，账号显式开启时除外。',
         add: '添加模型价格'
@@ -1142,7 +1142,7 @@ export default {
       },
       modelAllowlist: {
         title: '模型白名单',
-        hint: "开启后仅允许匹配白名单的模型；关闭时不额外限制。新增候选不会自动加入已保存的名单，请包含客户端辅助任务使用的模型。",
+        hint: '开启后，不在白名单中的模型会被拒绝（404 model_not_found），模型列表接口也只展示白名单内的模型。条目支持精确模型 ID 与任意位置的 * 通配（如 gpt-*-codex）。注意：Claude Code 会用 haiku 系小模型做标题/摘要等探测，/messages/count_tokens 同样受白名单控制，请一并勾选所需的小模型。',
         loading: '正在加载候选模型...',
         empty: '暂无候选模型，可在下方手工添加条目',
         selectedSummary: '已选 {selected} / {total}',
@@ -1159,17 +1159,16 @@ export default {
       },
       codexModelsManifest: {
         title: '固定账号获取模型列表',
-        hint: "开启后，Codex Model Manifest 从选定账号获取并按原有账号映射、分组白名单合并过滤。限流或过载中的选定账号仍会使用；推理请求的账号调度不变。",
-        enable: '使用特定账号获取 Codex Model Manifest',
+        hint: '开启后，普通模型列表与 Codex Model Manifest 均优先从选定账号获取并合并，再应用账号映射和分组列表过滤；限流/过载中的选定账号仍会被使用。',
+        enable: '使用特定账号获取模型列表',
         enabledHint: '账号来源限定为当前分组内的 OpenAI 账号，最多选择 10 个。',
-        disabledHint: "未启用：使用原有账号配置目录或调度器发现路径。",
+        disabledHint: '未启用：普通列表使用本地映射或默认模型；Codex 优先使用本地目录，无本地目录时由调度器选账。',
         accounts: '选定账号',
         searchPlaceholder: '搜索账号（当前分组内 OpenAI 账号）',
         searchEmpty: '未找到匹配账号',
         fallback: '选定账号全部不可用时回退调度器',
         fallbackHint: '关闭时返回 503 / 上游错误；开启时回退到现有调度器选账路径。',
-        selectAtLeastOne: '开启固定账号后至少选择一个账号',
-        selectAtMostTen: '固定账号最多选择 10 个'
+        selectAtLeastOne: '开启固定账号后至少选择一个账号'
       },
       compositeRoutes: {
         action: '路由',
@@ -1273,11 +1272,6 @@ export default {
         hint: '仅当上游明确返回 prompt too long 时才会触发，留空表示不兜底',
         noFallback: '不兜底'
       },
-      noAccountFallback: {
-        title: '无可用账号兜底分组',
-        hint: '当前分组选不出可用账号（封禁 / 配额耗尽 / 限流 / 不可调度）时，自动借用该分组的账号池；计费仍按当前分组结算，只能选同平台分组，留空表示不兜底',
-        noFallback: '不兜底'
-      },
       copyAccounts: {
         title: '从分组复制账号',
         tooltip: '选择一个或多个相同平台的分组，创建后会自动将这些分组的所有账号绑定到新分组（去重）。',
@@ -1307,12 +1301,6 @@ export default {
         searchAccountPlaceholder: '搜索账号...',
         accountsHint: '选择此模型模式优先使用的账号'
       },
-      mcpXml: {
-        title: 'MCP XML 协议注入',
-        tooltip: '启用后，当请求包含 MCP 工具时，会在 system prompt 中注入 XML 格式调用协议提示词。关闭此选项可避免对某些客户端造成干扰。',
-        enabled: '已启用',
-        disabled: '已禁用'
-      },
       claudeMaxSimulation: {
         title: 'Claude Max 用量模拟',
         tooltip:
@@ -1320,6 +1308,12 @@ export default {
         enabled: '已启用（模拟 1h 缓存）',
         disabled: '已禁用',
         hint: '仅调整用量计费日志中的 token 类别。不会持久化每个请求的映射状态。'
+      },
+      mcpXml: {
+        title: 'MCP XML 协议注入',
+        tooltip: '启用后，当请求包含 MCP 工具时，会在 system prompt 中注入 XML 格式调用协议提示词。关闭此选项可避免对某些客户端造成干扰。',
+        enabled: '已启用',
+        disabled: '已禁用'
       },
       supportedScopes: {
         title: '支持的模型系列',

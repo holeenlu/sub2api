@@ -1,13 +1,5 @@
 export default {
     ops: {
-      balanceError: {
-        user: '用户余额不足',
-        userHint: '本站用户余额未达到请求要求。请充值该用户余额后重试。',
-        upstream: '上游账户余额不足',
-        upstreamHint: '上游服务报告账户余额不足。请管理员检查并充值或更换上游账户。',
-        unknown: '余额不足（来源未确认）',
-        unknownHint: '这条日志缺少足够的来源信息，请结合原始错误和上游响应确认余额归属。',
-      },
       title: '运维监控',
       description: '运维监控与排障',
       // Dashboard
@@ -31,8 +23,6 @@ export default {
       lastRun: '最近运行',
       lastSuccess: '最近成功',
       lastError: '最近错误',
-      jobFailed: '报错',
-      jobStale: '疑似失联',
       result: '结果',
       noData: '暂无数据',
       loadingText: '加载中...',
@@ -157,17 +147,6 @@ export default {
       healthyStatus: '健康',
       riskyStatus: '风险',
       idleStatus: '待机',
-      healthBreakdown: {
-        business: '业务健康 {score}/100（权重 70%）',
-        errorRate: '· 错误率 {score}/100',
-        ttft: '· 首 Token 时间 {score}/100（{threshold}ms 内满分）',
-        infra: '基础健康 {score}/100（权重 30%）',
-        storage: '· 存储 {score}/100',
-        compute: '· 计算资源 {score}/100',
-        jobs: '· 后台任务 {score}/100',
-        failedJobs: '报错任务：{jobs}',
-        staleJobs: '疑似失联：{jobs}'
-      },
       timeRange: {
         '5m': '近5分钟',
         '30m': '近30分钟',
@@ -733,7 +712,7 @@ export default {
         slaMinPercent: 'SLA最低百分比',
         slaMinPercentHint: 'SLA低于此值时显示为红色（默认：99.5%）',
         ttftP99MaxMs: 'TTFT P99最大值（毫秒）',
-        ttftP99MaxMsHint: 'TTFT P99高于此值时显示为红色，同时作为健康评分 TTFT 刻度的满分点（默认：10000ms）',
+        ttftP99MaxMsHint: 'TTFT P99高于此值时显示为红色（默认：500ms）',
         requestErrorRateMaxPercent: '请求错误率最大值（%）',
         requestErrorRateMaxPercentHint: '请求错误率高于此值时显示为红色（默认：5%）',
         upstreamErrorRateMaxPercent: '上游错误率最大值（%）',

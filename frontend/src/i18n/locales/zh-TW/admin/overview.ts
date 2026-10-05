@@ -1103,7 +1103,7 @@ export default {
       },
       modelPricing: {
         title: '分組逐模型定價',
-        description: '只為例外模型設定獨立售價；留空的欄位繼續繼承通道價卡或參考價，平時用分組倍率即可。長上下文階梯沿用官方/預設價卡，無需再手填區間。音訊可用按次層級設定 realtime、tts、stt。',
+        description: '匹配模型後覆蓋通道和內建價格。長上下文階梯沿用官方/預設價卡，無需再手填區間。音訊可用按次層級設定 realtime、tts、stt。',
         longContext: '啟用長上下文階梯定價',
         longContextHint: '勾選後按通道區間或官方預設階梯計費；關閉後預設按第一檔，帳號顯式開啟時除外。',
         add: '新增模型價格'
@@ -1144,7 +1144,7 @@ export default {
       },
       modelAllowlist: {
         title: '模型白名單',
-        hint: "開啟後僅允許匹配白名單的模型；關閉時不額外限制。新增候選不會自動加入已儲存的名單，請包含用戶端輔助任務使用的模型。",
+        hint: '開啟後，不在白名單中的模型會被拒絕（404 model_not_found），模型列表介面也只展示白名單內的模型。項目支援精確模型 ID 與任意位置的 * 萬用字元（如 gpt-*-codex）。注意：Claude Code 會用 haiku 系小模型做標題/摘要等探測，/messages/count_tokens 同樣受白名單控制，請一併勾選所需的小模型。',
         loading: '正在載入候選模型...',
         empty: '暫無候選模型，可在下方手工新增項目',
         selectedSummary: '已選 {selected} / {total}',
@@ -1161,17 +1161,16 @@ export default {
       },
       codexModelsManifest: {
         title: '固定帳號取得模型列表',
-        hint: "開啟後，Codex Model Manifest 從選定帳號取得並按原有帳號對應、分組白名單合併過濾。速率限制或過載中的選定帳號仍會使用；推理請求的帳號排程不變。",
-        enable: '使用特定帳號取得 Codex Model Manifest',
+        hint: '開啟後，普通模型列表與 Codex Model Manifest 均優先從選定帳號取得併合並，再套用帳號對應和分組列表過濾；速率限制/過載中的選定帳號仍會被使用。',
+        enable: '使用特定帳號取得模型列表',
         enabledHint: '帳號來源限定為目前分組內的 OpenAI 帳號，最多選擇 10 個。',
-        disabledHint: "未啟用：使用原有帳號設定目錄或排程器發現路徑。",
+        disabledHint: '未啟用：普通列表使用本地對應或預設模型；Codex 優先使用本地目錄，無本地目錄時由排程器選帳。',
         accounts: '選定帳號',
         searchPlaceholder: '搜尋帳號（目前分組內 OpenAI 帳號）',
         searchEmpty: '未找到匹配帳號',
         fallback: '選定帳號全部不可用時回退排程器',
         fallbackHint: '關閉時返回 503 / 上游錯誤；開啟時回退到現有排程器選帳路徑。',
-        selectAtLeastOne: '開啟固定帳號後至少選擇一個帳號',
-        selectAtMostTen: '固定帳號最多選擇 10 個'
+        selectAtLeastOne: '開啟固定帳號後至少選擇一個帳號'
       },
       compositeRoutes: {
         action: '路由',
@@ -1275,11 +1274,6 @@ export default {
         hint: '僅當上游明確返回 prompt too long 時才會觸發，留空表示不備援',
         noFallback: '不備援'
       },
-      noAccountFallback: {
-        title: '無可用帳號備援分組',
-        hint: '目前分組選不出可用帳號（封鎖 / 配額耗盡 / 速率限制 / 不可排程）時，自動借用該分組的帳號池；計費仍按目前分組結算，只能選同平台分組，留空表示不備援',
-        noFallback: '不備援'
-      },
       copyAccounts: {
         title: '從分組複製帳號',
         tooltip: '選擇一個或多個相同平台的分組，建立後會自動將這些分組的所有帳號綁定到新分組（去重）。',
@@ -1309,12 +1303,6 @@ export default {
         searchAccountPlaceholder: '搜尋帳號...',
         accountsHint: '選擇此模型模式優先使用的帳號'
       },
-      mcpXml: {
-        title: 'MCP XML 協議注入',
-        tooltip: '啟用後，當請求包含 MCP 工具時，會在 system prompt 中注入 XML 格式呼叫協議提示詞。關閉此選項可避免對某些用戶端造成干擾。',
-        enabled: '已啟用',
-        disabled: '已停用'
-      },
       claudeMaxSimulation: {
         title: 'Claude Max 用量模擬',
         tooltip:
@@ -1322,6 +1310,12 @@ export default {
         enabled: '已啟用（模擬 1h 快取）',
         disabled: '已停用',
         hint: '僅調整用量計費日誌中的 token 類別。不會持久化每個請求的對應狀態。'
+      },
+      mcpXml: {
+        title: 'MCP XML 協議注入',
+        tooltip: '啟用後，當請求包含 MCP 工具時，會在 system prompt 中注入 XML 格式呼叫協議提示詞。關閉此選項可避免對某些用戶端造成干擾。',
+        enabled: '已啟用',
+        disabled: '已停用'
       },
       supportedScopes: {
         title: '支援的模型系列',

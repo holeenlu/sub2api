@@ -31,7 +31,6 @@ type RateLimitService struct {
 	settingService        *SettingService
 	tokenCacheInvalidator TokenCacheInvalidator
 	runtimeBlocker        AccountRuntimeBlocker
-	openAIIPUnauthorized  openAIIPUnauthorizedStreak
 	// ollamaCloudUsageProbe is the optional Ollama Cloud usage probe scheduler
 	// injected via SetOllamaCloudUsageProbeScheduler. See
 	// ratelimit_service_ollama_429.go for how real-Ollama 429s schedule an async
@@ -172,10 +171,10 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 	}
 
 	now := time.Now().UTC()
-	thresholds, thresholdsResolved := s.settingService.GetAccountSchedulingThresholds(ctx)
+	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
 	decision := EvaluateAccountSchedulingThreshold(account, thresholds, now)
 	if !decision.ShouldPause || decision.Until == nil || !decision.Until.After(now) {
-		s.applyAnthropicFableSchedulingThreshold(ctx, account, thresholds, thresholdsResolved, now)
+		s.applyAnthropicFableSchedulingThreshold(ctx, account, thresholds, now)
 		return false
 	}
 
@@ -229,17 +228,9 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 	return true
 }
 
-func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Context, account *Account, thresholds map[string]int, thresholdsResolved bool, now time.Time) {
-	decision := evaluateAnthropicFableSchedulingThreshold(account, thresholds, thresholdsResolved, now)
+func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Context, account *Account, thresholds map[string]int, now time.Time) {
+	decision := evaluateAnthropicFableSchedulingThreshold(account, thresholds, now)
 	if !decision.ShouldPause || decision.Until == nil || !decision.Until.After(now) {
-		// 只有拿到判据才敢解除：ShouldPause=false 既可能是「确认低于阈值」，也可能是
-		// 「这份账号副本上根本没有采样」。后者当成「没越线」会把刚打上的限流清掉，
-		// 账号在越线状态下继续接 Fable 请求。
-		// 例外是旧版本用共享 7d 写出的 Fable 阈值限流：共享 7d 已不再属于本 scope，
-		// 这条 reason 本身就是可以解除的正证据，即使当前缺少 7d_oi 采样也应清掉。
-		if decision.HasEvidence || hasDeprecatedAnthropicFableSharedWindowThreshold(account) {
-			s.releaseAnthropicFableSchedulingThreshold(ctx, account, now)
-		}
 		return
 	}
 	if account.isRateLimitActiveForKey(anthropicFableRateLimitKey) {
@@ -250,7 +241,6 @@ func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Co
 		Platform:         decision.Platform,
 		Window:           decision.Window,
 		Scope:            decision.Scope,
-		UntilSource:      decision.UntilSource,
 		ThresholdPercent: decision.ThresholdPercent,
 		UsedPercent:      decision.UsedPercent,
 		Until:            *decision.Until,
@@ -273,58 +263,6 @@ func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Co
 		"threshold_percent", decision.ThresholdPercent,
 		"used_percent", decision.UsedPercent,
 		"until", decision.Until.UTC())
-}
-
-func hasDeprecatedAnthropicFableSharedWindowThreshold(account *Account) bool {
-	if account == nil {
-		return false
-	}
-	reason := account.modelRateLimitReason(anthropicFableRateLimitKey)
-	payload, ok := parseTempUnschedReasonPayload(reason)
-	return ok && payload.Source == AccountSchedulingThresholdReasonSource &&
-		payload.Window == "7d" && payload.Scope == anthropicFableRateLimitKey
-}
-
-// releaseAnthropicFableSchedulingThreshold 在账号不再越线时解除由阈值打上的 Fable
-// 限流。阈值是给运维反复调的旋钮：设成 50 之后改回 70，不主动解除的话账号要一直被封
-// 到窗口重置（最长七天）。用量因窗口滚动回落到阈值以下时同理。
-//
-// 只解除 source=account_scheduling_threshold 的限流。上游 429 打的
-// anthropic_7d_oi_window_exhausted 必须原样保留——窗口是真的耗尽了，解除只会让请求
-// 继续撞上游 429。
-func (s *RateLimitService) releaseAnthropicFableSchedulingThreshold(ctx context.Context, account *Account, now time.Time) {
-	if s == nil || s.accountRepo == nil || account == nil || account.ID <= 0 {
-		return
-	}
-	resetAt := account.modelRateLimitResetAt(anthropicFableRateLimitKey)
-	if resetAt == nil || !resetAt.After(now) {
-		return
-	}
-	// reason 既是「这条限流是阈值打的」的判据，也是清除时的 CAS 令牌：这份账号副本是
-	// 选号时刻从 Redis 拷来的，判断与 UPDATE 之间上游 429 完全可能把同一个 scope 改写
-	// 成窗口耗尽限流，那条限流必须原样保留。
-	reason := account.modelRateLimitReason(anthropicFableRateLimitKey)
-	if !IsAccountSchedulingThresholdReason(reason) {
-		return
-	}
-
-	cleared, err := s.accountRepo.ClearModelRateLimit(ctx, account.ID, anthropicFableRateLimitKey, reason)
-	if err != nil {
-		slog.Warn("anthropic_fable_scheduling_threshold_clear_model_limit_failed",
-			"account_id", account.ID,
-			"scope", anthropicFableRateLimitKey,
-			"error", err)
-		return
-	}
-	if !cleared {
-		return
-	}
-	clearAccountModelRateLimitSnapshot(account, anthropicFableRateLimitKey)
-
-	slog.Info("anthropic_fable_scheduling_threshold_model_limit_cleared",
-		"account_id", account.ID,
-		"scope", anthropicFableRateLimitKey,
-		"previous_until", resetAt.UTC())
 }
 
 func accountHasSameSchedulingThresholdPause(account *Account, until time.Time, reason string) bool {
@@ -392,15 +330,6 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 // HandleUpstreamError 处理上游错误响应，标记账号状态
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
-	if !isOpenAIIPUnauthorizedResponse(statusCode, responseBody) {
-		s.resetOpenAIIPUnauthorizedStreak(account)
-	}
-	return s.handleUpstreamErrorAfterStreakReset(ctx, account, statusCode, headers, responseBody, requestedModel...)
-}
-
-// handleUpstreamErrorAfterStreakReset keeps account policy handling shared with
-// the OpenAI gateway, which resets the streak before its early-return policies.
-func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
@@ -538,15 +467,6 @@ func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Conte
 				s.handleAuthError(ctx, authAccount, msg)
 				shouldDisable = true
 				break
-			}
-			// An isolated IP-policy rejection is not evidence that this OAuth
-			// account should be parked. Require two consecutive responses within
-			// five seconds; credential revocation/missing refresh tokens above
-			// retain their existing handling.
-			if authAccount.Platform == PlatformOpenAI && isOpenAIIPUnauthorizedResponse(statusCode, responseBody) &&
-				!s.openAIIPUnauthorized.observe(authAccount.ID, headers.Get("x-request-id"), time.Now()) {
-				slog.Info("openai_ip_unauthorized_below_threshold", "account_id", authAccount.ID, "window_seconds", 5, "threshold", 2)
-				return false
 			}
 			// 2. 临时不可调度，替代 SetError（保持 status=active 让刷新服务能拾取）
 			// 注意：此处不再写回 account.Credentials/expires_at。
@@ -1251,12 +1171,6 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 			return
 		}
 	}
-	s.handle429Cooldown(ctx, account, headers, responseBody)
-}
-
-// handle429Cooldown persists the shared quota snapshot and blocks scheduling.
-
-func (s *RateLimitService) handle429Cooldown(ctx context.Context, account *Account, headers http.Header, responseBody []byte) {
 	// Spark 影子：限流/熔断状态 100% 由 QueryUsage(/wham/usage body 的 codex_bengalfox)驱动。
 	// /responses 的 429 携带的 x-codex-*/usage_limit_reached 是 global codex 道(plan/spec §8),
 	// 套到影子会把 spark 误耦合到 global 窗口——即便 spark 仍有配额也会被冷却到 global reset,
@@ -1602,10 +1516,8 @@ func (s *RateLimitService) persistAnthropicExhaustedWindowLimit(ctx context.Cont
 	return true
 }
 
-const AnthropicFableWindowExhaustedReason = "anthropic_7d_oi_window_exhausted"
-
 const (
-	anthropicFableWindowReason          = AnthropicFableWindowExhaustedReason
+	anthropicFableWindowReason          = "anthropic_7d_oi_window_exhausted"
 	anthropicFableCreditsRequiredReason = "anthropic_fable_credits_required"
 )
 
@@ -2116,12 +2028,6 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 	}
 
 	// 窗口重置时清除旧的 utilization 和被动采样数据，避免残留上个窗口的数据
-	//
-	// 这里连 7d / 7d_oi 一起清是有意为之，别「顺手修好」：这几个值全靠被动采样，清掉
-	// 后下一次请求的响应头就会把它们带回来。代价是每个账号在 5h 窗口滚动后会放行大约
-	// 一次 Fable 请求——数据回来后立刻按阈值停调。用这一次放行换取「永远不会拿上个
-	// 窗口的陈旧用量做判断」，是明确的取舍。采样清空期间阈值评估拿不到判据，因此
-	// evaluateAnthropicFableSchedulingThreshold 在这段窗口里不会解除已有限流。
 	if windowEnd != nil && needInitWindow {
 		_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
 			"session_window_utilization":      nil,

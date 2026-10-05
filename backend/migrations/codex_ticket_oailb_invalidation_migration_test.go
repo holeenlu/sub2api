@@ -4,7 +4,6 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,5 +18,5 @@ func TestMigration243PreservesLegacyTicketInvalidations(t *testing.T) {
 	for _, match := range matches {
 		reasons = append(reasons, match[1])
 	}
-	require.ElementsMatch(t, []string{"upstream_new_turn_state", service.CodexTicketInvalidationCredentialsChanged}, reasons)
+	require.ElementsMatch(t, []string{"upstream_new_turn_state", "upstream_turn_state_and_oailb_changed"}, reasons)
 }

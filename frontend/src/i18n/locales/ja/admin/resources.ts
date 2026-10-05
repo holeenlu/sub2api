@@ -233,7 +233,11 @@ export default {
       fallbackProxy: 'バックアッププロキシ',
       fallbackDirect: '直接接続',
       backupProxy: 'バックアッププロキシ',
-    },
+
+ad: {
+        inline: 'Need proxy IP?'
+      },
+},
 
     // Redeem Codes
     redeem: {
@@ -554,15 +558,6 @@ export default {
       clickToViewBalance: 'クリックして残高履歴を表示',
       failedToLoadUser: 'ユーザー情報の読み込みに失敗しました',
       userDeletedBadge: '削除済み',
-      keyRanking: {
-        subtitle: '現在のフィルターと期間におけるAPIキー別のトークン使用量',
-        rowHint: "クリックしてこのキーの使用量詳細を表示",
-        keyCount: '{count}件のキー',
-        columns: {
-          key: 'APIキー',
-          user: '所有者'
-        }
-      },
       tokenRanking: {
         subtitle: '現在のフィルターと期間におけるユーザー別のトークン使用量',
         rowHint: "クリックしてこのユーザーの使用量詳細を表示",

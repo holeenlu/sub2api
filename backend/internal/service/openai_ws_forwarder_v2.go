@@ -72,9 +72,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
 	applyStagedCodexFingerprintClientMetadata(c, account, payload)
-	if err := s.validateWSContinuation(ctx, c, payloadAsJSONBytes(payload)); err != nil {
-		return nil, err
-	}
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
 	previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	promptCacheKey := strings.TrimSpace(clientPromptCacheKey)
@@ -121,10 +118,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 
 	stateStore := s.getOpenAIWSStateStore()
-	// previous_response_id → 账号粘连要写进账号真正的来源分组（可能是无可用账号
-	// 兜底分组），否则续写命中的是起点命名空间，账号又不在起点池里而被丢弃。
-	groupID := openAIResponseAccountGroupID(c)
-	_, enforceGroup := openAITurnAdmissionGroupFromContext(c)
+	groupID := getOpenAIGroupIDFromContext(c)
 	sessionHash := s.GenerateSessionHash(c, nil)
 	if sessionHash == "" {
 		var legacySessionHash string
@@ -157,7 +151,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	forceNewConnByPolicy := shouldForceNewConnOnStoreDisabled(storeDisabledConnMode, lastFailureReason)
 	forceNewConn := forceNewConnByPolicy && storeDisabled && previousResponseID == "" && sessionHash != "" && preferredConnID == ""
-	wsHeaders, sessionResolution, ticket, buildHdrErr := s.buildOpenAIWSHeadersWithTicket(
+	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeaders(
 		ctx,
 		c,
 		account,
@@ -209,57 +203,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	defer acquireCancel()
 
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
-		Account:          account,
-		WSURL:            wsURL,
-		Headers:          wsHeaders,
-		ObserveHandshake: s.codexTicketHandshakeObserver(ctx, ticket),
-		Ticket:           ticket,
-		TicketScope:      fmt.Sprintf("%d/%s", getAPIKeyIDFromContext(c), sessionHash),
-		TenantScope:      openAIWSTenantScope(c),
-		PrepareTicket:    s.codexTicketProxy,
+		Account: account,
+		WSURL:   wsURL,
+		Headers: wsHeaders,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
-			_, err := s.admitOpenAITurnForGroup(factoryCtx, groupID, enforceGroup, account, mappedModel)
-			if err != nil {
-				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
-					factoryCtx,
-					groupID,
-					sessionHash,
-					previousResponseID,
-					account.ID,
-					err,
-				)
-				return nil, err
-			}
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
-		},
-		BindHandshake: func(headers http.Header) *openAIWSTurnBinding {
-			return s.bindOpenAIWSHandshake(account, mappedModel, headers)
-		},
-		CheckBinding: func(checkCtx context.Context, b *openAIWSTurnBinding) error {
-			latest, err := s.admitOpenAITurnForGroup(checkCtx, groupID, enforceGroup, account, mappedModel)
-			if err != nil {
-				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
-					checkCtx,
-					groupID,
-					sessionHash,
-					previousResponseID,
-					account.ID,
-					err,
-				)
-				return err
-			}
-			if err := s.checkOpenAIWSBinding(latest, mappedModel, b); err != nil {
-				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
-					checkCtx,
-					groupID,
-					sessionHash,
-					previousResponseID,
-					account.ID,
-					err,
-				)
-				return err
-			}
-			return nil
 		},
 		PreferredConnID: preferredConnID,
 		ForceNewConn:    forceNewConn,
@@ -271,9 +219,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}(),
 	})
 	if err != nil {
-		if IsOpenAITurnAdmissionError(err) {
-			return nil, err
-		}
 		var agentDialErr *openAIWSDialError
 		if s.isAgentIdentityAccount(ctx, account) && errors.As(err, &agentDialErr) && isAgentIdentityTaskInvalidWSDialError(agentDialErr) && agentTaskRecoveryTried != nil && !*agentTaskRecoveryTried {
 			*agentTaskRecoveryTried = true
@@ -383,37 +328,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 	}
 
-	releaseActivity := s.beginCodexTicketBusiness(account)
-	defer releaseActivity()
-	checkBeforeWrite := func() error {
-		latest, err := s.admitOpenAITurn(ctx, c, account, mappedModel)
-		if err == nil {
-			err = s.checkOpenAIWSBinding(latest, mappedModel, lease.conn.turnBinding)
-		}
-		if err != nil {
-			s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
-				ctx,
-				groupID,
-				sessionHash,
-				previousResponseID,
-				account.ID,
-				err,
-			)
-			lease.MarkBroken()
-		}
-		return err
-	}
-	if lease.conn.turnBinding != nil && lease.conn.turnBinding.ticket != nil && lease.conn.turnBinding.ticket.Binding != nil {
-		for _, key := range codexTicketIdentityBodyKeys {
-			delete(payload, key)
-			if value, exists := lease.conn.turnBinding.ticket.Binding.Body[key]; exists {
-				payload[key] = value
-			}
-		}
-	}
-	if err := checkBeforeWrite(); err != nil {
-		return nil, err
-	}
 	if err := s.performOpenAIWSGeneratePrewarm(
 		ctx,
 		lease,
@@ -428,12 +342,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 
-	if err := checkBeforeWrite(); err != nil {
-		return nil, err
-	}
-	if err := s.acquireOpenAIRPMForSend(ctx, account); err != nil {
-		return nil, err
-	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
@@ -713,7 +621,6 @@ readLoop:
 		lastEventType = eventType
 
 		if responseID == "" && eventResponseID != "" {
-			s.bindHTTPResponseAccount(ctx, c, account, eventResponseID)
 			responseID = eventResponseID
 		}
 
@@ -833,7 +740,8 @@ readLoop:
 		}
 
 		if reqStream {
-			// 缓冲首 token 前的事件，保留既有的早期错误处理窗口。
+			// 在首个 token 前先缓冲事件（如 response.created），
+			// 以便上游早期断连时仍可安全回退到 HTTP，不给下游发送半截流。
 			shouldBuffer := firstTokenMs == nil && !isTokenEvent && !isTerminalEvent
 			if shouldBuffer {
 				buffered := make([]byte, len(message))

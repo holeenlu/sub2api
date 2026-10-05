@@ -1,4 +1,3 @@
-import modelCatalog from './modelCatalog'
 import ui from './ui'
 import landing from './landing'
 import common from './common'
@@ -10,7 +9,6 @@ import misc from './misc'
 import docs from './docs'
 
 export default {
-  modelCatalog,
   ...ui,
   ...landing,
   ...common,

@@ -11,7 +11,7 @@ const api = vi.hoisted(() => ({
   saveDiagnosticPlan: vi.fn(), startDiagnosticRun: vi.fn(), diagnosticRuns: vi.fn(),
   cancelDiagnosticRun: vi.fn(), refreshFingerprint: vi.fn()
 }))
-vi.mock('@/api/admin/codexTickets', () => api)
+vi.mock('@/api/admin/codexDiagnostics', () => api)
 vi.mock('vue-i18n', () => ({ useI18n: () => ({
   t: (key: string, values: Record<string, string | number> = {}) => {
     const value = key.split('.').reduce<unknown>((current, part) =>

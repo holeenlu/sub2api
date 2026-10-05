@@ -49,9 +49,6 @@ func TestEnsureDeepSeekChatReasoningPlaceholders(t *testing.T) {
 	deepSeekAccount := openaiPlatformDeepSeekAccount()
 	nativeDeepSeek := &Account{Platform: PlatformDeepseek, Type: AccountTypeAPIKey}
 	otherOpenAI := &Account{
-		Status:      StatusActive,
-		Schedulable: true,
-
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeAPIKey,
 		Credentials: map[string]any{"api_key": "sk-test", "base_url": "http://upstream.example"},
@@ -233,9 +230,6 @@ func TestForwardResponses_NonDeepSeekChatFallbackDoesNotInjectReasoningPlacehold
 	c := newDeepSeekChatFallbackContext(t, body)
 	upstream := newOKChatCompletionsUpstream("rid_other_rc", deepSeekChatFallbackOKBody)
 	account := &Account{
-		Status:      StatusActive,
-		Schedulable: true,
-
 		ID:       99,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeAPIKey,

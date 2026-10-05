@@ -14,9 +14,22 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const CodexProbeTemplateMaxBytes = 256 << 10
+const codexProbePromptPlaceholder = "{{MODELTRACE_PROMPT}}"
+const SettingKeyCodexDiagnosticPromptTemplate = "openai_codex_diagnostic_prompt_template"
+
+type codexProbeReplayMessage struct {
+	Role  string
+	Parts []string
+}
+type codexProbeReplay struct {
+	Instructions string
+	Messages     []codexProbeReplayMessage
+}
 
 //go:embed codex_probe_template.jsonl
 var defaultCodexProbeTemplateJSONL string
@@ -27,7 +40,7 @@ var ErrCodexProbeIdentity = errors.New("codex probe identity unavailable")
 // CodexProbeTemplate is an immutable, validated initial conversation. It can be
 // shared by concurrent requests; rendering never changes its stored strings.
 type CodexProbeTemplate struct {
-	replay CodexHypothesisReplay
+	replay codexProbeReplay
 }
 
 type codexProbeText struct {
@@ -68,7 +81,7 @@ func validateCodexProbePlaceholders(text string) bool {
 	valid := true
 	rest := codexProbePlaceholder.ReplaceAllStringFunc(text, func(value string) string {
 		switch value {
-		case "{{TIMEZONE}}", "{{CURRENT_DATE}}", "{{MODEL}}", CodexHypothesisPromptPlaceholder:
+		case "{{TIMEZONE}}", "{{CURRENT_DATE}}", "{{MODEL}}", codexProbePromptPlaceholder:
 		default:
 			valid = false
 		}
@@ -167,7 +180,7 @@ func ParseCodexProbeTemplate(raw string) (*CodexProbeTemplate, error) {
 			if !validateCodexProbePlaceholders(payload.Base.Text) {
 				return fail("unknown or malformed placeholder")
 			}
-			placeholders += strings.Count(payload.Base.Text, CodexHypothesisPromptPlaceholder)
+			placeholders += strings.Count(payload.Base.Text, codexProbePromptPlaceholder)
 			template.replay.Instructions = payload.Base.Text
 		case "turn_context":
 			var payload struct {
@@ -183,7 +196,7 @@ func ParseCodexProbeTemplate(raw string) (*CodexProbeTemplate, error) {
 			if decodeCodexProbeJSON(string(record.Payload), &payload) != nil || payload.Type != "message" || payload.Role != roles[index] || len(payload.Content) != parts[index] {
 				return fail("retain the initial developer/user message roles and content parts")
 			}
-			message := CodexHypothesisReplayMessage{Role: payload.Role}
+			message := codexProbeReplayMessage{Role: payload.Role}
 			for partIndex, part := range payload.Content {
 				if part.Type != "input_text" || strings.TrimSpace(part.Text) == "" {
 					return fail("each content part must be nonempty input_text")
@@ -191,7 +204,7 @@ func ParseCodexProbeTemplate(raw string) (*CodexProbeTemplate, error) {
 				if !validateCodexProbePlaceholders(part.Text) {
 					return fail("unknown or malformed placeholder")
 				}
-				placeholders += strings.Count(part.Text, CodexHypothesisPromptPlaceholder)
+				placeholders += strings.Count(part.Text, codexProbePromptPlaceholder)
 				var tag string
 				switch index {
 				case 1:
@@ -217,7 +230,7 @@ func ParseCodexProbeTemplate(raw string) (*CodexProbeTemplate, error) {
 						return fail("environment date and timezone must use their placeholders")
 					}
 				case 6:
-					if part.Text != CodexHypothesisPromptPlaceholder {
+					if part.Text != codexProbePromptPlaceholder {
 						return fail("final user message must contain only the challenge placeholder")
 					}
 				}
@@ -242,7 +255,7 @@ var parsedDefaultCodexProbeTemplate = sync.OnceValues(func() (*CodexProbeTemplat
 
 type codexProbeTemplateContextKey struct{}
 
-// PrepareCodexProbeContext pins one snapshot for a model's harvest and diagnostic.
+// PrepareCodexProbeContext pins the template used by one diagnostic request.
 func (s *OpenAIGatewayService) PrepareCodexProbeContext(ctx context.Context) (context.Context, error) {
 	if _, ok := ctx.Value(codexProbeTemplateContextKey{}).(*CodexProbeTemplate); ok {
 		return ctx, nil
@@ -272,7 +285,7 @@ func (s *OpenAIGatewayService) buildCodexProbeRequest(ctx context.Context, accou
 	if !ok || template == nil {
 		return nil, nil, ErrCodexProbeIdentity
 	}
-	return template.render(model, challenge.Prompt, account.OpenAIRequestTimezone(), identity)
+	return template.render(model, challenge.Prompt, codexDiagnosticTimezone(account), identity)
 }
 
 func (template *CodexProbeTemplate) render(model, prompt, timezone string, identity codexReplayIdentity) ([]byte, http.Header, error) {
@@ -280,8 +293,37 @@ func (template *CodexProbeTemplate) render(model, prompt, timezone string, ident
 	if err != nil {
 		return nil, nil, ErrCodexProbeIdentity
 	}
-	replace := strings.NewReplacer("{{TIMEZONE}}", location.String(), "{{CURRENT_DATE}}", identity.startedAt.In(location).Format(time.DateOnly), "{{MODEL}}", model, CodexHypothesisPromptPlaceholder, prompt)
-	body, headers := buildCodexReplayRequest(&template.replay, model, "", identity, replace.Replace)
+	replace := strings.NewReplacer("{{TIMEZONE}}", location.String(), "{{CURRENT_DATE}}", identity.startedAt.In(location).Format(time.DateOnly), "{{MODEL}}", model, codexProbePromptPlaceholder, prompt)
+	input := make([]any, 0, len(template.replay.Messages))
+	for _, message := range template.replay.Messages {
+		parts := make([]any, 0, len(message.Parts))
+		for _, part := range message.Parts {
+			parts = append(parts, map[string]string{"type": "input_text", "text": replace.Replace(part)})
+		}
+		input = append(input, map[string]any{"role": message.Role, "content": parts})
+	}
+	metadata, _ := json.Marshal(map[string]any{
+		"installation_id": identity.installationID, "session_id": identity.sessionID,
+		"thread_id": identity.sessionID, "turn_id": identity.turnID, "window_id": identity.windowID,
+		"turn_started_at_unix_ms": identity.startedAt.UnixMilli(), "request_kind": "turn",
+	})
+	body := map[string]any{
+		"model": model, "store": false, "stream": true,
+		"instructions": replace.Replace(template.replay.Instructions), "input": input,
+		"prompt_cache_key": identity.sessionID,
+		"client_metadata": map[string]string{
+			"session_id": identity.sessionID, "thread_id": identity.sessionID, "turn_id": identity.turnID,
+			"x-codex-installation-id": identity.installationID, "x-codex-window-id": identity.windowID,
+			"x-codex-turn-metadata": string(metadata),
+		},
+	}
+	headers := http.Header{}
+	for _, key := range []string{"session_id", "session-id", "thread-id", "x-client-request-id"} {
+		headers.Set(key, identity.sessionID)
+	}
+	headers.Set("x-codex-installation-id", identity.installationID)
+	headers.Set("x-codex-window-id", identity.windowID)
+	headers.Set("x-codex-turn-metadata", string(metadata))
 	encoded, err := json.Marshal(body)
 	return encoded, headers, err
 }
@@ -294,4 +336,35 @@ func (s *OpenAIGatewayService) BuildCodexDiagnosticRequest(ctx context.Context, 
 		return nil, nil, ErrCodexProbeIdentity
 	}
 	return s.buildCodexProbeRequest(ctx, account, model, challenge)
+}
+
+type codexReplayIdentity struct {
+	installationID, sessionID, windowID, turnID string
+	startedAt                                   time.Time
+}
+
+func newCodexReplayIdentity(installationID, sessionID, windowID string, now time.Time) (codexReplayIdentity, error) {
+	identity := codexReplayIdentity{installationID: installationID, sessionID: sessionID, windowID: windowID, startedAt: now}
+	for _, value := range []*string{&identity.sessionID, &identity.windowID, &identity.turnID} {
+		if *value == "" {
+			id, err := uuid.NewV7()
+			if err != nil {
+				return identity, err
+			}
+			*value = id.String()
+		}
+	}
+	return identity, nil
+}
+
+// This setting is used only while rendering a diagnostic challenge.
+func codexDiagnosticTimezone(account *Account) string {
+	if account != nil {
+		if value, ok := account.Extra["openai_request_timezone"].(string); ok {
+			if _, err := time.LoadLocation(value); err == nil && value != "" {
+				return value
+			}
+		}
+	}
+	return "Asia/Singapore"
 }

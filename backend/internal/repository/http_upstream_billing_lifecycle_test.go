@@ -35,15 +35,6 @@ type lifecycleBillingRepo struct {
 	commands []*service.UsageBillingCommand
 }
 
-type lifecycleAdmissionRepo struct {
-	service.AccountRepository
-	account *service.Account
-}
-
-func (r *lifecycleAdmissionRepo) GetOpenAITurnAdmission(context.Context, int64) (*service.Account, *service.Account, error) {
-	return r.account, nil, nil
-}
-
 func (r *lifecycleBillingRepo) Apply(ctx context.Context, cmd *service.UsageBillingCommand) (*service.UsageBillingApplyResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -97,19 +88,16 @@ func TestHTTPUpstreamForwardDrainsUsageAfterClientDisconnect(t *testing.T) {
 	upstream := NewHTTPUpstream(cfg)
 	usageRepo := &lifecycleUsageLogRepo{}
 	billingRepo := &lifecycleBillingRepo{}
-	admissionRepo := &lifecycleAdmissionRepo{}
 	svc := service.NewOpenAIGatewayService(
-		admissionRepo, usageRepo, billingRepo, nil, nil, nil, nil, cfg, nil, nil,
+		nil, usageRepo, billingRepo, nil, nil, nil, nil, cfg, nil, nil,
 		service.NewBillingService(cfg, nil), nil, nil, upstream,
 		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil,
 	)
 	account := &service.Account{
 		ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
-		Status: service.StatusActive, Schedulable: true,
 		Concurrency: 1,
 		Credentials: map[string]any{"base_url": srv.URL, "api_key": "test-key"},
 	}
-	admissionRepo.account = account
 	body := []byte(`{"model":"gpt-5.1","stream":true,"input":"hello"}`)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body))).WithContext(clientCtx)

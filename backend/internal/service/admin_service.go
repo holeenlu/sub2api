@@ -39,10 +39,7 @@ type AdminService interface {
 	// ordered by sort_order then id. Used by the API Key group filter dropdown.
 	GetAllGroupsIncludingInactive(ctx context.Context) ([]Group, error)
 	GetGroup(ctx context.Context, id int64) (*Group, error)
-	// GetGroupModelsListCandidates returns the candidate model IDs together with
-	// the resolved platform (empty platform falls back to the group's own, then
-	// to anthropic), so callers never re-derive it.
-	GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, string, error)
+	GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, error)
 	CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error)
 	// DuplicateGroup creates an inactive independent copy of a group's configuration
 	// and account bindings while preserving each binding's priority.
@@ -95,10 +92,6 @@ type AdminService interface {
 	// UpdateAccountExtra 仅对 Extra 做 JSONB 增量合并（key 级覆盖），不会影响其它字段或运行态键。
 	// 用于刷新流程持久化 account_uuid / org_uuid 等少量键，避免被全量快照覆盖。
 	UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error
-	// ApplyOAuthCredentials 用一次授权换发的整套 token 替换账号凭据（重新授权）。
-	// 与 UpdateAccount 的区别：旧 token 字段（含 refresh_token / expires_at）整体删除而非
-	// "缺失即保留"；model_mapping 等非 token 键原样保留。非 OAuth 账号返回 NOT_OAUTH。
-	ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error)
 	DeleteAccount(ctx context.Context, id int64) error
 	RefreshAccountCredentials(ctx context.Context, id int64) (*Account, error)
 	ClearAccountError(ctx context.Context, id int64) (*Account, error)
@@ -113,9 +106,6 @@ type AdminService interface {
 	ForceAntigravityPrivacy(ctx context.Context, account *Account) string
 	SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error)
 	BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error)
-	// ResolveBulkUpdateTargetIDs 把批量操作的筛选条件展开成账号 ID 列表，
-	// 语义与 BulkUpdateAccounts 的 Filters 完全一致。filters 为 nil 时返回 nil。
-	ResolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters) ([]int64, error)
 	CheckMixedChannelRisk(ctx context.Context, currentAccountID int64, currentAccountPlatform string, groupIDs []int64) error
 	// RevertAccountProxyFallback 将账号的 proxy_id 切回 proxy_fallback_origin_id，并清空 origin 字段。
 	// 若账号不存在返回 ErrAccountNotFound；若账号存在但不在 fallback 状态，返回 ErrAccountNotInFallback。
@@ -288,8 +278,6 @@ type CreateGroupInput struct {
 	FallbackGroupID              *int64 // 降级分组 ID
 	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64
-	// 无可用账号兜底分组 ID（所有平台可用，必须同平台）
-	FallbackGroupIDOnNoAccount *int64
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled bool // 是否启用模型路由
@@ -371,8 +359,6 @@ type UpdateGroupInput struct {
 	FallbackGroupID              *int64 // 降级分组 ID
 	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64
-	// 无可用账号兜底分组 ID（所有平台可用，必须同平台）
-	FallbackGroupIDOnNoAccount *int64
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled *bool // 是否启用模型路由
@@ -457,12 +443,6 @@ type UpdateAccountInput struct {
 	ProbeEnabled          *bool
 	RateSyncEnabled       *bool
 	SkipMixedChannelCheck bool // 跳过混合渠道检查（用户已确认风险）
-}
-
-// ApplyOAuthCredentialsInput 是重新授权落库的输入：账号类型与本次授权得到的整套 token。
-type ApplyOAuthCredentialsInput struct {
-	Type        string // oauth / setup-token
-	Credentials map[string]any
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.

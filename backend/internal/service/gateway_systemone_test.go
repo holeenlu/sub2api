@@ -397,6 +397,6 @@ func TestTypeSafeAccountBaseURLNeverFallsBackToAnthropic(t *testing.T) {
 }
 
 func TestTypeSafeModelsListCandidates(t *testing.T) {
-	require.Equal(t, []string{typesafe.JevLatestModel}, DefaultModelsListCandidateIDs(PlatformTypeSafe))
+	require.Equal(t, []string{typesafe.JevLatestModel}, defaultModelsListCandidateIDs(PlatformTypeSafe))
 	require.NotContains(t, compositeDefaultModelsListCandidateIDs(), typesafe.JevLatestModel)
 }

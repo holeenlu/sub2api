@@ -1,9 +1,7 @@
 package migrations
 
 import (
-	"os"
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,18 +17,11 @@ func TestMigration242PrunesUnsupportedOpenAIRequestTimezones(t *testing.T) {
 	require.Contains(t, sql, "jsonb_typeof(extra->'openai_request_timezone') IS DISTINCT FROM 'string'")
 	require.Contains(t, sql, "extra->>'openai_request_timezone' NOT IN (")
 
-	list, err := os.ReadFile("../internal/service/openai_request_timezones.txt")
-	require.NoError(t, err)
 	matches := regexp.MustCompile(`(?m)^\s+'([^']+)'[,]?$`).FindAllStringSubmatch(sql, -1)
 	options := make([]string, 0, len(matches))
 	for _, match := range matches {
 		options = append(options, match[1])
 	}
 	require.Len(t, options, 30)
-	currentOptions := strings.Fields(string(list))
-	// Migration 242 is an immutable historical cleanup snapshot. New account
-	// options may be added without rewriting an already-applied migration.
-	require.Len(t, currentOptions, 31)
-	require.Subset(t, currentOptions, options)
-	require.Contains(t, currentOptions, "Asia/Taipei")
+	// The historical SQL snapshot is independent of the retired runtime option list.
 }

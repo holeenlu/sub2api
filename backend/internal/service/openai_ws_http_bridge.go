@@ -19,8 +19,9 @@ import (
 )
 
 const (
-	openAIWSClientReadLimitBytesDefault   int64 = 64 * 1024 * 1024
-	openAIWSHTTPBridgeErrorBodyLimitBytes       = 64 * 1024
+	openAIWSClientReadLimitBytesDefault     int64 = 64 * 1024 * 1024
+	openAIWSHTTPBridgeThresholdBytesDefault int64 = 15 * 1024 * 1024
+	openAIWSHTTPBridgeErrorBodyLimitBytes         = 64 * 1024
 )
 
 const openAIWSHTTPBridgeToolStateContextKey = "openai_ws_http_bridge_tool_state"
@@ -83,21 +84,6 @@ func ResolveOpenAIWSClientFirstMessageTimeout(cfg *config.Config) time.Duration 
 	return time.Duration(seconds) * time.Second
 }
 
-// ResolveOpenAIWSTurnSlotWaitTimeout returns how long an ingress turn may wait
-// for the connection's bound account to free a concurrency slot. A zero or
-// negative configured value disables waiting, restoring the legacy behavior of a
-// single non-blocking attempt.
-func ResolveOpenAIWSTurnSlotWaitTimeout(cfg *config.Config) time.Duration {
-	if cfg == nil {
-		return time.Duration(config.DefaultOpenAIWSTurnSlotWaitTimeoutSeconds) * time.Second
-	}
-	seconds := cfg.Gateway.OpenAIWS.TurnSlotWaitTimeoutSeconds
-	if seconds <= 0 {
-		return 0
-	}
-	return time.Duration(seconds) * time.Second
-}
-
 func ResolveOpenAIWSClientReadLimitBytes(cfg *config.Config) int64 {
 	if cfg == nil || cfg.Gateway.OpenAIWS.ClientReadLimitBytes <= 0 {
 		return openAIWSClientReadLimitBytesDefault
@@ -105,10 +91,154 @@ func ResolveOpenAIWSClientReadLimitBytes(cfg *config.Config) int64 {
 	return cfg.Gateway.OpenAIWS.ClientReadLimitBytes
 }
 
-func (s *OpenAIGatewayService) openAIWSManualHTTPBridge(account *Account) bool {
-	return s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled &&
-		account != nil && account.IsOpenAI() &&
-		account.ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault) == OpenAIWSIngressModeHTTPBridge
+func (s *OpenAIGatewayService) openAIWSHTTPBridgeEnabled() bool {
+	return s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.HTTPBridgeEnabled
+}
+
+func (s *OpenAIGatewayService) openAIWSHTTPBridgeThresholdBytes() int64 {
+	if s == nil || s.cfg == nil || s.cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes <= 0 {
+		return openAIWSHTTPBridgeThresholdBytesDefault
+	}
+	return s.cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes
+}
+
+func (s *OpenAIGatewayService) shouldBridgeOpenAIWSHTTP(account *Account, payloadBytes int, previousResponseID string) bool {
+	if account != nil && account.Platform == PlatformGrok {
+		return true
+	}
+	if !s.openAIWSHTTPBridgeEnabled() {
+		return false
+	}
+	if strings.TrimSpace(previousResponseID) != "" {
+		return false
+	}
+	threshold := s.openAIWSHTTPBridgeThresholdBytes()
+	return threshold > 0 && int64(payloadBytes) >= threshold
+}
+
+func (s *OpenAIGatewayService) shouldBridgeOpenAIWSPassthroughFirstMessage(account *Account, payload []byte) bool {
+	if account != nil && account.Platform == PlatformGrok {
+		return true
+	}
+	if !s.openAIWSHTTPBridgeEnabled() || int64(len(payload)) < s.openAIWSHTTPBridgeThresholdBytes() {
+		return false
+	}
+	if !json.Valid(payload) {
+		return false
+	}
+
+	i := skipOpenAIWSJSONSpace(payload, 0)
+	if i >= len(payload) || payload[i] != '{' {
+		return false
+	}
+	i++
+	eventType := "response.create"
+	previousResponseID := ""
+	typeSeen, previousResponseIDSeen := false, false
+	for {
+		i = skipOpenAIWSJSONSpace(payload, i)
+		if payload[i] == '}' {
+			break
+		}
+		keyStart := i
+		keyEnd := scanOpenAIWSJSONString(payload, keyStart)
+		i = skipOpenAIWSJSONSpace(payload, keyEnd)
+		i++ // json.Valid guarantees the colon.
+		i = skipOpenAIWSJSONSpace(payload, i)
+		valueStart := i
+		i = skipOpenAIWSJSONValue(payload, i)
+
+		key := ""
+		// A critical key is at most 20 decoded bytes. The generous encoded bound
+		// covers escaped spellings without allocating attacker-sized key strings.
+		if keyEnd-keyStart <= 128 {
+			_ = json.Unmarshal(payload[keyStart:keyEnd], &key)
+		}
+		switch key {
+		case "type":
+			if typeSeen {
+				return false
+			}
+			typeSeen = true
+			var value *string
+			if err := json.Unmarshal(payload[valueStart:i], &value); err != nil {
+				return false
+			}
+			if value == nil || strings.TrimSpace(*value) == "" {
+				eventType = "response.create"
+			} else {
+				eventType = strings.TrimSpace(*value)
+			}
+		case "previous_response_id":
+			if previousResponseIDSeen {
+				return false
+			}
+			previousResponseIDSeen = true
+			var value *string
+			if err := json.Unmarshal(payload[valueStart:i], &value); err != nil {
+				return false
+			}
+			if value != nil {
+				previousResponseID = strings.TrimSpace(*value)
+			}
+		}
+		i = skipOpenAIWSJSONSpace(payload, i)
+		if payload[i] == ',' {
+			i++
+		}
+	}
+	return eventType == "response.create" && previousResponseID == ""
+}
+
+func skipOpenAIWSJSONSpace(payload []byte, i int) int {
+	for i < len(payload) {
+		switch payload[i] {
+		case ' ', '\t', '\r', '\n':
+			i++
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+func scanOpenAIWSJSONString(payload []byte, i int) int {
+	for i++; i < len(payload); i++ {
+		switch payload[i] {
+		case '\\':
+			i++
+		case '"':
+			return i + 1
+		}
+	}
+	return len(payload)
+}
+
+func skipOpenAIWSJSONValue(payload []byte, i int) int {
+	if payload[i] == '"' {
+		return scanOpenAIWSJSONString(payload, i)
+	}
+	if payload[i] != '{' && payload[i] != '[' {
+		for i < len(payload) && payload[i] != ',' && payload[i] != '}' {
+			i++
+		}
+		return i
+	}
+	depth := 0
+	for ; i < len(payload); i++ {
+		switch payload[i] {
+		case '"':
+			i = scanOpenAIWSJSONString(payload, i) - 1
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return len(payload)
 }
 
 func prepareOpenAIWSHTTPBridgeBody(account *Account, payload []byte) ([]byte, error) {
@@ -162,24 +292,6 @@ func (c *openAIWSToolCallReplayCollector) AllItems() []json.RawMessage {
 	return slices.Clone(c.allItems)
 }
 
-// ReplayItems returns what a later request must replay once it reaches
-// upstream without previous_response_id. Codex sends only the delta after this
-// response's output, so tool calls alone would lose assistant messages and
-// reasoning. Without stored items, reasoning follows the store=false contract.
-func (c *openAIWSToolCallReplayCollector) ReplayItems(storeDisabled bool) []json.RawMessage {
-	items := c.AllItems()
-	if !storeDisabled {
-		return items
-	}
-	stateless, err := openAIWSStoreDisabledReplayItems(items)
-	if err != nil {
-		// Unparseable output: keep at least the calls a later tool output
-		// must pair with.
-		return c.Items()
-	}
-	return stateless
-}
-
 func (c *openAIWSToolCallReplayCollector) addAllItem(item gjson.Result) {
 	if !item.Exists() || item.Type != gjson.JSON {
 		return
@@ -231,31 +343,6 @@ func (c *openAIWSToolCallReplayCollector) addItem(item gjson.Result) {
 	}
 	c.seen[key] = struct{}{}
 	c.items = append(c.items, json.RawMessage(raw))
-}
-
-// openAIWSStoreDisabledReplayItems applies the store=false replay contract of
-// normalizeOpenAIAPIKeyStoreFalseReasoningReplay to collected output items.
-// Without stored items an rs_* id lookup 404s, so reasoning is replayed by its
-// encrypted_content alone and dropped when it has none. Changed items get new
-// bodies; the collector's bodies are never modified.
-func openAIWSStoreDisabledReplayItems(items []json.RawMessage) ([]json.RawMessage, error) {
-	if len(items) == 0 {
-		return items, nil
-	}
-	input, err := json.Marshal(items)
-	if err != nil {
-		return nil, err
-	}
-	body := make([]byte, 0, len(input)+len(`{"input":}`))
-	body = append(body, `{"input":`...)
-	body = append(body, input...)
-	body = append(body, '}')
-	normalized, changed, err := normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body, true)
-	if err != nil || !changed {
-		return items, err
-	}
-	replay, _, err := openAIWSExtractNormalizedInputSequence(normalized)
-	return replay, err
 }
 
 func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
@@ -346,18 +433,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
-	// A connection reuses one context; clear the previous turn's endpoint.
-	ClearActualOpenAIUpstreamEndpoint(c)
-	prewarm := gjson.GetBytes(payload, "generate").Type == gjson.False
 	responseModelObserver := &upstreamResponseModelObserver{}
 
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
 	}
-	// The ingress parser selects the protocol from the request model. Native
-	// payloads already contain the final model and must never be mapped again.
-
 	grokIntentSourceBody := append([]byte(nil), body...)
 	_, grokExplicitToolsField := openAIWSHTTPBridgeRawField(grokIntentSourceBody, "tools")
 	grokExplicitToolIntent := account.Platform == PlatformGrok && hasGrokResponsesToolIntent(grokIntentSourceBody)
@@ -398,11 +479,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			LoweredTools:  loweredTools,
 		})
 	}
-	if prewarm {
-		// Answered locally, after the tool state above: the continuation may
-		// omit tools and inherit them, exactly as after a generated turn.
-		return answerOpenAIWSHTTPBridgePrewarm(account.ID, originalModel, turn, writeClientMessage)
-	}
 	if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
 		liteBody, liteChanged, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(body, account)
 		if liteErr != nil {
@@ -413,9 +489,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 	}
 
-	upstreamCtx, startDrain, releaseUpstreamCtx := openAIWSDrainContext(ctx)
-	defer releaseUpstreamCtx()
 	buildUpstreamRequest := func(requestBody []byte) (*http.Request, error) {
+		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+		defer releaseUpstreamCtx()
 		var upstreamReq *http.Request
 		var buildErr error
 		if account.Platform == PlatformGrok {
@@ -473,32 +549,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		latest, admissionErr := s.admitOpenAITurn(ctx, c, account, actualModel)
-		if admissionErr == nil {
-			admissionErr = s.applyOpenAICodexTicket(ctx, latest, actualModel, upstreamReq.Header)
-		}
-		if admissionErr != nil {
-			// The bridge can reach this point on continuation turns after the
-			// ingress loop has already persisted response/session affinity. Do
-			// not leave that state pointing at an account which just failed the
-			// authoritative pre-send check.
-			s.invalidateOpenAIWSTurnStateAfterAdmissionFailureForRequest(
-				ctx,
-				c,
-				payload,
-				account.ID,
-				admissionErr,
-			)
-			return nil, admissionErr
-		}
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		if err != nil {
-			if IsOpenAIRPMError(err) {
-				return nil, err
-			}
-			if upstreamCtx.Err() != nil {
-				return nil, context.Cause(upstreamCtx)
-			}
 			if turn == 1 {
 				return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 			}
@@ -562,8 +614,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		return nil, fmt.Errorf("upstream http bridge error: status=%d message=%s", resp.StatusCode, upstreamMsg)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// upstreamCtx cancellation interrupts the transport read. Keep Body.Close
-	// on this reader's goroutine: compressed bodies cannot close during Read.
+	stopCancelBody := context.AfterFunc(ctx, func() { _ = resp.Body.Close() })
+	defer stopCancelBody()
 	if account.Platform == PlatformGrok {
 		s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, resolveGrokWSUpstreamModel(account, body, originalModel)), account, resp.Header, resp.StatusCode)
 	}
@@ -621,8 +673,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			Duration:                      time.Since(turnStart),
 			FirstTokenMs:                  firstTokenMs,
 		}
-		// The next bridged turn always reaches upstream without previous_response_id.
-		if replayInput := replayCollector.ReplayItems(s.isOpenAIWSStoreDisabledInRequestRaw(body, account)); len(replayInput) > 0 {
+		if replayInput := replayCollector.Items(); len(replayInput) > 0 {
 			result.wsReplayInput = replayInput
 			result.wsReplayInputExists = true
 		}
@@ -860,7 +911,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 					if err := writeClientMessage(message); err != nil {
 						if isOpenAIWSClientDisconnectError(err) {
 							clientDisconnected = true
-							startDrain()
 							closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
 							logOpenAIWSModeInfo(
 								"ingress_ws_http_bridge_client_disconnected_drain account_id=%d turn=%d close_status=%s close_reason=%s",
@@ -930,9 +980,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 	if err := scanner.Err(); err != nil {
 		streamErr := fmt.Errorf("read upstream http bridge stream: %w", err)
-		if upstreamCtx.Err() != nil {
-			return resultWithUsage(), context.Cause(upstreamCtx)
-		}
 		if turn == 1 && !clientDisconnected && !wroteDownstream {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, streamErr, true)
 		}

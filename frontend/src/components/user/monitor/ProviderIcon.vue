@@ -98,7 +98,7 @@ const props = withDefaults(defineProps<{
 })
 
 const iconInfo = computed<IconData | null>(() => {
-  const key = (props.provider) as Provider
+  const key = props.provider as Provider
   return PROVIDER_ICONS[key] ?? null
 })
 

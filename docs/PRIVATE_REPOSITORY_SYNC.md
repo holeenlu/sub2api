@@ -93,4 +93,4 @@ Docker CI 从 merge-base 最近的上游 `v*` tag 推导并注入 `main.Upstream
 
 ### 已移除协议的同步边界
 
-Excel/BPS、独立 `openai_bps` 平台及同批附带的 OAuth 初始化模板、额外别名模式、独立成本倍率均已移除，后续同步不得恢复协议、账号开关、默认模板、图片中转或自动恢复任务。共享 RPM、原生 WS、Codex 打票和降智检测按各自能力审查，不能以旧 BPS 依赖名义重新导入已删除代码。清除与数据升级说明见 [BPS 移除说明](BPS_REMOVAL.md)。
+Excel/BPS、独立 `openai_bps` 平台及同批附带的 OAuth 初始化模板、额外别名模式、独立成本倍率均已移除，后续同步不得恢复协议、账号开关、默认模板、图片中转或自动恢复任务。后续已恢复 Wei-Shaw 原生网关，Codex 打票及额外准入也已移除；仅保留已确认的降智检测，不能以旧 BPS 依赖名义重新导入已删除代码。当前能力与数据升级边界见 [原生恢复说明](FORK_FEATURE_RETIREMENT.md)。

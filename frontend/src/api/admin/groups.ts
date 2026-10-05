@@ -59,10 +59,9 @@ export async function list(
  * @param platform - Optional platform filter
  * @returns List of all active groups
  */
-export async function getAll(platform?: GroupPlatform, options?: { signal?: AbortSignal }): Promise<AdminGroup[]> {
+export async function getAll(platform?: GroupPlatform): Promise<AdminGroup[]> {
   const { data } = await apiClient.get<AdminGroup[]>('/admin/groups/all', {
-    params: platform ? { platform } : undefined,
-    signal: options?.signal
+    params: platform ? { platform } : undefined
   })
   return data
 }
@@ -98,31 +97,26 @@ export async function getLiveCapability(): Promise<LiveCapability> {
  * @param id - Group ID
  * @returns Group details
  */
-export async function getById(id: number, options?: { signal?: AbortSignal }): Promise<AdminGroup> {
-  const { data } = await apiClient.get<AdminGroup>(`/admin/groups/${id}`, { signal: options?.signal })
+export async function getById(id: number): Promise<AdminGroup> {
+  const { data } = await apiClient.get<AdminGroup>(`/admin/groups/${id}`)
   return data
 }
 
 /**
- * Get selection inventory from the unified model catalog. New and existing
- * groups share the same platform candidates, independent of account assignment
- * and pricing. Preserve saved selections when a catalog item is absent.
+ * Get candidate models for the group model allowlist.
+ * id=0 returns platform default models for create flow.
  */
-export interface ModelAllowlistCandidates {
-  models: string[]
-}
-
 export async function getModelAllowlistCandidates(
   id: number,
   platform?: GroupPlatform
-): Promise<ModelAllowlistCandidates> {
+): Promise<string[]> {
   const { data } = await apiClient.get<{ models: string[] }>(
     `/admin/groups/${id}/model-allowlist-candidates`,
     {
       params: platform ? { platform } : undefined
     }
   )
-  return { models: data.models || [] }
+  return data.models || []
 }
 
 /**
@@ -221,8 +215,8 @@ export async function duplicate(id: number): Promise<AdminGroup> {
  * @param updates - Fields to update
  * @returns Updated group
  */
-export async function update(id: number, updates: UpdateGroupRequest, options?: { signal?: AbortSignal }): Promise<AdminGroup> {
-  const { data } = await apiClient.put<AdminGroup>(`/admin/groups/${id}`, updates, { signal: options?.signal })
+export async function update(id: number, updates: UpdateGroupRequest): Promise<AdminGroup> {
+  const { data } = await apiClient.put<AdminGroup>(`/admin/groups/${id}`, updates)
   return data
 }
 

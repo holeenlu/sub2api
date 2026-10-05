@@ -9,7 +9,6 @@ import (
 )
 
 type bulkOpenAISettings struct {
-	apiKeyCodexIdentity     bool
 	longContextBilling      bool
 	endpointCapabilities    bool
 	responsesMode           bool
@@ -18,19 +17,13 @@ type bulkOpenAISettings struct {
 }
 
 func (s bulkOpenAISettings) any() bool {
-	return s.apiKeyCodexIdentity || s.longContextBilling || s.endpointCapabilities || s.responsesMode
+	return s.longContextBilling || s.endpointCapabilities || s.responsesMode
 }
 
 func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISettings, error) {
 	var settings bulkOpenAISettings
 	if input == nil {
 		return settings, nil
-	}
-	if raw, exists := input.Extra[OpenAIAPIKeyCodexIdentityKey]; exists {
-		if _, ok := raw.(bool); !ok {
-			return settings, infraerrors.BadRequest("OPENAI_APIKEY_IDENTITY_INVALID", "openai_apikey_codex_identity must be a boolean")
-		}
-		settings.apiKeyCodexIdentity = true
 	}
 
 	if _, exists := input.Extra[openAILongContextBillingEnabledKey]; exists {
@@ -168,10 +161,6 @@ func validateBulkOpenAISettingsTargets(
 		account, ok := targetsByID[accountID]
 		if !ok || account == nil {
 			return 0, invalidBulkOpenAITarget(accountID, "account does not exist")
-		}
-
-		if settings.apiKeyCodexIdentity && !account.IsOpenAIApiKey() {
-			return 0, invalidBulkOpenAITarget(accountID, "Codex identity requires an OpenAI API-key account")
 		}
 
 		if settings.longContextBilling {

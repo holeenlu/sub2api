@@ -233,9 +233,8 @@ type OpenAIUsage struct {
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
-	RequestPricing *RequestPricingSnapshot
-	RequestID      string
-	ResponseID     string
+	RequestID  string
+	ResponseID string
 	// UpstreamHeaders 是直接上游的响应头，用于按账户配置解析上游请求标识。
 	UpstreamHeaders http.Header
 	Usage           OpenAIUsage
@@ -271,9 +270,6 @@ type OpenAIForwardResult struct {
 	RequestedReasoningEffort *string
 	Stream                   bool
 	OpenAIWSMode             bool
-	// LocalPrewarm acknowledges a client WS prewarm without an upstream request.
-	// It must not create usage, deduct balance, or update account health.
-	LocalPrewarm bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
 	UpstreamTerminalEvent string
@@ -303,11 +299,6 @@ type OpenAIForwardResult struct {
 	wsReplayInput                []json.RawMessage
 	wsReplayInputExists          bool
 	wsAccountFailoverReplayInput []json.RawMessage
-}
-
-// HasTokenUsage reports metered tokens even when the upstream turn failed.
-func (r *OpenAIForwardResult) HasTokenUsage() bool {
-	return r != nil && openAIUsageHasTokens(&r.Usage)
 }
 
 // SucceededForScheduling reports whether this result is an upstream success
@@ -451,20 +442,12 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	modelCatalog     *ModelCatalogService
-	catalogSnapshots sync.Map // successful discovery snapshots; no public upstream fetch
-
 	accountRepo           AccountRepository
 	usageLogRepo          UsageLogRepository
 	usageBillingRepo      UsageBillingRepository
-	mediaAPIKeyService    *APIKeyService
-	mediaRepo             GatewayMediaRepository
-	mediaSettlementCancel context.CancelFunc
-	mediaSettlementDone   chan struct{}
 	userRepo              UserRepository
 	userSubRepo           UserSubscriptionRepository
 	cache                 GatewayCache
-	rpmCache              RPMCache
 	cfg                   *config.Config
 	codexDetector         CodexClientRestrictionDetector
 	schedulerSnapshot     *SchedulerSnapshotService
@@ -525,28 +508,6 @@ type OpenAIGatewayService struct {
 	// 剥离跨账号回带（openai_codex_turn_state.go）。
 	openaiCodexTurnStateOrigins sync.Map
 	openaiCodexTurnStateWrites  atomic.Uint64
-	// openaiCodexTickets: accountID\x00model → ModelTrace-verified ticket generation.
-	openaiCodexTickets           sync.Map
-	openaiCodexTicketInFlight    sync.Map
-	openaiCodexTicketActivity    sync.Map
-	openaiCodexTicketActive      atomic.Int32
-	openaiCodexTicketProxyTurns  sync.Map
-	openaiCodexTicketNextAttempt sync.Map
-	openaiCodexTicketHistory     CodexTicketAttemptRepository
-	openaiCodexTicketLifecycle   CodexTicketLifecycleRepository
-	openaiCodexTicketLifecycleMu sync.Mutex
-	openaiCodexTicketCancel      context.CancelFunc
-	openaiCodexTicketDone        chan struct{}
-	openaiCodexTicketWake        chan struct{}
-	openaiCodexTicketStopped     bool
-	requireLatestTurnAdmission   bool
-}
-
-type OpenAIGatewayOption func(*OpenAIGatewayService)
-
-// WithOpenAIRPMCache enables strict RPM accounting for OpenAI OAuth accounts.
-func WithOpenAIRPMCache(cache RPMCache) OpenAIGatewayOption {
-	return func(s *OpenAIGatewayService) { s.rpmCache = cache }
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -573,7 +534,6 @@ func NewOpenAIGatewayService(
 	balanceNotifyService *BalanceNotifyService,
 	settingService *SettingService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
-	opts ...OpenAIGatewayOption,
 ) *OpenAIGatewayService {
 	// enforceCodexIdentityHeaders 是 HTTP / 透传 / WS / 探针 等出站路径共用的纯函数收口点，
 	// 拿不到配置，故在此发布进程级开关快照。配置取反义，零值即「强制统一出口开启」。
@@ -617,13 +577,6 @@ func NewOpenAIGatewayService(
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 		openaiModelTransient:  newOpenAIAccountModelTransientState(openAIModelTransientDefaultMax),
-
-		requireLatestTurnAdmission: true,
-	}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(svc)
-		}
 	}
 	if rateLimitService != nil {
 		rateLimitService.SetAccountRuntimeBlocker(svc)

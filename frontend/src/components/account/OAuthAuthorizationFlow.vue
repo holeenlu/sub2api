@@ -139,99 +139,6 @@
           </div>
         </div>
 
-        <!-- Direct Claude Setup Token import (output of `claude setup-token`) -->
-        <div v-if="inputMethod === 'setup_token'" class="space-y-4" data-testid="setup-token-import-panel">
-          <div
-            class="rounded-lg border border-blue-300 bg-white/80 p-4 dark:border-blue-600 dark:bg-gray-800/80"
-          >
-            <p class="mb-3 text-sm text-blue-700 dark:text-blue-300">
-              {{ t('admin.accounts.oauth.setupTokenDirectDesc') }}
-            </p>
-
-            <div class="mb-4">
-              <label
-                class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300"
-              >
-                <Icon name="key" size="sm" class="text-blue-500" />
-                {{ t('admin.accounts.oauth.setupTokenLabel') }}
-                <span
-                  v-if="parsedSetupTokenCount > 1 && allowMultiple"
-                  class="rounded-full bg-blue-500 px-2 py-0.5 text-xs text-white"
-                >
-                  {{ t('admin.accounts.oauth.keysCount', { count: parsedSetupTokenCount }) }}
-                </span>
-              </label>
-              <textarea
-                v-model="setupTokenInput"
-                rows="3"
-                class="input w-full resize-y font-mono text-sm"
-                data-testid="setup-token-input"
-                :placeholder="
-                  allowMultiple
-                    ? t('admin.accounts.oauth.setupTokenPlaceholder')
-                    : t('admin.accounts.oauth.setupTokenPlaceholderSingle')
-                "
-                spellcheck="false"
-                autocomplete="off"
-              ></textarea>
-              <p class="mt-2 text-xs text-blue-600 dark:text-blue-400">
-                {{ t('admin.accounts.oauth.setupTokenCommandHint') }}
-                <code class="rounded bg-blue-100 px-1.5 py-0.5 font-mono dark:bg-blue-900/60">claude setup-token</code>
-              </p>
-              <p
-                v-if="parsedSetupTokenCount > 1 && allowMultiple"
-                class="mt-1 text-xs text-blue-600 dark:text-blue-400"
-              >
-                {{ t('admin.accounts.oauth.batchCreateAccounts', { count: parsedSetupTokenCount }) }}
-              </p>
-            </div>
-
-            <div
-              v-if="error"
-              class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-700 dark:bg-red-900/30"
-            >
-              <p class="whitespace-pre-line text-sm text-red-600 dark:text-red-400">
-                {{ error }}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              class="btn btn-primary w-full"
-              data-testid="setup-token-import-submit"
-              :disabled="loading || parsedSetupTokenCount === 0"
-              @click="handleImportSetupToken"
-            >
-              <svg
-                v-if="loading"
-                class="-ml-1 mr-2 h-4 w-4 animate-spin"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  class="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  stroke-width="4"
-                ></circle>
-                <path
-                  class="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                ></path>
-              </svg>
-              <Icon v-else name="sparkles" size="sm" class="mr-2" />
-              {{
-                loading
-                  ? t('admin.accounts.oauth.savingSetupToken')
-                  : t('admin.accounts.oauth.saveSetupToken')
-              }}
-            </button>
-          </div>
-        </div>
-
         <!-- Refresh Token Input (OpenAI / Antigravity / Mobile RT) -->
         <div v-if="inputMethod === 'refresh_token' || inputMethod === 'mobile_refresh_token'" class="space-y-4">
           <div
@@ -246,7 +153,9 @@
               <label
                 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300"
               >
-                <Icon name="key" size="sm" class="text-blue-500" />{{ t('ui.refreshToken') }}<span
+                <Icon name="key" size="sm" class="text-blue-500" />
+                Refresh Token
+                <span
                   v-if="parsedRefreshTokenCount > 1"
                   class="rounded-full bg-blue-500 px-2 py-0.5 text-xs text-white"
                 >
@@ -832,7 +741,7 @@
                     <button
                       type="button"
                       class="btn btn-secondary p-2"
-                      :title="t('ui.copyUrl')"
+                      title="Copy URL"
                       @click="handleCopyUrl"
                     >
                       <svg
@@ -989,11 +898,7 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useClipboard } from '@/composables/useClipboard'
 import Icon from '@/components/icons/Icon.vue'
-import {
-  parseClaudeSetupTokens,
-  type AddMethod,
-  type AuthInputMethod
-} from '@/composables/useAccountOAuth'
+import type { AddMethod, AuthInputMethod } from '@/composables/useAccountOAuth'
 import type { AccountPlatform } from '@/types'
 import { adminAPI } from '@/api/admin'
 
@@ -1059,7 +964,6 @@ const emit = defineEmits<{
   'generate-url': []
   'exchange-code': [code: string]
   'cookie-auth': [sessionKey: string]
-  'import-setup-token': [setupTokens: string]
   'validate-refresh-token': [refreshToken: string]
   'validate-mobile-refresh-token': [refreshToken: string]
   'validate-session-token': [sessionToken: string]
@@ -1075,11 +979,6 @@ const { t } = useI18n()
 const passwordAuthEnabled = ref(false)
 const emailPasswordOptionEnabled = computed(
   () => props.showEmailPasswordOption && props.platform === 'grok' && passwordAuthEnabled.value
-)
-// Anthropic setup-token accounts are created from the output of `claude setup-token`;
-// there is no browser or cookie step, so the flow collapses to a single paste panel.
-const isDirectClaudeSetupToken = computed(
-  () => props.platform === 'anthropic' && props.addMethod === 'setup-token'
 )
 
 const showLocalCallbackNotice = computed(() => props.platform === 'openai' || props.platform === 'grok')
@@ -1117,7 +1016,6 @@ const inputMethod = ref<AuthInputMethod>(props.initialInputMethod)
 const isAgentIdentityInput = computed(() => inputMethod.value === 'agent_identity')
 const authCodeInput = ref('')
 const sessionKeyInput = ref('')
-const setupTokenInput = ref('')
 const refreshTokenInput = ref('')
 const sessionTokenInput = ref('')
 const codexSessionInput = ref('')
@@ -1161,9 +1059,7 @@ const methodOptionCount = computed(() => [
   props.showSsoOption,
   emailPasswordOptionEnabled.value
 ].filter(Boolean).length)
-const showMethodSelection = computed(
-  () => !isDirectClaudeSetupToken.value && methodOptionCount.value > 1
-)
+const showMethodSelection = computed(() => methodOptionCount.value > 1)
 
 // Clipboard
 const { copied, copyToClipboard } = useClipboard()
@@ -1175,8 +1071,6 @@ const parsedKeyCount = computed(() => {
     .map((k) => k.trim())
     .filter((k) => k).length
 })
-
-const parsedSetupTokenCount = computed(() => parseClaudeSetupTokens(setupTokenInput.value).length)
 
 // Computed: count of refresh tokens entered
 const parsedRefreshTokenCount = computed(() => {
@@ -1217,22 +1111,7 @@ const handleAuthorizePassword = () => {
 }
 
 // Watchers
-// Pinning inputMethod (rather than adding a guard to every panel) also hides the
-// parent's "complete authorization" footer, which keys off inputMethod === 'manual'.
-watch(
-  isDirectClaudeSetupToken,
-  (direct) => {
-    if (direct) {
-      inputMethod.value = 'setup_token'
-    } else if (inputMethod.value === 'setup_token') {
-      inputMethod.value = props.initialInputMethod
-    }
-  },
-  { immediate: true }
-)
-
 watch(() => props.initialInputMethod, (newVal) => {
-  if (isDirectClaudeSetupToken.value) return
   inputMethod.value = newVal
 })
 
@@ -1306,12 +1185,6 @@ const handleCookieAuth = () => {
   }
 }
 
-const handleImportSetupToken = () => {
-  if (parsedSetupTokenCount.value > 0) {
-    emit('import-setup-token', setupTokenInput.value)
-  }
-}
-
 const handleValidateRefreshToken = () => {
   if (refreshTokenInput.value.trim()) {
     if (inputMethod.value === 'mobile_refresh_token') {
@@ -1346,7 +1219,6 @@ defineExpose({
   oauthState,
   projectId,
   sessionKey: sessionKeyInput,
-  setupToken: setupTokenInput,
   refreshToken: refreshTokenInput,
   sessionToken: sessionTokenInput,
   codexSession: codexSessionInput,
@@ -1359,14 +1231,13 @@ defineExpose({
     oauthState.value = ''
     projectId.value = ''
     sessionKeyInput.value = ''
-    setupTokenInput.value = ''
     refreshTokenInput.value = ''
     sessionTokenInput.value = ''
     codexSessionInput.value = ''
     codexPATInput.value = ''
     ssoCookieInput.value = ''
     emailPasswordInput.value = ''
-    inputMethod.value = isDirectClaudeSetupToken.value ? 'setup_token' : props.initialInputMethod
+    inputMethod.value = props.initialInputMethod
     showHelpDialog.value = false
   }
 })

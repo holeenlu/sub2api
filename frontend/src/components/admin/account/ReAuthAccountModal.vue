@@ -140,7 +140,6 @@
         :initial-input-method="grokInitialInputMethod"
         @generate-url="handleGenerateUrl"
         @cookie-auth="handleCookieAuth"
-        @import-setup-token="handleSetupTokenImport"
         @validate-refresh-token="handleValidateRefreshToken"
         @import-sso="handleGrokImportSSO"
       />
@@ -196,8 +195,6 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import {
-  applyClaudeSetupTokenReAuthorization,
-  describeClaudeSetupTokenError,
   useAccountOAuth,
   type AddMethod,
   type AuthInputMethod
@@ -531,8 +528,7 @@ const handleExchangeCode = async () => {
       appStore.showError(grokOAuth.error.value)
     }
   } else {
-    // Claude OAuth flow — setup-token accounts are imported directly, no code to exchange.
-    if (addMethod.value !== 'oauth') return
+    // Claude OAuth flow
     const sessionId = claudeOAuth.sessionId.value
     if (!sessionId) return
 
@@ -541,7 +537,12 @@ const handleExchangeCode = async () => {
 
     try {
       const proxyConfig = props.account.proxy_id ? { proxy_id: props.account.proxy_id } : {}
-      const tokenInfo = await adminAPI.accounts.exchangeCode('/admin/accounts/exchange-code', {
+      const endpoint =
+        addMethod.value === 'oauth'
+          ? '/admin/accounts/exchange-code'
+          : '/admin/accounts/exchange-setup-token-code'
+
+      const tokenInfo = await adminAPI.accounts.exchangeCode(endpoint, {
         session_id: sessionId,
         code: authCode.trim(),
         ...proxyConfig
@@ -550,7 +551,7 @@ const handleExchangeCode = async () => {
       const extra = claudeOAuth.buildExtraInfo(tokenInfo)
 
       const updatedAccount = await adminAPI.accounts.applyOAuthCredentials(props.account.id, {
-        type: 'oauth',
+        type: addMethod.value as 'oauth' | 'setup-token',
         credentials: tokenInfo as unknown as Record<string, unknown>,
         extra
       })
@@ -568,14 +569,19 @@ const handleExchangeCode = async () => {
 }
 
 const handleCookieAuth = async (sessionKey: string) => {
-  if (!props.account || isOpenAILike.value || addMethod.value !== 'oauth') return
+  if (!props.account || isOpenAILike.value) return
 
   claudeOAuth.loading.value = true
   claudeOAuth.error.value = ''
 
   try {
     const proxyConfig = props.account.proxy_id ? { proxy_id: props.account.proxy_id } : {}
-    const tokenInfo = await adminAPI.accounts.exchangeCode('/admin/accounts/cookie-auth', {
+    const endpoint =
+      addMethod.value === 'oauth'
+        ? '/admin/accounts/cookie-auth'
+        : '/admin/accounts/setup-token-cookie-auth'
+
+    const tokenInfo = await adminAPI.accounts.exchangeCode(endpoint, {
       session_id: '',
       code: sessionKey.trim(),
       ...proxyConfig
@@ -584,7 +590,7 @@ const handleCookieAuth = async (sessionKey: string) => {
     const extra = claudeOAuth.buildExtraInfo(tokenInfo)
 
     const updatedAccount = await adminAPI.accounts.applyOAuthCredentials(props.account.id, {
-      type: 'oauth',
+      type: addMethod.value as 'oauth' | 'setup-token',
       credentials: tokenInfo as unknown as Record<string, unknown>,
       extra
     })
@@ -595,33 +601,6 @@ const handleCookieAuth = async (sessionKey: string) => {
   } catch (error: any) {
     claudeOAuth.error.value =
       error.response?.data?.detail || t('admin.accounts.oauth.cookieAuthFailed')
-  } finally {
-    claudeOAuth.loading.value = false
-  }
-}
-
-/** Re-authorize with the output of `claude setup-token` (exactly one token). */
-const handleSetupTokenImport = async (setupTokenInput: string) => {
-  if (!props.account || !isAnthropic.value || addMethod.value !== 'setup-token') return
-
-  claudeOAuth.loading.value = true
-  claudeOAuth.error.value = ''
-
-  try {
-    const updatedAccount = await applyClaudeSetupTokenReAuthorization(
-      props.account.id,
-      setupTokenInput
-    )
-    appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
-    emit('reauthorized', updatedAccount)
-    handleClose()
-  } catch (error: unknown) {
-    claudeOAuth.error.value = describeClaudeSetupTokenError(
-      error,
-      t,
-      t('admin.accounts.oauth.authFailed')
-    )
-    appStore.showError(claudeOAuth.error.value)
   } finally {
     claudeOAuth.loading.value = false
   }

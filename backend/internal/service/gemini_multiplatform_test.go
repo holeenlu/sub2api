@@ -169,10 +169,6 @@ func (m *mockAccountRepoForGemini) ClearRateLimit(ctx context.Context, id int64)
 func (m *mockAccountRepoForGemini) ClearAntigravityQuotaScopes(ctx context.Context, id int64) error {
 	return nil
 }
-func (m *mockAccountRepoForGemini) ClearModelRateLimit(ctx context.Context, id int64, scope string, _ string) (bool, error) {
-	return true, nil
-}
-
 func (m *mockAccountRepoForGemini) ClearModelRateLimits(ctx context.Context, id int64) error {
 	return nil
 }
@@ -306,17 +302,6 @@ func (m *mockGatewayCacheForGemini) DeleteSessionAccountID(ctx context.Context, 
 	}
 	m.deletedSessions[sessionHash]++
 	delete(m.sessionBindings, sessionHash)
-	return nil
-}
-
-// 长周期亲和键：该 mock 不参与历史键行为，给出中性实现以满足接口。
-func (m *mockGatewayCacheForGemini) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
-	return 0, ErrStickySessionNotFound
-}
-func (m *mockGatewayCacheForGemini) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
-	return true, nil
-}
-func (m *mockGatewayCacheForGemini) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
 	return nil
 }
 

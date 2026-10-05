@@ -20,7 +20,7 @@
             type="button"
             @click="clearUser"
             class="absolute right-2 top-9 text-gray-400"
-            :aria-label="t('ui.clearUserFilter')"
+            aria-label="Clear user filter"
           >
             ✕
           </button>
@@ -57,7 +57,7 @@
             type="button"
             @click="onClearApiKey"
             class="absolute right-2 top-9 text-gray-400"
-            :aria-label="t('ui.clearApiKeyFilter')"
+            aria-label="Clear API key filter"
           >
             ✕
           </button>
@@ -100,7 +100,7 @@
             type="button"
             @click="clearAccount"
             class="absolute right-2 top-9 text-gray-400"
-            :aria-label="t('ui.clearAccountFilter')"
+            aria-label="Clear account filter"
           >
             ✕
           </button>
@@ -217,7 +217,7 @@ interface Props {
   modelOptions?: string[]
   /**
    * errors 模式:隐藏用量专属字段/按钮,显示错误类型+状态码(错误请求 tab 用)
-   * ranking 模式:同 usage 但隐藏计费模式筛选与清理/导出按钮(用户排行 / API 密钥排行 tab 用)
+   * ranking 模式:同 usage 但隐藏计费模式筛选与清理/导出按钮(用户排行 tab 用)
    */
   mode?: 'usage' | 'errors' | 'ranking'
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
@@ -269,12 +269,9 @@ const modelOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allModels') },
   ...(props.modelOptions ?? []).map((m) => ({ value: m, label: m })),
 ])
-const loadedGroupOptions = ref<SelectOption[]>([])
-const groupOptions = computed<SelectOption[]>(() => [
-  { value: null, label: t('admin.usage.allGroups') }, ...loadedGroupOptions.value,
-])
+const groupOptions = ref<SelectOption[]>([{ value: null, label: t('admin.usage.allGroups') }])
 
-const requestTypeOptions = computed<SelectOption[]>(() => [
+const requestTypeOptions = ref<SelectOption[]>([
   { value: null, label: t('admin.usage.allTypes') },
   { value: 'ws_v2', label: t('usage.ws') },
   { value: 'live', label: t('usage.live') },
@@ -283,12 +280,12 @@ const requestTypeOptions = computed<SelectOption[]>(() => [
   { value: 'cyber', label: t('usage.cyber') }
 ])
 
-const compactionOptions = computed<SelectOption[]>(() => [
+const compactionOptions = ref<SelectOption[]>([
   { value: null, label: t('usage.allCompactionTypes') },
   { value: true, label: t('usage.compactionOnly') }
 ])
 
-const billingTypeOptions = computed<SelectOption[]>(() => [
+const billingTypeOptions = ref<SelectOption[]>([
   { value: null, label: t('admin.usage.allBillingTypes') },
   { value: 0, label: t('admin.usage.billingTypeBalance') },
   { value: 1, label: t('admin.usage.billingTypeSubscription') }
@@ -318,7 +315,7 @@ const statusCodeOptions = computed<SelectOption[]>(() => [
   ...COMMON_ERROR_STATUS_CODES.map((c) => ({ value: c, label: String(c) })),
 ])
 
-const billingModeOptions = computed<SelectOption[]>(() => [
+const billingModeOptions = ref<SelectOption[]>([
   { value: null, label: t('admin.usage.allBillingModes') },
   { value: 'token', label: t('admin.usage.billingModeToken') },
   { value: 'per_request', label: t('admin.usage.billingModePerRequest') },
@@ -326,7 +323,7 @@ const billingModeOptions = computed<SelectOption[]>(() => [
   { value: 'video', label: t('admin.usage.billingModeVideo') }
 ])
 
-const upstreamModelMismatchOptions = computed<SelectOption[]>(() => [
+const upstreamModelMismatchOptions = ref<SelectOption[]>([
   { value: null, label: t('admin.usage.allUpstreamModelAudit') },
   { value: true, label: t('admin.usage.upstreamModelMismatchOnly') },
   { value: false, label: t('admin.usage.upstreamModelMatchedOnly') }
@@ -366,17 +363,9 @@ const debounceUserSearch = () => {
   }, 300)
 }
 
-const clearPendingApiKeySearch = () => {
-  if (apiKeySearchTimeout) {
-    clearTimeout(apiKeySearchTimeout)
-    apiKeySearchTimeout = null
-  }
-}
-
 const debounceApiKeySearch = () => {
-  clearPendingApiKeySearch()
+  if (apiKeySearchTimeout) clearTimeout(apiKeySearchTimeout)
   apiKeySearchTimeout = setTimeout(async () => {
-    apiKeySearchTimeout = null
     try {
       apiKeyResults.value = await adminAPI.usage.searchApiKeys(
         filters.value.user_id,
@@ -537,7 +526,7 @@ onMounted(async () => {
   document.addEventListener('click', onDocumentClick)
   try {
     const gs = await adminAPI.groups.list(1, 1000)
-    loadedGroupOptions.value = gs.items.map((g: any) => ({ value: g.id, label: g.name }))
+    groupOptions.value.push(...gs.items.map((g: any) => ({ value: g.id, label: g.name })))
   } catch {
     // Ignore filter option loading errors (page still usable)
   }
@@ -545,7 +534,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearPendingUserSearch()
-  clearPendingApiKeySearch()
   document.removeEventListener('click', onDocumentClick)
 })
 
@@ -557,17 +545,7 @@ const setUserKeyword = (email: string) => {
   showUserDropdown.value = false
 }
 
-// 与 setUserKeyword 对称：API 密钥排行下钻时把 Key 名回填到筛选栏。
-// 现有 watch(filters.api_key_id) 只负责「变空时清关键词」，不会反向回填；
-// 同时取消挂起的搜索，否则 300ms 后旧关键词的结果会把下拉弹出来。
-const setApiKeyKeyword = (name: string) => {
-  clearPendingApiKeySearch()
-  apiKeyKeyword.value = name
-  apiKeyResults.value = []
-  showApiKeyDropdown.value = false
-}
-
 const getUserSearchRevision = () => userSearchSequence
 
-defineExpose({ getUserSearchRevision, setUserKeyword, setApiKeyKeyword })
+defineExpose({ getUserSearchRevision, setUserKeyword })
 </script>

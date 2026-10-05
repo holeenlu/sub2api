@@ -42,12 +42,7 @@ export type SchedulingThresholdPlatformType =
   | "minimax"
   | "opencode_go"
 
-/** 非平台的阈值 scope：Anthropic Fable 模型家族的独立停调阈值。 */
-export type SchedulingThresholdScopeType =
-  | SchedulingThresholdPlatformType
-  | "anthropic_fable"
-
-export type AccountSchedulingThresholdsMap = Record<SchedulingThresholdScopeType, number>
+export type AccountSchedulingThresholdsMap = Record<SchedulingThresholdPlatformType, number>
 
 // 与后端 AllowedSchedulingThresholdPlatforms 保持一致（deepseek 为余额型，
 // 走余额检测而非用量阈值；minimax Coding/Token Plan 与 OpenCode GO 有滚动窗口）。
@@ -61,19 +56,13 @@ export const SCHEDULING_THRESHOLD_PLATFORMS: SchedulingThresholdPlatformType[] =
   "opencode_go",
 ]
 
-// 与后端 AllowedSchedulingThresholdScopes 保持一致：平台 + 非平台 scope。
-export const SCHEDULING_THRESHOLD_SCOPES: SchedulingThresholdScopeType[] = [
-  ...SCHEDULING_THRESHOLD_PLATFORMS,
-  "anthropic_fable",
-]
-
 export function normalizeAccountSchedulingThresholdsMap(
-  input?: Partial<Record<SchedulingThresholdScopeType, number>> | null,
+  input?: Partial<Record<SchedulingThresholdPlatformType, number>> | null,
 ): AccountSchedulingThresholdsMap {
   const result = {} as AccountSchedulingThresholdsMap
-  for (const scope of SCHEDULING_THRESHOLD_SCOPES) {
-    const value = input?.[scope]
-    result[scope] = typeof value === "number" && Number.isFinite(value)
+  for (const platform of SCHEDULING_THRESHOLD_PLATFORMS) {
+    const value = input?.[platform]
+    result[platform] = typeof value === "number" && Number.isFinite(value)
       ? Math.min(100, Math.max(1, Math.trunc(value)))
       : 100
   }
@@ -81,7 +70,7 @@ export function normalizeAccountSchedulingThresholdsMap(
 }
 
 export function sanitizeAccountSchedulingThresholdsMap(
-  input?: Partial<Record<SchedulingThresholdScopeType, number>> | null,
+  input?: Partial<Record<SchedulingThresholdPlatformType, number>> | null,
 ): AccountSchedulingThresholdsMap {
   return normalizeAccountSchedulingThresholdsMap(input)
 }
@@ -639,7 +628,6 @@ export interface SystemSettings {
   rewrite_message_cache_control: boolean;
   enable_client_dateline_normalization: boolean;
   antigravity_user_agent_version: string;
-  upstream_failover_status_codes: string;
   openai_codex_user_agent: string;
   openai_codex_client_version: string;
   openai_codex_client_version_synced: string;
@@ -647,12 +635,8 @@ export interface SystemSettings {
   claude_code_client_version: string;
   claude_code_client_version_synced: string;
   claude_code_version_auto_sync_enabled: boolean;
-  openai_codex_ticket_enabled: boolean;
-  openai_codex_ticket_allow_without_ticket: boolean;
-  openai_codex_ticket_prompt_template: string;
-  openai_codex_ticket_prompt_template_default: string;
-  openai_codex_ticket_harvest_proxy_url: string;
-  openai_codex_ticket_harvest_proxy_configured: boolean;
+  openai_codex_diagnostic_prompt_template: string;
+  openai_codex_diagnostic_prompt_template_default: string;
   // codex_cli_only 加固
   min_codex_version: string;
   max_codex_version: string;
@@ -975,16 +959,12 @@ export interface UpdateSettingsRequest {
   rewrite_message_cache_control?: boolean;
   enable_client_dateline_normalization?: boolean;
   antigravity_user_agent_version?: string;
-  upstream_failover_status_codes?: string;
   openai_codex_user_agent?: string;
   openai_codex_client_version?: string;
   openai_codex_version_auto_sync_enabled?: boolean;
   claude_code_client_version?: string;
   claude_code_version_auto_sync_enabled?: boolean;
-  openai_codex_ticket_enabled?: boolean;
-  openai_codex_ticket_allow_without_ticket?: boolean;
-  openai_codex_ticket_prompt_template?: string;
-  openai_codex_ticket_harvest_proxy_url?: string;
+  openai_codex_diagnostic_prompt_template?: string;
   // codex_cli_only 加固
   min_codex_version?: string;
   max_codex_version?: string;

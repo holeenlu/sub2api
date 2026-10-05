@@ -60,8 +60,6 @@ func TestOpenAIWSv2StreamingRepairsConcatenatedJSONDocumentsInSingleMessage(t *t
 		toolCorrector:    NewCodexToolCorrector(),
 	}
 	account := &Account{
-		GroupIDs: []int64{1},
-
 		ID:          2,
 		Name:        "ws-test",
 		Platform:    PlatformOpenAI,
@@ -134,8 +132,6 @@ func TestOpenAIWSv2RejectsMalformedEventAfterWritingDownstream(t *testing.T) {
 		toolCorrector:    NewCodexToolCorrector(),
 	}
 	account := &Account{
-		GroupIDs: []int64{1},
-
 		ID:          5,
 		Name:        "ws-malformed-event-after-output",
 		Platform:    PlatformOpenAI,
@@ -199,8 +195,6 @@ func testOpenAIWSv2RejectsMalformedEventBeforeWritingDownstream(t *testing.T, ma
 		toolCorrector:    NewCodexToolCorrector(),
 	}
 	account := &Account{
-		GroupIDs: []int64{1},
-
 		ID:          4,
 		Name:        "ws-malformed-event",
 		Platform:    PlatformOpenAI,
@@ -276,8 +270,6 @@ func TestOpenAIWSv2StreamingBreaksConnectionWhenTerminalHasTrailingDocument(t *t
 		toolCorrector:    NewCodexToolCorrector(),
 	}
 	account := &Account{
-		GroupIDs: []int64{1},
-
 		ID:          3,
 		Name:        "ws-terminal-tail",
 		Platform:    PlatformOpenAI,

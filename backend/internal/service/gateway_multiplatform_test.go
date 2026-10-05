@@ -205,10 +205,6 @@ func (m *mockAccountRepoForPlatform) ClearRateLimit(ctx context.Context, id int6
 func (m *mockAccountRepoForPlatform) ClearAntigravityQuotaScopes(ctx context.Context, id int64) error {
 	return nil
 }
-func (m *mockAccountRepoForPlatform) ClearModelRateLimit(ctx context.Context, id int64, scope string, _ string) (bool, error) {
-	return true, nil
-}
-
 func (m *mockAccountRepoForPlatform) ClearModelRateLimits(ctx context.Context, id int64) error {
 	return nil
 }
@@ -278,17 +274,6 @@ func (m *mockGatewayCacheForPlatform) DeleteSessionAccountID(ctx context.Context
 	}
 	m.deletedSessions[sessionHash]++
 	delete(m.sessionBindings, sessionHash)
-	return nil
-}
-
-// 长周期亲和键：该 mock 不参与历史键行为，给出中性实现以满足接口。
-func (m *mockGatewayCacheForPlatform) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
-	return 0, ErrStickySessionNotFound
-}
-func (m *mockGatewayCacheForPlatform) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
-	return true, nil
-}
-func (m *mockGatewayCacheForPlatform) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
 	return nil
 }
 
@@ -3377,7 +3362,7 @@ func TestGatewayService_GroupResolution_ReusesContextGroup(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, account)
 	require.Equal(t, 0, groupRepo.getByIDCalls)
-	require.Equal(t, 0, groupRepo.getByIDLiteCalls) // 已验证的 ctx 分组可复用
+	require.Equal(t, 1, groupRepo.getByIDLiteCalls) // require_privacy_set，不走账号计数聚合
 }
 
 func TestGatewayService_GroupResolution_IgnoresInvalidContextGroup(t *testing.T) {
@@ -3420,7 +3405,7 @@ func TestGatewayService_GroupResolution_IgnoresInvalidContextGroup(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, account)
 	require.Equal(t, 0, groupRepo.getByIDCalls)
-	require.Equal(t, 1, groupRepo.getByIDLiteCalls) // 分组解析后由 require_privacy_set 复用
+	require.Equal(t, 2, groupRepo.getByIDLiteCalls) // 分组解析 + require_privacy_set
 }
 
 func TestGatewayService_GroupContext_OverwritesInvalidContextGroup(t *testing.T) {
@@ -3490,7 +3475,7 @@ func TestGatewayService_GroupResolution_FallbackUsesLiteOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, account)
 	require.Equal(t, 0, groupRepo.getByIDCalls)
-	require.Equal(t, 1, groupRepo.getByIDLiteCalls) // fallback 解析后由 require_privacy_set 复用
+	require.Equal(t, 2, groupRepo.getByIDLiteCalls) // fallback 解析 + require_privacy_set
 }
 
 func TestGatewayService_ResolveGatewayGroup_DetectsFallbackCycle(t *testing.T) {

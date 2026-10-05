@@ -27,9 +27,6 @@ func TestIsOpenAIWSClientDisconnectError(t *testing.T) {
 		{name: "io_eof", err: io.EOF, want: true},
 		{name: "net_closed", err: net.ErrClosed, want: true},
 		{name: "context_canceled", err: context.Canceled, want: true},
-		{name: "local_cancel", err: NewOpenAIWSClientCloseError(coderws.StatusGoingAway, "websocket request canceled", context.Canceled), want: false},
-		{name: "local_deadline", err: NewOpenAIWSClientCloseError(coderws.StatusGoingAway, "websocket request canceled", context.DeadlineExceeded), want: false},
-		{name: "local_policy_wrapping_eof", err: NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "policy", io.EOF), want: false},
 		{name: "ws_normal_closure", err: coderws.CloseError{Code: coderws.StatusNormalClosure}, want: true},
 		{name: "ws_going_away", err: coderws.CloseError{Code: coderws.StatusGoingAway}, want: true},
 		{name: "ws_no_status", err: coderws.CloseError{Code: coderws.StatusNoStatusRcvd}, want: true},
@@ -915,33 +912,6 @@ func TestBuildOpenAIWSReplayInputSequence(t *testing.T) {
 		require.Len(t, items, 2)
 		require.Equal(t, "hello", gjson.GetBytes(items[0], "text").String())
 		require.Equal(t, "user", gjson.GetBytes(items[1], "role").String())
-	})
-
-	t.Run("previous_response_id_drops_reasoning_of_orphan_call", func(t *testing.T) {
-		previousFull := []json.RawMessage{
-			json.RawMessage(`{"role":"user","content":"hello"}`),
-			json.RawMessage(`{"type":"reasoning","summary":[],"encrypted_content":"enc_paired"}`),
-			json.RawMessage(`{"type":"function_call","id":"fc_paired","call_id":"call_paired","name":"exec","arguments":"{}"}`),
-			json.RawMessage(`{"type":"function_call_output","call_id":"call_paired","output":"ok"}`),
-			json.RawMessage(`{"type":"reasoning","summary":[],"encrypted_content":"enc_message"}`),
-			json.RawMessage(`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Looking."}]}`),
-			json.RawMessage(`{"type":"reasoning","summary":[],"encrypted_content":"enc_orphan"}`),
-			json.RawMessage(`{"type":"function_call","id":"fc_orphan","call_id":"call_orphan","name":"exec","arguments":"{}"}`),
-		}
-		items, exists, err := buildOpenAIWSReplayInputSequence(
-			previousFull,
-			true,
-			[]byte(`{"previous_response_id":"resp_1","input":[{"role":"user","content":"continue"}]}`),
-			true,
-		)
-		require.NoError(t, err)
-		require.True(t, exists)
-		require.Len(t, items, 7)
-		require.Equal(t, "enc_paired", gjson.GetBytes(items[1], "encrypted_content").String())
-		require.Equal(t, "call_paired", gjson.GetBytes(items[2], "call_id").String())
-		require.Equal(t, "enc_message", gjson.GetBytes(items[4], "encrypted_content").String())
-		require.Equal(t, "Looking.", gjson.GetBytes(items[5], "content.0.text").String())
-		require.Equal(t, "continue", gjson.GetBytes(items[6], "content").String())
 	})
 
 	t.Run("previous_response_id_preserves_paired_historical_function_call", func(t *testing.T) {

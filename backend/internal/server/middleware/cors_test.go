@@ -152,34 +152,6 @@ func TestCORS_PreflightAllowedOrigin_ReturnsNoContent(t *testing.T) {
 		"允许的 origin 的 preflight 请求应返回 204")
 }
 
-func TestCORS_PreflightAllowedOrigin_AllowsAnthropicSDKHeaders(t *testing.T) {
-	cfg := config.CORSConfig{
-		AllowedOrigins:   []string{"https://web.chatboxai.app"},
-		AllowCredentials: false,
-	}
-	middleware := CORS(cfg)
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodOptions, "/v1/messages", nil)
-	c.Request.Header.Set("Origin", "https://web.chatboxai.app")
-	c.Request.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	c.Request.Header.Set("Access-Control-Request-Headers", "content-type,x-api-key,anthropic-version,anthropic-beta,anthropic-dangerous-direct-browser-access,user-agent")
-
-	middleware(c)
-
-	assert.Equal(t, http.StatusNoContent, w.Code)
-	allowHeaders := w.Header().Get("Access-Control-Allow-Headers")
-	for _, header := range []string{
-		"anthropic-version",
-		"anthropic-beta",
-		"anthropic-dangerous-direct-browser-access",
-		"user-agent",
-	} {
-		assert.Contains(t, allowHeaders, header)
-	}
-}
-
 func TestCORS_WildcardOrigin_AllowsAny(t *testing.T) {
 	cfg := config.CORSConfig{
 		AllowedOrigins:   []string{"*"},

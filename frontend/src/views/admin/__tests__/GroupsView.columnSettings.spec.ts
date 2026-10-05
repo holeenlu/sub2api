@@ -120,7 +120,6 @@ const createGroup = (overrides: Partial<AdminGroup> = {}): AdminGroup => ({
   claude_code_only: false,
   fallback_group_id: null,
   fallback_group_id_on_invalid_request: null,
-  fallback_group_id_on_no_account: null,
   allow_messages_dispatch: false,
   default_mapped_model: '',
   messages_dispatch_model_config: undefined,
@@ -259,7 +258,7 @@ describe('admin GroupsView column settings', () => {
       pages: 1,
     })
     getAllGroups.mockResolvedValue([])
-    getModelAllowlistCandidates.mockResolvedValue({ models: [], pricingPending: [] })
+    getModelAllowlistCandidates.mockResolvedValue([])
     getUsageSummary.mockResolvedValue([])
     getCapacitySummary.mockResolvedValue([])
     getLiveCapability.mockResolvedValue({ supported: false })
