@@ -38,6 +38,7 @@ type ScheduledTestResult struct {
 
 // ScheduledTestPlanRepository defines the data access interface for test plans.
 type ScheduledTestPlanRepository interface {
+	CodexDiagnosticRepository
 	Create(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestPlan, error)
 	GetByID(ctx context.Context, id int64) (*ScheduledTestPlan, error)
 	ListByAccountID(ctx context.Context, accountID int64) ([]*ScheduledTestPlan, error)

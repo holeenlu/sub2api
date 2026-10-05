@@ -89,3 +89,73 @@ func TestCodexProbeGatewayAccountAndFingerprintRewritesStayConsistent(t *testing
 		})
 	}
 }
+
+func TestDiagnosticRecorderBoundsRetainedOutput(t *testing.T) {
+	w := &diagnosticRecorder{ResponseRecorder: httptest.NewRecorder()}
+	_, err := w.Write([]byte(strings.Repeat("1 ", 1<<20)))
+	require.NoError(t, err)
+	_, err = w.Write([]byte("extra"))
+	require.NoError(t, err)
+	require.True(t, w.overflow)
+	require.Equal(t, 2<<20, w.Body.Len())
+}
+func TestDiagnosticFailedTerminalNeverBecomesNormal(t *testing.T) {
+	_, complete := CodexDiagnosticOutput([]byte("data: {\"type\":\"response.completed\"}\n\ndata: {\"type\":\"response.failed\"}\n\n"))
+	require.False(t, complete)
+	_, complete = CodexDiagnosticOutput([]byte("data: [DONE]\n\n"))
+	require.False(t, complete)
+}
+
+// The same probe is used by manual and scheduled execution. No old synchronous
+// handler or separate parsing policy is needed to test these boundaries.
+func TestCodexDiagnosticProbeGatewayContract(t *testing.T) {
+	account := &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Credentials: map[string]any{"chatgpt_account_id": "fixture"}}
+	settingsRepo := &codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAICodexTicketPromptTemplate: strings.Replace(DefaultCodexProbeTemplate(), "anonymous workspace", "custom workspace", 1)}}
+	gateway := &OpenAIGatewayService{accountRepo: diagnosticAccounts{account: account}, settingService: NewSettingService(settingsRepo, nil)}
+	for _, tc := range []struct {
+		name          string
+		status, count int
+		reason        string
+	}{
+		{"completed enough", 200, 292, ""}, {"too few for challenge", 200, 332, "insufficient_numbers"}, {"gateway denial", 403, 292, "gateway_request_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				require.True(t, isCodexTicketDiagnostic(r.Context()))
+				require.Equal(t, "/v1/responses", r.URL.Path)
+				require.Equal(t, "Bearer fixture-key", r.Header.Get("Authorization"))
+				deadline, ok := r.Context().Deadline()
+				require.True(t, ok)
+				require.InDelta(t, 120, time.Until(deadline).Seconds(), 2)
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				require.Contains(t, string(body), "custom workspace")
+				require.Equal(t, "challenge", gjson.GetBytes(body, "input.4.content.0.text").String())
+				w.WriteHeader(tc.status)
+				if tc.status != 200 {
+					_, _ = w.Write([]byte("{\"error\":{\"code\":\"POLICY_DENIED\",\"message\":\"private detail\"}}"))
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "completed", "output_text": strings.Repeat("1 ", 170)})
+			})
+			item := RunCodexDiagnosticProbe(context.Background(), gateway, router, &APIKey{Key: "fixture-key"}, 41, "gpt-5.4", "127.0.0.1:0", "localhost", func() (ModelTraceChallenge, error) {
+				return ModelTraceChallenge{Prompt: "challenge", ExpectedCount: tc.count}, nil
+			})
+			require.Equal(t, 1, calls)
+			if tc.reason != "" {
+				require.Equal(t, tc.reason, item.Reason)
+			}
+			if tc.status != 200 {
+				require.Equal(t, "POLICY_DENIED", item.GatewayErrorCode)
+				raw, _ := json.Marshal(item)
+				require.NotContains(t, string(raw), "private detail")
+			}
+		})
+	}
+	settingsRepo.values[SettingKeyOpenAICodexTicketPromptTemplate] = "{private-secret"
+	gateway.settingService.InvalidateCodexProbeTemplateCache()
+	item := RunCodexDiagnosticProbe(context.Background(), gateway, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("invalid template entered gateway") }), &APIKey{Key: "fixture"}, 41, "gpt-5.4", "", "", NewModelTraceChallenge)
+	require.Equal(t, "template_invalid", item.Reason)
+}

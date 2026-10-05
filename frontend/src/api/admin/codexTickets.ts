@@ -59,7 +59,6 @@ export interface TicketDiagnostic {
   probability?: number
   parsed_number_count?: number
   http_status?: number
-  harvest?: TicketEvent
 }
 
 const base = (id: number) => `/admin/accounts/${id}`
@@ -89,10 +88,6 @@ export async function harvest(id: number, model: string): Promise<{ outcome: str
   return data
 }
 
-export async function diagnose(id: number, apiKeyID: number, models: string[], signal?: AbortSignal): Promise<{ items: TicketDiagnostic[]; canceled: boolean }> {
-  const { data } = await apiClient.post(`${base(id)}/codex-ticket-diagnostic`, { api_key_id: apiKeyID, models }, { timeout: Math.max(120000, models.length * 180000), signal })
-  return data
-}
 
 export async function ownKeys(): Promise<ApiKey[]> {
   const keys: ApiKey[] = []
@@ -120,4 +115,75 @@ export interface TicketParticipation {
 export async function saveParticipation(id: number, value: TicketParticipation): Promise<TicketParticipation> {
   const { data } = await apiClient.put(`${base(id)}/codex-ticket-participation`, value)
   return data
+}
+
+export interface DiagnosticPlan {
+  interval_minutes: number
+  account_id: number
+  owner_id: number
+  api_key_id: number
+  models: string[]
+  enabled: boolean
+  revision: number
+  next_run_at: string | null
+  updated_at: string
+}
+export interface DiagnosticSummary {
+  stale?: boolean
+  interval_minutes: number
+  run_id: number
+  status: string
+  checked_at: string | null
+  enabled: boolean
+  next_run_at: string | null
+}
+export interface DiagnosticRun {
+  id: number
+  account_id: number
+  owner_id: number
+  api_key_id: number
+  api_key_name: string
+  plan_revision: number
+  models: string[]
+  source: 'manual' | 'scheduled'
+  status: string
+  reason?: string
+  items: Array<TicketDiagnostic & { fingerprint_commit?: string; expected_count?: number; duration_ms: number }>
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  cancel_requested: boolean
+}
+export interface DiagnosticRules {
+ default_interval_minutes: number
+ min_interval_minutes: number
+ max_interval_minutes: number
+ max_models: number
+ history_limit: number
+ confidence_threshold: number
+}
+export async function diagnosticPlan(id: number) {
+  const { data } = await apiClient.get<{ plan: DiagnosticPlan | null; summary: DiagnosticSummary; rules: DiagnosticRules }>(base(id) + '/codex-ticket-diagnostic')
+  return data
+}
+export async function saveDiagnosticPlan(id: number, plan: Pick<DiagnosticPlan, 'api_key_id' | 'models' | 'enabled' | 'interval_minutes'>) {
+  const { data } = await apiClient.put<DiagnosticPlan>(base(id) + '/codex-ticket-diagnostic', plan)
+  return data
+}
+export async function diagnosticModels(id: number, keyID: number) {
+  const { data } = await apiClient.get<{ choices: { models: string[]; items: Array<{ id: string; eligible: boolean; reason?: string }>; group_name: string; whitelist_enabled: boolean; commit: string } }>(base(id) + '/codex-ticket-diagnostic', { params: { api_key_id: keyID } })
+  return data.choices
+}
+
+export async function startDiagnosticRun(id: number) {
+  const { data } = await apiClient.post<DiagnosticRun>(base(id) + '/codex-ticket-diagnostic')
+  return data
+}
+export async function diagnosticRuns(id: number) {
+  const { data } = await apiClient.get<{ items: DiagnosticRun[] }>(base(id) + '/codex-ticket-diagnostic/history')
+  return data
+}
+
+export async function cancelDiagnosticRun(id: number, runID: number) {
+  await apiClient.post(base(id) + '/codex-ticket-diagnostic/' + runID + '/cancel')
 }
