@@ -429,8 +429,7 @@ func redactAccountManagedExtra(extra map[string]any) map[string]any {
 	redacted := make(map[string]any, len(extra))
 	for key, value := range extra {
 		switch {
-		case key == "openai_bps_credential_state",
-			key == service.OllamaCloudUsageSessionExtraKey,
+		case key == service.OllamaCloudUsageSessionExtraKey,
 			key == service.OllamaCloudUsageAutoRefreshExtraKey,
 			key == service.OllamaCloudUsageSnapshotExtraKey,
 			key == service.OpenCodeGoUsageAutoRefreshExtraKey,

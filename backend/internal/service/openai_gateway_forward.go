@@ -19,8 +19,8 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
-	if account != nil && IsRetiredPlatform(account.Platform) {
-		return nil, ErrPlatformRetired
+	if account != nil && IsUnsupportedPlatform(account.Platform) {
+		return nil, ErrUnsupportedPlatform
 	}
 	if err := s.validateWSContinuation(ctx, c, body); err != nil {
 		return nil, err
@@ -38,8 +38,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
-	// A failed account attempt must not leave a bypass reason on a later BPS response.
-	c.Writer.Header().Del("X-Codex2API-Basispoints-Bypass")
 	c.Writer.Header().Del("X-Codex2API-Upstream")
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
@@ -76,25 +74,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			},
 		})
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
-	}
-
-	modelForBPS := gjson.GetBytes(body, "model").String()
-	if c.GetBool(bpsAccountProbeRequiredContextKey) &&
-		(!account.IsExcelBPSEnabledForModel(modelForBPS) || account.excelBPSNativeFallbackReason(body) != "") {
-		return nil, errors.New("bps probe path is unavailable")
-	}
-	if account.IsExcelBPSEnabledForModel(modelForBPS) {
-		reason := account.excelBPSNativeFallbackReason(body)
-		if reason == "" {
-			return s.forwardExcelBPS(ctx, c, account, body, startTime)
-		}
-		// The bridge cannot run this hosted capability. Keep the selected
-		// account and use its native Codex channel for this request instead of
-		// omitting the tool. BPS accounts do not take part in ticket harvesting,
-		// so the native request goes out like any non-participating account.
-		c.Header("X-Codex2API-Upstream", "codex")
-		c.Header("X-Codex2API-Basispoints-Bypass", reason)
-		recordExcelBPSNativeFallback(ctx, account, reason)
 	}
 
 	normalizedBody, normalized, err := normalizeOpenAICodexCompactReasoningEffortForAccount(c, account, body)

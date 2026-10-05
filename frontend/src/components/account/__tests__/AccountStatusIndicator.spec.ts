@@ -52,35 +52,6 @@ function makeAccount(overrides: Partial<Account>): Account {
 
 describe('AccountStatusIndicator', () => {
 
-  it('shows the Excel BPS badge above the account status', () => {
-    const account = makeAccount({
-      platform: 'openai',
-      extra: { openai_excel_bps: true },
-      credentials: { plan_type: 'plus' }
-    })
-    const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })
-    const badge = wrapper.get('[data-testid="bps-status-badge"]')
-    expect(badge.text()).toBe('bps')
-    expect(badge.attributes('title')).toBe('admin.accounts.openai.excelBPS')
-    expect(wrapper.element.firstElementChild).toBe(badge.element)
-  })
-
-  it.each([
-    { extra: undefined },
-    { extra: { openai_excel_bps: false } },
-    { platform: 'anthropic' },
-    { type: 'apikey' },
-    { credentials: { plan_type: 'free' } },
-    { credentials: { auth_mode: 'agentIdentity' } },
-    { credentials: { auth_mode: 'personalAccessToken' } },
-  ] as Partial<Account>[])('hides the Excel BPS badge for unsupported accounts: %j', (overrides) => {
-    const wrapper = mount(AccountStatusIndicator, {
-      props: { account: makeAccount({ platform: 'openai', extra: { openai_excel_bps: true }, ...overrides }) },
-      global: { stubs: { Icon: true } },
-    })
-    expect(wrapper.find('[data-testid="bps-status-badge"]').exists()).toBe(false)
-  })
-
   it('shows an inherited parent limit while the shadow setting remains disabled', () => {
     const account = makeAccount({ platform: 'openai', parent_account_id: 99, base_rpm: 0, effective_rpm_limit: 2, current_rpm: 2 })
     const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })

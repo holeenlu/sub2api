@@ -77,7 +77,7 @@ func TestOpenAIWSHTTPBridgePrewarmKeepsToolState(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 			write := func([]byte) error { return nil }
 			for turn, frame := range []string{tc.first, tc.next} {
-				_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", []byte(frame), len(frame), "gpt-5", false, "", "", "", "", turn+1, write)
+				_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", []byte(frame), len(frame), "gpt-5", "", "", "", "", turn+1, write)
 				require.NoError(t, err)
 			}
 			next := upstream.lastBody

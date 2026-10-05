@@ -3,14 +3,12 @@ package service
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 )
 
 type bulkOpenAISettings struct {
-	excelBPS                bool
 	apiKeyCodexIdentity     bool
 	longContextBilling      bool
 	endpointCapabilities    bool
@@ -20,18 +18,13 @@ type bulkOpenAISettings struct {
 }
 
 func (s bulkOpenAISettings) any() bool {
-	return s.apiKeyCodexIdentity || s.excelBPS || s.longContextBilling || s.endpointCapabilities || s.responsesMode
+	return s.apiKeyCodexIdentity || s.longContextBilling || s.endpointCapabilities || s.responsesMode
 }
 
 func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISettings, error) {
 	var settings bulkOpenAISettings
 	if input == nil {
 		return settings, nil
-	}
-	var err error
-	settings.excelBPS, err = normalizeBulkExcelBPSExtra(input.Extra)
-	if err != nil {
-		return settings, err
 	}
 	if raw, exists := input.Extra[OpenAIAPIKeyCodexIdentityKey]; exists {
 		if _, ok := raw.(bool); !ok {
@@ -82,87 +75,6 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 	}
 
 	return settings, nil
-}
-
-// A nil model scope removes the key (all models); an empty list selects no models.
-func normalizeBulkExcelBPSExtra(extra map[string]any) (bool, error) {
-	changed := false
-	if _, exists := extra[ExcelBPS403RecoveryIntervalMinutesKey]; exists {
-		changed = true
-		if err := validateExcelBPS403RecoveryExtra(extra); err != nil {
-			return true, err
-		}
-	}
-	for _, key := range []string{"openai_excel_bps", ExcelBPSIgnoreImagesKey, ExcelBPSIgnoreEncryptedContentKey, ExcelBPSOmitUnsupportedToolsKey, "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", ExcelBPSAutoRecoverOn403Key, ExcelBPSAutoMoveOn403Key} {
-		if raw, exists := extra[key]; exists {
-			changed = true
-			if _, ok := raw.(bool); !ok {
-				return true, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", key+" must be a boolean")
-			}
-		}
-	}
-	if raw, exists := extra[ExcelBPS403TargetGroupIDKey]; exists {
-		changed = true
-		if _, ok := excelBPS403GroupID(raw); raw != nil && !ok {
-			return true, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", ExcelBPS403TargetGroupIDKey+" must be a nonnegative integer")
-		}
-	}
-	if raw, exists := extra["openai_excel_bps_models"]; exists {
-		changed = true
-		if raw != nil {
-			models := make([]string, 0)
-			switch values := raw.(type) {
-			case []string:
-				models = append(models, values...)
-			case []any:
-				for _, value := range values {
-					model, ok := value.(string)
-					if !ok {
-						return true, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", "openai_excel_bps_models must be an array of strings or null")
-					}
-					models = append(models, model)
-				}
-			default:
-				return true, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", "openai_excel_bps_models must be an array of strings or null")
-			}
-			normalized := make([]string, 0, len(models))
-			seen := make(map[string]bool, len(models))
-			for _, model := range models {
-				model = strings.TrimSpace(model)
-				if model != "" && !seen[model] {
-					normalized = append(normalized, model)
-					seen[model] = true
-				}
-			}
-			extra["openai_excel_bps_models"] = normalized
-		}
-	}
-	if enabled, exists := extra["openai_excel_bps"].(bool); exists && !enabled {
-		extra["openai_excel_bps_models"] = nil
-		extra["openai_excel_bps_cache_creation_as_input"] = false
-		if _, exists := extra[ExcelBPSIgnoreImagesKey]; exists {
-			extra[ExcelBPSIgnoreImagesKey] = false
-		}
-		if _, exists := extra[ExcelBPSIgnoreEncryptedContentKey]; exists {
-			extra[ExcelBPSIgnoreEncryptedContentKey] = false
-		}
-		if _, exists := extra[ExcelBPSOmitUnsupportedToolsKey]; exists {
-			extra[ExcelBPSOmitUnsupportedToolsKey] = false
-		}
-		if _, exists := extra["openai_excel_bps_auto_disable_on_403"]; exists {
-			extra["openai_excel_bps_auto_disable_on_403"] = false
-		}
-		if _, exists := extra[ExcelBPSAutoRecoverOn403Key]; exists {
-			extra[ExcelBPSAutoRecoverOn403Key] = false
-		}
-		if _, exists := extra[ExcelBPSAutoMoveOn403Key]; exists {
-			extra[ExcelBPSAutoMoveOn403Key] = false
-		}
-		if _, exists := extra[ExcelBPS403TargetGroupIDKey]; exists {
-			extra[ExcelBPS403TargetGroupIDKey] = nil
-		}
-	}
-	return changed, nil
 }
 
 func normalizeBulkOpenAIEndpointCapabilities(raw any) (any, bool, error) {
@@ -256,11 +168,6 @@ func validateBulkOpenAISettingsTargets(
 		account, ok := targetsByID[accountID]
 		if !ok || account == nil {
 			return 0, invalidBulkOpenAITarget(accountID, "account does not exist")
-		}
-
-		if settings.excelBPS && (account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth ||
-			account.IsShadow() || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken()) {
-			return 0, invalidBulkOpenAITarget(accountID, "Excel / BPS requires a regular ChatGPT OAuth account")
 		}
 
 		if settings.apiKeyCodexIdentity && !account.IsOpenAIApiKey() {

@@ -69,7 +69,7 @@ func TestGatewayRoutesGroupModelAllowlistMountedOnEveryGatewayRoute(t *testing.T
 	source := string(routeSource)
 
 	// rootRoute helper：apiKeyAuth 之后、compositeTarget 之前。
-	rootHelper := regexp.MustCompile(regexp.QuoteMeta(`r.Handle(method, path, limit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), retiredPlatformGuard, imageAdmission, groupModelAllowlist, compositeTarget, retiredPlatformGuard, requireGroupAnthropic, handler)`))
+	rootHelper := regexp.MustCompile(regexp.QuoteMeta(`r.Handle(method, path, limit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), supportedPlatformGuard, groupModelAllowlist, compositeTarget, supportedPlatformGuard, requireGroupAnthropic, handler)`))
 	require.Regexp(t, rootHelper, source,
 		"root alias helper must place the allowlist between apiKeyAuth and compositeTarget")
 
@@ -94,7 +94,7 @@ func TestGatewayRoutesGroupModelAllowlistMountedOnEveryGatewayRoute(t *testing.T
 	}
 
 	// codexDirect 链是一条 Use 调用，直接断言顺序。
-	codexDirect := regexp.MustCompile(regexp.QuoteMeta(`codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), retiredPlatformGuard, imageAdmission, groupModelAllowlist, compositeTarget, retiredPlatformGuard, requireGroupAnthropic)`))
+	codexDirect := regexp.MustCompile(regexp.QuoteMeta(`codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), supportedPlatformGuard, groupModelAllowlist, compositeTarget, supportedPlatformGuard, requireGroupAnthropic)`))
 	require.Regexp(t, codexDirect, source, "codexDirect chain must mount the allowlist after auth and before compositeTarget")
 
 	// 所有带 apiKeyAuth 的根路径路由必须收敛到 rootRoute，避免漏挂。
@@ -209,5 +209,54 @@ func TestGatewayRoutesGroupModelAllowlistModelFreeRoutesUnaffected(t *testing.T)
 		router.ServeHTTP(w, req)
 		require.NotContains(t, w.Body.String(), "not available for this group",
 			"%s should not be blocked by the allowlist middleware, got: %s", path, w.Body.String())
+	}
+}
+
+func TestUnsupportedPlatformGuard(t *testing.T) {
+	for _, tc := range []struct {
+		name, group, resolved, forced string
+		status                        int
+	}{
+		{name: "retired group", group: "unsupported-provider", status: http.StatusGone},
+		{name: "forced alias cannot bypass retirement", group: "unsupported-provider", forced: service.PlatformAntigravity, status: http.StatusGone},
+		{name: "resolved legacy route", group: service.PlatformComposite, resolved: "unsupported-provider", status: http.StatusGone},
+		{name: "native OpenAI OAuth remains available", group: service.PlatformOpenAI, status: http.StatusNoContent},
+		{name: "normal composite OpenAI", group: service.PlatformComposite, resolved: service.PlatformOpenAI, status: http.StatusNoContent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := gin.New()
+			r.Use(func(c *gin.Context) {
+				c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Platform: tc.group}})
+				if tc.resolved != "" {
+					c.Request = c.Request.WithContext(service.WithResolvedTargetPlatform(c.Request.Context(), tc.resolved))
+				}
+				c.Next()
+			})
+			if tc.forced != "" {
+				r.Use(servermiddleware.ForcePlatform(tc.forced))
+			}
+			r.Use(supportedPlatformGuard)
+			forwarded := false
+			r.POST("/v1/responses", func(c *gin.Context) { forwarded = true; c.Status(http.StatusNoContent) })
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+			require.Equal(t, tc.status, w.Code)
+			require.Equal(t, tc.status == http.StatusNoContent, forwarded)
+			if tc.status == http.StatusGone {
+				require.Contains(t, w.Body.String(), "unsupported_platform")
+			}
+		})
+	}
+}
+
+func TestUnsupportedPlatformMountedRoutesRejectWithoutForwarding(t *testing.T) {
+	router := newGatewayRoutesTestRouterWithGroup(&service.Group{Platform: "unsupported-provider"})
+	for _, path := range []string{"/v1/responses", "/v1/responses/compact", "/responses", "/responses/compact", "/chat/completions", "/v1/chat/completions", "/v1/messages", "/backend-api/codex/responses", "/antigravity/v1/messages"} {
+		t.Run(path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, nil))
+			require.Equal(t, http.StatusGone, w.Code)
+			require.Contains(t, w.Body.String(), "unsupported_platform")
+		})
 	}
 }

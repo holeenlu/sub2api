@@ -394,8 +394,8 @@ func normalizeUpdateGroupInputForSimpleMode(input *UpdateGroupInput) {
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
-	if IsRetiredPlatform(input.Platform) {
-		return nil, ErrPlatformRetired
+	if IsUnsupportedPlatform(input.Platform) {
+		return nil, ErrUnsupportedPlatform
 	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && NormalizeGroupPlatform(input.Platform) == PlatformComposite {
 		return nil, infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite groups are not supported in simple mode")
@@ -862,8 +862,8 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if err != nil {
 		return nil, err
 	}
-	if IsRetiredPlatform(group.Platform) || IsRetiredPlatform(input.Platform) {
-		return nil, ErrPlatformRetired
+	if IsUnsupportedPlatform(group.Platform) || IsUnsupportedPlatform(input.Platform) {
+		return nil, ErrUnsupportedPlatform
 	}
 	if err := s.validateSimpleModeGroupAccess(group); err != nil {
 		return nil, err

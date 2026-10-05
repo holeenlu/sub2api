@@ -854,9 +854,7 @@ func prioritizeOpenAICompactAccounts(accounts []*Account) []*Account {
 // would be sent for a given request, honoring the legacy compact-only mapping
 // when the caller is on the /responses/compact path.
 func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedModel string, requireCompact bool) string {
-	if account.IsExcelBPSEnabledForModel(requestedModel) {
-		return account.GetMappedModel(requestedModel)
-	}
+
 	// Forward checks the raw Chat Completions fallback before passthrough.
 	// These API-key accounts therefore apply normal account model_mapping and
 	// upstream normalization, but never compact_model_mapping.
@@ -1089,10 +1087,6 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		// Skip excluded accounts
 		if _, excluded := excludedIDs[acc.ID]; excluded {
 			filterStats.exclude("excluded")
-			continue
-		}
-		if s.isExcelBPSCoolingDownContext(ctx, acc, requestedModel) {
-			filterStats.exclude(excelBPSRateLimitedFilterReason)
 			continue
 		}
 
@@ -1423,10 +1417,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			filterStats.exclude("shadow_parent_unhealthy")
 			continue
 		}
-		if s.isExcelBPSCoolingDownContext(ctx, acc, requestedModel) {
-			filterStats.exclude(excelBPSRateLimitedFilterReason)
-			continue
-		}
+
 		if s.isOpenAIAccountRequestRuntimeBlockedContext(ctx, acc, requestedModel, requireCompact) {
 			filterStats.exclude("runtime_blocked")
 			continue

@@ -1002,7 +1002,7 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	// Candidate admission and sticky routing must evaluate the same account-level
 	// threshold overrides before the full account snapshot is hydrated.
 	keys := []string{
-		"model_mapping", "model_mapping_mode", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type",
+		"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type",
 		"account_scheduling_threshold",
 		"anthropic_fable_scheduling_threshold",
 		"chatgpt_account_id", "expires_at",
@@ -1071,13 +1071,6 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// 走网关报 no available accounts"。
 		"openai_passthrough",
 		"openai_oauth_passthrough",
-		"openai_excel_bps",
-		"openai_excel_bps_auto_disable_on_403",
-		service.ExcelBPSAutoRecoverOn403Key,
-		service.ExcelBPS403RecoveryIntervalMinutesKey,
-		service.ExcelBPSAutoMoveOn403Key,
-		service.ExcelBPS403TargetGroupIDKey,
-		"openai_excel_bps_models",
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
 		"codex_allow_without_ticket",
@@ -1120,7 +1113,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 	}
 	filtered := make(map[string]any)
 	for _, key := range keys {
-		if value, ok := extra[key]; ok && (value != nil || key == "openai_excel_bps_models") {
+		if value, ok := extra[key]; ok && value != nil {
 			if key == service.UpstreamBillingProbeExtraKey {
 				filteredProbe := filterSchedulerUpstreamBillingProbe(value)
 				if filteredProbe == nil {

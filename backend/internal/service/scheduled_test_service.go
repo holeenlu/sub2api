@@ -103,7 +103,7 @@ func computeNextRun(cronExpr string, from time.Time) (time.Time, error) {
 
 func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
 	if plan.PelicanConfig != nil {
-		return time.Time{}, fmt.Errorf("automatic BPS and quality test plans have been retired")
+		return time.Time{}, fmt.Errorf("legacy quality test plans have been retired")
 	}
 	return computeNextRun(plan.CronExpression, now)
 }

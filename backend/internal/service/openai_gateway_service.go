@@ -20,7 +20,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/platform/liveattestation"
-	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
@@ -315,7 +314,7 @@ func (r *OpenAIForwardResult) HasTokenUsage() bool {
 // that may clear model-scoped transient state. The zero value remains a success
 // for existing non-WS callers.
 func (r *OpenAIForwardResult) SucceededForScheduling() bool {
-	if r == nil || (!r.OpenAIWSMode && r.UpstreamEndpoint != "/basispoints/api/responses") || r.UpstreamTerminalEvent == "" {
+	if r == nil || !r.OpenAIWSMode || r.UpstreamTerminalEvent == "" {
 		return true
 	}
 	switch r.UpstreamTerminalEvent {
@@ -455,47 +454,39 @@ type OpenAIGatewayService struct {
 	modelCatalog     *ModelCatalogService
 	catalogSnapshots sync.Map // successful discovery snapshots; no public upstream fetch
 
-	excelBPSRecoveryMu      sync.Mutex
-	excelBPSRecoveryCancel  context.CancelFunc
-	excelBPSRecoveryDone    chan struct{}
-	excelBPSRecoveryStopped bool
-	excelBPSCooldownUntil   sync.Map // key: int64(accountID), value: time.Time
-	excelBPSImagesMu        sync.Mutex
-	excelBPSImages          *basispoints.ImageRelay
-	excelBPSAttachments     basispoints.AttachmentCache
-	accountRepo             AccountRepository
-	usageLogRepo            UsageLogRepository
-	usageBillingRepo        UsageBillingRepository
-	mediaAPIKeyService      *APIKeyService
-	mediaRepo               GatewayMediaRepository
-	mediaSettlementCancel   context.CancelFunc
-	mediaSettlementDone     chan struct{}
-	userRepo                UserRepository
-	userSubRepo             UserSubscriptionRepository
-	cache                   GatewayCache
-	rpmCache                RPMCache
-	cfg                     *config.Config
-	codexDetector           CodexClientRestrictionDetector
-	schedulerSnapshot       *SchedulerSnapshotService
-	concurrencyService      *ConcurrencyService
-	billingService          *BillingService
-	rateLimitService        *RateLimitService
-	billingCacheService     *BillingCacheService
-	userGroupRateResolver   *userGroupRateResolver
-	httpUpstream            HTTPUpstream
-	pluginManager           *PluginManager
-	deferredService         *DeferredService
-	openAITokenProvider     *OpenAITokenProvider
-	grokTokenProvider       *GrokTokenProvider
-	toolCorrector           *CodexToolCorrector
-	openaiWSResolver        OpenAIWSProtocolResolver
-	resolver                *ModelPricingResolver
-	channelService          *ChannelService
-	balanceNotifyService    *BalanceNotifyService
-	settingService          *SettingService
-	userPlatformQuotaRepo   UserPlatformQuotaRepository
-	liveAttestation         liveattestation.Provider
-	liveAttestationCipher   SecretEncryptor
+	accountRepo           AccountRepository
+	usageLogRepo          UsageLogRepository
+	usageBillingRepo      UsageBillingRepository
+	mediaAPIKeyService    *APIKeyService
+	mediaRepo             GatewayMediaRepository
+	mediaSettlementCancel context.CancelFunc
+	mediaSettlementDone   chan struct{}
+	userRepo              UserRepository
+	userSubRepo           UserSubscriptionRepository
+	cache                 GatewayCache
+	rpmCache              RPMCache
+	cfg                   *config.Config
+	codexDetector         CodexClientRestrictionDetector
+	schedulerSnapshot     *SchedulerSnapshotService
+	concurrencyService    *ConcurrencyService
+	billingService        *BillingService
+	rateLimitService      *RateLimitService
+	billingCacheService   *BillingCacheService
+	userGroupRateResolver *userGroupRateResolver
+	httpUpstream          HTTPUpstream
+	pluginManager         *PluginManager
+	deferredService       *DeferredService
+	openAITokenProvider   *OpenAITokenProvider
+	grokTokenProvider     *GrokTokenProvider
+	toolCorrector         *CodexToolCorrector
+	openaiWSResolver      OpenAIWSProtocolResolver
+	resolver              *ModelPricingResolver
+	channelService        *ChannelService
+	balanceNotifyService  *BalanceNotifyService
+	settingService        *SettingService
+	userPlatformQuotaRepo UserPlatformQuotaRepository
+	liveAttestation       liveattestation.Provider
+	liveAttestationCipher SecretEncryptor
 
 	openaiWSPoolOnce               sync.Once
 	openaiWSStateStoreOnce         sync.Once

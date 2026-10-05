@@ -115,7 +115,6 @@ func grokMediaInflightEstimate(endpoint service.GrokMediaEndpoint, model string,
 	}
 }
 
-// grokVoiceSTTBytesPerSecond STT 时长粗估（~128kbps 压缩音频）。
 const grokVoiceSTTBytesPerSecond = 16000
 
 // grokVoiceInflightEstimate 语音 HTTP 接口估算：TTS 按输入字符数（百万字符），STT 按音频字节粗估时长（小时）。

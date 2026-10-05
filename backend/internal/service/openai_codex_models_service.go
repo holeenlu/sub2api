@@ -197,11 +197,6 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	if err != nil {
 		return fmt.Errorf("merge group configured Codex models: %w", err)
 	}
-	body, restricted, err := restrictExcelBPSCodexModelsManifest(body, catalog, group)
-	if err != nil {
-		return fmt.Errorf("restrict group BPS capabilities: %w", err)
-	}
-	changed = changed || restricted
 	if changed {
 		manifest.Body = body
 		manifest.ETag = codexModelsManifestBodyETag(body)
@@ -967,9 +962,7 @@ func buildCodexModelsManifestForAccounts(
 		}
 	}
 	body, err := buildCodexModelsManifest(modelIDs, imageInputModels, searchToolModels, metadataModels, modelMetadata)
-	if err == nil && effectivePlatform == PlatformOpenAI {
-		body, _, err = restrictExcelBPSCodexModelsManifest(body, accounts, group)
-	}
+
 	return body, err
 }
 

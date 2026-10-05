@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"log/slog"
 	"math"
 	"sort"
@@ -273,22 +272,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky:         "",
 
 		SettingKeyAllowUserViewErrorRequests: "false",
-		SettingKeyExcelBPSImageMode:          ExcelBPSImageModeNative,
-		SettingKeyExcelBPSImageRelayEnabled:  "true",
-		SettingKeyExcelBPSImageBaseURL:       "",
-
-		SettingKeyExcelBPSImageBodyLimitMiB:     strconv.Itoa(DefaultExcelBPSImageBodyLimitMiB),
-		SettingKeyExcelBPSImageBudgetMiB:        strconv.Itoa(DefaultExcelBPSImageBudgetMiB),
-		SettingKeyExcelBPSImageMaxRequests:      strconv.Itoa(DefaultExcelBPSImageMaxRequests),
-		SettingKeyExcelBPSImageMaxImageMiB:      "20",
-		SettingKeyExcelBPSImageLimitPolicy:      "off",
-		SettingKeyExcelBPSImageWarningRemaining: "8",
-		SettingKeyExcelBPSImageCompactReserve:   "3",
-		SettingKeyExcelBPSImageMaxImages:        "20",
-		SettingKeyExcelBPSImageMaxTotalMiB:      "32",
-		SettingKeyExcelBPSImageStorageMiB:       "1024",
-		SettingKeyExcelBPSImageStorageEntries:   "512",
-		SettingKeyExcelBPSImageTTLMinutes:       "30",
 	}
 
 	return s.settingRepo.SetMultiple(ctx, defaults)
@@ -1029,38 +1012,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 
 	result.AllowUserViewErrorRequests = settings[SettingKeyAllowUserViewErrorRequests] == "true" // default false
-	result.ExcelBPSImageMode = settings[SettingKeyExcelBPSImageMode]
-	if result.ExcelBPSImageMode == "" {
-		result.ExcelBPSImageMode = ExcelBPSImageModeNative
-	}
-	result.ExcelBPSImageRelayEnabled = settings[SettingKeyExcelBPSImageRelayEnabled] == "" || settings[SettingKeyExcelBPSImageRelayEnabled] == "true"
-	result.ExcelBPSImageBaseURL = settings[SettingKeyExcelBPSImageBaseURL]
-	result.ExcelBPSImageBodyLimitMiB, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageBodyLimitMiB], DefaultExcelBPSImageBodyLimitMiB)
-	result.ExcelBPSImageBudgetMiB, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageBudgetMiB], DefaultExcelBPSImageBudgetMiB)
-	result.ExcelBPSImageMaxRequests, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageMaxRequests], DefaultExcelBPSImageMaxRequests)
-	if validateExcelBPSImageCapacity(result.ExcelBPSImageBodyLimitMiB, result.ExcelBPSImageBudgetMiB, result.ExcelBPSImageMaxRequests) != nil {
-		result.ExcelBPSImageBodyLimitMiB = DefaultExcelBPSImageBodyLimitMiB
-		result.ExcelBPSImageBudgetMiB = DefaultExcelBPSImageBudgetMiB
-		result.ExcelBPSImageMaxRequests = DefaultExcelBPSImageMaxRequests
-	}
-
-	imageLimits, imageLimitsErr := parseExcelBPSImageLimits(settings)
-	if imageLimitsErr != nil {
-		imageLimits = basispoints.DefaultImageRelayLimits()
-	}
-	result.ExcelBPSImageMaxImageMiB = imageLimits.MaxImageMiB
-	result.ExcelBPSImageMaxImages = imageLimits.MaxImages
-	result.ExcelBPSImageLimitPolicy = settings[SettingKeyExcelBPSImageLimitPolicy]
-	if result.ExcelBPSImageLimitPolicy == "" {
-		result.ExcelBPSImageLimitPolicy = "off"
-	}
-	result.ExcelBPSImageWarningRemaining, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageWarningRemaining], 8)
-	result.ExcelBPSImageCompactReserve, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageCompactReserve], 3)
-	result.ExcelBPSImageMaxTotalMiB = imageLimits.MaxTotalMiB
-	result.ExcelBPSImageStorageMiB = imageLimits.StorageMiB
-	result.ExcelBPSImageStorageEntries = imageLimits.StorageEntries
-	result.ExcelBPSImageTTLMinutes = imageLimits.TTLMinutes
-
 	// Publish Grok default model_mapping options for accounts with empty mapping.
 	xai.SetRuntimeModelMappingOptions(xai.ModelMappingOptions{
 		DefaultText:          result.GrokDefaultTextModel,

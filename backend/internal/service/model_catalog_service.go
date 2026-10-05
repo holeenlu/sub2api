@@ -381,7 +381,7 @@ func (s *ModelCatalogService) Refresh(ctx context.Context, id int64, force bool)
 		if err != nil {
 			return nil, err
 		}
-		if a == nil || !a.IsActive() || IsRetiredPlatform(a.Platform) {
+		if a == nil || !a.IsActive() || IsUnsupportedPlatform(a.Platform) {
 			return nil, ErrModelCatalogUnavailable
 		}
 		source, err := resolveCredentialAccount(work, s.accounts, a)
@@ -614,7 +614,7 @@ func (s *ModelCatalogService) syncManually(ctx context.Context) (int, int, error
 		if work.Err() != nil {
 			break
 		}
-		if IsRetiredPlatform(account.Platform) {
+		if IsUnsupportedPlatform(account.Platform) {
 			continue
 		}
 		id := account.ID
@@ -707,7 +707,7 @@ func (s *ModelCatalogService) runSync(ctx context.Context) {
 	workers, work := errgroup.WithContext(ctx)
 	workers.SetLimit(cfg.Concurrency)
 	for _, a := range accounts {
-		if IsRetiredPlatform(a.Platform) {
+		if IsUnsupportedPlatform(a.Platform) {
 			continue
 		}
 		id := a.ID
