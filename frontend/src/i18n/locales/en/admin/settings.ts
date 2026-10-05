@@ -1,3 +1,5 @@
+import { BRAND_NAME } from '@/config/brand'
+
 export default {
     settings: {
       title: 'System Settings',
@@ -14,7 +16,6 @@ export default {
         payment: 'Payment',
       },
       features: {
-
         channelMonitor: {
           title: 'Channel Monitor',
           description: 'Choose either V1 active probes or V2 passive usage monitoring. When disabled, both background jobs stop and the user entry is hidden.',
@@ -280,10 +281,10 @@ export default {
       apiKeyAcl: {
         title: 'API Key IP Access Control',
         description:
-          'Authentication, IP restrictions, rate limits and session binding always use the configured trusted proxy chain',
-        trustForwardedIp: 'Legacy forwarded IP metadata',
+          'Choose which client IP is used by API Key allowlists/denylists, admin audit logs, and session IP/UA binding',
+        trustForwardedIp: 'Trust forwarded client IP',
         trustForwardedIpHint:
-          'Disabled by default. This compatibility option affects request and usage metadata only; it cannot override security checks. Configure server.trusted_proxies with the actual proxy addresses for authentication and access control.',
+          'Enabled by default for upgrade compatibility. When enabled, raw CF-Connecting-IP, X-Real-IP, or X-Forwarded-For values take over server.trusted_proxies for client-IP resolution. Disable it to enforce the Gin trusted-proxy chain configured by server.trusted_proxies. Only enable takeover mode when the origin cannot be reached directly. Changing this switch changes existing session IP fingerprints.',
         forwardedClientIpHeaders: 'Custom client-IP headers',
         forwardedClientIpHeadersHint: 'Add CDN or proxy header names to check before the built-in headers.',
         forwardedClientIpHeadersPlaceholder: 'X-Client-IP',
@@ -456,10 +457,7 @@ export default {
         accountSchedulingThresholdsDescription: 'When an account\'s current native usage window (OpenAI Codex/Anthropic session, or Grok request/token utilization) reaches this percent, @:common.siteName temporarily removes it from scheduling until the window resets. Use 100 to disable.',
         accountSchedulingThresholdsGlobalHint: 'System-wide default for every account on that platform. Individual accounts can still override this in the account editor.',
         accountSchedulingThresholdsDisabledHint: '100 disables platform auto-pause. Values 1–99 pause scheduling once utilization reaches that percent.',
-        accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.',
-        accountSchedulingThresholdsFableLabel: 'anthropic · 7d Fable',
-        accountSchedulingThresholdsFableHint:
-          'Integer 1–100 (percent). Only the Fable-specific 7d F window is checked; reaching this value stops scheduling Fable models while other models remain available. The shared 7d window is controlled only by the regular Anthropic threshold. 100 uses the Anthropic threshold instead of a separate value.'
+        accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.'
       },
       upstreamBillingProbe: {
         title: 'Upstream Rate Auto Detection',
@@ -551,9 +549,6 @@ export default {
         antigravityUserAgentVersion: 'Antigravity UA Version',
         antigravityUserAgentVersionPlaceholder: '1.23.2',
         antigravityUserAgentVersionHint: 'Leave empty to use ANTIGRAVITY_USER_AGENT_VERSION or the built-in default 1.23.2; when set, the admin setting takes precedence.',
-        upstreamFailoverStatusCodes: 'Upstream Failover Status Codes',
-        upstreamFailoverStatusCodesPlaceholder: '401,403,429,500-599',
-        upstreamFailoverStatusCodesHint: 'Comma-separated status codes or closed ranges that rotate to another account. Leave empty to keep each platform\'s built-in set; 400/404/408/413/422/499 never rotate regardless.',
         openaiCodexUserAgent: 'OpenAI Codex UA',
         openaiCodexUserAgentPlaceholder: 'codex-tui/0.146.1 (Ubuntu 22.4.0; x86_64) WindowsTerminal (codex-tui; 0.146.1)',
         openaiCodexUserAgentHint: 'The full Codex User-Agent used for all outbound requests, for customizing the OS / arch / terminal fingerprint. Leave empty to build the standard codex-tui identity from the version below (recommended). If set, both the leading and trailing version declarations are synchronized to the version below, so the UA never stays pinned to the release entered here — under capacity pressure the upstream sheds load by client identity and drops stale or non-official identities first with server_is_overloaded.',
@@ -568,15 +563,7 @@ export default {
         claudeCodeVersionAutoSync: 'Auto-sync Claude Code version',
         claudeCodeVersionAutoSyncHint: 'Fetches the latest Claude Code client version from the official release channel every hour, so you never need to upgrade this service just to keep the version current. When disabled, fetching stops but the previously synced version remains available. The manual version above always takes priority.',
         claudeCodeVersionSyncedValue: 'Currently synced: {version}',
-        codexHardeningTitle: "Codex Settings",
-        codexTicketEnabled: "292 ticket harvest",
-        codexTicketEnabledDesc:
-          'Ticket harvesting is off by default. Enable it manually when needed. When off, requests use the normal forwarding path. When on, background harvesting follows account and model participation settings and injects saved tickets into requests. Introducing this feature turns this switch off once; subsequent manual choices are preserved.',
-        codexTicketHarvestProxy: "292 harvest proxy",
-        codexTicketHarvestProxyDesc:
-          "Used only for minting 292 tickets when the ticket feature is enabled. Changes apply to subsequent probes without a restart. Production traffic still uses each account's residential proxy. Paste a full HTTP or SOCKS5h proxy URL including username and password. The proxy provider must handle IP rotation. Leave blank when saving to keep the stored value.",
-        codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
-        codexTicketHarvestProxyConfigured: "Configured (password hidden). Paste a full new proxy URL to replace it.",
+        codexHardeningTitle: 'Model diagnostic template',
         codexClientRestrictionTitle: "Codex client restriction",
         codexHardeningDesc:
           "Only affects OpenAI OAuth accounts with 'Codex official clients only' enabled (global). Beyond User-Agent/Originator, harden the decision with a version range, an engine-fingerprint gate, and black/whitelists.",
@@ -611,17 +598,21 @@ export default {
         codexUaContainsPlaceholder: "User-Agent contains markers, comma-separated (e.g. opencode/)",
         codexAddRow: "Add entry",
         codexRemoveRow: "Remove",
-        codexAdditionalSettingsFailed: 'Settings saved, but a separate setting failed: ',
-        codexProbeTemplate: 'Codex ticket and degradation check template',
-        codexProbeTemplateReset: 'Restore default',
-        codexProbeTemplateDesc: 'Ticket harvesting and degradation checks share this JSONL template. Preserve the message structure, tags and placeholders. Maximum 256 KiB. Save to apply edits or restore the default. Default static instructions are English; random challenges remain Chinese.',
-        codexProbeTimezone: 'Account request timezone',
-        codexProbeDate: 'Current date in the account timezone',
-        codexProbeModel: 'Target model',
-        codexProbeChallenge: 'Fresh random challenge',
-        codexTicketAllowWithoutTicket: 'Allow requests without tickets by default',
-        codexTicketAllowWithoutTicketDesc: 'Enabled when unconfigured, so missing tickets do not block normal requests. Existing policies are preserved. Missing-ticket restrictions apply only when global harvesting is enabled and both the account and current model participate; explicit account policies take priority.',
-      },
+
+codexProbeTemplate: 'Codex degradation check template',
+
+codexProbeTemplateReset: 'Restore default',
+
+codexProbeTemplateDesc: 'Model diagnostics use this JSONL template. Preserve the message structure, tags and placeholders. Maximum 256 KiB. Save to apply edits or restore the default. Default static instructions are English; random challenges remain Chinese.',
+
+codexProbeTimezone: 'Account request timezone',
+
+codexProbeDate: 'Current date in the account timezone',
+
+codexProbeModel: 'Target model',
+
+codexProbeChallenge: 'Fresh random challenge',
+},
       webSearchEmulation: {
         title: 'Web Search Emulation',
         description: 'Inject web search capability for Anthropic API Key accounts that don\'t natively support it',
@@ -663,7 +654,7 @@ export default {
         backendModeDescription:
           'Disables user registration, public site, and self-service features. Only admin can log in and manage the platform.',
         siteName: 'Site Name',
-        siteNamePlaceholder: 'KDAN',
+        siteNamePlaceholder: BRAND_NAME,
         siteNameHint: 'Displayed in emails and page titles',
         siteSubtitle: 'Site Subtitle',
         siteSubtitlePlaceholder: 'Subscription to API Conversion Platform',
@@ -671,7 +662,7 @@ export default {
         apiBaseUrl: 'API Base URL',
         apiBaseUrlPlaceholder: 'https://api.example.com',
         apiBaseUrlHint:
-          'Used for "Use Key" and callback URL suggestions. Leave empty to use current site URL.',
+          'Used for "Use Key", "Import to CC Switch", and callback URL suggestions. Leave empty to use current site URL.',
         tablePreferencesTitle: 'Global Table Preferences',
         tablePreferencesDescription: 'Configure default pagination behavior for shared table components',
         tableDefaultPageSize: 'Default Rows Per Page',
@@ -711,7 +702,9 @@ export default {
         homeContentHint: 'Customize the home page content. Supports Markdown/HTML. If you enter a URL (starting with http:// or https://), it will be used as an iframe src to embed an external page. When set, the default status information will no longer be displayed.',
         homeContentIframeWarning: '⚠️ iframe mode note: Some websites have X-Frame-Options or CSP security policies that prevent embedding in iframes. If the page appears blank or shows an error, please verify the target website allows embedding, or consider using HTML mode to build your own content.',
         compactHome: 'Compact Home Page',
-        compactHomeHint: 'Show a restrained site identity page when no custom home page content is set.'
+        compactHomeHint: 'Show a restrained site identity page when no custom home page content is set.',
+        hideCcsImportButton: 'Hide CCS Import Button',
+        hideCcsImportButtonHint: 'When enabled, the "Import to CCS" button will be hidden on the API Keys page'
       },
       purchase: {
         title: 'Recharge / Subscription Page',
@@ -1016,8 +1009,8 @@ export default {
         event: 'Event',
         locale: 'Locale',
         localeEn: 'English',
-        localeZh: 'Chinese',
         localeJa: 'Japanese',
+        localeZh: 'Chinese',
         subject: 'Subject',
         subjectPlaceholder: 'Enter the email subject',
         html: 'HTML Template',

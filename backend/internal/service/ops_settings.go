@@ -525,9 +525,7 @@ const SettingKeyOpsMetricThresholds = "ops_metric_thresholds"
 
 func defaultOpsMetricThresholds() *OpsMetricThresholds {
 	slaMin := 99.5
-	// TTFT 取决于上游 prefill，流式长上下文请求的 p99 常在数秒到十几秒；
-	// 500ms 会让正常流量长期"变红"。该值同时是健康评分 TTFT 刻度的满分点。
-	ttftMax := float64(dashboardTTFTDefaultFullScoreMs)
+	ttftMax := 500.0
 	reqErrMax := 5.0
 	upstreamErrMax := 5.0
 	return &OpsMetricThresholds{

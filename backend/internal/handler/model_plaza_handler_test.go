@@ -91,19 +91,15 @@ func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
 		SubscriptionType: "standard", RateMultiplier: 1, IsExclusive: true,
 		VideoRateIndependent: true, VideoRateMultiplier: 0.7,
 		Models: []service.PlazaModel{{
-			Name:        "claude-sonnet",
-			ChannelName: "Production Claude",
-			Platform:    "anthropic",
+			Name:     "claude-sonnet",
+			Platform: "anthropic",
 			Pricing: &service.ChannelModelPricing{
 				BillingMode: service.BillingModeToken,
 				InputPrice:  testPtr(3e-6),
 			},
 			OfficialPricing: &service.PlazaOfficialPricing{
-				InputPrice:          testPtr(3e-6),
-				CacheReadPrice:      testPtr(3e-7),
-				ImageInputPrice:     testPtr(8e-6),
-				ImageOutputPrice:    testPtr(30e-6),
-				ImageCacheReadPrice: testPtr(2e-6),
+				InputPrice:     testPtr(3e-6),
+				CacheReadPrice: testPtr(3e-7),
 			},
 		}},
 	}
@@ -133,15 +129,11 @@ func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
 	models := decoded["models"].([]any)
 	require.Len(t, models, 1)
 	model := models[0].(map[string]any)
-	require.Equal(t, "Production Claude", model["channel_name"])
 	require.Contains(t, model, "pricing")
 	require.Contains(t, model, "official_pricing")
 	official := model["official_pricing"].(map[string]any)
 	require.Contains(t, official, "input_price")
 	require.Contains(t, official, "cache_read_price")
-	require.InDelta(t, 8e-6, official["image_input_price"].(float64), 1e-12)
-	require.InDelta(t, 30e-6, official["image_output_price"].(float64), 1e-12)
-	require.InDelta(t, 2e-6, official["image_cache_read_price"].(float64), 1e-12)
 	_, has1h := official["cache_write_1h_price"]
 	require.False(t, has1h, "1h 缓存写价为 nil 时应 omitempty")
 	_, hasOfficialIntervals := official["intervals"]
@@ -269,21 +261,4 @@ func TestFilterPlazaVisibleGroups_SubscribedExclusiveGroup(t *testing.T) {
 		require.Len(t, visible, 1)
 		require.Equal(t, int64(42), visible[0].ID)
 	}
-}
-
-func TestToModelPlazaQuotePreservesBasePricingAndHidesInternalIdentity(t *testing.T) {
-	input, output := 2e-6, 6e-6
-	g := &service.PlazaGroup{ID: 1, CatalogStatus: "ready", RateMultiplier: 3, Models: []service.PlazaModel{{Name: "public-alias", Endpoint: "responses", Platform: service.PlatformOpenAI, CatalogSource: "discovery", PricingSource: "group", Pricing: &service.ChannelModelPricing{ID: 99, ChannelID: 123, Models: []string{"secret-upstream"}, InputPrice: &input, OutputPrice: &output}}}}
-	dto := toModelPlazaGroupDTO(g, map[int64]float64{1: 0.5})
-	require.InDelta(t, 2e-6, *dto.Models[0].Pricing.InputPrice, 1e-12)
-	require.InDelta(t, 1e-6, *dto.Models[0].Quote.Pricing.InputPrice, 1e-12)
-	require.Equal(t, "personal", dto.Models[0].Quote.Scope)
-	data, err := json.Marshal(dto)
-	require.NoError(t, err)
-	for _, hidden := range []string{"secret-upstream", "channel_id", "credentials", "billing_models", "catalog_issues"} {
-		require.NotContains(t, string(data), hidden)
-	}
-	fallback := toModelPlazaGroupDTO(g, nil, true)
-	require.True(t, fallback.PersonalQuoteUnavailable)
-	require.Equal(t, "group_fallback", fallback.Models[0].Quote.Scope)
 }

@@ -841,7 +841,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 	require.Contains(t, rec.Body.String(), `"id":"cmp_123"`)
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_CanceledBeforeAdmissionDoesNotSend(t *testing.T) {
+func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCancel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -881,9 +881,10 @@ func TestOpenAIGatewayService_OAuthPassthrough_CanceledBeforeAdmissionDoesNotSen
 	}
 
 	result, err := svc.Forward(reqCtx, c, account, originalBody)
-	require.ErrorIs(t, err, context.Canceled)
-	require.Nil(t, result)
-	require.Nil(t, upstream.lastReq, "canceled before admission must not start billable work")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.NoError(t, upstream.lastReq.Context().Err())
 }
 
 func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsGetsDefault(t *testing.T) {
@@ -1085,7 +1086,7 @@ func TestOpenAIGatewayService_OAuthLegacy_GroupForceStillHonorsGlobalFilter(t *t
 	require.Nil(t, result.ServiceTier)
 }
 
-func TestOpenAIGatewayService_OAuthLegacy_CanceledBeforeAdmissionDoesNotSend(t *testing.T) {
+func TestOpenAIGatewayService_OAuthLegacy_UpstreamRequestIgnoresClientCancel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -1125,9 +1126,10 @@ func TestOpenAIGatewayService_OAuthLegacy_CanceledBeforeAdmissionDoesNotSend(t *
 	}
 
 	result, err := svc.Forward(reqCtx, c, account, originalBody)
-	require.ErrorIs(t, err, context.Canceled)
-	require.Nil(t, result)
-	require.Nil(t, upstream.lastReq, "canceled before admission must not start billable work")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.NoError(t, upstream.lastReq.Context().Err())
 }
 
 func TestOpenAIGatewayService_OAuthLegacy_CompositeCodexUAUsesCodexOriginator(t *testing.T) {

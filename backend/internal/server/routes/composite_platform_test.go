@@ -3,7 +3,6 @@ package routes
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -11,13 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 )
 
 type compositeRouteRepoStub struct {
@@ -315,101 +312,6 @@ func TestCompositeGeminiTargetPlatformMiddlewareUsesPathRoute(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusNoContent, w.Code)
-}
-
-type failingBodyReader struct{ err error }
-
-func TestCompositeUnsupportedTargetUsesGatewayErrorContract(t *testing.T) {
-	for _, gemini := range []bool{false, true} {
-		t.Run(fmt.Sprintf("gemini=%t", gemini), func(t *testing.T) {
-			resolver := service.NewCompositeRouteResolver(compositeRouteRepoStub{routes: []service.CompositeModelRoute{{
-				GroupID: 1, PublicModel: "legacy-model", MatchType: service.CompositeRouteMatchExact,
-				TargetPlatform: "unsupported-provider", Endpoint: service.CompositeRouteEndpointAny, Enabled: true,
-			}}})
-			router := gin.New()
-			router.Use(func(c *gin.Context) {
-				c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{ID: 1, Platform: service.PlatformComposite}})
-				c.Next()
-			})
-			path := "/v1/responses"
-			if gemini {
-				router.Use(compositeGeminiTargetPlatformMiddleware(resolver))
-				path = "/v1beta/models/*modelAction"
-			} else {
-				router.Use(compositeTargetPlatformMiddleware(resolver))
-			}
-			forwarded := false
-			router.POST(path, func(c *gin.Context) { forwarded = true; c.Status(http.StatusNoContent) })
-			if gemini {
-				path = "/v1beta/models/legacy-model:generateContent"
-			}
-			w := httptest.NewRecorder()
-			router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"legacy-model"}`)))
-			require.Equal(t, http.StatusGone, w.Code)
-			require.JSONEq(t, `{"error":{"type":"invalid_request_error","code":"unsupported_platform","message":"This platform is not supported"}}`, w.Body.String())
-			require.False(t, forwarded)
-		})
-	}
-}
-
-func (r failingBodyReader) Read([]byte) (int, error) { return 0, r.err }
-
-type noopOpsRepo struct{ service.OpsRepository }
-
-func (noopOpsRepo) InsertErrorLog(context.Context, *service.OpsInsertErrorLogInput) (int64, error) {
-	return 0, nil
-}
-
-func (noopOpsRepo) BatchInsertErrorLogs(context.Context, []*service.OpsInsertErrorLogInput) (int64, error) {
-	return 0, nil
-}
-
-// composite 中间件在 handler 之前就读完请求体，读失败的分类必须与 handler 内的
-// 入口一致：客户端断连答 499 且不进 ops_error_logs，其余读取失败照常记录。
-func TestCompositeTargetPlatformMiddlewareClassifiesBodyReadFailure(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	ops := service.NewOpsService(noopOpsRepo{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-
-	router := gin.New()
-	router.Use(handler.OpsErrorLoggerMiddleware(ops))
-	router.Use(gin.HandlerFunc(servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
-		groupID := int64(1)
-		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
-			GroupID: &groupID,
-			Group:   &service.Group{ID: groupID, Platform: service.PlatformComposite},
-		})
-		c.Next()
-	})))
-	router.Use(compositeTargetPlatformMiddleware(nil))
-	router.POST("/v1/messages", func(c *gin.Context) {
-		t.Fatal("handler must not run after a failed body read")
-	})
-
-	cases := []struct {
-		name         string
-		err          error
-		wantStatus   int
-		wantEnqueued int64
-	}{
-		{"客户端断连", context.Canceled, 499, 0},
-		{"请求体过大", &http.MaxBytesError{Limit: 2048}, http.StatusRequestEntityTooLarge, 1},
-		{"传输被截断", io.ErrUnexpectedEOF, http.StatusBadRequest, 1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			before := handler.OpsErrorLogEnqueuedTotal()
-			req := httptest.NewRequest(http.MethodPost, "/v1/messages", failingBodyReader{err: tc.err})
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-
-			router.ServeHTTP(w, req)
-
-			require.Equal(t, tc.wantStatus, w.Code)
-			require.Equal(t, "invalid_request_error", gjson.Get(w.Body.String(), "error.type").String())
-			require.NotEmpty(t, gjson.Get(w.Body.String(), "error.message").String())
-			require.Equal(t, tc.wantEnqueued, handler.OpsErrorLogEnqueuedTotal()-before)
-		})
-	}
 }
 
 // Live 入口顶层 model 与 session.model 不一致时，合成路由必须按 session.model

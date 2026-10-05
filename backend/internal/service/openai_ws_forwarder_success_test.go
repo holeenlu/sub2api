@@ -127,8 +127,6 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	}
 
 	account := &Account{
-		GroupIDs: []int64{1001},
-
 		ID:          9,
 		Name:        "openai-ws",
 		Platform:    PlatformOpenAI,
@@ -352,8 +350,6 @@ func TestOpenAIGatewayService_Forward_WSv2_ImageGenerationCountsOutputs(t *testi
 	}
 
 	account := &Account{
-		GroupIDs: []int64{1010},
-
 		ID:          10,
 		Name:        "openai-ws-image",
 		Platform:    PlatformOpenAI,
@@ -528,8 +524,6 @@ func TestOpenAIGatewayService_Forward_WSv2_RewriteModelAndToolCallsOnCompletedEv
 	}
 
 	account := &Account{
-		GroupIDs: []int64{3001},
-
 		ID:          1301,
 		Name:        "openai-rewrite",
 		Platform:    PlatformOpenAI,
@@ -695,8 +689,6 @@ func TestOpenAIGatewayService_Forward_WSv2_PoolReuseNotOneToOne(t *testing.T) {
 		toolCorrector:    NewCodexToolCorrector(),
 	}
 	account := &Account{
-		GroupIDs: []int64{2001},
-
 		ID:          19,
 		Name:        "openai-ws",
 		Platform:    PlatformOpenAI,
@@ -850,8 +842,6 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthSanitizesInvalidNativeToolItemID
 	}
 
 	account := &Account{
-		GroupIDs: []int64{5662},
-
 		ID:          5662,
 		Name:        "openai-oauth-ws-tool-history",
 		Platform:    PlatformOpenAI,

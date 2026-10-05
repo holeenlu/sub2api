@@ -13,17 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGroupHandlerWithConfigPreservesModelSyncDependency(t *testing.T) {
-	accountTests := &service.AccountTestService{}
-	cfg := &config.Config{RunMode: config.RunModeSimple}
-	h := NewGroupHandlerWithConfig(&stubAdminService{}, nil, nil, accountTests, cfg)
-	require.Same(t, accountTests, h.accountTestService)
-	require.Same(t, cfg, h.cfg)
-	require.True(t, h.isSimpleMode())
-}
-
 func newSimpleModeGroupRouter(svc *stubAdminService) *gin.Engine {
-	h := NewGroupHandlerWithConfig(svc, nil, nil, nil, &config.Config{RunMode: config.RunModeSimple})
+	h := NewGroupHandlerWithConfig(svc, nil, nil, &config.Config{RunMode: config.RunModeSimple})
 	r := gin.New()
 	r.GET("/groups", h.List)
 	r.GET("/groups/all", h.GetAll)

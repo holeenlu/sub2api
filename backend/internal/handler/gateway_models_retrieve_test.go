@@ -70,34 +70,45 @@ func TestRetrieveModelMatchesVisibleCatalogue(t *testing.T) {
 	}
 }
 
-func TestRetrieveModelPreservesMetadata(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Params = gin.Params{{Key: "model", Value: "special-model"}}
-	writeRetrievedModel(c, []byte(`{"data":[{"id":"special-model","owned_by":"source-owner","created":123,"extra":{"context":999}}]}`))
-	require.Equal(t, http.StatusOK, recorder.Code)
-	require.JSONEq(t, `{"id":"special-model","owned_by":"source-owner","created":123,"extra":{"context":999}}`, recorder.Body.String())
-}
-
-func TestHiddenModelsListAndRetrieveExposePresentationNotExtraGrants(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	group := &service.Group{ID: 71, Platform: service.PlatformOpenAI,
-		ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"codex-auto-review", "gpt-reserve"}}}
-	h := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{
-		group.ID: {{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
-			Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{
-				"model_mapping": map[string]any{"codex-auto-review": "codex-auto-review", "gpt-reserve": "gpt-reserve"},
-			}}},
-	}})
-	for _, id := range group.ModelAllowlist.Models {
-		rec := requestModelForTest(h, group, id, "")
-		require.Equal(t, http.StatusOK, rec.Code)
-		var model map[string]any
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &model))
-		require.Equal(t, id, model["id"])
-		require.Equal(t, "hide", model["visibility"])
-		require.Equal(t, "background", model["model_purpose"])
+func TestRetrievePinnedModelPreservesMetadataFilteringAndErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		selected   []string
+		wantStatus int
+	}{
+		{name: "metadata", wantStatus: http.StatusOK},
+		{name: "hidden", selected: []string{"other-model"}, wantStatus: http.StatusNotFound},
+		{name: "upstream failure", status: http.StatusServiceUnavailable, wantStatus: http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &codexModelsPinnedHTTPUpstream{bodies: map[int64]string{
+				2: `{"data":[{"id":"special-model","ID":"not-a-model-id","owned_by":"source-owner","created":123,"extra":{"context":999}}]}`,
+			}, statuses: map[int64]int{}}
+			if tc.status != 0 {
+				upstream.statuses[2] = tc.status
+			}
+			codex := newPinnedCodexTestHandler([]service.Account{newPinnedCodexAccount(2, service.StatusActive, true, false)}, upstream, 3)
+			h := &GatewayHandler{openAIGatewayService: codex.gatewayService, maxAccountSwitches: 3}
+			group := &service.Group{ID: 72, Platform: service.PlatformOpenAI,
+				ModelAllowlist:            service.GroupModelAllowlist{Enabled: len(tc.selected) > 0, Models: tc.selected},
+				CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{2}}}
+			got := requestModelForTest(h, group, "special-model", "collection-etag")
+			require.Equal(t, tc.wantStatus, got.Code, got.Body.String())
+			if tc.wantStatus == http.StatusOK {
+				list := requestModelForTest(h, group, "", "")
+				var catalog struct {
+					Data []json.RawMessage `json:"data"`
+				}
+				require.NoError(t, json.Unmarshal(list.Body.Bytes(), &catalog))
+				require.JSONEq(t, string(catalog.Data[0]), got.Body.String())
+				require.Contains(t, got.Body.String(), `"owned_by":"source-owner"`)
+				require.Contains(t, got.Body.String(), `"created":123`)
+				again := requestModelForTest(h, group, "special-model", list.Header().Get("ETag"))
+				require.Equal(t, http.StatusOK, again.Code)
+				require.Empty(t, again.Header().Get("ETag"))
+				require.Equal(t, http.StatusNotFound, requestModelForTest(h, group, "not-a-model-id", "").Code)
+			}
+		})
 	}
-	group.ModelAllowlist.Models = []string{"codex-auto-review"}
-	require.Equal(t, http.StatusNotFound, requestModelForTest(h, group, "gpt-reserve", "").Code)
 }

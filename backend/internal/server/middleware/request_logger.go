@@ -13,11 +13,6 @@ import (
 
 const requestIDHeader = "X-Request-ID"
 
-func requestLogPath(path string) string {
-
-	return path
-}
-
 // RequestLogger 在请求入口注入 request-scoped logger。
 func RequestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -40,7 +35,7 @@ func RequestLogger() gin.HandlerFunc {
 			zap.String("component", "http"),
 			zap.String("request_id", requestID),
 			zap.String("client_request_id", strings.TrimSpace(clientRequestID)),
-			zap.String("path", requestLogPath(c.Request.URL.Path)),
+			zap.String("path", c.Request.URL.Path),
 			zap.String("method", c.Request.Method),
 		)
 

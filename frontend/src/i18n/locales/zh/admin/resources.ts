@@ -47,6 +47,9 @@ export default {
       createProxy: '添加代理',
       editProxy: '编辑代理',
       deleteProxy: '删除代理',
+      ad: {
+        inline: '正在寻找合适的代理 IP？'
+      },
       deleteConfirmMessage: "确定要删除代理 '{name}' 吗？",
       testProxy: '测试代理',
       dataImport: '导入',
@@ -551,15 +554,6 @@ export default {
       clickToViewBalance: '点击查看充值记录',
       failedToLoadUser: '加载用户信息失败',
       userDeletedBadge: '已删除',
-      keyRanking: {
-        subtitle: '按当前筛选与时间范围统计每把 API 密钥的 Token 用量',
-        rowHint: '点击查看该密钥的用量明细',
-        keyCount: '共 {count} 把密钥',
-        columns: {
-          key: '密钥',
-          user: '所属用户'
-        }
-      },
       tokenRanking: {
         subtitle: '按当前筛选与时间范围统计每个用户的 Token 用量',
         rowHint: '点击查看该用户的用量明细',

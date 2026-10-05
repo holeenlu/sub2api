@@ -81,14 +81,12 @@ func (s *adminServiceImpl) validateSimpleModeGroupAccess(group *Group) error {
 	return nil
 }
 
-// GetGroupModelsListCandidates 返回候选模型以及解析后的平台。平台解析（空则读
-// 分组、再空则默认 anthropic）只能有一份，调用方拿到的平台必须与候选口径一致。
-func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, string, error) {
+func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, error) {
 	platform = strings.TrimSpace(platform)
 	if id > 0 {
 		group, err := s.groupRepo.GetByIDLite(ctx, id)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		if platform == "" {
 			platform = group.Platform
@@ -98,14 +96,14 @@ func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id 
 		platform = PlatformAnthropic
 	}
 
-	candidates := DefaultModelsListCandidateIDs(platform)
+	candidates := defaultModelsListCandidateIDs(platform)
 	if id <= 0 || s.accountRepo == nil {
-		return candidates, platform, nil
+		return candidates, nil
 	}
 
 	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, id)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	seen := make(map[string]struct{}, len(candidates))
@@ -132,7 +130,7 @@ func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id 
 			candidates = append(candidates, model)
 		}
 	}
-	return candidates, platform, nil
+	return candidates, nil
 }
 
 func (s *adminServiceImpl) ListCompositeRoutes(ctx context.Context, groupID int64) ([]CompositeModelRoute, error) {
@@ -278,9 +276,8 @@ func compositeRouteFromInput(groupID int64, input CompositeRouteInput) (*Composi
 	}, nil
 }
 
-func DefaultModelsListCandidateIDs(platform string) []string {
+func defaultModelsListCandidateIDs(platform string) []string {
 	switch platform {
-
 	case PlatformOpenAI:
 		return openai.DefaultModelIDs()
 	case PlatformGemini:
@@ -300,26 +297,16 @@ func DefaultModelsListCandidateIDs(platform string) []string {
 		return xai.DefaultModelIDs()
 	case PlatformOpenCodeGo:
 		return DefaultOpenCodeGoModelIDs()
-	case PlatformKimi:
-		return []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "kimi-k2", "kimi-for-coding", "kimi-latest", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"}
-	case PlatformZhipu:
-		return []string{"glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-x", "glm-4.5-air", "glm-4.5-flash", "glm-4", "glm-4v", "glm-4-plus", "glm-4-0520", "glm-4-air", "glm-4-airx", "glm-4-long", "glm-4-flash", "glm-4v-plus", "glm-3-turbo", "glm-4-alltools", "chatglm_turbo", "chatglm_pro", "chatglm_std", "chatglm_lite", "cogview-3", "cogvideo"}
-	case PlatformDeepseek:
-		return []string{"deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-flash", "deepseek-coder", "deepseek-v3", "deepseek-v3-0324", "deepseek-r1", "deepseek-r1-0528", "deepseek-r1-distill-qwen-32b", "deepseek-r1-distill-qwen-14b", "deepseek-r1-distill-qwen-7b", "deepseek-r1-distill-llama-70b", "deepseek-r1-distill-llama-8b"}
-	case PlatformMiniMax:
-		return []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2", "abab6.5-chat", "abab6.5s-chat", "abab6.5s-chat-pro", "abab6-chat", "abab5.5-chat", "abab5.5s-chat"}
 	case PlatformTypeSafe:
 		return []string{typesafe.JevLatestModel}
 	case PlatformComposite:
 		return compositeDefaultModelsListCandidateIDs()
-	case PlatformAnthropic, "":
+	default:
 		ids := make([]string, 0, len(claude.DefaultModels))
 		for _, model := range claude.DefaultModels {
 			ids = append(ids, model.ID)
 		}
 		return ids
-	default:
-		return nil
 	}
 }
 
@@ -336,7 +323,7 @@ func compositeDefaultModelsListCandidateIDs() []string {
 	// through /v1/systemone); groups with TypeSafe accounts still get it from the
 	// account model mappings collected by GetGroupModelsListCandidates.
 	for _, platform := range []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo} {
-		for _, id := range DefaultModelsListCandidateIDs(platform) {
+		for _, id := range defaultModelsListCandidateIDs(platform) {
 			if _, ok := seen[id]; ok {
 				continue
 			}
@@ -394,9 +381,6 @@ func normalizeUpdateGroupInputForSimpleMode(input *UpdateGroupInput) {
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
-	if IsUnsupportedPlatform(input.Platform) {
-		return nil, ErrUnsupportedPlatform
-	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && NormalizeGroupPlatform(input.Platform) == PlatformComposite {
 		return nil, infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite groups are not supported in simple mode")
 	}
@@ -408,11 +392,10 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 
 	platform := NormalizeGroupPlatform(input.Platform)
-	// Account bindings are created after the group, so an enabled fixed
-	// manifest source cannot be validated on this request. Configure it from
-	// the model catalog page after binding OpenAI accounts.
+	// 固定账号 manifest 配置：账号绑定发生在创建之后，创建时无法校验成员关系，
+	// 拒绝开启并在创建后的编辑里配置。
 	if normalizeCodexModelsManifestConfig(platform, input.CodexModelsManifestConfig).Enabled {
-		return nil, infraerrors.New(http.StatusBadRequest, "INVALID_CODEX_MODELS_MANIFEST_CONFIG", "codex models manifest config cannot be enabled at group creation; configure it after binding accounts")
+		return nil, infraerrors.New(http.StatusBadRequest, "INVALID_CODEX_MODELS_MANIFEST_CONFIG", "codex models manifest config cannot be enabled at group creation; configure it after creation in the group editor")
 	}
 	modelPricing, err := normalizeGroupModelPricing(platform, input.ModelPricing)
 	if err != nil {
@@ -527,16 +510,6 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 			return nil, err
 		}
 	}
-	fallbackOnNoAccount := input.FallbackGroupIDOnNoAccount
-	if fallbackOnNoAccount != nil && *fallbackOnNoAccount <= 0 {
-		fallbackOnNoAccount = nil
-	}
-	// 校验无可用账号兜底分组
-	if fallbackOnNoAccount != nil {
-		if err := s.validateFallbackGroupOnNoAccount(ctx, 0, platform, *fallbackOnNoAccount, true); err != nil {
-			return nil, err
-		}
-	}
 
 	// MCPXMLInject：默认为 true，仅当显式传入 false 时关闭
 	mcpXMLInject := true
@@ -628,7 +601,6 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ClaudeCodeOnly:                  input.ClaudeCodeOnly,
 		FallbackGroupID:                 input.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: fallbackOnInvalidRequest,
-		FallbackGroupIDOnNoAccount:      fallbackOnNoAccount,
 		ModelRouting:                    input.ModelRouting,
 		MCPXMLInject:                    mcpXMLInject,
 		SupportedModelScopes:            input.SupportedModelScopes,
@@ -707,64 +679,6 @@ func normalizePrice(price *float64) *float64 {
 	return price
 }
 
-// fallbackChainSpec 描述一条兜底链怎么走。两种兜底（降级分组、无可用账号兜底）
-// 的链遍历骨架完全一样——visited 判环、GetByIDLite 逐跳、取下一跳——差别只在
-// 指针字段、首跳的附加校验、跳数上限与错误文案。
-type fallbackChainSpec struct {
-	// errPrefix 拼在固定错误文案前面，例如 "fallback " / "no-account fallback "。
-	errPrefix string
-	// maxHops <= 0 表示不限跳数，靠 visited 判环终止。
-	maxHops int
-	// next 取出某一跳的下一跳指针，nil 表示链到此为止。
-	next func(*Group) *int64
-	// firstHop 只对直接目标生效的附加校验（状态、claude_code_only 等）。
-	firstHop func(*Group) error
-	// everyHop 对链上每一跳都生效的校验（如平台）：运行时链走到异平台分组会静默
-	// 截断，只校验首跳的话后面几跳的错误配置保存时不会有任何提示。
-	everyHop func(*Group) error
-}
-
-// validateFallbackChain 沿兜底链逐跳回源，检测成环、跳数超限与链上分组缺失。
-func (s *adminServiceImpl) validateFallbackChain(ctx context.Context, currentGroupID, fallbackGroupID int64, spec fallbackChainSpec) error {
-	visited := map[int64]struct{}{}
-	nextID := fallbackGroupID
-	hops := 0
-	for {
-		if _, seen := visited[nextID]; seen {
-			return fmt.Errorf("%sgroup cycle detected", spec.errPrefix)
-		}
-		visited[nextID] = struct{}{}
-		if currentGroupID > 0 && nextID == currentGroupID {
-			return fmt.Errorf("%sgroup cycle detected", spec.errPrefix)
-		}
-		hops++
-		if spec.maxHops > 0 && hops > spec.maxHops {
-			return fmt.Errorf("%schain exceeds %d hops", spec.errPrefix, spec.maxHops)
-		}
-
-		fallbackGroup, err := s.groupRepo.GetByIDLite(ctx, nextID)
-		if err != nil {
-			return fmt.Errorf("%sgroup not found: %w", spec.errPrefix, err)
-		}
-		if nextID == fallbackGroupID && spec.firstHop != nil {
-			if hopErr := spec.firstHop(fallbackGroup); hopErr != nil {
-				return hopErr
-			}
-		}
-		if spec.everyHop != nil {
-			if hopErr := spec.everyHop(fallbackGroup); hopErr != nil {
-				return hopErr
-			}
-		}
-
-		next := spec.next(fallbackGroup)
-		if next == nil {
-			return nil
-		}
-		nextID = *next
-	}
-}
-
 // validateFallbackGroup 校验降级分组的有效性
 // currentGroupID: 当前分组 ID（新建时为 0）
 // fallbackGroupID: 降级分组 ID
@@ -774,17 +688,33 @@ func (s *adminServiceImpl) validateFallbackGroup(ctx context.Context, currentGro
 		return fmt.Errorf("cannot set self as fallback group")
 	}
 
-	return s.validateFallbackChain(ctx, currentGroupID, fallbackGroupID, fallbackChainSpec{
-		errPrefix: "fallback ",
-		next:      func(g *Group) *int64 { return g.FallbackGroupID },
-		firstHop: func(g *Group) error {
-			// 降级分组不能启用 claude_code_only，否则会造成死循环
-			if g.ClaudeCodeOnly {
-				return fmt.Errorf("fallback group cannot have claude_code_only enabled")
-			}
+	visited := map[int64]struct{}{}
+	nextID := fallbackGroupID
+	for {
+		if _, seen := visited[nextID]; seen {
+			return fmt.Errorf("fallback group cycle detected")
+		}
+		visited[nextID] = struct{}{}
+		if currentGroupID > 0 && nextID == currentGroupID {
+			return fmt.Errorf("fallback group cycle detected")
+		}
+
+		// 检查降级分组是否存在
+		fallbackGroup, err := s.groupRepo.GetByIDLite(ctx, nextID)
+		if err != nil {
+			return fmt.Errorf("fallback group not found: %w", err)
+		}
+
+		// 降级分组不能启用 claude_code_only，否则会造成死循环
+		if nextID == fallbackGroupID && fallbackGroup.ClaudeCodeOnly {
+			return fmt.Errorf("fallback group cannot have claude_code_only enabled")
+		}
+
+		if fallbackGroup.FallbackGroupID == nil {
 			return nil
-		},
-	})
+		}
+		nextID = *fallbackGroup.FallbackGroupID
+	}
 }
 
 // validateFallbackGroupOnInvalidRequest 校验无效请求兜底分组的有效性
@@ -818,52 +748,10 @@ func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Con
 	return nil
 }
 
-// validateFallbackGroupOnNoAccount 校验无可用账号兜底分组的有效性。
-// 与无效请求兜底不同，本兜底只借账号池、不改计费归属，因此不限制平台种类，
-// 也不限制订阅类型；但目标分组必须与当前分组同平台——选号本身按平台过滤，
-// 配一个异平台分组永远选不出账号，属于无效配置，直接在保存时拦掉。
-// 目标也不能是 claude_code_only：非 Claude Code 客户端到了那一跳会被
-// ErrClaudeCodeOnly 挡住，兜底等于没配。
-// 兜底链允许多级，这里沿链做成环检测并按 MaxNoAccountFallbackHops 限长，
-// 与运行时截断口径一致。
-// currentGroupID: 当前分组 ID（新建时为 0）
-// platform: 当前分组的有效平台
-// requireActive: 目标是否必须为 active。只有选定一个新目标时才要求；沿用旧值时
-// 目标可能早已被停用，此时复验只会挡住与兜底无关的编辑。
-func (s *adminServiceImpl) validateFallbackGroupOnNoAccount(ctx context.Context, currentGroupID int64, platform string, fallbackGroupID int64, requireActive bool) error {
-	if currentGroupID > 0 && currentGroupID == fallbackGroupID {
-		return fmt.Errorf("cannot set self as no-account fallback group")
-	}
-
-	return s.validateFallbackChain(ctx, currentGroupID, fallbackGroupID, fallbackChainSpec{
-		errPrefix: "no-account fallback ",
-		maxHops:   MaxNoAccountFallbackHops,
-		next:      func(g *Group) *int64 { return g.FallbackGroupIDOnNoAccount },
-		firstHop: func(g *Group) error {
-			if requireActive && g.Status != StatusActive {
-				return fmt.Errorf("no-account fallback group is not active")
-			}
-			if g.ClaudeCodeOnly {
-				return fmt.Errorf("no-account fallback group cannot have claude_code_only enabled")
-			}
-			return nil
-		},
-		everyHop: func(g *Group) error {
-			if g.Platform != platform {
-				return fmt.Errorf("no-account fallback group %d must be on the same platform: %s", g.ID, platform)
-			}
-			return nil
-		},
-	})
-}
-
 func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *UpdateGroupInput) (*Group, error) {
 	group, err := s.groupRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
-	}
-	if IsUnsupportedPlatform(group.Platform) || IsUnsupportedPlatform(input.Platform) {
-		return nil, ErrUnsupportedPlatform
 	}
 	if err := s.validateSimpleModeGroupAccess(group); err != nil {
 		return nil, err
@@ -1073,29 +961,6 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	group.FallbackGroupIDOnInvalidRequest = fallbackOnInvalidRequest
 
-	// 无可用账号兜底分组：只校验真正变更过的值。管理端的编辑弹窗会回填这一项并
-	// 无条件把它序列化进 PUT 载荷，所以「没动这一项」在接口上表现为「重新提交同
-	// 一个值」——它必须与不传字段等价，否则目标分组被停用或删除之后，改名字、改
-	// 价格这些无关编辑全都保存不了。运行时对非 active 目标会自行跳过。
-	// 例外是本次同时改了平台：兜底目标从此永远选不出账号，要重新校验（但仍不要求
-	// 它 active，那与平台无关）。传入 0 或负数表示清除。
-	if input.FallbackGroupIDOnNoAccount != nil {
-		if *input.FallbackGroupIDOnNoAccount > 0 {
-			unchanged := group.FallbackGroupIDOnNoAccount != nil &&
-				*group.FallbackGroupIDOnNoAccount == *input.FallbackGroupIDOnNoAccount
-			if !unchanged || group.Platform != previousPlatform {
-				if err := s.validateFallbackGroupOnNoAccount(
-					ctx, id, group.Platform, *input.FallbackGroupIDOnNoAccount, !unchanged,
-				); err != nil {
-					return nil, err
-				}
-			}
-			group.FallbackGroupIDOnNoAccount = input.FallbackGroupIDOnNoAccount
-		} else {
-			group.FallbackGroupIDOnNoAccount = nil
-		}
-	}
-
 	// 模型路由配置
 	if input.ModelRouting != nil {
 		group.ModelRouting = input.ModelRouting
@@ -1177,6 +1042,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.AllowLive = false
 	}
 	sanitizeGroupReasoningEffortPolicy(group)
+	// 固定账号 manifest 配置：按最终平台归一化（切出 openai 平台时静默归零，
+	// 与 ForceOpenAIFast 同一收口）；校验仅在本次显式携带配置时进行，
+	// 避免脏 ID 阻塞无关字段更新。
 	group.CodexModelsManifestConfig = normalizeCodexModelsManifestConfig(group.Platform, group.CodexModelsManifestConfig)
 	if input.CodexModelsManifestConfig != nil {
 		if err := s.validateCodexModelsManifestConfig(ctx, id, group.CodexModelsManifestConfig); err != nil {

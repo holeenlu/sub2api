@@ -320,7 +320,6 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err != nil {
 		return nil, fmt.Errorf("normalize duplicate account extra: %w", err)
 	}
-
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
@@ -412,14 +411,9 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
-	if IsUnsupportedPlatform(input.Platform) {
-		return nil, ErrUnsupportedPlatform
-	}
-
 	if input.Platform == PlatformTypeSafe && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
-	accountExtra = MergeOpenAICodexTicketExtra(accountExtra, nil)
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
@@ -429,9 +423,6 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
 	delete(accountExtra, OpenCodeGoUsageAutoRefreshExtraKey)
 	delete(accountExtra, OpenCodeGoUsageSnapshotExtraKey)
-	delete(accountExtra, "model_catalog_policy")
-	delete(accountExtra, "model_catalog_visibility")
-	delete(accountExtra, "openai_oauth_ws_sse_acceleration")
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
 	account := &Account{
 		Name:        input.Name,
@@ -488,12 +479,8 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
-
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
-		return nil, err
-	}
-	if err := ValidateOpenAIRequestTimezoneExtra(input.Platform, accountExtra); err != nil {
 		return nil, err
 	}
 	accountExtra, err = normalizeGrokMediaEligibilityExtra(input.Platform, accountExtra)
@@ -545,14 +532,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
-	if err := validateOpenAIAPIKeyIdentityExtra(account, account.Extra); err != nil {
-		return nil, err
-	}
-
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
-
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
@@ -593,48 +575,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
-
-	return s.updateAccount(ctx, id, input, MergePreservingSensitiveCreds)
-}
-
-// ApplyOAuthCredentials 把一次授权换发的整套 token 落到账号上。
-//
-// 与 UpdateAccount 只差凭据的合并语义：编辑账号用"缺失即保留"（前端表单已脱敏，
-// 不会带回 token），换发凭据用"整套替换"——否则把一个 OAuth 账号重新授权成直接导入
-// 的 setup-token 时，旧 refresh_token 会留下、expires_at 会被删掉，账号同时持有长期
-// token 与一套不属于它的历史刷新字段。虽然刷新入口也会按 setup-token 类型拒绝，落库时
-// 仍应清掉这些字段，避免错误状态继续传播。model_mapping 等非 token 键原样保留。
-func (s *adminServiceImpl) ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error) {
-	if input == nil || len(input.Credentials) == 0 {
-		return nil, infraerrors.BadRequest("INVALID_OAUTH_CREDENTIALS", "oauth credentials must not be empty")
-	}
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
-	}
-	if !account.IsOAuth() {
-		return nil, infraerrors.BadRequest("NOT_OAUTH", "cannot apply oauth credentials to non-OAuth account")
-	}
-	return s.updateAccount(ctx, id, &UpdateAccountInput{
-		Type:        input.Type,
-		Credentials: input.Credentials,
-	}, ReplaceOAuthTokenCredentials)
-}
-
-// updateAccount 是 UpdateAccount / ApplyOAuthCredentials 的公共实现；
-// mergeCredentials 决定 input.Credentials 如何合并进已有凭据。
-func (s *adminServiceImpl) updateAccount(
-	ctx context.Context,
-	id int64,
-	input *UpdateAccountInput,
-	mergeCredentials func(existing, incoming map[string]any) map[string]any,
-) (*Account, error) {
-	account, err := s.accountRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if IsUnsupportedPlatform(account.Platform) {
-		return nil, ErrUnsupportedPlatform
 	}
 	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
@@ -696,7 +639,6 @@ func (s *adminServiceImpl) updateAccount(
 	if input.Name != "" {
 		account.Name = input.Name
 	}
-
 	if input.Type != "" {
 		account.Type = input.Type
 	}
@@ -708,9 +650,7 @@ func (s *adminServiceImpl) updateAccount(
 	} else if len(input.Credentials) > 0 {
 		// 敏感子键采用"incoming 没提供就保留"的合并语义：前端响应已脱敏，
 		// 全对象 PUT 编辑时不会再带回 token，避免覆盖时清空已有凭证。
-
-		account.Credentials = mergeCredentials(account.Credentials, input.Credentials)
-
+		account.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
 		// 校验并规范化请求头覆写配置（header 名小写化、格式检查）
 		if err := NormalizeHeaderOverrideCredentials(account.Credentials); err != nil {
 			return nil, err
@@ -745,10 +685,6 @@ func (s *adminServiceImpl) updateAccount(
 		delete(normalizedExtra, OllamaCloudUsageSnapshotExtraKey)
 		delete(normalizedExtra, OpenCodeGoUsageAutoRefreshExtraKey)
 		delete(normalizedExtra, OpenCodeGoUsageSnapshotExtraKey)
-		// Retired catalogue permissions cannot be restored through arbitrary extra fields.
-		delete(normalizedExtra, "model_catalog_policy")
-		delete(normalizedExtra, "model_catalog_visibility")
-		delete(normalizedExtra, "openai_oauth_ws_sse_acceleration")
 		// 保留配额用量和专用服务受管字段，防止普通账号编辑意外覆盖。
 		for _, key := range []string{
 			"quota_used",
@@ -771,7 +707,6 @@ func (s *adminServiceImpl) updateAccount(
 				normalizedExtra[key] = v
 			}
 		}
-		normalizedExtra = MergeOpenAICodexTicketExtra(normalizedExtra, account.Extra)
 		normalizedExtra = prepareCodexFingerprintExtraForUpdate(account, normalizedExtra)
 		account.Extra = normalizedExtra
 		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
@@ -784,9 +719,6 @@ func (s *adminServiceImpl) updateAccount(
 		if account.Platform == PlatformAntigravity && !wasOveragesEnabled && account.IsOveragesEnabled() {
 			delete(account.Extra, modelRateLimitsKey)
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
-		}
-		if err := ValidateOpenAIRequestTimezoneExtra(account.Platform, account.Extra); err != nil {
-			return nil, err
 		}
 		// 校验并预计算固定时间重置的下次重置时间
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
@@ -917,7 +849,6 @@ func (s *adminServiceImpl) updateAccount(
 		if err := s.validateGroupIDsExist(ctx, *input.GroupIDs); err != nil {
 			return nil, err
 		}
-
 		if err := s.ValidateAccountGroupBindings(ctx, *input.GroupIDs); err != nil {
 			return nil, err
 		}
@@ -928,10 +859,6 @@ func (s *adminServiceImpl) updateAccount(
 				return nil, err
 			}
 		}
-	}
-
-	if err := validateOpenAIAPIKeyIdentityExtra(account, account.Extra); err != nil {
-		return nil, err
 	}
 
 	billingSettingsAppliedAtomically := false
@@ -999,17 +926,6 @@ func (s *adminServiceImpl) updateAccount(
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
-
-	if _, exists := updates[OpenAIAPIKeyCodexIdentityKey]; exists {
-		account, err := s.accountRepo.GetByID(ctx, id)
-		if err != nil {
-			return err
-		}
-		if err := validateOpenAIAPIKeyIdentityExtra(account, updates); err != nil {
-			return err
-		}
-	}
-	updates = MergeOpenAICodexTicketExtra(updates, nil)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
@@ -1020,8 +936,6 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	delete(updates, OllamaCloudUsageSnapshotExtraKey)
 	delete(updates, OpenCodeGoUsageAutoRefreshExtraKey)
 	delete(updates, OpenCodeGoUsageSnapshotExtraKey)
-	delete(updates, "model_catalog_policy")
-	delete(updates, "model_catalog_visibility")
 	if _, exists := updates[openAILongContextBillingEnabledKey]; exists {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {
@@ -1040,9 +954,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
-
 	// Managed probe/session state may only enter through dedicated typed endpoints.
-	input.Extra = MergeOpenAICodexTicketExtra(input.Extra, nil)
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
 	delete(input.Extra, UpstreamBillingProbeEnabledExtraKey)
@@ -1053,12 +965,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	delete(input.Extra, OllamaCloudUsageSnapshotExtraKey)
 	delete(input.Extra, OpenCodeGoUsageAutoRefreshExtraKey)
 	delete(input.Extra, OpenCodeGoUsageSnapshotExtraKey)
-	delete(input.Extra, "model_catalog_policy")
-	delete(input.Extra, "model_catalog_visibility")
-	delete(input.Extra, "openai_oauth_ws_sse_acceleration")
 
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
-		accountIDs, err := s.ResolveBulkUpdateTargetIDs(ctx, input.Filters)
+		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters)
 		if err != nil {
 			return nil, err
 		}
@@ -1091,7 +1000,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || input.GroupIDs != nil || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1100,9 +1009,6 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 	targetsByID := make(map[int64]*Account, len(cachedTargets))
 	for _, account := range cachedTargets {
-		if account != nil && IsUnsupportedPlatform(account.Platform) {
-			return nil, ErrUnsupportedPlatform
-		}
 		if account != nil {
 			targetsByID[account.ID] = account
 		}
@@ -1129,7 +1035,6 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// UpdateAccount 守卫对齐)。覆盖显式 IDs 与 filter 解析出的 IDs(此处 AccountIDs 已解析完成)。
 	if len(input.Credentials) > 0 {
 		for _, acc := range cachedTargets {
-
 			if acc != nil && acc.IsCredentialShadow() {
 				return nil, infraerrors.Newf(http.StatusBadRequest, "SPARK_SHADOW_NO_CREDENTIALS",
 					"spark shadow account %d cannot hold credentials; manage credentials on the parent account", acc.ID)
@@ -1194,7 +1099,6 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	// 校验并规范化请求头覆写配置（批量路径为 JSONB 顶层 key 合并，直接校验增量即可）
-
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
@@ -1329,8 +1233,7 @@ func upstreamBillingProbeIdentity(account *Account) map[string]any {
 	return identity
 }
 
-// ResolveBulkUpdateTargetIDs 把批量筛选条件展开成账号 ID 列表。
-func (s *adminServiceImpl) ResolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters) ([]int64, error) {
+func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters) ([]int64, error) {
 	if filters == nil {
 		return nil, nil
 	}

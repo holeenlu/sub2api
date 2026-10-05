@@ -293,7 +293,6 @@ func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		dashboard.POST("/users-usage", h.Admin.Dashboard.GetBatchUsersUsage)
 		dashboard.POST("/api-keys-usage", h.Admin.Dashboard.GetBatchAPIKeysUsage)
 		dashboard.GET("/user-breakdown", h.Admin.Dashboard.GetUserBreakdown)
-		dashboard.GET("/api-key-breakdown", h.Admin.Dashboard.GetAPIKeyBreakdown)
 		dashboard.POST("/aggregation/backfill", h.Admin.Dashboard.BackfillAggregation)
 	}
 }
@@ -334,7 +333,6 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.GET("/capacity-summary", h.Admin.Group.GetCapacitySummary)
 		groups.GET("/live-capability", h.Admin.Group.GetLiveCapability)
 		groups.PUT("/sort-order", h.Admin.Group.UpdateSortOrder)
-		groups.GET("/:id/model-plaza-preview", h.ModelPlaza.Preview)
 		groups.GET("/:id/model-allowlist-candidates", h.Admin.Group.GetGroupModelAllowlistCandidates)
 		groups.GET("/:id/composite-routes", h.Admin.Group.ListCompositeRoutes)
 		groups.POST("/:id/composite-routes", h.Admin.Group.CreateCompositeRoute)
@@ -357,22 +355,9 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
-	if h.Admin.ModelCatalog != nil {
-		catalog := admin.Group("/model-catalog")
-		catalog.GET("", h.Admin.ModelCatalog.Catalog)
-		catalog.PUT("/models", h.Admin.ModelCatalog.SaveModel)
-		catalog.GET("/pricing-audit", h.Admin.ModelCatalog.PricingAudits)
-		catalog.POST("/refresh", h.Admin.ModelCatalog.Refresh)
-		catalog.POST("/sync", h.Admin.ModelCatalog.Sync)
-		catalog.GET("/jobs/:job_id", h.Admin.ModelCatalog.Job)
-		catalog.GET("/settings", h.Admin.ModelCatalog.Settings)
-		catalog.PUT("/settings", h.Admin.ModelCatalog.SaveSettings)
-		catalog.GET("/accounts/:id/ticket-models", h.Admin.ModelCatalog.TicketModels)
-	}
 	accounts := admin.Group("/accounts")
 	{
 		accounts.GET("", h.Admin.Account.List)
-		accounts.GET("/openai-request-timezones", h.Admin.Account.GetOpenAIRequestTimezones)
 		accounts.GET("/upstream-billing-rates", h.Admin.Account.GetUpstreamBillingRates)
 		accounts.GET("/upstream-billing-probe/settings", h.Admin.Account.GetUpstreamBillingProbeSettings)
 		accounts.PUT("/upstream-billing-probe/settings", h.Admin.Account.UpdateUpstreamBillingProbeSettings)
@@ -381,23 +366,13 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.PUT("/ollama-cloud-usage/settings", h.Admin.Account.UpdateOllamaCloudUsageSettings)
 		accounts.GET("/opencode-go-usage/settings", h.Admin.Account.GetOpenCodeGoUsageSettings)
 		accounts.PUT("/opencode-go-usage/settings", h.Admin.Account.UpdateOpenCodeGoUsageSettings)
+		accounts.POST("/codex-diagnostic-fingerprint/refresh", h.Admin.Account.RefreshDiagnosticFingerprint)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
-
-		accounts.GET("/codex-ticket-cadence", h.Admin.Account.GetCodexTicketCadence)
-		accounts.PUT("/codex-ticket-cadence", h.Admin.Account.UpdateCodexTicketCadence)
-		accounts.GET("/codex-ticket-fingerprint", h.Admin.Account.GetCodexFingerprintVersion)
-		accounts.POST("/codex-ticket-fingerprint/refresh", h.Admin.Account.RefreshCodexFingerprint)
-		accounts.GET("/:id/codex-ticket-history", h.Admin.Account.GetCodexTicketHistory)
-		accounts.GET("/:id/codex-ticket-events", h.Admin.Account.GetCodexTicketEvents)
-		accounts.GET("/:id/codex-ticket-invalidations", h.Admin.Account.ListCodexTicketInvalidations)
-		accounts.GET("/:id/codex-ticket-invalidations/:event_id", h.Admin.Account.GetCodexTicketInvalidation)
-		accounts.POST("/:id/codex-ticket-harvest", h.Admin.Account.HarvestCodexTicket)
-		accounts.POST("/:id/codex-ticket-diagnostic", h.Admin.Account.StartCodexDiagnosticRun)
-		accounts.GET("/:id/codex-ticket-diagnostic", h.Admin.Account.GetCodexDiagnosticPlan)
-		accounts.PUT("/:id/codex-ticket-diagnostic", h.Admin.Account.SaveCodexDiagnosticPlan)
-		accounts.GET("/:id/codex-ticket-diagnostic/history", h.Admin.Account.ListCodexDiagnosticRuns)
-		accounts.POST("/:id/codex-ticket-diagnostic/:run_id/cancel", h.Admin.Account.CancelCodexDiagnosticRun)
-		accounts.PUT("/:id/codex-ticket-participation", h.Admin.Account.SetCodexTicketParticipation)
+		accounts.POST("/:id/codex-diagnostic", h.Admin.Account.StartCodexDiagnosticRun)
+		accounts.GET("/:id/codex-diagnostic", h.Admin.Account.GetCodexDiagnosticPlan)
+		accounts.PUT("/:id/codex-diagnostic", h.Admin.Account.SaveCodexDiagnosticPlan)
+		accounts.GET("/:id/codex-diagnostic/history", h.Admin.Account.ListCodexDiagnosticRuns)
+		accounts.POST("/:id/codex-diagnostic/:run_id/cancel", h.Admin.Account.CancelCodexDiagnosticRun)
 		accounts.GET("/:id/claude/reset-credits", h.Admin.Account.ClaudeResetCredits)
 		// Same protection as the Codex reset-quota route (admin auth, audit, compliance guard).
 		accounts.POST("/:id/claude/reset-credits/redeem", h.Admin.Account.RedeemClaudeResetCredit)
@@ -440,8 +415,6 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.DELETE("/:id/temp-unschedulable", h.Admin.Account.ClearTempUnschedulable)
 		accounts.POST("/:id/schedulable", h.Admin.Account.SetSchedulable)
 		accounts.POST("/models/sync-upstream-preview", h.Admin.Account.SyncUpstreamModelsPreview)
-		accounts.POST("/models/sync-anthropic-bulk", h.Admin.Account.SyncAnthropicModelsBulk)
-		accounts.POST("/models/sync-upstream-bulk", h.Admin.Account.SyncUpstreamModelsBulk)
 		accounts.GET("/:id/models", h.Admin.Account.GetAvailableModels)
 		accounts.POST("/:id/models/sync-upstream", h.Admin.Account.SyncUpstreamModels)
 		accounts.POST("/batch", h.Admin.Account.BatchCreate)
@@ -463,12 +436,10 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 
 		// Claude OAuth routes
 		accounts.POST("/generate-auth-url", h.Admin.OAuth.GenerateAuthURL)
-		accounts.POST("/exchange-code", h.Admin.OAuth.ExchangeCode)
-		accounts.POST("/cookie-auth", h.Admin.OAuth.CookieAuth)
-		// Legacy: the three setup-token endpoints below are kept for API
-		// compatibility only; the admin UI imports `claude setup-token` output directly.
 		accounts.POST("/generate-setup-token-url", h.Admin.OAuth.GenerateSetupTokenURL)
+		accounts.POST("/exchange-code", h.Admin.OAuth.ExchangeCode)
 		accounts.POST("/exchange-setup-token-code", h.Admin.OAuth.ExchangeSetupTokenCode)
+		accounts.POST("/cookie-auth", h.Admin.OAuth.CookieAuth)
 		accounts.POST("/setup-token-cookie-auth", h.Admin.OAuth.SetupTokenCookieAuth)
 	}
 }
@@ -555,8 +526,6 @@ func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth
 	{
 		proxies.GET("", h.Admin.Proxy.List)
 		proxies.GET("/all", h.Admin.Proxy.GetAll)
-		proxies.GET("/codex-ticket-pool", h.Admin.Proxy.GetCodexTicketPool)
-		proxies.PUT("/codex-ticket-pool", h.Admin.Proxy.UpdateCodexTicketPool)
 		// 代理导出泄露账号密码原文——要求 step-up 2FA
 		proxies.GET("/data", gin.HandlerFunc(stepUpAuth), h.Admin.Proxy.ExportData)
 		proxies.POST("/data", h.Admin.Proxy.ImportData)
@@ -763,8 +732,6 @@ func registerUserAttributeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	admin.GET("/scheduled-test-plans/:id/results/:result_id", h.Admin.ScheduledTest.GetResult)
-
 	plans := admin.Group("/scheduled-test-plans")
 	{
 		plans.POST("", h.Admin.ScheduledTest.Create)

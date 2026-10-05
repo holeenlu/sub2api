@@ -92,52 +92,23 @@
       </div>
     </div>
 
-    <p v-if="catalogLoading" class="mb-2 text-xs text-gray-500" role="status">{{ t('modelCatalog.loading') }}</p>
-    <p v-else-if="catalogError" class="mb-2 text-xs text-amber-600" role="alert">{{ catalogError }}</p>
-    <p v-else-if="!catalogModels.length" class="mb-2 text-xs text-gray-500">{{ t('modelCatalog.notSynced') }}</p>
-    <p v-if="selectedRetiredModels.length" class="mb-2 text-xs text-amber-600" data-testid="retired-models">
-      {{ t('modelCatalog.retiredSelected', { models: selectedRetiredModels.join(', ') }) }}
-      <button type="button" class="ml-2 underline" @click="removeRetiredModels">{{ t('modelCatalog.removeRetired') }}</button>
-    </p>
-    <a href="/admin/model-catalog" target="_blank" rel="noopener" class="mb-3 inline-block text-xs text-primary-600 underline">{{ t('modelCatalog.manage') }}</a>
     <!-- Quick Actions -->
     <div class="mb-4 flex flex-wrap gap-2">
       <button
         type="button"
         @click="fillRelated"
-        :disabled="catalogLoading || !availableOptions.length"
         class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
       >
-        {{ t('modelCatalog.selectAvailable') }}
+        {{ t('admin.accounts.fillRelatedModels') }}
       </button>
       <button
         v-if="canSyncUpstream"
         type="button"
-        data-testid="sync-upstream-models"
         @click="syncUpstreamModels"
         :disabled="isSyncingUpstream"
         class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
       >
-        {{ isSyncingUpstream || catalogLoading ? t('admin.accounts.syncUpstreamModelsLoading') : t('modelCatalog.refresh') }}
-      </button>
-      <button
-        v-if="canSyncBatch"
-        type="button"
-        data-testid="sync-upstream-models-bulk"
-        @click="syncBatchModels"
-        :disabled="isSyncingBatch"
-        class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
-      >
-        {{ isSyncingBatch ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
-      </button>
-      <button
-        v-if="modelsOutsideLiveIntersection.length > 0"
-        type="button"
-        data-testid="replace-with-live-models"
-        @click="replaceWithLiveModels"
-        class="rounded-lg border border-amber-200 px-3 py-1.5 text-sm text-amber-600 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/30"
-      >
-        {{ t('admin.accounts.syncLiveAnthropicModelsReplace', { count: modelsOutsideLiveIntersection.length }) }}
+        {{ isSyncingUpstream ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
       </button>
       <button
         type="button"
@@ -148,27 +119,6 @@
       </button>
     </div>
 
-    <p v-if="canSyncBatch" class="mb-3 text-xs text-gray-500 dark:text-gray-400">
-      {{ t('admin.accounts.syncBulkUpstreamModelsHint') }}
-    </p>
-
-    <!-- Accounts that did not answer the live model sync -->
-    <div
-      v-if="liveFailures.length > 0"
-      data-testid="bulk-upstream-sync-failures"
-      class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
-    >
-      <p class="font-medium">
-        {{ t('admin.accounts.syncLiveAnthropicModelsFailures', { count: liveFailures.length }) }}
-      </p>
-      <ul class="mt-1 space-y-0.5">
-        <li v-for="failure in liveFailures" :key="failure.account_id">
-          {{ failure.name || `#${failure.account_id}` }} — {{ failure.error }}
-        </li>
-      </ul>
-    </div>
-
-    <button v-if="!canSyncUpstream && !canSyncBatch" type="button" class="mb-3 text-xs text-primary-600 underline" :disabled="catalogLoading" @click="loadCatalog()">{{ t('modelCatalog.refresh') }}</button>
     <!-- Custom Model Input -->
     <div class="mb-3">
       <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.accounts.customModelName') }}</label>
@@ -195,20 +145,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { accountsAPI } from '@/api/admin/accounts'
-import type {
-  AnthropicModelSyncFailure,
-  SyncUpstreamModelsBulkFilters,
-  SyncUpstreamPreviewParams
-} from '@/api/admin/accounts'
+import type { SyncUpstreamPreviewParams } from '@/api/admin/accounts'
 import { useClipboard } from '@/composables/useClipboard'
-import { extractApiErrorMessage } from '@/utils/apiError'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { getModelCatalog, refreshModelCatalog, type CatalogModel } from '@/api/admin/modelCatalog'
+import { allModels, getModelsByPlatform } from '@/composables/useModelWhitelist'
 
 const { t } = useI18n()
 
@@ -218,10 +163,6 @@ const props = defineProps<{
   platform?: string
   platforms?: string[]
   accountId?: number
-  /** Batch targets for the live upstream model sync (explicit selection). */
-  accountIds?: number[]
-  /** Batch targets for the live upstream model sync (filter selection). */
-  syncFilters?: SyncUpstreamModelsBulkFilters
   syncCredentials?: {
     platform: string
     type: string
@@ -283,93 +224,20 @@ const canSyncUpstream = computed(() => {
   return false
 })
 
-// A shared whitelist must only add models verified for every batch target.
-const canSyncBatch = computed(() =>
-  !props.accountId && !props.syncCredentials &&
-  ((props.accountIds?.length ?? 0) > 0 || Boolean(props.syncFilters)) &&
-  normalizedPlatforms.value.every(platform => upstreamSyncPlatforms.has(platform.toLowerCase()))
-)
-
-const isSyncingBatch = ref(false)
-const liveModels = ref<string[]>([])
-const liveFailures = ref<AnthropicModelSyncFailure[]>([])
-
-// 已勾选但不在实时交集里的条目。它们未必非法（映射别名、上游刚下架的旧模型都
-// 会落在这里），所以只提示、不自动删除。
-const modelsOutsideLiveIntersection = computed(() => {
-  if (liveModels.value.length === 0) return []
-  return props.modelValue.filter(model => !liveModels.value.includes(model) && !isMediaChoice(model))
-})
-
-let batchRequestVersion = 0
-onBeforeUnmount(() => { batchRequestVersion += 1 })
-
-watch(
-  () => [normalizedPlatforms.value.join(','), props.accountIds?.join(',') ?? '', props.syncFilters],
-  () => {
-    batchRequestVersion += 1
-    isSyncingBatch.value = false
-    liveModels.value = []
-    liveFailures.value = []
-  },
-  { deep: true, flush: 'sync' }
-)
-
-const catalogModels = ref<CatalogModel[]>([])
-const catalogLoading = ref(false)
-const catalogError = ref('')
-let catalogRequest = 0
-let catalogController: AbortController | undefined
-const retiredModels = computed(() => {
-  const available = new Set(availableOptions.value.map(model => model.value))
-  return new Set(catalogModels.value.filter(m => m.lifecycle === 'retired' && !available.has(m.id)).map(m => m.id))
-})
-const selectedRetiredModels = computed(() => props.modelValue.filter(id => retiredModels.value.has(id)))
-// These choices configure account supply; discovery evidence is shown in the
-// catalog admin page. Loading candidates never changes the saved policy.
 const availableOptions = computed(() => {
-  // Bulk model_mapping still uses names. Filter each platform's candidate
-  // before deduplicating names, so an active provider is not hidden by a retired peer.
-  const choices = new Map<string, { value: string; label: string }>()
-  for (const m of catalogModels.value) {
-    if (!m.disabled && m.lifecycle !== 'retired' && !choices.has(m.id)) {
-      choices.set(m.id, { value: m.id, label: m.display_name || m.id })
+  if (normalizedPlatforms.value.length === 0) {
+    return allModels
+  }
+
+  const allowedModels = new Set<string>()
+  for (const platform of normalizedPlatforms.value) {
+    for (const model of getModelsByPlatform(platform)) {
+      allowedModels.add(model)
     }
   }
-  return [...choices.values()]
+
+  return allModels.filter(model => allowedModels.has(model.value))
 })
-
-async function loadCatalog(refresh = false) {
-  const serial = ++catalogRequest
-  catalogController?.abort()
-  catalogController = new AbortController()
-  const signal = catalogController.signal
-  catalogLoading.value = true
-  catalogError.value = ''
-  try {
-    const results = props.accountId
-      ? [await (refresh ? refreshModelCatalog(props.accountId, signal, 'selection') : getModelCatalog({ account_id: props.accountId, view: 'selection' }, signal))]
-      : await Promise.all((normalizedPlatforms.value.length ? normalizedPlatforms.value : ['']).map(platform => getModelCatalog({ platform, view: 'selection' }, signal)))
-    if (serial !== catalogRequest) return
-    const entries = new Map<string, CatalogModel>()
-    for (const result of results) for (const entry of result.models) entries.set(`${entry.platform}\0${entry.id}`, entry)
-    catalogModels.value = [...entries.values()]
-  } catch (error) {
-    if (serial === catalogRequest && !(error instanceof DOMException && error.name === 'AbortError')) {
-      const reason = extractApiErrorMessage(error, '')
-      const knownReasons = ['authentication_unavailable', 'upstream_rate_limited', 'discovery_not_supported', 'upstream_timeout', 'catalog_busy', 'scope_changed', 'upstream_unavailable', 'catalog_unavailable']
-      catalogError.value = t('modelCatalog.loadFailed')
-      if (reason) catalogError.value += ` ${knownReasons.includes(reason) ? t(`modelCatalog.syncErrors.${reason}`) : reason}`
-    }
-  } finally { if (serial === catalogRequest) catalogLoading.value = false }
-}
-watch(() => [props.accountId, normalizedPlatforms.value.join(',')], () => {
-  catalogModels.value = []
-  void loadCatalog()
-}, { immediate: true })
-onBeforeUnmount(() => { ++catalogRequest; catalogController?.abort() })
-
-const removeRetiredModels = () => emit('update:modelValue', props.modelValue.filter(id => !retiredModels.value.has(id)))
 
 const filteredModels = computed(() => {
   const query = searchQuery.value.toLowerCase().trim()
@@ -421,35 +289,15 @@ const handleEnter = () => {
 }
 
 const fillRelated = () => {
-  const values = new Set(props.modelValue)
-  for (const model of availableOptions.value) {
-    const conflict = props.modelMappings?.some(mapping => mapping.from.trim() === model.value && mapping.to.trim() !== model.value)
-    if (!conflict) values.add(model.value)
+  const newModels = [...props.modelValue]
+  for (const platform of normalizedPlatforms.value) {
+    for (const model of getModelsByPlatform(platform)) {
+      if (!newModels.includes(model)) {
+        newModels.push(model)
+      }
+    }
   }
-  emit('update:modelValue', [...values])
-}
-
-function isMediaChoice(id: string): boolean {
-  return catalogModels.value.some(model => model.id === id && ['image', 'video'].includes(model.kind))
-}
-
-function applyDiscoveredChoices(models: CatalogModel[]) {
-  // Chat discovery may omit media endpoints. Keep media inventory visible;
-  // refreshing is not evidence that image/video supply has been withdrawn.
-  const existing = new Map(catalogModels.value.map(model => [model.id, model]))
-  const incoming = new Set(models.map(model => model.id))
-  catalogModels.value = [
-    ...catalogModels.value.filter(model => ['image', 'video'].includes(model.kind) && !incoming.has(model.id)),
-    ...models.map(model => {
-      const previous = existing.get(model.id)
-      return previous ? {
-        ...model,
-        kind: previous.kind === 'unknown' ? model.kind : previous.kind,
-        lifecycle: previous.lifecycle === 'retired' ? previous.lifecycle : model.lifecycle,
-        metadata: { ...previous.metadata, ...model.metadata }
-      } : model
-    })
-  ]
+  emit('update:modelValue', newModels)
 }
 
 const syncUpstreamModels = async () => {
@@ -460,8 +308,7 @@ const syncUpstreamModels = async () => {
   try {
     let result
     if (props.accountId) {
-      await loadCatalog(true)
-      return
+      result = await accountsAPI.syncUpstreamModels(props.accountId)
     } else if (props.syncCredentials) {
       result = await accountsAPI.syncUpstreamModelsPreview(props.syncCredentials as SyncUpstreamPreviewParams)
     } else {
@@ -478,8 +325,16 @@ const syncUpstreamModels = async () => {
       emit('upstream-synced')
     }
 
-    applyDiscoveredChoices(upstreamModels.map(id => ({ id, display_name: id, platform: props.platform || '', kind: result.metadata?.[id]?.model_kind ?? 'unknown', lifecycle: 'active', access: 'listed', source: 'upstream_preview', metadata: result.metadata?.[id] ?? { id }, missing: [], endpoints: [] })))
-    const addedCount = upstreamModels.filter(id => !props.modelValue.includes(id)).length
+    const newModels = [...props.modelValue]
+    let addedCount = 0
+    for (const model of upstreamModels) {
+      if (!newModels.includes(model)) {
+        newModels.push(model)
+        addedCount += 1
+      }
+    }
+
+    emit('update:modelValue', newModels)
     const warnings = result.warnings ?? []
     const hasPartialMetadata = warnings.some(
       warning => warning.code === 'upstream_model_metadata_partial'
@@ -500,69 +355,11 @@ const syncUpstreamModels = async () => {
       appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataPartial'))
     }
   } catch (error) {
-    appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message: extractApiErrorMessage(error, t('admin.accounts.syncUpstreamModelsFailed')) }))
+    const message = error instanceof Error ? error.message : t('admin.accounts.syncUpstreamModelsFailed')
+    appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
   } finally {
     isSyncingUpstream.value = false
   }
-}
-
-const syncBatchModels = async () => {
-  if (isSyncingBatch.value || !canSyncBatch.value) return
-
-  const requestVersion = ++batchRequestVersion
-  ++catalogRequest;catalogController?.abort();catalogLoading.value=false
-  isSyncingBatch.value = true
-  liveModels.value = []
-  liveFailures.value = []
-  try {
-    const useIDs = (props.accountIds?.length ?? 0) > 0
-    const result = await accountsAPI.syncUpstreamModelsBulk({
-      account_ids: useIDs ? props.accountIds : undefined,
-      filters: useIDs ? undefined : props.syncFilters
-    })
-    if (requestVersion !== batchRequestVersion) return
-
-    const models = Array.from(new Set(result.models.map(model => model.trim()).filter(Boolean)))
-    liveFailures.value = result.failures ?? []
-    // 整批失败也走 200，好让逐账号明细能随响应一起回来（错误响应带不了 data）。
-    if (result.error || liveFailures.value.length > 0) {
-      const message = result.error || t('admin.accounts.syncLiveAnthropicModelsFailures', {
-        count: liveFailures.value.length
-      })
-      appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
-      return
-    }
-    if (models.length === 0) {
-      appStore.showInfo(t('admin.accounts.syncUpstreamModelsEmpty'))
-      return
-    }
-
-    liveModels.value = models
-
-    // A successful bulk intersection updates candidates only. Applying it to
-    // account restrictions remains an explicit form action.
-    await loadCatalog()
-    if (requestVersion !== batchRequestVersion) return
-    applyDiscoveredChoices(models.map(id => ({ id, display_name: id, platform: props.platform ?? '', kind: 'unknown', lifecycle: 'unknown', access: 'listed', source: 'upstream_bulk', metadata: {id}, missing: [], endpoints: [] })))
-    appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: models.length }))
-  } catch (error) {
-    if (requestVersion !== batchRequestVersion) return
-    appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message: extractApiErrorMessage(error, t('admin.accounts.syncUpstreamModelsFailed')) }))
-  } finally {
-    if (requestVersion === batchRequestVersion) isSyncingBatch.value = false
-  }
-}
-
-const replaceWithLiveModels = () => {
-  const dropped = modelsOutsideLiveIntersection.value
-  if (dropped.length === 0) return
-  if (!confirm(t('admin.accounts.syncLiveAnthropicModelsReplaceConfirm', {
-    count: dropped.length,
-    models: dropped.join(', ')
-  }))) {
-    return
-  }
-  emit('update:modelValue', [...new Set([...liveModels.value, ...props.modelValue.filter(isMediaChoice)])])
 }
 
 const clearAll = () => {

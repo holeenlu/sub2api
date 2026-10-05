@@ -59,15 +59,6 @@ func (r *snapshotUpdateAccountRepo) UpdateExtra(ctx context.Context, id int64, u
 	return nil
 }
 
-func (r stubOpenAIAccountRepo) GetOpenAITurnAdmission(ctx context.Context, id int64) (*Account, *Account, error) {
-	account, err := r.GetByID(ctx, id)
-	var parent *Account
-	if err == nil && account != nil && account.IsShadow() {
-		parent, err = r.GetByID(ctx, *account.ParentAccountID)
-	}
-	return account, parent, err
-}
-
 func (r stubOpenAIAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
 	for i := range r.accounts {
 		if r.accounts[i].ID == id {
@@ -795,17 +786,6 @@ func (c *stubGatewayCache) DeleteSessionAccountID(ctx context.Context, groupID i
 	}
 	c.deletedSessions[sessionHash]++
 	delete(c.sessionBindings, sessionHash)
-	return nil
-}
-
-// 长周期亲和键：该 mock 不参与历史键行为，给出中性实现以满足接口。
-func (c *stubGatewayCache) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
-	return 0, ErrStickySessionNotFound
-}
-func (c *stubGatewayCache) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
-	return true, nil
-}
-func (c *stubGatewayCache) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
 	return nil
 }
 

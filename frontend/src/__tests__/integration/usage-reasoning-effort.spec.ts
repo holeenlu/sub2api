@@ -196,8 +196,6 @@ const adminMappedLog = {
   user: { email: 'liu.jialin@code-dance.com' },
   account: { name: 'codex-wang' },
   upstream_reasoning_effort: 'xhigh',
-  inbound_endpoint: '/v1/responses',
-  upstream_endpoint: '/basispoints/api/responses',
 }
 
 const sharedPageStubs = {
@@ -217,23 +215,6 @@ const sharedPageStubs = {
 
 function reasoningCellText(wrapper: ReturnType<typeof mount>): string {
   return wrapper.get('[data-testid="reasoning-effort-cell"]').text()
-}
-
-function mountAdminUsage() {
-  return mount(AdminUsageView, {
-    global: {
-      stubs: {
-        ...sharedPageStubs,
-        UsageFilters: adminFiltersStub,
-        UsageExportProgress: true,
-        UsageCleanupDialog: true,
-        UserBalanceHistoryModal: true,
-        UserTokenRanking: true,
-        OpsErrorLogTable: true,
-        OpsErrorDetailModal: true,
-      },
-    },
-  })
 }
 
 describe('usage reasoning effort page display', () => {
@@ -278,6 +259,35 @@ describe('usage reasoning effort page display', () => {
     expect(wrapper.text()).not.toContain('XHigh')
   })
 
+  it('admin usage page shows requested and mapped effort after the column is enabled', async () => {
+    const wrapper = mount(AdminUsageView, {
+      global: {
+        stubs: {
+          ...sharedPageStubs,
+          UsageFilters: adminFiltersStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          UserTokenRanking: true,
+          OpsErrorLogTable: true,
+          OpsErrorDetailModal: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="reasoning-effort-cell"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
+    await wrapper.get('[data-testid="usage-column-toggle-reasoning_effort"]').trigger('click')
+    await flushPromises()
+
+    const cell = reasoningCellText(wrapper)
+    expect(cell).toContain('Max')
+    expect(cell).toContain('XHigh')
+    expect(cell).toContain('↳')
+  })
+
   it('admin usage page shows a single value when reasoning effort was not mapped', async () => {
     adminList.mockResolvedValue({
       items: [{ ...adminMappedLog, request_id: 'req-admin-plain', reasoning_effort: 'high', upstream_reasoning_effort: null }],
@@ -285,7 +295,24 @@ describe('usage reasoning effort page display', () => {
       pages: 1,
     })
 
-    const wrapper = mountAdminUsage()
+    const wrapper = mount(AdminUsageView, {
+      global: {
+        stubs: {
+          ...sharedPageStubs,
+          UsageFilters: adminFiltersStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          UserTokenRanking: true,
+          OpsErrorLogTable: true,
+          OpsErrorDetailModal: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
+    await wrapper.get('[data-testid="usage-column-toggle-reasoning_effort"]').trigger('click')
     await flushPromises()
 
     const cell = reasoningCellText(wrapper)

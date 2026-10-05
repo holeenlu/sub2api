@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"math"
 	"strings"
 	"time"
 
@@ -15,9 +14,6 @@ import (
 )
 
 func (s *GatewayService) getUserGroupRateMultiplier(ctx context.Context, userID, groupID int64, groupDefaultMultiplier float64) float64 {
-	if p := RequestPricingFromContext(ctx); p != nil && p.rateReady && p.userID == userID && p.group != nil && p.group.ID == groupID {
-		return p.rate
-	}
 	if s == nil {
 		return groupDefaultMultiplier
 	}
@@ -77,17 +73,16 @@ type usageLogBestEffortWriter interface {
 
 // postUsageBillingParams 统一扣费所需的参数
 type postUsageBillingParams struct {
-	BalanceAlreadyCaptured float64 // durable asynchronous media hold capture
-	Cost                   *CostBreakdown
-	User                   *User
-	APIKey                 *APIKey
-	Account                *Account
-	Subscription           *UserSubscription
-	RequestPayloadHash     string
-	IsSubscriptionBill     bool
-	AccountRateMultiplier  float64
-	APIKeyService          APIKeyQuotaUpdater
-	Platform               string // 来自 APIKey 关联 Group 的平台标识
+	Cost                  *CostBreakdown
+	User                  *User
+	APIKey                *APIKey
+	Account               *Account
+	Subscription          *UserSubscription
+	RequestPayloadHash    string
+	IsSubscriptionBill    bool
+	AccountRateMultiplier float64
+	APIKeyService         APIKeyQuotaUpdater
+	Platform              string // 来自 APIKey 关联 Group 的平台标识
 	// SimpleModeKeyRateLimitOnly opts the request into the simple-mode billing
 	// path that records only API-key 5h/1d/7d window usage. It must not trigger
 	// balance, subscription, account, platform, or lifetime-key-quota effects.
@@ -338,7 +333,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.SubscriptionID = &p.Subscription.ID
 		cmd.SubscriptionCost = p.Cost.ActualCost
 	} else if p.Cost.ActualCost > 0 {
-		cmd.BalanceCost = math.Max(0, p.Cost.ActualCost-p.BalanceAlreadyCaptured)
+		cmd.BalanceCost = p.Cost.ActualCost
 	}
 
 	if p.shouldDeductAPIKeyQuota() {
@@ -418,11 +413,7 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
 		}
 	} else if p.Cost.ActualCost > 0 && p.User != nil {
-		if p.BalanceAlreadyCaptured > 0 {
-			_ = deps.billingCacheService.InvalidateUserBalance(ctx, p.User.ID)
-		} else {
-			syncBalanceCacheAfterDeduction(ctx, p, deps, result)
-		}
+		syncBalanceCacheAfterDeduction(ctx, p, deps, result)
 	}
 
 	if p.Cost.ActualCost > 0 && p.APIKey != nil && p.APIKey.HasRateLimits() && deps.billingCacheService != nil {
@@ -443,7 +434,7 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 			deps.billingCacheService.IncrementUserPlatformQuotaUsage(p.User.ID, p.Platform, p.Cost.ActualCost)
 			if deps.cfg == nil || !deps.cfg.Database.UserPlatformQuotaFlusherEnabled {
 				// 降级路径:flusher 未启用时保留原有异步直写 DB
-				dbCtx, dbCancel := detachedBillingContext(ctx)
+				dbCtx, dbCancel := detachUpstreamContext(ctx)
 				userID, platform, cost := p.User.ID, p.Platform, p.Cost.ActualCost
 				go func() {
 					defer func() {
@@ -586,14 +577,14 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 	if !stream {
 		return ctx, func() {}
 	}
-	return detachAPIKeyUpstreamContext(ctx)
+	return context.WithoutCancel(ctx), func() {}
 }
 
 func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		return context.Background(), func() {}
 	}
-	return detachAPIKeyUpstreamContext(ctx)
+	return context.WithoutCancel(ctx), func() {}
 }
 
 // billingDeps 扣费逻辑依赖的服务（由各 gateway service 提供）
@@ -627,9 +618,6 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 	}
 	usageCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
-	if err := journalUsagePricing(servicePricingContext(ctx, usageCtx), repo, usageLog); err != nil {
-		slog.Warn("usage_pricing_journal_failed", "request_id", usageLog.RequestID, "error", err)
-	}
 
 	if writer, ok := repo.(usageLogBestEffortWriter); ok {
 		if err := writer.CreateBestEffort(usageCtx, usageLog); err != nil {
@@ -854,8 +842,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		result.UpstreamResponseModelConflict,
 		result.ImageCount > 0 || result.AudioUsage != nil || result.SearchCount > 0,
 	); responseModel != "" && !strings.EqualFold(responseModel, strings.TrimSpace(billingModel)) {
-		identified, responseChannelPriced := s.hasIdentifiedResponseModelPricing(ctx, responseModel, apiKey)
-		if identified {
+		if identified, responseChannelPriced := s.hasIdentifiedResponseModelPricing(ctx, responseModel, apiKey); identified {
 			responseCost := s.calculateRecordUsageCost(ctx, result, apiKey, responseModel, multiplier, imageMultiplier, pricingAt)
 			baselineChannelPriced := s.resolveChannelPricing(ctx, billingModel, apiKey) != nil
 			if responseModelBillingAdoptable(cost, responseCost, baselineChannelPriced, responseChannelPriced) {

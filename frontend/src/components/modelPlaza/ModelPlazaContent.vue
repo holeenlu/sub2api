@@ -30,7 +30,7 @@
       v-else-if="error"
       class="rounded-2xl border border-red-200 bg-red-50 px-5 py-8 text-center text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
     >
-      {{ t(errorStatus === 404 ? 'modelPlaza.catalog.disabled' : errorStatus === 401 ? 'modelPlaza.catalog.loginRequired' : 'modelPlaza.loadFailed') }}
+      {{ t('modelPlaza.loadFailed') }}
     </div>
     <template v-else>
       <!-- 筛选区:平台 → 分组 → 倍率 -->
@@ -77,7 +77,6 @@ const props = defineProps<{
   response: ModelPlazaResponse | null
   loading: boolean
   error?: boolean
-  errorStatus?: number | null
   /** 后台内嵌形态(AppLayout 内):隐藏页头。 */
   embedded?: boolean
 }>()

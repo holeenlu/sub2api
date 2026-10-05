@@ -336,7 +336,7 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 
 	gpt56 := newConfiguredCodexModelDescriptor("gpt-5.6-sol")
 	require.Equal(t, "GPT-5.6 Sol", gpt56.DisplayName)
-	require.Equal(t, "OpenAI GPT coding model routed through "+DefaultSiteName+".", gpt56.Description)
+	require.Equal(t, "OpenAI GPT coding model routed through Sub2API.", gpt56.Description)
 	require.NotNil(t, gpt56.DefaultReasoningLevel)
 	require.Equal(t, "low", *gpt56.DefaultReasoningLevel)
 	require.Equal(t, configuredCodexGPTReasoningLevels("gpt-5.6-sol"), gpt56.SupportedReasoningLevels)
@@ -438,32 +438,6 @@ func TestBuildCodexModelsManifestUsesGPT6AstraInstructions(t *testing.T) {
 		strings.TrimSpace(manifest.Models[0].ModelMessages.InstructionsTemplate),
 		"You are Codex, an agent based on GPT-6.",
 	))
-}
-
-func TestBuildCodexModelsManifestAdvertisesOneMillionTokenContextForZhipuGLM53Family(t *testing.T) {
-	body, err := BuildCodexModelsManifest([]string{"glm-4.7", "glm-5.3", "glm-5.3-flash"})
-	require.NoError(t, err)
-
-	var manifest struct {
-		Models []struct {
-			Slug            string `json:"slug"`
-			ContextWindow   int64  `json:"context_window"`
-			MaxContext      int64  `json:"max_context_window"`
-			MaxOutputTokens int64  `json:"max_output_tokens"`
-		} `json:"models"`
-	}
-	require.NoError(t, json.Unmarshal(body, &manifest))
-	require.Len(t, manifest.Models, 3)
-	require.Equal(t, "glm-4.7", manifest.Models[0].Slug)
-	require.Equal(t, int64(200_000), manifest.Models[0].ContextWindow)
-	require.Equal(t, int64(200_000), manifest.Models[0].MaxContext)
-	require.Equal(t, int64(128_000), manifest.Models[0].MaxOutputTokens)
-	for _, model := range manifest.Models[1:] {
-		require.Contains(t, []string{"glm-5.3", "glm-5.3-flash"}, model.Slug)
-		require.Equal(t, int64(1_000_000), model.ContextWindow)
-		require.Equal(t, int64(1_000_000), model.MaxContext)
-		require.Equal(t, int64(131_072), model.MaxOutputTokens)
-	}
 }
 
 func effortsFromConfiguredCodexLevels(levels []configuredCodexReasoningLevel) []string {
@@ -1043,7 +1017,7 @@ func TestBuildCodexModelsManifestForGroupUsesMappedTargetMetadataForCompositeAli
 	require.Len(t, models, 1)
 	require.Equal(t, "reasoning-alias", models[0]["slug"])
 	require.Equal(t, "reasoning-alias", models[0]["display_name"])
-	require.Equal(t, "Custom model routed through "+DefaultSiteName+".", models[0]["description"])
+	require.Equal(t, "Custom model routed through Sub2API.", models[0]["description"])
 	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromManifestModel(t, models[0]))
 }
 
@@ -1085,7 +1059,7 @@ func TestBuildCodexModelsManifestForGroupUsesSafeFallbackForConflictingAliasTarg
 	require.Len(t, models, 1)
 	require.Equal(t, "shared-alias", models[0]["slug"])
 	require.Equal(t, "shared-alias", models[0]["display_name"])
-	require.Equal(t, "Custom model routed through "+DefaultSiteName+".", models[0]["description"])
+	require.Equal(t, "Custom model routed through Sub2API.", models[0]["description"])
 	require.Empty(t, effortsFromManifestModel(t, models[0]))
 }
 
@@ -1284,14 +1258,10 @@ func TestBuildGroupConfiguredCodexModelsManifestUsesAdministratorConfiguration(t
 	require.NoError(t, err)
 	require.True(t, configured)
 	models := decodeCodexManifestModels(t, manifest.Body)
-	// Hidden background entries can precede the first selectable model.
-	for len(models) > 0 && models[0]["visibility"] == "hide" {
-		models = models[1:]
-	}
 	require.Equal(t, "glm-5.3", models[0]["slug"])
 	require.Contains(t, codexManifestModelSlugs(t, manifest.Body), "gpt-5.6-sol")
 	require.NotContains(t, codexManifestModelSlugs(t, manifest.Body), "gpt-image-2")
-	require.Contains(t, codexManifestModelSlugs(t, manifest.Body), "codex-auto-review")
+	require.NotContains(t, codexManifestModelSlugs(t, manifest.Body), "codex-auto-review")
 	require.Equal(t, "GLM 5.3", models[0]["display_name"])
 	require.Equal(t, []string{"low", "medium", "high"}, effortsFromManifestModel(t, models[0]))
 	require.Equal(t, "medium", models[0]["default_reasoning_level"])
@@ -1457,7 +1427,7 @@ func TestBuildGroupConfiguredCodexModelsManifestFallsThroughWithoutConfiguration
 	require.Nil(t, manifest)
 }
 
-func TestMergeGroupConfiguredCodexModelsHidesAutoReviewByDefault(t *testing.T) {
+func TestMergeGroupConfiguredCodexModelsFiltersAutoReviewByDefault(t *testing.T) {
 	t.Parallel()
 
 	const groupID int64 = 74
@@ -1473,15 +1443,13 @@ func TestMergeGroupConfiguredCodexModelsHidesAutoReviewByDefault(t *testing.T) {
 		"",
 	))
 	models := decodeCodexManifestModels(t, manifest.Body)
-	require.Len(t, models, 3)
-	require.Equal(t, "hide", models[0]["visibility"])
-	require.Equal(t, "hide", models[1]["visibility"])
-	require.Equal(t, "gpt-5.6", models[2]["slug"])
+	require.Len(t, models, 1)
+	require.Equal(t, "gpt-5.6", models[0]["slug"])
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
 }
 
-// An available background model keeps its native contract without appearing in the picker.
-func TestMergeGroupConfiguredCodexModelsPreservesHiddenAutoReviewContract(t *testing.T) {
+// Scenario: OpenAI 账号映射不启用 Auto Review。
+func TestMergeGroupConfiguredCodexModelsFiltersAccountMappedAutoReviewByDefault(t *testing.T) {
 	t.Parallel()
 
 	const groupID int64 = 75
@@ -1509,9 +1477,7 @@ func TestMergeGroupConfiguredCodexModelsPreservesHiddenAutoReviewContract(t *tes
 		manifest,
 		"",
 	))
-	require.Equal(t, []string{"codex-auto-review", "gpt-5.6"}, codexManifestModelSlugs(t, manifest.Body))
-	require.Contains(t, string(manifest.Body), `"auto_review":{"enabled":true}`)
-	require.Equal(t, "hide", decodeCodexManifestModels(t, manifest.Body)[0]["visibility"])
+	require.Equal(t, []string{"gpt-5.6"}, codexManifestModelSlugs(t, manifest.Body))
 }
 
 // Scenario: 启用的分组自定义列表允许 Auto Review。
@@ -1534,7 +1500,6 @@ func TestMergeGroupConfiguredCodexModelsKeepsExplicitAutoReviewSelection(t *test
 
 	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, manifest, ""))
 	require.Equal(t, []string{"codex-auto-review"}, codexManifestModelSlugs(t, manifest.Body))
-	require.Equal(t, "hide", decodeCodexManifestModels(t, manifest.Body)[0]["visibility"])
 }
 
 func TestMergeGroupConfiguredCodexModelsHonorsCustomListAndFinalETag(t *testing.T) {
@@ -1606,194 +1571,6 @@ func (s *codexModelsHTTPUpstreamStub) Do(req *http.Request, proxyURL string, acc
 
 func (s *codexModelsHTTPUpstreamStub) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return s.Do(req, proxyURL, accountID, accountConcurrency)
-}
-
-// Scenario: an OpenAI group with account model mappings gets its locally
-// generated catalog in the administrator's custom-list order, not alphabetical.
-func TestBuildGroupConfiguredCodexModelsManifestFollowsCustomListOrder(t *testing.T) {
-	t.Parallel()
-
-	const groupID int64 = 81
-	svc := &OpenAIGatewayService{accountRepo: codexModelsVisibilityAccountRepo{
-		byGroup: map[int64][]Account{
-			groupID: {{
-				Platform: PlatformOpenAI,
-				Credentials: map[string]any{
-					"model_mapping": map[string]any{
-						"a-model": "upstream-a",
-						"b-model": "upstream-b",
-						"c-model": "upstream-c",
-					},
-				},
-			}},
-		},
-	}}
-	group := &Group{
-		ID:       groupID,
-		Platform: PlatformOpenAI,
-		ModelAllowlist: GroupModelAllowlist{
-			Enabled: true,
-			Models:  []string{"b-model", "a-model", "c-model"},
-		},
-	}
-
-	manifest, configured, err := svc.BuildGroupConfiguredCodexModelsManifest(context.Background(), group, "")
-	require.NoError(t, err)
-	require.True(t, configured)
-	require.Equal(t, []string{"b-model", "a-model", "c-model"}, codexManifestModelSlugs(t, manifest.Body))
-	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
-}
-
-// Scenario: the upstream ChatGPT catalog is filtered *and* reordered by the custom list.
-func TestMergeGroupConfiguredCodexModelsFiltersAndOrdersByCustomList(t *testing.T) {
-	t.Parallel()
-
-	const groupID int64 = 82
-	svc := &OpenAIGatewayService{accountRepo: codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{}}}
-	group := &Group{
-		ID:       groupID,
-		Platform: PlatformOpenAI,
-		ModelAllowlist: GroupModelAllowlist{
-			Enabled: true,
-			Models:  []string{"c", "a"},
-		},
-	}
-	upstreamBody := []byte(`{"models":[{"slug":"a"},{"slug":"b"},{"slug":"c"}]}`)
-	manifest := &OpenAIModelsResponse{Body: upstreamBody, ETag: codexModelsManifestBodyETag(upstreamBody)}
-
-	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, manifest, ""))
-	require.Equal(t, []string{"c", "a"}, codexManifestModelSlugs(t, manifest.Body))
-	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
-	require.NotEqual(t, codexModelsManifestBodyETag(upstreamBody), manifest.ETag)
-}
-
-// Scenario: the custom list contains exactly the upstream set, only in a different
-// order. Nothing is filtered or injected, so the reorder alone must mark the body
-// changed and produce a new ETag — otherwise the picker keeps the upstream order.
-func TestMergeConfiguredCodexModelsManifestOrderOnlyChangeStillChangesBody(t *testing.T) {
-	t.Parallel()
-
-	upstreamBody := []byte(`{"models":[{"slug":"a","priority":0,"unknown":{"kept":1}},{"slug":"b","priority":1},{"slug":"c","priority":2}]}`)
-
-	body, changed, err := mergeConfiguredCodexModelsManifest(upstreamBody, nil, []string{"c", "b", "a"}, true)
-	require.NoError(t, err)
-	require.True(t, changed)
-	require.Equal(t, []string{"c", "b", "a"}, codexManifestModelSlugs(t, body))
-	require.NotEqual(t, codexModelsManifestBodyETag(upstreamBody), codexModelsManifestBodyETag(body))
-	// Updating order and priority must preserve unrelated descriptor metadata.
-	models := decodeCodexManifestModels(t, body)
-	require.Equal(t, map[string]any{"kept": float64(1)}, models[2]["unknown"])
-
-	// Same order as upstream → genuinely unchanged.
-	sameBody, sameChanged, err := mergeConfiguredCodexModelsManifest(upstreamBody, nil, []string{"a", "b", "c"}, true)
-	require.NoError(t, err)
-	require.False(t, sameChanged)
-	require.Equal(t, upstreamBody, sameBody)
-
-	// Custom list disabled → upstream order is authoritative even if a list is present.
-	offBody, offChanged, err := mergeConfiguredCodexModelsManifest(upstreamBody, nil, []string{"c", "b", "a"}, false)
-	require.NoError(t, err)
-	require.False(t, offChanged)
-	require.Equal(t, upstreamBody, offBody)
-}
-
-func TestMergeConfiguredCodexModelsManifestAllowlistOrdering(t *testing.T) {
-	t.Parallel()
-	upstream := []byte(`{"models":[{"slug":"gpt-5.6-sol","priority":50},{"slug":"gpt-6-astra","priority":50,"unknown":{"kept":true}},{"slug":"gpt-5.6-luna","priority":50}]}`)
-	for _, tt := range []struct {
-		name     string
-		selected []string
-		want     []string
-	}{
-		{"wildcard before exact", []string{"gpt-6*", "gpt-5.6-sol"}, []string{"gpt-6-astra", "gpt-5.6-sol"}},
-		{"case insensitive", []string{"GPT-6*", "GPT-5.6-SOL"}, []string{"gpt-6-astra", "gpt-5.6-sol"}},
-		{"multiple wildcards", []string{"gpt-6*", "gpt-5*"}, []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"}},
-		{"exact before wildcard", []string{"gpt-6-astra", "*"}, []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"}},
-		{"first matching entry wins", []string{"*", "gpt-6-astra"}, []string{"gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-luna"}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			body, changed, err := mergeConfiguredCodexModelsManifest(upstream, nil, tt.selected, true)
-			require.NoError(t, err)
-			require.True(t, changed)
-			require.Equal(t, tt.want, codexManifestModelSlugs(t, body))
-			require.NotEqual(t, codexModelsManifestBodyETag(upstream), codexModelsManifestBodyETag(body))
-			for i, model := range decodeCodexManifestModels(t, body) {
-				require.Equal(t, float64(i), model["priority"])
-				if model["slug"] == "gpt-6-astra" {
-					require.Equal(t, map[string]any{"kept": true}, model["unknown"])
-				}
-			}
-			again, changedAgain, err := mergeConfiguredCodexModelsManifest(body, nil, tt.selected, true)
-			require.NoError(t, err)
-			require.False(t, changedAgain)
-			require.Equal(t, body, again)
-		})
-	}
-}
-
-func TestMergeConfiguredCodexModelsManifestAlignsClientPriorities(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		name string
-		body string
-	}{
-		{"reverse upstream order", `{"models":[{"slug":"a","priority":0},{"slug":"b","priority":1,"unknown":{"kept":true}}]}`},
-		{"priority-only change", `{"models":[{"slug":"b","priority":1,"unknown":{"kept":true}},{"slug":"a","priority":0}]}`},
-		{"equal priorities", `{"models":[{"slug":"b","priority":50,"unknown":{"kept":true}},{"slug":"a","priority":50}]}`},
-		{"missing priorities", `{"models":[{"slug":"b","unknown":{"kept":true}},{"slug":"a"}]}`},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			original := []byte(tt.body)
-			body, changed, err := mergeConfiguredCodexModelsManifest(original, nil, []string{"b", "a"}, true)
-			require.NoError(t, err)
-			require.True(t, changed)
-			models := decodeCodexManifestModels(t, body)
-			require.Equal(t, float64(0), models[0]["priority"])
-			require.Equal(t, float64(1), models[1]["priority"])
-			require.Equal(t, map[string]any{"kept": true}, models[0]["unknown"])
-			require.Equal(t, []string{"b", "a"}, codexManifestModelSlugs(t, body))
-			require.NotEqual(t, codexModelsManifestBodyETag(original), codexModelsManifestBodyETag(body))
-
-			again, changedAgain, err := mergeConfiguredCodexModelsManifest(body, nil, []string{"b", "a"}, true)
-			require.NoError(t, err)
-			require.False(t, changedAgain)
-			require.Equal(t, body, again)
-
-			disabled, changedDisabled, err := mergeConfiguredCodexModelsManifest(original, nil, []string{"b", "a"}, false)
-			require.NoError(t, err)
-			require.False(t, changedDisabled)
-			require.Equal(t, original, disabled)
-		})
-	}
-}
-
-// Scenario: through the service entry point, an order-only list edit yields a new
-// ETag, and the new ETag then satisfies If-None-Match.
-func TestMergeGroupConfiguredCodexModelsOrderOnlyChangeRefreshesETag(t *testing.T) {
-	t.Parallel()
-
-	const groupID int64 = 83
-	svc := &OpenAIGatewayService{accountRepo: codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{}}}
-	// The array already matches the group: only client priorities need repair.
-	upstreamBody := []byte(`{"models":[{"slug":"c","priority":2},{"slug":"b","priority":1},{"slug":"a","priority":0}]}`)
-	upstreamETag := codexModelsManifestBodyETag(upstreamBody)
-
-	group := &Group{
-		ID:             groupID,
-		Platform:       PlatformOpenAI,
-		ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"c", "b", "a"}},
-	}
-	first := &OpenAIModelsResponse{Body: append([]byte(nil), upstreamBody...), ETag: upstreamETag}
-	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, first, upstreamETag))
-	require.False(t, first.NotModified, "the reordered body must not match the upstream ETag")
-	require.Equal(t, []string{"c", "b", "a"}, codexManifestModelSlugs(t, first.Body))
-	require.NotEqual(t, upstreamETag, first.ETag)
-
-	second := &OpenAIModelsResponse{Body: append([]byte(nil), upstreamBody...), ETag: upstreamETag}
-	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, second, first.ETag))
-	require.True(t, second.NotModified)
-	require.Empty(t, second.Body)
-	require.Equal(t, first.ETag, second.ETag)
 }
 
 func TestIsRetryableCodexModelsManifestTransportError(t *testing.T) {
@@ -3265,64 +3042,6 @@ func TestFetchCodexModelsManifestAPIKeyServesStaleWhileRefreshing(t *testing.T) 
 	if got := calls.Load(); got != 2 {
 		t.Errorf("stale refresh was not deduplicated: calls=%d, want 2", got)
 	}
-}
-
-// A stale manifest is returned at once while the refresh converts the new one
-// on a background goroutine, and the handler keeps using the request's account
-// to complete the stale manifest. Converting fills the Account's lazy
-// model-mapping cache, so the refresh must work on its own copy.
-func TestFetchCodexModelsManifestAPIKeyStaleRefreshDoesNotShareRequestAccount(t *testing.T) {
-	var calls atomic.Int32
-	refreshStarted := make(chan struct{})
-	releaseRefresh := make(chan struct{})
-	upstream := &codexModelsHTTPUpstreamStub{do: func(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-		call := calls.Add(1)
-		body := `{"models":[{"slug":"old"}]}`
-		if call > 1 {
-			if call == 2 {
-				close(refreshStarted)
-			}
-			<-releaseRefresh
-			body = `{"models":[{"slug":"new"}]}`
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(body)),
-		}, nil
-	}}
-	s := newCodexModelsAPIKeyTestService(upstream)
-	_, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example"), "0.144.0", "")
-	require.NoError(t, err)
-
-	s.openAIModelsCache.mu.Lock()
-	for key, entry := range s.openAIModelsCache.entries {
-		entry.expiresAt = time.Now().Add(-time.Second)
-		s.openAIModelsCache.entries[key] = entry
-	}
-	s.openAIModelsCache.mu.Unlock()
-
-	// Each request loads its own Account, so its lazy caches start empty.
-	account := newCodexModelsAPIKeyTestAccount("https://upstream.example")
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
-	require.NoError(t, err)
-	require.Equal(t, `{"models":[{"slug":"old"}]}`, string(manifest.Body))
-	select {
-	case <-refreshStarted:
-	case <-time.After(time.Second):
-		t.Fatal("background refresh did not start")
-	}
-
-	close(releaseRefresh)
-	require.Eventually(t, func() bool {
-		refreshed, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example"), "0.144.0", "")
-		return err == nil && string(refreshed.Body) == `{"models":[{"slug":"new"}]}`
-	}, time.Second, 10*time.Millisecond)
-	require.Equal(t, int32(2), calls.Load())
-	require.False(t, account.modelMappingCacheReady, "background refresh must not fill the request's Account cache")
-
-	require.NoError(t, s.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
-	require.True(t, account.modelMappingCacheReady)
 }
 
 func TestFetchCodexModelsManifestAPIKeyRevalidatesStaleETag(t *testing.T) {

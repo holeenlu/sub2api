@@ -4,7 +4,6 @@ import { mount } from '@vue/test-utils'
 import TokenUsageTrend from '../TokenUsageTrend.vue'
 
 const messages: Record<string, string> = {
-  'ui.chartCacheHitRate': 'Cache Hit Rate',
   'admin.dashboard.tokenUsageTrend': 'Token Usage Trend',
   'admin.dashboard.noDataAvailable': 'No data available',
 }

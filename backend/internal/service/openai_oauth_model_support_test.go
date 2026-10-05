@@ -74,19 +74,10 @@ func TestIsModelSupported_OpenAIOAuthExplicitMappingUnchanged(t *testing.T) {
 		},
 	}
 
-	for _, staleMode := range []string{"", "aliases"} {
-		t.Run("stale_mode="+staleMode, func(t *testing.T) {
-			if staleMode != "" {
-				// A stale in-memory snapshot must not revive the removed alias admission path.
-				account.Credentials["model_mapping_mode"] = staleMode
-			}
-			require.True(t, account.IsModelSupported("deepseek-v4"))
-			require.True(t, account.IsModelSupported("k3"))
-			require.Equal(t, "gpt-5.4", account.GetMappedModel("deepseek-v4"))
-			require.False(t, account.IsModelSupported("glm-4.7"))
-			require.False(t, account.IsModelSupported("gpt-5.4"))
-		})
-	}
+	// 显式映射沿用原有语义：命中映射即支持，未命中即不支持。
+	require.True(t, account.IsModelSupported("deepseek-v4"))
+	require.True(t, account.IsModelSupported("k3"))
+	require.False(t, account.IsModelSupported("glm-4.7"))
 }
 
 func TestIsModelSupported_OpenAIOAuthPassthroughAllowsAll(t *testing.T) {

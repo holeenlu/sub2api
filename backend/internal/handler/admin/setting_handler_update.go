@@ -22,6 +22,7 @@ import (
 
 // UpdateSettingsRequest 更新设置请求
 type UpdateSettingsRequest struct {
+	OpenAICodexDiagnosticPromptTemplate *string `json:"openai_codex_diagnostic_prompt_template"`
 	// 注册设置
 	RegistrationEnabled                 bool                         `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                         `json:"email_verify_enabled"`
@@ -254,16 +255,11 @@ type UpdateSettingsRequest struct {
 	RewriteMessageCacheControl             *bool   `json:"rewrite_message_cache_control"`
 	EnableClientDatelineNormalization      *bool   `json:"enable_client_dateline_normalization"`
 	AntigravityUserAgentVersion            *string `json:"antigravity_user_agent_version"`
-	UpstreamFailoverStatusCodes            *string `json:"upstream_failover_status_codes"` // 上游换号状态码（省略=保持现值）
 	OpenAICodexUserAgent                   *string `json:"openai_codex_user_agent"`
 	OpenAICodexClientVersion               *string `json:"openai_codex_client_version"`
 	OpenAICodexVersionAutoSyncEnabled      *bool   `json:"openai_codex_version_auto_sync_enabled"`
 	ClaudeCodeClientVersion                *string `json:"claude_code_client_version"`
 	ClaudeCodeVersionAutoSyncEnabled       *bool   `json:"claude_code_version_auto_sync_enabled"`
-	OpenAICodexTicketEnabled               *bool   `json:"openai_codex_ticket_enabled"`
-	OpenAICodexTicketAllowWithoutTicket    *bool   `json:"openai_codex_ticket_allow_without_ticket"`
-	OpenAICodexTicketHarvestProxyURL       string  `json:"openai_codex_ticket_harvest_proxy_url"`
-	OpenAICodexTicketPromptTemplate        *string `json:"openai_codex_ticket_prompt_template"`
 
 	// codex_cli_only 加固（global-only）
 	MinCodexVersion                      string `json:"min_codex_version"`
@@ -506,13 +502,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-
 	auditReq := settingsAuditRequest(req)
 	omitted := omittedSettingKeys(sentFields)
-	if req.OpenAICodexTicketPromptTemplate == nil {
-		// Keep omitted templates out of the write, including concurrent partial saves.
-		omitted[service.SettingKeyOpenAICodexTicketPromptTemplate] = struct{}{}
-	}
 
 	previousSettings, err := h.settingService.GetAllSettings(c.Request.Context())
 	if err != nil {
@@ -1446,10 +1437,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			return
 		}
 	}
-	if req.UpstreamFailoverStatusCodes != nil {
-		normalized := strings.TrimSpace(*req.UpstreamFailoverStatusCodes)
-		req.UpstreamFailoverStatusCodes = &normalized
-	}
 	if req.AntigravityUserAgentVersion != nil {
 		normalized := strings.TrimSpace(*req.AntigravityUserAgentVersion)
 		req.AntigravityUserAgentVersion = &normalized
@@ -1536,6 +1523,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	settings := &service.SystemSettings{
+		OpenAICodexDiagnosticPromptTemplate: func() string {
+			if req.OpenAICodexDiagnosticPromptTemplate != nil {
+				return *req.OpenAICodexDiagnosticPromptTemplate
+			}
+			return previousSettings.OpenAICodexDiagnosticPromptTemplate
+		}(),
 		// 系统全局 platform quota 默认值（整体替换语义）
 		DefaultPlatformQuotas:       req.DefaultPlatformQuotas,
 		AccountSchedulingThresholds: req.AccountSchedulingThresholds,
@@ -1689,7 +1682,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		MaxClaudeCodeVersion:                   req.MaxClaudeCodeVersion,
 		AllowUngroupedKeyScheduling:            req.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                     req.BackendModeEnabled,
-
 		AllowUserViewErrorRequests: func() bool {
 			if req.AllowUserViewErrorRequests != nil {
 				return *req.AllowUserViewErrorRequests
@@ -1786,12 +1778,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AntigravityUserAgentVersion
 		}(),
-		UpstreamFailoverStatusCodes: func() string {
-			if req.UpstreamFailoverStatusCodes != nil {
-				return *req.UpstreamFailoverStatusCodes
-			}
-			return previousSettings.UpstreamFailoverStatusCodes
-		}(),
 		OpenAICodexUserAgent: func() string {
 			if req.OpenAICodexUserAgent != nil {
 				return *req.OpenAICodexUserAgent
@@ -1825,31 +1811,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.ClaudeCodeVersionAutoSyncEnabled
 			}
 			return previousSettings.ClaudeCodeVersionAutoSyncEnabled
-		}(),
-		OpenAICodexTicketEnabled: func() bool {
-			if req.OpenAICodexTicketEnabled != nil {
-				return *req.OpenAICodexTicketEnabled
-			}
-			return previousSettings.OpenAICodexTicketEnabled
-		}(),
-		OpenAICodexTicketAllowWithoutTicket: func() bool {
-			if req.OpenAICodexTicketAllowWithoutTicket != nil {
-				return *req.OpenAICodexTicketAllowWithoutTicket
-			}
-			return previousSettings.OpenAICodexTicketAllowWithoutTicket
-		}(),
-		OpenAICodexTicketPromptTemplate: func() string {
-			if req.OpenAICodexTicketPromptTemplate != nil {
-				return *req.OpenAICodexTicketPromptTemplate
-			}
-			return previousSettings.OpenAICodexTicketPromptTemplate
-		}(),
-		OpenAICodexTicketHarvestProxyURL: func() string {
-			next := strings.TrimSpace(req.OpenAICodexTicketHarvestProxyURL)
-			if service.IsMaskedProxyURL(next) {
-				return previousSettings.OpenAICodexTicketHarvestProxyURL
-			}
-			return next
 		}(),
 		MinCodexVersion:       strings.TrimSpace(req.MinCodexVersion),
 		MaxCodexVersion:       strings.TrimSpace(req.MaxCodexVersion),
@@ -2237,6 +2198,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
 
 	payload := dto.SystemSettings{
+		OpenAICodexDiagnosticPromptTemplate:                    service.EffectiveCodexProbeTemplate(updatedSettings.OpenAICodexDiagnosticPromptTemplate),
+		OpenAICodexDiagnosticPromptTemplateDefault:             service.DefaultCodexProbeTemplate(),
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
 		EmailVerifyEnabled:                                     updatedSettings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       updatedSettings.RegistrationEmailSuffixWhitelist,
@@ -2399,7 +2362,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		RewriteMessageCacheControl:                             updatedSettings.RewriteMessageCacheControl,
 		EnableClientDatelineNormalization:                      updatedSettings.EnableClientDatelineNormalization,
 		AntigravityUserAgentVersion:                            updatedSettings.AntigravityUserAgentVersion,
-		UpstreamFailoverStatusCodes:                            updatedSettings.UpstreamFailoverStatusCodes,
 		OpenAICodexUserAgent:                                   updatedSettings.OpenAICodexUserAgent,
 		OpenAICodexClientVersion:                               updatedSettings.OpenAICodexClientVersion,
 		OpenAICodexClientVersionSynced:                         updatedSettings.OpenAICodexClientVersionSynced,
@@ -2407,12 +2369,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ClaudeCodeClientVersion:                                updatedSettings.ClaudeCodeClientVersion,
 		ClaudeCodeClientVersionSynced:                          updatedSettings.ClaudeCodeClientVersionSynced,
 		ClaudeCodeVersionAutoSyncEnabled:                       updatedSettings.ClaudeCodeVersionAutoSyncEnabled,
-		OpenAICodexTicketEnabled:                               updatedSettings.OpenAICodexTicketEnabled,
-		OpenAICodexTicketAllowWithoutTicket:                    updatedSettings.OpenAICodexTicketAllowWithoutTicket,
-		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
-		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",
-		OpenAICodexTicketPromptTemplate:                        service.EffectiveCodexProbeTemplate(updatedSettings.OpenAICodexTicketPromptTemplate),
-		OpenAICodexTicketPromptTemplateDefault:                 service.DefaultCodexProbeTemplate(),
 		MinCodexVersion:                                        updatedSettings.MinCodexVersion,
 		MaxCodexVersion:                                        updatedSettings.MaxCodexVersion,
 		CodexCLIOnlyBlacklist:                                  updatedSettings.CodexCLIOnlyBlacklist,

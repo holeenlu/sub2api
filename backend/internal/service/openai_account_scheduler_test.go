@@ -186,17 +186,6 @@ func (c *schedulerTestGatewayCache) DeleteSessionAccountID(ctx context.Context, 
 	return nil
 }
 
-// 长周期亲和键：该 mock 不参与历史键行为，给出中性实现以满足接口。
-func (c *schedulerTestGatewayCache) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
-	return 0, ErrStickySessionNotFound
-}
-func (c *schedulerTestGatewayCache) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
-	return true, nil
-}
-func (c *schedulerTestGatewayCache) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
-	return nil
-}
-
 func (c *schedulerTestGatewayCache) SetGrokVideoPendingBilling(_ context.Context, _ string, _ []byte, _ time.Duration) error {
 	return nil
 }
@@ -2940,15 +2929,14 @@ func TestReportOpenAIAccountScheduleResult_SuccessClearsModelTransientState(t *t
 
 func TestDefaultOpenAIAccountScheduler_ShouldEscapeStickyAccount_ThresholdBoundary(t *testing.T) {
 	stats := newOpenAIAccountRuntimeStats()
-	now := time.Now()
 	accountID := int64(21501)
 	ttft := 15000
-	stats.reportAt(accountID, true, &ttft, now)
-	stats.reportAt(accountID, false, nil, now)
-	stats.reportAt(accountID, true, nil, now)
+	stats.report(accountID, true, &ttft)
+	stats.report(accountID, false, nil)
+	stats.report(accountID, true, nil)
 	scheduler := &defaultOpenAIAccountScheduler{stats: stats}
 
-	reason, errorRate, observedTTFT, shouldEscape := scheduler.shouldEscapeStickyAccountAt(accountID, now, openAIStickyEscapeConfig{
+	reason, errorRate, observedTTFT, shouldEscape := scheduler.shouldEscapeStickyAccount(accountID, openAIStickyEscapeConfig{
 		enabled:   true,
 		ttftMs:    15000,
 		errorRate: 0.5,
@@ -2959,16 +2947,16 @@ func TestDefaultOpenAIAccountScheduler_ShouldEscapeStickyAccount_ThresholdBounda
 	require.InDelta(t, 15000, observedTTFT, 1e-9)
 
 	for i := 0; i < 4; i++ {
-		stats.reportAt(accountID, false, nil, now)
+		stats.report(accountID, false, nil)
 	}
-	reason, errorRate, _, shouldEscape = scheduler.shouldEscapeStickyAccountAt(accountID, now, openAIStickyEscapeConfig{
+	reason, errorRate, _, shouldEscape = scheduler.shouldEscapeStickyAccount(accountID, openAIStickyEscapeConfig{
 		enabled:   true,
 		ttftMs:    15000,
 		errorRate: 1,
 	})
 	require.False(t, shouldEscape)
 	require.Empty(t, reason)
-	reason, errorRate, observedTTFT, shouldEscape = scheduler.shouldEscapeStickyAccountAt(accountID, now, openAIStickyEscapeConfig{
+	reason, errorRate, observedTTFT, shouldEscape = scheduler.shouldEscapeStickyAccount(accountID, openAIStickyEscapeConfig{
 		enabled:   true,
 		ttftMs:    15000,
 		errorRate: errorRate,
@@ -3412,14 +3400,13 @@ func intPtrForTest(v int) *int {
 
 func TestOpenAIAccountRuntimeStats_ReportAndSnapshot(t *testing.T) {
 	stats := newOpenAIAccountRuntimeStats()
-	now := time.Now()
-	stats.reportAt(1001, true, nil, now)
+	stats.report(1001, true, nil)
 	firstTTFT := 100
-	stats.reportAt(1001, false, &firstTTFT, now)
+	stats.report(1001, false, &firstTTFT)
 	secondTTFT := 200
-	stats.reportAt(1001, false, &secondTTFT, now)
+	stats.report(1001, false, &secondTTFT)
 
-	errorRate, ttft, hasTTFT := stats.snapshotAt(1001, now)
+	errorRate, ttft, hasTTFT := stats.snapshot(1001)
 	require.True(t, hasTTFT)
 	require.InDelta(t, 0.36, errorRate, 1e-9)
 	require.InDelta(t, 120.0, ttft, 1e-9)

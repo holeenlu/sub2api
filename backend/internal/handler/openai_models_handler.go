@@ -2,29 +2,50 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
+
+func (h *GatewayHandler) pinnedOpenAIModels(c *gin.Context, group *service.Group) {
+	if c.Request.Context().Err() != nil {
+		return
+	}
+	if h.openAIGatewayService == nil {
+		writeOpenAIModelsError(c, http.StatusInternalServerError, "api_error", "OpenAI model discovery is not configured")
+		return
+	}
+	etag := c.GetHeader("If-None-Match")
+	if c.Param("model") != "" {
+		etag = "" // A collection ETag cannot validate a single-model representation.
+	}
+	response, account, err := h.openAIGatewayService.FetchPinnedOpenAIModelsList(
+		c.Request.Context(), group, h.maxAccountSwitches, etag,
+	)
+	if c.Request.Context().Err() != nil {
+		return
+	}
+	if err != nil {
+		if errors.Is(err, service.ErrNoPinnedCodexModelsAccounts) {
+			writeOpenAIModelsError(c, http.StatusServiceUnavailable, "upstream_error", "No available OpenAI model discovery accounts")
+			return
+		}
+		writeOpenAIModelsError(c, infraerrors.Code(err), "upstream_error", infraerrors.Message(err))
+		return
+	}
+	setOpsSelectedAccount(c, account.ID, account.Platform)
+	writeOpenAIModelsResponse(c, response)
+}
 
 func writeOpenAIModelsError(c *gin.Context, status int, errorType, message string) {
 	c.JSON(status, gin.H{"error": gin.H{"type": errorType, "message": message}})
 }
 
 func writeOpenAIModelsResponse(c *gin.Context, manifest *service.OpenAIModelsResponse) {
-	if isClientModelCatalog(c) {
-		body, err := projectClientModelCatalog(manifest.Body)
-		if err != nil || manifest.NotModified {
-			writeOpenAIModelsError(c, http.StatusBadGateway, "upstream_error", "Failed to build client model catalog")
-			return
-		}
-		copy := *manifest
-		copy.Body, copy.ETag = body, service.CodexModelsManifestETag(body)
-		copy.NotModified = service.CodexModelsManifestETagMatches(clientCatalogValidator(c), copy.ETag)
-		manifest = &copy
-	}
 	if c.Param("model") != "" {
 		writeRetrievedModel(c, manifest.Body)
 		return
@@ -42,60 +63,15 @@ func writeOpenAIModelsResponse(c *gin.Context, manifest *service.OpenAIModelsRes
 
 // Both discovery endpoints consume the same final catalogue, after group/platform
 // selection and allowlist filtering. Preserve every field on the selected entry.
-func writeModelsListResponse(c *gin.Context, models any, capabilities ...map[string]service.ModelListCapabilities) {
-	{
-		var entries []map[string]json.RawMessage
-		encoded, err := json.Marshal(models)
-		if err != nil || json.Unmarshal(encoded, &entries) != nil {
-			writeOpenAIModelsError(c, http.StatusInternalServerError, "api_error", "Failed to encode model catalogue")
-			return
-		}
-		for _, entry := range entries {
-			var id string
-			_ = json.Unmarshal(entry["id"], &id)
-			if len(capabilities) > 0 {
-				fields := capabilities[0][id]
-				// The dedicated DTO contains capability fields only. Keep existing
-				// identifiers and provider-specific response fields unchanged.
-				body, _ := json.Marshal(fields)
-				var extra map[string]json.RawMessage
-				_ = json.Unmarshal(body, &extra)
-				for key, value := range extra {
-					entry[key] = value
-				}
-			}
-			var visibility, purpose string
-			_ = json.Unmarshal(entry["visibility"], &visibility)
-			_ = json.Unmarshal(entry["model_purpose"], &purpose)
-			visibility, purpose = service.ModelPresentation(id, visibility, purpose)
-			if visibility != "" {
-				entry["visibility"], _ = json.Marshal(visibility)
-			}
-			if purpose != "" {
-				entry["model_purpose"], _ = json.Marshal(purpose)
-			}
-		}
-		models = entries
-	}
+func writeModelsListResponse(c *gin.Context, models any) {
 	response := gin.H{"object": "list", "data": models}
-	if c.Param("model") == "" && !isClientModelCatalog(c) {
+	if c.Param("model") == "" {
 		c.JSON(http.StatusOK, response)
 		return
 	}
 	body, err := json.Marshal(response)
 	if err != nil {
 		writeOpenAIModelsError(c, http.StatusInternalServerError, "api_error", "Failed to encode model catalogue")
-		return
-	}
-	if isClientModelCatalog(c) {
-		body, err = projectClientModelCatalog(body)
-		if err != nil {
-			writeOpenAIModelsError(c, http.StatusInternalServerError, "api_error", "Failed to build client model catalog")
-			return
-		}
-	}
-	if c.Param("model") == "" {
-		c.Data(http.StatusOK, "application/json", body)
 		return
 	}
 	writeRetrievedModel(c, body)

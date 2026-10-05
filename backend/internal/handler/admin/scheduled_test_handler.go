@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -21,22 +20,20 @@ func NewScheduledTestHandler(scheduledTestSvc *service.ScheduledTestService) *Sc
 }
 
 type createScheduledTestPlanRequest struct {
-	PelicanConfig  *json.RawMessage `json:"pelican_config"`
-	AccountID      int64            `json:"account_id" binding:"required"`
-	ModelID        string           `json:"model_id"`
-	CronExpression string           `json:"cron_expression" binding:"required"`
-	Enabled        *bool            `json:"enabled"`
-	MaxResults     int              `json:"max_results"`
-	AutoRecover    *bool            `json:"auto_recover"`
+	AccountID      int64  `json:"account_id" binding:"required"`
+	ModelID        string `json:"model_id"`
+	CronExpression string `json:"cron_expression" binding:"required"`
+	Enabled        *bool  `json:"enabled"`
+	MaxResults     int    `json:"max_results"`
+	AutoRecover    *bool  `json:"auto_recover"`
 }
 
 type updateScheduledTestPlanRequest struct {
-	PelicanConfig  *json.RawMessage `json:"pelican_config"`
-	ModelID        string           `json:"model_id"`
-	CronExpression string           `json:"cron_expression"`
-	Enabled        *bool            `json:"enabled"`
-	MaxResults     int              `json:"max_results"`
-	AutoRecover    *bool            `json:"auto_recover"`
+	ModelID        string `json:"model_id"`
+	CronExpression string `json:"cron_expression"`
+	Enabled        *bool  `json:"enabled"`
+	MaxResults     int    `json:"max_results"`
+	AutoRecover    *bool  `json:"auto_recover"`
 }
 
 // ListByAccount GET /admin/accounts/:id/scheduled-test-plans
@@ -65,7 +62,6 @@ func (h *ScheduledTestHandler) Create(c *gin.Context) {
 
 	plan := &service.ScheduledTestPlan{
 		AccountID:      req.AccountID,
-		PelicanConfig:  req.PelicanConfig,
 		ModelID:        req.ModelID,
 		CronExpression: req.CronExpression,
 		Enabled:        true,
@@ -106,10 +102,6 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 		return
 	}
 
-	if req.PelicanConfig != nil {
-		response.BadRequest(c, "legacy quality test plans have been retired")
-		return
-	}
 	if req.ModelID != "" {
 		existing.ModelID = req.ModelID
 	}
@@ -162,32 +154,10 @@ func (h *ScheduledTestHandler) ListResults(c *gin.Context) {
 		limit = l
 	}
 
-	if limit > 100 {
-		limit = 100
-	}
-	results, err := h.scheduledTestSvc.ListResults(c.Request.Context(), planID, limit, c.Query("include_content") != "false")
+	results, err := h.scheduledTestSvc.ListResults(c.Request.Context(), planID, limit)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, results)
-}
-
-func (h *ScheduledTestHandler) GetResult(c *gin.Context) {
-	planID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "invalid plan id")
-		return
-	}
-	resultID, err := strconv.ParseInt(c.Param("result_id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "invalid result id")
-		return
-	}
-	result, err := h.scheduledTestSvc.GetResult(c.Request.Context(), planID, resultID)
-	if err != nil {
-		response.NotFound(c, "result not found or expired")
-		return
-	}
-	c.JSON(http.StatusOK, result)
 }

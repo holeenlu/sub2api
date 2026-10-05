@@ -171,13 +171,13 @@ func TestApplyOAuthCredentialsPreservesExistingNonAuthCredentials(t *testing.T) 
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
-	require.Equal(t, 1, stub.applyOAuthCredentialsCalls)
+	require.Equal(t, 1, stub.updateAccountCalls)
 	require.Equal(t, map[string]any{
 		"access_token":  "new-token",
 		"refresh_token": "new-refresh-token",
 		"model_mapping": map[string]any{"gpt-5": "gpt-5"},
 		"account_id":    "existing-account-id",
-	}, stub.lastApplyOAuthCredentialsInput.Credentials)
+	}, stub.lastUpdateAccountInput.Credentials)
 }
 
 func TestOpenAIOAuthCodexPATBoundaryRejectsMalformedOpenAILongContextBillingValueBeforeTokenValidation(t *testing.T) {

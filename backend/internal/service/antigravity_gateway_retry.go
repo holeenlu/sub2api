@@ -783,14 +783,12 @@ func logPrefix(sessionID, accountName string) string {
 }
 
 func (s *AntigravityGatewayService) shouldFailoverUpstreamError(statusCode int) bool {
-	return shouldFailoverStatusCode(s.settingService, statusCode, func(statusCode int) bool {
-		switch statusCode {
-		case 401, 403, 429, 529:
-			return true
-		default:
-			return statusCode >= 500
-		}
-	})
+	switch statusCode {
+	case 401, 403, 429, 529:
+		return true
+	default:
+		return statusCode >= 500
+	}
 }
 
 // isGoogleProjectConfigError 判断（已提取的小写）错误消息是否属于 Google 服务端配置类问题。

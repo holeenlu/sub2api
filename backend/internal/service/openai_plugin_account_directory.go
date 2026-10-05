@@ -111,9 +111,6 @@ func accountReadableSnapshotJSON(account *Account) []byte {
 	clone.Credentials = nil
 	clone.Groups = nil
 	clone.AccountGroups = nil
-	// Harvested Codex ticket material is private runtime state, not readable
-	// account metadata; the helper clones so the source account is untouched.
-	clone.Extra = RedactOpenAICodexTicketExtra(account.Extra)
 	data, err := json.Marshal(&clone)
 	if err != nil {
 		return nil

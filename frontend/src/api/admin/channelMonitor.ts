@@ -7,7 +7,6 @@ import { apiClient } from '../client'
 
 export type Provider =
   | 'openai'
-
   | 'anthropic'
   | 'gemini'
   | 'grok'

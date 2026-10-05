@@ -5,38 +5,23 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 )
 
 // PlazaOfficialPricing 模型广场展示用的官方参考价（USD per token），与计费同源：
 // LiteLLM → 内置兜底价卡 → 模型策略。字段为 nil 表示该项缺失（0 视为未配置）。
 type PlazaOfficialPricing struct {
-	Source              string
-	Revision            string
-	InputPrice          *float64
-	OutputPrice         *float64
-	CacheWritePrice     *float64 // 5m 缓存写入（= LiteLLM cache_creation）
-	CacheWrite1hPrice   *float64 // 1h 缓存写入，仅计费会区分 5m/1h 时给出
-	CacheReadPrice      *float64
-	ImageInputPrice     *float64
-	ImageOutputPrice    *float64
-	ImageCacheReadPrice *float64
+	InputPrice        *float64
+	OutputPrice       *float64
+	CacheWritePrice   *float64 // 5m 缓存写入（= LiteLLM cache_creation）
+	CacheWrite1hPrice *float64 // 1h 缓存写入，仅计费会区分 5m/1h 时给出
+	CacheReadPrice    *float64
 	// Intervals 官方长上下文阶梯（多档时给出），不受分组开关影响。
 	Intervals []PricingInterval
 }
 
 // PlazaModel 模型广场中单个模型条目：按实收口径合成的展示定价 + 官方参考价。
 type PlazaModel struct {
-	ImageTokenPricing *PlazaImageTokenPricing
-	Endpoint          string
-	CatalogSource     string
-	PricingSource     string
-	QuoteReason       string
-	PriceUnit         string
-	MediaKind         BillingMode
-
 	Name            string
-	ChannelName     string // 渠道管理名称，与去重时选中的渠道定价保持一致。
 	Platform        string
 	Pricing         *ChannelModelPricing
 	OfficialPricing *PlazaOfficialPricing
@@ -48,12 +33,10 @@ type PlazaModel struct {
 
 // PlazaGroup 模型广场中以分组为顶层的条目。
 //
-// Models 由共享分组目录提供；价格不参与模型准入。
+// 与 AvailableGroupRef 相比多了 Description 与 Models；Models 来自该分组关联渠道的
+// 支持模型（普通分组按分组平台隔离，Composite 分组展开关联渠道已配置的
+// 具体平台），与「可用渠道」页口径一致。
 type PlazaGroup struct {
-	CatalogStatus    string
-	CatalogUpdatedAt time.Time
-	CatalogIssues    []GroupCatalogIssue
-
 	ID                 int64
 	Name               string
 	Description        string
@@ -79,11 +62,9 @@ type PlazaGroup struct {
 
 // ModelPlazaService 聚合模型广场数据。
 //
-// 模型枚举来自分组目录；token 模型的展示单价与阶梯由 BillingService 的阶梯表
+// 模型枚举来自渠道配置；token 模型的展示单价与阶梯由 BillingService 的阶梯表
 // 查询给出（与扣费走同一条解析链与计费函数），图片/按次模型沿用渠道/分组档位价。
 type ModelPlazaService struct {
-	catalog *GroupModelCatalogService
-
 	channelRepo    ChannelRepository
 	groupRepo      GroupRepository
 	pricingService *PricingService
@@ -108,14 +89,20 @@ func NewModelPlazaService(
 	}
 }
 
-// ListGroups returns active groups in rate order. Production providers inject
-// the shared catalog; the legacy constructor remains available to older callers.
+// ListGroups 返回模型广场数据：每个活跃分组附带其可用模型与定价。
+//
+// 模型枚举口径与 ListAvailable 一致（Active 渠道、SupportedModels ∪ 全局定价回落、
+// 平台隔离），仅把顶层从渠道换成分组：
+//   - 渠道按 lower(name) 排序后遍历，保证同名模型去重结果确定；
+//   - 同分组同名模型「先见者胜」，仅当已存条目无定价而新条目有定价时升级替换；
+//   - token 模型的单价与阶梯按实收口径合成（见 ResolveContextPricingSchedule），
+//     图片计费模型的档位价按实收口径合成（见 plazaImageDisplayPricing）；
+//   - 每个模型附带官方参考价（查不到为 nil）；
+//   - 只返回 Models 非空的分组；分组按 RateMultiplier 升序（同倍率按名称），
+//     组内模型按名称排序。
+//
+// 可见性过滤（专属分组）不在此层做，由 handler 按登录态裁剪。
 func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error) {
-	return s.ListVisibleGroups(ctx, nil)
-}
-
-// ListVisibleGroups filters before loading catalogs so private groups never affect a public response.
-func (s *ModelPlazaService) ListVisibleGroups(ctx context.Context, visible func(*Group) bool) ([]PlazaGroup, error) {
 	channels, err := s.channelRepo.ListAll(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list channels: %w", err)
@@ -134,9 +121,6 @@ func (s *ModelPlazaService) ListVisibleGroups(ctx context.Context, visible func(
 	order := make([]int64, 0, len(groups))
 	for i := range groups {
 		g := &groups[i]
-		if visible != nil && !visible(g) {
-			continue
-		}
 		byGroup[g.ID] = &PlazaGroup{
 			ID:                        g.ID,
 			Name:                      g.Name,
@@ -166,9 +150,6 @@ func (s *ModelPlazaService) ListVisibleGroups(ctx context.Context, visible func(
 	// modelIdx[groupID][platform+modelName] = index into byGroup[groupID].Models
 	modelIdx := make(map[int64]map[modelKey]int, len(groups))
 	for i := range channels {
-		if s.catalog != nil {
-			break
-		}
 		ch := &channels[i]
 		if ch.Status != StatusActive {
 			continue
@@ -189,10 +170,6 @@ func (s *ModelPlazaService) ListVisibleGroups(ctx context.Context, visible func(
 			}
 			for j := range supported {
 				m := supported[j]
-				g := groupEnt[gid]
-				if g != nil && g.ModelAllowlistEnabled() && !g.ModelAllowlist.Allows(m.Name) {
-					continue
-				}
 				if pg.Platform == PlatformComposite {
 					if !isConcreteRequestPlatform(m.Platform) {
 						continue
@@ -205,16 +182,14 @@ func (s *ModelPlazaService) ListVisibleGroups(ctx context.Context, visible func(
 					// 先见者胜；仅当已存条目无定价而新条目有定价时升级。
 					if pg.Models[at].Pricing == nil && m.Pricing != nil {
 						pg.Models[at].Pricing = m.Pricing
-						pg.Models[at].ChannelName = ch.Name
 					}
 					continue
 				}
 				idx[key] = len(pg.Models)
 				pg.Models = append(pg.Models, PlazaModel{
-					Name:        m.Name,
-					ChannelName: ch.Name,
-					Platform:    m.Platform,
-					Pricing:     m.Pricing,
+					Name:     m.Name,
+					Platform: m.Platform,
+					Pricing:  m.Pricing,
 				})
 			}
 		}
@@ -224,37 +199,6 @@ func (s *ModelPlazaService) ListVisibleGroups(ctx context.Context, visible func(
 	out := make([]PlazaGroup, 0, len(order))
 	for _, gid := range order {
 		pg := byGroup[gid]
-		if s.catalog != nil {
-			catalog, err := s.catalog.resolve(ctx, groupEnt[gid], channels)
-			if err != nil {
-				return nil, err
-			}
-			pg.CatalogStatus, pg.CatalogUpdatedAt, pg.CatalogIssues = catalog.Status, catalog.UpdatedAt, catalog.Issues
-			pg.Models = make([]PlazaModel, 0, len(catalog.Models))
-			for _, entry := range catalog.Models {
-				m := PlazaModel{Name: entry.Name, Platform: entry.Platform, Endpoint: entry.Endpoint, CatalogSource: entry.Source, ChannelName: entry.ChannelName}
-				if entry.PricingStatus == "unavailable" {
-					m.QuoteReason = "pricing_unavailable"
-				} else if len(entry.BillingModels) != 1 {
-					m.QuoteReason = "request_dependent_pricing"
-				} else {
-					m.Name = entry.BillingModels[0]
-					s.fillDisplayPricing(ctx, &m, groupEnt[gid])
-					s.fillMediaDisplayPricing(ctx, &m, groupEnt[gid])
-					m.Name = entry.Name
-					if entry.ResponseDependent && m.QuoteReason == "" {
-						// Keep configured prices visible; the response may select another billing model.
-						m.QuoteReason = "response_model_pricing"
-					}
-				}
-				// Official pricing belongs to the public model, independently of route
-				// ambiguity. Never substitute a different mapped target's official price.
-				m.OfficialPricing = s.lookupOfficialPricing(ctx, entry.Name, officialMemo)
-				pg.Models = append(pg.Models, m)
-			}
-			out = append(out, *pg)
-			continue
-		}
 		if len(pg.Models) == 0 {
 			continue
 		}
@@ -267,7 +211,6 @@ func (s *ModelPlazaService) ListVisibleGroups(ctx context.Context, visible func(
 		g := groupEnt[gid]
 		for j := range pg.Models {
 			s.fillDisplayPricing(ctx, &pg.Models[j], g)
-			s.fillMediaDisplayPricing(ctx, &pg.Models[j], g)
 			pg.Models[j].OfficialPricing = s.lookupOfficialPricing(ctx, pg.Models[j].Name, officialMemo)
 		}
 		out = append(out, *pg)
@@ -286,26 +229,6 @@ func (s *ModelPlazaService) ListVisibleGroups(ctx context.Context, visible func(
 // token 模型取计费阶梯表（单价与档位均由真实计费函数得出），
 // 图片/按次模型（或阶梯表不可用时）沿用渠道定价与分组图片档位价。
 func (s *ModelPlazaService) fillDisplayPricing(ctx context.Context, m *PlazaModel, g *Group) {
-	if s.resolver != nil {
-		pricingCtx := WithResolvedTargetPlatform(ctx, m.Platform)
-		var gid *int64
-		if g != nil {
-			gid = &g.ID
-		}
-		resolved := s.resolver.Resolve(pricingCtx, PricingInput{Model: m.Name, Group: g, GroupID: gid})
-		if resolved != nil {
-			m.ImageTokenPricing = s.imageTokenDisplayPricing(pricingCtx, m.Name, g, resolved)
-			m.PricingSource = resolved.Source
-			if resolved.Source == PricingSourceLiteLLM || resolved.Source == PricingSourceFallback {
-				m.PricingSource = "billing_catalog"
-			}
-			if resolved.channelPricing != nil {
-				p := resolved.channelPricing.Clone()
-				m.Pricing = &p
-			}
-		}
-	}
-
 	if groupPricing := matchGroupModelPricing(g, m.Name); groupPricing != nil {
 		m.Pricing = groupPricing
 	}
@@ -335,8 +258,6 @@ func plazaPricingFromSchedule(raw *ChannelModelPricing, sched *ContextPricingSch
 		out.ImageInputPrice = raw.ImageInputPrice
 		out.ImageOutputPrice = raw.ImageOutputPrice
 		out.PerRequestPrice = raw.PerRequestPrice
-		out.FastMultiplier = raw.FastMultiplier
-		out.FlexMultiplier = raw.FlexMultiplier
 		out.ReasoningEffortMultipliers = reasoningEffortMultipliersFromPricing(raw)
 	}
 	first := sched.Tiers[0]
@@ -426,24 +347,13 @@ func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName
 	if cached, ok := memo[modelName]; ok {
 		return cached
 	}
-	if s.pricingService != nil {
-		raw, revision, source := s.pricingService.ReferencePrice(modelName)
-		if revision != "" {
-			result := catalogPlazaReference(raw, revision, source)
-			memo[modelName] = result
-			return result
-		}
-	}
 	var result *PlazaOfficialPricing
 	if mp, err := s.billingService.GetModelPricing(modelName); err == nil && mp != nil {
 		result = &PlazaOfficialPricing{
-			InputPrice:          nonZeroPtr(mp.InputPricePerToken),
-			OutputPrice:         nonZeroPtr(mp.OutputPricePerToken),
-			CacheWritePrice:     nonZeroPtr(mp.CacheCreationPricePerToken),
-			CacheReadPrice:      nonZeroPtr(mp.CacheReadPricePerToken),
-			ImageInputPrice:     nonZeroPtr(mp.ImageInputPricePerToken),
-			ImageOutputPrice:    nonZeroPtr(mp.ImageOutputPricePerToken),
-			ImageCacheReadPrice: nonZeroPtr(mp.ImageCacheReadPricePerToken),
+			InputPrice:      nonZeroPtr(mp.InputPricePerToken),
+			OutputPrice:     nonZeroPtr(mp.OutputPricePerToken),
+			CacheWritePrice: nonZeroPtr(mp.CacheCreationPricePerToken),
+			CacheReadPrice:  nonZeroPtr(mp.CacheReadPricePerToken),
 		}
 		// 计费只在支持 5m/1h 分档时使用 1h 价，其余情况 1h 价对用户无意义。
 		if mp.SupportsCacheBreakdown {
@@ -456,110 +366,10 @@ func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName
 			}
 		}
 		if result.InputPrice == nil && result.OutputPrice == nil && result.CacheWritePrice == nil &&
-			result.CacheWrite1hPrice == nil && result.CacheReadPrice == nil && result.ImageInputPrice == nil &&
-			result.ImageOutputPrice == nil && result.ImageCacheReadPrice == nil && len(result.Intervals) == 0 {
+			result.CacheWrite1hPrice == nil && result.CacheReadPrice == nil && len(result.Intervals) == 0 {
 			result = nil
 		}
 	}
 	memo[modelName] = result
 	return result
-}
-
-// Image token components use the same usage fields and pricing path as billing.
-// They must not inherit the text cache price in the presentation layer.
-type PlazaImageTokenPricing struct {
-	Input     *float64 `json:"input_price"`
-	Output    *float64 `json:"output_price"`
-	CacheRead *float64 `json:"cache_read_price"`
-}
-
-func (s *ModelPlazaService) imageTokenDisplayPricing(ctx context.Context, model string, group *Group, resolved *ResolvedPricing) *PlazaImageTokenPricing {
-	if s.billingService == nil || (resolved.Mode != "" && resolved.Mode != BillingModeToken) {
-		return nil
-	}
-	base, raw := resolved.BasePricing, resolved.channelPricing
-	hasImagePrice := (base != nil && (base.ImageInputPricePerToken != 0 || base.ImageOutputPricePerToken != 0 || base.ImageCacheReadPricePerToken != 0)) || (raw != nil && (raw.ImageInputPrice != nil || raw.ImageOutputPrice != nil))
-	if !hasImagePrice {
-		return nil
-	}
-	probe := func(tokens UsageTokens) *float64 {
-		cost, err := s.billingService.CalculateTokenCostForRequest(TokenCostRequest{Ctx: ctx, Model: model, Group: group, RateMultiplier: 1, Resolver: s.resolver, Resolved: resolved, Tokens: tokens})
-		if err != nil {
-			return nil
-		}
-		value := roundContextPrice(cost.ActualCost / 1000)
-		return &value
-	}
-	return &PlazaImageTokenPricing{
-		Input:     probe(UsageTokens{InputTokens: 1000, ImageInputTokens: 1000}),
-		Output:    probe(UsageTokens{OutputTokens: 1000, ImageOutputTokens: 1000}),
-		CacheRead: probe(UsageTokens{CacheReadTokens: 1000, ImageCacheReadTokens: 1000}),
-	}
-}
-
-// Unit probes reuse media billing precedence (group card, resolution prices,
-// channel, defaults). A video unit is one second unless configured per request.
-func (s *ModelPlazaService) fillMediaDisplayPricing(ctx context.Context, m *PlazaModel, group *Group) {
-	if group == nil || s.billingService == nil || s.resolver == nil {
-		return
-	}
-	mode := BillingModeToken
-	if m.Pricing != nil {
-		mode = m.Pricing.BillingMode
-	}
-	video := mode == BillingModeVideo || isGrokVideoBillingModel(m.Name)
-	ctx = WithResolvedTargetPlatform(ctx, m.Platform)
-	gateway := &OpenAIGatewayService{billingService: s.billingService, resolver: s.resolver}
-	key := &APIKey{Group: group, GroupID: &group.ID}
-	explicit := gateway.resolveOpenAIChannelPricing(ctx, m.Name, key)
-	if explicit != nil && explicit.Mode == BillingModeToken {
-		return
-	}
-	image := mode == BillingModeImage || IsImageGenerationIntent("", m.Name, nil)
-	if !video && !image {
-		return
-	}
-	// Do not carry token-only prices or tiers into an image quote.
-	m.ImageTokenPricing = nil
-	m.LongContextBasis = ""
-	m.TimePricing = nil
-	resolved := s.resolver.Resolve(ctx, PricingInput{Model: m.Name, Group: group, GroupID: &group.ID})
-	raw := &ChannelModelPricing{BillingMode: BillingModeImage}
-	m.PriceUnit, m.MediaKind = "image", BillingModeImage
-	tiers := []string{ImageBillingSize1K, ImageBillingSize2K, ImageBillingSize4K}
-	if video {
-		raw.BillingMode = BillingModeVideo
-		m.PriceUnit, m.MediaKind = "second", BillingModeVideo
-		tiers = []string{VideoBillingResolution480P, VideoBillingResolution720P, VideoBillingResolution1080P}
-		// Different unit semantics across resolutions cannot be a single price table.
-		perRequest := 0
-		for _, tier := range tiers {
-			if !apiKeyHasConfiguredVideoPrice(key, m.Name, tier) && resolved.Source == PricingSourceChannel && (resolved.Mode == BillingModePerRequest || resolved.Mode == BillingModeImage) {
-				perRequest++
-			}
-		}
-		if perRequest > 0 && perRequest < len(tiers) {
-			m.QuoteReason = "request_dependent_pricing"
-			return
-		}
-		if perRequest == len(tiers) {
-			raw.BillingMode = BillingModePerRequest
-			m.PriceUnit = "request"
-		}
-	}
-	for i, tier := range tiers {
-		var cost *CostBreakdown
-		if video {
-			cost = gateway.calculateOpenAIVideoCost(ctx, m.Name, key, &OpenAIForwardResult{VideoCount: 1, VideoResolution: tier, VideoDurationSeconds: 1}, 1)
-		} else {
-			cost = gateway.calculateOpenAIImageCost(ctx, m.Name, key, &OpenAIForwardResult{ImageCount: 1, ImageSize: tier}, 1)
-		}
-		value := cost.ActualCost
-		raw.Intervals = append(raw.Intervals, PricingInterval{TierLabel: tier, PerRequestPrice: &value, SortOrder: i})
-	}
-	if resolved.channelPricing != nil {
-		raw.ReasoningEffortMultipliers = reasoningEffortMultipliersFromPricing(resolved.channelPricing)
-	}
-	m.Pricing = raw
-	m.PricingSource = "media_billing"
 }

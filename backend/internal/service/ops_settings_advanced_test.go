@@ -181,16 +181,3 @@ func TestSetOpenAIQuotaAutoPauseSettings_VisibleImmediately(t *testing.T) {
 		t.Fatalf("after Set, Get = %+v, want {0.88, 0.77}", got)
 	}
 }
-
-// Upstream defers cron syntax validation until the cleanup scheduler is built.
-func TestUpdateOpsAdvancedSettings_DefersCleanupScheduleValidation(t *testing.T) {
-	repo := newRuntimeSettingRepoStub()
-	svc := &OpsService{settingRepo: repo}
-	for _, schedule := range []string{"0 3 * *", "0 99 * * *", "0 3 * * 1-5", "   "} {
-		cfg := defaultOpsAdvancedSettings()
-		cfg.DataRetention.CleanupSchedule = schedule
-		if _, err := svc.UpdateOpsAdvancedSettings(context.Background(), cfg); err != nil {
-			t.Fatalf("schedule %q: unexpected save error: %v", schedule, err)
-		}
-	}
-}

@@ -249,7 +249,6 @@
               >
                 {{ accountDisplayEmail(row) }}
               </span>
-              <CodexDiagnosticBadge :summary="row.codex_diagnostic" @open="openCodexDiagnostic(row)" />
             </div>
           </template>
           <template #cell-notes="{ value }">
@@ -290,17 +289,8 @@
           <template #cell-status="{ row }">
             <div class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
+              <CodexDiagnosticBadge :summary="row.codex_diagnostic" @open="openCodexDiagnostic(row)" />
             </div>
-          </template>
-          <template #cell-codex_ticket="{ row }">
-            <button
-              v-if="row.platform === 'openai' && (row.type === 'oauth' || row.type === 'setup-token')"
-              type="button"
-              class="rounded-lg px-2 py-1 text-sm font-semibold tabular-nums text-primary-600 transition hover:bg-primary-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500 dark:text-primary-400 dark:hover:bg-primary-900/20"
-              :aria-label="t('admin.accounts.openai.codexTicketSummary', ticketSummary(row))"
-              @click="openCodexTickets(row)"
-            >{{ ticketSummary(row).ready }} / {{ ticketSummary(row).total }}</button>
-            <span v-else class="text-gray-400">—</span>
           </template>
           <template #cell-schedulable="{ row }">
             <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
@@ -465,15 +455,14 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" @test="handleTest" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" @codex-tickets="openEditCodexTickets" @test="handleTest" />
+    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
+    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
-    <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" @completed="handleAccountTestCompleted" />
+    <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <CodexTicketDashboard :show="showCodexTickets" :account="codexTicketAcc" @close="showCodexTickets = false" @updated="handleAccountUpdated" />
     <CodexDiagnosticModal :show="showCodexDiagnostic" :account="codexDiagnosticAcc" @close="showCodexDiagnostic = false" @completed="handleCodexDiagnosticCompleted" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @codex-diagnostic="openCodexDiagnostic" />
+    <AccountActionMenu @codex-diagnostic="openCodexDiagnostic" :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -503,7 +492,6 @@
 </template>
 
 <script setup lang="ts">
-
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
@@ -526,7 +514,6 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
-import CodexTicketDashboard from '@/components/admin/account/CodexTicketDashboard.vue'
 import CodexDiagnosticModal from '@/components/admin/account/CodexDiagnosticModal.vue'
 import CodexDiagnosticBadge from '@/components/admin/account/CodexDiagnosticBadge.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
@@ -540,7 +527,6 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
-
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
@@ -612,24 +598,13 @@ const selTypes = computed<AccountType[]>(() => {
 })
 const showCreate = ref(false)
 const showEdit = ref(false)
-const showCodexTickets = ref(false)
-const codexTicketAcc = ref<Account | null>(null)
 const showCodexDiagnostic = ref(false)
 const codexDiagnosticAcc = ref<Account | null>(null)
-const codexTicketGloballyEnabled = ref(false)
-let codexTicketSettingsRequestId = 0
-function openEditCodexTickets() { if (edAcc.value) { showEdit.value = false; openCodexTickets(edAcc.value) } }
-function openCodexTickets(account: Account) { showCodexDiagnostic.value = false; codexTicketAcc.value = account; showCodexTickets.value = true }
-function openCodexDiagnostic(account: Account) { showCodexTickets.value = false; codexDiagnosticAcc.value = account; showCodexDiagnostic.value = true }
+function openCodexDiagnostic(account: Account) { codexDiagnosticAcc.value = account; showCodexDiagnostic.value = true }
 async function handleCodexDiagnosticCompleted(accountID: number) {
   try { handleAccountUpdated(await adminAPI.accounts.getById(accountID)) }
   catch (error) { console.error('Failed to refresh account after diagnostic', error) }
 }
-function ticketSummary(account: Account) {
-  const entries = account.codex_turn_tickets ?? []
-  return { ready: entries.filter(ticket => ticket.ready).length, total: entries.length }
-}
-
 const showSync = ref(false)
 const showImportData = ref(false)
 const showExportDataDialog = ref(false)
@@ -1188,7 +1163,6 @@ useSwipeSelect(accountTableRef, {
 const resetAutoRefreshCache = () => {
   autoRefreshETag.value = null
   upstreamBillingRateETag.value = null
-  upstreamBillingRateAbortController?.abort()
 }
 
 type AccountLoadOptions = {
@@ -1239,35 +1213,25 @@ const upstreamBillingRateContextKey = () => JSON.stringify({
 })
 
 const applyUpstreamBillingRateSnapshots = async (
-  result: NonNullable<Awaited<ReturnType<typeof adminAPI.accounts.getUpstreamBillingRatesWithEtag>>['data']>,
-  requestContextKey: string,
-  signal: AbortSignal
+  result: NonNullable<Awaited<ReturnType<typeof adminAPI.accounts.getUpstreamBillingRatesWithEtag>>['data']>
 ) => {
   const nextIDs = result.items.map(item => item.account_id)
   const currentIDs = accounts.value.map(account => account.id)
-  const currentByID = new Map(accounts.value.map(account => [account.id, account]))
 
-  // Fetch missing rows without replacing the table with its loading skeleton.
-  if (result.total !== pagination.total || nextIDs.length !== currentIDs.length || nextIDs.some(id => !currentByID.has(id))) {
-    const page = await adminAPI.accounts.list(
-      pagination.page,
-      pagination.page_size,
-      { ...toRaw(params), lite: '1' },
-      { signal }
-    )
-    if (signal.aborted || loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
-    pagination.total = page.total
-    pagination.pages = page.pages
-    mergeAccountsIncrementally(page.items)
-    hasPendingListSync.value = false
-    upstreamBillingNow.value = Date.now()
+  // The compact response cannot fill a row that crossed a page boundary.
+  // Only that case needs the expensive, full account-list request.
+  if (result.total !== pagination.total || !sameAccountIDOrder(nextIDs, currentIDs)) {
+    try {
+      await load({ refreshTodayStats: false })
+    } catch (error) {
+      console.error('Failed to reconcile upstream billing sort:', error)
+    }
     return
   }
 
   const itemsByID = new Map(result.items.map(item => [item.account_id, item]))
-  let changed = !sameAccountIDOrder(nextIDs, currentIDs)
-  const nextAccounts = nextIDs.map(id => {
-    const account = currentByID.get(id)!
+  let changed = false
+  const nextAccounts = accounts.value.map(account => {
     const item = itemsByID.get(account.id)
     if (!item) return account
     const nextSnapshot = item.snapshot ?? null
@@ -1318,13 +1282,10 @@ const refreshUpstreamBillingRates = async (force = false) => {
       buildUpstreamBillingRateFilters(),
       { etag: force ? null : upstreamBillingRateETag.value, signal: controller.signal }
     )
-    if (controller.signal.aborted || loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
+    if (loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
     if (result.etag) upstreamBillingRateETag.value = result.etag
-    if (!result.notModified && result.data) {
-      await applyUpstreamBillingRateSnapshots(result.data, requestContextKey, controller.signal)
-    }
+    if (!result.notModified && result.data) await applyUpstreamBillingRateSnapshots(result.data)
   } catch (error) {
-    upstreamBillingRateETag.value = null
     const refreshError = error as { name?: string; code?: string }
     if (refreshError.name !== 'AbortError' && refreshError.name !== 'CanceledError' && refreshError.code !== 'ERR_CANCELED') {
       console.error('Failed to refresh upstream billing rates:', error)
@@ -1333,6 +1294,11 @@ const refreshUpstreamBillingRates = async (force = false) => {
     if (upstreamBillingRateAbortController === controller) upstreamBillingRateAbortController = null
     upstreamBillingRateRefreshing.value = false
   }
+}
+
+const refreshUpstreamBillingSortedList = async (force = false) => {
+  if (!force && sortState.sort_by !== 'upstream_billing_rate') return
+  await refreshUpstreamBillingRates(force)
 }
 
 useIntervalFn(() => { void refreshUpstreamBillingRates() }, 5 * 60_000, { immediate: false })
@@ -1438,10 +1404,6 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.current_concurrency !== next.current_concurrency ||
     current.current_window_cost !== next.current_window_cost ||
     current.active_sessions !== next.active_sessions ||
-    current.current_rpm !== next.current_rpm ||
-    current.effective_rpm_limit !== next.effective_rpm_limit ||
-    current.rpm_paused !== next.rpm_paused ||
-    current.rpm_reset_at !== next.rpm_reset_at ||
     current.schedulable !== next.schedulable ||
     current.status !== next.status ||
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
@@ -1494,7 +1456,6 @@ const refreshAccountsIncrementally = async () => {
   if (autoRefreshFetching.value) return
   syncAccountListDerivedParams()
   autoRefreshFetching.value = true
-  const ticketSettingsRefresh = loadCodexTicketGlobalState()
   try {
     const result = await adminAPI.accounts.listWithEtag(
       pagination.page,
@@ -1528,28 +1489,14 @@ const refreshAccountsIncrementally = async () => {
   } catch (error) {
     console.error('Auto refresh failed:', error)
   } finally {
-    await ticketSettingsRefresh
     autoRefreshFetching.value = false
   }
 }
 
 const handleManualRefresh = async () => {
-  await Promise.all([load(), loadUpstreamBillingProbeGlobalState(), loadCodexTicketGlobalState()])
+  await Promise.all([load(), loadUpstreamBillingProbeGlobalState()])
   // Force usage cells to refetch /usage on explicit user refresh.
   usageManualRefreshToken.value += 1
-}
-
-const loadCodexTicketGlobalState = async () => {
-  const requestId = ++codexTicketSettingsRequestId
-  try {
-    const settings = await adminAPI.settings.getSettings()
-    if (requestId !== codexTicketSettingsRequestId) return
-    codexTicketGloballyEnabled.value = settings.openai_codex_ticket_enabled === true
-  } catch (error) {
-    if (requestId !== codexTicketSettingsRequestId) return
-    // Keep the last confirmed state; an initial failure leaves the column hidden.
-    console.error('Failed to load Codex ticket settings:', error)
-  }
 }
 
 const loadUpstreamBillingProbeGlobalState = async () => {
@@ -1856,9 +1803,6 @@ const allColumns = computed(() => {
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
-    ...(codexTicketGloballyEnabled.value
-      ? [{ key: 'codex_ticket', label: t('admin.accounts.columns.codexTicket'), sortable: false }]
-      : []),
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
@@ -2302,9 +2246,7 @@ const patchUpstreamBillingSnapshot = (accountID: number, snapshot: UpstreamBilli
   })
 }
 const refreshAccountsAfterUpstreamBillingProbe = async () => {
-  enterAutoRefreshSilentWindow()
-  // Cost may change even when the active sort does not depend on upstream rates.
-  await refreshUpstreamBillingRates(true)
+  await refreshUpstreamBillingSortedList(true)
 }
 const handleProbeUpstreamBilling = async (account: Account) => {
   if (probingUpstreamBilling.has(account.id)) return
@@ -2381,21 +2323,7 @@ const handleExportData = async () => {
   }
 }
 const accountExportStepUp = useStepUp()
-const handleAccountTestCompleted = async (accountId: number) => {
-  try {
-    const fresh = await adminAPI.accounts.getById(accountId)
-    if (testingAcc.value?.id === accountId) testingAcc.value = fresh
-    await reload()
-  } catch (error) {
-    console.error('Failed to refresh tested account:', error)
-    appStore.showError(extractApiErrorMessage(error, t('common.error')))
-  }
-}
-const closeTestModal = () => {
-  showTest.value = false
-  testingAcc.value = null
-
-}
+const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
 const handleTest = async (a: AccountListItem) => {
@@ -2622,7 +2550,6 @@ onMounted(async () => {
 
   load()
   loadUpstreamBillingProbeGlobalState()
-  void loadCodexTicketGlobalState()
   const [proxiesResult, groupsResult] = await Promise.allSettled([
     adminAPI.proxies.getAll(),
     adminAPI.groups.getAll()
@@ -2650,7 +2577,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  codexTicketSettingsRequestId += 1
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)

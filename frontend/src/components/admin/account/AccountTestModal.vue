@@ -397,7 +397,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'completed', accountId: number): void
 }>()
 
 const terminalRef = ref<HTMLElement | null>(null)
@@ -423,7 +422,7 @@ const uploadAudioDataURL = ref('')
 const uploadAudioName = ref('')
 const imageFileInput = ref<HTMLInputElement | null>(null)
 const audioFileInput = ref<HTMLInputElement | null>(null)
-const isOpenAIAccount = computed(() => (props.account?.platform === 'openai'))
+const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
@@ -498,7 +497,6 @@ const modelOptionsForMode = computed(() => {
 })
 
 const supportsPromptInput = computed(() => {
-
   if (!isGrokAccount.value) {
     return supportsImageTest.value
   }
@@ -928,7 +926,6 @@ const startTest = async () => {
         }
       }
     }
-
   } catch (error: unknown) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       status.value = 'idle'
@@ -945,7 +942,6 @@ const handleEvent = (event: {
   type: string
   text?: string
   model?: string
-  code?: string
   success?: boolean
   error?: string
   image_url?: string
@@ -1034,7 +1030,6 @@ const handleEvent = (event: {
       }
       if (event.success) {
         status.value = 'success'
-
       } else {
         status.value = 'error'
         errorMessage.value = event.error || t('admin.accounts.testFailed')
@@ -1042,7 +1037,6 @@ const handleEvent = (event: {
       break
 
     case 'error':
-
       status.value = 'error'
       errorMessage.value = event.error || t('common.unknownError')
       if (streamingContent.value) {

@@ -268,7 +268,7 @@ var providerOpenAIResponsesAdapter = providerAdapter{
 
 // providerAdapterFor 按 provider + api_mode 选择具体 adapter。
 func providerAdapterFor(provider, apiMode string) (providerAdapter, string, bool) {
-	if (provider == MonitorProviderOpenAI) && defaultAPIMode(apiMode) == MonitorAPIModeResponses {
+	if provider == MonitorProviderOpenAI && defaultAPIMode(apiMode) == MonitorAPIModeResponses {
 		return providerOpenAIResponsesAdapter, MonitorAPIModeResponses, true
 	}
 	adapter, ok := providerAdapters[provider]
@@ -292,7 +292,6 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 	if !ok {
 		return "", "", 0, fmt.Errorf("unsupported provider %q", provider)
 	}
-
 	body, err := buildRequestBody(adapter, provider, apiMode, model, prompt, opts)
 	if err != nil {
 		return "", "", 0, err
@@ -303,7 +302,7 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 	if err != nil {
 		return "", "", status, err
 	}
-	if (provider == MonitorProviderOpenAI) && apiMode == MonitorAPIModeResponses {
+	if provider == MonitorProviderOpenAI && apiMode == MonitorAPIModeResponses {
 		return extractOpenAIResponsesText(respBytes), string(respBytes), status, nil
 	}
 	return extractMonitorResponseText(adapter, respBytes), string(respBytes), status, nil
@@ -592,21 +591,16 @@ func extractOrigin(endpoint string) (string, error) {
 // 大小写不敏感，匹配 `?name=value` 或 `&name=value` 形式（value 截到 & 或字符串末尾）。
 var monitorSensitiveQueryParamRegex = regexp.MustCompile(`(?i)([?&](?:key|api[_-]?key|access[_-]?token|token|authorization|x-api-key)=)[^&\s"']+`)
 
-// credentialLiteralPatterns 匹配常见 provider 的 API key 字面量。
-// 监控路径与网关上游错误出口（sanitizeUpstreamErrorMessage）共用同一份，
-// 避免两处各写一套、新增 provider 时漏改其一。
+// monitorAPIKeyPatterns 匹配常见 provider 的 API key 字面量。
 // 顺序敏感：sk-ant- 必须放在 sk- 之前，否则会被通用 sk- 模式先消费。
-var credentialLiteralPatterns = []struct {
+var monitorAPIKeyPatterns = []struct {
 	pattern *regexp.Regexp
 	replace string
 }{
 	// Anthropic（带前缀，必须先匹配）：sk-ant-xxxxxxx
-	{regexp.MustCompile(`\bsk-ant-[A-Za-z0-9_-]{20,}`), "sk-ant-***REDACTED***"},
+	{regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]{20,}`), "sk-ant-***REDACTED***"},
 	// OpenAI / Anthropic 通用 sk-: sk-xxxxxxx
-	// 字符类必须含下划线：sk-proj-/sk-svcacct- 项目密钥交替使用 - 和 _，漏掉 _ 会在
-	// 第一个下划线处截断，甚至前 20 位里出现 _ 时整段不匹配、密钥原样透出。
-	// 前置 \b 防止 disk-quota-…/task-<uuid> 这类连字符词被误擦成 di + sk-***。
-	{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}`), "sk-***REDACTED***"},
+	{regexp.MustCompile(`sk-[A-Za-z0-9-]{20,}`), "sk-***REDACTED***"},
 	// xAI API Key：xai-xxxxxxx
 	{regexp.MustCompile(`xai-[A-Za-z0-9_-]{6,}`), "xai-***REDACTED***"},
 	// Gemini / Google API Key：固定前缀 + 35 位
@@ -627,7 +621,7 @@ func sanitizeErrorMessage(msg string) string {
 		return msg
 	}
 	msg = monitorSensitiveQueryParamRegex.ReplaceAllString(msg, `${1}REDACTED`)
-	for _, p := range credentialLiteralPatterns {
+	for _, p := range monitorAPIKeyPatterns {
 		msg = p.pattern.ReplaceAllString(msg, p.replace)
 	}
 	return msg

@@ -348,7 +348,19 @@ export default {
       quota_exhausted: '額度耗盡',
       expired: '已過期'
     }
-  },
+  ,
+importToCcSwitch: '匯入到 CCS',
+ccSwitchNotInstalled:
+      'CC-Switch 未安裝或協議處理程序未註冊。請先安裝 CC-Switch 或手動複製 API 金鑰。',
+ccsClientSelect: {
+      title: '選擇用戶端',
+      description: '請選擇您要匯入到 CC-Switch 的用戶端類型：',
+      claudeCode: 'Claude Code',
+      claudeCodeDesc: '匯入為 Claude Code 設定',
+      geminiCli: 'Gemini CLI',
+      geminiCliDesc: '匯入為 Gemini CLI 設定'
+    },
+},
 
   // Usage
   usage: {

@@ -14,6 +14,81 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNativeGatewayRetirementPreservesDiagnosticsAndBilling(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		hasCurrent bool
+		current    string
+		want       string
+	}{
+		{name: "migrate saved template", want: "keep-template"},
+		{name: "keep current template", hasCurrent: true, current: "current-template", want: "current-template"},
+		{name: "keep explicit default", hasCurrent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			tx := testTx(t)
+			_, err := tx.ExecContext(ctx, `
+		CREATE TEMP TABLE accounts (id BIGINT PRIMARY KEY, credentials JSONB, extra JSONB, updated_at TIMESTAMPTZ) ON COMMIT DROP;
+		CREATE TEMP TABLE settings (key TEXT PRIMARY KEY, value TEXT) ON COMMIT DROP;
+		CREATE TEMP TABLE scheduler_outbox (event_type TEXT, account_id BIGINT) ON COMMIT DROP;
+		CREATE TEMP TABLE codex_ticket_invalidations (id BIGINT, reason_code TEXT, original_ticket TEXT, original_cookie TEXT,
+		 returned_ticket TEXT NOT NULL, returned_cookie TEXT, returned_set_cookies JSONB) ON COMMIT DROP;
+		CREATE TEMP TABLE scheduled_test_plans (id BIGINT, account_id BIGINT, diagnostic_config JSONB) ON COMMIT DROP;
+		CREATE TEMP TABLE scheduled_test_results (plan_id BIGINT, diagnostic_run JSONB) ON COMMIT DROP;
+		CREATE TEMP TABLE usage_logs (account_id BIGINT REFERENCES accounts(id), actual_cost NUMERIC) ON COMMIT DROP;
+		INSERT INTO accounts VALUES
+		 (1,'{"access_token":"keep-token","model_mapping":{"client":"native"}}',
+		  '{"codex_turn_ticket:gpt-6-astra":{"cookie":"erase"},"codex_ticket_harvest_enabled":true,"codex_allow_without_ticket":false,
+		    "openai_apikey_codex_identity":true,"openai_oauth_ws_sse_acceleration":true,"model_catalog_snapshot":{},
+		    "base_rpm":100,"openai_request_timezone":"Asia/Taipei","custom":"keep"}',NOW()),
+		 (2,'{}','{"custom":"untouched"}',NOW());
+		INSERT INTO settings VALUES ('openai_codex_ticket_enabled','true'),('openai_codex_ticket_proxy_pool','{}'),
+		 ('openai_codex_ticket_prompt_template','keep-template'),('codex_modeltrace_bank_v1','keep-bank'),
+		 ('account_scheduling_thresholds','{"anthropic":90,"anthropic_fable":60}'),
+		 ('model_catalog_settings','{}'),('model_catalog_registry','[]'),('upstream_failover_status_codes','500,503'),('openai_codex_version_override','keep-native');
+		INSERT INTO codex_ticket_invalidations VALUES (7,'keep-audit','erase','erase','erase','erase','["erase"]');
+		INSERT INTO scheduled_test_plans VALUES (9,1,'{"models":["gpt-6-astra"],"enabled":true}');
+		INSERT INTO scheduled_test_results VALUES (9,'{"status":"normal","probability":0.99}');
+		INSERT INTO usage_logs VALUES (1,12.34);`)
+			require.NoError(t, err)
+			if tc.hasCurrent {
+				_, err = tx.ExecContext(ctx, `INSERT INTO settings (key,value) VALUES($1,$2)`, service.SettingKeyCodexDiagnosticPromptTemplate, tc.current)
+				require.NoError(t, err)
+			}
+			contents, err := os.ReadFile("../../migrations/268_retire_fork_gateway_runtime.sql")
+			require.NoError(t, err)
+			for range 2 {
+				_, err = tx.ExecContext(ctx, string(contents))
+				require.NoError(t, err)
+			}
+			for _, check := range []struct {
+				query string
+				count int
+			}{
+				{`SELECT count(*) FROM accounts WHERE id=1 AND credentials->>'access_token'='keep-token' AND credentials->'model_mapping'='{"client":"native"}' AND extra='{"base_rpm":100,"openai_request_timezone":"Asia/Taipei","custom":"keep"}'`, 1},
+				{`SELECT count(*) FROM accounts WHERE id=2 AND extra='{"custom":"untouched"}'`, 1},
+				{`SELECT count(*) FROM settings`, 4},
+				{`SELECT count(*) FROM settings WHERE key ~ '^openai_codex_ticket_'`, 0},
+				{`SELECT count(*) FROM settings WHERE key='account_scheduling_thresholds' AND value::jsonb='{"anthropic":90}'`, 1},
+				{`SELECT count(*) FROM settings WHERE key IN ('openai_codex_diagnostic_prompt_template','codex_modeltrace_bank_v1','openai_codex_version_override')`, 3},
+				{`SELECT count(*) FROM codex_ticket_invalidations WHERE id=7 AND reason_code='keep-audit' AND original_ticket IS NULL AND original_cookie IS NULL AND returned_ticket='' AND returned_cookie IS NULL AND returned_set_cookies IS NULL`, 1},
+				{`SELECT count(*) FROM scheduled_test_plans WHERE diagnostic_config='{"models":["gpt-6-astra"],"enabled":true}'`, 1},
+				{`SELECT count(*) FROM scheduled_test_results WHERE diagnostic_run='{"status":"normal","probability":0.99}'`, 1},
+				{`SELECT count(*) FROM usage_logs WHERE actual_cost=12.34`, 1},
+				{`SELECT count(*) FROM scheduler_outbox WHERE account_id=1`, 1},
+			} {
+				var count int
+				require.NoError(t, tx.QueryRowContext(ctx, check.query).Scan(&count), check.query)
+				require.Equal(t, check.count, count, check.query)
+			}
+			var template string
+			require.NoError(t, tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyCodexDiagnosticPromptTemplate).Scan(&template))
+			require.Equal(t, tc.want, template)
+		})
+	}
+}
+
 func TestCodexDiagnosticPostgresLifecycle(t *testing.T) {
 	ctx := context.Background()
 	r := &scheduledTestPlanRepository{db: integrationDB}

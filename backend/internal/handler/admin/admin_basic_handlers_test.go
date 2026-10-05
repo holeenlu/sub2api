@@ -17,7 +17,7 @@ func setupAdminRouter(t *testing.T) (*gin.Engine, *stubAdminService) {
 	adminSvc := newStubAdminService()
 
 	userHandler := lifecycleAuthenticatedAdminHandler(t, router, adminSvc)
-	groupHandler := NewGroupHandler(adminSvc, nil, nil, nil)
+	groupHandler := NewGroupHandler(adminSvc, nil, nil)
 	proxyHandler := NewProxyHandler(adminSvc)
 	redeemHandler := NewRedeemHandler(adminSvc, nil)
 

@@ -147,60 +147,6 @@ func TestAccountRepoSuite(t *testing.T) {
 	suite.Run(t, new(AccountRepoSuite))
 }
 
-func (s *AccountRepoSuite) TestRemovedAccountFieldsRejectWritesWithoutPartialChanges() {
-	account := &service.Account{
-		Name: "native-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
-		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
-		Credentials: map[string]any{"access_token": "test-token", "model_mapping": map[string]any{"client": "native"}},
-		Extra:       map[string]any{"codex_diagnostic_monitor": "preserve", "custom_bps_label": "allowed"},
-	}
-	s.Require().NoError(s.repo.Create(s.ctx, account))
-	before, err := s.repo.GetByID(s.ctx, account.ID)
-	s.Require().NoError(err)
-	for _, tc := range []struct {
-		field       string
-		credentials bool
-	}{
-		{"model_mapping_mode", true}, {"openai_excel_bps", false},
-		{"openai_excel_bps_auto_recover_on_403", false}, {"openai_bps", false},
-		{"openai_bps_credential_state", false}, {"cost_multiplier", false}, {"cost_multiplier_auto_sync", false},
-	} {
-		s.Run(tc.field, func() {
-			creds, extra := maps.Clone(account.Credentials), maps.Clone(account.Extra)
-			if tc.credentials {
-				creds[tc.field] = "obsolete"
-			} else {
-				extra[tc.field] = "obsolete"
-			}
-			candidate := *account
-			candidate.ID, candidate.Name = 0, "must-not-be-created"
-			candidate.Credentials, candidate.Extra = creds, extra
-			s.Require().ErrorIs(s.repo.Create(s.ctx, &candidate), service.ErrUnsupportedAccountField)
-			s.Require().Zero(candidate.ID)
-			candidate.ID, candidate.Name = account.ID, "must-not-change"
-			s.Require().ErrorIs(s.repo.Update(s.ctx, &candidate), service.ErrUnsupportedAccountField)
-			changed, err := s.repo.BulkUpdate(s.ctx, []int64{account.ID}, service.AccountBulkUpdate{
-				Name: &candidate.Name, Credentials: creds, Extra: extra,
-			})
-			s.Require().ErrorIs(err, service.ErrUnsupportedAccountField)
-			s.Require().Zero(changed)
-			if tc.credentials {
-				s.Require().ErrorIs(s.repo.UpdateCredentials(s.ctx, account.ID, creds), service.ErrUnsupportedAccountField)
-				updated, err := s.repo.UpdateGrokOAuthCredentialsIfUnchanged(s.ctx, account.ID, account.Credentials, nil, creds)
-				s.Require().ErrorIs(err, service.ErrUnsupportedAccountField)
-				s.Require().False(updated)
-				s.Require().Contains(creds, tc.field, "rejected input must not be silently rewritten")
-			} else {
-				s.Require().ErrorIs(s.repo.UpdateExtra(s.ctx, account.ID, extra), service.ErrUnsupportedAccountField)
-				s.Require().Contains(extra, tc.field, "rejected input must not be silently rewritten")
-			}
-			after, err := s.repo.GetByID(s.ctx, account.ID)
-			s.Require().NoError(err)
-			s.Require().Equal(before, after, "rejected writes must preserve mappings, diagnostics, and the complete account")
-		})
-	}
-}
-
 // --- Create / GetByID / Update / Delete ---
 
 func (s *AccountRepoSuite) TestCreate() {
@@ -1153,116 +1099,6 @@ func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	s.Require().NotContains(cacheRecorder.setAccounts[0].Extra, "model_rate_limits")
 }
 
-func (s *AccountRepoSuite) TestClearModelRateLimit_RemovesOnlyTheGivenScope() {
-	account := mustCreateAccount(s.T(), s.client, &service.Account{
-		Name: "acc-clear-one-model-rate",
-		Extra: map[string]any{
-			"model_rate_limits": map[string]any{
-				"claude-fable-5": map[string]any{
-					"rate_limit_reset_at": "2026-06-03T10:00:00Z",
-					"reason":              `{"source":"account_scheduling_threshold"}`,
-				},
-				"claude-sonnet-4-5": map[string]any{
-					"rate_limit_reset_at": "2026-06-04T10:00:00Z",
-				},
-			},
-		},
-	})
-	cacheRecorder := &schedulerCacheRecorder{}
-	s.repo.schedulerCache = cacheRecorder
-
-	cleared, err := s.repo.ClearModelRateLimit(s.ctx, account.ID, "claude-fable-5", `{"source":"account_scheduling_threshold"}`)
-	s.Require().NoError(err)
-	s.True(cleared)
-
-	got, err := s.repo.GetByID(s.ctx, account.ID)
-	s.Require().NoError(err)
-	limits, ok := got.Extra["model_rate_limits"].(map[string]any)
-	s.Require().True(ok)
-	s.Require().NotContains(limits, "claude-fable-5")
-	s.Require().Contains(limits, "claude-sonnet-4-5", "只该删掉指定 scope")
-	s.Require().Len(cacheRecorder.setAccounts, 1)
-
-	var count int
-	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &count))
-	s.Require().Equal(1, count)
-}
-
-// 解除路径每次选号都会走到。清一个本就不存在的 scope 必须是真正的空操作：否则每次
-// 选号都 bump updated_at、入 outbox 并触发 bucket 重建。
-func (s *AccountRepoSuite) TestClearModelRateLimit_AbsentScopeIsNoOp() {
-	account := mustCreateAccount(s.T(), s.client, &service.Account{
-		Name: "acc-clear-absent-model-rate",
-		Extra: map[string]any{
-			"model_rate_limits": map[string]any{
-				"claude-sonnet-4-5": map[string]any{
-					"rate_limit_reset_at": "2026-06-04T10:00:00Z",
-				},
-			},
-		},
-	})
-	before, err := s.repo.GetByID(s.ctx, account.ID)
-	s.Require().NoError(err)
-
-	cacheRecorder := &schedulerCacheRecorder{}
-	s.repo.schedulerCache = cacheRecorder
-
-	cleared, err := s.repo.ClearModelRateLimit(s.ctx, account.ID, "claude-fable-5", "")
-	s.Require().NoError(err)
-	s.False(cleared)
-
-	after, err := s.repo.GetByID(s.ctx, account.ID)
-	s.Require().NoError(err)
-	s.Require().Equal(before.UpdatedAt.UTC(), after.UpdatedAt.UTC(), "无变化不该 bump updated_at")
-	s.Require().Empty(cacheRecorder.setAccounts, "无变化不该同步调度快照")
-
-	var count int
-	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &count))
-	s.Require().Zero(count, "无变化不该入 outbox")
-}
-
-// 上游 429 在解除路径拿到账号副本之后改写了同一个 scope：那条限流是真的耗尽，谓词
-// 必须在 DB 层挡住这次清除。
-func (s *AccountRepoSuite) TestClearModelRateLimit_KeepsScopeWhenReasonChanged() {
-	account := mustCreateAccount(s.T(), s.client, &service.Account{
-		Name: "acc-clear-model-rate-cas",
-		Extra: map[string]any{
-			"model_rate_limits": map[string]any{
-				"claude-fable-5": map[string]any{
-					"rate_limit_reset_at": "2026-06-03T10:00:00Z",
-					"reason":              "anthropic_7d_oi_window_exhausted",
-				},
-			},
-		},
-	})
-	before, err := s.repo.GetByID(s.ctx, account.ID)
-	s.Require().NoError(err)
-
-	cacheRecorder := &schedulerCacheRecorder{}
-	s.repo.schedulerCache = cacheRecorder
-
-	cleared, err := s.repo.ClearModelRateLimit(s.ctx, account.ID, "claude-fable-5", `{"source":"account_scheduling_threshold"}`)
-	s.Require().NoError(err)
-	s.False(cleared)
-
-	after, err := s.repo.GetByID(s.ctx, account.ID)
-	s.Require().NoError(err)
-	limits, ok := after.Extra["model_rate_limits"].(map[string]any)
-	s.Require().True(ok)
-	s.Require().Contains(limits, "claude-fable-5", "reason 已被改写，这条限流不是调用方看到的那条")
-	s.Require().Equal(before.UpdatedAt.UTC(), after.UpdatedAt.UTC())
-	s.Require().Empty(cacheRecorder.setAccounts)
-}
-
-// 账号不存在与「本来就没有这条限流」对调用方是同一件事：没有需要清除的东西。唯一的
-// 调用方对错误只 Warn，为了区分 not-found 而多打一条 SELECT 得不偿失——解除路径下
-// affected==0 才是常态。
-func (s *AccountRepoSuite) TestClearModelRateLimit_MissingAccountIsNoOp() {
-	cleared, err := s.repo.ClearModelRateLimit(s.ctx, 999999999, "claude-fable-5", "")
-	s.Require().NoError(err)
-	s.False(cleared)
-}
-
 // --- UpdateLastUsed ---
 
 func (s *AccountRepoSuite) TestUpdateLastUsed() {
@@ -1926,4 +1762,60 @@ func idsOfAccounts(accounts []service.Account) []int64 {
 		out = append(out, accounts[i].ID)
 	}
 	return out
+}
+
+func (s *AccountRepoSuite) TestRemovedAccountFieldsRejectWritesWithoutPartialChanges() {
+	account := &service.Account{
+		Name: "native-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token", "model_mapping": map[string]any{"client": "native"}},
+		Extra:       map[string]any{"codex_diagnostic_monitor": "preserve", "custom_bps_label": "allowed"},
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, account))
+	before, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	for _, tc := range []struct {
+		field       string
+		credentials bool
+	}{
+		{"model_mapping_mode", true}, {"openai_excel_bps", false},
+		{"codex_turn_ticket:gpt-6-astra", false}, {"codex_ticket_harvest_enabled", false},
+		{"codex_allow_without_ticket", false}, {"openai_apikey_codex_identity", false}, {"model_catalog_snapshot", false},
+		{"openai_excel_bps_auto_recover_on_403", false}, {"openai_bps", false},
+		{"openai_bps_credential_state", false}, {"cost_multiplier", false}, {"cost_multiplier_auto_sync", false},
+	} {
+		s.Run(tc.field, func() {
+			creds, extra := maps.Clone(account.Credentials), maps.Clone(account.Extra)
+			if tc.credentials {
+				creds[tc.field] = "obsolete"
+			} else {
+				extra[tc.field] = "obsolete"
+			}
+			candidate := *account
+			candidate.ID, candidate.Name = 0, "must-not-be-created"
+			candidate.Credentials, candidate.Extra = creds, extra
+			s.Require().ErrorIs(s.repo.Create(s.ctx, &candidate), service.ErrUnsupportedAccountField)
+			s.Require().Zero(candidate.ID)
+			candidate.ID, candidate.Name = account.ID, "must-not-change"
+			s.Require().ErrorIs(s.repo.Update(s.ctx, &candidate), service.ErrUnsupportedAccountField)
+			changed, err := s.repo.BulkUpdate(s.ctx, []int64{account.ID}, service.AccountBulkUpdate{
+				Name: &candidate.Name, Credentials: creds, Extra: extra,
+			})
+			s.Require().ErrorIs(err, service.ErrUnsupportedAccountField)
+			s.Require().Zero(changed)
+			if tc.credentials {
+				s.Require().ErrorIs(s.repo.UpdateCredentials(s.ctx, account.ID, creds), service.ErrUnsupportedAccountField)
+				updated, err := s.repo.UpdateGrokOAuthCredentialsIfUnchanged(s.ctx, account.ID, account.Credentials, nil, creds)
+				s.Require().ErrorIs(err, service.ErrUnsupportedAccountField)
+				s.Require().False(updated)
+				s.Require().Contains(creds, tc.field, "rejected input must not be silently rewritten")
+			} else {
+				s.Require().ErrorIs(s.repo.UpdateExtra(s.ctx, account.ID, extra), service.ErrUnsupportedAccountField)
+				s.Require().Contains(extra, tc.field, "rejected input must not be silently rewritten")
+			}
+			after, err := s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			s.Require().Equal(before, after, "rejected writes must preserve mappings, diagnostics, and the complete account")
+		})
+	}
 }

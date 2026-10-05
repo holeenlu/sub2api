@@ -360,28 +360,6 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('claude-sonnet-4-20250514')
   })
 
-  it.each([
-    ['gpt-5.6-sol → gpt-5.6-sol', 'gpt-5.6-sol', 'gpt-5.6-sol', ['gpt-5.6-sol']],
-    [' claude-opus-5 → claude-opus-5 → ', 'claude-opus-5', 'claude-opus-5', ['claude-opus-5']],
-    ['alias → alias → actual → actual', 'alias', 'actual', ['alias', 'actual']],
-    ['alias → actual → alias', 'alias', 'alias', ['alias', 'actual', 'alias']],
-    [null, 'gpt-5.6-sol', ' gpt-5.6-sol ', ['gpt-5.6-sol']],
-    [null, 'alias', 'actual', ['alias', 'actual']],
-    [' → ', 'alias', 'actual', ['alias', 'actual']],
-  ])('renders model transitions without adjacent duplicates: %s', (chain, requested, upstream, expected) => {
-    const wrapper = mount(UsageTable, {
-      props: {
-        data: [{ request_id: 'mapping-test', model: requested, upstream_model: upstream, model_mapping_chain: chain }],
-        loading: false,
-        columns: [],
-      },
-      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
-    })
-    const display = wrapper.get('[data-testid="model-mapping-display"]')
-    expect(Array.from(display.element.children).map(el => el.textContent?.replace(/^↳/, '').trim())).toEqual(expected)
-    expect(display.findAll('span')).toHaveLength(expected.length - 1)
-  })
-
   it('shows requested and forwarded reasoning effort separately when they differ', () => {
     const wrapper = mount(UsageTable, {
       props: {

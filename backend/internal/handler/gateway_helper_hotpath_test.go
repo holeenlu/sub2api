@@ -286,7 +286,7 @@ func TestAcquireUserSlotWithWait_ImmediateAcquireSkipsWaitQueue(t *testing.T) {
 	c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
 	streamStarted := false
 
-	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, 0, 0, time.Second, false, &streamStarted)
+	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, time.Second, false, &streamStarted)
 	require.NoError(t, err)
 	require.NotNil(t, release)
 	release()
@@ -307,7 +307,7 @@ func TestAcquireUserSlotWithWait_TracksAPIKeySlot(t *testing.T) {
 	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 77})
 	streamStarted := false
 
-	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, 77, 0, time.Second, false, &streamStarted)
+	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, time.Second, false, &streamStarted)
 	require.NoError(t, err)
 	require.NotNil(t, release)
 	require.Equal(t, 1, cache.apiKeyTrackCalls)
@@ -326,7 +326,7 @@ func TestTryAcquireUserSlotForAPIKey_TracksAPIKeySlot(t *testing.T) {
 	concurrency := service.NewConcurrencyService(cache)
 	helper := NewConcurrencyHelper(concurrency, SSEPingFormatNone, 5*time.Millisecond)
 
-	release, acquired, err := helper.TryAcquireUserSlotForAPIKey(context.Background(), 202, 3, 77, 0)
+	release, acquired, err := helper.TryAcquireUserSlotForAPIKey(context.Background(), 202, 3, 77)
 	require.NoError(t, err)
 	require.True(t, acquired)
 	require.NotNil(t, release)
@@ -349,7 +349,7 @@ func TestAcquireUserSlotWithWait_WaitSuccessDecrementsBeforeReturn(t *testing.T)
 	c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
 	streamStarted := false
 
-	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, 0, 0, time.Second, false, &streamStarted)
+	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, time.Second, false, &streamStarted)
 	require.NoError(t, err)
 	require.NotNil(t, release)
 
@@ -372,7 +372,7 @@ func TestAcquireUserSlotWithWait_TimeoutDecrementsWaitQueue(t *testing.T) {
 	c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
 	streamStarted := false
 
-	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, 0, 0, 30*time.Millisecond, false, &streamStarted)
+	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, 30*time.Millisecond, false, &streamStarted)
 	require.Nil(t, release)
 	var cErr *ConcurrencyError
 	require.ErrorAs(t, err, &cErr)
@@ -402,42 +402,13 @@ func TestAcquireUserSlotWithWait_RequestCancelDecrementsWaitQueue(t *testing.T) 
 	c.Request = c.Request.WithContext(reqCtx)
 	streamStarted := false
 
-	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, 0, 0, time.Second, false, &streamStarted)
+	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, time.Second, false, &streamStarted)
 	<-cancelled
 	require.Nil(t, release)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, 1, cache.waitIncrementCalls)
 	require.Equal(t, 1, cache.waitDecrementCalls)
 	require.Equal(t, 0, cache.userReleaseCalls)
-}
-
-// Grok voice keeps its user slot until a detached upstream call returns; call
-// sites that free on client cancellation opt in with wrapReleaseOnDone.
-func TestAcquireUserSlotWithWait_ReleaseOutlivesRequestCancel(t *testing.T) {
-	cache := &helperConcurrencyCacheStub{userSeq: []bool{true}}
-	helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, 5*time.Millisecond)
-	c, _ := newHelperTestContext(http.MethodPost, "/v1/tts")
-	reqCtx, cancel := context.WithCancel(c.Request.Context())
-	defer cancel()
-	c.Request = c.Request.WithContext(reqCtx)
-	streamStarted := false
-
-	release, err := helper.acquireUserSlotWithWaitTimeout(c, 202, 3, 77, 0, time.Second, false, &streamStarted)
-	require.NoError(t, err)
-	require.NotNil(t, release)
-	cancel()
-	require.Never(t, func() bool {
-		cache.mu.Lock()
-		defer cache.mu.Unlock()
-		return cache.userReleaseCalls > 0 || cache.apiKeyReleaseCalls > 0
-	}, 50*time.Millisecond, time.Millisecond, "request cancellation must not release user or key slots by itself")
-
-	release()
-	release()
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	require.Equal(t, 1, cache.userReleaseCalls)
-	require.Equal(t, 1, cache.apiKeyReleaseCalls)
 }
 
 func TestWaitForSlotWithPingTimeout_TimeoutAndStreamPing(t *testing.T) {

@@ -1,5 +1,7 @@
 // 此檔案由 tools/zh-tw/gen-locale.mjs 依 locales/zh 自動產生，請勿手動修改。
 // 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
+import { BRAND_NAME } from '@/config/brand'
+
 export default {
     settings: {
       title: '系統設定',
@@ -16,7 +18,6 @@ export default {
         payment: '支付設定',
       },
       features: {
-
         channelMonitor: {
           title: '通道監控',
           description: '啟用後在 V1 主動探測與 V2 被動用量監控中二選一。關閉後兩種模式的後台任務均停止，用戶端入口隱藏。',
@@ -281,10 +282,10 @@ export default {
       },
       apiKeyAcl: {
         title: 'API Key IP 存取控制',
-        description: '驗證、IP 限制、速率限制與工作階段綁定始終使用已設定的可信代理鏈',
-        trustForwardedIp: '舊版轉發 IP 後設資料相容',
+        description: '控制 API Key 白/黑名單、操作稽核日誌與工作階段 IP/UA 綁定使用哪個用戶端 IP 判斷',
+        trustForwardedIp: '信任反代傳遞的用戶端 IP',
         trustForwardedIpHint:
-          '預設關閉。該相容選項僅影響請求與用量後設資料，不能覆蓋安全驗證。請在 server.trusted_proxies 中設定實際代理地址，供驗證和存取控制使用。',
+          '為保證升級相容預設開啟。開啟後 CF-Connecting-IP、X-Real-IP 或 X-Forwarded-For 會直接接管用戶端 IP 解析並覆蓋 server.trusted_proxies；關閉後嚴格使用 server.trusted_proxies 設定的 Gin 可信代理鏈。僅在源站無法被直接存取時開啟接管模式。切換會改變現有工作階段的 IP 指紋。',
         forwardedClientIpHeaders: '自訂用戶端 IP 請求標頭',
         forwardedClientIpHeadersHint: '新增 CDN 或反代請求標頭名稱，解析時優先於內建請求標頭。',
         forwardedClientIpHeadersPlaceholder: 'X-Client-IP',
@@ -451,10 +452,7 @@ export default {
         accountSchedulingThresholdsDescription: '當帳號目前原生用量視窗（OpenAI Codex/Anthropic 工作階段，或 Grok 請求/Token 利用率）達到該百分比時，@:common.siteName 會臨時將其移出排程，直到視窗重設。填 100 表示停用。',
         accountSchedulingThresholdsGlobalHint: '系統級預設值，作用於該平台全部帳號。可在帳號編輯頁對單個帳號覆蓋。',
         accountSchedulingThresholdsDisabledHint: '100 表示停用該平台自動停調；1–99 表示達到該利用率後暫停排程。',
-        accountSchedulingThresholdsRangeHint: '整數 1–100（百分比）。僅 OpenAI / Anthropic / Grok。',
-        accountSchedulingThresholdsFableLabel: 'anthropic · 7d Fable',
-        accountSchedulingThresholdsFableHint:
-          '整數 1–100（百分比）。只檢查 7d F（Fable 專屬）視窗；達到該值後僅停調 Fable 模型，帳號對其他模型照常可用。共享 7d 視窗只由普通 Anthropic 閾值控制。100 表示不單獨設定，沿用 Anthropic 閾值。'
+        accountSchedulingThresholdsRangeHint: '整數 1–100（百分比）。僅 OpenAI / Anthropic / Grok。'
       },
       upstreamBillingProbe: {
         title: '上游倍率自動探測',
@@ -546,9 +544,6 @@ export default {
         antigravityUserAgentVersion: 'Antigravity UA 版本',
         antigravityUserAgentVersionPlaceholder: '1.23.2',
         antigravityUserAgentVersionHint: '留空時使用 ANTIGRAVITY_USER_AGENT_VERSION 或內建預設值 1.23.2；填寫後後台設定優先。',
-        upstreamFailoverStatusCodes: '上游換號狀態碼',
-        upstreamFailoverStatusCodesPlaceholder: '401,403,429,500-599',
-        upstreamFailoverStatusCodesHint: '逗號分隔的狀態碼或閉區間，上游回傳這些狀態碼時換帳號重試；留空沿用各平台內建集合，400/404/408/413/422/499 無論如何都不換號。',
         openaiCodexUserAgent: 'OpenAI Codex UA',
         openaiCodexUserAgentPlaceholder: 'codex-tui/0.146.1 (Ubuntu 22.4.0; x86_64) WindowsTerminal (codex-tui; 0.146.1)',
         openaiCodexUserAgentHint: '出站統一使用的完整 Codex User-Agent，用於自訂 OS / 架構 / 終端機指紋。留空則按下方版本號拼出標準 codex-tui 形態（推薦）。填寫後首段和尾部的版本號仍會被下方版本號同步覆蓋，避免這條 UA 停在填寫時的舊版本——上游在容量緊張時按用戶端身分分優先順序降載，陳舊或非官方形態的身分會被優先丟棄並回 server_is_overloaded。',
@@ -563,15 +558,7 @@ export default {
         claudeCodeVersionAutoSync: '自動同步 Claude Code 版本號',
         claudeCodeVersionAutoSyncHint: '每小時從官方釋出通道取得最新版本的 Claude Code 用戶端版本號，無需為了跟版本而升級本服務。關閉後停止取得新版本，已同步的版本仍可使用；上方手填版本始終優先。',
         claudeCodeVersionSyncedValue: '目前同步到：{version}',
-        codexHardeningTitle: 'Codex 設定',
-        codexTicketEnabled: '292 打票',
-        codexTicketEnabledDesc:
-          '打票預設關閉，需要時手動開啟。關閉後按原鏈路轉發；開啟後按帳號和模型參與設定後台打票，並在業務請求中注入票據。引入此功能時會一次性關閉此開關；之後手動開啟的選擇會保留。',
-        codexTicketHarvestProxy: '292 打票代理',
-        codexTicketHarvestProxyDesc:
-          '僅在門票功能開啟時用於打票，儲存後後續探測會使用新代理，無需重啟。日常業務仍走帳號自己的住宅代理。填寫完整代理 URL（http 或 socks5h，含使用者名稱和密碼）。代理服務商需自行負責出口 IP 輪換。留空並儲存表示不改已儲存的值。',
-        codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
-        codexTicketHarvestProxyConfigured: '已設定（密碼已隱藏）。要更換請整段貼上新的代理 URL。',
+        codexHardeningTitle: '降智檢測範本',
         codexClientRestrictionTitle: 'Codex 用戶端限制',
         codexHardeningDesc:
           '僅對已開啟「僅允許 Codex 官方用戶端」的 OpenAI OAuth 帳號生效（全域）。在 User-Agent/Originator 之外，用版本區間、引擎指紋門與黑/白名單鞏固判定。',
@@ -606,17 +593,21 @@ export default {
         codexUaContainsPlaceholder: 'User-Agent 包含標記，逗號分隔（如 opencode/）',
         codexAddRow: '新增一條',
         codexRemoveRow: '刪除',
-        codexAdditionalSettingsFailed: '普通設定已儲存，但打票間隔或其他附加設定儲存失敗：',
-        codexProbeTemplate: 'Codex 打票與降智檢測範本',
-        codexProbeTemplateReset: '恢復預設',
-        codexProbeTemplateDesc: '打票和降智檢測共用此 JSONL 範本。保留訊息結構、標籤和預留位置，最大 256 KiB；恢復預設後點擊儲存生效。預設固定文案為英文，動態隨機挑戰仍為中文。',
-        codexProbeTimezone: '帳號請求時區',
-        codexProbeDate: '帳號時區下的目前日期',
-        codexProbeModel: '目標模型',
-        codexProbeChallenge: '本次隨機挑戰',
-        codexTicketAllowWithoutTicket: '預設允許無票請求',
-        codexTicketAllowWithoutTicketDesc: '未設定時預設開啟，缺票不會阻斷正常請求；已有全域和帳號策略會保留。無票限制僅在全域打票開啟且帳號及目前模型均參與打票時生效，帳號單獨設定優先生效。',
-      },
+
+codexProbeTemplate: 'Codex 降智檢測範本',
+
+codexProbeTemplateReset: '恢復預設',
+
+codexProbeTemplateDesc: '降智檢測使用此 JSONL 範本。保留訊息結構、標籤和預留位置，最大 256 KiB；恢復預設後點擊儲存生效。預設固定文案為英文，動態隨機挑戰仍為中文。',
+
+codexProbeTimezone: '帳號請求時區',
+
+codexProbeDate: '帳號時區下的目前日期',
+
+codexProbeModel: '目標模型',
+
+codexProbeChallenge: '本次隨機挑戰',
+},
       webSearchEmulation: {
         title: 'Web Search 模擬',
         description: '為不原生支援搜尋的 Anthropic API Key 帳號注入 web search 能力',
@@ -659,12 +650,12 @@ export default {
           '停用使用者註冊、公開頁面和自助服務功能。僅管理員可以登入和管理平台。',
         siteName: '站點名稱',
         siteNameHint: '顯示在郵件和頁面標題中',
-        siteNamePlaceholder: 'KDAN',
+        siteNamePlaceholder: BRAND_NAME,
         siteSubtitle: '站點副標題',
         siteSubtitleHint: '顯示在登入和註冊頁面',
         siteSubtitlePlaceholder: '訂閱轉 API 轉換平台',
         apiBaseUrl: 'API 端點網址',
-        apiBaseUrlHint: '用於"使用金鑰"和回呼網址建議，留空則使用目前網站網址',
+        apiBaseUrlHint: '用於"使用金鑰"、"匯入到 CC Switch"和回呼網址建議，留空則使用目前網站網址',
         apiBaseUrlPlaceholder: 'https://api.example.com',
         tablePreferencesTitle: '通用表格設定',
         tablePreferencesDescription: '設定後台與使用者側表格元件的預設分頁行為',
@@ -708,7 +699,9 @@ export default {
         homeContentIframeWarning:
           '⚠️ iframe 模式提示：部分網站設定了 X-Frame-Options 或 CSP 安全策略，禁止被嵌入到 iframe 中。如果頁面顯示空白或錯誤，請確認目標網站允許被嵌入，或考慮使用 HTML 模式自行建置頁面內容。',
         compactHome: '簡潔首頁',
-        compactHomeHint: '未設定自訂首頁內容時，展示簡潔的站點資訊頁面。'
+        compactHomeHint: '未設定自訂首頁內容時，展示簡潔的站點資訊頁面。',
+        hideCcsImportButton: '隱藏 CCS 匯入按鈕',
+        hideCcsImportButtonHint: '啟用後將在 API Keys 頁面隱藏"匯入 CCS"按鈕'
       },
       purchase: {
         title: '儲值/訂閱頁面',
@@ -1013,8 +1006,8 @@ export default {
         event: '事件',
         locale: '語言',
         localeEn: '英文',
-        localeZh: '中文',
         localeJa: '日文',
+        localeZh: '中文',
         subject: '主題',
         subjectPlaceholder: '輸入郵件主題',
         html: 'HTML 範本',

@@ -4432,39 +4432,17 @@
               </h2>
             </div>
             <div class="p-6 space-y-4">
-                <div class="flex items-center justify-between gap-4">
-                  <div class="min-w-0">
-                    <h3 class="text-base font-semibold text-gray-900 dark:text-white">
-                      {{ t("admin.settings.gatewayForwarding.codexTicketEnabled") }}
-                    </h3>
-                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      {{ t("admin.settings.gatewayForwarding.codexTicketEnabledDesc") }}
-                    </p>
-                  </div>
-                  <Toggle
-                    id="codex-ticket-enabled"
-                    v-model="form.openai_codex_ticket_enabled"
-                  />
-                </div>
-                <div class="flex items-center justify-between gap-4">
-                  <div class="min-w-0">
-                    <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t("admin.settings.gatewayForwarding.codexTicketAllowWithoutTicket") }}</h3>
-                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t("admin.settings.gatewayForwarding.codexTicketAllowWithoutTicketDesc") }}</p>
-                  </div>
-                  <Toggle id="codex-ticket-allow-without" v-model="form.openai_codex_ticket_allow_without_ticket" />
-                </div>
                 <div class="space-y-2">
                   <div class="flex items-center justify-between gap-3">
                     <label for="codex-probe-template" class="text-base font-semibold text-gray-900 dark:text-white">{{ t("admin.settings.gatewayForwarding.codexProbeTemplate") }}</label>
-                    <button type="button" class="btn btn-secondary btn-sm" data-testid="codex-probe-template-reset" :disabled="saving || !form.openai_codex_ticket_prompt_template_default" @click="form.openai_codex_ticket_prompt_template = form.openai_codex_ticket_prompt_template_default">{{ t("admin.settings.gatewayForwarding.codexProbeTemplateReset") }}</button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-testid="codex-probe-template-reset" :disabled="saving || !form.openai_codex_diagnostic_prompt_template_default" @click="form.openai_codex_diagnostic_prompt_template = form.openai_codex_diagnostic_prompt_template_default">{{ t("admin.settings.gatewayForwarding.codexProbeTemplateReset") }}</button>
                   </div>
                   <p id="codex-probe-template-help" class="text-sm text-gray-500 dark:text-gray-400">{{ t("admin.settings.gatewayForwarding.codexProbeTemplateDesc") }}</p>
                   <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
                     <span v-for="placeholder in codexProbeTemplatePlaceholders" :key="placeholder.token"><code class="font-mono">{{ placeholder.token }}</code> — {{ t(placeholder.label) }}</span>
                   </div>
-                  <textarea id="codex-probe-template" v-model="form.openai_codex_ticket_prompt_template" data-testid="codex-probe-template" aria-describedby="codex-probe-template-help" class="input w-full font-mono text-xs" rows="12" wrap="off" :spellcheck="false" :disabled="saving" />
+                  <textarea id="codex-probe-template" v-model="form.openai_codex_diagnostic_prompt_template" data-testid="codex-probe-template" aria-describedby="codex-probe-template-help" class="input w-full font-mono text-xs" rows="12" wrap="off" :spellcheck="false" :disabled="saving" />
                 </div>
-                <CodexTicketCadenceSettings ref="codexTicketCadenceRef" :saving="saving" />
                 <div>
                   <h3 class="text-base font-semibold text-gray-900 dark:text-white">
                     {{ t("admin.settings.gatewayForwarding.codexClientRestrictionTitle") }}
@@ -5017,7 +4995,7 @@
                 </div>
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   <div
-                    v-for="scope in schedulingThresholdScopes"
+                    v-for="scope in schedulingThresholdPlatforms"
                     :key="scope"
                     class="rounded-lg border border-gray-200 p-4 dark:border-dark-700"
                   >
@@ -5026,17 +5004,11 @@
                         <label
                           class="font-mono text-sm font-medium text-gray-900 dark:text-white"
                         >
-                          {{ schedulingThresholdScopeLabel(scope) }}
+                          {{ scope }}
                         </label>
                         <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                           {{
-                            scope === "anthropic_fable"
-                              ? t(
-                                  "admin.settings.scheduling.accountSchedulingThresholdsFableHint",
-                                )
-                              : t(
-                                  "admin.settings.scheduling.accountSchedulingThresholdsRangeHint",
-                                )
+                            t("admin.settings.scheduling.accountSchedulingThresholdsRangeHint")
                           }}
                         </p>
                       </div>
@@ -5737,35 +5709,7 @@
                 </p>
               </div>
 
-              <!-- 上游换号状态码 -->
-              <div>
-                <label
-                  class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                >
-                  {{
-                    t(
-                      "admin.settings.gatewayForwarding.upstreamFailoverStatusCodes",
-                    )
-                  }}
-                </label>
-                <input
-                  v-model="form.upstream_failover_status_codes"
-                  type="text"
-                  class="input max-w-md font-mono text-sm"
-                  :placeholder="
-                    t(
-                      'admin.settings.gatewayForwarding.upstreamFailoverStatusCodesPlaceholder',
-                    )
-                  "
-                />
-                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                  {{
-                    t(
-                      "admin.settings.gatewayForwarding.upstreamFailoverStatusCodesHint",
-                    )
-                  }}
-                </p>
-              </div>
+
 
               <!-- OpenAI Codex UA -->
               <div>
@@ -8952,7 +8896,6 @@
 
 <script setup lang="ts">
 
-import CodexTicketCadenceSettings from '@/components/admin/account/CodexTicketCadenceSettings.vue'
 
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -8965,7 +8908,7 @@ import {
   normalizePlatformQuotasMap,
   sanitizeAccountSchedulingThresholdsMap,
   sanitizePlatformQuotasMap,
-  SCHEDULING_THRESHOLD_SCOPES,
+  SCHEDULING_THRESHOLD_PLATFORMS,
   defaultWeChatConnectScopesForMode,
   deriveWeChatConnectStoredMode,
   normalizeDefaultSubscriptionSettings,
@@ -8974,7 +8917,6 @@ import {
 import type {
   AuthSourceDefaultsState,
   AuthSourceType,
-  SchedulingThresholdScopeType,
   SystemSettings,
   UpdateSettingsRequest,
   DefaultSubscriptionSetting,
@@ -9089,7 +9031,6 @@ type SettingsTab =
   | "email"
   | "backup";
 const activeTab = ref<SettingsTab>("general");
-const codexTicketCadenceRef = ref<InstanceType<typeof CodexTicketCadenceSettings> | null>(null);
 const settingsTabs = [
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
@@ -9754,14 +9695,7 @@ type SettingsForm = Omit<
   account_scheduling_thresholds: ReturnType<typeof normalizeAccountSchedulingThresholdsMap>;
 };
 
-const schedulingThresholdScopes = SCHEDULING_THRESHOLD_SCOPES;
-
-// anthropic_fable 不是平台名，直接渲染原始 key 运维看不出它管的是哪个窗口；
-// 其余 scope 本身就是平台名，保持原样。
-const schedulingThresholdScopeLabel = (scope: SchedulingThresholdScopeType) =>
-  scope === "anthropic_fable"
-    ? t("admin.settings.scheduling.accountSchedulingThresholdsFableLabel")
-    : scope;
+const schedulingThresholdPlatforms = SCHEDULING_THRESHOLD_PLATFORMS;
 
 const form = reactive<SettingsForm>({
   registration_enabled: true,
@@ -10015,7 +9949,6 @@ const form = reactive<SettingsForm>({
   rewrite_message_cache_control: false,
   enable_client_dateline_normalization: true,
   antigravity_user_agent_version: "",
-  upstream_failover_status_codes: "",
   openai_codex_user_agent: "",
   openai_codex_client_version: "",
   // 只读展示：自动同步任务写入的官方最新稳定版，不参与提交（提交载荷按字段显式构造）
@@ -10025,12 +9958,8 @@ const form = reactive<SettingsForm>({
   // 只读展示：自动同步任务写入的官方最新稳定版，不参与提交（提交载荷按字段显式构造）
   claude_code_client_version_synced: "",
   claude_code_version_auto_sync_enabled: true,
-  openai_codex_ticket_enabled: false,
-  openai_codex_ticket_allow_without_ticket: true,
-  openai_codex_ticket_prompt_template: "",
-  openai_codex_ticket_prompt_template_default: "",
-  openai_codex_ticket_harvest_proxy_url: "",
-  openai_codex_ticket_harvest_proxy_configured: false,
+  openai_codex_diagnostic_prompt_template: "",
+  openai_codex_diagnostic_prompt_template_default: "",
   // codex_cli_only 加固
   min_codex_version: "",
   max_codex_version: "",
@@ -11313,14 +11242,6 @@ const siteBillingModeHint = computed(() =>
 );
 
 async function saveSettings() {
-  const cadence = codexTicketCadenceRef.value;
-  try {
-    if (activeTab.value === "gateway" || cadence?.isDirty?.()) cadence?.validate?.();
-  } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t("admin.settings.failedToSave")));
-    return;
-  }
-  let settingsSaved = false;
   saving.value = true;
   try {
 
@@ -11669,8 +11590,6 @@ async function saveSettings() {
         form.enable_client_dateline_normalization,
       antigravity_user_agent_version:
         form.antigravity_user_agent_version?.trim() || "",
-      upstream_failover_status_codes:
-        form.upstream_failover_status_codes?.trim() || "",
       openai_codex_user_agent:
         form.openai_codex_user_agent?.trim() || "",
       openai_codex_client_version:
@@ -11680,12 +11599,10 @@ async function saveSettings() {
       claude_code_client_version: form.claude_code_client_version?.trim() || "",
       claude_code_version_auto_sync_enabled:
         form.claude_code_version_auto_sync_enabled,
-      openai_codex_ticket_enabled: form.openai_codex_ticket_enabled,
-      openai_codex_ticket_allow_without_ticket: form.openai_codex_ticket_allow_without_ticket,
-      openai_codex_ticket_prompt_template:
-        form.openai_codex_ticket_prompt_template === form.openai_codex_ticket_prompt_template_default
+      openai_codex_diagnostic_prompt_template:
+        form.openai_codex_diagnostic_prompt_template === form.openai_codex_diagnostic_prompt_template_default
           ? ""
-          : form.openai_codex_ticket_prompt_template,
+          : form.openai_codex_diagnostic_prompt_template,
       min_codex_version: form.min_codex_version?.trim() || "",
       max_codex_version: form.max_codex_version?.trim() || "",
       codex_cli_only_allow_app_server_clients:
@@ -11847,8 +11764,6 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
-    settingsSaved = true;
-    if (cadence?.isDirty?.()) await cadence.save();
     for (const [key, value] of Object.entries(updated)) {
       if (key === "openai_fast_policy_settings") continue;
       if (value !== null && value !== undefined) {
@@ -11933,10 +11848,6 @@ async function saveSettings() {
       appStore.showSuccess(t("admin.settings.settingsSaved"));
     }
   } catch (error: unknown) {
-    if (settingsSaved) {
-      appStore.showError(`${t("admin.settings.gatewayForwarding.codexAdditionalSettingsFailed")}${extractApiErrorMessage(error, t("admin.settings.failedToSave"))}`);
-      return;
-    }
     // 用户取消 step-up 验证：静默返回，不弹错误
     if (isStepUpCancelled(error)) {
       return;

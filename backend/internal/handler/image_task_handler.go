@@ -77,7 +77,11 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		RespondRequestBodyReadFailure(c, requestLogger(c, "handler.async_image.submit"), err, imageTaskJSONError)
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			imageTaskJSONError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
 	if len(body) == 0 {

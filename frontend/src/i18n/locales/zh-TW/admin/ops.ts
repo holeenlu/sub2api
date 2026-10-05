@@ -2,14 +2,6 @@
 // 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
 export default {
     ops: {
-      balanceError: {
-        user: '使用者餘額不足',
-        userHint: '本站使用者餘額未達到請求要求。請儲值該使用者餘額後重試。',
-        upstream: '上游帳戶餘額不足',
-        upstreamHint: '上游服務報告帳戶餘額不足。請管理員檢查並儲值或更換上游帳戶。',
-        unknown: '餘額不足（來源未確認）',
-        unknownHint: '這條日誌缺少足夠的來源資訊，請結合原始錯誤和上游回應確認餘額歸屬。',
-      },
       title: '維運監控',
       description: '維運監控與故障排除',
       // Dashboard
@@ -33,8 +25,6 @@ export default {
       lastRun: '最近執行',
       lastSuccess: '最近成功',
       lastError: '最近錯誤',
-      jobFailed: '錯誤',
-      jobStale: '疑似失聯',
       result: '結果',
       noData: '暫無資料',
       loadingText: '載入中...',
@@ -159,17 +149,6 @@ export default {
       healthyStatus: '健康',
       riskyStatus: '風險',
       idleStatus: '待機',
-      healthBreakdown: {
-        business: '業務健康 {score}/100（權重 70%）',
-        errorRate: '· 錯誤率 {score}/100',
-        ttft: '· 首 Token 時間 {score}/100（{threshold}ms 內滿分）',
-        infra: '基礎健康 {score}/100（權重 30%）',
-        storage: '· 儲存 {score}/100',
-        compute: '· 計算資源 {score}/100',
-        jobs: '· 後台任務 {score}/100',
-        failedJobs: '錯誤任務：{jobs}',
-        staleJobs: '疑似失聯：{jobs}'
-      },
       timeRange: {
         '5m': '近5分鐘',
         '30m': '近30分鐘',
@@ -735,7 +714,7 @@ export default {
         slaMinPercent: 'SLA最低百分比',
         slaMinPercentHint: 'SLA低於此值時顯示為紅色（預設：99.5%）',
         ttftP99MaxMs: 'TTFT P99最大值（毫秒）',
-        ttftP99MaxMsHint: 'TTFT P99高於此值時顯示為紅色，同時作為健康評分 TTFT 刻度的滿分點（預設：10000ms）',
+        ttftP99MaxMsHint: 'TTFT P99高於此值時顯示為紅色（預設：500ms）',
         requestErrorRateMaxPercent: '請求錯誤率最大值（%）',
         requestErrorRateMaxPercentHint: '請求錯誤率高於此值時顯示為紅色（預設：5%）',
         upstreamErrorRateMaxPercent: '上游錯誤率最大值（%）',

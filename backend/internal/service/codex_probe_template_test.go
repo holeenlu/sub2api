@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
-	"errors"
 	"io"
 	"net/http"
 	"regexp"
@@ -12,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -59,8 +57,8 @@ func TestCodexProbeTemplateRejectsInvalidOrPrivateRecords(t *testing.T) {
 		"output text":           strings.Replace(good, `"input_text"`, `"output_text"`, 1),
 		"unknown placeholder":   strings.Replace(good, "anonymous workspace", "{{PRIVATE_VALUE}}", 1),
 		"malformed placeholder": strings.Replace(good, "anonymous workspace", "{{PRIVATE_VALUE", 1),
-		"duplicate prompt":      strings.Replace(good, "anonymous workspace", CodexHypothesisPromptPlaceholder, 1),
-		"missing prompt":        strings.ReplaceAll(good, CodexHypothesisPromptPlaceholder, "private-secret"),
+		"duplicate prompt":      strings.Replace(good, "anonymous workspace", codexProbePromptPlaceholder, 1),
+		"missing prompt":        strings.ReplaceAll(good, codexProbePromptPlaceholder, "private-secret"),
 		"fixed timezone":        strings.ReplaceAll(good, "{{TIMEZONE}}", "Europe/London"),
 		"missing tag":           strings.Replace(good, "</skills_instructions>", "", 1),
 		"changed tree":          strings.Replace(good, "<root>/workspace</root>", "", 1),
@@ -128,13 +126,13 @@ func assertCodexProbeIdentity(t *testing.T, body []byte, headers http.Header) {
 
 func TestCodexProbeAccountIdentityAndDefaultTimezone(t *testing.T) {
 	svc := &OpenAIGatewayService{}
-	account := ticketTestAccount(41)
+	account := diagnosticTestAccount(41)
 	challenge := ModelTraceChallenge{Prompt: "test prompt", ExpectedCount: 292}
 	body, first, err := svc.buildCodexProbeRequest(context.Background(), account, "gpt-6-astra", challenge)
 	require.NoError(t, err)
 	assertCodexProbeIdentity(t, body, first)
 	require.Contains(t, gjson.GetBytes(body, "input.3.content.0.text").String(), "<timezone>Asia/Singapore</timezone>")
-	account.Extra[openAIRequestTimezoneExtraKey] = "Asia/Taipei"
+	account.Extra["openai_request_timezone"] = "Asia/Taipei"
 	body, _, err = svc.buildCodexProbeRequest(context.Background(), account, "gpt-6-astra", challenge)
 	require.NoError(t, err)
 	require.Contains(t, gjson.GetBytes(body, "input.3.content.0.text").String(), "<timezone>Asia/Taipei</timezone>")
@@ -153,13 +151,13 @@ func TestCodexProbeAccountIdentityAndDefaultTimezone(t *testing.T) {
 }
 
 func TestCodexProbeSnapshotAndCacheRefresh(t *testing.T) {
-	repo := &codexPolicyMigrationRepoStub{values: map[string]string{}}
+	repo := &diagnosticSettingsRepoStub{values: map[string]string{}}
 	settings := &SettingService{settingRepo: repo}
 	svc := &OpenAIGatewayService{settingService: settings}
 	pinned, err := svc.PrepareCodexProbeContext(context.Background())
 	require.NoError(t, err)
 	custom := strings.Replace(DefaultCodexProbeTemplate(), "anonymous workspace", "custom workspace", 1)
-	repo.values[SettingKeyOpenAICodexTicketPromptTemplate] = custom
+	repo.values[SettingKeyCodexDiagnosticPromptTemplate] = custom
 	// A second process's write becomes visible after the local five-second TTL.
 	settings.codexProbeTemplateCache.expiresAt = time.Now().Add(-time.Second)
 	fresh, err := svc.PrepareCodexProbeContext(context.Background())
@@ -168,72 +166,51 @@ func TestCodexProbeSnapshotAndCacheRefresh(t *testing.T) {
 		ctx  context.Context
 		want string
 	}{{pinned, "anonymous workspace"}, {fresh, "custom workspace"}} {
-		body, _, err := svc.buildCodexProbeRequest(test.ctx, ticketTestAccount(41), "gpt-6-astra", ModelTraceChallenge{Prompt: "fresh challenge"})
+		body, _, err := svc.buildCodexProbeRequest(test.ctx, diagnosticTestAccount(41), "gpt-6-astra", ModelTraceChallenge{Prompt: "fresh challenge"})
 		require.NoError(t, err)
 		require.Contains(t, string(body), test.want)
 	}
-	repo.values[SettingKeyOpenAICodexTicketPromptTemplate] = "invalid"
+	repo.values[SettingKeyCodexDiagnosticPromptTemplate] = "invalid"
 	settings.InvalidateCodexProbeTemplateCache()
 	_, err = svc.PrepareCodexProbeContext(context.Background())
 	require.ErrorIs(t, err, ErrCodexProbeTemplateInvalid)
 	// The earlier model still uses its valid snapshot even after a configuration change.
-	_, _, err = svc.buildCodexProbeRequest(pinned, ticketTestAccount(41), "gpt-6-astra", ModelTraceChallenge{Prompt: "next request"})
+	_, _, err = svc.buildCodexProbeRequest(pinned, diagnosticTestAccount(41), "gpt-6-astra", ModelTraceChallenge{Prompt: "next request"})
 	require.NoError(t, err)
-	repo.values[SettingKeyOpenAICodexTicketPromptTemplate] = ""
+	repo.values[SettingKeyCodexDiagnosticPromptTemplate] = ""
 	settings.InvalidateCodexProbeTemplateCache()
 	_, err = svc.PrepareCodexProbeContext(context.Background())
 	require.NoError(t, err)
 }
 
-func TestCodexProbeInvalidTemplateDoesNotHarvestOrBlockOrdinaryRequests(t *testing.T) {
-	svc, account, history := challengeHarvestService(t, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
-		t.Fatal("invalid template must not reach upstream")
-		return nil, nil
-	}})
-	svc.settingService.settingRepo = &codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAICodexTicketPromptTemplate: "invalid"}}
-	result, err := svc.runCodexTicketAttempt(context.Background(), account, "gpt-6-astra", "automatic")
-	require.NoError(t, err)
-	require.Equal(t, "error", result.Outcome)
-	require.Equal(t, "template_invalid", result.ReasonCode)
-	require.Nil(t, result.HTTPStatus)
-	require.Len(t, history.attempts, 1)
-	require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
-	require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", http.Header{}))
+func TestCodexProbeInvalidTemplateDoesNotSendDiagnostic(t *testing.T) {
+	account := diagnosticTestAccount(41)
+	svc := &OpenAIGatewayService{accountRepo: diagnosticAccounts{account: account}, settingService: &SettingService{
+		settingRepo: &diagnosticSettingsRepoStub{values: map[string]string{SettingKeyCodexDiagnosticPromptTemplate: "invalid"}},
+	}}
+	sent := false
+	router := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { sent = true })
+	item := RunCodexDiagnosticProbe(context.Background(), svc, router, &APIKey{Key: "test-key"}, account.ID, "gpt-6-astra", "127.0.0.1:0", "localhost", NewModelTraceChallenge)
+	require.False(t, sent)
+	require.Equal(t, "failed", item.Status)
+	require.Equal(t, "template_invalid", item.Reason)
 }
 
-func TestCodexTicketAllowWithoutTicketPrecedenceAndInjection(t *testing.T) {
-	for _, test := range []struct {
-		name       string
-		failClosed bool
-		global     string
-		account    *bool
-		allow      bool
-	}{
-		{"default allow", false, "", nil, true},
-		{"explicit config deny", true, "", nil, false},
-		{"saved global deny", false, "false", nil, false},
-		{"saved global allow", true, "true", nil, true},
-		{"account deny", false, "true", new(false), false},
-		{"account allow", true, "false", new(true), true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			repo := &codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAICodexTicketAllowWithoutTicket: test.global}}
-			svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, FailClosed: test.failClosed}, nil)
-			svc.settingService = &SettingService{settingRepo: repo}
-			account := ticketTestAccount(41)
-			account.Extra = map[string]any{}
-			if test.account != nil {
-				account.Extra["codex_allow_without_ticket"] = *test.account
-			}
-			require.Equal(t, !test.allow, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
-			err := svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", http.Header{})
-			require.Equal(t, !test.allow, errors.Is(err, ErrOpenAICodexTicketUnavailable))
-			account.Extra[openAICodexTicketExtraKey("gpt-6-astra")] = verifiedTicket(account, "gpt-6-astra", "test-ticket", "session=test")
-			headers := http.Header{}
-			require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", headers))
-			require.Equal(t, "test-ticket", headers.Get(openAICodexTurnStateHeader))
-			require.Equal(t, "session=test", headers.Get("Cookie"))
-			require.Equal(t, test.global, repo.values[SettingKeyOpenAICodexTicketAllowWithoutTicket])
-		})
+func diagnosticTestAccount(id int64) *Account {
+	return &Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+		Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}, Extra: map[string]any{}}
+}
+
+type diagnosticSettingsRepoStub struct {
+	SettingRepository
+	values map[string]string
+}
+
+func (r *diagnosticSettingsRepoStub) GetValue(_ context.Context, key string) (string, error) {
+	value, ok := r.values[key]
+	if !ok {
+		return "", ErrSettingNotFound
 	}
+	return value, nil
 }

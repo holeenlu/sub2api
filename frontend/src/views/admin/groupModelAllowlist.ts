@@ -34,8 +34,6 @@ export const hydrateModelAllowlistState = (
   return state
 }
 
-// The catalog adds candidates; saved selections survive incomplete refreshes.
-// An enabled empty legacy list stays empty; opening it must not grant every model.
 export const setModelAllowlistCandidates = (
   state: ModelAllowlistState,
   candidates: string[],
@@ -56,7 +54,9 @@ export const setModelAllowlistCandidates = (
   state.items = selectionOrder.map(id => {
     const selected = hasExistingItems
       ? currentSelected.has(id)
-      : savedSelected.has(id) || (!state.enabled && state.savedModels.length === 0)
+      : state.savedModels.length > 0
+        ? savedSelected.has(id)
+        : normalizedCandidates.includes(id)
 
     return {
       id,

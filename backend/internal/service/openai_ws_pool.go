@@ -68,23 +68,15 @@ func (e *openAIWSDialError) Unwrap() error {
 }
 
 type openAIWSAcquireRequest struct {
-	Ticket        *openAICodexTicket
-	TenantScope   string
-	TicketScope   string
-	PrepareTicket func(context.Context, *openAICodexTicket, string) (string, error)
-	Account       *Account
-	WSURL         string
-	Headers       http.Header
+	Account *Account
+	WSURL   string
+	Headers http.Header
 	// HeadersFactory is evaluated inside dialConn. It exists so credentials
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
-	HeadersFactory func(context.Context, http.Header) (http.Header, error)
-	// ObserveHandshake runs once per real dial, including failures and prewarming.
-	ObserveHandshake func(http.Header, int, http.Header)
-	BindHandshake    func(http.Header) *openAIWSTurnBinding
-	CheckBinding     func(context.Context, *openAIWSTurnBinding) error
-	ProxyURL         string
-	PreferredConnID  string
+	HeadersFactory  func(context.Context, http.Header) (http.Header, error)
+	ProxyURL        string
+	PreferredConnID string
 	// ForceNewConn: 强制本次获取新连接（避免复用导致连接内续链状态互相污染）。
 	ForceNewConn bool
 	// ForcePreferredConn: 强制本次只使用 PreferredConnID，禁止漂移到其它连接。
@@ -92,9 +84,6 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
-	tenantScope         string
-	ticketGeneration    string
-	ticketScope         string
 	betaFeatures        string
 	codexInstallationID string
 	sessionIDHyphen     string
@@ -294,7 +283,6 @@ type openAIWSConn struct {
 	ws openAIWSClientConn
 
 	handshakeHeaders       http.Header
-	turnBinding            *openAIWSTurnBinding
 	handshakeCompatibility openAIWSHandshakeCompatibilityKey
 	routingAffinity        string
 
@@ -1137,13 +1125,6 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 		p.metrics.acquireQueueWaitMs.Add(queueWait.total.Milliseconds())
 	}
 	if lease != nil && lease.conn != nil {
-		if req.CheckBinding != nil {
-			if checkErr := req.CheckBinding(ctx, lease.conn.turnBinding); checkErr != nil {
-				lease.MarkBroken()
-				lease.Release()
-				return nil, checkErr
-			}
-		}
 		now := time.Now()
 		lease.idleBefore = lease.conn.idleDuration(now)
 		lease.ageBefore = lease.conn.age(now)
@@ -1164,7 +1145,7 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 
 retryAcquire:
 	accountID := req.Account.ID
-	compatibility := normalizeOpenAIWSAcquireCompatibility(req, req.Headers)
+	compatibility := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
 	routingAffinity := normalizeOpenAIWSRoutingAffinity(req.Headers)
 	effectiveMaxConns := p.effectiveMaxConnsByAccount(req.Account)
 	if effectiveMaxConns <= 0 {
@@ -2145,28 +2126,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
-	var ticketBinding *openAIWSTurnBinding
-	proxyURL := req.ProxyURL
-	if req.Ticket != nil {
-		applyCodexTicketIdentityHeaders(headers, req.Ticket)
-		ticketBinding = bindOpenAIWSTicket(req.Account, req.Ticket.Model, headers, req.Ticket)
-		if req.CheckBinding != nil {
-			if err := req.CheckBinding(ctx, ticketBinding); err != nil {
-				return nil, err
-			}
-		}
-		if req.PrepareTicket != nil {
-			proxyURL, err = req.PrepareTicket(ctx, req.Ticket, proxyURL)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	sentHeaders := cloneHeader(headers)
-	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, headers, proxyURL)
-	if req.ObserveHandshake != nil {
-		req.ObserveHandshake(sentHeaders, status, handshakeHeaders)
-	}
+	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, headers, req.ProxyURL)
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte
@@ -2192,13 +2152,8 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	accountID := req.Account.ID
 	evict := func() { p.evictConn(accountID, id) }
 	pooledConn.onPeerClosed.Store(&evict)
-	pooledConn.handshakeCompatibility = normalizeOpenAIWSAcquireCompatibility(req, headers)
-	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(headers)
-	if ticketBinding != nil {
-		pooledConn.turnBinding = ticketBinding
-	} else if req.BindHandshake != nil {
-		pooledConn.turnBinding = req.BindHandshake(headers)
-	}
+	pooledConn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(req.Headers)
 	return pooledConn, nil
 }
 
@@ -2378,7 +2333,7 @@ func cloneOpenAIWSAcquireRequestPtr(req *openAIWSAcquireRequest) *openAIWSAcquir
 func sameOpenAIWSPrewarmTarget(a, b openAIWSAcquireRequest) bool {
 	return stringsTrim(a.WSURL) == stringsTrim(b.WSURL) &&
 		stringsTrim(a.ProxyURL) == stringsTrim(b.ProxyURL) &&
-		normalizeOpenAIWSAcquireCompatibility(a, a.Headers) == normalizeOpenAIWSAcquireCompatibility(b, b.Headers)
+		normalizeOpenAIWSHandshakeCompatibility(a.Account, a.Headers) == normalizeOpenAIWSHandshakeCompatibility(b.Account, b.Headers)
 }
 
 func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
@@ -2501,13 +2456,4 @@ func closeOpenAIWSConns(conns []*openAIWSConn) {
 
 func stringsTrim(value string) string {
 	return strings.TrimSpace(value)
-}
-
-func normalizeOpenAIWSAcquireCompatibility(req openAIWSAcquireRequest, headers http.Header) openAIWSHandshakeCompatibilityKey {
-	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, headers)
-	key.tenantScope = req.TenantScope
-	if req.Ticket != nil {
-		key.ticketGeneration, key.ticketScope = req.Ticket.GenerationID, req.TicketScope
-	}
-	return key
 }

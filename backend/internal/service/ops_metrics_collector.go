@@ -32,6 +32,8 @@ const (
 	opsMetricsCollectorLeaderLockKey = "ops:metrics:collector:leader"
 	opsMetricsCollectorLeaderLockTTL = 90 * time.Second
 
+	opsMetricsCollectorHeartbeatTimeout = 2 * time.Second
+
 	bytesPerMB = 1024 * 1024
 )
 
@@ -110,14 +112,14 @@ func (c *OpsMetricsCollector) Stop() {
 
 func (c *OpsMetricsCollector) run() {
 	// First run immediately so the dashboard has data soon after startup.
-	c.collectOnce(c.getInterval())
+	c.collectOnce()
 
 	for {
 		interval := c.getInterval()
 		timer := time.NewTimer(interval)
 		select {
 		case <-timer.C:
-			c.collectOnce(interval)
+			c.collectOnce()
 		case <-c.stopCh:
 			timer.Stop()
 			return
@@ -157,8 +159,7 @@ func (c *OpsMetricsCollector) getInterval() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-// collectOnce 执行一轮采集；interval 是本轮的调度间隔，随心跳自报给判活逻辑。
-func (c *OpsMetricsCollector) collectOnce(interval time.Duration) {
+func (c *OpsMetricsCollector) collectOnce() {
 	if c == nil {
 		return
 	}
@@ -187,16 +188,39 @@ func (c *OpsMetricsCollector) collectOnce(interval time.Duration) {
 		defer release()
 	}
 
-	runAt := time.Now().UTC()
+	startedAt := time.Now().UTC()
 	err := c.collectAndPersist(ctx)
-	elapsed := time.Since(runAt)
+	finishedAt := time.Now().UTC()
+
+	durationMs := finishedAt.Sub(startedAt).Milliseconds()
+	dur := durationMs
+	runAt := startedAt
 
 	if err != nil {
-		recordOpsJobError(c.opsRepo, opsMetricsCollectorJobName, runAt, elapsed, interval, err)
+		msg := truncateString(err.Error(), 2048)
+		errAt := finishedAt
+		hbCtx, hbCancel := context.WithTimeout(context.Background(), opsMetricsCollectorHeartbeatTimeout)
+		defer hbCancel()
+		_ = c.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{
+			JobName:        opsMetricsCollectorJobName,
+			LastRunAt:      &runAt,
+			LastErrorAt:    &errAt,
+			LastError:      &msg,
+			LastDurationMs: &dur,
+		})
 		log.Printf("[OpsMetricsCollector] collect failed: %v", err)
 		return
 	}
-	recordOpsJobSuccess(c.opsRepo, opsMetricsCollectorJobName, runAt, elapsed, interval, "")
+
+	successAt := finishedAt
+	hbCtx, hbCancel := context.WithTimeout(context.Background(), opsMetricsCollectorHeartbeatTimeout)
+	defer hbCancel()
+	_ = c.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{
+		JobName:        opsMetricsCollectorJobName,
+		LastRunAt:      &runAt,
+		LastSuccessAt:  &successAt,
+		LastDurationMs: &dur,
+	})
 }
 
 func (c *OpsMetricsCollector) isMonitoringEnabled(ctx context.Context) bool {

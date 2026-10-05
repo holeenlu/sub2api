@@ -15,13 +15,7 @@ import (
 // FetchOpenAIModelsList discovers a single account's raw public model catalog.
 // API keys use the standard endpoint; OAuth reuses the authenticated, cached
 // Codex source. Account mappings and group policy are applied after this cache.
-func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (catalogResponse *OpenAIModelsResponse, catalogErr error) {
-	var catalogSource *Account
-	defer func() {
-		if catalogErr == nil {
-			s.rememberModelCatalog(account, catalogSource, catalogResponse, false)
-		}
-	}()
+func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
 	if s == nil || account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_MODELS_ACCOUNT_REQUIRED", "OpenAI account is required")
 	}
@@ -29,7 +23,6 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 	if err != nil {
 		return nil, fmt.Errorf("resolve model list credentials: %w", err)
 	}
-	catalogSource = credentialAccount
 	if credentialAccount.IsOpenAIOAuth() {
 		clientVersion := CodexCanonicalClientVersion()
 		if s.settingService != nil {
@@ -132,10 +125,6 @@ func standardOpenAIModelsBody(body []byte, fromManifest bool) ([]byte, error) {
 			continue
 		}
 		seen[id] = struct{}{}
-		var visibility, purpose string
-		_ = json.Unmarshal(entry["visibility"], &visibility)
-		_ = json.Unmarshal(entry["model_purpose"], &purpose)
-		visibility, purpose = ModelPresentation(id, visibility, purpose)
 		if fromManifest {
 			// Codex manifest entries carry dozens of client-only fields (instructions,
 			// model_messages, reasoning levels) that must not reach the public catalog,
@@ -152,12 +141,6 @@ func standardOpenAIModelsBody(body []byte, fromManifest bool) ([]byte, error) {
 			}
 		}
 		entry["id"], _ = json.Marshal(id)
-		if visibility != "" {
-			entry["visibility"], _ = json.Marshal(visibility)
-		}
-		if purpose != "" {
-			entry["model_purpose"], _ = json.Marshal(purpose)
-		}
 		entry["object"] = json.RawMessage(`"model"`)
 		if len(entry["created"]) == 0 || string(entry["created"]) == "null" {
 			entry["created"] = json.RawMessage(`0`)
@@ -212,6 +195,9 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 			if isCodexDedicatedMediaModel(id) {
 				continue
 			}
+			if strings.HasPrefix(id, codexAutoModelPrefix) && len(FilterCodexModelIDsForGroup([]string{id}, group)) == 0 {
+				continue
+			}
 		}
 		if _, ok := byID[id]; !ok {
 			byID[id] = raw
@@ -239,24 +225,13 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 		}
 		target, matched := account.ResolveMappedModel(id)
 		raw, available := byID[strings.TrimSpace(target)]
-		allowed := matched
-		if !available || !allowed {
+		if !matched || !available {
 			continue
 		}
 		seen[id] = struct{}{}
 		var entry map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &entry); err != nil {
 			return nil, err
-		}
-		var visibility, purpose string
-		_ = json.Unmarshal(entry["visibility"], &visibility)
-		_ = json.Unmarshal(entry["model_purpose"], &purpose)
-		visibility, purpose = ModelPresentation(target, visibility, purpose)
-		if visibility != "" {
-			entry["visibility"], _ = json.Marshal(visibility)
-		}
-		if purpose != "" {
-			entry["model_purpose"], _ = json.Marshal(purpose)
 		}
 		entry[idField], _ = json.Marshal(id)
 		if id != target {
@@ -275,12 +250,10 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 	return json.Marshal(envelope)
 }
 
-// ApplyPinnedCodexModelsMapping applies the selected source account's public
-// aliases and account model policy before the manifests are merged. The final
-// response still goes through the shared group catalog in
-// MergeGroupConfiguredCodexModels, so this source cannot widen group access.
+// ApplyPinnedCodexModelsMapping is used by pinned discovery and its scheduler
+// fallback. The ordinary (non-pinned) Codex path retains its local catalog policy.
 func ApplyPinnedCodexModelsMapping(response *OpenAIModelsResponse, account *Account, group *Group) error {
-	if response == nil || group == nil || group.Platform != PlatformOpenAI || !group.CodexModelsManifestConfig.Enabled {
+	if group == nil || group.Platform != PlatformOpenAI || !group.CodexModelsManifestConfig.Enabled {
 		return nil
 	}
 	body, err := projectAccountModelsBody(response.Body, account, group, true)
@@ -290,4 +263,128 @@ func ApplyPinnedCodexModelsMapping(response *OpenAIModelsResponse, account *Acco
 	response.Body = body
 	response.ETag = codexModelsManifestBodyETag(body)
 	return nil
+}
+
+// FetchPinnedOpenAIModelsList includes explicitly enabled scheduler fallback.
+// An authoritative empty catalog is success, including after group filtering.
+func (s *OpenAIGatewayService) FetchPinnedOpenAIModelsList(ctx context.Context, group *Group, maxAccountSwitches int, ifNoneMatch string) (*OpenAIModelsResponse, *Account, error) {
+	fetch := func(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+		response, err := s.FetchOpenAIModelsList(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+		response.Body, err = projectAccountModelsBody(response.Body, account, group, false)
+		return response, err
+	}
+	results, err := s.fetchPinnedOpenAIModels(ctx, group, fetch)
+	if err != nil && ctx.Err() == nil && group != nil && group.CodexModelsManifestConfig.FallbackToScheduler {
+		results, err = s.fetchScheduledOpenAIModels(ctx, group, maxAccountSwitches, fetch)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	models := make([]json.RawMessage, 0)
+	modelIDs := make([]string, 0)
+	byID := make(map[string]json.RawMessage)
+	for _, result := range results {
+		_, entries, err := modelCatalogEntries(result.response.Body, "data")
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, raw := range entries {
+			var model struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(raw, &model); err != nil {
+				return nil, nil, err
+			}
+			if _, exists := byID[model.ID]; !exists {
+				byID[model.ID] = raw
+				modelIDs = append(modelIDs, model.ID)
+				models = append(models, raw)
+			}
+		}
+	}
+	if group.ModelAllowlistEnabled() {
+		models = selectModelCatalogEntries(byID, group.ModelAllowlist.FilterForListing(modelIDs))
+	}
+	body, err := json.Marshal(struct {
+		Object string            `json:"object"`
+		Data   []json.RawMessage `json:"data"`
+	}{Object: "list", Data: models})
+	if err != nil {
+		return nil, nil, err
+	}
+	response := &OpenAIModelsResponse{Body: body, ETag: codexModelsManifestBodyETag(body)}
+	return openAIModelsResponseForClient(response, ifNoneMatch), results[0].account, nil
+}
+
+func selectModelCatalogEntries(byID map[string]json.RawMessage, selected []string) []json.RawMessage {
+	models := make([]json.RawMessage, 0, len(selected))
+	seen := make(map[string]struct{}, len(selected))
+	for _, id := range selected {
+		id = strings.TrimSpace(id)
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		if raw, exists := byID[id]; exists {
+			models = append(models, raw)
+			seen[id] = struct{}{}
+		}
+	}
+	return models
+}
+
+func orderPinnedCodexModelsBySelection(body []byte, allowlist GroupModelAllowlist) ([]byte, error) {
+	envelope, entries, err := modelCatalogEntries(body, "models")
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]json.RawMessage, len(entries))
+	modelIDs := make([]string, 0, len(entries))
+	for _, raw := range entries {
+		var entry struct {
+			Slug string `json:"slug"`
+		}
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			return nil, err
+		}
+		byID[entry.Slug] = raw
+		modelIDs = append(modelIDs, entry.Slug)
+	}
+	envelope["models"], err = json.Marshal(selectModelCatalogEntries(byID, allowlist.FilterForListing(modelIDs)))
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(envelope)
+}
+
+func (s *OpenAIGatewayService) fetchScheduledOpenAIModels(ctx context.Context, group *Group, maxSwitches int, fetch func(context.Context, *Account) (*OpenAIModelsResponse, error)) ([]pinnedOpenAIModelsResult, error) {
+	if maxSwitches <= 0 {
+		maxSwitches = 3
+	}
+	excluded := make(map[int64]struct{})
+	var lastErr error
+	for attempt := 0; attempt <= maxSwitches; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		account, err := s.SelectAccountForModelWithExclusions(ctx, &group.ID, "", "", excluded)
+		if err != nil {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, ErrNoPinnedCodexModelsAccounts
+		}
+		response, err := fetch(ctx, account)
+		if err == nil {
+			return []pinnedOpenAIModelsResult{{account: account, response: response}}, nil
+		}
+		lastErr = err
+		if !IsRetryableCodexModelsManifestError(err) {
+			return nil, err
+		}
+		excluded[account.ID] = struct{}{}
+	}
+	return nil, lastErr
 }

@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -672,7 +671,6 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	}
 	account := &Account{
 		ID:          31,
-		GroupIDs:    []int64{groupID},
 		Name:        "openai-codex-image-ws",
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
@@ -1124,38 +1122,39 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughBridg
 	tests := []struct {
 		name            string
 		payload         string
+		threshold       int64
 		wantRelayReject bool
 	}{
 		{
-			name:    "small response create",
-			payload: `{"type":"response.create","model":"gpt-5.1"}`,
+			name:      "small response create",
+			payload:   `{"type":"response.create","model":"gpt-5.1"}`,
+			threshold: 1024,
 		},
 		{
-			name:    "large fresh response stays on websocket",
-			payload: `{"type":"response.create","model":"gpt-5.1","input":"` + strings.Repeat("x", 16*1024*1024) + `"}`,
+			name:      "continuation response create",
+			payload:   `{"type":"response.create","previous_response_id":"resp_previous","model":"gpt-5.1"}`,
+			threshold: 1,
 		},
 		{
-			name:    "continuation response create",
-			payload: `{"type":"response.create","previous_response_id":"resp_previous","model":"gpt-5.1"}`,
-		},
-		{
-			name:    "other event type",
-			payload: `{"type":"session.update","padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`,
+			name:      "other event type",
+			payload:   `{"type":"session.update","padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`,
+			threshold: 1,
 		},
 		{
 			name:            "malformed data",
 			payload:         `{"type":"response.create","padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"`,
+			threshold:       1,
 			wantRelayReject: true,
 		},
 		{
-			name:            "duplicate type",
-			wantRelayReject: true,
-			payload:         `{"type":"response.create","type":"response.create","model":"gpt-5.1"}`,
+			name:      "duplicate type",
+			payload:   `{"type":"response.create","type":"response.create","model":"gpt-5.1"}`,
+			threshold: 1,
 		},
 		{
-			name:            "duplicate previous response id",
-			wantRelayReject: true,
-			payload:         `{"type":"response.create","previous_response_id":null,"previous_response_id":null,"model":"gpt-5.1"}`,
+			name:      "duplicate previous response id",
+			payload:   `{"type":"response.create","previous_response_id":null,"previous_response_id":null,"model":"gpt-5.1"}`,
+			threshold: 1,
 		},
 	}
 
@@ -1170,6 +1169,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughBridg
 			cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
 			cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
 			cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeCtxPool
+			cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
+			cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = tt.threshold
 
 			upstreamConn := &openAIWSCaptureConn{events: [][]byte{
 				[]byte(`{"type":"response.completed","response":{"id":"resp_duplicate_keys","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
@@ -1205,7 +1206,6 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughBridg
 					return
 				}
 				defer func() { _ = conn.CloseNow() }()
-				conn.SetReadLimit(ResolveOpenAIWSClientReadLimitBytes(cfg))
 				_, firstMessage, err := conn.Read(r.Context())
 				if err != nil {
 					errCh <- err
@@ -4073,187 +4073,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_StoreDisabledStr
 	require.Equal(t, "world", gjson.Get(secondWrite, "input.1.text").String())
 }
 
-// Codex responses_websockets_v2 continuations carry previous_response_id plus
-// only the input after the previous request and every item of the previous
-// response. Each ctx_pool fallback that drops previous_response_id sends the
-// replayed history as the whole input, so that history must hold the previous
-// output in full: tool calls alone would lose assistant messages and reasoning.
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_DropPreviousResponseIDReplaysPreviousOutput(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	prevPreflightPingIdle := openAIWSIngressPreflightPingIdle
-	openAIWSIngressPreflightPingIdle = 0
-	defer func() {
-		openAIWSIngressPreflightPingIdle = prevPreflightPingIdle
-	}()
-
-	cfg := &config.Config{}
-	cfg.Security.URLAllowlist.Enabled = false
-	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
-	cfg.Gateway.OpenAIWS.Enabled = true
-	cfg.Gateway.OpenAIWS.OAuthEnabled = true
-	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
-	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
-	cfg.Gateway.OpenAIWS.IngressPreviousResponseRecoveryEnabled = true
-	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
-	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
-	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 2
-	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
-	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
-	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
-	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
-
-	userMessage := func(text string) string {
-		return `{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}`
-	}
-	assistantMessage := func(id, text string) string {
-		return `{"id":"` + id + `","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","annotations":[],"text":"` + text + `"}]}`
-	}
-	reasoning := `{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Look at the layout."}],"encrypted_content":"enc-1"}`
-	bareReasoning := `{"id":"rs_2","type":"reasoning","summary":[{"type":"summary_text","text":"Thinking."}]}`
-	answerOutput := []string{reasoning, bareReasoning, assistantMessage("msg_1", "It is a Go service.")}
-	toolOutput := []string{reasoning, assistantMessage("msg_2", "Listing files."), `{"id":"fc_1","type":"function_call","status":"completed","call_id":"call_1","name":"exec","arguments":"{\"cmd\":\"ls\"}"}`}
-	firstTurn := func(output []string) [][]byte {
-		events := make([][]byte, 0, len(output)+1)
-		for i, item := range output {
-			events = append(events, []byte(`{"type":"response.output_item.done","output_index":`+strconv.Itoa(i)+`,"item":`+item+`}`))
-		}
-		return append(events, []byte(`{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.1","output":[`+strings.Join(output, ",")+`],"usage":{"input_tokens":5,"output_tokens":2}}}`))
-	}
-	prevNotFound := []byte(`{"type":"error","error":{"type":"invalid_request_error","code":"previous_response_not_found","message":"Previous response with id 'resp_1' not found."}}`)
-	completed := []byte(`{"type":"response.completed","response":{"id":"resp_2","model":"gpt-5.1","output":[],"usage":{"input_tokens":9,"output_tokens":1}}}`)
-	retryOnNewConn := func(first openAIWSClientConn) ([]openAIWSClientConn, *openAIWSCaptureConn) {
-		retry := &openAIWSCaptureConn{events: [][]byte{completed}}
-		return []openAIWSClientConn{first, retry}, retry
-	}
-	describe := func(item gjson.Result) string {
-		switch itemType := item.Get("type").String(); itemType {
-		case "message":
-			return item.Get("role").String() + ": " + item.Get("content.0.text").String()
-		case "reasoning":
-			// The id and encrypted_content decide whether upstream can resolve it.
-			return "reasoning id=" + item.Get("id").String() + " enc=" + item.Get("encrypted_content").String()
-		default:
-			return itemType + " " + item.Get("call_id").String()
-		}
-	}
-	storeDisabled := `"store":false,`
-	summarize := `"input":[` + userMessage("Summarize it.") + `]`
-	// Without stored items an rs_* id lookup 404s, so reasoning is replayed by
-	// its encrypted_content alone and dropped when it has none.
-	statelessAnswerReplay := []string{"user: Inspect the repo.", "reasoning id= enc=enc-1", "assistant: It is a Go service.", "user: Summarize it."}
-
-	for _, tc := range []struct {
-		name         string
-		store        string
-		output       []string
-		continuation string // fields after previous_response_id in the second frame
-		upstream     func(firstTurn [][]byte) (conns []openAIWSClientConn, fullCreate *openAIWSCaptureConn)
-		dials        int
-		want         []string
-	}{
-		{
-			// Stored items stay resolvable, so the output is replayed verbatim.
-			name:         "previous_response_not_found_store_enabled",
-			output:       answerOutput,
-			continuation: summarize,
-			upstream: func(first [][]byte) ([]openAIWSClientConn, *openAIWSCaptureConn) {
-				return retryOnNewConn(&openAIWSCaptureConn{events: append(first, prevNotFound)})
-			},
-			dials: 2,
-			want:  []string{"user: Inspect the repo.", "reasoning id=rs_1 enc=enc-1", "reasoning id=rs_2 enc=", "assistant: It is a Go service.", "user: Summarize it."},
-		},
-		{
-			name:         "previous_response_not_found",
-			store:        storeDisabled,
-			output:       answerOutput,
-			continuation: summarize,
-			upstream: func(first [][]byte) ([]openAIWSClientConn, *openAIWSCaptureConn) {
-				return retryOnNewConn(&openAIWSCaptureConn{events: append(first, prevNotFound)})
-			},
-			dials: 2,
-			want:  statelessAnswerReplay,
-		},
-		{
-			name:         "preflight_ping_failure",
-			store:        storeDisabled,
-			output:       answerOutput,
-			continuation: summarize,
-			upstream: func(first [][]byte) ([]openAIWSClientConn, *openAIWSCaptureConn) {
-				return retryOnNewConn(&openAIWSPreflightFailConn{events: first})
-			},
-			dials: 2,
-			want:  statelessAnswerReplay,
-		},
-		{
-			// The tool output may leave its chain only because the replay carries
-			// its call; the reasoning and commentary before the call come along.
-			name:         "preflight_ping_failure_tool_output",
-			store:        storeDisabled,
-			output:       toolOutput,
-			continuation: `"input":[{"type":"function_call_output","call_id":"call_1","output":"README.md"}]`,
-			upstream: func(first [][]byte) ([]openAIWSClientConn, *openAIWSCaptureConn) {
-				return retryOnNewConn(&openAIWSPreflightFailConn{events: first})
-			},
-			dials: 2,
-			want:  []string{"user: Inspect the repo.", "reasoning id= enc=enc-1", "assistant: Listing files.", "function_call call_1", "function_call_output call_1"},
-		},
-		{
-			// Changed non-input fields fail the strict incremental check, which
-			// drops previous_response_id on the same connection.
-			name:         "strict_full_create",
-			store:        storeDisabled,
-			output:       answerOutput,
-			continuation: `"instructions":"Answer briefly.",` + summarize,
-			upstream: func(first [][]byte) ([]openAIWSClientConn, *openAIWSCaptureConn) {
-				conn := &openAIWSCaptureConn{events: append(first, completed)}
-				return []openAIWSClientConn{conn}, conn
-			},
-			dials: 1,
-			want:  statelessAnswerReplay,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			conns, fullCreate := tc.upstream(firstTurn(tc.output))
-			dialer := &openAIWSQueueDialer{conns: conns}
-			pool := newOpenAIWSConnPool(cfg)
-			pool.setClientDialerForTest(dialer)
-			svc := &OpenAIGatewayService{
-				cfg:              cfg,
-				httpUpstream:     &httpUpstreamRecorder{},
-				cache:            &stubGatewayCache{},
-				openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
-				toolCorrector:    NewCodexToolCorrector(),
-				openaiWSPool:     pool,
-			}
-			account := &Account{
-				ID: 141, Name: "openai-ingress-full-create-replay", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
-				Status: StatusActive, Schedulable: true, Concurrency: 1,
-				Credentials: map[string]any{"api_key": "sk-test"},
-				Extra:       map[string]any{"responses_websockets_v2_enabled": true},
-			}
-
-			runOpenAIWSIngressTurns(t, svc, account, "sk-test",
-				`{"type":"response.create","model":"gpt-5.1","stream":true,`+tc.store+`"input":[`+userMessage("Inspect the repo.")+`]}`,
-				`{"type":"response.create","model":"gpt-5.1","stream":true,`+tc.store+`"previous_response_id":"resp_1",`+tc.continuation+`}`,
-			)
-
-			require.Equal(t, tc.dials, dialer.DialCount())
-			fullCreate.mu.Lock()
-			writes := append([]map[string]any(nil), fullCreate.writes...)
-			fullCreate.mu.Unlock()
-			require.NotEmpty(t, writes)
-			request := requestToJSONString(writes[len(writes)-1])
-			require.False(t, gjson.Get(request, "previous_response_id").Exists(), request)
-			var replayed []string
-			for _, item := range gjson.Get(request, "input").Array() {
-				replayed = append(replayed, describe(item))
-			}
-			require.Equal(t, tc.want, replayed)
-		})
-	}
-}
-
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_DuplicatePreviousResponseIDRejectedBeforeRecovery(t *testing.T) {
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PreviousResponseNotFoundRecoveryRemovesDuplicatePrevID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -4378,23 +4198,30 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_DuplicatePreviou
 
 	// duplicate previous_response_id: 恢复重试时应删除所有重复键，避免再次 previous_response_not_found。
 	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"previous_response_id":"resp_turn_prev_once_1","input":[],"previous_response_id":"resp_turn_prev_duplicate"}`)
-	readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
-	_, _, readErr := clientConn.Read(readCtx)
-	cancelRead()
-	require.Error(t, readErr)
+	secondTurn := readMessage()
+	require.Equal(t, "resp_turn_prev_once_2", gjson.GetBytes(secondTurn, "response.id").String())
+
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
 	select {
 	case serverErr := <-serverErrCh:
-		require.ErrorContains(t, serverErr, "ambiguous JSON field")
+		require.NoError(t, serverErr)
 	case <-time.After(5 * time.Second):
-		t.Fatal("ingress did not reject duplicate continuation")
+		t.Fatal("等待 ingress websocket 结束超时")
 	}
-	require.Equal(t, 1, dialer.DialCount(), "duplicate continuation must not trigger recovery or upstream work")
+
+	require.Equal(t, 2, dialer.DialCount(), "previous_response_not_found 恢复应只重试一次")
+
 	firstConn.mu.Lock()
-	require.Len(t, firstConn.writes, 1)
+	firstWrites := append([]map[string]any(nil), firstConn.writes...)
 	firstConn.mu.Unlock()
+	require.Len(t, firstWrites, 2)
+	require.True(t, gjson.Get(requestToJSONString(firstWrites[1]), "previous_response_id").Exists())
+
 	secondConn.mu.Lock()
-	require.Empty(t, secondConn.writes)
+	secondWrites := append([]map[string]any(nil), secondConn.writes...)
 	secondConn.mu.Unlock()
+	require.Len(t, secondWrites, 1)
+	require.False(t, gjson.Get(requestToJSONString(secondWrites[0]), "previous_response_id").Exists(), "重复键场景恢复重试后不应保留 previous_response_id")
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_RejectsMessageIDAsPreviousResponseID(t *testing.T) {

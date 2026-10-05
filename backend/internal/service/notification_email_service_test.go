@@ -123,18 +123,6 @@ func TestNotificationEmailAuthTemplatesAreListedAndPreviewable(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, resetPreview.Subject, "Password reset")
 	require.Contains(t, resetPreview.HTML, "https://example.com/reset?token=abc")
-
-	japanesePreview, err := svc.PreviewTemplate(ctx, NotificationEmailPreviewInput{
-		Event:  NotificationEmailEventAuthVerifyCode,
-		Locale: "ja-JP,ja;q=0.9",
-		Variables: map[string]string{
-			"verification_code":  "654321",
-			"expires_in_minutes": "15",
-		},
-	})
-	require.NoError(t, err)
-	require.Contains(t, japanesePreview.Subject, "メール認証コード")
-	require.Contains(t, japanesePreview.HTML, "654321")
 }
 
 func TestNotificationEmailAdditionalEventsAreListedAndPreviewable(t *testing.T) {
@@ -178,7 +166,7 @@ func TestCyberPolicyNoticeTemplateWrapsLongUpstreamMessages(t *testing.T) {
 	svc := NewNotificationEmailService(newNotificationEmailMemorySettingRepo(), nil)
 	longMessage := strings.Repeat("0123456789abcdef", 256)
 
-	for _, locale := range []string{"en", "zh", "ja"} {
+	for _, locale := range []string{"en", "zh"} {
 		preview, err := svc.PreviewTemplate(ctx, NotificationEmailPreviewInput{
 			Event:  NotificationEmailEventCyberPolicyNotice,
 			Locale: locale,
@@ -224,7 +212,7 @@ func TestOpsScheduledReportTemplateExposesEditableSummaryMetrics(t *testing.T) {
 		"report_tps_avg",
 	}
 
-	for _, locale := range []string{"en", "zh", "ja"} {
+	for _, locale := range []string{"en", "zh"} {
 		tmpl, err := svc.GetTemplate(ctx, NotificationEmailEventOpsScheduledReport, locale)
 		require.NoError(t, err)
 		for _, placeholder := range requiredPlaceholders {
@@ -377,13 +365,6 @@ func TestNotificationEmailLocaleMemoryNormalizesAcceptLanguage(t *testing.T) {
 	svc.RememberRecipientLocale(ctx, 42, "User@Example.com", "zh-CN,zh;q=0.9,en;q=0.8")
 	require.Equal(t, "zh", svc.ResolveRecipientLocale(ctx, 42, "user@example.com"))
 	require.Equal(t, "zh", svc.ResolveRecipientLocale(ctx, 0, "user@example.com"))
-}
-
-func TestNotificationEmailSupportsJapaneseLocale(t *testing.T) {
-	svc := NewNotificationEmailService(newNotificationEmailMemorySettingRepo(), nil)
-	require.Contains(t, svc.SupportedLocales(), "ja")
-	require.Equal(t, "ja", normalizeNotificationLocale("ja-JP,ja;q=0.9,en;q=0.8"))
-	require.Equal(t, "ja", normalizeNotificationLocale("jp"))
 }
 
 func TestNotificationEmailDeliveryKeyUsesShortStableHash(t *testing.T) {

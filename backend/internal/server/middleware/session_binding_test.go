@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSessionBindingContextAlwaysUsesTrustedProxyChain(t *testing.T) {
+func TestSessionBindingContextFollowsForwardedIPSwitch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	for _, tc := range []struct {
@@ -24,7 +24,7 @@ func TestSessionBindingContextAlwaysUsesTrustedProxyChain(t *testing.T) {
 		trustedProxies []string
 		wantIP         string
 	}{
-		{name: "enabled metadata switch cannot trust raw headers", trustForwarded: true, wantIP: "127.0.0.1"},
+		{name: "enabled switch takes over raw headers", trustForwarded: true, wantIP: "1.2.3.4"},
 		{name: "disabled switch ignores untrusted headers", trustForwarded: false, wantIP: "127.0.0.1"},
 		{name: "disabled switch uses configured Gin proxy", trustForwarded: false, trustedProxies: []string{"127.0.0.1"}, wantIP: "1.2.3.4"},
 	} {
@@ -68,10 +68,10 @@ func TestSessionBindingContextSnapshotsForwardedModeAndHeaders(t *testing.T) {
 	r.GET("/t", func(c *gin.Context) {
 		binding := service.SessionBindingFromContext(c.Request.Context())
 		require.NotNil(t, binding)
-		require.Equal(t, "9.9.9.9", binding.IP)
+		require.Equal(t, "1.2.3.4", binding.IP)
 
 		cfg.SetForwardedClientIPSettings(false, []string{"X-Changed-IP"})
-		require.Equal(t, "9.9.9.9", ip.GetSecurityClientIP(c, false))
+		require.Equal(t, "1.2.3.4", ip.GetSecurityClientIP(c, false))
 		c.Status(200)
 	})
 

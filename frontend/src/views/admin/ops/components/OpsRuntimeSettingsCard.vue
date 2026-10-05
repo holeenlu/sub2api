@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { opsAPI } from '@/api/admin/ops'
 import type { OpsAlertRuntimeSettings } from '../types'
-import { DEFAULT_TTFT_P99_MS_MAX } from '../utils/opsThresholds'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 
 const { t } = useI18n()
@@ -159,7 +158,7 @@ function openAlertEditor() {
     if (!draftAlert.value.thresholds) {
       draftAlert.value.thresholds = {
         sla_percent_min: 99.5,
-        ttft_p99_ms_max: DEFAULT_TTFT_P99_MS_MAX,
+        ttft_p99_ms_max: 500,
         request_error_rate_percent_max: 5,
         upstream_error_rate_percent_max: 5
       }

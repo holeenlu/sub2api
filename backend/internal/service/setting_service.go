@@ -8,11 +8,12 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"sync"
+
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"golang.org/x/sync/singleflight"
-	"sync"
 )
 
 const (
@@ -117,32 +118,25 @@ type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[i
 
 // SettingService 系统设置服务
 type SettingService struct {
-	settingRepo                        SettingRepository
-	defaultSubGroupReader              DefaultSubscriptionGroupReader
-	proxyRepo                          ProxyRepository // for resolving websearch provider proxy URLs
-	cfg                                *config.Config
-	onUpdate                           func() // Callback when settings are updated (for cache invalidation)
-	version                            string // Application version
-	webSearchManagerBuilder            WebSearchManagerBuilder
-	antigravityUAVersionCache          atomic.Value // *cachedAntigravityUserAgentVersion
-	antigravityUAVersionSF             singleflight.Group
-	openAICodexUACache                 atomic.Value // *cachedOpenAICodexUserAgent
-	openAICodexUASF                    singleflight.Group
-	openAICodexVersionCache            atomic.Value // *cachedOpenAICodexClientVersion
-	openAICodexVersionSF               singleflight.Group
-	claudeCodeVersionCache             atomic.Value // *cachedClaudeCodeClientVersion
-	claudeCodeVersionSF                singleflight.Group
-	codexRestrictionPolicyCache        atomic.Value // *cachedCodexRestrictionPolicy
-	codexRestrictionPolicySF           singleflight.Group
-	openAICodexTicketEnabledCache      atomic.Value // *cachedOpenAICodexTicketEnabled
-	codexTicketCadenceCache            atomic.Value
-	openAICodexTicketEnabledSF         singleflight.Group
-	openAICodexTicketAllowCache        atomic.Value
-	openAICodexTicketAllowSF           singleflight.Group
-	openAICodexTicketHarvestProxyCache atomic.Value // *cachedOpenAICodexTicketHarvestProxy
-	openAICodexTicketHarvestProxySF    singleflight.Group
-	codexProbeTemplateMu               sync.Mutex
-	codexProbeTemplateCache            *cachedCodexProbeTemplate
+	codexProbeTemplateMu        sync.Mutex
+	codexProbeTemplateCache     *cachedCodexProbeTemplate
+	settingRepo                 SettingRepository
+	defaultSubGroupReader       DefaultSubscriptionGroupReader
+	proxyRepo                   ProxyRepository // for resolving websearch provider proxy URLs
+	cfg                         *config.Config
+	onUpdate                    func() // Callback when settings are updated (for cache invalidation)
+	version                     string // Application version
+	webSearchManagerBuilder     WebSearchManagerBuilder
+	antigravityUAVersionCache   atomic.Value // *cachedAntigravityUserAgentVersion
+	antigravityUAVersionSF      singleflight.Group
+	openAICodexUACache          atomic.Value // *cachedOpenAICodexUserAgent
+	openAICodexUASF             singleflight.Group
+	openAICodexVersionCache     atomic.Value // *cachedOpenAICodexClientVersion
+	openAICodexVersionSF        singleflight.Group
+	claudeCodeVersionCache      atomic.Value // *cachedClaudeCodeClientVersion
+	claudeCodeVersionSF         singleflight.Group
+	codexRestrictionPolicyCache atomic.Value // *cachedCodexRestrictionPolicy
+	codexRestrictionPolicySF    singleflight.Group
 
 	cyberSessionBlockRuntimeMu    sync.Mutex
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
@@ -360,7 +354,7 @@ func (s *SettingService) LoadForwardedClientIPSettings(ctx context.Context) erro
 	}
 	if values[settingKeyForwardedClientIPModeV2] != "true" {
 		updates[settingKeyForwardedClientIPModeV2] = "true"
-		// Never turn a persisted opt-out back on during a settings migration.
+		// Preserve a saved opt-out when upgrading an existing installation.
 	}
 	if len(updates) > 0 {
 		if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {

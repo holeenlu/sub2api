@@ -7,7 +7,6 @@ import (
 
 // AdminHandlers contains all admin-related HTTP handlers
 type AdminHandlers struct {
-	ModelCatalog           *admin.ModelCatalogHandler
 	Dashboard              *admin.DashboardHandler
 	User                   *admin.UserHandler
 	Group                  *admin.GroupHandler
@@ -73,8 +72,8 @@ type Handlers struct {
 
 // BuildInfo contains build-time information
 type BuildInfo struct {
+	UpstreamVersion string
 	BuildCommit     string
 	Version         string
 	BuildType       string // "source" for manual builds, "release" for CI builds
-	UpstreamVersion string // upstream Sub2API version this build is based on, e.g. "v0.2.1"
 }
