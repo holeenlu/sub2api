@@ -459,6 +459,9 @@ export default {
         accountSchedulingThresholdsGlobalHint: 'そのプラットフォームのすべてのアカウントに適用されるシステム全体のデフォルト値です。個別のアカウントでは、アカウント編集画面でこの値を上書きできます。',
         accountSchedulingThresholdsDisabledHint: '100にするとプラットフォームの自動一時停止を無効にします。1～99を指定すると、使用率がその割合に達した時点でスケジューリングを一時停止します。',
         accountSchedulingThresholdsRangeHint: '1～100の整数（パーセント）。OpenAI/Anthropic/Grokのみ。',
+        accountSchedulingThresholdsFableLabel: 'anthropic · 7d Fable',
+        accountSchedulingThresholdsFableHint:
+          '1～100の整数（パーセント）。Fable専用の7d Fウィンドウのみがチェックされ、この値に達するとFableモデルのスケジューリングを停止します。他のモデルは引き続き利用できます。共有7dウィンドウは通常のAnthropicしきい値でのみ制御されます。100にすると個別の値を使用せず、Anthropicのしきい値を使用します。'
       },
       upstreamBillingProbe: {
         title: 'アップストリームレート自動検出',

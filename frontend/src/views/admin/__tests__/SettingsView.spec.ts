@@ -1263,6 +1263,20 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("loads and saves the Fable model threshold independently from Anthropic", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, account_scheduling_thresholds: { openai: 100, anthropic: 70, anthropic_fable: 95, grok: 100 } });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const editor = wrapper.get('[data-testid="account-scheduling-threshold-anthropic_fable"]');
+    expect((editor.element as HTMLInputElement).value).toBe('95');
+    await editor.setValue(90);
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings.mock.lastCall?.[0]?.account_scheduling_thresholds).toEqual(expect.objectContaining({ anthropic: 70, anthropic_fable: 90 }));
+    wrapper.unmount();
+  });
+
   it("loads, edits and restores the Codex diagnostic template", async () => {
     const defaultTemplate = '{"type":"session_meta","payload":{"base_instructions":{"text":"Default instructions"}}}\n';
     const customTemplate = defaultTemplate.replace("Default instructions", "Custom instructions");
