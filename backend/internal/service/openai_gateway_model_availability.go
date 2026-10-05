@@ -12,8 +12,7 @@ import (
 // account in the group for the given platform (e.g. PlatformOpenAI,
 // PlatformGrok). The platform scopes the candidate pool so distinct
 // OpenAI-compatible platforms do not cross-contaminate diagnosis results.
-// The query bypasses scheduler snapshots; process-local BPS cooldowns are
-// included only for models routed through BPS, alongside persisted rate limits.
+// The query uses persisted account state rather than scheduler snapshots.
 //
 // Safe to call on the error path: returns {true,true} on any internal
 // failure or when the inputs preclude meaningful diagnosis (empty model,
@@ -95,9 +94,7 @@ func (s *OpenAIGatewayService) diagnoseModelAvailabilityInGroup(
 			continue
 		}
 		resetAt := accountRateLimitCooldownEnd(ctx, acc, requestedModel)
-		if bpsResetAt := s.excelBPSCooldownEndContext(ctx, acc, requestedModel); bpsResetAt != nil && (resetAt == nil || bpsResetAt.After(*resetAt)) {
-			resetAt = bpsResetAt
-		}
+
 		cooldown.observe(resetAt, nil)
 	}
 	cooldown.apply(&diag)

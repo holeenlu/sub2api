@@ -107,7 +107,7 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 	}
 
 	if req.PelicanConfig != nil {
-		response.BadRequest(c, "automatic BPS and quality test plans have been retired")
+		response.BadRequest(c, "legacy quality test plans have been retired")
 		return
 	}
 	if req.ModelID != "" {

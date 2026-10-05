@@ -20,7 +20,7 @@ func (b failedIngressBody) Read([]byte) (int, error) { return 0, b.err }
 func (b failedIngressBody) Close() error             { return nil }
 
 func TestPrereadMiddlewareClassifiesBodyReadFailures(t *testing.T) {
-	for _, stage := range []string{"allowlist", "image admission"} {
+	for _, stage := range []string{"allowlist"} {
 		for _, tc := range []struct {
 			name    string
 			err     error
@@ -44,11 +44,7 @@ func TestPrereadMiddlewareClassifiesBodyReadFailures(t *testing.T) {
 					c.Next()
 					skip = ShouldSkipOpsErrorRecord(c)
 				})
-				if stage == "allowlist" {
-					r.Use(GroupModelAllowlist())
-				} else {
-					r.Use(ExcelBPSImageAdmission(bpsImageTestSettings{enabled: true}, 256<<20))
-				}
+				r.Use(GroupModelAllowlist())
 				r.POST("/v1/responses", func(c *gin.Context) { called = true })
 				req := httptest.NewRequest(http.MethodPost, "/v1/responses", failedIngressBody{tc.err})
 				req.Header.Set("Content-Type", "application/json")

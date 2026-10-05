@@ -816,8 +816,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstClientMessage = accountScopedFirst
 	}
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
-	var bpsRouting openAIWSBPSRouting
-	bpsRouting.resolve(account, initialRequestModel, firstClientMessage)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
 		return fmt.Errorf("apply openai fast policy on first ws frame: %w", policyErr)
@@ -1177,7 +1175,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				// capability decision one step stale.  Keep the client-facing
 				// request model separate in requestModelForThisFrame; only the
 				// payload sent upstream is rewritten here.
-				switchModel := requestModelForThisFrame
 				if hooks != nil && hooks.MapRequestModel != nil {
 					upstreamModel, err := hooks.MapRequestModel(turnNo, requestModelForThisFrame)
 					if err != nil {
@@ -1185,12 +1182,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 					if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
 						payload = s.ReplaceModelInBody(payload, upstreamModel)
-						switchModel = upstreamModel
 					}
 				}
-				if bridgeBPS, _ := bpsRouting.resolve(account, switchModel, payload); bridgeBPS {
-					return payload, nil, newOpenAIWSBPSModelSwitchError(switchModel)
-				}
+
 				if hooks != nil && hooks.BeforeTurn != nil {
 					if err := hooks.BeforeTurn(turnNo); err != nil {
 						s.invalidateOpenAIWSTurnStateAfterAdmissionFailureForRequest(

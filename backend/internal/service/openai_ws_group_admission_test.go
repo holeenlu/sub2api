@@ -82,27 +82,6 @@ func requireGroupMembershipDenied(t *testing.T, err error) {
 // Regression for #252: the Pelican and manual account tests carry no API key.
 // Over HTTP such a send is not bound to any group; the native Codex WS path
 // used to judge it as a group-0 request and reject every grouped account.
-func TestExcelBPSAccountTestOutsideBPSModelsPassesWSGroupAdmission(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	account := groupAdmissionAccount(7)
-	account.Extra["openai_excel_bps"] = true
-	account.Extra["openai_excel_bps_models"] = []any{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"}
-	conn := &openAIWSCaptureConn{events: [][]byte{
-		[]byte(`{"type":"response.output_text.delta","delta":"OK"}`),
-		[]byte(`{"type":"response.completed","response":{"id":"resp_252","model":"gpt-6.1-sol","usage":{"input_tokens":1,"output_tokens":1}}}`),
-	}}
-	gateway, _ := newGroupAdmissionWSv2Service(t, &groupAdmissionRepo{first: account}, conn)
-	svc := &AccountTestService{openaiGatewayService: gateway}
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = (&http.Request{Header: make(http.Header)}).WithContext(context.Background())
-
-	err := svc.testExcelBPSAccountConnection(c, account, "gpt-6.1-sol", "Reply OK")
-
-	require.NoError(t, err, rec.Body.String())
-	require.NotNil(t, conn.lastWrite, "the test must reach the native WS upstream")
-	require.Contains(t, rec.Body.String(), `"type":"test_complete"`)
-}
 
 func TestOpenAIWSv2GroupAdmissionFollowsAPIKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)

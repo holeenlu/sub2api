@@ -16,7 +16,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 const (
@@ -109,7 +108,7 @@ func ResolveOpenAIWSClientReadLimitBytes(cfg *config.Config) int64 {
 func (s *OpenAIGatewayService) openAIWSManualHTTPBridge(account *Account) bool {
 	return s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled &&
 		account != nil && account.IsOpenAI() &&
-		nativeOpenAIWSRoutingAccount(account).ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault) == OpenAIWSIngressModeHTTPBridge
+		account.ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault) == OpenAIWSIngressModeHTTPBridge
 }
 
 func prepareOpenAIWSHTTPBridgeBody(account *Account, payload []byte) ([]byte, error) {
@@ -328,7 +327,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	payload []byte,
 	payloadBytes int,
 	originalModel string,
-	excelBPS bool,
 	imageBillingModel string,
 	imageSizeTier string,
 	imageInputSize string,
@@ -348,9 +346,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
-	// One gin context serves every turn of the connection. As Forward does per
-	// request, drop the previous turn's upstream endpoint: a BPS turn records
-	// its own, and a native turn must not inherit it in usage logs.
+	// A connection reuses one context; clear the previous turn's endpoint.
 	ClearActualOpenAIUpstreamEndpoint(c)
 	prewarm := gjson.GetBytes(payload, "generate").Type == gjson.False
 	responseModelObserver := &upstreamResponseModelObserver{}
@@ -361,21 +357,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 	// The ingress parser selects the protocol from the request model. Native
 	// payloads already contain the final model and must never be mapped again.
-	if excelBPS && !prewarm {
-		reason := account.excelBPSNativeFallbackReason(body)
-		if reason == "" {
-			return s.proxyOpenAIWSExcelBPSTurn(ctx, c, account, body, originalModel, writeClientMessage)
-		}
-		if !s.openAIWSManualHTTPBridge(account) {
-			return nil, newOpenAIWSNativeModelSwitchError(originalModel)
-		}
-		// Explicit manual bridge mode keeps the original native HTTP fallback.
-		recordExcelBPSNativeFallback(ctx, account, reason)
-		body, err = sjson.SetBytes(body, "model", normalizeOpenAIModelForUpstream(account, account.GetMappedModel(gjson.GetBytes(body, "model").String())))
-		if err != nil {
-			return nil, err
-		}
-	}
+
 	grokIntentSourceBody := append([]byte(nil), body...)
 	_, grokExplicitToolsField := openAIWSHTTPBridgeRawField(grokIntentSourceBody, "tools")
 	grokExplicitToolIntent := account.Platform == PlatformGrok && hasGrokResponsesToolIntent(grokIntentSourceBody)

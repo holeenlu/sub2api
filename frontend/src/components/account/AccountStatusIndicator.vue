@@ -1,11 +1,6 @@
 <template>
   <div class="flex flex-col items-start gap-1">
-    <span
-      v-if="isExcelBPSEnabled"
-      data-testid="bps-status-badge"
-      class="inline-flex items-center rounded bg-[#217346] px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-white"
-      :title="t('admin.accounts.openai.excelBPS')"
-    >bps</span>
+
     <div class="flex items-center gap-2">
 
     <!-- OpenAI OAuth RPM Display - keep the pause reason explicit -->
@@ -190,24 +185,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'show-temp-unsched', account: Account): void
 }>()
-
-// Keep the account-list badge aligned with the backend BPS eligibility check.
-const isExcelBPSEnabled = computed(() => {
-  const account = props.account
-  if (
-    account.platform !== 'openai' ||
-    account.type !== 'oauth' ||
-    account.parent_account_id != null ||
-    account.extra?.openai_excel_bps !== true
-  ) return false
-  const credential = (key: string) => {
-    const value = account.credentials?.[key]
-    return typeof value === 'string' ? value.trim().toLowerCase() : ''
-  }
-  const isPAT = (mode: string) => mode === 'personalaccesstoken' || mode === 'personal_access_token'
-  return credential('plan_type') !== 'free' && credential('auth_mode') !== 'agentidentity' &&
-    !isPAT(credential('auth_mode')) && !isPAT(credential('openai_auth_mode'))
-})
 
 // Computed: is rate limited (429)
 const isRateLimited = computed(() => {

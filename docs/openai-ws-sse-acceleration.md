@@ -1,10 +1,10 @@
 # HTTP 流式 WS 加速已移除
 
-自 2026-10-04 起，本项目移除普通 OAuth 账号的 HTTP→上游 WS→SSE 加速及其单账号、批量配置入口。普通 OpenAI 请求默认遵循 HTTP→HTTP、WS→WS；BPS 保留 WS→HTTP/SSE 适配，管理员显式选择的手动 `http_bridge` 模式也保留。
+自 2026-10-04 起，本项目移除普通 OAuth 账号的 HTTP→上游 WS→SSE 加速及其单账号、批量配置入口。普通 OpenAI 请求默认遵循 HTTP→HTTP、WS→WS；管理员显式选择的手动 `http_bridge` 模式也保留。
 
 历史 `openai_oauth_ws_sse_acceleration=true` 不再生效，无需数据库迁移。按请求大小自动转 HTTP 已移除；手动 `http_bridge` 及历史配置保持有效，与源实现一致。
 
-当前行为、旧配置处理和 BPS 模型切换规则见 [OpenAI 客户端与上游协议](openai-transports.md)。
+当前行为、旧配置处理见 [OpenAI 客户端与上游协议](openai-transports.md)。
 
 ## 历史来源
 

@@ -21,7 +21,7 @@ func NewScheduledTestPlanRepository(db *sql.DB) service.ScheduledTestPlanReposit
 
 func (r *scheduledTestPlanRepository) Create(ctx context.Context, plan *service.ScheduledTestPlan) (*service.ScheduledTestPlan, error) {
 	if plan.PelicanConfig != nil {
-		return nil, fmt.Errorf("automatic BPS and quality test plans have been retired")
+		return nil, fmt.Errorf("legacy quality test plans have been retired")
 	}
 	row := r.db.QueryRowContext(ctx, `
 		INSERT INTO scheduled_test_plans (account_id, model_id, cron_expression, enabled, max_results, auto_recover, next_run_at, created_at, updated_at)
@@ -68,7 +68,7 @@ func (r *scheduledTestPlanRepository) ListDue(ctx context.Context, now time.Time
 
 func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.ScheduledTestPlan) (*service.ScheduledTestPlan, error) {
 	if plan.PelicanConfig != nil {
-		return nil, fmt.Errorf("automatic BPS and quality test plans have been retired")
+		return nil, fmt.Errorf("legacy quality test plans have been retired")
 	}
 	row := r.db.QueryRowContext(ctx, `
 		UPDATE scheduled_test_plans

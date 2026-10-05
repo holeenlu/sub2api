@@ -79,7 +79,6 @@ func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
 	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
-		!errors.Is(err, service.ErrOpenAIWSModelSwitchRequiresReconnect) &&
 		!errors.Is(err, service.ErrOpenAIWSCodexClientRestricted) && !service.IsOpenAIWSSessionPreemptedError(err)
 }
 
@@ -4131,13 +4130,8 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleStreamingAwareError(c, status, "server_error", failoverErr.ClientMessage, streamStarted)
 		return
 	}
-	// BPS rejections may echo request data: keep the fixed code and message
-	// instead of passthrough rules or the upstream body.
-	if failoverErr.Reason == service.ExcelBPSRateLimitedReason {
-		service.SetOpsUpstreamError(c, failoverErr.StatusCode, failoverErr.ClientMessage, "")
-		h.handleStreamingAwareErrorWithCode(c, failoverErr.ClientStatusCode, "rate_limit_error", string(failoverErr.Reason), failoverErr.ClientMessage, streamStarted, false)
-		return
-	}
+
+
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
 	if statusCode == http.StatusBadRequest && service.IsOpenAICompatibleModelNotFound400(responseBody) && !streamStarted {

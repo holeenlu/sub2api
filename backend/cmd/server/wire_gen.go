@@ -8,6 +8,11 @@ package main
 
 import (
 	"context"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
 	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
@@ -19,14 +24,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
-	"log"
-	"net/http"
-	"sync"
-	"time"
-)
 
-import (
 	_ "embed"
+
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
 )
 
@@ -665,9 +665,6 @@ func provideCleanup(
 				}
 				return nil
 			}},
-			{"ExcelBPSImages", func() error {
-				return openAIGateway.CloseExcelBPSImages()
-			}},
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()
@@ -683,12 +680,6 @@ func provideCleanup(
 			{"OpenAICodexTicketHarvester", func() error {
 				if openAIGateway != nil {
 					openAIGateway.StopOpenAICodexTicketHarvester()
-				}
-				return nil
-			}},
-			{"ExcelBPS403Recovery", func() error {
-				if openAIGateway != nil {
-					openAIGateway.StopBPS403Recovery()
 				}
 				return nil
 			}},

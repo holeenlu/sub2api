@@ -515,7 +515,7 @@ const checkModeOptions = computed<CheckModeOption[]>(() => [
     value: CHECK_MODE_QUOTA_PROBE,
     label: t('admin.channelMonitor.form.checkModeQuotaProbe'),
     hint: t('admin.channelMonitor.form.checkModeQuotaProbeHint'),
-    // BPS exposes HTTP Responses probes without an upstream quota API.
+
     disabled: form.provider === PROVIDER_ANTIGRAVITY,
   },
 ])

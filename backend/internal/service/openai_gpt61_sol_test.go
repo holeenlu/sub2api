@@ -38,20 +38,6 @@ func TestGPT61SolConfiguredCatalogCapabilities(t *testing.T) {
 	}
 }
 
-func TestGPT61SolBPSKeepsProtocolRestrictions(t *testing.T) {
-	account := Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth,
-		Extra:       map[string]any{"openai_excel_bps": true},
-		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-6.1-sol": "gpt-6.1-sol"}},
-	}
-	body, err := buildCodexModelsManifestForAccounts(PlatformOpenAI, []string{"gpt-6.1-sol"}, []Account{account}, nil, nil, true)
-	require.NoError(t, err)
-	model := decodeCodexManifestModels(t, body)[0]
-	require.Nil(t, model["multi_agent_version"])
-	require.Nil(t, model["multi_agent_reasoning_effort"])
-	require.Equal(t, false, model["use_responses_lite"])
-	require.Equal(t, true, model["supports_search_tool"])
-}
-
 func TestGPT61SolManifestKeepsProviderMetadata(t *testing.T) {
 	account := newCodexModelsAPIKeyTestAccount("https://relay.example/v1")
 	body := []byte(`{"models":[{"slug":"gpt-6.1-sol","description":"Provider-specific Sol","input_modalities":["text"],"supported_reasoning_levels":[{"effort":"high"}],"default_reasoning_level":"high","context_window":64000,"max_context_window":128000,"model_messages":{"instructions_template":"Provider instructions"}}]}`)

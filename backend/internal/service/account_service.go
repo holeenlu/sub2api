@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	ErrAccountNotFound      = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
-	ErrAccountNilInput      = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
-	ErrAccountNotInFallback = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
+	ErrAccountNotFound         = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
+	ErrAccountNilInput         = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
+	ErrAccountNotInFallback    = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
+	ErrUnsupportedAccountField = infraerrors.BadRequest("UNSUPPORTED_ACCOUNT_FIELD", "Account contains removed settings; refresh the editor or remove obsolete fields from the import")
 )
 
 const AccountListGroupUngrouped int64 = -1
@@ -135,18 +136,6 @@ type AccountRepository interface {
 	ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error)
 }
 
-// AccountExcelBPSRepository disables only BPS, provided the account credentials
-// and both opt-in switches still match at the time of the write.
-type AccountExcelBPSRepository interface {
-	DisableExcelBPSOn403(ctx context.Context, account *Account) (bool, error)
-}
-
-// AccountExcelBPSGroupRepository applies an opted-in group action atomically
-// after rechecking the account identity, policy and current memberships.
-type AccountExcelBPSGroupRepository interface {
-	MoveExcelBPSOn403(ctx context.Context, account *Account) (bool, error)
-}
-
 type AccountDuplicateRepository interface {
 	// CreateWithAccountGroups atomically persists an account, its exact group priorities,
 	// and the scheduler outbox event for the new routing snapshot.
@@ -244,12 +233,10 @@ func NewAccountService(accountRepo AccountRepository, groupRepo GroupRepository)
 
 // Create 创建账号
 func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (*Account, error) {
-	if IsRetiredPlatform(req.Platform) {
-		return nil, ErrPlatformRetired
+	if IsUnsupportedPlatform(req.Platform) {
+		return nil, ErrUnsupportedPlatform
 	}
-	if err := ValidateModelMappingMode(req.Credentials); err != nil {
-		return nil, err
-	}
+
 	if req.Platform == PlatformTypeSafe && req.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
@@ -359,9 +346,7 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	if req.Credentials != nil {
-		if err := ValidateModelMappingMode(*req.Credentials); err != nil {
-			return nil, err
-		}
+
 		account.Credentials = SanitizeStoredCredentials(account.Platform, *req.Credentials)
 	}
 

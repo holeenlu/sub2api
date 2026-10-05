@@ -187,13 +187,13 @@ describe('admin AccountsView lite account list', () => {
     vi.restoreAllMocks()
   })
 
-  it('refreshes the saved cost after probing even with unchanged snapshot and default sorting', async () => {
-    const snapshot = { status: 'ok', data: { effective_rate_multiplier: 0.14 } }
-    const row = { ...listRow, type: 'apikey', extra: { cost_multiplier: 0.1, upstream_billing_probe: snapshot } }
+  it('refreshes the original billing snapshot after probing without reloading the list', async () => {
+    const snapshot = { status: 'ok', data: { effective_rate_multiplier: 0.14 }, synced_rate_multiplier: 0.14 }
+    const row = { ...listRow, type: 'apikey', extra: { upstream_billing_probe: null } }
     listAccounts.mockResolvedValue({ items: [row], total: 1, page: 1, page_size: 20, pages: 1 })
     probeUpstreamBilling.mockResolvedValue({ account_id: row.id, snapshot })
     getUpstreamBillingRatesWithEtag.mockResolvedValue({ notModified: false, data: {
-      items: [{ account_id: row.id, snapshot, cost_multiplier: 0.14 }], total: 1, page: 1, page_size: 20
+      items: [{ account_id: row.id, snapshot }], total: 1, page: 1, page_size: 20
     } })
     const wrapper = mountView()
     await flushPromises()
@@ -201,7 +201,7 @@ describe('admin AccountsView lite account list', () => {
     await flushPromises()
     expect(probeUpstreamBilling).toHaveBeenCalledWith(row.id)
     expect(getUpstreamBillingRatesWithEtag).toHaveBeenCalled()
-    expect(wrapper.findComponent(UpstreamBillingRateCell).props('account').extra?.cost_multiplier).toBe(0.14)
+    expect(wrapper.findComponent(UpstreamBillingRateCell).props('account').extra?.upstream_billing_probe).toEqual(snapshot)
     wrapper.unmount()
   })
 

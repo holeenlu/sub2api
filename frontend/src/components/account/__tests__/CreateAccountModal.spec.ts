@@ -202,31 +202,6 @@ async function openCodexImportStep(toggleClicks = 0) {
 }
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
-  it('rejects invalid cost before starting OAuth or creating an account', async () => {
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'OpenAI')
-    await wrapper.get('form#create-account-form input[type="text"]').setValue('Invalid cost')
-    await wrapper.get('[data-testid="account-cost-multiplier"]').setValue(-1)
-    await wrapper.get('form#create-account-form').trigger('submit.prevent')
-    await flushPromises()
-    expect(createAccountMock).not.toHaveBeenCalled()
-    expect(wrapper.find('[data-testid="account-cost-multiplier"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="import-codex-session"]').exists()).toBe(false)
-    expect(showErrorMock).toHaveBeenLastCalledWith('admin.accounts.costMultiplierInvalid')
-    wrapper.unmount()
-  })
-
-  it('creates an account with a separate cost multiplier and the original billing rate', async () => {
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'OpenAI')
-    await selectButtonByText(wrapper, 'API Key')
-    expect(wrapper.get<HTMLInputElement>('[data-testid="account-cost-multiplier"]').element.value).toBe('0.1')
-    await wrapper.get('[data-testid="account-cost-multiplier"]').setValue(0.35)
-    await wrapper.get('form#create-account-form input[type="text"]').setValue('Cost example')
-    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
-    await wrapper.get('form#create-account-form').trigger('submit.prevent'); await flushPromises()
-    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({ rate_multiplier: 1, extra: expect.objectContaining({ cost_multiplier: 0.35 }) }))
-  })
 
   beforeEach(() => {
     authIsSimpleMode.value = true
@@ -899,15 +874,5 @@ describe('CreateAccountModal direct Claude setup-token import', () => {
 
     expect(createAccountMock).not.toHaveBeenCalled()
     expect(batchCreateAccountsMock).not.toHaveBeenCalled()
-  })
-})
-
-describe('standalone BPS retirement', () => {
-  it('offers OpenAI OAuth without the removed independent platform', () => {
-    const wrapper = mountModal()
-    const labels = wrapper.findAll('button').map(button => button.text())
-    expect(labels).toContain('OpenAI')
-    expect(labels).not.toContain('OpenAI BPS')
-    wrapper.unmount()
   })
 })

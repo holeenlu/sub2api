@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -144,6 +145,60 @@ func (s *AccountRepoSuite) SetupTest() {
 
 func TestAccountRepoSuite(t *testing.T) {
 	suite.Run(t, new(AccountRepoSuite))
+}
+
+func (s *AccountRepoSuite) TestRemovedAccountFieldsRejectWritesWithoutPartialChanges() {
+	account := &service.Account{
+		Name: "native-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token", "model_mapping": map[string]any{"client": "native"}},
+		Extra:       map[string]any{"codex_diagnostic_monitor": "preserve", "custom_bps_label": "allowed"},
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, account))
+	before, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	for _, tc := range []struct {
+		field       string
+		credentials bool
+	}{
+		{"model_mapping_mode", true}, {"openai_excel_bps", false},
+		{"openai_excel_bps_auto_recover_on_403", false}, {"openai_bps", false},
+		{"openai_bps_credential_state", false}, {"cost_multiplier", false}, {"cost_multiplier_auto_sync", false},
+	} {
+		s.Run(tc.field, func() {
+			creds, extra := maps.Clone(account.Credentials), maps.Clone(account.Extra)
+			if tc.credentials {
+				creds[tc.field] = "obsolete"
+			} else {
+				extra[tc.field] = "obsolete"
+			}
+			candidate := *account
+			candidate.ID, candidate.Name = 0, "must-not-be-created"
+			candidate.Credentials, candidate.Extra = creds, extra
+			s.Require().ErrorIs(s.repo.Create(s.ctx, &candidate), service.ErrUnsupportedAccountField)
+			s.Require().Zero(candidate.ID)
+			candidate.ID, candidate.Name = account.ID, "must-not-change"
+			s.Require().ErrorIs(s.repo.Update(s.ctx, &candidate), service.ErrUnsupportedAccountField)
+			changed, err := s.repo.BulkUpdate(s.ctx, []int64{account.ID}, service.AccountBulkUpdate{
+				Name: &candidate.Name, Credentials: creds, Extra: extra,
+			})
+			s.Require().ErrorIs(err, service.ErrUnsupportedAccountField)
+			s.Require().Zero(changed)
+			if tc.credentials {
+				s.Require().ErrorIs(s.repo.UpdateCredentials(s.ctx, account.ID, creds), service.ErrUnsupportedAccountField)
+				updated, err := s.repo.UpdateGrokOAuthCredentialsIfUnchanged(s.ctx, account.ID, account.Credentials, nil, creds)
+				s.Require().ErrorIs(err, service.ErrUnsupportedAccountField)
+				s.Require().False(updated)
+				s.Require().Contains(creds, tc.field, "rejected input must not be silently rewritten")
+			} else {
+				s.Require().ErrorIs(s.repo.UpdateExtra(s.ctx, account.ID, extra), service.ErrUnsupportedAccountField)
+				s.Require().Contains(extra, tc.field, "rejected input must not be silently rewritten")
+			}
+			after, err := s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			s.Require().Equal(before, after, "rejected writes must preserve mappings, diagnostics, and the complete account")
+		})
+	}
 }
 
 // --- Create / GetByID / Update / Delete ---
@@ -1849,56 +1904,6 @@ func (s *AccountRepoSuite) TestBulkUpdate_MergeExtra() {
 	got, _ := s.repo.GetByID(s.ctx, a1.ID)
 	s.Require().Equal("val", got.Extra["existing"])
 	s.Require().Equal("new_val", got.Extra["new_key"])
-}
-
-func (s *AccountRepoSuite) TestBulkUpdate_ExcelBPSModelScope() {
-	ids := make([]int64, 0, 2)
-	for _, name := range []string{"bulk-bps-one", "bulk-bps-two"} {
-		account := mustCreateAccount(s.T(), s.client, &service.Account{
-			Name: name, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
-			Credentials: map[string]any{"model_mapping": map[string]any{"alias": "gpt-6-astra"}},
-			Extra: map[string]any{
-				"openai_excel_bps":                          true,
-				"openai_excel_bps_models":                   []string{"gpt-6-astra"},
-				"openai_excel_bps_cache_creation_as_input":  true,
-				"openai_passthrough":                        true,
-				"openai_oauth_responses_websockets_v2_mode": "context_pool",
-			},
-		})
-		ids = append(ids, account.ID)
-	}
-	steps := []struct {
-		extra               map[string]any
-		astra, sol, billing bool
-		scopePresent        bool
-	}{
-		{map[string]any{"openai_excel_bps_models": nil, "openai_excel_bps_cache_creation_as_input": false}, true, true, false, false},
-		{map[string]any{"openai_excel_bps_models": []string{}}, false, false, false, true},
-		{map[string]any{"openai_excel_bps_models": []string{"gpt-6-astra"}, "openai_excel_bps_cache_creation_as_input": true}, true, false, true, true},
-		{map[string]any{"unrelated": "preserved"}, true, false, true, true},
-		{map[string]any{"openai_excel_bps": false}, false, false, false, false},
-	}
-	for _, step := range steps {
-		affected, err := s.repo.BulkUpdate(s.ctx, ids, service.AccountBulkUpdate{Extra: step.extra})
-		s.Require().NoError(err)
-		s.Require().Equal(int64(2), affected)
-		for _, id := range ids {
-			got, err := s.repo.GetByID(s.ctx, id)
-			s.Require().NoError(err)
-			s.Require().Equal(step.astra, got.IsExcelBPSEnabledForModel("alias"))
-			s.Require().Equal(step.sol, got.IsExcelBPSEnabledForModel("gpt-6-sol"))
-			s.Require().Equal(step.billing, got.IsExcelBPSCacheCreationAsInputEnabled())
-			_, scopePresent := got.Extra["openai_excel_bps_models"]
-			s.Require().Equal(step.scopePresent, scopePresent)
-			s.Require().Equal(true, got.Extra["openai_passthrough"])
-			s.Require().Equal("context_pool", got.Extra["openai_oauth_responses_websockets_v2_mode"])
-			s.Require().Equal("gpt-6-astra", got.GetMappedModel("alias"))
-			if !got.IsExcelBPSEnabled() {
-				s.Require().NotContains(got.Extra, "openai_excel_bps")
-				s.Require().NotContains(got.Extra, "openai_excel_bps_cache_creation_as_input")
-			}
-		}
-	}
 }
 
 func (s *AccountRepoSuite) TestBulkUpdate_EmptyIDs() {

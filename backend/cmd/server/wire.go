@@ -349,9 +349,6 @@ func provideCleanup(
 				}
 				return nil
 			}},
-			{"ExcelBPSImages", func() error {
-				return openAIGateway.CloseExcelBPSImages()
-			}},
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()
@@ -367,12 +364,6 @@ func provideCleanup(
 			{"OpenAICodexTicketHarvester", func() error {
 				if openAIGateway != nil {
 					openAIGateway.StopOpenAICodexTicketHarvester()
-				}
-				return nil
-			}},
-			{"ExcelBPS403Recovery", func() error {
-				if openAIGateway != nil {
-					openAIGateway.StopBPS403Recovery()
 				}
 				return nil
 			}},
