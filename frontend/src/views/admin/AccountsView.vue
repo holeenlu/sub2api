@@ -250,6 +250,7 @@
                 {{ accountDisplayEmail(row) }}
               </span>
               <ExcelBPS403Badge :account="row" :groups="accountGroupsForRow(row)" />
+              <CodexDiagnosticBadge :summary="row.codex_diagnostic" @open="openCodexDiagnostic(row)" />
             </div>
           </template>
           <template #cell-notes="{ value }">
@@ -528,6 +529,7 @@ import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActions
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import CodexTicketDashboard from '@/components/admin/account/CodexTicketDashboard.vue'
 import CodexDiagnosticModal from '@/components/admin/account/CodexDiagnosticModal.vue'
+import CodexDiagnosticBadge from '@/components/admin/account/CodexDiagnosticBadge.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'

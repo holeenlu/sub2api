@@ -67,6 +67,7 @@ type AccountHandler struct {
 	grokImportProber        grokImportProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
+	codexDiagnosticMonitor  *service.CodexDiagnosticMonitor
 	codexTicketSettings     *service.SettingService
 	codexTicketGateway      *service.OpenAIGatewayService
 	codexTicketRouter       http.Handler
@@ -215,7 +216,8 @@ type CheckMixedChannelRequest struct {
 
 // AccountWithConcurrency extends Account with real-time concurrency info
 type AccountWithConcurrency struct {
-	EffectiveRPMLimit *int `json:"effective_rpm_limit,omitempty"`
+	CodexDiagnostic   *service.CodexDiagnosticSummary `json:"codex_diagnostic,omitempty"`
+	EffectiveRPMLimit *int                            `json:"effective_rpm_limit,omitempty"`
 	*dto.Account
 	simpleMode         bool                         `json:"-"`
 	CurrentConcurrency int                          `json:"current_concurrency"`
@@ -454,6 +456,13 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 
 	items := []AccountWithConcurrency{item}
 	h.enrichShadowParents(ctx, items)
+	if h.codexDiagnosticMonitor != nil {
+		if summaries, err := h.codexDiagnosticMonitor.Summaries(ctx, []int64{account.ID}); err == nil {
+			if summary, ok := summaries[account.ID]; ok {
+				items[0].CodexDiagnostic = &summary
+			}
+		}
+	}
 	return items[0]
 }
 
@@ -862,6 +871,19 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
+	var diagnostics map[int64]service.CodexDiagnosticSummary
+	if h.codexDiagnosticMonitor != nil {
+		ids := make([]int64, 0, len(accounts))
+		for _, a := range accounts {
+			ids = append(ids, a.ID)
+		}
+		var err error
+		diagnostics, err = h.codexDiagnosticMonitor.Summaries(c.Request.Context(), ids)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
 	// Build response with concurrency info
 	result := make([]AccountWithConcurrency, len(accounts))
 	for i := range accounts {
@@ -884,6 +906,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 			SchedulerScores:    schedulerGroupScores[acc.ID],
 		}
 
+		if summary, ok := diagnostics[acc.ID]; ok {
+			item.CodexDiagnostic = &summary
+		}
 		// 添加窗口费用（仅当启用时）
 		if windowCosts != nil {
 			if cost, ok := windowCosts[acc.ID]; ok {
