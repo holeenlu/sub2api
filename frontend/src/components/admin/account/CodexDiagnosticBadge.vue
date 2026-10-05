@@ -12,7 +12,7 @@ import type { DiagnosticSummary } from '@/api/admin/codexTickets'
 const props = defineProps<{ summary?: DiagnosticSummary | null }>()
 defineEmits<{ open: [] }>()
 const { t } = useI18n()
-const stale = computed(() => !!props.summary?.checked_at && Date.now() - new Date(props.summary.checked_at).getTime() > 2 * (props.summary.interval_minutes || 60) * 60000)
+const stale = computed(() => props.summary?.stale === true)
 const label = computed(() => t('admin.accounts.codexMonitor.status.' + (props.summary?.status || 'unknown')))
 const title = computed(() => t('admin.accounts.codexMonitor.lastCheck') + ': ' + (props.summary?.checked_at ? new Date(props.summary.checked_at).toLocaleString() : '—'))
 const tone = computed(() => {

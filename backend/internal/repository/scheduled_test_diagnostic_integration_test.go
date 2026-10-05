@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 
 func TestCodexDiagnosticPostgresLifecycle(t *testing.T) {
 	ctx := context.Background()
-	r := &codexDiagnosticRepository{db: integrationDB}
+	r := &scheduledTestPlanRepository{db: integrationDB}
 	var owner, key, account int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,role) VALUES($1,'test','admin') RETURNING id`, fmt.Sprintf("diagnostic-%d@example.invalid", time.Now().UnixNano())).Scan(&owner))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'Test billing key') RETURNING id`, owner, fmt.Sprintf("sk-diagnostic-%d", time.Now().UnixNano())).Scan(&key))
@@ -25,7 +26,12 @@ func TestCodexDiagnosticPostgresLifecycle(t *testing.T) {
 		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM api_keys WHERE id=$1", key)
 		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM users WHERE id=$1", owner)
 	})
-	p := &service.CodexDiagnosticPlan{AccountID: account, OwnerID: owner, APIKeyID: key, Models: []string{"gpt-5.4"}, Enabled: true}
+	connectivity, err := r.Create(ctx, &service.ScheduledTestPlan{AccountID: account, ModelID: "connectivity-only", CronExpression: "0 * * * *", MaxResults: 2, Enabled: false})
+	require.NoError(t, err)
+	listed, err := r.ListByAccountID(ctx, account)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	p := &service.CodexDiagnosticPlan{AccountID: account, OwnerID: owner, APIKeyID: key, Models: []string{"gpt-5.4"}, Enabled: true, IntervalMinutes: service.CodexDiagnosticDefaultIntervalMinutes}
 	require.NoError(t, r.SavePlan(ctx, p))
 	require.EqualValues(t, 1, p.Revision)
 	require.NotNil(t, p.NextRunAt)
@@ -39,7 +45,7 @@ func TestCodexDiagnosticPostgresLifecycle(t *testing.T) {
 	require.EqualValues(t, 1, p.Revision)
 	require.WithinDuration(t, time.Now().Add(5*time.Hour), *p.NextRunAt, 5*time.Second)
 	// Multiple instances scanning the same due account may enqueue it once only.
-	_, err := integrationDB.ExecContext(ctx, "UPDATE codex_diagnostic_plans SET next_run_at=NOW()-INTERVAL '1 minute' WHERE account_id=$1", account)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE scheduled_test_plans SET next_run_at=NOW()-INTERVAL '1 minute' WHERE account_id=$1 AND diagnostic_config IS NOT NULL", account)
 	require.NoError(t, err)
 	var wg sync.WaitGroup
 	errs := make(chan error, 8)
@@ -52,10 +58,23 @@ func TestCodexDiagnosticPostgresLifecycle(t *testing.T) {
 	for err := range errs {
 		require.NoError(t, err)
 	}
-	history, err := r.ListRuns(ctx, account, 0, 20)
+	history, err := r.ListRuns(ctx, account)
 	require.NoError(t, err)
 	require.Len(t, history, 1)
 	require.Equal(t, "scheduled", history[0].Source)
+	normalPlans, err := r.ListByAccountID(ctx, account)
+	require.NoError(t, err)
+	require.Len(t, normalPlans, 1)
+	require.Equal(t, connectivity.ID, normalPlans[0].ID)
+	var diagnosticPlanID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM scheduled_test_plans WHERE account_id=$1 AND diagnostic_config IS NOT NULL", account).Scan(&diagnosticPlanID))
+	_, err = r.GetByID(ctx, diagnosticPlanID)
+	require.Error(t, err)
+	require.NoError(t, r.Delete(ctx, diagnosticPlanID))
+	stillThere, err := r.GetPlan(ctx, account)
+	require.NoError(t, err)
+	require.NotNil(t, stillThere)
+
 	scheduledPlan, err := r.GetPlan(ctx, account)
 	require.NoError(t, err)
 	require.Equal(t, 300, scheduledPlan.IntervalMinutes)
@@ -97,7 +116,7 @@ func TestCodexDiagnosticPostgresLifecycle(t *testing.T) {
 	summaries, err = r.Summaries(ctx, []int64{account})
 	require.NoError(t, err)
 	require.Equal(t, "unknown", summaries[account].Status)
-	history, err = r.ListRuns(ctx, account, 0, 20)
+	history, err = r.ListRuns(ctx, account)
 	require.NoError(t, err)
 	require.Len(t, history, 1)
 	// A canceled queued run is never claimed, but remains in history.
@@ -112,7 +131,7 @@ func TestCodexDiagnosticPostgresLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	expired, err := r.Claim(ctx, "worker-expired")
 	require.NoError(t, err)
-	_, err = integrationDB.ExecContext(ctx, "UPDATE codex_diagnostic_runs SET lease_until=NOW()-INTERVAL '1 second' WHERE id=$1", expired.ID)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE scheduled_test_results SET diagnostic_run=diagnostic_run || jsonb_build_object('lease_until',NOW()-INTERVAL '1 second') WHERE id=$1", expired.ID)
 	require.NoError(t, err)
 	require.NoError(t, r.EnqueueDue(ctx))
 	require.ErrorIs(t, r.SaveProgress(ctx, expired), service.ErrDiagnosticNotFound)
@@ -123,33 +142,76 @@ func TestCodexDiagnosticPostgresLifecycle(t *testing.T) {
 	duplicate, err = r.Claim(ctx, "worker-restart")
 	require.NoError(t, err)
 	require.Nil(t, duplicate)
-	// Cursor pagination never repeats results.
-	page, err := r.ListRuns(ctx, account, 0, 2)
-	require.NoError(t, err)
-	require.Len(t, page, 2)
-	older, err := r.ListRuns(ctx, account, page[1].ID, 2)
-	require.NoError(t, err)
-	require.Len(t, older, 1)
 	// Retention includes the newest queued run and removes only older terminal records.
 	for i := 0; i < 12; i++ {
 		queued, err := r.Enqueue(ctx, p, "manual", "Test")
 		require.NoError(t, err)
 		require.NoError(t, r.Cancel(ctx, account, queued.ID))
 	}
-	history, err = r.ListRuns(ctx, account, 0, 50)
+	history, err = r.ListRuns(ctx, account)
 	require.NoError(t, err)
 	require.Len(t, history, 10)
 	var retained int
-	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM codex_diagnostic_runs WHERE account_id=$1", account).Scan(&retained))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id WHERE p.account_id=$1 AND r.diagnostic_run IS NOT NULL", account).Scan(&retained))
 	require.Equal(t, 10, retained)
 	_, err = r.GetRun(ctx, account, running.ID)
 	require.ErrorIs(t, err, service.ErrDiagnosticNotFound)
 	queued, err = r.Enqueue(ctx, p, "manual", "Test")
 	require.NoError(t, err)
-	history, err = r.ListRuns(ctx, account, 0, 50)
+	history, err = r.ListRuns(ctx, account)
 	require.NoError(t, err)
 	require.Len(t, history, 10)
 	require.Equal(t, queued.ID, history[0].ID)
 	require.Equal(t, "queued", history[0].Status)
 
+}
+
+// Migration is one-time data conversion, not an indefinitely supported runtime
+// path. A queued paid run is marked interrupted rather than replayed.
+func TestDiagnosticMigrationPreservesEvidenceAndConnectivity(t *testing.T) {
+	ctx := context.Background()
+	tx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, "CREATE SCHEMA diagnostic_migration_fixture")
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, "SET LOCAL search_path=diagnostic_migration_fixture,public")
+	require.NoError(t, err)
+	// Minimal related rows keep this fixture isolated from other repository tests.
+	_, err = tx.ExecContext(ctx, "CREATE TABLE accounts(id bigint PRIMARY KEY); CREATE TABLE users(id bigint PRIMARY KEY); CREATE TABLE api_keys(id bigint PRIMARY KEY); INSERT INTO accounts VALUES(1); INSERT INTO users VALUES(1); INSERT INTO api_keys VALUES(1)")
+	require.NoError(t, err)
+	for _, name := range []string{"066_add_scheduled_test_tables.sql", "264_codex_diagnostic_monitor.sql"} {
+		raw, err := os.ReadFile("../../migrations/" + name)
+		require.NoError(t, err)
+		_, err = tx.ExecContext(ctx, string(raw))
+		require.NoError(t, err)
+	}
+	_, err = tx.ExecContext(ctx, `
+ INSERT INTO scheduled_test_plans(id,account_id,model_id,enabled) VALUES(1,1,'connectivity-model',true);
+ INSERT INTO scheduled_test_results(plan_id,status,response_text) VALUES(1,'success','keep connectivity result');
+ INSERT INTO codex_diagnostic_plans(account_id,owner_id,api_key_id,models,enabled,interval_minutes)
+ VALUES(1,1,1,'["gpt-5.4"]',true,300);
+ INSERT INTO codex_diagnostic_runs(account_id,owner_id,api_key_id,api_key_name,plan_revision,models,source,status,items)
+ VALUES(1,1,1,'test-key-name',1,'["gpt-5.4"]','manual','normal','[{"model":"gpt-5.4","status":"normal","probability":0.99}]'),
+ (1,1,1,'test-key-name',1,'["gpt-5.4"]','scheduled','running','[]');`)
+	require.NoError(t, err)
+	// Explicit ID above is only for the fixture; advance its sequence.
+	_, err = tx.ExecContext(ctx, "SELECT setval('scheduled_test_plans_id_seq',1)")
+	require.NoError(t, err)
+	raw, err := os.ReadFile("../../migrations/267_unify_diagnostic_scheduled_tests.sql")
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, string(raw))
+	require.NoError(t, err)
+	var normal, interrupted, interval int
+	var legacy, connectivity string
+	require.NoError(t, tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM scheduled_test_results WHERE status='normal' AND diagnostic_run->'items'->0->>'model'='gpt-5.4'").Scan(&normal))
+	require.Equal(t, 1, normal)
+	require.NoError(t, tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM scheduled_test_results WHERE status='failed' AND error_message='worker_interrupted'").Scan(&interrupted))
+	require.Equal(t, 1, interrupted)
+	require.NoError(t, tx.QueryRowContext(ctx, "SELECT (diagnostic_config->>'interval_minutes')::int FROM scheduled_test_plans WHERE diagnostic_config IS NOT NULL").Scan(&interval))
+	require.Equal(t, 300, interval)
+	require.NoError(t, tx.QueryRowContext(ctx, "SELECT COALESCE(to_regclass('diagnostic_migration_fixture.codex_diagnostic_plans')::text,'removed')").Scan(&legacy))
+	require.Equal(t, "removed", legacy)
+	require.NoError(t, tx.QueryRowContext(ctx, "SELECT response_text FROM scheduled_test_results WHERE diagnostic_run IS NULL").Scan(&connectivity))
+	require.Equal(t, "keep connectivity result", connectivity)
 }

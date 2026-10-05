@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -9,80 +11,146 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (h *AccountHandler) SetCodexTicketDiagnosticRouter(router http.Handler, keys *service.APIKeyService) {
-	h.codexTicketRouter = router
-	h.codexTicketAPIKeys = keys
-	if h.codexDiagnosticMonitor != nil {
-		h.codexDiagnosticMonitor.SetRouter(router)
+func (h *AccountHandler) SetScheduledTests(s *service.ScheduledTestService, r *service.ScheduledTestRunnerService) {
+	h.scheduledTests = s
+	h.scheduledRunner = r
+}
+func (h *AccountHandler) SetDiagnosticRouter(router http.Handler) {
+	if h.scheduledTests != nil {
+		h.scheduledTests.SetDiagnosticRouter(router)
+	}
+}
+func (h *AccountHandler) StartScheduledTests() {
+	if h.scheduledRunner != nil {
+		h.scheduledRunner.Start()
 	}
 }
 
-type codexDiagnosticItem = service.CodexDiagnosticItem
-
-func codexDiagnosticGatewayError(raw []byte) string   { return service.CodexDiagnosticGatewayError(raw) }
-func codexDiagnosticOutput(raw []byte) (string, bool) { return service.CodexDiagnosticOutput(raw) }
-
-func (h *AccountHandler) DiagnoseCodexModels(c *gin.Context) {
-	h.diagnoseCodexModels(c, service.NewModelTraceChallenge)
+func (h *AccountHandler) diagnosticReady(c *gin.Context) bool {
+	if h.scheduledTests == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Diagnostic monitor unavailable")
+		return false
+	}
+	return true
 }
-
-func (h *AccountHandler) diagnoseCodexModels(c *gin.Context, generateChallenge func() (service.ModelTraceChallenge, error)) {
-	accountID, ok := codexTicketAccountID(c)
-	if !ok {
+func diagnosticError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrDiagnosticBusy):
+		response.ErrorWithDetails(c, 409, "A diagnostic is already running", "DIAGNOSTIC_BUSY", nil)
+	case errors.Is(err, service.ErrDiagnosticInvalid):
+		response.ErrorWithDetails(c, 400, err.Error(), "DIAGNOSTIC_INVALID", nil)
+	case errors.Is(err, service.ErrDiagnosticNotFound):
+		response.NotFound(c, "Diagnostic not found")
+	default:
+		response.ErrorFrom(c, err)
+	}
+}
+func (h *AccountHandler) GetCodexDiagnosticPlan(c *gin.Context) {
+	id, ok := codexTicketAccountID(c)
+	if !ok || !h.diagnosticReady(c) {
 		return
 	}
-	if h.codexTicketRouter == nil || h.codexTicketAPIKeys == nil || h.codexTicketGateway == nil {
-		codexTicketError(c, service.ErrCodexTicketUnavailable)
+	plan, err := h.scheduledTests.GetDiagnosticPlan(c.Request.Context(), id)
+	if err != nil {
+		diagnosticError(c, err)
+		return
+	}
+	summary, err := h.scheduledTests.DiagnosticSummaries(c.Request.Context(), []int64{id})
+	if err != nil {
+		diagnosticError(c, err)
+		return
+	}
+	state := gin.H{"plan": plan, "summary": summary[id], "rules": service.DiagnosticRules()}
+	if key := c.Query("api_key_id"); key != "" {
+		subject, ok := middleware.GetAuthSubjectFromContext(c)
+		if !ok {
+			response.Error(c, 403, "Admin user required")
+			return
+		}
+		keyID, parseErr := strconv.ParseInt(key, 10, 64)
+		if parseErr != nil || keyID <= 0 {
+			response.BadRequest(c, "Select a billing key")
+			return
+		}
+		choices, choiceErr := h.scheduledTests.DiagnosticModels(c.Request.Context(), id, subject.UserID, keyID)
+		if choiceErr != nil {
+			diagnosticError(c, choiceErr)
+			return
+		}
+		state["choices"] = choices
+	}
+	response.Success(c, state)
+}
+func (h *AccountHandler) SaveCodexDiagnosticPlan(c *gin.Context) {
+	id, ok := codexTicketAccountID(c)
+	if !ok || !h.diagnosticReady(c) {
+		return
+	}
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Error(c, 403, "Admin user required")
 		return
 	}
 	var input struct {
-		APIKeyID int64    `json:"api_key_id"`
-		Models   []string `json:"models"`
+		IntervalMinutes int      `json:"interval_minutes"`
+		APIKeyID        int64    `json:"api_key_id"`
+		Models          []string `json:"models"`
+		Enabled         bool     `json:"enabled"`
 	}
-	if err := c.ShouldBindJSON(&input); err != nil || input.APIKeyID <= 0 || len(input.Models) == 0 || len(input.Models) > 32 {
-		response.BadRequest(c, "Select an API key and up to 32 models")
+	if c.ShouldBindJSON(&input) != nil {
+		response.BadRequest(c, "Invalid diagnostic configuration")
 		return
 	}
-	subject, authorized := middleware.GetAuthSubjectFromContext(c)
-	if !authorized || subject.UserID <= 0 {
-		response.ErrorWithDetails(c, http.StatusForbidden, "Admin user required", "FORBIDDEN", nil)
+	plan := &service.CodexDiagnosticPlan{AccountID: id, OwnerID: subject.UserID, APIKeyID: input.APIKeyID, Models: input.Models, Enabled: input.Enabled, IntervalMinutes: input.IntervalMinutes}
+	if err := h.scheduledTests.SaveDiagnosticPlan(c.Request.Context(), plan); err != nil {
+		diagnosticError(c, err)
 		return
 	}
-	key, err := h.codexTicketAPIKeys.GetByID(c.Request.Context(), input.APIKeyID)
-	if err != nil || key == nil || key.UserID != subject.UserID || !key.IsActive() || key.IsExpired() || key.IsQuotaExhausted() || key.Key == "" {
-		response.ErrorWithDetails(c, http.StatusForbidden, "API key unavailable or not owned by this admin", "API_KEY_UNAVAILABLE", nil)
+	response.Success(c, plan)
+}
+func (h *AccountHandler) StartCodexDiagnosticRun(c *gin.Context) {
+	id, ok := codexTicketAccountID(c)
+	if !ok || !h.diagnosticReady(c) {
 		return
 	}
-	allowed, err := service.ModelTraceGPTModels()
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Error(c, 403, "Admin user required")
+		return
+	}
+	run, err := h.scheduledTests.RunDiagnosticNow(c.Request.Context(), id, subject.UserID)
 	if err != nil {
-		response.ErrorFrom(c, err)
+		diagnosticError(c, err)
 		return
 	}
-	modelSet := make(map[string]bool, len(allowed))
-	for _, model := range allowed {
-		modelSet[model] = true
+	response.Success(c, run)
+}
+func (h *AccountHandler) ListCodexDiagnosticRuns(c *gin.Context) {
+	id, ok := codexTicketAccountID(c)
+	if !ok || !h.diagnosticReady(c) {
+		return
 	}
-	seen := make(map[string]bool, len(input.Models))
-	for _, model := range input.Models {
-		if !modelSet[model] || seen[model] {
-			response.BadRequest(c, "Invalid or duplicate GPT model")
-			return
-		}
-		seen[model] = true
+	runs, err := h.scheduledTests.ListDiagnosticRuns(c.Request.Context(), id)
+	if err != nil {
+		diagnosticError(c, err)
+		return
 	}
-	results := make([]codexDiagnosticItem, 0, len(input.Models))
-	for _, model := range input.Models {
-		if c.Request.Context().Err() != nil {
-			break
-		}
-		item := service.RunCodexDiagnosticProbe(c.Request.Context(), h.codexTicketGateway, h.codexTicketRouter, key, accountID, model, c.Request.RemoteAddr, c.Request.Host, generateChallenge)
-		results = append(results, item)
-	}
-	response.Success(c, gin.H{"items": results, "canceled": c.Request.Context().Err() != nil})
+	response.Success(c, gin.H{"items": runs})
 }
 
-func (h *AccountHandler) StartCodexDiagnosticMonitor() {
-	if h.codexDiagnosticMonitor != nil {
-		h.codexDiagnosticMonitor.Start()
+func (h *AccountHandler) CancelCodexDiagnosticRun(c *gin.Context) {
+	id, ok := codexTicketAccountID(c)
+	if !ok || !h.diagnosticReady(c) {
+		return
 	}
+	runID, err := strconv.ParseInt(c.Param("run_id"), 10, 64)
+	if err != nil || runID <= 0 {
+		response.BadRequest(c, "Invalid run")
+		return
+	}
+	if err := h.scheduledTests.CancelDiagnostic(c.Request.Context(), id, runID); err != nil {
+		diagnosticError(c, err)
+		return
+	}
+	response.Success(c, gin.H{"cancel_requested": true})
 }

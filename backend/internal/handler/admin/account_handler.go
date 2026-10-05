@@ -67,11 +67,10 @@ type AccountHandler struct {
 	grokImportProber        grokImportProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
-	codexDiagnosticMonitor  *service.CodexDiagnosticMonitor
+	scheduledTests          *service.ScheduledTestService
+	scheduledRunner         *service.ScheduledTestRunnerService
 	codexTicketSettings     *service.SettingService
 	codexTicketGateway      *service.OpenAIGatewayService
-	codexTicketRouter       http.Handler
-	codexTicketAPIKeys      *service.APIKeyService
 	cfg                     *config.Config
 	opencodeGoUsage         *service.OpenCodeGoUsageService
 }
@@ -456,8 +455,8 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 
 	items := []AccountWithConcurrency{item}
 	h.enrichShadowParents(ctx, items)
-	if h.codexDiagnosticMonitor != nil {
-		if summaries, err := h.codexDiagnosticMonitor.Summaries(ctx, []int64{account.ID}); err == nil {
+	if h.scheduledTests != nil {
+		if summaries, err := h.scheduledTests.DiagnosticSummaries(ctx, []int64{account.ID}); err == nil {
 			if summary, ok := summaries[account.ID]; ok {
 				items[0].CodexDiagnostic = &summary
 			}
@@ -872,13 +871,13 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 
 	var diagnostics map[int64]service.CodexDiagnosticSummary
-	if h.codexDiagnosticMonitor != nil {
+	if h.scheduledTests != nil {
 		ids := make([]int64, 0, len(accounts))
 		for _, a := range accounts {
 			ids = append(ids, a.ID)
 		}
 		var err error
-		diagnostics, err = h.codexDiagnosticMonitor.Summaries(c.Request.Context(), ids)
+		diagnostics, err = h.scheduledTests.DiagnosticSummaries(c.Request.Context(), ids)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return

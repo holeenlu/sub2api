@@ -16,18 +16,17 @@ import (
 )
 
 type CodexDiagnosticItem struct {
-	FingerprintCommit string              `json:"fingerprint_commit,omitempty"`
-	ExpectedCount     int                 `json:"expected_count,omitempty"`
-	DurationMS        int64               `json:"duration_ms"`
-	Model             string              `json:"model"`
-	Status            string              `json:"status"`
-	Reason            string              `json:"reason,omitempty"`
-	PredictedModel    string              `json:"predicted_model,omitempty"`
-	Probability       float64             `json:"probability,omitempty"`
-	ParsedCount       int                 `json:"parsed_number_count,omitempty"`
-	HTTPStatus        int                 `json:"http_status,omitempty"`
-	GatewayErrorCode  string              `json:"gateway_error_code,omitempty"`
-	Harvest           *CodexTicketAttempt `json:"harvest,omitempty"`
+	FingerprintCommit string  `json:"fingerprint_commit,omitempty"`
+	ExpectedCount     int     `json:"expected_count,omitempty"`
+	DurationMS        int64   `json:"duration_ms"`
+	Model             string  `json:"model"`
+	Status            string  `json:"status"`
+	Reason            string  `json:"reason,omitempty"`
+	PredictedModel    string  `json:"predicted_model,omitempty"`
+	Probability       float64 `json:"probability,omitempty"`
+	ParsedCount       int     `json:"parsed_number_count,omitempty"`
+	HTTPStatus        int     `json:"http_status,omitempty"`
+	GatewayErrorCode  string  `json:"gateway_error_code,omitempty"`
 }
 
 func CodexDiagnosticGatewayError(raw []byte) string {
@@ -182,12 +181,7 @@ func RunCodexDiagnosticProbe(ctx context.Context, gateway *OpenAIGatewayService,
 		return item
 	}
 	item.PredictedModel, item.Probability = prediction.Model, prediction.Probability
-	if prediction.Model == model {
-		item.Status = "normal"
-	} else {
-		item.Status = "degraded"
-		item.Reason = "fingerprint_mismatch"
-	}
+	item.Status, item.Reason = diagnosticConclusion(model, prediction.Model, prediction.Probability)
 	return item
 }
 

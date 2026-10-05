@@ -84,7 +84,6 @@ func providePluginHostInfo(buildInfo handler.BuildInfo) service.PluginHostInfo {
 }
 
 func provideCleanup(
-	diagnosticMonitor *service.CodexDiagnosticMonitor,
 	entClient *ent.Client,
 	rdb *redis.Client,
 	opsMetricsCollector *service.OpsMetricsCollector,
@@ -367,7 +366,6 @@ func provideCleanup(
 				}
 				return nil
 			}},
-			{"CodexDiagnosticMonitor", func() error { diagnosticMonitor.Stop(); return nil }},
 			{"ScheduledTestRunnerService", func() error {
 				if scheduledTestRunner != nil {
 					scheduledTestRunner.Stop()

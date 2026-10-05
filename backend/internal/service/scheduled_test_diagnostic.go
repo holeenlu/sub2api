@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -17,6 +16,22 @@ import (
 const CodexDiagnosticDefaultIntervalMinutes = 60
 const CodexDiagnosticConfidence = 0.8
 const CodexDiagnosticMaxModels = 16
+const CodexDiagnosticHistoryLimit = 10
+const CodexDiagnosticMinIntervalMinutes = 60
+const CodexDiagnosticMaxIntervalMinutes = 10080
+const CodexDiagnosticParallelRuns = 2
+const CodexDiagnosticLeaseMinutes = 40
+
+// Rules are the only frontend policy source; SQL consumes these same constants.
+func DiagnosticRules() map[string]any {
+	return map[string]any{
+		"default_interval_minutes": CodexDiagnosticDefaultIntervalMinutes,
+		"min_interval_minutes":     CodexDiagnosticMinIntervalMinutes,
+		"max_interval_minutes":     CodexDiagnosticMaxIntervalMinutes,
+		"max_models":               CodexDiagnosticMaxModels, "history_limit": CodexDiagnosticHistoryLimit,
+		"confidence_threshold": CodexDiagnosticConfidence,
+	}
+}
 
 var ErrDiagnosticBusy = errors.New("diagnostic_already_running")
 var ErrDiagnosticInvalid = errors.New("diagnostic_invalid_configuration")
@@ -52,6 +67,7 @@ type CodexDiagnosticRun struct {
 	CancelRequested bool                  `json:"cancel_requested"`
 }
 type CodexDiagnosticSummary struct {
+	Stale           bool       `json:"stale"`
 	IntervalMinutes int        `json:"interval_minutes"`
 	RunID           int64      `json:"run_id"`
 	Status          string     `json:"status"`
@@ -67,130 +83,91 @@ type CodexDiagnosticRepository interface {
 	Claim(context.Context, string) (*CodexDiagnosticRun, error)
 	SaveProgress(context.Context, *CodexDiagnosticRun) error
 	GetRun(context.Context, int64, int64) (*CodexDiagnosticRun, error)
-	ListRuns(context.Context, int64, int64, int) ([]CodexDiagnosticRun, error)
+	ListRuns(context.Context, int64) ([]CodexDiagnosticRun, error)
 	Cancel(context.Context, int64, int64) error
 	Summaries(context.Context, []int64) (map[int64]CodexDiagnosticSummary, error)
 }
-type CodexDiagnosticMonitor struct {
-	probe     func(context.Context, *APIKey, int64, string) CodexDiagnosticItem
-	repo      CodexDiagnosticRepository
-	accounts  AccountRepository
-	keys      *APIKeyService
-	users     UserRepository
-	gateway   *OpenAIGatewayService
-	router    http.Handler
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	startOnce sync.Once
-	stopOnce  sync.Once
-}
 
-func NewCodexDiagnosticMonitor(repo CodexDiagnosticRepository, accounts AccountRepository, keys *APIKeyService, users UserRepository, gateway *OpenAIGatewayService) *CodexDiagnosticMonitor {
-	return &CodexDiagnosticMonitor{repo: repo, accounts: accounts, keys: keys, users: users, gateway: gateway}
-}
-func (s *CodexDiagnosticMonitor) SetRouter(router http.Handler) { s.router = router }
-func (s *CodexDiagnosticMonitor) Start() {
-	s.startOnce.Do(func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		s.cancel = cancel
-		// Two bounded workers. The database arbitrates ownership across replicas.
-		for i := 0; i < 2; i++ {
-			s.wg.Add(1)
-			go func() { defer s.wg.Done(); s.worker(ctx) }()
-		}
-	})
-}
-func (s *CodexDiagnosticMonitor) Stop() {
-	if s == nil {
+// SetDiagnosticRouter is called after gateway routes are registered.
+func (s *ScheduledTestService) SetDiagnosticRouter(router http.Handler) { s.diagnosticRouter = router }
+
+// RunPendingDiagnostics is owned by the existing ScheduledTestRunnerService.
+// Every replica shares database ownership and the bounded diagnostic budget.
+func (s *ScheduledTestService) RunPendingDiagnostics(ctx context.Context) {
+	if s.diagnosticRouter == nil || s.gateway == nil {
 		return
 	}
-	s.stopOnce.Do(func() {
-		if s.cancel != nil {
-			s.cancel()
-		}
-		s.wg.Wait()
-	})
-}
-func (s *CodexDiagnosticMonitor) worker(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		scan, cancel := context.WithTimeout(ctx, 10*time.Second)
-		err := s.repo.EnqueueDue(scan)
-		var run *CodexDiagnosticRun
-		if err == nil {
-			run, err = s.repo.Claim(scan, uuid.NewString())
-		}
-		cancel()
-		if err != nil {
-			logger.LegacyPrintf("service.codex_diagnostic", "diagnostic queue unavailable: %v", err)
-			continue
-		}
-		if run != nil {
-			s.execute(ctx, run)
-		}
+	scan, cancel := context.WithTimeout(ctx, 10*time.Second)
+	err := s.planRepo.EnqueueDue(scan)
+	var run *CodexDiagnosticRun
+	if err == nil {
+		run, err = s.planRepo.Claim(scan, uuid.NewString())
+	}
+	cancel()
+	if err != nil {
+		logger.LegacyPrintf("service.scheduled_test", "diagnostic queue unavailable: %v", err)
+		return
+	}
+	if run != nil {
+		s.executeDiagnostic(ctx, run)
 	}
 }
-func (s *CodexDiagnosticMonitor) validate(ctx context.Context, p *CodexDiagnosticPlan) (*APIKey, error) {
+
+func (s *ScheduledTestService) validateDiagnostic(ctx context.Context, p *CodexDiagnosticPlan) (*APIKey, error) {
 	if p.APIKeyID <= 0 || p.OwnerID <= 0 || len(p.Models) == 0 || len(p.Models) > CodexDiagnosticMaxModels {
 		return nil, ErrDiagnosticInvalid
 	}
-	key, account, err := s.authorize(ctx, p)
+	key, account, err := s.authorizeDiagnostic(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	if key.Group == nil || !key.Group.ModelAllowlist.Enabled {
+	choices, err := buildDiagnosticChoices(key, account)
+	if err != nil {
+		return nil, err
+	}
+	if !choices.WhitelistEnabled {
 		return nil, fmt.Errorf("%w: group_whitelist_required", ErrDiagnosticInvalid)
 	}
-	models, err := ModelTraceGPTModels()
-	if err != nil {
-		return nil, err
-	}
-	known := map[string]bool{}
-	for _, m := range models {
-		known[m] = true
+	allowed := map[string]bool{}
+	for _, model := range choices.Models {
+		allowed[model] = true
 	}
 	seen := map[string]bool{}
 	for _, m := range p.Models {
-		if !known[m] || seen[m] || !account.IsModelSupported(m) || (key.Group != nil && !key.Group.ModelAllowlist.Allows(m)) {
+		if !allowed[m] || seen[m] {
 			return nil, fmt.Errorf("%w: model_unavailable", ErrDiagnosticInvalid)
 		}
 		seen[m] = true
 	}
 	return key, nil
 }
-func (s *CodexDiagnosticMonitor) GetPlan(ctx context.Context, id int64) (*CodexDiagnosticPlan, error) {
-	return s.repo.GetPlan(ctx, id)
+func (s *ScheduledTestService) GetDiagnosticPlan(ctx context.Context, id int64) (*CodexDiagnosticPlan, error) {
+	return s.planRepo.GetPlan(ctx, id)
 }
-func (s *CodexDiagnosticMonitor) SavePlan(ctx context.Context, p *CodexDiagnosticPlan) error {
+func (s *ScheduledTestService) SaveDiagnosticPlan(ctx context.Context, p *CodexDiagnosticPlan) error {
 	if p.IntervalMinutes == 0 {
 		p.IntervalMinutes = CodexDiagnosticDefaultIntervalMinutes
 	}
-	if p.IntervalMinutes < 60 || p.IntervalMinutes > 10080 || p.IntervalMinutes%60 != 0 {
+	if p.IntervalMinutes < CodexDiagnosticMinIntervalMinutes || p.IntervalMinutes > CodexDiagnosticMaxIntervalMinutes || p.IntervalMinutes%60 != 0 {
 		return fmt.Errorf("%w: interval_must_be_1_to_168_hours", ErrDiagnosticInvalid)
 	}
 
-	old, err := s.repo.GetPlan(ctx, p.AccountID)
+	old, err := s.planRepo.GetPlan(ctx, p.AccountID)
 	if err != nil {
 		return err
 	}
 	if !p.Enabled && old != nil && p.APIKeyID == old.APIKeyID && reflect.DeepEqual(p.Models, old.Models) {
 		p.OwnerID = old.OwnerID
-		return s.repo.SavePlan(ctx, p)
+		return s.planRepo.SavePlan(ctx, p)
 	}
-	if _, err := s.validate(ctx, p); err != nil {
+	if _, err := s.validateDiagnostic(ctx, p); err != nil {
 		return err
 	}
-	return s.repo.SavePlan(ctx, p)
+	return s.planRepo.SavePlan(ctx, p)
 }
 
-func (s *CodexDiagnosticMonitor) RunNow(ctx context.Context, accountID, ownerID int64) (*CodexDiagnosticRun, error) {
-	p, err := s.repo.GetPlan(ctx, accountID)
+func (s *ScheduledTestService) RunDiagnosticNow(ctx context.Context, accountID, ownerID int64) (*CodexDiagnosticRun, error) {
+	p, err := s.planRepo.GetPlan(ctx, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -201,23 +178,21 @@ func (s *CodexDiagnosticMonitor) RunNow(ctx context.Context, accountID, ownerID 
 	if p.OwnerID != ownerID {
 		return nil, fmt.Errorf("%w: save_own_key_first", ErrDiagnosticInvalid)
 	}
-	key, err := s.validate(ctx, p)
+	key, err := s.validateDiagnostic(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.Enqueue(ctx, p, "manual", key.Name)
+	return s.planRepo.Enqueue(ctx, p, "manual", key.Name)
 }
-func (s *CodexDiagnosticMonitor) ListRuns(ctx context.Context, id, before int64, limit int) ([]CodexDiagnosticRun, error) {
-	return s.repo.ListRuns(ctx, id, before, limit)
+func (s *ScheduledTestService) ListDiagnosticRuns(ctx context.Context, id int64) ([]CodexDiagnosticRun, error) {
+	return s.planRepo.ListRuns(ctx, id)
 }
-func (s *CodexDiagnosticMonitor) GetRun(ctx context.Context, account, id int64) (*CodexDiagnosticRun, error) {
-	return s.repo.GetRun(ctx, account, id)
+
+func (s *ScheduledTestService) CancelDiagnostic(ctx context.Context, account, id int64) error {
+	return s.planRepo.Cancel(ctx, account, id)
 }
-func (s *CodexDiagnosticMonitor) Cancel(ctx context.Context, account, id int64) error {
-	return s.repo.Cancel(ctx, account, id)
-}
-func (s *CodexDiagnosticMonitor) Summaries(ctx context.Context, ids []int64) (map[int64]CodexDiagnosticSummary, error) {
-	return s.repo.Summaries(ctx, ids)
+func (s *ScheduledTestService) DiagnosticSummaries(ctx context.Context, ids []int64) (map[int64]CodexDiagnosticSummary, error) {
+	return s.planRepo.Summaries(ctx, ids)
 }
 func DiagnosticRunStatus(items []CodexDiagnosticItem, expected int) string {
 	if len(items) == 0 {
@@ -243,7 +218,7 @@ func DiagnosticRunStatus(items []CodexDiagnosticItem, expected int) string {
 	}
 	return "uncertain"
 }
-func (s *CodexDiagnosticMonitor) execute(parent context.Context, run *CodexDiagnosticRun) {
+func (s *ScheduledTestService) executeDiagnostic(parent context.Context, run *CodexDiagnosticRun) {
 	ctx, cancel := context.WithTimeout(parent, 35*time.Minute)
 	defer cancel()
 	defer func() {
@@ -253,7 +228,7 @@ func (s *CodexDiagnosticMonitor) execute(parent context.Context, run *CodexDiagn
 		}
 		if run.Status == "running" {
 			check, stopCheck := context.WithTimeout(context.Background(), 3*time.Second)
-			current, err := s.repo.GetRun(check, run.AccountID, run.ID)
+			current, err := s.planRepo.GetRun(check, run.AccountID, run.ID)
 			stopCheck()
 			if err == nil && current.CancelRequested {
 				run.Status = "canceled"
@@ -267,7 +242,7 @@ func (s *CodexDiagnosticMonitor) execute(parent context.Context, run *CodexDiagn
 		run.FinishedAt = &finished
 		save, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stop()
-		if err := s.repo.SaveProgress(save, run); err != nil {
+		if err := s.planRepo.SaveProgress(save, run); err != nil {
 			logger.LegacyPrintf("service.codex_diagnostic", "persist run %d failed: %v", run.ID, err)
 		}
 	}()
@@ -277,13 +252,13 @@ func (s *CodexDiagnosticMonitor) execute(parent context.Context, run *CodexDiagn
 			run.Reason = "interrupted"
 			return
 		}
-		current, err := s.repo.GetRun(ctx, run.AccountID, run.ID)
+		current, err := s.planRepo.GetRun(ctx, run.AccountID, run.ID)
 		if err != nil {
 			run.Status = "failed"
 			run.Reason = "storage_unavailable"
 			return
 		}
-		p, err := s.repo.GetPlan(ctx, run.AccountID)
+		p, err := s.planRepo.GetPlan(ctx, run.AccountID)
 		if err != nil {
 			run.Status = "failed"
 			run.Reason = "storage_unavailable"
@@ -299,27 +274,20 @@ func (s *CodexDiagnosticMonitor) execute(parent context.Context, run *CodexDiagn
 			run.Reason = "canceled_or_settings_changed"
 			return
 		}
-		key, err := s.validate(ctx, &CodexDiagnosticPlan{AccountID: run.AccountID, OwnerID: run.OwnerID, APIKeyID: run.APIKeyID, Models: []string{model}})
+		key, err := s.validateDiagnostic(ctx, &CodexDiagnosticPlan{AccountID: run.AccountID, OwnerID: run.OwnerID, APIKeyID: run.APIKeyID, Models: []string{model}})
 		if err != nil {
 			run.Items = append(run.Items, CodexDiagnosticItem{Model: model, Status: "failed", Reason: "configuration_unavailable"})
 			continue
 		}
 		run.APIKeyName = key.Name
 		var item CodexDiagnosticItem
-		if s.probe != nil {
-			item = s.probe(ctx, key, run.AccountID, model)
+		if s.diagnosticProbe != nil {
+			item = s.diagnosticProbe(ctx, key, run.AccountID, model)
 		} else {
-			item = RunCodexDiagnosticProbe(ctx, s.gateway, s.router, key, run.AccountID, model, "127.0.0.1:0", "localhost", NewModelTraceChallenge)
-		}
-		// Low-confidence observations never become a definitive account badge.
-		if item.Status == "normal" || item.Status == "degraded" {
-			if item.Probability < CodexDiagnosticConfidence {
-				item.Status = "uncertain"
-				item.Reason = "low_confidence"
-			}
+			item = RunCodexDiagnosticProbe(ctx, s.gateway, s.diagnosticRouter, key, run.AccountID, model, "127.0.0.1:0", "localhost", NewModelTraceChallenge)
 		}
 		run.Items = append(run.Items, item)
-		if err := s.repo.SaveProgress(ctx, run); err != nil {
+		if err := s.planRepo.SaveProgress(ctx, run); err != nil {
 			run.Status = "failed"
 			run.Reason = "storage_unavailable"
 			return
@@ -327,7 +295,7 @@ func (s *CodexDiagnosticMonitor) execute(parent context.Context, run *CodexDiagn
 	}
 }
 
-func (s *CodexDiagnosticMonitor) authorize(ctx context.Context, p *CodexDiagnosticPlan) (*APIKey, *Account, error) {
+func (s *ScheduledTestService) authorizeDiagnostic(ctx context.Context, p *CodexDiagnosticPlan) (*APIKey, *Account, error) {
 	owner, err := s.users.GetByID(ctx, p.OwnerID)
 	if err != nil || owner == nil || !owner.IsAdmin() || !owner.IsActive() || owner.DeletedAt != nil {
 		return nil, nil, fmt.Errorf("%w: owner_unavailable", ErrDiagnosticInvalid)
@@ -369,11 +337,14 @@ type CodexDiagnosticChoices struct {
 	Commit           string                       `json:"commit"`
 }
 
-func (s *CodexDiagnosticMonitor) AvailableModels(ctx context.Context, accountID, ownerID, keyID int64) (*CodexDiagnosticChoices, error) {
-	key, account, err := s.authorize(ctx, &CodexDiagnosticPlan{AccountID: accountID, OwnerID: ownerID, APIKeyID: keyID})
+func (s *ScheduledTestService) DiagnosticModels(ctx context.Context, accountID, ownerID, keyID int64) (*CodexDiagnosticChoices, error) {
+	key, account, err := s.authorizeDiagnostic(ctx, &CodexDiagnosticPlan{AccountID: accountID, OwnerID: ownerID, APIKeyID: keyID})
 	if err != nil {
 		return nil, err
 	}
+	return buildDiagnosticChoices(key, account)
+}
+func buildDiagnosticChoices(key *APIKey, account *Account) (*CodexDiagnosticChoices, error) {
 	known, err := ModelTraceGPTModels()
 	if err != nil {
 		return nil, err
@@ -427,4 +398,19 @@ func (s *CodexDiagnosticMonitor) AvailableModels(ctx context.Context, accountID,
 		}
 	}
 	return choices, nil
+}
+
+func DiagnosticResultStale(checked *time.Time, intervalMinutes int, now time.Time) bool {
+	return checked != nil && now.Sub(*checked) > 2*time.Duration(intervalMinutes)*time.Minute
+}
+
+// Diagnostic classification has one owner; every execution path calls the probe.
+func diagnosticConclusion(model, predicted string, probability float64) (string, string) {
+	if probability < CodexDiagnosticConfidence {
+		return "uncertain", "low_confidence"
+	}
+	if model == predicted {
+		return "normal", ""
+	}
+	return "degraded", "fingerprint_mismatch"
 }
