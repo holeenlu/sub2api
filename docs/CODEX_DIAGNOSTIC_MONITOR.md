@@ -26,7 +26,7 @@ ModelTrace 是统计分类，不是能力测评或官方身份验证。达到 80
 
 ## 接口收敛
 
-沿用 POST /api/v1/admin/accounts/:id/codex-ticket-diagnostic，但其行为统一为按已保存设置提交后台任务，不再支持旧同步 payload/结果格式。
+使用 POST /api/v1/admin/accounts/:id/codex-diagnostic，但其行为统一为按已保存设置提交后台任务，不再支持旧同步 payload/结果格式。
 
 新增四个接口：
 - GET 同路径：读取设置、摘要、规则；带 api_key_id 时同时返回候选清单。
