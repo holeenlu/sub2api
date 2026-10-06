@@ -1,7 +1,11 @@
 // Package usagestats provides types for usage statistics and reporting.
 package usagestats
 
-import "time"
+import (
+	"strconv"
+	"strings"
+	"time"
+)
 
 const (
 	ModelSourceRequested = "requested"
@@ -23,6 +27,19 @@ func NormalizeModelSource(source string) string {
 		return source
 	}
 	return ModelSourceRequested
+}
+
+// NormalizeBreakdownLimit applies the shared limit policy for usage ranking endpoints.
+// Invalid, missing and out-of-range values use the same bounded default.
+func NormalizeBreakdownLimit(raw string) int {
+	limit, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || limit <= 0 {
+		return 50
+	}
+	if limit > 200 {
+		return 200
+	}
+	return limit
 }
 
 // DashboardStats 仪表盘统计
@@ -216,6 +233,7 @@ type UserBreakdownDimension struct {
 	Stream             *bool  // filter by stream flag (non-nil to enable)
 	NativeCompactionV2 *bool  // filter by native compaction v2 flag (non-nil to enable)
 	BillingType        *int8  // filter by billing_type (non-nil to enable)
+	BillingMode        string // filter by billing_mode (non-empty to enable)
 	// SortBy 指定排序列(空 = 默认按 actual_cost)。合法值由 repo 层 allowlist 校验。
 	SortBy string
 }

@@ -134,6 +134,7 @@
             </button>
             <div class="relative" ref="columnDropdownRef">
               <button
+                v-if="activeTab !== 'keyRanking'"
                 type="button"
                 data-testid="usage-column-settings"
                 @click="showColumnDropdown = !showColumnDropdown"
@@ -160,18 +161,21 @@
                 </button>
               </div>
             </div>
-            <button v-if="activeTab !== 'errors'" type="button" @click="exportToCSV" :disabled="exporting" class="btn btn-primary">
+            <button v-if="activeTab === 'usage'" type="button" @click="exportToCSV" :disabled="exporting" class="btn btn-primary">
               {{ exporting ? t('usage.exporting') : t('usage.exportCsv') }}
             </button>
           </div>
         </div>
       </div>
 
-      <div v-if="errorViewEnabled" class="flex gap-2 border-b border-gray-200 dark:border-dark-700">
+      <div class="flex gap-2 border-b border-gray-200 dark:border-dark-700">
         <button class="tab" :class="{ 'tab-active': activeTab === 'usage' }" @click="activeTab = 'usage'">
           {{ t('usage.tabs.usage') }}
         </button>
-        <button class="tab" :class="{ 'tab-active': activeTab === 'errors' }" @click="switchToErrors">
+        <button class="tab" :class="{ 'tab-active': activeTab === 'keyRanking' }" @click="activeTab = 'keyRanking'">
+          {{ t('usage.tabs.keyRanking') }}
+        </button>
+        <button v-if="errorViewEnabled" class="tab" :class="{ 'tab-active': activeTab === 'errors' }" @click="switchToErrors">
           {{ t('usage.tabs.errors') }}
         </button>
       </div>
@@ -199,6 +203,17 @@
           @update:pageSize="handlePageSizeChange"
         />
       </template>
+
+      <APIKeyTokenRanking
+        ref="keyRankingRef"
+        v-else-if="activeTab === 'keyRanking'"
+        :start-date="startDate"
+        :end-date="endDate"
+        :filters="rankingFilters"
+        :fetch="fetchUserAPIKeyBreakdown"
+        :active="activeTab === 'keyRanking'"
+        @select-api-key="handleKeyRankingSelect"
+      />
 
       <UserErrorRequestsTable
         v-else-if="errorViewEnabled"
@@ -236,6 +251,7 @@ import EndpointDistributionChart from '@/components/charts/EndpointDistributionC
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import Icon from '@/components/icons/Icon.vue'
 import UserErrorRequestsTable from '@/components/user/UserErrorRequestsTable.vue'
+import APIKeyTokenRanking from '@/components/admin/usage/APIKeyTokenRanking.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffort } from '@/utils/format'
 import { getBillingModeLabel, getDisplayBillingMode as resolveDisplayBillingMode } from '@/utils/billingMode'
@@ -355,7 +371,7 @@ const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const groupDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionSource = ref<EndpointSource>('inbound')
-const activeTab = ref<'usage' | 'errors'>('usage')
+const activeTab = ref<'usage' | 'keyRanking' | 'errors'>('usage')
 const errorViewEnabled = computed(() => appStore.cachedPublicSettings?.allow_user_view_error_requests ?? false)
 
 const filters = ref<UsageQueryParams>({
@@ -442,6 +458,27 @@ const buildUsageListParams = (page: number, pageSize: number): UsageQueryParams 
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order,
 })
+
+const rankingFilters = computed<Record<string, unknown>>(() => ({
+  api_key_id: normalizedFilters.value.api_key_id,
+  group_id: normalizedFilters.value.group_id,
+  model: normalizedFilters.value.model,
+  request_type: normalizedFilters.value.request_type,
+  stream: normalizedFilters.value.stream,
+  native_compaction_v2: normalizedFilters.value.native_compaction_v2,
+  billing_type: normalizedFilters.value.billing_type,
+  billing_mode: normalizedFilters.value.billing_mode,
+}))
+
+const fetchUserAPIKeyBreakdown = async (params: import('@/api/admin/dashboard').UserBreakdownParams) =>
+  usageAPI.getDashboardAPIKeyBreakdown(params)
+
+const keyRankingRef = ref<{ reload: () => Promise<void> } | null>(null)
+const handleKeyRankingSelect = (apiKeyId: number) => {
+  filters.value.api_key_id = apiKeyId
+  activeTab.value = 'usage'
+  applyFilters()
+}
 
 const loadLogs = async () => {
   abortController?.abort()
@@ -550,6 +587,10 @@ const applyFilters = () => {
 }
 
 const refreshData = () => {
+  if (activeTab.value === 'keyRanking') {
+    void keyRankingRef.value?.reload()
+    return
+  }
   void loadLogs()
   void loadStats()
   void loadModelStats()

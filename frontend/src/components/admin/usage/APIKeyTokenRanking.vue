@@ -39,7 +39,7 @@ import { getAPIKeyBreakdown, type UserBreakdownParams } from '@/api/admin/dashbo
 import type { APIKeyBreakdownItem } from '@/types'
 import BreakdownRanking, { type BreakdownIdentityColumn } from './BreakdownRanking.vue'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   startDate: string
   endDate: string
   filters: Record<string, unknown>
@@ -47,6 +47,7 @@ withDefaults(defineProps<{
   /** 由父级列设置下拉控制；未传时全部显示。key 集合见 UsageView 的 keyRankingAllColumns */
   visibleColumnKeys?: string[]
   active?: boolean
+  fetch?: (params: UserBreakdownParams) => Promise<{ api_keys: APIKeyBreakdownItem[] }>
 }>(), {
   active: true,
 })
@@ -61,7 +62,7 @@ const identityColumns: BreakdownIdentityColumn[] = [
 ]
 
 const fetchKeys = async (params: UserBreakdownParams): Promise<APIKeyBreakdownItem[]> => {
-  const res = await getAPIKeyBreakdown(params)
+  const res = await (props.fetch ? props.fetch(params) : getAPIKeyBreakdown(params))
   return res.api_keys || []
 }
 

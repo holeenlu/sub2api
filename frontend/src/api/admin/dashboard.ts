@@ -184,6 +184,7 @@ export interface UserBreakdownParams {
   stream?: boolean
   native_compaction_v2?: boolean | null
   billing_type?: number | null
+  billing_mode?: string | null
 }
 
 export interface UserBreakdownResponse {

@@ -660,6 +660,7 @@ func appendBreakdownDimensionFilters(query string, args []any, dim usagestats.Us
 		query += fmt.Sprintf(" AND ul.billing_type = $%d", len(args)+1)
 		args = append(args, *dim.BillingType)
 	}
+	query, args = appendUsageLogBillingModeQueryFilter(query, args, dim.BillingMode, "ul")
 	return query, args
 }
 
