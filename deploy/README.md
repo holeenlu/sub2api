@@ -1,8 +1,8 @@
 > Fork releases and Docker Compose online updates: [setup guide](AUTOMATIC_RELEASE.md).
 
-# KDAN Deployment Files
+# TapModels Deployment Files
 
-This directory contains files for deploying KDAN on Linux servers and Apple-silicon Macs.
+This directory contains files for deploying TapModels on Linux servers and Apple-silicon Macs.
 
 ## Deployment Methods
 
@@ -23,10 +23,10 @@ This directory contains files for deploying KDAN on Linux servers and Apple-sili
 | `APPLE_CONTAINER.md` | Apple `container` deployment and operations guide |
 | `.env.example` | Container environment variables template |
 | `DOCKER.md` | Docker Hub documentation |
-| `install.sh` | Legacy binary installer (disabled unless `KDAN_INSTALLER_ENABLED=true`; no KDAN releases published) |
+| `install.sh` | Legacy binary installer (disabled unless `TAPMODELS_INSTALLER_ENABLED=true`; no TapModels releases published) |
 | `install-datamanagementd.sh` | datamanagementd 一键安装脚本 |
-| `kdan.service` | Systemd service unit file |
-| `kdan-datamanagementd.service` | datamanagementd systemd service unit file |
+| `tapmodels.service` | Systemd service unit file |
+| `tapmodels-datamanagementd.service` | datamanagementd systemd service unit file |
 | `DATAMANAGEMENTD_CN.md` | datamanagementd 部署与联动说明（中文） |
 | `config.example.yaml` | Example configuration file |
 | `EDGE_SECURITY.md` | Reverse proxy, CDN/WAF, trusted proxy, and ingress hardening guide |
@@ -35,7 +35,7 @@ This directory contains files for deploying KDAN on Linux servers and Apple-sili
 
 ## Apple container Deployment
 
-Apple-silicon Macs running macOS 26 can run the complete KDAN, PostgreSQL, and Redis stack with Apple `container` 1.1.0 or newer:
+Apple-silicon Macs running macOS 26 can run the complete TapModels, PostgreSQL, and Redis stack with Apple `container` 1.1.0 or newer:
 
 ```bash
 ./apple-container.sh init
@@ -66,7 +66,7 @@ If you prefer manual control:
 
 ```bash
 # Clone repository
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b TapModels https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 
 # Configure environment
@@ -87,7 +87,7 @@ mkdir -p data postgres_data redis_data
 docker compose -f docker-compose.local.yml up -d
 
 # View logs (check for auto-generated admin password)
-docker compose -f docker-compose.local.yml logs -f kdan
+docker compose -f docker-compose.local.yml logs -f tapmodels
 
 # Access Web UI
 # http://localhost:8080
@@ -102,7 +102,7 @@ docker compose -f docker-compose.local.yml logs -f kdan
 
 **Recommendation:** Use `docker-compose.local.yml` (deployed by `docker-deploy.sh`) for easier data management and migration.
 
-Both Compose files take the application image from `KDAN_IMAGE` (default `ghcr.io/holeenlu/kdan:latest`), so you can pin a specific tag or digest in `.env` without editing the Compose file.
+Both Compose files take the application image from `TAPMODELS_IMAGE` (default `ghcr.io/holeenlu/tapmodels:latest`), so you can pin a specific tag or digest in `.env` without editing the Compose file.
 
 ### How Auto-Setup Works
 
@@ -119,12 +119,12 @@ When using Docker Compose with `AUTO_SETUP=true`:
 
 3. If `ADMIN_PASSWORD` is not set, check logs for the generated password:
    ```bash
-   docker compose logs kdan | grep "admin password"
+   docker compose logs tapmodels | grep "admin password"
    ```
 
 ### Startup and Database Recovery
 
-KDAN applies database migrations during application startup. PostgreSQL can
+TapModels applies database migrations during application startup. PostgreSQL can
 remain in its recovery/startup phase briefly after a host or Docker daemon
 restart. The application retries transient PostgreSQL startup and connection
 errors with bounded exponential backoff, then starts automatically when the
@@ -138,9 +138,9 @@ replacement for application-level retries when Docker restores existing
 containers after a host restart.
 
 For systemd deployments, keep `Restart=always` and `RestartSec` configured in
-`kdan.service`; the application retry covers transient database startup,
+`tapmodels.service`; the application retry covers transient database startup,
 while systemd remains the supervisor for permanent process exits. For
-Kubernetes, use a PostgreSQL readiness probe and retain the KDAN startup
+Kubernetes, use a PostgreSQL readiness probe and retain the TapModels startup
 retry behavior; configure the application liveness probe separately so a
 database recovery period is not treated as a permanent process failure.
 
@@ -172,7 +172,7 @@ SELECT
 
 如需启用管理后台“数据管理”功能，请额外部署宿主机 `datamanagementd`：
 
-- 主进程固定探测 `/tmp/kdan-datamanagement.sock`
+- 主进程固定探测 `/tmp/tapmodels-datamanagement.sock`
 - Docker 场景下需把宿主机 Socket 挂载到容器内同路径
 - 详细步骤见：`deploy/DATAMANAGEMENTD_CN.md`
 
@@ -188,10 +188,10 @@ docker compose -f docker-compose.local.yml up -d
 docker compose -f docker-compose.local.yml down
 
 # View logs
-docker compose -f docker-compose.local.yml logs -f kdan
+docker compose -f docker-compose.local.yml logs -f tapmodels
 
-# Restart KDAN only
-docker compose -f docker-compose.local.yml restart kdan
+# Restart TapModels only
+docker compose -f docker-compose.local.yml restart tapmodels
 
 # Update to latest version
 docker compose -f docker-compose.local.yml pull
@@ -212,10 +212,10 @@ docker compose up -d
 docker compose down
 
 # View logs
-docker compose logs -f kdan
+docker compose logs -f tapmodels
 
-# Restart KDAN only
-docker compose restart kdan
+# Restart TapModels only
+docker compose restart tapmodels
 
 # Update to latest version
 docker compose pull
@@ -233,11 +233,11 @@ docker compose down -v
 | `JWT_SECRET` | **Recommended** | *(auto-generated)* | JWT secret (fixed for persistent sessions) |
 | `TOTP_ENCRYPTION_KEY` | **Recommended** | *(auto-generated)* | TOTP encryption key (fixed for persistent 2FA) |
 | `SERVER_PORT` | No | `8080` | Server port |
-| `ADMIN_EMAIL` | No | `admin@kdan.local` | Admin email |
+| `ADMIN_EMAIL` | No | `admin@tapmodels.local` | Admin email |
 | `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password |
 | `TZ` | No | `Asia/Shanghai` | Timezone |
-| `KDAN_IMAGE` | No | `ghcr.io/holeenlu/kdan:latest` | Application image used by Docker Compose |
-| `UPDATE_CHECK_ENABLED` | No | `true` | Check the isolated kdan/v* release channel; Docker online updates require the host updater. |
+| `TAPMODELS_IMAGE` | No | `ghcr.io/holeenlu/tapmodels:latest` | Application image used by Docker Compose |
+| `UPDATE_CHECK_ENABLED` | No | `true` | Check the isolated tapmodels/v* release channel; Docker online updates require the host updater. |
 | `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for GitHub Release checks and private API asset downloads; never forwarded to storage redirects. |
 | `GEMINI_OAUTH_CLIENT_ID` | No | *(builtin)* | Google OAuth client ID (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_CLIENT_SECRET` | No | *(builtin)* | Google OAuth client secret (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
@@ -259,13 +259,13 @@ When using `docker-compose.local.yml`, all data is stored in local directories, 
 cd /path/to/deployment
 docker compose -f docker-compose.local.yml down
 cd ..
-tar czf kdan-complete.tar.gz deployment/
+tar czf tapmodels-complete.tar.gz deployment/
 
 # Transfer to new server
-scp kdan-complete.tar.gz user@new-server:/path/to/destination/
+scp tapmodels-complete.tar.gz user@new-server:/path/to/destination/
 
 # On new server: Extract and start
-tar xzf kdan-complete.tar.gz
+tar xzf tapmodels-complete.tar.gz
 cd deployment/
 docker compose -f docker-compose.local.yml up -d
 ```
@@ -276,7 +276,7 @@ Your entire deployment (configuration + data) is migrated!
 
 ## Gemini OAuth Configuration
 
-KDAN supports three methods to connect to Gemini:
+TapModels supports three methods to connect to Gemini:
 
 ### Method 1: Code Assist OAuth (Recommended for GCP Users)
 
@@ -321,7 +321,7 @@ Requires your own OAuth client credentials.
    - Go to "APIs & Services" → "Credentials"
    - Click "Create Credentials" → "OAuth client ID"
    - Application type: **Web application** (or **Desktop app**)
-   - Name: e.g., "KDAN Gemini"
+   - Name: e.g., "TapModels Gemini"
    - Authorized redirect URIs: Add `http://localhost:1455/auth/callback`
 6. Copy the **Client ID** and **Client Secret**
 7. **⚠️ Publish to Production (IMPORTANT):**
@@ -375,21 +375,21 @@ GEMINI_OAUTH_CLIENT_SECRET=GOCSPX-your-client-secret
 
 For production servers using systemd.
 
-> **No KDAN release artifacts are published.** `install.sh` therefore
-> refuses to download anything unless `KDAN_INSTALLER_ENABLED=true` is set,
-> and the only assets it could fetch are upstream kdan builds. Use the
+> **No TapModels release artifacts are published.** `install.sh` therefore
+> refuses to download anything unless `TAPMODELS_INSTALLER_ENABLED=true` is set,
+> and the only assets it could fetch are upstream tapmodels builds. Use the
 > Docker Compose deployment above, or build the binary from source.
 
 ### Manual Installation
 
 1. Download the latest release from [GitHub Releases](https://github.com/holeenlu/sub2api/releases)
-2. Extract and copy the binary to `/opt/kdan/`
-3. Copy `kdan.service` to `/etc/systemd/system/`
+2. Extract and copy the binary to `/opt/tapmodels/`
+3. Copy `tapmodels.service` to `/etc/systemd/system/`
 4. Run:
    ```bash
    sudo systemctl daemon-reload
-   sudo systemctl enable kdan
-   sudo systemctl start kdan
+   sudo systemctl enable tapmodels
+   sudo systemctl start tapmodels
    ```
 5. Open the Setup Wizard in your browser to complete configuration
 
@@ -410,22 +410,22 @@ sudo ./install.sh uninstall
 
 ```bash
 # Start the service
-sudo systemctl start kdan
+sudo systemctl start tapmodels
 
 # Stop the service
-sudo systemctl stop kdan
+sudo systemctl stop tapmodels
 
 # Restart the service
-sudo systemctl restart kdan
+sudo systemctl restart tapmodels
 
 # Check status
-sudo systemctl status kdan
+sudo systemctl status tapmodels
 
 # View logs
-sudo journalctl -u kdan -f
+sudo journalctl -u tapmodels -f
 
 # Enable auto-start on boot
-sudo systemctl enable kdan
+sudo systemctl enable tapmodels
 ```
 
 ### Configuration
@@ -438,7 +438,7 @@ To change after installation:
 
 1. Edit the systemd service:
    ```bash
-   sudo systemctl edit kdan
+   sudo systemctl edit tapmodels
    ```
 
 2. Add or modify:
@@ -451,7 +451,7 @@ To change after installation:
 3. Reload and restart:
    ```bash
    sudo systemctl daemon-reload
-   sudo systemctl restart kdan
+   sudo systemctl restart tapmodels
    ```
 
 #### Gemini OAuth Configuration
@@ -460,7 +460,7 @@ If you need to use AI Studio OAuth for Gemini accounts, add the OAuth client cre
 
 1. Edit the service file:
    ```bash
-   sudo nano /etc/systemd/system/kdan.service
+   sudo nano /etc/systemd/system/tapmodels.service
    ```
 
 2. Add your OAuth credentials in the `[Service]` section (after the existing `Environment=` lines):
@@ -477,7 +477,7 @@ If you need to use AI Studio OAuth for Gemini accounts, add the OAuth client cre
 3. Reload and restart:
    ```bash
    sudo systemctl daemon-reload
-   sudo systemctl restart kdan
+   sudo systemctl restart tapmodels
    ```
 
 > **Note:** Code Assist OAuth does not require any configuration - it uses the built-in Gemini CLI client.
@@ -485,7 +485,7 @@ If you need to use AI Studio OAuth for Gemini accounts, add the OAuth client cre
 
 #### Application Configuration
 
-The main config file is at `/etc/kdan/config.yaml` (created by Setup Wizard).
+The main config file is at `/etc/tapmodels/config.yaml` (created by Setup Wizard).
 
 ### Prerequisites
 
@@ -497,12 +497,12 @@ The main config file is at `/etc/kdan/config.yaml` (created by Setup Wizard).
 ### Directory Structure
 
 ```
-/opt/kdan/
-├── kdan              # Main binary
-├── kdan.backup       # Backup (after upgrade)
+/opt/tapmodels/
+├── tapmodels              # Main binary
+├── tapmodels.backup       # Backup (after upgrade)
 └── data/                # Runtime data
 
-/etc/kdan/
+/etc/tapmodels/
 └── config.yaml          # Configuration file
 ```
 
@@ -519,7 +519,7 @@ For **local directory version**:
 docker compose -f docker-compose.local.yml ps
 
 # View detailed logs
-docker compose -f docker-compose.local.yml logs --tail=100 kdan
+docker compose -f docker-compose.local.yml logs --tail=100 tapmodels
 
 # Check database connection
 docker compose -f docker-compose.local.yml exec postgres pg_isready
@@ -541,7 +541,7 @@ For **named volumes version**:
 docker compose ps
 
 # View detailed logs
-docker compose logs --tail=100 kdan
+docker compose logs --tail=100 tapmodels
 
 # Check database connection
 docker compose exec postgres pg_isready
@@ -557,13 +557,13 @@ docker compose restart
 
 ```bash
 # Check service status
-sudo systemctl status kdan
+sudo systemctl status tapmodels
 
 # View recent logs
-sudo journalctl -u kdan -n 50
+sudo journalctl -u tapmodels -n 50
 
 # Check config file
-sudo cat /etc/kdan/config.yaml
+sudo cat /etc/tapmodels/config.yaml
 
 # Check PostgreSQL
 sudo systemctl status postgresql
@@ -583,7 +583,7 @@ sudo systemctl status redis
 
 ## TLS Fingerprint Configuration
 
-KDAN supports TLS fingerprint simulation to make requests appear as if they come from the official Claude CLI (Node.js client).
+TapModels supports TLS fingerprint simulation to make requests appear as if they come from the official Claude CLI (Node.js client).
 
 ### Default Behavior
 

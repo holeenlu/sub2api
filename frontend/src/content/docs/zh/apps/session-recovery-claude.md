@@ -17,7 +17,7 @@ claude --resume "/absolute/path/to/SESSION_ID.jsonl"
 
 ## 下载与扫描
 
-需要 Python 3.10+。[下载 Claude Code 恢复工具](/downloads/kdan-claude-session-recovery.zip)，解压后进入 kdan-claude-session-recovery 目录：
+需要 Python 3.10+。[下载 Claude Code 恢复工具](/downloads/tapmodels-claude-session-recovery.zip)，解压后进入 tapmodels-claude-session-recovery 目录：
 
 ```bash
 bash find-claude-sessions.sh

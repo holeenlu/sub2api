@@ -3,12 +3,12 @@ name: sub2api-admin
 description: Operate Sub2API administrator APIs for explicit backend administration requests, including branded deployments.
 ---
 
-# KDAN Admin
+# TapModels Admin
 
 Use the bundled CLI instead of ad hoc `curl`. Run examples from this skill directory.
 
 ```bash
-export SUB2API_BASE_URL='https://api.kdan.com'
+export SUB2API_BASE_URL='https://api.tapmodels.ai'
 export SUB2API_ADMIN_API_KEY='<admin api key>'
 # Or, when the deployment uses admin JWT login instead of an admin API key:
 # export SUB2API_JWT='<admin access_token>'

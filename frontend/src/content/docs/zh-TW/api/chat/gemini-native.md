@@ -6,7 +6,7 @@ GET  /v1beta/models/{model}
 POST /v1beta/models/{model}:generateContent
 POST /v1beta/models/{model}:streamGenerateContent?alt=sse
 POST /v1beta/models/{model}:countTokens
-x-goog-api-key: $KDAN_API_KEY
+x-goog-api-key: $TAPMODELS_API_KEY
 ```
 
 普通 `/v1beta` 僅接受 Gemini 分組。另有 `/antigravity/v1beta` 專用字首，它強制選擇 Antigravity 平台，不能用它推斷普通 Gemini 分組的帳號或模型能力。
@@ -16,7 +16,7 @@ x-goog-api-key: $KDAN_API_KEY
 ## 模型發現
 
 ```bash
-curl "$KDAN_BASE_URL/v1beta/models" -H "x-goog-api-key: $KDAN_API_KEY"
+curl "$TAPMODELS_BASE_URL/v1beta/models" -H "x-goog-api-key: $TAPMODELS_API_KEY"
 ```
 
 回應使用 Gemini `models[]` 信封，`name` 通常為 `models/YOUR_MODEL_ID`。列表可能來自上游，也可能在特定帳號無法直接發現時回退到程式碼預設項，並經過分組白名單過濾。可見性不代表即時可排程。
@@ -24,8 +24,8 @@ curl "$KDAN_BASE_URL/v1beta/models" -H "x-goog-api-key: $KDAN_API_KEY"
 ## generateContent 請求
 
 ```bash
-curl "$KDAN_BASE_URL/v1beta/models/YOUR_MODEL_ID:generateContent" \
-  -H "x-goog-api-key: $KDAN_API_KEY" \
+curl "$TAPMODELS_BASE_URL/v1beta/models/YOUR_MODEL_ID:generateContent" \
+  -H "x-goog-api-key: $TAPMODELS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "systemInstruction":{"parts":[{"text":"Answer briefly."}]},
@@ -49,8 +49,8 @@ curl "$KDAN_BASE_URL/v1beta/models/YOUR_MODEL_ID:generateContent" \
 ## SSE 流
 
 ```bash
-curl -N "$KDAN_BASE_URL/v1beta/models/YOUR_MODEL_ID:streamGenerateContent?alt=sse" \
-  -H "x-goog-api-key: $KDAN_API_KEY" \
+curl -N "$TAPMODELS_BASE_URL/v1beta/models/YOUR_MODEL_ID:streamGenerateContent?alt=sse" \
+  -H "x-goog-api-key: $TAPMODELS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"contents":[{"role":"user","parts":[{"text":"Explain idempotency."}]}]}'
 ```

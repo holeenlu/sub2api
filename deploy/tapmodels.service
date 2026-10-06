@@ -1,27 +1,27 @@
 [Unit]
-Description=KDAN - Subscription to API Conversion Platform
-Documentation=https://docs.kdan.com
+Description=TapModels - Pick a model. Start building.
+Documentation=https://docs.tapmodels.ai
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
 
 [Service]
 Type=simple
-User=kdan
-Group=kdan
-WorkingDirectory=/opt/kdan
-ExecStart=/opt/kdan/kdan
+User=tapmodels
+Group=tapmodels
+WorkingDirectory=/opt/tapmodels
+ExecStart=/opt/tapmodels/tapmodels
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=kdan
+SyslogIdentifier=tapmodels
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/opt/kdan
+ReadWritePaths=/opt/tapmodels
 
 # Environment - Server configuration
 # Modify these values to change listen address and port

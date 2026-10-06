@@ -17,7 +17,7 @@ claude --resume "/absolute/path/to/SESSION_ID.jsonl"
 
 ## ダウンロードとスキャン
 
-Python 3.10 以降が必要です。[Claude Code ツールをダウンロード](/downloads/kdan-claude-session-recovery.zip)して展開し、kdan-claude-session-recovery に移動します。
+Python 3.10 以降が必要です。[Claude Code ツールをダウンロード](/downloads/tapmodels-claude-session-recovery.zip)して展開し、tapmodels-claude-session-recovery に移動します。
 
 ```bash
 bash find-claude-sessions.sh

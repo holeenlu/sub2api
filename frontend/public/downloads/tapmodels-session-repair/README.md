@@ -1,12 +1,12 @@
-# KDAN Codex session recovery
+# TapModels Codex session recovery
 
-Recover existing local sessions; this does not repair networking or recreate deleted messages. Claude Code users should use the [Claude tool](https://nextcode.buildtoconnect.com/apps/session-recovery-claude).
+Recover existing local sessions; this does not repair networking or recreate deleted messages. Claude Code users should use the [Claude tool](https://tapmodels.ai/apps/session-recovery-claude).
 
 ## Prepare and choose a recovery path
 
-Copy valid settings for your current group from [API Keys](https://nextcode.buildtoconnect.com/keys) and check that a new session works. Authentication, balance, 503, and upstream errors need configuration or server troubleshooting. Keep the original session directory.
+Copy valid settings for your current group from [API Keys](https://tapmodels.ai/keys) and check that a new session works. Authentication, balance, 503, and upstream errors need configuration or server troubleshooting. Keep the original session directory.
 
-Requires Python 3.11+ and an installed Codex CLI. [Download the tool](https://nextcode.buildtoconnect.com/downloads/kdan-codex-session-repair.zip), extract it, and enter kdan-codex-session-repair. It supports macOS, Linux, and Windows.
+Requires Python 3.11+ and an installed Codex CLI. [Download the tool](https://tapmodels.ai/downloads/tapmodels-codex-session-repair.zip), extract it, and enter tapmodels-codex-session-repair. It supports macOS, Linux, and Windows.
 
 ## Find sessions and prepare a resume command
 
@@ -18,7 +18,7 @@ bash repair-sessions.sh --list
 
 
 ```powershell
-.\RepairSessions.ps1 -List
+.\Repair-TapModelsSessions.ps1 -List
 ```
 
 
@@ -30,7 +30,7 @@ bash repair-sessions.sh --resume "SESSION_ID" --project-dir "/path/to/project"
 
 
 ```powershell
-.\RepairSessions.ps1 -Resume "SESSION_ID" -ProjectDir "C:\path\to\project"
+.\Repair-TapModelsSessions.ps1 -Resume "SESSION_ID" -ProjectDir "C:\path\to\project"
 ```
 
 
@@ -55,7 +55,7 @@ bash repair-sessions.sh --apply --client-closed
 
 
 ```powershell
-.\RepairSessions.ps1 -Apply -ClientClosed
+.\Repair-TapModelsSessions.ps1 -Apply -ClientClosed
 ```
 
 

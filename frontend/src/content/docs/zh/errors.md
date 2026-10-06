@@ -1,6 +1,6 @@
 ## 错误结构
 
-KDAN 保留入口协议的错误格式。OpenAI、Anthropic 与 Google 风格的字段可能不同；客户端应至少记录 HTTP 状态、错误类型、消息和响应 request ID。
+TapModels 保留入口协议的错误格式。OpenAI、Anthropic 与 Google 风格的字段可能不同；客户端应至少记录 HTTP 状态、错误类型、消息和响应 request ID。
 
 | 状态 | 常见原因 | 建议 |
 | --- | --- | --- |
