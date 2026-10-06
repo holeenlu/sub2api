@@ -1,5 +1,5 @@
 <template>
-  <!-- 用量页"API 密钥排行"tab 内容：公共排行骨架 + 密钥/所属用户两列身份列 -->
+  <!-- 用量页"API 密钥排行"tab 内容：公共排行骨架 + 按页面权限显示身份列 -->
   <BreakdownRanking
     ref="rankingRef"
     :fetch="fetchKeys"
@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getAPIKeyBreakdown, type UserBreakdownParams } from '@/api/admin/dashboard'
 import type { APIKeyBreakdownItem } from '@/types'
@@ -47,19 +47,31 @@ const props = withDefaults(defineProps<{
   /** 由父级列设置下拉控制；未传时全部显示。key 集合见 UsageView 的 keyRankingAllColumns */
   visibleColumnKeys?: string[]
   active?: boolean
+  /** 管理端显示所属用户；用户端已限定为当前登录用户，不显示该列。 */
+  showUser?: boolean
   fetch?: (params: UserBreakdownParams) => Promise<{ api_keys: APIKeyBreakdownItem[] }>
 }>(), {
   active: true,
+  showUser: true,
 })
 
 defineEmits<{ (e: 'select-api-key', apiKeyId: number, keyName: string): void }>()
 
 const { t } = useI18n()
 
-const identityColumns: BreakdownIdentityColumn[] = [
-  { key: 'key', label: 'admin.usage.keyRanking.columns.key' },
-  { key: 'user', label: 'admin.usage.keyRanking.columns.user', cellClass: 'max-w-[220px] text-gray-500 dark:text-gray-400' },
-]
+const identityColumns = computed<BreakdownIdentityColumn[]>(() => {
+  const columns: BreakdownIdentityColumn[] = [
+    { key: 'key', label: 'admin.usage.keyRanking.columns.key' },
+  ]
+  if (props.showUser) {
+    columns.push({
+      key: 'user',
+      label: 'admin.usage.keyRanking.columns.user',
+      cellClass: 'max-w-[220px] text-gray-500 dark:text-gray-400',
+    })
+  }
+  return columns
+})
 
 const fetchKeys = async (params: UserBreakdownParams): Promise<APIKeyBreakdownItem[]> => {
   const res = await (props.fetch ? props.fetch(params) : getAPIKeyBreakdown(params))
