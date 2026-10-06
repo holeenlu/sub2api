@@ -4798,7 +4798,7 @@ const expiresAtInput = computed({
 const canExchangeCode = computed(() => {
   const authCode = oauthFlowRef.value?.authCode || ''
   if (form.platform === 'anthropic' && addMethod.value === 'setup-token-manual') {
-    return !!oauthFlowRef.value?.setupToken?.trim() && !oauth.loading.value
+    return !!buildClaudeSetupTokenCredentials(oauthFlowRef.value?.setupToken || '') && !oauth.loading.value
   }
   if (form.platform === 'openai') {
     return authCode.trim() && openaiOAuth.sessionId.value && !openaiOAuth.loading.value
@@ -6970,13 +6970,14 @@ const buildAnthropicOAuthExtra = (base?: Record<string, unknown>): Record<string
 
 const handleAnthropicSetupToken = async (rawToken: string) => {
   const credentials = buildClaudeSetupTokenCredentials(rawToken)
-  if (!credentials) return
+  if (!credentials) {
+    oauth.error.value = t('admin.accounts.oauth.setupTokenInvalid')
+    return
+  }
 
   oauth.loading.value = true
   oauth.error.value = ''
   try {
-    const expiresAt = credentials.expires_at as number
-    if (!form.expires_at) form.expires_at = expiresAt
     await createAccountAndFinish('anthropic', 'setup-token', credentials, buildAnthropicOAuthExtra())
   } catch (error: any) {
     oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')

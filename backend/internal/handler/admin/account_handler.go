@@ -1664,10 +1664,22 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	req.Credentials = service.MergeCredentials(existing.Credentials, req.Credentials)
 	// Drop SSO/password residue; re-auth must leave only OAuth tokens on disk.
 	req.Credentials = service.SanitizeStoredCredentials(existing.Platform, req.Credentials)
+	if req.Type == service.AccountTypeSetupToken {
+		// A direct claude setup-token has no refresh flow. Do not carry the
+		// previous OAuth refresh token into the new credential type.
+		delete(req.Credentials, "refresh_token")
+		delete(req.Credentials, "expires_at")
+	}
+	var clearAccountExpiry *int64
+	if req.Type == service.AccountTypeSetupToken {
+		zero := int64(0)
+		clearAccountExpiry = &zero
+	}
 
 	updatedAccount, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
 		Type:        req.Type,
 		Credentials: req.Credentials,
+		ExpiresAt:   clearAccountExpiry,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

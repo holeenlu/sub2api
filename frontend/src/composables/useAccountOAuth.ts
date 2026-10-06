@@ -43,20 +43,13 @@ export function normalizeClaudeSetupToken(raw: string): string {
   return token
 }
 
-export function claudeSetupTokenExpiryUnix(): number {
-  const expiry = new Date()
-  expiry.setFullYear(expiry.getFullYear() + 1)
-  return Math.floor(expiry.getTime() / 1000)
-}
-
 export function buildClaudeSetupTokenCredentials(raw: string): Record<string, unknown> | null {
   const accessToken = normalizeClaudeSetupToken(raw)
-  if (!accessToken) return null
+  if (!accessToken || !accessToken.startsWith('sk-ant-oat')) return null
   return {
     access_token: accessToken,
     token_type: 'oauth',
-    scope: 'user:inference',
-    expires_at: claudeSetupTokenExpiryUnix()
+    scope: 'user:inference'
   }
 }
 

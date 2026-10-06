@@ -10,8 +10,6 @@ import (
 // JSON-formatted metadata.user_id instead of the legacy concatenated string.
 const NewMetadataFormatMinVersion = "2.1.78"
 
-const maxMetadataSessionIDLength = 128
-
 // ParsedUserID represents the components extracted from a metadata.user_id value.
 type ParsedUserID struct {
 	DeviceID    string // 64-char hex (or arbitrary client id)
@@ -46,7 +44,7 @@ func ParseMetadataUserID(raw string) *ParsedUserID {
 		if err := json.Unmarshal([]byte(raw), &j); err != nil {
 			return nil
 		}
-		if j.DeviceID == "" || j.SessionID == "" || len(j.SessionID) > maxMetadataSessionIDLength {
+		if j.DeviceID == "" || j.SessionID == "" {
 			return nil
 		}
 		return &ParsedUserID{

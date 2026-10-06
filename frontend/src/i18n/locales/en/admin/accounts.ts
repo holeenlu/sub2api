@@ -1148,6 +1148,7 @@ codexDiagnostic: 'Model degradation check',
         setupTokenExpiry: 'This Setup Token is valid for one year. Use it by setting the environment variable shown above.',
         setupTokenInput: 'Setup Token',
         setupTokenPlaceholder: 'Paste the token returned by claude setup-token...',
+        setupTokenInvalid: 'Setup Token must start with sk-ant-oat.',
         manualAuth: 'Manual Authorization',
         cookieAutoAuth: 'Cookie Auto-Auth',
         cookieAutoAuthDesc:
