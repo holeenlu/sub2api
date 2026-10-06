@@ -14,11 +14,12 @@ Create a key for the target group in [API keys](/keys). Messages compatibility a
 ### Online install (macOS / Linux)
 
 ```bash
+export KDAN_BASE_URL="{{API_ROOT}}"
 export KDAN_API_KEY="YOUR_KDAN_API_KEY"
 curl -fsSL {{API_ROOT}}/install/claude-code.sh | bash
 ```
 
-The script backs up `~/.claude/settings.json`, writes the Messages environment variables, and restricts file permissions. Review it before piping into a shell; set `KDAN_BASE_URL` for a custom gateway.
+The script backs up `~/.claude/settings.json`, writes the Messages environment variables, and restricts file permissions. Review it before piping into a shell; `KDAN_BASE_URL` is required.
 
 This is the project's **Use key → Claude Code** UI with invalid sample credentials and an example URL. Choose the operating-system tab and copy values from your own console. The [console guide](/apps/console) also includes the PowerShell screenshot.
 

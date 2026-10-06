@@ -11,11 +11,12 @@
 ### オンラインインストール（macOS / Linux）
 
 ```bash
+export KDAN_BASE_URL="{{API_ROOT}}"
 export KDAN_API_KEY="YOUR_KDAN_API_KEY"
-curl -fsSL https://nextcode.buildtoconnect.com/install/codex.sh | bash
+curl -fsSL {{API_ROOT}}/install/codex.sh | bash
 ```
 
-このスクリプトは `config.toml` をバックアップし、Responses プロバイダーを書き込み、モードを `600` に設定します。シェルにパイプする前に内容を確認してください。キーをシェル履歴やソース管理に決して保存しないでください。カスタムゲートウェイを使用する場合は `KDAN_BASE_URL` を設定し、例のモデルを上書きする場合は `MODEL_ID` を設定します。
+このスクリプトは `config.toml` をバックアップし、Responses プロバイダーを書き込み、モードを `600` に設定します。シェルにパイプする前に内容を確認してください。キーをシェル履歴やソース管理に決して保存しないでください。`KDAN_BASE_URL` は必須で、例のモデルは `MODEL_ID` で上書きできます。
 
 このスクリーンショットは、無効なサンプル認証情報と例の URL が設定された、プロジェクトの OpenAI グループ API キー設定を示しています。自身のグループ設定をコピーしてください。[コンソールガイド](/apps/console) では Legacy モードと手順も説明しています。画像をクリックするとフルサイズで表示できます。
 

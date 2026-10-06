@@ -179,15 +179,15 @@ func (f *stickyTTLFixture) withModelRouting(model string, accountIDs ...int64) *
 // newStickyTTLFixture 复刻线上那组账号：同一分组内 cc-5 优先级 1、cc-2 优先级 2，
 // 没有粘性绑定时自由选号必然落到 cc-5。
 func newStickyTTLFixture(ttlSeconds int, accounts ...Account) *stickyTTLFixture {
-	group := noAccountFallbackGroup(1, PlatformAnthropic, nil)
+	group := &Group{ID: 1, Name: "sticky-test", Platform: PlatformAnthropic, Status: StatusActive}
 	accountsByID := map[int64]*Account{}
 	for i := range accounts {
 		acc := accounts[i]
 		accountsByID[acc.ID] = &acc
 	}
-	repo := &noAccountFallbackAccountRepo{
-		mockAccountRepoForPlatform: &mockAccountRepoForPlatform{accountsByID: accountsByID},
-		byGroup:                    map[int64][]Account{1: accounts},
+	repo := &mockAccountRepoForPlatform{
+		accounts:     accounts,
+		accountsByID: accountsByID,
 	}
 
 	cfg := testConfig()
@@ -422,8 +422,13 @@ func TestSessionAccountHistory_TemporaryBypassDoesNotOverwriteHistory(t *testing
 	require.Positive(t, f.cache.historyWriteAttempts, "备用账号仍会尝试写，靠 IfAbsentOrSame 挡下")
 
 	// cc-2 恢复后，会话必须回得去。
-	f.svc.accountRepo.(*noAccountFallbackAccountRepo).accountsByID[2].Schedulable = true
-	f.svc.accountRepo.(*noAccountFallbackAccountRepo).byGroup[1][1].Schedulable = true
+	repo := f.svc.accountRepo.(*mockAccountRepoForPlatform)
+	repo.accountsByID[2].Schedulable = true
+	for i := range repo.accounts {
+		if repo.accounts[i].ID == 2 {
+			repo.accounts[i].Schedulable = true
+		}
+	}
 	f.cache.expire(1, session)
 
 	require.Equal(t, int64(2), f.selectAccount(t, session).ID, "原账号恢复后必须能回到它")

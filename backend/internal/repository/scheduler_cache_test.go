@@ -20,6 +20,16 @@ func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 	require.NotContains(t, filtered, "refresh_token")
 }
 
+func TestFilterSchedulerCredentialsKeepsAnthropicFableThreshold(t *testing.T) {
+	filtered := filterSchedulerCredentials(map[string]any{
+		"anthropic_fable_scheduling_threshold": 72,
+		"access_token":                         "secret-access-token",
+	})
+
+	require.Equal(t, 72, filtered["anthropic_fable_scheduling_threshold"])
+	require.NotContains(t, filtered, "access_token")
+}
+
 func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {
 	account := service.Account{
 		ID:       24,

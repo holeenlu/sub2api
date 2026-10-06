@@ -78,6 +78,12 @@ def records(releases, channel):
     return result
 
 
+def history_migrated_with_integrated_official_base(previous_plan, head):
+    """Allow a known branch rebuild only when its recorded upstream base remains integrated."""
+    upstream_commit = (previous_plan or {}).get("upstream_commit")
+    return bool(upstream_commit) and ancestor(upstream_commit, head)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--select", action="store_true")
@@ -104,7 +110,7 @@ def main():
     if previous and previous[0]["commit"] != head:
         if ancestor(head, previous[0]["commit"]):
             skip = True
-        elif not ancestor(previous[0]["commit"], head):
+        elif not ancestor(previous[0]["commit"], head) and not history_migrated_with_integrated_official_base(previous[0], head):
             raise ValueError("Release history diverged; refusing non-fast-forward publication")
     if skip:
         with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:

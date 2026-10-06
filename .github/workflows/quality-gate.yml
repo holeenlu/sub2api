@@ -1,0 +1,56 @@
+name: Quality gate
+
+on:
+  push:
+    branches: [main, TapModels, tokensavy]
+  pull_request:
+    branches: [main, TapModels, tokensavy]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend build and unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+      - run: go build ./...
+      - run: go test -tags=unit ./...
+
+  frontend:
+    name: Frontend type, lint, tests and generated locales
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: npm ci --prefix ../tools/zh-tw --omit=dev
+      - run: pnpm typecheck
+      - run: pnpm lint:check
+      - run: pnpm test:run
+      - run: node ../tools/zh-tw/gen-locale.mjs --check
+
+  generated-downloads:
+    name: Generated downloads
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/build_docs_downloads.py --check

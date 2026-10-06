@@ -109,7 +109,7 @@ fast_mode = true
 mkdir -p kdan-deploy && cd kdan-deploy
 
 # 下载并运行部署准备脚本
-curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/KDAN/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/main/deploy/docker-deploy.sh | bash
 
 # 启动服务
 docker compose up -d
@@ -131,7 +131,7 @@ docker compose logs -f kdan
 
 ```bash
 # 1. 克隆仓库
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b main https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 
 # 2. 复制环境配置文件
@@ -273,7 +273,7 @@ rm -rf data/ postgres_data/ redis_data/
 Apple 芯片 Mac 在 macOS 26 上可使用 Apple `container` 1.1.0 或更高版本运行完整的 KDAN、PostgreSQL 和 Redis：
 
 ```bash
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b main https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 ./apple-container.sh init
 ./apple-container.sh up
@@ -299,7 +299,7 @@ cd sub2api/deploy
 
 ```bash
 # 1. 克隆仓库
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b main https://github.com/holeenlu/sub2api.git
 cd sub2api
 
 # 2. 安装 pnpm（如果还没有安装）
