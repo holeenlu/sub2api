@@ -11,6 +11,7 @@ const {
   getStats,
   getDashboardModels,
   getDashboardSnapshotV2,
+  getDashboardAPIKeyBreakdown,
   listMyErrorRequests,
   list,
   getAvailable,
@@ -23,6 +24,7 @@ const {
   getStats: vi.fn(),
   getDashboardModels: vi.fn(),
   getDashboardSnapshotV2: vi.fn(),
+  getDashboardAPIKeyBreakdown: vi.fn(),
   listMyErrorRequests: vi.fn(),
   list: vi.fn(),
   getAvailable: vi.fn(),
@@ -54,6 +56,7 @@ const messages: Record<string, string> = {
   'usage.allApiKeys': 'All API Keys',
   'usage.errors.allKeys': 'All API Keys',
   'usage.tabs.usage': 'Usage records',
+  'usage.tabs.keyRanking': 'API Key Ranking',
   'usage.tabs.errors': 'Error records',
   'usage.apiKeyFilter': 'API Key',
   'usage.model': 'Model',
@@ -81,6 +84,7 @@ vi.mock('@/api', () => ({
     getStats,
     getDashboardModels,
     getDashboardSnapshotV2,
+    getDashboardAPIKeyBreakdown,
     listMyErrorRequests,
   },
   keysAPI: {
@@ -161,6 +165,7 @@ function mountUsageView() {
         UsageStatsCards: chartStub,
         UsageTable: chartStub,
         UserErrorRequestsTable: chartStub,
+        APIKeyTokenRanking: chartStub,
         ModelDistributionChart: chartStub,
         GroupDistributionChart: chartStub,
         EndpointDistributionChart: chartStub,
@@ -176,6 +181,7 @@ describe('user UsageView', () => {
     getStats.mockReset()
     getDashboardModels.mockReset()
     getDashboardSnapshotV2.mockReset()
+    getDashboardAPIKeyBreakdown.mockReset()
     listMyErrorRequests.mockReset()
     list.mockReset()
     getAvailable.mockReset()
@@ -203,6 +209,7 @@ describe('user UsageView', () => {
       start_date: '2026-03-08',
       end_date: '2026-03-08',
     })
+    getDashboardAPIKeyBreakdown.mockResolvedValue({ api_keys: [], start_date: '2026-03-08', end_date: '2026-03-08' })
     getDashboardSnapshotV2.mockResolvedValue({
       generated_at: '2026-03-08T00:00:00Z',
       start_date: '2026-03-08',
@@ -561,6 +568,19 @@ describe('user UsageView', () => {
     window.URL.revokeObjectURL = originalRevokeObjectURL
     vi.unstubAllGlobals()
     clickSpy.mockRestore()
+  })
+})
+
+describe('UsageView API key ranking tab', () => {
+  it('exposes the ranking tab without changing the usage detail route', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+
+    const rankingButton = wrapper.findAll('button').find((button) => button.text() === 'API Key Ranking')
+    expect(rankingButton).toBeDefined()
+    await rankingButton!.trigger('click')
+    expect((wrapper.vm as any).activeTab).toBe('keyRanking')
+    wrapper.unmount()
   })
 })
 
