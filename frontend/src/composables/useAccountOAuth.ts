@@ -2,9 +2,10 @@ import { ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 
-export type AddMethod = 'oauth' | 'setup-token'
+export type AddMethod = 'oauth' | 'setup-token' | 'setup-token-manual'
 export type AuthInputMethod =
   | 'manual'
+  | 'setup_token'
   | 'cookie'
   | 'refresh_token'
   | 'mobile_refresh_token'
@@ -30,6 +31,33 @@ export interface TokenInfo {
   account_uuid?: string
   email_address?: string
   [key: string]: unknown
+}
+
+export function normalizeClaudeSetupToken(raw: string): string {
+  let token = raw.trim()
+  const assignment = token.match(/^export\s+CLAUDE_CODE_OAUTH_TOKEN\s*=\s*(.+)$/i)
+  if (assignment) token = assignment[1].trim()
+  if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+    token = token.slice(1, -1).trim()
+  }
+  return token
+}
+
+export function claudeSetupTokenExpiryUnix(): number {
+  const expiry = new Date()
+  expiry.setFullYear(expiry.getFullYear() + 1)
+  return Math.floor(expiry.getTime() / 1000)
+}
+
+export function buildClaudeSetupTokenCredentials(raw: string): Record<string, unknown> | null {
+  const accessToken = normalizeClaudeSetupToken(raw)
+  if (!accessToken) return null
+  return {
+    access_token: accessToken,
+    token_type: 'oauth',
+    scope: 'user:inference',
+    expires_at: claudeSetupTokenExpiryUnix()
+  }
 }
 
 export function useAccountOAuth() {
