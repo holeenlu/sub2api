@@ -84,7 +84,7 @@ PostgreSQL と Redis のコンテナを含む Docker Compose でデプロイし�
 mkdir -p kdan-deploy && cd kdan-deploy
 
 # デプロイ準備スクリプトをダウンロードして実行
-curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/KDAN/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/main/deploy/docker-deploy.sh | bash
 
 # サービスを起動
 docker compose up -d
@@ -106,7 +106,7 @@ docker compose logs -f kdan
 
 ```bash
 # 1. リポジトリをクローン
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b main https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 
 # 2. 環境設定ファイルをコピー
@@ -236,7 +236,7 @@ rm -rf data/ postgres_data/ redis_data/
 Apple シリコン搭載 Mac と macOS 26 では、Apple `container` 1.1.0 以降を使用して KDAN、PostgreSQL、Redis の完全なスタックを実行できます:
 
 ```bash
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b main https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 ./apple-container.sh init
 ./apple-container.sh up
@@ -262,7 +262,7 @@ cd sub2api/deploy
 
 ```bash
 # 1. リポジトリをクローン
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b main https://github.com/holeenlu/sub2api.git
 cd sub2api
 
 # 2. pnpm をインストール（未インストールの場合）

@@ -426,6 +426,38 @@ func (s *PaymentService) QueryAndFinalizeRefund(ctx context.Context, oid int64) 
 	return s.finishRefund(ctx, &record.Plan, resp)
 }
 
+// ResolvePendingRefund applies an explicit administrator decision when the
+// provider has no query API (for example legacy EasyPay). This is deliberately
+// separate from retrying the provider request: resubmitting an unknown refund
+// can double-refund an order, while a recorded decision gives the held balance
+// a controlled accounting exit.
+func (s *PaymentService) ResolvePendingRefund(ctx context.Context, oid int64, success bool, reason string) (*RefundResult, error) {
+	o, err := s.entClient.PaymentOrder.Get(ctx, oid)
+	if err != nil {
+		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
+	}
+	if o.Status != OrderStatusRefundPending && o.Status != OrderStatusRefunding {
+		return nil, infraerrors.BadRequest("INVALID_STATUS", "order is not awaiting refund resolution")
+	}
+	record, err := loadRefundReservation(ctx, s.entClient, o)
+	if err != nil {
+		return nil, err
+	}
+	decision := strings.TrimSpace(reason)
+	if decision == "" {
+		return nil, infraerrors.BadRequest("REASON_REQUIRED", "manual refund resolution requires a reason")
+	}
+	result, err := s.completeRefundReservation(ctx, &record.Plan, success, fmt.Errorf("manual resolution: %s", decision))
+	if err != nil {
+		return nil, err
+	}
+	s.writeAuditLog(ctx, oid, "REFUND_MANUAL_RESOLUTION", "admin", map[string]any{
+		"outcome": map[bool]string{true: "success", false: "failed"}[success],
+		"reason":  decision,
+	})
+	return result, nil
+}
+
 func (s *PaymentService) applyRefundFinalDeduction(ctx context.Context, p *RefundPlan) error {
 	if p.DeductionType == payment.DeductionTypeBalance {
 		if p.Force {

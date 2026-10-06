@@ -2,7 +2,8 @@
 set -euo pipefail
 
 : "${KDAN_API_KEY:?Set KDAN_API_KEY before running this installer}"
-BASE_URL="${KDAN_BASE_URL:-https://api.example.com}"
+: "${KDAN_BASE_URL:?Set KDAN_BASE_URL before running this installer}"
+BASE_URL="${KDAN_BASE_URL%/}"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SETTINGS="$CLAUDE_DIR/settings.json"
 mkdir -p "$CLAUDE_DIR"

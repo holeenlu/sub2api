@@ -3723,6 +3723,9 @@ func (c *Config) Validate() error {
 	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds < 0 {
 		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must not be negative")
 	}
+	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds > 30*24*60*60 {
+		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must not exceed 30 days")
+	}
 	// 历史键比短期粘性键还短就毫无意义：短期键还在时根本不会去读它，短期键一过期
 	// 它也已经跟着没了。这种配置一定是写错了，直接拒绝而不是静默失效。
 	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds > 0 &&

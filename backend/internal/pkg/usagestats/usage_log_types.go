@@ -37,7 +37,7 @@ func NormalizeBreakdownLimit(raw string) int {
 		return 50
 	}
 	if limit > 200 {
-		return 200
+		return 50
 	}
 	return limit
 }

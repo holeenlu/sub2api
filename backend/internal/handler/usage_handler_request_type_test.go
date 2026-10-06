@@ -17,18 +17,18 @@ import (
 
 type userUsageRepoCapture struct {
 	service.UsageLogRepository
-	listParams   pagination.PaginationParams
-	listFilters  usagestats.UsageLogFilters
-	statsFilters usagestats.UsageLogFilters
-	trendFilters usagestats.UsageLogFilters
-	groupFilters usagestats.UsageLogFilters
-	apiKeyBreakdownDim usagestats.UserBreakdownDimension
+	listParams           pagination.PaginationParams
+	listFilters          usagestats.UsageLogFilters
+	statsFilters         usagestats.UsageLogFilters
+	trendFilters         usagestats.UsageLogFilters
+	groupFilters         usagestats.UsageLogFilters
+	apiKeyBreakdownDim   usagestats.UserBreakdownDimension
 	apiKeyBreakdownLimit int
-	apiKeyBreakdownRows []usagestats.APIKeyBreakdownItem
-	listRows     []service.UsageLog
-	stats        *usagestats.UsageStats
-	modelStats   []usagestats.ModelStat
-	groupStats   []usagestats.GroupStat
+	apiKeyBreakdownRows  []usagestats.APIKeyBreakdownItem
+	listRows             []service.UsageLog
+	stats                *usagestats.UsageStats
+	modelStats           []usagestats.ModelStat
+	groupStats           []usagestats.GroupStat
 }
 
 func (s *userUsageRepoCapture) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
@@ -379,7 +379,7 @@ func TestUserUsageSnapshotRejectsInvalidIncludeFlags(t *testing.T) {
 
 func TestUserAPIKeyBreakdownScopesToAuthenticatedUserAndSharedFilters(t *testing.T) {
 	repo := &userUsageRepoCapture{
-		apiKeyBreakdownRows: []usagestats.APIKeyBreakdownItem{{APIKeyID: 7, KeyName: "project", UserID: 42, Requests: 3}},
+		apiKeyBreakdownRows: []usagestats.APIKeyBreakdownItem{{APIKeyID: 7, KeyName: "project", UserID: 42, Requests: 3, AccountCost: 99.5}},
 	}
 	router := newUserUsageRequestTypeTestRouter(repo)
 
@@ -401,4 +401,15 @@ func TestUserAPIKeyBreakdownScopesToAuthenticatedUserAndSharedFilters(t *testing
 	require.Equal(t, "token", repo.apiKeyBreakdownDim.BillingMode)
 	require.Equal(t, "requests", repo.apiKeyBreakdownDim.SortBy)
 	require.Equal(t, 20, repo.apiKeyBreakdownLimit)
+	require.NotContains(t, rec.Body.String(), "account_cost")
+}
+
+func TestUserAPIKeyBreakdownRejectsUnboundedDateRange(t *testing.T) {
+	repo := &userUsageRepoCapture{}
+	router := newUserUsageRequestTypeTestRouter(repo)
+	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/api-key-breakdown?start_date=2026-01-01&end_date=2026-04-02", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
