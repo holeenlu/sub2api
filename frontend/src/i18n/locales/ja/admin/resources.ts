@@ -558,6 +558,15 @@ ad: {
       clickToViewBalance: 'クリックして残高履歴を表示',
       failedToLoadUser: 'ユーザー情報の読み込みに失敗しました',
       userDeletedBadge: '削除済み',
+      keyRanking: {
+        subtitle: '現在のフィルターと期間における API キー別のトークン使用量',
+        rowHint: 'クリックしてこのキーの使用量詳細を表示',
+        keyCount: '{count}個のキー',
+        columns: {
+          key: 'API キー',
+          user: '所有者'
+        }
+      },
       tokenRanking: {
         subtitle: '現在のフィルターと期間におけるユーザー別のトークン使用量',
         rowHint: "クリックしてこのユーザーの使用量詳細を表示",
