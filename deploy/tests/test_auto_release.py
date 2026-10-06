@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 import urllib.request
 
-from scripts.release.plan import next_version, parts, records
+from scripts.release.plan import history_migrated_with_integrated_official_base, next_version, parts, records
 from deploy.compose_updater import Updater, SafeRedirect, prepare_socket_directory
 
 
@@ -34,6 +34,15 @@ class VersionTests(unittest.TestCase):
         for version in ['0.2', '0.2.8.01', '0.2.8.1.1', '0.2.8\nstable=true', 'v0.2.8']:
             with self.assertRaises(ValueError):
                 parts(version)
+
+    def test_rebuilt_history_requires_integrated_official_base(self):
+        with patch('scripts.release.plan.ancestor', side_effect=lambda a, b: (a, b) == ('upstream-base', 'new-head')):
+            self.assertTrue(history_migrated_with_integrated_official_base(
+                {'commit': 'old-head', 'upstream_commit': 'upstream-base'}, 'new-head'))
+            self.assertFalse(history_migrated_with_integrated_official_base(
+                {'commit': 'old-head'}, 'new-head'))
+            self.assertFalse(history_migrated_with_integrated_official_base(
+                {'commit': 'old-head', 'upstream_commit': 'unrelated-base'}, 'new-head'))
 
 
 class ComposeUpdateTests(unittest.TestCase):
