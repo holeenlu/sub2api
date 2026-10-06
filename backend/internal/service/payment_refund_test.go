@@ -16,6 +16,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRefundReconciliationReadyDoesNotResolveFreshProviderRequest(t *testing.T) {
+	now := time.Now()
+	fresh := &dbent.PaymentOrder{Status: OrderStatusRefunding, UpdatedAt: now}
+	stale := &dbent.PaymentOrder{Status: OrderStatusRefunding, UpdatedAt: now.Add(-paymentFulfillmentLeaseDuration - time.Second)}
+	pending := &dbent.PaymentOrder{Status: OrderStatusRefundPending, UpdatedAt: now}
+
+	require.False(t, refundReconciliationReady(fresh, now))
+	require.True(t, refundReconciliationReady(stale, now))
+	require.True(t, refundReconciliationReady(pending, now))
+}
+
 func TestValidateRefundRequestRejectsLegacyGuessedProviderInstance(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)

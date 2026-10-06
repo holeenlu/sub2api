@@ -180,6 +180,33 @@ func TestApplyOAuthCredentialsPreservesExistingNonAuthCredentials(t *testing.T) 
 	}, stub.lastUpdateAccountInput.Credentials)
 }
 
+func TestApplyOAuthCredentialsSetupTokenDropsPreviousRefreshToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := newStubAdminService()
+	stub.getAccountResult = &service.Account{
+		ID:       1,
+		Platform: service.PlatformAnthropic,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":  "old-token",
+			"refresh_token": "old-refresh-token",
+		},
+	}
+	handler := NewAccountHandler(stub, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.POST("/accounts/:id/apply-oauth-credentials", handler.ApplyOAuthCredentials)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/accounts/1/apply-oauth-credentials", bytes.NewBufferString(
+		`{"type":"setup-token","credentials":{"access_token":"sk-ant-oat01-new"}}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, map[string]any{"access_token": "sk-ant-oat01-new"}, stub.lastUpdateAccountInput.Credentials)
+}
+
 func TestOpenAIOAuthCodexPATBoundaryRejectsMalformedOpenAILongContextBillingValueBeforeTokenValidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewOpenAIOAuthHandler(nil, newStubAdminService(), nil, nil)

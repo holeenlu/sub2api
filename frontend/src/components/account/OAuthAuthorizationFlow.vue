@@ -160,8 +160,19 @@
                   class="rounded-full bg-blue-500 px-2 py-0.5 text-xs text-white"
                 >
                   {{ t('admin.accounts.oauth.keysCount', { count: parsedRefreshTokenCount }) }}
-                </span>
-              </label>
+              </span>
+            </label>
+            <label v-if="showSetupTokenOption" class="flex cursor-pointer items-center gap-2">
+              <input
+                v-model="inputMethod"
+                type="radio"
+                value="setup_token"
+                class="text-blue-600 focus:ring-blue-500"
+              />
+              <span class="text-sm text-blue-900 dark:text-blue-200">{{
+                t('admin.accounts.oauth.setupTokenLongLived')
+              }}</span>
+            </label>
               <textarea
                 v-model="refreshTokenInput"
                 rows="3"
@@ -655,6 +666,41 @@
           </div>
         </div>
 
+        <!-- Claude Code setup-token pasted directly from `claude setup-token`. -->
+        <div v-if="inputMethod === 'setup_token'" class="space-y-4">
+          <div class="rounded-lg border border-emerald-300 bg-white/80 p-4 dark:border-emerald-700 dark:bg-gray-800/80">
+            <p class="text-sm text-emerald-800 dark:text-emerald-300">
+              {{ t('admin.accounts.oauth.setupTokenInstruction') }}
+            </p>
+            <code class="mt-3 block overflow-x-auto rounded bg-emerald-50 px-3 py-2 font-mono text-xs text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+              export CLAUDE_CODE_OAUTH_TOKEN=&lt;token&gt;
+            </code>
+            <p class="mt-3 text-xs text-amber-700 dark:text-amber-300">
+              {{ t('admin.accounts.oauth.setupTokenExpiry') }}
+            </p>
+          </div>
+          <div>
+            <label class="input-label">
+              <Icon name="key" size="sm" class="mr-1 inline text-blue-500" />
+              {{ t('admin.accounts.oauth.setupTokenInput') }}
+            </label>
+            <textarea
+              v-model="setupTokenInput"
+              rows="3"
+              class="input w-full resize-none font-mono text-sm"
+              autocomplete="off"
+              spellcheck="false"
+              :placeholder="t('admin.accounts.oauth.setupTokenPlaceholder')"
+            ></textarea>
+          </div>
+          <div
+            v-if="error"
+            class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-700 dark:bg-red-900/30"
+          >
+            <p class="whitespace-pre-line text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+          </div>
+        </div>
+
         <!-- Manual Authorization Flow -->
         <div v-if="inputMethod === 'manual'" class="space-y-4">
           <p class="mb-4 text-sm text-blue-800 dark:text-blue-300">
@@ -913,6 +959,7 @@ interface Props {
   allowMultiple?: boolean
   methodLabel?: string
   showCookieOption?: boolean // Whether to show cookie auto-auth option
+  showSetupTokenOption?: boolean // Whether to show direct `claude setup-token` input
   showRefreshTokenOption?: boolean // Whether to show refresh token input option (OpenAI only)
   showMobileRefreshTokenOption?: boolean // Whether to show mobile refresh token option (OpenAI only)
   showSessionTokenOption?: boolean
@@ -944,6 +991,7 @@ const props = withDefaults(defineProps<Props>(), {
   allowMultiple: false,
   methodLabel: 'Authorization Method',
   showCookieOption: true,
+  showSetupTokenOption: false,
   showRefreshTokenOption: false,
   showMobileRefreshTokenOption: false,
   showSessionTokenOption: false,
@@ -1016,6 +1064,7 @@ const inputMethod = ref<AuthInputMethod>(props.initialInputMethod)
 const isAgentIdentityInput = computed(() => inputMethod.value === 'agent_identity')
 const authCodeInput = ref('')
 const sessionKeyInput = ref('')
+const setupTokenInput = ref('')
 const refreshTokenInput = ref('')
 const sessionTokenInput = ref('')
 const codexSessionInput = ref('')
@@ -1049,6 +1098,7 @@ watch(emailPasswordOptionEnabled, (enabled) => {
 const methodOptionCount = computed(() => [
   props.showManualOption,
   props.showCookieOption,
+  props.showSetupTokenOption,
   props.showRefreshTokenOption,
   props.showMobileRefreshTokenOption,
   props.showSessionTokenOption,
@@ -1224,6 +1274,7 @@ defineExpose({
   codexSession: codexSessionInput,
   codexPAT: codexPATInput,
   ssoCookie: ssoCookieInput,
+  setupToken: setupTokenInput,
   emailPassword: emailPasswordInput,
   inputMethod,
   reset: () => {
@@ -1231,6 +1282,7 @@ defineExpose({
     oauthState.value = ''
     projectId.value = ''
     sessionKeyInput.value = ''
+    setupTokenInput.value = ''
     refreshTokenInput.value = ''
     sessionTokenInput.value = ''
     codexSessionInput.value = ''

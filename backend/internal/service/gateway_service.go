@@ -910,6 +910,8 @@ func NewGatewayService(
 }
 
 // GenerateSessionHash 从预解析请求计算粘性会话 hash
+const maxStickySessionIDLength = 128
+
 func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	if parsed == nil {
 		return ""
@@ -918,7 +920,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	// 1. 最高优先级：从 metadata.user_id 提取 session_xxx
 	if parsed.MetadataUserID != "" {
 		uid := ParseMetadataUserID(parsed.MetadataUserID)
-		if uid != nil && uid.SessionID != "" {
+		if uid != nil && uid.SessionID != "" && len(uid.SessionID) <= maxStickySessionIDLength {
 			slog.Info("sticky.hash_source",
 				"source", "metadata_user_id",
 				"session_id", uid.SessionID,
@@ -976,18 +978,17 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	return ""
 }
 
-// BindSelectionStickySession 以选号结果为准绑定粘性会话：账号从哪个分组选出，
-// 就绑进哪个分组的命名空间。handler 手里只有 API Key 自己的分组，而无可用账号
-// 兜底借用别的分组账号池后两者不再相同，且调用点看不出差别——所以有 selection
-// 在手的绑定点一律走这里，不再自己传分组。
+// BindSelectionStickySession binds the session in the request group's namespace.
+// AccountSelectionResult currently carries the selected account but no alternate
+// group namespace, so the existing request group remains the source of truth.
 func (s *GatewayService) BindSelectionStickySession(ctx context.Context, selection *AccountSelectionResult, originGroupID *int64, sessionHash string, accountID int64) error {
-	return s.bindStickySessionWithTTL(ctx, SelectionGroupID(selection, originGroupID), sessionHash, accountID, s.selectionStickyBinding(selection))
+	return s.bindStickySessionWithTTL(ctx, originGroupID, sessionHash, accountID, s.selectionStickyBinding(selection))
 }
 
 // BindSelectionStickySessionAfterProfitAdmission 是 BindSelectionStickySession
 // 的利润门版本。
 func (s *GatewayService) BindSelectionStickySessionAfterProfitAdmission(ctx context.Context, selection *AccountSelectionResult, originGroupID *int64, sessionHash string, accountID int64) error {
-	return s.bindStickySessionAfterProfitAdmissionWithTTL(ctx, SelectionGroupID(selection, originGroupID), sessionHash, accountID, s.selectionStickyBinding(selection))
+	return s.bindStickySessionAfterProfitAdmissionWithTTL(ctx, originGroupID, sessionHash, accountID, s.selectionStickyBinding(selection))
 }
 
 // stickySessionBinding 描述一次绑定要写哪些键、各自活多久。historyTTL 为 0 表示
