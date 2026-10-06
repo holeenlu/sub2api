@@ -620,6 +620,41 @@ func parseBoolQueryWithDefault(c *gin.Context, key string, fallback bool) (bool,
 	return parsed, true
 }
 
+// DashboardAPIKeyBreakdown returns the current user's API-key usage ranking.
+// GET /api/v1/usage/dashboard/api-key-breakdown
+func (h *UsageHandler) DashboardAPIKeyBreakdown(c *gin.Context) {
+	parsed, ok := h.parseUserUsageFilters(c, true)
+	if !ok {
+		return
+	}
+
+	dim := usagestats.UserBreakdownDimension{
+		UserID:             parsed.Filters.UserID,
+		APIKeyID:           parsed.Filters.APIKeyID,
+		GroupID:            parsed.Filters.GroupID,
+		Model:              parsed.Filters.Model,
+		ModelType:          parsed.Filters.ModelFilterSource,
+		RequestType:        parsed.Filters.RequestType,
+		Stream:             parsed.Filters.Stream,
+		NativeCompactionV2: parsed.Filters.NativeCompactionV2,
+		BillingType:        parsed.Filters.BillingType,
+		BillingMode:        parsed.Filters.BillingMode,
+		SortBy:             strings.TrimSpace(c.Query("sort_by")),
+	}
+	limit := usagestats.NormalizeBreakdownLimit(c.Query("limit"))
+	rows, err := h.usageService.GetAPIKeyBreakdownStats(c.Request.Context(), parsed.StartTime, parsed.EndTime, dim, limit)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{
+		"api_keys":   rows,
+		"start_date": parsed.StartTime.Format("2006-01-02"),
+		"end_date":   parsed.EndTime.Add(-24 * time.Hour).Format("2006-01-02"),
+	})
+}
+
 // BatchAPIKeysUsageRequest represents the request for batch API keys usage
 type BatchAPIKeysUsageRequest struct {
 	APIKeyIDs []int64 `json:"api_key_ids" binding:"required"`

@@ -73,6 +73,14 @@ describe('APIKeyTokenRanking', () => {
     expect(wrapper.emitted('select-api-key')?.[0]).toEqual([1, 'key-1'])
   })
 
+  it('hides the owner column for the current-user usage page', async () => {
+    const wrapper = mountRanking({ showUser: false })
+    await flushPromises()
+
+    expect(wrapper.findAll('thead th').map((header) => header.text())).not.toContain('admin.usage.keyRanking.columns.user')
+    expect(wrapper.text()).not.toContain('u1@test.com')
+  })
+
   it('reloads with the new sort key when a metric header is clicked', async () => {
     const wrapper = mountRanking()
     await flushPromises()

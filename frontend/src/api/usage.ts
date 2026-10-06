@@ -4,6 +4,7 @@
  */
 
 import { apiClient } from './client'
+import type { UserBreakdownParams } from './admin/dashboard'
 import type {
   UsageLog,
   UsageQueryParams,
@@ -312,6 +313,22 @@ export async function getMyApiKeyDailyUsage(
   return data
 }
 
+export interface UserAPIKeyBreakdownResponse {
+  api_keys: import('@/types').APIKeyBreakdownItem[]
+  start_date: string
+  end_date: string
+}
+
+export async function getDashboardAPIKeyBreakdown(
+  params: UserBreakdownParams
+): Promise<UserAPIKeyBreakdownResponse> {
+  const { data } = await apiClient.get<UserAPIKeyBreakdownResponse>(
+    '/usage/dashboard/api-key-breakdown',
+    { params }
+  )
+  return data
+}
+
 export async function getDashboardSnapshotV2(
   params?: UsageDashboardSnapshotV2Params
 ): Promise<UsageDashboardSnapshotV2Response> {
@@ -384,6 +401,7 @@ export const usageAPI = {
   getMyApiKeyDailyUsage,
   getDashboardSnapshotV2,
   getDashboardApiKeysUsage,
+  getDashboardAPIKeyBreakdown,
   // Error requests
   listMyErrorRequests,
   getMyErrorDetail

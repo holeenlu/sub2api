@@ -402,6 +402,16 @@ func (s *UsageService) GetAPIKeyModelStats(ctx context.Context, apiKeyID int64, 
 	return stats, nil
 }
 
+// GetAPIKeyBreakdownStats returns API-key ranking rows scoped by the supplied filters.
+// The caller must set UserID before exposing this to a non-admin user.
+func (s *UsageService) GetAPIKeyBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) ([]usagestats.APIKeyBreakdownItem, error) {
+	stats, err := s.usageRepo.GetAPIKeyBreakdownStats(ctx, startTime, endTime, dim, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get api key breakdown stats: %w", err)
+	}
+	return stats, nil
+}
+
 // GetAPIKeyDailyUsage returns daily usage stats for a user's API key.
 func (s *UsageService) GetAPIKeyDailyUsage(ctx context.Context, userID, apiKeyID int64, startTime, endTime time.Time) ([]usagestats.APIKeyDailyUsagePoint, error) {
 	trend, err := s.usageRepo.GetUsageTrendWithFilters(ctx, startTime, endTime, "day", userID, apiKeyID, 0, 0, "", nil, nil, nil)
