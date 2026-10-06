@@ -766,8 +766,8 @@ codexDiagnostic: 'Model degradation check',
         searchTestHint:
           'Standalone web_search probe (same as gateway /v1/web_search). Not a free-form chat with tools.',
         ttsTextLabel: 'TTS text',
-        ttsTextPlaceholder: 'Example: Hello from KDAN connectivity test.',
-        ttsTextDefault: 'Hello from KDAN account connectivity test.',
+        ttsTextPlaceholder: 'Example: Hello from Tokensavy connectivity test.',
+        ttsTextDefault: 'Hello from Tokensavy account connectivity test.',
         ttsTestHint: 'Standalone /v1/tts with language=en; success reports audio byte size.',
         sttTestHint: 'Standalone /v1/stt with a synthetic silent WAV; success means the endpoint is reachable.',
         realtimeTestHint:

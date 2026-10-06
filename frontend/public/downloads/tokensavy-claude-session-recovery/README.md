@@ -1,6 +1,6 @@
-# KDAN Claude session recovery
+# Tokensavy Claude session recovery
 
-This tool works with local Claude Code JSONL transcripts. For Codex, use the [Codex tool](https://nextcode.buildtoconnect.com/apps/session-recovery-codex). Official cloud history requires the original account or host.
+This tool works with local Claude Code JSONL transcripts. For Codex, use the [Codex tool](https://tokensavy.ai/apps/session-recovery-codex). Official cloud history requires the original account or host.
 
 ## Rule out connection problems first
 
@@ -19,7 +19,7 @@ Run this in the project directory where you want to continue. Replace the exampl
 
 ## Download and scan
 
-Requires Python 3.10+. [Download the Claude Code tool](https://nextcode.buildtoconnect.com/downloads/kdan-claude-session-recovery.zip), extract it, and enter kdan-claude-session-recovery:
+Requires Python 3.10+. [Download the Claude Code tool](https://tokensavy.ai/downloads/tokensavy-claude-session-recovery.zip), extract it, and enter tokensavy-claude-session-recovery:
 
 ```bash
 bash find-claude-sessions.sh

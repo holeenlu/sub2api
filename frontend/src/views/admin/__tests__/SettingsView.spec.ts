@@ -1202,7 +1202,7 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
-  it("links payment guidance to the KDAN docs site", async () => {
+   it("links payment guidance to the Tokensavy docs site", async () => {
     const wrapper = mountView();
 
     await flushPromises();
@@ -1216,13 +1216,13 @@ describe("admin SettingsView payment visible method controls", () => {
 
     expect(paymentLinks).toHaveLength(2);
     expect(paymentLinks[0]?.attributes("href")).toBe(
-      "https://docs.kdan.com/zh/payment",
+      "/guides/payment.zh.md",
     );
     expect(paymentLinks[1]?.attributes("href")).toBe(
-      "https://docs.kdan.com/zh/payment#supported-payment-methods",
+      "/guides/payment.zh.md",
     );
     for (const link of paymentLinks) {
-      expect(link.attributes("href")).toContain("https://docs.kdan.com/");
+      expect(link.attributes("href")).toContain("/guides/");
     }
   });
 

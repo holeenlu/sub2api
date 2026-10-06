@@ -1,8 +1,16 @@
+# Tokensavy
+
+Tokensavy 品牌分支，基于 TapModels；域名 `tokensavy.ai`。
+
+**全新服务器请使用 [Tokensavy 部署指南](deploy/tokensavy/README.md)。** 下方保留继承的项目说明，其中旧品牌部署/发版命令不适用于本分支。
+
+---
+
 <div align="center">
 
-<img src="assets/logo.svg" alt="KDAN Logo" width="128" />
+<img src="assets/logo.svg" alt="TapModels Logo" width="128" />
 
-# KDAN
+# TapModels
 
 [![Go](https://img.shields.io/badge/Go-1.27.0-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
@@ -10,7 +18,9 @@
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
-**AI API Gateway Platform for Subscription Quota Distribution**
+**Pick a model. Start building.**
+
+Access multiple AI models through one unified API. Spend less time managing integrations and more time building.
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
@@ -27,7 +37,7 @@ Please read the following carefully before using this project:
 
 ## Overview
 
-KDAN is an AI API gateway platform designed to distribute and manage API quotas from AI product subscriptions. Users can access upstream AI services through platform-generated API Keys, while the platform handles authentication, billing, load balancing, and request forwarding.
+TapModels lets developers reach multiple AI models through one unified API. Users call upstream AI services with a TapModels API key, while the platform handles authentication, billing, load balancing, and request forwarding — so you spend less time managing integrations and more time building.
 
 ## Features
 
@@ -57,7 +67,7 @@ API Key limits default to `0` (no additional limit). Configure them under **API 
 
 ## Nginx Reverse Proxy Note
 
-When using Nginx as a reverse proxy for KDAN (or CRS) with Codex CLI, add the following to the `http` block in your Nginx configuration:
+When using Nginx as a reverse proxy for TapModels (or CRS) with Codex CLI, add the following to the `http` block in your Nginx configuration:
 
 ```nginx
 underscores_in_headers on;
@@ -84,16 +94,16 @@ Use the automated deployment script for easy setup:
 
 ```bash
 # Create deployment directory
-mkdir -p kdan-deploy && cd kdan-deploy
+mkdir -p tapmodels-deploy && cd tapmodels-deploy
 
 # Download and run deployment preparation script
-curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/KDAN/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/TapModels/deploy/docker-deploy.sh | bash
 
 # Start services
 docker compose up -d
 
 # View logs
-docker compose logs -f kdan
+docker compose logs -f tapmodels
 ```
 
 **What the script does:**
@@ -109,7 +119,7 @@ If you prefer manual setup:
 
 ```bash
 # 1. Clone the repository
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b TapModels https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 
 # 2. Copy environment configuration
@@ -167,7 +177,7 @@ docker compose up -d
 docker compose -f docker-compose.local.yml ps
 
 # 7. View logs
-docker compose -f docker-compose.local.yml logs -f kdan
+docker compose -f docker-compose.local.yml logs -f tapmodels
 ```
 
 #### Deployment Versions
@@ -185,7 +195,7 @@ Open `http://YOUR_SERVER_IP:8080` in your browser.
 
 If admin password was auto-generated, find it in logs:
 ```bash
-docker compose -f docker-compose.local.yml logs kdan | grep "admin password"
+docker compose -f docker-compose.local.yml logs tapmodels | grep "admin password"
 ```
 
 #### Upgrade
@@ -204,14 +214,14 @@ When using `docker-compose.local.yml`, migrate to a new server easily:
 # On source server
 docker compose -f docker-compose.local.yml down
 cd ..
-tar czf kdan-complete.tar.gz kdan-deploy/
+tar czf tapmodels-complete.tar.gz tapmodels-deploy/
 
 # Transfer to new server
-scp kdan-complete.tar.gz user@new-server:/path/
+scp tapmodels-complete.tar.gz user@new-server:/path/
 
 # On new server
-tar xzf kdan-complete.tar.gz
-cd kdan-deploy/
+tar xzf tapmodels-complete.tar.gz
+cd tapmodels-deploy/
 docker compose -f docker-compose.local.yml up -d
 ```
 
@@ -236,10 +246,10 @@ rm -rf data/ postgres_data/ redis_data/
 
 ### Method 2: Apple container (macOS)
 
-Apple-silicon Macs running macOS 26 can run the full KDAN, PostgreSQL, and Redis stack with Apple `container` 1.1.0 or newer:
+Apple-silicon Macs running macOS 26 can run the full TapModels, PostgreSQL, and Redis stack with Apple `container` 1.1.0 or newer:
 
 ```bash
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b TapModels https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 ./apple-container.sh init
 ./apple-container.sh up
@@ -265,7 +275,7 @@ Build and run from source code for development or customization.
 
 ```bash
 # 1. Clone the repository
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b TapModels https://github.com/holeenlu/sub2api.git
 cd sub2api
 
 # 2. Install pnpm (if not already installed)
@@ -280,7 +290,7 @@ pnpm run build
 # 4. Build backend with embedded frontend
 cd ../backend
 VERSION="$(./scripts/resolve-version.sh)"
-go build -tags embed -ldflags="-X main.Version=${VERSION}" -o kdan ./cmd/server
+go build -tags embed -ldflags="-X main.Version=${VERSION}" -o tapmodels ./cmd/server
 
 # 5. Create configuration file
 cp ../deploy/config.example.yaml ./config.yaml
@@ -304,7 +314,7 @@ database:
   port: 5432
   user: "postgres"
   password: "your_password"
-  dbname: "kdan"
+  dbname: "tapmodels"
 
 redis:
   host: "localhost"
@@ -333,7 +343,7 @@ Additional security-related options are available in `config.yaml`:
 - `security.response_headers.enabled` to enable configurable response header filtering (disabled uses default allowlist)
 - `security.csp` to control Content-Security-Policy headers
 - `billing.circuit_breaker` to fail closed on billing errors
-- `security.trust_forwarded_ip_for_api_key_acl` enables legacy raw forwarded-header takeover (enabled by default for upgrade compatibility); disable it to enforce `server.trusted_proxies`, which should contain only the exact proxy CIDRs that connect directly to KDAN
+- `security.trust_forwarded_ip_for_api_key_acl` enables legacy raw forwarded-header takeover (enabled by default for upgrade compatibility); disable it to enforce `server.trusted_proxies`, which should contain only the exact proxy CIDRs that connect directly to TapModels
 - `security.forwarded_client_ip_headers` configures up to 16 third-party CDN client-IP header names; they are checked in order before the built-in headers only while legacy takeover is enabled
 - `turnstile.required` to require Turnstile in release mode
 
@@ -459,20 +469,20 @@ Because step 5 above pre-creates `config.yaml`, the setup wizard will be **skipp
 
 **Two ways to create the admin account:**
 
-1. **Recommended — let the wizard generate `config.yaml`:** Skip step 5 (do not run the `cp`). Start `./kdan` directly; the setup wizard at `http://localhost:8080` walks you through database, Redis, and admin account setup, then writes `config.yaml` for you.
+1. **Recommended — let the wizard generate `config.yaml`:** Skip step 5 (do not run the `cp`). Start `./tapmodels` directly; the setup wizard at `http://localhost:8080` walks you through database, Redis, and admin account setup, then writes `config.yaml` for you.
 
 2. **If you already created `config.yaml`:** Temporarily move it aside so the wizard can trigger on first run, then restore it afterwards:
    ```bash
    mv config.yaml config.yaml.bak
-   ./kdan        # wizard runs at http://localhost:8080 and writes a fresh config.yaml
+   ./tapmodels        # wizard runs at http://localhost:8080 and writes a fresh config.yaml
    # stop the server (Ctrl+C) once the wizard completes, then restore your config:
    mv config.yaml.bak config.yaml
-   ./kdan        # restart in normal mode and log in with the admin you just created
+   ./tapmodels        # restart in normal mode and log in with the admin you just created
    ```
 
 ```bash
 # 6. Run the application
-./kdan
+./tapmodels
 ```
 
 #### Development Mode
@@ -520,7 +530,7 @@ Long-running OpenAI/Grok image generation and editing can be submitted through `
 
 ## Grok / xAI Support
 
-KDAN supports both Grok subscription accounts through xAI OAuth and standard xAI API-key accounts. Both account types forward OpenAI-compatible Responses traffic to xAI.
+TapModels supports both Grok subscription accounts through xAI OAuth and standard xAI API-key accounts. Both account types forward OpenAI-compatible Responses traffic to xAI.
 
 ### Supported Scope
 
@@ -565,8 +575,8 @@ For API-key accounts, select **Grok → API Key** in the create-account dialog. 
 
 ### Grok Build CLI Configuration
 
-1. In the KDAN admin dashboard, add either a `grok` OAuth account and complete xAI authorization, or add a Grok API-key account.
-2. Create a Grok group, attach the account to it, then create a KDAN API key assigned to that group.
+1. In the TapModels admin dashboard, add either a `grok` OAuth account and complete xAI authorization, or add a Grok API-key account.
+2. Create a Grok group, attach the account to it, then create a TapModels API key assigned to that group.
 3. In the user API-key page, click **Use Key** and select **Grok CLI**. The modal generates the correct file and base URL for macOS/Linux or Windows. It also provides an OpenCode configuration on the **OpenCode** tab.
 4. If configuring manually, save the following as `~/.grok/config.toml` (Windows: `%USERPROFILE%\.grok\config.toml`):
 
@@ -577,26 +587,26 @@ web_search = "grok"
 
 [model."grok"]
 model = "grok-4.5"
-base_url = "https://api.kdan.com/v1"
+base_url = "https://api.tapmodels.ai/v1"
 name = "Grok 4.5"
-api_key = "sk-your-kdan-key"
+api_key = "sk-your-tapmodels-key"
 api_backend = "responses"
 context_window = 1000000
 supports_backend_search = true
 ```
 
-Back up an existing `config.toml` before merging the entry. The file contains a KDAN API key, so keep it private and restrict its permissions where supported. Verify the effective configuration and make a smoke request:
+Back up an existing `config.toml` before merging the entry. The file contains a TapModels API key, so keep it private and restrict its permissions where supported. Verify the effective configuration and make a smoke request:
 
 ```bash
 grok inspect
-grok -p "Reply with kdan-ok" -m grok
+grok -p "Reply with tapmodels-ok" -m grok
 ```
 
-The `base_url` above is the public KDAN URL ending in `/v1`, not `api.x.ai` or the internal xAI OAuth proxy URL.
+The `base_url` above is the public TapModels URL ending in `/v1`, not `api.x.ai` or the internal xAI OAuth proxy URL.
 
 ### Usage And Quota Display
 
-xAI quota is passive. KDAN does not invent subscription quota values; it records whitelisted xAI rate-limit headers from successful or rate-limited upstream responses when xAI sends them. Before the first usable upstream response, the dashboard shows quota as unknown and still displays local KDAN usage stats.
+xAI quota is passive. TapModels does not invent subscription quota values; it records whitelisted xAI rate-limit headers from successful or rate-limited upstream responses when xAI sends them. Before the first usable upstream response, the dashboard shows quota as unknown and still displays local TapModels usage stats.
 
 `401` responses temporarily remove accounts with invalid credentials from scheduling. `403` responses are treated as access or entitlement failures instead of token-refresh loops. `429` responses use `Retry-After` or a short cooldown to temporarily remove the account from scheduling.
 
@@ -633,7 +643,7 @@ The built-in `jev-latest` price is `$0.042` per million input tokens and `$0` fo
 
 ## Antigravity Support
 
-KDAN supports [Antigravity](https://antigravity.so/) accounts. After authorization, dedicated endpoints are available for Claude and Gemini models.
+TapModels supports [Antigravity](https://antigravity.so/) accounts. After authorization, dedicated endpoints are available for Claude and Gemini models.
 
 ### Dedicated Endpoints
 
@@ -682,7 +692,7 @@ sub2api/
     ├── docker-compose.yml    # Docker Compose configuration
     ├── .env.example          # Environment variables for Docker Compose
     ├── config.example.yaml   # Full config file for binary deployment
-    └── install.sh            # Legacy binary installer (disabled: no KDAN releases)
+    └── install.sh            # Legacy binary installer (disabled: no TapModels releases)
 ```
 
 ## License
@@ -693,7 +703,7 @@ Copyright (c) 2026 Wesley Liddick
 
 ## Acknowledgements
 
-KDAN is built on the Sub2API open-source project, licensed under LGPL-3.0.
+TapModels is built on the Sub2API open-source project, licensed under LGPL-3.0.
 
 ---
 

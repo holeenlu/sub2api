@@ -293,3 +293,15 @@ func TestUpdateServiceReportsRunningBuildCommit(t *testing.T) {
 		require.Empty(t, info.BuildCommit)
 	}
 }
+
+// These fixtures exercise the upstream, unprefixed version format independently
+// of the default channel compiled into this brand's production service.
+
+func TestUpdateTokensavyDefaultChannel(t *testing.T) {
+	svc := NewUpdateService(nil, nil, "0.2.13.1", "release")
+	require.Equal(t, "tokensavy", svc.releaseChannel)
+	require.Equal(t, "holeenlu/sub2api", githubRepo)
+	require.Empty(t, svc.releaseVersion("tapmodels/v0.2.13.2"))
+	require.Empty(t, svc.releaseVersion("kdan/v0.2.13.2"))
+	require.Equal(t, "0.2.13.2", svc.releaseVersion("tokensavy/v0.2.13.2"))
+}

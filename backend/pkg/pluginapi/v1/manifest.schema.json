@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sub2api.local/schemas/plugin-manifest-v1.json",
-  "title": "KDAN Plugin Manifest v1",
+  "title": "TapModels Plugin Manifest v1",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "id", "name", "version", "requires", "capabilities", "runtimes", "ui", "files"],

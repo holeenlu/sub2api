@@ -1,6 +1,6 @@
 ## Error handling
 
-KDAN preserves the inbound protocol's error shape. OpenAI, Anthropic, and Google-style fields can differ. Log the HTTP status, error type, message, and response request ID.
+Tokensavy preserves the inbound protocol's error shape. OpenAI, Anthropic, and Google-style fields can differ. Log the HTTP status, error type, message, and response request ID.
 
 | Status | Common cause | Action |
 | --- | --- | --- |

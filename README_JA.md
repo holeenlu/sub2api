@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="KDAN Logo" width="128" />
+<img src="assets/logo.svg" alt="TapModels Logo" width="128" />
 
-# KDAN
+# TapModels
 
 [![Go](https://img.shields.io/badge/Go-1.27.0-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
@@ -10,7 +10,9 @@
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
-**サブスクリプションクォータ配分のための AI API ゲートウェイプラットフォーム**
+**モデルを選んで、開発を始めよう。**
+
+1 つの統一 API で複数の AI モデルを利用できます。連携の構築と管理にかける時間を減らし、開発により多くの時間を使えます。
 
 [English](README.md) | [中文](README_CN.md) | 日本語
 
@@ -27,7 +29,7 @@
 
 ## 概要
 
-KDAN は、AI 製品のサブスクリプションから API クォータを配分・管理するために設計された AI API ゲートウェイプラットフォームです。ユーザーはプラットフォームが生成した API キーを通じて上流の AI サービスにアクセスでき、プラットフォームは認証、課金、負荷分散、リクエスト転送を処理します。
+TapModels は、1 つの統一 API で複数の AI モデルを利用できるようにするプラットフォームです。ユーザーは TapModels が発行した API キーで上流の AI サービスを呼び出し、プラットフォームが認証、課金、負荷分散、リクエスト転送を処理します。連携の構築と管理にかける時間を減らし、開発により多くの時間を使えます。
 
 ## 機能
 
@@ -54,7 +56,7 @@ KDAN は、AI 製品のサブスクリプションから API クォータを配�
 
 ## Nginx リバースプロキシに関する注意
 
-KDAN（または CRS）を Nginx でリバースプロキシし、Codex CLI と組み合わせて使用する場合、Nginx の `http` ブロックに以下の設定を追加してください:
+TapModels（または CRS）を Nginx でリバースプロキシし、Codex CLI と組み合わせて使用する場合、Nginx の `http` ブロックに以下の設定を追加してください:
 
 ```nginx
 underscores_in_headers on;
@@ -81,16 +83,16 @@ PostgreSQL と Redis のコンテナを含む Docker Compose でデプロイし�
 
 ```bash
 # デプロイ用ディレクトリを作成
-mkdir -p kdan-deploy && cd kdan-deploy
+mkdir -p tapmodels-deploy && cd tapmodels-deploy
 
 # デプロイ準備スクリプトをダウンロードして実行
-curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/KDAN/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/TapModels/deploy/docker-deploy.sh | bash
 
 # サービスを起動
 docker compose up -d
 
 # ログを表示
-docker compose logs -f kdan
+docker compose logs -f tapmodels
 ```
 
 **スクリプトの動作内容:**
@@ -106,7 +108,7 @@ docker compose logs -f kdan
 
 ```bash
 # 1. リポジトリをクローン
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b TapModels https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 
 # 2. 環境設定ファイルをコピー
@@ -164,7 +166,7 @@ docker compose up -d
 docker compose -f docker-compose.local.yml ps
 
 # 7. ログを表示
-docker compose -f docker-compose.local.yml logs -f kdan
+docker compose -f docker-compose.local.yml logs -f tapmodels
 ```
 
 #### デプロイバージョン
@@ -182,7 +184,7 @@ docker compose -f docker-compose.local.yml logs -f kdan
 
 管理者パスワードが自動生成された場合は、ログで確認できます:
 ```bash
-docker compose -f docker-compose.local.yml logs kdan | grep "admin password"
+docker compose -f docker-compose.local.yml logs tapmodels | grep "admin password"
 ```
 
 #### アップグレード
@@ -201,14 +203,14 @@ docker compose -f docker-compose.local.yml up -d
 # 移行元サーバーにて
 docker compose -f docker-compose.local.yml down
 cd ..
-tar czf kdan-complete.tar.gz kdan-deploy/
+tar czf tapmodels-complete.tar.gz tapmodels-deploy/
 
 # 新しいサーバーに転送
-scp kdan-complete.tar.gz user@new-server:/path/
+scp tapmodels-complete.tar.gz user@new-server:/path/
 
 # 移行先サーバーにて
-tar xzf kdan-complete.tar.gz
-cd kdan-deploy/
+tar xzf tapmodels-complete.tar.gz
+cd tapmodels-deploy/
 docker compose -f docker-compose.local.yml up -d
 ```
 
@@ -233,10 +235,10 @@ rm -rf data/ postgres_data/ redis_data/
 
 ### 方法2: Apple container（macOS）
 
-Apple シリコン搭載 Mac と macOS 26 では、Apple `container` 1.1.0 以降を使用して KDAN、PostgreSQL、Redis の完全なスタックを実行できます:
+Apple シリコン搭載 Mac と macOS 26 では、Apple `container` 1.1.0 以降を使用して TapModels、PostgreSQL、Redis の完全なスタックを実行できます:
 
 ```bash
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b TapModels https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 ./apple-container.sh init
 ./apple-container.sh up
@@ -262,7 +264,7 @@ cd sub2api/deploy
 
 ```bash
 # 1. リポジトリをクローン
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
+git clone -b TapModels https://github.com/holeenlu/sub2api.git
 cd sub2api
 
 # 2. pnpm をインストール（未インストールの場合）
@@ -277,7 +279,7 @@ pnpm run build
 # 4. フロントエンドを組み込んだバックエンドをビルド
 cd ../backend
 VERSION="$(./scripts/resolve-version.sh)"
-go build -tags embed -ldflags="-X main.Version=${VERSION}" -o kdan ./cmd/server
+go build -tags embed -ldflags="-X main.Version=${VERSION}" -o tapmodels ./cmd/server
 
 # 5. 設定ファイルを作成
 cp ../deploy/config.example.yaml ./config.yaml
@@ -301,7 +303,7 @@ database:
   port: 5432
   user: "postgres"
   password: "your_password"
-  dbname: "kdan"
+  dbname: "tapmodels"
 
 redis:
   host: "localhost"
@@ -329,7 +331,7 @@ default:
 - `security.response_headers.enabled` - 設定可能なレスポンスヘッダーフィルタリングを有効化（無効時はデフォルトの許可リストを使用）
 - `security.csp` - Content-Security-Policy ヘッダーの制御
 - `billing.circuit_breaker` - 課金エラー時にフェイルクローズ
-- `security.trust_forwarded_ip_for_api_key_acl` - 従来の生転送ヘッダーによる上書きを制御（アップグレード互換性のため既定で有効）。無効にすると `server.trusted_proxies` を厳格に使用し、KDAN に直接接続するプロキシの正確な CIDR のみを指定
+- `security.trust_forwarded_ip_for_api_key_acl` - 従来の生転送ヘッダーによる上書きを制御（アップグレード互換性のため既定で有効）。無効にすると `server.trusted_proxies` を厳格に使用し、TapModels に直接接続するプロキシの正確な CIDR のみを指定
 - `security.forwarded_client_ip_headers` - サードパーティ CDN のクライアント IP ヘッダーを最大 16 個指定。従来モードが有効な場合のみ、設定順で組み込みヘッダーより先に評価
 - `turnstile.required` - リリースモードでの Turnstile 必須化
 
@@ -389,20 +391,20 @@ URL バリデーションまたはレスポンスヘッダーフィルタリン�
 
 **管理者アカウントを作成する 2 つの方法:**
 
-1. **推奨 — ウィザードに `config.yaml` を自動生成させる:** 上記ステップ 5 をスキップします（`cp` を実行しない）。`./kdan` を直接起動し、`http://localhost:8080` にアクセスすると、セットアップウィザードがデータベース・Redis・管理者アカウントの設定を案内し、`config.yaml` を自動生成します。
+1. **推奨 — ウィザードに `config.yaml` を自動生成させる:** 上記ステップ 5 をスキップします（`cp` を実行しない）。`./tapmodels` を直接起動し、`http://localhost:8080` にアクセスすると、セットアップウィザードがデータベース・Redis・管理者アカウントの設定を案内し、`config.yaml` を自動生成します。
 
 2. **すでに `config.yaml` を作成してしまった場合:** 初回起動前に一時的に退避してウィザードを発生させ、完了後に戻します:
    ```bash
    mv config.yaml config.yaml.bak
-   ./kdan        # ウィザードが http://localhost:8080 で起動し、新しい config.yaml を生成します
+   ./tapmodels        # ウィザードが http://localhost:8080 で起動し、新しい config.yaml を生成します
    # ウィザード完了後、Ctrl+C でサーバーを停止し、設定を復元します:
    mv config.yaml.bak config.yaml
-   ./kdan        # 通常モードで再起動し、作成した管理者でログインします
+   ./tapmodels        # 通常モードで再起動し、作成した管理者でログインします
    ```
 
 ```bash
 # 6. アプリケーションを実行
-./kdan
+./tapmodels
 ```
 
 #### 開発モード
@@ -441,7 +443,7 @@ go generate ./cmd/server
 
 ## Antigravity サポート
 
-KDAN は [Antigravity](https://antigravity.so/) アカウントをサポートしています。認証後、Claude および Gemini モデル用の専用エンドポイントが利用可能になります。
+TapModels は [Antigravity](https://antigravity.so/) アカウントをサポートしています。認証後、Claude および Gemini モデル用の専用エンドポイントが利用可能になります。
 
 ### 専用エンドポイント
 
@@ -490,7 +492,7 @@ sub2api/
     ├── docker-compose.yml    # Docker Compose 設定
     ├── .env.example          # Docker Compose 用環境変数
     ├── config.example.yaml   # バイナリデプロイ用フル設定ファイル
-    └── install.sh            # 旧バイナリインストーラ（無効: KDAN のリリース成果物なし）
+    └── install.sh            # 旧バイナリインストーラ（無効: TapModels のリリース成果物なし）
 ```
 
 ## ライセンス
@@ -501,7 +503,7 @@ Copyright (c) 2026 Wesley Liddick
 
 ## 謝辞
 
-KDAN は、LGPL-3.0 で公開されているオープンソースプロジェクト Sub2API を基に構築されています。
+TapModels は、LGPL-3.0 で公開されているオープンソースプロジェクト Sub2API を基に構築されています。
 
 ---
 

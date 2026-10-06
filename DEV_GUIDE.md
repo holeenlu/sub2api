@@ -1,4 +1,4 @@
-# KDAN 项目开发指南
+# TapModels 项目开发指南
 
 > 本文档记录项目环境配置、常见坑点和注意事项，供 Claude Code 和团队成员参考。
 
@@ -7,7 +7,7 @@
 | 项目 | 说明 |
 |------|------|
 | **上游开源项目** | Sub2API（LGPL-3.0） |
-| **本仓库** | holeenlu/sub2api（KDAN） |
+| **本仓库** | holeenlu/sub2api（TapModels） |
 | **技术栈** | Go 后端 (Ent ORM + Gin) + Vue3 前端 (pnpm) |
 | **数据库** | PostgreSQL 16 + Redis |
 | **包管理** | 后端: go modules, 前端: **pnpm**（不是 npm） |

@@ -1118,15 +1118,15 @@ $env:XAI_API_KEY="${apiKey}"`
 export XAI_API_KEY="${apiKey}"`
   }
 
-  // Shape follows Grok Build user guide (~/.grok/docs + custom-models) and production-ready KDAN setups.
+  // Shape follows Grok Build user guide (~/.grok/docs + custom-models) and production-ready Tokensavy setups.
   // Text models only (Responses). Image/video: Imagine model IDs on media endpoints / feature overrides.
   // Credential order: api_key field → env_key → signed-in session → XAI_API_KEY global fallback.
   const modelsListUrl = `${baseUrl.replace(/\/+$/, '')}/models`
-  const configContent = `# Grok Build CLI → KDAN Grok group (API key auth).
+  const configContent = `# Grok Build CLI → Tokensavy Grok group (API key auth).
 # Docs: ~/.grok/docs/user-guide/05-configuration.md + 11-custom-models.md
 # Verify after save: grok inspect
 #
-# IMPORTANT: api_backend must be "responses" for KDAN Grok (POST /v1/responses).
+# IMPORTANT: api_backend must be "responses" for Tokensavy Grok (POST /v1/responses).
 # If omitted, Grok Build defaults to chat_completions (/v1/chat/completions).
 # Keep api_backend = "responses" on every model entry.
 #
@@ -1141,7 +1141,7 @@ models_list_url = "${modelsListUrl}"        # optional override (env: GROK_MODEL
 xai_api_base_url = "${baseUrl}"             # public xAI API base override for gateway routing
 cli_chat_proxy_base_url = "${baseUrl}"      # CLI chat-proxy base (env: GROK_CLI_CHAT_PROXY_BASE_URL)
 
-# Prefer API key when using a custom gateway (matches KDAN).
+# Prefer API key when using a custom gateway (matches Tokensavy).
 # Requires XAI_API_KEY env or per-model env_key / api_key.
 [auth]
 preferred_method = "api_key"
@@ -1149,7 +1149,7 @@ preferred_method = "api_key"
 [model."grok-4.5"]
 model = "grok-4.5"                          # id sent to the API
 name = "Grok 4.5"                           # shown in /model picker
-description = "Grok 4.5 via KDAN (Responses)"
+description = "Grok 4.5 via Tokensavy (Responses)"
 # base_url inherits from [endpoints].models_base_url; override only if needed:
 # base_url = "${baseUrl}"
 env_key = "XAI_API_KEY"                     # or: api_key = "${apiKey}"  (not recommended)
@@ -1212,7 +1212,7 @@ image_description = "grok-4.5"              # vision/describe-image helper model
 [session]
 auto_compact_threshold_percent = 80         # auto-compact at this % of context_window (default 85)
 
-# Imagine tools: model IDs go to KDAN media endpoints (not the text [model.*] catalog).
+# Imagine tools: model IDs go to Tokensavy media endpoints (not the text [model.*] catalog).
 # Enable only if the Grok group allows image/video generation.
 [features]
 image_gen = true
@@ -1247,25 +1247,25 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
   switch (shell) {
     case 'cmd':
       envPath = 'Command Prompt'
-      envContent = `set KDAN_API_KEY=${apiKey}`
+      envContent = `set TOKENSAVY_API_KEY=${apiKey}`
       break
     case 'powershell':
     case 'windows':
       envPath = 'PowerShell'
-      envContent = `$env:KDAN_API_KEY="${apiKey}"`
+      envContent = `$env:TOKENSAVY_API_KEY="${apiKey}"`
       break
     default:
       envPath = 'Terminal'
-      envContent = `export KDAN_API_KEY="${apiKey}"`
+      envContent = `export TOKENSAVY_API_KEY="${apiKey}"`
   }
 
-  const configContent = `# Codex CLI → KDAN Grok group
+  const configContent = `# Codex CLI → Tokensavy Grok group
 # Docs: Codex config reference (model_providers.*, wire_api = "responses")
 #
 # Text models only. Image/video: grok-imagine-image / grok-imagine-video on media endpoints.
 # Switch model: grok-4.5 | grok-4.3 | grok-build-0.1 | grok-4.20-multi-agent-0309 (text / web_search)
 
-model_provider = "kdan"
+model_provider = "tokensavy"
 model = "${model}"
 ${codexLocalCatalogToml.value}# Optional:
 # review_model = "${model}"
@@ -1275,17 +1275,17 @@ ${codexLocalCatalogToml.value}# Optional:
 # network_access = "enabled"
 # windows_wsl_setup_acknowledged = true
 
-[model_providers.kdan]
-name = "KDAN Grok"
+[model_providers.tokensavy]
+name = "Tokensavy Grok"
 base_url = "${baseUrl}"
 ${codexModelCatalogMode.value === 'remote' ? `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n` : ''}# Prefer env_key (variable NAME). Do not combine with experimental_bearer_token.
-env_key = "KDAN_API_KEY"
+env_key = "TOKENSAVY_API_KEY"
 # Fallback only if you cannot set env (discouraged — keeps secret on disk):
 # experimental_bearer_token = "${apiKey}"
 wire_api = "responses"
 # API-key providers: do not require ChatGPT OAuth login
 requires_openai_auth = false
-# Grok/KDAN path is HTTP/SSE; disable WS (Codex may otherwise try WebSocket first)
+# Grok/Tokensavy path is HTTP/SSE; disable WS (Codex may otherwise try WebSocket first)
 supports_websockets = false
 
 # Optional:
@@ -1340,19 +1340,19 @@ function generateRoutedCodexFiles(
   }
   const label = labels[platform]
   const envContent = isWindows
-    ? `$env:KDAN_API_KEY="${apiKey}"`
-    : `export KDAN_API_KEY="${apiKey}"`
+    ? `$env:TOKENSAVY_API_KEY="${apiKey}"`
+    : `export TOKENSAVY_API_KEY="${apiKey}"`
 
-  const configContent = `# Codex CLI -> KDAN ${label} group
-model_provider = "kdan"
+  const configContent = `# Codex CLI -> Tokensavy ${label} group
+model_provider = "tokensavy"
 model = "${model}"
 review_model = "${model}"
 disable_response_storage = true
 ${codexLocalCatalogToml.value}
-[model_providers.kdan]
-name = "KDAN ${label}"
+[model_providers.tokensavy]
+name = "Tokensavy ${label}"
 base_url = "${baseUrl}"
-${codexModelCatalogMode.value === 'remote' ? `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n` : ''}env_key = "KDAN_API_KEY"
+${codexModelCatalogMode.value === 'remote' ? `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n` : ''}env_key = "TOKENSAVY_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false`
@@ -2033,9 +2033,9 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
   } else if (platform === 'openai') {
     provider[platform].models = openaiModels
   } else if (platform === 'grok') {
-    // Custom provider pointing at KDAN OpenAI-compatible Responses/Chat endpoints.
+    // Custom provider pointing at Tokensavy OpenAI-compatible Responses/Chat endpoints.
     provider[platform].npm = '@ai-sdk/openai-compatible'
-    provider[platform].name = 'Grok via KDAN'
+    provider[platform].name = 'Grok via Tokensavy'
     provider[platform].models = grokModels
   }
 
