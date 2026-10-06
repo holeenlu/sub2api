@@ -15,13 +15,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ManualReleaseWorkflowTests(unittest.TestCase):
-    def test_only_release_workflow_is_present_and_requires_manual_dispatch(self):
-        workflows = sorted(
-            path for path in (ROOT / '.github/workflows').iterdir()
-            if path.suffix in {'.yml', '.yaml'}
+    def test_release_workflow_is_present_and_requires_manual_dispatch(self):
+        workflows_dir = ROOT / '.github/workflows'
+        release_workflows = sorted(
+            path for path in workflows_dir.iterdir()
+            if path.name == 'automatic-release.yml'
         )
-        self.assertEqual([path.name for path in workflows], ['automatic-release.yml'])
-        for path in workflows:
+        self.assertEqual([path.name for path in release_workflows], ['automatic-release.yml'])
+        self.assertTrue((workflows_dir / 'quality-gate.yml').is_file())
+        for path in release_workflows:
             with self.subTest(workflow=path.name):
                 # BaseLoader preserves the GitHub YAML key "on" as a string.
                 workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
