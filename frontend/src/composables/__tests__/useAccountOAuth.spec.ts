@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import {
   buildClaudeSetupTokenCredentials,
@@ -13,10 +13,7 @@ describe('Claude setup-token helpers', () => {
     )
   })
 
-  it('stores OAuth credentials with a one-year expiry', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-10-06T00:00:00Z'))
-
+  it('stores OAuth credentials without inventing a local expiry timestamp', () => {
     const credentials = buildClaudeSetupTokenCredentials('sk-ant-oat01-example')
 
     expect(credentials).toMatchObject({
@@ -24,7 +21,10 @@ describe('Claude setup-token helpers', () => {
       token_type: 'oauth',
       scope: 'user:inference'
     })
-    expect(credentials?.expires_at).toBe(Math.floor(new Date('2027-10-06T00:00:00Z').getTime() / 1000))
-    vi.useRealTimers()
+    expect(credentials).not.toHaveProperty('expires_at')
+  })
+
+  it('rejects non Setup Token credentials', () => {
+    expect(buildClaudeSetupTokenCredentials('sk-ant-api03-example')).toBeNull()
   })
 })

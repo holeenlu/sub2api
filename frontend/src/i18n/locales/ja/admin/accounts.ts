@@ -1152,6 +1152,7 @@ export default {
         setupTokenExpiry: 'このセットアップトークンの有効期間は1年です。上に表示された環境変数を設定して使用します。',
         setupTokenInput: 'セットアップトークン',
         setupTokenPlaceholder: 'claude setup-tokenが返したトークンを貼り付けてください...',
+        setupTokenInvalid: 'セットアップトークンは sk-ant-oat で始まる必要があります。',
         manualAuth: '手動認証',
         cookieAutoAuth: 'Cookie自動認証',
         cookieAutoAuthDesc:

@@ -42,6 +42,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: npm ci --prefix ../tools/zh-tw --omit=dev
       - run: pnpm typecheck
       - run: pnpm lint:check
       - run: pnpm test:run

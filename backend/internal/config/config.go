@@ -3720,6 +3720,9 @@ func (c *Config) Validate() error {
 	if c.Gateway.Scheduling.StickySessionTTLSeconds <= 0 {
 		return fmt.Errorf("gateway.scheduling.sticky_session_ttl_seconds must be positive")
 	}
+	if c.Gateway.Scheduling.StickySessionTTLSeconds > 30*24*60*60 {
+		return fmt.Errorf("gateway.scheduling.sticky_session_ttl_seconds must not exceed 30 days")
+	}
 	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds < 0 {
 		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must not be negative")
 	}

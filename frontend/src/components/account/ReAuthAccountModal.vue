@@ -293,7 +293,7 @@ const isManualInputMethod = computed(() => {
 const canExchangeCode = computed(() => {
   const authCode = oauthFlowRef.value?.authCode || ''
   if (isAnthropic.value && addMethod.value === 'setup-token-manual') {
-    return !!oauthFlowRef.value?.setupToken?.trim() && !claudeOAuth.loading.value
+    return !!buildClaudeSetupTokenCredentials(oauthFlowRef.value?.setupToken || '') && !claudeOAuth.loading.value
   }
   const sessionId = currentSessionId.value
   const loading = currentLoading.value
@@ -364,16 +364,17 @@ const handleExchangeCode = async () => {
 
   if (isAnthropic.value && addMethod.value === 'setup-token-manual') {
     const credentials = buildClaudeSetupTokenCredentials(oauthFlowRef.value?.setupToken || '')
-    if (!credentials) return
+    if (!credentials) {
+      claudeOAuth.error.value = t('admin.accounts.oauth.setupTokenInvalid')
+      return
+    }
     claudeOAuth.loading.value = true
     claudeOAuth.error.value = ''
     try {
-      await adminAPI.accounts.update(props.account.id, {
+      await adminAPI.accounts.applyOAuthCredentials(props.account.id, {
         type: 'setup-token',
-        credentials,
-        expires_at: credentials.expires_at as number
+        credentials
       })
-      await adminAPI.accounts.clearError(props.account.id)
       appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
       emit('reauthorized')
       handleClose()

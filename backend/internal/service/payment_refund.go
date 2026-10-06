@@ -386,8 +386,7 @@ func (s *PaymentService) QueryAndFinalizeRefund(ctx context.Context, oid int64) 
 	if err != nil {
 		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
-	reconcilable := o.Status == OrderStatusRefundPending || (o.Status == OrderStatusRefunding && time.Since(o.UpdatedAt) > paymentFulfillmentLeaseDuration)
-	if !reconcilable {
+	if !refundReconciliationReady(o, time.Now()) {
 		return nil, infraerrors.BadRequest("INVALID_STATUS", "refund is not awaiting reconciliation")
 	}
 	record, err := loadRefundReservation(ctx, s.entClient, o)
@@ -436,7 +435,7 @@ func (s *PaymentService) ResolvePendingRefund(ctx context.Context, oid int64, su
 	if err != nil {
 		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
-	if o.Status != OrderStatusRefundPending && o.Status != OrderStatusRefunding {
+	if !refundReconciliationReady(o, time.Now()) {
 		return nil, infraerrors.BadRequest("INVALID_STATUS", "order is not awaiting refund resolution")
 	}
 	record, err := loadRefundReservation(ctx, s.entClient, o)
@@ -456,6 +455,18 @@ func (s *PaymentService) ResolvePendingRefund(ctx context.Context, oid int64, su
 		"reason":  decision,
 	})
 	return result, nil
+}
+
+// refundReconciliationReady is shared by provider queries and manual
+// decisions. A REFUNDING order remains owned by the provider request until its
+// fulfillment lease expires; resolving it earlier can release collateral while
+// the provider is still able to complete the original refund.
+func refundReconciliationReady(o *dbent.PaymentOrder, now time.Time) bool {
+	if o == nil {
+		return false
+	}
+	return o.Status == OrderStatusRefundPending ||
+		(o.Status == OrderStatusRefunding && now.Sub(o.UpdatedAt) > paymentFulfillmentLeaseDuration)
 }
 
 func (s *PaymentService) applyRefundFinalDeduction(ctx context.Context, p *RefundPlan) error {
