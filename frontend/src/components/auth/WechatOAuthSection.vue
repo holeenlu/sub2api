@@ -48,12 +48,9 @@ const emit = defineEmits<{
 
 const appStore = useAppStore()
 const route = useRoute()
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const providerName = computed(() => t('auth.wechatProviderName'))
 
-function localizeWeChatHint(zh: string, en: string): string {
-  return locale.value.startsWith('zh') ? zh : en
-}
 
 const resolvedStart = computed(() => resolveWeChatOAuthStart(appStore.cachedPublicSettings))
 const buttonDisabled = computed(() => props.disabled || resolvedStart.value.mode === null)
@@ -67,10 +64,7 @@ const disabledHint = computed(() => {
     case 'wechat_browser_required':
       return t('auth.oauthFlow.wechatBrowserOnly')
     case 'native_app_required':
-      return localizeWeChatHint(
-        '当前仅配置微信移动应用登录，需要在原生 App 中通过微信 SDK 发起授权。',
-        'This site only has WeChat mobile app login configured. Continue from the native app through the WeChat SDK.',
-      )
+      return t('ui.wechatNativeAppRequired')
     case 'not_configured':
       return t('auth.oauthFlow.wechatNotConfigured')
     default:

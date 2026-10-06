@@ -1196,6 +1196,7 @@ export interface OpenCodeGoUsageSettings {
 }
 
 export interface Account {
+  codex_diagnostic?: import('@/api/admin/codexDiagnostics').DiagnosticSummary | null
   id: number
   name: string
   notes?: string | null

@@ -152,7 +152,7 @@ func (h *AuthHandler) DingTalkOAuthStart(c *gin.Context) {
 	clearOAuthPendingSessionCookie(c, secureCookie)
 
 	if intent == oauthIntentBindCurrentUser {
-		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c)
+		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c, dingTalkOAuthBindUserCookieName, state, browserSessionKey)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return

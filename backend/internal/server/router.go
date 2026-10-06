@@ -91,6 +91,8 @@ func SetupRouter(
 
 	// 注册路由
 	registerRoutes(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient)
+	handlers.Admin.Account.SetDiagnosticRouter(r)
+	handlers.Admin.Account.StartScheduledTests()
 
 	return r
 }

@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupAdminRouter() (*gin.Engine, *stubAdminService) {
+func setupAdminRouter(t *testing.T) (*gin.Engine, *stubAdminService) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	adminSvc := newStubAdminService()
 
-	userHandler := NewUserHandler(adminSvc, nil, nil, nil, nil, nil, nil)
+	userHandler := lifecycleAuthenticatedAdminHandler(t, router, adminSvc)
 	groupHandler := NewGroupHandler(adminSvc, nil, nil)
 	proxyHandler := NewProxyHandler(adminSvc)
 	redeemHandler := NewRedeemHandler(adminSvc, nil)
@@ -70,7 +70,7 @@ func setupAdminRouter() (*gin.Engine, *stubAdminService) {
 }
 
 func TestUserHandlerEndpoints(t *testing.T) {
-	router, _ := setupAdminRouter()
+	router, _ := setupAdminRouter(t)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users?page=1&page_size=20", nil)
@@ -139,7 +139,7 @@ func TestUserHandlerEndpoints(t *testing.T) {
 }
 
 func TestUserHandlerBindAuthIdentityMapsRequest(t *testing.T) {
-	router, adminSvc := setupAdminRouter()
+	router, adminSvc := setupAdminRouter(t)
 
 	body, err := json.Marshal(map[string]any{
 		"provider_type":    "oidc",
@@ -166,7 +166,7 @@ func TestUserHandlerBindAuthIdentityMapsRequest(t *testing.T) {
 }
 
 func TestGroupHandlerEndpoints(t *testing.T) {
-	router, _ := setupAdminRouter()
+	router, _ := setupAdminRouter(t)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/groups", nil)
@@ -267,7 +267,7 @@ func TestGroupHandlerEndpoints(t *testing.T) {
 }
 
 func TestProxyHandlerEndpoints(t *testing.T) {
-	router, _ := setupAdminRouter()
+	router, _ := setupAdminRouter(t)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies", nil)
@@ -331,7 +331,7 @@ func TestProxyHandlerEndpoints(t *testing.T) {
 }
 
 func TestRedeemHandlerEndpoints(t *testing.T) {
-	router, _ := setupAdminRouter()
+	router, _ := setupAdminRouter(t)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/redeem-codes", nil)

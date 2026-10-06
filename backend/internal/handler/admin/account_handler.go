@@ -49,6 +49,8 @@ func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
 
 // AccountHandler handles admin account management
 type AccountHandler struct {
+	scheduledTests          *service.ScheduledTestService
+	scheduledRunner         *service.ScheduledTestRunnerService
 	claudeResetCredits      claudeResetReader
 	adminService            service.AdminService
 	oauthService            *service.OAuthService
@@ -198,6 +200,7 @@ type CheckMixedChannelRequest struct {
 
 // AccountWithConcurrency extends Account with real-time concurrency info
 type AccountWithConcurrency struct {
+	CodexDiagnostic *service.CodexDiagnosticSummary `json:"codex_diagnostic,omitempty"`
 	*dto.Account
 	simpleMode         bool                         `json:"-"`
 	CurrentConcurrency int                          `json:"current_concurrency"`
@@ -214,12 +217,13 @@ type AccountWithConcurrency struct {
 // so groups/account_groups never appear in the list payload.
 type AccountListItemWithConcurrency struct {
 	*dto.AccountListItem
-	CurrentConcurrency int                          `json:"current_concurrency"`
-	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
-	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
-	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
-	ActiveSessions     *int                         `json:"active_sessions,omitempty"`
-	CurrentRPM         *int                         `json:"current_rpm,omitempty"`
+	CodexDiagnostic    *service.CodexDiagnosticSummary `json:"codex_diagnostic,omitempty"`
+	CurrentConcurrency int                             `json:"current_concurrency"`
+	SchedulerScore     *AccountSchedulerScore          `json:"scheduler_score,omitempty"`
+	SchedulerScores    []AccountSchedulerGroupScore    `json:"scheduler_scores,omitempty"`
+	CurrentWindowCost  *float64                        `json:"current_window_cost,omitempty"`
+	ActiveSessions     *int                            `json:"active_sessions,omitempty"`
+	CurrentRPM         *int                            `json:"current_rpm,omitempty"`
 }
 
 type simpleModeGroupReference struct {
@@ -407,9 +411,16 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		}
 	}
 
-	h.enrichShadowParents(ctx, []AccountWithConcurrency{item})
-
-	return item
+	items := []AccountWithConcurrency{item}
+	h.enrichShadowParents(ctx, items)
+	if h.scheduledTests != nil {
+		if summaries, err := h.scheduledTests.DiagnosticSummaries(ctx, []int64{account.ID}); err == nil {
+			if summary, ok := summaries[account.ID]; ok {
+				items[0].CodexDiagnostic = &summary
+			}
+		}
+	}
+	return items[0]
 }
 
 // scoreOpenAIAccountSchedulerPool 对池内 OpenAI 账号计算调度分数快照。
@@ -797,6 +808,19 @@ func (h *AccountHandler) List(c *gin.Context) {
 		_ = g.Wait()
 	}
 
+	var diagnostics map[int64]service.CodexDiagnosticSummary
+	if h.scheduledTests != nil {
+		ids := make([]int64, 0, len(accounts))
+		for _, a := range accounts {
+			ids = append(ids, a.ID)
+		}
+		var err error
+		diagnostics, err = h.scheduledTests.DiagnosticSummaries(c.Request.Context(), ids)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
 	// Build response with concurrency info
 	result := make([]AccountWithConcurrency, len(accounts))
 	for i := range accounts {
@@ -816,6 +840,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 			SchedulerScores:    schedulerGroupScores[acc.ID],
 		}
 
+		if summary, ok := diagnostics[acc.ID]; ok {
+			item.CodexDiagnostic = &summary
+		}
 		// 添加窗口费用（仅当启用时）
 		if windowCosts != nil {
 			if cost, ok := windowCosts[acc.ID]; ok {
@@ -848,6 +875,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 			item := result[i]
 			compact[i] = AccountListItemWithConcurrency{
 				AccountListItem:    dto.AccountListItemFromAccount(item.Account),
+				CodexDiagnostic:    item.CodexDiagnostic,
 				CurrentConcurrency: item.CurrentConcurrency,
 				SchedulerScore:     item.SchedulerScore,
 				SchedulerScores:    item.SchedulerScores,

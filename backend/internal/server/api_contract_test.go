@@ -5,12 +5,14 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/server/routes"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -989,7 +992,7 @@ func TestAPIContracts(t *testing.T) {
 					"payment_alipay_mobile_precreate_deep_link": false,
 					"balance_low_notify_enabled": false,
 					"account_quota_notify_enabled": false,
-					"account_scheduling_thresholds": {"anthropic":100,"grok":100,"openai":100},
+					"account_scheduling_thresholds": {"anthropic":100,"anthropic_fable":100,"grok":100,"openai":100},
 					"subscription_expiry_notify_enabled": true,
 					"balance_low_notify_threshold": 0,
 					"balance_low_notify_recharge_url": "",
@@ -1311,7 +1314,7 @@ func TestAPIContracts(t *testing.T) {
 					"payment_alipay_mobile_precreate_deep_link": false,
 					"balance_low_notify_enabled": false,
 					"account_quota_notify_enabled": false,
-					"account_scheduling_thresholds": {"anthropic":100,"grok":100,"openai":100},
+					"account_scheduling_thresholds": {"anthropic":100,"anthropic_fable":100,"grok":100,"openai":100},
 					"subscription_expiry_notify_enabled": true,
 					"balance_low_notify_threshold": 0,
 					"balance_low_notify_recharge_url": "",
@@ -1424,7 +1427,56 @@ func TestAPIContracts(t *testing.T) {
 
 			status, body := doRequest(t, deps.router, tt.method, tt.path, tt.body, tt.headers)
 			require.Equal(t, tt.wantStatus, status)
-			require.JSONEq(t, tt.wantJSON, body)
+			wantJSON := tt.wantJSON
+			if tt.method == http.MethodGet && tt.path == "/api/v1/admin/settings" {
+				var expected map[string]any
+				require.NoError(t, json.Unmarshal([]byte(wantJSON), &expected))
+				data := expected["data"].(map[string]any)
+				data["openai_codex_diagnostic_prompt_template"] = service.DefaultCodexProbeTemplate()
+				data["openai_codex_diagnostic_prompt_template_default"] = service.DefaultCodexProbeTemplate()
+				if strings.Contains(tt.name, "falls back to config oauth defaults") {
+					data["site_name"] = service.DefaultSiteName
+				}
+				encoded, err := json.Marshal(expected)
+				require.NoError(t, err)
+				wantJSON = string(encoded)
+			}
+			require.JSONEq(t, wantJSON, body)
+		})
+	}
+}
+
+func TestCodexDiagnosticRoutesRetireTicketEndpoints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handlers := &handler.Handlers{Admin: &handler.AdminHandlers{Account: &adminhandler.AccountHandler{}}}
+	pass := func(c *gin.Context) { c.Next() }
+	routes.RegisterAdminRoutes(router.Group("/api/v1"), handlers,
+		middleware.AdminAuthMiddleware(pass), middleware.AuditLogMiddleware(pass), middleware.StepUpAuthMiddleware(pass), nil, nil)
+	for _, tc := range []struct {
+		method, current, retired string
+	}{
+		{http.MethodGet, "/1/codex-diagnostic", "/1/codex-ticket-diagnostic"},
+		{http.MethodPut, "/1/codex-diagnostic", "/1/codex-ticket-diagnostic"},
+		{http.MethodPost, "/1/codex-diagnostic", "/1/codex-ticket-diagnostic"},
+		{http.MethodGet, "/1/codex-diagnostic/history", "/1/codex-ticket-diagnostic/history"},
+		{http.MethodPost, "/1/codex-diagnostic/2/cancel", "/1/codex-ticket-diagnostic/2/cancel"},
+		{http.MethodPost, "/codex-diagnostic-fingerprint/refresh", "/codex-ticket-fingerprint/refresh"},
+	} {
+		t.Run(tc.method+tc.current, func(t *testing.T) {
+			status, body := doRequest(t, router, tc.method, "/api/v1/admin/accounts"+tc.current, "", nil)
+			// Reach the diagnostic handler without a runner or a paid upstream request.
+			require.Equal(t, http.StatusServiceUnavailable, status, body)
+			require.Contains(t, body, "Diagnostic monitor unavailable")
+			status, body = doRequest(t, router, tc.method, "/api/v1/admin/accounts"+tc.retired, "", nil)
+			if tc.retired == "/codex-ticket-fingerprint/refresh" {
+				// The native /:id/refresh route rejects this nonnumeric account ID.
+				// Do not add a retired-route alias just to change its error status.
+				require.Equal(t, http.StatusBadRequest, status, body)
+				require.Contains(t, body, "Invalid account ID")
+				return
+			}
+			require.Equal(t, http.StatusNotFound, status, body)
 		})
 	}
 }

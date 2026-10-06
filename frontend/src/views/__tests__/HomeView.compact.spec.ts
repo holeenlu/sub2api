@@ -29,11 +29,21 @@ vi.mock('@/stores/app', () => ({
   useAppStore: () => appStore,
 }))
 
+// The model showcase reads auth through its direct store import.
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authStore,
+}))
+
+// 首页模型区会打模型广场公开端点；组件行为另有测试，这里只要求不发真实请求。
+vi.mock('@/api/modelPlaza', () => ({
+  getModelPlaza: vi.fn().mockResolvedValue({ description: '', groups: [] }),
+}))
+
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
   return {
     ...actual,
-    useI18n: () => ({ t: (key: string) => key }),
+    useI18n: () => ({ t: (key: string) => key, locale: { value: 'en' } }),
   }
 })
 
@@ -56,7 +66,7 @@ function mountHome(settings: Record<string, unknown> = {}) {
 }
 
 function compactDestination(wrapper: ReturnType<typeof mountHome>) {
-  return wrapper.get('[data-testid="compact-home"]').findComponent(RouterLinkStub).props('to')
+  return wrapper.getComponent('[data-testid="compact-home-primary"]').props('to')
 }
 
 function modelPlazaDestination(wrapper: ReturnType<typeof mountHome>) {
@@ -66,7 +76,20 @@ function modelPlazaDestination(wrapper: ReturnType<typeof mountHome>) {
     ?.props('to')
 }
 
+function destination(wrapper: ReturnType<typeof mountHome>, testId: string) {
+  return wrapper.getComponent(`[data-testid="${testId}"]`).props('to')
+}
+
 describe('HomeView compact mode', () => {
+  it.each(['', 'https://example.com/custom-logo.png'])(
+    'renders the actual logo in the default header (%j)', (logo) => {
+      const wrapper = mountHome({ compact_home_enabled: false, site_logo: logo })
+      const image = wrapper.get('[data-testid="home-brand-logo"]')
+      expect(image.element.tagName).toBe('IMG')
+      expect(image.attributes('src')).toBe(logo || '/logo.svg')
+      expect(image.attributes('alt')).toBe('Test site')
+    }
+  )
   beforeEach(() => {
     authStore.isAuthenticated = false
     authStore.isAdmin = false
@@ -109,6 +132,18 @@ describe('HomeView compact mode', () => {
 
     expect(wrapper.find('[data-testid="compact-home"]').exists()).toBe(false)
     expect(wrapper.find('.terminal-container').exists()).toBe(true)
+  })
+
+  it.each([
+    [true, 'compact-home-api-docs', 'compact-home-ai-apps'],
+    [false, 'home-api-docs', 'home-ai-apps'],
+  ])('shows explicit API Docs and AI Apps links when compact mode is %s', (compact, docsId, appsId) => {
+    const wrapper = mountHome({ compact_home_enabled: compact })
+
+    expect(destination(wrapper, docsId)).toBe('/docs')
+    expect(destination(wrapper, appsId)).toBe('/apps')
+    expect(wrapper.get(`[data-testid="${docsId}"]`).text()).toBe('home.apiDocs')
+    expect(wrapper.get(`[data-testid="${appsId}"]`).text()).toBe('home.aiApps')
   })
 
   it('links unauthenticated visitors to login', () => {
@@ -163,13 +198,24 @@ describe('HomeView compact mode', () => {
     expect(modelPlazaDestination(wrapper)).toBe('/model-plaza')
   })
 
-  it('shows the model plaza link in the default home header', () => {
+  it('keeps the model plaza deep link inside the default home models section', () => {
     const wrapper = mountHome({
       model_plaza_enabled: true,
       model_plaza_require_auth: false,
     })
 
+    expect(wrapper.find('#models').exists()).toBe(true)
     expect(modelPlazaDestination(wrapper)).toBe('/model-plaza')
+  })
+
+  it('keeps the default home models section but hides the deep link when the plaza is not public', () => {
+    const wrapper = mountHome({
+      model_plaza_enabled: true,
+      model_plaza_require_auth: true,
+    })
+
+    expect(wrapper.find('#models').exists()).toBe(true)
+    expect(modelPlazaDestination(wrapper)).toBeUndefined()
   })
 
   it('hides the model plaza link when the feature is disabled', () => {

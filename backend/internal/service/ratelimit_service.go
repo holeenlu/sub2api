@@ -171,10 +171,10 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 	}
 
 	now := time.Now().UTC()
-	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
+	thresholds, thresholdsResolved := s.settingService.GetAccountSchedulingThresholds(ctx)
 	decision := EvaluateAccountSchedulingThreshold(account, thresholds, now)
 	if !decision.ShouldPause || decision.Until == nil || !decision.Until.After(now) {
-		s.applyAnthropicFableSchedulingThreshold(ctx, account, thresholds, now)
+		s.applyAnthropicFableSchedulingThreshold(ctx, account, thresholds, thresholdsResolved, now)
 		return false
 	}
 
@@ -228,9 +228,17 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 	return true
 }
 
-func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Context, account *Account, thresholds map[string]int, now time.Time) {
-	decision := evaluateAnthropicFableSchedulingThreshold(account, thresholds, now)
+func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Context, account *Account, thresholds map[string]int, thresholdsResolved bool, now time.Time) {
+	decision := evaluateAnthropicFableSchedulingThreshold(account, thresholds, thresholdsResolved, now)
 	if !decision.ShouldPause || decision.Until == nil || !decision.Until.After(now) {
+		// 只有拿到判据才敢解除：ShouldPause=false 既可能是「确认低于阈值」，也可能是
+		// 「这份账号副本上根本没有采样」。后者当成「没越线」会把刚打上的限流清掉，
+		// 账号在越线状态下继续接 Fable 请求。
+		// 例外是旧版本用共享 7d 写出的 Fable 阈值限流：共享 7d 已不再属于本 scope，
+		// 这条 reason 本身就是可以解除的正证据，即使当前缺少 7d_oi 采样也应清掉。
+		if decision.HasEvidence || hasDeprecatedAnthropicFableSharedWindowThreshold(account) {
+			s.releaseAnthropicFableSchedulingThreshold(ctx, account, now)
+		}
 		return
 	}
 	if account.isRateLimitActiveForKey(anthropicFableRateLimitKey) {
@@ -241,6 +249,7 @@ func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Co
 		Platform:         decision.Platform,
 		Window:           decision.Window,
 		Scope:            decision.Scope,
+		UntilSource:      decision.UntilSource,
 		ThresholdPercent: decision.ThresholdPercent,
 		UsedPercent:      decision.UsedPercent,
 		Until:            *decision.Until,
@@ -263,6 +272,66 @@ func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Co
 		"threshold_percent", decision.ThresholdPercent,
 		"used_percent", decision.UsedPercent,
 		"until", decision.Until.UTC())
+}
+
+func hasDeprecatedAnthropicFableSharedWindowThreshold(account *Account) bool {
+	if account == nil {
+		return false
+	}
+	reason := account.modelRateLimitReason(anthropicFableRateLimitKey)
+	payload, ok := parseTempUnschedReasonPayload(reason)
+	return ok && payload.Source == AccountSchedulingThresholdReasonSource &&
+		payload.Window == "7d" && payload.Scope == anthropicFableRateLimitKey
+}
+
+// releaseAnthropicFableSchedulingThreshold 在账号不再越线时解除由阈值打上的 Fable
+// 限流。阈值是给运维反复调的旋钮：设成 50 之后改回 70，不主动解除的话账号要一直被封
+// 到窗口重置（最长七天）。用量因窗口滚动回落到阈值以下时同理。
+//
+// 只解除 source=account_scheduling_threshold 的限流。上游 429 打的
+// anthropic_7d_oi_window_exhausted 必须原样保留——窗口是真的耗尽了，解除只会让请求
+// 继续撞上游 429。
+func (s *RateLimitService) releaseAnthropicFableSchedulingThreshold(ctx context.Context, account *Account, now time.Time) {
+	if s == nil || s.accountRepo == nil || account == nil || account.ID <= 0 {
+		return
+	}
+	resetAt := account.modelRateLimitResetAt(anthropicFableRateLimitKey)
+	if resetAt == nil || !resetAt.After(now) {
+		return
+	}
+	// reason 既是「这条限流是阈值打的」的判据，也是清除时的 CAS 令牌：这份账号副本是
+	// 选号时刻从 Redis 拷来的，判断与 UPDATE 之间上游 429 完全可能把同一个 scope 改写
+	// 成窗口耗尽限流，那条限流必须原样保留。
+	reason := account.modelRateLimitReason(anthropicFableRateLimitKey)
+	if !IsAccountSchedulingThresholdReason(reason) {
+		return
+	}
+
+	// A full-account reset would clear unrelated upstream rate limits. The
+	// concrete account repository supplies the scoped compare-and-swap operation.
+	repo, ok := s.accountRepo.(interface {
+		ClearModelRateLimit(context.Context, int64, string, string) (bool, error)
+	})
+	if !ok {
+		return
+	}
+	cleared, err := repo.ClearModelRateLimit(ctx, account.ID, anthropicFableRateLimitKey, reason)
+	if err != nil {
+		slog.Warn("anthropic_fable_scheduling_threshold_clear_model_limit_failed",
+			"account_id", account.ID,
+			"scope", anthropicFableRateLimitKey,
+			"error", err)
+		return
+	}
+	if !cleared {
+		return
+	}
+	clearAccountModelRateLimitSnapshot(account, anthropicFableRateLimitKey)
+
+	slog.Info("anthropic_fable_scheduling_threshold_model_limit_cleared",
+		"account_id", account.ID,
+		"scope", anthropicFableRateLimitKey,
+		"previous_until", resetAt.UTC())
 }
 
 func accountHasSameSchedulingThresholdPause(account *Account, until time.Time, reason string) bool {

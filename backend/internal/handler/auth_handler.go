@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -264,7 +265,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Check if TOTP 2FA is enabled for this user
 	if h.totpService != nil && h.settingSvc.IsTotpEnabled(c.Request.Context()) && user.TotpEnabled {
 		// Create a temporary login session for 2FA
-		tempToken, err := h.totpService.CreateLoginSession(c.Request.Context(), user.ID, user.Email)
+		tempToken, err := h.totpService.CreateLoginSession(c.Request.Context(), user.ID, user.Email, service.CredentialVersion(user))
 		if err != nil {
 			response.InternalError(c, "Failed to create 2FA session")
 			return
@@ -342,6 +343,11 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	// Reloads may refresh profile fields, but cannot upgrade the password proof.
+	if service.CredentialVersion(user) != session.CredentialVersion {
+		response.ErrorFrom(c, service.ErrTokenRevoked)
+		return
+	}
 	if err := ensureLoginUserActive(user); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -374,6 +380,8 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 			response.ErrorFrom(c, err)
 			return
 		}
+		pendingSession.LocalFlowState = clonePendingMap(pendingSession.LocalFlowState)
+		pendingSession.LocalFlowState["credential_version"] = fmt.Sprintf("%d", session.CredentialVersion)
 		if err := applyPendingOAuthBinding(
 			c.Request.Context(),
 			h.entClient(),
@@ -386,14 +394,6 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 			true,
 		); err != nil {
 			response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to bind pending oauth identity").WithCause(err))
-			return
-		}
-		if _, err := pendingSvc.ConsumeBrowserSession(
-			c.Request.Context(),
-			pendingSession.SessionToken,
-			pendingSession.BrowserSessionKey,
-		); err != nil {
-			response.ErrorFrom(c, err)
 			return
 		}
 
@@ -409,6 +409,17 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 		}
 	}
 
+	// Pending adoption reloads the user again. Require the same proof before
+	// issuing either a token pair or the legacy access-token fallback. A revocation
+	// after this snapshot still invalidates both tokens through their old version.
+	if service.CredentialVersion(user) != session.CredentialVersion {
+		response.ErrorFrom(c, service.ErrTokenRevoked)
+		return
+	}
+	issuanceUser := *user
+	issuanceUser.TokenVersion = session.CredentialVersion
+	issuanceUser.TokenVersionResolved = true
+
 	// Delete the login session (only after all checks pass)
 	_ = h.totpService.DeleteLoginSession(c.Request.Context(), req.TempToken)
 
@@ -416,7 +427,7 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 		h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
 	}
 
-	h.respondWithTokenPair(c, user)
+	h.respondWithTokenPair(c, &issuanceUser)
 }
 
 // GetCurrentUser handles getting current authenticated user

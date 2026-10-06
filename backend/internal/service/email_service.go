@@ -21,6 +21,7 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/redis/go-redis/v9"
 )
 
 var (
@@ -583,6 +584,9 @@ func hashPasswordResetToken(token string) string {
 // VerifyPasswordResetToken verifies the password reset token without consuming it
 func (s *EmailService) VerifyPasswordResetToken(ctx context.Context, email, token string) error {
 	data, err := s.cache.GetPasswordResetToken(ctx, email)
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return ErrServiceUnavailable
+	}
 	if err != nil || data == nil || token == "" {
 		return ErrInvalidResetToken
 	}
@@ -597,16 +601,16 @@ func (s *EmailService) VerifyPasswordResetToken(ctx context.Context, email, toke
 
 // ConsumePasswordResetToken verifies and deletes the token atomically (one-time use).
 func (s *EmailService) ConsumePasswordResetToken(ctx context.Context, email, token string) error {
-	// Constant-time pre-check in Go; the atomic compare-and-delete below is authoritative.
+	// The constant-time pre-check does not consume; Redis compare-and-delete is authoritative.
 	if err := s.VerifyPasswordResetToken(ctx, email, token); err != nil {
 		return err
 	}
-	ok, err := s.cache.ConsumePasswordResetToken(ctx, email, hashPasswordResetToken(token))
+	consumed, err := s.cache.ConsumePasswordResetToken(ctx, email, hashPasswordResetToken(token))
 	if err != nil {
 		slog.Error("failed to consume password reset token", "email", email, "error", err)
-		return ErrInvalidResetToken
+		return ErrServiceUnavailable
 	}
-	if !ok {
+	if !consumed {
 		return ErrInvalidResetToken
 	}
 	return nil

@@ -48,6 +48,9 @@ const (
 	maxNotifyEmails      = 3 // Maximum number of notification emails per user
 	maxInlineAvatarBytes = 100 * 1024
 	targetAvatarBytes    = 20 * 1024
+	maxAvatarDimension   = 4096
+	maxAvatarPixels      = 4 * 1024 * 1024
+	maxAvatarOutputSize  = 512
 
 	// User-level rate limiting for notify email verification codes
 	notifyCodeUserRateLimit  = 5
@@ -673,6 +676,14 @@ func normalizeInlineUserAvatarInput(raw string) (UpsertUserAvatarInput, error) {
 }
 
 func compressInlineAvatar(decoded []byte) ([]byte, string, error) {
+	config, _, err := image.DecodeConfig(bytes.NewReader(decoded))
+	if err != nil {
+		return nil, "", ErrAvatarInvalid
+	}
+	if config.Width <= 0 || config.Height <= 0 || config.Width > maxAvatarDimension ||
+		config.Height > maxAvatarDimension || config.Width > maxAvatarPixels/config.Height {
+		return nil, "", ErrAvatarTooLarge
+	}
 	src, _, err := image.Decode(bytes.NewReader(decoded))
 	if err != nil {
 		return nil, "", ErrAvatarInvalid
@@ -683,7 +694,9 @@ func compressInlineAvatar(decoded []byte) ([]byte, string, error) {
 		return nil, "", ErrAvatarInvalid
 	}
 
-	for _, scale := range avatarScaleSteps {
+	outputScale := min(1.0, float64(maxAvatarOutputSize)/float64(srcBounds.Dx()), float64(maxAvatarOutputSize)/float64(srcBounds.Dy()))
+	for _, step := range avatarScaleSteps {
+		scale := step * outputScale
 		width := max(1, int(float64(srcBounds.Dx())*scale))
 		height := max(1, int(float64(srcBounds.Dy())*scale))
 		dst := image.NewRGBA(image.Rect(0, 0, width, height))
@@ -1275,7 +1288,7 @@ func saveNotifyVerifyCode(ctx context.Context, cache EmailCache, email, code str
 
 // sendNotifyVerifyEmail builds and sends the verification email.
 func (s *UserService) sendNotifyVerifyEmail(ctx context.Context, emailService *EmailService, userID int64, email, code, locale string) error {
-	siteName := "Sub2API"
+	siteName := DefaultSiteName
 	if s.settingRepo != nil {
 		if name, err := s.settingRepo.GetValue(ctx, SettingKeySiteName); err == nil && name != "" {
 			siteName = name

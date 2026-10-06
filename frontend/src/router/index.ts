@@ -12,7 +12,8 @@ import { useNavigationLoadingState } from '@/composables/useNavigationLoading'
 import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
-import { resolveRouteDocumentTitle } from './title'
+import { applyRouteMetaDescription, resolveRouteDocumentTitle } from './title'
+import { docsStaticItems, legacyAppRedirects } from '@/content/docs/nav'
 
 /**
  * Route definitions with lazy loading
@@ -25,7 +26,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/setup/SetupWizardView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Setup'
+      title: 'Setup',
+      titleKey: 'setup.pageTitle'
     }
   },
 
@@ -36,7 +38,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/HomeView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Home'
+      title: 'Home',
+      // 首页 SEO 标题自带站点名，不再附加一次
+      titleKey: 'home.seo.title',
+      titleStandalone: true,
+      metaDescriptionKey: 'home.seo.description'
     }
   },
   {
@@ -65,7 +71,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/EmailVerifyView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Verify Email'
+      title: 'Verify Email',
+      titleKey: 'auth.verifyYourEmail'
     }
   },
   {
@@ -125,7 +132,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/DingTalkEmailCompletionView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'DingTalk Email Completion'
+      title: 'DingTalk Email Completion',
+      titleKey: 'auth.dingtalk.createAccountTitle'
     }
   },
   {
@@ -154,7 +162,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/ResetPasswordView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Reset Password'
+      title: 'Reset Password',
+      titleKey: 'auth.resetPassword'
     }
   },
   {
@@ -164,6 +173,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: false,
       title: 'Key Usage',
+      titleKey: 'keyUsage.title',
     }
   },
   {
@@ -172,7 +182,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/public/LegalDocumentView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Legal Document'
+      title: 'Legal Document',
+      titleKey: 'legal.pageTitle'
     }
   },
   {
@@ -183,6 +194,29 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: false,
       title: 'Model Plaza',
       titleKey: 'modelPlaza.title'
+    }
+  },
+  ...legacyAppRedirects,
+  ...docsStaticItems.map((item, index): RouteRecordRaw => ({
+    path: item.path,
+    name: `DocsPage${index}`,
+    component: () => import('@/views/docs/DocsView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'API Docs',
+      titleKey: item.titleKey,
+      metaDescriptionKey: item.descriptionKey
+    }
+  })),
+  {
+    path: '/docs/models/:modelId',
+    name: 'DocsModel',
+    component: () => import('@/views/docs/DocsView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'Model - API Docs',
+      titleKey: 'docs.pages.models.title',
+      metaDescriptionKey: 'docs.pages.models.description'
     }
   },
 
@@ -382,6 +416,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: false,
       requiresAdmin: false,
       title: 'Payment',
+      titleKey: 'payment.stripePay',
       requiresPayment: false
     }
   },
@@ -721,7 +756,8 @@ const routes: RouteRecordRaw[] = [
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),
     meta: {
-      title: '404 Not Found'
+      title: '404 Not Found',
+      titleKey: 'common.pageNotFound'
     }
   }
 ]
@@ -799,6 +835,7 @@ router.beforeEach(async (to, _from, next) => {
     ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
   ]
   document.title = resolveRouteDocumentTitle(to, appStore.siteName, customMenuItems)
+  applyRouteMetaDescription(to)
 
   // Check if route requires authentication
   const requiresAuth = to.meta.requiresAuth !== false // Default to true

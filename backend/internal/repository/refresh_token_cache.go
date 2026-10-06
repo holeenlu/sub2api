@@ -46,7 +46,21 @@ func (c *refreshTokenCache) StoreRefreshToken(ctx context.Context, tokenHash str
 	if err != nil {
 		return fmt.Errorf("marshal refresh token data: %w", err)
 	}
-	return c.rdb.Set(ctx, key, val, ttl).Err()
+	result, err := c.rdb.Eval(ctx, `
+ if redis.call('EXISTS', KEYS[4]) == 1 then return 0 end
+ redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+ redis.call('SADD', KEYS[2], ARGV[3])
+ redis.call('PEXPIRE', KEYS[2], math.max(redis.call('PTTL', KEYS[2]), tonumber(ARGV[2])))
+ redis.call('SADD', KEYS[3], ARGV[3])
+ redis.call('PEXPIRE', KEYS[3], math.max(redis.call('PTTL', KEYS[3]), tonumber(ARGV[2]), tonumber(ARGV[4])))
+ return 1`, []string{key, userRefreshTokensKey(data.UserID), tokenFamilyKey(data.FamilyID), "revoked_family:" + data.FamilyID}, val, ttl.Milliseconds(), tokenHash, data.FamilyTTLMillis).Int64()
+	if err != nil {
+		return err
+	}
+	if result != 1 {
+		return service.ErrTokenRevoked
+	}
+	return nil
 }
 
 func (c *refreshTokenCache) GetRefreshToken(ctx context.Context, tokenHash string) (*service.RefreshTokenData, error) {
@@ -98,30 +112,16 @@ func (c *refreshTokenCache) DeleteUserRefreshTokens(ctx context.Context, userID 
 }
 
 func (c *refreshTokenCache) DeleteTokenFamily(ctx context.Context, familyID string) error {
-	// Get all token hashes in this family
-	tokenHashes, err := c.GetFamilyTokenHashes(ctx, familyID)
-	if err != nil && err != redis.Nil {
-		return fmt.Errorf("get family token hashes: %w", err)
-	}
+	return c.RevokeTokenFamily(ctx, familyID, 24*time.Hour)
+}
 
-	if len(tokenHashes) == 0 {
-		return nil
-	}
-
-	// Build keys to delete
-	keys := make([]string, 0, len(tokenHashes)+1)
-	for _, hash := range tokenHashes {
-		keys = append(keys, refreshTokenKey(hash))
-	}
-	keys = append(keys, tokenFamilyKey(familyID))
-
-	// Delete all keys in a pipeline
-	pipe := c.rdb.Pipeline()
-	for _, key := range keys {
-		pipe.Del(ctx, key)
-	}
-	_, err = pipe.Exec(ctx)
-	return err
+func (c *refreshTokenCache) RevokeTokenFamily(ctx context.Context, familyID string, minTTL time.Duration) error {
+	return c.rdb.Eval(ctx, `
+ local ttl = math.max(redis.call('PTTL', KEYS[1]), redis.call('PTTL', KEYS[2]), tonumber(ARGV[1]), 60000)
+ redis.call('SET', KEYS[2], '1', 'PX', ttl)
+ for _, hash in ipairs(redis.call('SMEMBERS', KEYS[1])) do redis.call('DEL', 'refresh_token:' .. hash) end
+ redis.call('DEL', KEYS[1])
+ return 1`, []string{tokenFamilyKey(familyID), "revoked_family:" + familyID}, minTTL.Milliseconds()).Err()
 }
 
 func (c *refreshTokenCache) AddToUserTokenSet(ctx context.Context, userID int64, tokenHash string, ttl time.Duration) error {
@@ -155,4 +155,46 @@ func (c *refreshTokenCache) GetFamilyTokenHashes(ctx context.Context, familyID s
 func (c *refreshTokenCache) IsTokenInFamily(ctx context.Context, familyID string, tokenHash string) (bool, error) {
 	key := tokenFamilyKey(familyID)
 	return c.rdb.SIsMember(ctx, key, tokenHash).Result()
+}
+
+// ConsumeRefreshToken atomically claims the capability and remembers its family for replay.
+// Family tombstones and StoreRefreshToken's check serialize replay/revocation against rotation.
+func (c *refreshTokenCache) ConsumeRefreshToken(ctx context.Context, tokenHash string) (*service.RefreshTokenData, error) {
+	raw, err := c.rdb.Eval(ctx, `
+ local raw = redis.call('GET', KEYS[1])
+ if not raw then
+  local used = redis.call('GET', KEYS[2])
+  if used then
+   local data = cjson.decode(used)
+   local family = 'token_family:' .. data.family_id
+   local ttl = math.max(redis.call('PTTL', family), redis.call('PTTL', KEYS[2]), redis.call('PTTL', 'revoked_family:' .. data.family_id), data.family_ttl_ms or 0, 60000)
+   redis.call('SET', 'revoked_family:' .. data.family_id, '1', 'PX', ttl)
+   for _, hash in ipairs(redis.call('SMEMBERS', family)) do redis.call('DEL', 'refresh_token:' .. hash) end
+   redis.call('DEL', family)
+  end
+  return false
+ end
+ local data = cjson.decode(raw)
+ if redis.call('EXISTS', 'revoked_family:' .. data.family_id) == 1 then return false end
+ local ttl = redis.call('PTTL', KEYS[1])
+ if ttl <= 0 then return false end
+ redis.call('SET', KEYS[2], raw, 'PX', ttl)
+ redis.call('DEL', KEYS[1])
+ return raw`, []string{refreshTokenKey(tokenHash), "used_refresh_token:" + tokenHash}).Text()
+	if err == redis.Nil {
+		return nil, service.ErrRefreshTokenNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var data service.RefreshTokenData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		return nil, err
+	}
+	return &data, nil
+}
+
+func (c *refreshTokenCache) IsFamilyRevoked(ctx context.Context, familyID string) (bool, error) {
+	n, err := c.rdb.Exists(ctx, "revoked_family:"+familyID).Result()
+	return n != 0, err
 }

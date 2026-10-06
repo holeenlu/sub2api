@@ -106,7 +106,10 @@ import Input from '@/components/common/Input.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAdminComplianceStore, useAppStore, useAuthStore } from '@/stores'
 import { getLocale } from '@/i18n'
+import { BRAND_COMPLIANCE_DOCUMENT_URL } from '@/config/brand'
 import zhDocument from '../../../../docs/legal/admin-compliance.zh.md?raw'
+import zhTwDocument from '../../../../docs/legal/admin-compliance.zh-TW.md?raw'
+import jaDocument from '../../../../docs/legal/admin-compliance.ja.md?raw'
 import enDocument from '../../../../docs/legal/admin-compliance.en.md?raw'
 
 const { t } = useI18n()
@@ -124,12 +127,23 @@ marked.setOptions({
 const visible = computed(() => authStore.isAuthenticated && authStore.isAdmin && complianceStore.shouldShow)
 const expectedPhrase = computed(() => complianceStore.expectedPhrase)
 const canSubmit = computed(() => typedPhrase.value.trim() === expectedPhrase.value)
-const currentDocument = computed(() => getLocale() === 'zh' ? zhDocument : enDocument)
+const currentDocument = computed(() => {
+  const locale = getLocale()
+  if (locale === 'zh-TW') return zhTwDocument
+  if (locale === 'zh') return zhDocument
+  return locale === 'ja' ? jaDocument : enDocument
+})
 const documentUrl = computed(() => {
-  if (getLocale() === 'zh') {
-    return complianceStore.status?.document_url_zh || 'https://github.com/Wei-Shaw/sub2api/blob/main/docs/legal/admin-compliance.zh.md'
+  if (getLocale() === 'zh-TW') {
+    return complianceStore.status?.document_url_zh || BRAND_COMPLIANCE_DOCUMENT_URL['zh-TW']
   }
-  return complianceStore.status?.document_url_en || 'https://github.com/Wei-Shaw/sub2api/blob/main/docs/legal/admin-compliance.en.md'
+  if (getLocale() === 'zh') {
+    return complianceStore.status?.document_url_zh || BRAND_COMPLIANCE_DOCUMENT_URL.zh
+  }
+  if (getLocale() === 'ja') {
+    return BRAND_COMPLIANCE_DOCUMENT_URL.ja
+  }
+  return complianceStore.status?.document_url_en || BRAND_COMPLIANCE_DOCUMENT_URL.en
 })
 const inputError = computed(() => {
   if (!attemptedSubmit.value || canSubmit.value) {

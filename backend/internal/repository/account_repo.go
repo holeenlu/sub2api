@@ -106,6 +106,27 @@ func stripCodexFingerprintSeedFromExtraUpdate(extra map[string]any) map[string]a
 	return stripped
 }
 
+// Reject removed settings at the shared persistence boundary. Migrations 265/266/268
+// cleans stored data; stale editors/imports must fail instead of silently changing
+// protocol, model access, or billing semantics. Do not repeat this policy in readers.
+func validateAccountWriteFields(credentials, extra map[string]any) error {
+	if _, exists := credentials["model_mapping_mode"]; exists {
+		return service.ErrUnsupportedAccountField.WithMetadata(map[string]string{"field": "credentials.model_mapping_mode"})
+	}
+	for key := range extra {
+		if key == "openai_excel_bps" || strings.HasPrefix(key, "openai_excel_bps_") ||
+			key == "openai_bps" || strings.HasPrefix(key, "openai_bps_") ||
+			key == "cost_multiplier" || key == "cost_multiplier_auto_sync" ||
+			strings.HasPrefix(key, "codex_turn_ticket:") || strings.HasPrefix(key, "codex_ticket_") ||
+			strings.HasPrefix(key, "openai_codex_ticket_") || key == "codex_allow_without_ticket" ||
+			key == "codex_harvest_proxy_url" || key == "openai_apikey_codex_identity" ||
+			key == "openai_oauth_ws_sse_acceleration" || key == "model_catalog_snapshot" || key == "model_catalog_policy" {
+			return service.ErrUnsupportedAccountField.WithMetadata(map[string]string{"field": "extra." + key})
+		}
+	}
+	return nil
+}
+
 // NewAccountRepository 创建账户仓储实例。
 // 这是对外暴露的构造函数，返回接口类型以便于依赖注入。
 func NewAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCache service.SchedulerCache) service.AccountRepository {
@@ -137,6 +158,9 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account) error {
 	if account == nil {
 		return service.ErrAccountNilInput
+	}
+	if err := validateAccountWriteFields(account.Credentials, account.Extra); err != nil {
+		return err
 	}
 
 	builder := client.Account.Create().
@@ -464,6 +488,9 @@ func (r *accountRepository) updateAccount(
 ) error {
 	if account == nil {
 		return nil
+	}
+	if err := validateAccountWriteFields(account.Credentials, account.Extra); err != nil {
+		return err
 	}
 
 	baseCtx := ctx
@@ -841,6 +868,9 @@ func decodeAccountExtraJSON(raw []byte) (any, bool, error) {
 }
 
 func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
+	if err := validateAccountWriteFields(credentials, nil); err != nil {
+		return err
+	}
 	payload, err := json.Marshal(normalizeJSONMap(credentials))
 	if err != nil {
 		return err
@@ -1596,6 +1626,9 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 	expectedProxyID *int64,
 	credentials map[string]any,
 ) (bool, error) {
+	if err := validateAccountWriteFields(credentials, nil); err != nil {
+		return false, err
+	}
 	if r == nil || r.sql == nil {
 		return false, errors.New("account repository SQL executor is not configured")
 	}
@@ -2432,7 +2465,7 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(
 		ctx,
-		`UPDATE accounts SET 
+		`UPDATE accounts SET
 			extra = jsonb_set(
 				jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_rate_limits}'::text[], COALESCE(extra->'model_rate_limits', '{}'::jsonb), true),
 				ARRAY['model_rate_limits', $1]::text[],
@@ -2731,6 +2764,9 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 }
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if err := validateAccountWriteFields(nil, updates); err != nil {
+		return err
+	}
 	updates = stripCodexFingerprintSeedFromExtraUpdate(updates)
 	if len(updates) == 0 {
 		return nil
@@ -3005,6 +3041,9 @@ func ollamaCloudUsageSnapshotClearRequested(extra map[string]any) bool {
 }
 
 func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates service.AccountBulkUpdate) (int64, error) {
+	if err := validateAccountWriteFields(updates.Credentials, updates.Extra); err != nil {
+		return 0, err
+	}
 	if len(ids) == 0 {
 		return 0, nil
 	}
@@ -4083,4 +4122,96 @@ func (r *accountRepository) ListShadowsByParent(ctx context.Context, parentID in
 		out = append(out, accountEntityToService(m))
 	}
 	return out, nil
+}
+
+func (r *accountRepository) PutVoice(ctx context.Context, v *service.GatewayMediaVoice) error {
+	res, err := r.sql.ExecContext(ctx, `INSERT INTO gateway_media_voices(account_id,voice_id,user_id,group_id,metadata) VALUES($1,$2,$3,$4,$5)
+ ON CONFLICT(account_id,voice_id) DO UPDATE SET metadata=EXCLUDED.metadata
+ WHERE gateway_media_voices.user_id=EXCLUDED.user_id AND gateway_media_voices.group_id=EXCLUDED.group_id`, v.AccountID, v.ID, v.UserID, v.GroupID, []byte(v.Metadata))
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err == nil && n != 1 {
+		return service.ErrMediaNotOwned
+	}
+	return err
+}
+func (r *accountRepository) GetVoice(ctx context.Context, g, u int64, id string) (*service.GatewayMediaVoice, error) {
+	v := &service.GatewayMediaVoice{ID: id, UserID: u, GroupID: g}
+	rows, err := r.sql.QueryContext(ctx, `SELECT account_id,metadata FROM gateway_media_voices WHERE group_id=$1 AND user_id=$2 AND voice_id=$3`, g, u, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, service.ErrMediaNotOwned
+	}
+	if err := rows.Scan(&v.AccountID, &v.Metadata); err != nil {
+		return nil, err
+	}
+	if rows.Next() {
+		return nil, service.ErrMediaNotOwned
+	}
+	return v, rows.Err()
+}
+func (r *accountRepository) ListVoices(ctx context.Context, g, u int64) ([]service.GatewayMediaVoice, error) {
+	rows, err := r.sql.QueryContext(ctx, `SELECT voice_id,account_id,metadata FROM gateway_media_voices WHERE group_id=$1 AND user_id=$2 ORDER BY created_at,voice_id`, g, u)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []service.GatewayMediaVoice{}
+	for rows.Next() {
+		v := service.GatewayMediaVoice{GroupID: g, UserID: u}
+		if err := rows.Scan(&v.ID, &v.AccountID, &v.Metadata); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+func (r *accountRepository) DeleteVoice(ctx context.Context, g, u int64, id string) error {
+	_, err := r.sql.ExecContext(ctx, `DELETE FROM gateway_media_voices WHERE group_id=$1 AND user_id=$2 AND voice_id=$3`, g, u, id)
+	return err
+}
+
+func (r *accountRepository) ClearModelRateLimit(ctx context.Context, id int64, scope string, expectedReason string) (bool, error) {
+	if strings.TrimSpace(scope) == "" {
+		return false, nil
+	}
+	client := clientFromContext(ctx, r.client)
+	// 谓词里还带上「该 scope 确实存在」：没有它，清除一个本就不存在的 scope 也会 bump
+	// updated_at、入 outbox 并触发 bucket 重建。解除路径每次选号都会走到，无变化时
+	// 必须是真正的空操作。
+	result, err := client.ExecContext(
+		ctx,
+		`UPDATE accounts
+		SET extra = COALESCE(extra, '{}'::jsonb) #- ARRAY['model_rate_limits', $1]::text[],
+			updated_at = NOW()
+		WHERE id = $2 AND deleted_at IS NULL
+			AND extra #> ARRAY['model_rate_limits', $1]::text[] IS NOT NULL
+			AND COALESCE(extra #>> ARRAY['model_rate_limits', $1, 'reason']::text[], '') = $3`,
+		scope,
+		id,
+		expectedReason,
+	)
+	if err != nil {
+		return false, err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		// 没有匹配的行：账号不存在，该 scope 本来就没有限流，或 reason 已经被改写。
+		// 不能据此清除请求内的旧快照：新 reason 可能代表仍然有效的上游 429。
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear model rate limit scope failed: account=%d scope=%s err=%v", id, scope, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return true, nil
 }

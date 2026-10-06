@@ -28,16 +28,21 @@ func (s *updateServiceCacheStub) SetUpdateInfo(_ context.Context, data string, _
 }
 
 type updateServiceGitHubClientStub struct {
+	latestErr      error
 	release        *GitHubRelease
 	recentReleases []*GitHubRelease
 	recentErr      error
+	latestCalls    int
+	recentCalls    int
 }
 
 func (s *updateServiceGitHubClientStub) FetchLatestRelease(context.Context, string) (*GitHubRelease, error) {
-	return s.release, nil
+	s.latestCalls++
+	return s.release, s.latestErr
 }
 
 func (s *updateServiceGitHubClientStub) FetchRecentReleases(context.Context, string, int) ([]*GitHubRelease, error) {
+	s.recentCalls++
 	return s.recentReleases, s.recentErr
 }
 
@@ -50,7 +55,7 @@ func (s *updateServiceGitHubClientStub) FetchChecksumFile(context.Context, strin
 }
 
 func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
-	svc := NewUpdateService(
+	svc := newUpstreamUpdateTestService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{
 			release: &GitHubRelease{
@@ -69,8 +74,14 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
 }
 
+func newUpstreamUpdateTestService(cache UpdateCache, client GitHubReleaseClient, version, buildType string) *UpdateService {
+	svc := NewUpdateService(cache, client, version, buildType)
+	svc.releaseChannel = ""
+	return svc
+}
+
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
-	return NewUpdateService(
+	return newUpstreamUpdateTestService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{recentReleases: releases},
 		current,
@@ -132,7 +143,7 @@ func TestUpdateServiceListRollbackVersionsEmptyWhenNoneOlder(t *testing.T) {
 }
 
 func TestUpdateServiceListRollbackVersionsPropagatesFetchError(t *testing.T) {
-	svc := NewUpdateService(
+	svc := newUpstreamUpdateTestService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{recentErr: errors.New("github unavailable")},
 		"0.1.147",
@@ -184,4 +195,101 @@ func TestUpdateServiceRollbackToVersionAcceptsVPrefix(t *testing.T) {
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrRollbackVersionNotAllowed)
 	require.Contains(t, err.Error(), "no compatible release found")
+}
+
+// update.check_enabled=false (wire.go feeds it through WithCheckEnabled) must
+// short-circuit every network-backed operation without touching GitHub.
+func TestUpdateServiceCheckDisabledSkipsGitHub(t *testing.T) {
+	client := &updateServiceGitHubClientStub{
+		release:        &GitHubRelease{TagName: "v9.9.9", Name: "v9.9.9"},
+		recentReleases: []*GitHubRelease{{TagName: "v0.1.146"}},
+	}
+	svc := newUpstreamUpdateTestService(&updateServiceCacheStub{}, client, "0.1.147", "release").WithCheckEnabled(false)
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.True(t, info.Disabled)
+	require.False(t, info.HasUpdate)
+	require.Equal(t, "0.1.147", info.CurrentVersion)
+	require.Equal(t, "0.1.147", info.LatestVersion)
+	require.Equal(t, "release", info.BuildType)
+
+	require.ErrorIs(t, svc.PerformUpdate(context.Background()), ErrUpdateCheckDisabled)
+	require.ErrorIs(t, svc.RollbackToVersion(context.Background(), "0.1.146"), ErrUpdateCheckDisabled)
+
+	versions, err := svc.ListRollbackVersions(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, versions)
+
+	require.Zero(t, client.latestCalls+client.recentCalls, "no GitHub call may happen while the update check is disabled")
+}
+
+// The default keeps upstream behaviour: checks are enabled unless configured off.
+func TestUpdateServiceCheckEnabledByDefault(t *testing.T) {
+	client := &updateServiceGitHubClientStub{
+		release: &GitHubRelease{TagName: "v9.9.9", Name: "v9.9.9"},
+	}
+	svc := newUpstreamUpdateTestService(&updateServiceCacheStub{}, client, "0.1.147", "release")
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.False(t, info.Disabled)
+	require.True(t, info.HasUpdate)
+	require.Equal(t, 1, client.latestCalls)
+}
+
+// The upstream baseline is build-time information and must be reported on every
+// CheckUpdate path, including the disabled and remote-failure ones.
+func TestUpdateServiceReportsUpstreamVersion(t *testing.T) {
+	client := &updateServiceGitHubClientStub{
+		release: &GitHubRelease{TagName: "v9.9.9", Name: "v9.9.9"},
+	}
+	svc := newUpstreamUpdateTestService(&updateServiceCacheStub{}, client, "0.1.147", "release").
+		WithUpstreamVersion(" v0.2.1 ")
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, "v0.2.1", info.UpstreamVersion)
+
+	disabled, err := svc.WithCheckEnabled(false).CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.True(t, disabled.Disabled)
+	require.Equal(t, "v0.2.1", disabled.UpstreamVersion)
+
+	plain := newUpstreamUpdateTestService(&updateServiceCacheStub{}, client, "0.1.147", "release")
+	info, err = plain.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Empty(t, info.UpstreamVersion, "upstream builds inject nothing and must omit the field")
+}
+
+func TestUpdateServiceReportsRunningBuildCommit(t *testing.T) {
+	const commit = "2776c84a5ebcc94d2fba1f551c200ab1d9ffe149"
+	cache := &updateServiceCacheStub{}
+	client := &updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v9.9.9"}}
+	svc := newUpstreamUpdateTestService(cache, client, "0.2.1", "release").WithBuildCommit(commit)
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, commit, info.BuildCommit)
+	// A new binary sharing an existing release cache must report its own commit.
+	svc.WithBuildCommit("abcdef012")
+	info, err = svc.CheckUpdate(context.Background(), false)
+	require.NoError(t, err)
+	require.True(t, info.Cached)
+	require.Equal(t, "abcdef012", info.BuildCommit)
+	svc.WithCheckEnabled(false)
+	info, err = svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, "abcdef012", info.BuildCommit)
+	svc.WithCheckEnabled(true)
+	client.latestErr = errors.New("offline")
+	cache.data = ""
+	info, err = svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, "abcdef012", info.BuildCommit)
+	for _, invalid := range []string{"", "unknown", "docker", "123xyz7"} {
+		svc.WithBuildCommit(invalid)
+		info, err = svc.CheckUpdate(context.Background(), true)
+		require.NoError(t, err)
+		require.Empty(t, info.BuildCommit)
+	}
 }

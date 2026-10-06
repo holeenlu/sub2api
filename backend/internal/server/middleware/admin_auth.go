@@ -191,7 +191,12 @@ func validateJWTForAdmin(
 	}
 
 	// 校验 TokenVersion，确保管理员改密后旧 token 失效
-	if claims.TokenVersion != user.TokenVersion {
+	if err := authService.ValidateAccessSession(c.Request.Context(), claims, user); err != nil {
+		if errors.Is(err, service.ErrServiceUnavailable) {
+			AbortWithError(c, 503, "AUTH_UNAVAILABLE", "Session validation is unavailable")
+			return false
+		}
+
 		AbortWithError(c, 401, "TOKEN_REVOKED", "Token has been revoked (password changed)")
 		return false
 	}

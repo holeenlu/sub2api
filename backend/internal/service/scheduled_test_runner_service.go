@@ -20,9 +20,10 @@ type ScheduledTestRunnerService struct {
 	rateLimitSvc   *RateLimitService
 	cfg            *config.Config
 
-	cron      *cron.Cron
-	startOnce sync.Once
-	stopOnce  sync.Once
+	stopDiagnostics context.CancelFunc
+	cron            *cron.Cron
+	startOnce       sync.Once
+	stopOnce        sync.Once
 }
 
 // NewScheduledTestRunnerService creates a new runner.
@@ -61,6 +62,9 @@ func (s *ScheduledTestRunnerService) Start() {
 			logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] not started (invalid schedule): %v", err)
 			return
 		}
+		ctx, cancel := context.WithCancel(context.Background())
+		s.stopDiagnostics = cancel
+		c.Schedule(cron.Every(5*time.Second), cron.FuncJob(func() { s.scheduledSvc.RunPendingDiagnostics(ctx) }))
 		s.cron = c
 		s.cron.Start()
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] started (tick=every minute)")
@@ -73,11 +77,14 @@ func (s *ScheduledTestRunnerService) Stop() {
 		return
 	}
 	s.stopOnce.Do(func() {
+		if s.stopDiagnostics != nil {
+			s.stopDiagnostics()
+		}
 		if s.cron != nil {
 			ctx := s.cron.Stop()
 			select {
 			case <-ctx.Done():
-			case <-time.After(3 * time.Second):
+			case <-time.After(8 * time.Second):
 				logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] cron stop timed out")
 			}
 		}
@@ -120,6 +127,16 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 }
 
 func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *ScheduledTestPlan) {
+	// Background plans do not run under the HTTP recovery middleware.
+	defer func() {
+		if recover() != nil {
+			logger.LegacyPrintf("service.scheduled_test_runner", "scheduled plan=%d account=%d panicked", plan.ID, plan.AccountID)
+		}
+	}()
+	if plan.PelicanConfig != nil {
+		// Never reinterpret a retired quality plan as a connectivity test.
+		return
+	}
 	result, err := s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d RunTestBackground error: %v", plan.ID, err)

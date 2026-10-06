@@ -1,15 +1,35 @@
-import { describe, expect, it, vi } from 'vitest'
-import { PURCHASE_ROUTE_NAME, resolveDocumentTitle, resolveRouteDocumentTitle, resolveRouteMetaKeys } from '@/router/title'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { i18n } from '@/i18n'
+import { BRAND_NAME } from '@/config/brand'
+import {
+  PURCHASE_ROUTE_NAME,
+  applyRouteMetaDescription,
+  resolveDocumentTitle,
+  resolveRouteDocumentTitle,
+  resolveRouteMetaKeys
+} from '@/router/title'
 
-// 语言包在测试环境是懒加载的，这里只提供本文件用到的几个 key，其余原样返回 key（触发 meta.title 回退）。
-vi.mock('@/i18n', () => {
-  const messages: Record<string, string> = {
-    'nav.recharge': '充值',
-    'nav.subscribe': '订阅',
-    'nav.buySubscription': '充值/订阅',
+// 语言包是懒加载的，测试里自己塞一份最小消息，避免依赖真实文案
+i18n.global.setLocaleMessage('en', {
+  page: {
+    standaloneTitle: 'Standalone Title — Example',
+    description: 'Example page description'
+  },
+  nav: {
+    recharge: '充值',
+    subscribe: '订阅',
+    buySubscription: '充值/订阅'
   }
-  return { i18n: { global: { t: (key: string) => messages[key] ?? key } } }
 })
+i18n.global.locale.value = 'en'
+
+function metaRoute(meta: Record<string, unknown>) {
+  return { name: 'Home', params: {}, meta } as never
+}
+
+function descriptionNodes(): HTMLMetaElement[] {
+  return Array.from(document.head.querySelectorAll<HTMLMetaElement>('meta[name="description"]'))
+}
 
 describe('resolveDocumentTitle', () => {
   it('路由存在标题时，使用“路由标题 - 站点名”格式', () => {
@@ -21,8 +41,8 @@ describe('resolveDocumentTitle', () => {
   })
 
   it('站点名为空时，回退默认站点名', () => {
-    expect(resolveDocumentTitle('Dashboard', '')).toBe('Dashboard - Sub2API')
-    expect(resolveDocumentTitle(undefined, '   ')).toBe('Sub2API')
+    expect(resolveDocumentTitle('Dashboard', '')).toBe(`Dashboard - ${BRAND_NAME}`)
+    expect(resolveDocumentTitle(undefined, '   ')).toBe(BRAND_NAME)
   })
 
   it('站点名变更时仅影响后续路由标题计算', () => {
@@ -55,6 +75,79 @@ describe('resolveRouteDocumentTitle', () => {
         sort_order: 0
       }
     ])).toBe('账号调度器 - EzouAPI')
+  })
+})
+
+describe('titleStandalone', () => {
+  it('标记为 standalone 时，翻译结果就是完整标题，不再附加站点名', () => {
+    expect(
+      resolveRouteDocumentTitle(
+        metaRoute({ titleKey: 'page.standaloneTitle', titleStandalone: true }),
+        'My Site'
+      )
+    ).toBe('Standalone Title — Example')
+  })
+
+  it('未标记 standalone 时，仍然附加站点名', () => {
+    expect(
+      resolveRouteDocumentTitle(metaRoute({ titleKey: 'page.standaloneTitle' }), 'My Site')
+    ).toBe('Standalone Title — Example - My Site')
+  })
+
+  it('自定义菜单标题优先，standalone 不生效', () => {
+    const route = {
+      name: 'CustomPage',
+      params: { id: 'scheduler' },
+      meta: { titleKey: 'page.standaloneTitle', titleStandalone: true }
+    } as never
+
+    expect(
+      resolveRouteDocumentTitle(route, 'My Site', [
+        {
+          id: 'scheduler',
+          label: '账号调度器',
+          icon_svg: '',
+          url: 'https://example.com',
+          visibility: 'admin',
+          sort_order: 0
+        }
+      ])
+    ).toBe('账号调度器 - My Site')
+  })
+})
+
+describe('applyRouteMetaDescription', () => {
+  beforeEach(() => {
+    for (const node of descriptionNodes()) {
+      node.remove()
+    }
+  })
+
+  it('有 metaDescriptionKey 时写入 description', () => {
+    applyRouteMetaDescription(metaRoute({ metaDescriptionKey: 'page.description' }))
+
+    expect(descriptionNodes()).toHaveLength(1)
+    expect(descriptionNodes()[0].getAttribute('content')).toBe('Example page description')
+  })
+
+  it('重复调用只复用同一个节点', () => {
+    applyRouteMetaDescription(metaRoute({ metaDescriptionKey: 'page.description' }))
+    applyRouteMetaDescription(metaRoute({ metaDescriptionKey: 'page.description' }))
+
+    expect(descriptionNodes()).toHaveLength(1)
+  })
+
+  it('离开带 description 的路由后移除节点', () => {
+    applyRouteMetaDescription(metaRoute({ metaDescriptionKey: 'page.description' }))
+    applyRouteMetaDescription(metaRoute({}))
+
+    expect(descriptionNodes()).toHaveLength(0)
+  })
+
+  it('key 无法翻译时不写入残缺的 description', () => {
+    applyRouteMetaDescription(metaRoute({ metaDescriptionKey: 'page.missingDescription' }))
+
+    expect(descriptionNodes()).toHaveLength(0)
   })
 })
 

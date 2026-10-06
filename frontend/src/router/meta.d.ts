@@ -70,5 +70,17 @@ declare module 'vue-router' {
      * i18n key for the page description
      */
     descriptionKey?: string
+
+    /**
+     * titleKey 已经是完整标题时设 true，不再附加「 - 站点名」。
+     * 用于自带完整 SEO 标题（标题里已含站点名）的页面，避免站点名出现两次。
+     */
+    titleStandalone?: boolean
+
+    /**
+     * i18n key for the `<meta name="description">` content.
+     * 缺省时离开该路由会移除上一页留下的 description，全站只保留一个节点。
+     */
+    metaDescriptionKey?: string
   }
 }

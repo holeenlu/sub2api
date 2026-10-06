@@ -39,7 +39,12 @@ export async function fetchAllAccountIds(
 
   const uniqueIDs = Array.from(new Set(ids))
   if (uniqueIDs.length !== firstPage.total) {
-    throw new Error('账号列表结果不完整')
+    // 这个 Error 只进 console：唯一的调用方（AccountsView）catch 之后走
+    // t('admin.accounts.bulkActions.selectAllFailed') 提示用户。message 保持
+    // 非本地化的技术描述，避免简体文案在 zh-TW / en 环境下泄漏到界面。
+    throw new Error(
+      `account list result is incomplete: expected ${firstPage.total} ids, got ${uniqueIDs.length}`
+    )
   }
   return uniqueIDs
 }

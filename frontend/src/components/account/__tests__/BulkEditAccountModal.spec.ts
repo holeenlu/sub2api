@@ -1,3 +1,4 @@
+import { i18n } from '@/i18n'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
@@ -144,7 +145,7 @@ describe('BulkEditAccountModal', () => {
     expect(mappingTab).toBeTruthy()
     await mappingTab!.trigger('click')
 
-    expect(wrapper.text()).toContain('3.1-Flash-Image透传')
+    expect(wrapper.text()).toContain(i18n.global.t('ui.passthroughModel', { model: '3.1-Flash-Image' }))
     expect(wrapper.text()).toContain('3-Pro-Image→3.1')
     expect(wrapper.text()).not.toContain('GPT-5.3 Codex Spark')
   })
@@ -273,7 +274,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('OpenAI 账号批量编辑可开启自动透传', async () => {
+  it(i18n.global.t('ui.passthroughModel', { model: 'OpenAI 账号批量编辑可开启自动' }), async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -856,7 +857,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('OpenAI 账号批量编辑可关闭自动透传', async () => {
+  it(i18n.global.t('ui.passthroughModel', { model: 'OpenAI 账号批量编辑可关闭自动' }), async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['apikey']

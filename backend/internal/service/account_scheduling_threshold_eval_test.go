@@ -121,7 +121,7 @@ func TestEvaluateAnthropicFableSchedulingThreshold_UsesAccountOverrideWithoutPau
 	accountDecision := EvaluateAccountSchedulingThreshold(account, thresholds, now)
 	require.False(t, accountDecision.ShouldPause)
 
-	decision := evaluateAnthropicFableSchedulingThreshold(account, thresholds, now)
+	decision := evaluateAnthropicFableSchedulingThreshold(account, thresholds, true, now)
 
 	require.True(t, decision.ShouldPause)
 	require.Equal(t, PlatformAnthropic, decision.Platform)
@@ -527,4 +527,19 @@ func TestEvaluateAccountSchedulingThreshold_GrokUsesOnlyHeaderQuotaWindow(t *tes
 	require.Equal(t, "quota", decision.Window)
 	require.NotNil(t, decision.Until)
 	require.True(t, headerUntil.Equal(*decision.Until))
+}
+
+func TestFableSchedulingThresholdIndependentScopeAndOverride(t *testing.T) {
+	now := time.Now()
+	account := &Account{Platform: PlatformAnthropic, Credentials: map[string]any{}, Extra: map[string]any{
+		"passive_usage_7d_utilization": 0.5, "passive_usage_7d_reset": float64(now.Add(time.Hour).Unix()),
+		"passive_usage_7d_oi_utilization": 0.9, "passive_usage_7d_oi_reset": float64(now.Add(2 * time.Hour).Unix())}}
+	thresholds := map[string]int{PlatformAnthropic: 70, SchedulingThresholdScopeAnthropicFable: 95}
+	require.False(t, evaluateAnthropicFableSchedulingThreshold(account, thresholds, true, now).ShouldPause)
+	account.Credentials[anthropicFableSchedulingThresholdCredentialKey] = 85
+	require.True(t, evaluateAnthropicFableSchedulingThreshold(account, thresholds, true, now).ShouldPause)
+	require.False(t, EvaluateAccountSchedulingThreshold(account, thresholds, now).ShouldPause)
+	delete(account.Credentials, anthropicFableSchedulingThresholdCredentialKey)
+	require.False(t, evaluateAnthropicFableSchedulingThreshold(account, map[string]int{}, false, now).HasEvidence)
+	require.True(t, evaluateAnthropicFableSchedulingThreshold(account, map[string]int{PlatformAnthropic: 100, SchedulingThresholdScopeAnthropicFable: 100}, true, now).HasEvidence)
 }

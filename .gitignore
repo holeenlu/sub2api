@@ -13,8 +13,11 @@
 *.dylib
 backend/bin/
 backend/server
-backend/sub2api
+backend/kdan
 backend/main
+
+# Release binary produced by the local build/deploy kit
+/kdan
 
 # Go 测试二进制
 *.test
@@ -128,11 +131,21 @@ scripts
 #openspec/
 code-reviews/
 AGENTS.md
+!/AGENTS.md
 backend/cmd/server/server
 deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
 docs/*
+!docs/CHANGE_DELIVERY.md
+!docs/MODEL_CATALOG_INCIDENT_2026-10-01.md
+!docs/FORK_FEATURE_RETIREMENT.md
+!docs/RANXI2001_TICKET_INTEGRATION.md
+!tools/tests/
+!tools/tests/test_change_delivery.py
+tools/__pycache__/
+tools/tests/__pycache__/
+!docs/ANTIGRAVITY_ATTRIBUTION_429.md
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
@@ -141,6 +154,12 @@ docs/*
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
+!docs/KEYS_PAGE_AND_BRANDING_PLAN.md
+!docs/CODEX_MODEL_CATALOG_REFRESH.md
+!docs/PRIVATE_REPOSITORY_SYNC.md
+!docs/I18N_COMPLETENESS_AUDIT.md
+# KDAN fork 自己的 CI／發版說明
+!docs/kdan-ci.md
 !docs/codex-credits.md
 !docs/legal/
 !docs/legal/*.md
@@ -161,3 +180,11 @@ issues/
 .vite/
 # 本地闭源插件开发目录及构建产物不进入 Sub2API 仓库
 /plugins/
+
+# convert-go.mjs 的「已轉換」標記；只該出現在建置用的副本樹，不進版控
+.zh-tw-converted
+
+# Python release/update tooling bytecode
+__pycache__/
+
+!docs/BPS_REMOVAL.md
