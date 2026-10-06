@@ -11,7 +11,6 @@
 ### オンラインインストール（macOS / Linux）
 
 ```bash
-export KDAN_API_KEY="YOUR_KDAN_API_KEY"
 export KDAN_BASE_URL="{{API_ROOT}}"
 export KDAN_API_KEY="YOUR_KDAN_API_KEY"
 curl -fsSL {{API_ROOT}}/install/codex.sh | bash
