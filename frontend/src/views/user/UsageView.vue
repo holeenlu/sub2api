@@ -66,8 +66,25 @@
         </div>
       </div>
 
-      <div class="card p-6">
-        <div class="flex flex-wrap items-end justify-between gap-4">
+      <div class="card">
+        <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
+          <button
+            v-for="tab in detailTabs"
+            :key="tab.key"
+            type="button"
+            data-testid="usage-detail-tab"
+            class="-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-3 text-sm font-medium transition-colors sm:px-4"
+            :class="activeTab === tab.key
+              ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-dark-500 dark:hover:text-gray-200'"
+            @click="tab.key === 'errors' ? switchToErrors() : activeTab = tab.key"
+          >
+            <Icon :name="tab.icon" size="sm" />
+            {{ tab.label }}
+          </button>
+        </div>
+
+        <div class="flex flex-wrap items-end justify-between gap-4 border-b border-gray-100 px-6 py-4 dark:border-dark-700/50">
           <div v-if="activeTab === 'errors'" class="flex flex-1 flex-wrap items-end gap-4">
             <div class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.errors.keyName') }}</label>
@@ -166,19 +183,6 @@
             </button>
           </div>
         </div>
-      </div>
-
-      <div class="flex gap-2 border-b border-gray-200 dark:border-dark-700">
-        <button class="tab" :class="{ 'tab-active': activeTab === 'usage' }" @click="activeTab = 'usage'">
-          {{ t('usage.tabs.usage') }}
-        </button>
-        <button class="tab" :class="{ 'tab-active': activeTab === 'keyRanking' }" @click="activeTab = 'keyRanking'">
-          {{ t('usage.tabs.keyRanking') }}
-        </button>
-        <button v-if="errorViewEnabled" class="tab" :class="{ 'tab-active': activeTab === 'errors' }" @click="switchToErrors">
-          {{ t('usage.tabs.errors') }}
-        </button>
-      </div>
 
       <template v-if="activeTab === 'usage'">
         <UsageTable
@@ -207,6 +211,7 @@
       <APIKeyTokenRanking
         ref="keyRankingRef"
         v-else-if="activeTab === 'keyRanking'"
+        :show-user="false"
         :start-date="startDate"
         :end-date="endDate"
         :filters="rankingFilters"
@@ -228,6 +233,7 @@
         @update:pageSize="onErrorPageSize"
         @ipGeoBatchFailed="handleIpGeoBatchFailed"
       />
+      </div>
     </div>
   </AppLayout>
 
@@ -373,6 +379,13 @@ const endpointDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionSource = ref<EndpointSource>('inbound')
 const activeTab = ref<'usage' | 'keyRanking' | 'errors'>('usage')
 const errorViewEnabled = computed(() => appStore.cachedPublicSettings?.allow_user_view_error_requests ?? false)
+const detailTabs = computed(() => [
+  { key: 'usage' as const, label: t('usage.tabs.usage'), icon: 'document' as const },
+  { key: 'keyRanking' as const, label: t('usage.tabs.keyRanking'), icon: 'key' as const },
+  ...(errorViewEnabled.value
+    ? [{ key: 'errors' as const, label: t('usage.tabs.errors'), icon: 'exclamationTriangle' as const }]
+    : []),
+])
 
 const filters = ref<UsageQueryParams>({
   start_date: startDate.value,
