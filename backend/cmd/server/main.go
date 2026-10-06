@@ -153,7 +153,11 @@ func runSetupServer() {
 	if err != nil {
 		log.Fatalf("Failed to initialize setup authorization: %v", err)
 	}
-	log.Printf("Setup authorization token (operator only): %s", bootstrapToken)
+	if strings.TrimSpace(os.Getenv("SETUP_BOOTSTRAP_TOKEN")) != "" {
+		log.Println("Setup authorization token is supplied through SETUP_BOOTSTRAP_TOKEN; it will not be written to logs")
+	} else {
+		log.Printf("Setup authorization token (operator only): %s", bootstrapToken)
+	}
 
 	// Serve embedded frontend if available
 	if web.HasEmbeddedFrontend() {

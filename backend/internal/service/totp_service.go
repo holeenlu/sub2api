@@ -397,14 +397,9 @@ func (s *TotpService) VerifyCode(ctx context.Context, userID int64, code string)
 		return infraerrors.InternalServer("TOTP_VERIFY_ERROR", "failed to verify totp code")
 	}
 
-	secretPrefix := "N/A"
-	if len(secret) >= 4 {
-		secretPrefix = secret[:4]
-	}
 	slog.Debug("totp_verify_decrypted",
 		"user_id", userID,
-		"secret_len", len(secret),
-		"secret_prefix", secretPrefix)
+		"secret_len", len(secret))
 
 	// Verify the code
 	valid := totp.Validate(code, secret)
@@ -412,7 +407,6 @@ func (s *TotpService) VerifyCode(ctx context.Context, userID int64, code string)
 		"user_id", userID,
 		"valid", valid,
 		"secret_len", len(secret),
-		"secret_prefix", secretPrefix,
 		"server_time", time.Now().UTC().Format(time.RFC3339))
 
 	if !valid {

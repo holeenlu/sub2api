@@ -11,11 +11,12 @@ This guide covers local clients that read Codex configuration. Remote hosts, WSL
 ### Online install (macOS / Linux)
 
 ```bash
+export KDAN_BASE_URL="{{API_ROOT}}"
 export KDAN_API_KEY="YOUR_KDAN_API_KEY"
 curl -fsSL {{API_ROOT}}/install/codex.sh | bash
 ```
 
-The script backs up `config.toml`, writes the Responses provider, and sets mode `600`. Review it before piping into a shell; never put a key in shell history or source control. Set `KDAN_BASE_URL` for a custom gateway and `MODEL_ID` to override the example model.
+The script backs up `config.toml`, writes the Responses provider, and sets mode `600`. Review it before piping into a shell; never put a key in shell history or source control. `KDAN_BASE_URL` is required and `MODEL_ID` can override the example model.
 
 This screenshot shows the project's OpenAI-group API key configuration with invalid sample credentials and an example URL. Copy your own group configuration. The [console guide](/apps/console) also shows Legacy mode and the steps; click images to view full size.
 

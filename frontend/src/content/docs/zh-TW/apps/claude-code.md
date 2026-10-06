@@ -14,11 +14,12 @@
 ### 線上部署（macOS / Linux）
 
 ```bash
+export KDAN_BASE_URL="{{API_ROOT}}"
 export KDAN_API_KEY="你的 KDAN API Key"
 curl -fsSL {{API_ROOT}}/install/claude-code.sh | bash
 ```
 
-腳本會備份 `~/.claude/settings.json` 後寫入 Messages 環境變數並限制權限。執行前請審閱腳本；需要自訂地址時設定 `KDAN_BASE_URL`。
+腳本會備份 `~/.claude/settings.json` 後寫入 Messages 環境變數並限制權限。執行前請審閱腳本；`KDAN_BASE_URL` 必須設定。
 
 下圖來自KDAN“使用金鑰 → Claude Code”，使用無效範例 Key 與演示地址。選擇與你作業系統一致的標籤，並複製自己控制台裡的值；[設定器教程](/apps/console) 也提供了 PowerShell 截圖。
 

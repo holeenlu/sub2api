@@ -2140,6 +2140,11 @@ func TestValidateConfigErrors(t *testing.T) {
 			wantErr: "gateway.scheduling.session_account_history_ttl_seconds",
 		},
 		{
+			name:    "gateway scheduling session account history ttl upper bound",
+			mutate:  func(c *Config) { c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds = 30*24*60*60 + 1 },
+			wantErr: "gateway.scheduling.session_account_history_ttl_seconds",
+		},
+		{
 			name:    "gateway scheduling sticky waiting",
 			mutate:  func(c *Config) { c.Gateway.Scheduling.StickySessionMaxWaiting = 0 },
 			wantErr: "gateway.scheduling.sticky_session_max_waiting",

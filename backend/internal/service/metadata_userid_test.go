@@ -3,6 +3,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -71,6 +72,11 @@ func TestParseMetadataUserID_InvalidInputs(t *testing.T) {
 			require.Nil(t, ParseMetadataUserID(tt.raw), "should return nil for: %s", tt.raw)
 		})
 	}
+}
+
+func TestParseMetadataUserID_RejectsOversizedSessionID(t *testing.T) {
+	raw := `{"device_id":"device","account_uuid":"","session_id":"` + strings.Repeat("x", maxMetadataSessionIDLength+1) + `"}`
+	require.Nil(t, ParseMetadataUserID(raw))
 }
 
 func TestParseMetadataUserID_HexCaseInsensitive(t *testing.T) {

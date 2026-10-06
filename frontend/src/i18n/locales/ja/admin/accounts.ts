@@ -611,8 +611,7 @@ export default {
       vertexSaJsonInvalid: 'サービスアカウントJSONの形式が無効です',
       vertexSaJsonRequired: 'サービスアカウントJSONをアップロードしてください',
       oauthSetupToken: 'OAuth / セットアップトークン',
-      addMethod: '方法を追加',
-      setupTokenLongLived: 'セットアップトークン（長期有効）',
+      addMethod: '認証方式',
       baseUrl: 'ベースURL',
       baseUrlHint: 'Anthropic公式APIを使用する場合はデフォルトのままにしてください',
       apiKeyRequired: 'APIキー *',
@@ -1146,6 +1145,13 @@ export default {
       oauth: {
         title: 'Claudeアカウント認証',
         authMethod: '認証方式',
+        auth: 'Auth',
+        oauthToken: 'OAuth token',
+        setupTokenLongLived: 'セットアップトークン（長期有効）',
+        setupTokenInstruction: '`claude setup-token`を実行し、CLIが返したトークンを下に貼り付けてください。',
+        setupTokenExpiry: 'このセットアップトークンの有効期間は1年です。上に表示された環境変数を設定して使用します。',
+        setupTokenInput: 'セットアップトークン',
+        setupTokenPlaceholder: 'claude setup-tokenが返したトークンを貼り付けてください...',
         manualAuth: '手動認証',
         cookieAutoAuth: 'Cookie自動認証',
         cookieAutoAuthDesc:

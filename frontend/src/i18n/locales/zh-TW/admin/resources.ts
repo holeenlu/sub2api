@@ -561,8 +561,8 @@ export default {
         rowHint: '點選檢視該金鑰的用量明細',
         keyCount: '共 {count} 把金鑰',
         columns: {
-          key: 'API 金鑰',
-          user: '擁有者'
+          key: '金鑰',
+          user: '所屬使用者'
         }
       },
       tokenRanking: {

@@ -13,11 +13,12 @@
 如果站點管理員已釋出安裝腳本，可在設定環境變數後直接部署目前使用者設定：
 
 ```bash
+export KDAN_BASE_URL="{{API_ROOT}}"
 export KDAN_API_KEY="你的 KDAN API Key"
 curl -fsSL {{API_ROOT}}/install/codex.sh | bash
 ```
 
-腳本會備份已有 `config.toml`、寫入 Responses Provider，並設定 `600` 權限。執行前應審閱腳本內容；不要把 API Key 寫進命令歷史或提交到儲存庫。需要自訂地址時額外設定 `KDAN_BASE_URL`，模型可用 `MODEL_ID` 覆蓋。
+腳本會備份已有 `config.toml`、寫入 Responses Provider，並設定 `600` 權限。執行前應審閱腳本內容；不要把 API Key 寫進命令歷史或提交到儲存庫。`KDAN_BASE_URL` 必須設定，模型可用 `MODEL_ID` 覆蓋。
 
 下圖為 KDAN OpenAI 分組的 API key 模式設定器，使用無效範例 Key 和演示地址。根據自己的分組複製實際設定；[控制台設定器](/apps/console) 說明驗證模式與操作步驟，截圖可點選放大。
 

@@ -2,7 +2,8 @@
 set -euo pipefail
 
 : "${KDAN_API_KEY:?Set KDAN_API_KEY before running this installer}"
-BASE_URL="${KDAN_BASE_URL:-https://api.example.com}"
+: "${KDAN_BASE_URL:?Set KDAN_BASE_URL before running this installer}"
+BASE_URL="${KDAN_BASE_URL%/}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 mkdir -p "$CODEX_HOME"
 CONFIG="$CODEX_HOME/config.toml"

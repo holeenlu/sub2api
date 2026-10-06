@@ -1343,9 +1343,9 @@
         </div>
       </div>
 
-      <!-- Add Method (only for Anthropic OAuth-based type) -->
+      <!-- Authorization method (only for Anthropic OAuth-based type) -->
       <div v-if="form.platform === 'anthropic' && isOAuthFlow">
-        <label class="input-label">{{ t('admin.accounts.addMethod') }}</label>
+        <label class="input-label">{{ t('admin.accounts.oauth.authMethod') }}</label>
         <div class="mt-2 flex gap-4">
           <label class="flex cursor-pointer items-center">
             <input
@@ -1354,7 +1354,7 @@
               value="oauth"
               class="mr-2 text-primary-600 focus:ring-primary-500"
             />
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.types.oauth') }}</span>
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.oauth.auth') }}</span>
           </label>
           <label class="flex cursor-pointer items-center">
             <input
@@ -1363,8 +1363,17 @@
               value="setup-token"
               class="mr-2 text-primary-600 focus:ring-primary-500"
             />
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.oauth.oauthToken') }}</span>
+          </label>
+          <label class="flex cursor-pointer items-center">
+            <input
+              v-model="addMethod"
+              type="radio"
+              value="setup-token-manual"
+              class="mr-2 text-primary-600 focus:ring-primary-500"
+            />
             <span class="text-sm text-gray-700 dark:text-gray-300">{{
-              t('admin.accounts.setupTokenLongLived')
+              t('admin.accounts.oauth.setupTokenLongLived')
             }}</span>
           </label>
         </div>
@@ -3562,7 +3571,7 @@
         :show-help="form.platform === 'anthropic'"
         :show-proxy-warning="form.platform !== 'openai' && form.platform !== 'grok' && !!form.proxy_id"
         :allow-multiple="form.platform === 'anthropic'"
-        :show-cookie-option="form.platform === 'anthropic'"
+        :show-cookie-option="form.platform === 'anthropic' && addMethod !== 'setup-token-manual'"
         :show-refresh-token-option="form.platform === 'openai' || form.platform === 'antigravity' || form.platform === 'grok'"
         :show-mobile-refresh-token-option="form.platform === 'openai'"
         :show-session-token-option="false"
@@ -3572,8 +3581,9 @@
         :show-codex-pat-option="form.platform === 'openai'"
         :show-sso-option="form.platform === 'grok'"
         :show-email-password-option="false"
-        :show-manual-option="true"
-        :initial-input-method="'manual'"
+        :show-manual-option="addMethod !== 'setup-token-manual'"
+        :show-setup-token-option="form.platform === 'anthropic' && addMethod === 'setup-token-manual'"
+        :initial-input-method="form.platform === 'anthropic' && addMethod === 'setup-token-manual' ? 'setup_token' : 'manual'"
         :platform="form.platform"
         :show-project-id="geminiOAuthType === 'code_assist'"
         @generate-url="handleGenerateUrl"
@@ -3918,6 +3928,7 @@ import {
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import {
+  buildClaudeSetupTokenCredentials,
   useAccountOAuth,
   type AddMethod,
   type AuthInputMethod
@@ -4002,6 +4013,7 @@ interface OAuthFlowExposed {
   oauthState: string
   projectId: string
   sessionKey: string
+  setupToken: string
   refreshToken: string
   sessionToken: string
   codexSession: string
@@ -4167,7 +4179,7 @@ interface TempUnschedRuleForm {
 const step = ref(1)
 const submitting = ref(false)
 const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
-const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
+const addMethod = ref<AddMethod>('oauth') // Auth, OAuth token, or direct Claude setup-token
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
@@ -4773,7 +4785,7 @@ const isOAuthFlow = computed(() => {
 const isGrokSSOInputMethod = computed(() => form.platform === 'grok' && oauthFlowRef.value?.inputMethod === 'sso_cookie')
 
 const isManualInputMethod = computed(() => {
-  return oauthFlowRef.value?.inputMethod === 'manual'
+  return oauthFlowRef.value?.inputMethod === 'manual' || oauthFlowRef.value?.inputMethod === 'setup_token'
 })
 
 const expiresAtInput = computed({
@@ -4785,6 +4797,9 @@ const expiresAtInput = computed({
 
 const canExchangeCode = computed(() => {
   const authCode = oauthFlowRef.value?.authCode || ''
+  if (form.platform === 'anthropic' && addMethod.value === 'setup-token-manual') {
+    return !!oauthFlowRef.value?.setupToken?.trim() && !oauth.loading.value
+  }
   if (form.platform === 'openai') {
     return authCode.trim() && openaiOAuth.sessionId.value && !openaiOAuth.loading.value
   }
@@ -4846,7 +4861,9 @@ watch(
     if ((form.platform === 'gemini' || form.platform === 'anthropic') && category === 'service_account') {
       form.type = 'service_account' as AccountType
     } else if (category === 'oauth-based') {
-      form.type = form.platform === 'anthropic' ? method as AccountType : 'oauth'
+      form.type = form.platform === 'anthropic'
+        ? (method === 'setup-token-manual' ? 'setup-token' : method as AccountType)
+        : 'oauth'
     } else {
       form.type = 'apikey'
     }
@@ -6915,6 +6932,60 @@ const handleGrokExchange = async (authCode: string) => {
   }
 }
 
+const buildAnthropicOAuthExtra = (base?: Record<string, unknown>): Record<string, unknown> | undefined => {
+  const extra: Record<string, unknown> = { ...(base || {}) }
+
+  if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
+    extra.window_cost_limit = windowCostLimit.value
+    extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
+  }
+  if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
+    extra.max_sessions = maxSessions.value
+    extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
+  }
+  if (rpmLimitEnabled.value) {
+    extra.base_rpm = baseRpm.value != null && baseRpm.value > 0 ? baseRpm.value : 15
+    extra.rpm_strategy = rpmStrategy.value
+    if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
+      extra.rpm_sticky_buffer = rpmStickyBuffer.value
+    }
+  }
+  if (userMsgQueueMode.value) extra.user_msg_queue_mode = userMsgQueueMode.value
+  if (tlsFingerprintEnabled.value) {
+    extra.enable_tls_fingerprint = true
+    if (tlsFingerprintProfileId.value) extra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
+  }
+  if (sessionIdMaskingEnabled.value) extra.session_id_masking_enabled = true
+  if (cacheTTLOverrideEnabled.value) {
+    extra.cache_ttl_override_enabled = true
+    extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
+  }
+  if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
+    extra.custom_base_url_enabled = true
+    extra.custom_base_url = customBaseUrl.value.trim()
+  }
+
+  return Object.keys(extra).length > 0 ? extra : undefined
+}
+
+const handleAnthropicSetupToken = async (rawToken: string) => {
+  const credentials = buildClaudeSetupTokenCredentials(rawToken)
+  if (!credentials) return
+
+  oauth.loading.value = true
+  oauth.error.value = ''
+  try {
+    const expiresAt = credentials.expires_at as number
+    if (!form.expires_at) form.expires_at = expiresAt
+    await createAccountAndFinish('anthropic', 'setup-token', credentials, buildAnthropicOAuthExtra())
+  } catch (error: any) {
+    oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+    appStore.showError(oauth.error.value)
+  } finally {
+    oauth.loading.value = false
+  }
+}
+
 // Anthropic OAuth 授权码兑换
 const handleAnthropicExchange = async (authCode: string) => {
   if (!authCode.trim() || !oauth.sessionId.value) return
@@ -6935,67 +7006,16 @@ const handleAnthropicExchange = async (authCode: string) => {
       ...proxyConfig
     })
 
-    // Build extra with quota control settings
-    const baseExtra = oauth.buildExtraInfo(tokenInfo) || {}
-    const extra: Record<string, unknown> = { ...baseExtra }
-
-    // Add window cost limit settings
-    if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
-      extra.window_cost_limit = windowCostLimit.value
-      extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
-    }
-
-    // Add session limit settings
-    if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
-      extra.max_sessions = maxSessions.value
-      extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
-    }
-
-    // Add RPM limit settings
-    if (rpmLimitEnabled.value) {
-      const DEFAULT_BASE_RPM = 15
-      extra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
-        ? baseRpm.value
-        : DEFAULT_BASE_RPM
-      extra.rpm_strategy = rpmStrategy.value
-      if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
-        extra.rpm_sticky_buffer = rpmStickyBuffer.value
-      }
-    }
-
-    // UMQ mode（独立于 RPM）
-    if (userMsgQueueMode.value) {
-      extra.user_msg_queue_mode = userMsgQueueMode.value
-    }
-
-    // Add TLS fingerprint settings
-    if (tlsFingerprintEnabled.value) {
-      extra.enable_tls_fingerprint = true
-      if (tlsFingerprintProfileId.value) {
-        extra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
-      }
-    }
-
-    // Add session ID masking settings
-    if (sessionIdMaskingEnabled.value) {
-      extra.session_id_masking_enabled = true
-    }
-
-    // Add cache TTL override settings
-    if (cacheTTLOverrideEnabled.value) {
-      extra.cache_ttl_override_enabled = true
-      extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
-    }
-
-    // Add custom base URL settings
-    if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
-      extra.custom_base_url_enabled = true
-      extra.custom_base_url = customBaseUrl.value.trim()
-    }
+    const extra = buildAnthropicOAuthExtra(oauth.buildExtraInfo(tokenInfo))
 
     const credentials: Record<string, unknown> = { ...tokenInfo }
     applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
-    await createAccountAndFinish(form.platform, addMethod.value as AccountType, credentials, extra)
+    await createAccountAndFinish(
+      form.platform,
+      addMethod.value === 'oauth' ? 'oauth' : 'setup-token',
+      credentials,
+      extra
+    )
   } catch (error: any) {
     oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
     appStore.showError(oauth.error.value)
@@ -7006,6 +7026,9 @@ const handleAnthropicExchange = async (authCode: string) => {
 
 // 主入口：根据平台路由到对应处理函数
 const handleExchangeCode = async () => {
+  if (form.platform === 'anthropic' && addMethod.value === 'setup-token-manual') {
+    return handleAnthropicSetupToken(oauthFlowRef.value?.setupToken || '')
+  }
   const authCode = oauthFlowRef.value?.authCode || ''
 
   switch (form.platform) {
@@ -7060,63 +7083,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           ...proxyConfig
         })
 
-        // Build extra with quota control settings
-        const baseExtra = oauth.buildExtraInfo(tokenInfo) || {}
-        const extra: Record<string, unknown> = { ...baseExtra }
-
-        // Add window cost limit settings
-        if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
-          extra.window_cost_limit = windowCostLimit.value
-          extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
-        }
-
-        // Add session limit settings
-        if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
-          extra.max_sessions = maxSessions.value
-          extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
-        }
-
-        // Add RPM limit settings
-        if (rpmLimitEnabled.value) {
-          const DEFAULT_BASE_RPM = 15
-          extra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
-            ? baseRpm.value
-            : DEFAULT_BASE_RPM
-          extra.rpm_strategy = rpmStrategy.value
-          if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
-            extra.rpm_sticky_buffer = rpmStickyBuffer.value
-          }
-        }
-
-        // UMQ mode（独立于 RPM）
-        if (userMsgQueueMode.value) {
-          extra.user_msg_queue_mode = userMsgQueueMode.value
-        }
-
-        // Add TLS fingerprint settings
-        if (tlsFingerprintEnabled.value) {
-          extra.enable_tls_fingerprint = true
-          if (tlsFingerprintProfileId.value) {
-            extra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
-          }
-        }
-
-        // Add session ID masking settings
-        if (sessionIdMaskingEnabled.value) {
-          extra.session_id_masking_enabled = true
-        }
-
-        // Add cache TTL override settings
-        if (cacheTTLOverrideEnabled.value) {
-          extra.cache_ttl_override_enabled = true
-          extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
-        }
-
-        // Add custom base URL settings
-        if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
-          extra.custom_base_url_enabled = true
-          extra.custom_base_url = customBaseUrl.value.trim()
-        }
+        const extra = buildAnthropicOAuthExtra(oauth.buildExtraInfo(tokenInfo))
 
         const accountName = keys.length > 1 ? `${form.name} #${i + 1}` : form.name
 
@@ -7131,7 +7098,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           name: accountName,
           notes: form.notes,
           platform: form.platform,
-          type: addMethod.value, // Use addMethod as type: 'oauth' or 'setup-token'
+          type: addMethod.value === 'oauth' ? 'oauth' : 'setup-token',
           credentials,
           extra: withUpstreamRequestIdHeader(extra),
           proxy_id: form.proxy_id,
