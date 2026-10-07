@@ -84,7 +84,15 @@ export interface User {
   linuxdo_bound?: boolean
   oidc_bound?: boolean
   wechat_bound?: boolean
-  role: 'admin' | 'user' // User role for authorization
+  role: 'super_admin' | 'admin' | 'user' // User role for authorization
+  created_by?: number
+  last_login_at?: string | null
+  totp_enabled?: boolean
+  policy_version?: number
+  admin_write_fields?: Record<string, string[]>
+  permissions?: string[]
+  admin_pages?: string[]
+  admin_features?: Record<string, boolean>
   balance: number // User balance for API usage
   frozen_balance?: number // Balance currently held by async batch jobs
   concurrency: number // Allowed concurrent requests
@@ -937,7 +945,7 @@ export interface Proxy {
   host: string
   port: number
   username: string | null
-  password?: string | null
+  has_password?: boolean
   status: 'active' | 'inactive' | 'expired'
   account_count?: number // Number of accounts using this proxy
   latency_ms?: number
@@ -2093,7 +2101,7 @@ export interface UpdateUserRequest {
   password?: string
   username?: string
   notes?: string
-  role?: 'admin' | 'user'
+  role?: 'super_admin' | 'admin' | 'user'
   balance?: number
   concurrency?: number
   rpm_limit?: number

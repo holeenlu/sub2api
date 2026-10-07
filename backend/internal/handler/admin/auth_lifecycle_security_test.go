@@ -35,6 +35,7 @@ func TestAuthLifecycleAdminCredentialReplacementGate(t *testing.T) {
 		allowed bool
 	}{
 		{`{"password":"replacement"}`, false},
+		{`{"reset_totp":true}`, false},
 		{`{"email":"attacker@example.com"}`, false},
 		{`{"role":"user"}`, false},
 		{`{"username":"ordinary edit","email":"admin@example.com","role":"admin"}`, true},
@@ -113,7 +114,7 @@ func lifecycleAuthenticatedAdminHandler(t *testing.T, router *gin.Engine, admin 
 	t.Helper()
 	ctx := context.Background()
 	secret := "JBSWY3DPEHPK3PXP"
-	actor := &service.User{ID: 1001, Email: "verified-admin@example.com", PasswordHash: "hash", Role: service.RoleAdmin, Status: service.StatusActive, TotpEnabled: true, TotpSecretEncrypted: &secret}
+	actor := &service.User{ID: 1001, Email: "verified-admin@example.com", PasswordHash: "hash", Role: service.RoleSuperAdmin, Status: service.StatusActive, TotpEnabled: true, TotpSecretEncrypted: &secret}
 	repo := lifecycleAdminUserRepo{user: actor}
 	users := service.NewUserService(repo, nil, nil, nil)
 	settings := service.NewSettingService(&settingHandlerRepoStub{values: map[string]string{service.SettingKeyStepUpEnabled: "true"}}, nil)

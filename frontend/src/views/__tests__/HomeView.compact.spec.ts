@@ -15,6 +15,7 @@ const { appStore, authStore } = vi.hoisted(() => ({
   authStore: {
     isAuthenticated: false,
     isAdmin: false,
+    get adminLandingPath() {return this.isAdmin ? '/admin/dashboard' : '/dashboard'},
     user: null as { email?: string } | null,
     checkAuth: vi.fn(),
   },

@@ -169,7 +169,7 @@ onMounted(async () => {
 
 <template>
   <NavigationProgress />
-  <RouterView />
+  <RouterView :key="`${authStore.user?.id}:${authStore.user?.role}:${authStore.user?.policy_version}`" />
   <Toast />
   <AnnouncementPopup />
   <AdminComplianceDialog />

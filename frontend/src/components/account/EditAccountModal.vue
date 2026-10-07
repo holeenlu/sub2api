@@ -26,12 +26,22 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
+      <div v-if="!allowTransportEdit" class="space-y-4" data-testid="delegated-account-editor">
+        <div class="grid grid-cols-3 gap-4">
+          <label class="input-label">{{ t('admin.accounts.concurrency') }}<input v-model.number="form.concurrency" type="number" min="1" class="input" /></label>
+          <label class="input-label">{{ t('admin.accounts.priority') }}<input v-model.number="form.priority" type="number" min="1" class="input" /></label>
+          <label class="input-label">{{ t('admin.accounts.loadFactor') }}<input v-model.number="form.load_factor" type="number" min="1" class="input" /></label>
+        </div>
+        <label v-if="showCost && allowRateEdit" class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}<input v-model.number="form.rate_multiplier" type="number" min="0" step="0.001" class="input" /></label>
+        <label v-if="allowAuthorize && account.type === 'apikey'" class="input-label">{{ t('admin.accounts.apiKey') }}<input v-model="editApiKey" type="password" autocomplete="new-password" class="input" /></label>
+      </div>
+      <template v-if="allowTransportEdit">
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
-            v-model="editBaseUrl"
+ :disabled="!allowTransportEdit"            v-model="editBaseUrl"
             type="text"
             class="input"
             :placeholder="
@@ -69,7 +79,7 @@
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                 {{ t(`admin.accounts.cnProviders.apiProtocol.${item.labelKey}`) }}
               </label>
-              <input v-model="editAdaptiveBaseUrls[item.value]" type="text" class="input" />
+              <input :disabled="!allowTransportEdit" v-model="editAdaptiveBaseUrls[item.value]" type="text" class="input" />
             </div>
           </div>
           <p v-if="!cnSupportsNativeResponses(account.platform)" class="input-hint">
@@ -207,7 +217,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
           <input
-            v-model="editApiKey"
+ :disabled="!allowAuthorize"            v-model="editApiKey"
             type="password"
             class="input font-mono"
             autocomplete="new-password"
@@ -681,7 +691,7 @@
         </div>
         <div v-if="grokOAuthCustomBaseUrlEnabled" class="space-y-2">
           <input
-            v-model="grokOAuthBaseUrl"
+ :disabled="!allowTransportEdit"            v-model="grokOAuthBaseUrl"
             type="text"
             class="input"
             data-testid="grok-custom-base-url-input"
@@ -873,7 +883,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.upstream.baseUrl') }}</label>
           <input
-            v-model="editBaseUrl"
+ :disabled="!allowTransportEdit"            v-model="editBaseUrl"
             type="text"
             class="input"
             placeholder="https://cloudcode-pa.googleapis.com"
@@ -883,7 +893,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.upstream.apiKey') }}</label>
           <input
-            v-model="editApiKey"
+ :disabled="!allowAuthorize"            v-model="editApiKey"
             type="password"
             class="input font-mono"
             placeholder="sk-..."
@@ -909,7 +919,7 @@
           <div>
             <label class="input-label">Location</label>
             <select
-              v-model="editVertexLocation"
+ :disabled="!allowTransportEdit"              v-model="editVertexLocation"
               required
               class="input font-mono"
             >
@@ -1114,7 +1124,7 @@
           <div>
             <label class="input-label">{{ t('admin.accounts.bedrockAccessKeyId') }}</label>
             <input
-              v-model="editBedrockAccessKeyId"
+ :disabled="!allowAuthorize"              v-model="editBedrockAccessKeyId"
               type="text"
               class="input font-mono"
               placeholder="AKIA..."
@@ -1123,7 +1133,7 @@
           <div>
             <label class="input-label">{{ t('admin.accounts.bedrockSecretAccessKey') }}</label>
             <input
-              v-model="editBedrockSecretAccessKey"
+ :disabled="!allowAuthorize"              v-model="editBedrockSecretAccessKey"
               type="password"
               class="input font-mono"
               :placeholder="t('admin.accounts.bedrockSecretKeyLeaveEmpty')"
@@ -1133,7 +1143,7 @@
           <div>
             <label class="input-label">{{ t('admin.accounts.bedrockSessionToken') }}</label>
             <input
-              v-model="editBedrockSessionToken"
+ :disabled="!allowAuthorize"              v-model="editBedrockSessionToken"
               type="password"
               class="input font-mono"
               :placeholder="t('admin.accounts.bedrockSecretKeyLeaveEmpty')"
@@ -1146,7 +1156,7 @@
         <div v-if="isBedrockAPIKeyMode">
           <label class="input-label">{{ t('admin.accounts.bedrockApiKeyInput') }}</label>
           <input
-            v-model="editBedrockApiKeyValue"
+ :disabled="!allowAuthorize"            v-model="editBedrockApiKeyValue"
             type="password"
             class="input font-mono"
             :placeholder="t('admin.accounts.bedrockApiKeyLeaveEmpty')"
@@ -1158,7 +1168,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.bedrockRegion') }}</label>
           <input
-            v-model="editBedrockRegion"
+ :disabled="!allowTransportEdit"            v-model="editBedrockRegion"
             type="text"
             class="input"
             placeholder="us-east-1"
@@ -1682,7 +1692,7 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
 
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector :disabled="!allowTransportEdit" v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
       <UpstreamRequestIdHeaderField
@@ -1715,7 +1725,7 @@
           />
           <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
         </div>
-        <div>
+        <div v-if="showCost">
           <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
           <input
             v-model.number="form.rate_multiplier"
@@ -1724,7 +1734,7 @@
             step="0.001"
             class="input disabled:cursor-not-allowed disabled:opacity-60"
             data-testid="account-rate-multiplier"
-            :disabled="upstreamBillingRateSyncEnabled"
+            :disabled="upstreamBillingRateSyncEnabled || !allowRateEdit"
           />
           <p class="input-hint">
             {{
@@ -3001,7 +3011,7 @@
           </div>
           <div v-if="customBaseUrlEnabled" class="mt-3">
             <input
-              v-model="customBaseUrl"
+ :disabled="!allowTransportEdit"              v-model="customBaseUrl"
               type="text"
               class="input"
               :placeholder="t('admin.accounts.quotaControl.customBaseUrl.urlHint')"
@@ -3075,6 +3085,7 @@
         </div>
       </div>
 
+      </template>
       <!-- Group Selection - 仅标准模式显示 -->
       <GroupSelector
         v-model="form.group_ids"
@@ -3239,9 +3250,13 @@ interface Props {
   account: Account | null
   proxies: Proxy[]
   groups: AdminGroup[]
+  allowRateEdit?: boolean
+  allowAuthorize?: boolean
+  allowTransportEdit?: boolean
+  showCost?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { allowRateEdit: true, allowAuthorize: true, allowTransportEdit: true, showCost: true })
 const emit = defineEmits<{
   close: []
   updated: [account: Account]
@@ -3766,11 +3781,11 @@ const {
 } = useQuotaNotifyState()
 
 // Load global feature states once
-adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
+if (props.allowTransportEdit) adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
   webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
 
-loadQuotaNotifyGlobal()
+if (props.allowTransportEdit) loadQuotaNotifyGlobal()
 const editQuotaLimit = ref<number | null>(null)
 const editQuotaDailyLimit = ref<number | null>(null)
 const editQuotaWeeklyLimit = ref<number | null>(null)
@@ -4594,6 +4609,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 
 async function loadTLSProfiles() {
   try {
+    if (!props.allowTransportEdit) return
     const profiles = await adminAPI.tlsFingerprintProfiles.list()
     tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name }))
   } catch {
@@ -5196,6 +5212,8 @@ const persistGrokMediaEligibility = async (accountID: number, updatedAccount: Ac
 }
 
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
+  if (!props.allowRateEdit || !props.showCost) delete updatePayload.rate_multiplier
+  if (!props.allowTransportEdit) delete updatePayload.proxy_id
   submitting.value = true
   try {
     let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
@@ -5223,6 +5241,13 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 const handleSubmit = async () => {
   if (!props.account) return
   const accountID = props.account.id
+  if (!props.allowTransportEdit) {
+    const payload: Record<string,unknown> = {name:form.name,notes:form.notes,concurrency:form.concurrency,priority:form.priority,load_factor:form.load_factor || 0,group_ids:form.group_ids}
+    if (props.allowRateEdit && props.showCost && form.rate_multiplier !== props.account.rate_multiplier) payload.rate_multiplier = form.rate_multiplier
+    if (props.allowAuthorize && props.account.type === 'apikey' && editApiKey.value.trim()) payload.credentials = {...props.account.credentials,api_key:editApiKey.value.trim()}
+    await submitUpdateAccount(accountID,payload)
+    return
+  }
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))

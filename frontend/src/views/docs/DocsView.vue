@@ -14,7 +14,7 @@
 
         <div class="flex shrink-0 items-center gap-1">
           <LocaleSwitcher />
-          <RouterLink :to="authStore.isAuthenticated ? (authStore.isAdmin ? '/admin/dashboard' : '/dashboard') : '/login'" class="hidden h-9 items-center rounded-md bg-gray-900 px-3 text-sm font-semibold text-white hover:bg-gray-800 sm:inline-flex dark:bg-white dark:text-dark-950 dark:hover:bg-gray-200">{{ authStore.isAuthenticated ? t('docs.console') : t('docs.login') }}</RouterLink>
+          <RouterLink :to="authStore.isAuthenticated ? (authStore.adminLandingPath || '/dashboard') : '/login'" class="hidden h-9 items-center rounded-md bg-gray-900 px-3 text-sm font-semibold text-white hover:bg-gray-800 sm:inline-flex dark:bg-white dark:text-dark-950 dark:hover:bg-gray-200">{{ authStore.isAuthenticated ? t('docs.console') : t('docs.login') }}</RouterLink>
         </div>
       </div>
       <nav class="flex gap-6 border-t border-gray-100 px-5 dark:border-dark-800" :aria-label="t('docs.sections')">

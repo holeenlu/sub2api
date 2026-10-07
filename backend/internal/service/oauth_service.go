@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"log"
 	"time"
 
@@ -106,11 +107,12 @@ func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope strin
 
 	// Store session
 	session := &oauth.OAuthSession{
-		State:        state,
-		CodeVerifier: codeVerifier,
-		Scope:        scope,
-		ProxyURL:     proxyURL,
-		CreatedAt:    time.Now(),
+		Authorization: authz.CaptureLease(ctx),
+		State:         state,
+		CodeVerifier:  codeVerifier,
+		Scope:         scope,
+		ProxyURL:      proxyURL,
+		CreatedAt:     time.Now(),
 	}
 	s.sessionStore.Set(sessionID, session)
 
@@ -149,6 +151,9 @@ func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInpu
 	session, ok := s.sessionStore.Get(input.SessionID)
 	if !ok {
 		return nil, fmt.Errorf("session not found or expired")
+	}
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
 	}
 
 	// Get proxy URL

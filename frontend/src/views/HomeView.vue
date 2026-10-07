@@ -445,8 +445,7 @@ const modelPlazaRequiresAuth = computed(
 const showModelPlazaEntry = computed(
   () => modelPlazaEnabled.value && (isAuthenticated.value || !modelPlazaRequiresAuth.value),
 )
-const isAdmin = computed(() => authStore.isAdmin)
-const dashboardPath = computed(() => isAdmin.value ? '/admin/dashboard' : '/dashboard')
+const dashboardPath = computed(() => authStore.adminLandingPath || '/dashboard')
 const userInitial = computed(() => {
   const user = authStore.user
   if (!user || !user.email) return ''

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   useStepUp,
+  globalAdminStepUp, requestAdminStepUp, adminSessionStamp,
   isStepUpRequired,
   isStepUpBlocked,
   isStepUpCancelled,
@@ -83,5 +84,22 @@ describe('useStepUp.run', () => {
     expect(isStepUpRequired(cancelled)).toBe(false)
     expect(isStepUpBlocked(cancelled)).toBe(false)
     expect(isStepUpCancelled({ status: 403, code: 'STEP_UP_REQUIRED' })).toBe(false)
+  })
+})
+
+describe('shared administrative verification', () => {
+  it('shares a prompt and cancels all waiting actions together', async () => {
+    const first = requestAdminStepUp()
+    const second = requestAdminStepUp()
+    expect(first).toBe(second)
+    globalAdminStepUp.onCancel()
+    expect(await first).toBe(false)
+    expect(await second).toBe(false)
+  })
+  it('permits token refresh in the same family but separates a different login or credential generation', () => {
+    const token = (sid: string, generation: number, exp: number) => `e30.${btoa(JSON.stringify({user_id: 1, role: 'admin', sid, token_version: generation, exp}))}.signature`
+    expect(adminSessionStamp(token('a', 1, 5))).toBe(adminSessionStamp(token('a', 1, 9)))
+    expect(adminSessionStamp(token('a', 1, 5))).not.toBe(adminSessionStamp(token('b', 1, 5)))
+    expect(adminSessionStamp(token('a', 1, 5))).not.toBe(adminSessionStamp(token('a', 2, 5)))
   })
 })

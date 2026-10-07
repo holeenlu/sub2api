@@ -182,151 +182,151 @@ func sanitizeUpdateGroupRequestForSimpleMode(req *UpdateGroupRequest) {
 
 // CreateGroupRequest represents create group request
 type CreateGroupRequest struct {
-	Name                      string                        `json:"name" binding:"required"`
-	Description               string                        `json:"description"`
-	Platform                  string                        `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity grok kimi zhipu deepseek minimax opencode_go typesafe composite"`
-	RateMultiplier            float64                       `json:"rate_multiplier"`
-	IsExclusive               bool                          `json:"is_exclusive"`
-	SubscriptionType          string                        `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
-	DailyLimitUSD             optionalLimitField            `json:"daily_limit_usd"`
-	WeeklyLimitUSD            optionalLimitField            `json:"weekly_limit_usd"`
-	MonthlyLimitUSD           optionalLimitField            `json:"monthly_limit_usd"`
-	LongContextPricingEnabled bool                          `json:"long_context_pricing_enabled"`
-	ModelPricing              []service.ChannelModelPricing `json:"model_pricing"`
+	Name                      string                        `json:"name" binding:"required" authz:"base"`
+	Description               string                        `json:"description" authz:"base"`
+	Platform                  string                        `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity grok kimi zhipu deepseek minimax opencode_go typesafe composite" authz:"base"`
+	RateMultiplier            float64                       `json:"rate_multiplier" authz:"billing.rates.update"`
+	IsExclusive               bool                          `json:"is_exclusive" authz:"base"`
+	SubscriptionType          string                        `json:"subscription_type" binding:"omitempty,oneof=standard subscription" authz:"billing.rates.update"`
+	DailyLimitUSD             optionalLimitField            `json:"daily_limit_usd" authz:"billing.rates.update"`
+	WeeklyLimitUSD            optionalLimitField            `json:"weekly_limit_usd" authz:"billing.rates.update"`
+	MonthlyLimitUSD           optionalLimitField            `json:"monthly_limit_usd" authz:"billing.rates.update"`
+	LongContextPricingEnabled bool                          `json:"long_context_pricing_enabled" authz:"billing.rates.update"`
+	ModelPricing              []service.ChannelModelPricing `json:"model_pricing" authz:"billing.rates.update"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
-	AllowImageGeneration            bool                          `json:"allow_image_generation"`
-	AllowBatchImageGeneration       bool                          `json:"allow_batch_image_generation"`
-	ImageRateIndependent            bool                          `json:"image_rate_independent"`
-	ImageRateMultiplier             *float64                      `json:"image_rate_multiplier"`
-	BatchImageDiscountMultiplier    *float64                      `json:"batch_image_discount_multiplier"`
-	BatchImageHoldMultiplier        *float64                      `json:"batch_image_hold_multiplier"`
-	VideoRateIndependent            bool                          `json:"video_rate_independent"`
-	VideoRateMultiplier             *float64                      `json:"video_rate_multiplier"`
-	PeakRateEnabled                 bool                          `json:"peak_rate_enabled"`
-	PeakStart                       string                        `json:"peak_start"`
-	PeakEnd                         string                        `json:"peak_end"`
-	PeakRateMultiplier              *float64                      `json:"peak_rate_multiplier"`
-	ProfitControlEnabled            bool                          `json:"profit_control_enabled"`
-	ProfitMinMargin                 *float64                      `json:"profit_min_margin"`
-	ProfitSafetyBuffer              *float64                      `json:"profit_safety_buffer"`
-	ImagePrice1K                    *float64                      `json:"image_price_1k"`
-	ImagePrice2K                    *float64                      `json:"image_price_2k"`
-	ImagePrice4K                    *float64                      `json:"image_price_4k"`
-	VideoPrice480P                  *float64                      `json:"video_price_480p"`
-	VideoPrice720P                  *float64                      `json:"video_price_720p"`
-	VideoPrice1080P                 *float64                      `json:"video_price_1080p"`
-	VideoModelPrices                map[string]map[string]float64 `json:"video_model_prices,omitempty"`
-	WebSearchPricePerCall           *float64                      `json:"web_search_price_per_call"`
-	SearchPricePer1k                *float64                      `json:"search_price_per_1k"`
-	AudioRealtimePricePerMin        *float64                      `json:"audio_realtime_price_per_min"`
-	AudioTtsPricePerMillionChars    *float64                      `json:"audio_tts_price_per_million_chars"`
-	AudioSttPricePerHour            *float64                      `json:"audio_stt_price_per_hour"`
-	ClaudeCodeOnly                  bool                          `json:"claude_code_only"`
-	FallbackGroupID                 *int64                        `json:"fallback_group_id"`
-	FallbackGroupIDOnInvalidRequest *int64                        `json:"fallback_group_id_on_invalid_request"`
+	AllowImageGeneration            bool                          `json:"allow_image_generation" authz:"base"`
+	AllowBatchImageGeneration       bool                          `json:"allow_batch_image_generation" authz:"base"`
+	ImageRateIndependent            bool                          `json:"image_rate_independent" authz:"billing.rates.update"`
+	ImageRateMultiplier             *float64                      `json:"image_rate_multiplier" authz:"billing.rates.update"`
+	BatchImageDiscountMultiplier    *float64                      `json:"batch_image_discount_multiplier" authz:"billing.rates.update"`
+	BatchImageHoldMultiplier        *float64                      `json:"batch_image_hold_multiplier" authz:"billing.rates.update"`
+	VideoRateIndependent            bool                          `json:"video_rate_independent" authz:"billing.rates.update"`
+	VideoRateMultiplier             *float64                      `json:"video_rate_multiplier" authz:"billing.rates.update"`
+	PeakRateEnabled                 bool                          `json:"peak_rate_enabled" authz:"billing.rates.update"`
+	PeakStart                       string                        `json:"peak_start" authz:"billing.rates.update"`
+	PeakEnd                         string                        `json:"peak_end" authz:"billing.rates.update"`
+	PeakRateMultiplier              *float64                      `json:"peak_rate_multiplier" authz:"billing.rates.update"`
+	ProfitControlEnabled            bool                          `json:"profit_control_enabled" authz:"billing.rates.update"`
+	ProfitMinMargin                 *float64                      `json:"profit_min_margin" authz:"billing.rates.update"`
+	ProfitSafetyBuffer              *float64                      `json:"profit_safety_buffer" authz:"billing.rates.update"`
+	ImagePrice1K                    *float64                      `json:"image_price_1k" authz:"billing.rates.update"`
+	ImagePrice2K                    *float64                      `json:"image_price_2k" authz:"billing.rates.update"`
+	ImagePrice4K                    *float64                      `json:"image_price_4k" authz:"billing.rates.update"`
+	VideoPrice480P                  *float64                      `json:"video_price_480p" authz:"billing.rates.update"`
+	VideoPrice720P                  *float64                      `json:"video_price_720p" authz:"billing.rates.update"`
+	VideoPrice1080P                 *float64                      `json:"video_price_1080p" authz:"billing.rates.update"`
+	VideoModelPrices                map[string]map[string]float64 `json:"video_model_prices,omitempty" authz:"billing.rates.update"`
+	WebSearchPricePerCall           *float64                      `json:"web_search_price_per_call" authz:"billing.rates.update"`
+	SearchPricePer1k                *float64                      `json:"search_price_per_1k" authz:"billing.rates.update"`
+	AudioRealtimePricePerMin        *float64                      `json:"audio_realtime_price_per_min" authz:"billing.rates.update"`
+	AudioTtsPricePerMillionChars    *float64                      `json:"audio_tts_price_per_million_chars" authz:"billing.rates.update"`
+	AudioSttPricePerHour            *float64                      `json:"audio_stt_price_per_hour" authz:"billing.rates.update"`
+	ClaudeCodeOnly                  bool                          `json:"claude_code_only" authz:"base"`
+	FallbackGroupID                 *int64                        `json:"fallback_group_id" authz:"base"`
+	FallbackGroupIDOnInvalidRequest *int64                        `json:"fallback_group_id_on_invalid_request" authz:"base"`
 	// 模型路由配置（仅 anthropic 平台使用）
-	ModelRouting        map[string][]int64 `json:"model_routing"`
-	ModelRoutingEnabled bool               `json:"model_routing_enabled"`
-	MCPXMLInject        *bool              `json:"mcp_xml_inject"`
+	ModelRouting        map[string][]int64 `json:"model_routing" authz:"base"`
+	ModelRoutingEnabled bool               `json:"model_routing_enabled" authz:"base"`
+	MCPXMLInject        *bool              `json:"mcp_xml_inject" authz:"base"`
 	// 支持的模型系列（仅 antigravity 平台使用）
-	SupportedModelScopes []string `json:"supported_model_scopes"`
+	SupportedModelScopes []string `json:"supported_model_scopes" authz:"base"`
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
-	AllowMessagesDispatch       bool                                      `json:"allow_messages_dispatch"`
-	AllowLive                   bool                                      `json:"allow_live"`
-	ForceOpenAIFast             bool                                      `json:"force_openai_fast"`
-	FreeOpenAIFast              bool                                      `json:"free_openai_fast"`
-	RequireOAuthOnly            bool                                      `json:"require_oauth_only"`
-	RequirePrivacySet           bool                                      `json:"require_privacy_set"`
-	DefaultMappedModel          string                                    `json:"default_mapped_model"`
-	MessagesDispatchModelConfig service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
-	ModelAllowlist              service.GroupModelAllowlist               `json:"model_allowlist"`
+	AllowMessagesDispatch       bool                                      `json:"allow_messages_dispatch" authz:"base"`
+	AllowLive                   bool                                      `json:"allow_live" authz:"base"`
+	ForceOpenAIFast             bool                                      `json:"force_openai_fast" authz:"billing.rates.update"`
+	FreeOpenAIFast              bool                                      `json:"free_openai_fast" authz:"billing.rates.update"`
+	RequireOAuthOnly            bool                                      `json:"require_oauth_only" authz:"base"`
+	RequirePrivacySet           bool                                      `json:"require_privacy_set" authz:"base"`
+	DefaultMappedModel          string                                    `json:"default_mapped_model" authz:"base"`
+	MessagesDispatchModelConfig service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config" authz:"base"`
+	ModelAllowlist              service.GroupModelAllowlist               `json:"model_allowlist" authz:"base"`
 	// 固定账号 manifest 配置；创建路径禁止开启，仅编辑可配置。
-	CodexModelsManifestConfig service.GroupCodexModelsManifestConfig `json:"codex_models_manifest_config"`
+	CodexModelsManifestConfig service.GroupCodexModelsManifestConfig `json:"codex_models_manifest_config" authz:"base"`
 	// 分组 RPM 上限（0 = 不限制）
-	RPMLimit int `json:"rpm_limit"`
+	RPMLimit int `json:"rpm_limit" authz:"base"`
 	// Anthropic/OpenAI 请求推理强度上限，空字符串表示不限制。
-	MaxReasoningEffort string `json:"max_reasoning_effort"`
+	MaxReasoningEffort string `json:"max_reasoning_effort" authz:"base"`
 	// 超过上限时的访问控制：downgrade（默认）或 deny。
-	MaxReasoningEffortOverLimit string `json:"max_reasoning_effort_over_limit"`
+	MaxReasoningEffortOverLimit string `json:"max_reasoning_effort_over_limit" authz:"base"`
 	// Anthropic/OpenAI 推理强度映射，可按模型精确名、前缀或后缀限定。
-	ReasoningEffortMappings []service.ReasoningEffortMapping `json:"reasoning_effort_mappings"`
+	ReasoningEffortMappings []service.ReasoningEffortMapping `json:"reasoning_effort_mappings" authz:"base"`
 	// 从指定分组复制账号（创建后自动绑定）
-	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
+	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids" authz:"base"`
 }
 
 // UpdateGroupRequest represents update group request
 type UpdateGroupRequest struct {
-	Name                      string                         `json:"name"`
-	Description               *string                        `json:"description"`
-	Platform                  string                         `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity grok kimi zhipu deepseek minimax opencode_go typesafe composite"`
-	RateMultiplier            *float64                       `json:"rate_multiplier"`
-	IsExclusive               *bool                          `json:"is_exclusive"`
-	Status                    string                         `json:"status" binding:"omitempty,oneof=active inactive"`
-	SubscriptionType          string                         `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
-	DailyLimitUSD             optionalLimitField             `json:"daily_limit_usd"`
-	WeeklyLimitUSD            optionalLimitField             `json:"weekly_limit_usd"`
-	MonthlyLimitUSD           optionalLimitField             `json:"monthly_limit_usd"`
-	LongContextPricingEnabled *bool                          `json:"long_context_pricing_enabled"`
-	ModelPricing              *[]service.ChannelModelPricing `json:"model_pricing"`
+	Name                      string                         `json:"name" authz:"base"`
+	Description               *string                        `json:"description" authz:"base"`
+	Platform                  string                         `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity grok kimi zhipu deepseek minimax opencode_go typesafe composite" authz:"base"`
+	RateMultiplier            *float64                       `json:"rate_multiplier" authz:"billing.rates.update"`
+	IsExclusive               *bool                          `json:"is_exclusive" authz:"base"`
+	Status                    string                         `json:"status" binding:"omitempty,oneof=active inactive" authz:"base"`
+	SubscriptionType          string                         `json:"subscription_type" binding:"omitempty,oneof=standard subscription" authz:"billing.rates.update"`
+	DailyLimitUSD             optionalLimitField             `json:"daily_limit_usd" authz:"billing.rates.update"`
+	WeeklyLimitUSD            optionalLimitField             `json:"weekly_limit_usd" authz:"billing.rates.update"`
+	MonthlyLimitUSD           optionalLimitField             `json:"monthly_limit_usd" authz:"billing.rates.update"`
+	LongContextPricingEnabled *bool                          `json:"long_context_pricing_enabled" authz:"billing.rates.update"`
+	ModelPricing              *[]service.ChannelModelPricing `json:"model_pricing" authz:"billing.rates.update"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
-	AllowImageGeneration            *bool                         `json:"allow_image_generation"`
-	AllowBatchImageGeneration       *bool                         `json:"allow_batch_image_generation"`
-	ImageRateIndependent            *bool                         `json:"image_rate_independent"`
-	ImageRateMultiplier             *float64                      `json:"image_rate_multiplier"`
-	BatchImageDiscountMultiplier    *float64                      `json:"batch_image_discount_multiplier"`
-	BatchImageHoldMultiplier        *float64                      `json:"batch_image_hold_multiplier"`
-	VideoRateIndependent            *bool                         `json:"video_rate_independent"`
-	VideoRateMultiplier             *float64                      `json:"video_rate_multiplier"`
-	PeakRateEnabled                 *bool                         `json:"peak_rate_enabled"`
-	PeakStart                       *string                       `json:"peak_start"`
-	PeakEnd                         *string                       `json:"peak_end"`
-	PeakRateMultiplier              *float64                      `json:"peak_rate_multiplier"`
-	ProfitControlEnabled            *bool                         `json:"profit_control_enabled"`
-	ProfitMinMargin                 *float64                      `json:"profit_min_margin"`
-	ProfitSafetyBuffer              *float64                      `json:"profit_safety_buffer"`
-	ImagePrice1K                    *float64                      `json:"image_price_1k"`
-	ImagePrice2K                    *float64                      `json:"image_price_2k"`
-	ImagePrice4K                    *float64                      `json:"image_price_4k"`
-	VideoPrice480P                  *float64                      `json:"video_price_480p"`
-	VideoPrice720P                  *float64                      `json:"video_price_720p"`
-	VideoPrice1080P                 *float64                      `json:"video_price_1080p"`
-	VideoModelPrices                map[string]map[string]float64 `json:"video_model_prices,omitempty"`
-	WebSearchPricePerCall           *float64                      `json:"web_search_price_per_call"`
-	SearchPricePer1k                *float64                      `json:"search_price_per_1k"`
-	AudioRealtimePricePerMin        *float64                      `json:"audio_realtime_price_per_min"`
-	AudioTtsPricePerMillionChars    *float64                      `json:"audio_tts_price_per_million_chars"`
-	AudioSttPricePerHour            *float64                      `json:"audio_stt_price_per_hour"`
-	ClaudeCodeOnly                  *bool                         `json:"claude_code_only"`
-	FallbackGroupID                 *int64                        `json:"fallback_group_id"`
-	FallbackGroupIDOnInvalidRequest *int64                        `json:"fallback_group_id_on_invalid_request"`
+	AllowImageGeneration            *bool                         `json:"allow_image_generation" authz:"base"`
+	AllowBatchImageGeneration       *bool                         `json:"allow_batch_image_generation" authz:"base"`
+	ImageRateIndependent            *bool                         `json:"image_rate_independent" authz:"billing.rates.update"`
+	ImageRateMultiplier             *float64                      `json:"image_rate_multiplier" authz:"billing.rates.update"`
+	BatchImageDiscountMultiplier    *float64                      `json:"batch_image_discount_multiplier" authz:"billing.rates.update"`
+	BatchImageHoldMultiplier        *float64                      `json:"batch_image_hold_multiplier" authz:"billing.rates.update"`
+	VideoRateIndependent            *bool                         `json:"video_rate_independent" authz:"billing.rates.update"`
+	VideoRateMultiplier             *float64                      `json:"video_rate_multiplier" authz:"billing.rates.update"`
+	PeakRateEnabled                 *bool                         `json:"peak_rate_enabled" authz:"billing.rates.update"`
+	PeakStart                       *string                       `json:"peak_start" authz:"billing.rates.update"`
+	PeakEnd                         *string                       `json:"peak_end" authz:"billing.rates.update"`
+	PeakRateMultiplier              *float64                      `json:"peak_rate_multiplier" authz:"billing.rates.update"`
+	ProfitControlEnabled            *bool                         `json:"profit_control_enabled" authz:"billing.rates.update"`
+	ProfitMinMargin                 *float64                      `json:"profit_min_margin" authz:"billing.rates.update"`
+	ProfitSafetyBuffer              *float64                      `json:"profit_safety_buffer" authz:"billing.rates.update"`
+	ImagePrice1K                    *float64                      `json:"image_price_1k" authz:"billing.rates.update"`
+	ImagePrice2K                    *float64                      `json:"image_price_2k" authz:"billing.rates.update"`
+	ImagePrice4K                    *float64                      `json:"image_price_4k" authz:"billing.rates.update"`
+	VideoPrice480P                  *float64                      `json:"video_price_480p" authz:"billing.rates.update"`
+	VideoPrice720P                  *float64                      `json:"video_price_720p" authz:"billing.rates.update"`
+	VideoPrice1080P                 *float64                      `json:"video_price_1080p" authz:"billing.rates.update"`
+	VideoModelPrices                map[string]map[string]float64 `json:"video_model_prices,omitempty" authz:"billing.rates.update"`
+	WebSearchPricePerCall           *float64                      `json:"web_search_price_per_call" authz:"billing.rates.update"`
+	SearchPricePer1k                *float64                      `json:"search_price_per_1k" authz:"billing.rates.update"`
+	AudioRealtimePricePerMin        *float64                      `json:"audio_realtime_price_per_min" authz:"billing.rates.update"`
+	AudioTtsPricePerMillionChars    *float64                      `json:"audio_tts_price_per_million_chars" authz:"billing.rates.update"`
+	AudioSttPricePerHour            *float64                      `json:"audio_stt_price_per_hour" authz:"billing.rates.update"`
+	ClaudeCodeOnly                  *bool                         `json:"claude_code_only" authz:"base"`
+	FallbackGroupID                 *int64                        `json:"fallback_group_id" authz:"base"`
+	FallbackGroupIDOnInvalidRequest *int64                        `json:"fallback_group_id_on_invalid_request" authz:"base"`
 	// 模型路由配置（仅 anthropic 平台使用）
-	ModelRouting        map[string][]int64 `json:"model_routing"`
-	ModelRoutingEnabled *bool              `json:"model_routing_enabled"`
-	MCPXMLInject        *bool              `json:"mcp_xml_inject"`
+	ModelRouting        map[string][]int64 `json:"model_routing" authz:"base"`
+	ModelRoutingEnabled *bool              `json:"model_routing_enabled" authz:"base"`
+	MCPXMLInject        *bool              `json:"mcp_xml_inject" authz:"base"`
 	// 支持的模型系列（仅 antigravity 平台使用）
-	SupportedModelScopes *[]string `json:"supported_model_scopes"`
+	SupportedModelScopes *[]string `json:"supported_model_scopes" authz:"base"`
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
-	AllowMessagesDispatch       *bool                                      `json:"allow_messages_dispatch"`
-	AllowLive                   *bool                                      `json:"allow_live"`
-	ForceOpenAIFast             *bool                                      `json:"force_openai_fast"`
-	FreeOpenAIFast              *bool                                      `json:"free_openai_fast"`
-	RequireOAuthOnly            *bool                                      `json:"require_oauth_only"`
-	RequirePrivacySet           *bool                                      `json:"require_privacy_set"`
-	DefaultMappedModel          *string                                    `json:"default_mapped_model"`
-	MessagesDispatchModelConfig *service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
-	ModelAllowlist              *service.GroupModelAllowlist               `json:"model_allowlist"`
+	AllowMessagesDispatch       *bool                                      `json:"allow_messages_dispatch" authz:"base"`
+	AllowLive                   *bool                                      `json:"allow_live" authz:"base"`
+	ForceOpenAIFast             *bool                                      `json:"force_openai_fast" authz:"billing.rates.update"`
+	FreeOpenAIFast              *bool                                      `json:"free_openai_fast" authz:"billing.rates.update"`
+	RequireOAuthOnly            *bool                                      `json:"require_oauth_only" authz:"base"`
+	RequirePrivacySet           *bool                                      `json:"require_privacy_set" authz:"base"`
+	DefaultMappedModel          *string                                    `json:"default_mapped_model" authz:"base"`
+	MessagesDispatchModelConfig *service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config" authz:"base"`
+	ModelAllowlist              *service.GroupModelAllowlist               `json:"model_allowlist" authz:"base"`
 	// 固定账号 manifest 配置；nil 表示不修改。
-	CodexModelsManifestConfig *service.GroupCodexModelsManifestConfig `json:"codex_models_manifest_config"`
+	CodexModelsManifestConfig *service.GroupCodexModelsManifestConfig `json:"codex_models_manifest_config" authz:"base"`
 	// 分组 RPM 上限（0 = 不限制）；nil 表示未提供不改动
-	RPMLimit *int `json:"rpm_limit"`
+	RPMLimit *int `json:"rpm_limit" authz:"base"`
 	// Anthropic/OpenAI 请求推理强度上限；空字符串清除，nil 不修改。
-	MaxReasoningEffort *string `json:"max_reasoning_effort"`
+	MaxReasoningEffort *string `json:"max_reasoning_effort" authz:"base"`
 	// 超过上限时的访问控制；空字符串视为 downgrade，nil 不修改。
-	MaxReasoningEffortOverLimit *string `json:"max_reasoning_effort_over_limit"`
+	MaxReasoningEffortOverLimit *string `json:"max_reasoning_effort_over_limit" authz:"base"`
 	// nil 不修改，空数组清空，非空数组替换。
-	ReasoningEffortMappings *[]service.ReasoningEffortMapping `json:"reasoning_effort_mappings"`
+	ReasoningEffortMappings *[]service.ReasoningEffortMapping `json:"reasoning_effort_mappings" authz:"base"`
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
-	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
+	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids" authz:"base"`
 }
 
 type CompositeRouteRequest struct {

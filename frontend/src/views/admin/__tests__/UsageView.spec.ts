@@ -959,3 +959,6 @@ describe('admin UsageView model audit export', () => {
 		expect(saveAs).toHaveBeenCalledTimes(1)
 	})
 })
+
+// Existing behavior under the migrated full administrator role.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))

@@ -332,7 +332,7 @@ func (s *OpsScheduledReportService) runReport(ctx context.Context, report *opsSc
 
 	recipients := report.Recipients
 	if len(recipients) == 0 && s.userService != nil {
-		admin, err := s.userService.GetFirstAdmin(ctx)
+		admin, err := s.userService.GetFirstSuperAdmin(ctx)
 		if err == nil && admin != nil && strings.TrimSpace(admin.Email) != "" {
 			recipients = []string{strings.TrimSpace(admin.Email)}
 		}

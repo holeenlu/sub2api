@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" />
+      <UsageStatsCards :show-account-cost="rolePermissions.can('billing.cost.read')" :stats="usageStats" />
       <!-- Charts Section -->
       <div class="space-y-4">
         <div class="card p-4">
@@ -123,7 +123,7 @@
         </UsageFilters>
 
         <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
-          <UsageTable
+          <UsageTable :show-account-billing="rolePermissions.can('billing.cost.read')"
             flat
             :data="usageLogs"
             :loading="loading"
@@ -199,6 +199,8 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore } from "@/stores/auth"
+const rolePermissions = useAuthStore()
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { saveAs } from 'file-saver'
@@ -600,7 +602,7 @@ const getRequestTypeLabel = (log: AdminUsageLog): string => {
 }
 
 const exportToExcel = async () => {
-  if (exporting.value) return; exporting.value = true; exportProgress.show = true
+  if (exporting.value || !rolePermissions.can('usage.export')) return; exporting.value = true; exportProgress.show = true
   const c = new AbortController(); exportAbortController = c
   try {
     let p = 1; let total = pagination.total; let exportedCount = 0
@@ -614,14 +616,14 @@ const exportToExcel = async () => {
       t('admin.usage.cacheReadTokens'), t('admin.usage.cacheCreationTokens'),
       t('admin.usage.inputCost'), t('admin.usage.outputCost'),
       t('admin.usage.cacheReadCost'), t('admin.usage.cacheCreationCost'),
-      t('usage.rate'), t('usage.accountMultiplier'), t('usage.original'), t('usage.userBilled'), t('usage.accountBilled'),
+      t('usage.rate'), ...(rolePermissions.can('billing.cost.read') ? [t('usage.accountMultiplier')] : []), t('usage.original'), t('usage.userBilled'), ...(rolePermissions.can('billing.cost.read') ? [t('usage.accountBilled')] : []),
       t('usage.firstToken'), t('usage.duration'),
       t('admin.usage.requestId'), t('admin.usage.upstreamRequestId'), t('usage.userAgent'), t('admin.usage.ipAddress')
     ]
     const ws = XLSX.utils.aoa_to_sheet([headers])
     while (true) {
       const res = await adminUsageAPI.list(
-        buildUsageListParams(p, 100, true),
+        { ...buildUsageListParams(p, 100, true), export: true },
         { signal: c.signal }
       )
       if (c.signal.aborted) break; if (p === 1) { total = res.total; exportProgress.total = total }
@@ -632,9 +634,9 @@ const exportToExcel = async () => {
         log.input_tokens, log.output_tokens, log.cache_read_tokens, log.cache_creation_tokens,
         log.input_cost?.toFixed(6) || '0.000000', log.output_cost?.toFixed(6) || '0.000000',
         log.cache_read_cost?.toFixed(6) || '0.000000', log.cache_creation_cost?.toFixed(6) || '0.000000',
-        log.rate_multiplier?.toPrecision(4) || '1.00', (log.account_rate_multiplier ?? 1).toPrecision(4),
+        log.rate_multiplier?.toPrecision(4) || '1.00', ...(rolePermissions.can('billing.cost.read') ? [(log.account_rate_multiplier ?? 1).toPrecision(4)] : []),
         log.total_cost?.toFixed(6) || '0.000000', log.actual_cost?.toFixed(6) || '0.000000',
-        ((log.account_stats_cost ?? log.total_cost) * (log.account_rate_multiplier ?? 1)).toFixed(6), log.first_token_ms ?? '', log.duration_ms,
+        ...(rolePermissions.can('billing.cost.read') ? [((log.account_stats_cost ?? log.total_cost) * (log.account_rate_multiplier ?? 1)).toFixed(6)] : []), log.first_token_ms ?? '', log.duration_ms,
         log.request_id || '', log.upstream_request_id || '', log.user_agent || '', log.ip_address || ''
       ])
       if (rows.length) {

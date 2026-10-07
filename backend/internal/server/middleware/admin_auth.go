@@ -2,8 +2,10 @@
 package middleware
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -41,7 +43,7 @@ func adminAuth(
 				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService) {
 					return
 				}
-				c.Next()
+				continueAdminRequest(c, userService, auditService)
 				return
 			}
 		}
@@ -52,7 +54,7 @@ func adminAuth(
 			if !validateAdminAPIKey(c, apiKey, settingService, userService) {
 				return
 			}
-			c.Next()
+			continueAdminRequest(c, userService, auditService)
 			return
 		}
 
@@ -69,7 +71,7 @@ func adminAuth(
 				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService) {
 					return
 				}
-				c.Next()
+				continueAdminRequest(c, userService, auditService)
 				return
 			}
 		}
@@ -137,9 +139,17 @@ func validateAdminAPIKey(
 	}
 
 	// 获取真实的管理员用户
-	admin, err := userService.GetFirstAdmin(c.Request.Context())
+	admin, err := userService.GetFirstSuperAdmin(c.Request.Context())
 	if err != nil {
-		AbortWithError(c, 500, "INTERNAL_ERROR", "No admin user found")
+		AbortWithError(c, 401, "INVALID_ADMIN_KEY", "Invalid admin API key")
+		return false
+	}
+
+	if admin == nil || !admin.IsSuperAdmin() || !admin.IsActive() {
+		AbortWithError(c, 401, "INVALID_ADMIN_KEY", "Invalid admin API key")
+		return false
+	}
+	if !bindManagementSubject(c, settingService, userService, admin, fmt.Sprintf("machine:%x", sha256.Sum256([]byte(key))), nil, nil) {
 		return false
 	}
 
@@ -202,13 +212,17 @@ func validateJWTForAdmin(
 	}
 
 	// 会话绑定校验：IP/UA 任一变化即撤销会话（功能可在系统设置中关闭）
-	if !enforceSessionBinding(c, authService, settingService, auditService, claims) {
+	if !enforceSessionBinding(c, authService, settingService, auditService, claims, user) {
 		return false
 	}
 
 	// 检查管理员权限
-	if !user.IsAdmin() {
+	if !user.IsStaff() {
 		AbortWithError(c, 403, "FORBIDDEN", "Admin access required")
+		return false
+	}
+
+	if !bindManagementSubject(c, settingService, userService, user, claims.SessionID, authService, claims) {
 		return false
 	}
 

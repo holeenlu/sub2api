@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
+const authState = vi.hoisted(() => ({isAdmin:true,isSuperAdmin:true}))
+
 const appStoreState = {
   versionLoading: false,
   currentVersion: '1.2.3',
@@ -23,7 +25,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('@/stores', () => ({
-  useAuthStore: () => ({ isAdmin: true }),
+  useAuthStore: () => authState,
   useAppStore: () => appStoreState
 }))
 
@@ -52,6 +54,16 @@ async function mountOpened() {
 }
 
 describe('VersionBadge', () => {
+  it('does not check protected update endpoints for a limited administrator', async () => {
+    authState.isSuperAdmin = false
+    appStoreState.fetchVersion.mockClear()
+    const wrapper = mount(VersionBadge, { global: { stubs } })
+    await nextTick()
+    expect(appStoreState.fetchVersion).not.toHaveBeenCalled()
+    expect(wrapper.find('button').exists()).toBe(false)
+    wrapper.unmount()
+    authState.isSuperAdmin = true
+  })
   it('shows only the version when online update check is disabled', async () => {
     appStoreState.updateDisabled = true
     appStoreState.hasUpdate = false

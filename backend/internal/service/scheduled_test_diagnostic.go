@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"net/http"
 	"reflect"
 	"strings"
@@ -38,17 +39,19 @@ var ErrDiagnosticInvalid = errors.New("diagnostic_invalid_configuration")
 var ErrDiagnosticNotFound = errors.New("diagnostic_not_found")
 
 type CodexDiagnosticPlan struct {
-	IntervalMinutes int        `json:"interval_minutes"`
-	AccountID       int64      `json:"account_id"`
-	OwnerID         int64      `json:"owner_id"`
-	APIKeyID        int64      `json:"api_key_id"`
-	Models          []string   `json:"models"`
-	Enabled         bool       `json:"enabled"`
-	Revision        int64      `json:"revision"`
-	NextRunAt       *time.Time `json:"next_run_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	Authorization   *authz.Lease `json:"-"`
+	IntervalMinutes int          `json:"interval_minutes"`
+	AccountID       int64        `json:"account_id"`
+	OwnerID         int64        `json:"owner_id"`
+	APIKeyID        int64        `json:"api_key_id"`
+	Models          []string     `json:"models"`
+	Enabled         bool         `json:"enabled"`
+	Revision        int64        `json:"revision"`
+	NextRunAt       *time.Time   `json:"next_run_at"`
+	UpdatedAt       time.Time    `json:"updated_at"`
 }
 type CodexDiagnosticRun struct {
+	Authorization   *authz.Lease          `json:"-"`
 	ID              int64                 `json:"id"`
 	AccountID       int64                 `json:"account_id"`
 	OwnerID         int64                 `json:"owner_id"`
@@ -145,6 +148,7 @@ func (s *ScheduledTestService) GetDiagnosticPlan(ctx context.Context, id int64) 
 	return s.planRepo.GetPlan(ctx, id)
 }
 func (s *ScheduledTestService) SaveDiagnosticPlan(ctx context.Context, p *CodexDiagnosticPlan) error {
+	p.Authorization = captureScheduledAuthorization(ctx)
 	if p.IntervalMinutes == 0 {
 		p.IntervalMinutes = CodexDiagnosticDefaultIntervalMinutes
 	}
@@ -274,6 +278,11 @@ func (s *ScheduledTestService) executeDiagnostic(parent context.Context, run *Co
 			run.Reason = "canceled_or_settings_changed"
 			return
 		}
+		if err := s.CheckScheduledAuthorization(ctx, run.Authorization); err != nil {
+			run.Status = "canceled"
+			run.Reason = "authorization_revoked"
+			return
+		}
 		key, err := s.validateDiagnostic(ctx, &CodexDiagnosticPlan{AccountID: run.AccountID, OwnerID: run.OwnerID, APIKeyID: run.APIKeyID, Models: []string{model}})
 		if err != nil {
 			run.Items = append(run.Items, CodexDiagnosticItem{Model: model, Status: "failed", Reason: "configuration_unavailable"})
@@ -297,7 +306,7 @@ func (s *ScheduledTestService) executeDiagnostic(parent context.Context, run *Co
 
 func (s *ScheduledTestService) authorizeDiagnostic(ctx context.Context, p *CodexDiagnosticPlan) (*APIKey, *Account, error) {
 	owner, err := s.users.GetByID(ctx, p.OwnerID)
-	if err != nil || owner == nil || !owner.IsAdmin() || !owner.IsActive() || owner.DeletedAt != nil {
+	if err != nil || owner == nil || !owner.IsStaff() || !owner.IsActive() || owner.DeletedAt != nil {
 		return nil, nil, fmt.Errorf("%w: owner_unavailable", ErrDiagnosticInvalid)
 	}
 	key, err := s.keys.GetByID(ctx, p.APIKeyID)

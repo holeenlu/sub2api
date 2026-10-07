@@ -864,7 +864,7 @@ router.beforeEach(async (to, _from, next) => {
         return
       }
       // Admin users go to admin dashboard, regular users go to user dashboard
-      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+      next(authStore.adminLandingPath)
       return
     }
     // Model Plaza:公开路由但受「启用开关 + 可选强制登录」双重控制(后端同口径 fail-closed)
@@ -920,6 +920,17 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
+  // A limited admin must load the server-owned role snapshot before navigation.
+  if (requiresAdmin && authStore.user?.role === 'admin' && authStore.user.policy_version === undefined) {
+    try { await authStore.refreshUser() } catch { next('/login'); return }
+  }
+  if (requiresAdmin && authStore.isAdmin && !authStore.canAccessAdminPage(to.path)) {
+    next(authStore.adminLandingPath)
+    return
+  }
+
+  const accessibleDashboard = authStore.isAdmin && authStore.canAccessAdminPage('/admin/dashboard') ? '/admin/dashboard' : '/dashboard'
+
   // Check admin requirement
   if (requiresAdmin && !authStore.isAdmin) {
     // User is authenticated but not admin, redirect to user dashboard
@@ -960,7 +971,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.payment_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    next(accessibleDashboard)
     return
   }
 
@@ -969,7 +980,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.risk_control_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/settings' : '/dashboard')
+    next(authStore.isAdmin && authStore.canAccessAdminPage('/admin/settings') ? '/admin/settings' : accessibleDashboard)
     return
   }
 
@@ -979,7 +990,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.subscription_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    next(accessibleDashboard)
     return
   }
 
@@ -994,7 +1005,7 @@ router.beforeEach(async (to, _from, next) => {
 
     if (restrictedPaths.some((path) => to.path.startsWith(path))) {
       // 简易模式下访问受限页面,重定向到仪表板
-      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+      next(accessibleDashboard)
       return
     }
   }

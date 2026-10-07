@@ -14,6 +14,7 @@ import {
 } from './adminUIRequest'
 import { refreshAuthTokens } from './tokenRefresh'
 import { getAPIBaseURL } from './url'
+import { requestAdminStepUp, adminSessionStamp, StepUpCancelledError } from '@/composables/useStepUp'
 export { buildApiUrl, buildGatewayUrl } from './url'
 
 // ==================== Axios Instance Configuration ====================
@@ -33,6 +34,28 @@ export const apiClient: AxiosInstance = axios.create({
   }
 })
 
+function currentAuthorizationScope(): string {
+  try {
+    const user = JSON.parse(localStorage.getItem('auth_user') || 'null')
+    return JSON.stringify([user?.id, user?.role, user?.policy_version])
+  } catch { return '' }
+}
+let permissionRefresh: Promise<void> | null = null
+async function refreshManagementPermissions(requestToken: string) {
+  if (requestToken !== localStorage.getItem('auth_token')) return
+  if (!permissionRefresh) {
+    permissionRefresh = import('@/stores/auth').then(async ({ useAuthStore }) => {
+      const auth = useAuthStore()
+      if (requestToken !== localStorage.getItem('auth_token')) return
+      await auth.refreshUser()
+      const { default: router } = await import('@/router')
+      const path = router.currentRoute.value.path
+      if (path.startsWith('/admin/') && !auth.canAccessAdminPage(path)) await router.replace(auth.adminLandingPath)
+    }).catch(() => { /* Preserve the original failure and let the next request retry. */ }).finally(() => { permissionRefresh = null })
+  }
+  await permissionRefresh
+}
+
 // ==================== Request Interceptor ====================
 
 // Get user's timezone
@@ -50,6 +73,10 @@ apiClient.interceptors.request.use(
     const token = localStorage.getItem('auth_token')
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
+    }
+
+    if (String(config.url || '').startsWith('/admin/')) {
+      Object.assign(config, { _authorizationScope: currentAuthorizationScope() })
     }
 
     // Attach locale for backend translations
@@ -85,7 +112,19 @@ apiClient.interceptors.request.use(
 // ==================== Response Interceptor ====================
 
 apiClient.interceptors.response.use(
-  (response: AxiosResponse) => {
+  async (response: AxiosResponse) => {
+    if (String(response.config.url || '').startsWith('/admin/')) {
+      const config = response.config as InternalAxiosRequestConfig & { _authorizationScope?: string }
+      if (config._authorizationScope !== undefined && config._authorizationScope !== currentAuthorizationScope()) throw new axios.CanceledError('Authorization scope changed')
+      const version = response.headers['x-admin-policy-version']
+      const requestToken = String(config.headers?.Authorization || '').replace(/^Bearer\s+/i, '')
+      let user: { role?: string; policy_version?: number } | null = null
+      try { user = JSON.parse(localStorage.getItem('auth_user') || 'null') } catch { /* no stored scope */ }
+      if (user?.role === 'admin' && version !== undefined && Number(version) !== user.policy_version) {
+        await refreshManagementPermissions(requestToken)
+        if (config._authorizationScope !== currentAuthorizationScope()) throw new axios.CanceledError('Administrator permissions updated')
+      }
+    }
     // Unwrap standard API response format { code, message, data }
     const apiResponse = response.data as ApiResponse<unknown>
     if (apiResponse && typeof apiResponse === 'object' && 'code' in apiResponse) {
@@ -113,7 +152,7 @@ apiClient.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _stepUpRetried?: boolean }
 
     // Handle common errors
     if (error.response) {
@@ -122,6 +161,20 @@ apiClient.interceptors.response.use(
 
       // Validate `data` shape to avoid HTML error pages breaking our error handling.
       const apiData = (typeof data === 'object' && data !== null ? data : {}) as Record<string, any>
+
+      if (status === 403 && url.startsWith('/admin/') && ['ADMIN_PERMISSION_DENIED', 'PERMISSION_DENIED'].includes(String(apiData.reason || apiData.code))) {
+        await refreshManagementPermissions(String(originalRequest.headers?.Authorization || '').replace(/^Bearer\s+/i, ''))
+      }
+
+      if (status === 403 && url.startsWith('/admin/') && (apiData.reason === 'STEP_UP_REQUIRED' || apiData.code === 'STEP_UP_REQUIRED') && !originalRequest._stepUpRetried) {
+        const originalToken = String(originalRequest.headers?.Authorization || '').replace(/^Bearer\s+/i, '')
+        const stamp = adminSessionStamp(originalToken)
+        if (!stamp || stamp !== adminSessionStamp(localStorage.getItem('auth_token'))) throw new StepUpCancelledError()
+        originalRequest._stepUpRetried = true
+        const verified = await requestAdminStepUp()
+        if (!verified || stamp !== adminSessionStamp(localStorage.getItem('auth_token'))) throw new StepUpCancelledError()
+        return apiClient(originalRequest)
+      }
 
       // Ops monitoring disabled: treat as feature-flagged 404, and proactively redirect away
       // from ops pages to avoid broken UI states.
@@ -138,7 +191,7 @@ apiClient.interceptors.response.use(
         }
 
         if (window.location.pathname.startsWith('/admin/ops')) {
-          window.location.href = '/admin/settings'
+          window.location.href = '/dashboard'
         }
 
         return Promise.reject({
@@ -260,13 +313,19 @@ apiClient.interceptors.response.use(
         }
       }
 
+      const permissionMessage = apiData.reason === 'ADMIN_PERMISSION_DENIED'
+        ? clientMessage('admin.rolePermissions.denied', 'Your role does not allow this action.')
+        : apiData.reason === 'ADMIN_POLICY_CONFLICT'
+          ? clientMessage('admin.rolePermissions.conflict', 'Permissions changed. Reload before saving.')
+          : undefined
+
       // Return structured error
       return Promise.reject({
         status,
         code: apiData.code,
         reason: apiData.reason,
         error: apiData.error,
-        message: apiData.message || apiData.detail || error.message,
+        message: permissionMessage || apiData.message || apiData.detail || error.message,
         metadata: apiData.metadata,
       })
     }

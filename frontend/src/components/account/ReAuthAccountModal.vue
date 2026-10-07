@@ -225,11 +225,12 @@ interface OAuthFlowExposed {
 }
 
 interface Props {
+  allowExtraEdit?: boolean
   show: boolean
   account: Account | null
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { allowExtraEdit: true })
 const emit = defineEmits<{
   close: []
   reauthorized: []
@@ -419,7 +420,7 @@ const handleExchangeCode = async () => {
       await adminAPI.accounts.update(props.account.id, {
         type: 'oauth', // OpenAI OAuth is always 'oauth' type
         credentials,
-        extra
+        extra: props.allowExtraEdit ? extra : undefined
       })
 
       // Clear error status after successful re-authorization
@@ -524,7 +525,7 @@ const handleExchangeCode = async () => {
       await adminAPI.accounts.update(props.account.id, {
         type: addMethod.value === 'oauth' ? 'oauth' : 'setup-token', // Update type based on selected method
         credentials: tokenInfo,
-        extra
+        extra: props.allowExtraEdit ? extra : undefined
       })
 
       // Clear error status after successful re-authorization
@@ -567,7 +568,7 @@ const handleCookieAuth = async (sessionKey: string) => {
     await adminAPI.accounts.update(props.account.id, {
       type: addMethod.value === 'oauth' ? 'oauth' : 'setup-token', // Update type based on selected method
       credentials: tokenInfo,
-      extra
+      extra: props.allowExtraEdit ? extra : undefined
     })
 
     // Clear error status after successful re-authorization

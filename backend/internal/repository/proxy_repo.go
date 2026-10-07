@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"sort"
 	"strings"
 	"time"
@@ -107,6 +109,20 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 			defer func() { _ = tx.Rollback() }()
 			ctx = dbent.NewTxContext(ctx, tx)
 			client = tx.Client()
+		}
+	}
+
+	if actor, ok := authz.FromContext(ctx); ok && actor.ManagementRequest && actor.Role == authz.Admin {
+		raw, err := json.Marshal(proxyIn)
+		if err != nil {
+			return err
+		}
+		var fields map[string]any
+		if err = json.Unmarshal(raw, &fields); err != nil {
+			return err
+		}
+		if err = (&userRepository{client: client}).CheckAdminProxyTransport(ctx, []int64{proxyIn.ID}, fields); err != nil {
+			return err
 		}
 	}
 
@@ -279,7 +295,12 @@ func enqueueProxyProbeAccountChanges(ctx context.Context, exec sqlExecutor, acco
 }
 
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
+	if actor, ok := authz.FromContext(ctx); ok && actor.Role == authz.Admin {
+		if err := (&userRepository{client: r.client}).CheckAdminProxyTransport(ctx, []int64{id}, map[string]any{"__deleting_proxy": true}); err != nil {
+			return err
+		}
+	}
+	_, err := clientFromContext(ctx, r.client).Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
 	return err
 }
 

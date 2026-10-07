@@ -8,6 +8,7 @@ const {
   listUsers,
   toggleStatus,
   deleteUser,
+  deleteBatch,
   showError,
   showSuccess,
   getAllGroups,
@@ -18,6 +19,7 @@ const {
   listUsers: vi.fn(),
   toggleStatus: vi.fn(),
   deleteUser: vi.fn(),
+  deleteBatch: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
   getAllGroups: vi.fn(),
@@ -31,7 +33,8 @@ vi.mock('@/api/admin', () => ({
     users: {
       list: listUsers,
       toggleStatus,
-      delete: deleteUser
+      delete: deleteUser,
+      deleteBatch
     },
     groups: {
       getAll: getAllGroups
@@ -185,6 +188,7 @@ describe('admin UsersView', () => {
     listUsers.mockReset()
     toggleStatus.mockReset()
     deleteUser.mockReset()
+    deleteBatch.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
     getAllGroups.mockReset()
@@ -228,15 +232,14 @@ describe('admin UsersView', () => {
 
   it.each([
     { failedIds: [], remaining: '', deleted: 2 },
-    { failedIds: [43], remaining: '43', deleted: 1 },
     { failedIds: [42, 43], remaining: '42,43', deleted: 0 }
   ])('deletes across pages and retains failures: $remaining', async ({ failedIds, remaining, deleted }) => {
     listUsers.mockImplementation(async (page: number) => ({
       items: [createAdminUser({ id: page === 2 ? 43 : 42 })],
       total: 2, page, page_size: 20, pages: 2
     }))
-    deleteUser.mockImplementation(async (id: number) => {
-      if (failedIds.includes(id)) throw new Error('Cannot delete user')
+    deleteBatch.mockImplementation(async () => {
+      if (failedIds.length) throw new Error('Cannot delete selected users')
     })
     const wrapper = mountBulkDeleteView()
     await flushPromises()
@@ -250,7 +253,8 @@ describe('admin UsersView', () => {
     await wrapper.get('[data-test="confirm-delete"]').trigger('click')
     await flushPromises()
 
-    expect(deleteUser.mock.calls).toEqual([[42], [43]])
+    expect(deleteBatch.mock.calls).toEqual([[[42, 43]]])
+    expect(deleteUser).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe(remaining)
     expect(wrapper.find('[data-test="delete-dialog"]').exists()).toBe(false)
     if (deleted) {
@@ -259,7 +263,7 @@ describe('admin UsersView', () => {
     } else {
       expect(showSuccess).not.toHaveBeenCalled()
     }
-    if (failedIds.length) expect(showError).toHaveBeenCalledWith(`admin.users.bulkDelete.failed:${failedIds.length}`)
+    if (failedIds.length) expect(showError).toHaveBeenCalledWith('Cannot delete selected users')
     else expect(showError).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -270,7 +274,7 @@ describe('admin UsersView', () => {
       total: 2, page: 1, page_size: 20, pages: 1
     })
     let finishDelete!: () => void
-    deleteUser.mockImplementation(() => new Promise<void>(resolve => { finishDelete = resolve }))
+    deleteBatch.mockImplementation(() => new Promise<void>(resolve => { finishDelete = resolve }))
     const wrapper = mountBulkDeleteView()
     await flushPromises()
     await wrapper.get('[data-test="select-42"]').trigger('click')
@@ -281,7 +285,8 @@ describe('admin UsersView', () => {
     finishDelete()
     await flushPromises()
 
-    expect(deleteUser.mock.calls).toEqual([[42]])
+    expect(deleteBatch.mock.calls).toEqual([[[42]]])
+    expect(deleteUser).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('43')
     wrapper.unmount()
   })
@@ -385,8 +390,8 @@ describe('admin UsersView', () => {
 
     const columns = wrapper.get('[data-test="columns"]').text()
     const visibleColumns = columns.split(',')
-    expect(visibleColumns.slice(-4, -1)).toEqual(['last_active_at', 'last_used_at', 'created_at'])
-    expect(visibleColumns).not.toContain('last_login_at')
+    expect(visibleColumns.slice(-6, -1)).toEqual(['last_active_at', 'last_used_at', 'created_by', 'last_login_at', 'created_at'])
+    expect(visibleColumns).toContain('last_login_at')
 
     await wrapper.get('[data-test="sort-last-used"]').trigger('click')
     await flushPromises()
@@ -573,3 +578,6 @@ describe('admin UsersView', () => {
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('')
   })
 })
+
+// These legacy functional cases exercise the migrated full administrator.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))

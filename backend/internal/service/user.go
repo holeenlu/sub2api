@@ -7,6 +7,7 @@ import (
 )
 
 type User struct {
+	CreatedBy      *int64 // Read-only provenance from the atomic creation audit.
 	ID             int64
 	Email          string
 	Username       string
@@ -69,9 +70,11 @@ type User struct {
 	Subscriptions []UserSubscription
 }
 
-func (u *User) IsAdmin() bool {
-	return u.Role == RoleAdmin
+func (u *User) IsStaff() bool {
+	return u != nil && (u.Role == RoleAdmin || u.Role == RoleSuperAdmin)
 }
+
+func (u *User) IsSuperAdmin() bool { return u != nil && u.Role == RoleSuperAdmin }
 
 func (u *User) IsActive() bool {
 	return u.Status == StatusActive

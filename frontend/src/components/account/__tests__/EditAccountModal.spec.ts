@@ -1754,3 +1754,23 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     wrapper.unmount()
   })
 })
+
+describe('delegated account editing', () => {
+  it('updates basic fields without replacing projected credentials or extra', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ allowTransportEdit: false, allowAuthorize: false, allowRateEdit: false, showCost: false })
+    await wrapper.get('form#edit-account-form input[type="text"]').setValue('operator name')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const payload = JSON.parse(JSON.stringify(updateAccountMock.mock.calls.at(-1)?.[1]))
+    expect(payload.name).toBe('operator name')
+    expect(payload).not.toHaveProperty('credentials')
+    expect(payload).not.toHaveProperty('extra')
+    expect(payload).not.toHaveProperty('proxy_id')
+    expect(payload).not.toHaveProperty('rate_multiplier')
+    wrapper.unmount()
+  })
+})
