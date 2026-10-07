@@ -272,14 +272,15 @@ export default {
         local: 'Local file (older clients)',
         oversized: 'The complete catalog exceeds the 1 MiB remote limit. Local file mode is selected; download it to the configured path.',
         title: 'Get model catalog and download',
-        description: 'config.toml points to codex-models.json by default. Fetch the catalog for this key, download it to the configured path, then restart Codex. Remote catalog is optional for supported groups.',
+        description: "This key's model catalog loads automatically and sets the model in config.toml: the default model is kept when the catalog includes it; otherwise the first model in the catalog is used. Codex loads the remote catalog itself; for a local file, download the catalog to the path above and restart Codex.",
         emptyDescription: 'The fetched catalog contains no usable Codex models. The default configuration is retained. Check account model restrictions and the group model allowlist.',
         fetch: 'Fetch catalog',
         refetch: 'Fetch again',
         retry: 'Retry',
+        resolving: 'Loading model catalog…',
         download: 'Download codex-models.json',
         modelsCount: '{count} models ready to download',
-        errorDescription: 'The catalog could not be fetched with this API key. Configuration and the catalog path are retained. Retry or use a previously saved catalog file.',
+        errorDescription: 'The catalog could not be fetched with this API key, so config.toml uses the default model for now. Retry or use a previously saved catalog file.',
       },
       opencode: {
         title: 'OpenCode Example',
@@ -342,18 +343,7 @@ export default {
       quota_exhausted: 'Quota Exhausted',
       expired: 'Expired',
     },
-
-importToCcSwitch: 'Import to CCS',
-ccSwitchNotInstalled: 'CC-Switch is not installed or the protocol handler is not registered. Please install CC-Switch first or manually copy the API key.',
-ccsClientSelect: {
-      title: 'Select Client',
-      description: 'Please select the client type to import to CC-Switch:',
-      claudeCode: 'Claude Code',
-      claudeCodeDesc: 'Import as Claude Code configuration',
-      geminiCli: 'Gemini CLI',
-      geminiCliDesc: 'Import as Gemini CLI configuration',
-    },
-},
+  },
 
   // Usage
   usage: {
