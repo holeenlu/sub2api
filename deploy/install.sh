@@ -1,8 +1,13 @@
 #!/bin/bash
 #
-# Sub2API Installation Script
-# Sub2API 安装脚本
-# Usage: curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | bash
+# KDAN Installation Script
+# KDAN 安装脚本
+# Usage (authenticated local checkout): KDAN_INSTALLER_ENABLED=true bash deploy/install.sh
+#
+# NOTE: no KDAN release artifacts are published yet. The only assets on
+# ${GITHUB_REPO} are upstream sub2api builds, so this installer refuses to
+# download anything unless KDAN_INSTALLER_ENABLED=true is set explicitly.
+# Use the Docker Compose deployment in deploy/README.md instead.
 #
 
 set -e
@@ -31,11 +36,21 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-GITHUB_REPO="Wei-Shaw/sub2api"
-INSTALL_DIR="/opt/sub2api"
-SERVICE_NAME="sub2api"
-SERVICE_USER="sub2api"
-CONFIG_DIR="/etc/sub2api"
+GITHUB_REPO="holeenlu/sub2api"
+INSTALL_DIR="/opt/kdan"
+SERVICE_NAME="kdan"
+SERVICE_USER="kdan"
+CONFIG_DIR="/etc/kdan"
+
+# Release artifacts on ${GITHUB_REPO} are still produced by the upstream
+# GoReleaser configuration, so their file names keep the upstream prefix even
+# though this branch installs everything under the KDAN names.
+RELEASE_ASSET_PREFIX="${KDAN_RELEASE_ASSET_PREFIX:-sub2api}"
+RELEASE_BINARY_NAME="${KDAN_RELEASE_BINARY_NAME:-sub2api}"
+
+# No KDAN release artifacts are published. Downloading is opt-in so the
+# installer never silently drops an upstream-branded binary onto a server.
+KDAN_INSTALLER_ENABLED="${KDAN_INSTALLER_ENABLED:-false}"
 
 # Server configuration (will be set by user)
 SERVER_HOST="0.0.0.0"
@@ -63,7 +78,7 @@ declare -A MSG_ZH=(
     ["enter_choice"]="请输入选择 (默认: 1)"
 
     # Installation
-    ["install_title"]="Sub2API 安装脚本"
+    ["install_title"]="KDAN 安装脚本"
     ["run_as_root"]="请使用 root 权限运行 (使用 sudo)"
     ["detected_platform"]="检测到平台"
     ["unsupported_arch"]="不支持的架构"
@@ -91,11 +106,11 @@ declare -A MSG_ZH=(
     ["ready_for_setup"]="准备就绪，可以启动设置向导"
 
     # Completion
-    ["install_complete"]="Sub2API 安装完成！"
+    ["install_complete"]="KDAN 安装完成！"
     ["install_dir"]="安装目录"
     ["next_steps"]="后续步骤"
     ["step1_check_services"]="确保 PostgreSQL 和 Redis 正在运行："
-    ["step2_start_service"]="启动 Sub2API 服务："
+    ["step2_start_service"]="启动 KDAN 服务："
     ["step3_enable_autostart"]="设置开机自启："
     ["step4_open_wizard"]="在浏览器中打开设置向导："
     ["wizard_guide"]="设置向导将引导您完成："
@@ -109,7 +124,7 @@ declare -A MSG_ZH=(
     ["cmd_stop"]="停止服务"
 
     # Upgrade
-    ["upgrading"]="正在升级 Sub2API..."
+    ["upgrading"]="正在升级 KDAN..."
     ["current_version"]="当前版本"
     ["stopping_service"]="正在停止服务..."
     ["backup_created"]="备份已创建"
@@ -125,11 +140,11 @@ declare -A MSG_ZH=(
     ["validating_version"]="正在验证版本..."
     ["available_versions"]="可用版本列表"
     ["fetching_versions"]="正在获取可用版本..."
-    ["not_installed"]="Sub2API 尚未安装，请先执行全新安装"
+    ["not_installed"]="KDAN 尚未安装，请先执行全新安装"
     ["fresh_install_hint"]="用法"
 
     # Uninstall
-    ["uninstall_confirm"]="这将从系统中移除 Sub2API。"
+    ["uninstall_confirm"]="这将从系统中移除 KDAN。"
     ["are_you_sure"]="确定要继续吗？(y/N)"
     ["uninstall_cancelled"]="卸载已取消"
     ["removing_files"]="正在移除文件..."
@@ -141,21 +156,21 @@ declare -A MSG_ZH=(
     ["install_lock_removed"]="安装锁文件已移除，重新安装时将进入设置向导"
     ["purge_prompt"]="是否同时删除配置目录？这将清除所有配置和数据 [y/N]: "
     ["removing_config_dir"]="正在移除配置目录..."
-    ["uninstall_complete"]="Sub2API 已卸载"
+    ["uninstall_complete"]="KDAN 已卸载"
 
     # Help
     ["usage"]="用法"
     ["cmd_none"]="(无参数)"
-    ["cmd_install"]="安装 Sub2API"
+    ["cmd_install"]="安装 KDAN"
     ["cmd_upgrade"]="升级到最新版本"
-    ["cmd_uninstall"]="卸载 Sub2API"
+    ["cmd_uninstall"]="卸载 KDAN"
     ["cmd_install_version"]="安装/回退到指定版本"
     ["cmd_list_versions"]="列出可用版本"
     ["opt_version"]="指定要安装的版本号 (例如: v1.0.0)"
 
     # Server configuration
     ["server_config_title"]="服务器配置"
-    ["server_config_desc"]="配置 Sub2API 服务监听地址"
+    ["server_config_desc"]="配置 KDAN 服务监听地址"
     ["server_host_prompt"]="服务器监听地址"
     ["server_host_hint"]="0.0.0.0 表示监听所有网卡，127.0.0.1 仅本地访问"
     ["server_port_prompt"]="服务器端口"
@@ -188,7 +203,7 @@ declare -A MSG_EN=(
     ["enter_choice"]="Enter your choice (default: 1)"
 
     # Installation
-    ["install_title"]="Sub2API Installation Script"
+    ["install_title"]="KDAN Installation Script"
     ["run_as_root"]="Please run as root (use sudo)"
     ["detected_platform"]="Detected platform"
     ["unsupported_arch"]="Unsupported architecture"
@@ -216,11 +231,11 @@ declare -A MSG_EN=(
     ["ready_for_setup"]="Ready for Setup Wizard"
 
     # Completion
-    ["install_complete"]="Sub2API installation completed!"
+    ["install_complete"]="KDAN installation completed!"
     ["install_dir"]="Installation directory"
     ["next_steps"]="NEXT STEPS"
     ["step1_check_services"]="Make sure PostgreSQL and Redis are running:"
-    ["step2_start_service"]="Start Sub2API service:"
+    ["step2_start_service"]="Start KDAN service:"
     ["step3_enable_autostart"]="Enable auto-start on boot:"
     ["step4_open_wizard"]="Open the Setup Wizard in your browser:"
     ["wizard_guide"]="The Setup Wizard will guide you through:"
@@ -234,7 +249,7 @@ declare -A MSG_EN=(
     ["cmd_stop"]="Stop"
 
     # Upgrade
-    ["upgrading"]="Upgrading Sub2API..."
+    ["upgrading"]="Upgrading KDAN..."
     ["current_version"]="Current version"
     ["stopping_service"]="Stopping service..."
     ["backup_created"]="Backup created"
@@ -250,11 +265,11 @@ declare -A MSG_EN=(
     ["validating_version"]="Validating version..."
     ["available_versions"]="Available versions"
     ["fetching_versions"]="Fetching available versions..."
-    ["not_installed"]="Sub2API is not installed. Please run a fresh install first"
+    ["not_installed"]="KDAN is not installed. Please run a fresh install first"
     ["fresh_install_hint"]="Usage"
 
     # Uninstall
-    ["uninstall_confirm"]="This will remove Sub2API from your system."
+    ["uninstall_confirm"]="This will remove KDAN from your system."
     ["are_you_sure"]="Are you sure? (y/N)"
     ["uninstall_cancelled"]="Uninstall cancelled"
     ["removing_files"]="Removing files..."
@@ -266,21 +281,21 @@ declare -A MSG_EN=(
     ["install_lock_removed"]="Install lock removed. Setup wizard will appear on next install."
     ["purge_prompt"]="Also remove config directory? This will delete all config and data [y/N]: "
     ["removing_config_dir"]="Removing config directory..."
-    ["uninstall_complete"]="Sub2API has been uninstalled"
+    ["uninstall_complete"]="KDAN has been uninstalled"
 
     # Help
     ["usage"]="Usage"
     ["cmd_none"]="(none)"
-    ["cmd_install"]="Install Sub2API"
+    ["cmd_install"]="Install KDAN"
     ["cmd_upgrade"]="Upgrade to the latest version"
-    ["cmd_uninstall"]="Remove Sub2API"
+    ["cmd_uninstall"]="Remove KDAN"
     ["cmd_install_version"]="Install/rollback to a specific version"
     ["cmd_list_versions"]="List available versions"
     ["opt_version"]="Specify version to install (e.g., v1.0.0)"
 
     # Server configuration
     ["server_config_title"]="Server Configuration"
-    ["server_config_desc"]="Configure Sub2API server listen address"
+    ["server_config_desc"]="Configure KDAN server listen address"
     ["server_host_prompt"]="Server listen address"
     ["server_host_hint"]="0.0.0.0 listens on all interfaces, 127.0.0.1 for local only"
     ["server_port_prompt"]="Server port"
@@ -605,18 +620,44 @@ validate_version() {
 
 # Get current installed version
 get_current_version() {
-    if [ -f "$INSTALL_DIR/sub2api" ]; then
+    if [ -f "$INSTALL_DIR/kdan" ]; then
         # Use grep -E for better compatibility (works on macOS and Linux)
-        "$INSTALL_DIR/sub2api" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown"
+        "$INSTALL_DIR/kdan" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown"
     else
         echo "not_installed"
     fi
 }
 
+# Refuse to download release artifacts unless explicitly enabled.
+# There are no KDAN releases; ${GITHUB_REPO} only carries upstream
+# sub2api builds, which do not match this branch.
+require_installer_enabled() {
+    case "$(printf '%s' "$KDAN_INSTALLER_ENABLED" | tr '[:upper:]' '[:lower:]')" in
+        1 | true | yes | on) return 0 ;;
+    esac
+
+    print_error "KDAN release artifacts are not published."
+    print_error "KDAN 尚未发布安装包。"
+    echo ""
+    echo "  The only assets on https://github.com/${GITHUB_REPO}/releases are"
+    echo "  upstream sub2api builds, which do not carry the KDAN branding"
+    echo "  or this branch's changes."
+    echo ""
+    echo "  Use the Docker Compose deployment instead (see deploy/README.md)."
+    echo "  推荐使用 Docker Compose 部署，见 deploy/README.md。"
+    echo ""
+    echo "  To install the upstream binary anyway, re-run with:"
+    echo "    KDAN_INSTALLER_ENABLED=true"
+    echo ""
+    exit 1
+}
+
 # Download and extract
 download_and_extract() {
+    require_installer_enabled
+
     local version_num=${LATEST_VERSION#v}
-    local archive_name="sub2api_${version_num}_${OS}_${ARCH}.tar.gz"
+    local archive_name="${RELEASE_ASSET_PREFIX}_${version_num}_${OS}_${ARCH}.tar.gz"
     local download_url="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_VERSION}/${archive_name}"
     local checksum_url="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_VERSION}/checksums.txt"
 
@@ -657,15 +698,15 @@ download_and_extract() {
     mkdir -p "$INSTALL_DIR"
 
     # Copy binary
-    cp "$TEMP_DIR/sub2api" "$INSTALL_DIR/sub2api"
-    chmod +x "$INSTALL_DIR/sub2api"
+    cp "$TEMP_DIR/${RELEASE_BINARY_NAME}" "$INSTALL_DIR/kdan"
+    chmod +x "$INSTALL_DIR/kdan"
 
     # Copy deploy files if they exist in the archive
     if [ -d "$TEMP_DIR/deploy" ]; then
         cp -r "$TEMP_DIR/deploy/"* "$INSTALL_DIR/" 2>/dev/null || true
     fi
 
-    print_success "$(msg 'binary_installed') $INSTALL_DIR/sub2api"
+    print_success "$(msg 'binary_installed') $INSTALL_DIR/kdan"
 }
 
 # Create system user
@@ -715,31 +756,31 @@ install_service() {
     print_info "$(msg 'installing_service')"
 
     # Create service file with configured host and port
-    cat > /etc/systemd/system/sub2api.service << EOF
+    cat > /etc/systemd/system/kdan.service << EOF
 [Unit]
-Description=Sub2API - AI API Gateway Platform
-Documentation=https://github.com/Wei-Shaw/sub2api
+Description=KDAN - Subscription to API Conversion Platform
+Documentation=https://docs.kdan.com
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
 
 [Service]
 Type=simple
-User=sub2api
-Group=sub2api
-WorkingDirectory=/opt/sub2api
-ExecStart=/opt/sub2api/sub2api
+User=kdan
+Group=kdan
+WorkingDirectory=/opt/kdan
+ExecStart=/opt/kdan/kdan
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=sub2api
+SyslogIdentifier=kdan
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/opt/sub2api
+ReadWritePaths=/opt/kdan
 
 # Environment - Server configuration
 Environment=GIN_MODE=release
@@ -788,12 +829,12 @@ get_public_ip() {
 start_service() {
     print_info "$(msg 'starting_service')"
 
-    if systemctl start sub2api; then
+    if systemctl start kdan; then
         print_success "$(msg 'service_started')"
         return 0
     else
         print_error "$(msg 'service_start_failed')"
-        print_info "sudo journalctl -u sub2api -n 50"
+        print_info "sudo journalctl -u kdan -n 50"
         return 1
     fi
 }
@@ -802,7 +843,7 @@ start_service() {
 enable_autostart() {
     print_info "$(msg 'enabling_autostart')"
 
-    if systemctl enable sub2api 2>/dev/null; then
+    if systemctl enable kdan 2>/dev/null; then
         print_success "$(msg 'autostart_enabled')"
         return 0
     else
@@ -843,18 +884,19 @@ print_completion() {
     echo "  $(msg 'useful_commands')"
     echo "=============================================="
     echo ""
-    echo "  $(msg 'cmd_status'):   sudo systemctl status sub2api"
-    echo "  $(msg 'cmd_logs'):     sudo journalctl -u sub2api -f"
-    echo "  $(msg 'cmd_restart'):  sudo systemctl restart sub2api"
-    echo "  $(msg 'cmd_stop'):     sudo systemctl stop sub2api"
+    echo "  $(msg 'cmd_status'):   sudo systemctl status kdan"
+    echo "  $(msg 'cmd_logs'):     sudo journalctl -u kdan -f"
+    echo "  $(msg 'cmd_restart'):  sudo systemctl restart kdan"
+    echo "  $(msg 'cmd_stop'):     sudo systemctl stop kdan"
     echo ""
     echo "=============================================="
 }
 
 # Upgrade function
 upgrade() {
-    # Check if Sub2API is installed
-    if [ ! -f "$INSTALL_DIR/sub2api" ]; then
+    require_installer_enabled
+    # Check if KDAN is installed
+    if [ ! -f "$INSTALL_DIR/kdan" ]; then
         print_error "$(msg 'not_installed')"
         print_info "$(msg 'fresh_install_hint'): $0 install"
         exit 1
@@ -863,40 +905,41 @@ upgrade() {
     print_info "$(msg 'upgrading')"
 
     # Get current version
-    CURRENT_VERSION=$("$INSTALL_DIR/sub2api" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+    CURRENT_VERSION=$("$INSTALL_DIR/kdan" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
     print_info "$(msg 'current_version'): $CURRENT_VERSION"
 
     # Stop service
-    if systemctl is-active --quiet sub2api; then
+    if systemctl is-active --quiet kdan; then
         print_info "$(msg 'stopping_service')"
-        systemctl stop sub2api
+        systemctl stop kdan
     fi
 
     # Backup current binary
-    cp "$INSTALL_DIR/sub2api" "$INSTALL_DIR/sub2api.backup"
-    print_info "$(msg 'backup_created'): $INSTALL_DIR/sub2api.backup"
+    cp "$INSTALL_DIR/kdan" "$INSTALL_DIR/kdan.backup"
+    print_info "$(msg 'backup_created'): $INSTALL_DIR/kdan.backup"
 
     # Download and install new version
     get_latest_version
     download_and_extract
 
     # Set permissions
-    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/sub2api"
+    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/kdan"
 
     # Start service
     print_info "$(msg 'starting_service')"
-    systemctl start sub2api
+    systemctl start kdan
 
     print_success "$(msg 'upgrade_complete')"
 }
 
 # Install specific version (for upgrade or rollback)
-# Requires: Sub2API must already be installed
+# Requires: KDAN must already be installed
 install_version() {
+    require_installer_enabled
     local target_version="$1"
 
-    # Check if Sub2API is installed
-    if [ ! -f "$INSTALL_DIR/sub2api" ]; then
+    # Check if KDAN is installed
+    if [ ! -f "$INSTALL_DIR/kdan" ]; then
         print_error "$(msg 'not_installed')"
         print_info "$(msg 'fresh_install_hint'): $0 install -v $target_version"
         exit 1
@@ -919,20 +962,20 @@ install_version() {
     fi
 
     # Stop service if running
-    if systemctl is-active --quiet sub2api; then
+    if systemctl is-active --quiet kdan; then
         print_info "$(msg 'stopping_service')"
-        systemctl stop sub2api
+        systemctl stop kdan
     fi
 
     # Backup current binary (for potential recovery)
-    if [ -f "$INSTALL_DIR/sub2api" ]; then
+    if [ -f "$INSTALL_DIR/kdan" ]; then
         local backup_name
         if [ "$current_version" != "unknown" ] && [ "$current_version" != "not_installed" ]; then
-            backup_name="sub2api.backup.${current_version}"
+            backup_name="kdan.backup.${current_version}"
         else
-            backup_name="sub2api.backup.$(date +%Y%m%d%H%M%S)"
+            backup_name="kdan.backup.$(date +%Y%m%d%H%M%S)"
         fi
-        cp "$INSTALL_DIR/sub2api" "$INSTALL_DIR/$backup_name"
+        cp "$INSTALL_DIR/kdan" "$INSTALL_DIR/$backup_name"
         print_info "$(msg 'backup_created'): $INSTALL_DIR/$backup_name"
     fi
 
@@ -943,15 +986,15 @@ install_version() {
     download_and_extract
 
     # Set permissions
-    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/sub2api"
+    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/kdan"
 
     # Start service
     print_info "$(msg 'starting_service')"
-    if systemctl start sub2api; then
+    if systemctl start kdan; then
         print_success "$(msg 'service_started')"
     else
         print_error "$(msg 'service_start_failed')"
-        print_info "sudo journalctl -u sub2api -n 50"
+        print_info "sudo journalctl -u kdan -n 50"
     fi
 
     # Print completion message
@@ -986,11 +1029,11 @@ uninstall() {
     fi
 
     print_info "$(msg 'stopping_service')"
-    systemctl stop sub2api 2>/dev/null || true
-    systemctl disable sub2api 2>/dev/null || true
+    systemctl stop kdan 2>/dev/null || true
+    systemctl disable kdan 2>/dev/null || true
 
     print_info "$(msg 'removing_files')"
-    rm -f /etc/systemd/system/sub2api.service
+    rm -f /etc/systemd/system/kdan.service
     systemctl daemon-reload
 
     print_info "$(msg 'removing_install_dir')"
@@ -1102,7 +1145,7 @@ main() {
             check_dependencies
             if [ -n "$target_version" ]; then
                 # Install specific version (fresh install or rollback)
-                if [ -f "$INSTALL_DIR/sub2api" ]; then
+                if [ -f "$INSTALL_DIR/kdan" ]; then
                     # Already installed, treat as version change
                     install_version "$target_version"
                 else
@@ -1198,7 +1241,7 @@ main() {
 
     if [ -n "$target_version" ]; then
         # Install specific version
-        if [ -f "$INSTALL_DIR/sub2api" ]; then
+        if [ -f "$INSTALL_DIR/kdan" ]; then
             install_version "$target_version"
         else
             configure_server

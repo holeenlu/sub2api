@@ -3,6 +3,7 @@ package service
 import (
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"sort"
 	"strings"
@@ -973,7 +975,7 @@ func (s *BackupService) RestoreBackup(ctx context.Context, backupID string) erro
 	defer func() { _ = gzReader.Close() }()
 
 	// 流式恢复
-	if err := s.dumper.Restore(ctx, gzReader); err != nil {
+	if err := s.restoreWithSessionInvalidation(ctx, gzReader); err != nil {
 		return fmt.Errorf("pg restore: %w", err)
 	}
 
@@ -1099,7 +1101,7 @@ func (s *BackupService) executeRestore(record *BackupRecord, objectStore BackupO
 	}
 	defer func() { _ = gzReader.Close() }()
 
-	if err := s.dumper.Restore(ctx, gzReader); err != nil {
+	if err := s.restoreWithSessionInvalidation(ctx, gzReader); err != nil {
 		record.RestoreStatus = "failed"
 		record.RestoreError = fmt.Sprintf("pg restore: %v", err)
 		_ = s.saveRestoreRecord(context.Background(), record)
@@ -1168,6 +1170,18 @@ func (s *BackupService) downloadBackupParts(ctx context.Context, objectStore Bac
 	return path, nil
 }
 
+// The dump and this epilogue run in PgDumper's one transaction. A fresh random
+// generation is essential: incrementing a restored old value could recreate
+// the generation of an already revoked token from before the restore.
+func (s *BackupService) restoreWithSessionInvalidation(ctx context.Context, data io.Reader) error {
+	generation, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
+	if err != nil {
+		return err
+	}
+	epilogue := fmt.Sprintf("\n-- Invalidate pre-restore authentication in the same restore transaction.\nUPDATE users SET session_generation = %d;\nUPDATE pending_auth_sessions SET consumed_at = NOW() WHERE consumed_at IS NULL;\n", generation.Int64()+1)
+	return s.dumper.Restore(ctx, io.MultiReader(data, strings.NewReader(epilogue)))
+}
+
 func (s *BackupService) restoreArchive(ctx context.Context, archivePath string) error {
 	archive, err := os.Open(archivePath)
 	if err != nil {
@@ -1180,7 +1194,7 @@ func (s *BackupService) restoreArchive(ctx context.Context, archivePath string) 
 		return fmt.Errorf("gzip reader: %w", err)
 	}
 	defer func() { _ = gzReader.Close() }()
-	if err := s.dumper.Restore(ctx, gzReader); err != nil {
+	if err := s.restoreWithSessionInvalidation(ctx, gzReader); err != nil {
 		return fmt.Errorf("pg restore: %w", err)
 	}
 	return nil
