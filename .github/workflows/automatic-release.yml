@@ -1,0 +1,282 @@
+name: Manual versioned release
+run-name: Manual release · ${{ github.ref_name }}
+# Use workflow from main (KDAN), TapModels or tokensavy in holeenlu/sub2api.
+# Repository + selected branch determine the channel; pushes never publish.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+# Keep reservation, publication and latest promotion in one ordered transaction.
+concurrency:
+  group: automatic-release-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  select:
+    name: Select brand from source branch
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.select.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: select
+        run: python3 scripts/release/plan.py --select >> "$GITHUB_OUTPUT"
+
+  prepare:
+    needs: select
+    if: needs.select.outputs.channel != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+      promote: ${{ steps.plan.outputs.promote }}
+      channel: ${{ steps.plan.outputs.channel }}
+      version: ${{ steps.plan.outputs.version }}
+      base: ${{ steps.plan.outputs.base }}
+      commit: ${{ steps.plan.outputs.commit }}
+      date: ${{ steps.plan.outputs.date }}
+      tag: ${{ steps.plan.outputs.tag }}
+      image: ${{ steps.plan.outputs.image }}
+      zh_tw: ${{ steps.plan.outputs.zh_tw }}
+      release_id: ${{ steps.plan.outputs.release_id }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r .github/release-tools/requirements-release.txt
+      - name: Verify release tooling
+        run: |
+          python -m unittest discover -s .github/release-tools -p 'test_release_matrix.py'
+          python -m unittest discover -s deploy/tests -p 'test_auto_release*.py'
+          bash -n .github/release-tools/release-images.sh
+      - name: Reserve version (or resume failed build)
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release/plan.py
+      - name: Select upstream GoReleaser target matrix
+        if: steps.plan.outputs.publish == 'true'
+        id: matrix
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, sys
+          sys.path.insert(0, '.github/release-tools')
+          from release_matrix import targets
+          print('matrix=' + json.dumps({'include': targets()}, separators=(',', ':')))
+          PY
+      - uses: actions/upload-artifact@v7
+        if: steps.plan.outputs.publish == 'true'
+        with:
+          name: automatic-release-plan
+          path: release-plan.json
+          if-no-files-found: error
+          retention-days: 3
+
+  build-frontend:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - name: Verify update UI and build frontend once
+        working-directory: frontend
+        run: |
+          pnpm run typecheck
+          pnpm exec vitest run src/components/common/__tests__/VersionBadge.spec.ts src/components/common/__tests__/VersionBadgeCompose.spec.ts
+          pnpm run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: automatic-frontend-dist
+          path: backend/internal/web/dist/
+          if-no-files-found: error
+          retention-days: 3
+
+  build-binaries:
+    needs: [prepare, build-frontend]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_DATE: ${{ needs.prepare.outputs.date }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.commit }}
+      RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+      UPSTREAM_VERSION: ${{ needs.prepare.outputs.base }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          name: automatic-frontend-dist
+          path: backend/internal/web/dist/
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: auto-release-go-${{ runner.os }}-${{ matrix.goos }}-${{ matrix.goarch }}-${{ needs.prepare.outputs.channel }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-${{ needs.prepare.outputs.commit }}
+          restore-keys: |
+            auto-release-go-${{ runner.os }}-${{ matrix.goos }}-${{ matrix.goarch }}-${{ needs.prepare.outputs.channel }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-
+      - name: Verify update API before publishing
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        working-directory: backend
+        run: CGO_ENABLED=0 go test -tags=unit ./internal/service ./internal/repository ./internal/handler/admin -run '^Test(Update|GitHubRelease|SystemHandler)' -count=1
+      - uses: actions/setup-node@v6
+        if: needs.prepare.outputs.zh_tw == 'true'
+        with:
+          node-version: '24'
+      - name: Convert brand backend messages
+        if: needs.prepare.outputs.zh_tw == 'true'
+        run: |
+          npm ci --prefix tools/zh-tw --omit=dev
+          node tools/zh-tw/convert-go.mjs backend
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r .github/release-tools/requirements-release.txt
+      - name: Select one GoReleaser target
+        env:
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: python .github/release-tools/release_matrix.py config build --channel "$RELEASE_CHANNEL" --goos "$TARGET_OS" --goarch "$TARGET_ARCH" --output "$RUNNER_TEMP/goreleaser.matrix.yaml"
+      - name: Build and archive without publishing
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: release --snapshot --clean --skip=validate,publish,docker,announce --config=${{ runner.temp }}/goreleaser.matrix.yaml
+        env:
+          # Snapshot naming carries the four-part version; the parser's base tag
+          # remains an upstream SemVer, independent of imported sub4api tags.
+          GORELEASER_CURRENT_TAG: v${{ needs.prepare.outputs.base }}
+          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO_OWNER_LOWER: ${{ github.repository_owner }}
+          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
+          DOCKERHUB_USERNAME: skip
+          TAG_MESSAGE: ''
+      - name: Verify archive checksum and source commit
+        env:
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: python .github/release-tools/release_matrix.py collect --channel "$RELEASE_CHANNEL" --version "$RELEASE_VERSION" --sha "$RELEASE_SHA" --goos "$TARGET_OS" --goarch "$TARGET_ARCH" --output matrix-output
+      - uses: actions/upload-artifact@v7
+        with:
+          name: automatic-binary-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: matrix-output/
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: [prepare, build-binaries]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.commit }}
+      RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+      RELEASE_IMAGE: ${{ needs.prepare.outputs.image }}
+      DEFER_PROMOTION: 'true'
+      DOCKERHUB_USERNAME: skip
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          name: automatic-release-plan
+          path: .
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: automatic-binary-*
+          path: release-input
+          merge-multiple: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r .github/release-tools/requirements-release.txt
+      - name: Verify complete matrix and prepare upstream Docker contexts
+        run: |
+          python .github/release-tools/release_matrix.py contexts --channel "$RELEASE_CHANNEL" --version "$RELEASE_VERSION" --sha "$RELEASE_SHA" --input release-input --output .release-context
+          mkdir -p dist/release
+          cp release-input/*.tar.gz release-input/*.zip dist/release/
+          (cd dist/release && sha256sum *.tar.gz *.zip > checksums.txt)
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Package the already-built binaries into versioned images
+        run: bash .github/release-tools/release-images.sh
+      - name: Publish complete release and update manifest
+        run: |
+          set -euo pipefail
+          IMAGE_DIGEST=$(docker buildx imagetools inspect "$RELEASE_IMAGE:$RELEASE_VERSION" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
+          export IMAGE_DIGEST
+          python3 scripts/release/notes.py
+          gh release upload "$RELEASE_TAG" dist/release/* --clobber
+          gh release edit "$RELEASE_TAG" --notes-file release-notes.md
+          # GitHub's Latest marker is repository-wide. Mark the release just
+          # published so the newest successful channel build is discoverable.
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -F make_latest=true
+
+  promote:
+    needs: [prepare, publish]
+    if: ${{ always() && needs.prepare.result == 'success' && needs.prepare.outputs.promote == 'true' && (needs.publish.result == 'success' || needs.prepare.outputs.publish != 'true') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_IMAGE: ${{ needs.prepare.outputs.image }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Promote the verified published image (safe to retry)
+        run: |
+          gh release download "$RELEASE_TAG" --pattern release-manifest.json --dir "$RUNNER_TEMP/release-promotion" --clobber
+          DIGEST=$(python3 -c 'import json,os; print(json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"release-promotion","release-manifest.json")))["image_digest"])')
+          docker buildx imagetools create --tag "$RELEASE_IMAGE:latest" "$RELEASE_IMAGE@$DIGEST"

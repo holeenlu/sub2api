@@ -1,10 +1,10 @@
 # =============================================================================
-# Sub2API Docker Compose Configuration
+# KDAN Docker Compose Configuration
 # =============================================================================
 # Quick Start:
 #   1. Copy .env.example to .env and configure
 #   2. docker-compose up -d
-#   3. Check logs: docker-compose logs -f sub2api
+#   3. Check logs: docker-compose logs -f kdan
 #   4. Access: http://localhost:8080
 #
 # All configuration is done via environment variables.
@@ -13,11 +13,11 @@
 
 services:
   # ===========================================================================
-  # Sub2API Application
+  # KDAN Application
   # ===========================================================================
-  sub2api:
-    image: weishaw/sub2api:latest
-    container_name: sub2api
+  kdan:
+    image: ${KDAN_IMAGE:-ghcr.io/holeenlu/kdan:latest}
+    container_name: kdan
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -29,7 +29,7 @@ services:
       - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-8080}:8080"
     volumes:
       # Data persistence (config.yaml will be auto-generated here)
-      - sub2api_data:/app/data
+      - kdan_data:/app/data
       # Optional: Mount custom config.yaml (uncomment and create the file first)
       # Copy config.example.yaml to config.yaml, modify it, then uncomment:
       # - ./config.yaml:/app/data/config.yaml
@@ -57,13 +57,36 @@ services:
       - ALIPAY_MOBILE_PRECREATE_DEEP_LINK=${ALIPAY_MOBILE_PRECREATE_DEEP_LINK:-}
 
       # =======================================================================
+      # Logging Configuration
+      # =======================================================================
+      # --- logging: values live in .env but were never referenced here, so the
+      # app fell back to built-in defaults and WARN-level records were lost.
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FORMAT=${LOG_FORMAT:-console}
+      - LOG_SERVICE_NAME=${LOG_SERVICE_NAME:-kdan}
+      - LOG_ENV=${LOG_ENV:-production}
+      - LOG_CALLER=${LOG_CALLER:-true}
+      - LOG_STACKTRACE_LEVEL=${LOG_STACKTRACE_LEVEL:-error}
+      - LOG_OUTPUT_TO_STDOUT=${LOG_OUTPUT_TO_STDOUT:-true}
+      - LOG_OUTPUT_TO_FILE=${LOG_OUTPUT_TO_FILE:-true}
+      - LOG_OUTPUT_FILE_PATH=${LOG_OUTPUT_FILE_PATH:-}
+      - LOG_ROTATION_MAX_SIZE_MB=${LOG_ROTATION_MAX_SIZE_MB:-100}
+      - LOG_ROTATION_MAX_BACKUPS=${LOG_ROTATION_MAX_BACKUPS:-10}
+      - LOG_ROTATION_MAX_AGE_DAYS=${LOG_ROTATION_MAX_AGE_DAYS:-7}
+      - LOG_ROTATION_COMPRESS=${LOG_ROTATION_COMPRESS:-true}
+      - LOG_ROTATION_LOCAL_TIME=${LOG_ROTATION_LOCAL_TIME:-true}
+      - LOG_SAMPLING_ENABLED=${LOG_SAMPLING_ENABLED:-false}
+      - LOG_SAMPLING_INITIAL=${LOG_SAMPLING_INITIAL:-100}
+      - LOG_SAMPLING_THEREAFTER=${LOG_SAMPLING_THEREAFTER:-100}
+
+      # =======================================================================
       # Database Configuration (PostgreSQL)
       # =======================================================================
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
-      - DATABASE_USER=${POSTGRES_USER:-sub2api}
+      - DATABASE_USER=${POSTGRES_USER:-kdan}
       - DATABASE_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - DATABASE_DBNAME=${POSTGRES_DB:-sub2api}
+      - DATABASE_DBNAME=${POSTGRES_DB:-kdan}
       - DATABASE_SSLMODE=disable
       - DATABASE_MAX_OPEN_CONNS=${DATABASE_MAX_OPEN_CONNS:-50}
       - DATABASE_MAX_IDLE_CONNS=${DATABASE_MAX_IDLE_CONNS:-10}
@@ -153,6 +176,9 @@ services:
       # =======================================================================
       # Update Configuration (在线更新配置)
       # =======================================================================
+      # Enable checking GitHub releases for updates and the self-update UI
+      # 是否检查上游发布并显示自更新入口，白标构建默认关闭
+      - UPDATE_CHECK_ENABLED=${UPDATE_CHECK_ENABLED:-true}
       # Proxy for accessing GitHub (online updates + pricing data)
       # Examples: http://host:port, socks5://host:port
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
@@ -161,7 +187,7 @@ services:
       # Gateway Upstream, Scheduling & Image Configuration
       # =======================================================================
       # Gateway values come from Compose .env or the shell.
-      # Fallbacks mirror Sub2API backend defaults so omitted values preserve behavior.
+      # Fallbacks mirror KDAN backend defaults so omitted values preserve behavior.
       - GATEWAY_FORCE_CODEX_CLI=${GATEWAY_FORCE_CODEX_CLI:-false}
       - GATEWAY_OPENAI_COMPACT_MODEL=${GATEWAY_OPENAI_COMPACT_MODEL:-gpt-5.5}
       - SUB2API_IMAGES_MAIN_MODEL=${SUB2API_IMAGES_MAIN_MODEL:-gpt-5.6-luna}
@@ -179,6 +205,8 @@ services:
       - GATEWAY_MAX_CONNS_PER_HOST=${GATEWAY_MAX_CONNS_PER_HOST:-1024}
       - GATEWAY_MAX_IDLE_CONNS=${GATEWAY_MAX_IDLE_CONNS:-2560}
       - GATEWAY_MAX_IDLE_CONNS_PER_HOST=${GATEWAY_MAX_IDLE_CONNS_PER_HOST:-120}
+      - GATEWAY_SCHEDULING_STICKY_SESSION_TTL_SECONDS=${GATEWAY_SCHEDULING_STICKY_SESSION_TTL_SECONDS:-3600}
+      - GATEWAY_SCHEDULING_SESSION_ACCOUNT_HISTORY_TTL_SECONDS=${GATEWAY_SCHEDULING_SESSION_ACCOUNT_HISTORY_TTL_SECONDS:-0}
       - GATEWAY_SCHEDULING_STICKY_SESSION_MAX_WAITING=${GATEWAY_SCHEDULING_STICKY_SESSION_MAX_WAITING:-3}
       - GATEWAY_SCHEDULING_STICKY_SESSION_WAIT_TIMEOUT=${GATEWAY_SCHEDULING_STICKY_SESSION_WAIT_TIMEOUT:-120s}
       - GATEWAY_SCHEDULING_FALLBACK_WAIT_TIMEOUT=${GATEWAY_SCHEDULING_FALLBACK_WAIT_TIMEOUT:-30s}
@@ -202,13 +230,16 @@ services:
       - GATEWAY_IMAGE_CONCURRENCY_OVERFLOW_MODE=${GATEWAY_IMAGE_CONCURRENCY_OVERFLOW_MODE:-reject}
       - GATEWAY_IMAGE_CONCURRENCY_WAIT_TIMEOUT_SECONDS=${GATEWAY_IMAGE_CONCURRENCY_WAIT_TIMEOUT_SECONDS:-30}
       - GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS=${GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS:-100}
+      # API Key 并发等待队列（启动时读取；值必须出现在容器环境中，仅 .env 插值不够）
+      - GATEWAY_API_KEY_QUEUE_MAX_WAITING=${GATEWAY_API_KEY_QUEUE_MAX_WAITING:-5}
+      - GATEWAY_API_KEY_QUEUE_TIMEOUT_SECONDS=${GATEWAY_API_KEY_QUEUE_TIMEOUT_SECONDS:-30}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     networks:
-      - sub2api-network
+      - kdan-network
     healthcheck:
       test:
         [
@@ -233,7 +264,7 @@ services:
   # ===========================================================================
   postgres:
     image: postgres:18-alpine
-    container_name: sub2api-postgres
+    container_name: kdan-postgres
     restart: unless-stopped
     ulimits:
       nofile:
@@ -255,17 +286,17 @@ services:
       # 若不显式设置 PGDATA，则即使挂载了 postgres_data 到 /var/lib/postgresql/data，数据也不会落盘到该命名卷，
       # docker compose down/up 后会触发 initdb 重新初始化，导致用户/密码等数据丢失。
       - PGDATA=/var/lib/postgresql/data
-      - POSTGRES_USER=${POSTGRES_USER:-sub2api}
+      - POSTGRES_USER=${POSTGRES_USER:-kdan}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - POSTGRES_DB=${POSTGRES_DB:-sub2api}
+      - POSTGRES_DB=${POSTGRES_DB:-kdan}
       - TZ=${TZ:-Asia/Shanghai}
     networks:
-      - sub2api-network
+      - kdan-network
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api} && psql -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api} -Atqc 'SELECT 1' >/dev/null",
+          "pg_isready -U ${POSTGRES_USER:-kdan} -d ${POSTGRES_DB:-kdan} && psql -U ${POSTGRES_USER:-kdan} -d ${POSTGRES_DB:-kdan} -Atqc 'SELECT 1' >/dev/null",
         ]
       interval: 10s
       timeout: 5s
@@ -279,7 +310,7 @@ services:
   # ===========================================================================
   redis:
     image: redis:8-alpine
-    container_name: sub2api-redis
+    container_name: kdan-redis
     restart: unless-stopped
     ulimits:
       nofile:
@@ -303,7 +334,7 @@ services:
       # REDISCLI_AUTH is used by redis-cli for authentication (safer than -a flag)
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}
     networks:
-      - sub2api-network
+      - kdan-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -316,7 +347,7 @@ services:
 # Volumes
 # =============================================================================
 volumes:
-  sub2api_data:
+  kdan_data:
     driver: local
   postgres_data:
     driver: local
@@ -327,5 +358,5 @@ volumes:
 # Networks
 # =============================================================================
 networks:
-  sub2api-network:
+  kdan-network:
     driver: bridge

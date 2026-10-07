@@ -1,6 +1,6 @@
 # Edge and HTTP Ingress Security
 
-Sub2API supports long-lived SSE and WebSocket requests. Protect the request
+KDAN supports long-lived SSE and WebSocket requests. Protect the request
 ingress without imposing a response `WriteTimeout`: a write deadline would
 terminate healthy long generations and streams.
 
@@ -29,42 +29,27 @@ the application's responsibility.
 
 ## Trusted client IPs
 
-`security.trust_forwarded_ip_for_api_key_acl` is enabled by default for upgrade
-compatibility. While enabled, raw forwarding headers take over client-IP
-resolution for logs and security-sensitive paths. Custom headers from
-`security.forwarded_client_ip_headers` are checked in configured order before
-the built-in `CF-Connecting-IP`, `X-Real-IP`, and `X-Forwarded-For` fallback.
-Header names are case-insensitive, normalized when loaded, de-duplicated, and
-limited to 16 unique valid HTTP field names. Header values must contain IP
-literals; comma-separated values are supported, invalid entries are skipped,
-and public addresses are preferred over private fallback addresses.
+Authentication, API-key IP restrictions, authentication rate limits, security
+audit identity and session binding always use Gin's `server.trusted_proxies`
+chain. Configure only the exact CIDR/IP addresses that connect directly to the
+application. An absent or explicitly empty list trusts no forwarded addresses.
+An edge proxy must replace client-supplied forwarding headers with its verified
+client address. For a CDN, configure its trusted chain at the edge and restrict
+direct origin access. Do not trust arbitrary internet peers.
 
-The list can be supplied in YAML or with the comma-separated environment
-variable `SECURITY_FORWARDED_CLIENT_IP_HEADERS`; an explicitly empty environment
-value clears YAML values. It is also editable from the admin security settings
-and updates at runtime without a restart. A request snapshots the switch and
-header list together, so one request cannot mix old and new settings. Custom
-headers are ignored completely when the switch is disabled. In that mode Gin's
-`server.trusted_proxies` chain is authoritative: configure only the exact
-CIDR/IP addresses that connect directly to Sub2API. An explicit empty list
-trusts no forwarded client IPs.
+The historical `security.trust_forwarded_ip_for_api_key_acl` name is retained
+for configuration compatibility, but is disabled by default and now affects
+only legacy request/usage metadata. Neither that switch nor
+`security.forwarded_client_ip_headers` can override security decisions.
+Existing `false` settings are never changed back to `true` by migration.
+Custom metadata headers remain normalized, de-duplicated and limited to 16;
+they can be changed through YAML, `SECURITY_FORWARDED_CLIENT_IP_HEADERS`, or
+admin settings. Metadata from an untrusted sender is not an authorization fact.
 
-On the first upgrade to this mode, a legacy `false` value is changed to `true`
-only when `server.trusted_proxies` was not explicitly configured; explicit
-proxy policies remain in secure mode. New installations persist the configured
-custom header list during database initialization. Existing installations
-backfill a missing database value from the YAML configuration. A hidden
-migration marker prevents later administrator changes from being overwritten.
-If settings cannot be read or the persisted custom-header list is malformed,
-the process fails closed to trusted-proxy mode with no custom headers. If a
-migration write fails, the computed mode remains active for the current process
-and startup records a warning.
-
-Compatibility takeover accepts forwarded headers without validating the direct
-peer, including any configured custom header. Protect the origin from direct
-access while it is enabled. A CDN deployment must firewall the origin so only
-the CDN or load balancer can reach it, and that proxy must overwrite every
-trusted client-IP header rather than append an untrusted client value.
+Before upgrading a reverse-proxy deployment, set its actual trusted proxy
+addresses. Sites that formerly relied on raw-header takeover may otherwise see
+the socket peer address. Existing IP-bound sessions may require a new login
+when the authoritative address changes.
 
 Example for a proxy on the same host:
 
@@ -75,6 +60,29 @@ server:
     - ::1/128
 ```
 
+## First-run setup authorization
+
+The web setup wizard requires an operator token for installation and both
+database/Redis connection tests. On first startup the server generates the token
+and prints it to its local startup log; enter it in the wizard. Operators can
+instead provide `SETUP_BOOTSTRAP_TOKEN` with at least 32 characters. The browser
+keeps the token only in memory and sends it in `X-Setup-Token`, never in URLs.
+Installed-system guards invalidate this capability after installation. The
+read-only status endpoint remains public. `AUTO_SETUP` and CLI setup retain
+their operator-controlled configuration flows. Protect remote setup with HTTPS
+or an SSH tunnel, as it also transports database and administrator credentials.
+
+## Generated-image downloads
+
+URLs returned by image providers are fetched through a separate public-only
+transport. Every redirect and DNS result is checked, and the connection uses
+the exact approved address while preserving the original HTTP Host and TLS
+server name. HTTP/HTTPS proxies must support CONNECT to that approved address,
+including for plain HTTP image URLs; unsupported tunnels fail rather than
+falling back to an unsafe destination or bypassing the proxy. Private configured
+API endpoints and private S3 upload endpoints are unaffected. Only recognized
+PNG/JPEG/WebP/GIF bytes are accepted for generated-image object storage.
+
 ## Nginx baseline
 
 Define shared zones in the `http` block. Tune rates to measured legitimate
@@ -82,9 +90,9 @@ traffic; the values below are conservative starting points, not universal
 capacity targets.
 
 ```nginx
-limit_conn_zone $binary_remote_addr zone=sub2api_conn:20m;
-limit_req_zone  $binary_remote_addr zone=sub2api_auth:20m rate=5r/s;
-limit_req_zone  $binary_remote_addr zone=sub2api_api:40m rate=30r/s;
+limit_conn_zone $binary_remote_addr zone=kdan_conn:20m;
+limit_req_zone  $binary_remote_addr zone=kdan_auth:20m rate=5r/s;
+limit_req_zone  $binary_remote_addr zone=kdan_api:40m rate=30r/s;
 map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      close;
@@ -97,21 +105,21 @@ server {
     client_header_timeout 10s;
     client_max_body_size 256m;
     large_client_header_buffers 4 16k;
-    limit_conn sub2api_conn 40;
+    limit_conn kdan_conn 40;
 
     location ~ ^/(auth|api/auth)/ {
-        limit_req zone=sub2api_auth burst=10 nodelay;
+        limit_req zone=kdan_auth burst=10 nodelay;
         proxy_pass http://127.0.0.1:8080;
     }
 
     location ~ ^/(v1/)?(embeddings|alpha/search)$ {
         client_max_body_size 32m;
-        limit_req zone=sub2api_api burst=60 nodelay;
+        limit_req zone=kdan_api burst=60 nodelay;
         proxy_pass http://127.0.0.1:8080;
     }
 
     location / {
-        limit_req zone=sub2api_api burst=60 nodelay;
+        limit_req zone=kdan_api burst=60 nodelay;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -129,7 +137,7 @@ server {
 ```
 
 If Nginx gzip is enabled in the `http` block, keep `text/event-stream` out of
-`gzip_types` and do not use `gzip_types *` for Sub2API. The
+`gzip_types` and do not use `gzip_types *` for KDAN. The
 `proxy_buffering off` setting above prevents proxy buffering, but it does not
 disable the gzip response filter. Use an explicit list for ordinary responses:
 
@@ -189,7 +197,7 @@ api.example.com {
 Replace the documentation ranges with the CDN's published, automatically
 maintained egress ranges. `CF-Connecting-IP` is safe here only because direct
 origin access is blocked and Caddy trusts only those TCP peers. Configure
-Sub2API `server.trusted_proxies` with the Caddy address/private subnet so the
+KDAN `server.trusted_proxies` with the Caddy address/private subnet so the
 application accepts only Caddy's rewritten headers.
 
 Caddy core does not provide a general request-rate limiter; use a trusted
