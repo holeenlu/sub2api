@@ -334,6 +334,16 @@ describe('user KeysView column settings', () => {
     wrapper.unmount()
   })
 
+  it('keeps Use Key but removes CCS import and client selection', async () => {
+    const wrapper = await mountView()
+    expect(wrapper.text()).toContain('keys.useKey')
+    expect(wrapper.text()).not.toContain('keys.importToCcSwitch')
+    expect(wrapper.findComponent({ name: 'UseKeyModal' }).exists()).toBe(true)
+    expect(wrapper.findAllComponents({ name: 'BaseDialog' }).some(dialog =>
+      dialog.props('title') === 'keys.ccsClientSelect.title'
+    )).toBe(false)
+  })
+
   it('uses the default API key columns with low-frequency columns hidden', async () => {
     const wrapper = await mountView()
 

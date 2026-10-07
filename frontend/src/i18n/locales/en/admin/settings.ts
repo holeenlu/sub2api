@@ -665,7 +665,7 @@ codexProbeChallenge: 'Fresh random challenge',
         apiBaseUrl: 'API Base URL',
         apiBaseUrlPlaceholder: 'https://api.example.com',
         apiBaseUrlHint:
-          'Used for "Use Key", "Import to CC Switch", and callback URL suggestions. Leave empty to use current site URL.',
+          'Used for "Use Key" and callback URL suggestions. Leave empty to use current site URL.',
         tablePreferencesTitle: 'Global Table Preferences',
         tablePreferencesDescription: 'Configure default pagination behavior for shared table components',
         tableDefaultPageSize: 'Default Rows Per Page',
@@ -706,8 +706,6 @@ codexProbeChallenge: 'Fresh random challenge',
         homeContentIframeWarning: '⚠️ iframe mode note: Some websites have X-Frame-Options or CSP security policies that prevent embedding in iframes. If the page appears blank or shows an error, please verify the target website allows embedding, or consider using HTML mode to build your own content.',
         compactHome: 'Compact Home Page',
         compactHomeHint: 'Show a restrained site identity page when no custom home page content is set.',
-        hideCcsImportButton: 'Hide CCS Import Button',
-        hideCcsImportButtonHint: 'When enabled, the "Import to CCS" button will be hidden on the API Keys page'
       },
       purchase: {
         title: 'Recharge / Subscription Page',

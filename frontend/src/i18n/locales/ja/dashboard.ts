@@ -343,18 +343,7 @@ export default {
       quota_exhausted: 'クォータ超過',
       expired: '期限切れ',
     },
-
-importToCcSwitch: 'Import to CCS',
-ccSwitchNotInstalled: 'CC-Switch がインストールされていないか、プロトコルハンドラーが登録されていません。CC-Switch をインストールするか、APIキーを手動でコピーしてください。',
-ccsClientSelect: {
-      title: 'クライアントを選択',
-      description: 'CC-Switch にインポートするクライアントの種類を選択してください。',
-      claudeCode: 'Claude Code',
-      claudeCodeDesc: 'Claude Code の設定としてインポート',
-      geminiCli: 'Gemini CLI',
-      geminiCliDesc: 'Gemini CLI の設定としてインポート',
-    },
-},
+  },
 
   // Usage
   usage: {
