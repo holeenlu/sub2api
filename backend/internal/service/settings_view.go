@@ -12,6 +12,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 type SystemSettings struct {
+	OpenAICodexDiagnosticPromptTemplate string
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	RegistrationEmailSuffixWhitelist    []string
@@ -157,7 +158,6 @@ type SystemSettings struct {
 	DocURL                      string
 	HomeContent                 string
 	CompactHomeEnabled          bool
-	HideCcsImportButton         bool
 	PurchaseSubscriptionEnabled bool
 	PurchaseSubscriptionURL     string
 	TableDefaultPageSize        int
@@ -359,7 +359,6 @@ type PublicSettings struct {
 	DocURL                              string
 	HomeContent                         string
 	CompactHomeEnabled                  bool
-	HideCcsImportButton                 bool
 
 	PurchaseSubscriptionEnabled bool
 	PurchaseSubscriptionURL     string

@@ -86,6 +86,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 // it omitted, so in that case the caches are rebuilt from storage rather than
 // from the request struct.
 func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
+	if _, skip := omitted[SettingKeyCodexDiagnosticPromptTemplate]; !skip {
+		s.InvalidateCodexProbeTemplateCache()
+	}
 	if len(omitted) == 0 {
 		s.refreshCachedSettings(settings)
 		return
@@ -162,6 +165,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates := make(map[string]string)
 
 	// 注册设置
+	if _, err := ParseCodexProbeTemplate(settings.OpenAICodexDiagnosticPromptTemplate); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_CODEX_PROBE_TEMPLATE", err.Error())
+	}
+	updates[SettingKeyCodexDiagnosticPromptTemplate] = settings.OpenAICodexDiagnosticPromptTemplate
 	updates[SettingKeyRegistrationEnabled] = strconv.FormatBool(settings.RegistrationEnabled)
 	updates[SettingKeyEmailVerifyEnabled] = strconv.FormatBool(settings.EmailVerifyEnabled)
 	registrationEmailSuffixWhitelistJSON, err := json.Marshal(settings.RegistrationEmailSuffixWhitelist)
@@ -344,7 +351,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyDocURL] = settings.DocURL
 	updates[SettingKeyHomeContent] = settings.HomeContent
 	updates[SettingKeyCompactHomeEnabled] = strconv.FormatBool(settings.CompactHomeEnabled)
-	updates[SettingKeyHideCcsImportButton] = strconv.FormatBool(settings.HideCcsImportButton)
 	updates[SettingKeyPurchaseSubscriptionEnabled] = strconv.FormatBool(settings.PurchaseSubscriptionEnabled)
 	updates[SettingKeyPurchaseSubscriptionURL] = strings.TrimSpace(settings.PurchaseSubscriptionURL)
 	tableDefaultPageSize, tablePageSizeOptions := normalizeTablePreferences(
@@ -564,9 +570,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 func defaultAccountSchedulingThresholds() map[string]int {
 	return map[string]int{
-		PlatformOpenAI:    100,
-		PlatformAnthropic: 100,
-		PlatformGrok:      100,
+		PlatformOpenAI:                         100,
+		PlatformAnthropic:                      100,
+		SchedulingThresholdScopeAnthropicFable: 100,
+		PlatformGrok:                           100,
 	}
 }
 
@@ -574,7 +581,7 @@ func validateAndNormalizeAccountSchedulingThresholds(input map[string]int) (map[
 	normalized := defaultAccountSchedulingThresholds()
 	for platform, value := range input {
 		allowed := false
-		for _, item := range AllowedSchedulingThresholdPlatforms {
+		for _, item := range AllowedSchedulingThresholdScopes {
 			if item == platform {
 				allowed = true
 				break
@@ -601,7 +608,7 @@ func parseAccountSchedulingThresholdsSetting(raw string) (map[string]int, error)
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return thresholds, err
 	}
-	for _, platform := range AllowedSchedulingThresholdPlatforms {
+	for _, platform := range AllowedSchedulingThresholdScopes {
 		if value, ok := parsed[platform]; ok {
 			thresholds[platform] = boundedIntOrDefault(value, 1, 100, 100)
 		}
@@ -792,6 +799,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		}
 		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
 			thresholds: cloneAccountSchedulingThresholds(normalizedThresholds),
+			resolved:   true,
 			expiresAt:  time.Now().Add(accountSchedulingThresholdsCacheTTL).UnixNano(),
 		})
 	} else {

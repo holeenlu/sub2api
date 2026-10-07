@@ -6,13 +6,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Toast, ToastType, PublicSettings } from '@/types'
-import { i18n } from '@/i18n'
+import { i18n, setSiteName } from '@/i18n'
 import {
   checkUpdates as checkUpdatesAPI,
   type VersionInfo,
   type ReleaseInfo
 } from '@/api/admin/system'
 import { getPublicSettings as fetchPublicSettingsAPI } from '@/api/auth'
+import { BRAND_NAME } from '@/config/brand'
 
 export const useAppStore = defineStore('app', () => {
   // ==================== State ====================
@@ -26,7 +27,7 @@ export const useAppStore = defineStore('app', () => {
   // Public settings cache state
   const publicSettingsLoaded = ref<boolean>(false)
   const publicSettingsLoading = ref<boolean>(false)
-  const siteName = ref<string>('Sub2API')
+  const siteName = ref<string>(BRAND_NAME)
   const siteLogo = ref<string>('')
   const siteVersion = ref<string>('')
   const contactInfo = ref<string>('')
@@ -42,6 +43,15 @@ export const useAppStore = defineStore('app', () => {
   const latestVersion = ref<string>('')
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
+  // 本次构建所基于的上游 Sub2API 版本，例如 "v0.2.1"；上游自身的构建为空
+  const upstreamVersion = ref<string>('')
+  const buildCommit = ref<string>('')
+  // 後端 update.check_enabled=false 時為 true：沒有連線查過版本，徽章不該顯示「已是最新」
+  const updateDisabled = ref<boolean>(false)
+  const updateMethod = ref<'binary' | 'compose' | 'manual'>('binary')
+  const releaseChannel = ref('')
+  const updateWarning = ref('')
+  const containerUpdate = ref<import('@/api/admin/system').ContainerUpdateStatus | undefined>()
   const releaseInfo = ref<ReleaseInfo | null>(null)
 
   // Auto-incrementing ID for toasts
@@ -248,8 +258,15 @@ export const useAppStore = defineStore('app', () => {
         latest_version: latestVersion.value,
         has_update: hasUpdate.value,
         build_type: buildType.value,
+        upstream_version: upstreamVersion.value || undefined,
+        build_commit: buildCommit.value || undefined,
         release_info: releaseInfo.value || undefined,
-        cached: true
+        cached: true,
+        disabled: updateDisabled.value,
+        update_method: updateMethod.value,
+        release_channel: releaseChannel.value,
+        warning: updateWarning.value || undefined,
+        container_update: containerUpdate.value
       }
     }
 
@@ -265,6 +282,13 @@ export const useAppStore = defineStore('app', () => {
       latestVersion.value = data.latest_version
       hasUpdate.value = data.has_update
       buildType.value = data.build_type || 'source'
+      upstreamVersion.value = data.upstream_version || ''
+      buildCommit.value = data.build_commit || ''
+      updateDisabled.value = data.disabled === true
+      updateMethod.value = data.update_method || 'binary'
+      releaseChannel.value = data.release_channel || ''
+      updateWarning.value = data.warning || ''
+      containerUpdate.value = data.container_update
       releaseInfo.value = data.release_info || null
       versionLoaded.value = true
       return data
@@ -294,7 +318,10 @@ export const useAppStore = defineStore('app', () => {
       window.__APP_CONFIG__ = { ...config }
     }
     cachedPublicSettings.value = config
-    siteName.value = config.site_name || 'Sub2API'
+    siteName.value = config.site_name || BRAND_NAME
+    // 讓文案裡的 @:common.siteName 解析成後台設定的站點名稱。
+    // 用 linked message 而不是在每個 t() 呼叫端傳參數，新增文案時才不會漏掉。
+    setSiteName(siteName.value)
     siteLogo.value = config.site_logo || ''
     siteVersion.value = config.version || ''
     contactInfo.value = config.contact_info || ''
@@ -347,7 +374,6 @@ export const useAppStore = defineStore('app', () => {
         doc_url: docUrl.value,
         home_content: '',
         compact_home_enabled: false,
-        hide_ccs_import_button: false,
         payment_enabled: false,
         table_default_page_size: 20,
         table_page_size_options: [10, 20, 50, 100],
@@ -461,6 +487,13 @@ export const useAppStore = defineStore('app', () => {
     latestVersion,
     hasUpdate,
     buildType,
+    upstreamVersion,
+    buildCommit,
+    updateDisabled,
+    updateMethod,
+    releaseChannel,
+    updateWarning,
+    containerUpdate,
     releaseInfo,
 
     // Computed

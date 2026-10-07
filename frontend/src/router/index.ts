@@ -12,7 +12,8 @@ import { useNavigationLoadingState } from '@/composables/useNavigationLoading'
 import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
-import { resolveRouteDocumentTitle } from './title'
+import { applyRouteMetaDescription, resolveRouteDocumentTitle } from './title'
+import { docsStaticItems, legacyAppRedirects } from '@/content/docs/nav'
 
 /**
  * Route definitions with lazy loading
@@ -25,7 +26,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/setup/SetupWizardView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Setup'
+      title: 'Setup',
+      titleKey: 'setup.pageTitle'
     }
   },
 
@@ -36,7 +38,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/HomeView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Home'
+      title: 'Home',
+      // 首页 SEO 标题自带站点名，不再附加一次
+      titleKey: 'home.seo.title',
+      titleStandalone: true,
+      metaDescriptionKey: 'home.seo.description'
     }
   },
   {
@@ -65,7 +71,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/EmailVerifyView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Verify Email'
+      title: 'Verify Email',
+      titleKey: 'auth.verifyYourEmail'
     }
   },
   {
@@ -125,7 +132,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/DingTalkEmailCompletionView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'DingTalk Email Completion'
+      title: 'DingTalk Email Completion',
+      titleKey: 'auth.dingtalk.createAccountTitle'
     }
   },
   {
@@ -154,7 +162,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/ResetPasswordView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Reset Password'
+      title: 'Reset Password',
+      titleKey: 'auth.resetPassword'
     }
   },
   {
@@ -164,6 +173,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: false,
       title: 'Key Usage',
+      titleKey: 'keyUsage.title',
     }
   },
   {
@@ -172,7 +182,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/public/LegalDocumentView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Legal Document'
+      title: 'Legal Document',
+      titleKey: 'legal.pageTitle'
     }
   },
   {
@@ -183,6 +194,29 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: false,
       title: 'Model Plaza',
       titleKey: 'modelPlaza.title'
+    }
+  },
+  ...legacyAppRedirects,
+  ...docsStaticItems.map((item, index): RouteRecordRaw => ({
+    path: item.path,
+    name: `DocsPage${index}`,
+    component: () => import('@/views/docs/DocsView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'API Docs',
+      titleKey: item.titleKey,
+      metaDescriptionKey: item.descriptionKey
+    }
+  })),
+  {
+    path: '/docs/models/:modelId',
+    name: 'DocsModel',
+    component: () => import('@/views/docs/DocsView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'Model - API Docs',
+      titleKey: 'docs.pages.models.title',
+      metaDescriptionKey: 'docs.pages.models.description'
     }
   },
 
@@ -382,6 +416,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: false,
       requiresAdmin: false,
       title: 'Payment',
+      titleKey: 'payment.stripePay',
       requiresPayment: false
     }
   },
@@ -721,7 +756,8 @@ const routes: RouteRecordRaw[] = [
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),
     meta: {
-      title: '404 Not Found'
+      title: '404 Not Found',
+      titleKey: 'common.pageNotFound'
     }
   }
 ]
@@ -799,6 +835,7 @@ router.beforeEach(async (to, _from, next) => {
     ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
   ]
   document.title = resolveRouteDocumentTitle(to, appStore.siteName, customMenuItems)
+  applyRouteMetaDescription(to)
 
   // Check if route requires authentication
   const requiresAuth = to.meta.requiresAuth !== false // Default to true
@@ -827,7 +864,7 @@ router.beforeEach(async (to, _from, next) => {
         return
       }
       // Admin users go to admin dashboard, regular users go to user dashboard
-      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+      next(authStore.adminLandingPath)
       return
     }
     // Model Plaza:公开路由但受「启用开关 + 可选强制登录」双重控制(后端同口径 fail-closed)
@@ -883,6 +920,17 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
+  // A limited admin must load the server-owned role snapshot before navigation.
+  if (requiresAdmin && authStore.user?.role === 'admin' && authStore.user.policy_version === undefined) {
+    try { await authStore.refreshUser() } catch { next('/login'); return }
+  }
+  if (requiresAdmin && authStore.isAdmin && !authStore.canAccessAdminPage(to.path)) {
+    next(authStore.adminLandingPath)
+    return
+  }
+
+  const accessibleDashboard = authStore.isAdmin && authStore.canAccessAdminPage('/admin/dashboard') ? '/admin/dashboard' : '/dashboard'
+
   // Check admin requirement
   if (requiresAdmin && !authStore.isAdmin) {
     // User is authenticated but not admin, redirect to user dashboard
@@ -923,7 +971,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.payment_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    next(accessibleDashboard)
     return
   }
 
@@ -932,7 +980,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.risk_control_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/settings' : '/dashboard')
+    next(authStore.isAdmin && authStore.canAccessAdminPage('/admin/settings') ? '/admin/settings' : accessibleDashboard)
     return
   }
 
@@ -942,7 +990,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.subscription_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    next(accessibleDashboard)
     return
   }
 
@@ -957,7 +1005,7 @@ router.beforeEach(async (to, _from, next) => {
 
     if (restrictedPaths.some((path) => to.path.startsWith(path))) {
       // 简易模式下访问受限页面,重定向到仪表板
-      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+      next(accessibleDashboard)
       return
     }
   }

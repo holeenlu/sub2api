@@ -29,8 +29,11 @@ func RegisterAdminRoutes(
 	admin.Use(panelRateLimiter.Global())
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
+	admin.Use(middleware.AdminPermissionStepUp(stepUpAuth))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 	{
+		admin.GET("/roles/admin/permissions", h.Admin.Setting.GetAdminRolePermissions)
+		admin.PUT("/roles/admin/permissions", h.Admin.Setting.UpdateAdminRolePermissions)
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)
 
@@ -293,6 +296,7 @@ func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		dashboard.POST("/users-usage", h.Admin.Dashboard.GetBatchUsersUsage)
 		dashboard.POST("/api-keys-usage", h.Admin.Dashboard.GetBatchAPIKeysUsage)
 		dashboard.GET("/user-breakdown", h.Admin.Dashboard.GetUserBreakdown)
+		dashboard.GET("/api-key-breakdown", h.Admin.Dashboard.GetAPIKeyBreakdown)
 		dashboard.POST("/aggregation/backfill", h.Admin.Dashboard.BackfillAggregation)
 	}
 }
@@ -306,6 +310,7 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		users.POST("", h.Admin.User.Create)
 		users.PUT("/:id", h.Admin.User.Update)
 		users.DELETE("/:id", h.Admin.User.Delete)
+		users.POST("/batch-delete", h.Admin.User.DeleteBatch)
 		users.POST("/:id/balance", h.Admin.User.UpdateBalance)
 		users.GET("/:id/api-keys", h.Admin.User.GetUserAPIKeys)
 		users.GET("/:id/usage", h.Admin.User.GetUserUsage)
@@ -366,7 +371,13 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.PUT("/ollama-cloud-usage/settings", h.Admin.Account.UpdateOllamaCloudUsageSettings)
 		accounts.GET("/opencode-go-usage/settings", h.Admin.Account.GetOpenCodeGoUsageSettings)
 		accounts.PUT("/opencode-go-usage/settings", h.Admin.Account.UpdateOpenCodeGoUsageSettings)
+		accounts.POST("/codex-diagnostic-fingerprint/refresh", h.Admin.Account.RefreshDiagnosticFingerprint)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
+		accounts.POST("/:id/codex-diagnostic", h.Admin.Account.StartCodexDiagnosticRun)
+		accounts.GET("/:id/codex-diagnostic", h.Admin.Account.GetCodexDiagnosticPlan)
+		accounts.PUT("/:id/codex-diagnostic", h.Admin.Account.SaveCodexDiagnosticPlan)
+		accounts.GET("/:id/codex-diagnostic/history", h.Admin.Account.ListCodexDiagnosticRuns)
+		accounts.POST("/:id/codex-diagnostic/:run_id/cancel", h.Admin.Account.CancelCodexDiagnosticRun)
 		accounts.GET("/:id/claude/reset-credits", h.Admin.Account.ClaudeResetCredits)
 		// Same protection as the Codex reset-quota route (admin auth, audit, compliance guard).
 		accounts.POST("/:id/claude/reset-credits/redeem", h.Admin.Account.RedeemClaudeResetCredit)

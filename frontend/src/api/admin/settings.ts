@@ -42,7 +42,12 @@ export type SchedulingThresholdPlatformType =
   | "minimax"
   | "opencode_go"
 
-export type AccountSchedulingThresholdsMap = Record<SchedulingThresholdPlatformType, number>
+/** 非平台的阈值 scope：Anthropic Fable 模型家族的独立停调阈值。 */
+export type SchedulingThresholdScopeType =
+  | SchedulingThresholdPlatformType
+  | "anthropic_fable"
+
+export type AccountSchedulingThresholdsMap = Record<SchedulingThresholdScopeType, number>
 
 // 与后端 AllowedSchedulingThresholdPlatforms 保持一致（deepseek 为余额型，
 // 走余额检测而非用量阈值；minimax Coding/Token Plan 与 OpenCode GO 有滚动窗口）。
@@ -56,13 +61,19 @@ export const SCHEDULING_THRESHOLD_PLATFORMS: SchedulingThresholdPlatformType[] =
   "opencode_go",
 ]
 
+// 与后端 AllowedSchedulingThresholdScopes 保持一致：平台 + 非平台 scope。
+export const SCHEDULING_THRESHOLD_SCOPES: SchedulingThresholdScopeType[] = [
+  ...SCHEDULING_THRESHOLD_PLATFORMS,
+  "anthropic_fable",
+]
+
 export function normalizeAccountSchedulingThresholdsMap(
-  input?: Partial<Record<SchedulingThresholdPlatformType, number>> | null,
+  input?: Partial<Record<SchedulingThresholdScopeType, number>> | null,
 ): AccountSchedulingThresholdsMap {
   const result = {} as AccountSchedulingThresholdsMap
-  for (const platform of SCHEDULING_THRESHOLD_PLATFORMS) {
-    const value = input?.[platform]
-    result[platform] = typeof value === "number" && Number.isFinite(value)
+  for (const scope of SCHEDULING_THRESHOLD_SCOPES) {
+    const value = input?.[scope]
+    result[scope] = typeof value === "number" && Number.isFinite(value)
       ? Math.min(100, Math.max(1, Math.trunc(value)))
       : 100
   }
@@ -134,14 +145,12 @@ export type WeChatConnectMode = "open" | "mp" | "mobile";
 
 export interface PaymentVisibleMethodSourceOption {
   value: PaymentVisibleMethodSource;
-  labelZh: string;
-  labelEn: string;
+  labelKey: string;
 }
 
 export interface WeChatConnectModeOption {
   value: WeChatConnectMode;
-  labelZh: string;
-  labelEn: string;
+  labelKey: string;
 }
 
 const AUTH_SOURCE_TYPES: AuthSourceType[] = [
@@ -160,29 +169,25 @@ const PAYMENT_VISIBLE_METHOD_SOURCE_OPTIONS: Record<
   PaymentVisibleMethodSourceOption[]
 > = {
   alipay: [
-    { value: "", labelZh: "未配置", labelEn: "Not configured" },
+    { value: "", labelKey: "ui.notConfigured", },
     {
       value: "official_alipay",
-      labelZh: "支付宝官方",
-      labelEn: "Official Alipay",
+      labelKey: "ui.officialAlipay",
     },
     {
       value: "easypay_alipay",
-      labelZh: "易支付支付宝",
-      labelEn: "EasyPay Alipay",
+      labelKey: "ui.easypayAlipay",
     },
   ],
   wxpay: [
-    { value: "", labelZh: "未配置", labelEn: "Not configured" },
+    { value: "", labelKey: "ui.notConfigured", },
     {
       value: "official_wxpay",
-      labelZh: "微信官方",
-      labelEn: "Official WeChat Pay",
+      labelKey: "ui.officialWechatPay",
     },
     {
       value: "easypay_wxpay",
-      labelZh: "易支付微信",
-      labelEn: "EasyPay WeChat Pay",
+      labelKey: "ui.easypayWechatPay",
     },
   ],
 };
@@ -209,16 +214,14 @@ const PAYMENT_VISIBLE_METHOD_SOURCE_ALIASES: Record<
   },
 };
 const WECHAT_CONNECT_MODE_OPTIONS: WeChatConnectModeOption[] = [
-  { value: "open", labelZh: "PC 应用", labelEn: "PC App" },
+  { value: "open", labelKey: "ui.pcApp", },
   {
     value: "mp",
-    labelZh: "公众号",
-    labelEn: "Official Account",
+    labelKey: "ui.officialAccount",
   },
   {
     value: "mobile",
-    labelZh: "移动应用",
-    labelEn: "Mobile App",
+    labelKey: "ui.mobileApp",
   },
 ];
 const WECHAT_CONNECT_MODE_ALIASES: Record<string, WeChatConnectMode> = {
@@ -485,7 +488,6 @@ export interface SystemSettings {
   doc_url: string;
   home_content: string;
   compact_home_enabled: boolean;
-  hide_ccs_import_button: boolean;
   table_default_page_size: number;
   table_page_size_options: number[];
   backend_mode_enabled: boolean;
@@ -643,6 +645,8 @@ export interface SystemSettings {
   claude_code_client_version: string;
   claude_code_client_version_synced: string;
   claude_code_version_auto_sync_enabled: boolean;
+  openai_codex_diagnostic_prompt_template: string;
+  openai_codex_diagnostic_prompt_template_default: string;
   // codex_cli_only 加固
   min_codex_version: string;
   max_codex_version: string;
@@ -755,6 +759,7 @@ export interface SystemSettings {
 
   // Allow user view error requests
   allow_user_view_error_requests: boolean;
+
 }
 
 export interface UpdateSettingsRequest {
@@ -837,7 +842,6 @@ export interface UpdateSettingsRequest {
   doc_url?: string;
   home_content?: string;
   compact_home_enabled?: boolean;
-  hide_ccs_import_button?: boolean;
   table_default_page_size?: number;
   table_page_size_options?: number[];
   backend_mode_enabled?: boolean;
@@ -969,6 +973,7 @@ export interface UpdateSettingsRequest {
   openai_codex_version_auto_sync_enabled?: boolean;
   claude_code_client_version?: string;
   claude_code_version_auto_sync_enabled?: boolean;
+  openai_codex_diagnostic_prompt_template?: string;
   // codex_cli_only 加固
   min_codex_version?: string;
   max_codex_version?: string;
@@ -1066,6 +1071,7 @@ export interface UpdateSettingsRequest {
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
 
   allow_user_view_error_requests?: boolean;
+
 }
 
 /**

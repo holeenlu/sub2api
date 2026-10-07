@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import AdminComplianceDialog from '@/components/admin/AdminComplianceDialog.vue'
-import { resolveRouteDocumentTitle } from '@/router/title'
+import { applyRouteMetaDescription, resolveRouteDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
@@ -20,6 +21,7 @@ const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
 const adminComplianceStore = useAdminComplianceStore()
 const adminSettingsStore = useAdminSettingsStore()
+const { locale } = useI18n()
 
 function updateDocumentTitle() {
   const customMenuItems = [
@@ -29,6 +31,7 @@ function updateDocumentTitle() {
   document.title = resolveRouteDocumentTitle(route, appStore.siteName, customMenuItems, {
     billingMode: resolveSiteBillingMode(appStore.cachedPublicSettings),
   })
+  applyRouteMetaDescription(route)
 }
 
 // Watch for site settings changes and update favicon/title
@@ -47,6 +50,9 @@ watch(
     () => route.fullPath,
     () => route.meta.title,
     () => route.meta.titleKey,
+    () => route.meta.metaDescriptionKey,
+    // 切换语言要立即换掉 title 与 description
+    () => locale.value,
     () => appStore.siteName,
     () => appStore.cachedPublicSettings?.custom_menu_items,
     () => appStore.cachedPublicSettings?.subscription_enabled,
@@ -163,7 +169,7 @@ onMounted(async () => {
 
 <template>
   <NavigationProgress />
-  <RouterView />
+  <RouterView :key="`${authStore.user?.id}:${authStore.user?.role}:${authStore.user?.policy_version}`" />
   <Toast />
   <AnnouncementPopup />
   <AdminComplianceDialog />
