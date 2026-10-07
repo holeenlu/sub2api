@@ -663,3 +663,9 @@ func (s *EmailService) buildPasswordResetEmailBody(resetURL, siteName string) st
 </html>
 `, html.EscapeString(siteName), html.EscapeString(resetURL), html.EscapeString(resetURL))
 }
+
+func (s *EmailService) SendManagementSecurityChange(ctx context.Context, to, siteName string, userID, actorID int64) error {
+	subject := fmt.Sprintf("[%s] 账号安全变更 / Account security change", siteName)
+	body := fmt.Sprintf("<p>%s</p><p>管理员 #%d 修改了账号 #%d 的登录、安全设置或管理身份。旧登录已失效；如果这不是预期操作，请联系站点超级管理员。</p><p>Administrator #%d changed the login, security settings or role of account #%d. Previous sessions have been revoked. Contact the site owner if this was unexpected.</p>", html.EscapeString(siteName), actorID, userID, actorID, userID)
+	return s.SendEmail(ctx, to, subject, body)
+}

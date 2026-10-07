@@ -191,6 +191,8 @@ func (s *stubAdminService) UpdateUser(ctx context.Context, id int64, input *serv
 	return &user, nil
 }
 
+func (s *stubAdminService) DeleteUsers(ctx context.Context, ids []int64) error { return nil }
+
 func (s *stubAdminService) DeleteUser(ctx context.Context, id int64) error {
 	return nil
 }

@@ -64,6 +64,7 @@ func enforceSessionBinding(
 	settingService *service.SettingService,
 	auditService *service.AuditLogService,
 	claims *service.JWTClaims,
+	currentUsers ...*service.User,
 ) bool {
 	if settingService == nil || !settingService.IsSessionBindingEnabled(c.Request.Context()) {
 		return true
@@ -86,10 +87,14 @@ func enforceSessionBinding(
 		if path == "" {
 			path = c.Request.URL.Path
 		}
+		role, email := "", ""
+		if len(currentUsers) > 0 && currentUsers[0] != nil {
+			role, email = currentUsers[0].Role, currentUsers[0].Email
+		}
 		auditService.Record(&service.AuditLog{
 			ActorUserID: &uid,
-			ActorEmail:  claims.Email,
-			ActorRole:   claims.Role,
+			ActorEmail:  email,
+			ActorRole:   role,
 			AuthMethod:  service.AuditAuthMethodJWT,
 			Action:      service.AuditActionSessionBindingMismatch,
 			Method:      c.Request.Method,

@@ -141,7 +141,7 @@ type UserRepository interface {
 	// GetByIDIncludeDeleted 绕过软删除过滤按 ID 取用户（含已删）。仅供管理员审计/usage 点击使用。
 	GetByIDIncludeDeleted(ctx context.Context, id int64) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)
-	GetFirstAdmin(ctx context.Context) (*User, error)
+	GetFirstSuperAdmin(ctx context.Context) (*User, error)
 	// Update 只写 fields 中显式声明的列，其余列保持库中当前值。
 	Update(ctx context.Context, user *User, fields UserUpdateFields) error
 	Delete(ctx context.Context, id int64) error
@@ -311,13 +311,26 @@ func NewUserService(userRepo UserRepository, settingRepo SettingRepository, auth
 	}
 }
 
-// GetFirstAdmin 获取首个管理员用户（用于 Admin API Key 认证）
-func (s *UserService) GetFirstAdmin(ctx context.Context) (*User, error) {
-	admin, err := s.userRepo.GetFirstAdmin(ctx)
+// GetFirstSuperAdmin 获取首个管理员用户（用于 Admin API Key 认证）
+func (s *UserService) GetFirstSuperAdmin(ctx context.Context) (*User, error) {
+	admin, err := s.userRepo.GetFirstSuperAdmin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get first admin: %w", err)
 	}
 	return admin, nil
+}
+
+// CountAdministrators reuses the existing filtered count for the shared-policy
+// preview; inactive admins are included because their future grants change too.
+func (s *UserService) CountAdministrators(ctx context.Context) (int64, error) {
+	_, result, err := s.userRepo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 1}, UserListFilters{Role: RoleAdmin})
+	if err != nil {
+		return 0, err
+	}
+	if result == nil {
+		return 0, nil
+	}
+	return result.Total, nil
 }
 
 // GetProfile 获取用户资料

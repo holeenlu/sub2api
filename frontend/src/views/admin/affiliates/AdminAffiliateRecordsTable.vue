@@ -13,7 +13,7 @@
             <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
           </button>
           <button
-            v-if="props.type === 'transfers'"
+            v-if="props.type === 'transfers' &amp;&amp; rolePermissions.can('affiliates.adjust')"
             type="button"
             class="btn btn-primary ml-auto"
             data-test="affiliate-withdraw-open"
@@ -134,7 +134,7 @@
     </TablePageLayout>
 
     <AffiliateOfflineWithdrawDialog
-      v-if="props.type === 'transfers'"
+      v-if="props.type === 'transfers' &amp;&amp; rolePermissions.can('affiliates.adjust')"
       :show="withdrawDialog"
       @close="withdrawDialog = false"
       @success="handleWithdrawSuccess"
@@ -181,6 +181,7 @@ import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
 import AffiliateOfflineWithdrawDialog from './AffiliateOfflineWithdrawDialog.vue'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { affiliatesAPI, type AffiliateInviteRecord, type AffiliateRebateRecord, type AffiliateTransferRecord, type AffiliateUserOverview, type ListAffiliateRecordsParams } from '@/api/admin/affiliates'
 import type { PaginatedResponse } from '@/types'
 import { extractI18nErrorMessage } from '@/utils/apiError'
@@ -195,6 +196,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const rolePermissions = useAuthStore()
 const loading = ref(false)
 const records = ref<AffiliateRecord[]>([])
 const filters = reactive({ search: '', start_at: '', end_at: '' })

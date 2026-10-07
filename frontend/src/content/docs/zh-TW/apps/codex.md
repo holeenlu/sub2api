@@ -86,9 +86,9 @@ OpenAI 分組的設定使用彈出視窗顯示的 Provider ID。該 ID 區分大
 
 ## OpenAI 分組的網頁搜尋
 
-OpenAI 分組的 Codex 設定啟用原生獨立搜尋：用戶端透過 `web.run` 呼叫本站 `/v1/alpha/search`，由閘道器既有的帳號選擇、驗證與計費流程處理。模型對話繼續使用原有的 Responses HTTP 或 WebSocket 連線。
+OpenAI 分組的 Codex 設定啟用原生獨立搜尋：用戶端透過 `web.run` 呼叫本站 `/v1/alpha/search`，由閘道器現有的帳號選擇、鑑權和計費流程處理。模型對話繼續使用原來的 Responses HTTP 或 WebSocket 連線。
 
-既有設定需在對應的 Provider 表及 `[features]` 表分別合併以下欄位，不要重複建立表：
+已有設定需在對應的 Provider 表和 `[features]` 表分別合併以下欄位，不要重複建立表：
 
 ```toml
 [model_providers.OpenAI]
@@ -98,9 +98,9 @@ supports_standalone_web_search = true
 standalone_web_search = true
 ```
 
-已使用 Codex CLI 0.160.1 驗證。該用戶端將獨立搜尋標記為開發中功能，啟動提示不代表搜尋失敗。儲存後完全退出並重新啟動用戶端，再重新開啟任務。明確設定 `web_search = "disabled"` 仍會關閉搜尋。其他平台分組不自動啟用此 OpenAI 專用介面。
+已使用 Codex CLI 0.160.1 驗證。該用戶端將獨立搜尋標記為開發中功能，啟動提示不代表搜尋失敗。儲存後完全退出並重啟用戶端，再重新開啟任務。顯式設定 `web_search = "disabled"` 仍會關閉搜尋。其他平台分組不自動啟用該 OpenAI 專用介面。
 
-若出現 `Hosted tool 'web_search' requires authorization and metering ... rustponsesapi`，先檢查兩個開關是否由實際執行的程序載入；不要藉由移除搜尋工具後重試來隱藏錯誤。搜尋權限與計費仍由上游帳號決定，不會由這兩個用戶端開關繞過。
+若出現 `Hosted tool 'web_search' requires authorization and metering ... rustponsesapi`，先檢查兩個開關是否由實際執行程序載入；不要通過移除搜尋工具後重試來隱藏錯誤。搜尋權限和計費仍由上游帳號決定，不受這兩個用戶端開關繞過。
 
 ## 驗證接入
 

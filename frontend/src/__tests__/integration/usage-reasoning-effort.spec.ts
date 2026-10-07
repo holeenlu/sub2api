@@ -320,3 +320,6 @@ describe('usage reasoning effort page display', () => {
     expect(cell).not.toContain('↳')
   })
 })
+
+// Existing behavior under the migrated full administrator role.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,11 +24,12 @@ type OAuthConfig struct {
 }
 
 type OAuthSession struct {
-	State        string `json:"state"`
-	CodeVerifier string `json:"code_verifier"`
-	ProxyURL     string `json:"proxy_url,omitempty"`
-	RedirectURI  string `json:"redirect_uri"`
-	ProjectID    string `json:"project_id,omitempty"`
+	Authorization *authz.Lease `json:"authorization,omitempty"`
+	State         string       `json:"state"`
+	CodeVerifier  string       `json:"code_verifier"`
+	ProxyURL      string       `json:"proxy_url,omitempty"`
+	RedirectURI   string       `json:"redirect_uri"`
+	ProjectID     string       `json:"project_id,omitempty"`
 	// TierID is a user-selected fallback tier.
 	// For oauth types that support auto detection (google_one/code_assist), the server will prefer
 	// the detected tier and fall back to TierID when detection fails.

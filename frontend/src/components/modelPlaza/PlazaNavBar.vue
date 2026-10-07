@@ -57,5 +57,5 @@ const siteLogo = computed(() =>
   sanitizeUrl(settings.value?.site_logo || '', { allowRelative: true, allowDataUrl: true })
 )
 const isAuthenticated = computed(() => authStore.isAuthenticated)
-const backTarget = computed(() => (authStore.isAdmin ? '/admin/dashboard' : '/dashboard'))
+const backTarget = computed(() => (authStore.adminLandingPath || '/dashboard'))
 </script>

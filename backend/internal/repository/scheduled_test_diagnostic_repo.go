@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"strings"
 	"time"
 
@@ -34,15 +35,17 @@ func scanDiagnosticPlan(row scannable) (*service.CodexDiagnosticPlan, error) {
 		return nil, err
 	}
 	var config struct {
-		OwnerID  int64    `json:"owner_id"`
-		APIKeyID int64    `json:"api_key_id"`
-		Models   []string `json:"models"`
-		Interval int      `json:"interval_minutes"`
-		Revision int64    `json:"revision"`
+		Authorization *authz.Lease `json:"authorization"`
+		OwnerID       int64        `json:"owner_id"`
+		APIKeyID      int64        `json:"api_key_id"`
+		Models        []string     `json:"models"`
+		Interval      int          `json:"interval_minutes"`
+		Revision      int64        `json:"revision"`
 	}
 	if err := json.Unmarshal(raw, &config); err != nil {
 		return nil, err
 	}
+	p.Authorization = config.Authorization
 	p.OwnerID, p.APIKeyID, p.Models, p.IntervalMinutes, p.Revision = config.OwnerID, config.APIKeyID, config.Models, config.Interval, config.Revision
 	return p, nil
 }
@@ -50,7 +53,7 @@ func (r *scheduledTestPlanRepository) GetPlan(ctx context.Context, account int64
 	return scanDiagnosticPlan(r.db.QueryRowContext(ctx, "SELECT "+diagnosticPlanColumns+" FROM scheduled_test_plans WHERE account_id=$1 AND "+diagnosticPlanPredicate, account))
 }
 func (r *scheduledTestPlanRepository) SavePlan(ctx context.Context, p *service.CodexDiagnosticPlan) error {
-	raw, err := json.Marshal(map[string]any{"owner_id": p.OwnerID, "api_key_id": p.APIKeyID, "models": p.Models, "interval_minutes": p.IntervalMinutes, "revision": 1})
+	raw, err := json.Marshal(map[string]any{"authorization": p.Authorization, "owner_id": p.OwnerID, "api_key_id": p.APIKeyID, "models": p.Models, "interval_minutes": p.IntervalMinutes, "revision": 1})
 	if err != nil {
 		return err
 	}
@@ -81,18 +84,20 @@ func scanDiagnosticRun(row scannable) (*service.CodexDiagnosticRun, error) {
 	// Only these evidence fields are read from JSON; row identity/status/timestamps
 	// always come from the normal result columns.
 	var data struct {
-		OwnerID  int64                         `json:"owner_id"`
-		APIKeyID int64                         `json:"api_key_id"`
-		KeyName  string                        `json:"api_key_name"`
-		Revision int64                         `json:"plan_revision"`
-		Models   []string                      `json:"models"`
-		Source   string                        `json:"source"`
-		Items    []service.CodexDiagnosticItem `json:"items"`
-		Cancel   bool                          `json:"cancel_requested"`
+		Authorization *authz.Lease                  `json:"authorization"`
+		OwnerID       int64                         `json:"owner_id"`
+		APIKeyID      int64                         `json:"api_key_id"`
+		KeyName       string                        `json:"api_key_name"`
+		Revision      int64                         `json:"plan_revision"`
+		Models        []string                      `json:"models"`
+		Source        string                        `json:"source"`
+		Items         []service.CodexDiagnosticItem `json:"items"`
+		Cancel        bool                          `json:"cancel_requested"`
 	}
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return nil, err
 	}
+	r.Authorization = data.Authorization
 	r.OwnerID, r.APIKeyID, r.APIKeyName, r.PlanRevision = data.OwnerID, data.APIKeyID, data.KeyName, data.Revision
 	r.Models, r.Source, r.Items, r.CancelRequested = data.Models, data.Source, data.Items, data.Cancel
 	if r.Items == nil {

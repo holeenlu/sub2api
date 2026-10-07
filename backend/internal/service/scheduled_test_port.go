@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"time"
 )
 
 // ScheduledTestPlan represents a scheduled test plan domain model.
 type ScheduledTestPlan struct {
+	Authorization *authz.Lease `json:"-"`
 	// Retained only to reject legacy quality-plan payloads. Historical rows stay in the database.
 	PelicanConfig  *json.RawMessage `json:"-"`
 	ID             int64            `json:"id"`

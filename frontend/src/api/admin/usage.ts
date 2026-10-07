@@ -81,6 +81,7 @@ export interface CreateUsageCleanupTaskRequest {
 }
 
 export interface AdminUsageQueryParams extends UsageQueryParams {
+  export?: boolean
   user_id?: number
   exact_total?: boolean
   billing_mode?: string

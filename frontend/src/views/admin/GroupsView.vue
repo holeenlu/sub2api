@@ -94,7 +94,7 @@
               </div>
             </div>
             <button
-              v-if="!authStore.isSimpleMode"
+              v-if="(!authStore.isSimpleMode) &amp;&amp; (rolePermissions.can('groups.manage'))"
               @click="openSortModal"
               class="btn btn-secondary"
               :title="t('admin.groups.sortOrder')"
@@ -102,7 +102,7 @@
               <Icon name="arrowsUpDown" size="md" class="mr-2" />
               {{ t("admin.groups.sortOrder") }}
             </button>
-            <button
+            <button v-if="rolePermissions.can('groups.manage')"
               @click="openCreateModal"
               class="btn btn-primary"
               data-tour="groups-create-btn"
@@ -381,7 +381,7 @@
 
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
-              <button
+              <button v-if="rolePermissions.can('groups.manage')"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -389,7 +389,7 @@
                 <span class="text-xs">{{ t("common.edit") }}</span>
               </button>
               <button
-                v-if="!authStore.isSimpleMode"
+                v-if="(!authStore.isSimpleMode) &amp;&amp; (rolePermissions.can('groups.manage'))"
                 data-testid="group-duplicate"
                 :title="
                   duplicatingGroupIds.has(row.id)
@@ -421,7 +421,7 @@
                 }}</span>
               </button>
               <button
-                v-if="!authStore.isSimpleMode"
+                v-if="(!authStore.isSimpleMode) &amp;&amp; (rolePermissions.can('billing.rates.update'))"
                 data-testid="group-rate-multipliers"
                 @click="handleRateMultipliers(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
@@ -432,7 +432,7 @@
                 }}</span>
               </button>
               <button
-                v-if="!authStore.isSimpleMode"
+                v-if="(!authStore.isSimpleMode) &amp;&amp; (rolePermissions.can('groups.manage'))"
                 data-testid="group-rpm-overrides"
                 @click="handleRPMOverrides(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
@@ -442,7 +442,7 @@
                   t("admin.groups.rpmOverrides")
                 }}</span>
               </button>
-              <button
+              <button v-if="rolePermissions.can('groups.manage')"
                 @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
@@ -482,7 +482,7 @@
       width="wide"
       @close="closeCreateModal"
     >
-      <form
+      <form v-if="rolePermissions.can('groups.manage')"
         id="create-group-form"
         @submit.prevent="handleCreateGroup"
         class="space-y-5"
@@ -611,7 +611,7 @@
           <p class="input-hint">{{ t("admin.groups.copyAccounts.hint") }}</p>
         </div>
         <template v-if="!authStore.isSimpleMode">
-        <div>
+        <div :inert="!canEditGroupField('rate_multiplier', true)" :aria-disabled="!canEditGroupField('rate_multiplier', true)">
           <label class="input-label">{{
             t("admin.groups.form.rateMultiplier")
           }}</label>
@@ -647,7 +647,7 @@
           v-model:over-limit="createForm.max_reasoning_effort_over_limit"
           v-model:mappings="createForm.reasoning_effort_mappings"
         />
-        <div
+        <div :inert="!canEditGroupField('subscription_type', true)" :aria-disabled="!canEditGroupField('subscription_type', true)"
           v-if="createForm.subscription_type !== 'subscription'"
           data-tour="group-form-exclusive"
         >
@@ -708,7 +708,7 @@
 
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
-          <div>
+          <div :inert="!canEditGroupField('subscription_type', true)" :aria-disabled="!canEditGroupField('subscription_type', true)">
             <label class="input-label">{{
               t("admin.groups.subscription.type")
             }}</label>
@@ -722,11 +722,11 @@
           </div>
 
           <!-- Subscription limits (only show when subscription type is selected) -->
-          <div
+          <div :inert="!canEditGroupField('subscription_type', true)" :aria-disabled="!canEditGroupField('subscription_type', true)"
             v-if="createForm.subscription_type === 'subscription'"
             class="space-y-4 border-l-2 border-primary-200 pl-4 dark:border-primary-800"
           >
-            <div>
+            <div :inert="!canEditGroupField('daily_limit_usd', true)" :aria-disabled="!canEditGroupField('daily_limit_usd', true)">
               <label class="input-label">{{
                 t("admin.groups.subscription.dailyLimit")
               }}</label>
@@ -739,7 +739,7 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('weekly_limit_usd', true)" :aria-disabled="!canEditGroupField('weekly_limit_usd', true)">
               <label class="input-label">{{
                 t("admin.groups.subscription.weeklyLimit")
               }}</label>
@@ -752,7 +752,7 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('monthly_limit_usd', true)" :aria-disabled="!canEditGroupField('monthly_limit_usd', true)">
               <label class="input-label">{{
                 t("admin.groups.subscription.monthlyLimit")
               }}</label>
@@ -911,7 +911,7 @@
               />
               {{ t(imagePricingI18nKey(createForm.platform, "allowImageGeneration")) }}
             </label>
-            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <label :inert="!canEditGroupField('image_rate_independent', true)" :aria-disabled="!canEditGroupField('image_rate_independent', true)" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
                 v-model="createForm.image_rate_independent"
                 type="checkbox"
@@ -920,7 +920,7 @@
               {{ t(imagePricingI18nKey(createForm.platform, "independentMultiplier")) }}
             </label>
           </div>
-          <div
+          <div :inert="!canEditGroupField('image_rate_multiplier', true)" :aria-disabled="!canEditGroupField('image_rate_multiplier', true)"
             v-if="createForm.image_rate_independent"
             class="mb-4"
           >
@@ -937,7 +937,7 @@
             />
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <div>
+            <div :inert="!canEditGroupField('image_price_1k', true)" :aria-disabled="!canEditGroupField('image_price_1k', true)">
               <label class="input-label">1K ($)</label>
               <input
                 v-model.number="createForm.image_price_1k"
@@ -948,7 +948,7 @@
                 :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_1k')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('image_price_2k', true)" :aria-disabled="!canEditGroupField('image_price_2k', true)">
               <label class="input-label">2K ($)</label>
               <input
                 v-model.number="createForm.image_price_2k"
@@ -959,7 +959,7 @@
                 :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_2k')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('image_price_4k', true)" :aria-disabled="!canEditGroupField('image_price_4k', true)">
               <label class="input-label">4K ($)</label>
               <input
                 v-model.number="createForm.image_price_4k"
@@ -1005,7 +1005,7 @@
               v-if="createForm.allow_batch_image_generation"
               class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2"
             >
-              <div>
+              <div :inert="!canEditGroupField('batch_image_discount_multiplier', true)" :aria-disabled="!canEditGroupField('batch_image_discount_multiplier', true)">
                 <label class="input-label">{{
                   t("admin.groups.imagePricing.batchDiscountMultiplier")
                 }}</label>
@@ -1018,7 +1018,7 @@
                   placeholder="0.5"
                 />
               </div>
-              <div>
+              <div :inert="!canEditGroupField('batch_image_hold_multiplier', true)" :aria-disabled="!canEditGroupField('batch_image_hold_multiplier', true)">
                 <label class="input-label">{{
                   t("admin.groups.imagePricing.batchHoldMultiplier")
                 }}</label>
@@ -1055,7 +1055,7 @@
             {{ t(videoPricingI18nKey("description")) }}
           </p>
           <div class="mb-4">
-            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <label :inert="!canEditGroupField('video_rate_independent', true)" :aria-disabled="!canEditGroupField('video_rate_independent', true)" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
                 v-model="createForm.video_rate_independent"
                 type="checkbox"
@@ -1064,7 +1064,7 @@
               {{ t(videoPricingI18nKey("independentMultiplier")) }}
             </label>
           </div>
-          <div
+          <div :inert="!canEditGroupField('video_rate_multiplier', true)" :aria-disabled="!canEditGroupField('video_rate_multiplier', true)"
             v-if="createForm.video_rate_independent"
             class="mb-4"
           >
@@ -1081,7 +1081,7 @@
             />
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <div>
+            <div :inert="!canEditGroupField('video_price_480p', true)" :aria-disabled="!canEditGroupField('video_price_480p', true)">
               <label class="input-label">480p ($/s)</label>
               <input
                 v-model.number="createForm.video_price_480p"
@@ -1092,7 +1092,7 @@
                 :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_480p')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('video_price_720p', true)" :aria-disabled="!canEditGroupField('video_price_720p', true)">
               <label class="input-label">720p ($/s)</label>
               <input
                 v-model.number="createForm.video_price_720p"
@@ -1103,7 +1103,7 @@
                 :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_720p')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('video_price_1080p', true)" :aria-disabled="!canEditGroupField('video_price_1080p', true)">
               <label class="input-label">1080p ($/s)</label>
               <input
                 v-model.number="createForm.video_price_1080p"
@@ -1126,7 +1126,7 @@
               {{ t("admin.groups.videoPricing.modelOverridesDescription") }}
             </p>
             <div class="mt-3 space-y-3">
-              <div
+              <div :inert="!canEditGroupField('video_model_prices', true)" :aria-disabled="!canEditGroupField('video_model_prices', true)"
                 v-for="family in videoModelPriceFamilyRows(createForm.video_model_prices)"
                 :key="family.key"
                 class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,7rem))] sm:items-end"
@@ -1134,7 +1134,7 @@
                 <div class="min-w-0 pb-1 font-mono text-xs text-gray-700 dark:text-gray-300">
                   {{ family.label }}
                 </div>
-                <label
+                <label :inert="!canEditGroupField('video_model_prices', true)" :aria-disabled="!canEditGroupField('video_model_prices', true)"
                   v-for="resolution in grokVideoPriceResolutions"
                   :key="resolution.key"
                   class="block"
@@ -1173,9 +1173,9 @@
         </div>
 
         <!-- 高峰时段倍率配置（仅订阅类型分组） -->
-        <div v-if="createForm.subscription_type === 'subscription'" class="border-t pt-4">
+        <div :inert="!canEditGroupField('subscription_type', true)" :aria-disabled="!canEditGroupField('subscription_type', true)" v-if="createForm.subscription_type === 'subscription'" class="border-t pt-4">
           <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <label :inert="!canEditGroupField('peak_rate_enabled', true)" :aria-disabled="!canEditGroupField('peak_rate_enabled', true)" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
                 v-model="createForm.peak_rate_enabled"
                 type="checkbox"
@@ -1184,11 +1184,11 @@
               <span>{{ t("admin.groups.peakRate.enable") }}</span>
             </label>
           </div>
-          <div
+          <div :inert="!canEditGroupField('peak_rate_enabled', true)" :aria-disabled="!canEditGroupField('peak_rate_enabled', true)"
             v-if="createForm.peak_rate_enabled"
             class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3"
           >
-            <div>
+            <div :inert="!canEditGroupField('peak_start', true)" :aria-disabled="!canEditGroupField('peak_start', true)">
               <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
               <input
                 v-model="createForm.peak_start"
@@ -1196,7 +1196,7 @@
                 class="input"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('peak_end', true)" :aria-disabled="!canEditGroupField('peak_end', true)">
               <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
               <input
                 v-model="createForm.peak_end"
@@ -1204,7 +1204,7 @@
                 class="input"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('peak_rate_multiplier', true)" :aria-disabled="!canEditGroupField('peak_rate_multiplier', true)">
               <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
               <input
                 v-model.number="createForm.peak_rate_multiplier"
@@ -1221,7 +1221,7 @@
 
         <!-- 分组利润控制（五个平台 token 请求） -->
         <div v-if="isProfitControlPlatform(createForm.platform)" class="border-t pt-4">
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <label :inert="!canEditGroupField('profit_control_enabled', true)" :aria-disabled="!canEditGroupField('profit_control_enabled', true)" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
             <input
               v-model="createForm.profit_control_enabled"
               type="checkbox"
@@ -1236,11 +1236,11 @@
                 : t("admin.groups.profitControl.disabledHint")
             }}
           </p>
-          <div
+          <div :inert="!canEditGroupField('profit_control_enabled', true)" :aria-disabled="!canEditGroupField('profit_control_enabled', true)"
             v-if="createForm.profit_control_enabled"
             class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
-            <div>
+            <div :inert="!canEditGroupField('profit_min_margin', true)" :aria-disabled="!canEditGroupField('profit_min_margin', true)">
               <label class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
                 v-model.number="createForm.profit_min_margin_percent"
@@ -1253,7 +1253,7 @@
                 :title="t('admin.groups.profitControl.minMarginHint')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('profit_safety_buffer', true)" :aria-disabled="!canEditGroupField('profit_safety_buffer', true)">
               <label class="input-label">{{ t("admin.groups.profitControl.safetyBuffer") }}</label>
               <input
                 v-model.number="createForm.profit_safety_buffer_percent"
@@ -1448,7 +1448,7 @@
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.webSearchPricing.title") }}
           </h4>
-          <div>
+          <div :inert="!canEditGroupField('web_search_price_per_call', true)" :aria-disabled="!canEditGroupField('web_search_price_per_call', true)">
             <label class="input-label">{{
               t("admin.groups.webSearchPricing.pricePerCall")
             }}</label>
@@ -1477,7 +1477,7 @@
 
 
         <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
-          <div class="flex flex-wrap items-start justify-between gap-3">
+          <div :inert="!canEditGroupField('model_pricing', true)" :aria-disabled="!canEditGroupField('model_pricing', true)" class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.title") }}</h4>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.groups.modelPricing.description") }}</p>
@@ -1486,11 +1486,11 @@
               <Icon name="plus" size="sm" class="mr-1" />{{ t("admin.groups.modelPricing.add") }}
             </button>
           </div>
-          <label class="mt-3 flex items-start gap-2">
+          <label :inert="!canEditGroupField('long_context_pricing_enabled', true)" :aria-disabled="!canEditGroupField('long_context_pricing_enabled', true)" class="mt-3 flex items-start gap-2">
             <input v-model="createForm.long_context_pricing_enabled" type="checkbox" class="mt-0.5" />
             <span><span class="block text-sm text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.longContext") }}</span><span class="block text-xs text-gray-500">{{ t("admin.groups.modelPricing.longContextHint") }}</span></span>
           </label>
-          <div class="mt-3 space-y-2">
+          <div :inert="!canEditGroupField('model_pricing', true)" :aria-disabled="!canEditGroupField('model_pricing', true)" class="mt-3 space-y-2">
             <PricingEntryCard v-for="(entry, index) in createForm.model_pricing" :key="index" :entry="entry" :platform="createForm.platform" hide-token-intervals @update="createForm.model_pricing[index] = $event" @remove="createForm.model_pricing.splice(index, 1)" />
           </div>
         </div>
@@ -1507,7 +1507,7 @@
             {{ t("admin.groups.explicitPricing.description") }}
           </p>
           <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div>
+            <div :inert="!canEditGroupField('search_price_per_1k', true)" :aria-disabled="!canEditGroupField('search_price_per_1k', true)">
               <label class="input-label">{{ t("admin.groups.explicitPricing.searchPricePer1k") }}</label>
               <input
                 v-model.number="createForm.search_price_per_1k"
@@ -1519,7 +1519,7 @@
                 data-testid="create-search-price"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('audio_realtime_price_per_min', true)" :aria-disabled="!canEditGroupField('audio_realtime_price_per_min', true)">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioRealtimePerMin") }}</label>
               <input
                 v-model.number="createForm.audio_realtime_price_per_min"
@@ -1531,7 +1531,7 @@
                 data-testid="create-audio-realtime-price"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('audio_tts_price_per_million_chars', true)" :aria-disabled="!canEditGroupField('audio_tts_price_per_million_chars', true)">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioTtsPerMillionChars") }}</label>
               <input
                 v-model.number="createForm.audio_tts_price_per_million_chars"
@@ -1543,7 +1543,7 @@
                 data-testid="create-audio-tts-price"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('audio_stt_price_per_hour', true)" :aria-disabled="!canEditGroupField('audio_stt_price_per_hour', true)">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioSttPerHour") }}</label>
               <input
                 v-model.number="createForm.audio_stt_price_per_hour"
@@ -1565,7 +1565,7 @@
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiFast.title") }}
           </h4>
-          <div class="flex items-center justify-between gap-4">
+          <div :inert="!canEditGroupField('force_openai_fast', true)" :aria-disabled="!canEditGroupField('force_openai_fast', true)" class="flex items-center justify-between gap-4">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.force") }}
             </label>
@@ -1578,7 +1578,7 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {{ t("admin.groups.openaiFast.hint") }}
           </p>
-          <div class="flex items-center justify-between gap-4 mt-4">
+          <div :inert="!canEditGroupField('free_openai_fast', true)" :aria-disabled="!canEditGroupField('free_openai_fast', true)" class="flex items-center justify-between gap-4 mt-4">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.free") }}
             </label>
@@ -1876,7 +1876,7 @@
         </div>
 
         <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
-        <div
+        <div :inert="!canEditGroupField('subscription_type', true)" :aria-disabled="!canEditGroupField('subscription_type', true)"
           v-if="
             ['anthropic', 'antigravity'].includes(createForm.platform) &&
             createForm.subscription_type !== 'subscription'
@@ -2121,7 +2121,7 @@
       @close="closeEditModal"
     >
       <form
-        v-if="editingGroup"
+        v-if="(editingGroup) &amp;&amp; (rolePermissions.can('groups.manage'))"
         id="edit-group-form"
         @submit.prevent="handleUpdateGroup"
         class="space-y-5"
@@ -2250,7 +2250,7 @@
             {{ t("admin.groups.copyAccounts.hintEdit") }}
           </p>
         </div>
-        <div>
+        <div :inert="!canEditGroupField('rate_multiplier', false)" :aria-disabled="!canEditGroupField('rate_multiplier', false)">
           <label class="input-label">{{
             t("admin.groups.form.rateMultiplier")
           }}</label>
@@ -2285,7 +2285,7 @@
           v-model:over-limit="editForm.max_reasoning_effort_over_limit"
           v-model:mappings="editForm.reasoning_effort_mappings"
         />
-        <div v-if="editForm.subscription_type !== 'subscription'">
+        <div :inert="!canEditGroupField('subscription_type', false)" :aria-disabled="!canEditGroupField('subscription_type', false)" v-if="editForm.subscription_type !== 'subscription'">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.form.exclusive") }}
@@ -2347,7 +2347,7 @@
 
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
-          <div>
+          <div :inert="!canEditGroupField('subscription_type', false)" :aria-disabled="!canEditGroupField('subscription_type', false)">
             <label class="input-label">{{
               t("admin.groups.subscription.type")
             }}</label>
@@ -2362,11 +2362,11 @@
           </div>
 
           <!-- Subscription limits (only show when subscription type is selected) -->
-          <div
+          <div :inert="!canEditGroupField('subscription_type', false)" :aria-disabled="!canEditGroupField('subscription_type', false)"
             v-if="editForm.subscription_type === 'subscription'"
             class="space-y-4 border-l-2 border-primary-200 pl-4 dark:border-primary-800"
           >
-            <div>
+            <div :inert="!canEditGroupField('daily_limit_usd', false)" :aria-disabled="!canEditGroupField('daily_limit_usd', false)">
               <label class="input-label">{{
                 t("admin.groups.subscription.dailyLimit")
               }}</label>
@@ -2379,7 +2379,7 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('weekly_limit_usd', false)" :aria-disabled="!canEditGroupField('weekly_limit_usd', false)">
               <label class="input-label">{{
                 t("admin.groups.subscription.weeklyLimit")
               }}</label>
@@ -2392,7 +2392,7 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('monthly_limit_usd', false)" :aria-disabled="!canEditGroupField('monthly_limit_usd', false)">
               <label class="input-label">{{
                 t("admin.groups.subscription.monthlyLimit")
               }}</label>
@@ -2551,7 +2551,7 @@
               />
               {{ t(imagePricingI18nKey(editForm.platform, "allowImageGeneration")) }}
             </label>
-            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <label :inert="!canEditGroupField('image_rate_independent', false)" :aria-disabled="!canEditGroupField('image_rate_independent', false)" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
                 v-model="editForm.image_rate_independent"
                 type="checkbox"
@@ -2560,7 +2560,7 @@
               {{ t(imagePricingI18nKey(editForm.platform, "independentMultiplier")) }}
             </label>
           </div>
-          <div
+          <div :inert="!canEditGroupField('image_rate_multiplier', false)" :aria-disabled="!canEditGroupField('image_rate_multiplier', false)"
             v-if="editForm.image_rate_independent"
             class="mb-4"
           >
@@ -2577,7 +2577,7 @@
             />
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <div>
+            <div :inert="!canEditGroupField('image_price_1k', false)" :aria-disabled="!canEditGroupField('image_price_1k', false)">
               <label class="input-label">1K ($)</label>
               <input
                 v-model.number="editForm.image_price_1k"
@@ -2588,7 +2588,7 @@
                 :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_1k')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('image_price_2k', false)" :aria-disabled="!canEditGroupField('image_price_2k', false)">
               <label class="input-label">2K ($)</label>
               <input
                 v-model.number="editForm.image_price_2k"
@@ -2599,7 +2599,7 @@
                 :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_2k')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('image_price_4k', false)" :aria-disabled="!canEditGroupField('image_price_4k', false)">
               <label class="input-label">4K ($)</label>
               <input
                 v-model.number="editForm.image_price_4k"
@@ -2645,7 +2645,7 @@
               v-if="editForm.allow_batch_image_generation"
               class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2"
             >
-              <div>
+              <div :inert="!canEditGroupField('batch_image_discount_multiplier', false)" :aria-disabled="!canEditGroupField('batch_image_discount_multiplier', false)">
                 <label class="input-label">{{
                   t("admin.groups.imagePricing.batchDiscountMultiplier")
                 }}</label>
@@ -2658,7 +2658,7 @@
                   placeholder="0.5"
                 />
               </div>
-              <div>
+              <div :inert="!canEditGroupField('batch_image_hold_multiplier', false)" :aria-disabled="!canEditGroupField('batch_image_hold_multiplier', false)">
                 <label class="input-label">{{
                   t("admin.groups.imagePricing.batchHoldMultiplier")
                 }}</label>
@@ -2695,7 +2695,7 @@
             {{ t(videoPricingI18nKey("description")) }}
           </p>
           <div class="mb-4">
-            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <label :inert="!canEditGroupField('video_rate_independent', false)" :aria-disabled="!canEditGroupField('video_rate_independent', false)" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
                 v-model="editForm.video_rate_independent"
                 type="checkbox"
@@ -2704,7 +2704,7 @@
               {{ t(videoPricingI18nKey("independentMultiplier")) }}
             </label>
           </div>
-          <div
+          <div :inert="!canEditGroupField('video_rate_multiplier', false)" :aria-disabled="!canEditGroupField('video_rate_multiplier', false)"
             v-if="editForm.video_rate_independent"
             class="mb-4"
           >
@@ -2721,7 +2721,7 @@
             />
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <div>
+            <div :inert="!canEditGroupField('video_price_480p', false)" :aria-disabled="!canEditGroupField('video_price_480p', false)">
               <label class="input-label">480p ($/s)</label>
               <input
                 v-model.number="editForm.video_price_480p"
@@ -2732,7 +2732,7 @@
                 :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_480p')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('video_price_720p', false)" :aria-disabled="!canEditGroupField('video_price_720p', false)">
               <label class="input-label">720p ($/s)</label>
               <input
                 v-model.number="editForm.video_price_720p"
@@ -2743,7 +2743,7 @@
                 :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_720p')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('video_price_1080p', false)" :aria-disabled="!canEditGroupField('video_price_1080p', false)">
               <label class="input-label">1080p ($/s)</label>
               <input
                 v-model.number="editForm.video_price_1080p"
@@ -2766,7 +2766,7 @@
               {{ t("admin.groups.videoPricing.modelOverridesDescription") }}
             </p>
             <div class="mt-3 space-y-3">
-              <div
+              <div :inert="!canEditGroupField('video_model_prices', false)" :aria-disabled="!canEditGroupField('video_model_prices', false)"
                 v-for="family in videoModelPriceFamilyRows(editForm.video_model_prices)"
                 :key="family.key"
                 class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,7rem))] sm:items-end"
@@ -2774,7 +2774,7 @@
                 <div class="min-w-0 pb-1 font-mono text-xs text-gray-700 dark:text-gray-300">
                   {{ family.label }}
                 </div>
-                <label
+                <label :inert="!canEditGroupField('video_model_prices', false)" :aria-disabled="!canEditGroupField('video_model_prices', false)"
                   v-for="resolution in grokVideoPriceResolutions"
                   :key="resolution.key"
                   class="block"
@@ -2813,9 +2813,9 @@
         </div>
 
         <!-- 高峰时段倍率配置（仅订阅类型分组） -->
-        <div v-if="editForm.subscription_type === 'subscription'" class="border-t pt-4">
+        <div :inert="!canEditGroupField('subscription_type', false)" :aria-disabled="!canEditGroupField('subscription_type', false)" v-if="editForm.subscription_type === 'subscription'" class="border-t pt-4">
           <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <label :inert="!canEditGroupField('peak_rate_enabled', false)" :aria-disabled="!canEditGroupField('peak_rate_enabled', false)" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
                 v-model="editForm.peak_rate_enabled"
                 type="checkbox"
@@ -2824,11 +2824,11 @@
               <span>{{ t("admin.groups.peakRate.enable") }}</span>
             </label>
           </div>
-          <div
+          <div :inert="!canEditGroupField('peak_rate_enabled', false)" :aria-disabled="!canEditGroupField('peak_rate_enabled', false)"
             v-if="editForm.peak_rate_enabled"
             class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3"
           >
-            <div>
+            <div :inert="!canEditGroupField('peak_start', false)" :aria-disabled="!canEditGroupField('peak_start', false)">
               <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
               <input
                 v-model="editForm.peak_start"
@@ -2836,7 +2836,7 @@
                 class="input"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('peak_end', false)" :aria-disabled="!canEditGroupField('peak_end', false)">
               <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
               <input
                 v-model="editForm.peak_end"
@@ -2844,7 +2844,7 @@
                 class="input"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('peak_rate_multiplier', false)" :aria-disabled="!canEditGroupField('peak_rate_multiplier', false)">
               <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
               <input
                 v-model.number="editForm.peak_rate_multiplier"
@@ -2861,7 +2861,7 @@
 
         <!-- 分组利润控制（五个平台 token 请求） -->
         <div v-if="isProfitControlPlatform(editForm.platform)" class="border-t pt-4">
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <label :inert="!canEditGroupField('profit_control_enabled', false)" :aria-disabled="!canEditGroupField('profit_control_enabled', false)" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
             <input
               v-model="editForm.profit_control_enabled"
               type="checkbox"
@@ -2876,11 +2876,11 @@
                 : t("admin.groups.profitControl.disabledHint")
             }}
           </p>
-          <div
+          <div :inert="!canEditGroupField('profit_control_enabled', false)" :aria-disabled="!canEditGroupField('profit_control_enabled', false)"
             v-if="editForm.profit_control_enabled"
             class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
-            <div>
+            <div :inert="!canEditGroupField('profit_min_margin', false)" :aria-disabled="!canEditGroupField('profit_min_margin', false)">
               <label class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
                 v-model.number="editForm.profit_min_margin_percent"
@@ -2893,7 +2893,7 @@
                 :title="t('admin.groups.profitControl.minMarginHint')"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('profit_safety_buffer', false)" :aria-disabled="!canEditGroupField('profit_safety_buffer', false)">
               <label class="input-label">{{ t("admin.groups.profitControl.safetyBuffer") }}</label>
               <input
                 v-model.number="editForm.profit_safety_buffer_percent"
@@ -3088,7 +3088,7 @@
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.webSearchPricing.title") }}
           </h4>
-          <div>
+          <div :inert="!canEditGroupField('web_search_price_per_call', false)" :aria-disabled="!canEditGroupField('web_search_price_per_call', false)">
             <label class="input-label">{{
               t("admin.groups.webSearchPricing.pricePerCall")
             }}</label>
@@ -3127,7 +3127,7 @@
 
 
         <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
-          <div class="flex flex-wrap items-start justify-between gap-3">
+          <div :inert="!canEditGroupField('model_pricing', false)" :aria-disabled="!canEditGroupField('model_pricing', false)" class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.title") }}</h4>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.groups.modelPricing.description") }}</p>
@@ -3136,11 +3136,11 @@
               <Icon name="plus" size="sm" class="mr-1" />{{ t("admin.groups.modelPricing.add") }}
             </button>
           </div>
-          <label class="mt-3 flex items-start gap-2">
+          <label :inert="!canEditGroupField('long_context_pricing_enabled', false)" :aria-disabled="!canEditGroupField('long_context_pricing_enabled', false)" class="mt-3 flex items-start gap-2">
             <input v-model="editForm.long_context_pricing_enabled" type="checkbox" class="mt-0.5" />
             <span><span class="block text-sm text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.longContext") }}</span><span class="block text-xs text-gray-500">{{ t("admin.groups.modelPricing.longContextHint") }}</span></span>
           </label>
-          <div class="mt-3 space-y-2">
+          <div :inert="!canEditGroupField('model_pricing', false)" :aria-disabled="!canEditGroupField('model_pricing', false)" class="mt-3 space-y-2">
             <PricingEntryCard v-for="(entry, index) in editForm.model_pricing" :key="index" :entry="entry" :platform="editForm.platform" hide-token-intervals @update="editForm.model_pricing[index] = $event" @remove="editForm.model_pricing.splice(index, 1)" />
           </div>
         </div>
@@ -3157,7 +3157,7 @@
             {{ t("admin.groups.explicitPricing.description") }}
           </p>
           <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div>
+            <div :inert="!canEditGroupField('search_price_per_1k', false)" :aria-disabled="!canEditGroupField('search_price_per_1k', false)">
               <label class="input-label">{{ t("admin.groups.explicitPricing.searchPricePer1k") }}</label>
               <input
                 v-model.number="editForm.search_price_per_1k"
@@ -3169,7 +3169,7 @@
                 data-testid="edit-search-price"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('audio_realtime_price_per_min', false)" :aria-disabled="!canEditGroupField('audio_realtime_price_per_min', false)">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioRealtimePerMin") }}</label>
               <input
                 v-model.number="editForm.audio_realtime_price_per_min"
@@ -3181,7 +3181,7 @@
                 data-testid="edit-audio-realtime-price"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('audio_tts_price_per_million_chars', false)" :aria-disabled="!canEditGroupField('audio_tts_price_per_million_chars', false)">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioTtsPerMillionChars") }}</label>
               <input
                 v-model.number="editForm.audio_tts_price_per_million_chars"
@@ -3193,7 +3193,7 @@
                 data-testid="edit-audio-tts-price"
               />
             </div>
-            <div>
+            <div :inert="!canEditGroupField('audio_stt_price_per_hour', false)" :aria-disabled="!canEditGroupField('audio_stt_price_per_hour', false)">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioSttPerHour") }}</label>
               <input
                 v-model.number="editForm.audio_stt_price_per_hour"
@@ -3215,7 +3215,7 @@
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiFast.title") }}
           </h4>
-          <div class="flex items-center justify-between gap-4">
+          <div :inert="!canEditGroupField('force_openai_fast', false)" :aria-disabled="!canEditGroupField('force_openai_fast', false)" class="flex items-center justify-between gap-4">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.force") }}
             </label>
@@ -3228,7 +3228,7 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {{ t("admin.groups.openaiFast.hint") }}
           </p>
-          <div class="flex items-center justify-between gap-4 mt-4">
+          <div :inert="!canEditGroupField('free_openai_fast', false)" :aria-disabled="!canEditGroupField('free_openai_fast', false)" class="flex items-center justify-between gap-4 mt-4">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.free") }}
             </label>
@@ -3525,7 +3525,7 @@
         </div>
 
         <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
-        <div
+        <div :inert="!canEditGroupField('subscription_type', false)" :aria-disabled="!canEditGroupField('subscription_type', false)"
           v-if="
             ['anthropic', 'antigravity'].includes(editForm.platform) &&
             editForm.subscription_type !== 'subscription'
@@ -3856,7 +3856,7 @@
           >
             {{ t("common.cancel") }}
           </button>
-          <button
+          <button v-if="rolePermissions.can('groups.manage')"
             @click="saveSortOrder"
             :disabled="sortSubmitting"
             class="btn btn-primary"
@@ -3995,7 +3995,7 @@
                     </td>
                     <td class="px-3 py-2">
                       <div class="flex justify-end gap-1">
-                        <button
+                        <button v-if="rolePermissions.can('groups.manage')"
                           type="button"
                           class="rounded p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
                           :title="t('common.edit')"
@@ -4003,7 +4003,7 @@
                         >
                           <Icon name="edit" size="sm" />
                         </button>
-                        <button
+                        <button v-if="rolePermissions.can('groups.manage')"
                           type="button"
                           class="rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                           :title="t('common.delete')"
@@ -4021,7 +4021,7 @@
         </section>
 
         <section class="space-y-5">
-          <form class="space-y-3" @submit.prevent="saveCompositeRoute">
+          <form v-if="rolePermissions.can('groups.manage')" class="space-y-3" @submit.prevent="saveCompositeRoute">
             <div class="flex items-center justify-between gap-3">
               <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
                 {{
@@ -4265,6 +4265,10 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore as useRolePermissions } from '@/stores/auth'
+const rolePermissions = useRolePermissions()
+const canEditGroupField = (field: string, creating: boolean) => rolePermissions.isSuperAdmin || rolePermissions.canEditAdminField(creating ? 'group.create' : 'group.update', field)
+
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAppStore } from "@/stores/app";
@@ -6025,7 +6029,7 @@ const handleCreateGroup = async () => {
           platform: createForm.platform,
         }
       : requestData;
-    await adminAPI.groups.create(payload);
+    await adminAPI.groups.create(rolePermissions.isSuperAdmin ? payload : rolePermissions.editableAdminFields("group.create", payload));
     appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
     loadGroups();
@@ -6375,7 +6379,7 @@ const handleUpdateGroup = async () => {
           description: editForm.description,
         }
       : payload;
-    await adminAPI.groups.update(editingGroup.value.id, requestData);
+    await adminAPI.groups.update(editingGroup.value.id, rolePermissions.isSuperAdmin ? requestData : rolePermissions.editableAdminFields("group.update", requestData));
     appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
     loadGroups();

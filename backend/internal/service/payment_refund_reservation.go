@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/google/uuid"
 	"strconv"
 	"time"
@@ -72,6 +73,9 @@ func (s *PaymentService) reserveRefund(ctx context.Context, p *RefundPlan) error
 	}
 	defer func() { _ = tx.Rollback() }()
 	txCtx := dbent.NewTxContext(ctx, tx)
+	if err := authz.LockManagementWrite(txCtx, tx.Client(), []int64{p.Order.UserID}, "", "", false); err != nil {
+		return err
+	}
 	n, err := tx.PaymentOrder.Update().Where(paymentorder.IDEQ(p.OrderID), paymentorder.StatusIn(OrderStatusCompleted, OrderStatusRefundRequested, OrderStatusRefundFailed)).SetStatus(OrderStatusRefunding).SetRefundAmount(p.RefundAmount).SetRefundReason(p.Reason).SetForceRefund(p.Force).Save(txCtx)
 	if err != nil {
 		return err

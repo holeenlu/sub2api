@@ -63,6 +63,17 @@ func TestEnforceStepUpRejectsAdminAPIKey(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "STEP_UP_ADMIN_API_KEY_FORBIDDEN")
 }
 
+func TestAdministratorStepUpRespectsSwitchButAlwaysTierDoesNot(t *testing.T) {
+	for _, role := range []string{service.RoleAdmin, service.RoleSuperAdmin} {
+		c, _ := newStepUpTestContext(t)
+		c.Set(string(ContextKeyUserRole), role)
+		c.Set(string(ContextKeyUser), AuthSubject{UserID: 1})
+		reader := stubStepUpUserReader{user: &service.User{ID: 1, Role: role}}
+		require.True(t, enforceStepUp(c, stubStepUpGrantChecker{}, reader, stubStepUpSettingReader{enabled: false}))
+		require.False(t, enforceStepUp(c, stubStepUpGrantChecker{}, reader, nil), "unconditional tier must require TOTP even with site switch off")
+	}
+}
+
 func TestEnforceStepUpRequiresAuthSubject(t *testing.T) {
 	c, rec := newStepUpTestContext(t)
 
