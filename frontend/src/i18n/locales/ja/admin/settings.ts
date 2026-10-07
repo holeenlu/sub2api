@@ -708,8 +708,6 @@ codexProbeChallenge: '新しいランダム課題',
         compactHome: 'コンパクトホームページ',
         compactHomeHint: 'カスタムホームページのコンテンツが設定されていない場合に、簡潔なサイト情報ページを表示します。'
       ,
-hideCcsImportButton: 'Hide CCS Import Button',
-hideCcsImportButtonHint: 'When enabled, the "Import to CCS" button will be hidden on the API Keys page',
 },
       purchase: {
         title: 'チャージ / サブスクリプションページ',

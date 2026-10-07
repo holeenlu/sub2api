@@ -276,14 +276,15 @@ export default {
         local: '本地文件（旧版客户端）',
         oversized: '完整目录超过远程加载的 1 MiB 限制，已改为本地文件。请下载目录并保存到配置中的路径。',
         title: '获取模型目录及下载',
-        description: 'config.toml 默认指向 codex-models.json。先获取当前 Key 的目录，下载到配置路径后重启 Codex；支持的分组可选择远程目录。',
+        description: '打开时自动读取当前 Key 的模型目录，config.toml 的 model 随之确定：目录包含默认模型时沿用默认模型，否则使用目录中的首个模型。远程目录由 Codex 自行加载；选择本地文件时，请下载目录并保存到上述路径后重启 Codex。',
         emptyDescription: '获取的目录没有可用的 Codex 模型，已保留默认配置。请检查账号模型限制和分组模型白名单。',
         fetch: '获取目录',
         refetch: '重新获取',
         retry: '重试',
+        resolving: '正在读取模型目录…',
         download: '下载 codex-models.json',
         modelsCount: '已获取 {count} 个模型',
-        errorDescription: '无法使用当前 API Key 获取模型目录，已保留配置和目录路径。请重试，或使用之前保存的目录文件。'
+        errorDescription: '无法使用当前 API Key 获取模型目录，config.toml 暂用默认模型。请重试，或使用之前保存的目录文件。'
       },
       opencode: {
         title: 'OpenCode 配置示例',
@@ -345,20 +346,8 @@ export default {
       inactive: '已停用',
       quota_exhausted: '额度耗尽',
       expired: '已过期'
-    }
-  ,
-importToCcSwitch: '导入到 CCS',
-ccSwitchNotInstalled:
-      'CC-Switch 未安装或协议处理程序未注册。请先安装 CC-Switch 或手动复制 API 密钥。',
-ccsClientSelect: {
-      title: '选择客户端',
-      description: '请选择您要导入到 CC-Switch 的客户端类型：',
-      claudeCode: 'Claude Code',
-      claudeCodeDesc: '导入为 Claude Code 配置',
-      geminiCli: 'Gemini CLI',
-      geminiCliDesc: '导入为 Gemini CLI 配置'
     },
-},
+  },
 
   // Usage
   usage: {
