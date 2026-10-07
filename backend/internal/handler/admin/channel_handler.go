@@ -28,32 +28,32 @@ func NewChannelHandler(channelService *service.ChannelService, billingService *s
 // --- Request / Response types ---
 
 type createChannelRequest struct {
-	Name                       string                           `json:"name" binding:"required,max=100"`
-	Description                string                           `json:"description"`
-	GroupIDs                   []int64                          `json:"group_ids"`
-	ModelPricing               []channelModelPricingRequest     `json:"model_pricing"`
-	ModelMapping               map[string]map[string]string     `json:"model_mapping"`
-	BillingModelSource         string                           `json:"billing_model_source" binding:"omitempty,oneof=requested upstream channel_mapped response_model"`
-	RestrictModels             bool                             `json:"restrict_models"`
-	Features                   string                           `json:"features"`
-	FeaturesConfig             map[string]any                   `json:"features_config"`
-	ApplyPricingToAccountStats bool                             `json:"apply_pricing_to_account_stats"`
-	AccountStatsPricingRules   []accountStatsPricingRuleRequest `json:"account_stats_pricing_rules"`
+	Name                       string                           `json:"name" binding:"required,max=100" authz:"base"`
+	Description                string                           `json:"description" authz:"base"`
+	GroupIDs                   []int64                          `json:"group_ids" authz:"base"`
+	ModelPricing               []channelModelPricingRequest     `json:"model_pricing" authz:"billing.rates.update"`
+	ModelMapping               map[string]map[string]string     `json:"model_mapping" authz:"base"`
+	BillingModelSource         string                           `json:"billing_model_source" binding:"omitempty,oneof=requested upstream channel_mapped response_model" authz:"billing.rates.update"`
+	RestrictModels             bool                             `json:"restrict_models" authz:"base"`
+	Features                   string                           `json:"features" authz:"billing.rates.update"`
+	FeaturesConfig             map[string]any                   `json:"features_config" authz:"billing.rates.update"`
+	ApplyPricingToAccountStats bool                             `json:"apply_pricing_to_account_stats" authz:"billing.rates.update"`
+	AccountStatsPricingRules   []accountStatsPricingRuleRequest `json:"account_stats_pricing_rules" authz:"billing.rates.update"`
 }
 
 type updateChannelRequest struct {
-	Name                       string                            `json:"name" binding:"omitempty,max=100"`
-	Description                *string                           `json:"description"`
-	Status                     string                            `json:"status" binding:"omitempty,oneof=active disabled"`
-	GroupIDs                   *[]int64                          `json:"group_ids"`
-	ModelPricing               *[]channelModelPricingRequest     `json:"model_pricing"`
-	ModelMapping               map[string]map[string]string      `json:"model_mapping"`
-	BillingModelSource         string                            `json:"billing_model_source" binding:"omitempty,oneof=requested upstream channel_mapped response_model"`
-	RestrictModels             *bool                             `json:"restrict_models"`
-	Features                   *string                           `json:"features"`
-	FeaturesConfig             map[string]any                    `json:"features_config"`
-	ApplyPricingToAccountStats *bool                             `json:"apply_pricing_to_account_stats"`
-	AccountStatsPricingRules   *[]accountStatsPricingRuleRequest `json:"account_stats_pricing_rules"`
+	Name                       string                            `json:"name" binding:"omitempty,max=100" authz:"base"`
+	Description                *string                           `json:"description" authz:"base"`
+	Status                     string                            `json:"status" binding:"omitempty,oneof=active disabled" authz:"base"`
+	GroupIDs                   *[]int64                          `json:"group_ids" authz:"base"`
+	ModelPricing               *[]channelModelPricingRequest     `json:"model_pricing" authz:"billing.rates.update"`
+	ModelMapping               map[string]map[string]string      `json:"model_mapping" authz:"base"`
+	BillingModelSource         string                            `json:"billing_model_source" binding:"omitempty,oneof=requested upstream channel_mapped response_model" authz:"billing.rates.update"`
+	RestrictModels             *bool                             `json:"restrict_models" authz:"base"`
+	Features                   *string                           `json:"features" authz:"billing.rates.update"`
+	FeaturesConfig             map[string]any                    `json:"features_config" authz:"billing.rates.update"`
+	ApplyPricingToAccountStats *bool                             `json:"apply_pricing_to_account_stats" authz:"billing.rates.update"`
+	AccountStatsPricingRules   *[]accountStatsPricingRuleRequest `json:"account_stats_pricing_rules" authz:"billing.rates.update"`
 }
 
 type channelModelPricingRequest struct {

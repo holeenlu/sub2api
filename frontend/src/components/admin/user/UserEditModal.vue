@@ -8,9 +8,9 @@
     <form v-if="user" id="edit-user-form" @submit.prevent="handleUpdateUser" class="space-y-5">
       <div>
         <label class="input-label">{{ t('admin.users.email') }}</label>
-        <input v-model="form.email" type="email" class="input" />
+        <input v-model="form.email" :disabled="!canEditSecurity" type="email" class="input" />
       </div>
-      <div>
+      <div v-if="canEditSecurity">
         <label class="input-label">{{ t('admin.users.password') }}</label>
         <div class="flex gap-2">
           <div class="relative flex-1">
@@ -37,6 +37,7 @@
           :searchable="false"
         />
       </div>
+      <p v-if="form.role === 'admin'" class="text-sm text-gray-500">{{ t('admin.rolePermissions.sharedPolicy') }}</p>
       <div>
         <label class="input-label">{{ t('admin.users.notes') }}</label>
         <textarea v-model="form.notes" rows="3" class="input"></textarea>
@@ -66,6 +67,10 @@
         />
         <p class="input-hint">{{ t('admin.users.form.rpmLimitHint') }}</p>
       </div>
+      <label v-if="user?.totp_enabled && user.id !== auth.user?.id && canEditSecurity" class="flex items-start gap-2 text-sm">
+        <input v-model="form.reset_totp" type="checkbox" class="mt-1" />
+        <span>{{ t('admin.rolePermissions.resetTotp') }}<small class="mt-1 block text-gray-500">{{ t('admin.rolePermissions.resetTotpHint') }}</small></span>
+      </label>
       <UserAttributeForm v-model="form.customAttributes" :user-id="user?.id" />
     </form>
     <template #footer>
@@ -86,6 +91,7 @@
 import { computed, ref, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { useClipboard } from '@/composables/useClipboard'
 import { adminAPI } from '@/api/admin'
 import type { AdminUser, UserAttributeValuesMap } from '@/types'
@@ -100,12 +106,15 @@ const props = defineProps<{ show: boolean, user: AdminUser | null }>()
 const emit = defineEmits(['close', 'success'])
 const { t } = useI18n(); const appStore = useAppStore(); const { copyToClipboard } = useClipboard()
 
+const auth = useAuthStore()
 const submitting = ref(false); const passwordCopied = ref(false)
+const canEditSecurity = computed(() => props.user?.id !== auth.user?.id && auth.can(props.user?.role === 'admin' ? 'staff.manage' : 'users.security'))
 const roleOptions = computed(() => [
-  { value: 'user', label: t('admin.users.roles.user') },
-  { value: 'admin', label: t('admin.users.roles.admin') }
+  ...(auth.isSuperAdmin ? [{ value: 'super_admin', label: t('admin.users.roles.super_admin') }] : []),
+  ...(auth.can('staff.manage') ? [{ value: 'user', label: t('admin.users.roles.user') }, { value: 'admin', label: t('admin.users.roles.admin') }] : [{value: props.user?.role || 'user',label: t(`admin.users.roles.${props.user?.role || 'user'}`)}])
 ])
 const form = reactive({
+  reset_totp: false,
   email: '',
   password: '',
   username: '',
@@ -118,7 +127,7 @@ const form = reactive({
 
 watch(() => props.user, (u) => {
   if (u) {
-    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', role: u.role || 'user', concurrency: u.concurrency, rpm_limit: u.rpm_limit ?? 0, customAttributes: {} })
+    Object.assign(form, { reset_totp: false, email: u.email, password: '', username: u.username || '', notes: u.notes || '', role: u.role || 'user', concurrency: u.concurrency, rpm_limit: u.rpm_limit ?? 0, customAttributes: {} })
     passwordCopied.value = false
   }
 }, { immediate: true })
@@ -151,6 +160,7 @@ const handleUpdateUser = async () => {
   try {
     const data: any = { email: form.email, username: form.username, notes: form.notes, role: form.role, concurrency: form.concurrency, rpm_limit: form.rpm_limit }
     if (form.password.trim()) data.password = form.password.trim()
+    if (form.reset_totp) data.reset_totp = true
     // 提升为管理员属敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 验证并重试
     await stepUp.run(() => adminAPI.users.update(userId, data))
     if (Object.keys(form.customAttributes).length > 0) await adminAPI.userAttributes.updateUserAttributeValues(userId, form.customAttributes)

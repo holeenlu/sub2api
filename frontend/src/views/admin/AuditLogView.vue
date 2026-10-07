@@ -73,7 +73,7 @@
               <button type="button" class="btn btn-secondary" :disabled="loading" @click="resetFilters">
                 {{ t('common.reset') }}
               </button>
-              <button type="button" class="btn btn-danger" @click="openClearDialog">
+              <button type="button" class="btn btn-danger" v-if="rolePermissions.isSuperAdmin" @click="openClearDialog">
                 <Icon name="trash" size="sm" class="mr-1.5" />
                 {{ t('admin.audit.clearAll') }}
               </button>
@@ -95,7 +95,7 @@
                 {{ row.actor_email || '—' }}
               </div>
               <div class="mt-0.5 truncate text-xs text-gray-400">
-                {{ row.actor_role }}<span v-if="row.auth_method"> · {{ authMethodLabel(row.auth_method) }}</span>
+                {{ row.extra?.pre_role_upgrade ? t('admin.rolePermissions.preUpgrade') : row.actor_role }}<span v-if="row.auth_method"> · {{ authMethodLabel(row.auth_method) }}</span>
               </div>
             </div>
           </template>
@@ -216,7 +216,7 @@
             <div class="mt-1 break-all text-sm font-medium text-gray-900 dark:text-white">
               {{ detail.actor_email || '—' }}
             </div>
-            <div class="mt-0.5 text-xs text-gray-400">{{ detail.actor_role }}</div>
+            <div class="mt-0.5 text-xs text-gray-400">{{ detail.extra?.pre_role_upgrade ? t('admin.rolePermissions.preUpgrade') : detail.actor_role }}</div>
           </div>
 
           <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
@@ -352,6 +352,8 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore } from "@/stores/auth"
+const rolePermissions = useAuthStore()
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI, type AuditLog } from '@/api/admin'

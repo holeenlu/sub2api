@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
@@ -55,17 +56,19 @@ type SecretEncryptor interface {
 
 // TotpSetupSession represents a TOTP setup session
 type TotpSetupSession struct {
-	Secret     string // Plain text TOTP secret (not encrypted yet)
-	SetupToken string // Random token to verify setup request
-	CreatedAt  time.Time
+	CredentialVersion int64
+	Secret            string // Plain text TOTP secret (not encrypted yet)
+	SetupToken        string // Random token to verify setup request
+	CreatedAt         time.Time
 }
 
 // TotpLoginSession represents a pending 2FA login session
 type TotpLoginSession struct {
-	UserID           int64
-	Email            string
-	TokenExpiry      time.Time
-	PendingOAuthBind *PendingOAuthBindLoginSession `json:"pending_oauth_bind,omitempty"`
+	CredentialVersion int64
+	UserID            int64
+	Email             string
+	TokenExpiry       time.Time
+	PendingOAuthBind  *PendingOAuthBindLoginSession `json:"pending_oauth_bind,omitempty"`
 }
 
 type PendingOAuthBindLoginSession struct {
@@ -93,7 +96,7 @@ const (
 	totpLoginTTL    = 5 * time.Minute
 	totpAttemptsTTL = 15 * time.Minute
 	maxTotpAttempts = 5
-	totpIssuer      = "Sub2API"
+	totpIssuer      = DefaultSiteName
 )
 
 // TotpService handles TOTP operations
@@ -146,7 +149,7 @@ func (s *TotpService) GetStatus(ctx context.Context, userID int64) (*TotpStatus,
 // 且管理员凭证失守时攻击者往往同时控制通知邮箱，邮箱验证码不构成有效防线。
 // 普通用户维持原有行为：开启邮箱验证时用邮箱验证码，否则用密码。
 func (s *TotpService) usesEmailVerification(ctx context.Context, user *User) bool {
-	return user.Role != RoleAdmin && s.settingService.IsEmailVerifyEnabled(ctx)
+	return !user.IsStaff() && s.settingService.IsEmailVerifyEnabled(ctx)
 }
 
 // verifyIdentity 按 usesEmailVerification 的结果校验邮箱验证码或密码。
@@ -205,9 +208,10 @@ func (s *TotpService) InitiateSetup(ctx context.Context, userID int64, emailCode
 
 	// Store the setup session in cache
 	session := &TotpSetupSession{
-		Secret:     key.Secret(),
-		SetupToken: setupToken,
-		CreatedAt:  time.Now(),
+		CredentialVersion: resolvedTokenVersion(user),
+		Secret:            key.Secret(),
+		SetupToken:        setupToken,
+		CreatedAt:         time.Now(),
 	}
 
 	if err := s.cache.SetSetupSession(ctx, userID, session, totpSetupTTL); err != nil {
@@ -229,13 +233,20 @@ func (s *TotpService) CompleteSetup(ctx context.Context, userID int64, totpCode,
 		return ErrTotpNotEnabled
 	}
 
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user.TotpEnabled {
+		return ErrTotpAlreadyEnabled
+	}
 	// Get the setup session
 	session, err := s.cache.GetSetupSession(ctx, userID)
 	if err != nil {
 		return ErrTotpSetupExpired
 	}
 
-	if session == nil {
+	if session == nil || session.CredentialVersion != resolvedTokenVersion(user) {
 		return ErrTotpSetupExpired
 	}
 
@@ -287,14 +298,14 @@ func (s *TotpService) CompleteSetup(ctx context.Context, userID int64, totpCode,
 			"decrypted_prefix", decryptedPrefix)
 	}
 
-	// Update user with encrypted TOTP secret
-	if err := s.userRepo.UpdateTotpSecret(ctx, userID, &encryptedSecret); err != nil {
-		return fmt.Errorf("update totp secret: %w", err)
+	activator, ok := s.userRepo.(interface {
+		ActivateTotp(context.Context, *User, string) error
+	})
+	if !ok {
+		return ErrServiceUnavailable
 	}
-
-	// Enable TOTP for the user
-	if err := s.userRepo.EnableTotp(ctx, userID); err != nil {
-		return fmt.Errorf("enable totp: %w", err)
+	if err := activator.ActivateTotp(ctx, user, encryptedSecret); err != nil {
+		return err
 	}
 
 	// Clean up the setup session
@@ -306,6 +317,10 @@ func (s *TotpService) CompleteSetup(ctx context.Context, userID int64, totpCode,
 // Disable disables TOTP for a user
 // If email verification is enabled, emailCode is required; otherwise password is required
 func (s *TotpService) Disable(ctx context.Context, userID int64, emailCode, password string) error {
+	return s.disable(ctx, userID, emailCode, password, "")
+}
+
+func (s *TotpService) disable(ctx context.Context, userID int64, emailCode, password, sessionKey string) error {
 	// Get user
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -320,6 +335,18 @@ func (s *TotpService) Disable(ctx context.Context, userID int64, emailCode, pass
 		return err
 	}
 
+	if user.IsStaff() && s.settingService.IsStepUpEnabled(ctx) {
+		if sessionKey == "" {
+			return infraerrors.Forbidden("STEP_UP_REQUIRED", "Recent verification of the existing factor is required")
+		}
+		granted, err := s.HasStepUpGrant(ctx, userID, sessionKey)
+		if err != nil {
+			return err
+		}
+		if !granted {
+			return infraerrors.Forbidden("STEP_UP_REQUIRED", "Recent verification of the existing factor is required")
+		}
+	}
 	// Disable TOTP
 	if err := s.userRepo.DisableTotp(ctx, userID); err != nil {
 		return fmt.Errorf("disable totp: %w", err)
@@ -370,14 +397,9 @@ func (s *TotpService) VerifyCode(ctx context.Context, userID int64, code string)
 		return infraerrors.InternalServer("TOTP_VERIFY_ERROR", "failed to verify totp code")
 	}
 
-	secretPrefix := "N/A"
-	if len(secret) >= 4 {
-		secretPrefix = secret[:4]
-	}
 	slog.Debug("totp_verify_decrypted",
 		"user_id", userID,
-		"secret_len", len(secret),
-		"secret_prefix", secretPrefix)
+		"secret_len", len(secret))
 
 	// Verify the code
 	valid := totp.Validate(code, secret)
@@ -385,7 +407,6 @@ func (s *TotpService) VerifyCode(ctx context.Context, userID int64, code string)
 		"user_id", userID,
 		"valid", valid,
 		"secret_len", len(secret),
-		"secret_prefix", secretPrefix,
 		"server_time", time.Now().UTC().Format(time.RFC3339))
 
 	if !valid {
@@ -406,10 +427,14 @@ const StepUpGrantTTL = 15 * time.Minute
 // VerifyStepUp 校验 TOTP 码并授予当前会话一段时间的 step-up 权限。
 // 返回授权有效期，供前端展示/设置提醒。
 func (s *TotpService) VerifyStepUp(ctx context.Context, userID int64, sessionKey, code string) (time.Duration, error) {
+	key, err := s.stepUpCredentialKey(ctx, userID, sessionKey)
+	if err != nil {
+		return 0, err
+	}
 	if err := s.VerifyCode(ctx, userID, code); err != nil {
 		return 0, err
 	}
-	if err := s.cache.SetStepUpGrant(ctx, userID, sessionKey, StepUpGrantTTL); err != nil {
+	if err := s.cache.SetStepUpGrant(ctx, userID, key, StepUpGrantTTL); err != nil {
 		return 0, fmt.Errorf("store step-up grant: %w", err)
 	}
 	return StepUpGrantTTL, nil
@@ -417,12 +442,17 @@ func (s *TotpService) VerifyStepUp(ctx context.Context, userID int64, sessionKey
 
 // HasStepUpGrant 检查当前会话是否在 step-up 有效期内。
 func (s *TotpService) HasStepUpGrant(ctx context.Context, userID int64, sessionKey string) (bool, error) {
-	return s.cache.HasStepUpGrant(ctx, userID, sessionKey)
+	key, err := s.stepUpCredentialKey(ctx, userID, sessionKey)
+	if err != nil {
+		return false, err
+	}
+	return s.cache.HasStepUpGrant(ctx, userID, key)
 }
 
-// CreateLoginSession creates a temporary login session for 2FA
-func (s *TotpService) CreateLoginSession(ctx context.Context, userID int64, email string) (string, error) {
-	return s.createLoginSession(ctx, userID, email, nil)
+// CreateLoginSession binds the 2FA challenge to the credential version that
+// actually passed password verification. A newer repository read is not proof.
+func (s *TotpService) CreateLoginSession(ctx context.Context, userID int64, email string, credentialVersion int64) (string, error) {
+	return s.createLoginSession(ctx, userID, email, credentialVersion, nil)
 }
 
 // CreatePendingOAuthBindLoginSession creates a temporary 2FA session that will
@@ -431,10 +461,11 @@ func (s *TotpService) CreatePendingOAuthBindLoginSession(
 	ctx context.Context,
 	userID int64,
 	email string,
+	credentialVersion int64,
 	pendingSessionToken string,
 	browserSessionKey string,
 ) (string, error) {
-	return s.createLoginSession(ctx, userID, email, &PendingOAuthBindLoginSession{
+	return s.createLoginSession(ctx, userID, email, credentialVersion, &PendingOAuthBindLoginSession{
 		PendingSessionToken: pendingSessionToken,
 		BrowserSessionKey:   browserSessionKey,
 	})
@@ -444,6 +475,7 @@ func (s *TotpService) createLoginSession(
 	ctx context.Context,
 	userID int64,
 	email string,
+	credentialVersion int64,
 	pendingOAuthBind *PendingOAuthBindLoginSession,
 ) (string, error) {
 	// Generate a random temp token
@@ -453,10 +485,11 @@ func (s *TotpService) createLoginSession(
 	}
 
 	session := &TotpLoginSession{
-		UserID:           userID,
-		Email:            email,
-		TokenExpiry:      time.Now().Add(totpLoginTTL),
-		PendingOAuthBind: pendingOAuthBind,
+		CredentialVersion: credentialVersion,
+		UserID:            userID,
+		Email:             email,
+		TokenExpiry:       time.Now().Add(totpLoginTTL),
+		PendingOAuthBind:  pendingOAuthBind,
 	}
 
 	if err := s.cache.SetLoginSession(ctx, tempToken, session, totpLoginTTL); err != nil {
@@ -468,7 +501,18 @@ func (s *TotpService) createLoginSession(
 
 // GetLoginSession retrieves a login session
 func (s *TotpService) GetLoginSession(ctx context.Context, tempToken string) (*TotpLoginSession, error) {
-	return s.cache.GetLoginSession(ctx, tempToken)
+	session, err := s.cache.GetLoginSession(ctx, tempToken)
+	if err != nil || session == nil {
+		return session, err
+	}
+	user, err := s.userRepo.GetByID(ctx, session.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if session.CredentialVersion != resolvedTokenVersion(user) || !time.Now().Before(session.TokenExpiry) {
+		return nil, ErrTokenRevoked
+	}
+	return session, nil
 }
 
 // DeleteLoginSession deletes a login session
@@ -558,4 +602,21 @@ func (s *TotpService) SendVerifyCode(ctx context.Context, userID int64, locale .
 
 	// Send verification code via queue
 	return s.emailQueueService.EnqueueVerifyCode(user.Email, siteName, firstEmailLocale(locale))
+}
+
+func (s *TotpService) stepUpCredentialKey(ctx context.Context, userID int64, sessionKey string) (string, error) {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	secret := ""
+	if user.TotpSecretEncrypted != nil {
+		secret = *user.TotpSecretEncrypted
+	}
+	sum := sha256.Sum256([]byte(secret))
+	return fmt.Sprintf("%s:v%d:%x", sessionKey, resolvedTokenVersion(user), sum[:]), nil
+}
+
+func (s *TotpService) DisableWithSession(ctx context.Context, userID int64, emailCode, password, sessionKey string) error {
+	return s.disable(ctx, userID, emailCode, password, sessionKey)
 }

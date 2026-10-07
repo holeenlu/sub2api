@@ -28,7 +28,7 @@ const {
   showError: vi.fn()
 }))
 
-const authState = vi.hoisted(() => ({ isSimpleMode: false }))
+const authState = vi.hoisted(() => ({ isSimpleMode: false, isSuperAdmin: true, can: () => true }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {

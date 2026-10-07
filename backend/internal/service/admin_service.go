@@ -19,6 +19,7 @@ type AdminService interface {
 	CreateUser(ctx context.Context, input *CreateUserInput) (*User, error)
 	UpdateUser(ctx context.Context, id int64, input *UpdateUserInput) (*User, error)
 	DeleteUser(ctx context.Context, id int64) error
+	DeleteUsers(ctx context.Context, ids []int64) error
 	UpdateUserBalance(ctx context.Context, userID int64, balance float64, operation string, notes string) (*User, error)
 	BatchUpdateConcurrency(ctx context.Context, userIDs []int64, value int, mode string) (int, error)
 	BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error)
@@ -175,6 +176,7 @@ type CreateUserInput struct {
 }
 
 type UpdateUserInput struct {
+	ResetTOTP     bool
 	Email         string
 	Password      string
 	Username      *string
@@ -683,6 +685,7 @@ var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_ST
 
 // adminServiceImpl implements AdminService
 type adminServiceImpl struct {
+	emailQueue           *EmailQueueService
 	cfg                  *config.Config
 	userRepo             UserRepository
 	groupRepo            GroupRepository
@@ -752,8 +755,10 @@ func NewAdminService(
 	compositeRouteRepo CompositeModelRouteRepository,
 	compositeResolver *CompositeRouteResolver,
 	channelCacheInvalidator ChannelCacheInvalidator,
+	emailQueue *EmailQueueService,
 ) AdminService {
 	return &adminServiceImpl{
+		emailQueue:           emailQueue,
 		cfg:                  cfg,
 		userRepo:             userRepo,
 		groupRepo:            groupRepo,

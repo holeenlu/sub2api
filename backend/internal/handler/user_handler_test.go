@@ -38,7 +38,7 @@ func (s *userHandlerRepoStub) GetByEmail(context.Context, string) (*service.User
 	cloned := *s.user
 	return &cloned, nil
 }
-func (s *userHandlerRepoStub) GetFirstAdmin(context.Context) (*service.User, error) {
+func (s *userHandlerRepoStub) GetFirstSuperAdmin(context.Context) (*service.User, error) {
 	cloned := *s.user
 	return &cloned, nil
 }

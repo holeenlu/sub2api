@@ -42,7 +42,7 @@ func (s *userRepoStubForGroupUpdate) GetByID(context.Context, int64) (*User, err
 func (s *userRepoStubForGroupUpdate) GetByEmail(context.Context, string) (*User, error) {
 	panic("unexpected")
 }
-func (s *userRepoStubForGroupUpdate) GetFirstAdmin(context.Context) (*User, error) {
+func (s *userRepoStubForGroupUpdate) GetFirstSuperAdmin(context.Context) (*User, error) {
 	panic("unexpected")
 }
 func (s *userRepoStubForGroupUpdate) Update(context.Context, *User, UserUpdateFields) error {

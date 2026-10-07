@@ -16,7 +16,7 @@
               <Icon name="refresh" size="sm" :class="statusLoading ? 'animate-spin' : ''" />
               {{ t('admin.riskControl.refreshStatus') }}
             </button>
-            <button type="button" class="btn btn-primary inline-flex items-center gap-2" @click="openSettings">
+            <button type="button" class="btn btn-primary inline-flex items-center gap-2" v-if="rolePermissions.isSuperAdmin" @click="openSettings">
               <Icon name="cog" size="sm" />
               {{ t('admin.riskControl.openSettings') }}
             </button>
@@ -1147,6 +1147,8 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore as useRolePermissions } from "@/stores/auth"
+const rolePermissions = useRolePermissions()
 import { computed, onMounted, onUnmounted, reactive, ref, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -1835,13 +1837,13 @@ async function loadAll() {
   loading.value = true
   try {
     const [config, groupItems, runtimeStatus, proxyItems] = await Promise.all([
-      adminAPI.riskControl.getConfig(),
+      rolePermissions.isSuperAdmin ? adminAPI.riskControl.getConfig() : Promise.resolve(null),
       adminAPI.groups.getAll(),
       adminAPI.riskControl.getStatus(),
       // 代理列表加载失败不阻塞风控页面（仅影响下拉可选项）
-      adminAPI.proxies.getAll().catch(() => [] as Proxy[]),
+      rolePermissions.isSuperAdmin ? adminAPI.proxies.getAll().catch(() => [] as Proxy[]) : Promise.resolve([] as Proxy[]),
     ])
-    applyConfig(config)
+    if (config) applyConfig(config)
     groups.value = groupItems
     status.value = runtimeStatus
     proxies.value = proxyItems

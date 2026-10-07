@@ -68,7 +68,7 @@ export async function list(
   pageSize: number = 20,
   filters?: {
     status?: 'active' | 'disabled'
-    role?: 'admin' | 'user'
+    role?: 'super_admin' | 'admin' | 'user'
     search?: string
     group_name?: string         // fuzzy filter by allowed group name
     api_key_group_id?: number   // filter users by the group their API keys are bound to
@@ -132,7 +132,7 @@ export async function create(userData: {
   password: string
   username?: string
   notes?: string
-  role?: 'admin' | 'user'
+  role?: 'super_admin' | 'admin' | 'user'
   balance?: number
   concurrency?: number
   rpm_limit?: number
@@ -158,6 +158,10 @@ export async function update(id: number, updates: UpdateUserRequest): Promise<Ad
  * @param id - User ID
  * @returns Success confirmation
  */
+export async function deleteUsers(userIds: number[]): Promise<void> {
+  await apiClient.post('/admin/users/batch-delete', { user_ids: userIds })
+}
+
 export async function deleteUser(id: number): Promise<{ message: string }> {
   const { data } = await apiClient.delete<{ message: string }>(`/admin/users/${id}`)
   return data
@@ -410,6 +414,7 @@ export const usersAPI = {
   create,
   update,
   delete: deleteUser,
+  deleteBatch: deleteUsers,
   updateBalance,
   updateConcurrency,
   batchUpdateLimits,

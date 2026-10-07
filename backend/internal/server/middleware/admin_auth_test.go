@@ -25,7 +25,7 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 	admin := &service.User{
 		ID:           1,
 		Email:        "admin@example.com",
-		Role:         service.RoleAdmin,
+		Role:         service.RoleSuperAdmin,
 		Status:       service.StatusActive,
 		TokenVersion: 2,
 		Concurrency:  1,
@@ -44,7 +44,7 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 
 	router := gin.New()
 	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, nil)))
-	router.GET("/t", func(c *gin.Context) {
+	router.Group("").GET("/api/v1/admin/users", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
@@ -58,7 +58,7 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		router.ServeHTTP(w, req)
 
@@ -76,7 +76,7 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		router.ServeHTTP(w, req)
 
@@ -93,7 +93,7 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
 		req.Header.Set("Upgrade", "websocket")
 		req.Header.Set("Connection", "Upgrade")
 		req.Header.Set("Sec-WebSocket-Protocol", "sub2api-admin, jwt."+token)
@@ -113,7 +113,7 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
 		req.Header.Set("Upgrade", "websocket")
 		req.Header.Set("Connection", "Upgrade")
 		req.Header.Set("Sec-WebSocket-Protocol", "sub2api-admin, jwt."+token)
@@ -146,8 +146,8 @@ func (s *stubUserRepo) GetByEmail(ctx context.Context, email string) (*service.U
 	panic("unexpected GetByEmail call")
 }
 
-func (s *stubUserRepo) GetFirstAdmin(ctx context.Context) (*service.User, error) {
-	panic("unexpected GetFirstAdmin call")
+func (s *stubUserRepo) GetFirstSuperAdmin(ctx context.Context) (*service.User, error) {
+	panic("unexpected GetFirstSuperAdmin call")
 }
 
 func (s *stubUserRepo) Update(ctx context.Context, user *service.User, fields service.UserUpdateFields) error {
