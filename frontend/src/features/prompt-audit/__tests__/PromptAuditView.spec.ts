@@ -239,3 +239,5 @@ describe('PromptAuditView', () => {
     expect(wrapper.find('[data-test="filter-delete-dialog"]').exists()).toBe(false)
   })
 })
+
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, can: () => true }) }))

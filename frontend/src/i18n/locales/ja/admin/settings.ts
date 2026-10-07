@@ -5,6 +5,7 @@ export default {
       title: 'システム設定',
       description: '登録、メール認証、デフォルト値、SMTP設定を管理します',
       tabs: {
+        roles: "管理者ロールの権限",
         general: '一般',
         agreement: '同意',
         features: '機能スイッチ',

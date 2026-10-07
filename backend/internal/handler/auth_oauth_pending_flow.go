@@ -1237,7 +1237,7 @@ func applyPendingOAuthBindingTx(
 		if json.Unmarshal([]byte(pendingSessionStringValue(session.LocalFlowState, "bind_claims")), &claims) != nil || claims.UserID != targetUserID || claims.ExpiresAt == nil || !time.Now().Before(claims.ExpiresAt.Time) {
 			return service.ErrInvalidToken
 		}
-		user := &service.User{ID: current.ID, Email: current.Email, PasswordHash: current.PasswordHash, Status: current.Status, SessionGeneration: current.SessionGeneration}
+		user := &service.User{ID: current.ID, Email: current.Email, Role: current.Role, PasswordHash: current.PasswordHash, Status: current.Status, SessionGeneration: current.SessionGeneration}
 		if err := authService.ValidateAccessSession(ctx, &claims, user); err != nil {
 			return err
 		}

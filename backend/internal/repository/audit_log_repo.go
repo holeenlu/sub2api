@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"strings"
 	"time"
 
@@ -25,9 +26,13 @@ func NewAuditLogRepository(db *sql.DB) service.AuditLogRepository {
 
 const auditLogInsertColumns = `created_at, actor_user_id, actor_email, actor_role, auth_method,
 credential_masked, action, method, path, request_id, client_ip, user_agent,
-request_body, status_code, latency_ms, extra`
+request_body, status_code, latency_ms, extra, visibility`
 
 func auditLogInsertValues(log *service.AuditLog) []any {
+	visibility := log.Visibility
+	if visibility != "staff" || log.ActorRole == service.RoleSuperAdmin || log.AuthMethod == service.AuditAuthMethodAdminAPIKey {
+		visibility = service.RoleSuperAdmin
+	}
 	createdAt := log.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -55,6 +60,7 @@ func auditLogInsertValues(log *service.AuditLog) []any {
 		log.StatusCode,
 		log.LatencyMs,
 		extraJSON,
+		visibility,
 	}
 }
 
@@ -74,7 +80,7 @@ func (r *auditLogRepository) BatchInsert(ctx context.Context, logs []*service.Au
 		"audit_logs",
 		"created_at", "actor_user_id", "actor_email", "actor_role", "auth_method",
 		"credential_masked", "action", "method", "path", "request_id", "client_ip", "user_agent",
-		"request_body", "status_code", "latency_ms", "extra",
+		"request_body", "status_code", "latency_ms", "extra", "visibility",
 	))
 	if err != nil {
 		_ = tx.Rollback()
@@ -117,15 +123,21 @@ func (r *auditLogRepository) Insert(ctx context.Context, log *service.AuditLog) 
 		return fmt.Errorf("nil audit log")
 	}
 	query := `INSERT INTO audit_logs (` + auditLogInsertColumns + `)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`
 	_, err := r.db.ExecContext(ctx, query, auditLogInsertValues(log)...)
 	return err
 }
 
-func buildAuditLogsWhere(filter *service.AuditLogFilter) (string, []any) {
+func buildAuditLogsWhere(scope service.AuditLogScope, filter *service.AuditLogFilter) (string, []any) {
 	clauses := make([]string, 0, 10)
 	args := make([]any, 0, 10)
 	clauses = append(clauses, "1=1")
+	if scope != service.AuditScopeAll && scope != service.AuditScopeStaff {
+		clauses = append(clauses, "1=0")
+	}
+	if scope == service.AuditScopeStaff {
+		clauses = append(clauses, "l.visibility = 'staff' AND l.actor_role <> 'super_admin'")
+	}
 
 	if filter.StartTime != nil {
 		args = append(args, filter.StartTime.UTC())
@@ -192,7 +204,8 @@ const auditLogSelectColumns = `
   COALESCE(l.request_body, ''),
   l.status_code,
   l.latency_ms,
-  COALESCE(l.extra::text, '{}')`
+  COALESCE(l.extra::text, '{}'),
+  l.visibility`
 
 func scanAuditLogRow(scan func(dest ...any) error) (*service.AuditLog, error) {
 	item := &service.AuditLog{}
@@ -216,6 +229,7 @@ func scanAuditLogRow(scan func(dest ...any) error) (*service.AuditLog, error) {
 		&item.StatusCode,
 		&item.LatencyMs,
 		&extraRaw,
+		&item.Visibility,
 	); err != nil {
 		return nil, err
 	}
@@ -233,7 +247,31 @@ func scanAuditLogRow(scan func(dest ...any) error) (*service.AuditLog, error) {
 	return item, nil
 }
 
-func (r *auditLogRepository) List(ctx context.Context, filter *service.AuditLogFilter) (*service.AuditLogList, error) {
+// The upgrade boundary is one immutable value in the existing protected
+// policy record. Label old rows on read; migration never rewrites the audit table.
+func (r *auditLogRepository) markLegacy(ctx context.Context, scope service.AuditLogScope, logs ...*service.AuditLog) {
+	if scope != service.AuditScopeAll || len(logs) == 0 {
+		return
+	}
+	var raw string
+	if r.db.QueryRowContext(ctx, "SELECT value FROM settings WHERE key=$1", authz.PolicyKey).Scan(&raw) != nil {
+		return
+	}
+	var policy authz.Policy
+	if json.Unmarshal([]byte(raw), &policy) != nil {
+		return
+	}
+	for _, entry := range logs {
+		if entry != nil && entry.ID > 0 && entry.ID <= policy.LegacyAuditMaxID {
+			if entry.Extra == nil {
+				entry.Extra = map[string]any{}
+			}
+			entry.Extra["pre_role_upgrade"] = true
+		}
+	}
+}
+
+func (r *auditLogRepository) List(ctx context.Context, scope service.AuditLogScope, filter *service.AuditLogFilter) (*service.AuditLogList, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("nil audit log repository")
 	}
@@ -253,7 +291,7 @@ func (r *auditLogRepository) List(ctx context.Context, filter *service.AuditLogF
 		pageSize = 200
 	}
 
-	where, args := buildAuditLogsWhere(filter)
+	where, args := buildAuditLogsWhere(scope, filter)
 	countSQL := "SELECT COUNT(*) FROM audit_logs l " + where
 	var total int
 	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
@@ -286,6 +324,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 		return nil, err
 	}
 
+	r.markLegacy(ctx, scope, logs...)
 	return &service.AuditLogList{
 		Logs:     logs,
 		Total:    total,
@@ -294,11 +333,17 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 	}, nil
 }
 
-func (r *auditLogRepository) GetByID(ctx context.Context, id int64) (*service.AuditLog, error) {
+func (r *auditLogRepository) GetByID(ctx context.Context, scope service.AuditLogScope, id int64) (*service.AuditLog, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("nil audit log repository")
 	}
 	query := "SELECT" + auditLogSelectColumns + "\nFROM audit_logs l WHERE l.id = $1"
+	if scope != service.AuditScopeAll && scope != service.AuditScopeStaff {
+		return nil, service.ErrAuditLogNotFound
+	}
+	if scope == service.AuditScopeStaff {
+		query += " AND l.visibility = 'staff' AND l.actor_role <> 'super_admin'"
+	}
 	row := r.db.QueryRowContext(ctx, query, id)
 	item, err := scanAuditLogRow(row.Scan)
 	if err != nil {
@@ -307,15 +352,17 @@ func (r *auditLogRepository) GetByID(ctx context.Context, id int64) (*service.Au
 		}
 		return nil, err
 	}
+	r.markLegacy(ctx, scope, item)
 	return item, nil
 }
 
-func (r *auditLogRepository) Count(ctx context.Context) (int64, error) {
+func (r *auditLogRepository) Count(ctx context.Context, scope service.AuditLogScope) (int64, error) {
 	if r == nil || r.db == nil {
 		return 0, fmt.Errorf("nil audit log repository")
 	}
 	var total int64
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&total); err != nil {
+	where, args := buildAuditLogsWhere(scope, &service.AuditLogFilter{})
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_logs l "+where, args...).Scan(&total); err != nil {
 		return 0, err
 	}
 	return total, nil

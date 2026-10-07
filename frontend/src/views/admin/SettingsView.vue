@@ -1,6 +1,7 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-6xl space-y-6">
+    <DelegatedSettings v-if="!roleAuth.isSuperAdmin" />
+    <div v-else class="mx-auto max-w-6xl space-y-6">
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-12">
         <div
@@ -43,6 +44,8 @@
             </div>
           </nav>
         </div>
+
+        <AdminRolePermissions v-if="activeTab === 'roles'" />
 
         <!-- Tab: Security — Admin API Key -->
         <div v-show="activeTab === 'security'" class="space-y-6">
@@ -8822,7 +8825,7 @@
         </div>
 
         <!-- Save Button -->
-        <div v-show="activeTab !== 'backup'" class="settings-save-bar flex justify-end">
+        <div v-show="activeTab !== 'backup' && activeTab !== 'roles'" class="settings-save-bar flex justify-end">
           <button
             type="submit"
             :disabled="saving || loadFailed"
@@ -8899,6 +8902,9 @@
 
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useAuthStore } from "@/stores/auth";
+import AdminRolePermissions from "@/components/admin/AdminRolePermissions.vue";
+import DelegatedSettings from "@/components/admin/DelegatedSettings.vue";
 import { isChineseLocale } from "@/i18n/localeUtils";
 import { adminAPI } from "@/api";
 import {
@@ -9019,7 +9025,10 @@ const paymentMethodsHref = computed(() =>
     : BRAND_PAYMENT_METHODS_URL.en,
 );
 
+const roleAuth = useAuthStore();
+
 type SettingsTab =
+  | "roles"
   | "general"
   | "agreement"
   | "features"
@@ -9032,6 +9041,7 @@ type SettingsTab =
   | "backup";
 const activeTab = ref<SettingsTab>("general");
 const settingsTabs = [
+  { key: "roles" as SettingsTab, icon: "users" as const },
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
   { key: "features" as SettingsTab, icon: "bolt" as const },
@@ -12835,6 +12845,7 @@ async function handleDeleteProvider() {
 }
 
 onMounted(() => {
+  if (!roleAuth.isSuperAdmin) return;
 
   loadSettings();
   loadSubscriptionGroups();

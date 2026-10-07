@@ -202,6 +202,13 @@ func (h *SettingHandler) ListEmailTemplates(c *gin.Context) {
 		return
 	}
 	events := h.notificationEmailService.ListEventInfos()
+	permitted := events[:0]
+	for _, event := range events {
+		if h.notificationEmailService.CheckTemplateManagement(c.Request.Context(), event.Event) == nil {
+			permitted = append(permitted, event)
+		}
+	}
+	events = permitted
 	templates, err := h.notificationEmailService.ListTemplates(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -222,6 +229,11 @@ func (h *SettingHandler) GetEmailTemplate(c *gin.Context) {
 		response.InternalError(c, "notification email service is not configured")
 		return
 	}
+	if err := h.notificationEmailService.CheckTemplateManagement(c.Request.Context(), c.Param("event")); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	tmpl, err := h.notificationEmailService.GetTemplate(c.Request.Context(), c.Param("event"), c.Param("locale"))
 	if err != nil {
 		response.BadRequest(c, err.Error())
@@ -237,6 +249,11 @@ func (h *SettingHandler) UpdateEmailTemplate(c *gin.Context) {
 		response.InternalError(c, "notification email service is not configured")
 		return
 	}
+	if err := h.notificationEmailService.CheckTemplateManagement(c.Request.Context(), c.Param("event")); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	var req dto.UpdateEmailTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -257,6 +274,11 @@ func (h *SettingHandler) RestoreOfficialEmailTemplate(c *gin.Context) {
 		response.InternalError(c, "notification email service is not configured")
 		return
 	}
+	if err := h.notificationEmailService.CheckTemplateManagement(c.Request.Context(), c.Param("event")); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	tmpl, err := h.notificationEmailService.RestoreOfficialTemplate(c.Request.Context(), c.Param("event"), c.Param("locale"))
 	if err != nil {
 		response.BadRequest(c, err.Error())
@@ -275,6 +297,10 @@ func (h *SettingHandler) PreviewEmailTemplate(c *gin.Context) {
 	var req dto.PreviewEmailTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := h.notificationEmailService.CheckTemplateManagement(c.Request.Context(), req.Event); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 	preview, err := h.notificationEmailService.PreviewTemplate(c.Request.Context(), service.NotificationEmailPreviewInput{

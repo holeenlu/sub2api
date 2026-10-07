@@ -63,7 +63,7 @@ func TestUpdateUserKeepAdminRoleSkipsStepUp(t *testing.T) {
 func TestUpdateUserRegularRoleSkipsStepUp(t *testing.T) {
 	router, _ := setupRoleStepUpRouter(t)
 
-	rec := doJSON(t, router, http.MethodPut, "/api/v1/admin/users/1", map[string]any{"role": "user", "email": "u@example.com"})
+	rec := doJSON(t, router, http.MethodPut, "/api/v1/admin/users/1", map[string]any{"role": "user", "username": "Ordinary profile"})
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 

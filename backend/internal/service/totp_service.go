@@ -149,7 +149,7 @@ func (s *TotpService) GetStatus(ctx context.Context, userID int64) (*TotpStatus,
 // 且管理员凭证失守时攻击者往往同时控制通知邮箱，邮箱验证码不构成有效防线。
 // 普通用户维持原有行为：开启邮箱验证时用邮箱验证码，否则用密码。
 func (s *TotpService) usesEmailVerification(ctx context.Context, user *User) bool {
-	return user.Role != RoleAdmin && s.settingService.IsEmailVerifyEnabled(ctx)
+	return !user.IsStaff() && s.settingService.IsEmailVerifyEnabled(ctx)
 }
 
 // verifyIdentity 按 usesEmailVerification 的结果校验邮箱验证码或密码。
@@ -335,7 +335,7 @@ func (s *TotpService) disable(ctx context.Context, userID int64, emailCode, pass
 		return err
 	}
 
-	if user.Role == RoleAdmin && s.settingService.IsStepUpEnabled(ctx) {
+	if user.IsStaff() && s.settingService.IsStepUpEnabled(ctx) {
 		if sessionKey == "" {
 			return infraerrors.Forbidden("STEP_UP_REQUIRED", "Recent verification of the existing factor is required")
 		}

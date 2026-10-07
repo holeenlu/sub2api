@@ -39,7 +39,7 @@
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="openCreateDialog" class="btn btn-primary">
+            <button v-if="rolePermissions.can('channels.manage')" @click="openCreateDialog" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.channels.createChannel', 'Create Channel') }}
             </button>
@@ -67,7 +67,7 @@
 
           <template #cell-status="{ row }">
             <Toggle
-              :modelValue="row.status === 'active'"
+              :disabled="!rolePermissions.can('channels.manage')" :modelValue="row.status === 'active'"
               @update:modelValue="toggleChannelStatus(row)"
             />
           </template>
@@ -99,14 +99,14 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
-                @click="openEditDialog(row)"
+                v-if="rolePermissions.can('channels.manage')" @click="openEditDialog(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit', 'Edit') }}</span>
               </button>
               <button
-                @click="handleDelete(row)"
+                v-if="rolePermissions.can('channels.manage')" @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
                 <Icon name="trash" size="sm" />
@@ -220,7 +220,7 @@
             </div>
 
             <!-- Billing Basis -->
-            <div>
+            <div :inert="!rolePermissions.canEditAdminField(editingChannel ? 'channel.update' : 'channel.create', 'billing_model_source')" :aria-disabled="!rolePermissions.canEditAdminField(editingChannel ? 'channel.update' : 'channel.create', 'billing_model_source')">
               <label class="input-label">{{ t('admin.channels.form.billingModelSource', 'Billing Basis') }}</label>
               <Select v-model="form.billing_model_source" :options="billingModelSourceOptions" />
               <p class="mt-1 text-xs text-gray-400">
@@ -254,7 +254,7 @@
 
             <!-- Apply Pricing to Account Stats (toggle only in basic settings) -->
             <div class="border-t border-gray-200 pt-4 dark:border-dark-700">
-              <div class="flex items-center justify-between">
+              <div :inert="!rolePermissions.canEditAdminField(editingChannel ? 'channel.update' : 'channel.create', 'apply_pricing_to_account_stats')" :aria-disabled="!rolePermissions.canEditAdminField(editingChannel ? 'channel.update' : 'channel.create', 'apply_pricing_to_account_stats')" class="flex items-center justify-between">
                 <div>
                   <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.channels.form.applyPricingToAccountStats') }}
@@ -335,7 +335,7 @@
                     {{ t('admin.channels.form.webSearchEmulationHint') }}
                   </p>
                 </div>
-                <Toggle v-model="section.web_search_emulation" />
+                <Toggle :disabled="!rolePermissions.canEditAdminField(editingChannel ? 'channel.update' : 'channel.create', 'features_config')" v-model="section.web_search_emulation" />
               </div>
             </div>
 
@@ -350,7 +350,7 @@
                     {{ t('admin.channels.form.codexImageGenerationBridgeHint') }}
                   </p>
                 </div>
-                <Toggle v-model="section.codex_image_generation_bridge" />
+                <Toggle :disabled="!rolePermissions.canEditAdminField(editingChannel ? 'channel.update' : 'channel.create', 'features_config')" v-model="section.codex_image_generation_bridge" />
               </div>
             </div>
 
@@ -365,7 +365,7 @@
                     {{ t('admin.channels.form.bedrockCCCompatHint') }}
                   </p>
                 </div>
-                <Toggle v-model="section.bedrock_cc_compat" />
+                <Toggle :disabled="!rolePermissions.canEditAdminField(editingChannel ? 'channel.update' : 'channel.create', 'features_config')" v-model="section.bedrock_cc_compat" />
               </div>
             </div>
 
@@ -418,7 +418,7 @@
             </div>
 
             <!-- Model Pricing -->
-            <div>
+            <div :inert="!rolePermissions.canEditAdminField(editingChannel ? 'channel.update' : 'channel.create', 'model_pricing')">
               <div class="mb-1 flex items-center justify-between">
                 <label class="input-label text-xs mb-0">{{ t('admin.channels.form.modelPricing', 'Model Pricing') }}</label>
                 <div class="flex items-center gap-2">
@@ -456,7 +456,7 @@
             </div>
 
             <!-- Account Stats Pricing Rules (per-platform, always visible) -->
-            <div class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
+            <div v-if="rolePermissions.can('billing.cost.read')" :inert="!rolePermissions.canEditAdminField(editingChannel ? 'channel.update' : 'channel.create', 'account_stats_pricing_rules')" class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
               <div class="flex items-center justify-between">
                 <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('admin.channels.form.accountStatsPricingRules') }}
@@ -627,6 +627,8 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore } from '@/stores/auth'
+const rolePermissions = useAuthStore()
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -659,6 +661,7 @@ const appStore = useAppStore()
 // Web Search global enabled state (loaded once on mount)
 const webSearchGlobalEnabled = ref(false)
 async function loadWebSearchGlobalState() {
+  if (!rolePermissions.isSuperAdmin) return
   try {
     const cfg = await adminAPI.settings.getWebSearchEmulationConfig()
     webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
@@ -1615,7 +1618,7 @@ async function handleSubmit() {
         apply_pricing_to_account_stats: form.apply_pricing_to_account_stats,
         account_stats_pricing_rules: accountStatsRulesToAPI()
       }
-      await adminAPI.channels.update(editingChannel.value.id, req)
+      await adminAPI.channels.update(editingChannel.value.id, rolePermissions.editableAdminFields("channel.update", req))
       appStore.showSuccess(t('admin.channels.updateSuccess', 'Channel updated'))
     } else {
       const req: CreateChannelRequest = {
@@ -1630,7 +1633,7 @@ async function handleSubmit() {
         apply_pricing_to_account_stats: form.apply_pricing_to_account_stats,
         account_stats_pricing_rules: accountStatsRulesToAPI()
       }
-      await adminAPI.channels.create(req)
+      await adminAPI.channels.create(rolePermissions.editableAdminFields("channel.create", req))
       appStore.showSuccess(t('admin.channels.createSuccess', 'Channel created'))
     }
     closeDialog()

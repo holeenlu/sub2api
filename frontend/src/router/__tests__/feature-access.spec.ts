@@ -14,6 +14,8 @@ const authStore = vi.hoisted(() => ({
   checkAuth: vi.fn(),
   isAuthenticated: true,
   isAdmin: false,
+  get adminLandingPath() { return this.isAdmin ? '/admin/dashboard' : '/dashboard' },
+  canAccessAdminPage: (_path: string) => true,
   isSimpleMode: false,
   hasPendingAuthSession: false,
 }))
@@ -49,6 +51,8 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('@/stores/app', () => ({
   useAppStore: () => appStore,
 }))
+
+vi.mock('@/stores/adminCompliance', () => ({ useAdminComplianceStore: () => ({ initialized: true }) }))
 
 vi.mock('@/stores/adminSettings', () => ({
   useAdminSettingsStore: () => ({ customMenuItems: [] }),
@@ -112,6 +116,7 @@ describe('feature route guard', () => {
   })
 
   beforeEach(() => {
+    authStore.canAccessAdminPage = () => true
     authStore.isAuthenticated = true
     authStore.isAdmin = false
     authStore.isSimpleMode = false
@@ -177,6 +182,16 @@ describe('feature route guard', () => {
     expect(next).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledWith(target)
   })
+  it('does not loop when the only delegated page belongs to a disabled feature', async () => {
+    authStore.isAdmin = true
+    authStore.canAccessAdminPage = (path: string) => path === '/admin/orders'
+    appStore.publicSettingsLoaded = true
+    appStore.cachedPublicSettings = { payment_enabled: false }
+    const { navigation, next } = runGuard({ requiresAdmin: true, requiresPayment: true }, '/admin/orders')
+    await navigation
+    expect(next).toHaveBeenCalledWith('/dashboard')
+  })
+
 })
 
 describe('subscription route guard (opt-out flag)', () => {
@@ -201,6 +216,7 @@ describe('subscription route guard (opt-out flag)', () => {
   })
 
   it('sends admins to the admin dashboard when subscriptions are disabled', async () => {
+    authStore.canAccessAdminPage = () => true
     authStore.isAdmin = true
     appStore.cachedPublicSettings = { subscription_enabled: false }
 

@@ -1049,8 +1049,8 @@ func (s *emailBindUserRepoStub) GetByEmail(_ context.Context, email string) (*se
 	return cloneEmailBindUser(user), nil
 }
 
-func (s *emailBindUserRepoStub) GetFirstAdmin(context.Context) (*service.User, error) {
-	panic("unexpected GetFirstAdmin call")
+func (s *emailBindUserRepoStub) GetFirstSuperAdmin(context.Context) (*service.User, error) {
+	panic("unexpected GetFirstSuperAdmin call")
 }
 
 func (s *emailBindUserRepoStub) Update(_ context.Context, user *service.User, _ service.UserUpdateFields) error {

@@ -7,6 +7,7 @@ export default {
       title: '系統設定',
       description: '管理註冊、電子郵件驗證、預設值和 SMTP 設定',
       tabs: {
+        roles: "管理員角色權限",
         general: '通用設定',
         agreement: '登入條款',
         features: '功能開關',

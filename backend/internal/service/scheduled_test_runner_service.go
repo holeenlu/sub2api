@@ -137,6 +137,9 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 		// Never reinterpret a retired quality plan as a connectivity test.
 		return
 	}
+	if s.scheduledSvc == nil || s.scheduledSvc.CheckScheduledAuthorization(ctx, plan.Authorization) != nil {
+		return
+	}
 	result, err := s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d RunTestBackground error: %v", plan.ID, err)
@@ -148,7 +151,7 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 	}
 
 	// Auto-recover account if test succeeded and auto_recover is enabled.
-	if result.Status == "success" && plan.AutoRecover {
+	if result.Status == "success" && plan.AutoRecover && s.scheduledSvc.CheckScheduledAuthorization(ctx, plan.Authorization) == nil {
 		s.tryRecoverAccount(ctx, plan.AccountID, plan.ID)
 	}
 

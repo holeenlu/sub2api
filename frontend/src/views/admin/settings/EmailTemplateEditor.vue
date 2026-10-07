@@ -24,6 +24,7 @@
           type="button"
           class="btn btn-secondary btn-sm"
           :disabled="loadingTemplate || restoring || !selectedEvent || !selectedLocale"
+          v-if="!props.readOnly"
           @click="restoreOfficial"
         >
           {{ restoring ? t("admin.settings.emailTemplates.restoring") : t("admin.settings.emailTemplates.restoreOfficial") }}
@@ -32,6 +33,7 @@
           type="button"
           class="btn btn-primary btn-sm"
           :disabled="loadingTemplate || saving || !canSave"
+          v-if="!props.readOnly"
           @click="saveTemplate"
         >
           {{ saving ? t("admin.settings.emailTemplates.saving") : t("admin.settings.emailTemplates.save") }}
@@ -145,7 +147,7 @@
                 v-model="subject"
                 type="text"
                 class="input"
-                :disabled="loadingTemplate"
+                :disabled="loadingTemplate || props.readOnly"
                 :placeholder="t('admin.settings.emailTemplates.subjectPlaceholder')"
               />
             </div>
@@ -159,7 +161,7 @@
                 v-model="html"
                 rows="18"
                 class="input min-h-[28rem] resize-y font-mono text-sm leading-6"
-                :disabled="loadingTemplate"
+                :disabled="loadingTemplate || props.readOnly"
                 :placeholder="t('admin.settings.emailTemplates.htmlPlaceholder')"
               ></textarea>
             </div>
@@ -230,6 +232,7 @@
 </template>
 
 <script setup lang="ts">
+const props = withDefaults(defineProps<{ readOnly?: boolean }>(), { readOnly: false })
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
@@ -522,6 +525,7 @@ async function loadTemplateList() {
 }
 
 async function saveTemplate() {
+  if (props.readOnly) return;
   if (!canSave.value) {
     appStore.showError(t("admin.settings.emailTemplates.validationRequired"));
     return;
@@ -570,6 +574,7 @@ async function refreshPreview() {
 }
 
 async function restoreOfficial() {
+  if (props.readOnly) return;
   if (!selectedEvent.value || !selectedLocale.value) return;
   if (!window.confirm(t("admin.settings.emailTemplates.restoreConfirm"))) return;
 

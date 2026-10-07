@@ -176,7 +176,7 @@ func lifecycleSeedAuth(t *testing.T, h *AuthHandler, c *gin.Context, id int64) i
 		entity, err = h.entClient().User.Create().SetEmail(fmt.Sprintf("seed%d@example.com", id)).SetPasswordHash("hash").Save(ctx)
 	}
 	require.NoError(t, err)
-	token, err := h.authService.GenerateToken(ctx, &service.User{ID: entity.ID, Email: entity.Email, PasswordHash: entity.PasswordHash, Status: entity.Status, SessionGeneration: entity.SessionGeneration})
+	token, err := h.authService.GenerateToken(ctx, &service.User{ID: entity.ID, Email: entity.Email, Role: entity.Role, PasswordHash: entity.PasswordHash, Status: entity.Status, SessionGeneration: entity.SessionGeneration})
 	require.NoError(t, err)
 	c.Request.Header.Set("Authorization", "Bearer "+token)
 	return entity.ID

@@ -125,3 +125,21 @@ export function useStepUp() {
     run
   }
 }
+
+// Shared management actions reuse the same verification dialog. Concurrent
+// requests in one session share a prompt; the API client still retries each
+// original operation at most once.
+export const globalAdminStepUp = useStepUp()
+let globalPrompt: Promise<boolean> | null = null
+export function requestAdminStepUp(): Promise<boolean> {
+  if (!globalPrompt) globalPrompt = globalAdminStepUp.prompt().finally(() => { globalPrompt = null })
+  return globalPrompt
+}
+export function adminSessionStamp(token: string | null): string {
+  if (!token) return ''
+  try {
+    const encoded = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    const claims = JSON.parse(atob(encoded)) as Record<string, unknown>
+    return JSON.stringify([claims.user_id, claims.role, claims.sid || token, claims.token_version])
+  } catch { return token }
+}

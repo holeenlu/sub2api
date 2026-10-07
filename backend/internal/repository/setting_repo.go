@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -42,6 +43,9 @@ func (r *settingRepository) GetValue(ctx context.Context, key string) (string, e
 }
 
 func (r *settingRepository) Set(ctx context.Context, key, value string) error {
+	if key == authz.PolicyKey {
+		return service.ErrAdminPermissionDenied
+	}
 	now := time.Now()
 	return r.client.Setting.
 		Create().
@@ -70,6 +74,9 @@ func (r *settingRepository) GetMultiple(ctx context.Context, keys []string) (map
 }
 
 func (r *settingRepository) SetMultiple(ctx context.Context, settings map[string]string) error {
+	if _, exists := settings[authz.PolicyKey]; exists {
+		return service.ErrAdminPermissionDenied
+	}
 	if len(settings) == 0 {
 		return nil
 	}
@@ -100,6 +107,9 @@ func (r *settingRepository) GetAll(ctx context.Context) (map[string]string, erro
 }
 
 func (r *settingRepository) Delete(ctx context.Context, key string) error {
+	if key == authz.PolicyKey {
+		return service.ErrAdminPermissionDenied
+	}
 	_, err := r.client.Setting.Delete().Where(setting.KeyEQ(key)).Exec(ctx)
 	return err
 }

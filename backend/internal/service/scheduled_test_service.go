@@ -36,6 +36,7 @@ func NewScheduledTestService(
 
 // CreatePlan validates the cron expression, computes next_run_at, and persists the plan.
 func (s *ScheduledTestService) CreatePlan(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestPlan, error) {
+	plan.Authorization = captureScheduledAuthorization(ctx)
 	nextRun, err := nextPlanRun(plan, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("invalid test schedule: %w", err)
@@ -61,6 +62,7 @@ func (s *ScheduledTestService) ListPlansByAccount(ctx context.Context, accountID
 
 // UpdatePlan validates cron and updates the plan.
 func (s *ScheduledTestService) UpdatePlan(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestPlan, error) {
+	plan.Authorization = captureScheduledAuthorization(ctx)
 	nextRun, err := nextPlanRun(plan, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("invalid test schedule: %w", err)

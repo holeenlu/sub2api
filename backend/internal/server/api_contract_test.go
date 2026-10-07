@@ -56,6 +56,7 @@ func TestAPIContracts(t *testing.T) {
 					"email_bound": true,
 					"username": "alice",
 						"role": "user",
+ "policy_version":0,"permissions":[],"admin_pages":[],
 						"balance": 12.5,
 						"frozen_balance": 0,
 						"concurrency": 5,
@@ -1544,7 +1545,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	settingRepo := newStubSettingRepo()
 	settingService := service.NewSettingService(settingRepo, cfg)
 
-	adminService := service.NewAdminService(nil, userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	adminService := service.NewAdminService(nil, userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
@@ -1663,7 +1664,7 @@ func (r *stubUserRepo) GetByEmail(ctx context.Context, email string) (*service.U
 	return nil, service.ErrUserNotFound
 }
 
-func (r *stubUserRepo) GetFirstAdmin(ctx context.Context) (*service.User, error) {
+func (r *stubUserRepo) GetFirstSuperAdmin(ctx context.Context) (*service.User, error) {
 	for _, user := range r.users {
 		if user.Role == service.RoleAdmin && user.Status == service.StatusActive {
 			clone := *user

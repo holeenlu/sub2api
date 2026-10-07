@@ -5,7 +5,7 @@ import VersionBadge from '../VersionBadge.vue'
 import { performUpdate } from '@/api/admin/system'
 
 const state = vi.hoisted(() => ({ app: {} as any }))
-vi.mock('@/stores', () => ({ useAuthStore: () => ({ isAdmin: true }), useAppStore: () => state.app }))
+vi.mock('@/stores', () => ({ useAuthStore: () => ({ isAdmin: true, isSuperAdmin:true }), useAppStore: () => state.app }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/admin/system', () => ({ performUpdate: vi.fn(), restartService: vi.fn(), getRollbackVersions: vi.fn(), rollback: vi.fn() }))
 vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copied: false, copyToClipboard: vi.fn() }) }))

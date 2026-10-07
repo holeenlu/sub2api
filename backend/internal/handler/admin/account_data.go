@@ -25,14 +25,14 @@ const (
 )
 
 type DataPayload struct {
-	Type       string        `json:"type,omitempty"`
-	Version    int           `json:"version,omitempty"`
-	ExportedAt string        `json:"exported_at"`
-	Proxies    []DataProxy   `json:"proxies"`
-	Accounts   []DataAccount `json:"accounts"`
+	Type       string        `json:"type,omitempty" authz:"base"`
+	Version    int           `json:"version,omitempty" authz:"base"`
+	ExportedAt string        `json:"exported_at" authz:"base"`
+	Proxies    []DataProxy   `json:"proxies" authz:"proxies.manage,nonempty"`
+	Accounts   []DataAccount `json:"accounts" authz:"object"`
 	// SkippedShadows 记录导出时被排除的 spark 影子账号数量(见 ExportData)。仅作可见性提示,
 	// 导入侧忽略该字段;omitempty 保持向后兼容。
-	SkippedShadows int `json:"skipped_shadows,omitempty"`
+	SkippedShadows int `json:"skipped_shadows,omitempty" authz:"base"`
 }
 
 type DataProxy struct {
@@ -58,23 +58,23 @@ type DataProxy struct {
 // 影子的独立调度配置(priority/并发/分组/status 管理员可单独调)亦不在本备份范围,属已知局限
 // (外审第6轮裁决:保持排除 + 前端警告,而非升级格式做完整往返)。
 type DataAccount struct {
-	Name               string         `json:"name"`
-	Notes              *string        `json:"notes,omitempty"`
-	Platform           string         `json:"platform"`
-	Type               string         `json:"type"`
-	Credentials        map[string]any `json:"credentials"`
-	Extra              map[string]any `json:"extra,omitempty"`
-	ProxyKey           *string        `json:"proxy_key,omitempty"`
-	Concurrency        int            `json:"concurrency"`
-	Priority           int            `json:"priority"`
-	RateMultiplier     *float64       `json:"rate_multiplier,omitempty"`
-	ExpiresAt          *int64         `json:"expires_at,omitempty"`
-	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired,omitempty"`
+	Name               string         `json:"name" authz:"base"`
+	Notes              *string        `json:"notes,omitempty" authz:"base"`
+	Platform           string         `json:"platform" authz:"base"`
+	Type               string         `json:"type" authz:"base"`
+	Credentials        map[string]any `json:"credentials" authz:"accounts.authorize"`
+	Extra              map[string]any `json:"extra,omitempty" authz:"account_create_extra"`
+	ProxyKey           *string        `json:"proxy_key,omitempty" authz:"base"`
+	Concurrency        int            `json:"concurrency" authz:"base"`
+	Priority           int            `json:"priority" authz:"base"`
+	RateMultiplier     *float64       `json:"rate_multiplier,omitempty" authz:"billing.rates.update"`
+	ExpiresAt          *int64         `json:"expires_at,omitempty" authz:"base"`
+	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired,omitempty" authz:"base"`
 }
 
 type DataImportRequest struct {
-	Data                 DataPayload `json:"data"`
-	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind"`
+	Data                 DataPayload `json:"data" authz:"object"`
+	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind" authz:"base"`
 }
 
 type DataImportResult struct {

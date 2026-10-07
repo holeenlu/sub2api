@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/stretchr/testify/require"
 )
 
@@ -76,7 +77,7 @@ func diagnosticFixture() (*ScheduledTestService, *diagnosticMemoryRepo, *APIKey,
 	key := &APIKey{ID: 9, UserID: 7, Key: "private-key", Status: StatusActive, GroupID: &groupID, Group: &Group{ID: 3, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.4", "gpt-5.5"}}}}
 	acc := &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, GroupIDs: []int64{3}}
 	repo := &diagnosticMemoryRepo{plan: &CodexDiagnosticPlan{AccountID: 41, OwnerID: 7, APIKeyID: 9, Models: []string{"gpt-5.4", "gpt-5.5"}, Enabled: true, Revision: 1}}
-	repo.run = &CodexDiagnosticRun{ID: 1, AccountID: 41, OwnerID: 7, APIKeyID: 9, Models: append([]string{}, repo.plan.Models...), PlanRevision: 1, Status: "running", Source: "scheduled", WorkerToken: "worker"}
+	repo.run = &CodexDiagnosticRun{ID: 1, AccountID: 41, OwnerID: 7, APIKeyID: 9, Models: append([]string{}, repo.plan.Models...), PlanRevision: 1, Status: "running", Source: "scheduled", WorkerToken: "worker", Authorization: &authz.Lease{System: true}}
 	svc := &ScheduledTestService{planRepo: repo, accounts: diagnosticAccounts{account: acc}, keys: NewAPIKeyService(diagnosticKeys{key: key}, nil, nil, nil, nil, nil, nil), users: diagnosticUsers{user: user}}
 	return svc, repo, key, user
 }

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"net/http"
 	"strconv"
 	"strings"
@@ -61,6 +62,9 @@ type CreateUsageCleanupTaskRequest struct {
 // GET /api/v1/admin/usage
 func (h *UsageHandler) List(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
+	if actor, ok := authz.FromContext(c.Request.Context()); ok && actor.Role == authz.Admin && !actor.Can("usage.export") && pageSize > 100 {
+		pageSize = 100
+	}
 	exactTotal := false
 	if exactTotalRaw := strings.TrimSpace(c.Query("exact_total")); exactTotalRaw != "" {
 		parsed, err := strconv.ParseBool(exactTotalRaw)

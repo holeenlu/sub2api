@@ -29,8 +29,11 @@ func RegisterAdminRoutes(
 	admin.Use(panelRateLimiter.Global())
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
+	admin.Use(middleware.AdminPermissionStepUp(stepUpAuth))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 	{
+		admin.GET("/roles/admin/permissions", h.Admin.Setting.GetAdminRolePermissions)
+		admin.PUT("/roles/admin/permissions", h.Admin.Setting.UpdateAdminRolePermissions)
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)
 
@@ -307,6 +310,7 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		users.POST("", h.Admin.User.Create)
 		users.PUT("/:id", h.Admin.User.Update)
 		users.DELETE("/:id", h.Admin.User.Delete)
+		users.POST("/batch-delete", h.Admin.User.DeleteBatch)
 		users.POST("/:id/balance", h.Admin.User.UpdateBalance)
 		users.GET("/:id/api-keys", h.Admin.User.GetUserAPIKeys)
 		users.GET("/:id/usage", h.Admin.User.GetUserUsage)

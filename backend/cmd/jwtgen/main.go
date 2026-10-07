@@ -42,7 +42,7 @@ func main() {
 	if *email != "" {
 		user, err = userRepo.GetByEmail(ctx, *email)
 	} else {
-		user, err = userRepo.GetFirstAdmin(ctx)
+		user, err = userRepo.GetFirstSuperAdmin(ctx)
 	}
 	if err != nil {
 		log.Fatalf("failed to resolve admin user: %v", err)

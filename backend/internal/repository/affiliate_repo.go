@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"math"
 	"strings"
 	"time"
@@ -948,6 +949,9 @@ func queryAffiliateRecordCount(ctx context.Context, client affiliateQueryExecer,
 
 func (r *affiliateRepository) withTx(ctx context.Context, fn func(txCtx context.Context, txClient *dbent.Client) error) error {
 	if tx := dbent.TxFromContext(ctx); tx != nil {
+		if err := authz.LockManagementWrite(ctx, tx.Client(), nil, "", "", false); err != nil {
+			return err
+		}
 		return fn(ctx, tx.Client())
 	}
 
@@ -958,6 +962,9 @@ func (r *affiliateRepository) withTx(ctx context.Context, fn func(txCtx context.
 	defer func() { _ = tx.Rollback() }()
 
 	txCtx := dbent.NewTxContext(ctx, tx)
+	if err := authz.LockManagementWrite(txCtx, tx.Client(), nil, "", "", false); err != nil {
+		return err
+	}
 	if err := fn(txCtx, tx.Client()); err != nil {
 		return err
 	}
