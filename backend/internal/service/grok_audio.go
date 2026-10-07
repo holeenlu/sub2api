@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -55,6 +57,28 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 	for _, part := range parts[1:] {
 		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "?#\\") {
 			return nil, fmt.Errorf("invalid grok voice endpoint path")
+		}
+	}
+	if baseEndpoint == "custom-voices" && (s.grokVoiceRepository() == nil || c == nil || c.Request == nil) {
+		return nil, fmt.Errorf("voice ownership unavailable")
+	}
+	if baseEndpoint == "custom-voices" && len(parts) == 1 && c.Request.Method == http.MethodGet {
+		voices, err := s.ListOwnedGrokVoices(ctx, c)
+		if err != nil {
+			return nil, err
+		}
+		c.JSON(http.StatusOK, gin.H{"voices": voices})
+		return &OpenAIForwardResult{}, nil
+	}
+	if c != nil {
+		if _, exists := c.Get("api_key"); exists {
+			bound, err := s.ResolveGrokVoiceAccount(ctx, c, endpoint, body)
+			if err != nil {
+				return nil, err
+			}
+			if bound > 0 && bound != account.ID {
+				return nil, ErrMediaNotOwned
+			}
 		}
 	}
 	token, _, err := s.getRequestCredential(ctx, c, account)
@@ -106,6 +130,12 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 	if err != nil {
 		return nil, err
 	}
+	durableCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	err = s.persistGrokVoice(durableCtx, c, account, endpoint, data)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
 	writeGrokMediaResponse(c, resp, data, s.responseHeaderFilter)
 	audioUsage := estimateGrokVoiceAudioUsage(baseEndpoint, body, contentType, data, time.Since(started))
 	upstreamID := firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id"))
@@ -138,7 +168,33 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 	return s.ProxyGrokRealtimeConn(ctx, c, client, upstream)
 }
 
-type GrokRealtimeUpstream struct{ conn openAIWSClientConn }
+// GrokRealtimeVoiceAccountChange requests a pre-audio rebind to a voice owner.
+// No part of Payload has been forwarded to the old account.
+type GrokRealtimeVoiceAccountChange struct {
+	AccountID int64
+	Payload   []byte
+}
+
+func (e *GrokRealtimeVoiceAccountChange) Error() string {
+	return "custom voice requires its owning upstream account"
+}
+func (s *OpenAIGatewayService) ReplayGrokRealtimeVoiceSetup(ctx context.Context, c *gin.Context, u *GrokRealtimeUpstream, change *GrokRealtimeVoiceAccountChange) error {
+	if u == nil || change == nil || u.accountID != change.AccountID {
+		return ErrMediaNotOwned
+	}
+	bound, err := s.ResolveGrokVoiceAccount(ctx, c, "realtime", change.Payload)
+	if err != nil || bound != u.accountID {
+		return ErrMediaNotOwned
+	}
+	return u.conn.WriteJSON(ctx, json.RawMessage(change.Payload))
+}
+
+type GrokRealtimeUpstream struct {
+	conn      openAIWSClientConn
+	accountID int64
+	closeOnce sync.Once
+	closeErr  error
+}
 
 // GrokRealtimeDialError preserves an HTTP status returned before WebSocket
 // upgrade so handlers can apply the normal Grok account policy.
@@ -154,7 +210,8 @@ func (u *GrokRealtimeUpstream) Close() error {
 	if u == nil || u.conn == nil {
 		return nil
 	}
-	return u.conn.Close()
+	u.closeOnce.Do(func() { u.closeErr = u.conn.Close() })
+	return u.closeErr
 }
 
 func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Account, token, model string) (*GrokRealtimeUpstream, error) {
@@ -186,7 +243,7 @@ func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Ac
 	if err != nil {
 		return nil, &GrokRealtimeDialError{StatusCode: status, Err: err}
 	}
-	return &GrokRealtimeUpstream{conn: conn}, nil
+	return &GrokRealtimeUpstream{conn: conn, accountID: account.ID}, nil
 }
 
 // HandleGrokRealtimeUpstreamError applies the shared Grok account policy to a
@@ -207,10 +264,13 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	errCh := make(chan error, 2)
+	var readers sync.WaitGroup
+	readers.Add(2)
 	var audioObserved atomic.Bool
 
 	// Upstream → client
 	go func() {
+		defer readers.Done()
 		for {
 			msg, readErr := conn.ReadMessage(ctx)
 			if readErr != nil {
@@ -229,6 +289,7 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 
 	// Client → upstream (JSON events only)
 	go func() {
+		defer readers.Done()
 		for {
 			kind, msg, readErr := client.Read(ctx)
 			if readErr != nil {
@@ -246,6 +307,35 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 				errCh <- fmt.Errorf("invalid realtime event: %w", unmarshalErr)
 				return
 			}
+			if c != nil {
+				if _, ok := c.Get("api_key"); ok {
+					key, keyErr := mediaPrincipal(c)
+					if keyErr != nil {
+						errCh <- keyErr
+						return
+					}
+					for _, path := range []string{"model", "session.model", "response.model"} {
+						model := strings.TrimSpace(gjson.GetBytes(msg, path).String())
+						if model != "" && key.Group != nil && !key.Group.ModelAllowlist.Allows(model) {
+							errCh <- fmt.Errorf("model is not available for this group")
+							return
+						}
+					}
+					bound, err := s.ResolveGrokVoiceAccount(ctx, c, "realtime", msg)
+					if err != nil {
+						errCh <- err
+						return
+					}
+					if bound > 0 && bound != upstream.accountID {
+						if !audioObserved.Load() {
+							errCh <- &GrokRealtimeVoiceAccountChange{AccountID: bound, Payload: append([]byte(nil), msg...)}
+						} else {
+							errCh <- ErrMediaNotOwned
+						}
+						return
+					}
+				}
+			}
 			if writeErr := conn.WriteJSON(ctx, raw); writeErr != nil {
 				errCh <- writeErr
 				return
@@ -253,7 +343,12 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 		}
 	}()
 
-	return awaitGrokRealtimeAudioObserved(errCh, &audioObserved)
+	err := <-errCh
+	cancel()
+	_ = upstream.Close()
+	// Join both pumps before reading usage and releasing the key reservation.
+	readers.Wait()
+	return audioObserved.Load(), err
 }
 
 // ProbeGrokRealtime performs the upstream WebSocket handshake without sending
@@ -399,4 +494,203 @@ func estimateGrokVoiceAudioUsage(endpoint string, reqBody []byte, contentType st
 	default:
 		return nil
 	}
+}
+
+var ErrMediaNotOwned = errors.New("voice resource not found")
+
+type GatewayMediaVoice struct {
+	ID                         string
+	UserID, GroupID, AccountID int64
+	Metadata                   json.RawMessage
+}
+
+type GrokVoiceRepository interface {
+	PutVoice(context.Context, *GatewayMediaVoice) error
+	GetVoice(context.Context, int64, int64, string) (*GatewayMediaVoice, error)
+	ListVoices(context.Context, int64, int64) ([]GatewayMediaVoice, error)
+	DeleteVoice(context.Context, int64, int64, string) error
+}
+
+func (s *OpenAIGatewayService) grokVoiceRepository() GrokVoiceRepository {
+	if s == nil {
+		return nil
+	}
+	repo, _ := s.accountRepo.(GrokVoiceRepository)
+	return repo
+}
+func mediaPrincipal(c *gin.Context) (*APIKey, error) {
+	if c == nil {
+		return nil, ErrMediaNotOwned
+	}
+	v, ok := c.Get("api_key")
+	if !ok {
+		return nil, ErrMediaNotOwned
+	}
+	k, ok := v.(*APIKey)
+	if !ok || k == nil || k.UserID <= 0 {
+		return nil, ErrMediaNotOwned
+	}
+	return k, nil
+}
+
+// Only documented built-ins are account-independent. Unknown identifiers must
+// have durable provenance; old shared upstream voices are never auto-adopted.
+func isBuiltinGrokVoice(id string) bool {
+	switch strings.ToLower(id) {
+	case "ara", "rex", "sal", "eve", "leo":
+		return true
+	}
+	return false
+}
+
+func grokVoiceReferences(body []byte) ([]string, error) {
+	if len(body) == 0 {
+		return nil, nil
+	}
+	if err := ValidateGatewaySecurityJSON(body); err != nil {
+		return nil, err
+	}
+	var root any
+	if err := json.Unmarshal(body, &root); err != nil {
+		return nil, err
+	}
+	out := []string{}
+	var walk func(any) error
+	walk = func(x any) error {
+		switch v := x.(type) {
+		case map[string]any:
+			for key, value := range v {
+				if strings.EqualFold(key, "voice") || strings.EqualFold(key, "voice_id") {
+					if key != "voice" && key != "voice_id" {
+						return fmt.Errorf("noncanonical voice field")
+					}
+					switch ref := value.(type) {
+					case string:
+						if ref != "" {
+							out = append(out, ref)
+						}
+					case map[string]any:
+						for field := range ref {
+							if field != "id" && field != "type" {
+								return fmt.Errorf("unsupported voice reference field")
+							}
+						}
+						id, ok := ref["id"].(string)
+						if !ok || id == "" {
+							return fmt.Errorf("invalid voice reference")
+						}
+						out = append(out, id)
+					default:
+						return fmt.Errorf("invalid voice reference")
+					}
+				} else if err := walk(value); err != nil {
+					return err
+				}
+			}
+		case []any:
+			for _, item := range v {
+				if err := walk(item); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(root); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ResolveGrokVoiceAccount checks every reference before selecting any upstream.
+// The same user's keys share voices, but the owning group/account never changes.
+func (s *OpenAIGatewayService) ResolveGrokVoiceAccount(ctx context.Context, c *gin.Context, endpoint string, body []byte) (int64, error) {
+	key, err := mediaPrincipal(c)
+	if err != nil {
+		return 0, err
+	}
+	refs := []string{}
+	if strings.HasPrefix(endpoint, "custom-voices/") {
+		id := strings.Split(strings.TrimPrefix(endpoint, "custom-voices/"), "/")[0]
+		if id == "" {
+			return 0, ErrMediaNotOwned
+		}
+		refs = append(refs, id)
+	}
+	if endpoint == "tts" || endpoint == "realtime" {
+		r, err := grokVoiceReferences(body)
+		if err != nil {
+			return 0, err
+		}
+		for _, id := range r {
+			if !isBuiltinGrokVoice(id) {
+				refs = append(refs, id)
+			}
+		}
+	}
+	var account int64
+	for _, id := range refs {
+		if s.grokVoiceRepository() == nil {
+			return 0, ErrMediaNotOwned
+		}
+		v, err := s.grokVoiceRepository().GetVoice(ctx, derefGroupID(key.GroupID), key.UserID, id)
+		if err != nil {
+			return 0, err
+		}
+		if account != 0 && account != v.AccountID {
+			return 0, ErrMediaNotOwned
+		}
+		account = v.AccountID
+	}
+	return account, nil
+}
+
+func (s *OpenAIGatewayService) ListOwnedGrokVoices(ctx context.Context, c *gin.Context) ([]json.RawMessage, error) {
+	key, err := mediaPrincipal(c)
+	if err != nil {
+		return nil, err
+	}
+	if s.grokVoiceRepository() == nil {
+		return nil, fmt.Errorf("media ownership repository unavailable")
+	}
+	voices, err := s.grokVoiceRepository().ListVoices(ctx, derefGroupID(key.GroupID), key.UserID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]json.RawMessage, 0, len(voices))
+	for _, v := range voices {
+		out = append(out, v.Metadata)
+	}
+	return out, nil
+}
+
+func (s *OpenAIGatewayService) persistGrokVoice(ctx context.Context, c *gin.Context, account *Account, endpoint string, data []byte) error {
+	if !strings.HasPrefix(endpoint, "custom-voices") {
+		return nil
+	}
+	key, err := mediaPrincipal(c)
+	if err != nil {
+		return err
+	}
+	if s.grokVoiceRepository() == nil {
+		return fmt.Errorf("media ownership repository unavailable")
+	}
+	parts := strings.Split(endpoint, "/")
+	if c.Request.Method == http.MethodDelete && len(parts) == 2 {
+		return s.grokVoiceRepository().DeleteVoice(ctx, derefGroupID(key.GroupID), key.UserID, parts[1])
+	}
+	if len(parts) == 3 || c.Request.Method == http.MethodGet {
+		return nil
+	}
+	id := gjson.GetBytes(data, "voice_id").String()
+	if id == "" {
+		id = gjson.GetBytes(data, "id").String()
+	}
+	if len(parts) == 2 {
+		id = parts[1]
+	}
+	if id == "" || !gjson.ValidBytes(data) {
+		return fmt.Errorf("upstream custom voice response has no identity")
+	}
+	return s.grokVoiceRepository().PutVoice(ctx, &GatewayMediaVoice{ID: id, AccountID: account.ID, GroupID: derefGroupID(key.GroupID), UserID: key.UserID, Metadata: data})
 }

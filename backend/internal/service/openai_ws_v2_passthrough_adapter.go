@@ -977,11 +977,23 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		// capturedSessionModel 的读写都发生在该 goroutine 内，因此无需
 		// 加锁/原子化。
 		filter: func(msgType coderws.MessageType, payload []byte) (out []byte, blocked *OpenAIFastBlockedError, filterErr error) {
+			if err := s.validateWSContinuation(ctx, c, payload); err != nil {
+				return payload, nil, err
+			}
 			if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 				return payload, nil, nil
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
+			if isResponseCreate {
+				if err := s.checkOpenAIWSCodexClientRestriction(ctx, c, account, payload, func(event []byte) error {
+					writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
+					defer cancel()
+					return clientConn.Write(writeCtx, coderws.MessageText, event)
+				}); err != nil {
+					return payload, nil, err
+				}
+			}
 			responseCreateAt := time.Time{}
 			acceptedTurn := false
 			if isResponseCreate {
@@ -1246,6 +1258,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			BeforeClientWrite: func(msgType coderws.MessageType, payload []byte) {
+				if id := strings.TrimSpace(gjson.GetBytes(payload, "response.id").String()); id != "" {
+					s.bindHTTPResponseAccount(ctx, c, account, id)
+				}
 				if msgType == coderws.MessageText && openAIWSPassthroughIsTerminalOutput(payload) {
 					turnLifecycle.beginTerminalWrite()
 				}

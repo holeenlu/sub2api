@@ -36,6 +36,21 @@ import (
 
 const gatewayCompatibilityMetricsLogInterval = 1024
 
+// stickySessionBindTimeout bounds the post-forward sticky rebind. The write is a
+// single Redis SET that must survive a client disconnect, but it must never hold
+// the request goroutine open if Redis is unreachable.
+const stickySessionBindTimeout = 3 * time.Second
+
+// detachedStickyBindContext derives the context for the post-forward sticky
+// rebind. That rebind renews the binding TTL after the response has already been
+// delivered, so by then the client has frequently hung up and the request context
+// is cancelled — binding through it fails with `context canceled` and the session
+// silently loses its account affinity while it is still in active use. The
+// binding therefore runs on a detached context with its own short deadline.
+func detachedStickyBindContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), stickySessionBindTimeout)
+}
+
 var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 
 // GatewayHandler handles API gateway requests
@@ -480,7 +495,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindSelectionStickySessionAfterProfitAdmission(admissionCtx, selection, apiKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -830,7 +845,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindSelectionStickySessionAfterProfitAdmission(admissionCtx, selection, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -1125,9 +1140,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				// 转发已经成功，这次绑定只是把 TTL 续上，不能再挂在请求 context 上：
+				// 流式请求走到这里时客户端往往已经断开，c.Request.Context() 早被取消，
+				// 续期会以 context canceled 静默失败，绑定就在会话还活跃时到期了。
+				bindCtx, cancelBind := detachedStickyBindContext(c.Request.Context())
+				if err := h.gatewayService.BindSelectionStickySession(bindCtx, selection, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
+				cancelBind()
 			}
 
 			submitForwardUsage(result)
