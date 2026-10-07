@@ -4,6 +4,7 @@ export interface CodexCatalogReasoningLevel {
 
 export interface CodexCatalogModel {
   slug: string
+  visibility?: unknown
   default_reasoning_level?: unknown
   supported_reasoning_levels?: CodexCatalogReasoningLevel[]
 }
@@ -38,6 +39,21 @@ export function findCodexCatalogModel(
   const wanted = slug.trim()
   if (!wanted) return undefined
   return parseCodexCatalogModels(content).find((model) => model.slug === wanted)
+}
+
+// Generated configs keep the platform default when the key's catalog offers it.
+// Otherwise they follow the catalog order, skipping entries Codex keeps out of
+// its model picker; without a usable catalog the platform default stays.
+export function selectCodexCatalogModel(
+  models: CodexCatalogModel[],
+  preferredModel: string
+): string {
+  if (models.some((model) => model.slug === preferredModel)) return preferredModel
+  const listed = models.find((model) => {
+    const visibility = typeof model.visibility === 'string' ? model.visibility.trim() : ''
+    return !visibility || visibility === 'list'
+  })
+  return (listed ?? models[0])?.slug || preferredModel
 }
 
 export function selectCodexConfigReasoningEffort(
