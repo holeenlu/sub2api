@@ -2,7 +2,7 @@
 
 ```http
 GET /v1/models
-Authorization: Bearer $KDAN_API_KEY
+Authorization: Bearer $API_KEY
 ```
 
 The model list depends on the key's group, platform, account/channel mappings, and model allowlist. Query with the same key that will perform inference.
@@ -10,8 +10,8 @@ The model list depends on the key's group, platform, account/channel mappings, a
 ## Minimal request and response
 
 ```bash
-curl "$KDAN_BASE_URL/v1/models" \
-  -H "Authorization: Bearer $KDAN_API_KEY"
+curl "$API_BASE_URL/v1/models" \
+  -H "Authorization: Bearer $API_KEY"
 ```
 
 OpenAI-compatible groups normally return:

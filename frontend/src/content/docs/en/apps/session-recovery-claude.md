@@ -17,7 +17,7 @@ Run this in the project directory where you want to continue. Replace the exampl
 
 ## Download and scan
 
-Requires Python 3.10+. [Download the Claude Code tool](/downloads/kdan-claude-session-recovery.zip), extract it, and enter kdan-claude-session-recovery:
+Requires Python 3.10+. [Download the Claude Code tool](/downloads/tokensavy-claude-session-recovery.zip), extract it, and enter tokensavy-claude-session-recovery:
 
 ```bash
 bash find-claude-sessions.sh

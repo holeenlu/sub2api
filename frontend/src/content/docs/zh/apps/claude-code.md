@@ -5,7 +5,7 @@
 | Claude Code CLI | 本页环境变量或用户 `settings.json` |
 | VS Code 中的 Claude Code | 编辑器用户配置中的环境变量，见下文 |
 | 支持 Third-Party Inference 的 Claude 桌面端 | [Claude 桌面端教程](/apps/claude-desktop) |
-| claude.ai 网页聊天 | 本页不会把网页账号聊天切换为 KDAN Key |
+| claude.ai 网页聊天 | 本页不会把网页账号聊天切换为 Tokensavy Key |
 
 先在 [API 密钥](/keys) 为目标分组创建 Key。项目支持 Messages 请求，最终是否允许该客户端、模型及辅助请求由分组策略决定。
 
@@ -14,16 +14,15 @@
 ### 在线部署（macOS / Linux）
 
 ```bash
-export KDAN_BASE_URL="{{API_ROOT}}"
-export KDAN_API_KEY="你的 KDAN API Key"
-curl -fsSL {{API_ROOT}}/install/claude-code.sh | bash
+export TOKENSAVY_API_KEY="你的 Tokensavy API Key"
+curl -fsSL https://tokensavy.ai/install/claude-code.sh | bash
 ```
 
-脚本会备份 `~/.claude/settings.json` 后写入 Messages 环境变量并限制权限。执行前请审阅脚本；`KDAN_BASE_URL` 必须设置。
+脚本会备份 `~/.claude/settings.json` 后写入 Messages 环境变量并限制权限。执行前请审阅脚本；需要自定义地址时设置 `TOKENSAVY_BASE_URL`。
 
-下图来自KDAN“使用密钥 → Claude Code”，使用无效示例 Key 与演示地址。选择与你操作系统一致的标签，并复制自己控制台里的值；[配置器教程](/apps/console) 也提供了 PowerShell 截图。
+下图来自Tokensavy“使用密钥 → Claude Code”，使用无效示例 Key 与演示地址。选择与你操作系统一致的标签，并复制自己控制台里的值；[配置器教程](/apps/console) 也提供了 PowerShell 截图。
 
-![KDAN Claude Code 配置器（示例数据）](/docs-assets/client-claude-zh.png)
+![Tokensavy Claude Code 配置器（示例数据）](/docs-assets/client-claude-zh.png)
 
 已安装 Claude Code 后运行 `claude --version`。安装步骤见 [Claude Code 官方说明](https://code.claude.com/docs/en/setup)。
 
@@ -31,7 +30,7 @@ macOS / Linux：
 
 ```bash
 export ANTHROPIC_BASE_URL="{{API_ROOT}}"
-export ANTHROPIC_AUTH_TOKEN="你的 KDAN API Key"
+export ANTHROPIC_AUTH_TOKEN="你的 Tokensavy API Key"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 claude --model claude-sonnet-5
 ```
@@ -40,7 +39,7 @@ Windows PowerShell：
 
 ```powershell
 $env:ANTHROPIC_BASE_URL="{{API_ROOT}}"
-$env:ANTHROPIC_AUTH_TOKEN="你的 KDAN API Key"
+$env:ANTHROPIC_AUTH_TOKEN="你的 Tokensavy API Key"
 $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
 claude --model claude-sonnet-5
 ```
@@ -55,19 +54,19 @@ claude --model claude-sonnet-5
 {
   "env": {
     "ANTHROPIC_BASE_URL": "{{API_ROOT}}",
-    "ANTHROPIC_AUTH_TOKEN": "你的 KDAN API Key",
+    "ANTHROPIC_AUTH_TOKEN": "你的 Tokensavy API Key",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   }
 }
 ```
 
-该文件含私密凭据。不要写进共享的项目 `.claude/settings.json`。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 是当前控制台生成器用于减少登录、遥测等非必要外连的设置，不会把 Claude 网页、Remote Control 或语音功能改为由 KDAN 提供。GUI 启动的 IDE 不一定继承终端环境。VS Code 扩展可在用户 Settings JSON 中设置：
+该文件含私密凭据。不要写进共享的项目 `.claude/settings.json`。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 是当前控制台生成器用于减少登录、遥测等非必要外连的设置，不会把 Claude 网页、Remote Control 或语音功能改为由 Tokensavy 提供。GUI 启动的 IDE 不一定继承终端环境。VS Code 扩展可在用户 Settings JSON 中设置：
 
 ```json
 {
   "claudeCode.environmentVariables": [
     { "name": "ANTHROPIC_BASE_URL", "value": "{{API_ROOT}}" },
-    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 KDAN API Key" },
+    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 Tokensavy API Key" },
     { "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "value": "1" }
   ]
 }
@@ -75,7 +74,7 @@ claude --model claude-sonnet-5
 
 ## 验证与模型选择
 
-运行 `/status` 检查 Base URL 和凭据来源，再通过 `/model claude-sonnet-5` 选择分组开放的精确 ID。发送一次简单问题，并在 KDAN 用量记录核对。不要假设 `/model` 一定自动列出 `GET /v1/models` 的所有条目。
+运行 `/status` 检查 Base URL 和凭据来源，再通过 `/model claude-sonnet-5` 选择分组开放的精确 ID。发送一次简单问题，并在 Tokensavy 用量记录核对。不要假设 `/model` 一定自动列出 `GET /v1/models` 的所有条目。
 
 Claude Code 可能为标题、摘要和 token 计数发送辅助请求。主模型调用正常但辅助功能失败时，需核对分组白名单或模型映射，不能仅换 Key 解决。
 

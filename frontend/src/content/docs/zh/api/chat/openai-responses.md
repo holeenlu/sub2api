@@ -2,7 +2,7 @@
 
 ```http
 POST /v1/responses
-Authorization: Bearer $KDAN_API_KEY
+Authorization: Bearer $API_KEY
 Content-Type: application/json
 ```
 
@@ -34,8 +34,8 @@ Content-Type: application/json
 ## 最小请求与非流响应
 
 ```bash
-curl "$KDAN_BASE_URL/v1/responses" \
-  -H "Authorization: Bearer $KDAN_API_KEY" \
+curl "$API_BASE_URL/v1/responses" \
+  -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"YOUR_MODEL_ID","input":"用一句话解释幂等性。"}'
 ```

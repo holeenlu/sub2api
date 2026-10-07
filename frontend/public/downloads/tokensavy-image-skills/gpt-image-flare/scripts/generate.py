@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate or edit one image with the fixed Sunburst model."""
+"""Generate or edit one image with the fixed Flare model."""
 from __future__ import annotations
 import argparse, base64, ipaddress, json, os, re, secrets, ssl, sys, tempfile, time, tomllib
 from contextlib import contextmanager
@@ -15,7 +15,7 @@ except ImportError:
     Image = None
     UnidentifiedImageError = OSError
 
-MODEL = "gpt-image-2.5-sunburst"
+MODEL = "gpt-image-2.5-flare"
 MAX_INPUT_BYTES = 20 << 20
 MAX_RESPONSE_BYTES = 128 << 20
 
@@ -64,17 +64,17 @@ def _env_name(value: str) -> bool:
     return re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value) is not None
 
 def load_provider(require_token: bool = True) -> tuple[str, str, dict[str, str], str | None]:
-    env_base, env_key = os.environ.get("KDAN_BASE_URL"), os.environ.get("KDAN_API_KEY")
+    env_base, env_key = os.environ.get("TOKENSAVY_BASE_URL"), os.environ.get("TOKENSAVY_API_KEY")
     # A key-only environment is the normal setup when Codex provides the URL
     # and env_key name.  Only an explicit base URL opts into full override.
     if env_base is not None:
         base = (env_base or "").strip()
         token = (env_key or "").strip()
         if not base:
-            raise RuntimeError("KDAN_BASE_URL is required when using the KDAN environment override")
+            raise RuntimeError("TOKENSAVY_BASE_URL is required when using the Tokensavy environment override")
         if require_token and not token:
-            raise RuntimeError("KDAN_API_KEY is required when using the KDAN environment override")
-        return "KDAN environment", base, {}, token or None
+            raise RuntimeError("TOKENSAVY_API_KEY is required when using the Tokensavy environment override")
+        return "Tokensavy environment", base, {}, token or None
     home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
     path = home / "config.toml"
     try:
@@ -84,7 +84,7 @@ def load_provider(require_token: bool = True) -> tuple[str, str, dict[str, str],
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise RuntimeError(f"Codex config is invalid: {path}") from exc
     if "profile" in config or "profiles" in config:
-        raise RuntimeError("Codex profile-based provider selection is not supported; use top-level model_provider/model_providers or KDAN_BASE_URL")
+        raise RuntimeError("Codex profile-based provider selection is not supported; use top-level model_provider/model_providers or TOKENSAVY_BASE_URL")
     name, providers = config.get("model_provider", "openai"), config.get("model_providers", {})
     provider = providers.get(name) if isinstance(name, str) and isinstance(providers, dict) else None
     if not isinstance(provider, dict):

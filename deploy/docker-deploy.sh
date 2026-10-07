@@ -1,8 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# KDAN Docker Deployment Preparation Script
+# Tokensavy Docker Deployment Preparation Script
 # =============================================================================
-# This script prepares deployment files for KDAN:
+# This script prepares deployment files for Tokensavy:
 #   - Downloads docker-compose.local.yml and .env.example
 #   - Generates secure secrets (JWT_SECRET, TOTP_ENCRYPTION_KEY, POSTGRES_PASSWORD)
 #   - Generates a random admin login email (ADMIN_EMAIL)
@@ -22,7 +22,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # GitHub raw content base URL
-GITHUB_RAW_URL="https://raw.githubusercontent.com/holeenlu/sub2api/main/deploy"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/holeenlu/sub2api/tokensavy/deploy"
 
 # Print colored message
 print_info() {
@@ -51,7 +51,7 @@ generate_admin_email() {
     local suffix
     suffix=$(openssl rand -hex 6) || return 1
     [ -n "$suffix" ] || return 1
-    echo "admin-${suffix}@kdan.local"
+    echo "admin-${suffix}@tokensavy.local"
 }
 
 # Check if command exists
@@ -63,7 +63,7 @@ command_exists() {
 main() {
     echo ""
     echo "=========================================="
-    echo "  KDAN Deployment Preparation"
+    echo "  Tokensavy Deployment Preparation"
     echo "=========================================="
     echo ""
 
@@ -170,7 +170,7 @@ main() {
     echo "     docker-compose up -d"
     echo ""
     echo "  3. View logs:"
-    echo "     docker-compose logs -f kdan"
+    echo "     docker-compose logs -f tokensavy"
     echo ""
     echo "  4. Access Web UI:"
     echo "     http://localhost:8080"

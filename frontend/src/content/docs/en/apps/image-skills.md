@@ -1,6 +1,6 @@
 ## Downloadable skills
 
-KDAN provides two separate skills:
+Tokensavy provides two separate skills:
 
 | Skill | Fixed model | Generate | Edit |
 | --- | --- | --- | --- |
@@ -40,7 +40,7 @@ py -3 -m venv "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv"
 & "$env:USERPROFILE\.agents\skills\gpt-image-flare\.venv\Scripts\python.exe" "$env:USERPROFILE\.agents\skills\gpt-image-flare\scripts\generate.py" --check-config
 ```
 
-The script reads `base_url` and `env_key` from the top-level Codex `model_provider` / `model_providers`; it does not support profile-based provider selection or place the key in generated files. When only `KDAN_API_KEY` is set, the provider still supplies both the URL and the configured environment-variable name. Set `KDAN_BASE_URL` only when intentionally overriding the provider; that override also requires `KDAN_API_KEY`. Provider URLs must use HTTPS (HTTP is allowed only for loopback tests), and redirects are rejected.
+The script reads `base_url` and `env_key` from the top-level Codex `model_provider` / `model_providers`; it does not support profile-based provider selection or place the key in generated files. When only `TOKENSAVY_API_KEY` is set, the provider still supplies both the URL and the configured environment-variable name. Set `TOKENSAVY_BASE_URL` only when intentionally overriding the provider; that override also requires `TOKENSAVY_API_KEY`. Provider URLs must use HTTPS (HTTP is allowed only for loopback tests), and redirects are rejected.
 
 ## Runtime and credentials
 
@@ -55,15 +55,15 @@ Image scripts use these credential sources, independently of Codex login files:
 For Legacy authentication or a separate image group, set both values in the process that runs the skill. The key must belong to a group with the image model enabled. Setting only the key does not replace the provider authentication mode.
 
 ```bash
-export KDAN_BASE_URL="{{API_ROOT}}"
-export KDAN_API_KEY="YOUR_IMAGE_GROUP_KDAN_API_KEY"
+export TOKENSAVY_BASE_URL="{{API_ROOT}}"
+export TOKENSAVY_API_KEY="YOUR_IMAGE_GROUP_API_KEY"
 ```
 
-PowerShell uses `$env:KDAN_BASE_URL="{{API_ROOT}}"` and `$env:KDAN_API_KEY="YOUR_IMAGE_GROUP_KDAN_API_KEY"`. Launch desktop Codex from that terminal as described in the [Codex guide](/apps/codex).
+PowerShell uses `$env:TOKENSAVY_BASE_URL="{{API_ROOT}}"` and `$env:TOKENSAVY_API_KEY="YOUR_IMAGE_GROUP_API_KEY"`. Launch desktop Codex from that terminal as described in the [Codex guide](/apps/codex).
 
 Use Python 3.11+ and install Pillow from the bundled `requirements.txt`, preferably in a virtual environment inside the skill directory. On Windows use `py -3` and the environment's `Scripts/python.exe`; on macOS/Linux use its `bin/python`.
 
-An explicit `KDAN_BASE_URL` enables a complete environment override and requires `KDAN_API_KEY`; without it, the script reads the active Codex provider's URL and credential fields listed above. A missing configured key variable fails instead of borrowing another account key. `--check-config` validates configuration only; `--dry-run` validates the payload and input images without a network call. Real calls need credentials, network and model access. Use an absolute output path; existing files require explicit `--force`.
+An explicit `TOKENSAVY_BASE_URL` enables a complete environment override and requires `TOKENSAVY_API_KEY`; without it, the script reads the active Codex provider's URL and credential fields listed above. A missing configured key variable fails instead of borrowing another account key. `--check-config` validates configuration only; `--dry-run` validates the payload and input images without a network call. Real calls need credentials, network and model access. Use an absolute output path; existing files require explicit `--force`.
 
 Current official guidance recommends `~/.agents/skills`. Older clients may discover `~/.codex/skills`; use the path your client actually supports, without duplicate names. Type `$gpt-image-flare` to check discovery and restart if needed.
 

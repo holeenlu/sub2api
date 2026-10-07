@@ -17,8 +17,8 @@ const (
 	AdminComplianceVersion        = "v2026.06.10"
 	AdminComplianceDocumentPathZH = "docs/legal/admin-compliance.zh.md"
 	AdminComplianceDocumentPathEN = "docs/legal/admin-compliance.en.md"
-	AdminComplianceDocumentURLZH  = DefaultDocsBaseURL + "/legal/admin-compliance.zh.md"
-	AdminComplianceDocumentURLEN  = DefaultDocsBaseURL + "/legal/admin-compliance.en.md"
+	AdminComplianceDocumentURLZH  = "/legal/admin-compliance"
+	AdminComplianceDocumentURLEN  = "/legal/admin-compliance"
 	AdminComplianceAckPhraseZH    = "我已阅读、理解并同意 " + DefaultSiteName + " 部署与运营合规承诺"
 	AdminComplianceAckPhraseEN    = "I have read, understood, and agree to the " + DefaultSiteName + " Deployment and Operation Compliance Commitment"
 

@@ -2,7 +2,7 @@
 
 Create an API key in the console and confirm its group. The group controls models, rates, limits, and upstream routing. Do not infer key access from a public model page alone.
 
-Copy the endpoint from the console. `KDAN_BASE_URL` below is the root without a trailing `/v1`; remove that suffix before joining an endpoint when the configured value already contains it.
+Copy the endpoint from the console. `API_BASE_URL` below is the root without a trailing `/v1`; remove that suffix before joining an endpoint when the configured value already contains it.
 
 ## Choose a protocol
 

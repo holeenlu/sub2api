@@ -1,9 +1,9 @@
-# KDAN Admin Reference
+# TapModels Admin Reference
 
 ## Environment
 
 ```bash
-export SUB2API_BASE_URL='https://api.kdan.com'
+export SUB2API_BASE_URL='https://api.tapmodels.ai'
 export SUB2API_ADMIN_API_KEY='<admin api key>'
 # 或者，未配置管理员 API Key 时使用管理员 JWT：
 # export SUB2API_JWT='<admin access_token>'

@@ -30,7 +30,7 @@ const (
 	// change this value together with BRAND_TITLE_SUFFIX_EN in
 	// frontend/src/config/brand.ts; it is a local constant so the web package
 	// stays free of a dependency on internal/service.
-	defaultTitleSuffix = "AI API Gateway"
+	defaultTitleSuffix = "Smart tokens. More possibilities."
 )
 
 //go:embed all:dist

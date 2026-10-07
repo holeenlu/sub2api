@@ -2,7 +2,7 @@ export default {
   common: {
     // 站点名称。实际值在设置加载后由 stores/app.ts 以 mergeLocaleMessage 覆盖，
     // 文案中用 @:common.siteName 链接即可自动跟随后台设置变化。
-    siteName: 'KDAN',
+    siteName: 'Tokensavy',
     loading: '加载中...',
     submitting: '提交中...',
     justNow: '刚刚',

@@ -19,10 +19,10 @@ export default {
     exploreModels: '探索模型',
     goToDashboard: '進入控制台',
     // 首頁主視覺文案
-    heroSubtitle: '一個 API，自由選模型。',
+    heroSubtitle: '精用 Token，釋放更多可能。',
     heroDescription: '透過一個 API 使用不同 AI 模型。\n減少串接與管理的負擔，把時間留給產品開發。',
     heroEyebrow: '多模型 AI API 閘道器',
-    heroTitle: '一個 API，自由選模型。',
+    heroTitle: '精用 Token，釋放更多可能。',
     contactIntegration: '接入諮詢',
     quickInstall: { eyebrow: '幾分鐘完成接入', title: '從 API Key 直接開始', description: 'Codex CLI 與 Claude Code 提供安全備份、環境變數和設定檔安裝指引。' },
     terminal: {

@@ -2,7 +2,7 @@ export default {
   common: {
     // Site name. Overwritten via mergeLocaleMessage in stores/app.ts once the
     // public settings load; reference it as @:common.siteName in copy.
-    siteName: 'KDAN',
+    siteName: 'Tokensavy',
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',
