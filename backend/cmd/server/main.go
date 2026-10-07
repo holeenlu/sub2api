@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	_ "embed"
 	"errors"
 	"flag"
@@ -19,7 +20,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/setup"
 	"github.com/Wei-Shaw/sub2api/internal/web"
 
@@ -35,9 +38,17 @@ var (
 	Commit    = "unknown"
 	Date      = "unknown"
 	BuildType = "source" // "source" for manual builds, "release" for CI builds (set by ldflags)
+	// UpstreamVersion 是本次构建所基于的上游 Sub2API 版本，由 ldflags 注入
+	// （-X main.UpstreamVersion=v0.2.1）。留空时回退到 embedded VERSION 文件。
+	UpstreamVersion = ""
 )
 
 func init() {
+	initVersion()
+	initUpstreamVersion()
+}
+
+func initVersion() {
 	// 如果 Version 已通过 ldflags 注入（例如 -X main.Version=...），则不要覆盖。
 	if strings.TrimSpace(Version) != "" {
 		return
@@ -50,6 +61,24 @@ func init() {
 	}
 }
 
+// initUpstreamVersion 归一化上游版本号：始终以 "v" 开头，接受 ldflags 传入带或不带前缀的值。
+// 未注入时回退到 embedded VERSION 文件——该文件在上游打 tag 时才回写，只是兜底；
+// 派生构建应由构建流程注入实际同步到的上游版本。
+func initUpstreamVersion() {
+	UpstreamVersion = normalizeUpstreamVersion(UpstreamVersion, embeddedVersion)
+}
+
+func normalizeUpstreamVersion(injected, fallback string) string {
+	v := strings.TrimSpace(injected)
+	if v == "" {
+		v = strings.TrimSpace(fallback)
+	}
+	if v == "" {
+		return ""
+	}
+	return "v" + strings.TrimPrefix(v, "v")
+}
+
 // initLogger configures the default slog handler based on gin.Mode().
 // In non-release mode, Debug level logs are enabled.
 func main() {
@@ -59,10 +88,29 @@ func main() {
 	// Parse command line flags
 	setupMode := flag.Bool("setup", false, "Run setup wizard in CLI mode")
 	showVersion := flag.Bool("version", false, "Show version information")
+	checkModelPolicy := flag.Bool("check-model-policy-migration", false, "Validate migration 263 using temporary tables; do not start or modify the application")
 	flag.Parse()
 
 	if *showVersion {
-		log.Printf("Sub2API %s (commit: %s, built: %s)\n", Version, Commit, Date)
+		log.Printf(service.DefaultSiteName+" %s (commit: %s, built: %s)\n", Version, Commit, Date)
+		return
+	}
+	if *checkModelPolicy {
+		cfg, err := config.LoadForBootstrap()
+		if err != nil {
+			log.Fatalf("Preflight configuration: %v", err)
+		}
+		db, err := sql.Open("postgres", cfg.Database.DSN())
+		if err != nil {
+			log.Fatal("Cannot open database for migration preflight")
+		}
+		defer db.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := repository.CheckModelPolicyMigration(ctx, db); err != nil {
+			log.Fatalf("PREFLIGHT FAILED: %v", err)
+		}
+		log.Print("PREFLIGHT OK: model policy migration; application data unchanged")
 		return
 	}
 
@@ -101,7 +149,15 @@ func runSetupServer() {
 	r.Use(middleware.SecurityHeaders(config.CSPConfig{Enabled: true, Policy: config.DefaultCSPPolicy}, nil))
 
 	// Register setup routes
-	setup.RegisterRoutes(r)
+	bootstrapToken, err := setup.RegisterRoutes(r)
+	if err != nil {
+		log.Fatalf("Failed to initialize setup authorization: %v", err)
+	}
+	if strings.TrimSpace(os.Getenv("SETUP_BOOTSTRAP_TOKEN")) != "" {
+		log.Println("Setup authorization token is supplied through SETUP_BOOTSTRAP_TOKEN; it will not be written to logs")
+	} else {
+		log.Printf("Setup authorization token (operator only): %s", bootstrapToken)
+	}
 
 	// Serve embedded frontend if available
 	if web.HasEmbeddedFrontend() {
@@ -112,7 +168,7 @@ func runSetupServer() {
 	// This allows users to run setup on a different address if needed
 	addr := config.GetServerAddress()
 	log.Printf("Setup wizard available at http://%s", addr)
-	log.Println("Complete the setup wizard to configure Sub2API")
+	log.Println("Complete the setup wizard to configure " + service.DefaultSiteName)
 
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
@@ -144,8 +200,10 @@ func runMainServer() {
 	}
 
 	buildInfo := handler.BuildInfo{
-		Version:   Version,
-		BuildType: BuildType,
+		Version:         Version,
+		BuildType:       BuildType,
+		UpstreamVersion: UpstreamVersion,
+		BuildCommit:     Commit,
 	}
 
 	app, err := initializeApplication(buildInfo)

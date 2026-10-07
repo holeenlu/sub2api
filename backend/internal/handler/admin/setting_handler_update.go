@@ -22,6 +22,7 @@ import (
 
 // UpdateSettingsRequest 更新设置请求
 type UpdateSettingsRequest struct {
+	OpenAICodexDiagnosticPromptTemplate *string `json:"openai_codex_diagnostic_prompt_template"`
 	// 注册设置
 	RegistrationEnabled                 bool                         `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                         `json:"email_verify_enabled"`
@@ -161,7 +162,6 @@ type UpdateSettingsRequest struct {
 	DocURL                      string                `json:"doc_url"`
 	HomeContent                 string                `json:"home_content"`
 	CompactHomeEnabled          bool                  `json:"compact_home_enabled"`
-	HideCcsImportButton         bool                  `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled *bool                 `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL     *string               `json:"purchase_subscription_url"`
 	TableDefaultPageSize        int                   `json:"table_default_page_size"`
@@ -556,7 +556,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	// 关闭 step-up 门控本身就是敏感操作：防止拿到管理员会话的攻击者先关闸再执行导出/备份。
 	// previousSettings 已证实开关处于开启状态，使用无条件门控变体，
 	// 避免门控内部二次读取开关时因存储故障 fail-open（前端捕获 STEP_UP_REQUIRED 弹码重试）。
-	if !stepUpEnabled && previousSettings.StepUpEnabled {
+	if previousSettings.StepUpEnabled && (!stepUpEnabled || (previousSettings.TotpEnabled && !req.TotpEnabled && sentFields["totp_enabled"] != nil)) {
 		if !middleware.EnforceStepUpAlways(c, h.totpService, h.userService) {
 			return
 		}
@@ -1522,6 +1522,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	settings := &service.SystemSettings{
+		OpenAICodexDiagnosticPromptTemplate: func() string {
+			if req.OpenAICodexDiagnosticPromptTemplate != nil {
+				return *req.OpenAICodexDiagnosticPromptTemplate
+			}
+			return previousSettings.OpenAICodexDiagnosticPromptTemplate
+		}(),
 		// 系统全局 platform quota 默认值（整体替换语义）
 		DefaultPlatformQuotas:       req.DefaultPlatformQuotas,
 		AccountSchedulingThresholds: req.AccountSchedulingThresholds,
@@ -1648,7 +1654,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		DocURL:                                 req.DocURL,
 		HomeContent:                            req.HomeContent,
 		CompactHomeEnabled:                     req.CompactHomeEnabled,
-		HideCcsImportButton:                    req.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:            purchaseEnabled,
 		PurchaseSubscriptionURL:                purchaseURL,
 		TableDefaultPageSize:                   req.TableDefaultPageSize,
@@ -2191,6 +2196,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
 
 	payload := dto.SystemSettings{
+		OpenAICodexDiagnosticPromptTemplate:                    service.EffectiveCodexProbeTemplate(updatedSettings.OpenAICodexDiagnosticPromptTemplate),
+		OpenAICodexDiagnosticPromptTemplateDefault:             service.DefaultCodexProbeTemplate(),
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
 		EmailVerifyEnabled:                                     updatedSettings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       updatedSettings.RegistrationEmailSuffixWhitelist,
@@ -2312,7 +2319,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		DocURL:                                                 updatedSettings.DocURL,
 		HomeContent:                                            updatedSettings.HomeContent,
 		CompactHomeEnabled:                                     updatedSettings.CompactHomeEnabled,
-		HideCcsImportButton:                                    updatedSettings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:                            updatedSettings.PurchaseSubscriptionEnabled,
 		PurchaseSubscriptionURL:                                updatedSettings.PurchaseSubscriptionURL,
 		TableDefaultPageSize:                                   updatedSettings.TableDefaultPageSize,

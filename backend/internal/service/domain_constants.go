@@ -18,8 +18,9 @@ const (
 
 // Role constants
 const (
-	RoleAdmin = domain.RoleAdmin
-	RoleUser  = domain.RoleUser
+	RoleSuperAdmin = domain.RoleSuperAdmin
+	RoleAdmin      = domain.RoleAdmin
+	RoleUser       = domain.RoleUser
 )
 
 // Affiliate rebate settings
@@ -151,6 +152,20 @@ var AllowedSchedulingThresholdPlatforms = []string{
 	PlatformMiniMax,
 	PlatformOpenCodeGo,
 }
+
+// SchedulingThresholdScopeAnthropicFable 是 Anthropic Fable 模型家族的独立停调阈值
+// scope。它不是平台——account.Platform 永远不会等于它，只在
+// account_scheduling_thresholds 这张 map 里多占一个 key。越线只对 Fable 打模型级
+// 限流，账号对其他模型仍可调度。
+const SchedulingThresholdScopeAnthropicFable = "anthropic_fable"
+
+// AllowedSchedulingThresholdScopes 是 account_scheduling_thresholds 允许出现的全部
+// key：平台 + 非平台 scope。设置的校验/解析/审计遍历用它；判定「某账号平台是否支持
+// 阈值停调」仍用 AllowedSchedulingThresholdPlatforms。
+var AllowedSchedulingThresholdScopes = append(
+	append([]string{}, AllowedSchedulingThresholdPlatforms...),
+	SchedulingThresholdScopeAnthropicFable,
+)
 
 // IsAllowedQuotaPlatform 报告 s 是否为合法的 quota platform 标识。
 func IsAllowedQuotaPlatform(s string) bool {
@@ -387,7 +402,6 @@ const (
 	SettingKeyDocURL                      = "doc_url"                       // 文档链接
 	SettingKeyHomeContent                 = "home_content"                  // 首页内容（支持 Markdown/HTML，或 URL 作为 iframe src）
 	SettingKeyCompactHomeEnabled          = "compact_home_enabled"          // 是否启用内置简洁首页
-	SettingKeyHideCcsImportButton         = "hide_ccs_import_button"        // 是否隐藏 API Keys 页面的导入 CCS 按钮
 	SettingKeyPurchaseSubscriptionEnabled = "purchase_subscription_enabled" // 是否展示"购买订阅"页面入口
 	SettingKeyPurchaseSubscriptionURL     = "purchase_subscription_url"     // "购买订阅"页面 URL（作为 iframe src）
 	SettingKeyTableDefaultPageSize        = "table_default_page_size"       // 表格默认每页条数

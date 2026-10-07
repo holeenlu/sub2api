@@ -133,6 +133,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
 
 	payload := dto.SystemSettings{
+		OpenAICodexDiagnosticPromptTemplate:                    service.EffectiveCodexProbeTemplate(settings.OpenAICodexDiagnosticPromptTemplate),
+		OpenAICodexDiagnosticPromptTemplateDefault:             service.DefaultCodexProbeTemplate(),
 		RegistrationEnabled:                                    settings.RegistrationEnabled,
 		EmailVerifyEnabled:                                     settings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       settings.RegistrationEmailSuffixWhitelist,
@@ -254,7 +256,6 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		DocURL:                                                 settings.DocURL,
 		HomeContent:                                            settings.HomeContent,
 		CompactHomeEnabled:                                     settings.CompactHomeEnabled,
-		HideCcsImportButton:                                    settings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:                            settings.PurchaseSubscriptionEnabled,
 		PurchaseSubscriptionURL:                                settings.PurchaseSubscriptionURL,
 		TableDefaultPageSize:                                   settings.TableDefaultPageSize,

@@ -182,6 +182,7 @@ type GeminiTierQuotaConfig struct {
 }
 
 type UpdateConfig struct {
+	CheckEnabled bool `mapstructure:"check_enabled"`
 	// ProxyURL 用于访问 GitHub 的代理地址
 	// 支持 http/https/socks5/socks5h 协议
 	// 例如: "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"
@@ -738,8 +739,8 @@ type SecurityConfig struct {
 	CSP             CSPConfig            `mapstructure:"csp"`
 	ProxyFallback   ProxyFallbackConfig  `mapstructure:"proxy_fallback"`
 	ProxyProbe      ProxyProbeConfig     `mapstructure:"proxy_probe"`
-	// TrustForwardedIPForAPIKeyACL enables legacy raw forwarded-header takeover.
-	// When disabled, server.trusted_proxies is authoritative for all client-IP consumers.
+	// Deprecated name retained for settings compatibility: this controls only
+	// legacy request metadata. Security decisions always use server.trusted_proxies.
 	TrustForwardedIPForAPIKeyACL  bool                                       `mapstructure:"trust_forwarded_ip_for_api_key_acl"`
 	ForwardedClientIPHeaders      []string                                   `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
 	forwardedClientIPSettingsLive *atomic.Pointer[ForwardedClientIPSettings] `mapstructure:"-" json:"-" yaml:"-"`
@@ -1485,6 +1486,31 @@ type TLSProfileConfig struct {
 
 // GatewaySchedulingConfig accounts scheduling configuration.
 type GatewaySchedulingConfig struct {
+	// StickySessionTTLSeconds: session_hash -> account_id 粘连 TTL（滑动窗口，
+	// 每次成功选号或粘性命中都会续期）。默认 3600 与历史硬编码值一致，升级不改
+	// 变任何实例的行为；调大后同一会话隔夜/跨周末回来仍会落回原账号，避免在多个
+	// 账号之间反复重建上游 prompt cache。
+	//
+	// 只作用于 GatewayService 的 Anthropic 账号路径。Gemini、Antigravity 以及
+	// OpenAI 各自保留原有的 TTL 常量/配置，不受此项影响。
+	//
+	// 注意这只延长「同一会话优先复用同一账号」的记忆时长，不会绕过任何调度闸门：
+	// 账号停调、限流、模型不支持、配额或利润门不通过时依旧照常换号。
+	StickySessionTTLSeconds int `mapstructure:"sticky_session_ttl_seconds"`
+
+	// SessionAccountHistoryTTLSeconds: 长周期「会话账号历史」亲和键的 TTL（秒）。
+	// 0（默认）为关闭，保持升级前行为。
+	//
+	// 短期粘性键过期后，自由选号会按优先级重新挑账号，同一个会话隔天回来极可能
+	// 落到另一个账号上并重建整份上游 prompt cache。开启后会额外写一个寿命长得多
+	// 的亲和键：短期键 miss 时先试历史账号，历史账号同样要过全部调度闸门，过不了
+	// 才进入自由选号。
+	//
+	// 与直接把 StickySessionTTLSeconds 拉到几天相比，两级结构保留了「短期内严格
+	// 粘住、长期只是优先建议」的区分，也不会让一次会话把某个账号锁定数天。
+	// 同样只作用于 Anthropic 账号。
+	SessionAccountHistoryTTLSeconds int `mapstructure:"session_account_history_ttl_seconds"`
+
 	// 粘性会话排队配置
 	StickySessionMaxWaiting  int           `mapstructure:"sticky_session_max_waiting"`
 	StickySessionWaitTimeout time.Duration `mapstructure:"sticky_session_wait_timeout"`
@@ -1853,6 +1879,7 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 	trustedProxiesEnv, trustedProxiesEnvConfigured := os.LookupEnv("SERVER_TRUSTED_PROXIES")
 	forwardedClientIPHeadersEnv, forwardedClientIPHeadersEnvConfigured := os.LookupEnv("SECURITY_FORWARDED_CLIENT_IP_HEADERS")
+	corsAllowedOriginsEnv, corsAllowedOriginsEnvConfigured := os.LookupEnv("CORS_ALLOWED_ORIGINS")
 	trustedProxiesConfigured := viper.InConfig("server.trusted_proxies") ||
 		viper.IsSet("server.trusted_proxies") || trustedProxiesEnvConfigured
 
@@ -1865,6 +1892,9 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 	if forwardedClientIPHeadersEnvConfigured {
 		cfg.Security.ForwardedClientIPHeaders = normalizeStringSlice(strings.Split(forwardedClientIPHeadersEnv, ","))
+	}
+	if corsAllowedOriginsEnvConfigured {
+		cfg.CORS.AllowedOrigins = normalizeStringSlice(strings.Split(corsAllowedOriginsEnv, ","))
 	}
 	cfg.Server.TrustedProxiesConfigured = trustedProxiesConfigured
 	if cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs == 0 {
@@ -2028,7 +2058,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 	addConfigPath("/app/data")
 	addConfigPath(".")
 	addConfigPath("./config")
-	addConfigPath("/etc/sub2api")
+	addConfigPath("/etc/kdan")
 }
 
 func setDefaults() {
@@ -2057,7 +2087,7 @@ func setDefaults() {
 	// Log
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.format", "console")
-	viper.SetDefault("log.service_name", "sub2api")
+	viper.SetDefault("log.service_name", "kdan")
 	viper.SetDefault("log.env", "production")
 	viper.SetDefault("log.caller", true)
 	viper.SetDefault("log.stacktrace_level", "error")
@@ -2080,7 +2110,7 @@ func setDefaults() {
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
 	// declare its relying-party domain and trusted browser origins.
 	viper.SetDefault("webauthn.enabled", false)
-	viper.SetDefault("webauthn.rp_display_name", "Sub2API")
+	viper.SetDefault("webauthn.rp_display_name", "KDAN")
 	viper.SetDefault("webauthn.rp_id", "")
 	viper.SetDefault("webauthn.rp_origins", []string{})
 
@@ -2112,7 +2142,7 @@ func setDefaults() {
 	viper.SetDefault("security.csp.enabled", true)
 	viper.SetDefault("security.csp.policy", DefaultCSPPolicy)
 	viper.SetDefault("security.proxy_probe.insecure_skip_verify", false)
-	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", true)
+	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", false)
 
 	// Security - disable direct fallback on proxy error
 	viper.SetDefault("security.proxy_fallback.allow_direct_on_error", false)
@@ -2212,7 +2242,7 @@ func setDefaults() {
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")
 	viper.SetDefault("database.password", "postgres")
-	viper.SetDefault("database.dbname", "sub2api")
+	viper.SetDefault("database.dbname", "kdan")
 	viper.SetDefault("database.sslmode", "prefer")
 	viper.SetDefault("database.max_open_conns", 256)
 	viper.SetDefault("database.max_idle_conns", 128)
@@ -2542,6 +2572,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_nonstream_keepalive_interval", 0)
 	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
+	viper.SetDefault("gateway.scheduling.sticky_session_ttl_seconds", 3600)
+	viper.SetDefault("gateway.scheduling.session_account_history_ttl_seconds", 0)
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)
 	viper.SetDefault("gateway.scheduling.fallback_wait_timeout", 30*time.Second)
@@ -2642,6 +2674,7 @@ func setEnvReachableDefaults() {
 	viper.SetDefault("gateway.forced_codex_instructions_template_file", "")
 	viper.SetDefault("gateway.session_idle_timeout_minutes", 0)
 	viper.SetDefault("gateway.user_message_queue.mode", "")
+	viper.SetDefault("update.check_enabled", true)
 	viper.SetDefault("update.proxy_url", "")
 
 	// sticky_escape_enabled is the one exception to the zero-value rule: its
@@ -3683,6 +3716,24 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ModelsListCacheTTLSeconds < 10 || c.Gateway.ModelsListCacheTTLSeconds > 30 {
 		return fmt.Errorf("gateway.models_list_cache_ttl_seconds must be between 10-30")
+	}
+	if c.Gateway.Scheduling.StickySessionTTLSeconds <= 0 {
+		return fmt.Errorf("gateway.scheduling.sticky_session_ttl_seconds must be positive")
+	}
+	if c.Gateway.Scheduling.StickySessionTTLSeconds > 30*24*60*60 {
+		return fmt.Errorf("gateway.scheduling.sticky_session_ttl_seconds must not exceed 30 days")
+	}
+	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds < 0 {
+		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must not be negative")
+	}
+	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds > 30*24*60*60 {
+		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must not exceed 30 days")
+	}
+	// 历史键比短期粘性键还短就毫无意义：短期键还在时根本不会去读它，短期键一过期
+	// 它也已经跟着没了。这种配置一定是写错了，直接拒绝而不是静默失效。
+	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds > 0 &&
+		c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds < c.Gateway.Scheduling.StickySessionTTLSeconds {
+		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must be >= gateway.scheduling.sticky_session_ttl_seconds")
 	}
 	if c.Gateway.Scheduling.StickySessionMaxWaiting <= 0 {
 		return fmt.Errorf("gateway.scheduling.sticky_session_max_waiting must be positive")

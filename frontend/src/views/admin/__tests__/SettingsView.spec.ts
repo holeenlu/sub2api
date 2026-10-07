@@ -129,6 +129,18 @@ vi.mock("@/stores", () => ({
   }),
 }));
 
+// Nested model selectors use the direct store import. Share the same fixture
+// callbacks so mounting settings does not instantiate an unconfigured Pinia.
+vi.mock("@/stores/app", () => ({
+  useAppStore: () => ({
+    showError,
+    showSuccess,
+    showWarning: vi.fn(),
+    showInfo: vi.fn(),
+    fetchPublicSettings,
+  }),
+}));
+
 vi.mock("@/stores/adminSettings", () => ({
   useAdminSettingsStore: () => ({
     fetch: adminSettingsFetch,
@@ -389,7 +401,7 @@ const baseSettingsResponse = {
   doc_url: "",
   home_content: "",
   compact_home_enabled: false,
-  hide_ccs_import_button: false,
+
   table_default_page_size: 20,
   table_page_size_options: [10, 20, 50, 100],
   backend_mode_enabled: false,
@@ -563,6 +575,7 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
+        EmailTemplateEditor: true,
       },
     },
   });
@@ -723,6 +736,9 @@ describe("admin SettingsView payment visible method controls", () => {
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
   });
+
+
+
 
   it("loads and saves the open button visibility for each custom menu", async () => {
     const menuItems = [
@@ -1158,7 +1174,7 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
-  it("links payment guidance to README sections instead of removed payment docs", async () => {
+  it("links payment guidance to the KDAN docs site", async () => {
     const wrapper = mountView();
 
     await flushPromises();
@@ -1172,13 +1188,13 @@ describe("admin SettingsView payment visible method controls", () => {
 
     expect(paymentLinks).toHaveLength(2);
     expect(paymentLinks[0]?.attributes("href")).toBe(
-      "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md",
+      "https://docs.kdan.com/zh/payment",
     );
     expect(paymentLinks[1]?.attributes("href")).toBe(
-      "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md#支持的支付方式",
+      "https://docs.kdan.com/zh/payment#supported-payment-methods",
     );
     for (const link of paymentLinks) {
-      expect(link.attributes("href")).toContain("docs/PAYMENT");
+      expect(link.attributes("href")).toContain("https://docs.kdan.com/");
     }
   });
 
@@ -1217,6 +1233,57 @@ describe("admin SettingsView payment visible method controls", () => {
         affiliate_admin_recharge_enabled: true,
       }),
     );
+  });
+
+  it("loads and saves the Fable model threshold independently from Anthropic", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, account_scheduling_thresholds: { openai: 100, anthropic: 70, anthropic_fable: 95, grok: 100 } });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const editor = wrapper.get('[data-testid="account-scheduling-threshold-anthropic_fable"]');
+    expect((editor.element as HTMLInputElement).value).toBe('95');
+    await editor.setValue(90);
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings.mock.lastCall?.[0]?.account_scheduling_thresholds).toEqual(expect.objectContaining({ anthropic: 70, anthropic_fable: 90 }));
+    wrapper.unmount();
+  });
+
+  it("loads, edits and restores the Codex diagnostic template", async () => {
+    const defaultTemplate = '{"type":"session_meta","payload":{"base_instructions":{"text":"Default instructions"}}}\n';
+    const customTemplate = defaultTemplate.replace("Default instructions", "Custom instructions");
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_diagnostic_prompt_template: defaultTemplate,
+      openai_codex_diagnostic_prompt_template_default: defaultTemplate,
+    });
+    updateSettings.mockImplementation(async (payload) => ({
+      ...baseSettingsResponse,
+      ...payload,
+      openai_codex_diagnostic_prompt_template: payload.openai_codex_diagnostic_prompt_template || defaultTemplate,
+      openai_codex_diagnostic_prompt_template_default: defaultTemplate,
+    }));
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const editor = wrapper.get('[data-testid="codex-probe-template"]');
+    expect((editor.element as HTMLTextAreaElement).value).toBe(defaultTemplate);
+    expect(wrapper.text()).toContain("{{TIMEZONE}}");
+    await editor.setValue(customTemplate);
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      openai_codex_diagnostic_prompt_template: customTemplate,
+    }));
+    expect(updateSettings.mock.lastCall?.[0]).not.toHaveProperty("openai_codex_diagnostic_prompt_template_default");
+    await wrapper.get('[data-testid="codex-probe-template-reset"]').trigger("click");
+    expect((editor.element as HTMLTextAreaElement).value).toBe(defaultTemplate);
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ openai_codex_diagnostic_prompt_template: "" }));
+    expect((editor.element as HTMLTextAreaElement).value).toBe(defaultTemplate);
+    wrapper.unmount();
   });
 
   it("submits Anthropic cache TTL injection gateway setting", async () => {
@@ -1839,7 +1906,7 @@ describe("admin SettingsView wechat connect controls", () => {
       wrapper
         .get('[data-testid="wechat-connect-mp-app-secret"]')
         .attributes("placeholder"),
-    ).toContain("密钥已配置");
+    ).toContain("ui.secretConfiguredLeaveEmptyToKeepTheCurrentValue");
     expect(
       (
         wrapper.get('[data-testid="wechat-connect-frontend-redirect-url"]')
@@ -1917,7 +1984,7 @@ describe("admin SettingsView wechat connect controls", () => {
       wrapper
         .get('[data-testid="wechat-connect-mp-app-secret"]')
         .attributes("placeholder"),
-    ).toContain("密钥已配置");
+    ).toContain("ui.secretConfiguredLeaveEmptyToKeepTheCurrentValue");
   });
 
   it("collapses auth source defaults until the source is enabled", async () => {
@@ -2127,3 +2194,6 @@ describe("admin SettingsView platform quota matrix", () => {
     expect(quotas["anthropic"]?.["daily"]).toBe(null);
   });
 });
+
+// These legacy functional cases exercise the migrated full administrator.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))

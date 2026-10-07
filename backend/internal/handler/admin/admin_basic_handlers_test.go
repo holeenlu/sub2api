@@ -11,66 +11,66 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupAdminRouter() (*gin.Engine, *stubAdminService) {
+func setupAdminRouter(t *testing.T) (*gin.Engine, *stubAdminService) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	adminSvc := newStubAdminService()
 
-	userHandler := NewUserHandler(adminSvc, nil, nil, nil, nil, nil, nil)
+	userHandler := lifecycleAuthenticatedAdminHandler(t, router, adminSvc)
 	groupHandler := NewGroupHandler(adminSvc, nil, nil)
 	proxyHandler := NewProxyHandler(adminSvc)
 	redeemHandler := NewRedeemHandler(adminSvc, nil)
 
-	router.GET("/api/v1/admin/users", userHandler.List)
-	router.GET("/api/v1/admin/users/:id", userHandler.GetByID)
-	router.POST("/api/v1/admin/users/:id/auth-identities", userHandler.BindAuthIdentity)
-	router.POST("/api/v1/admin/users", userHandler.Create)
-	router.PUT("/api/v1/admin/users/:id", userHandler.Update)
-	router.DELETE("/api/v1/admin/users/:id", userHandler.Delete)
-	router.POST("/api/v1/admin/users/:id/balance", userHandler.UpdateBalance)
-	router.GET("/api/v1/admin/users/:id/api-keys", userHandler.GetUserAPIKeys)
-	router.GET("/api/v1/admin/users/:id/usage", userHandler.GetUserUsage)
+	router.Group("").GET("/api/v1/admin/users", userHandler.List)
+	router.Group("").GET("/api/v1/admin/users/:id", userHandler.GetByID)
+	router.Group("").POST("/api/v1/admin/users/:id/auth-identities", userHandler.BindAuthIdentity)
+	router.Group("").POST("/api/v1/admin/users", userHandler.Create)
+	router.Group("").PUT("/api/v1/admin/users/:id", userHandler.Update)
+	router.Group("").DELETE("/api/v1/admin/users/:id", userHandler.Delete)
+	router.Group("").POST("/api/v1/admin/users/:id/balance", userHandler.UpdateBalance)
+	router.Group("").GET("/api/v1/admin/users/:id/api-keys", userHandler.GetUserAPIKeys)
+	router.Group("").GET("/api/v1/admin/users/:id/usage", userHandler.GetUserUsage)
 
-	router.GET("/api/v1/admin/groups", groupHandler.List)
-	router.GET("/api/v1/admin/groups/all", groupHandler.GetAll)
-	router.GET("/api/v1/admin/groups/:id/model-allowlist-candidates", groupHandler.GetGroupModelAllowlistCandidates)
-	router.GET("/api/v1/admin/groups/:id/composite-routes", groupHandler.ListCompositeRoutes)
-	router.POST("/api/v1/admin/groups/:id/composite-routes", groupHandler.CreateCompositeRoute)
-	router.POST("/api/v1/admin/groups/:id/composite-routes/preview", groupHandler.PreviewCompositeRoute)
-	router.PUT("/api/v1/admin/groups/:id/composite-routes/:route_id", groupHandler.UpdateCompositeRoute)
-	router.DELETE("/api/v1/admin/groups/:id/composite-routes/:route_id", groupHandler.DeleteCompositeRoute)
-	router.GET("/api/v1/admin/groups/:id", groupHandler.GetByID)
-	router.POST("/api/v1/admin/groups", groupHandler.Create)
-	router.PUT("/api/v1/admin/groups/:id", groupHandler.Update)
-	router.DELETE("/api/v1/admin/groups/:id", groupHandler.Delete)
-	router.GET("/api/v1/admin/groups/:id/stats", groupHandler.GetStats)
-	router.GET("/api/v1/admin/groups/:id/api-keys", groupHandler.GetGroupAPIKeys)
+	router.Group("").GET("/api/v1/admin/groups", groupHandler.List)
+	router.Group("").GET("/api/v1/admin/groups/all", groupHandler.GetAll)
+	router.Group("").GET("/api/v1/admin/groups/:id/model-allowlist-candidates", groupHandler.GetGroupModelAllowlistCandidates)
+	router.Group("").GET("/api/v1/admin/groups/:id/composite-routes", groupHandler.ListCompositeRoutes)
+	router.Group("").POST("/api/v1/admin/groups/:id/composite-routes", groupHandler.CreateCompositeRoute)
+	router.Group("").POST("/api/v1/admin/groups/:id/composite-routes/preview", groupHandler.PreviewCompositeRoute)
+	router.Group("").PUT("/api/v1/admin/groups/:id/composite-routes/:route_id", groupHandler.UpdateCompositeRoute)
+	router.Group("").DELETE("/api/v1/admin/groups/:id/composite-routes/:route_id", groupHandler.DeleteCompositeRoute)
+	router.Group("").GET("/api/v1/admin/groups/:id", groupHandler.GetByID)
+	router.Group("").POST("/api/v1/admin/groups", groupHandler.Create)
+	router.Group("").PUT("/api/v1/admin/groups/:id", groupHandler.Update)
+	router.Group("").DELETE("/api/v1/admin/groups/:id", groupHandler.Delete)
+	router.Group("").GET("/api/v1/admin/groups/:id/stats", groupHandler.GetStats)
+	router.Group("").GET("/api/v1/admin/groups/:id/api-keys", groupHandler.GetGroupAPIKeys)
 
-	router.GET("/api/v1/admin/proxies", proxyHandler.List)
-	router.GET("/api/v1/admin/proxies/all", proxyHandler.GetAll)
-	router.GET("/api/v1/admin/proxies/:id", proxyHandler.GetByID)
-	router.POST("/api/v1/admin/proxies", proxyHandler.Create)
-	router.PUT("/api/v1/admin/proxies/:id", proxyHandler.Update)
-	router.DELETE("/api/v1/admin/proxies/:id", proxyHandler.Delete)
-	router.POST("/api/v1/admin/proxies/batch-delete", proxyHandler.BatchDelete)
-	router.POST("/api/v1/admin/proxies/:id/test", proxyHandler.Test)
-	router.POST("/api/v1/admin/proxies/:id/quality-check", proxyHandler.CheckQuality)
-	router.GET("/api/v1/admin/proxies/:id/stats", proxyHandler.GetStats)
-	router.GET("/api/v1/admin/proxies/:id/accounts", proxyHandler.GetProxyAccounts)
+	router.Group("").GET("/api/v1/admin/proxies", proxyHandler.List)
+	router.Group("").GET("/api/v1/admin/proxies/all", proxyHandler.GetAll)
+	router.Group("").GET("/api/v1/admin/proxies/:id", proxyHandler.GetByID)
+	router.Group("").POST("/api/v1/admin/proxies", proxyHandler.Create)
+	router.Group("").PUT("/api/v1/admin/proxies/:id", proxyHandler.Update)
+	router.Group("").DELETE("/api/v1/admin/proxies/:id", proxyHandler.Delete)
+	router.Group("").POST("/api/v1/admin/proxies/batch-delete", proxyHandler.BatchDelete)
+	router.Group("").POST("/api/v1/admin/proxies/:id/test", proxyHandler.Test)
+	router.Group("").POST("/api/v1/admin/proxies/:id/quality-check", proxyHandler.CheckQuality)
+	router.Group("").GET("/api/v1/admin/proxies/:id/stats", proxyHandler.GetStats)
+	router.Group("").GET("/api/v1/admin/proxies/:id/accounts", proxyHandler.GetProxyAccounts)
 
-	router.GET("/api/v1/admin/redeem-codes", redeemHandler.List)
-	router.GET("/api/v1/admin/redeem-codes/:id", redeemHandler.GetByID)
-	router.POST("/api/v1/admin/redeem-codes", redeemHandler.Generate)
-	router.DELETE("/api/v1/admin/redeem-codes/:id", redeemHandler.Delete)
-	router.POST("/api/v1/admin/redeem-codes/batch-delete", redeemHandler.BatchDelete)
-	router.POST("/api/v1/admin/redeem-codes/:id/expire", redeemHandler.Expire)
-	router.GET("/api/v1/admin/redeem-codes/:id/stats", redeemHandler.GetStats)
+	router.Group("").GET("/api/v1/admin/redeem-codes", redeemHandler.List)
+	router.Group("").GET("/api/v1/admin/redeem-codes/:id", redeemHandler.GetByID)
+	router.Group("").POST("/api/v1/admin/redeem-codes/generate", redeemHandler.Generate)
+	router.Group("").DELETE("/api/v1/admin/redeem-codes/:id", redeemHandler.Delete)
+	router.Group("").POST("/api/v1/admin/redeem-codes/batch-delete", redeemHandler.BatchDelete)
+	router.Group("").POST("/api/v1/admin/redeem-codes/:id/expire", redeemHandler.Expire)
+	router.Group("").GET("/api/v1/admin/redeem-codes/stats", redeemHandler.GetStats)
 
 	return router, adminSvc
 }
 
 func TestUserHandlerEndpoints(t *testing.T) {
-	router, _ := setupAdminRouter()
+	router, _ := setupAdminRouter(t)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users?page=1&page_size=20", nil)
@@ -139,7 +139,7 @@ func TestUserHandlerEndpoints(t *testing.T) {
 }
 
 func TestUserHandlerBindAuthIdentityMapsRequest(t *testing.T) {
-	router, adminSvc := setupAdminRouter()
+	router, adminSvc := setupAdminRouter(t)
 
 	body, err := json.Marshal(map[string]any{
 		"provider_type":    "oidc",
@@ -166,7 +166,7 @@ func TestUserHandlerBindAuthIdentityMapsRequest(t *testing.T) {
 }
 
 func TestGroupHandlerEndpoints(t *testing.T) {
-	router, _ := setupAdminRouter()
+	router, _ := setupAdminRouter(t)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/groups", nil)
@@ -267,7 +267,7 @@ func TestGroupHandlerEndpoints(t *testing.T) {
 }
 
 func TestProxyHandlerEndpoints(t *testing.T) {
-	router, _ := setupAdminRouter()
+	router, _ := setupAdminRouter(t)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies", nil)
@@ -331,7 +331,7 @@ func TestProxyHandlerEndpoints(t *testing.T) {
 }
 
 func TestRedeemHandlerEndpoints(t *testing.T) {
-	router, _ := setupAdminRouter()
+	router, _ := setupAdminRouter(t)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/redeem-codes", nil)
@@ -345,7 +345,7 @@ func TestRedeemHandlerEndpoints(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"count": 1, "type": "balance", "value": 10})
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/redeem-codes", bytes.NewReader(body))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/redeem-codes/generate", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -367,7 +367,7 @@ func TestRedeemHandlerEndpoints(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/redeem-codes/5/stats", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/redeem-codes/stats", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 }

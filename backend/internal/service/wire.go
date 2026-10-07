@@ -29,8 +29,10 @@ func ProvideGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthCli
 
 // BuildInfo contains build information
 type BuildInfo struct {
-	Version   string
-	BuildType string
+	UpstreamVersion string
+	BuildCommit     string
+	Version         string
+	BuildType       string
 }
 
 // ProvidePricingService creates and initializes PricingService
@@ -44,8 +46,8 @@ func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient)
 }
 
 // ProvideUpdateService creates UpdateService with BuildInfo
-func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo) *UpdateService {
-	return NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType)
+func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo, cfg *config.Config) *UpdateService {
+	return NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType).WithUpstreamVersion(buildInfo.UpstreamVersion).WithBuildCommit(buildInfo.BuildCommit).WithCheckEnabled(cfg == nil || cfg.Update.CheckEnabled)
 }
 
 // ProvideEmailQueueService creates EmailQueueService with default worker count
@@ -642,10 +644,18 @@ func ProvideIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Co
 
 // ProvideScheduledTestService creates ScheduledTestService.
 func ProvideScheduledTestService(
-	planRepo ScheduledTestPlanRepository,
-	resultRepo ScheduledTestResultRepository,
+	planRepo ScheduledTestPlanRepository, resultRepo ScheduledTestResultRepository,
+	accounts AccountRepository, keys *APIKeyService, users UserRepository,
+	gateway *OpenAIGatewayService,
 ) *ScheduledTestService {
-	return NewScheduledTestService(planRepo, resultRepo)
+	svc := NewScheduledTestService(planRepo, resultRepo)
+	svc.accounts, svc.keys, svc.users, svc.gateway = accounts, keys, users, gateway
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if gateway != nil && gateway.settingService != nil {
+		_ = gateway.settingService.LoadModelTraceBank(ctx)
+	}
+	return svc
 }
 
 // ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
@@ -657,7 +667,6 @@ func ProvideScheduledTestRunnerService(
 	cfg *config.Config,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
-	svc.Start()
 	return svc
 }
 

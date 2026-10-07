@@ -1,6 +1,7 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-6xl space-y-6">
+    <DelegatedSettings v-if="!roleAuth.isSuperAdmin" />
+    <div v-else class="mx-auto max-w-6xl space-y-6">
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-12">
         <div
@@ -43,6 +44,8 @@
             </div>
           </nav>
         </div>
+
+        <AdminRolePermissions v-if="activeTab === 'roles'" />
 
         <!-- Tab: Security — Admin API Key -->
         <div v-show="activeTab === 'security'" class="space-y-6">
@@ -1422,6 +1425,7 @@
         <!-- /Tab: Gateway -->
 
         <!-- Tab: Security — Registration, Turnstile, LinuxDo -->
+
         <div v-show="activeTab === 'security'" class="space-y-6">
           <!-- Registration Settings -->
           <div class="card">
@@ -2561,14 +2565,11 @@
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
               <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ localText("邮箱快捷登录", "Email OAuth Sign-in") }}
+                {{ t('ui.emailOauthSignIn') }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 {{
-                  localText(
-                    "开启 GitHub 或 Google 邮箱授权登录后，系统会读取已验证邮箱，存在则直接登录，不存在则自动注册。",
-                    "After GitHub or Google email OAuth is enabled, the system reads a verified email, signs in matching users, and auto-registers missing users.",
-                  )
+                  t('ui.afterGithubOrGoogleEmailOauthIsEnabledThe')
                 }}
               </p>
             </div>
@@ -2582,10 +2583,7 @@
                       </h3>
                       <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                         {{
-                          localText(
-                            "GitHub OAuth App 需要 read:user user:email 权限，回调地址填写下方后端地址。",
-                            "GitHub OAuth App needs read:user user:email scopes. Use the backend callback URL below.",
-                          )
+                          t('ui.githubOauthAppNeedsReadUserUserEmailScopes')
                         }}
                       </p>
                     </div>
@@ -2594,8 +2592,8 @@
 
                   <div v-if="form.github_oauth_enabled" class="mt-4 space-y-4">
                     <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300">
-                      <template v-if="isZhLocale">
-                        开通引导：GitHub Settings → Developer settings →
+                      <template>
+                        {{ t('ui.githubSetupStart') }}
                         <a
                           data-testid="github-oauth-apps-guide-link"
                           href="https://github.com/settings/developers"
@@ -2603,18 +2601,7 @@
                           rel="noopener noreferrer"
                           class="font-medium text-primary-600 hover:underline dark:text-primary-400"
                         >OAuth Apps</a>
-                        → New OAuth App；Homepage URL 填站点域名，Authorization callback URL 填下面的后端回调地址。
-                      </template>
-                      <template v-else>
-                        Setup guide: GitHub Settings → Developer settings →
-                        <a
-                          data-testid="github-oauth-apps-guide-link"
-                          href="https://github.com/settings/developers"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="font-medium text-primary-600 hover:underline dark:text-primary-400"
-                        >OAuth Apps</a>
-                        → New OAuth App. Use your site origin as Homepage URL and the backend callback URL below as Authorization callback URL.
+                        {{ t('ui.githubSetupEnd') }}
                       </template>
                     </div>
 
@@ -2636,7 +2623,7 @@
                           class="input font-mono text-sm"
                           :placeholder="
                             form.github_oauth_client_secret_configured
-                              ? localText('密钥已配置，留空以保留当前值。', 'Secret configured. Leave empty to keep the current value.')
+                              ? t('ui.secretConfiguredLeaveEmptyToKeepTheCurrentValue')
                               : 'GitHub OAuth Client Secret'
                           "
                         />
@@ -2645,7 +2632,7 @@
 
                     <div>
                       <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        {{ localText("后端回调地址", "Backend Callback URL") }}
+                        {{ t('ui.backendCallbackUrl') }}
                       </label>
                       <input
                         v-model="form.github_oauth_redirect_url"
@@ -2659,7 +2646,7 @@
                           class="btn btn-secondary btn-sm w-fit"
                           @click="setAndCopyEmailOAuthRedirectUrl('github')"
                         >
-                          {{ localText("生成并复制", "Generate and copy") }}
+                          {{ t('ui.generateAndCopy') }}
                         </button>
                         <code
                           v-if="githubOAuthRedirectUrlSuggestion"
@@ -2672,7 +2659,7 @@
 
                     <div>
                       <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        {{ localText("前端回跳地址", "Frontend Callback URL") }}
+                        {{ t('ui.frontendCallbackUrl') }}
                       </label>
                       <input
                         v-model="form.github_oauth_frontend_redirect_url"
@@ -2692,10 +2679,7 @@
                       </h3>
                       <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                         {{
-                          localText(
-                            "Google OAuth 客户端需要 openid email profile 范围，并在凭据里登记后端回调地址。",
-                            "Google OAuth client needs openid email profile scopes and the backend callback URL registered in credentials.",
-                          )
+                          t('ui.googleOauthClientNeedsOpenidEmailProfileScopesAnd')
                         }}
                       </p>
                     </div>
@@ -2705,10 +2689,7 @@
                   <div v-if="form.google_oauth_enabled" class="mt-4 space-y-4">
                     <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300">
                       {{
-                        localText(
-                          "开通引导：Google Cloud Console → APIs & Services → OAuth consent screen 完成同意屏幕；Credentials → Create Credentials → OAuth client ID，类型选择 Web application，并把下面地址加入 Authorized redirect URIs。",
-                          "Setup guide: Google Cloud Console → APIs & Services → OAuth consent screen, then Credentials → Create Credentials → OAuth client ID, choose Web application, and add the URL below to Authorized redirect URIs.",
-                        )
+                        t('ui.setupGuideGoogleCloudConsoleApisServicesOauthConsent')
                       }}
                     </div>
 
@@ -2730,7 +2711,7 @@
                           class="input font-mono text-sm"
                           :placeholder="
                             form.google_oauth_client_secret_configured
-                              ? localText('密钥已配置，留空以保留当前值。', 'Secret configured. Leave empty to keep the current value.')
+                              ? t('ui.secretConfiguredLeaveEmptyToKeepTheCurrentValue')
                               : 'Google OAuth Client Secret'
                           "
                         />
@@ -2739,7 +2720,7 @@
 
                     <div>
                       <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        {{ localText("后端回调地址", "Backend Callback URL") }}
+                        {{ t('ui.backendCallbackUrl') }}
                       </label>
                       <input
                         v-model="form.google_oauth_redirect_url"
@@ -2753,7 +2734,7 @@
                           class="btn btn-secondary btn-sm w-fit"
                           @click="setAndCopyEmailOAuthRedirectUrl('google')"
                         >
-                          {{ localText("生成并复制", "Generate and copy") }}
+                          {{ t('ui.generateAndCopy') }}
                         </button>
                         <code
                           v-if="googleOAuthRedirectUrlSuggestion"
@@ -2766,7 +2747,7 @@
 
                     <div>
                       <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        {{ localText("前端回跳地址", "Frontend Callback URL") }}
+                        {{ t('ui.frontendCallbackUrl') }}
                       </label>
                       <input
                         v-model="form.google_oauth_frontend_redirect_url"
@@ -2820,14 +2801,11 @@
                     <div class="flex items-start justify-between gap-4">
                       <div>
                         <h3 class="font-medium text-gray-900 dark:text-white">
-                          {{ localText("PC 应用", "PC App") }}
+                          {{ t('ui.pcApp') }}
                         </h3>
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                           {{
-                            localText(
-                              "桌面浏览器通过微信开放平台扫码登录。可与公众号或移动应用同时存在。",
-                              "Desktop browsers sign in through WeChat Open Platform QR login. This can coexist with Official Account or Mobile App.",
-                            )
+                            t('ui.desktopBrowsersSignInThroughWechatOpenPlatformQr')
                           }}
                         </p>
                       </div>
@@ -2845,7 +2823,7 @@
                         <label
                           class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                         >
-                          {{ localText("PC AppID", "PC App ID") }}
+                          {{ t('ui.pcAppId') }}
                         </label>
                         <input
                           v-model="form.wechat_connect_open_app_id"
@@ -2853,10 +2831,7 @@
                           type="text"
                           class="input font-mono text-sm"
                           :placeholder="
-                            localText(
-                              '微信开放平台 PC 应用 AppID',
-                              'WeChat Open Platform PC App ID',
-                            )
+                            t('ui.wechatOpenPlatformPcAppId')
                           "
                         />
                       </div>
@@ -2864,7 +2839,7 @@
                         <label
                           class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                         >
-                          {{ localText("PC AppSecret", "PC App Secret") }}
+                          {{ t('ui.pcAppSecret') }}
                         </label>
                         <input
                           v-model="form.wechat_connect_open_app_secret"
@@ -2873,14 +2848,8 @@
                           class="input font-mono text-sm"
                           :placeholder="
                             form.wechat_connect_open_app_secret_configured
-                              ? localText(
-                                  '密钥已配置，留空以保留当前值。',
-                                  'Secret configured. Leave empty to keep the current value.',
-                                )
-                              : localText(
-                                  '微信开放平台 PC 应用 AppSecret',
-                                  'WeChat Open Platform PC App Secret',
-                                )
+                              ? t('ui.secretConfiguredLeaveEmptyToKeepTheCurrentValue')
+                              : t('ui.wechatOpenPlatformPcAppSecret')
                           "
                         />
                       </div>
@@ -2893,14 +2862,11 @@
                     <div class="flex items-start justify-between gap-4">
                       <div>
                         <h3 class="font-medium text-gray-900 dark:text-white">
-                          {{ localText("公众号", "Official Account") }}
+                          {{ t('ui.officialAccount') }}
                         </h3>
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                           {{
-                            localText(
-                              "仅在微信内浏览器可用；非微信环境下会显示不可用。",
-                              "Only available inside the WeChat browser. It is shown as unavailable outside WeChat.",
-                            )
+                            t('ui.onlyAvailableInsideTheWechatBrowserItIsShown')
                           }}
                         </p>
                       </div>
@@ -2918,7 +2884,7 @@
                         <label
                           class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                         >
-                          {{ localText("公众号 AppID", "Official Account App ID") }}
+                          {{ t('ui.officialAccountAppId') }}
                         </label>
                         <input
                           v-model="form.wechat_connect_mp_app_id"
@@ -2926,10 +2892,7 @@
                           type="text"
                           class="input font-mono text-sm"
                           :placeholder="
-                            localText(
-                              '公众号 AppID',
-                              'Official Account App ID',
-                            )
+                            t('ui.officialAccountAppId')
                           "
                         />
                       </div>
@@ -2938,10 +2901,7 @@
                           class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                         >
                           {{
-                            localText(
-                              "公众号 AppSecret",
-                              "Official Account App Secret",
-                            )
+                            t('ui.officialAccountAppSecret')
                           }}
                         </label>
                         <input
@@ -2951,14 +2911,8 @@
                           class="input font-mono text-sm"
                           :placeholder="
                             form.wechat_connect_mp_app_secret_configured
-                              ? localText(
-                                  '密钥已配置，留空以保留当前值。',
-                                  'Secret configured. Leave empty to keep the current value.',
-                                )
-                              : localText(
-                                  '公众号 AppSecret',
-                                  'Official Account App Secret',
-                                )
+                              ? t('ui.secretConfiguredLeaveEmptyToKeepTheCurrentValue')
+                              : t('ui.officialAccountAppSecret')
                           "
                         />
                       </div>
@@ -2971,14 +2925,11 @@
                     <div class="flex items-start justify-between gap-4">
                       <div>
                         <h3 class="font-medium text-gray-900 dark:text-white">
-                          {{ localText("移动应用", "Mobile App") }}
+                          {{ t('ui.mobileApp') }}
                         </h3>
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                           {{
-                            localText(
-                              "原生移动端通过微信 SDK 唤起授权，网页端不会直接发起该流程。",
-                              "Native mobile clients start authorization through the WeChat SDK. The web UI does not launch this flow directly.",
-                            )
+                            t('ui.nativeMobileClientsStartAuthorizationThroughTheWechatSdk')
                           }}
                         </p>
                       </div>
@@ -2996,7 +2947,7 @@
                         <label
                           class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                         >
-                          {{ localText("移动应用 AppID", "Mobile App ID") }}
+                          {{ t('ui.mobileAppId') }}
                         </label>
                         <input
                           v-model="form.wechat_connect_mobile_app_id"
@@ -3004,10 +2955,7 @@
                           type="text"
                           class="input font-mono text-sm"
                           :placeholder="
-                            localText(
-                              '移动应用 AppID',
-                              'Mobile App ID',
-                            )
+                            t('ui.mobileAppId')
                           "
                         />
                       </div>
@@ -3015,7 +2963,7 @@
                         <label
                           class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                         >
-                          {{ localText("移动应用 AppSecret", "Mobile App Secret") }}
+                          {{ t('ui.mobileAppSecret') }}
                         </label>
                         <input
                           v-model="form.wechat_connect_mobile_app_secret"
@@ -3024,14 +2972,8 @@
                           class="input font-mono text-sm"
                           :placeholder="
                             form.wechat_connect_mobile_app_secret_configured
-                              ? localText(
-                                  '密钥已配置，留空以保留当前值。',
-                                  'Secret configured. Leave empty to keep the current value.',
-                                )
-                              : localText(
-                                  '移动应用 AppSecret',
-                                  'Mobile App Secret',
-                                )
+                              ? t('ui.secretConfiguredLeaveEmptyToKeepTheCurrentValue')
+                              : t('ui.mobileAppSecret')
                           "
                         />
                       </div>
@@ -3048,10 +2990,7 @@
                   class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-300"
                 >
                   {{
-                    localText(
-                      "如果同时启用 PC 应用和公众号/移动应用，这些应用需要挂在同一个微信开放平台主体下，否则 UnionID 无法稳定归并账号。",
-                      "When PC App is enabled together with Official Account or Mobile App, they should belong to the same WeChat Open Platform account so UnionID can merge identities reliably.",
-                    )
+                    t('ui.whenPcAppIsEnabledTogetherWithOfficialAccount')
                   }}
                 </div>
 
@@ -3061,10 +3000,7 @@
                       class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                     >
                       {{
-                        localText(
-                          "浏览器回调地址",
-                          "Browser Redirect URL",
-                        )
+                        t('ui.browserRedirectUrl')
                       }}
                     </label>
                     <input
@@ -3076,10 +3012,7 @@
                     />
                     <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                       {{
-                        localText(
-                          "用于 PC 应用和公众号的网页回调。移动应用走原生 SDK 时不直接使用这个浏览器回调。",
-                          "Used by PC App and Official Account browser callbacks. Native mobile SDK flows do not start from this browser callback directly.",
-                        )
+                        t('ui.usedByPcAppAndOfficialAccountBrowserCallbacks')
                       }}
                     </p>
                     <div
@@ -3305,7 +3238,7 @@
                         <input
                           v-model="form.dingtalk_connect_sync_display_name_attr_name"
                           type="text"
-                          :placeholder="localText('钉钉姓名', 'DingTalk Name')"
+                          :placeholder="t('ui.dingtalkName')"
                           class="input text-sm flex-1 max-w-xs"
                         />
                       </div>
@@ -3351,7 +3284,7 @@
                         <input
                           v-model="form.dingtalk_connect_sync_corp_email_attr_name"
                           type="text"
-                          :placeholder="localText('钉钉企业邮箱', 'DingTalk Corporate Email')"
+                          :placeholder="t('ui.dingtalkCorporateEmail')"
                           class="input text-sm flex-1 max-w-xs"
                         />
                       </div>
@@ -3397,7 +3330,7 @@
                         <input
                           v-model="form.dingtalk_connect_sync_dept_attr_name"
                           type="text"
-                          :placeholder="localText('钉钉部门', 'DingTalk Department')"
+                          :placeholder="t('ui.dingtalkDepartment')"
                           class="input text-sm flex-1 max-w-xs"
                         />
                       </div>
@@ -4502,6 +4435,17 @@
               </h2>
             </div>
             <div class="p-6 space-y-4">
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between gap-3">
+                    <label for="codex-probe-template" class="text-base font-semibold text-gray-900 dark:text-white">{{ t("admin.settings.gatewayForwarding.codexProbeTemplate") }}</label>
+                    <button type="button" class="btn btn-secondary btn-sm" data-testid="codex-probe-template-reset" :disabled="saving || !form.openai_codex_diagnostic_prompt_template_default" @click="form.openai_codex_diagnostic_prompt_template = form.openai_codex_diagnostic_prompt_template_default">{{ t("admin.settings.gatewayForwarding.codexProbeTemplateReset") }}</button>
+                  </div>
+                  <p id="codex-probe-template-help" class="text-sm text-gray-500 dark:text-gray-400">{{ t("admin.settings.gatewayForwarding.codexProbeTemplateDesc") }}</p>
+                  <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                    <span v-for="placeholder in codexProbeTemplatePlaceholders" :key="placeholder.token"><code class="font-mono">{{ placeholder.token }}</code> — {{ t(placeholder.label) }}</span>
+                  </div>
+                  <textarea id="codex-probe-template" v-model="form.openai_codex_diagnostic_prompt_template" data-testid="codex-probe-template" aria-describedby="codex-probe-template-help" class="input w-full font-mono text-xs" rows="12" wrap="off" :spellcheck="false" :disabled="saving" />
+                </div>
                 <div>
                   <h3 class="text-base font-semibold text-gray-900 dark:text-white">
                     {{ t("admin.settings.gatewayForwarding.codexClientRestrictionTitle") }}
@@ -5054,8 +4998,8 @@
                 </div>
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   <div
-                    v-for="platform in schedulingThresholdPlatforms"
-                    :key="platform"
+                    v-for="scope in schedulingThresholdPlatforms"
+                    :key="scope"
                     class="rounded-lg border border-gray-200 p-4 dark:border-dark-700"
                   >
                     <div class="flex items-start justify-between gap-3">
@@ -5063,13 +5007,11 @@
                         <label
                           class="font-mono text-sm font-medium text-gray-900 dark:text-white"
                         >
-                          {{ platform }}
+                          {{ schedulingThresholdScopeLabel(scope) }}
                         </label>
                         <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                           {{
-                            t(
-                              "admin.settings.scheduling.accountSchedulingThresholdsRangeHint",
-                            )
+                            scope === "anthropic_fable" ? t("admin.settings.scheduling.accountSchedulingThresholdsFableHint") : t("admin.settings.scheduling.accountSchedulingThresholdsRangeHint")
                           }}
                         </p>
                       </div>
@@ -5080,13 +5022,13 @@
                       </span>
                     </div>
                     <input
-                      v-model.number="form.account_scheduling_thresholds[platform]"
+                      v-model.number="form.account_scheduling_thresholds[scope]"
                       type="number"
                       min="1"
                       max="100"
                       step="1"
                       class="input mt-3"
-                      :data-testid="`account-scheduling-threshold-${platform}`"
+                      :data-testid="`account-scheduling-threshold-${scope}`"
                       placeholder="100"
                     />
                   </div>
@@ -5769,6 +5711,8 @@
                   }}
                 </p>
               </div>
+
+
 
               <!-- OpenAI Codex UA -->
               <div>
@@ -6735,21 +6679,6 @@
                 </div>
                 <Toggle v-model="form.compact_home_enabled" data-testid="compact-home-toggle" />
               </div>
-
-              <!-- Hide CCS Import Button -->
-              <div
-                class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
-              >
-                <div>
-                  <label class="font-medium text-gray-900 dark:text-white">{{
-                    t("admin.settings.site.hideCcsImportButton")
-                  }}</label>
-                  <p class="text-sm text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.site.hideCcsImportButtonHint") }}
-                  </p>
-                </div>
-                <Toggle v-model="form.hide_ccs_import_button" />
-              </div>
             </div>
           </div>
 
@@ -6964,20 +6893,17 @@
 	              <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
 	                <div>
 	                  <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-	                    {{ localText("登录条款确认", "Login agreement") }}
+	                    {{ t('ui.loginAgreement') }}
 	                  </h2>
 	                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
 	                    {{
-	                      localText(
-	                        "控制登录页是否要求用户先阅读并同意服务条款、隐私政策或其他 Markdown 文档。",
-	                        "Control whether the login page requires users to accept Markdown policy documents first.",
-	                      )
+	                      t('ui.controlWhetherTheLoginPageRequiresUsersToAccept')
 	                    }}
 	                  </p>
 	                </div>
 	                <div class="flex items-center gap-3">
 	                  <span class="text-sm text-gray-600 dark:text-gray-300">
-	                    {{ form.login_agreement_enabled ? localText("已启用", "Enabled") : localText("未启用", "Disabled") }}
+	                    {{ form.login_agreement_enabled ? t('ui.enabled') : t('ui.disabled') }}
 	                  </span>
 	                  <Toggle v-model="form.login_agreement_enabled" />
 	                </div>
@@ -6988,7 +6914,7 @@
 	              <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
 	                <div>
 	                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-	                    {{ localText("展示形式", "Display mode") }}
+	                    {{ t('ui.displayMode') }}
 	                  </label>
 	                  <div class="grid grid-cols-2 gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
                     <button
@@ -7002,7 +6928,7 @@
                       @click="form.login_agreement_mode = 'modal'"
                     >
                       <Icon name="shield" size="sm" />
-                      {{ localText("弹窗", "Modal") }}
+                      {{ t('ui.modal') }}
                     </button>
                     <button
                       type="button"
@@ -7015,21 +6941,21 @@
                       @click="form.login_agreement_mode = 'checkbox'"
                     >
                       <Icon name="checkCircle" size="sm" />
-                      {{ localText("复选框", "Checkbox") }}
+                      {{ t('ui.checkbox') }}
                     </button>
                   </div>
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                     {{
                       form.login_agreement_mode === "checkbox"
-                        ? localText("复选框会显示在登录按钮下方，未勾选前所有登录入口禁用。", "The checkbox appears below the login button and gates all login actions.")
-                        : localText("弹窗会在登录页打开，用户拒绝后所有登录入口保持禁用。", "The modal opens on the login page and gates all login actions until accepted.")
+                        ? t('ui.theCheckboxAppearsBelowTheLoginButtonAndGates')
+                        : t('ui.theModalOpensOnTheLoginPageAndGates')
                     }}
                   </p>
                 </div>
 
                 <div>
                   <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {{ localText("条款更新日期", "Updated date") }}
+                    {{ t('ui.updatedDate') }}
                   </label>
                   <input
                     v-model="form.login_agreement_updated_at"
@@ -7037,7 +6963,7 @@
                     class="input"
                   />
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ localText("日期或文档内容变化后，用户需要重新同意。", "Changing the date or content requires fresh consent.") }}
+                    {{ t('ui.changingTheDateOrContentRequiresFreshConsent') }}
                   </p>
                 </div>
               </div>
@@ -7046,14 +6972,11 @@
                 <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h3 class="text-sm font-medium text-gray-900 dark:text-white">
-                      {{ localText("协议文档", "Agreement documents") }}
+                      {{ t('ui.agreementDocuments') }}
                     </h3>
                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                       {{
-                        localText(
-                          "文档名称可自定义，内容按 Markdown 保存。可参考：服务条款、使用政策、支持的国家和地区、服务特定条款。",
-                          "Document titles are customizable and content is saved as Markdown.",
-                        )
+                        t('ui.documentTitlesAreCustomizableAndContentIsSavedAs')
                       }}
                     </p>
                   </div>
@@ -7063,7 +6986,7 @@
                     @click="addLoginAgreementDocument"
                   >
                     <Icon name="plus" size="sm" />
-                    {{ localText("添加文档", "Add document") }}
+                    {{ t('ui.addDocument') }}
                   </button>
                 </div>
 
@@ -7091,7 +7014,7 @@
                         </span>
                         <div class="min-w-0">
                           <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">
-                            {{ doc.title || localText("未命名文档", "Untitled document") }}
+                            {{ doc.title || t('ui.untitledDocument') }}
                           </p>
                           <p class="truncate text-xs text-gray-500 dark:text-gray-400">
                             {{ loginAgreementRoutePath(doc, index) }}
@@ -7114,18 +7037,18 @@
                     <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
                       <div>
                         <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-                          {{ localText("文档名称", "Document title") }}
+                          {{ t('ui.documentTitle') }}
                         </label>
                         <input
                           v-model="doc.title"
                           type="text"
                           class="input text-sm"
-                          :placeholder="localText('例如：服务条款', 'Example: Terms of Service')"
+                          :placeholder="t('ui.exampleTermsOfService')"
                         />
                       </div>
                       <div>
                         <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-                          {{ localText("路由标识", "Route slug") }}
+                          {{ t('ui.routeSlug') }}
                         </label>
                         <div class="flex overflow-hidden rounded-lg border border-gray-300 bg-white focus-within:border-primary-500 focus-within:ring-1 focus-within:ring-primary-500 dark:border-dark-600 dark:bg-dark-900">
                           <span class="inline-flex flex-shrink-0 items-center border-r border-gray-200 bg-gray-50 px-3 text-sm text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400">
@@ -7142,13 +7065,13 @@
                     </div>
                     <div class="mt-3">
                       <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-                        {{ localText("Markdown 内容", "Markdown content") }}
+                        {{ t('ui.markdownContent') }}
                       </label>
                         <textarea
                           v-model="doc.content_md"
                           rows="8"
                           class="input font-mono text-sm"
-                          :placeholder="localText('在这里填写正式 Markdown 内容。', 'Write the final Markdown content here.')"
+                          :placeholder="t('ui.writeTheFinalMarkdownContentHere')"
                         ></textarea>
                     </div>
                   </div>
@@ -7974,7 +7897,7 @@
                       v-model="form.payment_product_name_prefix"
                       type="text"
                       class="input"
-                      placeholder="Sub2API"
+                      :placeholder="BRAND_NAME"
                     />
                   </div>
                   <div>
@@ -7996,7 +7919,7 @@
                       class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300"
                     >
                       {{
-                        (form.payment_product_name_prefix || "Sub2API") +
+                        (form.payment_product_name_prefix || BRAND_NAME) +
                         " 100 " +
                         (form.payment_product_name_suffix || "CNY")
                       }}
@@ -8902,7 +8825,7 @@
         </div>
 
         <!-- Save Button -->
-        <div v-show="activeTab !== 'backup'" class="flex justify-end">
+        <div v-show="activeTab !== 'backup' && activeTab !== 'roles'" class="settings-save-bar flex justify-end">
           <button
             type="submit"
             :disabled="saving || loadFailed"
@@ -8975,8 +8898,14 @@
 </template>
 
 <script setup lang="ts">
+
+
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useAuthStore } from "@/stores/auth";
+import AdminRolePermissions from "@/components/admin/AdminRolePermissions.vue";
+import DelegatedSettings from "@/components/admin/DelegatedSettings.vue";
+import { isChineseLocale } from "@/i18n/localeUtils";
 import { adminAPI } from "@/api";
 import {
   appendAuthSourceDefaultsToUpdateRequest,
@@ -8985,7 +8914,7 @@ import {
   normalizePlatformQuotasMap,
   sanitizeAccountSchedulingThresholdsMap,
   sanitizePlatformQuotasMap,
-  SCHEDULING_THRESHOLD_PLATFORMS,
+  SCHEDULING_THRESHOLD_SCOPES,
   defaultWeChatConnectScopesForMode,
   deriveWeChatConnectStoredMode,
   normalizeDefaultSubscriptionSettings,
@@ -9011,6 +8940,12 @@ import type {
   Proxy,
 } from "@/types";
 import type { ProviderInstance } from "@/types/payment";
+import {
+  BRAND_NAME,
+  BRAND_PAYMENT_GUIDE_URL,
+  BRAND_PAYMENT_METHODS_URL,
+  BRAND_TAGLINE_EN,
+} from "@/config/brand";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import Icon from "@/components/icons/Icon.vue";
 import Select, { type SelectOption } from "@/components/common/Select.vue";
@@ -9071,28 +9006,33 @@ const appStore = useAppStore();
 // 关闭 step-up 开关是敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 码重试
 const settingsStepUp = useStepUp();
 const adminSettingsStore = useAdminSettingsStore();
-const isZhLocale = computed(() => locale.value.startsWith("zh"));
 
-function localText(zh: string, en: string): string {
-  return isZhLocale.value ? zh : en;
-}
+const isZhLocale = computed(() => isChineseLocale(locale.value));
 
 const paymentGuideHref = computed(() =>
-  locale.value.startsWith("zh")
-    ? "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md"
-    : "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT.md",
+  isZhLocale.value
+    ? BRAND_PAYMENT_GUIDE_URL.zh
+    : locale.value === 'ja'
+      ? BRAND_PAYMENT_GUIDE_URL.ja
+    : BRAND_PAYMENT_GUIDE_URL.en,
 );
 
 const paymentMethodsHref = computed(() =>
-  locale.value.startsWith("zh")
-    ? "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md#支持的支付方式"
-    : "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT.md#supported-payment-methods",
+  isZhLocale.value
+    ? BRAND_PAYMENT_METHODS_URL.zh
+    : locale.value === 'ja'
+      ? BRAND_PAYMENT_METHODS_URL.ja
+    : BRAND_PAYMENT_METHODS_URL.en,
 );
 
+const roleAuth = useAuthStore();
+
 type SettingsTab =
+  | "roles"
   | "general"
   | "agreement"
   | "features"
+
   | "security"
   | "users"
   | "gateway"
@@ -9101,9 +9041,11 @@ type SettingsTab =
   | "backup";
 const activeTab = ref<SettingsTab>("general");
 const settingsTabs = [
+  { key: "roles" as SettingsTab, icon: "users" as const },
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
   { key: "features" as SettingsTab, icon: "bolt" as const },
+
   { key: "security" as SettingsTab, icon: "shield" as const },
   { key: "users" as SettingsTab, icon: "user" as const },
   { key: "gateway" as SettingsTab, icon: "server" as const },
@@ -9288,22 +9230,22 @@ function defaultLoginAgreementDocuments(): LoginAgreementDocument[] {
   return [
     {
       id: "terms",
-      title: localText("服务条款", "Terms of Service"),
+      title: t('ui.termsOfService'),
       content_md: "",
     },
     {
       id: "usage-policy",
-      title: localText("使用政策", "Usage Policy"),
+      title: t('ui.usagePolicy'),
       content_md: "",
     },
     {
       id: "supported-regions",
-      title: localText("支持的国家和地区", "Supported Countries and Regions"),
+      title: t('ui.supportedCountriesAndRegions'),
       content_md: "",
     },
     {
       id: "service-specific-terms",
-      title: localText("服务特定条款", "Service-Specific Terms"),
+      title: t('ui.serviceSpecificTerms'),
       content_md: "",
     },
   ];
@@ -9698,7 +9640,6 @@ function resetClaudeOAuthSystemPromptBlocks(): void {
   syncClaudeOAuthSystemPromptBlocksFormField();
 }
 
-
 interface DefaultSubscriptionGroupOption {
   value: number;
   label: string;
@@ -9764,7 +9705,8 @@ type SettingsForm = Omit<
   account_scheduling_thresholds: ReturnType<typeof normalizeAccountSchedulingThresholdsMap>;
 };
 
-const schedulingThresholdPlatforms = SCHEDULING_THRESHOLD_PLATFORMS;
+const schedulingThresholdPlatforms = SCHEDULING_THRESHOLD_SCOPES;
+const schedulingThresholdScopeLabel = (scope: string) => scope === "anthropic_fable" ? t("admin.settings.scheduling.accountSchedulingThresholdsFableLabel") : scope;
 
 const form = reactive<SettingsForm>({
   registration_enabled: true,
@@ -9799,16 +9741,15 @@ const form = reactive<SettingsForm>({
   default_subscriptions: [],
   force_email_on_third_party_signup: false,
   default_user_rpm_limit: 0,
-  site_name: "Sub2API",
+  site_name: BRAND_NAME,
   site_logo: "",
-  site_subtitle: "Subscription to API Conversion Platform",
+  site_subtitle: BRAND_TAGLINE_EN,
   api_base_url: "",
   contact_info: "",
   doc_url: "",
   home_content: "",
   compact_home_enabled: false,
   backend_mode_enabled: false,
-  hide_ccs_import_button: false,
   payment_enabled: false,
   risk_control_enabled: false,
   cyber_policy_user_allowlist: "",
@@ -9908,9 +9849,9 @@ const form = reactive<SettingsForm>({
   dingtalk_connect_sync_corp_email_attr_key: "dingtalk_email",
   dingtalk_connect_sync_display_name_attr_key: "dingtalk_name",
   dingtalk_connect_sync_dept_attr_key: "dingtalk_department",
-  dingtalk_connect_sync_corp_email_attr_name: localText("钉钉企业邮箱", "DingTalk Corporate Email"),
-  dingtalk_connect_sync_display_name_attr_name: localText("钉钉姓名", "DingTalk Name"),
-  dingtalk_connect_sync_dept_attr_name: localText("钉钉部门", "DingTalk Department"),
+  dingtalk_connect_sync_corp_email_attr_name: t('ui.dingtalkCorporateEmail'),
+  dingtalk_connect_sync_display_name_attr_name: t('ui.dingtalkName'),
+  dingtalk_connect_sync_dept_attr_name: t('ui.dingtalkDepartment'),
   wechat_connect_enabled: false,
   wechat_connect_app_id: "",
   wechat_connect_app_secret: "",
@@ -10027,6 +9968,8 @@ const form = reactive<SettingsForm>({
   // 只读展示：自动同步任务写入的官方最新稳定版，不参与提交（提交载荷按字段显式构造）
   claude_code_client_version_synced: "",
   claude_code_version_auto_sync_enabled: true,
+  openai_codex_diagnostic_prompt_template: "",
+  openai_codex_diagnostic_prompt_template_default: "",
   // codex_cli_only 加固
   min_codex_version: "",
   max_codex_version: "",
@@ -10062,6 +10005,7 @@ const form = reactive<SettingsForm>({
   affiliate_enabled: false,
   // Allow user view error requests
   allow_user_view_error_requests: false,
+
 });
 
 // 人机验证 UI 状态：单卡片「总开关 + 服务商单选」，落库仍是三个独立
@@ -10261,26 +10205,17 @@ const authSourceDefaultsMeta = computed(() => [
   {
     source: "github" as AuthSourceType,
     title: "GitHub",
-    description: localText(
-      "通过 GitHub 已验证邮箱首次注册或首次绑定时应用。",
-      "Applied on first signup or first bind through a verified GitHub email.",
-    ),
+    description: t('ui.appliedOnFirstSignupOrFirstBindThroughA'),
   },
   {
     source: "google" as AuthSourceType,
     title: "Google",
-    description: localText(
-      "通过 Google 已验证邮箱首次注册或首次绑定时应用。",
-      "Applied on first signup or first bind through a verified Google email.",
-    ),
+    description: t('ui.appliedOnFirstSignupOrFirstBindThroughADetails'),
   },
   {
     source: "dingtalk" as AuthSourceType,
     title: t("auth.dingtalkProviderName"),
-    description: localText(
-      "通过钉钉首次注册或首次绑定时应用。",
-      "Applied on first signup or first bind through DingTalk.",
-    ),
+    description: t('ui.appliedOnFirstSignupOrFirstBindThroughDingtalk'),
   },
 ]);
 
@@ -10752,7 +10687,7 @@ async function setAndCopyEmailOAuthRedirectUrl(provider: EmailOAuthProvider) {
   }
   await copyToClipboard(
     url,
-    localText("回调地址已写入并复制。", "Callback URL set and copied."),
+    t('ui.callbackUrlSetAndCopied'),
   );
 }
 
@@ -11035,6 +10970,13 @@ const claudeSyncedVersionLabel = computed(() => {
   });
 });
 
+const codexProbeTemplatePlaceholders = [
+  { token: '{{TIMEZONE}}', label: 'admin.settings.gatewayForwarding.codexProbeTimezone' },
+  { token: '{{CURRENT_DATE}}', label: 'admin.settings.gatewayForwarding.codexProbeDate' },
+  { token: '{{MODEL}}', label: 'admin.settings.gatewayForwarding.codexProbeModel' },
+  { token: '{{MODELTRACE_PROMPT}}', label: 'admin.settings.gatewayForwarding.codexProbeChallenge' },
+];
+
 async function loadSettings() {
   loading.value = true;
   loadFailed.value = false;
@@ -11312,6 +11254,7 @@ const siteBillingModeHint = computed(() =>
 async function saveSettings() {
   saving.value = true;
   try {
+
     const normalizedTableDefaultPageSize = Math.floor(
       Number(form.table_default_page_size),
     );
@@ -11349,10 +11292,7 @@ async function saveSettings() {
       normalizeLoginAgreementDocumentsForSave();
     if (form.login_agreement_enabled && normalizedLoginAgreementDocuments.length === 0) {
       appStore.showError(
-        localText(
-          "启用登录条款确认时，至少需要保留一份文档。",
-          "At least one document is required when login agreement is enabled.",
-        ),
+        t('ui.atLeastOneDocumentIsRequiredWhenLoginAgreement'),
       );
       return;
     }
@@ -11361,10 +11301,7 @@ async function saveSettings() {
     );
     if (emptyTitleDocument) {
       appStore.showError(
-        localText(
-          "登录条款文档名称不能为空。",
-          "Login agreement document title cannot be empty.",
-        ),
+        t('ui.loginAgreementDocumentTitleCannotBeEmpty'),
       );
       return;
     }
@@ -11372,10 +11309,7 @@ async function saveSettings() {
       findDuplicateLoginAgreementDocumentId(normalizedLoginAgreementDocuments);
     if (duplicateLoginAgreementDocumentId) {
       appStore.showError(
-        localText(
-          `登录条款文档路由不能重复：/legal/${duplicateLoginAgreementDocumentId}`,
-          `Login agreement document routes cannot be duplicated: /legal/${duplicateLoginAgreementDocumentId}`,
-        ),
+        t('ui.duplicateAgreementRoute', { slug: duplicateLoginAgreementDocumentId }),
       );
       return;
     }
@@ -11424,10 +11358,7 @@ async function saveSettings() {
 
     if (form.wechat_connect_mp_enabled && form.wechat_connect_mobile_enabled) {
       appStore.showError(
-        localText(
-          "公众号和移动应用不能同时启用。",
-          "Official Account and Mobile App cannot be enabled at the same time.",
-        ),
+        t('ui.officialAccountAndMobileAppCannotBeEnabledAt'),
       );
       return;
     }
@@ -11515,7 +11446,6 @@ async function saveSettings() {
       home_content: form.home_content,
       compact_home_enabled: form.compact_home_enabled,
       backend_mode_enabled: form.backend_mode_enabled,
-      hide_ccs_import_button: form.hide_ccs_import_button,
       table_default_page_size: form.table_default_page_size,
       table_page_size_options: form.table_page_size_options,
       custom_menu_items: form.custom_menu_items,
@@ -11678,6 +11608,10 @@ async function saveSettings() {
       claude_code_client_version: form.claude_code_client_version?.trim() || "",
       claude_code_version_auto_sync_enabled:
         form.claude_code_version_auto_sync_enabled,
+      openai_codex_diagnostic_prompt_template:
+        form.openai_codex_diagnostic_prompt_template === form.openai_codex_diagnostic_prompt_template_default
+          ? ""
+          : form.openai_codex_diagnostic_prompt_template,
       min_codex_version: form.min_codex_version?.trim() || "",
       max_codex_version: form.max_codex_version?.trim() || "",
       codex_cli_only_allow_app_server_clients:
@@ -11795,6 +11729,7 @@ async function saveSettings() {
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
       allow_user_view_error_requests: form.allow_user_view_error_requests,
+
     };
 
     // 仅当 openai_fast_policy_settings 已成功从后端加载时才回写，
@@ -12910,6 +12845,8 @@ async function handleDeleteProvider() {
 }
 
 onMounted(() => {
+  if (!roleAuth.isSuperAdmin) return;
+
   loadSettings();
   loadSubscriptionGroups();
   loadAdminApiKey();
@@ -13302,6 +13239,21 @@ watch(
 .default-sub-delete-btn {
   @apply h-[42px];
 }
+
+.settings-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  margin: 0 -0.25rem;
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+  border: 1px solid rgb(226 232 240 / 0.85);
+  border-radius: 0.75rem;
+  background: rgb(255 255 255 / 0.94);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 -8px 24px rgb(15 23 42 / 0.06);
+}
+
+:global(.dark) .settings-save-bar { background: rgb(30 41 59 / 0.94); border-color: rgb(71 85 105 / 0.7); }
 
 /* ============ 系统设置 Tab 导航 ============ */
 .settings-tabs-shell {
