@@ -34,7 +34,7 @@ func TestEasyPaySecurityCheckoutSignatureAmbiguity(t *testing.T) {
 	defer server.Close()
 	e := &EasyPay{config: map[string]string{"pid": "merchant", "pkey": key, "apiBase": server.URL}, httpClient: server.Client()}
 	_, err := e.VerifyNotification(context.Background(), encodeEasyPaySecurityParams(forged), nil)
-	require.ErrorContains(t, err, "settlement")
+	require.ErrorContains(t, err, "unexpected notify param")
 }
 
 func encodeEasyPaySecurityParams(params map[string]string) string {
