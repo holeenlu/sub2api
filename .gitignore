@@ -13,11 +13,11 @@
 *.dylib
 backend/bin/
 backend/server
-backend/kdan
+backend/tapmodels
 backend/main
 
 # Release binary produced by the local build/deploy kit
-/kdan
+/tapmodels
 
 # Go 测试二进制
 *.test
@@ -127,6 +127,10 @@ CLAUDE.md
 scripts
 !backend/scripts/
 !backend/scripts/resolve-version.sh
+!frontend/public/downloads/tapmodels-image-skills/gpt-image-flare/scripts/
+!frontend/public/downloads/tapmodels-image-skills/gpt-image-flare/scripts/generate.py
+!frontend/public/downloads/tapmodels-image-skills/gpt-image-sunburst/scripts/
+!frontend/public/downloads/tapmodels-image-skills/gpt-image-sunburst/scripts/generate.py
 .code-review-state
 #openspec/
 code-reviews/
@@ -158,8 +162,10 @@ tools/tests/__pycache__/
 !docs/CODEX_MODEL_CATALOG_REFRESH.md
 !docs/PRIVATE_REPOSITORY_SYNC.md
 !docs/I18N_COMPLETENESS_AUDIT.md
-# KDAN fork 自己的 CI／發版說明
-!docs/kdan-ci.md
+!docs/CUSTOMIZATION_REVIEW_2026-09-08.md
+!docs/PROJECT_CUSTOMIZATION_WORKFLOW.md
+# TapModels fork 自己的 CI／發版說明
+!docs/tapmodels-ci.md
 !docs/codex-credits.md
 !docs/legal/
 !docs/legal/*.md
@@ -184,6 +190,8 @@ issues/
 # convert-go.mjs 的「已轉換」標記；只該出現在建置用的副本樹，不進版控
 .zh-tw-converted
 
+!docs/AI_COORDINATION_BASELINE.md
+!docs/TAPMODELS_DOCS_ACCEPTANCE.md
 # Python release/update tooling bytecode
 __pycache__/
 

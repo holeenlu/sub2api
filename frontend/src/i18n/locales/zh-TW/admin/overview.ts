@@ -295,7 +295,7 @@ export default {
         step1: {
           title: '建立 R2 儲存桶',
           line1: '登入 Cloudflare Dashboard (dash.cloudflare.com)，左側選單選擇「R2 物件儲存」',
-          line2: '點選「建立儲存桶」，輸入名稱（如 kdan-backups），選擇區域',
+          line2: '點選「建立儲存桶」，輸入名稱（如 tapmodels-backups），選擇區域',
           line3: '點選建立完成'
         },
         step2: {

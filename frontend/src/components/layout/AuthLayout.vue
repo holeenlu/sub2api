@@ -56,7 +56,7 @@
 
       <!-- Copyright -->
       <div class="mt-8 text-center text-xs text-gray-400 dark:text-dark-500">
-        &copy; {{ currentYear }} {{ siteName }}. {{ t('ui.rightsReserved') }}
+        &copy; {{ currentYear }} {{ BRAND_COPYRIGHT_HOLDER }}. {{ t('ui.rightsReserved') }}
       </div>
     </div>
   </div>
@@ -68,7 +68,7 @@ const { t } = useI18n()
 import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores'
 import { sanitizeUrl } from '@/utils/url'
-import { BRAND_NAME, BRAND_TAGLINE_EN } from '@/config/brand'
+import { BRAND_NAME, BRAND_TAGLINE_EN, BRAND_COPYRIGHT_HOLDER } from '@/config/brand'
 
 const appStore = useAppStore()
 

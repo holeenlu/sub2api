@@ -631,7 +631,7 @@ func AutoSetupFromEnv() error {
 			Port:     getEnvIntOrDefault("DATABASE_PORT", 5432),
 			User:     getEnvOrDefault("DATABASE_USER", "postgres"),
 			Password: getEnvOrDefault("DATABASE_PASSWORD", ""),
-			DBName:   getEnvOrDefault("DATABASE_DBNAME", "kdan"),
+			DBName:   getEnvOrDefault("DATABASE_DBNAME", "tapmodels"),
 			SSLMode:  getEnvOrDefault("DATABASE_SSLMODE", "disable"),
 		},
 		Redis: RedisConfig{

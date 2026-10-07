@@ -18,26 +18,29 @@
  * RELEASE_REPO / RELEASE_DOCKER_IMAGE mirror service.DefaultReleaseRepo and the
  * image published by the release pipeline; the version badge builds rollback
  * commands from them.
- *
- * TODO(brand): the KDAN name, tagline and links below are PLACEHOLDERS pending
- * the final wording and domains. Only the product name has been substituted so
- * far; the surrounding copy is still the neutral upstream text.
  */
 
 /** Product name, used wherever the configured site name is missing. */
-export const BRAND_NAME = 'KDAN'
+export const BRAND_NAME = 'TapModels'
+
+/** Legal copyright holder; separate from the runtime product/site name. */
+export const BRAND_COPYRIGHT_HOLDER = 'Yochen Pty Ltd'
 
 /** Suffix appended to the site name in the document title (index.html, main.ts). */
-export const BRAND_TITLE_SUFFIX_EN = 'AI API Gateway'
+export const BRAND_TITLE_SUFFIX_EN = 'Pick a model. Start building.'
 
 /** Default `site_subtitle` shown on the auth pages and seeded in the settings form. */
-export const BRAND_TAGLINE_EN = 'Subscription to API Conversion Platform'
+export const BRAND_TAGLINE_EN = 'Pick a model. Start building.'
 
-/** Project home (header / footer link). Empty string hides the link. */
-export const BRAND_SITE_URL = 'https://kdan.com'
+/**
+ * Project home (header / footer "GitHub" link). Empty string hides the link:
+ * TapModels has no public source repository to point at (marketing site is
+ * https://tapmodels.ai, documentation is BRAND_DOCS_URL).
+ */
+export const BRAND_SITE_URL = ''
 
 /** Base URL of the shipped documentation. */
-export const BRAND_DOCS_URL = 'https://docs.kdan.com'
+export const BRAND_DOCS_URL = 'https://docs.tapmodels.ai'
 
 /** Payment integration guide, per UI language. */
 export const BRAND_PAYMENT_GUIDE_URL = {
@@ -64,11 +67,8 @@ export const BRAND_COMPLIANCE_DOCUMENT_URL = {
   en: `${BRAND_DOCS_URL}/legal/admin-compliance.en.md`
 } as const
 
-/**
- * GitHub "owner/repo" whose releases the version badge follows (= service.DefaultReleaseRepo).
- * KDAN uses the kdan/v* release channel in this shared repository.
- */
+/** GitHub "owner/repo" whose releases the version badge follows (= service.DefaultReleaseRepo). */
 export const RELEASE_REPO = 'holeenlu/sub2api'
 
-/** Container image published by the release pipeline (tags carry no "v" prefix). */
-export const RELEASE_DOCKER_IMAGE = 'ghcr.io/holeenlu/kdan'
+/** GHCR image published by automatic-release.yml (tags carry no "v" prefix, e.g. 1.0.0). */
+export const RELEASE_DOCKER_IMAGE = 'ghcr.io/holeenlu/tapmodels'

@@ -11,8 +11,8 @@ Both LoginView and RegisterView use the AuthLayout component, which provides:
 │                                             │
 │  ┌─────────────────────────────────────┐   │
 │  │                                     │   │
-│  │         KDAN Logo                   │   │
-│  │  "Subscription to API Conversion"   │   │
+│  │         TapModels Logo              │   │
+│  │  "Pick a model. Start building."    │   │
 │  │                                     │   │
 │  └─────────────────────────────────────┘   │
 │                                             │
@@ -39,8 +39,8 @@ Centered: Both horizontally and vertically
 ```
 ┌─────────────────────────────────────────────┐
 │                                             │
-│         🔷 KDAN                             │
-│    Subscription to API Conversion Platform  │
+│         🔷 TapModels                        │
+│         Pick a model. Start building.       │
 │                                             │
 │  ┌─────────────────────────────────────┐   │
 │  │                                     │   │
@@ -133,13 +133,13 @@ Centered: Both horizontally and vertically
 ```
 ┌─────────────────────────────────────────────┐
 │                                             │
-│         🔷 KDAN                             │
-│    Subscription to API Conversion Platform  │
+│         🔷 TapModels                        │
+│         Pick a model. Start building.       │
 │                                             │
 │  ┌─────────────────────────────────────┐   │
 │  │                                     │   │
 │  │        Create Account               │   │
-│  │     Sign up to start using KDAN     │   │
+│  │   Sign up to start using TapModels  │   │
 │  │                                     │   │
 │  │  Username                           │   │
 │  │  ┌────────────────────────────────┐ │   │

@@ -27,7 +27,7 @@ OpenAI の Codex タブには 2 つのモードがあります。「キーを使
 - **Legacy** は `requires_openai_auth = true` を設定し、`auth.json` を提供します。このログイン形式を必要とする Codex バージョンでのみ使用してください。
 - **API key** は `requires_openai_auth = false` を設定し、`experimental_bearer_token` を書き込み、ローカル画像拡張ヘッダーを追加します。これによりシークレットがディスクに保存されるため、アクセス権を制限し、決してコミットしないでください。
 
-ルーティング済み Codex タブでは、デフォルトで `env_key = "KDAN_API_KEY"`、`wire_api = "responses"`、`supports_websockets = false` が設定されます。Zhipu タブは API キーを生成した `experimental_bearer_token` に埋め込むため、単独の `config.toml` では `KDAN_API_KEY` に依存しません。WebSocket タブでは、OpenAI Responses パスでのみ WebSocket トランスポートが有効になります。
+ルーティング済み Codex タブでは、デフォルトで `env_key = "TAPMODELS_API_KEY"`、`wire_api = "responses"`、`supports_websockets = false` が設定されます。Zhipu タブは API キーを生成した `experimental_bearer_token` に埋め込むため、単独の `config.toml` では `TAPMODELS_API_KEY` に依存しません。WebSocket タブでは、OpenAI Responses パスでのみ WebSocket トランスポートが有効になります。
 
 ## モデルカタログ
 
@@ -38,7 +38,7 @@ OpenAI の Codex タブには 2 つのモードがあります。「キーを使
 
 カタログ非対応のタブでは、グループで利用できる正確なモデル ID を指定します。一覧への表示、利用可能なアカウント、プロトコル対応は別の条件です。すべてのツールやエンドポイントの利用を保証しません。通常のモデル一覧 JSON を Codex 専用カタログとして保存しないでください。
 
-## KDAN の UI に従う
+## TapModels の UI に従う
 
 以下のスクリーンショットには、無効なサンプルキーと `api.example.com` を使用した、現在のプロジェクトの「キーを使用」コンポーネントが表示されています。画像ではなく、ご自身のコンソールから値をコピーしてください。
 

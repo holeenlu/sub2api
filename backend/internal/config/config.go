@@ -2058,7 +2058,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 	addConfigPath("/app/data")
 	addConfigPath(".")
 	addConfigPath("./config")
-	addConfigPath("/etc/kdan")
+	addConfigPath("/etc/tapmodels")
 }
 
 func setDefaults() {
@@ -2087,7 +2087,7 @@ func setDefaults() {
 	// Log
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.format", "console")
-	viper.SetDefault("log.service_name", "kdan")
+	viper.SetDefault("log.service_name", "tapmodels")
 	viper.SetDefault("log.env", "production")
 	viper.SetDefault("log.caller", true)
 	viper.SetDefault("log.stacktrace_level", "error")
@@ -2110,7 +2110,7 @@ func setDefaults() {
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
 	// declare its relying-party domain and trusted browser origins.
 	viper.SetDefault("webauthn.enabled", false)
-	viper.SetDefault("webauthn.rp_display_name", "KDAN")
+	viper.SetDefault("webauthn.rp_display_name", "TapModels")
 	viper.SetDefault("webauthn.rp_id", "")
 	viper.SetDefault("webauthn.rp_origins", []string{})
 
@@ -2242,7 +2242,7 @@ func setDefaults() {
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")
 	viper.SetDefault("database.password", "postgres")
-	viper.SetDefault("database.dbname", "kdan")
+	viper.SetDefault("database.dbname", "tapmodels")
 	viper.SetDefault("database.sslmode", "prefer")
 	viper.SetDefault("database.max_open_conns", 256)
 	viper.SetDefault("database.max_idle_conns", 128)
