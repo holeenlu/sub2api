@@ -1,6 +1,6 @@
 ## APIキーからアプリへ
 
-KDANは、OpenAI Responses、Chat Completions、Anthropic Messages、画像APIに互換対応しています。アプリによってラベルは異なりますが、すべてのインテグレーションで必要なのは、コンソールに表示されるAPIベースURL、KDANのAPIキー、そのキーのグループで有効化されたモデルIDという3つの実値です。
+Tokensavyは、OpenAI Responses、Chat Completions、Anthropic Messages、画像APIに互換対応しています。アプリによってラベルは異なりますが、すべてのインテグレーションで必要なのは、コンソールに表示されるAPIベースURL、TokensavyのAPIキー、そのキーのグループで有効化されたモデルIDという3つの実値です。
 
 | アプリ | プロトコル | ベースURL | 認証 |
 | --- | --- | --- | --- |
@@ -12,9 +12,9 @@ KDANは、OpenAI Responses、Chat Completions、Anthropic Messages、画像API�
 
 ## 専用キーを作成する
 
-[APIキー](/keys) を開き、使用するグループを選択します。このスクリーンショットはKDANのもので、オプションはインストールされているバージョンによって異なります。
+[APIキー](/keys) を開き、使用するグループを選択します。このスクリーンショットはTokensavyのもので、オプションはインストールされているバージョンによって異なります。
 
-![KDANのAPIキーを作成し、そのグループを選択する](/docs-assets/create-api-key.png)
+![TokensavyのAPIキーを作成し、そのグループを選択する](/docs-assets/create-api-key.png)
 
 ## 推奨セットアップ手順
 
@@ -22,6 +22,6 @@ KDANは、OpenAI Responses、Chat Completions、Anthropic Messages、画像API�
 2. そのキーを使って `GET /v1/models` を呼び出し、正確なモデルIDをコピーします。
 3. アプリのベースURL、キー、モデルを設定します。
 4. アプリを完全に終了して再起動し、新しいテストセッションを作成します。
-5. KDANの使用量記録で、リクエスト、モデル、コストを確認します。
+5. Tokensavyの使用量記録で、リクエスト、モデル、コストを確認します。
 
 切り替え後にセッション一覧が空になる場合は、プロジェクト選択、アーカイブ、プロバイダーのフィルタリング、データディレクトリ、または古いインデックスパスが原因の可能性があります。対象クライアントについて [Codexセッションの復旧](/apps/session-recovery-codex) または [Claude Codeセッションの復旧](/apps/session-recovery-claude) に従い、修復を適用する前に読み取り専用の診断を実行してください。ダウンロードとチェックサムは [ダウンロード](/apps/downloads) にまとめられています。

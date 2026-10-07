@@ -768,8 +768,8 @@ export default {
         searchTestHint:
           'スタンドアロンweb_searchプローブ（ゲートウェイの/v1/web_searchと同じ）。ツールを使用する自由形式のチャットではありません。',
         ttsTextLabel: 'TTSテキスト',
-        ttsTextPlaceholder: '例: TapModels接続テストからのHello。',
-        ttsTextDefault: 'TapModelsアカウント接続テストからのHello。',
+        ttsTextPlaceholder: '例: Tokensavy接続テストからのHello。',
+        ttsTextDefault: 'Tokensavyアカウント接続テストからのHello。',
         ttsTestHint: 'スタンドアロン/v1/tts（language=en）。成功時に音声バイト数を報告します。',
         sttTestHint: '無音の合成WAVを使用するスタンドアロン/v1/stt。成功はエンドポイントに到達可能であることを示します。',
         realtimeTestHint:

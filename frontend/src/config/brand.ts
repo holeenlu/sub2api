@@ -18,39 +18,38 @@
  * RELEASE_REPO / RELEASE_DOCKER_IMAGE mirror service.DefaultReleaseRepo and the
  * image published by the release pipeline; the version badge builds rollback
  * commands from them.
- *
- * TODO(brand): the KDAN name, tagline and links below are PLACEHOLDERS pending
- * the final wording and domains. Only the product name has been substituted so
- * far; the surrounding copy is still the neutral upstream text.
  */
 
 /** Product name, used wherever the configured site name is missing. */
-export const BRAND_NAME = 'KDAN'
+export const BRAND_NAME = 'Tokensavy'
 
 /** Suffix appended to the site name in the document title (index.html, main.ts). */
-export const BRAND_TITLE_SUFFIX_EN = 'AI API Gateway'
+export const BRAND_TITLE_SUFFIX_EN = 'Smart tokens. More possibilities.'
 
 /** Default `site_subtitle` shown on the auth pages and seeded in the settings form. */
-export const BRAND_TAGLINE_EN = 'Subscription to API Conversion Platform'
+export const BRAND_TAGLINE_EN = 'Smart tokens. More possibilities.'
 
-/** Project home (header / footer link). Empty string hides the link. */
-export const BRAND_SITE_URL = 'https://kdan.com'
+/**
+ * Project home (header / footer "GitHub" link). Empty string hides the link:
+ * Tokensavy is deployed from source; no separate public repository is configured.
+ */
+export const BRAND_SITE_URL = ''
 
 /** Base URL of the shipped documentation. */
-export const BRAND_DOCS_URL = 'https://docs.kdan.com'
+export const BRAND_DOCS_URL = 'https://tokensavy.ai/docs'
 
 /** Payment integration guide, per UI language. */
 export const BRAND_PAYMENT_GUIDE_URL = {
-  zh: `${BRAND_DOCS_URL}/zh/payment`,
-  ja: `${BRAND_DOCS_URL}/ja/payment`,
-  en: `${BRAND_DOCS_URL}/payment`
+  zh: '/guides/payment.zh.md',
+  ja: '/guides/payment.en.md',
+  en: '/guides/payment.en.md'
 } as const
 
 /** "Supported payment methods" section of the payment guide, per UI language. */
 export const BRAND_PAYMENT_METHODS_URL = {
-  zh: `${BRAND_DOCS_URL}/zh/payment#supported-payment-methods`,
-  ja: `${BRAND_DOCS_URL}/ja/payment#supported-payment-methods`,
-  en: `${BRAND_DOCS_URL}/payment#supported-payment-methods`
+  zh: BRAND_PAYMENT_GUIDE_URL.zh,
+  ja: BRAND_PAYMENT_GUIDE_URL.ja,
+  en: BRAND_PAYMENT_GUIDE_URL.en
 } as const
 
 /**
@@ -58,17 +57,14 @@ export const BRAND_PAYMENT_METHODS_URL = {
  * return `document_url_zh` / `document_url_en`.
  */
 export const BRAND_COMPLIANCE_DOCUMENT_URL = {
-  zh: `${BRAND_DOCS_URL}/legal/admin-compliance.zh.md`,
-  'zh-TW': `${BRAND_DOCS_URL}/legal/admin-compliance.zh-TW.md`,
-  ja: `${BRAND_DOCS_URL}/legal/admin-compliance.ja.md`,
-  en: `${BRAND_DOCS_URL}/legal/admin-compliance.en.md`
+  zh: '/legal/admin-compliance',
+  'zh-TW': '/legal/admin-compliance',
+  ja: '/legal/admin-compliance',
+  en: '/legal/admin-compliance'
 } as const
 
-/**
- * GitHub "owner/repo" whose releases the version badge follows (= service.DefaultReleaseRepo).
- * KDAN uses the kdan/v* release channel in this shared repository.
- */
+/** Releases from the tokensavy branch, isolated by the tokensavy/v* channel. */
 export const RELEASE_REPO = 'holeenlu/sub2api'
 
-/** Container image published by the release pipeline (tags carry no "v" prefix). */
-export const RELEASE_DOCKER_IMAGE = 'ghcr.io/holeenlu/kdan'
+/** GHCR image built manually from this repository’s tokensavy branch. */
+export const RELEASE_DOCKER_IMAGE = 'ghcr.io/holeenlu/tokensavy'

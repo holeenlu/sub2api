@@ -293,7 +293,7 @@ export default {
         step1: {
           title: 'R2バケットを作成',
           line1: 'Cloudflareダッシュボード（dash.cloudflare.com）にログインし、サイドバーから「R2 Object Storage」を選択します',
-          line2: '「Create bucket」をクリックし、名前（例：tapmodels-backups）を入力してリージョンを選択します',
+          line2: '「Create bucket」をクリックし、名前（例：tokensavy-backups）を入力してリージョンを選択します',
           line3: 'Createをクリックして完了します'
         },
         step2: {

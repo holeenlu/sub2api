@@ -8,8 +8,8 @@ import tempfile
 import unittest
 
 DOWNLOADS = Path(__file__).parents[2] / "frontend/public/downloads"
-CODEX = DOWNLOADS / "kdan-codex-session-repair/repair_sessions.py"
-CLAUDE = DOWNLOADS / "kdan-claude-session-recovery/find_claude_sessions.py"
+CODEX = DOWNLOADS / "tokensavy-session-repair/repair_sessions.py"
+CLAUDE = DOWNLOADS / "tokensavy-claude-session-recovery/find_claude_sessions.py"
 ID = "12345678-1234-4123-8123-123456789abc"
 
 
@@ -23,8 +23,8 @@ class RecoveryCommandsTest(unittest.TestCase):
         self.codex = self.root / "old codex"
         self.codex.mkdir()
         (self.codex / "config.toml").write_text(
-            'model_provider = "kdan"\nmodel = "available-model"\n'
-            '[model_providers.kdan]\nname = "KDAN"\n'
+            'model_provider = "tokensavy"\nmodel = "available-model"\n'
+            '[model_providers.tokensavy]\nname = "Tokensavy"\n'
             'base_url = "https://example.invalid/v1"\nexperimental_bearer_token = "PRIVATE-KEY"\n'
         )
         self.rollout = self.codex / "sessions/renamed.jsonl"
@@ -56,7 +56,7 @@ class RecoveryCommandsTest(unittest.TestCase):
         result = self.invoke(CODEX, self.codex, "--list")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         data = json.loads(result.stdout)
-        self.assertEqual(data["provider"], "kdan")
+        self.assertEqual(data["provider"], "tokensavy")
         self.assertEqual(data["sessions"][0]["recorded_provider"], "missing-old-provider")
         self.assertNotIn("PRIVATE-KEY", result.stdout)
         self.assertNotIn("PRIVATE-MESSAGE", result.stdout)
@@ -69,7 +69,7 @@ class RecoveryCommandsTest(unittest.TestCase):
         subprocess.run(["/bin/sh", "-c", command], env=self.env, check=True, timeout=10)
         expected = json.loads(self.capture.read_text())
         self.assertEqual(expected["codex_home"], str(self.codex))
-        self.assertIn('model_provider="kdan"', expected["args"])
+        self.assertIn('model_provider="tokensavy"', expected["args"])
         self.assertEqual(expected["args"][-2:], ["--model", "available-model"])
         self.capture.unlink()
         result = self.invoke(CODEX, self.codex, "--resume", ID, "--run")

@@ -17,11 +17,11 @@ export default {
     exploreModels: 'モデルを探す',
     goToDashboard: 'ダッシュボードへ移動',
     // Hero copy
-    heroSubtitle: 'モデルを選んで、開発を始めましょう。',
+    heroSubtitle: 'トークンを賢く、可能性をもっと。',
     heroDescription:
       '統合APIから複数のAIモデルにアクセスできます。\n統合管理にかかる時間を減らし、開発に集中できます。',
     heroEyebrow: 'マルチモデルAI APIゲートウェイ',
-    heroTitle: 'モデルを選んで、開発を始めましょう。',
+    heroTitle: 'トークンを賢く、可能性をもっと。',
     contactIntegration: '統合について相談',
     quickInstall: { eyebrow: '数分で利用開始', title: '1つのAPIキーで開始', description: 'Codex CLIとClaude Codeのガイドには、バックアップ、環境変数、設定ファイルが含まれています。' },
     terminal: {
@@ -171,7 +171,7 @@ export default {
         'すべてのツールで同じ接続情報を使用します。モデルエイリアスは実際のアップストリームモデルにマッピングされ、/v1/modelsはAPIキーのグループのモデルカタログを返します。転送時には推論レベル設定とプロンプトキャッシュキーが保持されます。'
     },
     seo: {
-      title: '@:{\'common.siteName\'} | モデルを選んで、開発を始めましょう。',
+      title: '@:{\'common.siteName\'} | トークンを賢く、可能性をもっと。',
       description:
         '1つの@:{\'common.siteName\'} APIから複数のAIモデルにアクセスできます。利用可能なモデルと料金を確認し、リクエスト単位の使用量と料金を確認できます。'
     },

@@ -4,7 +4,7 @@ Recover existing local sessions; this does not repair networking or recreate del
 
 Copy valid settings for your current group from [API Keys](/keys) and check that a new session works. Authentication, balance, 503, and upstream errors need configuration or server troubleshooting. Keep the original session directory.
 
-Requires Python 3.11+ and an installed Codex CLI. [Download the tool](/downloads/kdan-codex-session-repair.zip), extract it, and enter kdan-codex-session-repair. It supports macOS, Linux, and Windows.
+Requires Python 3.11+ and an installed Codex CLI. [Download the tool](/downloads/tokensavy-codex-session-repair.zip), extract it, and enter tokensavy-codex-session-repair. It supports macOS, Linux, and Windows.
 
 ## Find sessions and prepare a resume command
 
@@ -16,7 +16,7 @@ bash repair-sessions.sh --list
 
 
 ```powershell
-.\RepairSessions.ps1 -List
+.\Repair-TokensavySessions.ps1 -List
 ```
 
 
@@ -28,7 +28,7 @@ bash repair-sessions.sh --resume "SESSION_ID" --project-dir "/path/to/project"
 
 
 ```powershell
-.\RepairSessions.ps1 -Resume "SESSION_ID" -ProjectDir "C:\path\to\project"
+.\Repair-TokensavySessions.ps1 -Resume "SESSION_ID" -ProjectDir "C:\path\to\project"
 ```
 
 
@@ -53,7 +53,7 @@ bash repair-sessions.sh --apply --client-closed
 
 
 ```powershell
-.\RepairSessions.ps1 -Apply -ClientClosed
+.\Repair-TokensavySessions.ps1 -Apply -ClientClosed
 ```
 
 

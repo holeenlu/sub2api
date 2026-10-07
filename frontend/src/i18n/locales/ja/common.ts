@@ -2,7 +2,7 @@ export default {
   common: {
     // Site name. Overwritten via mergeLocaleMessage in stores/app.ts once the
     // public settings load; reference it as @:{\'common.siteName\'} in copy.
-    siteName: 'TapModels',
+    siteName: 'Tokensavy',
     loading: '読み込み中…',
     submitting: '送信中…',
     justNow: 'たった今',

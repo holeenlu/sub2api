@@ -11,12 +11,12 @@
 ### オンラインインストール（macOS / Linux）
 
 ```bash
-export KDAN_BASE_URL="{{API_ROOT}}"
-export KDAN_API_KEY="YOUR_KDAN_API_KEY"
+export TOKENSAVY_BASE_URL="{{API_ROOT}}"
+export TOKENSAVY_API_KEY="YOUR_TOKENSAVY_API_KEY"
 curl -fsSL {{API_ROOT}}/install/codex.sh | bash
 ```
 
-このスクリプトは `config.toml` をバックアップし、Responses プロバイダーを書き込み、モードを `600` に設定します。シェルにパイプする前に内容を確認してください。キーをシェル履歴やソース管理に決して保存しないでください。`KDAN_BASE_URL` は必須で、例のモデルは `MODEL_ID` で上書きできます。
+このスクリプトは `config.toml` をバックアップし、Responses プロバイダーを書き込み、モードを `600` に設定します。シェルにパイプする前に内容を確認してください。キーをシェル履歴やソース管理に決して保存しないでください。カスタムゲートウェイを使用する場合は `TOKENSAVY_BASE_URL` を設定し、例のモデルを上書きする場合は `MODEL_ID` を設定します。
 
 このスクリーンショットは、無効なサンプル認証情報と例の URL が設定された、プロジェクトの OpenAI グループ API キー設定を示しています。自身のグループ設定をコピーしてください。[コンソールガイド](/apps/console) では Legacy モードと手順も説明しています。画像をクリックするとフルサイズで表示できます。
 
@@ -27,14 +27,14 @@ curl -fsSL {{API_ROOT}}/install/codex.sh | bash
 macOS / Linux:
 
 ```bash
-export KDAN_API_KEY="your KDAN API key"
+export TOKENSAVY_API_KEY="your TOKENSAVY API key"
 mkdir -p "${CODEX_HOME:-$HOME/.codex}"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:KDAN_API_KEY="your KDAN API key"
+$env:TOKENSAVY_API_KEY="your TOKENSAVY API key"
 $codexConfigDir = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
 New-Item -ItemType Directory -Force $codexConfigDir | Out-Null
 notepad (Join-Path $codexConfigDir 'config.toml')
@@ -47,9 +47,9 @@ model_provider = "gateway"
 model = "gpt-6-astra"
 
 [model_providers.gateway]
-name = "KDAN"
+name = "TOKENSAVY"
 base_url = "{{API_ROOT}}/v1"
-env_key = "KDAN_API_KEY"
+env_key = "TOKENSAVY_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false
@@ -67,7 +67,7 @@ Dock またはスタートメニューから起動したデスクトップアプ
 "/Applications/Codex.app/Contents/MacOS/Codex"
 ```
 
-最初に実際のインストール先を確認してください。Windows では、`$env:KDAN_API_KEY` を含む PowerShell からインストール済みの Codex `.exe` を呼び出します。
+最初に実際のインストール先を確認してください。Windows では、`$env:TOKENSAVY_API_KEY` を含む PowerShell からインストール済みの Codex `.exe` を呼び出します。
 
 アイコンから起動する場合は、OpenAI グループの Use key モーダルで **API key** を選択し、完全な `config.toml` をダウンロードしてください。これによりファイル内にシークレットが保存されます。アクセスを制限し、決してコミットしないでください。Zhipu Codex 設定は API キーを `experimental_bearer_token` に埋め込むため、ダウンロードした `config.toml` だけで使用できます。その他のグループでは、生成された `env_key` 設定をそのまま使用し、自分で 2 つ目の認証フィールドを追加しないでください。
 
@@ -100,7 +100,7 @@ Codex CLI 0.160.1 で検証済みです。このクライアントは独立検�
 
 ## 確認とトラブルシューティング
 
-新しいタスクで簡単なメッセージを送信し、KDAN の使用量レコードでタイムスタンプ、キー、モデルが一致することを確認します。その後、既存の作業を再開してください。履歴が消えた場合は、[Codex セッションの復旧](/apps/session-recovery-codex) を参照してください。
+新しいタスクで簡単なメッセージを送信し、TOKENSAVY の使用量レコードでタイムスタンプ、キー、モデルが一致することを確認します。その後、既存の作業を再開してください。履歴が消えた場合は、[Codex セッションの復旧](/apps/session-recovery-codex) を参照してください。
 
 | 症状 | 確認項目 |
 | --- | --- |
