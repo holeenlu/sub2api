@@ -616,8 +616,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const appStore = useAppStore()
 const copiedRequestId = ref<string | null>(null)
-const showAccountBilling = props.showAccountBilling
-const showUpstreamEndpoint = props.showUpstreamEndpoint
+const showAccountBilling = computed(() => props.showAccountBilling)
+const showUpstreamEndpoint = computed(() => props.showUpstreamEndpoint)
 const ipGeoBatchLoading = ref(false)
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))

@@ -17,15 +17,18 @@ import (
 
 type userUsageRepoCapture struct {
 	service.UsageLogRepository
-	listParams   pagination.PaginationParams
-	listFilters  usagestats.UsageLogFilters
-	statsFilters usagestats.UsageLogFilters
-	trendFilters usagestats.UsageLogFilters
-	groupFilters usagestats.UsageLogFilters
-	listRows     []service.UsageLog
-	stats        *usagestats.UsageStats
-	modelStats   []usagestats.ModelStat
-	groupStats   []usagestats.GroupStat
+	listParams           pagination.PaginationParams
+	listFilters          usagestats.UsageLogFilters
+	statsFilters         usagestats.UsageLogFilters
+	trendFilters         usagestats.UsageLogFilters
+	groupFilters         usagestats.UsageLogFilters
+	apiKeyBreakdownDim   usagestats.UserBreakdownDimension
+	apiKeyBreakdownLimit int
+	apiKeyBreakdownRows  []usagestats.APIKeyBreakdownItem
+	listRows             []service.UsageLog
+	stats                *usagestats.UsageStats
+	modelStats           []usagestats.ModelStat
+	groupStats           []usagestats.GroupStat
 }
 
 func (s *userUsageRepoCapture) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
@@ -65,6 +68,12 @@ func (s *userUsageRepoCapture) GetModelStatsWithFilters(ctx context.Context, sta
 	return s.modelStats, nil
 }
 
+func (s *userUsageRepoCapture) GetAPIKeyBreakdownStats(_ context.Context, _ time.Time, _ time.Time, dim usagestats.UserBreakdownDimension, limit int) ([]usagestats.APIKeyBreakdownItem, error) {
+	s.apiKeyBreakdownDim = dim
+	s.apiKeyBreakdownLimit = limit
+	return s.apiKeyBreakdownRows, nil
+}
+
 func (s *userUsageRepoCapture) GetGroupStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8) ([]usagestats.GroupStat, error) {
 	s.groupFilters = usagestats.UsageLogFilters{
 		UserID:      userID,
@@ -91,6 +100,7 @@ func newUserUsageRequestTypeTestRouter(repo *userUsageRepoCapture) *gin.Engine {
 	router.GET("/usage/stats", handler.Stats)
 	router.GET("/usage/dashboard/models", handler.DashboardModels)
 	router.GET("/usage/dashboard/snapshot-v2", handler.DashboardSnapshotV2)
+	router.GET("/usage/dashboard/api-key-breakdown", handler.DashboardAPIKeyBreakdown)
 	return router
 }
 
@@ -365,4 +375,41 @@ func TestUserUsageSnapshotRejectsInvalidIncludeFlags(t *testing.T) {
 
 		require.Equal(t, http.StatusBadRequest, rec.Code, query)
 	}
+}
+
+func TestUserAPIKeyBreakdownScopesToAuthenticatedUserAndSharedFilters(t *testing.T) {
+	repo := &userUsageRepoCapture{
+		apiKeyBreakdownRows: []usagestats.APIKeyBreakdownItem{{APIKeyID: 7, KeyName: "project", UserID: 42, Requests: 3, AccountCost: 99.5}},
+	}
+	router := newUserUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/api-key-breakdown?start_date=2026-05-01&end_date=2026-05-03&group_id=9&model=gpt-6-astra&request_type=ws_v2&native_compaction_v2=true&billing_type=1&billing_mode=token&sort_by=requests&limit=20", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(42), repo.apiKeyBreakdownDim.UserID)
+	require.Equal(t, int64(9), repo.apiKeyBreakdownDim.GroupID)
+	require.Equal(t, "gpt-6-astra", repo.apiKeyBreakdownDim.Model)
+	require.Equal(t, "requested", repo.apiKeyBreakdownDim.ModelType)
+	require.NotNil(t, repo.apiKeyBreakdownDim.RequestType)
+	require.Equal(t, int16(service.RequestTypeWSV2), *repo.apiKeyBreakdownDim.RequestType)
+	require.NotNil(t, repo.apiKeyBreakdownDim.NativeCompactionV2)
+	require.True(t, *repo.apiKeyBreakdownDim.NativeCompactionV2)
+	require.NotNil(t, repo.apiKeyBreakdownDim.BillingType)
+	require.Equal(t, int8(1), *repo.apiKeyBreakdownDim.BillingType)
+	require.Equal(t, "token", repo.apiKeyBreakdownDim.BillingMode)
+	require.Equal(t, "requests", repo.apiKeyBreakdownDim.SortBy)
+	require.Equal(t, 20, repo.apiKeyBreakdownLimit)
+	require.NotContains(t, rec.Body.String(), "account_cost")
+}
+
+func TestUserAPIKeyBreakdownRejectsUnboundedDateRange(t *testing.T) {
+	repo := &userUsageRepoCapture{}
+	router := newUserUsageRequestTypeTestRouter(repo)
+	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/api-key-breakdown?start_date=2026-01-01&end_date=2026-04-02", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }

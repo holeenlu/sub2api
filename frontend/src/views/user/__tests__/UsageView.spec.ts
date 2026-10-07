@@ -11,6 +11,7 @@ const {
   getStats,
   getDashboardModels,
   getDashboardSnapshotV2,
+  getDashboardAPIKeyBreakdown,
   listMyErrorRequests,
   list,
   getAvailable,
@@ -23,6 +24,7 @@ const {
   getStats: vi.fn(),
   getDashboardModels: vi.fn(),
   getDashboardSnapshotV2: vi.fn(),
+  getDashboardAPIKeyBreakdown: vi.fn(),
   listMyErrorRequests: vi.fn(),
   list: vi.fn(),
   getAvailable: vi.fn(),
@@ -54,6 +56,7 @@ const messages: Record<string, string> = {
   'usage.allApiKeys': 'All API Keys',
   'usage.errors.allKeys': 'All API Keys',
   'usage.tabs.usage': 'Usage records',
+  'usage.tabs.keyRanking': 'API Key Ranking',
   'usage.tabs.errors': 'Error records',
   'usage.apiKeyFilter': 'API Key',
   'usage.model': 'Model',
@@ -81,6 +84,7 @@ vi.mock('@/api', () => ({
     getStats,
     getDashboardModels,
     getDashboardSnapshotV2,
+    getDashboardAPIKeyBreakdown,
     listMyErrorRequests,
   },
   keysAPI: {
@@ -161,6 +165,7 @@ function mountUsageView() {
         UsageStatsCards: chartStub,
         UsageTable: chartStub,
         UserErrorRequestsTable: chartStub,
+        APIKeyTokenRanking: chartStub,
         ModelDistributionChart: chartStub,
         GroupDistributionChart: chartStub,
         EndpointDistributionChart: chartStub,
@@ -176,6 +181,7 @@ describe('user UsageView', () => {
     getStats.mockReset()
     getDashboardModels.mockReset()
     getDashboardSnapshotV2.mockReset()
+    getDashboardAPIKeyBreakdown.mockReset()
     listMyErrorRequests.mockReset()
     list.mockReset()
     getAvailable.mockReset()
@@ -203,6 +209,7 @@ describe('user UsageView', () => {
       start_date: '2026-03-08',
       end_date: '2026-03-08',
     })
+    getDashboardAPIKeyBreakdown.mockResolvedValue({ api_keys: [], start_date: '2026-03-08', end_date: '2026-03-08' })
     getDashboardSnapshotV2.mockResolvedValue({
       generated_at: '2026-03-08T00:00:00Z',
       start_date: '2026-03-08',
@@ -216,6 +223,24 @@ describe('user UsageView', () => {
     getAvailable.mockResolvedValue([{ id: 1, name: 'default' }])
   })
 
+  it('cancels all superseded aggregates on filtering and when leaving the page', async () => {
+    getStats.mockImplementation(() => new Promise(() => {}))
+    getDashboardModels.mockImplementation(() => new Promise(() => {}))
+    getDashboardSnapshotV2.mockImplementation(() => new Promise(() => {}))
+    const wrapper = mountUsageView()
+    await flushPromises()
+    const signals = () => [getStats.mock.lastCall![2].signal, getDashboardModels.mock.lastCall![1].signal, getDashboardSnapshotV2.mock.lastCall![1].signal] as AbortSignal[]
+    const first = signals()
+    wrapper.findComponent(DateRangePicker).vm.$emit('change', { startDate: '2026-03-09', endDate: '2026-03-10', preset: null })
+    await flushPromises()
+    expect(first.every(signal => signal.aborted)).toBe(true)
+    const current = signals()
+    expect(current.every(signal => !signal.aborted)).toBe(true)
+    wrapper.unmount()
+    expect(current.every(signal => signal.aborted)).toBe(true)
+    expect(showError).not.toHaveBeenCalled()
+  })
+
   it('loads logs, stats, model stats, and snapshot on first render', async () => {
     mountUsageView()
     await flushPromises()
@@ -227,7 +252,7 @@ describe('user UsageView', () => {
       include_trend: true,
       include_model_stats: false,
       include_group_stats: true,
-    }))
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(list).toHaveBeenCalledTimes(1)
     expect(list).toHaveBeenCalledWith(1, 100)
     expect(getAvailable).toHaveBeenCalled()
@@ -342,9 +367,9 @@ describe('user UsageView', () => {
       expect.objectContaining({ native_compaction_v2: true }),
       expect.anything()
     )
-    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }))
-    expect(getDashboardModels).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }))
-    expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }))
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }), undefined, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getDashboardModels).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
 
     query.mockClear()
     getStats.mockClear()
@@ -359,9 +384,9 @@ describe('user UsageView', () => {
       expect.objectContaining({ native_compaction_v2: null }),
       expect.anything()
     )
-    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }))
-    expect(getDashboardModels).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }))
-    expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }))
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }), undefined, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getDashboardModels).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 
   it('exports csv with current filters and without admin-only fields', async () => {
@@ -561,6 +586,19 @@ describe('user UsageView', () => {
     window.URL.revokeObjectURL = originalRevokeObjectURL
     vi.unstubAllGlobals()
     clickSpy.mockRestore()
+  })
+})
+
+describe('UsageView API key ranking tab', () => {
+  it('exposes the ranking tab without changing the usage detail route', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+
+    const rankingButton = wrapper.findAll('button').find((button) => button.text() === 'API Key Ranking')
+    expect(rankingButton).toBeDefined()
+    await rankingButton!.trigger('click')
+    expect((wrapper.vm as any).activeTab).toBe('keyRanking')
+    wrapper.unmount()
   })
 })
 

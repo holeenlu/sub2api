@@ -13,6 +13,7 @@ import type {
   UserUsageTrendPoint,
   UserSpendingRankingResponse,
   UserBreakdownItem,
+  APIKeyBreakdownItem,
   UsageRequestType
 } from '@/types'
 
@@ -104,8 +105,8 @@ export interface ModelStatsResponse {
  * @param params - Query parameters for filtering
  * @returns Model usage statistics
  */
-export async function getModelStats(params?: ModelStatsParams): Promise<ModelStatsResponse> {
-  const { data } = await apiClient.get<ModelStatsResponse>('/admin/dashboard/models', { params })
+export async function getModelStats(params?: ModelStatsParams, options?: { signal?: AbortSignal }): Promise<ModelStatsResponse> {
+  const { data } = await apiClient.get<ModelStatsResponse>('/admin/dashboard/models', { params, signal: options?.signal })
   return data
 }
 
@@ -183,6 +184,7 @@ export interface UserBreakdownParams {
   stream?: boolean
   native_compaction_v2?: boolean | null
   billing_type?: number | null
+  billing_mode?: string | null
 }
 
 export interface UserBreakdownResponse {
@@ -198,12 +200,29 @@ export async function getUserBreakdown(params: UserBreakdownParams): Promise<Use
   return data
 }
 
+export interface APIKeyBreakdownResponse {
+  api_keys: APIKeyBreakdownItem[]
+  start_date: string
+  end_date: string
+}
+
+/**
+ * API Key 用量排行。筛选参数与 user-breakdown 完全一致（后端共用同一个解析器），
+ * 因此直接复用 UserBreakdownParams。
+ */
+export async function getAPIKeyBreakdown(params: UserBreakdownParams): Promise<APIKeyBreakdownResponse> {
+  const { data } = await apiClient.get<APIKeyBreakdownResponse>('/admin/dashboard/api-key-breakdown', {
+    params
+  })
+  return data
+}
+
 /**
  * Get dashboard snapshot v2 (aggregated response for heavy admin pages).
  */
-export async function getSnapshotV2(params?: DashboardSnapshotV2Params): Promise<DashboardSnapshotV2Response> {
+export async function getSnapshotV2(params?: DashboardSnapshotV2Params, options?: { signal?: AbortSignal }): Promise<DashboardSnapshotV2Response> {
   const { data } = await apiClient.get<DashboardSnapshotV2Response>('/admin/dashboard/snapshot-v2', {
-    params
+    params, signal: options?.signal
   })
   return data
 }

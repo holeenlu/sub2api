@@ -81,6 +81,7 @@ export interface CreateUsageCleanupTaskRequest {
 }
 
 export interface AdminUsageQueryParams extends UsageQueryParams {
+  export?: boolean
   user_id?: number
   exact_total?: boolean
   billing_mode?: string
@@ -131,9 +132,9 @@ export async function getStats(params: {
   end_date?: string
   timezone?: string
   nocache?: number
-}): Promise<AdminUsageStatsResponse> {
+}, options?: { signal?: AbortSignal }): Promise<AdminUsageStatsResponse> {
   const { data } = await apiClient.get<AdminUsageStatsResponse>('/admin/usage/stats', {
-    params
+    params, signal: options?.signal
   })
   return data
 }

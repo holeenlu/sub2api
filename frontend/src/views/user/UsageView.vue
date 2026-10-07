@@ -66,8 +66,25 @@
         </div>
       </div>
 
-      <div class="card p-6">
-        <div class="flex flex-wrap items-end justify-between gap-4">
+      <div class="card">
+        <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
+          <button
+            v-for="tab in detailTabs"
+            :key="tab.key"
+            type="button"
+            data-testid="usage-detail-tab"
+            class="-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-3 text-sm font-medium transition-colors sm:px-4"
+            :class="activeTab === tab.key
+              ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-dark-500 dark:hover:text-gray-200'"
+            @click="tab.key === 'errors' ? switchToErrors() : activeTab = tab.key"
+          >
+            <Icon :name="tab.icon" size="sm" />
+            {{ tab.label }}
+          </button>
+        </div>
+
+        <div class="flex flex-wrap items-end justify-between gap-4 border-b border-gray-100 px-6 py-4 dark:border-dark-700/50">
           <div v-if="activeTab === 'errors'" class="flex flex-1 flex-wrap items-end gap-4">
             <div class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.errors.keyName') }}</label>
@@ -134,6 +151,7 @@
             </button>
             <div class="relative" ref="columnDropdownRef">
               <button
+                v-if="activeTab !== 'keyRanking'"
                 type="button"
                 data-testid="usage-column-settings"
                 @click="showColumnDropdown = !showColumnDropdown"
@@ -160,21 +178,11 @@
                 </button>
               </div>
             </div>
-            <button v-if="activeTab !== 'errors'" type="button" @click="exportToCSV" :disabled="exporting" class="btn btn-primary">
+            <button v-if="activeTab === 'usage'" type="button" @click="exportToCSV" :disabled="exporting" class="btn btn-primary">
               {{ exporting ? t('usage.exporting') : t('usage.exportCsv') }}
             </button>
           </div>
         </div>
-      </div>
-
-      <div v-if="errorViewEnabled" class="flex gap-2 border-b border-gray-200 dark:border-dark-700">
-        <button class="tab" :class="{ 'tab-active': activeTab === 'usage' }" @click="activeTab = 'usage'">
-          {{ t('usage.tabs.usage') }}
-        </button>
-        <button class="tab" :class="{ 'tab-active': activeTab === 'errors' }" @click="switchToErrors">
-          {{ t('usage.tabs.errors') }}
-        </button>
-      </div>
 
       <template v-if="activeTab === 'usage'">
         <UsageTable
@@ -200,6 +208,18 @@
         />
       </template>
 
+      <APIKeyTokenRanking
+        ref="keyRankingRef"
+        v-else-if="activeTab === 'keyRanking'"
+        :show-user="false"
+        :start-date="startDate"
+        :end-date="endDate"
+        :filters="rankingFilters"
+        :fetch="fetchUserAPIKeyBreakdown"
+        :active="activeTab === 'keyRanking'"
+        @select-api-key="handleKeyRankingSelect"
+      />
+
       <UserErrorRequestsTable
         v-else-if="errorViewEnabled"
         :rows="errorRows"
@@ -213,6 +233,7 @@
         @update:pageSize="onErrorPageSize"
         @ipGeoBatchFailed="handleIpGeoBatchFailed"
       />
+      </div>
     </div>
   </AppLayout>
 
@@ -236,6 +257,7 @@ import EndpointDistributionChart from '@/components/charts/EndpointDistributionC
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import Icon from '@/components/icons/Icon.vue'
 import UserErrorRequestsTable from '@/components/user/UserErrorRequestsTable.vue'
+import APIKeyTokenRanking from '@/components/admin/usage/APIKeyTokenRanking.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffort } from '@/utils/format'
 import { getBillingModeLabel, getDisplayBillingMode as resolveDisplayBillingMode } from '@/utils/billingMode'
@@ -327,9 +349,9 @@ const applyErrorFilters = () => {
 }
 
 let abortController: AbortController | null = null
-let chartReqSeq = 0
-let statsReqSeq = 0
-let modelStatsReqSeq = 0
+let chartController: AbortController | null = null
+let statsController: AbortController | null = null
+let modelStatsController: AbortController | null = null
 
 const formatLocalDate = (date: Date): string =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -355,8 +377,15 @@ const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const groupDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionSource = ref<EndpointSource>('inbound')
-const activeTab = ref<'usage' | 'errors'>('usage')
+const activeTab = ref<'usage' | 'keyRanking' | 'errors'>('usage')
 const errorViewEnabled = computed(() => appStore.cachedPublicSettings?.allow_user_view_error_requests ?? false)
+const detailTabs = computed(() => [
+  { key: 'usage' as const, label: t('usage.tabs.usage'), icon: 'document' as const },
+  { key: 'keyRanking' as const, label: t('usage.tabs.keyRanking'), icon: 'key' as const },
+  ...(errorViewEnabled.value
+    ? [{ key: 'errors' as const, label: t('usage.tabs.errors'), icon: 'exclamationTriangle' as const }]
+    : []),
+])
 
 const filters = ref<UsageQueryParams>({
   start_date: startDate.value,
@@ -443,6 +472,27 @@ const buildUsageListParams = (page: number, pageSize: number): UsageQueryParams 
   sort_order: sortState.sort_order,
 })
 
+const rankingFilters = computed<Record<string, unknown>>(() => ({
+  api_key_id: normalizedFilters.value.api_key_id,
+  group_id: normalizedFilters.value.group_id,
+  model: normalizedFilters.value.model,
+  request_type: normalizedFilters.value.request_type,
+  stream: normalizedFilters.value.stream,
+  native_compaction_v2: normalizedFilters.value.native_compaction_v2,
+  billing_type: normalizedFilters.value.billing_type,
+  billing_mode: normalizedFilters.value.billing_mode,
+}))
+
+const fetchUserAPIKeyBreakdown = async (params: import('@/api/admin/dashboard').UserBreakdownParams) =>
+  usageAPI.getDashboardAPIKeyBreakdown(params)
+
+const keyRankingRef = ref<{ reload: () => Promise<void> } | null>(null)
+const handleKeyRankingSelect = (apiKeyId: number) => {
+  filters.value.api_key_id = apiKeyId
+  activeTab.value = 'usage'
+  applyFilters()
+}
+
 const loadLogs = async () => {
   abortController?.abort()
   const controller = new AbortController()
@@ -466,48 +516,54 @@ const loadLogs = async () => {
 }
 
 const loadStats = async () => {
-  const seq = ++statsReqSeq
+  statsController?.abort()
+  const controller = new AbortController()
+  statsController = controller
   endpointStatsLoading.value = true
   try {
-    const stats = await usageAPI.getStats(normalizedFilters.value)
-    if (seq !== statsReqSeq) return
+    const stats = await usageAPI.getStats(normalizedFilters.value, undefined, { signal: controller.signal })
+    if (controller.signal.aborted) return
     usageStats.value = stats
     inboundEndpointStats.value = stats.endpoints || []
     upstreamEndpointStats.value = []
     endpointPathStats.value = []
   } catch (error) {
-    if (seq !== statsReqSeq) return
+    if (controller.signal.aborted) return
     console.error('Failed to load usage stats:', error)
     inboundEndpointStats.value = []
     upstreamEndpointStats.value = []
     endpointPathStats.value = []
   } finally {
-    if (seq === statsReqSeq) endpointStatsLoading.value = false
+    if (statsController === controller && !controller.signal.aborted) endpointStatsLoading.value = false
   }
 }
 
 const loadModelStats = async () => {
-  const seq = ++modelStatsReqSeq
+  modelStatsController?.abort()
+  const controller = new AbortController()
+  modelStatsController = controller
   modelStatsLoading.value = true
   try {
     const response = await usageAPI.getDashboardModels({
       ...normalizedFilters.value,
       model_source: 'requested',
-    })
-    if (seq !== modelStatsReqSeq) return
+    }, { signal: controller.signal })
+    if (controller.signal.aborted) return
     requestedModelStats.value = response.models || []
     refreshModelOptions(response.models || [])
   } catch (error) {
-    if (seq !== modelStatsReqSeq) return
+    if (controller.signal.aborted) return
     console.error('Failed to load model stats:', error)
     requestedModelStats.value = []
   } finally {
-    if (seq === modelStatsReqSeq) modelStatsLoading.value = false
+    if (modelStatsController === controller && !controller.signal.aborted) modelStatsLoading.value = false
   }
 }
 
 const loadChartData = async () => {
-  const seq = ++chartReqSeq
+  chartController?.abort()
+  const controller = new AbortController()
+  chartController = controller
   chartsLoading.value = true
   try {
     const snapshot = await usageAPI.getDashboardSnapshotV2({
@@ -516,17 +572,17 @@ const loadChartData = async () => {
       include_trend: true,
       include_model_stats: false,
       include_group_stats: true,
-    })
-    if (seq !== chartReqSeq) return
+    }, { signal: controller.signal })
+    if (controller.signal.aborted) return
     trendData.value = snapshot.trend || []
     groupStats.value = snapshot.groups || []
   } catch (error) {
-    if (seq !== chartReqSeq) return
+    if (controller.signal.aborted) return
     console.error('Failed to load chart data:', error)
     trendData.value = []
     groupStats.value = []
   } finally {
-    if (seq === chartReqSeq) chartsLoading.value = false
+    if (chartController === controller && !controller.signal.aborted) chartsLoading.value = false
   }
 }
 
@@ -550,6 +606,10 @@ const applyFilters = () => {
 }
 
 const refreshData = () => {
+  if (activeTab.value === 'keyRanking') {
+    void keyRankingRef.value?.reload()
+    return
+  }
   void loadLogs()
   void loadStats()
   void loadModelStats()
@@ -908,6 +968,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   abortController?.abort()
+  statsController?.abort()
+  modelStatsController?.abort()
+  chartController?.abort()
   document.removeEventListener('click', handleColumnClickOutside)
 })
 
