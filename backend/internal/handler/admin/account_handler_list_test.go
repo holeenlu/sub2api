@@ -3,17 +3,22 @@ package admin
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
@@ -79,6 +84,20 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 	require.Contains(t, fullPayload.Data.Items[0], "account_groups")
 }
 
+func TestAccountHandlerListLiteIncludesDiagnosticSummary(t *testing.T) {
+	repo := &accountListDiagnosticRepo{summaries: map[int64]service.CodexDiagnosticSummary{
+		501: {Status: "degraded", RunID: 12},
+	}}
+	router, adminSvc := setupAccountListRouterWithScheduledTests(service.ProvideScheduledTestService(repo, nil, nil, nil, nil, nil))
+	now := time.Now().UTC()
+	adminSvc.accounts = []service.Account{{ID: 501, Name: "diagnostic-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, CreatedAt: now, UpdatedAt: now}}
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20&lite=1", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "degraded", gjson.GetBytes(rec.Body.Bytes(), "data.items.0.codex_diagnostic.status").String())
+}
+
 func TestAccountHandlerListLiteStaysBelowResponseBudget(t *testing.T) {
 	router, adminSvc := setupAccountListRouter()
 	now := time.Now().UTC()
@@ -112,12 +131,26 @@ func TestAccountHandlerListLiteStaysBelowResponseBudget(t *testing.T) {
 }
 
 func setupAccountListRouter() (*gin.Engine, *stubAdminService) {
+	return setupAccountListRouterWithScheduledTests(nil)
+}
+
+func setupAccountListRouterWithScheduledTests(scheduledTests *service.ScheduledTestService) (*gin.Engine, *stubAdminService) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	adminSvc := newStubAdminService()
 	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler.SetScheduledTests(scheduledTests, nil)
 	router.GET("/api/v1/admin/accounts", handler.List)
 	return router, adminSvc
+}
+
+type accountListDiagnosticRepo struct {
+	service.ScheduledTestPlanRepository
+	summaries map[int64]service.CodexDiagnosticSummary
+}
+
+func (r *accountListDiagnosticRepo) Summaries(context.Context, []int64) (map[int64]service.CodexDiagnosticSummary, error) {
+	return r.summaries, nil
 }
 
 func TestAccountHandlerListIncludesCreatedAt(t *testing.T) {
@@ -404,4 +437,73 @@ func TestAccountHandlerListSchedulerScoreIgnoresPagination(t *testing.T) {
 	require.Equal(t, int64(301), payload.Data.Items[0].ID)
 	require.Less(t, payload.Data.Items[0].SchedulerScore.BaseScore, 3.75)
 	require.Empty(t, payload.Data.Items[0].SchedulerScores)
+}
+
+// The list must aggregate by each account's actual window, not one global start.
+type listWindowUsageRepo struct {
+	service.UsageLogRepository
+	mu    sync.Mutex
+	calls map[time.Time][]int64
+	fail  bool
+}
+
+func (r *listWindowUsageRepo) GetAccountWindowStatsBatch(_ context.Context, ids []int64, start time.Time) (map[int64]*usagestats.AccountStats, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls[start] = append(r.calls[start], ids...)
+	if r.fail {
+		return nil, errors.New("database unavailable")
+	}
+	result := make(map[int64]*usagestats.AccountStats)
+	for _, id := range ids {
+		result[id] = &usagestats.AccountStats{StandardCost: float64(id), Cost: 999, UserCost: 888}
+	}
+	return result, nil
+}
+func TestAccountHandlerListBatchesWindowCostsWithoutChangingWindows(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(strconv.FormatBool(fail), func(t *testing.T) {
+			now := time.Now().UTC()
+			start, end := now.Add(-time.Hour), now.Add(time.Hour)
+			otherStart := start.Add(-time.Hour)
+			repo := &listWindowUsageRepo{calls: map[time.Time][]int64{}, fail: fail}
+			usage := service.NewAccountUsageService(nil, repo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			adminSvc := newStubAdminService()
+			adminSvc.accounts = nil
+			// Forty accounts sharing a window require one aggregate, plus one for a different window.
+			for i := 1; i <= 41; i++ {
+				windowStart := &start
+				if i == 41 {
+					windowStart = &otherStart
+				}
+				adminSvc.accounts = append(adminSvc.accounts, service.Account{
+					ID: int64(i), Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth,
+					SessionWindowStart: windowStart, SessionWindowEnd: &end,
+					Extra: map[string]any{"window_cost_limit": float64(100)},
+				})
+			}
+			// No window limit: must not run a window query.
+			adminSvc.accounts = append(adminSvc.accounts, service.Account{ID: 42, Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth})
+			handler := &AccountHandler{adminService: adminSvc, accountUsageService: usage}
+			router := gin.New()
+			router.GET("/accounts", handler.List)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/accounts?lite=1&page_size=100", nil))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Len(t, repo.calls, 2)
+			require.Len(t, repo.calls[start], 40)
+			require.Equal(t, []int64{41}, repo.calls[otherStart])
+			items := gjson.Get(rec.Body.String(), "data.items").Array()
+			require.Len(t, items, 42)
+			for _, item := range items {
+				id := item.Get("id").Int()
+				cost := item.Get("current_window_cost")
+				if fail || id == 42 {
+					require.False(t, cost.Exists())
+				} else {
+					require.Equal(t, float64(id), cost.Float())
+				}
+			}
+		})
+	}
 }

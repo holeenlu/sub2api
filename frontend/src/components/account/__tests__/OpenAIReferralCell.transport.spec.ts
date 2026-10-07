@@ -5,7 +5,16 @@ import apiClient from '@/api/client'
 import OpenAIReferralCell from '../OpenAIReferralCell.vue'
 import type { Account } from '@/types'
 
-vi.mock('@/i18n', () => ({ getLocale: () => 'en' }))
+vi.mock('@/i18n', () => ({
+  getLocale: () => 'en',
+  i18n: {
+    global: {
+      t: (key: string) => key === 'ui.networkError'
+        ? 'Network error. Please check your connection.'
+        : key,
+    },
+  },
+}))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 // Exercise the actual accounts API and shared Axios interceptor together.

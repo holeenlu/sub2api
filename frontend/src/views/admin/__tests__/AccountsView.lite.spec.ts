@@ -53,7 +53,7 @@ vi.mock('@/stores/app', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ token: 'test-token', isSimpleMode: false })
+  useAuthStore: () => ({ token: 'test-token', isSimpleMode: false, isSuperAdmin: true, can: () => true })
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -66,6 +66,7 @@ const DataTableStub = defineComponent({
   template: `
     <div>
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
+        <slot name="cell-name" :row="row" :value="row.name" />
         <slot name="cell-groups" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div>
@@ -107,6 +108,7 @@ function mountView(stubActionMenu = true) {
         Pagination: true,
         ConfirmDialog: true,
         AccountActionMenu: stubActionMenu,
+        CodexDiagnosticBadge: { props: ['summary'], template: '<button v-if="summary" data-test="codex-diagnostic-badge">{{ summary.status }}</button>' },
         ImportDataModal: true,
         ReAuthAccountModal: true,
         AccountTestModal: AccountTestModalStub,
@@ -194,6 +196,21 @@ describe('admin AccountsView lite account list', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="account-groups"]').text()).toBe('codex')
+    wrapper.unmount()
+  })
+
+  it('renders the latest diagnostic conclusion beneath the account name', async () => {
+    listAccounts.mockResolvedValue({
+      items: [{ ...listRow, codex_diagnostic: { status: 'degraded', checked_at: '2026-10-05T02:00:00Z' } }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="codex-diagnostic-badge"]').text()).toBe('degraded')
     wrapper.unmount()
   })
 

@@ -15,12 +15,20 @@ import (
 )
 
 const stickySessionPrefix = "sticky_session:"
+
+// stickySessionHistoryPrefix 是长周期「会话账号历史」亲和键的独立命名空间。
+// 必须独立：sessionHash 由客户端提供（新版 metadata.user_id 的 session_id 不做
+// UUID 校验），如果把历史键实现成 sessionHash 前拼字符串，客户端只要把会话命名成
+// 那个前缀开头，就能让自己的短期键和别人的历史键落到同一个 Redis key 上。
+const stickySessionHistoryPrefix = "sticky_session_history:"
 const openAIResponsesSessionWindowPrefix = "openai_responses_session_window:"
 const liveCallPrefix = "live:call:"
 
 type gatewayCache struct {
 	rdb *redis.Client
 }
+
+var _ service.GatewayCache = (*gatewayCache)(nil)
 
 func NewGatewayCache(rdb *redis.Client) service.GatewayCache {
 	return &gatewayCache{rdb: rdb}
@@ -30,6 +38,12 @@ func NewGatewayCache(rdb *redis.Client) service.GatewayCache {
 // 格式: sticky_session:{groupID}:{sessionHash}
 func buildSessionKey(groupID int64, sessionHash string) string {
 	return fmt.Sprintf("%s%d:%s", stickySessionPrefix, groupID, sessionHash)
+}
+
+// buildSessionHistoryKey 构建长周期亲和键
+// 格式: sticky_session_history:{groupID}:{sessionHash}
+func buildSessionHistoryKey(groupID int64, sessionHash string) string {
+	return fmt.Sprintf("%s%d:%s", stickySessionHistoryPrefix, groupID, sessionHash)
 }
 
 func buildOpenAIResponsesSessionWindowKey(groupID int64, sessionHash string) string {
@@ -68,6 +82,54 @@ func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, ses
 func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error {
 	key := buildSessionKey(groupID, sessionHash)
 	return c.rdb.Del(ctx, key).Err()
+}
+
+func (c *gatewayCache) GetSessionAccountHistory(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
+	accountID, err := c.rdb.Get(ctx, buildSessionHistoryKey(groupID, sessionHash)).Int64()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return 0, service.ErrStickySessionNotFound
+		}
+		return 0, err
+	}
+	return accountID, nil
+}
+
+// setSessionAccountHistoryIfAbsentOrSameScript 写入长周期亲和键，但只在它不存在
+// 或已经指向同一个账号时写。已经指向别的账号时保持不动并返回 0——原账号被临时
+// 闸门绕开时，本次请求会落到备用账号，历史必须继续记着原账号，否则原账号一恢复
+// 会话也回不去了。
+var setSessionAccountHistoryIfAbsentOrSameScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if current == false or current == ARGV[1] then
+  redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+  return 1
+end
+return 0
+`)
+
+func (c *gatewayCache) SetSessionAccountHistoryIfAbsentOrSame(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) (bool, error) {
+	if c == nil || c.rdb == nil {
+		return false, errors.New("gateway cache unavailable")
+	}
+	if accountID <= 0 || strings.TrimSpace(sessionHash) == "" || ttl <= 0 {
+		return false, errors.New("invalid sticky session history write")
+	}
+	written, err := setSessionAccountHistoryIfAbsentOrSameScript.Run(
+		ctx,
+		c.rdb,
+		[]string{buildSessionHistoryKey(groupID, sessionHash)},
+		strconv.FormatInt(accountID, 10),
+		ttl.Milliseconds(),
+	).Int64()
+	if err != nil {
+		return false, err
+	}
+	return written == 1, nil
+}
+
+func (c *gatewayCache) DeleteSessionAccountHistory(ctx context.Context, groupID int64, sessionHash string) error {
+	return c.rdb.Del(ctx, buildSessionHistoryKey(groupID, sessionHash)).Err()
 }
 
 var claimOpenAIResponsesSessionWindowScript = redis.NewScript(`

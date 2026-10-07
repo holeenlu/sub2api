@@ -26,12 +26,22 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
+      <div v-if="!allowTransportEdit" class="space-y-4" data-testid="delegated-account-editor">
+        <div class="grid grid-cols-3 gap-4">
+          <label class="input-label">{{ t('admin.accounts.concurrency') }}<input v-model.number="form.concurrency" type="number" min="1" class="input" /></label>
+          <label class="input-label">{{ t('admin.accounts.priority') }}<input v-model.number="form.priority" type="number" min="1" class="input" /></label>
+          <label class="input-label">{{ t('admin.accounts.loadFactor') }}<input v-model.number="form.load_factor" type="number" min="1" class="input" /></label>
+        </div>
+        <label v-if="showCost && allowRateEdit" class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}<input v-model.number="form.rate_multiplier" type="number" min="0" step="0.001" class="input" /></label>
+        <label v-if="allowAuthorize && account.type === 'apikey'" class="input-label">{{ t('admin.accounts.apiKey') }}<input v-model="editApiKey" type="password" autocomplete="new-password" class="input" /></label>
+      </div>
+      <template v-if="allowTransportEdit">
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
-            v-model="editBaseUrl"
+ :disabled="!allowTransportEdit"            v-model="editBaseUrl"
             type="text"
             class="input"
             :placeholder="
@@ -69,7 +79,7 @@
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                 {{ t(`admin.accounts.cnProviders.apiProtocol.${item.labelKey}`) }}
               </label>
-              <input v-model="editAdaptiveBaseUrls[item.value]" type="text" class="input" />
+              <input :disabled="!allowTransportEdit" v-model="editAdaptiveBaseUrls[item.value]" type="text" class="input" />
             </div>
           </div>
           <p v-if="!cnSupportsNativeResponses(account.platform)" class="input-hint">
@@ -207,7 +217,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
           <input
-            v-model="editApiKey"
+ :disabled="!allowAuthorize"            v-model="editApiKey"
             type="password"
             class="input font-mono"
             autocomplete="new-password"
@@ -681,7 +691,7 @@
         </div>
         <div v-if="grokOAuthCustomBaseUrlEnabled" class="space-y-2">
           <input
-            v-model="grokOAuthBaseUrl"
+ :disabled="!allowTransportEdit"            v-model="grokOAuthBaseUrl"
             type="text"
             class="input"
             data-testid="grok-custom-base-url-input"
@@ -873,7 +883,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.upstream.baseUrl') }}</label>
           <input
-            v-model="editBaseUrl"
+ :disabled="!allowTransportEdit"            v-model="editBaseUrl"
             type="text"
             class="input"
             placeholder="https://cloudcode-pa.googleapis.com"
@@ -883,7 +893,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.upstream.apiKey') }}</label>
           <input
-            v-model="editApiKey"
+ :disabled="!allowAuthorize"            v-model="editApiKey"
             type="password"
             class="input font-mono"
             placeholder="sk-..."
@@ -909,7 +919,7 @@
           <div>
             <label class="input-label">Location</label>
             <select
-              v-model="editVertexLocation"
+ :disabled="!allowTransportEdit"              v-model="editVertexLocation"
               required
               class="input font-mono"
             >
@@ -1114,7 +1124,7 @@
           <div>
             <label class="input-label">{{ t('admin.accounts.bedrockAccessKeyId') }}</label>
             <input
-              v-model="editBedrockAccessKeyId"
+ :disabled="!allowAuthorize"              v-model="editBedrockAccessKeyId"
               type="text"
               class="input font-mono"
               placeholder="AKIA..."
@@ -1123,7 +1133,7 @@
           <div>
             <label class="input-label">{{ t('admin.accounts.bedrockSecretAccessKey') }}</label>
             <input
-              v-model="editBedrockSecretAccessKey"
+ :disabled="!allowAuthorize"              v-model="editBedrockSecretAccessKey"
               type="password"
               class="input font-mono"
               :placeholder="t('admin.accounts.bedrockSecretKeyLeaveEmpty')"
@@ -1133,7 +1143,7 @@
           <div>
             <label class="input-label">{{ t('admin.accounts.bedrockSessionToken') }}</label>
             <input
-              v-model="editBedrockSessionToken"
+ :disabled="!allowAuthorize"              v-model="editBedrockSessionToken"
               type="password"
               class="input font-mono"
               :placeholder="t('admin.accounts.bedrockSecretKeyLeaveEmpty')"
@@ -1146,7 +1156,7 @@
         <div v-if="isBedrockAPIKeyMode">
           <label class="input-label">{{ t('admin.accounts.bedrockApiKeyInput') }}</label>
           <input
-            v-model="editBedrockApiKeyValue"
+ :disabled="!allowAuthorize"            v-model="editBedrockApiKeyValue"
             type="password"
             class="input font-mono"
             :placeholder="t('admin.accounts.bedrockApiKeyLeaveEmpty')"
@@ -1158,7 +1168,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.bedrockRegion') }}</label>
           <input
-            v-model="editBedrockRegion"
+ :disabled="!allowTransportEdit"            v-model="editBedrockRegion"
             type="text"
             class="input"
             placeholder="us-east-1"
@@ -1611,6 +1621,40 @@
         </div>
       </div>
 
+      <!-- Anthropic 7d Fable 阈值覆盖：只拦 Fable 模型，不停整个账号 -->
+      <div
+        v-if="supportsAnthropicFableSchedulingThresholdOverride"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="anthropic-fable-scheduling-threshold-section"
+      >
+        <div class="mb-3 flex items-center justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverride') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideHint') }}
+            </p>
+          </div>
+          <input
+            v-model="anthropicFableSchedulingThresholdOverrideEnabled"
+            data-testid="anthropic-fable-scheduling-threshold-override-enabled"
+            type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div v-if="anthropicFableSchedulingThresholdOverrideEnabled">
+          <label class="input-label">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideValue') }}</label>
+          <input
+            v-model.number="anthropicFableSchedulingThresholdOverrideValue"
+            data-testid="anthropic-fable-scheduling-threshold-override-value"
+            type="number"
+            min="1"
+            max="100"
+            class="input"
+          />
+          <p class="input-hint">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideDisabledHint') }}</p>
+        </div>
+      </div>
+
       <!-- Intercept Warmup Requests (Anthropic/Antigravity) -->
       <div
         v-if="account?.platform === 'anthropic' || account?.platform === 'antigravity'"
@@ -1646,9 +1690,9 @@
       <div v-if="!isSparkShadow">
         <div class="mb-1 flex items-center gap-2">
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
-          <ProxyAdBanner />
+
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector :disabled="!allowTransportEdit" v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
       <UpstreamRequestIdHeaderField
@@ -1681,7 +1725,7 @@
           />
           <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
         </div>
-        <div>
+        <div v-if="showCost">
           <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
           <input
             v-model.number="form.rate_multiplier"
@@ -1690,7 +1734,7 @@
             step="0.001"
             class="input disabled:cursor-not-allowed disabled:opacity-60"
             data-testid="account-rate-multiplier"
-            :disabled="upstreamBillingRateSyncEnabled"
+            :disabled="upstreamBillingRateSyncEnabled || !allowRateEdit"
           />
           <p class="input-hint">
             {{
@@ -2967,7 +3011,7 @@
           </div>
           <div v-if="customBaseUrlEnabled" class="mt-3">
             <input
-              v-model="customBaseUrl"
+ :disabled="!allowTransportEdit"              v-model="customBaseUrl"
               type="text"
               class="input"
               :placeholder="t('admin.accounts.quotaControl.customBaseUrl.urlHint')"
@@ -3041,6 +3085,7 @@
         </div>
       </div>
 
+      </template>
       <!-- Group Selection - 仅标准模式显示 -->
       <GroupSelector
         v-model="form.group_ids"
@@ -3133,7 +3178,6 @@ import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestId
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
-import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
@@ -3206,9 +3250,13 @@ interface Props {
   account: Account | null
   proxies: Proxy[]
   groups: AdminGroup[]
+  allowRateEdit?: boolean
+  allowAuthorize?: boolean
+  allowTransportEdit?: boolean
+  showCost?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { allowRateEdit: true, allowAuthorize: true, allowTransportEdit: true, showCost: true })
 const emit = defineEmits<{
   close: []
   updated: [account: Account]
@@ -3634,11 +3682,28 @@ const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
 const isSyncingAntigravityUpstream = ref(false)
 const tempUnschedEnabled = ref(false)
-const accountSchedulingThresholdOverrideEnabled = ref(false)
-const accountSchedulingThresholdOverrideValue = ref(100)
 const ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY = 'account_scheduling_threshold'
+const ANTHROPIC_FABLE_SCHEDULING_THRESHOLD_CREDENTIAL_KEY = 'anthropic_fable_scheduling_threshold'
+
+const accountSchedulingThresholdOverride = createSchedulingThresholdOverrideBinding(
+  ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY,
+  supportsAccountSchedulingThresholdOverridePlatform
+)
+// Fable 是 Anthropic 独有的模型家族，其他平台没有这个概念。
+const anthropicFableSchedulingThresholdOverride = createSchedulingThresholdOverrideBinding(
+  ANTHROPIC_FABLE_SCHEDULING_THRESHOLD_CREDENTIAL_KEY,
+  supportsAnthropicFableSchedulingThresholdAccount
+)
+
+const accountSchedulingThresholdOverrideEnabled = accountSchedulingThresholdOverride.enabled
+const accountSchedulingThresholdOverrideValue = accountSchedulingThresholdOverride.value
 const supportsAccountSchedulingThresholdOverride = computed(() =>
   supportsAccountSchedulingThresholdOverridePlatform(props.account?.platform)
+)
+const anthropicFableSchedulingThresholdOverrideEnabled = anthropicFableSchedulingThresholdOverride.enabled
+const anthropicFableSchedulingThresholdOverrideValue = anthropicFableSchedulingThresholdOverride.value
+const supportsAnthropicFableSchedulingThresholdOverride = computed(() =>
+  supportsAnthropicFableSchedulingThresholdAccount(props.account?.platform, props.account?.type)
 )
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-model-mapping')
@@ -3716,11 +3781,11 @@ const {
 } = useQuotaNotifyState()
 
 // Load global feature states once
-adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
+if (props.allowTransportEdit) adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
   webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
 
-loadQuotaNotifyGlobal()
+if (props.allowTransportEdit) loadQuotaNotifyGlobal()
 const editQuotaLimit = ref<number | null>(null)
 const editQuotaDailyLimit = ref<number | null>(null)
 const editQuotaWeeklyLimit = ref<number | null>(null)
@@ -4329,7 +4394,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   loadQuotaControlSettings(newAccount)
 
   loadTempUnschedRules(credentials)
-  loadAccountSchedulingThresholdOverride(newAccount.platform, credentials)
+  loadAccountSchedulingThresholdOverride(newAccount.platform, newAccount.type, credentials)
 
   // Load header override state for eligible account platforms/types
   headerOverrideEnabled.value = false
@@ -4544,6 +4609,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 
 async function loadTLSProfiles() {
   try {
+    if (!props.allowTransportEdit) return
     const profiles = await adminAPI.tlsFingerprintProfiles.list()
     tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name }))
   } catch {
@@ -4790,6 +4856,16 @@ function supportsAccountSchedulingThresholdOverridePlatform(platform: Account['p
   return platform === 'openai' || platform === 'anthropic' || platform === 'grok'
 }
 
+// 7d / 7d_oi 窗口只来自 Anthropic OAuth 类账号的被动采样（后端
+// supportsAnthropicPassiveUsage 同样只认 oauth / setup-token），apikey 与 bedrock
+// 永远没有窗口样本，覆盖写进去也不会生效，入口就不该出现。
+function supportsAnthropicFableSchedulingThresholdAccount(
+  platform: Account['platform'] | undefined,
+  type: Account['type'] | undefined
+) {
+  return platform === 'anthropic' && (type === 'oauth' || type === 'setup-token')
+}
+
 function normalizeAccountSchedulingThresholdOverride(value: unknown): number | null {
   if (value === null || value === undefined || value === '') {
     return null
@@ -4809,43 +4885,76 @@ function clampAccountSchedulingThresholdOverride(value: unknown): number {
   return Math.min(100, Math.max(1, Math.trunc(Number(value) || 100)))
 }
 
+// 通用阈值覆盖与 Fable 阈值覆盖只差一个 credentials 键和一个适用性判定，其余（回填、
+// 关闭时发 null 删键、无变化不进 patch）逐字相同，因此按键参数化成一个工厂。
+function createSchedulingThresholdOverrideBinding(
+  credentialKey: string,
+  supportsAccount: (
+    platform: Account['platform'] | undefined,
+    type: Account['type'] | undefined
+  ) => boolean
+) {
+  const enabled = ref(false)
+  const value = ref(100)
+
+  const load = (
+    platform: Account['platform'] | undefined,
+    type: Account['type'] | undefined,
+    credentials: Record<string, unknown> | undefined
+  ) => {
+    if (!supportsAccount(platform, type)) {
+      enabled.value = false
+      value.value = 100
+      return
+    }
+    const stored = normalizeAccountSchedulingThresholdOverride(credentials?.[credentialKey])
+    enabled.value = stored !== null
+    value.value = stored ?? 100
+  }
+
+  const applyPatch = (
+    credentials: Record<string, unknown>,
+    currentCredentials: Record<string, unknown>,
+    platform: Account['platform'] | undefined = props.account?.platform,
+    type: Account['type'] | undefined = props.account?.type
+  ) => {
+    if (!supportsAccount(platform, type)) {
+      return
+    }
+    const current = normalizeAccountSchedulingThresholdOverride(currentCredentials[credentialKey])
+    if (!enabled.value) {
+      // 显式发 null 才能让后端删掉这个键；本来就没有则不进 patch。
+      if (current !== null) {
+        credentials[credentialKey] = null
+      }
+      return
+    }
+    const next = clampAccountSchedulingThresholdOverride(value.value)
+    if (current !== next) {
+      credentials[credentialKey] = next
+    }
+  }
+
+  return { enabled, value, load, applyPatch }
+}
+
 function loadAccountSchedulingThresholdOverride(
   platform: Account['platform'] | undefined,
+  type: Account['type'] | undefined,
   credentials: Record<string, unknown> | undefined
 ) {
-  if (!supportsAccountSchedulingThresholdOverridePlatform(platform)) {
-    accountSchedulingThresholdOverrideEnabled.value = false
-    accountSchedulingThresholdOverrideValue.value = 100
-    return
-  }
-  const value = normalizeAccountSchedulingThresholdOverride(
-    credentials?.[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY]
-  )
-  accountSchedulingThresholdOverrideEnabled.value = value !== null
-  accountSchedulingThresholdOverrideValue.value = value ?? 100
+  accountSchedulingThresholdOverride.load(platform, type, credentials)
+  anthropicFableSchedulingThresholdOverride.load(platform, type, credentials)
 }
 
 const applyAccountSchedulingThresholdOverridePatch = (
   credentials: Record<string, unknown>,
   currentCredentials: Record<string, unknown>,
-  platform: Account['platform'] | undefined = props.account?.platform
+  platform: Account['platform'] | undefined = props.account?.platform,
+  type: Account['type'] | undefined = props.account?.type
 ) => {
-  if (!supportsAccountSchedulingThresholdOverridePlatform(platform)) {
-    return
-  }
-  const current = normalizeAccountSchedulingThresholdOverride(
-    currentCredentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY]
-  )
-  if (!accountSchedulingThresholdOverrideEnabled.value) {
-    if (current !== null) {
-      credentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY] = null
-    }
-    return
-  }
-  const next = clampAccountSchedulingThresholdOverride(accountSchedulingThresholdOverrideValue.value)
-  if (current !== next) {
-    credentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY] = next
-  }
+  accountSchedulingThresholdOverride.applyPatch(credentials, currentCredentials, platform, type)
+  anthropicFableSchedulingThresholdOverride.applyPatch(credentials, currentCredentials, platform, type)
 }
 
 function loadTempUnschedRules(credentials?: Record<string, unknown>) {
@@ -5103,6 +5212,8 @@ const persistGrokMediaEligibility = async (accountID: number, updatedAccount: Ac
 }
 
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
+  if (!props.allowRateEdit || !props.showCost) delete updatePayload.rate_multiplier
+  if (!props.allowTransportEdit) delete updatePayload.proxy_id
   submitting.value = true
   try {
     let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
@@ -5130,6 +5241,13 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 const handleSubmit = async () => {
   if (!props.account) return
   const accountID = props.account.id
+  if (!props.allowTransportEdit) {
+    const payload: Record<string,unknown> = {name:form.name,notes:form.notes,concurrency:form.concurrency,priority:form.priority,load_factor:form.load_factor || 0,group_ids:form.group_ids}
+    if (props.allowRateEdit && props.showCost && form.rate_multiplier !== props.account.rate_multiplier) payload.rate_multiplier = form.rate_multiplier
+    if (props.allowAuthorize && props.account.type === 'apikey' && editApiKey.value.trim()) payload.credentials = {...props.account.credentials,api_key:editApiKey.value.trim()}
+    await submitUpdateAccount(accountID,payload)
+    return
+  }
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))

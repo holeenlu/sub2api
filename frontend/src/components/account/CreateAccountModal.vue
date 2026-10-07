@@ -1147,7 +1147,7 @@
           <p class="input-hint">{{ t('admin.accounts.upstream.apiKeyHint') }}</p>
         </div>
         <!-- 上游倍率自动探测：antigravity upstream 也是 API-key 账号 -->
-        <div class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="allowRateEdit" class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600">
           <div>
             <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -1343,9 +1343,9 @@
         </div>
       </div>
 
-      <!-- Add Method (only for Anthropic OAuth-based type) -->
+      <!-- Authorization method (only for Anthropic OAuth-based type) -->
       <div v-if="form.platform === 'anthropic' && isOAuthFlow">
-        <label class="input-label">{{ t('admin.accounts.addMethod') }}</label>
+        <label class="input-label">{{ t('admin.accounts.oauth.authMethod') }}</label>
         <div class="mt-2 flex gap-4">
           <label class="flex cursor-pointer items-center">
             <input
@@ -1354,7 +1354,7 @@
               value="oauth"
               class="mr-2 text-primary-600 focus:ring-primary-500"
             />
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.types.oauth') }}</span>
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.oauth.auth') }}</span>
           </label>
           <label class="flex cursor-pointer items-center">
             <input
@@ -1363,8 +1363,17 @@
               value="setup-token"
               class="mr-2 text-primary-600 focus:ring-primary-500"
             />
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.oauth.oauthToken') }}</span>
+          </label>
+          <label class="flex cursor-pointer items-center">
+            <input
+              v-model="addMethod"
+              type="radio"
+              value="setup-token-manual"
+              class="mr-2 text-primary-600 focus:ring-primary-500"
+            />
             <span class="text-sm text-gray-700 dark:text-gray-300">{{
-              t('admin.accounts.setupTokenLongLived')
+              t('admin.accounts.oauth.setupTokenLongLived')
             }}</span>
           </label>
         </div>
@@ -1433,7 +1442,7 @@
         </div>
 
         <!-- 上游倍率自动探测：全部 API-key 平台可用（所在区块已限定 apikey 类型） -->
-        <div
+        <div v-if="allowRateEdit"
           class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
         >
           <div>
@@ -2134,7 +2143,7 @@
             {{ t('admin.accounts.quotaControl.hint') }}
           </p>
         </div>
-        <QuotaLimitCard
+        <QuotaLimitCard v-if="allowRateEdit"
           :totalLimit="editQuotaLimit"
           :dailyLimit="editQuotaDailyLimit"
           :weeklyLimit="editQuotaWeeklyLimit"
@@ -2186,7 +2195,7 @@
             {{ t('admin.accounts.quotaLimitHint') }}
           </p>
         </div>
-        <QuotaLimitCard
+        <QuotaLimitCard v-if="allowRateEdit"
           :totalLimit="editQuotaLimit"
           :dailyLimit="editQuotaDailyLimit"
           :weeklyLimit="editQuotaWeeklyLimit"
@@ -2647,7 +2656,7 @@
         </div>
 
         <!-- Window Cost Limit -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="allowRateEdit" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.windowCost.label') }}</label>
@@ -3017,7 +3026,7 @@
       <div>
         <div class="mb-1 flex items-center gap-2">
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
-          <ProxyAdBanner />
+
         </div>
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
@@ -3052,7 +3061,7 @@
           />
           <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
         </div>
-        <div>
+        <div v-if="allowRateEdit">
           <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
           <input v-model.number="form.rate_multiplier" type="number" min="0" step="0.001" class="input" />
           <p class="input-hint">{{ t('admin.accounts.billingRateMultiplierHint') }}</p>
@@ -3228,7 +3237,7 @@
 
       <!-- OpenAI API 长上下文计费开关 -->
       <div
-        v-if="form.platform === 'openai' && !hideAccountLongContextBilling && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
+        v-if="allowRateEdit && form.platform === 'openai' && !hideAccountLongContextBilling && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -3510,7 +3519,7 @@
             </div>
           </div>
         </div>
-        <div v-if="form.platform === 'antigravity'" class="mt-3 flex items-center gap-2">
+        <div v-if="allowRateEdit && form.platform === 'antigravity'" class="mt-3 flex items-center gap-2">
           <label class="flex cursor-pointer items-center gap-2">
             <input
               type="checkbox"
@@ -3562,7 +3571,7 @@
         :show-help="form.platform === 'anthropic'"
         :show-proxy-warning="form.platform !== 'openai' && form.platform !== 'grok' && !!form.proxy_id"
         :allow-multiple="form.platform === 'anthropic'"
-        :show-cookie-option="form.platform === 'anthropic'"
+        :show-cookie-option="form.platform === 'anthropic' && addMethod !== 'setup-token-manual'"
         :show-refresh-token-option="form.platform === 'openai' || form.platform === 'antigravity' || form.platform === 'grok'"
         :show-mobile-refresh-token-option="form.platform === 'openai'"
         :show-session-token-option="false"
@@ -3572,8 +3581,9 @@
         :show-codex-pat-option="form.platform === 'openai'"
         :show-sso-option="form.platform === 'grok'"
         :show-email-password-option="false"
-        :show-manual-option="true"
-        :initial-input-method="'manual'"
+        :show-manual-option="addMethod !== 'setup-token-manual'"
+        :show-setup-token-option="form.platform === 'anthropic' && addMethod === 'setup-token-manual'"
+        :initial-input-method="form.platform === 'anthropic' && addMethod === 'setup-token-manual' ? 'setup_token' : 'manual'"
         :platform="form.platform"
         :show-project-id="geminiOAuthType === 'code_assist'"
         @generate-url="handleGenerateUrl"
@@ -3918,6 +3928,7 @@ import {
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import {
+  buildClaudeSetupTokenCredentials,
   useAccountOAuth,
   type AddMethod,
   type AuthInputMethod
@@ -3946,7 +3957,6 @@ import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestId
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
-import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
@@ -4003,6 +4013,7 @@ interface OAuthFlowExposed {
   oauthState: string
   projectId: string
   sessionKey: string
+  setupToken: string
   refreshToken: string
   sessionToken: string
   codexSession: string
@@ -4094,9 +4105,11 @@ interface Props {
   show: boolean
   proxies: Proxy[]
   groups: AdminGroup[]
+  allowRateEdit?: boolean
+  allowSystemSettings?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { allowRateEdit: true, allowSystemSettings: true })
 const emit = defineEmits<{
   close: []
   created: []
@@ -4168,7 +4181,7 @@ interface TempUnschedRuleForm {
 const step = ref(1)
 const submitting = ref(false)
 const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
-const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
+const addMethod = ref<AddMethod>('oauth') // Auth, OAuth token, or direct Claude setup-token
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
@@ -4491,11 +4504,11 @@ const {
 } = useQuotaNotifyState()
 
 // Load global feature states once
-adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
+if (props.allowSystemSettings) adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
   webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
 
-loadQuotaNotifyGlobal()
+if (props.allowSystemSettings) loadQuotaNotifyGlobal()
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityAccountType = ref<'oauth' | 'upstream'>('oauth') // For antigravity: oauth or upstream
@@ -4774,7 +4787,7 @@ const isOAuthFlow = computed(() => {
 const isGrokSSOInputMethod = computed(() => form.platform === 'grok' && oauthFlowRef.value?.inputMethod === 'sso_cookie')
 
 const isManualInputMethod = computed(() => {
-  return oauthFlowRef.value?.inputMethod === 'manual'
+  return oauthFlowRef.value?.inputMethod === 'manual' || oauthFlowRef.value?.inputMethod === 'setup_token'
 })
 
 const expiresAtInput = computed({
@@ -4786,6 +4799,9 @@ const expiresAtInput = computed({
 
 const canExchangeCode = computed(() => {
   const authCode = oauthFlowRef.value?.authCode || ''
+  if (form.platform === 'anthropic' && addMethod.value === 'setup-token-manual') {
+    return !!buildClaudeSetupTokenCredentials(oauthFlowRef.value?.setupToken || '') && !oauth.loading.value
+  }
   if (form.platform === 'openai') {
     return authCode.trim() && openaiOAuth.sessionId.value && !openaiOAuth.loading.value
   }
@@ -4807,7 +4823,7 @@ watch(
   (newVal) => {
     if (newVal) {
       // Load TLS fingerprint profiles
-      adminAPI.tlsFingerprintProfiles.list()
+      if (props.allowSystemSettings) adminAPI.tlsFingerprintProfiles.list()
         .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })
         .catch(() => { tlsFingerprintProfiles.value = [] })
       // Modal opened - fill related models
@@ -4847,7 +4863,9 @@ watch(
     if ((form.platform === 'gemini' || form.platform === 'anthropic') && category === 'service_account') {
       form.type = 'service_account' as AccountType
     } else if (category === 'oauth-based') {
-      form.type = form.platform === 'anthropic' ? method as AccountType : 'oauth'
+      form.type = form.platform === 'anthropic'
+        ? (method === 'setup-token-manual' ? 'setup-token' : method as AccountType)
+        : 'oauth'
     } else {
       form.type = 'apikey'
     }
@@ -5478,7 +5496,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   } else {
     delete extra.openai_responses_flatten_namespaces
   }
-  extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
+  if (props.allowRateEdit) extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
 
   if (accountCategory.value === 'oauth-based' && codexCLIOnlyEnabled.value) {
     extra.codex_cli_only = true
@@ -5907,9 +5925,10 @@ const handleSubmit = async () => {
 
   await doCreateAccount({
     ...form,
+    rate_multiplier: props.allowRateEdit ? form.rate_multiplier : undefined,
     group_ids: form.group_ids,
     extra: withUpstreamRequestIdHeader(extra),
-    upstream_billing_probe_enabled: upstreamBillingAutoProbeEnabled.value,
+    upstream_billing_probe_enabled: props.allowRateEdit ? upstreamBillingAutoProbeEnabled.value : undefined,
     auto_pause_on_expired: autoPauseOnExpired.value
   })
 }
@@ -6035,12 +6054,12 @@ const createAccountAndFinish = async (
     concurrency: form.concurrency,
     load_factor: form.load_factor ?? undefined,
     priority: form.priority,
-    rate_multiplier: form.rate_multiplier,
+    rate_multiplier: props.allowRateEdit ? form.rate_multiplier : undefined,
     group_ids: form.group_ids,
     expires_at: form.expires_at,
     // 上游倍率探测对全部 API-key 平台开放（antigravity upstream 走本 helper）；
     // 非 apikey 类型（bedrock/oauth）不传，后端不动作。
-    upstream_billing_probe_enabled: type === 'apikey' ? upstreamBillingAutoProbeEnabled.value : undefined,
+    upstream_billing_probe_enabled: props.allowRateEdit && type === 'apikey' ? upstreamBillingAutoProbeEnabled.value : undefined,
     auto_pause_on_expired: autoPauseOnExpired.value
   })
 }
@@ -6102,7 +6121,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
-          rate_multiplier: form.rate_multiplier,
+          rate_multiplier: props.allowRateEdit ? form.rate_multiplier : undefined,
           group_ids: form.group_ids,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
@@ -6170,7 +6189,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
       concurrency: form.concurrency,
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
-      rate_multiplier: form.rate_multiplier,
+      rate_multiplier: props.allowRateEdit ? form.rate_multiplier : undefined,
       expires_at: form.expires_at,
       auto_pause_on_expired: autoPauseOnExpired.value
     })
@@ -6279,7 +6298,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
-          rate_multiplier: form.rate_multiplier,
+          rate_multiplier: props.allowRateEdit ? form.rate_multiplier : undefined,
           group_ids: form.group_ids,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
@@ -6378,7 +6397,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         concurrency: form.concurrency,
         load_factor: form.load_factor ?? undefined,
         priority: form.priority,
-        rate_multiplier: form.rate_multiplier,
+        rate_multiplier: props.allowRateEdit ? form.rate_multiplier : undefined,
         group_ids: form.group_ids,
         expires_at: form.expires_at,
         auto_pause_on_expired: autoPauseOnExpired.value
@@ -6483,7 +6502,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       concurrency: form.concurrency,
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
-      rate_multiplier: form.rate_multiplier,
+      rate_multiplier: props.allowRateEdit ? form.rate_multiplier : undefined,
       group_ids: form.group_ids,
       expires_at: form.expires_at,
       auto_pause_on_expired: autoPauseOnExpired.value,
@@ -6561,7 +6580,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       concurrency: form.concurrency,
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
-      rate_multiplier: form.rate_multiplier,
+      rate_multiplier: props.allowRateEdit ? form.rate_multiplier : undefined,
       group_ids: form.group_ids,
       expires_at: form.expires_at,
       auto_pause_on_expired: autoPauseOnExpired.value,
@@ -6659,7 +6678,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             concurrency: form.concurrency,
             load_factor: form.load_factor ?? undefined,
             priority: form.priority,
-            rate_multiplier: form.rate_multiplier,
+            rate_multiplier: props.allowRateEdit ? form.rate_multiplier : undefined,
             group_ids: form.group_ids,
             expires_at: form.expires_at,
             auto_pause_on_expired: autoPauseOnExpired.value
@@ -6742,7 +6761,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
 
         const credentials = antigravityOAuth.buildCredentials(tokenInfo, refreshTokens[i])
         applyAntigravityProjectID(credentials, antigravityProjectId.value, 'create')
-        
+
         // Generate account name with index for batch
         const accountName = refreshTokens.length > 1 ? `${form.name} #${i + 1}` : form.name
 
@@ -6758,7 +6777,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
-          rate_multiplier: form.rate_multiplier,
+          rate_multiplier: props.allowRateEdit ? form.rate_multiplier : undefined,
           group_ids: form.group_ids,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
@@ -6916,6 +6935,61 @@ const handleGrokExchange = async (authCode: string) => {
   }
 }
 
+const buildAnthropicOAuthExtra = (base?: Record<string, unknown>): Record<string, unknown> | undefined => {
+  const extra: Record<string, unknown> = { ...(base || {}) }
+
+  if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
+    extra.window_cost_limit = windowCostLimit.value
+    extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
+  }
+  if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
+    extra.max_sessions = maxSessions.value
+    extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
+  }
+  if (rpmLimitEnabled.value) {
+    extra.base_rpm = baseRpm.value != null && baseRpm.value > 0 ? baseRpm.value : 15
+    extra.rpm_strategy = rpmStrategy.value
+    if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
+      extra.rpm_sticky_buffer = rpmStickyBuffer.value
+    }
+  }
+  if (userMsgQueueMode.value) extra.user_msg_queue_mode = userMsgQueueMode.value
+  if (tlsFingerprintEnabled.value) {
+    extra.enable_tls_fingerprint = true
+    if (tlsFingerprintProfileId.value) extra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
+  }
+  if (sessionIdMaskingEnabled.value) extra.session_id_masking_enabled = true
+  if (cacheTTLOverrideEnabled.value) {
+    extra.cache_ttl_override_enabled = true
+    extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
+  }
+  if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
+    extra.custom_base_url_enabled = true
+    extra.custom_base_url = customBaseUrl.value.trim()
+  }
+
+  return Object.keys(extra).length > 0 ? extra : undefined
+}
+
+const handleAnthropicSetupToken = async (rawToken: string) => {
+  const credentials = buildClaudeSetupTokenCredentials(rawToken)
+  if (!credentials) {
+    oauth.error.value = t('admin.accounts.oauth.setupTokenInvalid')
+    return
+  }
+
+  oauth.loading.value = true
+  oauth.error.value = ''
+  try {
+    await createAccountAndFinish('anthropic', 'setup-token', credentials, buildAnthropicOAuthExtra())
+  } catch (error: any) {
+    oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+    appStore.showError(oauth.error.value)
+  } finally {
+    oauth.loading.value = false
+  }
+}
+
 // Anthropic OAuth 授权码兑换
 const handleAnthropicExchange = async (authCode: string) => {
   if (!authCode.trim() || !oauth.sessionId.value) return
@@ -6936,67 +7010,16 @@ const handleAnthropicExchange = async (authCode: string) => {
       ...proxyConfig
     })
 
-    // Build extra with quota control settings
-    const baseExtra = oauth.buildExtraInfo(tokenInfo) || {}
-    const extra: Record<string, unknown> = { ...baseExtra }
-
-    // Add window cost limit settings
-    if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
-      extra.window_cost_limit = windowCostLimit.value
-      extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
-    }
-
-    // Add session limit settings
-    if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
-      extra.max_sessions = maxSessions.value
-      extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
-    }
-
-    // Add RPM limit settings
-    if (rpmLimitEnabled.value) {
-      const DEFAULT_BASE_RPM = 15
-      extra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
-        ? baseRpm.value
-        : DEFAULT_BASE_RPM
-      extra.rpm_strategy = rpmStrategy.value
-      if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
-        extra.rpm_sticky_buffer = rpmStickyBuffer.value
-      }
-    }
-
-    // UMQ mode（独立于 RPM）
-    if (userMsgQueueMode.value) {
-      extra.user_msg_queue_mode = userMsgQueueMode.value
-    }
-
-    // Add TLS fingerprint settings
-    if (tlsFingerprintEnabled.value) {
-      extra.enable_tls_fingerprint = true
-      if (tlsFingerprintProfileId.value) {
-        extra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
-      }
-    }
-
-    // Add session ID masking settings
-    if (sessionIdMaskingEnabled.value) {
-      extra.session_id_masking_enabled = true
-    }
-
-    // Add cache TTL override settings
-    if (cacheTTLOverrideEnabled.value) {
-      extra.cache_ttl_override_enabled = true
-      extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
-    }
-
-    // Add custom base URL settings
-    if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
-      extra.custom_base_url_enabled = true
-      extra.custom_base_url = customBaseUrl.value.trim()
-    }
+    const extra = buildAnthropicOAuthExtra(oauth.buildExtraInfo(tokenInfo))
 
     const credentials: Record<string, unknown> = { ...tokenInfo }
     applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
-    await createAccountAndFinish(form.platform, addMethod.value as AccountType, credentials, extra)
+    await createAccountAndFinish(
+      form.platform,
+      addMethod.value === 'oauth' ? 'oauth' : 'setup-token',
+      credentials,
+      extra
+    )
   } catch (error: any) {
     oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
     appStore.showError(oauth.error.value)
@@ -7007,6 +7030,9 @@ const handleAnthropicExchange = async (authCode: string) => {
 
 // 主入口：根据平台路由到对应处理函数
 const handleExchangeCode = async () => {
+  if (form.platform === 'anthropic' && addMethod.value === 'setup-token-manual') {
+    return handleAnthropicSetupToken(oauthFlowRef.value?.setupToken || '')
+  }
   const authCode = oauthFlowRef.value?.authCode || ''
 
   switch (form.platform) {
@@ -7061,63 +7087,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           ...proxyConfig
         })
 
-        // Build extra with quota control settings
-        const baseExtra = oauth.buildExtraInfo(tokenInfo) || {}
-        const extra: Record<string, unknown> = { ...baseExtra }
-
-        // Add window cost limit settings
-        if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
-          extra.window_cost_limit = windowCostLimit.value
-          extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
-        }
-
-        // Add session limit settings
-        if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
-          extra.max_sessions = maxSessions.value
-          extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
-        }
-
-        // Add RPM limit settings
-        if (rpmLimitEnabled.value) {
-          const DEFAULT_BASE_RPM = 15
-          extra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
-            ? baseRpm.value
-            : DEFAULT_BASE_RPM
-          extra.rpm_strategy = rpmStrategy.value
-          if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
-            extra.rpm_sticky_buffer = rpmStickyBuffer.value
-          }
-        }
-
-        // UMQ mode（独立于 RPM）
-        if (userMsgQueueMode.value) {
-          extra.user_msg_queue_mode = userMsgQueueMode.value
-        }
-
-        // Add TLS fingerprint settings
-        if (tlsFingerprintEnabled.value) {
-          extra.enable_tls_fingerprint = true
-          if (tlsFingerprintProfileId.value) {
-            extra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
-          }
-        }
-
-        // Add session ID masking settings
-        if (sessionIdMaskingEnabled.value) {
-          extra.session_id_masking_enabled = true
-        }
-
-        // Add cache TTL override settings
-        if (cacheTTLOverrideEnabled.value) {
-          extra.cache_ttl_override_enabled = true
-          extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
-        }
-
-        // Add custom base URL settings
-        if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
-          extra.custom_base_url_enabled = true
-          extra.custom_base_url = customBaseUrl.value.trim()
-        }
+        const extra = buildAnthropicOAuthExtra(oauth.buildExtraInfo(tokenInfo))
 
         const accountName = keys.length > 1 ? `${form.name} #${i + 1}` : form.name
 
@@ -7132,14 +7102,14 @@ const handleCookieAuth = async (sessionKey: string) => {
           name: accountName,
           notes: form.notes,
           platform: form.platform,
-          type: addMethod.value, // Use addMethod as type: 'oauth' or 'setup-token'
+          type: addMethod.value === 'oauth' ? 'oauth' : 'setup-token',
           credentials,
           extra: withUpstreamRequestIdHeader(extra),
           proxy_id: form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
-          rate_multiplier: form.rate_multiplier,
+          rate_multiplier: props.allowRateEdit ? form.rate_multiplier : undefined,
           group_ids: form.group_ids,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value

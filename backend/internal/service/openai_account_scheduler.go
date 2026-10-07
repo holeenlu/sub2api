@@ -2322,6 +2322,33 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
+	if targetAccountID, ok := ctx.Value(codexDiagnosticTargetKey{}).(int64); ok && targetAccountID > 0 {
+		accounts, err := s.listSchedulableAccounts(ctx, groupID, platform)
+		if err != nil {
+			return nil, OpenAIAccountScheduleDecision{}, err
+		}
+		found := false
+		for _, account := range accounts {
+			if account.ID == targetAccountID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts
+		}
+		excludedIDs = cloneExcludedAccountIDs(excludedIDs)
+		if excludedIDs == nil {
+			excludedIDs = make(map[int64]struct{})
+		}
+		for _, account := range accounts {
+			if account.ID != targetAccountID {
+				excludedIDs[account.ID] = struct{}{}
+			}
+		}
+		previousResponseID = ""
+		sessionHash = ""
+	}
 	decision := OpenAIAccountScheduleDecision{}
 	preserveGuardianParentBinding := preserveOpenAIGuardianParentBinding(ctx, sessionHash)
 	guardianParentAccountID := int64(0)

@@ -56,7 +56,7 @@
               class="mr-2 text-primary-600 focus:ring-primary-500"
             />
             <span class="text-sm text-gray-700 dark:text-gray-300">{{
-              t('admin.accounts.types.oauth')
+              t('admin.accounts.oauth.auth')
             }}</span>
           </label>
           <label class="flex cursor-pointer items-center">
@@ -67,7 +67,18 @@
               class="mr-2 text-primary-600 focus:ring-primary-500"
             />
             <span class="text-sm text-gray-700 dark:text-gray-300">{{
-              t('admin.accounts.setupTokenLongLived')
+              t('admin.accounts.oauth.oauthToken')
+            }}</span>
+          </label>
+          <label class="flex cursor-pointer items-center">
+            <input
+              v-model="addMethod"
+              type="radio"
+              value="setup-token-manual"
+              class="mr-2 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{
+              t('admin.accounts.oauth.setupTokenLongLived')
             }}</span>
           </label>
         </div>
@@ -125,11 +136,14 @@
         :error="currentError"
         :show-help="isAnthropic"
         :show-proxy-warning="isAnthropic"
-        :show-cookie-option="isAnthropic"
+        :show-cookie-option="isAnthropic && addMethod !== 'setup-token-manual'"
+        :show-manual-option="addMethod !== 'setup-token-manual'"
+        :show-setup-token-option="isAnthropic && addMethod === 'setup-token-manual'"
         :allow-multiple="false"
         :method-label="t('admin.accounts.inputMethod')"
         :platform="isOpenAI ? 'openai' : isGemini ? 'gemini' : isAntigravity ? 'antigravity' : 'anthropic'"
         :show-project-id="isGemini && geminiOAuthType === 'code_assist'"
+        :initial-input-method="isAnthropic && addMethod === 'setup-token-manual' ? 'setup_token' : 'manual'"
         @generate-url="handleGenerateUrl"
         @cookie-auth="handleCookieAuth"
       />
@@ -185,6 +199,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import {
+  buildClaudeSetupTokenCredentials,
   useAccountOAuth,
   type AddMethod,
   type AuthInputMethod
@@ -204,16 +219,18 @@ interface OAuthFlowExposed {
   oauthState: string
   projectId: string
   sessionKey: string
+  setupToken: string
   inputMethod: AuthInputMethod
   reset: () => void
 }
 
 interface Props {
+  allowExtraEdit?: boolean
   show: boolean
   account: Account | null
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { allowExtraEdit: true })
 const emit = defineEmits<{
   close: []
   reauthorized: []
@@ -271,11 +288,14 @@ const currentError = computed(() => {
 // Computed
 const isManualInputMethod = computed(() => {
   // OpenAI/Gemini/Antigravity always use manual input (no cookie auth option)
-  return isOpenAILike.value || isGemini.value || isAntigravity.value || oauthFlowRef.value?.inputMethod === 'manual'
+  return isOpenAILike.value || isGemini.value || isAntigravity.value || oauthFlowRef.value?.inputMethod === 'manual' || oauthFlowRef.value?.inputMethod === 'setup_token'
 })
 
 const canExchangeCode = computed(() => {
   const authCode = oauthFlowRef.value?.authCode || ''
+  if (isAnthropic.value && addMethod.value === 'setup-token-manual') {
+    return !!buildClaudeSetupTokenCredentials(oauthFlowRef.value?.setupToken || '') && !claudeOAuth.loading.value
+  }
   const sessionId = currentSessionId.value
   const loading = currentLoading.value
   return authCode.trim() && sessionId && !loading
@@ -343,6 +363,31 @@ const handleGenerateUrl = async () => {
 const handleExchangeCode = async () => {
   if (!props.account) return
 
+  if (isAnthropic.value && addMethod.value === 'setup-token-manual') {
+    const credentials = buildClaudeSetupTokenCredentials(oauthFlowRef.value?.setupToken || '')
+    if (!credentials) {
+      claudeOAuth.error.value = t('admin.accounts.oauth.setupTokenInvalid')
+      return
+    }
+    claudeOAuth.loading.value = true
+    claudeOAuth.error.value = ''
+    try {
+      await adminAPI.accounts.applyOAuthCredentials(props.account.id, {
+        type: 'setup-token',
+        credentials
+      })
+      appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
+      emit('reauthorized')
+      handleClose()
+    } catch (error: any) {
+      claudeOAuth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+      appStore.showError(claudeOAuth.error.value)
+    } finally {
+      claudeOAuth.loading.value = false
+    }
+    return
+  }
+
   const authCode = oauthFlowRef.value?.authCode || ''
   if (!authCode.trim()) return
 
@@ -375,7 +420,7 @@ const handleExchangeCode = async () => {
       await adminAPI.accounts.update(props.account.id, {
         type: 'oauth', // OpenAI OAuth is always 'oauth' type
         credentials,
-        extra
+        extra: props.allowExtraEdit ? extra : undefined
       })
 
       // Clear error status after successful re-authorization
@@ -478,9 +523,9 @@ const handleExchangeCode = async () => {
 
       // Update account with new credentials and type
       await adminAPI.accounts.update(props.account.id, {
-        type: addMethod.value, // Update type based on selected method
+        type: addMethod.value === 'oauth' ? 'oauth' : 'setup-token', // Update type based on selected method
         credentials: tokenInfo,
-        extra
+        extra: props.allowExtraEdit ? extra : undefined
       })
 
       // Clear error status after successful re-authorization
@@ -521,9 +566,9 @@ const handleCookieAuth = async (sessionKey: string) => {
 
     // Update account with new credentials and type
     await adminAPI.accounts.update(props.account.id, {
-      type: addMethod.value, // Update type based on selected method
+      type: addMethod.value === 'oauth' ? 'oauth' : 'setup-token', // Update type based on selected method
       credentials: tokenInfo,
-      extra
+      extra: props.allowExtraEdit ? extra : undefined
     })
 
     // Clear error status after successful re-authorization

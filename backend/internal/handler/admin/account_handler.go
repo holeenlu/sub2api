@@ -49,6 +49,8 @@ func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
 
 // AccountHandler handles admin account management
 type AccountHandler struct {
+	scheduledTests          *service.ScheduledTestService
+	scheduledRunner         *service.ScheduledTestRunnerService
 	claudeResetCredits      claudeResetReader
 	adminService            service.AdminService
 	oauthService            *service.OAuthService
@@ -121,63 +123,63 @@ func NewAccountHandler(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
-	Name                    string         `json:"name" binding:"required"`
-	Notes                   *string        `json:"notes"`
-	Platform                string         `json:"platform" binding:"required"`
-	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials             map[string]any `json:"credentials" binding:"required"`
-	Extra                   map[string]any `json:"extra"`
-	ProxyID                 *int64         `json:"proxy_id"`
-	Concurrency             int            `json:"concurrency"`
-	Priority                int            `json:"priority"`
-	RateMultiplier          *float64       `json:"rate_multiplier"`
-	LoadFactor              *int           `json:"load_factor"`
-	GroupIDs                []int64        `json:"group_ids"`
-	ExpiresAt               *int64         `json:"expires_at"`
-	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
-	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled"`
-	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	Name                    string         `json:"name" binding:"required" authz:"base"`
+	Notes                   *string        `json:"notes" authz:"base"`
+	Platform                string         `json:"platform" binding:"required" authz:"base"`
+	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account" authz:"base"`
+	Credentials             map[string]any `json:"credentials" binding:"required" authz:"accounts.authorize"`
+	Extra                   map[string]any `json:"extra" authz:"account_create_extra"`
+	ProxyID                 *int64         `json:"proxy_id" authz:"base"`
+	Concurrency             int            `json:"concurrency" authz:"base"`
+	Priority                int            `json:"priority" authz:"base"`
+	RateMultiplier          *float64       `json:"rate_multiplier" authz:"billing.rates.update"`
+	LoadFactor              *int           `json:"load_factor" authz:"base"`
+	GroupIDs                []int64        `json:"group_ids" authz:"base"`
+	ExpiresAt               *int64         `json:"expires_at" authz:"base"`
+	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired" authz:"base"`
+	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled" authz:"billing.rates.update"`
+	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk" authz:"base"` // 用户确认混合渠道风险
 }
 
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
-	Name                    string         `json:"name"`
-	Notes                   *string        `json:"notes"`
-	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials             map[string]any `json:"credentials"`
-	Extra                   map[string]any `json:"extra"`
-	ProxyID                 *int64         `json:"proxy_id"`
-	Concurrency             *int           `json:"concurrency"`
-	Priority                *int           `json:"priority"`
-	RateMultiplier          *float64       `json:"rate_multiplier"`
-	LoadFactor              *int           `json:"load_factor"`
-	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive error"`
-	GroupIDs                *[]int64       `json:"group_ids"`
-	ExpiresAt               *int64         `json:"expires_at"`
-	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
-	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled"`
-	RateSyncEnabled         *bool          `json:"upstream_billing_rate_sync_enabled"`
-	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	Name                    string         `json:"name" authz:"base"`
+	Notes                   *string        `json:"notes" authz:"base"`
+	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account" authz:"base"`
+	Credentials             map[string]any `json:"credentials" authz:"accounts.authorize"`
+	Extra                   map[string]any `json:"extra" authz:"super_admin"`
+	ProxyID                 *int64         `json:"proxy_id" authz:"base"`
+	Concurrency             *int           `json:"concurrency" authz:"base"`
+	Priority                *int           `json:"priority" authz:"base"`
+	RateMultiplier          *float64       `json:"rate_multiplier" authz:"billing.rates.update"`
+	LoadFactor              *int           `json:"load_factor" authz:"base"`
+	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive error" authz:"base"`
+	GroupIDs                *[]int64       `json:"group_ids" authz:"base"`
+	ExpiresAt               *int64         `json:"expires_at" authz:"base"`
+	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired" authz:"base"`
+	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled" authz:"billing.rates.update"`
+	RateSyncEnabled         *bool          `json:"upstream_billing_rate_sync_enabled" authz:"billing.rates.update"`
+	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk" authz:"base"` // 用户确认混合渠道风险
 }
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
-	AccountIDs              []int64                   `json:"account_ids"`
-	Filters                 *BulkUpdateAccountFilters `json:"filters"`
-	Name                    string                    `json:"name"`
-	ProxyID                 *int64                    `json:"proxy_id"`
-	Concurrency             *int                      `json:"concurrency"`
-	Priority                *int                      `json:"priority"`
-	RateMultiplier          *float64                  `json:"rate_multiplier"`
-	LoadFactor              *int                      `json:"load_factor"`
-	Status                  string                    `json:"status" binding:"omitempty,oneof=active inactive error"`
-	Schedulable             *bool                     `json:"schedulable"`
-	GroupIDs                *[]int64                  `json:"group_ids"`
-	Credentials             map[string]any            `json:"credentials"`
-	Extra                   map[string]any            `json:"extra"`
-	ProbeEnabled            *bool                     `json:"upstream_billing_probe_enabled"`
-	ConfirmMixedChannelRisk *bool                     `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	AccountIDs              []int64                   `json:"account_ids" authz:"base"`
+	Filters                 *BulkUpdateAccountFilters `json:"filters" authz:"base"`
+	Name                    string                    `json:"name" authz:"base"`
+	ProxyID                 *int64                    `json:"proxy_id" authz:"base"`
+	Concurrency             *int                      `json:"concurrency" authz:"base"`
+	Priority                *int                      `json:"priority" authz:"base"`
+	RateMultiplier          *float64                  `json:"rate_multiplier" authz:"billing.rates.update"`
+	LoadFactor              *int                      `json:"load_factor" authz:"base"`
+	Status                  string                    `json:"status" binding:"omitempty,oneof=active inactive error" authz:"base"`
+	Schedulable             *bool                     `json:"schedulable" authz:"base"`
+	GroupIDs                *[]int64                  `json:"group_ids" authz:"base"`
+	Credentials             map[string]any            `json:"credentials" authz:"accounts.authorize"`
+	Extra                   map[string]any            `json:"extra" authz:"super_admin"`
+	ProbeEnabled            *bool                     `json:"upstream_billing_probe_enabled" authz:"billing.rates.update"`
+	ConfirmMixedChannelRisk *bool                     `json:"confirm_mixed_channel_risk" authz:"base"` // 用户确认混合渠道风险
 }
 
 type BulkUpdateAccountFilters struct {
@@ -198,6 +200,7 @@ type CheckMixedChannelRequest struct {
 
 // AccountWithConcurrency extends Account with real-time concurrency info
 type AccountWithConcurrency struct {
+	CodexDiagnostic *service.CodexDiagnosticSummary `json:"codex_diagnostic,omitempty"`
 	*dto.Account
 	simpleMode         bool                         `json:"-"`
 	CurrentConcurrency int                          `json:"current_concurrency"`
@@ -214,12 +217,13 @@ type AccountWithConcurrency struct {
 // so groups/account_groups never appear in the list payload.
 type AccountListItemWithConcurrency struct {
 	*dto.AccountListItem
-	CurrentConcurrency int                          `json:"current_concurrency"`
-	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
-	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
-	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
-	ActiveSessions     *int                         `json:"active_sessions,omitempty"`
-	CurrentRPM         *int                         `json:"current_rpm,omitempty"`
+	CodexDiagnostic    *service.CodexDiagnosticSummary `json:"codex_diagnostic,omitempty"`
+	CurrentConcurrency int                             `json:"current_concurrency"`
+	SchedulerScore     *AccountSchedulerScore          `json:"scheduler_score,omitempty"`
+	SchedulerScores    []AccountSchedulerGroupScore    `json:"scheduler_scores,omitempty"`
+	CurrentWindowCost  *float64                        `json:"current_window_cost,omitempty"`
+	ActiveSessions     *int                            `json:"active_sessions,omitempty"`
+	CurrentRPM         *int                            `json:"current_rpm,omitempty"`
 }
 
 type simpleModeGroupReference struct {
@@ -407,9 +411,16 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		}
 	}
 
-	h.enrichShadowParents(ctx, []AccountWithConcurrency{item})
-
-	return item
+	items := []AccountWithConcurrency{item}
+	h.enrichShadowParents(ctx, items)
+	if h.scheduledTests != nil {
+		if summaries, err := h.scheduledTests.DiagnosticSummaries(ctx, []int64{account.ID}); err == nil {
+			if summary, ok := summaries[account.ID]; ok {
+				items[0].CodexDiagnostic = &summary
+			}
+		}
+	}
+	return items[0]
 }
 
 // scoreOpenAIAccountSchedulerPool 对池内 OpenAI 账号计算调度分数快照。
@@ -733,7 +744,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 
 	// 识别需要查询窗口费用、会话数和 RPM 的账号（Anthropic OAuth/SetupToken 且启用了相应功能）
-	windowCostAccountIDs := make([]int64, 0)
+	windowCostAccounts := make(map[time.Time][]int64)
 	sessionLimitAccountIDs := make([]int64, 0)
 	rpmAccountIDs := make([]int64, 0)
 	sessionIdleTimeouts := make(map[int64]time.Duration) // 各账号的会话空闲超时配置
@@ -741,7 +752,8 @@ func (h *AccountHandler) List(c *gin.Context) {
 		acc := &accounts[i]
 		if acc.IsAnthropicOAuthOrSetupToken() {
 			if acc.GetWindowCostLimit() > 0 {
-				windowCostAccountIDs = append(windowCostAccountIDs, acc.ID)
+				start := acc.GetCurrentWindowStartTime().UTC()
+				windowCostAccounts[start] = append(windowCostAccounts[start], acc.ID)
 			}
 			if acc.GetMaxSessions() > 0 {
 				sessionLimitAccountIDs = append(sessionLimitAccountIDs, acc.ID)
@@ -769,44 +781,55 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	// 始终获取窗口费用（PostgreSQL 聚合查询）
-	if len(windowCostAccountIDs) > 0 {
+	// 同一起点的窗口合并为一次查询；各账号仍使用自己的实际窗口起点。
+	if len(windowCostAccounts) > 0 && h.accountUsageService != nil {
 		windowCosts = make(map[int64]float64)
 		var mu sync.Mutex
 		g, gctx := errgroup.WithContext(c.Request.Context())
-		g.SetLimit(10) // 限制并发数
-
-		for i := range accounts {
-			acc := &accounts[i]
-			if !acc.IsAnthropicOAuthOrSetupToken() || acc.GetWindowCostLimit() <= 0 {
-				continue
-			}
-			accCopy := acc // 闭包捕获
+		g.SetLimit(10)
+		for start, ids := range windowCostAccounts {
 			g.Go(func() error {
-				// 使用统一的窗口开始时间计算逻辑（考虑窗口过期情况）
-				startTime := accCopy.GetCurrentWindowStartTime()
-				stats, err := h.accountUsageService.GetAccountWindowStats(gctx, accCopy.ID, startTime)
-				if err == nil && stats != nil {
+				stats, err := h.accountUsageService.GetAccountWindowStatsBatch(gctx, ids, start)
+				if err == nil {
 					mu.Lock()
-					windowCosts[accCopy.ID] = stats.StandardCost // 使用标准费用
+					for id, stat := range stats {
+						if stat != nil {
+							windowCosts[id] = stat.StandardCost
+						}
+					}
 					mu.Unlock()
 				}
-				return nil // 不返回错误，允许部分失败
+				return nil // 保留部分失败时省略该窗口费用的行为。
 			})
 		}
 		_ = g.Wait()
 	}
 
+	var diagnostics map[int64]service.CodexDiagnosticSummary
+	if h.scheduledTests != nil {
+		ids := make([]int64, 0, len(accounts))
+		for _, a := range accounts {
+			ids = append(ids, a.ID)
+		}
+		var err error
+		diagnostics, err = h.scheduledTests.DiagnosticSummaries(c.Request.Context(), ids)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
 	// Build response with concurrency info
 	result := make([]AccountWithConcurrency, len(accounts))
 	for i := range accounts {
 		acc := &accounts[i]
-		accountResponse := h.accountResponseFromService(acc)
+		var accountResponse *dto.Account
 		if lite {
 			accountResponse = h.accountListResponseFromService(acc)
 			if h.isSimpleMode() {
 				accountResponse.GroupIDs = filterSimpleModeGroupIDs(accountResponse.GroupIDs, simpleModeCompositeServiceGroupIDs(acc))
 			}
+		} else {
+			accountResponse = h.accountResponseFromService(acc)
 		}
 		item := AccountWithConcurrency{
 			Account:            accountResponse,
@@ -816,6 +839,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 			SchedulerScores:    schedulerGroupScores[acc.ID],
 		}
 
+		if summary, ok := diagnostics[acc.ID]; ok {
+			item.CodexDiagnostic = &summary
+		}
 		// 添加窗口费用（仅当启用时）
 		if windowCosts != nil {
 			if cost, ok := windowCosts[acc.ID]; ok {
@@ -848,6 +874,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 			item := result[i]
 			compact[i] = AccountListItemWithConcurrency{
 				AccountListItem:    dto.AccountListItemFromAccount(item.Account),
+				CodexDiagnostic:    item.CodexDiagnostic,
 				CurrentConcurrency: item.CurrentConcurrency,
 				SchedulerScore:     item.SchedulerScore,
 				SchedulerScores:    item.SchedulerScores,
@@ -1636,10 +1663,22 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	req.Credentials = service.MergeCredentials(existing.Credentials, req.Credentials)
 	// Drop SSO/password residue; re-auth must leave only OAuth tokens on disk.
 	req.Credentials = service.SanitizeStoredCredentials(existing.Platform, req.Credentials)
+	if req.Type == service.AccountTypeSetupToken {
+		// A direct claude setup-token has no refresh flow. Do not carry the
+		// previous OAuth refresh token into the new credential type.
+		delete(req.Credentials, "refresh_token")
+		delete(req.Credentials, "expires_at")
+	}
+	var clearAccountExpiry *int64
+	if req.Type == service.AccountTypeSetupToken {
+		zero := int64(0)
+		clearAccountExpiry = &zero
+	}
 
 	updatedAccount, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
 		Type:        req.Type,
 		Credentials: req.Credentials,
+		ExpiresAt:   clearAccountExpiry,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -2070,10 +2109,12 @@ func (h *AccountHandler) BatchRefresh(c *gin.Context) {
 
 // BatchCreate handles batch creating accounts
 // POST /api/v1/admin/accounts/batch
+type batchCreateAccountRequest struct {
+	Accounts []CreateAccountRequest `json:"accounts" binding:"required,min=1" authz:"object"`
+}
+
 func (h *AccountHandler) BatchCreate(c *gin.Context) {
-	var req struct {
-		Accounts []CreateAccountRequest `json:"accounts" binding:"required,min=1"`
-	}
+	var req batchCreateAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
