@@ -1,0 +1,9 @@
+{
+  "name": "sub2api-zh-tw-tools",
+  "private": true,
+  "type": "module",
+  "description": "Simplified-to-Traditional (Taiwan) conversion tooling. Kept out of frontend/ so it does not touch the pnpm lockfile.",
+  "dependencies": {
+    "opencc-js": "1.4.2"
+  }
+}

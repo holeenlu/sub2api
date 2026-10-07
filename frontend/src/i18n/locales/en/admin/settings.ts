@@ -1,8 +1,11 @@
+import { BRAND_NAME } from '@/config/brand'
+
 export default {
     settings: {
       title: 'System Settings',
       description: 'Manage registration, email verification, default values, and SMTP settings',
       tabs: {
+        roles: "Administrator role permissions",
         general: 'General',
         agreement: 'Agreement',
         features: 'Feature Switches',
@@ -293,7 +296,7 @@ export default {
       },
       linuxdo: {
         title: 'LinuxDo Connect Login',
-        description: 'Configure LinuxDo Connect OAuth for Sub2API end-user login',
+        description: 'Configure LinuxDo Connect OAuth for @:common.siteName end-user login',
         enable: 'Enable LinuxDo Login',
         enableHint: 'Show LinuxDo login on the login/register pages',
         clientId: 'Client ID',
@@ -313,7 +316,7 @@ export default {
       },
       dingtalk: {
         title: 'DingTalk Login',
-        description: 'Configure DingTalk OAuth for Sub2API end-user login',
+        description: 'Configure DingTalk OAuth for @:common.siteName end-user login',
         enable: 'Enable DingTalk Login (Internal Corporate App)',
         enableHint: 'Show DingTalk login on the login/register pages',
         clientId: 'Client ID (AppKey)',
@@ -452,14 +455,17 @@ export default {
         allowUngroupedKey: 'Allow Ungrouped Key Scheduling',
         allowUngroupedKeyHint: 'When disabled, API Keys not assigned to any group cannot make requests (403 Forbidden). Keep disabled to ensure all Keys belong to a specific group.',
         accountSchedulingThresholdsTitle: 'Platform Account Auto-Pause Thresholds',
-        accountSchedulingThresholdsDescription: 'When an account\'s current native usage window (OpenAI Codex/Anthropic session, or Grok request/token utilization) reaches this percent, Sub2API temporarily removes it from scheduling until the window resets. Use 100 to disable.',
+        accountSchedulingThresholdsDescription: 'When an account\'s current native usage window (OpenAI Codex/Anthropic session, or Grok request/token utilization) reaches this percent, @:common.siteName temporarily removes it from scheduling until the window resets. Use 100 to disable.',
         accountSchedulingThresholdsGlobalHint: 'System-wide default for every account on that platform. Individual accounts can still override this in the account editor.',
         accountSchedulingThresholdsDisabledHint: '100 disables platform auto-pause. Values 1–99 pause scheduling once utilization reaches that percent.',
-        accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.'
+        accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.',
+        accountSchedulingThresholdsFableLabel: 'anthropic · 7d Fable',
+        accountSchedulingThresholdsFableHint:
+          'Integer 1–100 (percent). Only the Fable-specific 7d F window is checked; reaching this value stops scheduling Fable models while other models remain available. The shared 7d window is controlled only by the regular Anthropic threshold. 100 uses the Anthropic threshold instead of a separate value.'
       },
       upstreamBillingProbe: {
         title: 'Upstream Rate Auto Detection',
-        description: 'Periodically retrieve rates declared by upstream Sub2API sites. Account rates change only when the separate sync switch is enabled.',
+        description: 'Periodically retrieve rates declared by upstream @:common.siteName sites. Account rates change only when the separate sync switch is enabled.',
         enabled: 'Enable global auto detection',
         enabledHint: 'When enabled, scheduled detection runs only for accounts that also enable automatic detection. Disabling stops all scheduled detection; manual detection remains available.',
         intervalMinutes: 'Detection interval (minutes)',
@@ -561,7 +567,7 @@ export default {
         claudeCodeVersionAutoSync: 'Auto-sync Claude Code version',
         claudeCodeVersionAutoSyncHint: 'Fetches the latest Claude Code client version from the official release channel every hour, so you never need to upgrade this service just to keep the version current. When disabled, fetching stops but the previously synced version remains available. The manual version above always takes priority.',
         claudeCodeVersionSyncedValue: 'Currently synced: {version}',
-        codexHardeningTitle: "Codex Settings",
+        codexHardeningTitle: 'Model diagnostic template',
         codexClientRestrictionTitle: "Codex client restriction",
         codexHardeningDesc:
           "Only affects OpenAI OAuth accounts with 'Codex official clients only' enabled (global). Beyond User-Agent/Originator, harden the decision with a version range, an engine-fingerprint gate, and black/whitelists.",
@@ -596,7 +602,21 @@ export default {
         codexUaContainsPlaceholder: "User-Agent contains markers, comma-separated (e.g. opencode/)",
         codexAddRow: "Add entry",
         codexRemoveRow: "Remove",
-      },
+
+codexProbeTemplate: 'Codex degradation check template',
+
+codexProbeTemplateReset: 'Restore default',
+
+codexProbeTemplateDesc: 'Model diagnostics use this JSONL template. Preserve the message structure, tags and placeholders. Maximum 256 KiB. Save to apply edits or restore the default. Default static instructions are English; random challenges remain Chinese.',
+
+codexProbeTimezone: 'Account request timezone',
+
+codexProbeDate: 'Current date in the account timezone',
+
+codexProbeModel: 'Target model',
+
+codexProbeChallenge: 'Fresh random challenge',
+},
       webSearchEmulation: {
         title: 'Web Search Emulation',
         description: 'Inject web search capability for Anthropic API Key accounts that don\'t natively support it',
@@ -638,7 +658,7 @@ export default {
         backendModeDescription:
           'Disables user registration, public site, and self-service features. Only admin can log in and manage the platform.',
         siteName: 'Site Name',
-        siteNamePlaceholder: 'Sub2API',
+        siteNamePlaceholder: BRAND_NAME,
         siteNameHint: 'Displayed in emails and page titles',
         siteSubtitle: 'Site Subtitle',
         siteSubtitlePlaceholder: 'Subscription to API Conversion Platform',
@@ -646,7 +666,7 @@ export default {
         apiBaseUrl: 'API Base URL',
         apiBaseUrlPlaceholder: 'https://api.example.com',
         apiBaseUrlHint:
-          'Used for "Use Key", "Import to CC Switch", and callback URL suggestions. Leave empty to use current site URL.',
+          'Used for "Use Key" and callback URL suggestions. Leave empty to use current site URL.',
         tablePreferencesTitle: 'Global Table Preferences',
         tablePreferencesDescription: 'Configure default pagination behavior for shared table components',
         tableDefaultPageSize: 'Default Rows Per Page',
@@ -687,8 +707,6 @@ export default {
         homeContentIframeWarning: '⚠️ iframe mode note: Some websites have X-Frame-Options or CSP security policies that prevent embedding in iframes. If the page appears blank or shows an error, please verify the target website allows embedding, or consider using HTML mode to build your own content.',
         compactHome: 'Compact Home Page',
         compactHomeHint: 'Show a restrained site identity page when no custom home page content is set.',
-        hideCcsImportButton: 'Hide CCS Import Button',
-        hideCcsImportButtonHint: 'When enabled, the "Import to CCS" button will be hidden on the API Keys page'
       },
       purchase: {
         title: 'Recharge / Subscription Page',
@@ -857,7 +875,7 @@ export default {
         field_cidAlipay: 'Alipay Channel ID',
         field_cidWxpay: 'WeChat Channel ID',
         easypayCustomMethods: 'Custom EasyPay methods',
-        easypayCustomMethodsHint: 'Add provider-specific methods supported by this EasyPay endpoint. The payment type is stored on Sub2API orders; the upstream type is sent as EasyPay type.',
+        easypayCustomMethodsHint: 'Add provider-specific methods supported by this EasyPay endpoint. The payment type is stored on @:common.siteName orders; the upstream type is sent as EasyPay type.',
         addCustomMethod: 'Add method',
         customMethodType: 'Payment type',
         customMethodUpstreamType: 'Upstream type',
@@ -974,7 +992,7 @@ export default {
         fromEmail: 'From Email',
         fromEmailPlaceholder: "noreply{'@'}example.com",
         fromName: 'From Name',
-        fromNamePlaceholder: 'Sub2API',
+        fromNamePlaceholder: 'KDAN',
         useTls: 'Use TLS',
         useTlsHint: 'Enable TLS encryption for SMTP connection'
       },
@@ -993,6 +1011,7 @@ export default {
         event: 'Event',
         locale: 'Locale',
         localeEn: 'English',
+        localeJa: 'Japanese',
         localeZh: 'Chinese',
         subject: 'Subject',
         subjectPlaceholder: 'Enter the email subject',
@@ -1172,7 +1191,7 @@ export default {
         scopeAPIKey: 'API Key only',
         scopeBedrock: 'Bedrock only',
         userIds: 'Specific users',
-        userIdsHint: 'Type any part of a user email to search. Leave empty to apply to all Sub2API users. Selected users match requests from their API keys and take precedence over global rules.',
+        userIdsHint: 'Type any part of a user email to search. Leave empty to apply to all @:common.siteName users. Selected users match requests from their API keys and take precedence over global rules.',
         userSearchPlaceholder: 'Search by user email',
         userSearchEmpty: 'No matching users found',
         userDeleted: '(deleted)',

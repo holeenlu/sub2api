@@ -104,13 +104,30 @@ export default {
     apiKey: 'API 密钥',
     group: '分组',
     currentConcurrency: '当前并发',
+    concurrencyAndWaiting: '并发 / 等待',
+    concurrencyCount: '并发',
+    waitingCount: '等待',
+    queueFull: '已满',
+    queueOff: '全局排队已关闭',
+    queuePolicy: '统一排队设置：此密钥最多额外等待 {max} 个请求，每个请求最长等待 {seconds} 秒。由管理员统一配置。',
+    queuePolicyOff: '全局排队已关闭，达到此密钥的并发上限后直接拒绝新请求。',
+    queueNotApplicable: '此密钥未设置额外并发上限，不启用密钥级排队。',
+    queuePolicyLoading: '正在加载统一排队设置…',
+    queuePolicyUnavailable: '统一排队设置暂不可用。',
+    queueHint: '等待名额分别适用于每个密钥；名额已满时拒绝新请求，超时后结束等待。不保证按到达顺序处理。',
+    concurrencyLoading: '正在加载',
+    concurrencyUnavailable: '统计暂不可用',
+    concurrencyStale: '未更新',
+    concurrencyLimit: '并发上限',
+    concurrencyLimitHint: '此密钥可同时处理的最大请求数。0 表示无额外限制，用户和账号的并发限制仍然生效。',
+    concurrencyLimitInvalid: '并发上限必须为非负整数。',
+    noAdditionalConcurrencyLimit: '无额外限制',
     noGroup: '无分组',
     searchGroup: '搜索分组...',
     noGroupFound: '未找到匹配的分组',
     created: '创建时间',
     copyToClipboard: '复制到剪贴板',
     copied: '已复制！',
-    importToCcSwitch: '导入到 CCS',
     enable: '启用',
     disable: '禁用',
     nameLabel: '名称',
@@ -160,6 +177,7 @@ export default {
       description: '将以下环境变量添加到您的终端配置文件或直接在终端中运行。',
       copy: '复制',
       copied: '已复制',
+      download: '下载',
       note: '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。',
       claudeSettingsHint: '用户级持久配置。此文件包含 API 密钥，请勿提交到项目仓库。',
       noGroupTitle: '请先分配分组',
@@ -168,8 +186,8 @@ export default {
       openai: {
         description: '将以下配置文件添加到 Codex CLI 配置目录中。',
         authModeTitle: 'Codex 认证模式',
-        authModeDescription: '兼容模式保留旧版 Codex 配置；API Key Mode 用于授权客户端图片执行器。',
-        authModeLegacy: '兼容模式',
+        authModeDescription: 'API Key Mode 将密钥写入 config.toml；auth.json 模式单独保存凭据。两者均使用远程模型目录，需要 Codex 0.156.0 或更新版本。',
+        authModeLegacy: 'auth.json',
         authModeApiKey: 'API Key Mode',
         authModeApiKeyRestartNotice: '保存此配置后，必须完全退出并重启 Codex Desktop 或 CLI，然后新建 task，让客户端重新构建工具注册表。',
         configTomlHint: '请确保以下内容位于 config.toml 文件的开头部分',
@@ -207,13 +225,13 @@ export default {
       },
       grok: {
         description:
-          '配置 Grok CLI、Claude Code、Codex 或 OpenCode，让请求通过当前 Sub2API Grok 分组发送。文本模型走 Responses；图片/视频使用 Imagine 模型 ID 与媒体端点。',
-        claudeDescription: '配置 Claude Code，让 Messages API 请求通过当前 Sub2API Grok 分组发送。',
-        codexDescription: '配置 Codex，让 Responses API 请求通过当前 Sub2API Grok 分组发送。',
+          '配置 Grok CLI、Claude Code、Codex 或 OpenCode，让请求通过当前 @:common.siteName Grok 分组发送。文本模型走 Responses；图片/视频使用 Imagine 模型 ID 与媒体端点。',
+        claudeDescription: '配置 Claude Code，让 Messages API 请求通过当前 @:common.siteName Grok 分组发送。',
+        codexDescription: '配置 Codex，让 Responses API 请求通过当前 @:common.siteName Grok 分组发送。',
         configTomlHint:
           '官方路径：~/.grok/config.toml（或 $GROK_HOME）。请填写 [endpoints]（models_base_url / models_list_url / xai_api_base_url / cli_chat_proxy_base_url）、[auth] preferred_method=api_key、[models]、[session]、[features] 图片/视频覆盖。优先 env_key，勿硬编码 api_key；文本模型必须 api_backend=responses。合并前备份，保存后运行 grok inspect。',
         codexConfigTomlHint:
-          'Codex 官方：wire_api 仅支持 "responses"；优先 env_key，勿与 experimental_bearer_token 混用；非 OpenAI 网关默认 supports_websockets = false（Sub2API 仍可接客户端 WS 并桥接到 HTTP/SSE）。合并前备份 ~/.codex/config.toml。',
+          'Codex 官方：wire_api 仅支持 "responses"；优先 env_key，勿与 experimental_bearer_token 混用；非 OpenAI 网关默认 supports_websockets = false（@:common.siteName 仍可接客户端 WS 并桥接到 HTTP/SSE）。合并前备份 ~/.codex/config.toml。',
         note:
           '导出 GROK_MODELS_BASE_URL 与 XAI_API_KEY，将完整 config.toml（endpoints/auth/models/session/features）保存为 ~/.grok/config.toml，运行 grok inspect，再用 /model 选择 grok-4.5（编程场景可用 grok-build-0.1）。',
         noteWindows:
@@ -221,45 +239,52 @@ export default {
         claudeNote:
           '二选一：终端环境变量仅当前会话；~/.claude/settings.json 可持久化。请勿把含 API Key 的文件提交到仓库。',
         codexNote:
-          '导出 SUB2API_API_KEY，将 config.toml 保存到 ~/.codex（可用 mkdir -p ~/.codex）。优先 env_key，勿提交密钥。',
+          '导出 KDAN_API_KEY，将 config.toml 保存到 ~/.codex（可用 mkdir -p ~/.codex）。优先 env_key，勿提交密钥。',
         codexNoteWindows:
-          '设置 $env:SUB2API_API_KEY，将 config.toml 保存到 %USERPROFILE%\\.codex。优先 env_key，勿提交密钥。'
+          '设置 $env:KDAN_API_KEY，将 config.toml 保存到 %USERPROFILE%\\.codex。优先 env_key，勿提交密钥。'
       },
       deepseek: {
         description: '通过当前 DeepSeek 分组配置 Claude Code、Codex 或 OpenCode。',
         codexDescription: '使用 API Key 配置 Codex，并通过当前 DeepSeek 分组发送请求。',
-        codexConfigTomlHint: '保存 config.toml 后重启 Codex，客户端会加载远程目录。使用本地文件模式时，还需下载目录并保存到配置中的路径。',
-        codexNote: '启动 Codex 前先导出 SUB2API_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
+        codexConfigTomlHint: '默认使用本地目录文件；支持的分组可改选远程目录。',
+        codexNote: '启动 Codex 前先导出 KDAN_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
       },
       minimax: {
         description: '通过当前 MiniMax 分组配置 Claude Code、Codex 或 OpenCode。',
         codexDescription: '使用 API Key 配置 Codex，并通过当前 MiniMax 分组发送请求。',
-        codexConfigTomlHint: '保存 config.toml 后重启 Codex，客户端会加载远程目录。使用本地文件模式时，还需下载目录并保存到配置中的路径。',
-        codexNote: '启动 Codex 前先导出 SUB2API_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
+        codexConfigTomlHint: '默认使用本地目录文件；支持的分组可改选远程目录。',
+        codexNote: '启动 Codex 前先导出 KDAN_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
       },
       composite: {
         description: '通过当前 Composite 路由分组配置受支持的客户端。',
         codexDescription: '使用 API Key 和当前 Composite 分组的完整模型目录配置 Codex。',
-        codexConfigTomlHint: '保存 config.toml 后重启 Codex，客户端会加载远程目录。使用本地文件模式时，还需下载目录并保存到配置中的路径。',
-        codexNote: '启动 Codex 前先导出 SUB2API_API_KEY；分组会根据目录中选中的模型路由请求。'
+        codexConfigTomlHint: '默认使用本地目录文件；支持的分组可改选远程目录。',
+        codexNote: '启动 Codex 前先导出 KDAN_API_KEY；分组会根据目录中选中的模型路由请求。'
+      },
+      zhipu: {
+        codexConfigTomlHint: '配置已包含 API Key。请同时下载 codex-models.json，保存到 model_catalog_json 指定路径后重启 Codex。推理档位及默认值以当前模型目录为准。',
+        codexNote: '合并旧配置前请备份，并删除 [features.guardianv2] 及所有 profile 覆盖中的 thread_context 字段；客户端已自动启用线程上下文，无需设置此字段。'
       },
       routedCodex: {
         description: '使用当前路由分组的完整模型目录配置 Codex。',
-        configTomlHint: '保存 config.toml 后重启 Codex，客户端会加载远程目录。使用本地文件模式时，还需下载目录并保存到配置中的路径。',
-        note: '启动 Codex 前先导出 SUB2API_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
+        configTomlHint: '默认使用本地目录文件；支持的分组可改选远程目录。',
+        note: '启动 Codex 前先导出 KDAN_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
       },
       codexModelCatalog: {
         mode: '目录来源',
         remote: '远程目录（Codex 0.156.0+）',
         local: '本地文件（旧版客户端）',
         oversized: '完整目录超过远程加载的 1 MiB 限制，已改为本地文件。请下载目录并保存到配置中的路径。',
-        title: 'Codex 模型目录',
-        description: 'Codex 会使用配置中的认证信息加载并刷新远程目录。使用本地文件模式时，请在下方获取目录并保存到配置中的路径。',
+        title: '获取模型目录及下载',
+        description: '打开时自动读取当前 Key 的模型目录，config.toml 的 model 随之确定：目录包含默认模型时沿用默认模型，否则使用目录中的首个模型。远程目录由 Codex 自行加载；选择本地文件时，请下载目录并保存到上述路径后重启 Codex。',
+        emptyDescription: '获取的目录没有可用的 Codex 模型，已保留默认配置。请检查账号模型限制和分组模型白名单。',
         fetch: '获取目录',
+        refetch: '重新获取',
         retry: '重试',
-        download: '下载目录',
+        resolving: '正在读取模型目录…',
+        download: '下载 codex-models.json',
         modelsCount: '已获取 {count} 个模型',
-        errorDescription: '无法使用当前 API Key 获取模型目录。'
+        errorDescription: '无法使用当前 API Key 获取模型目录，config.toml 暂用默认模型。请重试，或使用之前保存的目录文件。'
       },
       opencode: {
         title: 'OpenCode 配置示例',
@@ -281,16 +306,6 @@ export default {
     ipBlacklistPlaceholder: '1.2.3.4\n5.6.0.0/16',
     ipBlacklistHint: '每行一个 IP 或 CIDR，这些 IP 将被禁止使用此密钥',
     ipRestrictionEnabled: '已配置 IP 限制',
-    ccSwitchNotInstalled:
-      'CC-Switch 未安装或协议处理程序未注册。请先安装 CC-Switch 或手动复制 API 密钥。',
-    ccsClientSelect: {
-      title: '选择客户端',
-      description: '请选择您要导入到 CC-Switch 的客户端类型：',
-      claudeCode: 'Claude Code',
-      claudeCodeDesc: '导入为 Claude Code 配置',
-      geminiCli: 'Gemini CLI',
-      geminiCliDesc: '导入为 Gemini CLI 配置'
-    },
     // 配额和有效期
     quotaLimit: '额度限制',
     quotaAmount: '额度金额 (USD)',
@@ -331,7 +346,7 @@ export default {
       inactive: '已停用',
       quota_exhausted: '额度耗尽',
       expired: '已过期'
-    }
+    },
   },
 
   // Usage
@@ -476,7 +491,7 @@ export default {
       detailAccuracy: '定位精度',
       detailCoordinates: '坐标',
     },
-    tabs: { usage: '用量明细', errors: '错误请求', ranking: '用户排行' },
+    tabs: { usage: '用量明细', errors: '错误请求', ranking: '用户排行', keyRanking: 'API 密钥排行' },
     errors: {
       time: '时间', model: '模型', endpoint: '端点', status: '状态码',
       category: '分类', platform: '平台', message: '错误信息',
@@ -653,6 +668,37 @@ export default {
 
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
+    catalog: {
+      disabled: '模型广场尚未开启',
+      loginRequired: '请登录后查看模型广场',
+      copyModel: '复制请求模型 ID',
+      count: '{count} 个模型条目',
+      updated: '目录更新于 {time}',
+      stale: '目录来自较早的发现快照，模型可用性可能已变化。',
+      unavailable: '模型目录暂不可用，请管理员刷新模型发现数据。'
+    },
+    quote: {
+      scopes: {group: '分组标准价', personal: '你的报价', group_fallback: '分组参考价'},
+      sources: {media_billing: '媒体计费规则', group: '分组价卡', channel: '渠道价卡', billing_catalog: '计费目录/兼容价'},
+      conditional: '已应用倍率；阶梯、时段等条件见明细',
+      responseModel: '按当前模型展示倍率价格；最终按响应模型计费',
+      requestDependent: '价格取决于实际路由或上游返回模型',
+      personalUnavailable: '个人倍率暂不可用，以下为分组参考价。'
+    },
+    preview: {
+      action: '模型预览',
+      title: '分组模型与价格预览',
+      hint: '按当前分组配置展示模型与标准时段价格。此预览使用分组倍率；目录不会在访问时自动探测上游。发现型账号请先在账号管理中刷新模型列表。',
+      diagnostics: '目录诊断',
+      reasons: {
+        wildcard_requires_concrete_models: '通配规则需要具体模型映射或发现数据',
+        discovery_snapshot_missing: '尚无有效的模型发现快照',
+        group_policy_excluded: '被分组模型策略排除',
+        ambiguous_route: '多个平台声明此模型，请配置明确路由',
+        no_configured_route: '没有匹配的可用账号与路由',
+        pricing_only_or_not_allowed: '仅配置了价格，或未通过分组路由与模型策略'
+      }
+    },
     title: '模型广场',
     description: '按分组浏览可用模型与价格',
     loading: '加载中...',
@@ -679,6 +725,8 @@ export default {
       longContextDisabledNote: '该分组未启用长上下文阶梯计费，超阈值请求仍按基础档计费，官方阶梯仅供参考'
     },
     table: {
+      perSecond: '按秒计费',
+      perUnitSecond: '/ 秒',
       model: '模型',
       input: '输入',
       output: '输出',
@@ -698,7 +746,7 @@ export default {
       timePricingRowHintPeak: '；本行价格未含高峰倍率，与高峰时段 {window} 重叠的部分实付再乘 ×{multiplier}',
       timePricingWeekdays: '工作日',
       timePricingRateHint: '生效倍率 {rate} × 时段倍率 {multiplier}',
-      paidPrice: '实付价格(折后)',
+      paidPrice: '实付价格（已应用倍率）',
       officialPrice: '官方价格',
       rate: '折扣倍率',
       unitPerMillion: '$ / 1M token',

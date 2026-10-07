@@ -104,13 +104,30 @@ export default {
     apiKey: 'API Key',
     group: 'Group',
     currentConcurrency: 'Current Concurrency',
+    concurrencyAndWaiting: 'Concurrency / Waiting',
+    concurrencyCount: 'Concurrency',
+    waitingCount: 'Waiting',
+    queueFull: 'Full',
+    queueOff: 'Queuing globally disabled',
+    queuePolicy: 'Shared queue settings: this key allows up to {max} additional waiting requests, each waiting up to {seconds} seconds. Configured by the administrator.',
+    queuePolicyOff: 'Queuing is globally disabled. New requests are rejected when this key reaches its concurrency limit.',
+    queueNotApplicable: 'This key has no additional concurrency limit and does not use key-level queuing.',
+    queuePolicyLoading: 'Loading shared queue settings…',
+    queuePolicyUnavailable: 'Shared queue settings are currently unavailable.',
+    queueHint: 'Waiting capacity applies independently to each key. New requests are rejected when full; waiting ends on timeout. Arrival order is not guaranteed.',
+    concurrencyLoading: 'Loading',
+    concurrencyUnavailable: 'Statistics unavailable',
+    concurrencyStale: 'Not updated',
+    concurrencyLimit: 'Concurrency limit',
+    concurrencyLimitHint: 'Maximum simultaneous requests for this key. 0 means no additional limit; user and account limits still apply.',
+    concurrencyLimitInvalid: 'Enter a nonnegative whole number for the concurrency limit.',
+    noAdditionalConcurrencyLimit: 'No additional limit',
     noGroup: 'No group',
     searchGroup: 'Search groups...',
     noGroupFound: 'No groups found',
     created: 'Created',
     copyToClipboard: 'Copy to clipboard',
     copied: 'Copied!',
-    importToCcSwitch: 'Import to CCS',
     enable: 'Enable',
     disable: 'Disable',
     nameLabel: 'Name',
@@ -161,6 +178,7 @@ export default {
         'Add the following environment variables to your terminal profile or run directly in terminal to configure API access.',
       copy: 'Copy',
       copied: 'Copied',
+      download: 'Download',
       note: 'These environment variables will be active in the current terminal session. For permanent configuration, add them to ~/.bashrc, ~/.zshrc, or the appropriate configuration file.',
       claudeSettingsHint: 'User-level persistent configuration. Do not commit this file containing your API key to a project repository.',
       noGroupTitle: 'Please assign a group first',
@@ -168,8 +186,8 @@ export default {
       openai: {
         description: 'Add the following configuration files to your Codex CLI config directory.',
         authModeTitle: 'Codex authentication mode',
-        authModeDescription: 'Compatibility mode keeps the existing setup for older Codex clients. API Key Mode authorizes the client-side image executor.',
-        authModeLegacy: 'Compatibility mode',
+        authModeDescription: 'API Key Mode stores the key in config.toml; auth.json stores credentials separately. Both use the remote model catalog and require Codex 0.156.0 or later.',
+        authModeLegacy: 'auth.json',
         authModeApiKey: 'API Key Mode',
         authModeApiKeyRestartNotice: 'After saving this configuration, completely quit and restart Codex Desktop or CLI, then create a new task so the client can rebuild its tool registry.',
         configTomlHint: 'Make sure the following content is at the beginning of the config.toml file',
@@ -203,13 +221,13 @@ export default {
       },
       grok: {
         description:
-          'Configure Grok CLI, Claude Code, Codex, or OpenCode to send requests through your Sub2API Grok group. Text models use Responses; image/video use Imagine model IDs on media endpoints.',
-        claudeDescription: 'Configure Claude Code to send Messages API traffic through your Sub2API Grok group.',
-        codexDescription: 'Configure Codex to send Responses API traffic through your Sub2API Grok group.',
+          'Configure Grok CLI, Claude Code, Codex, or OpenCode to send requests through your @:common.siteName Grok group. Text models use Responses; image/video use Imagine model IDs on media endpoints.',
+        claudeDescription: 'Configure Claude Code to send Messages API traffic through your @:common.siteName Grok group.',
+        codexDescription: 'Configure Codex to send Responses API traffic through your @:common.siteName Grok group.',
         configTomlHint:
           'Official path: ~/.grok/config.toml (or $GROK_HOME). Fill [endpoints] (models_base_url / models_list_url / xai_api_base_url / cli_chat_proxy_base_url), [auth] preferred_method=api_key, [models], [session], and [features] image/video overrides. Prefer env_key over api_key; every text model needs api_backend=responses. Back up before merge, then run grok inspect.',
         codexConfigTomlHint:
-          'Official Codex: wire_api = "responses" only; prefer env_key over experimental_bearer_token; supports_websockets = false for non-OpenAI gateways (Sub2API can still accept client WS and bridge to HTTP/SSE). Back up ~/.codex/config.toml before merge.',
+          'Official Codex: wire_api = "responses" only; prefer env_key over experimental_bearer_token; supports_websockets = false for non-OpenAI gateways (@:common.siteName can still accept client WS and bridge to HTTP/SSE). Back up ~/.codex/config.toml before merge.',
         note:
           'Export GROK_MODELS_BASE_URL and XAI_API_KEY, save the full config.toml (endpoints/auth/models/session/features) as ~/.grok/config.toml, run grok inspect, then /model grok-4.5 (or grok-build-0.1 for coding).',
         noteWindows:
@@ -217,45 +235,52 @@ export default {
         claudeNote:
           'Choose one method: terminal env for this session, or ~/.claude/settings.json for persistence. Do not commit files that contain your API key.',
         codexNote:
-          'Export SUB2API_API_KEY, save config.toml under ~/.codex (mkdir -p ~/.codex). Prefer env_key auth; do not commit secrets.',
+          'Export KDAN_API_KEY, save config.toml under ~/.codex (mkdir -p ~/.codex). Prefer env_key auth; do not commit secrets.',
         codexNoteWindows:
-          'Set $env:SUB2API_API_KEY, save config.toml under %USERPROFILE%\\.codex. Prefer env_key auth; do not commit secrets.',
+          'Set $env:KDAN_API_KEY, save config.toml under %USERPROFILE%\\.codex. Prefer env_key auth; do not commit secrets.',
       },
       deepseek: {
         description: 'Configure Claude Code, Codex, or OpenCode through the current DeepSeek group.',
         codexDescription: 'Configure Codex with API key authentication through the current DeepSeek group.',
-        codexConfigTomlHint: 'Save config.toml and restart Codex to load the remote catalog. In local file mode, also download the catalog to the configured path.',
-        codexNote: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
+        codexConfigTomlHint: 'Local catalog file by default; remote catalog is optional for supported groups.',
+        codexNote: 'Export KDAN_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
       },
       minimax: {
         description: 'Configure Claude Code, Codex, or OpenCode through the current MiniMax group.',
         codexDescription: 'Configure Codex with API key authentication through the current MiniMax group.',
-        codexConfigTomlHint: 'Save config.toml and restart Codex to load the remote catalog. In local file mode, also download the catalog to the configured path.',
+        codexConfigTomlHint: 'Local catalog file by default; remote catalog is optional for supported groups.',
         codexNote: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
       },
       composite: {
         description: 'Configure supported clients through the current Composite routing group.',
         codexDescription: 'Configure Codex with API key authentication and the complete model catalog for this Composite group.',
-        codexConfigTomlHint: 'Save config.toml and restart Codex to load the remote catalog. In local file mode, also download the catalog to the configured path.',
-        codexNote: 'Export SUB2API_API_KEY before starting Codex. Model requests are routed by the selected catalog slug.',
+        codexConfigTomlHint: 'Local catalog file by default; remote catalog is optional for supported groups.',
+        codexNote: 'Export KDAN_API_KEY before starting Codex. Model requests are routed by the selected catalog slug.',
+      },
+      zhipu: {
+        codexConfigTomlHint: 'This config includes your API key. Also download codex-models.json, save it at model_catalog_json, and restart Codex. Reasoning levels and defaults follow the current model catalog.',
+        codexNote: 'Back up before merging an existing config. Remove thread_context from [features.guardianv2] and every profile override; thread-owned context is already enabled by the client.',
       },
       routedCodex: {
         description: 'Configure Codex with the complete model catalog for the current routed group.',
-        configTomlHint: 'Save config.toml and restart Codex to load the remote catalog. In local file mode, also download the catalog to the configured path.',
-        note: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
+        configTomlHint: 'Local catalog file by default; remote catalog is optional for supported groups.',
+        note: 'Export KDAN_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
       },
       codexModelCatalog: {
         mode: 'Catalog source',
         remote: 'Remote catalog (Codex 0.156.0+)',
         local: 'Local file (older clients)',
         oversized: 'The complete catalog exceeds the 1 MiB remote limit. Local file mode is selected; download it to the configured path.',
-        title: 'Codex model catalog',
-        description: 'Codex loads and refreshes the remote catalog using your configured authentication. For local file mode, fetch the catalog below and save it at the configured path.',
+        title: 'Get model catalog and download',
+        description: "This key's model catalog loads automatically and sets the model in config.toml: the default model is kept when the catalog includes it; otherwise the first model in the catalog is used. Codex loads the remote catalog itself; for a local file, download the catalog to the path above and restart Codex.",
+        emptyDescription: 'The fetched catalog contains no usable Codex models. The default configuration is retained. Check account model restrictions and the group model allowlist.',
         fetch: 'Fetch catalog',
+        refetch: 'Fetch again',
         retry: 'Retry',
-        download: 'Download catalog',
+        resolving: 'Loading model catalog…',
+        download: 'Download codex-models.json',
         modelsCount: '{count} models ready to download',
-        errorDescription: 'The catalog could not be fetched with this API key.',
+        errorDescription: 'The catalog could not be fetched with this API key, so config.toml uses the default model for now. Retry or use a previously saved catalog file.',
       },
       opencode: {
         title: 'OpenCode Example',
@@ -277,15 +302,6 @@ export default {
     ipBlacklistPlaceholder: '1.2.3.4\n5.6.0.0/16',
     ipBlacklistHint: 'One IP or CIDR per line. These IPs will be blocked from using this key.',
     ipRestrictionEnabled: 'IP restriction enabled',
-    ccSwitchNotInstalled: 'CC-Switch is not installed or the protocol handler is not registered. Please install CC-Switch first or manually copy the API key.',
-    ccsClientSelect: {
-      title: 'Select Client',
-      description: 'Please select the client type to import to CC-Switch:',
-      claudeCode: 'Claude Code',
-      claudeCodeDesc: 'Import as Claude Code configuration',
-      geminiCli: 'Gemini CLI',
-      geminiCliDesc: 'Import as Gemini CLI configuration',
-    },
     // Quota and expiration
     quotaLimit: 'Quota Limit',
     quotaAmount: 'Quota Amount (USD)',
@@ -471,7 +487,7 @@ export default {
       detailAccuracy: 'Accuracy',
       detailCoordinates: 'Coordinates',
     },
-    tabs: { usage: 'Usage', errors: 'Error Requests', ranking: 'User Ranking' },
+    tabs: { usage: 'Usage', errors: 'Error Requests', ranking: 'User Ranking', keyRanking: 'API Key Ranking' },
     errors: {
       time: 'Time', model: 'Model', endpoint: 'Endpoint', status: 'Status',
       category: 'Category', platform: 'Platform', message: 'Message',
@@ -648,6 +664,37 @@ export default {
 
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
+    catalog: {
+      disabled: 'Model plaza is disabled',
+      loginRequired: 'Sign in to view the model plaza',
+      copyModel: 'Copy request model ID',
+      count: '{count} model entries',
+      updated: 'Catalog updated {time}',
+      stale: 'This catalog uses an older discovery snapshot. Availability may have changed.',
+      unavailable: 'Model catalog unavailable. Ask an administrator to refresh model discovery.'
+    },
+    quote: {
+      scopes: {group: 'Group price', personal: 'Your quote', group_fallback: 'Group reference'},
+      sources: {media_billing: 'Media billing rules', group: 'Group pricing', channel: 'Channel pricing', billing_catalog: 'Billing catalog / fallback'},
+      conditional: 'Rate applied; see tier and time conditions',
+      responseModel: 'Rate applied to this model; final billing follows the response model',
+      requestDependent: 'Price depends on the selected route or response model',
+      personalUnavailable: 'Personal rates are unavailable. Group reference prices are shown.'
+    },
+    preview: {
+      action: 'Models',
+      title: 'Group models and pricing preview',
+      hint: 'Current group models and standard-period prices at group rates. Views do not probe upstream services. For discovery-based accounts, refresh the model list in account management first.',
+      diagnostics: 'Catalog diagnostics',
+      reasons: {
+        wildcard_requires_concrete_models: 'Wildcard rules require concrete mappings or discovery data',
+        discovery_snapshot_missing: 'No valid model discovery snapshot',
+        group_policy_excluded: 'Excluded by group model policy',
+        ambiguous_route: 'Multiple platforms claim this model; configure an explicit route',
+        no_configured_route: 'No matching eligible account and route',
+        pricing_only_or_not_allowed: 'Pricing only, or excluded by routing or model policy'
+      }
+    },
     title: 'Model Plaza',
     description: 'Browse available models and pricing by group',
     loading: 'Loading...',
@@ -674,6 +721,8 @@ export default {
       longContextDisabledNote: 'Long-context tier pricing is disabled for this group: requests above the threshold are billed at the base tier; official tiers are for reference only'
     },
     table: {
+      perSecond: 'Per second',
+      perUnitSecond: '/ second',
       model: 'Model',
       input: 'Input',
       output: 'Output',
@@ -694,8 +743,8 @@ export default {
         '; prices in this row exclude the peak-hour rate — where this period overlaps the peak hours {window}, the overlapping portion is additionally multiplied by ×{multiplier}',
       timePricingWeekdays: 'Weekdays',
       timePricingRateHint: 'Effective rate {rate} × period multiplier {multiplier}',
-      paidPrice: 'Your Price (Discounted)',
-      officialPrice: 'Official Price',
+      paidPrice: 'Your price (rate applied)',
+      officialPrice: 'Official price',
       rate: 'Rate',
       unitPerMillion: '$ / 1M tokens',
       perUnitRequest: '/ request',
