@@ -39,7 +39,6 @@ const (
 const (
 	// defaultMaxPendingOrders and defaultOrderTimeoutMin are defined in
 	// payment_config_service.go alongside other payment configuration defaults.
-	paymentGraceMinutes = 5
 
 	defaultPageSize    = 20
 	maxPageSize        = 100
@@ -123,6 +122,7 @@ type OrderListParams struct {
 }
 
 type RefundPlan struct {
+	ReservationID   string
 	OrderID         int64
 	Order           *dbent.PaymentOrder
 	RefundAmount    float64

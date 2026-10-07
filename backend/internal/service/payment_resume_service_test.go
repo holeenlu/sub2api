@@ -167,8 +167,8 @@ func TestBuildPaymentReturnURL(t *testing.T) {
 		t.Fatalf("buildPaymentReturnURL should strip fragments, got %q", parsed.Fragment)
 	}
 	query := parsed.Query()
-	if query.Get("from") != "checkout" {
-		t.Fatalf("expected original query to be preserved, got %q", query.Get("from"))
+	if query.Get("from") != "" {
+		t.Fatalf("expected client query to be discarded, got %q", query.Get("from"))
 	}
 	if query.Get("order_id") != strconv.FormatInt(42, 10) {
 		t.Fatalf("order_id = %q", query.Get("order_id"))

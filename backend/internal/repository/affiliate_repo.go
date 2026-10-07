@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"math"
 	"strings"
 	"time"
 
@@ -42,7 +44,7 @@ LEFT JOIN (
     GROUP BY user_id
 ) rebated ON rebated.user_id = ua.user_id
 LEFT JOIN (
-    SELECT user_id, COALESCE(SUM(amount), 0)::double precision AS matured_frozen_quota
+    SELECT user_id, COALESCE(SUM(amount - reversed_amount), 0)::double precision AS matured_frozen_quota
     FROM user_affiliate_ledger
     WHERE action = 'accrue' AND frozen_until IS NOT NULL AND frozen_until <= NOW()
     GROUP BY user_id
@@ -115,51 +117,90 @@ func (r *affiliateRepository) BindInviter(ctx context.Context, userID, inviterID
 }
 
 func (r *affiliateRepository) AccrueQuota(ctx context.Context, inviterID, inviteeUserID int64, amount float64, freezeHours int, sourceOrderID *int64) (bool, error) {
-	if amount <= 0 {
-		return false, nil
-	}
+	credited, err := r.AccrueQuotaCapped(ctx, inviterID, inviteeUserID, amount, freezeHours, sourceOrderID, 0)
+	return credited > 0, err
+}
 
-	var applied bool
-	err := r.withTx(ctx, func(txCtx context.Context, txClient *dbent.Client) error {
-		// freezeHours > 0: add to frozen quota; == 0: add to available quota directly
-		var updateSQL string
-		if freezeHours > 0 {
-			updateSQL = "UPDATE user_affiliates SET aff_frozen_quota = aff_frozen_quota + $1, aff_history_quota = aff_history_quota + $1, updated_at = NOW() WHERE user_id = $2"
-		} else {
-			updateSQL = "UPDATE user_affiliates SET aff_quota = aff_quota + $1, aff_history_quota = aff_history_quota + $1, updated_at = NOW() WHERE user_id = $2"
+// AccrueQuotaCapped holds the same profile lock used by thaw, transfer, and
+// reversal. The historical gross cap and its credit are decided in one tx.
+func (r *affiliateRepository) AccrueQuotaCapped(ctx context.Context, inviterID, inviteeUserID int64, amount float64, freezeHours int, sourceOrderID *int64, cap float64) (float64, error) {
+	if amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return 0, nil
+	}
+	var credited float64
+	err := r.withTx(ctx, func(txCtx context.Context, client *dbent.Client) error {
+		// Lock the source order before the profile, as refund completion does.
+		// A rebate cannot appear after a refund already reversed that order.
+		if sourceOrderID != nil {
+			rows, err := client.QueryContext(txCtx, `SELECT status FROM payment_orders WHERE id=$1 FOR UPDATE`, *sourceOrderID)
+			if err != nil {
+				return err
+			}
+			var status string
+			if !rows.Next() {
+				_ = rows.Close()
+				return fmt.Errorf("rebate source order missing")
+			}
+			err = rows.Scan(&status)
+			_ = rows.Close()
+			if err != nil {
+				return err
+			}
+			switch status {
+			case service.OrderStatusCompleted, service.OrderStatusRecharging:
+			default:
+				return nil
+			}
 		}
-		res, err := txClient.ExecContext(txCtx, updateSQL, amount, inviterID)
+		if err := lockAffiliateProfile(txCtx, client, inviterID); err != nil {
+			return err
+		}
+		if sourceOrderID != nil {
+			rows, err := client.QueryContext(txCtx, `SELECT 1 FROM user_affiliate_ledger WHERE source_order_id=$1 AND action='accrue'`, *sourceOrderID)
+			if err != nil {
+				return err
+			}
+			exists := rows.Next()
+			err = rows.Err()
+			_ = rows.Close()
+			if err != nil {
+				return err
+			}
+			if exists {
+				return nil
+			}
+		}
+		if cap > 0 {
+			existing, err := r.GetAccruedRebateFromInvitee(txCtx, inviterID, inviteeUserID)
+			if err != nil {
+				return err
+			}
+			amount = math.Min(amount, math.Max(0, cap-existing))
+			amount = math.Floor((amount+1e-10)*1e8) / 1e8
+			if amount <= 0 {
+				return nil
+			}
+		}
+		column := "aff_quota"
+		if freezeHours > 0 {
+			column = "aff_frozen_quota"
+		}
+		_, err := client.ExecContext(txCtx, "UPDATE user_affiliates SET "+column+"="+column+"+$1, aff_history_quota=aff_history_quota+$1, updated_at=NOW() WHERE user_id=$2", amount, inviterID)
 		if err != nil {
 			return err
 		}
-		affected, _ := res.RowsAffected()
-		if affected == 0 {
-			applied = false
-			return nil
+		_, err = client.ExecContext(txCtx, `INSERT INTO user_affiliate_ledger(user_id,action,amount,source_user_id,source_order_id,frozen_until,created_at,updated_at)
+VALUES($1,'accrue',$2,$3,$4,CASE WHEN $5>0 THEN NOW()+make_interval(hours=>$5) ELSE NULL END,NOW(),NOW())`, inviterID, amount, inviteeUserID, nullableInt64Arg(sourceOrderID), freezeHours)
+		if err != nil {
+			return err
 		}
-
-		if freezeHours > 0 {
-			if _, err = txClient.ExecContext(txCtx, `
-INSERT INTO user_affiliate_ledger (user_id, action, amount, source_user_id, source_order_id, frozen_until, created_at, updated_at)
-VALUES ($1, 'accrue', $2, $3, $4, NOW() + make_interval(hours => $5), NOW(), NOW())`,
-				inviterID, amount, inviteeUserID, nullableInt64Arg(sourceOrderID), freezeHours); err != nil {
-				return fmt.Errorf("insert affiliate accrue ledger: %w", err)
-			}
-		} else {
-			if _, err = txClient.ExecContext(txCtx, `
-INSERT INTO user_affiliate_ledger (user_id, action, amount, source_user_id, source_order_id, created_at, updated_at)
-VALUES ($1, 'accrue', $2, $3, $4, NOW(), NOW())`, inviterID, amount, inviteeUserID, nullableInt64Arg(sourceOrderID)); err != nil {
-				return fmt.Errorf("insert affiliate accrue ledger: %w", err)
-			}
-		}
-
-		applied = true
+		credited = amount
 		return nil
 	})
 	if err != nil {
-		return false, err
+		return 0, err
 	}
-	return applied, nil
+	return credited, nil
 }
 
 func (r *affiliateRepository) GetAccruedRebateFromInvitee(ctx context.Context, inviterID, inviteeUserID int64) (float64, error) {
@@ -192,6 +233,9 @@ func (r *affiliateRepository) ThawFrozenQuota(ctx context.Context, userID int64)
 
 // thawFrozenQuotaTx moves matured frozen quota to available quota within an existing tx.
 func thawFrozenQuotaTx(txCtx context.Context, txClient *dbent.Client, userID int64) (float64, error) {
+	if err := lockAffiliateProfile(txCtx, txClient, userID); err != nil {
+		return 0, err
+	}
 	rows, err := txClient.QueryContext(txCtx, `
 WITH matured AS (
     UPDATE user_affiliate_ledger
@@ -199,7 +243,7 @@ WITH matured AS (
     WHERE user_id = $1
       AND frozen_until IS NOT NULL
       AND frozen_until <= NOW()
-    RETURNING amount
+    RETURNING amount - reversed_amount AS amount
 )
 SELECT COALESCE(SUM(amount), 0) FROM matured`, userID)
 	if err != nil {
@@ -905,6 +949,9 @@ func queryAffiliateRecordCount(ctx context.Context, client affiliateQueryExecer,
 
 func (r *affiliateRepository) withTx(ctx context.Context, fn func(txCtx context.Context, txClient *dbent.Client) error) error {
 	if tx := dbent.TxFromContext(ctx); tx != nil {
+		if err := authz.LockManagementWrite(ctx, tx.Client(), nil, "", "", false); err != nil {
+			return err
+		}
 		return fn(ctx, tx.Client())
 	}
 
@@ -915,6 +962,9 @@ func (r *affiliateRepository) withTx(ctx context.Context, fn func(txCtx context.
 	defer func() { _ = tx.Rollback() }()
 
 	txCtx := dbent.NewTxContext(ctx, tx)
+	if err := authz.LockManagementWrite(txCtx, tx.Client(), nil, "", "", false); err != nil {
+		return err
+	}
 	if err := fn(txCtx, tx.Client()); err != nil {
 		return err
 	}

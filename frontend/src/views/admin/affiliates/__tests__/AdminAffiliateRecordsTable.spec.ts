@@ -10,6 +10,7 @@ const { listInviteRecords, listRebateRecords, listTransferRecords, getUserOvervi
   getUserOverview: vi.fn(),
 }))
 
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({can: () => true}) }))
 vi.mock('@/api/admin/affiliates', () => {
   const affiliatesAPI = { listInviteRecords, listRebateRecords, listTransferRecords, getUserOverview }
   return { affiliatesAPI, default: affiliatesAPI }

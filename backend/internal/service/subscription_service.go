@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"log"
 	"math/rand/v2"
 	"strconv"
@@ -355,7 +356,10 @@ func (s *SubscriptionService) updateExistingSubscriptionTerm(
 }
 
 func (s *SubscriptionService) withSubscriptionUpdateTx(ctx context.Context, fn func(context.Context) error) error {
-	if dbent.TxFromContext(ctx) != nil {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		if err := authz.LockManagementWrite(ctx, tx.Client(), nil, "", "", false); err != nil {
+			return err
+		}
 		return fn(ctx)
 	}
 	if s.entClient == nil {
@@ -367,6 +371,10 @@ func (s *SubscriptionService) withSubscriptionUpdateTx(ctx context.Context, fn f
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	txCtx := dbent.NewTxContext(ctx, tx)
+	if err := authz.LockManagementWrite(txCtx, tx.Client(), nil, "", "", false); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 
 	if err := fn(txCtx); err != nil {
 		_ = tx.Rollback()

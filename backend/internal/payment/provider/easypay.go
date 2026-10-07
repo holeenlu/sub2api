@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -300,6 +301,24 @@ func (e *EasyPay) upstreamPaymentType(paymentType string) string {
 	return paymentType
 }
 
+// EasyPay variants return pid as either a JSON integer or a string. Preserve
+// both protocol forms without converting through floating point.
+type easyPayQueryMerchantID string
+
+func (id *easyPayQueryMerchantID) UnmarshalJSON(raw []byte) error {
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		*id = easyPayQueryMerchantID(text)
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(raw, &number); err != nil {
+		return err
+	}
+	*id = easyPayQueryMerchantID(number.String())
+	return nil
+}
+
 func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.QueryOrderResponse, error) {
 	params := map[string]string{
 		"act": "order", "pid": e.config["pid"],
@@ -310,19 +329,23 @@ func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.Quer
 		return nil, fmt.Errorf("easypay query: %w", err)
 	}
 	type easyPayQueryData struct {
-		TradeStatus *string `json:"trade_status"`
-		Status      *int    `json:"status"`
-		Money       *string `json:"money"`
-		TradeNo     *string `json:"trade_no"`
+		PID         *easyPayQueryMerchantID `json:"pid"`
+		OrderID     *string                 `json:"out_trade_no"`
+		TradeStatus *string                 `json:"trade_status"`
+		Status      *int                    `json:"status"`
+		Money       *string                 `json:"money"`
+		TradeNo     *string                 `json:"trade_no"`
 	}
 	var resp struct {
-		Code        int              `json:"code"`
-		Msg         string           `json:"msg"`
-		TradeStatus *string          `json:"trade_status"`
-		Status      *int             `json:"status"`
-		Money       *string          `json:"money"`
-		TradeNo     *string          `json:"trade_no"`
-		Data        easyPayQueryData `json:"data"`
+		PID         *easyPayQueryMerchantID `json:"pid"`
+		OrderID     *string                 `json:"out_trade_no"`
+		Code        int                     `json:"code"`
+		Msg         string                  `json:"msg"`
+		TradeStatus *string                 `json:"trade_status"`
+		Status      *int                    `json:"status"`
+		Money       *string                 `json:"money"`
+		TradeNo     *string                 `json:"trade_no"`
+		Data        easyPayQueryData        `json:"data"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("easypay parse query: %w", err)
@@ -359,27 +382,49 @@ func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.Quer
 		responseTradeNo = *resp.Data.TradeNo
 	}
 
+	metadata := e.MerchantIdentityMetadata()
+	for _, identity := range []*easyPayQueryMerchantID{resp.PID, resp.Data.PID} {
+		if identity != nil && string(*identity) != e.config["pid"] {
+			return nil, fmt.Errorf("query merchant mismatch")
+		}
+	}
+	for _, identity := range []*string{resp.OrderID, resp.Data.OrderID} {
+		if identity != nil && *identity != tradeNo {
+			return nil, fmt.Errorf("query order mismatch")
+		}
+	}
+	if resp.TradeNo != nil {
+		metadata["verified_trade_no"] = *resp.TradeNo
+	} else if resp.Data.TradeNo != nil {
+		metadata["verified_trade_no"] = *resp.Data.TradeNo
+	}
 	amount, _ := strconv.ParseFloat(money, 64)
+	if resp.Code != easypayCodeSuccess || amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+		status = payment.ProviderStatusPending
+	}
 	return &payment.QueryOrderResponse{
 		TradeNo:  responseTradeNo,
 		Status:   status,
 		Amount:   amount,
-		Metadata: e.MerchantIdentityMetadata(),
+		Metadata: metadata,
 	}, nil
 }
 
-func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[string]string) (*payment.PaymentNotification, error) {
+func (e *EasyPay) VerifyNotification(ctx context.Context, rawBody string, _ map[string]string) (*payment.PaymentNotification, error) {
 	values, err := url.ParseQuery(rawBody)
 	if err != nil {
 		return nil, fmt.Errorf("parse notify: %w", err)
 	}
 	// url.ParseQuery already decodes values — no additional decode needed.
 	params := make(map[string]string)
-	for k := range values {
+	for k, v := range values {
 		if !easyPayNotifyAllowedParams[k] {
 			return nil, fmt.Errorf("unexpected notify param: %s", k)
 		}
-		params[k] = values.Get(k)
+		if len(v) != 1 {
+			return nil, fmt.Errorf("duplicate notify field: %s", k)
+		}
+		params[k] = v[0]
 	}
 	sign := params["sign"]
 	if sign == "" {
@@ -392,7 +437,27 @@ func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[st
 	if params["trade_status"] == tradeStatusSuccess {
 		status = payment.ProviderStatusSuccess
 	}
-	amount, _ := strconv.ParseFloat(params["money"], 64)
+	amount, err := strconv.ParseFloat(params["money"], 64)
+	if err != nil || amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return nil, fmt.Errorf("invalid notification amount")
+	}
+	if params["pid"] != e.config["pid"] || params["out_trade_no"] == "" || params["trade_no"] == "" {
+		return nil, fmt.Errorf("notification merchant or order identity missing/mismatched")
+	}
+	if status == payment.ProviderStatusSuccess {
+		// The legacy MD5 protocol does not escape delimiters. Its signature alone
+		// cannot distinguish a checkout from a callback. Preserve the protocol,
+		// but only the authenticated provider query can authorize settlement.
+		confirmed, err := e.QueryOrder(ctx, params["out_trade_no"])
+		if err != nil {
+			return nil, fmt.Errorf("confirm notification: %w", err)
+		}
+		if confirmed.Status != payment.ProviderStatusPaid || confirmed.TradeNo != params["trade_no"] ||
+			confirmed.Metadata["verified_trade_no"] != params["trade_no"] ||
+			math.Abs(confirmed.Amount-amount) > 0.000001 {
+			return nil, fmt.Errorf("notification does not match provider settlement")
+		}
+	}
 
 	metadata := e.MerchantIdentityMetadata()
 	if pid := strings.TrimSpace(params["pid"]); pid != "" {

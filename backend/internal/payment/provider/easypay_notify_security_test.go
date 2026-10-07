@@ -21,6 +21,8 @@ package provider
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 
@@ -111,6 +113,16 @@ func TestEasyPayNotifyRejectsOrderURLReplay(t *testing.T) {
 func TestEasyPayNotifyAcceptsGenuineCallback(t *testing.T) {
 	t.Parallel()
 	e := easyPayPoCProvider()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil || r.Form.Get("out_trade_no") != "ORDER123" || r.Form.Get("key") != e.config["pkey"] {
+			http.Error(w, "invalid order query", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"code":1,"status":1,"money":"650.00","trade_no":"2026100622001400000001"}`))
+	}))
+	t.Cleanup(server.Close)
+	e.config["apiBase"] = server.URL
+	e.httpClient = server.Client()
 
 	params := map[string]string{
 		"pid":          "1000",

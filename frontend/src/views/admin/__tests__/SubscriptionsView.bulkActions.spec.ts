@@ -141,3 +141,6 @@ describe('subscription bulk operations', () => {
     expect(form.find('[data-test="assign-users"]').exists()).toBe(false)
   })
 })
+
+// These legacy functional cases exercise the migrated full administrator.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))
