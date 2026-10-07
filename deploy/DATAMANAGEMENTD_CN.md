@@ -4,44 +4,44 @@
 
 ## 1. 关键约束
 
-- 主进程固定探测路径：`/tmp/kdan-datamanagement.sock`
+- 主进程固定探测路径：`/tmp/tapmodels-datamanagement.sock`
 - 仅当该 Unix Socket 可连通且 `Health` 成功时，后台“数据管理”才会启用
 - `datamanagementd` 使用 SQLite 持久化元数据，不依赖主库
 
 ## 2. 宿主机构建与运行
 
 ```bash
-cd /opt/kdan-src/datamanagement
-go build -o /opt/kdan/datamanagementd ./cmd/datamanagementd
+cd /opt/tapmodels-src/datamanagement
+go build -o /opt/tapmodels/datamanagementd ./cmd/datamanagementd
 
-mkdir -p /var/lib/kdan/datamanagement
-chown -R kdan:kdan /var/lib/kdan/datamanagement
+mkdir -p /var/lib/tapmodels/datamanagement
+chown -R tapmodels:tapmodels /var/lib/tapmodels/datamanagement
 ```
 
 手动启动示例：
 
 ```bash
-/opt/kdan/datamanagementd \
-  -socket-path /tmp/kdan-datamanagement.sock \
-  -sqlite-path /var/lib/kdan/datamanagement/datamanagementd.db \
+/opt/tapmodels/datamanagementd \
+  -socket-path /tmp/tapmodels-datamanagement.sock \
+  -sqlite-path /var/lib/tapmodels/datamanagement/datamanagementd.db \
   -version 1.0.0
 ```
 
 ## 3. systemd 托管（推荐）
 
-仓库已提供示例服务文件：`deploy/kdan-datamanagementd.service`
+仓库已提供示例服务文件：`deploy/tapmodels-datamanagementd.service`
 
 ```bash
-sudo cp deploy/kdan-datamanagementd.service /etc/systemd/system/
+sudo cp deploy/tapmodels-datamanagementd.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now kdan-datamanagementd
-sudo systemctl status kdan-datamanagementd
+sudo systemctl enable --now tapmodels-datamanagementd
+sudo systemctl status tapmodels-datamanagementd
 ```
 
 查看日志：
 
 ```bash
-sudo journalctl -u kdan-datamanagementd -f
+sudo journalctl -u tapmodels-datamanagementd -f
 ```
 
 也可以使用一键安装脚本（自动安装二进制 + 注册 systemd）：
@@ -51,18 +51,18 @@ sudo journalctl -u kdan-datamanagementd -f
 sudo ./deploy/install-datamanagementd.sh --binary /path/to/datamanagementd
 
 # 方式二：从源码构建后安装
-sudo ./deploy/install-datamanagementd.sh --source /path/to/kdan
+sudo ./deploy/install-datamanagementd.sh --source /path/to/tapmodels
 ```
 
 ## 4. Docker 部署联动
 
-若 `kdan` 运行在 Docker 容器中，需要将宿主机 Socket 挂载到容器同路径：
+若 `tapmodels` 运行在 Docker 容器中，需要将宿主机 Socket 挂载到容器同路径：
 
 ```yaml
 services:
-  kdan:
+  tapmodels:
     volumes:
-      - /tmp/kdan-datamanagement.sock:/tmp/kdan-datamanagement.sock
+      - /tmp/tapmodels-datamanagement.sock:/tmp/tapmodels-datamanagement.sock
 ```
 
 建议在 `docker-compose.override.yml` 中维护该挂载，避免覆盖主 compose 文件。

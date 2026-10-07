@@ -1,5 +1,5 @@
 # =============================================================================
-# KDAN Docker Compose - Local Development Build
+# TapModels Docker Compose - Local Development Build
 # =============================================================================
 # Build from local source code for testing changes.
 #
@@ -9,13 +9,13 @@
 # =============================================================================
 
 services:
-  kdan:
+  tapmodels:
     build:
       context: ..
       dockerfile: Dockerfile
       args:
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
-    container_name: kdan-dev
+    container_name: tapmodels-dev
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -34,9 +34,9 @@ services:
       - SIMPLE_MODE_KEY_RATE_LIMIT_ENABLED=${SIMPLE_MODE_KEY_RATE_LIMIT_ENABLED:-false}
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
-      - DATABASE_USER=${POSTGRES_USER:-kdan}
+      - DATABASE_USER=${POSTGRES_USER:-tapmodels}
       - DATABASE_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - DATABASE_DBNAME=${POSTGRES_DB:-kdan}
+      - DATABASE_DBNAME=${POSTGRES_DB:-tapmodels}
       - DATABASE_SSLMODE=disable
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -51,12 +51,12 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       # Local mainland-China development proxy. Containers cannot use
       # 127.0.0.1 for the host proxy, so default to Docker Desktop's host name.
-      - HTTP_PROXY=${KDAN_DEV_HTTP_PROXY:-http://host.docker.internal:7897}
-      - HTTPS_PROXY=${KDAN_DEV_HTTPS_PROXY:-http://host.docker.internal:7897}
-      - ALL_PROXY=${KDAN_DEV_ALL_PROXY:-socks5://host.docker.internal:7897}
-      - NO_PROXY=${KDAN_DEV_NO_PROXY:-127.0.0.1,localhost,::1,postgres,redis,kdan,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.local}
+      - HTTP_PROXY=${TAPMODELS_DEV_HTTP_PROXY:-http://host.docker.internal:7897}
+      - HTTPS_PROXY=${TAPMODELS_DEV_HTTPS_PROXY:-http://host.docker.internal:7897}
+      - ALL_PROXY=${TAPMODELS_DEV_ALL_PROXY:-socks5://host.docker.internal:7897}
+      - NO_PROXY=${TAPMODELS_DEV_NO_PROXY:-127.0.0.1,localhost,::1,postgres,redis,tapmodels,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.local}
       # Gateway values come from Compose .env or the shell.
-      # Fallbacks mirror KDAN backend defaults so omitted values preserve behavior.
+      # Fallbacks mirror TapModels backend defaults so omitted values preserve behavior.
       - GATEWAY_FORCE_CODEX_CLI=${GATEWAY_FORCE_CODEX_CLI:-false}
       - GATEWAY_OPENAI_COMPACT_MODEL=${GATEWAY_OPENAI_COMPACT_MODEL:-gpt-5.5}
       - SUB2API_IMAGES_MAIN_MODEL=${SUB2API_IMAGES_MAIN_MODEL:-gpt-5.6-luna}
@@ -117,7 +117,7 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - kdan-network
+      - tapmodels-network
     healthcheck:
       test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/health"]
       interval: 30s
@@ -127,20 +127,20 @@ services:
 
   postgres:
     image: postgres:18-alpine
-    container_name: kdan-postgres-dev
+    container_name: tapmodels-postgres-dev
     restart: unless-stopped
     volumes:
       - ./postgres_data:/var/lib/postgresql/data:Z
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-kdan}
+      - POSTGRES_USER=${POSTGRES_USER:-tapmodels}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - POSTGRES_DB=${POSTGRES_DB:-kdan}
+      - POSTGRES_DB=${POSTGRES_DB:-tapmodels}
       - PGDATA=/var/lib/postgresql/data
       - TZ=${TZ:-Asia/Shanghai}
     networks:
-      - kdan-network
+      - tapmodels-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kdan} -d ${POSTGRES_DB:-kdan}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tapmodels} -d ${POSTGRES_DB:-tapmodels}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -148,7 +148,7 @@ services:
 
   redis:
     image: redis:8-alpine
-    container_name: kdan-redis-dev
+    container_name: tapmodels-redis-dev
     restart: unless-stopped
     volumes:
       - ./redis_data:/data:Z
@@ -167,7 +167,7 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}
     networks:
-      - kdan-network
+      - tapmodels-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -176,5 +176,5 @@ services:
       start_period: 5s
 
 networks:
-  kdan-network:
+  tapmodels-network:
     driver: bridge

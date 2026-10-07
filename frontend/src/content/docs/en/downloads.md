@@ -4,8 +4,8 @@ Before downloading, read the [console configuration builder](/apps/console) and 
 
 | File | Purpose | Default behavior |
 | --- | --- | --- |
-| [KDAN Codex session repair bundle](/downloads/kdan-codex-session-repair.zip) | macOS, Linux, and Windows Codex session diagnostics and repair | Read-only; explicit Apply required to write |
-| [KDAN Claude Code session recovery bundle](/downloads/kdan-claude-session-recovery.zip) | Find local Claude sessions and produce exact resume commands | Read-only; does not start Claude or modify sessions |
+| [TapModels Codex session repair bundle](/downloads/tapmodels-codex-session-repair.zip) | macOS, Linux, and Windows Codex session diagnostics and repair | Read-only; explicit Apply required to write |
+| [TapModels Claude Code session recovery bundle](/downloads/tapmodels-claude-session-recovery.zip) | Find local Claude sessions and produce exact resume commands | Read-only; does not start Claude or modify sessions |
 | [GPT Image 2.5 Flare skill](/downloads/gpt-image-flare.zip) | Codex image generation and editing | Fixed Flare model |
 | [GPT Image 2.5 Sunburst skill](/downloads/gpt-image-sunburst.zip) | Codex image generation and editing | Fixed Sunburst model |
 

@@ -1,6 +1,6 @@
 # Layout Components
 
-Vue 3 layout components for the KDAN frontend, built with Composition API, TypeScript, and TailwindCSS.
+Vue 3 layout components for the TapModels frontend, built with Composition API, TypeScript, and TailwindCSS.
 
 ## Components
 

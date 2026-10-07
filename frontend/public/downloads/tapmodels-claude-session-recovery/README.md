@@ -1,6 +1,6 @@
-# KDAN Claude session recovery
+# TapModels Claude session recovery
 
-This tool works with local Claude Code JSONL transcripts. For Codex, use the Codex recovery tool from the deployment console. Official cloud history requires the original account or host.
+This tool works with local Claude Code JSONL transcripts. For Codex, use the [Codex tool](https://tapmodels.ai/apps/session-recovery-codex). Official cloud history requires the original account or host.
 
 ## Rule out connection problems first
 
@@ -19,7 +19,7 @@ Run this in the project directory where you want to continue. Replace the exampl
 
 ## Download and scan
 
-Requires Python 3.10+. Download the package from the deployment console, extract it, and enter kdan-claude-session-recovery:
+Requires Python 3.10+. [Download the Claude Code tool](https://tapmodels.ai/downloads/tapmodels-claude-session-recovery.zip), extract it, and enter tapmodels-claude-session-recovery:
 
 ```bash
 bash find-claude-sessions.sh

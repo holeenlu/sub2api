@@ -1,38 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 260" role="img" aria-labelledby="t">
-  <title id="t">KDAN</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 260" role="img" aria-labelledby="t">
+  <title id="t">TapModels</title>
   <defs>
-    <!-- userSpaceOnUse (not objectBoundingBox): vertical strokes have a
-         zero-width bbox and would not paint with an oBB gradient. -->
-    <linearGradient id="kw-mark" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#79F4BD"/><stop offset=".48" stop-color="#39D9E7"/><stop offset="1" stop-color="#3875F6"/>
-    </linearGradient>
-    <linearGradient id="kw-letter" x1="10" y1="0" x2="67" y2="110" gradientUnits="userSpaceOnUse">
+    <linearGradient id="w-brand" x1="0" y1="0" x2="1" y2="1">
       <stop stop-color="#79F4BD"/><stop offset=".48" stop-color="#39D9E7"/><stop offset="1" stop-color="#3875F6"/>
     </linearGradient>
   </defs>
   <g transform="translate(20 20) scale(0.43)">
     <rect x="16" y="16" width="480" height="480" rx="120" fill="#0A1A39"/>
-    <g transform="translate(52 52) scale(17)" fill="none" stroke="url(#kw-mark)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5">
-      <path d="M16.8 6.2v11.6" stroke-width="1.9" stroke-opacity=".3"/>
-      <path d="M7.2 5v14"/>
-      <path d="M7.2 12 16.8 6.2"/>
-      <path d="M7.2 12 16.8 17.8"/>
-      <circle cx="16.8" cy="6.2" r="1.65" fill="url(#kw-mark)" stroke="none"/>
-      <circle cx="16.8" cy="17.8" r="1.65" fill="url(#kw-mark)" stroke="none"/>
+    <g transform="translate(52 52) scale(17)" fill="none" stroke="url(#w-brand)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4">
+    <path d="M5.4 10.2h9.2a1.6 1.6 0 0 1 1.6 1.6v6.6a1.6 1.6 0 0 1-1.6 1.6H5.4a1.6 1.6 0 0 1-1.6-1.6v-6.6a1.6 1.6 0 0 1 1.6-1.6Z"/>
+    <path d="M6.6 7.4h8.2" stroke-opacity=".55"/>
+    <path d="M7.8 4.6h7.4" stroke-opacity=".28"/>
+    <circle cx="19.4" cy="7.4" r="1.45" fill="url(#w-brand)" stroke="none"/>
+    <path d="M16.9 4.75a3.6 3.6 0 0 0 0 5.3" stroke-width="1.9"/>
+    <path d="M21.9 4.75a3.6 3.6 0 0 1 0 5.3" stroke-width="1.9"/>
+
     </g>
   </g>
-  <!-- "KDAN" drawn as monoline letterforms, no font dependency.
-       Cap height 110, baseline y=185, stroke 20. -->
-  <g transform="translate(270 75)" fill="none" stroke="#0A1A39" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
-    <g stroke="url(#kw-letter)">
-      <path d="M10 0v110"/>
-      <path d="M10 55 63 0"/>
-      <path d="M10 55 67 110"/>
-    </g>
-    <path d="M111 0v110"/>
-    <path d="M111 0h28c26 0 39 22 39 55s-13 55-39 55h-28"/>
-    <path d="M222 110 256 0l34 110"/>
-    <path d="M237 73h38"/>
-    <path d="M334 110V0l60 110V0"/>
-  </g>
+  <text x="270" y="172" font-family="Inter, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="150" font-weight="700" letter-spacing="-4" fill="#0A1A39">Tap<tspan fill="#3875F6">Models</tspan></text>
 </svg>

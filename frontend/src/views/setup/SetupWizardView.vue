@@ -146,7 +146,7 @@
                 v-model="formData.database.dbname"
                 type="text"
                 class="input"
-                placeholder="kdan"
+                placeholder="tapmodels"
               />
             </div>
             <div>
@@ -560,7 +560,7 @@ const formData = reactive<InstallRequest>({
     port: 5432,
     user: 'postgres',
     password: '',
-    dbname: 'kdan',
+    dbname: 'tapmodels',
     sslmode: 'disable'
   },
   redis: {

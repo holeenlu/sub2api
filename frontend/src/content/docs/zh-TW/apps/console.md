@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | OpenAI | Codex CLI、Codex WebSocket、Claude Code（啟用 Messages 時）、OpenCode | `config.toml`、`auth.json` 或 `experimental_bearer_token`、Anthropic 環境變數、`opencode.json` |
 | Anthropic | Claude Code、Codex（路由）、OpenCode | `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、Codex Responses provider、OpenCode provider |
-| Gemini | Gemini CLI、Codex（路由）、OpenCode | `GOOGLE_GEMINI_BASE_URL`、`GEMINI_KDAN_API_KEY`、`GEMINI_MODEL` |
+| Gemini | Gemini CLI、Codex（路由）、OpenCode | `GOOGLE_GEMINI_BASE_URL`、`GEMINI_API_KEY`、`GEMINI_MODEL` |
 | Antigravity | Claude Code、Gemini CLI、Codex（路由）、OpenCode | 地址自動追加 `/antigravity`，Gemini 使用 `/v1beta` |
 | Grok | Grok CLI、Claude Code、Codex、OpenCode | `GROK_MODELS_BASE_URL`、`XAI_API_KEY` 或對應用戶端設定 |
 | DeepSeek、MiniMax、Composite、Kimi、Zhipu、OpenCode | Claude Code、Codex（路由）、OpenCode | 以彈出視窗生成的分組地址為準；目錄支援範圍見下節 |
@@ -27,7 +27,7 @@ OpenAI 分組的 Codex 標籤提供兩種模式，開啟“使用金鑰”時預
 - **Legacy**：`config.toml` 使用 `requires_openai_auth = true`，並下載 `auth.json`。只在 Codex 版本需要該登入形態時使用。
 - **API key**：`requires_openai_auth = false`，把 Key 寫入 `experimental_bearer_token`，並附加本地圖片擴充套件所需的請求標頭。該模式會把金鑰儲存在磁碟，限制檔案權限且不要提交到儲存庫。
 
-其他分組的 Codex 路由預設使用 `env_key = "KDAN_API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`；智譜分組把 API Key 寫入生成的 `experimental_bearer_token`，因此單獨複製 `config.toml` 也不會依賴 `KDAN_API_KEY`。WebSocket 標籤只對 OpenAI Responses WebSocket 路徑啟用。
+其他分組的 Codex 路由預設使用 `env_key = "TAPMODELS_API_KEY"`、`wire_api = "responses"` 和 `supports_websockets = false`；智譜分組把 API Key 寫入生成的 `experimental_bearer_token`，因此單獨複製 `config.toml` 也不會依賴 `TAPMODELS_API_KEY`。WebSocket 標籤只對 OpenAI Responses WebSocket 路徑啟用。
 
 ## 模型目錄
 
@@ -38,23 +38,23 @@ OpenAI 分組的 Codex 標籤提供兩種模式，開啟“使用金鑰”時預
 
 不支援目錄的標籤使用該分組開放的精確模型 ID。模型目錄、帳號可排程狀態和請求協議是不同條件；列表可見不保證所有工具與介面可用。設定來源以目前彈出視窗為準，不把普通模型列表 JSON 當作 Codex 專用目錄。
 
-## KDAN 介面操作
+## TapModels 介面操作
 
 以下截圖來自目前專案的“使用金鑰”元件，使用無效範例 Key 和 `api.example.com` 演示地址。實際接入請複製自己控制台生成的值，不要抄錄圖片中的地址或 Key。
 
 1. OpenAI 分組預設即為 **Codex CLI (WebSocket)** + API key 驗證；網路不支援 WebSocket 時改選 **Codex CLI**，需要 `auth.json` 登入形態時改選 Legacy。兩種驗證模式對應的檔案不同。
 
-![KDAN Codex 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
+![TapModels Codex 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
 
 2. API key 模式會把 Key 寫入設定檔；下載後限制檔案權限，並完全重啟用戶端。
 
-![KDAN Codex API key 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
+![TapModels Codex API key 設定器（範例資料）](/docs-assets/client-codex-zh-TW.png)
 
 3. Anthropic 分組選擇 **Claude Code**，根據作業系統切換命令。複製目前標籤下完整命令，在同一個終端機執行用戶端。
 
-![KDAN Claude Code macOS / Linux 設定器（範例資料）](/docs-assets/client-claude-zh-TW.png)
+![TapModels Claude Code macOS / Linux 設定器（範例資料）](/docs-assets/client-claude-zh-TW.png)
 
-![KDAN Claude Code PowerShell 設定器（範例資料）](/docs-assets/client-claude-zh-TW.png)
+![TapModels Claude Code PowerShell 設定器（範例資料）](/docs-assets/client-claude-zh-TW.png)
 
 ## 驗證與檢查
 
