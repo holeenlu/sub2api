@@ -13,7 +13,7 @@
 
 | # | 需求 | 范围 | 改动规模 | 后端 | 需要决策 |
 |---|------|------|---------|------|---------|
-| 1 | 移除「导入到 CCS」 | 前端（可选后端清理） | 小 | 可选 | 是否连带删除 `hide_ccs_import_button` 设置 |
+| 1 | 移除「导入到 CCS」 | 前后端同步清理 | 小 | 已实现 | 已同步删除 `hide_ccs_import_button` 设置 |
 | 2 | 「使用密钥」默认模型升级 | 前端 | 小 | 否 | Antigravity/Composite 是否同步；`gpt-6-astra` 参数 |
 | 3 | 配置块增加「下载」 | 前端 | 小 | 否 | 已实现 Codex config.toml、auth.json；其他配置是否下载待定 |
 | 4 | Codex 模型目录按分组顺序排列 | **后端** | 小 | 是 | 无 |
@@ -27,62 +27,13 @@
 
 ---
 
-## 1. 移除「导入到 CCS」
+## 1. 移除「导入到 CCS」（已实现）
 
-### 1.1 现状
+/keys 不再提供 CCS 导入按钮、Antigravity 客户端选择弹窗或 ccswitch:// 深链接生成。已删除专用工具文件及其旧测试；保留现有「使用密钥」、复制密钥、编辑、启停和删除功能。通用图标、其他客户端兼容和用量查询接口不属于此删除范围。
 
-`/keys` 操作列有「导入到 CCS」按钮，点击生成 `ccswitch://v1/import?...` 深链拉起 CC-Switch 桌面端；Antigravity 分组会先弹「选择客户端」对话框。按钮受后台设置 `hide_ccs_import_button`（公开设置）控制显隐。
+入口删除后，hide_ccs_import_button 不再承载业务需求，已同步移除前端设置和类型、后端设置读写、公开配置与管理 DTO，以及旧文案。前后端不再读取或返回该字段，不保留永久兼容路径。历史数据库设置值无运行消费者，无需为此新增迁移。
 
-### 1.2 前端改动（必做）
-
-| 文件 | 位置 | 改动 |
-|------|------|------|
-| `frontend/src/views/user/KeysView.vue` | L382–390 | 删除「导入到 CCS」按钮（`v-if="!publicSettings?.hide_ccs_import_button"` 那个 `<button>`） |
-| 同上 | L1001–1045 | 删除 `<!-- CCS Client Selection Dialog for Antigravity -->` 整个 `BaseDialog` |
-| 同上 | L1148–1151 | 删除 `import { buildCcSwitchImportDeeplink, type CcSwitchClientType } from '@/utils/ccswitchImport'` |
-| 同上 | L1303, L1305 | 删除 `showCcsClientSelect`、`pendingCcsRow` 两个 ref |
-| 同上 | L1872–1942 | 删除 `importToCcswitch`、`executeCcsImport`、`handleCcsClientSelect`、`closeCcsClientSelect` 四个函数 |
-| `frontend/src/utils/ccswitchImport.ts` | 整文件 | **删除**（84 行，仅 KeysView 引用） |
-| `frontend/src/utils/__tests__/ccswitchImport.spec.ts` | 整文件 | **删除**（96 行） |
-| `frontend/src/i18n/locales/zh/dashboard.ts` | L98 `importToCcSwitch`；L241–247 `ccSwitchNotInstalled`、`ccsClientSelect.*` | 删除 |
-| `frontend/src/i18n/locales/en/dashboard.ts` | L98；L237–243 | 删除（zh/en 必须对称，否则 `localesNoKeyCollision.spec` / 编译检查可能报错） |
-
-删完后 `Icon name="upload"` 在 KeysView 无引用，但 Icon 组件里 `upload` 仍被其他 7 处使用，**不要**从 `Icon.vue` 删。
-
-### 1.3 后台开关 `hide_ccs_import_button` 的处理（决策点）
-
-按钮删除后这个开关就成了死配置。两个方案：
-
-**方案 A（推荐，兼容保留）— 只删可见开关，保留字段往返，后端不动**
-
-| 文件 | 位置 | 改动 |
-|------|------|------|
-| `frontend/src/views/admin/SettingsView.vue` | L6605–6618 | 删除「隐藏 CCS 导入按钮」Toggle 区块 |
-| 同上 | L9582 | 保留 `form` 字段及加载服务器已有值的逻辑 |
-| 同上 | L11214 | 保留保存 payload 中的字段，原值往返，不强制重置 |
-| 同上 | L10784（`loadSettings()`） | **无需改动，但要知道为什么**：服务端值不是逐字段装载，而是 `for (const [key, value] of Object.entries(settings))` 通用循环写进 `form`。只要 L9582 的 `form` 默认字段不删，装载就自动保留；删了默认字段，循环仍会写入但类型丢失。这是「只删 Toggle 就够」的依据 |
-| `frontend/src/i18n/locales/zh/admin/settings.ts` | L651–652 | 删除 `hideCcsImportButton` / `hideCcsImportButtonHint` |
-| `frontend/src/i18n/locales/en/admin/settings.ts` | L656–657 | 同上 |
-| `frontend/src/api/admin/settings.ts` | L494, L834 | 保留读写接口字段 |
-| `frontend/src/types/index.ts` | L242 | 保留 `PublicSettings.hide_ccs_import_button` |
-| `frontend/src/stores/app.ts` | L350 | 保留兼容默认值 |
-| 测试 fixture | `stores/__tests__/app.spec.ts` L37, L458；`views/admin/__tests__/SettingsView.spec.ts` L391；`components/auth/__tests__/WechatOAuthSection.spec.ts` L73；`components/user/profile/__tests__/ProfileIdentityBindingsSection.spec.ts` L254 | 保留字段，补充已有值不变的回归用例 |
-
-后端继续接受/返回这个字段。**不能删除保存字段后声称无副作用**：`setting_handler_update.go` L164 的字段是非指针 `bool`，缺省为 `false`；`setting_update.go` L347 会无条件持久化，导致保存其他设置时也把已有 `true` 覆盖成 `false`，影响回滚或仍使用旧前端的客户端。方案 A 保留字段往返，仅去掉入口和可见开关。若未来需要省略字段，应先明确后端缺省更新语义并测试，而不是依赖 Go 零值。
-
-**方案 B — 后端一并清理**（约 20 个改动点，全部是样板代码）
-
-`backend/internal/service/domain_constants.go` L372 · `setting_public.go` L191/L332/L582/L671 · `setting_parse.go` L362 · `setting_update.go` L347 · `settings_view.go` L160/L354 · `handler/dto/settings.go` L159/L387 · `handler/setting_handler.go` L79 · `handler/admin/setting_handler.go` L257 · `handler/admin/setting_handler_update.go` L164/L1624/L2252 · `handler/admin/setting_handler_audit.go` L344–345 · 测试 `server/api_contract_test.go` L892/L1178。数据库里已存在的 `hide_ccs_import_button` 行会被忽略，不需要迁移。
-
-方案 B 更干净但每个文件都是 upstream 高频改动区，合并成本高。**建议先做 A，B 放到下一次与 upstream 同步之后再评估。**
-
-### 1.4 测试
-
-- 删除 `ccswitchImport.spec.ts`。
-- `KeysView.spec.ts` 目前没有引用 CCS，不需要改；跑一遍确认。
-- 若做方案 A：保留现有 fixture 字段；已有值分别为 `true` / `false` 时，加载设置并保存无关字段，断言原值仍在请求中且不变。写法直接套用 `views/admin/__tests__/SettingsView.spec.ts` L723 `submits the compact home page toggle`（mock `getSettings` 返回 `hide_ccs_import_button: true` → 改动别的字段并保存 → 断言 `updateSettings` 收到的 payload 里该字段仍为 `true`）。
-- 补充 `/keys` 不再渲染 CCS 入口、后台不再渲染可见开关的断言；保留 Antigravity「使用密钥」流程回归。
-- `pnpm -C frontend test:run`、`pnpm -C frontend typecheck`。
+验证扩展现有 KeysView 测试，检查使用密钥入口保留、CCS 按钮及选择弹窗消失；原 CCS 专用测试和旧设置往返测试一并删除。设置保存、公开接口契约、多语言和类型检查验证现有流程。
 
 ---
 
@@ -491,14 +442,14 @@ git ls-files | grep -iE '(logo|favicon|partners|sponsor|license|copying|notice|r
 
 | 提交 | 内容 | 依赖 |
 |------|------|------|
-| 1 | `feat(keys): remove CC-Switch import`（§1 前端 + 方案 A） | — |
+| 1 | `feat(keys): remove CC-Switch import`（§1 前后端清理） | — |
 | 2 | `feat(keys): bump default models for Codex/OpenCode setup`（§2） | — |
 | 3 | `feat(keys): add per-file download to setup snippets`（§3） | 建议在 2 后，复用更新后的生成器与测试 |
 | 4 | `fix(codex): order group catalog by custom models list`（§4，纯后端） | — |
 | 5 | 品牌盘点明细及复核方法（仅文档） | 包含 §5.8–5.9；首次提交同时包含白名单（见 §0）。`git status` 核对可见性，实际暂存后再用 `git diff --cached --name-only` 核对提交范围 |
 | 后续独立任务 | 品牌重塑按 §5.7 分步实施 | 需另行批准品牌名与策略，不属于本次功能实施 |
 
-2、3 同时修改 `UseKeyModal.vue` 及其测试，建议顺序实施，不视为无冲突并行任务。采用 CCS 方案 A 且未新增模型后端支持时，4 是唯一后端改动，可独立验证；上线仍须另行批准，不由本计划自动触发。
+2、3 同时修改 `UseKeyModal.vue` 及其测试，建议顺序实施，不视为无冲突并行任务。CCS 删除涉及设置接口契约，须验证前后端字段同时退役；上线仍须另行批准，不由本计划自动触发。
 
 ## 7. 验证清单
 
@@ -523,7 +474,7 @@ go test -tags unit -run 'Codex' ./internal/service/ ./internal/handler/
 #    models[] 顺序与管理端一致；关闭自定义列表后顺序回到原行为
 #    仅重排不改变模型集合时同样生效，旧/新 ETag 与分组隔离正确
 # 5. 中英文、Windows/Unix、窄屏界面及实际文件下载回归
-# 6. CCS 原值 true/false 保存无关设置后均不变；品牌盘点不执行实际替换
+# 6. 保存设置不携带旧 CCS 字段；品牌盘点不执行实际替换
 ```
 
 验收记录应包含命令结果、浏览器/客户端版本和未验证项。当前计划修订未执行上述功能测试；不得把测试清单当作通过记录。新增解析器测试或国际化用例必须实际被测试命令选中。
