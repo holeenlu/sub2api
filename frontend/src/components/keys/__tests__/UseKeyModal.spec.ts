@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { parse as parseToml } from 'smol-toml'
 
 const { copyToClipboardMock, saveAsMock } = vi.hoisted(() => ({
   copyToClipboardMock: vi.fn().mockResolvedValue(true),
@@ -419,6 +420,12 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('env_key')
     expect(configToml).not.toContain('image_generation')
     expect(configToml).not.toContain('supports_websockets')
+    const parsed = parseToml(configToml!) as {
+      model_providers: { OpenAI: { supports_standalone_web_search: boolean } }
+      features: { standalone_web_search: boolean }
+    }
+    expect(parsed.model_providers.OpenAI.supports_standalone_web_search).toBe(true)
+    expect(parsed.features.standalone_web_search).toBe(true)
     expect(configToml).not.toContain('responses_websockets_v2')
     expect(configToml).toContain('[features]\napi_key_model_discovery = true\ngoals = true')
     expect(configToml).not.toContain('model_reasoning_effort = "xhigh"')
@@ -1223,5 +1230,41 @@ describe('UseKeyModal', () => {
     const apiKeyConfig = await readBlobAsText(saveAsMock.mock.calls[2]![0] as Blob)
     expect(apiKeyConfig).toBe(shownFiles()[0])
     expect(apiKeyConfig).toContain('experimental_bearer_token = "sk-test"')
+  })
+
+  it('keeps standalone OpenAI search enabled across transport, authentication and catalog modes', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: { show: true, apiKey: 'sk-test', baseUrl: 'https://example.com/v1', platform: 'openai' },
+      global: { stubs: {
+        BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+        Icon: { template: '<span />' }
+      } }
+    })
+    await flushPromises()
+    for (const tab of ['keys.useKeyModal.cliTabs.codexCli', 'keys.useKeyModal.cliTabs.codexCliWs']) {
+      await wrapper.findAll('button').find(button => button.text().trim() === tab)!.trigger('click')
+      for (const auth of ['legacy', 'api-key']) {
+        await wrapper.get(`[data-testid="codex-auth-mode-${auth}"]`).trigger('click')
+        for (const mode of ['remote', 'file']) {
+          await wrapper.get('[data-testid="codex-model-catalog-mode"]').setValue(mode)
+          const config = wrapper.findAll('pre code').map(code => code.text())
+            .find(text => text.includes('model_provider = "OpenAI"'))!
+          const parsed = parseToml(config) as {
+            model_providers: { OpenAI: { base_url: string; supports_standalone_web_search: boolean } }
+            features: { standalone_web_search: boolean }
+          }
+          expect(parsed.model_providers.OpenAI.base_url).toBe('https://example.com/v1')
+          expect(parsed.model_providers.OpenAI.supports_standalone_web_search).toBe(true)
+          expect(parsed.features.standalone_web_search).toBe(true)
+          expect(parsed).not.toHaveProperty('supports_standalone_web_search')
+          expect(config).not.toContain('web_search = "disabled"')
+        }
+      }
+    }
+    // Other providers do not implement the OpenAI standalone search endpoint.
+    await wrapper.setProps({ platform: 'deepseek' })
+    await wrapper.findAll('button').find(button => button.text().trim() === 'keys.useKeyModal.cliTabs.codexCli')!.trigger('click')
+    expect(wrapper.findAll('pre code').map(code => code.text()).join('\n'))
+      .not.toContain('standalone_web_search')
   })
 })

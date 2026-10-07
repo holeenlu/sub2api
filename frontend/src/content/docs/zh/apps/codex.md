@@ -83,6 +83,24 @@ OpenAI 分组的配置使用弹窗显示的 Provider ID。该 ID 区分大小写
 
 不支持目录的标签使用该分组开放的精确模型 ID。模型目录、账号可调度状态和请求协议是不同条件；列表可见不保证所有工具与接口可用。配置来源以当前弹窗为准，不把普通模型列表 JSON 当作 Codex 专用目录。
 
+## OpenAI 分组的网页搜索
+
+OpenAI 分组的 Codex 配置启用原生独立搜索：客户端通过 `web.run` 调用本站 `/v1/alpha/search`，由网关现有的账号选择、鉴权和计费流程处理。模型对话继续使用原来的 Responses HTTP 或 WebSocket 连接。
+
+已有配置需在对应的 Provider 表和 `[features]` 表分别合并以下字段，不要重复创建表：
+
+```toml
+[model_providers.OpenAI]
+supports_standalone_web_search = true
+
+[features]
+standalone_web_search = true
+```
+
+已使用 Codex CLI 0.160.1 验证。该客户端将独立搜索标记为开发中功能，启动提示不代表搜索失败。保存后完全退出并重启客户端，再重新打开任务。显式设置 `web_search = "disabled"` 仍会关闭搜索。其他平台分组不自动启用该 OpenAI 专用接口。
+
+若出现 `Hosted tool 'web_search' requires authorization and metering ... rustponsesapi`，先检查两个开关是否由实际运行进程加载；不要通过移除搜索工具后重试来隐藏错误。搜索权限和计费仍由上游账号决定，不受这两个客户端开关绕过。
+
 ## 验证接入
 
 1. 新建一个任务并发送简单问题。
