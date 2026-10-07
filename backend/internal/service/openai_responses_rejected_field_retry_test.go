@@ -89,6 +89,11 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRejectsAmbiguousErrors(t 
 			body:         []byte(`{"max_output_tokens":4096,"truncation":"auto"}`),
 			responseBody: []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: truncation.","param":"max_output_tokens"}}`),
 		},
+		{
+			name:         "hosted search capability rejection must not remove search",
+			body:         []byte(`{"tools":[{"type":"web_search"}],"tool_choice":"auto","input":"search the web"}`),
+			responseBody: []byte(`{"error":{"message":"Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.","type":"invalid_request_error","param":"tools","code":"unsupported_parameter"}}`),
+		},
 	}
 
 	for _, tt := range tests {

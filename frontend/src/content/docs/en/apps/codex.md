@@ -79,6 +79,24 @@ If the selected Codex tab offers a catalog, follow the mode shown in the dialog:
 
 For tabs without a catalog, use an exact model ID available to that group. Catalog visibility, routable accounts, and protocol support are separate conditions. A visible model does not guarantee every tool or endpoint. Use the current dialog as the configuration source; a plain model-list JSON response is not a Codex manifest.
 
+## Web search for OpenAI groups
+
+The OpenAI Codex configuration enables native standalone search. The client calls this site's `/v1/alpha/search` through `web.run`; the gateway's existing account selection, authentication, and billing handle the request. Conversation requests keep using Responses over HTTP or WebSocket.
+
+For an existing configuration, merge these fields into the matching provider and `[features]` tables without creating duplicate tables:
+
+```toml
+[model_providers.OpenAI]
+supports_standalone_web_search = true
+
+[features]
+standalone_web_search = true
+```
+
+Verified with Codex CLI 0.160.1, which labels standalone search as under development. Its startup warning does not mean search failed. Fully restart the client after saving, then reopen the task. An explicit `web_search = "disabled"` still disables search. Other provider groups do not automatically enable this OpenAI-specific endpoint.
+
+For `Hosted tool 'web_search' requires authorization and metering ... rustponsesapi`, check that the running client loaded both settings. Do not hide the error by removing search tools and retrying. These client settings do not bypass upstream search authorization or billing.
+
 ## Verify and troubleshoot
 
 Send a simple message in a new task and match its timestamp, key and model in TapModels usage records. Then resume existing work. See [Codex session recovery](/apps/session-recovery-codex) if history disappears.
