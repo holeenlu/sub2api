@@ -1,0 +1,258 @@
+group	feature	kind	status	added_lines	deleted_lines	path
+11	构建、手动发布与在线更新	tooling/config	M	3	3	.dockerignore
+11	构建、手动发布与在线更新	tooling/config	M	12	4	.gitignore
+11	构建、手动发布与在线更新	tooling/config	M	9	9	.goreleaser.simple.yaml
+11	构建、手动发布与在线更新	tooling/config	M	35	35	.goreleaser.yaml
+09	品牌界面、文档站与用户体验	documentation	M	2	2	DEV_GUIDE.md
+11	构建、手动发布与在线更新	tooling/config	M	19	19	Dockerfile
+11	构建、手动发布与在线更新	tooling/config	M	13	13	Dockerfile.goreleaser
+09	品牌界面、文档站与用户体验	documentation	M	39	37	README.md
+09	品牌界面、文档站与用户体验	documentation	M	31	29	README_CN.md
+09	品牌界面、文档站与用户体验	documentation	M	30	28	README_JA.md
+09	品牌界面、文档站与用户体验	asset	M	21	22	assets/logo.svg
+09	品牌界面、文档站与用户体验	asset	M	12	29	assets/wordmark.svg
+12	跨功能设置、路由与依赖装配	business	M	4	4	backend/internal/config/config.go
+11	构建、手动发布与在线更新	business	M	4	4	backend/internal/pkg/logger/options.go
+11	构建、手动发布与在线更新	test	M	2	2	backend/internal/pkg/logger/options_test.go
+11	构建、手动发布与在线更新	business	M	1	1	backend/internal/pkg/sysutil/restart.go
+11	构建、手动发布与在线更新	business	M	2	2	backend/internal/platform/liveattestation/attestation.go
+12	跨功能设置、路由与依赖装配	test	M	2	2	backend/internal/server/api_contract_test.go
+09	品牌界面、文档站与用户体验	business	M	4	10	backend/internal/service/brand.go
+11	构建、手动发布与在线更新	business	M	1	1	backend/internal/service/data_management_service.go
+11	构建、手动发布与在线更新	business	M	4	4	backend/internal/service/update_service.go
+09	品牌界面、文档站与用户体验	business	M	3	3	backend/internal/setup/cli.go
+09	品牌界面、文档站与用户体验	business	M	1	1	backend/internal/setup/setup.go
+09	品牌界面、文档站与用户体验	business	M	1	1	backend/internal/web/embed_on.go
+09	品牌界面、文档站与用户体验	test	M	12	12	backend/internal/web/embed_test.go
+12	跨功能设置、路由与依赖装配	documentation	M	9	9	backend/pkg/pluginapi/README.md
+12	跨功能设置、路由与依赖装配	documentation	M	1	1	backend/pkg/pluginapi/docs/development.md
+12	跨功能设置、路由与依赖装配	documentation	M	1	1	backend/pkg/pluginapi/docs/package-format.md
+12	跨功能设置、路由与依赖装配	documentation	M	2	2	backend/pkg/pluginapi/docs/security.md
+12	跨功能设置、路由与依赖装配	business	M	1	1	backend/pkg/pluginapi/v1/manifest.schema.json
+11	构建、手动发布与在线更新	tooling/config	M	15	15	deploy/.env.example
+11	构建、手动发布与在线更新	tooling/config	M	1	1	deploy/.gitignore
+11	构建、手动发布与在线更新	documentation	M	38	38	deploy/APPLE_CONTAINER.md
+11	构建、手动发布与在线更新	tooling/config	M	2	2	deploy/Caddyfile
+11	构建、手动发布与在线更新	documentation	M	17	17	deploy/DATAMANAGEMENTD_CN.md
+11	构建、手动发布与在线更新	documentation	M	13	13	deploy/DOCKER.md
+11	构建、手动发布与在线更新	tooling/config	M	12	12	deploy/Dockerfile
+11	构建、手动发布与在线更新	documentation	M	10	10	deploy/EDGE_SECURITY.md
+11	构建、手动发布与在线更新	documentation	M	55	55	deploy/README.md
+11	构建、手动发布与在线更新	tooling/config	M	39	39	deploy/apple-container.sh
+11	构建、手动发布与在线更新	tooling/config	M	1	1	deploy/build_image.sh
+11	构建、手动发布与在线更新	tooling/config	M	20	20	deploy/config.example.yaml
+11	构建、手动发布与在线更新	tooling/config	M	19	19	deploy/docker-compose.dev.yml
+11	构建、手动发布与在线更新	tooling/config	M	21	21	deploy/docker-compose.local.yml
+11	构建、手动发布与在线更新	tooling/config	M	11	11	deploy/docker-compose.standalone.yml
+11	构建、手动发布与在线更新	tooling/config	M	8	8	deploy/docker-compose.wsl.yml
+11	构建、手动发布与在线更新	tooling/config	M	21	21	deploy/docker-compose.yml
+11	构建、手动发布与在线更新	tooling/config	M	6	6	deploy/docker-deploy.sh
+11	构建、手动发布与在线更新	tooling/config	M	6	6	deploy/docker-entrypoint.sh
+11	构建、手动发布与在线更新	tooling/config	M	16	16	deploy/install-datamanagementd.sh
+11	构建、手动发布与在线更新	tooling/config	M	87	87	deploy/install.sh
+11	构建、手动发布与在线更新	tooling/config	D	0	22	deploy/kdan-datamanagementd.service
+11	构建、手动发布与在线更新	tooling/config	D	0	33	deploy/kdan.service
+11	构建、手动发布与在线更新	tooling/config	A	22	0	deploy/tapmodels-datamanagementd.service
+11	构建、手动发布与在线更新	tooling/config	A	33	0	deploy/tapmodels.service
+11	构建、手动发布与在线更新	test	M	31	31	deploy/tests/apple-container-test.sh
+11	构建、手动发布与在线更新	test	M	1	1	deploy/tests/docker-compose-gateway-env-test.sh
+11	构建、手动发布与在线更新	test	M	2	2	deploy/tests/docker-compose-security-test.sh
+11	构建、手动发布与在线更新	test	M	2	2	deploy/tests/docker-runtime-resources-test.sh
+11	构建、手动发布与在线更新	test	M	4	4	deploy/tests/fixtures/bin/container
+13	需求、历史说明与工程规范	documentation	M	6	6	docs/ADMIN_PAYMENT_INTEGRATION_API.md
+13	需求、历史说明与工程规范	documentation	A	20	0	docs/AI_COORDINATION_BASELINE.md
+13	需求、历史说明与工程规范	documentation	M	9	9	docs/BATCH_IMAGE_MVP.md
+13	需求、历史说明与工程规范	documentation	A	182	0	docs/CUSTOMIZATION_REVIEW_2026-09-08.md
+13	需求、历史说明与工程规范	documentation	M	6	6	docs/PAYMENT.md
+13	需求、历史说明与工程规范	documentation	M	6	6	docs/PAYMENT_CN.md
+13	需求、历史说明与工程规范	documentation	M	11	11	docs/PLUGIN_DEVELOPMENT.md
+13	需求、历史说明与工程规范	documentation	A	171	0	docs/PROJECT_CUSTOMIZATION_WORKFLOW.md
+13	需求、历史说明与工程规范	documentation	A	36	0	docs/TAPMODELS_DOCS_ACCEPTANCE.md
+09	品牌界面、文档站与用户体验	documentation	M	4	4	docs/legal/admin-compliance.en.md
+09	品牌界面、文档站与用户体验	generated	M	4	4	docs/legal/admin-compliance.zh-TW.md
+09	品牌界面、文档站与用户体验	documentation	M	4	4	docs/legal/admin-compliance.zh.md
+13	需求、历史说明与工程规范	documentation	A	45	0	docs/tapmodels-ci.md
+09	品牌界面、文档站与用户体验	business	M	1	1	frontend/index.html
+08	API Key 客户端配置与下载工具	business	M	4	4	frontend/public/downloads/SHA256SUMS.txt
+08	API Key 客户端配置与下载工具	asset	M	-	-	frontend/public/downloads/gpt-image-flare.zip
+08	API Key 客户端配置与下载工具	asset	M	-	-	frontend/public/downloads/gpt-image-sunburst.zip
+08	API Key 客户端配置与下载工具	asset	D	-	-	frontend/public/downloads/kdan-claude-session-recovery.zip
+08	API Key 客户端配置与下载工具	business	D	0	22	frontend/public/downloads/kdan-claude-session-recovery/Find-ClaudeSessions.ps1
+08	API Key 客户端配置与下载工具	documentation	D	0	60	frontend/public/downloads/kdan-claude-session-recovery/README.md
+08	API Key 客户端配置与下载工具	business	D	0	11	frontend/public/downloads/kdan-claude-session-recovery/find-claude-sessions.sh
+08	API Key 客户端配置与下载工具	business	D	0	213	frontend/public/downloads/kdan-claude-session-recovery/find_claude_sessions.py
+08	API Key 客户端配置与下载工具	asset	D	-	-	frontend/public/downloads/kdan-codex-session-repair.zip
+08	API Key 客户端配置与下载工具	documentation	D	0	78	frontend/public/downloads/kdan-codex-session-repair/README.md
+08	API Key 客户端配置与下载工具	business	D	0	40	frontend/public/downloads/kdan-codex-session-repair/RepairSessions.ps1
+08	API Key 客户端配置与下载工具	business	D	0	11	frontend/public/downloads/kdan-codex-session-repair/repair-sessions.sh
+08	API Key 客户端配置与下载工具	business	D	0	714	frontend/public/downloads/kdan-codex-session-repair/repair_sessions.py
+08	API Key 客户端配置与下载工具	business	D	0	125	frontend/public/downloads/kdan-codex-session-repair/resume_sessions.py
+08	API Key 客户端配置与下载工具	documentation	D	0	38	frontend/public/downloads/kdan-image-skills/gpt-image-flare/SKILL.md
+08	API Key 客户端配置与下载工具	tooling/config	D	0	4	frontend/public/downloads/kdan-image-skills/gpt-image-flare/agents/openai.yaml
+08	API Key 客户端配置与下载工具	business	D	0	1	frontend/public/downloads/kdan-image-skills/gpt-image-flare/requirements.txt
+08	API Key 客户端配置与下载工具	business	D	0	285	frontend/public/downloads/kdan-image-skills/gpt-image-flare/scripts/generate.py
+08	API Key 客户端配置与下载工具	documentation	D	0	38	frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/SKILL.md
+08	API Key 客户端配置与下载工具	tooling/config	D	0	4	frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/agents/openai.yaml
+08	API Key 客户端配置与下载工具	business	D	0	1	frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/requirements.txt
+08	API Key 客户端配置与下载工具	business	D	0	285	frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/scripts/generate.py
+08	API Key 客户端配置与下载工具	asset	A	-	-	frontend/public/downloads/session-repair.zip
+08	API Key 客户端配置与下载工具	documentation	A	77	0	frontend/public/downloads/session-repair/README.md
+08	API Key 客户端配置与下载工具	business	A	40	0	frontend/public/downloads/session-repair/RepairSessions.ps1
+08	API Key 客户端配置与下载工具	business	A	11	0	frontend/public/downloads/session-repair/repair-sessions.sh
+08	API Key 客户端配置与下载工具	business	A	714	0	frontend/public/downloads/session-repair/repair_sessions.py
+08	API Key 客户端配置与下载工具	asset	A	-	-	frontend/public/downloads/tapmodels-claude-session-recovery.zip
+08	API Key 客户端配置与下载工具	business	A	22	0	frontend/public/downloads/tapmodels-claude-session-recovery/Find-ClaudeSessions.ps1
+08	API Key 客户端配置与下载工具	documentation	A	60	0	frontend/public/downloads/tapmodels-claude-session-recovery/README.md
+08	API Key 客户端配置与下载工具	business	A	11	0	frontend/public/downloads/tapmodels-claude-session-recovery/find-claude-sessions.sh
+08	API Key 客户端配置与下载工具	business	A	213	0	frontend/public/downloads/tapmodels-claude-session-recovery/find_claude_sessions.py
+08	API Key 客户端配置与下载工具	asset	A	-	-	frontend/public/downloads/tapmodels-codex-session-repair.zip
+08	API Key 客户端配置与下载工具	documentation	A	38	0	frontend/public/downloads/tapmodels-image-skills/gpt-image-flare/SKILL.md
+08	API Key 客户端配置与下载工具	tooling/config	A	4	0	frontend/public/downloads/tapmodels-image-skills/gpt-image-flare/agents/openai.yaml
+08	API Key 客户端配置与下载工具	business	A	1	0	frontend/public/downloads/tapmodels-image-skills/gpt-image-flare/requirements.txt
+08	API Key 客户端配置与下载工具	business	A	285	0	frontend/public/downloads/tapmodels-image-skills/gpt-image-flare/scripts/generate.py
+08	API Key 客户端配置与下载工具	documentation	A	38	0	frontend/public/downloads/tapmodels-image-skills/gpt-image-sunburst/SKILL.md
+08	API Key 客户端配置与下载工具	tooling/config	A	4	0	frontend/public/downloads/tapmodels-image-skills/gpt-image-sunburst/agents/openai.yaml
+08	API Key 客户端配置与下载工具	business	A	1	0	frontend/public/downloads/tapmodels-image-skills/gpt-image-sunburst/requirements.txt
+08	API Key 客户端配置与下载工具	business	A	285	0	frontend/public/downloads/tapmodels-image-skills/gpt-image-sunburst/scripts/generate.py
+08	API Key 客户端配置与下载工具	documentation	A	78	0	frontend/public/downloads/tapmodels-session-repair/README.md
+08	API Key 客户端配置与下载工具	business	A	40	0	frontend/public/downloads/tapmodels-session-repair/Repair-TapModelsSessions.ps1
+08	API Key 客户端配置与下载工具	business	A	11	0	frontend/public/downloads/tapmodels-session-repair/repair-sessions.sh
+08	API Key 客户端配置与下载工具	business	A	714	0	frontend/public/downloads/tapmodels-session-repair/repair_sessions.py
+08	API Key 客户端配置与下载工具	business	A	125	0	frontend/public/downloads/tapmodels-session-repair/resume_sessions.py
+08	API Key 客户端配置与下载工具	documentation	M	5	5	frontend/public/install/README.md
+08	API Key 客户端配置与下载工具	business	M	5	6	frontend/public/install/claude-code.sh
+08	API Key 客户端配置与下载工具	business	M	9	10	frontend/public/install/codex.sh
+09	品牌界面、文档站与用户体验	asset	M	21	22	frontend/public/logo.svg
+09	品牌界面、文档站与用户体验	business	M	1	1	frontend/src/components/home/GatewayShowcase.vue
+08	API Key 客户端配置与下载工具	business	M	24	24	frontend/src/components/keys/UseKeyModal.vue
+08	API Key 客户端配置与下载工具	test	M	12	12	frontend/src/components/keys/__tests__/UseKeyModal.spec.ts
+09	品牌界面、文档站与用户体验	business	M	2	2	frontend/src/components/layout/AuthLayout.vue
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/components/layout/README.md
+09	品牌界面、文档站与用户体验	business	M	16	16	frontend/src/config/brand.ts
+09	品牌界面、文档站与用户体验	test	M	1	1	frontend/src/content/docs/__tests__/examples.spec.ts
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/en/api/chat/anthropic-messages.md
+09	品牌界面、文档站与用户体验	documentation	M	6	6	frontend/src/content/docs/en/api/chat/gemini-native.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/en/api/chat/grok-native.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/en/api/chat/openai-chat.md
+09	品牌界面、文档站与用户体验	documentation	M	4	4	frontend/src/content/docs/en/api/chat/openai-responses.md
+09	品牌界面、文档站与用户体验	documentation	M	5	5	frontend/src/content/docs/en/api/image/openai-image.md
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/content/docs/en/api/protocols.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/en/api/query/embeddings.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/en/api/query/models.md
+09	品牌界面、文档站与用户体验	documentation	M	6	6	frontend/src/content/docs/en/api/query/token-count.md
+03	原生网关与多媒体安全	documentation	M	10	11	frontend/src/content/docs/en/apps/claude-code.md
+03	原生网关与多媒体安全	documentation	M	3	3	frontend/src/content/docs/en/apps/claude-desktop.md
+09	品牌界面、文档站与用户体验	documentation	M	12	13	frontend/src/content/docs/en/apps/codex.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/en/apps/console.md
+09	品牌界面、文档站与用户体验	documentation	M	6	6	frontend/src/content/docs/en/apps/image-skills.md
+09	品牌界面、文档站与用户体验	documentation	M	4	4	frontend/src/content/docs/en/apps/index.md
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/content/docs/en/apps/session-recovery-claude.md
+09	品牌界面、文档站与用户体验	documentation	M	4	4	frontend/src/content/docs/en/apps/session-recovery-codex.md
+09	品牌界面、文档站与用户体验	documentation	M	4	4	frontend/src/content/docs/en/authentication.md
+09	品牌界面、文档站与用户体验	documentation	M	2	2	frontend/src/content/docs/en/downloads.md
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/content/docs/en/errors.md
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/content/docs/en/limits.md
+09	品牌界面、文档站与用户体验	documentation	M	2	2	frontend/src/content/docs/en/pricing.md
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/content/docs/en/quickstart.md
+09	品牌界面、文档站与用户体验	business	M	4	4	frontend/src/content/docs/examples.ts
+09	品牌界面、文档站与用户体验	documentation	M	9	9	frontend/src/content/docs/ja/apps/codex.md
+09	品牌界面、文档站与用户体验	documentation	M	2	2	frontend/src/content/docs/ja/apps/console.md
+09	品牌界面、文档站与用户体验	documentation	M	4	4	frontend/src/content/docs/ja/apps/index.md
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/content/docs/ja/apps/session-recovery-claude.md
+09	品牌界面、文档站与用户体验	documentation	M	4	4	frontend/src/content/docs/ja/apps/session-recovery-codex.md
+09	品牌界面、文档站与用户体验	documentation	M	2	2	frontend/src/content/docs/ja/pricing.md
+09	品牌界面、文档站与用户体验	generated	M	3	3	frontend/src/content/docs/zh-TW/api/chat/anthropic-messages.md
+09	品牌界面、文档站与用户体验	generated	M	6	6	frontend/src/content/docs/zh-TW/api/chat/gemini-native.md
+09	品牌界面、文档站与用户体验	generated	M	3	3	frontend/src/content/docs/zh-TW/api/chat/grok-native.md
+09	品牌界面、文档站与用户体验	generated	M	3	3	frontend/src/content/docs/zh-TW/api/chat/openai-chat.md
+09	品牌界面、文档站与用户体验	generated	M	3	3	frontend/src/content/docs/zh-TW/api/chat/openai-responses.md
+09	品牌界面、文档站与用户体验	generated	M	5	5	frontend/src/content/docs/zh-TW/api/image/openai-image.md
+09	品牌界面、文档站与用户体验	generated	M	1	1	frontend/src/content/docs/zh-TW/api/protocols.md
+09	品牌界面、文档站与用户体验	generated	M	3	3	frontend/src/content/docs/zh-TW/api/query/embeddings.md
+09	品牌界面、文档站与用户体验	generated	M	3	3	frontend/src/content/docs/zh-TW/api/query/models.md
+09	品牌界面、文档站与用户体验	generated	M	6	6	frontend/src/content/docs/zh-TW/api/query/token-count.md
+03	原生网关与多媒体安全	generated	M	12	13	frontend/src/content/docs/zh-TW/apps/claude-code.md
+03	原生网关与多媒体安全	generated	M	4	4	frontend/src/content/docs/zh-TW/apps/claude-desktop.md
+09	品牌界面、文档站与用户体验	generated	M	14	15	frontend/src/content/docs/zh-TW/apps/codex.md
+09	品牌界面、文档站与用户体验	generated	M	7	7	frontend/src/content/docs/zh-TW/apps/console.md
+09	品牌界面、文档站与用户体验	generated	M	7	7	frontend/src/content/docs/zh-TW/apps/image-skills.md
+09	品牌界面、文档站与用户体验	generated	M	3	3	frontend/src/content/docs/zh-TW/apps/index.md
+09	品牌界面、文档站与用户体验	generated	M	1	1	frontend/src/content/docs/zh-TW/apps/session-recovery-claude.md
+09	品牌界面、文档站与用户体验	generated	M	4	4	frontend/src/content/docs/zh-TW/apps/session-recovery-codex.md
+09	品牌界面、文档站与用户体验	generated	M	5	5	frontend/src/content/docs/zh-TW/authentication.md
+09	品牌界面、文档站与用户体验	generated	M	2	2	frontend/src/content/docs/zh-TW/downloads.md
+09	品牌界面、文档站与用户体验	generated	M	1	1	frontend/src/content/docs/zh-TW/errors.md
+09	品牌界面、文档站与用户体验	generated	M	1	1	frontend/src/content/docs/zh-TW/limits.md
+09	品牌界面、文档站与用户体验	generated	M	1	1	frontend/src/content/docs/zh-TW/pricing.md
+09	品牌界面、文档站与用户体验	generated	M	3	3	frontend/src/content/docs/zh-TW/quickstart.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/zh/api/chat/anthropic-messages.md
+09	品牌界面、文档站与用户体验	documentation	M	6	6	frontend/src/content/docs/zh/api/chat/gemini-native.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/zh/api/chat/grok-native.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/zh/api/chat/openai-chat.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/zh/api/chat/openai-responses.md
+09	品牌界面、文档站与用户体验	documentation	M	5	5	frontend/src/content/docs/zh/api/image/openai-image.md
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/content/docs/zh/api/protocols.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/zh/api/query/embeddings.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/zh/api/query/models.md
+09	品牌界面、文档站与用户体验	documentation	M	6	6	frontend/src/content/docs/zh/api/query/token-count.md
+03	原生网关与多媒体安全	documentation	M	12	13	frontend/src/content/docs/zh/apps/claude-code.md
+03	原生网关与多媒体安全	documentation	M	4	4	frontend/src/content/docs/zh/apps/claude-desktop.md
+09	品牌界面、文档站与用户体验	documentation	M	14	15	frontend/src/content/docs/zh/apps/codex.md
+09	品牌界面、文档站与用户体验	documentation	M	7	7	frontend/src/content/docs/zh/apps/console.md
+09	品牌界面、文档站与用户体验	documentation	M	7	7	frontend/src/content/docs/zh/apps/image-skills.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/zh/apps/index.md
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/content/docs/zh/apps/session-recovery-claude.md
+09	品牌界面、文档站与用户体验	documentation	M	4	4	frontend/src/content/docs/zh/apps/session-recovery-codex.md
+09	品牌界面、文档站与用户体验	documentation	M	5	5	frontend/src/content/docs/zh/authentication.md
+09	品牌界面、文档站与用户体验	documentation	M	2	2	frontend/src/content/docs/zh/downloads.md
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/content/docs/zh/errors.md
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/content/docs/zh/limits.md
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/content/docs/zh/pricing.md
+09	品牌界面、文档站与用户体验	documentation	M	3	3	frontend/src/content/docs/zh/quickstart.md
+10	多语言与繁体生成	business	M	2	2	frontend/src/i18n/locales/en/admin/accounts.ts
+10	多语言与繁体生成	business	M	1	1	frontend/src/i18n/locales/en/admin/overview.ts
+10	多语言与繁体生成	business	M	2	2	frontend/src/i18n/locales/en/admin/settings.ts
+10	多语言与繁体生成	business	M	1	1	frontend/src/i18n/locales/en/common.ts
+10	多语言与繁体生成	business	M	5	5	frontend/src/i18n/locales/en/dashboard.ts
+10	多语言与繁体生成	business	M	6	6	frontend/src/i18n/locales/en/docs.ts
+10	多语言与繁体生成	business	M	2	2	frontend/src/i18n/locales/en/misc.ts
+10	多语言与繁体生成	business	M	5	5	frontend/src/i18n/locales/ja/docs.ts
+10	多语言与繁体生成	generated	M	2	2	frontend/src/i18n/locales/zh-TW/admin/accounts.ts
+10	多语言与繁体生成	generated	M	1	1	frontend/src/i18n/locales/zh-TW/admin/overview.ts
+10	多语言与繁体生成	generated	M	2	2	frontend/src/i18n/locales/zh-TW/admin/settings.ts
+10	多语言与繁体生成	generated	M	1	1	frontend/src/i18n/locales/zh-TW/common.ts
+10	多语言与繁体生成	generated	M	6	6	frontend/src/i18n/locales/zh-TW/dashboard.ts
+10	多语言与繁体生成	generated	M	8	8	frontend/src/i18n/locales/zh-TW/docs.ts
+10	多语言与繁体生成	generated	M	2	2	frontend/src/i18n/locales/zh-TW/landing.ts
+10	多语言与繁体生成	generated	M	2	2	frontend/src/i18n/locales/zh-TW/misc.ts
+10	多语言与繁体生成	business	M	2	2	frontend/src/i18n/locales/zh/admin/accounts.ts
+10	多语言与繁体生成	business	M	1	1	frontend/src/i18n/locales/zh/admin/overview.ts
+10	多语言与繁体生成	business	M	2	2	frontend/src/i18n/locales/zh/admin/settings.ts
+10	多语言与繁体生成	business	M	1	1	frontend/src/i18n/locales/zh/common.ts
+10	多语言与繁体生成	business	M	6	6	frontend/src/i18n/locales/zh/dashboard.ts
+10	多语言与繁体生成	business	M	8	8	frontend/src/i18n/locales/zh/docs.ts
+10	多语言与繁体生成	business	M	2	2	frontend/src/i18n/locales/zh/landing.ts
+10	多语言与繁体生成	business	M	2	2	frontend/src/i18n/locales/zh/misc.ts
+12	跨功能设置、路由与依赖装配	documentation	M	1	1	frontend/src/router/README.md
+12	跨功能设置、路由与依赖装配	documentation	M	1	1	frontend/src/stores/README.md
+09	品牌界面、文档站与用户体验	business	M	6	45	frontend/src/views/HomeView.vue
+06	用量排行与页面加载	business	M	2	9	frontend/src/views/KeyUsageView.vue
+04	账号、Anthropic 授权与调度	business	M	1	1	frontend/src/views/admin/AccountsView.vue
+02	三级角色、会话与管理授权	business	M	1	1	frontend/src/views/admin/ProxiesView.vue
+12	跨功能设置、路由与依赖装配	test	M	4	4	frontend/src/views/admin/__tests__/SettingsView.spec.ts
+12	跨功能设置、路由与依赖装配	documentation	M	1	1	frontend/src/views/auth/README.md
+06	用量排行与页面加载	documentation	M	2	2	frontend/src/views/auth/USAGE_EXAMPLES.md
+12	跨功能设置、路由与依赖装配	documentation	M	7	7	frontend/src/views/auth/VISUAL_GUIDE.md
+09	品牌界面、文档站与用户体验	business	M	2	2	frontend/src/views/setup/SetupWizardView.vue
+09	品牌界面、文档站与用户体验	business	M	1	1	frontend/src/views/user/BatchImageGuideView.vue
+12	跨功能设置、路由与依赖装配	business	M	1	1	frontend/vite.config.ts
+08	API Key 客户端配置与下载工具	documentation	M	2	2	skills/sub2api-admin/SKILL.md
+08	API Key 客户端配置与下载工具	tooling/config	M	3	3	skills/sub2api-admin/agents/openai.yaml
+08	API Key 客户端配置与下载工具	documentation	M	2	2	skills/sub2api-admin/references/admin-cli.md
+08	API Key 客户端配置与下载工具	tooling/config	M	8	8	tools/build_docs_downloads.py
+08	API Key 客户端配置与下载工具	test	M	1	1	tools/tests/test_claude_session_recovery.py
+08	API Key 客户端配置与下载工具	test	M	8	8	tools/tests/test_docs_downloads.py
+08	API Key 客户端配置与下载工具	test	M	16	16	tools/tests/test_image_skills.py
+08	API Key 客户端配置与下载工具	test	M	6	6	tools/tests/test_session_recovery_commands.py
+08	API Key 客户端配置与下载工具	test	M	3	3	tools/tests/test_session_repair.py
+10	多语言与繁体生成	documentation	M	2	2	tools/zh-tw/README.md
