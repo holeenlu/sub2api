@@ -147,6 +147,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { LoginAgreementDocument } from '@/types'
+import { matchLegalDocumentIcon, type LegalDocumentIcon } from '@/utils/legalDocumentIcon'
 
 const { t } = useI18n()
 
@@ -190,28 +191,13 @@ function handleCheckboxChange(event: Event): void {
   }
 }
 
-function documentIcon(index: number, title: string): 'document' | 'shield' | 'globe' | 'cog' {
-  const normalizedTitle = title.toLowerCase()
-  if (
-    normalizedTitle.includes('policy') ||
-    normalizedTitle.includes('privacy') ||
-    title.includes('政策') ||
-    title.includes('隐私')
-  ) {
-    return 'shield'
+function documentIcon(index: number, title: string): LegalDocumentIcon {
+  const matched = matchLegalDocumentIcon(title)
+  if (matched) {
+    return matched
   }
-  if (
-    normalizedTitle.includes('country') ||
-    normalizedTitle.includes('region') ||
-    title.includes('国家') ||
-    title.includes('地区')
-  ) {
-    return 'globe'
-  }
-  if (index === 3) {
-    return 'cog'
-  }
-  return 'document'
+  // 兜底：默认文档顺序里第 4 份是「服务特定条款」
+  return index === 3 ? 'cog' : 'document'
 }
 </script>
 

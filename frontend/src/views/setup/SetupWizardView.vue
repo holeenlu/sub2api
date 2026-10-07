@@ -15,6 +15,21 @@
       </div>
 
       <!-- Progress Steps -->
+      <div v-if="!installSuccess" class="mb-6 rounded-xl bg-white p-5 shadow-sm dark:bg-dark-800">
+        <label for="setup-token" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-200">
+          {{ t('setup.bootstrapToken') }}
+        </label>
+        <input
+          id="setup-token"
+          v-model="bootstrapToken"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          class="input w-full"
+          :placeholder="t('setup.bootstrapTokenPlaceholder')"
+        />
+        <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ t('setup.bootstrapTokenHint') }}</p>
+      </div>
       <div class="mb-8">
         <div class="flex items-center justify-center">
           <template v-for="(step, index) in steps" :key="step.id">
@@ -131,7 +146,7 @@
                 v-model="formData.database.dbname"
                 type="text"
                 class="input"
-                placeholder="sub2api"
+                placeholder="kdan"
               />
             </div>
             <div>
@@ -150,7 +165,7 @@
 
           <button
             @click="testDatabaseConnection"
-            :disabled="testingDb"
+            :disabled="testingDb || !bootstrapToken.trim()"
             class="btn btn-secondary w-full"
           >
             <svg
@@ -260,7 +275,7 @@
 
           <button
             @click="testRedisConnection"
-            :disabled="testingRedis"
+            :disabled="testingRedis || !bootstrapToken.trim()"
             class="btn btn-secondary w-full"
           >
             <svg
@@ -467,7 +482,7 @@
           <button
             v-else-if="!installSuccess"
             @click="performInstall"
-            :disabled="installing"
+            :disabled="installing || !bootstrapToken.trim()"
             class="btn btn-primary"
           >
             <svg
@@ -545,7 +560,7 @@ const formData = reactive<InstallRequest>({
     port: 5432,
     user: 'postgres',
     password: '',
-    dbname: 'sub2api',
+    dbname: 'kdan',
     sslmode: 'disable'
   },
   redis: {
@@ -567,7 +582,10 @@ const formData = reactive<InstallRequest>({
   }
 })
 
+const bootstrapToken = ref('')
+
 const canProceed = computed(() => {
+  if (!bootstrapToken.value.trim()) return false
   switch (currentStep.value) {
     case 0:
       return dbConnected.value
@@ -590,7 +608,7 @@ async function testDatabaseConnection() {
   dbConnected.value = false
 
   try {
-    await testDatabase(formData.database)
+    await testDatabase(formData.database, bootstrapToken.value)
     dbConnected.value = true
   } catch (error: unknown) {
     const err = error as { response?: { data?: { detail?: string; message?: string } }; message?: string }
@@ -607,7 +625,7 @@ async function testRedisConnection() {
   redisConnected.value = false
 
   try {
-    await testRedis(formData.redis)
+    await testRedis(formData.redis, bootstrapToken.value)
     redisConnected.value = true
   } catch (error: unknown) {
     const err = error as { response?: { data?: { detail?: string; message?: string } }; message?: string }
@@ -630,7 +648,8 @@ async function performInstall() {
   errorMessage.value = ''
 
   try {
-    await install(formData)
+    await install(formData, bootstrapToken.value)
+    bootstrapToken.value = ''
     installSuccess.value = true
     // Start polling for service restart
     waitForServiceRestart()

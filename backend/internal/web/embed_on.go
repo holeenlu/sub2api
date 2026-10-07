@@ -24,6 +24,13 @@ import (
 const (
 	// NonceHTMLPlaceholder is the placeholder for nonce in HTML script tags
 	NonceHTMLPlaceholder = "__CSP_NONCE_VALUE__"
+
+	// defaultTitleSuffix is appended after the configured site name when the
+	// embedded SPA shell's <title> is rewritten at request time. Brand branches
+	// change this value together with BRAND_TITLE_SUFFIX_EN in
+	// frontend/src/config/brand.ts; it is a local constant so the web package
+	// stays free of a dependency on internal/service.
+	defaultTitleSuffix = "AI API Gateway"
 )
 
 //go:embed all:dist
@@ -285,7 +292,7 @@ func injectSiteTitle(html, settingsJSON []byte) []byte {
 		return html
 	}
 
-	newTitle := []byte("<title>" + htmlpkg.EscapeString(cfg.SiteName) + " - AI API Gateway</title>")
+	newTitle := []byte("<title>" + htmlpkg.EscapeString(cfg.SiteName) + " - " + defaultTitleSuffix + "</title>")
 	var buf bytes.Buffer
 	buf.Write(html[:titleStart])
 	buf.Write(newTitle)

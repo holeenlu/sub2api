@@ -274,7 +274,7 @@ const pulseStyle = computed(() => {
   }
 })
 const axisStart = computed(() =>
-  bucketStarts.value.length ? formatAxisTime(bucketStarts.value[0]) : '时间脉冲'
+  bucketStarts.value.length ? formatAxisTime(bucketStarts.value[0]) : t('ui.timePulse')
 )
 const axisEnd = computed(() =>
   bucketStarts.value.length ? formatAxisTime(bucketStarts.value[bucketStarts.value.length - 1]) : ''

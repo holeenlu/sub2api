@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 import BaseDialog from '../BaseDialog.vue'
+import i18n from '@/i18n'
 
 enableAutoUnmount(afterEach)
 
 function dialog(show = true) {
-  return mount(BaseDialog, { props: { show, title: 'Details' }, global: { stubs: { Icon: true } } })
+  return mount(BaseDialog, { props: { show, title: 'Details' }, global: { plugins: [i18n], stubs: { Icon: true } } })
 }
 
 const locked = () => document.body.classList.contains('modal-open')
