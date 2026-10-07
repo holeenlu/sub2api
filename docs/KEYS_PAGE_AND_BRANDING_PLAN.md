@@ -15,7 +15,7 @@
 |---|------|------|---------|------|---------|
 | 1 | 移除「导入到 CCS」 | 前端（可选后端清理） | 小 | 可选 | 是否连带删除 `hide_ccs_import_button` 设置 |
 | 2 | 「使用密钥」默认模型升级 | 前端 | 小 | 否 | Antigravity/Composite 是否同步；`gpt-6-astra` 参数 |
-| 3 | 配置块增加「下载」 | 前端 | 小 | 否 | 下载覆盖哪些文件 |
+| 3 | 配置块增加「下载」 | 前端 | 小 | 否 | 已实现 Codex config.toml、auth.json；其他配置是否下载待定 |
 | 4 | Codex 模型目录按分组顺序排列 | **后端** | 小 | 是 | 无 |
 | 5 | 品牌 / 赞助商 盘点 | 全项目 | 盘点（本次不改码） | — | 白标策略 |
 
@@ -121,6 +121,8 @@ review_model = "${model}"
 
 普通 CLI 和 WebSocket 两条生成路径都只选择一次主模型，`review_model` 直接复用该结果，不独立选择 Terra。`selectCodexCatalogModel()`（L657）的语义是：用户点过「获取目录」且目录里没有首选模型时，退回目录第 1 个；未获取目录时原样返回首选值。改动后这个语义不变，兜底后两个配置键仍必须同值。Composite 和其他 routed Codex 配置同样遵守此约束。
 
+> 2026-10-07 已实现目录自动读取：Codex 标签打开即用当前 Key 读取目录，并按 Key 缓存到离开 /keys 页，关闭重开或切换标签不再退回首选值；缓存超过 60 秒时后台刷新，刷新失败保留已有目录。首次读取完成前，依赖目录的 config.toml 不可复制或下载。兜底跳过 `visibility` 不是 `list` 的条目。首选值仍为 `gpt-5.5`，本节的默认模型升级未实施。
+
 **注意**：后端 `configuredCodexGPTReasoningLevels()`（`openai_codex_models_service.go` L562）为 `gpt-5.6-sol`/`gpt-5.6-terra` 额外声明了 `ultra` 档，目录获取后 `codexReasoningEffortTomlLine` 会按目录 `default_reasoning_level` 生成 `model_reasoning_effort`，不需要前端硬编码。
 
 **决策点**：`preferredModels.composite: 'gpt-5.5'`（L1222）是否同步改为 `gpt-5.6-sol`？需求未提，建议同步改以保持一致，但需确认 Composite 分组的路由表里有该模型。
@@ -174,7 +176,9 @@ review_model = "${model}"
 
 ---
 
-## 3. 配置块增加「下载」按钮
+## 3. 配置块增加「下载」按钮（部分实现）
+
+> 2026-10-07 已实现 Codex 的 config.toml（全部 Codex 标签）与 auth.json（auth.json 模式）下载，展示、复制和下载共用 `file.content`；OpenCode、Grok CLI 和 Claude settings.json 未纳入。远程目录模式不依赖本地目录文件，本地文件模式仍需另行下载 codex-models.json。
 
 ### 3.1 现状
 
