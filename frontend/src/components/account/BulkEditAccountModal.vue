@@ -345,6 +345,7 @@
                 v-model="allowedModels"
                 :model-mappings="modelMappings"
                 :platforms="targetSelectedPlatforms"
+                :sync-account-ids="canSyncAnthropicUpstream ? resolveSyncAccountIds : undefined"
               />
 
               <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -1557,6 +1558,22 @@ const allTargetsGrok = computed(
     targetSelectedPlatforms.value.every((p) => p === 'grok')
 )
 const isMixedPlatform = computed(() => targetSelectedPlatforms.value.length > 1)
+const canSyncAnthropicUpstream = computed(() =>
+  targetSelectedPlatforms.value.length === 1 && targetSelectedPlatforms.value[0] === 'anthropic' &&
+  targetSelectedTypes.value.length > 0 &&
+  targetSelectedTypes.value.every(type => ['oauth', 'setup-token', 'apikey'].includes(type))
+)
+const resolveSyncAccountIds = async (): Promise<number[]> => {
+  if (targetMode.value === 'selected') return [...props.accountIds]
+  const ids = new Set<number>()
+  const filters = { ...props.target?.filters, lite: 'true' }
+  for (let page = 1; ; page += 1) {
+    const result = await adminAPI.accounts.list(page, 100, filters)
+    for (const account of result.items) ids.add(account.id)
+    if (page >= result.pages || result.items.length === 0) break
+  }
+  return [...ids]
+}
 
 const allOpenAIPassthroughCapable = computed(() => {
   return (
