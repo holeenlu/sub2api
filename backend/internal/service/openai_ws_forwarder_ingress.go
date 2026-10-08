@@ -987,6 +987,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
+		// ChatGPT upstreams open every turn with codex.rate_limits and
+		// codex.response.metadata before any response.* event, including turns
+		// that then fail with a request rejection. Forwarding them straight away
+		// set wroteDownstream and silently disabled every pre-output recovery
+		// below (rejected-field retry, rate-limit failover, previous-response
+		// recovery). Hold them until the first real event instead: they are
+		// flushed in order ahead of it, and dropped with the attempt when the
+		// turn is retried. Dropping matters, not just order — Codex stores the
+		// metadata's x-codex-turn-state in a OnceLock, so a duplicate from a
+		// discarded attempt would pin the rest of the turn to the routing that
+		// just rejected it.
+		var heldTurnMetadata [][]byte
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -1209,7 +1221,24 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						clientMessage = rewritten
 					}
 				}
-				if err := writeClientMessage(clientMessage); err != nil {
+				holdMetadata := !wroteDownstream && isOpenAIWSTurnMetadataEvent(eventType)
+				var writeErr error
+				if holdMetadata {
+					heldTurnMetadata = append(heldTurnMetadata, append([]byte(nil), clientMessage...))
+				} else {
+					for len(heldTurnMetadata) > 0 && writeErr == nil {
+						if writeErr = writeClientMessage(heldTurnMetadata[0]); writeErr == nil {
+							wroteDownstream = true
+						}
+						heldTurnMetadata = heldTurnMetadata[1:]
+					}
+					if writeErr == nil {
+						writeErr = writeClientMessage(clientMessage)
+					}
+				}
+				if holdMetadata {
+					// Not on the wire yet, so wroteDownstream stays false.
+				} else if err := writeErr; err != nil {
 					if isOpenAIWSClientDisconnectError(err) {
 						clientDisconnected = true
 						closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
