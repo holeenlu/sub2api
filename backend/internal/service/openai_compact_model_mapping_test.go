@@ -58,7 +58,7 @@ func TestOpenAIGatewayService_Forward_CompactOnlyModelMappingOverridesOAuthUpstr
 	require.Equal(t, "gpt-5.4-openai-compact", opsModel)
 }
 
-func TestOpenAIGatewayService_Forward_APIKeyCompactSanitizesStatelessReplayAfterStoreWasDropped(t *testing.T) {
+func TestOpenAIGatewayService_Forward_APIKeyCompactPreservesUnresolvableStatelessHistory(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -93,8 +93,10 @@ func TestOpenAIGatewayService_Forward_APIKeyCompactSanitizesStatelessReplayAfter
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Exists())
-	require.Equal(t, int64(1), gjson.GetBytes(upstream.lastBody, "input.#").Int())
-	require.Equal(t, "message", gjson.GetBytes(upstream.lastBody, "input.0.type").String())
+	require.Equal(t, int64(3), gjson.GetBytes(upstream.lastBody, "input.#").Int(), "missing persisted history must not be silently discarded")
+	require.Equal(t, "rs_server_only", gjson.GetBytes(upstream.lastBody, "input.0.id").String())
+	require.Equal(t, "item_reference", gjson.GetBytes(upstream.lastBody, "input.1.type").String())
+	require.Equal(t, "message", gjson.GetBytes(upstream.lastBody, "input.2.type").String())
 }
 
 func TestOpenAIGatewayService_Forward_NormalizesCompactionTriggerAfterHistoryCleanup(t *testing.T) {
