@@ -6,6 +6,8 @@ export default {
       description: '維運監控與故障排除',
       // Dashboard
       systemHealth: '系統健康',
+      outputTps: '單次輸出 TPS',
+      outputTpsSamples: '有效樣本：{count}',
       overview: '總覽',
       noSystemMetrics: '尚未收集系統指標。',
       collectedAt: '採集時間：',
@@ -806,6 +808,7 @@ export default {
         accountError: '異常'
       },
       tooltips: {
+        outputTps: '每條有效用量記錄的輸出 Token ÷ 總耗時（含首字等待），再按目前時間、平台和分組計算分位數。輸出可含推理 Token，不重複相加。P50 為中位數，P5/P10 反映較慢請求；數值越高越快。排除圖片、Live、無有效輸出或耗時的記錄。樣本來自仍保留的使用明細；無樣本或統計暫不可用時顯示 —。',
         totalRequests: '目前時間視窗內的總請求數和Token消耗量。',
         throughputTrend: '目前視窗內的請求/QPS 與 token/TPS 趨勢。',
         switchRateTrend: '近5小時內帳號切換次數 / 請求總數的趨勢（平均切換次數）。',
