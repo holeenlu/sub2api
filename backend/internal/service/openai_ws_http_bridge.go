@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -640,6 +641,41 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	clientDisconnected := false
 	officialOpenAIResponses := account != nil && account.Platform == PlatformOpenAI
 	bareErrorPending := false
+	var bareErrorTimer *time.Timer
+	var bareErrorTimerMu sync.Mutex
+	var bareErrorIdleDeadline time.Time
+	// Capture the final wrapped body below, before any timer is armed.
+	setBareErrorIdle := func(active bool) {
+		bareErrorTimerMu.Lock()
+		defer bareErrorTimerMu.Unlock()
+		if bareErrorTimer != nil {
+			bareErrorTimer.Stop()
+		}
+		bareErrorIdleDeadline = time.Time{}
+		if !active {
+			return
+		}
+		timeout := s.openAIWSErrorIdleTimeout(body)
+		bareErrorIdleDeadline = time.Now().Add(timeout)
+		if bareErrorTimer == nil {
+			bodyToClose := resp.Body
+			bareErrorTimer = time.AfterFunc(timeout, func() {
+				bareErrorTimerMu.Lock()
+				defer bareErrorTimerMu.Unlock()
+				if bareErrorIdleDeadline.IsZero() {
+					return
+				}
+				if remaining := time.Until(bareErrorIdleDeadline); remaining > 0 {
+					bareErrorTimer.Reset(remaining)
+					return
+				}
+				_ = bodyToClose.Close()
+			})
+		} else {
+			bareErrorTimer.Reset(timeout)
+		}
+	}
+	defer func() { setBareErrorIdle(false) }()
 	var bareErrorPayload []byte
 	bareErrorMessage := ""
 	failureAccountSideEffectsApplied := false
@@ -673,7 +709,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			Duration:                      time.Since(turnStart),
 			FirstTokenMs:                  firstTokenMs,
 		}
-		if replayInput := replayCollector.Items(); len(replayInput) > 0 {
+		if replayInput := replayCollector.AllItems(); len(replayInput) > 0 {
 			result.wsReplayInput = replayInput
 			result.wsReplayInputExists = true
 		}
@@ -796,12 +832,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		replayCollector.AddEvent(eventType, upstreamMessage)
 
+		if bareErrorPending {
+			setBareErrorIdle(true)
+		}
 		var upstreamEventErr error
-		if officialOpenAIResponses && bareErrorPending && (eventType == "response.completed" || eventType == "response.done") {
+		if officialOpenAIResponses && bareErrorPending && ((isOpenAIWSTerminalEvent(eventType) && eventType != "response.failed") || isOpenAIWSTokenEvent(eventType)) {
 			// Some upstreams emit a recoverable bare error before the authoritative
-			// successful terminal. Do not replace that terminal with a synthetic
+			// terminal or resume semantic output. Do not replace that with a synthetic
 			// failure or retain side effects from the superseded error.
 			bareErrorPending = false
+			setBareErrorIdle(false)
 			bareErrorPayload = nil
 			bareErrorMessage = ""
 		}
@@ -858,12 +898,14 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			if eventType == "error" && !officialOpenAIResponses {
 				upstreamEventErr = errors.New(errMessage)
 			} else if eventType == "error" {
+				setBareErrorIdle(true)
 				bareErrorPending = true
 				bareErrorPayload = append(bareErrorPayload[:0], upstreamMessage...)
 				bareErrorMessage = errMessage
 				suppressClientMessage = true
 			} else {
 				bareErrorPending = false
+				setBareErrorIdle(false)
 			}
 		}
 
@@ -972,9 +1014,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if bareErrorPending {
 		if finalizeErr := finalizeBareError(); finalizeErr != nil {
 			return resultWithUsage(), finalizeErr
-		}
-		if scanErr := scanner.Err(); scanErr != nil {
-			return resultWithUsage(), fmt.Errorf("read upstream http bridge stream after error event: %w", scanErr)
 		}
 		return resultWithUsage(), errors.New(bareErrorMessage)
 	}
