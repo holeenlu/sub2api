@@ -411,6 +411,8 @@ export default {
     latency: 'レイテンシ',
     latencyFirstToken: '初回',
     latencyDuration: '合計',
+    outputTps: '出力TPS',
+    outputTpsHint: '出力トークン数を初回応答待ちを含む総時間で割った値（tok/s）です。出力トークン数には推論トークンが含まれる場合があります。',
     time: '時間',
     ws: 'WS',
     stream: 'ストリーム',

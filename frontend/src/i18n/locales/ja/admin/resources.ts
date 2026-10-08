@@ -531,6 +531,8 @@ ad: {
       allTypes: 'すべてのタイプ',
       inputCost: '入力コスト',
       outputCost: '出力コスト',
+      longContext: '長いコンテキスト',
+      longContextPricingTooltip: '長いコンテキストの料金が適用されました。入力・出力単価は料金階層に従い、一律の倍率ではありません。',
       cacheCreationCost: 'キャッシュ作成コスト',
       cacheReadCost: 'キャッシュ読み取りコスト',
       inputTokens: '入力トークン',
