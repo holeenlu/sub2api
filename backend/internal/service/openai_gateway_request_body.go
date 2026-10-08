@@ -761,7 +761,9 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body []byte, knownStoreFalse
 		encrypted := item.Get("encrypted_content")
 		if (typ == "reasoning" && (encrypted.Type != gjson.String || strings.TrimSpace(encrypted.Str) == "")) ||
 			(typ == "item_reference" && strings.HasPrefix(id, "rs_")) {
-			changed = true
+			// Missing content cannot be repaired by deleting history. Preserve it
+			// for a precise upstream rejection or a complete session replay.
+			items = append(items, item.Raw)
 			return true
 		}
 		stripID := typ == "reasoning" && strings.HasPrefix(id, "rs_")
@@ -838,7 +840,7 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded(body []byte, knownSto
 		case "reasoning":
 			encryptedContent, hasEncryptedContent := item["encrypted_content"].(string)
 			if !hasEncryptedContent || strings.TrimSpace(encryptedContent) == "" {
-				changed = true
+				filtered = append(filtered, item)
 				continue
 			}
 			if strings.HasPrefix(id, "rs_") {
@@ -848,11 +850,6 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded(body []byte, knownSto
 			if summary, ok := item["summary"]; !ok || summary == nil {
 				item["summary"] = []any{}
 				changed = true
-			}
-		case "item_reference":
-			if strings.HasPrefix(id, "rs_") {
-				changed = true
-				continue
 			}
 		}
 		if shouldStripOpenAIResponsesNonPairCallID(typ) {
