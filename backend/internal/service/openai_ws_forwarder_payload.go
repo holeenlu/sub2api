@@ -811,9 +811,40 @@ func buildOpenAIWSCurrentTurnRetryPayload(
 	fullInput []json.RawMessage,
 	fullInputExists bool,
 	originalModel string,
+	sameAccount ...bool,
 ) ([]byte, bool, error) {
 	if !fullInputExists {
 		return nil, false, nil
+	}
+	bytes := len(payload)
+	for _, raw := range fullInput {
+		bytes += len(raw)
+		if bytes > int(openAIWSMessageReadLimitBytes) {
+			return nil, false, nil
+		}
+		item := gjson.ParseBytes(raw)
+		typ := item.Get("type").String()
+		encrypted := item.Get("encrypted_content")
+		if len(sameAccount) == 0 || !sameAccount[0] {
+			var value any
+			if json.Unmarshal(raw, &value) != nil || openAIWSNonPortableValue(value) {
+				return nil, false, nil
+			}
+		}
+		if typ == "item_reference" ||
+			((typ == "reasoning" || typ == "compaction") && (encrypted.Type != gjson.String || strings.TrimSpace(encrypted.String()) == "")) {
+			return nil, false, nil
+		}
+		// Uploaded files belong to an upstream account; possession of their
+		// identifiers does not make a cross-account replay self-contained.
+		if item.Get("file_id").Exists() && (len(sameAccount) == 0 || !sameAccount[0]) {
+			return nil, false, nil
+		}
+		for _, content := range item.Get("content").Array() {
+			if content.Get("file_id").Exists() && (len(sameAccount) == 0 || !sameAccount[0]) {
+				return nil, false, nil
+			}
+		}
 	}
 	retryPayload, err := setOpenAIWSPayloadInputSequence(payload, fullInput, true)
 	if err != nil {
@@ -831,6 +862,52 @@ func buildOpenAIWSCurrentTurnRetryPayload(
 		return nil, false, nil
 	}
 	return retryPayload, true, nil
+}
+
+// Files, item references and encrypted state cannot be assumed portable across
+// credentials merely because their surrounding JSON is available locally.
+func openAIWSNonPortableValue(value any) bool {
+	switch v := value.(type) {
+	case map[string]any:
+		if v["type"] == "item_reference" {
+			return true
+		}
+		for _, key := range []string{"encrypted_content", "file_id"} {
+			if s, ok := v[key].(string); ok && s != "" {
+				return true
+			}
+		}
+		for _, child := range v {
+			if openAIWSNonPortableValue(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if openAIWSNonPortableValue(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Transport failure after a write does not prove the provider did no work.
+// Before output is delivered, function/custom calls have not run on the client.
+// Read-only hosted searches may be replayed at the cost of repeated search usage;
+// other hosted tools and unknown tool kinds may already have side effects.
+func openAIWSUncertainExecutionReplaySafe(payload []byte) bool {
+	if gjson.GetBytes(payload, "tool_choice").String() == "none" {
+		return true
+	}
+	for _, tool := range gjson.GetBytes(payload, "tools").Array() {
+		switch tool.Get("type").String() {
+		case "function", "custom", "web_search", "file_search":
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func shouldKeepIngressPreviousResponseID(
