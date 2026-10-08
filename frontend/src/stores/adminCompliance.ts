@@ -22,6 +22,7 @@ export const useAdminComplianceStore = defineStore('adminCompliance', () => {
   const submitting = ref(false)
   const initialized = ref(false)
   const forceVisible = ref(false)
+  let stateVersion = 0
 
   const required = computed(() => status.value?.required === true)
   const shouldShow = computed(() => required.value || forceVisible.value)
@@ -51,19 +52,22 @@ export const useAdminComplianceStore = defineStore('adminCompliance', () => {
   })
 
   async function fetchStatus(): Promise<AdminComplianceStatus> {
+    const version = stateVersion
     loading.value = true
     try {
       const nextStatus = await adminComplianceAPI.getStatus()
+      if (version !== stateVersion) return nextStatus
       status.value = nextStatus
       initialized.value = true
       forceVisible.value = nextStatus.required
       return nextStatus
     } finally {
-      loading.value = false
+      if (version === stateVersion) loading.value = false
     }
   }
 
   async function accept(phrase: string): Promise<AdminComplianceStatus> {
+    const version = stateVersion
     submitting.value = true
     try {
       // 使用者输入的是界面展示的短语（zh-TW 为繁体），后端只接受简体／英文原文，
@@ -73,11 +77,12 @@ export const useAdminComplianceStore = defineStore('adminCompliance', () => {
         phrase: typed === expectedPhrase.value ? submittedPhrase.value : typed,
         language: submittedLanguage.value
       })
+      if (version !== stateVersion) return nextStatus
       status.value = nextStatus
       forceVisible.value = nextStatus.required
       return nextStatus
     } finally {
-      submitting.value = false
+      if (version === stateVersion) submitting.value = false
     }
   }
 
@@ -98,6 +103,7 @@ export const useAdminComplianceStore = defineStore('adminCompliance', () => {
   }
 
   function reset(): void {
+    stateVersion++
     status.value = null
     loading.value = false
     submitting.value = false
