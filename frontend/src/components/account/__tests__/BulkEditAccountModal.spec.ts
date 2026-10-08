@@ -23,6 +23,7 @@ vi.mock('@/stores/app', () => ({
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
+      list: vi.fn(),
       bulkUpdate: vi.fn(),
       checkMixedChannelRisk: vi.fn()
     }
@@ -82,6 +83,32 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 }
 
 describe('BulkEditAccountModal', () => {
+  it('passes all selected Anthropic accounts to upstream sync', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['anthropic'], selectedTypes: ['oauth', 'setup-token'] })
+    const selector = wrapper.findComponent(ModelWhitelistSelector)
+    expect(await selector.props('syncAccountIds')!()).toEqual([1, 2])
+    expect(selector.text()).toContain('admin.accounts.syncUpstreamModels')
+  })
+
+  it('resolves every filtered page for Anthropic upstream sync', async () => {
+    vi.mocked(adminAPI.accounts.list).mockResolvedValueOnce({ items: [{ id: 3 }], pages: 2 } as any)
+      .mockResolvedValueOnce({ items: [{ id: 4 }], pages: 2 } as any)
+    const wrapper = mountModal({
+      accountIds: [],
+      target: { mode: 'filtered', filters: { platform: 'anthropic', group: '7' }, selectedPlatforms: ['anthropic'], selectedTypes: ['apikey'] }
+    })
+    expect(await wrapper.findComponent(ModelWhitelistSelector).props('syncAccountIds')!()).toEqual([3, 4])
+    expect(adminAPI.accounts.list).toHaveBeenLastCalledWith(2, 100, { platform: 'anthropic', group: '7', lite: 'true' })
+  })
+
+  it('does not offer live sync for unsupported Anthropic Bedrock or Vertex accounts', () => {
+    for (const type of ['bedrock', 'service_account']) {
+      const wrapper = mountModal({ selectedPlatforms: ['anthropic'], selectedTypes: [type] })
+      expect(wrapper.findComponent(ModelWhitelistSelector).props('syncAccountIds')).toBeUndefined()
+      wrapper.unmount()
+    }
+  })
+
   beforeEach(() => {
     vi.mocked(adminAPI.accounts.bulkUpdate).mockReset()
     vi.mocked(adminAPI.accounts.checkMixedChannelRisk).mockReset()
