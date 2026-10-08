@@ -417,6 +417,8 @@ export default {
     latency: '延遲',
     latencyFirstToken: '首字',
     latencyDuration: '總耗時',
+    outputTps: '輸出 TPS',
+    outputTpsHint: '輸出 Token ÷ 總耗時（包含首字等待），單位 tok/s。輸出 Token 可能包含推理 Token。',
     time: '時間',
     ws: 'WS',
     stream: '串流',
