@@ -22,6 +22,15 @@ func TestMarkOpenAIWSClientVisibleFailure_ResponseFailedNestedError(t *testing.T
 }
 
 func TestMarkOpenAIWSClientVisibleFailure_ErrorAndSuccessBoundary(t *testing.T) {
+	t.Run("local client restriction is not an upstream error", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(nil)
+		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+		markOpenAIWSClientVisibleFailure(c, "error", []byte(`{"type":"error","status":403,"error":{"type":"permission_error","message":"client restricted"}}`))
+		got, ok := GetOpsStreamError(c)
+		require.True(t, ok)
+		require.Zero(t, got.UpstreamStatus)
+		require.Empty(t, got.UpstreamMessage)
+	})
 	t.Run("error", func(t *testing.T) {
 		c, _ := gin.CreateTestContext(nil)
 		markOpenAIWSClientVisibleFailure(c, "error", []byte(`{"type":"error","error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"slow down"}}`))

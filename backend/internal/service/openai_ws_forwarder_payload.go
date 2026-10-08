@@ -815,6 +815,25 @@ func buildOpenAIWSCurrentTurnRetryPayload(
 	if !fullInputExists {
 		return nil, false, nil
 	}
+	for _, raw := range fullInput {
+		item := gjson.ParseBytes(raw)
+		typ := item.Get("type").String()
+		encrypted := item.Get("encrypted_content")
+		if typ == "item_reference" ||
+			((typ == "reasoning" || typ == "compaction") && (encrypted.Type != gjson.String || strings.TrimSpace(encrypted.String()) == "")) {
+			return nil, false, nil
+		}
+		// Uploaded files belong to an upstream account; possession of their
+		// identifiers does not make a cross-account replay self-contained.
+		if item.Get("file_id").Exists() {
+			return nil, false, nil
+		}
+		for _, content := range item.Get("content").Array() {
+			if content.Get("file_id").Exists() {
+				return nil, false, nil
+			}
+		}
+	}
 	retryPayload, err := setOpenAIWSPayloadInputSequence(payload, fullInput, true)
 	if err != nil {
 		return nil, false, err

@@ -74,15 +74,15 @@ type OpenAIWSStateStore interface {
 
 	BindResponseConn(responseID, connID string, ttl time.Duration)
 	GetResponseConn(responseID string) (string, bool)
-	DeleteResponseConn(responseID string)
+	DeleteResponseConn(responseID string, expectedConnID ...string)
 
 	BindSessionTurnState(groupID int64, sessionHash, turnState string, ttl time.Duration)
 	GetSessionTurnState(groupID int64, sessionHash string) (string, bool)
-	DeleteSessionTurnState(groupID int64, sessionHash string)
+	DeleteSessionTurnState(groupID int64, sessionHash string, expectedTurnState ...string)
 
 	BindSessionConn(groupID int64, sessionHash, connID string, ttl time.Duration)
 	GetSessionConn(groupID int64, sessionHash string) (string, bool)
-	DeleteSessionConn(groupID int64, sessionHash string)
+	DeleteSessionConn(groupID int64, sessionHash string, expectedConnID ...string)
 
 	// invalid_encrypted_content lineage：按会话记录已被上游拒绝的
 	// encrypted_content 摘要，后续 turn 进场时仅剥离命中项，避免同一失效
@@ -321,13 +321,15 @@ func (s *defaultOpenAIWSStateStore) GetResponseConn(responseID string) (string, 
 	return binding.connID, true
 }
 
-func (s *defaultOpenAIWSStateStore) DeleteResponseConn(responseID string) {
+func (s *defaultOpenAIWSStateStore) DeleteResponseConn(responseID string, expectedConnID ...string) {
 	id := normalizeOpenAIWSResponseID(responseID)
 	if id == "" {
 		return
 	}
 	s.responseToConnMu.Lock()
-	delete(s.responseToConn, id)
+	if len(expectedConnID) == 0 || s.responseToConn[id].connID == expectedConnID[0] {
+		delete(s.responseToConn, id)
+	}
 	s.responseToConnMu.Unlock()
 }
 
@@ -366,13 +368,15 @@ func (s *defaultOpenAIWSStateStore) GetSessionTurnState(groupID int64, sessionHa
 	return binding.turnState, true
 }
 
-func (s *defaultOpenAIWSStateStore) DeleteSessionTurnState(groupID int64, sessionHash string) {
+func (s *defaultOpenAIWSStateStore) DeleteSessionTurnState(groupID int64, sessionHash string, expectedTurnState ...string) {
 	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
 	if key == "" {
 		return
 	}
 	s.sessionToTurnStateMu.Lock()
-	delete(s.sessionToTurnState, key)
+	if len(expectedTurnState) == 0 || s.sessionToTurnState[key].turnState == expectedTurnState[0] {
+		delete(s.sessionToTurnState, key)
+	}
 	s.sessionToTurnStateMu.Unlock()
 }
 
@@ -411,13 +415,15 @@ func (s *defaultOpenAIWSStateStore) GetSessionConn(groupID int64, sessionHash st
 	return binding.connID, true
 }
 
-func (s *defaultOpenAIWSStateStore) DeleteSessionConn(groupID int64, sessionHash string) {
+func (s *defaultOpenAIWSStateStore) DeleteSessionConn(groupID int64, sessionHash string, expectedConnID ...string) {
 	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
 	if key == "" {
 		return
 	}
 	s.sessionToConnMu.Lock()
-	delete(s.sessionToConn, key)
+	if len(expectedConnID) == 0 || s.sessionToConn[key].connID == expectedConnID[0] {
+		delete(s.sessionToConn, key)
+	}
 	s.sessionToConnMu.Unlock()
 }
 

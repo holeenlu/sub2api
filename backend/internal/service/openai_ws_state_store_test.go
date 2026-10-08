@@ -10,6 +10,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOpenAIWSStateStore_ConnectionCleanupDoesNotDeleteReplacement(t *testing.T) {
+	store := NewOpenAIWSStateStore(nil)
+	store.BindResponseConn("resp_1", "replacement", time.Hour)
+	store.BindSessionConn(7, "session", "replacement", time.Hour)
+	store.BindSessionTurnState(7, "session", "new-state", time.Hour)
+	store.DeleteResponseConn("resp_1", "expired")
+	store.DeleteSessionConn(7, "session", "expired")
+	store.DeleteSessionTurnState(7, "session", "old-state")
+	conn, ok := store.GetResponseConn("resp_1")
+	require.True(t, ok)
+	require.Equal(t, "replacement", conn)
+	conn, ok = store.GetSessionConn(7, "session")
+	require.True(t, ok)
+	require.Equal(t, "replacement", conn)
+	state, ok := store.GetSessionTurnState(7, "session")
+	require.True(t, ok)
+	require.Equal(t, "new-state", state)
+	store.DeleteResponseConn("resp_1", "replacement")
+	store.DeleteSessionConn(7, "session", "replacement")
+	store.DeleteSessionTurnState(7, "session", "new-state")
+	_, ok = store.GetResponseConn("resp_1")
+	require.False(t, ok)
+	_, ok = store.GetSessionConn(7, "session")
+	require.False(t, ok)
+	_, ok = store.GetSessionTurnState(7, "session")
+	require.False(t, ok)
+}
+
 func TestOpenAIWSStateStore_BindGetDeleteResponseAccount(t *testing.T) {
 	cache := &stubGatewayCache{}
 	store := NewOpenAIWSStateStore(cache)

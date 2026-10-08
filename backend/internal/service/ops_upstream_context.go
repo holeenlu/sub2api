@@ -42,9 +42,12 @@ const (
 	// 上就地(in-band)补发错误帧时记录的 OpsStreamError。因为 wire 状态码停留在 200，
 	// ops_error_logger 的 status>=400 采集路径永远不会触发，这类流内失败
 	//（例如等待并发槽位超时后回退的限流、Wait 后二次计费校验失败）本会在错误看板里隐形。
-	OpsStreamErrorKey  = "ops_stream_error"
-	OpsStreamErrorsKey = "ops_stream_errors"
-	OpsStreamTurnKey   = "ops_stream_turn"
+	OpsStreamErrorKey          = "ops_stream_error"
+	OpsStreamErrorsKey         = "ops_stream_errors"
+	OpsStreamTurnKey           = "ops_stream_turn"
+	OpsStreamTurnSucceededKey  = "ops_stream_turn_succeeded"
+	OpsStreamRecoveryLoggedKey = "ops_ws_recovery_logged"
+	OpsStreamTurnStartedAtKey  = "ops_stream_turn_started_at"
 
 	// Client-side configuration denials should remain visible in ops_error_logs,
 	// but should be excluded from SLA/error-rate calculations.
@@ -179,6 +182,9 @@ func BeginOpsStreamTurn(c *gin.Context, turn int) {
 		return
 	}
 	c.Set(OpsStreamTurnKey, turn)
+	c.Set(OpsStreamTurnSucceededKey, false)
+	c.Set(OpsStreamRecoveryLoggedKey, false)
+	c.Set(OpsStreamTurnStartedAtKey, time.Now())
 	// Rule and attempt state is turn-scoped on a long-lived WS connection.
 	c.Set(OpsSkipPassthroughKey, false)
 	c.Set(OpsUpstreamErrorsKey, []*OpsUpstreamErrorEvent{})
