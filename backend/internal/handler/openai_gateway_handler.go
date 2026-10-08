@@ -78,7 +78,7 @@ func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 }
 
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
-	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) && !errors.Is(err, service.ErrOpenAIWSCodexClientRestricted) && !service.IsOpenAIWSSessionPreemptedError(err)
+	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) && !errors.Is(err, service.ErrOpenAIWSCodexClientRestricted) && !errors.Is(err, service.ErrOpenAIWSReplayUnavailable) && !errors.Is(err, service.ErrOpenAIWSFirstOutputBudgetExhausted) && !service.IsOpenAIWSSessionPreemptedError(err)
 }
 
 // openAIWSIngressEndedByClient reports whether a finished ingress WebSocket turn
@@ -2495,14 +2495,26 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			return
 		}
 		closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
+		failureKind := "client_read_failed"
+		clientCloseReason := "missing first response.create message"
+		if errors.Is(err, context.DeadlineExceeded) {
+			failureKind = "first_message_timeout"
+		} else if strings.Contains(err.Error(), "flate: corrupt input") {
+			failureKind = "compressed_frame_invalid"
+			clientCloseReason = "invalid compressed websocket frame"
+		} else if openAIWSIngressEndedByClient(err) || errors.Is(err, io.EOF) {
+			failureKind = "client_disconnected"
+		}
 		reqLog.Warn("openai.websocket_read_first_message_failed",
 			zap.Error(err),
+			zap.String("failure_kind", failureKind),
+			zap.Bool("permessage_deflate_requested", strings.Contains(c.GetHeader("Sec-WebSocket-Extensions"), "permessage-deflate")),
 			zap.String("client_ip", clientIP),
 			zap.String("close_status", closeStatus),
 			zap.String("close_reason", closeReason),
 			zap.Duration("read_timeout", firstMessageTimeout),
 		)
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "missing first response.create message")
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, clientCloseReason)
 		return
 	}
 	firstTurnStartedAt := time.Now()
@@ -2708,6 +2720,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	wsAttemptMessage := append([]byte(nil), firstMessage...)
+	// Service-local turn numbers restart after an account switch. Ops must keep
+	// one monotonically increasing client turn across those attempts.
+	var wsLogicalTurn atomic.Int64
+	wsLogicalTurn.Store(1)
+	service.BeginOpsStreamTurn(c, 1)
+	c.Set(service.OpsStreamTurnStartedAtKey, firstTurnStartedAt)
 	waitForWSSameAccountRetry := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
 		if account == nil || failoverErr == nil || failoverErr.StatusCode != http.StatusTooManyRequests || failoverErr.SameAccountRetryDeadline.IsZero() {
 			return false
@@ -2747,6 +2765,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			return false
 		}
 		h.gatewayService.RecordOpenAIAccountSwitch()
+		c.Request.Header.Del("x-codex-turn-state")
 		failedAccountIDs[account.ID] = struct{}{}
 		lastFailoverErr = failoverErr
 		if switchCount >= maxAccountSwitches {
@@ -2969,7 +2988,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			TurnStarted:                 recordTurnStart,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
 				c.Set(securityAuditWSTurnContextKey, turn)
-				service.BeginOpsStreamTurn(c, turn)
+				service.BeginOpsStreamTurn(c, int(wsLogicalTurn.Add(1)))
 				setCyberTurnBody(turn, payload)
 				// 连接级 cyber session gate 也在 BeforeRequest 先执行，使 native 与
 				// passthrough ingress 都能在 BeforeTurn 及上游写入前无副作用地拒绝。
@@ -3082,6 +3101,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return checkSimpleModeTurnBilling()
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
+				c.Set(service.OpsStreamTurnSucceededKey, turnErr == nil && result != nil &&
+					(result.UpstreamTerminalEvent == "response.completed" || result.UpstreamTerminalEvent == "response.done" || result.UpstreamTerminalEvent == "response.incomplete"))
+				if c.GetBool(service.OpsStreamTurnSucceededKey) {
+					logOpsRecoveredUpstream(c, h.opsService, http.StatusSwitchingProtocols)
+				}
 				turnStart := getTurnStart(turn)
 				cyberBlockBody := takeCyberTurnBody(turn)
 				// 每次 attempt 都清 cyber mark；failover 链结束前保留 recorded guard，
@@ -3210,6 +3234,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 
 		for {
+			c.Set(service.OpsStreamTurnSucceededKey, false)
+			// Account retries retain this logical turn's start, not the start of
+			// the potentially hour-old client connection and not a fresh budget.
+			hooks.InitialTurnStartedAt = c.GetTime(service.OpsStreamTurnStartedAtKey)
 			err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks)
 			if err == nil {
 				reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
@@ -3297,6 +3325,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 			if shouldReportOpenAIWSProxyAccountFailure(err) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, wsForwardModel, false, nil), false, nil, err)
+			}
+			if service.IsOpenAIWSUpstreamTransportError(err) {
+				status := http.StatusBadGateway
+				if errors.Is(err, context.DeadlineExceeded) {
+					status = http.StatusGatewayTimeout
+				}
+				service.SetOpsUpstreamError(c, status, err.Error(), "")
+				service.MarkOpsStreamFailure(c, "upstream_error", "websocket_transport_error", err.Error(), status)
 			}
 			closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
 			proxyFailedFields := []zap.Field{

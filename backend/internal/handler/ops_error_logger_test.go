@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -373,6 +374,38 @@ func TestOpsErrorLoggerMiddleware_RecordsRecoveredUpstreamTelemetryOutsideFailur
 	require.NoError(t, err)
 	require.Len(t, persistedEvents, 1)
 	require.Equal(t, http.StatusTooManyRequests, persistedEvents[0].UpstreamStatusCode)
+}
+
+func TestOpsRecoveredWebSocketRequiresSuccessfulTurn(t *testing.T) {
+	for _, completed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(completed), func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
+			service.BeginOpsStreamTurn(c, 2)
+			c.Set(service.OpsStreamTurnSucceededKey, completed)
+			service.SetOpsUpstreamError(c, http.StatusBadGateway, "provider failed", "")
+			ops := service.NewOpsService(&ingressRejectOpsRepo{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+			job := <-opsErrorLogQueue
+			if completed {
+				require.Contains(t, job.entry.ErrorMessage, "Recovered upstream error")
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				require.Empty(t, opsErrorLogQueue, "socket close must not duplicate the completed turn")
+				service.BeginOpsStreamTurn(c, 3)
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				require.Empty(t, opsErrorLogQueue, "later disconnected turn cannot relabel earlier recovery")
+				service.SetOpsUpstreamError(c, http.StatusBadGateway, "third turn failed", "")
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				third := <-opsErrorLogQueue
+				require.Contains(t, third.entry.ErrorMessage, "recovery not confirmed")
+				require.Contains(t, job.entry.ErrorMessage, "Recovered upstream error")
+			} else {
+				require.Contains(t, job.entry.ErrorMessage, "recovery not confirmed")
+			}
+		})
+	}
 }
 
 func TestOpsErrorLoggerMiddleware_RecoveredTelemetryFiltersSkipMonitoringAttempts(t *testing.T) {
