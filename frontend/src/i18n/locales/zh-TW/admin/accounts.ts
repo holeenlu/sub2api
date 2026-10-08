@@ -80,6 +80,8 @@ export default {
       editAccount: '編輯帳號',
       deleteAccount: '刪除帳號',
       searchAccounts: '搜尋帳號...',
+      moreFilters: '更多篩選',
+      moreFiltersActive: '更多篩選（已啟用 {count} 項）',
       notes: '備註',
       notesPlaceholder: '請輸入備註',
       notesHint: '備註可選',
@@ -408,7 +410,8 @@ export default {
         refreshSuccess: 'OpenCode Go 用量已重新整理',
         refreshFailed: '重新整理 OpenCode Go 用量失敗',
         errors: {
-          OPENCODE_GO_USAGE_REFRESH_RATE_LIMITED: '重新整理過於頻繁，請在 {retry_after_seconds} 秒後重試。'
+          OPENCODE_GO_USAGE_REFRESH_RATE_LIMITED: '重新整理過於頻繁，請在 {retry_after_seconds} 秒後重試。',
+          forbidden: '上游回傳 403：可能是訂閱缺失/失效，也可能是 WAF 或存取策略攔截，請結合網路路徑與 HTTP 狀態檢查。'
         }
       },
       types: {

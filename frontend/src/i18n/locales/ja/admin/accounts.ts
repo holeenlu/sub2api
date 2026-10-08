@@ -80,6 +80,8 @@ export default {
       editAccount: 'アカウントを編集',
       deleteAccount: 'アカウントを削除',
       searchAccounts: 'アカウントを検索...',
+      moreFilters: '詳細フィルター',
+      moreFiltersActive: '詳細フィルター（{count} 件有効）',
       notes: 'メモ',
       notesPlaceholder: 'メモを入力',
       notesHint: 'メモは任意です',
@@ -204,7 +206,8 @@ export default {
         refreshSuccess: 'OpenCode Go使用量を更新しました',
         refreshFailed: 'OpenCode Go使用量の更新に失敗しました',
         errors: {
-          OPENCODE_GO_USAGE_REFRESH_RATE_LIMITED: '更新が制限されています。{retry_after_seconds}秒後に再試行してください。'
+          OPENCODE_GO_USAGE_REFRESH_RATE_LIMITED: '更新が制限されています。{retry_after_seconds}秒後に再試行してください。',
+          forbidden: '上流が403を返しました。OpenCode Go契約の未加入・期限切れ、またはWAF・アクセス制限の可能性があります。接続経路とHTTPステータスを確認してください。'
         },
       },
       types: {
