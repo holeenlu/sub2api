@@ -1760,6 +1760,11 @@ func TestOpenAIChannelForwardModelForScheduler(t *testing.T) {
 }
 
 func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
+	t.Run("gateway budget expires before sending to selected account", func(t *testing.T) {
+		err := fmt.Errorf("wrapped ingress turn: %w", service.ErrOpenAIWSFirstOutputBudgetExhausted)
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		require.False(t, service.IsOpenAIWSUpstreamTransportError(err))
+	})
 	t.Run("unsupported client model switch does not penalize account", func(t *testing.T) {
 		err := fmt.Errorf("wrapped ingress turn: %w", newOpenAIWSUnsupportedModelSwitchError("gpt-unsupported"))
 		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
