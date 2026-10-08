@@ -912,6 +912,7 @@ export interface OpsErrorLog {
 
   severity: OpsSeverity
   status_code: number
+  request_status_code?: number | null
   platform: string
   model: string
 

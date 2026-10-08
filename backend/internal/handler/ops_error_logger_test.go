@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -373,6 +374,38 @@ func TestOpsErrorLoggerMiddleware_RecordsRecoveredUpstreamTelemetryOutsideFailur
 	require.NoError(t, err)
 	require.Len(t, persistedEvents, 1)
 	require.Equal(t, http.StatusTooManyRequests, persistedEvents[0].UpstreamStatusCode)
+}
+
+func TestOpsRecoveredWebSocketRequiresSuccessfulTurn(t *testing.T) {
+	for _, completed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(completed), func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
+			service.BeginOpsStreamTurn(c, 2)
+			c.Set(service.OpsStreamTurnSucceededKey, completed)
+			service.SetOpsUpstreamError(c, http.StatusBadGateway, "provider failed", "")
+			ops := service.NewOpsService(&ingressRejectOpsRepo{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+			job := <-opsErrorLogQueue
+			if completed {
+				require.Contains(t, job.entry.ErrorMessage, "Recovered upstream error")
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				require.Empty(t, opsErrorLogQueue, "socket close must not duplicate the completed turn")
+				service.BeginOpsStreamTurn(c, 3)
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				require.Empty(t, opsErrorLogQueue, "later disconnected turn cannot relabel earlier recovery")
+				service.SetOpsUpstreamError(c, http.StatusBadGateway, "third turn failed", "")
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				third := <-opsErrorLogQueue
+				require.Contains(t, third.entry.ErrorMessage, "recovery not confirmed")
+				require.Contains(t, job.entry.ErrorMessage, "Recovered upstream error")
+			} else {
+				require.Contains(t, job.entry.ErrorMessage, "recovery not confirmed")
+			}
+		})
+	}
 }
 
 func TestOpsErrorLoggerMiddleware_RecoveredTelemetryFiltersSkipMonitoringAttempts(t *testing.T) {
@@ -1660,9 +1693,10 @@ func TestApplyOpsUpstreamFieldsUsesLastNonNilAttempt(t *testing.T) {
 	c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{
 		{UpstreamStatusCode: http.StatusTooManyRequests, Message: "first attempt", Detail: "first detail"},
 		nil,
-		{UpstreamStatusCode: http.StatusServiceUnavailable, Message: "final attempt", Detail: "final detail"},
+		{UpstreamStatusCode: http.StatusServiceUnavailable, Message: "final attempt", Detail: "final detail", SkipMonitoring: true},
 		nil,
 	})
+	service.RecordOpenAIRetryStop(c, nil, service.OpenAIRetryStopDownstreamCommitted)
 	entry := &service.OpsInsertErrorLogInput{}
 
 	applyOpsUpstreamFieldsFromContext(c, entry)
@@ -1673,7 +1707,64 @@ func TestApplyOpsUpstreamFieldsUsesLastNonNilAttempt(t *testing.T) {
 	require.Equal(t, "final attempt", *entry.UpstreamErrorMessage)
 	require.NotNil(t, entry.UpstreamErrorDetail)
 	require.Equal(t, "final detail", *entry.UpstreamErrorDetail)
-	require.Len(t, entry.UpstreamErrors, 4)
+	require.Len(t, entry.UpstreamErrors, 5)
+	require.True(t, shouldSkipFinalOpsFailure(c), "a diagnostic stop must not clear provider monitoring rules")
+}
+
+func TestOpsErrorLoggerMiddlewareResponsesFailureProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		gateway          bool
+		upstreamEvidence bool
+		wantUpstream     int
+		wantMessage      string
+	}{
+		{"gateway keeps actual 500", true, true, 500, "actual provider failure"},
+		{"gateway infers only without evidence", true, false, 502, "Upstream service temporarily unavailable"},
+		{"provider terminal supersedes earlier attempt", false, true, 429, "final provider quota"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			gin.SetMode(gin.TestMode)
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.POST("/v1/responses", func(c *gin.Context) {
+				setOpsRequestContext(c, "gpt-6.1-sol", true)
+				if tc.upstreamEvidence {
+					service.SetOpsUpstreamError(c, 500, "actual provider failure", "")
+					c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{{
+						Kind: "failover", UpstreamStatusCode: 500, Message: "actual provider failure",
+					}})
+				}
+				service.RecordOpenAIRetryStop(c, nil, service.OpenAIRetryStopReplayUnsafe, `{"blocking_tool_kind":"mcp"}`)
+				if tc.gateway {
+					c.Header("Content-Type", "text/event-stream")
+					c.Writer.Flush()
+					require.True(t, writeResponsesFailedSSE(c, "upstream_error", "", "Upstream service temporarily unavailable"))
+				} else {
+					c.Data(http.StatusOK, "text/event-stream", []byte("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"final provider quota\"}}}\n\n"))
+				}
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+			require.Equal(t, int64(1), OpsErrorLogQueueLength())
+			entry := (<-opsErrorLogQueue).entry
+			require.NotNil(t, entry.UpstreamStatusCode)
+			require.Equal(t, tc.wantUpstream, *entry.UpstreamStatusCode)
+			require.NotNil(t, entry.UpstreamErrorMessage)
+			require.Equal(t, tc.wantMessage, *entry.UpstreamErrorMessage)
+			if tc.gateway {
+				require.Equal(t, 502, entry.StatusCode, "client status remains independently mapped")
+			}
+			require.NotNil(t, entry.UpstreamErrorsJSON)
+			events, err := service.ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
+			require.NoError(t, err)
+			require.Equal(t, service.OpsUpstreamRetryStopped, events[len(events)-1].Kind)
+			require.Equal(t, string(service.OpenAIRetryStopReplayUnsafe), events[len(events)-1].Reason)
+			require.JSONEq(t, `{"blocking_tool_kind":"mcp"}`, events[len(events)-1].Detail, "stop evidence must survive persistence without replacing provider attribution")
+		})
+	}
 }
 
 func TestApplyOpsUpstreamFieldsFinalStatuslessAttemptClearsStaleContext(t *testing.T) {

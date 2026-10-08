@@ -247,6 +247,7 @@ export default {
       },
       // Error Log
       errorLog: {
+        recovered: '已恢复',
         timeId: '时间 / ID',
         commonErrors: {
           contextDeadlineExceeded: '请求超时',
@@ -316,6 +317,7 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        requestStatus: '请求状态码',
         title: '错误详情',
         titleWithId: '错误 #{id}',
         noErrorSelected: '未选择错误。',

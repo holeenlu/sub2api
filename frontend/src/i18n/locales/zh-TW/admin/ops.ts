@@ -249,6 +249,7 @@ export default {
       },
       // Error Log
       errorLog: {
+        recovered: '已恢復',
         timeId: '時間 / ID',
         commonErrors: {
           contextDeadlineExceeded: '請求逾時',
@@ -318,6 +319,7 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        requestStatus: '請求狀態碼',
         title: '錯誤詳情',
         titleWithId: '錯誤 #{id}',
         noErrorSelected: '未選擇錯誤。',

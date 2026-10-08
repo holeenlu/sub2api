@@ -5,8 +5,14 @@
  * 同时避免引入额外 UI 依赖。
  */
 
-import type { OpsSeverity } from '@/api/admin/ops'
+import type { OpsErrorLog, OpsSeverity } from '@/api/admin/ops'
 import { formatBytes } from '@/utils/format'
+
+export function isRecoveredOpsError(error: Pick<OpsErrorLog, 'request_status_code' | 'message'>): boolean {
+  const status = error.request_status_code
+  return typeof status === 'number' && status >= 100 && status < 400 &&
+    /^Recovered (upstream error|account authentication failure)\b/.test(error.message)
+}
 
 export function getSeverityClass(severity: OpsSeverity): string {
   const classes: Record<string, string> = {

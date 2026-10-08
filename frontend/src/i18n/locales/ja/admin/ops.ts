@@ -247,6 +247,7 @@ export default {
       },
       // Error Log
       errorLog: {
+        recovered: '復旧済み',
         timeId: '時刻 / ID',
         commonErrors: {
           contextDeadlineExceeded: 'コンテキストの期限を超過しました',
@@ -316,6 +317,7 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        requestStatus: 'リクエストのステータスコード',
         title: 'エラー詳細',
         titleWithId: 'エラー #{id}',
         noErrorSelected: 'エラーが選択されていません。',
