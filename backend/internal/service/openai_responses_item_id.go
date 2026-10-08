@@ -125,3 +125,75 @@ func sanitizeOpenAIResponsesInputItemIDs(body []byte) ([]byte, bool, error) {
 	}
 	return replaceOpenAIRawInput(body, input, rebuiltItems), true, nil
 }
+
+// Only an explicit upstream lookup rejection permits removing valid IDs. A
+// reference or an incomplete item still needs persisted state: never turn it
+// into an empty item or silently drop it. Tool pairing uses call_id, not id.
+//
+// The third result explains why a repair was declined, and the caller logs it.
+// Without that line a declined repair looks exactly like "the upstream never
+// sent this rejection", which is how the rejection stayed unhandled unnoticed.
+// "unsupported item type" specifically means the switch below could grow to
+// cover it; "incomplete" means the payload genuinely cannot be replayed inline.
+func removeOpenAIResponsesSelfContainedItemIDs(body []byte) ([]byte, bool, string, error) {
+	input := parseRawJSONView(body).Get("input")
+	if !input.IsArray() {
+		return body, false, "input is not an array", nil
+	}
+	items := input.Array()
+	for index, item := range items {
+		typ := strings.TrimSpace(item.Get("type").String())
+		if typ == "item_reference" {
+			return body, false, fmt.Sprintf("item_reference at input[%d]", index), nil
+		}
+		if !item.Get("id").Exists() {
+			continue
+		}
+		known := true
+		selfContained := false
+		switch typ {
+		case "", "message":
+			selfContained = item.Get("role").String() != "" &&
+				(item.Get("content").Type == gjson.String || item.Get("content").IsArray())
+		case "reasoning":
+			selfContained = strings.TrimSpace(item.Get("encrypted_content").String()) != ""
+		case "function_call":
+			selfContained = item.Get("call_id").String() != "" && item.Get("name").String() != "" && item.Get("arguments").Type == gjson.String
+		case "custom_tool_call":
+			selfContained = item.Get("call_id").String() != "" && item.Get("name").String() != "" && item.Get("input").Type == gjson.String
+		case "function_call_output", "custom_tool_call_output":
+			selfContained = item.Get("call_id").String() != "" &&
+				(item.Get("output").Type == gjson.String || item.Get("output").IsArray())
+		default:
+			known = false
+		}
+		if !selfContained {
+			if !known {
+				return body, false, fmt.Sprintf("unsupported item type %q at input[%d]", typ, index), nil
+			}
+			label := typ
+			if label == "" {
+				label = "message"
+			}
+			return body, false, fmt.Sprintf("incomplete %s at input[%d]", label, index), nil
+		}
+	}
+	changed := false
+	rebuilt := make([]string, 0, len(items))
+	for _, item := range items {
+		raw := item.Raw
+		if item.Get("id").Exists() {
+			var err error
+			raw, err = sjson.Delete(raw, "id")
+			if err != nil {
+				return nil, false, "", fmt.Errorf("delete rejected input item id: %w", err)
+			}
+			changed = true
+		}
+		rebuilt = append(rebuilt, raw)
+	}
+	if !changed {
+		return body, false, "no input item ids to remove", nil
+	}
+	return replaceOpenAIRawInput(body, input, rebuilt), true, "", nil
+}
