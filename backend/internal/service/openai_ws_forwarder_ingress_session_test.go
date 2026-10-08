@@ -4888,3 +4888,121 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_TurnMetadataDoes
 	require.False(t, gjson.Get(requestToJSONString(captureConn.writes[1]), "input.0.id").Exists())
 	require.Equal(t, "msg_remote", gjson.Get(requestToJSONString(captureConn.writes[2]), "input.0.id").String())
 }
+
+// A server_error before any output used to end the turn: the client got the
+// error and Codex replayed the turn on the same sticky account, which kept
+// failing. It must now come back as a failover error with nothing written to
+// the client, while a request-scoped error still reaches the client.
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PreOutputServerErrorFailsOver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const metadataRateLimits = `{"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":1}}}`
+	const metadataTurnState = `{"type":"codex.response.metadata","headers":{"x-codex-turn-state":"ts_failed"}}`
+
+	run := func(t *testing.T, upstreamError string) (error, []byte) {
+		cfg := &config.Config{}
+		cfg.Security.URLAllowlist.Enabled = false
+		cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+		cfg.Gateway.OpenAIWS.Enabled = true
+		cfg.Gateway.OpenAIWS.OAuthEnabled = true
+		cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+		cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+		cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+		cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+		cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
+		cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+		cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+		cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+		captureConn := &openAIWSCaptureConn{events: [][]byte{
+			[]byte(metadataRateLimits), []byte(metadataTurnState), []byte(upstreamError),
+		}}
+		pool := newOpenAIWSConnPool(cfg)
+		pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
+		svc := &OpenAIGatewayService{
+			cfg:              cfg,
+			httpUpstream:     &httpUpstreamRecorder{},
+			cache:            &stubGatewayCache{},
+			openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+			toolCorrector:    NewCodexToolCorrector(),
+			openaiWSPool:     pool,
+		}
+		account := &Account{
+			ID: 116, Name: "openai-ingress-preoutput-failover", Platform: PlatformOpenAI,
+			Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1,
+			Credentials: map[string]any{"api_key": "sk-test"},
+			Extra:       map[string]any{"responses_websockets_v2_enabled": true},
+		}
+
+		serverErrCh := make(chan error, 1)
+		wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
+			if err != nil {
+				serverErrCh <- err
+				return
+			}
+			defer func() { _ = conn.CloseNow() }()
+			rec := httptest.NewRecorder()
+			ginCtx, _ := gin.CreateTestContext(rec)
+			ginCtx.Request = r.Clone(r.Context())
+			readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			_, firstMessage, readErr := conn.Read(readCtx)
+			cancel()
+			if readErr != nil {
+				serverErrCh <- readErr
+				return
+			}
+			serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, nil)
+		}))
+		defer wsServer.Close()
+
+		dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+		clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+		cancelDial()
+		require.NoError(t, err)
+		defer func() { _ = clientConn.CloseNow() }()
+		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+		require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":true,"input":"hi"}`)))
+		cancelWrite()
+
+		var serverErr error
+		select {
+		case serverErr = <-serverErrCh:
+		case <-time.After(5 * time.Second):
+			t.Fatal("ingress websocket did not finish the turn")
+		}
+		readCtx, cancelRead := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		_, firstFrame, _ := clientConn.Read(readCtx)
+		cancelRead()
+		return serverErr, firstFrame
+	}
+
+	t.Run("server_error fails over without writing to the client", func(t *testing.T) {
+		err, frame := run(t, `{"type":"error","error":{"code":"server_error","type":"api_error","message":"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists."}}`)
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr)
+		require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+		require.Empty(t, frame, "held metadata from the failed attempt must not reach the client")
+	})
+
+	t.Run("response protection outage fails over", func(t *testing.T) {
+		err, frame := run(t, `{"type":"error","error":{"code":"upstream_error","type":"internal_error","message":"response protection is unavailable"}}`)
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr)
+		require.Empty(t, frame)
+	})
+
+	t.Run("capacity shed retries on the same account, as over HTTP", func(t *testing.T) {
+		err, frame := run(t, `{"type":"error","error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`)
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr)
+		require.True(t, failoverErr.RetryableOnSameAccount)
+		require.Empty(t, frame)
+	})
+
+	t.Run("request-scoped error still reaches the client", func(t *testing.T) {
+		err, frame := run(t, `{"type":"error","error":{"code":"upstream_error","type":"server_error","message":"mixed tools failed"}}`)
+		var failoverErr *UpstreamFailoverError
+		require.False(t, errors.As(err, &failoverErr), "must not hide a request-scoped error behind failover: %v", err)
+		require.Equal(t, "codex.rate_limits", gjson.GetBytes(frame, "type").String(), "metadata is flushed ahead of the passed-through error")
+	})
+}

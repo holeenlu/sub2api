@@ -38,6 +38,10 @@ func (r *openAIWSIngressCapacityShedRepo) UpdateExtra(context.Context, int64, ma
 // 客户端会打印 "Selected model is at capacity" 并直接终止会话而不是退避重试。
 //
 // 第二个用例锁住改写范围：非容量类错误码必须原样下发，客户端依赖原码各自处理。
+//
+// 两个用例都先下发一段真实输出：出字前的同类错误现在与 HTTP/SSE 一致走 failover
+// （容量降载同账号退避、账号状态错误换号），根本不会写给客户端；只有出字后
+// 无法再 failover 时，错误才会下发，改写逻辑也只在这时生效。
 func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -50,6 +54,7 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 		{
 			name: "capacity_shed_error_and_failed_are_rewritten",
 			upstreamEvents: [][]byte{
+				[]byte(`{"type":"response.output_text.delta","delta":"partial"}`),
 				[]byte(`{"type":"error","error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`),
 				[]byte(`{"type":"response.failed","response":{"id":"resp_shed","status":"failed","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}}`),
 			},
@@ -62,6 +67,7 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 		{
 			name: "non_capacity_error_code_is_passed_through",
 			upstreamEvents: [][]byte{
+				[]byte(`{"type":"response.output_text.delta","delta":"partial"}`),
 				[]byte(`{"type":"error","error":{"type":"invalid_request_error","code":"workspace_suspended","message":"workspace is suspended"}}`),
 				[]byte(`{"type":"response.failed","response":{"id":"resp_suspended","status":"failed","error":{"code":"workspace_suspended","message":"workspace is suspended"}}}`),
 			},
