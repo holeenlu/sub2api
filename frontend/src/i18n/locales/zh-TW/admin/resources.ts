@@ -529,6 +529,8 @@ export default {
       allTypes: '全部類型',
       inputCost: '輸入費用',
       outputCost: '輸出費用',
+      longContext: '長上下文',
+      longContextPricingTooltip: '已套用長上下文計費。輸入和輸出費率取決於定價檔位，並非統一倍率。',
       cacheCreationCost: '快取建立費用',
       cacheReadCost: '快取讀取費用',
       inputTokens: '輸入 Token',

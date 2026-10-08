@@ -4,6 +4,8 @@ export default {
       description: '運用状況の監視とトラブルシューティング',
       // Dashboard
       systemHealth: 'システム状態',
+      outputTps: 'リクエストごとの出力TPS',
+      outputTpsSamples: '有効サンプル数：{count}',
       overview: '概要',
       noSystemMetrics: 'システムメトリクスはまだ収集されていません。',
       collectedAt: '収集日時：',
@@ -803,6 +805,7 @@ export default {
         accountError: 'エラー'
       },
       tooltips: {
+        outputTps: '選択した時間・プラットフォーム・グループ内の各有効リクエストについて、出力トークン数を初回応答待ちを含む総時間で割った値の分位数です。出力に推論トークンが含まれる場合も二重加算しません。P50は中央値、P5/P10は遅いリクエストを示し、高いほど高速です。画像、Live、出力数や時間が正でない記録は除外します。保存済み用量ログから集計し、サンプルなし・一時的な取得不可は「—」で表示します。',
         totalRequests: '選択した時間範囲内のリクエスト総数（成功・失敗を含む）。',
         throughputTrend: '選択した時間範囲内のリクエスト／QPSおよびトークン／TPS。',
         switchRateTrend: '過去5時間におけるアカウント切り替え数／総リクエスト数の推移（切り替えの平均）。',
