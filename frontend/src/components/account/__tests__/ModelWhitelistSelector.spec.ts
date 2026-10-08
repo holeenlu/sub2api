@@ -81,6 +81,43 @@ function findModelRow(wrapper: ReturnType<typeof mountSelector>, modelId: string
 }
 
 describe('ModelWhitelistSelector', () => {
+  it('bulk sync adds only common upstream models and preserves the draft', async () => {
+    syncUpstreamModels.mockResolvedValueOnce({ models: ['claude-haiku-5-5', 'only-first'] })
+      .mockResolvedValueOnce({ models: [' claude-haiku-5-5 ', 'only-second'] })
+    const wrapper = mountSelector({ platform: 'anthropic', modelValue: ['custom'], syncAccountIds: async () => [1, 2, 1] })
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+    expect(syncUpstreamModels.mock.calls).toEqual([[1], [2]])
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['custom', 'claude-haiku-5-5']]])
+    expect(wrapper.emitted('upstream-synced')).toBeUndefined()
+  })
+
+  it('stops a pending bulk sync after the selector is closed', async () => {
+    let complete!: (value: { models: string[] }) => void
+    syncUpstreamModels.mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    const wrapper = mountSelector({ platform: 'anthropic', syncAccountIds: async () => [1, 2] })
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+    wrapper.unmount()
+    complete({ models: ['claude-haiku-5-5'] })
+    await flushPromises()
+    expect(syncUpstreamModels).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(showSuccess).not.toHaveBeenCalled()
+  })
+
+  it.each(['failure', 'empty', 'disjoint'])('bulk sync keeps the draft on %s instead of applying a partial or empty whitelist', async (mode) => {
+    syncUpstreamModels.mockResolvedValueOnce({ models: ['claude-haiku-5-5'] })
+    if (mode === 'failure') syncUpstreamModels.mockRejectedValueOnce(new Error('upstream unavailable'))
+    else syncUpstreamModels.mockResolvedValueOnce({ models: mode === 'empty' ? [] : ['other-model'] })
+    const wrapper = mountSelector({ platform: 'anthropic', modelValue: ['custom'], syncAccountIds: async () => [1, 2] })
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(showError).toHaveBeenCalled()
+    expect(showSuccess).not.toHaveBeenCalled()
+  })
+
   beforeEach(() => {
     copyToClipboard.mockClear()
     showError.mockReset()

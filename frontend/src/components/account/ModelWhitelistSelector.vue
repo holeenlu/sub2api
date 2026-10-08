@@ -92,6 +92,10 @@
       </div>
     </div>
 
+    <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+      {{ t('admin.accounts.modelSyncSourceHint') }}
+    </p>
+
     <!-- Quick Actions -->
     <div class="mb-4 flex flex-wrap gap-2">
       <button
@@ -119,6 +123,10 @@
       </button>
     </div>
 
+    <p v-if="syncAccountIds" class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+      {{ t('admin.accounts.syncUpstreamModelsBatchHint') }}
+    </p>
+
     <!-- Custom Model Input -->
     <div class="mb-3">
       <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.accounts.customModelName') }}</label>
@@ -145,11 +153,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { accountsAPI } from '@/api/admin/accounts'
-import type { SyncUpstreamPreviewParams } from '@/api/admin/accounts'
+import type { SyncUpstreamModelsResult, SyncUpstreamPreviewParams } from '@/api/admin/accounts'
 import { useClipboard } from '@/composables/useClipboard'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -163,6 +171,7 @@ const props = defineProps<{
   platform?: string
   platforms?: string[]
   accountId?: number
+  syncAccountIds?: () => Promise<number[]>
   syncCredentials?: {
     platform: string
     type: string
@@ -184,6 +193,8 @@ const searchQuery = ref('')
 const customModel = ref('')
 const isComposing = ref(false)
 const isSyncingUpstream = ref(false)
+let disposed = false
+onBeforeUnmount(() => { disposed = true })
 const normalizedPlatforms = computed(() => {
   const rawPlatforms =
     props.platforms && props.platforms.length > 0
@@ -214,6 +225,7 @@ const upstreamSyncPlatforms = new Set([
   'opencode_go'
 ])
 const canSyncUpstream = computed(() => {
+  if (props.syncAccountIds) return true
   if (props.accountId) {
     if (normalizedPlatforms.value.length === 0) return true
     return normalizedPlatforms.value.some(platform => upstreamSyncPlatforms.has(platform.toLowerCase()))
@@ -302,12 +314,33 @@ const fillRelated = () => {
 
 const syncUpstreamModels = async () => {
   if (isSyncingUpstream.value) return
-  if (!props.accountId && !props.syncCredentials) return
+  if (!props.accountId && !props.syncCredentials && !props.syncAccountIds) return
 
   isSyncingUpstream.value = true
   try {
-    let result
-    if (props.accountId) {
+    let result: SyncUpstreamModelsResult
+    if (props.syncAccountIds) {
+      const ids = [...new Set(await props.syncAccountIds())]
+      if (disposed) return
+      let commonModels: string[] | undefined
+      const warnings: NonNullable<SyncUpstreamModelsResult['warnings']> = []
+      // A bulk edit writes one whitelist to all targets. Only add their intersection.
+      // Fetch sequentially to avoid a burst of upstream requests; fail without changing the draft.
+      for (const id of ids) {
+        const catalog = await accountsAPI.syncUpstreamModels(id)
+        if (disposed) return
+        const models = new Set(catalog.models.map(model => model.trim()).filter(Boolean))
+        commonModels = commonModels === undefined
+          ? [...models]
+          : commonModels.filter(model => models.has(model))
+        warnings.push(...(catalog.warnings ?? []))
+      }
+      if (!commonModels?.length) {
+        appStore.showError(t('admin.accounts.syncUpstreamModelsNoCommon'))
+        return
+      }
+      result = { models: commonModels, warnings }
+    } else if (props.accountId) {
       result = await accountsAPI.syncUpstreamModels(props.accountId)
     } else if (props.syncCredentials) {
       result = await accountsAPI.syncUpstreamModelsPreview(props.syncCredentials as SyncUpstreamPreviewParams)
@@ -315,13 +348,14 @@ const syncUpstreamModels = async () => {
       return
     }
 
+    if (disposed) return
     const upstreamModels = result.models.map(model => model.trim()).filter(Boolean)
     if (upstreamModels.length === 0) {
       appStore.showInfo(t('admin.accounts.syncUpstreamModelsEmpty'))
       return
     }
 
-    if (!props.accountId) {
+    if (props.syncCredentials && !props.accountId && !props.syncAccountIds) {
       emit('upstream-synced')
     }
 
@@ -355,6 +389,7 @@ const syncUpstreamModels = async () => {
       appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataPartial'))
     }
   } catch (error) {
+    if (disposed) return
     const message = error instanceof Error ? error.message : t('admin.accounts.syncUpstreamModelsFailed')
     appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
   } finally {
