@@ -218,7 +218,11 @@ func parseOpenAIWSErrorEventFields(message []byte) (code string, errType string,
 	if len(message) == 0 {
 		return "", "", ""
 	}
-	values := gjson.GetManyBytes(message, "error.code", "error.type", "error.message")
+	prefix := "error"
+	if gjson.GetBytes(message, "response.error").IsObject() {
+		prefix = "response.error"
+	}
+	values := gjson.GetManyBytes(message, prefix+".code", prefix+".type", prefix+".message")
 	return strings.TrimSpace(values[0].String()), strings.TrimSpace(values[1].String()), strings.TrimSpace(values[2].String())
 }
 
