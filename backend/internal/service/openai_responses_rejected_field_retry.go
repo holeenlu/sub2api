@@ -12,9 +12,18 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
 const maxOpenAIResponsesRejectedFieldRetries = 6
+
+// Match only the phrase that identifies the failure, not the whole sentence:
+// the upstream wording has carried a trailing period and a backend name that
+// may both change. The sibling rustponsesapi rejection reads "requires
+// authorization and metering" and never contains this phrase, so matching a
+// substring keeps the two unambiguous — both are pinned by tests.
+const openAIResponsesPersistedItemLookupPhrase = "persisted-item lookup"
 
 var (
 	openAIResponsesRejectedNamespaceParamPattern  = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
@@ -119,6 +128,24 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 	code := strings.ToLower(strings.TrimSpace(extractUpstreamErrorCode(responseBody)))
 	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
 	param := strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "error.param").String()))
+	if code == "unsupported_parameter" && param == "" &&
+		strings.Contains(message, openAIResponsesPersistedItemLookupPhrase) {
+		retryBody, changed, declineReason, err := removeOpenAIResponsesSelfContainedItemIDs(body)
+		if err != nil || changed {
+			return retryBody, "persisted input item lookup rejection", changed, err
+		}
+		// Logged here rather than at the four call sites so every transport —
+		// HTTP forward, passthrough, native WS and the WS HTTP bridge — reports
+		// it. The request's account and model are already on the matching
+		// ops_error_logs row; what is missing without this line is which item
+		// blocked the repair, which is what decides whether to widen coverage.
+		logger.LegacyPrintf(
+			"service.openai_gateway",
+			"[OpenAI] Skip persisted input item id repair: %s",
+			declineReason,
+		)
+		return nil, "", false, nil
+	}
 	if code == "invalid_function_parameters" &&
 		openAIResponsesToolParametersParamPattern.MatchString(param) &&
 		openAIResponsesMissingSchemaTypePattern.MatchString(message) {
