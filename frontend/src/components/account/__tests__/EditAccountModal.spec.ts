@@ -325,6 +325,49 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it.each(['oauth', 'setup-token'])('loads and saves Anthropic %s restrictions while preserving credentials and mappings', async (type) => {
+    const account = buildAccount()
+    account.platform = 'anthropic'
+    account.type = type
+    account.credentials = {
+      access_token: 'keep-token', refresh_token: 'keep-refresh',
+      model_mapping: { 'claude-sonnet-5-5': 'claude-sonnet-5-5', 'claude-alias': 'claude-opus-5-5' }
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const selector = wrapper.findComponent(ModelWhitelistSelectorStub)
+    expect(selector.exists()).toBe(true)
+    expect(selector.attributes('account-id')).toBe('1')
+    expect(selector.props('modelValue')).toEqual(['claude-sonnet-5-5'])
+    selector.vm.$emit('update:modelValue', ['claude-haiku-5-5'])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      access_token: 'keep-token', refresh_token: 'keep-refresh',
+      model_mapping: { 'claude-haiku-5-5': 'claude-haiku-5-5', 'claude-alias': 'claude-opus-5-5' }
+    })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.model_mapping).not.toHaveProperty('claude-sonnet-5-5')
+    wrapper.unmount()
+  })
+
+  it.each(['oauth', 'setup-token'])('clears Anthropic %s whitelist without dropping its token', async (type) => {
+    const account = buildAccount()
+    account.platform = 'anthropic'
+    account.type = type
+    account.credentials = { access_token: 'keep-token', model_mapping: { 'claude-haiku-5-5': 'claude-haiku-5-5' } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    wrapper.findComponent(ModelWhitelistSelectorStub).vm.$emit('update:modelValue', [])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials.access_token).toBe('keep-token')
+    expect(credentials).not.toHaveProperty('model_mapping')
+    wrapper.unmount()
+  })
+
   it('edits and removes the Fable override independently from the account threshold', async () => {
     const account = buildAccount()
     account.platform = 'anthropic'
