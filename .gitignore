@@ -142,6 +142,7 @@ deploy/docker-compose.override.yml
 vite.config.js
 docs/*
 !docs/CHANGE_DELIVERY.md
+!docs/GROUP_MODEL_CANDIDATES.md
 !docs/MODEL_CATALOG_INCIDENT_2026-10-01.md
 !docs/FORK_FEATURE_RETIREMENT.md
 !docs/RANXI2001_TICKET_INTEGRATION.md
