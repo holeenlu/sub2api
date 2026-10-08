@@ -92,7 +92,7 @@ func TestOpenAIWSDownstreamWriteContext_CancellationOwnership(t *testing.T) {
 	})
 }
 
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossTurns(t *testing.T) {
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossTurnsAndRejectedItemLookup(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -112,6 +112,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 
 	captureConn := &openAIWSCaptureConn{
 		events: [][]byte{
+			[]byte(`{"type":"error","error":{"code":"unsupported_parameter","type":"invalid_request_error","message":"Supplied input item IDs require persisted-item lookup that is not supported by rustponsesapi."}}`),
 			[]byte(`{"type":"response.output_item.done","item":{"id":"ig_ingress_1","type":"image_generation_call","status":"generating","result":"iVBORw0KGgoAAAANSUhEUg/+=="}}`),
 			[]byte(`{"type":"response.completed","response":{"id":"resp_ingress_turn_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
 			[]byte(`{"type":"response.completed","response":{"id":"resp_ingress_turn_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
@@ -212,7 +213,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 		return message
 	}
 
-	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false}`)
+	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":[{"type":"message","id":"msg_replay","role":"user","content":"hello"}]}`)
 	firstTurnImageEvent := readMessage()
 	require.Equal(t, "response.output_item.done", gjson.GetBytes(firstTurnImageEvent, "type").String())
 	require.Equal(t, "completed", gjson.GetBytes(firstTurnImageEvent, "item.status").String())
@@ -240,7 +241,11 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	metrics := svc.SnapshotOpenAIWSPoolMetrics()
 	require.Equal(t, int64(1), metrics.AcquireTotal, "同一 ingress 会话多 turn 应只获取一次上游 lease")
 	require.Equal(t, 1, captureDialer.DialCount(), "同一 ingress 会话应保持同一上游连接")
-	require.Len(t, captureConn.writes, 2, "应向同一上游连接发送两轮 response.create")
+	require.Len(t, captureConn.writes, 3, "two turns plus one compatibility retry share the same connection")
+	require.Equal(t, "msg_replay", gjson.Get(requestToJSONString(captureConn.writes[0]), "input.0.id").String())
+	require.False(t, gjson.Get(requestToJSONString(captureConn.writes[1]), "input.0.id").Exists())
+	require.Equal(t, "hello", gjson.Get(requestToJSONString(captureConn.writes[1]), "input.0.content").String())
+	require.Equal(t, "resp_ingress_turn_1", gjson.Get(requestToJSONString(captureConn.writes[2]), "previous_response_id").String())
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_LeaseLossSendsRetryClose(t *testing.T) {
