@@ -4,9 +4,9 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/stretchr/testify/require"
 )
 
@@ -202,18 +202,85 @@ func TestAdminService_CompositeModelsListCandidatesIncludeConcreteAccountMapping
 	require.Contains(t, candidates, "gpt-custom")
 	require.Contains(t, candidates, "gemini-custom")
 	require.Contains(t, candidates, "kimi-custom")
-	require.Contains(t, candidates, "gpt-5.5")
-	require.Contains(t, candidates, "gemini-2.5-flash")
+	require.Contains(t, candidates, "gpt-6.1-sol")
+	require.Contains(t, candidates, "gemini-3.8-flash")
+	require.Contains(t, candidates, "kimi-k3")
+	require.Contains(t, candidates, "glm-5.3")
+	require.Contains(t, candidates, "deepseek-flash")
+	require.Contains(t, candidates, "MiniMax-M3")
+	require.NotContains(t, candidates, "gemini-2.0-flash")
+	require.NotContains(t, candidates, "jev-latest")
 }
 
-// 独立 CN 分组的模型列表候选沿用 default 分支的 Claude 默认列表；
-// composite 支持不得改变独立分组的候选语义。
-func TestAdminService_CNProviderModelsListCandidatesKeepClaudeDefaults(t *testing.T) {
-	want := make([]string, 0, len(claude.DefaultModels))
-	for _, model := range claude.DefaultModels {
-		want = append(want, model.ID)
+func TestAdminService_GroupModelsListCandidatesAreCurrentAndProviderSpecific(t *testing.T) {
+	cases := []struct {
+		platform string
+		current  string
+		omitted  string
+	}{
+		{PlatformAnthropic, "claude-haiku-5-5", "claude-sonnet-4-5-20250929"},
+		{PlatformOpenAI, "gpt-6.1-sol", "gpt-image-1"},
+		{PlatformGemini, "gemini-3.8-flash", "gemini-3-pro-preview"},
+		{PlatformAntigravity, "gemini-3.8-flash-high", "gemini-2.5-flash-image-preview"},
+		{PlatformGrok, "grok-4.7", "grok-4.20-0309-reasoning"},
+		{PlatformKimi, "kimi-k3", "claude-haiku-5-5"},
+		{PlatformZhipu, "glm-5.3", "claude-haiku-5-5"},
+		{PlatformDeepseek, "deepseek-flash", "claude-haiku-5-5"},
+		{PlatformMiniMax, "MiniMax-M3", "claude-haiku-5-5"},
+		{PlatformOpenCodeGo, "deepseek-v4.1-flash", "omen-alpha"},
 	}
-	for _, platform := range []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax} {
-		require.Equal(t, want, defaultModelsListCandidateIDs(platform), "platform=%s", platform)
+	svc := &adminServiceImpl{}
+	for _, tc := range cases {
+		t.Run(tc.platform, func(t *testing.T) {
+			ids, err := svc.GetGroupModelsListCandidates(context.Background(), 0, tc.platform)
+			require.NoError(t, err)
+			require.Contains(t, ids, tc.current)
+			require.NotContains(t, ids, tc.omitted)
+			seen := make(map[string]bool)
+			for _, id := range ids {
+				require.NotEmpty(t, id)
+				require.Equal(t, strings.TrimSpace(id), id)
+				require.False(t, seen[id], "duplicate candidate %s", id)
+				seen[id] = true
+			}
+		})
+	}
+	// Coding-plan IDs differ from the same vendor's pay-as-you-go IDs.
+	ids, err := svc.GetGroupModelsListCandidates(context.Background(), 0, PlatformKimi)
+	require.NoError(t, err)
+	require.Contains(t, ids, "kimi-for-coding")
+	require.Contains(t, ids, "k3-256k")
+}
+
+func TestAdminService_GroupModelsListCandidatesPreserveExplicitMappingsOnly(t *testing.T) {
+	for _, platform := range []string{PlatformAntigravity, PlatformGrok} {
+		t.Run(platform, func(t *testing.T) {
+			mapping := map[string]any{
+				" custom-model ":   "upstream-model",
+				"gemini-2.0-flash": "upstream-model",
+				"my-model-*":       "upstream-model",
+				"invalid-model":    42,
+			}
+			accounts := &accountRepoStubForCompositeModelsList{accounts: []Account{
+				{ID: 1, Platform: platform}, // Runtime defaults must not repopulate stale candidates.
+				{ID: 2, Platform: platform, Credentials: map[string]any{"model_mapping": mapping}},
+				{ID: 3, Platform: PlatformKimi, Credentials: map[string]any{
+					"model_mapping": map[string]any{"wrong-platform": "kimi-k3"},
+				}},
+			}}
+			svc := &adminServiceImpl{accountRepo: accounts, groupRepo: &groupRepoStubForAdmin{
+				getByIDByID: map[int64]*Group{99: {ID: 99, Platform: platform}},
+			}}
+			ids, err := svc.GetGroupModelsListCandidates(context.Background(), 99, platform)
+			require.NoError(t, err)
+			require.Len(t, ids, len(defaultModelsListCandidateIDs(platform))+3)
+			require.Contains(t, ids, "custom-model")
+			require.Contains(t, ids, "gemini-2.0-flash")
+			require.Contains(t, ids, "my-model-*")
+			require.NotContains(t, ids, "wrong-platform")
+			require.NotContains(t, ids, "invalid-model")
+			require.NotContains(t, ids, "gpt-*")
+			require.Len(t, mapping, 4)
+		})
 	}
 }
