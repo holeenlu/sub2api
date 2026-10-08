@@ -1179,6 +1179,29 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					lease.MarkBroken()
 					return nil, s.newOpenAIWSRateLimitFailoverError(account, lease.HandshakeHeaders(), upstreamMessage, errMsgRaw)
 				}
+				// Nothing has reached the client yet, so recover the turn instead
+				// of ending it. Both the decision and the failover error are the
+				// ones the HTTP stream applies to the same bare error frame, so a
+				// turn recovers on WS exactly as it would over HTTP: the canonical
+				// server_error and the response-protection outage move to another
+				// account, capacity shed retries on the same one, and
+				// request-scoped or policy errors still reach the client. Without
+				// this Codex replays the turn on the same sticky account and hits
+				// the same failure up to five more times.
+				if !wroteDownstream && openAIStreamErrorEventShouldFailover(upstreamMessage, errMsgRaw) {
+					lease.MarkBroken()
+					headers := lease.HandshakeHeaders()
+					return nil, s.newOpenAIStreamFailoverErrorWithModel(
+						c,
+						account,
+						false,
+						strings.TrimSpace(headers.Get("x-request-id")),
+						upstreamMessage,
+						errMsgRaw,
+						mappedModel,
+						headers,
+					)
+				}
 			}
 			isTokenEvent := isOpenAIWSTokenEvent(eventType)
 			if isTokenEvent {

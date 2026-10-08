@@ -1606,6 +1606,9 @@ func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
 	if isOpenAIUpstreamAccessStateError(message, payload) {
 		return true
 	}
+	if isOpenAIResponseProtectionUnavailable(message, payload) {
+		return true
+	}
 	switch openAIStreamFailedEventSemanticStatus(payload, message) {
 	case http.StatusForbidden:
 		return openAIStream403AccountFailure(payload, message)
