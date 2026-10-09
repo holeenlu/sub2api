@@ -250,6 +250,11 @@ func TestAdminService_GroupModelsListCandidatesAreCurrentAndProviderSpecific(t *
 	require.NoError(t, err)
 	require.Contains(t, ids, "kimi-for-coding")
 	require.Contains(t, ids, "k3-256k")
+	for _, platform := range []string{PlatformCommandCode, PlatformCline} {
+		ids, err := svc.GetGroupModelsListCandidates(context.Background(), 0, platform)
+		require.NoError(t, err)
+		require.Empty(t, ids, "aggregators without curated candidates must not inherit Claude models")
+	}
 }
 
 func TestAdminService_GroupModelsListCandidatesPreserveExplicitMappingsOnly(t *testing.T) {
