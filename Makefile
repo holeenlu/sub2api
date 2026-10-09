@@ -12,6 +12,11 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \
 	src/components/account/__tests__/EditAccountModal.spec.ts \
 	src/components/account/__tests__/BulkEditAccountModal.spec.ts \
+	src/constants/__tests__/platforms.spec.ts \
+	src/components/account/__tests__/credentialsBuilder.platformCatalog.spec.ts \
+	src/components/account/__tests__/CreateAccountModal.spec.ts \
+	src/components/account/__tests__/credentialsBuilder.spec.ts \
+	src/components/account/__tests__/OpenCodeGoProtocolRulesEditor.spec.ts \
 	src/components/keys/__tests__/BulkEditKeysModal.spec.ts \
 	src/components/admin/user/__tests__/UserPlatformQuotaModal.spec.ts \
 	src/views/user/__tests__/KeysView.spec.ts \
