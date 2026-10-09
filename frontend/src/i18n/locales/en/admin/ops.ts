@@ -247,6 +247,7 @@ export default {
       },
       // Error Log
       errorLog: {
+        recovered: 'Recovered',
         timeId: 'Time / ID',
         commonErrors: {
           contextDeadlineExceeded: 'context deadline exceeded',
@@ -316,6 +317,7 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        requestStatus: 'Request status code',
         title: 'Error Detail',
         titleWithId: 'Error #{id}',
         noErrorSelected: 'No error selected.',

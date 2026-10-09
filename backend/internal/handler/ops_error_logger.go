@@ -1243,7 +1243,8 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		}
 		applyOpsLatencyFieldsFromContext(c, entry)
 		applyOpsUpstreamFieldsFromContext(c, entry)
-		if parsed.StreamFailure {
+		if parsed.StreamFailure && !(c.GetBool(opsGatewayResponsesFailedKey) &&
+			(entry.UpstreamStatusCode != nil || entry.UpstreamErrorMessage != nil || entry.UpstreamErrorDetail != nil || service.LastOpsUpstreamAttempt(entry.UpstreamErrors) != nil)) {
 			if message := strings.TrimSpace(parsed.Message); message != "" {
 				entry.UpstreamErrorMessage = &message
 			}
@@ -1285,6 +1286,10 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 		return
 	}
 
+	if service.GetOpenAIClientTransport(c) == service.OpenAIClientTransportWS &&
+		c.GetBool(service.OpsStreamRecoveryLoggedKey) {
+		return
+	}
 	entry := &service.OpsInsertErrorLogInput{StatusCode: finalStatus}
 	applyOpsUpstreamFieldsFromContext(c, entry)
 	if len(entry.UpstreamErrors) > 0 {
@@ -1300,7 +1305,7 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 		applyOpsUpstreamErrorEvents(entry, visibleEvents)
 	}
 	if entry.UpstreamStatusCode == nil && entry.UpstreamErrorMessage == nil &&
-		entry.UpstreamErrorDetail == nil && len(entry.UpstreamErrors) == 0 {
+		entry.UpstreamErrorDetail == nil && service.LastOpsUpstreamAttempt(entry.UpstreamErrors) == nil {
 		return
 	}
 
@@ -1309,14 +1314,11 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 		lastStatus = *entry.UpstreamStatusCode
 	}
 	lastStage := ""
-	for i := len(entry.UpstreamErrors) - 1; i >= 0; i-- {
-		if event := entry.UpstreamErrors[i]; event != nil {
-			lastStage = event.Stage
-			if event.AccountID > 0 {
-				accountID := event.AccountID
-				entry.AccountID = &accountID
-			}
-			break
+	if event := service.LastOpsUpstreamAttempt(entry.UpstreamErrors); event != nil {
+		lastStage = event.Stage
+		if event.AccountID > 0 {
+			accountID := event.AccountID
+			entry.AccountID = &accountID
 		}
 	}
 	if entry.AccountID == nil {
@@ -1334,10 +1336,17 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 	entry.Severity = classifyOpsSeverity(entry.ErrorType, lastStatus)
 	entry.IsCountTokens = isCountTokensRequest(c)
 	entry.CreatedAt = time.Now()
+	recoveryConfirmed := service.GetOpenAIClientTransport(c) != service.OpenAIClientTransportWS || c.GetBool(service.OpsStreamTurnSucceededKey)
 	entry.ErrorMessage = "Recovered upstream error"
+	if !recoveryConfirmed {
+		entry.ErrorMessage = "Upstream WebSocket recovery not confirmed"
+	}
 	if lastStage == string(service.GatewayFailureStageAccountAuth) {
 		entry.ErrorPhase = string(service.GatewayFailureStageAccountAuth)
 		entry.ErrorMessage = "Recovered account authentication failure"
+		if !recoveryConfirmed {
+			entry.ErrorMessage = "WebSocket account authentication recovery not confirmed"
+		}
 	} else if lastStatus > 0 {
 		entry.ErrorMessage += " " + strconv.Itoa(lastStatus)
 	}
@@ -1393,6 +1402,9 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 	}
 	applyOpsLatencyFieldsFromContext(c, entry)
 	enqueueOpsErrorLog(ops, entry)
+	if service.GetOpenAIClientTransport(c) == service.OpenAIClientTransportWS {
+		c.Set(service.OpsStreamRecoveryLoggedKey, true)
+	}
 }
 
 func opsRequestTypeFromContext(c *gin.Context) *int16 {
@@ -1608,18 +1620,15 @@ func applyOpsStreamErrorSnapshot(entry *service.OpsInsertErrorLogInput, streamEr
 	}
 	entry.UpstreamErrors = streamErr.UpstreamErrors
 	lastStage := ""
-	for i := len(streamErr.UpstreamErrors) - 1; i >= 0; i-- {
-		if streamErr.UpstreamErrors[i] != nil {
-			lastStage = streamErr.UpstreamErrors[i].Stage
-			break
-		}
+	if last := service.LastOpsUpstreamAttempt(streamErr.UpstreamErrors); last != nil {
+		lastStage = last.Stage
 	}
 	if lastStage == string(service.GatewayFailureStageAccountAuth) {
 		entry.ErrorPhase = string(service.GatewayFailureStageAccountAuth)
 		entry.ErrorOwner = "provider"
 		entry.ErrorSource = "gateway"
 		entry.IsBusinessLimited = false
-	} else if streamErr.UpstreamStatus > 0 || len(streamErr.UpstreamErrors) > 0 {
+	} else if streamErr.UpstreamStatus > 0 || service.LastOpsUpstreamAttempt(streamErr.UpstreamErrors) != nil {
 		entry.ErrorPhase = "upstream"
 		entry.ErrorOwner = "provider"
 		entry.ErrorSource = "upstream_http"
@@ -1638,10 +1647,8 @@ func shouldSkipFinalOpsFailure(c *gin.Context) bool {
 	}
 	if v, ok := c.Get(service.OpsUpstreamErrorsKey); ok {
 		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok {
-			for i := len(events) - 1; i >= 0; i-- {
-				if events[i] != nil {
-					return events[i].SkipMonitoring
-				}
+			if last := service.LastOpsUpstreamAttempt(events); last != nil {
+				return last.SkipMonitoring
 			}
 		}
 	}
@@ -1715,13 +1722,7 @@ func applyOpsUpstreamFieldsFromContext(c *gin.Context, entry *service.OpsInsertE
 
 func applyOpsUpstreamErrorEvents(entry *service.OpsInsertErrorLogInput, events []*service.OpsUpstreamErrorEvent) {
 	entry.UpstreamErrors = events
-	var last *service.OpsUpstreamErrorEvent
-	for i := len(events) - 1; i >= 0; i-- {
-		if events[i] != nil {
-			last = events[i]
-			break
-		}
-	}
+	last := service.LastOpsUpstreamAttempt(events)
 	if last == nil {
 		return
 	}
@@ -2351,7 +2352,7 @@ func hasOpsUpstreamErrorContext(c *gin.Context) bool {
 		}
 	}
 	if v, ok := c.Get(service.OpsUpstreamErrorsKey); ok {
-		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok && len(events) > 0 {
+		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok && service.LastOpsUpstreamAttempt(events) != nil {
 			return true
 		}
 	}
@@ -2364,10 +2365,8 @@ func hasOpsAccountAuthFailure(c *gin.Context) bool {
 	}
 	if v, ok := c.Get(service.OpsUpstreamErrorsKey); ok {
 		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok {
-			for i := len(events) - 1; i >= 0; i-- {
-				if events[i] != nil {
-					return events[i].Stage == string(service.GatewayFailureStageAccountAuth)
-				}
+			if last := service.LastOpsUpstreamAttempt(events); last != nil {
+				return last.Stage == string(service.GatewayFailureStageAccountAuth)
 			}
 		}
 	}

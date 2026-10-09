@@ -627,7 +627,8 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		// Drop fully-empty events (can happen if only status code was known).
 		// Judged on the original detail so an older attempt whose detail is
 		// cleared by the body window below is still retained.
-		if out.UpstreamStatusCode == 0 && out.Message == "" && detail == "" {
+		if out.UpstreamStatusCode == 0 && out.Message == "" && detail == "" &&
+			!(out.Kind == OpsUpstreamRetryStopped && out.Reason != "") {
 			continue
 		}
 		if keepBody && detail != "" {

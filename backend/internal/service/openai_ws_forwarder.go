@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	coderws "github.com/coder/websocket"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -56,6 +57,33 @@ var openAIWSLogValueReplacer = strings.NewReplacer(
 
 var openAIWSIngressPreflightPingIdle = 20 * time.Second
 
+// ErrOpenAIWSReplayUnavailable requires client context recovery, not an account
+// health penalty: the gateway cannot prove a complete replay is available.
+var ErrOpenAIWSReplayUnavailable = errors.New("websocket continuation requires full input context")
+
+// ErrOpenAIWSFirstOutputBudgetExhausted is a gateway deadline reached before
+// this account received the request; it must not affect account health.
+var ErrOpenAIWSFirstOutputBudgetExhausted = errors.New("websocket first-output budget exhausted before upstream write")
+
+// Use configured idle limits, not a speculative short grace period: providers
+// may follow a bare error with delayed usage or even a successful response.
+func (s *OpenAIGatewayService) openAIWSErrorIdleTimeout(payload []byte) time.Duration {
+	timeout := s.openAIWSReadTimeout()
+	if s.cfg != nil {
+		seconds := s.cfg.Gateway.StreamDataIntervalTimeout
+		for _, tool := range gjson.GetBytes(payload, "tools").Array() {
+			if tool.Get("type").String() == "image_generation" {
+				seconds = s.cfg.Gateway.ImageStreamDataIntervalTimeout
+				break
+			}
+		}
+		if seconds > 0 {
+			timeout = min(timeout, time.Duration(seconds)*time.Second)
+		}
+	}
+	return timeout
+}
+
 // openAIWSFallbackError 表示可安全回退到 HTTP 的 WS 错误（尚未写下游）。
 type openAIWSFallbackError struct {
 	Reason string
@@ -94,6 +122,7 @@ type openAIWSIngressTurnError struct {
 	stage           string
 	cause           error
 	wroteDownstream bool
+	retryDetail     string // bounded progress evidence; no request/output content
 }
 
 type openAIWSCurrentTurnFailoverError struct {
@@ -188,6 +217,15 @@ func openAIWSIngressTurnRetryReason(err error) string {
 		return "unknown"
 	}
 	return turnErr.stage
+}
+
+// IsOpenAIWSUpstreamTransportError distinguishes upstream I/O failures from
+// invalid client frames and normal disconnects at the handler's Ops boundary.
+func IsOpenAIWSUpstreamTransportError(err error) bool {
+	var turnErr *openAIWSIngressTurnError
+	return errors.As(err, &turnErr) && turnErr != nil &&
+		(turnErr.stage == "read_upstream" || turnErr.stage == "write_upstream") &&
+		!errors.Is(err, context.Canceled)
 }
 
 func isOpenAIWSIngressPreviousResponseNotFound(err error) bool {

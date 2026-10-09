@@ -38,9 +38,12 @@ type OpsErrorLog struct {
 
 	Severity string `json:"severity"`
 
-	StatusCode int    `json:"status_code"`
-	Platform   string `json:"platform"`
-	Model      string `json:"model"`
+	StatusCode int `json:"status_code"`
+	// RequestStatusCode preserves the final request outcome separately from
+	// StatusCode, which also serves upstream-health filtering and sorting.
+	RequestStatusCode *int   `json:"request_status_code,omitempty"`
+	Platform          string `json:"platform"`
+	Model             string `json:"model"`
 
 	Resolved           bool       `json:"resolved"`
 	ResolvedAt         *time.Time `json:"resolved_at"`

@@ -122,3 +122,12 @@ describe('OpsErrorLogTable i18n keys exist in the errorLog namespace', () => {
     })
   }
 })
+
+
+describe('OpsErrorLogTable recovered attempts', () => {
+  it('retains the provider status while making the recovered request explicit', () => {
+    const wrapper = mountTable({ status_code: 503, request_status_code: 200, message: 'Recovered upstream error 503: overloaded' })
+    expect(wrapper.text()).toContain('503')
+    expect(wrapper.text()).toContain('admin.ops.errorLog.recovered · 200')
+  })
+})

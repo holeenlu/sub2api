@@ -18,7 +18,9 @@ import (
 )
 
 const (
-	openAIWSConnMaxAge          = 60 * time.Minute
+	// Leave headroom before the provider's hard 60-minute lifetime. Active
+	// leases rotate at the next turn boundary, never in the middle of output.
+	openAIWSConnMaxAge          = 55 * time.Minute
 	openAIWSConnHealthCheckIdle = 90 * time.Second
 	// 仅对没有常驻读循环的连接实现生效：这类连接空闲时无人应答上游 ping，须在
 	// 上游保活窗口到期前回收。coder/websocket 连接由池常驻读循环应答 ping，不受此阈值约束。

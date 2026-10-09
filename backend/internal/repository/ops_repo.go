@@ -267,7 +267,8 @@ SELECT
   COALESCE(e.user_agent, ''),
   e.request_type,
   COALESCE(ak.name, ''),
-  ak.deleted_at
+  ak.deleted_at,
+  e.status_code
 FROM ops_error_logs e
 LEFT JOIN accounts a ON e.account_id = a.id
 LEFT JOIN groups g ON e.group_id = g.id
@@ -288,6 +289,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 	for rows.Next() {
 		var item service.OpsErrorLog
 		var statusCode sql.NullInt64
+		var requestStatusCode sql.NullInt64
 		var clientIP sql.NullString
 		var userID sql.NullInt64
 		var apiKeyID sql.NullInt64
@@ -338,6 +340,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			&requestType,
 			&apiKeyName,
 			&apiKeyDeletedAt,
+			&requestStatusCode,
 		); err != nil {
 			return nil, err
 		}
@@ -351,6 +354,10 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 		}
 		item.ResolvedByUserName = resolvedByName
 		item.StatusCode = int(statusCode.Int64)
+		if requestStatusCode.Valid {
+			v := int(requestStatusCode.Int64)
+			item.RequestStatusCode = &v
+		}
 		if clientIP.Valid {
 			s := clientIP.String
 			item.ClientIP = &s
@@ -449,7 +456,8 @@ SELECT
   e.time_to_first_token_ms,
   COALESCE(e.api_key_prefix, ''),
   COALESCE(ak.name, ''),
-  ak.deleted_at
+  ak.deleted_at,
+  e.status_code
 FROM ops_error_logs e
 LEFT JOIN users u ON e.user_id = u.id
 LEFT JOIN accounts a ON e.account_id = a.id
@@ -460,6 +468,7 @@ LIMIT 1`
 
 	var out service.OpsErrorLogDetail
 	var statusCode sql.NullInt64
+	var requestStatusCode sql.NullInt64
 	var upstreamStatusCode sql.NullInt64
 	var resolvedAt sql.NullTime
 	var resolvedBy sql.NullInt64
@@ -524,12 +533,17 @@ LIMIT 1`
 		&out.APIKeyPrefix,
 		&detailAPIKeyName,
 		&detailAPIKeyDeletedAt,
+		&requestStatusCode,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	out.StatusCode = int(statusCode.Int64)
+	if requestStatusCode.Valid {
+		v := int(requestStatusCode.Int64)
+		out.RequestStatusCode = &v
+	}
 	if resolvedAt.Valid {
 		t := resolvedAt.Time
 		out.ResolvedAt = &t

@@ -19,6 +19,8 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	setOpenAIReplaySafety(c, body)
+	ctx = EnsureOpenAITurnBudget(ctx, s.cfg)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
@@ -1035,6 +1037,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if reqStream && account.Platform == PlatformOpenAI {
 		firstOutputTimeout = s.openAIFirstOutputTimeout(reasoningEffortValue)
 	}
+	if firstOutputTimeout > 0 {
+		openAITurnFirstOutputDeadline(ctx, firstOutputTimeout, startTime)
+	}
 
 	httpInvalidEncryptedContentRetryTried := false
 	compactModelFallbackRetried := false
@@ -1046,7 +1051,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		var headerGuard *openAIFirstOutputHeaderGuard
 		if firstOutputTimeout > 0 {
 			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(
-				upstreamCtx, releaseUpstreamCtx, startTime.Add(firstOutputTimeout),
+				upstreamCtx, releaseUpstreamCtx, openAITurnFirstOutputDeadline(ctx, firstOutputTimeout, startTime),
 			)
 		}
 		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, reqStream, promptCacheKey, isCodexCLI)
@@ -1411,6 +1416,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// DeepSeek / Kimi 原生 Responses 端点为无状态实现：强制 store=false、清除
 	// previous_response_id，避免携带状态字段被上游拒绝。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
+	// Account policy can add or remove hosted tools after Forward's initial
+	// snapshot. Every attempt must use the final body, including plugin sends.
+	setOpenAIReplaySafety(c, body)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {

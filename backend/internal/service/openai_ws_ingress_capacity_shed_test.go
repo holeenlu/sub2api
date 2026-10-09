@@ -37,19 +37,25 @@ func (r *openAIWSIngressCapacityShedRepo) UpdateExtra(context.Context, int64, ma
 // server_error：Codex 按闭集判定，server_is_overloaded / slow_down 属致命集，
 // 客户端会打印 "Selected model is at capacity" 并直接终止会话而不是退避重试。
 //
-// 第二个用例锁住改写范围：非容量类错误码必须原样下发，客户端依赖原码各自处理。
+// Cover committed output, unsafe hosted execution and provisional recovery.
+// Non-capacity codes retain their original meaning.
 func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name           string
+		request        string
 		upstreamEvents [][]byte
 		wantContains   []string
 		wantAbsent     []string
+		wantOpsStatus  int
+		wantStop       OpenAIRetryStopReason
+		wantSuccess    bool
 	}{
 		{
 			name: "capacity_shed_error_and_failed_are_rewritten",
 			upstreamEvents: [][]byte{
+				[]byte(`{"type":"response.output_text.delta","delta":"partial"}`),
 				[]byte(`{"type":"error","error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`),
 				[]byte(`{"type":"response.failed","response":{"id":"resp_shed","status":"failed","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}}`),
 			},
@@ -57,11 +63,36 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 				`"code":"server_error"`,
 				"Our servers are currently overloaded",
 			},
-			wantAbsent: []string{"server_is_overloaded"},
+			wantAbsent:    []string{"server_is_overloaded"},
+			wantOpsStatus: http.StatusServiceUnavailable,
+			wantStop:      OpenAIRetryStopDownstreamCommitted,
+		},
+		{
+			name:    "hosted_tool_bare_overload_is_not_replayed",
+			request: `{"type":"response.create","model":"gpt-6.1-sol","store":false,"tools":[{"type":"code_interpreter","container":{"type":"auto"}}]}`,
+			upstreamEvents: [][]byte{
+				[]byte(`{"type":"error","error":{"type":"upstream_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`),
+			},
+			wantContains:  []string{`"type":"response.failed"`, `"code":"server_error"`, "Our servers are currently overloaded"},
+			wantAbsent:    []string{"server_is_overloaded"},
+			wantOpsStatus: http.StatusServiceUnavailable,
+			wantStop:      OpenAIRetryStopReplayUnsafe,
+		},
+		{
+			name:    "provisional_unsafe_error_then_completed_has_no_stop",
+			request: `{"type":"response.create","model":"gpt-6.1-sol","store":false,"tools":[{"type":"code_interpreter","container":{"type":"auto"}}]}`,
+			upstreamEvents: [][]byte{
+				[]byte(`{"type":"error","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded."}}`),
+				[]byte(`{"type":"response.completed","response":{"id":"resp_recovered","output":[]}}`),
+			},
+			wantContains: []string{`"type":"response.completed"`},
+			wantAbsent:   []string{`"type":"response.failed"`},
+			wantSuccess:  true,
 		},
 		{
 			name: "non_capacity_error_code_is_passed_through",
 			upstreamEvents: [][]byte{
+				[]byte(`{"type":"response.output_text.delta","delta":"partial"}`),
 				[]byte(`{"type":"error","error":{"type":"invalid_request_error","code":"workspace_suspended","message":"workspace is suspended"}}`),
 				[]byte(`{"type":"response.failed","response":{"id":"resp_suspended","status":"failed","error":{"code":"workspace_suspended","message":"workspace is suspended"}}}`),
 			},
@@ -118,6 +149,9 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 			}
 
 			serverDone := make(chan struct{})
+			var opsFailure OpsStreamError
+			var hasOpsFailure bool
+			var opsEvents []*OpsUpstreamErrorEvent
 			wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				defer close(serverDone)
 				conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
@@ -140,6 +174,10 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 					return
 				}
 				_ = svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, &account, "sk-test", firstMessage, nil)
+				opsFailure, hasOpsFailure = GetOpsStreamError(ginCtx)
+				if raw, ok := ginCtx.Get(OpsUpstreamErrorsKey); ok {
+					opsEvents, _ = raw.([]*OpsUpstreamErrorEvent)
+				}
 			}))
 			defer wsServer.Close()
 
@@ -150,7 +188,11 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 			defer func() { _ = clientConn.CloseNow() }()
 
 			writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-			err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false}`))
+			request := tt.request
+			if request == "" {
+				request = `{"type":"response.create","model":"gpt-5.1","stream":false}`
+			}
+			err = clientConn.Write(writeCtx, coderws.MessageText, []byte(request))
 			cancelWrite()
 			require.NoError(t, err)
 
@@ -180,6 +222,29 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 			case <-serverDone:
 			case <-time.After(5 * time.Second):
 				t.Fatal("等待 ingress websocket 结束超时")
+			}
+			require.Len(t, captureConn.writes, 1, "committed output and hosted tools must not trigger automatic replay")
+			if tt.wantStop != "" {
+				require.Len(t, opsEvents, 1, "one final stop, not one event per bare error/terminal")
+				require.Equal(t, OpsUpstreamRetryStopped, opsEvents[0].Kind)
+				require.Equal(t, string(tt.wantStop), opsEvents[0].Reason)
+				require.True(t, gjson.Valid(opsEvents[0].Detail))
+				if tt.wantStop == OpenAIRetryStopReplayUnsafe {
+					require.Equal(t, "code_interpreter", gjson.Get(opsEvents[0].Detail, "blocking_tool_kind").String())
+					require.EqualValues(t, 0, gjson.Get(opsEvents[0].Detail, "downstream_events").Int())
+				} else {
+					require.EqualValues(t, 1, gjson.Get(opsEvents[0].Detail, "downstream_token_events").Int())
+				}
+			}
+			if tt.wantSuccess {
+				require.False(t, hasOpsFailure)
+				require.Empty(t, opsEvents, "recovered provisional errors must not leave a stop event")
+			}
+			if tt.wantOpsStatus != 0 {
+				require.True(t, hasOpsFailure)
+				require.Equal(t, tt.wantOpsStatus, opsFailure.IntendedStatus)
+				require.Equal(t, "server_is_overloaded", opsFailure.Code, "Ops retains the provider error while the wire code is retryable")
+				require.Equal(t, "client-visible websocket response.failed", opsFailure.UpstreamDetail)
 			}
 		})
 	}
