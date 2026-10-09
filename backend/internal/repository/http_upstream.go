@@ -6,6 +6,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -130,6 +131,7 @@ type openAIHTTP2Settings struct {
 // 记录客户端实例及其元数据，用于连接池管理和淘汰策略
 type upstreamClientEntry struct {
 	client       *http.Client // HTTP 客户端实例
+	feedbackKey  string       // origin/account-scoped H2 feedback, never logged raw
 	proxyKey     string       // 代理标识（用于检测代理变更）
 	poolKey      string       // 连接池配置标识（用于检测配置变更）
 	protocolMode string       // 协议模式（default/long_stream_h2/openai_h1/openai_h2/openai_h1_fallback）
@@ -142,6 +144,7 @@ type openAIHTTP2FallbackState struct {
 	windowStart   time.Time
 	errorCount    int
 	fallbackUntil time.Time
+	expiresAt     time.Time
 }
 
 // httpUpstreamService 通用 HTTP 上游服务
@@ -165,8 +168,9 @@ type httpUpstreamService struct {
 	cfg     *config.Config                  // 全局配置
 	mu      sync.RWMutex                    // 保护 clients map 的读写锁
 	clients map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
-	// OpenAI 走 HTTP/HTTPS 代理时的 H2->H1 回退状态（key=标准化 proxyKey）
-	openAIHTTP2Fallbacks sync.Map
+	// Bounded, lazily expired H2 feedback for proxy + origin + account.
+	openAIHTTP2Fallbacks  sync.Map
+	openAIHTTP2FallbackMu sync.Mutex
 }
 
 // NewHTTPUpstream 创建通用 HTTP 上游服务
@@ -211,7 +215,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	}
 
 	// 获取或创建对应的客户端，并标记请求占用
-	entry, err := s.acquireClientWithProfile(proxyURL, accountID, accountConcurrency, profile)
+	entry, err := s.acquireClientWithProfile(proxyURL, accountID, accountConcurrency, profile, req.URL.Scheme+"://"+req.URL.Host)
 	if err != nil {
 		return nil, err
 	}
@@ -219,15 +223,26 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	// 执行请求
 	client := s.httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
-	resp, err := doUpstreamRequest(client, req)
+	resp, err := doWithOpenAIPreRequestRetry(client, req, proxyURL, profile)
 	if err != nil {
-		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
+		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.feedbackKey, err)
 		// 请求失败，立即减少计数
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 		return nil, err
 	}
-	s.recordOpenAIHTTP2Success(profile, entry.protocolMode, entry.proxyKey)
+	if profile == service.HTTPUpstreamProfileOpenAI && resp.ProtoMajor == 2 {
+		resp.Body = &openAIHTTP2FeedbackBody{ReadCloser: resp.Body, report: func(err error) {
+			if req.Context().Err() != nil {
+				return
+			}
+			if err == nil {
+				s.recordOpenAIHTTP2Success(profile, entry.protocolMode, entry.feedbackKey)
+			} else {
+				s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.feedbackKey, err)
+			}
+		}}
+	}
 
 	// 包装响应体，在关闭时自动减少计数并更新时间戳
 	// 这确保了流式响应（如 SSE）在完全读取前不会被淘汰
@@ -280,7 +295,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 
 	client := s.httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
-	resp, err := doUpstreamRequest(client, req)
+	resp, err := doWithOpenAIPreRequestRetry(client, req, proxyURL, upstreamProfile)
 	if err != nil {
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
@@ -686,8 +701,8 @@ func (s *httpUpstreamService) acquireClient(proxyURL string, accountID int64, ac
 }
 
 // acquireClientWithProfile 获取或创建客户端，并按请求 profile 选择协议策略。
-func (s *httpUpstreamService) acquireClientWithProfile(proxyURL string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile) (*upstreamClientEntry, error) {
-	return s.getClientEntry(proxyURL, accountID, accountConcurrency, profile, true, true)
+func (s *httpUpstreamService) acquireClientWithProfile(proxyURL string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile, origin ...string) (*upstreamClientEntry, error) {
+	return s.getClientEntry(proxyURL, accountID, accountConcurrency, profile, true, true, origin...)
 }
 
 // getOrCreateClient 获取或创建客户端
@@ -712,7 +727,7 @@ func (s *httpUpstreamService) getOrCreateClient(proxyURL string, accountID int64
 // getClientEntry 获取或创建客户端条目
 // markInFlight=true 时会标记进行中请求，用于请求路径防止被淘汰
 // enforceLimit=true 时会限制客户端数量，超限且无法淘汰时返回错误
-func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile, markInFlight bool, enforceLimit bool) (*upstreamClientEntry, error) {
+func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile, markInFlight bool, enforceLimit bool, origin ...string) (*upstreamClientEntry, error) {
 	// 获取隔离模式
 	isolation := s.getIsolationMode()
 	// 标准化代理 URL 并解析
@@ -721,11 +736,18 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 		return nil, err
 	}
 	// 根据请求 profile（例如 OpenAI）选择协议模式
-	protocolMode := s.resolveProtocolMode(profile, proxyKey, parsedProxy)
+	feedbackKey := proxyKey
+	if profile == service.HTTPUpstreamProfileOpenAI && len(origin) > 0 {
+		feedbackKey += fmt.Sprintf("\x00%s\x00%d", origin[0], accountID)
+	}
+	protocolMode := s.resolveProtocolMode(profile, feedbackKey, parsedProxy)
 	settings := s.resolvePoolSettings(isolation, accountConcurrency)
 	settings = s.applyProfilePoolSettings(settings, profile)
 	// 构建缓存键（根据隔离策略不同）
-	cacheKey := buildCacheKey(isolation, proxyKey, accountID, protocolMode)
+	cacheKey := buildCacheKey(isolation, feedbackKey, accountID, protocolMode)
+	if profile == service.HTTPUpstreamProfileOpenAI && len(origin) > 0 {
+		cacheKey += "|origin:" + origin[0]
+	}
 	// 构建连接池配置键（用于检测配置变更）
 	poolKey := buildPoolKey(settings, protocolMode)
 
@@ -784,6 +806,7 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 		proxyKey:     proxyKey,
 		poolKey:      poolKey,
 		protocolMode: protocolMode,
+		feedbackKey:  feedbackKey,
 	}
 	atomic.StoreInt64(&entry.lastUsed, nowUnix)
 	if markInFlight {
@@ -1077,7 +1100,7 @@ func (s *httpUpstreamService) resolveProtocolMode(profile service.HTTPUpstreamPr
 		return upstreamProtocolModeOpenAIH2
 	}
 	scheme := strings.ToLower(parsedProxy.Scheme)
-	if scheme != "http" && scheme != "https" {
+	if scheme != "http" && scheme != "https" && scheme != "socks5" && scheme != "socks5h" {
 		return upstreamProtocolModeOpenAIH2
 	}
 	if settings.allowProxyFallbackToHTTP1 && s.isOpenAIHTTP2FallbackActive(proxyKey) {
@@ -1095,22 +1118,80 @@ func (s *httpUpstreamService) isOpenAIHTTP2FallbackActive(proxyKey string) bool 
 	if !ok || state == nil {
 		return false
 	}
-	return state.isFallbackActive(time.Now())
+	now := time.Now()
+	state.mu.Lock()
+	expired := !state.expiresAt.IsZero() && !now.Before(state.expiresAt)
+	state.mu.Unlock()
+	return !expired && state.isFallbackActive(now)
 }
 
+const openAIHTTP2FallbackMaxEntries = 4096
+
 func (s *httpUpstreamService) getOrCreateOpenAIHTTP2FallbackState(proxyKey string) *openAIHTTP2FallbackState {
-	state := &openAIHTTP2FallbackState{}
-	actual, _ := s.openAIHTTP2Fallbacks.LoadOrStore(proxyKey, state)
-	cached, ok := actual.(*openAIHTTP2FallbackState)
-	if !ok || cached == nil {
+	// Insertion is rare (compatibility failures only). Serialize pruning and
+	// insertion so concurrent accounts cannot overshoot the memory bound.
+	s.openAIHTTP2FallbackMu.Lock()
+	defer s.openAIHTTP2FallbackMu.Unlock()
+	now := time.Now()
+	settings := s.resolveOpenAIHTTP2Settings()
+	expires := now.Add(max(settings.fallbackTTL, settings.fallbackWindow))
+	if raw, ok := s.openAIHTTP2Fallbacks.Load(proxyKey); ok {
+		state := raw.(*openAIHTTP2FallbackState)
+		state.mu.Lock()
+		state.expiresAt = expires
+		state.mu.Unlock()
 		return state
 	}
-	return cached
+	count := 0
+	var oldestKey any
+	var oldestState *openAIHTTP2FallbackState
+	var oldest time.Time
+	s.openAIHTTP2Fallbacks.Range(func(key, value any) bool {
+		state := value.(*openAIHTTP2FallbackState)
+		state.mu.Lock()
+		at := state.expiresAt
+		state.mu.Unlock()
+		if !at.IsZero() && !now.Before(at) {
+			s.openAIHTTP2Fallbacks.CompareAndDelete(key, state)
+			return true
+		}
+		count++
+		if oldestKey == nil || at.Before(oldest) {
+			oldestKey, oldestState, oldest = key, state, at
+		}
+		return true
+	})
+	if count >= openAIHTTP2FallbackMaxEntries {
+		s.openAIHTTP2Fallbacks.CompareAndDelete(oldestKey, oldestState)
+	}
+	state := &openAIHTTP2FallbackState{expiresAt: expires}
+	s.openAIHTTP2Fallbacks.Store(proxyKey, state)
+	return state
 }
 
 func isHTTPProxyKey(proxyKey string) bool {
 	return strings.HasPrefix(proxyKey, "http://") || strings.HasPrefix(proxyKey, "https://")
 }
+
+func isOpenAIProxyFeedbackKey(key string) bool {
+	return isHTTPProxyKey(key) || strings.HasPrefix(key, "socks5://") || strings.HasPrefix(key, "socks5h://")
+}
+
+type openAIHTTP2FeedbackBody struct {
+	io.ReadCloser
+	once   sync.Once
+	report func(error)
+}
+
+func (b *openAIHTTP2FeedbackBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		b.once.Do(func() { b.report(err) })
+	}
+	return n, err
+}
+
+func (b *openAIHTTP2FeedbackBody) MarkComplete() { b.once.Do(func() { b.report(nil) }) }
 
 func isOpenAIHTTP2CompatibilityError(err error) bool {
 	if err == nil {
@@ -1178,14 +1259,15 @@ func (s *httpUpstreamService) recordOpenAIHTTP2Failure(profile service.HTTPUpstr
 	if !settings.enabled || !settings.allowProxyFallbackToHTTP1 {
 		return
 	}
-	if !isHTTPProxyKey(proxyKey) || !isOpenAIHTTP2CompatibilityError(err) {
+	if !isOpenAIProxyFeedbackKey(proxyKey) || !isOpenAIHTTP2CompatibilityError(err) {
 		return
 	}
 	state := s.getOrCreateOpenAIHTTP2FallbackState(proxyKey)
 	activated, until := state.recordFailure(time.Now(), settings.fallbackErrorThreshold, settings.fallbackWindow, settings.fallbackTTL)
 	if activated {
 		slog.Warn("openai_http2_proxy_fallback_activated",
-			"proxy", proxyKey,
+			"proxy_hash", fmt.Sprintf("%x", sha256.Sum256([]byte(strings.SplitN(proxyKey, "\x00", 2)[0])))[:8],
+			"route_hash", fmt.Sprintf("%x", sha256.Sum256([]byte(proxyKey)))[:8],
 			"fallback_until", until.Format(time.RFC3339))
 	}
 }
@@ -1194,7 +1276,7 @@ func (s *httpUpstreamService) recordOpenAIHTTP2Success(profile service.HTTPUpstr
 	if profile != service.HTTPUpstreamProfileOpenAI || protocolMode != upstreamProtocolModeOpenAIH2 {
 		return
 	}
-	if !isHTTPProxyKey(proxyKey) {
+	if !isOpenAIProxyFeedbackKey(proxyKey) {
 		return
 	}
 	raw, ok := s.openAIHTTP2Fallbacks.Load(proxyKey)
@@ -1507,6 +1589,12 @@ func (b *trackedBody) Close() error {
 		b.once.Do(b.onClose)
 	}
 	return err
+}
+
+func (b *trackedBody) MarkComplete() {
+	if complete, ok := b.ReadCloser.(interface{ MarkComplete() }); ok {
+		complete.MarkComplete()
+	}
 }
 
 // wrapTrackedBody 包装响应体以跟踪关闭事件

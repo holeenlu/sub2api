@@ -94,6 +94,11 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRejectsAmbiguousErrors(t 
 			body:         []byte(`{"tools":[{"type":"web_search"}],"tool_choice":"auto","input":"search the web"}`),
 			responseBody: []byte(`{"error":{"message":"Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.","type":"invalid_request_error","param":"tools","code":"unsupported_parameter"}}`),
 		},
+		{
+			name:         "hosted search rejection without param must not trigger item ID repair",
+			body:         []byte(`{"tools":[{"type":"web_search"}],"tool_choice":"auto","input":[{"type":"message","id":"msg_replay","role":"user","content":"search the web"}]}`),
+			responseBody: []byte(`{"error":{"code":"unsupported_parameter","message":"Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.","type":"invalid_request_error"}}`),
+		},
 	}
 
 	for _, tt := range tests {
@@ -104,6 +109,134 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRejectsAmbiguousErrors(t 
 			require.Nil(t, retryBody)
 		})
 	}
+}
+
+func TestNormalizeOpenAIResponsesRejectedPersistedItemLookup(t *testing.T) {
+	const rejection = `{"error":{"code":"unsupported_parameter","type":"invalid_request_error","message":"Supplied input item IDs require persisted-item lookup that is not supported by rustponsesapi."}}`
+	const body = `{"type":"response.create","previous_response_id":"resp_keep","input":[
+		{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"hello","id":"nested_keep"}]},
+		{"type":"reasoning","id":"rs_1","encrypted_content":"cipher","summary":[]},
+		{"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup","arguments":"{}"},
+		{"type":"function_call_output","id":"fco_1","call_id":"call_1","output":"ok"},
+		{"type":"custom_tool_call","id":"ctc_1","call_id":"call_2","name":"patch","input":"patch"},
+		{"type":"custom_tool_call_output","id":"fc_2","call_id":"call_2","output":"ok"},
+		{"id":"msg_2","role":"user","content":"continue"}
+	]}`
+	for _, errorBody := range []string{rejection, `{"type":"error",` + rejection[1:]} {
+		status := openAIWSRejectedFieldRetryHTTPStatus([]byte(errorBody))
+		require.Equal(t, http.StatusBadRequest, status)
+		retry, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(status, []byte(body), []byte(errorBody))
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "persisted input item lookup rejection", reason)
+		// Removing only top-level item IDs must preserve every other byte's
+		// JSON value, including nested IDs, opaque content and tool pairing.
+		var original, actual map[string]any
+		require.NoError(t, decodeOpenAIJSONUseNumber([]byte(body), &original))
+		require.NoError(t, decodeOpenAIJSONUseNumber(retry, &actual))
+		for _, item := range original["input"].([]any) {
+			delete(item.(map[string]any), "id")
+		}
+		require.Equal(t, original, actual)
+		_, _, changed, err = normalizeOpenAIResponsesRejectedFieldRetryBody(status, retry, []byte(errorBody))
+		require.NoError(t, err)
+		require.False(t, changed, "must not retry unchanged bodies")
+	}
+	for _, input := range []string{
+		`[{"type":"item_reference","id":"msg_remote"}]`,
+		`[{"type":"message","id":"msg_remote"}]`,
+		`[{"type":"reasoning","id":"rs_remote","summary":[]}]`,
+		`[{"type":"future_item","id":"remote","content":"unknown"}]`,
+		`[{"type":"function_call","id":"fc_1","name":"lookup","arguments":"{}"}]`,
+		`[{"type":"message","id":"msg_1","role":"user","content":"hi"},{"type":"item_reference","id":"remote"}]`,
+	} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(`{"input":`+input+`}`), []byte(rejection))
+		require.NoError(t, err)
+		require.False(t, changed, input)
+	}
+	// The identifying phrase is matched as a substring, so the repair must
+	// survive the wording drift the upstream has already shown once: a dropped
+	// trailing period, a renamed backend, or extra leading text.
+	for _, errorBody := range []string{
+		strings.Replace(rejection, "by rustponsesapi.", "by rustponsesapi", 1),
+		strings.Replace(rejection, "rustponsesapi", "some-other-backend", 1),
+		strings.Replace(rejection, "Supplied input item IDs", "Request rejected: supplied input item IDs", 1),
+	} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(body), []byte(errorBody))
+		require.NoError(t, err)
+		require.True(t, changed, errorBody)
+	}
+	for _, errorBody := range []string{
+		strings.Replace(rejection, "unsupported_parameter", "invalid_request_error", 1),
+		strings.Replace(rejection, `"type":"invalid_request_error"`, `"param":"tools","type":"invalid_request_error"`, 1),
+		// Dropping the identifying phrase must stop the repair even though the
+		// rest of the sentence, and the backend name, still match.
+		strings.Replace(rejection, "persisted-item lookup", "an unrelated lookup", 1),
+	} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(body), []byte(errorBody))
+		require.NoError(t, err)
+		require.False(t, changed, errorBody)
+	}
+	_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusInternalServerError, []byte(body), []byte(rejection))
+	require.NoError(t, err)
+	require.False(t, changed)
+}
+
+// The decline reason is the only signal that separates "the repair was offered
+// and refused" from "the rejection never arrived"; pin its wording so the log
+// stays greppable and keeps naming the item that blocked the repair.
+func TestNormalizeOpenAIResponsesStatelessMissingItem(t *testing.T) {
+	const rejection = `{"type":"error","status":404,"error":{"code":"error","type":"invalid_request_error","message":"Item with id 'rs_MixedCase' not found. Items are not persisted when store is set to false."}}`
+	const body = `{"store":false,"input":[{"type":"reasoning","id":"rs_MixedCase","summary":[],"encrypted_content":"cipher"},{"type":"function_call","id":"fc_keep","call_id":"pair","name":"test","arguments":"{}"}]}`
+	for _, event := range []string{rejection, `{"type":"response.failed","response":{"error":` + gjson.Get(rejection, "error").Raw + `}}`} {
+		retry, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusNotFound, []byte(body), []byte(event))
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(retry, "input.0.id").Exists())
+		require.Equal(t, "cipher", gjson.GetBytes(retry, "input.0.encrypted_content").String())
+		require.Equal(t, "fc_keep", gjson.GetBytes(retry, "input.1.id").String(), "only the explicitly rejected item is repaired")
+		require.Equal(t, "pair", gjson.GetBytes(retry, "input.1.call_id").String())
+	}
+	for _, input := range []string{`{"type":"item_reference","id":"rs_MixedCase"}`, `{"type":"reasoning","id":"rs_MixedCase","summary":[]}`} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusNotFound, []byte(`{"input":[`+input+`]}`), []byte(rejection))
+		require.NoError(t, err)
+		require.False(t, changed, "missing content is not repaired by deleting history")
+	}
+	_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusNotFound, []byte(body), []byte(`{"error":{"message":"Item with id 'rs_MixedCase' not found."}}`))
+	require.NoError(t, err)
+	require.False(t, changed, "a general 404 does not permit rewriting input")
+}
+
+func TestRemoveOpenAIResponsesSelfContainedItemIDsExplainsDeclines(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		body  string
+		equal string
+	}{
+		{"item reference", `{"input":[{"type":"item_reference","id":"msg_remote"}]}`, "item_reference at input[0]"},
+		{"reference after a repairable item", `{"input":[{"type":"message","id":"msg_1","role":"user","content":"hi"},{"type":"item_reference","id":"remote"}]}`, "item_reference at input[1]"},
+		{"unsupported type", `{"input":[{"type":"web_search_call","id":"ws_1","status":"completed"}]}`, `unsupported item type "web_search_call" at input[0]`},
+		{"incomplete reasoning", `{"input":[{"type":"reasoning","id":"rs_1","summary":[]}]}`, "incomplete reasoning at input[0]"},
+		{"incomplete message", `{"input":[{"type":"message","id":"msg_1"}]}`, "incomplete message at input[0]"},
+		{"untyped incomplete message", `{"input":[{"id":"msg_1"}]}`, "incomplete message at input[0]"},
+		{"incomplete function call", `{"input":[{"type":"function_call","id":"fc_1","name":"lookup","arguments":"{}"}]}`, "incomplete function_call at input[0]"},
+		{"nothing to remove", `{"input":[{"type":"message","role":"user","content":"hi"}]}`, "no input item ids to remove"},
+		{"input is not an array", `{"input":"plain text"}`, "input is not an array"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, changed, declineReason, err := removeOpenAIResponsesSelfContainedItemIDs([]byte(tt.body))
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Equal(t, tt.equal, declineReason)
+		})
+	}
+
+	_, changed, declineReason, err := removeOpenAIResponsesSelfContainedItemIDs(
+		[]byte(`{"input":[{"type":"message","id":"msg_1","role":"user","content":"hi"}]}`),
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Empty(t, declineReason, "a successful repair must not report a decline")
 }
 
 func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRepairsAutomationMissingRootType(t *testing.T) {

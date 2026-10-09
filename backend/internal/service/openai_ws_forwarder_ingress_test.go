@@ -1287,7 +1287,7 @@ func (l *nativeWSMemoryListener) Addr() net.Addr {
 	return &net.UnixAddr{Name: "native-ws-test", Net: "memory"}
 }
 
-func startOpenAIWSMemorySession(t *testing.T, svc *OpenAIGatewayService, account *Account, header http.Header, payload string, hooks *OpenAIWSIngressHooks) (*coderws.Conn, <-chan error) {
+func startOpenAIWSMemorySession(t *testing.T, svc *OpenAIGatewayService, account *Account, header http.Header, payload string, hooks *OpenAIWSIngressHooks, inspect ...func(*gin.Context)) (*coderws.Conn, <-chan error) {
 	t.Helper()
 	clientPipe, serverPipe := net.Pipe()
 	listener := &nativeWSMemoryListener{conn: serverPipe, done: make(chan struct{})}
@@ -1307,7 +1307,13 @@ func startOpenAIWSMemorySession(t *testing.T, svc *OpenAIGatewayService, account
 		}
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = r.Clone(ctx)
-		serverErr <- svc.ProxyResponsesWebSocketFromClient(ctx, c, conn, account, "test-token", first, hooks)
+		SetOpenAIClientTransport(c, OpenAIClientTransportWS)
+		BeginOpsStreamTurn(c, 1)
+		err = svc.ProxyResponsesWebSocketFromClient(ctx, c, conn, account, "test-token", first, hooks)
+		for _, capture := range inspect {
+			capture(c)
+		}
+		serverErr <- err
 	})}
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = clientPipe.Close(); _ = serverPipe.Close(); _ = server.Close() })

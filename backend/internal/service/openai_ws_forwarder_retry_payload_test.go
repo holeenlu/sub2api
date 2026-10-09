@@ -1,10 +1,44 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestBuildOpenAIWSCurrentTurnRetryPayloadRequiresCompleteDependencies(t *testing.T) {
+	for _, input := range []string{
+		`{"type":"item_reference","id":"rs_missing"}`,
+		`{"type":"reasoning","id":"rs_missing","summary":[]}`,
+		`{"type":"function_call_output","call_id":"missing_call","output":"done"}`,
+		`{"role":"user","content":[{"type":"input_file","file_id":"file_account_scoped"}]}`,
+	} {
+		payload, safe, err := buildOpenAIWSCurrentTurnRetryPayload([]byte(`{"previous_response_id":"resp_old"}`), []json.RawMessage{json.RawMessage(input)}, true, "gpt-6.1-sol")
+		require.NoError(t, err)
+		require.False(t, safe, input)
+		require.Empty(t, payload)
+	}
+}
+
+func TestBuildOpenAIWSCurrentTurnRetryPayloadPreservesHostedItems(t *testing.T) {
+	for _, store := range []string{"true", "false"} {
+		for _, typ := range []string{"web_search_call", "mcp_call", "local_shell_call", "image_generation_call", "future_hosted_call"} {
+			t.Run(store+"/"+typ, func(t *testing.T) {
+				item := json.RawMessage(`{"type":"` + typ + `","id":"hosted_1","status":"completed","result":"retained"}`)
+				payload, safe, err := buildOpenAIWSCurrentTurnRetryPayload([]byte(`{"store":`+store+`,"previous_response_id":"resp_old"}`), []json.RawMessage{item}, true, "gpt-6.1-sol")
+				require.NoError(t, err)
+				require.True(t, safe)
+				var decoded struct {
+					Input []json.RawMessage `json:"input"`
+				}
+				require.NoError(t, json.Unmarshal(payload, &decoded))
+				require.Len(t, decoded.Input, 1)
+				require.JSONEq(t, string(item), string(decoded.Input[0]))
+			})
+		}
+	}
+}
 
 func TestApplyOpenAIWSRetryPayloadStrategy_KeepPromptCacheKey(t *testing.T) {
 	payload := map[string]any{

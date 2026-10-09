@@ -15,9 +15,117 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
+
+type openAITurnBudgetKey struct{}
+
+// OpenAITurnBudget is shared through context across account switches and
+// transport-local retries. It does not contain request data or credentials.
+type OpenAITurnBudget struct {
+	mu                 sync.Mutex
+	limit, attempts    int
+	started            time.Time
+	deadline           time.Time
+	control            context.Context
+	protectionAccounts map[int64]bool
+}
+
+var ErrOpenAITurnAttemptBudgetExhausted = errors.New("OpenAI turn attempt budget exhausted before upstream send")
+
+func NewOpenAITurnBudget(cfg *config.Config) *OpenAITurnBudget {
+	b := &OpenAITurnBudget{started: time.Now()}
+	if cfg != nil && cfg.Gateway.OpenAITurnMaxAttempts > 0 {
+		switches := cfg.Gateway.MaxAccountSwitches
+		if switches <= 0 {
+			switches = 3
+		}
+		b.limit = min(cfg.Gateway.OpenAITurnMaxAttempts, switches+1)
+	}
+	return b
+}
+
+func WithOpenAITurnBudget(ctx context.Context, budget *OpenAITurnBudget) context.Context {
+	if budget != nil {
+		budget.mu.Lock()
+		if budget.control == nil {
+			budget.control = ctx
+		}
+		budget.mu.Unlock()
+	}
+	return context.WithValue(ctx, openAITurnBudgetKey{}, budget)
+}
+
+func EnsureOpenAITurnBudget(ctx context.Context, cfg *config.Config) context.Context {
+	if _, ok := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget); ok {
+		return ctx
+	}
+	return WithOpenAITurnBudget(ctx, NewOpenAITurnBudget(cfg))
+}
+
+func TakeOpenAITurnAttempt(ctx context.Context) error {
+	b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+	if b == nil {
+		return ctx.Err()
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if b.control != nil && b.control.Err() != nil {
+		return b.control.Err()
+	}
+	if !b.deadline.IsZero() && !time.Now().Before(b.deadline) {
+		return ErrOpenAIWSFirstOutputBudgetExhausted
+	}
+	if b.limit > 0 && b.attempts >= b.limit {
+		return ErrOpenAITurnAttemptBudgetExhausted
+	}
+	b.attempts++
+	return nil
+}
+
+func openAITurnFirstOutputDeadline(ctx context.Context, timeout time.Duration, fallback time.Time) time.Time {
+	b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+	if b == nil || b.limit == 0 {
+		return fallback.Add(timeout)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.deadline.IsZero() && timeout > 0 {
+		b.deadline = b.started.Add(timeout)
+	}
+	return b.deadline
+}
+
+// Correlated protection failures on independent credentials are not repaired
+// by exhausting every account. Stop this turn after two distinct accounts;
+// future requests remain free to probe recovery without a global outage flag.
+func OpenAITurnRetryAllowed(ctx context.Context, accountID int64, response []byte) bool {
+	b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+	if b == nil {
+		return true
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.control != nil && b.control.Err() != nil {
+		return false
+	}
+	if b.limit > 0 && b.attempts >= b.limit {
+		return false
+	}
+	if b.limit == 0 || !isOpenAIResponseProtectionUnavailable("", response) {
+		return true
+	}
+	if b.protectionAccounts == nil {
+		b.protectionAccounts = make(map[int64]bool)
+	}
+	b.protectionAccounts[accountID] = true
+	return len(b.protectionAccounts) < 2
+}
 
 const (
 	openAIFirstOutputStageMemoryLimit        = 64 * 1024
