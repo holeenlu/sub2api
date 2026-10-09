@@ -10,6 +10,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -373,6 +374,8 @@ func defaultModelsListCandidateIDs(platform string) []string {
 		}
 	case PlatformTypeSafe:
 		return []string{typesafe.JevLatestModel}
+	case PlatformCommandCode, PlatformCline:
+		return nil
 	case PlatformComposite:
 		return compositeDefaultModelsListCandidateIDs()
 	default:
@@ -396,10 +399,13 @@ func defaultAllowImageGenerationForPlatform(platform string) bool {
 func compositeDefaultModelsListCandidateIDs() []string {
 	seen := make(map[string]struct{})
 	ids := make([]string, 0)
-	// TypeSafe stays out of the static composite candidates (jev-latest only works
-	// through /v1/systemone); groups with TypeSafe accounts still get it from the
-	// account model mappings collected by GetGroupModelsListCandidates.
-	for _, platform := range []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo} {
+	for _, platform := range domain.CompositePrecedencePlatformIDs() {
+		// TypeSafe stays out of the static composite candidates (jev-latest only works
+		// through /v1/systemone); groups with TypeSafe accounts still get it from the
+		// account model mappings collected by GetGroupModelsListCandidates.
+		if platform == PlatformTypeSafe {
+			continue
+		}
 		for _, id := range defaultModelsListCandidateIDs(platform) {
 			if _, ok := seen[id]; ok {
 				continue

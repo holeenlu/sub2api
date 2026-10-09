@@ -90,6 +90,10 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 		if isAnthropicFableModel(modelKey) && modelKey != anthropicFableRateLimitKey {
 			keys = append(keys, anthropicFableRateLimitKey)
 		}
+	case PlatformCline:
+		if walletKey := clineWalletRateLimitKey(modelKey); walletKey != "" {
+			keys = append(keys, walletKey)
+		}
 	}
 	return keys
 }
@@ -189,6 +193,17 @@ func (a *Account) modelRateLimitResetAt(scope string) *time.Time {
 	return &resetAt
 }
 
+// modelRateLimitReason 返回指定 scope 冷却记录中的原因；没有记录时为空。
+func (a *Account) modelRateLimitReason(scope string) string {
+	if a == nil || a.Extra == nil || scope == "" {
+		return ""
+	}
+	rawLimits, _ := a.Extra[modelRateLimitsKey].(map[string]any)
+	rawLimit, _ := rawLimits[scope].(map[string]any)
+	reason, _ := rawLimit["reason"].(string)
+	return reason
+}
+
 func setAccountModelRateLimitSnapshot(account *Account, scope string, resetAt time.Time, reason string, now time.Time) {
 	if account == nil || strings.TrimSpace(scope) == "" {
 		return
@@ -209,22 +224,6 @@ func setAccountModelRateLimitSnapshot(account *Account, scope string, resetAt ti
 		payload["reason"] = reason
 	}
 	limits[scope] = payload
-}
-
-func (a *Account) modelRateLimitReason(scope string) string {
-	if a == nil || a.Extra == nil || scope == "" {
-		return ""
-	}
-	rawLimits, ok := a.Extra[modelRateLimitsKey].(map[string]any)
-	if !ok {
-		return ""
-	}
-	rawLimit, ok := rawLimits[scope].(map[string]any)
-	if !ok {
-		return ""
-	}
-	reason, _ := rawLimit["reason"].(string)
-	return reason
 }
 
 func clearAccountModelRateLimitSnapshot(account *Account, scope string) {
