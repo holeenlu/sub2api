@@ -196,6 +196,21 @@ func payloadAsJSONBytes(payload map[string]any) []byte {
 	return body
 }
 
+// isOpenAIWSTurnMetadataEvent reports the per-turn metadata frames ChatGPT
+// sends ahead of the response itself. Only these two are listed: Codex reads
+// rate limits from the first and the models etag plus x-codex-turn-state from
+// the second, and neither belongs to a response, so holding them back until
+// the response starts is invisible to the client. An unknown codex.* frame is
+// forwarded immediately as before rather than assumed to be equally inert.
+func isOpenAIWSTurnMetadataEvent(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "codex.rate_limits", "codex.response.metadata":
+		return true
+	default:
+		return false
+	}
+}
+
 func isOpenAIWSTerminalEvent(eventType string) bool {
 	switch strings.TrimSpace(eventType) {
 	case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
@@ -261,6 +276,12 @@ func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload 
 	}
 	if message == "" {
 		message = "upstream websocket request failed"
+	}
+	// This is an upstream WS event, even when its logical status is 400/404.
+	// Snapshot its origin before the turn marker so it is not blamed on the
+	// client or on the gateway merely because the handshake status stayed 101.
+	if !HasOpsClientBusinessLimited(c) {
+		setOpsUpstreamError(c, status, message, "")
 	}
 	MarkOpsStreamFailure(c, errType, code, message, status)
 }
@@ -862,4 +883,23 @@ func (s *OpenAIGatewayService) clearOpenAIWSFallbackCooling(accountID int64) {
 		return
 	}
 	s.openaiWSFallbackUntil.Delete(accountID)
+}
+
+// A named request-parameter rejection before any response is accepted can end
+// immediately after field repair has been exhausted. Bare codes/messages alone
+// are insufficient: rustponsesapi emits those before successful responses too.
+func openAIWSDefinitiveRequestRejection(message []byte, responseID string) bool {
+	if responseID != "" || gjson.GetBytes(message, "error.type").String() != "invalid_request_error" {
+		return false
+	}
+	param := gjson.GetBytes(message, "error.param").String()
+	if param == "" || strings.HasPrefix(param, "input") {
+		return false
+	}
+	switch gjson.GetBytes(message, "error.code").String() {
+	case "unknown_parameter", "unsupported_parameter", "missing_required_parameter":
+		return true
+	default:
+		return false
+	}
 }

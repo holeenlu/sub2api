@@ -19,6 +19,10 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	if c != nil {
+		c.Set("openai_uncertain_replay_safe", openAIWSUncertainExecutionReplaySafe(body))
+	}
+	ctx = EnsureOpenAITurnBudget(ctx, s.cfg)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
@@ -1035,6 +1039,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if reqStream && account.Platform == PlatformOpenAI {
 		firstOutputTimeout = s.openAIFirstOutputTimeout(reasoningEffortValue)
 	}
+	if firstOutputTimeout > 0 {
+		openAITurnFirstOutputDeadline(ctx, firstOutputTimeout, startTime)
+	}
 
 	httpInvalidEncryptedContentRetryTried := false
 	compactModelFallbackRetried := false
@@ -1046,7 +1053,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		var headerGuard *openAIFirstOutputHeaderGuard
 		if firstOutputTimeout > 0 {
 			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(
-				upstreamCtx, releaseUpstreamCtx, startTime.Add(firstOutputTimeout),
+				upstreamCtx, releaseUpstreamCtx, openAITurnFirstOutputDeadline(ctx, firstOutputTimeout, startTime),
 			)
 		}
 		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, reqStream, promptCacheKey, isCodexCLI)

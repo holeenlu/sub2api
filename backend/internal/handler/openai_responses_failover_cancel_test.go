@@ -5,6 +5,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ type openAIResponsesFailoverCancelUpstream struct {
 	mu         sync.Mutex
 	accountIDs []int64
 	onFirstDo  func()
+	firstError error
 }
 
 func (u *openAIResponsesFailoverCancelUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
@@ -35,6 +37,9 @@ func (u *openAIResponsesFailoverCancelUpstream) Do(_ *http.Request, _ string, ac
 	u.mu.Unlock()
 	if first && u.onFirstDo != nil {
 		u.onFirstDo()
+	}
+	if first && u.firstError != nil {
+		return nil, u.firstError
 	}
 	return &http.Response{
 		StatusCode: 520,
@@ -191,4 +196,43 @@ func TestOpenAIGatewayHandlerResponses_FailoverContinuesForConnectedClient(t *te
 	require.Equal(t, []int64{1, 2}, upstream.calls(), "在线客户端应正常切换账号")
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+}
+
+func TestOpenAIHostedToolsFailoverRequiresSendEvidence(t *testing.T) {
+	for _, unsent := range []bool{false, true} {
+		for _, plugin := range []bool{false, true} {
+			upstream := &openAIResponsesFailoverCancelUpstream{firstError: &service.OpenAITransportAttemptError{Cause: errors.New("dial tcp: i/o timeout"), Unsent: unsent}}
+			if plugin {
+				upstream.firstError = &service.PluginTransportError{Code: "dial_failure", Message: "dial tcp: i/o timeout", RequestSent: !unsent}
+			}
+			h := newOpenAIResponsesFailoverTestHandler(t, upstream)
+			c, _ := newOpenAIResponsesFailoverTestContext(t, nil)
+			c.Request.Body = io.NopCloser(bytes.NewBufferString(`{"model":"gpt-5.1","stream":false,"input":"hello","tools":[{"type":"web_search"}]}`))
+			h.Responses(c)
+			if unsent {
+				require.Equal(t, []int64{1, 2}, upstream.calls())
+			} else {
+				require.Equal(t, []int64{1}, upstream.calls())
+			}
+		}
+	}
+}
+
+func TestOpenAIMessagesCanceledFailoverDoesNotMarkExhaustion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	upstream := &openAIResponsesFailoverCancelUpstream{onFirstDo: cancel}
+	h := newOpenAIResponsesFailoverTestHandler(t, upstream)
+	h.cfg.Gateway.OpenAITurnMaxAttempts = 3
+	c, rec := newOpenAIResponsesFailoverTestContext(t, ctx)
+	key, _ := middleware2.GetAPIKeyFromContext(c)
+	key.Group.AllowMessagesDispatch = true
+	c.Request.Body = io.NopCloser(bytes.NewBufferString(`{"model":"gpt-5.1","max_tokens":100,"messages":[{"role":"user","content":"hello"}]}`))
+	h.Messages(c)
+	require.Equal(t, []int64{1}, upstream.calls())
+	require.Equal(t, statusClientClosedRequest, c.Writer.Status())
+	require.Zero(t, rec.Body.Len())
+	require.Empty(t, service.GetOpsStreamErrors(c))
+	_, final := c.Get(service.OpsUpstreamStatusCodeKey)
+	require.False(t, final)
 }

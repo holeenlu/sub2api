@@ -439,17 +439,20 @@ func TestLoadDefaultOpenAIFirstOutputTimeoutsDisabled(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, cfg.Gateway.OpenAIFirstOutputTimeoutSeconds)
 	require.Zero(t, cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds)
+	require.Zero(t, cfg.Gateway.OpenAITurnMaxAttempts)
 }
 
 func TestLoadOpenAIFirstOutputTimeoutsFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_OPENAI_FIRST_OUTPUT_TIMEOUT_SECONDS", "90")
 	t.Setenv("GATEWAY_OPENAI_HIGH_EFFORT_FIRST_OUTPUT_TIMEOUT_SECONDS", "240")
+	t.Setenv("GATEWAY_OPENAI_TURN_MAX_ATTEMPTS", "3")
 
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, 90, cfg.Gateway.OpenAIFirstOutputTimeoutSeconds)
 	require.Equal(t, 240, cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds)
+	require.Equal(t, 3, cfg.Gateway.OpenAITurnMaxAttempts)
 }
 
 func TestValidateOpenAIFirstOutputTimeoutMinimum(t *testing.T) {
@@ -1610,6 +1613,8 @@ func TestValidateConfigErrors(t *testing.T) {
 		mutate  func(*Config)
 		wantErr string
 	}{
+		{name: "negative OpenAI turn attempts", mutate: func(c *Config) { c.Gateway.OpenAITurnMaxAttempts = -1 }, wantErr: "gateway.openai_turn_max_attempts"},
+		{name: "excessive OpenAI turn attempts", mutate: func(c *Config) { c.Gateway.OpenAITurnMaxAttempts = 101 }, wantErr: "gateway.openai_turn_max_attempts"},
 		{
 			name:    "server read header timeout",
 			mutate:  func(c *Config) { c.Server.ReadHeaderTimeout = 0 },

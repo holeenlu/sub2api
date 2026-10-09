@@ -413,6 +413,28 @@ const (
 // isOpenAIUpstreamAccessStateError recognizes provider-side credential state
 // failures only from explicit structured codes. Free-form messages may contain
 // echoed user input, including inside stream terminal error.message fields.
+// isOpenAIResponseProtectionUnavailable recognises ChatGPT's "response
+// protection is unavailable" rejection. It arrives as a bare error frame
+// (code upstream_error, type internal_error) and the stream then ends, before
+// any output. It is scoped to the account, not the request: on 2026-10-08 it
+// hit 3 of 14 OpenAI accounts repeatedly while the other 11 served the same
+// clients without a single occurrence, so another account is the fix. The
+// generic upstream_error code alone must not imply that — a request-specific
+// failure such as "mixed tools failed" shares it and has to reach the client.
+func isOpenAIResponseProtectionUnavailable(message string, body []byte) bool {
+	const phrase = "response protection is unavailable"
+	for _, text := range []string{
+		message,
+		gjson.GetBytes(body, "error.message").String(),
+		gjson.GetBytes(body, "response.error.message").String(),
+	} {
+		if strings.Contains(strings.ToLower(text), phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 func isOpenAIUpstreamAccessStateError(_ string, body []byte) bool {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return false

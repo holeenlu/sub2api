@@ -273,20 +273,21 @@ type OpenAIForwardResult struct {
 	OpenAIWSMode             bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
-	UpstreamTerminalEvent string
-	ResponseHeaders       http.Header
-	Duration              time.Duration
-	FirstTokenMs          *int
-	ClientDisconnect      bool
-	ImageCount            int
-	ImageSize             string
-	ImageInputSize        string
-	ImageOutputSize       string
-	ImageOutputSizes      []string
-	ImageSizeSource       string
-	ImageSizeBreakdown    map[string]int
-	VideoCount            int
-	VideoResolution       string
+	UpstreamTerminalEvent    string
+	UpstreamIncompleteReason string
+	ResponseHeaders          http.Header
+	Duration                 time.Duration
+	FirstTokenMs             *int
+	ClientDisconnect         bool
+	ImageCount               int
+	ImageSize                string
+	ImageInputSize           string
+	ImageOutputSize          string
+	ImageOutputSizes         []string
+	ImageSizeSource          string
+	ImageSizeBreakdown       map[string]int
+	VideoCount               int
+	VideoResolution          string
 	// VideoDurationSeconds 是提交时请求的生成时长（xAI 按输出秒数计费），已归一化到 1-15 秒。
 	VideoDurationSeconds int
 	// WebSearchCalls 是 Codex alpha/search 网页搜索调用次数（每次成功请求为 1）。
@@ -299,6 +300,7 @@ type OpenAIForwardResult struct {
 
 	wsReplayInput                []json.RawMessage
 	wsReplayInputExists          bool
+	wsReplayIncomplete           bool
 	wsAccountFailoverReplayInput []json.RawMessage
 }
 
@@ -312,9 +314,27 @@ func (r *OpenAIForwardResult) SucceededForScheduling() bool {
 	switch r.UpstreamTerminalEvent {
 	case "response.completed", "response.done":
 		return true
+	case "response.incomplete":
+		return r.UpstreamIncompleteReason == "max_output_tokens" || r.UpstreamIncompleteReason == "max_tokens"
 	default:
 		return false
 	}
+}
+
+func (r *OpenAIForwardResult) SchedulingOutcomeKnown() bool {
+	if r == nil {
+		return false
+	}
+	if r.ClientDisconnect || (r.OpenAIWSMode && r.UpstreamTerminalEvent == "") || r.UpstreamTerminalEvent == "response.cancelled" || r.UpstreamTerminalEvent == "response.canceled" {
+		return false
+	}
+	if r.UpstreamTerminalEvent == "response.incomplete" {
+		switch r.UpstreamIncompleteReason {
+		case "content_filter", "safety", "content_policy_violation":
+			return false
+		}
+	}
+	return true
 }
 
 const openAIResponsesUpstreamEndpoint = "/v1/responses"
