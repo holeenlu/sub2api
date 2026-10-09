@@ -1285,6 +1285,10 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 		return
 	}
 
+	if service.GetOpenAIClientTransport(c) == service.OpenAIClientTransportWS &&
+		c.GetBool(service.OpsStreamRecoveryLoggedKey) {
+		return
+	}
 	entry := &service.OpsInsertErrorLogInput{StatusCode: finalStatus}
 	applyOpsUpstreamFieldsFromContext(c, entry)
 	if len(entry.UpstreamErrors) > 0 {
@@ -1334,10 +1338,17 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 	entry.Severity = classifyOpsSeverity(entry.ErrorType, lastStatus)
 	entry.IsCountTokens = isCountTokensRequest(c)
 	entry.CreatedAt = time.Now()
+	recoveryConfirmed := service.GetOpenAIClientTransport(c) != service.OpenAIClientTransportWS || c.GetBool(service.OpsStreamTurnSucceededKey)
 	entry.ErrorMessage = "Recovered upstream error"
+	if !recoveryConfirmed {
+		entry.ErrorMessage = "Upstream WebSocket recovery not confirmed"
+	}
 	if lastStage == string(service.GatewayFailureStageAccountAuth) {
 		entry.ErrorPhase = string(service.GatewayFailureStageAccountAuth)
 		entry.ErrorMessage = "Recovered account authentication failure"
+		if !recoveryConfirmed {
+			entry.ErrorMessage = "WebSocket account authentication recovery not confirmed"
+		}
 	} else if lastStatus > 0 {
 		entry.ErrorMessage += " " + strconv.Itoa(lastStatus)
 	}
@@ -1393,6 +1404,9 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 	}
 	applyOpsLatencyFieldsFromContext(c, entry)
 	enqueueOpsErrorLog(ops, entry)
+	if service.GetOpenAIClientTransport(c) == service.OpenAIClientTransportWS {
+		c.Set(service.OpsStreamRecoveryLoggedKey, true)
+	}
 }
 
 func opsRequestTypeFromContext(c *gin.Context) *int16 {

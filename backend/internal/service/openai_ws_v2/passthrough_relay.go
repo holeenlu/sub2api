@@ -379,6 +379,13 @@ func Relay(
 	<-upstreamDone
 
 	emitTurnComplete(options.OnTurnComplete, state, finalizePendingBareError(state, nowFn()))
+	if firstExit.stage == "read_client" && firstExit.graceful {
+		if id := openAIWSRelayActiveTurnID(state); id != "" {
+			// Drain expired without a terminal. Settle only this active turn's
+			// observed usage, keeping its terminal type empty (unknown).
+			emitTurnComplete(options.OnTurnComplete, state, finalizeObservedRelayTerminal(state, observedUpstreamEvent{responseID: id}, nowFn()))
+		}
+	}
 	enrichResult(&result, state, nowFn().Sub(startAt))
 	result.ClientToUpstreamFrames = clientToUpstreamFrames.Load()
 	result.UpstreamToClientFrames = upstreamToClientFrames.Load()
@@ -597,6 +604,11 @@ func runUpstreamToClient(
 		switch msgType {
 		case coderws.MessageText:
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+			// A bare error is provisional. Resumed output or the authoritative
+			// terminal belongs to the same request, not a second billable turn.
+			if state.pendingBareError != nil && (state.pendingBareError.responseID == "" || gjson.GetBytes(payload, "response.id").String() == "" || state.pendingBareError.responseID == gjson.GetBytes(payload, "response.id").String()) && (isTokenEvent(eventType) || eventType == "response.completed" || eventType == "response.done" || eventType == "response.incomplete") {
+				state.pendingBareError = nil
+			}
 			if shouldFinalizePendingBareError(state, payload, eventType) {
 				emitTurnComplete(onTurnComplete, state, finalizePendingBareError(state, nowFn()))
 			}
@@ -850,7 +862,7 @@ func finalizePendingBareError(state *relayState, now time.Time) observedUpstream
 }
 
 func finalizeObservedRelayTerminal(state *relayState, observed observedUpstreamEvent, now time.Time) observedUpstreamEvent {
-	if state == nil || strings.TrimSpace(observed.eventType) == "" {
+	if state == nil || (strings.TrimSpace(observed.eventType) == "" && observed.responseID == "") {
 		return observedUpstreamEvent{}
 	}
 	observed.usage = finalizeRelayTurnUsage(state)

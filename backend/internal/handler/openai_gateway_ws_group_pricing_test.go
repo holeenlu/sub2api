@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -69,7 +70,9 @@ func (s *wsGroupPricingAPIKeyRepoStub) GetByKeyForAuth(ctx context.Context, key 
 	user := *s.apiKey.User
 	apiKey.User = &user
 	group := s.group
-	apiKey.Group = &group
+	if apiKey.GroupID != nil {
+		apiKey.Group = &group
+	}
 	return &apiKey, nil
 }
 
@@ -143,14 +146,16 @@ func TestOpenAIResponsesWebSocket_GroupRateChangeReachesProfitGateOnNextTurn(t *
 	})
 }
 
-func TestOpenAIResponsesWebSocket_KeyMovedToAnotherGroupKeepsConnectionGroup(t *testing.T) {
+func TestOpenAIResponsesWebSocket_KeyMovedToAnotherGroupRejectsNextTurn(t *testing.T) {
 	repo := newWSGroupPricingAPIKeyRepoStub(3.0)
 	apiKeyService := newWSGroupPricingAPIKeyService(repo)
-	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:     wsGroupPricingFirst,
-		secondPayload:    wsGroupPricingSecond,
-		apiKeyService:    apiKeyService,
-		apiKeyCredential: wsGroupPricingKey,
+	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload:            wsGroupPricingFirst,
+		secondTurnCloseExpected: true,
+		closeReason:             "authorization is no longer valid",
+		secondPayload:           wsGroupPricingSecond,
+		apiKeyService:           apiKeyService,
+		apiKeyCredential:        wsGroupPricingKey,
 		afterFirstUpstreamRequest: func(*service.ChannelService) error {
 			return repo.adminUpdate(apiKeyService, func(apiKey *service.APIKey, group *service.Group) {
 				other := wsGroupPricingGroupID + 1
@@ -161,19 +166,18 @@ func TestOpenAIResponsesWebSocket_KeyMovedToAnotherGroupKeepsConnectionGroup(t *
 		},
 	})
 
-	require.Len(t, got.logs, 2)
-	require.InDelta(t, 3.0, got.logs[1].RateMultiplier, 1e-12,
-		"a key moved to another group keeps the connection's group: the connection was scheduled from it")
 }
 
-func TestOpenAIResponsesWebSocket_FailedKeyRefreshKeepsConnectionGroup(t *testing.T) {
+func TestOpenAIResponsesWebSocket_FailedKeyRefreshRejectsNextTurn(t *testing.T) {
 	repo := newWSGroupPricingAPIKeyRepoStub(3.0)
 	apiKeyService := newWSGroupPricingAPIKeyService(repo)
-	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:     wsGroupPricingFirst,
-		secondPayload:    wsGroupPricingSecond,
-		apiKeyService:    apiKeyService,
-		apiKeyCredential: wsGroupPricingKey,
+	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload:            wsGroupPricingFirst,
+		secondTurnCloseExpected: true,
+		closeReason:             "authorization is no longer valid",
+		secondPayload:           wsGroupPricingSecond,
+		apiKeyService:           apiKeyService,
+		apiKeyCredential:        wsGroupPricingKey,
 		afterFirstUpstreamRequest: func(*service.ChannelService) error {
 			return repo.adminUpdate(apiKeyService, func(_ *service.APIKey, group *service.Group) {
 				group.RateMultiplier = 0.3
@@ -182,9 +186,6 @@ func TestOpenAIResponsesWebSocket_FailedKeyRefreshKeepsConnectionGroup(t *testin
 		},
 	})
 
-	require.Len(t, got.logs, 2)
-	require.InDelta(t, 3.0, got.logs[1].RateMultiplier, 1e-12, "a failed refresh keeps the connection snapshot")
-	require.GreaterOrEqual(t, repo.lookupCount(), 2, "the second turn must have attempted a refresh")
 }
 
 type wsTurnAPIKeyLookupFunc func(ctx context.Context, key string) (*service.APIKey, error)
@@ -290,4 +291,30 @@ func TestOpenAIWSTurnBillingAPIKeysKeepPreviousTurnUntilItIsRecorded(t *testing.
 	keys.set(4, conn)
 	require.Same(t, conn, keys.forTurn(2, conn), "only the current and previous turn are kept")
 	require.Len(t, keys.keys, 2)
+}
+
+func TestOpenAIResponsesWebSocket_UngroupedKeyContinuesAndRevokes(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough} {
+		for _, revoke := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/revoke=%t", mode, revoke), func(t *testing.T) {
+				repo := newWSGroupPricingAPIKeyRepoStub(1)
+				repo.apiKey.GroupID = nil
+				keys := newWSGroupPricingAPIKeyService(repo)
+				got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+					firstPayload: wsGroupPricingFirst, secondPayload: wsGroupPricingSecond,
+					ingressMode: mode, apiKeyService: keys, apiKeyCredential: wsGroupPricingKey,
+					secondTurnCloseExpected: revoke, closeReason: "authorization is no longer valid",
+					afterFirstUpstreamRequest: func(*service.ChannelService) error {
+						if revoke {
+							return repo.adminUpdate(keys, func(k *service.APIKey, _ *service.Group) { k.Status = service.StatusDisabled })
+						}
+						return nil
+					},
+				})
+				if !revoke {
+					require.Len(t, got.logs, 2)
+				}
+			})
+		}
+	}
 }
