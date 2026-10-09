@@ -1126,6 +1126,43 @@ func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.
 	}
 }
 
+func TestProxyOpenAIWSHTTPBridgeTurnBareErrorDoesNotWaitForEOF(t *testing.T) {
+	for _, namedParameter := range []bool{false, true} {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
+		errorFrame := `{"type":"error","error":{"code":"invalid_request","message":"bad request"}}`
+		idle := 1
+		if namedParameter {
+			errorFrame = `{"type":"error","error":{"code":"unsupported_parameter","type":"invalid_request_error","param":"tools","message":"bad request"}}`
+			idle = 180
+		}
+		go func() { _, _ = io.WriteString(writer, "data: "+errorFrame+"\n\n") }()
+		upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: reader}}
+		svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: idle}}, httpUpstream: upstream}
+		account := &Account{ID: 112, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+		payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
+		var writes [][]byte
+		started := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, err := svc.proxyOpenAIWSHTTPBridgeTurn(ctx, c, account, "sk-test", payload, len(payload), "gpt-5", "", "", "", "", 2, func(message []byte) error {
+			writes = append(writes, append([]byte(nil), message...))
+			return nil
+		})
+		require.EqualError(t, err, "bad request")
+		require.Less(t, time.Since(started), 3*time.Second)
+		require.Len(t, writes, 1)
+		require.Equal(t, "response.failed", gjson.GetBytes(writes[0], "type").String())
+		require.Equal(t, "bad request", gjson.GetBytes(writes[0], "response.error.message").String())
+		opsFailure, ok := GetOpsStreamError(c)
+		require.True(t, ok)
+		require.Equal(t, "bad request", opsFailure.UpstreamMessage)
+	}
+}
+
 func TestProxyOpenAIWSHTTPBridgeTurnBareErrorEOFSynthesizesFailed(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_eof\",\"status\":\"in_progress\"}}\n\n" +
@@ -1151,6 +1188,59 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorEOFSynthesizesFailed(t *testing.T) 
 	require.Equal(t, "response.failed", gjson.GetBytes(writes[1], "type").String())
 	require.Equal(t, "failed", gjson.GetBytes(writes[1], "response.status").String())
 	require.Equal(t, "resp_eof", gjson.GetBytes(writes[1], "response.id").String())
+}
+
+func TestProxyOpenAIWSHTTPBridgeDelayedBareErrorTerminal(t *testing.T) {
+	for _, terminal := range []string{"response.completed", "response.failed"} {
+		t.Run(terminal, func(t *testing.T) {
+			reader, writer := io.Pipe()
+			defer reader.Close()
+			defer writer.Close()
+			writesDone := make(chan error, 1)
+			go func() {
+				events := []string{
+					`{"type":"response.created","response":{"id":"resp_delayed"}}`,
+					`{"type":"error","error":{"code":"transient","message":"original provider message"}}`,
+					`{"type":"keepalive"}`,
+					`{"type":"` + terminal + `","response":{"id":"resp_delayed","status":"` + strings.TrimPrefix(terminal, "response.") + `","error":{"code":"invalid_request","message":"authoritative message"},"usage":{"input_tokens":8,"output_tokens":4}}}`,
+				}
+				if terminal == "response.completed" {
+					events = append(events[:3], append([]string{`{"type":"response.output_text.delta","delta":"recovered output"}`}, events[3:]...)...)
+				}
+				for i, event := range events {
+					if i >= 2 {
+						time.Sleep(600 * time.Millisecond)
+					}
+					if _, err := io.WriteString(writer, "data: "+event+"\n\n"); err != nil {
+						writesDone <- err
+						return
+					}
+				}
+				writesDone <- writer.Close()
+			}()
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: reader}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}, httpUpstream: upstream}
+			account := &Account{ID: 113, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
+			var writes [][]byte
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "sk-test", payload, len(payload), "gpt-5", "", "", "", "", 2, func(message []byte) error {
+				writes = append(writes, append([]byte(nil), message...))
+				return nil
+			})
+			require.NoError(t, err)
+			require.NoError(t, <-writesDone)
+			require.Equal(t, terminal, result.UpstreamTerminalEvent)
+			require.Equal(t, 8, result.Usage.InputTokens)
+			require.Equal(t, 4, result.Usage.OutputTokens)
+			require.Equal(t, terminal, gjson.GetBytes(writes[len(writes)-1], "type").String())
+			if terminal == "response.completed" {
+				require.Len(t, writes, 3)
+				require.Equal(t, "recovered output", gjson.GetBytes(writes[1], "delta").String())
+			}
+		})
+	}
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurnBareErrorFollowedByCompletedUsesCompleted(t *testing.T) {
@@ -2347,4 +2437,26 @@ func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
 		t.Fatal("timed out waiting for idle HTTP bridge session to close")
 	}
 	require.Len(t, upstream.bodies, 1, "an idle client must not leave a continuation request running")
+}
+
+func TestProxyOpenAIWSHTTPBridgeHostedToolSendEvidence(t *testing.T) {
+	for _, unsent := range []bool{true, false} {
+		upstream := &httpUpstreamRecorder{err: &OpenAITransportAttemptError{Cause: errors.New("dial tcp: i/o timeout"), Unsent: unsent}}
+		svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+		account := &Account{ID: 112, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+		payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi","tools":[{"type":"code_interpreter","container":{"type":"auto"}}]}`)
+		var writes [][]byte
+		_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "sk-test", payload, len(payload), "gpt-5", "", "", "", "", 1, func(b []byte) error { writes = append(writes, b); return nil })
+		var failover *UpstreamFailoverError
+		require.Equal(t, unsent, errors.As(err, &failover))
+		if unsent {
+			require.True(t, failover.RequestNotSent)
+			require.Empty(t, writes)
+		} else {
+			require.Len(t, writes, 1)
+			require.Equal(t, "error", gjson.GetBytes(writes[0], "type").String())
+		}
+	}
 }

@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"io"
+	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -174,7 +175,7 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 	if normalizedProxy == "" {
 		return nil, errors.New("proxy url is empty")
 	}
-	parsedProxyURL, err := url.Parse(normalizedProxy)
+	_, parsedProxyURL, err := proxyurl.Parse(normalizedProxy)
 	if err != nil {
 		return nil, fmt.Errorf("invalid proxy url: %w", err)
 	}
@@ -189,6 +190,7 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 	}
 	d.cleanupProxyClientsLocked(now)
 	transport := &http.Transport{
+		DialContext:         (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		Proxy:               http.ProxyURL(parsedProxyURL),
 		MaxIdleConns:        openAIWSProxyTransportMaxIdleConns,
 		MaxIdleConnsPerHost: openAIWSProxyTransportMaxIdleConnsPerHost,

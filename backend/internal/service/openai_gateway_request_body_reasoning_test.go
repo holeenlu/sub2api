@@ -212,15 +212,16 @@ func TestNormalizeOpenAIAPIKeyStoreFalseReasoningReplay(t *testing.T) {
 	normalized, changed, err := normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body, false)
 	require.NoError(t, err)
 	require.True(t, changed)
-	require.Equal(t, int64(3), gjson.GetBytes(normalized, "input.#").Int())
+	require.Equal(t, int64(5), gjson.GetBytes(normalized, "input.#").Int())
 	require.Equal(t, "reasoning", gjson.GetBytes(normalized, "input.0.type").String())
 	require.False(t, gjson.GetBytes(normalized, "input.0.id").Exists())
 	require.False(t, gjson.GetBytes(normalized, "input.0.call_id").Exists())
 	require.Equal(t, "cipher", gjson.GetBytes(normalized, "input.0.encrypted_content").String())
 	require.True(t, gjson.GetBytes(normalized, "input.0.summary").IsArray())
 	require.Equal(t, "9007199254740993", gjson.GetBytes(normalized, "input.0.opaque").Raw)
-	require.Equal(t, "msg_keep", gjson.GetBytes(normalized, "input.1.id").String())
-	require.Equal(t, "message", gjson.GetBytes(normalized, "input.2.type").String())
+	require.Equal(t, "rs_server_only", gjson.GetBytes(normalized, "input.1.id").String())
+	require.Equal(t, "item_reference", gjson.GetBytes(normalized, "input.2.type").String())
+	require.Equal(t, "message", gjson.GetBytes(normalized, "input.4.type").String())
 }
 
 func TestNormalizeOpenAIAPIKeyStoreFalseReasoningReplayRequiresExplicitStoreFalse(t *testing.T) {
@@ -241,9 +242,8 @@ func TestNormalizeOpenAIAPIKeyStoreFalseReasoningReplayKnownCompactMode(t *testi
 	normalized, changed, err := normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body, true)
 
 	require.NoError(t, err)
-	require.True(t, changed)
-	require.Equal(t, int64(1), gjson.GetBytes(normalized, "input.#").Int())
-	require.Equal(t, "message", gjson.GetBytes(normalized, "input.0.type").String())
+	require.False(t, changed)
+	require.Equal(t, body, normalized, "missing reasoning content must not silently disappear")
 }
 
 func TestNormalizeOpenAIAPIKeyStoreFalseReasoningReplayRejectsEmptyEncryptedContent(t *testing.T) {
@@ -251,9 +251,8 @@ func TestNormalizeOpenAIAPIKeyStoreFalseReasoningReplayRejectsEmptyEncryptedCont
 		body := []byte(`{"store":false,"input":[{"type":"reasoning","id":"rs_drop","encrypted_content":` + encrypted + `},{"type":"message","content":"continue"}]}`)
 		normalized, changed, err := normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body, false)
 		require.NoError(t, err)
-		require.True(t, changed)
-		require.Equal(t, int64(1), gjson.GetBytes(normalized, "input.#").Int())
-		require.Equal(t, "message", gjson.GetBytes(normalized, "input.0.type").String())
+		require.False(t, changed)
+		require.Equal(t, body, normalized, "invalid ciphertext requires recovery, not deletion")
 	}
 }
 
