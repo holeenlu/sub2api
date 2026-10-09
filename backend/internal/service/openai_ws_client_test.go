@@ -32,6 +32,18 @@ func TestCoderOpenAIWSClientDialer_ProxyHTTPClientInvalidURL(t *testing.T) {
 
 	_, err := impl.proxyHTTPClient("://bad")
 	require.Error(t, err)
+	for _, scheme := range []string{"http", "https", "socks5", "socks5h"} {
+		client, err := impl.proxyHTTPClient(scheme + "://127.0.0.1:1080")
+		require.NoError(t, err)
+		transport := client.Transport.(*http.Transport)
+		request, _ := http.NewRequest("GET", "https://api.openai.com/v1/responses", nil)
+		proxy, err := transport.Proxy(request)
+		require.NoError(t, err)
+		require.NotNil(t, proxy)
+		require.Equal(t, "127.0.0.1:1080", proxy.Host)
+	}
+	_, err = impl.proxyHTTPClient("ftp://127.0.0.1:1080")
+	require.Error(t, err)
 }
 
 func TestCoderOpenAIWSClientDialer_TransportMetricsSnapshot(t *testing.T) {

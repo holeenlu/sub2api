@@ -42,9 +42,12 @@ const (
 	// 上就地(in-band)补发错误帧时记录的 OpsStreamError。因为 wire 状态码停留在 200，
 	// ops_error_logger 的 status>=400 采集路径永远不会触发，这类流内失败
 	//（例如等待并发槽位超时后回退的限流、Wait 后二次计费校验失败）本会在错误看板里隐形。
-	OpsStreamErrorKey  = "ops_stream_error"
-	OpsStreamErrorsKey = "ops_stream_errors"
-	OpsStreamTurnKey   = "ops_stream_turn"
+	OpsStreamErrorKey          = "ops_stream_error"
+	OpsStreamErrorsKey         = "ops_stream_errors"
+	OpsStreamTurnKey           = "ops_stream_turn"
+	OpsStreamTurnSucceededKey  = "ops_stream_turn_succeeded"
+	OpsStreamRecoveryLoggedKey = "ops_ws_recovery_logged"
+	OpsStreamTurnStartedAtKey  = "ops_stream_turn_started_at"
 
 	// Client-side configuration denials should remain visible in ops_error_logs,
 	// but should be excluded from SLA/error-rate calculations.
@@ -179,6 +182,9 @@ func BeginOpsStreamTurn(c *gin.Context, turn int) {
 		return
 	}
 	c.Set(OpsStreamTurnKey, turn)
+	c.Set(OpsStreamTurnSucceededKey, false)
+	c.Set(OpsStreamRecoveryLoggedKey, false)
+	c.Set(OpsStreamTurnStartedAtKey, time.Now())
 	// Rule and attempt state is turn-scoped on a long-lived WS connection.
 	c.Set(OpsSkipPassthroughKey, false)
 	c.Set(OpsUpstreamErrorsKey, []*OpsUpstreamErrorEvent{})
@@ -315,10 +321,8 @@ func currentOpsFailureSkipMonitoring(c *gin.Context) bool {
 	}
 	if value, ok := c.Get(OpsUpstreamErrorsKey); ok {
 		if events, ok := value.([]*OpsUpstreamErrorEvent); ok {
-			for i := len(events) - 1; i >= 0; i-- {
-				if events[i] != nil {
-					return events[i].SkipMonitoring
-				}
+			if last := LastOpsUpstreamAttempt(events); last != nil {
+				return last.SkipMonitoring
 			}
 		}
 	}
@@ -411,7 +415,7 @@ type OpsUpstreamErrorEvent struct {
 	// Best-effort upstream response capture (sanitized+trimmed).
 	UpstreamResponseBody string `json:"upstream_response_body,omitempty"`
 
-	// Kind: http_error | request_error | retry_exhausted | failover
+	// Kind: http_error | request_error | retry_exhausted | failover | retry_stopped
 	Kind string `json:"kind,omitempty"`
 	// Stage/Scope/Reason distinguish credential acquisition from inference
 	// without overloading upstream_status_code with a synthetic HTTP status.
@@ -427,6 +431,82 @@ type OpsUpstreamErrorEvent struct {
 	// the final client-visible failure; recovered attempts remain provider-health
 	// telemetry and do not count as failed requests.
 	SkipMonitoring bool `json:"-"`
+}
+
+// Retry-stop events describe a gateway decision, not another upstream attempt.
+const OpsUpstreamRetryStopped = "retry_stopped"
+
+type OpenAIRetryStopReason string
+
+const (
+	OpenAIRetryStopDownstreamCommitted OpenAIRetryStopReason = "downstream_committed"
+	OpenAIRetryStopReplayUnsafe        OpenAIRetryStopReason = "replay_unsafe"
+	OpenAIRetryStopTurnBudget          OpenAIRetryStopReason = "turn_budget"
+	OpenAIRetryStopAccountSwitchLimit  OpenAIRetryStopReason = "account_switch_limit"
+	OpenAIRetryStopNoAvailableAccount  OpenAIRetryStopReason = "no_available_account"
+)
+
+// LastOpsUpstreamAttempt excludes local decisions from attribution and monitoring
+// rules while retaining those decisions in the persisted event array.
+func LastOpsUpstreamAttempt(events []*OpsUpstreamErrorEvent) *OpsUpstreamErrorEvent {
+	for i := len(events) - 1; i >= 0; i-- {
+		if event := events[i]; event != nil && event.Kind != OpsUpstreamRetryStopped {
+			return event
+		}
+	}
+	return nil
+}
+
+// RecordOpenAIRetryStop records one final decision per HTTP request or WS turn.
+// Call only when recovery has ended, not while a bare error remains provisional.
+func RecordOpenAIRetryStop(c *gin.Context, account *Account, reason OpenAIRetryStopReason, details ...string) {
+	if c == nil || (c.Request != nil && c.Request.Context().Err() != nil) {
+		return
+	}
+	switch reason {
+	case OpenAIRetryStopDownstreamCommitted, OpenAIRetryStopReplayUnsafe,
+		OpenAIRetryStopTurnBudget, OpenAIRetryStopAccountSwitchLimit, OpenAIRetryStopNoAvailableAccount:
+	default:
+		return
+	}
+	if value, ok := c.Get(OpsUpstreamErrorsKey); ok {
+		if events, ok := value.([]*OpsUpstreamErrorEvent); ok {
+			for _, event := range events {
+				if event != nil && event.Kind == OpsUpstreamRetryStopped {
+					return
+				}
+			}
+		}
+	}
+	event := OpsUpstreamErrorEvent{
+		Kind: OpsUpstreamRetryStopped, Stage: "recovery", Scope: string(GatewayFailureScopeRequest),
+		Reason: string(reason), Platform: PlatformOpenAI,
+		ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
+	}
+	if len(details) > 0 {
+		event.Detail = truncateString(details[0], 1024)
+	} else if reason == OpenAIRetryStopReplayUnsafe {
+		if blocker := c.GetString(openAIReplayBlockerContextKey); blocker != "" {
+			data, _ := json.Marshal(map[string]string{"blocking_tool_kind": blocker})
+			event.Detail = string(data)
+		}
+	}
+	if account != nil {
+		event.AccountID, event.AccountName = account.ID, account.Name
+		if account.Platform != "" {
+			event.Platform = account.Platform
+		}
+	} else if value, ok := c.Get(OpsUpstreamErrorsKey); ok {
+		if events, ok := value.([]*OpsUpstreamErrorEvent); ok {
+			if last := LastOpsUpstreamAttempt(events); last != nil {
+				event.Platform, event.AccountID, event.AccountName = last.Platform, last.AccountID, last.AccountName
+				event.ProxyID, event.ProxyName = last.ProxyID, last.ProxyName
+			}
+		}
+	}
+	// No upstream status/message: this event must not mask the actual failure,
+	// match provider passthrough rules or count as an extra account switch.
+	appendOpsUpstreamError(c, event)
 }
 
 const (

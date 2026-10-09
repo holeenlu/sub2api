@@ -26,6 +26,34 @@ type blockingOpenAIResponseHeaderUpstream struct {
 	once     sync.Once
 }
 
+func TestOpenAITurnBudgetSharedAcrossRetries(t *testing.T) {
+	for _, tc := range []struct{ limit, switches, want int }{{0, 10, 20}, {3, 10, 3}, {3, 1, 2}} {
+		cfg := &config.Config{}
+		cfg.Gateway.OpenAITurnMaxAttempts = tc.limit
+		cfg.Gateway.MaxAccountSwitches = tc.switches
+		ctx := EnsureOpenAITurnBudget(context.Background(), cfg)
+		for i := 0; i < tc.want; i++ {
+			require.NoError(t, TakeOpenAITurnAttempt(EnsureOpenAITurnBudget(ctx, cfg)))
+		}
+		if tc.limit > 0 {
+			require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAITurnAttemptBudgetExhausted)
+		}
+		// New logical requests do not inherit the exhausted budget.
+		require.NoError(t, TakeOpenAITurnAttempt(WithOpenAITurnBudget(ctx, NewOpenAITurnBudget(cfg))))
+	}
+	protection := []byte(`{"error":{"message":"response protection is unavailable"}}`)
+	for _, limit := range []int{0, 3} {
+		ctx := EnsureOpenAITurnBudget(context.Background(), &config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: limit}})
+		require.True(t, OpenAITurnRetryAllowed(ctx, 1, protection))
+		require.True(t, OpenAITurnRetryAllowed(ctx, 1, protection))
+		require.Equal(t, limit == 0, OpenAITurnRetryAllowed(ctx, 2, protection))
+	}
+	parent, cancel := context.WithCancel(context.Background())
+	bound := EnsureOpenAITurnBudget(parent, nil)
+	cancel()
+	require.ErrorIs(t, TakeOpenAITurnAttempt(context.WithoutCancel(bound)), context.Canceled, "detached usage drain cannot authorize a new generation after client cancellation")
+}
+
 type firstOutputCloseTrackingBody struct {
 	io.ReadCloser
 	closed chan struct{}
@@ -674,5 +702,22 @@ func TestOpenAINativeFirstOutputFailoverKeepsAttemptHeadersPrivateAfterKeepalive
 	case <-firstWriterDone:
 	case <-time.After(time.Second):
 		t.Fatal("first account writer did not exit after timeout")
+	}
+}
+
+func TestOpenAITurnFirstOutputDeadlineDefaultAndEnabled(t *testing.T) {
+	for _, limit := range []int{0, 3} {
+		budget := NewOpenAITurnBudget(&config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: limit}})
+		budget.started = time.Now().Add(-2 * time.Second)
+		ctx := WithOpenAITurnBudget(context.Background(), budget)
+		forwardB := time.Now()
+		deadline := openAITurnFirstOutputDeadline(ctx, time.Second, forwardB)
+		if limit == 0 {
+			require.Equal(t, forwardB.Add(time.Second), deadline, "disabled budget preserves a fresh timeout after account failover")
+			require.NoError(t, TakeOpenAITurnAttempt(ctx))
+		} else {
+			require.Equal(t, budget.started.Add(time.Second), deadline)
+			require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAIWSFirstOutputBudgetExhausted)
+		}
 	}
 }

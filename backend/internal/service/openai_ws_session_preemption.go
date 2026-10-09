@@ -315,8 +315,10 @@ func (s *OpenAIGatewayService) watchOpenAIWSSessionPreemptOwner(ctx context.Cont
 		return func() {}
 	}
 	stopCh := make(chan struct{})
+	done := make(chan struct{})
 	var once sync.Once
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(openAIWSSessionPreemptWatchInterval)
 		defer ticker.Stop()
 		for {
@@ -342,7 +344,7 @@ func (s *OpenAIGatewayService) watchOpenAIWSSessionPreemptOwner(ctx context.Cont
 			}
 		}
 	}()
-	return func() { once.Do(func() { close(stopCh) }) }
+	return func() { once.Do(func() { close(stopCh) }); <-done }
 }
 
 func isOpenAIWSSessionPreempted(ctx context.Context) bool {

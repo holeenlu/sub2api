@@ -1760,6 +1760,11 @@ func TestOpenAIChannelForwardModelForScheduler(t *testing.T) {
 }
 
 func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
+	t.Run("gateway budget expires before sending to selected account", func(t *testing.T) {
+		err := fmt.Errorf("wrapped ingress turn: %w", service.ErrOpenAIWSFirstOutputBudgetExhausted)
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		require.False(t, service.IsOpenAIWSUpstreamTransportError(err))
+	})
 	t.Run("unsupported client model switch does not penalize account", func(t *testing.T) {
 		err := fmt.Errorf("wrapped ingress turn: %w", newOpenAIWSUnsupportedModelSwitchError("gpt-unsupported"))
 		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
@@ -1931,12 +1936,19 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
-	simpleModeRejectAtRead int64
-	compositeResolver      *service.CompositeRouteResolver
-	accountPlatform        string
-	closeReason            string
-	closeStatus            coderws.StatusCode
-	firstPayload           string
+	failFirstBeforeContent   bool
+	firstAttemptErrorCode    string
+	firstAttemptErrorDelay   time.Duration
+	bareErrorBeforeCompleted bool
+	disconnectAfterUsage     bool
+	opsService               *service.OpsService
+	billingCache             service.BillingCache
+	simpleModeRejectAtRead   int64
+	compositeResolver        *service.CompositeRouteResolver
+	accountPlatform          string
+	closeReason              string
+	closeStatus              coderws.StatusCode
+	firstPayload             string
 	// midPayload 在首个 turn 完成后发送（如 session.update），上游桩会为它
 	// 回一个 response.completed，客户端按普通事件读取。
 	midPayload                string
@@ -1964,6 +1976,7 @@ type openAIResponsesWSUsageLogCase struct {
 type openAIResponsesWSUsageLogResult struct {
 	log                  *service.UsageLog
 	logs                 []*service.UsageLog
+	upstreamAttempts     int
 	upstreamFirstPayload []byte
 	upstreamPayloads     [][]byte
 	clientEvents         [][]byte
@@ -2886,6 +2899,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 	upstreamPayloadCh := make(chan []byte, turnCount)
 	upstreamErrCh := make(chan error, 1)
+	var attempts atomic.Int32
 	var channelSvc *service.ChannelService
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tc.accountPlatform == service.PlatformGrok {
@@ -2910,6 +2924,30 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			_ = conn.CloseNow()
 		}()
 
+		if attempts.Add(1) == 1 && (tc.failFirstBeforeContent || tc.firstAttemptErrorCode != "") {
+			readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			_, _, readErr := conn.Read(readCtx)
+			cancel()
+			if readErr != nil {
+				upstreamErrCh <- readErr
+				return
+			}
+			writeCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			writeErr := conn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_discarded_attempt"}}`))
+			cancel()
+			if writeErr != nil {
+				upstreamErrCh <- writeErr
+				return
+			}
+			if tc.firstAttemptErrorCode != "" {
+				time.Sleep(tc.firstAttemptErrorDelay)
+				payload := fmt.Sprintf(`{"type":"error","error":{"type":"upstream_error","code":%q,"message":"Our servers are currently overloaded. Please try again later."}}`, tc.firstAttemptErrorCode)
+				if err := conn.Write(r.Context(), coderws.MessageText, []byte(payload)); err != nil {
+					upstreamErrCh <- err
+				}
+			}
+			return
+		}
 		for turn := 1; turn <= turnCount; turn++ {
 			readCtx, cancelRead := context.WithTimeout(r.Context(), 3*time.Second)
 			msgType, payload, readErr := conn.Read(readCtx)
@@ -2930,6 +2968,23 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 				}
 			}
 
+			if tc.disconnectAfterUsage {
+				if err := conn.Write(r.Context(), coderws.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_partial_billed","usage":{"input_tokens":8,"output_tokens":4}}}`)); err != nil {
+					upstreamErrCh <- err
+					return
+				}
+				readCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+				_, _, _ = conn.Read(readCtx)
+				cancel()
+				upstreamErrCh <- nil
+				return
+			}
+			if tc.bareErrorBeforeCompleted {
+				if err := conn.Write(r.Context(), coderws.MessageText, []byte(`{"type":"error","error":{"code":"unsupported_parameter","message":"Supplied input item IDs require persisted-item lookup that is not supported by rustponsesapi."}}`)); err != nil {
+					upstreamErrCh <- err
+					return
+				}
+			}
 			response := fmt.Sprintf(
 				`{"type":"response.completed","response":{"id":"resp_usage_e2e_%d","model":%q,"usage":{"input_tokens":2,"output_tokens":1}}}`,
 				turn,
@@ -3009,7 +3064,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cfg.SimpleModeKeyRateLimitEnabled = true
 		keyRepo = &simpleModeWSRateLimitRepo{rejectAt: tc.simpleModeRejectAtRead}
 	}
-	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, keyRepo, nil, nil, cfg, nil)
+	if tc.billingCache != nil {
+		cfg.RunMode = config.RunModeStandard
+	}
+	billingCacheSvc := service.NewBillingCacheService(tc.billingCache, nil, nil, keyRepo, nil, nil, cfg, nil)
 	t.Cleanup(billingCacheSvc.Stop)
 	gatewaySvc := service.NewOpenAIGatewayService(
 		accountRepo,
@@ -3058,6 +3116,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		GroupID: &groupID,
 		User:    &service.User{ID: 1701, Status: service.StatusActive},
 	}
+	h.opsService = tc.opsService
 	if tc.apiKeyService != nil {
 		h.apiKeyService = tc.apiKeyService
 		authKey, err := tc.apiKeyService.GetByKey(context.Background(), tc.apiKeyCredential)
@@ -3138,7 +3197,11 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		_, event, readErr := clientConn.Read(readCtx)
 		cancelRead()
 		require.NoError(t, readErr)
-		require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+		want := "response.completed"
+		if tc.disconnectAfterUsage {
+			want = "response.created"
+		}
+		require.Equal(t, want, gjson.GetBytes(event, "type").String())
 		clientEvents = append(clientEvents, append([]byte(nil), event...))
 	}
 	readCompleted()
@@ -3177,7 +3240,11 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		}
 		readCompleted()
 	}
-	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
+	if tc.disconnectAfterUsage {
+		_ = clientConn.CloseNow()
+	} else {
+		_ = clientConn.Close(coderws.StatusNormalClosure, "done")
+	}
 
 	usageLogs := make([]*service.UsageLog, 0, turnCount)
 	for len(usageLogs) < turnCount {
@@ -3213,6 +3280,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	return openAIResponsesWSUsageLogResult{
 		log:                  usageLogs[0],
 		logs:                 usageLogs,
+		upstreamAttempts:     int(attempts.Load()),
 		upstreamFirstPayload: upstreamPayloads[0],
 		upstreamPayloads:     upstreamPayloads,
 		clientEvents:         clientEvents,
@@ -3318,6 +3386,92 @@ func TestOpenAIResponsesWebSocketSimpleModeRechecksKeyWindows(t *testing.T) {
 				secondPayload: `{"type":"response.create","model":"gpt-5.1"}`,
 				ingressMode:   mode, simpleModeRejectAtRead: 3, secondTurnCloseExpected: true, closeReason: "billing check failed",
 			})
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocketRecoveredAttemptNeverRecordsDiscardedResponse(t *testing.T) {
+	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{failFirstBeforeContent: true, ingressMode: service.OpenAIWSIngressModeCtxPool, firstPayload: `{"type":"response.create","model":"gpt-5.1","input":"hello","store":false}`})
+	require.Len(t, got.logs, 1)
+	require.Equal(t, "resp_usage_e2e_1", got.logs[0].RequestID)
+	require.Len(t, got.clientEvents, 1)
+	require.NotContains(t, string(got.clientEvents[0]), "resp_discarded_attempt")
+}
+
+func TestOpenAIResponsesWebSocketCapacityShedRetriesOnSameAccount(t *testing.T) {
+	for _, code := range []string{"server_is_overloaded", "slow_down"} {
+		t.Run(code, func(t *testing.T) {
+			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstAttemptErrorCode: code, firstAttemptErrorDelay: 100 * time.Millisecond,
+				ingressMode:  service.OpenAIWSIngressModeCtxPool,
+				firstPayload: `{"type":"response.create","model":"gpt-6.1-sol","input":"hello","store":false,"tools":[{"type":"namespace","name":"functions","tools":[{"type":"function","name":"shell"}]},{"type":"web_search_preview"},{"type":"file_search","vector_store_ids":["vs_test"]}]}`,
+			})
+			// The fixture has one account and permits no account switches. Only
+			// the same-account retry can recover this turn without closing it.
+			require.Equal(t, 2, got.upstreamAttempts)
+			require.Len(t, got.logs, 1)
+			require.Equal(t, "resp_usage_e2e_1", got.logs[0].RequestID)
+			require.Len(t, got.clientEvents, 1)
+			require.NotContains(t, string(got.clientEvents[0]), "resp_discarded_attempt")
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocketStandardBalanceRechecked(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough} {
+		t.Run(mode, func(t *testing.T) {
+			cache := newHandlerInflightCache(100)
+			runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload: wsGroupPricingFirst, secondPayload: wsGroupPricingSecond,
+				ingressMode: mode, billingCache: cache, secondTurnCloseExpected: true, closeReason: "billing check failed",
+				afterFirstUpstreamRequest: func(*service.ChannelService) error { cache.mu.Lock(); cache.balance = 0; cache.mu.Unlock(); return nil },
+			})
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocketRecoveredBareErrorOpsEndToEnd(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+	ops := service.NewOpsService(&ingressRejectOpsRepo{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		bareErrorBeforeCompleted: true, opsService: ops, ingressMode: service.OpenAIWSIngressModeCtxPool,
+		firstPayload: `{"type":"response.create","model":"gpt-5.1","input":"hello","store":false}`,
+	})
+	require.Len(t, got.logs, 1)
+	select {
+	case job := <-opsErrorLogQueue:
+		require.Contains(t, job.entry.ErrorMessage, "Recovered upstream error")
+		require.NotContains(t, job.entry.ErrorMessage, "not confirmed")
+		require.Equal(t, http.StatusSwitchingProtocols, job.entry.StatusCode)
+	case <-time.After(time.Second):
+		t.Fatal("successful handler turn did not confirm Ops recovery")
+	}
+	require.Empty(t, opsErrorLogQueue, "closing the same connection must not duplicate its recovered entry")
+}
+
+func TestOpenAIResponsesWebSocketRejectsStreamIDChange(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough} {
+		t.Run(mode, func(t *testing.T) {
+			runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload:  `{"type":"response.create","model":"gpt-5.1","stream_id":"lane1"}`,
+				secondPayload: `{"type":"response.create","model":"gpt-5.1","stream_id":"lane2"}`,
+				ingressMode:   mode, secondTurnCloseExpected: true, closeReason: "supports one response stream",
+			})
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocketDisconnectedPartialUsageIsBilledOnce(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough} {
+		t.Run(mode, func(t *testing.T) {
+			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				disconnectAfterUsage: true, ingressMode: mode,
+				firstPayload: `{"type":"response.create","model":"gpt-5.1","input":"hello"}`,
+			})
+			require.Len(t, got.logs, 1)
+			require.Equal(t, "resp_partial_billed", got.logs[0].RequestID)
+			require.EqualValues(t, 8, got.logs[0].InputTokens)
+			require.EqualValues(t, 4, got.logs[0].OutputTokens)
 		})
 	}
 }

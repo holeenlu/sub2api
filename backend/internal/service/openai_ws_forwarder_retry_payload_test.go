@@ -1,10 +1,67 @@
 package service
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAIWSUncertainReplayChecksNamespaceChildren(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload, blocker string
+	}{
+		{"no tools", `{}`, ""},
+		{"disabled tools", `{"tool_choice":"none","tools":[{"type":"mcp"}]}`, ""},
+		{"namespaced functions", `{"tools":[{"type":"namespace","name":"local","tools":[{"type":"function","name":"shell"},{"type":"custom","name":"edit"}]}]}`, ""},
+		{"nested namespace", `{"tools":[{"type":"namespace","tools":[{"type":"namespace","tools":[{"type":"function"}]}]}]}`, ""},
+		{"nested interpreter", `{"tools":[{"type":"namespace","tools":[{"type":"function"},{"type":"code_interpreter"}]}]}`, "code_interpreter"},
+		{"unknown child is not logged verbatim", `{"tools":[{"type":"namespace","tools":[{"type":"private-key-in-type"}]}]}`, "unknown_tool"},
+		{"malformed namespace", `{"tools":[{"type":"namespace","tools":{"type":"mcp"}}]}`, "malformed_tools"},
+		{"missing namespace definition", `{"tools":[{"type":"namespace","name":"remote"}]}`, "malformed_tools"},
+		{"malformed top-level list", `{"tools":{"type":"mcp"}}`, "malformed_tools"},
+		{"deep namespace", `{"tools":` + strings.Repeat(`[{"type":"namespace","tools":`, 17) + `[]` + strings.Repeat(`}]`, 17) + `}`, "namespace_depth"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.blocker, openAIWSUncertainExecutionReplayBlocker([]byte(tc.payload)))
+			require.Equal(t, tc.blocker == "", openAIWSUncertainExecutionReplaySafe([]byte(tc.payload)))
+		})
+	}
+}
+
+func TestBuildOpenAIWSCurrentTurnRetryPayloadRequiresCompleteDependencies(t *testing.T) {
+	for _, input := range []string{
+		`{"type":"item_reference","id":"rs_missing"}`,
+		`{"type":"reasoning","id":"rs_missing","summary":[]}`,
+		`{"type":"function_call_output","call_id":"missing_call","output":"done"}`,
+		`{"role":"user","content":[{"type":"input_file","file_id":"file_account_scoped"}]}`,
+	} {
+		payload, safe, err := buildOpenAIWSCurrentTurnRetryPayload([]byte(`{"previous_response_id":"resp_old"}`), []json.RawMessage{json.RawMessage(input)}, true, "gpt-6.1-sol")
+		require.NoError(t, err)
+		require.False(t, safe, input)
+		require.Empty(t, payload)
+	}
+}
+
+func TestBuildOpenAIWSCurrentTurnRetryPayloadPreservesHostedItems(t *testing.T) {
+	for _, store := range []string{"true", "false"} {
+		for _, typ := range []string{"web_search_call", "mcp_call", "local_shell_call", "image_generation_call", "future_hosted_call"} {
+			t.Run(store+"/"+typ, func(t *testing.T) {
+				item := json.RawMessage(`{"type":"` + typ + `","id":"hosted_1","status":"completed","result":"retained"}`)
+				payload, safe, err := buildOpenAIWSCurrentTurnRetryPayload([]byte(`{"store":`+store+`,"previous_response_id":"resp_old"}`), []json.RawMessage{item}, true, "gpt-6.1-sol")
+				require.NoError(t, err)
+				require.True(t, safe)
+				var decoded struct {
+					Input []json.RawMessage `json:"input"`
+				}
+				require.NoError(t, json.Unmarshal(payload, &decoded))
+				require.Len(t, decoded.Input, 1)
+				require.JSONEq(t, string(item), string(decoded.Input[0]))
+			})
+		}
+	}
+}
 
 func TestApplyOpenAIWSRetryPayloadStrategy_KeepPromptCacheKey(t *testing.T) {
 	payload := map[string]any{

@@ -1,6 +1,9 @@
 package service
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 // HTTPUpstreamProfile marks HTTP upstream requests that need provider-specific
 // transport policy.
@@ -71,4 +74,13 @@ func WithHTTPUpstreamPublicHostsOnly(ctx context.Context) context.Context {
 
 func HTTPUpstreamPublicHostsOnly(ctx context.Context) bool {
 	return ctx != nil && ctx.Value(httpUpstreamPublicHostsOnlyContextKey{}) == true
+}
+
+// CompleteHTTPUpstreamResponse reports protocol completion rather than mere response headers or EOF.
+func CompleteHTTPUpstreamResponse(resp *http.Response) {
+	if resp != nil {
+		if complete, ok := resp.Body.(interface{ MarkComplete() }); ok {
+			complete.MarkComplete()
+		}
+	}
 }
