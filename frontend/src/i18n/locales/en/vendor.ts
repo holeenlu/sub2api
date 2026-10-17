@@ -1,5 +1,6 @@
 export default {
   authorization: {
+    siwc: "SIWC authorization",
     noModelsHelp: "Saving an empty list stops BPS supply for all models. Authorization and history are retained.",
     "mode": "Authorization mode",
     "executionMode": "Execution mode",
@@ -470,7 +471,7 @@ export default {
   importPrivacy:
     'Previews hide credentials. Proxy inventory exports omit authentication; account backups include credentials for owned proxies.',
   importBundledProxy: 'Import and use the proxy included with each account',
-  importFormatInvalid: 'Select a native account JSON export from this project (sub2api-data/sub2api-bundle v1 headers are optional).',
+  importFormatInvalid: 'Select a native account JSON export from this project (sub2api-data/sub2api-bundle v1/v2 headers are optional; SIWC requires administrator import).',
   importRowsLimit: 'Import 1–25 accounts per batch.',
   importMappingRequired:
     'Select groups for this platform and explicitly choose a proxy or permitted direct access.',

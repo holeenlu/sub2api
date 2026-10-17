@@ -190,6 +190,11 @@ export default {
         'Batch quality check completed for {count} proxies: healthy {healthy}, warn {warn}, challenge {challenge}, abnormal {failed}',
       batchQualityFailed: 'Batch quality check failed',
       batchQualityEmpty: 'No proxies available for quality check',
+      qualityReachable: 'Target reachable',
+      qualityRateLimited: 'Target rate limited',
+      qualityVerification: 'Target requires verification',
+      qualityConnectionFailed: 'Target connection failed',
+      qualitySummary: '{passed} passed, {warn} warnings, {failed} failed, {challenge} challenges',
       qualityReportTitle: 'Proxy Quality Report',
       qualityGrade: 'Grade {grade}',
       qualityExitIP: 'Exit IP',
@@ -559,6 +564,15 @@ export default {
       clickToViewBalance: 'Click to view balance history',
       failedToLoadUser: 'Failed to load user info',
       userDeletedBadge: 'Deleted',
+      keyRanking: {
+        subtitle: 'Per-API-key token usage for the current filters and time range',
+        rowHint: "Click to view this key's usage details",
+        keyCount: '{count} keys',
+        columns: {
+          key: 'API Key',
+          user: 'Owner'
+        }
+      },
       tokenRanking: {
         subtitle: 'Per-user token usage for the current filters and time range',
         rowHint: "Click to view this user's usage details",

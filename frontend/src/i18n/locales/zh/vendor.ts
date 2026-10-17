@@ -1,5 +1,6 @@
 export default {
   authorization: {
+    siwc: "SIWC 授权",
     noModelsHelp: "保存空列表将停止所有模型的 BPS 供给，已有授权和历史仍然保留。",
     "mode": "授权模式",
     "executionMode": "实际执行模式",
@@ -454,7 +455,7 @@ export default {
   importHelp: '支持本项目导出的原生账号 JSON（type/version 可省略）。确认时新增或复用文件代理并自动绑定；新账号默认暂停。',
   importPrivacy: '预览仅显示安全的逐行结果；代理清单导出不含认证信息。',
   importBundledProxy: '导入并使用各账号随附的代理',
-  importFormatInvalid: '请选择本项目导出的原生账号 JSON（可省略 sub2api-data/sub2api-bundle v1 标记）。',
+  importFormatInvalid: '请选择本项目导出的原生账号 JSON（可省略 sub2api-data/sub2api-bundle v1/v2 标记）。',
   importRowsLimit: '每批请选择 1–25 个账号。',
   importMappingRequired: '请选择该平台的分组，并明确选择代理或获准直连。',
   importDefaults: '批次默认设置',
