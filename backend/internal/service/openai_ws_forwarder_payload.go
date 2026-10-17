@@ -881,6 +881,12 @@ func OpenAIResponsesAccountReplayAllowed(payload []byte) bool {
 // Fixed structural reasons share the ownership decision; never log resource
 // identifiers, encrypted content or arbitrary request fields.
 func openAIResponsesAccountReplayBlocker(payload []byte) string {
+	return openAIResponsesReplayBlocker(payload, false)
+}
+
+// allowEncryptedState is only for explicit pre-generation BPS recovery.
+// The public native/uncertain-execution replay policy remains unchanged.
+func openAIResponsesReplayBlocker(payload []byte, allowEncryptedState bool) string {
 	if !gjson.ValidBytes(payload) {
 		return "malformed_request"
 	}
@@ -889,8 +895,15 @@ func openAIResponsesAccountReplayBlocker(payload []byte) string {
 		return "malformed_request"
 	}
 	blocker := ""
+	inputs := 0
 	root.ForEach(func(key, value gjson.Result) bool {
 		switch key.String() {
+		case "input":
+			inputs++
+			if allowEncryptedState && inputs > 1 {
+				// Coverage and upstream parsers may choose different occurrences.
+				blocker = "ambiguous_input"
+			}
 		case "previous_response_id", "conversation", "prompt":
 			if value.Type != gjson.Null && !(value.Type == gjson.String && strings.TrimSpace(value.String()) == "") {
 				blocker = key.String()
@@ -901,11 +914,11 @@ func openAIResponsesAccountReplayBlocker(payload []byte) string {
 	if blocker != "" {
 		return blocker
 	}
-	return openAIWSNonPortableBlocker(root, 0)
+	return openAIWSNonPortableBlocker(root, 0, allowEncryptedState)
 }
 
 // Scan wire values without decoding or copying large message/attachment bodies.
-func openAIWSNonPortableBlocker(value gjson.Result, depth int) string {
+func openAIWSNonPortableBlocker(value gjson.Result, depth int, encryptedState ...bool) string {
 	if depth > 64 {
 		return "context_depth"
 	}
@@ -915,6 +928,19 @@ func openAIWSNonPortableBlocker(value gjson.Result, depth int) string {
 	if value.IsObject() && value.Get("type").String() == "item_reference" {
 		return "item_reference"
 	}
+	allowState := len(encryptedState) > 0 && encryptedState[0]
+	allowOwnState := false
+	if allowState && depth == 2 && value.IsObject() {
+		types := 0
+		value.ForEach(func(key, _ gjson.Result) bool {
+			if key.String() == "type" {
+				types++
+			}
+			return true
+		})
+		kind := value.Get("type").String()
+		allowOwnState = types == 1 && (kind == "reasoning" || kind == "compaction")
+	}
 	blocker := ""
 	value.ForEach(func(key, child gjson.Result) bool {
 		switch key.String() {
@@ -923,7 +949,7 @@ func openAIWSNonPortableBlocker(value gjson.Result, depth int) string {
 				blocker = "item_reference"
 			}
 		case "encrypted_content", "file_id", "vector_store_id", "container_id":
-			if child.Type == gjson.String && strings.TrimSpace(child.String()) != "" {
+			if child.Type == gjson.String && strings.TrimSpace(child.String()) != "" && (key.String() != "encrypted_content" || !allowOwnState) {
 				blocker = key.String()
 			}
 		case "vector_store_ids":
@@ -932,7 +958,10 @@ func openAIWSNonPortableBlocker(value gjson.Result, depth int) string {
 			}
 		}
 		if blocker == "" {
-			blocker = openAIWSNonPortableBlocker(child, depth+1)
+			// Only direct input items may carry replayable encrypted state.
+			// Nested messages, agent assignments and tool arguments stay blocked.
+			allowChildState := allowState && ((depth == 0 && key.String() == "input" && child.IsArray()) || (depth == 1 && value.IsArray()))
+			blocker = openAIWSNonPortableBlocker(child, depth+1, allowChildState)
 		}
 		return blocker == ""
 	})
@@ -966,6 +995,10 @@ func setOpenAIReplaySafety(c *gin.Context, body []byte) {
 // Return a bounded, fixed diagnostic code, never tool names, descriptions or
 // arguments. Namespace membership does not change where a function is executed.
 func openAIWSUncertainExecutionReplayBlocker(payload []byte, completeHistory ...[]json.RawMessage) string {
+	return openAIWSExecutionReplayBlocker(payload, false, completeHistory...)
+}
+
+func openAIWSExecutionReplayBlocker(payload []byte, beforeGeneration bool, completeHistory ...[]json.RawMessage) string {
 	if !gjson.ValidBytes(payload) {
 		return "malformed_request"
 	}
@@ -1046,14 +1079,17 @@ func openAIWSUncertainExecutionReplayBlocker(payload []byte, completeHistory ...
 		if !item.IsObject() {
 			return "malformed_tool_context"
 		}
-		types := 0
+		types, callIDs := 0, 0
 		item.ForEach(func(key, _ gjson.Result) bool {
 			if key.String() == "type" {
 				types++
 			}
+			if key.String() == "call_id" {
+				callIDs++
+			}
 			return true
 		})
-		if types > 1 {
+		if types > 1 || (beforeGeneration && callIDs > 1) {
 			return "malformed_tool_context"
 		}
 		switch item.Get("type").String() {
@@ -1070,8 +1106,12 @@ func openAIWSUncertainExecutionReplayBlocker(payload []byte, completeHistory ...
 				return "malformed_tools"
 			}
 			return blocker
-		case "item_reference", "compaction", "compaction_summary":
+		case "item_reference", "compaction_summary":
 			return "unresolved_tool_context"
+		case "compaction":
+			if !beforeGeneration {
+				return "unresolved_tool_context"
+			}
 		}
 		return ""
 	}

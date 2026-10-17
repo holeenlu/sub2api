@@ -23,6 +23,10 @@ import (
 )
 
 type Account struct {
+	VendorID                *int64
+	VendorPausedAt          *time.Time
+	VendorNotes             string
+	VendorSupplyBlocked     bool // Live supply eligibility snapshot; verified again before dispatch.
 	ID                      int64
 	Name                    string
 	Notes                   *string
@@ -150,6 +154,25 @@ func (a *Account) IsActive() bool {
 	return a.Status == StatusActive
 }
 
+// Archive is independent of provider health. A nonempty marker fails closed
+// even if an old scheduler snapshot has lost the ownership or pause fields.
+const VendorArchivedAtKey = "vendor_archived_at"
+
+func (a *Account) IsVendorArchived() bool {
+	return a != nil && a.Extra[VendorArchivedAtKey] != nil && a.Extra[VendorArchivedAtKey] != ""
+}
+
+func (a *Account) VendorArchivedAt() *time.Time {
+	if a == nil {
+		return nil
+	}
+	at, err := time.Parse(time.RFC3339Nano, a.GetExtraString(VendorArchivedAtKey))
+	if err != nil {
+		return nil
+	}
+	return &at
+}
+
 // IsSyntheticUITest reports whether the account belongs to an isolated UI load-test
 // dataset. Production accounts never receive this marker. It lets the dedicated
 // test instance exercise interactive quota and connection-test controls without
@@ -190,7 +213,7 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
-	if !a.IsActive() || !a.Schedulable {
+	if a == nil || a.IsVendorArchived() || a.VendorPausedAt != nil || a.VendorSupplyBlocked || !a.IsActive() || !a.Schedulable {
 		return false
 	}
 	now := time.Now()
@@ -225,7 +248,7 @@ func (a *Account) IsSchedulable() bool {
 // 手动 Schedulable 开关:spark 影子拥有独立 spark 配额窗口,母账号 global 429(走 RateLimitResetAt)
 // 不应连坐 spark(否则重新耦合影子架构本应解耦的两条 429 道)。nil receiver 返回 false。
 func (a *Account) IsCredentialUsableForShadow() bool {
-	if a == nil || !a.IsActive() {
+	if a == nil || a.IsVendorArchived() || a.VendorPausedAt != nil || a.VendorSupplyBlocked || !a.IsActive() {
 		return false
 	}
 	now := time.Now()
@@ -918,6 +941,9 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 }
 
 func (a *Account) isModelMappingSupported(requestedModel string) bool {
+	if a.IsExcelOAuth() && !a.IsExcelBPSEnabledForModel(requestedModel) {
+		return false
+	}
 	// 透传模式仅替换认证、模型语义完全交由上游决定，因此放行所有模型。
 	// 该短路必须在 model_mapping 判定之前：账号从"白名单模式"切换到透传后，
 	// credentials 里常残留旧的非空 model_mapping，若不在此放行，透传账号会被
@@ -2131,6 +2157,115 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 	}
 	if enabled, ok := a.Extra["openai_oauth_passthrough"].(bool); ok {
 		return enabled
+	}
+	return false
+}
+
+// IsExcelBPSEligible keeps BPS on ordinary paid ChatGPT OAuth accounts.
+func (a *Account) IsExcelBPSEligible() bool {
+	return a != nil && a.Platform == PlatformOpenAI && a.Type == AccountTypeOAuth && !a.IsShadow() && !a.IsOpenAIAgentIdentity() && !a.IsOpenAIPersonalAccessToken() && !strings.EqualFold(strings.TrimSpace(a.GetCredential("plan_type")), "free")
+}
+
+// IsExcelBPSEnabled routes an existing ChatGPT OAuth account to the Excel gateway.
+// Mixed native/BPS accounts use an independently authorized Excel grant.
+func (a *Account) IsExcelBPSEnabled() bool {
+	if a == nil || a.Platform != PlatformOpenAI || a.Type != AccountTypeOAuth || a.IsShadow() || a.IsOpenAIAgentIdentity() || a.IsOpenAIPersonalAccessToken() {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(a.GetCredential("plan_type")), "free") {
+		return false
+	}
+	enabled, _ := a.Extra["openai_excel_bps"].(bool)
+	return enabled
+}
+
+const ExcelBPSIgnoreEncryptedContentKey = "openai_excel_bps_ignore_encrypted_content"
+
+// IsExcelBPSIgnoreEncryptedContentEnabled opts into replacing ciphertext that
+// BPS cannot forward, such as sub-agent messages in an old Codex conversation,
+// with an omission notice instead of rejecting the whole request.
+func (a *Account) IsExcelBPSIgnoreEncryptedContentEnabled() bool {
+	if !a.IsExcelBPSEnabled() {
+		return false
+	}
+	enabled, _ := a.Extra[ExcelBPSIgnoreEncryptedContentKey].(bool)
+	return enabled
+}
+
+// IsExcelBPSCacheCreationAsInputEnabled controls local billing and downstream usage.
+// The setting has no effect unless this account uses the Excel/BPS protocol.
+func (a *Account) IsExcelBPSCacheCreationAsInputEnabled() bool {
+	if !a.IsExcelBPSEnabled() {
+		return false
+	}
+	enabled, _ := a.Extra["openai_excel_bps_cache_creation_as_input"].(bool)
+	return enabled
+}
+
+// IsExcelBPSAutoDisableOn403Enabled opts into disabling BPS after a generic 403.
+func (a *Account) IsExcelBPSAutoDisableOn403Enabled() bool {
+	if !a.IsExcelBPSEnabled() {
+		return false
+	}
+	enabled, _ := a.Extra["openai_excel_bps_auto_disable_on_403"].(bool)
+	return enabled
+}
+
+// isExcelBPSAllModelsEnabled preserves legacy account-wide routing. An explicit
+// list, including an empty or malformed list, never enables BPS for all models.
+func (a *Account) isExcelBPSAllModelsEnabled() bool {
+	if !a.IsExcelBPSEnabled() {
+		return false
+	}
+	_, scoped := a.Extra["openai_excel_bps_models"]
+	return !scoped
+}
+
+// IsExcelBPSEnabledForModel selects the protocol after account model mapping.
+// The list selects a protocol; it does not restrict access to other models.
+func (a *Account) IsExcelBPSEnabledForModel(requestedModel string) bool {
+	if !a.IsExcelBPSEnabled() {
+		return false
+	}
+	return a.isExcelBPSUpstreamModelEnabled(a.GetMappedModel(requestedModel))
+}
+
+// IsExcelBPSImagesEnabledForModel routes image generation through BPS only
+// when the image model is listed explicitly. Legacy account-wide routing keeps
+// images on Codex so an upgrade does not silently change the image channel.
+func (a *Account) IsExcelBPSImagesEnabledForModel(requestedModel string) bool {
+	if !a.IsExcelBPSEnabled() || a.isExcelBPSAllModelsEnabled() {
+		return false
+	}
+	model := a.GetMappedModel(requestedModel)
+	return usesCodexDirectImages(model) && excelBPSImagesSupportedModel(model) && a.isExcelBPSUpstreamModelEnabled(model)
+}
+
+func (a *Account) isExcelBPSUpstreamModelEnabled(model string) bool {
+	if !a.IsExcelBPSEnabled() {
+		return false
+	}
+	raw, scoped := a.Extra["openai_excel_bps_models"]
+	if !scoped {
+		return true
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	switch models := raw.(type) {
+	case []string:
+		for _, selected := range models {
+			if strings.TrimSpace(selected) == model {
+				return true
+			}
+		}
+	case []any:
+		for _, selected := range models {
+			if name, ok := selected.(string); ok && strings.TrimSpace(name) == model {
+				return true
+			}
+		}
 	}
 	return false
 }
