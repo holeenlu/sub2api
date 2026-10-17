@@ -188,3 +188,16 @@ BPS 专属协议、Excel 授权、工具、图片及显式 403 恢复文件在�
 ### 2026-10-15 后续原生 Grok 维护
 
 从已筛选 `d59cf0e8b49953c558089368b770a7a860f678ce` 核查到 `74226d499a6d00213a97504f50edc06a54c1b2f5`：采用 `6b930db8a1688206ad793b5729214109c1f45c64` 的 raw Chat Completions Ops 正文补齐，复用既有 `opsUpstreamErrorDetail` 和原开关/截断/入库脱敏；补充原测试文件的开启/关闭和 16 字节截断验收。此前三条 Responses/bridge/视觉分支已覆盖，该补丁只补原生 raw 分支，不是 BPS 变化。未采用 fork v2.11.0 版本号，不导入 regional 计费或退役能力。来源 BPS/Excel 内核无本轮增量，清单首次导入和无关散列不改写；本轮四源比较与最终验证见 `.release/upstream-sync/20261015T165315-d9d993be/upstream-changes.md`。
+## 2026-10-21 已保留能力同步至 ranxi2001 production 16dc0e016
+
+固定比较范围：974a47f2ed722798566727a342df1eab3140dc94 → 16dc0e0165b696d7e418c915e8952c1c859a4dc6。这是选择性适配记录，不代表整分支导入。
+
+- #505（5c65680aa、7db08fa4a）：用户确认不引入删 reasoning 密文后的重试、跨轮自动剥离或新兼容开关。统一原生与 BPS 的精确拒绝识别，保留上下文、真实用量及合法终态；请求历史错误不触发盲目换号。修正 REQUIREMENTS 中失效的 opaque reasoning 删除例外。
+- #507（e2a7f27b5、1add09b40、be3823e86）：上传及响应头等待心跳、跨尝试注释字节统计和错误 SSE 包装已有等效实现。补齐既有 keepalive writer 的 FlushError 传播，并在原 openAIForwardTiming 增加 terminal_output_flush 阶段。该阶段只说明本机完整终态帧刷新成功，不证明客户端收到。沿用 gateway.stream_keepalive_interval，不增加 timer、重放或独立 requesttiming 系统。
+- #503（5b445311e）：批量编辑冻结预览 ID，勾选集合优先；普通保存、完整参数编辑、模型同步共用固定集合，删除前端运行时重解筛选路径。后端非空 filters 请求契约仍保留，唯一目标解析入口拒绝空筛选，覆盖普通和参数批量编辑；不增加 API。
+- #510（bbab35388）：只有 OpenAI OAuthLike 账号持久化上游 429 的 plan_type；API Key 不显示旧套餐/到期徽章，正常限流处理保留。
+- 不纳入 #504 的新连接诊断表、页面及入口采集器；#506 新账号 2FA 准入、#508 延迟分位数策略和默认拒绝邮箱别名属于独立产品政策，本轮不改变现有行为。
+
+本地合并适配：官方 Anthropic 兼容流修复落入已有完整帧读取、绝对排水界限和用量通道，不恢复第二套 line pump。失败且未观察用量不入账；失败已观察用量仅记一次。插件账号快照不输出管理审计身份。Gemini/Antigravity 生图门禁保留管理员保存值，新迁移 246 仅占位，不批量开启；不修改生产库。
+
+验证与交付以本轮 `.release/upstream-sync/20261021T212813-41cf7f03/` 实际回执为准；新增 HTTP API 0、全局配置 0。本记录不表示已经部署或完成真实上游、数据库迁移验收。
