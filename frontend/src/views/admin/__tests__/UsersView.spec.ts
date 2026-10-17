@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import type { AdminUser } from '@/types'
 import UsersView from '../UsersView.vue'
+import Select from '@/components/common/Select.vue'
 
 const {
   listUsers,
@@ -211,6 +212,23 @@ describe('admin UsersView', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('lists all five roles in order and filters by supplier level', async () => {
+    localStorage.setItem('user-visible-filters', JSON.stringify(['role']))
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    const roleSelect = wrapper.findAllComponents(Select).find(select =>
+      select.props('options').some(option => option.value === 'vendor_level1'))!
+    expect(roleSelect.props('options').map(option => option.value)).toEqual([
+      '', 'super_admin', 'admin', 'user', 'vendor_level1', 'vendor_level2'
+    ])
+
+    roleSelect.vm.$emit('update:modelValue', 'vendor_level2')
+    roleSelect.vm.$emit('change', 'vendor_level2')
+    await flushPromises()
+    expect(listUsers.mock.lastCall?.[2]).toMatchObject({ role: 'vendor_level2' })
+    wrapper.unmount()
   })
 
   it('cancels bulk deletion without deleting or clearing selected users', async () => {

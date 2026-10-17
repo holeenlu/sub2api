@@ -86,5 +86,6 @@ func TestUsageSettlementUpsertIncludesBillingState(t *testing.T) {
 	require.NoError(t, execUsageSettlementLog(context.Background(), db, prepareUsageLogInsert(&service.UsageLog{RequestID: "x", APIKeyID: 1})))
 	require.Contains(t, queries[0], "DO UPDATE SET")
 	require.Contains(t, queries[0], "billing_status=EXCLUDED.billing_status")
+	require.Contains(t, queries[0], "billing_mode=EXCLUDED.billing_mode")
 	require.False(t, strings.Contains(queries[0], "DO NOTHING"))
 }

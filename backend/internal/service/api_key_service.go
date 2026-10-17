@@ -481,6 +481,9 @@ func (s *APIKeyService) incrementAPIKeyErrorCount(ctx context.Context, userID in
 // 对于订阅类型分组：检查用户是否有有效订阅
 // 对于标准类型分组：使用原有的 AllowedGroups 和 IsExclusive 逻辑
 func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group *Group) bool {
+	if user.IsVendor() {
+		return false
+	}
 	// 订阅类型分组：需要有效订阅
 	if group.IsSubscriptionType() {
 		_, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, user.ID, group.ID)
@@ -499,6 +502,10 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get user: %w", err)
+	}
+
+	if user.IsVendor() {
+		return nil, ErrVendorDenied
 	}
 
 	// 验证 IP 白名单格式
@@ -738,7 +745,13 @@ func (s *APIKeyService) GetByID(ctx context.Context, id int64) (*APIKey, error) 
 }
 
 // GetByKey 根据Key字符串获取API Key（用于认证）
-func (s *APIKeyService) GetByKey(ctx context.Context, key string) (*APIKey, error) {
+func (s *APIKeyService) GetByKey(ctx context.Context, key string) (result *APIKey, err error) {
+	defer func() {
+		if result != nil && result.User != nil && result.User.IsVendor() {
+			result = nil
+			err = ErrVendorDenied
+		}
+	}()
 	if len(key) == 0 || len(key) > MaxAPIKeyCredentialBytes {
 		return nil, ErrAPIKeyNotFound
 	}

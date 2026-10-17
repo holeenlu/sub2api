@@ -13,18 +13,19 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	if len(groupIDs) > 0 && groupIDs[0] != nil {
 		groupID = *groupIDs[0]
 	}
-	if err := validateVendorDispatch(request.Context(), s.accountRepo, account, &groupID); err != nil {
-		return nil, err
+	if err := validateVendorNativeDispatch(request.Context(), s.accountRepo, account, &groupID); err != nil {
+		return nil, vendorDispatchFailure(err)
 	}
 	if account.VendorID != nil && proxyURL != resolveAccountProxyURL(account) {
-		return nil, ErrVendorSupplyUnavailable
+		return nil, vendorDispatchFailure(ErrVendorSupplyUnavailable)
 	}
 
-	if account.Platform == PlatformOpenAI {
-		if err := TakeOpenAITurnAttempt(request.Context()); err != nil {
-			return nil, err
-		}
+	var err error
+	request, err = takeHTTPAccountTurnAttempt(request, account, proxyURL, "http")
+	if err != nil {
+		return nil, turnAttemptFailure(err)
 	}
+
 	if s.pluginManager != nil {
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {

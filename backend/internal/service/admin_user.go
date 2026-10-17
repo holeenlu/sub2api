@@ -159,13 +159,13 @@ func (s *adminServiceImpl) GetUserIncludeDeleted(ctx context.Context, id int64) 
 }
 
 // normalizeUserRole 校验并归一化角色输入。
-// 空字符串返回 fallback(未提供时的默认角色);非法值返回错误。
+// 空字符串返回 fallback(未提供时的默认角色);供应商只能保留原角色。
 func normalizeUserRole(role, fallback string) (string, error) {
 	if role == "" {
 		return fallback, nil
 	}
-	if !authz.ValidRole(role) {
-		return "", fmt.Errorf("invalid role: %q", role)
+	if !authz.ValidRole(role) || (role != fallback && (authz.IsVendorRole(role) || authz.IsVendorRole(fallback))) {
+		return "", infraerrors.BadRequest("INVALID_USER_ROLE", fmt.Sprintf("invalid role: %q", role))
 	}
 	return role, nil
 }
@@ -307,7 +307,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 			fields.Status = true
 		}
 
-		// 角色变更(admin/user);空字符串表示不修改。
+		// 空字符串表示不修改；供应商角色允许原值回传，但不能通过用户管理转换身份或层级。
 		if input.Role != "" {
 			role, err := normalizeUserRole(input.Role, user.Role)
 			if err != nil {

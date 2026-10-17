@@ -46070,8 +46070,13 @@ type UsageLogMutation struct {
 	op                           Op
 	typ                          string
 	id                           *int64
+	billing_status               *string
 	vendor_id_snapshot           *int64
 	addvendor_id_snapshot        *int64
+	vendor_root_id_snapshot      *int64
+	addvendor_root_id_snapshot   *int64
+	vendor_parent_id_snapshot    *int64
+	addvendor_parent_id_snapshot *int64
 	account_name_snapshot        *string
 	group_name_snapshot          *string
 	platform_snapshot            *string
@@ -46138,6 +46143,7 @@ type UsageLogMutation struct {
 	addvideo_duration_seconds    *int
 	cache_ttl_overridden         *bool
 	created_at                   *time.Time
+	authorization_mode           *string
 	clearedFields                map[string]struct{}
 	user                         *int64
 	cleareduser                  bool
@@ -46250,6 +46256,42 @@ func (m *UsageLogMutation) IDs(ctx context.Context) ([]int64, error) {
 	default:
 		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
 	}
+}
+
+// SetBillingStatus sets the "billing_status" field.
+func (m *UsageLogMutation) SetBillingStatus(s string) {
+	m.billing_status = &s
+}
+
+// BillingStatus returns the value of the "billing_status" field in the mutation.
+func (m *UsageLogMutation) BillingStatus() (r string, exists bool) {
+	v := m.billing_status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBillingStatus returns the old "billing_status" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldBillingStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBillingStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBillingStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBillingStatus: %w", err)
+	}
+	return oldValue.BillingStatus, nil
+}
+
+// ResetBillingStatus resets all changes to the "billing_status" field.
+func (m *UsageLogMutation) ResetBillingStatus() {
+	m.billing_status = nil
 }
 
 // SetUserID sets the "user_id" field.
@@ -46428,6 +46470,146 @@ func (m *UsageLogMutation) ResetVendorIDSnapshot() {
 	m.vendor_id_snapshot = nil
 	m.addvendor_id_snapshot = nil
 	delete(m.clearedFields, usagelog.FieldVendorIDSnapshot)
+}
+
+// SetVendorRootIDSnapshot sets the "vendor_root_id_snapshot" field.
+func (m *UsageLogMutation) SetVendorRootIDSnapshot(i int64) {
+	m.vendor_root_id_snapshot = &i
+	m.addvendor_root_id_snapshot = nil
+}
+
+// VendorRootIDSnapshot returns the value of the "vendor_root_id_snapshot" field in the mutation.
+func (m *UsageLogMutation) VendorRootIDSnapshot() (r int64, exists bool) {
+	v := m.vendor_root_id_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldVendorRootIDSnapshot returns the old "vendor_root_id_snapshot" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldVendorRootIDSnapshot(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldVendorRootIDSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldVendorRootIDSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldVendorRootIDSnapshot: %w", err)
+	}
+	return oldValue.VendorRootIDSnapshot, nil
+}
+
+// AddVendorRootIDSnapshot adds i to the "vendor_root_id_snapshot" field.
+func (m *UsageLogMutation) AddVendorRootIDSnapshot(i int64) {
+	if m.addvendor_root_id_snapshot != nil {
+		*m.addvendor_root_id_snapshot += i
+	} else {
+		m.addvendor_root_id_snapshot = &i
+	}
+}
+
+// AddedVendorRootIDSnapshot returns the value that was added to the "vendor_root_id_snapshot" field in this mutation.
+func (m *UsageLogMutation) AddedVendorRootIDSnapshot() (r int64, exists bool) {
+	v := m.addvendor_root_id_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearVendorRootIDSnapshot clears the value of the "vendor_root_id_snapshot" field.
+func (m *UsageLogMutation) ClearVendorRootIDSnapshot() {
+	m.vendor_root_id_snapshot = nil
+	m.addvendor_root_id_snapshot = nil
+	m.clearedFields[usagelog.FieldVendorRootIDSnapshot] = struct{}{}
+}
+
+// VendorRootIDSnapshotCleared returns if the "vendor_root_id_snapshot" field was cleared in this mutation.
+func (m *UsageLogMutation) VendorRootIDSnapshotCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldVendorRootIDSnapshot]
+	return ok
+}
+
+// ResetVendorRootIDSnapshot resets all changes to the "vendor_root_id_snapshot" field.
+func (m *UsageLogMutation) ResetVendorRootIDSnapshot() {
+	m.vendor_root_id_snapshot = nil
+	m.addvendor_root_id_snapshot = nil
+	delete(m.clearedFields, usagelog.FieldVendorRootIDSnapshot)
+}
+
+// SetVendorParentIDSnapshot sets the "vendor_parent_id_snapshot" field.
+func (m *UsageLogMutation) SetVendorParentIDSnapshot(i int64) {
+	m.vendor_parent_id_snapshot = &i
+	m.addvendor_parent_id_snapshot = nil
+}
+
+// VendorParentIDSnapshot returns the value of the "vendor_parent_id_snapshot" field in the mutation.
+func (m *UsageLogMutation) VendorParentIDSnapshot() (r int64, exists bool) {
+	v := m.vendor_parent_id_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldVendorParentIDSnapshot returns the old "vendor_parent_id_snapshot" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldVendorParentIDSnapshot(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldVendorParentIDSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldVendorParentIDSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldVendorParentIDSnapshot: %w", err)
+	}
+	return oldValue.VendorParentIDSnapshot, nil
+}
+
+// AddVendorParentIDSnapshot adds i to the "vendor_parent_id_snapshot" field.
+func (m *UsageLogMutation) AddVendorParentIDSnapshot(i int64) {
+	if m.addvendor_parent_id_snapshot != nil {
+		*m.addvendor_parent_id_snapshot += i
+	} else {
+		m.addvendor_parent_id_snapshot = &i
+	}
+}
+
+// AddedVendorParentIDSnapshot returns the value that was added to the "vendor_parent_id_snapshot" field in this mutation.
+func (m *UsageLogMutation) AddedVendorParentIDSnapshot() (r int64, exists bool) {
+	v := m.addvendor_parent_id_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearVendorParentIDSnapshot clears the value of the "vendor_parent_id_snapshot" field.
+func (m *UsageLogMutation) ClearVendorParentIDSnapshot() {
+	m.vendor_parent_id_snapshot = nil
+	m.addvendor_parent_id_snapshot = nil
+	m.clearedFields[usagelog.FieldVendorParentIDSnapshot] = struct{}{}
+}
+
+// VendorParentIDSnapshotCleared returns if the "vendor_parent_id_snapshot" field was cleared in this mutation.
+func (m *UsageLogMutation) VendorParentIDSnapshotCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldVendorParentIDSnapshot]
+	return ok
+}
+
+// ResetVendorParentIDSnapshot resets all changes to the "vendor_parent_id_snapshot" field.
+func (m *UsageLogMutation) ResetVendorParentIDSnapshot() {
+	m.vendor_parent_id_snapshot = nil
+	m.addvendor_parent_id_snapshot = nil
+	delete(m.clearedFields, usagelog.FieldVendorParentIDSnapshot)
 }
 
 // SetAccountNameSnapshot sets the "account_name_snapshot" field.
@@ -48872,6 +49054,55 @@ func (m *UsageLogMutation) ResetCreatedAt() {
 	m.created_at = nil
 }
 
+// SetAuthorizationMode sets the "authorization_mode" field.
+func (m *UsageLogMutation) SetAuthorizationMode(s string) {
+	m.authorization_mode = &s
+}
+
+// AuthorizationMode returns the value of the "authorization_mode" field in the mutation.
+func (m *UsageLogMutation) AuthorizationMode() (r string, exists bool) {
+	v := m.authorization_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAuthorizationMode returns the old "authorization_mode" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldAuthorizationMode(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAuthorizationMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAuthorizationMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAuthorizationMode: %w", err)
+	}
+	return oldValue.AuthorizationMode, nil
+}
+
+// ClearAuthorizationMode clears the value of the "authorization_mode" field.
+func (m *UsageLogMutation) ClearAuthorizationMode() {
+	m.authorization_mode = nil
+	m.clearedFields[usagelog.FieldAuthorizationMode] = struct{}{}
+}
+
+// AuthorizationModeCleared returns if the "authorization_mode" field was cleared in this mutation.
+func (m *UsageLogMutation) AuthorizationModeCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldAuthorizationMode]
+	return ok
+}
+
+// ResetAuthorizationMode resets all changes to the "authorization_mode" field.
+func (m *UsageLogMutation) ResetAuthorizationMode() {
+	m.authorization_mode = nil
+	delete(m.clearedFields, usagelog.FieldAuthorizationMode)
+}
+
 // ClearUser clears the "user" edge to the User entity.
 func (m *UsageLogMutation) ClearUser() {
 	m.cleareduser = true
@@ -49041,7 +49272,10 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 51)
+	fields := make([]string, 0, 55)
+	if m.billing_status != nil {
+		fields = append(fields, usagelog.FieldBillingStatus)
+	}
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -49053,6 +49287,12 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.vendor_id_snapshot != nil {
 		fields = append(fields, usagelog.FieldVendorIDSnapshot)
+	}
+	if m.vendor_root_id_snapshot != nil {
+		fields = append(fields, usagelog.FieldVendorRootIDSnapshot)
+	}
+	if m.vendor_parent_id_snapshot != nil {
+		fields = append(fields, usagelog.FieldVendorParentIDSnapshot)
 	}
 	if m.account_name_snapshot != nil {
 		fields = append(fields, usagelog.FieldAccountNameSnapshot)
@@ -49195,6 +49435,9 @@ func (m *UsageLogMutation) Fields() []string {
 	if m.created_at != nil {
 		fields = append(fields, usagelog.FieldCreatedAt)
 	}
+	if m.authorization_mode != nil {
+		fields = append(fields, usagelog.FieldAuthorizationMode)
+	}
 	return fields
 }
 
@@ -49203,6 +49446,8 @@ func (m *UsageLogMutation) Fields() []string {
 // schema.
 func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 	switch name {
+	case usagelog.FieldBillingStatus:
+		return m.BillingStatus()
 	case usagelog.FieldUserID:
 		return m.UserID()
 	case usagelog.FieldAPIKeyID:
@@ -49211,6 +49456,10 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.AccountID()
 	case usagelog.FieldVendorIDSnapshot:
 		return m.VendorIDSnapshot()
+	case usagelog.FieldVendorRootIDSnapshot:
+		return m.VendorRootIDSnapshot()
+	case usagelog.FieldVendorParentIDSnapshot:
+		return m.VendorParentIDSnapshot()
 	case usagelog.FieldAccountNameSnapshot:
 		return m.AccountNameSnapshot()
 	case usagelog.FieldGroupNameSnapshot:
@@ -49305,6 +49554,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.CacheTTLOverridden()
 	case usagelog.FieldCreatedAt:
 		return m.CreatedAt()
+	case usagelog.FieldAuthorizationMode:
+		return m.AuthorizationMode()
 	}
 	return nil, false
 }
@@ -49314,6 +49565,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 // database failed.
 func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
 	switch name {
+	case usagelog.FieldBillingStatus:
+		return m.OldBillingStatus(ctx)
 	case usagelog.FieldUserID:
 		return m.OldUserID(ctx)
 	case usagelog.FieldAPIKeyID:
@@ -49322,6 +49575,10 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldAccountID(ctx)
 	case usagelog.FieldVendorIDSnapshot:
 		return m.OldVendorIDSnapshot(ctx)
+	case usagelog.FieldVendorRootIDSnapshot:
+		return m.OldVendorRootIDSnapshot(ctx)
+	case usagelog.FieldVendorParentIDSnapshot:
+		return m.OldVendorParentIDSnapshot(ctx)
 	case usagelog.FieldAccountNameSnapshot:
 		return m.OldAccountNameSnapshot(ctx)
 	case usagelog.FieldGroupNameSnapshot:
@@ -49416,6 +49673,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldCacheTTLOverridden(ctx)
 	case usagelog.FieldCreatedAt:
 		return m.OldCreatedAt(ctx)
+	case usagelog.FieldAuthorizationMode:
+		return m.OldAuthorizationMode(ctx)
 	}
 	return nil, fmt.Errorf("unknown UsageLog field %s", name)
 }
@@ -49425,6 +49684,13 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 // type.
 func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 	switch name {
+	case usagelog.FieldBillingStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBillingStatus(v)
+		return nil
 	case usagelog.FieldUserID:
 		v, ok := value.(int64)
 		if !ok {
@@ -49452,6 +49718,20 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetVendorIDSnapshot(v)
+		return nil
+	case usagelog.FieldVendorRootIDSnapshot:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetVendorRootIDSnapshot(v)
+		return nil
+	case usagelog.FieldVendorParentIDSnapshot:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetVendorParentIDSnapshot(v)
 		return nil
 	case usagelog.FieldAccountNameSnapshot:
 		v, ok := value.(string)
@@ -49782,6 +50062,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetCreatedAt(v)
 		return nil
+	case usagelog.FieldAuthorizationMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAuthorizationMode(v)
+		return nil
 	}
 	return fmt.Errorf("unknown UsageLog field %s", name)
 }
@@ -49792,6 +50079,12 @@ func (m *UsageLogMutation) AddedFields() []string {
 	var fields []string
 	if m.addvendor_id_snapshot != nil {
 		fields = append(fields, usagelog.FieldVendorIDSnapshot)
+	}
+	if m.addvendor_root_id_snapshot != nil {
+		fields = append(fields, usagelog.FieldVendorRootIDSnapshot)
+	}
+	if m.addvendor_parent_id_snapshot != nil {
+		fields = append(fields, usagelog.FieldVendorParentIDSnapshot)
 	}
 	if m.addchannel_id != nil {
 		fields = append(fields, usagelog.FieldChannelID)
@@ -49866,6 +50159,10 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case usagelog.FieldVendorIDSnapshot:
 		return m.AddedVendorIDSnapshot()
+	case usagelog.FieldVendorRootIDSnapshot:
+		return m.AddedVendorRootIDSnapshot()
+	case usagelog.FieldVendorParentIDSnapshot:
+		return m.AddedVendorParentIDSnapshot()
 	case usagelog.FieldChannelID:
 		return m.AddedChannelID()
 	case usagelog.FieldInputTokens:
@@ -49923,6 +50220,20 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddVendorIDSnapshot(v)
+		return nil
+	case usagelog.FieldVendorRootIDSnapshot:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddVendorRootIDSnapshot(v)
+		return nil
+	case usagelog.FieldVendorParentIDSnapshot:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddVendorParentIDSnapshot(v)
 		return nil
 	case usagelog.FieldChannelID:
 		v, ok := value.(int64)
@@ -50082,6 +50393,12 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldVendorIDSnapshot) {
 		fields = append(fields, usagelog.FieldVendorIDSnapshot)
 	}
+	if m.FieldCleared(usagelog.FieldVendorRootIDSnapshot) {
+		fields = append(fields, usagelog.FieldVendorRootIDSnapshot)
+	}
+	if m.FieldCleared(usagelog.FieldVendorParentIDSnapshot) {
+		fields = append(fields, usagelog.FieldVendorParentIDSnapshot)
+	}
 	if m.FieldCleared(usagelog.FieldAccountNameSnapshot) {
 		fields = append(fields, usagelog.FieldAccountNameSnapshot)
 	}
@@ -50157,6 +50474,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldVideoDurationSeconds) {
 		fields = append(fields, usagelog.FieldVideoDurationSeconds)
 	}
+	if m.FieldCleared(usagelog.FieldAuthorizationMode) {
+		fields = append(fields, usagelog.FieldAuthorizationMode)
+	}
 	return fields
 }
 
@@ -50173,6 +50493,12 @@ func (m *UsageLogMutation) ClearField(name string) error {
 	switch name {
 	case usagelog.FieldVendorIDSnapshot:
 		m.ClearVendorIDSnapshot()
+		return nil
+	case usagelog.FieldVendorRootIDSnapshot:
+		m.ClearVendorRootIDSnapshot()
+		return nil
+	case usagelog.FieldVendorParentIDSnapshot:
+		m.ClearVendorParentIDSnapshot()
 		return nil
 	case usagelog.FieldAccountNameSnapshot:
 		m.ClearAccountNameSnapshot()
@@ -50249,6 +50575,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 	case usagelog.FieldVideoDurationSeconds:
 		m.ClearVideoDurationSeconds()
 		return nil
+	case usagelog.FieldAuthorizationMode:
+		m.ClearAuthorizationMode()
+		return nil
 	}
 	return fmt.Errorf("unknown UsageLog nullable field %s", name)
 }
@@ -50257,6 +50586,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 // It returns an error if the field is not defined in the schema.
 func (m *UsageLogMutation) ResetField(name string) error {
 	switch name {
+	case usagelog.FieldBillingStatus:
+		m.ResetBillingStatus()
+		return nil
 	case usagelog.FieldUserID:
 		m.ResetUserID()
 		return nil
@@ -50268,6 +50600,12 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldVendorIDSnapshot:
 		m.ResetVendorIDSnapshot()
+		return nil
+	case usagelog.FieldVendorRootIDSnapshot:
+		m.ResetVendorRootIDSnapshot()
+		return nil
+	case usagelog.FieldVendorParentIDSnapshot:
+		m.ResetVendorParentIDSnapshot()
 		return nil
 	case usagelog.FieldAccountNameSnapshot:
 		m.ResetAccountNameSnapshot()
@@ -50409,6 +50747,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldCreatedAt:
 		m.ResetCreatedAt()
+		return nil
+	case usagelog.FieldAuthorizationMode:
+		m.ResetAuthorizationMode()
 		return nil
 	}
 	return fmt.Errorf("unknown UsageLog field %s", name)
@@ -58971,41 +59312,47 @@ func (m *UserSubscriptionMutation) ResetEdge(name string) error {
 // VendorMutation represents an operation that mutates the Vendor nodes in the graph.
 type VendorMutation struct {
 	config
-	op                         Op
-	typ                        string
-	id                         *int64
-	created_at                 *time.Time
-	updated_at                 *time.Time
-	user_id                    *int64
-	adduser_id                 *int64
-	name                       *string
-	status                     *string
-	policy_version             *int64
-	addpolicy_version          *int64
-	platforms                  *[]string
-	appendplatforms            []string
-	account_limit              *int
-	addaccount_limit           *int
-	proxy_limit                *int
-	addproxy_limit             *int
-	allow_direct               *bool
-	default_concurrency        *int
-	adddefault_concurrency     *int
-	default_priority           *int
-	adddefault_priority        *int
-	default_rate_multiplier    *float64
-	adddefault_rate_multiplier *float64
-	contact_name               *string
-	settlement_email           *string
-	binance_id                 *string
-	default_coefficient        *string
-	group_coefficients         *map[string]string
-	contract_version           *int64
-	addcontract_version        *int64
-	clearedFields              map[string]struct{}
-	done                       bool
-	oldValue                   func(context.Context) (*Vendor, error)
-	predicates                 []predicate.Vendor
+	op                               Op
+	typ                              string
+	id                               *int64
+	created_at                       *time.Time
+	updated_at                       *time.Time
+	user_id                          *int64
+	adduser_id                       *int64
+	tier                             *int16
+	addtier                          *int16
+	parent_vendor_id                 *int64
+	addparent_vendor_id              *int64
+	name                             *string
+	status                           *string
+	policy_version                   *int64
+	addpolicy_version                *int64
+	platforms                        *[]string
+	appendplatforms                  []string
+	openai_authorization_modes       *[]string
+	appendopenai_authorization_modes []string
+	account_limit                    *int
+	addaccount_limit                 *int
+	proxy_limit                      *int
+	addproxy_limit                   *int
+	allow_direct                     *bool
+	default_concurrency              *int
+	adddefault_concurrency           *int
+	default_priority                 *int
+	adddefault_priority              *int
+	default_rate_multiplier          *float64
+	adddefault_rate_multiplier       *float64
+	contact_name                     *string
+	settlement_email                 *string
+	binance_id                       *string
+	default_coefficient              *string
+	group_coefficients               *map[string]string
+	contract_version                 *int64
+	addcontract_version              *int64
+	clearedFields                    map[string]struct{}
+	done                             bool
+	oldValue                         func(context.Context) (*Vendor, error)
+	predicates                       []predicate.Vendor
 }
 
 var _ ent.Mutation = (*VendorMutation)(nil)
@@ -59234,6 +59581,132 @@ func (m *VendorMutation) ResetUserID() {
 	m.adduser_id = nil
 }
 
+// SetTier sets the "tier" field.
+func (m *VendorMutation) SetTier(i int16) {
+	m.tier = &i
+	m.addtier = nil
+}
+
+// Tier returns the value of the "tier" field in the mutation.
+func (m *VendorMutation) Tier() (r int16, exists bool) {
+	v := m.tier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTier returns the old "tier" field's value of the Vendor entity.
+// If the Vendor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *VendorMutation) OldTier(ctx context.Context) (v int16, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTier: %w", err)
+	}
+	return oldValue.Tier, nil
+}
+
+// AddTier adds i to the "tier" field.
+func (m *VendorMutation) AddTier(i int16) {
+	if m.addtier != nil {
+		*m.addtier += i
+	} else {
+		m.addtier = &i
+	}
+}
+
+// AddedTier returns the value that was added to the "tier" field in this mutation.
+func (m *VendorMutation) AddedTier() (r int16, exists bool) {
+	v := m.addtier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTier resets all changes to the "tier" field.
+func (m *VendorMutation) ResetTier() {
+	m.tier = nil
+	m.addtier = nil
+}
+
+// SetParentVendorID sets the "parent_vendor_id" field.
+func (m *VendorMutation) SetParentVendorID(i int64) {
+	m.parent_vendor_id = &i
+	m.addparent_vendor_id = nil
+}
+
+// ParentVendorID returns the value of the "parent_vendor_id" field in the mutation.
+func (m *VendorMutation) ParentVendorID() (r int64, exists bool) {
+	v := m.parent_vendor_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldParentVendorID returns the old "parent_vendor_id" field's value of the Vendor entity.
+// If the Vendor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *VendorMutation) OldParentVendorID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldParentVendorID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldParentVendorID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldParentVendorID: %w", err)
+	}
+	return oldValue.ParentVendorID, nil
+}
+
+// AddParentVendorID adds i to the "parent_vendor_id" field.
+func (m *VendorMutation) AddParentVendorID(i int64) {
+	if m.addparent_vendor_id != nil {
+		*m.addparent_vendor_id += i
+	} else {
+		m.addparent_vendor_id = &i
+	}
+}
+
+// AddedParentVendorID returns the value that was added to the "parent_vendor_id" field in this mutation.
+func (m *VendorMutation) AddedParentVendorID() (r int64, exists bool) {
+	v := m.addparent_vendor_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearParentVendorID clears the value of the "parent_vendor_id" field.
+func (m *VendorMutation) ClearParentVendorID() {
+	m.parent_vendor_id = nil
+	m.addparent_vendor_id = nil
+	m.clearedFields[vendor.FieldParentVendorID] = struct{}{}
+}
+
+// ParentVendorIDCleared returns if the "parent_vendor_id" field was cleared in this mutation.
+func (m *VendorMutation) ParentVendorIDCleared() bool {
+	_, ok := m.clearedFields[vendor.FieldParentVendorID]
+	return ok
+}
+
+// ResetParentVendorID resets all changes to the "parent_vendor_id" field.
+func (m *VendorMutation) ResetParentVendorID() {
+	m.parent_vendor_id = nil
+	m.addparent_vendor_id = nil
+	delete(m.clearedFields, vendor.FieldParentVendorID)
+}
+
 // SetName sets the "name" field.
 func (m *VendorMutation) SetName(s string) {
 	m.name = &s
@@ -59411,6 +59884,57 @@ func (m *VendorMutation) AppendedPlatforms() ([]string, bool) {
 func (m *VendorMutation) ResetPlatforms() {
 	m.platforms = nil
 	m.appendplatforms = nil
+}
+
+// SetOpenaiAuthorizationModes sets the "openai_authorization_modes" field.
+func (m *VendorMutation) SetOpenaiAuthorizationModes(s []string) {
+	m.openai_authorization_modes = &s
+	m.appendopenai_authorization_modes = nil
+}
+
+// OpenaiAuthorizationModes returns the value of the "openai_authorization_modes" field in the mutation.
+func (m *VendorMutation) OpenaiAuthorizationModes() (r []string, exists bool) {
+	v := m.openai_authorization_modes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiAuthorizationModes returns the old "openai_authorization_modes" field's value of the Vendor entity.
+// If the Vendor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *VendorMutation) OldOpenaiAuthorizationModes(ctx context.Context) (v []string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiAuthorizationModes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiAuthorizationModes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiAuthorizationModes: %w", err)
+	}
+	return oldValue.OpenaiAuthorizationModes, nil
+}
+
+// AppendOpenaiAuthorizationModes adds s to the "openai_authorization_modes" field.
+func (m *VendorMutation) AppendOpenaiAuthorizationModes(s []string) {
+	m.appendopenai_authorization_modes = append(m.appendopenai_authorization_modes, s...)
+}
+
+// AppendedOpenaiAuthorizationModes returns the list of values that were appended to the "openai_authorization_modes" field in this mutation.
+func (m *VendorMutation) AppendedOpenaiAuthorizationModes() ([]string, bool) {
+	if len(m.appendopenai_authorization_modes) == 0 {
+		return nil, false
+	}
+	return m.appendopenai_authorization_modes, true
+}
+
+// ResetOpenaiAuthorizationModes resets all changes to the "openai_authorization_modes" field.
+func (m *VendorMutation) ResetOpenaiAuthorizationModes() {
+	m.openai_authorization_modes = nil
+	m.appendopenai_authorization_modes = nil
 }
 
 // SetAccountLimit sets the "account_limit" field.
@@ -59999,7 +60523,7 @@ func (m *VendorMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *VendorMutation) Fields() []string {
-	fields := make([]string, 0, 19)
+	fields := make([]string, 0, 22)
 	if m.created_at != nil {
 		fields = append(fields, vendor.FieldCreatedAt)
 	}
@@ -60008,6 +60532,12 @@ func (m *VendorMutation) Fields() []string {
 	}
 	if m.user_id != nil {
 		fields = append(fields, vendor.FieldUserID)
+	}
+	if m.tier != nil {
+		fields = append(fields, vendor.FieldTier)
+	}
+	if m.parent_vendor_id != nil {
+		fields = append(fields, vendor.FieldParentVendorID)
 	}
 	if m.name != nil {
 		fields = append(fields, vendor.FieldName)
@@ -60020,6 +60550,9 @@ func (m *VendorMutation) Fields() []string {
 	}
 	if m.platforms != nil {
 		fields = append(fields, vendor.FieldPlatforms)
+	}
+	if m.openai_authorization_modes != nil {
+		fields = append(fields, vendor.FieldOpenaiAuthorizationModes)
 	}
 	if m.account_limit != nil {
 		fields = append(fields, vendor.FieldAccountLimit)
@@ -60071,6 +60604,10 @@ func (m *VendorMutation) Field(name string) (ent.Value, bool) {
 		return m.UpdatedAt()
 	case vendor.FieldUserID:
 		return m.UserID()
+	case vendor.FieldTier:
+		return m.Tier()
+	case vendor.FieldParentVendorID:
+		return m.ParentVendorID()
 	case vendor.FieldName:
 		return m.Name()
 	case vendor.FieldStatus:
@@ -60079,6 +60616,8 @@ func (m *VendorMutation) Field(name string) (ent.Value, bool) {
 		return m.PolicyVersion()
 	case vendor.FieldPlatforms:
 		return m.Platforms()
+	case vendor.FieldOpenaiAuthorizationModes:
+		return m.OpenaiAuthorizationModes()
 	case vendor.FieldAccountLimit:
 		return m.AccountLimit()
 	case vendor.FieldProxyLimit:
@@ -60118,6 +60657,10 @@ func (m *VendorMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldUpdatedAt(ctx)
 	case vendor.FieldUserID:
 		return m.OldUserID(ctx)
+	case vendor.FieldTier:
+		return m.OldTier(ctx)
+	case vendor.FieldParentVendorID:
+		return m.OldParentVendorID(ctx)
 	case vendor.FieldName:
 		return m.OldName(ctx)
 	case vendor.FieldStatus:
@@ -60126,6 +60669,8 @@ func (m *VendorMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldPolicyVersion(ctx)
 	case vendor.FieldPlatforms:
 		return m.OldPlatforms(ctx)
+	case vendor.FieldOpenaiAuthorizationModes:
+		return m.OldOpenaiAuthorizationModes(ctx)
 	case vendor.FieldAccountLimit:
 		return m.OldAccountLimit(ctx)
 	case vendor.FieldProxyLimit:
@@ -60180,6 +60725,20 @@ func (m *VendorMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetUserID(v)
 		return nil
+	case vendor.FieldTier:
+		v, ok := value.(int16)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTier(v)
+		return nil
+	case vendor.FieldParentVendorID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetParentVendorID(v)
+		return nil
 	case vendor.FieldName:
 		v, ok := value.(string)
 		if !ok {
@@ -60207,6 +60766,13 @@ func (m *VendorMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPlatforms(v)
+		return nil
+	case vendor.FieldOpenaiAuthorizationModes:
+		v, ok := value.([]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiAuthorizationModes(v)
 		return nil
 	case vendor.FieldAccountLimit:
 		v, ok := value.(int)
@@ -60303,6 +60869,12 @@ func (m *VendorMutation) AddedFields() []string {
 	if m.adduser_id != nil {
 		fields = append(fields, vendor.FieldUserID)
 	}
+	if m.addtier != nil {
+		fields = append(fields, vendor.FieldTier)
+	}
+	if m.addparent_vendor_id != nil {
+		fields = append(fields, vendor.FieldParentVendorID)
+	}
 	if m.addpolicy_version != nil {
 		fields = append(fields, vendor.FieldPolicyVersion)
 	}
@@ -60334,6 +60906,10 @@ func (m *VendorMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case vendor.FieldUserID:
 		return m.AddedUserID()
+	case vendor.FieldTier:
+		return m.AddedTier()
+	case vendor.FieldParentVendorID:
+		return m.AddedParentVendorID()
 	case vendor.FieldPolicyVersion:
 		return m.AddedPolicyVersion()
 	case vendor.FieldAccountLimit:
@@ -60363,6 +60939,20 @@ func (m *VendorMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddUserID(v)
+		return nil
+	case vendor.FieldTier:
+		v, ok := value.(int16)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTier(v)
+		return nil
+	case vendor.FieldParentVendorID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddParentVendorID(v)
 		return nil
 	case vendor.FieldPolicyVersion:
 		v, ok := value.(int64)
@@ -60420,7 +61010,11 @@ func (m *VendorMutation) AddField(name string, value ent.Value) error {
 // ClearedFields returns all nullable fields that were cleared during this
 // mutation.
 func (m *VendorMutation) ClearedFields() []string {
-	return nil
+	var fields []string
+	if m.FieldCleared(vendor.FieldParentVendorID) {
+		fields = append(fields, vendor.FieldParentVendorID)
+	}
+	return fields
 }
 
 // FieldCleared returns a boolean indicating if a field with the given name was
@@ -60433,6 +61027,11 @@ func (m *VendorMutation) FieldCleared(name string) bool {
 // ClearField clears the value of the field with the given name. It returns an
 // error if the field is not defined in the schema.
 func (m *VendorMutation) ClearField(name string) error {
+	switch name {
+	case vendor.FieldParentVendorID:
+		m.ClearParentVendorID()
+		return nil
+	}
 	return fmt.Errorf("unknown Vendor nullable field %s", name)
 }
 
@@ -60449,6 +61048,12 @@ func (m *VendorMutation) ResetField(name string) error {
 	case vendor.FieldUserID:
 		m.ResetUserID()
 		return nil
+	case vendor.FieldTier:
+		m.ResetTier()
+		return nil
+	case vendor.FieldParentVendorID:
+		m.ResetParentVendorID()
+		return nil
 	case vendor.FieldName:
 		m.ResetName()
 		return nil
@@ -60460,6 +61065,9 @@ func (m *VendorMutation) ResetField(name string) error {
 		return nil
 	case vendor.FieldPlatforms:
 		m.ResetPlatforms()
+		return nil
+	case vendor.FieldOpenaiAuthorizationModes:
+		m.ResetOpenaiAuthorizationModes()
 		return nil
 	case vendor.FieldAccountLimit:
 		m.ResetAccountLimit()
@@ -61058,6 +61666,8 @@ type VendorSettlementMutation struct {
 	op                     Op
 	typ                    string
 	id                     *int64
+	payer_vendor_id        *int64
+	addpayer_vendor_id     *int64
 	number                 *string
 	vendor_id              *int64
 	addvendor_id           *int64
@@ -61199,6 +61809,76 @@ func (m *VendorSettlementMutation) IDs(ctx context.Context) ([]int64, error) {
 	default:
 		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
 	}
+}
+
+// SetPayerVendorID sets the "payer_vendor_id" field.
+func (m *VendorSettlementMutation) SetPayerVendorID(i int64) {
+	m.payer_vendor_id = &i
+	m.addpayer_vendor_id = nil
+}
+
+// PayerVendorID returns the value of the "payer_vendor_id" field in the mutation.
+func (m *VendorSettlementMutation) PayerVendorID() (r int64, exists bool) {
+	v := m.payer_vendor_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPayerVendorID returns the old "payer_vendor_id" field's value of the VendorSettlement entity.
+// If the VendorSettlement object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *VendorSettlementMutation) OldPayerVendorID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPayerVendorID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPayerVendorID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPayerVendorID: %w", err)
+	}
+	return oldValue.PayerVendorID, nil
+}
+
+// AddPayerVendorID adds i to the "payer_vendor_id" field.
+func (m *VendorSettlementMutation) AddPayerVendorID(i int64) {
+	if m.addpayer_vendor_id != nil {
+		*m.addpayer_vendor_id += i
+	} else {
+		m.addpayer_vendor_id = &i
+	}
+}
+
+// AddedPayerVendorID returns the value that was added to the "payer_vendor_id" field in this mutation.
+func (m *VendorSettlementMutation) AddedPayerVendorID() (r int64, exists bool) {
+	v := m.addpayer_vendor_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearPayerVendorID clears the value of the "payer_vendor_id" field.
+func (m *VendorSettlementMutation) ClearPayerVendorID() {
+	m.payer_vendor_id = nil
+	m.addpayer_vendor_id = nil
+	m.clearedFields[vendorsettlement.FieldPayerVendorID] = struct{}{}
+}
+
+// PayerVendorIDCleared returns if the "payer_vendor_id" field was cleared in this mutation.
+func (m *VendorSettlementMutation) PayerVendorIDCleared() bool {
+	_, ok := m.clearedFields[vendorsettlement.FieldPayerVendorID]
+	return ok
+}
+
+// ResetPayerVendorID resets all changes to the "payer_vendor_id" field.
+func (m *VendorSettlementMutation) ResetPayerVendorID() {
+	m.payer_vendor_id = nil
+	m.addpayer_vendor_id = nil
+	delete(m.clearedFields, vendorsettlement.FieldPayerVendorID)
 }
 
 // SetNumber sets the "number" field.
@@ -62349,7 +63029,10 @@ func (m *VendorSettlementMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *VendorSettlementMutation) Fields() []string {
-	fields := make([]string, 0, 25)
+	fields := make([]string, 0, 26)
+	if m.payer_vendor_id != nil {
+		fields = append(fields, vendorsettlement.FieldPayerVendorID)
+	}
 	if m.number != nil {
 		fields = append(fields, vendorsettlement.FieldNumber)
 	}
@@ -62433,6 +63116,8 @@ func (m *VendorSettlementMutation) Fields() []string {
 // schema.
 func (m *VendorSettlementMutation) Field(name string) (ent.Value, bool) {
 	switch name {
+	case vendorsettlement.FieldPayerVendorID:
+		return m.PayerVendorID()
 	case vendorsettlement.FieldNumber:
 		return m.Number()
 	case vendorsettlement.FieldVendorID:
@@ -62492,6 +63177,8 @@ func (m *VendorSettlementMutation) Field(name string) (ent.Value, bool) {
 // database failed.
 func (m *VendorSettlementMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
 	switch name {
+	case vendorsettlement.FieldPayerVendorID:
+		return m.OldPayerVendorID(ctx)
 	case vendorsettlement.FieldNumber:
 		return m.OldNumber(ctx)
 	case vendorsettlement.FieldVendorID:
@@ -62551,6 +63238,13 @@ func (m *VendorSettlementMutation) OldField(ctx context.Context, name string) (e
 // type.
 func (m *VendorSettlementMutation) SetField(name string, value ent.Value) error {
 	switch name {
+	case vendorsettlement.FieldPayerVendorID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPayerVendorID(v)
+		return nil
 	case vendorsettlement.FieldNumber:
 		v, ok := value.(string)
 		if !ok {
@@ -62734,6 +63428,9 @@ func (m *VendorSettlementMutation) SetField(name string, value ent.Value) error 
 // this mutation.
 func (m *VendorSettlementMutation) AddedFields() []string {
 	var fields []string
+	if m.addpayer_vendor_id != nil {
+		fields = append(fields, vendorsettlement.FieldPayerVendorID)
+	}
 	if m.addvendor_id != nil {
 		fields = append(fields, vendorsettlement.FieldVendorID)
 	}
@@ -62766,6 +63463,8 @@ func (m *VendorSettlementMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *VendorSettlementMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case vendorsettlement.FieldPayerVendorID:
+		return m.AddedPayerVendorID()
 	case vendorsettlement.FieldVendorID:
 		return m.AddedVendorID()
 	case vendorsettlement.FieldParentStatementID:
@@ -62791,6 +63490,13 @@ func (m *VendorSettlementMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *VendorSettlementMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case vendorsettlement.FieldPayerVendorID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPayerVendorID(v)
+		return nil
 	case vendorsettlement.FieldVendorID:
 		v, ok := value.(int64)
 		if !ok {
@@ -62855,6 +63561,9 @@ func (m *VendorSettlementMutation) AddField(name string, value ent.Value) error 
 // mutation.
 func (m *VendorSettlementMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(vendorsettlement.FieldPayerVendorID) {
+		fields = append(fields, vendorsettlement.FieldPayerVendorID)
+	}
 	if m.FieldCleared(vendorsettlement.FieldParentStatementID) {
 		fields = append(fields, vendorsettlement.FieldParentStatementID)
 	}
@@ -62881,6 +63590,9 @@ func (m *VendorSettlementMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *VendorSettlementMutation) ClearField(name string) error {
 	switch name {
+	case vendorsettlement.FieldPayerVendorID:
+		m.ClearPayerVendorID()
+		return nil
 	case vendorsettlement.FieldParentStatementID:
 		m.ClearParentStatementID()
 		return nil
@@ -62901,6 +63613,9 @@ func (m *VendorSettlementMutation) ClearField(name string) error {
 // It returns an error if the field is not defined in the schema.
 func (m *VendorSettlementMutation) ResetField(name string) error {
 	switch name {
+	case vendorsettlement.FieldPayerVendorID:
+		m.ResetPayerVendorID()
+		return nil
 	case vendorsettlement.FieldNumber:
 		m.ResetNumber()
 		return nil
@@ -63034,6 +63749,8 @@ type VendorSettlementAllocationMutation struct {
 	op                 Op
 	typ                string
 	id                 *int64
+	payer_vendor_id    *int64
+	addpayer_vendor_id *int64
 	statement_id       *int64
 	addstatement_id    *int64
 	line_id            *int64
@@ -63154,6 +63871,76 @@ func (m *VendorSettlementAllocationMutation) IDs(ctx context.Context) ([]int64, 
 	default:
 		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
 	}
+}
+
+// SetPayerVendorID sets the "payer_vendor_id" field.
+func (m *VendorSettlementAllocationMutation) SetPayerVendorID(i int64) {
+	m.payer_vendor_id = &i
+	m.addpayer_vendor_id = nil
+}
+
+// PayerVendorID returns the value of the "payer_vendor_id" field in the mutation.
+func (m *VendorSettlementAllocationMutation) PayerVendorID() (r int64, exists bool) {
+	v := m.payer_vendor_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPayerVendorID returns the old "payer_vendor_id" field's value of the VendorSettlementAllocation entity.
+// If the VendorSettlementAllocation object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *VendorSettlementAllocationMutation) OldPayerVendorID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPayerVendorID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPayerVendorID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPayerVendorID: %w", err)
+	}
+	return oldValue.PayerVendorID, nil
+}
+
+// AddPayerVendorID adds i to the "payer_vendor_id" field.
+func (m *VendorSettlementAllocationMutation) AddPayerVendorID(i int64) {
+	if m.addpayer_vendor_id != nil {
+		*m.addpayer_vendor_id += i
+	} else {
+		m.addpayer_vendor_id = &i
+	}
+}
+
+// AddedPayerVendorID returns the value that was added to the "payer_vendor_id" field in this mutation.
+func (m *VendorSettlementAllocationMutation) AddedPayerVendorID() (r int64, exists bool) {
+	v := m.addpayer_vendor_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearPayerVendorID clears the value of the "payer_vendor_id" field.
+func (m *VendorSettlementAllocationMutation) ClearPayerVendorID() {
+	m.payer_vendor_id = nil
+	m.addpayer_vendor_id = nil
+	m.clearedFields[vendorsettlementallocation.FieldPayerVendorID] = struct{}{}
+}
+
+// PayerVendorIDCleared returns if the "payer_vendor_id" field was cleared in this mutation.
+func (m *VendorSettlementAllocationMutation) PayerVendorIDCleared() bool {
+	_, ok := m.clearedFields[vendorsettlementallocation.FieldPayerVendorID]
+	return ok
+}
+
+// ResetPayerVendorID resets all changes to the "payer_vendor_id" field.
+func (m *VendorSettlementAllocationMutation) ResetPayerVendorID() {
+	m.payer_vendor_id = nil
+	m.addpayer_vendor_id = nil
+	delete(m.clearedFields, vendorsettlementallocation.FieldPayerVendorID)
 }
 
 // SetStatementID sets the "statement_id" field.
@@ -63571,7 +64358,10 @@ func (m *VendorSettlementAllocationMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *VendorSettlementAllocationMutation) Fields() []string {
-	fields := make([]string, 0, 8)
+	fields := make([]string, 0, 9)
+	if m.payer_vendor_id != nil {
+		fields = append(fields, vendorsettlementallocation.FieldPayerVendorID)
+	}
 	if m.statement_id != nil {
 		fields = append(fields, vendorsettlementallocation.FieldStatementID)
 	}
@@ -63604,6 +64394,8 @@ func (m *VendorSettlementAllocationMutation) Fields() []string {
 // schema.
 func (m *VendorSettlementAllocationMutation) Field(name string) (ent.Value, bool) {
 	switch name {
+	case vendorsettlementallocation.FieldPayerVendorID:
+		return m.PayerVendorID()
 	case vendorsettlementallocation.FieldStatementID:
 		return m.StatementID()
 	case vendorsettlementallocation.FieldLineID:
@@ -63629,6 +64421,8 @@ func (m *VendorSettlementAllocationMutation) Field(name string) (ent.Value, bool
 // database failed.
 func (m *VendorSettlementAllocationMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
 	switch name {
+	case vendorsettlementallocation.FieldPayerVendorID:
+		return m.OldPayerVendorID(ctx)
 	case vendorsettlementallocation.FieldStatementID:
 		return m.OldStatementID(ctx)
 	case vendorsettlementallocation.FieldLineID:
@@ -63654,6 +64448,13 @@ func (m *VendorSettlementAllocationMutation) OldField(ctx context.Context, name 
 // type.
 func (m *VendorSettlementAllocationMutation) SetField(name string, value ent.Value) error {
 	switch name {
+	case vendorsettlementallocation.FieldPayerVendorID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPayerVendorID(v)
+		return nil
 	case vendorsettlementallocation.FieldStatementID:
 		v, ok := value.(int64)
 		if !ok {
@@ -63718,6 +64519,9 @@ func (m *VendorSettlementAllocationMutation) SetField(name string, value ent.Val
 // this mutation.
 func (m *VendorSettlementAllocationMutation) AddedFields() []string {
 	var fields []string
+	if m.addpayer_vendor_id != nil {
+		fields = append(fields, vendorsettlementallocation.FieldPayerVendorID)
+	}
 	if m.addstatement_id != nil {
 		fields = append(fields, vendorsettlementallocation.FieldStatementID)
 	}
@@ -63738,6 +64542,8 @@ func (m *VendorSettlementAllocationMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *VendorSettlementAllocationMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case vendorsettlementallocation.FieldPayerVendorID:
+		return m.AddedPayerVendorID()
 	case vendorsettlementallocation.FieldStatementID:
 		return m.AddedStatementID()
 	case vendorsettlementallocation.FieldLineID:
@@ -63755,6 +64561,13 @@ func (m *VendorSettlementAllocationMutation) AddedField(name string) (ent.Value,
 // type.
 func (m *VendorSettlementAllocationMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case vendorsettlementallocation.FieldPayerVendorID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPayerVendorID(v)
+		return nil
 	case vendorsettlementallocation.FieldStatementID:
 		v, ok := value.(int64)
 		if !ok {
@@ -63791,6 +64604,9 @@ func (m *VendorSettlementAllocationMutation) AddField(name string, value ent.Val
 // mutation.
 func (m *VendorSettlementAllocationMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(vendorsettlementallocation.FieldPayerVendorID) {
+		fields = append(fields, vendorsettlementallocation.FieldPayerVendorID)
+	}
 	if m.FieldCleared(vendorsettlementallocation.FieldSourceFingerprint) {
 		fields = append(fields, vendorsettlementallocation.FieldSourceFingerprint)
 	}
@@ -63808,6 +64624,9 @@ func (m *VendorSettlementAllocationMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *VendorSettlementAllocationMutation) ClearField(name string) error {
 	switch name {
+	case vendorsettlementallocation.FieldPayerVendorID:
+		m.ClearPayerVendorID()
+		return nil
 	case vendorsettlementallocation.FieldSourceFingerprint:
 		m.ClearSourceFingerprint()
 		return nil
@@ -63819,6 +64638,9 @@ func (m *VendorSettlementAllocationMutation) ClearField(name string) error {
 // It returns an error if the field is not defined in the schema.
 func (m *VendorSettlementAllocationMutation) ResetField(name string) error {
 	switch name {
+	case vendorsettlementallocation.FieldPayerVendorID:
+		m.ResetPayerVendorID()
+		return nil
 	case vendorsettlementallocation.FieldStatementID:
 		m.ResetStatementID()
 		return nil
@@ -64874,28 +65696,30 @@ func (m *VendorSettlementLineMutation) ResetEdge(name string) error {
 // VendorSettlementPaymentMutation represents an operation that mutates the VendorSettlementPayment nodes in the graph.
 type VendorSettlementPaymentMutation struct {
 	config
-	op                Op
-	typ               string
-	id                *int64
-	statement_id      *int64
-	addstatement_id   *int64
-	amount            *string
-	currency          *string
-	paid_at           *time.Time
-	channel           *string
-	reference         *string
-	actor_id          *int64
-	addactor_id       *int64
-	idempotency_key   *string
-	input_hash        *string
-	reversal_of_id    *int64
-	addreversal_of_id *int64
-	reason            *string
-	created_at        *time.Time
-	clearedFields     map[string]struct{}
-	done              bool
-	oldValue          func(context.Context) (*VendorSettlementPayment, error)
-	predicates        []predicate.VendorSettlementPayment
+	op                 Op
+	typ                string
+	id                 *int64
+	payer_vendor_id    *int64
+	addpayer_vendor_id *int64
+	statement_id       *int64
+	addstatement_id    *int64
+	amount             *string
+	currency           *string
+	paid_at            *time.Time
+	channel            *string
+	reference          *string
+	actor_id           *int64
+	addactor_id        *int64
+	idempotency_key    *string
+	input_hash         *string
+	reversal_of_id     *int64
+	addreversal_of_id  *int64
+	reason             *string
+	created_at         *time.Time
+	clearedFields      map[string]struct{}
+	done               bool
+	oldValue           func(context.Context) (*VendorSettlementPayment, error)
+	predicates         []predicate.VendorSettlementPayment
 }
 
 var _ ent.Mutation = (*VendorSettlementPaymentMutation)(nil)
@@ -65000,6 +65824,76 @@ func (m *VendorSettlementPaymentMutation) IDs(ctx context.Context) ([]int64, err
 	default:
 		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
 	}
+}
+
+// SetPayerVendorID sets the "payer_vendor_id" field.
+func (m *VendorSettlementPaymentMutation) SetPayerVendorID(i int64) {
+	m.payer_vendor_id = &i
+	m.addpayer_vendor_id = nil
+}
+
+// PayerVendorID returns the value of the "payer_vendor_id" field in the mutation.
+func (m *VendorSettlementPaymentMutation) PayerVendorID() (r int64, exists bool) {
+	v := m.payer_vendor_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPayerVendorID returns the old "payer_vendor_id" field's value of the VendorSettlementPayment entity.
+// If the VendorSettlementPayment object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *VendorSettlementPaymentMutation) OldPayerVendorID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPayerVendorID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPayerVendorID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPayerVendorID: %w", err)
+	}
+	return oldValue.PayerVendorID, nil
+}
+
+// AddPayerVendorID adds i to the "payer_vendor_id" field.
+func (m *VendorSettlementPaymentMutation) AddPayerVendorID(i int64) {
+	if m.addpayer_vendor_id != nil {
+		*m.addpayer_vendor_id += i
+	} else {
+		m.addpayer_vendor_id = &i
+	}
+}
+
+// AddedPayerVendorID returns the value that was added to the "payer_vendor_id" field in this mutation.
+func (m *VendorSettlementPaymentMutation) AddedPayerVendorID() (r int64, exists bool) {
+	v := m.addpayer_vendor_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearPayerVendorID clears the value of the "payer_vendor_id" field.
+func (m *VendorSettlementPaymentMutation) ClearPayerVendorID() {
+	m.payer_vendor_id = nil
+	m.addpayer_vendor_id = nil
+	m.clearedFields[vendorsettlementpayment.FieldPayerVendorID] = struct{}{}
+}
+
+// PayerVendorIDCleared returns if the "payer_vendor_id" field was cleared in this mutation.
+func (m *VendorSettlementPaymentMutation) PayerVendorIDCleared() bool {
+	_, ok := m.clearedFields[vendorsettlementpayment.FieldPayerVendorID]
+	return ok
+}
+
+// ResetPayerVendorID resets all changes to the "payer_vendor_id" field.
+func (m *VendorSettlementPaymentMutation) ResetPayerVendorID() {
+	m.payer_vendor_id = nil
+	m.addpayer_vendor_id = nil
+	delete(m.clearedFields, vendorsettlementpayment.FieldPayerVendorID)
 }
 
 // SetStatementID sets the "statement_id" field.
@@ -65542,7 +66436,10 @@ func (m *VendorSettlementPaymentMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *VendorSettlementPaymentMutation) Fields() []string {
-	fields := make([]string, 0, 12)
+	fields := make([]string, 0, 13)
+	if m.payer_vendor_id != nil {
+		fields = append(fields, vendorsettlementpayment.FieldPayerVendorID)
+	}
 	if m.statement_id != nil {
 		fields = append(fields, vendorsettlementpayment.FieldStatementID)
 	}
@@ -65587,6 +66484,8 @@ func (m *VendorSettlementPaymentMutation) Fields() []string {
 // schema.
 func (m *VendorSettlementPaymentMutation) Field(name string) (ent.Value, bool) {
 	switch name {
+	case vendorsettlementpayment.FieldPayerVendorID:
+		return m.PayerVendorID()
 	case vendorsettlementpayment.FieldStatementID:
 		return m.StatementID()
 	case vendorsettlementpayment.FieldAmount:
@@ -65620,6 +66519,8 @@ func (m *VendorSettlementPaymentMutation) Field(name string) (ent.Value, bool) {
 // database failed.
 func (m *VendorSettlementPaymentMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
 	switch name {
+	case vendorsettlementpayment.FieldPayerVendorID:
+		return m.OldPayerVendorID(ctx)
 	case vendorsettlementpayment.FieldStatementID:
 		return m.OldStatementID(ctx)
 	case vendorsettlementpayment.FieldAmount:
@@ -65653,6 +66554,13 @@ func (m *VendorSettlementPaymentMutation) OldField(ctx context.Context, name str
 // type.
 func (m *VendorSettlementPaymentMutation) SetField(name string, value ent.Value) error {
 	switch name {
+	case vendorsettlementpayment.FieldPayerVendorID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPayerVendorID(v)
+		return nil
 	case vendorsettlementpayment.FieldStatementID:
 		v, ok := value.(int64)
 		if !ok {
@@ -65745,6 +66653,9 @@ func (m *VendorSettlementPaymentMutation) SetField(name string, value ent.Value)
 // this mutation.
 func (m *VendorSettlementPaymentMutation) AddedFields() []string {
 	var fields []string
+	if m.addpayer_vendor_id != nil {
+		fields = append(fields, vendorsettlementpayment.FieldPayerVendorID)
+	}
 	if m.addstatement_id != nil {
 		fields = append(fields, vendorsettlementpayment.FieldStatementID)
 	}
@@ -65762,6 +66673,8 @@ func (m *VendorSettlementPaymentMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *VendorSettlementPaymentMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case vendorsettlementpayment.FieldPayerVendorID:
+		return m.AddedPayerVendorID()
 	case vendorsettlementpayment.FieldStatementID:
 		return m.AddedStatementID()
 	case vendorsettlementpayment.FieldActorID:
@@ -65777,6 +66690,13 @@ func (m *VendorSettlementPaymentMutation) AddedField(name string) (ent.Value, bo
 // type.
 func (m *VendorSettlementPaymentMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case vendorsettlementpayment.FieldPayerVendorID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPayerVendorID(v)
+		return nil
 	case vendorsettlementpayment.FieldStatementID:
 		v, ok := value.(int64)
 		if !ok {
@@ -65806,6 +66726,9 @@ func (m *VendorSettlementPaymentMutation) AddField(name string, value ent.Value)
 // mutation.
 func (m *VendorSettlementPaymentMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(vendorsettlementpayment.FieldPayerVendorID) {
+		fields = append(fields, vendorsettlementpayment.FieldPayerVendorID)
+	}
 	if m.FieldCleared(vendorsettlementpayment.FieldReversalOfID) {
 		fields = append(fields, vendorsettlementpayment.FieldReversalOfID)
 	}
@@ -65823,6 +66746,9 @@ func (m *VendorSettlementPaymentMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *VendorSettlementPaymentMutation) ClearField(name string) error {
 	switch name {
+	case vendorsettlementpayment.FieldPayerVendorID:
+		m.ClearPayerVendorID()
+		return nil
 	case vendorsettlementpayment.FieldReversalOfID:
 		m.ClearReversalOfID()
 		return nil
@@ -65834,6 +66760,9 @@ func (m *VendorSettlementPaymentMutation) ClearField(name string) error {
 // It returns an error if the field is not defined in the schema.
 func (m *VendorSettlementPaymentMutation) ResetField(name string) error {
 	switch name {
+	case vendorsettlementpayment.FieldPayerVendorID:
+		m.ResetPayerVendorID()
+		return nil
 	case vendorsettlementpayment.FieldStatementID:
 		m.ResetStatementID()
 		return nil

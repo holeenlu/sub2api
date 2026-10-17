@@ -13,7 +13,7 @@ var _ service.OpenAIExcelCredentialRepository = (*accountRepository)(nil)
 
 func (r *accountRepository) GetExcelCredentials(ctx context.Context, id int64) (string, error) {
 	var encrypted string
-	rows, err := r.sql.QueryContext(ctx, `SELECT g.ciphertext FROM openai_excel_grants g JOIN accounts a ON a.id=g.account_id WHERE a.id=$1 AND a.deleted_at IS NULL AND a.vendor_id IS NULL`, id)
+	rows, err := r.sql.QueryContext(ctx, `SELECT g.ciphertext FROM openai_excel_grants g JOIN accounts a ON a.id=g.account_id WHERE a.id=$1 AND a.deleted_at IS NULL AND (`+accountVisibilitySQL(ctx, "a.vendor_id")+`) AND (a.vendor_id IS NULL OR (`+vendorSupplySQL("a", "NULL")+` AND EXISTS(SELECT 1 FROM vendors v WHERE v.id=a.vendor_id AND `+authz.OpenAIAuthorizationModeSQL("a", "v", "bps")+`)))`, id)
 	if err != nil {
 		return "", err
 	}
@@ -30,8 +30,24 @@ func (r *accountRepository) GetExcelCredentials(ctx context.Context, id int64) (
 // Serialize on the account row and compare both the primary identity and grant.
 // A refresh may never overwrite a concurrent reauthorization or account edit.
 func (r *accountRepository) StoreExcelCredentials(ctx context.Context, account *service.Account, previous, next string) (bool, error) {
-	if !account.IsExcelBPSEligible() {
+	if account == nil || !account.IsExcelBPSEligible() {
 		return false, nil
+	}
+	if account.VendorID != nil {
+		// Supplier grant admission/revocation is owned by its verified account
+		// transaction. This repository path is only the CAS refresh of a grant.
+		if previous == "" || next == "" {
+			return false, authz.ErrPermissionDenied
+		}
+		if actor, ok := authz.FromContext(ctx); ok && actor.ManagementRequest {
+			scope, scoped := authz.VendorScopeFromContext(ctx)
+			if !scoped || scope.ReadOnly || scope.VendorID != *account.VendorID {
+				return false, authz.ErrPermissionDenied
+			}
+		}
+		if err := r.guardAccountScope(ctx, account.ID); err != nil {
+			return false, err
+		}
 	}
 	primary, err := json.Marshal(account.Credentials)
 	if err != nil {
@@ -45,7 +61,13 @@ func (r *accountRepository) StoreExcelCredentials(ctx context.Context, account *
 	if err := authz.LockManagementWrite(ctx, tx.Client(), nil, "", "", false); err != nil {
 		return false, err
 	}
-	rows, err := tx.Client().QueryContext(ctx, `SELECT id FROM accounts WHERE id=$1 AND deleted_at IS NULL AND vendor_id IS NULL AND parent_account_id IS NULL AND platform='openai' AND type='oauth' AND credentials=$2::jsonb FOR UPDATE`, account.ID, string(primary))
+	lockQuery := `SELECT id FROM accounts WHERE id=$1 AND deleted_at IS NULL AND vendor_id IS NULL AND parent_account_id IS NULL AND platform='openai' AND type='oauth' AND credentials=$2::jsonb FOR UPDATE`
+	lockArgs := []any{account.ID, string(primary)}
+	if account.VendorID != nil {
+		lockQuery = `SELECT a.id FROM accounts a WHERE a.id=$1 AND a.deleted_at IS NULL AND a.vendor_id=$3 AND a.parent_account_id IS NULL AND a.platform='openai' AND a.type='oauth' AND a.credentials=$2::jsonb AND ` + vendorSupplySQL("a", "NULL") + ` AND EXISTS(SELECT 1 FROM vendors v WHERE v.id=a.vendor_id AND ` + authz.OpenAIAuthorizationModeSQL("a", "v", "bps") + `) FOR UPDATE OF a`
+		lockArgs = append(lockArgs, *account.VendorID)
+	}
+	rows, err := tx.Client().QueryContext(ctx, lockQuery, lockArgs...)
 	if err != nil {
 		return false, err
 	}

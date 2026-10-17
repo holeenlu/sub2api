@@ -118,6 +118,11 @@ func (r *OpenAITokenRefresher) NeedsRefresh(account *Account, refreshWindow time
 // Refresh 执行token刷新
 // 保留原有credentials中的所有字段，只更新token相关字段
 func (r *OpenAITokenRefresher) Refresh(ctx context.Context, account *Account) (map[string]any, error) {
+	// This check runs after provider rate admission, immediately before the
+	// actual exchange, including callers outside the background refresh API.
+	if err := validateVendorOAuthRefresh(ctx, r.accountRepo, account); err != nil {
+		return nil, err
+	}
 	tokenInfo, err := r.openaiOAuthService.RefreshAccountToken(ctx, account)
 	if err != nil {
 		return nil, err

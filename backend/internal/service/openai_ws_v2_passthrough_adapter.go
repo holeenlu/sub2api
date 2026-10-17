@@ -980,10 +980,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		if err != nil {
 			return fmt.Errorf("refresh ws authentication headers: %w", err)
 		}
-		if err := TakeOpenAITurnAttempt(ctx); err != nil {
+		if err := TakeOpenAITurnAttempt(withTurnRecoveryTarget(ctx, account, "websocket", "/v1/responses", resolveAccountProxyURL(account), token)); err != nil {
 			return wrapOpenAIWSIngressTurnError("before_upstream_write", err, false)
 		}
-		if err := validateVendorDispatch(ctx, s.accountRepo, account, vendorDispatchGroup(c)); err != nil {
+		if err := validateVendorNativeDispatch(ctx, s.accountRepo, account, vendorDispatchGroup(c)); err != nil {
 			return err
 		}
 		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
@@ -996,6 +996,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		responseBody := []byte(nil)
 		if errors.As(err, &handshakeErr) && handshakeErr != nil {
 			responseBody = handshakeErr.Body
+		}
+		if statusCode == http.StatusUnauthorized && s.openAITokenProvider != nil {
+			if fresh, ok := refreshRejectedCredential(ctx, s.accountRepo, account, token, s.openAITokenProvider.refreshAPI, s.openAITokenProvider.executor); ok {
+				token = fresh
+				headers.Set("Authorization", "Bearer "+fresh)
+				continue
+			}
 		}
 		dialErr := &openAIWSDialError{StatusCode: statusCode, ResponseHeaders: cloneHeader(handshakeHeaders), ResponseBody: responseBody, Err: err}
 		if s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidWSDialError(dialErr) && !agentTaskRecoveryTried {
@@ -1103,7 +1110,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
 			if isResponseCreate {
-				if err := validateVendorDispatch(ctx, s.accountRepo, account, vendorDispatchGroup(c)); err != nil {
+				if err := validateVendorNativeDispatch(ctx, s.accountRepo, account, vendorDispatchGroup(c)); err != nil {
 					return payload, nil, err
 				}
 				if err := s.checkOpenAIWSCodexClientRestriction(ctx, c, account, payload, func(event []byte) error {
@@ -1265,7 +1272,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
 			if isResponseCreate && blocked == nil && policyErr == nil {
 				if ds, ok := clientConn.(*OpenAIWSDownstream); ok {
-					if err := TakeOpenAITurnAttempt(ds.TurnBudgetContext(ctx, s.cfg, payload)); err != nil {
+					if err := TakeOpenAITurnAttempt(withTurnRecoveryTarget(ds.TurnBudgetContext(ctx, s.cfg, payload), account, "websocket", "/v1/responses", resolveAccountProxyURL(account), token, out)); err != nil {
 						return payload, nil, err
 					}
 				}
@@ -1388,7 +1395,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				turnRequestModel, turnUpstreamModel := usageMeta.turnModels(turn.RequestModel)
 				turnResult := &OpenAIForwardResult{
-					RequestID: turn.RequestID,
+					AuthorizationMode: nativeOpenAIUsageAuthorizationMode(account),
+					RequestID:         turn.RequestID,
 					Usage: OpenAIUsage{
 						InputTokens:              turn.Usage.InputTokens,
 						ImageInputTokens:         turn.Usage.ImageInputTokens,
@@ -1561,7 +1569,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 
 	resultRequestModel, resultUpstreamModel := usageMeta.turnModels(relayResult.RequestModel)
 	result := &OpenAIForwardResult{
-		RequestID: relayResult.RequestID,
+		AuthorizationMode: nativeOpenAIUsageAuthorizationMode(account),
+		RequestID:         relayResult.RequestID,
 		Usage: OpenAIUsage{
 			InputTokens:              relayResult.Usage.InputTokens,
 			ImageInputTokens:         relayResult.Usage.ImageInputTokens,
@@ -1756,7 +1765,10 @@ func (s *OpenAIGatewayService) mapOpenAIWSPassthroughDialError(
 			wrappedErr,
 		)
 	}
-	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+	if statusCode == http.StatusUnauthorized {
+		return &UpstreamFailoverError{StatusCode: statusCode, Stage: GatewayFailureStageAccountAuth, Scope: GatewayFailureScopeAccount, Reason: "upstream_credentials_rejected", Cause: wrappedErr, RequestNotSent: true, RejectedBeforeGeneration: true}
+	}
+	if statusCode == http.StatusForbidden {
 		return NewOpenAIWSClientCloseError(
 			coderws.StatusPolicyViolation,
 			"upstream websocket authentication failed",
