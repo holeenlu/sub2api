@@ -19,6 +19,8 @@ const redeemTestOrg = "11111111-1111-4111-8111-111111111111"
 
 type redeemAccountsStub struct{}
 
+func (redeemAccountsStub) UpdateExtra(context.Context, int64, map[string]any) error { return nil }
+
 func (redeemAccountsStub) GetByID(_ context.Context, id int64) (*Account, error) {
 	return &Account{ID: id, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Credentials: map[string]any{"scope": "user:profile"}}, nil
 }
@@ -121,6 +123,32 @@ func newRedeemService(t *testing.T, f *redeemFake) (*ClaudeResetCreditService, *
 		return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body))}, nil
 	}
 	return s, repo, locks
+}
+
+func TestClaudeResetRedemptionRefreshesOrInvalidatesPersistedCount(t *testing.T) {
+	for _, outcome := range []string{`{"result":"reset","cleared":["five_hour"]}`, "network-error"} {
+		t.Run(outcome, func(t *testing.T) {
+			f := &redeemFake{claim: outcome}
+			s, _, _ := newRedeemService(t, f)
+			account, err := (redeemAccountsStub{}).GetByID(context.Background(), 1)
+			require.NoError(t, err)
+			accounts := &resetSnapshotAccounts{resetAccountStub: resetAccountStub{account}}
+			accounts.account.Extra = map[string]any{claudeResetCreditSnapshotKey: map[string]any{"available_count": 9}}
+			s.accounts = accounts
+			result, err := s.Redeem(context.Background(), 1, "persisted-count")
+			require.NoError(t, err)
+			require.NotEmpty(t, accounts.writes)
+			require.Nil(t, accounts.writes[0][claudeResetCreditSnapshotKey], "invalidate pre-claim count even when claim outcome is unknown")
+			if outcome == "network-error" {
+				require.Equal(t, ClaudeResetOutcomeUnknown, result.Outcome)
+				require.Nil(t, accounts.account.Extra[claudeResetCreditSnapshotKey])
+			} else {
+				require.NotNil(t, result.Credits)
+				require.True(t, result.Credits.CachePersisted)
+				require.Len(t, accounts.writes, 2)
+			}
+		})
+	}
 }
 
 func TestClaudeResetRedeemHappyPathServerPicksNextGrant(t *testing.T) {
