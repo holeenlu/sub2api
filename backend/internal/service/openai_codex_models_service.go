@@ -2149,16 +2149,6 @@ func adjustAPIKeyCodexModelsManifest(body []byte, account *Account) ([]byte, err
 	return adjusted, nil
 }
 
-// convertOpenAIModelListToCodexManifest rewrites a standard OpenAI
-// GET /v1/models response ({"object":"list","data":[{"id":...},...]}) into the
-// same complete Codex manifest used by locally generated custom-provider
-// catalogs. Bodies that already carry a top-level models field, are not the
-// standard list shape, or yield no usable model IDs are returned unchanged so
-// envelope validation reports the original payload.
-func convertOpenAIModelListToCodexManifest(body []byte) []byte {
-	return convertOpenAIModelListToCodexManifestForAccount(body, nil)
-}
-
 func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Account) []byte {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(body, &envelope); err != nil || envelope == nil {
