@@ -482,10 +482,14 @@ func TestAntigravityGatewayService_ForwardGemini_MissingProjectReturnsLocalError
 	result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-2.5-flash", "streamGenerateContent", true, body, false)
 	require.Nil(t, result)
 	require.ErrorIs(t, err, errAntigravityProjectIDRequired)
-	require.Equal(t, http.StatusBadRequest, writer.Code)
+	var failure *UpstreamFailoverError
+	require.ErrorAs(t, err, &failure)
+	require.True(t, failure.RequestNotSent)
+	require.True(t, failure.ShouldRetryNextAccount())
+	require.False(t, c.Writer.Written())
 	require.Empty(t, upstream.requestBodies)
 	require.Empty(t, internal500Cache.incrementCalls)
-	require.Contains(t, writer.Body.String(), "project_id")
+	require.Empty(t, writer.Body.String())
 	require.NotContains(t, writer.Body.String(), `"project":""`)
 }
 
@@ -1628,7 +1632,7 @@ func TestHandleGeminiStreamingResponse_ClientDisconnect(t *testing.T) {
 
 	go func() {
 		defer func() { _ = pw.Close() }()
-		fmt.Fprintln(pw, `data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":10}}`)
+		fmt.Fprintln(pw, `data: {"candidates":[{"content":{"parts":[{"text":"hi"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":10}}`)
 		fmt.Fprintln(pw, "")
 	}()
 
@@ -1659,7 +1663,8 @@ func TestHandleGeminiStreamingResponse_ContextCanceled(t *testing.T) {
 
 	result, err := svc.handleGeminiStreamingResponse(c, resp, time.Now())
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+	require.True(t, IsResponseCommitted(c))
 	require.NotNil(t, result)
 	require.True(t, result.clientDisconnect)
 	require.NotContains(t, rec.Body.String(), "event: error")
@@ -1754,7 +1759,7 @@ func TestHandleClaudeStreamingResponse_ContextCanceled(t *testing.T) {
 
 	result, err := svc.handleClaudeStreamingResponse(c, resp, time.Now(), "claude-sonnet-4-5")
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 	require.NotNil(t, result)
 	require.True(t, result.clientDisconnect)
 	require.NotContains(t, rec.Body.String(), "event: error")
@@ -2011,6 +2016,32 @@ func generateLargeUnwrapJSON(minSize int) []byte {
 	outer := map[string]any{"response": inner}
 	b, _ := json.Marshal(outer)
 	return b
+}
+
+func TestAntigravityForwardGeminiAggregateFailureWritesErrorAndRetainsUsage(t *testing.T) {
+	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", nil)
+	wire := `data: {"response":{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}}` + "\n\n"
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+		StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(wire)),
+	}}}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{}),
+		tokenProvider:  &AntigravityTokenProvider{}, httpUpstream: upstream,
+	}
+	account := &Account{ID: 103, Platform: PlatformAntigravity, Type: AccountTypeOAuth, Status: StatusActive, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "token", "project_id": "project-103", "model_mapping": map[string]any{"gemini-2.5-flash": "gemini-2.5-flash"}},
+	}
+	result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-2.5-flash", "generateContent", false,
+		[]byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`), false)
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 7, result.Usage.InputTokens)
+	require.Equal(t, 3, result.Usage.OutputTokens)
+	require.Equal(t, http.StatusBadGateway, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "Failed to read upstream stream")
+	require.True(t, IsResponseCommitted(c))
+	require.Len(t, upstream.requestBodies, 1)
 }
 
 func TestAntigravityGatewayService_ForwardGemini_NonStreamPreservesFunctionCallAndThoughtSignature(t *testing.T) {

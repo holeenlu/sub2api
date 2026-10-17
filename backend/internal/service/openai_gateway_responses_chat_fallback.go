@@ -31,6 +31,19 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	body []byte,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	// Chat Completions cannot resolve Responses server-side state. Check raw
+	// JSON before decoding into the narrower conversion DTO, which otherwise
+	// silently drops prompt/conversation/context_management (and the converter
+	// ignores previous_response_id even when a nonempty input is only a delta).
+	for _, field := range []string{"previous_response_id", "conversation", "prompt", "context_management"} {
+		value := gjson.GetBytes(body, field)
+		if !value.Exists() || value.Type == gjson.Null || (value.Type == gjson.String && strings.TrimSpace(value.String()) == "") || (value.IsArray() && len(value.Array()) == 0) {
+			continue
+		}
+		inputErr := &openAIResponsesInputError{Code: "unsupported_parameter", Param: field, Message: fmt.Sprintf("Chat Completions cannot resolve Responses %s; use a Responses-capable account or resend full input without this field.", field)}
+		writeOpenAIResponsesInputError(c, inputErr)
+		return nil, inputErr
+	}
 	var responsesReq apicompat.ResponsesRequest
 	if err := json.Unmarshal(body, &responsesReq); err != nil {
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")

@@ -419,6 +419,7 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersPreservesCodexIdentity(t *test
 		"",
 		"",
 		"",
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -443,7 +444,7 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersDeviceModePreservesNamespacedC
 	c.Request.Header.Set("x-client-request-id", "client-request")
 
 	account := newTestOAuthAccount(1300, map[string]any{codexFingerprintModeExtraKey: "device"})
-	ids := resolveCodexFingerprintIDsFromRequest(account, c.Request.Header)
+	ids := resolveCodexFingerprintIDsForCaller(account, c.Request.Header, 0)
 	require.NotNil(t, ids)
 	stageCodexFingerprintIDs(c, ids)
 
@@ -460,6 +461,7 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersDeviceModePreservesNamespacedC
 		"",
 		"",
 		"",
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -468,7 +470,7 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersDeviceModePreservesNamespacedC
 	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "window", "client-window"), headers.Get("x-codex-window-id"))
 	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "session", "client-session"), headers.Get("session-id"))
 	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "thread", "client-thread"), headers.Get("thread-id"))
-	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "request", "client-request"), headers.Get("x-client-request-id"))
+	require.Equal(t, headers.Get("thread-id"), headers.Get("x-client-request-id"), "Codex request correlation carries the scoped thread identity")
 }
 
 func TestLogOpenAIWSBindResponseAccountWarn(t *testing.T) {
@@ -1157,12 +1159,15 @@ func TestOpenAIGatewayService_Forward_WSv2_CodexFingerprintHandshakeBodyParityAn
 	require.True(t, ok)
 	wantInstall := resolveConvergedInstallationID(account, seed)
 	wantSession := resolveConvergedSessionID(seed)
-	wantThread := resolveConvergedThreadID(seed, "header-session")
+	wantThread := scopeCodexAccountIdentityValue(account, 0, "thread", "body-thread")
+	wantAffinity := scopeCodexAccountIdentityValue(account, 0, "session", "header-session")
 	payloadJSON := requestToJSONString(captureConn.lastWrite)
 
-	require.Equal(t, wantInstall, captureDialer.lastHeaders.Get("x-codex-installation-id"))
-	require.Equal(t, wantSession, captureDialer.lastHeaders.Get("session-id"))
-	require.Equal(t, wantSession, captureDialer.lastHeaders.Get("session_id"))
+	for _, name := range []string{"session_id", "conversation_id", "x-codex-installation-id", "accept-language"} {
+		require.Empty(t, captureDialer.lastHeaders.Get(name), name)
+	}
+	require.Equal(t, wantAffinity, captureDialer.lastHeaders.Get("session-id"))
+	require.NotEqual(t, wantSession, wantAffinity, "explicit affinity remains independent of body session")
 	require.Equal(t, wantThread, captureDialer.lastHeaders.Get("thread-id"))
 	require.Equal(t, wantThread, captureDialer.lastHeaders.Get("x-client-request-id"))
 	require.Equal(t, wantThread+":0", captureDialer.lastHeaders.Get("x-codex-window-id"))
@@ -1951,6 +1956,7 @@ func (d *openAIWSCaptureDialer) DialCount() int {
 
 type openAIWSCaptureConn struct {
 	mu         sync.Mutex
+	readErr    error
 	readDelays []time.Duration
 	events     [][]byte
 	lastWrite  map[string]any
@@ -1996,6 +2002,9 @@ func (c *openAIWSCaptureConn) ReadMessage(ctx context.Context) ([]byte, error) {
 	}
 	if len(c.events) == 0 {
 		c.mu.Unlock()
+		if c.readErr != nil {
+			return nil, c.readErr
+		}
 		return nil, io.EOF
 	}
 	delay := time.Duration(0)
