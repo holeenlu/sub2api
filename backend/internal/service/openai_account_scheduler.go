@@ -1831,11 +1831,6 @@ func (s *OpenAIGatewayService) getOpenAIAccountScheduler(ctx context.Context) Op
 	return s.openaiScheduler
 }
 
-func resetOpenAIAdvancedSchedulerSettingCacheForTest() {
-	openAIAdvancedSchedulerSettingCache = atomic.Value{}
-	openAIAdvancedSchedulerSettingSF = singleflight.Group{}
-}
-
 func (s *OpenAIGatewayService) SelectAccountWithScheduler(
 	ctx context.Context,
 	groupID *int64,
