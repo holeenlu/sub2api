@@ -89,11 +89,11 @@ func TestOpenAIOAuthHTTPBuildersSendRoutingHintFromFinalBody(t *testing.T) {
 		body []byte
 		want string
 	}{
-		{name: "fast", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"fast"}`), want: "model=gpt-5.6-codex;tier=priority"},
-		{name: "flex", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"flex"}`), want: "model=gpt-5.6-codex;tier=flex"},
-		{name: "ultrafast", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"ultrafast"}`), want: "model=gpt-5.6-codex;tier=ultrafast"},
-		{name: "default", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"default"}`), want: "model=gpt-5.6-codex"},
-		{name: "omitted", body: []byte(`{"model":"gpt-5.6-codex"}`), want: "model=gpt-5.6-codex"},
+		{name: "fast", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"fast","input":[{"role":"user","content":"hello"}]}`), want: "model=gpt-5.6-codex;tier=priority"},
+		{name: "flex", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"flex","input":[{"role":"user","content":"hello"}]}`), want: "model=gpt-5.6-codex;tier=flex"},
+		{name: "ultrafast", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"ultrafast","input":[{"role":"user","content":"hello"}]}`), want: "model=gpt-5.6-codex;tier=ultrafast"},
+		{name: "default", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"default","input":[{"role":"user","content":"hello"}]}`), want: "model=gpt-5.6-codex"},
+		{name: "omitted", body: []byte(`{"model":"gpt-5.6-codex","input":[{"role":"user","content":"hello"}]}`), want: "model=gpt-5.6-codex"},
 	}
 
 	for _, tt := range tests {
@@ -130,7 +130,7 @@ func TestOpenAIHTTPPassthroughStripsOnlyOAuthLegacyResponsesBeta(t *testing.T) {
 			URLAllowlist: config.URLAllowlistConfig{Enabled: false},
 		},
 	}}
-	body := []byte(`{"model":"gpt-5.6-codex","service_tier":"priority"}`)
+	body := []byte(`{"model":"gpt-5.6-codex","service_tier":"priority","input":[{"role":"user","content":"hello"}]}`)
 
 	build := func(t *testing.T, account *Account, betaValues []string, rawLowercaseKey bool) http.Header {
 		t.Helper()
@@ -236,7 +236,7 @@ func TestOpenAIRoutingDiagnosticsUseFinalDerivedValuesOnly(t *testing.T) {
 			"chatgpt_account_id": "chatgpt-account",
 		},
 	}
-	body := []byte(`{"model":"gpt-5.6-codex","service_tier":"fast"}`)
+	body := []byte(`{"model":"gpt-5.6-codex","service_tier":"fast","input":[{"role":"user","content":"hello"}]}`)
 	svc := &OpenAIGatewayService{}
 
 	recorder := httptest.NewRecorder()

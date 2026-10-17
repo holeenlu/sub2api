@@ -107,6 +107,30 @@ type stagedPassthroughDialer struct {
 	conn openAIWSClientConn
 }
 
+func TestOpenAIWSPassthroughBareErrorAllowsDelayedTerminal(t *testing.T) {
+	for _, terminal := range []string{"response.failed", "response.completed"} {
+		t.Run(terminal, func(t *testing.T) {
+			inner := newStagedPassthroughConn()
+			defer inner.Close()
+			conn := &openAIWSPassthroughFirstOutputFrameConn{inner: inner, activeReadTimeout: time.Second}
+			conn.armActiveReadDeadline()
+			inner.Send(`{"type":"error","error":{"type":"invalid_request_error","message":"rejected"}}`)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_, event, err := conn.ReadFrame(ctx)
+			require.NoError(t, err)
+			require.Equal(t, "error", gjson.GetBytes(event, "type").String())
+			time.Sleep(500 * time.Millisecond)
+			inner.Send(`{"type":"` + terminal + `","response":{"usage":{"input_tokens":8,"output_tokens":4}}}`)
+			_, event, err = conn.ReadFrame(ctx)
+			require.NoError(t, err)
+			require.Equal(t, terminal, gjson.GetBytes(event, "type").String())
+			require.Equal(t, int64(8), gjson.GetBytes(event, "response.usage.input_tokens").Int())
+			require.False(t, conn.deadlineState().armed)
+		})
+	}
+}
+
 func (d *stagedPassthroughDialer) Dial(context.Context, string, http.Header, string) (openAIWSClientConn, int, http.Header, error) {
 	return d.conn, http.StatusSwitchingProtocols, http.Header{}, nil
 }
@@ -235,7 +259,7 @@ func TestPassthroughLifecycle_LaterTurnPreOutputRateLimitRequestsReconnect(t *te
 	require.Equal(t, "response.completed", gjson.GetBytes(completed, "type").String())
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"hello","stream":false}`))
 	cancelWrite()
 	require.NoError(t, err)
 	secondRequest := requirePassthroughUpstreamWrite(t, upstream, time.Second)
@@ -470,7 +494,7 @@ func TestPassthroughLifecycle_CloseReasonTruncationPreservesUTF8(t *testing.T) {
 
 func dialPassthroughLifecycleClient(t *testing.T, server *httptest.Server) *coderws.Conn {
 	t.Helper()
-	return dialPassthroughLifecycleClientWithPayload(t, server, `{"type":"response.create","model":"gpt-5.1","stream":false}`)
+	return dialPassthroughLifecycleClientWithPayload(t, server, `{"type":"response.create","model":"gpt-5.1","input":"hello","stream":false}`)
 }
 
 func dialPassthroughLifecycleClientWithPayload(t *testing.T, server *httptest.Server, payload string) *coderws.Conn {
@@ -514,7 +538,7 @@ func TestPassthroughLifecycle_ResponsesLiteFirstFramePinsParallelToolCalls(t *te
 	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream), passthroughLifecycleAccount())
 	defer server.Close()
 	clientConn := dialPassthroughLifecycleClientWithPayload(t, server, `{
-		"type":"response.create","model":"gpt-5.1","stream":false,
+		"type":"response.create","model":"gpt-5.1","input":"hello","stream":false,
 		"parallel_tool_calls":true,
 		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"}
 	}`)
@@ -704,7 +728,7 @@ func TestPassthroughLifecycle_RejectsOverlappingResponseCreate(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "response.created", gjson.GetBytes(created, "type").String())
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1"}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"hello"}`))
 	cancelWrite()
 	require.NoError(t, err)
 

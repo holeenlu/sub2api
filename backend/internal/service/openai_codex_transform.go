@@ -1351,6 +1351,17 @@ func extractSystemMessagesFromInput(reqBody map[string]any, omitPromoted bool) b
 		filteredInput = append(filteredInput, item)
 		modified = true
 	}
+	if omitPromoted && len(filteredInput) == 0 && len(systemTexts) > 0 {
+		// Instructions alone do not supply a Responses input. Preserve the
+		// client's original task as developer messages when promotion would
+		// remove every item; do not manufacture a user prompt.
+		for _, item := range input {
+			if m, ok := item.(map[string]any); ok && m["role"] == "system" {
+				m["role"] = "developer"
+			}
+		}
+		filteredInput = input
+	}
 	if omitPromoted && len(filteredInput) != len(input) {
 		reqBody["input"] = filteredInput
 	}

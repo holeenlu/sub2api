@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -28,7 +29,9 @@ import (
 //	          ├─ 成功 → 正常返回
 //	          └─ 失败 → 设置模型限流 + 清除粘性绑定 → 切换账号
 func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte, isStickySession bool) (*ForwardResult, error) {
+	ctx = EnsureOpenAITurnBudget(ctx, nil, "")
 	beginUpstreamResponseModelObservation(c)
+	beginGeminiImageOutputObservation(c)
 	// 上游透传账号直接转发，不走 OAuth token 刷新
 	if account.Type == AccountTypeUpstream {
 		return s.ForwardUpstream(ctx, c, account, body)
@@ -63,22 +66,22 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	mappedModel = applyThinkingModelSuffix(mappedModel, thinkingEnabled)
 	billingModel := mappedModel
 
-	// 获取 access_token
+	if err := rejectAntigravityClaudeOutputFormat(c, body, mappedModel); err != nil {
+		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	recordAntigravitySchemaConversion(c, body, mappedModel)
+
+	// Credential/configuration preparation can recover before any generation.
 	if s.tokenProvider == nil {
-		return nil, s.writeClaudeError(c, http.StatusBadGateway, "api_error", "Antigravity token provider not configured")
+		return nil, newCredentialPreparationFailure(errors.New("antigravity token provider not configured"))
 	}
 	accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"type":"authentication_error","message":"Failed to get upstream access token"},"type":"error"}`),
-		}
+		return nil, newCredentialPreparationFailure(err)
 	}
-
 	projectID, err := resolveAntigravityProjectID(account)
 	if err != nil {
-		_ = s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-		return nil, err
+		return nil, newAccountConfigurationFailure(err)
 	}
 
 	// 代理 URL
@@ -122,6 +125,10 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		sessionHash:     "",              // Forward 方法没有 sessionHash，由上层处理粘性会话清除
 	})
 	if err != nil {
+		var recovery *UpstreamFailoverError
+		if IsTurnBudgetError(err) || errors.As(err, &recovery) {
+			return nil, err
+		}
 		// 检查是否是账号切换信号，转换为 UpstreamFailoverError 让 Handler 切换账号
 		if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
 			return nil, &UpstreamFailoverError{
@@ -450,7 +457,10 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		streamRes, err := s.handleClaudeStreamingResponse(c, resp, startTime, originalModel)
 		if err != nil {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=stream_error error=%v", prefix, err)
-			return nil, err
+			if streamRes == nil {
+				return nil, err
+			}
+			return geminiPartialForwardResult(c, resp, streamRes.usage, streamRes.firstTokenMs, startTime, originalModel, billingModel, claudeReq.Stream, ""), err
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
@@ -460,7 +470,10 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		streamRes, err := s.handleClaudeStreamToNonStreaming(c, resp, startTime, originalModel)
 		if err != nil {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=stream_collect_error error=%v", prefix, err)
-			return nil, err
+			if streamRes == nil {
+				return nil, err
+			}
+			return geminiPartialForwardResult(c, resp, streamRes.usage, streamRes.firstTokenMs, startTime, originalModel, billingModel, claudeReq.Stream, ""), err
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs

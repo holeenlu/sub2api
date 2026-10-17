@@ -470,3 +470,23 @@ func TestForwardResponses_ChatFallbackRestoresReasoningFromCache(t *testing.T) {
 	// 明文 summary 的 item 被回写进缓存（自愈）。
 	require.Equal(t, "plain thinking", cache.snapshotSets()["item_plain"])
 }
+
+func TestForwardResponsesChatFallbackRejectsUnresolvedState(t *testing.T) {
+	for _, state := range []string{`"previous_response_id":"resp_prior"`, `"conversation":"conv_prior"`, `"prompt":{"id":"pmpt_saved"}`, `"context_management":[{"type":"compaction"}]`} {
+		t.Run(state, func(t *testing.T) {
+			// A nonempty delta is not a proof of complete conversation history.
+			body := []byte(`{"model":"gpt-5.4","input":"continue the original task",` + state + `}`)
+			c := newOpenAIRejectedFieldTestContext(body)
+			upstream := &httpUpstreamRecorder{}
+			svc := newOpenAIRejectedFieldTestService(upstream)
+			result, err := svc.Forward(context.Background(), c, forceChatResponsesFallbackAccount(), body)
+			var inputErr *openAIResponsesInputError
+			require.ErrorAs(t, err, &inputErr)
+			require.Equal(t, "unsupported_parameter", inputErr.Code)
+			require.Equal(t, http.StatusBadRequest, c.Writer.Status())
+			require.Nil(t, result)
+			require.Empty(t, upstream.requests)
+			require.Contains(t, inputErr.Message, "Chat Completions cannot resolve")
+		})
+	}
+}

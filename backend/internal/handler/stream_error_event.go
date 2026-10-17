@@ -42,6 +42,8 @@ type responsesFailedEvent struct {
 	Response       responsesFailedBody `json:"response"`
 }
 
+const opsGatewayResponsesFailedKey = "ops_gateway_responses_failed"
+
 // writeResponsesFailedSSE emits a `response.failed` SSE event in the OpenAI
 // Responses API protocol after the stream has already started.
 //
@@ -84,6 +86,9 @@ func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool
 		return true
 	}
 
+	// The capture middleware cannot infer whether serialized SSE came from the
+	// provider or this local mapper; retain that provenance before writing it.
+	c.Set(opsGatewayResponsesFailedKey, true)
 	if _, err := fmt.Fprintf(c.Writer, "event: response.failed\ndata: %s\n\n", payload); err != nil {
 		_ = c.Error(err)
 		return true

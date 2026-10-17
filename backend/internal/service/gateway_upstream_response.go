@@ -1025,6 +1025,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			if !ok {
 				// 上游完成，返回结果
 				if !sawTerminalEvent {
+					if !clientDisconnected && !c.Writer.Written() && !usage.hasObservedTokens() {
+						return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway, Cause: io.ErrUnexpectedEOF, Reason: "upstream_missing_terminal", RetryableOnSameAccount: true, SameAccountRetryMax: 1}
+					}
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
 				}
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil

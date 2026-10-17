@@ -352,6 +352,12 @@ func TestOpenAIStreamCapacityShedAfterOutputRewritesCodeForClient(t *testing.T) 
 	require.True(t, logSink.ContainsMessage("gateway.failover_suppressed_after_semantic_output"))
 	require.True(t, logSink.ContainsFieldValue("path", "native_sse"))
 	require.True(t, logSink.ContainsFieldValue("upstream_request_id", "rid-shed-after-output"))
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events := raw.([]*OpsUpstreamErrorEvent)
+	require.Equal(t, OpsUpstreamRetryStopped, events[len(events)-1].Kind)
+	require.Equal(t, string(OpenAIRetryStopDownstreamCommitted), events[len(events)-1].Reason)
+	require.Equal(t, http.StatusServiceUnavailable, LastOpsUpstreamAttempt(events).UpstreamStatusCode)
 }
 
 func TestOpenAIStreamProcessingFailureAfterOutputIsRecorded(t *testing.T) {
@@ -399,7 +405,10 @@ func TestOpenAIStreamProcessingFailureAfterOutputIsRecorded(t *testing.T) {
 			events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
 			require.True(t, ok)
 			require.NotEmpty(t, events)
-			event := events[len(events)-1]
+			require.Equal(t, OpsUpstreamRetryStopped, events[len(events)-1].Kind)
+			require.Equal(t, string(OpenAIRetryStopDownstreamCommitted), events[len(events)-1].Reason)
+			event := LastOpsUpstreamAttempt(events)
+			require.NotNil(t, event)
 			require.Equal(t, "stream_failed", event.Kind)
 			require.Equal(t, "rid-processing-failure", event.UpstreamRequestID)
 			require.Contains(t, event.Message, "An error occurred while processing your request")
@@ -482,4 +491,33 @@ func TestCodexOutboundVersionHasSingleSource(t *testing.T) {
 	require.GreaterOrEqual(t, CompareVersions(codexCLIVersion, codexUpstreamMinVersion), 0,
 		"codexCLIVersion=%q 不得低于上游最低门槛 %q", codexCLIVersion, codexUpstreamMinVersion,
 	)
+}
+
+// ChatGPT reports a response-protection outage as a bare error frame and ends
+// the stream with nothing else. The gateway used to synthesize a
+// response.failed for the client instead of failing over, although the same
+// error sent as response.failed did fail over.
+func TestOpenAIStreamResponseProtectionBareErrorFailsOver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	bareError := []string{
+		"event: error",
+		`data: {"type":"error","error":{"code":"upstream_error","message":"response protection is unavailable","type":"internal_error"}}`,
+		"",
+	}
+	for _, keepalive := range []int{0, 10} {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+		svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize, StreamKeepaliveInterval: keepalive}}}
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(strings.Join(bareError, "\n"))),
+			Header:     http.Header{"X-Request-Id": []string{"rid-protection"}},
+		}
+
+		_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Name: "acc"}, time.Now(), "model", "model")
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr, "keepalive=%d", keepalive)
+		require.Empty(t, rec.Body.String(), "keepalive=%d", keepalive)
+	}
 }

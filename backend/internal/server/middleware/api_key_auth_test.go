@@ -50,6 +50,37 @@ func TestAPIKeyAuthRejectsOversizedCredentialsBeforeLookup(t *testing.T) {
 	require.Zero(t, calls.Load())
 }
 
+func TestValidateAPIKeyContinuationRechecksAccess(t *testing.T) {
+	for _, scenario := range []string{"active", "disabled", "expired", "user disabled", "group disabled", "quota exhausted"} {
+		t.Run(scenario, func(t *testing.T) {
+			group := &service.Group{ID: 1, Status: service.StatusActive, Hydrated: true}
+			key := &service.APIKey{ID: 1, Status: service.StatusActive, GroupID: &group.ID, Group: group, User: &service.User{ID: 1, Status: service.StatusActive}}
+			switch scenario {
+			case "disabled":
+				key.Status = service.StatusDisabled
+			case "expired":
+				expired := time.Now().Add(-time.Hour)
+				key.ExpiresAt = &expired
+			case "user disabled":
+				key.User.Status = service.StatusDisabled
+			case "group disabled":
+				group.Status = service.StatusDisabled
+			case "quota exhausted":
+				key.Quota = 1
+				key.QuotaUsed = 1
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			err := ValidateAPIKeyContinuation(c, key, &config.Config{})
+			if scenario == "active" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}
+
 func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

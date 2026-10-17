@@ -582,7 +582,9 @@ func openAIWSExtractNormalizedInputSequence(payload []byte) ([]json.RawMessage, 
 		return []json.RawMessage{openAIWSRawMessageFromResult(payload, inputValue)}, true, nil
 	}
 	if inputValue.Type == gjson.String {
-		encoded, _ := json.Marshal(inputValue.String())
+		// A scalar input is a user message. Array replay requires an input
+		// item, not a bare JSON string beside the subsequent output items.
+		encoded, _ := json.Marshal(map[string]any{"role": "user", "content": inputValue.String()})
 		return []json.RawMessage{encoded}, true, nil
 	}
 	return []json.RawMessage{openAIWSRawMessageFromResult(payload, inputValue)}, true, nil
@@ -811,9 +813,42 @@ func buildOpenAIWSCurrentTurnRetryPayload(
 	fullInput []json.RawMessage,
 	fullInputExists bool,
 	originalModel string,
+	sameAccount ...bool,
 ) ([]byte, bool, error) {
 	if !fullInputExists {
 		return nil, false, nil
+	}
+	bytes := len(payload)
+	for _, raw := range fullInput {
+		bytes += len(raw)
+		if bytes > int(openAIWSMessageReadLimitBytes) {
+			return nil, false, nil
+		}
+		item := gjson.ParseBytes(raw)
+		if !gjson.ValidBytes(raw) {
+			return nil, false, nil
+		}
+		typ := item.Get("type").String()
+		encrypted := item.Get("encrypted_content")
+		if len(sameAccount) == 0 || !sameAccount[0] {
+			if openAIWSNonPortableBlocker(item, 0) != "" {
+				return nil, false, nil
+			}
+		}
+		if typ == "item_reference" ||
+			((typ == "reasoning" || typ == "compaction" || typ == "compaction_summary") && (encrypted.Type != gjson.String || strings.TrimSpace(encrypted.String()) == "")) {
+			return nil, false, nil
+		}
+		// Uploaded files belong to an upstream account; possession of their
+		// identifiers does not make a cross-account replay self-contained.
+		if item.Get("file_id").Exists() && (len(sameAccount) == 0 || !sameAccount[0]) {
+			return nil, false, nil
+		}
+		for _, content := range item.Get("content").Array() {
+			if content.Get("file_id").Exists() && (len(sameAccount) == 0 || !sameAccount[0]) {
+				return nil, false, nil
+			}
+		}
 	}
 	retryPayload, err := setOpenAIWSPayloadInputSequence(payload, fullInput, true)
 	if err != nil {
@@ -830,7 +865,252 @@ func buildOpenAIWSCurrentTurnRetryPayload(
 	if coverage.HasFunctionCallOutput && !coverage.ContextCoversAllCallIDs {
 		return nil, false, nil
 	}
+	if (len(sameAccount) == 0 || !sameAccount[0]) && !OpenAIResponsesAccountReplayAllowed(retryPayload) {
+		return nil, false, nil
+	}
 	return retryPayload, true, nil
+}
+
+// OpenAIResponsesAccountReplayAllowed checks the complete request for state
+// owned by an upstream credential. It does not restrict retries on that same
+// account, and does not infer ownership from a resource ID's spelling.
+func OpenAIResponsesAccountReplayAllowed(payload []byte) bool {
+	return openAIResponsesAccountReplayBlocker(payload) == ""
+}
+
+// Fixed structural reasons share the ownership decision; never log resource
+// identifiers, encrypted content or arbitrary request fields.
+func openAIResponsesAccountReplayBlocker(payload []byte) string {
+	if !gjson.ValidBytes(payload) {
+		return "malformed_request"
+	}
+	root := gjson.ParseBytes(payload)
+	if !root.IsObject() {
+		return "malformed_request"
+	}
+	blocker := ""
+	root.ForEach(func(key, value gjson.Result) bool {
+		switch key.String() {
+		case "previous_response_id", "conversation", "prompt":
+			if value.Type != gjson.Null && !(value.Type == gjson.String && strings.TrimSpace(value.String()) == "") {
+				blocker = key.String()
+			}
+		}
+		return blocker == ""
+	})
+	if blocker != "" {
+		return blocker
+	}
+	return openAIWSNonPortableBlocker(root, 0)
+}
+
+// Scan wire values without decoding or copying large message/attachment bodies.
+func openAIWSNonPortableBlocker(value gjson.Result, depth int) string {
+	if depth > 64 {
+		return "context_depth"
+	}
+	if !value.IsObject() && !value.IsArray() {
+		return ""
+	}
+	if value.IsObject() && value.Get("type").String() == "item_reference" {
+		return "item_reference"
+	}
+	blocker := ""
+	value.ForEach(func(key, child gjson.Result) bool {
+		switch key.String() {
+		case "type":
+			if child.String() == "item_reference" {
+				blocker = "item_reference"
+			}
+		case "encrypted_content", "file_id", "vector_store_id", "container_id":
+			if child.Type == gjson.String && strings.TrimSpace(child.String()) != "" {
+				blocker = key.String()
+			}
+		case "vector_store_ids":
+			if child.IsArray() && len(child.Array()) > 0 {
+				blocker = "vector_store_ids"
+			}
+		}
+		if blocker == "" {
+			blocker = openAIWSNonPortableBlocker(child, depth+1)
+		}
+		return blocker == ""
+	})
+	return blocker
+}
+
+// Transport failure after a write does not prove the provider did no work.
+// Before output is delivered, function/custom calls have not run on the client.
+// Read-only hosted searches may be replayed at the cost of repeated search usage;
+// other hosted tools and unknown tool kinds may already have side effects.
+func openAIWSUncertainExecutionReplaySafe(payload []byte) bool {
+	return openAIWSUncertainExecutionReplayBlocker(payload) == ""
+}
+
+const openAIReplayBlockerContextKey = "openai_replay_blocker"
+const openAIAccountReplayBlockerContextKey = "openai_account_replay_blocker"
+const OpenAIAccountReplayAllowedContextKey = "openai_account_replay_allowed"
+
+func setOpenAIReplaySafety(c *gin.Context, body []byte) {
+	if c == nil {
+		return
+	}
+	blocker := openAIWSUncertainExecutionReplayBlocker(body)
+	c.Set("openai_uncertain_replay_safe", blocker == "")
+	c.Set(openAIReplayBlockerContextKey, blocker)
+	accountBlocker := openAIResponsesAccountReplayBlocker(body)
+	c.Set(openAIAccountReplayBlockerContextKey, accountBlocker)
+	c.Set(OpenAIAccountReplayAllowedContextKey, accountBlocker == "")
+}
+
+// Return a bounded, fixed diagnostic code, never tool names, descriptions or
+// arguments. Namespace membership does not change where a function is executed.
+func openAIWSUncertainExecutionReplayBlocker(payload []byte, completeHistory ...[]json.RawMessage) string {
+	if !gjson.ValidBytes(payload) {
+		return "malformed_request"
+	}
+	root := gjson.ParseBytes(payload)
+	if !root.IsObject() {
+		return "malformed_request"
+	}
+	choiceCount := 0
+	root.ForEach(func(key, value gjson.Result) bool {
+		if key.String() == "tool_choice" {
+			choiceCount++
+		}
+		return true
+	})
+	if choiceCount > 1 {
+		return "ambiguous_tool_choice"
+	}
+	if root.Get("tool_choice").String() == "none" {
+		return ""
+	}
+	var checkTools func(gjson.Result, int) string
+	checkTools = func(tools gjson.Result, depth int) string {
+		if depth > 16 {
+			return "namespace_depth"
+		}
+		if !tools.IsArray() {
+			return "malformed_tools"
+		}
+		blocker := ""
+		tools.ForEach(func(_, tool gjson.Result) bool {
+			if !tool.IsObject() {
+				blocker = "malformed_tools"
+				return false
+			}
+			// Ambiguous execution fields cannot establish replay safety. Other
+			// tool properties (names, schemas, arguments) are never logged.
+			seen := map[string]bool{}
+			tool.ForEach(func(key, _ gjson.Result) bool {
+				switch field := key.String(); field {
+				case "type", "execution", "tools":
+					if seen[field] {
+						blocker = "malformed_tools"
+					}
+					seen[field] = true
+				}
+				return blocker == ""
+			})
+			if blocker != "" {
+				return false
+			}
+			switch kind := tool.Get("type").String(); kind {
+			case "function", "custom", "web_search", "file_search",
+				"web_search_preview", "web_search_preview_2025_03_11":
+			case "namespace":
+				blocker = checkTools(tool.Get("tools"), depth+1)
+			case "tool_search":
+				// Discovery does not itself execute a discovered tool. Both
+				// server and client discovery still require checking its inventory.
+				switch tool.Get("execution").String() {
+				case "", "server", "client":
+				default:
+					blocker = "tool_search_execution"
+				}
+			case "mcp", "computer", "computer_use", "computer_use_preview", "code_interpreter",
+				"image_generation", "local_shell", "shell":
+				blocker = kind
+			default:
+				blocker = "unknown_tool"
+			}
+			return blocker == ""
+		})
+		return blocker
+	}
+	checkItem := func(item gjson.Result) string {
+		if item.Type == gjson.String {
+			return "" // textual input cannot introduce executable tools
+		}
+		if !item.IsObject() {
+			return "malformed_tool_context"
+		}
+		types := 0
+		item.ForEach(func(key, _ gjson.Result) bool {
+			if key.String() == "type" {
+				types++
+			}
+			return true
+		})
+		if types > 1 {
+			return "malformed_tool_context"
+		}
+		switch item.Get("type").String() {
+		case "additional_tools", "tool_search_output":
+			blocker, found := "", false
+			item.ForEach(func(key, value gjson.Result) bool {
+				if key.String() == "tools" {
+					found = true
+					blocker = checkTools(value, 0)
+				}
+				return blocker == ""
+			})
+			if !found {
+				return "malformed_tools"
+			}
+			return blocker
+		case "item_reference", "compaction", "compaction_summary":
+			return "unresolved_tool_context"
+		}
+		return ""
+	}
+	blocker := ""
+	// Walk every wire occurrence: a duplicate tools/input field must not hide
+	// a later MCP definition from a parser that would otherwise read only first.
+	root.ForEach(func(key, value gjson.Result) bool {
+		switch key.String() {
+		case "tools":
+			if value.Type != gjson.Null {
+				blocker = checkTools(value, 0)
+			}
+		case "input":
+			if value.IsArray() {
+				value.ForEach(func(_, item gjson.Result) bool {
+					blocker = checkItem(item)
+					return blocker == ""
+				})
+			} else if value.IsObject() {
+				blocker = checkItem(value)
+			}
+		case "previous_response_id", "conversation", "prompt":
+			if key.String() == "previous_response_id" && len(completeHistory) > 0 {
+				break
+			}
+			if value.Type != gjson.Null && value.Raw != `""` {
+				blocker = "unresolved_tool_context"
+			}
+		}
+		return blocker == ""
+	})
+	if blocker == "" && len(completeHistory) > 0 {
+		for _, raw := range completeHistory[0] {
+			if blocker = checkItem(gjson.ParseBytes(raw)); blocker != "" {
+				break
+			}
+		}
+	}
+	return blocker
 }
 
 func shouldKeepIngressPreviousResponseID(

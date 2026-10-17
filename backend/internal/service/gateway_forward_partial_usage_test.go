@@ -261,45 +261,60 @@ func TestGatewayService_Forward_PreOutputSSEOverloadedErrorUsesSemantic529(t *te
 	require.Empty(t, rec.Body.String(), "pre-output overload must remain eligible for account failover")
 }
 
-func TestGatewayService_Forward_PostOutputSSEOverloadedErrorKeepsExistingStatus(t *testing.T) {
+func TestGatewayService_Forward_PostOutputSSEOverloadedErrorUsesSemantic529(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	for name, prefix := range map[string]string{
+		"message_start": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n",
+		"ping":          "event: ping\ndata: {\"type\":\"ping\"}\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
-	body := []byte(`{"model":"claude-3-5-sonnet-latest","stream":true,"messages":[{"role":"user","content":"hello"}]}`)
-	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
-	require.NoError(t, err)
+			body := []byte(`{"model":"claude-3-5-sonnet-latest","stream":true,"messages":[{"role":"user","content":"hello"}]}`)
+			parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+			require.NoError(t, err)
 
-	const errorJSON = `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`
-	fixture := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n" +
-		"event: error\ndata: " + errorJSON + "\n\n"
-	upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body:       io.NopCloser(strings.NewReader(fixture)),
-	}}
-	repo := &gatewayForwardErrorPolicyRepoStub{}
-	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
-	svc := &GatewayService{
-		cfg:                  cfg,
-		responseHeaderFilter: compileResponseHeaderFilter(cfg),
-		httpUpstream:         upstream,
-		rateLimitService:     NewRateLimitService(repo, nil, cfg, nil, nil),
-		deferredService:      &DeferredService{},
+			const errorJSON = `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`
+			fixture := prefix + "event: error\ndata: " + errorJSON + "\n\n"
+			upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(fixture)),
+			}}
+			repo := &gatewayForwardErrorPolicyRepoStub{}
+			cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+			svc := &GatewayService{
+				cfg:                  cfg,
+				responseHeaderFilter: compileResponseHeaderFilter(cfg),
+				httpUpstream:         upstream,
+				rateLimitService:     NewRateLimitService(repo, nil, cfg, nil, nil),
+				deferredService:      &DeferredService{},
+			}
+
+			result, err := svc.Forward(context.Background(), c, newAnthropicOAuthAccountForPartialUsageTest(), parsed)
+			require.Error(t, err)
+			require.Nil(t, result)
+
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, 529, failoverErr.StatusCode)
+			require.JSONEq(t, errorJSON, string(failoverErr.ResponseBody))
+			require.Zero(t, repo.tempCalls)
+			require.Zero(t, repo.overloadCalls, "classification must not change post-output cooldown policy")
+			require.Contains(t, rec.Body.String(), prefix)
+			require.Greater(t, c.Writer.Size(), 0, "post-output errors must still trigger the no-replay guard")
+			events, ok := c.Get(OpsUpstreamErrorsKey)
+			require.True(t, ok)
+			upstreamErrors := events.([]*OpsUpstreamErrorEvent)
+			require.Len(t, upstreamErrors, 1)
+			require.Equal(t, 529, upstreamErrors[0].UpstreamStatusCode)
+			require.Equal(t, "stream_error", upstreamErrors[0].Kind)
+			require.Equal(t, "Overloaded", upstreamErrors[0].Message)
+		})
 	}
-
-	result, err := svc.Forward(context.Background(), c, newAnthropicOAuthAccountForPartialUsageTest(), parsed)
-	require.Error(t, err)
-	require.Nil(t, result)
-
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusForbidden, failoverErr.StatusCode)
-	require.JSONEq(t, errorJSON, string(failoverErr.ResponseBody))
-	require.Zero(t, repo.tempCalls)
-	require.Contains(t, rec.Body.String(), "message_start")
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamMissingTerminalPreservesPartialUsage(t *testing.T) {
