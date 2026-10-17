@@ -109,7 +109,7 @@ func (m *mockUserRepo) GetByID(ctx context.Context, _ int64) (*User, error) {
 	return &User{}, nil
 }
 func (m *mockUserRepo) GetByEmail(context.Context, string) (*User, error) { return &User{}, nil }
-func (m *mockUserRepo) GetFirstAdmin(context.Context) (*User, error)      { return &User{}, nil }
+func (m *mockUserRepo) GetFirstSuperAdmin(context.Context) (*User, error) { return &User{}, nil }
 func (m *mockUserRepo) Update(ctx context.Context, user *User, fields UserUpdateFields) error {
 	m.updateCalls++
 	m.updateFields = append(m.updateFields, fields)

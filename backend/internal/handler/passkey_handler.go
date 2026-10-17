@@ -232,7 +232,7 @@ func (h *PasskeyHandler) ensureBackendModeAllowsUser(ctx context.Context, user *
 	if err := ensureLoginUserActive(user); err != nil {
 		return err
 	}
-	if h.settingSvc == nil || !h.settingSvc.IsBackendModeEnabled(ctx) || user.IsAdmin() {
+	if h.settingSvc == nil || !h.settingSvc.IsBackendModeEnabled(ctx) || user.IsStaff() {
 		return nil
 	}
 	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "Backend mode is active. Only admin login is allowed.")

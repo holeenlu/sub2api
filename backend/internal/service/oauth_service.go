@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"github.com/redis/go-redis/v9"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
@@ -44,14 +48,20 @@ type ClaudeOAuthClient interface {
 
 // OAuthService handles OAuth authentication flows
 type OAuthService struct {
+	rdb          *redis.Client
 	sessionStore *oauth.SessionStore
 	proxyRepo    ProxyRepository
 	oauthClient  ClaudeOAuthClient
 }
 
 // NewOAuthService creates a new OAuth service
-func NewOAuthService(proxyRepo ProxyRepository, oauthClient ClaudeOAuthClient) *OAuthService {
+func NewOAuthService(proxyRepo ProxyRepository, oauthClient ClaudeOAuthClient, shared ...*redis.Client) *OAuthService {
+	var rdb *redis.Client
+	if len(shared) > 0 {
+		rdb = shared[0]
+	}
 	return &OAuthService{
+		rdb:          rdb,
 		sessionStore: oauth.NewSessionStore(),
 		proxyRepo:    proxyRepo,
 		oauthClient:  oauthClient,
@@ -66,6 +76,9 @@ type GenerateAuthURLResult struct {
 
 // GenerateAuthURL generates an OAuth authorization URL with full scope
 func (s *OAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64) (*GenerateAuthURLResult, error) {
+	if _, scoped := authz.VendorScopeFromContext(ctx); scoped {
+		return nil, authz.ErrAuthorizationExpired
+	}
 	return s.generateAuthURLWithScope(ctx, oauth.ScopeOAuth, proxyID)
 }
 
@@ -106,13 +119,20 @@ func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope strin
 
 	// Store session
 	session := &oauth.OAuthSession{
-		State:        state,
-		CodeVerifier: codeVerifier,
-		Scope:        scope,
-		ProxyURL:     proxyURL,
-		CreatedAt:    time.Now(),
+		Authorization: authz.CaptureLease(ctx),
+		State:         state,
+		CodeVerifier:  codeVerifier,
+		Scope:         scope,
+		ProxyURL:      proxyURL,
+		CreatedAt:     time.Now(),
 	}
-	s.sessionStore.Set(sessionID, session)
+	if s.rdb != nil {
+		if err := oauth.PutSharedSession(ctx, s.rdb, "oauth:anthropic:"+sessionID, session, oauth.SessionTTL); err != nil {
+			return nil, err
+		}
+	} else {
+		s.sessionStore.Set(sessionID, session)
+	}
 
 	// Build authorization URL
 	authURL := oauth.BuildAuthorizationURL(state, codeChallenge, scope)
@@ -145,12 +165,32 @@ type TokenInfo struct {
 
 // ExchangeCode exchanges authorization code for tokens
 func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInput) (*TokenInfo, error) {
+	if _, scoped := authz.VendorScopeFromContext(ctx); scoped {
+		return nil, authz.ErrAuthorizationExpired
+	}
+	if input == nil || input.SessionID == "" || strings.TrimSpace(input.Code) == "" {
+		return nil, fmt.Errorf("invalid OAuth exchange input")
+	}
 	// Get session
 	session, ok := s.sessionStore.Get(input.SessionID)
+	var raw string
+	if s.rdb != nil {
+		var err error
+		session, raw, err = oauth.ReadSharedSession[oauth.OAuthSession](ctx, s.rdb, "oauth:anthropic:"+input.SessionID)
+		ok = err == nil
+	}
 	if !ok {
 		return nil, fmt.Errorf("session not found or expired")
 	}
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
+	}
 
+	if code, state, hasState := strings.Cut(strings.TrimSpace(input.Code), "#"); hasState {
+		if code == "" || subtle.ConstantTimeCompare([]byte(state), []byte(session.State)) != 1 {
+			return nil, fmt.Errorf("invalid oauth state")
+		}
+	}
 	// Get proxy URL
 	proxyURL := session.ProxyURL
 	if input.ProxyID != nil {
@@ -163,9 +203,21 @@ func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInpu
 	// Determine if this is a setup token (scope is inference only)
 	isSetupToken := session.Scope == oauth.ScopeInference
 
+	// Atomically claim before the remote side effect; failures are not replayable.
+	if s.rdb != nil {
+		if _, err := oauth.CompareSwapSession(ctx, s.rdb, "oauth:anthropic:"+input.SessionID, raw, nil); err != nil {
+			return nil, oauth.ErrSessionConflict
+		}
+	} else if !s.sessionStore.Consume(input.SessionID, session) {
+		return nil, oauth.ErrSessionConflict
+	}
 	// Exchange code for token
 	tokenInfo, err := s.exchangeCodeForToken(ctx, input.Code, session.CodeVerifier, session.State, proxyURL, isSetupToken)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
 		return nil, err
 	}
 

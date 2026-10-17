@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,7 @@ type AuditLog struct {
 	ActorUserID      *int64         `json:"actor_user_id,omitempty"`
 	ActorEmail       string         `json:"actor_email"`
 	ActorRole        string         `json:"actor_role"`
+	Visibility       string         `json:"visibility"`
 	AuthMethod       string         `json:"auth_method"`
 	CredentialMasked string         `json:"credential_masked"`
 	Action           string         `json:"action"`
@@ -58,6 +60,29 @@ type AuditLog struct {
 	StatusCode       int            `json:"status_code"`
 	LatencyMs        int64          `json:"latency_ms"`
 	Extra            map[string]any `json:"extra,omitempty"`
+}
+
+// AuditLogScope is server-owned and cannot be populated by request filters.
+type AuditLogScope uint8
+
+const (
+	AuditScopeNone AuditLogScope = iota
+	AuditScopeStaff
+	AuditScopeAll
+)
+
+func AuditScopeFromContext(ctx context.Context) AuditLogScope {
+	actor, ok := authz.FromContext(ctx)
+	if !ok {
+		return AuditScopeNone
+	}
+	if actor.Role == authz.SuperAdmin {
+		return AuditScopeAll
+	}
+	if actor.Can("audit.read") {
+		return AuditScopeStaff
+	}
+	return AuditScopeNone
 }
 
 // AuditLogFilter 审计日志列表查询条件。
@@ -93,9 +118,9 @@ type AuditLogRepository interface {
 	BatchInsert(ctx context.Context, logs []*AuditLog) (int64, error)
 	// Insert 同步写入单条（用于清空留痕等必须落库的记录）。
 	Insert(ctx context.Context, log *AuditLog) error
-	List(ctx context.Context, filter *AuditLogFilter) (*AuditLogList, error)
-	GetByID(ctx context.Context, id int64) (*AuditLog, error)
-	Count(ctx context.Context) (int64, error)
+	List(ctx context.Context, scope AuditLogScope, filter *AuditLogFilter) (*AuditLogList, error)
+	GetByID(ctx context.Context, scope AuditLogScope, id int64) (*AuditLog, error)
+	Count(ctx context.Context, scope AuditLogScope) (int64, error)
 	// TruncateAll 全量清空（TRUNCATE），返回前需调用方自行 Count 记录行数。
 	TruncateAll(ctx context.Context) error
 	// DeleteBefore 按保留期批量删除，返回本批删除行数（幂等，可多实例并发）。
