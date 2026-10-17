@@ -2,7 +2,7 @@
 
 ```http
 POST /v1/chat/completions
-Authorization: Bearer $KDAN_API_KEY
+Authorization: Bearer $API_KEY
 Content-Type: application/json
 ```
 
@@ -31,8 +31,8 @@ Content-Type: application/json
 ## 最小請求
 
 ```bash
-curl "$KDAN_BASE_URL/v1/chat/completions" \
-  -H "Authorization: Bearer $KDAN_API_KEY" \
+curl "$API_BASE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "YOUR_MODEL_ID",

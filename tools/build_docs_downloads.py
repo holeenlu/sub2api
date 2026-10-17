@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build reproducible KDAN documentation downloads; --check rejects stale archives."""
+"""Build reproducible TapModels downloads; --check rejects stale archives."""
 
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ import zipfile
 DOWNLOADS = Path(__file__).resolve().parents[1] / "frontend/public/downloads"
 SKILL_FILES = ("SKILL.md", "agents/openai.yaml", "requirements.txt", "scripts/generate.py")
 PACKAGES = {
-    "gpt-image-flare": ("kdan-image-skills/gpt-image-flare", SKILL_FILES),
-    "gpt-image-sunburst": ("kdan-image-skills/gpt-image-sunburst", SKILL_FILES),
-    "kdan-codex-session-repair": (
-        "kdan-codex-session-repair",
-        ("README.md", "repair_sessions.py", "resume_sessions.py", "repair-sessions.sh", "RepairSessions.ps1"),
+    "gpt-image-flare": ("tapmodels-image-skills/gpt-image-flare", SKILL_FILES),
+    "gpt-image-sunburst": ("tapmodels-image-skills/gpt-image-sunburst", SKILL_FILES),
+    "tapmodels-codex-session-repair": (
+        "tapmodels-session-repair",
+        ("README.md", "repair_sessions.py", "resume_sessions.py", "repair-sessions.sh", "Repair-TapModelsSessions.ps1"),
     ),
-    "kdan-claude-session-recovery": (
-        "kdan-claude-session-recovery",
+    "tapmodels-claude-session-recovery": (
+        "tapmodels-claude-session-recovery",
         ("README.md", "find_claude_sessions.py", "find-claude-sessions.sh", "Find-ClaudeSessions.ps1"),
     ),
 }

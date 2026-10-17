@@ -1,5 +1,5 @@
 # =============================================================================
-# Docker Ignore File for KDAN
+# Docker Ignore File for TapModels
 # =============================================================================
 
 # Git
@@ -67,8 +67,8 @@ temp/
 
 # Deploy files (not needed in image)
 deploy/install.sh
-deploy/kdan.service
-deploy/kdan-datamanagementd.service
+deploy/tapmodels.service
+deploy/tapmodels-datamanagementd.service
 deploy/data/
 deploy/postgres_data/
 deploy/redis_data/
