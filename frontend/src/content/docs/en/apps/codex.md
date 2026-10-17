@@ -11,12 +11,11 @@ This guide covers local clients that read Codex configuration. Remote hosts, WSL
 ### Online install (macOS / Linux)
 
 ```bash
-export KDAN_BASE_URL="{{API_ROOT}}"
-export KDAN_API_KEY="YOUR_KDAN_API_KEY"
-curl -fsSL {{API_ROOT}}/install/codex.sh | bash
+export TAPMODELS_API_KEY="YOUR_TAPMODELS_API_KEY"
+curl -fsSL https://tapmodels.ai/install/codex.sh | bash
 ```
 
-The script backs up `config.toml`, writes the Responses provider, and sets mode `600`. Review it before piping into a shell; never put a key in shell history or source control. `KDAN_BASE_URL` is required and `MODEL_ID` can override the example model.
+The script backs up `config.toml`, writes the Responses provider, and sets mode `600`. Review it before piping into a shell; never put a key in shell history or source control. Set `TAPMODELS_BASE_URL` for a custom gateway and `TAPMODELS_MODEL` to override the example model.
 
 This screenshot shows the project's OpenAI-group API key configuration with invalid sample credentials and an example URL. Copy your own group configuration. The [console guide](/apps/console) also shows Legacy mode and the steps; click images to view full size.
 
@@ -27,14 +26,14 @@ Install the CLI using the [official instructions](https://developers.openai.com/
 macOS / Linux:
 
 ```bash
-export KDAN_API_KEY="your API key"
+export TAPMODELS_API_KEY="your TapModels API key"
 mkdir -p "${CODEX_HOME:-$HOME/.codex}"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:KDAN_API_KEY="your API key"
+$env:TAPMODELS_API_KEY="your TapModels API key"
 $codexConfigDir = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
 New-Item -ItemType Directory -Force $codexConfigDir | Out-Null
 notepad (Join-Path $codexConfigDir 'config.toml')
@@ -43,13 +42,13 @@ notepad (Join-Path $codexConfigDir 'config.toml')
 Merge this routed-group example into `~/.codex/config.toml`, or your `CODEX_HOME` directory. It applies to Anthropic, Gemini, Grok, and other groups routed into Codex through Responses. Top-level fields must precede tables and each provider table must appear only once. Copy the current model and `base_url` from the modal rather than inferring them from this example:
 
 ```toml
-model_provider = "gateway"
+model_provider = "tapmodels"
 model = "gpt-6-astra"
 
-[model_providers.gateway]
-name = "KDAN"
+[model_providers.tapmodels]
+name = "TapModels"
 base_url = "{{API_ROOT}}/v1"
-env_key = "KDAN_API_KEY"
+env_key = "TAPMODELS_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false
@@ -67,7 +66,7 @@ A desktop app opened from the Dock or Start menu does not automatically inherit 
 "/Applications/Codex.app/Contents/MacOS/Codex"
 ```
 
-Check the actual installation path first. On Windows, invoke the installed Codex `.exe` from the PowerShell that contains `$env:KDAN_API_KEY`.
+Check the actual installation path first. On Windows, invoke the installed Codex `.exe` from the PowerShell that contains `$env:TAPMODELS_API_KEY`.
 
 For an icon launch, select **API key** in the OpenAI group's Use key modal and download its complete `config.toml`. This stores a secret in the file; restrict access and never commit it. The Zhipu Codex configuration embeds its API key in `experimental_bearer_token`, so the downloaded `config.toml` works on its own; for other groups, keep the generated `env_key` configuration and do not add a second authentication field yourself.
 
@@ -100,11 +99,11 @@ For `Hosted tool 'web_search' requires authorization and metering ... rustponses
 
 ## Verify and troubleshoot
 
-Send a simple message in a new task and match its timestamp, key and model in KDAN usage records. Then resume existing work. See [Codex session recovery](/apps/session-recovery-codex) if history disappears.
+Send a simple message in a new task and match its timestamp, key and model in TapModels usage records. Then resume existing work. See [Codex session recovery](/apps/session-recovery-codex) if history disappears.
 
 | Symptom | Check |
 | --- | --- |
-| 401 / KDAN_API_KEY_REQUIRED | Key variable in the actual process, or token in the active provider |
+| 401 / API_KEY_REQUIRED | Key variable in the actual process, or token in the active provider |
 | Unknown model | Key group, exact ID, stale catalog |
 | Settings ignored | CODEX_HOME, selected profile, project overrides, remote host |
 | No Speed/Fast control | Catalog capabilities; a billing multiplier does not create a client control |
