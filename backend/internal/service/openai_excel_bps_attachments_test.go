@@ -559,7 +559,7 @@ func TestExcelBPSFreshAttachmentsAcrossTurns(t *testing.T) {
 					SetOpenAIClientTransport(c, OpenAIClientTransportWS)
 					_, err = svc.proxyOpenAIWSExcelBPSTurn(t.Context(), c, account, body, "gpt-6-astra", func([]byte) error { return nil })
 				case "chat-stream":
-					_, err = svc.forwardExcelBPSCompatibility(t.Context(), c, account, body, "", "gpt-6-astra", false)
+					_, err = svc.forwardOpenAIGrantCompatibility(t.Context(), c, account, body, "", "gpt-6-astra", false)
 				default:
 					_, err = svc.Forward(t.Context(), c, account, body)
 				}

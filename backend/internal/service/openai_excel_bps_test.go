@@ -384,7 +384,7 @@ func TestExcelBPSRequestNumbersRemainExactAcrossIngress(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 			var err error
 			if ingress == "chat" || ingress == "messages" {
-				_, err = svc.forwardExcelBPSCompatibility(context.Background(), c, excelAccount(), body, "", "gpt-5.6-sol", ingress == "messages")
+				_, err = svc.forwardOpenAIGrantCompatibility(context.Background(), c, excelAccount(), body, "", "gpt-5.6-sol", ingress == "messages")
 			} else {
 				_, err = svc.Forward(context.Background(), c, excelAccount(), body)
 			}

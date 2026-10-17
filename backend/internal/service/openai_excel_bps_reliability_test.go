@@ -304,7 +304,7 @@ func TestExcelBPSFirstOutputDeadlineCoversHeadersAndMetadata(t *testing.T) {
 					result, err = svc.proxyOpenAIWSExcelBPSTurn(ctx, c, excelAccount(), body, "gpt-6-astra", func(raw []byte) error { events.Write(raw); return nil })
 				case strings.HasPrefix(protocol, "chat"):
 					body = []byte(fmt.Sprintf(`{"model":"gpt-6-astra","messages":[{"role":"user","content":"hello"}],"stream":%t}`, stream))
-					result, err = svc.forwardExcelBPSCompatibility(ctx, c, excelAccount(), body, "", "gpt-6-astra", false)
+					result, err = svc.forwardOpenAIGrantCompatibility(ctx, c, excelAccount(), body, "", "gpt-6-astra", false)
 				default:
 					result, err = svc.Forward(ctx, c, excelAccount(), body)
 				}

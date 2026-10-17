@@ -10,13 +10,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// normalizeOpenAIResponsesLegacyIngress accepts the Chat Completions-shaped
-// payloads that a few Responses clients still emit. Native Responses input is
-// always authoritative because this path has no separate full-replay attempt.
-func normalizeOpenAIResponsesLegacyIngress(body []byte) ([]byte, bool, error) {
-	return normalizeOpenAIResponsesLegacyIngressWithConfig(nil, body)
-}
-
 func normalizeOpenAIResponsesLegacyIngressWithConfig(cfg *config.Config, body []byte) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
@@ -92,7 +85,7 @@ func normalizeOpenAIResponsesLegacyIngressWithConfig(cfg *config.Config, body []
 	if err != nil {
 		return body, false, fmt.Errorf("serialize legacy Responses ingress: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 type convertedLegacyResponsesMessages struct {

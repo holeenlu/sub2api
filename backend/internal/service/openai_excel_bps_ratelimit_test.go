@@ -130,7 +130,7 @@ func TestExcelBPS429NativeFallbackAcrossTransports(t *testing.T) {
 						})
 					case strings.HasPrefix(protocol, "chat"), strings.HasPrefix(protocol, "messages"):
 						body = []byte(fmt.Sprintf(`{"model":"gpt-6-astra","stream":%t,"max_tokens":100,"messages":[{"role":"user","content":"hello"}]}`, stream))
-						result, err = svc.forwardExcelBPSCompatibility(ctx, c, account, body, "", "gpt-6-astra", strings.HasPrefix(protocol, "messages"))
+						result, err = svc.forwardOpenAIGrantCompatibility(ctx, c, account, body, "", "gpt-6-astra", strings.HasPrefix(protocol, "messages"))
 					default:
 						result, err = svc.Forward(ctx, c, account, body)
 					}

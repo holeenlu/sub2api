@@ -630,7 +630,7 @@ func TestExcelBPSToolArgumentCorrectionAcrossTransports(t *testing.T) {
 					SetOpenAIClientTransport(c, OpenAIClientTransportWS)
 					result, err = svc.proxyOpenAIWSExcelBPSTurn(t.Context(), c, account, body, "gpt-6-astra", func(raw []byte) error { events.Write(raw); return nil })
 				case chat:
-					result, err = svc.forwardExcelBPSCompatibility(t.Context(), c, account, body, "", "gpt-6-astra", false)
+					result, err = svc.forwardOpenAIGrantCompatibility(t.Context(), c, account, body, "", "gpt-6-astra", false)
 				default:
 					result, err = svc.Forward(t.Context(), c, account, body)
 				}

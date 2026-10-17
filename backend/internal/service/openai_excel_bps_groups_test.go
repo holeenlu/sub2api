@@ -186,7 +186,7 @@ func TestValidateExcelBPS403GroupSettings(t *testing.T) {
 			if tc.simple {
 				svc.cfg.RunMode = config.RunModeSimple
 			}
-			err := svc.validateExcelBPS403GroupSettings(context.Background(), account)
+			err := svc.validateOpenAIProtocolSettings(context.Background(), account)
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {

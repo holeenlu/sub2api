@@ -17,9 +17,9 @@ import (
 )
 
 // The native compatibility forwarders own their transport and retry policy.
-// BPS must instead reuse Forward's grant, budget, repair and metering boundary;
+// Independently authorized BPS/SIWC must reuse Forward's grant, budget and metering boundary;
 // only the existing apicompat request/response conversion belongs here.
-func (s *OpenAIGatewayService) forwardExcelBPSCompatibility(ctx context.Context, c *gin.Context, account *Account, body []byte, promptCacheKey, requestModel string, anthropic bool) (*OpenAIForwardResult, error) {
+func (s *OpenAIGatewayService) forwardOpenAIGrantCompatibility(ctx context.Context, c *gin.Context, account *Account, body []byte, promptCacheKey, requestModel string, anthropic bool) (*OpenAIForwardResult, error) {
 	originalModel := gjson.GetBytes(body, "model").String()
 	stream := gjson.GetBytes(body, "stream").Bool()
 	var converted []byte
@@ -92,7 +92,19 @@ func (s *OpenAIGatewayService) forwardExcelBPSCompatibility(ctx context.Context,
 		}
 	}
 	clientWriter := c.Writer
+	var grantHeaders http.Header
+	copySIWCHeaders := func() {
+		if !account.IsSIWCEnabled() {
+			return
+		}
+		for _, key := range []string{"X-Request-Id", "Retry-After"} {
+			if value := grantHeaders.Get(key); value != "" {
+				clientWriter.Header().Set(key, value)
+			}
+		}
+	}
 	writeSSE := func(payload string) error {
+		copySIWCHeaders()
 		clientWriter.Header().Set("Content-Type", "text/event-stream")
 		clientWriter.Header().Set("Cache-Control", "no-cache")
 		clientWriter.Header().Set("X-Accel-Buffering", "no")
@@ -107,12 +119,27 @@ func (s *OpenAIGatewayService) forwardExcelBPSCompatibility(ctx context.Context,
 	chatState.IncludeUsage = gjson.GetBytes(body, "stream_options.include_usage").Bool()
 	writer := &excelBPSResponseWriter{ResponseWriter: clientWriter, header: make(http.Header), status: http.StatusOK,
 		size: -1, model: originalModel, startDrain: func() {}, context: c, lastWrite: time.Now()}
+	grantHeaders = writer.header
 	var conversionErr error
 	writer.write = func(payload []byte) error {
 		if conversionErr != nil {
 			return nil
 		}
-		if failure := basispoints.ParseUpstreamFailure(payload); failure != nil {
+		kind := gjson.GetBytes(payload, "type").String()
+		if account.IsSIWCEnabled() && (kind == "response.failed" || kind == "error" || kind == "response.incomplete") {
+			envelope := gin.H{"error": siwcCompatibilityErrorDetails(payload)}
+			prefix := ""
+			if anthropic {
+				envelope["type"] = "error"
+				prefix = "event: error\n"
+			}
+			raw, err := json.Marshal(envelope)
+			if err != nil {
+				return err
+			}
+			return writeSSE(prefix + "data: " + string(raw) + "\n\n")
+		}
+		if failure := basispoints.ParseUpstreamFailure(payload); !account.IsSIWCEnabled() && failure != nil {
 			if anthropic {
 				return writeSSE(buildAnthropicStreamErrorSSE(failure.Type, failure.Message))
 			}
@@ -161,6 +188,7 @@ func (s *OpenAIGatewayService) forwardExcelBPSCompatibility(ctx context.Context,
 	defer func() { c.Writer = clientWriter }()
 	result, forwardErr := s.Forward(ctx, c, account, converted)
 	c.Writer = clientWriter
+	copySIWCHeaders()
 	if result != nil {
 		result.Model, result.BillingModel, result.Stream = originalModel, result.UpstreamModel, stream
 		result.ClientDisconnect = result.ClientDisconnect || writer.disconnected
@@ -175,6 +203,19 @@ func (s *OpenAIGatewayService) forwardExcelBPSCompatibility(ctx context.Context,
 		var failover *UpstreamFailoverError
 		if errors.As(forwardErr, &failover) || ctx.Err() != nil || writer.terminal {
 			return result, forwardErr // no synthetic success or commit before failover
+		}
+		if account.IsSIWCEnabled() {
+			status := writer.status
+			if status < 400 {
+				status = http.StatusBadGateway
+			}
+			envelope := gin.H{"error": siwcCompatibilityErrorDetails(writer.pending)}
+			if anthropic {
+				envelope["type"] = "error"
+			}
+			MarkResponseCommitted(c)
+			c.JSON(status, envelope)
+			return result, forwardErr
 		}
 		message := gjson.GetBytes(writer.pending, "error.message").String()
 		errType := gjson.GetBytes(writer.pending, "error.type").String()
@@ -238,7 +279,7 @@ func (s *OpenAIGatewayService) forwardExcelBPSCompatibility(ctx context.Context,
 	}
 	var response apicompat.ResponsesResponse
 	if err = json.Unmarshal(writer.pending, &response); err != nil {
-		return result, fmt.Errorf("decode BPS compatibility response: %w", err)
+		return result, fmt.Errorf("decode OpenAI grant compatibility response: %w", err)
 	}
 	if err := apicompat.ValidateResponsesToolArguments(&response); err != nil {
 		return result, writeAPICompatConversionError(c, err, anthropic)

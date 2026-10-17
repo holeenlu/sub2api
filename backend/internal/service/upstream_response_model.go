@@ -27,6 +27,7 @@ const (
 // the billable tier for the selected credential protocol.
 type upstreamResponseModelObserver struct {
 	claudeConversation *claudeConversationObservation
+	refusal            *upstreamRefusalObserver
 	first              string
 	terminal           string
 	conflict           bool
@@ -70,6 +71,10 @@ func normalizeObservedUpstreamResponseModel(model string) string {
 }
 
 func (o *upstreamResponseModelObserver) ObserveOpenAI(payload []byte, eventType string) {
+	if o == nil {
+		return
+	}
+	o.refusal.observe(payload)
 	model := firstValidTrimmedGJSONString(payload, "response.model", "model")
 	terminal := isUpstreamResponseModelTerminalEvent(eventType)
 	o.Observe(model, terminal)
@@ -93,6 +98,7 @@ func (o *upstreamResponseModelObserver) ObserveAnthropic(payload []byte) {
 		return
 	}
 	o.claudeConversation.observe(payload)
+	o.refusal.observe(payload)
 	model := firstValidTrimmedGJSONString(payload, "message.model", "model")
 	o.Observe(model, false)
 	// usage.speed travels with the message object (message_start in streams,
@@ -165,6 +171,10 @@ func normalizeObservedAnthropicSpeed(raw string) string {
 }
 
 func (o *upstreamResponseModelObserver) ObserveGemini(payload []byte) {
+	if o == nil {
+		return
+	}
+	o.refusal.observe(payload)
 	model := firstValidTrimmedGJSONString(
 		payload,
 		"modelVersion",
@@ -190,8 +200,16 @@ func (o *upstreamResponseModelObserver) Conflict() bool {
 	return o != nil && o.conflict
 }
 
-func beginUpstreamResponseModelObservation(c *gin.Context) *upstreamResponseModelObserver {
+func newUpstreamResponseModelObserver(c *gin.Context) *upstreamResponseModelObserver {
 	observer := &upstreamResponseModelObserver{}
+	if c != nil && c.Request != nil {
+		observer.refusal = upstreamRefusalObserverFromContext(c.Request.Context())
+	}
+	return observer
+}
+
+func beginUpstreamResponseModelObservation(c *gin.Context) *upstreamResponseModelObserver {
+	observer := newUpstreamResponseModelObserver(c)
 	if c != nil {
 		c.Set(upstreamResponseModelObserverContextKey, observer)
 	}

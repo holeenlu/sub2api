@@ -1,13 +1,13 @@
 package service
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -16,6 +16,8 @@ import (
 )
 
 const anthropicCompatUsageDrainTimeout = 1200 * time.Millisecond
+
+var errAnthropicCompatStreamIdle = errors.New("stream data interval timeout")
 
 type anthropicCompatStreamResult struct {
 	usage              ClaudeUsage
@@ -32,54 +34,77 @@ func (r anthropicCompatStreamResult) forwardResult(resp *http.Response, model, u
 	}
 }
 
-// readAnthropicCompatStream is shared by both compatibility protocols and their
-// JSON/SSE responses. Only complete frames reach conversion; only message_stop
-// completes a response. The reader owns the upstream body until termination,
-// including a bounded usage drain after downstream cancellation/write failure.
+// readAnthropicCompatStream converts complete frames from the shared Anthropic
+// reader. Tool aliases are restored before either protocol converter sees them.
 func (s *GatewayService) readAnthropicCompatStream(
 	resp *http.Response, c *gin.Context, start time.Time,
 	consume func(*apicompat.AnthropicStreamEvent, string, ClaudeUsage) (bool, error),
+) (result anthropicCompatStreamResult, err error) {
+	var usage ClaudeUsage
+	rw := toolNameRewriteFromContext(c)
+	result, err = s.readAnthropicSSEStream(resp, c, start, nil, func(frame sseEvent, disconnected bool) (bool, error) {
+		if !frame.hasData || strings.TrimSpace(frame.data) == "" {
+			return false, nil
+		}
+		payload := restoreToolNamesInBytes([]byte(frame.data), rw)
+		var event apicompat.AnthropicStreamEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			// The shared reader returns the original typed error for error frames.
+			if strings.TrimSpace(frame.eventName) == "error" {
+				return false, nil
+			}
+			return false, fmt.Errorf("invalid Anthropic SSE event: %w", err)
+		}
+		if event.Type == "" {
+			event.Type = strings.TrimSpace(frame.eventName)
+		}
+		if event.Message != nil && event.Type == "message_start" {
+			mergeAnthropicUsage(&usage, event.Message.Usage)
+		}
+		if event.Usage != nil {
+			mergeAnthropicUsage(&usage, *event.Usage)
+		}
+		if disconnected || event.Type == "error" || strings.TrimSpace(frame.eventName) == "error" {
+			return false, nil
+		}
+		normalizeAnthropicEventUsageForResponses(&event, usage)
+		return consume(&event, frame.data, usage)
+	})
+	result.usage = usage
+	return result, err
+}
+
+// readAnthropicSSEStream owns the one bounded frame reader used by compatibility
+// conversion and native Messages relay. Consumers still observe frames while
+// disconnected for metering, but must not write. Only a complete data-bearing
+// message_stop after message_start completes the response; EOF never adds one.
+func (s *GatewayService) readAnthropicSSEStream(
+	resp *http.Response, c *gin.Context, start time.Time,
+	heartbeat func() bool,
+	consume func(sseEvent, bool) (bool, error),
 ) (result anthropicCompatStreamResult, err error) {
 	limit := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		limit = s.cfg.Gateway.MaxLineSize
 	}
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, min(64*1024, limit)), limit)
-	type scanEvent struct {
-		line string
-		err  error
+	pump := newSSEReadPump(resp.Body, limit, nil, false)
+	defer pump.Close()
+	events := pump.events
+	var idle *time.Timer
+	var idleC <-chan time.Time
+	var interval time.Duration
+	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		interval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+		idle = time.NewTimer(interval)
+		idleC = idle.C
+		defer idle.Stop()
 	}
-	events := make(chan scanEvent, 1)
-	done, readerDone := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(readerDone)
-		defer close(events)
-		send := func(event scanEvent) bool {
-			select {
-			case events <- event:
-				return true
-			case <-done:
-				return false
-			}
-		}
-		for scanner.Scan() {
-			if !send(scanEvent{line: scanner.Text()}) {
-				return
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			send(scanEvent{err: err})
-		}
-	}()
-	defer func() {
-		close(done)
-		_ = resp.Body.Close() // Unblock a pending HTTP body read, including on message_stop.
-		<-readerDone
-	}()
 
-	var canceled <-chan struct{}
-	if c.Request != nil {
+	var canceled, writeCanceled <-chan struct{}
+	if writeCtx := streamWriteContext(c); writeCtx != nil {
+		writeCanceled = writeCtx.Done()
+	}
+	if c != nil && c.Request != nil {
 		canceled = c.Request.Context().Done()
 	}
 	var drain *time.Timer
@@ -93,19 +118,29 @@ func (s *GatewayService) readAnthropicCompatStream(
 	disconnect := func() {
 		if !result.clientDisconnected {
 			result.clientDisconnected = true
-			canceled = nil
+			canceled, writeCanceled = nil, nil
 			drainDeadline = time.Now().Add(anthropicCompatUsageDrainTimeout)
 			drain = time.NewTimer(anthropicCompatUsageDrainTimeout)
 			drainC = drain.C
 		}
 	}
-	rw := toolNameRewriteFromContext(c)
-	pending := anthropicSSEEventBuffer{}
+	var keepalive *time.Timer
+	var keepaliveC <-chan time.Time
+	var keepaliveInterval time.Duration
+	if heartbeat != nil && s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+		keepalive = time.NewTimer(keepaliveInterval)
+		keepaliveC = keepalive.C
+		defer keepalive.Stop()
+	}
+	pending := sseEventBuffer{}
 	started := false
 	for {
 		// Observe cancellation before processing already queued upstream data.
 		select {
 		case <-canceled:
+			disconnect()
+		case <-writeCanceled:
 			disconnect()
 		default:
 		}
@@ -115,8 +150,23 @@ func (s *GatewayService) readAnthropicCompatStream(
 		select {
 		case <-canceled:
 			disconnect()
+		case <-writeCanceled:
+			disconnect()
 		case <-drainC:
 			return result, fmt.Errorf("Anthropic usage drain expired before message_stop: %w", context.DeadlineExceeded)
+		case <-idleC:
+			if remaining := time.Until(time.Unix(0, pump.lastRead.Load()).Add(interval)); remaining > 0 {
+				idle.Reset(remaining)
+				continue
+			}
+			return result, errAnthropicCompatStreamIdle
+		case <-keepaliveC:
+			// Pending upstream lines have never been written downstream. A
+			// heartbeat is still at a downstream frame boundary while they wait.
+			if !result.clientDisconnected && heartbeat() {
+				disconnect()
+			}
+			keepalive.Reset(keepaliveInterval)
 		case scanned, ok := <-events:
 			if !ok {
 				return result, fmt.Errorf("Anthropic stream ended without message_stop: %w", io.ErrUnexpectedEOF)
@@ -124,57 +174,58 @@ func (s *GatewayService) readAnthropicCompatStream(
 			if scanned.err != nil {
 				return result, fmt.Errorf("read Anthropic stream: %w", scanned.err)
 			}
+			if idle != nil {
+				idle.Reset(interval)
+			}
 			if scanned.line != "" {
 				if err := pending.addLine(scanned.line, limit); err != nil {
 					return result, err
 				}
 				continue
 			}
-			frame := parseAnthropicSSEEvent(pending.lines)
-			pending.reset()
-			if !frame.hasData {
-				if frame.eventName == "error" {
-					return result, &sseStreamErrorEventError{RawData: frame.data}
-				}
+			if len(pending.lines) == 0 {
 				continue
 			}
-			// Restore only Anthropic tool name fields before either protocol converter.
-			payload := restoreToolNamesInBytes([]byte(frame.data), rw)
-			var event apicompat.AnthropicStreamEvent
-			if err := json.Unmarshal(payload, &event); err != nil {
-				return result, fmt.Errorf("invalid Anthropic SSE event: %w", err)
+			frame := parseSSEEvent(pending.lines)
+			eventType := strings.TrimSpace(frame.eventName)
+			hasData := frame.hasData && strings.TrimSpace(frame.data) != ""
+			isError := eventType == "error"
+			if hasData {
+				if !gjson.Valid(frame.data) || !gjson.Parse(frame.data).IsObject() {
+					if !isError {
+						return result, fmt.Errorf("invalid Anthropic SSE event JSON")
+					}
+				} else if dataType := gjson.Get(frame.data, "type").String(); dataType != "" {
+					eventType = dataType
+				}
 			}
-			if event.Type == "" {
-				event.Type = frame.eventName
-			}
-			if event.Message != nil && event.Type == "message_start" {
+			isError = isError || (hasData && eventType == "error")
+			if hasData && eventType == "message_start" && gjson.Get(frame.data, "message").IsObject() {
 				started = true
-				mergeAnthropicUsage(&result.usage, event.Message.Usage)
 			}
-			if event.Usage != nil {
-				mergeAnthropicUsage(&result.usage, *event.Usage)
-			}
-			if frame.eventName == "error" || event.Type == "error" {
-				return result, &sseStreamErrorEventError{RawData: frame.data}
-			}
-			if event.Type == "message_stop" && !started {
+			terminal := hasData && !isError && eventType == "message_stop"
+			if terminal && !started {
 				return result, fmt.Errorf("Anthropic message_stop without message_start")
 			}
-			normalizeAnthropicEventUsageForResponses(&event, result.usage)
-			if !result.clientDisconnected {
-				if result.firstTokenMs == nil && event.Type != "ping" {
-					ms := int(time.Since(start).Milliseconds())
-					result.firstTokenMs = &ms
-				}
-				closed, err := consume(&event, frame.data, result.usage)
-				if err != nil {
-					return result, err
-				}
-				if closed {
-					disconnect()
-				}
+			if !result.clientDisconnected && hasData && !isError && eventType != "ping" && result.firstTokenMs == nil {
+				ms := int(time.Since(start).Milliseconds())
+				result.firstTokenMs = &ms
 			}
-			if event.Type == "message_stop" {
+			closed, err := consume(frame, result.clientDisconnected)
+			pending.reset() // frame.lines remains valid until the consumer has returned.
+			if err != nil {
+				return result, err
+			}
+			if closed {
+				disconnect()
+			}
+			if keepalive != nil {
+				keepalive.Reset(keepaliveInterval)
+			}
+			if isError {
+				return result, &sseStreamErrorEventError{RawData: frame.data}
+			}
+			if terminal {
 				return result, nil
 			}
 		}
@@ -239,6 +290,8 @@ func anthropicCompatError(err error) (code, message string) {
 		}
 	} else if errors.Is(err, io.ErrUnexpectedEOF) {
 		code, message = "upstream_missing_terminal", "Upstream stream ended without message_stop"
+	} else if errors.Is(err, errAnthropicCompatStreamIdle) {
+		code, message = "upstream_timeout", "Upstream stream data interval timeout"
 	}
 	return code, message
 }
