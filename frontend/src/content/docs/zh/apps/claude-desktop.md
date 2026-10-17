@@ -28,3 +28,9 @@
 提示 Gateway was unreachable 时检查网络和根地址；401 检查 Key；模型未出现时核对分组及客户端的显式模型配置。该模式的远程和云端功能限制见官方说明。官方账号云端历史和本机网关会话不保证互相迁移，本站修复包仅适用于 Codex 本地索引。
 
 来源：[Claude 桌面端网关配置](https://claude.com/docs/third-party/claude-desktop/gateway)、[各客户端的网关区别](https://code.claude.com/docs/en/llm-gateway-connect#desktop-app)，核对于 2026-09-15。
+
+本网关不采集或保存 Claude Code / Claude 桌面客户端的遥测，不提供 `/v1/logs`、`/v1/metrics` 采集端点。原事件接口只返回空 200，不读取或转发上传内容。客户端自身的隐私设置及其直连供应商的流量由客户端控制。
+
+账号遥测仅使用管理员导入的设备包，适用于 Claude OAuth / Setup Token 账号。新账号等待导入，服务器不再初始化 Claude Code。本地工具生成的 JSON 包含真实设备安装 ID、CLI 版本及环境，不包含账号凭据或会话。导入后，网关绑定当前账号身份和会话，按 vm2api 规则生成完整遥测事件；令牌只用于上游请求认证，不写入遥测 JSON。“账号遥测定时发送”默认关闭，开启后仅已导入设备包的账号按十分钟活动窗口、约十秒事件、六小时 GrowthBook 周期发送，关闭时保留导入的设备资料。
+
+如果桌面端已配置指向本网关的 `otlpEndpoint`，请移除该采集器配置。推理连接配置不受影响。
