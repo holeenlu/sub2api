@@ -373,6 +373,7 @@ func defaultOpsAdvancedSettings() *OpsAdvancedSettings {
 		Aggregation: OpsAggregationSettings{
 			AggregationEnabled: false,
 		},
+		AccountTelemetrySendingEnabled:  false,
 		OpenAIAccountQuotaAutoPause:     OpsOpenAIAccountQuotaAutoPauseSettings{},
 		IgnoreCountTokensErrors:         true,  // count_tokens 404 是预期行为，默认忽略
 		IgnoreContextCanceled:           true,  // Default to true - client disconnects are not errors
@@ -525,7 +526,7 @@ const SettingKeyOpsMetricThresholds = "ops_metric_thresholds"
 
 func defaultOpsMetricThresholds() *OpsMetricThresholds {
 	slaMin := 99.5
-	ttftMax := 500.0
+	ttftMax := 10000.0
 	reqErrMax := 5.0
 	upstreamErrMax := 5.0
 	return &OpsMetricThresholds{
@@ -556,11 +557,24 @@ func (s *OpsService) GetMetricThresholds(ctx context.Context) (*OpsMetricThresho
 		return nil, err
 	}
 
-	cfg := &OpsMetricThresholds{}
+	cfg := defaultCfg
 	if err := json.Unmarshal([]byte(raw), cfg); err != nil {
-		return defaultCfg, nil
+		return defaultOpsMetricThresholds(), nil
 	}
-
+	// Partial/old settings must resolve to the same limits in scoring and the UI.
+	defaults := defaultOpsMetricThresholds()
+	if cfg.SLAPercentMin == nil {
+		cfg.SLAPercentMin = defaults.SLAPercentMin
+	}
+	if cfg.TTFTp99MsMax == nil {
+		cfg.TTFTp99MsMax = defaults.TTFTp99MsMax
+	}
+	if cfg.RequestErrorRatePercentMax == nil {
+		cfg.RequestErrorRatePercentMax = defaults.RequestErrorRatePercentMax
+	}
+	if cfg.UpstreamErrorRatePercentMax == nil {
+		cfg.UpstreamErrorRatePercentMax = defaults.UpstreamErrorRatePercentMax
+	}
 	return cfg, nil
 }
 

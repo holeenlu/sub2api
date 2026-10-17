@@ -33,7 +33,7 @@ const advancedSettings = ref<OpsAdvancedSettings | null>(null)
 // 指标阈值配置
 const metricThresholds = ref<OpsMetricThresholds>({
   sla_percent_min: 99.5,
-  ttft_p99_ms_max: 500,
+  ttft_p99_ms_max: 10000,
   request_error_rate_percent_max: 5,
   upstream_error_rate_percent_max: 5
 })
@@ -60,7 +60,7 @@ async function loadAllSettings() {
     if (thresholds && Object.keys(thresholds).length > 0) {
         metricThresholds.value = {
           sla_percent_min: thresholds.sla_percent_min ?? 99.5,
-          ttft_p99_ms_max: thresholds.ttft_p99_ms_max ?? 500,
+          ttft_p99_ms_max: thresholds.ttft_p99_ms_max ?? 10000,
           request_error_rate_percent_max: thresholds.request_error_rate_percent_max ?? 5,
           upstream_error_rate_percent_max: thresholds.upstream_error_rate_percent_max ?? 5
         }
@@ -440,6 +440,13 @@ async function saveAllSettings() {
           {{ t('admin.ops.settings.advancedSettings') }}
         </summary>
         <div class="space-y-4 px-4 pb-4">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.accountTelemetry') }}</label>
+              <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.accountTelemetryHint') }}</p>
+            </div>
+            <Toggle v-model="advancedSettings.account_telemetry_sending_enabled" :aria-label="t('admin.ops.settings.accountTelemetry')" data-testid="account-telemetry-enabled" />
+          </div>
           <!-- 数据保留策略 -->
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.dataRetention') }}</h5>

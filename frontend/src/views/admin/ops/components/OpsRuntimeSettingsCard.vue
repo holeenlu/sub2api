@@ -158,7 +158,7 @@ function openAlertEditor() {
     if (!draftAlert.value.thresholds) {
       draftAlert.value.thresholds = {
         sla_percent_min: 99.5,
-        ttft_p99_ms_max: 500,
+        ttft_p99_ms_max: 10000,
         request_error_rate_percent_max: 5,
         upstream_error_rate_percent_max: 5
       }
