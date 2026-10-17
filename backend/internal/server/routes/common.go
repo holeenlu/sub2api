@@ -13,11 +13,6 @@ func RegisterCommonRoutes(r *gin.Engine) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// Claude Code 遥测日志（忽略，直接返回200）
-	r.POST("/api/event_logging/batch", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
 	// Setup status endpoint (always returns needs_setup: false in normal mode)
 	// This is used by the frontend to detect when the service has restarted after setup
 	r.GET("/setup/status", func(c *gin.Context) {
@@ -29,4 +24,14 @@ func RegisterCommonRoutes(r *gin.Engine) {
 			},
 		})
 	})
+}
+
+// Anonymous events retain Wei-Shaw's empty 200 response. Authentication remains
+// mandatory for sample storage; caller-supplied user/account IDs are never trusted.
+func acknowledgeAnonymousClientTelemetry(c *gin.Context) {
+	if c.GetHeader("Authorization") == "" && c.GetHeader("x-api-key") == "" &&
+		c.GetHeader("x-goog-api-key") == "" && c.Query("key") == "" && c.Query("api_key") == "" {
+		c.Header("Cache-Control", "no-store")
+		c.AbortWithStatus(http.StatusOK)
+	}
 }

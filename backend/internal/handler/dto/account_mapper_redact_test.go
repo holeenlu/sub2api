@@ -100,3 +100,15 @@ func TestAccountFromServiceShallow_NilCredentialsOmitsStatus(t *testing.T) {
 	require.Nil(t, got.Credentials)
 	require.Nil(t, got.CredentialsStatus)
 }
+
+func TestAccountFromServiceShallow_HidesInternalAnthropicObservations(t *testing.T) {
+	src := &service.Account{ID: 1, Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Extra: map[string]any{
+		"anthropic_observation_profile.rate_limit_tier": map[string]any{"value": "old-tier", "identity": "private-hash"},
+		"anthropic_observation_seven_day.utilization":   map[string]any{"value": 40, "identity": "private-hash"},
+		"passive_usage_7d_utilization":                  0.4,
+	}}
+	got := AccountFromServiceShallow(src)
+	require.Equal(t, map[string]any{"passive_usage_7d_utilization": 0.4}, got.Extra)
+	require.Equal(t, got.Extra, AccountListItemFromAccount(got).Extra)
+	require.Len(t, src.Extra, 3, "projection must not delete stored data")
+}

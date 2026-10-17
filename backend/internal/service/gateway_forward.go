@@ -14,9 +14,8 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/tidwall/gjson"
-
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 // 重试相关常量
@@ -66,33 +65,30 @@ func retryBackoffDelay(attempt int) time.Duration {
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
-	if d <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(d)
-	defer func() {
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
+	return WaitOpenAITurnRetry(ctx, d)
 }
 
 // Forward 转发请求到Claude API
 func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) (result *ForwardResult, err error) {
+	defer func() {
+		if err == nil && result != nil {
+			confirmSchedulingQuotaPrefix(ctx, account, result.Usage.CacheCreationInputTokens+result.Usage.CacheReadInputTokens)
+		}
+	}()
+	// Account retries share the gin context, but only this attempt's actual
+	// request rewrite may authorize response-side tool-name restoration.
+	if c != nil {
+		c.Set(toolNameRewriteKey, nil)
+	}
+	ctx = EnsureOpenAITurnBudget(ctx, s.cfg, "")
+	if err := validateVendorDispatch(ctx, s.accountRepo, account, vendorDispatchGroup(c)); err != nil {
+		return nil, vendorDispatchFailure(err)
+	}
 	startTime := time.Now()
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
+	telemetrySessionID := claudeTelemetryRequestSession(c, parsed)
 	// API-key mappings and OAuth native IDs are resolved before mimicry.
 	validationModel := parsed.Model
 	if account != nil {
@@ -100,13 +96,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			if resolved, ok := ResolveBedrockModelID(account, validationModel); ok {
 				validationModel = resolved
 			}
-		} else if account.Type == AccountTypeAPIKey {
+		} else if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 			validationModel = account.GetMappedModel(validationModel)
 		}
 	}
 	if account != nil && account.Platform == PlatformAnthropic {
-		if err := validateClaude55Request(parsed.Body.Bytes(), validationModel); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+		normalized, err := normalizeClaudeThinkingForUpstream(ctx, parsed.Body.Bytes(), validationModel)
+		if err == nil {
+			err = parsed.ReplaceBody(normalized)
+		}
+		if err != nil {
+			writeClaudeThinkingError(c, err, writeAnthropicError)
 			return nil, err
 		}
 	}
@@ -154,7 +154,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// Beta policy: evaluate once; block check + cache filter set for buildUpstreamRequest.
 	// Always overwrite the cache to prevent stale values from a previous retry with a different account.
 	if account.Platform == PlatformAnthropic && c != nil {
-		policy := s.evaluateBetaPolicy(ctx, c.GetHeader("anthropic-beta"), account, parsed.Model)
+		policy := s.evaluateBetaPolicy(ctx, getRequestTokenListHeader(c.Request, "anthropic-beta"), account, parsed.Model)
 		if policy.blockErr != nil {
 			return nil, policy.blockErr
 		}
@@ -166,6 +166,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 
 	body := parsed.Body.Bytes()
+	ctx = withGatewayCachePrefix(ctx, body)
+	captureClaudeBillingSource(c, body)
 	replaceBody := func(next []byte) error {
 		if err := parsed.ReplaceBody(next); err != nil {
 			return fmt.Errorf("rewrite request body: %w", err)
@@ -213,27 +215,27 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCode
 
 	if shouldMimicClaudeCode {
-		// 与 Parrot 对齐：OAuth 账号无条件重写 system（即使客户端已发了 Claude Code
-		// 风格的 system prompt）。原因：第三方工具（opencode 等）会发 "You are Claude
-		// Code..." system prompt 但缺少 billing attribution block，导致 Anthropic
-		// 检测到"有 CC prompt 但无 billing block"的不一致而判为 third-party。
-		// Parrot 的 transform_request 从不检查客户端 system 内容，直接覆盖。
+		// Render the configured layout once. Explicit zero injection and caller
+		// system slots must survive the subsequent OAuth normalization.
 		systemRaw, _ := parsed.SystemValue()
 		systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
+		systemPromptBlocks = claudeOAuthSystemPromptBlocksForModel(reqModel, systemPromptBlocks)
 		if systemPromptInjectionEnabled {
-			if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks)); err != nil {
+			if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks, s.claudePromptAccountVariables(ctx, c, account, body, parsed))); err != nil {
 				return nil, err
 			}
 		}
 
-		normalizeOpts := claudeOAuthNormalizeOptions{}
+		normalizeOpts := claudeOAuthNormalizeOptions{
+			preserveSystem: claudeOAuthSystemPromptPreservesCallerSystem(systemPromptInjectionEnabled, reqModel, systemPromptBlocks),
+		}
 		if s.identityService != nil && c != nil {
-			fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header)
+			fp, err := s.identityService.GetAccountFingerprint(ctx, account, c.Request.Header)
 			if err == nil && fp != nil {
 				// metadata 透传开启时跳过 metadata 注入
 				_, mimicMPT, _ := s.settingService.GetGatewayForwardingSettings(ctx)
 				if !mimicMPT {
-					if metadataUserID := s.buildOAuthMetadataUserID(parsed, account, fp); metadataUserID != "" {
+					if metadataUserID := s.buildOAuthMetadataUserID(c, parsed, account, fp); metadataUserID != "" {
 						normalizeOpts.injectMetadata = true
 						normalizeOpts.metadataUserID = metadataUserID
 					}
@@ -331,7 +333,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// 获取凭证
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
-		return nil, err
+		return nil, newCredentialPreparationFailure(err)
 	}
 
 	// 获取代理URL（自定义 base URL 模式下，proxy 通过 buildCustomRelayURL 作为查询参数传递）
@@ -399,7 +401,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		lastWireBody = wireBody
 
 		// 发送请求
-		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+		resp, err = qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+		if resp != nil {
+			s.bindClaudeTelemetryAccount(ctx, c, account, telemetrySessionID, wireBody, upstreamReq.Header)
+		}
+		s.observeClaudeCodeResponseHeaders(ctx, account, resp)
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -409,7 +415,18 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			})
 		}
 
+		if s.isContentRefusalResponse(resp) {
+			return s.handleErrorResponse(ctx, resp, c, account, reqModel)
+		}
+
 		// 优先检测thinking block签名错误（400）并重试一次
+		if resp.StatusCode == http.StatusUnauthorized && s.claudeTokenProvider != nil {
+			if fresh, ok := refreshRejectedCredential(ctx, s.accountRepo, account, token, s.claudeTokenProvider.refreshAPI, s.claudeTokenProvider.executor); ok {
+				_ = resp.Body.Close()
+				token = fresh
+				continue
+			}
+		}
 		if resp.StatusCode == 400 {
 			respBody, readErr := s.readUpstreamErrorBody(resp)
 			if readErr == nil {
@@ -462,7 +479,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					retryReq, retryWireBody, buildErr := s.buildUpstreamRequest(retryCtx, c, account, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 					releaseRetryCtx()
 					if buildErr == nil {
-						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+						retryResp, retryErr := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+						s.observeClaudeCodeResponseHeaders(ctx, account, retryResp)
 						if retryErr == nil {
 							if retryResp.StatusCode < 400 {
 								// 重试请求被上游接受后同步 ParsedRequest，保证 usage/日志看到真实请求体。
@@ -505,7 +523,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									retryReq2, retryWireBody2, buildErr2 := s.buildUpstreamRequest(retryCtx2, c, account, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 									releaseRetryCtx2()
 									if buildErr2 == nil {
-										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
+										retryResp2, retryErr2 := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
+										s.observeClaudeCodeResponseHeaders(ctx, account, retryResp2)
 										if retryErr2 == nil {
 											if retryResp2.StatusCode < 400 {
 												// 二阶段工具块降级成功时也必须更新当前 body。
@@ -588,7 +607,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						budgetRetryReq, budgetWireBody, buildErr := s.buildUpstreamRequest(budgetRetryCtx, c, account, rectifiedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 						releaseBudgetRetryCtx()
 						if buildErr == nil {
-							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							budgetRetryResp, retryErr := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							s.observeClaudeCodeResponseHeaders(ctx, account, budgetRetryResp)
 							if retryErr == nil {
 								if budgetRetryResp.StatusCode < 400 {
 									// budget 修正请求成功后，ParsedRequest 也要描述被接受的修正版。
@@ -616,6 +636,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 
 		// 检查是否需要通用重试（排除400，因为400已经在上面特殊处理过了）
+		if resp.StatusCode >= 500 && !NativeUncertainReplaySafe(body) {
+			break // No proof that a hosted tool was not executed.
+		}
 		if resp.StatusCode >= 400 && resp.StatusCode != 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
 			if attempt < maxRetryAttempts {
 				elapsed := time.Since(retryStart)
@@ -825,15 +848,21 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			if errors.As(err, &sseErr) {
 				// 上游 HTTP 200 + SSE 流体内出现 event:error 帧。
 				body := []byte(sseErr.RawData)
+				canFailover := c.Writer.Size() == writerSizeBeforeStream &&
+					(streamResult == nil || (!streamResult.usage.hasObservedTokens() && !streamResult.clientDisconnect))
 				semanticStatus := http.StatusForbidden
-				if c.Writer.Size() == writerSizeBeforeStream && gjson.GetBytes(body, "error.type").String() == "overloaded_error" {
+				// Error semantics do not depend on whether stream output has started.
+				// Keep the pre-output guard only for the existing cooldown side effects.
+				if gjson.GetBytes(body, "error.type").String() == "overloaded_error" {
 					semanticStatus = 529
-					syntheticResp := &http.Response{
-						StatusCode: semanticStatus,
-						Header:     resp.Header.Clone(),
-						Body:       io.NopCloser(bytes.NewReader(body)),
+					if canFailover {
+						syntheticResp := &http.Response{
+							StatusCode: semanticStatus,
+							Header:     resp.Header.Clone(),
+							Body:       io.NopCloser(bytes.NewReader(body)),
+						}
+						s.handleFailoverSideEffects(ctx, syntheticResp, account, reqModel)
 					}
-					s.handleFailoverSideEffects(ctx, syntheticResp, account, reqModel)
 				}
 
 				upstreamMsg := sanitizeUpstreamErrorMessage(
@@ -868,6 +897,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					truncateString(sseErr.RawData, 1000),
 				)
 
+				if !canFailover {
+					// 已提交的输出不可重生成；已观测用量必须随错误交给 handler 入账。
+					// handleStreamingResponse has already forwarded the original error frame.
+					return partialStreamUsageResult(c, resp, streamResult, originalModel, mappedModel, startTime, err), err
+				}
 				return nil, &UpstreamFailoverError{
 					StatusCode:   semanticStatus,
 					ResponseBody: body,

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -19,8 +20,8 @@ import (
 const (
 	wsGroupPricingGroupID = int64(4201) // 与 runOpenAIResponsesWebSocketUsageLogCase 的调度分组一致
 	wsGroupPricingKey     = "sk-ws-group-pricing"
-	wsGroupPricingFirst   = `{"type":"response.create","model":"gpt-5.6-sol","stream":false}`
-	wsGroupPricingSecond  = `{"type":"response.create","model":"gpt-5.6-sol","stream":false}`
+	wsGroupPricingFirst   = `{"type":"response.create","model":"gpt-5.6-sol","stream":false,"input":"hello"}`
+	wsGroupPricingSecond  = `{"type":"response.create","model":"gpt-5.6-sol","stream":false,"input":"hello"}`
 )
 
 // wsGroupPricingAPIKeyRepoStub 只实现认证查询与按分组列 Key（认证缓存失效用）。
@@ -69,7 +70,9 @@ func (s *wsGroupPricingAPIKeyRepoStub) GetByKeyForAuth(ctx context.Context, key 
 	user := *s.apiKey.User
 	apiKey.User = &user
 	group := s.group
-	apiKey.Group = &group
+	if apiKey.GroupID != nil {
+		apiKey.Group = &group
+	}
 	return &apiKey, nil
 }
 
@@ -143,14 +146,16 @@ func TestOpenAIResponsesWebSocket_GroupRateChangeReachesProfitGateOnNextTurn(t *
 	})
 }
 
-func TestOpenAIResponsesWebSocket_KeyMovedToAnotherGroupKeepsConnectionGroup(t *testing.T) {
+func TestOpenAIResponsesWebSocket_KeyMovedToAnotherGroupRejectsNextTurn(t *testing.T) {
 	repo := newWSGroupPricingAPIKeyRepoStub(3.0)
 	apiKeyService := newWSGroupPricingAPIKeyService(repo)
-	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:     wsGroupPricingFirst,
-		secondPayload:    wsGroupPricingSecond,
-		apiKeyService:    apiKeyService,
-		apiKeyCredential: wsGroupPricingKey,
+	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload:            wsGroupPricingFirst,
+		secondTurnCloseExpected: true,
+		closeReason:             "authorization is no longer valid",
+		secondPayload:           wsGroupPricingSecond,
+		apiKeyService:           apiKeyService,
+		apiKeyCredential:        wsGroupPricingKey,
 		afterFirstUpstreamRequest: func(*service.ChannelService) error {
 			return repo.adminUpdate(apiKeyService, func(apiKey *service.APIKey, group *service.Group) {
 				other := wsGroupPricingGroupID + 1
@@ -161,19 +166,18 @@ func TestOpenAIResponsesWebSocket_KeyMovedToAnotherGroupKeepsConnectionGroup(t *
 		},
 	})
 
-	require.Len(t, got.logs, 2)
-	require.InDelta(t, 3.0, got.logs[1].RateMultiplier, 1e-12,
-		"a key moved to another group keeps the connection's group: the connection was scheduled from it")
 }
 
-func TestOpenAIResponsesWebSocket_FailedKeyRefreshKeepsConnectionGroup(t *testing.T) {
+func TestOpenAIResponsesWebSocket_FailedKeyRefreshRejectsNextTurn(t *testing.T) {
 	repo := newWSGroupPricingAPIKeyRepoStub(3.0)
 	apiKeyService := newWSGroupPricingAPIKeyService(repo)
-	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:     wsGroupPricingFirst,
-		secondPayload:    wsGroupPricingSecond,
-		apiKeyService:    apiKeyService,
-		apiKeyCredential: wsGroupPricingKey,
+	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload:            wsGroupPricingFirst,
+		secondTurnCloseExpected: true,
+		closeReason:             "authorization is no longer valid",
+		secondPayload:           wsGroupPricingSecond,
+		apiKeyService:           apiKeyService,
+		apiKeyCredential:        wsGroupPricingKey,
 		afterFirstUpstreamRequest: func(*service.ChannelService) error {
 			return repo.adminUpdate(apiKeyService, func(_ *service.APIKey, group *service.Group) {
 				group.RateMultiplier = 0.3
@@ -182,9 +186,36 @@ func TestOpenAIResponsesWebSocket_FailedKeyRefreshKeepsConnectionGroup(t *testin
 		},
 	})
 
+}
+
+func TestOpenAIResponsesWebSocket_BPSMultiTurnThroughHandler(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeOff, service.OpenAIWSIngressModeCtxPool} {
+		t.Run(mode, func(t *testing.T) {
+			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				bps: true, ingressMode: mode,
+				firstPayload:  `{"type":"response.create","model":"gpt-5.6-sol","input":"first"}`,
+				secondPayload: `{"type":"response.create","previous_response_id":"resp_usage_e2e_1","input":"second"}`,
+			})
+			require.Len(t, got.logs, 2)
+			require.Equal(t, 2, got.upstreamAttempts)
+			require.Contains(t, string(got.upstreamPayloads[1]), "first")
+			require.Contains(t, string(got.upstreamPayloads[1]), "second")
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocket_BPSInterruptedRepairBillsOnce(t *testing.T) {
+	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		bps: true, bpsToolRepairEOF: true, ingressMode: service.OpenAIWSIngressModeOff,
+		firstPayload:  `{"type":"response.create","model":"gpt-5.6-sol","input":"calculate","tools":[{"type":"custom","name":"exec"}]}`,
+		secondPayload: `{"type":"response.create","model":"gpt-5.6-sol","tools":[],"input":"new turn"}`,
+	})
 	require.Len(t, got.logs, 2)
-	require.InDelta(t, 3.0, got.logs[1].RateMultiplier, 1e-12, "a failed refresh keeps the connection snapshot")
-	require.GreaterOrEqual(t, repo.lookupCount(), 2, "the second turn must have attempted a refresh")
+	require.Equal(t, 3, got.upstreamAttempts)
+	require.Equal(t, 17, got.logs[0].InputTokens)
+	require.Equal(t, 5, got.logs[0].OutputTokens)
+	require.Equal(t, 2, got.logs[1].InputTokens)
+	require.NotEqual(t, got.logs[0].RequestID, got.logs[1].RequestID)
 }
 
 type wsTurnAPIKeyLookupFunc func(ctx context.Context, key string) (*service.APIKey, error)
@@ -290,4 +321,30 @@ func TestOpenAIWSTurnBillingAPIKeysKeepPreviousTurnUntilItIsRecorded(t *testing.
 	keys.set(4, conn)
 	require.Same(t, conn, keys.forTurn(2, conn), "only the current and previous turn are kept")
 	require.Len(t, keys.keys, 2)
+}
+
+func TestOpenAIResponsesWebSocket_UngroupedKeyContinuesAndRevokes(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough} {
+		for _, revoke := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/revoke=%t", mode, revoke), func(t *testing.T) {
+				repo := newWSGroupPricingAPIKeyRepoStub(1)
+				repo.apiKey.GroupID = nil
+				keys := newWSGroupPricingAPIKeyService(repo)
+				got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+					firstPayload: wsGroupPricingFirst, secondPayload: wsGroupPricingSecond,
+					ingressMode: mode, apiKeyService: keys, apiKeyCredential: wsGroupPricingKey,
+					secondTurnCloseExpected: revoke, closeReason: "authorization is no longer valid",
+					afterFirstUpstreamRequest: func(*service.ChannelService) error {
+						if revoke {
+							return repo.adminUpdate(keys, func(k *service.APIKey, _ *service.Group) { k.Status = service.StatusDisabled })
+						}
+						return nil
+					},
+				})
+				if !revoke {
+					require.Len(t, got.logs, 2)
+				}
+			})
+		}
+	}
 }

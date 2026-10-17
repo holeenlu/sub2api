@@ -69,8 +69,10 @@ func providePrivacyClientFactory() service.PrivacyClientFactory {
 
 func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 	return service.BuildInfo{
-		Version:   buildInfo.Version,
-		BuildType: buildInfo.BuildType,
+		UpstreamVersion: buildInfo.UpstreamVersion,
+		BuildCommit:     buildInfo.BuildCommit,
+		Version:         buildInfo.Version,
+		BuildType:       buildInfo.BuildType,
 	}
 }
 
@@ -123,7 +125,6 @@ func provideCleanup(
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	channelMonitorV2Aggregator *service.ChannelMonitorV2Aggregator,
-	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
@@ -341,6 +342,8 @@ func provideCleanup(
 			}},
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
+					openAIGateway.StopBPS403Recovery()
+					_ = openAIGateway.CloseExcelBPSImages()
 					openAIGateway.CloseOpenAIWSPool()
 				}
 				return nil
@@ -376,9 +379,6 @@ func provideCleanup(
 				return nil
 			}},
 			{"UserPlatformQuotaUsageFlusher", func() error {
-				if quotaFlusher != nil {
-					quotaFlusher.Stop()
-				}
 				return nil
 			}},
 			{"UpstreamBillingProbeService", func() error {
