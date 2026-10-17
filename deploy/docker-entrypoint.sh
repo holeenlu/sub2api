@@ -3,21 +3,21 @@ set -e
 
 # Fix data directory permissions when running as root.
 # Docker named volumes / host bind-mounts may be owned by root,
-# preventing the non-root kdan user from writing files.
+# preventing the non-root tapmodels user from writing files.
 if [ "$(id -u)" = "0" ]; then
     mkdir -p /app/data
     # Use || true to avoid failure on read-only mounted files (e.g. config.yaml:ro)
-    chown -R kdan:kdan /app/data 2>/dev/null || true
-    # Re-invoke this script as kdan so the flag-detection below
+    chown -R tapmodels:tapmodels /app/data 2>/dev/null || true
+    # Re-invoke this script as tapmodels so the flag-detection below
     # also runs under the correct user.
-    exec su-exec kdan "$0" "$@"
+    exec su-exec tapmodels "$0" "$@"
 fi
 
 # Compatibility: if the first arg looks like a flag (e.g. --help),
 # prepend the default binary so it behaves the same as the old
-# ENTRYPOINT ["/app/kdan"] style.
+# ENTRYPOINT ["/app/tapmodels"] style.
 if [ "${1#-}" != "$1" ]; then
-    set -- /app/kdan "$@"
+    set -- /app/tapmodels "$@"
 fi
 
 exec "$@"

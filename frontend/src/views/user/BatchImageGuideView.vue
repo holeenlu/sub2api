@@ -1069,7 +1069,7 @@ function referenceImageLimitForModel(model: string) {
 const agentRequestExample = "{\n  \"model\": \"<model available to the selected key>\",\n  \"task_name\": \"<task name inferred from chat or current time>\",\n  \"image_size\": \"1K\",\n  \"response_mime_type\": \"image/png\",\n  \"items\": [\n    {\n      \"custom_id\": \"img_001\",\n      \"prompt\": \"<first complete prompt>\",\n      \"output_count\": 1,\n      \"reference_images\": [\n        {\n          \"id\": \"face\",\n          \"type\": \"subject\",\n          \"mime_type\": \"image/png\",\n          \"data\": \"<base64 without the data:image/png;base64, prefix>\"\n        }\n      ]\n    }\n  ]\n}"
 
 const agentInstruction = computed(() => t('ui.batchAgentInstruction', {
-  skillName: 'kdan-batch-image',
+  skillName: 'tapmodels-batch-image',
   requestExample: agentRequestExample,
   endpoint: endpointBase.value,
   modelsUrl: joinEndpointPath(endpointBase.value, '/v1/images/batches/models'),
