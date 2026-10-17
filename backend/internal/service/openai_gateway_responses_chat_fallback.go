@@ -173,15 +173,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	if err != nil {
 		return nil, err
 	}
-	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
-	s.cacheReasoningItemsFromOutput(responsesResp.Output)
-
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	}
-	c.JSON(http.StatusOK, responsesResp)
-
-	return &OpenAIForwardResult{
+	result := &OpenAIForwardResult{
 		RequestID:                   requestID,
 		UpstreamHeaders:             resp.Header,
 		Usage:                       usage,
@@ -193,7 +185,32 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                      false,
 		Duration:                    time.Since(startTime),
-	}, nil
+	}
+	// Apply the same tool-kind rules as the streaming bridge before its
+	// buffered converter can omit malformed function calls.
+	validation := apicompat.NewChatCompletionsToResponsesStreamState(originalModel)
+	validation.CustomTools, validation.FunctionTools = customTools, functionTools
+	validation.ToolSearchDeclared, validation.NamespaceTools = toolSearch, namespaceTools
+	if len(ccResp.Choices) > 0 {
+		calls := append([]apicompat.ChatToolCall(nil), ccResp.Choices[0].Message.ToolCalls...)
+		for i := range calls {
+			idx := i
+			calls[i].Index = &idx
+		}
+		apicompat.ChatCompletionsChunkToResponsesEvents(&apicompat.ChatCompletionsChunk{Choices: []apicompat.ChatChunkChoice{{Delta: apicompat.ChatDelta{ToolCalls: calls}}}}, validation)
+	}
+	if err := validation.ValidateToolCallArguments(); err != nil {
+		return result, writeAPICompatConversionError(c, err, false)
+	}
+	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
+	s.cacheReasoningItemsFromOutput(responsesResp.Output)
+
+	if s.responseHeaderFilter != nil {
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	}
+	c.JSON(http.StatusOK, responsesResp)
+
+	return result, nil
 }
 
 func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(

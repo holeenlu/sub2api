@@ -35,28 +35,25 @@ func collectAnthropicText(events []AnthropicStreamEvent) string {
 func requireAnthropicBlockLifecycle(t *testing.T, events []AnthropicStreamEvent) {
 	t.Helper()
 
-	open := false
+	open := make(map[int]bool)
 	next := 0
 	for _, event := range events {
 		switch event.Type {
 		case "content_block_start":
-			require.False(t, open, "content_block_start while a block is open")
 			require.NotNil(t, event.Index)
-			require.Equal(t, next, *event.Index, "content block indices must increase by one")
-			open = true
-		case "content_block_delta":
-			require.True(t, open, "content_block_delta outside an open block")
-			require.NotNil(t, event.Index)
-			require.Equal(t, next, *event.Index)
-		case "content_block_stop":
-			require.True(t, open, "content_block_stop without an open block")
-			require.NotNil(t, event.Index)
-			require.Equal(t, next, *event.Index)
-			open = false
+			require.Equal(t, next, *event.Index, "block indices must increase by one")
+			open[next] = true
 			next++
+		case "content_block_delta":
+			require.NotNil(t, event.Index)
+			require.True(t, open[*event.Index], "delta outside an open block")
+		case "content_block_stop":
+			require.NotNil(t, event.Index)
+			require.True(t, open[*event.Index], "stop outside an open block")
+			delete(open, *event.Index)
 		}
 	}
-	require.False(t, open, "stream ended with an unclosed content block")
+	require.Empty(t, open, "stream ended with unclosed blocks")
 }
 
 func responsesCreated() *ResponsesStreamEvent {

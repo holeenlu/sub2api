@@ -384,9 +384,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	// Override session_id with a deterministic UUID derived from the isolated
-	// session key, ensuring different API keys produce different upstream sessions.
-	if account.Platform != PlatformGrok && promptCacheKey != "" {
+	// Non-Codex relays retain their legacy session convention. OAuth already
+	// carries the scoped official identity from the shared request builder.
+	if account.Platform != PlatformGrok && (!account.UsesOpenAICodexProtocol() || codexAccountIdentityNamespace(codexAccountIdentitySource(c, account)) == "") && promptCacheKey != "" {
 		isolatedSessionID := generateSessionUUID(isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey))
 		upstreamReq.Header.Set("session_id", isolatedSessionID)
 		if upstreamReq.Header.Get("conversation_id") != "" {
@@ -394,9 +394,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		}
 	}
 	if account.UsesOpenAICodexProtocol() && account.Platform != PlatformGrok {
-		// buildUpstreamRequest 保留 Messages bridge 的 body/session 兼容行为，并会先
-		// 清除身份头。真正发送前恢复完整 Codex 身份，避免 ChatGPT Codex 上游因缺失
-		// originator/OpenAI-Beta 返回 404（issue #3901）。
+		// Restore the bridge's HTTP client identity, then apply the shared final
+		// projection so legacy or WS-only headers cannot reappear after building.
 		ensureCodexIdentityHeaders(upstreamReq.Header)
 		enforceCodexIdentityHeaders(upstreamReq.Header)
 		logger.L().Debug("openai messages: upstream identity restored",
@@ -411,6 +410,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
 		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
 	}
+	projectCodexOutboundHeaders(upstreamReq.Header, codexAccountIdentitySource(c, account), false)
 
 	// 7. Send request
 	proxyURL := ""
@@ -625,6 +625,9 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		return nil, err
 	}
 
+	if finalResponse == nil && acc.Err() != nil {
+		return nil, writeAPICompatConversionError(c, acc.Err(), true)
+	}
 	if finalResponse == nil {
 		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream stream ended without a terminal response event")
 		return nil, fmt.Errorf("upstream stream ended without terminal event")
@@ -681,6 +684,12 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	// When the terminal event has an empty output array, reconstruct from
 	// accumulated delta events so the client receives the full content.
 	acc.SupplementResponseOutput(finalResponse)
+	if err := acc.Err(); err != nil {
+		return nil, writeAPICompatConversionError(c, err, true)
+	}
+	if err := apicompat.ValidateResponsesToolArguments(finalResponse); err != nil {
+		return nil, writeAPICompatConversionError(c, err, true)
+	}
 
 	anthropicResp := apicompat.ResponsesToAnthropic(finalResponse, originalModel)
 
@@ -713,6 +722,40 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		}
 	}
 	return result, nil
+}
+
+// writeAPICompatConversionError terminates the client protocol without making
+// a conversion failure eligible for account replay. Usage remains owned by the
+// caller's upstream reader, including any terminal usage received after error.
+func writeAPICompatConversionError(c *gin.Context, cause error, anthropic bool) error {
+	err := fmt.Errorf("upstream protocol conversion failed: %w", cause)
+	if c == nil || c.Writer == nil {
+		return err
+	}
+	const message = "Upstream response contains invalid tool arguments"
+	setOpsUpstreamError(c, http.StatusBadGateway, message, "")
+	MarkOpsStreamError(c, "upstream_protocol_error", message, http.StatusBadGateway)
+	if c.Request != nil && c.Request.Context().Err() != nil {
+		return err
+	}
+	MarkResponseCommitted(c)
+	if !c.Writer.Written() {
+		c.Header("Content-Type", "application/json; charset=utf-8")
+		if anthropic {
+			writeAnthropicError(c, http.StatusBadGateway, "api_error", message)
+		} else {
+			writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", message)
+		}
+		return err
+	}
+	if anthropic {
+		_, _ = fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE("api_error", message))
+	} else {
+		payload, _ := json.Marshal(gin.H{"error": gin.H{"type": "upstream_error", "code": "upstream_protocol_error", "message": message}})
+		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", payload)
+	}
+	c.Writer.Flush()
+	return err
 }
 
 func isOpenAICompatResponsesTerminalEvent(eventType string) bool {
@@ -1127,6 +1170,18 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 
 		// Convert to Anthropic events
 		events := apicompat.ResponsesEventToAnthropicEvents(&event, state)
+		if err := state.Err(); err != nil {
+			if streamNonFailoverErr == nil {
+				if !clientDisconnected {
+					streamNonFailoverErr = writeAPICompatConversionError(c, err, true)
+					clientOutputStarted = true
+				} else {
+					streamNonFailoverErr = fmt.Errorf("upstream protocol conversion failed: %w", err)
+				}
+			}
+			return isTerminalEvent
+		}
+
 		if !clientDisconnected {
 			for _, evt := range events {
 				sse, err := apicompat.ResponsesAnthropicEventToSSE(evt)
@@ -1162,7 +1217,14 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		if streamNonFailoverErr != nil {
 			return resultWithUsage(), streamNonFailoverErr
 		}
-		if finalEvents := apicompat.FinalizeResponsesAnthropicStream(state); len(finalEvents) > 0 && !clientDisconnected {
+		finalEvents := apicompat.FinalizeResponsesAnthropicStream(state)
+		if err := state.Err(); err != nil {
+			if !clientDisconnected {
+				return resultWithUsage(), writeAPICompatConversionError(c, err, true)
+			}
+			return resultWithUsage(), fmt.Errorf("upstream protocol conversion failed: %w", err)
+		}
+		if len(finalEvents) > 0 && !clientDisconnected {
 			for _, evt := range finalEvents {
 				sse, err := apicompat.ResponsesAnthropicEventToSSE(evt)
 				if err != nil {
@@ -1196,6 +1258,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 	}
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
+		if streamNonFailoverErr != nil {
+			return resultWithUsage(), streamNonFailoverErr
+		}
 		result := resultWithUsage()
 		if clientDisconnected {
 			return result, fmt.Errorf("stream usage incomplete: missing terminal event")
