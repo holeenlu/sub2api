@@ -1,6 +1,6 @@
 ## 從 API Key 到應用
 
-KDAN 提供 OpenAI Responses、Chat Completions、Anthropic Messages 與影像相容介面。第三方應用的欄位名稱不同，但都需要三項真實設定：控制台顯示的 API 基礎網址、KDAN API Key、目前 Key 分組開放的模型 ID。
+Tokensavy 提供 OpenAI Responses、Chat Completions、Anthropic Messages 與影像相容介面。第三方應用的欄位名稱不同，但都需要三項真實設定：控制台顯示的 API 基礎網址、Tokensavy API Key、目前 Key 分組開放的模型 ID。
 
 | 應用 | 協議 | 基礎網址 | 驗證方式 |
 | --- | --- | --- | --- |
@@ -12,9 +12,9 @@ KDAN 提供 OpenAI Responses、Chat Completions、Anthropic Messages 與影像�
 
 ## 建立專用 Key
 
-在 [API 金鑰](/keys) 點選建立，選擇你實際要使用的分組。下面為KDAN控制台截圖，選項以目前版本為準。
+在 [API 金鑰](/keys) 點選建立，選擇你實際要使用的分組。下面為Tokensavy控制台截圖，選項以目前版本為準。
 
-![KDAN 建立 API 金鑰：選擇分組與限額](/docs-assets/create-api-key.png)
+![Tokensavy 建立 API 金鑰：選擇分組與限額](/docs-assets/create-api-key.png)
 
 ## 推薦接入順序
 

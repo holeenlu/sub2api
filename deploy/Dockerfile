@@ -1,5 +1,5 @@
 # =============================================================================
-# KDAN Multi-Stage Dockerfile
+# Tokensavy Multi-Stage Dockerfile
 # =============================================================================
 # Stage 1: Build frontend
 # Stage 2: Build Go backend with embedded frontend
@@ -80,7 +80,7 @@ RUN VERSION_VALUE="${VERSION}" && \
     CGO_ENABLED=0 GOOS=linux go build \
     -tags embed \
     -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=release" \
-    -o /app/kdan \
+    -o /app/tokensavy \
     ./cmd/server
 
 # -----------------------------------------------------------------------------
@@ -89,8 +89,8 @@ RUN VERSION_VALUE="${VERSION}" && \
 FROM ${ALPINE_IMAGE}
 
 # Labels
-LABEL maintainer="KDAN <https://kdan.com>"
-LABEL description="KDAN - Subscription to API Conversion Platform"
+LABEL maintainer="Tokensavy <https://tokensavy.ai>"
+LABEL description="Tokensavy - Smart tokens. More possibilities."
 LABEL org.opencontainers.image.source="https://github.com/holeenlu/sub2api"
 
 # Install runtime dependencies
@@ -102,20 +102,20 @@ RUN apk add --no-cache \
     && rm -rf /var/cache/apk/*
 
 # Create non-root user
-RUN addgroup -g 1000 kdan && \
-    adduser -u 1000 -G kdan -s /bin/sh -D kdan
+RUN addgroup -g 1000 tokensavy && \
+    adduser -u 1000 -G tokensavy -s /bin/sh -D tokensavy
 
 # Set working directory
 WORKDIR /app
 
 # Copy binary and runtime fallback resources from builder
-COPY --from=backend-builder --chmod=755 /app/kdan /app/kdan
-COPY --from=backend-builder --chown=kdan:kdan /app/backend/resources /app/resources
+COPY --from=backend-builder --chmod=755 /app/tokensavy /app/tokensavy
+COPY --from=backend-builder --chown=tokensavy:tokensavy /app/backend/resources /app/resources
 
 # Create data directory
-RUN mkdir -p /app/data && chown -R kdan:kdan /app
+RUN mkdir -p /app/data && chown -R tokensavy:tokensavy /app
 
-# Copy entrypoint script (fixes volume permissions then drops to kdan)
+# Copy entrypoint script (fixes volume permissions then drops to tokensavy)
 COPY --chmod=755 deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # Expose port (can be overridden by SERVER_PORT env var)
@@ -125,6 +125,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD wget -q -T 5 -O /dev/null http://localhost:${SERVER_PORT:-8080}/health || exit 1
 
-# Run the application (entrypoint fixes /app/data ownership then execs as kdan)
+# Run the application (entrypoint fixes /app/data ownership then execs as tokensavy)
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["/app/kdan"]
+CMD ["/app/tokensavy"]

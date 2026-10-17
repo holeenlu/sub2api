@@ -11,8 +11,8 @@ Both LoginView and RegisterView use the AuthLayout component, which provides:
 │                                             │
 │  ┌─────────────────────────────────────┐   │
 │  │                                     │   │
-│  │         KDAN Logo                   │   │
-│  │  "Subscription to API Conversion"   │   │
+│  │         Tokensavy Logo              │   │
+│  │  "Smart tokens. More possibilities."    │   │
 │  │                                     │   │
 │  └─────────────────────────────────────┘   │
 │                                             │
@@ -39,8 +39,8 @@ Centered: Both horizontally and vertically
 ```
 ┌─────────────────────────────────────────────┐
 │                                             │
-│         🔷 KDAN                             │
-│    Subscription to API Conversion Platform  │
+│         🔷 Tokensavy                        │
+│         Smart tokens. More possibilities.       │
 │                                             │
 │  ┌─────────────────────────────────────┐   │
 │  │                                     │   │
@@ -133,13 +133,13 @@ Centered: Both horizontally and vertically
 ```
 ┌─────────────────────────────────────────────┐
 │                                             │
-│         🔷 KDAN                             │
-│    Subscription to API Conversion Platform  │
+│         🔷 Tokensavy                        │
+│         Smart tokens. More possibilities.       │
 │                                             │
 │  ┌─────────────────────────────────────┐   │
 │  │                                     │   │
 │  │        Create Account               │   │
-│  │     Sign up to start using KDAN     │   │
+│  │   Sign up to start using Tokensavy  │   │
 │  │                                     │   │
 │  │  Username                           │   │
 │  │  ┌────────────────────────────────┐ │   │

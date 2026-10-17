@@ -7,7 +7,7 @@
 ## 中文
 
 ### 目标
-本文档用于对接外部支付系统（如 `sub2apipay`）与 KDAN 的 Admin API，覆盖：
+本文档用于对接外部支付系统（如 `sub2apipay`）与 TapModels 的 Admin API，覆盖：
 - 支付成功后充值
 - 用户查询
 - 人工余额修正
@@ -100,7 +100,7 @@ curl -X POST "${BASE}/api/v1/admin/users/123/balance" \
 ```
 
 ### 4) 自定义页面 URL Query 透传（iframe / 新窗口一致）
-当 KDAN 打开用户侧自定义页面时，会追加以下展示参数；不传递登录 JWT，并清除旧链接中的 `token`。第三方页面须使用自己的认证机制，不能把 `user_id` 当作身份认证：
+当 TapModels 打开用户侧自定义页面时，会追加以下展示参数；不传递登录 JWT，并清除旧链接中的 `token`。第三方页面须使用自己的认证机制，不能把 `user_id` 当作身份认证：
 - `user_id`
 - `theme`（`light` / `dark`）
 - `lang`（例如 `zh` / `en`，用于向嵌入页传递当前界面语言）
@@ -118,7 +118,7 @@ https://pay.example.com/pay?user_id=123&theme=light&lang=zh&ui_mode=embedded
 - 重试保持相同 `code`，并使用新的 `Idempotency-Key`
 
 ### 6) `doc_url` 配置建议
-- 查看链接：`https://docs.kdan.com/admin-payment-integration-api`
+- 查看链接：`https://docs.tapmodels.ai/admin-payment-integration-api`
 - 下载链接：`https://raw.githubusercontent.com/holeenlu/sub2api/main/docs/ADMIN_PAYMENT_INTEGRATION_API.md`
 
 ---
@@ -126,7 +126,7 @@ https://pay.example.com/pay?user_id=123&theme=light&lang=zh&ui_mode=embedded
 ## English
 
 ### Purpose
-This document describes the minimal KDAN Admin API surface for external payment integrations (for example, `sub2apipay`), including:
+This document describes the minimal TapModels Admin API surface for external payment integrations (for example, `sub2apipay`), including:
 - Recharge after payment success
 - User lookup
 - Manual balance correction
@@ -219,7 +219,7 @@ curl -X POST "${BASE}/api/v1/admin/users/123/balance" \
 ```
 
 ### 4) Custom Page URL query forwarding (iframe and new tab)
-When KDAN opens a user-facing custom page, it appends presentation parameters only. Login JWTs are never forwarded; the legacy `token` parameter is removed. Third-party pages must authenticate independently, and must not treat `user_id` as authentication:
+When TapModels opens a user-facing custom page, it appends presentation parameters only. Login JWTs are never forwarded; the legacy `token` parameter is removed. Third-party pages must authenticate independently, and must not treat `user_id` as authentication:
 - `user_id`
 - `theme` (`light` / `dark`)
 - `lang` (for example `zh` / `en`, used to pass the current UI language to the embedded page)
@@ -237,5 +237,5 @@ https://pay.example.com/pay?user_id=123&theme=light&lang=zh&ui_mode=embedded
 - Keep the same `code` for retry, and use a new `Idempotency-Key`
 
 ### 6) Recommended `doc_url`
-- View URL: `https://docs.kdan.com/admin-payment-integration-api`
+- View URL: `https://docs.tapmodels.ai/admin-payment-integration-api`
 - Download URL: `https://raw.githubusercontent.com/holeenlu/sub2api/main/docs/ADMIN_PAYMENT_INTEGRATION_API.md`
