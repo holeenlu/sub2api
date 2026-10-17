@@ -79,6 +79,10 @@ func jwtAuth(
 			return
 		}
 
+		if !vendorRoleRouteAllowed(user.Role, c.FullPath()) {
+			AbortWithError(c, 403, "VENDOR_CONSUMER_FORBIDDEN", "Supplier identities cannot use customer endpoints")
+			return
+		}
 		// 检查用户状态
 		if !user.IsActive() {
 			AbortWithError(c, 401, "USER_INACTIVE", "User account is not active")

@@ -51,14 +51,15 @@ type OpenAIRecordUsageInput struct {
 // 用量按上游真实 token 计费，与 WS cyber 及正常请求口径一致（InputTokens/OutputTokens
 // 取自上游 response.failed 报告的 usage，即 mark.UpstreamInTok/OutTok）。
 type CyberPolicyUsageInput struct {
-	APIKey       *APIKey
-	Account      *Account
-	Subscription *UserSubscription
-	RequestID    string
-	Model        string
-	Stream       bool
-	InputTokens  int
-	OutputTokens int
+	AuthorizationMode string
+	APIKey            *APIKey
+	Account           *Account
+	Subscription      *UserSubscription
+	RequestID         string
+	Model             string
+	Stream            bool
+	InputTokens       int
+	OutputTokens      int
 	// 渠道归因与请求级 meta，使 cyber 计费行与正常 RecordUsage 行口径一致
 	// （否则 cyber 行 channel_id 等为空，渠道维度统计会遗漏 cyber 命中）。
 	InboundEndpoint    string
@@ -83,9 +84,10 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 		return
 	}
 	result := &OpenAIForwardResult{
-		RequestID: in.RequestID,
-		Model:     in.Model,
-		Stream:    in.Stream,
+		AuthorizationMode: in.AuthorizationMode,
+		RequestID:         in.RequestID,
+		Model:             in.Model,
+		Stream:            in.Stream,
 		Usage: OpenAIUsage{
 			InputTokens:  in.InputTokens,
 			OutputTokens: in.OutputTokens,
@@ -387,6 +389,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		imageSizeBreakdown["image_cache_read_tokens"] = result.Usage.ImageCacheReadTokens
 	}
 	usageLog := &UsageLog{
+		AuthorizationMode:        result.AuthorizationMode,
 		UserID:                   user.ID,
 		APIKeyID:                 apiKey.ID,
 		AccountID:                account.ID,
@@ -500,7 +503,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
-		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+		s.writeOpenAIAuthorizationUsage(ctx, usageLog, result, account)
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 		return nil
@@ -529,10 +532,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	if billingErr != nil {
 		usageLog.ActualCost = 0
-		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+		s.writeOpenAIAuthorizationUsage(ctx, usageLog, result, account)
 		return billingErr
 	}
-	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+	s.writeOpenAIAuthorizationUsage(ctx, usageLog, result, account)
 
 	return nil
 }

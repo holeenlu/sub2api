@@ -1135,6 +1135,24 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			}
 		}
 	}
+	if _u.mutation.VendorIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorRootIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorRootIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorParentIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorParentIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.AccountNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldAccountNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.GroupNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldGroupNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.PlatformSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldPlatformSnapshot, field.TypeString)
+	}
 	if value, ok := _u.mutation.RequestID(); ok {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)
 	}
@@ -1380,6 +1398,9 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if _u.mutation.AuthorizationModeCleared() {
+		_spec.ClearField(usagelog.FieldAuthorizationMode, field.TypeString)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2679,6 +2700,24 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 			}
 		}
 	}
+	if _u.mutation.VendorIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorRootIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorRootIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorParentIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorParentIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.AccountNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldAccountNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.GroupNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldGroupNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.PlatformSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldPlatformSnapshot, field.TypeString)
+	}
 	if value, ok := _u.mutation.RequestID(); ok {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)
 	}
@@ -2924,6 +2963,9 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if _u.mutation.AuthorizationModeCleared() {
+		_spec.ClearField(usagelog.FieldAuthorizationMode, field.TypeString)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{

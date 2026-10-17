@@ -20,6 +20,18 @@ const (
 	FieldAPIKeyID = "api_key_id"
 	// FieldAccountID holds the string denoting the account_id field in the database.
 	FieldAccountID = "account_id"
+	// FieldVendorIDSnapshot holds the string denoting the vendor_id_snapshot field in the database.
+	FieldVendorIDSnapshot = "vendor_id_snapshot"
+	// FieldVendorRootIDSnapshot holds the string denoting the vendor_root_id_snapshot field in the database.
+	FieldVendorRootIDSnapshot = "vendor_root_id_snapshot"
+	// FieldVendorParentIDSnapshot holds the string denoting the vendor_parent_id_snapshot field in the database.
+	FieldVendorParentIDSnapshot = "vendor_parent_id_snapshot"
+	// FieldAccountNameSnapshot holds the string denoting the account_name_snapshot field in the database.
+	FieldAccountNameSnapshot = "account_name_snapshot"
+	// FieldGroupNameSnapshot holds the string denoting the group_name_snapshot field in the database.
+	FieldGroupNameSnapshot = "group_name_snapshot"
+	// FieldPlatformSnapshot holds the string denoting the platform_snapshot field in the database.
+	FieldPlatformSnapshot = "platform_snapshot"
 	// FieldRequestID holds the string denoting the request_id field in the database.
 	FieldRequestID = "request_id"
 	// FieldModel holds the string denoting the model field in the database.
@@ -108,6 +120,8 @@ const (
 	FieldCacheTTLOverridden = "cache_ttl_overridden"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
+	// FieldAuthorizationMode holds the string denoting the authorization_mode field in the database.
+	FieldAuthorizationMode = "authorization_mode"
 	// EdgeUser holds the string denoting the user edge name in mutations.
 	EdgeUser = "user"
 	// EdgeAPIKey holds the string denoting the api_key edge name in mutations.
@@ -163,6 +177,12 @@ var Columns = []string{
 	FieldUserID,
 	FieldAPIKeyID,
 	FieldAccountID,
+	FieldVendorIDSnapshot,
+	FieldVendorRootIDSnapshot,
+	FieldVendorParentIDSnapshot,
+	FieldAccountNameSnapshot,
+	FieldGroupNameSnapshot,
+	FieldPlatformSnapshot,
 	FieldRequestID,
 	FieldModel,
 	FieldRequestedModel,
@@ -207,6 +227,7 @@ var Columns = []string{
 	FieldVideoDurationSeconds,
 	FieldCacheTTLOverridden,
 	FieldCreatedAt,
+	FieldAuthorizationMode,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -290,6 +311,8 @@ var (
 	DefaultCacheTTLOverridden bool
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() time.Time
+	// AuthorizationModeValidator is a validator for the "authorization_mode" field. It is called by the builders before save.
+	AuthorizationModeValidator func(string) error
 )
 
 // OrderOption defines the ordering options for the UsageLog queries.
@@ -313,6 +336,36 @@ func ByAPIKeyID(opts ...sql.OrderTermOption) OrderOption {
 // ByAccountID orders the results by the account_id field.
 func ByAccountID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldAccountID, opts...).ToFunc()
+}
+
+// ByVendorIDSnapshot orders the results by the vendor_id_snapshot field.
+func ByVendorIDSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVendorIDSnapshot, opts...).ToFunc()
+}
+
+// ByVendorRootIDSnapshot orders the results by the vendor_root_id_snapshot field.
+func ByVendorRootIDSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVendorRootIDSnapshot, opts...).ToFunc()
+}
+
+// ByVendorParentIDSnapshot orders the results by the vendor_parent_id_snapshot field.
+func ByVendorParentIDSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVendorParentIDSnapshot, opts...).ToFunc()
+}
+
+// ByAccountNameSnapshot orders the results by the account_name_snapshot field.
+func ByAccountNameSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAccountNameSnapshot, opts...).ToFunc()
+}
+
+// ByGroupNameSnapshot orders the results by the group_name_snapshot field.
+func ByGroupNameSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldGroupNameSnapshot, opts...).ToFunc()
+}
+
+// ByPlatformSnapshot orders the results by the platform_snapshot field.
+func ByPlatformSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPlatformSnapshot, opts...).ToFunc()
 }
 
 // ByRequestID orders the results by the request_id field.
@@ -528,6 +581,11 @@ func ByCacheTTLOverridden(opts ...sql.OrderTermOption) OrderOption {
 // ByCreatedAt orders the results by the created_at field.
 func ByCreatedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCreatedAt, opts...).ToFunc()
+}
+
+// ByAuthorizationMode orders the results by the authorization_mode field.
+func ByAuthorizationMode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAuthorizationMode, opts...).ToFunc()
 }
 
 // ByUserField orders the results by user field.

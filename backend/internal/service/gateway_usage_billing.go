@@ -647,6 +647,10 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
 func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) error {
+	if input != nil && input.Result != nil {
+		usage := input.Result.Usage
+		RecordSchedulingCacheTokens(ctx, usage.InputTokens+usage.CacheCreationInputTokens+usage.CacheReadInputTokens, usage.CacheReadInputTokens)
+	}
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,
 		APIKey:             input.APIKey,
@@ -1283,6 +1287,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		)
 	}
 	usageLog := &UsageLog{
+		AuthorizationMode:        result.AuthorizationMode,
 		UserID:                   user.ID,
 		APIKeyID:                 apiKey.ID,
 		AccountID:                account.ID,
@@ -1328,6 +1333,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		SubscriptionID:           optionalSubscriptionID(subscription),
 		CreatedAt:                time.Now(),
 	}
+	usageLog.CaptureVendorSnapshot(account, apiKey.Group)
 	if result.ImageCount > 0 && (cost == nil || cost.BillingMode != string(BillingModeToken)) {
 		usageLog.RateMultiplier = imageMultiplier
 	}

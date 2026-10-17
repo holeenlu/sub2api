@@ -131,6 +131,22 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
 }
 
+func TestExportDataCannotBypassSupplierArchiveGuard(t *testing.T) {
+	for _, archived := range []bool{false, true} {
+		router, adminSvc := setupAccountDataRouter()
+		owner := int64(7)
+		a := service.Account{ID: 21, VendorID: &owner, Credentials: map[string]any{"access_token": "retained-secret"}}
+		if archived {
+			a.Extra = map[string]any{service.VendorArchivedAtKey: "2026-10-17T00:00:00Z"}
+		}
+		adminSvc.accounts = []service.Account{a}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data", nil))
+		require.Equal(t, http.StatusForbidden, rec.Code)
+		require.NotContains(t, rec.Body.String(), "retained-secret")
+	}
+}
+
 func TestExportDataWithoutProxies(t *testing.T) {
 	router, adminSvc := setupAccountDataRouter()
 

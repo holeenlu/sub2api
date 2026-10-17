@@ -164,7 +164,7 @@ func normalizeUserRole(role, fallback string) (string, error) {
 	if role == "" {
 		return fallback, nil
 	}
-	if !authz.ValidRole(role) {
+	if !authz.ValidRole(role) || authz.IsVendorRole(role) {
 		return "", fmt.Errorf("invalid role: %q", role)
 	}
 	return role, nil

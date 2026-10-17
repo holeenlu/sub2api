@@ -26,11 +26,17 @@ const excelBPSRateLimitedFilterReason = "excel_bps_rate_limited"
 // only route/account decisions, never ciphertext, credentials or request data.
 type excelBPSPoolRecovery struct {
 	managed, native bool
+	nativeAvailable bool
 	rejected        map[int64]bool
 	nativeAttempts  map[int64]bool
 }
 
+type excelBPSNativeProbeKey struct{}
+
 func excelBPSNativeRecoveryActive(ctx context.Context) bool {
+	if probe, _ := ctx.Value(excelBPSNativeProbeKey{}).(bool); probe {
+		return true
+	}
 	budget, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
 	if budget == nil {
 		return false
@@ -46,7 +52,7 @@ func excelBPSPoolForwardAccount(ctx context.Context, c *gin.Context, account *Ac
 	if !excelBPSHasNativeFallback(account) || !excelBPSNativeRecoveryActive(ctx) {
 		return account
 	}
-	budget := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+	budget, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
 	budget.mu.Lock()
 	if budget.bpsRecovery.nativeAttempts == nil {
 		budget.bpsRecovery.nativeAttempts = make(map[int64]bool)
@@ -72,6 +78,9 @@ func (s *OpenAIGatewayService) excelBPSPoolCandidate(ctx context.Context, accoun
 	}
 	budget.mu.Lock()
 	native, active := budget.bpsRecovery.native, len(budget.bpsRecovery.rejected) > 0
+	if probe, _ := ctx.Value(excelBPSNativeProbeKey{}).(bool); probe {
+		native, active = true, true
+	}
 	budget.mu.Unlock()
 	if !active {
 		return account, !excluded
@@ -110,7 +119,7 @@ func newExcelBPSRateLimitedFailoverError(retryAfter string) *UpstreamFailoverErr
 }
 
 func excelBPSHasNativeFallback(account *Account) bool {
-	return account != nil && account.IsExcelBPSEligible() && !account.IsExcelOAuth() &&
+	return account != nil && account.IsExcelBPSEligible() && !account.IsExcelOAuth() && account.VendorOpenAIModeAllowed(VendorOpenAIModeNative) &&
 		(strings.TrimSpace(account.GetOpenAIAccessToken()) != "" || strings.TrimSpace(account.GetOpenAIRefreshToken()) != "")
 }
 
@@ -145,7 +154,7 @@ func OpenAIResponsesBPSPreGenerationReplayAllowed(body []byte, failure *Upstream
 // Never change a shared account snapshot, saved BPS switch or model/proxy.
 func excelBPSNativeFallbackAccount(ctx context.Context, c *gin.Context, account *Account, body []byte, err error) *Account {
 	var rejected *UpstreamFailoverError
-	if !errors.As(err, &rejected) || rejected == nil || rejected.Reason != ExcelBPSRateLimitedReason || rejected.StatusCode != http.StatusTooManyRequests ||
+	if !errors.As(err, &rejected) || rejected == nil || (rejected.Reason != ExcelBPSRateLimitedReason && rejected.Reason != ExcelBPSUpstreamFailureReason && rejected.Reason != "basispoints_credentials_rejected" && rejected.Reason != "basispoints_credentials_unavailable") || (rejected.Reason == ExcelBPSRateLimitedReason && rejected.StatusCode != http.StatusTooManyRequests) ||
 		c.GetBool(bpsAccountProbeRequiredContextKey) || isExcelBPSClientCancellation(c, ctx.Err()) {
 		return nil
 	}
@@ -196,6 +205,15 @@ func finishExcelBPSNativeFallback(result **OpenAIForwardResult, previous *OpenAI
 		(*result).UpstreamEndpoint = "/v1/responses"
 	}
 	if previous != nil {
+		if openAIUsageHasTokens(&previous.Usage) {
+			prior := *previous
+			if account.IsExcelBPSCacheCreationAsInputEnabled() {
+				prior.Usage.CacheCreationInputTokens = 0
+			}
+			(*result).PriorAuthorizationResults = append((*result).PriorAuthorizationResults, &prior)
+			usage := (*result).Usage
+			(*result).authorizationUsage = &usage
+		}
 		usage := previous.Usage
 		if account.IsExcelBPSCacheCreationAsInputEnabled() {
 			usage.CacheCreationInputTokens = 0 // total input already includes BPS cache writes

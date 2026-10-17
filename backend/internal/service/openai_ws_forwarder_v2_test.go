@@ -84,6 +84,7 @@ func TestForwardOpenAIWSV2_KeepsOutboundAndObservedServiceTiersSeparate(t *testi
 			result, err := svc.Forward(context.Background(), c, account, body)
 			require.NoError(t, err)
 			require.NotNil(t, result)
+			require.Equal(t, UsageAuthorizationModeNative, result.AuthorizationMode)
 			require.True(t, result.OpenAIWSMode, "must take HTTP POST → forwardOpenAIWSV2, not HTTP fallback")
 			require.Equal(t, tc.stream, result.Stream)
 			require.Equal(t, "resp_tier_v2", result.RequestID)
@@ -158,6 +159,7 @@ func TestForwardOpenAIWSV2_MarksCyberPolicyForFailureEventShapes(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, result)
+				require.Equal(t, UsageAuthorizationModeNative, result.AuthorizationMode)
 			}
 
 			mark := GetOpsCyberPolicy(c)

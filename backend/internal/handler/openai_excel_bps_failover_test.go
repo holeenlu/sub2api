@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -244,7 +245,7 @@ func TestExcelBPSCompactionUsageSurvivesAccountFailover(t *testing.T) {
 				defer cancel()
 				client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+path, &coderws.DialOptions{HTTPHeader: c.Request.Header})
 				require.NoError(t, err)
-				defer client.CloseNow()
+				defer func() { _ = client.CloseNow() }()
 				require.NoError(t, client.Write(ctx, coderws.MessageText, raw))
 				for {
 					_, event, err := client.Read(ctx)
@@ -278,6 +279,7 @@ func TestExcelBPSCompactionUsageSurvivesAccountFailover(t *testing.T) {
 			for range 2 {
 				select {
 				case log := <-usage.created:
+					require.Equal(t, service.UsageAuthorizationModeBPS, log.AuthorizationMode)
 					logs[log.AccountID] = log
 				case <-time.After(3 * time.Second):
 					t.Fatal("both metered account attempts must be recorded")
@@ -470,7 +472,7 @@ func TestExcelBPSPermissionAnd500FailoverAcrossClientProtocols(t *testing.T) {
 				redisServer := miniredis.RunT(t)
 				rdb := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
 				t.Cleanup(func() { _ = rdb.Close() })
-				usage := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 3)}
+				usage := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 8)}
 				h := newExcelBPSFailoverTestHandler(t, upstream, false, excelBPSFailoverTestOptions{usage: usage, cache: repository.NewGatewayCache(rdb)})
 				stream := protocol != "json" && !strings.HasSuffix(protocol, "-json")
 				c, rec := newExcelBPSFailoverTestContext(t.Context(), stream)
@@ -513,28 +515,21 @@ func TestExcelBPSPermissionAnd500FailoverAcrossClientProtocols(t *testing.T) {
 					defer cancel()
 					client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+path, nil)
 					require.NoError(t, err)
-					defer client.CloseNow()
+					defer func() { _ = client.CloseNow() }()
 					require.NoError(t, client.Write(ctx, coderws.MessageText, raw))
 					for {
 						_, event, err := client.Read(ctx)
 						if failure.exhausted {
-							require.Equal(t, coderws.StatusTryAgainLater, coderws.CloseStatus(err), "pool exhaustion must not be a client authentication rejection")
-							require.NotContains(t, err.Error(), "PRIVATE_UPSTREAM")
-							require.NotContains(t, err.Error(), "authentication")
+							require.NoError(t, err, "pool exhaustion ends the turn, not the socket")
+							typ := gjson.GetBytes(event, "type").String()
+							if typ != "error" && typ != "response.failed" {
+								continue
+							}
+							require.NotContains(t, string(event), "PRIVATE_UPSTREAM")
+							require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
 							select {
 							case streamErr := <-wsFailure:
 								require.Equal(t, failure.status, streamErr.IntendedStatus)
-								wantCode := service.ExcelBPSUpstreamFailureReason
-								if failure.status == 403 {
-									wantCode = service.ExcelBPSModelPermissionReason
-								}
-								require.Equal(t, string(wantCode), streamErr.Code)
-								if failure.status == 403 {
-									require.Equal(t, "invalid_request_error", streamErr.ErrType)
-									require.Contains(t, err.Error(), "This model is not available")
-								} else {
-									require.Equal(t, "server_error", streamErr.ErrType)
-								}
 							case <-ctx.Done():
 								t.Fatal("missing exhaustion diagnostic")
 							}
@@ -580,8 +575,20 @@ func TestExcelBPSPermissionAnd500FailoverAcrossClientProtocols(t *testing.T) {
 					require.NotContains(t, rec.Body.String(), "PRIVATE_UPSTREAM")
 				}
 				calls := upstream.calls()
-				require.Len(t, calls, 2)
-				require.NotEqual(t, calls[0], calls[1])
+				wantCalls := 2
+				if failure.exhausted && failure.status >= 500 {
+					wantCalls = 4
+				}
+				require.Len(t, calls, wantCalls)
+				if failure.status >= 500 {
+					require.Equal(t, calls[0], calls[1])
+					if failure.exhausted {
+						require.Equal(t, calls[2], calls[3])
+						require.NotEqual(t, calls[0], calls[2])
+					}
+				} else {
+					require.NotEqual(t, calls[0], calls[1])
+				}
 				require.Equal(t, gjson.GetBytes(upstream.bodies[0], "input").Raw, gjson.GetBytes(upstream.bodies[1], "input").Raw)
 				for _, url := range upstream.urls {
 					require.Equal(t, basispoints.ResponsesURL, url)
@@ -591,29 +598,30 @@ func TestExcelBPSPermissionAnd500FailoverAcrossClientProtocols(t *testing.T) {
 					wantLogs = 0
 				}
 				if failure.event != "" {
-					wantLogs = 2
+					wantLogs = wantCalls
 				}
-				logs := map[int64]*service.UsageLog{}
+				logs := make([]*service.UsageLog, 0, wantLogs)
 				for range wantLogs {
 					select {
 					case log := <-usage.created:
-						logs[log.AccountID] = log
+						require.Equal(t, service.UsageAuthorizationModeBPS, log.AuthorizationMode)
+						logs = append(logs, log)
 					case <-time.After(3 * time.Second):
 						t.Fatal("each metered attempt must be recorded before failover completes")
 					}
 				}
 				require.Len(t, logs, wantLogs)
 				if !failure.exhausted {
-					require.Equal(t, 3, logs[calls[1]].InputTokens)
-					require.Equal(t, 1, logs[calls[1]].OutputTokens)
+					require.Equal(t, 3, logs[len(logs)-1].InputTokens)
+					require.Equal(t, 1, logs[len(logs)-1].OutputTokens)
 				}
 				if failure.event != "" {
-					require.Equal(t, 7, logs[calls[0]].InputTokens)
-					require.Equal(t, 2, logs[calls[0]].OutputTokens)
-					require.NotEqual(t, logs[calls[0]].RequestID, logs[calls[1]].RequestID)
+					require.Equal(t, 7, logs[0].InputTokens)
+					require.Equal(t, 2, logs[0].OutputTokens)
+					require.NotEqual(t, logs[0].RequestID, logs[len(logs)-1].RequestID)
 					if failure.exhausted {
-						require.Equal(t, 7, logs[calls[1]].InputTokens)
-						require.Equal(t, 2, logs[calls[1]].OutputTokens)
+						require.Equal(t, 7, logs[len(logs)-1].InputTokens)
+						require.Equal(t, 2, logs[len(logs)-1].OutputTokens)
 					}
 				}
 				require.Empty(t, usage.created, "do not bill the failed attempt twice")
@@ -657,10 +665,13 @@ func TestExcelBPSAttachment429NeverSwitchesFileOwner(t *testing.T) {
 				defer cancel()
 				client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)
 				require.NoError(t, err)
-				defer client.CloseNow()
+				defer func() { _ = client.CloseNow() }()
 				require.NoError(t, client.Write(ctx, coderws.MessageText, raw))
-				_, _, err = client.Read(ctx)
-				require.Equal(t, coderws.StatusTryAgainLater, coderws.CloseStatus(err))
+				_, event, err := client.Read(ctx)
+				require.NoError(t, err)
+				require.Equal(t, "error", gjson.GetBytes(event, "type").String())
+				require.Contains(t, string(event), "basispoints_rate_limited")
+				require.NoError(t, client.CloseNow())
 				select {
 				case c = <-done:
 				case <-ctx.Done():
@@ -764,7 +775,9 @@ func TestExcelBPS429PoolPrefersBPSBeforeNative(t *testing.T) {
 					service.SettingKeyExcelBPSImageRelayEnabled: "true", service.SettingKeyExcelBPSImageMode: "native",
 				}})
 				c, rec := newExcelBPSFailoverTestContext(t.Context(), protocol != "json")
-				c.MustGet(string(middleware2.ContextKeyAPIKey)).(*service.APIKey).Group.AllowMessagesDispatch = true
+				apiKey, ok := c.MustGet(string(middleware2.ContextKeyAPIKey)).(*service.APIKey)
+				require.True(t, ok)
+				apiKey.Group.AllowMessagesDispatch = true
 				if protocol == "ws" {
 					router := gin.New()
 					done := make(chan struct{})
@@ -780,7 +793,7 @@ func TestExcelBPS429PoolPrefersBPSBeforeNative(t *testing.T) {
 					defer cancel()
 					client, _, dialErr := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)
 					require.NoError(t, dialErr)
-					defer client.CloseNow()
+					defer func() { _ = client.CloseNow() }()
 					require.NoError(t, client.Write(ctx, coderws.MessageText, raw))
 					for {
 						_, event, readErr := client.Read(ctx)
@@ -789,8 +802,8 @@ func TestExcelBPS429PoolPrefersBPSBeforeNative(t *testing.T) {
 							break
 						}
 						require.NoError(t, readErr)
-						if gjson.GetBytes(event, "type").String() == "response.completed" || (outcome == "native_rejected" && (gjson.GetBytes(event, "type").String() == "error" || gjson.GetBytes(event, "type").String() == "response.failed")) {
-							client.CloseNow()
+						if gjson.GetBytes(event, "type").String() == "response.completed" || ((outcome == "native_rejected" || outcome == "no_native_grant") && (gjson.GetBytes(event, "type").String() == "error" || gjson.GetBytes(event, "type").String() == "response.failed")) {
+							_ = client.CloseNow()
 							break
 						}
 					}
@@ -809,16 +822,17 @@ func TestExcelBPS429PoolPrefersBPSBeforeNative(t *testing.T) {
 					default:
 						h.Responses(c)
 					}
-					if outcome == "no_native_grant" {
+					switch outcome {
+					case "no_native_grant":
 						require.Equal(t, 429, rec.Code)
 						if protocol == "messages" {
 							require.Contains(t, rec.Body.String(), "rate_limit_error")
 						} else {
 							require.Contains(t, rec.Body.String(), "basispoints_rate_limited")
 						}
-					} else if outcome == "native_rejected" {
+					case "native_rejected":
 						require.Equal(t, 400, rec.Code, rec.Body.String())
-					} else {
+					default:
 						require.Equal(t, 200, rec.Code, rec.Body.String())
 						require.Contains(t, rec.Body.String(), "done")
 					}
@@ -848,5 +862,78 @@ func TestExcelBPS429PoolPrefersBPSBeforeNative(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestTurnRecoveryWSHandlerExhaustedThenTwoSuccessfulTurns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var recovered atomic.Bool
+	upstream := &excelBPSFailoverUpstream{answer: func(call int) *http.Response {
+		if !recovered.Load() {
+			return &http.Response{StatusCode: 503, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"server_error","message":"PRIVATE_UPSTREAM"}}`))}
+		}
+		return excelBPSCompleted()
+	}}
+	h := newExcelBPSFailoverTestHandler(t, upstream, false)
+	c, _ := newExcelBPSFailoverTestContext(t.Context(), true)
+	completed := make(chan struct{})
+	router := gin.New()
+	router.GET("/v1/responses", func(wsCtx *gin.Context) {
+		defer close(completed)
+		wsCtx.Set(string(middleware2.ContextKeyAPIKey), c.MustGet(string(middleware2.ContextKeyAPIKey)))
+		wsCtx.Set(string(middleware2.ContextKeyUser), c.MustGet(string(middleware2.ContextKeyUser)))
+		h.ResponsesWebSocket(wsCtx)
+	})
+	server := httptest.NewServer(router)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
+	defer cancel()
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)
+	require.NoError(t, err)
+	defer func() { _ = client.CloseNow() }()
+	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-6-astra","input":"failed turn marker","event_id":"failed_request"}`)))
+	for {
+		_, event, err := client.Read(ctx)
+		require.NoError(t, err)
+		require.NotContains(t, string(event), "PRIVATE_UPSTREAM")
+		typ := gjson.GetBytes(event, "type").String()
+		if typ == "error" || typ == "response.failed" {
+			break
+		}
+	}
+	firstCalls := len(upstream.calls())
+	calls := upstream.calls()
+	require.Len(t, calls, 4)
+	require.Equal(t, calls[0], calls[1], "retry the actual first owner")
+	require.Equal(t, calls[2], calls[3], "retry the actual second owner")
+	require.NotEqual(t, calls[0], calls[2], "switch to an independent owner")
+	require.ElementsMatch(t, []int64{1, 1, 2, 2}, calls)
+	recovered.Store(true)
+	for _, marker := range []string{"second fresh request", "third fresh request"} {
+		next := map[string]any{"type": "response.create", "model": "gpt-6-astra", "input": marker}
+		if marker == "third fresh request" {
+			next["previous_response_id"] = "resp_bps_failover"
+		}
+		payload, _ := json.Marshal(next)
+		require.NoError(t, client.Write(ctx, coderws.MessageText, payload))
+		for {
+			_, event, err := client.Read(ctx)
+			require.NoError(t, err)
+			require.NotEqual(t, "error", gjson.GetBytes(event, "type").String(), string(event))
+			require.NotEqual(t, "response.failed", gjson.GetBytes(event, "type").String(), string(event))
+			if gjson.GetBytes(event, "type").String() == "response.completed" {
+				break
+			}
+		}
+	}
+	require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+	select {
+	case <-completed:
+	case <-ctx.Done():
+		t.Fatal("handler did not release connection")
+	}
+	require.Len(t, upstream.calls(), firstCalls+2)
+	for _, body := range upstream.bodies[firstCalls:] {
+		require.NotContains(t, string(body), "failed turn marker")
 	}
 }

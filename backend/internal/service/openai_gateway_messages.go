@@ -34,6 +34,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	account = excelBPSPoolForwardAccount(ctx, c, account)
+	setActualOpenAIUsageAuthorizationMode(c, nativeOpenAIUsageAuthorizationMode(account))
 	// 工具 Schema 清洗必须先于所有分流：下游每条路径（原生 Anthropic 直通、
 	// Chat Completions 转换、Responses 转换）都会把 tools 原样带给上游，而
 	// xAI / Moonshot 等严格校验方会因 input_schema 里的 required:null 或
@@ -691,6 +692,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	c.JSON(http.StatusOK, anthropicResp)
 
 	result := &OpenAIForwardResult{
+		AuthorizationMode:             nativeOpenAIUsageAuthorizationMode(account),
 		RequestID:                     requestID,
 		UpstreamHeaders:               resp.Header,
 		ResponseID:                    finalResponse.ID,
@@ -998,6 +1000,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	// resultWithUsage builds the final result snapshot.
 	resultWithUsage := func() *OpenAIForwardResult {
 		out := &OpenAIForwardResult{
+			AuthorizationMode:             nativeOpenAIUsageAuthorizationMode(account),
 			RequestID:                     requestID,
 			UpstreamHeaders:               resp.Header,
 			ResponseID:                    responseID,

@@ -179,6 +179,7 @@ func TestExcelBPSImagesForwardContract(t *testing.T) {
 	}
 
 	require.Equal(t, excelBPSImagesEndpoint, result.UpstreamEndpoint)
+	require.Equal(t, UsageAuthorizationModeBPS, result.AuthorizationMode)
 	require.Equal(t, excelBPSImagesEndpoint, GetActualOpenAIUpstreamEndpoint(c))
 	require.Equal(t, "gpt-image-2", result.UpstreamModel)
 	require.Equal(t, 1, result.ImageCount)
@@ -276,6 +277,7 @@ func TestExcelBPSImagesEditsFormatRejectionFallsBackToCodex(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{basispoints.ImagesEditsURL, codexDirectImagesEditsURL}, urls)
 	require.Equal(t, "/backend-api/codex/images/edits", result.UpstreamEndpoint)
+	require.Equal(t, UsageAuthorizationModeNative, result.AuthorizationMode)
 }
 
 func TestExcelBPSImagesFormatRejectionFallsBackToCodex(t *testing.T) {
@@ -294,6 +296,7 @@ func TestExcelBPSImagesFormatRejectionFallsBackToCodex(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, []string{basispoints.ImagesGenerationsURL, codexDirectImagesURL}, urls)
 			require.Equal(t, "/backend-api/codex/images/generations", result.UpstreamEndpoint)
+			require.Equal(t, UsageAuthorizationModeNative, result.AuthorizationMode)
 			require.NotEqual(t, excelBPSImagesEndpoint, GetActualOpenAIUpstreamEndpoint(c))
 			require.False(t, svc.isExcelBPSCoolingDown(account, "gpt-image-2"))
 			require.NotContains(t, rec.Body.String(), "PRIVATE_UPSTREAM")

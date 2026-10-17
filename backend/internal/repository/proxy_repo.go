@@ -28,12 +28,18 @@ type proxyRepository struct {
 
 const proxyProbeOutboxAccountChunkSize = 500
 
-// Internal gateway contexts retain native access. HTTP actors are constrained
-// at the repository, so legacy lists, exports, tests and batch routes cannot
-// turn an object id into access to another supplier's proxy.
+// Internal gateway contexts retain native access. Native admin inventory is
+// platform-owned, including for super admins; supplier inventory requires an
+// explicit vendor scope so lists/imports cannot select an unusable foreign ID.
+func platformProxyScope(ctx context.Context) bool {
+	actor, ok := authz.FromContext(ctx)
+	_, scoped := authz.VendorScopeFromContext(ctx)
+	return ok && (actor.Role == authz.Admin || actor.Role == authz.SuperAdmin && !scoped)
+}
+
 func proxyScopePredicate(ctx context.Context) func(*entsql.Selector) {
 	return func(q *entsql.Selector) {
-		if actor, ok := authz.FromContext(ctx); ok && actor.Role == authz.Admin {
+		if platformProxyScope(ctx) {
 			q.Where(entsql.IsNull(q.C("vendor_id")))
 			return
 		}
@@ -44,7 +50,7 @@ func proxyScopePredicate(ctx context.Context) func(*entsql.Selector) {
 }
 
 func proxySQLScope(ctx context.Context, alias string, args *[]any) string {
-	if actor, ok := authz.FromContext(ctx); ok && actor.Role == authz.Admin {
+	if platformProxyScope(ctx) {
 		return " AND " + alias + "vendor_id IS NULL"
 	}
 	if scope, ok := authz.VendorScopeFromContext(ctx); ok {
