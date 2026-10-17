@@ -834,6 +834,8 @@ func openAIWSErrorHTTPStatusFromRaw(codeRaw, errTypeRaw string) int {
 		// Match Responses SSE's request-scoped capacity classification. This
 		// is a semantic status: a successfully upgraded WS has no HTTP 5xx.
 		return http.StatusServiceUnavailable
+	case code == "first_output_timeout":
+		return http.StatusGatewayTimeout
 	default:
 		return http.StatusBadGateway
 	}
