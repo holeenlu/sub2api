@@ -200,6 +200,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ImageOutputTokens:    result.Usage.ImageOutputTokens,
 	}
 
+	observed := ClaudeUsage{InputTokens: max(result.Usage.InputTokens-result.Usage.CacheReadInputTokens-result.Usage.CacheCreationInputTokens, 0), OutputTokens: result.Usage.OutputTokens, CacheReadInputTokens: result.Usage.CacheReadInputTokens, CacheCreationInputTokens: result.Usage.CacheCreationInputTokens}
+	billed := observed
+	billed.InputTokens, billed.CacheCreationInputTokens = actualInputTokens, cacheCreationTokens
+	logGatewayUsageAccounting(ctx, account, apiKey, result.RequestID, input.SessionID, observed, billed, false, false)
+
 	// Get rate multiplier
 	multiplier := 1.0
 	if s.cfg != nil {
