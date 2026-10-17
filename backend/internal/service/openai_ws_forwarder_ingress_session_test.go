@@ -5967,3 +5967,67 @@ func TestOpenAIWSLocalInputRejectionKeepsConnection(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIWSIngressUpstreamFailureRetainsMeteredTurn(t *testing.T) {
+	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough, OpenAIWSIngressModeHTTPBridge} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := passthroughLifecycleConfig()
+			cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 0
+			upstream := newStagedPassthroughConn()
+			svc := newPassthroughLifecycleService(cfg, upstream)
+			pool := newOpenAIWSConnPool(cfg)
+			dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{&nativeCodexStagedConn{upstream}}}
+			pool.setClientDialerForTest(dialer)
+			svc.openaiWSPool = pool
+			t.Cleanup(pool.Close)
+			account := passthroughLifecycleAccount()
+			account.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
+			const metered = `{"type":"response.created","response":{"id":"resp_metered_failure","usage":{"input_tokens":11,"output_tokens":2,"input_tokens_details":{"cached_tokens":3,"cache_write_tokens":4}}}}`
+			if mode == OpenAIWSIngressModeHTTPBridge {
+				svc.httpUpstream = &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(io.MultiReader(strings.NewReader("data: "+metered+"\n\n"), passthroughErrReadCloser{err: io.ErrUnexpectedEOF}))}}
+			} else {
+				upstream.Send(metered)
+				upstream.Fail(io.ErrUnexpectedEOF)
+			}
+			results := make(chan *OpenAIForwardResult, 2)
+			hooks := &OpenAIWSIngressHooks{AfterTurn: func(_ int, result *OpenAIForwardResult, _ error) { results <- result }}
+			client, done := startNativeWSMemorySession(t, svc, account, `{"type":"response.create","model":"gpt-5.1","input":"hi"}`, hooks)
+			defer client.CloseNow()
+			readDone := make(chan struct{})
+			go func() {
+				defer close(readDone)
+				for {
+					if _, _, err := client.Read(context.Background()); err != nil {
+						return
+					}
+				}
+			}()
+			defer func() { client.CloseNow(); <-readDone }()
+			select {
+			case result := <-results:
+				require.NotNil(t, result)
+				require.Equal(t, 11, result.Usage.InputTokens)
+				require.Equal(t, 2, result.Usage.OutputTokens)
+				require.Equal(t, 3, result.Usage.CacheReadInputTokens)
+				require.Equal(t, 4, result.Usage.CacheCreationInputTokens)
+				require.Empty(t, result.UpstreamTerminalEvent)
+			case <-time.After(3 * time.Second):
+				client.CloseNow()
+				t.Fatal("metered failed turn was discarded or replayed")
+			}
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				client.CloseNow()
+				t.Fatal("failed upstream did not finish the turn")
+			}
+			require.Empty(t, results, "one metered attempt reaches accounting once")
+			if mode == OpenAIWSIngressModeCtxPool {
+				dialer.mu.Lock()
+				count := dialer.dialCount
+				dialer.mu.Unlock()
+				require.Equal(t, 1, count, "metered turn must not reconnect and replay")
+			}
+		})
+	}
+}

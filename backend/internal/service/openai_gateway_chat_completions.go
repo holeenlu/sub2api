@@ -350,7 +350,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account, vendorDispatchGroup(c))
+	resp, err := s.doOpenAIHTTPUpstream(c, upstreamReq, proxyURL, account)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -662,10 +662,23 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (out *OpenAIForwardResult, outErr error) {
 	requestID := resp.Header.Get("x-request-id")
 
 	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, "openai chat_completions buffered", requestID)
+	defer func() {
+		if out == nil && outErr != nil && openAIUsageHasTokens(&usage) {
+			out = &OpenAIForwardResult{AuthorizationMode: nativeOpenAIUsageAuthorizationMode(account),
+				RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,
+				Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel,
+				UpstreamResponseModel:         observedUpstreamResponseModel(c),
+				UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+				UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
+				Duration:                      time.Since(startTime), ClientDisconnect: c.Request.Context().Err() != nil}
+			outErr = stopOpenAIMeteredReplay(outErr)
+		}
+	}()
+
 	if err != nil {
 		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
 	}
@@ -830,7 +843,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 	requestBodyLen int,
-) (*OpenAIForwardResult, error) {
+) (out *OpenAIForwardResult, outErr error) {
+	drain := newOpenAIHTTPUsageDrain(c.Request.Context(), resp.Body.Close)
+	defer drain.stop()
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -896,7 +911,19 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		return out
 	}
 
+	defer func() {
+		if out == nil && outErr != nil && openAIUsageHasTokens(&usage) {
+			out = resultWithUsage()
+		}
+		if out != nil {
+			out.ClientDisconnect = clientDisconnected || drain.disconnected()
+			if outErr != nil && openAIUsageHasTokens(&out.Usage) {
+				outErr = stopOpenAIMeteredReplay(outErr)
+			}
+		}
+	}()
 	processDataLine := func(payload string) bool {
+		clientDisconnected = clientDisconnected || drain.disconnected()
 		payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 		if firstChunk {
 			firstChunk = false
@@ -960,6 +987,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					// 无条件置位：成功路径防 finalizeStream 重复 [DONE]；写失败意味着连接已不可写，
 					// finalizeStream 的 [DONE] 同样发不出去，统一抑制。
 					clientDisconnected = true
+					drain.start()
 				}
 				return true
 			}
@@ -996,6 +1024,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			} else if c != nil && c.Writer != nil && !clientDisconnected {
 				if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", errorPayload); err != nil {
 					clientDisconnected = true
+					drain.start()
 					logger.L().Info("openai chat_completions stream: client disconnected while writing upstream error",
 						zap.String("request_id", requestID),
 					)
@@ -1041,6 +1070,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					for _, pending := range pendingSSE {
 						if _, err := fmt.Fprint(c.Writer, pending); err != nil {
 							clientDisconnected = true
+							drain.start()
 							logger.L().Info("openai chat_completions stream: client disconnected while flushing pending chunks",
 								zap.String("request_id", requestID),
 							)
@@ -1055,6 +1085,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 					clientDisconnected = true
+					drain.start()
 					logger.L().Info("openai chat_completions stream: client disconnected, continuing to drain upstream for billing",
 						zap.String("request_id", requestID),
 					)
@@ -1101,6 +1132,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					for _, pending := range pendingSSE {
 						if _, err := fmt.Fprint(c.Writer, pending); err != nil {
 							clientDisconnected = true
+							drain.start()
 							logger.L().Info("openai chat_completions stream: client disconnected during pending final flush",
 								zap.String("request_id", requestID),
 							)
@@ -1115,6 +1147,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 					clientDisconnected = true
+					drain.start()
 					logger.L().Info("openai chat_completions stream: client disconnected during final flush",
 						zap.String("request_id", requestID),
 					)
@@ -1131,6 +1164,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				for _, pending := range pendingSSE {
 					if _, err := fmt.Fprint(c.Writer, pending); err != nil {
 						clientDisconnected = true
+						drain.start()
 						logger.L().Info("openai chat_completions stream: client disconnected during final pending flush",
 							zap.String("request_id", requestID),
 						)
@@ -1146,6 +1180,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			writeStreamHeaders()
 			if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err != nil {
 				clientDisconnected = true
+				drain.start()
 				logger.L().Info("openai chat_completions stream: client disconnected during done flush",
 					zap.String("request_id", requestID),
 				)
@@ -1330,6 +1365,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					zap.String("request_id", requestID),
 				)
 				clientDisconnected = true
+				drain.start()
 				continue
 			}
 			c.Writer.Flush()

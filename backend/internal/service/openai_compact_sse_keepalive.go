@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -61,8 +62,27 @@ func (s *OpenAIGatewayService) doOpenAIResponsesUpstream(c *gin.Context, request
 		stop := startOpenAISSEKeepalive(c, time.Duration(s.cfg.Gateway.StreamKeepaliveInterval)*time.Second)
 		defer stop()
 	}
-	response, err := s.doOpenAIUpstream(request, proxyURL, account, vendorDispatchGroup(c))
+	response, err := s.doOpenAIHTTPUpstream(c, request, proxyURL, account)
 	timing.markResponse(response, err)
+	return response, err
+}
+
+// doOpenAIHTTPUpstream shares cancellation ownership across the header wait
+// and body read. A detached request may drain usage, but never run indefinitely
+// after the downstream has gone away.
+func (s *OpenAIGatewayService) doOpenAIHTTPUpstream(c *gin.Context, request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
+	if c == nil || c.Request == nil {
+		return s.doOpenAIUpstream(request, proxyURL, account, vendorDispatchGroup(c))
+	}
+	upstreamCtx, cancel := context.WithCancel(request.Context())
+	drain := newOpenAIHTTPUsageDrain(c.Request.Context(), func() error { cancel(); return nil })
+	cleanup := func() { drain.stop(); cancel() }
+	response, err := s.doOpenAIUpstream(request.WithContext(upstreamCtx), proxyURL, account, vendorDispatchGroup(c))
+	if err != nil || response == nil || response.Body == nil {
+		cleanup()
+	} else {
+		response.Body = &openAIRequestContextReadCloser{ReadCloser: response.Body, cleanup: cleanup}
+	}
 	return response, err
 }
 
