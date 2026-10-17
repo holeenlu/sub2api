@@ -136,14 +136,6 @@ func (s *RateLimitService) SetAccountRuntimeBlocker(blocker AccountRuntimeBlocke
 	s.runtimeBlocker = blocker
 }
 
-func (s *RateLimitService) IsOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx context.Context) bool {
-	if s == nil || s.settingService == nil {
-		return false
-	}
-	gateway := &OpenAIGatewayService{rateLimitService: s}
-	return gateway.isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx)
-}
-
 func (s *RateLimitService) notifyAccountSchedulingBlocked(account *Account, until time.Time, reason string) {
 	if s == nil || s.runtimeBlocker == nil || account == nil {
 		return
@@ -171,10 +163,10 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 	}
 
 	now := time.Now().UTC()
-	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
+	thresholds, thresholdsResolved := s.settingService.GetAccountSchedulingThresholds(ctx)
 	decision := EvaluateAccountSchedulingThreshold(account, thresholds, now)
 	if !decision.ShouldPause || decision.Until == nil || !decision.Until.After(now) {
-		s.applyAnthropicFableSchedulingThreshold(ctx, account, thresholds, now)
+		s.applyAnthropicFableSchedulingThreshold(ctx, account, thresholds, thresholdsResolved, now)
 		return false
 	}
 
@@ -228,9 +220,17 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 	return true
 }
 
-func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Context, account *Account, thresholds map[string]int, now time.Time) {
-	decision := evaluateAnthropicFableSchedulingThreshold(account, thresholds, now)
+func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Context, account *Account, thresholds map[string]int, thresholdsResolved bool, now time.Time) {
+	decision := evaluateAnthropicFableSchedulingThreshold(account, thresholds, thresholdsResolved, now)
 	if !decision.ShouldPause || decision.Until == nil || !decision.Until.After(now) {
+		// 只有拿到判据才敢解除：ShouldPause=false 既可能是「确认低于阈值」，也可能是
+		// 「这份账号副本上根本没有采样」。后者当成「没越线」会把刚打上的限流清掉，
+		// 账号在越线状态下继续接 Fable 请求。
+		// 例外是旧版本用共享 7d 写出的 Fable 阈值限流：共享 7d 已不再属于本 scope，
+		// 这条 reason 本身就是可以解除的正证据，即使当前缺少 7d_oi 采样也应清掉。
+		if decision.HasEvidence || hasDeprecatedAnthropicFableSharedWindowThreshold(account) {
+			s.releaseAnthropicFableSchedulingThreshold(ctx, account, now)
+		}
 		return
 	}
 	if account.isRateLimitActiveForKey(anthropicFableRateLimitKey) {
@@ -241,6 +241,7 @@ func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Co
 		Platform:         decision.Platform,
 		Window:           decision.Window,
 		Scope:            decision.Scope,
+		UntilSource:      decision.UntilSource,
 		ThresholdPercent: decision.ThresholdPercent,
 		UsedPercent:      decision.UsedPercent,
 		Until:            *decision.Until,
@@ -263,6 +264,66 @@ func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Co
 		"threshold_percent", decision.ThresholdPercent,
 		"used_percent", decision.UsedPercent,
 		"until", decision.Until.UTC())
+}
+
+func hasDeprecatedAnthropicFableSharedWindowThreshold(account *Account) bool {
+	if account == nil {
+		return false
+	}
+	reason := account.modelRateLimitReason(anthropicFableRateLimitKey)
+	payload, ok := parseTempUnschedReasonPayload(reason)
+	return ok && payload.Source == AccountSchedulingThresholdReasonSource &&
+		payload.Window == "7d" && payload.Scope == anthropicFableRateLimitKey
+}
+
+// releaseAnthropicFableSchedulingThreshold 在账号不再越线时解除由阈值打上的 Fable
+// 限流。阈值是给运维反复调的旋钮：设成 50 之后改回 70，不主动解除的话账号要一直被封
+// 到窗口重置（最长七天）。用量因窗口滚动回落到阈值以下时同理。
+//
+// 只解除 source=account_scheduling_threshold 的限流。上游 429 打的
+// anthropic_7d_oi_window_exhausted 必须原样保留——窗口是真的耗尽了，解除只会让请求
+// 继续撞上游 429。
+func (s *RateLimitService) releaseAnthropicFableSchedulingThreshold(ctx context.Context, account *Account, now time.Time) {
+	if s == nil || s.accountRepo == nil || account == nil || account.ID <= 0 {
+		return
+	}
+	resetAt := account.modelRateLimitResetAt(anthropicFableRateLimitKey)
+	if resetAt == nil || !resetAt.After(now) {
+		return
+	}
+	// reason 既是「这条限流是阈值打的」的判据，也是清除时的 CAS 令牌：这份账号副本是
+	// 选号时刻从 Redis 拷来的，判断与 UPDATE 之间上游 429 完全可能把同一个 scope 改写
+	// 成窗口耗尽限流，那条限流必须原样保留。
+	reason := account.modelRateLimitReason(anthropicFableRateLimitKey)
+	if !IsAccountSchedulingThresholdReason(reason) {
+		return
+	}
+
+	// A full-account reset would clear unrelated upstream rate limits. The
+	// concrete account repository supplies the scoped compare-and-swap operation.
+	repo, ok := s.accountRepo.(interface {
+		ClearModelRateLimit(context.Context, int64, string, string) (bool, error)
+	})
+	if !ok {
+		return
+	}
+	cleared, err := repo.ClearModelRateLimit(ctx, account.ID, anthropicFableRateLimitKey, reason)
+	if err != nil {
+		slog.Warn("anthropic_fable_scheduling_threshold_clear_model_limit_failed",
+			"account_id", account.ID,
+			"scope", anthropicFableRateLimitKey,
+			"error", err)
+		return
+	}
+	if !cleared {
+		return
+	}
+	clearAccountModelRateLimitSnapshot(account, anthropicFableRateLimitKey)
+
+	slog.Info("anthropic_fable_scheduling_threshold_model_limit_cleared",
+		"account_id", account.ID,
+		"scope", anthropicFableRateLimitKey,
+		"previous_until", resetAt.UTC())
 }
 
 func accountHasSameSchedulingThresholdPause(account *Account, until time.Time, reason string) bool {
@@ -331,7 +392,17 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 // HandleUpstreamError 处理上游错误响应，标记账号状态
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
+	if IsUpstreamContentRefusal(responseBody) {
+		return false
+	}
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
+	if supportsAnthropicPassiveUsage(account) && s.accountRepo != nil {
+		s.samplePassiveUsageFromHeaders(ctx, account, headers)
+	}
+	if account != nil && account.IsOpenAI() && isOpenAIImagePermissionError(statusCode, responseBody) {
+		_ = s.HandleOpenAIImageCapabilityLoss(ctx, account, statusCode, responseBody)
+		return false
+	}
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
 	s.maybeHandleOpenAITeamLinkedError(ctx, account, statusCode, responseBody)
@@ -1643,10 +1714,8 @@ func (s *RateLimitService) persistAnthropicFableWindowLimit(ctx context.Context,
 	if limit == nil {
 		return false
 	}
-	// 429 响应头本身携带最新的窗口用量（7d_oi utilization=1.0）。限流期内
-	// Fable 请求不再调度到该账号，若不在此处采样，7d F 进度条会冻结在
-	// 限流前的旧值直到窗口重置。
-	s.samplePassiveUsageFromHeaders(ctx, account, headers)
+	// HandleUpstreamError has already sampled this response, including overage
+	// and representative-claim, before entering model-specific scheduling.
 	if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, anthropicFableRateLimitKey, limit.resetAt, limit.reason); err != nil {
 		slog.Warn("anthropic_fable_window_rate_limit_set_failed",
 			"account_id", account.ID,
@@ -2007,9 +2076,6 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 // UpdateSessionWindow 从成功响应更新5h窗口状态
 func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Account, headers http.Header) {
 	status := headers.Get("anthropic-ratelimit-unified-5h-status")
-	if status == "" {
-		return
-	}
 
 	// 检查是否需要初始化时间窗口
 	// 对于 Setup Token 账号，首次成功请求时需要预测时间窗口
@@ -2052,23 +2118,25 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 		slog.Info("account_session_window_initialized", "account_id", account.ID, "window_start", start, "window_end", end, "status", status)
 	}
 
-	// 窗口重置时清除旧的 utilization 和被动采样数据，避免残留上个窗口的数据
+	// 5h 重置只清除本窗口的 utilization；7d / 7d_oi 独立重置，
+	// 上游本次没有下发周窗口时必须保留已持久化的快照。
 	if windowEnd != nil && needInitWindow {
 		_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
-			"session_window_utilization":      nil,
-			"passive_usage_7d_utilization":    nil,
-			"passive_usage_7d_reset":          nil,
-			"passive_usage_7d_oi_utilization": nil,
-			"passive_usage_7d_oi_reset":       nil,
-			"passive_usage_sampled_at":        nil,
+			"session_window_utilization": nil,
 		})
 	}
 
-	if err := s.accountRepo.UpdateSessionWindow(ctx, account.ID, windowStart, windowEnd, status); err != nil {
-		slog.Warn("session_window_update_failed", "account_id", account.ID, "error", err)
+	if status != "" || windowEnd != nil {
+		windowStatus := status
+		if windowStatus == "" {
+			windowStatus = account.SessionWindowStatus
+		}
+		if err := s.accountRepo.UpdateSessionWindow(ctx, account.ID, windowStart, windowEnd, windowStatus); err != nil {
+			slog.Warn("session_window_update_failed", "account_id", account.ID, "error", err)
+		}
 	}
 
-	// 被动采样：从响应头收集 5h + 7d + 7d_oi utilization，合并为一次 DB 写入
+	// 额度响应头可以独立于 5h status 下发，仍需保存到数据库。
 	s.samplePassiveUsageFromHeaders(ctx, account, headers)
 
 	// 如果状态为allowed且之前有限流，说明窗口已重置，清除限流状态
@@ -2082,45 +2150,54 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 // samplePassiveUsageFromHeaders 从 Anthropic 响应头收集 5h/7d/7d_oi 的
 // utilization 与 reset 被动采样数据，合并为一次 Extra 写入。无数据时不写。
 func (s *RateLimitService) samplePassiveUsageFromHeaders(ctx context.Context, account *Account, headers http.Header) {
-	extraUpdates := make(map[string]any, 6)
-	// 5h utilization（0-1 小数），供 estimateSetupTokenUsage 使用
-	if utilStr := headers.Get("anthropic-ratelimit-unified-5h-utilization"); utilStr != "" {
-		if util, err := strconv.ParseFloat(utilStr, 64); err == nil {
-			extraUpdates["session_window_utilization"] = util
+	observedAt := time.Now().UTC()
+	fields := anthropicHeaderObservations(headers, observedAt)
+	// A newly observed window must not inherit utilization from its predecessor.
+	for _, window := range []struct{ name, utilKey, resetKey string }{
+		{"five_hour", "session_window_utilization", ""},
+		{"seven_day", "passive_usage_7d_utilization", "passive_usage_7d_reset"},
+		{"seven_day_fable", "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"},
+	} {
+		reset, seen := fields[window.name+".resets_at"]
+		if !seen {
+			continue
+		}
+		next, _ := parseTime(reset.Value.(string))
+		var old int64
+		if window.resetKey == "" && account.SessionWindowEnd != nil {
+			old = account.SessionWindowEnd.Unix()
+		} else {
+			old = int64(parseExtraFloat64(account.Extra[window.resetKey]))
+		}
+		if _, hasUtil := fields[window.name+".utilization"]; !hasUtil && old != 0 && old != next.Unix() {
+			putUsageObservation(fields, window.name+".utilization", nil, "upstream_headers", &observedAt)
 		}
 	}
-	// 7d utilization（0-1 小数）
-	if utilStr := headers.Get("anthropic-ratelimit-unified-7d-utilization"); utilStr != "" {
-		if util, err := strconv.ParseFloat(utilStr, 64); err == nil {
-			extraUpdates["passive_usage_7d_utilization"] = util
+	extraUpdates := persistableAnthropicObservations(fields, anthropicCredentialIdentity(account))
+	for field, key := range map[string]string{
+		"five_hour.utilization":       "session_window_utilization",
+		"seven_day.utilization":       "passive_usage_7d_utilization",
+		"seven_day.resets_at":         "passive_usage_7d_reset",
+		"seven_day_fable.utilization": "passive_usage_7d_oi_utilization",
+		"seven_day_fable.resets_at":   "passive_usage_7d_oi_reset",
+	} {
+		observation, exists := fields[field]
+		if !exists {
+			continue
 		}
-	}
-	// 7d reset timestamp
-	if resetStr := headers.Get("anthropic-ratelimit-unified-7d-reset"); resetStr != "" {
-		if ts, err := strconv.ParseInt(resetStr, 10, 64); err == nil {
-			if ts > 1e11 {
-				ts = ts / 1000
-			}
-			extraUpdates["passive_usage_7d_reset"] = ts
+		if observation.Value == nil {
+			extraUpdates[key] = nil
+			continue
 		}
-	}
-	// 7d_oi (Fable 专属 7d 窗口) utilization（0-1 小数）
-	if utilStr := headers.Get("anthropic-ratelimit-unified-7d_oi-utilization"); utilStr != "" {
-		if util, err := strconv.ParseFloat(utilStr, 64); err == nil {
-			extraUpdates["passive_usage_7d_oi_utilization"] = util
-		}
-	}
-	// 7d_oi reset timestamp
-	if resetStr := headers.Get("anthropic-ratelimit-unified-7d_oi-reset"); resetStr != "" {
-		if ts, err := strconv.ParseInt(resetStr, 10, 64); err == nil {
-			if ts > 1e11 {
-				ts = ts / 1000
-			}
-			extraUpdates["passive_usage_7d_oi_reset"] = ts
+		if strings.HasSuffix(field, ".resets_at") {
+			reset, _ := parseTime(observation.Value.(string))
+			extraUpdates[key] = reset.Unix()
+		} else {
+			extraUpdates[key] = observation.Value.(float64) / 100
 		}
 	}
 	if len(extraUpdates) > 0 {
-		extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
+		extraUpdates["passive_usage_sampled_at"] = observedAt.Format(time.RFC3339)
 		if err := s.accountRepo.UpdateExtra(ctx, account.ID, extraUpdates); err != nil {
 			slog.Warn("passive_usage_update_failed", "account_id", account.ID, "error", err)
 		}
@@ -2398,12 +2475,18 @@ func (s *RateLimitService) HandleOpenAIImageCapabilityLoss(ctx context.Context, 
 	return true
 }
 
-// isOpenAIImageCapabilityLossError reports whether upstream rejected the
-// image_generation tool choice that sub2api itself put into the request body.
-// Only meaningful for self-built images requests, where tools always carries a
-// matching image_generation entry — upstream saying otherwise means the account
-// lost the capability.
+func isOpenAIImagePermissionError(statusCode int, body []byte) bool {
+	return statusCode == http.StatusForbidden && gjson.ValidBytes(body) &&
+		gjson.GetBytes(body, "error.type").String() == "permission_error" &&
+		strings.TrimSpace(gjson.GetBytes(body, "error.message").String()) == ImageGenerationPermissionMessage()
+}
+
+// The 400 variant applies only to self-built tools; explicit image permission
+// denial also applies to passthrough and must not disable text credentials.
 func isOpenAIImageCapabilityLossError(statusCode int, body []byte) bool {
+	if isOpenAIImagePermissionError(statusCode, body) {
+		return true
+	}
 	if statusCode != http.StatusBadRequest || len(body) == 0 {
 		return false
 	}

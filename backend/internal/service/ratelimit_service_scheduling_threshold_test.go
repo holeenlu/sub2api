@@ -96,6 +96,8 @@ type fableSchedulingThresholdRepoStub struct {
 	lastModelScope  string
 	lastModelReset  time.Time
 	lastModelReason string
+	clearCalls      int
+	clearReason     string
 }
 
 func (r *fableSchedulingThresholdRepoStub) SetModelRateLimit(_ context.Context, _ int64, scope string, resetAt time.Time, reason ...string) error {
@@ -227,4 +229,27 @@ func TestRateLimitService_ApplyAccountSchedulingThreshold_UnsupportedPlatformDoe
 	require.Equal(t, 0, accountRepo.tempCalls)
 	require.Nil(t, account.TempUnschedulableUntil)
 	require.Empty(t, account.TempUnschedulableReason)
+}
+
+func (r *fableSchedulingThresholdRepoStub) ClearModelRateLimit(_ context.Context, _ int64, _ string, reason string) (bool, error) {
+	r.clearCalls++
+	r.clearReason = reason
+	return true, nil
+}
+
+func TestFableThresholdReleaseRequiresEvidenceAndPreservesUpstreamLimit(t *testing.T) {
+	now := time.Now()
+	repo := &fableSchedulingThresholdRepoStub{}
+	rl := &RateLimitService{accountRepo: repo}
+	account := &Account{ID: 7, Platform: PlatformAnthropic, Extra: map[string]any{}}
+	reason := BuildAccountSchedulingThresholdReason("threshold")
+	setAccountModelRateLimitSnapshot(account, anthropicFableRateLimitKey, now.Add(time.Hour), reason, now)
+	rl.applyAnthropicFableSchedulingThreshold(context.Background(), account, map[string]int{PlatformAnthropic: 100}, false, now)
+	require.Zero(t, repo.clearCalls, "storage fallback must not be treated as disabling the threshold")
+	rl.applyAnthropicFableSchedulingThreshold(context.Background(), account, map[string]int{PlatformAnthropic: 100}, true, now)
+	require.Equal(t, 1, repo.clearCalls)
+	require.Equal(t, reason, repo.clearReason)
+	setAccountModelRateLimitSnapshot(account, anthropicFableRateLimitKey, now.Add(time.Hour), "anthropic_7d_oi_window_exhausted", now)
+	rl.applyAnthropicFableSchedulingThreshold(context.Background(), account, map[string]int{PlatformAnthropic: 100}, true, now)
+	require.Equal(t, 1, repo.clearCalls, "upstream 429 must retain its limit")
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -16,7 +17,10 @@ import (
 
 var claudeResetGrantIDPattern = regexp.MustCompile(`^[a-z0-9_-]{1,40}$`)
 
-const claudeResetUsageURL = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1"
+const (
+	claudeResetUsageURL          = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1"
+	claudeResetCreditSnapshotKey = "claude_reset_credit_snapshot"
+)
 
 // ClaudeResetCredit is deliberately free of upstream grant and organization IDs.
 type ClaudeResetCredit struct {
@@ -38,6 +42,7 @@ type ClaudeResetCredits struct {
 	CooldownUntil  *time.Time          `json:"cooldown_until,omitempty"`
 	WeeklyResetsAt *time.Time          `json:"weekly_resets_at,omitempty"`
 	FetchedAt      time.Time           `json:"fetched_at"`
+	CachePersisted bool                `json:"cache_persisted"`
 }
 
 type claudeResetGrant struct {
@@ -64,6 +69,7 @@ type claudeResetBlock struct {
 
 type claudeResetAccounts interface {
 	GetByID(context.Context, int64) (*Account, error)
+	UpdateExtra(context.Context, int64, map[string]any) error
 }
 type claudeResetTokens interface {
 	GetAccessToken(context.Context, *Account) (string, error)
@@ -105,13 +111,7 @@ func (s *ClaudeResetCreditService) account(ctx context.Context, id int64) (*Acco
 	if a == nil || a.Platform != PlatformAnthropic || a.Type != AccountTypeOAuth {
 		return nil, "", "", infraerrors.BadRequest("CLAUDE_RESET_OAUTH_REQUIRED", "Claude OAuth account required")
 	}
-	profile := false
-	for _, scope := range strings.Fields(a.GetCredential("scope")) {
-		if scope == "user:profile" {
-			profile = true
-		}
-	}
-	if !profile {
+	if !a.HasOAuthScope("user:profile") {
 		return nil, "", "", infraerrors.BadRequest("CLAUDE_RESET_PROFILE_SCOPE_REQUIRED", "user:profile scope required")
 	}
 	proxy := ""
@@ -147,7 +147,30 @@ func (s *ClaudeResetCreditService) query(ctx context.Context, id int64) (*Claude
 	if err != nil {
 		return nil, err
 	}
-	return projectClaudeResetCredits(block, s.now()), nil
+	status := projectClaudeResetCredits(block, s.now())
+	s.persistCredits(ctx, id, status)
+	return status, nil
+}
+
+// Persist only the public projection, never raw grant IDs or organization IDs.
+// Reset counts use a different endpoint from the passive usage windows, so
+// persisting 5h/7d observations cannot preserve this display snapshot.
+func (s *ClaudeResetCreditService) persistCredits(ctx context.Context, id int64, status *ClaudeResetCredits) {
+	var snapshot any
+	if status != nil {
+		copy := *status
+		copy.CachePersisted = true
+		snapshot = copy
+	}
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	err := s.accounts.UpdateExtra(persistCtx, id, map[string]any{claudeResetCreditSnapshotKey: snapshot})
+	if status != nil {
+		status.CachePersisted = err == nil
+	}
+	if err != nil {
+		slog.Warn("claude_reset_credit_snapshot_persist_failed", "account_id", id, "error", err)
+	}
 }
 
 // fetchBlock returns the raw cedar_ember block (nil when absent). It carries grant

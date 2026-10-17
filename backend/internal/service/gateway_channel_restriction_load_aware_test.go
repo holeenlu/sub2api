@@ -4,7 +4,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
@@ -146,11 +148,17 @@ func TestSelectAccountWithLoadAwareness_UpstreamRestrictionRoutedStickyAccountNo
 	t.Parallel()
 
 	f := newLoadAwareRestrictionFixture(t, true, map[string]int64{"sticky": 1}, map[string][]int64{"claude-fable-5-1": {1, 2}})
+	f.ctx = WithSchedulingTrace(f.ctx)
 	result, err := f.svc.SelectAccountWithLoadAwareness(f.ctx, &f.groupID, "sticky", "claude-fable-5-1", nil, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Account)
 	require.Equal(t, int64(2), result.Account.ID, "路由列表内的粘性账号被渠道限制时不得沿用")
+	trace := WithOpsSchedulingTrace(f.ctx, nil)
+	require.Len(t, trace, 1)
+	require.Contains(t, trace[0].Detail, `"reason":"channel_restricted"`)
+	require.Contains(t, trace[0].Detail, `"layer":"model_route","action":"acquired"`)
+	require.Equal(t, 1, f.concurrencyCache.acquireAccountCalls, "diagnostics must not trigger extra selection")
 }
 
 func TestSelectAccountWithLoadAwareness_RestrictModelsDisabledKeepsPriorityOrder(t *testing.T) {
@@ -162,4 +170,100 @@ func TestSelectAccountWithLoadAwareness_RestrictModelsDisabledKeepsPriorityOrder
 	require.NotNil(t, result)
 	require.NotNil(t, result.Account)
 	require.Equal(t, int64(1), result.Account.ID, "未开启限制时不应因定价列表过滤账号")
+}
+
+func TestNativePhysicalSlotsAndSessionPreflight(t *testing.T) {
+	f := newLoadAwareRestrictionFixture(t, false, nil, nil)
+	repo, ok := f.svc.accountRepo.(*mockAccountRepoForPlatform)
+	require.True(t, ok)
+	a := repo.accounts[0]
+	factor := 2
+	a.Concurrency = 10
+	a.LoadFactor = &factor
+	repo.accounts = []Account{a}
+	repo.accountsByID = map[int64]*Account{a.ID: &repo.accounts[0]}
+	var acquired []int64
+	f.svc.concurrencyService = NewConcurrencyService(schedulerTestConcurrencyCache{loadMap: map[int64]*AccountLoadInfo{a.ID: {AccountID: a.ID, CurrentConcurrency: 2, LoadRate: 100}}, acquiredIDs: &acquired})
+	selection, err := f.svc.SelectAccountWithLoadAwareness(f.ctx, &f.groupID, "", "claude-fable-5-1", nil, "", 0)
+	require.NoError(t, err)
+	require.True(t, selection.Acquired)
+	selection.ReleaseFunc()
+	for _, test := range []struct {
+		name          string
+		known, active bool
+		err           error
+		maxCalls      int
+	}{
+		{"all full", true, false, nil, 0}, {"old session", true, true, nil, 1}, {"unknown Redis failure", false, false, errors.New("redis down"), 4},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo.accounts = make([]Account, 1000)
+			repo.accountsByID = make(map[int64]*Account)
+			for i := range repo.accounts {
+				copy := a
+				copy.ID = int64(i + 1)
+				copy.Type = AccountTypeOAuth
+				copy.Extra = map[string]any{"max_sessions": 1}
+				repo.accounts[i] = copy
+				repo.accountsByID[copy.ID] = &repo.accounts[i]
+			}
+			sessions := &finalSessionCache{known: test.known, active: test.active, err: test.err}
+			f.svc.sessionLimitCache = sessions
+			f.svc.concurrencyService = NewConcurrencyService(schedulerTestConcurrencyCache{})
+			selection, err := f.svc.SelectAccountWithLoadAwareness(f.ctx, &f.groupID, "session", "claude-fable-5-1", nil, "", 0)
+			if test.active {
+				require.NoError(t, err)
+				require.NotNil(t, selection)
+				selection.ReleaseFunc()
+			} else {
+				require.Error(t, err)
+			}
+			require.LessOrEqual(t, sessions.registrations, test.maxCalls)
+		})
+	}
+}
+
+func TestNativeStaleHighLayerYieldsWithinSharedBudget(t *testing.T) {
+	f := newLoadAwareRestrictionFixture(t, false, nil, nil)
+	repo, ok := f.svc.accountRepo.(*mockAccountRepoForPlatform)
+	require.True(t, ok)
+	template := repo.accounts[0]
+	repo.accounts = make([]Account, 570)
+	for i := range repo.accounts {
+		a := template
+		a.ID = int64(i + 1)
+		a.Priority = 0
+		if i >= 70 {
+			a.Priority = 1
+		}
+		repo.accounts[i] = a
+	}
+	cache := &finalBudgetConcurrency{acceptAfter: 70}
+	f.svc.concurrencyService = NewConcurrencyService(cache)
+	ctx := WithSchedulingTrace(f.ctx)
+	selection, err := f.svc.SelectAccountWithLoadAwareness(ctx, &f.groupID, "", "claude-fable-5-1", nil, "", 0)
+	require.NoError(t, err)
+	require.True(t, selection.Acquired)
+	require.Greater(t, selection.Account.ID, int64(70))
+	require.LessOrEqual(t, schedulingTraceFromContext(ctx).summary.Budget.Operations, 64)
+	selection.ReleaseFunc()
+}
+
+type finalSessionCache struct {
+	SessionLimitCache
+	registrations int
+	known, active bool
+	err           error
+}
+
+func (s *finalSessionCache) GetSessionAdmissionBatch(_ context.Context, ids []int64, _ string, _ map[int64]time.Duration) (map[int64]SessionAdmission, error) {
+	result := make(map[int64]SessionAdmission, len(ids))
+	for _, id := range ids {
+		result[id] = SessionAdmission{Known: s.known, ActiveCount: 1, SessionActive: s.active}
+	}
+	return result, s.err
+}
+func (s *finalSessionCache) RegisterSession(context.Context, int64, string, int, time.Duration) (SessionRegistration, error) {
+	s.registrations++
+	return SessionRegistration{Allowed: s.active}, s.err
 }
