@@ -11,15 +11,10 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
 // Group management implementations
@@ -119,7 +114,13 @@ func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id 
 		} else if acc.Platform != platform {
 			continue
 		}
-		for model := range acc.GetModelMapping() {
+		// Only explicit account mappings supplement the curated candidates. Runtime
+		// defaults inject legacy IDs and broad wildcards, which undo UI curation.
+		mapping, _ := acc.Credentials["model_mapping"].(map[string]any)
+		for model, target := range mapping {
+			if _, ok := target.(string); !ok {
+				continue
+			}
 			model = strings.TrimSpace(model)
 			if model == "" {
 				continue
@@ -277,37 +278,118 @@ func compositeRouteFromInput(groupID int64, input CompositeRouteInput) (*Composi
 	}, nil
 }
 
+// defaultModelsListCandidateIDs is the shared curated catalog for group and account editors,
+// reviewed against provider documentation on 2026-10-08. It is not an admission
+// rule or an exhaustive account catalog. Keep it independent of runtime fallback
+// catalogs, which retain legacy aliases and account-test defaults.
+// Sources, selection criteria and provider-specific limitations:
+// docs/GROUP_MODEL_CANDIDATES.md.
 func defaultModelsListCandidateIDs(platform string) []string {
 	switch platform {
 	case PlatformOpenAI:
-		return openai.DefaultModelIDs()
+		return []string{
+			"gpt-6-astra",
+			"gpt-6.1-sol",
+			"gpt-6-luna",
+			"gpt-6-sol",
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+			"gpt-5.6-luna",
+			"codex-auto-review",
+			"gpt-reserve",
+			"gpt-image-2.5-sunburst",
+			"gpt-image-2.5-flare",
+			"gpt-image-2",
+		}
 	case PlatformGemini:
-		ids := make([]string, 0, len(geminicli.DefaultModels))
-		for _, model := range geminicli.DefaultModels {
-			ids = append(ids, model.ID)
+		return []string{
+			"gemini-3.8-flash",
+			"gemini-3.5-flash-lite",
+			"gemini-3.1-pro-preview",
+			"gemini-nano-banana-2.1",
+			"gemini-3.1-flash-image",
+			"gemini-3.1-flash-lite-image",
+			"gemini-3-pro-image",
 		}
-		return ids
 	case PlatformAntigravity:
-		models := antigravity.DefaultModels()
-		ids := make([]string, 0, len(models))
-		for _, model := range models {
-			ids = append(ids, model.ID)
+		return []string{
+			"gemini-3.8-flash-high",
+			"gemini-3.8-flash-medium",
+			"gemini-3.1-pro-high",
+			"claude-sonnet-4-6",
+			"claude-opus-4-6-thinking",
+			"gemini-3.1-flash-image",
 		}
-		return ids
 	case PlatformGrok:
-		return xai.DefaultModelIDs()
+		return []string{
+			"grok-4.7",
+			"grok-imagine-image-2.0",
+			"grok-imagine-video-1.5",
+		}
+	case PlatformKimi:
+		return []string{
+			"kimi-k3",
+			"kimi-k2.7-code",
+			"kimi-k2.7-code-highspeed",
+			"kimi-k2.6",
+			"k3",
+			"k3-256k",
+			"kimi-for-coding",
+			"kimi-for-coding-highspeed",
+		}
+	case PlatformZhipu:
+		return []string{
+			"glm-5.3",
+			"glm-5.3-flash",
+			"glm-5.3-flashx",
+			"glm-5.2",
+		}
+	case PlatformDeepseek:
+		return []string{
+			"deepseek-flash",
+			"deepseek-v4-pro",
+		}
+	case PlatformMiniMax:
+		return []string{
+			"MiniMax-M3",
+			"MiniMax-M2.7",
+			"MiniMax-M2.7-highspeed",
+		}
 	case PlatformOpenCodeGo:
-		return DefaultOpenCodeGoModelIDs()
+		return []string{
+			"grok-4.7",
+			"gpt-6-luna",
+			"glm-5.3",
+			"glm-5.3-flash",
+			"kimi-k3",
+			"kimi-k2.7-code",
+			"deepseek-v4.1-flash",
+			"deepseek-v4-pro",
+			"mimo-v2.6-pro",
+			"mimo-v2.6-flash",
+			"minimax-m3",
+			"qwen3.8-max",
+			"qwen3.8-flash",
+			"longcat-2.0",
+			"hy3",
+		}
 	case PlatformTypeSafe:
 		return []string{typesafe.JevLatestModel}
+	case PlatformCommandCode, PlatformCline:
+		return nil
 	case PlatformComposite:
 		return compositeDefaultModelsListCandidateIDs()
-	default:
-		ids := make([]string, 0, len(claude.DefaultModels))
-		for _, model := range claude.DefaultModels {
-			ids = append(ids, model.ID)
+	case PlatformAnthropic:
+		return []string{
+			"claude-fable-5-1",
+			"claude-opus-5-5",
+			"claude-sonnet-5-5",
+			"claude-haiku-5-5",
+			// Claude Code still uses the small 4.5 model for auxiliary requests.
+			"claude-haiku-4-5-20251001",
 		}
-		return ids
+	default:
+		return nil
 	}
 }
 
@@ -1339,130 +1421,134 @@ func (s *adminServiceImpl) UpdateGroupSortOrders(ctx context.Context, updates []
 // AdminUpdateAPIKeyGroupID 管理员修改 API Key 分组绑定
 // groupID: nil=不修改, 指向0=解绑, 指向正整数=绑定到目标分组
 func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID int64, groupID *int64) (*AdminUpdateAPIKeyGroupIDResult, error) {
-	apiKey, err := s.apiKeyRepo.GetByID(ctx, keyID)
-	if err != nil {
-		return nil, err
-	}
-
-	if groupID == nil {
-		// nil 表示不修改，直接返回
-		return &AdminUpdateAPIKeyGroupIDResult{APIKey: apiKey}, nil
-	}
-
-	if *groupID < 0 {
-		return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "group_id must be non-negative")
-	}
-
-	result := &AdminUpdateAPIKeyGroupIDResult{}
-
-	if *groupID == 0 {
-		// 0 表示解绑分组（不修改 user_allowed_groups，避免影响用户其他 Key）
-		apiKey.GroupID = nil
-		apiKey.Group = nil
-	} else {
-		// 验证目标分组存在且状态为 active
-		group, err := s.groupRepo.GetByID(ctx, *groupID)
+	return WithManagementWrite(ctx, s.entClient, nil, func(ctx context.Context) (*AdminUpdateAPIKeyGroupIDResult, error) {
+		apiKey, err := s.apiKeyRepo.GetByID(ctx, keyID)
 		if err != nil {
 			return nil, err
 		}
-		if group.Status != StatusActive {
-			return nil, infraerrors.BadRequest("GROUP_NOT_ACTIVE", "target group is not active")
+
+		if groupID == nil {
+			// nil 表示不修改，直接返回
+			return &AdminUpdateAPIKeyGroupIDResult{APIKey: apiKey}, nil
 		}
-		// 订阅类型分组：用户须持有该分组的有效订阅才可绑定
-		if group.IsSubscriptionType() {
-			if s.userSubRepo == nil {
-				return nil, infraerrors.InternalServer("SUBSCRIPTION_REPOSITORY_UNAVAILABLE", "subscription repository is not configured")
-			}
-			if _, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, apiKey.UserID, *groupID); err != nil {
-				if errors.Is(err, ErrSubscriptionNotFound) {
-					return nil, infraerrors.BadRequest("SUBSCRIPTION_REQUIRED", "user does not have an active subscription for this group")
-				}
+
+		if *groupID < 0 {
+			return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "group_id must be non-negative")
+		}
+
+		result := &AdminUpdateAPIKeyGroupIDResult{}
+
+		if *groupID == 0 {
+			// 0 表示解绑分组（不修改 user_allowed_groups，避免影响用户其他 Key）
+			apiKey.GroupID = nil
+			apiKey.Group = nil
+		} else {
+			// 验证目标分组存在且状态为 active
+			group, err := s.groupRepo.GetByID(ctx, *groupID)
+			if err != nil {
 				return nil, err
 			}
-		}
-
-		gid := *groupID
-		apiKey.GroupID = &gid
-		apiKey.Group = group
-
-		// 专属标准分组：使用事务保证「添加分组权限」与「更新 API Key」的原子性
-		if group.IsExclusive && !group.IsSubscriptionType() {
-			opCtx := ctx
-			var tx *dbent.Tx
-			if s.entClient == nil {
-				logger.LegacyPrintf("service.admin", "Warning: entClient is nil, skipping transaction protection for exclusive group binding")
-			} else {
-				var txErr error
-				tx, txErr = s.entClient.Tx(ctx)
-				if txErr != nil {
-					return nil, fmt.Errorf("begin transaction: %w", txErr)
+			if group.Status != StatusActive {
+				return nil, infraerrors.BadRequest("GROUP_NOT_ACTIVE", "target group is not active")
+			}
+			// 订阅类型分组：用户须持有该分组的有效订阅才可绑定
+			if group.IsSubscriptionType() {
+				if s.userSubRepo == nil {
+					return nil, infraerrors.InternalServer("SUBSCRIPTION_REPOSITORY_UNAVAILABLE", "subscription repository is not configured")
 				}
-				defer func() { _ = tx.Rollback() }()
-				opCtx = dbent.NewTxContext(ctx, tx)
-			}
-
-			if addErr := s.userRepo.AddGroupToAllowedGroups(opCtx, apiKey.UserID, gid); addErr != nil {
-				return nil, fmt.Errorf("add group to user allowed groups: %w", addErr)
-			}
-			if err := s.apiKeyRepo.Update(opCtx, apiKey, APIKeyUpdateFields{GroupID: true}); err != nil {
-				return nil, fmt.Errorf("update api key: %w", err)
-			}
-			if tx != nil {
-				if err := tx.Commit(); err != nil {
-					return nil, fmt.Errorf("commit transaction: %w", err)
+				if _, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, apiKey.UserID, *groupID); err != nil {
+					if errors.Is(err, ErrSubscriptionNotFound) {
+						return nil, infraerrors.BadRequest("SUBSCRIPTION_REQUIRED", "user does not have an active subscription for this group")
+					}
+					return nil, err
 				}
 			}
 
-			result.AutoGrantedGroupAccess = true
-			result.GrantedGroupID = &gid
-			result.GrantedGroupName = group.Name
+			gid := *groupID
+			apiKey.GroupID = &gid
+			apiKey.Group = group
 
-			// 失效认证缓存（在事务提交后执行）
-			if s.authCacheInvalidator != nil {
-				s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+			// 专属标准分组：使用事务保证「添加分组权限」与「更新 API Key」的原子性
+			if group.IsExclusive && !group.IsSubscriptionType() {
+				opCtx := ctx
+				var tx *dbent.Tx
+				if s.entClient == nil {
+					logger.LegacyPrintf("service.admin", "Warning: entClient is nil, skipping transaction protection for exclusive group binding")
+				} else if dbent.TxFromContext(ctx) == nil {
+					var txErr error
+					tx, txErr = s.entClient.Tx(ctx)
+					if txErr != nil {
+						return nil, fmt.Errorf("begin transaction: %w", txErr)
+					}
+					defer func() { _ = tx.Rollback() }()
+					opCtx = dbent.NewTxContext(ctx, tx)
+				}
+
+				if addErr := s.userRepo.AddGroupToAllowedGroups(opCtx, apiKey.UserID, gid); addErr != nil {
+					return nil, fmt.Errorf("add group to user allowed groups: %w", addErr)
+				}
+				if err := s.apiKeyRepo.Update(opCtx, apiKey, APIKeyUpdateFields{GroupID: true}); err != nil {
+					return nil, fmt.Errorf("update api key: %w", err)
+				}
+				if tx != nil {
+					if err := tx.Commit(); err != nil {
+						return nil, fmt.Errorf("commit transaction: %w", err)
+					}
+				}
+
+				result.AutoGrantedGroupAccess = true
+				result.GrantedGroupID = &gid
+				result.GrantedGroupName = group.Name
+
+				// 失效认证缓存（在事务提交后执行）
+				if s.authCacheInvalidator != nil {
+					s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+				}
+
+				result.APIKey = apiKey
+				return result, nil
 			}
-
-			result.APIKey = apiKey
-			return result, nil
 		}
-	}
 
-	// 非专属分组 / 解绑：无需事务，单步更新即可
-	if err := s.apiKeyRepo.Update(ctx, apiKey, APIKeyUpdateFields{GroupID: true}); err != nil {
-		return nil, fmt.Errorf("update api key: %w", err)
-	}
+		// 非专属分组 / 解绑：无需事务，单步更新即可
+		if err := s.apiKeyRepo.Update(ctx, apiKey, APIKeyUpdateFields{GroupID: true}); err != nil {
+			return nil, fmt.Errorf("update api key: %w", err)
+		}
 
-	// 失效认证缓存
-	if s.authCacheInvalidator != nil {
-		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
-	}
+		// 失效认证缓存
+		if s.authCacheInvalidator != nil {
+			s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+		}
 
-	result.APIKey = apiKey
-	return result, nil
+		result.APIKey = apiKey
+		return result, nil
+	})
 }
 
 // AdminResetAPIKeyRateLimitUsage resets all API key rate-limit usage windows.
 func (s *adminServiceImpl) AdminResetAPIKeyRateLimitUsage(ctx context.Context, keyID int64) (*APIKey, error) {
-	apiKey, err := s.apiKeyRepo.GetByID(ctx, keyID)
-	if err != nil {
-		return nil, err
-	}
-	apiKey.Usage5h = 0
-	apiKey.Usage1d = 0
-	apiKey.Usage7d = 0
-	apiKey.Window5hStart = nil
-	apiKey.Window1dStart = nil
-	apiKey.Window7dStart = nil
-	if err := s.apiKeyRepo.Update(ctx, apiKey, APIKeyUpdateFields{RateLimitUsage: true}); err != nil {
-		return nil, fmt.Errorf("reset api key rate limit usage: %w", err)
-	}
-	if s.authCacheInvalidator != nil {
-		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
-	}
-	if s.billingCacheService != nil {
-		_ = s.billingCacheService.InvalidateAPIKeyRateLimit(ctx, apiKey.ID)
-	}
-	return apiKey, nil
+	return WithManagementWrite(ctx, s.entClient, nil, func(ctx context.Context) (*APIKey, error) {
+		apiKey, err := s.apiKeyRepo.GetByID(ctx, keyID)
+		if err != nil {
+			return nil, err
+		}
+		apiKey.Usage5h = 0
+		apiKey.Usage1d = 0
+		apiKey.Usage7d = 0
+		apiKey.Window5hStart = nil
+		apiKey.Window1dStart = nil
+		apiKey.Window7dStart = nil
+		if err := s.apiKeyRepo.Update(ctx, apiKey, APIKeyUpdateFields{RateLimitUsage: true}); err != nil {
+			return nil, fmt.Errorf("reset api key rate limit usage: %w", err)
+		}
+		if s.authCacheInvalidator != nil {
+			s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+		}
+		if s.billingCacheService != nil {
+			_ = s.billingCacheService.InvalidateAPIKeyRateLimit(ctx, apiKey.ID)
+		}
+		return apiKey, nil
+	})
 }
 
 // ReplaceUserGroup 替换用户的专属分组

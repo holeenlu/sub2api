@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"io"
 	"mime/quotedprintable"
 	"net"
@@ -15,6 +16,38 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestDelegatedContentCannotReplaceAuthenticationTemplates(t *testing.T) {
+	repo := newNotificationEmailMemorySettingRepo()
+	svc := NewNotificationEmailService(repo, nil)
+	ctx := authz.WithSubject(context.Background(), authz.Subject{Role: authz.Admin, ManagementRequest: true, PolicyVersion: 1, Permissions: []string{"settings.content.read", "settings.content.manage"}})
+	for _, event := range svc.ListEventInfos() {
+		if event.Category != "auth" {
+			continue
+		}
+		official, err := svc.GetTemplate(context.Background(), event.Event, "en")
+		require.NoError(t, err)
+		_, err = svc.UpdateTemplate(ctx, event.Event, "en", official.Subject, official.HTML)
+		require.ErrorIs(t, err, ErrAdminPermissionDenied)
+		_, err = svc.RestoreOfficialTemplate(ctx, event.Event, "en")
+		require.ErrorIs(t, err, ErrAdminPermissionDenied)
+		_, err = svc.PreviewTemplate(ctx, NotificationEmailPreviewInput{Event: event.Event, Locale: "en"})
+		require.ErrorIs(t, err, ErrAdminPermissionDenied)
+		current, err := svc.GetTemplate(context.Background(), event.Event, "en")
+		require.NoError(t, err)
+		require.Equal(t, official, current)
+		// A legitimate sender may render the root-controlled authentication template.
+		_, err = svc.GetTemplate(ctx, event.Event, "en")
+		require.NoError(t, err)
+	}
+	items, err := svc.ListTemplates(ctx)
+	require.NoError(t, err)
+	for _, item := range items {
+		info, _, err := svc.eventInfo(item.Event)
+		require.NoError(t, err)
+		require.NotEqual(t, "auth", info.Category)
+	}
+}
 
 func TestNotificationEmailPreviewEscapesHTMLAndSanitizesSubject(t *testing.T) {
 	ctx := context.Background()
