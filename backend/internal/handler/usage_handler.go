@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	"github.com/Wei-Shaw/sub2api/internal/handler/usageexport"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -42,6 +42,48 @@ type userGroupStat struct {
 	TotalTokens int64   `json:"total_tokens"`
 	Cost        float64 `json:"cost"`
 	ActualCost  float64 `json:"actual_cost"`
+}
+
+// userAPIKeyBreakdownItem is the user-scoped projection of the shared ranking
+// row. The repository row also contains account_cost for administrators; it
+// must not cross the user API boundary.
+type userAPIKeyBreakdownItem struct {
+	APIKeyID     int64   `json:"api_key_id"`
+	KeyName      string  `json:"key_name"`
+	KeyDeleted   bool    `json:"key_deleted"`
+	UserID       int64   `json:"user_id"`
+	Email        string  `json:"email"`
+	Requests     int64   `json:"requests"`
+	InputTokens  int64   `json:"input_tokens"`
+	OutputTokens int64   `json:"output_tokens"`
+	CacheTokens  int64   `json:"cache_tokens"`
+	TotalTokens  int64   `json:"total_tokens"`
+	Cost         float64 `json:"cost"`
+	ActualCost   float64 `json:"actual_cost"`
+}
+
+func projectUserAPIKeyBreakdownRows(rows []usagestats.APIKeyBreakdownItem) []userAPIKeyBreakdownItem {
+	if rows == nil {
+		return nil
+	}
+	projected := make([]userAPIKeyBreakdownItem, 0, len(rows))
+	for _, row := range rows {
+		projected = append(projected, userAPIKeyBreakdownItem{
+			APIKeyID:     row.APIKeyID,
+			KeyName:      row.KeyName,
+			KeyDeleted:   row.KeyDeleted,
+			UserID:       row.UserID,
+			Email:        row.Email,
+			Requests:     row.Requests,
+			InputTokens:  row.InputTokens,
+			OutputTokens: row.OutputTokens,
+			CacheTokens:  row.CacheTokens,
+			TotalTokens:  row.TotalTokens,
+			Cost:         row.Cost,
+			ActualCost:   row.ActualCost,
+		})
+	}
+	return projected
 }
 
 // UsageHandler handles usage-related requests
@@ -620,6 +662,45 @@ func parseBoolQueryWithDefault(c *gin.Context, key string, fallback bool) (bool,
 	return parsed, true
 }
 
+// DashboardAPIKeyBreakdown returns the current user's API-key usage ranking.
+// GET /api/v1/usage/dashboard/api-key-breakdown
+func (h *UsageHandler) DashboardAPIKeyBreakdown(c *gin.Context) {
+	parsed, ok := h.parseUserUsageFilters(c, true)
+	if !ok {
+		return
+	}
+	if parsed.EndTime.Sub(parsed.StartTime) > 90*24*time.Hour {
+		response.BadRequest(c, "API key ranking date range cannot exceed 90 days")
+		return
+	}
+
+	dim := usagestats.UserBreakdownDimension{
+		UserID:             parsed.Filters.UserID,
+		APIKeyID:           parsed.Filters.APIKeyID,
+		GroupID:            parsed.Filters.GroupID,
+		Model:              parsed.Filters.Model,
+		ModelType:          parsed.Filters.ModelFilterSource,
+		RequestType:        parsed.Filters.RequestType,
+		Stream:             parsed.Filters.Stream,
+		NativeCompactionV2: parsed.Filters.NativeCompactionV2,
+		BillingType:        parsed.Filters.BillingType,
+		BillingMode:        parsed.Filters.BillingMode,
+		SortBy:             strings.TrimSpace(c.Query("sort_by")),
+	}
+	limit := usagestats.NormalizeBreakdownLimit(c.Query("limit"))
+	rows, err := h.usageService.GetAPIKeyBreakdownStats(c.Request.Context(), parsed.StartTime, parsed.EndTime, dim, limit)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{
+		"api_keys":   projectUserAPIKeyBreakdownRows(rows),
+		"start_date": parsed.StartTime.Format("2006-01-02"),
+		"end_date":   parsed.EndTime.Add(-24 * time.Hour).Format("2006-01-02"),
+	})
+}
+
 // BatchAPIKeysUsageRequest represents the request for batch API keys usage
 type BatchAPIKeysUsageRequest struct {
 	APIKeyIDs []int64 `json:"api_key_ids" binding:"required"`
@@ -721,4 +802,12 @@ func (h *UsageHandler) GetMyAPIKeyDailyUsage(c *gin.Context) {
 		"start_date": startTime.Format("2006-01-02"),
 		"end_date":   endTime.AddDate(0, 0, -1).Format("2006-01-02"),
 	})
+}
+
+func (h *UsageHandler) Export(c *gin.Context) {
+	parsed, ok := h.parseUserUsageFilters(c, true)
+	if !ok {
+		return
+	}
+	usageexport.Stream(c, h.usageService, parsed.Filters.UserID, parsed.Filters, false)
 }
