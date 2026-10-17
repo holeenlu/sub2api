@@ -2,6 +2,7 @@
 // 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
 export default {
     ops: {
+
       title: '維運監控',
       description: '維運監控與故障排除',
       // Dashboard
@@ -368,7 +369,8 @@ export default {
           client: '用戶端回應',
           upstream_message: '上游訊息',
           upstream_detail: '上游詳情',
-          upstream_events: '上游事件'
+          upstream_events: '上游事件',
+          scheduling_trace: '排程決策'
         },
         basicInfo: '基本資訊',
         platform: '平台',
@@ -700,6 +702,8 @@ export default {
         }
       },
       settings: {
+        accountTelemetry: "帳號遙測定時傳送",
+        accountTelemetryHint: "預設關閉。僅已匯入裝置包的帳號在開啟後按十分鐘活動視窗、約十秒事件、六小時 GrowthBook 週期傳送；關閉後停止定時傳送並保留匯入資料。未匯入的帳號保持等待，伺服器不再初始化 Claude Code。",
         title: '維運監控設定',
         loadFailed: '載入設定失敗',
         saveSuccess: '維運監控設定儲存成功',
@@ -740,6 +744,21 @@ export default {
         aggregation: '預聚合任務',
         enableAggregation: '啟用預聚合任務',
         aggregationHint: '預聚合可提升長時間視窗查詢效能',
+        quotaProtection: {
+          "title": "額度臨界保護",
+          "apply": "應用 vm2api 建議值",
+          "hint": "建議值：普通/Pro 帳號 5h 85%、7d 80%，Max 帳號均 95%；OpenAI 全域閾值設為 85%/80%。帳號覆蓋和更嚴格的管理員停調線仍優先，Fable 獨立閾值保留。點選儲存後生效。",
+          "tiers": "啟用 Anthropic 方案與視窗閾值",
+          "cold": "臨界區攔截大額未快取輸入",
+          "anthropic_default_5h": "普通/Pro 5h 閾值 (%)",
+          "anthropic_default_7d": "普通/Pro 7d 閾值 (%)",
+          "anthropic_max_5h": "Max 5h 閾值 (%)",
+          "anthropic_max_7d": "Max 7d 閾值 (%)",
+          "critical_band_percent": "臨界區寬度（百分點）",
+          "large_cold_input_tokens": "未快取輸入 token 上限",
+          "sample_max_age_seconds": "可信取樣有效期（秒）",
+          "invalid": "請檢查額度臨界保護參數的有效範圍"
+        },
         openaiQuotaAutoPause: 'OpenAI 帳號配額自動暫停',
         openaiQuotaAutoPauseHint: '當 OpenAI 帳號 5h / 7d 用量達到閾值時，排程會自動跳過該帳號；視窗滾動後自動恢復。帳號級閾值優先於此全域預設值。',
         openaiQuotaAutoPauseDefault5h: '預設 5h 用量閾值 (%)',

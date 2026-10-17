@@ -1,5 +1,6 @@
 export default {
     ops: {
+
       title: 'Ops Monitoring',
       description: 'Operational monitoring and troubleshooting',
       // Dashboard
@@ -366,7 +367,8 @@ export default {
           client: 'Client Response',
           upstream_message: 'Upstream Message',
           upstream_detail: 'Upstream Detail',
-          upstream_events: 'Upstream Events'
+          upstream_events: 'Upstream Events',
+          scheduling_trace: 'Scheduling Decisions'
         },
         basicInfo: 'Basic Info',
         platform: 'Platform',
@@ -698,6 +700,8 @@ export default {
         }
       },
       settings: {
+        accountTelemetry: "Scheduled account telemetry",
+        accountTelemetryHint: "Off by default. Only accounts with an imported device bundle send within a ten-minute activity window: events approximately every ten seconds and GrowthBook every six hours. Turning this off stops scheduled sending and preserves imported data. Accounts without a bundle wait for an import; the server does not initialize Claude Code.",
         title: 'Ops Monitoring Settings',
         loadFailed: 'Failed to load settings',
         saveSuccess: 'Ops monitoring settings saved successfully',
@@ -738,6 +742,21 @@ export default {
         aggregation: 'Pre-aggregation Tasks',
         enableAggregation: 'Enable Pre-aggregation',
         aggregationHint: 'Pre-aggregation improves query performance for long time windows',
+        quotaProtection: {
+          "title": "Quota protection near the limit",
+          "apply": "Apply vm2api suggested values",
+          "hint": "Suggested thresholds: default/Pro 85% for 5h and 80% for 7d; Max 95% for both. OpenAI defaults become 85%/80%. Account overrides and stricter administrator limits take precedence. The independent Fable threshold is preserved. Save to apply.",
+          "tiers": "Enable Anthropic plan and window thresholds",
+          "cold": "Block large uncached inputs near the limit",
+          "anthropic_default_5h": "Default/Pro 5h threshold (%)",
+          "anthropic_default_7d": "Default/Pro 7d threshold (%)",
+          "anthropic_max_5h": "Max 5h threshold (%)",
+          "anthropic_max_7d": "Max 7d threshold (%)",
+          "critical_band_percent": "Critical band (percentage points)",
+          "large_cold_input_tokens": "Uncached input token limit",
+          "sample_max_age_seconds": "Trusted sample lifetime (seconds)",
+          "invalid": "Check the allowed ranges for quota protection settings"
+        },
         openaiQuotaAutoPause: 'OpenAI Account Quota Auto-pause',
         openaiQuotaAutoPauseHint: 'When an OpenAI account reaches its 5h / 7d usage threshold, the scheduler skips it automatically and resumes once the window rolls over. Per-account thresholds take precedence over this global default.',
         openaiQuotaAutoPauseDefault5h: 'Default 5h usage threshold (%)',
