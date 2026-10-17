@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -31,15 +30,21 @@ import (
 // （GLM effort 归一化、fast policy、Grok 分支、ClientDisconnect 语义等）仍留在
 // 调用方，属于有意保留的行为差异，不在此强行统一。
 
-// newUpstreamSSEScanner 构造读取上游 SSE 流的行扫描器，按配置放大单行上限。
-func (s *OpenAIGatewayService) newUpstreamSSEScanner(r io.Reader) *bufio.Scanner {
-	scanner := bufio.NewScanner(r)
+// newUpstreamSSEReadPump shares byte activity, complete-event framing and joined
+// shutdown across Responses, Chat Completions and compatibility conversion.
+func (s *OpenAIGatewayService) newUpstreamSSEReadPump(r io.ReadCloser) *openAISSEReadPump {
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		maxLineSize = s.cfg.Gateway.MaxLineSize
 	}
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
-	return scanner
+	return newOpenAISSEReadPump(r, maxLineSize)
+}
+
+func (s *OpenAIGatewayService) openAIStreamDataInterval() time.Duration {
+	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		return time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	return 0
 }
 
 // newStreamHeaderWriter 返回幂等的 SSE 响应头写入闭包：首次调用时透传过滤后的
@@ -286,10 +291,13 @@ func (s *OpenAIGatewayService) scanCCStream(
 	emit func(*apicompat.ChatCompletionsChunk),
 ) ccStreamScanState {
 	var st ccStreamScanState
+	drain := newOpenAIHTTPUsageDrain(c.Request.Context(), resp.Body.Close, streamWriteContext(c))
+	defer drain.stop()
 
-	scanner := s.newUpstreamSSEScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
+	pump := s.newUpstreamSSEReadPump(resp.Body)
+	defer pump.Close()
+	for pump.Next(context.Background(), s.openAIStreamDataInterval(), nil, nil) {
+		line := pump.Text()
 		payload, ok := extractOpenAISSEDataLine(line)
 		if !ok {
 			continue
@@ -300,6 +308,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 		}
 		if payload == "[DONE]" {
 			st.SawDone = true
+			CompleteHTTPUpstreamResponse(resp)
 			break
 		}
 		// 观察上游 CC chunk 回显的 model / service_tier（计费以回显为准）。
@@ -328,7 +337,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 		emit(&chunk)
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := pump.Err(); err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn(logPrefix+": stream read error",
 				zap.Error(err),

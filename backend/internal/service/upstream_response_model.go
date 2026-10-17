@@ -26,9 +26,10 @@ const (
 // separate from the final outbound request tier until usage recording resolves
 // the billable tier for the selected credential protocol.
 type upstreamResponseModelObserver struct {
-	first    string
-	terminal string
-	conflict bool
+	claudeConversation *claudeConversationObservation
+	first              string
+	terminal           string
+	conflict           bool
 
 	// firstTier holds the first non-terminal tier declaration; it is discarded
 	// when later non-terminal declarations disagree. terminalTier comes from a
@@ -88,6 +89,10 @@ func (o *upstreamResponseModelObserver) ObserveOpenAI(payload []byte, eventType 
 }
 
 func (o *upstreamResponseModelObserver) ObserveAnthropic(payload []byte) {
+	if o == nil {
+		return
+	}
+	o.claudeConversation.observe(payload)
 	model := firstValidTrimmedGJSONString(payload, "message.model", "model")
 	o.Observe(model, false)
 	// usage.speed travels with the message object (message_start in streams,

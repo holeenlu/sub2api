@@ -2070,6 +2070,7 @@ func (u *openAIHTTPPassthroughSSERateLimitUpstream) Do(_ *http.Request, _ string
 		"event: response.failed",
 		`data: {"type":"response.failed","response":{"id":"resp_rate_limited","status":"failed","error":{"code":"rate_limit_exceeded","message":"Concurrency limit exceeded for account, please retry later"}}}`,
 		"",
+		"",
 	}, "\n")
 	return &http.Response{
 		StatusCode: http.StatusOK,

@@ -2112,6 +2112,7 @@ func TestForwardAsAnthropic_MissingTerminalAfterOutputRecordsOpsWithoutFailover(
 		"",
 		`data: {"type":"response.output_text.delta","delta":"partial"}`,
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -2164,6 +2165,7 @@ func TestForwardAsAnthropic_MissingTerminalAfterClientDisconnectSkipsOpsAndFailo
 
 	upstreamBody := strings.Join([]string{
 		`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.4","status":"in_progress","output":[]}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{

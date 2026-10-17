@@ -288,6 +288,7 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 // POST /v1beta/models/{model}:generateContent
 // POST /v1beta/models/{model}:streamGenerateContent?alt=sse
 func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
+	c.Request = c.Request.WithContext(service.EnsureOpenAITurnBudget(c.Request.Context(), h.cfg, ""))
 	apiKey, ok := middleware.GetAPIKeyFromContext(c)
 	if !ok || apiKey == nil {
 		googleError(c, http.StatusUnauthorized, "Invalid API key")
@@ -545,6 +546,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 	}
 	fs := NewFailoverState(maxAccountSwitches, hasBoundSession)
+	fs.ReplayAllowed, fs.UncertainReplaySafe = service.NativeAccountReplayAllowed(body), service.NativeUncertainReplaySafe(body)
 
 	// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
 	// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
@@ -580,7 +582,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				googleError(c, http.StatusServiceUnavailable, geminiCachedContentUnavailableMessage)
 				return
 			}
-			if len(fs.FailedAccountIDs) == 0 {
+			if len(fs.FailedAccountIDs) == 0 || errors.Is(err, service.ErrSelectionDependency) || service.IsTurnBudgetError(err) {
 				diagPlatform := service.PlatformGemini
 				if p := effectiveAPIKeyPlatform(c, apiKey); p == service.PlatformAntigravity {
 					diagPlatform = service.PlatformAntigravity
@@ -596,7 +598,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				googleError(c, cls.Status, message)
 				return
 			}
-			action := fs.HandleSelectionExhausted(c.Request.Context())
+			action := fs.HandleSelectionExhausted(c.Request.Context(), err)
 			switch action {
 			case FailoverContinue:
 				ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
@@ -723,6 +725,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
 		sessionGroupID := derefGroupID(apiKey.GroupID)
+		writerSizeBeforeForward := c.Writer.Size()
+		finishStage := beginRetryOutputStage(c)
+		defer func() { _ = finishStage(&service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable}) }()
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 			result, err = h.antigravityGatewayService.ForwardGemini(
 				requestCtx,
@@ -738,12 +743,18 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		} else {
 			result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
 		}
+		err = finishStage(err)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
+				if c.Writer.Size() != writerSizeBeforeForward {
+					h.handleGeminiFailoverExhausted(c, failoverErr)
+					return
+				}
+				service.PinTurnRetryAccount(c.Request.Context(), account)
 				failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 				switch failoverAction {
 				case FailoverContinue:

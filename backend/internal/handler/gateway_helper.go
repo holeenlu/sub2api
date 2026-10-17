@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -224,8 +225,17 @@ func (h *ConcurrencyHelper) DecrementAccountWaitCount(ctx context.Context, accou
 // TryAcquireUserSlot 尝试立即获取用户并发槽位。
 // 返回值: (releaseFunc, acquired, error)
 func (h *ConcurrencyHelper) TryAcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int) (func(), bool, error) {
+	waitCtx, cancel := service.OpenAITurnWaitContext(ctx)
+	defer cancel()
+	if errors.Is(context.Cause(waitCtx), service.ErrOpenAIWSFirstOutputBudgetExhausted) {
+		return nil, false, service.ErrOpenAIWSFirstOutputBudgetExhausted
+	}
+	ctx = waitCtx
 	result, err := h.concurrencyService.AcquireUserSlot(ctx, userID, maxConcurrency)
 	if err != nil {
+		if errors.Is(context.Cause(waitCtx), service.ErrOpenAIWSFirstOutputBudgetExhausted) {
+			return nil, false, service.ErrOpenAIWSFirstOutputBudgetExhausted
+		}
 		return nil, false, err
 	}
 	if !result.Acquired {
@@ -253,9 +263,25 @@ func (h *ConcurrencyHelper) AcquireOpenAIWSIngressLease(ctx context.Context, api
 
 // TryAcquireAccountSlot 尝试立即获取账号并发槽位。
 // 返回值: (releaseFunc, acquired, error)
-func (h *ConcurrencyHelper) TryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (func(), bool, error) {
+func (h *ConcurrencyHelper) TryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, refresh ...func(context.Context) (int, error)) (func(), bool, error) {
+	waitCtx, cancel := service.OpenAITurnWaitContext(ctx)
+	defer cancel()
+	if errors.Is(context.Cause(waitCtx), service.ErrOpenAIWSFirstOutputBudgetExhausted) {
+		return nil, false, service.ErrOpenAIWSFirstOutputBudgetExhausted
+	}
+	ctx = waitCtx
+	if len(refresh) > 0 && refresh[0] != nil {
+		var err error
+		maxConcurrency, err = refresh[0](ctx)
+		if err != nil {
+			return nil, false, err
+		}
+	}
 	result, err := h.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
 	if err != nil {
+		if errors.Is(context.Cause(waitCtx), service.ErrOpenAIWSFirstOutputBudgetExhausted) {
+			return nil, false, service.ErrOpenAIWSFirstOutputBudgetExhausted
+		}
 		return nil, false, err
 	}
 	if !result.Acquired {
@@ -358,15 +384,25 @@ func (h *ConcurrencyHelper) waitForSlotWithPing(c *gin.Context, slotType string,
 }
 
 // waitForSlotWithPingTimeout waits for a concurrency slot with a custom timeout.
-func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType string, id int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool, tryImmediate bool) (func(), error) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType string, id int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool, tryImmediate bool, refresh ...func(context.Context) (int, error)) (func(), error) {
+	waitCtx, stopBudget := service.OpenAITurnWaitContext(c.Request.Context())
+	defer stopBudget()
+	ctx, cancel := context.WithTimeout(waitCtx, timeout)
 	defer cancel()
 
 	acquireSlot := func() (*service.AcquireResult, error) {
 		if slotType == "user" {
 			return h.concurrencyService.AcquireUserSlot(ctx, id, maxConcurrency)
 		}
-		return h.concurrencyService.AcquireAccountSlot(ctx, id, maxConcurrency)
+		limit := maxConcurrency
+		if len(refresh) > 0 && refresh[0] != nil {
+			var err error
+			limit, err = refresh[0](ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return h.concurrencyService.AcquireAccountSlot(ctx, id, limit)
 	}
 
 	if tryImmediate {
@@ -378,6 +414,9 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 			return result.ReleaseFunc, nil
 		}
 	}
+
+	ctx, endObservation := h.concurrencyService.BeginWaitObservation(ctx, slotType, id, timeout)
+	defer endObservation()
 
 	// Determine if ping is needed (streaming + ping format defined)
 	needPing := isStream && h.pingFormat != ""
@@ -406,6 +445,9 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 	for {
 		select {
 		case <-ctx.Done():
+			if errors.Is(context.Cause(waitCtx), service.ErrOpenAIWSFirstOutputBudgetExhausted) {
+				return nil, service.ErrOpenAIWSFirstOutputBudgetExhausted
+			}
 			if parentErr := c.Request.Context().Err(); parentErr != nil {
 				return nil, parentErr
 			}
@@ -447,8 +489,8 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 }
 
 // AcquireAccountSlotWithWaitTimeout acquires an account slot with a custom timeout (keeps SSE ping).
-func (h *ConcurrencyHelper) AcquireAccountSlotWithWaitTimeout(c *gin.Context, accountID int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool) (func(), error) {
-	return h.waitForSlotWithPingTimeout(c, "account", accountID, maxConcurrency, timeout, isStream, streamStarted, true)
+func (h *ConcurrencyHelper) AcquireAccountSlotWithWaitTimeout(c *gin.Context, accountID int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool, refresh ...func(context.Context) (int, error)) (func(), error) {
+	return h.waitForSlotWithPingTimeout(c, "account", accountID, maxConcurrency, timeout, isStream, streamStarted, true, refresh...)
 }
 
 // nextBackoff 计算下一次退避时间

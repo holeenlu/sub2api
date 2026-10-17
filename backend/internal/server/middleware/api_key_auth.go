@@ -413,6 +413,37 @@ func abortIfAPIKeyGroupUnavailable(c *gin.Context, apiKey *service.APIKey) bool 
 	return true
 }
 
+// ValidateAPIKeyContinuation reuses the HTTP access rules for an already
+// upgraded socket without attempting to write an HTTP error after status 101.
+func ValidateAPIKeyContinuation(c *gin.Context, key *service.APIKey, cfg *config.Config) error {
+	if key == nil || (!key.IsActive() && key.Status != service.StatusAPIKeyExpired && key.Status != service.StatusAPIKeyQuotaExhausted) || key.User == nil || !key.User.IsActive() {
+		return fmt.Errorf("API key authorization is no longer valid")
+	}
+	if _, message, ok := validateAPIKeyGroupAvailable(key); !ok {
+		return fmt.Errorf("%s", message)
+	}
+	if !validateAPIKeyGroupAllowed(key) {
+		return fmt.Errorf("API key group is no longer allowed")
+	}
+	if len(key.IPWhitelist) > 0 || len(key.IPBlacklist) > 0 {
+		trust := false
+		if cfg != nil {
+			trust = cfg.TrustForwardedIPForAPIKeyACL()
+		}
+		allowed, _ := ip.CheckIPRestrictionWithCompiledRules(ip.GetSecurityClientIP(c, trust), key.CompiledIPWhitelist, key.CompiledIPBlacklist)
+		if !allowed {
+			return fmt.Errorf("API key access denied")
+		}
+	}
+	if cfg != nil && cfg.RunMode == config.RunModeSimple {
+		return nil
+	}
+	if key.IsExpired() || key.IsQuotaExhausted() || key.Status == service.StatusAPIKeyExpired || key.Status == service.StatusAPIKeyQuotaExhausted {
+		return fmt.Errorf("API key quota or expiry no longer permits this request")
+	}
+	return nil
+}
+
 func abortIfAPIKeyGroupNotAllowed(c *gin.Context, apiKey *service.APIKey) bool {
 	if validateAPIKeyGroupAllowed(apiKey) {
 		return false

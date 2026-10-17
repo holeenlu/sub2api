@@ -1589,7 +1589,6 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 	}
 
 	flushData := func() (bool, error) {
-		sseData.Flush(processData)
 		if processDataErr != nil {
 			return true, processDataErr
 		}

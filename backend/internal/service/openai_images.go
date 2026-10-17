@@ -1089,10 +1089,6 @@ func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
 		}
 	}
 
-	flushSSEEvent := func() {
-		sseData.Flush(processSSEData)
-	}
-
 	processLine := func(line []byte) {
 		if len(line) == 0 {
 			return
@@ -1153,11 +1149,9 @@ func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
 				break
 			}
 			if err != nil {
-				flushSSEEvent()
 				return usage, imageCounter.Count(), imageCounter.Sizes(), firstTokenMs, err
 			}
 		}
-		flushSSEEvent()
 		finalizeFallbackBody()
 		return usage, imageCounter.Count(), imageCounter.Sizes(), firstTokenMs, finish()
 	}
@@ -1224,12 +1218,10 @@ func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				flushSSEEvent()
 				finalizeFallbackBody()
 				return usage, imageCounter.Count(), imageCounter.Sizes(), firstTokenMs, finish()
 			}
 			if ev.err != nil {
-				flushSSEEvent()
 				return usage, imageCounter.Count(), imageCounter.Sizes(), firstTokenMs, ev.err
 			}
 			processLine(ev.line)

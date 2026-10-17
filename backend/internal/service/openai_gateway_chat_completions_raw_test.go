@@ -97,6 +97,7 @@ func TestForwardAsRawChatCompletions_ForcesStreamUsageUpstreamAndPassesUsageDown
 		"",
 		"data: [DONE]",
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -380,6 +381,7 @@ func TestForwardAsRawChatCompletions_PreservesDeepSeekReasoningContentStreaming(
 		"",
 		"data: [DONE]",
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -477,6 +479,7 @@ func TestForwardAsRawChatCompletions_SilentRefusalTriggersFailover(t *testing.T)
 		"",
 		"data: [DONE]",
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -517,6 +520,7 @@ func TestForwardAsRawChatCompletions_SilentRefusalToolCallsExempt(t *testing.T) 
 		"",
 		"data: [DONE]",
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -549,6 +553,7 @@ func TestHandleChatStreamingResponse_SilentRefusalReasoningSummaryExempt(t *test
 		`data: {"type":"response.reasoning_summary_text.delta","delta":"thinking only"}`,
 		"",
 		`data: {"type":"response.completed","response":{"id":"resp_reasoning","model":"gpt-5.5","status":"completed"}}`,
+		"",
 		"",
 	}, "\n")
 	resp := &http.Response{
@@ -591,6 +596,7 @@ func TestForwardAsRawChatCompletions_SilentRefusalNormalContentExempt(t *testing
 		`data: {"id":"chatcmpl_ok","object":"chat.completion.chunk","model":"gpt-5.5","choices":[{"index":0,"delta":{"content":""},"finish_reason":"stop"}]}`,
 		"",
 		"data: [DONE]",
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -635,6 +641,7 @@ func TestForwardAsRawChatCompletions_StripsEmptyToolCallIdentity(t *testing.T) {
 		`data: {"id":"chatcmpl_tool","object":"chat.completion.chunk","model":"deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
 		"",
 		"data: [DONE]",
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -705,6 +712,7 @@ func TestForwardAsRawChatCompletions_TruncatedStreamAfterOutputFailsRequest(t *t
 
 	upstreamBody := strings.Join([]string{
 		`data: {"id":"chatcmpl_cut","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"content":"half an ans"},"finish_reason":null}]}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -861,6 +869,7 @@ func TestForwardAsRawChatCompletions_MissingDoneWithUsageStillSucceeds(t *testin
 		"",
 		`data: {"id":"chatcmpl_nodone","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":6,"total_tokens":17}}`,
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -894,6 +903,7 @@ func TestForwardAsRawChatCompletions_MissingDoneWithFinishReasonStillSucceeds(t 
 		`data: {"id":"chatcmpl_finish","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"content":"done"},"finish_reason":null}]}`,
 		"",
 		`data: {"id":"chatcmpl_finish","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -941,6 +951,7 @@ func TestForwardAsRawChatCompletions_ClientDisconnectTruncationStillBills(t *tes
 
 	upstreamBody := strings.Join([]string{
 		`data: {"id":"chatcmpl_gone","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"content":"ok"}}]}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -1072,6 +1083,7 @@ func TestForwardAsRawChatCompletions_ClientDisconnectDrainsUsage(t *testing.T) {
 		"",
 		"data: [DONE]",
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -1088,6 +1100,7 @@ func TestForwardAsRawChatCompletions_ClientDisconnectDrainsUsage(t *testing.T) {
 	result, err := svc.forwardAsRawChatCompletions(context.Background(), c, account, body, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.ClientDisconnect)
 	require.Equal(t, 17, result.Usage.InputTokens)
 	require.Equal(t, 8, result.Usage.OutputTokens)
 	require.Equal(t, 6, result.Usage.CacheReadInputTokens)

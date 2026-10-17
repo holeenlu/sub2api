@@ -90,6 +90,7 @@ func TestForEachOpenAISSEFrameDataTypeOverridesEventField(t *testing.T) {
 		"event: response.in_progress",
 		`data: {"type":"response.completed","response":{"id":"resp_1"}}`,
 		"",
+		"",
 	}, "\n"), func(eventType string, _ []byte) {
 		types = append(types, eventType)
 	})

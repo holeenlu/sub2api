@@ -335,7 +335,11 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 				zap.Error(err),
 			)
-			return
+			// A failed stream can still carry observed upstream usage. Keep it
+			// on the normal once-only accounting path without retrying the turn.
+			if result == nil {
+				return
+			}
 		}
 
 		// 6. Record usage

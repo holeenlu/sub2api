@@ -260,8 +260,14 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "", gjson.GetBytes(upstream.lastBody, "instructions").String())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").Exists())
-	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
-	require.Empty(t, upstream.lastReq.Header.Get("Conversation_Id"))
+	require.Empty(t, upstream.lastReq.Header.Get("session_id"))
+	require.Empty(t, upstream.lastReq.Header.Get("conversation_id"))
+	require.Empty(t, upstream.lastReq.Header.Get("x-codex-installation-id"))
+	require.Regexp(t, "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", upstream.lastReq.Header.Get("session-id"))
+	require.Regexp(t, "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", upstream.lastReq.Header.Get("thread-id"))
+	require.NotEqual(t, upstream.lastReq.Header.Get("session-id"), upstream.lastReq.Header.Get("thread-id"))
+	require.Equal(t, upstream.lastReq.Header.Get("session-id"), gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
+	require.Equal(t, upstream.lastReq.Header.Get("thread-id"), gjson.GetBytes(upstream.lastBody, "client_metadata.thread_id").String())
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.Empty(t, upstream.lastReq.Header.Get("originator"))
 }
@@ -406,6 +412,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormali
 		`data: {"type":"response.output_item.added","item":{"type":"tool_call","tool_calls":[{"function":{"name":"apply_patch"}}]}}`,
 		"",
 		"data: [DONE]",
+		"",
 		"",
 	}, "\n")
 	resp := &http.Response{
@@ -835,13 +842,19 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 	require.Equal(t, "local-test-instructions", strings.TrimSpace(gjson.GetBytes(upstream.lastBody, "instructions").String()))
 	require.Equal(t, "application/json", upstream.lastReq.Header.Get("Accept"))
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
-	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
+	require.Empty(t, upstream.lastReq.Header.Get("session_id"))
+	require.Empty(t, upstream.lastReq.Header.Get("conversation_id"))
+	require.Empty(t, upstream.lastReq.Header.Get("x-codex-installation-id"))
+	require.Regexp(t, "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", upstream.lastReq.Header.Get("session-id"))
+	require.Regexp(t, "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", upstream.lastReq.Header.Get("thread-id"))
+	require.NotEqual(t, upstream.lastReq.Header.Get("session-id"), upstream.lastReq.Header.Get("thread-id"))
+	require.False(t, gjson.GetBytes(upstream.lastBody, "client_metadata").Exists(), "legacy compact must not gain body metadata")
 	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
 	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
 	require.Contains(t, rec.Body.String(), `"id":"cmp_123"`)
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCancel(t *testing.T) {
+func TestOpenAIGatewayService_OAuthPassthrough_CancelledBeforeSendDoesNotGenerate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -881,10 +894,9 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCance
 	}
 
 	result, err := svc.Forward(reqCtx, c, account, originalBody)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.NotNil(t, upstream.lastReq)
-	require.NoError(t, upstream.lastReq.Context().Err())
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, result)
+	require.Nil(t, upstream.lastReq)
 }
 
 func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsGetsDefault(t *testing.T) {
@@ -1086,7 +1098,7 @@ func TestOpenAIGatewayService_OAuthLegacy_GroupForceStillHonorsGlobalFilter(t *t
 	require.Nil(t, result.ServiceTier)
 }
 
-func TestOpenAIGatewayService_OAuthLegacy_UpstreamRequestIgnoresClientCancel(t *testing.T) {
+func TestOpenAIGatewayService_OAuthLegacy_CancelledBeforeSendDoesNotGenerate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -1126,10 +1138,9 @@ func TestOpenAIGatewayService_OAuthLegacy_UpstreamRequestIgnoresClientCancel(t *
 	}
 
 	result, err := svc.Forward(reqCtx, c, account, originalBody)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.NotNil(t, upstream.lastReq)
-	require.NoError(t, upstream.lastReq.Context().Err())
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, result)
+	require.Nil(t, upstream.lastReq)
 }
 
 func TestOpenAIGatewayService_OAuthLegacy_CompositeCodexUAUsesCodexOriginator(t *testing.T) {
@@ -2162,11 +2173,14 @@ func TestOpenAIGatewayService_CodexFingerprintHTTPTransformedHeaderBodyParityAnd
 	require.True(t, ok)
 	wantInstall := resolveConvergedInstallationID(account, seed)
 	wantSession := resolveConvergedSessionID(seed)
-	wantThread := resolveConvergedThreadID(seed, "header-session")
+	wantThread := scopeCodexAccountIdentityValue(account, 0, "thread", "body-thread")
+	wantAffinity := scopeCodexAccountIdentityValue(account, 0, "session", "header-session")
 
-	require.Equal(t, wantInstall, upstream.lastReq.Header.Get("x-codex-installation-id"))
-	require.Equal(t, wantSession, upstream.lastReq.Header.Get("session-id"))
-	require.Equal(t, wantSession, upstream.lastReq.Header.Get("session_id"))
+	for _, name := range []string{"session_id", "conversation_id", "x-codex-installation-id", "accept-language"} {
+		require.Empty(t, upstream.lastReq.Header.Get(name), name)
+	}
+	require.Equal(t, wantAffinity, upstream.lastReq.Header.Get("session-id"))
+	require.NotEqual(t, wantSession, wantAffinity, "explicit cache affinity is independent of body session")
 	require.Equal(t, wantThread, upstream.lastReq.Header.Get("thread-id"))
 	require.Equal(t, wantThread, upstream.lastReq.Header.Get("x-client-request-id"))
 	require.Equal(t, wantThread+":0", upstream.lastReq.Header.Get("x-codex-window-id"))
@@ -2224,11 +2238,14 @@ func TestOpenAIGatewayService_CodexFingerprintHTTPRawPassthroughHeaderBodyParity
 	require.True(t, ok)
 	wantInstall := resolveConvergedInstallationID(account, seed)
 	wantSession := resolveConvergedSessionID(seed)
-	wantThread := resolveConvergedThreadID(seed, "header-session")
+	wantThread := scopeCodexAccountIdentityValue(account, 0, "thread", "body-thread")
+	wantAffinity := scopeCodexAccountIdentityValue(account, 0, "session", "header-session")
 
-	require.Equal(t, wantInstall, upstream.lastReq.Header.Get("x-codex-installation-id"))
-	require.Equal(t, wantSession, upstream.lastReq.Header.Get("session-id"))
-	require.Equal(t, wantSession, upstream.lastReq.Header.Get("session_id"))
+	for _, name := range []string{"session_id", "conversation_id", "x-codex-installation-id", "accept-language"} {
+		require.Empty(t, upstream.lastReq.Header.Get(name), name)
+	}
+	require.Equal(t, wantAffinity, upstream.lastReq.Header.Get("session-id"))
+	require.NotEqual(t, wantSession, wantAffinity, "explicit cache affinity is independent of body session")
 	require.Equal(t, wantThread, upstream.lastReq.Header.Get("thread-id"))
 	require.Equal(t, wantThread, upstream.lastReq.Header.Get("x-client-request-id"))
 	require.Equal(t, wantThread+":0", upstream.lastReq.Header.Get("x-codex-window-id"))
@@ -2246,7 +2263,7 @@ func TestOpenAIGatewayService_CodexFingerprintHTTPRawPassthroughHeaderBodyParity
 	require.Equal(t, gjson.Get(bodyTurnMetadata, "turn_id").String(), gjson.Get(headerTurnMetadata, "turn_id").String())
 }
 
-func TestOpenAIGatewayService_CodexFingerprintCompactDoesNotRewriteBodyCacheKeyOrMetadata(t *testing.T) {
+func TestOpenAIGatewayService_CodexFingerprintCompactKeepsCacheKeyAndScopesAccountMetadata(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -2285,9 +2302,18 @@ func TestOpenAIGatewayService_CodexFingerprintCompactDoesNotRewriteBodyCacheKeyO
 	require.True(t, ok)
 	require.NotEqual(t, resolveConvergedSessionID(seed), gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 	require.Equal(t, "body-session", gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
-	require.Equal(t, "body-session", gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
+	// Compact still skips optional fingerprint convergence, but account isolation
+	// now applies to its metadata independently of the unchanged cache-key bytes.
+	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "session", "body-session"), gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
+	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "session", "header-session"), upstream.lastReq.Header.Get("session-id"))
 	require.False(t, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").Exists())
-	require.Empty(t, upstream.lastReq.Header.Get("x-codex-window-id"))
+	require.Empty(t, upstream.lastReq.Header.Get("session_id"))
+	require.Empty(t, upstream.lastReq.Header.Get("x-codex-installation-id"))
+	thread := upstream.lastReq.Header.Get("thread-id")
+	require.Regexp(t, "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", thread)
+	require.NotEqual(t, upstream.lastReq.Header.Get("session-id"), thread)
+	require.Equal(t, thread+":0", upstream.lastReq.Header.Get("x-codex-window-id"))
+	require.Equal(t, gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String(), gjson.Get(upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader), "session_id").String())
 }
 
 func TestOpenAIGatewayService_CodexFingerprintMessagesBridgeDoesNotInjectBodyPromptCacheKey(t *testing.T) {
@@ -2327,7 +2353,12 @@ func TestOpenAIGatewayService_CodexFingerprintMessagesBridgeDoesNotInjectBodyPro
 	wantSession := resolveConvergedSessionID(seed)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").Exists())
 	require.Equal(t, wantSession, gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
-	require.Equal(t, wantSession, upstream.lastReq.Header.Get("session_id"))
+	require.Empty(t, upstream.lastReq.Header.Get("session_id"))
+	require.Empty(t, upstream.lastReq.Header.Get("conversation_id"))
+	require.Empty(t, upstream.lastReq.Header.Get("x-codex-installation-id"))
+	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "session", "header-session"), upstream.lastReq.Header.Get("session-id"))
+	require.NotEqual(t, wantSession, upstream.lastReq.Header.Get("session-id"))
+	require.Equal(t, gjson.GetBytes(upstream.lastBody, "client_metadata.thread_id").String(), upstream.lastReq.Header.Get("thread-id"))
 }
 
 func TestOpenAIGatewayService_CodexCLIOnly_RejectsNonCodexClient(t *testing.T) {
@@ -2440,6 +2471,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamingSetsFirstTokenMs(t *test
 		`data: {"type":"response.output_text.delta","delta":"h"}`,
 		"",
 		"data: [DONE]",
+		"",
 		"",
 	}, "\n")
 	resp := &http.Response{

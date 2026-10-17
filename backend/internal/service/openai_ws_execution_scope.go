@@ -1,10 +1,12 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -164,4 +166,28 @@ func openAIWSTenantScope(c *gin.Context) string {
 		}
 	}
 	return fmt.Sprintf("%d/key/%d", getOpenAIGroupIDFromContext(c), getAPIKeyIDFromContext(c))
+}
+
+// SIWC replay is connection-local, account-, tenant-, and grant-scoped. A
+// database account ID alone cannot authorize cached encrypted response items.
+type openAIWSSIWCBridgeOwnerKey struct{}
+
+func (s *OpenAIGatewayService) openAIWSSIWCBridgeOwner(ctx context.Context, c *gin.Context, account *Account) (string, error) {
+	if account == nil || !account.IsSIWCEnabled() {
+		return "", nil
+	}
+	if s.siwcOAuthService() == nil {
+		return "", siwcRequired()
+	}
+	prepareCtx, stopPrepare := OpenAITurnWaitContext(selectionbudget.PreparationContext(ctx))
+	defer stopPrepare()
+	identity, err := s.siwcOAuthService().SIWCGrantIdentity(prepareCtx, account)
+	if err != nil {
+		return "", err
+	}
+	return openAIWSSIWCBridgeOwnerIdentity(c, account, identity), nil
+}
+
+func openAIWSSIWCBridgeOwnerIdentity(c *gin.Context, account *Account, identity string) string {
+	return fmt.Sprintf("%s/key/%d/account/%d/siwc/%s", openAIWSTenantScope(c), getAPIKeyIDFromContext(c), account.ID, identity)
 }

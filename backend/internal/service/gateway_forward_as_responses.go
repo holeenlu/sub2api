@@ -134,9 +134,9 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 
 	// 10. Build upstream request
-	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
+	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream, streamWriteContext(c))
 	upstreamReq, forwardedBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
-	releaseUpstreamCtx()
+	defer releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}

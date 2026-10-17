@@ -571,14 +571,16 @@ func detachedBillingContext(ctx context.Context) (context.Context, context.Cance
 	return context.WithTimeout(base, postUsageBillingTimeout)
 }
 
-func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Context, context.CancelFunc) {
+func detachStreamUpstreamContext(ctx context.Context, stream bool, additional ...context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		return context.Background(), func() {}
 	}
 	if !stream {
 		return ctx, func() {}
 	}
-	return context.WithoutCancel(ctx), func() {}
+	detached, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	drain := newOpenAIHTTPUsageDrain(ctx, func() error { cancel(); return nil }, additional...)
+	return detached, func() { drain.stop(); cancel() }
 }
 
 func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {

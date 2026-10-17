@@ -26,6 +26,41 @@ type blockingOpenAIResponseHeaderUpstream struct {
 	once     sync.Once
 }
 
+func TestOpenAITurnBudgetSharedAcrossRetries(t *testing.T) {
+	for _, tc := range []struct{ limit, switches, want int }{{0, 10, 20}, {3, 10, 3}, {3, 1, 2}} {
+		cfg := &config.Config{}
+		cfg.Gateway.OpenAITurnMaxAttempts = tc.limit
+		cfg.Gateway.MaxAccountSwitches = tc.switches
+		ctx := EnsureOpenAITurnBudget(context.Background(), cfg)
+		for i := 0; i < tc.want; i++ {
+			require.NoError(t, TakeOpenAITurnAttempt(EnsureOpenAITurnBudget(ctx, cfg)))
+		}
+		if tc.limit > 0 {
+			require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAITurnAttemptBudgetExhausted)
+		}
+		// New logical requests do not inherit the exhausted budget.
+		require.NoError(t, TakeOpenAITurnAttempt(WithOpenAITurnBudget(ctx, NewOpenAITurnBudget(cfg))))
+	}
+	t.Run("preparatory retry reserves generation", func(t *testing.T) {
+		ctx := WithOpenAITurnBudget(t.Context(), &OpenAITurnBudget{limit: 2})
+		require.NoError(t, takeOpenAITurnAttempt(ctx, 1))
+		require.ErrorIs(t, takeOpenAITurnAttempt(ctx, 1), ErrOpenAITurnAttemptBudgetExhausted)
+		require.NoError(t, TakeOpenAITurnAttempt(ctx), "a rejected reservation must not consume the generation slot")
+		require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAITurnAttemptBudgetExhausted)
+	})
+	protection := []byte(`{"error":{"message":"response protection is unavailable"}}`)
+	for _, limit := range []int{0, 3} {
+		ctx := EnsureOpenAITurnBudget(context.Background(), &config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: limit}})
+		require.True(t, OpenAITurnRetryAllowed(ctx, 1, protection))
+		require.True(t, OpenAITurnRetryAllowed(ctx, 1, protection))
+		require.Equal(t, limit == 0, OpenAITurnRetryAllowed(ctx, 2, protection))
+	}
+	parent, cancel := context.WithCancel(context.Background())
+	bound := EnsureOpenAITurnBudget(parent, nil)
+	cancel()
+	require.ErrorIs(t, TakeOpenAITurnAttempt(context.WithoutCancel(bound)), context.Canceled, "detached usage drain cannot authorize a new generation after client cancellation")
+}
+
 type firstOutputCloseTrackingBody struct {
 	io.ReadCloser
 	closed chan struct{}
@@ -98,6 +133,7 @@ func TestOpenAINativeFirstOutputTimeoutDisabledPreservesSynchronousStream(t *tes
 		`data: {"type":"response.created","response":{"id":"resp_disabled"}}`,
 		"",
 		`data: {"type":"response.completed","response":{"id":"resp_disabled","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
 		"",
 	}, "\n")))}
 	rec := httptest.NewRecorder()
@@ -198,11 +234,6 @@ func TestOpenAIFirstOutputStageDefaultLimitIsIndependentFromScannerLimit(t *test
 	require.EqualValues(t, 8*1024*1024, stage.limit)
 	require.Greater(t, stage.limit, int64(68106))
 	require.Less(t, stage.limit, int64(defaultMaxLineSize))
-}
-
-func TestOpenAIFirstOutputEventQueueSizeBackpressuresGuardedStreams(t *testing.T) {
-	require.Equal(t, 1, openAIFirstOutputEventQueueSize(true))
-	require.Equal(t, 16, openAIFirstOutputEventQueueSize(false))
 }
 
 func TestOpenAIFirstOutputDynamicScannerLimitsOnlyWhileGuardIsActive(t *testing.T) {
@@ -429,7 +460,7 @@ func assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t *testing.T, line stri
 	}
 }
 
-func TestOpenAINativeFirstOutputEOFDispatchesTerminalEventWithoutBlankLine(t *testing.T) {
+func TestOpenAINativeFirstOutputEOFRejectsTerminalEventWithoutBlankLine(t *testing.T) {
 	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
 		openAITTFTMode: OpenAITTFTModeVisible,
 		expiresAt:      time.Now().Add(time.Minute).UnixNano(),
@@ -460,18 +491,15 @@ func TestOpenAINativeFirstOutputEOFDispatchesTerminalEventWithoutBlankLine(t *te
 
 	result, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI}, time.Now(), "model", "model")
 
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.NotNil(t, result)
-	require.Nil(t, result.firstTokenMs, "usage-only terminal event is not visible output")
-	require.Equal(t, "resp_eof", result.responseID)
-	require.Equal(t, 3, result.usage.InputTokens)
-	require.Equal(t, 2, result.usage.OutputTokens)
-	require.Contains(t, rec.Body.String(), `"type":"response.completed"`)
-	require.Contains(t, rec.Body.String(), `"id":"resp_eof"`)
-	require.True(t, strings.HasSuffix(rec.Body.String(), "\n"))
-	require.False(t, strings.HasSuffix(rec.Body.String(), "\n\n"), "EOF dispatch must not synthesize a blank line")
-	require.Equal(t, "request-eof", rec.Result().Header.Get("X-Request-Id"))
-	require.Equal(t, "17", rec.Result().Header.Get("X-Ratelimit-Remaining-Requests"))
+	require.Nil(t, result.firstTokenMs)
+	require.Empty(t, result.responseID)
+	require.Zero(t, result.usage.InputTokens)
+	require.Zero(t, result.usage.OutputTokens)
+	require.Empty(t, rec.Body.String())
+	require.Empty(t, rec.Result().Header.Get("X-Request-Id"))
+	require.Empty(t, rec.Result().Header.Get("X-Ratelimit-Remaining-Requests"))
 }
 
 func TestOpenAINativeFirstOutputStageOverflowFailsOverWithoutAttemptBytes(t *testing.T) {
@@ -503,7 +531,7 @@ func TestOpenAINativeFirstOutputStageOverflowFailsOverWithoutAttemptBytes(t *tes
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 	require.True(t, failoverErr.SafeToFailoverAfterWrite)
-	require.Contains(t, string(failoverErr.ResponseBody), "staging limit exceeded")
+	require.Contains(t, string(failoverErr.ResponseBody), "first-output limit")
 	require.Empty(t, rec.Body.String())
 	require.Empty(t, rec.Header().Values("X-Request-Id"))
 	require.Empty(t, rec.Header().Values("X-Ratelimit-Remaining-Requests"))
@@ -554,6 +582,7 @@ func TestOpenAINativeFirstOutputScannerAllowsLargeEventAfterSemanticBoundary(t *
 		`data: {"type":"response.output_text.delta","delta":"` + largeDelta + `"}`,
 		"",
 		`data: {"type":"response.completed","response":{"id":"resp_large_image","usage":{"input_tokens":4,"output_tokens":3}}}`,
+		"",
 		"",
 	}, "\n")
 	rec := httptest.NewRecorder()
@@ -658,6 +687,7 @@ func TestOpenAINativeFirstOutputFailoverKeepsAttemptHeadersPrivateAfterKeepalive
 			"",
 			`data: {"type":"response.completed","response":{"id":"resp_second","usage":{"input_tokens":1,"output_tokens":1}}}`,
 			"",
+			"",
 		}, "\n"))),
 	}
 	result, secondErr := svc.handleStreamingResponse(c.Request.Context(), secondResp, c, &Account{ID: 2, Platform: PlatformOpenAI}, time.Now(), "model", "model")
@@ -674,5 +704,133 @@ func TestOpenAINativeFirstOutputFailoverKeepsAttemptHeadersPrivateAfterKeepalive
 	case <-firstWriterDone:
 	case <-time.After(time.Second):
 		t.Fatal("first account writer did not exit after timeout")
+	}
+}
+
+func TestOpenAITurnFirstOutputDeadlineDefaultAndEnabled(t *testing.T) {
+	for _, limit := range []int{0, 3} {
+		budget := NewOpenAITurnBudget(&config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: limit}})
+		budget.started = time.Now().Add(-2 * time.Second)
+		ctx := WithOpenAITurnBudget(context.Background(), budget)
+		forwardB := time.Now()
+		deadline := openAITurnFirstOutputDeadline(ctx, time.Second, forwardB)
+		if limit == 0 {
+			require.Equal(t, forwardB.Add(time.Second), deadline, "disabled budget preserves a fresh timeout after account failover")
+			require.NoError(t, TakeOpenAITurnAttempt(ctx))
+		} else {
+			require.Equal(t, budget.started.Add(time.Second), deadline)
+			require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAIWSFirstOutputBudgetExhausted)
+		}
+	}
+}
+
+func TestOpenAITurnDeadlineBoundsWaitsWithoutCancelingResponseContext(t *testing.T) {
+	cfg := &config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: 3, OpenAIFirstOutputTimeoutSeconds: 60, OpenAIHighEffortFirstOutputTimeoutSeconds: 180}}
+	ctx := EnsureOpenAITurnBudget(context.Background(), cfg, "high")
+	budget := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+	require.Equal(t, 180*time.Second, budget.deadline.Sub(budget.started))
+	budget.deadline = time.Now().Add(25 * time.Millisecond)
+	require.ErrorIs(t, WaitOpenAITurnRetry(ctx, time.Second), ErrOpenAIWSFirstOutputBudgetExhausted)
+	require.NoError(t, ctx.Err(), "a finished pre-output wait must not cancel an already streaming response")
+	require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAIWSFirstOutputBudgetExhausted)
+	require.Zero(t, budget.attempts, "admission exhaustion never sends or penalizes another account")
+	cfg.Gateway.OpenAITurnMaxAttempts = 0
+	legacy := EnsureOpenAITurnBudget(context.Background(), cfg, "high")
+	wait, cancel := OpenAITurnWaitContext(legacy)
+	defer cancel()
+	_, hasDeadline := wait.Deadline()
+	require.False(t, hasDeadline, "default zero retains existing per-path deadlines")
+}
+
+func TestOpenAIHTTPFirstOutputDeadlineCoversHeadersAndBody(t *testing.T) {
+	for _, mode := range []string{"bridge", "passthrough"} {
+		for _, headers := range []bool{false, true} {
+			t.Run(mode+"/"+map[bool]string{false: "body", true: "headers"}[headers], func(t *testing.T) {
+				cfg := &config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: 3, OpenAIFirstOutputTimeoutSeconds: 60}}
+				parent, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				ctx := EnsureOpenAITurnBudget(parent, cfg, "medium")
+				budget := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+				budget.deadline = time.Now().Add(40 * time.Millisecond)
+				var upstream HTTPUpstream
+				closed := make(chan struct{})
+				if headers {
+					upstream = &blockingOpenAIResponseHeaderUpstream{canceled: closed}
+				} else {
+					pr, pw := io.Pipe()
+					defer pw.Close()
+					body := &firstOutputCloseTrackingBody{ReadCloser: pr, closed: closed}
+					upstream = &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: body}}
+					go func() {
+						_, _ = io.WriteString(pw, "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_discarded\"}}\n\n: heartbeat\n\n")
+					}()
+				}
+				svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+				account := &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+				payload := []byte(`{"type":"response.create","model":"gpt-6.1-sol","input":"hello"}`)
+				writes := 0
+				var err error
+				if mode == "bridge" {
+					_, err = svc.proxyOpenAIWSHTTPBridgeTurn(ctx, nil, account, "token", payload, len(payload), "gpt-6.1-sol", "", "", "", "", 1, func([]byte) error { writes++; return nil })
+				} else {
+					account.Type = AccountTypeAPIKey
+					account.Credentials = map[string]any{"api_key": "test"}
+					rec := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(rec)
+					c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+					_, err = svc.forwardOpenAIPassthrough(ctx, c, account, []byte(`{"model":"gpt-6.1-sol","stream":true,"input":"hello"}`), nil, "gpt-6.1-sol", false, nil, true, time.Now())
+					require.NotContains(t, rec.Body.String(), "resp_discarded")
+				}
+				var failover *UpstreamFailoverError
+				require.ErrorAs(t, err, &failover)
+				require.Equal(t, http.StatusGatewayTimeout, failover.StatusCode)
+				require.Zero(t, writes, "uncommitted identity and heartbeats do not end the first-output budget")
+				select {
+				case <-closed:
+				case <-parent.Done():
+					t.Fatal("upstream reader was not canceled")
+				}
+				require.Equal(t, 1, budget.attempts)
+			})
+		}
+	}
+}
+
+func TestOpenAIHTTPFirstOutputDeadlineStopsAfterContent(t *testing.T) {
+	for _, mode := range []string{"bridge", "passthrough"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := &config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: 3, OpenAIFirstOutputTimeoutSeconds: 60}}
+			ctx := EnsureOpenAITurnBudget(context.Background(), cfg, "medium")
+			budget := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+			budget.deadline = time.Now().Add(40 * time.Millisecond)
+			pr, pw := io.Pipe()
+			defer pw.Close()
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: pr}}
+			writerDone := make(chan struct{})
+			go func() {
+				defer close(writerDone)
+				defer pw.Close()
+				_, _ = io.WriteString(pw, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"working\"}\n\n")
+				time.Sleep(80 * time.Millisecond)
+				_, _ = io.WriteString(pw, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_kept\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
+			}()
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+			account := &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			payload := []byte(`{"type":"response.create","model":"gpt-6.1-sol","input":"hello"}`)
+			if mode == "bridge" {
+				result, err := svc.proxyOpenAIWSHTTPBridgeTurn(ctx, nil, account, "token", payload, len(payload), "gpt-6.1-sol", "", "", "", "", 1, func([]byte) error { return nil })
+				require.NoError(t, err)
+				require.Equal(t, "response.completed", result.UpstreamTerminalEvent)
+			} else {
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+				result, err := svc.handleStreamingResponsePassthrough(ctx, upstream.resp, c, account, time.Now(), "gpt-6.1-sol", "gpt-6.1-sol")
+				require.NoError(t, err)
+				require.Equal(t, 1, result.usage.OutputTokens)
+				require.Contains(t, rec.Body.String(), "resp_kept")
+			}
+			<-writerDone
+		})
 	}
 }

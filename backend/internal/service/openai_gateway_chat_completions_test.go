@@ -35,6 +35,8 @@ func (w *openAIChatFailingWriter) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
+func (w *openAIChatFailingWriter) WriteString(data string) (int, error) { return w.Write([]byte(data)) }
+
 func TestForwardAsChatCompletions_ResponsesSupportedFallsBackWhenStructuredInputRequiresString(t *testing.T) {
 	for name, rejection := range map[string]string{
 		"OpenAI invalid type": `{"error":{"type":"invalid_request_error","code":"invalid_type","param":"input","message":"Invalid type for 'input': expected a string, but got an array instead."}}`,
@@ -1049,6 +1051,7 @@ func TestForwardAsChatCompletions_BufferedContextWindowResponseFailedReturnsErro
 		`event: response.failed`,
 		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.5","status":"failed","output":[],"error":{"code":"upstream_error","message":"input exceeds the context window"}}}`,
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -1093,6 +1096,7 @@ func TestForwardAsChatCompletions_StreamContextWindowResponseFailedReturnsErrorW
 		"",
 		`event: response.failed`,
 		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.5","status":"failed","output":[],"error":{"code":"upstream_error","message":"input exceeds the context window"}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -1180,6 +1184,7 @@ func TestForwardAsChatCompletions_StreamCyberPolicyNoFailover(t *testing.T) {
 		"",
 		`event: response.failed`,
 		`data: {"type":"response.failed","response":{"id":"resp_cyber","object":"response","model":"gpt-5.5","status":"failed","output":[],"error":{"code":"cyber_policy","message":"flagged for cyber policy"}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{

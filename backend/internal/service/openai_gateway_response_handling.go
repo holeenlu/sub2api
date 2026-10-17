@@ -985,7 +985,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if clientDisconnected || failureDelivered {
 				continue
 			}
-			if eventInProgress {
+			// A staged partial event has not reached the wire. Keepalive is safe
+			// until the stage commits; never splice comments into a visible frame.
+			if eventInProgress && (firstOutputStage == nil || firstOutputStage.closed) {
 				continue
 			}
 			if time.Since(lastDownstreamWriteAt) < keepaliveInterval {
@@ -1879,6 +1881,10 @@ func buildOpenAIResponseFailedSSE(responseID, model string, createdAt int64, sou
 	if code == "" {
 		code = strings.TrimSpace(gjson.GetBytes(source, "response.error.code").String())
 	}
+	if code == "" && gjson.GetBytes(source, "type").String() == "error" {
+		code = strings.TrimSpace(gjson.GetBytes(source, "code").String())
+	}
+	code = truncateString(sanitizeUpstreamErrorMessage(code), 512)
 	if code == "" {
 		code = "upstream_error"
 	}

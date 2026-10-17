@@ -1548,6 +1548,13 @@ func (p *openAIWSConnPool) recordLastSuccessfulAcquire(accountID int64, generati
 		ap.mu.Unlock()
 		return
 	}
+	// SIWC sockets belong to one authenticated ingress. Never cache their
+	// bearer for speculative background dials or other client sessions.
+	if req.Account != nil && req.Account.IsSIWCEnabled() {
+		ap.lastAcquire = nil
+		ap.mu.Unlock()
+		return
+	}
 	ap.lastAcquire = cloneOpenAIWSAcquireRequestPtr(&req)
 	ap.mu.Unlock()
 }

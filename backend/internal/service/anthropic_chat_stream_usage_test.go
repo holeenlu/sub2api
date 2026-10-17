@@ -70,11 +70,23 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 							svc := &GatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
 							account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "sk-test"}}
 							result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, nil)
-							require.NoError(t, err)
+							if terminal == "eof" {
+								require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+							} else {
+								require.NoError(t, err)
+							}
+							require.NotNil(t, result)
 							require.Equal(t, tc.billableInput, result.Usage.InputTokens)
 							require.Equal(t, tc.output, result.Usage.OutputTokens)
 							require.Equal(t, tc.cached, result.Usage.CacheReadInputTokens)
 							require.Equal(t, tc.created, result.Usage.CacheCreationInputTokens)
+						}
+						if adapter == "anthropic" && terminal == "eof" {
+							// Partial authoritative usage is retained above, but missing
+							// message_stop cannot become a successful terminal chunk.
+							require.Contains(t, rec.Body.String(), "upstream_missing_terminal")
+							require.NotContains(t, rec.Body.String(), "[DONE]")
+							return
 						}
 						count, done := 0, 0
 						var last *apicompat.ChatCompletionsChunk
