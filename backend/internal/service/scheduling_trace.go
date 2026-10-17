@@ -25,18 +25,22 @@ const (
 // evidence of an upstream send. Bodies, credentials and session identifiers must
 // never enter this record; actual failures retain their existing Ops events.
 type SchedulingDecision struct {
-	Policy     string         `json:"policy,omitempty"`
-	Stage      string         `json:"stage"`
-	Layer      string         `json:"layer,omitempty"`
-	Action     string         `json:"action"`
-	Reason     string         `json:"reason,omitempty"`
-	AccountID  int64          `json:"account_id,omitempty"`
-	Pool       int            `json:"pool,omitempty"`
-	Candidates int            `json:"candidates,omitempty"`
-	TopK       int            `json:"top_k,omitempty"`
-	Excluded   map[string]int `json:"excluded,omitempty"`
-	ElapsedMs  int64          `json:"elapsed_ms"`
-	DurationMs int64          `json:"duration_ms,omitempty"`
+	Policy             string         `json:"policy,omitempty"`
+	Stage              string         `json:"stage"`
+	Layer              string         `json:"layer,omitempty"`
+	Action             string         `json:"action"`
+	Reason             string         `json:"reason,omitempty"`
+	AccountID          int64          `json:"account_id,omitempty"`
+	Pool               int            `json:"pool,omitempty"`
+	Candidates         int            `json:"candidates,omitempty"`
+	TopK               int            `json:"top_k,omitempty"`
+	Excluded           map[string]int `json:"excluded,omitempty"`
+	ElapsedMs          int64          `json:"elapsed_ms"`
+	DurationMs         int64          `json:"duration_ms,omitempty"`
+	ConfiguredCapacity int            `json:"configured_capacity,omitempty"`
+	EffectiveCapacity  int            `json:"effective_capacity,omitempty"`
+	OldestWaitMs       int64          `json:"oldest_wait_ms,omitempty"`
+	BypassedWaiters    int            `json:"bypassed_waiters,omitempty"`
 }
 
 type schedulingTraceKey struct{}
@@ -111,7 +115,45 @@ func recordSchedulingSlot(ctx context.Context, accountID int64, result *AcquireR
 }
 
 func RecordSchedulingDecision(ctx context.Context, event SchedulingDecision) {
+	if root := openAIRequestTimingFromContext(ctx); root != nil {
+		if event.Stage == "selection" && event.AccountID > 0 {
+			root.mark("account_selected", time.Now())
+		}
+		if (event.Stage == "slot" && event.Action == "acquired") || (event.Stage == "queue" && event.Action == "slot_admitted") {
+			stage := "account_slot"
+			if event.Layer == "user" {
+				stage = "user_slot"
+			}
+			root.mark(stage, time.Now())
+		}
+	}
 	logGatewayCacheSelection(ctx, event)
+	if event.Stage == "queue" {
+		index := 0
+		if event.Layer == "user" {
+			index = 1
+		}
+		age := event.OldestWaitMs
+		if event.Action == "slot_admitted" {
+			schedulingCounters.queueAdmissions[index].Add(1)
+			if event.BypassedWaiters > 0 {
+				schedulingCounters.queueBypasses[index].Add(1)
+			}
+		}
+		if event.Action == "wait_finished" && event.DurationMs > age {
+			age = event.DurationMs
+		}
+		for previous := schedulingCounters.oldestWaitMs[index].Load(); age > 0 && uint64(age) > previous; previous = schedulingCounters.oldestWaitMs[index].Load() {
+			if schedulingCounters.oldestWaitMs[index].CompareAndSwap(previous, uint64(age)) {
+				break
+			}
+		}
+	}
+
+	if event.Stage == "load" {
+		schedulingCounters.dynamicAccounts.Add(uint64(max(0, event.Candidates)))
+	}
+
 	if event.Action == "next_layer" {
 		schedulingCounters.crossLayer.Add(1)
 	}
@@ -136,6 +178,18 @@ func RecordSchedulingDecision(ctx context.Context, event SchedulingDecision) {
 	}
 	trace.mu.Lock()
 	defer trace.mu.Unlock()
+	if event.Stage == "queue" && event.Action == "slot_admitted" {
+		trace.summary.QueueAdmissions++
+		if event.OldestWaitMs > trace.summary.OldestWaitMs {
+			trace.summary.OldestWaitMs = event.OldestWaitMs
+		}
+		if event.BypassedWaiters > 0 {
+			trace.summary.QueueBypasses++
+		}
+	}
+	if event.Stage == "load" {
+		trace.summary.DynamicAccounts += event.Candidates
+	}
 	if event.Stage == "slot" {
 		trace.summary.Attempts++
 	}
@@ -241,14 +295,18 @@ func LogSchedulingTrace(ctx context.Context, failed bool) {
 
 // The summary survives event-ring eviction. No identity becomes a metric label.
 type schedulingSummary struct {
-	Attempts   int                      `json:"candidate_attempts"`
-	Pool       int                      `json:"pool"`
-	Candidates int                      `json:"candidates"`
-	Excluded   map[string]int           `json:"excluded,omitempty"`
-	Budget     selectionbudget.Snapshot `json:"budget"`
-	StopReason string                   `json:"stop_reason,omitempty"`
-	First      *SchedulingDecision      `json:"first,omitempty"`
-	Last       *SchedulingDecision      `json:"last,omitempty"`
+	OldestWaitMs    int64                    `json:"oldest_wait_ms,omitempty"`
+	QueueAdmissions int                      `json:"queue_admissions,omitempty"`
+	QueueBypasses   int                      `json:"queue_bypasses,omitempty"`
+	DynamicAccounts int                      `json:"dynamic_accounts_read,omitempty"`
+	Attempts        int                      `json:"candidate_attempts"`
+	Pool            int                      `json:"pool"`
+	Candidates      int                      `json:"candidates"`
+	Excluded        map[string]int           `json:"excluded,omitempty"`
+	Budget          selectionbudget.Snapshot `json:"budget"`
+	StopReason      string                   `json:"stop_reason,omitempty"`
+	First           *SchedulingDecision      `json:"first,omitempty"`
+	Last            *SchedulingDecision      `json:"last,omitempty"`
 }
 
 func finishSchedulingBudget(ctx context.Context, b *selectionbudget.Budget, err *error) {

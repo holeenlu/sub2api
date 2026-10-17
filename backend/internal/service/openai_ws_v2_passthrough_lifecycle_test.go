@@ -16,10 +16,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type stagedPassthroughFrame struct {
@@ -1131,4 +1134,115 @@ func TestPassthroughLifecycle_SecondTurnTimeoutIsNotFailoverSafe(t *testing.T) {
 	case <-time.After(2500 * time.Millisecond):
 		t.Fatal("second turn first semantic output was left unbounded")
 	}
+}
+
+// Hold the second local Write completion while permitting a real upstream reply.
+// This catches summaries that close on the reader before the sender returns.
+type latencyDelayedWriteConn struct {
+	*stagedPassthroughConn
+	calls   atomic.Int32
+	release chan struct{}
+}
+
+func (c *latencyDelayedWriteConn) WriteFrame(ctx context.Context, typ coderws.MessageType, payload []byte) error {
+	if err := c.stagedPassthroughConn.WriteFrame(ctx, typ, payload); err != nil {
+		return err
+	}
+	if c.calls.Add(1) == 2 {
+		select {
+		case <-c.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func TestPassthroughLifecycle_TransportTimingWaitsForSendCompletion(t *testing.T) {
+	cfg := passthroughLifecycleConfig()
+	cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 5
+	upstream := newStagedPassthroughConn()
+	delayed := &latencyDelayedWriteConn{stagedPassthroughConn: upstream, release: make(chan struct{})}
+	svc := newPassthroughLifecycleService(cfg, upstream)
+	svc.openaiWSPassthroughDialer = &stagedPassthroughDialer{conn: delayed}
+	core, logs := observer.New(zap.InfoLevel)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, serverErr := startPassthroughLifecycleServerWithHooks(t, ctx, svc, passthroughLifecycleAccount(), func(c *gin.Context) *OpenAIWSIngressHooks {
+		c.Request = c.Request.WithContext(logger.IntoContext(c.Request.Context(), zap.New(core)))
+		return nil
+	})
+	defer server.Close()
+	client := dialPassthroughLifecycleClient(t, server)
+	defer client.CloseNow()
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(delayed.release) }) }
+	defer release()
+	for turn := 1; turn <= 2; turn++ {
+		if turn == 2 {
+			wctx, done := context.WithTimeout(ctx, time.Second)
+			err := client.Write(wctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"second"}`))
+			done()
+			require.NoError(t, err)
+		}
+		requirePassthroughUpstreamWrite(t, upstream, time.Second)
+		id := fmt.Sprintf("resp_send_%d", turn)
+		upstream.Send(`{"type":"response.output_text.delta","response_id":"` + id + `","delta":"ok"}`)
+		upstream.Send(`{"type":"response.completed","response":{"id":"` + id + `","status":"completed"}}`)
+		readNativeWSTestTurn(t, client)
+		if turn == 2 {
+			require.Len(t, wsLatencySummaries(logs), 1)
+			release()
+		}
+		require.Eventually(t, func() bool { return len(wsLatencySummaries(logs)) == turn }, time.Second, time.Millisecond)
+	}
+	summaries := wsLatencySummaries(logs)
+	stages := summaries[1]["stages_ms"].(map[string]int64)
+	require.Contains(t, stages, "wrote_request")
+	require.Contains(t, stages, "terminal")
+	require.Contains(t, stages, "first_text_flush")
+	require.GreaterOrEqual(t, stages["wrote_request"], stages["terminal"])
+	requireNativeWSTestServerExit(t, client, serverErr)
+}
+
+func TestPassthroughLifecycle_TransportTimingWarmupDoesNotGenerateAttempt(t *testing.T) {
+	cfg := passthroughLifecycleConfig()
+	cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 5
+	upstream := newStagedPassthroughConn()
+	svc := newPassthroughLifecycleService(cfg, upstream)
+	core, logs := observer.New(zap.InfoLevel)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, serverErr := startPassthroughLifecycleServerWithHooks(t, ctx, svc, passthroughLifecycleAccount(), func(c *gin.Context) *OpenAIWSIngressHooks {
+		c.Request = c.Request.WithContext(logger.IntoContext(c.Request.Context(), zap.New(core)))
+		BeginOpenAIRequestTiming(c)
+		openAIRequestTimingFromContext(c.Request.Context()).started = time.Now().Add(-2 * time.Minute)
+		return nil
+	})
+	defer server.Close()
+	client := dialPassthroughLifecycleClientWithPayload(t, server, `{"type":"response.create","model":"gpt-5.1","generate":false,"input":"warm"}`)
+	defer client.CloseNow()
+	requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	// An ID-less warmup does not advance the relay's billed-turn counter.
+	upstream.Send(`{"type":"response.completed","response":{"status":"completed","output":[]}}`)
+	readNativeWSTestTurn(t, client)
+	require.Empty(t, wsLatencySummaries(logs))
+	wctx, done := context.WithTimeout(ctx, time.Second)
+	err := client.Write(wctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"hello"}`))
+	done()
+	require.NoError(t, err)
+	requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	upstream.Send(`{"type":"response.completed","response":{"id":"real","status":"completed","output":[]}}`)
+	readNativeWSTestTurn(t, client)
+	require.Eventually(t, func() bool { return len(wsLatencySummaries(logs)) == 1 }, time.Second, time.Millisecond)
+	require.Equal(t, "completed", wsLatencySummaries(logs)[0]["outcome"])
+	require.Less(t, wsLatencySummaries(logs)[0]["request_elapsed_ms"].(int64), int64(30000), "first generation must not reuse the old prewarm middleware root")
+	prewarms := 0
+	for _, entry := range logs.All() {
+		if entry.ContextMap()["stage"] == "prewarm" {
+			prewarms++
+		}
+	}
+	require.Equal(t, 1, prewarms)
+	requireNativeWSTestServerExit(t, client, serverErr)
 }

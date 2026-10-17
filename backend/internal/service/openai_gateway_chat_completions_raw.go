@@ -237,6 +237,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 				UpstreamRequestID:  firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
 				Kind:               kind,
 				Message:            upstreamMsg,
+				Detail:             s.opsUpstreamErrorDetail(respBody),
 			})
 			s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, upstreamModel), account, resp.StatusCode, resp.Header, respBody)
 			if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
@@ -403,6 +404,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	resultWithUsage := func() *OpenAIForwardResult {
 		return &OpenAIForwardResult{
+			AuthorizationMode:             nativeOpenAIUsageAuthorizationMode(account),
 			RequestID:                     requestID,
 			UpstreamHeaders:               resp.Header,
 			Usage:                         usage,
@@ -579,6 +581,7 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 	_, _ = c.Writer.Write(respBody)
 
 	return &OpenAIForwardResult{
+		AuthorizationMode:             nativeOpenAIUsageAuthorizationMode(account),
 		RequestID:                     requestID,
 		UpstreamHeaders:               resp.Header,
 		Usage:                         usage,

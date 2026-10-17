@@ -1219,6 +1219,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	currentPayload := firstPayload.payloadRaw
 	currentPayloadBytes := len(currentPayload)
 	agentTaskRecoveryTried := false
+	var timing *openAIForwardTiming
+	var pendingPrewarm time.Duration
+	defer func() { timing.Finish(returnErr) }()
 	var acquireTurnLease func(int, string, bool, bool) (*openAIWSConnLease, error)
 	acquireTurnLease = func(turn int, preferred string, forcePreferredConn bool, forceNewConn bool) (*openAIWSConnLease, error) {
 		if turn > 1 || forceNewConn {
@@ -1252,7 +1255,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			stopBudget()
 			return nil, err
 		}
+		if gjson.GetBytes(currentPayload, "generate").Type != gjson.False {
+			timing = newOpenAITransportTiming(c, account, "websocket", int64(len(currentPayload)))
+			timing.SetTransportReason("ctx_pool_ingress")
+		}
 		lease, acquireErr := pool.Acquire(acquireCtx, req)
+		if acquireErr != nil {
+			timing.Finish(acquireErr)
+		}
 		if errors.Is(context.Cause(waitCtx), ErrOpenAIWSFirstOutputBudgetExhausted) {
 			if lease != nil {
 				lease.Release()
@@ -1330,6 +1340,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			return nil, acquireErr
 		}
+		timing.ConnectionReady(lease.Reused(), lease.ConnPickDuration(), lease.QueueWaitDuration())
 		connID := strings.TrimSpace(lease.ConnID())
 		if handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader)); handshakeTurnState != "" {
 			s.noteOpenAICodexTurnStateProvenance(c, account, handshakeTurnState)
@@ -1345,7 +1356,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			baseAcquireReq.Headers = updatedHeaders
 		}
 		logOpenAIWSModeInfo(
-			"ingress_ws_upstream_connected account_id=%d turn=%d conn_id=%s conn_reused=%v conn_idle_ms=%d conn_age_ms=%d upstream_pings=%d conn_pick_ms=%d queue_wait_ms=%d preferred_conn_id=%s",
+			"ingress_ws_upstream_connected account_id=%d turn=%d conn_id=%s conn_reused=%v conn_idle_ms=%d conn_age_ms=%d upstream_pings=%d preferred_conn_id=%s",
 			account.ID,
 			turn,
 			truncateOpenAIWSLogValue(connID, openAIWSIDValueMaxLen),
@@ -1353,8 +1364,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			lease.IdleBefore().Milliseconds(),
 			lease.AgeBefore().Milliseconds(),
 			lease.UpstreamPingCount(),
-			lease.ConnPickDuration().Milliseconds(),
-			lease.QueueWaitDuration().Milliseconds(),
 			truncateOpenAIWSLogValue(preferred, openAIWSIDValueMaxLen),
 		)
 		return lease, nil
@@ -1382,6 +1391,32 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return nil, errors.New("upstream websocket lease is nil")
 		}
 		turnStart := time.Now()
+		attemptTiming := timing
+		if gjson.GetBytes(payload, "generate").Type == gjson.False {
+			prewarmTiming := openAIForwardTimingFromContext(c)
+			defer func() {
+				elapsed := time.Since(turnStart)
+				if prewarmTiming != nil {
+					prewarmTiming.MarkPrewarm(elapsed)
+				} else {
+					pendingPrewarm += elapsed
+				}
+			}()
+		}
+		var timingErr error
+		defer func() {
+			if returnErr != nil {
+				timingErr = returnErr
+			}
+			if timingErr == nil {
+				timingErr = ctx.Err()
+			}
+			if returnErr == nil && out != nil && out.UpstreamTerminalEvent != "" {
+				attemptTiming.FinishTurn(timingErr)
+			} else {
+				attemptTiming.Finish(timingErr)
+			}
+		}()
 		wroteDownstream := false
 		clientDisconnected := false
 		progress := beginOpenAIResponseProgress(c, ingressMode, "websocket", nil)
@@ -1420,8 +1455,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if clientDisconnected {
 				return nil
 			}
-			err := observeWrite(writeClientMessage(message))
+			writeErr := writeClientMessage(message)
+			if writeErr != nil {
+				timingErr = writeErr
+			}
+			err := observeWrite(writeErr)
 			if err == nil && !clientDisconnected {
+				attemptTiming.MarkDownstream(message)
 				progress.observeDownstream(message)
 				if gjson.GetBytes(message, "type").String() == "codex.response.metadata" {
 					if state := gjson.GetBytes(message, "headers.x-codex-turn-state").String(); state != "" {
@@ -1507,6 +1547,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if err := validateVendorNativeDispatch(ctx, s.accountRepo, account, vendorDispatchGroup(c)); err != nil {
 			return nil, err
 		}
+		attemptTiming.SetRequestMetadata(payload)
 		logGatewayCacheTransform(ctx, account, "", payload)
 		if s.rateLimitService.IsRequestBlockedBySchedulingQuota(ctx, account) {
 			return nil, &UpstreamFailoverError{StatusCode: http.StatusTooManyRequests, Stage: "selection", Scope: GatewayFailureScopeRequest, Reason: SchedulingQuotaRequestTooLarge, RequestNotSent: true, ClientMessage: "Large uncached input is blocked near the account quota limit"}
@@ -1518,6 +1559,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				false,
 			)
 		}
+		attemptTiming.MarkRequestWritten(int64(len(payload)))
 		if debugEnabled {
 			logOpenAIWSModeDebug(
 				"ingress_ws_turn_request_sent account_id=%d turn=%d conn_id=%s payload_bytes=%d",
@@ -1772,6 +1814,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			progress.observeUpstream(eventType)
 			if previous := downstream.lastTerminalID.Load(); previous != nil && eventResponseID != "" && eventResponseID == *previous {
 				continue
+			}
+			if readErr == nil {
+				attemptTiming.ObserveEvent(upstreamMessage)
+			} else {
+				timingErr = readErr
 			}
 			createdAtTracker.Observe(upstreamMessage, eventType)
 			if eventType == "error" && !cancelDeadline.IsZero() {
@@ -2103,24 +2150,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				if clientDisconnected {
 					lease.MarkBroken()
 				}
-				firstTokenMsValue := -1
-				if firstTokenMs != nil {
-					firstTokenMsValue = *firstTokenMs
-				}
 				if debugEnabled {
 					logOpenAIWSModeDebug(
-						"ingress_ws_turn_completed account_id=%d turn=%d conn_id=%s response_id=%s duration_ms=%d events=%d token_events=%d terminal_events=%d first_event=%s last_event=%s first_token_ms=%d client_disconnected=%v",
+						"ingress_ws_turn_completed account_id=%d turn=%d conn_id=%s response_id=%s events=%d token_events=%d terminal_events=%d first_event=%s last_event=%s client_disconnected=%v",
 						account.ID,
 						turn,
 						truncateOpenAIWSLogValue(lease.ConnID(), openAIWSIDValueMaxLen),
 						truncateOpenAIWSLogValue(responseID, openAIWSIDValueMaxLen),
-						time.Since(turnStart).Milliseconds(),
 						eventCount,
 						tokenEventCount,
 						terminalEventCount,
 						truncateOpenAIWSLogValue(firstEventType, openAIWSLogValueMaxLen),
 						truncateOpenAIWSLogValue(lastEventType, openAIWSLogValueMaxLen),
-						firstTokenMsValue,
 						clientDisconnected,
 					)
 				}
@@ -2505,6 +2546,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 		}
+		timing.Finish(nil)
+		timing = nil
 		attemptReserved := false
 		reserveAttempt := func() error {
 			if attemptReserved {
@@ -2632,6 +2675,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 		if err := reserveAttempt(); err != nil {
 			return err
+		}
+		if timing == nil && gjson.GetBytes(currentPayload, "generate").Type != gjson.False {
+			timing = newOpenAITransportTiming(c, account, "websocket", int64(len(currentPayload)))
+			timing.SetTransportReason("ctx_pool_ingress")
+			timing.ConnectionReady(true, 0, 0)
+		}
+		if timing != nil && pendingPrewarm > 0 {
+			timing.MarkPrewarm(pendingPrewarm)
+			pendingPrewarm = 0
 		}
 		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort)
 		if relayErr != nil {

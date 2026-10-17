@@ -70,6 +70,28 @@ type flushFailureRecorder struct {
 
 func (w *flushFailureRecorder) FlushError() error { return w.err }
 
+func TestKeepaliveFlushFailurePreservesWriteFailure(t *testing.T) {
+	for _, heartbeat := range []bool{false, true} {
+		writeErr := errors.New("downstream flush failed")
+		recorder := &flushFailureRecorder{ResponseRecorder: httptest.NewRecorder(), err: writeErr}
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		finish := GuardSSEWrites(c)
+		stop := StartSSEKeepalive(c, time.Hour)
+		wrapped := c.Writer.(*openAICompactKeepaliveWriter)
+		if heartbeat {
+			require.False(t, wrapped.k.beat())
+			require.False(t, wrapped.k.beat())
+		} else {
+			require.ErrorIs(t, http.NewResponseController(c.Writer).Flush(), writeErr)
+		}
+		require.ErrorIs(t, downstreamStreamError(c), writeErr)
+		require.ErrorIs(t, streamWriteContext(c).Err(), context.Canceled)
+		stop()
+		finish()
+	}
+}
+
 func TestStreamWriterFlushFailureStartsBoundedUsageDrain(t *testing.T) {
 	writeErr := errors.New("downstream flush failed")
 	w := &flushFailureRecorder{ResponseRecorder: httptest.NewRecorder(), err: writeErr}

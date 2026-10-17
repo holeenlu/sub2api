@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -42,7 +43,7 @@ type responsesFailedEvent struct {
 	Response       responsesFailedBody `json:"response"`
 }
 
-const opsGatewayResponsesFailedKey = "ops_gateway_responses_failed"
+const opsGatewayResponsesFailedKey = service.OpsGatewayResponsesFailedKey
 
 // writeResponsesFailedSSE emits a `response.failed` SSE event in the OpenAI
 // Responses API protocol after the stream has already started.

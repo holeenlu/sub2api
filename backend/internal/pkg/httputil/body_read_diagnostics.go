@@ -30,14 +30,43 @@ type bodyReadError struct {
 	failedAt   time.Time
 }
 
+type bodyReadCanceledKey struct{}
+
 func (e *bodyReadError) Error() string { return e.err.Error() }
 func (e *bodyReadError) Unwrap() error { return e.err }
 
 func newBodyReadError(req *http.Request, err error, bytesRead int64, started time.Time, phase string) error {
 	now := time.Now()
 	deadline, _ := req.Context().Deadline()
-	return &bodyReadError{err: err, bytesRead: bytesRead, elapsed: now.Sub(started), phase: phase,
+	readErr := &bodyReadError{err: err, bytesRead: bytesRead, elapsed: now.Sub(started), phase: phase,
 		contextErr: req.Context().Err(), deadline: deadline, failedAt: now}
+	// Keep only the failure-time classification for outer middleware, which
+	// otherwise sees a generic 400 after the original read error is discarded.
+	*req = *req.WithContext(context.WithValue(req.Context(), bodyReadCanceledKey{}, readErr.clientCanceled()))
+	return readErr
+}
+
+func (e *bodyReadError) clientCanceled() bool {
+	if e.phase != "read" || errors.Is(e.contextErr, context.DeadlineExceeded) || errors.Is(e.err, context.DeadlineExceeded) {
+		return false
+	}
+	var limitErr *http.MaxBytesError
+	var netErr net.Error
+	if errors.As(e.err, &limitErr) || (errors.As(e.err, &netErr) && netErr.Timeout()) {
+		return false
+	}
+	return errors.Is(e.contextErr, context.Canceled) || errors.Is(e.err, context.Canceled)
+}
+
+// RequestBodyReadCanceled reports a canceled upload observed by the shared body
+// reader. A truncated body alone, decoding/size errors, timeouts, or cancellation
+// after the failed read do not qualify. No request contents are retained.
+func RequestBodyReadCanceled(req *http.Request) bool {
+	if req == nil {
+		return false
+	}
+	canceled, _ := req.Context().Value(bodyReadCanceledKey{}).(bool)
+	return canceled
 }
 
 // LogRequestBodyReadFailure is shared by pre-read middleware and gateway

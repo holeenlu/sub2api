@@ -76,6 +76,12 @@ type OpenAIWSStateStore interface {
 type defaultOpenAIWSStateStore struct {
 	cache GatewayCache
 
+	// Instance-local, bounded P2 observations; never persisted through GatewayCache.
+	incrementalMu         sync.Mutex
+	incremental           map[[32]byte]*openAIIncrementalSlot
+	incrementalBytes      int
+	incrementalGeneration uint64
+
 	responseToAccountMu  sync.RWMutex
 	responseToAccount    map[string]openAIWSAccountBinding
 	responseOwnerMu      sync.RWMutex

@@ -47,6 +47,9 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	if !account.IsSIWCEnabled() && s.pluginManager != nil {
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
+			if timing, _ := request.Context().Value(openAITransportTimingKey{}).(*openAIForwardTiming); timing != nil {
+				timing.markOpaqueTransport()
+			}
 			return response, err
 		}
 	}

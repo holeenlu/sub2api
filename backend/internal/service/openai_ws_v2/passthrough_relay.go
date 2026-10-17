@@ -81,13 +81,17 @@ type RelayOptions struct {
 	StartClientAfterFirstDownstream bool
 	OnUsageParseFailure             func(eventType string, usageRaw string)
 	OnTurnComplete                  func(turn RelayTurnResult)
-	BeforeWriteClient               func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
-	BeforeClientWrite               func(msgType coderws.MessageType, payload []byte)
-	AfterClientWrite                func(msgType coderws.MessageType, payload []byte, writeErr error)
-	BeforeRelayCancel               func(exit RelayExit)
-	ReadClientFrame                 func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
-	OnTrace                         func(event RelayTraceEvent)
-	Now                             func() time.Time
+	// Observers run synchronously around the actual upstream write. Payload is
+	// borrowed and read-only; observers must not retain it or change relay policy.
+	BeforeUpstreamWrite func(msgType coderws.MessageType, payload []byte)
+	AfterUpstreamWrite  func(msgType coderws.MessageType, payload []byte, writeErr error)
+	BeforeWriteClient   func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
+	BeforeClientWrite   func(msgType coderws.MessageType, payload []byte)
+	AfterClientWrite    func(msgType coderws.MessageType, payload []byte, writeErr error)
+	BeforeRelayCancel   func(exit RelayExit)
+	ReadClientFrame     func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
+	OnTrace             func(event RelayTraceEvent)
+	Now                 func() time.Time
 }
 
 type RelayTraceEvent struct {
@@ -203,7 +207,14 @@ func Relay(
 	writeUpstream := func(msgType coderws.MessageType, payload []byte) error {
 		writeCtx, cancel := context.WithTimeout(relayCtx, writeTimeout)
 		defer cancel()
-		return upstreamConn.WriteFrame(writeCtx, msgType, payload)
+		if options.BeforeUpstreamWrite != nil {
+			options.BeforeUpstreamWrite(msgType, payload)
+		}
+		err := upstreamConn.WriteFrame(writeCtx, msgType, payload)
+		if options.AfterUpstreamWrite != nil {
+			options.AfterUpstreamWrite(msgType, payload, err)
+		}
+		return err
 	}
 	writeClientFrameUpstream := func(msgType coderws.MessageType, payload []byte) error {
 		isResponseCreate := isClientResponseCreateFrame(msgType, payload)

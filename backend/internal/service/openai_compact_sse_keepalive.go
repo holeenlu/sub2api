@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -56,6 +57,19 @@ func StartOpenAICompactSSEKeepalive(c *gin.Context, interval time.Duration) func
 // Adapted from huoji120/sub4api 234ef4d60, retaining qualified dispatch.
 func (s *OpenAIGatewayService) doOpenAIResponsesUpstream(c *gin.Context, request *http.Request, proxyURL string, account *Account, stream bool) (*http.Response, error) {
 	timing := newOpenAIForwardTiming(c, request, account)
+	if request.GetBody != nil {
+		if copyBody, copyErr := request.GetBody(); copyErr == nil {
+			body, readErr := io.ReadAll(io.LimitReader(copyBody, openAIIncrementalMaxBody+1))
+			_ = copyBody.Close()
+			if readErr == nil {
+				if len(body) <= openAIIncrementalMaxBody {
+					timing.SetRequestMetadata(body)
+				}
+				s.attachOpenAIIncrementalObservation(request.Context(), c, account, body, request.URL.String(), request.Header, "", timing)
+			}
+		}
+	}
+
 	request = request.WithContext(timing.context(request.Context()))
 	if stream && account != nil && account.Platform == PlatformOpenAI &&
 		!openAICompactClientWantsStream(c) && s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
@@ -168,10 +182,13 @@ func (k *openAICompactSSEKeepalive) beat() bool {
 	n, err := k.writer.Write([]byte(": keepalive\n\n"))
 	k.bytes += n
 	if err != nil {
-		k.stopped = true
+		k.markStoppedLocked()
 		return false
 	}
-	k.writer.Flush()
+	if err := http.NewResponseController(k.writer).Flush(); err != nil {
+		k.markStoppedLocked()
+		return false
+	}
 	return true
 }
 
@@ -315,11 +332,15 @@ func (w *openAICompactKeepaliveWriter) WriteHeaderNow() {
 }
 
 func (w *openAICompactKeepaliveWriter) Flush() {
+	_ = w.FlushError()
+}
+
+func (w *openAICompactKeepaliveWriter) FlushError() error {
 	w.suspend()
 	if w.ResponseWriter == nil {
-		return
+		return io.ErrClosedPipe
 	}
-	w.ResponseWriter.Flush()
+	return http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 func (w *openAICompactKeepaliveWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {

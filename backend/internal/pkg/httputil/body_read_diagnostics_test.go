@@ -52,6 +52,7 @@ func TestBodyReadFailureCountsPartialBytesAndSnapshotsContext(t *testing.T) {
 			require.ErrorIs(t, err, io.ErrUnexpectedEOF)
 			// A later cancellation must not be attributed to the read failure.
 			cancel()
+			require.False(t, RequestBodyReadCanceled(req), "later cancellation must not suppress the original read failure")
 			core, logs := observer.New(zap.WarnLevel)
 			LogRequestBodyReadFailure(zap.New(core), req, err, "group_model_allowlist")
 			require.Len(t, logs.All(), 1)
@@ -126,4 +127,42 @@ func TestBodyReadFailureEncodingAndLimitDiagnostics(t *testing.T) {
 	require.Equal(t, "max_bytes", fields["error_kind"])
 	require.EqualValues(t, 64, fields["body_limit_bytes"])
 	require.EqualValues(t, 64, fields["bytes_read"])
+}
+
+func TestRequestBodyReadCanceledSnapshotsOnlyCanceledUploads(t *testing.T) {
+	require.False(t, RequestBodyReadCanceled(nil))
+	for _, tc := range []struct {
+		name       string
+		err        error
+		contextErr error
+		want       bool
+	}{
+		{"canceled_truncation", io.ErrUnexpectedEOF, context.Canceled, true},
+		{"wrapped_cancellation", fmt.Errorf("read body: %w", context.Canceled), nil, true},
+		{"canceled_reset", syscall.ECONNRESET, context.Canceled, true},
+		{"truncation_alone", io.ErrUnexpectedEOF, nil, false},
+		{"server_deadline", io.ErrUnexpectedEOF, context.DeadlineExceeded, false},
+		{"read_deadline", context.DeadlineExceeded, context.Canceled, false},
+		{"read_timeout", os.ErrDeadlineExceeded, context.Canceled, false},
+		{"read_limit", &http.MaxBytesError{Limit: 10}, context.Canceled, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			switch tc.contextErr {
+			case context.Canceled:
+				canceled, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = canceled
+			case context.DeadlineExceeded:
+				expired, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+				defer cancel()
+				ctx = expired
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", &terminalBody{err: tc.err}).WithContext(ctx)
+			require.False(t, RequestBodyReadCanceled(req), "canceled context alone is insufficient")
+			_, err := ReadRequestBodyWithPrealloc(req)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.want, RequestBodyReadCanceled(req))
+		})
+	}
 }

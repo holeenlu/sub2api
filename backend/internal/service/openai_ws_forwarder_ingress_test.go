@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -14,10 +15,13 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestIsOpenAIWSClientDisconnectError(t *testing.T) {
@@ -1278,4 +1282,76 @@ func (r *nativeWSSettingsRepo) SetMultiple(_ context.Context, values map[string]
 		r.values[key] = value
 	}
 	return nil
+}
+
+func TestWSIngress_TransportTimingAcrossTurns(t *testing.T) {
+	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := passthroughLifecycleConfig()
+			cfg.Gateway.OpenAIWS.OAuthEnabled = true
+			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 5
+			upstream := newStagedPassthroughConn()
+			svc := newPassthroughLifecycleService(cfg, upstream)
+			pool := newOpenAIWSConnPool(cfg)
+			pool.setClientDialerForTest(&stagedPassthroughDialer{conn: &nativeCodexStagedConn{upstream}})
+			t.Cleanup(pool.Close)
+			svc.openaiWSPool = pool
+			account := nativeWSTestAccount()
+			account.Extra["openai_oauth_responses_websockets_v2_mode"] = mode
+			account.Extra["openai_oauth_responses_websockets_v2_enabled"] = true
+			core, logs := observer.New(zap.InfoLevel)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			server, serverErr := startPassthroughLifecycleServerWithHooks(t, ctx, svc, account, func(c *gin.Context) *OpenAIWSIngressHooks {
+				c.Request = c.Request.WithContext(logger.IntoContext(c.Request.Context(), zap.New(core)))
+				SetOpenAIClientTransport(c, OpenAIClientTransportWS)
+				BeginOpsStreamTurn(c, 1)
+				return &OpenAIWSIngressHooks{BeforeTurn: func(turn int) error { BeginOpsStreamTurn(c, turn); return nil }}
+			})
+			defer server.Close()
+			client := dialPassthroughLifecycleClient(t, server)
+			defer client.CloseNow()
+			for turn := 1; turn <= 2; turn++ {
+				if turn == 2 {
+					writeCtx, done := context.WithTimeout(ctx, 3*time.Second)
+					err := client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"private-next"}`))
+					done()
+					require.NoError(t, err)
+				}
+				requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+				id := fmt.Sprintf("resp_timing_%d", turn)
+				upstream.Send(`{"type":"codex.response.metadata","headers":{"x-codex-turn-state":"private-state"}}`)
+				upstream.Send(`{"type":"response.output_text.delta","response_id":"` + id + `","delta":""}`)
+				if turn == 2 {
+					upstream.Send(`{"type":"response.output_text.delta","response_id":"` + id + `","delta":"private-text"}`)
+				}
+				upstream.Send(`{"type":"response.completed","response":{"id":"` + id + `","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`)
+				readNativeWSTestTurn(t, client)
+				require.Eventually(t, func() bool {
+					return len(wsLatencySummaries(logs)) == turn && logs.FilterMessage("openai.request_timing").Len() == turn
+				}, time.Second, time.Millisecond)
+				require.Len(t, logs.FilterMessage("openai.request_timing").All(), turn, "close the turn root before inter-turn idle")
+			}
+			summaries := wsLatencySummaries(logs)
+			require.Len(t, summaries, 2)
+			for i, summary := range summaries {
+				require.Equal(t, "completed", summary["outcome"])
+				require.Equal(t, "websocket", summary["transport"])
+				require.Equal(t, false, summary["body_wire_bytes_known"])
+				stages := summary["stages_ms"].(map[string]int64)
+				for _, key := range []string{"connection_ready", "wrote_request", "first_event", "terminal"} {
+					require.Contains(t, stages, key)
+				}
+				_, observed := stages["first_text"]
+				_, flushed := stages["first_text_flush"]
+				require.Equal(t, i == 1, observed)
+				require.Equal(t, i == 1, flushed)
+			}
+			requireNativeWSTestServerExit(t, client, serverErr)
+			for _, entry := range logs.All() {
+				require.NotContains(t, fmt.Sprint(entry.ContextMap()), "private-")
+			}
+		})
+	}
 }

@@ -1490,3 +1490,39 @@ func TestRelay_ClientDisconnectRetainsUnfinishedTurnUsage(t *testing.T) {
 	require.Equal(t, 4, turns[0].Usage.OutputTokens)
 	require.Empty(t, turns[0].TerminalEventType)
 }
+
+func TestRelay_UpstreamWriteObservers(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "failure"}[fail], func(t *testing.T) {
+			client := newPassthroughTestFrameConn(nil, false)
+			base := newPassthroughTestFrameConn([]passthroughTestFrame{{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_observed"}}`)}}, true)
+			var upstream FrameConn = base
+			if fail {
+				upstream = &errorOnWriteFrameConn{}
+			}
+			request := []byte(`{"type":"response.create","model":"gpt-5","input":"hello"}`)
+			var before, after atomic.Int32
+			var observedErr atomic.Bool
+			_, _ = Relay(context.Background(), client, upstream, request, RelayOptions{
+				BeforeUpstreamWrite: func(typ coderws.MessageType, payload []byte) {
+					require.Equal(t, coderws.MessageText, typ)
+					require.Equal(t, string(request), string(payload))
+					require.Empty(t, base.Writes())
+					before.Add(1)
+				},
+				AfterUpstreamWrite: func(typ coderws.MessageType, payload []byte, err error) {
+					require.Equal(t, int32(1), before.Load())
+					require.Equal(t, string(request), string(payload))
+					observedErr.Store(err != nil)
+					if !fail {
+						require.Len(t, base.Writes(), 1)
+					}
+					after.Add(1)
+				},
+			})
+			require.Equal(t, int32(1), before.Load())
+			require.Equal(t, int32(1), after.Load())
+			require.Equal(t, fail, observedErr.Load())
+		})
+	}
+}

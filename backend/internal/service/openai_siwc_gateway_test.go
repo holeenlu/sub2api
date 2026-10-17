@@ -68,6 +68,11 @@ func TestSIWCGatewayForwardSuccessUsesIndependentGrantAndExactModel(t *testing.T
 				require.NoError(t, err)
 				require.NotNil(t, result)
 				require.Len(t, upstream.requests, 1)
+				timing := openAIForwardTimingFromContext(c)
+				require.NotNil(t, timing)
+				require.NotNil(t, timing.observation)
+				require.True(t, timing.observation.report.Candidate)
+				require.Equal(t, "unknown", timing.observation.report.StateReady)
 				require.Equal(t, "https://api.openai.com/v1/responses", upstream.lastReq.URL.String())
 				require.Equal(t, "Bearer "+siwcOpaqueToken().AccessToken, upstream.lastReq.Header.Get("Authorization"))
 				for _, h := range []string{"Cookie", "ChatGPT-Account-ID", "Originator", "OpenAI-Beta", "OpenAI-Organization", "OpenAI-Project"} {
@@ -388,5 +393,52 @@ func TestSIWCGatewayCompatibilityProtocols(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestSIWCGatewayIncrementalObservationUsesActualGrantAndFullHistory(t *testing.T) {
+	for _, renew := range []bool{false, true} {
+		t.Run(fmt.Sprintf("new_authorization=%t", renew), func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				siwcWSResponse(string(incrementalCompleted(incrementalOutput))),
+				siwcWSResponse(string(incrementalCompleted(""))),
+			}}
+			svc, oauth, account := siwcWSFixture(t, upstream)
+			originalGrant, err := oauth.SIWCGrantIdentity(t.Context(), account)
+			require.NoError(t, err)
+			for turn, items := range []string{incrementalUser, incrementalUser + "," + incrementalOutput + "," + incrementalNext} {
+				if turn == 1 && renew {
+					authorizeSIWC(t, oauth, account)
+					changedGrant, err := oauth.SIWCGrantIdentity(t.Context(), account)
+					require.NoError(t, err)
+					require.NotEqual(t, originalGrant, changedGrant)
+				}
+				body := incrementalRequest(items, `"store":false,"stream":true`)
+				_, c := siwcHTTPTestContext(t, body)
+				c.Set("api_key", &APIKey{ID: 7, UserID: 8})
+				c.Request.Header.Set("session_id", "siwc-observation-session")
+				_, err := svc.Forward(t.Context(), c, account, body)
+				require.NoError(t, err)
+				timing := openAIForwardTimingFromContext(c)
+				require.NotNil(t, timing)
+				require.NotNil(t, timing.observation)
+				report := timing.observation.report
+				require.True(t, report.Candidate)
+				require.Equal(t, "unknown", report.StateReady)
+				if turn == 1 {
+					if renew {
+						require.Equal(t, "boundary_changed", report.Reason)
+						require.NotEqual(t, "true", report.PrefixMatch)
+					} else {
+						require.Equal(t, "prefix_match", report.Reason)
+						require.True(t, report.Assessable)
+						require.Equal(t, 2, report.CandidateItems)
+					}
+				}
+				require.Len(t, upstream.requests, turn+1, "observation must never send a probe")
+				require.JSONEq(t, string(body), string(upstream.bodies[turn]), "send full history unchanged")
+				require.False(t, gjson.GetBytes(upstream.bodies[turn], "previous_response_id").Exists())
+			}
+		})
 	}
 }
