@@ -27,7 +27,19 @@ type blockingOpenAIResponseHeaderUpstream struct {
 }
 
 func TestOpenAITurnBudgetSharedAcrossRetries(t *testing.T) {
-	for _, tc := range []struct{ limit, switches, want int }{{0, 10, 20}, {3, 10, 3}, {3, 1, 2}} {
+	t.Run("explicit refusal and committed output stop all retry routes", func(t *testing.T) {
+		refusal := []byte(`{"error":{"code":"content_policy_violation"}}`)
+		require.False(t, OpenAITurnRetryAllowed(t.Context(), 1, refusal), "refusal stops even without a budget")
+		err := &UpstreamFailoverError{ResponseBody: refusal}
+		require.False(t, err.ShouldReportAccountScheduleFailure())
+		ctx := EnsureOpenAITurnBudget(t.Context(), nil)
+		require.True(t, OpenAITurnRetryAllowed(ctx, 1, nil))
+		MarkTurnOutputCommitted(ctx)
+		require.False(t, OpenAITurnRetryAllowed(ctx, 1, nil))
+		fresh := WithOpenAITurnBudget(ctx, NewOpenAITurnBudget(nil))
+		require.True(t, OpenAITurnRetryAllowed(fresh, 1, nil))
+	})
+	for _, tc := range []struct{ limit, switches, want int }{{0, 10, 8}, {3, 10, 3}, {3, 1, 3}} {
 		cfg := &config.Config{}
 		cfg.Gateway.OpenAITurnMaxAttempts = tc.limit
 		cfg.Gateway.MaxAccountSwitches = tc.switches
@@ -41,19 +53,30 @@ func TestOpenAITurnBudgetSharedAcrossRetries(t *testing.T) {
 		// New logical requests do not inherit the exhausted budget.
 		require.NoError(t, TakeOpenAITurnAttempt(WithOpenAITurnBudget(ctx, NewOpenAITurnBudget(cfg))))
 	}
-	t.Run("preparatory retry reserves generation", func(t *testing.T) {
+	t.Run("preparation and generation have independent limits", func(t *testing.T) {
 		ctx := WithOpenAITurnBudget(t.Context(), &OpenAITurnBudget{limit: 2})
-		require.NoError(t, takeOpenAITurnAttempt(ctx, 1))
-		require.ErrorIs(t, takeOpenAITurnAttempt(ctx, 1), ErrOpenAITurnAttemptBudgetExhausted)
-		require.NoError(t, TakeOpenAITurnAttempt(ctx), "a rejected reservation must not consume the generation slot")
+		require.NoError(t, TakeTurnPreparationRetry(ctx))
+		require.NoError(t, TakeTurnPreparationRetry(ctx))
+		require.ErrorIs(t, TakeTurnPreparationRetry(ctx), ErrTurnPreparationExhausted)
+		require.NoError(t, TakeOpenAITurnAttempt(ctx))
+		require.NoError(t, TakeOpenAITurnAttempt(ctx))
 		require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAITurnAttemptBudgetExhausted)
+	})
+	t.Run("new WS turn resets BPS recovery", func(t *testing.T) {
+		old := &OpenAITurnBudget{bpsRecovery: excelBPSPoolRecovery{managed: true, native: true, rejected: map[int64]bool{1: true}}}
+		ctx := WithOpenAITurnBudget(t.Context(), old)
+		next := NewOpenAITurnBudget(nil)
+		WithOpenAITurnBudget(ctx, next)
+		require.True(t, next.bpsRecovery.managed)
+		require.False(t, next.bpsRecovery.native)
+		require.Empty(t, next.bpsRecovery.rejected)
 	})
 	protection := []byte(`{"error":{"message":"response protection is unavailable"}}`)
 	for _, limit := range []int{0, 3} {
 		ctx := EnsureOpenAITurnBudget(context.Background(), &config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: limit}})
 		require.True(t, OpenAITurnRetryAllowed(ctx, 1, protection))
 		require.True(t, OpenAITurnRetryAllowed(ctx, 1, protection))
-		require.Equal(t, limit == 0, OpenAITurnRetryAllowed(ctx, 2, protection))
+		require.False(t, OpenAITurnRetryAllowed(ctx, 2, protection))
 	}
 	parent, cancel := context.WithCancel(context.Background())
 	bound := EnsureOpenAITurnBudget(parent, nil)
@@ -714,13 +737,8 @@ func TestOpenAITurnFirstOutputDeadlineDefaultAndEnabled(t *testing.T) {
 		ctx := WithOpenAITurnBudget(context.Background(), budget)
 		forwardB := time.Now()
 		deadline := openAITurnFirstOutputDeadline(ctx, time.Second, forwardB)
-		if limit == 0 {
-			require.Equal(t, forwardB.Add(time.Second), deadline, "disabled budget preserves a fresh timeout after account failover")
-			require.NoError(t, TakeOpenAITurnAttempt(ctx))
-		} else {
-			require.Equal(t, budget.started.Add(time.Second), deadline)
-			require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAIWSFirstOutputBudgetExhausted)
-		}
+		require.Equal(t, budget.started.Add(time.Second), deadline)
+		require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAIWSFirstOutputBudgetExhausted)
 	}
 }
 
@@ -739,7 +757,7 @@ func TestOpenAITurnDeadlineBoundsWaitsWithoutCancelingResponseContext(t *testing
 	wait, cancel := OpenAITurnWaitContext(legacy)
 	defer cancel()
 	_, hasDeadline := wait.Deadline()
-	require.False(t, hasDeadline, "default zero retains existing per-path deadlines")
+	require.True(t, hasDeadline, "default zero uses the shared deadline")
 }
 
 func TestOpenAIHTTPFirstOutputDeadlineCoversHeadersAndBody(t *testing.T) {

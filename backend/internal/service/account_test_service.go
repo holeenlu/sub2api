@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
@@ -50,12 +51,16 @@ const (
 
 // TestEvent represents a SSE event for account testing
 type TestEvent struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Status   string `json:"status,omitempty"`
-	Code     string `json:"code,omitempty"`
-	ImageURL string `json:"image_url,omitempty"`
+	UpstreamStatus    int    `json:"upstream_status,omitempty"`
+	UpstreamModel     string `json:"upstream_model,omitempty"`
+	RequestID         string `json:"request_id,omitempty"`
+	UpstreamErrorCode string `json:"upstream_error_code,omitempty"`
+	Type              string `json:"type"`
+	Text              string `json:"text,omitempty"`
+	Model             string `json:"model,omitempty"`
+	Status            string `json:"status,omitempty"`
+	Code              string `json:"code,omitempty"`
+	ImageURL          string `json:"image_url,omitempty"`
 	// AudioURL / VideoURL are data: or https URLs for in-browser media players.
 	AudioURL string `json:"audio_url,omitempty"`
 	VideoURL string `json:"video_url,omitempty"`
@@ -152,6 +157,8 @@ type AccountTestService struct {
 	modelMetadataRegistryAt   time.Time
 	pluginManager             *PluginManager
 	openaiGatewayService      *OpenAIGatewayService
+	bpsProbeMu                sync.Mutex
+	bpsProbeAccounts          map[int64]struct{}
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
@@ -217,7 +224,7 @@ func (s *AccountTestService) FetchOpenAIAccountModels(ctx context.Context, accou
 	// Codex discovery lists Responses drivers, not image_generation tool models.
 	// Add locally supported image choices only to the OAuth test picker; keep the
 	// shared upstream catalog and API-key discovery authoritative.
-	if account != nil && account.IsOpenAIOAuthLike() {
+	if account != nil && account.IsOpenAIOAuthLike() && !account.IsSIWCEnabled() {
 		passthrough := account.IsOpenAIPassthroughEnabled()
 		seen := make(map[string]bool, len(payload.Data))
 		for _, model := range payload.Data {
@@ -367,6 +374,17 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Account not found")
+	}
+	if account.IsVendorArchived() {
+		return s.sendErrorAndEnd(c, "Archived accounts are read-only")
+	}
+	// Supplier probes require the scoped workbench's live policy/session guard.
+	// Native saved schedules carry no such scope and cannot revive old authority.
+	if account.VendorID != nil {
+		scope, ok := authz.VendorScopeFromContext(ctx)
+		if !ok || scope.VendorID != *account.VendorID || scope.ActorUserID <= 0 || scope.PolicyVersion <= 0 || authz.Revalidate(ctx) != nil {
+			return s.sendErrorAndEnd(c, "Use the supplier workbench to test this account")
+		}
 	}
 	bindAccountTestPlatform(c, account)
 
@@ -565,6 +583,13 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
 	payloadBytes, _ := json.Marshal(payload)
+	billing, err := buildBillingAttributionText(payloadBytes, claudeCCHVersion)
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create billing attribution")
+	}
+	payload["system"] = append([]map[string]any{{"type": "text", "text": billing}}, payload["system"].([]map[string]any)...)
+	payloadBytes, _ = json.Marshal(payload)
+	payloadBytes = finalizeClaudeCCH(payloadBytes, apiURL)
 
 	// Send test_start event
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
@@ -578,10 +603,9 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
 
-	// Apply Claude Code client headers
-	for key, value := range claude.DefaultHeaders() {
-		req.Header.Set(key, value)
-	}
+	// Reuse the same native CLI profile and session linkage as live forwarding.
+	applyClaudeCodeMimicHeaders(req, c)
+	syncClaudeCodeSessionHeader(req, payloadBytes)
 
 	// Set authentication header
 	if account.IsOAuth() {
@@ -800,6 +824,28 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
 	ctx := c.Request.Context()
 	mode = normalizeAccountTestMode(mode)
+	if account.IsSIWCEnabled() {
+		if s.openaiGatewayService == nil {
+			return s.sendErrorAndEnd(c, "SIWC gateway is unavailable")
+		}
+		if mode == AccountTestModeCompact || mode == AccountTestModeBPSTools || isOpenAIImageModel(account.GetMappedModel(strings.TrimSpace(modelID))) {
+			return s.sendErrorAndEnd(c, "SIWC supports Responses text/tool requests, not this test mode")
+		}
+		return s.testOpenAIGrantAccountConnection(c, account, modelID, prompt)
+	}
+
+	// Excel/BPS accounts must use the same gateway path as user Responses
+	// requests. The legacy account-test probe hard-codes ChatGPT Codex and
+	// silently bypasses the account's protocol toggle, producing misleading
+	// quality-test results.
+	if mode == AccountTestModeBPSTools {
+		return s.testExcelBPSToolRoundtrip(c, account, modelID)
+	}
+	// Image models use the image test below, which applies the gateway's BPS
+	// image routing; the text BPS test would send them to /responses.
+	if account.IsExcelBPSEnabled() && s.openaiGatewayService != nil && !isOpenAIImageModel(account.GetMappedModel(strings.TrimSpace(modelID))) {
+		return s.testOpenAIGrantAccountConnection(c, account, modelID, prompt)
+	}
 
 	// Default to openai.DefaultTestModel for OpenAI testing
 	testModelID := modelID
@@ -988,6 +1034,99 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// Process SSE stream
 	return s.processOpenAIStream(c, resp.Body)
+}
+
+func (s *AccountTestService) testOpenAIGrantAccountConnection(c *gin.Context, account *Account, modelID, prompt string) error {
+	model := strings.TrimSpace(modelID)
+	if model == "" {
+		model = openai.DefaultTestModel
+	}
+	model = account.GetMappedModel(model)
+	prompt = excelBPSTestPrompt(prompt)
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: model})
+
+	body, err := buildOpenAIGrantAccountTestBody(model, prompt)
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create OpenAI Responses test payload")
+	}
+
+	probe := httptest.NewRecorder()
+	probeCtx, _ := gin.CreateTestContext(probe)
+	testCtx := c.Request.Context()
+	if !account.IsSIWCEnabled() {
+		testCtx = s.withBPSTestEvidence(testCtx, c)
+	}
+	probeCtx.Request = c.Request.Clone(testCtx)
+	if probeCtx.Request.Header == nil {
+		probeCtx.Request.Header = make(http.Header)
+	}
+	result, err := s.openaiGatewayService.Forward(probeCtx.Request.Context(), probeCtx, account, body)
+	if err != nil {
+		// A single-account test has no other account to fail over to.
+		var failover *UpstreamFailoverError
+		if errors.As(err, &failover) && failover.ClientMessage != "" {
+			return s.sendErrorAndEnd(c, failover.ClientMessage)
+		}
+		return s.sendErrorAndEnd(c, err.Error())
+	}
+
+	answer := strings.Builder{}
+	completed := false
+	for _, line := range strings.Split(probe.Body.String(), "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event map[string]any
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) != nil {
+			continue
+		}
+		switch event["type"] {
+		case "response.output_text.delta":
+			if delta, ok := event["delta"].(string); ok {
+				_, _ = answer.WriteString(delta)
+				s.sendEvent(c, TestEvent{Type: "content", Text: delta})
+			}
+		case "error", "response.failed", "response.incomplete":
+			return s.sendErrorAndEnd(c, "OpenAI Responses test did not complete successfully")
+		case "response.completed":
+			if status := gjson.Get(strings.TrimPrefix(line, "data: "), "response.status").String(); status != "" && status != "completed" {
+				return s.sendErrorAndEnd(c, "OpenAI Responses test returned a non-completed status")
+			}
+			completed = true
+			if answer.Len() == 0 {
+				for _, item := range gjson.Get(strings.TrimPrefix(line, "data: "), "response.output").Array() {
+					for _, part := range item.Get("content").Array() {
+						if part.Get("type").String() == "output_text" {
+							text := part.Get("text").String()
+							answer.WriteString(text)
+							s.sendEvent(c, TestEvent{Type: "content", Text: text})
+						}
+					}
+				}
+			}
+		}
+	}
+	if result == nil || result.ClientDisconnect {
+		return s.sendErrorAndEnd(c, "OpenAI Responses test response was interrupted")
+	}
+	if !completed {
+		return s.sendErrorAndEnd(c, "OpenAI Responses test response ended before completion")
+	}
+	if strings.TrimSpace(answer.String()) == "" {
+		return s.sendErrorAndEnd(c, "OpenAI Responses returned empty output")
+	}
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
+
+func buildOpenAIGrantAccountTestBody(model, prompt string) ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"model": model, "stream": true, "store": false,
+		"input": []any{map[string]any{"type": "message", "role": "user", "content": []any{
+			map[string]any{"type": "input_text", "text": excelBPSTestPrompt(prompt)},
+		}}},
+		"reasoning": map[string]any{"effort": "medium"},
+	})
 }
 
 // testGrokAccountConnection routes Grok admin connectivity tests by explicit mode first,
@@ -3119,6 +3258,9 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 
 // OAuth 图片测试与正式转发共用 Codex Images / Responses 分流规则。
 func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string) error {
+	if account.IsSIWCEnabled() {
+		return s.sendErrorAndEnd(c, "SIWC does not support image generation tests")
+	}
 	credentialAccount := account
 	if account.IsShadow() {
 		resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
@@ -3152,6 +3294,11 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	applyOpenAIImagesDefaults(parsed)
 
 	upstreamModel := account.GetMappedModel(parsed.Model)
+	if s.openaiGatewayService != nil && s.openaiGatewayService.excelBPSGloballyEnabled(ctx) && account.IsExcelBPSImagesEnabledForModel(parsed.Model) {
+		if handled, err := s.testExcelBPSImages(c, ctx, account, parsed, upstreamModel); handled {
+			return err
+		}
+	}
 	responsesBody, targetURL, err := buildOpenAIImagesOAuthPayload(parsed, upstreamModel)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build image request: %s", err.Error()))
@@ -3268,6 +3415,52 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	return nil
 }
 
+// testExcelBPSImages runs the gateway's BPS image route. handled=false means
+// BPS rejected the request format, so the caller tests Codex like user traffic.
+func (s *AccountTestService) testExcelBPSImages(c *gin.Context, ctx context.Context, account *Account, parsed *OpenAIImagesRequest, upstreamModel string) (bool, error) {
+	if excelBPSImagesUnsupportedReason(parsed) != "" {
+		return false, nil
+	}
+	s.sendEvent(c, TestEvent{Type: "content", Text: fmt.Sprintf("Calling Excel BPS /images/generations; image model: %s\n", upstreamModel)})
+	probe := httptest.NewRecorder()
+	probeCtx, _ := gin.CreateTestContext(probe)
+	probeCtx.Request = c.Request.Clone(ctx)
+	_, fallback, err := s.openaiGatewayService.forwardExcelBPSImages(ctx, probeCtx, account, parsed, parsed.Model, upstreamModel, time.Now())
+	if fallback {
+		s.sendEvent(c, TestEvent{Type: "content", Text: "Excel BPS rejected this request format; user requests fall back to Codex, testing Codex\n"})
+		return false, nil
+	}
+	if err != nil {
+		// A single-account test has no other account to fail over to.
+		var upErr *OpenAIImagesUpstreamError
+		if errors.As(err, &upErr) {
+			return true, s.sendErrorAndEnd(c, upErr.clientMessage())
+		}
+		var failover *UpstreamFailoverError
+		if errors.As(err, &failover) && failover.ClientMessage != "" {
+			return true, s.sendErrorAndEnd(c, failover.ClientMessage)
+		}
+		return true, s.sendErrorAndEnd(c, err.Error())
+	}
+	results, err := parseCodexDirectImagesResponse(probe.Body.Bytes())
+	if err != nil {
+		return true, s.sendErrorAndEnd(c, fmt.Sprintf("Failed to parse Excel BPS image response: %s", err.Error()))
+	}
+	for _, item := range results {
+		if item.RevisedPrompt != "" {
+			s.sendEvent(c, TestEvent{Type: "content", Text: item.RevisedPrompt})
+		}
+		mimeType := openAIImageOutputMIMEType(item.OutputFormat)
+		s.sendEvent(c, TestEvent{
+			Type:     "image",
+			ImageURL: "data:" + mimeType + ";base64," + item.Result,
+			MimeType: mimeType,
+		})
+	}
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return true, nil
+}
+
 func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
 	if event.Type == "test_complete" {
 		if suppress, ok := c.Get(accountTestSuppressCompletionContextKey); ok {
@@ -3349,4 +3542,11 @@ func parseTestSSEOutput(body string) (responseText, errMsg string) {
 	}
 	responseText = strings.Join(texts, "")
 	return
+}
+
+func excelBPSTestPrompt(prompt string) string {
+	if value := strings.TrimSpace(prompt); value != "" {
+		return value
+	}
+	return "hi"
 }

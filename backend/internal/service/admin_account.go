@@ -543,6 +543,12 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	if _, err := normalizeBulkExcelBPSExtra(account.Extra); err != nil {
+		return nil, err
+	}
+	if err := s.validateOpenAIProtocolSettings(ctx, account); err != nil {
+		return nil, err
+	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
@@ -920,6 +926,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	if _, err := normalizeBulkExcelBPSExtra(account.Extra); err != nil {
+		return nil, err
+	}
+	if err := s.validateOpenAIProtocolSettings(ctx, account); err != nil {
+		return nil, err
+	}
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -986,6 +998,27 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
 	stripAnthropicObservationExtra(updates)
+	if _, err := normalizeBulkExcelBPSExtra(updates); err != nil {
+		return err
+	}
+	for key := range updates {
+		if strings.HasPrefix(key, "openai_excel_bps") || key == OpenAISIWCEnabledKey {
+			account, err := s.accountRepo.GetByID(ctx, id)
+			if err != nil {
+				return err
+			}
+			merged := *account
+			merged.Extra = maps.Clone(account.Extra)
+			if merged.Extra == nil {
+				merged.Extra = map[string]any{}
+			}
+			maps.Copy(merged.Extra, updates)
+			if err := s.validateOpenAIProtocolSettings(ctx, &merged); err != nil {
+				return err
+			}
+			break
+		}
+	}
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
@@ -1088,6 +1121,30 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, err
 		}
 		result.LongContextInheritedCount = inheritedCount
+	}
+	_, moveChanged := input.Extra[ExcelBPSAutoMoveOn403Key]
+	_, targetChanged := input.Extra[ExcelBPS403TargetGroupIDKey]
+	_, bpsChanged := input.Extra["openai_excel_bps"]
+	_, planChanged := input.Credentials["plan_type"]
+	_, siwcChanged := input.Extra[OpenAISIWCEnabledKey]
+	if moveChanged || targetChanged || bpsChanged || planChanged || siwcChanged {
+		for _, account := range cachedTargets {
+			if account == nil {
+				continue
+			}
+			merged := *account
+			merged.Credentials = maps.Clone(account.Credentials)
+			if merged.Credentials == nil {
+				merged.Credentials = make(map[string]any)
+			}
+			maps.Copy(merged.Credentials, input.Credentials)
+			merged.Extra = make(map[string]any, len(account.Extra)+len(input.Extra))
+			maps.Copy(merged.Extra, account.Extra)
+			maps.Copy(merged.Extra, input.Extra)
+			if err := s.validateOpenAIProtocolSettings(ctx, &merged); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if input.ProbeEnabled != nil {
 		for _, accountID := range input.AccountIDs {

@@ -431,6 +431,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	turn int,
 	writeClientMessage func([]byte) error,
 ) (*OpenAIForwardResult, error) {
+	if excelBPSNativeRecoveryActive(ctx) && excelBPSHasNativeFallback(account) {
+		c.Set(openAIWSBPSNativeAccountContextKey, account.ID)
+		account = excelBPSPoolForwardAccount(ctx, c, account)
+	}
 	if s == nil {
 		return nil, errors.New("service is nil")
 	}

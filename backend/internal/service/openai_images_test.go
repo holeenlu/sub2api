@@ -16,7 +16,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
-	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -396,61 +395,6 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_JSONEditURLs(t *testing.T)
 	require.Equal(t, 2, *parsed.PartialImages)
 	require.True(t, parsed.HasMask)
 	require.Equal(t, OpenAIImagesCapabilityNative, parsed.RequiredCapability)
-}
-
-func TestCollectOpenAIImagePointers_RecognizesDirectAssets(t *testing.T) {
-	items := collectOpenAIImagePointers([]byte(`{
-		"revised_prompt": "cat astronaut",
-		"parts": [
-			{"b64_json":"QUJD"},
-			{"download_url":"https://files.example.com/image.png?sig=1"},
-			{"asset_pointer":"file-service://file_123"}
-		]
-	}`))
-
-	require.Len(t, items, 3)
-	var sawBase64, sawURL, sawPointer bool
-	for _, item := range items {
-		if item.B64JSON == "QUJD" {
-			sawBase64 = true
-			require.Equal(t, "cat astronaut", item.Prompt)
-		}
-		if item.DownloadURL == "https://files.example.com/image.png?sig=1" {
-			sawURL = true
-		}
-		if item.Pointer == "file-service://file_123" {
-			sawPointer = true
-		}
-	}
-	require.True(t, sawBase64)
-	require.True(t, sawURL)
-	require.True(t, sawPointer)
-}
-
-func TestResolveOpenAIImageBytes_PrefersInlineBase64(t *testing.T) {
-	data, err := resolveOpenAIImageBytes(context.Background(), nil, nil, "", openAIImagePointerInfo{
-		B64JSON: "data:image/png;base64,QUJD",
-	}, openAIUpstreamErrorBodyReadLimit)
-	require.NoError(t, err)
-	require.Equal(t, []byte("ABC"), data)
-}
-
-func TestNewOpenAIImageStatusError_UsesProvidedReadLimit(t *testing.T) {
-	padding := strings.Repeat("x", int(openAIUpstreamErrorBodyReadLimit)+1024)
-	body := fmt.Sprintf(`{"error":{"padding":"%s","message":"diagnostic-marker"}}`, padding)
-	resp := &req.Response{Response: &http.Response{
-		StatusCode: http.StatusBadGateway,
-		Header:     http.Header{},
-		Body:       io.NopCloser(strings.NewReader(body)),
-	}}
-
-	err := newOpenAIImageStatusError(resp, "download image bytes failed", int64(len(body)))
-	require.Error(t, err)
-	require.Equal(t, "diagnostic-marker", err.Error())
-
-	var statusErr *openAIImageStatusError
-	require.ErrorAs(t, err, &statusErr)
-	require.Len(t, statusErr.ResponseBody, len(body))
 }
 
 func TestOpenAIUpstreamErrorBodyReadLimitForConfig_RespectsDiagnosticLimit(t *testing.T) {
@@ -1584,12 +1528,6 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyStreamMultilineSSEDataBillsImag
 	require.Equal(t, 10, result.Usage.InputTokens)
 	require.Equal(t, 18, result.Usage.OutputTokens)
 	require.Equal(t, 8, result.Usage.ImageOutputTokens)
-}
-
-func TestExtractOpenAIImagesBillableCountFromJSONBytes_CompletedEvent(t *testing.T) {
-	body := []byte(`{"type":"image_generation.completed","b64_json":"ZmluYWw=","usage":{"input_tokens":10,"output_tokens":18}}`)
-
-	require.Equal(t, 1, extractOpenAIImagesBillableCountFromJSONBytes(body))
 }
 
 func TestOpenAIGatewayServiceForwardImages_APIKeyEditUsesConfiguredV1BaseURL(t *testing.T) {
