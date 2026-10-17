@@ -33,9 +33,9 @@ GET  /v1/videos/{request_id}/content
 ## スタンドアロン検索
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1/web_search" \
-  -H "Authorization: Bearer $TAPMODELS_API_KEY" -H "Content-Type: application/json" \
-  -d '{"query":"TapModels API updates","max_results":5}'
+curl "$TOKENSAVY_BASE_URL/v1/web_search" \
+  -H "Authorization: Bearer $TOKENSAVY_API_KEY" -H "Content-Type: application/json" \
+  -d '{"query":"Tokensavy API updates","max_results":5}'
 ```
 
 `query` は必須で、エイリアスとして `input` も使用できます。`max_results` のデフォルト値は5で、上限は20です。`/v1/x_search` では、`allowed_x_handles`、`excluded_x_handles`、`from_date`、`to_date`、`enable_image_understanding`、`enable_video_understanding` も受け付けます。レスポンスはゲートウェイによる集約結果（`query/results/provider/max_results`）であり、生のResponsesツールイベントではありません。URLの検証と重複排除を行ってください。
