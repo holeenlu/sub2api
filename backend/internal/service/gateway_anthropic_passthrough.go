@@ -117,6 +117,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			})
 		}
 
+		if s.isContentRefusalResponse(resp) {
+			return s.handleErrorResponse(ctx, resp, c, account, input.RequestModel)
+		}
 		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）
 		if resp.StatusCode >= 500 && !NativeUncertainReplaySafe(input.Body) {
 			break // No proof that a hosted tool was not executed.
@@ -328,6 +331,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	if beta, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
 		clientBeta = beta
 	}
+	body, clientBeta = s.prepareClaudeConversation(ctx, c, account, body, clientBeta, nil)
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		body = sanitized
 	}
@@ -371,10 +375,17 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		setHeaderRaw(req.Header, "anthropic-version", "2023-06-01")
 	}
 
+	deleteHeaderAllForms(req.Header, "anthropic-beta")
+	if clientBeta != "" {
+		setHeaderRaw(req.Header, "anthropic-beta", clientBeta)
+	}
 	// 账号级请求头覆写（最终生效，覆盖上面所有来源的同名头）
 	account.ApplyHeaderOverrides(req.Header)
 	filterSonnet55ToolsetBetaHeader(req.Header, body, gjson.GetBytes(body, "model").String())
 
+	if observer := upstreamResponseModelObserverFromContext(c); observer != nil && observer.claudeConversation != nil {
+		observer.claudeConversation.betas = splitClaudeBetas(getTokenListHeader(req.Header, "anthropic-beta"))
+	}
 	return req, body, nil
 }
 
