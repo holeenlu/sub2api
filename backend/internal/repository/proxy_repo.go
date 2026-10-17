@@ -3,6 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +28,52 @@ type proxyRepository struct {
 
 const proxyProbeOutboxAccountChunkSize = 500
 
+// Internal gateway contexts retain native access. HTTP actors are constrained
+// at the repository, so legacy lists, exports, tests and batch routes cannot
+// turn an object id into access to another supplier's proxy.
+func proxyScopePredicate(ctx context.Context) func(*entsql.Selector) {
+	return func(q *entsql.Selector) {
+		if actor, ok := authz.FromContext(ctx); ok && actor.Role == authz.Admin {
+			q.Where(entsql.IsNull(q.C("vendor_id")))
+			return
+		}
+		if scope, ok := authz.VendorScopeFromContext(ctx); ok {
+			q.Where(entsql.EQ(q.C("vendor_id"), scope.VendorID))
+		}
+	}
+}
+
+func proxySQLScope(ctx context.Context, alias string, args *[]any) string {
+	if actor, ok := authz.FromContext(ctx); ok && actor.Role == authz.Admin {
+		return " AND " + alias + "vendor_id IS NULL"
+	}
+	if scope, ok := authz.VendorScopeFromContext(ctx); ok {
+		*args = append(*args, scope.VendorID)
+		return fmt.Sprintf(" AND %svendor_id=$%d", alias, len(*args))
+	}
+	return ""
+}
+
+func (r *proxyRepository) checkProxyBackupOwner(ctx context.Context, p *service.Proxy) error {
+	if p.VendorID != nil && p.FallbackMode == service.FallbackModeDirect {
+		return service.ErrProxyNotFound
+	}
+	if p.BackupProxyID == nil {
+		return nil
+	}
+	if *p.BackupProxyID == p.ID {
+		return service.ErrProxyInUse
+	}
+	b, err := r.GetByID(ctx, *p.BackupProxyID)
+	if err != nil {
+		return err
+	}
+	if !service.SameProxyOwner(p.VendorID, b.VendorID) {
+		return service.ErrProxyNotFound
+	}
+	return nil
+}
+
 func NewProxyRepository(client *dbent.Client, sqlDB *sql.DB) service.ProxyRepository {
 	return newProxyRepositoryWithSQL(client, sqlDB)
 }
@@ -34,6 +83,15 @@ func newProxyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *proxyRep
 }
 
 func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) error {
+	if actor, ok := authz.FromContext(ctx); ok && actor.Role == authz.Admin && proxyIn.VendorID != nil {
+		return service.ErrProxyNotFound
+	}
+	if scope, ok := authz.VendorScopeFromContext(ctx); ok && !service.SameProxyOwner(proxyIn.VendorID, &scope.VendorID) {
+		return service.ErrProxyNotFound
+	}
+	if err := r.checkProxyBackupOwner(ctx, proxyIn); err != nil {
+		return err
+	}
 	builder := r.client.Proxy.Create().
 		SetName(proxyIn.Name).
 		SetProtocol(proxyIn.Protocol).
@@ -42,6 +100,8 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 		SetStatus(proxyIn.Status).
 		SetFallbackMode(proxyIn.FallbackMode).
 		SetExpiryWarnDays(proxyIn.ExpiryWarnDays)
+	builder.SetNillableVendorID(proxyIn.VendorID).SetNillableCreatedBy(proxyIn.CreatedBy).
+		SetVendorNotes(proxyIn.VendorNotes).SetRegionLabelCountryCode(proxyIn.RegionLabelCountryCode).SetRegionLabelCity(proxyIn.RegionLabelCity)
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
 	}
@@ -63,7 +123,7 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 }
 
 func (r *proxyRepository) GetByID(ctx context.Context, id int64) (*service.Proxy, error) {
-	m, err := r.client.Proxy.Get(ctx, id)
+	m, err := clientFromContext(ctx, r.client).Proxy.Query().Where(proxy.IDEQ(id), proxyScopePredicate(ctx)).Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, service.ErrProxyNotFound
@@ -79,7 +139,7 @@ func (r *proxyRepository) ListByIDs(ctx context.Context, ids []int64) ([]service
 	}
 
 	proxies, err := r.client.Proxy.Query().
-		Where(proxy.IDIn(ids...)).
+		Where(proxy.IDIn(ids...), proxyScopePredicate(ctx)).
 		All(ctx)
 	if err != nil {
 		return nil, err
@@ -93,6 +153,23 @@ func (r *proxyRepository) ListByIDs(ctx context.Context, ids []int64) ([]service
 }
 
 func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) error {
+	_, actorPresent := authz.FromContext(ctx)
+	_, scopePresent := authz.VendorScopeFromContext(ctx)
+	if actorPresent || scopePresent || proxyIn.VendorID != nil || proxyIn.ConfigVersion > 0 {
+		current, err := r.GetByID(ctx, proxyIn.ID)
+		if err != nil {
+			return err
+		}
+		if !service.SameProxyOwner(current.VendorID, proxyIn.VendorID) {
+			return service.ErrProxyNotFound
+		}
+		if current.VendorID != nil {
+			return service.ErrVendorProxyWorkbenchRequired
+		}
+	}
+	if err := r.checkProxyBackupOwner(ctx, proxyIn); err != nil {
+		return err
+	}
 	client := r.client
 	var tx *dbent.Tx
 	if contextTx := dbent.TxFromContext(ctx); contextTx != nil {
@@ -107,6 +184,20 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 			defer func() { _ = tx.Rollback() }()
 			ctx = dbent.NewTxContext(ctx, tx)
 			client = tx.Client()
+		}
+	}
+
+	if actor, ok := authz.FromContext(ctx); ok && actor.ManagementRequest && actor.Role == authz.Admin {
+		raw, err := json.Marshal(proxyIn)
+		if err != nil {
+			return err
+		}
+		var fields map[string]any
+		if err = json.Unmarshal(raw, &fields); err != nil {
+			return err
+		}
+		if err = (&userRepository{client: client}).CheckAdminProxyTransport(ctx, []int64{proxyIn.ID}, fields); err != nil {
+			return err
 		}
 	}
 
@@ -144,9 +235,23 @@ func proxyProbeIdentityFromService(proxyIn *service.Proxy) proxyProbeIdentity {
 }
 
 func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.Client, proxyIn *service.Proxy) (*dbent.Proxy, error) {
+	if proxyIn.VendorID != nil {
+		if err := service.AcquireVendorProxyLock(ctx, client, *proxyIn.VendorID); err != nil {
+			return nil, err
+		}
+	}
 	currentIdentity, err := lockProxyProbeIdentity(ctx, client, proxyIn.ID)
 	if err != nil {
 		return nil, err
+	}
+	if proxyIn.ConfigVersion > 0 {
+		current, e := client.Proxy.Query().Where(proxy.IDEQ(proxyIn.ID), proxyScopePredicate(ctx)).Only(ctx)
+		if e != nil {
+			return nil, service.ErrProxyNotFound
+		}
+		if current.ConfigVersion != proxyIn.ConfigVersion {
+			return nil, service.ErrVendorProxyVersion
+		}
 	}
 	builder := client.Proxy.UpdateOneID(proxyIn.ID).
 		SetName(proxyIn.Name).
@@ -156,6 +261,9 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 		SetStatus(proxyIn.Status).
 		SetFallbackMode(proxyIn.FallbackMode).
 		SetExpiryWarnDays(proxyIn.ExpiryWarnDays)
+	if currentIdentity != proxyProbeIdentityFromService(proxyIn) {
+		builder.AddConfigVersion(1)
+	}
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
 	} else {
@@ -201,7 +309,7 @@ func lockProxyProbeIdentity(ctx context.Context, client *dbent.Client, proxyID i
 	rows, err := client.QueryContext(ctx, `
 		SELECT protocol, host, port, COALESCE(username, ''), COALESCE(password, ''), status
 		FROM proxies
-		WHERE id = $1 AND deleted_at IS NULL
+		WHERE id = $1 AND deleted_at IS NULL AND vendor_id IS NULL
 		FOR NO KEY UPDATE
 	`, proxyID)
 	if err != nil {
@@ -230,6 +338,7 @@ func invalidateProxyProbeSnapshots(ctx context.Context, exec sqlExecutor, proxyI
 				- 'opencode_go_usage_snapshot',
 			updated_at = NOW()
 		WHERE proxy_id = $1
+			AND vendor_id IS NOT DISTINCT FROM (SELECT vendor_id FROM proxies WHERE id=$1)
 			AND type = 'apikey'
 			AND (
 				(extra ? 'upstream_billing_probe'
@@ -263,6 +372,13 @@ func invalidateProxyProbeSnapshots(ctx context.Context, exec sqlExecutor, proxyI
 	return accountIDs, nil
 }
 
+// The workbench owns the vendor/proxy transaction and scheduler outbox write;
+// reuse precisely the native probe invalidation policy within that transaction.
+func (r *proxyRepository) InvalidateVendorProxySnapshots(ctx context.Context, tx service.VendorProxySQL, proxyID int64) error {
+	_, err := invalidateProxyProbeSnapshots(ctx, tx, proxyID)
+	return err
+}
+
 func enqueueProxyProbeAccountChanges(ctx context.Context, exec sqlExecutor, accountIDs []int64) error {
 	accountIDs = sortedUniqueAccountIDs(accountIDs)
 	for start := 0; start < len(accountIDs); start += proxyProbeOutboxAccountChunkSize {
@@ -279,7 +395,21 @@ func enqueueProxyProbeAccountChanges(ctx context.Context, exec sqlExecutor, acco
 }
 
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
+	current, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	// Supplier deletion includes OAuth/inflight references and must use the
+	// scoped workbench service, even for a super administrator.
+	if current.VendorID != nil {
+		return service.ErrVendorProxyWorkbenchRequired
+	}
+	if actor, ok := authz.FromContext(ctx); ok && actor.Role == authz.Admin {
+		if err := (&userRepository{client: r.client}).CheckAdminProxyTransport(ctx, []int64{id}, map[string]any{"__deleting_proxy": true}); err != nil {
+			return err
+		}
+	}
+	_, err = clientFromContext(ctx, r.client).Proxy.Delete().Where(proxy.IDEQ(id), proxyScopePredicate(ctx)).Exec(ctx)
 	return err
 }
 
@@ -289,7 +419,7 @@ func (r *proxyRepository) List(ctx context.Context, params pagination.Pagination
 
 // ListWithFilters lists proxies with optional filtering by protocol, status, and search query
 func (r *proxyRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]service.Proxy, *pagination.PaginationResult, error) {
-	q := r.client.Proxy.Query()
+	q := r.client.Proxy.Query().Where(proxyScopePredicate(ctx))
 	if protocol != "" {
 		q = q.Where(proxy.ProtocolEQ(protocol))
 	}
@@ -327,7 +457,7 @@ func (r *proxyRepository) ListWithFilters(ctx context.Context, params pagination
 
 // ListWithFiltersAndAccountCount lists proxies with filters and includes account count per proxy
 func (r *proxyRepository) ListWithFiltersAndAccountCount(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]service.ProxyWithAccountCount, *pagination.PaginationResult, error) {
-	q := r.client.Proxy.Query()
+	q := r.client.Proxy.Query().Where(proxyScopePredicate(ctx))
 	if protocol != "" {
 		q = q.Where(proxy.ProtocolEQ(protocol))
 	}
@@ -442,7 +572,7 @@ func proxyListOrder(params pagination.PaginationParams) []func(*entsql.Selector)
 
 func (r *proxyRepository) ListActive(ctx context.Context) ([]service.Proxy, error) {
 	proxies, err := r.client.Proxy.Query().
-		Where(proxy.StatusEQ(service.StatusActive)).
+		Where(proxy.StatusEQ(service.StatusActive), proxyScopePredicate(ctx)).
 		All(ctx)
 	if err != nil {
 		return nil, err
@@ -457,7 +587,7 @@ func (r *proxyRepository) ListActive(ctx context.Context) ([]service.Proxy, erro
 // ExistsByHostPortAuth checks if a proxy with the same host, port, username, and password exists
 func (r *proxyRepository) ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error) {
 	q := r.client.Proxy.Query().
-		Where(proxy.HostEQ(host), proxy.PortEQ(port))
+		Where(proxy.HostEQ(host), proxy.PortEQ(port), proxyScopePredicate(ctx))
 
 	if username == "" {
 		q = q.Where(proxy.Or(proxy.UsernameIsNil(), proxy.UsernameEQ("")))
@@ -476,6 +606,13 @@ func (r *proxyRepository) ExistsByHostPortAuth(ctx context.Context, host string,
 
 // CountAccountsByProxyID returns the number of accounts using a specific proxy
 func (r *proxyRepository) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
+	_, actorPresent := authz.FromContext(ctx)
+	_, scopePresent := authz.VendorScopeFromContext(ctx)
+	if actorPresent || scopePresent {
+		if _, err := r.GetByID(ctx, proxyID); err != nil {
+			return 0, err
+		}
+	}
 	var count int64
 	if err := scanSingleRow(ctx, r.sql, "SELECT COUNT(*) FROM accounts WHERE proxy_id = $1 AND deleted_at IS NULL", []any{proxyID}, &count); err != nil {
 		return 0, err
@@ -484,8 +621,11 @@ func (r *proxyRepository) CountAccountsByProxyID(ctx context.Context, proxyID in
 }
 
 func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, proxyID int64) ([]service.ProxyAccountSummary, error) {
+	if _, err := r.GetByID(ctx, proxyID); err != nil {
+		return nil, err
+	}
 	rows, err := r.sql.QueryContext(ctx, `
-		SELECT id, name, platform, type, notes
+		SELECT id, name, platform, type, notes, status
 		FROM accounts
 		WHERE proxy_id = $1 AND deleted_at IS NULL
 		ORDER BY id DESC
@@ -503,8 +643,9 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 			platform string
 			accType  string
 			notes    sql.NullString
+			status   string
 		)
-		if err := rows.Scan(&id, &name, &platform, &accType, &notes); err != nil {
+		if err := rows.Scan(&id, &name, &platform, &accType, &notes, &status); err != nil {
 			return nil, err
 		}
 		var notesPtr *string
@@ -517,6 +658,7 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 			Platform: platform,
 			Type:     accType,
 			Notes:    notesPtr,
+			Status:   status,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -527,7 +669,13 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 
 // GetAccountCountsForProxies returns a map of proxy ID to account count for all proxies
 func (r *proxyRepository) GetAccountCountsForProxies(ctx context.Context) (counts map[int64]int64, err error) {
-	rows, err := r.sql.QueryContext(ctx, "SELECT proxy_id, COUNT(*) AS count FROM accounts WHERE proxy_id IS NOT NULL AND deleted_at IS NULL GROUP BY proxy_id")
+	args := []any{}
+	scope := proxySQLScope(ctx, "", &args)
+	where := ""
+	if scope != "" {
+		where = " AND proxy_id IN (SELECT id FROM proxies WHERE deleted_at IS NULL" + scope + ")"
+	}
+	rows, err := r.sql.QueryContext(ctx, "SELECT proxy_id, COUNT(*) AS count FROM accounts WHERE proxy_id IS NOT NULL AND deleted_at IS NULL"+where+" GROUP BY proxy_id", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -555,7 +703,7 @@ func (r *proxyRepository) GetAccountCountsForProxies(ctx context.Context) (count
 // ListActiveWithAccountCount returns all active proxies with account count, sorted by creation time descending
 func (r *proxyRepository) ListActiveWithAccountCount(ctx context.Context) ([]service.ProxyWithAccountCount, error) {
 	proxies, err := r.client.Proxy.Query().
-		Where(proxy.StatusEQ(service.StatusActive)).
+		Where(proxy.StatusEQ(service.StatusActive), proxyScopePredicate(ctx)).
 		Order(dbent.Desc(proxy.FieldCreatedAt)).
 		All(ctx)
 	if err != nil {
@@ -589,6 +737,7 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		return nil
 	}
 	out := &service.Proxy{
+		VendorID: m.VendorID, CreatedBy: m.CreatedBy, VendorNotes: m.VendorNotes, RegionLabelCountryCode: m.RegionLabelCountryCode, RegionLabelCity: m.RegionLabelCity, ConfigVersion: m.ConfigVersion,
 		ID:             m.ID,
 		Name:           m.Name,
 		Protocol:       m.Protocol,
@@ -618,11 +767,12 @@ func applyProxyEntityToService(dst *service.Proxy, src *dbent.Proxy) {
 	dst.ID = src.ID
 	dst.CreatedAt = src.CreatedAt
 	dst.UpdatedAt = src.UpdatedAt
+	dst.ConfigVersion = src.ConfigVersion
 }
 
 // ListAllForFallback 返回所有代理（含过期/非活跃），供改投逻辑使用。
 func (r *proxyRepository) ListAllForFallback(ctx context.Context) ([]service.Proxy, error) {
-	proxies, err := r.client.Proxy.Query().All(ctx)
+	proxies, err := r.client.Proxy.Query().Where(proxyScopePredicate(ctx)).All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -728,6 +878,40 @@ func (r *proxyRepository) sweepOneExpiredProxy(ctx context.Context, snapshot ser
 
 // sweepOneExpiredProxyOnExec 在给定的 sqlExecutor 上执行：标记 expired + 改投账号。
 func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec sqlExecutor, snapshot service.Proxy, now time.Time, target *int64, change bool) ([]int64, error) {
+	if snapshot.VendorID != nil {
+		if err := service.AcquireVendorProxyLock(ctx, exec, *snapshot.VendorID); err != nil {
+			return nil, err
+		}
+		locked, err := exec.QueryContext(ctx, "SELECT id FROM vendors WHERE id=$1 FOR UPDATE", *snapshot.VendorID)
+		if err != nil {
+			return nil, err
+		}
+		exists := locked.Next()
+		err = locked.Err()
+		locked.Close()
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, service.ErrProxyNotFound
+		}
+		// Supplier policy never authorizes implicit direct egress. Re-read the
+		// selected backup under a lock: the earlier graph is only a snapshot.
+		if target == nil {
+			change = false
+		} else if change {
+			rows, err := exec.QueryContext(ctx, "SELECT id FROM proxies WHERE id=$1 AND vendor_id=$2 AND deleted_at IS NULL AND status='active' AND (expires_at IS NULL OR expires_at>$3) FOR KEY SHARE", *target, *snapshot.VendorID, now)
+			if err != nil {
+				return nil, err
+			}
+			change = rows.Next()
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	proxyID := snapshot.ID
 	// The UPDATE locks the row and rechecks its predicates after concurrent writes.
 	// If an administrator renewed, disabled or reconfigured the proxy after the
@@ -771,7 +955,7 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 					ELSE extra
 				END,
 				updated_at=NOW()
-			WHERE proxy_id=$1 AND deleted_at IS NULL
+			WHERE proxy_id=$1 AND deleted_at IS NULL AND vendor_id IS NULL
 			RETURNING id`, proxyID)
 	} else {
 		rows, err = exec.QueryContext(ctx, `
@@ -783,6 +967,8 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 				END,
 				updated_at=NOW()
 			WHERE proxy_id=$1 AND deleted_at IS NULL
+			  AND vendor_id IS NOT DISTINCT FROM (SELECT vendor_id FROM proxies WHERE id=$2)
+			  AND vendor_id IS NOT DISTINCT FROM (SELECT vendor_id FROM proxies WHERE id=$1)
 			RETURNING id`, proxyID, *target)
 	}
 	if err != nil {
@@ -812,17 +998,21 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 // CountExpired 返回已过期（status=expired）的代理数量。
 func (r *proxyRepository) CountExpired(ctx context.Context) (int64, error) {
 	var c int64
-	err := scanSingleRow(ctx, r.sql, `SELECT COUNT(*) FROM proxies WHERE status=$1 AND deleted_at IS NULL`, []any{service.StatusExpired}, &c)
+	args := []any{service.StatusExpired}
+	scope := proxySQLScope(ctx, "", &args)
+	err := scanSingleRow(ctx, r.sql, `SELECT COUNT(*) FROM proxies WHERE status=$1 AND deleted_at IS NULL`+scope, args, &c)
 	return c, err
 }
 
 // CountExpiringSoon 返回即将到期（在 expiry_warn_days 天内）的活跃代理数量。
 func (r *proxyRepository) CountExpiringSoon(ctx context.Context, now time.Time) (int64, error) {
 	var c int64
+	args := []any{service.StatusActive, now}
+	scope := proxySQLScope(ctx, "", &args)
 	err := scanSingleRow(ctx, r.sql, `
 		SELECT COUNT(*) FROM proxies
 		WHERE deleted_at IS NULL AND status=$1 AND expires_at IS NOT NULL
-		  AND expires_at > $2 AND expires_at <= $2 + (expiry_warn_days || ' days')::interval`,
-		[]any{service.StatusActive, now}, &c)
+		  AND expires_at > $2 AND expires_at <= $2 + (expiry_warn_days || ' days')::interval`+scope,
+		args, &c)
 	return c, err
 }

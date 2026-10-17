@@ -6,13 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"github.com/lib/pq"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
 	"github.com/Wei-Shaw/sub2api/ent/authidentitychannel"
+	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -61,7 +65,46 @@ func (s *adminServiceImpl) ListUsers(ctx context.Context, page, pageSize int, fi
 			s.loadUserGroupRatesOneByOne(ctx, users)
 		}
 	}
+	s.loadUserCreators(ctx, users)
 	return users, result.Total, nil
+}
+
+// Reuse the creation receipt instead of introducing an ownership column. This
+// exposes only the creator ID, never a privileged audit event or its contents.
+// Old registrations or expired audit history have unknown provenance.
+func (s *adminServiceImpl) loadUserCreators(ctx context.Context, users []User) {
+	if s.entClient == nil || len(users) == 0 {
+		return
+	}
+	ids := make([]string, len(users))
+	for i := range users {
+		ids[i] = strconv.FormatInt(users[i].ID, 10)
+	}
+	scope := ""
+	if actor, ok := authz.FromContext(ctx); ok && actor.Role != authz.SuperAdmin {
+		scope = " AND visibility='staff' AND actor_role<>'super_admin'"
+	}
+	rows, err := s.entClient.QueryContext(ctx, `SELECT DISTINCT ON (extra->>'target_user_id') extra->>'target_user_id',actor_user_id FROM audit_logs WHERE action='admin.users.create' AND extra->>'target_user_id'=ANY($1) AND actor_user_id IS NOT NULL`+scope+` ORDER BY extra->>'target_user_id',id`, pq.Array(ids))
+	if err != nil {
+		logger.LegacyPrintf("service.admin", "creator provenance lookup failed: %v", err)
+		return
+	}
+	defer rows.Close()
+	creators := map[int64]int64{}
+	for rows.Next() {
+		var id string
+		var creator int64
+		if rows.Scan(&id, &creator) != nil {
+			return
+		}
+		uid, _ := strconv.ParseInt(id, 10, 64)
+		creators[uid] = creator
+	}
+	for i := range users {
+		if creator, ok := creators[users[i].ID]; ok {
+			users[i].CreatedBy = &creator
+		}
+	}
 }
 
 func (s *adminServiceImpl) loadUserGroupRatesOneByOne(ctx context.Context, users []User) {
@@ -83,6 +126,9 @@ func (s *adminServiceImpl) GetUser(ctx context.Context, id int64) (*User, error)
 	if err != nil {
 		return nil, err
 	}
+	if err := guardManagedUser(ctx, user, "", false); err != nil {
+		return nil, err
+	}
 	lastUsedAt, latestErr := s.userRepo.GetLatestUsedAtByUserID(ctx, id)
 	if latestErr != nil {
 		logger.LegacyPrintf("service.admin", "failed to load user last_used_at: user_id=%d err=%v", id, latestErr)
@@ -102,7 +148,14 @@ func (s *adminServiceImpl) GetUser(ctx context.Context, id int64) (*User, error)
 }
 
 func (s *adminServiceImpl) GetUserIncludeDeleted(ctx context.Context, id int64) (*User, error) {
-	return s.userRepo.GetByIDIncludeDeleted(ctx, id)
+	user, err := s.userRepo.GetByIDIncludeDeleted(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := guardManagedUser(ctx, user, "", false); err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 // normalizeUserRole 校验并归一化角色输入。
@@ -111,70 +164,62 @@ func normalizeUserRole(role, fallback string) (string, error) {
 	if role == "" {
 		return fallback, nil
 	}
-	if role != RoleAdmin && role != RoleUser {
-		return "", fmt.Errorf("invalid role: %q (must be %s or %s)", role, RoleAdmin, RoleUser)
+	if !authz.ValidRole(role) {
+		return "", fmt.Errorf("invalid role: %q", role)
 	}
 	return role, nil
 }
 
 func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInput) (*User, error) {
-	balance := 0.0
-	if input.Balance != nil {
-		balance = *input.Balance
-	} else if s.settingService != nil {
-		balance = s.settingService.GetDefaultBalance(ctx)
-	}
+	ctx = withPersonnelAction(ctx, "create")
+	return WithManagementWrite(ctx, s.entClient, nil, func(ctx context.Context) (*User, error) {
+		balance := 0.0
+		if input.Balance != nil {
+			balance = *input.Balance
+		} else if s.settingService != nil {
+			if actor, ok := authz.FromContext(ctx); !ok || actor.Role != authz.Admin {
+				balance = s.settingService.GetDefaultBalance(ctx)
+			}
+		}
 
-	// 角色可由管理员在创建时指定(admin/user);未提供时默认 user。
-	role, err := normalizeUserRole(input.Role, RoleUser)
-	if err != nil {
-		return nil, err
-	}
+		// 角色可由管理员在创建时指定(admin/user);未提供时默认 user。
+		role, err := normalizeUserRole(input.Role, RoleUser)
+		if err != nil {
+			return nil, err
+		}
+		if actor, ok := authz.FromContext(ctx); ok && actor.Role == RoleAdmin && (role == RoleSuperAdmin || !actor.Can(authz.PersonnelPermission("create", role, ""))) {
+			return nil, ErrAdminPermissionDenied
+		}
 
-	user := &User{
-		Email:         input.Email,
-		Username:      input.Username,
-		Notes:         input.Notes,
-		Role:          role,
-		Balance:       balance,
-		Concurrency:   input.Concurrency,
-		RPMLimit:      input.RPMLimit,
-		Status:        StatusActive,
-		AllowedGroups: input.AllowedGroups,
+		user := &User{
+			Email:         input.Email,
+			Username:      input.Username,
+			Notes:         input.Notes,
+			Role:          role,
+			Balance:       balance,
+			Concurrency:   input.Concurrency,
+			RPMLimit:      input.RPMLimit,
+			Status:        StatusActive,
+			AllowedGroups: input.AllowedGroups,
 
-		RestrictPublicGroups: input.RestrictPublicGroups,
-	}
-	if err := user.SetPassword(input.Password); err != nil {
-		return nil, err
-	}
-	if err := s.userRepo.Create(ctx, user); err != nil {
-		return nil, err
-	}
-	// 创建管理员属权限敏感操作，落审计日志（含操作者），便于事后追溯。
-	if user.Role == RoleAdmin {
-		logger.LegacyPrintf("service.admin", "audit: admin user created actor_admin_id=%d target_user_id=%d",
-			input.ActorAdminID, user.ID)
-	}
-	s.assignDefaultSubscriptions(ctx, user.ID)
-	return user, nil
-}
-
-// ensureNotLastAdmin 降级管理员前确认系统中仍存在其他管理员，防止零 admin 锁死。
-// 注：读取与写入之间存在竞态窗口，极端并发下仍可能双双降级；作为后台低频操作
-// 的兜底保护足够，彻底防护需依赖数据库层约束。
-func (s *adminServiceImpl) ensureNotLastAdmin(ctx context.Context) error {
-	noSubs := false
-	_, result, err := s.userRepo.ListWithFilters(ctx,
-		pagination.PaginationParams{Page: 1, PageSize: 1},
-		UserListFilters{Role: RoleAdmin, IncludeSubscriptions: &noSubs},
-	)
-	if err != nil {
-		return fmt.Errorf("count admin users: %w", err)
-	}
-	if result == nil || result.Total <= 1 {
-		return errors.New("cannot demote the last admin user")
-	}
-	return nil
+			RestrictPublicGroups: input.RestrictPublicGroups,
+		}
+		if err := user.SetPassword(input.Password); err != nil {
+			return nil, err
+		}
+		if err := s.userRepo.Create(ctx, user); err != nil {
+			return nil, err
+		}
+		// 创建管理员属权限敏感操作，落审计日志（含操作者），便于事后追溯。
+		if user.Role == RoleAdmin {
+			logger.LegacyPrintf("service.admin", "audit: admin user created actor_admin_id=%d target_user_id=%d",
+				input.ActorAdminID, user.ID)
+		}
+		if actor, ok := authz.FromContext(ctx); !ok || actor.Role != authz.Admin {
+			s.assignDefaultSubscriptions(ctx, user.ID)
+		}
+		return user, nil
+	})
 }
 
 func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userID int64) {
@@ -195,145 +240,180 @@ func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userI
 }
 
 func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *UpdateUserInput) (*User, error) {
-	// 校验用户专属分组倍率：必须 > 0（nil 合法，表示清除专属倍率）
-	if input.GroupRates != nil {
-		for groupID, rate := range input.GroupRates {
-			if rate != nil && *rate <= 0 {
-				return nil, fmt.Errorf("rate_multiplier must be > 0 (group_id=%d)", groupID)
+	ctx = withPersonnelAction(ctx, "update")
+	var previousEmail string
+	var notifySecurity bool
+	updatedUser, updateErr := WithManagementWrite(ctx, s.entClient, []int64{id}, func(ctx context.Context) (*User, error) {
+		// 校验用户专属分组倍率：必须 > 0（nil 合法，表示清除专属倍率）
+		if input.GroupRates != nil {
+			for groupID, rate := range input.GroupRates {
+				if rate != nil && *rate <= 0 {
+					return nil, fmt.Errorf("rate_multiplier must be > 0 (group_id=%d)", groupID)
+				}
 			}
 		}
-	}
 
-	user, err := s.userRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	// Protect admin users: cannot disable admin accounts
-	if user.Role == "admin" && input.Status == "disabled" {
-		return nil, errors.New("cannot disable admin user")
-	}
-
-	oldConcurrency := user.Concurrency
-	oldStatus := user.Status
-	oldRole := user.Role
-	oldRPMLimit := user.RPMLimit
-	oldAllowedGroups := append([]int64(nil), user.AllowedGroups...)
-
-	// fields 与下面的 input.X 判空条件一一对应：管理员没提交的列不写回，
-	// 避免这份快照回滚并发的扣费、状态变更或批量限额调整。
-	var fields UserUpdateFields
-
-	if input.Email != "" {
-		user.Email = input.Email
-		fields.Email = true
-	}
-	if input.Password != "" {
-		if err := user.SetPassword(input.Password); err != nil {
-			return nil, err
-		}
-		fields.PasswordHash = true
-	}
-
-	if input.Username != nil {
-		user.Username = *input.Username
-		fields.Username = true
-	}
-	if input.Notes != nil {
-		user.Notes = *input.Notes
-		fields.Notes = true
-	}
-
-	if input.Status != "" {
-		user.Status = input.Status
-		fields.Status = true
-	}
-
-	// 角色变更(admin/user);空字符串表示不修改。
-	if input.Role != "" {
-		role, err := normalizeUserRole(input.Role, user.Role)
+		user, err := s.userRepo.GetByID(ctx, id)
 		if err != nil {
 			return nil, err
 		}
-		// 防锁死保护：不允许降级系统中最后一个管理员（自我降级已在 handler 层拦截，
-		// 此处兜底覆盖跨管理员互降导致零 admin 的场景）。
-		if user.Role == RoleAdmin && role == RoleUser {
-			if err := s.ensureNotLastAdmin(ctx); err != nil {
+
+		if err := guardManagedUser(ctx, user, input.Role, input.Status == StatusDisabled); err != nil {
+			return nil, err
+		}
+
+		if actor, ok := authz.FromContext(ctx); ok && actor.UserID == id && (input.ResetTOTP || input.Password != "" || (input.Email != "" && input.Email != user.Email)) {
+			return nil, ErrAdminPermissionDenied
+		}
+		if actor, ok := authz.FromContext(ctx); ok && actor.Role == authz.Admin && (input.ResetTOTP || input.Password != "" || (input.Email != "" && input.Email != user.Email)) && !actor.Can(authz.PersonnelPermission("security", user.Role, "")) {
+			return nil, ErrAdminPermissionDenied
+		}
+		notifySecurity = input.ResetTOTP || input.Password != "" || (input.Email != "" && input.Email != user.Email) || (input.Role != "" && input.Role != user.Role) || (input.Status != "" && input.Status != user.Status)
+		if notifySecurity {
+			previousEmail = s.verifiedManagementEmail(ctx, user.ID, user.Email)
+		}
+		oldConcurrency := user.Concurrency
+		oldStatus := user.Status
+		oldRole := user.Role
+		oldRPMLimit := user.RPMLimit
+		oldAllowedGroups := append([]int64(nil), user.AllowedGroups...)
+
+		// fields 与下面的 input.X 判空条件一一对应：管理员没提交的列不写回，
+		// 避免这份快照回滚并发的扣费、状态变更或批量限额调整。
+		var fields UserUpdateFields
+
+		if input.Email != "" {
+			user.Email = input.Email
+			fields.Email = true
+		}
+		if input.Password != "" {
+			if err := user.SetPassword(input.Password); err != nil {
 				return nil, err
 			}
+			fields.PasswordHash = true
 		}
-		user.Role = role
-		fields.Role = true
-	}
 
-	if input.Concurrency != nil {
-		user.Concurrency = *input.Concurrency
-		fields.Concurrency = true
-	}
-
-	if input.RPMLimit != nil {
-		user.RPMLimit = *input.RPMLimit
-		fields.RPMLimit = true
-	}
-
-	if input.AllowedGroups != nil {
-		user.AllowedGroups = *input.AllowedGroups
-		fields.AllowedGroups = true
-	}
-
-	oldRestrictPublicGroups := user.RestrictPublicGroups
-	if input.RestrictPublicGroups != nil {
-		user.RestrictPublicGroups = *input.RestrictPublicGroups
-		fields.RestrictPublicGroups = true
-	}
-
-	if err := s.userRepo.Update(ctx, user, fields); err != nil {
-		return nil, err
-	}
-
-	// 角色变更属权限敏感操作，落审计日志（含操作者），便于事后追溯。
-	if user.Role != oldRole {
-		logger.LegacyPrintf("service.admin", "audit: user role changed actor_admin_id=%d target_user_id=%d old_role=%s new_role=%s",
-			input.ActorAdminID, user.ID, oldRole, user.Role)
-	}
-
-	// 同步用户专属分组倍率
-	if input.GroupRates != nil && s.userGroupRateRepo != nil {
-		if err := s.userGroupRateRepo.SyncUserGroupRates(ctx, user.ID, input.GroupRates); err != nil {
-			logger.LegacyPrintf("service.admin", "failed to sync user group rates: user_id=%d err=%v", user.ID, err)
+		if input.Username != nil {
+			user.Username = *input.Username
+			fields.Username = true
 		}
-	}
+		if input.Notes != nil {
+			user.Notes = *input.Notes
+			fields.Notes = true
+		}
 
-	if s.authCacheInvalidator != nil {
-		// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
-		// allowed_groups 参与 API Key 专属分组授权判断；不失效缓存会让修改在一个 L2 TTL 内失去效果。
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || user.RestrictPublicGroups != oldRestrictPublicGroups || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) {
-			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
+		if input.Status != "" {
+			user.Status = input.Status
+			fields.Status = true
 		}
-	}
 
-	concurrencyDiff := user.Concurrency - oldConcurrency
-	if concurrencyDiff != 0 {
-		code, err := GenerateRedeemCode()
-		if err != nil {
-			logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
-			return user, nil
-		}
-		adjustmentRecord := &RedeemCode{
-			Code:   code,
-			Type:   AdjustmentTypeAdminConcurrency,
-			Value:  float64(concurrencyDiff),
-			Status: StatusUsed,
-			UsedBy: &user.ID,
-		}
-		now := time.Now()
-		adjustmentRecord.UsedAt = &now
-		if err := s.redeemCodeRepo.Create(ctx, adjustmentRecord); err != nil {
-			logger.LegacyPrintf("service.admin", "failed to create concurrency adjustment redeem code: %v", err)
-		}
-	}
+		// 角色变更(admin/user);空字符串表示不修改。
+		if input.Role != "" {
+			role, err := normalizeUserRole(input.Role, user.Role)
+			if err != nil {
+				return nil, err
+			}
 
-	return user, nil
+			user.Role = role
+			fields.Role = true
+		}
+
+		if input.Concurrency != nil {
+			user.Concurrency = *input.Concurrency
+			fields.Concurrency = true
+		}
+
+		if input.RPMLimit != nil {
+			user.RPMLimit = *input.RPMLimit
+			fields.RPMLimit = true
+		}
+
+		if input.AllowedGroups != nil {
+			user.AllowedGroups = *input.AllowedGroups
+			fields.AllowedGroups = true
+		}
+
+		oldRestrictPublicGroups := user.RestrictPublicGroups
+		if input.RestrictPublicGroups != nil {
+			user.RestrictPublicGroups = *input.RestrictPublicGroups
+			fields.RestrictPublicGroups = true
+		}
+
+		if err := s.userRepo.Update(ctx, user, fields); err != nil {
+			return nil, err
+		}
+
+		if input.ResetTOTP {
+			if err := s.userRepo.DisableTotp(ctx, id); err != nil {
+				return nil, err
+			}
+			if s.entClient != nil {
+				tx := dbent.TxFromContext(ctx)
+				if tx == nil {
+					return nil, ErrAdminPolicyUnavailable
+				}
+				if err := tx.PendingAuthSession.Update().Where(pendingauthsession.TargetUserIDEQ(id), pendingauthsession.ConsumedAtIsNil()).SetConsumedAt(time.Now()).Exec(ctx); err != nil {
+					return nil, err
+				}
+				if err := RecordManagementUserChange(ctx, tx.Client(), id, "admin.user.mfa.reset", oldRole, user.Role); err != nil {
+					return nil, err
+				}
+			}
+			user.SessionGeneration++
+			user.TokenVersion = CredentialVersion(user)
+			user.TotpEnabled = false
+			user.TotpEnabledAt = nil
+			user.TotpSecretEncrypted = nil
+		}
+		// 角色变更属权限敏感操作，落审计日志（含操作者），便于事后追溯。
+		if user.Role != oldRole {
+			logger.LegacyPrintf("service.admin", "audit: user role changed actor_admin_id=%d target_user_id=%d old_role=%s new_role=%s",
+				input.ActorAdminID, user.ID, oldRole, user.Role)
+		}
+
+		// 同步用户专属分组倍率
+		if input.GroupRates != nil && s.userGroupRateRepo != nil {
+			if err := s.userGroupRateRepo.SyncUserGroupRates(ctx, user.ID, input.GroupRates); err != nil {
+				return nil, fmt.Errorf("sync user group rates: %w", err)
+			}
+		}
+
+		if s.authCacheInvalidator != nil {
+			// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
+			// allowed_groups 参与 API Key 专属分组授权判断；不失效缓存会让修改在一个 L2 TTL 内失去效果。
+			if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || user.RestrictPublicGroups != oldRestrictPublicGroups || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) {
+				s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
+			}
+		}
+
+		concurrencyDiff := user.Concurrency - oldConcurrency
+		if concurrencyDiff != 0 {
+			code, err := GenerateRedeemCode()
+			if err != nil {
+				logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
+				return user, nil
+			}
+			adjustmentRecord := &RedeemCode{
+				Code:   code,
+				Type:   AdjustmentTypeAdminConcurrency,
+				Value:  float64(concurrencyDiff),
+				Status: StatusUsed,
+				UsedBy: &user.ID,
+			}
+			now := time.Now()
+			adjustmentRecord.UsedAt = &now
+			if err := s.redeemCodeRepo.Create(ctx, adjustmentRecord); err != nil {
+				logger.LegacyPrintf("service.admin", "failed to create concurrency adjustment redeem code: %v", err)
+			}
+		}
+
+		return user, nil
+	})
+	if updateErr == nil && notifySecurity {
+		s.notifyManagementSecurityChange(ctx, id, previousEmail)
+	}
+	return updatedUser, updateErr
+
 }
 
 func sameInt64Set(a, b []int64) bool {
@@ -357,13 +437,14 @@ func sameInt64Set(a, b []int64) bool {
 }
 
 func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
-	// Protect admin users: cannot delete admin accounts
+	ctx = withPersonnelAction(ctx, "delete")
+	// Peer administrators are manageable; the super-admin and self guards still apply.
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	if user.Role == "admin" {
-		return errors.New("cannot delete admin user")
+	if err := guardManagedUser(ctx, user, "", true); err != nil {
+		return err
 	}
 
 	apiKeys, err := s.listUserAPIKeysForDeletion(ctx, id)
@@ -379,6 +460,9 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 		defer func() { _ = tx.Rollback() }()
 
 		opCtx := dbent.NewTxContext(ctx, tx)
+		if err := authz.LockManagementWrite(opCtx, tx.Client(), []int64{id}, "", "", true); err != nil {
+			return err
+		}
 		if err := s.deleteUserWithAPIKeys(opCtx, id, apiKeys); err != nil {
 			return err
 		}
@@ -400,6 +484,56 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, id)
 	}
 	return nil
+}
+
+// DeleteUsers receives the complete selection; separate DELETE requests cannot
+// atomically reject a protected member mixed into a batch.
+func (s *adminServiceImpl) DeleteUsers(ctx context.Context, ids []int64) error {
+	ctx = withPersonnelAction(ctx, "delete")
+	actor, ok := authz.FromContext(ctx)
+	if !ok || !actor.ManagementRequest || !actor.Can("users.delete") {
+		return ErrAdminPermissionDenied
+	}
+	if len(ids) == 0 || len(ids) > 1000 {
+		return infraerrors.BadRequest("INVALID_USER_IDS", "user_ids must contain between 1 and 1000 IDs")
+	}
+	seen := map[int64]bool{}
+	targets := []int64{}
+	for _, id := range ids {
+		if id <= 0 {
+			return infraerrors.BadRequest("INVALID_USER_IDS", "user IDs must be positive")
+		}
+		if !seen[id] {
+			seen[id] = true
+			targets = append(targets, id)
+		}
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i] < targets[j] })
+	return RunManagementWrite(ctx, s.entClient, targets, func(ctx context.Context) error {
+		tx := dbent.TxFromContext(ctx)
+		if tx == nil {
+			return ErrAdminPolicyUnavailable
+		}
+		if err := authz.LockManagementWrite(ctx, tx.Client(), targets, "", "", true); err != nil {
+			return err
+		}
+		for _, id := range targets {
+			keys, err := s.listUserAPIKeysForDeletion(ctx, id)
+			if err != nil {
+				return err
+			}
+			if err = s.deleteUserWithAPIKeys(ctx, id, keys); err != nil {
+				return err
+			}
+			if s.authCacheInvalidator != nil {
+				for _, key := range keys {
+					s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, key.Key)
+				}
+				s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, id)
+			}
+		}
+		return nil
+	})
 }
 
 func (s *adminServiceImpl) listUserAPIKeysForDeletion(ctx context.Context, userID int64) ([]APIKey, error) {
@@ -909,6 +1043,7 @@ func redeemCodeHistoryTime(code RedeemCode) time.Time {
 }
 
 func (s *adminServiceImpl) BindUserAuthIdentity(ctx context.Context, userID int64, input AdminBindAuthIdentityInput) (*AdminBoundAuthIdentity, error) {
+	ctx = withPersonnelAction(ctx, "security")
 	if userID <= 0 {
 		return nil, infraerrors.BadRequest("INVALID_INPUT", "user_id must be greater than 0")
 	}
@@ -917,6 +1052,10 @@ func (s *adminServiceImpl) BindUserAuthIdentity(ctx context.Context, userID int6
 	}
 	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
 		return nil, err
+	}
+
+	if actor, ok := authz.FromContext(ctx); ok && actor.UserID == userID {
+		return nil, ErrAdminPermissionDenied
 	}
 
 	providerType := normalizeAdminAuthIdentityProviderType(input.ProviderType)
@@ -950,7 +1089,15 @@ func (s *adminServiceImpl) BindUserAuthIdentity(ctx context.Context, userID int6
 		return nil, infraerrors.InternalServer("ADMIN_AUTH_IDENTITY_BIND_TX_FAILED", "failed to start auth identity bind transaction").WithCause(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := authz.LockManagementWrite(ctx, tx.Client(), []int64{userID}, "", "", false); err != nil {
+		return nil, err
+	}
+	target, err := LockAuthLifecycleUser(ctx, tx.Client(), userID)
+	if err != nil {
+		return nil, err
+	}
 
+	previousEmail := s.verifiedManagementEmail(ctx, userID, target.Email)
 	identityRecords, err := tx.AuthIdentity.Query().
 		Where(
 			authidentity.ProviderTypeEQ(providerType),
@@ -1047,9 +1194,19 @@ func (s *adminServiceImpl) BindUserAuthIdentity(ctx context.Context, userID int6
 		}
 	}
 
+	if err := tx.User.UpdateOneID(userID).AddSessionGeneration(1).Exec(ctx); err != nil {
+		return nil, err
+	}
+	if err := tx.PendingAuthSession.Update().Where(pendingauthsession.TargetUserIDEQ(userID), pendingauthsession.ConsumedAtIsNil()).SetConsumedAt(time.Now()).Exec(ctx); err != nil {
+		return nil, err
+	}
+	if err := RecordManagementUserChange(ctx, tx.Client(), userID, "admin.user.identity.bind", target.Role, target.Role); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, infraerrors.InternalServer("ADMIN_AUTH_IDENTITY_BIND_COMMIT_FAILED", "failed to commit auth identity bind").WithCause(err)
 	}
+	s.notifyManagementSecurityChange(ctx, userID, previousEmail)
 	return buildAdminBoundAuthIdentity(identity, channel), nil
 }
 
@@ -1325,4 +1482,25 @@ func (s *adminServiceImpl) ExpireRedeemCode(ctx context.Context, id int64) (*Red
 		return nil, err
 	}
 	return code, nil
+}
+
+// guardManagedUser distinguishes peer membership management from root authority.
+func guardManagedUser(ctx context.Context, user *User, nextRole string, removing bool) error {
+	actor, ok := authz.FromContext(ctx)
+	if !ok {
+		return nil
+	}
+	if !authz.IsManagementRole(actor.Role) {
+		return ErrAdminPermissionDenied
+	}
+	if actor.Role == RoleAdmin && (user.Role == RoleSuperAdmin || nextRole == RoleSuperAdmin) {
+		return ErrAdminPermissionDenied
+	}
+	if actor.Role == authz.Admin && actor.PersonnelAction != "" && !actor.Can(authz.PersonnelPermission(actor.PersonnelAction, user.Role, nextRole)) {
+		return ErrAdminPermissionDenied
+	}
+	if actor.UserID == user.ID && (removing || (nextRole != "" && nextRole != user.Role)) {
+		return ErrAdminPermissionDenied
+	}
+	return nil
 }

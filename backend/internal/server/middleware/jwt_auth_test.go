@@ -236,7 +236,7 @@ func TestJWTAuth_UserLookupErrors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", ExpireHour: 1}}
 	authSvc := service.NewAuthService(nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
-	token, err := authSvc.GenerateToken(context.Background(), &service.User{ID: 1, Role: service.RoleAdmin})
+	token, err := authSvc.GenerateToken(context.Background(), &service.User{ID: 1, Role: service.RoleSuperAdmin})
 	require.NoError(t, err)
 
 	for _, tc := range []struct {

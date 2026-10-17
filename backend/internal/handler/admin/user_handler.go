@@ -63,7 +63,7 @@ type CreateUserRequest struct {
 	Password             string   `json:"password" binding:"required,min=6"`
 	Username             string   `json:"username"`
 	Notes                string   `json:"notes"`
-	Role                 string   `json:"role" binding:"omitempty,oneof=admin user"`
+	Role                 string   `json:"role" binding:"omitempty,oneof=super_admin admin user"`
 	Balance              *float64 `json:"balance"`
 	Concurrency          int      `json:"concurrency"`
 	RPMLimit             int      `json:"rpm_limit"`
@@ -74,11 +74,12 @@ type CreateUserRequest struct {
 // UpdateUserRequest represents admin update user request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateUserRequest struct {
+	ResetTOTP            bool     `json:"reset_totp"`
 	Email                string   `json:"email" binding:"omitempty,email"`
 	Password             string   `json:"password" binding:"omitempty,min=6"`
 	Username             *string  `json:"username"`
 	Notes                *string  `json:"notes"`
-	Role                 string   `json:"role" binding:"omitempty,oneof=admin user"`
+	Role                 string   `json:"role" binding:"omitempty,oneof=super_admin admin user"`
 	Balance              *float64 `json:"balance"`
 	Concurrency          *int     `json:"concurrency"`
 	RPMLimit             *int     `json:"rpm_limit"`
@@ -233,6 +234,10 @@ func (h *UserHandler) GetByID(c *gin.Context) {
 // BindAuthIdentity manually binds a canonical auth identity to a user.
 // POST /api/v1/admin/users/:id/auth-identities
 func (h *UserHandler) BindAuthIdentity(c *gin.Context) {
+	if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
+		return
+	}
+
 	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid user ID")
@@ -279,7 +284,11 @@ func (h *UserHandler) Create(c *gin.Context) {
 	}
 
 	// 创建管理员账号属权限敏感操作：需最近完成 step-up 2FA 验证。
-	if req.Role == service.RoleAdmin {
+	if req.Role == service.RoleSuperAdmin {
+		if !middleware.EnforceStepUpAlways(c, h.totpService, h.userService) {
+			return
+		}
+	} else if req.Role == service.RoleAdmin {
 		if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
 			return
 		}
@@ -328,15 +337,19 @@ func (h *UserHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// 把普通用户提升为管理员属权限敏感操作：需最近完成 step-up 2FA 验证。
-	// 目标已是管理员时（前端编辑表单总是携带 role）不触发，避免日常编辑被打断。
-	if req.Role == service.RoleAdmin {
+	if req.ResetTOTP || req.Role == service.RoleSuperAdmin || req.Role == service.RoleAdmin || req.Password != "" || req.Email != "" || req.Role == service.RoleUser {
 		target, err := h.adminService.GetUser(c.Request.Context(), userID)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
 		}
-		if target.Role != service.RoleAdmin {
+		promoting := (req.Role == service.RoleAdmin || req.Role == service.RoleSuperAdmin) && target.Role != req.Role
+		replacingAdminCredential := target.IsStaff() && (req.Password != "" || (req.Email != "" && req.Email != target.Email) || req.Role == service.RoleUser)
+		if promoting && req.Role == service.RoleSuperAdmin {
+			if !middleware.EnforceStepUpAlways(c, h.totpService, h.userService) {
+				return
+			}
+		} else if req.ResetTOTP || promoting || replacingAdminCredential || req.Password != "" || (req.Email != "" && req.Email != target.Email) {
 			if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
 				return
 			}
@@ -345,6 +358,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 
 	// 使用指针类型直接传递，nil 表示未提供该字段
 	user, err := h.adminService.UpdateUser(c.Request.Context(), userID, &service.UpdateUserInput{
+		ResetTOTP:            req.ResetTOTP,
 		Email:                req.Email,
 		Password:             req.Password,
 		Username:             req.Username,
@@ -976,4 +990,23 @@ func (h *UserHandler) ResetUserPlatformQuotaWindow(c *gin.Context) {
 		out = append(out, quotaview.LazyZeroQuotaForResponse(records[i], now, true))
 	}
 	response.Success(c, map[string]any{"platform_quotas": out})
+}
+
+// DeleteBatch applies identity protection to the complete submitted selection.
+func (h *UserHandler) DeleteBatch(c *gin.Context) {
+	if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
+		return
+	}
+	var req struct {
+		UserIDs []int64 `json:"user_ids" binding:"required,min=1,max=1000,dive,gt=0"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid user IDs")
+		return
+	}
+	if err := h.adminService.DeleteUsers(c.Request.Context(), req.UserIDs); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": "Users deleted"})
 }
