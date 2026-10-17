@@ -2,6 +2,30 @@
 // 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
 export default {
     ops: {
+      clientTelemetry: {
+        captureMode: "用戶端遙測",
+        captureForward: "開啟：留存並轉發帳號遙測",
+        captureDisabled: "關閉遙測",
+        captureHint: "真實上傳先去重儲存。優先使用該工作階段實際帳號的遙測副本；無副本時初始化帳號身分和環境並生成遙測資料後轉發。儲存成功返回空 200；匿名、關閉或 DNT / GPC 請求僅確認接收。",
+        title: "用戶端遙測樣本",
+        description: "保留首份用戶端原始事件並累計次數。轉發使用帳號副本或按帳號初始化的資料；工作階段按實際傳送歷史關聯帳號。空 200 表示本地儲存成功，不代表上游接收成功。",
+        retention: "按維運日誌保留天數和已啟用的清理計劃，清除長時間未收到新上傳的樣本。沒有裝置標識時只按事件內容去重。",
+        user_id: "使用者 ID",
+        api_key_id: "API Key ID",
+        session: "首次工作階段 ID",
+        lastSeen: "最近接收",
+        source: "用戶端 / 使用者 / Key",
+        device: "裝置標識",
+        noDevice: "未提供",
+        count: "接收次數",
+        detail: "檢視樣本",
+        body: "原始事件 JSON",
+        headers: "用戶端環境頭",
+        copy: "複製原始事件",
+        copied: "已複製",
+        loadFailed: "載入遙測樣本失敗",
+        invalidID: "ID 必須是正整數",
+      },
       title: '維運監控',
       description: '維運監控與故障排除',
       // Dashboard
@@ -368,7 +392,8 @@ export default {
           client: '用戶端回應',
           upstream_message: '上游訊息',
           upstream_detail: '上游詳情',
-          upstream_events: '上游事件'
+          upstream_events: '上游事件',
+          scheduling_trace: '排程決策'
         },
         basicInfo: '基本資訊',
         platform: '平台',

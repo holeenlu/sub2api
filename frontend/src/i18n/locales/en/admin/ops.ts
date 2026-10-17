@@ -1,5 +1,29 @@
 export default {
     ops: {
+      clientTelemetry: {
+        captureMode: "Client telemetry",
+        captureForward: "Enable: store and forward account telemetry",
+        captureDisabled: "Disable telemetry",
+        captureHint: "Deduplicate and store real uploads. Use the session account copy when present; otherwise initialize account identity and environment and generate telemetry on demand. Saved uploads return empty 200; anonymous, disabled and DNT/GPC requests are acknowledged only.",
+        title: "Client telemetry samples",
+        description: "Retain the first original sample and receipt count. Forward with the account copy or initialized account data, using actual dispatch history. Empty 200 acknowledges local storage, not upstream acceptance.",
+        retention: "Inactive samples expire under the ops log retention period and enabled cleanup schedule. Events without a device ID are deduplicated by content only.",
+        user_id: "User ID",
+        api_key_id: "API Key ID",
+        session: "First session ID",
+        lastSeen: "Last received",
+        source: "Client / User / Key",
+        device: "Device ID",
+        noDevice: "Not provided",
+        count: "Receipts",
+        detail: "View sample",
+        body: "Original event JSON",
+        headers: "Client environment headers",
+        copy: "Copy original event",
+        copied: "Copied",
+        loadFailed: "Failed to load telemetry samples",
+        invalidID: "IDs must be positive integers",
+      },
       title: 'Ops Monitoring',
       description: 'Operational monitoring and troubleshooting',
       // Dashboard
@@ -366,7 +390,8 @@ export default {
           client: 'Client Response',
           upstream_message: 'Upstream Message',
           upstream_detail: 'Upstream Detail',
-          upstream_events: 'Upstream Events'
+          upstream_events: 'Upstream Events',
+          scheduling_trace: 'Scheduling Decisions'
         },
         basicInfo: 'Basic Info',
         platform: 'Platform',

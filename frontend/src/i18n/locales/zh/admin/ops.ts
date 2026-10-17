@@ -1,5 +1,29 @@
 export default {
     ops: {
+      clientTelemetry: {
+        captureMode: "客户端遥测",
+        captureForward: "开启：留存并转发账号遥测",
+        captureDisabled: "关闭遥测",
+        captureHint: "真实上传先去重保存。优先使用该会话实际账号的遥测副本；无副本时初始化账号身份和环境并生成遥测数据后转发。保存成功返回空 200；匿名、关闭或 DNT / GPC 请求仅确认接收。",
+        title: "客户端遥测样本",
+        description: "保留首份客户端原始事件并累计次数。转发使用账号副本或按账号初始化的数据；会话按实际发送历史关联账号。空 200 表示本地保存成功，不代表上游接收成功。",
+        retention: "按运维日志保留天数和已启用的清理计划，清除长时间未收到新上传的样本。没有设备标识时只按事件内容去重。",
+        user_id: "用户 ID",
+        api_key_id: "API Key ID",
+        session: "首次会话 ID",
+        lastSeen: "最近接收",
+        source: "客户端 / 用户 / Key",
+        device: "设备标识",
+        noDevice: "未提供",
+        count: "接收次数",
+        detail: "查看样本",
+        body: "原始事件 JSON",
+        headers: "客户端环境头",
+        copy: "复制原始事件",
+        copied: "已复制",
+        loadFailed: "加载遥测样本失败",
+        invalidID: "ID 必须是正整数",
+      },
       title: '运维监控',
       description: '运维监控与排障',
       // Dashboard
@@ -366,7 +390,8 @@ export default {
           client: '客户端响应',
           upstream_message: '上游消息',
           upstream_detail: '上游详情',
-          upstream_events: '上游事件'
+          upstream_events: '上游事件',
+          scheduling_trace: '调度决策'
         },
         basicInfo: '基本信息',
         platform: '平台',

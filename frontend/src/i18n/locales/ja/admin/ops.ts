@@ -1,5 +1,29 @@
 export default {
     ops: {
+      clientTelemetry: {
+        captureMode: "クライアントテレメトリ",
+        captureForward: "有効：保存してアカウント情報で転送",
+        captureDisabled: "テレメトリを無効化",
+        captureHint: "実際のアップロードを重複排除して保存します。セッションで使用したアカウントのコピーを優先し、コピーがない場合は識別情報と環境を初期化して生成・転送します。保存成功時は空の 200 を返します。匿名・無効・DNT/GPC は受領確認のみです。",
+        title: "クライアントのテレメトリサンプル",
+        description: "最初の元イベントと受信回数を保存します。実際の送信履歴でアカウントを特定し、コピーまたは初期化したデータを転送します。空の 200 はローカル保存の確認であり、上流受信の保証ではありません。",
+        retention: "運用ログの保存日数と有効なクリーンアップ設定に従い、長期間受信のないサンプルを削除します。デバイス ID がない場合は内容で重複を判定します。",
+        user_id: "ユーザー ID",
+        api_key_id: "API Key ID",
+        session: "初回セッション ID",
+        lastSeen: "最終受信",
+        source: "クライアント / ユーザー / Key",
+        device: "デバイス ID",
+        noDevice: "未指定",
+        count: "受信回数",
+        detail: "サンプルを表示",
+        body: "元のイベント JSON",
+        headers: "クライアント環境ヘッダー",
+        copy: "元のイベントをコピー",
+        copied: "コピーしました",
+        loadFailed: "テレメトリの読み込みに失敗しました",
+        invalidID: "ID は正の整数で指定してください",
+      },
       title: '運用監視',
       description: '運用状況の監視とトラブルシューティング',
       // Dashboard
@@ -366,7 +390,8 @@ export default {
           client: 'クライアントレスポンス',
           upstream_message: 'アップストリームメッセージ',
           upstream_detail: 'アップストリーム詳細',
-          upstream_events: 'アップストリームイベント'
+          upstream_events: 'アップストリームイベント',
+          scheduling_trace: 'スケジューリング判断'
         },
         basicInfo: '基本情報',
         platform: 'プラットフォーム',
