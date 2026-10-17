@@ -20,7 +20,7 @@
 | --- | --- |
 | 现有后台 api_base_url | 运营/网关对外地址，用于“使用密钥”和回调建议；含义不变 |
 | PORTAL_PUBLIC_ORIGIN | 门户公开 origin，例如 https://supplier.example.com；与后台 vendor_portal_origin 完全一致 |
-| BACKEND_ORIGIN | 门户连接现有后端的 origin；同机例如 http://kdan:8080，跨机使用 B 私网地址或 HTTPS 入口 |
+| BACKEND_ORIGIN | 门户连接现有后端的 origin；同机例如 http://tapmodels:8080，跨机使用 B 私网地址或 HTTPS 入口 |
 
 部署前在现有运营后台启用 vendor_console_enabled，并将 vendor_portal_origin 配成 PORTAL_PUBLIC_ORIGIN。供应商账号仍由既有超管/上级供应商按权限开通；门户镜像不会自动开户或放宽授权。
 
@@ -34,7 +34,7 @@
 
 ~~~sh
 cp deploy/vendor-portal.env.example deploy/vendor-portal.env
-# BACKEND_ORIGIN 使用现有 Compose 服务名，例如 http://kdan:8080。
+# BACKEND_ORIGIN 使用现有 Compose 服务名，例如 http://tapmodels:8080。
 docker compose --env-file deploy/.env --env-file deploy/vendor-portal.env \
   -f deploy/docker-compose.yml -f deploy/docker-compose.vendor.yml \
   -f deploy/docker-compose.vendor-local.yml config

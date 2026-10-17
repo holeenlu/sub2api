@@ -4,7 +4,7 @@ export default {
   common: {
     // 站點名稱。實際值在設定載入後由 stores/app.ts 以 mergeLocaleMessage 覆蓋，
     // 文案中用 @:common.siteName 連結即可自動跟隨後台設定變化。
-    siteName: 'KDAN',
+    siteName: 'TapModels',
     loading: '載入中...',
     submitting: '提交中...',
     justNow: '剛剛',
