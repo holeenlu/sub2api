@@ -1,12 +1,12 @@
 # Apple container Deployment
 
-KDAN can run as a native three-service stack with Apple's `container` CLI. This workflow runs the published KDAN, PostgreSQL, and Redis OCI images without Docker Desktop or a Docker-compatible daemon.
+TapModels can run as a native three-service stack with Apple's `container` CLI. This workflow runs the published TapModels, PostgreSQL, and Redis OCI images without Docker Desktop or a Docker-compatible daemon.
 
 ## Support Level
 
 Apple `container` support is intended for local development and operator-managed deployments on a Mac. Docker Compose remains the recommended production deployment path.
 
-Apple `container` 1.1 does not provide restart policies, automatic startup, workload health scheduling, a Docker API socket, or full Compose orchestration. `apple-container.sh` supplies ordered startup and readiness checks when you invoke it. Inside the application container, a small supervisor relaunches the KDAN process after the Web UI requests a restart; it does not restart stopped containers or the stack itself.
+Apple `container` 1.1 does not provide restart policies, automatic startup, workload health scheduling, a Docker API socket, or full Compose orchestration. `apple-container.sh` supplies ordered startup and readiness checks when you invoke it. Inside the application container, a small supervisor relaunches the TapModels process after the Web UI requests a restart; it does not restart stopped containers or the stack itself.
 
 ## Requirements
 
@@ -25,8 +25,8 @@ container --version
 ## Quick Start
 
 ```bash
-git clone -b KDAN https://github.com/holeenlu/sub2api.git
-cd kdan/deploy
+git clone -b TapModels https://github.com/holeenlu/sub2api.git
+cd tapmodels/deploy
 
 # Creates .env with random PostgreSQL, JWT, and TOTP secrets.
 ./apple-container.sh init
@@ -34,7 +34,7 @@ cd kdan/deploy
 # Review optional settings before startup.
 nano .env
 
-# Creates volumes/network/containers, waits for dependencies, and starts KDAN.
+# Creates volumes/network/containers, waits for dependencies, and starts TapModels.
 ./apple-container.sh up
 
 # Verifies PostgreSQL, Redis, and the application endpoint.
@@ -61,7 +61,7 @@ The env file uses literal `KEY=value` syntax. Do not use Compose expressions suc
 # Stop containers while preserving all resources and data.
 ./apple-container.sh down
 
-# Restart PostgreSQL, Redis, and KDAN in dependency order.
+# Restart PostgreSQL, Redis, and TapModels in dependency order.
 ./apple-container.sh restart
 
 # Show resource state and run live health probes.
@@ -89,10 +89,10 @@ After a host reboot or `container system stop`, run `./apple-container.sh up` ag
 
 ## Configuration
 
-The script uses `deploy/.env`, the same source file used by Docker Compose. Export `KDAN_ENV_FILE` to use another file for every command in the current shell:
+The script uses `deploy/.env`, the same source file used by Docker Compose. Export `TAPMODELS_ENV_FILE` to use another file for every command in the current shell:
 
 ```bash
-export KDAN_ENV_FILE=/absolute/path/to/kdan.env
+export TAPMODELS_ENV_FILE=/absolute/path/to/tapmodels.env
 ./apple-container.sh init
 ./apple-container.sh up
 ```
@@ -100,7 +100,7 @@ export KDAN_ENV_FILE=/absolute/path/to/kdan.env
 Apple-specific image overrides are available:
 
 ```dotenv
-APPLE_CONTAINER_KDAN_IMAGE=ghcr.io/holeenlu/kdan:latest
+APPLE_CONTAINER_TAPMODELS_IMAGE=ghcr.io/holeenlu/tapmodels:latest
 APPLE_CONTAINER_POSTGRES_IMAGE=postgres:18-alpine
 APPLE_CONTAINER_REDIS_IMAGE=redis:8-alpine
 ```
@@ -115,7 +115,7 @@ APPLE_CONTAINER_NETWORK_SUBNET=
 
 Leave the setting empty to keep automatic subnet allocation. When setting it,
 choose a CIDR that does not overlap the host LAN or VPN. The script applies the
-setting only when it creates `kdan-apple`. If the existing managed network
+setting only when it creates `tapmodels-apple`. If the existing managed network
 uses a different subnet, it stops without deleting any resources. To migrate
 intentionally, run `./apple-container.sh destroy --yes` to remove the managed
 containers and network while preserving named volumes, then run
@@ -129,32 +129,32 @@ Apple-specific handling of shared settings:
 
 | Setting | Apple workflow behavior |
 |---|---|
-| Application and gateway variables | Passed to KDAN from `.env` |
+| Application and gateway variables | Passed to TapModels from `.env` |
 | `BIND_HOST`, `SERVER_PORT` | Used for the macOS published port |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | PostgreSQL first initialization only |
-| `REDIS_PASSWORD` | Applied to Redis and KDAN |
+| `REDIS_PASSWORD` | Applied to Redis and TapModels |
 | `DATABASE_PORT`, `REDIS_PORT` | Internal ports are fixed to 5432 and 6379 |
 | `POSTGRES_MAX_*`, `REDIS_MAXCLIENTS` | Not currently applied to the database/cache server |
 
 ## Managed Resources
 
-The script creates only resources carrying the `org.kdan.stack=apple-container` label:
+The script creates only resources carrying the `org.tapmodels.stack=apple-container` label:
 
 | Type | Names |
 |---|---|
-| Containers | `kdan-apple`, `kdan-apple-postgres`, `kdan-apple-redis` |
-| Network | `kdan-apple` |
-| Volumes | `kdan-apple-data`, `kdan-apple-postgres-data`, `kdan-apple-redis-data` |
+| Containers | `tapmodels-apple`, `tapmodels-apple-postgres`, `tapmodels-apple-redis` |
+| Network | `tapmodels-apple` |
+| Volumes | `tapmodels-apple-data`, `tapmodels-apple-postgres-data`, `tapmodels-apple-redis-data` |
 
-The PostgreSQL volume is mounted at `/var/lib/postgresql`, retaining PostgreSQL 18's default child data directory. KDAN data and its updatable runtime binary use separate child directories in `kdan-apple-data`; Redis also stores data below its Apple volume mount point. This is required because Apple named volumes do not have Docker's copy-up and mount-point ownership behavior.
+The PostgreSQL volume is mounted at `/var/lib/postgresql`, retaining PostgreSQL 18's default child data directory. TapModels data and its updatable runtime binary use separate child directories in `tapmodels-apple-data`; Redis also stores data below its Apple volume mount point. This is required because Apple named volumes do not have Docker's copy-up and mount-point ownership behavior.
 
 ## Networking
 
-Apple `container` 1.1 does not provide Compose-style network-scoped service aliases. After PostgreSQL and Redis start, the script reads their current private-network IPv4 addresses from `container inspect`, injects those addresses into a newly created application container, and then starts KDAN. The script does not modify `~/.config/container/config.toml` or the macOS host resolver.
+Apple `container` 1.1 does not provide Compose-style network-scoped service aliases. After PostgreSQL and Redis start, the script reads their current private-network IPv4 addresses from `container inspect`, injects those addresses into a newly created application container, and then starts TapModels. The script does not modify `~/.config/container/config.toml` or the macOS host resolver.
 
-All three services attach only to the private `kdan-apple` network. Only the application publishes a host port; database and Redis ports remain unpublished.
+All three services attach only to the private `tapmodels-apple` network. Only the application publishes a host port; database and Redis ports remain unpublished.
 
-The application container is intentionally recreated by every `up` and `restart` operation because dependency VM addresses can change after they stop. Application data remains in `kdan-apple-data`.
+The application container is intentionally recreated by every `up` and `restart` operation because dependency VM addresses can change after they stop. Application data remains in `tapmodels-apple-data`.
 
 The script checks the published `/health` endpoint from macOS before reporting success. Approve the Local Network prompt on first startup. If the internal probe succeeds but the host-port probe fails with a connection reset, enable Local Network access for `container-runtime-linux`, run `container system stop` followed by `container system start`, and then run `up` again. Runtime upgrades may prompt for permission again.
 
@@ -162,7 +162,7 @@ The script checks the published `/health` endpoint from macOS before reporting s
 
 The Web UI uses the same update flow as the Docker deployment: it downloads a release over GitHub, atomically replaces the active executable, and asks the application to restart. Docker supplies the restart policy in a Compose deployment; `apple-container.sh` supplies an equivalent process supervisor inside the Apple application container.
 
-The active executable lives in `kdan-apple-data` so a later `up`, `restart`, or `up --recreate` does not discard an update downloaded from the Web UI. The script records the configured base image ID alongside it; when `APPLE_CONTAINER_KDAN_IMAGE` resolves to a different image ID, the image's `/app/kdan` becomes the new active executable. This keeps explicit image upgrades authoritative while preserving in-place updates across routine application-container recreation.
+The active executable lives in `tapmodels-apple-data` so a later `up`, `restart`, or `up --recreate` does not discard an update downloaded from the Web UI. The script records the configured base image ID alongside it; when `APPLE_CONTAINER_TAPMODELS_IMAGE` resolves to a different image ID, the image's `/app/tapmodels` becomes the new active executable. This keeps explicit image upgrades authoritative while preserving in-place updates across routine application-container recreation.
 
 If GitHub is not reachable directly, set `UPDATE_PROXY_URL` to a proxy address reachable from the Apple container VM. A proxy listening only on the Mac's `127.0.0.1` is not reachable as `127.0.0.1` from inside the VM; use an appropriately restricted host gateway listener instead.
 
@@ -175,13 +175,13 @@ umask 077
 mkdir -p backups
 
 # Logical PostgreSQL backup.
-container exec kdan-apple sh -c \
+container exec tapmodels-apple sh -c \
   'PGPASSWORD="$DATABASE_PASSWORD" pg_dump -h "$DATABASE_HOST" -U "$DATABASE_USER" "$DATABASE_DBNAME"' \
-  > backups/kdan.sql
+  > backups/tapmodels.sql
 
 # Application configuration and local files.
-container exec kdan-apple sh -c 'tar -C "$DATA_DIR" -czf - .' \
-  > backups/kdan-data.tar.gz
+container exec tapmodels-apple sh -c 'tar -C "$DATA_DIR" -czf - .' \
+  > backups/tapmodels-data.tar.gz
 
 ./apple-container.sh pull
 ./apple-container.sh up --recreate
@@ -198,25 +198,25 @@ To restore these backups into an existing stack, first ensure the image versions
 ./apple-container.sh down
 
 # Remove only the app container so a helper can mount its named volume.
-container delete kdan-apple
-KDAN_IMAGE=ghcr.io/holeenlu/kdan:latest # Match APPLE_CONTAINER_KDAN_IMAGE in .env.
-container run --rm --name kdan-apple-data-restore \
+container delete tapmodels-apple
+TAPMODELS_IMAGE=ghcr.io/holeenlu/tapmodels:latest # Match APPLE_CONTAINER_TAPMODELS_IMAGE in .env.
+container run --rm --name tapmodels-apple-data-restore \
   --entrypoint /bin/sh \
-  --volume kdan-apple-data:/restore \
+  --volume tapmodels-apple-data:/restore \
   --volume "$PWD/backups:/backup:ro" \
-  "$KDAN_IMAGE" \
-  -c 'rm -rf /restore/data && mkdir -p /restore/data && tar -xzf /backup/kdan-data.tar.gz -C /restore/data'
+  "$TAPMODELS_IMAGE" \
+  -c 'rm -rf /restore/data && mkdir -p /restore/data && tar -xzf /backup/tapmodels-data.tar.gz -C /restore/data'
 
 # Restore the logical database while the application is absent.
-container start kdan-apple-postgres
-until container exec kdan-apple-postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'; do sleep 1; done
-container copy backups/kdan.sql kdan-apple-postgres:/tmp/kdan.sql
-container exec kdan-apple-postgres sh -c '
+container start tapmodels-apple-postgres
+until container exec tapmodels-apple-postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'; do sleep 1; done
+container copy backups/tapmodels.sql tapmodels-apple-postgres:/tmp/tapmodels.sql
+container exec tapmodels-apple-postgres sh -c '
   export PGPASSWORD="$POSTGRES_PASSWORD"
   dropdb -h 127.0.0.1 -U "$POSTGRES_USER" --if-exists --force "$POSTGRES_DB"
   createdb -h 127.0.0.1 -U "$POSTGRES_USER" "$POSTGRES_DB"
-  psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/kdan.sql
-  rm /tmp/kdan.sql
+  psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/tapmodels.sql
+  rm /tmp/tapmodels.sql
 '
 
 ./apple-container.sh up
@@ -241,5 +241,5 @@ container system start
 - Health probes run during `up`, `restart`, and `status`; Apple `container` does not continuously schedule them.
 - Docker Compose, Testcontainers, Buildx, and tools requiring `/var/run/docker.sock` cannot use this runtime directly.
 - Named volume backup and restore must be tested before using this workflow for important data.
-- The script targets native `linux/arm64` images. The normal KDAN release publishes an arm64 variant.
+- The script targets native `linux/arm64` images. The normal TapModels release publishes an arm64 variant.
 - Runtime environment values, including credentials, are retained in Apple container configuration and are visible to users who can inspect the local runtime.

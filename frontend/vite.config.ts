@@ -7,7 +7,7 @@ import { resolve } from 'path'
 // vite.config.ts, so importing src/config/brand.ts here would emit brand.js /
 // brand.d.ts into the source tree. Keep in sync with BRAND_TITLE_SUFFIX_EN in
 // src/config/brand.ts.
-const BRAND_TITLE_SUFFIX_EN = 'AI API Gateway'
+const BRAND_TITLE_SUFFIX_EN = 'Pick a model. Start building.'
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({

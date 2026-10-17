@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="KDAN Logo" width="128" />
+<img src="assets/logo.svg" alt="TapModels Logo" width="128" />
 
-# KDAN
+# TapModels
 
 [![Go](https://img.shields.io/badge/Go-1.27.0-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
@@ -10,7 +10,9 @@
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
-**AI API 网关平台 - 订阅配额分发管理**
+**选个模型，开始开发。**
+
+通过一个 API 使用不同 AI 模型。减少接入与管理的负担，把时间留给产品开发。
 
 [English](README.md) | 中文 | [日本語](README_JA.md)
 
@@ -28,7 +30,7 @@
 
 ## 项目概述
 
-KDAN 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的 API 配额。用户通过平台生成的 API Key 调用上游 AI 服务，平台负责鉴权、计费、负载均衡和请求转发。
+TapModels，让开发者通过一个 API 使用不同 AI 模型。用户使用 TapModels 签发的 API Key 调用上游 AI 服务，平台负责鉴权、计费、负载均衡和请求转发，减少接入与管理的负担，把时间留给产品开发。
 
 ## 核心功能
 
@@ -55,7 +57,7 @@ KDAN 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的 AP
 
 ## Nginx 反向代理注意事项
 
-通过 Nginx 反向代理 KDAN（或 CRS 服务）并搭配 Codex CLI 使用时，需要在 Nginx 配置的 `http` 块中添加：
+通过 Nginx 反向代理 TapModels（或 CRS 服务）并搭配 Codex CLI 使用时，需要在 Nginx 配置的 `http` 块中添加：
 
 ```nginx
 underscores_in_headers on;
@@ -106,16 +108,16 @@ fast_mode = true
 
 ```bash
 # 创建部署目录
-mkdir -p kdan-deploy && cd kdan-deploy
+mkdir -p tapmodels-deploy && cd tapmodels-deploy
 
 # 下载并运行部署准备脚本
-curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/main/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/holeenlu/sub2api/TapModels/deploy/docker-deploy.sh | bash
 
 # 启动服务
 docker compose up -d
 
 # 查看日志
-docker compose logs -f kdan
+docker compose logs -f tapmodels
 ```
 
 **脚本功能：**
@@ -131,7 +133,7 @@ docker compose logs -f kdan
 
 ```bash
 # 1. 克隆仓库
-git clone -b main https://github.com/holeenlu/sub2api.git
+git clone -b TapModels https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 
 # 2. 复制环境配置文件
@@ -191,7 +193,7 @@ docker compose up -d
 docker compose -f docker-compose.local.yml ps
 
 # 7. 查看日志
-docker compose -f docker-compose.local.yml logs -f kdan
+docker compose -f docker-compose.local.yml logs -f tapmodels
 ```
 
 #### 部署版本对比
@@ -209,7 +211,7 @@ docker compose -f docker-compose.local.yml logs -f kdan
 
 关键点：
 
-- 主进程固定探测：`/tmp/kdan-datamanagement.sock`
+- 主进程固定探测：`/tmp/tapmodels-datamanagement.sock`
 - 只有该 Socket 可连通时，数据管理功能才会开启
 - Docker 场景需将宿主机 Socket 挂载到容器同路径
 
@@ -221,7 +223,7 @@ docker compose -f docker-compose.local.yml logs -f kdan
 
 如果管理员邮箱（登录用户名）或密码是自动生成的，在日志中查找：
 ```bash
-docker compose -f docker-compose.local.yml logs kdan | grep "Generated admin"
+docker compose -f docker-compose.local.yml logs tapmodels | grep "Generated admin"
 ```
 
 #### 升级
@@ -240,14 +242,14 @@ docker compose -f docker-compose.local.yml up -d
 # 源服务器
 docker compose -f docker-compose.local.yml down
 cd ..
-tar czf kdan-complete.tar.gz kdan-deploy/
+tar czf tapmodels-complete.tar.gz tapmodels-deploy/
 
 # 传输到新服务器
-scp kdan-complete.tar.gz user@new-server:/path/
+scp tapmodels-complete.tar.gz user@new-server:/path/
 
 # 新服务器
-tar xzf kdan-complete.tar.gz
-cd kdan-deploy/
+tar xzf tapmodels-complete.tar.gz
+cd tapmodels-deploy/
 docker compose -f docker-compose.local.yml up -d
 ```
 
@@ -272,10 +274,10 @@ rm -rf data/ postgres_data/ redis_data/
 
 ### 方式二：Apple container（macOS）
 
-Apple 芯片 Mac 在 macOS 26 上可使用 Apple `container` 1.1.0 或更高版本运行完整的 KDAN、PostgreSQL 和 Redis：
+Apple 芯片 Mac 在 macOS 26 上可使用 Apple `container` 1.1.0 或更高版本运行完整的 TapModels、PostgreSQL 和 Redis：
 
 ```bash
-git clone -b main https://github.com/holeenlu/sub2api.git
+git clone -b TapModels https://github.com/holeenlu/sub2api.git
 cd sub2api/deploy
 ./apple-container.sh init
 ./apple-container.sh up
@@ -301,7 +303,7 @@ cd sub2api/deploy
 
 ```bash
 # 1. 克隆仓库
-git clone -b main https://github.com/holeenlu/sub2api.git
+git clone -b TapModels https://github.com/holeenlu/sub2api.git
 cd sub2api
 
 # 2. 安装 pnpm（如果还没有安装）
@@ -316,7 +318,7 @@ pnpm run build
 # 4. 编译后端（嵌入前端）
 cd ../backend
 VERSION="$(./scripts/resolve-version.sh)"
-go build -tags embed -ldflags="-X main.Version=${VERSION}" -o kdan ./cmd/server
+go build -tags embed -ldflags="-X main.Version=${VERSION}" -o tapmodels ./cmd/server
 
 # 5. 创建配置文件
 cp ../deploy/config.example.yaml ./config.yaml
@@ -340,7 +342,7 @@ database:
   port: 5432
   user: "postgres"
   password: "your_password"
-  dbname: "kdan"
+  dbname: "tapmodels"
 
 redis:
   host: "localhost"
@@ -368,7 +370,7 @@ default:
 - `security.response_headers.enabled` 可启用可配置响应头过滤（关闭时使用默认白名单）
 - `security.csp` 配置 Content-Security-Policy
 - `billing.circuit_breaker` 计费异常时 fail-closed
-- `security.trust_forwarded_ip_for_api_key_acl` 控制旧版原始转发头接管（为升级兼容默认开启）；关闭后严格使用 `server.trusted_proxies`，其中只应填写直接连接 KDAN 的精确代理 CIDR
+- `security.trust_forwarded_ip_for_api_key_acl` 控制旧版原始转发头接管（为升级兼容默认开启）；关闭后严格使用 `server.trusted_proxies`，其中只应填写直接连接 TapModels 的精确代理 CIDR
 - `security.forwarded_client_ip_headers` 最多配置 16 个第三方 CDN 客户端 IP 请求头；仅在旧版接管开启时按顺序优先于内置请求头解析
 - `turnstile.required` 在 release 模式强制启用 Turnstile
 
@@ -436,20 +438,20 @@ Invalid base URL: invalid url scheme: http
 
 **创建管理员的两种方式：**
 
-1. **推荐——让向导自动生成 `config.yaml`：** 跳过上面的第 5 步（不要执行 `cp`）。直接运行 `./kdan`，访问 `http://localhost:8080`，向导会引导你完成数据库、Redis 和管理员账号配置，并自动写出 `config.yaml`。
+1. **推荐——让向导自动生成 `config.yaml`：** 跳过上面的第 5 步（不要执行 `cp`）。直接运行 `./tapmodels`，访问 `http://localhost:8080`，向导会引导你完成数据库、Redis 和管理员账号配置，并自动写出 `config.yaml`。
 
 2. **如果你已经创建了 `config.yaml`：** 首次启动前先把它临时移走以触发向导，完成后再恢复：
    ```bash
    mv config.yaml config.yaml.bak
-   ./kdan        # 向导在 http://localhost:8080 启动，并生成新的 config.yaml
+   ./tapmodels        # 向导在 http://localhost:8080 启动，并生成新的 config.yaml
    # 向导完成后 Ctrl+C 停服，再恢复你的配置：
    mv config.yaml.bak config.yaml
-   ./kdan        # 重启进入正常模式，用刚创建的管理员登录
+   ./tapmodels        # 重启进入正常模式，用刚创建的管理员登录
    ```
 
 ```bash
 # 6. 运行应用
-./kdan
+./tapmodels
 ```
 
 #### HTTP/2 (h2c) 与 HTTP/1.1 回退
@@ -547,7 +549,7 @@ curl https://your-sub2api.example.com/v1/systemone \
 
 ## Antigravity 使用说明
 
-KDAN 支持 [Antigravity](https://antigravity.so/) 账户，授权后可通过专用端点访问 Claude 和 Gemini 模型。
+TapModels 支持 [Antigravity](https://antigravity.so/) 账户，授权后可通过专用端点访问 Claude 和 Gemini 模型。
 
 ### 专用端点
 
@@ -596,7 +598,7 @@ sub2api/
     ├── docker-compose.yml    # Docker Compose 配置
     ├── .env.example          # Docker Compose 环境变量
     ├── config.example.yaml   # 二进制部署完整配置文件
-    └── install.sh            # 旧版二进制安装脚本（已停用：KDAN 未发布安装包）
+    └── install.sh            # 旧版二进制安装脚本（已停用：TapModels 未发布安装包）
 ```
 
 ## 许可证
@@ -607,7 +609,7 @@ Copyright (c) 2026 Wesley Liddick
 
 ## 致谢
 
-KDAN 基于开源项目 Sub2API 构建，该项目以 LGPL-3.0 协议开源。
+TapModels 基于开源项目 Sub2API 构建，该项目以 LGPL-3.0 协议开源。
 
 ---
 

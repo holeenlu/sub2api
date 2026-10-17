@@ -33,9 +33,9 @@ Creation usually needs a model and prompt, with optional `resolution`, `duration
 ## Standalone search
 
 ```bash
-curl "$KDAN_BASE_URL/v1/web_search" \
-  -H "Authorization: Bearer $KDAN_API_KEY" -H "Content-Type: application/json" \
-  -d '{"query":"KDAN API updates","max_results":5}'
+curl "$TAPMODELS_BASE_URL/v1/web_search" \
+  -H "Authorization: Bearer $TAPMODELS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"query":"TapModels API updates","max_results":5}'
 ```
 
 `query` is required and `input` is accepted as an alias. `max_results` defaults to 5 and is capped at 20. `/v1/x_search` also accepts `allowed_x_handles`, `excluded_x_handles`, `from_date`, `to_date`, `enable_image_understanding`, and `enable_video_understanding`. The response is a gateway aggregate (`query/results/provider/max_results`), not raw Responses tool events; validate and deduplicate URLs.

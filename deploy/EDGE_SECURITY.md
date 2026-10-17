@@ -1,6 +1,6 @@
 # Edge and HTTP Ingress Security
 
-KDAN supports long-lived SSE and WebSocket requests. Protect the request
+TapModels supports long-lived SSE and WebSocket requests. Protect the request
 ingress without imposing a response `WriteTimeout`: a write deadline would
 terminate healthy long generations and streams.
 
@@ -90,9 +90,9 @@ traffic; the values below are conservative starting points, not universal
 capacity targets.
 
 ```nginx
-limit_conn_zone $binary_remote_addr zone=kdan_conn:20m;
-limit_req_zone  $binary_remote_addr zone=kdan_auth:20m rate=5r/s;
-limit_req_zone  $binary_remote_addr zone=kdan_api:40m rate=30r/s;
+limit_conn_zone $binary_remote_addr zone=tapmodels_conn:20m;
+limit_req_zone  $binary_remote_addr zone=tapmodels_auth:20m rate=5r/s;
+limit_req_zone  $binary_remote_addr zone=tapmodels_api:40m rate=30r/s;
 map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      close;
@@ -105,21 +105,21 @@ server {
     client_header_timeout 10s;
     client_max_body_size 256m;
     large_client_header_buffers 4 16k;
-    limit_conn kdan_conn 40;
+    limit_conn tapmodels_conn 40;
 
     location ~ ^/(auth|api/auth)/ {
-        limit_req zone=kdan_auth burst=10 nodelay;
+        limit_req zone=tapmodels_auth burst=10 nodelay;
         proxy_pass http://127.0.0.1:8080;
     }
 
     location ~ ^/(v1/)?(embeddings|alpha/search)$ {
         client_max_body_size 32m;
-        limit_req zone=kdan_api burst=60 nodelay;
+        limit_req zone=tapmodels_api burst=60 nodelay;
         proxy_pass http://127.0.0.1:8080;
     }
 
     location / {
-        limit_req zone=kdan_api burst=60 nodelay;
+        limit_req zone=tapmodels_api burst=60 nodelay;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -137,7 +137,7 @@ server {
 ```
 
 If Nginx gzip is enabled in the `http` block, keep `text/event-stream` out of
-`gzip_types` and do not use `gzip_types *` for KDAN. The
+`gzip_types` and do not use `gzip_types *` for TapModels. The
 `proxy_buffering off` setting above prevents proxy buffering, but it does not
 disable the gzip response filter. Use an explicit list for ordinary responses:
 
@@ -197,7 +197,7 @@ api.example.com {
 Replace the documentation ranges with the CDN's published, automatically
 maintained egress ranges. `CF-Connecting-IP` is safe here only because direct
 origin access is blocked and Caddy trusts only those TCP peers. Configure
-KDAN `server.trusted_proxies` with the Caddy address/private subnet so the
+TapModels `server.trusted_proxies` with the Caddy address/private subnet so the
 application accepts only Caddy's rewritten headers.
 
 Caddy core does not provide a general request-rate limiter; use a trusted

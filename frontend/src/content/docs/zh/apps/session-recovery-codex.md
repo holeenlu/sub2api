@@ -4,7 +4,7 @@
 
 先在 [API 密钥](/keys) 复制当前分组的有效配置，确认新会话能使用。401、503、余额不足和上游错误需要排查配置或服务端，历史工具不能解决。请保留原始会话目录。
 
-需要 Python 3.11+ 和已安装的 Codex CLI。[下载恢复工具](/downloads/kdan-codex-session-repair.zip)，解压后进入 kdan-codex-session-repair 目录。工具支持 macOS、Linux 和 Windows。
+需要 Python 3.11+ 和已安装的 Codex CLI。[下载恢复工具](/downloads/tapmodels-codex-session-repair.zip)，解压后进入 tapmodels-codex-session-repair 目录。工具支持 macOS、Linux 和 Windows。
 
 ## 找回会话并生成恢复命令
 
@@ -16,7 +16,7 @@ bash repair-sessions.sh --list
 
 
 ```powershell
-.\RepairSessions.ps1 -List
+.\Repair-TapModelsSessions.ps1 -List
 ```
 
 
@@ -28,7 +28,7 @@ bash repair-sessions.sh --resume "SESSION_ID" --project-dir "/path/to/project"
 
 
 ```powershell
-.\RepairSessions.ps1 -Resume "SESSION_ID" -ProjectDir "C:\path\to\project"
+.\Repair-TapModelsSessions.ps1 -Resume "SESSION_ID" -ProjectDir "C:\path\to\project"
 ```
 
 
@@ -53,7 +53,7 @@ bash repair-sessions.sh --apply --client-closed
 
 
 ```powershell
-.\RepairSessions.ps1 -Apply -ClientClosed
+.\Repair-TapModelsSessions.ps1 -Apply -ClientClosed
 ```
 
 
