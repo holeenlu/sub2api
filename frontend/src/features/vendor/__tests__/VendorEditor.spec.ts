@@ -1,0 +1,207 @@
+import { createI18n } from 'vue-i18n'
+import { flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import nativeEn from '@/i18n/locales/en'
+import VendorEditor from '../components/VendorEditor.vue'
+import type { Vendor } from '../types'
+
+const apiClient = vi.hoisted(() => ({ get: vi.fn() }))
+const vendorAPI = vi.hoisted(() => ({ create: vi.fn(), update: vi.fn(), list: vi.fn(), detail: vi.fn() }))
+const childAPI = vi.hoisted(() => ({ create: vi.fn(), update: vi.fn() }))
+vi.mock('@/api/client', () => ({ apiClient }))
+vi.mock('../api', () => ({ vendorAPI, vendorManagementAPI: (parent?: unknown) => parent ? childAPI : vendorAPI }))
+const global = {
+  plugins: [createI18n({ legacy: false, locale: 'en', messages: { en: nativeEn } })],
+  stubs: {
+    BaseDialog: { template: '<div><slot /></div>' },
+    Select: { name: 'Select', props: ['modelValue', 'options', 'disabled'], template: '<div data-testid="select-stub" />' },
+  },
+}
+const parent = { id: 1, user_id: 10, tier: 1, name: 'Parent', status: 'active', policy_version: 2, platforms: ['openai'], group_ids: [1], groups: [{ id: 1, name: 'OpenAI', platform: 'openai' }], account_limit: 1000, proxy_limit: 1000, default_concurrency: 15, default_priority: 1, default_rate_multiplier: 1, allow_direct: false, default_coefficient: '1.8', group_coefficients: {}, contract_version: 4 } as Vendor
+beforeEach(() => {
+  vi.clearAllMocks()
+  apiClient.get.mockResolvedValue({ data: parent.groups })
+  vendorAPI.create.mockResolvedValue(parent)
+  vendorAPI.update.mockResolvedValue(parent)
+  vendorAPI.list.mockResolvedValue({ items: [parent] })
+  vendorAPI.detail.mockResolvedValue(parent)
+  childAPI.create.mockResolvedValue({ ...parent, id: 2, tier: 2, parent_vendor_id: 1 })
+})
+async function fill(wrapper: ReturnType<typeof mount>) {
+  await flushPromises()
+  await wrapper.get('[data-testid="vendor-new-email"]').setValue('new@example.invalid')
+  await wrapper.get('[data-testid="vendor-new-password"]').setValue('valid-password')
+  await wrapper.get('[data-testid="vendor-name"]').setValue('Supply organization')
+  await wrapper.get('input[type="checkbox"][value="1"]').setValue(true)
+}
+describe('supplier provisioning', () => {
+  it('requires explicit credentials and uses an atomic supplier request with the requested defaults', async () => {
+    const wrapper = mount(VendorEditor, { global })
+    await fill(wrapper)
+    expect(wrapper.get('[data-testid="vendor-new-password"]').attributes('type')).toBe('text')
+    expect(wrapper.find('[data-testid="vendor-new-username"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Login account source')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(vendorAPI.create).toHaveBeenCalledWith(expect.objectContaining({ email: 'new@example.invalid', password: 'valid-password', name: 'Supply organization', tier: 1, parent_vendor_id: null, account_limit: 0, proxy_limit: 0, default_concurrency: 15, default_priority: 1 }))
+    expect(vendorAPI.create.mock.calls[0][0]).not.toHaveProperty('username')
+    expect(vendorAPI.create.mock.calls[0][0]).not.toHaveProperty('contract_version')
+    expect((wrapper.get('[data-testid="vendor-new-password"]').element as HTMLInputElement).value).toBe('')
+  })
+  it('prevents duplicate submissions while provisioning is pending', async () => {
+    vendorAPI.create.mockImplementation(() => new Promise(() => {}))
+    const wrapper = mount(VendorEditor, { global })
+    await fill(wrapper)
+    await wrapper.get('form').trigger('submit')
+    await wrapper.get('form').trigger('submit')
+    expect(vendorAPI.create).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+  it('generates a visible password and submits exactly that value for a new supplier', async () => {
+    const wrapper = mount(VendorEditor, { global })
+    await fill(wrapper)
+    await wrapper.get('button[aria-label="Generate random password"]').trigger('click')
+    const password = (wrapper.get('[data-testid="vendor-new-password"]').element as HTMLInputElement).value
+    expect(password).toMatch(/^[A-Za-z2-9!@#$%^&*]{16}$/)
+    expect(password).not.toBe('valid-password')
+    expect((wrapper.get('form').element as HTMLFormElement).checkValidity()).toBe(true)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(vendorAPI.create).toHaveBeenCalledWith(expect.objectContaining({ password }))
+    wrapper.unmount()
+  })
+  it('creates only a direct child in the parent workspace and never requests admin groups', async () => {
+    const wrapper = mount(VendorEditor, { props: { parent }, global })
+    await fill(wrapper)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(childAPI.create).toHaveBeenCalledWith(expect.objectContaining({ tier: 2, parent_vendor_id: parent.id, platforms: ['openai'] }))
+    expect(childAPI.create.mock.calls[0][0]).toMatchObject({ account_limit: 0, proxy_limit: 0 })
+    expect(childAPI.create.mock.calls[0][0]).not.toHaveProperty('username')
+    expect(vendorAPI.create).not.toHaveBeenCalled()
+    expect(apiClient.get).not.toHaveBeenCalled()
+  })
+  it('accepts zero resource caps and rejects negative caps through native form validation', async () => {
+    const wrapper = mount(VendorEditor, { global })
+    await fill(wrapper)
+    const form = wrapper.get('form').element as HTMLFormElement
+    expect(form.checkValidity()).toBe(true)
+    for (const field of ['account_limit', 'proxy_limit']) {
+      await wrapper.get(`[data-testid="${field}"]`).setValue('-1')
+      expect(form.checkValidity()).toBe(false)
+      await wrapper.get(`[data-testid="${field}"]`).setValue('0')
+      expect(form.checkValidity()).toBe(true)
+    }
+    expect(wrapper.text()).toContain('0 = unlimited')
+    wrapper.unmount()
+  })
+  it('preserves existing policy values and renders contract versions read-only', async () => {
+    const wrapper = mount(VendorEditor, { props: { vendor: { ...parent, account_limit: 95, default_concurrency: 3, default_priority: 50 } }, global })
+    await flushPromises()
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+    expect((wrapper.get('[data-testid="account_limit"]').element as HTMLInputElement).value).toBe('95')
+    expect((wrapper.get('[data-testid="default_concurrency"]').element as HTMLInputElement).value).toBe('3')
+    expect(wrapper.get('output').text()).toBe('4')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(vendorAPI.update).toHaveBeenCalledWith(1, expect.objectContaining({ account_limit: 95, default_concurrency: 3, default_priority: 50 }))
+    expect(vendorAPI.update.mock.calls[0][1]).not.toHaveProperty('password')
+    expect(vendorAPI.update.mock.calls[0][1]).not.toHaveProperty('contract_version')
+  })
+  it('requires an explicit parent for a tier-2 supplier created by the administrator', async () => {
+    const wrapper = mount(VendorEditor, { global })
+    await fill(wrapper)
+    const selects = wrapper.findAllComponents({ name: 'Select' })
+    const tier = selects.find(item => item.props('modelValue') === 1)
+    if (!tier) throw new Error('Tier selector missing')
+    tier.vm.$emit('update:modelValue', 2)
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    expect(vendorAPI.create).not.toHaveBeenCalled()
+  })
+  it('saves database-scaled prices without failing native form validation or losing precision', async () => {
+    const wrapper = mount(VendorEditor, { props: { vendor: { ...parent, default_coefficient: '1.00000000', group_coefficients: { '1': '1.23456789' } } }, global })
+    await flushPromises()
+    expect((wrapper.get('form').element as HTMLFormElement).checkValidity()).toBe(true)
+    expect(wrapper.text()).toContain('OpenAI · Group settlement price')
+    expect(wrapper.text()).toContain('Applies only to the “OpenAI” group')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(vendorAPI.update).toHaveBeenCalledWith(1, expect.objectContaining({ default_coefficient: '1.00000000', group_coefficients: { '1': '1.23456789' } }))
+    await wrapper.get('[data-testid=vendor-group-price-1]').setValue('')
+    expect((wrapper.get('form').element as HTMLFormElement).checkValidity()).toBe(true)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(vendorAPI.update).toHaveBeenLastCalledWith(1, expect.objectContaining({ group_coefficients: {} }))
+    for (const field of ['vendor-default-price', 'vendor-group-price-1']) {
+      const input = wrapper.get(`[data-testid=${field}]`)
+      await input.setValue('1.123456789')
+      expect((input.element as HTMLInputElement).checkValidity()).toBe(false)
+      await input.setValue('1.00000000')
+    }
+    wrapper.unmount()
+  })
+  it('grants native and BPS independently and prevents an empty OpenAI mode selection', async () => {
+    const wrapper = mount(VendorEditor, { global })
+    await fill(wrapper)
+    const native = wrapper.get('[data-testid=vendor-mode-native]')
+    expect((native.element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-testid=vendor-mode-bps]').element as HTMLInputElement).checked).toBe(false)
+    await native.setValue(false)
+    await wrapper.get('form').trigger('submit')
+    expect(vendorAPI.create).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid=vendor-mode-bps]').setValue(true)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(vendorAPI.create).toHaveBeenCalledWith(expect.objectContaining({ openai_authorization_modes: ['bps'] }))
+    wrapper.unmount()
+  })
+  it('limits child modes to its parent', async () => {
+    const parentBPS = { ...parent, openai_authorization_modes: ['bps'] as const }
+    const wrapper = mount(VendorEditor, { props: { parent: { ...parentBPS, openai_authorization_modes: [...parentBPS.openai_authorization_modes] } }, global })
+    await fill(wrapper)
+    expect(wrapper.get('[data-testid=vendor-mode-native]').attributes('disabled')).toBeDefined()
+    expect((wrapper.get('[data-testid=vendor-mode-bps]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(childAPI.create).toHaveBeenCalledWith(expect.objectContaining({ openai_authorization_modes: ['bps'], parent_vendor_id: 1 }))
+    wrapper.unmount()
+  })
+  it('removes a child mode revoked by its parent before editing the policy', async () => {
+    const wrapper = mount(VendorEditor, { props: { parent, vendor: { ...parent, id: 2, tier: 2, parent_vendor_id: 1, openai_authorization_modes: ['native', 'bps'] } }, global })
+    await flushPromises()
+    expect((wrapper.get('[data-testid=vendor-mode-bps]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.get('[data-testid=vendor-mode-bps]').attributes('disabled')).toBeDefined()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(childAPI.update).toHaveBeenCalledWith(2, expect.objectContaining({ openai_authorization_modes: ['native'] }))
+    wrapper.unmount()
+  })
+  it('uses the selected parent effective modes when an administrator creates a child', async () => {
+    vendorAPI.detail.mockResolvedValueOnce({ ...parent, openai_authorization_modes: ['bps'] })
+    const wrapper = mount(VendorEditor, { global })
+    await fill(wrapper)
+    wrapper.findAllComponents({ name: 'Select' }).find(item => item.props('modelValue') === 1)!.vm.$emit('update:modelValue', 2)
+    await flushPromises()
+    wrapper.findAllComponents({ name: 'Select' }).find(item => item.props('modelValue') === null)!.vm.$emit('update:modelValue', 1)
+    await flushPromises()
+    expect(wrapper.get('[data-testid=vendor-mode-native]').attributes('disabled')).toBeDefined()
+    expect((wrapper.get('[data-testid=vendor-mode-bps]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('input[type=checkbox][value="1"]').setValue(true)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(vendorAPI.create).toHaveBeenCalledWith(expect.objectContaining({ tier: 2, parent_vendor_id: 1, openai_authorization_modes: ['bps'] }))
+    wrapper.unmount()
+  })
+  it('keeps Claude-only provisioning free of OpenAI mode grants', async () => {
+    const claudeParent = { ...parent, platforms: ['anthropic'] as const, groups: [{ id: 1, name: 'Claude', platform: 'anthropic' as const }] }
+    const wrapper = mount(VendorEditor, { props: { parent: { ...claudeParent, platforms: [...claudeParent.platforms] } }, global })
+    await fill(wrapper)
+    expect(wrapper.find('[data-testid=vendor-mode-native]').exists()).toBe(false)
+    expect(wrapper.find('input[value=openai]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(childAPI.create).toHaveBeenCalledWith(expect.objectContaining({ platforms: ['anthropic'], openai_authorization_modes: [] }))
+    wrapper.unmount()
+  })
+})

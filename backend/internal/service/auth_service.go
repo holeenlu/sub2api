@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"net/mail"
 	"strconv"
 	"strings"
@@ -1418,6 +1419,9 @@ func (s *AuthService) GenerateToken(ctx context.Context, user *User) (string, er
 
 // generateAccessToken 生成带会话 ID 与绑定指纹的 access token。
 func (s *AuthService) generateAccessToken(ctx context.Context, user *User, sessionID, bindingHash string) (string, error) {
+	if err := s.ValidateLoginIdentity(ctx, user); err != nil {
+		return "", err
+	}
 	now := time.Now()
 	var expiresAt time.Time
 	if s.cfg.JWT.AccessTokenExpireMinutes > 0 {
@@ -1984,6 +1988,9 @@ func (s *AuthService) ValidateAccessSession(ctx context.Context, claims *JWTClai
 	if claims == nil || user == nil || !user.IsActive() {
 		return ErrInvalidToken
 	}
+	if err := s.ValidateLoginIdentity(ctx, user); err != nil {
+		return err
+	}
 	if claims.TokenVersion != resolvedTokenVersion(user) {
 		return ErrTokenRevoked
 	}
@@ -2005,3 +2012,28 @@ func (s *AuthService) ValidateAccessSession(ctx context.Context, claims *JWTClai
 
 // CredentialVersion preserves the original email/password fingerprint at generation zero.
 func CredentialVersion(user *User) int64 { return resolvedTokenVersion(user) }
+
+// ValidateLoginIdentity also covers MFA, passkey and refresh token issuance.
+func (s *AuthService) ValidateLoginIdentity(ctx context.Context, user *User) error {
+	if user == nil {
+		return ErrInvalidCredentials
+	}
+	if supplier, marked := authz.SupplierOrigin(ctx); marked {
+		if supplier && user.Role != RoleSuperAdmin && !user.IsVendor() {
+			return ErrVendorDenied
+		}
+		if !supplier && user.IsVendor() {
+			return ErrVendorDenied
+		}
+	}
+	if !user.IsVendor() {
+		return nil
+	}
+	checker, ok := s.userRepo.(interface {
+		ValidateVendorIdentity(context.Context, int64, string) error
+	})
+	if !ok {
+		return ErrServiceUnavailable
+	}
+	return checker.ValidateVendorIdentity(ctx, user.ID, user.Role)
+}

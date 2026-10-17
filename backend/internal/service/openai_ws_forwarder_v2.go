@@ -38,7 +38,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
-	if err := validateVendorDispatch(ctx, s.accountRepo, account, vendorDispatchGroup(c)); err != nil {
+	if err := validateVendorNativeDispatch(ctx, s.accountRepo, account, vendorDispatchGroup(c)); err != nil {
 		return nil, err
 	}
 	responseModelObserver := &upstreamResponseModelObserver{}
@@ -358,10 +358,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 
-	if err := TakeOpenAITurnAttempt(ctx); err != nil {
+	if err := TakeOpenAITurnAttempt(withTurnRecoveryTarget(ctx, account, "websocket", "/v1/responses", resolveAccountProxyURL(account), token, payload)); err != nil {
 		return nil, err
 	}
-	if err := validateVendorDispatch(ctx, s.accountRepo, account, vendorDispatchGroup(c)); err != nil {
+	if err := validateVendorNativeDispatch(ctx, s.accountRepo, account, vendorDispatchGroup(c)); err != nil {
 		return nil, err
 	}
 	logGatewayCacheWSPayload(ctx, account, payload)
@@ -445,6 +445,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 	resultWithUsage := func() *OpenAIForwardResult {
 		return &OpenAIForwardResult{
+			AuthorizationMode:             nativeOpenAIUsageAuthorizationMode(account),
 			RequestID:                     responseID,
 			ResponseID:                    responseID,
 			Usage:                         *usage,

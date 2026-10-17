@@ -15,6 +15,9 @@ type Account func(*sql.Selector)
 // AccountGroup is the predicate function for accountgroup builders.
 type AccountGroup func(*sql.Selector)
 
+// AccountSupplyIdentityClaim is the predicate function for accountsupplyidentityclaim builders.
+type AccountSupplyIdentityClaim func(*sql.Selector)
+
 // Announcement is the predicate function for announcement builders.
 type Announcement func(*sql.Selector)
 
@@ -122,3 +125,21 @@ type UserPlatformQuota func(*sql.Selector)
 
 // UserSubscription is the predicate function for usersubscription builders.
 type UserSubscription func(*sql.Selector)
+
+// Vendor is the predicate function for vendor builders.
+type Vendor func(*sql.Selector)
+
+// VendorGroup is the predicate function for vendorgroup builders.
+type VendorGroup func(*sql.Selector)
+
+// VendorSettlement is the predicate function for vendorsettlement builders.
+type VendorSettlement func(*sql.Selector)
+
+// VendorSettlementAllocation is the predicate function for vendorsettlementallocation builders.
+type VendorSettlementAllocation func(*sql.Selector)
+
+// VendorSettlementLine is the predicate function for vendorsettlementline builders.
+type VendorSettlementLine func(*sql.Selector)
+
+// VendorSettlementPayment is the predicate function for vendorsettlementpayment builders.
+type VendorSettlementPayment func(*sql.Selector)
