@@ -82,10 +82,11 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 	responsesReq.Model = mappedModel
 	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(&responsesReq)
+	if anthropicReq != nil {
+		recordConversionDiagnostics(c, "openai", "anthropic", anthropicReq.Model, anthropicReq.Diagnostics)
+	}
 	if err != nil {
-		if isClaude55SignedThinkingModel(mappedModel) {
-			writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-		}
+		writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
 	}
 
@@ -104,6 +105,11 @@ func (s *GatewayService) ForwardAsResponses(
 	anthropicBody, err := json.Marshal(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
+	}
+	anthropicBody, err = normalizeClaudeThinkingForUpstream(ctx, anthropicBody, mappedModel)
+	if err != nil {
+		writeClaudeThinkingError(c, err, writeResponsesError)
+		return nil, err
 	}
 
 	// 6. Apply Claude Code mimicry for OAuth accounts (non-Claude-Code endpoints).
@@ -141,12 +147,12 @@ func (s *GatewayService) ForwardAsResponses(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 	// Bill the final Anthropic effort after conversion and account normalization.
-	// For example, OpenAI xhigh is forwarded as output_config.effort=max.
+	// The mapped Claude model determines whether xhigh stays xhigh or becomes max/high.
 	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, mappedModel)
 
 	// 11. Send request
-	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
@@ -468,7 +474,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	}
 
 	// Update usage from accumulated delta
-	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
+	if usage.hasObservedTokens() {
 		finalResp.Usage = apicompat.AnthropicUsage{
 			InputTokens:              usage.InputTokens,
 			OutputTokens:             usage.OutputTokens,

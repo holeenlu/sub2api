@@ -975,6 +975,14 @@ func TestGatewayService_AnthropicOAuthRealClaudeCodeHaiku_PreservesClientHeaders
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	c.Request.Header.Set("User-Agent", "claude-cli/"+claude.CLICurrentVersion+" (external, cli)")
 	c.Request.Header.Set("X-Stainless-Package-Version", "real-client-package")
+	clientHints := map[string]string{
+		"x-claude-code-prompt-id":     "685622eb-8280-4c19-9a09-b447739f2d58",
+		"x-claude-code-request-class": "main",
+		"x-claude-code-agent-type":    "general-purpose",
+	}
+	for key, value := range clientHints {
+		c.Request.Header.Set(key, value)
+	}
 	clientBeta := strings.Join([]string{
 		claude.BetaClaudeCode,
 		claude.BetaOAuth,
@@ -1007,6 +1015,9 @@ func TestGatewayService_AnthropicOAuthRealClaudeCodeHaiku_PreservesClientHeaders
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, c.Request.Header.Get("User-Agent"), getHeaderRaw(upstream.lastReq.Header, "User-Agent"))
 	require.Equal(t, "real-client-package", getHeaderRaw(upstream.lastReq.Header, "X-Stainless-Package-Version"))
+	for key, value := range clientHints {
+		require.Equal(t, value, getHeaderRaw(upstream.lastReq.Header, key))
+	}
 	require.Equal(t, clientBeta, getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"), "真实 CC 不应被强制写入 mimic request id")
 	require.Equal(t, gjson.GetBytes(body, "system").Raw, gjson.GetBytes(upstream.lastBody, "system").Raw)
@@ -1772,7 +1783,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_Non2xxRecordsOllamaActivity(t
 
 func TestOpus55RejectsUnsupportedParametersBeforeMimicry(t *testing.T) {
 	for _, typ := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
-		for _, field := range []string{`"thinking":{"type":"disabled"}`, `"thinking":{"type":"enabled","budget_tokens":1024}`, `"tool_choice":{"type":"any"}`, `"tool_choice":{"type":"tool","name":"lookup"}`} {
+		for _, field := range []string{`"thinking":{"type":"disabled"}`, `"tool_choice":{"type":"any"}`, `"tool_choice":{"type":"tool","name":"lookup"}`} {
 			for _, count := range []bool{false, true} {
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
@@ -1815,8 +1826,6 @@ func TestOpus55ThinkingDefaultPreservesSignedHistory(t *testing.T) {
 
 func TestSonnet55RejectsUnsupportedParametersBeforeMimicry(t *testing.T) {
 	fields := []string{
-		`"thinking":{"type":"disabled"}`,
-		`"thinking":{"type":"enabled","budget_tokens":1024}`,
 		`"thinking":{"type":"between_tools"},"output_config":{"effort":"xhigh"}`,
 		`"thinking":{"type":"between_tools","display":"summarized"}`,
 		`"tool_choice":{"type":"any"}`,

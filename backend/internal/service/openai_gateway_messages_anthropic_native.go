@@ -61,16 +61,6 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 		body = normalized
 	}
 
-	// 记录客户端请求的推理强度：优先 Claude 协议的 output_config.effort；
-	// 缺失且 thinking 已启用时，按国产 passback-required 模型兜底为 high
-	// （对齐 Anthropic 网关 gateway_handler 的记录语义，避免该路径长期落 NULL）。
-	requestedReasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(body, "output_config.effort").String())
-	reasoningEffort := ApplyThinkingEnabledFallback(
-		requestedReasoningEffort,
-		body,
-		billingModel,
-	)
-
 	// 与 Anthropic 平台 passthrough 相同的 pre-filter：剥离空文本块与上游
 	// 无法接受的 web-search 历史块（GLM/Kimi/DeepSeek 对 server_tool_use 400）。
 	body = StripEmptyTextBlocks(body)
@@ -94,13 +84,17 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 	}
 
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, clientStream)
-	upstreamReq, _, err := s.buildNativeAnthropicUpstreamRequest(upstreamCtx, c, account, body, apiKey, targetURL)
+	upstreamReq, forwardedBody, err := s.buildNativeAnthropicUpstreamRequest(upstreamCtx, c, account, body, apiKey, targetURL)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	// Pricing follows final wire controls; preserve the existing passback-model
+	// fallback only when the upstream did not receive an explicit effort.
+	reasoningEffort := ApplyThinkingEnabledFallback(NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String()), forwardedBody, upstreamModel)
+
+	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account, vendorDispatchGroup(c))
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
@@ -161,12 +155,19 @@ func (s *OpenAIGatewayService) buildNativeAnthropicUpstreamRequest(
 	targetURL string,
 	sessionBodies ...[]byte,
 ) (*http.Request, []byte, error) {
+	normalized, thinkingErr := normalizeClaudeThinkingForUpstream(ctx, body, gjson.GetBytes(body, "model").String())
+	if thinkingErr != nil {
+		writeClaudeThinkingError(c, thinkingErr, writeAnthropicError)
+		return nil, nil, thinkingErr
+	}
+	body = normalized
+
 	// 能力维度 body sanitize：与 Anthropic 平台 passthrough 相同，按 beta
 	// header 决定是否保留 body 中的 beta 能力字段，避免客户端"body 带字段但
 	// header 忘带 token"的 bug 让第三方上游 400。
 	clientBeta := ""
 	if c != nil && c.Request != nil {
-		clientBeta = getHeaderRaw(c.Request.Header, "anthropic-beta")
+		clientBeta = getRequestTokenListHeader(c.Request, "anthropic-beta")
 	}
 	if beta, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
 		clientBeta = beta

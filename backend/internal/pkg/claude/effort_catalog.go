@@ -11,35 +11,58 @@ var (
 	effortLowMediumHighXHighMax = []string{"low", "medium", "high", "xhigh", "max"}
 )
 
-var effortFamilies = []struct {
-	family string
-	levels []string
-}{
-	{family: "claude-mythos-preview", levels: effortLowMediumHighMax},
-	{family: "claude-mythos-5", levels: effortLowMediumHighXHighMax},
-	{family: "claude-fable-5", levels: effortLowMediumHighXHighMax},
-	{family: "claude-sonnet-4-6", levels: effortLowMediumHighMax},
-	{family: "claude-sonnet-5-5", levels: effortLowMediumHighXHighMax},
-	{family: "claude-sonnet-5", levels: effortLowMediumHighXHighMax},
-	{family: "claude-opus-4-8", levels: effortLowMediumHighXHighMax},
-	{family: "claude-opus-4-7", levels: effortLowMediumHighXHighMax},
-	{family: "claude-opus-4-6", levels: effortLowMediumHighMax},
-	{family: "claude-opus-4-5", levels: effortLowMediumHigh},
-	{family: "claude-opus-5-5", levels: effortLowMediumHighXHighMax},
-	{family: "claude-opus-5", levels: effortLowMediumHighXHighMax},
-	{family: "claude-haiku-5-5", levels: effortLowMediumHighXHighMax},
+// ThinkingCapabilities describes known Messages API models only. The separate
+// lookup boolean distinguishes an unknown model from a model without effort.
+// Keep model facts here so discovery and outbound adaptation cannot diverge.
+type ThinkingCapabilities struct {
+	EffortLevels    []string
+	Adaptive        bool
+	Manual          bool
+	Disable         bool
+	BetweenTools    bool
+	DisableHighOnly bool
+	// DisableFixedEffort forbids historical effort changes independently of
+	// the request-level ceiling (Haiku 5.5, whose default effort is medium).
+	DisableFixedEffort bool
+	DefaultThinking    bool
+}
+
+var thinkingFamilies = map[string]ThinkingCapabilities{
+	"claude-mythos-preview": {EffortLevels: effortLowMediumHighMax, Adaptive: true, Manual: true, DefaultThinking: true},
+	"claude-mythos-5":       {EffortLevels: effortLowMediumHighXHighMax, Adaptive: true, DefaultThinking: true},
+	"claude-mythos-5-1":     {EffortLevels: effortLowMediumHighXHighMax, Adaptive: true, DefaultThinking: true},
+	"claude-fable-5":        {EffortLevels: effortLowMediumHighXHighMax, Adaptive: true, DefaultThinking: true},
+	"claude-fable-5-1":      {EffortLevels: effortLowMediumHighXHighMax, Adaptive: true, DefaultThinking: true},
+	"claude-sonnet-4-6":     {EffortLevels: effortLowMediumHighMax, Adaptive: true, Manual: true, Disable: true},
+	"claude-sonnet-5-5":     {EffortLevels: effortLowMediumHighXHighMax, Adaptive: true, BetweenTools: true, DefaultThinking: true},
+	"claude-sonnet-5":       {EffortLevels: effortLowMediumHighXHighMax, Adaptive: true, Disable: true, DefaultThinking: true},
+	"claude-opus-4-8":       {EffortLevels: effortLowMediumHighXHighMax, Adaptive: true, Disable: true},
+	"claude-opus-4-7":       {EffortLevels: effortLowMediumHighXHighMax, Adaptive: true, Disable: true},
+	"claude-opus-4-6":       {EffortLevels: effortLowMediumHighMax, Adaptive: true, Manual: true, Disable: true},
+	"claude-opus-4-5":       {EffortLevels: effortLowMediumHigh, Manual: true, Disable: true},
+	"claude-opus-5-5":       {EffortLevels: effortLowMediumHighXHighMax, Adaptive: true, DefaultThinking: true},
+	"claude-opus-5":         {EffortLevels: effortLowMediumHighXHighMax, Adaptive: true, Disable: true, DisableHighOnly: true, DefaultThinking: true},
+	"claude-haiku-4-5":      {Manual: true, Disable: true},
+	"claude-haiku-5-5":      {EffortLevels: effortLowMediumHighXHighMax, Adaptive: true, Disable: true, DisableHighOnly: true, DisableFixedEffort: true, DefaultThinking: true},
+	"claude-sonnet-4-5":     {Manual: true, Disable: true},
+	"claude-opus-4-1":       {Manual: true, Disable: true},
+	"claude-opus-4":         {Manual: true, Disable: true},
+	"claude-sonnet-4":       {Manual: true, Disable: true},
+}
+
+// ThinkingCapabilitiesForModel never infers the capabilities of future minor
+// versions or arbitrary suffixes. Provider prefixes and dated IDs are aliases.
+func ThinkingCapabilitiesForModel(model string) (ThinkingCapabilities, bool) {
+	capabilities, known := thinkingFamilies[normalizeEffortModelID(model)]
+	capabilities.EffortLevels = append([]string(nil), capabilities.EffortLevels...)
+	return capabilities, known
 }
 
 // EffortLevelsForModel returns the output_config.effort values accepted by a
 // Claude model, ordered from the lightest to the deepest reasoning level.
 func EffortLevelsForModel(model string) []string {
-	id := normalizeEffortModelID(model)
-	for _, entry := range effortFamilies {
-		if id == entry.family || strings.HasPrefix(id, entry.family+"-") {
-			return append([]string(nil), entry.levels...)
-		}
-	}
-	return nil
+	capabilities, _ := ThinkingCapabilitiesForModel(model)
+	return capabilities.EffortLevels
 }
 
 // IsOpus55 identifies the fixed Opus 5.5 ID after provider/local suffix normalization.
@@ -67,18 +90,17 @@ func normalizeEffortModelID(model string) string {
 		id = strings.TrimPrefix(id, prefix)
 	}
 	id = strings.TrimPrefix(id, "anthropic.")
+	// Bedrock version qualifiers and Vertex date qualifiers are not model
+	// families. Strip them before matching exact, known model IDs.
+	if version := strings.IndexByte(id, ':'); version >= 0 {
+		id = id[:version]
+	}
+	id = strings.ReplaceAll(id, "@", "-")
+	id = strings.TrimSuffix(id, "-v1")
 	id = strings.TrimSuffix(id, "-thinking")
 	// OpenRouter uses dotted minor versions for some models. Normalize them
 	// before effort, thinking, and billing family lookups.
-	if id == "claude-opus-5.5" {
-		id = "claude-opus-5-5"
-	}
-	if id == "claude-sonnet-5.5" {
-		id = "claude-sonnet-5-5"
-	}
-	if id == "claude-haiku-5.5" {
-		id = "claude-haiku-5-5"
-	}
+	id = strings.ReplaceAll(id, ".", "-")
 	if mapped, ok := ModelIDReverseOverrides[id]; ok {
 		id = mapped
 	}
@@ -98,4 +120,18 @@ func normalizeEffortModelID(model string) string {
 		}
 	}
 	return id
+}
+
+// RejectsAssistantPrefill applies only to known adaptive-era Messages models.
+func RejectsAssistantPrefill(model string) bool {
+	cap, known := ThinkingCapabilitiesForModel(model)
+	return known && cap.Adaptive
+}
+
+// SupportsStructuredOutput uses the same normalized family catalog as thinking.
+// Unknown model versions remain the upstream's decision, not a local rejection.
+func SupportsStructuredOutput(model string) bool {
+	id := normalizeEffortModelID(model)
+	_, known := thinkingFamilies[id]
+	return !known || (id != "claude-opus-4" && id != "claude-sonnet-4" && id != "claude-opus-4-1")
 }

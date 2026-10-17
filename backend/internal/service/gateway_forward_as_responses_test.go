@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/tidwall/gjson"
 	"io"
@@ -367,11 +368,26 @@ func TestHandleResponsesStreamingResponse_NormalizesTerminalUsage(t *testing.T) 
 			wantOutput:        30,
 			wantCacheCreation: 800,
 		},
+		{
+			name:       "cache-only read with zero output",
+			startUsage: `"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":100`,
+			deltaUsage: `"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":200`,
+			wantCached: 200,
+		},
+		{
+			name:              "cache-only write with zero output",
+			startUsage:        `"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":100`,
+			deltaUsage:        `"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":200`,
+			wantCacheCreation: 200,
+		},
 	}
 
 	for _, tt := range tests {
-		for _, terminal := range []string{"message_stop", "eof"} {
-			t.Run(tt.name+"/"+terminal, func(t *testing.T) {
+		for _, variant := range []struct {
+			terminal string
+			stream   bool
+		}{{"message_stop", true}, {"eof", true}, {"message_stop", false}, {"eof", false}} {
+			t.Run(fmt.Sprintf("%s/%s/stream=%t", tt.name, variant.terminal, variant.stream), func(t *testing.T) {
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				lines := []string{
@@ -382,12 +398,18 @@ func TestHandleResponsesStreamingResponse_NormalizesTerminalUsage(t *testing.T) 
 					`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{` + tt.deltaUsage + `}}`,
 					``,
 				}
-				if terminal == "message_stop" {
+				if variant.terminal == "message_stop" {
 					lines = append(lines, `event: message_stop`, `data: {"type":"message_stop"}`, ``)
 				}
 				resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join(lines, "\n")))}
 
-				result, err := (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "k3", "k3", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+				var result *ForwardResult
+				var err error
+				if variant.stream {
+					result, err = (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "k3", "k3", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+				} else {
+					result, err = (&GatewayService{}).handleResponsesBufferedStreamingResponse(resp, c, "k3", "k3", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+				}
 				require.NoError(t, err)
 				require.Equal(t, tt.wantInput, result.Usage.InputTokens)
 				require.Equal(t, tt.wantCached, result.Usage.CacheReadInputTokens)
@@ -403,6 +425,11 @@ func TestHandleResponsesStreamingResponse_NormalizesTerminalUsage(t *testing.T) 
 					if event.Type == "response.completed" {
 						completed = event
 					}
+				}
+				if !variant.stream {
+					var response apicompat.ResponsesResponse
+					require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+					completed.Response = &response
 				}
 				require.NotNil(t, completed.Response)
 				require.NotNil(t, completed.Response.Usage)

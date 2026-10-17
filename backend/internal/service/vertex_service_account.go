@@ -384,6 +384,17 @@ func setVertexGeminiAuth(ctx context.Context, req *http.Request, account *Accoun
 	return nil
 }
 
+func vertexAPIHost(location string) string {
+	switch location {
+	case "global":
+		return vertexGlobalHost
+	case "us", "eu":
+		return "aiplatform." + location + ".rep.googleapis.com"
+	default:
+		return location + "-aiplatform.googleapis.com"
+	}
+}
+
 func buildVertexGeminiURL(projectID, location, model, action string, stream bool) (string, error) {
 	projectID = strings.TrimSpace(projectID)
 	location = strings.TrimSpace(location)
@@ -404,13 +415,9 @@ func buildVertexGeminiURL(projectID, location, model, action string, stream bool
 	if err := validateVertexGeminiAction(action); err != nil {
 		return "", err
 	}
-	host := fmt.Sprintf("%s-aiplatform.googleapis.com", location)
-	if location == "global" {
-		host = vertexGlobalHost
-	}
 	u := fmt.Sprintf(
 		"https://%s/v1/projects/%s/locations/%s/publishers/google/models/%s:%s",
-		host,
+		vertexAPIHost(location),
 		url.PathEscape(projectID),
 		url.PathEscape(location),
 		url.PathEscape(model),
@@ -442,14 +449,10 @@ func buildVertexAnthropicURL(projectID, location, model string, stream bool) (st
 	if stream {
 		action = "streamRawPredict"
 	}
-	host := fmt.Sprintf("%s-aiplatform.googleapis.com", location)
-	if location == "global" {
-		host = "aiplatform.googleapis.com"
-	}
 	escapedModel := strings.ReplaceAll(url.PathEscape(model), "%40", "@")
 	return fmt.Sprintf(
 		"https://%s/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:%s",
-		host,
+		vertexAPIHost(location),
 		url.PathEscape(projectID),
 		url.PathEscape(location),
 		escapedModel,

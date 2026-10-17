@@ -224,7 +224,7 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 
 	thinkingType := gjson.Get(jsonStr, "thinking.type").String()
 	parsed.ThinkingEnabled = thinkingType == "enabled" || thinkingType == "adaptive" || thinkingType == "between_tools" ||
-		(protocol == domain.PlatformAnthropic && isClaude55SignedThinkingModel(parsed.Model))
+		(protocol == domain.PlatformAnthropic && thinkingType == "" && claudeThinkingEnabledByDefault(parsed.Model))
 
 	parsed.OutputEffort = strings.TrimSpace(gjson.Get(jsonStr, "output_config.effort").String())
 	if protocol == domain.PlatformAnthropic {
@@ -567,6 +567,11 @@ func StripEmptyTextBlocks(body []byte) []byte {
 	return out
 }
 
+func claudeThinkingEnabledByDefault(model string) bool {
+	cap, known := claude.ThinkingCapabilitiesForModel(model)
+	return known && cap.DefaultThinking
+}
+
 // isClaude55SignedThinkingModel identifies models whose default thinking mode
 // requires signed history to survive protocol conversion and request filtering.
 func isClaude55SignedThinkingModel(model string) bool {
@@ -672,7 +677,7 @@ func FilterThinkingBlocks(body []byte, mappedModel string) []byte {
 	if !ShouldPreFilterThinkingBlocks(mappedModel) {
 		return body
 	}
-	return filterThinkingBlocksInternal(body, isClaude55SignedThinkingModel(mappedModel))
+	return filterThinkingBlocksInternal(body, mappedModel)
 }
 
 // FilterThinkingBlocksForRetry strips thinking-related constructs for retry scenarios.
@@ -1416,7 +1421,7 @@ func FilterSignatureSensitiveBlocksForRetry(body []byte, mappedModel string) []b
 //   - 当 thinking.type 是 "enabled"/"adaptive"：移除缺失/无效 signature 的 thinking 块
 //   - 对 5.5 模型，只要历史中有无效 thinking，就移除所有 thinking/redacted_thinking，
 //     避免留下不连续的签名历史
-func filterThinkingBlocksInternal(body []byte, alwaysThinking bool) []byte {
+func filterThinkingBlocksInternal(body []byte, model string) []byte {
 	// Fast path: if body doesn't contain "thinking", skip parsing
 	if !bytes.Contains(body, []byte(`"type":"thinking"`)) &&
 		!bytes.Contains(body, []byte(`"type": "thinking"`)) &&
@@ -1433,7 +1438,11 @@ func filterThinkingBlocksInternal(body []byte, alwaysThinking bool) []byte {
 	}
 
 	// Check if thinking is enabled
+	alwaysThinking := claudeThinkingEnabledByDefault(model)
 	thinkingEnabled := alwaysThinking
+	if gjson.GetBytes(body, "thinking.type").String() == "disabled" {
+		thinkingEnabled = false
+	}
 	if thinking, ok := req["thinking"].(map[string]any); ok {
 		if thinkType, ok := thinking["type"].(string); ok && (thinkType == "enabled" || thinkType == "adaptive") {
 			thinkingEnabled = true
@@ -1511,7 +1520,7 @@ func filterThinkingBlocksInternal(body []byte, alwaysThinking bool) []byte {
 	if !filtered {
 		return body
 	}
-	if alwaysThinking {
+	if isClaude55SignedThinkingModel(model) {
 		for _, msg := range messages {
 			msgMap, ok := msg.(map[string]any)
 			if !ok {
