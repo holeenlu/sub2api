@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -18,6 +19,16 @@ func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 	require.Equal(t, "plus", filtered["plan_type"])
 	require.NotContains(t, filtered, "access_token")
 	require.NotContains(t, filtered, "refresh_token")
+}
+
+func TestFilterSchedulerCredentialsKeepsAnthropicFableThreshold(t *testing.T) {
+	filtered := filterSchedulerCredentials(map[string]any{
+		"anthropic_fable_scheduling_threshold": 72,
+		"access_token":                         "secret-access-token",
+	})
+
+	require.Equal(t, 72, filtered["anthropic_fable_scheduling_threshold"])
+	require.NotContains(t, filtered, "access_token")
 }
 
 func TestFilterSchedulerCredentialsKeepsGeminiExplicitCacheKeys(t *testing.T) {
@@ -123,5 +134,29 @@ func TestSchedulerMetadataAccountDropsInvalidUpstreamBillingProbe(t *testing.T) 
 		})
 
 		require.NotContains(t, metadata.Extra, service.UpstreamBillingProbeExtraKey)
+	}
+}
+
+func TestSchedulerMetadataAccountKeepsSIWCModeWithoutPrivateGrant(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		account := service.Account{ID: 45, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+			Credentials: map[string]any{}, Extra: map[string]any{service.OpenAISIWCEnabledKey: enabled}}
+		// SIWC private storage is separate. Even accidental copies of token fields or
+		// encrypted private records must not become scheduler metadata.
+		for _, key := range []string{"access_token", "refresh_token", "id_token", "registration_ciphertext", "credentials_ciphertext"} {
+			account.Credentials[key] = "secret-" + key
+			account.Extra[key] = "secret-" + key
+		}
+		metadata := buildSchedulerMetadataAccount(account)
+		require.Equal(t, map[string]any{service.OpenAISIWCEnabledKey: enabled}, metadata.Extra)
+		require.Empty(t, metadata.Credentials)
+		require.Equal(t, enabled, metadata.IsSIWCEnabled())
+		_, payload, err := marshalSchedulerCacheAccount(account)
+		require.NoError(t, err)
+		require.NotContains(t, string(payload), "secret-")
+		var restored service.Account
+		require.NoError(t, json.Unmarshal(payload, &restored))
+		require.Equal(t, enabled, restored.Extra[service.OpenAISIWCEnabledKey])
+		require.Equal(t, enabled, restored.IsSIWCEnabled())
 	}
 }

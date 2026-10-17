@@ -93,6 +93,15 @@ func isOpenAIAccount(account *Account) bool {
 // handleOpenAIAccountUpstreamError expects canonicalModel to be the model used
 // for scheduling after applying account mapping exactly once.
 func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, canonicalModel ...string) bool {
+	if isOpenAIUpstreamSessionBlocked(responseBody) {
+		return false
+	}
+	if account.IsSIWCEnabled() {
+		return false
+	} // SIWC grant failures cannot invalidate Codex/Excel credentials.
+	if IsUpstreamContentRefusal(responseBody) {
+		return false
+	}
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}
@@ -456,7 +465,11 @@ func (s *OpenAIGatewayService) recordOpenAIAccountModelTransientFailure(account 
 	if state == nil {
 		return openAIAccountModelTransientDecision{}
 	}
-	return state.recordFailure(account.ID, openAIAccountModelTransientModel(canonicalModel), now)
+	decision := state.recordFailure(account.ID, openAIAccountModelTransientModel(canonicalModel), now)
+	if decision.Cooldown > 0 {
+		s.blockSchedulingRecovery(modelRecoveryScope(account.ID, canonicalModel), decision.Cooldown)
+	}
+	return decision
 }
 
 func (s *OpenAIGatewayService) clearOpenAIAccountModelTransientState(accountID int64, model string) {

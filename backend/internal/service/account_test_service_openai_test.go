@@ -421,6 +421,37 @@ func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleErro
 	require.Empty(t, repo.updatedExtra)
 }
 
+func TestAccountTestService_OpenAIAPIKey429DoesNotSyncUpstreamPlanType(t *testing.T) {
+	for _, currentPlan := range []string{"", "plus"} {
+		for _, errorType := range []string{"usage_limit_reached", "rate_limit_exceeded"} {
+			t.Run(currentPlan+"/"+errorType, func(t *testing.T) {
+				repo := &openAIAccountTestRepo{}
+				svc := &AccountTestService{accountRepo: repo}
+				credentials := map[string]any{"api_key": "test-key"}
+				if currentPlan != "" {
+					credentials["plan_type"] = currentPlan
+				}
+				account := &Account{ID: 82, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Credentials: credentials}
+				body := []byte(`{"error":{"type":"` + errorType + `","plan_type":"pro","resets_at":4102444800}}`)
+
+				svc.reconcileOpenAI429State(context.Background(), account, http.Header{}, body)
+
+				require.Empty(t, repo.bulkUpdatedIDs)
+				require.Nil(t, repo.bulkUpdatedPayload.Credentials)
+				require.Equal(t, currentPlan, account.GetCredential("plan_type"))
+				if currentPlan == "" {
+					require.NotContains(t, account.Credentials, "plan_type")
+				}
+				require.Equal(t, AccountTypeAPIKey, account.Type)
+				require.Equal(t, "test-key", account.GetCredential("api_key"))
+				require.Equal(t, account.ID, repo.rateLimitedID)
+				require.NotNil(t, account.RateLimitResetAt)
+				require.Equal(t, int64(4102444800), account.RateLimitResetAt.Unix())
+			})
+		}
+	}
+}
+
 func TestAccountTestService_OpenAI429SyncsObservedPlanType(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()

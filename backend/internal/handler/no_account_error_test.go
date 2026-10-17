@@ -23,6 +23,17 @@ type fakeDiagnoser struct {
 	resp  service.ModelAvailabilityDiagnosis
 }
 
+func TestWebSocketQuotaProtectionIsLocal429(t *testing.T) {
+	c := newTestGinContextWithRequest()
+	err := &service.UpstreamFailoverError{StatusCode: http.StatusTooManyRequests, Stage: "selection", Scope: service.GatewayFailureScopeRequest, Reason: service.SchedulingQuotaRequestTooLarge, RequestNotSent: true}
+	result := markOpenAIWSTurnFailure(c, err)
+	require.Equal(t, http.StatusTooManyRequests, result.IntendedStatus)
+	require.Equal(t, service.SchedulingQuotaRequestTooLarge, result.Code)
+	require.True(t, result.RequestScoped)
+	require.False(t, result.CountTowardsSLA)
+	require.False(t, err.ShouldReportAccountScheduleFailure())
+}
+
 type fakeDiagnoseCall struct {
 	GroupID  *int64
 	Model    string
@@ -43,6 +54,35 @@ func (f *fakeDiagnoser) DiagnoseModelAvailabilityForPlatform(
 }
 
 func ptrInt64(v int64) *int64 { return &v }
+
+func TestNoAccountQuotaGuardReturns429WithoutOverridingUnsupportedModel(t *testing.T) {
+	now := time.Now().Add(-time.Second)
+	reset := now.Add(time.Hour).Format(time.RFC3339)
+	account := &service.Account{ID: 77, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Credentials: map[string]any{"account_scheduling_threshold": 80},
+		Extra: map[string]any{
+			"codex_5h_used_percent": 79.0, "codex_5h_reset_at": reset,
+			"codex_5h_quota_observation": map[string]any{"used_percent": 79.0, "reset_at": reset, "sampled_at": now.Format(time.RFC3339)},
+		}}
+	body := []byte(`{"model":"gpt-5.1","input":"` + strings.Repeat(" word", 100010) + `"}`)
+	ctx := service.WithSchedulingQuotaRequest(t.Context(), body, service.ContentModerationProtocolOpenAIResponses)
+	require.True(t, (*service.RateLimitService)(nil).IsRequestBlockedBySchedulingQuota(ctx, account))
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+	key := &service.APIKey{GroupID: ptrInt64(1)}
+	diag := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}}
+	got := classifyNoAccountErrorFromGin(c, diag, key, "gpt-5.1", "gpt-5.1", service.PlatformOpenAI)
+	require.Equal(t, http.StatusTooManyRequests, got.Status)
+	require.Equal(t, service.SchedulingQuotaRequestTooLarge, got.ErrType)
+	require.True(t, service.HasOpsClientBusinessLimited(c))
+	diag.resp.HasModelSupport = false
+	got = classifyNoAccountError(ctx, diag, key, "unknown", "unknown", service.PlatformOpenAI)
+	require.Equal(t, http.StatusNotFound, got.Status)
+	require.True(t, got.ModelNotFound)
+	fresh := service.WithSchedulingQuotaRequest(ctx, []byte(`{"model":"gpt-5.1","input":"hi"}`), service.ContentModerationProtocolOpenAIResponses)
+	got = classifyNoAccountError(fresh, nil, nil, "gpt-5.1", "gpt-5.1", service.PlatformOpenAI)
+	require.Equal(t, http.StatusServiceUnavailable, got.Status)
+}
 
 // Selection and failure diagnosis must use the same mapped model. A cooldown
 // remains retryable, while a genuinely unsupported target names the public alias.

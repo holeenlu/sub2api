@@ -3,7 +3,7 @@
     <!-- Rate Limit Display (429) - Two-line layout -->
     <div v-if="isRateLimited" class="flex flex-col items-center gap-1">
       <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
-      <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ rateLimitResumeText }}</span>
+      <span v-if="rateLimitResetAt" class="text-[11px] text-gray-400 dark:text-gray-500">{{ rateLimitResumeText }}</span>
     </div>
 
     <!-- Overload Display (529) - Two-line layout -->
@@ -33,7 +33,7 @@
     </template>
 
     <!-- Error Info Indicator -->
-    <div v-if="hasError && account.error_message" class="group/error relative">
+    <div v-if="hasError && errorMessage" class="group/error relative">
       <svg
         class="h-4 w-4 cursor-help text-red-500 transition-colors hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
         fill="none"
@@ -52,7 +52,7 @@
         class="invisible absolute left-0 top-full z-[100] mt-1.5 min-w-[200px] max-w-[300px] rounded-lg bg-gray-800 px-3 py-2 text-xs text-white opacity-0 shadow-xl transition-all duration-200 group-hover/error:visible group-hover/error:opacity-100 dark:bg-gray-900"
       >
         <div class="whitespace-pre-wrap break-words leading-relaxed text-gray-300">
-          {{ account.error_message }}
+          {{ errorMessage }}
         </div>
         <!-- 上方小三角 -->
         <div
@@ -71,9 +71,10 @@
       </span>
       <!-- Tooltip -->
       <div
+        v-if="rateLimitResetAt"
         class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 whitespace-normal rounded bg-gray-900 px-3 py-2 text-center text-xs leading-relaxed text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
       >
-        {{ t('admin.accounts.status.rateLimitedUntil', { time: formatDateTime(account.rate_limit_reset_at) }) }}
+        {{ t('admin.accounts.status.rateLimitedUntil', { time: formatDateTime(rateLimitResetAt) }) }}
         <div
           class="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"
         ></div>
@@ -99,7 +100,7 @@
         >
           <Icon name="exclamationTriangle" size="xs" :stroke-width="2" />
           {{ t('admin.accounts.status.creditsExhausted') }}
-          <span class="text-[10px] opacity-70">{{ formatCountdown(item.reset_at) }}</span>
+          <span v-if="item.reset_at" class="text-[10px] opacity-70">{{ formatCountdown(item.reset_at) }}</span>
         </span>
         <!-- 正在走积分（模型限流但积分可用）-->
         <span
@@ -108,7 +109,7 @@
         >
           <span>⚡</span>
           {{ formatScopeName(item.model) }}
-          <span class="text-[10px] opacity-70">{{ formatCountdown(item.reset_at) }}</span>
+          <span v-if="item.reset_at" class="text-[10px] opacity-70">{{ formatCountdown(item.reset_at) }}</span>
         </span>
         <!-- 普通模型限流 -->
         <span
@@ -117,10 +118,11 @@
         >
           <Icon name="exclamationTriangle" size="xs" :stroke-width="2" />
           {{ formatScopeName(item.model) }}
-          <span class="text-[10px] opacity-70">{{ formatCountdown(item.reset_at) }}</span>
+          <span v-if="item.reset_at" class="text-[10px] opacity-70">{{ formatCountdown(item.reset_at) }}</span>
         </span>
         <!-- Tooltip -->
         <div
+          v-if="item.reset_at"
           class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-max max-w-[320px] -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-3 py-2 text-center text-xs leading-relaxed text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
         >
           {{
@@ -176,9 +178,17 @@ const emit = defineEmits<{
 }>()
 
 // Computed: is rate limited (429)
+const upstreamStatus = computed(() => props.account.platform === 'anthropic' && props.account.status === 'active'
+  ? props.account.anthropic_status : null)
+const rateLimitResetAt = computed(() => {
+  const native = props.account.rate_limit_reset_at
+  return native && new Date(native) > new Date() ? native : upstreamStatus.value?.rate_limit_reset_at
+})
 const isRateLimited = computed(() => {
-  if (!props.account.rate_limit_reset_at) return false
-  return new Date(props.account.rate_limit_reset_at) > new Date()
+  if (upstreamStatus.value?.error_code) return false
+  const reset = rateLimitResetAt.value
+  if (reset) return new Date(reset) > new Date()
+  return upstreamStatus.value?.rate_limited === true
 })
 
 type AccountModelStatusItem = {
@@ -196,14 +206,14 @@ const activeModelStatuses = computed<AccountModelStatusItem[]>(() => {
   const now = new Date()
   const items: AccountModelStatusItem[] = []
 
-  if (!modelLimits) return items
+  const limits = modelLimits ?? {}
 
   // 检查 AICredits key 是否生效（积分是否耗尽）
-  const aiCreditsEntry = modelLimits['AICredits']
+  const aiCreditsEntry = limits['AICredits']
   const hasActiveAICredits = aiCreditsEntry && new Date(aiCreditsEntry.rate_limit_reset_at) > now
   const allowOverages = !!(extra?.allow_overages)
 
-  for (const [model, info] of Object.entries(modelLimits)) {
+  for (const [model, info] of Object.entries(limits)) {
     if (new Date(info.rate_limit_reset_at) <= now) continue
 
     if (model === 'AICredits') {
@@ -218,6 +228,10 @@ const activeModelStatuses = computed<AccountModelStatusItem[]>(() => {
     }
   }
 
+  for (const [model, reset] of Object.entries(upstreamStatus.value?.model_rate_limits ?? {})) {
+    if ((reset && new Date(reset) <= now) || items.some(item => item.model === model)) continue
+    items.push({ kind: 'rate_limit', model, reset_at: reset ?? '' })
+  }
   return items
 })
 
@@ -279,9 +293,12 @@ const isTempUnschedulable = computed(() => {
   return new Date(props.account.temp_unschedulable_until) > new Date()
 })
 
+const errorMessage = computed(() => props.account.error_message || (upstreamStatus.value?.error_code
+  ? t('admin.accounts.status.anthropicErrors.' + upstreamStatus.value.error_code) : ''))
+
 // Computed: has error status
 const hasError = computed(() => {
-  return props.account.status === 'error'
+  return props.account.status === 'error' || !!upstreamStatus.value?.error_code
 })
 
 const isQuotaExceeded = computed(() => {
@@ -296,7 +313,7 @@ const isQuotaExceeded = computed(() => {
 
 // Computed: countdown text for rate limit (429)
 const rateLimitCountdown = computed(() => {
-  return formatCountdown(props.account.rate_limit_reset_at)
+  return formatCountdown(rateLimitResetAt.value)
 })
 
 const rateLimitResumeText = computed(() => {

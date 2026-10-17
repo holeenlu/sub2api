@@ -35,8 +35,11 @@ import (
 const (
 	claudeAPIURL            = "https://api.anthropic.com/v1/messages?beta=true"
 	claudeAPICountTokensURL = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"
-	stickySessionTTL        = time.Hour // 粘性会话TTL
-	defaultMaxLineSize      = 500 * 1024 * 1024
+	// stickySessionTTL 是粘性会话的兜底 TTL。Anthropic 路径可由
+	// gateway.scheduling.sticky_session_ttl_seconds 覆盖（见
+	// GatewayService.stickySessionTTLForPlatform），其余协议固定用这个值。
+	stickySessionTTL   = time.Hour // 粘性会话TTL
+	defaultMaxLineSize = 500 * 1024 * 1024
 	// Canonical Claude Code banner. Keep it EXACT (no trailing whitespace/newlines)
 	// to match real Claude CLI traffic as closely as possible. When we need a visual
 	// separator between system blocks, we add "\n\n" at concatenation time.
@@ -402,10 +405,7 @@ func isClaudeCodeCredentialScopeError(msg string) bool {
 		strings.Contains(m, "cannot be used for other api requests")
 }
 
-// sseDataRe matches SSE data lines with optional whitespace after colon.
-// Some upstream APIs return non-standard "data:" without space (should be "data: ").
 var (
-	sseDataRe            = regexp.MustCompile(`^data:\s*`)
 	claudeCliUserAgentRe = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
 
 	// claudeCodePromptPrefixes 用于检测 Claude Code 系统提示词的前缀列表
@@ -426,29 +426,38 @@ var ErrNoAvailableAccounts = errors.New("no available accounts")
 var ErrClaudeCodeOnly = errors.New("this group only allows Claude Code clients")
 
 // allowedHeaders 白名单headers（参考CRS项目）
-var allowedHeaders = map[string]bool{
-	"accept":                                    true,
-	"x-stainless-retry-count":                   true,
-	"x-stainless-timeout":                       true,
-	"x-stainless-lang":                          true,
-	"x-stainless-package-version":               true,
-	"x-stainless-os":                            true,
-	"x-stainless-arch":                          true,
-	"x-stainless-runtime":                       true,
-	"x-stainless-runtime-version":               true,
-	"x-stainless-helper-method":                 true,
-	"anthropic-dangerous-direct-browser-access": true,
-	"anthropic-version":                         true,
-	"x-app":                                     true,
-	"anthropic-beta":                            true,
-	"accept-language":                           true,
-	"sec-fetch-mode":                            true,
-	"user-agent":                                true,
-	"content-type":                              true,
-	"accept-encoding":                           true,
-	"x-claude-code-session-id":                  true,
-	"x-client-request-id":                       true,
-}
+var allowedHeaders = func() map[string]bool {
+	headers := map[string]bool{
+		"accept":                                    true,
+		"x-stainless-retry-count":                   true,
+		"x-stainless-timeout":                       true,
+		"x-stainless-lang":                          true,
+		"x-stainless-package-version":               true,
+		"x-stainless-os":                            true,
+		"x-stainless-arch":                          true,
+		"x-stainless-runtime":                       true,
+		"x-stainless-runtime-version":               true,
+		"x-stainless-helper-method":                 true,
+		"anthropic-dangerous-direct-browser-access": true,
+		"anthropic-version":                         true,
+		"x-app":                                     true,
+		"anthropic-beta":                            true,
+		"accept-language":                           true,
+		"sec-fetch-mode":                            true,
+		"user-agent":                                true,
+		"content-type":                              true,
+		"accept-encoding":                           true,
+		"x-claude-code-session-id":                  true,
+		"x-claude-code-prompt-id":                   true,
+		"x-claude-code-request-class":               true,
+		"x-claude-code-agent-type":                  true,
+		"x-client-request-id":                       true,
+	}
+	for _, name := range claudeCodeControlHeaderNames {
+		headers[name] = true
+	}
+	return headers
+}()
 
 // ErrStickySessionNotFound is returned by GatewayCache.GetSessionAccountID
 // when no binding exists for the session. It abstracts away the underlying
@@ -482,6 +491,25 @@ type GatewayCache interface {
 	// DeleteSessionAccountID 删除粘性会话绑定，用于账号不可用时主动清理
 	// Delete sticky session binding, used to proactively clean up when account becomes unavailable
 	DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error
+
+	// 长周期「会话账号历史」亲和键。它必须有自己的 Redis 命名空间：sessionHash
+	// 来自客户端（新版 metadata.user_id 的 session_id 没有 UUID 校验），在
+	// sessionHash 前拼前缀会让「会话 X 的历史键」和「会话 前缀+X 的短期键」撞成
+	// 同一个 key，两个不相干的会话互相覆盖绑定。
+	//
+	// GetSessionAccountHistory 读长周期亲和账号，未绑定时返回
+	// ErrStickySessionNotFound。
+	GetSessionAccountHistory(ctx context.Context, groupID int64, sessionHash string) (int64, error)
+	// SetSessionAccountHistoryIfAbsentOrSame 只在历史键不存在、或已经指向同一个
+	// 账号时写入并续期；已经指向别的账号时不覆盖，返回 false。
+	//
+	// 「不覆盖」是这个键的关键语义：原账号临时限流/超窗口被绕开时，本次请求会落到
+	// 备用账号上，但历史必须继续记着原账号，否则原账号一恢复，会话也再回不去了。
+	// 真正需要改写历史的只有「原账号已经彻底消失」，那条路径走
+	// DeleteSessionAccountHistory 显式清理。
+	SetSessionAccountHistoryIfAbsentOrSame(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) (bool, error)
+	// DeleteSessionAccountHistory 清除长周期亲和键。
+	DeleteSessionAccountHistory(ctx context.Context, groupID int64, sessionHash string) error
 
 	// Grok async video billing snapshot (create → status success).
 	// SetGrokVideoPendingBilling stores create-time model/duration/resolution for status billing.
@@ -571,6 +599,7 @@ func shouldClearStickySession(account *Account, requestedModel string) bool {
 }
 
 type AccountWaitPlan struct {
+	RefreshLimit   func(context.Context) (int, error) `json:"-"`
 	AccountID      int64
 	MaxConcurrency int
 	Timeout        time.Duration
@@ -578,12 +607,12 @@ type AccountWaitPlan struct {
 }
 
 type AccountSelectionResult struct {
+	// affinity is selection-owned; a borrowed turn cannot overwrite its home.
+	affinity    *schedulingAffinity
 	Account     *Account
 	Acquired    bool
 	ReleaseFunc func()
 	WaitPlan    *AccountWaitPlan // nil means no wait allowed
-	// stickySessionHit 标记账号来自会话粘性绑定命中，供非高级调度路径回填决策标签。
-	stickySessionHit bool
 	// profitGate 携带本次选号真实生效的利润门（无门为 nil）。门安装在调度栈的
 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
@@ -700,6 +729,7 @@ type UpstreamFailoverError struct {
 	SameAccountRetryDeadline time.Time     // 同账号重试截止时间；零值表示仅受 retryLimit 限制
 	SameAccountRetryMax      int           // 可选的错误级同账号重试上限，低于 handler 默认预算时优先采用
 	RequestScopedTransient   bool          // 故障因素与账号无关（如上游按客户端身份/模型容量降载）：可同账号重试，但不得据此对账号做临时封禁
+	RequestNotSent           bool          // Transport evidence proves this attempt never reached HTTP; hosted tools may fail over.
 	SafeToFailoverAfterWrite bool          // 仅写出 SSE 注释等非语义字节时，仍可在同一客户端流中切换账号
 	BoundUpstreamPassthrough bool          // 绑定显式缓存的请求在上游网关账号上收到的 429 / 5xx：反映持有缓存的上游账号状态，原样回写不走错误映射
 	Stage                    GatewayFailureStage
@@ -729,7 +759,7 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
-	if e == nil {
+	if e == nil || e.Reason == ExcelBPSRateLimitedReason || e.Reason == ExcelBPSModelPermissionReason || e.Reason == ExcelBPSUpstreamFailureReason || e.IsExcelBPSImageAdmissionRejection() {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount
@@ -894,6 +924,8 @@ func NewGatewayService(
 }
 
 // GenerateSessionHash 从预解析请求计算粘性会话 hash
+const maxStickySessionIDLength = 128
+
 func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	if parsed == nil {
 		return ""
@@ -902,7 +934,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	// 1. 最高优先级：从 metadata.user_id 提取 session_xxx
 	if parsed.MetadataUserID != "" {
 		uid := ParseMetadataUserID(parsed.MetadataUserID)
-		if uid != nil && uid.SessionID != "" {
+		if uid != nil && uid.SessionID != "" && len(uid.SessionID) <= maxStickySessionIDLength {
 			slog.Info("sticky.hash_source",
 				"source", "metadata_user_id",
 				"session_id", uid.SessionID,
@@ -915,6 +947,12 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 			"metadata_user_id", parsed.MetadataUserID,
 			"parsed_nil", uid == nil,
 		)
+	}
+
+	// Anthropic affinity must survive appended turns and moving cache markers.
+	// Keep the legacy derivation for other protocols.
+	if parsed.protocol == PlatformAnthropic {
+		return s.anthropicSessionHash(parsed)
 	}
 
 	// 2. 提取带 cache_control: {type: "ephemeral"} 的内容
@@ -960,23 +998,209 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	return ""
 }
 
+// anthropicSessionHash uses an explicit conversation ID when available. Without
+// one, stable content is only a routing hint, never proof of conversation identity
+// or ownership. A compacted/replaced first message intentionally starts a new hint.
+func (s *GatewayService) anthropicSessionHash(parsed *ParsedRequest) string {
+	var seed strings.Builder
+	if sc := parsed.SessionContext; sc != nil {
+		_, _ = fmt.Fprintf(&seed, "key:%d|", sc.APIKeyID)
+		if id := sanitizeSessionID(sc.ExplicitSessionID); id != "" {
+			return s.hashContent(seed.String() + "session:" + id)
+		}
+		_, _ = fmt.Fprintf(&seed, "%s|%s|", sc.ClientIP, NormalizeSessionUserAgent(sc.UserAgent))
+	}
+	appendContent := func(label string, raw []byte) {
+		if len(raw) == 0 {
+			return
+		}
+		var value any
+		if decodeJSONUseNumber(raw, &value) != nil {
+			return
+		}
+		// Only strip protocol cache markers, not user/tool payload fields.
+		if blocks, ok := value.([]any); ok {
+			for _, block := range blocks {
+				if object, ok := block.(map[string]any); ok {
+					delete(object, "cache_control")
+				}
+			}
+		}
+		encoded, err := json.Marshal(value)
+		if err == nil {
+			_, _ = fmt.Fprintf(&seed, "%s:%d:%s|", label, len(encoded), encoded)
+		}
+	}
+	appendContent("model", []byte(gjson.GetBytes(parsed.Body.Bytes(), "model").Raw))
+	appendContent("system", parsed.SystemRaw())
+	appendContent("tools", []byte(gjson.GetBytes(parsed.Body.Bytes(), "tools").Raw))
+	parseRawJSONView(parsed.MessagesRaw()).ForEach(func(_, message gjson.Result) bool {
+		if message.Get("role").String() != "user" {
+			return true
+		}
+		appendContent("first_user", []byte(message.Get("content").Raw))
+		return false
+	})
+	if seed.Len() == 0 {
+		return ""
+	}
+	return s.hashContent(seed.String())
+}
+
+// BindSelectionStickySession binds the session in the request group's namespace.
+// AccountSelectionResult currently carries the selected account but no alternate
+// group namespace, so the existing request group remains the source of truth.
+func (s *GatewayService) BindSelectionStickySession(ctx context.Context, selection *AccountSelectionResult, originGroupID *int64, sessionHash string, accountID int64) error {
+	return s.bindStickySessionWithTTL(ContextWithSelectionProfitGate(ctx, selection), originGroupID, sessionHash, accountID, s.selectionStickyBinding(selection))
+}
+
+// BindSelectionStickySessionAfterProfitAdmission 是 BindSelectionStickySession
+// 的利润门版本。
+func (s *GatewayService) BindSelectionStickySessionAfterProfitAdmission(ctx context.Context, selection *AccountSelectionResult, originGroupID *int64, sessionHash string, accountID int64) error {
+	return s.bindStickySessionAfterProfitAdmissionWithTTL(ContextWithSelectionProfitGate(ctx, selection), originGroupID, sessionHash, accountID, s.selectionStickyBinding(selection))
+}
+
+// stickySessionBinding 描述一次绑定要写哪些键、各自活多久。historyTTL 为 0 表示
+// 不写长周期亲和键（未开启，或该协议不在作用域内）。
+type stickySessionBinding struct {
+	ttl        time.Duration
+	historyTTL time.Duration
+}
+
+// sessionAccountHistoryTTL 返回长周期亲和键的 TTL，0 表示未开启。
+func (s *GatewayService) sessionAccountHistoryTTL() time.Duration {
+	if s == nil || s.cfg == nil {
+		return 0
+	}
+	seconds := s.cfg.Gateway.Scheduling.SessionAccountHistoryTTLSeconds
+	if seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// stickyBindingForAccount 解析一次绑定的两级 TTL。长周期亲和键与可配置 TTL 同样
+// 只覆盖 Anthropic：其余协议保持单键、1 小时的历史行为。
+func (s *GatewayService) stickyBindingForAccount(account *Account) stickySessionBinding {
+	if account == nil || account.Platform != PlatformAnthropic {
+		return stickySessionBinding{ttl: stickySessionTTL}
+	}
+	return stickySessionBinding{
+		ttl:        s.stickySessionTTLForPlatform(account.Platform),
+		historyTTL: s.sessionAccountHistoryTTL(),
+	}
+}
+
+// stickySessionTTLForPlatform 解析粘性绑定 TTL。只有 Anthropic 路径可由运维通过
+// gateway.scheduling.sticky_session_ttl_seconds 调整；GatewayService 同时还服务
+// Gemini（/v1/messages 兼容层与 v1beta 原生）与 Antigravity，它们一律保留历史的
+// 1 小时绑定，所以这个开关不会外溢到别的协议。
+func (s *GatewayService) stickySessionTTLForPlatform(platform string) time.Duration {
+	if s == nil || platform != PlatformAnthropic {
+		return stickySessionTTL
+	}
+	if s.cfg == nil || s.cfg.Gateway.Scheduling.StickySessionTTLSeconds <= 0 {
+		return stickySessionTTL
+	}
+	return time.Duration(s.cfg.Gateway.Scheduling.StickySessionTTLSeconds) * time.Second
+}
+
+// selectionStickyBinding 从选号结果里取平台。绑定点拿到的只有 accountID，
+// 平台信息只能从 selection 携带的账号上读。
+func (s *GatewayService) selectionStickyBinding(selection *AccountSelectionResult) stickySessionBinding {
+	if selection == nil {
+		return stickySessionBinding{ttl: stickySessionTTL}
+	}
+	return s.stickyBindingForAccount(selection.Account)
+}
+
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	return s.bindStickySessionWithTTL(ctx, groupID, sessionHash, accountID, stickySessionBinding{ttl: stickySessionTTL})
+}
+
+func (s *GatewayService) bindStickySessionWithTTL(ctx context.Context, groupID *int64, sessionHash string, accountID int64, binding stickySessionBinding) error {
+	if preserveBorrowedStickyHome(ctx, sessionHash, accountID) {
+		return nil
+	}
 	if sessionHash == "" || accountID <= 0 || s.cache == nil {
 		return nil
 	}
-	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
+	if binding.ttl <= 0 {
+		binding.ttl = stickySessionTTL
+	}
+	// 长周期亲和键先写：即使短期键写失败，下一次请求也还能凭历史落回同一个账号。
+	// 它的写入失败不影响绑定本身，只降级成「没有第二层记忆」。
+	//
+	// 写入是「不存在或相同才写」：本次绑定的账号可能只是原账号被临时闸门（限流、
+	// 窗口费用、RPM、利润门）绕开后的备用账号，无条件覆盖会把原账号从历史里抹掉，
+	// 原账号恢复后会话再也回不去——这正好跟这个键存在的目的相反。
+	if binding.historyTTL > 0 {
+		if _, err := s.cache.SetSessionAccountHistoryIfAbsentOrSame(ctx, derefGroupID(groupID), sessionHash, accountID, binding.historyTTL); err != nil {
+			slog.Warn("sticky.history_write_failed", "group_id", derefGroupID(groupID), "account_id", accountID, "error", err)
+		}
+	}
+	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, binding.ttl)
+}
+
+// resolveStickySessionAccountID 解析一个会话当前该优先使用的账号：先读短期粘性
+// 键，miss 且本次请求确实解析到 Anthropic 时才读长周期亲和键。返回的 source 只用
+// 于日志。
+//
+// platform 必须是本次请求真正解析出来的平台，不能省。长周期亲和键只为 Anthropic
+// 写，非 Anthropic 请求去读它只会白打一次 Redis；复合分组里同一个 session 先后解
+// 析到不同平台时，还会把 Anthropic 的历史账号读给 Gemini 请求，再靠后面的平台校
+// 验兜回来——多一次往返，也多一条没必要的失败路径。
+//
+// 返回历史账号并不等于要用它——调用方拿到的只是一个「优先候选」，仍然要过完整的
+// 调度闸门（停调、限流、模型支持、配额、窗口费用、RPM、利润门）。历史只是把「同
+// 一个会话优先回到同一个账号」的记忆拉长，不是给账号发豁免。
+func (s *GatewayService) resolveStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string, platform string) (int64, string) {
+	if s == nil || s.cache == nil || sessionHash == "" {
+		return 0, ""
+	}
+	if accountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash); err == nil && accountID > 0 {
+		return accountID, "cache"
+	}
+	return s.resolveStickySessionHistoryAccountID(ctx, groupID, sessionHash, platform)
+}
+
+// resolveStickySessionHistoryAccountID 只读长周期亲和键。给已经自己确认过短期键
+// miss 的调用方用——调度入口就是这种情况，让它再走一遍 resolveStickySessionAccountID
+// 会把同一个短期键读两遍，开启历史后每个新会话/过期会话要打三次 Redis。
+func (s *GatewayService) resolveStickySessionHistoryAccountID(ctx context.Context, groupID *int64, sessionHash string, platform string) (int64, string) {
+	if s == nil || s.cache == nil || sessionHash == "" {
+		return 0, ""
+	}
+	if !s.sessionAccountHistoryEnabledForPlatform(platform) {
+		return 0, ""
+	}
+	accountID, err := s.cache.GetSessionAccountHistory(ctx, derefGroupID(groupID), sessionHash)
+	if err != nil || accountID <= 0 {
+		return 0, ""
+	}
+	slog.Debug("sticky.history_promoted",
+		"group_id", derefGroupID(groupID),
+		"session", shortSessionHash(sessionHash),
+		"account_id", accountID,
+	)
+	return accountID, "history"
+}
+
+// sessionAccountHistoryEnabledForPlatform 报告本次请求是否该动长周期亲和键。
+func (s *GatewayService) sessionAccountHistoryEnabledForPlatform(platform string) bool {
+	return platform == PlatformAnthropic && s.sessionAccountHistoryTTL() > 0
 }
 
 // bindGatewayStickySessionDuringSelection preserves the normal eager sticky
 // behavior unless a profit gate is installed. Profit-controlled requests bind
 // only after the terminal post-slot check, otherwise a rejected candidate could
 // overwrite a healthy pre-existing sticky binding.
-func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	if gatewayProfitControlGateActive(ctx) {
+func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Context, groupID *int64, sessionHash string, account *Account) error {
+	if gatewayProfitControlGateActive(ctx) || account == nil {
 		return nil
 	}
-	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+	return s.bindStickySessionWithTTL(ctx, groupID, sessionHash, account.ID, s.stickyBindingForAccount(account))
 }
 
 // BindStickySessionAfterProfitAdmission records a terminally admitted
@@ -986,11 +1210,15 @@ func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Con
 // account remains bound and automatically becomes eligible again if its
 // account rate recovers.
 func (s *GatewayService) BindStickySessionAfterProfitAdmission(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	return s.bindStickySessionAfterProfitAdmissionWithTTL(ctx, groupID, sessionHash, accountID, stickySessionBinding{ttl: stickySessionTTL})
+}
+
+func (s *GatewayService) bindStickySessionAfterProfitAdmissionWithTTL(ctx context.Context, groupID *int64, sessionHash string, accountID int64, binding stickySessionBinding) error {
 	if sessionHash == "" || accountID <= 0 || s.cache == nil {
 		return nil
 	}
 	if !gatewayProfitControlGateActive(ctx) {
-		return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+		return s.bindStickySessionWithTTL(ctx, groupID, sessionHash, accountID, binding)
 	}
 	existingAccountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 	if err != nil && !errors.Is(err, ErrStickySessionNotFound) {
@@ -1001,7 +1229,35 @@ func (s *GatewayService) BindStickySessionAfterProfitAdmission(ctx context.Conte
 	if existingAccountID > 0 && existingAccountID != accountID {
 		return nil
 	}
-	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+	return s.bindStickySessionWithTTL(ctx, groupID, sessionHash, accountID, binding)
+}
+
+// refreshStickySessionOnHit 在一次粘性命中后续期绑定。粘性绑定是滑动窗口：只要
+// 会话还在用同一个账号，TTL 就该从命中时刻重新计时，否则绑定会在会话仍然活跃时
+// 到期，下一次请求自由选号换到别的账号，把上游 prompt cache 整个重建一遍。
+//
+// Anthropic 走重新写入而不是 EXPIRE：命中可能来自长周期亲和键，此时短期键根本
+// 不存在，EXPIRE 是空操作，会话会在每一次请求上都退化成「历史提升」。其余协议
+// 保持原有的纯续期语义。
+func (s *GatewayService) refreshStickySessionOnHit(ctx context.Context, groupID *int64, sessionHash string, account *Account) {
+	if s == nil || s.cache == nil || sessionHash == "" || account == nil {
+		return
+	}
+	if account.Platform != PlatformAnthropic {
+		_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), sessionHash, stickySessionTTL)
+		return
+	}
+	_ = s.bindStickySessionWithTTL(ctx, groupID, sessionHash, account.ID, s.stickyBindingForAccount(account))
+}
+
+// refreshAnthropicStickySessionOnHit 只对 Anthropic 账号续期。本次改动新增的续期
+// 点一律走这里：Gemini / Antigravity 的粘性寿命保持原有的「绑定后固定 1 小时」，
+// 不因为可配置 TTL 的接线而顺带变成滑动窗口。
+func (s *GatewayService) refreshAnthropicStickySessionOnHit(ctx context.Context, groupID *int64, sessionHash string, account *Account) {
+	if account == nil || account.Platform != PlatformAnthropic {
+		return
+	}
+	s.refreshStickySessionOnHit(ctx, groupID, sessionHash, account)
 }
 
 // GetCachedSessionAccountID retrieves the account ID bound to a sticky session.

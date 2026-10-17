@@ -2419,8 +2419,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	fastReleaseFunc, fastAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(
 		ctx,
 		account.ID,
-		selection.WaitPlan.MaxConcurrency,
-	)
+		selection.WaitPlan.MaxConcurrency, selection.WaitPlan.RefreshLimit)
 	if err != nil {
 		reqLog.Warn("openai.account_slot_quick_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		status, errType, code, message := concurrencyErrorResponse(err, "account")
@@ -2473,8 +2472,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		selection.WaitPlan.MaxConcurrency,
 		selection.WaitPlan.Timeout,
 		reqStream,
-		streamStarted,
-	)
+		streamStarted, selection.WaitPlan.RefreshLimit)
 	if err != nil {
 		reqLog.Warn("openai.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		status, errType, code, message := concurrencyErrorResponse(err, "account")
@@ -3003,8 +3001,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			fastReleaseFunc, fastAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(
 				ctx,
 				account.ID,
-				selection.WaitPlan.MaxConcurrency,
-			)
+				selection.WaitPlan.MaxConcurrency, selection.WaitPlan.RefreshLimit)
 			if err != nil {
 				reqLog.Warn("openai.websocket_account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire account concurrency slot")

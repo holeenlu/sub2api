@@ -16,6 +16,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 )
 
 // ConcurrencyCache 定义并发控制的缓存接口
@@ -222,7 +224,7 @@ const (
 
 	defaultAccountLoadBatchCacheTTL = 200 * time.Millisecond
 	accountLoadBatchFetchTimeout    = 3 * time.Second
-	maxAccountLoadBatchCacheEntries = 256
+	maxAccountLoadCacheEntries      = 32768
 	apiKeyConcurrencyFetchTimeout   = 3 * time.Second
 	apiKeySlotTrackTimeout          = 2 * time.Second
 )
@@ -233,12 +235,12 @@ type ConcurrencyService struct {
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
-	accountLoadCache    map[string]cachedAccountLoadBatch
+	accountLoadCache    map[int64]cachedAccountLoad
 	accountLoadGroup    singleflight.Group
 }
 
-type cachedAccountLoadBatch struct {
-	loadMap   map[int64]*AccountLoadInfo
+type cachedAccountLoad struct {
+	load      AccountLoadInfo
 	expiresAt time.Time
 }
 
@@ -246,7 +248,7 @@ type cachedAccountLoadBatch struct {
 func NewConcurrencyService(cache ConcurrencyCache) *ConcurrencyService {
 	svc := &ConcurrencyService{
 		cache:            cache,
-		accountLoadCache: make(map[string]cachedAccountLoadBatch),
+		accountLoadCache: make(map[int64]cachedAccountLoad),
 	}
 	svc.SetAccountLoadBatchCacheTTL(defaultAccountLoadBatchCacheTTL)
 	return svc
@@ -301,7 +303,7 @@ func (s *ConcurrencyService) SetAccountLoadBatchCacheTTL(ttl time.Duration) {
 	s.accountLoadCacheTTL.Store(int64(ttl))
 	if ttl <= 0 {
 		s.accountLoadCacheMu.Lock()
-		s.accountLoadCache = make(map[string]cachedAccountLoadBatch)
+		s.accountLoadCache = make(map[int64]cachedAccountLoad)
 		s.accountLoadCacheMu.Unlock()
 	}
 }
@@ -357,10 +359,11 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 	}
 
 	if acquired {
+		s.observeWaitAdmission(ctx, "account", accountID)
 		return &AcquireResult{
 			Acquired: true,
 			ReleaseFunc: func() {
-				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				bgCtx, cancel := context.WithTimeout(selectionbudget.CleanupContext(ctx), 5*time.Second)
 				defer cancel()
 				if err := s.cache.ReleaseAccountSlot(bgCtx, accountID, requestID); err != nil {
 					logger.LegacyPrintf("service.concurrency", "Warning: failed to release account slot for %d (req=%s): %v", accountID, requestID, err)
@@ -396,6 +399,7 @@ func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, 
 	}
 
 	if acquired {
+		s.observeWaitAdmission(ctx, "user", userID)
 		return &AcquireResult{
 			Acquired: true,
 			ReleaseFunc: func() {
@@ -591,32 +595,43 @@ func (s *ConcurrencyService) getAccountsLoadBatch(ctx context.Context, accounts 
 		return s.fetchAccountsLoadBatch(ctx, accounts)
 	}
 
-	key := accountLoadBatchCacheKey(accounts)
-	if cached, ok := s.getCachedAccountLoadBatch(key, time.Now()); ok {
+	cached, missing := s.getCachedAccountLoads(accounts, time.Now())
+	if len(missing) == 0 {
 		return cached, nil
 	}
-
-	value, err, _ := s.accountLoadGroup.Do(key, func() (any, error) {
+	pending := s.accountLoadGroup.DoChan(accountLoadBatchCacheKey(missing), func() (any, error) {
 		now := time.Now()
-		if cached, ok := s.getCachedAccountLoadBatch(key, now); ok {
-			return cached, nil
+		result, unread := s.getCachedAccountLoads(missing, now)
+		if len(unread) == 0 {
+			return result, nil
 		}
-		loadMap, fetchErr := s.fetchAccountsLoadBatch(ctx, accounts)
-		if fetchErr != nil {
-			return nil, fetchErr
+		loads, err := s.fetchAccountsLoadBatch(ctx, unread)
+		if err != nil {
+			return nil, err
 		}
-		cached := cloneAccountLoadMap(loadMap)
-		s.storeCachedAccountLoadBatch(key, cached, now.Add(ttl))
-		return cached, nil
+		s.storeCachedAccountLoads(loads, now.Add(ttl))
+		for id, load := range loads {
+			result[id] = load
+		}
+		return result, nil
 	})
-	if err != nil {
-		return nil, err
+	var result singleflight.Result
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result = <-pending:
 	}
-	loadMap, _ := value.(map[int64]*AccountLoadInfo)
-	if loadMap == nil {
-		return map[int64]*AccountLoadInfo{}, nil
+	if result.Err != nil {
+		return nil, result.Err
 	}
-	return loadMap, nil
+	loads, _ := result.Val.(map[int64]*AccountLoadInfo)
+	for id, load := range loads {
+		if load != nil {
+			copy := *load
+			cached[id] = &copy
+		}
+	}
+	return cached, nil
 }
 
 func (s *ConcurrencyService) fetchAccountsLoadBatch(ctx context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
@@ -625,55 +640,63 @@ func (s *ConcurrencyService) fetchAccountsLoadBatch(ctx context.Context, account
 	}
 	baseCtx := context.Background()
 	if ctx != nil {
-		baseCtx = context.WithoutCancel(ctx)
+		baseCtx = ctx
 	}
 	redisCtx, cancel := context.WithTimeout(baseCtx, accountLoadBatchFetchTimeout)
 	defer cancel()
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "load", Action: "batch_read", Candidates: len(accounts)})
 	return s.cache.GetAccountsLoadBatch(redisCtx, accounts)
 }
 
-func (s *ConcurrencyService) getCachedAccountLoadBatch(key string, now time.Time) (map[int64]*AccountLoadInfo, bool) {
+// Cache observations by account, not by sampled batch membership. Otherwise
+// random batches defeat the shared short TTL and duplicate the same account in
+// hundreds of cache entries. Capacity is request-owned and applied on read.
+func (s *ConcurrencyService) getCachedAccountLoads(accounts []AccountWithConcurrency, now time.Time) (map[int64]*AccountLoadInfo, []AccountWithConcurrency) {
+	result := make(map[int64]*AccountLoadInfo, len(accounts))
+	missing := make([]AccountWithConcurrency, 0, len(accounts))
 	s.accountLoadCacheMu.RLock()
-	cached, ok := s.accountLoadCache[key]
-	s.accountLoadCacheMu.RUnlock()
-	if !ok {
-		return nil, false
-	}
-	if !now.Before(cached.expiresAt) {
-		s.accountLoadCacheMu.Lock()
-		if current, exists := s.accountLoadCache[key]; exists && !now.Before(current.expiresAt) {
-			delete(s.accountLoadCache, key)
+	defer s.accountLoadCacheMu.RUnlock()
+	for _, account := range accounts {
+		cached, ok := s.accountLoadCache[account.ID]
+		if !ok || !now.Before(cached.expiresAt) {
+			missing = append(missing, account)
+			continue
 		}
-		s.accountLoadCacheMu.Unlock()
-		return nil, false
+		copy := cached.load
+		copy.LoadRate = 0
+		if account.MaxConcurrency > 0 {
+			copy.LoadRate = (copy.CurrentConcurrency + copy.WaitingCount) * 100 / account.MaxConcurrency
+		}
+		result[account.ID] = &copy
 	}
-	return cached.loadMap, true
+	return result, missing
 }
-
-func (s *ConcurrencyService) storeCachedAccountLoadBatch(key string, loadMap map[int64]*AccountLoadInfo, expiresAt time.Time) {
+func (s *ConcurrencyService) storeCachedAccountLoads(loads map[int64]*AccountLoadInfo, expiresAt time.Time) {
 	s.accountLoadCacheMu.Lock()
+	defer s.accountLoadCacheMu.Unlock()
 	if s.accountLoadCache == nil {
-		s.accountLoadCache = make(map[string]cachedAccountLoadBatch)
+		s.accountLoadCache = make(map[int64]cachedAccountLoad)
 	}
-	if len(s.accountLoadCache) >= maxAccountLoadBatchCacheEntries {
+	if len(s.accountLoadCache)+len(loads) > maxAccountLoadCacheEntries {
 		now := time.Now()
-		for cacheKey, cached := range s.accountLoadCache {
+		for id, cached := range s.accountLoadCache {
 			if !now.Before(cached.expiresAt) {
-				delete(s.accountLoadCache, cacheKey)
+				delete(s.accountLoadCache, id)
 			}
 		}
-		for len(s.accountLoadCache) >= maxAccountLoadBatchCacheEntries {
-			for cacheKey := range s.accountLoadCache {
-				delete(s.accountLoadCache, cacheKey)
+	}
+	for id, load := range loads {
+		if load == nil {
+			continue
+		}
+		if _, exists := s.accountLoadCache[id]; !exists && len(s.accountLoadCache) >= maxAccountLoadCacheEntries {
+			for evict := range s.accountLoadCache {
+				delete(s.accountLoadCache, evict)
 				break
 			}
 		}
+		s.accountLoadCache[id] = cachedAccountLoad{load: *load, expiresAt: expiresAt}
 	}
-	s.accountLoadCache[key] = cachedAccountLoadBatch{
-		loadMap:   loadMap,
-		expiresAt: expiresAt,
-	}
-	s.accountLoadCacheMu.Unlock()
 }
 
 func accountLoadBatchCacheKey(accounts []AccountWithConcurrency) string {
@@ -686,22 +709,6 @@ func accountLoadBatchCacheKey(accounts []AccountWithConcurrency) string {
 	}
 	sum := hash.Sum(nil)
 	return strconv.Itoa(len(accounts)) + ":" + hex.EncodeToString(sum)
-}
-
-func cloneAccountLoadMap(loadMap map[int64]*AccountLoadInfo) map[int64]*AccountLoadInfo {
-	if len(loadMap) == 0 {
-		return map[int64]*AccountLoadInfo{}
-	}
-	clone := make(map[int64]*AccountLoadInfo, len(loadMap))
-	for accountID, loadInfo := range loadMap {
-		if loadInfo == nil {
-			clone[accountID] = nil
-			continue
-		}
-		copied := *loadInfo
-		clone[accountID] = &copied
-	}
-	return clone
 }
 
 // GetUsersLoadBatch returns load info for multiple users.

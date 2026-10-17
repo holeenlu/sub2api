@@ -245,8 +245,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				selection.WaitPlan.MaxConcurrency,
 				selection.WaitPlan.Timeout,
 				reqStream,
-				&streamStarted,
-			)
+				&streamStarted, selection.WaitPlan.RefreshLimit)
 			if err != nil {
 				reqLog.Warn("gateway.responses.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				h.handleConcurrencyError(c, err, "account", streamStarted)

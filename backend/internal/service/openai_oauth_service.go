@@ -19,6 +19,7 @@ import (
 
 // OpenAIOAuthService handles OpenAI OAuth authentication flows
 type OpenAIOAuthService struct {
+	siwcAgentName        string
 	rdb                  *redis.Client
 	excelAccountRepo     AccountRepository
 	excelEncryptor       SecretEncryptor

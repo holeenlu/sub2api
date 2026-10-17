@@ -141,6 +141,9 @@ func (s *OpenAIGatewayService) GenerateExplicitSessionHash(c *gin.Context, body 
 
 	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
 	attachOpenAILegacySessionHashToGin(c, legacyHash)
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(WithGatewayCacheDiagnostics(c.Request.Context(), getAPIKeyIDFromContext(c), "responses", ExtractClientSessionID(c), currentHash, c.GetHeader("User-Agent")))
+	}
 	return currentHash
 }
 
@@ -216,6 +219,9 @@ func (s *OpenAIGatewayService) GenerateSessionHashWithFallback(c *gin.Context, b
 
 	currentHash, legacyHash := deriveOpenAISessionHashes(seed)
 	attachOpenAILegacySessionHashToGin(c, legacyHash)
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(WithGatewayCacheDiagnostics(c.Request.Context(), getAPIKeyIDFromContext(c), "responses", ExtractClientSessionID(c), currentHash, c.GetHeader("User-Agent")))
+	}
 	return currentHash
 }
 
@@ -233,6 +239,9 @@ func resolveOpenAIUpstreamOriginator(c *gin.Context, isOfficialClient bool) stri
 
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *OpenAIGatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if preserveBorrowedStickyHome(ctx, sessionHash, accountID) {
+		return nil
+	}
 	if sessionHash == "" || accountID <= 0 {
 		return nil
 	}
@@ -335,7 +344,7 @@ func (e openAINoAvailableSelectionError) Unwrap() error {
 // openAICompactSupportTier classifies an OpenAI-compatible account by compact capability.
 // 0 = explicitly unsupported, 1 = unknown / not yet probed, 2 = explicitly supported.
 func openAICompactSupportTier(account *Account) int {
-	if account == nil {
+	if account == nil || account.IsSIWCEnabled() {
 		return 0
 	}
 	if account.IsGrok() {
@@ -528,7 +537,7 @@ func grokQuotaSnapshotStaleForPause(snapshot *xai.QuotaSnapshot, now time.Time) 
 }
 
 func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) (bool, openAIQuotaAutoPauseDecision) {
-	if account == nil || !account.IsOpenAI() {
+	if account == nil || !account.IsOpenAI() || account.IsSIWCEnabled() {
 		return false, openAIQuotaAutoPauseDecision{}
 	}
 	// 自动用卡有独立阈值：达到消费阈值时必须先退出调度；仅达到普通暂停阈值时，
@@ -781,33 +790,6 @@ func (s *OpenAIGatewayService) withOpenAIQuotaAutoPauseContext(ctx context.Conte
 		return ctx
 	}
 	return withOpenAIQuotaAutoPauseSettings(ctx, s.settingService.GetOpenAIQuotaAutoPauseSettings(ctx))
-}
-
-// prioritizeOpenAICompactAccounts re-orders a slice so that accounts with known
-// compact support are tried first, followed by unknown, then explicitly unsupported.
-// The relative order within each tier is preserved.
-func prioritizeOpenAICompactAccounts(accounts []*Account) []*Account {
-	if len(accounts) == 0 {
-		return nil
-	}
-	supported := make([]*Account, 0, len(accounts))
-	unknown := make([]*Account, 0, len(accounts))
-	unsupported := make([]*Account, 0, len(accounts))
-	for _, account := range accounts {
-		switch openAICompactSupportTier(account) {
-		case 2:
-			supported = append(supported, account)
-		case 1:
-			unknown = append(unknown, account)
-		default:
-			unsupported = append(unsupported, account)
-		}
-	}
-	out := make([]*Account, 0, len(accounts))
-	out = append(out, supported...)
-	out = append(out, unknown...)
-	out = append(out, unsupported...)
-	return out
 }
 
 // resolveOpenAIAccountUpstreamModelForRequest resolves the upstream model that
@@ -1753,14 +1735,6 @@ func (s *OpenAIGatewayService) newAcquiredSelectionResult(ctx context.Context, a
 		release()
 	}
 	return selection, err
-}
-
-// markStickySessionHit 在选号结果上记录账号是否来自会话粘性命中。
-func markStickySessionHit(selection *AccountSelectionResult, hit bool) *AccountSelectionResult {
-	if selection != nil && hit {
-		selection.stickySessionHit = true
-	}
-	return selection
 }
 
 func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig {

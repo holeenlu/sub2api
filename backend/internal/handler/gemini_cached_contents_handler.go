@@ -639,7 +639,7 @@ func (h *GatewayHandler) acquireGeminiCachedContentAccountSlot(c *gin.Context, r
 		return nil, false
 	}
 	streamStarted := false
-	release, acquireErr := helper.AcquireAccountSlotWithWaitTimeout(c, account.ID, selection.WaitPlan.MaxConcurrency, selection.WaitPlan.Timeout, false, &streamStarted)
+	release, acquireErr := helper.AcquireAccountSlotWithWaitTimeout(c, account.ID, selection.WaitPlan.MaxConcurrency, selection.WaitPlan.Timeout, false, &streamStarted, selection.WaitPlan.RefreshLimit)
 	if err == nil {
 		helper.DecrementAccountWaitCount(c.Request.Context(), account.ID)
 	}

@@ -16,6 +16,7 @@ const (
 	// anthropicFableRateLimitKey 是 Anthropic 7d_oi（Fable 专属 7d 窗口）限流的
 	// 家族级 scope：命中后所有 Fable 变体（含 [1m] 等后缀）都不再调度到该账号。
 	anthropicFableRateLimitKey = "claude-fable-5"
+	AnthropicFableModelKeyword = "fable"
 )
 
 // isRateLimitActiveForKey 检查指定 key 的限流是否生效
@@ -100,7 +101,7 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 
 // isAnthropicFableModel 判断是否为 Fable 模型家族（claude-fable-5、claude-fable-5[1m] 等变体）
 func isAnthropicFableModel(model string) bool {
-	return strings.Contains(strings.ToLower(model), "fable")
+	return strings.Contains(strings.ToLower(model), AnthropicFableModelKeyword)
 }
 
 func openAIImageGenerationRateLimitApplies(ctx context.Context, requestedModel, modelKey string) bool {
@@ -200,7 +201,7 @@ func (a *Account) modelRateLimitResetAt(scope string) *time.Time {
 
 // modelRateLimitReason 返回指定 scope 冷却记录中的原因；没有记录时为空。
 func (a *Account) modelRateLimitReason(scope string) string {
-	if a == nil || a.Extra == nil {
+	if a == nil || a.Extra == nil || scope == "" {
 		return ""
 	}
 	rawLimits, _ := a.Extra[modelRateLimitsKey].(map[string]any)
@@ -229,4 +230,15 @@ func setAccountModelRateLimitSnapshot(account *Account, scope string, resetAt ti
 		payload["reason"] = reason
 	}
 	limits[scope] = payload
+}
+
+func clearAccountModelRateLimitSnapshot(account *Account, scope string) {
+	if account == nil || account.Extra == nil || strings.TrimSpace(scope) == "" {
+		return
+	}
+	limits, ok := account.Extra[modelRateLimitsKey].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(limits, scope)
 }

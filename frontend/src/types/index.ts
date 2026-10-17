@@ -1662,6 +1662,17 @@ export interface AdminDataProxy {
   username?: string | null
   password?: string | null
   status: 'active' | 'inactive'
+  expires_at?: number | null
+  fallback_mode?: 'none' | 'proxy' | 'direct'
+  backup_proxy_name?: string
+  backup_proxy_key?: string
+  expiry_warn_days?: number
+}
+
+export interface AdminDataAccountGroup {
+  name: string
+  platform: string
+  priority: number
 }
 
 export interface AdminDataAccount {
@@ -1670,6 +1681,16 @@ export interface AdminDataAccount {
   platform: AccountPlatform
   type: AccountType
   credentials: Record<string, unknown>
+  bps_credentials?: Record<string, unknown>
+  siwc_authorization?: {
+    registration: Record<string, unknown>
+    credentials?: Record<string, unknown>
+  }
+  status?: Account['status']
+  schedulable?: boolean
+  load_factor?: number | null
+  groups?: AdminDataAccountGroup[]
+  bps_403_target_group?: AdminDataAccountGroup
   extra?: Record<string, unknown>
   proxy_key?: string | null
   concurrency: number
