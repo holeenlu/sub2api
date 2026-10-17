@@ -110,13 +110,6 @@ var (
 	modelsListCacheMissTotal  atomic.Int64
 	modelsListCacheStoreTotal atomic.Int64
 
-	// Deprecated: flusher_enabled=true 后不再增长(仅 flag=false 降级直写路径使用);新主路径见 FlusherMetrics。remove after 2026-09。
-	// userPlatformQuotaDBIncrErrorTotal 统计 finalizePostUsageBilling 异步 goroutine
-	// 中 IncrementUsageWithReset 失败次数。Redis 已成功累加 + DB 写失败意味着
-	// Redis cache TTL 过期或被清后该笔 cost 会丢失（与实际消费偏差）。
-	// oncall 通过 GatewayUserPlatformQuotaIncrStats() 暴露给 ops 面板做阈值告警。
-	userPlatformQuotaDBIncrErrorTotal atomic.Int64
-	// Deprecated: flusher_enabled=true 后不再增长(仅 flag=false 降级直写路径使用);新主路径见 FlusherMetrics。remove after 2026-09。
 	// userPlatformQuotaDBIncrLegacyErrorTotal 统计 legacy postUsageBilling
 	// （applyUsageBilling 在 repo==nil 时 fallback）路径下的失败次数；
 	// 与 DB Incr 失败分开计数，便于区分"主路径暂时故障"vs"基础设施长期未配齐"。
@@ -147,31 +140,14 @@ func GatewayModelsListCacheStats() (cacheHit, cacheMiss, store int64) {
 }
 
 // GatewayUserPlatformQuotaIncrStats 返回 (mainPathErr, legacyPathErr, sentinelSetErr)。
-// mainPathErr：finalizePostUsageBilling 异步 goroutine 写 DB 失败累计次数；
+// mainPathErr is retained as zero for the existing diagnostics signature; main-path quota updates are transactional.
 // legacyPathErr：postUsageBilling fallback 路径写 DB 失败累计次数；
 // sentinelSetErr：DB 无行时回填 sentinel cache entry 写 Redis 失败累计次数。
 // ops 监控面板可以按"持续上升斜率"做告警阈值。
 func GatewayUserPlatformQuotaIncrStats() (mainPathErr, legacyPathErr, sentinelSetErr int64) {
-	return userPlatformQuotaDBIncrErrorTotal.Load(),
+	return 0,
 		userPlatformQuotaDBIncrLegacyErrorTotal.Load(),
 		userPlatformQuotaSentinelSetCacheErrorTotal.Load()
-}
-
-// GatewayUserPlatformQuotaFlusherStats 暴露 flusher 运行指标供 ops/health 面板查询。
-func GatewayUserPlatformQuotaFlusherStats(f *UserPlatformQuotaUsageFlusher) map[string]int64 {
-	if f == nil || f.metrics == nil {
-		return nil
-	}
-	m := f.metrics
-	return map[string]int64{
-		"flush_success":        m.FlushSuccessTotal.Load(),
-		"flush_error":          m.FlushErrorTotal.Load(),
-		"flush_batch_size":     m.FlushBatchSizeTotal.Load(),
-		"flush_latency_ms_max": m.FlushLatencyMsMax.Load(),
-		"dirty_readd":          m.DirtyReaddTotal.Load(),
-		"dirty_lost":           m.DirtyLostTotal.Load(),
-		"flush_fk_violation":   m.FlushFKViolationTotal.Load(),
-	}
 }
 
 // openAIStreamEventIsTerminalWithType 复用已提取的 type，避免 SSE 热路径重复扫描 JSON。

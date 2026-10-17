@@ -256,7 +256,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	resp, err := s.doOpenAIHTTPUpstream(c, upstreamReq, proxyURL, account)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}

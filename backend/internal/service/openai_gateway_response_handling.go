@@ -29,21 +29,23 @@ import (
 
 // openaiStreamingResult streaming response result
 type openaiStreamingResult struct {
-	usage            *OpenAIUsage
-	firstTokenMs     *int
-	responseID       string
-	imageCount       int
-	imageOutputSizes []string
-	searchCount      int
+	usage              *OpenAIUsage
+	firstTokenMs       *int
+	responseID         string
+	imageCount         int
+	imageOutputSizes   []string
+	searchCount        int
+	clientDisconnected bool
 }
 
 type openaiNonStreamingResult struct {
 	*OpenAIUsage
-	usage            *OpenAIUsage
-	responseID       string
-	imageCount       int
-	imageOutputSizes []string
-	searchCount      int
+	usage              *OpenAIUsage
+	responseID         string
+	imageCount         int
+	imageOutputSizes   []string
+	searchCount        int
+	clientDisconnected bool
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string) (*openaiStreamingResult, error) {
@@ -51,6 +53,8 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
+	drain := newOpenAIHTTPUsageDrain(ctx, resp.Body.Close)
+	defer drain.stop()
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -285,6 +289,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return
 		}
 		clientDisconnected = true
+		drain.start()
 		logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
 	}
 	completeGuardedEvent := func(queueDrained bool) {
@@ -299,6 +304,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if shouldFlush {
 				if err := flushBuffered(); err != nil {
 					clientDisconnected = true
+					drain.start()
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
 				} else {
 					clientOutputStarted = true
@@ -329,14 +335,17 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		payload := `{"type":"error","sequence_number":0,"code":` + strconv.Quote(code) + `,"message":` + strconv.Quote(message) + `,"param":null}`
 		if err := flushBuffered(); err != nil {
 			clientDisconnected = true
+			drain.start()
 			return
 		}
 		if _, err := writePendingString("event: error\ndata: " + payload + "\n\n"); err != nil {
 			clientDisconnected = true
+			drain.start()
 			return
 		}
 		if err := flushBuffered(); err != nil {
 			clientDisconnected = true
+			drain.start()
 			return
 		}
 		clientOutputStarted = true
@@ -357,12 +366,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	streamSearchSeen := make(map[string]struct{})
 	resultWithUsage := func() *openaiStreamingResult {
 		return &openaiStreamingResult{
-			usage:            usage,
-			firstTokenMs:     firstTokenMs,
-			responseID:       responseID,
-			imageCount:       imageCounter.Count(),
-			imageOutputSizes: imageCounter.Sizes(),
-			searchCount:      searchCounter,
+			usage:              usage,
+			firstTokenMs:       firstTokenMs,
+			responseID:         responseID,
+			imageCount:         imageCounter.Count(),
+			imageOutputSizes:   imageCounter.Sizes(),
+			searchCount:        searchCounter,
+			clientDisconnected: clientDisconnected || drain.disconnected(),
 		}
 	}
 	flushPending := func(disconnectMessage string) {
@@ -371,6 +381,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if err := flushBuffered(); err != nil {
 			clientDisconnected = true
+			drain.start()
 			logger.LegacyPrintf("service.openai_gateway", "%s", disconnectMessage)
 			return
 		}
@@ -484,6 +495,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", scanErr), true
 	}
 	processSSELine := func(line string, queueDrained bool) {
+		clientDisconnected = clientDisconnected || drain.disconnected()
 		if streamEarlyErr != nil {
 			return
 		}
@@ -564,7 +576,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					})
 				}
 				outputStarted := openAIStreamClientOutputStarted(c, clientOutputStarted)
-				if !outputStarted && !cyberHit {
+				if !outputStarted && !cyberHit && !openAIUsageHasTokens(usage) && imageCounter.Count() == 0 && searchCounter == 0 {
 					if compactErr := newOpenAICompactFallbackSignal(c, dataBytes, failedMessage); compactErr != nil {
 						sawFailedEvent = true
 						streamEarlyErr = compactErr
@@ -812,6 +824,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				if shouldFlush {
 					if err := flushBuffered(); err != nil {
 						clientDisconnected = true
+						drain.start()
 						logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
 					} else {
 						clientOutputStarted = true
@@ -1000,6 +1013,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				recordOpenAIStreamKeepaliveBytes(c, n)
 				if err != nil {
 					clientDisconnected = true
+					drain.start()
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
 					continue
 				}
@@ -1009,11 +1023,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			if _, err := writePendingString(":\n\n"); err != nil {
 				clientDisconnected = true
+				drain.start()
 				logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
 				continue
 			}
 			if err := flushBuffered(); err != nil {
 				clientDisconnected = true
+				drain.start()
 				logger.LegacyPrintf("service.openai_gateway", "Client disconnected during keepalive flush, continuing to drain upstream for billing")
 			} else {
 				lastDownstreamWriteAt = time.Now()
@@ -1620,9 +1636,70 @@ func openAICacheCreationTokensFromUsage(value gjson.Result) int {
 	)
 }
 
+// readOpenAIHTTPResponseBody preserves complete SSE observations before a read
+// failure and ends at a terminal frame instead of waiting for connection EOF.
+func (s *OpenAIGatewayService) readOpenAIHTTPResponseBody(resp *http.Response, c *gin.Context, guards ...*openAIFirstOutputHeaderGuard) ([]byte, error) {
+	var guard *openAIFirstOutputHeaderGuard
+	if len(guards) > 0 {
+		guard = guards[0]
+	}
+	limit := resolveUpstreamResponseReadLimit(s.cfg)
+	var body []byte
+	var err error
+	reader := bufio.NewReader(resp.Body)
+	prefix, _ := reader.Peek(1)
+	sse := isEventStreamResponse(resp.Header) || (len(prefix) > 0 && (prefix[0] == ':' || prefix[0] == 'd' || prefix[0] == 'e'))
+	if !sse {
+		body, err = io.ReadAll(io.LimitReader(reader, limit+1))
+	} else {
+		scanner := newOpenAISSEJSONDocumentScanner(s.newUpstreamSSEScanner(reader))
+		var output bytes.Buffer
+		var frames openAICompatSSEFrameParser
+		for scanner.Scan() {
+			line := scanner.Text()
+			if int64(output.Len()+len(line)+1) > limit {
+				err = ErrUpstreamResponseBodyTooLarge
+				break
+			}
+			output.WriteString(line)
+			output.WriteByte('\n')
+			if frame, ok := frames.AddLine(line); ok && gjson.Valid(frame.Data) {
+				eventType := effectiveOpenAISSEEventType([]byte(frame.Data), frame.EventType)
+				terminal := isOpenAIWSTerminalEvent(eventType)
+				if guard != nil && (terminal || openAIStreamDataStartsClientOutput(frame.Data, eventType)) {
+					if guard.stopHeaderWait() {
+						err = errors.New("SIWC first output deadline exceeded")
+						break
+					}
+					guard = nil
+				}
+				if terminal {
+					break
+				}
+			}
+		}
+		body = output.Bytes()
+		if err == nil {
+			err = scanner.Err()
+		}
+	}
+	if int64(len(body)) > limit || errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
+		setOpsUpstreamError(c, http.StatusBadGateway, "upstream response too large", "")
+		openAITooLargeError(c)
+		return nil, ErrUpstreamResponseBodyTooLarge
+	}
+	return body, err
+}
+
 func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
-	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
+	drain := newOpenAIHTTPUsageDrain(ctx, resp.Body.Close)
+	defer drain.stop()
+	body, err := s.readOpenAIHTTPResponseBody(resp, c)
 	if err != nil {
+		usage := s.parseSSEUsageFromBody(string(body))
+		if openAIUsageHasTokens(usage) {
+			return &openaiNonStreamingResult{OpenAIUsage: usage, usage: usage, clientDisconnected: drain.disconnected()}, err
+		}
 		return nil, err
 	}
 	observer := upstreamResponseModelObserverFromContext(c)
@@ -1748,6 +1825,17 @@ func bodyHasSSEFraming(body []byte) bool {
 func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
 	bodyText := string(body)
 	terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
+	usage := s.parseSSEUsageFromBody(bodyText)
+	partial := &openaiNonStreamingResult{OpenAIUsage: usage, usage: usage,
+		responseID:       extractOpenAIResponseIDFromJSONBytes(terminalPayload),
+		imageCount:       countOpenAIImageOutputsFromSSEBody(bodyText),
+		imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText)}
+	partialResult := func() *openaiNonStreamingResult {
+		if !openAIUsageHasTokens(usage) && partial.imageCount == 0 {
+			return nil
+		}
+		return partial
+	}
 	if terminalOK && isOpenAIWSTerminalEvent(terminalType) {
 		CompleteHTTPUpstreamResponse(resp)
 	}
@@ -1756,70 +1844,55 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		if msg == "" {
 			msg = "Upstream compact response failed"
 		}
-		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
-			return nil, compactErr
+		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil && partialResult() == nil {
+			return partialResult(), compactErr
 		}
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
-			return nil, failoverErr
+			return partialResult(), failoverErr
 		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		return partialResult(), s.writeOpenAINonStreamingProtocolError(resp, c, msg)
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
-
-	usage := s.parseSSEUsageFromBody(bodyText)
-	if ok {
-		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
-			*usage = parsedUsage
-		}
-		// When the terminal event has an empty output array, reconstruct
-		// output from accumulated delta events so the client gets full content.
-		// gjson Array() returns empty slice for null, missing, or empty arrays.
-		if len(gjson.GetBytes(finalResponse, "output").Array()) == 0 {
-			if outputJSON, reconstructed := reconstructResponseOutputFromSSE(bodyText); reconstructed {
-				if patched, err := sjson.SetRawBytes(finalResponse, "output", outputJSON); err == nil {
-					finalResponse = patched
-				}
+	if !ok {
+		return partialResult(), s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream stream ended without a terminal response")
+	}
+	// When the terminal event has an empty output array, reconstruct
+	// output from accumulated delta events so the client gets full content.
+	// gjson Array() returns empty slice for null, missing, or empty arrays.
+	if len(gjson.GetBytes(finalResponse, "output").Array()) == 0 {
+		if outputJSON, reconstructed := reconstructResponseOutputFromSSE(bodyText); reconstructed {
+			if patched, err := sjson.SetRawBytes(finalResponse, "output", outputJSON); err == nil {
+				finalResponse = patched
 			}
 		}
-		finalResponse = supplementCompactionItemFromSSE(c, finalResponse, bodyText)
-		body = finalResponse
-		if originalModel != mappedModel {
-			body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
-		}
-		// Correct tool calls in final response
-		body = s.correctToolCallsInResponseBody(body)
-		restoredBody, restoreErr := restoreGrokResponsesClientToolPayload(c, body)
-		if restoreErr != nil {
-			return nil, fmt.Errorf("restore Grok Responses client tool response: %w", restoreErr)
-		}
-		restoredBody, restoreErr = restoreOpenAIResponsesClientToolPayload(c, restoredBody)
-		if restoreErr != nil {
-			return nil, fmt.Errorf("restore OpenAI Responses client tool response: %w", restoreErr)
-		}
-		restoredBody, restoreErr = restoreOpenAIResponsesNamespacePayload(c, restoredBody)
-		if restoreErr != nil {
-			return nil, fmt.Errorf("restore OpenAI namespace response: %w", restoreErr)
-		}
-		restoredBody = restoreCodexToolNamesFromContext(c, restoredBody)
-		body = ensureOpenAIResponseObjectCreatedAt(restoredBody)
-	} else {
-		if originalModel != mappedModel {
-			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
-		}
-		body = []byte(bodyText)
 	}
+	finalResponse = supplementCompactionItemFromSSE(c, finalResponse, bodyText)
+	body = finalResponse
+	if originalModel != mappedModel {
+		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
+	}
+	// Correct tool calls in final response
+	body = s.correctToolCallsInResponseBody(body)
+	restoredBody, restoreErr := restoreGrokResponsesClientToolPayload(c, body)
+	if restoreErr != nil {
+		return nil, fmt.Errorf("restore Grok Responses client tool response: %w", restoreErr)
+	}
+	restoredBody, restoreErr = restoreOpenAIResponsesClientToolPayload(c, restoredBody)
+	if restoreErr != nil {
+		return nil, fmt.Errorf("restore OpenAI Responses client tool response: %w", restoreErr)
+	}
+	restoredBody, restoreErr = restoreOpenAIResponsesNamespacePayload(c, restoredBody)
+	if restoreErr != nil {
+		return nil, fmt.Errorf("restore OpenAI namespace response: %w", restoreErr)
+	}
+	restoredBody = restoreCodexToolNamesFromContext(c, restoredBody)
+	body = ensureOpenAIResponseObjectCreatedAt(restoredBody)
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usage, terminalType, false)
 	s.relayOpenAICodexTurnState(c, account, resp.Header)
 
 	contentType := "application/json; charset=utf-8"
-	if !ok {
-		contentType = resp.Header.Get("Content-Type")
-		if contentType == "" {
-			contentType = "text/event-stream"
-		}
-	}
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		// The response was aggregated from SSE; replace any upstream SSE
 		// header before an outer compatibility writer inspects the body.
@@ -2023,7 +2096,7 @@ func extractCodexFinalResponse(body string) ([]byte, bool) {
 		if normalized, changed := normalizeCompletedImageGenerationStatus(data); changed {
 			data = normalized
 		}
-		if eventType == "response.done" || eventType == "response.completed" {
+		if eventType == "response.done" || eventType == "response.completed" || eventType == "response.incomplete" || eventType == "response.cancelled" || eventType == "response.canceled" {
 			if response := gjson.GetBytes(data, "response"); response.Exists() && response.Type == gjson.JSON && response.Raw != "" {
 				finalResponse = []byte(response.Raw)
 			}
@@ -2562,4 +2635,18 @@ func (s *OpenAIGatewayService) validateWSContinuation(ctx context.Context, c *gi
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "previous_response_id is not available for this user", err)
 	}
 	return nil
+}
+
+// Metered failures share one durable request or turn identity with the handler.
+// Stop transparent retries once consumption is observed so a
+// second attempt cannot collide with the first bill or repeat paid execution.
+func stopOpenAIMeteredReplay(err error) error {
+	var failure *UpstreamFailoverError
+	if !errors.As(err, &failure) {
+		return err
+	}
+	stopped := *failure
+	stopped.RetryableOnSameAccount = false
+	stopped.NextAccountAction = NextAccountStop
+	return &stopped
 }
