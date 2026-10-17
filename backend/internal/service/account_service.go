@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	ErrAccountNotFound      = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
-	ErrAccountNilInput      = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
-	ErrAccountNotInFallback = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
+	ErrAccountNotFound         = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
+	ErrUnsupportedAccountField = infraerrors.BadRequest("UNSUPPORTED_ACCOUNT_FIELD", "Account contains removed settings; refresh the editor or remove obsolete fields from the import")
+	ErrAccountNilInput         = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
+	ErrAccountNotInFallback    = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
 )
 
 const AccountListGroupUngrouped int64 = -1

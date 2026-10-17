@@ -1,10 +1,72 @@
 package service
 
 import (
+	"context"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/tidwall/gjson"
 )
+
+type openAIImageRequestModelKey struct{}
+
+// The hosted image model is separate from the outer Responses text model.
+// Record false/empty values too so a later WS text turn clears the image scope.
+func WithOpenAIImageGenerationRequest(ctx context.Context, model string, body []byte) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	intent := IsExplicitImageGenerationIntent(openAIResponsesEndpoint, model, body)
+	ctx = context.WithValue(ctx, ctxkey.OpenAIImageGenerationIntent, intent)
+	imageModel := ""
+	if intent {
+		imageModel = "gpt-image-2"
+		if isOpenAIImageGenerationModel(model) {
+			imageModel = strings.TrimSpace(model)
+		} else if bodyModel := gjson.GetBytes(body, "model").String(); isOpenAIImageGenerationModel(bodyModel) {
+			imageModel = strings.TrimSpace(bodyModel)
+		} else {
+			for _, tool := range gjson.GetBytes(body, "tools").Array() {
+				if tool.Get("type").String() == "image_generation" {
+					if explicit := strings.TrimSpace(tool.Get("model").String()); explicit != "" {
+						imageModel = explicit
+					}
+					break
+				}
+			}
+		}
+	}
+	return context.WithValue(ctx, openAIImageRequestModelKey{}, imageModel)
+}
+
+// Use the existing account allowlist and model cooldown, not a second policy.
+func OpenAIImageRequestRejection(ctx context.Context, account *Account, requestedModel string) string {
+	if account == nil || !account.IsOpenAI() {
+		return ""
+	}
+	model := ""
+	if ctx != nil {
+		model, _ = ctx.Value(openAIImageRequestModelKey{}).(string)
+	}
+	if model == "" {
+		switch {
+		case isOpenAIImageGenerationModel(requestedModel), OpenAIImagesEndpointFromContext(ctx):
+			model = strings.TrimSpace(requestedModel)
+		case OpenAIImageGenerationIntentFromContext(ctx):
+			model = "gpt-image-2"
+		}
+	}
+	if model == "" {
+		return ""
+	}
+	if !account.IsModelSupported(model) {
+		return "image_model_not_supported"
+	}
+	if account.isModelRateLimitedWithContext(WithOpenAIImageGenerationIntent(ctx), model) {
+		return "image_model_rate_limited"
+	}
+	return ""
+}
 
 const (
 	openAIResponsesEndpoint          = "/v1/responses"

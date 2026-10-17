@@ -4,6 +4,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
@@ -183,6 +184,18 @@ func TestGenerateSessionHash_MetadataJSON_HasHighestPriority(t *testing.T) {
 
 	hash := svc.GenerateSessionHash(parsed)
 	require.Equal(t, "c72554f2-1234-5678-abcd-123456789abc", hash, "JSON format metadata session_id should have highest priority")
+}
+
+func TestGenerateSessionHash_OversizedMetadataSessionFallsBackWithoutRejectingMetadata(t *testing.T) {
+	svc := &GatewayService{}
+	longSession := strings.Repeat("x", maxStickySessionIDLength+1)
+	metadata := `{"device_id":"device","account_uuid":"","session_id":"` + longSession + `"}`
+	parsed := mustParseSessionHashRequest(t, anthropicSessionBody("system", []any{msg("user", "hello")}, metadata), &SessionContext{ClientIP: "1.2.3.4", UserAgent: "claude", APIKeyID: 1})
+
+	hash := svc.GenerateSessionHash(parsed)
+	require.NotEmpty(t, hash)
+	require.NotEqual(t, longSession, hash)
+	require.NotNil(t, ParseMetadataUserID(parsed.MetadataUserID), "identity parsing must remain available to request rewriting")
 }
 
 func TestGenerateSessionHash_NilSessionContextBackwardCompatible(t *testing.T) {

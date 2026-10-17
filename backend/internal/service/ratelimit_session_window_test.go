@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/stretchr/testify/require"
 )
 
 // sessionWindowMockRepo is a minimal AccountRepository mock that records calls
@@ -403,8 +404,8 @@ func TestUpdateSessionWindow_SamplesFable7dOiHeaders(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionWindow_ClearsFable7dOiOnWindowReset(t *testing.T) {
-	// 5h 窗口重置时应连同清除 7d_oi 被动采样数据，与 7d 行为一致。
+func TestUpdateSessionWindow_PreservesWeeklySnapshotsOnWindowReset(t *testing.T) {
+	// Weekly windows reset independently; a 5h-only response must preserve them.
 	resetUnix := time.Now().Add(3 * time.Hour).Unix()
 
 	repo := &sessionWindowMockRepo{}
@@ -421,10 +422,42 @@ func TestUpdateSessionWindow_ClearsFable7dOiOnWindowReset(t *testing.T) {
 		t.Fatalf("expected 1 UpdateExtra (clear) call, got %d", len(repo.updateExtraCalls))
 	}
 	clearUpdates := repo.updateExtraCalls[0].Updates
-	for _, key := range []string{"passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"} {
-		if val, present := clearUpdates[key]; !present || val != nil {
-			t.Errorf("expected %s cleared to nil on window reset, got present=%v val=%v", key, present, val)
-		}
+	for _, key := range []string{"passive_usage_7d_utilization", "passive_usage_7d_reset", "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset", "passive_usage_sampled_at"} {
+		require.NotContains(t, clearUpdates, key)
+	}
+}
+
+func TestUpdateSessionWindow_SamplesWithoutStatusHeader(t *testing.T) {
+	for _, weeklyOnly := range []bool{false, true} {
+		t.Run(fmt.Sprint("weeklyOnly=", weeklyOnly), func(t *testing.T) {
+			repo := &sessionWindowMockRepo{}
+			svc := newRateLimitServiceForTest(repo)
+			reset := time.Now().Add(time.Hour).Unix()
+			headers := http.Header{}
+			headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.74")
+			headers.Set("anthropic-ratelimit-unified-7d-reset", fmt.Sprint(reset+86400))
+			headers.Set("anthropic-ratelimit-unified-7d_oi-utilization", "0.42")
+			headers.Set("anthropic-ratelimit-unified-7d_oi-reset", fmt.Sprint(reset+172800))
+			if !weeklyOnly {
+				headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.65")
+				headers.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprint(reset))
+			}
+			svc.UpdateSessionWindow(t.Context(), &Account{ID: 12, SessionWindowStatus: "allowed"}, headers)
+			require.NotEmpty(t, repo.updateExtraCalls)
+			updates := repo.updateExtraCalls[len(repo.updateExtraCalls)-1].Updates
+			require.Equal(t, 0.74, updates["passive_usage_7d_utilization"])
+			require.Equal(t, reset+86400, updates["passive_usage_7d_reset"])
+			require.Equal(t, 0.42, updates["passive_usage_7d_oi_utilization"])
+			require.Equal(t, reset+172800, updates["passive_usage_7d_oi_reset"])
+			if weeklyOnly {
+				require.Empty(t, repo.sessionWindowCalls)
+			} else {
+				require.Equal(t, 0.65, updates["session_window_utilization"])
+				require.Len(t, repo.sessionWindowCalls, 1)
+				require.Equal(t, reset, repo.sessionWindowCalls[0].End.Unix())
+				require.Equal(t, "allowed", repo.sessionWindowCalls[0].Status)
+			}
+		})
 	}
 }
 
