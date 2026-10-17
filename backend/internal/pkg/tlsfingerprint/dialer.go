@@ -5,13 +5,17 @@ package tlsfingerprint
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/proxy"
 )
@@ -25,11 +29,11 @@ type Profile struct {
 	PointFormats        []uint16
 	EnableGREASE        bool
 	SignatureAlgorithms []uint16 // Empty uses defaultSignatureAlgorithms
-	ALPNProtocols       []string // Empty uses ["http/1.1"]
+	ALPNProtocols       []string // Empty uses ["http/1.1"].
 	SupportedVersions   []uint16 // Empty uses [TLS1.3, TLS1.2]
-	KeyShareGroups      []uint16 // Empty uses [X25519]
+	KeyShareGroups      []uint16 // Empty uses [X25519MLKEM768, X25519]
 	PSKModes            []uint16 // Empty uses [psk_dhe_ke]
-	Extensions          []uint16 // Extension type IDs in order; empty uses default Node.js 24.x order
+	Extensions          []uint16 // Extension type IDs in order; empty uses the captured native CLI order
 }
 
 // Dialer creates TLS connections with custom fingerprints.
@@ -52,12 +56,11 @@ type SOCKS5ProxyDialer struct {
 	proxyURL *url.URL
 }
 
-// Default TLS fingerprint values captured from Claude Code (Node.js 24.x)
-// Captured via tls-fingerprint-web capture server
-// JA3 Hash: 44f88fca027f27bab4bb08d4af15f23e
-// JA4:      t13d1714h1_5b57614c22b0_7baf387fc6ff
+// Captured from official Claude Code 2.1.301 linux-arm64 Messages requests
+// over direct TLS and a local CONNECT proxy on 2026-10-16. ALPN is http/1.1, with no GREASE;
+// the native client offers the hybrid ML-KEM key share before X25519.
 var (
-	// defaultCipherSuites contains the 17 cipher suites from Node.js 24.x
+	// defaultCipherSuites contains the 17 cipher suites from the Linux native CLI.
 	// Order is critical for JA3 fingerprint matching
 	defaultCipherSuites = []uint16{
 		// TLS 1.3 cipher suites
@@ -90,19 +93,20 @@ var (
 		0x0035, // TLS_RSA_WITH_AES_256_CBC_SHA
 	}
 
-	// defaultCurves contains the 3 supported groups from Node.js 24.x
+	// defaultCurves follows the native CLI supported_groups extension.
 	defaultCurves = []utls.CurveID{
-		utls.X25519,    // 0x001d
-		utls.CurveP256, // 0x0017 (secp256r1)
-		utls.CurveP384, // 0x0018 (secp384r1)
+		utls.X25519MLKEM768, // 0x11ec
+		utls.X25519,         // 0x001d
+		utls.CurveP256,      // 0x0017 (secp256r1)
+		utls.CurveP384,      // 0x0018 (secp384r1)
 	}
 
-	// defaultPointFormats contains point formats from Node.js 24.x
+	// defaultPointFormats contains the native Linux CLI point formats.
 	defaultPointFormats = []uint16{
 		0, // uncompressed
 	}
 
-	// defaultSignatureAlgorithms contains the 9 signature algorithms from Node.js 24.x
+	// defaultSignatureAlgorithms contains the native Linux CLI signature algorithms.
 	defaultSignatureAlgorithms = []utls.SignatureScheme{
 		0x0403, // ecdsa_secp256r1_sha256
 		0x0804, // rsa_pss_rsae_sha256
@@ -160,7 +164,7 @@ func (d *SOCKS5ProxyDialer) DialTLSContext(ctx context.Context, network, addr st
 		proxyAddr = net.JoinHostPort(d.proxyURL.Hostname(), "1080") // Default SOCKS5 port
 	}
 
-	socksDialer, err := proxy.SOCKS5("tcp", proxyAddr, auth, proxy.Direct)
+	socksDialer, err := proxy.SOCKS5("tcp", proxyAddr, auth, proxyutil.ContextForwardDialer{DialFunc: proxyutil.GuardProxyDial(d.proxyURL, nil)})
 	if err != nil {
 		slog.Debug("tls_fingerprint_socks5_dialer_failed", "error", err)
 		return nil, fmt.Errorf("create SOCKS5 dialer: %w", err)
@@ -168,7 +172,7 @@ func (d *SOCKS5ProxyDialer) DialTLSContext(ctx context.Context, network, addr st
 
 	// Step 2: Establish SOCKS5 tunnel to target
 	slog.Debug("tls_fingerprint_socks5_establishing_tunnel", "target", addr)
-	conn, err := socksDialer.Dial("tcp", addr)
+	conn, err := socksDialer.(proxy.ContextDialer).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		slog.Debug("tls_fingerprint_socks5_connect_failed", "error", err)
 		return nil, fmt.Errorf("SOCKS5 connect: %w", err)
@@ -197,13 +201,30 @@ func (d *HTTPProxyDialer) DialTLSContext(ctx context.Context, network, addr stri
 		}
 	}
 
-	dialer := &net.Dialer{}
-	conn, err := dialer.DialContext(ctx, "tcp", proxyAddr)
+	conn, err := proxyutil.GuardProxyDial(d.proxyURL, nil)(ctx, "tcp", proxyAddr)
 	if err != nil {
 		slog.Debug("tls_fingerprint_http_proxy_connect_failed", "error", err)
 		return nil, fmt.Errorf("connect to proxy: %w", err)
 	}
 	slog.Debug("tls_fingerprint_http_proxy_connected", "proxy_addr", proxyAddr)
+
+	// Keep proxy credentials inside TLS for HTTPS proxies. Both the proxy
+	// certificate and the later upstream certificate use normal verification.
+	// Close the original socket on cancellation, including a stalled CONNECT.
+	rawConn := conn
+	stopCancellation := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
+	defer stopCancellation()
+	if strings.EqualFold(d.proxyURL.Scheme, "https") {
+		proxyTLS := tls.Client(conn, &tls.Config{
+			ServerName: d.proxyURL.Hostname(),
+			MinVersion: tls.VersionTLS12,
+		})
+		if err := proxyTLS.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("TLS handshake with proxy: %w", err)
+		}
+		conn = proxyTLS
+	}
 
 	// Step 2: Send CONNECT request to establish tunnel
 	req := &http.Request{
@@ -307,11 +328,10 @@ func toUTLSCurves(curves []uint16) []utls.CurveID {
 	return result
 }
 
-// defaultExtensionOrder is the Node.js 24.x extension order.
+// defaultExtensionOrder is the native CLI Messages extension order.
 // Used when Profile.Extensions is empty.
 var defaultExtensionOrder = []uint16{
 	0,     // server_name
-	65037, // encrypted_client_hello
 	23,    // extended_master_secret
 	65281, // renegotiation_info
 	10,    // supported_groups
@@ -368,9 +388,18 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 		supportedVersions = profile.SupportedVersions
 	}
 
-	keyShareGroups := []utls.CurveID{utls.X25519}
+	keyShareGroups := []utls.CurveID{utls.X25519MLKEM768, utls.X25519}
 	if profile != nil && len(profile.KeyShareGroups) > 0 {
 		keyShareGroups = toUTLSCurves(profile.KeyShareGroups)
+	} else if profile != nil && len(profile.Curves) > 0 {
+		// A partial custom profile may exclude ML-KEM. Never send a key share
+		// for a group absent from its supported_groups extension.
+		keyShareGroups = slices.DeleteFunc(keyShareGroups, func(group utls.CurveID) bool {
+			return !slices.Contains(curves, group)
+		})
+		if len(keyShareGroups) == 0 {
+			keyShareGroups = curves[:1]
+		}
 	}
 
 	pskModes := []uint16{uint16(utls.PskModeDHE)}
