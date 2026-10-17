@@ -1,5 +1,6 @@
 export default {
     ops: {
+
       title: '运维监控',
       description: '运维监控与排障',
       // Dashboard
@@ -366,7 +367,8 @@ export default {
           client: '客户端响应',
           upstream_message: '上游消息',
           upstream_detail: '上游详情',
-          upstream_events: '上游事件'
+          upstream_events: '上游事件',
+          scheduling_trace: '调度决策'
         },
         basicInfo: '基本信息',
         platform: '平台',
@@ -698,6 +700,8 @@ export default {
         }
       },
       settings: {
+        accountTelemetry: "账号遥测定时发送",
+        accountTelemetryHint: "默认关闭。仅已导入设备包的账号在开启后按十分钟活动窗口、约十秒事件、六小时 GrowthBook 周期发送；关闭后停止定时发送并保留导入资料。未导入的账号保持等待，服务器不再初始化 Claude Code。",
         title: '运维监控设置',
         loadFailed: '加载设置失败',
         saveSuccess: '运维监控设置保存成功',

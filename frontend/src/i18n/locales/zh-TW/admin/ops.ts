@@ -2,6 +2,7 @@
 // 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
 export default {
     ops: {
+
       title: '維運監控',
       description: '維運監控與故障排除',
       // Dashboard
@@ -368,7 +369,8 @@ export default {
           client: '用戶端回應',
           upstream_message: '上游訊息',
           upstream_detail: '上游詳情',
-          upstream_events: '上游事件'
+          upstream_events: '上游事件',
+          scheduling_trace: '排程決策'
         },
         basicInfo: '基本資訊',
         platform: '平台',
@@ -700,6 +702,8 @@ export default {
         }
       },
       settings: {
+        accountTelemetry: "帳號遙測定時傳送",
+        accountTelemetryHint: "預設關閉。僅已匯入裝置包的帳號在開啟後按十分鐘活動視窗、約十秒事件、六小時 GrowthBook 週期傳送；關閉後停止定時傳送並保留匯入資料。未匯入的帳號保持等待，伺服器不再初始化 Claude Code。",
         title: '維運監控設定',
         loadFailed: '載入設定失敗',
         saveSuccess: '維運監控設定儲存成功',

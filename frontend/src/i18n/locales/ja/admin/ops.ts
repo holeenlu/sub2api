@@ -1,5 +1,6 @@
 export default {
     ops: {
+
       title: '運用監視',
       description: '運用状況の監視とトラブルシューティング',
       // Dashboard
@@ -366,7 +367,8 @@ export default {
           client: 'クライアントレスポンス',
           upstream_message: 'アップストリームメッセージ',
           upstream_detail: 'アップストリーム詳細',
-          upstream_events: 'アップストリームイベント'
+          upstream_events: 'アップストリームイベント',
+          scheduling_trace: 'スケジューリング判断'
         },
         basicInfo: '基本情報',
         platform: 'プラットフォーム',
@@ -698,6 +700,8 @@ export default {
         }
       },
       settings: {
+        accountTelemetry: "アカウントテレメトリの定期送信",
+        accountTelemetryHint: "既定はオフです。有効時はデバイスパッケージをインポート済みのアカウントのみ、10分間のアクティブ期間内で約10秒ごとにイベント、6時間ごとに GrowthBook を送信します。無効時は定期送信を停止し、インポートした情報を保持します。未インポートのアカウントは待機し、サーバーは Claude Code を初期化しません。",
         title: '運用監視設定',
         loadFailed: '設定の読み込みに失敗しました',
         saveSuccess: '運用監視設定を保存しました',
