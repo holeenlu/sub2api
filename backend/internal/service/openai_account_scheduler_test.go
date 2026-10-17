@@ -3958,3 +3958,10 @@ func TestOpenAIAccountScheduler_PriorityMigrationReplay(t *testing.T) {
 		})
 	}
 }
+
+func (c *schedulerTestGatewayCache) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (c *schedulerTestGatewayCache) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
+}

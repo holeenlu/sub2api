@@ -326,11 +326,19 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// 计算粘性会话hash
 	parsedReq.SessionContext = &service.SessionContext{
-		ClientIP:  ip.GetClientIP(c),
-		UserAgent: c.GetHeader("User-Agent"),
-		APIKeyID:  apiKey.ID,
+		ClientIP:          ip.GetClientIP(c),
+		UserAgent:         c.GetHeader("User-Agent"),
+		APIKeyID:          apiKey.ID,
+		ExplicitSessionID: service.ExtractClientSessionID(c),
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	correlationID := service.ExtractClientSessionID(c)
+	if correlationID == "" {
+		if metadata := service.ParseMetadataUserID(parsedReq.MetadataUserID); metadata != nil {
+			correlationID = metadata.SessionID
+		}
+	}
+	c.Request = c.Request.WithContext(service.WithGatewayCacheDiagnostics(c.Request.Context(), apiKey.ID, "anthropic", correlationID, sessionHash, c.GetHeader("User-Agent")))
 
 	// [DEBUG-STICKY] 打印会话 hash 生成结果
 	reqLog.Info("sticky.session_hash_generated",
@@ -2215,7 +2223,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 
-	_, ok = middleware2.GetAuthSubjectFromContext(c)
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
 		return
@@ -2277,6 +2285,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 
 	setOpsRequestContext(c, parsedReq.Model, parsedReq.Stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsedReq.Stream, false)))
+	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, parsedReq.Model, body); decision != nil && !decision.AllowNextStage {
+		h.anthropicSecurityAuditError(c, decision)
+		return
+	}
 
 	// 获取订阅信息（可能为nil）
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
@@ -2294,9 +2306,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 
 	// 计算粘性会话 hash
 	parsedReq.SessionContext = &service.SessionContext{
-		ClientIP:  ip.GetClientIP(c),
-		UserAgent: c.GetHeader("User-Agent"),
-		APIKeyID:  apiKey.ID,
+		ClientIP:          ip.GetClientIP(c),
+		UserAgent:         c.GetHeader("User-Agent"),
+		APIKeyID:          apiKey.ID,
+		ExplicitSessionID: service.ExtractClientSessionID(c),
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 
@@ -2327,10 +2340,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 type InterceptType int
 
 const (
-	InterceptTypeNone              InterceptType = iota
-	InterceptTypeWarmup                          // 预热请求（返回 "New Conversation"）
-	InterceptTypeSuggestionMode                  // SUGGESTION MODE（返回空字符串）
-	InterceptTypeMaxTokensOneHaiku               // max_tokens=1 + haiku 探测请求（返回 "#"）
+	InterceptTypeNone           InterceptType = iota
+	InterceptTypeWarmup                       // 预热请求（返回 "New Conversation"）
+	InterceptTypeSuggestionMode               // SUGGESTION MODE（返回空字符串）
+	InterceptTypeMaxTokensOne                 // 已验证 Claude Code 的 max_tokens=1 探测请求（返回 "#"）
 )
 
 // isHaikuModel 检查模型名称是否包含 "haiku"（大小写不敏感）
@@ -2352,9 +2365,11 @@ func isMaxTokensOneHaikuRequest(model string, maxTokens int) bool {
 //   - maxTokens: max_tokens 值
 //   - isClaudeCodeClient: 是否已通过 Claude Code 客户端校验
 func detectInterceptType(body []byte, model string, maxTokens int, isClaudeCodeClient bool) InterceptType {
-	// 优先检查 max_tokens=1 + haiku 探测请求（流式/非流式均适用）
-	if isClaudeCodeClient && isMaxTokensOneHaikuRequest(model, maxTokens) {
-		return InterceptTypeMaxTokensOneHaiku
+	// Verified clients probe all Claude models, not just Haiku. Keep the
+	// separate Haiku-only validator compatibility exception unchanged.
+	// Source: huoji120/sub4api a3eaf63afc672ffedf7844e6cfc5cb6750d52a3e.
+	if isClaudeCodeClient && maxTokens == 1 {
+		return InterceptTypeMaxTokensOne
 	}
 
 	// 快速检查：如果不包含任何关键字，直接返回
@@ -2428,8 +2443,14 @@ func sendMockInterceptStream(c *gin.Context, model string, interceptType Interce
 	var msgID string
 	var outputTokens int
 	var textDeltas []string
+	stopReason := "end_turn"
 
 	switch interceptType {
+	case InterceptTypeMaxTokensOne:
+		msgID = generateRealisticMsgID()
+		outputTokens = 1
+		textDeltas = []string{"#"}
+		stopReason = "max_tokens"
 	case InterceptTypeSuggestionMode:
 		msgID = generateRealisticMsgID()
 		outputTokens = 1
@@ -2456,7 +2477,7 @@ func sendMockInterceptStream(c *gin.Context, model string, interceptType Interce
 	}
 
 	// Add final events
-	messageDeltaJSON := `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"output_tokens":` + strconv.Itoa(outputTokens) + `}}`
+	messageDeltaJSON := `{"type":"message_delta","delta":{"stop_reason":` + strconv.Quote(stopReason) + `,"stop_sequence":null,"stop_details":null},"usage":{"output_tokens":` + strconv.Itoa(outputTokens) + `}}`
 
 	events = append(events,
 		`event: content_block_stop`+"\n"+`data: {"index":0,"type":"content_block_stop"}`,
@@ -2498,7 +2519,7 @@ func sendMockInterceptResponse(c *gin.Context, model string, interceptType Inter
 		text = ""
 		outputTokens = 1
 		stopReason = "end_turn"
-	case InterceptTypeMaxTokensOneHaiku:
+	case InterceptTypeMaxTokensOne:
 		msgID = generateRealisticMsgID()
 		text = "#"
 		outputTokens = 1

@@ -336,3 +336,10 @@ func TestSecurityContinuationJSONAndTenantPool(t *testing.T) {
 	SetOpenAIHTTPResponseOwner(attacker, 2, 22)
 	require.Error(t, svc.validateWSContinuation(ctx, attacker, []byte(`{"previous_response_id":"resp_owned"}`)))
 }
+
+func (c *openAIWSStateStoreTimeoutProbeCache) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (c *openAIWSStateStoreTimeoutProbeCache) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
+}

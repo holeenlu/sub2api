@@ -305,7 +305,9 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 ) (*http.Request, []byte, error) {
 	normalized, thinkingErr := normalizeClaudeThinkingForUpstream(ctx, body, gjson.GetBytes(body, "model").String())
 	if thinkingErr != nil {
-		writeClaudeThinkingError(c, thinkingErr, writeAnthropicError)
+		writeClaudeThinkingError(c, thinkingErr, func(c *gin.Context, status int, errType, message string) {
+			writeClaudeGatewayError(c, status, gin.H{"type": "error", "error": gin.H{"type": errType, "message": message}})
+		})
 		return nil, nil, thinkingErr
 	}
 	body = normalized

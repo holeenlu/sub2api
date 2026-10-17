@@ -6,7 +6,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -29,13 +28,18 @@ func RegisterAdminRoutes(
 	admin.Use(panelRateLimiter.Global())
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
+	admin.Use(middleware.AdminPermissionStepUp(stepUpAuth))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 	{
+		admin.GET("/roles/admin/permissions", h.Admin.Setting.GetAdminRolePermissions)
+		admin.PUT("/roles/admin/permissions", h.Admin.Setting.UpdateAdminRolePermissions)
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)
 
 		// 仪表盘
 		registerDashboardRoutes(admin, h)
+
+		registerVendorAdminRoutes(admin, h)
 
 		// 用户管理
 		registerUserManagementRoutes(admin, h)
@@ -77,7 +81,6 @@ func RegisterAdminRoutes(
 		registerSettingsRoutes(admin, h)
 
 		// 数据管理
-		registerDataManagementRoutes(admin, h, stepUpAuth)
 
 		// 数据库备份恢复
 		registerBackupRoutes(admin, h, stepUpAuth)
@@ -293,6 +296,7 @@ func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		dashboard.POST("/users-usage", h.Admin.Dashboard.GetBatchUsersUsage)
 		dashboard.POST("/api-keys-usage", h.Admin.Dashboard.GetBatchAPIKeysUsage)
 		dashboard.GET("/user-breakdown", h.Admin.Dashboard.GetUserBreakdown)
+		dashboard.GET("/api-key-breakdown", h.Admin.Dashboard.GetAPIKeyBreakdown)
 		dashboard.POST("/aggregation/backfill", h.Admin.Dashboard.BackfillAggregation)
 	}
 }
@@ -306,6 +310,7 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		users.POST("", h.Admin.User.Create)
 		users.PUT("/:id", h.Admin.User.Update)
 		users.DELETE("/:id", h.Admin.User.Delete)
+		users.POST("/batch-delete", h.Admin.User.DeleteBatch)
 		users.POST("/:id/balance", h.Admin.User.UpdateBalance)
 		users.GET("/:id/api-keys", h.Admin.User.GetUserAPIKeys)
 		users.GET("/:id/usage", h.Admin.User.GetUserUsage)
@@ -357,7 +362,7 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
 	accounts := admin.Group("/accounts")
 	{
-		accounts.GET("", h.Admin.Account.List)
+		accounts.GET("", h.Vendor.Dispatch("accounts", h.Admin.Account.List, h.VendorAccount.List))
 		accounts.GET("/upstream-billing-rates", h.Admin.Account.GetUpstreamBillingRates)
 		accounts.GET("/upstream-billing-probe/settings", h.Admin.Account.GetUpstreamBillingProbeSettings)
 		accounts.PUT("/upstream-billing-probe/settings", h.Admin.Account.UpdateUpstreamBillingProbeSettings)
@@ -366,17 +371,24 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.PUT("/ollama-cloud-usage/settings", h.Admin.Account.UpdateOllamaCloudUsageSettings)
 		accounts.GET("/opencode-go-usage/settings", h.Admin.Account.GetOpenCodeGoUsageSettings)
 		accounts.PUT("/opencode-go-usage/settings", h.Admin.Account.UpdateOpenCodeGoUsageSettings)
-		accounts.GET("/:id", h.Admin.Account.GetByID)
+		accounts.POST("/codex-diagnostic-fingerprint/refresh", h.Admin.Account.RefreshDiagnosticFingerprint)
+		accounts.GET("/:id", h.Vendor.Dispatch("accounts", h.Admin.Account.GetByID, h.VendorAccount.Get))
+		accounts.POST("/:id/telemetry/import", h.Admin.Account.ImportAccountTelemetry)
+		accounts.POST("/:id/codex-diagnostic", h.Admin.Account.StartCodexDiagnosticRun)
+		accounts.GET("/:id/codex-diagnostic", h.Admin.Account.GetCodexDiagnosticPlan)
+		accounts.PUT("/:id/codex-diagnostic", h.Admin.Account.SaveCodexDiagnosticPlan)
+		accounts.GET("/:id/codex-diagnostic/history", h.Admin.Account.ListCodexDiagnosticRuns)
+		accounts.POST("/:id/codex-diagnostic/:run_id/cancel", h.Admin.Account.CancelCodexDiagnosticRun)
 		accounts.GET("/:id/claude/reset-credits", h.Admin.Account.ClaudeResetCredits)
 		// Same protection as the Codex reset-quota route (admin auth, audit, compliance guard).
 		accounts.POST("/:id/claude/reset-credits/redeem", h.Admin.Account.RedeemClaudeResetCredit)
-		accounts.POST("", h.Admin.Account.Create)
+		accounts.POST("", h.Vendor.Dispatch("accounts", h.Admin.Account.Create, h.VendorAccount.Create))
 		accounts.POST("/:id/duplicate", h.Admin.Account.Duplicate)
 		accounts.POST("/check-mixed-channel", h.Admin.Account.CheckMixedChannel)
 		accounts.POST("/import/codex-session", h.Admin.Account.ImportCodexSession)
 		accounts.POST("/sync/crs", h.Admin.Account.SyncFromCRS)
 		accounts.POST("/sync/crs/preview", h.Admin.Account.PreviewFromCRS)
-		accounts.PUT("/:id", h.Admin.Account.Update)
+		accounts.PUT("/:id", h.Vendor.Dispatch("accounts", h.Admin.Account.Update, h.VendorAccount.Update))
 		accounts.GET("/:id/grok-media-eligibility", h.Admin.Account.GetGrokMediaEligibility)
 		accounts.PUT("/:id/grok-media-eligibility", h.Admin.Account.UpdateGrokMediaEligibility)
 		accounts.PUT("/:id/upstream-billing-probe", h.Admin.Account.SetUpstreamBillingProbeEnabled)
@@ -389,17 +401,17 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/:id/opencode-go-usage", h.Admin.Account.GetOpenCodeGoUsage)
 		accounts.PUT("/:id/opencode-go-usage/auto-refresh", h.Admin.Account.SetOpenCodeGoUsageAutoRefresh)
 		accounts.POST("/:id/opencode-go-usage/refresh", h.Admin.Account.RefreshOpenCodeGoUsage)
-		accounts.DELETE("/:id", h.Admin.Account.Delete)
+		accounts.DELETE("/:id", h.Vendor.Dispatch("accounts", h.Admin.Account.Delete, h.VendorAccount.Delete))
 		accounts.POST("/:id/test", h.Admin.Account.Test)
 		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
-		accounts.POST("/:id/refresh", h.Admin.Account.Refresh)
+		accounts.POST("/:id/refresh", h.Vendor.Dispatch("accounts", h.Admin.Account.Refresh, h.VendorAccount.Refresh))
 		accounts.POST("/:id/apply-oauth-credentials", h.Admin.Account.ApplyOAuthCredentials)
 		accounts.POST("/:id/set-privacy", h.Admin.Account.SetPrivacy)
 		accounts.POST("/:id/refresh-tier", h.Admin.Account.RefreshTier)
 		accounts.GET("/:id/stats", h.Admin.Account.GetStats)
 		accounts.POST("/:id/clear-error", h.Admin.Account.ClearError)
 		accounts.POST("/:id/revert-proxy-fallback", h.Admin.Account.RevertProxyFallback)
-		accounts.GET("/:id/usage", h.Admin.Account.GetUsage)
+		accounts.GET("/:id/usage", h.Vendor.Dispatch("accounts", h.Admin.Account.GetUsage, h.VendorUsage.AccountUsage))
 		accounts.GET("/:id/today-stats", h.Admin.Account.GetTodayStats)
 		accounts.POST("/usage/batch", h.Admin.Account.GetBatchUsage)
 		accounts.POST("/today-stats/batch", h.Admin.Account.GetBatchTodayStats)
@@ -454,6 +466,9 @@ func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	openai := admin.Group("/openai")
 	{
 		openai.POST("/generate-auth-url", h.Admin.OpenAIOAuth.GenerateAuthURL)
+		openai.GET("/accounts/:id/excel-authorization", h.Admin.OpenAIOAuth.GetExcelAuthorization)
+		openai.POST("/accounts/:id/excel-authorization", h.Admin.OpenAIOAuth.ImportExcelAuthorization)
+		openai.DELETE("/accounts/:id/excel-authorization", h.Admin.OpenAIOAuth.DeleteExcelAuthorization)
 		openai.POST("/exchange-code", h.Admin.OpenAIOAuth.ExchangeCode)
 		openai.POST("/refresh-token", h.Admin.OpenAIOAuth.RefreshToken)
 		openai.POST("/accounts/:id/refresh", h.Admin.OpenAIOAuth.RefreshAccountToken)
@@ -518,20 +533,20 @@ func registerCNProviderRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
 	proxies := admin.Group("/proxies")
 	{
-		proxies.GET("", h.Admin.Proxy.List)
+		proxies.GET("", h.Vendor.Dispatch("proxies", h.Admin.Proxy.List, h.VendorProxy.List))
 		proxies.GET("/all", h.Admin.Proxy.GetAll)
 		// 代理导出泄露账号密码原文——要求 step-up 2FA
 		proxies.GET("/data", gin.HandlerFunc(stepUpAuth), h.Admin.Proxy.ExportData)
 		proxies.POST("/data", h.Admin.Proxy.ImportData)
-		proxies.GET("/:id", h.Admin.Proxy.GetByID)
-		proxies.POST("", h.Admin.Proxy.Create)
-		proxies.PUT("/:id", h.Admin.Proxy.Update)
-		proxies.DELETE("/:id", h.Admin.Proxy.Delete)
-		proxies.POST("/:id/test", h.Admin.Proxy.Test)
-		proxies.POST("/:id/quality-check", h.Admin.Proxy.CheckQuality)
+		proxies.GET("/:id", h.Vendor.Dispatch("proxies", h.Admin.Proxy.GetByID, h.VendorProxy.Get))
+		proxies.POST("", h.Vendor.Dispatch("proxies", h.Admin.Proxy.Create, h.VendorProxy.Create))
+		proxies.PUT("/:id", h.Vendor.Dispatch("proxies", h.Admin.Proxy.Update, h.VendorProxy.Update))
+		proxies.DELETE("/:id", h.Vendor.Dispatch("proxies", h.Admin.Proxy.Delete, h.VendorProxy.Delete))
+		proxies.POST("/:id/test", h.Vendor.Dispatch("proxies", h.Admin.Proxy.Test, h.VendorProxy.Test))
+		proxies.POST("/:id/quality-check", h.Vendor.Dispatch("proxies", h.Admin.Proxy.CheckQuality, h.VendorProxy.QualityCheck))
 		proxies.GET("/:id/stats", h.Admin.Proxy.GetStats)
 		proxies.GET("/:id/accounts", h.Admin.Proxy.GetProxyAccounts)
-		proxies.POST("/batch-delete", h.Admin.Proxy.BatchDelete)
+		proxies.POST("/batch-delete", h.Vendor.Dispatch("proxies", h.Admin.Proxy.BatchDelete, h.VendorProxy.BatchDelete))
 		proxies.POST("/batch", h.Admin.Proxy.BatchCreate)
 	}
 }
@@ -569,6 +584,8 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
+		adminSettings.GET("/excel-bps-defaults", h.Admin.Setting.GetExcelBPSDefaults)
+		adminSettings.PUT("/excel-bps-defaults", h.Admin.Setting.UpdateExcelBPSDefaults)
 		adminSettings.POST("/test-smtp", h.Admin.Setting.TestSMTPConnection)
 		adminSettings.POST("/send-test-email", h.Admin.Setting.SendTestEmail)
 		adminSettings.GET("/email-templates", h.Admin.Setting.ListEmailTemplates)
@@ -606,30 +623,6 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		adminSettings.PUT("/web-search-emulation", h.Admin.Setting.UpdateWebSearchEmulationConfig)
 		adminSettings.POST("/web-search-emulation/test", h.Admin.Setting.TestWebSearchEmulation)
 		adminSettings.POST("/web-search-emulation/reset-usage", h.Admin.Setting.ResetWebSearchUsage)
-	}
-}
-
-func registerDataManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
-	dataManagement := admin.Group("/data-management")
-	{
-		dataManagement.GET("/agent/health", h.Admin.DataManagement.GetAgentHealth)
-		dataManagement.GET("/config", h.Admin.DataManagement.GetConfig)
-		dataManagement.PUT("/config", h.Admin.DataManagement.UpdateConfig)
-		dataManagement.GET("/sources/:source_type/profiles", h.Admin.DataManagement.ListSourceProfiles)
-		dataManagement.POST("/sources/:source_type/profiles", h.Admin.DataManagement.CreateSourceProfile)
-		dataManagement.PUT("/sources/:source_type/profiles/:profile_id", h.Admin.DataManagement.UpdateSourceProfile)
-		dataManagement.DELETE("/sources/:source_type/profiles/:profile_id", h.Admin.DataManagement.DeleteSourceProfile)
-		dataManagement.POST("/sources/:source_type/profiles/:profile_id/activate", h.Admin.DataManagement.SetActiveSourceProfile)
-		dataManagement.POST("/s3/test", h.Admin.DataManagement.TestS3)
-		dataManagement.GET("/s3/profiles", h.Admin.DataManagement.ListS3Profiles)
-		// 修改 S3 目标可将数据备份外泄——要求 step-up 2FA
-		dataManagement.POST("/s3/profiles", gin.HandlerFunc(stepUpAuth), h.Admin.DataManagement.CreateS3Profile)
-		dataManagement.PUT("/s3/profiles/:profile_id", gin.HandlerFunc(stepUpAuth), h.Admin.DataManagement.UpdateS3Profile)
-		dataManagement.DELETE("/s3/profiles/:profile_id", h.Admin.DataManagement.DeleteS3Profile)
-		dataManagement.POST("/s3/profiles/:profile_id/activate", gin.HandlerFunc(stepUpAuth), h.Admin.DataManagement.SetActiveS3Profile)
-		dataManagement.POST("/backups", gin.HandlerFunc(stepUpAuth), h.Admin.DataManagement.CreateBackupJob)
-		dataManagement.GET("/backups", h.Admin.DataManagement.ListBackupJobs)
-		dataManagement.GET("/backups/:job_id", h.Admin.DataManagement.GetBackupJob)
 	}
 }
 
@@ -704,6 +697,7 @@ func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	usage := admin.Group("/usage")
 	{
 		usage.GET("", h.Admin.Usage.List)
+		usage.GET("/export", h.Admin.Usage.Export)
 		usage.GET("/stats", h.Admin.Usage.Stats)
 		usage.GET("/search-users", h.Admin.Usage.SearchUsers)
 		usage.GET("/search-api-keys", h.Admin.Usage.SearchAPIKeys)
