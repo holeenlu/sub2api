@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -40,6 +43,58 @@ func (f *fakeDiagnoser) DiagnoseModelAvailabilityForPlatform(
 }
 
 func ptrInt64(v int64) *int64 { return &v }
+
+// Selection and failure diagnosis must use the same mapped model. A cooldown
+// remains retryable, while a genuinely unsupported target names the public alias.
+func TestOpenAIResponses_ChannelMappedSelectionFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, mappedModel string
+		wantStatus        int
+	}{
+		{"supported but cooling down", "gpt-6-astra", http.StatusServiceUnavailable},
+		{"unsupported target", "gpt-unsupported", http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{RunMode: config.RunModeSimple}
+			reset := time.Now().Add(time.Hour)
+			repo := excelBPSFailoverAccountRepo{openAIImagesFailoverAccountRepo{accounts: []service.Account{{
+				ID: 91, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{3131}, RateLimitResetAt: &reset,
+				Credentials: map[string]any{"api_key": "test-key", "model_mapping": map[string]any{"gpt-6-astra": "gpt-6-astra"}},
+			}}}}
+			channels := service.NewChannelService(&openAIWSUsageHandlerChannelRepoStub{
+				channels: []service.Channel{{ID: 1, Name: "mapped", Status: service.StatusActive, GroupIDs: []int64{3131},
+					ModelMapping: map[string]map[string]string{service.PlatformOpenAI: {"public-alias": tc.mappedModel}}}},
+				groupPlatforms: map[int64]string{3131: service.PlatformOpenAI},
+			}, nil, nil, nil, nil)
+			upstream := &excelBPSFailoverUpstream{answer: func(int) *http.Response {
+				t.Fatal("selection failure must not contact upstream")
+				return nil
+			}}
+			gateway := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, nil, cfg, nil, nil,
+				service.NewBillingService(cfg, nil), nil, nil, upstream, &service.DeferredService{}, nil, nil, nil, channels, nil, nil, nil)
+			billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+			t.Cleanup(billing.Stop)
+			h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billing,
+				service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
+			c, recorder := newExcelBPSFailoverTestContext(t.Context(), false)
+			body := fmt.Sprintf("{%q:%q,%q:%q,%q:false}", "model", "public-alias", "input", "hello", "stream")
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+			h.Responses(c)
+			require.Equal(t, tc.wantStatus, recorder.Code, recorder.Body.String())
+			require.Empty(t, upstream.calls())
+			if tc.wantStatus == http.StatusNotFound {
+				require.Contains(t, recorder.Body.String(), "public-alias")
+				require.NotContains(t, recorder.Body.String(), tc.mappedModel)
+				require.True(t, service.HasOpsClientBusinessLimited(c))
+			} else {
+				require.NotContains(t, recorder.Body.String(), "model_not_found")
+				require.False(t, service.HasOpsClientBusinessLimited(c))
+			}
+		})
+	}
+}
 
 // newTestGinContextWithRequest wraps the bare newTestGinContext helper
 // (defined in openai_gateway_cyber_test.go) by additionally attaching a stub
