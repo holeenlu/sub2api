@@ -73,7 +73,8 @@
     "2026-10-19 #31791: recover at most eight missing comma/colon separators between whitespace-separated complete JSON tokens in the existing bounded decoder, retaining all keys and values and rejecting duplicates or mixed string/syntax repairs. Compare recovered argument objects before any RAW binding; never execute an undecodable unmarked JSON envelope as code. Distinguish original_payload_unverifiable from changed arguments, retain catalog/schema, batch, replay, usage and two-correction boundaries. Synthetic 3502-byte/offset-3061 and JSON/SSE/WS/Chat regressions reproduce the gap; production payloads were not supplied and missing_separator may also indicate unescaped quotes.",
     "2026-10-19 #31847: preserve first_output_timeout as semantic 504 across Responses, client WS and Chat, retain the actual BPS HTTP 200 separately, and record retry_stopped/turn_budget when the shared deadline expires. Share the existing gateway-generated terminal provenance key across handler/service and reset it per WS turn; retain safe Chat JSON error code/param. No deadline reset, extra retry, account policy, production setting or upstream call is added. Regressions cover headers and metadata-only stalls, observed usage, client cancellation and subsequent turns. The production upstream stall cause remains unproven.",
     "2026-10-19 full BPS audit: preserve exact JSON numbers during explicit compact; scope catalog/replay/image and prompt-cache identity to the stable credential namespace without AT refresh churn; inspect joined metered repair usage before any uncertain-stream replay decision; retain separate billing identities for BPS HTTP attempts under the same client correlation. Add real PostgreSQL grant CAS/revocation and real Redis concurrent state tests. No new public API, configuration, migration or upstream request path.",
-    "2026-10-19 #33681: exclude local recovery/protocol-switch events from the existing upstream-attempt resolver while retaining the full diagnostic timeline. Preserve the actual BPS 429 status, detail and failed account when native Codex succeeds; do not manufacture recovered errors when monitoring filters leave only local decisions. Regressions cover HTTP/WS recovery, SLA, next-turn isolation and later statusless transport failures. No scheduling, replay, budget, billing or upstream-request behavior changes."
+    "2026-10-19 #33681: exclude local recovery/protocol-switch events from the existing upstream-attempt resolver while retaining the full diagnostic timeline. Preserve the actual BPS 429 status, detail and failed account when native Codex succeeds; do not manufacture recovered errors when monitoring filters leave only local decisions. Regressions cover HTTP/WS recovery, SLA, next-turn isolation and later statusless transport failures. No scheduling, replay, budget, billing or upstream-request behavior changes.",
+    "2026-10-19 workspace review: retain shared Responses observed-usage settlement, bounded HTTP disconnect drainage and terminal-aware JSON/SSE handling through existing recovery and billing owners. Preserve already-published BPS recovery attribution, WS structural-output diagnostics and Lite search protections; remove only stale local copies during workspace reconciliation. No upstream source baseline, account policy, public interface, configuration or billing ledger is added."
   ],
   "files": [
     {
@@ -195,14 +196,14 @@
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "classification": "local-adaptation",
       "source_blob_oid": "c90c6546d62dbd311660b549427918429e63c308",
-      "local_sha256": "3c309b19891470250de5599446a67d04194e1215248c187b41c5af1662af3f7d",
+      "local_sha256": "f67a21bcffafcee6917b3e646852457d062aa810dc691bff18d297033b645ccb",
       "source_commit": "84f7e99cc509a43a8c2dd4c67fb01fa5aa8ff318"
     },
     {
       "path": "backend/internal/handler/openai_gateway_handler_test.go",
       "classification": "local-adaptation",
       "source_blob_oid": "778c66e78986d800258c714250ecea82242d3c75",
-      "local_sha256": "052869c1a42ef89889237c3c383b112ca78cf84c1689a8381656ebaf63fac405"
+      "local_sha256": "1f50acef66028e8e9f281da238a8778caec9cc0949f1da7eff8fed1bac41e16d"
     },
     {
       "path": "backend/internal/handler/openai_gateway_ws_group_pricing_test.go",
@@ -1423,37 +1424,37 @@
       "path": "backend/internal/service/openai_gateway_chat_completions.go",
       "classification": "local-adaptation",
       "source_blob_oid": "ae5e34fdf3318bc71fb76d895fb53760fc4af7b1",
-      "local_sha256": "8dcc365474c37073ef619c190797bc94b1da848af264fcc3a41cca00aa8f8ccf"
+      "local_sha256": "3e2c67166f3d11577c00e9793eba5eabf8d444d80c7d9128c8bb5af4e6a7d4ce"
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
       "classification": "local-adaptation",
       "source_blob_oid": "6f8d1f7b049e82c40f658b337ed99afb5d896a62",
-      "local_sha256": "b1e462215eb974fdd5ef87985afc80f87d6d8fb7dd2427c4dc24e419ba82ad6e"
+      "local_sha256": "7f88651a6d641127738b679f0d0584327055ad69dac1317ff9cc61b9c2715703"
     },
     {
       "path": "backend/internal/service/openai_gateway_messages.go",
       "classification": "local-adaptation",
       "source_blob_oid": "48375e17337dd0b72b82eac1ebee8cc9b31a71c9",
-      "local_sha256": "0e369e70b56765dbb5f8c6de24b8ea353f6b5951810ccad8d3e1f4ee7aaade76"
+      "local_sha256": "ad997a290d53e488bce51140a186c96f0741355720253e71668469bd0ee5bb40"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
       "classification": "local-adaptation",
       "source_blob_oid": null,
-      "local_sha256": "c2777002bbe831458b54124a23bc476e272cd2ebe00fe492bb4ef72aeae4a35d"
+      "local_sha256": "1a013f0d7e6ffcb7f1ece3f21b565bee487436b0e7ad5d8d4b341a17ea532812"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
       "classification": "local-adaptation",
       "source_blob_oid": null,
-      "local_sha256": "951db942607722cda453a09d5dbdd5e68b7a1634dcb71447d931c57cca3b06be"
+      "local_sha256": "292ed9cac88c99e70393e24f6b2630734418b82d216eced61edba5aa254c3388"
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
       "classification": "local-adaptation",
       "source_blob_oid": "9471f748223b70722ec0c22c87d5b442306d78ee",
-      "local_sha256": "740d78e724d7b5d69e7cb06856c6645fd1a6cf00850eb66b0cf592927dfb061e"
+      "local_sha256": "80800c095b57cf1c9161d70a585cafcefe854cdaa1ab86cd564d15729daa1fe2"
     },
     {
       "path": "backend/internal/service/openai_gateway_service.go",
@@ -1526,7 +1527,7 @@
       "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
       "classification": "local-adaptation",
       "source_blob_oid": "b13ca0402c8169bedb862d8b953ab0a270bcafdb",
-      "local_sha256": "4b77a440fb38e3f2a00a03a1c97e78c2ed3fe891c412c1875f4ccd4e8f564c1c"
+      "local_sha256": "766da68d0108c3302c3036472c19574a99617a1ff1e03b114de8a2add563853d"
     },
     {
       "path": "backend/internal/service/openai_ws_forwarder_ingress_test.go",
@@ -1550,7 +1551,7 @@
       "path": "backend/internal/service/openai_ws_http_bridge.go",
       "classification": "local-adaptation",
       "source_blob_oid": "01474cb72d421a6c22ac9d15ef3a4b442c5fb365",
-      "local_sha256": "2f5a648607157b74cf3bccf6dc43dbc46cc1c7ea53437a303a204aa7afa5dbbc"
+      "local_sha256": "e3e7540016d920e9453c17e4fc8e2dc7d187194dcb15e99dea8792d6ffab458a"
     },
     {
       "path": "backend/internal/service/openai_ws_recovery_contract_test.go",
@@ -1574,7 +1575,7 @@
       "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
       "classification": "local-adaptation",
       "source_blob_oid": "671895390785dfc47ee6b45db10b81a9d23784b9",
-      "local_sha256": "78b6a381cd294870036fea1654be018908276da9860d2d8c99ac87bbd6707550"
+      "local_sha256": "a7052242c7862d4aac7c23bc4feb4f695175209524cfae9367123411b030bf1c"
     },
     {
       "path": "backend/internal/service/ops_upstream_context.go",
