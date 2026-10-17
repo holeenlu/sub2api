@@ -17,6 +17,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type openAIWSClientFrameConn struct {
@@ -835,6 +836,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			firstClientMessage = aliasedBody
 		}
 	}
+	// The handshake describes only the first turn. Merge its raw metadata before
+	// identity scoping and defaults so a header-only turn keeps its real IDs.
+	if turnMetadata := strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)); turnMetadata != "" && !gjson.GetBytes(firstClientMessage, "client_metadata."+openAIWSTurnMetadataHeader).Exists() {
+		next, setErr := sjson.SetBytes(firstClientMessage, "client_metadata."+openAIWSTurnMetadataHeader, turnMetadata)
+		if setErr != nil {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
+		}
+		firstClientMessage = next
+	}
 	accountScopedFirst, accountScoped, scopeErr := applyCodexAccountIdentityClientMetadataRaw(firstClientMessage, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
 	if scopeErr != nil {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", scopeErr)
@@ -842,6 +852,19 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if accountScoped {
 		firstClientMessage = accountScopedFirst
 	}
+	ids := resolveCodexFingerprintIDsForCaller(codexAccountIdentitySource(c, account), c.Request.Header, getAPIKeyIDFromContext(c))
+	if next, _, fpErr := applyCodexFingerprintClientMetadataRaw(firstClientMessage, ids); fpErr != nil {
+		return fpErr
+	} else {
+		firstClientMessage = next
+	}
+	stageCodexFingerprintIDs(c, ids)
+	if next, _, metadataErr := normalizeCodexRequestMetadata(firstClientMessage, nil, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c), false); metadataErr != nil {
+		return metadataErr
+	} else {
+		firstClientMessage = next
+	}
+
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
@@ -926,10 +949,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		promptCacheKey,
 		gjson.GetBytes(firstClientMessage, "model").String(),
 		gjson.GetBytes(firstClientMessage, "service_tier").String(),
+		firstClientMessage,
 	)
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	if next, _, metadataErr := normalizeCodexRequestMetadata(firstClientMessage, headers, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c), false); metadataErr != nil {
+		return metadataErr
+	} else {
+		firstClientMessage = next
+	}
+	projectCodexOutboundHeaders(headers, codexAccountIdentitySource(c, account), true)
+
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
@@ -1141,6 +1172,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if accountScoped {
 					payload = accountScopedPayload
 				}
+				ids := resolveCodexFingerprintIDsForCaller(codexAccountIdentitySource(c, account), c.Request.Header, getAPIKeyIDFromContext(c))
+				if next, _, fpErr := applyCodexFingerprintClientMetadataRaw(payload, ids); fpErr != nil {
+					return payload, nil, fpErr
+				} else {
+					payload = next
+				}
+				if next, _, metadataErr := normalizeCodexRequestMetadata(payload, nil, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c), false); metadataErr != nil {
+					return payload, nil, metadataErr
+				} else {
+					payload = next
+				}
+
 			}
 			if isResponseCreate {
 				if responsesLite {
@@ -1402,6 +1445,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if msgType == coderws.MessageText && writeErr == nil {
 					progress.observeDownstream(payload)
 					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
+					if eventType == "codex.response.metadata" {
+						if state := strings.TrimSpace(gjson.GetBytes(payload, "headers.x-codex-turn-state").String()); state != "" {
+							s.noteOpenAICodexTurnStateProvenance(c, account, state)
+						}
+					}
 					if eventType != "error" {
 						markOpenAIWSClientVisibleFailure(c, eventType, payload)
 					}

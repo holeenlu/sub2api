@@ -137,6 +137,8 @@ func NewGatewayHandler(
 // Messages handles Claude API compatible messages endpoint
 // POST /v1/messages
 func (h *GatewayHandler) Messages(c *gin.Context) {
+	c.Request = c.Request.WithContext(service.EnsureOpenAITurnBudget(c.Request.Context(), h.cfg, ""))
+	c.Request = c.Request.WithContext(service.WithGatewaySessionTracking(c.Request.Context()))
 	// 从context获取apiKey和user（ApiKeyAuth中间件已设置）
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -254,6 +256,24 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// Track if we've started streaming (for error handling)
 	streamStarted := false
+	// Resolve the provider before starting the Claude preparation heartbeat.
+	platform := ""
+	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
+		platform = forcePlatform
+	} else if resolvedPlatform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
+		platform = resolvedPlatform
+	} else if apiKey.Group != nil {
+		platform = apiKey.Group.Platform
+	}
+	stopKeepalive := func() {}
+	restartKeepalive := func() {
+		stopKeepalive()
+		if reqStream && (platform == "" || platform == service.PlatformAnthropic) && h.cfg != nil {
+			stopKeepalive = service.StartSSEKeepalive(c, time.Duration(h.cfg.Gateway.StreamKeepaliveInterval)*time.Second)
+		}
+	}
+	restartKeepalive()
+	defer func() { stopKeepalive() }()
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -275,6 +295,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	if userReleaseFunc != nil {
 		defer userReleaseFunc()
 	}
+	restartKeepalive()
 
 	// 2. 【新增】Wait后二次检查余额/订阅
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
@@ -317,15 +338,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		zap.String("metadata_user_id_raw", parsedReq.MetadataUserID),
 	)
 
-	// 获取平台：优先使用强制平台（/antigravity 路由），其次使用 composite 解析出的目标平台，否则使用分组平台
-	platform := ""
-	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
-		platform = forcePlatform
-	} else if resolvedPlatform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
-		platform = resolvedPlatform
-	} else if apiKey.Group != nil {
-		platform = apiKey.Group.Platform
-	}
 	sessionKey := sessionHash
 	if platform == service.PlatformGemini && sessionHash != "" {
 		sessionKey = "gemini:" + sessionHash
@@ -356,6 +368,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	if platform == service.PlatformGemini {
 		fs := NewFailoverState(h.maxAccountSwitchesGemini, hasBoundSession)
+		fs.ReplayAllowed, fs.UncertainReplaySafe = service.NativeAccountReplayAllowed(body), service.NativeUncertainReplaySafe(body)
 
 		// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
 		// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
@@ -371,7 +384,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
 					return
 				}
-				if len(fs.FailedAccountIDs) == 0 {
+				if len(fs.FailedAccountIDs) == 0 || errors.Is(err, service.ErrSelectionDependency) || service.IsTurnBudgetError(err) {
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformGemini)
 					if !cls.ModelNotFound {
 						markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -390,7 +403,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)
 					return
 				}
-				action := fs.HandleSelectionExhausted(c.Request.Context())
+				action := fs.HandleSelectionExhausted(c.Request.Context(), err)
 				switch action {
 				case FailoverContinue:
 					ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
@@ -514,7 +527,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
-			writerSizeBeforeForward := c.Writer.Size()
+			writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
 			if account.Platform == service.PlatformAntigravity {
 				result, err = h.antigravityGatewayService.ForwardGemini(
 					requestCtx,
@@ -528,7 +541,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					service.WithForwardGeminiSession(derefGroupID(apiKey.GroupID), sessionKey),
 				)
 			} else {
+				finishStage := beginRetryOutputStage(c)
+				defer func() { _ = finishStage(&service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable}) }()
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
+				err = finishStage(err)
 			}
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
@@ -537,10 +553,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
-					if c.Writer.Size() != writerSizeBeforeForward {
+					if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
 						return
 					}
+					service.PinTurnRetryAccount(c.Request.Context(), account)
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
@@ -679,15 +696,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		}
 		// 客户端可能已断开、请求 ctx 已取消，用独立 ctx 执行释放
 		for _, acc := range sessionSlotAccounts {
-			h.gatewayService.ReleaseAccountSession(context.Background(), acc, sessionKey)
+			h.gatewayService.ReleaseAccountSession(c.Request.Context(), acc, sessionKey)
 		}
 	}()
 
 	for {
 		fs := NewFailoverState(h.maxAccountSwitches, hasBoundSession)
+		fs.ReplayAllowed, fs.UncertainReplaySafe = service.NativeAccountReplayAllowed(body), service.NativeUncertainReplaySafe(body)
 		retryWithFallback := false
 
 		for {
+			restartKeepalive()
 			attemptParsedReq, err := parsedReq.CloneForBody(body)
 			if err != nil {
 				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -707,7 +726,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
 					return
 				}
-				if len(fs.FailedAccountIDs) == 0 {
+				if len(fs.FailedAccountIDs) == 0 || errors.Is(err, service.ErrSelectionDependency) || service.IsTurnBudgetError(err) {
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, currentAPIKey, reqModel, reqModel, platform)
 					if !cls.ModelNotFound {
 						markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -727,7 +746,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)
 					return
 				}
-				action := fs.HandleSelectionExhausted(c.Request.Context())
+				action := fs.HandleSelectionExhausted(c.Request.Context(), err)
 				switch action {
 				case FailoverContinue:
 					ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
@@ -826,6 +845,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
 			}
+			restartKeepalive()
 			// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 			admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
 			latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
@@ -841,7 +861,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 				// 尝试被否决（从未转发），立即释放该账号的会话注册
-				h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
+				h.gatewayService.ReleaseAccountSession(c.Request.Context(), account, sessionKey)
 				delete(sessionSlotAccounts, account.ID)
 				continue
 			}
@@ -910,6 +930,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 注入回调到 ParsedRequest：使用外层 wrapper 以便提前清理 AfterFunc
 			attemptParsedReq.OnUpstreamAccepted = queueRelease
 			// ===== 用户消息串行队列 END =====
+			restartKeepalive()
 
 			// 渠道模型映射只作用于本次账号尝试，避免 failover 后污染原始 ParsedRequest。
 			if channelMapping.Mapped {
@@ -936,13 +957,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if fs.ForceCacheBilling {
 				requestCtx = service.WithForceCacheBilling(requestCtx)
 			}
-			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
-			writerSizeBeforeForward := c.Writer.Size()
+			// Preparation comments must not prevent a safe account retry.
+			writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
+			finishStage := beginRetryOutputStage(c)
+			defer func() { _ = finishStage(&service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable}) }()
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}
+
+			err = finishStage(err)
 
 			// 兜底释放串行锁（正常情况已通过回调提前释放）
 			if queueRelease != nil {
@@ -1078,7 +1103,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						retryWithFallback = true
 						// 原分组账号已确定性失败（prompt too long），先释放其会话注册再走兜底分组
 						for _, acc := range sessionSlotAccounts {
-							h.gatewayService.ReleaseAccountSession(context.Background(), acc, sessionKey)
+							h.gatewayService.ReleaseAccountSession(c.Request.Context(), acc, sessionKey)
 						}
 						sessionSlotAccounts = make(map[int64]*service.Account)
 						break
@@ -1089,15 +1114,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
-					if c.Writer.Size() != writerSizeBeforeForward {
+					if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
 						return
 					}
+					service.PinTurnRetryAccount(c.Request.Context(), account)
+					restartKeepalive()
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
 						// 本次尝试已确定性失败，立即释放该账号的会话注册
-						h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
+						h.gatewayService.ReleaseAccountSession(c.Request.Context(), account, sessionKey)
 						delete(sessionSlotAccounts, account.ID)
 						continue
 					case FailoverExhausted:
@@ -2026,6 +2053,7 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 }
 
 func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, status int, errType, code, message string, streamStarted bool) {
+	streamStarted = service.StopOpenAICompactSSEKeepaliveCommitted(c) || streamStarted
 	if streamStarted {
 		// 响应状态码已固化为 200（ping/部分数据已 flush），错误只能就地以 SSE 帧回传。
 		// 标记本次流内错误，供 ops_error_logger 补记——否则该中间件按 status>=400 采集，
@@ -2098,7 +2126,7 @@ func gatewayForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForw
 	if err == nil || c == nil || c.Writer == nil {
 		return false
 	}
-	if c.Writer.Size() == writerSizeBeforeForward {
+	if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward {
 		return false
 	}
 
@@ -2159,6 +2187,10 @@ func (h *GatewayHandler) errorResponse(c *gin.Context, status int, errType, mess
 }
 
 func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errType, code, message string) {
+	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+		h.handleStreamingAwareErrorWithCode(c, status, errType, code, message, true)
+		return
+	}
 	errorObject := gin.H{"type": errType, "message": message}
 	if code != "" {
 		errorObject["code"] = code
@@ -2173,6 +2205,7 @@ func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errTy
 // POST /v1/messages/count_tokens
 // 特点：校验订阅/余额，但不计算并发、不记录使用量
 func (h *GatewayHandler) CountTokens(c *gin.Context) {
+	c.Request = c.Request.WithContext(service.WithGatewaySessionTracking(c.Request.Context()))
 	// 从context获取apiKey和user（ApiKeyAuth中间件已设置）
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -2283,7 +2316,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		reqLog.Error("gateway.count_tokens_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		// 错误响应已在 ForwardCountTokens 中处理
 		// 上游未服务该会话，立即释放选号时注册的会话槽（客户端可能已断开，用独立 ctx）
-		h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionHash)
+		h.gatewayService.ReleaseAccountSession(c.Request.Context(), account, sessionHash)
 		return
 	}
 }

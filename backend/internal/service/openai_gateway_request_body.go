@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"net/http"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -464,117 +465,6 @@ func sanitizeEncryptedReasoningInputItem(item any) (next any, changed bool, keep
 	return inputItem, true, true
 }
 
-// SanitizeOpenAICrossModeFailoverReasoning derives a failover attempt body from
-// the canonical request body by dropping provider-specific encrypted reasoning
-// input items in full (encrypted_content plus the coupled id/summary shape).
-//
-// This is the proactive counterpart to the reactive same-account
-// invalid_encrypted_content recovery in Forward: when a failover switches from an
-// OpenAI passthrough account (which forwards upstream-native encrypted reasoning,
-// e.g. Kiro) to a non-passthrough account (e.g. Bedrock Mantle) that rejects the
-// provider-specific reasoning IDs/shape, the whole reasoning item must go before
-// the request reaches the new upstream. Unlike trimOpenAIEncryptedReasoningItems,
-// which only strips the encrypted_content / null-content fields while preserving
-// the reasoning item's id and summary, this drops the entire item.
-//
-// The input slice is treated as immutable and is never mutated; a distinct slice
-// is returned only when changed is true.
-func SanitizeOpenAICrossModeFailoverReasoning(body []byte) (sanitized []byte, changed bool, err error) {
-	if len(body) == 0 {
-		return body, false, nil
-	}
-	if !gjson.GetBytes(body, "input").Exists() {
-		return body, false, nil
-	}
-	var decoded map[string]any
-	if err := decodeOpenAIJSONUseNumber(body, &decoded); err != nil {
-		return body, false, fmt.Errorf("decode cross-mode failover body: %w", err)
-	}
-	if !dropOpenAIEncryptedReasoningInputItems(decoded) {
-		return body, false, nil
-	}
-	out, marshalErr := marshalOpenAIUpstreamJSON(decoded)
-	if marshalErr != nil {
-		return body, false, fmt.Errorf("serialize cross-mode failover body: %w", marshalErr)
-	}
-	return out, true, nil
-}
-
-// dropOpenAIEncryptedReasoningInputItems removes reasoning input items that carry
-// provider-specific encrypted_content in full — including their coupled id and
-// summary — and reports whether anything changed. Contrast with
-// trimOpenAIEncryptedReasoningItems, which only strips fields while keeping the
-// reasoning item skeleton.
-func dropOpenAIEncryptedReasoningInputItems(reqBody map[string]any) bool {
-	if len(reqBody) == 0 {
-		return false
-	}
-	inputValue, has := reqBody["input"]
-	if !has {
-		return false
-	}
-	switch input := inputValue.(type) {
-	case []any:
-		filtered := input[:0]
-		changed := false
-		for _, item := range input {
-			if isOpenAIEncryptedReasoningInputItem(item) {
-				changed = true
-				continue
-			}
-			filtered = append(filtered, item)
-		}
-		if !changed {
-			return false
-		}
-		if len(filtered) == 0 {
-			delete(reqBody, "input")
-			return true
-		}
-		reqBody["input"] = filtered
-		return true
-	case []map[string]any:
-		filtered := input[:0]
-		changed := false
-		for _, item := range input {
-			if isOpenAIEncryptedReasoningInputItem(item) {
-				changed = true
-				continue
-			}
-			filtered = append(filtered, item)
-		}
-		if !changed {
-			return false
-		}
-		if len(filtered) == 0 {
-			delete(reqBody, "input")
-			return true
-		}
-		reqBody["input"] = filtered
-		return true
-	case map[string]any:
-		if isOpenAIEncryptedReasoningInputItem(input) {
-			delete(reqBody, "input")
-			return true
-		}
-		return false
-	default:
-		return false
-	}
-}
-
-func isOpenAIEncryptedReasoningInputItem(item any) bool {
-	inputItem, ok := item.(map[string]any)
-	if !ok {
-		return false
-	}
-	if itemType, _ := inputItem["type"].(string); strings.TrimSpace(itemType) != "reasoning" {
-		return false
-	}
-	_, has := inputItem["encrypted_content"]
-	return has
-}
-
 // IsOpenAIResponsesCompactPath reports whether the request targets the legacy
 // /responses/compact endpoint, including its forwardable subpaths.
 func IsOpenAIResponsesCompactPath(c *gin.Context) bool {
@@ -762,7 +652,9 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body []byte, knownStoreFalse
 		encrypted := item.Get("encrypted_content")
 		if (typ == "reasoning" && (encrypted.Type != gjson.String || strings.TrimSpace(encrypted.Str) == "")) ||
 			(typ == "item_reference" && strings.HasPrefix(id, "rs_")) {
-			changed = true
+			// Missing content cannot be repaired by deleting history. Preserve it
+			// for a precise upstream rejection or a complete session replay.
+			items = append(items, item.Raw)
 			return true
 		}
 		stripID := typ == "reasoning" && strings.HasPrefix(id, "rs_")
@@ -839,7 +731,7 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded(body []byte, knownSto
 		case "reasoning":
 			encryptedContent, hasEncryptedContent := item["encrypted_content"].(string)
 			if !hasEncryptedContent || strings.TrimSpace(encryptedContent) == "" {
-				changed = true
+				filtered = append(filtered, item)
 				continue
 			}
 			if strings.HasPrefix(id, "rs_") {
@@ -849,11 +741,6 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded(body []byte, knownSto
 			if summary, ok := item["summary"]; !ok || summary == nil {
 				item["summary"] = []any{}
 				changed = true
-			}
-		case "item_reference":
-			if strings.HasPrefix(id, "rs_") {
-				changed = true
-				continue
 			}
 		}
 		if shouldStripOpenAIResponsesNonPairCallID(typ) {
@@ -1430,10 +1317,6 @@ func normalizeOpenAIResponseFormatSchemasBody(body []byte) ([]byte, bool, error)
 	return normalized, true, nil
 }
 
-func normalizeOpenAIResponsesWebSocketCompatibilityBody(body []byte, account *Account, responsesLite bool) ([]byte, bool, error) {
-	return normalizeOpenAIResponsesCompatibilityBodyWithOptions(body, account, openAIResponsesCompatibilityOptions{ResponsesLite: responsesLite})
-}
-
 func normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(cfg *config.Config, body []byte, account *Account, responsesLite bool) ([]byte, bool, error) {
 	return normalizeOpenAIResponsesCompatibilityBodyWithOptions(body, account, openAIResponsesCompatibilityOptions{Config: cfg, ResponsesLite: responsesLite})
 }
@@ -1530,12 +1413,12 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 		}
 		mapChanged := false
 		if needsOrphanCleanup {
-			if input, ok := reqBody["input"].([]any); ok && sanitizeOpenAIResponsesOrphanToolOutputs(
-				reqBody,
-				input,
-				strings.TrimSpace(firstNonEmptyString(reqBody["previous_response_id"])) != "",
-			) {
-				mapChanged = true
+			if input, ok := reqBody["input"].([]any); ok {
+				inputChanged, inputErr := sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, hasOpenAIResponsesContextReference(reqBody))
+				if inputErr != nil {
+					return body, false, inputErr
+				}
+				mapChanged = inputChanged
 			}
 		}
 		if truncateOpenAIResponsesInputText(reqBody) {

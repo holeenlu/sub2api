@@ -174,17 +174,6 @@ func GatewayUserPlatformQuotaFlusherStats(f *UserPlatformQuotaUsageFlusher) map[
 	}
 }
 
-func openAIStreamEventIsTerminal(data string) bool {
-	trimmed := strings.TrimSpace(data)
-	if trimmed == "" {
-		return false
-	}
-	if trimmed == "[DONE]" {
-		return true
-	}
-	return openAIStreamEventTypeIsTerminal(gjson.Get(trimmed, "type").String())
-}
-
 // openAIStreamEventIsTerminalWithType 复用已提取的 type，避免 SSE 热路径重复扫描 JSON。
 func openAIStreamEventIsTerminalWithType(data, eventType string) bool {
 	trimmed := strings.TrimSpace(data)

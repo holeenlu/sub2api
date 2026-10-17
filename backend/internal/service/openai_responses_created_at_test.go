@@ -140,6 +140,9 @@ func TestBuildOpenAIWSHTTPBridgeFailedEvent_CarriesCreatedAtAndSequenceNumber(t 
 	event = buildOpenAIWSHTTPBridgeFailedEvent("resp_1", "", 0, []byte(`{"type":"error","error":{"message":"boom"}}`), "")
 	require.EqualValues(t, 0, gjson.GetBytes(event, "sequence_number").Int())
 	require.Positive(t, gjson.GetBytes(event, "response.created_at").Int())
+	event = buildOpenAIWSHTTPBridgeFailedEvent("", "", 1700000000, []byte(`{"type":"error","error":{"code":"invalid_request_error","message":"bad request"}}`), "")
+	require.Equal(t, "error", gjson.GetBytes(event, "type").String())
+	require.False(t, gjson.GetBytes(event, "response").Exists(), "no response identity may be fabricated for a request rejection")
 }
 
 // Grok 账号挂在不发 created_at 的上游（第三方中转）后面：每个生命周期事件都要补齐，

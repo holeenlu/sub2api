@@ -248,3 +248,15 @@ func TestRestoreCodexToolNamesFromSSEContextUsesEventLineTypeWithoutAddingType(t
 	require.Equal(t, codexPythonToolAlias, gjson.GetBytes(restored, "metadata.name").String())
 	require.False(t, gjson.GetBytes(restored, "type").Exists())
 }
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+func applyCodexOAuthTransform(reqBody map[string]any, isCodexCLI bool, isCompact bool) codexTransformResult {
+	return applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
+		IsCodexCLI: isCodexCLI,
+		IsCompact:  isCompact,
+	})
+}
+
+func normalizeOpenAIResponsesWebSocketCompatibilityBody(body []byte, account *Account, responsesLite bool) ([]byte, bool, error) {
+	return normalizeOpenAIResponsesCompatibilityBodyWithOptions(body, account, openAIResponsesCompatibilityOptions{ResponsesLite: responsesLite})
+}

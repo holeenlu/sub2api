@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -255,4 +257,38 @@ func TestNonStreamingTerminalFailureFailover_NilAccountProposesNothing(t *testin
 	require.Nil(t, svc.nonStreamingTerminalFailureFailover(
 		c, newNonStreamingSSEResponse(), nil, false, "response.failed", payload,
 		"Selected model is at capacity. Please try a different model."))
+}
+
+type openAINonStreamingFeedbackTestBody struct {
+	io.ReadCloser
+	completed bool
+}
+
+func (b *openAINonStreamingFeedbackTestBody) MarkComplete() { b.completed = true }
+
+func TestOpenAINonStreamingProtocolCompletionFeedback(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, tc := range []struct {
+			body, contentType string
+			complete          bool
+		}{
+			{`{"id":"resp_json","status":"completed","usage":{"input_tokens":3,"output_tokens":2}}`, "application/json", true},
+			{`{"id":"resp_queued","status":"queued","usage":{}}`, "application/json", false},
+			{`not json`, "application/json", false},
+			{"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}}\n\n", "text/event-stream", true},
+			{"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_partial\"}}\n\n", "text/event-stream", false},
+		} {
+			c, _ := newNonStreamingFailoverContext(t)
+			body := &openAINonStreamingFeedbackTestBody{ReadCloser: io.NopCloser(strings.NewReader(tc.body))}
+			resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {tc.contentType}}, Body: body}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, toolCorrector: NewCodexToolCorrector()}
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+			if passthrough {
+				_, _ = svc.handleNonStreamingResponsePassthrough(context.Background(), resp, c, account, "m", "m")
+			} else {
+				_, _ = svc.handleNonStreamingResponse(context.Background(), resp, c, account, "m", "m")
+			}
+			require.Equal(t, tc.complete, body.completed, "passthrough=%v body=%s", passthrough, tc.body)
+		}
+	}
 }

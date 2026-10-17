@@ -878,7 +878,7 @@ func TestBuildUpstreamRequestOpenAIPassthrough_AppliesStagedFingerprint(t *testi
 	require.NotNil(t, ids)
 	stageCodexFingerprintIDs(c, ids)
 
-	body := []byte(`{"model":"gpt-5.6-sol","input":[],"stream":true}`)
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"role":"user","content":"hello"}],"stream":true}`)
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "test-token")
 	require.NoError(t, err)
 
@@ -907,7 +907,7 @@ func TestBuildUpstreamRequestOpenAIPassthrough_OffModeKeepsIsolatedSession(t *te
 	require.Nil(t, ids)
 	stageCodexFingerprintIDs(c, ids)
 
-	body := []byte(`{"model":"gpt-5.6-sol","input":[],"stream":true}`)
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"role":"user","content":"hello"}],"stream":true}`)
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "test-token")
 	require.NoError(t, err)
 

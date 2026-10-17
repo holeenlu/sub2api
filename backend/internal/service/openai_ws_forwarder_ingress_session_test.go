@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type openAIWSLeaseLossAfterReadConn struct {
@@ -271,6 +272,187 @@ func (d *openAIWSSingleConnDialer) Dial(
 	proxyURL string,
 ) (openAIWSClientConn, int, http.Header, error) {
 	return d.conn, 0, nil, nil
+}
+
+// The first handshake is a raw identity source only for the first turn. Later
+// frames own their metadata, including when a connection-lifetime error retries
+// the same response.create on a fresh upstream connection (sub4api a3eaf63 audit).
+func TestOpenAIWSIngressTurnMetadataFirstHeaderAndReconnect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const firstMetadata = `{"installation_id":"install-first","session_id":"session-first","thread_id":"thread-first","turn_id":"turn-first","window_id":"thread-first:4","parent_thread_id":"parent-first","context_window_id":"context-first","window_number":4,"turn_started_at_unix_ms":9007199254740993,"tool_namespaces_info":[{"name":"first"}]}`
+	const firstRequest = `{"type":"response.create","model":"gpt-5.1","input":[{"role":"user","content":"hello"}]}`
+	const completedFirst = `{"type":"response.completed","response":{"id":"resp_metadata_first","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`
+	const completedSecond = `{"type":"response.completed","response":{"id":"resp_metadata_second","output":[],"usage":{"input_tokens":2,"output_tokens":1}}}`
+	const expired = `{"type":"error","error":{"type":"invalid_request_error","code":"websocket_connection_limit_reached","message":"Responses websocket connection limit reached (60 minutes)."}}`
+	for _, tc := range []struct{ mode, convergence string }{
+		{OpenAIWSIngressModeCtxPool, "off"},
+		{OpenAIWSIngressModePassthrough, "off"},
+		{OpenAIWSIngressModeCtxPool, "session"},
+		{OpenAIWSIngressModePassthrough, "session"},
+		{OpenAIWSIngressModeCtxPool, "full"},
+		{OpenAIWSIngressModePassthrough, "full"},
+	} {
+		mode := tc.mode
+		for _, scenario := range []string{"second_metadata", "second_metadata_with_cache_key", "second_without_metadata"} {
+			t.Run(tc.convergence+"/"+mode+"/"+scenario, func(t *testing.T) {
+				cfg := passthroughLifecycleConfig()
+				cfg.Gateway.OpenAIWS.OAuthEnabled = true
+				cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+				cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+				cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+				cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 5
+				account := passthroughLifecycleAccount()
+				account.Type = AccountTypeOAuth
+				account.Credentials = map[string]any{"access_token": "sk-test", "chatgpt_account_id": "metadata-account"}
+				account.Extra = map[string]any{"openai_oauth_responses_websockets_v2_mode": mode, codexFingerprintModeExtraKey: tc.convergence, codexFingerprintSeedExtraKey: testCodexFingerprintSeed}
+				first := &openAIWSCaptureConn{events: [][]byte{[]byte(completedFirst), []byte(expired)}}
+				second := &openAIWSCaptureConn{events: [][]byte{[]byte(completedSecond)}}
+				staged := newStagedPassthroughConn()
+				defer staged.Close()
+				headers := make(chan http.Header, 3)
+				dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{first, second}, headers: headers}
+				if mode == OpenAIWSIngressModePassthrough {
+					dialer.conns = []openAIWSClientConn{staged}
+				}
+				svc := newPassthroughLifecycleService(cfg, staged)
+				svc.openaiWSPassthroughDialer = dialer
+				svc.openaiWSPool = newOpenAIWSConnPool(cfg)
+				svc.openaiWSPool.setClientDialerForTest(dialer)
+				controlCtx, cancel := context.WithCancelCause(context.Background())
+				defer cancel(context.Canceled)
+				server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, account)
+				defer server.Close()
+				handshake := http.Header{}
+				handshake.Set(openAIWSTurnMetadataHeader, firstMetadata)
+				handshake.Set("accept-language", "en-US")
+				dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+				client, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http"), &coderws.DialOptions{HTTPHeader: handshake})
+				cancelDial()
+				require.NoError(t, err)
+				defer client.CloseNow()
+				readHeaders := func() http.Header {
+					select {
+					case h := <-headers:
+						return h
+					case <-time.After(3 * time.Second):
+						t.Fatal("missing upstream handshake")
+						return nil
+					}
+				}
+				assertMetadata := func(body []byte, h http.Header, raw string) {
+					t.Helper()
+					metadata := gjson.Parse(gjson.GetBytes(body, "client_metadata."+openAIWSTurnMetadataHeader).String())
+					require.NotEmpty(t, metadata.Get("turn_id").String())
+					for _, field := range [][2]string{{"installation_id", "installation"}, {"session_id", "session"}, {"thread_id", "thread"}, {"turn_id", "turn"}, {"window_id", "window"}, {"parent_thread_id", "thread"}, {"context_window_id", "context-window"}} {
+						if raw != "" {
+							want := scopeCodexAccountIdentityValue(account, 0, field[1], gjson.Get(raw, field[0]).String())
+							if tc.convergence != "off" {
+								if field[0] == "installation_id" {
+									want = resolveConvergedInstallationID(account, testCodexFingerprintSeed)
+								}
+								if field[0] == "session_id" {
+									want = resolveConvergedSessionID(testCodexFingerprintSeed)
+								}
+							}
+							require.Equal(t, want, metadata.Get(field[0]).String(), "scope exactly once: %s", field[0])
+						}
+						if h != nil {
+							require.Equal(t, metadata.Get(field[0]).String(), gjson.Get(h.Get(openAIWSTurnMetadataHeader), field[0]).String(), "body/header metadata: %s", field[0])
+						}
+					}
+					if raw != "" {
+						require.Equal(t, "9007199254740993", metadata.Get("turn_started_at_unix_ms").Raw)
+						require.True(t, metadata.Get("tool_namespaces_info").Exists())
+					}
+					if h != nil {
+						require.Equal(t, metadata.Get("thread_id").String(), h.Get("thread-id"))
+						require.Equal(t, metadata.Get("window_id").String(), h.Get("x-codex-window-id"))
+						require.False(t, gjson.Get(h.Get(openAIWSTurnMetadataHeader), "tool_namespaces_info").Exists())
+						for _, name := range []string{"session_id", "conversation_id", "installation_id", "x-codex-installation-id", "accept-language"} {
+							require.Empty(t, h.Get(name), "projected header: %s", name)
+						}
+					}
+				}
+				var firstBody []byte
+				for turn := 1; turn <= 2; turn++ {
+					payload := []byte(firstRequest)
+					rawMetadata := firstMetadata
+					if turn == 2 {
+						payload = []byte(strings.Replace(firstRequest, "hello", "next", 1))
+						rawMetadata = strings.ReplaceAll(firstMetadata, "first", "second")
+						if scenario == "second_without_metadata" {
+							rawMetadata = ""
+						} else {
+							payload, err = sjson.SetBytes(payload, "client_metadata."+openAIWSTurnMetadataHeader, rawMetadata)
+							require.NoError(t, err)
+						}
+						if scenario == "second_metadata_with_cache_key" {
+							payload, err = sjson.SetBytes(payload, "prompt_cache_key", "cache-second")
+							require.NoError(t, err)
+						}
+					}
+					writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+					err = client.Write(writeCtx, coderws.MessageText, payload)
+					cancelWrite()
+					require.NoError(t, err)
+					var body []byte
+					if mode == OpenAIWSIngressModePassthrough {
+						body = requirePassthroughUpstreamWrite(t, staged, 3*time.Second)
+						if turn == 1 {
+							staged.Send(completedFirst)
+						} else {
+							staged.Send(completedSecond)
+						}
+					}
+					event, readErr := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+					require.NoError(t, readErr)
+					require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String(), string(event))
+					var h http.Header
+					if turn == 1 || mode == OpenAIWSIngressModeCtxPool {
+						h = readHeaders()
+					}
+					if mode == OpenAIWSIngressModeCtxPool {
+						capture := first
+						if turn == 2 {
+							capture = second
+						}
+						capture.mu.Lock()
+						body = []byte(requestToJSONString(capture.lastWrite))
+						capture.mu.Unlock()
+					}
+					assertMetadata(body, h, rawMetadata)
+					if turn == 1 {
+						firstBody = body
+					} else {
+						require.NotEqual(t, gjson.GetBytes(firstBody, "client_metadata.turn_id").String(), gjson.GetBytes(body, "client_metadata.turn_id").String(), "first header must not leak into the next turn")
+						if rawMetadata == "" {
+							require.False(t, gjson.Get(gjson.GetBytes(body, "client_metadata."+openAIWSTurnMetadataHeader).String(), "tool_namespaces_info").Exists())
+						}
+						if mode == OpenAIWSIngressModeCtxPool {
+							first.mu.Lock()
+							writes := append([]map[string]any(nil), first.writes...)
+							first.mu.Unlock()
+							require.Len(t, writes, 2)
+							beforeReconnect := requestToJSONString(writes[1])
+							require.JSONEq(t, gjson.Get(beforeReconnect, "client_metadata").Raw, gjson.GetBytes(body, "client_metadata").Raw, "retry preserves the original turn metadata")
+						}
+					}
+				}
+				require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+				select {
+				case err := <-serverErr:
+					require.NoError(t, err)
+				case <-time.After(3 * time.Second):
+					t.Fatal("metadata multi-turn session did not exit")
+				}
+				wantDials := 2
+				if mode == OpenAIWSIngressModePassthrough {
+					wantDials = 1
+				}
+				require.Equal(t, wantDials, dialer.DialCount())
+			})
+		}
+	}
 }
 
 func TestOpenAIWSDownstreamWriteContext_CancellationOwnership(t *testing.T) {
@@ -4559,6 +4741,7 @@ type openAIWSQueueDialer struct {
 	mu        sync.Mutex
 	conns     []openAIWSClientConn
 	dialCount int
+	headers   chan http.Header
 }
 
 func (d *openAIWSQueueDialer) Dial(
@@ -4574,6 +4757,9 @@ func (d *openAIWSQueueDialer) Dial(
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.dialCount++
+	if d.headers != nil {
+		d.headers <- headers.Clone()
+	}
 	if len(d.conns) == 0 {
 		return nil, 503, nil, errors.New("no test conn")
 	}
@@ -5268,7 +5454,7 @@ func (c *openAIWSRestartFailureConn) ReadMessage(ctx context.Context) ([]byte, e
 }
 
 func TestOpenAIWSIngressCancellationAndStaging(t *testing.T) {
-	for _, scenario := range []string{"cancel before ID", "old ID cannot cancel current", "staging expires without closing", "overload after staging expires", "EOF after staging expires", "EOF after content", "hosted tool is not replayed", "hosted tool executed before created"} {
+	for _, scenario := range []string{"cancel before ID", "old ID cannot cancel current", "staging expires without closing", "overload after staging expires", "EOF after staging expires", "EOF after content", "1012 after structural progress", "hosted tool is not replayed", "hosted tool executed before created"} {
 		t.Run(scenario, func(t *testing.T) {
 			cfg := passthroughLifecycleConfig()
 			cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 0
@@ -5287,6 +5473,9 @@ func TestOpenAIWSIngressCancellationAndStaging(t *testing.T) {
 			if strings.HasPrefix(scenario, "hosted tool") {
 				payload = `{"type":"response.create","model":"gpt-5.1","input":"hi","tools":[{"type":"code_interpreter","container":{"type":"auto"}}]}`
 			}
+			if scenario == "1012 after structural progress" {
+				payload = `{"type":"response.create","model":"gpt-5.1","store":false,"input":[{"type":"compaction","encrypted_content":"private-history"}]}`
+			}
 			var stopEvents []*OpsUpstreamErrorEvent
 			client, done := startOpenAIWSMemorySession(t, svc, account, nil, payload, nil, func(c *gin.Context) {
 				if raw, ok := c.Get(OpsUpstreamErrorsKey); ok {
@@ -5296,7 +5485,14 @@ func TestOpenAIWSIngressCancellationAndStaging(t *testing.T) {
 			defer client.CloseNow()
 			requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
 			if scenario != "hosted tool executed before created" {
+				if scenario == "1012 after structural progress" {
+					upstream.Send(`{"type":"codex.rate_limits"}`)
+					upstream.Send(`{"type":"codex.response.metadata"}`)
+				}
 				upstream.Send(`{"type":"response.created","response":{"id":"resp_active"}}`)
+				if scenario == "1012 after structural progress" {
+					upstream.Send(`{"type":"response.in_progress","response":{"id":"resp_active"}}`)
+				}
 				select {
 				case <-processedCreated:
 				case <-time.After(3 * time.Second):
@@ -5326,6 +5522,41 @@ func TestOpenAIWSIngressCancellationAndStaging(t *testing.T) {
 				event, err = readPassthroughLifecycleFrame(t, client, 3*time.Second)
 				require.NoError(t, err)
 				require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+			case "1012 after structural progress":
+				for i := 0; i < 4; i++ {
+					_, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+					require.NoError(t, err)
+				}
+				for i := 0; i < 21; i++ {
+					upstream.Send(`{"type":"response.web_search_call.searching","response_id":"resp_active"}`)
+					event, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+					require.NoError(t, err)
+					require.Equal(t, "response.web_search_call.searching", gjson.GetBytes(event, "type").String())
+				}
+				upstream.frames <- stagedPassthroughFrame{err: coderws.CloseError{Code: coderws.StatusServiceRestart}}
+				select {
+				case err := <-done:
+					require.Equal(t, coderws.StatusServiceRestart, coderws.CloseStatus(err))
+				case <-time.After(3 * time.Second):
+					t.Fatal("ingress failed to terminate after service restart")
+				}
+				require.Len(t, stopEvents, 1)
+				require.Equal(t, string(OpenAIRetryStopDownstreamCommitted), stopEvents[0].Reason)
+				detail := gjson.Parse(stopEvents[0].Detail)
+				require.True(t, detail.IsObject(), "diagnostics must remain valid bounded JSON")
+				require.Equal(t, "staging_timeout", detail.Get("commit_reason").String())
+				require.EqualValues(t, 25, detail.Get("downstream_events").Int())
+				require.EqualValues(t, 4, detail.Get("downstream_metadata_events").Int())
+				require.Zero(t, detail.Get("downstream_token_events").Int())
+				require.True(t, detail.Get("semantic_output_seen").Bool())
+				require.False(t, detail.Get("visible_output_seen").Bool())
+				require.Equal(t, "response.web_search_call.searching", detail.Get("first_semantic_event").String())
+				require.Equal(t, "unresolved_tool_context", detail.Get("blocking_tool_kind").String())
+				require.True(t, detail.Get("history_complete").Bool())
+				require.EqualValues(t, 1012, detail.Get("upstream_close_code").Int())
+				require.NotContains(t, stopEvents[0].Detail, "private-history")
+				require.Equal(t, 1, dialer.DialCount(), "committed structural output must not be replayed")
+				return
 			case "EOF after staging expires", "EOF after content":
 				wantTokens := int64(0)
 				if scenario == "EOF after content" {
@@ -5351,6 +5582,8 @@ func TestOpenAIWSIngressCancellationAndStaging(t *testing.T) {
 				require.Equal(t, string(OpenAIRetryStopDownstreamCommitted), stopEvents[0].Reason)
 				require.EqualValues(t, 1, gjson.Get(stopEvents[0].Detail, "downstream_metadata_events").Int())
 				require.EqualValues(t, wantTokens, gjson.Get(stopEvents[0].Detail, "downstream_token_events").Int())
+				require.Equal(t, wantTokens > 0, gjson.Get(stopEvents[0].Detail, "visible_output_seen").Bool())
+				require.False(t, gjson.Get(stopEvents[0].Detail, "upstream_close_code").Exists(), "an untyped EOF must not invent a close code")
 				require.NotContains(t, stopEvents[0].Detail, "private output")
 				require.Equal(t, 1, dialer.DialCount())
 				return
@@ -5591,76 +5824,93 @@ func TestOpenAIWSIngressUsageDrainRetainsObservedUsage(t *testing.T) {
 }
 
 func TestOpenAIWSIngressCanceledTurnWithCompleteHistoryCanContinue(t *testing.T) {
-	cfg := passthroughLifecycleConfig()
-	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 5
-	cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 0
-	upstream := newStagedPassthroughConn()
-	svc := newPassthroughLifecycleService(cfg, upstream)
-	second := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_next"}}`)}}
-	dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{&nativeCodexStagedConn{upstream}, second}}
-	pool := newOpenAIWSConnPool(cfg)
-	pool.setClientDialerForTest(dialer)
-	svc.openaiWSPool = pool
-	account := passthroughLifecycleAccount()
-	account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModeCtxPool
-	client, done := startNativeWSMemorySession(t, svc, account, `{"type":"response.create","model":"gpt-5.1","store":false,"input":[{"role":"user","content":"first"}]}`, nil)
-	defer client.CloseNow()
-	requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
-	upstream.Send(`{"type":"response.created","response":{"id":"resp_cancelled"}}`)
-	upstream.Send(`{"type":"response.output_item.done","item":{"type":"message","id":"msg_done","role":"assistant","content":[{"type":"output_text","text":"complete item"}]}}`)
-	for i := 0; i < 2; i++ {
-		_, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
-		require.NoError(t, err)
+	for _, controlType := range []string{"response.cancel", "response.interrupt"} {
+		t.Run(controlType, func(t *testing.T) {
+			cfg := passthroughLifecycleConfig()
+			cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 5
+			cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 0
+			upstream := newStagedPassthroughConn()
+			svc := newPassthroughLifecycleService(cfg, upstream)
+			second := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_next"}}`)}}
+			dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{&nativeCodexStagedConn{upstream}, second}}
+			pool := newOpenAIWSConnPool(cfg)
+			pool.setClientDialerForTest(dialer)
+			svc.openaiWSPool = pool
+			account := passthroughLifecycleAccount()
+			account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModeCtxPool
+			client, done := startNativeWSMemorySession(t, svc, account, `{"type":"response.create","model":"gpt-5.1","store":false,"input":[{"role":"user","content":"first"}]}`, nil)
+			defer client.CloseNow()
+			requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+			upstream.Send(`{"type":"response.created","response":{"id":"resp_cancelled"}}`)
+			upstream.Send(`{"type":"response.output_item.done","item":{"type":"message","id":"msg_done","role":"assistant","content":[{"type":"output_text","text":"complete item"}]}}`)
+			for i := 0; i < 2; i++ {
+				_, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+				require.NoError(t, err)
+			}
+			require.NoError(t, client.Write(context.Background(), coderws.MessageText, []byte(fmt.Sprintf(`{"type":"%s","response_id":"resp_cancelled"}`, controlType))))
+			event, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+			require.NoError(t, err)
+			if controlType == "response.interrupt" {
+				require.Equal(t, "response.interrupt.accepted", gjson.GetBytes(event, "type").String())
+				event, err = readPassthroughLifecycleFrame(t, client, 3*time.Second)
+				require.NoError(t, err)
+			}
+			require.Equal(t, "response.cancelled", gjson.GetBytes(event, "type").String())
+			require.NoError(t, client.Write(context.Background(), coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","store":false,"previous_response_id":"resp_cancelled","input":[{"role":"user","content":"next"}]}`)))
+			event, err = readPassthroughLifecycleFrame(t, client, 3*time.Second)
+			require.NoError(t, err)
+			require.Equal(t, "resp_next", gjson.GetBytes(event, "response.id").String())
+			requireNativeWSTestServerExit(t, client, done)
+			require.Equal(t, 2, dialer.DialCount())
+			replay := requestToJSONString(second.writes[0])
+			require.NotContains(t, replay, "previous_response_id")
+			require.Contains(t, replay, "complete item")
+			require.Contains(t, replay, "next")
+		})
 	}
-	require.NoError(t, client.Write(context.Background(), coderws.MessageText, []byte(`{"type":"response.cancel","response_id":"resp_cancelled"}`)))
-	event, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
-	require.NoError(t, err)
-	require.Equal(t, "response.cancelled", gjson.GetBytes(event, "type").String())
-	require.NoError(t, client.Write(context.Background(), coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","store":false,"previous_response_id":"resp_cancelled","input":[{"role":"user","content":"next"}]}`)))
-	event, err = readPassthroughLifecycleFrame(t, client, 3*time.Second)
-	require.NoError(t, err)
-	require.Equal(t, "resp_next", gjson.GetBytes(event, "response.id").String())
-	requireNativeWSTestServerExit(t, client, done)
-	require.Equal(t, 2, dialer.DialCount())
-	replay := requestToJSONString(second.writes[0])
-	require.NotContains(t, replay, "previous_response_id")
-	require.Contains(t, replay, "complete item")
-	require.Contains(t, replay, "next")
 }
 
 func TestOpenAIWSIngressCancelBeforeResponsePreservesPreviousAnchor(t *testing.T) {
-	cfg := passthroughLifecycleConfig()
-	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 5
-	cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 0
-	upstream := newStagedPassthroughConn()
-	svc := newPassthroughLifecycleService(cfg, upstream)
-	second := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_next"}}`)}}
-	pool := newOpenAIWSConnPool(cfg)
-	pool.setClientDialerForTest(&openAIWSQueueDialer{conns: []openAIWSClientConn{&nativeCodexStagedConn{upstream}, second}})
-	svc.openaiWSPool = pool
-	account := passthroughLifecycleAccount()
-	account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModeCtxPool
-	client, done := startNativeWSMemorySession(t, svc, account, `{"type":"response.create","model":"gpt-5.1","store":false,"input":[{"role":"user","content":"first"}]}`, nil)
-	defer client.CloseNow()
-	requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
-	upstream.Send(`{"type":"response.completed","response":{"id":"resp_first","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first answer"}]}]}}`)
-	_, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
-	require.NoError(t, err)
-	require.NoError(t, client.Write(context.Background(), coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","store":false,"previous_response_id":"resp_first","input":[{"role":"user","content":"cancel this input"}]}`)))
-	requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
-	require.NoError(t, client.Write(context.Background(), coderws.MessageText, []byte(`{"type":"response.cancel"}`)))
-	event, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
-	require.NoError(t, err)
-	require.Equal(t, "request_cancelled", gjson.GetBytes(event, "error.code").String())
-	require.NoError(t, client.Write(context.Background(), coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","store":false,"previous_response_id":"resp_first","input":[{"role":"user","content":"next input"}]}`)))
-	event, err = readPassthroughLifecycleFrame(t, client, 3*time.Second)
-	require.NoError(t, err)
-	require.Equal(t, "resp_next", gjson.GetBytes(event, "response.id").String())
-	requireNativeWSTestServerExit(t, client, done)
-	replay := requestToJSONString(second.writes[0])
-	require.NotContains(t, replay, "previous_response_id")
-	require.NotContains(t, replay, "cancel this input")
-	require.Contains(t, replay, "first answer")
+	for _, controlType := range []string{"response.cancel", "response.interrupt"} {
+		t.Run(controlType, func(t *testing.T) {
+			cfg := passthroughLifecycleConfig()
+			cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 5
+			cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 0
+			upstream := newStagedPassthroughConn()
+			svc := newPassthroughLifecycleService(cfg, upstream)
+			second := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_next"}}`)}}
+			pool := newOpenAIWSConnPool(cfg)
+			pool.setClientDialerForTest(&openAIWSQueueDialer{conns: []openAIWSClientConn{&nativeCodexStagedConn{upstream}, second}})
+			svc.openaiWSPool = pool
+			account := passthroughLifecycleAccount()
+			account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModeCtxPool
+			client, done := startNativeWSMemorySession(t, svc, account, `{"type":"response.create","model":"gpt-5.1","store":false,"input":[{"role":"user","content":"first"}]}`, nil)
+			defer client.CloseNow()
+			requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+			upstream.Send(`{"type":"response.completed","response":{"id":"resp_first","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first answer"}]}]}}`)
+			_, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+			require.NoError(t, err)
+			require.NoError(t, client.Write(context.Background(), coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","store":false,"previous_response_id":"resp_first","input":[{"role":"user","content":"cancel this input"}]}`)))
+			requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+			require.NoError(t, client.Write(context.Background(), coderws.MessageText, []byte(fmt.Sprintf(`{"type":"%s"}`, controlType))))
+			event, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+			require.NoError(t, err)
+			if controlType == "response.interrupt" {
+				require.Equal(t, "response.interrupt.accepted", gjson.GetBytes(event, "type").String())
+			} else {
+				require.Equal(t, "request_cancelled", gjson.GetBytes(event, "error.code").String())
+			}
+			require.NoError(t, client.Write(context.Background(), coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","store":false,"previous_response_id":"resp_first","input":[{"role":"user","content":"next input"}]}`)))
+			event, err = readPassthroughLifecycleFrame(t, client, 3*time.Second)
+			require.NoError(t, err)
+			require.Equal(t, "resp_next", gjson.GetBytes(event, "response.id").String())
+			requireNativeWSTestServerExit(t, client, done)
+			replay := requestToJSONString(second.writes[0])
+			require.NotContains(t, replay, "previous_response_id")
+			require.NotContains(t, replay, "cancel this input")
+			require.Contains(t, replay, "first answer")
+		})
+	}
 }
 
 func TestOpenAIWSLocalInputRejectionKeepsConnection(t *testing.T) {

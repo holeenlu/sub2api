@@ -260,13 +260,16 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if requestID, _ := parent.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 		base = context.WithValue(base, ctxkey.RequestID, strings.TrimSpace(requestID))
 	}
-	return base
+	return service.WithSchedulingMetricsContext(base, parent)
 }
 
 // wrapUsageRecordTaskContext 包装计费任务：复制请求级 context 值，并接管请求的在途余额预留引用。
 // 返回的 abandon 在任务未被执行（被丢弃）时必须调用以归还预留引用；任务执行结束时（含 panic）
 // 自动归还，此时余额缓存已在计费路径中同步扣减。
 func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecordTask) (service.UsageRecordTask, func()) {
+	if parent != nil {
+		parent = service.FreezeSchedulingMetricsContext(parent)
+	}
 	if task == nil {
 		return nil, func() {}
 	}
@@ -931,7 +934,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						streamStarted = true
 					}
 					if failoverErr.ShouldReportAccountScheduleFailure() {
-						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, nil), false, nil, err)
+						h.gatewayService.ReportOpenAIAccountScheduleFailure(c.Request.Context(), account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, nil), err)
 					}
 					if !failoverErr.ShouldRetryNextAccount() {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
@@ -1009,7 +1012,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					reqLog.Warn("openai.upstream_failover_switching", failoverSwitchFields...)
 					continue
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), false, nil, err)
+				h.gatewayService.ReportOpenAIAccountScheduleFailure(c.Request.Context(), account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), err)
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
@@ -1035,9 +1038,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)
 			}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
+			reportOpenAICompletion(c.Request.Context(), h.gatewayService, account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), result)
 		} else {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), openAIForwardSucceededForScheduling(result), nil)
+			reportOpenAICompletion(c.Request.Context(), h.gatewayService, account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), result)
 		}
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
@@ -1541,7 +1544,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 					if failoverErr.ShouldReportAccountScheduleFailure() {
-						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, nil), false, nil, err)
+						h.gatewayService.ReportOpenAIAccountScheduleFailure(c.Request.Context(), account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, nil), err)
 					}
 					if !failoverErr.ShouldRetryNextAccount() {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
@@ -1613,7 +1616,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					submitMessagesUsage(result)
 					return
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), false, nil, err)
+				h.gatewayService.ReportOpenAIAccountScheduleFailure(c.Request.Context(), account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), err)
 				wroteFallback := h.ensureAnthropicErrorResponse(c, streamStarted)
 				reqLog.Warn("openai_messages.forward_failed",
 					zap.Int64("account_id", account.ID),
@@ -1625,9 +1628,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			}
 		}
 		if result != nil {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), true, result.FirstTokenMs)
+			h.gatewayService.ReportOpenAIAccountScheduleSuccess(c.Request.Context(), account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), result.FirstTokenMs)
 		} else {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), true, nil)
+			h.gatewayService.ReportOpenAIAccountScheduleSuccess(c.Request.Context(), account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), nil)
 		}
 
 		submitMessagesUsage(result)
@@ -2620,6 +2623,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	firstTurnStartedAt := time.Now()
+	if service.GatewayInstanceOverloaded() {
+		service.RecordSchedulingOverload("websocket")
+		closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "gateway instance is busy; retry shortly")
+		return
+	}
 	if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "unsupported websocket message type")
 		return
@@ -2863,7 +2871,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			return false
 		}
 		if failoverErr.ShouldReportAccountScheduleFailure() {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, wsForwardModel, false, nil), false, nil, failoverErr)
+			h.gatewayService.ReportOpenAIAccountScheduleFailure(c.Request.Context(), account, openAIAccountScheduleModel(c, account, wsForwardModel, false, nil), failoverErr)
 		}
 		releaseAccountSlot()
 		if !failoverErr.ShouldRetryNextAccount() {
@@ -3221,6 +3229,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return mapping.MappedModel, nil
 			},
 			BeforeTurn: func(turn int) error {
+				if service.GatewayInstanceOverloaded() {
+					service.RecordSchedulingOverload("websocket")
+					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "gateway instance is busy; retry shortly", service.ErrGatewayInstanceOverloaded)
+				}
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
 				if cyberBlockedThisConn && !h.cyberPolicyLogOnly(c, apiKey) {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)
@@ -3357,10 +3369,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				scheduleModel := turnUpstreamModel
 				if scheduleModel == "" {
-					scheduleModel = turnRequestedModel
+					scheduleModel = service.ResolveOpenAIAccountUpstreamModelForRequest(account, turnRequestedModel, false)
 				}
 				if result.SchedulingOutcomeKnown() {
-					h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
+					reportOpenAICompletion(c.Request.Context(), h.gatewayService, account, scheduleModel, result)
 				}
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
@@ -3484,7 +3496,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				allowOpenAIAccountBoundRetry(failoverErr, portable)
 				if waitForWSSameAccountRetry(account, failoverErr) {
 					if failoverErr.ShouldReportAccountScheduleFailure() {
-						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, wsForwardModel, false, nil), false, nil, err)
+						h.gatewayService.ReportOpenAIAccountScheduleFailure(c.Request.Context(), account, openAIAccountScheduleModel(c, account, wsForwardModel, false, nil), err)
 					}
 					if !ensureAttemptSlots() {
 						return
@@ -3538,7 +3550,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 
 			if shouldReportOpenAIWSProxyAccountFailure(err) {
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, wsForwardModel, false, nil), false, nil, err)
+				h.gatewayService.ReportOpenAIAccountScheduleFailure(c.Request.Context(), account, openAIAccountScheduleModel(c, account, wsForwardModel, false, nil), err)
 			}
 			if service.IsOpenAIWSUpstreamTransportError(err) {
 				status := http.StatusBadGateway
@@ -4843,4 +4855,22 @@ func summarizeWSCloseErrorForLog(err error) (string, string) {
 		}
 	}
 	return closeStatus, closeReason
+}
+
+func reportOpenAICompletion(ctx context.Context, gateway *service.OpenAIGatewayService, account *service.Account, model string, result *service.OpenAIForwardResult) {
+	if result != nil && !result.SchedulingOutcomeKnown() {
+		return
+	}
+	if result != nil && strings.TrimSpace(result.UpstreamModel) != "" {
+		model = strings.TrimSpace(result.UpstreamModel)
+	}
+	if !openAIForwardSucceededForScheduling(result) {
+		gateway.ReportOpenAIAccountScheduleFailure(ctx, account, model, errors.New("upstream stream ended with a semantic failure"))
+		return
+	}
+	var firstToken *int
+	if result != nil {
+		firstToken = result.FirstTokenMs
+	}
+	gateway.ReportOpenAIAccountScheduleSuccess(ctx, account, model, firstToken)
 }

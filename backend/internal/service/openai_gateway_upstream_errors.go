@@ -251,6 +251,12 @@ func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool 
 }
 
 func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Account, statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if IsUpstreamContentRefusal(upstreamBody) {
+		return false
+	}
+	if account != nil && account.Platform == PlatformOpenAI && isOpenAIEncryptedContextRejection(upstreamBody) {
+		return false
+	}
 	// cyber_policy is request-scoped even when an intermediary wraps the
 	// provider response in a retryable 5xx status. Never punish or rotate the
 	// selected credential for it.
@@ -283,6 +289,21 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Acc
 		return true
 	}
 	return isOpenAITransientProcessingError(statusCode, upstreamMsg, upstreamBody)
+}
+
+// Invalid encrypted state cannot be repaired by deleting it or changing the
+// credential. Keep the original error and let the client supply complete state.
+func isOpenAIEncryptedContextRejection(body []byte) bool {
+	code := gjson.GetBytes(body, "error.code").String()
+	if code == "" {
+		code = gjson.GetBytes(body, "response.error.code").String()
+	}
+	if code == "invalid_encrypted_content" {
+		return true
+	}
+	message := strings.ToLower(extractOpenAISSEErrorMessage(body))
+	return code == "thinking_signature_invalid" && strings.Contains(message, "encrypted content") &&
+		strings.Contains(message, "could not be verified") && strings.Contains(message, "could not be decrypted or parsed")
 }
 
 func isOpenAICompatibleModelNotFound400(respBody []byte) bool {
@@ -413,6 +434,28 @@ const (
 // isOpenAIUpstreamAccessStateError recognizes provider-side credential state
 // failures only from explicit structured codes. Free-form messages may contain
 // echoed user input, including inside stream terminal error.message fields.
+// isOpenAIResponseProtectionUnavailable recognises ChatGPT's "response
+// protection is unavailable" rejection. It arrives as a bare error frame
+// (code upstream_error, type internal_error) and the stream then ends, before
+// any output. It is scoped to the account, not the request: on 2026-10-08 it
+// hit 3 of 14 OpenAI accounts repeatedly while the other 11 served the same
+// clients without a single occurrence, so another account is the fix. The
+// generic upstream_error code alone must not imply that — a request-specific
+// failure such as "mixed tools failed" shares it and has to reach the client.
+func isOpenAIResponseProtectionUnavailable(message string, body []byte) bool {
+	const phrase = "response protection is unavailable"
+	for _, text := range []string{
+		message,
+		gjson.GetBytes(body, "error.message").String(),
+		gjson.GetBytes(body, "response.error.message").String(),
+	} {
+		if strings.Contains(strings.ToLower(text), phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 func isOpenAIUpstreamAccessStateError(_ string, body []byte) bool {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return false
@@ -508,6 +551,20 @@ func (s *OpenAIGatewayService) readUpstreamErrorBody(resp *http.Response) []byte
 	return body
 }
 
+// opsUpstreamErrorDetail returns the trimmed upstream error body for an ops
+// event when gateway.log_upstream_error_body is enabled, so failover attempts
+// keep the provider's own wording (e.g. an unclassified xAI 403).
+func (s *OpenAIGatewayService) opsUpstreamErrorDetail(body []byte) string {
+	if s == nil || s.cfg == nil || !s.cfg.Gateway.LogUpstreamErrorBody {
+		return ""
+	}
+	maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
+	if maxBytes <= 0 {
+		maxBytes = 2048
+	}
+	return truncateString(string(body), maxBytes)
+}
+
 func (s *OpenAIGatewayService) handleFailoverSideEffects(ctx context.Context, resp *http.Response, account *Account, responseBody []byte, canonicalModel ...string) bool {
 	if len(canonicalModel) > 0 {
 		return s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, responseBody, canonicalModel[0])
@@ -525,6 +582,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
+	observeUpstreamContentRefusal(ctx, body)
 
 	// cyber_policy 硬阻断：透传上游原始错误体给客户端（不重包成通用 502），不冷却账号。
 	// 当前请求恒透传（需求1）；标记供 handler 事后写风控/邮件。400 cyber 不可 failover
@@ -537,12 +595,14 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 			UpstreamStatus: resp.StatusCode,
 		})
 		setOpsUpstreamError(c, resp.StatusCode, cyberMsg, truncateString(string(body), 2048))
-		writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-		contentType := resp.Header.Get("Content-Type")
-		if contentType == "" {
-			contentType = "application/json"
+		if !writeOpenAIResponsesErrorAfterKeepalive(c, resp.StatusCode, body) {
+			writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+			contentType := resp.Header.Get("Content-Type")
+			if contentType == "" {
+				contentType = "application/json"
+			}
+			c.Data(resp.StatusCode, contentType, body)
 		}
-		c.Data(resp.StatusCode, contentType, body)
 		if cyberMsg == "" {
 			return nil, fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)
 		}
@@ -553,25 +613,35 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		setOpsUpstreamError(c, resp.StatusCode, clientMsg, truncateString(string(body), 2048))
 		writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 		MarkResponseCommitted(c)
-		c.JSON(http.StatusForbidden, gin.H{
+		status, errType, errMsg, _ := applyErrorPassthroughRule(
+			c, account.Platform, resp.StatusCode, body,
+			http.StatusForbidden, "invalid_request_error", clientMsg,
+		)
+		writeOpenAIResponsesErrorJSON(c, status, gin.H{
 			"error": gin.H{
-				"type":    "invalid_request_error",
-				"message": clientMsg,
+				"type":    errType,
+				"message": errMsg,
 			},
 		})
 		return nil, fmt.Errorf("grok content policy rejection: %s", clientMsg)
 	}
+	if IsUpstreamContentRefusal(body) {
+		setOpsUpstreamError(c, resp.StatusCode, "Upstream content policy refusal", s.opsUpstreamErrorDetail(body))
+		MarkResponseCommitted(c)
+		status, errType, errMsg, _ := applyErrorPassthroughRule(c, account.Platform, resp.StatusCode, body,
+			http.StatusBadRequest, "invalid_request_error", "Request blocked by upstream content policy")
+		writeOpenAIResponsesErrorJSON(c, status, gin.H{"error": gin.H{"type": errType, "code": "content_policy_violation", "message": errMsg}})
+		return nil, fmt.Errorf("upstream content policy refusal: %d", resp.StatusCode)
+	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
-	upstreamDetail := ""
-	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
-		if maxBytes <= 0 {
-			maxBytes = 2048
-		}
-		upstreamDetail = truncateString(string(body), maxBytes)
+	if account != nil && account.Platform == PlatformOpenAI && isOpenAIEncryptedContextRejection(body) {
+		setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, "context recovery declined: encrypted history must be supplied intact")
+		writeOpenAIPassthroughErrorEnvelope(c, resp.StatusCode, resp.Header, upstreamMsg, body)
+		return nil, fmt.Errorf("upstream response failed: %s: %w", upstreamMsg, ErrOpenAIWSReplayUnavailable)
 	}
+	upstreamDetail := s.opsUpstreamErrorDetail(body)
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
 
@@ -619,7 +689,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		"Upstream request failed",
 	); matched {
 		MarkResponseCommitted(c)
-		c.JSON(status, gin.H{
+		writeOpenAIResponsesErrorJSON(c, status, gin.H{
 			"error": gin.H{
 				"type":    errType,
 				"message": errMsg,
@@ -649,7 +719,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 			Detail:             upstreamDetail,
 		})
 		MarkResponseCommitted(c)
-		c.JSON(http.StatusInternalServerError, gin.H{
+		writeOpenAIResponsesErrorJSON(c, http.StatusInternalServerError, gin.H{
 			"error": gin.H{
 				"type":    "upstream_error",
 				"message": "Upstream gateway error",
@@ -745,7 +815,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		errMsg = upstreamMsg
 	}
 
-	c.JSON(statusCode, gin.H{
+	writeOpenAIResponsesErrorJSON(c, statusCode, gin.H{
 		"error": gin.H{
 			"type":    errType,
 			"message": errMsg,
@@ -776,6 +846,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(context.Background(), account, body)
+	observeUpstreamContentRefusal(c.Request.Context(), body)
 
 	// cyber_policy：兼容路径（Chat Completions / Anthropic）以各自格式回写错误，
 	// 不原样透传 responses 格式的 cyber body（否则对下游格式不合法）。cyber 是上游网络
@@ -803,8 +874,20 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		clientMsg := grokContentPolicyClientMessage(body)
 		setOpsUpstreamError(c, resp.StatusCode, clientMsg, truncateString(string(body), 2048))
 		MarkResponseCommitted(c)
-		writeError(c, http.StatusForbidden, "invalid_request_error", clientMsg)
+		status, errType, errMsg, _ := applyErrorPassthroughRule(
+			c, account.Platform, resp.StatusCode, body,
+			http.StatusForbidden, "invalid_request_error", clientMsg,
+		)
+		writeError(c, status, errType, errMsg)
 		return nil, fmt.Errorf("grok content policy rejection: %s", clientMsg)
+	}
+	if IsUpstreamContentRefusal(body) {
+		setOpsUpstreamError(c, resp.StatusCode, "Upstream content policy refusal", s.opsUpstreamErrorDetail(body))
+		MarkResponseCommitted(c)
+		status, errType, errMsg, _ := applyErrorPassthroughRule(c, account.Platform, resp.StatusCode, body,
+			http.StatusBadRequest, "invalid_request_error", "Request blocked by upstream content policy")
+		writeError(c, status, errType, errMsg)
+		return nil, fmt.Errorf("upstream content policy refusal: %d", resp.StatusCode)
 	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
@@ -813,14 +896,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	}
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 
-	upstreamDetail := ""
-	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
-		if maxBytes <= 0 {
-			maxBytes = 2048
-		}
-		upstreamDetail = truncateString(string(body), maxBytes)
-	}
+	upstreamDetail := s.opsUpstreamErrorDetail(body)
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 
 	// Apply error passthrough rules
