@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-import type { ApiKey } from '@/types'
+import type { ApiKey, Group } from '@/types'
 import { keysAPI } from '@/api'
 import KeysView from '../KeysView.vue'
 
@@ -156,7 +156,7 @@ const TablePageLayoutStub = {
 
 const DataTableStub = {
   name: 'DataTable',
-  props: { columns: Array, data: Array, selectedKeys: Array, selectable: Boolean },
+  props: { columns: Array, data: Array, selectedKeys: Array, selectable: Boolean, loading: Boolean },
   emits: ['sort', 'update:selectedKeys'],
   template: `
     <div>
@@ -172,7 +172,9 @@ const DataTableStub = {
         >
           <slot name="cell-id" :value="row.id" :row="row" />
         </div>
+        <div data-test="usage"><slot name="cell-usage" :row="row" /></div>
         <slot name="cell-name" :value="row.name" :row="row" />
+        <div data-test="key-group"><slot name="cell-group" :row="row" /></div>
         <slot name="cell-actions" :row="row" />
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
@@ -241,7 +243,11 @@ const mountView = async () => {
         UseKeyModal: true,
         BulkEditKeysModal: true,
         EndpointPopover: true,
-        GroupBadge: true,
+        GroupBadge: {
+          name: 'GroupBadge',
+          props: ['name', 'rateMultiplier', 'userRateMultiplier'],
+          template: '<span>{{ name }} {{ userRateMultiplier ?? rateMultiplier }}x</span>',
+        },
         GroupOptionItem: true,
         Teleport: true,
       },
@@ -297,6 +303,116 @@ describe('user KeysView column settings', () => {
     isCurrentStep.mockReturnValue(false)
   })
 
+  describe('group pricing refresh', () => {
+    const group = {
+      id: 42, name: 'Example group', platform: 'openai',
+      rate_multiplier: 0.3, subscription_type: 'standard',
+    } as Group
+
+    const formOption = (wrapper: VueWrapper) => wrapper
+      .getComponent('[data-tour="key-form-group"]').props('options')
+      .find((option: { value: number }) => option.value === group.id)
+
+    beforeEach(() => {
+      listKeys.mockResolvedValue({ items: [{ ...createApiKey(), group_id: group.id, group }], total: 1, page: 1, page_size: 20, pages: 1 })
+      getAvailableGroups.mockResolvedValue([group])
+      getUserGroupRates.mockResolvedValue({ 42: 1.3 })
+    })
+
+    it.each([0.5, 0, null])('refreshes the row after an override changes to %s', async (rate) => {
+      const wrapper = await mountView()
+      expect(wrapper.get('[data-test="key-group"]').text()).toContain('1.3x')
+      getUserGroupRates.mockResolvedValue(rate === null ? {} : { 42: rate })
+
+      await wrapper.get('button[title="Refresh"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.get('[data-test="key-group"]').text()).toContain(`${rate ?? 0.3}x`)
+      expect(getAvailableGroups).toHaveBeenCalledTimes(2)
+    })
+
+    it.each(['create', 'edit'])('refreshes pricing when opening the %s dialog', async (mode) => {
+      const wrapper = await mountView()
+      getAvailableGroups.mockResolvedValue([{ ...group, rate_multiplier: 0.4 }])
+      getUserGroupRates.mockResolvedValue({ 42: 0.5 })
+
+      await getButtonByText(wrapper, mode === 'create' ? 'Create API Key' : 'common.edit').trigger('click')
+      await flushPromises()
+
+      expect(formOption(wrapper)).toMatchObject({ rate: 0.4, userRate: 0.5 })
+      expect(wrapper.get('[data-test="key-group"]').text()).toContain('0.5x')
+      expect(getUserGroupRates).toHaveBeenCalledTimes(2)
+    })
+
+    it('refreshes the inline group selector without reloading the page', async () => {
+      const wrapper = await mountView()
+      getUserGroupRates.mockResolvedValue({ 42: 0.5 })
+
+      await wrapper.get('[data-test="key-group"] button').trigger('click')
+      await flushPromises()
+
+      const option = wrapper.findComponent({ name: 'GroupOptionItem' })
+      expect(option.props('userRateMultiplier')).toBe(0.5)
+      expect(wrapper.get('[data-test="key-group"]').text()).toContain('0.5x')
+    })
+
+    it('keeps the previous pricing together and reports a failed refresh', async () => {
+      const wrapper = await mountView()
+      getAvailableGroups.mockResolvedValue([{ ...group, rate_multiplier: 0.4 }])
+      getUserGroupRates.mockRejectedValueOnce(new Error('Unavailable'))
+
+      await wrapper.get('button[title="Refresh"]').trigger('click')
+      await flushPromises()
+
+      expect(showError).toHaveBeenCalledWith('keys.failedToLoad')
+      expect(wrapper.get('[data-test="key-group"]').text()).toContain('1.3x')
+      getUserGroupRates.mockResolvedValue({ 42: 0.5 })
+      await wrapper.get('button[title="Refresh"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.get('[data-test="key-group"]').text()).toContain('0.5x')
+    })
+
+    it('does not let an older refresh overwrite the dialog pricing', async () => {
+      const wrapper = await mountView()
+      let resolveOlder!: (value: Record<number, number>) => void
+      const olderRates = { promise: new Promise<Record<number, number>>(resolve => { resolveOlder = resolve }), resolve: (value: Record<number, number>) => resolveOlder(value) }
+      getUserGroupRates.mockReturnValueOnce(olderRates.promise)
+      await wrapper.get('button[title="Refresh"]').trigger('click')
+
+      getUserGroupRates.mockResolvedValue({ 42: 0.5 })
+      await wrapper.get('[data-tour="keys-create-btn"]').trigger('click')
+      await flushPromises()
+      olderRates.resolve({ 42: 1.3 })
+      await flushPromises()
+
+      expect(formOption(wrapper)).toMatchObject({ userRate: 0.5 })
+      expect(wrapper.get('[data-test="key-group"]').text()).toContain('0.5x')
+    })
+  })
+
+  it('shows keys before slow usage aggregates and ignores an old page response', async () => {
+    let finishOld!: (value: any) => void
+    getDashboardApiKeysUsage.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+    const wrapper = await mountView()
+    const table = wrapper.findComponent({ name: 'DataTable' })
+    expect(table.props('loading')).toBe(false)
+    expect(table.props('data')[0].name).toBe('test-key')
+    expect(wrapper.get('[data-test="usage"]').text()).toContain('—')
+    expect(wrapper.get('[data-test="usage"]').text()).not.toContain('$0.0000')
+    const oldSignal = getDashboardApiKeysUsage.mock.calls[0][1].signal as AbortSignal
+
+    listKeys.mockResolvedValueOnce({ items: [{ ...createApiKey(), id: 2, name: 'second' }], total: 2, pages: 2 })
+    getDashboardApiKeysUsage.mockResolvedValueOnce({ stats: { 2: { today_actual_cost: 2, total_actual_cost: 3 } } })
+    await wrapper.get('[data-test="page-2"]').trigger('click')
+    await flushPromises()
+    expect(oldSignal.aborted).toBe(true)
+    finishOld({ stats: { 1: { today_actual_cost: 99, total_actual_cost: 99 } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="usage"]').text()).toContain('$2.0000')
+    expect(wrapper.text()).not.toContain('$99.0000')
+    wrapper.unmount()
+  })
+
   it.each([
     { initialStatus: 'quota_exhausted', status: 'active', formStatus: 'active' },
     { initialStatus: 'inactive', status: 'inactive', formStatus: 'inactive' },
@@ -332,6 +448,16 @@ describe('user KeysView column settings', () => {
     await flushPromises()
     expect(updateKey).toHaveBeenNthCalledWith(2, key.id, expect.objectContaining({ name: 'Unsaved name', status: formStatus }))
     wrapper.unmount()
+  })
+
+  it('keeps Use Key but removes CCS import and client selection', async () => {
+    const wrapper = await mountView()
+    expect(wrapper.text()).toContain('keys.useKey')
+    expect(wrapper.text()).not.toContain('keys.importToCcSwitch')
+    expect(wrapper.findComponent({ name: 'UseKeyModal' }).exists()).toBe(true)
+    expect(wrapper.findAllComponents({ name: 'BaseDialog' }).some(dialog =>
+      dialog.props('title') === 'keys.ccsClientSelect.title'
+    )).toBe(false)
   })
 
   it('uses the default API key columns with low-frequency columns hidden', async () => {
