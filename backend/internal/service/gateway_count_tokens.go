@@ -10,9 +10,8 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/tidwall/gjson"
-
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 // ForwardCountTokens 转发 count_tokens 请求到上游 API
@@ -36,13 +35,17 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 			if resolved, ok := ResolveBedrockModelID(account, validationModel); ok {
 				validationModel = resolved
 			}
-		} else if account.Type == AccountTypeAPIKey {
+		} else if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 			validationModel = account.GetMappedModel(validationModel)
 		}
 	}
 	if account != nil && account.Platform == PlatformAnthropic {
-		if err := validateClaude55Request(parsed.Body.Bytes(), validationModel); err != nil {
-			s.countTokensError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		normalized, err := normalizeClaudeThinkingForUpstream(ctx, parsed.Body.Bytes(), validationModel)
+		if err == nil {
+			err = parsed.ReplaceBody(normalized)
+		}
+		if err != nil {
+			writeClaudeThinkingError(c, err, writeAnthropicError)
 			return err
 		}
 	}
@@ -167,7 +170,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	// 发送请求
-	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Request failed")
@@ -194,7 +197,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
 		retryReq, retryWireBody, buildErr := s.buildCountTokensRequest(ctx, c, account, filteredBody, token, tokenType, reqModel, shouldMimicClaudeCode)
 		if buildErr == nil {
-			retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+			retryResp, retryErr := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 			if retryErr == nil {
 				if retryResp.StatusCode < 400 {
 					// count_tokens 签名重试成功后记录最终 wire body，错误响应仍保留原 body 便于后续处理。
@@ -293,7 +296,7 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -412,7 +415,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 	// 同 buildUpstreamRequestAnthropicAPIKeyPassthrough：能力维度 sanitize。
 	clientBeta := ""
 	if c != nil && c.Request != nil {
-		clientBeta = getHeaderRaw(c.Request.Header, "anthropic-beta")
+		clientBeta = getRequestTokenListHeader(c.Request, "anthropic-beta")
 	}
 	// 账号覆写了 anthropic-beta 时，覆写值即最终上游值：净化以覆写值为准
 	if beta, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
@@ -523,7 +526,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 	// 一致性铁律：同一次请求内只取一次 mimic UA，billing cc_version 与出站
 	// User-Agent 头共用这一个字符串（同 buildUpstreamRequest）。
-	ctMimicUserAgent := claude.DefaultUserAgent()
+	ctMimicUserAgent := claudeCodeMimicUserAgent()
 	if billingUA := effectiveBillingUserAgent(ctMimicUserAgent, tokenType, mimicClaudeCode, billingFingerprint); billingUA != "" {
 		body = syncBillingHeaderVersion(body, billingUA)
 	}
@@ -547,6 +550,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 
 	body = sanitizeCountTokensRequestBody(body)
+	body = finalizeClaudeCCH(body, targetURL)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
@@ -563,19 +567,21 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 
 	// 白名单透传 headers（恢复真实 wire casing）
-	for key, values := range clientHeaders {
-		lowerKey := strings.ToLower(key)
-		if allowedHeaders[lowerKey] {
-			wireKey := resolveWireCasing(key)
-			for _, v := range values {
-				addHeaderRaw(req.Header, wireKey, v)
+	if tokenType != "oauth" || !mimicClaudeCode {
+		for key, values := range clientHeaders {
+			lowerKey := strings.ToLower(key)
+			if allowedHeaders[lowerKey] {
+				wireKey := resolveWireCasing(key)
+				for _, v := range values {
+					addHeaderRaw(req.Header, wireKey, v)
+				}
 			}
 		}
 	}
 
 	// OAuth 账号：应用指纹到请求头（受设置开关控制）
 	if ctEnableFP && ctFingerprint != nil {
-		s.identityService.ApplyFingerprint(req, ctFingerprint)
+		ctFingerprint.applyHeaders(req)
 	}
 
 	// 确保必要的 headers 存在（保持原始大小写）
@@ -591,7 +597,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹 header
 	if tokenType == "oauth" && mimicClaudeCode {
-		applyClaudeCodeMimicHeaders(req, false, ctMimicUserAgent)
+		applyClaudeCodeMimicHeaders(req, c)
 	}
 
 	// 写入最终 anthropic-beta header（Del 一次避免白名单透传值残留）
@@ -601,12 +607,8 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 
 	// 同步 X-Claude-Code-Session-Id 头：取 body 中已处理的 metadata.user_id 的 session_id 覆盖
-	if sessionHeader := getHeaderRaw(req.Header, "X-Claude-Code-Session-Id"); sessionHeader != "" {
-		if uid := gjson.GetBytes(body, "metadata.user_id").String(); uid != "" {
-			if parsed := ParseMetadataUserID(uid); parsed != nil {
-				setHeaderRaw(req.Header, "X-Claude-Code-Session-Id", parsed.SessionID)
-			}
-		}
+	if tokenType == "oauth" || getHeaderRaw(req.Header, "X-Claude-Code-Session-Id") != "" {
+		syncClaudeCodeSessionHeader(req, body)
 	}
 
 	// 账号级请求头覆写（仅 anthropic/openai api_key 账号启用时生效；OAuth 路径 no-op）
