@@ -29,7 +29,7 @@
         class="select-clear"
         role="button"
         tabindex="-1"
-        aria-label="Clear selection"
+        :aria-label="t('ui.clearSelection')"
         @click.stop="clearSelection"
         @mousedown.stop
         @keydown.enter.stop.prevent="clearSelection"
@@ -115,6 +115,7 @@
               {{ props.loading ? t('common.loading') : emptyTextDisplay }}
             </div>
           </div>
+          <slot name="footer" />
         </div>
       </Transition>
     </Teleport>
@@ -165,6 +166,7 @@ interface Emits {
   (e: 'update:modelValue', value: string | number | boolean | null): void
   (e: 'change', value: string | number | boolean | null, option: SelectOption | null): void
   (e: 'search', query: string): void
+  (e: 'open'): void
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -381,6 +383,7 @@ watch(() => props.disabled, (disabled) => {
 
 watch(isOpen, (open) => {
   if (open) {
+    emit('open')
     calculateDropdownPosition()
     // Reset focused index to current selection or first item
     if (filteredOptions.value.length === 0) {
