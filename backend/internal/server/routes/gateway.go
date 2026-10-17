@@ -42,6 +42,13 @@ func RegisterGatewayRoutes(
 	compositeTarget := compositeTargetPlatformMiddleware(compositeResolver)
 	compositeGeminiTarget := compositeGeminiTargetPlatformMiddleware(compositeResolver)
 
+	// Match Wei-Shaw's local acknowledgement for anonymous telemetry. Only
+	// authenticated uploads opt into our per-user sample storage; neither path
+	// schedules an account or forwards events to a supplier.
+	for _, path := range []string{service.ClaudeTelemetryLegacyPath, service.ClaudeTelemetryBatchPath} {
+		r.POST(path, acknowledgeAnonymousClientTelemetry, middleware.RequestBodyLimit(service.ClientTelemetryMaxBodyBytes), gin.HandlerFunc(apiKeyAuth), h.Gateway.ClaudeTelemetry)
+	}
+
 	// 未分组 Key 拦截中间件（按协议格式区分错误响应）
 	requireGroupAnthropic := middleware.RequireGroupAssignment(settingService, middleware.AnthropicErrorWriter)
 	requireGroupGoogle := middleware.RequireGroupAssignment(settingService, middleware.GoogleErrorWriter)

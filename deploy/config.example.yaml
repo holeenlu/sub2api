@@ -30,6 +30,8 @@ server:
   # Maximum time to receive complete request headers. Does not limit response streams.
   # 完整读取请求头的最大时间；不限制响应流持续时间。
   read_header_timeout: 10
+  # Request body phase only; cleared after the body completes. 0 disables.
+  read_body_timeout: 300
   # Request header limit in bytes (64 KiB); also bounds the HTTP/2 header list.
   # 请求头上限（字节，默认 64 KiB）；同时约束 HTTP/2 header list。
   max_header_bytes: 65536
