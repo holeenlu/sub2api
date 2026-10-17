@@ -377,10 +377,9 @@ func normalizeCodexRequestMetadataMap(payload map[string]any, headers http.Heade
 	return err
 }
 
-// normalizeCodexClientMetadata merges embedded body metadata before header-only
-// additions. An explicit official session-id is cache affinity and is never
-// overwritten by the body's session. Header pruning never mutates body data.
-func normalizeCodexClientMetadata(cm map[string]any, headers http.Header, body []byte, account *Account, apiKeyID int64, isCompact bool) (bool, error) {
+// mergeCodexTurnMetadata reads already-scoped metadata without adding defaults
+// or mutating either source. Body fields take precedence over header additions.
+func mergeCodexTurnMetadata(cm map[string]any, headers http.Header) map[string]any {
 	metadata := map[string]any{}
 	if raw, ok := cm[openAIWSTurnMetadataHeader].(string); ok {
 		if decoded, err := decodeCodexTurnMetadata(raw); err == nil && decoded != nil {
@@ -408,6 +407,14 @@ func normalizeCodexClientMetadata(cm map[string]any, headers http.Header, body [
 			}
 		}
 	}
+	return metadata
+}
+
+// normalizeCodexClientMetadata merges embedded body metadata before header-only
+// additions. An explicit official session-id is cache affinity and is never
+// overwritten by the body's session. Header pruning never mutates body data.
+func normalizeCodexClientMetadata(cm map[string]any, headers http.Header, body []byte, account *Account, apiKeyID int64, isCompact bool) (bool, error) {
+	metadata := mergeCodexTurnMetadata(cm, headers)
 	first := func(values ...any) string {
 		for _, value := range values {
 			if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {

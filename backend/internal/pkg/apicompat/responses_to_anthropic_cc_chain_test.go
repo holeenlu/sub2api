@@ -2,6 +2,7 @@ package apicompat
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -99,4 +100,36 @@ func TestCCChain_WellFormedMultiRound(t *testing.T) {
 		sawB = sawB || hasToolUse(blocks, "call_b")
 	}
 	require.True(t, sawA && sawB, "both well-formed calls should be preserved")
+}
+
+func TestResponsesFormatAndCompletedTailFidelity(t *testing.T) {
+	input := json.RawMessage(`[{"role":"user","content":"question"},{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"answer","annotations":[]}]}]`)
+	req := &ResponsesRequest{Model: "claude-sonnet-5-5", Input: input, Text: &ResponsesText{Format: json.RawMessage(`{"type":"json_schema","name":"result","strict":true,"schema":{"type":"object","properties":{"ok":{"type":"boolean"}},"additionalProperties":false}}`)}}
+	out, err := ResponsesToAnthropicRequest(req)
+	require.NoError(t, err)
+	require.Len(t, out.Messages, 1)
+	require.Len(t, out.Diagnostics, 1)
+	require.JSONEq(t, `{"type":"json_schema","schema":{"type":"object","properties":{"ok":{"type":"boolean"}},"additionalProperties":false}}`, string(out.OutputConfig.Format))
+	require.Equal(t, string(input), string(req.Input))
+	req.FromChatCompletions = true
+	out, err = ResponsesToAnthropicRequest(req)
+	require.NoError(t, err)
+	require.Len(t, out.Messages, 2)
+	req.FromChatCompletions = false
+	req.Input = json.RawMessage(`[{"role":"user","content":"question"},{"type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":"partial"}]}]`)
+	out, err = ResponsesToAnthropicRequest(req)
+	require.NoError(t, err)
+	require.Len(t, out.Messages, 2)
+	req.Input = json.RawMessage(`[{"role":"user","content":"question"},{"type":"message","role":"assistant","status":"completed","provider_signature":"opaque","content":[{"type":"output_text","text":"answer"}]}]`)
+	var diagnostics ConversionDiagnostics
+	require.Equal(t, req.Input, omitCompletedResponsesTail(req.Input, &diagnostics))
+	require.Empty(t, diagnostics)
+}
+func TestConversionDiagnosticsBounded(t *testing.T) {
+	var d ConversionDiagnostics
+	for i := 0; i < 100; i++ {
+		d.Add("schema_legacy_conversion", fmt.Sprintf("tools[%d]", i))
+		d.Add("schema_legacy_conversion", fmt.Sprintf("tools[%d]", i))
+	}
+	require.Len(t, d, 32)
 }

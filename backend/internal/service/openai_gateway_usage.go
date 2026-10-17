@@ -1141,6 +1141,7 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 			updates["codex_7d_reset_at"] = *reset7dAt
 		}
 	}
+	appendSchedulingQuotaObservations(updates)
 
 	return updates
 }
