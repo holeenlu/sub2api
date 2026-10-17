@@ -351,7 +351,7 @@ func (s *OpenAIGatewayService) forwardExcelBPSImages(ctx context.Context, c *gin
 	if imageCount <= 0 {
 		imageCount = parsed.N
 	}
-	return &OpenAIForwardResult{
+	return &OpenAIForwardResult{AuthorizationMode: UsageAuthorizationModeBPS,
 		RequestID:                     resp.Header.Get("x-request-id"),
 		UpstreamHeaders:               resp.Header,
 		Usage:                         usage,

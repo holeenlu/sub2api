@@ -160,7 +160,7 @@ func (h *AuthHandler) ensureBackendModeAllowsUser(ctx context.Context, user *ser
 	if user == nil {
 		return infraerrors.Unauthorized("INVALID_USER", "user not found")
 	}
-	if h == nil || !h.isBackendModeEnabled(ctx) || user.IsStaff() {
+	if h == nil || !h.isBackendModeEnabled(ctx) || user.IsStaff() || (user.IsVendor() && supplierLoginContext(ctx)) {
 		return nil
 	}
 	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "Backend mode is active. Only admin login is allowed.")
@@ -723,7 +723,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	}
 
 	// Backend mode: block non-admin token refresh
-	if h.settingSvc.IsBackendModeEnabled(c.Request.Context()) && result.UserRole != service.RoleAdmin && result.UserRole != service.RoleSuperAdmin {
+	if h.settingSvc.IsBackendModeEnabled(c.Request.Context()) && result.UserRole != service.RoleAdmin && result.UserRole != service.RoleSuperAdmin && !(supplierLoginContext(c.Request.Context()) && authz.IsVendorRole(result.UserRole)) {
 		response.Forbidden(c, "Backend mode is active. Only admin login is allowed.")
 		return
 	}
@@ -792,3 +792,5 @@ func (h *AuthHandler) RevokeAllSessions(c *gin.Context) {
 		Message: "All sessions have been revoked. Please log in again.",
 	})
 }
+
+func supplierLoginContext(ctx context.Context) bool { v, _ := authz.SupplierOrigin(ctx); return v }
