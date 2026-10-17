@@ -1,18 +1,18 @@
 ---
-name: gpt-image-flare
-description: Generate or edit images with gpt-image-2.5-flare through the API provider and API key already configured in the Codex client. Use for Flare image generation, image editing, reference-image composition, or explicit $gpt-image-flare requests; do not use another image model.
+name: gpt-image-sunburst
+description: Generate or edit images with gpt-image-2.5-sunburst through the API provider and API key already configured in the Codex client. Use for Sunburst image generation, image editing, reference-image composition, or explicit $gpt-image-sunburst requests; do not use another image model.
 ---
 
-# GPT Image 2.5 Flare
+# GPT Image 2.5 Sunburst
 
-Use Python 3.11+. Create `.venv` in this skill directory and install `requirements.txt`; Pillow is required for real image decoding. Run `scripts/generate.py` with that environment's Python from this skill directory; do not assume a fixed installation path. (`--check-config` can run without Pillow, but generation and editing cannot.) The skill can be installed under the default `~/.agents/skills` or the compatible `~/.codex/skills` directory. It reads the top-level Codex `model_provider`/`model_providers` configuration. Setting only `KDAN_API_KEY` leaves the provider's `base_url` and `env_key` in effect; an explicit `KDAN_BASE_URL` enables a complete environment override and requires `KDAN_API_KEY`. Codex `profile`/`profiles` provider selection is rejected explicitly. An `env_key` configured in Codex is authoritative: a missing variable fails and never falls back to `OPENAI_API_KEY`. Never print, copy, or place the credential in a command argument or generated file.
+Use Python 3.11+. Create `.venv` in this skill directory and install `requirements.txt`; Pillow is required for real image decoding. Run `scripts/generate.py` with that environment's Python from this skill directory; do not assume a fixed installation path. (`--check-config` can run without Pillow, but generation and editing cannot.) The skill can be installed under the default `~/.agents/skills` or the compatible `~/.codex/skills` directory. It reads the top-level Codex `model_provider`/`model_providers` configuration. Setting only `TOKENSAVY_API_KEY` leaves the provider's `base_url` and `env_key` in effect; an explicit `TOKENSAVY_BASE_URL` enables a complete environment override and requires `TOKENSAVY_API_KEY`. Codex `profile`/`profiles` provider selection is rejected explicitly. An `env_key` configured in Codex is authoritative: a missing variable fails and never falls back to `OPENAI_API_KEY`. Never print, copy, or place the credential in a command argument or generated file.
 
 The provider URL must use HTTPS; plain HTTP is accepted only for loopback test servers. Redirects are rejected before credentials could be sent to another host. Input images and masks must decode successfully and each is limited by this tool to 20 MiB; that is a tool limit, not a claim about provider limits. Output PNG, JPEG, and WebP are decoded and verified with Pillow, and the reported dimensions are the actual decoded dimensions.
 
 Use an absolute output path. If the user does not choose one, allow the script to save under `$CODEX_HOME/generated-images`.
 
 ```bash
-cd /path/to/gpt-image-flare
+cd /path/to/gpt-image-sunburst
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python scripts/generate.py \
@@ -24,7 +24,7 @@ python3 -m venv .venv
 For editing, pass the source image with `--image`. Repeat `--image` for additional reference images. Add `--mask` only when the user supplies a mask for the first image.
 
 ```bash
-cd /path/to/gpt-image-flare
+cd /path/to/gpt-image-sunburst
 .venv/bin/python scripts/generate.py \
   --image "/absolute/path/source.png" \
   --prompt "Add a red beret while preserving the subject, background, and composition" \

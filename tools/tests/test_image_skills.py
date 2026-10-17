@@ -10,7 +10,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-ROOT = Path(__file__).parents[2] / "frontend/public/downloads/kdan-image-skills"
+ROOT = Path(__file__).parents[2] / "frontend/public/downloads/tokensavy-image-skills"
 
 
 def load_script(name):
@@ -32,7 +32,7 @@ class ImageSkillTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.home = Path(self.temp.name)
         os.environ["CODEX_HOME"] = str(self.home)
-        for key in ("KDAN_BASE_URL", "KDAN_API_KEY", "OPENAI_API_KEY"):
+        for key in ("TOKENSAVY_BASE_URL", "TOKENSAVY_API_KEY", "OPENAI_API_KEY"):
             os.environ.pop(key, None)
 
     def tearDown(self):
@@ -80,15 +80,15 @@ env_key = "sk-should-never-be-echoed"
         self.assertEqual(str(raised.exception), "Model provider 'Tap' has an invalid env_key")
         self.assertNotIn("sk-", str(raised.exception))
 
-    def test_explicit_kdan_override_and_profile_rejection(self):
-        os.environ["KDAN_BASE_URL"] = "http://127.0.0.1:43111"
-        self.assertEqual(self.flare.load_provider(require_token=False), ("KDAN environment", "http://127.0.0.1:43111", {}, None))
-        with self.assertRaisesRegex(RuntimeError, "KDAN_API_KEY"):
+    def test_explicit_tokensavy_override_and_profile_rejection(self):
+        os.environ["TOKENSAVY_BASE_URL"] = "http://127.0.0.1:43111"
+        self.assertEqual(self.flare.load_provider(require_token=False), ("Tokensavy environment", "http://127.0.0.1:43111", {}, None))
+        with self.assertRaisesRegex(RuntimeError, "TOKENSAVY_API_KEY"):
             self.flare.load_provider()
-        os.environ["KDAN_API_KEY"] = "test-key"
+        os.environ["TOKENSAVY_API_KEY"] = "test-key"
         self.assertEqual(self.flare.load_provider()[3], "test-key")
-        os.environ.pop("KDAN_BASE_URL")
-        os.environ.pop("KDAN_API_KEY")
+        os.environ.pop("TOKENSAVY_BASE_URL")
+        os.environ.pop("TOKENSAVY_API_KEY")
         self.write_config('''profile = "work"
 [model_providers.OpenAI]
 base_url = "https://api.example.test"
@@ -101,9 +101,9 @@ experimental_bearer_token = "secret"
         self.write_config('''model_provider = "Tap"
 [model_providers.Tap]
 base_url = "https://provider.example.test"
-env_key = "KDAN_API_KEY"
+env_key = "TOKENSAVY_API_KEY"
 ''')
-        os.environ["KDAN_API_KEY"] = "provider-key"
+        os.environ["TOKENSAVY_API_KEY"] = "provider-key"
         for skill in (self.flare, self.sunburst):
             name, base, headers, token = skill.load_provider()
             self.assertEqual(name, "Tap")
@@ -117,7 +117,7 @@ env_key = "KDAN_API_KEY"
 base_url = "https://provider.example.test"
 env_key = "PROVIDER_API_KEY"
 ''')
-        os.environ["KDAN_API_KEY"] = "wrong-provider-key"
+        os.environ["TOKENSAVY_API_KEY"] = "wrong-provider-key"
         for skill in (self.flare, self.sunburst):
             with self.assertRaisesRegex(RuntimeError, "PROVIDER_API_KEY.*missing"):
                 skill.load_provider()
@@ -183,8 +183,8 @@ env_key = "MISSING_KEY"
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            os.environ["KDAN_BASE_URL"] = f"http://127.0.0.1:{server.server_port}"
-            os.environ["KDAN_API_KEY"] = "fixture-key"
+            os.environ["TOKENSAVY_BASE_URL"] = f"http://127.0.0.1:{server.server_port}"
+            os.environ["TOKENSAVY_API_KEY"] = "fixture-key"
             output_path = self.home / "out.png"
             old_argv = list(__import__("sys").argv)
             __import__("sys").argv = ["generate.py", "--prompt", "draw", "--output", str(output_path)]
@@ -237,8 +237,8 @@ env_key = "MISSING_KEY"
         server = HTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:
-            os.environ["KDAN_BASE_URL"] = f"http://127.0.0.1:{server.server_port}"
-            os.environ["KDAN_API_KEY"] = secret
+            os.environ["TOKENSAVY_BASE_URL"] = f"http://127.0.0.1:{server.server_port}"
+            os.environ["TOKENSAVY_API_KEY"] = secret
             old_argv = list(__import__("sys").argv)
             __import__("sys").argv = ["generate.py", "--prompt", "draw", "--output", str(self.home / "error.png")]
             try:

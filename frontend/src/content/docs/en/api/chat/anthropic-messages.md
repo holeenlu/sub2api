@@ -2,7 +2,7 @@
 
 ```http
 POST /v1/messages
-x-api-key: $KDAN_API_KEY
+x-api-key: $API_KEY
 anthropic-version: 2023-06-01
 Content-Type: application/json
 ```
@@ -33,8 +33,8 @@ An image block uses `{"type":"image","source":{"type":"base64","media_type":"ima
 ## Minimal request and complete response
 
 ```bash
-curl "$KDAN_BASE_URL/v1/messages" \
-  -H "x-api-key: $KDAN_API_KEY" \
+curl "$API_BASE_URL/v1/messages" \
+  -H "x-api-key: $API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
   -d '{"model":"YOUR_MODEL_ID","max_tokens":256,"messages":[{"role":"user","content":"Explain idempotency in one sentence."}]}'
