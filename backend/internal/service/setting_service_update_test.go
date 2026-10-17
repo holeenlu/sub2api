@@ -567,6 +567,43 @@ func TestSettingService_UpdateSettings_AntigravityUserAgentVersion(t *testing.T)
 	require.Equal(t, "1.23.2", repo.updates[SettingKeyAntigravityUserAgentVersion])
 }
 
+func TestSettingService_InitializeDefaultSettingsBPSDefaults(t *testing.T) {
+	ctx := context.Background()
+	t.Run("fresh install enables BPS and native images", func(t *testing.T) {
+		repo := &forwardedIPMigrationRepoStub{values: map[string]string{}}
+		svc := NewSettingService(repo, &config.Config{})
+		require.NoError(t, svc.InitializeDefaultSettings(ctx))
+		require.Equal(t, "true", repo.values[SettingKeyExcelBPSEnabled])
+		require.Equal(t, "true", repo.values[SettingKeyExcelBPSImageRelayEnabled])
+		require.Equal(t, "auto_compact", repo.values[SettingKeyExcelBPSImageLimitPolicy])
+		settings, err := svc.GetExcelBPSImageRelaySettings(ctx)
+		require.NoError(t, err)
+		require.True(t, settings.Enabled)
+		require.Equal(t, ExcelBPSImageModeNative, settings.Mode)
+		require.Equal(t, "auto_compact", settings.Policy)
+		require.Equal(t, DefaultExcelBPSImageBudgetMiB, settings.BudgetMiB)
+		require.Equal(t, DefaultExcelBPSImageMaxRequests, settings.MaxRequests)
+	})
+	t.Run("existing opt-outs and budgets remain saved", func(t *testing.T) {
+		repo := &forwardedIPMigrationRepoStub{values: map[string]string{
+			SettingKeyRegistrationEnabled:       "true",
+			SettingKeyExcelBPSEnabled:           "false",
+			SettingKeyExcelBPSImageRelayEnabled: "false",
+			SettingKeyExcelBPSImageBudgetMiB:    "2048",
+			SettingKeyExcelBPSImageLimitPolicy:  "off",
+		}}
+		svc := NewSettingService(repo, &config.Config{})
+		require.NoError(t, svc.InitializeDefaultSettings(ctx))
+		require.Nil(t, repo.updates)
+		require.Equal(t, "false", repo.values[SettingKeyExcelBPSEnabled])
+		settings, err := svc.GetExcelBPSImageRelaySettings(ctx)
+		require.NoError(t, err)
+		require.False(t, settings.Enabled)
+		require.Equal(t, 2048, settings.BudgetMiB)
+		require.Equal(t, "off", settings.Policy)
+	})
+}
+
 func TestSettingService_InitializeDefaultSettingsPersistsConfiguredForwardedClientIPHeaders(t *testing.T) {
 	repo := &forwardedIPMigrationRepoStub{values: map[string]string{}}
 	cfg := &config.Config{}

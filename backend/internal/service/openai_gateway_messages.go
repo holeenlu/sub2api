@@ -33,6 +33,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	account = excelBPSPoolForwardAccount(ctx, c, account)
 	// 工具 Schema 清洗必须先于所有分流：下游每条路径（原生 Anthropic 直通、
 	// Chat Completions 转换、Responses 转换）都会把 tools 原样带给上游，而
 	// xAI / Moonshot 等严格校验方会因 input_schema 里的 required:null 或
@@ -67,6 +68,17 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// ShouldUseResponsesAPI：Anthropic 协议账号经 probe 落标
 	// openai_responses_supported=false，否则会命中 CC 直转。
 	routingModel := upstreamRoutingModel(account, body, defaultMappedModel)
+	requestModel := gjson.GetBytes(body, "model").String()
+	if strings.TrimSpace(defaultMappedModel) != "" {
+		requestModel = defaultMappedModel
+	}
+	if s.excelBPSGloballyEnabled(ctx) && account.IsExcelBPSEnabledForModel(requestModel) {
+		return s.forwardExcelBPSCompatibility(ctx, c, account, body, promptCacheKey, requestModel, true)
+	}
+	if account.IsExcelOAuth() {
+		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Excel-only authorization requires BPS enabled for this model")
+		return nil, errors.New("Excel-only authorization cannot use native Codex")
+	}
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
 		return nil, writeOpenCodeUnsupportedModelError(c, true, routingModel)
 	}
@@ -165,7 +177,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	isStream := true
 
 	// 3b. Handle BetaFastMode → service_tier: "priority"
-	if containsBetaToken(c.GetHeader("anthropic-beta"), claude.BetaFastMode) {
+	if containsBetaToken(getRequestTokenListHeader(c.Request, "anthropic-beta"), claude.BetaFastMode) {
 		responsesReq.ServiceTier = "priority"
 	}
 
@@ -421,7 +433,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				return nil, fmt.Errorf("build grok retry request: %w", err)
 			}
 		}
-		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account, vendorDispatchGroup(c))
 		if err != nil {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 		}

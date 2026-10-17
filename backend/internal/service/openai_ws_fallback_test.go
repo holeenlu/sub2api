@@ -124,6 +124,7 @@ func TestClassifyOpenAIWSReconnectReason(t *testing.T) {
 }
 
 func TestOpenAIWSErrorHTTPStatus(t *testing.T) {
+	require.Equal(t, http.StatusGatewayTimeout, openAIWSErrorHTTPStatus([]byte(`{"type":"error","error":{"type":"server_error","code":"first_output_timeout"}}`)))
 	require.Equal(t, http.StatusBadRequest, openAIWSErrorHTTPStatus([]byte(`{"type":"error","error":{"type":"invalid_request_error","code":"invalid_request","message":"invalid input"}}`)))
 	require.Equal(t, http.StatusUnauthorized, openAIWSErrorHTTPStatus([]byte(`{"type":"error","error":{"type":"authentication_error","code":"invalid_api_key","message":"auth failed"}}`)))
 	require.Equal(t, http.StatusForbidden, openAIWSErrorHTTPStatus([]byte(`{"type":"error","error":{"type":"permission_error","code":"forbidden","message":"forbidden"}}`)))
