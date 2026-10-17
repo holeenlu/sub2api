@@ -32,7 +32,6 @@ macOS / Linux：
 ```bash
 export ANTHROPIC_BASE_URL="{{API_ROOT}}"
 export ANTHROPIC_AUTH_TOKEN="你的 KDAN API Key"
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 claude --model claude-sonnet-5
 ```
 
@@ -41,7 +40,6 @@ Windows PowerShell：
 ```powershell
 $env:ANTHROPIC_BASE_URL="{{API_ROOT}}"
 $env:ANTHROPIC_AUTH_TOKEN="你的 KDAN API Key"
-$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
 claude --model claude-sonnet-5
 ```
 
@@ -55,20 +53,20 @@ claude --model claude-sonnet-5
 {
   "env": {
     "ANTHROPIC_BASE_URL": "{{API_ROOT}}",
-    "ANTHROPIC_AUTH_TOKEN": "你的 KDAN API Key",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    "ANTHROPIC_AUTH_TOKEN": "你的 KDAN API Key"
   }
 }
 ```
 
-该文件含私密凭据。不要写进共享的项目 `.claude/settings.json`。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 是当前控制台生成器用于减少登录、遥测等非必要外连的设置，不会把 Claude 网页、Remote Control 或语音功能改为由 KDAN 提供。GUI 启动的 IDE 不一定继承终端环境。VS Code 扩展可在用户 Settings JSON 中设置：
+网关管理员可在「运维监控 → 设置 → 高级设置 → 客户端遥测」开启“留存并转发账号遥测”，默认关闭。客户端上传时，先去重保存原始事件，再用该会话实际使用账号的遥测副本替换身份、环境和环境头，通过该账号凭据及代理发送上游。账号没有保存 Claude 遥测副本、会话归属缺失或不明确时不转发；有效网关 Key 的合法上传去重保存后统一返回空 200。匿名请求也返回空 200，不保存或转发。转发结果只记日志，不改变保存成功的回执。关闭或客户端发送 DNT: 1 / Sec-GPC: 1 时只返回确认，不采集或转发；历史样本按原保留策略清理。该开关只管理实际到达网关的遥测，不能控制客户端直接连接供应商的流量。
+
+该文件含私密凭据。不要写进共享的项目 `.claude/settings.json`。当前配置不再强制关闭客户端遥测；安装脚本会保留你已有的隐私设置。若旧配置仍含 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`，它仍然有效；希望恢复客户端默认行为时，需自行从 shell 和用户 settings 的 env 中移除该项并重启客户端，不要改成 `0`。这不会将所有遥测自动路由到网关：部分官方遥测仍直接连接供应商。GUI 启动的 IDE 不一定继承终端环境。VS Code 扩展可在用户 Settings JSON 中设置：
 
 ```json
 {
   "claudeCode.environmentVariables": [
     { "name": "ANTHROPIC_BASE_URL", "value": "{{API_ROOT}}" },
-    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 KDAN API Key" },
-    { "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "value": "1" }
+    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 KDAN API Key" }
   ]
 }
 ```
@@ -90,4 +88,4 @@ Claude Code 可能为标题、摘要和 token 计数发送辅助请求。主模�
 | 429 | 等待限流窗口，核对余额、并发与分组配额 |
 | 仍提示账号登录 | 确认启动的是 Claude Code，变量传到当前进程；桌面端使用独立教程 |
 
-来源：[官方网关接入](https://code.claude.com/docs/en/llm-gateway-connect)、[恢复会话](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)，项目配置生成器核对于 2026-09-15。
+来源：[官方网关接入](https://code.claude.com/docs/en/llm-gateway-connect)、[恢复会话](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)，项目配置生成器核对于 2026-10-19。

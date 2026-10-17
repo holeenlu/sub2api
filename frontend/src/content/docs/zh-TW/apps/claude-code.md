@@ -32,7 +32,6 @@ macOS / Linux：
 ```bash
 export ANTHROPIC_BASE_URL="{{API_ROOT}}"
 export ANTHROPIC_AUTH_TOKEN="你的 KDAN API Key"
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 claude --model claude-sonnet-5
 ```
 
@@ -41,7 +40,6 @@ Windows PowerShell：
 ```powershell
 $env:ANTHROPIC_BASE_URL="{{API_ROOT}}"
 $env:ANTHROPIC_AUTH_TOKEN="你的 KDAN API Key"
-$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
 claude --model claude-sonnet-5
 ```
 
@@ -55,20 +53,20 @@ claude --model claude-sonnet-5
 {
   "env": {
     "ANTHROPIC_BASE_URL": "{{API_ROOT}}",
-    "ANTHROPIC_AUTH_TOKEN": "你的 KDAN API Key",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    "ANTHROPIC_AUTH_TOKEN": "你的 KDAN API Key"
   }
 }
 ```
 
-該文件含私密認證資訊。不要寫進共享的專案 `.claude/settings.json`。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 是目前控制台生成器用於減少登入、遙測等非必要外連的設定，不會把 Claude 網頁、Remote Control 或語音功能改為由 KDAN 提供。GUI 啟動的 IDE 不一定繼承終端機環境。VS Code 擴充套件可在使用者 Settings JSON 中設定：
+閘道器管理員可在「維運監控 → 設定 → 進階設定 → 用戶端遙測」開啟“留存並轉發帳號遙測”，預設關閉。用戶端上傳時，先去重儲存原始事件，再用該工作階段實際使用帳號的遙測副本替換身分、環境和環境頭，透過該帳號認證資訊及代理傳送上游。帳號沒有儲存 Claude 遙測副本、工作階段歸屬缺失或不明確時不轉發；有效閘道器 Key 的合法上傳去重儲存後統一返回空 200。匿名請求也返回空 200，不儲存或轉發。轉發結果只記日誌，不改變儲存成功的回執。關閉或用戶端傳送 DNT: 1 / Sec-GPC: 1 時只返回確認，不採集或轉發；歷史樣本按原保留策略清理。該開關只管理實際到達閘道器的遙測，不能控制用戶端直接連線供應商的流量。
+
+該文件含私密認證資訊。不要寫進共享的專案 `.claude/settings.json`。目前設定不再強制關閉用戶端遙測；安裝腳本會保留你已有的隱私設定。若舊設定仍含 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`，它仍然有效；希望恢復用戶端預設行為時，需自行從 shell 和使用者 settings 的 env 中移除該項並重啟用戶端，不要改成 `0`。這不會將所有遙測自動路由到閘道器：部分官方遙測仍直接連線供應商。GUI 啟動的 IDE 不一定繼承終端機環境。VS Code 擴充套件可在使用者 Settings JSON 中設定：
 
 ```json
 {
   "claudeCode.environmentVariables": [
     { "name": "ANTHROPIC_BASE_URL", "value": "{{API_ROOT}}" },
-    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 KDAN API Key" },
-    { "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "value": "1" }
+    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 KDAN API Key" }
   ]
 }
 ```
@@ -90,4 +88,4 @@ Claude Code 可能為標題、摘要和 token 計數傳送輔助請求。主模�
 | 429 | 等待速率限制視窗，核對餘額、並行與分組配額 |
 | 仍提示帳號登入 | 確認啟動的是 Claude Code，變數傳到目前程序；桌面版使用獨立教程 |
 
-來源：[官方閘道器接入](https://code.claude.com/docs/en/llm-gateway-connect)、[恢復工作階段](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)，專案設定生成器核對於 2026-09-15。
+來源：[官方閘道器接入](https://code.claude.com/docs/en/llm-gateway-connect)、[恢復工作階段](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)，專案設定生成器核對於 2026-10-19。
