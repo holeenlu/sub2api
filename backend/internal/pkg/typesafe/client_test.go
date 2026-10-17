@@ -25,6 +25,11 @@ func TestEvaluateContract(t *testing.T) {
 		{"above_one", `{"model":"jev-1.13.0","answers":{"sexual":{"type":"noul","noul":1.1},"illicit":{"type":"noul","noul":0}}}`, false},
 		{"wrong_type", `{"model":"jev-1.13.0","answers":{"sexual":{"type":"score","noul":0},"illicit":{"type":"noul","noul":0}}}`, false},
 		{"missing_model", `{"answers":{"sexual":{"type":"noul","noul":0},"illicit":{"type":"noul","noul":0}}}`, false},
+		{"null_probability", `{"model":"jev-1.13.0","answers":{"sexual":{"type":"noul","noul":null},"illicit":{"type":"noul","noul":0}}}`, false},
+		{"string_probability", `{"model":"jev-1.13.0","answers":{"sexual":{"type":"noul","noul":"0.2"},"illicit":{"type":"noul","noul":0}}}`, false},
+		{"overflow_probability", `{"model":"jev-1.13.0","answers":{"sexual":{"type":"noul","noul":1e309},"illicit":{"type":"noul","noul":0}}}`, false},
+		{"trailing_object", `{"model":"jev-1.13.0","answers":{"sexual":{"type":"noul","noul":0},"illicit":{"type":"noul","noul":0}}} {}`, false},
+		{"oversized", `{"model":"jev-1.13.0","answers":{"sexual":{"type":"noul","noul":0},"illicit":{"type":"noul","noul":0}},"padding":"` + strings.Repeat("x", 1<<20) + `"}`, false},
 		{"invalid_json", `{bad`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

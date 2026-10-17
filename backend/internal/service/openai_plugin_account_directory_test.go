@@ -91,7 +91,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	// (refresh_token) not handed out by ResolveOutboundIdentity. Groups/AccountGroups
 	// = relational graphs with back-references that would cycle under encoding/json.
 	stripped := map[string]struct{}{
-		"Credentials": {}, "Groups": {}, "AccountGroups": {},
+		"Credentials": {}, "Groups": {}, "AccountGroups": {}, "VendorNotes": {},
 	}
 	// Fields intentionally exposed as readable metadata (incl. Extra and Proxy —
 	// the proxy password is already handed out via ResolveOutboundIdentity's URL).
@@ -105,6 +105,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 		"TempUnschedulableUntil": {}, "TempUnschedulableReason": {},
 		"SessionWindowStart": {}, "SessionWindowEnd": {}, "SessionWindowStatus": {},
 		"ParentAccountID": {}, "QuotaDimension": {}, "GroupIDs": {},
+		"VendorID": {}, "VendorPausedAt": {}, "VendorSupplyBlocked": {},
 	}
 	tp := reflect.TypeOf(Account{})
 	for i := 0; i < tp.NumField(); i++ {
@@ -125,6 +126,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	acct := &Account{
 		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
 		Credentials: map[string]any{"access_token": "AT", "refresh_token": "LEAK-REFRESH"},
+		VendorNotes: "PRIVATE-SUPPLIER-NOTE",
 		Extra:       map[string]any{"opaque": "extra-released"},
 		Proxy:       &Proxy{Host: "host", Port: 1, Username: "user", Password: "pw-released"},
 	}
@@ -133,8 +135,9 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(snap, &m))
 	assert.NotContains(t, string(snap), "LEAK-REFRESH", "raw Credentials must never appear in metadata")
+	assert.NotContains(t, string(snap), "PRIVATE-SUPPLIER-NOTE", "private supplier notes must never appear in metadata")
 	assert.Contains(t, string(snap), "extra-released", "Extra is intentionally released")
-	assert.Contains(t, string(snap), "pw-released", "proxy is intentionally released (already exposed via 打票)")
+	assert.Contains(t, string(snap), "pw-released", "the transport plugin receives the configured proxy credentials")
 
 	// Cycle safety: a populated Groups/AccountGroups back-reference cycle must NOT
 	// crash json.Marshal (encoding/json does not detect cycles). Stripping them
@@ -150,6 +153,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 
 	// Shallow-copy safety: the source account must be untouched.
 	assert.NotNil(t, acct.Credentials, "snapshot must not mutate the source account")
+	assert.Equal(t, "PRIVATE-SUPPLIER-NOTE", acct.VendorNotes, "snapshot must not mutate the source supplier notes")
 	assert.NotNil(t, acct.Proxy, "snapshot must not mutate the source account")
 	assert.Len(t, acct.Groups, 1, "snapshot must not mutate the source account's Groups")
 }

@@ -282,3 +282,27 @@ func TestAuditBodyReplayCloseAndCaptureBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestSIWCCallbackAuditOmitsOneTimeAuthorizationMaterial(t *testing.T) {
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	payload := `{"session_id":"canary-session","callback_url":"http://127.0.0.1:1455/auth/callback?code=canary-code&state=canary-state&client_id=canary-client"}`
+	router.POST("/api/v1/admin/accounts/:id/siwc/callback", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		require.NoError(t, err)
+		require.Equal(t, payload, string(body))
+		c.Status(http.StatusBadRequest)
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/7/siwc/callback", strings.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(httptest.NewRecorder(), request)
+	auditService.Stop()
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	require.Len(t, repository.logs, 1)
+	require.Equal(t, "<credential-bearing body omitted>", repository.logs[0].RequestBody)
+	require.NotContains(t, repository.logs[0].RequestBody, "canary-")
+}

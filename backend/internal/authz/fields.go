@@ -82,7 +82,7 @@ func filterResponse(value any, path string, actor Subject, allowNewCredentials b
 		_, proxyHost := v["host"]
 		_, proxyPort := v["port"]
 		for key, item := range v {
-			if FieldName(key) == "clienttelemetry" && actor.Role != SuperAdmin {
+			if FieldName(key) == "clienttelemetry" || (FieldName(key) == "accounttelemetry" && actor.Role != SuperAdmin) {
 				delete(v, key)
 				continue
 			}
