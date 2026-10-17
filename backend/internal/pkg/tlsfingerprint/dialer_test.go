@@ -11,15 +11,22 @@
 package tlsfingerprint
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/cryptobyte"
 )
 
 // TestDialerBasicConnection tests that the dialer can establish TLS connections.
@@ -55,8 +62,8 @@ func TestDialerBasicConnection(t *testing.T) {
 
 // TestJA3Fingerprint verifies the JA3/JA4 fingerprint matches expected value.
 // This test uses tls.peet.ws to verify the fingerprint.
-// Expected JA3 hash: 44f88fca027f27bab4bb08d4af15f23e (Node.js 24.x)
-// Expected JA4: t13d1714h1_5b57614c22b0_7baf387fc6ff
+// Expected JA3 hash: 1523504b38f0fae0d881d4b6554aac1b (Claude Code 2.1.301 native)
+// Expected JA4: t13d1713h1 (cipher hash 5b57614c22b0)
 func TestJA3Fingerprint(t *testing.T) {
 	skipNetworkTest(t)
 
@@ -107,8 +114,8 @@ func TestJA3Fingerprint(t *testing.T) {
 	t.Logf("PeetPrint: %s", fpResp.TLS.PeetPrint)
 	t.Logf("PeetPrint Hash: %s", fpResp.TLS.PeetPrintHash)
 
-	// Verify JA3 hash matches expected value (Node.js 24.x default)
-	expectedJA3Hash := "44f88fca027f27bab4bb08d4af15f23e"
+	// Verify JA3 hash matches expected value (Claude Code native default)
+	expectedJA3Hash := "1523504b38f0fae0d881d4b6554aac1b"
 	if fpResp.TLS.JA3Hash == expectedJA3Hash {
 		t.Logf("✓ JA3 hash matches expected value: %s", expectedJA3Hash)
 	} else {
@@ -123,12 +130,12 @@ func TestJA3Fingerprint(t *testing.T) {
 		t.Errorf("✗ JA4 cipher hash mismatch: got %s, expected containing %s", fpResp.TLS.JA4, expectedJA4CipherHash)
 	}
 
-	// Verify JA4 prefix (t13d1714h1 or t13i1714h1)
-	expectedJA4Prefix := "t13d1714h1"
+	// Verify JA4 prefix (t13d1713h1 or t13i1713h1)
+	expectedJA4Prefix := "t13d1713h1"
 	if strings.HasPrefix(fpResp.TLS.JA4, expectedJA4Prefix) {
-		t.Logf("✓ JA4 prefix matches: %s (t13=TLS1.3, d=domain, 17=ciphers, 14=extensions, h1=HTTP/1.1)", expectedJA4Prefix)
+		t.Logf("✓ JA4 prefix matches: %s (t13=TLS1.3, d=domain, 17=ciphers, 13=extensions, h1=HTTP/1.1)", expectedJA4Prefix)
 	} else {
-		altPrefix := "t13i1714h1"
+		altPrefix := "t13i1713h1"
 		if strings.HasPrefix(fpResp.TLS.JA4, altPrefix) {
 			t.Logf("✓ JA4 prefix matches (IP variant): %s", altPrefix)
 		} else {
@@ -143,8 +150,8 @@ func TestJA3Fingerprint(t *testing.T) {
 		t.Logf("Warning: JA3 does not contain expected TLS 1.3 cipher suites")
 	}
 
-	// Verify extension list (14 extensions, Node.js 24.x order)
-	expectedExtensions := "0-65037-23-65281-10-11-35-16-5-13-18-51-45-43"
+	// Verify extension list (13 extensions, Linux native CLI order)
+	expectedExtensions := "0-23-65281-10-11-35-16-5-13-18-51-45-43"
 	if strings.Contains(fpResp.TLS.JA3, expectedExtensions) {
 		t.Logf("✓ JA3 contains expected extension list: %s", expectedExtensions)
 	} else {
@@ -264,6 +271,83 @@ func TestBuildClientHelloSpec(t *testing.T) {
 	}
 }
 
+func TestNativeClaudeClientHelloMatchesCapturedWire(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	conn := utls.UClient(client, &utls.Config{ServerName: "api.anthropic.com"}, utls.HelloCustom)
+	require.NoError(t, conn.ApplyPreset(buildClientHelloSpecFromProfile(nil)))
+	require.NoError(t, conn.BuildHandshakeState())
+	hello := conn.HandshakeState.Hello
+	// Golden values captured from the official 2.1.301 Messages request, not
+	// derived from the profile constants under test. BuildHandshakeState also
+	// verifies that uTLS can generate both of the advertised key shares.
+	require.Equal(t, []uint16{4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49161, 49171, 49162, 49172, 156, 157, 47, 53}, hello.CipherSuites)
+	require.Equal(t, []utls.CurveID{4588, 29, 23, 24}, hello.SupportedCurves)
+	require.Equal(t, []uint16{0x0304, 0x0303}, hello.SupportedVersions)
+	require.Equal(t, []string{"http/1.1"}, hello.AlpnProtocols)
+	require.Equal(t, []utls.SignatureScheme{0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601, 0x0201}, hello.SupportedSignatureAlgorithms)
+	require.Len(t, hello.KeyShares, 2)
+	require.Equal(t, utls.CurveID(4588), hello.KeyShares[0].Group)
+	require.Len(t, hello.KeyShares[0].Data, 1216)
+	require.Equal(t, utls.X25519, hello.KeyShares[1].Group)
+	require.Len(t, hello.KeyShares[1].Data, 32)
+
+	// Compare every deterministic handshake byte to the native Linux capture;
+	// only cryptographic random, session ID and ephemeral key data are masked.
+	masked := bytes.Clone(hello.Raw)
+	clear(masked[6:38])
+	raw := cryptobyte.String(masked)
+	require.True(t, raw.Skip(4+2+32)) // handshake header, version, random
+	var field, extensions cryptobyte.String
+	require.True(t, raw.ReadUint8LengthPrefixed(&field)) // session ID
+	clear(field)
+	require.True(t, raw.ReadUint16LengthPrefixed(&field)) // cipher suites
+	require.True(t, raw.ReadUint8LengthPrefixed(&field))  // compression
+	require.True(t, raw.ReadUint16LengthPrefixed(&extensions))
+	var ids []uint16
+	for !extensions.Empty() {
+		var id uint16
+		require.True(t, extensions.ReadUint16(&id))
+		require.True(t, extensions.ReadUint16LengthPrefixed(&field))
+		ids = append(ids, id)
+		if id == 51 {
+			var shares, key cryptobyte.String
+			require.True(t, field.ReadUint16LengthPrefixed(&shares))
+			for !shares.Empty() {
+				require.True(t, shares.Skip(2)) // key share group
+				require.True(t, shares.ReadUint16LengthPrefixed(&key))
+				clear(key)
+			}
+		}
+	}
+	require.Equal(t, []uint16{0, 23, 65281, 10, 11, 35, 16, 5, 13, 18, 51, 45, 43}, ids)
+	goldenHex, err := os.ReadFile("testdata/claude_code_2_1_301_linux_hello.hex")
+	require.NoError(t, err)
+	golden, err := hex.DecodeString(strings.TrimSpace(string(goldenHex)))
+	require.NoError(t, err)
+	require.Equal(t, golden, masked)
+}
+
+func TestPartialTLSProfilePreservesCustomGroupsAndALPN(t *testing.T) {
+	profile := &Profile{Curves: []uint16{23}, ALPNProtocols: []string{"h2"}}
+	spec := buildClientHelloSpecFromProfile(profile)
+	var shares *utls.KeyShareExtension
+	var alpn *utls.ALPNExtension
+	for _, ext := range spec.Extensions {
+		switch e := ext.(type) {
+		case *utls.KeyShareExtension:
+			shares = e
+		case *utls.ALPNExtension:
+			alpn = e
+		}
+	}
+	require.NotNil(t, shares)
+	require.Equal(t, []utls.KeyShare{{Group: utls.CurveP256}}, shares.KeyShares)
+	require.NotNil(t, alpn)
+	require.Equal(t, []string{"h2"}, alpn.AlpnProtocols)
+}
+
 // TestToUTLSCurves tests curve ID conversion.
 func TestToUTLSCurves(t *testing.T) {
 	input := []uint16{0x001d, 0x0017, 0x0018}
@@ -296,11 +380,11 @@ func TestAllProfiles(t *testing.T) {
 
 	profiles := []TestProfileExpectation{
 		{
-			// Default profile (Node.js 24.x)
-			// JA3 Hash: 44f88fca027f27bab4bb08d4af15f23e
-			// JA4: t13d1714h1_5b57614c22b0_7baf387fc6ff
+			// Default profile (Claude Code 2.1.301 native)
+			// JA3 Hash: 1523504b38f0fae0d881d4b6554aac1b
+			// JA4: t13d1713h1 (cipher hash 5b57614c22b0)
 			Profile: &Profile{
-				Name:         "default_node_v24",
+				Name:         "default_claude_native",
 				EnableGREASE: false,
 			},
 			JA4CipherHash: "5b57614c22b0",
