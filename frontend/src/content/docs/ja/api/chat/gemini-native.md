@@ -6,7 +6,7 @@ GET  /v1beta/models/{model}
 POST /v1beta/models/{model}:generateContent
 POST /v1beta/models/{model}:streamGenerateContent?alt=sse
 POST /v1beta/models/{model}:countTokens
-x-goog-api-key: $TAPMODELS_API_KEY
+x-goog-api-key: $TOKENSAVY_API_KEY
 ```
 
 通常の `/v1beta` サーフェスは Gemini グループのみを受け付けます。別の `/antigravity/v1beta` プレフィックスを指定すると Antigravity プラットフォームが強制的に選択されます。これは、通常の Gemini グループが同じアカウントやモデルを持つことを意味しません。
@@ -16,7 +16,7 @@ x-goog-api-key: $TAPMODELS_API_KEY
 ## モデルの検出
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1beta/models" -H "x-goog-api-key: $TAPMODELS_API_KEY"
+curl "$TOKENSAVY_BASE_URL/v1beta/models" -H "x-goog-api-key: $TOKENSAVY_API_KEY"
 ```
 
 レスポンスでは Gemini の `models[]` エンベロープが使用されます。`name` は通常 `models/YOUR_MODEL_ID` です。項目はアップストリームから取得される場合と、選択したアカウント タイプでモデルを検出できない場合にコードで定義されたフォールバックから取得される場合があり、その後グループの許可リストを通過します。表示されていることは、実際にスケジューリング可能であることの証明にはなりません。
@@ -24,8 +24,8 @@ curl "$TAPMODELS_BASE_URL/v1beta/models" -H "x-goog-api-key: $TAPMODELS_API_KEY"
 ## generateContent リクエスト
 
 ```bash
-curl "$TAPMODELS_BASE_URL/v1beta/models/YOUR_MODEL_ID:generateContent" \
-  -H "x-goog-api-key: $TAPMODELS_API_KEY" \
+curl "$TOKENSAVY_BASE_URL/v1beta/models/YOUR_MODEL_ID:generateContent" \
+  -H "x-goog-api-key: $TOKENSAVY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "systemInstruction":{"parts":[{"text":"Answer briefly."}]},
@@ -49,8 +49,8 @@ curl "$TAPMODELS_BASE_URL/v1beta/models/YOUR_MODEL_ID:generateContent" \
 ## SSE ストリーミング
 
 ```bash
-curl -N "$TAPMODELS_BASE_URL/v1beta/models/YOUR_MODEL_ID:streamGenerateContent?alt=sse" \
-  -H "x-goog-api-key: $TAPMODELS_API_KEY" \
+curl -N "$TOKENSAVY_BASE_URL/v1beta/models/YOUR_MODEL_ID:streamGenerateContent?alt=sse" \
+  -H "x-goog-api-key: $TOKENSAVY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"contents":[{"role":"user","parts":[{"text":"Explain idempotency."}]}]}'
 ```

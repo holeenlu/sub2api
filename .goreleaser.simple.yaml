@@ -1,17 +1,17 @@
 # 简化版 GoReleaser 配置 - 仅发布 x86_64 GHCR 镜像
 version: 2
 
-project_name: kdan
+project_name: tokensavy
 
 before:
   hooks:
     - go mod tidy -C backend
 
 builds:
-  - id: kdan
+  - id: tokensavy
     dir: backend
     main: ./cmd/server
-    binary: kdan
+    binary: tokensavy
     flags:
       - -tags=embed
     env:
@@ -42,9 +42,9 @@ dockers:
     goos: linux
     goarch: amd64
     image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/kdan:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/kdan:{{ .Version }}"
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/kdan:latest"
+      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/tokensavy:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/tokensavy:{{ .Version }}"
+      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/tokensavy:latest"
     dockerfile: Dockerfile.goreleaser
     use: buildx
     extra_files:
@@ -65,11 +65,11 @@ release:
     name: "{{ .Env.GITHUB_REPO_NAME }}"
   draft: false
   prerelease: auto
-  name_template: "KDAN {{.Version}} (Simple)"
+  name_template: "Tokensavy {{.Version}} (Simple)"
   # 跳过上传二进制包
   skip_upload: true
   header: |
-    > KDAN - 选个模型，开始开发。通过一个 API 使用不同 AI 模型。
+    > Tokensavy - 选个模型，开始开发。通过一个 API 使用不同 AI 模型。
     > ⚡ Simple Release: 仅包含 x86_64 GHCR 镜像
 
     {{ .Env.TAG_MESSAGE }}
@@ -81,7 +81,7 @@ release:
 
     **Docker (x86_64 only):**
     ```bash
-    docker pull ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/kdan:{{ .Version }}
+    docker pull ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/tokensavy:{{ .Version }}
     ```
 
     ## 📚 Documentation
