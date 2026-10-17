@@ -73,6 +73,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
+	account = excelBPSPoolForwardAccount(ctx, c, account)
 	rememberOpenCodeInboundBody(c, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
@@ -127,6 +128,17 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// ShouldUseResponsesAPI：Anthropic 协议账号经 probe 落标
 	// openai_responses_supported=false，否则会命中 CC 直转。
 	routingModel := upstreamRoutingModel(account, body, defaultMappedModel)
+	requestModel := gjson.GetBytes(body, "model").String()
+	if strings.TrimSpace(defaultMappedModel) != "" {
+		requestModel = defaultMappedModel
+	}
+	if s.excelBPSGloballyEnabled(ctx) && account.IsExcelBPSEnabledForModel(requestModel) {
+		return s.forwardExcelBPSCompatibility(ctx, c, account, body, promptCacheKey, requestModel, false)
+	}
+	if account.IsExcelOAuth() {
+		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Excel-only authorization requires BPS enabled for this model")
+		return nil, errors.New("Excel-only authorization cannot use native Codex")
+	}
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
 		return nil, writeOpenCodeUnsupportedModelError(c, false, routingModel)
 	}
@@ -361,7 +373,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account, vendorDispatchGroup(c))
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
