@@ -56,7 +56,7 @@ describe('ops settings load guard', () => {
     expect(wrapper.get('button.btn-primary').attributes('disabled')).toBeUndefined()
     await wrapper.get('button.btn-primary').trigger('click')
     await flushPromises()
-    expect(opsAPI.updateMetricThresholds).toHaveBeenCalledWith(expect.objectContaining({ sla_percent_min: 98 }))
+    expect(opsAPI.updateMetricThresholds).toHaveBeenCalledWith(expect.objectContaining({ sla_percent_min: 98, ttft_p99_ms_max: 10000 }))
     expect(wrapper.emitted('saved')).toHaveLength(1)
   })
   it('does not save default thresholds after a failed initial load', async () => {
