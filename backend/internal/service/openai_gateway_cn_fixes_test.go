@@ -77,8 +77,8 @@ func TestCalculateOpenAIRecordUsageCost_EmptyCandidatesIsPricingUnavailable(t *t
 		1.0, 1.0, 1.0, 1.0, UsageTokens{InputTokens: 100}, "", nil, false, time.Time{},
 	)
 	require.Error(t, err)
-	require.True(t, isUsagePricingUnavailableError(err),
-		"空候选必须按无价可循处理（上层零成本落账），而不是丢弃整条 usage 记录: %v", err)
+	require.ErrorIs(t, err, ErrModelPricingUnavailable,
+		"空候选必须按无价可循处理（上层保留待定价事件），而不是丢弃整条 usage 记录: %v", err)
 }
 
 func TestResponsesStreamingFromNativeAnthropic_ClientDisconnectDrainsUsage(t *testing.T) {

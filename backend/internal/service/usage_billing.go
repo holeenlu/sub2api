@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -17,6 +18,13 @@ var ErrUsageBillingRequestConflict = errors.New("usage billing request fingerpri
 
 // UsageBillingCommand describes one billable request that must be applied at most once.
 type UsageBillingCommand struct {
+	PayloadVersion int // Persisted event schema; unknown versions must never debit.
+	// Only immutable billing facts are serialized; never Account/APIKey credentials.
+	UsageLog  *UsageLog
+	UsageLogs []*UsageLog
+	Pricing   *UsageBillingPricingSnapshot
+	Platform  string
+
 	RequestID          string
 	APIKeyID           int64
 	RequestFingerprint string
@@ -224,3 +232,25 @@ type UsageBillingRepository interface {
 	CaptureBatchImageBalance(ctx context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error)
 	ReleaseBatchImageBalance(ctx context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error)
 }
+
+// UsageBillingPricingSnapshot preserves allocation policy while an unknown price
+// awaits repair. It is not permission to replace an explicitly configured zero price.
+type UsageBillingPricingSnapshot struct {
+	Pending               bool
+	Model                 string
+	PricingAt             time.Time
+	Balance               bool
+	Subscription          bool
+	KeyQuota              bool
+	KeyRateLimit          bool
+	AccountQuota          bool
+	AccountRateMultiplier float64
+	Request               *UsagePricingRequest
+}
+
+type UsageBillingRecoveryRepository interface {
+	ConfigureUsageBillingRecovery(reprice func(context.Context, *UsageBillingCommand) error, invalidate func(context.Context, *UsageBillingCommand) error)
+	RecoverPendingUsageBilling(context.Context, int, func(context.Context, *UsageBillingCommand) error) (int, error)
+}
+
+var ErrUsagePricingPending = errors.New("usage pricing is pending resolution")

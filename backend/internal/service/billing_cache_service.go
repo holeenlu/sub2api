@@ -708,31 +708,6 @@ func (s *BillingCacheService) QueueUpdateAPIKeyRateLimitUsage(apiKeyID int64, co
 	})
 }
 
-// IncrementUserPlatformQuotaUsage 同步累加 user × platform usage 到 Redis 缓存。
-//
-// 设计：同步写入而非异步入队。同步写确保下次 preflight 立即看到最新 usage，
-// 把 TOCTOU 超支窗口限制在并发 in-flight 请求数量内（而非随时间无限累积）。
-// 写延迟通常 < 1ms（本地 Redis），换取 quota 视图实时性的取舍合理。
-//
-// Redis 写失败用 ALERT 级 log；DB 持久化由 caller 单独 goroutine 兜底（gateway_service.go）。
-func (s *BillingCacheService) IncrementUserPlatformQuotaUsage(userID int64, platform string, cost float64) {
-	if s.cache == nil {
-		return
-	}
-	if platform == "" || cost <= 0 {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-	defer cancel()
-	ttl := time.Duration(s.cfg.Billing.UserPlatformQuotaCacheTTLSeconds) * time.Second
-	markDirty := s.cfg.Database.UserPlatformQuotaFlusherEnabled
-	if err := s.cache.IncrUserPlatformQuotaUsageCache(ctx, userID, platform, cost, ttl, markDirty); err != nil {
-		logger.LegacyPrintf("service.billing_cache",
-			"ALERT: incr user platform quota cache failed user=%d platform=%s cost=%f: %v",
-			userID, platform, cost, err)
-	}
-}
-
 // ============================================
 // 统一检查方法
 // ============================================
@@ -1497,21 +1472,4 @@ func monthlyQuotaWindowExpired(start *time.Time, now time.Time) bool {
 		return true
 	}
 	return now.Sub(*start) >= 30*24*time.Hour
-}
-
-// HasUserPlatformQuotaLimit 判断该 user×platform 是否设了任一非 nil limit。
-// 写入点守卫:无 limit 直接跳过 Redis 写 + 脏集标记,消除无谓写入。
-// fail-safe:任何不确定(simple 模式除外)都返回 true 维持写入。
-func (s *BillingCacheService) HasUserPlatformQuotaLimit(ctx context.Context, userID int64, platform string) bool {
-	if s.cfg.RunMode == config.RunModeSimple {
-		return false
-	}
-	if s.cache == nil {
-		return true
-	}
-	entry, ok, err := s.cache.GetUserPlatformQuotaCache(ctx, userID, platform)
-	if err != nil || !ok || entry == nil {
-		return true
-	}
-	return entry.DailyLimitUSD != nil || entry.WeeklyLimitUSD != nil || entry.MonthlyLimitUSD != nil
 }

@@ -625,6 +625,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			forceCacheBilling := fs.ForceCacheBilling
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			sessionID := service.ExtractClientSessionID(c)
+			usageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:             result,
@@ -642,7 +643,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					RequestPayloadHash: requestPayloadHash,
 					ForceCacheBilling:  forceCacheBilling,
 					APIKeyService:      h.apiKeyService,
-					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+					ChannelUsageFields: usageFields,
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gateway.messages"),
@@ -996,6 +997,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				forceCacheBilling := fs.ForceCacheBilling
 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
 				sessionID := service.ExtractClientSessionID(c)
+				usageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
 				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 					if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 						Result:             result,
@@ -1013,7 +1015,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						RequestPayloadHash: requestPayloadHash,
 						ForceCacheBilling:  forceCacheBilling,
 						APIKeyService:      h.apiKeyService,
-						ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+						ChannelUsageFields: usageFields,
 					}); err != nil {
 						logger.L().With(
 							zap.String("component", "handler.gateway.messages"),
@@ -2545,6 +2547,10 @@ func extractQuotaResetSeconds(err error) int {
 }
 
 func billingErrorDetails(err error) (status int, code, message string, retryAfter int) {
+	if errors.Is(err, service.ErrModelPricingUnavailable) {
+		return http.StatusServiceUnavailable, "model_pricing_unavailable", "Model pricing is unavailable. Contact the administrator before retrying.", 0
+	}
+
 	if errors.Is(err, service.ErrBillingServiceUnavailable) {
 		msg := pkgerrors.Message(err)
 		if msg == "" {
@@ -2618,19 +2624,10 @@ func (h *GatewayHandler) submitUsageRecordTask(parent context.Context, task serv
 	if task == nil {
 		return
 	}
-	task, abandon := wrapUsageRecordTaskContext(parent, task)
+	task, _ = wrapUsageRecordTaskContext(parent, task)
 	if h.usageRecordWorkerPool != nil {
-		if mode := h.usageRecordWorkerPool.Submit(task); mode != service.UsageRecordSubmitModeDroppedStopped {
-			if mode.Dropped() {
-				abandon()
-			}
-			return
-		}
-		// 池已停止（进程关停窗口）：计费任务不能静默丢失，降级为内联同步执行。
-		// 显式配置的 drop/sample 溢出丢弃仍按配置语义保留。
-		logger.L().With(
-			zap.String("component", "handler.gateway.messages"),
-		).Warn("gateway.usage_record_task_stopped_sync_fallback")
+		h.usageRecordWorkerPool.Run(task)
+		return
 	}
 	// 回退路径：worker 池未注入或已停止时同步执行，避免退回到无界 goroutine 模式。
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -2639,33 +2636,6 @@ func (h *GatewayHandler) submitUsageRecordTask(parent context.Context, task serv
 		if recovered := recover(); recovered != nil {
 			logger.L().With(
 				zap.String("component", "handler.gateway.messages"),
-				zap.Any("panic", recovered),
-			).Error("gateway.usage_record_task_panic_recovered")
-		}
-	}()
-	task(ctx)
-}
-
-// submitMandatoryUsageRecordTask never silently drops billing work on pool overflow.
-func (h *GatewayHandler) submitMandatoryUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
-	if task == nil {
-		return
-	}
-	task, _ = wrapUsageRecordTaskContext(parent, task)
-	if h.usageRecordWorkerPool != nil {
-		if mode := h.usageRecordWorkerPool.Submit(task); !mode.Dropped() {
-			return
-		}
-		logger.L().With(
-			zap.String("component", "handler.gateway.usage"),
-		).Warn("gateway.usage_record_task_mandatory_sync_fallback")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			logger.L().With(
-				zap.String("component", "handler.gateway.usage"),
 				zap.Any("panic", recovered),
 			).Error("gateway.usage_record_task_panic_recovered")
 		}

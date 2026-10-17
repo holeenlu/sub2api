@@ -28,12 +28,6 @@ type APIKeyRateLimitCacheData struct {
 	Window7d int64   `json:"window_7d"`
 }
 
-// UserPlatformQuotaKey 标识一个 user×platform，用于脏集出入与批量读。
-type UserPlatformQuotaKey struct {
-	UserID   int64
-	Platform string
-}
-
 // UserPlatformQuotaCacheEntry Redis hash 反序列化结果。
 //
 // SchemaVersion 用于向后兼容：
@@ -84,14 +78,6 @@ type BillingCache interface {
 	GetUserPlatformQuotaCache(ctx context.Context, userID int64, platform string) (*UserPlatformQuotaCacheEntry, bool, error)
 	SetUserPlatformQuotaCache(ctx context.Context, userID int64, platform string, entry *UserPlatformQuotaCacheEntry, ttl time.Duration) error
 	DeleteUserPlatformQuotaCache(ctx context.Context, userID int64, platform string) error
-	// IncrUserPlatformQuotaUsageCache 在缓存命中时累加用量；缓存未命中（key 不存在）静默返回 nil。
-	// markDirty=true 时将该 key 的 member 写入 Redis 脏集，供 flusher 批量回写 DB。
-	IncrUserPlatformQuotaUsageCache(ctx context.Context, userID int64, platform string, cost float64, ttl time.Duration, markDirty bool) error
-
-	// 脏集读写，供 flusher 使用。
-	PopDirtyUserPlatformQuotaKeys(ctx context.Context, n int) ([]UserPlatformQuotaKey, error)
-	ReaddDirtyUserPlatformQuotaKeys(ctx context.Context, keys []UserPlatformQuotaKey) error
-	BatchGetUserPlatformQuotaCache(ctx context.Context, keys []UserPlatformQuotaKey) ([]*UserPlatformQuotaCacheEntry, error)
 }
 
 // ModelPricing 模型价格配置（per-token价格，与LiteLLM格式一致）
@@ -199,6 +185,8 @@ type UsageTokens struct {
 
 // CostBreakdown 费用明细
 type CostBreakdown struct {
+	PricingRequest            *UsagePricingRequest
+	PricingError              string  // Nonempty means unresolved, never a free-price decision.
 	InputCost                 float64 // 文本输入费用（不含图片输入，图片输入单独记入 ImageInputCost）
 	ImageInputCost            float64 // 图片输入 token 费用（如 gpt-image-2 图片编辑）
 	OutputCost                float64
