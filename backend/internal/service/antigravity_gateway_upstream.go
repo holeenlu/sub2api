@@ -48,7 +48,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	// 能力维度 sanitize：Anthropic-compatible 上游透传路径也需要保证 body↔beta header
 	// 对称。客户端 anthropic-beta header 不含 context-management-2025-06-27 但 body 带
 	// context_management 时 strip，与 Anthropic 直连 / Bedrock / Vertex 路径保持一致。
-	clientBeta := c.GetHeader("anthropic-beta")
+	clientBeta := getRequestTokenListHeader(c.Request, "anthropic-beta")
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		body = sanitized
 	}
@@ -79,7 +79,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	}
 
 	// 发送请求
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	resp, err := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "%s upstream request failed: %v", prefix, err)
 		return nil, fmt.Errorf("upstream request failed: %w", err)

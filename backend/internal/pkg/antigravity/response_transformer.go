@@ -23,7 +23,7 @@ func TransformGeminiToClaude(geminiResp []byte, originalModel string) ([]byte, *
 		v1Resp.Response = directResp
 		v1Resp.ResponseID = directResp.ResponseID
 		v1Resp.ModelVersion = directResp.ModelVersion
-	} else if len(v1Resp.Response.Candidates) == 0 {
+	} else if len(v1Resp.Response.Candidates) == 0 && v1Resp.Response.PromptFeedback == nil {
 		// 第一次解析成功但 candidates 为空，说明是直接的 GeminiResponse 格式
 		var directResp GeminiResponse
 		if err2 := json.Unmarshal(geminiResp, &directResp); err2 != nil {
@@ -269,11 +269,16 @@ func (p *NonStreamingProcessor) buildResponse(geminiResp *GeminiResponse, respon
 		}
 	}
 
+	if feedback := geminiResp.PromptFeedback; feedback != nil && feedback.BlockReason != "" && feedback.BlockReason != "BLOCK_REASON_UNSPECIFIED" {
+		finishReason = "SAFETY"
+	}
 	stopReason := "end_turn"
 	if p.hasToolCall {
 		stopReason = "tool_use"
 	} else if finishReason == "MAX_TOKENS" {
 		stopReason = "max_tokens"
+	} else if finishReason == "SAFETY" {
+		stopReason = "refusal"
 	}
 
 	// 注意：Gemini 的 promptTokenCount 包含 cachedContentTokenCount，

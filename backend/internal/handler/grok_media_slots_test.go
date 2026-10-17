@@ -227,7 +227,6 @@ func newGrokMediaSlotHandler(t *testing.T, oauth, mismatch bool, platforms ...st
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.Gateway.Scheduling.StickySessionWaitTimeout = 20 * time.Millisecond
 	cfg.Gateway.Scheduling.StickySessionMaxWaiting = 3
-	cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 	repo := grokMediaSlotRepo{openAIImagesFailoverAccountRepo: openAIImagesFailoverAccountRepo{accounts: accounts}, mismatch: mismatch}
 	provider := service.NewGrokTokenProvider(repo, nil)
 	if oauth {

@@ -74,6 +74,9 @@ const (
 
 // OpenAI allowed headers whitelist (for non-passthrough).
 var openaiAllowedHeaders = map[string]bool{
+	"session-id":              true,
+	"thread-id":               true,
+	"x-client-request-id":     true,
 	"accept-language":         true,
 	"content-type":            true,
 	"conversation_id":         true,
@@ -92,6 +95,9 @@ var openaiAllowedHeaders = map[string]bool{
 // OpenAI passthrough allowed headers whitelist.
 // 透传模式下仅放行这些低风险请求头，避免将非标准/环境噪声头传给上游触发风控。
 var openaiPassthroughAllowedHeaders = map[string]bool{
+	"session-id":              true,
+	"thread-id":               true,
+	"x-client-request-id":     true,
 	"accept":                  true,
 	"accept-language":         true,
 	"content-type":            true,
@@ -542,11 +548,6 @@ type OpenAIGatewayService struct {
 	openAIModelsCache                   openAIModelsCache
 	openaiCompatSessionResponses        sync.Map
 	openaiCompatAnthropicDigestSessions sync.Map
-	// openaiCodexTurnStateOrigins: 下游会话 seed → openAICodexTurnStateOrigin，
-	// 记录最近一次向该会话下发 x-codex-turn-state 的铸造账号，供出站守卫
-	// 剥离跨账号回带（openai_codex_turn_state.go）。
-	openaiCodexTurnStateOrigins sync.Map
-	openaiCodexTurnStateWrites  atomic.Uint64
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -855,6 +856,15 @@ func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType st
 	if err == nil {
 		return 0, "", "", "", false
 	}
+	// A typed close 1009 is the peer rejecting an incoming message. The
+	// local reader's ErrMessageTooBig is a different failure and must not
+	// become a client request error. Also handle non-replayable requests,
+	// whose read errors are deliberately not wrapped as fallback errors.
+	if coderws.CloseStatus(err) == coderws.StatusMessageTooBig {
+		return http.StatusRequestEntityTooLarge, "invalid_request_error",
+			"The upstream WebSocket message size limit was exceeded. Reduce the request size before retrying.",
+			sanitizeUpstreamErrorMessage(strings.TrimSpace(err.Error())), true
+	}
 	var fallbackErr *openAIWSFallbackError
 	if !errors.As(err, &fallbackErr) || fallbackErr == nil {
 		return 0, "", "", "", false
@@ -945,7 +955,7 @@ func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType st
 }
 
 func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context, account *Account, wsErr error) bool {
-	if c == nil || c.Writer == nil || c.Writer.Written() {
+	if c == nil || c.Writer == nil || openAIStreamClientOutputStarted(c, false) {
 		return false
 	}
 	statusCode, errType, clientMessage, upstreamMessage, ok := resolveOpenAIWSFallbackErrorResponse(wsErr)
@@ -959,7 +969,25 @@ func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context
 		upstreamMessage = clientMessage
 	}
 
-	setOpsUpstreamError(c, statusCode, upstreamMessage, "")
+	upstreamStatusCode := statusCode
+	detail, reason := "", ""
+	errorBody := gin.H{"type": errType, "message": clientMessage}
+	if coderws.CloseStatus(wsErr) == coderws.StatusMessageTooBig {
+		// The client-facing 413 is a translation, not an upstream HTTP status.
+		upstreamStatusCode = 0
+		c.Set(OpsUpstreamStatusCodeKey, 0)
+		reason = "message_too_big"
+		errorBody["code"] = "request_too_large"
+		diagnostic := map[string]any{"upstream_protocol": "websocket", "upstream_close_code": int(coderws.StatusMessageTooBig)}
+		if size, ok := c.Get(OpsOpenAIWSPayloadBytesKey); ok {
+			if bytes, known := size.(int); known && bytes >= 0 {
+				diagnostic["payload_bytes"] = bytes
+			}
+		}
+		raw, _ := json.Marshal(diagnostic)
+		detail = string(raw)
+	}
+	setOpsUpstreamError(c, upstreamStatusCode, upstreamMessage, detail)
 	if account != nil {
 		proxyID, proxyName := opsUpstreamWSProxyAttribution(account)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -968,17 +996,14 @@ func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context
 			Platform:           account.Platform,
 			AccountID:          account.ID,
 			AccountName:        account.Name,
-			UpstreamStatusCode: statusCode,
+			UpstreamStatusCode: upstreamStatusCode,
 			Kind:               "ws_error",
 			Message:            upstreamMessage,
+			Reason:             reason,
+			Detail:             detail,
 		})
 	}
-	c.JSON(statusCode, gin.H{
-		"error": gin.H{
-			"type":    errType,
-			"message": clientMessage,
-		},
-	})
+	writeOpenAIResponsesErrorJSON(c, statusCode, gin.H{"error": errorBody})
 	return true
 }
 

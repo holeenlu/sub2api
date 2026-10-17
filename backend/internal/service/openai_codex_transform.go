@@ -227,12 +227,6 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		}
 	}
 
-	// 请求带 reasoning 时补齐 include:["reasoning.encrypted_content"]，与真实 Codex 对齐
-	// （compact 端点形态不同，单独处理，此处跳过）。
-	if !opts.IsCompact && ensureCodexReasoningInclude(reqBody) {
-		result.Modified = true
-	}
-
 	// 兼容遗留的 functions 和 function_call，转换为 tools 和 tool_choice
 	if functionsRaw, ok := reqBody["functions"]; ok {
 		if functions, k := functionsRaw.([]any); k {
@@ -352,6 +346,11 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 	// Runs after input filtering so it sees the final replayed history. The
 	// compact endpoint has its own wire shape and is left untouched.
 	if !opts.IsCompact && ensureOpenAIOAuthWebSearchToolForHistory(reqBody, opts.ResponsesLite) {
+		result.Modified = true
+	}
+	// Defaults must see the final tool declarations, including legacy functions,
+	// additional_tools and hosted tools required by replayed history.
+	if !opts.IsCompact && ensureCodexResponsesDefaults(reqBody) {
 		result.Modified = true
 	}
 
@@ -1351,6 +1350,17 @@ func extractSystemMessagesFromInput(reqBody map[string]any, omitPromoted bool) b
 		filteredInput = append(filteredInput, item)
 		modified = true
 	}
+	if omitPromoted && len(filteredInput) == 0 && len(systemTexts) > 0 {
+		// Instructions alone do not supply a Responses input. Preserve the
+		// client's original task as developer messages when promotion would
+		// remove every item; do not manufacture a user prompt.
+		for _, item := range input {
+			if m, ok := item.(map[string]any); ok && m["role"] == "system" {
+				m["role"] = "developer"
+			}
+		}
+		filteredInput = input
+	}
 	if omitPromoted && len(filteredInput) != len(input) {
 		reqBody["input"] = filteredInput
 	}
@@ -1430,7 +1440,54 @@ func defaultCodexSynthInstructions(model string) string {
 	return "You are a helpful coding assistant."
 }
 
-// ensureCodexReasoningInclude 在请求带 reasoning 时补齐 include:["reasoning.encrypted_content"]。
+// ensureCodexResponsesDefaults adapts huoji120/sub4api a3eaf63a defaults to
+// the final local OAuth body, after its existing tool and history transforms.
+// Explicit caller values and the Lite normalizer's overrides take precedence.
+func ensureCodexResponsesDefaults(reqBody map[string]any) bool {
+	if reqBody == nil {
+		return false
+	}
+	changed := false
+	if _, exists := reqBody["reasoning"]; !exists {
+		reqBody["reasoning"] = map[string]any{}
+		changed = true
+	}
+	if _, exists := reqBody["tool_choice"]; !exists {
+		reqBody["tool_choice"] = "auto"
+		changed = true
+	}
+	if _, exists := reqBody["parallel_tool_calls"]; !exists {
+		reqBody["parallel_tool_calls"] = openAIRequestBodyHasToolsMap(reqBody)
+		changed = true
+	}
+	if _, exists := reqBody["include"]; !exists {
+		reqBody["include"] = []any{"reasoning.encrypted_content"}
+		changed = true
+	} else if ensureCodexReasoningInclude(reqBody) {
+		changed = true
+	}
+	return changed
+}
+
+func openAIRequestBodyHasToolsMap(reqBody map[string]any) bool {
+	if tools, ok := reqBody["tools"].([]any); ok && len(tools) > 0 {
+		return true
+	}
+	input, _ := reqBody["input"].([]any)
+	for _, raw := range input {
+		item, ok := raw.(map[string]any)
+		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "additional_tools" {
+			continue
+		}
+		if tools, ok := item["tools"].([]any); ok && len(tools) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureCodexReasoningInclude is shared by the final OAuth defaults and the
+// WS-to-HTTP bridge, which intentionally bypasses the full OAuth transform.
 //
 // 真实 Codex 在 reasoning 存在时总会请求加密推理内容（ChatGPT/store=false 场景下用于上下文回放）。
 // 该函数为加法式、幂等：仅在 include 缺失或未包含该项时追加；对非数组的异常 include 不做破坏性改写。

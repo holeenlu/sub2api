@@ -985,7 +985,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if clientDisconnected || failureDelivered {
 				continue
 			}
-			if eventInProgress {
+			// A staged partial event has not reached the wire. Keepalive is safe
+			// until the stage commits; never splice comments into a visible frame.
+			if eventInProgress && (firstOutputStage == nil || firstOutputStage.closed) {
 				continue
 			}
 			if time.Since(lastDownstreamWriteAt) < keepaliveInterval {
