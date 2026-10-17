@@ -236,6 +236,9 @@ __pycache__/
 /scripts/bps/*
 !/scripts/bps/upstream-review.py
 
+# Standalone account device export documentation
+!docs/ACCOUNT_TELEMETRY_DEVICE_EXPORT.md
+
 !docs/vendor-console/UNIFIED-PLATFORM-PLAN.md
 !docs/vendor-console/UNIFIED-PLATFORM-ACCEPTANCE.md
 !docs/vendor-console/OPENAI-BPS-AUTH-DESIGN.md
@@ -244,3 +247,4 @@ __pycache__/
 !docs/CODE_QUALITY_REVIEW_2026-10-19.md
 
 !docs/CODE_QUALITY_IMPLEMENTATION_2026-10-19.md
+!docs/WORKSPACE_REVIEW_2026-10-19.md
