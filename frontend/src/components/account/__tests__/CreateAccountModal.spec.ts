@@ -15,6 +15,8 @@ const {
   importCodexSessionMock,
   createOpenAICodexPATMock,
   authIsSimpleMode,
+  getModelAllowlistCandidatesMock,
+  showErrorMock,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
   probeUpstreamBillingMock: vi.fn(),
@@ -23,11 +25,14 @@ const {
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
   authIsSimpleMode: { value: true },
+  getModelAllowlistCandidatesMock: vi.fn().mockImplementation(async (_id: number, platform: string) =>
+    platform === 'openai' ? ['gpt-reserve', 'gpt-6.1-sol'] : platform === 'anthropic' ? ['claude-haiku-5-5'] : platform === 'typesafe' ? ['jev-latest'] : []),
+  showErrorMock: vi.fn(),
 }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
-    showError: vi.fn(),
+    showError: showErrorMock,
     showSuccess: vi.fn(),
     showWarning: showWarningMock,
   }),
@@ -63,6 +68,10 @@ vi.mock('@/api/admin', () => ({
 
 vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn().mockResolvedValue([]),
+}))
+
+vi.mock('@/api/admin/groups', () => ({
+  getModelAllowlistCandidates: getModelAllowlistCandidatesMock,
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -201,6 +210,9 @@ async function openCodexImportStep(toggleClicks = 0) {
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
   beforeEach(() => {
+    getModelAllowlistCandidatesMock.mockReset().mockImplementation(async (_id: number, platform: string) =>
+      platform === 'openai' ? ['gpt-reserve', 'gpt-6.1-sol'] : platform === 'anthropic' ? ['claude-haiku-5-5'] : platform === 'typesafe' ? ['jev-latest'] : [])
+    showErrorMock.mockReset()
     authIsSimpleMode.value = true
     createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'openai', type: 'apikey' })
     probeUpstreamBillingMock.mockReset().mockResolvedValue({})
@@ -218,6 +230,71 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it('loads the shared built-in defaults on opening and switching platforms', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
+    await flushPromises()
+    expect(wrapper.findComponent(ModelWhitelistSelectorStub).props('modelValue')).toEqual(['claude-haiku-5-5'])
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await flushPromises()
+    expect(getModelAllowlistCandidatesMock).toHaveBeenLastCalledWith(0, 'openai')
+    expect(wrapper.findComponent(ModelWhitelistSelectorStub).props('modelValue')).toEqual(['gpt-reserve', 'gpt-6.1-sol'])
+  })
+
+  it('submits the shared OpenAI defaults without requiring a sync-button click', async () => {
+    await submitApiKeyAccount('openai')
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials?.model_mapping).toEqual({
+      'gpt-reserve': 'gpt-reserve', 'gpt-6.1-sol': 'gpt-6.1-sol',
+    })
+  })
+
+  it('does not submit while the default model catalog is loading', async () => {
+    let complete!: (models: string[]) => void
+    getModelAllowlistCandidatesMock.mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    const wrapper = mountModal()
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('pending')
+    expect(wrapper.get('[data-tour="account-form-submit"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(wrapper.find('[data-testid="import-codex-session"]').exists()).toBe(false)
+    complete(['claude-haiku-5-5'])
+    await flushPromises()
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-tour="account-form-submit"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it.each(['switch', 'close', 'edit'])('discards pending default models after %s', async (action) => {
+    let complete!: (models: string[]) => void
+    getModelAllowlistCandidatesMock.mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    const wrapper = mountModal()
+    if (action === 'switch') await selectButtonByText(wrapper, 'OpenAI')
+    else if (action === 'close') await wrapper.setProps({ show: false })
+    else {
+      await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
+      await wrapper.get('[data-testid="model-whitelist-selector"]').trigger('click')
+    }
+    complete(['stale-model'])
+    await flushPromises()
+    if (action === 'close') {
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+      await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
+    } else if (action === 'switch') await selectButtonByText(wrapper, 'API Key')
+    const models = wrapper.findComponent(ModelWhitelistSelectorStub).props('modelValue')
+    expect(models).not.toContain('stale-model')
+    if (action === 'edit') expect(models).toEqual(['public-glm'])
+  })
+
+  it('does not fall back to a static list when the default catalog fails', async () => {
+    getModelAllowlistCandidatesMock.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
+    await flushPromises()
+    expect(showErrorMock).toHaveBeenCalledWith('admin.accounts.modelSyncBuiltinFailed')
+    expect(wrapper.findComponent(ModelWhitelistSelectorStub).props('modelValue')).toEqual([])
+  })
 
   it('sets month and year expiry presets without submitting the account form', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
@@ -893,6 +970,29 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await flushPromises()
 
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
+  })
+})
+
+describe('delegated account creation', () => {
+  it('creates an API-key account without sending defaults for ungranted financial fields', async () => {
+    createAccountMock.mockResolvedValue({ id: 42 })
+    const wrapper = mountModal()
+    await wrapper.setProps({ allowRateEdit: false, allowSystemSettings: false })
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('delegated account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('new-key')
+    expect(wrapper.find('[data-testid="openai-long-context-billing-toggle"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="upstream-billing-auto-probe"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const payload = JSON.parse(JSON.stringify(createAccountMock.mock.calls.at(-1)?.[0]))
+    expect(payload.name).toBe('delegated account')
+    expect(payload.rate_multiplier).toBeUndefined()
+    expect(payload.upstream_billing_probe_enabled).toBeUndefined()
+    expect(payload.extra?.openai_long_context_billing_enabled).toBeUndefined()
+    expect(payload.credentials.api_key).toBe('new-key')
+    wrapper.unmount()
   })
 })
 

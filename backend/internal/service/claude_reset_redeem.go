@@ -205,6 +205,9 @@ func (s *ClaudeResetCreditService) redeemOnce(ctx context.Context, id int64, ope
 		return nil, err
 	}
 	outcome := s.claim(ctx, token, proxy, org, grant.ID, operation)
+	// A sent claim may have consumed a credit even when its response is unknown.
+	// Invalidate the previous display before attempting a fresh upstream read.
+	s.persistCredits(ctx, id, nil)
 	marker.Outcome, marker.Reason = outcome.Outcome, outcome.Reason
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	persistErr := s.persistFence(persistCtx, fence.ID, marker)
@@ -215,6 +218,7 @@ func (s *ClaudeResetCreditService) redeemOnce(ctx context.Context, id int64, ope
 	if outcome.Outcome != ClaudeResetOutcomeUnknown {
 		if fresh, e := s.fetchBlock(ctx, token, proxy); e == nil {
 			outcome.Credits = projectClaudeResetCredits(fresh, s.now())
+			s.persistCredits(ctx, id, outcome.Credits)
 		}
 	}
 	return outcome, nil

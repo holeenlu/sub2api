@@ -1299,15 +1299,6 @@ func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (s *adminServiceImpl) RefreshAccountCredentials(ctx context.Context, id int64) (*Account, error) {
-	account, err := s.accountRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	// TODO: Implement refresh logic
-	return account, nil
-}
-
 func (s *adminServiceImpl) ClearAccountError(ctx context.Context, id int64) (*Account, error) {
 	if err := s.accountRepo.ClearError(ctx, id); err != nil {
 		return nil, err

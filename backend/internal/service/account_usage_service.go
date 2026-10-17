@@ -51,6 +51,7 @@ type UsageLogRepository interface {
 	GetUpstreamEndpointStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) ([]usagestats.EndpointStat, error)
 	GetGroupStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8) ([]usagestats.GroupStat, error)
 	GetUserBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) ([]usagestats.UserBreakdownItem, error)
+	GetAPIKeyBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) ([]usagestats.APIKeyBreakdownItem, error)
 	GetAllGroupUsageSummary(ctx context.Context, todayStart time.Time) ([]usagestats.GroupUsageSummary, error)
 	GetAPIKeyUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) ([]usagestats.APIKeyUsageTrendPoint, error)
 	GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int, metric string) ([]usagestats.UserUsageTrendPoint, error)
@@ -392,6 +393,7 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 	// 只有oauth类型账号可以通过API获取usage（有profile scope）
 	if account.CanGetUsage() {
 		var apiResp *ClaudeUsageResponse
+		var sampledAt time.Time
 
 		// 1. 检查缓存（成功响应 3 分钟 / 错误响应 1 分钟）
 		if cached, ok := s.cache.apiCache.Load(accountID); ok {
@@ -401,8 +403,9 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 					// 负缓存命中：返回缓存的错误，避免重试风暴
 					return nil, cache.err
 				}
-				if cache.response != nil && age < apiCacheTTL {
+				if !forceProbe && cache.response != nil && age < apiCacheTTL {
 					apiResp = cache.response
+					sampledAt = cache.timestamp
 				}
 			}
 		}
@@ -427,8 +430,8 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 						if cache.err != nil && age < apiErrorCacheTTL {
 							return nil, cache.err
 						}
-						if cache.response != nil && age < apiCacheTTL {
-							return cache.response, nil
+						if !forceProbe && cache.response != nil && age < apiCacheTTL {
+							return cache, nil
 						}
 					}
 				}
@@ -441,30 +444,31 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 					})
 					return nil, fetchErr
 				}
-				// 缓存成功响应
-				s.cache.apiCache.Store(accountID, &apiUsageCache{
+				// 只持久化新采集的数据。缓存命中不重新写入，避免覆盖
+				// 查询之后从响应头采到的更新用量，也不伪造采样时间。
+				observedAt := time.Now()
+				s.syncActiveToPassive(ctx, accountID, s.buildUsageInfo(resp, &observedAt))
+				cache := &apiUsageCache{
 					response:  resp,
-					timestamp: time.Now(),
-				})
-				return resp, nil
+					timestamp: observedAt,
+				}
+				s.cache.apiCache.Store(accountID, cache)
+				return cache, nil
 			})
 			if flightErr != nil {
 				return nil, flightErr
 			}
-			apiResp, _ = result.(*ClaudeUsageResponse)
+			cache := result.(*apiUsageCache)
+			apiResp, sampledAt = cache.response, cache.timestamp
 		}
 
 		// 3. 构建 UsageInfo（每次都重新计算 RemainingSeconds）
-		now := time.Now()
-		usage := s.buildUsageInfo(apiResp, &now)
+		usage := s.buildUsageInfo(apiResp, &sampledAt)
 
 		// 4. 添加窗口统计（有独立缓存，1 分钟）
 		s.addWindowStats(ctx, account, usage)
 
-		// 5. 将主动查询结果同步到被动缓存，下次 passive 加载即为最新值
-		s.syncActiveToPassive(ctx, account.ID, usage)
-
-		// 6. 上游 usage API 目前不一定下发 Fable 7d 窗口；缺失时回填被动采样
+		// 5. 上游 usage API 目前不一定下发 Fable 7d 窗口；缺失时回填被动采样
 		// （7d_oi 响应头）的数据，避免主动查询后 7d F 进度条丢失。
 		if usage.SevenDayFable == nil {
 			usage.SevenDayFable = buildPassiveUsageWindow(account.Extra, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset")
@@ -658,8 +662,9 @@ func buildPassiveUsageWindow(extra map[string]any, utilKey, resetKey string) *Us
 		t := time.Unix(int64(resetRaw), 0)
 		resetAt = &t
 		remaining = int(time.Until(t).Seconds())
-		if remaining < 0 {
-			remaining = 0
+		if !time.Now().Before(t) {
+			// Each persisted window expires independently, as does the 5h window.
+			return &UsageProgress{}
 		}
 	}
 	return &UsageProgress{
@@ -1793,4 +1798,13 @@ func buildGeminiUsageProgress(used, limit int64, resetAt time.Time, tokens int64
 // 用于账号列表页面显示当前窗口费用
 func (s *AccountUsageService) GetAccountWindowStats(ctx context.Context, accountID int64, startTime time.Time) (*usagestats.AccountStats, error) {
 	return s.usageLogRepo.GetAccountWindowStats(ctx, accountID, startTime)
+}
+
+// GetAccountWindowStatsBatch reuses the repository's batch query for accounts
+// sharing a window. Unlike today's totals, active session windows may differ.
+func (s *AccountUsageService) GetAccountWindowStatsBatch(ctx context.Context, accountIDs []int64, startTime time.Time) (map[int64]*usagestats.AccountStats, error) {
+	if reader, ok := s.usageLogRepo.(accountWindowStatsBatchReader); ok {
+		return reader.GetAccountWindowStatsBatch(ctx, accountIDs, startTime)
+	}
+	return nil, fmt.Errorf("account window batch statistics are unavailable")
 }

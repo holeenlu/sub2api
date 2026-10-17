@@ -1452,8 +1452,9 @@ func TestOpenAISelectAccountWithLoadAwareness_AllFullWaitPlan(t *testing.T) {
 	}
 	cache := &stubGatewayCache{}
 	concurrencyCache := stubConcurrencyCache{
+		acquireResults: map[int64]bool{1: false},
 		loadMap: map[int64]*AccountLoadInfo{
-			1: {AccountID: 1, LoadRate: 100},
+			1: {AccountID: 1, LoadRate: 100, CurrentConcurrency: 1},
 		},
 	}
 
@@ -1514,6 +1515,7 @@ func TestOpenAISelectAccountWithLoadAwareness_MissingLoadInfo(t *testing.T) {
 			1: {AccountID: 1, LoadRate: 50},
 		},
 		skipDefaultLoad: true,
+		acquireResults:  map[int64]bool{1: false, 2: true},
 	}
 
 	svc := &OpenAIGatewayService{
@@ -1556,7 +1558,7 @@ func TestOpenAISelectAccountForModelWithExclusions_LeastRecentlyUsed(t *testing.
 	}
 }
 
-func TestOpenAISelectAccountWithLoadAwareness_PreferNeverUsed(t *testing.T) {
+func TestOpenAISelectAccountWithLoadAwareness_ColdStartParticipates(t *testing.T) {
 	groupID := int64(1)
 	lastUsed := time.Now().Add(-1 * time.Hour)
 	repo := stubOpenAIAccountRepo{
@@ -1579,13 +1581,18 @@ func TestOpenAISelectAccountWithLoadAwareness_PreferNeverUsed(t *testing.T) {
 		concurrencyService: NewConcurrencyService(concurrencyCache),
 	}
 
-	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "gpt-4", nil)
-	if err != nil {
-		t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
+	counts := map[int64]int{}
+	for i := 0; i < 200; i++ {
+		selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, fmt.Sprintf("cold-start-%d", i), "gpt-4", nil)
+		require.NoError(t, err)
+		require.NotNil(t, selection.Account)
+		counts[selection.Account.ID]++
+		if selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
 	}
-	if selection == nil || selection.Account == nil || selection.Account.ID != 2 {
-		t.Fatalf("expected account 2")
-	}
+	require.Greater(t, counts[1], 40)
+	require.Greater(t, counts[2], 40, "cold-start accounts must remain eligible without a history score")
 }
 
 func TestOpenAIStreamingTimeout(t *testing.T) {
@@ -1740,11 +1747,13 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 	gin.SetMode(gin.TestMode)
 	proxyID := int64(4698)
 	account := &Account{
-		ID:       469801,
-		Name:     "oauth-on-shared-proxy",
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeOAuth,
-		ProxyID:  &proxyID,
+		ID:          469801,
+		Name:        "oauth-on-shared-proxy",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		ProxyID:     &proxyID,
 	}
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
 		MaxLineSize: defaultMaxLineSize,
@@ -1794,7 +1803,7 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 func TestOpenAIStreamingTerminalAndClientCancellationDoNotQuarantineProxy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	proxyID := int64(4699)
-	account := &Account{ID: 469901, Name: "oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, ProxyID: &proxyID}
+	account := &Account{ID: 469901, Name: "oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, ProxyID: &proxyID, Status: StatusActive, Schedulable: true}
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
 
 	terminalRecorder := httptest.NewRecorder()
