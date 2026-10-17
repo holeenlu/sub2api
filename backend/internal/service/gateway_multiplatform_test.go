@@ -3597,3 +3597,10 @@ func TestGatewayService_SelectAccountForModelWithPlatform_RoutedOpenAIGroup(t *t
 	require.NotNil(t, acc)
 	require.Equal(t, int64(2), acc.ID, "routed account must win over the higher-priority unrouted one")
 }
+
+func (m *mockGatewayCacheForPlatform) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (m *mockGatewayCacheForPlatform) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
+}

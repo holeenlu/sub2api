@@ -4193,3 +4193,10 @@ func TestHandleCompatErrorResponseCyberPolicyEarlyReturn(t *testing.T) {
 	require.NotContains(t, gotMsg, "Upstream request failed")
 	require.NotNil(t, GetOpsCyberPolicy(c))
 }
+
+func (c *stubGatewayCache) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (c *stubGatewayCache) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
+}

@@ -2665,6 +2665,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	firstTurnStartedAt := time.Now()
+	// WS request time starts at the accepted generation frame, not idle since upgrade.
+	service.BeginOpenAIRequestTiming(c, firstTurnStartedAt)
 	if service.GatewayInstanceOverloaded() {
 		service.RecordSchedulingOverload("websocket")
 		closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "gateway instance is busy; retry shortly")
@@ -2744,6 +2746,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision))
 		return
 	}
+	ctx = c.Request.Context()
 
 	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage)
 	ctx = service.WithOpenAIImageGenerationRequest(ctx, reqModel, firstMessage)
@@ -2896,6 +2899,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 			apiKey = latest
 		}
+		service.MarkOpenAIRequestTimingStage(c, "auth_done")
 		if !gjson.ValidBytes(payload) {
 			return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
 		}
@@ -2924,6 +2928,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			writeSecurityAuditWSError(ctx, wsConn, decision)
 			return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
 		}
+		ctx = c.Request.Context()
 		if h.cfg == nil || h.cfg.RunMode != config.RunModeSimple {
 			if billingErr := h.billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(ctx, apiKey)); billingErr != nil {
 				return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "billing check failed", errors.Join(service.ErrOpenAIWSLocalClientPolicy, billingErr))
@@ -3140,6 +3145,8 @@ wsAccountLoop:
 			failure := lastFailoverErr
 			if !errors.Is(err, service.ErrNoAvailableAccounts) {
 				failure = &service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable, Cause: err, ClientMessage: "Account selection temporarily unavailable"}
+			} else if service.SchedulingQuotaRequestWasBlocked(ctx) {
+				failure = &service.UpstreamFailoverError{StatusCode: http.StatusTooManyRequests, Scope: service.GatewayFailureScopeRequest, Reason: service.SchedulingQuotaRequestTooLarge, RequestNotSent: true, ClientMessage: "Large uncached input is blocked near the account quota limit"}
 			}
 			if finishFailedTurn(failure) {
 				continue wsAccountLoop
@@ -4330,6 +4337,9 @@ func allowOpenAIAccountBoundRetry(err *service.UpstreamFailoverError, portable b
 }
 
 func openAIForwardRetryStopReason(c *gin.Context, writerSizeBeforeForward int, failoverErr *service.UpstreamFailoverError) service.OpenAIRetryStopReason {
+	if failoverErr != nil && service.IsUpstreamContentRefusal(failoverErr.ResponseBody) {
+		return service.OpenAIRetryStopContentRefusal
+	}
 	if c == nil || c.Writer == nil {
 		return service.OpenAIRetryStopDownstreamCommitted
 	}
@@ -4484,6 +4494,10 @@ func markOpenAIWSTurnFailure(c *gin.Context, failure *service.UpstreamFailoverEr
 			result.IntendedStatus = failure.StatusCode
 		}
 		result.RequestScoped = failure.Scope == service.GatewayFailureScopeRequest || failure.IsExcelBPSImageAdmissionRejection()
+		if failure.Reason == service.SchedulingQuotaRequestTooLarge {
+			result.CountTowardsSLA = false
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+		}
 		switch {
 		case failure.IsCredentialFailure():
 			result.IntendedStatus, result.Message = credentialFailoverClientResponse(failure)

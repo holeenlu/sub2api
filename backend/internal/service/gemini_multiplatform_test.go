@@ -1018,3 +1018,10 @@ func TestGeminiMessagesCompatService_isModelSupportedByAccount(t *testing.T) {
 		})
 	}
 }
+
+func (m *mockGatewayCacheForGemini) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (m *mockGatewayCacheForGemini) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
+}

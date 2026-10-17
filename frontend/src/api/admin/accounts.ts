@@ -1,3 +1,4 @@
+import type { AccountTelemetryState } from '@/utils/accountTelemetry'
 /**
  * Admin Accounts API endpoints
  * Handles AI platform account management for administrators
@@ -1210,3 +1211,8 @@ export const accountsAPI = {
 }
 
 export default accountsAPI
+
+export async function importAccountTelemetry(id: number, bundle: unknown): Promise<AccountTelemetryState> {
+  const { data } = await apiClient.post<AccountTelemetryState>('/admin/accounts/' + id + '/telemetry/import', bundle)
+  return data
+}

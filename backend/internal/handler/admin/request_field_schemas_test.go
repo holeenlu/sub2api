@@ -113,7 +113,7 @@ func TestAccountExtraCreationAndReplacementHaveDistinctAuthority(t *testing.T) {
 	_, err := authz.ValidateRequestFields("account.create", map[string]any{"extra": map[string]any{"org_uuid": "org", "openai_oauth_responses_websockets_v2_mode": "off"}}, actor)
 	require.NoError(t, err, "normal OAuth metadata must remain usable without financial permissions")
 	for _, schema := range []string{"account.create", "account.codex", "account.pat", "account.sso"} {
-		_, err = authz.ValidateRequestFields(schema, map[string]any{"extra": map[string]any{"client_telemetry": map[string]any{"client": "claude", "payload_json": "{}"}}}, actor)
+		_, err = authz.ValidateRequestFields(schema, map[string]any{"extra": map[string]any{"account_telemetry": map[string]any{"client": "claude", "payload_json": "{}"}}}, actor)
 		require.Error(t, err, "saved user telemetry is restricted to super administrators")
 		_, err = authz.ValidateRequestFields(schema, map[string]any{"extra": map[string]any{"quota_limit": 0}}, actor)
 		require.Error(t, err)
