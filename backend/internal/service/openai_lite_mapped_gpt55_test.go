@@ -70,7 +70,7 @@ func TestMappedGPT55LiteBuildersPreserveIngressForFailover(t *testing.T) {
 		c.Request.Header.Set(responsesLiteHeader, "true")
 		s := &OpenAIGatewayService{cfg: &config.Config{}}
 		a := &Account{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.6-sol": "gpt-5.5"}}}
-		body := []byte(`{"model":"gpt-5.5","stream":true,"input":[]}`)
+		body := []byte(`{"model":"gpt-5.5","stream":true,"input":[{"role":"user","content":"hello"}]}`)
 		var r *http.Request
 		var err error
 		if passthrough {
@@ -82,7 +82,7 @@ func TestMappedGPT55LiteBuildersPreserveIngressForFailover(t *testing.T) {
 		require.Empty(t, r.Header.Get(responsesLiteHeader))
 		require.Equal(t, "true", c.GetHeader(responsesLiteHeader))
 		a.ID = 14
-		body = []byte(`{"model":"gpt-6-astra","stream":true,"input":[]}`)
+		body = []byte(`{"model":"gpt-6-astra","stream":true,"input":[{"role":"user","content":"hello"}]}`)
 		if passthrough {
 			r, err = s.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, a, body, "test-token")
 		} else {

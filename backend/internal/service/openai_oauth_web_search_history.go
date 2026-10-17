@@ -20,6 +20,9 @@ import (
 // input additional_tools item instead. When the caller declared no tools at
 // all, also pin tool_choice to "none" so the injected tool cannot be invoked
 // and the request keeps its no-tools semantics.
+// A client-executed web.run already owns the web-search tool name. Injecting
+// a hosted tool alongside it causes a 400 name conflict; preserve the caller's
+// tools and replayed history in that case.
 
 const (
 	openAIWebSearchCallItemType      = "web_search_call"
@@ -33,18 +36,29 @@ var openAIWebSearchHistoryTool = map[string]any{
 	"external_web_access": false,
 }
 
-func isOpenAIWebSearchToolType(toolType string) bool {
-	return strings.HasPrefix(strings.TrimSpace(toolType), "web_search")
+func isOpenAIWebSearchTool(toolType, qualifiedName string) bool {
+	toolType = strings.TrimSpace(toolType)
+	return strings.HasPrefix(toolType, "web_search") ||
+		((toolType == "function" || toolType == "custom") && qualifiedName == "web.run")
 }
 
-func openAIToolsContainWebSearch(rawTools any) bool {
+func openAIToolsContainWebSearch(rawTools any, namespace string) bool {
 	tools, ok := rawTools.([]any)
 	if !ok {
 		return false
 	}
 	for _, rawTool := range tools {
 		tool, ok := rawTool.(map[string]any)
-		if ok && isOpenAIWebSearchToolType(firstNonEmptyString(tool["type"])) {
+		if !ok {
+			continue
+		}
+		toolType := strings.TrimSpace(firstNonEmptyString(tool["type"]))
+		name := firstNonEmptyString(tool["name"])
+		if namespace != "" {
+			name = namespace + "." + name
+		}
+		if isOpenAIWebSearchTool(toolType, name) ||
+			(toolType == "namespace" && openAIToolsContainWebSearch(tool["tools"], name)) {
 			return true
 		}
 	}
@@ -99,7 +113,7 @@ func ensureOpenAIOAuthWebSearchToolForHistory(reqBody map[string]any, responsesL
 		case openAIWebSearchCallItemType:
 			hasWebSearchCall = true
 		case openAIAdditionalToolsItemType:
-			if openAIToolsContainWebSearch(item["tools"]) {
+			if openAIToolsContainWebSearch(item["tools"], "") {
 				return false
 			}
 			if tools, _ := item["tools"].([]any); len(tools) > 0 {
@@ -110,7 +124,7 @@ func ensureOpenAIOAuthWebSearchToolForHistory(reqBody map[string]any, responsesL
 			}
 		}
 	}
-	if !hasWebSearchCall || openAIToolsContainWebSearch(reqBody["tools"]) {
+	if !hasWebSearchCall || openAIToolsContainWebSearch(reqBody["tools"], "") {
 		return false
 	}
 	tools, _ := reqBody["tools"].([]any)
@@ -167,7 +181,7 @@ func ensureOpenAIOAuthWebSearchToolForHistoryBody(body []byte, responsesLite boo
 			hasWebSearchCall = true
 		case openAIAdditionalToolsItemType:
 			itemTools := item.Get("tools")
-			if gjsonToolsContainWebSearch(itemTools) {
+			if gjsonToolsContainWebSearch(itemTools, "") {
 				return body, false, nil
 			}
 			if itemTools.IsArray() && len(itemTools.Array()) > 0 {
@@ -182,7 +196,7 @@ func ensureOpenAIOAuthWebSearchToolForHistoryBody(body []byte, responsesLite boo
 		return body, false, nil
 	}
 	tools := gjson.GetBytes(body, "tools")
-	if gjsonToolsContainWebSearch(tools) {
+	if gjsonToolsContainWebSearch(tools, "") {
 		return body, false, nil
 	}
 	topLevelTools := tools.IsArray() && len(tools.Array()) > 0
@@ -243,12 +257,18 @@ func insertOpenAIAdditionalToolsItemRaw(body []byte, items []gjson.Result, at in
 	return sjson.SetRawBytes(body, "input", raw)
 }
 
-func gjsonToolsContainWebSearch(tools gjson.Result) bool {
+func gjsonToolsContainWebSearch(tools gjson.Result, namespace string) bool {
 	if !tools.IsArray() {
 		return false
 	}
 	for _, tool := range tools.Array() {
-		if isOpenAIWebSearchToolType(tool.Get("type").String()) {
+		toolType := strings.TrimSpace(tool.Get("type").String())
+		name := tool.Get("name").String()
+		if namespace != "" {
+			name = namespace + "." + name
+		}
+		if isOpenAIWebSearchTool(toolType, name) ||
+			(toolType == "namespace" && gjsonToolsContainWebSearch(tool.Get("tools"), name)) {
 			return true
 		}
 	}

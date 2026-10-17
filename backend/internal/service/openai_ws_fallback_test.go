@@ -203,6 +203,27 @@ func TestWriteOpenAIWSFallbackErrorResponseKeepsManagedProxy(t *testing.T) {
 	require.Equal(t, "ws-proxy", events[0].ProxyName)
 }
 
+func TestWriteOpenAIWSFallbackErrorAfterHTTPHeartbeat(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	stop := startOpenAISSEKeepalive(c, time.Hour)
+	defer stop()
+	value, _ := c.Get(openAICompactSSEKeepaliveKey)
+	require.True(t, value.(*openAICompactSSEKeepalive).beat())
+	stop()
+	require.True(t, c.Writer.Written())
+	require.False(t, openAIStreamClientOutputStarted(c, false))
+	svc := &OpenAIGatewayService{}
+	require.True(t, svc.writeOpenAIWSFallbackErrorResponse(c, &Account{ID: 42, Platform: PlatformOpenAI}, wrapOpenAIWSFallback("auth_failed", errors.New("unauthorized"))))
+	events := parseCompactBridgeSSE(t, stripKeepaliveComments(recorder.Body.String()))
+	require.Len(t, events, 1)
+	require.Equal(t, "response.failed", events[0][0])
+	require.True(t, openAIStreamClientOutputStarted(c, false))
+	require.True(t, IsResponseCommitted(c))
+}
+
 func TestOpsUpstreamWSProxyAttributionNeverReportsDirect(t *testing.T) {
 	proxyID := int64(7)
 	id, name := opsUpstreamWSProxyAttribution(nil)

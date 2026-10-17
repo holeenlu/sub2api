@@ -37,7 +37,7 @@ func anthropicSSEWithNegativeBlockIndex() string {
 		`event: message_stop`,
 		`data: {"type":"message_stop"}`,
 		``,
-	}, "\n")
+	}, "\n") + "\n"
 }
 
 func TestAnthropicBufferedAggregators_IgnoreNegativeBlockIndex(t *testing.T) {

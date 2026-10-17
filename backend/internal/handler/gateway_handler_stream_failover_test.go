@@ -100,6 +100,44 @@ func TestStreamWrittenGuard_GeminiPath_AbortFailoverOnSSEContentWritten(t *testi
 	assert.Equal(t, firstIdx, lastIdx, "Gemini 路径不得出现双 message_start")
 }
 
+func TestHandleFailoverExhausted_OverloadedError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for name, prefix := range map[string]string{
+		"before_output": "",
+		"message_start": partialMessageStartSSE,
+		"ping":          "event: ping\ndata: {\"type\":\"ping\"}\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			status := http.StatusServiceUnavailable
+			if prefix != "" {
+				_, err := c.Writer.Write([]byte(prefix))
+				require.NoError(t, err)
+				status = http.StatusOK // A started stream keeps its committed HTTP status.
+			}
+			h := &GatewayHandler{}
+			h.handleFailoverExhausted(c, &service.UpstreamFailoverError{
+				StatusCode:   529,
+				ResponseBody: []byte(`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`),
+			}, service.PlatformAnthropic, prefix != "")
+
+			require.Equal(t, status, w.Code)
+			require.Equal(t, 529, c.GetInt(service.OpsUpstreamStatusCodeKey))
+			require.Equal(t, "Overloaded", c.GetString(service.OpsUpstreamErrorMessageKey))
+			require.Contains(t, w.Body.String(), `"type":"overloaded_error"`)
+			require.Contains(t, w.Body.String(), "Upstream service overloaded, please retry later")
+			require.NotContains(t, w.Body.String(), "forbidden")
+			if prefix != "" {
+				require.True(t, strings.HasPrefix(w.Body.String(), prefix))
+				require.Equal(t, 1, strings.Count(w.Body.String(), prefix))
+				require.Contains(t, w.Body.String()[len(prefix):], "data: ")
+			}
+		})
+	}
+}
+
 // TestStreamWrittenGuard_NoByteWritten_GuardNotTriggered 验证反向场景：
 // 当 Forward 返回 UpstreamFailoverError 时若未向客户端写入任何 SSE 内容，
 // 守卫条件（c.Writer.Size() != sizeBeforeForward）为 false，不应中止 failover。
