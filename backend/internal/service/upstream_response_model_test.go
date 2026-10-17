@@ -1,6 +1,8 @@
 package service
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -19,6 +21,14 @@ func TestUpstreamResponseModelObserverTerminalWinsAndRecordsConflict(t *testing.
 }
 
 func TestUpstreamResponseModelObserverSupportsAnthropicAndGeminiShapes(t *testing.T) {
+	t.Run("optional observer", func(t *testing.T) {
+		var observer *upstreamResponseModelObserver
+		require.NotPanics(t, func() {
+			observer.ObserveOpenAI([]byte(`{"model":"gpt-5.5"}`), "")
+			observer.ObserveAnthropic([]byte(`{"stop_reason":"refusal"}`))
+			observer.ObserveGemini([]byte(`{"candidates":[{"finishReason":"SAFETY"}]}`))
+		})
+	})
 	t.Run("anthropic", func(t *testing.T) {
 		observer := &upstreamResponseModelObserver{}
 		observer.ObserveAnthropic([]byte(`{"type":"message_start","message":{"model":"claude-sonnet-4-20250514"}}`))
@@ -45,6 +55,27 @@ func TestUpstreamResponseModelObservationAttemptReset(t *testing.T) {
 
 	require.Equal(t, "successful-attempt-model", observedUpstreamResponseModel(c))
 	require.False(t, observedUpstreamResponseModelConflict(c))
+}
+
+func TestUpstreamRefusalFeedbackIsOncePerTurnAcrossProtocolsAndAttempts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	firstHits, secondHits := 0, 0
+	ctx := WithUpstreamRefusalObserver(t.Context(), func() { firstHits++ })
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+	first := beginUpstreamResponseModelObservation(c)
+	first.ObserveOpenAI([]byte(`{"type":"response.output_text.delta","delta":"content_policy_violation"}`), "response.output_text.delta")
+	require.Zero(t, firstHits, "ordinary text is not policy evidence")
+	first.ObserveAnthropic([]byte(`{"type":"message_delta","delta":{"stop_reason":"refusal"}}`))
+	secondAttempt := beginUpstreamResponseModelObservation(c)
+	secondAttempt.ObserveOpenAI([]byte(`{"type":"response.refusal.done","refusal":"declined"}`), "response.refusal.done")
+	observeUpstreamContentRefusal(ctx, []byte(`{"error":{"code":"content_policy_violation"}}`))
+	require.Equal(t, 1, firstHits)
+	c.Request = c.Request.WithContext(WithUpstreamRefusalObserver(ctx, func() { secondHits++ }))
+	turn := newUpstreamResponseModelObserver(c)
+	turn.ObserveGemini([]byte(`{"candidates":[{"finishReason":"SAFETY"}]}`))
+	require.Equal(t, 1, firstHits)
+	require.Equal(t, 1, secondHits, "a new WS turn must not reuse the prior request callback")
 }
 
 func TestUpstreamModelMismatchThreeStateAndCaseInsensitiveComparison(t *testing.T) {

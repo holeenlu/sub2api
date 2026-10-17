@@ -23,22 +23,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// cursorResponsesUnsupportedFields are top-level Responses API parameters that
-// Codex upstreams reject with "Unsupported parameter: ...". They must be
-// stripped when forwarding a raw client body through the Responses-shape
-// short-circuit in ForwardAsChatCompletions (see isResponsesShape branch).
-// The normal Chat Completions → Responses conversion path is unaffected
-// because ChatCompletionsRequest has no fields for these parameters — unknown
-// fields are dropped naturally by json.Unmarshal. Kept semantically in sync
-// with the list in openai_gateway_service.go:2034 used by the /v1/responses
-// passthrough path.
-var cursorResponsesUnsupportedFields = []string{
-	"prompt_cache_retention",
-	"safety_identifier",
-	"metadata",
-	"stream_options",
-}
-
 // ForwardAsChatCompletions accepts a Chat Completions request body, converts it
 // to OpenAI Responses API format, forwards to the OpenAI upstream, and converts
 // the response back to Chat Completions format.
@@ -215,16 +199,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("rewrite model in responses-shape body: %w", err)
 		}
-		// Strip Responses API parameters that no Codex upstream accepts.
-		// Because this branch forwards the raw body (the normal path rebuilds
-		// it from ChatCompletionsRequest and drops unknown fields naturally),
-		// we must filter these fields explicitly here — otherwise the upstream
-		// rejects the request with "Unsupported parameter: ...".
-		for _, field := range cursorResponsesUnsupportedFields {
-			if stripped, derr := sjson.DeleteBytes(responsesBody, field); derr == nil {
-				responsesBody = stripped
-			}
-		}
+		// Preserve native Responses fields. The shared Codex transform below owns
+		// endpoint-specific exclusions for OAuth; API-key upstreams retain them.
 		var normalizedServiceTier string
 		responsesBody, normalizedServiceTier, err = normalizeResponsesBodyServiceTier(responsesBody)
 		if err != nil {
@@ -359,7 +335,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	if promptCacheKey != "" {
+	if promptCacheKey != "" && (!account.UsesOpenAICodexProtocol() || codexAccountIdentityNamespace(codexAccountIdentitySource(c, account)) == "") {
 		apiKeyID := getAPIKeyIDFromContext(c)
 		sessionKey := promptCacheKey
 		if !compatPromptCacheTenantIsolated {
@@ -367,6 +343,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		}
 		upstreamReq.Header.Set("session_id", generateSessionUUID(sessionKey))
 	}
+	projectCodexOutboundHeaders(upstreamReq.Header, codexAccountIdentitySource(c, account), false)
 
 	// 7. Send request
 	proxyURL := ""
@@ -693,6 +670,9 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
 	}
 
+	if finalResponse == nil && acc.Err() != nil {
+		return nil, writeAPICompatConversionError(c, acc.Err(), false)
+	}
 	if finalResponse == nil {
 		writeChatCompletionsError(c, http.StatusBadGateway, "api_error", "Upstream stream ended without a terminal response event")
 		return nil, fmt.Errorf("upstream stream ended without terminal event")
@@ -755,6 +735,12 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	// When the terminal event has an empty output array, reconstruct from
 	// accumulated delta events so the client receives the full content.
 	acc.SupplementResponseOutput(finalResponse)
+	if err := acc.Err(); err != nil {
+		return nil, writeAPICompatConversionError(c, err, false)
+	}
+	if err := apicompat.ValidateResponsesToolArguments(finalResponse); err != nil {
+		return nil, writeAPICompatConversionError(c, err, false)
+	}
 
 	chatResp := apicompat.ResponsesToChatCompletions(finalResponse, originalModel)
 
@@ -833,6 +819,21 @@ func (s *OpenAIGatewayService) newOpenAICompatBufferedReadFailoverError(
 	return failoverErr
 }
 
+// openAIChatChunkHasOutput excludes protocol metadata. Tool identity counts as
+// output because replaying it could execute the same client tool twice.
+func openAIChatChunkHasOutput(chunk apicompat.ChatCompletionsChunk) bool {
+	for _, choice := range chunk.Choices {
+		delta := choice.Delta
+		if (delta.Content != nil && *delta.Content != "") ||
+			(delta.Refusal != nil && *delta.Refusal != "") ||
+			(delta.ReasoningContent != nil && *delta.ReasoningContent != "") ||
+			(delta.Reasoning != nil && *delta.Reasoning != "") || len(delta.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // handleChatStreamingResponse reads Responses SSE events from upstream,
 // converts each to Chat Completions SSE chunks, and writes them to the client.
 func (s *OpenAIGatewayService) handleChatStreamingResponse(
@@ -856,7 +857,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 	var usage OpenAIUsage
 	var firstTokenMs *int
-	firstChunk := true
 	clientDisconnected := false
 	clientOutputStarted := false
 	pendingSSE := make([]string, 0, 4)
@@ -912,11 +912,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 	processDataLine := func(payload string) bool {
 		payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
-		if firstChunk {
-			firstChunk = false
-			ms := int(time.Since(startTime).Milliseconds())
-			firstTokenMs = &ms
-		}
 		if countSearch {
 			searchCount += countGrokNativeSearchCallsInSSEDataDedup([]byte(payload), streamSearchSeen)
 		}
@@ -987,6 +982,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
 			defaultStatus, defaultErrType, defaultMsg := http.StatusBadGateway, "upstream_error", message
+			failureStatus := openAIStreamFailureStatus(payloadBytes, message)
 			// 统一走语义状态推断 + body 归一化（与 /v1/responses 路径一致），
 			// 使按错误码配置的透传规则可命中。
 			if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(
@@ -996,8 +992,13 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					errMsg = defaultMsg
 				}
 				defaultStatus, defaultErrType, defaultMsg = status, errType, errMsg
+				if status >= http.StatusBadRequest {
+					failureStatus = status
+				}
 				MarkResponseCommitted(c)
 			}
+			// The HTTP status may already be 200; retain the terminal failure for Ops.
+			MarkOpsStreamFailure(c, defaultErrType, openAIStreamFailedEventErrorCode(payloadBytes), defaultMsg, failureStatus)
 			errorPayload, _ := json.Marshal(gin.H{
 				"error": gin.H{
 					"type":    defaultErrType,
@@ -1023,6 +1024,27 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 
 		chunks := apicompat.ResponsesEventToChatChunks(&event, state)
+		if firstTokenMs == nil {
+			for _, chunk := range chunks {
+				if openAIChatChunkHasOutput(chunk) {
+					ms := int(time.Since(startTime).Milliseconds())
+					firstTokenMs = &ms
+					break
+				}
+			}
+		}
+		if err := state.Err(); err != nil {
+			if streamNonFailoverErr == nil {
+				if !clientDisconnected {
+					streamNonFailoverErr = writeAPICompatConversionError(c, err, false)
+					clientOutputStarted = true
+				} else {
+					streamNonFailoverErr = fmt.Errorf("upstream protocol conversion failed: %w", err)
+				}
+			}
+			return isTerminalEvent
+		}
+
 		if !clientDisconnected {
 			for _, chunk := range chunks {
 				refusalDetector.ObserveChatChunk(chunk)
@@ -1034,7 +1056,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					)
 					continue
 				}
-				if !clientOutputStarted && !refusalDetector.ShouldReleaseClientOutput() {
+				if !clientOutputStarted && ((!isTerminalEvent && !openAIChatChunkHasOutput(chunk)) || !refusalDetector.ShouldReleaseClientOutput()) {
 					pendingSSE = append(pendingSSE, sse)
 					continue
 				}
@@ -1080,7 +1102,14 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		if streamNonFailoverErr != nil {
 			return resultWithUsage(), streamNonFailoverErr
 		}
-		if finalChunks := apicompat.FinalizeResponsesChatStream(state); len(finalChunks) > 0 && !clientDisconnected {
+		finalChunks := apicompat.FinalizeResponsesChatStream(state)
+		if err := state.Err(); err != nil {
+			if !clientDisconnected {
+				return resultWithUsage(), writeAPICompatConversionError(c, err, false)
+			}
+			return resultWithUsage(), fmt.Errorf("upstream protocol conversion failed: %w", err)
+		}
+		if len(finalChunks) > 0 && !clientDisconnected {
 			for _, chunk := range finalChunks {
 				refusalDetector.ObserveChatChunk(chunk)
 				sse, err := apicompat.ChatChunkToSSE(chunk)
@@ -1163,6 +1192,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 	}
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
+		if streamNonFailoverErr != nil {
+			return resultWithUsage(), streamNonFailoverErr
+		}
 		return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
 	processFrame := func(frame openAICompatSSEFrame) bool {
@@ -1309,7 +1341,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			if clientDisconnected {
 				continue
 			}
-			if refusalDetector.Enabled() && !clientOutputStarted {
+			if !clientOutputStarted {
 				continue
 			}
 			if time.Since(lastDataAt) < keepaliveInterval {

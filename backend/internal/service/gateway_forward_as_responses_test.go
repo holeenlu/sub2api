@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/tidwall/gjson"
 	"io"
@@ -141,7 +142,7 @@ func namespaceToolAnthropicStream() string {
 		`event: message_stop`,
 		`data: {"type":"message_stop"}`,
 		``,
-	}, "\n")
+	}, "\n") + "\n"
 }
 
 func namespaceToolMapping() apicompat.ResponsesClientToolMapping {
@@ -151,12 +152,13 @@ func namespaceToolMapping() apicompat.ResponsesClientToolMapping {
 }
 
 func TestHandleResponsesBufferedStreamingResponse_RestoresNamespaceTool(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	resp := &http.Response{Body: io.NopCloser(strings.NewReader(namespaceToolAnthropicStream()))}
+	c.Set(toolNameRewriteKey, &ToolNameRewrite{Reverse: map[string]string{"mapped_namespace": "codex_app__read_thread"}})
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.ReplaceAll(namespaceToolAnthropicStream(), "codex_app__read_thread", "mapped_namespace")))}
 
 	svc := &GatewayService{}
 	_, err := svc.handleResponsesBufferedStreamingResponse(resp, c, "claude-fable-5", "claude-fable-5", nil, time.Now(), namespaceToolMapping())
@@ -168,12 +170,12 @@ func TestHandleResponsesBufferedStreamingResponse_RestoresNamespaceTool(t *testi
 }
 
 func TestHandleResponsesBufferedStreamingResponse_ToolArgumentsAreValidJSON(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	resp := &http.Response{Body: io.NopCloser(strings.NewReader(toolAnthropicSSEStream()))}
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(toolAnthropicSSEStream() + "\n"))}
 
 	_, err := (&GatewayService{}).handleResponsesBufferedStreamingResponse(resp, c, "claude-fable-5", "claude-fable-5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.NoError(t, err)
@@ -199,12 +201,13 @@ func TestAppendRawJSON_EmptyObjectPlaceholder(t *testing.T) {
 }
 
 func TestHandleResponsesStreamingResponse_RestoresNamespaceTool(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	resp := &http.Response{Body: io.NopCloser(strings.NewReader(namespaceToolAnthropicStream()))}
+	c.Set(toolNameRewriteKey, &ToolNameRewrite{Reverse: map[string]string{"mapped_namespace": "codex_app__read_thread"}})
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.ReplaceAll(namespaceToolAnthropicStream(), "codex_app__read_thread", "mapped_namespace")))}
 
 	svc := &GatewayService{}
 	_, err := svc.handleResponsesStreamingResponse(resp, c, "claude-fable-5", "claude-fable-5", nil, time.Now(), namespaceToolMapping())
@@ -242,8 +245,8 @@ func TestExtractResponsesReasoningEffortFromBody(t *testing.T) {
 }
 
 func TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsage(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -260,7 +263,10 @@ func TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsag
 			`event: message_delta`,
 			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`,
 			``,
-		}, "\n"))),
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
+			``,
+		}, "\n") + "\n")),
 	}
 
 	svc := &GatewayService{}
@@ -275,8 +281,8 @@ func TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsag
 }
 
 func TestHandleResponsesStreamingResponse_PreservesMessageStartCacheUsage(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -296,7 +302,7 @@ func TestHandleResponsesStreamingResponse_PreservesMessageStartCacheUsage(t *tes
 			`event: message_stop`,
 			`data: {"type":"message_stop"}`,
 			``,
-		}, "\n"))),
+		}, "\n") + "\n")),
 	}
 
 	svc := &GatewayService{}
@@ -367,11 +373,26 @@ func TestHandleResponsesStreamingResponse_NormalizesTerminalUsage(t *testing.T) 
 			wantOutput:        30,
 			wantCacheCreation: 800,
 		},
+		{
+			name:       "cache-only read with zero output",
+			startUsage: `"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":100`,
+			deltaUsage: `"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":200`,
+			wantCached: 200,
+		},
+		{
+			name:              "cache-only write with zero output",
+			startUsage:        `"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":100`,
+			deltaUsage:        `"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":200`,
+			wantCacheCreation: 200,
+		},
 	}
 
 	for _, tt := range tests {
-		for _, terminal := range []string{"message_stop", "eof"} {
-			t.Run(tt.name+"/"+terminal, func(t *testing.T) {
+		for _, variant := range []struct {
+			terminal string
+			stream   bool
+		}{{"message_stop", true}, {"eof", true}, {"message_stop", false}, {"eof", false}} {
+			t.Run(fmt.Sprintf("%s/%s/stream=%t", tt.name, variant.terminal, variant.stream), func(t *testing.T) {
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				lines := []string{
@@ -382,17 +403,33 @@ func TestHandleResponsesStreamingResponse_NormalizesTerminalUsage(t *testing.T) 
 					`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{` + tt.deltaUsage + `}}`,
 					``,
 				}
-				if terminal == "message_stop" {
+				if variant.terminal == "message_stop" {
 					lines = append(lines, `event: message_stop`, `data: {"type":"message_stop"}`, ``)
 				}
-				resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join(lines, "\n")))}
+				resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join(lines, "\n") + "\n"))}
 
-				result, err := (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "k3", "k3", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
-				require.NoError(t, err)
+				var result *ForwardResult
+				var err error
+				if variant.stream {
+					result, err = (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "k3", "k3", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+				} else {
+					result, err = (&GatewayService{}).handleResponsesBufferedStreamingResponse(resp, c, "k3", "k3", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+				}
+				if variant.terminal == "eof" {
+					require.Error(t, err)
+					require.NotContains(t, rec.Body.String(), "response.completed")
+				} else {
+					require.NoError(t, err)
+				}
 				require.Equal(t, tt.wantInput, result.Usage.InputTokens)
 				require.Equal(t, tt.wantCached, result.Usage.CacheReadInputTokens)
 				require.Equal(t, tt.wantCacheCreation, result.Usage.CacheCreationInputTokens)
 
+				require.Equal(t, tt.wantOutput, result.Usage.OutputTokens)
+				if variant.terminal == "eof" && !variant.stream {
+					require.Equal(t, http.StatusBadGateway, rec.Code)
+					return
+				}
 				var completed apicompat.ResponsesStreamEvent
 				for _, line := range strings.Split(rec.Body.String(), "\n") {
 					if !strings.HasPrefix(line, "data: ") {
@@ -400,9 +437,14 @@ func TestHandleResponsesStreamingResponse_NormalizesTerminalUsage(t *testing.T) 
 					}
 					var event apicompat.ResponsesStreamEvent
 					require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event))
-					if event.Type == "response.completed" {
+					if event.Type == "response.completed" || event.Type == "response.failed" {
 						completed = event
 					}
+				}
+				if !variant.stream {
+					var response apicompat.ResponsesResponse
+					require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+					completed.Response = &response
 				}
 				require.NotNil(t, completed.Response)
 				require.NotNil(t, completed.Response.Usage)
@@ -420,86 +462,9 @@ func TestHandleResponsesStreamingResponse_NormalizesTerminalUsage(t *testing.T) 
 	}
 }
 
-func TestParseAnthropicSSEField(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		line      string
-		field     string
-		wantValue string
-		wantOK    bool
-	}{
-		{
-			name:      "standard format with space",
-			line:      "event: message_start",
-			field:     "event",
-			wantValue: "message_start",
-			wantOK:    true,
-		},
-		{
-			name:      "compact format without space",
-			line:      "event:message_start",
-			field:     "event",
-			wantValue: "message_start",
-			wantOK:    true,
-		},
-		{
-			name:      "data field with space",
-			line:      "data: {\"type\":\"message_start\"}",
-			field:     "data",
-			wantValue: "{\"type\":\"message_start\"}",
-			wantOK:    true,
-		},
-		{
-			name:      "data field without space",
-			line:      "data:{\"type\":\"message_start\"}",
-			field:     "data",
-			wantValue: "{\"type\":\"message_start\"}",
-			wantOK:    true,
-		},
-		{
-			name:      "field with multiple spaces after colon",
-			line:      "event:  message_delta",
-			field:     "event",
-			wantValue: "message_delta",
-			wantOK:    true,
-		},
-		{
-			name:      "wrong field name",
-			line:      "event: message_start",
-			field:     "data",
-			wantValue: "",
-			wantOK:    false,
-		},
-		{
-			name:      "empty line",
-			line:      "",
-			field:     "event",
-			wantValue: "",
-			wantOK:    false,
-		},
-		{
-			name:      "line without colon",
-			line:      "invalid line",
-			field:     "event",
-			wantValue: "",
-			wantOK:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotValue, gotOK := parseAnthropicSSEField(tt.line, tt.field)
-			require.Equal(t, tt.wantOK, gotOK, "parseAnthropicSSEField() ok")
-			require.Equal(t, tt.wantValue, gotValue, "parseAnthropicSSEField() value")
-		})
-	}
-}
-
 func TestHandleResponsesBufferedStreamingResponse_CompactSSEFormat(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -517,7 +482,10 @@ func TestHandleResponsesBufferedStreamingResponse_CompactSSEFormat(t *testing.T)
 			`event:message_delta`,
 			`data:{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
 			``,
-		}, "\n"))),
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
+			``,
+		}, "\n") + "\n")),
 	}
 
 	svc := &GatewayService{}
@@ -529,8 +497,8 @@ func TestHandleResponsesBufferedStreamingResponse_CompactSSEFormat(t *testing.T)
 }
 
 func TestHandleResponsesStreamingResponse_CompactSSEFormat(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -551,7 +519,7 @@ func TestHandleResponsesStreamingResponse_CompactSSEFormat(t *testing.T) {
 			`event:message_stop`,
 			`data:{"type":"message_stop"}`,
 			``,
-		}, "\n"))),
+		}, "\n") + "\n")),
 	}
 
 	svc := &GatewayService{}

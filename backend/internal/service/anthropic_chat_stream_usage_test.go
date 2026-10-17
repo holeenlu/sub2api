@@ -61,7 +61,11 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 						if adapter == "native" {
 							svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
 							result, err := svc.forwardChatCompletionsViaNativeAnthropic(context.Background(), c, nativeAnthropicTestAccount(), body, "")
-							require.NoError(t, err)
+							if terminal == "eof" {
+								require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+							} else {
+								require.NoError(t, err)
+							}
 							require.Equal(t, tc.totalInput, result.Usage.InputTokens)
 							require.Equal(t, tc.output, result.Usage.OutputTokens)
 							require.Equal(t, tc.cached, result.Usage.CacheReadInputTokens)
@@ -81,7 +85,7 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 							require.Equal(t, tc.cached, result.Usage.CacheReadInputTokens)
 							require.Equal(t, tc.created, result.Usage.CacheCreationInputTokens)
 						}
-						if adapter == "anthropic" && terminal == "eof" {
+						if terminal == "eof" {
 							// Partial authoritative usage is retained above, but missing
 							// message_stop cannot become a successful terminal chunk.
 							require.Contains(t, rec.Body.String(), "upstream_missing_terminal")

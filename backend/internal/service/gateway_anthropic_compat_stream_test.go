@@ -23,6 +23,10 @@ import (
 
 var anthropicCompatRoutes = []string{"chat_json", "chat_sse", "responses_json", "responses_sse"}
 
+// Both gateway families must share the same return-path contracts.
+var anthropicCompatReturnRoutes = append(append([]string(nil), anthropicCompatRoutes...),
+	"native_chat_json", "native_chat_sse", "native_responses_json", "native_responses_sse")
+
 func anthropicCompatFixture() string {
 	return "data: " + strings.Join([]string{
 		`{"type":"message_start","message":{"id":"msg_compat","role":"assistant","content":[],"usage":{"input_tokens":10,"cache_read_input_tokens":3,"cache_creation_input_tokens":2}}}`,
@@ -39,6 +43,29 @@ func anthropicCompatFixture() string {
 const anthropicCompatStop = "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 
 func runAnthropicCompatRoute(svc *GatewayService, route string, c *gin.Context, resp *http.Response) (*ForwardResult, error) {
+	if strings.HasPrefix(route, "native_") {
+		native := &OpenAIGatewayService{cfg: svc.cfg, responseHeaderFilter: svc.responseHeaderFilter}
+		var result *OpenAIForwardResult
+		var err error
+		switch strings.TrimPrefix(route, "native_") {
+		case "chat_json":
+			result, err = native.handleCCBufferedFromNativeAnthropic(resp, c, "client-model", "billing-model", "claude-sonnet-4-6", nil, time.Now())
+		case "chat_sse":
+			result, err = native.handleCCStreamingFromNativeAnthropic(resp, c, "client-model", "billing-model", "claude-sonnet-4-6", nil, time.Now())
+		case "responses_json":
+			result, err = native.handleResponsesBufferedFromNativeAnthropic(resp, c, "client-model", "billing-model", "claude-sonnet-4-6", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+		default:
+			result, err = native.handleResponsesStreamingFromNativeAnthropic(resp, c, "client-model", "billing-model", "claude-sonnet-4-6", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+		}
+		if result == nil {
+			return nil, err
+		}
+		return &ForwardResult{Model: result.Model, UpstreamModel: result.UpstreamModel, ClientDisconnect: result.ClientDisconnect, FirstTokenMs: result.FirstTokenMs,
+			Usage: ClaudeUsage{InputTokens: result.Usage.InputTokens - result.Usage.CacheReadInputTokens - result.Usage.CacheCreationInputTokens,
+				OutputTokens: result.Usage.OutputTokens, CacheReadInputTokens: result.Usage.CacheReadInputTokens,
+				CacheCreationInputTokens: result.Usage.CacheCreationInputTokens, CacheCreation5mTokens: result.Usage.CacheCreation5mTokens, CacheCreation1hTokens: result.Usage.CacheCreation1hTokens}}, err
+	}
+
 	switch route {
 	case "chat_json":
 		return svc.handleCCBufferedFromAnthropic(resp, c, "client-model", "claude-sonnet-4-6", nil, time.Now())
@@ -67,7 +94,7 @@ func anthropicCompatPayloads(body, route string) []gjson.Result {
 // Promotes the prior overlay's four return-path assertions, including the
 // untouched argument, ID and text contract and full SSE field framing.
 func TestAnthropicCompatToolNamesAndEventFraming(t *testing.T) {
-	for _, route := range anthropicCompatRoutes {
+	for _, route := range anthropicCompatReturnRoutes {
 		for _, mapped := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/mapped=%t", route, mapped), func(t *testing.T) {
 				rec := httptest.NewRecorder()
@@ -148,7 +175,7 @@ func TestAnthropicCompatToolNamesAndEventFraming(t *testing.T) {
 }
 
 func TestAnthropicCompatStrictTerminalAndPartialUsage(t *testing.T) {
-	for _, route := range anthropicCompatRoutes {
+	for _, route := range anthropicCompatReturnRoutes {
 		for _, kind := range []string{"eof", "message_start_only", "partial_output", "truncated_stop", "read_error", "stream_error", "line_limit", "event_limit", "normal"} {
 			t.Run(route+"/"+kind, func(t *testing.T) {
 				fixture := anthropicCompatFixture()
@@ -206,7 +233,7 @@ func TestAnthropicCompatStrictTerminalAndPartialUsage(t *testing.T) {
 				if strings.HasSuffix(route, "json") {
 					require.Equal(t, http.StatusBadGateway, rec.Code)
 				}
-				if route == "responses_sse" {
+				if strings.HasSuffix(route, "responses_sse") {
 					payloads := anthropicCompatPayloads(rec.Body.String(), route)
 					failed := payloads[len(payloads)-1]
 					require.Equal(t, "response.failed", failed.Get("type").String())
@@ -219,8 +246,8 @@ func TestAnthropicCompatStrictTerminalAndPartialUsage(t *testing.T) {
 }
 
 func TestAnthropicCompatTerminalBeforeEOFAndCancellationDrain(t *testing.T) {
-	for _, route := range anthropicCompatRoutes {
-		for _, mode := range []string{"terminal", "canceled_terminal", "canceled_timeout"} {
+	for _, route := range anthropicCompatReturnRoutes {
+		for _, mode := range []string{"terminal", "canceled_terminal", "canceled_timeout", "canceled_ping_timeout"} {
 			t.Run(route+"/"+mode, func(t *testing.T) {
 				t.Parallel()
 				rec := httptest.NewRecorder()
@@ -244,14 +271,25 @@ func TestAnthropicCompatTerminalBeforeEOFAndCancellationDrain(t *testing.T) {
 					finished <- outcome{result, err}
 				}()
 				fixture := anthropicCompatFixture()
-				if mode != "canceled_timeout" {
+				if !strings.HasSuffix(mode, "timeout") {
 					fixture += anthropicCompatStop
 				}
 				_, err := io.WriteString(writer, fixture)
 				require.NoError(t, err)
+				if mode == "canceled_ping_timeout" {
+					go func() {
+						ticker := time.NewTicker(5 * time.Millisecond)
+						defer ticker.Stop()
+						for range ticker.C {
+							if _, err := io.WriteString(writer, "event: ping\ndata: {\"type\":\"ping\"}\n\n"); err != nil {
+								return
+							}
+						}
+					}()
+				}
 				select {
 				case got := <-finished:
-					if mode == "canceled_timeout" {
+					if strings.HasSuffix(mode, "timeout") {
 						require.ErrorIs(t, got.err, context.DeadlineExceeded)
 					} else {
 						require.NoError(t, got.err)
@@ -336,7 +374,7 @@ func TestAnthropicCompatForwardFeedbackAndAttemptMapping(t *testing.T) {
 }
 
 func TestAnthropicCompatWriteFailureDrainsWithoutMoreWrites(t *testing.T) {
-	for _, route := range []string{"chat_sse", "responses_sse"} {
+	for _, route := range []string{"chat_sse", "responses_sse", "native_chat_sse", "native_responses_sse"} {
 		t.Run(route, func(t *testing.T) {
 			writer := &ccPingResponseWriter{ResponseRecorder: httptest.NewRecorder(), failPing: true}
 			c, _ := gin.CreateTestContext(writer)

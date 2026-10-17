@@ -1556,7 +1556,7 @@ func (s *GatewayService) getOAuthToken(ctx context.Context, account *Account) (s
 
 // DoGrokNativeResponsesJSON POSTs a non-streaming Responses body to the account's
 // Grok upstream and returns the raw JSON body. Used by /v1/web_search.
-// Gin-free: UA is always the pinned Grok CLI identity (resolveGrokUpstreamUserAgent ignores inbound).
+// Gin-free: UA is always the pinned Grok CLI identity, independent of inbound headers.
 func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account *Account, body []byte) ([]byte, error) {
 	if s == nil || s.httpUpstream == nil {
 		return nil, errors.New("http upstream not configured")
