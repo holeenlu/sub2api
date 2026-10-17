@@ -23,16 +23,16 @@ export function buildDocsExamples(kind: NonNullable<import('./types').DocsNavIte
           : undefined
   const shellQuote = (value: string) => "'" + value.replace(/'/g, "'\"'\"'") + "'"
   const curlArgs = [`curl --fail-with-body --max-time 300 ${isGet ? '' : '-X POST '}${shellQuote(endpoint)}`,
-    `  -H "${anthropic ? 'x-api-key: $KDAN_API_KEY' : 'Authorization: Bearer $KDAN_API_KEY'}"`]
+    `  -H "${anthropic ? 'x-api-key: $API_KEY' : 'Authorization: Bearer $API_KEY'}"`]
   if (anthropic) curlArgs.push("  -H 'anthropic-version: 2023-06-01'")
   if (body) curlArgs.push("  -H 'Content-Type: application/json'", `  -d ${shellQuote(JSON.stringify(body))}`)
   const curlCode = curlArgs.join(' \\\n')
   const pythonHeaders = anthropic
-    ? `{\n        "x-api-key": os.environ["KDAN_API_KEY"],\n        "anthropic-version": "2023-06-01",\n    }`
-    : `{"Authorization": f"Bearer {os.environ['KDAN_API_KEY']}"}`
+    ? `{\n        "x-api-key": os.environ["API_KEY"],\n        "anthropic-version": "2023-06-01",\n    }`
+    : `{"Authorization": f"Bearer {os.environ['API_KEY']}"}`
   return [
     { id: 'curl', label: 'cURL', language: 'bash', code: curlCode },
     { id: 'python', label: 'Python', language: 'python', code: `import os\nimport requests\n\nresponse = requests.${isGet ? 'get' : 'post'}(\n    ${JSON.stringify(endpoint)},\n    headers=${pythonHeaders},${body ? `\n    json=${JSON.stringify(body, null, 4).replace(/\n/g, '\n    ')},` : ''}\n    timeout=300,\n)\nresponse.raise_for_status()\nprint(response.json())` },
-    { id: 'node', label: 'Node.js', language: 'javascript', code: `const response = await fetch(${JSON.stringify(endpoint)}, {\n  method: '${isGet ? 'GET' : 'POST'}',\n  headers: {\n    '${anthropic ? 'x-api-key' : 'Authorization'}': ${anthropic ? 'process.env.KDAN_API_KEY' : '`Bearer ${process.env.KDAN_API_KEY}`'},${anthropic ? "\n    'anthropic-version': '2023-06-01'," : ''}${body ? "\n    'Content-Type': 'application/json'," : ''}\n  },${body ? `\n  body: JSON.stringify(${JSON.stringify(body, null, 2).replace(/\n/g, '\n  ')})` : ''}\n})\nif (!response.ok) throw new Error(await response.text())\nconsole.log(await response.json())` }
+    { id: 'node', label: 'Node.js', language: 'javascript', code: `const response = await fetch(${JSON.stringify(endpoint)}, {\n  method: '${isGet ? 'GET' : 'POST'}',\n  headers: {\n    '${anthropic ? 'x-api-key' : 'Authorization'}': ${anthropic ? 'process.env.API_KEY' : '`Bearer ${process.env.API_KEY}`'},${anthropic ? "\n    'anthropic-version': '2023-06-01'," : ''}${body ? "\n    'Content-Type': 'application/json'," : ''}\n  },${body ? `\n  body: JSON.stringify(${JSON.stringify(body, null, 2).replace(/\n/g, '\n  ')})` : ''}\n})\nif (!response.ok) throw new Error(await response.text())\nconsole.log(await response.json())` }
   ]
 }

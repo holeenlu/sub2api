@@ -162,7 +162,7 @@ export default {
       welcome: {
         title: '👋 歡迎使用 @:common.siteName',
         description:
-          '<div style="line-height: 1.8;"><p style="margin-bottom: 16px;">@:common.siteName 是一個強大的 AI 服務中轉平台，讓您輕鬆管理和分發 AI 服務。</p><p style="margin-bottom: 12px;"><b>🎯 核心功能：</b></p><ul style="margin-left: 20px; margin-bottom: 16px;"><li>📦 <b>分組管理</b> - 建立不同的服務方案（VIP、免費試用等）</li><li>🔗 <b>帳號池</b> - 連線多個上游 AI 服務商帳號</li><li>🔑 <b>金鑰分發</b> - 為使用者生成獨立的 API Key</li><li>💰 <b>計費管理</b> - 靈活的費率和配額控制</li></ul><p style="color: #10b981; font-weight: 600;">接下來，我們將用 3 分鐘帶您完成首次設定 →</p></div>',
+          '<div style="line-height: 1.8;"><p style="margin-bottom: 16px;">@:{\'common.siteName\'}，讓開發者透過一個 API 使用不同 AI 模型。管理後台協助您輕鬆管理和分發 AI 服務。</p><p style="margin-bottom: 12px;"><b>🎯 核心功能：</b></p><ul style="margin-left: 20px; margin-bottom: 16px;"><li>📦 <b>分組管理</b> - 建立不同的服務方案（VIP、免費試用等）</li><li>🔗 <b>帳號池</b> - 連線多個上游 AI 服務商帳號</li><li>🔑 <b>金鑰分發</b> - 為使用者生成獨立的 API Key</li><li>💰 <b>計費管理</b> - 靈活的費率和配額控制</li></ul><p style="color: #10b981; font-weight: 600;">接下來，我們將用 3 分鐘帶您完成首次設定 →</p></div>',
         nextBtn: '開始設定 🚀',
         prevBtn: '跳過'
       },
@@ -283,7 +283,7 @@ export default {
       welcome: {
         title: '👋 歡迎使用 @:common.siteName',
         description:
-          '<div style="line-height: 1.8;"><p style="margin-bottom: 16px;">您好！歡迎來到 @:common.siteName AI 服務平台。</p><p style="margin-bottom: 12px;"><b>🎯 快速開始：</b></p><ul style="margin-left: 20px; margin-bottom: 16px;"><li>🔑 建立 API 金鑰</li><li>📋 複製金鑰到您的應用程式</li><li>🚀 開始使用 AI 服務</li></ul><p style="color: #10b981; font-weight: 600;">只需 1 分鐘，讓我們開始吧 →</p></div>',
+          '<div style="line-height: 1.8;"><p style="margin-bottom: 16px;">您好！歡迎來到 @:{\'common.siteName\'}。@:{\'common.siteName\'}，讓開發者透過一個 API 使用不同 AI 模型。</p><p style="margin-bottom: 12px;"><b>🎯 快速開始：</b></p><ul style="margin-left: 20px; margin-bottom: 16px;"><li>🔑 建立 API 金鑰</li><li>📋 複製金鑰到您的應用程式</li><li>🚀 開始使用 AI 服務</li></ul><p style="color: #10b981; font-weight: 600;">只需 1 分鐘，讓我們開始吧 →</p></div>',
         nextBtn: '開始 🚀',
         prevBtn: '跳過'
       },
