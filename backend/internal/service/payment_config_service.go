@@ -173,33 +173,33 @@ type UpdateProviderInstanceRequest struct {
 	AllowUserRefund *bool             `json:"allow_user_refund"`
 }
 type CreatePlanRequest struct {
-	GroupID       int64    `json:"group_id"`
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	Price         float64  `json:"price"`
-	OriginalPrice *float64 `json:"original_price"`
-	Currency      string   `json:"currency"`
-	ValidityDays  int      `json:"validity_days"`
-	ValidityUnit  string   `json:"validity_unit"`
-	Features      string   `json:"features"`
-	ProductName   string   `json:"product_name"`
-	ForSale       bool     `json:"for_sale"`
-	SortOrder     int      `json:"sort_order"`
+	GroupID       int64    `json:"group_id" authz:"billing.rates.update"`
+	Name          string   `json:"name" authz:"base"`
+	Description   string   `json:"description" authz:"base"`
+	Price         float64  `json:"price" authz:"billing.rates.update"`
+	OriginalPrice *float64 `json:"original_price" authz:"billing.rates.update"`
+	Currency      string   `json:"currency" authz:"billing.rates.update"`
+	ValidityDays  int      `json:"validity_days" authz:"billing.rates.update"`
+	ValidityUnit  string   `json:"validity_unit" authz:"billing.rates.update"`
+	Features      string   `json:"features" authz:"base"`
+	ProductName   string   `json:"product_name" authz:"base"`
+	ForSale       bool     `json:"for_sale" authz:"base"`
+	SortOrder     int      `json:"sort_order" authz:"base"`
 }
 
 type UpdatePlanRequest struct {
-	GroupID       *int64   `json:"group_id"`
-	Name          *string  `json:"name"`
-	Description   *string  `json:"description"`
-	Price         *float64 `json:"price"`
-	OriginalPrice *float64 `json:"original_price"`
-	Currency      *string  `json:"currency"`
-	ValidityDays  *int     `json:"validity_days"`
-	ValidityUnit  *string  `json:"validity_unit"`
-	Features      *string  `json:"features"`
-	ProductName   *string  `json:"product_name"`
-	ForSale       *bool    `json:"for_sale"`
-	SortOrder     *int     `json:"sort_order"`
+	GroupID       *int64   `json:"group_id" authz:"billing.rates.update"`
+	Name          *string  `json:"name" authz:"base"`
+	Description   *string  `json:"description" authz:"base"`
+	Price         *float64 `json:"price" authz:"billing.rates.update"`
+	OriginalPrice *float64 `json:"original_price" authz:"billing.rates.update"`
+	Currency      *string  `json:"currency" authz:"billing.rates.update"`
+	ValidityDays  *int     `json:"validity_days" authz:"billing.rates.update"`
+	ValidityUnit  *string  `json:"validity_unit" authz:"billing.rates.update"`
+	Features      *string  `json:"features" authz:"base"`
+	ProductName   *string  `json:"product_name" authz:"base"`
+	ForSale       *bool    `json:"for_sale" authz:"base"`
+	SortOrder     *int     `json:"sort_order" authz:"base"`
 }
 
 // PaymentConfigService manages payment configuration and CRUD for

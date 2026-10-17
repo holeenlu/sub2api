@@ -257,3 +257,6 @@ describe('admin subscription users', () => {
     expect(link.props('to')).toEqual({ path: '/admin/usage', query: { user_id: 42 } })
   })
 })
+
+// These legacy functional cases exercise the migrated full administrator.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))

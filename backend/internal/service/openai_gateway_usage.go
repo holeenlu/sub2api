@@ -236,6 +236,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		result.UpstreamModel,
 		result.Model,
 	)
+	pricingCandidates := append([]string(nil), billingModels...)
 	billingModels = s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, billingModels)
 	serviceTier := ""
 	if result.ServiceTier != nil {
@@ -259,9 +260,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		pricingAt,
 	)
 	if err != nil {
-		if !isUsagePricingUnavailableError(err) {
-			return err
-		}
 		logger.L().With(
 			zap.String("component", "service.openai_gateway"),
 			zap.Strings("billing_models", billingModels),
@@ -270,8 +268,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			zap.String("upstream_model", result.UpstreamModel),
 			zap.Int64("api_key_id", apiKey.ID),
 			zap.Int64("account_id", account.ID),
-		).Warn("openai_usage.pricing_missing_record_zero_cost", zap.Error(err))
-		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
+		).Warn("openai_usage.pricing_pending", zap.Error(err))
+		cost = &CostBreakdown{BillingMode: string(BillingModeToken), PricingError: err.Error()}
 	}
 	// response_model：按上游成功响应自报的模型计费（渠道显式开启才生效）。
 	// 采纳条件见 responseModelBillingDeclaration + hasIdentifiedOpenAIResponsePricing
@@ -323,8 +321,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			modelLongContextExempt,
 			pricingAt,
 		)
-		if standardErr != nil && !isUsagePricingUnavailableError(standardErr) {
-			return standardErr
+		if standardErr != nil {
+			cost.PricingError = standardErr.Error()
 		}
 		// Missing pricing already fell back to a zero-cost log above; keep that
 		// usage row instead of dropping it on the Standard re-evaluation.
@@ -333,6 +331,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 	}
 
+	if cost.PricingError != "" {
+		cost.PricingRequest = openAIPricingRequest(result, apiKey, pricingCandidates, tokens, multiplier, imageMultiplier, videoMultiplier, baseMultiplier, serviceTier, longContextBillingGate, modelLongContextExempt, groupBillsOpenAIFastAtStandard(apiKey, billingAccount, serviceTier), pricingAt)
+	}
+	if cost.PricingRequest != nil && apiKey.Group != nil {
+		cost.PricingRequest.GroupLongContextEnabled = apiKey.Group.LongContextPricingEnabled
+	}
+	if cost.PricingRequest != nil {
+		cost.PricingRequest.AccountPlatform = account.Platform
+	}
 	// Determine billing type
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 	billingType := BillingTypeBalance
@@ -344,7 +351,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	durationMs := int(result.Duration.Milliseconds())
 	accountRateMultiplier := account.BillingRateMultiplier()
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
-	if result.OpenAIWSMode {
+	// One HTTP BPS request can settle compaction before a safe account failover.
+	// As with separate WS turns, distinct metered attempts need distinct billing
+	// identities; the connection/client correlation ID must not deduplicate them.
+	if result.OpenAIWSMode || result.UpstreamEndpoint == "/basispoints/api/responses" {
 		if upstreamRequestID := strings.TrimSpace(result.RequestID); upstreamRequestID != "" {
 			requestID = upstreamRequestID
 		}
@@ -514,6 +524,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+		UsageLogs:    splitOpenAIUsageAuthorization(usageLog, result, account),
+		BillingModel: billingModel, PricingAt: pricingAt,
 		Cost:                       cost,
 		User:                       user,
 		APIKey:                     apiKey,
@@ -528,6 +540,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {
+		if cost.PricingError != "" {
+			usageLog.BillingStatus = "pending_pricing"
+		} else {
+			usageLog.BillingStatus = "pending"
+		}
 		usageLog.ActualCost = 0
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		return billingErr
@@ -722,17 +739,6 @@ func isGrokVideoUsageResult(result *OpenAIForwardResult, billingModels []string)
 		}
 	}
 	return true
-}
-
-func isUsagePricingUnavailableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrModelPricingUnavailable) {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "no pricing available") || strings.Contains(msg, "pricing not found")
 }
 
 func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
