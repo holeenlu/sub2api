@@ -134,9 +134,10 @@ const claudeCodeClientVersionDBTimeout = 5 * time.Second
 // claudeCodeClientVersionSFKey singleflight 键。
 const claudeCodeClientVersionSFKey = "claude_code_client_version"
 
-type cachedOpenAIQuotaAutoPauseSettings struct {
-	settings  OpsOpenAIAccountQuotaAutoPauseSettings
-	expiresAt int64
+type cachedSchedulingQuotaSettings struct {
+	protection SchedulingQuotaProtection
+	settings   OpsOpenAIAccountQuotaAutoPauseSettings
+	expiresAt  int64
 }
 
 const openAICodexUserAgentCacheTTL = 60 * time.Second
@@ -166,7 +167,7 @@ const cyberSessionBlockRuntimeCacheTTL = 60 * time.Second
 const cyberSessionBlockRuntimeErrorTTL = 5 * time.Second
 const cyberSessionBlockRuntimeDBTimeout = 5 * time.Second
 
-const openAIQuotaAutoPauseSettingsCacheTTL = 60 * time.Second
+const schedulingQuotaSettingsCacheTTL = 60 * time.Second
 const openAIQuotaAutoPauseSettingsErrorTTL = 5 * time.Second
 const openAIQuotaAutoPauseSettingsDBTimeout = 5 * time.Second
 
@@ -1088,25 +1089,31 @@ func (s *SettingService) GetClaudeCodeVersionBounds(ctx context.Context) (min, m
 // Callers that need the freshly persisted value synchronously (tests, post-update
 // confirmation, optional startup warm-up) should call WarmOpenAIQuotaAutoPauseSettings.
 func (s *SettingService) GetOpenAIQuotaAutoPauseSettings(ctx context.Context) OpsOpenAIAccountQuotaAutoPauseSettings {
+	return s.getSchedulingQuotaSettings(ctx).settings
+}
+func (s *SettingService) GetSchedulingQuotaProtection(ctx context.Context) SchedulingQuotaProtection {
+	return s.getSchedulingQuotaSettings(ctx).protection
+}
+func (s *SettingService) getSchedulingQuotaSettings(ctx context.Context) cachedSchedulingQuotaSettings {
 	if s == nil {
-		return OpsOpenAIAccountQuotaAutoPauseSettings{}
+		return cachedSchedulingQuotaSettings{protection: defaultSchedulingQuotaProtection()}
 	}
-	cached, _ := s.openAIQuotaAutoPauseSettingsCache.Load().(*cachedOpenAIQuotaAutoPauseSettings)
+	cached, _ := s.schedulingQuotaSettingsCache.Load().(*cachedSchedulingQuotaSettings)
 	now := time.Now().UnixNano()
 	if cached != nil && now < cached.expiresAt {
-		return cached.settings
+		return *cached
 	}
 	// Stale or unset: trigger background refresh without blocking this request.
 	// singleflight.DoChan dedupes concurrent refreshes; we deliberately ignore the
 	// returned channel — the result is observable via the atomic cache.
-	s.openAIQuotaAutoPauseSettingsSF.DoChan(openAIQuotaAutoPauseSettingsRefreshKey, func() (any, error) {
-		s.refreshOpenAIQuotaAutoPauseSettings(context.Background())
+	s.schedulingQuotaSettingsSF.DoChan(openAIQuotaAutoPauseSettingsRefreshKey, func() (any, error) {
+		s.refreshSchedulingQuotaSettings(context.Background())
 		return nil, nil
 	})
 	if cached != nil {
-		return cached.settings // serve stale value while revalidating
+		return *cached // serve stale value while revalidating
 	}
-	return OpsOpenAIAccountQuotaAutoPauseSettings{}
+	return cachedSchedulingQuotaSettings{protection: defaultSchedulingQuotaProtection()}
 }
 
 // WarmOpenAIQuotaAutoPauseSettings synchronously loads the quota auto-pause settings
@@ -1117,60 +1124,58 @@ func (s *SettingService) WarmOpenAIQuotaAutoPauseSettings(ctx context.Context) O
 	if s == nil {
 		return OpsOpenAIAccountQuotaAutoPauseSettings{}
 	}
-	s.refreshOpenAIQuotaAutoPauseSettings(ctx)
-	cached, _ := s.openAIQuotaAutoPauseSettingsCache.Load().(*cachedOpenAIQuotaAutoPauseSettings)
+	s.refreshSchedulingQuotaSettings(ctx)
+	cached, _ := s.schedulingQuotaSettingsCache.Load().(*cachedSchedulingQuotaSettings)
 	if cached == nil {
 		return OpsOpenAIAccountQuotaAutoPauseSettings{}
 	}
 	return cached.settings
 }
 
-// refreshOpenAIQuotaAutoPauseSettings reads the latest settings from the DB and stores
+// refreshSchedulingQuotaSettings reads the latest settings from the DB and stores
 // them into the in-memory cache. On error it stores the prior value (or zero defaults
 // if nothing is cached yet) with the shorter error TTL so the next refresh comes
 // sooner. Always uses its own timeout-bounded context to keep refresh latency
 // predictable regardless of the caller.
-func (s *SettingService) refreshOpenAIQuotaAutoPauseSettings(ctx context.Context) {
+func (s *SettingService) refreshSchedulingQuotaSettings(ctx context.Context) {
 	if s == nil || s.settingRepo == nil {
 		return
 	}
+	prior := s.schedulingQuotaSettingsCache.Load()
 	dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIQuotaAutoPauseSettingsDBTimeout)
 	defer cancel()
-
-	settings := OpsOpenAIAccountQuotaAutoPauseSettings{}
-	ttl := openAIQuotaAutoPauseSettingsCacheTTL
+	cfg := defaultOpsAdvancedSettings()
+	ttl := schedulingQuotaSettingsCacheTTL
 	raw, err := s.settingRepo.GetValue(dbCtx, SettingKeyOpsAdvancedSettings)
+	if err == nil && strings.TrimSpace(raw) != "" {
+		err = json.Unmarshal([]byte(raw), cfg)
+	}
 	if err == nil {
-		cfg := defaultOpsAdvancedSettings()
-		if strings.TrimSpace(raw) != "" {
-			if jsonErr := json.Unmarshal([]byte(raw), cfg); jsonErr == nil {
-				normalizeOpsAdvancedSettings(cfg)
-			}
-		}
-		settings = cfg.OpenAIAccountQuotaAutoPause
-	} else if !errors.Is(err, ErrSettingNotFound) {
-		// Real error: keep serving prior value but refresh sooner.
-		if prior, _ := s.openAIQuotaAutoPauseSettingsCache.Load().(*cachedOpenAIQuotaAutoPauseSettings); prior != nil {
-			settings = prior.settings
+		normalizeOpsAdvancedSettings(cfg)
+		err = cfg.QuotaProtection.validate()
+	}
+	next := &cachedSchedulingQuotaSettings{settings: cfg.OpenAIAccountQuotaAutoPause, protection: cfg.QuotaProtection}
+	if err != nil && !errors.Is(err, ErrSettingNotFound) {
+		if cached, ok := prior.(*cachedSchedulingQuotaSettings); ok {
+			next.settings, next.protection = cached.settings, cached.protection
 		}
 		ttl = openAIQuotaAutoPauseSettingsErrorTTL
 	}
-
-	s.openAIQuotaAutoPauseSettingsCache.Store(&cachedOpenAIQuotaAutoPauseSettings{
-		settings:  settings,
-		expiresAt: time.Now().Add(ttl).UnixNano(),
-	})
+	next.expiresAt = time.Now().Add(ttl).UnixNano()
+	// A delayed read must not replace a configuration just saved by the admin.
+	s.schedulingQuotaSettingsCache.CompareAndSwap(prior, next)
 }
 
-// SetOpenAIQuotaAutoPauseSettings writes the given settings directly into the in-memory
+// SetQuotaSchedulingSettings writes the given settings directly into the in-memory
 // cache. Called from settings-write code paths so that the next read reflects the new
 // value immediately, without waiting for the background refresh.
-func (s *SettingService) SetOpenAIQuotaAutoPauseSettings(settings OpsOpenAIAccountQuotaAutoPauseSettings) {
+func (s *SettingService) SetQuotaSchedulingSettings(settings OpsOpenAIAccountQuotaAutoPauseSettings, protection SchedulingQuotaProtection) {
 	if s == nil {
 		return
 	}
-	s.openAIQuotaAutoPauseSettingsCache.Store(&cachedOpenAIQuotaAutoPauseSettings{
-		settings:  settings,
-		expiresAt: time.Now().Add(openAIQuotaAutoPauseSettingsCacheTTL).UnixNano(),
+	s.schedulingQuotaSettingsCache.Store(&cachedSchedulingQuotaSettings{
+		settings:   settings,
+		protection: effectiveSchedulingQuotaProtection(protection),
+		expiresAt:  time.Now().Add(schedulingQuotaSettingsCacheTTL).UnixNano(),
 	})
 }
