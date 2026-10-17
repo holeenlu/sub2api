@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import ProxiesView from '../ProxiesView.vue'
 
-const { list, update, getAllWithCount } = vi.hoisted(() => ({ list: vi.fn(), update: vi.fn(), getAllWithCount: vi.fn() }))
-vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { list, update, getAllWithCount } } }))
+const { list, update, getAllWithCount, exportData, copyToClipboard } = vi.hoisted(() => ({ list: vi.fn(), update: vi.fn(), getAllWithCount: vi.fn(), exportData: vi.fn(), copyToClipboard: vi.fn() }))
+vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { list, update, getAllWithCount, exportData } } }))
+vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({copyToClipboard}) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn() }) }))
 vi.mock('vue-i18n', async () => ({
   ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'),
@@ -13,7 +14,7 @@ const mountView = () => shallowMount(ProxiesView, {
   global: { stubs: {
     AppLayout: { template: '<div><slot /></div>' },
     TablePageLayout: { template: '<div><slot name="table" /></div>' },
-    DataTable: { props: ['data'], template: '<div v-for="row in data" :key="row.id"><slot name="cell-actions" :row="row" /></div>' },
+    DataTable: { props: ['data'], template: '<div v-for="row in data" :key="row.id"><slot name="cell-actions" :row="row" /><slot name="cell-address" :row="row" /></div>' },
     BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
   } },
 })
@@ -36,6 +37,13 @@ async function submit() {
 }
 
 describe('proxy credential updates', () => {
+  it('copies credentials through the protected export endpoint, not from a cached row', async () => {
+    exportData.mockResolvedValue({proxies:[{protocol:'http',host:'proxy.example',port:8080,username:'export-user',password:'export-password'}]})
+    wrapper = mountView(); await flushPromises()
+    await wrapper.get('button[title="admin.proxies.copyProxyUrl"]').trigger('click'); await flushPromises()
+    expect(exportData).toHaveBeenCalledWith({ids:[9]})
+    expect(copyToClipboard).toHaveBeenCalledWith('http://export-user:export-password@proxy.example:8080','admin.proxies.urlCopied')
+  })
   it('sends an explicit empty username when cleared', async () => {
     await edit()
     const username = wrapper.findAll<HTMLInputElement>('#edit-proxy-form input').find(input => input.element.value === 'old-user')!
@@ -64,3 +72,6 @@ describe('proxy credential updates', () => {
     expect((await submit()).password).toBe('new-password')
   })
 })
+
+// These legacy functional cases exercise the migrated full administrator.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))
