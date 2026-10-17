@@ -379,9 +379,9 @@ func Relay(
 	<-upstreamDone
 
 	emitTurnComplete(options.OnTurnComplete, state, finalizePendingBareError(state, nowFn()))
-	if firstExit.stage == "read_client" && firstExit.graceful {
+	if (firstExit.stage == "read_client" && firstExit.graceful) || relayUsageHasTokens(state.turnUsage) {
 		if id := openAIWSRelayActiveTurnID(state); id != "" {
-			// Drain expired without a terminal. Settle only this active turn's
+			// Disconnect or upstream failure without a terminal. Settle this turn's
 			// observed usage, keeping its terminal type empty (unknown).
 			emitTurnComplete(options.OnTurnComplete, state, finalizeObservedRelayTerminal(state, observedUpstreamEvent{responseID: id}, nowFn()))
 		}

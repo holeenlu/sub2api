@@ -702,6 +702,14 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		return result
 	}
+	defer func() {
+		if forwardErr != nil && (openAIUsageHasTokens(&usage) || imageCounter.Count() > 0) {
+			if forwardResult == nil {
+				forwardResult = resultWithUsage()
+			}
+			forwardErr = stopOpenAIMeteredReplay(forwardErr)
+		}
+	}()
 
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {

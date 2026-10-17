@@ -938,6 +938,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
+				if result != nil && (openAIUsageHasTokens(&result.Usage) || result.ImageCount > 0) && hooks != nil && hooks.AfterTurn != nil {
+					hooks.AfterTurn(turn, result, errOpenAIWSSessionPreempted)
+				}
 				return errOpenAIWSSessionPreempted
 			}
 			if hooks != nil && hooks.AfterTurn != nil {
@@ -1282,7 +1285,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if hooks != nil && !hooks.InitialTurnStartedAt.IsZero() {
 		turnStartedAt = hooks.InitialTurnStartedAt
 	}
-	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (_ *OpenAIForwardResult, returnErr error) {
+	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (out *OpenAIForwardResult, returnErr error) {
 		ctx, finishDrain := downstream.turnContext(ctx)
 		defer finishDrain()
 		ctx = WithSchedulingQuotaRequest(ctx, payload, ContentModerationProtocolOpenAIResponses)
@@ -1508,6 +1511,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			return result
 		}
+		defer func() {
+			if out == nil && returnErr != nil && (openAIUsageHasTokens(&usage) || imageCounter.Count() > 0) {
+				out = resultWithUsage("", "")
+			}
+		}()
 		// One bounded read remains pending while control/staging timers fire.
 		// Cancelling a short socket read would destroy the upstream connection.
 		readCtx, cancelRead := context.WithCancel(ctx)
@@ -2517,8 +2525,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort)
 		if relayErr != nil {
+			meteredFailure := result != nil && (openAIUsageHasTokens(&result.Usage) || result.ImageCount > 0)
+			if meteredFailure {
+				relayErr = stopOpenAIMeteredReplay(relayErr)
+			}
 			lastTurnClean = false
 			if isOpenAIWSSessionPreempted(ctx) {
+				if meteredFailure && hooks != nil && hooks.AfterTurn != nil {
+					hooks.AfterTurn(turn, result, errOpenAIWSSessionPreempted)
+				}
 				sessionLease.MarkBroken()
 				return errOpenAIWSSessionPreempted
 			}
@@ -2533,7 +2548,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return nil
 			}
 			var rejectedFieldErr *openAIWSRejectedFieldRetryError
-			if errors.As(relayErr, &rejectedFieldErr) && rejectedFieldErr != nil && len(rejectedFieldErr.body) > 0 {
+			if !meteredFailure && errors.As(relayErr, &rejectedFieldErr) && rejectedFieldErr != nil && len(rejectedFieldErr.body) > 0 {
 				currentPayload = append([]byte(nil), rejectedFieldErr.body...)
 				currentPayloadBytes = len(currentPayload)
 				if rejectedFieldErr.reconnect {
@@ -2542,15 +2557,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				skipBeforeTurn = true
 				continue
 			}
-			if recoverIngressPrevResponseNotFound(relayErr, turn, connID) {
+			if !meteredFailure && recoverIngressPrevResponseNotFound(relayErr, turn, connID) {
 				continue
 			}
-			if retryIngressTurn(relayErr, turn, connID) {
+			if !meteredFailure && retryIngressTurn(relayErr, turn, connID) {
 				continue
 			}
 			finalErr := relayErr
 			var failoverErr *UpstreamFailoverError
-			if turn > 1 && errors.As(finalErr, &failoverErr) {
+			if !meteredFailure && turn > 1 && errors.As(finalErr, &failoverErr) {
 				retryPayload, safe, buildErr := buildOpenAIWSCurrentTurnRetryPayload(
 					currentClientPayload, currentTurnReplayInput, currentTurnReplayComplete, currentOriginalModel, true)
 				if buildErr != nil {
@@ -2564,7 +2579,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				finalErr = newOpenAIWSCurrentTurnFailoverError(finalErr, retryPayload)
 			}
 			if hooks != nil && hooks.AfterTurn != nil {
-				hooks.AfterTurn(turn, nil, finalErr)
+				hooks.AfterTurn(turn, result, finalErr)
 			}
 			resetSessionLease(true)
 			return finalErr
