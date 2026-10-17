@@ -195,7 +195,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			return nil, ErrLiveConcurrencyFull
 		}
 
-		created, createErr := s.createUpstreamLiveCall(ctx, account, request, attestation)
+		created, createErr := s.createUpstreamLiveCall(ctx, account, request, attestation, identity.GroupID)
 		selection.ReleaseFunc()
 		if createErr != nil {
 			s.releaseLiveLease(account.ID, identity.UserID, identity.APIKeyID, leaseID)
@@ -213,6 +213,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			model = "gpt-live"
 		}
 		record := &LiveCallRecord{
+			GroupNameSnapshot:     identity.GroupNameSnapshot,
 			CallID:                created.CallID,
 			CallHash:              hashLiveCallID(created.CallID),
 			AccountID:             account.ID,
@@ -230,7 +231,23 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			InboundEndpoint:       identity.InboundEndpoint,
 			AttestationCiphertext: attestationCiphertext,
 		}
+		snapshot := &UsageLog{}
+		snapshot.CaptureVendorSnapshot(account, nil)
+		record.VendorIDSnapshot = snapshot.VendorIDSnapshot
+		record.AccountNameSnapshot = snapshot.AccountNameSnapshot
+		record.PlatformSnapshot = snapshot.PlatformSnapshot
 		mappingTTL := s.liveMaxSessionDuration() + 5*time.Minute
+		if record.VendorIDSnapshot != nil {
+			snapshotStore, ok := store.(LiveUsageSnapshotStore)
+			if !ok {
+				s.releaseLiveLease(account.ID, identity.UserID, identity.APIKeyID, leaseID)
+				return nil, fmt.Errorf("live usage snapshot storage unavailable")
+			}
+			if err := snapshotStore.SaveLiveUsageSnapshot(ctx, record, mappingTTL); err != nil {
+				s.releaseLiveLease(account.ID, identity.UserID, identity.APIKeyID, leaseID)
+				return nil, fmt.Errorf("save live usage snapshot: %w", err)
+			}
+		}
 		if saveErr := store.SaveLiveCall(ctx, record, mappingTTL); saveErr != nil {
 			s.releaseLiveLease(account.ID, identity.UserID, identity.APIKeyID, leaseID)
 			return nil, fmt.Errorf("save live call mapping: %w", saveErr)
@@ -263,6 +280,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	account *Account,
 	request *LiveCallRequest,
 	attestation string,
+	groupIDs ...*int64,
 ) (*LiveCallCreated, error) {
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
@@ -304,7 +322,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	upstreamReq.Header.Set(liveAttestationHeader, attestation)
 	applyLiveUpstreamIdentityHeaders(upstreamReq.Header)
 
-	resp, err := s.doOpenAIUpstream(upstreamReq, resolveAccountProxyURL(account), account)
+	resp, err := s.doOpenAIUpstream(upstreamReq, resolveAccountProxyURL(account), account, groupIDs...)
 	if err != nil {
 		logLiveCreateStageFailure(ctx, account.ID, "upstream_transport", err)
 		return nil, err
@@ -803,6 +821,12 @@ func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), liveRedisOperationTimeout)
+	if snapshotStore, ok := store.(LiveUsageSnapshotStore); ok && record.VendorIDSnapshot == nil {
+		if err := snapshotStore.LoadLiveUsageSnapshot(ctx, record); err != nil {
+			cancel()
+			return
+		}
+	}
 	first, err := store.MarkLiveCallClosed(ctx, record.CallHash, liveClosedRecordTTL)
 	cancel()
 	if err != nil || !first {
@@ -824,31 +848,33 @@ func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
 	if record.SubscriptionID > 0 {
 		billingType = BillingTypeSubscription
 	}
-	// TODO(billing): Live 会话目前不计费：TotalCost/ActualCost 恒为 0，完全绕过
-	// recordUsageCore/applyUsageBilling，余额模式下极低余额也能反复开启最长
-	// liveMaxSessionDuration 的会话。若确认按时长计费，应在此接入计费管道；
-	// 若确认有意免费，删除本注释即可（零值行为由
-	// TestFinalizeLiveCallIsIdempotentAndWritesZeroUsage 锁定）。
-	//
+	// The upstream does not provide priced metering for Live. Preserve the existing
+	// allow-live, concurrency and duration budgets; label unknown cost explicitly.
+
 	// 这是该会话唯一一次落库机会（MarkLiveCallClosed 已标记 first），失败即永久
 	// 丢失，因此走带日志与同步兜底的 writeUsageLogBestEffort（issue #3656）。
 	writeUsageLogBestEffort(context.Background(), s.usageLogRepo, &UsageLog{
-		UserID:           record.UserID,
-		APIKeyID:         record.APIKeyID,
-		AccountID:        record.AccountID,
-		RequestID:        record.CallHash,
-		Model:            record.Model,
-		RequestedModel:   record.Model,
-		GroupID:          liveOptionalID(record.GroupID),
-		SubscriptionID:   liveOptionalID(record.SubscriptionID),
-		RateMultiplier:   1,
-		BillingType:      billingType,
-		RequestType:      RequestTypeLive,
-		DurationMs:       &duration,
-		UserAgent:        &userAgent,
-		IPAddress:        &ipAddress,
-		InboundEndpoint:  &inboundEndpoint,
-		UpstreamEndpoint: &upstreamEndpoint,
-		CreatedAt:        record.CreatedAt,
+		UserID:              record.UserID,
+		APIKeyID:            record.APIKeyID,
+		AccountID:           record.AccountID,
+		VendorIDSnapshot:    record.VendorIDSnapshot,
+		GroupNameSnapshot:   record.GroupNameSnapshot,
+		AccountNameSnapshot: record.AccountNameSnapshot,
+		PlatformSnapshot:    record.PlatformSnapshot,
+		RequestID:           record.CallHash,
+		Model:               record.Model,
+		RequestedModel:      record.Model,
+		GroupID:             liveOptionalID(record.GroupID),
+		SubscriptionID:      liveOptionalID(record.SubscriptionID),
+		RateMultiplier:      1,
+		BillingType:         billingType,
+		RequestType:         RequestTypeLive,
+		BillingStatus:       "unmetered",
+		DurationMs:          &duration,
+		UserAgent:           &userAgent,
+		IPAddress:           &ipAddress,
+		InboundEndpoint:     &inboundEndpoint,
+		UpstreamEndpoint:    &upstreamEndpoint,
+		CreatedAt:           record.CreatedAt,
 	}, "service.openai_live")
 }

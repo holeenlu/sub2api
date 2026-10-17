@@ -198,6 +198,7 @@ func newExcelBPSRequestTo(ctx context.Context, targetURL, accept string, body []
 // BPS deliberately bypasses Codex ticket/cookie injection and OAuth plugins:
 // only the selected account's bearer and ChatGPT account ID belong on this host.
 func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Context, account *Account, body []byte, start time.Time, mappedModels ...string) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	setActualOpenAIUsageAuthorizationMode(c, UsageAuthorizationModeBPS)
 	parentCtx := ctx
 	ctx = EnsureOpenAITurnBudget(ctx, s.cfg, gjson.GetBytes(body, "reasoning.effort").String())
 	var firstOutputGuard *openAIFirstOutputHeaderGuard
@@ -212,11 +213,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			if firstOutputGuard.stopHeaderWait() {
 				return false
 			}
-			if budget, ok := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget); ok {
-				budget.mu.Lock()
-				budget.deadline = time.Time{}
-				budget.mu.Unlock()
-			}
+			MarkTurnOutputCommitted(ctx)
 		}
 		return true
 	}
@@ -229,7 +226,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	defer func() {
 		if compactID != "" && openAIUsageHasTokens(&compactUsage) {
 			if forwardResult == nil {
-				forwardResult = &OpenAIForwardResult{Model: originalImagePolicyModel, ReasoningEffort: &compactEffort, UpstreamModel: gjson.GetBytes(body, "model").String(), UpstreamEndpoint: "/basispoints/api/responses", RequestID: compactID, Stream: gjson.GetBytes(body, "stream").Bool(), Duration: time.Since(start)}
+				forwardResult = &OpenAIForwardResult{AuthorizationMode: UsageAuthorizationModeBPS, Model: originalImagePolicyModel, ReasoningEffort: &compactEffort, UpstreamModel: gjson.GetBytes(body, "model").String(), UpstreamEndpoint: "/basispoints/api/responses", RequestID: compactID, Stream: gjson.GetBytes(body, "stream").Bool(), Duration: time.Since(start)}
 			}
 			addImagePolicyUsage(&forwardResult.Usage, compactUsage)
 		}
@@ -481,11 +478,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		if isExcelBPSClientCancellation(c, err) {
 			return clientCanceled()
 		}
-		if IsExcelAuthorizationError(err) {
-			code := "basispoints_auth_" + strings.ToLower(strings.TrimPrefix(infraerrors.Reason(err), "OPENAI_EXCEL_AUTH_"))
-			return fail(503, code, infraerrors.Message(err))
-		}
-		return fail(502, "basispoints_auth_unavailable", "Excel OAuth credential is unavailable; see Credential Operations")
+		return nil, newExcelBPSCredentialFailure(err)
 	}
 	accountID := excelBPSAccountID(account, token)
 	if accountID == "" {
@@ -687,11 +680,26 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	resp, _, err := s.doExcelBPSRequest(requestCtx, c, account, scope, upstreamBody, token, accountID)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(sent).Milliseconds())
 	if err != nil {
+		if parentCtx.Err() == nil && firstOutputGuard.expired() {
+			return fail(504, "first_output_timeout", "Excel BPS produced no output before the deadline")
+		}
 		if errors.Is(err, ErrOpenAITurnAttemptBudgetExhausted) || errors.Is(err, ErrOpenAIWSFirstOutputBudgetExhausted) {
 			return nil, err
 		}
 		if isExcelBPSClientCancellation(c, err) {
 			return clientCanceled()
+		}
+		var attempt *OpenAITransportAttemptError
+		var recovery *UpstreamFailoverError
+		if IsTurnBudgetError(err) || errors.As(err, &recovery) {
+			return nil, err
+		}
+		if errors.As(err, &attempt) && attempt.Unsent && !compactionCompleted || (!compactionCompleted && openAIWSUncertainExecutionReplaySafe(originalBody)) {
+			failure := newExcelBPSUpstreamFailureError(http.StatusBadGateway)
+			failure.Cause = err
+			failure.RequestNotSent = attempt != nil && attempt.Unsent
+			failure.RetryableOnSameAccount, failure.SameAccountRetryMax = true, 1
+			return nil, failure
 		}
 		return fail(502, "basispoints_transport_error", "Excel BPS connection failed; request was not replayed after sending")
 	}
@@ -742,7 +750,23 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			return fail(failure.Status, failure.Code, failure.Message)
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
+			if account.IsExcelOAuth() && !compactionCompleted && s.openAITokenProvider != nil {
+				if _, refreshed := refreshRejectedCredential(ctx, s.accountRepo, account, token, s.openAITokenProvider.refreshAPI, s.openAITokenProvider.executor); refreshed {
+					failure := newExcelBPSUpstreamFailureError(http.StatusUnauthorized)
+					failure.Stage, failure.Reason = GatewayFailureStageAccountAuth, "basispoints_credentials_rejected"
+					failure.RejectedBeforeGeneration, failure.RetryableOnSameAccount, failure.SameAccountRetryMax = true, true, 1
+					return nil, failure
+				}
+			}
 			s.handleExcelBPSUnauthorized(ctx, account, resp.StatusCode, resp.Header, raw, token)
+			if !compactionCompleted {
+				failure := newExcelBPSUpstreamFailureError(http.StatusUnauthorized)
+				failure.Stage, failure.Reason = GatewayFailureStageAccountAuth, "basispoints_credentials_rejected"
+				failure.RejectedBeforeGeneration = true
+				failure.RetryableOnSameAccount = !account.IsExcelOAuth() && takeTurnGrantRefresh(ctx, account, "excel", token) == nil
+				failure.SameAccountRetryMax = 1
+				return nil, failure
+			}
 			return fail(resp.StatusCode, "basispoints_upstream_error", "Excel BPS authentication failed; request was not replayed")
 		}
 		if modelDenied {
@@ -769,6 +793,15 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 				message = "Excel BPS rejected this request; Excel BPS was automatically disabled for this account; request was not replayed"
 			case moved:
 				message = "Excel BPS rejected this request; account groups were automatically updated; request was not replayed"
+			}
+		}
+		if resp.StatusCode == http.StatusForbidden && !compactionCompleted {
+			switch extractUpstreamErrorCode(raw) {
+			case "account_deactivated", "account_suspended", "token_invalidated", "token_revoked", "invalid_token":
+				failure := newExcelBPSUpstreamFailureError(http.StatusForbidden)
+				failure.Stage, failure.Scope, failure.Reason = GatewayFailureStageAccountAuth, GatewayFailureScopeAccount, "basispoints_credentials_rejected"
+				failure.RejectedBeforeGeneration = true
+				return nil, failure
 			}
 		}
 		return fail(resp.StatusCode, errorCode, message)
@@ -872,7 +905,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	// The bridge sees the body after group policy mapping. Keep the original
 	// client effort for usage display, and the BPS-normalized effort for billing.
 	requestedEffort := coalesceRequestedReasoningEffort(RequestedReasoningEffortFromContext(ctx), &bridge.RequestedEffort)
-	result := &OpenAIForwardResult{Model: originalModel, UpstreamModel: model, UpstreamEndpoint: "/basispoints/api/responses", Stream: stream, ReasoningEffort: &bridge.Effort, RequestedReasoningEffort: requestedEffort, RequestID: resp.Header.Get("x-request-id")}
+	result := &OpenAIForwardResult{AuthorizationMode: UsageAuthorizationModeBPS, Model: originalModel, UpstreamModel: model, UpstreamEndpoint: "/basispoints/api/responses", Stream: stream, ReasoningEffort: &bridge.Effort, RequestedReasoningEffort: requestedEffort, RequestID: resp.Header.Get("x-request-id")}
 	var createdAtTracker responsesCreatedAtStamper
 	streamFailureRecorded := false
 	recordStreamFailure := func(kind string) {
@@ -1142,6 +1175,11 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			code, message, status = "first_output_timeout", "Excel BPS produced no semantic output before the deadline", http.StatusGatewayTimeout
 			RecordOpenAIRetryStop(c, account, OpenAIRetryStopTurnBudget)
 		}
+		if !contentCommitted && !compactionCompleted && !firstOutputGuard.expired() && openAIWSUncertainExecutionReplaySafe(originalBody) && !openAIUsageHasTokens(&result.Usage) {
+			failure := newExcelBPSUpstreamFailureError(status)
+			failure.RetryableOnSameAccount, failure.SameAccountRetryMax = true, 1
+			return nil, failure
+		}
 		c.Set(OpsGatewayResponsesFailedKey, true)
 		MarkOpsStreamErrorValue(c, OpsStreamError{
 			ErrType: "server_error", Code: code, Message: message, IntendedStatus: status,
@@ -1249,4 +1287,20 @@ func resolveExcelBPSIdentity(c *gin.Context, body []byte, apiKeyID int64, manage
 	identity := uuid.NewString()
 	c.Set(key, identity)
 	return identity, true
+}
+
+// Both WS admission and HTTP generation must preserve the failed grant mode.
+func newExcelBPSCredentialFailure(err error) error {
+	if err == nil || IsTurnBudgetError(err) || errors.Is(err, context.Canceled) {
+		return err
+	}
+	failure := newExcelBPSUpstreamFailureError(http.StatusServiceUnavailable)
+	failure.Stage, failure.Scope, failure.Reason = GatewayFailureStageAccountAuth, GatewayFailureScopeAccount, "basispoints_credentials_unavailable"
+	failure.RequestNotSent, failure.Cause = true, err
+	failure.ClientMessage = "Excel BPS credentials are unavailable"
+	failure.RetryableOnSameAccount, failure.SameAccountRetryMax = true, 1
+	if !IsExcelAuthorizationError(err) || infraerrors.Reason(err) == "OPENAI_EXCEL_AUTH_STORAGE_UNAVAILABLE" {
+		failure.Scope = GatewayFailureScopeProvider
+	}
+	return failure
 }

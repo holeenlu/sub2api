@@ -30,7 +30,12 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	account *Account,
 	body []byte,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	defer func() {
+		if forwardResult != nil {
+			forwardResult.AuthorizationMode = nativeOpenAIUsageAuthorizationMode(account)
+		}
+	}()
 	// Chat Completions cannot resolve Responses server-side state. Check raw
 	// JSON before decoding into the narrower conversion DTO, which otherwise
 	// silently drops prompt/conversation/context_management (and the converter

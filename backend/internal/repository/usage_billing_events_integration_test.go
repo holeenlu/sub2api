@@ -119,6 +119,8 @@ func TestUsageBillingRecoveryFreezesRepairedPrice(t *testing.T) {
 	cmd := &service.UsageBillingCommand{RequestID: id, UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, Pricing: &service.UsageBillingPricingSnapshot{Pending: true}, UsageLog: &service.UsageLog{RequestID: id, UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, Model: "repairable", CreatedAt: time.Now(), BillingStatus: "pending_pricing"}}
 	_, err := repo.Apply(ctx, cmd)
 	require.ErrorIs(t, err, service.ErrUsagePricingPending)
+	_, err = NewUsageLogRepository(client, integrationDB).Create(ctx, cmd.UsageLog)
+	require.NoError(t, err)
 	calls := 0
 	repo.reprice = func(_ context.Context, c *service.UsageBillingCommand) error {
 		calls++
@@ -126,6 +128,8 @@ func TestUsageBillingRecoveryFreezesRepairedPrice(t *testing.T) {
 		c.BalanceCost = 2
 		c.UsageLog.ActualCost = 2
 		c.UsageLog.TotalCost = 2
+		mode := string(service.BillingModePerRequest)
+		c.UsageLog.BillingMode = &mode
 		return nil
 	}
 	repo.invalidate = func(context.Context, *service.UsageBillingCommand) error { return errors.New("temporary cache error") }
@@ -141,4 +145,7 @@ func TestUsageBillingRecoveryFreezesRepairedPrice(t *testing.T) {
 	var balance float64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT balance FROM users WHERE id=$1", user.ID).Scan(&balance))
 	require.Equal(t, 98.0, balance)
+	var mode string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COALESCE(billing_mode,'') FROM usage_logs WHERE request_id=$1 AND api_key_id=$2", id, key.ID).Scan(&mode))
+	require.Equal(t, string(service.BillingModePerRequest), mode)
 }

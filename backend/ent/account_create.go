@@ -67,6 +67,48 @@ func (_c *AccountCreate) SetNillableDeletedAt(v *time.Time) *AccountCreate {
 	return _c
 }
 
+// SetVendorID sets the "vendor_id" field.
+func (_c *AccountCreate) SetVendorID(v int64) *AccountCreate {
+	_c.mutation.SetVendorID(v)
+	return _c
+}
+
+// SetNillableVendorID sets the "vendor_id" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableVendorID(v *int64) *AccountCreate {
+	if v != nil {
+		_c.SetVendorID(*v)
+	}
+	return _c
+}
+
+// SetVendorPausedAt sets the "vendor_paused_at" field.
+func (_c *AccountCreate) SetVendorPausedAt(v time.Time) *AccountCreate {
+	_c.mutation.SetVendorPausedAt(v)
+	return _c
+}
+
+// SetNillableVendorPausedAt sets the "vendor_paused_at" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableVendorPausedAt(v *time.Time) *AccountCreate {
+	if v != nil {
+		_c.SetVendorPausedAt(*v)
+	}
+	return _c
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (_c *AccountCreate) SetVendorNotes(v string) *AccountCreate {
+	_c.mutation.SetVendorNotes(v)
+	return _c
+}
+
+// SetNillableVendorNotes sets the "vendor_notes" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableVendorNotes(v *string) *AccountCreate {
+	if v != nil {
+		_c.SetVendorNotes(*v)
+	}
+	return _c
+}
+
 // SetName sets the "name" field.
 func (_c *AccountCreate) SetName(v string) *AccountCreate {
 	_c.mutation.SetName(v)
@@ -539,6 +581,10 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.VendorNotes(); !ok {
+		v := account.DefaultVendorNotes
+		_c.mutation.SetVendorNotes(v)
+	}
 	if _, ok := _c.mutation.Credentials(); !ok {
 		if account.DefaultCredentials == nil {
 			return fmt.Errorf("ent: uninitialized account.DefaultCredentials (forgotten import ent/runtime?)")
@@ -591,6 +637,9 @@ func (_c *AccountCreate) check() error {
 	}
 	if _, ok := _c.mutation.UpdatedAt(); !ok {
 		return &ValidationError{Name: "updated_at", err: errors.New(`ent: missing required field "Account.updated_at"`)}
+	}
+	if _, ok := _c.mutation.VendorNotes(); !ok {
+		return &ValidationError{Name: "vendor_notes", err: errors.New(`ent: missing required field "Account.vendor_notes"`)}
 	}
 	if _, ok := _c.mutation.Name(); !ok {
 		return &ValidationError{Name: "name", err: errors.New(`ent: missing required field "Account.name"`)}
@@ -696,6 +745,18 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DeletedAt(); ok {
 		_spec.SetField(account.FieldDeletedAt, field.TypeTime, value)
 		_node.DeletedAt = &value
+	}
+	if value, ok := _c.mutation.VendorID(); ok {
+		_spec.SetField(account.FieldVendorID, field.TypeInt64, value)
+		_node.VendorID = &value
+	}
+	if value, ok := _c.mutation.VendorPausedAt(); ok {
+		_spec.SetField(account.FieldVendorPausedAt, field.TypeTime, value)
+		_node.VendorPausedAt = &value
+	}
+	if value, ok := _c.mutation.VendorNotes(); ok {
+		_spec.SetField(account.FieldVendorNotes, field.TypeString, value)
+		_node.VendorNotes = value
 	}
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(account.FieldName, field.TypeString, value)
@@ -966,6 +1027,60 @@ func (u *AccountUpsert) UpdateDeletedAt() *AccountUpsert {
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (u *AccountUpsert) ClearDeletedAt() *AccountUpsert {
 	u.SetNull(account.FieldDeletedAt)
+	return u
+}
+
+// SetVendorID sets the "vendor_id" field.
+func (u *AccountUpsert) SetVendorID(v int64) *AccountUpsert {
+	u.Set(account.FieldVendorID, v)
+	return u
+}
+
+// UpdateVendorID sets the "vendor_id" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateVendorID() *AccountUpsert {
+	u.SetExcluded(account.FieldVendorID)
+	return u
+}
+
+// AddVendorID adds v to the "vendor_id" field.
+func (u *AccountUpsert) AddVendorID(v int64) *AccountUpsert {
+	u.Add(account.FieldVendorID, v)
+	return u
+}
+
+// ClearVendorID clears the value of the "vendor_id" field.
+func (u *AccountUpsert) ClearVendorID() *AccountUpsert {
+	u.SetNull(account.FieldVendorID)
+	return u
+}
+
+// SetVendorPausedAt sets the "vendor_paused_at" field.
+func (u *AccountUpsert) SetVendorPausedAt(v time.Time) *AccountUpsert {
+	u.Set(account.FieldVendorPausedAt, v)
+	return u
+}
+
+// UpdateVendorPausedAt sets the "vendor_paused_at" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateVendorPausedAt() *AccountUpsert {
+	u.SetExcluded(account.FieldVendorPausedAt)
+	return u
+}
+
+// ClearVendorPausedAt clears the value of the "vendor_paused_at" field.
+func (u *AccountUpsert) ClearVendorPausedAt() *AccountUpsert {
+	u.SetNull(account.FieldVendorPausedAt)
+	return u
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (u *AccountUpsert) SetVendorNotes(v string) *AccountUpsert {
+	u.Set(account.FieldVendorNotes, v)
+	return u
+}
+
+// UpdateVendorNotes sets the "vendor_notes" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateVendorNotes() *AccountUpsert {
+	u.SetExcluded(account.FieldVendorNotes)
 	return u
 }
 
@@ -1508,6 +1623,69 @@ func (u *AccountUpsertOne) UpdateDeletedAt() *AccountUpsertOne {
 func (u *AccountUpsertOne) ClearDeletedAt() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearDeletedAt()
+	})
+}
+
+// SetVendorID sets the "vendor_id" field.
+func (u *AccountUpsertOne) SetVendorID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetVendorID(v)
+	})
+}
+
+// AddVendorID adds v to the "vendor_id" field.
+func (u *AccountUpsertOne) AddVendorID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddVendorID(v)
+	})
+}
+
+// UpdateVendorID sets the "vendor_id" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateVendorID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateVendorID()
+	})
+}
+
+// ClearVendorID clears the value of the "vendor_id" field.
+func (u *AccountUpsertOne) ClearVendorID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearVendorID()
+	})
+}
+
+// SetVendorPausedAt sets the "vendor_paused_at" field.
+func (u *AccountUpsertOne) SetVendorPausedAt(v time.Time) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetVendorPausedAt(v)
+	})
+}
+
+// UpdateVendorPausedAt sets the "vendor_paused_at" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateVendorPausedAt() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateVendorPausedAt()
+	})
+}
+
+// ClearVendorPausedAt clears the value of the "vendor_paused_at" field.
+func (u *AccountUpsertOne) ClearVendorPausedAt() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearVendorPausedAt()
+	})
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (u *AccountUpsertOne) SetVendorNotes(v string) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetVendorNotes(v)
+	})
+}
+
+// UpdateVendorNotes sets the "vendor_notes" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateVendorNotes() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateVendorNotes()
 	})
 }
 
@@ -2293,6 +2471,69 @@ func (u *AccountUpsertBulk) UpdateDeletedAt() *AccountUpsertBulk {
 func (u *AccountUpsertBulk) ClearDeletedAt() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearDeletedAt()
+	})
+}
+
+// SetVendorID sets the "vendor_id" field.
+func (u *AccountUpsertBulk) SetVendorID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetVendorID(v)
+	})
+}
+
+// AddVendorID adds v to the "vendor_id" field.
+func (u *AccountUpsertBulk) AddVendorID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddVendorID(v)
+	})
+}
+
+// UpdateVendorID sets the "vendor_id" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateVendorID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateVendorID()
+	})
+}
+
+// ClearVendorID clears the value of the "vendor_id" field.
+func (u *AccountUpsertBulk) ClearVendorID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearVendorID()
+	})
+}
+
+// SetVendorPausedAt sets the "vendor_paused_at" field.
+func (u *AccountUpsertBulk) SetVendorPausedAt(v time.Time) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetVendorPausedAt(v)
+	})
+}
+
+// UpdateVendorPausedAt sets the "vendor_paused_at" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateVendorPausedAt() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateVendorPausedAt()
+	})
+}
+
+// ClearVendorPausedAt clears the value of the "vendor_paused_at" field.
+func (u *AccountUpsertBulk) ClearVendorPausedAt() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearVendorPausedAt()
+	})
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (u *AccountUpsertBulk) SetVendorNotes(v string) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetVendorNotes(v)
+	})
+}
+
+// UpdateVendorNotes sets the "vendor_notes" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateVendorNotes() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateVendorNotes()
 	})
 }
 

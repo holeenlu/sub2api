@@ -484,6 +484,9 @@ func (s *AuthService) ValidatePasswordCredentials(ctx context.Context, email, pa
 	if !s.CheckPassword(password, user.PasswordHash) {
 		return nil, ErrInvalidCredentials
 	}
+	if err := s.ValidateLoginIdentity(ctx, user); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 

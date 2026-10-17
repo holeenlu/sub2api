@@ -103,6 +103,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // account_name_snapshot
 			sqlmock.AnyArg(), // group_name_snapshot
 			sqlmock.AnyArg(), // platform_snapshot
+			sqlmock.AnyArg(), // authorization_mode
 			sqlmock.AnyArg(), // upstream_request_id
 			sqlmock.AnyArg(), // session_id
 			log.NativeCompactionV2,
@@ -203,6 +204,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // account_name_snapshot
 			sqlmock.AnyArg(), // group_name_snapshot
 			sqlmock.AnyArg(), // platform_snapshot
+			sqlmock.AnyArg(), // authorization_mode
 			sqlmock.AnyArg(), // upstream_request_id
 			sqlmock.AnyArg(), // session_id
 			log.NativeCompactionV2,
@@ -971,6 +973,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{}, // account_name_snapshot
 			sql.NullString{}, // group_name_snapshot
 			sql.NullString{}, // platform_snapshot
+			sql.NullString{}, // authorization_mode
 			sql.NullString{}, // upstream_request_id
 			sql.NullString{},
 			false, // native_compaction_v2
@@ -1056,6 +1059,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // account_name_snapshot
 			sql.NullString{},  // group_name_snapshot
 			sql.NullString{},  // platform_snapshot
+			sql.NullString{},  // authorization_mode
 			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			false,             // native_compaction_v2
@@ -1124,6 +1128,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // account_name_snapshot
 			sql.NullString{},  // group_name_snapshot
 			sql.NullString{},  // platform_snapshot
+			sql.NullString{},  // authorization_mode
 			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			true,              // native_compaction_v2
@@ -1193,6 +1198,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // account_name_snapshot
 			sql.NullString{},  // group_name_snapshot
 			sql.NullString{},  // platform_snapshot
+			sql.NullString{},  // authorization_mode
 			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			false,             // native_compaction_v2

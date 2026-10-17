@@ -146,13 +146,11 @@ func (s *OpenAIGatewayService) doExcelBPSRequestTo(ctx context.Context, c *gin.C
 	if err != nil {
 		return nil, proxy, err
 	}
-	if err := TakeOpenAITurnAttempt(ctx); err != nil {
-		return nil, proxy, err
-	}
 	if c != nil {
 		c.Set("excel_bps_upstream_attempt", c.GetInt("excel_bps_upstream_attempt")+1)
 	}
 	evidence := &excelBPSWriteEvidence{}
+	req = req.WithContext(context.WithValue(req.Context(), vendorAuthorizationModeKey{}, VendorOpenAIModeBPS))
 	resp, err := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).Do(evidence.request(req), proxy, account.ID, account.Concurrency)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
@@ -164,7 +162,7 @@ func (s *OpenAIGatewayService) doExcelBPSRequestTo(ctx context.Context, c *gin.C
 		}
 		recordExcelBPSTransportFailure(ctx, c, account, scope, err, attempt,
 			OpsUpstreamErrorEvent{UpstreamURL: upstreamURL, Stage: "transport"}, nil, evidence)
-		return nil, proxy, err
+		return nil, proxy, &OpenAITransportAttemptError{Cause: err, Unsent: evidence.unsent()}
 	}
 	return resp, proxy, nil
 }

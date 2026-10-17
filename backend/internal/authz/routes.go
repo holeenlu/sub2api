@@ -389,6 +389,7 @@ var routeRules = map[string]RouteRule{
 	"POST /api/v1/admin/openai/exchange-code":                                               {All: []string{"accounts.authorize"}, Mutates: true, NewCredentials: true},
 	"GET /api/v1/admin/openai/accounts/:id/excel-authorization":                             {All: []string{"accounts.authorize"}},
 	"POST /api/v1/admin/openai/accounts/:id/excel-authorization":                            {All: []string{"accounts.authorize"}, Mutates: true},
+	"DELETE /api/v1/admin/accounts/:id/authorizations/:mode":                                {All: []string{"accounts.authorize"}, Mutates: true},
 	"DELETE /api/v1/admin/openai/accounts/:id/excel-authorization":                          {All: []string{"accounts.authorize"}, Mutates: true},
 	"GET /api/v1/admin/settings/excel-bps-defaults":                                         {SuperOnly: true},
 	"PUT /api/v1/admin/settings/excel-bps-defaults":                                         {SuperOnly: true, Mutates: true},

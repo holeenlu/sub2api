@@ -12,6 +12,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 )
 
 // Private encrypted storage is separate from the account's native Codex grant.
@@ -119,6 +120,62 @@ func decodeExcelOAuthTokenInfo(credentials map[string]any, allowExpired bool) (*
 		ChatGPTUserID: excelFirstNonEmpty(at.OpenAIAuth.ChatGPTUserID, at.OpenAIAuth.UserID, id.GetUserInfo().ChatGPTUserID)}, nil
 }
 
+// This decoder is exclusively for private grants read from authenticated
+// encrypted storage. Supplier writers must have verified the provider signature
+// and saved the canonical identity first. It is never an import validator:
+// ImportExcelCredentials continues to require its original RT and ID Token.
+func decodeStoredExcelOAuthTokenInfo(account *Account, credentials map[string]any, allowExpired bool) (*OpenAITokenInfo, error) {
+	if account == nil || account.VendorID == nil {
+		info, err := decodeExcelOAuthTokenInfo(credentials, allowExpired)
+		if err == nil {
+			err = validateExcelIdentity(account, info)
+		}
+		return info, err
+	}
+	access := excelMapString(credentials, "access_token")
+	if *account.VendorID <= 0 || excelMapString(credentials, "client_id") != openai.ExcelClientID || len(access) > vendorOpenAITokenLimit {
+		return nil, errors.New("invalid saved supplier Excel grant")
+	}
+	parts := strings.Split(access, ".")
+	if len(parts) != 3 {
+		return nil, errors.New("invalid saved supplier Excel access token")
+	}
+	payload, err := base64.RawURLEncoding.Strict().DecodeString(parts[1])
+	var at vendorOpenAISignedClaims
+	if err != nil || json.Unmarshal(payload, &at) != nil || at.Auth == nil || at.ExpiresAt == nil || at.ExpiresAt.Unix() <= 0 ||
+		at.Issuer != vendorOpenAIIssuer || len(at.Audience) != 1 || at.Audience[0] != vendorOpenAIAccessAudience ||
+		(at.ClientID != "" && at.ClientID != openai.ExcelClientID) || (at.AZP != "" && at.AZP != openai.ExcelClientID) ||
+		(at.ClientID == "" && at.AZP == "") || !vendorOpenAIIdentityValue(at.Subject) || at.IssuedAt == nil ||
+		!at.ExpiresAt.After(at.IssuedAt.Time) || at.IssuedAt.After(time.Now()) ||
+		(at.NotBefore != nil && at.NotBefore.After(time.Now())) || (!allowExpired && !at.ExpiresAt.After(time.Now())) {
+		return nil, errors.New("invalid saved supplier Excel claims")
+	}
+	user, valid := vendorOpenAIClaimUser(at.Auth)
+	workspace := at.Auth.ChatGPTAccountID
+	if !valid || user == "" || !vendorOpenAIIdentityValue(workspace) || workspace == "default" ||
+		workspace != excelMapString(credentials, "chatgpt_account_id") || user != excelMapString(credentials, "chatgpt_user_id") {
+		return nil, errors.New("saved supplier Excel identity mismatch")
+	}
+	// A retained ID Token may describe an earlier refresh (including its old
+	// expiry and at_hash). The saved verified identity, not that historical token,
+	// is authoritative here. Missing display email can use the same account's
+	// existing metadata; ownership still requires exact workspace/user matching.
+	info := &OpenAITokenInfo{
+		AccessToken: access, RefreshToken: excelMapString(credentials, "refresh_token"),
+		IDToken: excelMapString(credentials, "id_token"), ClientID: openai.ExcelClientID, ExpiresAt: at.ExpiresAt.Unix(),
+		ChatGPTAccountID: workspace, ChatGPTUserID: user, PlanType: excelMapString(credentials, "plan_type"),
+		Email: excelFirstNonEmpty(excelMapString(credentials, "email"), account.GetCredential("email")),
+	}
+	if err := validateExcelIdentity(account, info); err != nil {
+		return nil, err
+	}
+	return info, nil
+}
+
+func excelGrantReauthorizationRequired() error {
+	return infraerrors.ServiceUnavailable("OPENAI_EXCEL_AUTH_REAUTHORIZE_REQUIRED", "Excel authorization has expired or was rejected and has no refresh token; reauthorize BPS")
+}
+
 var excelOAuthRefreshLocks sync.Map
 
 // Stored inside the encrypted grant. A resource-server 401 rejects the access
@@ -189,10 +246,7 @@ func (s *OpenAIOAuthService) readExcelGrant(ctx context.Context, account *Accoun
 	if json.Unmarshal([]byte(raw), &credentials) != nil {
 		return "", nil, errors.New("invalid saved Excel credentials")
 	}
-	info, err := decodeExcelOAuthTokenInfo(credentials, true)
-	if err == nil {
-		err = validateExcelIdentity(account, info)
-	}
+	_, err = decodeStoredExcelOAuthTokenInfo(account, credentials, true)
 	if err != nil {
 		return "", nil, err
 	}
@@ -238,16 +292,31 @@ func (s *OpenAIOAuthService) ImportExcelCredentials(ctx context.Context, account
 }
 
 func (s *OpenAIOAuthService) ExcelAccessToken(ctx context.Context, account *Account, cache OpenAITokenCache) (string, error) {
+	return s.excelAccessToken(ctx, account, cache, (&VendorService{openaiOAuth: s}).vendorVerifyOpenAIProfile)
+}
+
+// The private verifier argument lets tests use local signed provider fixtures;
+// the public runtime entry always binds the fixed-provider profile verifier.
+func (s *OpenAIOAuthService) excelAccessToken(ctx context.Context, account *Account, cache OpenAITokenCache,
+	verify func(context.Context, *openai.TokenResponse, string, string, string) (*vendorVerifiedCredential, error),
+) (string, error) {
 	_, credentials, err := s.readExcelGrant(ctx, account)
 	if err != nil {
 		return "", err
 	}
 	fresh := func(c map[string]any) bool {
-		info, err := decodeExcelOAuthTokenInfo(c, true)
-		return err == nil && c[excelAccessTokenRejectedKey] != true && info.ExpiresAt > time.Now().Add(openAITokenRefreshSkew).Unix()
+		info, err := decodeStoredExcelOAuthTokenInfo(account, c, true)
+		deadline := time.Now()
+		if account.VendorID == nil || excelMapString(c, "refresh_token") != "" {
+			deadline = deadline.Add(openAITokenRefreshSkew)
+		}
+		return err == nil && c[excelAccessTokenRejectedKey] != true && info.ExpiresAt > deadline.Unix()
 	}
 	if fresh(credentials) {
 		return excelMapString(credentials, "access_token"), nil
+	}
+	if excelMapString(credentials, "refresh_token") == "" {
+		return "", excelGrantReauthorizationRequired()
 	}
 	unlock, err := lockExcelCredentials(ctx, account.ID, cache, true)
 	if err != nil {
@@ -263,6 +332,12 @@ func (s *OpenAIOAuthService) ExcelAccessToken(ctx context.Context, account *Acco
 	if fresh(credentials) {
 		return excelMapString(credentials, "access_token"), nil
 	}
+	if excelMapString(credentials, "refresh_token") == "" {
+		return "", excelGrantReauthorizationRequired()
+	}
+	if s.oauthClient == nil {
+		return "", infraerrors.ServiceUnavailable("OPENAI_EXCEL_AUTH_REFRESH_FAILED", "Excel token refresh is unavailable; credentials were retained")
+	}
 	proxy := ""
 	if account.Proxy != nil {
 		proxy = account.Proxy.URL()
@@ -273,18 +348,28 @@ func (s *OpenAIOAuthService) ExcelAccessToken(ctx context.Context, account *Acco
 	if err != nil || response == nil {
 		return "", infraerrors.ServiceUnavailable("OPENAI_EXCEL_AUTH_REFRESH_FAILED", "Excel token refresh failed; credentials were retained")
 	}
-	credentials["access_token"] = response.AccessToken
-	if response.RefreshToken != "" {
-		credentials["refresh_token"] = response.RefreshToken
-	}
-	if response.IDToken != "" {
-		credentials["id_token"] = response.IDToken
+	if account.VendorID != nil {
+		// Validate exactly this provider response. Never pass a retained, possibly
+		// expired ID Token (or its at_hash for the old AT) as fresh evidence.
+		verified, err := verify(ctx, response, "refresh_token", proxy, VendorOpenAIModeBPS)
+		if err != nil || verified == nil || verified.AccountID != excelMapString(credentials, "chatgpt_account_id") ||
+			excelMapString(verified.Credentials, "chatgpt_user_id") != excelMapString(credentials, "chatgpt_user_id") {
+			return "", errors.New("refreshed supplier Excel identity could not be verified")
+		}
+		for key, value := range verified.Credentials {
+			credentials[key] = value
+		}
+	} else {
+		credentials["access_token"] = response.AccessToken
+		if response.RefreshToken != "" {
+			credentials["refresh_token"] = response.RefreshToken
+		}
+		if response.IDToken != "" {
+			credentials["id_token"] = response.IDToken
+		}
 	}
 	delete(credentials, excelAccessTokenRejectedKey)
-	info, err := excelOAuthTokenInfo(credentials)
-	if err == nil {
-		err = validateExcelIdentity(account, info)
-	}
+	info, err := decodeStoredExcelOAuthTokenInfo(account, credentials, false)
 	if err != nil {
 		return "", errors.New("refreshed Excel identity mismatch")
 	}
@@ -341,6 +426,14 @@ func (s *OpenAIOAuthService) rejectExcelAccessToken(ctx context.Context, account
 	return err
 }
 func (s *OpenAIGatewayService) getExcelBPSAccessToken(ctx context.Context, account *Account) (string, error) {
+	ctx = selectionbudget.PreparationContext(ctx)
+	ctx, stopPreparation := OpenAITurnWaitContext(ctx)
+	defer stopPreparation()
+	if account != nil && account.VendorID != nil {
+		if err := validateVendorModeDispatch(ctx, s.accountRepo, account, nil, VendorOpenAIModeBPS); err != nil {
+			return "", err
+		}
+	}
 	if account.IsExcelOAuth() {
 		token, _, err := s.GetAccessToken(ctx, account)
 		return token, err
@@ -373,7 +466,7 @@ func (s *OpenAIOAuthService) ExcelAuthorizationStatus(ctx context.Context, accou
 		}
 		return nil, infraerrors.ServiceUnavailable("OPENAI_EXCEL_AUTH_UNAVAILABLE", "Excel authorization is unavailable")
 	}
-	info, err := decodeExcelOAuthTokenInfo(credentials, true)
+	info, err := decodeStoredExcelOAuthTokenInfo(account, credentials, true)
 	if err != nil {
 		return nil, err
 	}
