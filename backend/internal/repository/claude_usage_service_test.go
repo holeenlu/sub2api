@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
+
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
@@ -74,8 +76,8 @@ func (s *ClaudeUsageServiceSuite) TestFetchUsage_NonOK() {
 
 	_, err := s.fetcher.FetchUsage(context.Background(), "at", "")
 	require.Error(s.T(), err)
-	require.ErrorContains(s.T(), err, "status 401")
-	require.ErrorContains(s.T(), err, "nope")
+	require.ErrorContains(s.T(), err, "HTTP 401")
+	require.NotContains(s.T(), err.Error(), "nope", "raw upstream error bodies must not reach clients")
 }
 
 func (s *ClaudeUsageServiceSuite) TestFetchUsage_BadJSON() {
@@ -92,6 +94,45 @@ func (s *ClaudeUsageServiceSuite) TestFetchUsage_BadJSON() {
 	_, err := s.fetcher.FetchUsage(context.Background(), "at", "")
 	require.Error(s.T(), err)
 	require.ErrorContains(s.T(), err, "decode response failed")
+}
+
+func (s *ClaudeUsageServiceSuite) TestFetchUsage_RejectsSuccessfulErrorEnvelope() {
+	s.srv = newLocalTestServer(s.T(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "{\"error\":{\"type\":\"permission_error\",\"message\":\"sensitive details\"}}")
+	}))
+	s.fetcher = &claudeUsageService{usageURL: s.srv.URL, allowPrivateHosts: true}
+	_, err := s.fetcher.FetchUsage(s.T().Context(), "at", "")
+	require.Error(s.T(), err)
+	require.NotContains(s.T(), err.Error(), "sensitive details")
+}
+
+func (s *ClaudeUsageServiceSuite) TestFetchProfile_SameAuthorizationAndOptionalFields() {
+	s.srv = newLocalTestServer(s.T(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(s.T(), "/profile", r.URL.Path)
+		require.Equal(s.T(), "Bearer at", r.Header.Get("Authorization"))
+		require.Equal(s.T(), "oauth-2025-04-20", r.Header.Get("anthropic-beta"))
+		_, _ = io.WriteString(w, `{"organization":{"rate_limit_tier":"default_claude_max_20x","has_extra_usage_enabled":false},"account":{"has_claude_max":true}}`)
+	}))
+	s.fetcher = &claudeUsageService{profileURL: s.srv.URL + "/profile", allowPrivateHosts: true}
+	profile, err := s.fetcher.FetchProfileWithOptions(s.T().Context(), &service.ClaudeUsageFetchOptions{AccessToken: "at"})
+	require.NoError(s.T(), err)
+	require.JSONEq(s.T(), `"default_claude_max_20x"`, string(profile.Organization["rate_limit_tier"]))
+	require.JSONEq(s.T(), "false", string(profile.Organization["has_extra_usage_enabled"]))
+}
+
+func (s *ClaudeUsageServiceSuite) TestFetchProfile_DoesNotFollowCredentialRedirects() {
+	requests := 0
+	s.srv = newLocalTestServer(s.T(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.Redirect(w, r, "/other", http.StatusFound)
+	}))
+	s.fetcher = &claudeUsageService{profileURL: s.srv.URL, allowPrivateHosts: true}
+	_, err := s.fetcher.FetchProfileWithOptions(s.T().Context(), &service.ClaudeUsageFetchOptions{AccessToken: "at"})
+	require.Error(s.T(), err)
+	var upstream *service.ClaudeUsageHTTPError
+	require.ErrorAs(s.T(), err, &upstream)
+	require.Equal(s.T(), http.StatusFound, upstream.StatusCode)
+	require.Equal(s.T(), 1, requests)
 }
 
 func (s *ClaudeUsageServiceSuite) TestFetchUsage_ContextCancel() {

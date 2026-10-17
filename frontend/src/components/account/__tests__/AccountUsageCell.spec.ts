@@ -608,33 +608,40 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('7d|36|900')
   })
 
-  it('仅为 OpenAI OAuth 7d 窗口计算预计总费用', async () => {
+  it.each<[Account['platform'], Account['type'], number]>([
+    ['openai', 'oauth', 6752],
+    ['anthropic', 'oauth', 6753],
+    ['anthropic', 'setup-token', 6754]
+  ])('%s %s 展示独立窗口统计、重置时间及 7d 预计总费用', async (platform, type, id) => {
     getUsage.mockResolvedValue({
       five_hour: {
         utilization: 25,
-        resets_at: null,
+        resets_at: '2099-03-07T12:00:00Z',
         remaining_seconds: 0,
         window_stats: { requests: 1, tokens: 100, cost: 2 }
       },
       seven_day: {
         utilization: 40,
-        resets_at: null,
+        resets_at: '2099-03-13T12:00:00Z',
         remaining_seconds: 0,
-        window_stats: { requests: 2, tokens: 200, cost: 12 }
+        window_stats: { requests: 2, tokens: 200, cost: 12, standard_cost: 18, user_cost: 6 }
       }
     })
 
     const wrapper = mount(AccountUsageCell, {
       props: {
-        account: makeAccount({ id: 6752, platform: 'openai', type: 'oauth' })
+        account: makeAccount({ id, platform, type })
       },
       global: {
         stubs: {
           UsageProgressBar: {
-            props: ['label', 'estimatedTotalCost'],
+            name: 'UsageProgressBar',
+            props: ['label', 'estimatedTotalCost', 'windowStats', 'resetsAt'],
             template: '<div class="usage-bar">{{ label }}|{{ estimatedTotalCost ?? "none" }}</div>'
           },
-          AccountQuotaInfo: true
+          AccountQuotaInfo: true,
+          ClaudeResetCreditsCell: true,
+          OpenAIQuotaResetCell: true
         }
       }
     })
@@ -643,6 +650,14 @@ describe('AccountUsageCell', () => {
 
     expect(wrapper.text()).toContain('5h|none')
     expect(wrapper.text()).toContain('7d|30')
+    const bars = wrapper.findAllComponents({ name: 'UsageProgressBar' })
+    expect(bars[0].props('windowStats').requests).toBe(1)
+    expect(bars[0].props('resetsAt')).toBe('2099-03-07T12:00:00Z')
+    expect(bars[1].props('windowStats')).toEqual({
+      requests: 2, tokens: 200, cost: 12, standard_cost: 18, user_cost: 6
+    })
+    expect(bars[1].props('resetsAt')).toBe('2099-03-13T12:00:00Z')
+    wrapper.unmount()
   })
 
   it.each([
@@ -1804,6 +1819,28 @@ describe('AccountUsageCell', () => {
     expect(text).toContain('admin.accounts.gemini.quotaPolicy.title')
     expect(text).toContain('admin.accounts.gemini.quotaPolicy.simulatedNote')
     expect(getUsage).toHaveBeenCalledWith(4003)
+  })
+
+  it('Anthropic 把逐字段来源传入窗口和详情组件', async () => {
+    const observation = { value: 42, source: 'upstream_api', sampled_at: '2026-10-19T03:00:00Z' }
+    const statistics = { value: { requests: 2, cost: 12 }, source: 'local_statistics', sampled_at: '2026-10-19T03:01:00Z' }
+    const details = { profile_access: 'granted', observations: { 'seven_day.utilization': observation, 'seven_day.window_stats': statistics } }
+    getUsage.mockResolvedValue({ seven_day: { utilization: 42, resets_at: null, remaining_seconds: 0 }, anthropic: details })
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 3901, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: {
+        UsageProgressBar: { name: 'UsageProgressBar', props: ['observation', 'statsObservation', 'utilizationKnown'], template: '<div />' },
+        AnthropicUsageDetails: { name: 'AnthropicUsageDetails', props: ['details'], template: '<div />' },
+        ClaudeResetCreditsCell: true
+      } }
+    })
+    await flushPromises()
+    const bar = wrapper.getComponent({ name: 'UsageProgressBar' })
+    expect(bar.props('observation')).toEqual(observation)
+    expect(bar.props('statsObservation')).toEqual(statistics)
+    expect(bar.props('utilizationKnown')).toBe(true)
+    expect(wrapper.getComponent({ name: 'AnthropicUsageDetails' }).props('details')).toEqual(details)
+    wrapper.unmount()
   })
 
   it('Anthropic OAuth 会渲染 7d F (Fable) 进度条，且 7d S 逻辑保留', async () => {

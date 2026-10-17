@@ -1,10 +1,13 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/stretchr/testify/require"
 )
 
@@ -84,6 +87,8 @@ func TestBuildPassiveUsageWindow(t *testing.T) {
 		}, "u", "r")
 		require.NotNil(t, window)
 		require.Equal(t, 0, window.RemainingSeconds)
+		require.Zero(t, window.Utilization)
+		require.Nil(t, window.ResetsAt)
 	})
 
 	t.Run("utilization only", func(t *testing.T) {
@@ -92,6 +97,213 @@ func TestBuildPassiveUsageWindow(t *testing.T) {
 		require.InDelta(t, 25.0, window.Utilization, 1e-9)
 		require.Nil(t, window.ResetsAt)
 	})
+}
+
+type claudeUsageSnapshotRepo struct {
+	AccountRepository
+	account Account
+	writes  int
+}
+
+func (r *claudeUsageSnapshotRepo) GetByID(context.Context, int64) (*Account, error) {
+	// Simulate a fresh DB load, including JSON numbers decoded as float64.
+	raw, err := json.Marshal(r.account)
+	if err != nil {
+		return nil, err
+	}
+	var account Account
+	err = json.Unmarshal(raw, &account)
+	return &account, err
+}
+
+func (r *claudeUsageSnapshotRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+	mergeAccountExtra(&r.account, updates)
+	r.writes++
+	return nil
+}
+
+func (r *claudeUsageSnapshotRepo) UpdateSessionWindowEnd(_ context.Context, _ int64, end time.Time) error {
+	r.account.SessionWindowEnd = &end
+	return nil
+}
+
+type claudeSnapshotFetcher struct {
+	ClaudeUsageFetcher
+	response *ClaudeUsageResponse
+	calls    int
+}
+
+type claudeWindowStatsRepo struct {
+	UsageLogRepository
+	starts []time.Time
+	query  func(time.Time) (*usagestats.AccountStats, error)
+}
+
+func (r *claudeWindowStatsRepo) GetAccountWindowStats(_ context.Context, _ int64, start time.Time) (*usagestats.AccountStats, error) {
+	r.starts = append(r.starts, start)
+	return r.query(start)
+}
+
+func (f *claudeSnapshotFetcher) FetchUsageWithOptions(context.Context, *ClaudeUsageFetchOptions) (*ClaudeUsageResponse, error) {
+	f.calls++
+	return f.response, nil
+}
+
+func TestClaudeUsageSnapshot_RefreshAndReload(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	reset5h, reset7d := now.Add(time.Hour), now.Add(6*24*time.Hour)
+	resp := &ClaudeUsageResponse{}
+	resp.FiveHour.Utilization, resp.FiveHour.ResetsAt = 65, reset5h.Format(time.RFC3339)
+	resp.SevenDay.Utilization, resp.SevenDay.ResetsAt = 74, reset7d.Format(time.RFC3339)
+	resp.SevenDayOverageIncluded = ClaudeUsageWindow{Utilization: 42, ResetsAt: reset7d.Format(time.RFC3339)}
+	fetcher := &claudeSnapshotFetcher{response: resp}
+	repo := &claudeUsageSnapshotRepo{account: Account{ID: 12, Platform: PlatformAnthropic, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "test-token", "scope": "user:profile user:inference"}}}
+	fiveHourStats := &usagestats.AccountStats{Requests: 2, Tokens: 100, Cost: 3, StandardCost: 4, UserCost: 2}
+	sevenDayStats := &usagestats.AccountStats{Requests: 10, Tokens: 500, Cost: 12, StandardCost: 18, UserCost: 6}
+	logs := &claudeWindowStatsRepo{query: func(start time.Time) (*usagestats.AccountStats, error) {
+		if start.Equal(reset5h.Add(-5 * time.Hour)) {
+			return fiveHourStats, nil
+		}
+		require.True(t, start.Equal(reset7d.Add(-7*24*time.Hour)), "unexpected window start: %v", start)
+		return sevenDayStats, nil
+	}}
+	svc := &AccountUsageService{accountRepo: repo, usageLogRepo: logs, cache: NewUsageCache(), usageFetcher: fetcher}
+
+	active, err := svc.GetUsage(t.Context(), 12, true)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.writes)
+	require.Equal(t, windowStatsFromAccountStats(fiveHourStats), active.FiveHour.WindowStats)
+	require.Equal(t, windowStatsFromAccountStats(sevenDayStats), active.SevenDay.WindowStats)
+
+	// A new service must recover window times and costs from persisted records.
+	reloaded := &AccountUsageService{accountRepo: repo, usageLogRepo: logs, cache: NewUsageCache()}
+	usage, err := reloaded.GetPassiveUsage(t.Context(), 12)
+	require.NoError(t, err)
+	require.InDelta(t, 65, usage.FiveHour.Utilization, 1e-9)
+	require.InDelta(t, 74, usage.SevenDay.Utilization, 1e-9)
+	require.InDelta(t, 42, usage.SevenDayFable.Utilization, 1e-9)
+	require.True(t, reset5h.Equal(*usage.FiveHour.ResetsAt))
+	require.True(t, reset7d.Equal(*usage.SevenDay.ResetsAt))
+	require.True(t, reset7d.Equal(*usage.SevenDayFable.ResetsAt))
+	require.Equal(t, active.FiveHour.WindowStats, usage.FiveHour.WindowStats)
+	require.Equal(t, active.SevenDay.WindowStats, usage.SevenDay.WindowStats)
+	require.Len(t, logs.starts, 4, "empty cache must reload both windows from storage")
+
+	// Setup Token manual queries use the same persisted windows without OAuth scope.
+	repo.account.Type = AccountTypeSetupToken
+	setupUsage, err := reloaded.GetUsage(t.Context(), 12, true)
+	require.NoError(t, err)
+	require.Equal(t, usage.SevenDay, setupUsage.SevenDay)
+	require.Equal(t, usage.FiveHour.WindowStats, setupUsage.FiveHour.WindowStats)
+	require.Len(t, logs.starts, 4, "unchanged windows reuse their separate stats caches")
+	repo.account.Type = AccountTypeOAuth
+
+	// A newer header sample must not be overwritten by replaying the API cache.
+	require.NoError(t, repo.UpdateExtra(t.Context(), 12, map[string]any{"passive_usage_7d_utilization": 0.75}))
+	before := repo.writes
+	_, err = svc.GetUsage(t.Context(), 12)
+	require.NoError(t, err)
+	require.Equal(t, before, repo.writes, "cache hits must not rewrite persisted observations")
+	require.Equal(t, 0.75, repo.account.Extra["passive_usage_7d_utilization"])
+
+	// Explicit query bypasses a successful cache; missing Fable keeps its snapshot.
+	updated := *resp
+	updated.SevenDay.Utilization = 76
+	updated.SevenDayOverageIncluded = ClaudeUsageWindow{}
+	fetcher.response = &updated
+	usage, err = svc.GetUsage(t.Context(), 12, true)
+	require.NoError(t, err)
+	require.Equal(t, 2, fetcher.calls)
+	require.Equal(t, 76.0, usage.SevenDay.Utilization)
+	require.InDelta(t, 42, usage.SevenDayFable.Utilization, 1e-9)
+	usage, err = reloaded.GetPassiveUsage(t.Context(), 12)
+	require.NoError(t, err)
+	require.InDelta(t, 76, usage.SevenDay.Utilization, 1e-9)
+	require.InDelta(t, 42, usage.SevenDayFable.Utilization, 1e-9)
+
+	// Forced refresh still respects the short error cache to avoid retry storms.
+	upstreamErr := errors.New("upstream rate limited")
+	svc.cache.apiCache.Store(int64(12), &apiUsageCache{identity: anthropicCredentialIdentity(&repo.account), err: upstreamErr, timestamp: time.Now()})
+	fallback, err := svc.GetUsage(t.Context(), 12, true)
+	require.NoError(t, err)
+	require.NotEmpty(t, fallback.Error)
+	require.NotNil(t, fallback.SevenDay)
+	require.Equal(t, 2, fetcher.calls)
+	usage, err = reloaded.GetPassiveUsage(t.Context(), 12)
+	require.NoError(t, err)
+	require.InDelta(t, 76, usage.SevenDay.Utilization, 1e-9)
+}
+
+func TestAddWindowStats_CacheTracksWindowBoundaries(t *testing.T) {
+	reset5h := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	reset7d := reset5h.Add(4 * 24 * time.Hour)
+	logs := &claudeWindowStatsRepo{}
+	logs.query = func(time.Time) (*usagestats.AccountStats, error) {
+		return &usagestats.AccountStats{Requests: int64(len(logs.starts))}, nil
+	}
+	svc := &AccountUsageService{usageLogRepo: logs, cache: NewUsageCache()}
+	account := &Account{ID: 42}
+	usage := &UsageInfo{FiveHour: &UsageProgress{ResetsAt: &reset5h}, SevenDay: &UsageProgress{ResetsAt: &reset7d}}
+	svc.addWindowStats(t.Context(), account, usage)
+	require.Equal(t, []time.Time{reset5h.Add(-5 * time.Hour), reset7d.Add(-7 * 24 * time.Hour)}, logs.starts)
+	require.EqualValues(t, 1, usage.FiveHour.WindowStats.Requests)
+	require.EqualValues(t, 2, usage.SevenDay.WindowStats.Requests)
+	svc.addWindowStats(t.Context(), account, usage)
+	require.Len(t, logs.starts, 2)
+
+	// Either upstream reset changes before the TTL: invalidate only that window.
+	reset5h = reset5h.Add(time.Hour)
+	svc.addWindowStats(t.Context(), account, usage)
+	require.Len(t, logs.starts, 3)
+	require.Equal(t, reset5h.Add(-5*time.Hour), logs.starts[2])
+	require.EqualValues(t, 3, usage.FiveHour.WindowStats.Requests)
+	require.EqualValues(t, 2, usage.SevenDay.WindowStats.Requests)
+	reset7d = reset7d.Add(24 * time.Hour)
+	svc.addWindowStats(t.Context(), account, usage)
+	require.Len(t, logs.starts, 4)
+	require.Equal(t, reset7d.Add(-7*24*time.Hour), logs.starts[3])
+	require.EqualValues(t, 3, usage.FiveHour.WindowStats.Requests)
+	require.EqualValues(t, 4, usage.SevenDay.WindowStats.Requests)
+
+	// Cache size stays bounded across resets; TTL expiration refreshes costs.
+	entries := 0
+	svc.cache.windowStatsCache.Range(func(_, value any) bool {
+		entries++
+		value.(*windowStatsCache).timestamp = time.Now().Add(-2 * windowStatsCacheTTL)
+		return true
+	})
+	require.Equal(t, 2, entries)
+	svc.addWindowStats(t.Context(), account, usage)
+	require.Len(t, logs.starts, 6)
+}
+
+func TestAddWindowStats_IndependentFailuresAndRollingFallback(t *testing.T) {
+	reset5h := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	failFiveHour := true
+	logs := &claudeWindowStatsRepo{query: func(start time.Time) (*usagestats.AccountStats, error) {
+		if failFiveHour && start.Equal(reset5h.Add(-5*time.Hour)) {
+			return nil, errors.New("stats temporarily unavailable")
+		}
+		return &usagestats.AccountStats{Requests: 5, Cost: 12}, nil
+	}}
+	svc := &AccountUsageService{usageLogRepo: logs, cache: NewUsageCache()}
+	account := &Account{ID: 42}
+	usage := &UsageInfo{FiveHour: &UsageProgress{ResetsAt: &reset5h}, SevenDay: &UsageProgress{Utilization: 40}}
+	svc.addWindowStats(t.Context(), account, usage)
+	require.Nil(t, usage.FiveHour.WindowStats)
+	require.Equal(t, 12.0, usage.SevenDay.WindowStats.Cost)
+	require.WithinDuration(t, time.Now().Add(-7*24*time.Hour), logs.starts[1], time.Second)
+
+	// A failed query is retried; a rolling window still uses the one-minute cache.
+	failFiveHour = false
+	svc.addWindowStats(t.Context(), account, usage)
+	require.NotNil(t, usage.FiveHour.WindowStats)
+	require.Len(t, logs.starts, 3)
+	usage.FiveHour = nil
+	svc.addWindowStats(t.Context(), account, usage)
+	require.Len(t, logs.starts, 3)
+	require.NotNil(t, usage.SevenDay.WindowStats)
 }
 
 func TestSyncActiveToPassive_WritesFableExtras(t *testing.T) {

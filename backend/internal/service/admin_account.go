@@ -162,6 +162,11 @@ func duplicateAccountExtra(value map[string]any) (map[string]any, error) {
 	for key := range duplicateAccountDiscardedExtraKeys {
 		delete(cloned, key)
 	}
+	for key := range cloned {
+		if strings.HasPrefix(key, anthropicObservationPrefix) {
+			delete(cloned, key)
+		}
+	}
 	return cloned, nil
 }
 
@@ -1297,15 +1302,6 @@ func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
 		return err
 	}
 	return nil
-}
-
-func (s *adminServiceImpl) RefreshAccountCredentials(ctx context.Context, id int64) (*Account, error) {
-	account, err := s.accountRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	// TODO: Implement refresh logic
-	return account, nil
 }
 
 func (s *adminServiceImpl) ClearAccountError(ctx context.Context, id int64) (*Account, error) {

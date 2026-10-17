@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -20,6 +19,7 @@ const defaultUsageUserAgent = "claude-code/2.1.7"
 
 type claudeUsageService struct {
 	usageURL          string
+	profileURL        string
 	allowPrivateHosts bool
 	httpUpstream      service.HTTPUpstream
 }
@@ -43,66 +43,77 @@ func (s *claudeUsageService) FetchUsage(ctx context.Context, accessToken, proxyU
 
 // FetchUsageWithOptions 完整版本，支持 TLS 指纹和自定义 User-Agent
 func (s *claudeUsageService) FetchUsageWithOptions(ctx context.Context, opts *service.ClaudeUsageFetchOptions) (*service.ClaudeUsageResponse, error) {
+	var result service.ClaudeUsageResponse
+	if err := s.fetchJSON(ctx, opts, s.usageURL, &result); err != nil {
+		return nil, err
+	}
+	if _, failed := result.RawFields["error"]; failed {
+		return nil, fmt.Errorf("invalid usage response")
+	}
+	for _, key := range []string{"five_hour", "seven_day", "seven_day_sonnet", "seven_day_opus", "seven_day_overage_included", "extra_usage", "limits"} {
+		if _, present := result.RawFields[key]; present {
+			return &result, nil
+		}
+	}
+	return nil, fmt.Errorf("empty or unsupported usage response")
+}
+
+// FetchProfileWithOptions reuses the credential, proxy and TLS identity. Callers
+// require user:profile and handle profile failures independently of usage.
+func (s *claudeUsageService) FetchProfileWithOptions(ctx context.Context, opts *service.ClaudeUsageFetchOptions) (*service.ClaudeProfileResponse, error) {
+	endpoint := s.profileURL
+	if endpoint == "" {
+		endpoint = "https://api.anthropic.com/api/oauth/profile"
+	}
+	var result service.ClaudeProfileResponse
+	if err := s.fetchJSON(ctx, opts, endpoint, &result); err != nil {
+		return nil, err
+	}
+	if result.Organization == nil && result.Account == nil {
+		return nil, fmt.Errorf("empty profile response")
+	}
+	return &result, nil
+}
+
+func (s *claudeUsageService) fetchJSON(ctx context.Context, opts *service.ClaudeUsageFetchOptions, endpoint string, result any) error {
 	if opts == nil {
-		return nil, fmt.Errorf("options is nil")
+		return fmt.Errorf("options is nil")
 	}
-
-	// 创建请求
-	req, err := http.NewRequestWithContext(ctx, "GET", s.usageURL, nil)
+	ctx = service.WithHTTPUpstreamRedirectsDisabled(ctx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request failed: %w", err)
+		return fmt.Errorf("create request failed: %w", err)
 	}
-
-	// 设置请求头（与抓包一致，但不设置 Accept-Encoding，让 Go 自动处理压缩）
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+opts.AccessToken)
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
-
-	// 设置 User-Agent（优先使用缓存的 Fingerprint，否则使用默认值）
 	userAgent := defaultUsageUserAgent
 	if opts.Fingerprint != nil && opts.Fingerprint.UserAgent != "" {
 		userAgent = opts.Fingerprint.UserAgent
 	}
 	req.Header.Set("User-Agent", userAgent)
-
 	var resp *http.Response
-
-	// 如果有 TLS Profile 且有 HTTPUpstream，使用 DoWithTLS
 	if opts.TLSProfile != nil && s.httpUpstream != nil {
 		resp, err = s.httpUpstream.DoWithTLS(req, opts.ProxyURL, opts.AccountID, 0, opts.TLSProfile)
-		if err != nil {
-			return nil, fmt.Errorf("request with TLS fingerprint failed: %w", err)
-		}
 	} else {
-		// 不启用 TLS 指纹，使用普通 HTTP 客户端
-		client, err := httpclient.GetClient(httpclient.Options{
-			ProxyURL:           opts.ProxyURL,
-			Timeout:            30 * time.Second,
-			ValidateResolvedIP: true,
-			AllowPrivateHosts:  s.allowPrivateHosts,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create http client failed: %w", err)
+		client, clientErr := httpclient.GetClient(httpclient.Options{ProxyURL: opts.ProxyURL, Timeout: 30 * time.Second, ValidateResolvedIP: true, AllowPrivateHosts: s.allowPrivateHosts})
+		if clientErr != nil {
+			return fmt.Errorf("create http client failed: %w", clientErr)
 		}
-
-		resp, err = client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("request failed: %w", err)
-		}
+		isolated := *client
+		isolated.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		resp, err = isolated.Do(req)
+	}
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		msg := fmt.Sprintf("API returned status %d: %s", resp.StatusCode, string(body))
-		return nil, infraerrors.New(http.StatusInternalServerError, "UPSTREAM_ERROR", msg)
+		return &service.ClaudeUsageHTTPError{StatusCode: resp.StatusCode}
 	}
-
-	var usageResp service.ClaudeUsageResponse
-	if err := json.NewDecoder(resp.Body).Decode(&usageResp); err != nil {
-		return nil, fmt.Errorf("decode response failed: %w", err)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(result); err != nil {
+		return fmt.Errorf("decode response failed: %w", err)
 	}
-
-	return &usageResp, nil
+	return nil
 }

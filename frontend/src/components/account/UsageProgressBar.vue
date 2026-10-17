@@ -30,6 +30,8 @@
         >
           {{ t('admin.accounts.usageWindow.estimatedTotalCost', { cost: estimatedTotalCost.toFixed(2) }) }}
         </span>
+        <UsageObservationBadge :observation="statsObservation" />
+        <UsageObservationBadge v-if="estimatedTotalCost != null" :observation="estimateObservation" />
       </div>
     </div>
 
@@ -57,6 +59,7 @@
       <span v-if="shouldShowResetTime" class="shrink-0 text-[10px] text-gray-400">
         {{ formatResetTime }}
       </span>
+      <UsageObservationBadge :observation="observation" />
     </div>
   </div>
 </template>
@@ -65,13 +68,18 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import type { WindowStats } from '@/types'
+import type { WindowStats, UsageObservation } from '@/types'
+import UsageObservationBadge from './UsageObservationBadge.vue'
 import { formatCompactNumber } from '@/utils/format'
 
 const props = withDefaults(
   defineProps<{
     label: string
     utilization: number // Percentage (0-100+)
+    utilizationKnown?: boolean
+    observation?: UsageObservation | null
+    statsObservation?: UsageObservation | null
+    estimateObservation?: UsageObservation | null
     resetsAt?: string | null
     color: 'indigo' | 'emerald' | 'purple' | 'amber'
     windowStats?: WindowStats | null
@@ -81,7 +89,7 @@ const props = withDefaults(
     /** fixed: 定宽居中徽章（账号页纵向对齐）；auto: 限宽截断左对齐（监控页组合标签） */
     labelWidth?: 'fixed' | 'auto'
   }>(),
-  { labelWidth: 'fixed' }
+  { labelWidth: 'fixed', utilizationKnown: true }
 )
 
 const { t } = useI18n()
@@ -173,11 +181,13 @@ const textClass = computed(() => {
 
 // Bar width (capped at 100%)
 const barWidth = computed(() => {
+  if (!props.utilizationKnown) return '0%'
   return `${Math.min(Math.max(props.utilization, 0), 100)}%`
 })
 
 // Display percentage (cap at 999% for readability)
 const displayPercent = computed(() => {
+  if (!props.utilizationKnown) return '—'
   const percent = Math.round(
     props.remainingCapacity
       ? Math.min(Math.max(props.utilization, 0), 100)

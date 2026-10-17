@@ -43,6 +43,7 @@
         <!-- 5h Window -->
         <UsageProgressBar
           v-if="usageInfo.five_hour"
+          v-bind="anthropicWindowProps('five_hour')"
           label="5h"
           :utilization="usageInfo.five_hour.utilization"
           :resets-at="usageInfo.five_hour.resets_at"
@@ -50,18 +51,22 @@
           color="indigo"
         />
 
-        <!-- 7d Window (OAuth only) -->
+        <!-- 7d Window (OAuth and Setup Token passive samples) -->
         <UsageProgressBar
           v-if="usageInfo.seven_day"
+          v-bind="anthropicWindowProps('seven_day')"
           label="7d"
           :utilization="usageInfo.seven_day.utilization"
           :resets-at="usageInfo.seven_day.resets_at"
+          :window-stats="usageInfo.seven_day.window_stats"
+          :estimated-total-cost="sevenDayEstimatedTotalCost"
           color="emerald"
         />
 
         <!-- 7d Sonnet Window (OAuth only) -->
         <UsageProgressBar
           v-if="usageInfo.seven_day_sonnet"
+          v-bind="anthropicWindowProps('seven_day_sonnet')"
           label="7d S"
           :utilization="usageInfo.seven_day_sonnet.utilization"
           :resets-at="usageInfo.seven_day_sonnet.resets_at"
@@ -71,12 +76,13 @@
         <!-- 7d Fable Window (7d_oi) -->
         <UsageProgressBar
           v-if="usageInfo.seven_day_fable"
+          v-bind="anthropicWindowProps('seven_day_fable')"
           label="7d F"
           :utilization="usageInfo.seven_day_fable.utilization"
           :resets-at="usageInfo.seven_day_fable.resets_at"
           color="amber"
         />
-
+        <AnthropicUsageDetails v-if="usageInfo.anthropic" :details="usageInfo.anthropic" class="mt-1" />
       </div>
 
       <!-- No data yet -->
@@ -88,7 +94,7 @@
         while usage is still loading survives the usage response. The local query
         button shares its row once usage data exists.
       -->
-      <ClaudeResetCreditsCell :account="account" class="mt-1" @redeemed="loadActiveUsage">
+      <ClaudeResetCreditsCell :account="account" class="mt-1" @redeemed="loadActiveUsage" @account-updated="handleQuotaResetAccountUpdated">
         <template v-if="usageInfo" #pre-actions>
           <span
             v-if="usageInfo.source === 'passive'"
@@ -140,7 +146,7 @@
           :utilization="usageInfo.seven_day.utilization"
           :resets-at="usageInfo.seven_day.resets_at"
           :window-stats="usageInfo.seven_day.window_stats"
-          :estimated-total-cost="openAISevenDayEstimatedTotalCost"
+          :estimated-total-cost="sevenDayEstimatedTotalCost"
           :show-now-when-idle="true"
           color="emerald"
         />
@@ -685,6 +691,7 @@ import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
 import { formatCompactNumber } from '@/utils/format'
 import { isOfficialGeminiBaseUrl } from '@/utils/geminiExplicitCache'
 import UsageProgressBar from './UsageProgressBar.vue'
+import AnthropicUsageDetails from './AnthropicUsageDetails.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import ClaudeResetCreditsCell from './ClaudeResetCreditsCell.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
@@ -826,7 +833,17 @@ const hasOpenAIUsageFallback = computed(() => {
   return !!usageInfo.value?.five_hour || !!usageInfo.value?.seven_day
 })
 
-const openAISevenDayEstimatedTotalCost = computed(() => {
+const anthropicWindowProps = (window: string) => {
+  const observations = usageInfo.value?.anthropic?.observations
+  return {
+    observation: observations?.[window + '.utilization'],
+    statsObservation: observations?.[window + '.window_stats'],
+    estimateObservation: observations?.[window + '.estimated_total_cost'],
+    utilizationKnown: !observations || observations[window + '.utilization']?.value != null
+  }
+}
+
+const sevenDayEstimatedTotalCost = computed(() => {
   const sevenDay = usageInfo.value?.seven_day
   const utilization = sevenDay?.utilization
   const currentCost = sevenDay?.window_stats?.cost
