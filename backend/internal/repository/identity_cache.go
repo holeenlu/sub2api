@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -11,10 +12,10 @@ import (
 )
 
 const (
-	fingerprintKeyPrefix   = "fingerprint:"
-	fingerprintTTL         = 7 * 24 * time.Hour // 7天，配合每24小时懒续期可保持活跃账号永不过期
-	maskedSessionKeyPrefix = "masked_session:"
-	maskedSessionTTL       = 15 * time.Minute
+	fingerprintKeyPrefix     = "fingerprint:"
+	fingerprintTTL           = 7 * 24 * time.Hour // 7天，配合每24小时懒续期可保持活跃账号永不过期
+	sessionMaskSeedKeyPrefix = "session_mask_seed:"
+	sessionMaskSeedTTL       = 15 * time.Minute
 )
 
 // fingerprintKey generates the Redis key for account fingerprint cache.
@@ -22,9 +23,9 @@ func fingerprintKey(accountID int64) string {
 	return fmt.Sprintf("%s%d", fingerprintKeyPrefix, accountID)
 }
 
-// maskedSessionKey generates the Redis key for masked session ID cache.
-func maskedSessionKey(accountID int64) string {
-	return fmt.Sprintf("%s%d", maskedSessionKeyPrefix, accountID)
+// sessionMaskSeedKey isolates seeds from obsolete fixed-session cache entries.
+func sessionMaskSeedKey(accountID int64) string {
+	return fmt.Sprintf("%s%d", sessionMaskSeedKeyPrefix, accountID)
 }
 
 type identityCache struct {
@@ -57,19 +58,63 @@ func (c *identityCache) SetFingerprint(ctx context.Context, accountID int64, fp 
 	return c.rdb.Set(ctx, key, val, fingerprintTTL).Err()
 }
 
-func (c *identityCache) GetMaskedSessionID(ctx context.Context, accountID int64) (string, error) {
-	key := maskedSessionKey(accountID)
-	val, err := c.rdb.Get(ctx, key).Result()
-	if err != nil {
-		if err == redis.Nil {
-			return "", nil
-		}
-		return "", err
-	}
-	return val, nil
+// Adapted from sub4api a3eaf63afc672ffedf7844e6cfc5cb6750d52a3e.
+var getOrCreateSessionMaskSeedScript = redis.NewScript(`
+local seed = redis.call('GET', KEYS[1])
+if not seed then
+  if ARGV[1] == '' then
+    return ''
+  end
+  seed = ARGV[1]
+  redis.call('SET', KEYS[1], seed, 'PX', ARGV[2])
+else
+  redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return seed
+`)
+
+func (c *identityCache) GetOrCreateSessionMaskSeed(ctx context.Context, accountID int64, candidate string) (string, error) {
+	return getOrCreateSessionMaskSeedScript.Run(ctx, c.rdb, []string{sessionMaskSeedKey(accountID)}, candidate, sessionMaskSeedTTL.Milliseconds()).Text()
 }
 
-func (c *identityCache) SetMaskedSessionID(ctx context.Context, accountID int64, sessionID string) error {
-	key := maskedSessionKey(accountID)
-	return c.rdb.Set(ctx, key, sessionID, maskedSessionTTL).Err()
+func claudeCodeHeadersKey(accountID int64) string {
+	return fmt.Sprintf("claude_code_headers:%d", accountID)
+}
+
+func (c *identityCache) GetClaudeCodeHeaders(ctx context.Context, accountID int64) (http.Header, error) {
+	fields, err := c.rdb.HGetAll(ctx, claudeCodeHeadersKey(accountID)).Result()
+	if err != nil {
+		return nil, err
+	}
+	headers := make(http.Header, len(fields))
+	for name, encoded := range fields {
+		var values []string
+		if err := json.Unmarshal([]byte(encoded), &values); err != nil {
+			return nil, fmt.Errorf("decode Claude Code header %q: %w", name, err)
+		}
+		headers[name] = values
+	}
+	return headers, nil
+}
+
+func (c *identityCache) UpdateClaudeCodeHeaders(ctx context.Context, accountID int64, headers http.Header) error {
+	if len(headers) == 0 {
+		return nil
+	}
+	fields := make(map[string]interface{}, len(headers))
+	for name, values := range headers {
+		encoded, err := json.Marshal(values)
+		if err != nil {
+			return err
+		}
+		fields[name] = string(encoded)
+	}
+	// Partial HSET and expiry execute together, without a read/modify/write
+	// race that could discard concurrent updates to other fields.
+	key := claudeCodeHeadersKey(accountID)
+	pipe := c.rdb.TxPipeline()
+	pipe.HSet(ctx, key, fields)
+	pipe.Expire(ctx, key, fingerprintTTL)
+	_, err := pipe.Exec(ctx)
+	return err
 }
