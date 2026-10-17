@@ -32,7 +32,6 @@ macOS / Linux：
 ```bash
 export ANTHROPIC_BASE_URL="{{API_ROOT}}"
 export ANTHROPIC_AUTH_TOKEN="你的 KDAN API Key"
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 claude --model claude-sonnet-5
 ```
 
@@ -41,7 +40,6 @@ Windows PowerShell：
 ```powershell
 $env:ANTHROPIC_BASE_URL="{{API_ROOT}}"
 $env:ANTHROPIC_AUTH_TOKEN="你的 KDAN API Key"
-$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
 claude --model claude-sonnet-5
 ```
 
@@ -55,20 +53,18 @@ claude --model claude-sonnet-5
 {
   "env": {
     "ANTHROPIC_BASE_URL": "{{API_ROOT}}",
-    "ANTHROPIC_AUTH_TOKEN": "你的 KDAN API Key",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    "ANTHROPIC_AUTH_TOKEN": "你的 KDAN API Key"
   }
 }
 ```
 
-該文件含私密認證資訊。不要寫進共享的專案 `.claude/settings.json`。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 是目前控制台生成器用於減少登入、遙測等非必要外連的設定，不會把 Claude 網頁、Remote Control 或語音功能改為由 KDAN 提供。GUI 啟動的 IDE 不一定繼承終端機環境。VS Code 擴充套件可在使用者 Settings JSON 中設定：
+該文件含私密認證資訊。不要寫進共享的專案 `.claude/settings.json`。目前設定不再強制關閉客戶端遙測；安裝腳本會保留既有的隱私設定。若舊設定仍含 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`，它仍然有效；希望恢復客戶端預設行為時，需自行從 shell 與使用者 settings 的 env 中移除該項並重新啟動客戶端，不要改成 `0`。這不會把所有遙測自動路由至網關：部分官方遙測仍直接連接供應商。GUI 啟動的 IDE 不一定繼承終端機環境。VS Code 擴充套件可在使用者 Settings JSON 中設定：
 
 ```json
 {
   "claudeCode.environmentVariables": [
     { "name": "ANTHROPIC_BASE_URL", "value": "{{API_ROOT}}" },
-    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 KDAN API Key" },
-    { "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "value": "1" }
+    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 KDAN API Key" }
   ]
 }
 ```
@@ -90,4 +86,4 @@ Claude Code 可能為標題、摘要和 token 計數傳送輔助請求。主模�
 | 429 | 等待速率限制視窗，核對餘額、並行與分組配額 |
 | 仍提示帳號登入 | 確認啟動的是 Claude Code，變數傳到目前程序；桌面版使用獨立教程 |
 
-來源：[官方閘道器接入](https://code.claude.com/docs/en/llm-gateway-connect)、[恢復工作階段](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)，專案設定生成器核對於 2026-09-15。
+來源：[官方閘道器接入](https://code.claude.com/docs/en/llm-gateway-connect)、[恢復工作階段](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)，專案設定生成器核對於 2026-10-19。
