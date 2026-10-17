@@ -489,6 +489,10 @@ func TestOpenAIGatewayService_GenerateSessionHash_AttachesLegacyHashToContext(t 
 	require.NotNil(t, c.Request)
 	require.NotNil(t, c.Request.Context())
 	require.NotEmpty(t, openAILegacySessionHashFromContext(c.Request.Context()))
+	diagnostics, ok := c.Request.Context().Value(gatewayCacheDiagnosticKey{}).(gatewayCacheDiagnostic)
+	require.True(t, ok)
+	require.Equal(t, gatewayCacheIdentity(0, sessionHash), diagnostics.Routing)
+	require.Equal(t, gatewayCacheIdentity(0, "sess-legacy-check"), diagnostics.Session)
 }
 
 func TestExtractOpenAIResponseIDFromJSONBytes(t *testing.T) {
@@ -685,6 +689,10 @@ func TestOpenAIGatewayService_GenerateSessionHash_ContentFallback(t *testing.T) 
 
 	hash := svc.GenerateSessionHash(c, body)
 	require.NotEmpty(t, hash, "content-based fallback should produce a hash")
+	diagnostics, ok := c.Request.Context().Value(gatewayCacheDiagnosticKey{}).(gatewayCacheDiagnostic)
+	require.True(t, ok)
+	require.Equal(t, gatewayCacheIdentity(0, hash), diagnostics.Routing)
+	require.Empty(t, diagnostics.Session, "derived routing must not fabricate an explicit conversation identity")
 
 	hash2 := svc.GenerateSessionHash(c, body)
 	require.Equal(t, hash, hash2, "same content should produce same hash")
@@ -3963,7 +3971,7 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 	require.Equal(t, "draw a cat", gjson.Get(rec.Body.String(), "output.0.revised_prompt").String())
 }
 
-func TestHandleSSEToJSON_NoFinalResponseKeepsSSEBody(t *testing.T) {
+func TestHandleSSEToJSON_NoFinalResponseReturnsProtocolError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -3980,11 +3988,11 @@ func TestHandleSSEToJSON_NoFinalResponseKeepsSSEBody(t *testing.T) {
 	}, "\n"))
 
 	usage, err := svc.handleSSEToJSON(resp, c, nil, body, "gpt-4o", "gpt-4o")
-	require.NoError(t, err)
-	require.NotNil(t, usage)
-	require.Equal(t, 0, usage.InputTokens)
-	require.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
-	require.Contains(t, rec.Body.String(), `data: {"type":"response.in_progress"`)
+	require.Error(t, err)
+	require.Nil(t, usage)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+	require.Contains(t, rec.Body.String(), "without a terminal response")
 }
 
 // 无账号时没有可换的对象：newOpenAIStreamFailoverError 要拿 account 记录 ops 归属与

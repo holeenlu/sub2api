@@ -2054,6 +2054,7 @@ func (u *openAIHTTPPassthroughAuthFailoverUpstream) calls() []int64 {
 }
 
 type openAIHTTPPassthroughSSERateLimitUpstream struct {
+	responseBody string
 	service.HTTPUpstream
 	mu         sync.Mutex
 	accountIDs []int64
@@ -2071,10 +2072,14 @@ func (u *openAIHTTPPassthroughSSERateLimitUpstream) Do(_ *http.Request, _ string
 		`data: {"type":"response.failed","response":{"id":"resp_rate_limited","status":"failed","error":{"code":"rate_limit_exceeded","message":"Concurrency limit exceeded for account, please retry later"}}}`,
 		"",
 	}, "\n")
+	if u.responseBody != "" {
+		body = u.responseBody
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header: http.Header{
 			"Content-Type": []string{"text/event-stream"},
+			"X-Request-Id": []string{"upstream-metered"},
 			"Retry-After":  []string{"1"},
 		},
 		Body: io.NopCloser(strings.NewReader(body)),
@@ -2389,7 +2394,8 @@ func TestOpenAIResponses_APIKeyPassthroughPoolAuthFailureRetriesThenSwitchesToHe
 	}
 }
 
-func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t *testing.T) {
+func runOpenAIResponsesHTTPPoolFailure(t *testing.T, wire string, passthrough, stream bool) ([]int64, []*service.UsageLog, *httptest.ResponseRecorder) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	groupID := int64(4204)
 	accounts := []service.Account{
@@ -2403,7 +2409,7 @@ func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t 
 				"pool_mode_retry_count":        float64(1),
 				"pool_mode_retry_status_codes": []any{float64(http.StatusTooManyRequests)},
 			},
-			Extra: map[string]any{"openai_passthrough": true},
+			Extra: map[string]any{"openai_passthrough": passthrough},
 		},
 	}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
@@ -2412,12 +2418,13 @@ func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t 
 	cfg.Gateway.MaxAccountSwitches = 1
 
 	accountRepo := &openAIWSFailoverHandlerAccountRepoStub{accounts: accounts}
-	upstream := &openAIHTTPPassthroughSSERateLimitUpstream{}
+	upstream := &openAIHTTPPassthroughSSERateLimitUpstream{responseBody: wire}
+	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 4)}
 	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billingCacheSvc.Stop)
 	gatewaySvc := service.NewOpenAIGatewayService(
 		accountRepo,
-		nil,
+		usageRepo,
 		nil,
 		nil,
 		nil,
@@ -2453,7 +2460,7 @@ func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t 
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol","input":"hello","stream":true}`))
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(fmt.Sprintf(`{"model":"gpt-5.6-sol","input":"hello","stream":%t}`, stream)))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
 		ID: 1804, GroupID: &groupID,
@@ -2464,11 +2471,38 @@ func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t 
 
 	h.Responses(c)
 
-	require.Equal(t, []int64{9912, 9912}, upstream.calls())
+	var logs []*service.UsageLog
+	for len(usageRepo.created) > 0 {
+		logs = append(logs, <-usageRepo.created)
+	}
+	return upstream.calls(), logs, rec
+}
+func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t *testing.T) {
+	calls, _, rec := runOpenAIResponsesHTTPPoolFailure(t, "", true, true)
+	require.Equal(t, []int64{9912, 9912}, calls)
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	require.Equal(t, "1", rec.Header().Get("Retry-After"))
 	require.Equal(t, "rate_limit_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 	require.Equal(t, "Upstream rate limit exceeded, please retry later", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+}
+
+func TestOpenAIResponsesHTTPMeteredFailureRecordsOnceAndStopsReplay(t *testing.T) {
+	const wire = "data: " + `{"type":"response.failed","response":{"id":"resp_metered_http","status":"failed","error":{"code":"rate_limit_exceeded","message":"Concurrency limit exceeded for account, please retry later"},"usage":{"input_tokens":11,"output_tokens":2,"input_tokens_details":{"cached_tokens":3,"cache_write_tokens":4}}}}` + "\n\n"
+	for _, passthrough := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("passthrough=%t/stream=%t", passthrough, stream), func(t *testing.T) {
+				calls, logs, _ := runOpenAIResponsesHTTPPoolFailure(t, wire, passthrough, stream)
+				require.Equal(t, []int64{9912}, calls, "metered execution cannot be transparently repeated")
+				require.Len(t, logs, 1)
+				require.Equal(t, 4, logs[0].InputTokens)
+				require.Equal(t, 3, logs[0].CacheReadTokens)
+				require.Equal(t, 4, logs[0].CacheCreationTokens)
+				require.Equal(t, 2, logs[0].OutputTokens)
+				require.Positive(t, logs[0].TotalCost)
+				require.Zero(t, logs[0].ActualCost, "Simple Mode records observed usage without debiting")
+			})
+		}
+	}
 }
 
 func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T) {

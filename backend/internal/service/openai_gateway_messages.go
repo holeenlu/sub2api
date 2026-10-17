@@ -433,7 +433,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				return nil, fmt.Errorf("build grok retry request: %w", err)
 			}
 		}
-		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account, vendorDispatchGroup(c))
+		resp, err = s.doOpenAIHTTPUpstream(c, upstreamReq, proxyURL, account)
 		if err != nil {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 		}
@@ -613,10 +613,23 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (out *OpenAIForwardResult, outErr error) {
 	requestID := resp.Header.Get("x-request-id")
 
 	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, "openai messages buffered", requestID)
+	defer func() {
+		if out == nil && outErr != nil && openAIUsageHasTokens(&usage) {
+			out = &OpenAIForwardResult{AuthorizationMode: nativeOpenAIUsageAuthorizationMode(account),
+				RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,
+				Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel,
+				UpstreamResponseModel:         observedUpstreamResponseModel(c),
+				UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+				UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
+				Duration:                      time.Since(startTime), ClientDisconnect: c.Request.Context().Err() != nil}
+			outErr = stopOpenAIMeteredReplay(outErr)
+		}
+	}()
+
 	if err != nil {
 		var readErr *openAICompatBufferedReadError
 		if errors.As(err, &readErr) && readErr != nil {
@@ -795,6 +808,8 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 		return nil, usage, acc, errors.New("upstream response body is nil")
 	}
 
+	drain := newOpenAIHTTPUsageDrain(c.Request.Context(), resp.Body.Close)
+	defer drain.stop()
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 
 	streamInterval := time.Duration(0)
@@ -956,7 +971,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (out *OpenAIForwardResult, outErr error) {
+	drain := newOpenAIHTTPUsageDrain(c.Request.Context(), resp.Body.Close)
+	defer drain.stop()
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -1020,7 +1037,19 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	}
 
 	// processDataLine handles a single "data: ..." SSE line from upstream.
+	defer func() {
+		if out == nil && outErr != nil && openAIUsageHasTokens(&usage) {
+			out = resultWithUsage()
+		}
+		if out != nil {
+			out.ClientDisconnect = clientDisconnected || drain.disconnected()
+			if outErr != nil && openAIUsageHasTokens(&out.Usage) {
+				outErr = stopOpenAIMeteredReplay(outErr)
+			}
+		}
+	}()
 	processDataLine := func(payload string) bool {
+		clientDisconnected = clientDisconnected || drain.disconnected()
 		payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 		if firstChunk {
 			firstChunk = false
@@ -1081,6 +1110,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 							c.Writer.Flush()
 						}
 						clientDisconnected = true
+						drain.start()
 					}
 					return true
 				}
@@ -1140,6 +1170,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				writeStreamHeaders()
 				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 					clientDisconnected = true
+					drain.start()
 					logger.L().Info("openai messages stream: client disconnected, continuing to drain upstream for billing",
 						zap.String("request_id", requestID),
 					)
@@ -1171,6 +1202,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				writeStreamHeaders()
 				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 					clientDisconnected = true
+					drain.start()
 					logger.L().Info("openai messages stream: client disconnected during final flush",
 						zap.String("request_id", requestID),
 					)
@@ -1354,6 +1386,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					zap.String("request_id", requestID),
 				)
 				clientDisconnected = true
+				drain.start()
 				continue
 			}
 			clientOutputStarted = true
