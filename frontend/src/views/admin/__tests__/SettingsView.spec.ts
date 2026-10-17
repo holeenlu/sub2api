@@ -724,6 +724,94 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
+
+
+
+  it.each([true, false])("preserves loaded BPS and image switches set to %s", async (enabled) => {
+    getSettings.mockResolvedValue({ ...baseSettingsResponse, excel_bps_enabled: enabled, excel_bps_image_relay_enabled: enabled });
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.get<HTMLInputElement>('#excel-bps-global-enabled').element.checked).toBe(enabled);
+    expect(wrapper.get<HTMLInputElement>('#excel-bps-image-enabled').element.checked).toBe(enabled);
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_enabled: enabled, excel_bps_image_relay_enabled: enabled }));
+    wrapper.unmount();
+  });
+
+  it.each([undefined, "off", "warn", "auto_compact"])("applies the BPS image policy default while preserving %s", async (policy) => {
+    getSettings.mockResolvedValue({ ...baseSettingsResponse, ...(policy ? { excel_bps_image_limit_policy: policy } : {}) });
+    const wrapper = mountView();
+    await flushPromises();
+    const expected = policy ?? "auto_compact";
+    expect(wrapper.get<HTMLSelectElement>('#bps-image-limit-policy').element.value).toBe(expected);
+    expect(wrapper.find('[data-testid="bps-image-auto-compact-disabled"]').exists()).toBe(expected !== 'auto_compact');
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_image_limit_policy: expected }));
+    wrapper.unmount();
+  });
+
+  it("previews the effective BPS budget without rewriting saved inputs", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.get<HTMLInputElement>('#excel-bps-global-enabled').element.checked).toBe(true);
+    expect(wrapper.get('[data-testid="bps-effective-budget"]').text()).toBe('1024 MiB');
+    expect(wrapper.get('[data-testid="bps-full-body-requests"]').text()).toBe('2');
+    await wrapper.get('#excel-bps-image-max-requests').setValue(4096);
+    expect(wrapper.get('[data-testid="bps-effective-budget"]').text()).toBe('32768 MiB');
+    expect(wrapper.get('[data-testid="bps-slot-budget"]').text()).toBe('32768 MiB');
+    expect(wrapper.find('[data-testid="bps-budget-raised"]').exists()).toBe(true);
+    expect(wrapper.get<HTMLInputElement>('#excel-bps-image-budget').element.value).toBe('1024');
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_image_budget_mib: 1024, excel_bps_image_max_requests: 4096 }));
+    await wrapper.get('#excel-bps-image-budget').setValue(65536);
+    expect(wrapper.get('[data-testid="bps-effective-budget"]').text()).toBe('65536 MiB');
+    expect(wrapper.find('[data-testid="bps-budget-raised"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("shows the minimum BPS budget and rejects invalid capacity inputs", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('#excel-bps-image-body-limit').setValue(1024);
+    expect(wrapper.get('#excel-bps-image-budget').attributes('min')).toBe('8192');
+    expect(wrapper.find('[data-testid="bps-budget-invalid"]').exists()).toBe(true);
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    await wrapper.get('#excel-bps-image-budget').setValue(8192);
+    expect(wrapper.find('[data-testid="bps-budget-invalid"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="bps-full-body-requests"]').text()).toBe('1');
+    await wrapper.get('#excel-bps-image-max-requests').setValue('');
+    expect(wrapper.find('[data-testid="bps-capacity-preview"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("keeps native image counts independent of relay storage and validates a relay switch", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.find('#excel-bps-image-storage-entries').exists()).toBe(false);
+    await wrapper.get('#excel-bps-image-max-images').setValue(1024);
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_image_mode: 'native', excel_bps_image_max_images: 1024, excel_bps_image_storage_entries: 512 }));
+    updateSettings.mockClear();
+    await wrapper.get('#excel-bps-image-mode').setValue('relay');
+    await wrapper.get('#excel-bps-image-base-url').setValue('https://images.example');
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    await wrapper.get('#excel-bps-image-storage-entries').setValue(1024);
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_image_mode: 'relay', excel_bps_image_storage_entries: 1024 }));
+    await wrapper.get('#excel-bps-global-enabled').setValue(false);
+    expect(wrapper.find('[data-testid="bps-global-disabled"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
   it("loads and saves the open button visibility for each custom menu", async () => {
     const menuItems = [
       { id: "docs", label: "Docs", url: "https://example.com/docs", icon_svg: "", visibility: "user", sort_order: 0 },
