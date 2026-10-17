@@ -1,0 +1,227 @@
+# 02 · 三级角色、会话与管理授权
+
+归档日期：2026-10-13；官方基线 `01842576b3d5c1e2545b5a99ad555d36e28ed306`；最终快照 `acf71dbc6c3f1ffe8ab0200ed8b7499c1b7d0286`。
+
+
+2026-10-14 增量归并：本页已纳入通过验收的 New API 实现，来源和逐文件归属见 [归并分析](NEW-API-INTEGRATION-2026-10-14.md)。原快照 SHA 仅代表 2026-10-13 历史输入。
+
+## 最终需求
+
+1. 固定 super_admin / admin / user 三级角色。super_admin 保有全站权限和超管专属操作；初始化可以只有超级管理员，由其直接建用户和个人 API Key，不依赖先建受限管理员。
+
+2. 全部管理员共用 admin_role_policy；不存在个人特批、上下级或创建人数据隔离。管理员是否能创建/修改其他管理员由 staff.manage 控制；获准的管理员共享同一策略，超管修改后对现有和以后创建的管理员生效。
+
+3. 管理员只能操作获准模块中的业务对象，不能读取或修改超管对象及超管操作日志。超管查看全部范围；创建人、关联分配人等响应也遵循保护规则。
+
+4. 策略编辑仅限超级管理员登录会话。最终需求已移除该动作的 TOTP 二次验证，无论全站开关是否开启都不要求；机器 Admin API Key 仍不可调用。保留权限目录校验、expected_version 冲突 409、变更原因和策略/审计原子提交。
+
+5. 创建或提升超级管理员仍采用原强制二次验证；其余敏感操作按现有全站开关和权限控制。关闭 TOTP 限制的范围仅是统一管理员策略编辑，不是全站取消 MFA。
+
+6. 权限归属由后端 authz 目录、路由表和真实请求结构体字段声明统一决定。前端消费授权快照和 admin_write_fields，不维护第二套财务授权规则；新未声明字段不能默认放行给受限管理员。
+
+7. 成本、计价、余额调整、退款、账号授权、导出和提示词原文分别授权。无导出权的兑换码列表/详情隐藏明文；认证类邮件模板仅超管可编辑；模型上游预览需 accounts.authorize。
+
+8. 改密码/身份等会话生命周期保护、refresh family 撤销、OAuth pending 一次性消费和管理事务继续有效。用户并发数可以从正数改为 0 或另一正数，调整记录必须使用同一请求事务，避免外键跨连接等待；失败回滚时用户和记录一起回滚。
+
+9. 长连接、多步授权和定时任务继续按既有机制复核授权；最后有效超管保护、管理员操作通知、整批用户删除全有或全无保持。内容风控自动封禁豁免 staff，面板限流仅豁免超管。
+
+## 入口与配置归属
+
+系统设置→管理员权限、用户管理、各管理表单；GET/PUT /api/v1/admin/roles/admin/permissions。人员 CRUD、个人 Key 和登录仍复用已有入口。
+
+## 最终实现方案
+
+1. 后端 authz 目录、真实路由与 request 字段声明是单一授权来源；前端使用授权快照和 admin_write_fields。
+
+2. 策略保存走版本检查、原因和审计事务；机器 Admin API Key 拒绝，保存统一策略不做 TOTP，创建/提升超管仍沿用强校验。
+
+3. 会话撤销、一次性 pending、最后超管保护和批量删除事务在已有服务/仓储中完成；并发数变更记录沿同一事务连接。
+
+## 边界、失败路径与依赖
+
+关联功能组：05, 07。 同一文件只落一个主提交；关联关系不代表新增模块。跨功能路由、设置、类型和装配应与完整提交集一起使用。此组与关联组共同形成完整运行行为；本次归并不额外改写已验收的业务源码。
+
+## 验收要求
+
+authz、middleware、server 路由/字段契约；角色、会话、策略版本与 TOTP 边界测试。 本轮实际执行结果在 VALIDATION.md 单列；旧记录中的通过结果仅是来源证据。
+
+## 累计差异统计
+
+| 类别 | 路径项 | 新增行 | 删除行 | 二进制项 |
+| --- | ---: | ---: | ---: | ---: |
+| source | 98 | 6217 | 1558 | 0 |
+| test | 53 | 2822 | 133 | 0 |
+
+相对官方 v0.2.16 的累计差异，已包含本批实现；不是本次归并额外编写的代码。
+
+## 来源提交
+
+- `230ddc10f4926e88f62de3caa805a5bfa0598bf0`
+- `3bd5cd406dd37b332f01a446718caca3a8a4222f`
+- `4b2cfde513867c40dbcc663a5ddea30cdd286dd2`
+- `6dc1165380ed5f93a5f63729eb5c3b8421d61126`
+- `944fdb1eff8e7ea33ed70ff722b6822f962e9255`
+- `a2988a14ca54b99b09a6f64024166d52fa8db132`
+- `e37f32177a2b3f31414e8e2801d1f20678983fe5`
+
+原始作者、提交正文和更早来源见 source-commits.json；最终对象见 files-main.tsv。
+
+## 文件与方案落点
+
+| 状态 | 类别 | +行 | −行 | 关联组 | 文件 |
+| --- | --- | ---: | ---: | --- | --- |
+| M | source | 1 | 1 | 02 | [backend/cmd/jwtgen/main.go](../../../backend/cmd/jwtgen/main.go) |
+| A | source | 245 | 0 | 02 | [backend/internal/authz/fields.go](../../../backend/internal/authz/fields.go) |
+| A | source | 132 | 0 | 02 | [backend/internal/authz/financial_fields.go](../../../backend/internal/authz/financial_fields.go) |
+| A | source | 53 | 0 | 02 | [backend/internal/authz/lifecycle.go](../../../backend/internal/authz/lifecycle.go) |
+| A | source | 122 | 0 | 02 | [backend/internal/authz/mutation.go](../../../backend/internal/authz/mutation.go) |
+| A | source | 311 | 0 | 02 | [backend/internal/authz/policy.go](../../../backend/internal/authz/policy.go) |
+| A | test | 96 | 0 | 02 | [backend/internal/authz/policy_test.go](../../../backend/internal/authz/policy_test.go) |
+| A | source | 237 | 0 | 02 | [backend/internal/authz/request_fields.go](../../../backend/internal/authz/request_fields.go) |
+| A | source | 504 | 0 | 02,07,10 | [backend/internal/authz/routes.go](../../../backend/internal/authz/routes.go) |
+| M | test | 2 | 0 | 02 | [backend/internal/handler/admin/admin_service_stub_test.go](../../../backend/internal/handler/admin/admin_service_stub_test.go) |
+| A | test | 133 | 0 | 02 | [backend/internal/handler/admin/auth_lifecycle_security_test.go](../../../backend/internal/handler/admin/auth_lifecycle_security_test.go) |
+| M | source | 23 | 23 | 02 | [backend/internal/handler/admin/channel_handler.go](../../../backend/internal/handler/admin/channel_handler.go) |
+| M | source | 14 | 14 | 02 | [backend/internal/handler/admin/grok_oauth_handler.go](../../../backend/internal/handler/admin/grok_oauth_handler.go) |
+| M | source | 129 | 126 | 02,05 | [backend/internal/handler/admin/group_handler.go](../../../backend/internal/handler/admin/group_handler.go) |
+| M | source | 19 | 17 | 02,07 | [backend/internal/handler/admin/openai_oauth_handler.go](../../../backend/internal/handler/admin/openai_oauth_handler.go) |
+| A | source | 23 | 0 | 02 | [backend/internal/handler/admin/request_field_schemas.go](../../../backend/internal/handler/admin/request_field_schemas.go) |
+| A | test | 139 | 0 | 02 | [backend/internal/handler/admin/request_field_schemas_test.go](../../../backend/internal/handler/admin/request_field_schemas_test.go) |
+| A | source | 64 | 0 | 02 | [backend/internal/handler/admin/role_handler.go](../../../backend/internal/handler/admin/role_handler.go) |
+| M | source | 40 | 7 | 02 | [backend/internal/handler/admin/user_handler.go](../../../backend/internal/handler/admin/user_handler.go) |
+| M | test | 1 | 1 | 02 | [backend/internal/handler/admin/user_handler_role_stepup_test.go](../../../backend/internal/handler/admin/user_handler_role_stepup_test.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/handler/auth_dingtalk_oauth.go](../../../backend/internal/handler/auth_dingtalk_oauth.go) |
+| M | source | 41 | 14 | 02 | [backend/internal/handler/auth_handler.go](../../../backend/internal/handler/auth_handler.go) |
+| A | test | 23 | 0 | 02 | [backend/internal/handler/auth_legacy_bind_cookie_test.go](../../../backend/internal/handler/auth_legacy_bind_cookie_test.go) |
+| A | test | 242 | 0 | 02 | [backend/internal/handler/auth_lifecycle_security_test.go](../../../backend/internal/handler/auth_lifecycle_security_test.go) |
+| M | source | 106 | 64 | 02 | [backend/internal/handler/auth_linuxdo_oauth.go](../../../backend/internal/handler/auth_linuxdo_oauth.go) |
+| M | test | 6 | 6 | 02 | [backend/internal/handler/auth_linuxdo_oauth_test.go](../../../backend/internal/handler/auth_linuxdo_oauth_test.go) |
+| M | source | 86 | 14 | 02 | [backend/internal/handler/auth_oauth_pending_flow.go](../../../backend/internal/handler/auth_oauth_pending_flow.go) |
+| M | test | 17 | 6 | 02 | [backend/internal/handler/auth_oauth_pending_flow_test.go](../../../backend/internal/handler/auth_oauth_pending_flow_test.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/handler/auth_oidc_oauth.go](../../../backend/internal/handler/auth_oidc_oauth.go) |
+| M | test | 5 | 4 | 02 | [backend/internal/handler/auth_oidc_oauth_test.go](../../../backend/internal/handler/auth_oidc_oauth_test.go) |
+| M | test | 7 | 5 | 02 | [backend/internal/handler/auth_session_revocation_test.go](../../../backend/internal/handler/auth_session_revocation_test.go) |
+| A | test | 292 | 0 | 02 | [backend/internal/handler/auth_totp_proof_race_test.go](../../../backend/internal/handler/auth_totp_proof_race_test.go) |
+| M | source | 16 | 11 | 02 | [backend/internal/handler/auth_wechat_oauth.go](../../../backend/internal/handler/auth_wechat_oauth.go) |
+| M | test | 11 | 7 | 02 | [backend/internal/handler/auth_wechat_oauth_test.go](../../../backend/internal/handler/auth_wechat_oauth_test.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/handler/passkey_handler.go](../../../backend/internal/handler/passkey_handler.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/handler/totp_handler.go](../../../backend/internal/handler/totp_handler.go) |
+| M | test | 1 | 1 | 02 | [backend/internal/handler/user_handler_test.go](../../../backend/internal/handler/user_handler_test.go) |
+| A | test | 391 | 0 | 02 | [backend/internal/repository/admin_authorization_integration_test.go](../../../backend/internal/repository/admin_authorization_integration_test.go) |
+| A | source | 180 | 0 | 02 | [backend/internal/repository/admin_object_scope.go](../../../backend/internal/repository/admin_object_scope.go) |
+| A | source | 88 | 0 | 02 | [backend/internal/repository/admin_role_policy.go](../../../backend/internal/repository/admin_role_policy.go) |
+| M | source | 57 | 10 | 02 | [backend/internal/repository/audit_log_repo.go](../../../backend/internal/repository/audit_log_repo.go) |
+| A | test | 229 | 0 | 02 | [backend/internal/repository/auth_lifecycle_integration_test.go](../../../backend/internal/repository/auth_lifecycle_integration_test.go) |
+| A | test | 225 | 0 | 02 | [backend/internal/repository/auth_lifecycle_security_test.go](../../../backend/internal/repository/auth_lifecycle_security_test.go) |
+| M | source | 22 | 1 | 02 | [backend/internal/repository/proxy_repo.go](../../../backend/internal/repository/proxy_repo.go) |
+| M | source | 3 | 1 | 02 | [backend/internal/repository/redeem_code_repo.go](../../../backend/internal/repository/redeem_code_repo.go) |
+| M | source | 66 | 24 | 02 | [backend/internal/repository/refresh_token_cache.go](../../../backend/internal/repository/refresh_token_cache.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/repository/simple_mode_admin_concurrency.go](../../../backend/internal/repository/simple_mode_admin_concurrency.go) |
+| M | source | 4 | 0 | 02 | [backend/internal/repository/user_attribute_repo.go](../../../backend/internal/repository/user_attribute_repo.go) |
+| M | source | 183 | 108 | 02 | [backend/internal/repository/user_group_rate_repo.go](../../../backend/internal/repository/user_group_rate_repo.go) |
+| M | source | 7 | 0 | 02 | [backend/internal/repository/user_platform_quota_repo.go](../../../backend/internal/repository/user_platform_quota_repo.go) |
+| M | source | 7 | 0 | 02 | [backend/internal/repository/user_profile_identity_repo.go](../../../backend/internal/repository/user_profile_identity_repo.go) |
+| M | source | 208 | 92 | 02 | [backend/internal/repository/user_repo.go](../../../backend/internal/repository/user_repo.go) |
+| M | test | 14 | 14 | 02 | [backend/internal/repository/user_repo_integration_test.go](../../../backend/internal/repository/user_repo_integration_test.go) |
+| M | source | 120 | 102 | 02 | [backend/internal/repository/user_subscription_repo.go](../../../backend/internal/repository/user_subscription_repo.go) |
+| M | source | 27 | 8 | 02 | [backend/internal/server/middleware/admin_auth.go](../../../backend/internal/server/middleware/admin_auth.go) |
+| M | test | 8 | 8 | 02 | [backend/internal/server/middleware/admin_auth_test.go](../../../backend/internal/server/middleware/admin_auth_test.go) |
+| A | source | 564 | 0 | 02,10 | [backend/internal/server/middleware/admin_authorization.go](../../../backend/internal/server/middleware/admin_authorization.go) |
+| A | test | 238 | 0 | 02,10 | [backend/internal/server/middleware/admin_authorization_test.go](../../../backend/internal/server/middleware/admin_authorization_test.go) |
+| D | source | 0 | 27 | 02 | [backend/internal/server/middleware/admin_only.go](../../../backend/internal/server/middleware/admin_only.go) |
+| A | source | 87 | 0 | 02,10 | [backend/internal/server/middleware/admin_response.go](../../../backend/internal/server/middleware/admin_response.go) |
+| M | test | 98 | 4 | 02,03 | [backend/internal/server/middleware/audit_log_test.go](../../../backend/internal/server/middleware/audit_log_test.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/server/middleware/backend_mode_guard.go](../../../backend/internal/server/middleware/backend_mode_guard.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/server/middleware/cors.go](../../../backend/internal/server/middleware/cors.go) |
+| M | source | 16 | 2 | 02 | [backend/internal/server/middleware/jwt_auth.go](../../../backend/internal/server/middleware/jwt_auth.go) |
+| M | test | 1 | 1 | 02 | [backend/internal/server/middleware/jwt_auth_test.go](../../../backend/internal/server/middleware/jwt_auth_test.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/server/middleware/panel_rate_limit.go](../../../backend/internal/server/middleware/panel_rate_limit.go) |
+| M | test | 7 | 3 | 02 | [backend/internal/server/middleware/panel_rate_limit_test.go](../../../backend/internal/server/middleware/panel_rate_limit_test.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/server/middleware/server_timing.go](../../../backend/internal/server/middleware/server_timing.go) |
+| M | source | 9 | 4 | 02 | [backend/internal/server/middleware/session_binding.go](../../../backend/internal/server/middleware/session_binding.go) |
+| M | test | 3 | 3 | 02 | [backend/internal/server/middleware/session_binding_test.go](../../../backend/internal/server/middleware/session_binding_test.go) |
+| M | test | 11 | 0 | 02 | [backend/internal/server/middleware/step_up_test.go](../../../backend/internal/server/middleware/step_up_test.go) |
+| A | test | 46 | 0 | 02 | [backend/internal/server/routes/admin_authorization_coverage_test.go](../../../backend/internal/server/routes/admin_authorization_coverage_test.go) |
+| M | source | 2 | 1 | 02,10 | [backend/internal/server/routes/user.go](../../../backend/internal/server/routes/user.go) |
+| M | source | 4 | 4 | 02 | [backend/internal/service/admin_compliance.go](../../../backend/internal/service/admin_compliance.go) |
+| M | source | 211 | 125 | 02,05 | [backend/internal/service/admin_group.go](../../../backend/internal/service/admin_group.go) |
+| A | source | 169 | 0 | 02 | [backend/internal/service/admin_mutation.go](../../../backend/internal/service/admin_mutation.go) |
+| A | source | 194 | 0 | 02 | [backend/internal/service/admin_object_scope.go](../../../backend/internal/service/admin_object_scope.go) |
+| A | source | 134 | 0 | 02 | [backend/internal/service/admin_role_policy.go](../../../backend/internal/service/admin_role_policy.go) |
+| A | test | 71 | 0 | 02 | [backend/internal/service/admin_security_notice_test.go](../../../backend/internal/service/admin_security_notice_test.go) |
+| M | source | 5 | 0 | 02 | [backend/internal/service/admin_service.go](../../../backend/internal/service/admin_service.go) |
+| M | test | 1 | 1 | 02 | [backend/internal/service/admin_service_apikey_test.go](../../../backend/internal/service/admin_service_apikey_test.go) |
+| M | test | 26 | 10 | 02 | [backend/internal/service/admin_service_delete_test.go](../../../backend/internal/service/admin_service_delete_test.go) |
+| M | test | 2 | 2 | 02 | [backend/internal/service/admin_service_email_identity_sync_test.go](../../../backend/internal/service/admin_service_email_identity_sync_test.go) |
+| M | test | 4 | 5 | 02 | [backend/internal/service/admin_service_role_test.go](../../../backend/internal/service/admin_service_role_test.go) |
+| M | source | 348 | 170 | 02 | [backend/internal/service/admin_user.go](../../../backend/internal/service/admin_user.go) |
+| M | source | 9 | 4 | 02 | [backend/internal/service/antigravity_oauth_service.go](../../../backend/internal/service/antigravity_oauth_service.go) |
+| M | source | 28 | 3 | 02 | [backend/internal/service/audit_log.go](../../../backend/internal/service/audit_log.go) |
+| M | source | 22 | 4 | 02 | [backend/internal/service/audit_log_service.go](../../../backend/internal/service/audit_log_service.go) |
+| A | source | 12 | 0 | 02 | [backend/internal/service/auth_admin_policy.go](../../../backend/internal/service/auth_admin_policy.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/service/auth_email_binding.go](../../../backend/internal/service/auth_email_binding.go) |
+| A | test | 62 | 0 | 02 | [backend/internal/service/auth_lifecycle_security_test.go](../../../backend/internal/service/auth_lifecycle_security_test.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/service/auth_oauth_email_flow.go](../../../backend/internal/service/auth_oauth_email_flow.go) |
+| M | source | 41 | 2 | 02 | [backend/internal/service/auth_pending_identity_service.go](../../../backend/internal/service/auth_pending_identity_service.go) |
+| M | source | 89 | 49 | 02 | [backend/internal/service/auth_service.go](../../../backend/internal/service/auth_service.go) |
+| M | test | 16 | 3 | 02 | [backend/internal/service/auth_service_email_bind_test.go](../../../backend/internal/service/auth_service_email_bind_test.go) |
+| M | source | 1 | 1 | 02 | [backend/internal/service/content_moderation.go](../../../backend/internal/service/content_moderation.go) |
+| M | test | 37 | 32 | 02 | [backend/internal/service/content_moderation_test.go](../../../backend/internal/service/content_moderation_test.go) |
+| M | source | 24 | 7 | 02 | [backend/internal/service/email_queue_service.go](../../../backend/internal/service/email_queue_service.go) |
+| M | source | 14 | 4 | 02 | [backend/internal/service/email_service.go](../../../backend/internal/service/email_service.go) |
+| M | test | 22 | 1 | 02 | [backend/internal/service/email_service_reset_token_test.go](../../../backend/internal/service/email_service_reset_token_test.go) |
+| M | source | 13 | 8 | 02 | [backend/internal/service/gemini_oauth_service.go](../../../backend/internal/service/gemini_oauth_service.go) |
+| M | source | 5 | 0 | 02 | [backend/internal/service/grok_oauth_service.go](../../../backend/internal/service/grok_oauth_service.go) |
+| M | source | 27 | 0 | 02 | [backend/internal/service/notification_email_service.go](../../../backend/internal/service/notification_email_service.go) |
+| M | test | 33 | 0 | 02 | [backend/internal/service/notification_email_service_test.go](../../../backend/internal/service/notification_email_service_test.go) |
+| M | source | 10 | 5 | 02 | [backend/internal/service/oauth_service.go](../../../backend/internal/service/oauth_service.go) |
+| M | source | 33 | 11 | 02,07 | [backend/internal/service/openai_oauth_service.go](../../../backend/internal/service/openai_oauth_service.go) |
+| M | source | 8 | 7 | 02 | [backend/internal/service/refresh_token_cache.go](../../../backend/internal/service/refresh_token_cache.go) |
+| M | source | 99 | 38 | 02 | [backend/internal/service/totp_service.go](../../../backend/internal/service/totp_service.go) |
+| M | source | 6 | 2 | 02 | [backend/internal/service/user.go](../../../backend/internal/service/user.go) |
+| M | source | 32 | 6 | 02 | [backend/internal/service/user_service.go](../../../backend/internal/service/user_service.go) |
+| M | test | 1 | 1 | 02 | [backend/internal/service/user_service_test.go](../../../backend/internal/service/user_service_test.go) |
+| M | test | 1 | 0 | 02 | [frontend/src/api/__tests__/client.spec.ts](../../../frontend/src/api/__tests__/client.spec.ts) |
+| A | source | 35 | 0 | 02 | [frontend/src/api/admin/roles.ts](../../../frontend/src/api/admin/roles.ts) |
+| M | source | 7 | 2 | 02 | [frontend/src/api/admin/users.ts](../../../frontend/src/api/admin/users.ts) |
+| M | source | 74 | 9 | 02 | [frontend/src/api/client.ts](../../../frontend/src/api/client.ts) |
+| M | source | 17 | 3 | 02 | [frontend/src/components/admin/AdminComplianceDialog.vue](../../../frontend/src/components/admin/AdminComplianceDialog.vue) |
+| A | source | 156 | 0 | 02 | [frontend/src/components/admin/AdminRolePermissions.vue](../../../frontend/src/components/admin/AdminRolePermissions.vue) |
+| A | source | 75 | 0 | 02 | [frontend/src/components/admin/DelegatedSettings.vue](../../../frontend/src/components/admin/DelegatedSettings.vue) |
+| A | test | 105 | 0 | 02 | [frontend/src/components/admin/__tests__/AdminRolePermissions.spec.ts](../../../frontend/src/components/admin/__tests__/AdminRolePermissions.spec.ts) |
+| M | source | 9 | 5 | 02 | [frontend/src/components/admin/user/UserCreateModal.vue](../../../frontend/src/components/admin/user/UserCreateModal.vue) |
+| M | source | 15 | 5 | 02 | [frontend/src/components/admin/user/UserEditModal.vue](../../../frontend/src/components/admin/user/UserEditModal.vue) |
+| M | test | 3 | 0 | 02 | [frontend/src/components/admin/user/__tests__/UserEditModal.spec.ts](../../../frontend/src/components/admin/user/__tests__/UserEditModal.spec.ts) |
+| A | test | 76 | 0 | 02 | [frontend/src/composables/__tests__/useHiddenColumns.spec.ts](../../../frontend/src/composables/__tests__/useHiddenColumns.spec.ts) |
+| M | test | 18 | 0 | 02 | [frontend/src/composables/__tests__/useStepUp.spec.ts](../../../frontend/src/composables/__tests__/useStepUp.spec.ts) |
+| A | source | 74 | 0 | 02 | [frontend/src/composables/useHiddenColumns.ts](../../../frontend/src/composables/useHiddenColumns.ts) |
+| M | source | 18 | 0 | 02 | [frontend/src/composables/useStepUp.ts](../../../frontend/src/composables/useStepUp.ts) |
+| M | source | 6 | 2 | 02 | [frontend/src/features/prompt-audit/PromptAuditView.vue](../../../frontend/src/features/prompt-audit/PromptAuditView.vue) |
+| M | test | 2 | 0 | 02 | [frontend/src/features/prompt-audit/__tests__/PromptAuditView.spec.ts](../../../frontend/src/features/prompt-audit/__tests__/PromptAuditView.spec.ts) |
+| M | source | 7 | 6 | 02 | [frontend/src/features/prompt-audit/components/EventWorkspace.vue](../../../frontend/src/features/prompt-audit/components/EventWorkspace.vue) |
+| M | test | 2 | 0 | 02 | [frontend/src/stores/__tests__/adminSettings.retry.spec.ts](../../../frontend/src/stores/__tests__/adminSettings.retry.spec.ts) |
+| A | test | 48 | 0 | 02 | [frontend/src/stores/__tests__/auth.permissions.spec.ts](../../../frontend/src/stores/__tests__/auth.permissions.spec.ts) |
+| M | source | 40 | 8 | 02 | [frontend/src/stores/adminCompliance.ts](../../../frontend/src/stores/adminCompliance.ts) |
+| M | source | 37 | 2 | 02 | [frontend/src/stores/auth.ts](../../../frontend/src/stores/auth.ts) |
+| M | source | 7 | 4 | 02 | [frontend/src/views/admin/AnnouncementsView.vue](../../../frontend/src/views/admin/AnnouncementsView.vue) |
+| M | source | 5 | 3 | 02 | [frontend/src/views/admin/AuditLogView.vue](../../../frontend/src/views/admin/AuditLogView.vue) |
+| M | source | 16 | 13 | 02 | [frontend/src/views/admin/ChannelsView.vue](../../../frontend/src/views/admin/ChannelsView.vue) |
+| M | source | 103 | 99 | 02 | [frontend/src/views/admin/GroupsView.vue](../../../frontend/src/views/admin/GroupsView.vue) |
+| M | source | 8 | 5 | 02 | [frontend/src/views/admin/PromoCodesView.vue](../../../frontend/src/views/admin/PromoCodesView.vue) |
+| M | source | 55 | 71 | 02 | [frontend/src/views/admin/ProxiesView.vue](../../../frontend/src/views/admin/ProxiesView.vue) |
+| M | source | 8 | 4 | 02 | [frontend/src/views/admin/RedeemView.vue](../../../frontend/src/views/admin/RedeemView.vue) |
+| M | source | 6 | 4 | 02 | [frontend/src/views/admin/RiskControlView.vue](../../../frontend/src/views/admin/RiskControlView.vue) |
+| M | source | 36 | 35 | 02 | [frontend/src/views/admin/UsersView.vue](../../../frontend/src/views/admin/UsersView.vue) |
+| M | test | 3 | 0 | 02 | [frontend/src/views/admin/__tests__/GroupsView.codexManifest.spec.ts](../../../frontend/src/views/admin/__tests__/GroupsView.codexManifest.spec.ts) |
+| M | test | 1 | 1 | 02 | [frontend/src/views/admin/__tests__/GroupsView.columnSettings.spec.ts](../../../frontend/src/views/admin/__tests__/GroupsView.columnSettings.spec.ts) |
+| M | test | 1 | 1 | 02 | [frontend/src/views/admin/__tests__/GroupsView.duplicate.spec.ts](../../../frontend/src/views/admin/__tests__/GroupsView.duplicate.spec.ts) |
+| M | test | 14 | 3 | 02 | [frontend/src/views/admin/__tests__/ProxiesView.credentials.spec.ts](../../../frontend/src/views/admin/__tests__/ProxiesView.credentials.spec.ts) |
+| M | test | 3 | 0 | 02 | [frontend/src/views/admin/__tests__/ProxiesView.filters.spec.ts](../../../frontend/src/views/admin/__tests__/ProxiesView.filters.spec.ts) |
+| M | test | 3 | 0 | 02 | [frontend/src/views/admin/__tests__/RedeemView.batchUpdate.spec.ts](../../../frontend/src/views/admin/__tests__/RedeemView.batchUpdate.spec.ts) |
+| M | test | 3 | 0 | 02 | [frontend/src/views/admin/__tests__/RiskControlView.spec.ts](../../../frontend/src/views/admin/__tests__/RiskControlView.spec.ts) |
+| M | test | 18 | 10 | 02 | [frontend/src/views/admin/__tests__/UsersView.spec.ts](../../../frontend/src/views/admin/__tests__/UsersView.spec.ts) |
+| M | source | 38 | 146 | 02 | [frontend/src/views/admin/settings/EmailTemplateEditor.vue](../../../frontend/src/views/admin/settings/EmailTemplateEditor.vue) |
+
+## 2026-10-14 新增需求与实施边界
+
+导出复用 usage.read、usage.export、step-up、成本脱敏和审计；审计请求体失败回归与 03 关联。没有新增角色或平行权限系统。
