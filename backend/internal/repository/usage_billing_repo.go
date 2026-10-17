@@ -12,14 +12,35 @@ import (
 )
 
 type usageBillingRepository struct {
-	db *sql.DB
+	db         *sql.DB
+	reprice    func(context.Context, *service.UsageBillingCommand) error
+	invalidate func(context.Context, *service.UsageBillingCommand) error
 }
 
 func NewUsageBillingRepository(_ *dbent.Client, sqlDB *sql.DB) service.UsageBillingRepository {
 	return &usageBillingRepository{db: sqlDB}
 }
 
-func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBillingCommand) (_ *service.UsageBillingApplyResult, err error) {
+func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBillingCommand) (*service.UsageBillingApplyResult, error) {
+	if cmd != nil && cmd.UsageLog != nil {
+		if err := r.persistUsageBillingEvent(ctx, cmd); err != nil {
+			return nil, err
+		}
+		if cmd.Pricing != nil && cmd.Pricing.Pending {
+			return nil, service.ErrUsagePricingPending
+		}
+	}
+	result, err := r.applyUsageBillingTransaction(ctx, cmd)
+	if err != nil && cmd != nil && cmd.UsageLog != nil {
+		r.retryUsageBillingEvent(ctx, cmd, err)
+	}
+	if err == nil && cmd != nil && cmd.UsageLog != nil {
+		r.finishUsageBillingEvent(ctx, cmd)
+	}
+	return result, err
+}
+
+func (r *usageBillingRepository) applyUsageBillingTransaction(ctx context.Context, cmd *service.UsageBillingCommand) (_ *service.UsageBillingApplyResult, err error) {
 	if cmd == nil {
 		return &service.UsageBillingApplyResult{}, nil
 	}
@@ -46,19 +67,54 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 	if err != nil {
 		return nil, err
 	}
-	if !applied {
+	if !applied && cmd.UsageLog == nil {
 		return &service.UsageBillingApplyResult{Applied: false}, nil
 	}
-
-	result := &service.UsageBillingApplyResult{Applied: true}
-	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
-		return nil, err
+	result := &service.UsageBillingApplyResult{Applied: applied}
+	if applied {
+		if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
+			return nil, err
+		}
+	}
+	if cmd.UsageLog != nil {
+		logs := cmd.UsageLogs
+		if len(logs) == 0 {
+			logs = []*service.UsageLog{cmd.UsageLog}
+		}
+		for _, log := range logs {
+			if log == nil {
+				continue
+			}
+			log.BillingStatus = "settled"
+			if log.ActualCost == 0 {
+				log.BillingStatus = "free"
+			}
+			var err error
+			if applied {
+				err = execUsageSettlementLog(ctx, tx, prepareUsageLogInsert(log))
+			} else {
+				err = execUsageLogInsertNoResult(ctx, tx, prepareUsageLogInsert(log))
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE usage_billing_events SET status='settled',last_error=NULL,updated_at=NOW() WHERE request_id=$1 AND api_key_id=$2 AND status<>'applied'`, cmd.RequestID, cmd.APIKeyID); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	tx = nil
+	if cmd.UsageLog != nil {
+		cmd.UsageLog.SettlementRecorded = true
+		cmd.UsageLog.BillingStatus = "settled"
+		if cmd.UsageLog.ActualCost == 0 {
+			cmd.UsageLog.BillingStatus = "free"
+		}
+	}
 	return result, nil
 }
 
@@ -208,6 +264,13 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 			return err
 		}
 		result.QuotaState = quotaState
+	}
+
+	// Preserve existing user/key/account lock order; platform quota follows those rows.
+	if cmd.BalanceCost > 0 && cmd.Platform != "" {
+		if err := incrementUsageBillingPlatformQuota(ctx, tx, cmd.UserID, cmd.Platform, cmd.BalanceCost); err != nil {
+			return err
+		}
 	}
 
 	return nil

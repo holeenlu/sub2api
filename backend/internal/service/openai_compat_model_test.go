@@ -2295,7 +2295,8 @@ func TestForwardAsAnthropic_UpstreamRequestIgnoresClientCancel(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, upstream.lastReq)
-	require.NoError(t, upstream.lastReq.Context().Err())
+	require.NoError(t, upstream.contextErrAtDo, "client cancellation must permit bounded usage drainage")
+	require.ErrorIs(t, upstream.lastReq.Context().Err(), context.Canceled, "completed response releases its upstream context")
 }
 
 func TestForwardAsAnthropic_AstraContinuationRestoresHistoryAndDisablesUnsupportedSession(t *testing.T) {
