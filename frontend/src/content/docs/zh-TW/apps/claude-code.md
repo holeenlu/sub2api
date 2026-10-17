@@ -32,7 +32,6 @@ macOS / Linux：
 ```bash
 export ANTHROPIC_BASE_URL="{{API_ROOT}}"
 export ANTHROPIC_AUTH_TOKEN="你的 KDAN API Key"
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 claude --model claude-sonnet-5
 ```
 
@@ -41,7 +40,6 @@ Windows PowerShell：
 ```powershell
 $env:ANTHROPIC_BASE_URL="{{API_ROOT}}"
 $env:ANTHROPIC_AUTH_TOKEN="你的 KDAN API Key"
-$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
 claude --model claude-sonnet-5
 ```
 
@@ -55,20 +53,20 @@ claude --model claude-sonnet-5
 {
   "env": {
     "ANTHROPIC_BASE_URL": "{{API_ROOT}}",
-    "ANTHROPIC_AUTH_TOKEN": "你的 KDAN API Key",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    "ANTHROPIC_AUTH_TOKEN": "你的 KDAN API Key"
   }
 }
 ```
 
-該文件含私密認證資訊。不要寫進共享的專案 `.claude/settings.json`。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 是目前控制台生成器用於減少登入、遙測等非必要外連的設定，不會把 Claude 網頁、Remote Control 或語音功能改為由 KDAN 提供。GUI 啟動的 IDE 不一定繼承終端機環境。VS Code 擴充套件可在使用者 Settings JSON 中設定：
+本閘道器不採集或儲存 Claude Code / Claude 桌面用戶端的遙測，不提供 `/v1/logs`、`/v1/metrics` 採集端點。原事件介面只返回空 200，不讀取或轉發上傳內容。帳號遙測由伺服器端在建立 Claude OAuth / Setup Token 帳號後自動生成；管理員可在帳號頁手工重新生成，傳送遵循帳號自身的活動視窗。用戶端自身的隱私設定及其直連供應商的流量由用戶端控制。
+
+該文件含私密認證資訊，不要寫進共享專案的 `.claude/settings.json`。安裝腳本保留已有用戶端隱私設定。GUI 啟動的 IDE 不一定繼承終端機環境。VS Code 擴充套件可在使用者 Settings JSON 中設定：
 
 ```json
 {
   "claudeCode.environmentVariables": [
     { "name": "ANTHROPIC_BASE_URL", "value": "{{API_ROOT}}" },
-    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 KDAN API Key" },
-    { "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "value": "1" }
+    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 KDAN API Key" }
   ]
 }
 ```
@@ -90,4 +88,4 @@ Claude Code 可能為標題、摘要和 token 計數傳送輔助請求。主模�
 | 429 | 等待速率限制視窗，核對餘額、並行與分組配額 |
 | 仍提示帳號登入 | 確認啟動的是 Claude Code，變數傳到目前程序；桌面版使用獨立教程 |
 
-來源：[官方閘道器接入](https://code.claude.com/docs/en/llm-gateway-connect)、[恢復工作階段](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)，專案設定生成器核對於 2026-09-15。
+來源：[官方閘道器接入](https://code.claude.com/docs/en/llm-gateway-connect)、[恢復工作階段](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)，專案設定生成器核對於 2026-10-19。

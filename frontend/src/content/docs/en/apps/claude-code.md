@@ -32,7 +32,6 @@ macOS / Linux:
 ```bash
 export ANTHROPIC_BASE_URL="{{API_ROOT}}"
 export ANTHROPIC_AUTH_TOKEN="your API key"
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 claude --model claude-sonnet-5
 ```
 
@@ -41,7 +40,6 @@ Windows PowerShell:
 ```powershell
 $env:ANTHROPIC_BASE_URL="{{API_ROOT}}"
 $env:ANTHROPIC_AUTH_TOKEN="your API key"
-$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
 claude --model claude-sonnet-5
 ```
 
@@ -55,20 +53,18 @@ Back up and merge this `env` block into `~/.claude/settings.json`:
 {
   "env": {
     "ANTHROPIC_BASE_URL": "{{API_ROOT}}",
-    "ANTHROPIC_AUTH_TOKEN": "your API key",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    "ANTHROPIC_AUTH_TOKEN": "your API key"
   }
 }
 ```
 
-This is private configuration. Do not put credentials in shared project `.claude/settings.json`. `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` is emitted by the current console builder to reduce sign-in, telemetry, and other nonessential traffic. It does not route Claude web, Remote Control, or voice services through KDAN. GUI editors may not inherit terminal exports. In VS Code user Settings JSON:
+This file contains private credentials; do not place it in shared project `.claude/settings.json`. The installer preserves existing client privacy preferences. GUI editors may not inherit terminal exports. In VS Code user Settings JSON:
 
 ```json
 {
   "claudeCode.environmentVariables": [
     { "name": "ANTHROPIC_BASE_URL", "value": "{{API_ROOT}}" },
-    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "your API key" },
-    { "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "value": "1" }
+    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "your API key" }
   ]
 }
 ```
@@ -90,4 +86,6 @@ Return to the original project directory and use `claude --resume`, `claude --co
 | 429 | Respect limits and check balance, concurrency and quota |
 | Login prompt persists | Confirm client and environment; desktop uses a separate configuration |
 
-Sources: [gateway setup](https://code.claude.com/docs/en/llm-gateway-connect), [resume conversations](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations). Project configuration checked 2026-09-15.
+Sources: [gateway setup](https://code.claude.com/docs/en/llm-gateway-connect), [resume conversations](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations). Project configuration checked 2026-10-19.
+
+This gateway does not collect or store telemetry uploaded by Claude Code or Claude Desktop, and does not expose OTLP `/v1/logs` or `/v1/metrics` collectors. Legacy event endpoints return an empty 200 without reading or forwarding the body. Account telemetry is generated automatically after creating a Claude OAuth / Setup Token account and can be regenerated from the account page. Sending follows the account activity window. Client privacy preferences and direct provider traffic remain client-controlled.

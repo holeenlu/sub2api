@@ -156,7 +156,7 @@ const TablePageLayoutStub = {
 
 const DataTableStub = {
   name: 'DataTable',
-  props: { columns: Array, data: Array, selectedKeys: Array, selectable: Boolean },
+  props: { columns: Array, data: Array, selectedKeys: Array, selectable: Boolean, loading: Boolean },
   emits: ['sort', 'update:selectedKeys'],
   template: `
     <div>
@@ -172,6 +172,7 @@ const DataTableStub = {
         >
           <slot name="cell-id" :value="row.id" :row="row" />
         </div>
+        <div data-test="usage"><slot name="cell-usage" :row="row" /></div>
         <slot name="cell-name" :value="row.name" :row="row" />
         <slot name="cell-actions" :row="row" />
         <div data-test="current-concurrency">
@@ -297,6 +298,29 @@ describe('user KeysView column settings', () => {
     isCurrentStep.mockReturnValue(false)
   })
 
+  it('shows keys before slow usage aggregates and ignores an old page response', async () => {
+    let finishOld!: (value: any) => void
+    getDashboardApiKeysUsage.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+    const wrapper = await mountView()
+    const table = wrapper.findComponent({ name: 'DataTable' })
+    expect(table.props('loading')).toBe(false)
+    expect(table.props('data')[0].name).toBe('test-key')
+    expect(wrapper.get('[data-test="usage"]').text()).toContain('—')
+    expect(wrapper.get('[data-test="usage"]').text()).not.toContain('$0.0000')
+    const oldSignal = getDashboardApiKeysUsage.mock.calls[0][1].signal as AbortSignal
+
+    listKeys.mockResolvedValueOnce({ items: [{ ...createApiKey(), id: 2, name: 'second' }], total: 2, pages: 2 })
+    getDashboardApiKeysUsage.mockResolvedValueOnce({ stats: { 2: { today_actual_cost: 2, total_actual_cost: 3 } } })
+    await wrapper.get('[data-test="page-2"]').trigger('click')
+    await flushPromises()
+    expect(oldSignal.aborted).toBe(true)
+    finishOld({ stats: { 1: { today_actual_cost: 99, total_actual_cost: 99 } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="usage"]').text()).toContain('$2.0000')
+    expect(wrapper.text()).not.toContain('$99.0000')
+    wrapper.unmount()
+  })
+
   it.each([
     { initialStatus: 'quota_exhausted', status: 'active', formStatus: 'active' },
     { initialStatus: 'inactive', status: 'inactive', formStatus: 'inactive' },
@@ -332,6 +356,16 @@ describe('user KeysView column settings', () => {
     await flushPromises()
     expect(updateKey).toHaveBeenNthCalledWith(2, key.id, expect.objectContaining({ name: 'Unsaved name', status: formStatus }))
     wrapper.unmount()
+  })
+
+  it('keeps Use Key but removes CCS import and client selection', async () => {
+    const wrapper = await mountView()
+    expect(wrapper.text()).toContain('keys.useKey')
+    expect(wrapper.text()).not.toContain('keys.importToCcSwitch')
+    expect(wrapper.findComponent({ name: 'UseKeyModal' }).exists()).toBe(true)
+    expect(wrapper.findAllComponents({ name: 'BaseDialog' }).some(dialog =>
+      dialog.props('title') === 'keys.ccsClientSelect.title'
+    )).toBe(false)
   })
 
   it('uses the default API key columns with low-frequency columns hidden', async () => {

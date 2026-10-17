@@ -28,3 +28,7 @@ Match the test request in KDAN usage records. Model access follows the key's gro
 For Gateway was unreachable, check the root URL and network. For 401, check the key. For missing models, inspect group access and explicit client model settings. See official guidance for remote/cloud restrictions. Official account cloud history and local gateway sessions are not guaranteed to migrate; our repair package handles only Codex local indexes.
 
 Sources: [Claude desktop gateway](https://claude.com/docs/third-party/claude-desktop/gateway), [client differences](https://code.claude.com/docs/en/llm-gateway-connect#desktop-app), checked 2026-09-15.
+
+This gateway does not collect or store telemetry uploaded by Claude Code or Claude Desktop, and does not expose OTLP `/v1/logs` or `/v1/metrics` collectors. Legacy event endpoints return an empty 200 without reading or forwarding the body. Account telemetry is generated automatically after creating a Claude OAuth / Setup Token account and can be regenerated from the account page. Sending follows the account activity window. Client privacy preferences and direct provider traffic remain client-controlled.
+
+If Desktop already has an `otlpEndpoint` pointing to this gateway, remove that collector configuration. Inference connection settings are unaffected.

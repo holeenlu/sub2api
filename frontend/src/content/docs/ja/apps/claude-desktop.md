@@ -28,3 +28,7 @@ TapModels の使用量記録でテストリクエストと一致することを�
 Gateway に到達できない場合は、ルート URL とネットワークを確認してください。401 が返る場合は、キーを確認してください。モデルが見つからない場合は、グループのアクセス権とクライアント側で明示的に設定されたモデルを確認してください。リモートまたはクラウドの制限については、公式のガイダンスを参照してください。公式アカウントのクラウド履歴とローカル Gateway セッションが移行される保証はありません。当社の修復パッケージが処理するのは Codex のローカルインデックスのみです。
 
 参考資料: [Claude desktop gateway](https://claude.com/docs/third-party/claude-desktop/gateway)、[client differences](https://code.claude.com/docs/en/llm-gateway-connect#desktop-app)、確認日 2026-09-15。
+
+このゲートウェイは Claude Code / Claude Desktop のテレメトリを収集・保存せず、OTLP `/v1/logs` と `/v1/metrics` も提供しません。従来のイベント API は本文を読み取らず空の 200 を返します。Claude OAuth / Setup Token アカウント作成後にサーバーが自動生成し、アカウント画面から再生成できます。送信はアカウントのアクティブ期間に従います。クライアントのプライバシー設定とプロバイダーへの直接通信はクライアントが制御します。
+
+Desktop の `otlpEndpoint` がこのゲートウェイを指している場合、そのコレクター設定を削除してください。推論の接続設定への変更は不要です。

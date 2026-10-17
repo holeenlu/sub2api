@@ -31,7 +31,6 @@ macOS / Linux:
 ```bash
 export ANTHROPIC_BASE_URL="{{API_ROOT}}"
 export ANTHROPIC_AUTH_TOKEN="your TapModels API key"
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 claude --model claude-sonnet-5
 ```
 
@@ -40,7 +39,6 @@ Windows PowerShell:
 ```powershell
 $env:ANTHROPIC_BASE_URL="{{API_ROOT}}"
 $env:ANTHROPIC_AUTH_TOKEN="your TapModels API key"
-$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
 claude --model claude-sonnet-5
 ```
 
@@ -54,20 +52,18 @@ claude --model claude-sonnet-5
 {
   "env": {
     "ANTHROPIC_BASE_URL": "{{API_ROOT}}",
-    "ANTHROPIC_AUTH_TOKEN": "your TapModels API key",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    "ANTHROPIC_AUTH_TOKEN": "your TapModels API key"
   }
 }
 ```
 
-これはプライベートな設定です。認証情報を共有プロジェクトの `.claude/settings.json` に配置しないでください。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` は、サインイン、テレメトリ、その他の不要なトラフィックを削減するために、現在のコンソールビルダーが出力します。これによって Claude の Web、Remote Control、音声サービスが TapModels 経由でルーティングされることはありません。GUI エディターは、ターミナルでエクスポートした環境変数を継承しない場合があります。VS Code のユーザー Settings JSON では、次のように設定します。
+このファイルには認証情報が含まれます。共有プロジェクトの `.claude/settings.json` に配置しないでください。インストーラーはクライアントの既存のプライバシー設定を保持します。GUI エディターは端末の環境変数を継承しない場合があります。VS Code のユーザー Settings JSON：
 
 ```json
 {
   "claudeCode.environmentVariables": [
     { "name": "ANTHROPIC_BASE_URL", "value": "{{API_ROOT}}" },
-    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "your TapModels API key" },
-    { "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "value": "1" }
+    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "your TapModels API key" }
   ]
 }
 ```
@@ -89,4 +85,6 @@ Claude Code は、タイトル、要約、トークン数を取得する補助�
 | 429 | 制限を遵守し、残高、同時実行数、クォータを確認する |
 | ログインプロンプトが繰り返し表示される | クライアントと環境を確認する。デスクトップは別の設定を使用する |
 
-参照元: [ゲートウェイの設定](https://code.claude.com/docs/en/llm-gateway-connect)、[会話の再開](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)。プロジェクト設定の確認日: 2026-09-15。
+参照元: [ゲートウェイの設定](https://code.claude.com/docs/en/llm-gateway-connect)、[会話の再開](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)。プロジェクト設定の確認日: 2026-10-19。
+
+このゲートウェイは Claude Code / Claude Desktop のテレメトリを収集・保存せず、OTLP `/v1/logs` と `/v1/metrics` も提供しません。従来のイベント API は本文を読み取らず空の 200 を返します。Claude OAuth / Setup Token アカウント作成後にサーバーが自動生成し、アカウント画面から再生成できます。送信はアカウントのアクティブ期間に従います。クライアントのプライバシー設定とプロバイダーへの直接通信はクライアントが制御します。
