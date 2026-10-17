@@ -33,7 +33,7 @@ const advancedSettings = ref<OpsAdvancedSettings | null>(null)
 // 指标阈值配置
 const metricThresholds = ref<OpsMetricThresholds>({
   sla_percent_min: 99.5,
-  ttft_p99_ms_max: 500,
+  ttft_p99_ms_max: 10000,
   request_error_rate_percent_max: 5,
   upstream_error_rate_percent_max: 5
 })
@@ -60,7 +60,7 @@ async function loadAllSettings() {
     if (thresholds && Object.keys(thresholds).length > 0) {
         metricThresholds.value = {
           sla_percent_min: thresholds.sla_percent_min ?? 99.5,
-          ttft_p99_ms_max: thresholds.ttft_p99_ms_max ?? 500,
+          ttft_p99_ms_max: thresholds.ttft_p99_ms_max ?? 10000,
           request_error_rate_percent_max: thresholds.request_error_rate_percent_max ?? 5,
           upstream_error_rate_percent_max: thresholds.upstream_error_rate_percent_max ?? 5
         }
@@ -440,6 +440,14 @@ async function saveAllSettings() {
           {{ t('admin.ops.settings.advancedSettings') }}
         </summary>
         <div class="space-y-4 px-4 pb-4">
+          <div class="space-y-2">
+            <label for="client-telemetry-mode" class="input-label">{{ t('admin.ops.clientTelemetry.captureMode') }}</label>
+            <select id="client-telemetry-mode" v-model="advancedSettings.client_telemetry_mode" class="input" data-testid="client-telemetry-mode">
+              <option value="forward">{{ t('admin.ops.clientTelemetry.captureForward') }}</option>
+              <option value="disabled">{{ t('admin.ops.clientTelemetry.captureDisabled') }}</option>
+            </select>
+            <p class="text-xs text-gray-500">{{ t('admin.ops.clientTelemetry.captureHint') }}</p>
+          </div>
           <!-- 数据保留策略 -->
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.dataRetention') }}</h5>

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"math"
 	"math/rand/v2"
 	"strings"
 	"sync"
@@ -123,6 +124,11 @@ func NewOpsService(
 	antigravityGatewayService *AntigravityGatewayService,
 	systemLogSink *OpsSystemLogSink,
 ) *OpsService {
+	// Constructed before the HTTP server starts; reuse the ops repository without
+	// introducing a second writer, queue or dependency cycle through OpsService.
+	if gatewayService != nil {
+		gatewayService.clientTelemetryRepo = opsRepo
+	}
 	svc := &OpsService{
 		opsRepo:     opsRepo,
 		settingRepo: settingRepo,
@@ -137,6 +143,11 @@ func NewOpsService(
 		geminiCompatService:       geminiCompatService,
 		antigravityGatewayService: antigravityGatewayService,
 		systemLogSink:             systemLogSink,
+	}
+	if gatewayService != nil {
+		gatewayService.clientTelemetryEnabled = func() bool {
+			return svc.OpsAdvancedSettingsSnapshot().ClientTelemetryMode == ClientTelemetryModeForward
+		}
 	}
 	svc.initRuntimeSettings(context.Background())
 	svc.applyRuntimeLogConfigOnStartup(context.Background())
@@ -178,6 +189,10 @@ func (s *OpsService) initRuntimeSettings(ctx context.Context) {
 		return
 	}
 	defaults := defaultOpsAdvancedSettingsForConfig(s.cfg)
+	if s.settingRepo != nil {
+		// Until the persisted privacy choice is known, do not collect uploads.
+		defaults.ClientTelemetryMode = ClientTelemetryModeDisabled
+	}
 	s.runtimeSettings.Store(&opsRuntimeSettingsSnapshot{monitoringEnabled: true, advanced: *defaults})
 	_ = s.RefreshRuntimeSettings(ctx)
 }
@@ -212,6 +227,7 @@ func (s *OpsService) RefreshRuntimeSettings(ctx context.Context) error {
 	if raw, ok := values[SettingKeyOpsAdvancedSettings]; ok {
 		if err := json.Unmarshal([]byte(raw), advanced); err != nil {
 			advanced = defaultOpsAdvancedSettingsForConfig(s.cfg)
+			advanced.ClientTelemetryMode = ClientTelemetryModeDisabled
 		}
 	}
 	normalizeOpsAdvancedSettings(advanced)
@@ -488,11 +504,7 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 	// HTTP attempt. Enforce that ownership at the persistence boundary so an
 	// earlier inference attempt cannot leak its status or text into top-level
 	// auth fields even if a caller supplied stale single-value context.
-	for i := len(entry.UpstreamErrors) - 1; i >= 0; i-- {
-		last := entry.UpstreamErrors[i]
-		if last == nil {
-			continue
-		}
+	if last := LastOpsUpstreamAttempt(entry.UpstreamErrors); last != nil {
 		if last.Stage == string(GatewayFailureStageAccountAuth) {
 			entry.ErrorPhase = string(GatewayFailureStageAccountAuth)
 			entry.ErrorOwner = "provider"
@@ -508,7 +520,6 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 				entry.UpstreamErrorDetail = &detail
 			}
 		}
-		break
 	}
 
 	// Sanitize + truncate error_body to avoid storing sensitive data.
@@ -549,6 +560,8 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 		return nil, false, err
 	}
 
+	// Apply SLA responsibility after final per-turn evidence and auth attribution.
+	normalizeOpsSLA(entry)
 	return entry, true, nil
 }
 
@@ -577,9 +590,12 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 			events = append(events, ev)
 		}
 	}
-	firstEventWithBody := len(events) - opsUpstreamErrorsBodyWindow
-	if firstEventWithBody < 0 {
-		firstEventWithBody = 0
+	firstEventWithBody := len(events)
+	for i, remaining := len(events)-1, opsUpstreamErrorsBodyWindow; i >= 0 && remaining > 0; i-- {
+		if events[i].Kind != opsSchedulingTrace {
+			firstEventWithBody = i
+			remaining--
+		}
 	}
 
 	sanitized := make([]*OpsUpstreamErrorEvent, 0, len(events))
@@ -588,7 +604,7 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		normalizeOpsUpstreamProxyAttribution(&out)
 		// Only boundOpsUpstreamErrors may stamp this; never trust caller input.
 		out.DroppedEarlierAttempts = 0
-		keepBody := i >= firstEventWithBody
+		keepBody := i >= firstEventWithBody || out.Kind == opsSchedulingTrace
 		urlMaxLen, messageMaxLen := 2048, 2048
 		if !keepBody {
 			urlMaxLen, messageMaxLen = opsUpstreamErrorsOlderURLMaxLen, opsUpstreamErrorsOlderMessageMaxLen
@@ -627,12 +643,17 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		// Drop fully-empty events (can happen if only status code was known).
 		// Judged on the original detail so an older attempt whose detail is
 		// cleared by the body window below is still retained.
-		if out.UpstreamStatusCode == 0 && out.Message == "" && detail == "" {
+		if out.UpstreamStatusCode == 0 && out.Message == "" && detail == "" &&
+			!(out.Kind == OpsUpstreamRetryStopped && out.Reason != "") {
 			continue
 		}
 		if keepBody && detail != "" {
 			// Keep upstream detail small while the event waits in the queue.
-			sanitizedDetail, _ := sanitizeErrorBodyForStorage(detail, OpsErrorLogQueueBodyMaxBytes)
+			limit := OpsErrorLogQueueBodyMaxBytes
+			if out.Kind == opsSchedulingTrace {
+				limit = maxSchedulingTraceBytes
+			}
+			sanitizedDetail, _ := sanitizeErrorBodyForStorage(detail, limit)
 			out.Detail = sanitizedDetail
 		} else {
 			out.Detail = ""
@@ -889,6 +910,13 @@ func redactSensitiveJSON(v any) any {
 		out := make(map[string]any, len(t))
 		for k, vv := range t {
 			if isSensitiveKey(k) {
+				// This gateway-owned field counts WS events, not credential tokens.
+				// Keep the exception value-typed so strings/objects cannot bypass redaction.
+				if count, ok := vv.(float64); strings.EqualFold(strings.TrimSpace(k), "downstream_token_events") &&
+					ok && count >= 0 && count == math.Trunc(count) {
+					out[k] = count
+					continue
+				}
 				out[k] = "[REDACTED]"
 				continue
 			}

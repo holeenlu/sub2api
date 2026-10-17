@@ -160,6 +160,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}
 		flusher.Flush()
+		openAIForwardTimingFromContext(c).MarkFlush()
 		return nil
 	}
 
@@ -295,6 +296,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	completeGuardedEvent := func(queueDrained bool) {
 		completedProgressEvent := eventStartsClientOutput
 		completedTTFTEvent := eventStartsTTFTOutput
+		if completedProgressEvent {
+			openAIForwardTimingFromContext(c).MarkSemantic()
+		}
 		shouldFlush := eventShouldFlush || (queueDrained && clientOutputStarted)
 		eventInProgress = false
 		if !clientDisconnected {
@@ -357,6 +361,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	needModelReplace := originalModel != mappedModel
 	var createdAtStamper responsesCreatedAtStamper
 	streamOutputAccumulator := apicompat.NewBufferedResponseAccumulator()
+	var conversionErr error
 	streamDoneItems := newResponsesStreamOutputItems()
 	streamImageOutputs := make([]json.RawMessage, 0, 1)
 	streamSeenImages := make(map[string]struct{})
@@ -389,6 +394,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		lastDownstreamWriteAt = time.Now()
 	}
 	finalizeStream := func() (*openaiStreamingResult, error) {
+		if conversionErr != nil {
+			return resultWithUsage(), conversionErr
+		}
 		if stageFirstOutput && eventInProgress {
 			// EOF dispatches the final SSE event even without a trailing blank line.
 			completeGuardedEvent(true)
@@ -539,6 +547,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if responseID == "" {
 				responseID = extractOpenAIResponseIDFromJSONBytes(dataBytes)
 			}
+			if conversionErr != nil {
+				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+				suppressCurrentEvent = true
+				return
+			}
 			forceFlushFailedEvent := false
 			if !capacityFailoverSuppressedLogged && account != nil && account.Platform == PlatformOpenAI &&
 				(eventType == "error" || eventType == "response.failed") &&
@@ -669,6 +682,36 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				data = string(normalizedData)
 				line = "data: " + data
 				eventType = effectiveOpenAISSEEventType(dataBytes, eventType)
+			}
+			validationErr := streamOutputAccumulator.Err()
+			if validationErr == nil && (eventType == "response.completed" || eventType == "response.done" || eventType == "response.incomplete") {
+				validationErr = validateResponsesToolArgumentsJSON([]byte(gjson.GetBytes(dataBytes, "response").Raw))
+			}
+			if validationErr != nil && !sawFailedEvent {
+				conversionErr = fmt.Errorf("upstream protocol conversion failed: %w", validationErr)
+				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+				// Discard unsent staging, including the current event name, before
+				// writing a complete error frame. Already sent content is immutable.
+				if firstOutputStage != nil && !firstOutputStage.closed {
+					_ = firstOutputStage.Close()
+				}
+				bufferedWriter.Reset(w)
+				eventInProgress = false
+				eventShouldFlush = false
+				stopFirstOutputTimer()
+				firstOutputScanGuard.Store(false)
+				if !clientDisconnected {
+					if !c.Writer.Written() {
+						_ = s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream response contains invalid tool arguments")
+						MarkResponseCommitted(c)
+					} else {
+						sendErrorEvent("upstream_protocol_error", "Upstream response contains invalid tool arguments")
+					}
+					clientOutputStarted = true
+				}
+				failureDelivered = true
+				suppressCurrentEvent = true
+				return
 			}
 			restoredData, restoreErr := restoreGrokResponsesClientToolPayload(c, dataBytes)
 			if restoreErr != nil {
@@ -1761,6 +1804,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	}
 	body = restoreCodexToolNamesFromContext(c, body)
 	body = ensureOpenAIResponseObjectCreatedAt(body)
+	if err := validateResponsesToolArgumentsJSON(body); err != nil {
+		return &openaiNonStreamingResult{OpenAIUsage: usage, usage: usage, responseID: extractOpenAIResponseIDFromJSONBytes(body), imageCount: countOpenAIResponseImageOutputsFromJSONBytes(body), imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body), searchCount: countGrokNativeSearchCallsFromJSONBytes(body)}, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream response contains invalid tool arguments")
+	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	// Codex 协议要求 /responses/compact JSON 响应携带 x-codex-turn-state
 	// （codex-api/src/endpoint/compact.rs 从响应头捕获），显式回传。
@@ -1842,6 +1888,9 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	if !ok {
 		return partialResult(), s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream stream ended without a terminal response")
 	}
+	if err := validateResponsesSSEToolArguments(bodyText); err != nil {
+		return partialResult(), s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream response contains inconsistent tool arguments")
+	}
 	// When the terminal event has an empty output array, reconstruct
 	// output from accumulated delta events so the client gets full content.
 	// gjson Array() returns empty slice for null, missing, or empty arrays.
@@ -1874,6 +1923,9 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	restoredBody = restoreCodexToolNamesFromContext(c, restoredBody)
 	body = ensureOpenAIResponseObjectCreatedAt(restoredBody)
 
+	if err := validateResponsesToolArgumentsJSON(body); err != nil {
+		return partialResult(), s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream response contains invalid tool arguments")
+	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usage, terminalType, false)
 	s.relayOpenAICodexTurnState(c, account, resp.Header)
@@ -2253,10 +2305,14 @@ func normalizeResponsesStreamingTerminalOutput(data []byte, acc *apicompat.Buffe
 
 func responsesStreamEventMayContributeToOutput(eventType string) bool {
 	switch eventType {
-	case "response.output_text.delta",
-		"response.output_item.added",
-		"response.function_call_arguments.delta",
-		"response.reasoning_summary_text.delta":
+	case "response.completed", "response.done", "response.incomplete",
+		"response.output_text.delta", "response.output_text.done",
+		"response.refusal.delta", "response.refusal.done",
+		"response.output_item.added", "response.output_item.done",
+		"response.function_call_arguments.delta", "response.function_call_arguments.done",
+		"response.custom_tool_call_input.delta", "response.custom_tool_call_input.done",
+		"response.reasoning_summary_text.delta", "response.reasoning_summary_text.done",
+		"response.reasoning_text.delta", "response.reasoning_text.done":
 		return true
 	default:
 		return false
@@ -2402,6 +2458,37 @@ func findRawCompactionItemFromSSE(bodyText string) (json.RawMessage, bool) {
 	return found, found != nil
 }
 
+// validateResponsesToolArgumentsJSON checks only function calls, preserving all
+// native response fields and opaque output item types without re-encoding them.
+func validateResponsesToolArgumentsJSON(body []byte) error {
+	response := &apicompat.ResponsesResponse{}
+	for _, item := range gjson.GetBytes(body, "output").Array() {
+		if item.Get("type").String() != "function_call" {
+			continue
+		}
+		var call apicompat.ResponsesOutput
+		if err := json.Unmarshal([]byte(item.Raw), &call); err != nil {
+			return err
+		}
+		response.Output = append(response.Output, call)
+	}
+	return apicompat.ValidateResponsesToolArguments(response)
+}
+
+func validateResponsesSSEToolArguments(bodyText string) error {
+	acc := apicompat.NewBufferedResponseAccumulator()
+	forEachOpenAISSEFrame(bodyText, func(eventType string, data []byte) {
+		if !responsesStreamEventMayContributeToOutput(eventType) {
+			return
+		}
+		var event apicompat.ResponsesStreamEvent
+		if json.Unmarshal([]byte(openAICompatPayloadWithEventType(string(data), eventType)), &event) == nil {
+			acc.ProcessEvent(&event)
+		}
+	})
+	return acc.Err()
+}
+
 // reconstructResponseOutputFromSSE scans raw SSE body text and returns a
 // JSON-encoded output array for a terminal event whose output is empty.
 // Raw output_item.done items are preferred: per the Responses protocol they
@@ -2433,6 +2520,9 @@ func reconstructResponseOutputFromSSE(bodyText string) ([]byte, bool) {
 }
 
 func buildResponsesOutputJSON(acc *apicompat.BufferedResponseAccumulator, imageOutputs []json.RawMessage) ([]byte, bool) {
+	if acc != nil && acc.Err() != nil {
+		return nil, false
+	}
 	if (acc == nil || !acc.HasContent()) && len(imageOutputs) == 0 {
 		return nil, false
 	}

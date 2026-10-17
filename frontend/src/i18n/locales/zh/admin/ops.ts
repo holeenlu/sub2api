@@ -145,7 +145,7 @@ export default {
       // Health Score & Diagnosis
       health: '健康',
       healthCondition: '健康状况',
-      healthHelp: '基于 SLA、错误率和资源使用情况的系统整体健康评分',
+      healthHelp: '按运维阈值评估请求错误、首 Token 耗时、资源和后台任务状态；SLA 与错误率不重复扣分',
       healthyStatus: '健康',
       riskyStatus: '风险',
       idleStatus: '待机',
@@ -214,7 +214,7 @@ export default {
         memoryHighAction: '监控内存趋势，检查是否有内存泄漏',
         ttftHigh: '首 Token 时间偏高 ({ttft}ms)',
         ttftHighImpact: '用户感知时长增加',
-        ttftHighAction: '优化请求处理流程，减少前置逻辑耗时',
+        ttftHighAction: '检查上游排队、模型推理耗时及网关前置处理，按模型类型评估',
         // Error rate diagnostics
         upstreamCritical: '上游错误率严重偏高 ({rate}%)',
         upstreamCriticalImpact: '可能影响大量用户请求',
@@ -235,6 +235,10 @@ export default {
         slaLow: 'SLA 低于目标 ({sla}%)',
         slaLowImpact: '需要关注服务质量',
         slaLowAction: '分析SLA下降原因，优化系统性能',
+        jobFailed: '后台任务执行失败 ({job})',
+        jobStale: '后台任务超过预期执行周期 ({job})',
+        jobImpact: '后台数据采集、聚合或维护可能延迟',
+        jobAction: '检查任务最近执行结果、执行周期和服务日志',
         // Health score diagnostics
         healthCritical: '综合健康评分过低 ({score})',
         healthCriticalImpact: '多个指标可能同时异常，建议优先排查错误与资源使用情况',
@@ -242,11 +246,12 @@ export default {
         healthLow: '综合健康评分偏低 ({score})',
         healthLowImpact: '可能存在轻度波动，建议关注 SLA 与错误率',
         healthLowAction: '监控指标趋势，预防问题恶化',
-        healthy: '所有系统指标正常',
+        healthy: '当前已采集指标无异常',
         healthyImpact: '服务运行稳定'
       },
       // Error Log
       errorLog: {
+        recovered: '已恢复',
         timeId: '时间 / ID',
         commonErrors: {
           contextDeadlineExceeded: '请求超时',
@@ -316,6 +321,7 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        requestStatus: '请求状态码',
         title: '错误详情',
         titleWithId: '错误 #{id}',
         noErrorSelected: '未选择错误。',
@@ -595,9 +601,9 @@ export default {
         metricThresholds: '指标阈值配置',
         metricThresholdsHint: '配置各项指标的告警阈值，超出阈值时将以红色显示',
         slaMinPercent: 'SLA 最低百分比',
-        slaMinPercentHint: 'SLA 低于此值时显示为红色（默认：99.5%）',
+        slaMinPercentHint: '低于目标时提示，低于目标超过 2 个百分点时标红（默认目标：99.5%）',
         ttftP99MaxMs: 'TTFT P99 最大值（毫秒）',
-        ttftP99MaxMsHint: 'TTFT P99 高于此值时显示为红色（默认：500ms）',
+        ttftP99MaxMsHint: '用于 TTFT 指标颜色、健康评分和诊断；默认 10,000ms，请按模型类型配置',
         requestErrorRateMaxPercent: '请求错误率最大值（%）',
         requestErrorRateMaxPercentHint: '请求错误率高于此值时显示为红色（默认：5%）',
         upstreamErrorRateMaxPercent: '上游错误率最大值（%）',
@@ -713,9 +719,9 @@ export default {
         metricThresholds: '指标阈值配置',
         metricThresholdsHint: '配置各项指标的告警阈值，超出阈值时将以红色显示',
         slaMinPercent: 'SLA最低百分比',
-        slaMinPercentHint: 'SLA低于此值时显示为红色（默认：99.5%）',
+        slaMinPercentHint: '低于目标时提示，低于目标超过 2 个百分点时标红（默认目标：99.5%）',
         ttftP99MaxMs: 'TTFT P99最大值（毫秒）',
-        ttftP99MaxMsHint: 'TTFT P99高于此值时显示为红色（默认：500ms）',
+        ttftP99MaxMsHint: '用于 TTFT 指标颜色、健康评分和诊断；默认 10,000ms，请按模型类型配置',
         requestErrorRateMaxPercent: '请求错误率最大值（%）',
         requestErrorRateMaxPercentHint: '请求错误率高于此值时显示为红色（默认：5%）',
         upstreamErrorRateMaxPercent: '上游错误率最大值（%）',
@@ -828,7 +834,7 @@ export default {
         errors: '错误统计，包括总错误数、错误率和上游错误率。',
         latency: '请求时长统计，包括 p50、p90、p95、p99 等百分位数。',
         ttft: '首 Token 延迟（Time To First Token），衡量流式响应的首 Token 返回速度。',
-        health: '系统健康评分（0-100），综合考虑 SLA、错误率和资源使用情况。'
+        health: '按运维阈值评估请求错误、首 Token 耗时、资源和后台任务状态；SLA 与错误率不重复扣分'
       },
       charts: {
         emptyRequest: '该时间窗口内暂无请求。',

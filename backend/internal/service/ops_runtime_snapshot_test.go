@@ -113,6 +113,37 @@ func TestOpsRuntimeSettingsAdministrativeUpdatesAreImmediatelyVisible(t *testing
 	}
 }
 
+func TestClientTelemetryDisabledUntilSettingsLoadAndRetainsPrivacyOnFailure(t *testing.T) {
+	repo := &opsRuntimeRefreshRepo{values: map[string]string{
+		SettingKeyOpsAdvancedSettings: `{"client_telemetry_mode":"disabled"}`,
+	}}
+	repo.fail.Store(true)
+	svc := &OpsService{settingRepo: repo}
+	svc.initRuntimeSettings(t.Context())
+	if got := svc.OpsAdvancedSettingsSnapshot().ClientTelemetryMode; got != ClientTelemetryModeDisabled {
+		t.Fatalf("cold settings failure enabled collection: %s", got)
+	}
+	repo.fail.Store(false)
+	repo.set(SettingKeyOpsAdvancedSettings, `{"client_telemetry_mode":"forward"}`)
+	if err := svc.RefreshRuntimeSettings(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.OpsAdvancedSettingsSnapshot().ClientTelemetryMode; got != ClientTelemetryModeForward {
+		t.Fatalf("successful refresh did not publish explicit mode: %s", got)
+	}
+	repo.set(SettingKeyOpsAdvancedSettings, `{"client_telemetry_mode":"disabled"}`)
+	if err := svc.RefreshRuntimeSettings(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	repo.fail.Store(true)
+	if err := svc.RefreshRuntimeSettings(t.Context()); err == nil {
+		t.Fatal("expected settings failure")
+	}
+	if got := svc.OpsAdvancedSettingsSnapshot().ClientTelemetryMode; got != ClientTelemetryModeDisabled {
+		t.Fatalf("failed refresh lost opt-out: %s", got)
+	}
+}
+
 func TestOpsRuntimeSettingsBackgroundRefreshConverges(t *testing.T) {
 	repo := &opsRuntimeRefreshRepo{values: map[string]string{
 		SettingKeyOpsMonitoringEnabled: "false",

@@ -56,7 +56,7 @@ describe('ops settings load guard', () => {
     expect(wrapper.get('button.btn-primary').attributes('disabled')).toBeUndefined()
     await wrapper.get('button.btn-primary').trigger('click')
     await flushPromises()
-    expect(opsAPI.updateMetricThresholds).toHaveBeenCalledWith(expect.objectContaining({ sla_percent_min: 98 }))
+    expect(opsAPI.updateMetricThresholds).toHaveBeenCalledWith(expect.objectContaining({ sla_percent_min: 98, ttft_p99_ms_max: 10000 }))
     expect(wrapper.emitted('saved')).toHaveLength(1)
   })
   it('does not save default thresholds after a failed initial load', async () => {
@@ -67,6 +67,18 @@ describe('ops settings load guard', () => {
     await (wrapper.vm as unknown as View).saveAllSettings()
     expect(opsAPI.updateMetricThresholds).not.toHaveBeenCalled()
     expect(wrapper.emitted('saved')).toBeUndefined()
+  })
+
+  it.each(['disabled', 'forward'] as const)('preserves telemetry mode %s when saving the existing settings form', async (mode) => {
+    opsAPI.getAdvancedSettings.mockResolvedValueOnce({
+      client_telemetry_mode: mode,
+      data_retention: { error_log_retention_days: 7, minute_metrics_retention_days: 7, hourly_metrics_retention_days: 7 },
+    })
+    const wrapper = await openDialog()
+    await flushPromises()
+    await (wrapper.vm as unknown as View).saveAllSettings()
+    expect(opsAPI.updateAdvancedSettings).toHaveBeenCalledWith(expect.objectContaining({ client_telemetry_mode: mode }))
+    expect(wrapper.emitted('saved')).toHaveLength(1)
   })
   it('blocks saving stale settings after a failed reopen and allows a later retry', async () => {
     const wrapper = await openDialog()

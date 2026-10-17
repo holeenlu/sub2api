@@ -284,6 +284,8 @@ export interface OpsSystemMetricsSnapshot {
 
 export interface OpsJobHeartbeat {
   job_name: string
+  expected_interval_seconds?: number
+  health_status?: 'healthy' | 'failed' | 'stale' | 'unknown'
   last_run_at?: string | null
   last_success_at?: string | null
   last_error_at?: string | null
@@ -795,6 +797,7 @@ export interface OpsOpenAIAccountQuotaAutoPauseSettings {
 }
 
 export interface OpsAdvancedSettings {
+  client_telemetry_mode: 'forward' | 'disabled'
   data_retention: OpsDataRetentionSettings
   aggregation: OpsAggregationSettings
   openai_account_quota_auto_pause: OpsOpenAIAccountQuotaAutoPauseSettings
@@ -851,6 +854,43 @@ export interface OpsSystemLog {
   platform?: string
   model?: string
   extra?: Record<string, any>
+}
+
+export interface ClientTelemetryLog {
+  id: number
+  user_id: number
+  api_key_id: number
+  group_id: number | null
+  client: string
+  request_path: string
+  event_type: string
+  session_id: string
+  device_id: string
+  payload_hash: string
+  payload_json?: string
+  headers?: Record<string, string[]>
+  received_count: number
+  created_at: string
+  last_seen_at: string
+}
+
+export interface ClientTelemetryQuery {
+  page?: number
+  page_size?: number
+  time_range?: string
+  user_id?: number
+  api_key_id?: number
+  session_id?: string
+}
+
+export async function listClientTelemetry(params: ClientTelemetryQuery): Promise<PaginatedResponse<ClientTelemetryLog>> {
+  const { data } = await apiClient.get<PaginatedResponse<ClientTelemetryLog>>('/admin/ops/client-telemetry', { params })
+  return data
+}
+
+export async function getClientTelemetry(id: number): Promise<ClientTelemetryLog> {
+  const { data } = await apiClient.get<ClientTelemetryLog>(`/admin/ops/client-telemetry/${id}`)
+  return data
 }
 
 export type OpsSystemLogListResponse = PaginatedResponse<OpsSystemLog>
@@ -912,6 +952,7 @@ export interface OpsErrorLog {
 
   severity: OpsSeverity
   status_code: number
+  request_status_code?: number | null
   platform: string
   model: string
 

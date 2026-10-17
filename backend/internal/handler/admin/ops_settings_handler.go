@@ -212,7 +212,7 @@ func (h *OpsHandler) UpdateAdvancedSettings(c *gin.Context) {
 		return
 	}
 
-	var req service.OpsAdvancedSettings
+	req := service.OpsAdvancedSettings{ClientTelemetryMode: h.opsService.OpsAdvancedSettingsSnapshot().ClientTelemetryMode}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request body")
 		return

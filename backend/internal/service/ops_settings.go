@@ -361,6 +361,7 @@ func (s *OpsService) UpdateOpsAlertRuntimeSettings(ctx context.Context, cfg *Ops
 
 func defaultOpsAdvancedSettings() *OpsAdvancedSettings {
 	return &OpsAdvancedSettings{
+		ClientTelemetryMode: ClientTelemetryModeDisabled,
 		DataRetention: OpsDataRetentionSettings{
 			// Keep the DB-backed default aligned with ops.cleanup.enabled so a
 			// first settings read cannot silently disable configured retention.
@@ -397,6 +398,16 @@ func defaultOpsAdvancedSettingsForConfig(cfg *config.Config) *OpsAdvancedSetting
 func normalizeOpsAdvancedSettings(cfg *OpsAdvancedSettings) {
 	if cfg == nil {
 		return
+	}
+	cfg.ClientTelemetryMode = strings.ToLower(strings.TrimSpace(cfg.ClientTelemetryMode))
+	switch cfg.ClientTelemetryMode {
+	case "":
+		// Sending credential-account telemetry requires an explicit opt-in.
+		cfg.ClientTelemetryMode = ClientTelemetryModeDisabled
+	case ClientTelemetryModeForward, ClientTelemetryModeDisabled:
+	default:
+		// Unknown stored values must not silently enable collection.
+		cfg.ClientTelemetryMode = ClientTelemetryModeDisabled
 	}
 	// Admission rejects are a security/traffic concern, not an operational
 	// request-error category. Keep the legacy field true for old clients but do
@@ -438,6 +449,11 @@ func clampOpsQuotaAutoPauseThreshold(value float64) float64 {
 func validateOpsAdvancedSettings(cfg *OpsAdvancedSettings) error {
 	if cfg == nil {
 		return errors.New("invalid config")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.ClientTelemetryMode)) {
+	case "", ClientTelemetryModeForward, ClientTelemetryModeDisabled:
+	default:
+		return errors.New("client_telemetry_mode must be forward or disabled")
 	}
 	// 保留天数：0 表示每次清理全部，1-365 表示按天数保留。
 	if cfg.DataRetention.ErrorLogRetentionDays < 0 || cfg.DataRetention.ErrorLogRetentionDays > 365 {
@@ -525,7 +541,7 @@ const SettingKeyOpsMetricThresholds = "ops_metric_thresholds"
 
 func defaultOpsMetricThresholds() *OpsMetricThresholds {
 	slaMin := 99.5
-	ttftMax := 500.0
+	ttftMax := 10000.0
 	reqErrMax := 5.0
 	upstreamErrMax := 5.0
 	return &OpsMetricThresholds{
@@ -556,11 +572,24 @@ func (s *OpsService) GetMetricThresholds(ctx context.Context) (*OpsMetricThresho
 		return nil, err
 	}
 
-	cfg := &OpsMetricThresholds{}
+	cfg := defaultCfg
 	if err := json.Unmarshal([]byte(raw), cfg); err != nil {
-		return defaultCfg, nil
+		return defaultOpsMetricThresholds(), nil
 	}
-
+	// Partial/old settings must resolve to the same limits in scoring and the UI.
+	defaults := defaultOpsMetricThresholds()
+	if cfg.SLAPercentMin == nil {
+		cfg.SLAPercentMin = defaults.SLAPercentMin
+	}
+	if cfg.TTFTp99MsMax == nil {
+		cfg.TTFTp99MsMax = defaults.TTFTp99MsMax
+	}
+	if cfg.RequestErrorRatePercentMax == nil {
+		cfg.RequestErrorRatePercentMax = defaults.RequestErrorRatePercentMax
+	}
+	if cfg.UpstreamErrorRatePercentMax == nil {
+		cfg.UpstreamErrorRatePercentMax = defaults.UpstreamErrorRatePercentMax
+	}
 	return cfg, nil
 }
 

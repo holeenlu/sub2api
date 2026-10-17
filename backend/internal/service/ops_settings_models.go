@@ -97,6 +97,7 @@ type OpsAlertRuntimeSettings struct {
 
 // OpsAdvancedSettings stores advanced ops configuration (data retention, aggregation).
 type OpsAdvancedSettings struct {
+	ClientTelemetryMode         string                                 `json:"client_telemetry_mode"`
 	DataRetention               OpsDataRetentionSettings               `json:"data_retention"`
 	Aggregation                 OpsAggregationSettings                 `json:"aggregation"`
 	OpenAIAccountQuotaAutoPause OpsOpenAIAccountQuotaAutoPauseSettings `json:"openai_account_quota_auto_pause"`
