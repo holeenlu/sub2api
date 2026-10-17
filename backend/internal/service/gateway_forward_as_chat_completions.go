@@ -30,7 +30,12 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	account *Account,
 	body []byte,
 	parsed *ParsedRequest,
-) (*ForwardResult, error) {
+) (result *ForwardResult, returnErr error) {
+	defer func() {
+		if returnErr == nil && result != nil {
+			confirmSchedulingQuotaPrefix(ctx, account, result.Usage.CacheCreationInputTokens+result.Usage.CacheReadInputTokens)
+		}
+	}()
 	startTime := time.Now()
 	// A retry on another account must never reuse the previous attempt's aliases.
 	if c != nil {
@@ -143,6 +148,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, mappedModel)
 
 	// 11. Send request
+	s.activateAccountTelemetry(ctx, account, forwardedBody)
 	resp, err := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	s.observeClaudeCodeResponseHeaders(ctx, account, resp)
 	if err != nil {
@@ -164,6 +170,11 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 
+		if IsUpstreamContentRefusal(respBody) {
+			observeUpstreamContentRefusal(ctx, respBody)
+			writeGatewayCCError(c, mapUpstreamStatusCode(resp.StatusCode), "content_policy_violation", upstreamMsg)
+			return nil, fmt.Errorf("upstream content refusal: %d", resp.StatusCode)
+		}
 		if s.shouldFailoverUpstreamError(resp.StatusCode) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				ProxyID:            opsUpstreamProxyID(account),
@@ -193,7 +204,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 
 	// 13. Handle normal response
 	// Read Anthropic SSE → convert to Responses events → convert to CC format
-	var result *ForwardResult
 	var handleErr error
 	if clientStream {
 		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)

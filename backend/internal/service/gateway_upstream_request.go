@@ -26,6 +26,9 @@ const anthropicMessagesForeignOAuthReason = GatewayFailureReason("anthropic_mess
 // chatgpt.com），送错协议既泄露凭据，上游 401 还会被误记到账号头上；
 // API Key 不受限：其上游可能同时兼容多种协议格式。
 func anthropicMessagesCredentialAllowed(account *Account) bool {
+	if account != nil && account.Type == AccountTypeServiceAccount {
+		return account.Platform == PlatformAnthropic
+	}
 	if !account.IsOAuth() {
 		return true
 	}
@@ -58,8 +61,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	body = normalized
 	body = stripDeferredToolCacheControl(body)
 	if account.Platform == PlatformAnthropic && account.Type == AccountTypeServiceAccount {
-		req, err := s.buildUpstreamRequestAnthropicVertex(ctx, c, account, body, token, modelID, reqStream)
-		return req, body, err
+		return s.buildUpstreamRequestAnthropicVertex(ctx, c, account, body, token, modelID, reqStream, false)
 	}
 
 	// 确定目标URL
@@ -99,7 +101,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	}
 	if account.IsOAuth() && s.identityService != nil {
 		// 1. 获取或创建指纹（包含随机生成的ClientID）
-		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
+		fp, err := s.identityService.GetAccountFingerprint(ctx, account, clientHeaders)
 		if err != nil {
 			logger.LegacyPrintf("service.gateway", "Warning: failed to get fingerprint for account %d: %v", account.ID, err)
 			// 失败时降级为透传原始headers
@@ -109,10 +111,10 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			}
 
 			// 2. 重写metadata.user_id（需要指纹中的ClientID和账号的account_uuid）
-			// 如果启用了会话ID伪装，会在重写后替换 session 部分为固定值
+			// 会话伪装以同一个账号 seed 分别映射原始 session 和 parent
 			// 当 metadata 透传开启时跳过重写
 			if !enableMPT {
-				accountUUID := account.GetExtraString("account_uuid")
+				accountUUID := telemetryCredential(account, "account_uuid")
 				if accountUUID != "" && fp.ClientID != "" {
 					if newBody, err := s.identityService.RewriteUserIDWithMasking(ctx, body, account, accountUUID, fp.ClientID, fp.UserAgent); err == nil && len(newBody) > 0 {
 						body = newBody
@@ -126,8 +128,11 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	mimicUserAgent := claudeCodeMimicUserAgent()
 
 	// Mimicry may override the cached User-Agent later, even without a fingerprint.
-	if billingUA := effectiveBillingUserAgent(mimicUserAgent, tokenType, mimicClaudeCode, fingerprint); billingUA != "" {
-		body = syncBillingHeaderVersion(body, billingUA)
+	if billingUA := effectiveBillingUserAgent(mimicUserAgent, getHeaderRaw(clientHeaders, "User-Agent"), tokenType, mimicClaudeCode, fingerprint); billingUA != "" {
+		if !mimicClaudeCode {
+			body = ensureClaudeCodeBillingBlock(body, billingUA, c)
+		}
+		body = syncBillingHeaderVersion(body, billingUA, c)
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
@@ -152,6 +157,8 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if beta, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
 		finalBetaHeader, finalBetaShouldSet = beta, true
 	}
+	body, finalBetaHeader = s.prepareClaudeConversation(ctx, c, account, body, finalBetaHeader, effectiveDropSet)
+	finalBetaShouldSet = finalBetaShouldSet || finalBetaHeader != ""
 	finalBetaHeader = filterSonnet55ToolsetBeta(finalBetaHeader, body, modelID)
 
 	// 能力维度 body sanitize：与最终 anthropic-beta header 对称
@@ -165,6 +172,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	body = clampOllamaCloudAnthropicMessagesMaxTokens(account, baseURL, body)
 	body = finalizeClaudeCCH(body, targetURL)
 
+	logGatewayCacheTransform(ctx, account, "", body)
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
@@ -215,6 +223,8 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		applyClaudeCodeMimicHeaders(req, c)
 	}
 
+	s.applyClaudeCodeControlHeaders(ctx, req, clientHeaders, account, tokenType, mimicClaudeCode)
+
 	// 写入最终 anthropic-beta header
 	// 注：透传分支白名单可能写入了客户端 anthropic-beta，无条件 Del 一次再按 finalBeta
 	// 决定是否 set，确保 dropSet 过滤后的结果一定覆盖客户端原始值。
@@ -252,6 +262,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		logClaudeMimicDebug(req, body, account, tokenType, mimicClaudeCode)
 	}
 
+	if observer := upstreamResponseModelObserverFromContext(c); observer != nil && observer.claudeConversation != nil {
+		observer.claudeConversation.betas = splitClaudeBetas(getTokenListHeader(req.Header, "anthropic-beta"))
+	}
 	return req, body, nil
 }
 
@@ -307,18 +320,19 @@ func filterVertexBetaTokens(header string, drop map[string]struct{}) string {
 	return strings.Join(out, ",")
 }
 
-func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
-	ctx context.Context,
-	c *gin.Context,
-	account *Account,
-	body []byte,
-	token string,
-	modelID string,
-	reqStream bool,
-) (*http.Request, error) {
-	vertexBody, err := buildVertexAnthropicRequestBody(body)
+// Share endpoint validation, beta policy and credential isolation for Messages
+// and count_tokens. The latter retains model in the body and uses count-tokens.
+func (s *GatewayService) buildUpstreamRequestAnthropicVertex(ctx context.Context, c *gin.Context, account *Account, body []byte, token, modelID string, reqStream, countTokens bool) (*http.Request, []byte, error) {
+	if countTokens {
+		reqStream = false
+		if strings.TrimSpace(modelID) == "" {
+			return nil, nil, fmt.Errorf("vertex count_tokens model is required")
+		}
+		body = s.replaceModelInBody(body, modelID)
+	}
+	vertexBody, err := buildVertexAnthropicBody(body, countTokens)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// 计算最终 outgoing anthropic-beta。Vertex AI 的 Anthropic 端点只接受一小撮
@@ -334,7 +348,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	}
 	policy := s.evaluateBetaPolicy(ctx, clientBeta, account, modelID)
 	if policy.blockErr != nil {
-		return nil, policy.blockErr
+		return nil, nil, policy.blockErr
 	}
 	finalBeta := filterSonnet55ToolsetBeta(filterVertexBetaTokens(clientBeta, mergeDropSets(policy.filterSet)), vertexBody, modelID)
 
@@ -343,13 +357,18 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(vertexBody, finalBeta); changed {
 		vertexBody = sanitized
 	}
-	fullURL, err := buildVertexAnthropicURL(account.VertexProjectID(), account.VertexLocation(modelID), modelID, reqStream)
-	if err != nil {
-		return nil, err
+	routeModel := modelID
+	if countTokens {
+		routeModel = "count-tokens"
 	}
+	fullURL, err := buildVertexAnthropicURL(account.VertexProjectID(), account.VertexLocation(modelID), routeModel, reqStream)
+	if err != nil {
+		return nil, nil, err
+	}
+	logGatewayCacheTransform(ctx, account, "", vertexBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if c != nil && c.Request != nil {
@@ -372,6 +391,9 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	req.Header.Del("anthropic-version")
 	setHeaderRaw(req.Header, "authorization", "Bearer "+token)
 	setHeaderRaw(req.Header, "content-type", "application/json")
+	if c != nil && c.Request != nil {
+		s.applyClaudeCodeControlHeaders(ctx, req, c.Request.Header, account, "service_account", false)
+	}
 
 	// 覆盖上面白名单 loop 写入的原始 client anthropic-beta，使用过滤后的最终值。
 	// finalBeta 为空（全部被剥离）时不下发该 header，与 Vertex 无 beta 请求一致。
@@ -387,7 +409,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 		"stream":     strconv.FormatBool(reqStream),
 	})
 
-	return req, nil
+	return req, vertexBody, nil
 }
 
 // getBetaHeader 处理anthropic-beta header
@@ -675,14 +697,6 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 	return "", false
 }
 
-// stripBetaTokens removes the given beta tokens from a comma-separated header value.
-func stripBetaTokens(header string, tokens []string) string {
-	if header == "" || len(tokens) == 0 {
-		return header
-	}
-	return stripBetaTokensWithSet(header, buildBetaTokenSet(tokens))
-}
-
 func stripBetaTokensWithSet(header string, drop map[string]struct{}) string {
 	if header == "" || len(drop) == 0 {
 		return header
@@ -832,18 +846,6 @@ func resolveRuleAction(rule BetaPolicyRule, model string) (action, errorMessage 
 		return rule.FallbackAction, rule.FallbackErrorMessage
 	}
 	return BetaPolicyActionPass, "" // default fallback: pass (fail-open)
-}
-
-// droppedBetaSet returns claude.DroppedBetas as a set, with optional extra tokens.
-func droppedBetaSet(extra ...string) map[string]struct{} {
-	m := make(map[string]struct{}, len(defaultDroppedBetasSet)+len(extra))
-	for t := range defaultDroppedBetasSet {
-		m[t] = struct{}{}
-	}
-	for _, t := range extra {
-		m[t] = struct{}{}
-	}
-	return m
 }
 
 // containsBetaToken checks if a comma-separated header value contains the given token.
