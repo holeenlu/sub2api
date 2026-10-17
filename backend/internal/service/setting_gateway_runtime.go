@@ -76,6 +76,7 @@ const gatewayForwardingDBTimeout = 5 * time.Second
 
 // cachedAccountSchedulingThresholds 缓存平台自动停调阈值（进程内缓存，60s TTL）
 type cachedAccountSchedulingThresholds struct {
+	resolved   bool // distinguishes storage fallback from an explicit disabled threshold
 	thresholds map[string]int
 	expiresAt  int64 // unix nano
 }

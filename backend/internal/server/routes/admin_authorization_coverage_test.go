@@ -38,9 +38,18 @@ func TestExactRoutesEnforceReadWriteAndNeverImplySuperAuthority(t *testing.T) {
 		all = append(all, permission.Key)
 	}
 	limited := authz.Subject{Role: authz.Admin, PolicyVersion: 3, Permissions: all}
-	for _, route := range []string{"/api/v1/admin/backups", "/api/v1/admin/settings/admin-api-key", "/api/v1/admin/plugins", "/api/v1/admin/ops/client-telemetry", "/api/v1/admin/ops/client-telemetry/:id"} {
+	for _, route := range []string{"/api/v1/admin/backups", "/api/v1/admin/settings/admin-api-key", "/api/v1/admin/plugins"} {
 		rule, ok := authz.RuleFor("GET", route)
 		require.True(t, ok)
 		require.False(t, rule.Allows(limited))
 	}
+	rule, ok := authz.RuleFor("POST", "/api/v1/admin/accounts/:id/telemetry/generate")
+	require.True(t, ok)
+	require.False(t, rule.Allows(limited))
+	require.True(t, rule.Allows(authz.Subject{Role: authz.SuperAdmin}))
+	for _, path := range []string{"/api/v1/admin/ops/client-telemetry", "/api/v1/admin/ops/client-telemetry/:id"} {
+		_, known := authz.RuleFor("GET", path)
+		require.False(t, known)
+	}
+
 }

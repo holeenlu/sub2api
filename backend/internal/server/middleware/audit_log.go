@@ -8,7 +8,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -109,6 +108,7 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
+	"GET /api/v1/admin/usage/export":              "admin.usage.export",
 	"GET /api/v1/admin/accounts/data":             "admin.accounts.export",
 	"GET /api/v1/admin/proxies/data":              "admin.proxies.export",
 	"GET /api/v1/admin/redeem-codes/export":       "admin.redeem_codes.export",
@@ -195,13 +195,14 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 		} else if c.Request.Body != nil && c.Request.Method != "GET" {
 			orig := c.Request.Body
 			raw, err := io.ReadAll(io.LimitReader(orig, service.AuditRequestBodyCaptureLimit+1))
+			var replay io.Reader = bytes.NewReader(raw)
 			if err == nil {
-				c.Request.Body = &restoredBody{
-					Reader: io.MultiReader(bytes.NewReader(raw), orig),
-					closer: orig,
-				}
+				replay = io.MultiReader(replay, orig)
 				bodyRedacted = service.RedactAuditBody(raw, c.GetHeader("Content-Type"))
 			}
+			// A failed read may have consumed the transport's only error. Replay
+			// its prefix and keep that cause sticky for every subsequent reader.
+			c.Request.Body = &restoredBody{Reader: replay, closer: orig, readErr: err}
 		}
 
 		start := time.Now()
@@ -300,7 +301,16 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 // 保证 handler 读到完整请求体；Close 委托给原始 body。
 type restoredBody struct {
 	io.Reader
-	closer io.Closer
+	closer  io.Closer
+	readErr error
+}
+
+func (b *restoredBody) Read(p []byte) (int, error) {
+	n, err := b.Reader.Read(p)
+	if err == io.EOF && b.readErr != nil {
+		return n, b.readErr
+	}
+	return n, err
 }
 
 func (b *restoredBody) Close() error { return b.closer.Close() }

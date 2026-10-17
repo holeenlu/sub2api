@@ -29,12 +29,26 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
 const gatewayCompatibilityMetricsLogInterval = 1024
+
+// stickySessionBindTimeout bounds the post-forward sticky rebind. The write is a
+// single Redis SET that must survive a client disconnect, but it must never hold
+// the request goroutine open if Redis is unreachable.
+const stickySessionBindTimeout = 3 * time.Second
+
+// detachedStickyBindContext derives the context for the post-forward sticky
+// rebind. That rebind renews the binding TTL after the response has already been
+// delivered, so by then the client has frequently hung up and the request context
+// is cancelled — binding through it fails with `context canceled` and the session
+// silently loses its account affinity while it is still in active use. The
+// binding therefore runs on a detached context with its own short deadline.
+func detachedStickyBindContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), stickySessionBindTimeout)
+}
 
 var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 
@@ -147,6 +161,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 读取请求体
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
+		logRequestBodyReadFailure(reqLog, c.Request, err)
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
@@ -174,6 +189,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	reqStream := parsedReq.Stream
 	bindRequestedReasoningEffort(c, body, reqModel)
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
+	// A fallback group evaluates the original intent, not another group's
+	// already-mapped effort. Account attempts still clone their own body.
+	effortPolicyInputBody := body
 	if policyBody, changed, err := applyAnthropicReasoningEffortPolicyForRequest(c, apiKey, body); err != nil {
 		respondOpenAIReasoningEffortPolicyError(c, err, h.errorResponse)
 		return
@@ -482,7 +500,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindSelectionStickySessionAfterProfitAdmission(admissionCtx, selection, apiKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -559,13 +577,15 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					forwardFailedFields = append(forwardFailedFields, zap.Int64p("proxy_id", account.ProxyID))
 				}
 				reqLog.Error("gateway.forward_failed", forwardFailedFields...)
-				return
+				if result == nil {
+					return
+				}
 			}
 
 			// RPM 计数递增（Forward 成功后）
 			// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。
 			// 在高并发下可能短暂超出 RPM 限制，但不会导致请求失败。
-			if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
+			if err == nil && account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
 				if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
 					reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
@@ -578,7 +598,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
-			stampForwardRequestedReasoningEffort(result, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort))
+			stampForwardRequestedReasoningEffort(result, service.RequestedReasoningEffortFromContext(c.Request.Context()))
 			if result.ReasoningEffort == nil {
 				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
 			}
@@ -832,7 +852,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindSelectionStickySessionAfterProfitAdmission(admissionCtx, selection, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -946,7 +966,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
-				stampForwardRequestedReasoningEffort(result, service.NormalizeClaudeOutputEffort(attemptParsedReq.OutputEffort))
+				stampForwardRequestedReasoningEffort(result, service.RequestedReasoningEffortFromContext(c.Request.Context()))
 				if result.ReasoningEffort == nil {
 					result.ReasoningEffort = service.NormalizeClaudeOutputEffort(attemptParsedReq.OutputEffort)
 				}
@@ -1040,7 +1060,18 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						}
 						// 兜底重试按"直接请求兜底分组"处理：清除强制平台，允许按分组平台调度
 						ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, "")
+						ctx = service.WithResolvedTargetPlatform(ctx, fallbackGroup.Platform)
 						c.Request = c.Request.WithContext(ctx)
+						fallbackBody, _, policyErr := applyAnthropicReasoningEffortPolicyForRequest(c, fallbackAPIKey, effortPolicyInputBody)
+						if policyErr != nil {
+							respondOpenAIReasoningEffortPolicyError(c, policyErr, h.errorResponse)
+							return
+						}
+						if err := parsedReq.ReplaceBody(fallbackBody); err != nil {
+							h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to apply fallback reasoning effort policy")
+							return
+						}
+						body = parsedReq.Body.Bytes()
 						currentAPIKey = fallbackAPIKey
 						currentSubscription = nil
 						fallbackUsed = true
@@ -1127,9 +1158,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				// 转发已经成功，这次绑定只是把 TTL 续上，不能再挂在请求 context 上：
+				// 流式请求走到这里时客户端往往已经断开，c.Request.Context() 早被取消，
+				// 续期会以 context canceled 静默失败，绑定就在会话还活跃时到期了。
+				bindCtx, cancelBind := detachedStickyBindContext(c.Request.Context())
+				if err := h.gatewayService.BindSelectionStickySession(bindCtx, selection, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
+				cancelBind()
 			}
 
 			submitForwardUsage(result)
@@ -2160,6 +2196,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// 读取请求体
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
+		logRequestBodyReadFailure(reqLog, c.Request, err)
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return

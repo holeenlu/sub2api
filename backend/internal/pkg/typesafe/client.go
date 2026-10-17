@@ -158,7 +158,8 @@ func Evaluate(ctx context.Context, client *http.Client, baseURL, key string, inp
 			Noul *float64 `json:"noul"`
 		} `json:"answers"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil || strings.TrimSpace(out.Model) == "" {
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if readErr != nil || len(raw) > 1<<20 || json.Unmarshal(raw, &out) != nil || strings.TrimSpace(out.Model) == "" {
 		return nil, resp.StatusCode, errors.New("typesafe invalid response")
 	}
 	result := &Result{Model: out.Model, Usage: out.Usage, Scores: make(map[string]float64, len(input.Questions))}
