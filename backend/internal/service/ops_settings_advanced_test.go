@@ -7,7 +7,29 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/stretchr/testify/require"
 )
+
+func TestAccountTelemetrySendingSettingDefaultsAndPersistence(t *testing.T) {
+	repo := newRuntimeSettingRepoStub()
+	// A retired collection choice must not opt an installation into sending.
+	repo.values[SettingKeyOpsAdvancedSettings] = `{"client_telemetry_mode":"enabled"}`
+	svc := &OpsService{settingRepo: repo}
+	svc.initRuntimeSettings(t.Context())
+	require.False(t, svc.OpsAdvancedSettingsSnapshot().AccountTelemetrySendingEnabled)
+	for _, enabled := range []bool{true, false} {
+		settings := svc.OpsAdvancedSettingsSnapshot()
+		settings.AccountTelemetrySendingEnabled = enabled
+		updated, err := svc.UpdateOpsAdvancedSettings(t.Context(), &settings)
+		require.NoError(t, err)
+		require.Equal(t, enabled, updated.AccountTelemetrySendingEnabled)
+		require.Equal(t, enabled, svc.OpsAdvancedSettingsSnapshot().AccountTelemetrySendingEnabled)
+		// Restart and another instance read the same persisted setting.
+		reloaded := &OpsService{settingRepo: repo}
+		reloaded.initRuntimeSettings(t.Context())
+		require.Equal(t, enabled, reloaded.OpsAdvancedSettingsSnapshot().AccountTelemetrySendingEnabled)
+	}
+}
 
 func TestGetOpsAdvancedSettings_DefaultSnapshotHidesOpenAITokenStats(t *testing.T) {
 	repo := newRuntimeSettingRepoStub()
