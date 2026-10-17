@@ -5,12 +5,14 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/server/routes"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -53,6 +56,7 @@ func TestAPIContracts(t *testing.T) {
 					"email_bound": true,
 					"username": "alice",
 						"role": "user",
+ "policy_version":0,"permissions":[],"admin_pages":[],
 						"balance": 12.5,
 						"frozen_balance": 0,
 						"concurrency": 5,
@@ -576,7 +580,7 @@ func TestAPIContracts(t *testing.T) {
 				})
 			},
 			method:     http.MethodGet,
-			path:       "/api/v1/usage?page=1&page_size=10",
+			path:       "/api/v1/usage?page=1&page_size=10&start_date=2025-01-01&end_date=2025-01-03&timezone=UTC",
 			wantStatus: http.StatusOK,
 			wantJSON: `{
 				"code": 0,
@@ -703,8 +707,6 @@ func TestAPIContracts(t *testing.T) {
 					service.SettingPaymentVisibleMethodWxpayEnabled:                      "false",
 					service.SettingKeyOpenAILowUpstreamRatePriorityEnabled:               "true",
 					service.SettingKeyOpenAIOAuthSchedulingRateMultiplier:                "0.05",
-					"openai_advanced_scheduler_enabled":                                  "true",
-					service.SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled:       "false",
 					service.SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled: "false",
 				})
 			},
@@ -728,7 +730,9 @@ func TestAPIContracts(t *testing.T) {
 						"passkey_configured": false,
 						"passkey_rp_id": "",
 						"passkey_rp_origins": [],
-						"session_binding_enabled": false,
+						"vendor_console_enabled": false,
+                        "vendor_portal_origin": "",
+                        "session_binding_enabled": false,
 						"step_up_enabled": false,
 						"audit_log_retention_days": 180,
 						"login_agreement_enabled": false,
@@ -880,6 +884,22 @@ func TestAPIContracts(t *testing.T) {
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
 					"enable_model_fallback": false,
+                    "excel_bps_enabled": false,
+                    "excel_bps_image_base_url": "",
+                    "excel_bps_image_body_limit_mib": 64,
+                    "excel_bps_image_budget_mib": 1024,
+                    "excel_bps_image_compact_reserve": 3,
+                    "excel_bps_image_limit_policy": "auto_compact",
+                    "excel_bps_image_max_image_mib": 20,
+                    "excel_bps_image_max_images": 20,
+                    "excel_bps_image_max_requests": 128,
+                    "excel_bps_image_max_total_mib": 32,
+                    "excel_bps_image_mode": "native",
+                    "excel_bps_image_relay_enabled": false,
+                    "excel_bps_image_storage_entries": 512,
+                    "excel_bps_image_storage_mib": 1024,
+                    "excel_bps_image_ttl_minutes": 30,
+                    "excel_bps_image_warning_remaining": 8,
 					"fallback_model_anthropic": "claude-3-5-sonnet-20241022",
 					"fallback_model_antigravity": "gemini-2.5-pro",
 					"fallback_model_gemini": "gemini-2.5-pro",
@@ -888,7 +908,6 @@ func TestAPIContracts(t *testing.T) {
 						"identity_patch_prompt": "",
 						"invitation_code_enabled": false,
 						"home_content": "",
-					"hide_ccs_import_button": false,
 					"grok_default_text_model": "grok-4.6",
 					"grok_default_base_url_mode": "cli",
 					"grok_cross_client_model_map_enabled": true,
@@ -925,31 +944,7 @@ func TestAPIContracts(t *testing.T) {
 					"openai_low_upstream_rate_priority_enabled": true,
 					"openai_oauth_scheduling_rate_multiplier": 0.05,
 					"openai_ttft_mode": "semantic",
-					"openai_advanced_scheduler_enabled": true,
-					"openai_advanced_scheduler_sticky_weighted_enabled": false,
 					"openai_advanced_scheduler_subscription_priority_enabled": false,
-					"openai_advanced_scheduler_lb_top_k": "",
-					"openai_advanced_scheduler_weight_priority": "",
-					"openai_advanced_scheduler_weight_load": "",
-					"openai_advanced_scheduler_weight_queue": "",
-					"openai_advanced_scheduler_weight_error_rate": "",
-					"openai_advanced_scheduler_weight_ttft": "",
-					"openai_advanced_scheduler_weight_reset": "",
-					"openai_advanced_scheduler_weight_quota_headroom": "",
-					"openai_advanced_scheduler_weight_upstream_cost": "",
-					"openai_advanced_scheduler_weight_previous_response": "",
-					"openai_advanced_scheduler_weight_session_sticky": "",
-					"openai_advanced_scheduler_effective_lb_top_k": "7",
-					"openai_advanced_scheduler_effective_weight_priority": "1",
-					"openai_advanced_scheduler_effective_weight_load": "1",
-					"openai_advanced_scheduler_effective_weight_queue": "0.7",
-					"openai_advanced_scheduler_effective_weight_error_rate": "0.8",
-					"openai_advanced_scheduler_effective_weight_ttft": "0.5",
-					"openai_advanced_scheduler_effective_weight_reset": "0",
-					"openai_advanced_scheduler_effective_weight_quota_headroom": "0",
-					"openai_advanced_scheduler_effective_weight_upstream_cost": "0",
-					"openai_advanced_scheduler_effective_weight_previous_response": "5",
-					"openai_advanced_scheduler_effective_weight_session_sticky": "3",
 					"openai_codex_user_agent":           "",
 					"openai_codex_client_version":       "",
 					"openai_codex_client_version_synced": "",
@@ -990,7 +985,7 @@ func TestAPIContracts(t *testing.T) {
 					"payment_alipay_mobile_precreate_deep_link": false,
 					"balance_low_notify_enabled": false,
 					"account_quota_notify_enabled": false,
-					"account_scheduling_thresholds": {"anthropic":100,"grok":100,"openai":100},
+					"account_scheduling_thresholds": {"anthropic":100,"anthropic_fable":100,"grok":100,"openai":100},
 					"subscription_expiry_notify_enabled": true,
 					"balance_low_notify_threshold": 0,
 					"balance_low_notify_recharge_url": "",
@@ -1087,7 +1082,9 @@ func TestAPIContracts(t *testing.T) {
 						"passkey_configured": false,
 						"passkey_rp_id": "",
 						"passkey_rp_origins": [],
-						"session_binding_enabled": false,
+						"vendor_console_enabled": false,
+                        "vendor_portal_origin": "",
+                        "session_binding_enabled": false,
 						"step_up_enabled": false,
 						"audit_log_retention_days": 180,
 						"login_agreement_enabled": false,
@@ -1182,7 +1179,6 @@ func TestAPIContracts(t *testing.T) {
 					"contact_info": "",
 					"doc_url": "",
 					"home_content": "",
-					"hide_ccs_import_button": false,
 					"grok_default_text_model": "grok-4.6",
 					"grok_default_base_url_mode": "cli",
 					"grok_cross_client_model_map_enabled": true,
@@ -1210,6 +1206,22 @@ func TestAPIContracts(t *testing.T) {
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
 					"enable_model_fallback": false,
+                    "excel_bps_enabled": false,
+                    "excel_bps_image_base_url": "",
+                    "excel_bps_image_body_limit_mib": 64,
+                    "excel_bps_image_budget_mib": 1024,
+                    "excel_bps_image_compact_reserve": 3,
+                    "excel_bps_image_limit_policy": "auto_compact",
+                    "excel_bps_image_max_image_mib": 20,
+                    "excel_bps_image_max_images": 20,
+                    "excel_bps_image_max_requests": 128,
+                    "excel_bps_image_max_total_mib": 32,
+                    "excel_bps_image_mode": "native",
+                    "excel_bps_image_relay_enabled": false,
+                    "excel_bps_image_storage_entries": 512,
+                    "excel_bps_image_storage_mib": 1024,
+                    "excel_bps_image_ttl_minutes": 30,
+                    "excel_bps_image_warning_remaining": 8,
 					"fallback_model_anthropic": "claude-3-5-sonnet-20241022",
 					"fallback_model_openai": "gpt-4o",
 					"fallback_model_gemini": "gemini-2.5-pro",
@@ -1249,31 +1261,7 @@ func TestAPIContracts(t *testing.T) {
 					"openai_low_upstream_rate_priority_enabled": false,
 					"openai_oauth_scheduling_rate_multiplier": 1,
 					"openai_ttft_mode": "semantic",
-					"openai_advanced_scheduler_enabled": false,
-					"openai_advanced_scheduler_sticky_weighted_enabled": false,
 					"openai_advanced_scheduler_subscription_priority_enabled": false,
-					"openai_advanced_scheduler_lb_top_k": "",
-					"openai_advanced_scheduler_weight_priority": "",
-					"openai_advanced_scheduler_weight_load": "",
-					"openai_advanced_scheduler_weight_queue": "",
-					"openai_advanced_scheduler_weight_error_rate": "",
-					"openai_advanced_scheduler_weight_ttft": "",
-					"openai_advanced_scheduler_weight_reset": "",
-					"openai_advanced_scheduler_weight_quota_headroom": "",
-					"openai_advanced_scheduler_weight_upstream_cost": "",
-					"openai_advanced_scheduler_weight_previous_response": "",
-					"openai_advanced_scheduler_weight_session_sticky": "",
-					"openai_advanced_scheduler_effective_lb_top_k": "7",
-					"openai_advanced_scheduler_effective_weight_priority": "1",
-					"openai_advanced_scheduler_effective_weight_load": "1",
-					"openai_advanced_scheduler_effective_weight_queue": "0.7",
-					"openai_advanced_scheduler_effective_weight_error_rate": "0.8",
-					"openai_advanced_scheduler_effective_weight_ttft": "0.5",
-					"openai_advanced_scheduler_effective_weight_reset": "0",
-					"openai_advanced_scheduler_effective_weight_quota_headroom": "0",
-					"openai_advanced_scheduler_effective_weight_upstream_cost": "0",
-					"openai_advanced_scheduler_effective_weight_previous_response": "5",
-					"openai_advanced_scheduler_effective_weight_session_sticky": "3",
 					"openai_codex_user_agent":           "",
 					"openai_codex_client_version":       "",
 					"openai_codex_client_version_synced": "",
@@ -1312,7 +1300,7 @@ func TestAPIContracts(t *testing.T) {
 					"payment_alipay_mobile_precreate_deep_link": false,
 					"balance_low_notify_enabled": false,
 					"account_quota_notify_enabled": false,
-					"account_scheduling_thresholds": {"anthropic":100,"grok":100,"openai":100},
+					"account_scheduling_thresholds": {"anthropic":100,"anthropic_fable":100,"grok":100,"openai":100},
 					"subscription_expiry_notify_enabled": true,
 					"balance_low_notify_threshold": 0,
 					"balance_low_notify_recharge_url": "",
@@ -1425,7 +1413,56 @@ func TestAPIContracts(t *testing.T) {
 
 			status, body := doRequest(t, deps.router, tt.method, tt.path, tt.body, tt.headers)
 			require.Equal(t, tt.wantStatus, status)
-			require.JSONEq(t, tt.wantJSON, body)
+			wantJSON := tt.wantJSON
+			if tt.method == http.MethodGet && tt.path == "/api/v1/admin/settings" {
+				var expected map[string]any
+				require.NoError(t, json.Unmarshal([]byte(wantJSON), &expected))
+				data := expected["data"].(map[string]any)
+				data["openai_codex_diagnostic_prompt_template"] = service.DefaultCodexProbeTemplate()
+				data["openai_codex_diagnostic_prompt_template_default"] = service.DefaultCodexProbeTemplate()
+				if strings.Contains(tt.name, "falls back to config oauth defaults") {
+					data["site_name"] = service.DefaultSiteName
+				}
+				encoded, err := json.Marshal(expected)
+				require.NoError(t, err)
+				wantJSON = string(encoded)
+			}
+			require.JSONEq(t, wantJSON, body)
+		})
+	}
+}
+
+func TestCodexDiagnosticRoutesRetireTicketEndpoints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handlers := &handler.Handlers{Admin: &handler.AdminHandlers{Account: &adminhandler.AccountHandler{}}}
+	pass := func(c *gin.Context) { c.Next() }
+	routes.RegisterAdminRoutes(router.Group("/api/v1"), handlers,
+		middleware.AdminAuthMiddleware(pass), middleware.AuditLogMiddleware(pass), middleware.StepUpAuthMiddleware(pass), nil, nil)
+	for _, tc := range []struct {
+		method, current, retired string
+	}{
+		{http.MethodGet, "/1/codex-diagnostic", "/1/codex-ticket-diagnostic"},
+		{http.MethodPut, "/1/codex-diagnostic", "/1/codex-ticket-diagnostic"},
+		{http.MethodPost, "/1/codex-diagnostic", "/1/codex-ticket-diagnostic"},
+		{http.MethodGet, "/1/codex-diagnostic/history", "/1/codex-ticket-diagnostic/history"},
+		{http.MethodPost, "/1/codex-diagnostic/2/cancel", "/1/codex-ticket-diagnostic/2/cancel"},
+		{http.MethodPost, "/codex-diagnostic-fingerprint/refresh", "/codex-ticket-fingerprint/refresh"},
+	} {
+		t.Run(tc.method+tc.current, func(t *testing.T) {
+			status, body := doRequest(t, router, tc.method, "/api/v1/admin/accounts"+tc.current, "", nil)
+			// Reach the diagnostic handler without a runner or a paid upstream request.
+			require.Equal(t, http.StatusServiceUnavailable, status, body)
+			require.Contains(t, body, "Diagnostic monitor unavailable")
+			status, body = doRequest(t, router, tc.method, "/api/v1/admin/accounts"+tc.retired, "", nil)
+			if tc.retired == "/codex-ticket-fingerprint/refresh" {
+				// The native /:id/refresh route rejects this nonnumeric account ID.
+				// Do not add a retired-route alias just to change its error status.
+				require.Equal(t, http.StatusBadRequest, status, body)
+				require.Contains(t, body, "Invalid account ID")
+				return
+			}
+			require.Equal(t, http.StatusNotFound, status, body)
 		})
 	}
 }
@@ -1495,7 +1532,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	settingRepo := newStubSettingRepo()
 	settingService := service.NewSettingService(settingRepo, cfg)
 
-	adminService := service.NewAdminService(nil, userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	adminService := service.NewAdminService(nil, userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
@@ -1614,7 +1651,7 @@ func (r *stubUserRepo) GetByEmail(ctx context.Context, email string) (*service.U
 	return nil, service.ErrUserNotFound
 }
 
-func (r *stubUserRepo) GetFirstAdmin(ctx context.Context) (*service.User, error) {
+func (r *stubUserRepo) GetFirstSuperAdmin(ctx context.Context) (*service.User, error) {
 	for _, user := range r.users {
 		if user.Role == service.RoleAdmin && user.Status == service.StatusActive {
 			clone := *user
@@ -2654,6 +2691,10 @@ func (r *stubUsageLogRepo) GetGroupStatsWithFilters(ctx context.Context, startTi
 }
 
 func (r *stubUsageLogRepo) GetUserBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) ([]usagestats.UserBreakdownItem, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *stubUsageLogRepo) GetAPIKeyBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) ([]usagestats.APIKeyBreakdownItem, error) {
 	return nil, errors.New("not implemented")
 }
 

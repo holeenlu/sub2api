@@ -12,6 +12,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 )
 
 var errOpenAIWSSessionPreempted = errors.New("openai ws session preempted by newer request")
@@ -79,6 +80,7 @@ func (s *OpenAIGatewayService) BeginOpenAIWSIngressSessionPreemptionWithClient(
 	account *Account,
 	firstClientMessage []byte,
 	clientConn openAIWSPreemptClientCloser,
+	requestModels ...string,
 ) (context.Context, func(), bool) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -91,6 +93,16 @@ func (s *OpenAIGatewayService) BeginOpenAIWSIngressSessionPreemptionWithClient(
 		notifyPreempted = func() {
 			_ = clientConn.Close(coderws.StatusTryAgainLater, openAIWSSessionPreemptedCloseReason)
 		}
+	}
+	requestModel := gjson.GetBytes(firstClientMessage, "model").String()
+	if len(requestModels) > 0 {
+		requestModel = requestModels[0] // handler supplies the channel-mapped model
+	}
+	if account != nil && account.IsExcelBPSEnabledForModel(requestModel) && s.excelBPSGloballyEnabled(ctx) {
+		// BPS owns its HTTP request and replay history per connection, just
+		// like explicit HTTP bridge mode. Shared client identity is not shared
+		// upstream state and must not preempt an independent generation.
+		return ctx, func() {}, false
 	}
 	if s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled && account != nil {
 		switch account.ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault) {
@@ -315,8 +327,10 @@ func (s *OpenAIGatewayService) watchOpenAIWSSessionPreemptOwner(ctx context.Cont
 		return func() {}
 	}
 	stopCh := make(chan struct{})
+	done := make(chan struct{})
 	var once sync.Once
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(openAIWSSessionPreemptWatchInterval)
 		defer ticker.Stop()
 		for {
@@ -342,7 +356,7 @@ func (s *OpenAIGatewayService) watchOpenAIWSSessionPreemptOwner(ctx context.Cont
 			}
 		}
 	}()
-	return func() { once.Do(func() { close(stopCh) }) }
+	return func() { once.Do(func() { close(stopCh) }); <-done }
 }
 
 func isOpenAIWSSessionPreempted(ctx context.Context) bool {

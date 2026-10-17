@@ -17,6 +17,12 @@ import (
 // API keys use the standard endpoint; OAuth reuses the authenticated, cached
 // Codex source. Account mappings and group policy are applied after this cache.
 func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	if account != nil && account.IsExcelBPSEnabled() && s.excelBPSGloballyEnabled(ctx) {
+		return s.fetchExcelBPSAccountModels(ctx, account)
+	}
+	return s.fetchNativeOpenAIModelsList(ctx, account)
+}
+func (s *OpenAIGatewayService) fetchNativeOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
 	if s == nil || account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_MODELS_ACCOUNT_REQUIRED", "OpenAI account is required")
 	}
@@ -29,7 +35,7 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 		if s.settingService != nil {
 			clientVersion = s.settingService.GetOpenAICodexClientVersion(ctx)
 		}
-		response, err := s.FetchCodexModelsManifest(ctx, account, clientVersion, "")
+		response, err := s.fetchNativeCodexModelsManifest(ctx, account, clientVersion, "")
 		if err != nil {
 			return nil, err
 		}
@@ -347,18 +353,30 @@ func selectModelCatalogEntries(byID map[string]json.RawMessage, selected []strin
 	seen := make(map[string]struct{}, len(selected))
 	for _, id := range selected {
 		id = strings.TrimSpace(id)
-		if _, ok := seen[id]; ok {
+		key := strings.ToLower(id)
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		if raw, exists := byID[id]; exists {
+		raw, exists := byID[id]
+		if !exists {
+			// Listing matches the case-insensitive admission rule, while keeping
+			// the original upstream descriptor and an exact match's precedence.
+			matchedID := ""
+			for candidateID, candidate := range byID {
+				if strings.EqualFold(candidateID, id) && (matchedID == "" || candidateID < matchedID) {
+					matchedID, raw, exists = candidateID, candidate, true
+				}
+			}
+		}
+		if exists {
 			models = append(models, raw)
-			seen[id] = struct{}{}
+			seen[key] = struct{}{}
 		}
 	}
 	return models
 }
 
-func orderPinnedCodexModelsBySelection(body []byte, allowlist GroupModelAllowlist) ([]byte, error) {
+func orderCodexModelsBySelection(body []byte, allowlist GroupModelAllowlist) ([]byte, error) {
 	envelope, entries, err := modelCatalogEntries(body, "models")
 	if err != nil {
 		return nil, err
@@ -375,7 +393,11 @@ func orderPinnedCodexModelsBySelection(body []byte, allowlist GroupModelAllowlis
 		byID[entry.Slug] = raw
 		modelIDs = append(modelIDs, entry.Slug)
 	}
-	envelope["models"], err = json.Marshal(selectModelCatalogEntries(byID, allowlist.FilterForListing(modelIDs)))
+	ordered := selectModelCatalogEntries(byID, allowlist.FilterForListing(modelIDs))
+	if slices.EqualFunc(entries, ordered, func(a, b json.RawMessage) bool { return bytes.Equal(a, b) }) {
+		return body, nil
+	}
+	envelope["models"], err = json.Marshal(ordered)
 	if err != nil {
 		return nil, err
 	}

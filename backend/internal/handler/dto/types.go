@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 type User struct {
+	*authz.Snapshot
 	ID            int64      `json:"id"`
 	Email         string     `json:"email"`
 	Username      string     `json:"username"`
@@ -42,6 +44,9 @@ type User struct {
 // 注意：普通用户接口不得返回 notes 等管理员备注信息。
 type AdminUser struct {
 	User
+	CreatedBy   *int64     `json:"created_by,omitempty"`
+	LastLoginAt *time.Time `json:"last_login_at"`
+	TotpEnabled bool       `json:"totp_enabled"`
 
 	Notes      string     `json:"notes"`
 	LastUsedAt *time.Time `json:"last_used_at"`
@@ -209,6 +214,10 @@ type AdminGroup struct {
 }
 
 type Account struct {
+	VendorID       *int64     `json:"vendor_id,omitempty"`
+	VendorPausedAt *time.Time `json:"vendor_paused_at,omitempty"`
+	VendorNotes    string     `json:"vendor_notes,omitempty"`
+
 	ID       int64   `json:"id"`
 	Name     string  `json:"name"`
 	Notes    *string `json:"notes"`
@@ -335,6 +344,10 @@ type Account struct {
 // repeated account_groups and groups object graphs. Fetch /admin/accounts/:id
 // for the complete Account DTO when editing or inspecting an account.
 type AccountListItem struct {
+	VendorID       *int64     `json:"vendor_id,omitempty"`
+	VendorPausedAt *time.Time `json:"vendor_paused_at,omitempty"`
+	VendorNotes    string     `json:"vendor_notes,omitempty"`
+
 	ID       int64   `json:"id"`
 	Name     string  `json:"name"`
 	Notes    *string `json:"notes"`
@@ -472,11 +485,11 @@ type ProxyWithAccountCount struct {
 	QualityChecked *int64 `json:"quality_checked,omitempty"`
 }
 
-// AdminProxy 是管理员接口使用的 proxy DTO（包含密码等敏感字段）。
+// AdminProxy only describes whether credentials are configured; stored passwords are never returned.
 // 注意：普通接口不得使用此 DTO。
 type AdminProxy struct {
 	Proxy
-	Password string `json:"password,omitempty"`
+	HasPassword bool `json:"has_password"`
 }
 
 // AdminProxyWithAccountCount 是管理员接口使用的带账号统计的 proxy DTO。
@@ -677,6 +690,7 @@ type UsageLog struct {
 // AdminUsageLog 是管理员接口使用的 usage log DTO（包含管理员字段）。
 type AdminUsageLog struct {
 	UsageLog
+	AuthorizationMode string `json:"authorization_mode"`
 
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Omitted when no mapping was applied (requested model was used as-is).
