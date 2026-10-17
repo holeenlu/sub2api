@@ -710,7 +710,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				zap.Error(openAICompatibleSelectionErrorForLog(err, requestPlatform)),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
-			if len(failedAccountIDs) == 0 {
+			if len(failedAccountIDs) == 0 && lastFailoverErr == nil {
 				if legacyCompact && errors.Is(err, service.ErrNoAvailableCompactAccounts) {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "compact_not_supported", "No available accounts support /responses/compact", streamStarted)
@@ -945,7 +945,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
-					portable := openAIForwardAccountReplayAllowed(c, account, body)
+					portable := openAIForwardAccountReplayAllowed(c, account, body, failoverErr)
 					allowOpenAIAccountBoundRetry(failoverErr, portable)
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
@@ -988,7 +988,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						return
 					}
 					switchCount++
-					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
+					if failoverErr.Reason != service.ExcelBPSRateLimitedReason && h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 						service.RecordOpenAIRetryStop(c, account, service.OpenAIRetryStopAccountSwitchLimit)
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
@@ -1386,7 +1386,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				zap.Error(openAICompatibleSelectionErrorForLog(err, requestPlatform)),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
-			if len(failedAccountIDs) == 0 {
+			if len(failedAccountIDs) == 0 && lastFailoverErr == nil {
 				if err != nil {
 					cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, currentRoutingModel, reqModel)
 					if !cls.ModelNotFound {
@@ -1550,7 +1550,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
-					portable := openAIForwardAccountReplayAllowed(c, account, body)
+					portable := openAIForwardAccountReplayAllowed(c, account, body, failoverErr)
 					allowOpenAIAccountBoundRetry(failoverErr, portable)
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
@@ -1593,7 +1593,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 					switchCount++
-					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
+					if failoverErr.Reason != service.ExcelBPSRateLimitedReason && h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 						service.RecordOpenAIRetryStop(c, account, service.OpenAIRetryStopAccountSwitchLimit)
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
@@ -2896,7 +2896,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			return false
 		}
 		switchCount++
-		if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
+		if failoverErr.Reason != service.ExcelBPSRateLimitedReason && h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 			service.RecordOpenAIRetryStop(c, account, service.OpenAIRetryStopAccountSwitchLimit)
 			closeOpenAIWSFailoverExhausted(c, wsConn, failoverErr)
 			return false
@@ -3492,7 +3492,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						zap.Int("retry_payload_bytes", len(retryPayload)),
 					)
 				}
-				portable := service.OpenAIResponsesAccountReplayAllowed(wsAttemptMessage)
+				portable := service.OpenAIResponsesAccountReplayAllowed(wsAttemptMessage) || service.OpenAIResponsesBPSPreGenerationReplayAllowed(wsAttemptMessage, failoverErr)
 				allowOpenAIAccountBoundRetry(failoverErr, portable)
 				if waitForWSSameAccountRetry(account, failoverErr) {
 					if failoverErr.ShouldReportAccountScheduleFailure() {
@@ -4164,7 +4164,10 @@ func openAIForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForwa
 	return false
 }
 
-func openAIForwardAccountReplayAllowed(c *gin.Context, account *service.Account, body []byte) bool {
+func openAIForwardAccountReplayAllowed(c *gin.Context, account *service.Account, body []byte, failures ...*service.UpstreamFailoverError) bool {
+	if len(failures) > 0 && service.OpenAIResponsesBPSPreGenerationReplayAllowed(body, failures[0]) {
+		return true
+	}
 	if account == nil || account.Platform != service.PlatformOpenAI {
 		return true
 	}
@@ -4214,7 +4217,7 @@ func openAIFirstOutputFailoverExhausted(failoverErr *service.UpstreamFailoverErr
 	if failoverErr == nil || !failoverErr.SafeToFailoverAfterWrite || switchCount == nil {
 		return false
 	}
-	if failoverErr.Reason == service.ExcelBPSModelPermissionReason || failoverErr.Reason == service.ExcelBPSUpstreamFailureReason {
+	if failoverErr.Reason == service.ExcelBPSModelPermissionReason || failoverErr.Reason == service.ExcelBPSUpstreamFailureReason || failoverErr.Reason == service.ExcelBPSRateLimitedReason {
 		return false // BPS rejections use the normal account-switch/turn budgets
 	}
 	if *switchCount >= maxOpenAIFirstOutputTimeoutSwitches {
