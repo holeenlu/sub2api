@@ -28,7 +28,10 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 	account *Account,
 	body []byte,
 ) (*ForwardResult, error) {
+	ctx = EnsureOpenAITurnBudget(ctx, s.cfg, "")
 	startTime := time.Now()
+	beginGeminiImageOutputObservation(c)
+	beginUpstreamResponseModelObservation(c)
 
 	var ccReq apicompat.ChatCompletionsRequest
 	if err := json.Unmarshal(body, &ccReq); err != nil {
@@ -56,9 +59,27 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
 
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(responsesReq)
+	reasoning := responsesReq.Reasoning
+	mappedModel := originalModel
+	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
+		mappedModel = account.GetMappedModel(originalModel)
+	}
+	_, _, _, _, knownThinkingModel := geminiThinkingCapabilities(mappedModel)
+	if knownThinkingModel {
+		responsesReq.Reasoning = nil
+	}
+	anthropicReq, err := apicompat.ResponsesToAnthropicIntermediateRequest(responsesReq)
+	if anthropicReq != nil {
+		recordConversionDiagnostics(c, "openai", "anthropic", anthropicReq.Model, anthropicReq.Diagnostics)
+	}
 	if err != nil {
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	if knownThinkingModel && reasoning != nil && reasoning.Effort != "" {
+		if anthropicReq.OutputConfig == nil {
+			anthropicReq.OutputConfig = &apicompat.AnthropicOutputConfig{}
+		}
+		anthropicReq.OutputConfig.Effort = reasoning.Effort
 	}
 	anthropicReq.Stream = clientStream
 
@@ -96,12 +117,16 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		mappedModel = account.GetMappedModel(req.Model)
 	}
 
-	geminiReq, err := convertClaudeMessagesToGeminiGenerateContent(claudeBody)
+	geminiReq, err := convertClaudeForGeminiAccount(c, account, claudeBody, mappedModel)
+	if err != nil {
+		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	geminiReq, err = applyClaudeThinkingToGemini(geminiReq, claudeBody, mappedModel)
 	if err != nil {
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
 	geminiReq = ensureGeminiFunctionCallThoughtSignatures(geminiReq)
-	geminiReq = applyGeminiCompatThinkingConfig(geminiReq, claudeBody, mappedModel, clientStream)
+	geminiReq = includeGeminiCompatThoughts(geminiReq, mappedModel, clientStream)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -121,6 +146,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		useUpstreamStream,
 	)
 
+	var refreshedToken string
 	var resp *http.Response
 	// checkedPolicy 是循环内对当前 resp 的错误策略检查结果，未检查时为 nil。
 	var checkedPolicy *ErrorPolicyResult
@@ -133,13 +159,25 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			if failoverErr := s.handleVertexServiceAccountNotFound(ctx, c, account, err); failoverErr != nil {
 				return nil, failoverErr
 			}
-			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", err.Error())
+			return nil, newAccountConfigurationFailure(err)
 		}
 		requestIDHeader = idHeader
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		if refreshedToken != "" {
+			upstreamReq.Header.Set("Authorization", "Bearer "+refreshedToken)
+		}
+		resp, err = qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			return nil, s.handleUpstreamTransportError(ctx, c, account, err)
+		}
+
+		if resp.StatusCode == http.StatusUnauthorized && s.tokenProvider != nil && account.Type == AccountTypeOAuth {
+			rejected := strings.TrimPrefix(upstreamReq.Header.Get("Authorization"), "Bearer ")
+			if fresh, ok := refreshRejectedCredential(ctx, s.accountRepo, account, rejected, s.tokenProvider.refreshAPI, s.tokenProvider.executor); ok {
+				_ = resp.Body.Close()
+				refreshedToken = fresh
+				continue
+			}
 		}
 
 		checked, rebuilt := s.checkErrorPolicyInLoop(ctx, account, resp, mappedModel)
@@ -182,7 +220,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 					Message:            upstreamMsg,
 				})
 				logger.LegacyPrintf("service.gemini_chat_completions", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				sleepGeminiBackoff(attempt)
+				if waitErr := sleepGeminiBackoff(ctx, attempt); waitErr != nil {
+					return nil, waitErr
+				}
 				continue
 			}
 			resp = &http.Response{
@@ -250,17 +290,27 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 
 	var usage *ClaudeUsage
 	var firstTokenMs *int
+	clientDisconnected := false
 	if clientStream {
 		streamRes, err := s.handleChatCompletionsStreamingResponseFromGemini(c, resp, startTime, originalModel, account.Type == AccountTypeOAuth, includeUsage)
 		if err != nil {
-			return nil, err
+			if streamRes == nil {
+				return nil, err
+			}
+			return geminiPartialForwardResult(c, resp, streamRes.usage, streamRes.firstTokenMs, startTime, originalModel, mappedModel, clientStream, s.extractImageInputSize(claudeBody), reasoningEffort), err
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
+		clientDisconnected = streamRes.clientDisconnect
 	} else if useUpstreamStream {
-		collected, usageObj, err := collectGeminiSSE(resp.Body, account.Type == AccountTypeOAuth)
+		collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, account.Type == AccountTypeOAuth, func(raw []byte) {
+			upstreamResponseModelObserverFromContext(c).ObserveGemini(raw)
+			observeGeminiImageOutputs(c, raw)
+		}, c)
 		if err != nil {
-			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
+			partialBytes, _ := json.Marshal(collected)
+			observeGeminiImageOutputs(c, partialBytes)
+			return geminiPartialForwardResult(c, resp, usageObj, nil, startTime, originalModel, mappedModel, clientStream, s.extractImageInputSize(claudeBody), reasoningEffort), s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
 		}
 		collectedBytes, _ := json.Marshal(collected)
 		chatResp, usageObj2, err := geminiResponseToChatCompletions(collected, originalModel, collectedBytes, usageObj)
@@ -301,7 +351,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		ImageCount:       imageCount,
 		ImageSize:        imageSize,
 		ImageInputSize:   imageInputSize,
-		ClientDisconnect: false,
+		ClientDisconnect: clientDisconnected,
 	}, nil
 }
 
@@ -348,11 +398,11 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 	case AccountTypeOAuth:
 		return func(ctx context.Context) (*http.Request, string, error) {
 			if s.tokenProvider == nil {
-				return nil, "", errors.New("gemini token provider not configured")
+				return nil, "", newCredentialPreparationFailure(errors.New("gemini token provider not configured"))
 			}
 			accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 			if err != nil {
-				return nil, "", err
+				return nil, "", newCredentialPreparationFailure(err)
 			}
 
 			projectID := strings.TrimSpace(account.GetCredential("project_id"))
@@ -508,7 +558,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	originalModel string,
 	isOAuth bool,
 	includeUsage bool,
-) (*geminiStreamResult, error) {
+) (result *geminiStreamResult, retErr error) {
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
@@ -529,8 +579,26 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	ccState.Model = originalModel
 	ccState.IncludeUsage = includeUsage
 
+	writer := &geminiStreamWriter{Writer: c.Writer}
+	limit := defaultMaxLineSize
+	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
+		limit = s.cfg.Gateway.MaxLineSize
+	}
+	terminal := newGeminiTerminalReader(resp.Body, limit, c)
 	var usage ClaudeUsage
 	var firstTokenMs *int
+	defer func() {
+		if writer.err != nil && !terminal.terminal {
+			retErr = context.Canceled
+		}
+		if result != nil {
+			result.clientDisconnect = writer.err != nil
+		}
+		if retErr != nil {
+			result = &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs, clientDisconnect: writer.err != nil}
+			reportGeminiStreamFailure(c, retErr, "openai")
+		}
+	}()
 	firstChunk := true
 
 	writeChatChunk := func(chunk apicompat.ChatCompletionsChunk) bool {
@@ -538,7 +606,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		if err != nil {
 			return false
 		}
-		if _, err := io.WriteString(c.Writer, sse); err != nil {
+		if _, err := io.WriteString(writer, sse); err != nil {
 			return true
 		}
 		return false
@@ -605,7 +673,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		return disconnected
 	}
 
-	reader := bufio.NewReader(resp.Body)
+	reader := bufio.NewReader(terminal)
 	for {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
@@ -620,6 +688,10 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 						}
 					}
 
+					observeGeminiImageOutputs(c, rawBytes)
+					if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
+						observer.ObserveGemini(rawBytes)
+					}
 					var geminiResp map[string]any
 					if err := json.Unmarshal(rawBytes, &geminiResp); err == nil {
 						if firstChunk {
@@ -830,7 +902,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		}
 	}
 
-	_, _ = io.WriteString(c.Writer, "data: [DONE]\n\n")
+	_, _ = io.WriteString(writer, "data: [DONE]\n\n")
 	flusher.Flush()
 
 	return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil

@@ -384,9 +384,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	// Override session_id with a deterministic UUID derived from the isolated
-	// session key, ensuring different API keys produce different upstream sessions.
-	if account.Platform != PlatformGrok && promptCacheKey != "" {
+	// Non-Codex relays retain their legacy session convention. OAuth already
+	// carries the scoped official identity from the shared request builder.
+	if account.Platform != PlatformGrok && (!account.UsesOpenAICodexProtocol() || codexAccountIdentityNamespace(codexAccountIdentitySource(c, account)) == "") && promptCacheKey != "" {
 		isolatedSessionID := generateSessionUUID(isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey))
 		upstreamReq.Header.Set("session_id", isolatedSessionID)
 		if upstreamReq.Header.Get("conversation_id") != "" {
@@ -394,9 +394,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		}
 	}
 	if account.UsesOpenAICodexProtocol() && account.Platform != PlatformGrok {
-		// buildUpstreamRequest 保留 Messages bridge 的 body/session 兼容行为，并会先
-		// 清除身份头。真正发送前恢复完整 Codex 身份，避免 ChatGPT Codex 上游因缺失
-		// originator/OpenAI-Beta 返回 404（issue #3901）。
+		// Restore the bridge's HTTP client identity, then apply the shared final
+		// projection so legacy or WS-only headers cannot reappear after building.
 		ensureCodexIdentityHeaders(upstreamReq.Header)
 		enforceCodexIdentityHeaders(upstreamReq.Header)
 		logger.L().Debug("openai messages: upstream identity restored",
@@ -411,6 +410,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
 		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
 	}
+	projectCodexOutboundHeaders(upstreamReq.Header, codexAccountIdentitySource(c, account), false)
 
 	// 7. Send request
 	proxyURL := ""
