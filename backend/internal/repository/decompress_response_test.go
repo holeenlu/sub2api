@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"compress/zlib"
 	"io"
 	"log/slog"
 	"net/http"
@@ -44,6 +45,14 @@ func TestDecompressResponseBodyExistingEncodings(t *testing.T) {
 		{name: "gzip", encoding: "gzip", compress: compressGzip},
 		{name: "brotli", encoding: "br", compress: compressBrotli},
 		{name: "deflate", encoding: "deflate", compress: compressDeflate},
+		{name: "deflate_zlib", encoding: "deflate", compress: func(t *testing.T, payload []byte) []byte {
+			var buf bytes.Buffer
+			zw := zlib.NewWriter(&buf)
+			_, err := zw.Write(payload)
+			require.NoError(t, err)
+			require.NoError(t, zw.Close())
+			return buf.Bytes()
+		}},
 	}
 
 	for _, tt := range tests {
