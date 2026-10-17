@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"io"
 	"log/slog"
 	"net/http"
@@ -607,7 +608,8 @@ type AudioUsage struct {
 }
 
 type ForwardResult struct {
-	RequestID string
+	AuthorizationMode string `json:"authorization_mode"`
+	RequestID         string
 	// UpstreamHeaders 是直接上游的响应头，用于按账户配置解析上游请求标识。
 	UpstreamHeaders http.Header
 	Usage           ClaudeUsage
@@ -685,6 +687,7 @@ type GatewayFailureReason string
 // trigger account failover. Additive metadata keeps existing composite literals
 // source-compatible and preserves their legacy retry-next-account behavior.
 type UpstreamFailoverError struct {
+	Cause                    error // Internal failure chain; never serialized to the client.
 	StatusCode               int
 	ResponseBody             []byte        // 上游响应体，用于错误透传规则匹配
 	ResponseHeaders          http.Header   // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息
@@ -706,6 +709,8 @@ type UpstreamFailoverError struct {
 	ClientMessage            string
 }
 
+func (e *UpstreamFailoverError) Unwrap() error { return e.Cause }
+
 func (e *UpstreamFailoverError) Error() string {
 	if e != nil && e.Stage == GatewayFailureStageAccountAuth {
 		return fmt.Sprintf("credential failure: %s (failover)", e.Reason)
@@ -725,7 +730,7 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
-	if e == nil || e.Reason == ExcelBPSRateLimitedReason || e.Reason == ExcelBPSModelPermissionReason || e.Reason == ExcelBPSUpstreamFailureReason || e.IsExcelBPSImageAdmissionRejection() {
+	if e == nil || strings.HasPrefix(string(e.Reason), "basispoints_credentials_") || e.Reason == "recovery_target_exhausted" || e.Stage == "selection" || e.Reason == ExcelBPSRateLimitedReason || e.Reason == ExcelBPSModelPermissionReason || e.Reason == ExcelBPSUpstreamFailureReason || e.IsExcelBPSImageAdmissionRejection() {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount
@@ -1474,6 +1479,9 @@ func (s *GatewayService) hashContent(content string) string {
 
 // GetAccessToken 获取账号凭证
 func (s *GatewayService) GetAccessToken(ctx context.Context, account *Account) (string, string, error) {
+	ctx = selectionbudget.PreparationContext(ctx)
+	ctx, stopPreparation := OpenAITurnWaitContext(ctx)
+	defer stopPreparation()
 	switch account.Type {
 	case AccountTypeOAuth, AccountTypeSetupToken:
 		// Both oauth and setup-token use OAuth token flow

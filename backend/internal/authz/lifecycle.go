@@ -57,7 +57,7 @@ func CheckLease(ctx context.Context, l *Lease, permission string) error {
 	} // Internal tests/services do not issue HTTP authority.
 	if ok && l != nil && l.ScopeKind == "vendor" {
 		scope, scoped := VendorScopeFromContext(ctx)
-		if !scoped || permission != "accounts.authorize" || l.System || l.UserID != actor.UserID || l.Role != actor.Role || l.SessionGeneration != actor.SessionGeneration || l.SessionID != actor.SessionID || scope.VendorID != l.VendorID || scope.PolicyVersion != l.VendorPolicyVersion || scope.ActorUserID != actor.UserID {
+		if !scoped || scope.ReadOnly || (!IsVendorRole(actor.Role) && actor.Role != SuperAdmin) || permission != "accounts.authorize" || l.System || l.UserID != actor.UserID || l.Role != actor.Role || l.SessionGeneration != actor.SessionGeneration || l.SessionID != actor.SessionID || scope.VendorID != l.VendorID || scope.PolicyVersion != l.VendorPolicyVersion || scope.ActorUserID != actor.UserID {
 			return ErrAuthorizationExpired
 		}
 		return Revalidate(ctx)

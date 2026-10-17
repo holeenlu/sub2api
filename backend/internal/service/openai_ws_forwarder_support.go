@@ -78,7 +78,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	prewarmPayload["generate"] = false
 	prewarmPayloadJSON := payloadAsJSONBytes(prewarmPayload)
 
-	if err := validateVendorDispatch(ctx, s.accountRepo, account, &groupID); err != nil {
+	if err := validateVendorNativeDispatch(ctx, s.accountRepo, account, &groupID); err != nil {
 		return err
 	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmPayload, s.openAIWSWriteTimeout()); err != nil {

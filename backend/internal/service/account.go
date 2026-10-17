@@ -23,22 +23,28 @@ import (
 )
 
 type Account struct {
-	VendorID                *int64
-	VendorPausedAt          *time.Time
-	VendorNotes             string
-	VendorSupplyBlocked     bool // Live supply eligibility snapshot; verified again before dispatch.
-	ID                      int64
-	Name                    string
-	Notes                   *string
-	Platform                string
-	Type                    string
-	Credentials             map[string]any
-	Extra                   map[string]any
-	ProxyID                 *int64
-	ProxyFallbackOriginID   *int64
-	ProxyFallbackOriginName *string // 仅展示用
-	Concurrency             int
-	Priority                int
+	CreatedBy                      *int64
+	CreatedByName                  string
+	CreatedByRole                  string
+	VendorID                       *int64
+	VendorPausedAt                 *time.Time
+	VendorNotes                    string
+	VendorSupplyBlocked            bool // Live supply eligibility snapshot; verified again before dispatch.
+	VendorAuthorizationModesLoaded bool
+	VendorNativeAllowed            bool
+	VendorBPSAllowed               bool
+	ID                             int64
+	Name                           string
+	Notes                          *string
+	Platform                       string
+	Type                           string
+	Credentials                    map[string]any
+	Extra                          map[string]any
+	ProxyID                        *int64
+	ProxyFallbackOriginID          *int64
+	ProxyFallbackOriginName        *string // 仅展示用
+	Concurrency                    int
+	Priority                       int
 	// RateMultiplier 账号计费倍率（>=0，允许 0 表示该账号计费为 0）。
 	// 使用指针用于兼容旧版本调度缓存（Redis）中缺字段的情况：nil 表示按 1.0 处理。
 	RateMultiplier     *float64
@@ -955,6 +961,15 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 }
 
 func (a *Account) isModelMappingSupported(requestedModel string) bool {
+	if a.VendorID != nil && a.Platform == PlatformOpenAI {
+		mode := VendorOpenAIModeNative
+		if a.IsExcelBPSEnabledForModel(requestedModel) {
+			mode = VendorOpenAIModeBPS
+		}
+		if !a.VendorOpenAIModeAllowed(mode) {
+			return false
+		}
+	}
 	if a.IsExcelOAuth() && !a.IsExcelBPSEnabledForModel(requestedModel) {
 		return false
 	}
@@ -980,6 +995,27 @@ func (a *Account) isModelMappingSupported(requestedModel string) bool {
 	}
 	normalized := normalizeRequestedModelForLookup(a.Platform, requestedModel)
 	return normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized)
+}
+
+// Snapshot checks avoid choosing a route already revoked in the live batch
+// qualification. Every actual HTTP/WS dispatch also verifies its mode in DB.
+func (a *Account) VendorOpenAIModeAllowed(mode string) bool {
+	if a == nil {
+		return false
+	}
+	if a.VendorID == nil || a.Platform != PlatformOpenAI {
+		return true
+	}
+	if mode == VendorOpenAIModeNative && a.Extra["vendor_native_disabled"] == true {
+		return false
+	}
+	if !a.VendorAuthorizationModesLoaded {
+		return true
+	}
+	if mode == VendorOpenAIModeBPS {
+		return a.VendorBPSAllowed
+	}
+	return mode == VendorOpenAIModeNative && a.VendorNativeAllowed
 }
 
 // GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）

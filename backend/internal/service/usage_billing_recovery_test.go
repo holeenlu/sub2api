@@ -24,6 +24,7 @@ func TestUsagePricingRecoveryPreservesPolicyAndSplitConservation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, QuantizeUsageBillingAmount(expected.ActualCost), cmd.BalanceCost)
 	require.Equal(t, cmd.BalanceCost, cmd.APIKeyQuotaCost)
+	require.Equal(t, cmd.BalanceCost, aggregate.ActualCost)
 	require.Equal(t, fingerprint, cmd.RequestFingerprint)
 	require.False(t, aggregate.LongContextBillingApplied)
 	require.InDelta(t, aggregate.ActualCost, cmd.UsageLogs[0].ActualCost+cmd.UsageLogs[1].ActualCost, 1e-10)

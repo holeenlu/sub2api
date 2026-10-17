@@ -85,6 +85,52 @@ func TestAdminService_UpdateUser_InvalidRoleRejected(t *testing.T) {
 	require.Nil(t, repo.lastUpdated, "非法角色不应触发持久化")
 }
 
+func TestAdminService_UpdateUser_PreservesVendorRole(t *testing.T) {
+	for _, role := range []string{RoleVendorLevel1, RoleVendorLevel2} {
+		for _, submittedRole := range []string{role, ""} {
+			t.Run(role+"/"+submittedRole, func(t *testing.T) {
+				repo := &rpmUserRepoStub{userRepoStub: &userRepoStub{user: &User{ID: 42, Email: "vendor@example.com", Role: role}}}
+				invalidator := &authCacheInvalidatorStub{}
+				svc := &adminServiceImpl{userRepo: repo, authCacheInvalidator: invalidator}
+				name, notes := "Supplier", "Updated profile"
+				updated, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{Role: submittedRole, Username: &name, Notes: &notes})
+				require.NoError(t, err)
+				require.Equal(t, role, updated.Role)
+				require.Equal(t, name, repo.lastUpdated.Username)
+				require.Equal(t, notes, repo.lastUpdated.Notes)
+				require.Empty(t, invalidator.userIDs, "保存资料不应被当作角色变更")
+			})
+		}
+	}
+}
+
+func TestAdminService_VendorRoleTransitionsRejected(t *testing.T) {
+	roles := []string{RoleSuperAdmin, RoleAdmin, RoleUser, RoleVendorLevel1, RoleVendorLevel2}
+	for _, vendorRole := range []string{RoleVendorLevel1, RoleVendorLevel2} {
+		t.Run("create/"+vendorRole, func(t *testing.T) {
+			repo := &userRepoStub{nextID: 42}
+			svc := &adminServiceImpl{userRepo: repo}
+			_, err := svc.CreateUser(context.Background(), &CreateUserInput{Email: "vendor@example.com", Password: "strong-pass", Role: vendorRole})
+			require.Error(t, err)
+			require.Empty(t, repo.created)
+		})
+		for _, role := range roles {
+			if role == vendorRole {
+				continue
+			}
+			for _, transition := range [][2]string{{role, vendorRole}, {vendorRole, role}} {
+				t.Run(transition[0]+"/"+transition[1], func(t *testing.T) {
+					repo := &rpmUserRepoStub{userRepoStub: &userRepoStub{user: &User{ID: 42, Email: "vendor@example.com", Role: transition[0]}}}
+					svc := &adminServiceImpl{userRepo: repo}
+					_, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{Role: transition[1]})
+					require.Error(t, err)
+					require.Nil(t, repo.lastUpdated, "用户管理不能转换供应商身份或层级")
+				})
+			}
+		}
+	}
+}
+
 // roleGuardUserRepoStub 在 rpmUserRepoStub 之上提供可控的管理员计数，
 // 用于测试"最后一个管理员不可降级"守卫。
 type roleGuardUserRepoStub struct {

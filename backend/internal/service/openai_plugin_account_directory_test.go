@@ -92,6 +92,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	// = relational graphs with back-references that would cycle under encoding/json.
 	stripped := map[string]struct{}{
 		"Credentials": {}, "Groups": {}, "AccountGroups": {}, "VendorNotes": {},
+		"CreatedBy": {}, "CreatedByName": {}, "CreatedByRole": {},
 	}
 	// Fields intentionally exposed as readable metadata (incl. Extra and Proxy —
 	// the proxy password is already handed out via ResolveOutboundIdentity's URL).
@@ -106,6 +107,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 		"SessionWindowStart": {}, "SessionWindowEnd": {}, "SessionWindowStatus": {},
 		"ParentAccountID": {}, "QuotaDimension": {}, "GroupIDs": {},
 		"VendorID": {}, "VendorPausedAt": {}, "VendorSupplyBlocked": {},
+		"VendorAuthorizationModesLoaded": {}, "VendorNativeAllowed": {}, "VendorBPSAllowed": {},
 	}
 	tp := reflect.TypeOf(Account{})
 	for i := 0; i < tp.NumField(); i++ {
@@ -125,10 +127,11 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	// The raw Credentials blob must never serialize; Extra and the proxy ARE released.
 	acct := &Account{
 		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
-		Credentials: map[string]any{"access_token": "AT", "refresh_token": "LEAK-REFRESH"},
-		VendorNotes: "PRIVATE-SUPPLIER-NOTE",
-		Extra:       map[string]any{"opaque": "extra-released"},
-		Proxy:       &Proxy{Host: "host", Port: 1, Username: "user", Password: "pw-released"},
+		Credentials:   map[string]any{"access_token": "AT", "refresh_token": "LEAK-REFRESH"},
+		VendorNotes:   "PRIVATE-SUPPLIER-NOTE",
+		CreatedByName: "PRIVATE-CREATOR", CreatedByRole: "PRIVATE-ROLE",
+		Extra: map[string]any{"opaque": "extra-released"},
+		Proxy: &Proxy{Host: "host", Port: 1, Username: "user", Password: "pw-released"},
 	}
 	snap := accountReadableSnapshotJSON(acct)
 	require.NotNil(t, snap)
@@ -136,6 +139,8 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	require.NoError(t, json.Unmarshal(snap, &m))
 	assert.NotContains(t, string(snap), "LEAK-REFRESH", "raw Credentials must never appear in metadata")
 	assert.NotContains(t, string(snap), "PRIVATE-SUPPLIER-NOTE", "private supplier notes must never appear in metadata")
+	assert.NotContains(t, string(snap), "PRIVATE-CREATOR")
+	assert.NotContains(t, string(snap), "PRIVATE-ROLE")
 	assert.Contains(t, string(snap), "extra-released", "Extra is intentionally released")
 	assert.Contains(t, string(snap), "pw-released", "the transport plugin receives the configured proxy credentials")
 

@@ -150,6 +150,9 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
+	if scope, ok := authz.VendorScopeFromContext(ctx); ok && scope.ReadOnly {
+		return authz.ErrPermissionDenied
+	}
 	if nativeSupplyIdentityRequired(account) {
 		return r.createNativeSupplyAccount(ctx, account)
 	}
@@ -179,8 +182,14 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	}
 
 	account.Extra = service.MergeExcelBPS403Marker(account.Extra, nil)
+	creator, err := service.ResolveAccountCreator(ctx, client)
+	if err != nil {
+		return err
+	}
+	account.CreatedBy, account.CreatedByName, account.CreatedByRole = creator.ID, creator.Name, creator.Role
 	service.PrepareAccountTelemetryImport(account)
 	builder := client.Account.Create().
+		SetNillableCreatedBy(creator.ID).SetCreatedByName(creator.Name).SetCreatedByRole(creator.Role).
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
 		SetPlatform(account.Platform).
@@ -250,6 +259,13 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 // CreateWithAccountGroups atomically persists an account, its exact per-group priorities,
 // and the scheduler outbox event used to publish the new routing snapshot.
 func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup) error {
+	return r.createWithAccountGroups(ctx, account, groups, nil)
+}
+
+func (r *accountRepository) createWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup, authorizations *service.AccountAuthorizationCiphertexts) error {
+	if scope, ok := authz.VendorScopeFromContext(ctx); ok && scope.ReadOnly {
+		return authz.ErrPermissionDenied
+	}
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
@@ -277,12 +293,27 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
 		return err
 	}
+	if err := authz.LockManagementWrite(ctx, txClient, nil, "", "", false); err != nil {
+		return err
+	}
 
 	if err := createAccountRecord(ctx, txClient, account); err != nil {
 		return err
 	}
 	if err := r.claimNativeSupplyIdentity(ctx, txClient, account, identity); err != nil {
 		return err
+	}
+	if authorizations != nil {
+		if authorizations.Excel != "" {
+			if _, err := txClient.ExecContext(ctx, `INSERT INTO openai_excel_grants(account_id,ciphertext) VALUES($1,$2)`, account.ID, authorizations.Excel); err != nil {
+				return err
+			}
+		}
+		if authorizations.SIWCRegistration != "" {
+			if _, err := txClient.ExecContext(ctx, `INSERT INTO openai_siwc_grants(account_id,registration_ciphertext,credentials_ciphertext) VALUES($1,$2,$3)`, account.ID, authorizations.SIWCRegistration, authorizations.SIWCCredentials); err != nil {
+				return err
+			}
+		}
 	}
 	if len(groups) > 0 {
 		builders := make([]*dbent.AccountGroupCreate, 0, len(groups))
@@ -969,6 +1000,15 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	if (scoped && scope.VendorID > 0) || (!scoped && !authz.IsManagementRequest(ctx)) {
 		vendorCredentialGuard = "(vendor_id IS NULL OR (" + vendorSupplySQL("accounts", "NULL") + " AND " + accountVisibilitySQL(ctx, "vendor_id") + " AND credentials->'account_uuid' IS NOT DISTINCT FROM $1::jsonb->'account_uuid' AND credentials->'org_uuid' IS NOT DISTINCT FROM $1::jsonb->'org_uuid' AND credentials->'chatgpt_account_id' IS NOT DISTINCT FROM $1::jsonb->'chatgpt_account_id'))"
 	}
+	credentialArgs := []any{string(payload), id}
+	if snapshot, ok := ctx.Value(vendorOAuthRefreshSnapshotKey{}).(*service.Account); ok {
+		predicate, args, err := vendorOAuthRefreshMatchSQL(ctx, "accounts", snapshot, len(credentialArgs))
+		if err != nil {
+			return err
+		}
+		vendorCredentialGuard += " AND " + predicate
+		credentialArgs = append(credentialArgs, args...)
+	}
 	result, err := client.ExecContext(ctx, `
 		UPDATE accounts
 		SET
@@ -1038,7 +1078,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 			END,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL AND `+vendorCredentialGuard+`
-	`, string(payload), id)
+	`, credentialArgs...)
 	if err != nil {
 		return err
 	}
@@ -1477,6 +1517,7 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 			AND platform = ANY($1)
 			AND id > $2`
 	query += " AND " + accountVisibilitySQL(ctx, "accounts.vendor_id") + " AND " + vendorSupplySQL("accounts", "NULL")
+	query += " AND " + vendorOAuthRefreshModeSQL("accounts")
 	if options.ActiveOnly {
 		query += `
 			AND status = 'active'`
@@ -3989,6 +4030,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 	rateMultiplier := m.RateMultiplier
 
 	return &service.Account{
+		CreatedBy: m.CreatedBy, CreatedByName: m.CreatedByName, CreatedByRole: m.CreatedByRole,
 		ID:                      m.ID,
 		VendorID:                m.VendorID,
 		VendorPausedAt:          m.VendorPausedAt,

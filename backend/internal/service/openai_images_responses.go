@@ -1949,6 +1949,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		if err != nil {
 			if imageCount > 0 {
 				return &OpenAIForwardResult{
+					AuthorizationMode:             nativeOpenAIUsageAuthorizationMode(account),
 					RequestID:                     resp.Header.Get("x-request-id"),
 					UpstreamHeaders:               resp.Header,
 					Usage:                         usage,
@@ -2001,6 +2002,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		imageCount = parsed.N
 	}
 	return &OpenAIForwardResult{
+		AuthorizationMode:             nativeOpenAIUsageAuthorizationMode(account),
 		RequestID:                     resp.Header.Get("x-request-id"),
 		UpstreamHeaders:               resp.Header,
 		Usage:                         usage,

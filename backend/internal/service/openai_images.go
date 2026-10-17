@@ -671,7 +671,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		proxyURL = account.Proxy.URL()
 	}
 	upstreamStart := time.Now()
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account, vendorDispatchGroup(c))
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -747,19 +747,20 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		if err != nil {
 			if streamCount > 0 {
 				return &OpenAIForwardResult{
-					RequestID:        resp.Header.Get("x-request-id"),
-					UpstreamHeaders:  resp.Header,
-					Usage:            streamUsage,
-					Model:            requestModel,
-					UpstreamModel:    upstreamModel,
-					Stream:           parsed.Stream,
-					ResponseHeaders:  resp.Header.Clone(),
-					Duration:         time.Since(startTime),
-					FirstTokenMs:     ttft,
-					ImageCount:       streamCount,
-					ImageSize:        parsed.SizeTier,
-					ImageInputSize:   parsed.Size,
-					ImageOutputSizes: streamSizes,
+					AuthorizationMode: nativeOpenAIUsageAuthorizationMode(account),
+					RequestID:         resp.Header.Get("x-request-id"),
+					UpstreamHeaders:   resp.Header,
+					Usage:             streamUsage,
+					Model:             requestModel,
+					UpstreamModel:     upstreamModel,
+					Stream:            parsed.Stream,
+					ResponseHeaders:   resp.Header.Clone(),
+					Duration:          time.Since(startTime),
+					FirstTokenMs:      ttft,
+					ImageCount:        streamCount,
+					ImageSize:         parsed.SizeTier,
+					ImageInputSize:    parsed.Size,
+					ImageOutputSizes:  streamSizes,
 				}, err
 			}
 			return nil, err
@@ -769,19 +770,20 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		imageOutputSizes := streamSizes
 		firstTokenMs = ttft
 		return &OpenAIForwardResult{
-			RequestID:        resp.Header.Get("x-request-id"),
-			UpstreamHeaders:  resp.Header,
-			Usage:            usage,
-			Model:            requestModel,
-			UpstreamModel:    upstreamModel,
-			Stream:           parsed.Stream,
-			ResponseHeaders:  resp.Header.Clone(),
-			Duration:         time.Since(startTime),
-			FirstTokenMs:     firstTokenMs,
-			ImageCount:       imageCount,
-			ImageSize:        parsed.SizeTier,
-			ImageInputSize:   parsed.Size,
-			ImageOutputSizes: imageOutputSizes,
+			AuthorizationMode: nativeOpenAIUsageAuthorizationMode(account),
+			RequestID:         resp.Header.Get("x-request-id"),
+			UpstreamHeaders:   resp.Header,
+			Usage:             usage,
+			Model:             requestModel,
+			UpstreamModel:     upstreamModel,
+			Stream:            parsed.Stream,
+			ResponseHeaders:   resp.Header.Clone(),
+			Duration:          time.Since(startTime),
+			FirstTokenMs:      firstTokenMs,
+			ImageCount:        imageCount,
+			ImageSize:         parsed.SizeTier,
+			ImageInputSize:    parsed.Size,
+			ImageOutputSizes:  imageOutputSizes,
 		}, nil
 	} else {
 		nonStreamUsage, nonStreamCount, nonStreamSizes, err := s.handleOpenAIImagesNonStreamingResponse(upstreamCtx, resp, c, account, parsed)
@@ -793,19 +795,20 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			imageCount = nonStreamCount
 		}
 		return &OpenAIForwardResult{
-			RequestID:        resp.Header.Get("x-request-id"),
-			UpstreamHeaders:  resp.Header,
-			Usage:            usage,
-			Model:            requestModel,
-			UpstreamModel:    upstreamModel,
-			Stream:           parsed.Stream,
-			ResponseHeaders:  resp.Header.Clone(),
-			Duration:         time.Since(startTime),
-			FirstTokenMs:     firstTokenMs,
-			ImageCount:       imageCount,
-			ImageSize:        parsed.SizeTier,
-			ImageInputSize:   parsed.Size,
-			ImageOutputSizes: nonStreamSizes,
+			AuthorizationMode: nativeOpenAIUsageAuthorizationMode(account),
+			RequestID:         resp.Header.Get("x-request-id"),
+			UpstreamHeaders:   resp.Header,
+			Usage:             usage,
+			Model:             requestModel,
+			UpstreamModel:     upstreamModel,
+			Stream:            parsed.Stream,
+			ResponseHeaders:   resp.Header.Clone(),
+			Duration:          time.Since(startTime),
+			FirstTokenMs:      firstTokenMs,
+			ImageCount:        imageCount,
+			ImageSize:         parsed.SizeTier,
+			ImageInputSize:    parsed.Size,
+			ImageOutputSizes:  nonStreamSizes,
 		}, nil
 	}
 }

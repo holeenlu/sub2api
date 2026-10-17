@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -243,8 +244,13 @@ type OpenAIUsage struct {
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
-	RequestID  string
-	ResponseID string
+	AuthorizationMode string `json:"authorization_mode"`
+	// PriorAuthorizationResults retains already-metered attempts when switching
+	// authorization within one account. Usage remains the client-visible total.
+	PriorAuthorizationResults []*OpenAIForwardResult
+	authorizationUsage        *OpenAIUsage
+	RequestID                 string
+	ResponseID                string
 	// UpstreamHeaders 是直接上游的响应头，用于按账户配置解析上游请求标识。
 	UpstreamHeaders http.Header
 	Usage           OpenAIUsage
@@ -1277,12 +1283,31 @@ func hashSensitiveValueForLog(raw string) string {
 
 // GetAccessToken gets the access token for an OpenAI account
 func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Account) (string, string, error) {
+	ctx = selectionbudget.PreparationContext(ctx)
+	ctx, stopPreparation := OpenAITurnWaitContext(ctx)
+	defer stopPreparation()
 	if account.IsShadow() {
 		credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 		if err != nil {
 			return "", "", err
 		}
 		account = credAccount
+	}
+	if account.IsSIWCEnabled() {
+		if oauth := s.siwcOAuthService(); oauth != nil {
+			var cache OpenAITokenCache
+			if s.openAITokenProvider != nil {
+				cache = s.openAITokenProvider.tokenCache
+			}
+			token, err := oauth.SIWCAccessToken(ctx, account, cache)
+			return token, UsageAuthorizationModeSIWC, err
+		}
+		return "", UsageAuthorizationModeSIWC, errors.New("SIWC credential service is unavailable")
+	}
+	if account.VendorID != nil && account.Platform == PlatformOpenAI {
+		if err := validateVendorModeDispatch(ctx, s.accountRepo, account, nil, vendorAccountPrimaryMode(account)); err != nil {
+			return "", "", err
+		}
 	}
 	switch account.Type {
 	case AccountTypeOAuth:

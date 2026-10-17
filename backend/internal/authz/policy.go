@@ -13,10 +13,12 @@ import (
 )
 
 const (
-	SuperAdmin = domain.RoleSuperAdmin
-	Admin      = domain.RoleAdmin
-	User       = domain.RoleUser
-	PolicyKey  = "admin_role_policy"
+	SuperAdmin   = domain.RoleSuperAdmin
+	Admin        = domain.RoleAdmin
+	User         = domain.RoleUser
+	VendorLevel1 = domain.RoleVendorLevel1
+	VendorLevel2 = domain.RoleVendorLevel2
+	PolicyKey    = "admin_role_policy"
 )
 
 type Permission struct {
@@ -178,7 +180,8 @@ func PersonnelPermission(action, targetRole, nextRole string) string {
 }
 
 func IsManagementRole(role string) bool { return role == SuperAdmin || role == Admin }
-func ValidRole(role string) bool        { return role == User || IsManagementRole(role) }
+func IsVendorRole(role string) bool     { return role == VendorLevel1 || role == VendorLevel2 }
+func ValidRole(role string) bool        { return role == User || IsManagementRole(role) || IsVendorRole(role) }
 
 type Subject struct {
 	PersonnelAction   string

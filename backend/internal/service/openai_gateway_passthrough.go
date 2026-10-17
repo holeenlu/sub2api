@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -138,6 +140,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	clientPromptCacheKey := gjson.GetBytes(body, "prompt_cache_key").String()
 	requestedModel := reqModel
 	upstreamPassthroughModel := ""
+	if account.IsSIWCEnabled() {
+		upstreamPassthroughModel = gjson.GetBytes(body, "model").String()
+	}
 	if isOpenAIResponsesCompactPath(c) {
 		compactMappedModel := s.resolveOpenAICompactFallbackModel(account, reqModel)
 		if compactMappedModel != "" && compactMappedModel != reqModel {
@@ -217,7 +222,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			stageCodexFingerprintIDs(c, fpIDs)
 		}
 	}
-	if account != nil && account.IsOpenAI() {
+	if account != nil && account.IsOpenAI() && !account.IsSIWCEnabled() {
 		responsesLite := isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) || isOpenAIResponsesLiteWebSocketPayload(body)
 		normalizedBody, normalized, normalizeErr := normalizeOpenAIResponsesCompatibilityBodyWithOptions(body, account, openAIResponsesCompatibilityOptions{
 			Config:        s.cfg,
@@ -354,9 +359,24 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, inputErr
 		}
 	}
-	token, _, err := s.GetAccessToken(ctx, account)
+	var token string
+	if account.IsSIWCEnabled() {
+		oauth := s.siwcOAuthService()
+		if oauth == nil {
+			return nil, fmt.Errorf("SIWC authorization service is unavailable")
+		}
+		var identity string
+		prepareCtx, stopPrepare := OpenAITurnWaitContext(selectionbudget.PreparationContext(ctx))
+		token, identity, err = oauth.SIWCAccessTokenWithIdentity(prepareCtx, account, s.openAITokenProvider.tokenCache)
+		stopPrepare()
+		if err == nil {
+			ctx = withSIWCRequestGrant(ctx, account, token, identity)
+		}
+	} else {
+		token, _, err = s.GetAccessToken(ctx, account)
+	}
 	if err != nil {
-		return nil, err
+		return nil, newCredentialPreparationFailure(err)
 	}
 
 	proxyURL := ""
@@ -373,7 +393,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	if reasoningEffort != nil {
 		reasoningValue = *reasoningEffort
 	}
-	if reqStream && account.Platform == PlatformOpenAI {
+	if (reqStream || account.IsSIWCEnabled()) && account.Platform == PlatformOpenAI {
 		firstOutputTimeout = s.openAIFirstOutputTimeout(reasoningValue)
 	}
 	agentTaskRecoveryTried := false
@@ -399,7 +419,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, openAITurnFirstOutputDeadline(ctx, firstOutputTimeout, startTime))
 		}
 		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token, clientPromptCacheKey)
-		if buildErr == nil {
+		if buildErr == nil && !account.IsSIWCEnabled() {
 			// The body cache key has already been scoped. Only the captured
 			// original can supply a missing official session header.
 			applyCodexOfficialSessionHeaderFallback(upstreamReq.Header, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c), clientPromptCacheKey)
@@ -422,6 +442,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		resp, err = s.doOpenAIResponsesUpstream(c, upstreamReq, proxyURL, account, reqStream)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if resp != nil {
+			if resp.Request == nil {
+				resp.Request = upstreamReq
+			}
 			progress.protocol = resp.Proto
 		}
 		if headerGuard != nil && headerGuard.stopHeaderWait() {
@@ -436,6 +459,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			if errors.Is(err, ErrOpenAIWSFirstOutputBudgetExhausted) || (errors.As(err, &transportErr) && transportErr.Unsent) {
 				return nil, ErrOpenAIWSFirstOutputBudgetExhausted
 			}
+			if account.IsSIWCEnabled() {
+				return nil, infraerrors.New(http.StatusGatewayTimeout, "OPENAI_SIWC_FIRST_OUTPUT_TIMEOUT", "SIWC produced no output before the deadline; the request was not replayed")
+			}
 			return nil, s.newOpenAIFirstOutputTimeoutError(ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account), startTime, requestedModel, reasoningValue, firstOutputTimeout, "http_passthrough_response_headers", nil)
 		}
 		if headerGuard != nil && resp != nil && resp.Body != nil {
@@ -445,11 +471,30 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			if headerGuard != nil {
 				headerGuard.close()
 			}
+			if account.IsSIWCEnabled() {
+				return nil, infraerrors.New(http.StatusBadGateway, "OPENAI_SIWC_TRANSPORT_FAILED", "SIWC upstream connection failed; no alternate authorization was used").WithCause(err)
+			}
 			// Transport-level failure (proxy/DNS/TCP/TLS — no HTTP response). Convert to
 			// a failover so the handler switches to a healthy account.
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 		}
+		if account.IsSIWCEnabled() && (resp == nil || resp.Body == nil) {
+			if headerGuard != nil {
+				headerGuard.close()
+			}
+			return nil, infraerrors.New(http.StatusBadGateway, "OPENAI_SIWC_INVALID_RESPONSE", "SIWC upstream returned an empty response")
+		}
+		if !account.IsSIWCEnabled() && resp.StatusCode == http.StatusUnauthorized && s.openAITokenProvider != nil {
+			if fresh, ok := refreshRejectedCredential(ctx, s.accountRepo, account, token, s.openAITokenProvider.refreshAPI, s.openAITokenProvider.executor); ok {
+				_ = resp.Body.Close()
+				token = fresh
+				continue
+			}
+		}
 		if resp.StatusCode >= 400 {
+			if account.IsSIWCEnabled() {
+				return nil, s.handleSIWCHTTPError(ctx, resp, c, account, token)
+			}
 			// Peek only to identify an invalid task. Restore the body so the existing
 			// passthrough error handling sees the same response after recovery fails.
 			probeBody := s.readUpstreamErrorBody(resp)
@@ -551,7 +596,16 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			imageCount = result.imageCount
 			imageOutputSizes = result.imageOutputSizes
 		} else {
-			result, handleErr := s.handleNonStreamingResponsePassthrough(ctx, resp, c, account, reqModel, upstreamPassthroughModel)
+			var readGuard *openAIFirstOutputHeaderGuard
+			closeReadGuard := func() {}
+			if account.IsSIWCEnabled() && firstOutputTimeout > 0 {
+				guardCtx, guard := newOpenAIFirstOutputHeaderGuard(context.WithoutCancel(ctx), func() {}, openAITurnFirstOutputDeadline(ctx, firstOutputTimeout, startTime))
+				readGuard = guard
+				stopCloseBody := context.AfterFunc(guardCtx, func() { _ = resp.Body.Close() })
+				closeReadGuard = func() { stopCloseBody(); guard.close() }
+			}
+			result, handleErr := s.handleNonStreamingResponsePassthrough(ctx, resp, c, account, reqModel, upstreamPassthroughModel, readGuard)
+			closeReadGuard()
 			if handleErr != nil {
 				if retryBody, fallbackModel, retry := s.applyOpenAIPassthroughCompactFallbackFromSignal(
 					c, account, requestedModel, body, handleErr, compactModelFallbackRetried, resp,
@@ -590,7 +644,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
-	if !account.IsShadow() {
+	if !account.IsShadow() && !account.IsSIWCEnabled() {
 		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 			s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 		}
@@ -603,6 +657,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	forwardResult := &OpenAIForwardResult{
+		AuthorizationMode:             nativeOpenAIUsageAuthorizationMode(account),
 		RequestID:                     resp.Header.Get("x-request-id"),
 		UpstreamHeaders:               resp.Header,
 		ResponseID:                    responseID,
@@ -669,6 +724,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	token string,
 	rawSessionFallback ...string,
 ) (*http.Request, error) {
+	if account.IsSIWCEnabled() {
+		return s.buildSIWCRequest(ctx, c, body, token)
+	}
 	targetURL := openaiPlatformAPIURL
 	switch account.Type {
 	case AccountTypeOAuth:
@@ -1521,6 +1579,12 @@ var openAIStreamErrorStatusPaths = []string{
 }
 
 func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
+	if isOpenAIUpstreamSessionBlocked(payload) {
+		return http.StatusForbidden
+	}
+	if status := siwcErrorStatus(payload); status != 0 {
+		return status
+	}
 	if isOpenAIContextWindowError(message, payload) {
 		return http.StatusBadRequest
 	}
@@ -1556,6 +1620,9 @@ func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
 }
 
 func openAIStreamFailureStatus(payload []byte, message string) int {
+	if status := siwcErrorStatus(payload); status != 0 {
+		return status
+	}
 	if len(bytes.TrimSpace(payload)) == 0 || !gjson.ValidBytes(payload) {
 		return http.StatusBadGateway
 	}
@@ -1678,6 +1745,12 @@ func applyOpenAIStreamFailedErrorPassthroughRule(
 }
 
 func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool {
+	if isOpenAIUpstreamSessionBlocked(payload) {
+		return false
+	}
+	if siwcErrorStatus(payload) != 0 {
+		return false
+	}
 	if isOpenAIEncryptedContextRejection(payload) {
 		return false
 	}
@@ -1733,6 +1806,12 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 }
 
 func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
+	if isOpenAIUpstreamSessionBlocked(payload) {
+		return false
+	}
+	if siwcErrorStatus(payload) != 0 {
+		return false
+	}
 	if isOpenAIEncryptedContextRejection(payload) {
 		return false
 	}
@@ -1802,6 +1881,9 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 }
 
 func openAIStreamFailedEventRetryableOnSameAccount(account *Account, payload []byte, message string) bool {
+	if account.IsSIWCEnabled() {
+		return false
+	}
 	if account == nil {
 		return false
 	}
@@ -1854,6 +1936,12 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 			Kind:               kind,
 			Message:            message,
 			Detail:             detail,
+		}
+		if account.IsSIWCEnabled() {
+			event.UpstreamStatusCode = http.StatusOK
+			event.Stage = "stream"
+			event.Scope = "semantic"
+			event.Reason = openAIStreamFailedEventErrorCode(payload)
 		}
 		if account != nil {
 			event.Platform = account.Platform
@@ -1968,7 +2056,7 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	message string,
 	canonicalModel ...string,
 ) *UpstreamFailoverError {
-	if account == nil || IsResponseCommitted(c) {
+	if account == nil || account.IsSIWCEnabled() || IsResponseCommitted(c) {
 		return nil
 	}
 	shouldFailover := openAIStreamFailedEventShouldFailover(payload, message)
@@ -2039,7 +2127,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	progress := beginOpenAIResponseProgress(c, "http_passthrough", resp.Proto, func() (bool, bool) {
 		return openAIStreamClientOutputStarted(c, clientOutputStarted), semanticOutputSeen
 	})
-	codexFailureTerminal := account != nil && account.Platform == PlatformOpenAI
+	codexFailureTerminal := account != nil && account.Platform == PlatformOpenAI && !account.IsSIWCEnabled()
 	failureDelivered := false
 	suppressCurrentEvent := false
 	responseFailedPending := false
@@ -2237,6 +2325,16 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				capacityFailoverSuppressedLogged = true
 			}
 			cyberHit := false
+			if account.IsSIWCEnabled() && (eventType == "response.failed" || eventType == "error" || eventType == "response.incomplete") {
+				if eventType == "response.incomplete" {
+					sawFailedEvent = true
+					failedMessage = "SIWC response was incomplete"
+				}
+				s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "stream_failed", dataBytes, extractOpenAISSEErrorMessage(dataBytes))
+				if openAIStreamFailedEventSemanticStatus(dataBytes, "") == http.StatusUnauthorized {
+					s.rejectSIWCResponseToken(ctx, resp, account)
+				}
+			}
 			if eventType == "response.failed" || eventType == "error" {
 				if codexFailureTerminal && eventType == "error" {
 					sawBareError = true
@@ -2266,7 +2364,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					})
 				}
 				outputStarted := openAIStreamClientOutputStarted(c, clientOutputStarted)
-				if !outputStarted && !cyberHit && !openAIUsageHasTokens(usage) && imageCounter.Count() == 0 {
+				if !account.IsSIWCEnabled() && !outputStarted && !cyberHit && !openAIUsageHasTokens(usage) && imageCounter.Count() == 0 {
 					if compactErr := newOpenAICompactFallbackSignal(c, dataBytes, failedMessage); compactErr != nil {
 						return resultWithUsage(), compactErr
 					}
@@ -2280,7 +2378,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 						s.handleOpenAIStreamTerminalAccountSideEffects(c, account, dataBytes, failedMessage, resp.Header, mappedModel)
 						bareErrorAccountSideEffectsPending = false
 					}
-					if eventType == "response.failed" {
+					if eventType == "response.failed" && !account.IsSIWCEnabled() {
 						// The stream cannot be replayed after semantic output. Preserve the
 						// terminal event, while making the upstream failure queryable.
 						s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "stream_failed", dataBytes, failedMessage)
@@ -2291,7 +2389,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				}
 				if !outputStarted {
 					shouldFailover := false
-					if !cyberHit {
+					if !cyberHit && !account.IsSIWCEnabled() {
 						if eventType == "error" {
 							shouldFailover = openAIStreamErrorEventShouldFailover(dataBytes, failedMessage)
 						} else {
@@ -2302,7 +2400,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 						return resultWithUsage(),
 							s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header)
 					}
-					if !cyberHit && !sawBareError {
+					if !cyberHit && !sawBareError && !account.IsSIWCEnabled() {
 						if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {
 							// 命中透传规则也要记录 ops 上游错误事件（对齐 CC/Messages 与
 							// antigravity 先例），否则透传命中的 failed 在监控中不可见。
@@ -2362,7 +2460,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			// response.completed (no output, no usage, no error, nothing sent
 			// to the client) are silent upstream refusals: fail over instead of
 			// recording a successful 0/0 usage turn (issue #5009).
-			if (eventType == "response.completed" || eventType == "response.done") &&
+			if !account.IsSIWCEnabled() && (eventType == "response.completed" || eventType == "response.done") &&
 				!sawFailedEvent && !semanticOutputSeen && !clientOutputStarted &&
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
 				return resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
@@ -2423,6 +2521,19 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		}
 	}
 	ensureResponseFailedTerminal()
+	if account.IsSIWCEnabled() && !sawFailedEvent && terminalEventType != "response.completed" {
+		message := "SIWC stream ended without response.completed; the request was not replayed"
+		if firstOutputGuard.expired() {
+			message = "SIWC first output timed out; the request was not replayed"
+		}
+		if !clientDisconnected && ctx.Err() == nil {
+			if writePendingLines() {
+				_, _ = fmt.Fprint(w, buildOpenAIResponseFailedSSE(responseID, originalModel, createdAtTracker.Value(), nil, message))
+				flusher.Flush()
+			}
+		}
+		return resultWithUsage(), errors.New(message)
+	}
 	if firstOutputGuard.expired() && !sawFailedEvent && ctx.Err() == nil {
 		return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account), startTime, originalModel, effort, firstOutputTimeout, "http_passthrough_first_semantic_output", resp.Header)
 	}
@@ -2495,10 +2606,11 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	account *Account,
 	originalModel string,
 	mappedModel string,
+	guards ...*openAIFirstOutputHeaderGuard,
 ) (*openaiNonStreamingResultPassthrough, error) {
 	drain := newOpenAIHTTPUsageDrain(ctx, resp.Body.Close)
 	defer drain.stop()
-	body, err := s.readOpenAIHTTPResponseBody(resp, c)
+	body, err := s.readOpenAIHTTPResponseBody(resp, c, guards...)
 	if err != nil {
 		usage := s.parseSSEUsageFromBody(string(body))
 		if openAIUsageHasTokens(usage) {
@@ -2524,6 +2636,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		return s.handlePassthroughSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 	}
 
+	if account.IsSIWCEnabled() {
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "SIWC upstream did not return a Responses event stream")
+	}
 	if !gjson.ValidBytes(body) {
 		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream returned invalid JSON")
 	}
@@ -2603,13 +2718,23 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		if msg == "" {
 			msg = "Upstream compact response failed"
 		}
-		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil && partialResult() == nil {
+		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); !account.IsSIWCEnabled() && compactErr != nil && partialResult() == nil {
 			return partialResult(), compactErr
+		}
+		if account.IsSIWCEnabled() {
+			status := openAIStreamFailedEventSemanticStatus(terminalPayload, msg)
+			if status == http.StatusUnauthorized {
+				s.rejectSIWCResponseToken(c.Request.Context(), resp, account)
+			}
+			return partialResult(), writeSIWCError(c, status, resp.Header, terminalPayload)
 		}
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
 			return partialResult(), failoverErr
 		}
 		return partialResult(), s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+	}
+	if account.IsSIWCEnabled() && (!terminalOK || terminalType != "response.completed") {
+		return partialResult(), s.writeOpenAINonStreamingProtocolError(resp, c, "SIWC stream ended without response.completed; the request was not replayed")
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 	if !ok {

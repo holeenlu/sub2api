@@ -36,20 +36,7 @@ type DataPayload struct {
 	SkippedShadows int `json:"skipped_shadows,omitempty" authz:"base"`
 }
 
-type DataProxy struct {
-	ProxyKey        string `json:"proxy_key"`
-	Name            string `json:"name"`
-	Protocol        string `json:"protocol"`
-	Host            string `json:"host"`
-	Port            int    `json:"port"`
-	Username        string `json:"username,omitempty"`
-	Password        string `json:"password,omitempty"`
-	Status          string `json:"status"`
-	ExpiresAt       *int64 `json:"expires_at,omitempty"`        // unix 秒，与 DataAccount.ExpiresAt 风格一致
-	FallbackMode    string `json:"fallback_mode,omitempty"`     // none/direct/proxy
-	BackupProxyName string `json:"backup_proxy_name,omitempty"` // 备用代理 name（跨实例按 name 反查）
-	ExpiryWarnDays  int    `json:"expiry_warn_days,omitempty"`
-}
+type DataProxy = service.AccountDataProxy
 
 // DataAccount 是管理员显式备份导出使用的账号结构，故意不走 dto.Account 的脱敏路径，
 // Credentials 原文返回。这是"管理员备份"这一显式行为的一部分；如未来需要导出脱敏版本，
@@ -110,7 +97,7 @@ type DataImportError struct {
 }
 
 func buildProxyKey(protocol, host string, port int, username, password string) string {
-	return fmt.Sprintf("%s|%s|%d|%s|%s", strings.TrimSpace(protocol), strings.TrimSpace(host), port, strings.TrimSpace(username), strings.TrimSpace(password))
+	return service.NativeDataProxyKey(protocol, host, port, username, password)
 }
 
 func (h *AccountHandler) ExportData(c *gin.Context) {
@@ -569,7 +556,34 @@ func (h *AccountHandler) resolveExportProxies(ctx context.Context, accounts []se
 		return []service.Proxy{}, nil
 	}
 
-	return h.adminService.GetProxiesByIDs(ctx, ids)
+	// A portable account backup must include its fallback chain as well as
+	// the selected accounts' primary proxies. Otherwise backup_proxy_name
+	// points outside the file and cannot be safely restored by a supplier.
+	proxies := make([]service.Proxy, 0, len(ids))
+	for len(ids) > 0 {
+		batch, err := h.adminService.GetProxiesByIDs(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		if len(batch) != len(ids) {
+			return nil, service.ErrProxyNotFound
+		}
+		ids = nil
+		for _, proxy := range batch {
+			if proxy.VendorID != nil {
+				return nil, authz.ErrPermissionDenied
+			}
+			proxies = append(proxies, proxy)
+			if proxy.FallbackMode != service.FallbackModeProxy || proxy.BackupProxyID == nil {
+				continue
+			}
+			if _, ok := seen[*proxy.BackupProxyID]; !ok {
+				seen[*proxy.BackupProxyID] = struct{}{}
+				ids = append(ids, *proxy.BackupProxyID)
+			}
+		}
+	}
+	return proxies, nil
 }
 
 func parseAccountIDs(c *gin.Context) ([]int64, error) {
@@ -617,11 +631,8 @@ func parseIncludeProxies(c *gin.Context) (bool, error) {
 }
 
 func validateDataHeader(payload DataPayload) error {
-	if payload.Type != "" && payload.Type != dataType && payload.Type != legacyDataType {
-		return fmt.Errorf("unsupported data type: %s", payload.Type)
-	}
-	if payload.Version != 0 && payload.Version != dataVersion {
-		return fmt.Errorf("unsupported data version: %d", payload.Version)
+	if err := service.ValidateNativeDataVersion(payload.Type, payload.Version); err != nil {
+		return err
 	}
 	if payload.Proxies == nil {
 		return errors.New("proxies is required")

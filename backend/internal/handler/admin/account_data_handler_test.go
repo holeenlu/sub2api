@@ -229,6 +229,48 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
 }
 
+func TestExportDataCannotBypassSupplierArchiveGuard(t *testing.T) {
+	for _, archived := range []bool{false, true} {
+		router, adminSvc := setupAccountDataRouter()
+		owner := int64(7)
+		a := service.Account{ID: 21, VendorID: &owner, Credentials: map[string]any{"access_token": "retained-secret"}}
+		if archived {
+			a.Extra = map[string]any{service.VendorArchivedAtKey: "2026-10-17T00:00:00Z"}
+		}
+		adminSvc.accounts = []service.Account{a}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data", nil))
+		require.Equal(t, http.StatusForbidden, rec.Code)
+		require.NotContains(t, rec.Body.String(), "retained-secret")
+	}
+}
+
+func TestExportDataIncludesPortableProxyBackupChain(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	primaryID, backupID := int64(11), int64(12)
+	adminSvc.proxies = []service.Proxy{
+		{ID: primaryID, Name: "primary", Protocol: "http", Host: "primary.invalid", Port: 8080, Status: service.StatusActive, FallbackMode: service.FallbackModeProxy, BackupProxyID: &backupID},
+		{ID: backupID, Name: "backup", Protocol: "socks5h", Host: "backup.invalid", Port: 1080, Username: "backup-user", Password: "backup-secret", Status: service.StatusActive},
+	}
+	adminSvc.accounts = []service.Account{{ID: 21, Name: "account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"access_token": "secret"}, ProxyID: &primaryID}}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response struct {
+		Data DataPayload `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Len(t, response.Data.Proxies, 2)
+	require.Equal(t, "backup", response.Data.Proxies[0].BackupProxyName)
+	require.Equal(t, "backup-secret", response.Data.Proxies[1].Password)
+	otherOwner := int64(8)
+	adminSvc.proxies[1].VendorID = &otherOwner
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data", nil))
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.NotContains(t, rec.Body.String(), "backup-secret")
+}
+
 func TestExportDataWithoutProxies(t *testing.T) {
 	router, adminSvc := setupAccountDataRouter()
 

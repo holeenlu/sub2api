@@ -80,7 +80,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}
 
 	upstreamStart := time.Now()
-	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
+	resp, err := s.doOpenAIUpstream(req, proxyURL, account, vendorDispatchGroup(c))
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
@@ -131,12 +131,13 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 		return nil, nil
 	}
 	return &OpenAIForwardResult{
-		RequestID:       strings.TrimSpace(resp.Header.Get("x-request-id")),
-		UpstreamHeaders: resp.Header,
-		Model:           requestedModel,
-		UpstreamModel:   upstreamModel,
-		Duration:        time.Since(upstreamStart),
-		WebSearchCalls:  1,
+		AuthorizationMode: nativeOpenAIUsageAuthorizationMode(account),
+		RequestID:         strings.TrimSpace(resp.Header.Get("x-request-id")),
+		UpstreamHeaders:   resp.Header,
+		Model:             requestedModel,
+		UpstreamModel:     upstreamModel,
+		Duration:          time.Since(upstreamStart),
+		WebSearchCalls:    1,
 	}, nil
 }
 
@@ -164,7 +165,7 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 	SetActualOpenAIUpstreamEndpoint(c, "/v1/responses")
 
 	upstreamStart := time.Now()
-	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
+	resp, err := s.doOpenAIUpstream(req, proxyURL, account, vendorDispatchGroup(c))
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
@@ -215,14 +216,15 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 	}
 	c.Data(http.StatusOK, "application/json", alphaRespBody)
 	return &OpenAIForwardResult{
-		RequestID:        strings.TrimSpace(resp.Header.Get("x-request-id")),
-		UpstreamHeaders:  resp.Header,
-		Model:            requestedModel,
-		UpstreamModel:    upstreamModel,
-		UpstreamEndpoint: "/v1/responses",
-		ResponseHeaders:  resp.Header.Clone(),
-		Duration:         time.Since(upstreamStart),
-		WebSearchCalls:   1,
+		AuthorizationMode: nativeOpenAIUsageAuthorizationMode(account),
+		RequestID:         strings.TrimSpace(resp.Header.Get("x-request-id")),
+		UpstreamHeaders:   resp.Header,
+		Model:             requestedModel,
+		UpstreamModel:     upstreamModel,
+		UpstreamEndpoint:  "/v1/responses",
+		ResponseHeaders:   resp.Header.Clone(),
+		Duration:          time.Since(upstreamStart),
+		WebSearchCalls:    1,
 	}, nil
 }
 
