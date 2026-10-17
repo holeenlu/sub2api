@@ -118,6 +118,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			})
 		}
 
+		if s.isContentRefusalResponse(resp) {
+			return s.handleErrorResponse(ctx, resp, c, account, input.RequestModel)
+		}
 		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）
 		if resp.StatusCode >= 500 && !NativeUncertainReplaySafe(input.Body) {
 			break // No proof that a hosted tool was not executed.
