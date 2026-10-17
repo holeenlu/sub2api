@@ -97,7 +97,13 @@ func TestSyncActiveToPassive_WritesFiveHourSessionWindowEnd(t *testing.T) {
 	repo := &sessionWindowSyncRepo{}
 	svc := &AccountUsageService{accountRepo: repo}
 	resetsAt := time.Now().Add(3 * time.Hour).UTC().Truncate(time.Second)
+	now := time.Now()
 	svc.syncActiveToPassive(context.Background(), 42, &UsageInfo{
+		UpdatedAt: &now,
+		Anthropic: &AnthropicUsageDetails{Observations: map[string]UsageObservation{
+			"five_hour.utilization": {Value: 53.0, Source: "upstream_api", SampledAt: &now},
+			"five_hour.resets_at":   {Value: resetsAt.Format(time.RFC3339), Source: "upstream_api", SampledAt: &now},
+		}},
 		FiveHour: &UsageProgress{
 			Utilization: 53,
 			ResetsAt:    &resetsAt,
@@ -123,7 +129,12 @@ func TestSyncActiveToPassive_SkipsSessionWindowEndWhenResetMissing(t *testing.T)
 
 	repo := &sessionWindowSyncRepo{}
 	svc := &AccountUsageService{accountRepo: repo}
+	now := time.Now()
 	svc.syncActiveToPassive(context.Background(), 99, &UsageInfo{
+		UpdatedAt: &now,
+		Anthropic: &AnthropicUsageDetails{Observations: map[string]UsageObservation{
+			"five_hour.utilization": {Value: 10.0, Source: "upstream_api", SampledAt: &now},
+		}},
 		FiveHour: &UsageProgress{Utilization: 10},
 	})
 

@@ -36,13 +36,11 @@
 
       <!-- Usage data -->
       <div v-else-if="usageInfo" class="space-y-1">
-        <!-- API error (degraded response) -->
-        <div v-if="usageInfo.error" class="text-xs text-amber-600 dark:text-amber-400 truncate max-w-[200px]" :title="usageInfo.error">
-          {{ usageInfo.error }}
-        </div>
         <!-- 5h Window -->
         <UsageProgressBar
           v-if="usageInfo.five_hour"
+          :utilization-known="isAnthropicUtilizationKnown('five_hour')"
+          :show-now-when-idle="true"
           label="5h"
           :utilization="usageInfo.five_hour.utilization"
           :resets-at="usageInfo.five_hour.resets_at"
@@ -50,33 +48,31 @@
           color="indigo"
         />
 
-        <!-- 7d Window (OAuth only) -->
+        <!-- 7d Window (OAuth and Setup Token passive samples) -->
         <UsageProgressBar
           v-if="usageInfo.seven_day"
+          :utilization-known="isAnthropicUtilizationKnown('seven_day')"
+          :show-now-when-idle="true"
           label="7d"
           :utilization="usageInfo.seven_day.utilization"
           :resets-at="usageInfo.seven_day.resets_at"
+          :window-stats="usageInfo.seven_day.window_stats"
+          :estimated-total-cost="sevenDayEstimatedTotalCost"
           color="emerald"
-        />
-
-        <!-- 7d Sonnet Window (OAuth only) -->
-        <UsageProgressBar
-          v-if="usageInfo.seven_day_sonnet"
-          label="7d S"
-          :utilization="usageInfo.seven_day_sonnet.utilization"
-          :resets-at="usageInfo.seven_day_sonnet.resets_at"
-          color="purple"
         />
 
         <!-- 7d Fable Window (7d_oi) -->
         <UsageProgressBar
           v-if="usageInfo.seven_day_fable"
+          :utilization-known="isAnthropicUtilizationKnown('seven_day_fable')"
+          :show-now-when-idle="true"
           label="7d F"
           :utilization="usageInfo.seven_day_fable.utilization"
           :resets-at="usageInfo.seven_day_fable.resets_at"
+          :window-stats="usageInfo.seven_day_fable.window_stats"
+          :estimated-total-cost="sevenDayFableEstimatedTotalCost"
           color="amber"
         />
-
       </div>
 
       <!-- No data yet -->
@@ -88,14 +84,8 @@
         while usage is still loading survives the usage response. The local query
         button shares its row once usage data exists.
       -->
-      <ClaudeResetCreditsCell :account="account" class="mt-1" @redeemed="loadActiveUsage">
+      <ClaudeResetCreditsCell :account="account" class="mt-1" @redeemed="loadActiveUsage" @account-updated="handleQuotaResetAccountUpdated">
         <template v-if="usageInfo" #pre-actions>
-          <span
-            v-if="usageInfo.source === 'passive'"
-            class="text-[9px] text-gray-400 dark:text-gray-500 italic"
-          >
-            {{ t('admin.accounts.usageWindow.passiveSampled') }}
-          </span>
           <button
             type="button"
             class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
@@ -140,7 +130,7 @@
           :utilization="usageInfo.seven_day.utilization"
           :resets-at="usageInfo.seven_day.resets_at"
           :window-stats="usageInfo.seven_day.window_stats"
-          :estimated-total-cost="openAISevenDayEstimatedTotalCost"
+          :estimated-total-cost="sevenDayEstimatedTotalCost"
           :show-now-when-idle="true"
           color="emerald"
         />
@@ -699,7 +689,7 @@ import {
 } from './credentialsBuilder'
 import OpenCodeGoUsageCell from './OpenCodeGoUsageCell.vue'
 
-// Module-level cache shared across all AccountUsageCell instances
+// Cache for this cell instance; remounting reloads the persisted server snapshot.
 const _usageCache = new Map<number, { data: AccountUsageInfo; ts: number }>()
 const USAGE_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
@@ -740,8 +730,15 @@ const loading = ref(false)
 const activeQueryLoading = ref(false)
 const error = ref<string | null>(null)
 const usageInfo = ref<AccountUsageInfo | null>(null)
+let usageRequestGeneration = 0
 watch(usageInfo, (usage) => {
-  if (usage) emit('usage-loaded', usage)
+  if (usage) {
+    emit('usage-loaded', usage)
+    if (props.account.platform === 'anthropic' && usage.anthropic_status !== undefined &&
+      JSON.stringify(usage.anthropic_status) !== JSON.stringify(props.account.anthropic_status ?? null)) {
+      emit('account-updated', { ...props.account, anthropic_status: usage.anthropic_status })
+    }
+  }
 })
 const rootRef = ref<HTMLElement | null>(null)
 const isDesktopViewport = ref(
@@ -826,8 +823,15 @@ const hasOpenAIUsageFallback = computed(() => {
   return !!usageInfo.value?.five_hour || !!usageInfo.value?.seven_day
 })
 
-const openAISevenDayEstimatedTotalCost = computed(() => {
-  const sevenDay = usageInfo.value?.seven_day
+const isAnthropicUtilizationKnown = (window: string) => {
+  const observations = usageInfo.value?.anthropic?.observations
+  return !observations || observations[window + '.utilization']?.value != null
+}
+
+const sevenDayEstimatedTotalCost = computed(() => estimatedWindowCost(usageInfo.value?.seven_day))
+const sevenDayFableEstimatedTotalCost = computed(() => estimatedWindowCost(usageInfo.value?.seven_day_fable))
+
+const estimatedWindowCost = (sevenDay: AccountUsageInfo['seven_day'] | undefined) => {
   const utilization = sevenDay?.utilization
   const currentCost = sevenDay?.window_stats?.cost
   if (
@@ -843,7 +847,7 @@ const openAISevenDayEstimatedTotalCost = computed(() => {
 
   const estimate = (currentCost * 100) / utilization
   return Number.isFinite(estimate) && estimate > 0 ? estimate : null
-})
+}
 
 const openAIUsageRefreshKey = computed(() => buildOpenAIUsageRefreshKey(props.account))
 
@@ -1446,23 +1450,25 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
 
   loading.value = true
   error.value = null
+  const generation = ++usageRequestGeneration
+  const accountID = props.account.id
 
   try {
 		const fetchFn = () => options?.source
 			? adminAPI.accounts.getUsage(props.account.id, options.source, options.bypassCache === true)
 			: adminAPI.accounts.getUsage(props.account.id)
     const result = await enqueueUsageRequest(props.account, fetchFn)
-    if (!unmounted.value) {
+    if (!unmounted.value && generation === usageRequestGeneration && accountID === props.account.id) {
       usageInfo.value = result
       _usageCache.set(props.account.id, { data: result, ts: Date.now() })
     }
   } catch (e: any) {
-    if (!unmounted.value) {
+    if (!unmounted.value && generation === usageRequestGeneration && accountID === props.account.id) {
       error.value = t('common.error')
       console.error('Failed to load usage:', e)
     }
   } finally {
-    if (!unmounted.value) loading.value = false
+    if (!unmounted.value && generation === usageRequestGeneration) loading.value = false
   }
 }
 
@@ -1517,13 +1523,24 @@ const attachVisibilityObserver = () => {
 }
 
 const loadActiveUsage = async () => {
+  const generation = ++usageRequestGeneration
+  const accountID = props.account.id
+  _usageCache.delete(accountID)
   activeQueryLoading.value = true
   try {
-    usageInfo.value = await adminAPI.accounts.getUsage(props.account.id, 'active', true)
+    const result = await adminAPI.accounts.getUsage(accountID, 'active', true)
+    if (!unmounted.value && generation === usageRequestGeneration && accountID === props.account.id) {
+      usageInfo.value = result
+      error.value = null
+      _usageCache.set(accountID, { data: result, ts: Date.now() })
+    }
   } catch (e: any) {
     console.error('Failed to load active usage:', e)
   } finally {
-    activeQueryLoading.value = false
+    if (generation === usageRequestGeneration) {
+      activeQueryLoading.value = false
+      loading.value = false
+    }
   }
 }
 

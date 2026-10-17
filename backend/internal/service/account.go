@@ -357,7 +357,21 @@ func (a *Account) IsGeminiThirdPartyAPIKey() bool {
 }
 
 func (a *Account) CanGetUsage() bool {
-	return a.Type == AccountTypeOAuth
+	return a != nil && a.Type == AccountTypeOAuth && (a.Platform != PlatformAnthropic || a.HasOAuthScope("user:profile"))
+}
+
+// HasOAuthScope compares complete granted scopes; an imported token without scope
+// metadata has unknown permissions and must not trigger privileged profile calls.
+func (a *Account) HasOAuthScope(scope string) bool {
+	if a == nil {
+		return false
+	}
+	for _, granted := range strings.Fields(a.GetCredential("scope")) {
+		if granted == scope {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Account) GetCredential(key string) string {

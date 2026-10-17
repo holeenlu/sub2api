@@ -60,7 +60,7 @@
               class="mr-2 text-primary-600 focus:ring-primary-500"
             />
             <span class="text-sm text-gray-700 dark:text-gray-300">{{
-              t('admin.accounts.types.oauth')
+              t('admin.accounts.oauth.auth')
             }}</span>
           </label>
           <label class="flex cursor-pointer items-center">
@@ -71,7 +71,18 @@
               class="mr-2 text-primary-600 focus:ring-primary-500"
             />
             <span class="text-sm text-gray-700 dark:text-gray-300">{{
-              t('admin.accounts.setupTokenLongLived')
+              t('admin.accounts.oauth.oauthToken')
+            }}</span>
+          </label>
+          <label class="flex cursor-pointer items-center">
+            <input
+              v-model="addMethod"
+              type="radio"
+              value="setup-token-manual"
+              class="mr-2 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{
+              t('admin.accounts.oauth.setupTokenLongLived')
             }}</span>
           </label>
         </div>
@@ -129,7 +140,9 @@
         :error="currentError"
         :show-help="isAnthropic"
         :show-proxy-warning="isAnthropic"
-        :show-cookie-option="isAnthropic"
+        :show-cookie-option="isAnthropic && addMethod !== 'setup-token-manual'"
+        :show-manual-option="addMethod !== 'setup-token-manual'"
+        :show-setup-token-option="isAnthropic && addMethod === 'setup-token-manual'"
         :show-refresh-token-option="isOpenAI || isAntigravity || isGrok"
         :show-sso-option="isGrok"
         :show-email-password-option="false"
@@ -195,6 +208,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import {
+  buildClaudeSetupTokenCredentials,
   useAccountOAuth,
   type AddMethod,
   type AuthInputMethod
@@ -215,6 +229,7 @@ interface OAuthFlowExposed {
   oauthState: string
   projectId: string
   sessionKey: string
+  setupToken: string
   inputMethod: AuthInputMethod
   reset: () => void
 }
@@ -261,6 +276,7 @@ const isGrok = computed(() => props.account?.platform === 'grok')
  * - SSO cookie otherwise
  */
 const grokInitialInputMethod = computed<AuthInputMethod>(() => {
+  if (isAnthropic.value && addMethod.value === 'setup-token-manual') return 'setup_token'
   if (!isGrok.value) return 'manual'
   const creds = (props.account?.credentials || {}) as Record<string, unknown>
   const hasRT =
@@ -312,12 +328,16 @@ const isManualInputMethod = computed(() => {
     isGemini.value ||
     isAntigravity.value ||
     isGrok.value ||
-    method === 'manual'
+    method === 'manual' ||
+    method === 'setup_token'
   )
 })
 
 const canExchangeCode = computed(() => {
   const authCode = oauthFlowRef.value?.authCode || ''
+  if (isAnthropic.value && addMethod.value === 'setup-token-manual') {
+    return !!buildClaudeSetupTokenCredentials(oauthFlowRef.value?.setupToken || '') && !claudeOAuth.loading.value
+  }
   const sessionId = currentSessionId.value
   const loading = currentLoading.value
   return authCode.trim() && sessionId && !loading
@@ -385,8 +405,39 @@ const handleGenerateUrl = async () => {
   }
 }
 
+const handleAnthropicSetupToken = async (rawToken: string) => {
+  if (!props.account) return
+  const credentials = buildClaudeSetupTokenCredentials(rawToken)
+  if (!credentials) {
+    claudeOAuth.error.value = t('admin.accounts.oauth.setupTokenInvalid')
+    return
+  }
+
+  claudeOAuth.loading.value = true
+  claudeOAuth.error.value = ''
+  try {
+    const updatedAccount = await adminAPI.accounts.applyOAuthCredentials(props.account.id, {
+      type: 'setup-token',
+      credentials
+    })
+    appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
+    emit('reauthorized', updatedAccount)
+    handleClose()
+  } catch (error: any) {
+    claudeOAuth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+    appStore.showError(claudeOAuth.error.value)
+  } finally {
+    claudeOAuth.loading.value = false
+  }
+}
+
 const handleExchangeCode = async () => {
   if (!props.account) return
+
+  if (isAnthropic.value && addMethod.value === 'setup-token-manual') {
+    await handleAnthropicSetupToken(oauthFlowRef.value?.setupToken || '')
+    return
+  }
 
   const authCode = oauthFlowRef.value?.authCode || ''
   if (!authCode.trim()) return
