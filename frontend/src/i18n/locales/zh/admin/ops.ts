@@ -366,7 +366,8 @@ export default {
           client: '客户端响应',
           upstream_message: '上游消息',
           upstream_detail: '上游详情',
-          upstream_events: '上游事件'
+          upstream_events: '上游事件',
+          scheduling_trace: '调度决策'
         },
         basicInfo: '基本信息',
         platform: '平台',

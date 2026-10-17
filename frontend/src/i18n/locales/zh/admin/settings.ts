@@ -1,10 +1,14 @@
+import { BRAND_NAME } from '@/config/brand'
+
 export default {
     settings: {
       title: '系统设置',
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',
       tabs: {
+        roles: "管理员角色权限",
         general: '通用设置',
         agreement: '登录条款',
+        bps: 'Excel / BPS',
         features: '功能开关',
         security: '安全与认证',
         users: '用户默认值',
@@ -340,7 +344,7 @@ export default {
       },
       linuxdo: {
         title: 'LinuxDo Connect 登录',
-        description: '配置 LinuxDo Connect OAuth，用于 Sub2API 用户登录',
+        description: '配置 LinuxDo Connect OAuth，用于 @:common.siteName 用户登录',
         enable: '启用 LinuxDo 登录',
         enableHint: '在登录/注册页面显示 LinuxDo 登录入口',
         clientId: 'Client ID',
@@ -359,7 +363,7 @@ export default {
       },
       dingtalk: {
         title: '钉钉登录',
-        description: '配置钉钉 OAuth，用于 Sub2API 用户登录',
+        description: '配置钉钉 OAuth，用于 @:common.siteName 用户登录',
         enable: '启用钉钉登录-企业内部应用',
         enableHint: '在登录/注册页面显示钉钉登录入口',
         clientId: 'Client ID（AppKey）',
@@ -493,14 +497,17 @@ export default {
         allowUngroupedKey: '允许未分组 Key 调度',
         allowUngroupedKeyHint: '关闭后，未分配到任何分组的 API Key 将无法发起请求（返回 403）。建议保持关闭以确保所有 Key 都归属明确的分组。',
         accountSchedulingThresholdsTitle: '平台账号自动停调阈值',
-        accountSchedulingThresholdsDescription: '当账号当前原生用量窗口（OpenAI Codex/Anthropic 会话，或 Grok 请求/Token 利用率）达到该百分比时，Sub2API 会临时将其移出调度，直到窗口重置。填 100 表示禁用。',
+        accountSchedulingThresholdsDescription: '当账号当前原生用量窗口（OpenAI Codex/Anthropic 会话，或 Grok 请求/Token 利用率）达到该百分比时，@:common.siteName 会临时将其移出调度，直到窗口重置。填 100 表示禁用。',
         accountSchedulingThresholdsGlobalHint: '系统级默认值，作用于该平台全部账号。可在账号编辑页对单个账号覆盖。',
         accountSchedulingThresholdsDisabledHint: '100 表示禁用该平台自动停调；1–99 表示达到该利用率后暂停调度。',
-        accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。'
+        accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。',
+        accountSchedulingThresholdsFableLabel: 'anthropic · 7d Fable',
+        accountSchedulingThresholdsFableHint:
+          '整数 1–100（百分比）。只检查 7d F（Fable 专属）窗口；达到该值后仅停调 Fable 模型，账号对其他模型照常可用。共享 7d 窗口只由普通 Anthropic 阈值控制。100 表示不单独配置，沿用 Anthropic 阈值。'
       },
       upstreamBillingProbe: {
         title: '上游倍率自动探测',
-        description: '定期获取 API Key 账号所连接上游 Sub2API 站点声明的计费倍率；只有另行开启“同步上游声明倍率”的账号才会更新账号倍率。',
+        description: '定期获取 API Key 账号所连接上游 @:common.siteName 站点声明的计费倍率；只有另行开启“同步上游声明倍率”的账号才会更新账号倍率。',
         enabled: '启用全局自动探测',
         enabledHint: '开启后，仅对账号自身已启用自动检测的账号执行定时探测；关闭后停止所有定时探测，手动探测不受影响。',
         intervalMinutes: '探测周期（分钟）',
@@ -602,7 +609,7 @@ export default {
         claudeCodeVersionAutoSync: '自动同步 Claude Code 版本号',
         claudeCodeVersionAutoSyncHint: '每小时从官方发布渠道获取最新版本的 Claude Code 客户端版本号，无需为了跟版本而升级本服务。关闭后停止获取新版本，已同步的版本仍可使用；上方手填版本始终优先。',
         claudeCodeVersionSyncedValue: '当前同步到：{version}',
-        codexHardeningTitle: 'Codex 设置',
+        codexHardeningTitle: '降智检测模板',
         codexClientRestrictionTitle: 'Codex 客户端限制',
         codexHardeningDesc:
           '仅对已开启「仅允许 Codex 官方客户端」的 OpenAI OAuth 账号生效（全局）。在 User-Agent/Originator 之外，用版本区间、引擎指纹门与黑/白名单巩固判定。',
@@ -637,7 +644,21 @@ export default {
         codexUaContainsPlaceholder: 'User-Agent 包含标记，逗号分隔（如 opencode/）',
         codexAddRow: '添加一条',
         codexRemoveRow: '删除',
-      },
+
+codexProbeTemplate: 'Codex 降智检测模板',
+
+codexProbeTemplateReset: '恢复默认',
+
+codexProbeTemplateDesc: '降智检测使用此 JSONL 模板。保留消息结构、标签和占位符，最大 256 KiB；恢复默认后点击保存生效。默认固定文案为英文，动态随机挑战仍为中文。',
+
+codexProbeTimezone: '账号请求时区',
+
+codexProbeDate: '账号时区下的当前日期',
+
+codexProbeModel: '目标模型',
+
+codexProbeChallenge: '本次随机挑战',
+},
       webSearchEmulation: {
         title: 'Web Search 模拟',
         description: '为不原生支持搜索的 Anthropic API Key 账号注入 web search 能力',
@@ -680,12 +701,12 @@ export default {
           '禁用用户注册、公开页面和自助服务功能。仅管理员可以登录和管理平台。',
         siteName: '站点名称',
         siteNameHint: '显示在邮件和页面标题中',
-        siteNamePlaceholder: 'Sub2API',
+        siteNamePlaceholder: BRAND_NAME,
         siteSubtitle: '站点副标题',
         siteSubtitleHint: '显示在登录和注册页面',
         siteSubtitlePlaceholder: '订阅转 API 转换平台',
         apiBaseUrl: 'API 端点地址',
-        apiBaseUrlHint: '用于"使用密钥"、"导入到 CC Switch"和回调地址建议，留空则使用当前站点地址',
+        apiBaseUrlHint: '用于"使用密钥"、回调地址建议，留空则使用当前站点地址',
         apiBaseUrlPlaceholder: 'https://api.example.com',
         tablePreferencesTitle: '通用表格设置',
         tablePreferencesDescription: '设置后台与用户侧表格组件的默认分页行为',
@@ -730,8 +751,6 @@ export default {
           '⚠️ iframe 模式提示：部分网站设置了 X-Frame-Options 或 CSP 安全策略，禁止被嵌入到 iframe 中。如果页面显示空白或报错，请确认目标网站允许被嵌入，或考虑使用 HTML 模式自行构建页面内容。',
         compactHome: '简洁首页',
         compactHomeHint: '未设置自定义首页内容时，展示简洁的站点信息页面。',
-        hideCcsImportButton: '隐藏 CCS 导入按钮',
-        hideCcsImportButtonHint: '启用后将在 API Keys 页面隐藏"导入 CCS"按钮'
       },
       purchase: {
         title: '充值/订阅页面',
@@ -900,7 +919,7 @@ export default {
         field_cidAlipay: '支付宝渠道 ID',
         field_cidWxpay: '微信渠道 ID',
         easypayCustomMethods: '易支付自定义支付方式',
-        easypayCustomMethodsHint: '添加当前易支付服务商额外支持的支付方式。支付方式会记录到 Sub2API 订单中，上游 type 会作为易支付 type 参数提交。',
+        easypayCustomMethodsHint: '添加当前易支付服务商额外支持的支付方式。支付方式会记录到 @:common.siteName 订单中，上游 type 会作为易支付 type 参数提交。',
         addCustomMethod: '添加方式',
         customMethodType: '支付方式',
         customMethodUpstreamType: '上游 type',
@@ -1017,7 +1036,7 @@ export default {
         fromEmail: '发件人邮箱',
         fromEmailPlaceholder: "noreply{'@'}example.com",
         fromName: '发件人名称',
-        fromNamePlaceholder: 'Sub2API',
+        fromNamePlaceholder: 'KDAN',
         useTls: '使用 TLS',
         useTlsHint: '为 SMTP 连接启用 TLS 加密'
       },
@@ -1036,6 +1055,7 @@ export default {
         event: '事件',
         locale: '语言',
         localeEn: '英文',
+        localeJa: '日文',
         localeZh: '中文',
         subject: '主题',
         subjectPlaceholder: '输入邮件主题',
@@ -1214,7 +1234,7 @@ export default {
         scopeAPIKey: '仅 API Key 账号',
         scopeBedrock: '仅 Bedrock 账号',
         userIds: '指定用户',
-        userIdsHint: '输入任意邮箱关键词进行模糊搜索。留空表示对全部 Sub2API 用户生效；选中用户的 API Key 请求优先匹配用户规则。',
+        userIdsHint: '输入任意邮箱关键词进行模糊搜索。留空表示对全部 @:common.siteName 用户生效；选中用户的 API Key 请求优先匹配用户规则。',
         userSearchPlaceholder: '输入用户邮箱搜索',
         userSearchEmpty: '未找到匹配用户',
         userDeleted: '（已删除）',
@@ -1304,33 +1324,16 @@ export default {
         sourceHint: '启用后必须明确选择一个来源；未配置状态不会对外展示该支付方式。',
         sourceRequiredError: '{title} 已启用，请先选择支付来源。'
       },
-      openaiExperimentalScheduler: {
-        title: 'OpenAI 实验调度策略',
-        description: '默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。',
-        lowRatePriorityTitle: '低倍率优先',
-        lowRatePriorityDescription: '开启后优先选择计费倍率较低的账号；倍率相同时，再比较账号优先级和当前负载等。启用实验调度策略后，此开关不生效。',
-        oauthRateTitle: 'OAuth 调度参考倍率',
-        oauthRatePriorityDescription: 'OAuth 账号按此参考倍率参与低倍率优先排序；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。',
-        oauthRateWeightedDescription: '计算“计费倍率”得分时，OAuth 账号使用此参考倍率；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。',
-        oauthRateInvalid: 'OAuth 调度参考倍率必须是非负数字，或留空以使用账号倍率。',
-        stickyWeightedTitle: '粘性加权',
-        stickyWeightedDescription: '开启后 previous_response_id 和 session_hash 粘性进入高级调度打分；关闭时仍按旧逻辑硬命中粘性账号。',
-        subscriptionPriorityTitle: '订阅优先',
-        subscriptionPriorityDescription: '开启后先在 ChatGPT 订阅账号池中按权值选取；订阅池拿不到席位时再回退到非订阅账号池。',
-        weightsTitle: '调度权值覆盖',
-        weightsDescription: '留空时使用配置/环境变量值；配置未设置时使用内置默认值。页面非空设置优先。',
-        defaultPlaceholder: '配置/默认：{value}',
-        topKLabel: 'TopK',
-        priorityWeight: '优先级',
-        loadWeight: '负载',
-        queueWeight: '排队',
-        errorRateWeight: '错误率',
-        ttftWeight: '首包延迟',
-        resetWeight: '重置窗口',
-        quotaHeadroomWeight: '额度余量',
-        upstreamCostWeight: '计费倍率',
-        previousResponseWeight: 'previous_response 粘性',
-        sessionStickyWeight: 'session_hash 粘性'
+      openaiScheduler: {
+        title: "号池调度与经营偏好",
+        description: "统一策略 v2 自动运行：资格与归属校验、容量感知选号和有界故障恢复，无需配置算法权重。",
+        subscriptionPriorityTitle: "订阅额度优先",
+        subscriptionPriorityDescription: "在同优先级且健康的可用账号中优先使用订阅资源；不覆盖账号权限、响应归属或等待上限。",
+        lowRatePriorityTitle: "偏好较低参考成本",
+        lowRatePriorityDescription: "在合格候选中考虑上游参考倍率；不改变用户计费，不让低成本绕过优先级和健康要求。",
+        oauthRateTitle: "OAuth 调度参考倍率",
+        oauthRateDescription: "仅用于成本估计，留空使用账号倍率；API Key 优先使用有效探测值。该数值不改变计费。",
+        oauthRateInvalid: "OAuth 调度参考倍率必须是非负数，也可留空使用账号倍率。",
       },
       usageRecords: {
         title: '使用记录',

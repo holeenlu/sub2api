@@ -366,7 +366,8 @@ export default {
           client: 'クライアントレスポンス',
           upstream_message: 'アップストリームメッセージ',
           upstream_detail: 'アップストリーム詳細',
-          upstream_events: 'アップストリームイベント'
+          upstream_events: 'アップストリームイベント',
+          scheduling_trace: 'スケジューリング判断'
         },
         basicInfo: '基本情報',
         platform: 'プラットフォーム',
