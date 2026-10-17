@@ -57,6 +57,67 @@ func (_u *AccountUpdate) ClearDeletedAt() *AccountUpdate {
 	return _u
 }
 
+// SetVendorID sets the "vendor_id" field.
+func (_u *AccountUpdate) SetVendorID(v int64) *AccountUpdate {
+	_u.mutation.ResetVendorID()
+	_u.mutation.SetVendorID(v)
+	return _u
+}
+
+// SetNillableVendorID sets the "vendor_id" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableVendorID(v *int64) *AccountUpdate {
+	if v != nil {
+		_u.SetVendorID(*v)
+	}
+	return _u
+}
+
+// AddVendorID adds value to the "vendor_id" field.
+func (_u *AccountUpdate) AddVendorID(v int64) *AccountUpdate {
+	_u.mutation.AddVendorID(v)
+	return _u
+}
+
+// ClearVendorID clears the value of the "vendor_id" field.
+func (_u *AccountUpdate) ClearVendorID() *AccountUpdate {
+	_u.mutation.ClearVendorID()
+	return _u
+}
+
+// SetVendorPausedAt sets the "vendor_paused_at" field.
+func (_u *AccountUpdate) SetVendorPausedAt(v time.Time) *AccountUpdate {
+	_u.mutation.SetVendorPausedAt(v)
+	return _u
+}
+
+// SetNillableVendorPausedAt sets the "vendor_paused_at" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableVendorPausedAt(v *time.Time) *AccountUpdate {
+	if v != nil {
+		_u.SetVendorPausedAt(*v)
+	}
+	return _u
+}
+
+// ClearVendorPausedAt clears the value of the "vendor_paused_at" field.
+func (_u *AccountUpdate) ClearVendorPausedAt() *AccountUpdate {
+	_u.mutation.ClearVendorPausedAt()
+	return _u
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (_u *AccountUpdate) SetVendorNotes(v string) *AccountUpdate {
+	_u.mutation.SetVendorNotes(v)
+	return _u
+}
+
+// SetNillableVendorNotes sets the "vendor_notes" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableVendorNotes(v *string) *AccountUpdate {
+	if v != nil {
+		_u.SetVendorNotes(*v)
+	}
+	return _u
+}
+
 // SetName sets the "name" field.
 func (_u *AccountUpdate) SetName(v string) *AccountUpdate {
 	_u.mutation.SetName(v)
@@ -811,6 +872,24 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(account.FieldDeletedAt, field.TypeTime)
 	}
+	if value, ok := _u.mutation.VendorID(); ok {
+		_spec.SetField(account.FieldVendorID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedVendorID(); ok {
+		_spec.AddField(account.FieldVendorID, field.TypeInt64, value)
+	}
+	if _u.mutation.VendorIDCleared() {
+		_spec.ClearField(account.FieldVendorID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.VendorPausedAt(); ok {
+		_spec.SetField(account.FieldVendorPausedAt, field.TypeTime, value)
+	}
+	if _u.mutation.VendorPausedAtCleared() {
+		_spec.ClearField(account.FieldVendorPausedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.VendorNotes(); ok {
+		_spec.SetField(account.FieldVendorNotes, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(account.FieldName, field.TypeString, value)
 	}
@@ -1194,6 +1273,67 @@ func (_u *AccountUpdateOne) SetNillableDeletedAt(v *time.Time) *AccountUpdateOne
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (_u *AccountUpdateOne) ClearDeletedAt() *AccountUpdateOne {
 	_u.mutation.ClearDeletedAt()
+	return _u
+}
+
+// SetVendorID sets the "vendor_id" field.
+func (_u *AccountUpdateOne) SetVendorID(v int64) *AccountUpdateOne {
+	_u.mutation.ResetVendorID()
+	_u.mutation.SetVendorID(v)
+	return _u
+}
+
+// SetNillableVendorID sets the "vendor_id" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableVendorID(v *int64) *AccountUpdateOne {
+	if v != nil {
+		_u.SetVendorID(*v)
+	}
+	return _u
+}
+
+// AddVendorID adds value to the "vendor_id" field.
+func (_u *AccountUpdateOne) AddVendorID(v int64) *AccountUpdateOne {
+	_u.mutation.AddVendorID(v)
+	return _u
+}
+
+// ClearVendorID clears the value of the "vendor_id" field.
+func (_u *AccountUpdateOne) ClearVendorID() *AccountUpdateOne {
+	_u.mutation.ClearVendorID()
+	return _u
+}
+
+// SetVendorPausedAt sets the "vendor_paused_at" field.
+func (_u *AccountUpdateOne) SetVendorPausedAt(v time.Time) *AccountUpdateOne {
+	_u.mutation.SetVendorPausedAt(v)
+	return _u
+}
+
+// SetNillableVendorPausedAt sets the "vendor_paused_at" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableVendorPausedAt(v *time.Time) *AccountUpdateOne {
+	if v != nil {
+		_u.SetVendorPausedAt(*v)
+	}
+	return _u
+}
+
+// ClearVendorPausedAt clears the value of the "vendor_paused_at" field.
+func (_u *AccountUpdateOne) ClearVendorPausedAt() *AccountUpdateOne {
+	_u.mutation.ClearVendorPausedAt()
+	return _u
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (_u *AccountUpdateOne) SetVendorNotes(v string) *AccountUpdateOne {
+	_u.mutation.SetVendorNotes(v)
+	return _u
+}
+
+// SetNillableVendorNotes sets the "vendor_notes" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableVendorNotes(v *string) *AccountUpdateOne {
+	if v != nil {
+		_u.SetVendorNotes(*v)
+	}
 	return _u
 }
 
@@ -1980,6 +2120,24 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(account.FieldDeletedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.VendorID(); ok {
+		_spec.SetField(account.FieldVendorID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedVendorID(); ok {
+		_spec.AddField(account.FieldVendorID, field.TypeInt64, value)
+	}
+	if _u.mutation.VendorIDCleared() {
+		_spec.ClearField(account.FieldVendorID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.VendorPausedAt(); ok {
+		_spec.SetField(account.FieldVendorPausedAt, field.TypeTime, value)
+	}
+	if _u.mutation.VendorPausedAtCleared() {
+		_spec.ClearField(account.FieldVendorPausedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.VendorNotes(); ok {
+		_spec.SetField(account.FieldVendorNotes, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(account.FieldName, field.TypeString, value)

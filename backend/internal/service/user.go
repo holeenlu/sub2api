@@ -74,6 +74,10 @@ func (u *User) IsStaff() bool {
 	return u != nil && (u.Role == RoleAdmin || u.Role == RoleSuperAdmin)
 }
 
+func (u *User) IsVendor() bool {
+	return u != nil && (u.Role == RoleVendorLevel1 || u.Role == RoleVendorLevel2)
+}
+
 func (u *User) IsSuperAdmin() bool { return u != nil && u.Role == RoleSuperAdmin }
 
 func (u *User) IsActive() bool {
@@ -86,6 +90,9 @@ func (u *User) IsActive() bool {
 //     RestrictPublicGroups set, in which case the group must be in AllowedGroups
 //   - Exclusive groups: only users with the group in AllowedGroups can bind
 func (u *User) CanBindGroup(groupID int64, isExclusive bool) bool {
+	if u.IsVendor() {
+		return false
+	}
 	// 公开分组（非专属）：默认所有用户都可以绑定；仅当该用户开启了公开分组
 	// 限制时，才需要落在 AllowedGroups 中。
 	if !isExclusive && !u.RestrictPublicGroups {

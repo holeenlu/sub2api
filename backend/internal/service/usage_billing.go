@@ -94,6 +94,20 @@ func (c *UsageBillingCommand) quantizeMonetaryFields() {
 	c.APIKeyQuotaCost = QuantizeUsageBillingAmount(c.APIKeyQuotaCost)
 	c.APIKeyRateLimitCost = QuantizeUsageBillingAmount(c.APIKeyRateLimitCost)
 	c.AccountQuotaCost = QuantizeUsageBillingAmount(c.AccountQuotaCost)
+	if c.UsageLog != nil {
+		// ActualCost records charged money; theoretical token costs retain their
+		// existing precision. Allocate the same rounded total across supply rows.
+		c.UsageLog.ActualCost = QuantizeUsageBillingAmount(c.UsageLog.ActualCost)
+		if len(c.UsageLogs) > 0 {
+			rows := make([]*UsageLog, 0, len(c.UsageLogs))
+			for _, row := range c.UsageLogs {
+				if row != nil {
+					rows = append(rows, row)
+				}
+			}
+			allocateAuthorizationUsageRows(c.UsageLog, rows)
+		}
+	}
 }
 
 // QuantizeUsageBillingAmount 把金额舍入到 UsageBillingMonetaryScale 位小数，

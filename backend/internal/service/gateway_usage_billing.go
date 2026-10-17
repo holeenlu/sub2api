@@ -374,6 +374,14 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	}
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
+	// Build the idempotency fingerprint from the original quote first. Legacy
+	// debits, cache updates and notifications then use the same charged amount.
+	if p.Cost != nil {
+		params, charged := *p, *p.Cost
+		charged.ActualCost = QuantizeUsageBillingAmount(charged.ActualCost)
+		params.Cost = &charged
+		p = &params // Keep the caller's original quote stable for a retried command.
+	}
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
 		if cmd != nil && cmd.Pricing != nil && cmd.Pricing.Pending {
 			return false, ErrUsagePricingPending
@@ -641,6 +649,11 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
 func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) error {
+	if input == nil || input.Result == nil {
+		return errors.New("gateway usage result is nil")
+	}
+	usage := input.Result.Usage
+	RecordSchedulingCacheTokens(ctx, usage.InputTokens+usage.CacheCreationInputTokens+usage.CacheReadInputTokens, usage.CacheReadInputTokens)
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,
 		APIKey:             input.APIKey,
@@ -757,7 +770,13 @@ func logResponseModelBillingApplied(component string, account *Account, requestI
 
 // recordUsageCore 是 RecordUsage 的核心实现。
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput) error {
-	result := input.Result
+	if input == nil || input.Result == nil {
+		return errors.New("gateway usage result is nil")
+	}
+	// Billing adjustments operate on a copy; forwarding and diagnostics keep raw usage.
+	resultCopy := *input.Result
+	result := &resultCopy
+	observed := input.Result.Usage
 	apiKey := input.APIKey
 	user := input.User
 	account := input.Account
@@ -781,6 +800,8 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		applyCacheTTLOverride(&result.Usage, overrideTarget)
 		cacheTTLOverridden = (result.Usage.CacheCreation5mTokens + result.Usage.CacheCreation1hTokens) > 0
 	}
+
+	logGatewayUsageAccounting(ctx, account, apiKey, result.RequestID, input.SessionID, observed, result.Usage, input.ForceCacheBilling, cacheTTLOverridden)
 
 	multiplier, imageMultiplier, pricingAt := s.recordUsageMultipliers(ctx, apiKey, user, input.PricingAt)
 	billingModel := s.recordUsageBillingModel(ctx, apiKey, result, input.ChannelUsageFields)
@@ -842,11 +863,13 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 			// Anthropic's input_tokens excludes cache_read and cache_creation (billed separately);
 			// OpenAI gateway uses actualInputTokens which also excludes cache_read for the same reason.
 			UsageTokens{
-				InputTokens:         result.Usage.InputTokens,
-				OutputTokens:        result.Usage.OutputTokens,
-				CacheCreationTokens: result.Usage.CacheCreationInputTokens,
-				CacheReadTokens:     result.Usage.CacheReadInputTokens,
-				ImageOutputTokens:   result.Usage.ImageOutputTokens,
+				InputTokens:           observed.InputTokens,
+				OutputTokens:          observed.OutputTokens,
+				CacheCreationTokens:   observed.CacheCreationInputTokens,
+				CacheReadTokens:       observed.CacheReadInputTokens,
+				ImageOutputTokens:     observed.ImageOutputTokens,
+				CacheCreation5mTokens: observed.CacheCreation5mTokens,
+				CacheCreation1hTokens: observed.CacheCreation1hTokens,
 			},
 			cost.TotalCost-cacheStorageCost, pricingAt,
 			accountStatsLongContextPricingEnabled(nil),
@@ -1289,6 +1312,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		)
 	}
 	usageLog := &UsageLog{
+		AuthorizationMode:        result.AuthorizationMode,
 		UserID:                   user.ID,
 		APIKeyID:                 apiKey.ID,
 		AccountID:                account.ID,
@@ -1334,6 +1358,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		SubscriptionID:           optionalSubscriptionID(subscription),
 		CreatedAt:                time.Now(),
 	}
+	usageLog.CaptureVendorSnapshot(account, apiKey.Group)
 	if result.ImageCount > 0 && (cost == nil || cost.BillingMode != string(BillingModeToken)) {
 		usageLog.RateMultiplier = imageMultiplier
 	}
