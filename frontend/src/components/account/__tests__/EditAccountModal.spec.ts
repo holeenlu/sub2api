@@ -1,16 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import {
   BUILTIN_PLATFORM_CATALOG,
   resetPlatformCatalog,
   setPlatformCatalog
 } from '@/constants/platformCatalog'
 
-const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
+const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode, authCanMock } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
-  authIsSimpleMode: { value: true }
+  authIsSimpleMode: { value: true },
+  authCanMock: vi.fn(() => true)
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -23,6 +24,9 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
+    can: authCanMock,
+    isSuperAdmin: true,
+    user: { id: 1, role: 'super_admin' },
     get isSimpleMode() {
       return authIsSimpleMode.value
     }
@@ -60,6 +64,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 import EditAccountModal from '../EditAccountModal.vue'
+import ExcelBPSAuthorization from '../ExcelBPSAuthorization.vue'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -322,6 +327,7 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
         Select: SelectStub,
         Icon: true,
         ProxySelector: true,
+        ExcelBPSAuthorization: true,
         GroupSelector: renderGroupSelector ? false : GroupSelectorStub,
         ModelWhitelistSelector: ModelWhitelistSelectorStub
       }
@@ -330,11 +336,111 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('loads and clears the independent telemetry copy while preserving unrelated extra', async () => {
+    const account = buildAccount()
+    const copy = { client: 'claude', payload_json: '{ "value":9007199254740993 }', headers: { 'User-Agent': ['original-client'] } }
+    account.extra = { client_telemetry: copy, unrelated: true }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect((wrapper.get('[data-testid="account-telemetry-body"]').element as HTMLTextAreaElement).value).toBe(copy.payload_json)
+    await wrapper.get('[data-testid="account-telemetry-clear"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0][1].extra).not.toHaveProperty('client_telemetry')
+    expect(updateAccountMock.mock.calls[0][1].extra.unrelated).toBe(true)
+    expect(account.extra.client_telemetry.payload_json).toBe(copy.payload_json)
+    wrapper.unmount()
+  })
+
+  it.each(['oauth', 'setup-token'])('loads and saves Anthropic %s restrictions while preserving credentials and mappings', async (type) => {
+    const account = buildAccount()
+    account.platform = 'anthropic'
+    account.type = type
+    account.credentials = {
+      access_token: 'keep-token', refresh_token: 'keep-refresh',
+      model_mapping: { 'claude-sonnet-5-5': 'claude-sonnet-5-5', 'claude-alias': 'claude-opus-5-5' }
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const selector = wrapper.findComponent(ModelWhitelistSelectorStub)
+    expect(selector.exists()).toBe(true)
+    expect(selector.attributes('account-id')).toBe('1')
+    expect(selector.props('modelValue')).toEqual(['claude-sonnet-5-5'])
+    selector.vm.$emit('update:modelValue', ['claude-haiku-5-5'])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      access_token: 'keep-token', refresh_token: 'keep-refresh',
+      model_mapping: { 'claude-haiku-5-5': 'claude-haiku-5-5', 'claude-alias': 'claude-opus-5-5' }
+    })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.model_mapping).not.toHaveProperty('claude-sonnet-5-5')
+    wrapper.unmount()
+  })
+
+  it.each(['oauth', 'setup-token'])('clears Anthropic %s whitelist without dropping its token', async (type) => {
+    const account = buildAccount()
+    account.platform = 'anthropic'
+    account.type = type
+    account.credentials = { access_token: 'keep-token', model_mapping: { 'claude-haiku-5-5': 'claude-haiku-5-5' } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    wrapper.findComponent(ModelWhitelistSelectorStub).vm.$emit('update:modelValue', [])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials.access_token).toBe('keep-token')
+    expect(credentials).not.toHaveProperty('model_mapping')
+    wrapper.unmount()
+  })
+
+  it('edits and removes the Fable override independently from the account threshold', async () => {
+    const account = buildAccount()
+    account.platform = 'anthropic'
+    account.type = 'oauth'
+    account.credentials = { access_token: 'token', account_scheduling_threshold: 70, anthropic_fable_scheduling_threshold: 95 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const enabled = wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-enabled"]')
+    expect((enabled.element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-testid="anthropic-fable-scheduling-threshold-override-value"]').setValue(90)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls.at(-1)?.[1]?.credentials).toEqual(expect.objectContaining({ anthropic_fable_scheduling_threshold: 90 }))
+    expect(updateAccountMock.mock.calls.at(-1)?.[1]?.credentials?.account_scheduling_threshold).toBe(70)
+    await enabled.setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls.at(-1)?.[1]?.credentials).toEqual(expect.objectContaining({ anthropic_fable_scheduling_threshold: null }))
+    wrapper.unmount()
+  })
+
+
   beforeEach(() => {
     authIsSimpleMode.value = true
+    authCanMock.mockReset().mockReturnValue(true)
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it.each([true, false])('renders Excel authorization according to accounts.authorize permission (%s)', (allowed) => {
+    authCanMock.mockReturnValue(allowed)
+    const account = buildOpenAIOAuthParentAccount()
+    account.proxy_id = 23
+    const wrapper = mountModal(account)
+    const authorization = wrapper.findComponent(ExcelBPSAuthorization)
+
+    expect(authCanMock).toHaveBeenCalledWith('accounts.authorize')
+    expect(authorization.exists()).toBe(allowed)
+    if (allowed) {
+      expect(authorization.props()).toEqual({ accountId: account.id, proxyId: 23 })
+    }
+    wrapper.unmount()
+  })
 
   it('passes existing non-identity mappings to the whitelist selector and preserves them on save', async () => {
     const account = buildAccount()
@@ -1887,6 +1993,26 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     await wrapper.get('[data-testid="auto-reset-credit-5h-threshold"]').setValue('0')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
+describe('delegated account editing', () => {
+  it('updates basic fields without replacing projected credentials or extra', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ allowTransportEdit: false, allowAuthorize: false, allowRateEdit: false, showCost: false })
+    await wrapper.get('form#edit-account-form input[type="text"]').setValue('operator name')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const payload = JSON.parse(JSON.stringify(updateAccountMock.mock.calls.at(-1)?.[1]))
+    expect(payload.name).toBe('operator name')
+    expect(payload).not.toHaveProperty('credentials')
+    expect(payload).not.toHaveProperty('extra')
+    expect(payload).not.toHaveProperty('proxy_id')
+    expect(payload).not.toHaveProperty('rate_multiplier')
     wrapper.unmount()
   })
 })

@@ -16,6 +16,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 )
 
 // ConcurrencyCache 定义并发控制的缓存接口
@@ -360,7 +362,7 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 		return &AcquireResult{
 			Acquired: true,
 			ReleaseFunc: func() {
-				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				bgCtx, cancel := context.WithTimeout(selectionbudget.CleanupContext(ctx), 5*time.Second)
 				defer cancel()
 				if err := s.cache.ReleaseAccountSlot(bgCtx, accountID, requestID); err != nil {
 					logger.LegacyPrintf("service.concurrency", "Warning: failed to release account slot for %d (req=%s): %v", accountID, requestID, err)
@@ -596,7 +598,7 @@ func (s *ConcurrencyService) getAccountsLoadBatch(ctx context.Context, accounts 
 		return cached, nil
 	}
 
-	value, err, _ := s.accountLoadGroup.Do(key, func() (any, error) {
+	pending := s.accountLoadGroup.DoChan(key, func() (any, error) {
 		now := time.Now()
 		if cached, ok := s.getCachedAccountLoadBatch(key, now); ok {
 			return cached, nil
@@ -609,10 +611,16 @@ func (s *ConcurrencyService) getAccountsLoadBatch(ctx context.Context, accounts 
 		s.storeCachedAccountLoadBatch(key, cached, now.Add(ttl))
 		return cached, nil
 	})
-	if err != nil {
-		return nil, err
+	var result singleflight.Result
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result = <-pending:
 	}
-	loadMap, _ := value.(map[int64]*AccountLoadInfo)
+	if result.Err != nil {
+		return nil, result.Err
+	}
+	loadMap, _ := result.Val.(map[int64]*AccountLoadInfo)
 	if loadMap == nil {
 		return map[int64]*AccountLoadInfo{}, nil
 	}
@@ -625,7 +633,7 @@ func (s *ConcurrencyService) fetchAccountsLoadBatch(ctx context.Context, account
 	}
 	baseCtx := context.Background()
 	if ctx != nil {
-		baseCtx = context.WithoutCancel(ctx)
+		baseCtx = ctx
 	}
 	redisCtx, cancel := context.WithTimeout(baseCtx, accountLoadBatchFetchTimeout)
 	defer cancel()
