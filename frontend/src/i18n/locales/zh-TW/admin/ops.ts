@@ -368,7 +368,8 @@ export default {
           client: '用戶端回應',
           upstream_message: '上游訊息',
           upstream_detail: '上游詳情',
-          upstream_events: '上游事件'
+          upstream_events: '上游事件',
+          scheduling_trace: '排程決策'
         },
         basicInfo: '基本資訊',
         platform: '平台',
