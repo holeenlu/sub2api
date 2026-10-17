@@ -827,11 +827,12 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	// We can't know from here whether ops_advanced_settings was also touched, so be
 	// defensive: store an expired entry — GetOpenAIQuotaAutoPauseSettings will serve
 	// stale and kick off an async refresh, never blocking the request that follows.
-	s.openAIQuotaAutoPauseSettingsSF.Forget(openAIQuotaAutoPauseSettingsRefreshKey)
-	if cached, _ := s.openAIQuotaAutoPauseSettingsCache.Load().(*cachedOpenAIQuotaAutoPauseSettings); cached != nil {
-		s.openAIQuotaAutoPauseSettingsCache.Store(&cachedOpenAIQuotaAutoPauseSettings{
-			settings:  cached.settings,
-			expiresAt: 0,
+	s.schedulingQuotaSettingsSF.Forget(openAIQuotaAutoPauseSettingsRefreshKey)
+	if cached, _ := s.schedulingQuotaSettingsCache.Load().(*cachedSchedulingQuotaSettings); cached != nil {
+		s.schedulingQuotaSettingsCache.CompareAndSwap(cached, &cachedSchedulingQuotaSettings{
+			settings:   cached.settings,
+			protection: cached.protection,
+			expiresAt:  0,
 		})
 	}
 	accountSchedulingThresholdsSF.Forget(SettingKeyAccountSchedulingThresholds)

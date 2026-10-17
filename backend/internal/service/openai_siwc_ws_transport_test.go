@@ -20,12 +20,16 @@ import (
 
 type siwcTransportConn struct {
 	*openAIWSReaderLoopFakeConn
-	mu     sync.Mutex
-	writes [][]byte
-	event  string
+	mu       sync.Mutex
+	writes   [][]byte
+	event    string
+	writeErr error
 }
 
 func (c *siwcTransportConn) WriteJSON(ctx context.Context, value any) error {
+	if c.writeErr != nil {
+		return c.writeErr
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -44,17 +48,18 @@ func (c *siwcTransportConn) WriteJSON(ctx context.Context, value any) error {
 }
 
 type siwcTransportDialer struct {
-	mu      sync.Mutex
-	conns   []*siwcTransportConn
-	event   string
-	urls    []string
-	headers []http.Header
+	mu       sync.Mutex
+	conns    []*siwcTransportConn
+	event    string
+	urls     []string
+	headers  []http.Header
+	writeErr error
 }
 
 func (d *siwcTransportDialer) Dial(_ context.Context, url string, headers http.Header, _ string) (openAIWSClientConn, int, http.Header, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	conn := &siwcTransportConn{openAIWSReaderLoopFakeConn: newOpenAIWSReaderLoopFakeConn(), event: d.event}
+	conn := &siwcTransportConn{openAIWSReaderLoopFakeConn: newOpenAIWSReaderLoopFakeConn(), event: d.event, writeErr: d.writeErr}
 	d.conns = append(d.conns, conn)
 	d.urls = append(d.urls, url)
 	d.headers = append(d.headers, headers.Clone())
@@ -106,6 +111,37 @@ func TestSIWCWSTransportCommitAndRotation(t *testing.T) {
 		t.Fatal("successful turn closed retained socket")
 	default:
 	}
+	// An accepted prefix on the held socket sends only the new input. Capture
+	// the emitted summary rather than treating a candidate estimate as savings.
+	c, logs := newWSLatencyTestContext()
+	timing := newOpenAITransportTiming(c, a, "websocket", 0)
+	next := `{"model":"gpt-6.1-sol","input":[{"role":"user","content":"one"},{"role":"user","content":"next <中文&>"}]}`
+	req := siwcTransportRequest(t, oauth, a, next)
+	req = req.WithContext(context.WithValue(req.Context(), openAITransportTimingKey{}, timing))
+	resp, err = session.do(svc, req, a, "")
+	require.NoError(t, err)
+	_, err = io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	session.finish(result, nil)
+	timing.Finish(nil)
+	normalized, err := normalizeSIWCBody([]byte(next))
+	require.NoError(t, err)
+	fullWire, _, _, err := siwcWebSocketPayload(normalized, nil)
+	require.NoError(t, err)
+	conn.mu.Lock()
+	require.Len(t, conn.writes, 2)
+	sentBytes := len(conn.writes[1])
+	require.True(t, gjson.GetBytes(conn.writes[1], "previous_response_id").Exists())
+	conn.mu.Unlock()
+	summaries := wsLatencySummaries(logs)
+	require.Len(t, summaries, 1)
+	payload := summaries[0]["incremental_payload"].(map[string]int64)
+	require.Equal(t, int64(len(fullWire)), payload["full_json_bytes"])
+	require.Equal(t, int64(sentBytes), payload["sent_json_bytes"])
+	require.Equal(t, false, summaries[0]["body_wire_bytes_known"])
+	require.NotContains(t, fmt.Sprint(summaries), "next")
+
 	// Rotating the bearer preserves grant identity, but a new authenticated
 	// socket must start with full input rather than an old response ID.
 	pr, pg, r, g, err := oauth.readSIWCRecord(t.Context(), a)
@@ -134,7 +170,7 @@ func TestSIWCWSTransportCommitAndRotation(t *testing.T) {
 	second.mu.Unlock()
 }
 func TestSIWCWSTransportCancellationAndPartialClose(t *testing.T) {
-	for _, scenario := range []string{"blocked read", "partial frame", "cancel after terminal", "failed turn", "malformed completed"} {
+	for _, scenario := range []string{"blocked read", "partial frame", "cancel after terminal", "failed turn", "malformed completed", "write fails"} {
 		t.Run(scenario, func(t *testing.T) {
 			event := "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_complete\",\"status\":\"completed\",\"output\":[]}}"
 			if scenario == "blocked read" {
@@ -147,9 +183,20 @@ func TestSIWCWSTransportCancellationAndPartialClose(t *testing.T) {
 			req := siwcTransportRequest(t, oauth, a, "{\"model\":\"gpt-6.1-sol\",\"input\":[]}")
 			ctx, cancel := context.WithCancel(req.Context())
 			defer cancel()
-			req = req.WithContext(ctx)
+			timing := &openAIForwardTiming{}
+			req = req.WithContext(context.WithValue(ctx, openAITransportTimingKey{}, timing))
+			if scenario == "write fails" {
+				dialer.writeErr = errors.New("failed write")
+			}
 			resp, err := session.do(svc, req, a, "")
+			if scenario == "write fails" {
+				require.Error(t, err)
+				require.Nil(t, resp)
+				require.False(t, timing.payloadKnown, "failed writes cannot claim sent JSON or savings")
+				return
+			}
 			require.NoError(t, err)
+			require.True(t, timing.payloadKnown)
 			if scenario == "blocked read" {
 				done := make(chan error, 1)
 				go func() { _, err := io.ReadAll(resp.Body); done <- err }()
@@ -203,20 +250,20 @@ func TestSIWCWSTransportCancellationAndPartialClose(t *testing.T) {
 }
 func TestSIWCWSPrefixProofPreservesPrecisionAndSettings(t *testing.T) {
 	first := []byte("{\"model\":\"same\",\"instructions\":\"first\",\"input\":[{\"type\":\"message\",\"content\":9007199254740993}]}")
-	_, anchor, err := siwcWebSocketPayload(first, nil)
+	_, anchor, _, err := siwcWebSocketPayload(first, nil)
 	require.NoError(t, err)
 	output := []byte("{\"type\":\"message\",\"id\":\"msg_one\",\"content\":[]}")
 	anchor.history, err = siwcAppendJSONHash(anchor.history, output)
 	require.NoError(t, err)
 	anchor.items++
-	anchor.responseID = "resp_one"
+	anchor.responseID = "resp_<中文&>_one"
 	for _, tc := range []struct {
 		name, number, instructions string
 		wantDelta                  bool
 	}{{"reordered equivalent", "9007199254740993", "first", true}, {"distinct precise integer", "9007199254740992", "first", false}, {"settings changed", "9007199254740993", "different", false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := fmt.Sprintf("{\"model\":\"same\",\"instructions\":%q,\"input\":[{\"content\":%s,\"type\":\"message\"},%s,{\"type\":\"message\",\"content\":\"next\"}]}", tc.instructions, tc.number, output)
-			wire, pending, err := siwcWebSocketPayload([]byte(body), anchor)
+			wire, pending, fullBytes, err := siwcWebSocketPayload([]byte(body), anchor)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantDelta, gjson.GetBytes(wire, "previous_response_id").Exists())
 			if tc.wantDelta {
@@ -225,6 +272,12 @@ func TestSIWCWSPrefixProofPreservesPrecisionAndSettings(t *testing.T) {
 				require.Len(t, gjson.GetBytes(wire, "input").Array(), 3)
 			}
 			require.Equal(t, 3, pending.items)
+			fullWire, _, _, err := siwcWebSocketPayload([]byte(body), nil)
+			require.NoError(t, err)
+			require.Equal(t, len(fullWire), fullBytes, "counterfactual must use the same WS envelope")
+			if !tc.wantDelta {
+				require.Equal(t, len(wire), fullBytes)
+			}
 		})
 	}
 }

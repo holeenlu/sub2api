@@ -388,7 +388,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 ) (result *streamingResult, returnErr error) {
 	finishWrites := GuardSSEWrites(c)
 	defer finishWrites()
-	timing := beginAnthropicStreamTiming(c, account, startTime)
+	timing := beginAnthropicStreamTiming(c, account, model)
 	defer func() {
 		if result != nil && (result.clientDisconnect || downstreamStreamError(c) != nil) {
 			result.clientDisconnect = true

@@ -55,3 +55,9 @@
 - Force existing v2 → v1.
 - Separate backfill workers / read replicas.
 - Admin `backfill_profile` setting (may add later).
+
+## 2026-10-16 查询修正
+
+参考 ranxi2001/sub2api `b81a63aba9a52e28cec1ea1d28f8423525ceb5a6`，原生 V2 查询复用 `channelMonitorV2Where` 排除已软删除分组，保留无实体记录的 group_id=0 平台汇总；原管理员范围与用户 AllowedGroupIDs 继续相交，不删除历史指标、不新增接口或配置。原 `/monitor` 和 `/admin/channels/monitor` 的 V2 页面沿既有缓存自然刷新后生效。
+
+同源 `e9580129b4c58439650d132ce42108dcc7c23bd8` 的“近18次独立采样”面向 fork 专用卡片 samples 模式；本地原生矩阵/趋势按所选窗口查询且无该模式，因此不引入额外查询、DTO字段或卡片实现。此为当前页面语义的选择，不声称已支持跨时间窗口的样本卡片。

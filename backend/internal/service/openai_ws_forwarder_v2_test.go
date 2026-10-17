@@ -12,10 +12,13 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestForwardOpenAIWSV2_RemoteMessageTooBigPreservesRejection(t *testing.T) {
@@ -403,6 +406,101 @@ func TestForwardOpenAIWSV2_MarksCyberPolicyForFailureEventShapes(t *testing.T) {
 			require.Equal(t, "cyber_policy", mark.Code)
 			require.Equal(t, tt.wantInput, mark.UpstreamInTok)
 			require.Equal(t, tt.wantOutput, mark.UpstreamOutTok)
+		})
+	}
+}
+
+// These helpers observe the shared logger through real forwarding entrypoints.
+func newWSLatencyTestContext() (*gin.Context, *observer.ObservedLogs) {
+	core, logs := observer.New(zap.InfoLevel)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(logger.IntoContext(context.Background(), zap.New(core)))
+	return c, logs
+}
+
+func wsLatencySummaries(logs *observer.ObservedLogs) []map[string]any {
+	var summaries []map[string]any
+	for _, entry := range logs.FilterMessage("openai.forward_timing").All() {
+		fields := entry.ContextMap()
+		if fields["stage"] == "attempt_summary" {
+			summaries = append(summaries, fields)
+		}
+	}
+	return summaries
+}
+
+func TestForwardOpenAIWSV2_TransportTimingBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		stream, text, prewarm bool
+	}{
+		{name: "metadata_and_empty_delta", stream: true},
+		{name: "text_stream", stream: true, text: true},
+		{name: "text_json", text: true},
+		{name: "prewarm_then_text", stream: true, text: true, prewarm: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, logs := newWSLatencyTestContext()
+			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+			cfg := newOpenAIWSV2TestConfig()
+			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			cfg.Gateway.OpenAIWS.PrewarmGenerateEnabled = tc.prewarm
+			events := []string{}
+			if tc.prewarm {
+				events = append(events, `{"type":"response.completed","response":{"id":"warm","output":[]}}`)
+			}
+			events = append(events, `{"type":"codex.response.metadata","headers":{"x-codex-turn-state":"private-state"}}`,
+				`{"type":"ping"}`, `{"type":"response.output_text.delta","response_id":"resp_timing","delta":""}`)
+			output := "[]"
+			if tc.text {
+				events = append(events, `{"type":"response.output_text.delta","response_id":"resp_timing","delta":"private-reply"}`)
+				output = `[{"type":"message","content":[{"type":"output_text","text":"private-reply"}]}]`
+			}
+			events = append(events, `{"type":"response.completed","response":{"object":"response","id":"resp_timing","status":"completed","output":`+output+`,"usage":{"input_tokens":3,"output_tokens":1}}}`)
+			conn := &openAIWSCaptureConn{}
+			for _, event := range events {
+				conn.events = append(conn.events, []byte(event))
+			}
+			pool := newOpenAIWSConnPool(cfg)
+			pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: conn})
+			t.Cleanup(pool.Close)
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamSequenceRecorder{}, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), openaiWSPool: pool, toolCorrector: NewCodexToolCorrector()}
+			account := &Account{ID: 38, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "owner"}, Extra: map[string]any{"responses_websockets_v2_enabled": true}}
+			result, err := svc.Forward(context.Background(), c, account, []byte(fmt.Sprintf(`{"model":"gpt-5.5","stream":%t,"input":"private-input"}`, tc.stream)))
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, 3, result.Usage.InputTokens)
+			summaries := wsLatencySummaries(logs)
+			require.Len(t, summaries, 1, "prewarm must not become a second generation attempt")
+			summary := summaries[0]
+			require.Equal(t, "websocket", summary["transport"])
+			require.Equal(t, "completed", summary["outcome"])
+			require.Equal(t, false, summary["body_wire_bytes_known"])
+			require.Equal(t, int64(len(payloadAsJSONBytes(conn.lastWrite))), summary["semantic_request_bytes"])
+			stages := summary["stages_ms"].(map[string]int64)
+			for _, key := range []string{"connection_ready", "wrote_request", "first_event", "terminal"} {
+				require.Contains(t, stages, key)
+			}
+			_, textObserved := stages["first_text"]
+			_, textFlushed := stages["first_text_flush"]
+			require.Equal(t, tc.text, textObserved)
+			require.Equal(t, tc.text && tc.stream, textFlushed)
+			if !tc.stream {
+				require.Contains(t, stages, "buffered_response_written")
+			}
+			prewarmCount := 0
+			for _, entry := range logs.All() {
+				fields := entry.ContextMap()
+				if fields["stage"] == "prewarm" {
+					prewarmCount++
+				}
+				require.NotContains(t, fmt.Sprint(fields), "private-")
+			}
+			if tc.prewarm {
+				require.Equal(t, 1, prewarmCount)
+			} else {
+				require.Zero(t, prewarmCount)
+			}
 		})
 	}
 }

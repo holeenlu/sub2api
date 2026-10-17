@@ -749,7 +749,7 @@ func partialStreamUsageResult(c *gin.Context, resp *http.Response, streamResult 
 func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, mimicClaudeCode bool) (result *streamingResult, returnErr error) {
 	finishWrites := GuardSSEWrites(c)
 	defer finishWrites()
-	timing := beginAnthropicStreamTiming(c, account, startTime)
+	timing := beginAnthropicStreamTiming(c, account, originalModel)
 	defer func() {
 		if result != nil && (result.clientDisconnect || downstreamStreamError(c) != nil) {
 			result.clientDisconnect = true

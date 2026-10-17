@@ -218,7 +218,7 @@ func (session *openAIWSSIWCSession) do(s *OpenAIGatewayService, request *http.Re
 	}
 	// Acquisition can wait. Revalidate the atomically captured grant at the
 	// actual send boundary, including revoke/rebind while the dial was pending.
-	wire, pending, err := siwcWebSocketPayload(body, session.anchor)
+	wire, pending, fullBytes, err := siwcWebSocketPayload(body, session.anchor)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func (session *openAIWSSIWCSession) do(s *OpenAIGatewayService, request *http.Re
 		return nil, err
 	} // No reconnect or HTTP fallback after any write.
 	timing.MarkRequestWritten(int64(len(wire)))
-	logOpenAIWSModeInfo("ingress_ws_siwc_write account_id=%d full_payload_bytes=%d wire_payload_bytes=%d incremental=%v reused_conn=%v", account.ID, len(body), len(wire), gjson.GetBytes(wire, "previous_response_id").String() != "", reusedConn)
+	timing.MarkIncrementalPayloadWritten(int64(fullBytes), int64(len(wire)))
 	stream := &openAIWSSIWCSSEBody{session: session, lease: session.lease, ctx: attempt.Context(), cancel: cleanup, input: pending, readTimeout: s.openAIWSReadTimeout(), maxFrame: defaultMaxLineSize}
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		stream.maxFrame = s.cfg.Gateway.MaxLineSize
@@ -253,48 +253,62 @@ func (session *openAIWSSIWCSession) do(s *OpenAIGatewayService, request *http.Re
 // Compare exact normalized settings and an ordered hash of canonical JSON
 // input items. Retaining one count and two digests bounds memory independently
 // of conversation length; the caller already owns the complete replay history.
-func siwcWebSocketPayload(body []byte, anchor *openAIWSSIWCAnchor) ([]byte, *openAIWSSIWCAnchor, error) {
+func siwcWebSocketPayload(body []byte, anchor *openAIWSSIWCAnchor) ([]byte, *openAIWSSIWCAnchor, int, error) {
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	var input []json.RawMessage
 	if err := json.Unmarshal(payload["input"], &input); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	delete(payload, "input")
 	delete(payload, "previous_response_id")
 	settings, err := json.Marshal(payload)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	settings, err = normalizeOpenAIWSJSONForCompare(settings)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	summary := &openAIWSSIWCAnchor{settings: sha256.Sum256(settings), items: len(input)}
 	prefix := [32]byte{}
 	for i, item := range input {
 		summary.history, err = siwcAppendJSONHash(summary.history, item)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		if anchor != nil && i+1 == anchor.items {
 			prefix = summary.history
 		}
 	}
+	// The full-input counterfactual has the identical WS envelope and settings.
+	// Count only the changed input/parent members; do not serialize or retain a
+	// second full request solely for telemetry.
+	fullInputBytes, parentBytes := 0, 0
 	if anchor != nil && anchor.responseID != "" && anchor.settings == summary.settings && len(input) >= anchor.items && prefix == anchor.history {
+		fullInput, err := json.Marshal(input)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		fullInputBytes = len(fullInput)
 		payload["previous_response_id"], _ = json.Marshal(anchor.responseID)
+		parentBytes = len(`,"previous_response_id":`) + len(payload["previous_response_id"])
 		input = input[anchor.items:]
 	}
 	payload["input"], err = json.Marshal(input)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	payload["type"] = json.RawMessage("\"response.create\"")
 	delete(payload, "stream") // WebSocket generation always emits events.
 	wire, err := json.Marshal(payload)
-	return wire, summary, err
+	fullBytes := len(wire)
+	if parentBytes > 0 {
+		fullBytes += fullInputBytes - len(payload["input"]) - parentBytes
+	}
+	return wire, summary, fullBytes, err
 }
 
 func siwcAppendJSONHash(previous [32]byte, raw []byte) ([32]byte, error) {

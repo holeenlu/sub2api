@@ -321,6 +321,7 @@ func TestProxyOpenAIWSHTTPBridgeTurn_KeepsOutboundAndObservedServiceTiersSeparat
 	sse := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_tier","model":"gpt-5.5","status":"completed","service_tier":"default","usage":{"input_tokens":1,"output_tokens":1}}}`,
 		``,
+		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -358,6 +359,7 @@ func TestProxyOpenAIWSHTTPBridgeTurn_NormalizesFastWithoutLosingObservedDefault(
 	// independently captures the upstream default declaration.
 	sse := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_tier2","model":"gpt-5.5","status":"completed","service_tier":"default","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		``,
 		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -399,6 +401,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnAPIKeyAdaptsClientTools(t *testing.T) {
 		`data: {"type":"response.output_item.done","sequence_number":2,"output_index":0,"item":{"type":"function_call","id":"item_exec","call_id":"call_exec","name":"exec","arguments":"{\"input\":\"pwd\"}","status":"completed"}}`,
 		``,
 		`data: {"type":"response.completed","sequence_number":3,"response":{"id":"resp_tools","status":"completed","output":[{"type":"function_call","id":"item_exec","call_id":"call_exec","name":"exec","arguments":"{\"input\":\"pwd\"}","status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		``,
 		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -473,6 +476,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnAPIKeyRestoresClientToolsInResponseDone(t *t
 		``,
 		`data: {"type":"response.done","sequence_number":2,"response":{"id":"resp_tools","status":"completed","output":[{"type":"function_call","id":"item_exec","call_id":"call_exec","name":"exec","arguments":"{\"input\":\"pwd\"}","status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
 		``,
+		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -528,6 +532,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnGrokPromotesDiscoveryAndRestoresNamespaceSSE
 		`data: {"type":"response.output_item.done","sequence_number":2,"output_index":0,"item":{"type":"function_call","id":"item_spawn","call_id":"call_spawn","name":"multi_agent_v1__spawn_agent","arguments":"{\"message\":\"work\"}","status":"completed"}}`,
 		"",
 		`data: {"type":"response.completed","sequence_number":3,"response":{"id":"resp_spawn","status":"completed","output":[{"type":"function_call","id":"item_spawn","call_id":"call_spawn","name":"multi_agent_v1__spawn_agent","arguments":"{\"message\":\"work\"}","status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -648,9 +653,11 @@ func TestOpenAIWSHTTPBridgeAPIKeyReusesClientToolMappingWhenFollowupOmitsTools(t
 	firstSSEBody := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_custom_first","model":"gpt-5.6-sol","output":[{"type":"function_call","id":"fc_custom_1","call_id":"call_custom_1","name":"exec","arguments":"{\"input\":\"pwd\"}"}],"usage":{"input_tokens":9,"output_tokens":1}}}`,
 		"",
+		"",
 	}, "\n")
 	secondSSEBody := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_custom_second","model":"gpt-5.6-sol","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
@@ -1143,9 +1150,8 @@ func TestProxyOpenAIWSHTTPBridgeTurnRetriesRejectedFieldBeforeClientOutput(t *te
 	}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 	account := &Account{ID: 91, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c, timingLogs := newWSLatencyTestContext()
+	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
 	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi","truncation":"auto"}`)
 	var writes [][]byte
 
@@ -1166,6 +1172,12 @@ func TestProxyOpenAIWSHTTPBridgeTurnRetriesRejectedFieldBeforeClientOutput(t *te
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "truncation").Exists())
 	require.Len(t, writes, 1)
 	require.Equal(t, "response.completed", gjson.GetBytes(writes[0], "type").String())
+	summaries := wsLatencySummaries(timingLogs)
+	require.Len(t, summaries, 2)
+	require.Equal(t, int64(1), summaries[0]["attempt"])
+	require.Equal(t, int64(2), summaries[1]["attempt"])
+	require.Equal(t, "upstream_failed", summaries[0]["outcome"])
+	require.Equal(t, "completed", summaries[1]["outcome"])
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurnSSEErrorFailoverSafety(t *testing.T) {
@@ -1276,6 +1288,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorUsesAuthoritativeFailed(t *testing.
 		`data: {"type":"error","error":{"status_code":403,"code":"workspace_suspended","message":"workspace is suspended"}}`,
 		``,
 		`data: {"type":"response.failed","response":{"id":"resp_failed","status":"failed","usage":{"input_tokens":9,"output_tokens":2},"error":{"status_code":403,"code":"workspace_suspended","message":"workspace is suspended"}}}`,
+		``,
 		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}}
@@ -1503,6 +1516,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorFollowedByCompletedUsesCompleted(t 
 		``,
 		`data: {"type":"response.completed","response":{"id":"resp_recovered","status":"completed","output":[],"usage":{"input_tokens":8,"output_tokens":4}}}`,
 		``,
+		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
@@ -1613,6 +1627,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnDoesNotReplayCapacityAfterSemanticOutput(t *
 		"",
 		`data: {"type":"response.failed","response":{"id":"resp_partial","status":"failed","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}}`,
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -1668,6 +1683,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnKeepaliveWriteFailure(t *testing.T) {
 				`data: {"type":"keepalive"}`,
 				"",
 				`data: {"type":"response.completed","response":{"id":"resp_disconnect","usage":{"input_tokens":3,"output_tokens":2}}}`,
+				"",
 				"",
 			}, "\n")
 			upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -1851,6 +1867,7 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 		"",
 		`data: {"type":"response.completed","response":{"id":"resp_bridge","model":"gpt-5","usage":{"input_tokens":3,"output_tokens":2}}}`,
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -1982,6 +1999,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnForGrokDefaultsEmptyModelTo45(t *testing.T) 
 			"",
 			`data: {"type":"response.completed","response":{"id":"resp_grok_default","model":"grok-4.5","usage":{"input_tokens":1,"output_tokens":1}}}`,
 			"",
+			"",
 		}, "\n"))),
 	}}
 	svc := &OpenAIGatewayService{
@@ -2026,6 +2044,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnPromotesCodexAdditionalToolsForMixedCache(t 
 			`data: {"type":"response.created","response":{"id":"resp_grok_codex_lite","model":"grok-4.5"}}`,
 			"",
 			`data: {"type":"response.completed","response":{"id":"resp_grok_codex_lite","model":"grok-4.5","usage":{"input_tokens":4,"output_tokens":1}}}`,
+			"",
 			"",
 		}, "\n"))),
 	}}
@@ -2100,6 +2119,7 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 			`data: {"type":"response.output_text.delta","response":{"id":"` + responseID + `"},"delta":"ok"}`,
 			"",
 			`data: {"type":"response.completed","response":{"id":"` + responseID + `","model":"grok-4.3","usage":{"input_tokens":4,"output_tokens":2,"input_tokens_details":{"cached_tokens":` + fmt.Sprintf("%d", cachedTokens) + `}}}}`,
+			"",
 			"",
 		}, "\n")
 		return &http.Response{
@@ -2275,6 +2295,7 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 		"",
 		`data: {"type":"response.completed","response":{"id":"resp_large_bridge","model":"gpt-5","usage":{"input_tokens":9,"output_tokens":1}}}`,
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -2440,9 +2461,11 @@ func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseI
 	firstSSEBody := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_bridge_first","model":"gpt-5.1","output":[{"type":"function_call","id":"fc_bridge_1","call_id":"call_bridge_1","name":"shell","arguments":"{}"}],"usage":{"input_tokens":9,"output_tokens":1}}}`,
 		"",
+		"",
 	}, "\n")
 	secondSSEBody := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_bridge_second","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
@@ -2595,6 +2618,7 @@ func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
 	sseBody := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_bridge_idle","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`,
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -2739,6 +2763,53 @@ func TestOpenAIWSHTTPBridgeKeepsRequestEnvelopeOutOfHTTP(t *testing.T) {
 			require.Equal(t, "lane_a", gjson.GetBytes(events[0], "stream_id").String())
 			if status == 400 {
 				require.Equal(t, "evt_create", gjson.GetBytes(events[0], "event_id").String())
+			}
+		})
+	}
+}
+
+func TestProxyOpenAIWSHTTPBridgeTurn_TransportTimingCompleteFrames(t *testing.T) {
+	for _, tc := range []struct {
+		name, event                    string
+		writeFail, wantText, wantError bool
+	}{
+		{name: "multiline_crlf", event: "event: response.output_text.delta\r\ndata: {\"delta\":\r\ndata: \"private-text\"}\r\n\r\n", wantText: true},
+		{name: "metadata_empty_delta", event: "data: {\"type\":\"codex.response.metadata\"}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"\"}\n\n"},
+		{name: "failed_downstream", event: "data: {\"type\":\"response.output_text.delta\",\"delta\":\"text\"}\n\n", writeFail: true, wantText: true, wantError: true},
+		{name: "truncated_text_frame", event: "data: {\"type\":\"response.output_text.delta\",\"delta\":\"text\"}\n", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stream := tc.event
+			if tc.name != "truncated_text_frame" {
+				stream += "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_timing\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+			}
+			upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream))}}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 91, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+			c, logs := newWSLatencyTestContext()
+			SetOpenAIClientTransport(c, OpenAIClientTransportWS)
+			body := []byte(`{"type":"response.create","model":"gpt-5","input":"hello"}`)
+			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "sk-test", body, len(body), "gpt-5", "", "", "", "", 1, func([]byte) error {
+				if tc.writeFail {
+					return errors.New("private-write-failure")
+				}
+				return nil
+			})
+			if tc.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			summaries := wsLatencySummaries(logs)
+			require.Len(t, summaries, 1)
+			require.Equal(t, "http_bridge", summaries[0]["transport"])
+			stages := summaries[0]["stages_ms"].(map[string]int64)
+			_, observed := stages["first_text"]
+			_, flushed := stages["first_text_flush"]
+			require.Equal(t, tc.wantText, observed)
+			require.Equal(t, tc.wantText && !tc.writeFail, flushed)
+			for _, entry := range logs.All() {
+				require.NotContains(t, fmt.Sprint(entry.ContextMap()), "private-")
 			}
 		})
 	}

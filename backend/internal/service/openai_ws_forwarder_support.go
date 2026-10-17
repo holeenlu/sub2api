@@ -30,6 +30,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	account *Account,
 	stateStore OpenAIWSStateStore,
 	groupID int64,
+	timing *openAIForwardTiming,
 ) error {
 	if s == nil {
 		return nil
@@ -69,6 +70,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		return nil
 	}
 	prewarmStart := time.Now()
+	defer func() { timing.MarkPrewarm(time.Since(prewarmStart)) }()
 	logOpenAIWSModeInfo("prewarm_start account_id=%d conn_id=%s", account.ID, connID)
 
 	prewarmPayload := make(map[string]any, len(payload)+1)
@@ -173,13 +175,12 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		stateStore.BindResponseConn(prewarmResponseID, lease.ConnID(), ttl)
 	}
 	logOpenAIWSModeInfo(
-		"prewarm_done account_id=%d conn_id=%s response_id=%s events=%d terminal_events=%d duration_ms=%d",
+		"prewarm_done account_id=%d conn_id=%s response_id=%s events=%d terminal_events=%d",
 		account.ID,
 		connID,
 		truncateOpenAIWSLogValue(prewarmResponseID, openAIWSIDValueMaxLen),
 		prewarmEventCount,
 		prewarmTerminalCount,
-		time.Since(prewarmStart).Milliseconds(),
 	)
 	return nil
 }
