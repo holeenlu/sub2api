@@ -17,6 +17,8 @@ import (
 
 const anthropicCompatUsageDrainTimeout = 1200 * time.Millisecond
 
+var errAnthropicCompatStreamIdle = errors.New("stream data interval timeout")
+
 type anthropicCompatStreamResult struct {
 	usage              ClaudeUsage
 	firstTokenMs       *int
@@ -46,6 +48,15 @@ func (s *GatewayService) readAnthropicCompatStream(
 	}
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, min(64*1024, limit)), limit)
+	var idle *time.Timer
+	var idleC <-chan time.Time
+	var interval time.Duration
+	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		interval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+		idle = time.NewTimer(interval)
+		idleC = idle.C
+		defer idle.Stop()
+	}
 	type scanEvent struct {
 		line string
 		err  error
@@ -117,12 +128,17 @@ func (s *GatewayService) readAnthropicCompatStream(
 			disconnect()
 		case <-drainC:
 			return result, fmt.Errorf("Anthropic usage drain expired before message_stop: %w", context.DeadlineExceeded)
+		case <-idleC:
+			return result, errAnthropicCompatStreamIdle
 		case scanned, ok := <-events:
 			if !ok {
 				return result, fmt.Errorf("Anthropic stream ended without message_stop: %w", io.ErrUnexpectedEOF)
 			}
 			if scanned.err != nil {
 				return result, fmt.Errorf("read Anthropic stream: %w", scanned.err)
+			}
+			if idle != nil {
+				idle.Reset(interval)
 			}
 			if scanned.line != "" {
 				if err := pending.addLine(scanned.line, limit); err != nil {
@@ -239,6 +255,8 @@ func anthropicCompatError(err error) (code, message string) {
 		}
 	} else if errors.Is(err, io.ErrUnexpectedEOF) {
 		code, message = "upstream_missing_terminal", "Upstream stream ended without message_stop"
+	} else if errors.Is(err, errAnthropicCompatStreamIdle) {
+		code, message = "upstream_timeout", "Upstream stream data interval timeout"
 	}
 	return code, message
 }

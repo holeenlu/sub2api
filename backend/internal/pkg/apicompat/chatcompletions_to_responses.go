@@ -38,14 +38,15 @@ func ChatCompletionsToResponsesWithMinOutputTokens(req *ChatCompletionsRequest, 
 	}
 
 	out := &ResponsesRequest{
-		Model:              req.Model,
-		Instructions:       req.Instructions,
-		Input:              inputJSON,
-		Stream:             true, // upstream always streams
-		Include:            []string{"reasoning.encrypted_content"},
-		ServiceTier:        req.ServiceTier,
-		PromptCacheOptions: req.PromptCacheOptions,
-		ParallelToolCalls:  req.ParallelToolCalls,
+		FromChatCompletions: true,
+		Model:               req.Model,
+		Instructions:        req.Instructions,
+		Input:               inputJSON,
+		Stream:              true, // upstream always streams
+		Include:             []string{"reasoning.encrypted_content"},
+		ServiceTier:         req.ServiceTier,
+		PromptCacheOptions:  req.PromptCacheOptions,
+		ParallelToolCalls:   req.ParallelToolCalls,
 	}
 
 	// Reasoning models (gpt-5.x) do not accept sampling parameters.
@@ -461,6 +462,7 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 					PromptCacheBreakpoint: p.PromptCacheBreakpoint,
 					Type:                  "input_image",
 					ImageURL:              p.ImageURL.URL,
+					Detail:                responsesImageDetail(p.ImageURL.Detail),
 				})
 			}
 		case "file":
@@ -476,6 +478,15 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 		}
 	}
 	return responseParts
+}
+
+func responsesImageDetail(detail string) string {
+	switch normalized := strings.ToLower(strings.TrimSpace(detail)); normalized {
+	case "low", "high", "auto", "original":
+		return normalized
+	default:
+		return "auto"
+	}
 }
 
 func isEmptyBase64DataURI(raw string) bool {
