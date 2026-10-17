@@ -391,6 +391,8 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 		return body
 	}
 
+	captureClaudeBillingSource(c, body)
+
 	systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
 	if systemPromptInjectionEnabled {
 		systemPromptBlocks = claudeOAuthSystemPromptBlocksForModel(model, systemPromptBlocks)
@@ -771,9 +773,8 @@ func expandClaudeOAuthSystemPromptTextTemplate(body []byte, text string, expansi
 		return "", nil
 	}
 	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
-	// 同一次展开内只取一次版本号，billing attribution / 指纹 / 占位符三处共用，
-	// 避免运行期版本翻转瞬间取到不同值。
-	cliVersion := claude.EffectiveCLIVersion()
+	// 生成的模板与 mimic 头/CCH 共用已验证版本，不跟随运行期版本发现。
+	cliVersion := claude.CLICurrentVersion
 	billingText, err := buildBillingAttributionText(body, cliVersion)
 	if err != nil {
 		return "", err
@@ -924,8 +925,8 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	//    接近真实，同时不注入会污染被代理用户行为的工具专属指令。
 	//
 	//    缺失 billing block 的系统 payload 是 Anthropic 判定第三方的关键信号之一
-	//    （真实 CLI 每个请求都带）。新版 CLI 已取消 cch=... 签名字段，故 block 不再注入
-	//    cch（见 buildBillingAttributionText）。
+	//    （真实 CLI 每个请求都带）。cch 的端点差异与当前实现限制见
+	//    buildBillingAttributionText。
 	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, blocksConfig)
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build configured Claude OAuth system blocks: %v", blockErr)
