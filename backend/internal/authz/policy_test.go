@@ -97,11 +97,11 @@ func TestOAuthLeaseUsesCurrentPermissionsAndOriginalIdentity(t *testing.T) {
 
 func TestAccountTelemetryCopyIsSuperAdminOnly(t *testing.T) {
 	value := func() map[string]any {
-		return map[string]any{"extra": map[string]any{"client_telemetry": map[string]any{"client": "claude", "payload_json": "{\"device\":\"private\"}"}, "ordinary": true}}
+		return map[string]any{"extra": map[string]any{"account_telemetry": map[string]any{"client": "claude", "payload_json": "{\"device\":\"private\"}"}, "ordinary": true}}
 	}
 	limited := FilterResponse(value(), "/api/v1/admin/accounts/:id", Subject{Role: Admin, Permissions: []string{"accounts.read"}}, false).(map[string]any)
-	require.NotContains(t, limited["extra"], "client_telemetry")
+	require.NotContains(t, limited["extra"], "account_telemetry")
 	require.Contains(t, limited["extra"], "ordinary")
 	root := FilterResponse(value(), "/api/v1/admin/accounts/:id", Subject{Role: SuperAdmin}, false).(map[string]any)
-	require.Contains(t, root["extra"], "client_telemetry")
+	require.Contains(t, root["extra"], "account_telemetry")
 }

@@ -855,11 +855,11 @@
                   <button
                     type="button"
                     class="btn btn-secondary inline-flex items-center justify-center gap-2 text-red-600 hover:text-red-700 dark:text-red-300"
-                    :disabled="hashActionLoading || (status?.flagged_hash_count ?? 0) === 0"
+                    :disabled="hashActionLoading || ((status?.flagged_hash_count ?? 0) + (status?.refusal_guard_entries ?? 0) + (status?.device_guard_entries ?? 0)) === 0"
                     @click="clearFlaggedHashes"
                   >
                     <Icon name="trash" size="sm" :class="hashActionLoading ? 'animate-pulse' : ''" />
-                    {{ t('admin.riskControl.clearFlaggedHashes') }}
+                    {{ t('admin.riskControl.guard.clear') }}
                   </button>
                 </div>
                 <div class="mt-3 flex flex-col gap-2 sm:flex-row">
@@ -1048,6 +1048,75 @@
             </div>
           </div>
 
+          <div v-else-if="activeSettingsTab === 'guards'" class="space-y-5" data-test="risk-guards">
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.guard.hint') }}</p>
+            <label class="block">
+              <span class="input-label">{{ t('admin.riskControl.guard.failurePolicy') }}</span>
+              <select v-model="configForm.failure_policy" class="input" data-test="failure-policy">
+                <option value="fail_open">{{ t('admin.riskControl.guard.failOpen') }}</option>
+                <option value="fail_closed">{{ t('admin.riskControl.guard.failClosed') }}</option>
+              </select>
+            </label>
+            <fieldset class="space-y-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+              <label class="flex items-center justify-between gap-4">
+                <span class="font-medium">{{ t('admin.riskControl.guard.distillation') }}</span>
+                <input v-model="configForm.distillation.enabled" type="checkbox" data-test="distillation-enabled" />
+              </label>
+              <label class="block">
+                <span class="input-label">{{ t('admin.riskControl.guard.phrases') }}</span>
+                <textarea v-model="configForm.distillation_phrases" class="input min-h-24 font-mono" data-test="distillation-phrases" />
+              </label>
+              <label class="block">
+                <span class="input-label">{{ t('admin.riskControl.guard.patterns') }}</span>
+                <textarea v-model="configForm.distillation_patterns" class="input min-h-24 font-mono" data-test="distillation-patterns" />
+              </label>
+              <label class="block">
+                <span class="input-label">{{ t('admin.riskControl.guard.fingerprints') }}</span>
+                <textarea v-model="configForm.distillation_fingerprints" class="input min-h-24 font-mono" data-test="distillation-fingerprints" />
+              </label>
+              <label class="block">
+                <span class="input-label">{{ t('admin.riskControl.guard.structurePattern') }}</span>
+                <input v-model="configForm.distillation.structure_pattern" class="input font-mono" data-test="distillation-structure" />
+              </label>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <label>
+                  <span class="input-label">{{ t('admin.riskControl.guard.minMaxTokens') }}</span>
+                  <input v-model.number="configForm.distillation.min_max_tokens" type="number" min="1" max="10000000" class="input" data-test="distillation-max-tokens" />
+                </label>
+                <label>
+                  <span class="input-label">{{ t('admin.riskControl.guard.minThinkingTokens') }}</span>
+                  <input v-model.number="configForm.distillation.min_thinking_tokens" type="number" min="1" max="10000000" class="input" data-test="distillation-thinking-tokens" />
+                </label>
+              </div>
+            </fieldset>
+            <label class="block">
+              <span class="input-label">{{ t('admin.riskControl.guard.regexRules') }}</span>
+              <textarea v-model="configForm.regex_rules" class="input min-h-24 font-mono" data-test="regex-rules" />
+            </label>
+            <fieldset v-for="kind in guardCacheTypes" :key="kind" class="space-y-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+              <label class="flex items-center justify-between gap-4">
+                <span class="font-medium">{{ kind === 'refusal_guard' ? t('admin.riskControl.guard.refusal') : t('admin.riskControl.guard.device') }}</span>
+                <input v-model="configForm[kind].enabled" type="checkbox" :data-test="`${kind}-enabled`" />
+              </label>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <label>
+                  <span class="input-label">{{ t('admin.riskControl.guard.ttlSeconds') }}</span>
+                  <input v-model.number="configForm[kind].ttl_seconds" type="number" min="1" :max="kind === 'refusal_guard' ? 604800 : 86400" class="input" :data-test="`${kind}-ttl`" />
+                </label>
+                <label>
+                  <span class="input-label">{{ t('admin.riskControl.guard.maxEntries') }}</span>
+                  <input v-model.number="configForm[kind].max_entries" type="number" min="1" max="4096" class="input" :data-test="`${kind}-capacity`" />
+                </label>
+              </div>
+            </fieldset>
+            <label class="block">
+              <span class="input-label">{{ t('admin.riskControl.guard.similarity') }}</span>
+              <input v-model.number="configForm.refusal_guard.similarity_threshold" type="number" min="0.8" max="1" step="0.01" class="input" data-test="refusal-similarity" />
+            </label>
+            <p class="text-sm text-gray-500">{{ t('admin.riskControl.guard.cacheCounts', { refusals: status?.refusal_guard_entries ?? 0, devices: status?.device_guard_entries ?? 0 }) }}</p>
+            <button type="button" class="btn btn-secondary" :disabled="hashActionLoading" data-test="clear-guard-memory" @click="clearFlaggedHashes">{{ t('admin.riskControl.guard.clear') }}</button>
+          </div>
+
           <div v-else class="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <div>
               <label class="input-label">{{ t('admin.riskControl.hitRetentionDays') }}</label>
@@ -1069,7 +1138,8 @@
         <template #footer>
           <div class="flex justify-end gap-2">
             <button type="button" class="btn btn-secondary" @click="settingsOpen = false">{{ t('common.cancel') }}</button>
-            <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="saving" @click="saveConfig">
+            <button type="button" class="btn btn-secondary" :disabled="saving" data-test="save-and-enable" @click="saveConfig(true)">{{ t('admin.riskControl.saveAndEnable') }}</button>
+            <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="saving" @click="saveConfig()">
               <Icon v-if="saving" name="refresh" size="sm" class="animate-spin" />
               <Icon v-else name="check" size="sm" />
               {{ saving ? t('common.saving') : t('admin.riskControl.saveConfig') }}
@@ -1180,7 +1250,7 @@ import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime as formatDateTimeValue } from '@/utils/format'
 
-type SettingsTab = 'basic' | 'scope' | 'runtime' | 'response' | 'riskThresholds' | 'retention' | 'keywords'
+type SettingsTab = 'basic' | 'scope' | 'runtime' | 'response' | 'riskThresholds' | 'guards' | 'retention' | 'keywords'
 type WorkerSlotState = 'active' | 'idle' | 'disabled'
 type APIKeysWriteMode = 'append' | 'replace'
 type OverviewIcon = 'shield' | 'key' | 'users' | 'document'
@@ -1296,6 +1366,14 @@ const configForm = reactive({
   keyword_blocking_mode: 'keyword_and_api' as KeywordBlockingMode,
   model_filter_type: 'all' as ContentModerationModelFilterType,
   model_filter_models: [] as string[],
+  failure_policy: 'fail_open' as 'fail_open' | 'fail_closed',
+  distillation: { enabled: false, min_max_tokens: 8192, min_thinking_tokens: 8192, structure_pattern: '' },
+  distillation_phrases: '',
+  distillation_patterns: '',
+  distillation_fingerprints: '',
+  regex_rules: '',
+  refusal_guard: { enabled: false, ttl_seconds: 3600, max_entries: 1024, similarity_threshold: 0.9 },
+  device_guard: { enabled: false, ttl_seconds: 900, max_entries: 1024 },
 })
 
 const engineFields = ['base_url', 'model', 'proxy_id', 'api_keys_text', 'api_key_configured', 'api_key_masked', 'api_key_count', 'api_key_masks', 'api_key_statuses', 'api_keys_mode', 'clear_api_key', 'timeout_ms', 'retry_count', 'thresholds'] as const
@@ -1368,6 +1446,7 @@ const settingsTabs = computed<Array<{ id: SettingsTab; label: string }>>(() => [
   { id: 'response', label: t('admin.riskControl.tabs.response') },
   { id: 'riskThresholds', label: t('admin.riskControl.tabs.riskThresholds') },
   { id: 'keywords', label: t('admin.riskControl.tabs.keywords') },
+  { id: 'guards', label: t('admin.riskControl.tabs.guards') },
   { id: 'retention', label: t('admin.riskControl.tabs.retention') },
 ])
 
@@ -1824,6 +1903,19 @@ function applyConfig(config: ContentModerationConfig) {
   const modelFilter = normalizeModelFilter(config.model_filter)
   configForm.model_filter_type = modelFilter.type
   configForm.model_filter_models = modelFilter.models
+  configForm.failure_policy = config.failure_policy ?? 'fail_open'
+  configForm.distillation = {
+    enabled: config.distillation?.enabled ?? false,
+    min_max_tokens: config.distillation?.min_max_tokens ?? 8192,
+    min_thinking_tokens: config.distillation?.min_thinking_tokens ?? 8192,
+    structure_pattern: config.distillation?.structure_pattern ?? '',
+  }
+  configForm.distillation_phrases = (config.distillation?.phrases ?? []).join('\n')
+  configForm.distillation_patterns = (config.distillation?.patterns ?? []).join('\n')
+  configForm.distillation_fingerprints = (config.distillation?.fingerprints ?? []).join('\n')
+  configForm.regex_rules = (config.regex_rules ?? []).join('\n')
+  configForm.refusal_guard = { enabled: false, ttl_seconds: 3600, max_entries: 1024, similarity_threshold: 0.9, ...config.refusal_guard }
+  configForm.device_guard = { enabled: false, ttl_seconds: 900, max_entries: 1024, ...config.device_guard }
   engineDrafts.value = {
     openai: engineDraftFromConfig(config.engine_configs?.openai ?? (savedEngine.value === 'openai' ? config : undefined), 'openai'),
     typesafe: engineDraftFromConfig(config.engine_configs?.typesafe ?? (savedEngine.value === 'typesafe' ? config : undefined), 'typesafe'),
@@ -1877,8 +1969,18 @@ async function loadStatus(silent = true) {
   }
 }
 
-async function saveConfig() {
+function guardRuleLines(text: string): string[] {
+  return text.split('\n').map(line => line.trim()).filter(Boolean)
+}
+const guardCacheTypes = ['refusal_guard', 'device_guard'] as const
+
+async function saveConfig(activate = false) {
+  let configurationSaved = false
   saving.value = true
+  if (activate) {
+    configForm.enabled = true
+    if (configForm.mode === 'off') configForm.mode = 'pre_block'
+  }
   try {
     const modelFilterPayload = buildModelFilterPayload()
     if (modelFilterPayload.type !== 'all' && modelFilterPayload.models.length === 0) {
@@ -1916,6 +2018,16 @@ async function saveConfig() {
       blocked_keywords: blockedKeywordList.value,
       keyword_blocking_mode: configForm.keyword_blocking_mode,
       model_filter: modelFilterPayload,
+      failure_policy: configForm.failure_policy,
+      distillation: {
+        ...configForm.distillation,
+        phrases: guardRuleLines(configForm.distillation_phrases),
+        patterns: guardRuleLines(configForm.distillation_patterns),
+        fingerprints: guardRuleLines(configForm.distillation_fingerprints),
+      },
+      regex_rules: guardRuleLines(configForm.regex_rules),
+      refusal_guard: { ...configForm.refusal_guard },
+      device_guard: { ...configForm.device_guard },
     }
     const keys = parseApiKeys(configForm.api_keys_text)
     if (!payload.clear_api_key && configForm.api_keys_mode === 'replace' && keys.length === 0) {
@@ -1935,11 +2047,14 @@ async function saveConfig() {
     payload.engine_configs = Object.fromEntries(Object.entries(engineDrafts.value).map(([engine, draft]) => [engine, engineDraftPayload(draft)]))
     const updated = await adminAPI.riskControl.updateConfig(payload)
     applyConfig(updated)
+    configurationSaved = true
+    if (activate) await adminAPI.settings.updateSettings({ risk_control_enabled: true })
     settingsOpen.value = false
     appStore.showSuccess(t('admin.riskControl.saved'))
     await Promise.all([loadStatus(true), loadLogs()])
   } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.saveFailed')))
+    appStore.showError(activate && configurationSaved ? t('admin.riskControl.savedButNotEnabled') : extractApiErrorMessage(err, t('admin.riskControl.saveFailed')))
+    if (configurationSaved) await loadStatus(true)
   } finally {
     saving.value = false
   }
@@ -2021,7 +2136,7 @@ async function deleteFlaggedHash() {
 
 async function clearFlaggedHashes() {
   if (hashActionLoading.value) return
-  const confirmed = window.confirm(t('admin.riskControl.clearFlaggedHashesConfirm'))
+  const confirmed = window.confirm(t('admin.riskControl.guard.clearConfirm'))
   if (!confirmed) return
   hashActionLoading.value = true
   try {

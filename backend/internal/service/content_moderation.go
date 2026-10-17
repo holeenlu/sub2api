@@ -140,12 +140,17 @@ func ContentModerationCategories() []string {
 }
 
 type ContentModerationConfig struct {
-	Engine   string                         `json:"engine,omitempty"`
-	TypeSafe *ContentModerationEngineConfig `json:"typesafe,omitempty"`
-	Enabled  bool                           `json:"enabled"`
-	Mode     string                         `json:"mode"`
-	BaseURL  string                         `json:"base_url"`
-	Model    string                         `json:"model"`
+	FailurePolicy string                              `json:"failure_policy"`
+	Distillation  ContentModerationDistillationConfig `json:"distillation"`
+	RegexRules    []string                            `json:"regex_rules"`
+	RefusalGuard  ContentModerationRefusalGuardConfig `json:"refusal_guard"`
+	DeviceGuard   ContentModerationDeviceGuardConfig  `json:"device_guard"`
+	Engine        string                              `json:"engine,omitempty"`
+	TypeSafe      *ContentModerationEngineConfig      `json:"typesafe,omitempty"`
+	Enabled       bool                                `json:"enabled"`
+	Mode          string                              `json:"mode"`
+	BaseURL       string                              `json:"base_url"`
+	Model         string                              `json:"model"`
 	// ProxyID 指定审计请求使用的代理服务器（IP管理-代理服务器），nil 表示直连。
 	ProxyID              *int64                       `json:"proxy_id,omitempty"`
 	APIKey               string                       `json:"api_key,omitempty"`
@@ -178,6 +183,11 @@ type ContentModerationConfig struct {
 }
 
 type ContentModerationConfigView struct {
+	FailurePolicy                  string                                  `json:"failure_policy"`
+	Distillation                   ContentModerationDistillationConfig     `json:"distillation"`
+	RegexRules                     []string                                `json:"regex_rules"`
+	RefusalGuard                   ContentModerationRefusalGuardConfig     `json:"refusal_guard"`
+	DeviceGuard                    ContentModerationDeviceGuardConfig      `json:"device_guard"`
 	Engine                         string                                  `json:"engine"`
 	EngineConfigs                  map[string]*ContentModerationConfigView `json:"engine_configs,omitempty"`
 	Enabled                        bool                                    `json:"enabled"`
@@ -274,6 +284,11 @@ type ContentModerationTestAuditResult struct {
 }
 
 type UpdateContentModerationConfigInput struct {
+	FailurePolicy *string                                       `json:"failure_policy"`
+	Distillation  *ContentModerationDistillationConfig          `json:"distillation"`
+	RegexRules    *[]string                                     `json:"regex_rules"`
+	RefusalGuard  *ContentModerationRefusalGuardConfig          `json:"refusal_guard"`
+	DeviceGuard   *ContentModerationDeviceGuardConfig           `json:"device_guard"`
 	Engine        *string                                       `json:"engine"`
 	EngineConfigs map[string]UpdateContentModerationEngineInput `json:"engine_configs"`
 	Enabled       *bool                                         `json:"enabled"`
@@ -317,6 +332,8 @@ type ContentModerationModelFilter struct {
 }
 
 type ContentModerationCheckInput struct {
+	// DeviceID is untrusted client metadata, scoped by the authenticated UserID.
+	DeviceID           string
 	riskControlLogOnly bool // Captured at admission and retained by asynchronous tasks.
 	RequestID          string
 	UserID             int64
@@ -396,6 +413,15 @@ type ContentModerationDecision struct {
 	Action          string             `json:"action"`
 }
 
+const ContentModerationErrorUnavailable = "content_audit_unavailable"
+
+func (d *ContentModerationDecision) ErrorCode() string {
+	if d != nil && d.Action == ContentModerationActionError && d.StatusCode == http.StatusServiceUnavailable {
+		return ContentModerationErrorUnavailable
+	}
+	return "content_policy_violation"
+}
+
 type ContentModerationLog struct {
 	EngineMeta        *ContentModerationEngineMeta `json:"engine_meta,omitempty"`
 	ID                int64                        `json:"id"`
@@ -445,6 +471,8 @@ type ContentModerationCleanupResult struct {
 }
 
 type ContentModerationRuntimeStatus struct {
+	RefusalGuardEntries          int                             `json:"refusal_guard_entries"`
+	DeviceGuardEntries           int                             `json:"device_guard_entries"`
 	Engine                       string                          `json:"engine"`
 	Enabled                      bool                            `json:"enabled"`
 	RiskControlEnabled           bool                            `json:"risk_control_enabled"`
@@ -511,6 +539,11 @@ type ContentModerationHashCache interface {
 }
 
 type ContentModerationService struct {
+	guardMu                  sync.Mutex
+	guardStoreMu             sync.Mutex
+	guardMemory              contentModerationGuardMemory
+	guardRevision            string
+	guardPending             []ContentModerationGuardRecord
 	settingRepo              SettingRepository
 	repo                     ContentModerationRepository
 	hashCache                ContentModerationHashCache
@@ -547,6 +580,7 @@ type ContentModerationService struct {
 }
 
 type contentModerationRuntimeSnapshot struct {
+	guardRules         *contentModerationGuardRules
 	allowlistedUsers   map[int64]struct{}
 	riskControlEnabled bool
 	config             *ContentModerationConfig
@@ -698,6 +732,21 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	}
 	if input.CyberPolicyExcludeFromBanCount != nil {
 		cfg.CyberPolicyExcludeFromBanCount = *input.CyberPolicyExcludeFromBanCount
+	}
+	if input.FailurePolicy != nil {
+		cfg.FailurePolicy = *input.FailurePolicy
+	}
+	if input.Distillation != nil {
+		cfg.Distillation = *input.Distillation
+	}
+	if input.RegexRules != nil {
+		cfg.RegexRules = append([]string{}, (*input.RegexRules)...)
+	}
+	if input.RefusalGuard != nil {
+		cfg.RefusalGuard = *input.RefusalGuard
+	}
+	if input.DeviceGuard != nil {
+		cfg.DeviceGuard = *input.DeviceGuard
 	}
 	// Legacy flat updates target the selected engine; explicit profiles preserve both drafts.
 	if err := s.updateEngineProfile(ctx, cfg, cfg.Engine, UpdateContentModerationEngineInput{
@@ -928,6 +977,9 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"configured_models", cfg.ModelFilter.Models)
 		return allow, nil
 	}
+	if decision := s.checkLocalGuards(ctx, input, runtimeSnapshot); decision != nil {
+		return decision, nil
+	}
 	if cfg.Mode == ContentModerationModePreBlock {
 		if cfg.KeywordBlockingMode != ContentModerationKeywordModeAPIOnly && len(cfg.BlockedKeywords) > 0 {
 			keywordText := extractContentModerationKeywordText(input.Protocol, input.Body)
@@ -1021,6 +1073,9 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			scores := map[string]float64{"hash": 1.0}
 			log := s.buildLog(input, cfg, ContentModerationActionHashBlock, true, "hash", 1.0, scores, content.ExcerptText(), nil, nil, "")
 			s.enqueueRecord(input, cfg, log, hashText, false, false)
+			if cfg.Mode == ContentModerationModeObserve {
+				return &ContentModerationDecision{Allowed: true, Flagged: true, Action: ContentModerationActionAllow}, nil
+			}
 			return &ContentModerationDecision{
 				Allowed:    false,
 				Blocked:    true,
@@ -1049,13 +1104,12 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		if cfg.Mode == ContentModerationModePreBlock {
 			s.recordPreBlockSyncMetric(0, ContentModerationActionError)
 		}
-		slog.Warn("content_moderation.skip_no_audit_api_keys",
-			"user_id", input.UserID,
-			"api_key_id", input.APIKeyID,
-			"group_id", contentModerationLogGroupID(input.GroupID),
-			"endpoint", input.Endpoint,
-			"protocol", input.Protocol)
-		return allow, nil
+		decision := moderationFailureDecision(input, cfg, true)
+		if cfg.RecordNonHits || decision.Blocked {
+			log := s.buildLog(input, cfg, ContentModerationActionError, false, "", 0, nil, content.ExcerptText(), nil, nil, "no moderation api key configured")
+			s.enqueueRecord(input, cfg, log, "", false, false)
+		}
+		return decision, nil
 	}
 	if cfg.Mode == ContentModerationModeObserve {
 		slog.Info("content_moderation.enqueue_observe",
@@ -1073,7 +1127,6 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 }
 
 func (s *ContentModerationService) checkSync(ctx context.Context, input ContentModerationCheckInput, cfg *ContentModerationConfig, content ContentModerationInput, hashText string, queueDelay *int, allowBlock bool) *ContentModerationDecision {
-	allow := &ContentModerationDecision{Allowed: true, Action: ContentModerationActionAllow}
 	trackPreBlock := queueDelay == nil && allowBlock && cfg != nil && cfg.Mode == ContentModerationModePreBlock
 	if trackPreBlock {
 		s.preBlockActive.Add(1)
@@ -1101,12 +1154,12 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		if queueDelay != nil {
 			s.asyncErrors.Add(1)
 		}
-		if cfg.RecordNonHits {
+		if cfg.RecordNonHits || (cfg.FailurePolicy == ContentModerationFailClosed && allowBlock) {
 			log := s.buildLog(input, cfg, ContentModerationActionError, false, "", 0, nil, content.ExcerptText(), &latency, queueDelay, err.Error())
 			log.EngineMeta = moderationAttemptMeta(cfg, content)
 			_ = s.repo.CreateLog(ctx, log)
 		}
-		return allow
+		return moderationFailureDecision(input, cfg, allowBlock)
 	}
 
 	flagged, highestCategory, highestScore := evaluateModerationScores(result.CategoryScores, cfg.Thresholds)
@@ -1115,6 +1168,12 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 	if allowBlock && !input.riskControlLogOnly && flagged && cfg.Mode == ContentModerationModePreBlock {
 		action = ContentModerationActionBlock
 		blocked = true
+	}
+	if blocked && cfg.DeviceGuard.Enabled {
+		s.guardMu.Lock()
+		s.rememberDeviceLocked(input, cfg, time.Now())
+		s.pruneGuardMemoryLocked(time.Now(), cfg)
+		s.guardMu.Unlock()
 	}
 	if trackPreBlock {
 		s.recordPreBlockSyncMetric(latency, action)
@@ -1390,12 +1449,30 @@ func (s *ContentModerationService) DeleteFlaggedInputHash(ctx context.Context, i
 }
 
 func (s *ContentModerationService) ClearFlaggedInputHashes(ctx context.Context) (*ContentModerationClearHashesResult, error) {
-	if s == nil || s.hashCache == nil {
+	if s == nil {
 		return nil, infraerrors.InternalServer("CONTENT_MODERATION_HASH_CACHE_UNAVAILABLE", "内容审计哈希缓存不可用")
 	}
-	deleted, err := s.hashCache.ClearFlaggedInputHashes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("clear content moderation flagged hashes: %w", err)
+	s.guardStoreMu.Lock()
+	defer s.guardStoreMu.Unlock()
+	s.guardMu.Lock()
+	deleted := int64(len(s.guardMemory.refusals) + len(s.guardMemory.devices))
+	s.guardMemory = contentModerationGuardMemory{}
+	s.guardPending = nil
+	s.guardRevision = ""
+	s.guardMu.Unlock()
+	if store, ok := s.hashCache.(ContentModerationGuardStore); ok {
+		count, err := store.ClearGuardEntries(ctx)
+		if err != nil {
+			return nil, err
+		}
+		deleted = count
+	}
+	if s.hashCache != nil {
+		shared, err := s.hashCache.ClearFlaggedInputHashes(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("cleared %d local guard entries; clear shared content moderation hashes failed: %w", deleted, err)
+		}
+		deleted += shared
 	}
 	return &ContentModerationClearHashesResult{Deleted: deleted}, nil
 }
@@ -1447,7 +1524,16 @@ func (s *ContentModerationService) GetStatus(ctx context.Context) (*ContentModer
 		t := time.Unix(unix, 0)
 		lastCleanupAt = &t
 	}
+	if err := s.syncGuardMemory(ctx); err != nil {
+		slog.Warn("content_moderation.guard_status_unavailable")
+	}
+	s.guardMu.Lock()
+	s.pruneGuardMemoryLocked(time.Now(), cfg)
+	refusalEntries, deviceEntries := len(s.guardMemory.refusals), len(s.guardMemory.devices)
+	s.guardMu.Unlock()
 	return &ContentModerationRuntimeStatus{
+		RefusalGuardEntries:          refusalEntries,
+		DeviceGuardEntries:           deviceEntries,
 		Engine:                       cfg.Engine,
 		Enabled:                      cfg.Enabled,
 		RiskControlEnabled:           riskEnabled,
@@ -1535,10 +1621,18 @@ func parseContentModerationConfig(raw string) (*ContentModerationConfig, error) 
 		cfg.normalize()
 		return cfg, nil
 	}
+	// Persisted operator choices (including old omitted sections) retain their
+	// existing disabled semantics; fresh defaults are not a silent policy migration.
+	cfg.Distillation = ContentModerationDistillationConfig{}
+	cfg.RefusalGuard = ContentModerationRefusalGuardConfig{}
+	cfg.DeviceGuard = ContentModerationDeviceGuardConfig{}
 	if err := json.Unmarshal([]byte(raw), cfg); err != nil {
 		return nil, infraerrors.BadRequest("INVALID_CONTENT_MODERATION_CONFIG", "内容审计配置不是有效 JSON")
 	}
 	cfg.normalize()
+	if _, err := compileContentModerationGuards(cfg); err != nil {
+		return nil, err
+	}
 	if !validModerationEngine(cfg.Engine) {
 		return nil, infraerrors.BadRequest("INVALID_CONTENT_MODERATION_ENGINE", "内容审计引擎无效")
 	}
@@ -1620,6 +1714,7 @@ func (s *ContentModerationService) refreshRuntimeSnapshot(ctx context.Context) (
 			riskControlEnabled: values[SettingKeyRiskControlEnabled] == "true",
 			config:             current.config,
 			keywordMatcher:     current.keywordMatcher,
+			guardRules:         current.guardRules,
 			configDigest:       configDigest,
 			loadedAt:           time.Now(),
 		}
@@ -1632,11 +1727,16 @@ func (s *ContentModerationService) refreshRuntimeSnapshot(ctx context.Context) (
 		return nil, err
 	}
 	cfg = cfg.effectiveEngine(cfg.Engine)
+	guardRules, err := compileContentModerationGuards(cfg)
+	if err != nil {
+		return nil, err
+	}
 	snapshot := &contentModerationRuntimeSnapshot{
 		allowlistedUsers:   allowlistedUsers,
 		riskControlEnabled: values[SettingKeyRiskControlEnabled] == "true",
 		config:             cfg,
 		keywordMatcher:     newContentModerationKeywordMatcher(cfg.BlockedKeywords),
+		guardRules:         guardRules,
 		configDigest:       configDigest,
 		loadedAt:           time.Now(),
 	}
@@ -1657,6 +1757,10 @@ func (s *ContentModerationService) replaceRuntimeConfig(cfg *ContentModerationCo
 	}
 	config := cfg.effectiveEngine(cfg.Engine)
 	keywordMatcher := newContentModerationKeywordMatcher(cfg.BlockedKeywords)
+	guardRules, _ := compileContentModerationGuards(cfg) // validated before saving
+	s.guardMu.Lock()
+	s.pruneGuardMemoryLocked(time.Now(), cfg)
+	s.guardMu.Unlock()
 	configDigest := sha256.Sum256(raw)
 
 	s.runtimeRefreshMu.Lock()
@@ -1670,6 +1774,7 @@ func (s *ContentModerationService) replaceRuntimeConfig(cfg *ContentModerationCo
 		riskControlEnabled: current.riskControlEnabled,
 		config:             config,
 		keywordMatcher:     keywordMatcher,
+		guardRules:         guardRules,
 		configDigest:       configDigest,
 		loadedAt:           time.Now(),
 	})
@@ -1698,6 +1803,9 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_CONFIG", "内容审计配置不能为空")
 	}
 	cfg.normalize()
+	if _, err := compileContentModerationGuards(cfg); err != nil {
+		return err
+	}
 	if !validModerationEngine(cfg.Engine) {
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_ENGINE", "内容审计引擎无效")
 	}
@@ -2138,6 +2246,13 @@ func (s *ContentModerationService) siteName(ctx context.Context) string {
 
 func defaultContentModerationConfig() *ContentModerationConfig {
 	return &ContentModerationConfig{
+		Distillation: ContentModerationDistillationConfig{Enabled: true,
+			Phrases:          []string{"Memory-stage-one extractor", "MUST distill reusable", "MUST extract durable memory"},
+			Patterns:         []string{`(?i)\b(?:distill|extract)\b.{0,64}\b(?:hidden|private)\b.{0,32}\b(?:reasoning|chain.of.thought)\b`},
+			StructurePattern: `(?i)prove that|\\boxed|\baime\b|olympiad|\bgpqa\b|livecodebench`},
+		RefusalGuard: ContentModerationRefusalGuardConfig{Enabled: true},
+		DeviceGuard:  ContentModerationDeviceGuardConfig{Enabled: true},
+
 		Enabled:              false,
 		Mode:                 ContentModerationModePreBlock,
 		BaseURL:              defaultContentModerationBaseURL,
@@ -2175,6 +2290,10 @@ func cloneContentModerationConfig(cfg *ContentModerationConfig) *ContentModerati
 		return nil
 	}
 	clone := *cfg
+	clone.RegexRules = append([]string{}, cfg.RegexRules...)
+	clone.Distillation.Phrases = append([]string{}, cfg.Distillation.Phrases...)
+	clone.Distillation.Patterns = append([]string{}, cfg.Distillation.Patterns...)
+	clone.Distillation.Fingerprints = append([]string{}, cfg.Distillation.Fingerprints...)
 	if cfg.TypeSafe != nil {
 		clone.TypeSafe = cfg.engineProfile(ContentModerationEngineTypeSafe)
 	}
@@ -2191,6 +2310,7 @@ func cloneContentModerationConfig(cfg *ContentModerationConfig) *ContentModerati
 }
 
 func (cfg *ContentModerationConfig) normalize() {
+	cfg.normalizeGuards()
 	cfg.Engine = moderationEngine(cfg.Engine)
 	if cfg.APIKey != "" {
 		cfg.APIKeys = normalizeModerationAPIKeys(append(cfg.APIKeys, cfg.APIKey))
@@ -2471,6 +2591,11 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		apiKeyMasked = masks[0]
 	}
 	return &ContentModerationConfigView{
+		FailurePolicy:                  cfg.FailurePolicy,
+		Distillation:                   cloneContentModerationConfig(cfg).Distillation,
+		RegexRules:                     append([]string{}, cfg.RegexRules...),
+		RefusalGuard:                   cfg.RefusalGuard,
+		DeviceGuard:                    cfg.DeviceGuard,
 		Engine:                         cfg.Engine,
 		Enabled:                        cfg.Enabled,
 		Mode:                           cfg.Mode,
