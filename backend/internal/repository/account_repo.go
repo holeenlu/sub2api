@@ -150,6 +150,9 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
+	if scope, ok := authz.VendorScopeFromContext(ctx); ok && scope.ReadOnly {
+		return authz.ErrPermissionDenied
+	}
 	if nativeSupplyIdentityRequired(account) {
 		return r.createNativeSupplyAccount(ctx, account)
 	}
@@ -250,6 +253,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 // CreateWithAccountGroups atomically persists an account, its exact per-group priorities,
 // and the scheduler outbox event used to publish the new routing snapshot.
 func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup) error {
+	if scope, ok := authz.VendorScopeFromContext(ctx); ok && scope.ReadOnly {
+		return authz.ErrPermissionDenied
+	}
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
@@ -969,6 +975,15 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	if (scoped && scope.VendorID > 0) || (!scoped && !authz.IsManagementRequest(ctx)) {
 		vendorCredentialGuard = "(vendor_id IS NULL OR (" + vendorSupplySQL("accounts", "NULL") + " AND " + accountVisibilitySQL(ctx, "vendor_id") + " AND credentials->'account_uuid' IS NOT DISTINCT FROM $1::jsonb->'account_uuid' AND credentials->'org_uuid' IS NOT DISTINCT FROM $1::jsonb->'org_uuid' AND credentials->'chatgpt_account_id' IS NOT DISTINCT FROM $1::jsonb->'chatgpt_account_id'))"
 	}
+	credentialArgs := []any{string(payload), id}
+	if snapshot, ok := ctx.Value(vendorOAuthRefreshSnapshotKey{}).(*service.Account); ok {
+		predicate, args, err := vendorOAuthRefreshMatchSQL(ctx, "accounts", snapshot, len(credentialArgs))
+		if err != nil {
+			return err
+		}
+		vendorCredentialGuard += " AND " + predicate
+		credentialArgs = append(credentialArgs, args...)
+	}
 	result, err := client.ExecContext(ctx, `
 		UPDATE accounts
 		SET
@@ -1038,7 +1053,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 			END,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL AND `+vendorCredentialGuard+`
-	`, string(payload), id)
+	`, credentialArgs...)
 	if err != nil {
 		return err
 	}
@@ -1477,6 +1492,7 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 			AND platform = ANY($1)
 			AND id > $2`
 	query += " AND " + accountVisibilitySQL(ctx, "accounts.vendor_id") + " AND " + vendorSupplySQL("accounts", "NULL")
+	query += " AND " + vendorOAuthRefreshModeSQL("accounts")
 	if options.ActiveOnly {
 		query += `
 			AND status = 'active'`

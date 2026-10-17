@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -44,7 +45,9 @@ func TestExcelBPS429NativeFallbackPreservesOpaqueHistory(t *testing.T) {
 				require.NoError(t, json.Unmarshal(excelBPSBoundAttachmentBody(t, false), &source))
 				source["stream"] = protocol != "json"
 				if rejection == "http" {
-					source["input"] = source["input"].([]any)[:1]
+					input, ok := source["input"].([]any)
+					require.True(t, ok)
+					source["input"] = input[:1]
 				}
 				body, err := json.Marshal(source)
 				require.NoError(t, err)
@@ -155,6 +158,15 @@ func TestExcelBPS429NativeFallbackAcrossTransports(t *testing.T) {
 					require.NotContains(t, rec.Body.String(), "PRIVATE_BPS")
 					require.NotContains(t, rec.Body.String(), "resp_rejected")
 					require.Equal(t, "/v1/responses", result.UpstreamEndpoint)
+					require.Equal(t, UsageAuthorizationModeNative, result.AuthorizationMode)
+					if rejection == "stream" {
+						require.Len(t, result.PriorAuthorizationResults, 1)
+						require.Equal(t, UsageAuthorizationModeBPS, result.PriorAuthorizationResults[0].AuthorizationMode)
+						require.Equal(t, 7, result.PriorAuthorizationResults[0].Usage.InputTokens)
+						require.Equal(t, 10, result.authorizationUsage.InputTokens)
+					} else {
+						require.Empty(t, result.PriorAuthorizationResults)
+					}
 					require.True(t, account.IsExcelBPSEnabled(), "fallback must not mutate the account snapshot")
 					require.True(t, svc.isExcelBPSCoolingDown(account, "gpt-6-astra"))
 					require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "gpt-6-astra"))
@@ -184,6 +196,8 @@ func TestExcelBPSPreGenerationReplayChecksCompletePayload(t *testing.T) {
 		{"nested encrypted message", `{"input":[` + state + `,{"role":"user","content":[{"type":"encrypted_content","encrypted_content":"task"}]}]}`, false},
 		{"orphan result", `{"input":[` + state + `,{"type":"function_call_output","call_id":"missing","output":"result"}]}`, false},
 		{"duplicate input", `{"input":[` + state + `],"input":[{"type":"item_reference","id":"owner"}]}`, false},
+		{"duplicate input orphan result", `{"input":[` + state + `],"input":[{"type":"function_call_output","call_id":"missing","output":"result"}]}`, false},
+		{"duplicate output call id", `{"input":[` + state + `,{"type":"function_call","call_id":"present","name":"read","arguments":"{}"},{"type":"function_call_output","call_id":"present","call_id":"missing","output":"result"}]}`, false},
 		{"duplicate tool fields", `{"input":[` + state + `],"tools":[],"tools":[{"type":"mcp"}]}`, false},
 		{"duplicate state type", `{"input":[{"type":"compaction","encrypted_content":"opaque","type":"message"}]}`, false},
 		{"nested state ciphertext", `{"input":[{"type":"compaction","encrypted_content":"opaque","summary":{"encrypted_content":"hidden"}}]}`, false},
@@ -195,6 +209,84 @@ func TestExcelBPSPreGenerationReplayChecksCompletePayload(t *testing.T) {
 			require.False(t, OpenAIResponsesAccountReplayAllowed([]byte(tc.body)), "do not relax native ambiguous-failure recovery")
 			err.RequestNotSent = false
 			require.False(t, OpenAIResponsesBPSPreGenerationReplayAllowed([]byte(tc.body), err), "inference/compaction already started")
+		})
+	}
+}
+
+type excelBPSBudgetScheduler struct {
+	OpenAIAccountScheduler
+	selectAccount func(context.Context, OpenAIAccountScheduleRequest) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error)
+}
+
+func (s excelBPSBudgetScheduler) Select(ctx context.Context, req OpenAIAccountScheduleRequest) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	return s.selectAccount(ctx, req)
+}
+
+func TestExcelBPSPoolRecoverySharesSelectionBudget(t *testing.T) {
+	dependencyErr := fmt.Errorf("storage unavailable")
+	for _, tc := range []struct {
+		name       string
+		nativeOps  int
+		dependency bool
+		wantErr    error
+	}{
+		{name: "fits", nativeOps: 1},
+		{name: "exhausted", nativeOps: 25, wantErr: selectionbudget.ErrExhausted},
+		{name: "dependency failure", dependency: true, wantErr: dependencyErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			turn := NewOpenAITurnBudget(nil)
+			turn.bpsRecovery.rejected = map[int64]bool{1: true}
+			ctx := WithOpenAITurnBudget(t.Context(), turn)
+			excluded := map[int64]struct{}{1: {}}
+			var budgets []*selectionbudget.Budget
+			var deadlines []time.Time
+			svc := &OpenAIGatewayService{}
+			svc.openaiScheduler = excelBPSBudgetScheduler{selectAccount: func(ctx context.Context, req OpenAIAccountScheduleRequest) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+				budgets = append(budgets, selectionbudget.From(ctx))
+				deadline, ok := ctx.Deadline()
+				require.True(t, ok)
+				deadlines = append(deadlines, deadline)
+				if tc.dependency {
+					selectionbudget.RecordError(ctx, dependencyErr)
+					return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts
+				}
+				ops := tc.nativeOps
+				if len(budgets) == 1 {
+					ops = 40
+				}
+				for range ops {
+					if err := selectionbudget.Take(ctx, "sql", 0); err != nil {
+						return nil, OpenAIAccountScheduleDecision{}, err
+					}
+				}
+				if len(budgets) == 1 {
+					if tc.dependency {
+						selectionbudget.RecordError(ctx, dependencyErr)
+					}
+					return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts
+				}
+				require.True(t, excelBPSNativeRecoveryActive(ctx))
+				require.NotContains(t, req.ExcludedIDs, int64(1))
+				return &AccountSelectionResult{Account: &Account{ID: 1}}, OpenAIAccountScheduleDecision{}, nil
+			}}
+			selection, _, err := svc.SelectAccountWithSchedulerForCapability(ctx, nil, "", "", "gpt-6-astra", excluded, OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityResponses, false, false, true)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+				require.Nil(t, selection)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, selection)
+			}
+			if tc.dependency {
+				require.Len(t, budgets, 3, "two bounded dependency retries must not trigger native recovery")
+				require.False(t, excelBPSNativeRecoveryActive(ctx))
+			} else {
+				require.Len(t, budgets, 2)
+				require.Same(t, budgets[0], budgets[1], "one public selection cannot reset its storage budget during fallback")
+				require.Equal(t, deadlines[0], deadlines[1], "fallback cannot renew the selection deadline")
+				require.Equal(t, min(selectionbudget.Limit, 40+tc.nativeOps), budgets[0].Snapshot().Operations)
+			}
 		})
 	}
 }

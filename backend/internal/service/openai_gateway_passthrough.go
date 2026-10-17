@@ -356,7 +356,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
-		return nil, err
+		return nil, newCredentialPreparationFailure(err)
 	}
 
 	proxyURL := ""
@@ -448,6 +448,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			// Transport-level failure (proxy/DNS/TCP/TLS — no HTTP response). Convert to
 			// a failover so the handler switches to a healthy account.
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
+		}
+		if resp.StatusCode == http.StatusUnauthorized && s.openAITokenProvider != nil {
+			if fresh, ok := refreshRejectedCredential(ctx, s.accountRepo, account, token, s.openAITokenProvider.refreshAPI, s.openAITokenProvider.executor); ok {
+				_ = resp.Body.Close()
+				token = fresh
+				continue
+			}
 		}
 		if resp.StatusCode >= 400 {
 			// Peek only to identify an invalid task. Restore the body so the existing
@@ -603,6 +610,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	forwardResult := &OpenAIForwardResult{
+		AuthorizationMode:             nativeOpenAIUsageAuthorizationMode(account),
 		RequestID:                     resp.Header.Get("x-request-id"),
 		UpstreamHeaders:               resp.Header,
 		ResponseID:                    responseID,

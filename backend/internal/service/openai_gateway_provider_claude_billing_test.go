@@ -4,9 +4,15 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -101,6 +107,44 @@ func TestOpenAIGatewayServiceRecordUsage_CNAndOpenCodeClaudeHonorExplicitPricing
 				require.InDelta(t, expectedActual, usageRepo.lastLog.ActualCost, 1e-12)
 				require.Equal(t, 1, userRepo.deductCalls)
 				require.InDelta(t, expectedActual, userRepo.lastAmount, 1e-12)
+			})
+		}
+	}
+}
+
+func TestProviderClaudeRecordUsagePreservesTTLAcrossSSELayouts(t *testing.T) {
+	for _, route := range []string{"native_chat_json", "native_chat_sse", "native_responses_json", "native_responses_sse"} {
+		for _, multiline := range []bool{false, true} {
+			t.Run(route+map[bool]string{false: "/single", true: "/multiline"}[multiline], func(t *testing.T) {
+				wireUsage, err := json.Marshal(map[string]any{"input_tokens": 10, "output_tokens": 1,
+					"cache_creation_input_tokens": 1000, "cache_read_input_tokens": 3,
+					"cache_creation": map[string]int{"ephemeral_5m_input_tokens": 250, "ephemeral_1h_input_tokens": 750}})
+				require.NoError(t, err)
+				fixture := strings.Replace(miniAnthropicSSEStream(), `{"input_tokens":10,"output_tokens":1}`, string(wireUsage), 1)
+				if multiline {
+					fixture = strings.Replace(fixture, ",", ",\ndata: ", 1)
+				}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				result, err := runAnthropicCompatRoute(&GatewayService{}, route, c, &http.Response{Body: io.NopCloser(strings.NewReader(fixture))})
+				require.NoError(t, err)
+				require.Equal(t, 250, result.Usage.CacheCreation5mTokens)
+				require.Equal(t, 750, result.Usage.CacheCreation1hTokens)
+				usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+				userRepo := &openAIRecordUsageUserRepoStub{}
+				svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+				svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+				group := &Group{ID: 1, Platform: PlatformCommandCode, RateMultiplier: 1.1}
+				input := providerClaudeRecordUsageInput(PlatformCommandCode, "claude-sonnet-4-6", group, claudeUsageToOpenAIUsage(&result.Usage))
+				require.NoError(t, svc.RecordUsage(context.Background(), input))
+				log := usageRepo.lastLog
+				require.NotNil(t, log)
+				require.Equal(t, 250, log.CacheCreation5mTokens)
+				require.Equal(t, 750, log.CacheCreation1hTokens)
+				require.Equal(t, 10, log.InputTokens)
+				wantTotal := 10*3e-6 + 5*15e-6 + 3*0.3e-6 + 250*3.75e-6 + 750*6e-6
+				require.InDelta(t, wantTotal, log.TotalCost, 1e-12)
+				require.Equal(t, QuantizeUsageBillingAmount(wantTotal*1.1), log.ActualCost)
+				require.Equal(t, log.ActualCost, userRepo.lastAmount)
 			})
 		}
 	}
