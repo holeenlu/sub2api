@@ -2,6 +2,7 @@
 // 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
 export default {
   authorization: {
+    siwc: "SIWC 授權",
     noModelsHelp: "儲存空列表將停止所有模型的 BPS 供給，已有授權和歷史仍然保留。",
     "mode": "授權模式",
     "executionMode": "實際執行模式",
@@ -456,7 +457,7 @@ export default {
   importHelp: '支援本專案匯出的原生帳號 JSON（type/version 可省略）。確認時新增或複用檔案代理並自動綁定；新帳號預設暫停。',
   importPrivacy: '預覽僅顯示安全的逐行結果；代理清單匯出不含驗證資訊。',
   importBundledProxy: '匯入並使用各帳號隨附的代理',
-  importFormatInvalid: '請選擇本專案匯出的原生帳號 JSON（可省略 sub2api-data/sub2api-bundle v1 標記）。',
+  importFormatInvalid: '請選擇本專案匯出的原生帳號 JSON（可省略 sub2api-data/sub2api-bundle v1/v2 標記）。',
   importRowsLimit: '每批請選擇 1–25 個帳號。',
   importMappingRequired: '請選擇該平台的分組，並明確選擇代理或獲准直連。',
   importDefaults: '批次預設設定',

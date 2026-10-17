@@ -1,5 +1,6 @@
 export default {
   authorization: {
+    siwc: "SIWC 認可",
     noModelsHelp: "空のリストを保存すると、すべてのモデルの BPS 供給が停止します。認証と履歴は保持されます。",
     "mode": "認証モード",
     "executionMode": "実行モード",
@@ -464,7 +465,7 @@ export default {
   importHelp: '本プロジェクトのネイティブアカウント JSON に対応します（type/version は省略可能）。確認時に同梱プロキシを作成または再利用して紐付けます。新規アカウントは一時停止で開始します。',
   importPrivacy: 'プレビューに認証情報は表示されません。プロキシ一覧の出力には含まれませんが、アカウントバックアップには所有プロキシの認証情報が含まれます。',
   importBundledProxy: '各アカウントに同梱されたプロキシをインポートして使用',
-  importFormatInvalid: '本プロジェクトからエクスポートしたネイティブアカウント JSON を選択してください（sub2api-data/sub2api-bundle v1 ヘッダーは省略可能）。',
+  importFormatInvalid: '本プロジェクトからエクスポートしたネイティブアカウント JSON を選択してください（sub2api-data/sub2api-bundle v1/v2 ヘッダーは省略可能）。',
   importRowsLimit: '1 回につき 1～25 件のアカウントを指定してください。',
   importMappingRequired:
     'このプラットフォームのグループと、プロキシまたは許可された直接接続を選択してください。',

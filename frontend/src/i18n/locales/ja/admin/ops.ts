@@ -1,5 +1,6 @@
 export default {
     ops: {
+
       title: '運用監視',
       description: '運用状況の監視とトラブルシューティング',
       // Dashboard
@@ -366,7 +367,8 @@ export default {
           client: 'クライアントレスポンス',
           upstream_message: 'アップストリームメッセージ',
           upstream_detail: 'アップストリーム詳細',
-          upstream_events: 'アップストリームイベント'
+          upstream_events: 'アップストリームイベント',
+          scheduling_trace: 'スケジューリング判断'
         },
         basicInfo: '基本情報',
         platform: 'プラットフォーム',
@@ -698,6 +700,8 @@ export default {
         }
       },
       settings: {
+        accountTelemetry: "アカウントテレメトリの定期送信",
+        accountTelemetryHint: "既定はオフです。有効時はデバイスパッケージをインポート済みのアカウントのみ、10分間のアクティブ期間内で約10秒ごとにイベント、6時間ごとに GrowthBook を送信します。無効時は定期送信を停止し、インポートした情報を保持します。未インポートのアカウントは待機し、サーバーは Claude Code を初期化しません。",
         title: '運用監視設定',
         loadFailed: '設定の読み込みに失敗しました',
         saveSuccess: '運用監視設定を保存しました',
@@ -738,6 +742,21 @@ export default {
         aggregation: '事前集計タスク',
         enableAggregation: '事前集計を有効化',
         aggregationHint: '事前集計により、長い時間範囲でのクエリ性能が向上します',
+        quotaProtection: {
+          "title": "上限付近のクォータ保護",
+          "apply": "vm2api の推奨値を適用",
+          "hint": "推奨閾値：通常/Pro は 5h 85%、7d 80%、Max は両方 95%。OpenAI の既定値は 85%/80% です。アカウント設定とより厳しい管理者の上限が優先され、Fable の独立閾値は維持されます。保存後に適用されます。",
+          "tiers": "Anthropic のプラン別・期間別閾値を有効化",
+          "cold": "上限付近で大きな未キャッシュ入力を制限",
+          "anthropic_default_5h": "通常/Pro 5h 閾値 (%)",
+          "anthropic_default_7d": "通常/Pro 7d 閾値 (%)",
+          "anthropic_max_5h": "Max 5h 閾値 (%)",
+          "anthropic_max_7d": "Max 7d 閾値 (%)",
+          "critical_band_percent": "臨界範囲（パーセントポイント）",
+          "large_cold_input_tokens": "未キャッシュ入力のトークン上限",
+          "sample_max_age_seconds": "信頼できる測定値の有効期間（秒）",
+          "invalid": "クォータ保護設定の有効範囲を確認してください"
+        },
         openaiQuotaAutoPause: 'OpenAIアカウントクォータの自動一時停止',
         openaiQuotaAutoPauseHint: 'OpenAIアカウントが5時間／7日間の使用量しきい値に達すると、スケジューラーはそのアカウントを自動的にスキップし、期間が更新されると再開します。アカウント単位のしきい値は、このグローバルデフォルトより優先されます。',
         openaiQuotaAutoPauseDefault5h: 'デフォルトの5時間使用量しきい値（%）',
