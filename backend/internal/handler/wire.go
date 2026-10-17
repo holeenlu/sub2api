@@ -11,6 +11,8 @@ import (
 
 // ProvideAdminHandlers creates the AdminHandlers struct
 func ProvideAdminHandlers(
+	scheduledTests *service.ScheduledTestService,
+	scheduledRunner *service.ScheduledTestRunnerService,
 	dashboardHandler *admin.DashboardHandler,
 	userHandler *admin.UserHandler,
 	groupHandler *admin.GroupHandler,
@@ -52,6 +54,7 @@ func ProvideAdminHandlers(
 	opencodeGoUsage *service.OpenCodeGoUsageService,
 	claudeResetCredits *service.ClaudeResetCreditService,
 ) *AdminHandlers {
+	accountHandler.SetScheduledTests(scheduledTests, scheduledRunner)
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
@@ -181,6 +184,7 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 
 // ProvideHandlers creates the Handlers struct
 func ProvideHandlers(
+	vendorHandler *VendorHandler, vendorAccount *VendorAccountHandler, vendorProxy *VendorProxyHandler, vendorUsage *VendorUsageHandler, vendorSettlement *VendorSettlementHandler,
 	authHandler *AuthHandler,
 	userHandler *UserHandler,
 	apiKeyHandler *APIKeyHandler,
@@ -207,6 +211,7 @@ func ProvideHandlers(
 	_ *service.OpenAIQuotaAutoResetService,
 ) *Handlers {
 	return &Handlers{
+		Vendor: vendorHandler, VendorAccount: vendorAccount, VendorProxy: vendorProxy, VendorUsage: vendorUsage, VendorSettlement: vendorSettlement,
 		Auth:             authHandler,
 		User:             userHandler,
 		APIKey:           apiKeyHandler,
@@ -233,6 +238,7 @@ func ProvideHandlers(
 
 // ProviderSet is the Wire provider set for all handlers
 var ProviderSet = wire.NewSet(
+	NewVendorHandler, ProvideVendorAccountHandler, NewVendorProxyHandler, NewVendorUsageHandler, NewVendorSettlementHandler,
 	// Top-level handlers
 	NewAuthHandler,
 	NewUserHandler,
@@ -296,3 +302,10 @@ var ProviderSet = wire.NewSet(
 	ProvideAdminHandlers,
 	ProvideHandlers,
 )
+
+func ProvideVendorAccountHandler(s *service.VendorService, test *service.AccountTestService, concurrency *service.ConcurrencyService) *VendorAccountHandler {
+	h := NewVendorAccountHandler(s)
+	h.SetAccountTestService(test)
+	h.SetConcurrencyService(concurrency)
+	return h
+}

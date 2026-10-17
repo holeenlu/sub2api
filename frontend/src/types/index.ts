@@ -84,7 +84,15 @@ export interface User {
   linuxdo_bound?: boolean
   oidc_bound?: boolean
   wechat_bound?: boolean
-  role: 'admin' | 'user' // User role for authorization
+  role: 'super_admin' | 'admin' | 'user' | 'vendor_level1' | 'vendor_level2' // User role for authorization
+  created_by?: number
+  last_login_at?: string | null
+  totp_enabled?: boolean
+  policy_version?: number
+  admin_write_fields?: Record<string, string[]>
+  permissions?: string[]
+  admin_pages?: string[]
+  admin_features?: Record<string, boolean>
   balance: number // User balance for API usage
   frozen_balance?: number // Balance currently held by async batch jobs
   concurrency: number // Allowed concurrent requests
@@ -209,6 +217,8 @@ export interface LoginAgreementDocument {
 }
 
 export interface PublicSettings {
+  vendor_console_enabled?: boolean
+  vendor_portal_origin?: string
   registration_enabled: boolean
   email_verify_enabled: boolean
   force_email_on_third_party_signup: boolean
@@ -240,7 +250,6 @@ export interface PublicSettings {
   doc_url: string
   home_content: string
   compact_home_enabled: boolean
-  hide_ccs_import_button: boolean
   payment_enabled: boolean
   risk_control_enabled: boolean
   table_default_page_size: number
@@ -965,7 +974,7 @@ export interface Proxy {
   host: string
   port: number
   username: string | null
-  password?: string | null
+  has_password?: boolean
   status: 'active' | 'inactive' | 'expired'
   account_count?: number // Number of accounts using this proxy
   latency_ms?: number
@@ -1230,6 +1239,7 @@ export interface OpenCodeGoUsageSettings {
 }
 
 export interface Account {
+  codex_diagnostic?: import('@/api/admin/codexDiagnostics').DiagnosticSummary | null
   id: number
   name: string
   notes?: string | null
@@ -1279,9 +1289,6 @@ export interface Account {
   current_concurrency?: number // Real-time concurrency count from Redis
   scheduler_score?: {
     base_score: number
-    sticky_score?: number
-    sticky_score_infinity?: boolean
-    sticky_weighted_enabled: boolean
   } | null
   scheduler_scores?: AccountSchedulerGroupScore[] | null
   priority: number
@@ -1383,9 +1390,6 @@ export interface AccountSchedulerGroupScore {
   group_name?: string
   group_priority?: number | null
   base_score: number
-  sticky_score?: number
-  sticky_score_infinity?: boolean
-  sticky_weighted_enabled: boolean
 }
 
 // Account Usage types
@@ -1456,6 +1460,7 @@ export interface GrokBillingSummary {
 }
 
 export interface AccountUsageInfo {
+  anthropic?: AnthropicUsageDetails | null
   source?: 'passive' | 'active'
   updated_at: string | null
   five_hour: UsageProgress | null
@@ -1506,6 +1511,27 @@ export interface AccountUsageInfo {
   error_code?: string
 
   error?: string            // usage 获取失败时的错误信息
+}
+
+export interface UsageObservation {
+  value: unknown
+  source: 'upstream_headers' | 'upstream_api' | 'local_statistics' | 'estimate' | 'local_credentials' | 'stored_snapshot'
+  sampled_at: string | null
+}
+
+export interface AnthropicUsageLimit {
+  kind: string
+  group?: string
+  percent?: number | null
+  resets_at?: string | null
+  severity?: string
+  is_active?: boolean | null
+  scope?: Record<string, { id?: string; display_name?: string }> | null
+}
+
+export interface AnthropicUsageDetails {
+  profile_access: 'granted' | 'denied' | 'unknown'
+  observations: Record<string, UsageObservation>
 }
 
 // OpenAI Codex usage snapshot (from response headers)
@@ -2065,6 +2091,25 @@ export interface UserBreakdownItem {
   account_cost: number
 }
 
+/** 与 UserBreakdownItem 同构，聚合维度换成 api_key_id。 */
+export interface APIKeyBreakdownItem {
+  api_key_id: number
+  /** Key 已被物理删除时为空 */
+  key_name: string
+  /** Key 已软删除或已不存在；历史用量仍会统计进来，只是标记出来 */
+  key_deleted: boolean
+  user_id: number
+  email: string
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  cache_tokens: number
+  total_tokens: number
+  cost: number
+  actual_cost: number
+  account_cost: number
+}
+
 export interface UserUsageTrendPoint {
   date: string
   user_id: number
@@ -2109,7 +2154,7 @@ export interface UpdateUserRequest {
   password?: string
   username?: string
   notes?: string
-  role?: 'admin' | 'user'
+  role?: User['role']
   balance?: number
   concurrency?: number
   rpm_limit?: number

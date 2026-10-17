@@ -47,6 +47,11 @@ type AdminHandlers struct {
 
 // Handlers contains all HTTP handlers
 type Handlers struct {
+	Vendor           *VendorHandler
+	VendorAccount    *VendorAccountHandler
+	VendorProxy      *VendorProxyHandler
+	VendorUsage      *VendorUsageHandler
+	VendorSettlement *VendorSettlementHandler
 	Auth             *AuthHandler
 	User             *UserHandler
 	APIKey           *APIKeyHandler
@@ -72,6 +77,8 @@ type Handlers struct {
 
 // BuildInfo contains build-time information
 type BuildInfo struct {
-	Version   string
-	BuildType string // "source" for manual builds, "release" for CI builds
+	UpstreamVersion string
+	BuildCommit     string
+	Version         string
+	BuildType       string // "source" for manual builds, "release" for CI builds
 }
