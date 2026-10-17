@@ -85,11 +85,12 @@
         </div>
 
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
-          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.status') }}</div>
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t(detail.request_status_code != null ? 'admin.ops.errorDetail.requestStatus' : 'admin.ops.errorDetail.status') }}</div>
           <div class="mt-1">
             <span :class="['inline-flex items-center rounded-lg px-2 py-1 text-xs font-black ring-1 ring-inset shadow-sm', statusClass]">
-              {{ detail.status_code }}
+              {{ requestStatusCode }}
             </span>
+            <span v-if="isRecoveredOpsError(detail)" class="ml-2 text-xs font-medium text-emerald-700 dark:text-emerald-300">{{ t('admin.ops.errorLog.recovered') }}</span>
           </div>
         </div>
 
@@ -111,8 +112,8 @@
 
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.message') }}</div>
-          <div class="mt-1 break-words text-sm font-medium text-gray-900 dark:text-white" :title="rootCauseMessage">
-            {{ rootCauseMessage || '—' }}
+          <div class="mt-1 break-words text-sm font-medium text-gray-900 dark:text-white" :title="displayMessage">
+            {{ displayMessage || '—' }}
           </div>
         </div>
 
@@ -232,7 +233,8 @@ import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
 import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
 import { formatDateTime } from '@/utils/format'
-import { resolveUpstreamPayload } from '../utils/errorDetailResponse'
+import { resolveUpstreamPayload, splitSchedulingDiagnostics } from '../utils/errorDetailResponse'
+import { isRecoveredOpsError } from '../utils/opsFormatters'
 
 interface Props {
   show: boolean
@@ -259,7 +261,7 @@ const showUpstreamList = computed(() => props.errorType === 'request')
 
 const requestId = computed(() => detail.value?.request_id || detail.value?.client_request_id || '')
 
-type DiagnosticPayloadKey = 'client' | 'upstream_message' | 'upstream_detail' | 'upstream_events'
+type DiagnosticPayloadKey = 'client' | 'upstream_message' | 'upstream_detail' | 'upstream_events' | 'scheduling_trace'
 
 const rootCauseMessage = computed(() => {
   const current = detail.value
@@ -271,6 +273,14 @@ const rootCauseMessage = computed(() => {
   return ''
 })
 
+const displayMessage = computed(() => {
+  const current = detail.value
+  if (current && (isRecoveredOpsError(current) || current.message?.includes('recovery not confirmed'))) {
+    return current.message
+  }
+  return rootCauseMessage.value
+})
+
 const diagnosticPayloadSections = computed(() => {
   const current = detail.value
   if (!current) return []
@@ -278,7 +288,8 @@ const diagnosticPayloadSections = computed(() => {
     { key: 'client', value: meaningfulPayload(current.error_body) },
     { key: 'upstream_message', value: meaningfulPayload(current.upstream_error_message) },
     { key: 'upstream_detail', value: meaningfulPayload(current.upstream_error_detail) },
-    { key: 'upstream_events', value: meaningfulPayload(current.upstream_errors) }
+    { key: 'upstream_events', value: meaningfulPayload(splitSchedulingDiagnostics(current.upstream_errors).upstream) },
+    { key: 'scheduling_trace', value: meaningfulPayload(splitSchedulingDiagnostics(current.upstream_errors).scheduling) }
   ]
   return candidates.filter((section, index, all) => {
     return section.value && all.findIndex(candidate => candidate.value === section.value) === index
@@ -430,7 +441,8 @@ function statusBadgeClass(code: number): string {
   return 'bg-gray-50 text-gray-700 ring-gray-600/20 dark:bg-gray-900/30 dark:text-gray-400 dark:ring-gray-500/30'
 }
 
-const statusClass = computed(() => statusBadgeClass(detail.value?.status_code ?? 0))
+const requestStatusCode = computed(() => detail.value?.request_status_code ?? detail.value?.status_code ?? 0)
+const statusClass = computed(() => statusBadgeClass(requestStatusCode.value))
 
 const upstreamStatusClass = computed(() => statusBadgeClass(detail.value?.upstream_status_code ?? 0))
 

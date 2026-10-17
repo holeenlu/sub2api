@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -42,9 +43,12 @@ const (
 	// 上就地(in-band)补发错误帧时记录的 OpsStreamError。因为 wire 状态码停留在 200，
 	// ops_error_logger 的 status>=400 采集路径永远不会触发，这类流内失败
 	//（例如等待并发槽位超时后回退的限流、Wait 后二次计费校验失败）本会在错误看板里隐形。
-	OpsStreamErrorKey  = "ops_stream_error"
-	OpsStreamErrorsKey = "ops_stream_errors"
-	OpsStreamTurnKey   = "ops_stream_turn"
+	OpsStreamErrorKey          = "ops_stream_error"
+	OpsStreamErrorsKey         = "ops_stream_errors"
+	OpsStreamTurnKey           = "ops_stream_turn"
+	OpsStreamTurnSucceededKey  = "ops_stream_turn_succeeded"
+	OpsStreamRecoveryLoggedKey = "ops_ws_recovery_logged"
+	OpsStreamTurnStartedAtKey  = "ops_stream_turn_started_at"
 
 	// Client-side configuration denials should remain visible in ops_error_logs,
 	// but should be excluded from SLA/error-rate calculations.
@@ -96,6 +100,13 @@ func SetOpsUpstreamModel(c *gin.Context, model string) {
 	}
 	if model = strings.TrimSpace(model); model != "" {
 		c.Set(OpsUpstreamModelKey, model)
+		if c.Request != nil {
+			if b, _ := c.Request.Context().Value(openAITurnBudgetKey{}).(*OpenAITurnBudget); b != nil {
+				b.mu.Lock()
+				b.model = model
+				b.mu.Unlock()
+			}
+		}
 	}
 }
 
@@ -222,7 +233,19 @@ func BeginOpsStreamTurn(c *gin.Context, turn int) {
 	if c == nil || turn <= 0 {
 		return
 	}
+	if c.Request != nil {
+		LogSchedulingTrace(c.Request.Context(), HasOpsCurrentStreamError(c))
+		resetSchedulingTrace(c.Request.Context())
+	}
+	ClearOpsUpstreamModel(c)
 	c.Set(OpsStreamTurnKey, turn)
+	c.Set(OpsStreamTurnSucceededKey, false)
+	c.Set(OpsStreamRecoveryLoggedKey, false)
+	c.Set(OpsStreamTurnStartedAtKey, time.Now())
+	c.Set(openAIResponseProgressContextKey, (*openAIResponseProgress)(nil))
+	c.Set(openAIReplayBlockerContextKey, "")
+	c.Set(openAIAccountReplayBlockerContextKey, "")
+	c.Set(OpenAIAccountReplayAllowedContextKey, nil)
 	// Rule and attempt state is turn-scoped on a long-lived WS connection.
 	c.Set(OpsSkipPassthroughKey, false)
 	c.Set(OpsUpstreamErrorsKey, []*OpsUpstreamErrorEvent{})
@@ -315,6 +338,10 @@ func snapshotOpsStreamErrorContext(c *gin.Context, streamErr *OpsStreamError) {
 		streamErr.UpstreamModel = strings.TrimSpace(streamErr.UpstreamModel)
 	}
 	if streamErr.RequestScoped {
+		streamErr.UpstreamErrors = nil
+		if c.Request != nil {
+			streamErr.UpstreamErrors = WithOpsSchedulingTrace(c.Request.Context(), nil)
+		}
 		return
 	}
 	if value, ok := c.Get(OpsUpstreamStatusCodeKey); ok {
@@ -346,6 +373,9 @@ func snapshotOpsStreamErrorContext(c *gin.Context, streamErr *OpsStreamError) {
 			}
 		}
 	}
+	if c.Request != nil {
+		streamErr.UpstreamErrors = WithOpsSchedulingTrace(c.Request.Context(), streamErr.UpstreamErrors)
+	}
 }
 
 func currentOpsFailureSkipMonitoring(c *gin.Context) bool {
@@ -359,10 +389,8 @@ func currentOpsFailureSkipMonitoring(c *gin.Context) bool {
 	}
 	if value, ok := c.Get(OpsUpstreamErrorsKey); ok {
 		if events, ok := value.([]*OpsUpstreamErrorEvent); ok {
-			for i := len(events) - 1; i >= 0; i-- {
-				if events[i] != nil {
-					return events[i].SkipMonitoring
-				}
+			if last := LastOpsUpstreamAttempt(events); last != nil {
+				return last.SkipMonitoring
 			}
 		}
 	}
@@ -380,6 +408,12 @@ func GetOpsStreamError(c *gin.Context) (OpsStreamError, bool) {
 	}
 	se, ok := v.(OpsStreamError)
 	return se, ok
+}
+
+// HasOpsCurrentStreamError excludes earlier failures on a long-lived WS connection.
+func HasOpsCurrentStreamError(c *gin.Context) bool {
+	err, ok := GetOpsStreamError(c)
+	return ok && err.Turn == c.GetInt(OpsStreamTurnKey)
 }
 
 func GetOpsStreamErrors(c *gin.Context) []OpsStreamError {
@@ -419,10 +453,11 @@ func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage
 	}
 }
 
-// OpsUpstreamErrorEvent describes one upstream error attempt during a single gateway request.
+// OpsUpstreamErrorEvent describes an upstream attempt or a local diagnostic event during a gateway request.
 // It is stored in ops_error_logs.upstream_errors as a JSON array.
 type OpsUpstreamErrorEvent struct {
-	AtUnixMs int64 `json:"at_unix_ms,omitempty"`
+	ConversionDiagnostics apicompat.ConversionDiagnostics `json:"conversion_diagnostics,omitempty"`
+	AtUnixMs              int64                           `json:"at_unix_ms,omitempty"`
 
 	// Passthrough 表示本次请求是否命中“原样透传（仅替换认证）”分支。
 	// 该字段用于排障与灰度评估；存入 JSON，不涉及 DB schema 变更。
@@ -455,7 +490,7 @@ type OpsUpstreamErrorEvent struct {
 	// Best-effort upstream response capture (sanitized+trimmed).
 	UpstreamResponseBody string `json:"upstream_response_body,omitempty"`
 
-	// Kind: http_error | request_error | retry_exhausted | failover
+	// Kind: http_error | request_error | retry_exhausted | failover | retry_stopped | scheduling_trace
 	Kind string `json:"kind,omitempty"`
 	// Stage/Scope/Reason distinguish credential acquisition from inference
 	// without overloading upstream_status_code with a synthetic HTTP status.
@@ -471,6 +506,195 @@ type OpsUpstreamErrorEvent struct {
 	// the final client-visible failure; recovered attempts remain provider-health
 	// telemetry and do not count as failed requests.
 	SkipMonitoring bool `json:"-"`
+}
+
+// Retry-stop events describe a gateway decision, not another upstream attempt.
+const OpsUpstreamRetryStopped = "retry_stopped"
+
+const openAIResponseProgressContextKey = "openai_response_progress"
+
+// Owned by the current response reader/writer. Only immutable, bounded JSON
+// snapshots enter Ops; input, output, tool names and ciphertext are excluded.
+type openAIResponseProgress struct {
+	mode, protocol, commitReason        string
+	createdAt                           time.Time
+	committed, semanticSeen             bool
+	countsKnown                         bool
+	events, metadataEvents, tokenEvents int
+	state                               func() (bool, bool)
+}
+
+func beginOpenAIResponseProgress(c *gin.Context, mode, protocol string, state func() (bool, bool)) *openAIResponseProgress {
+	p := &openAIResponseProgress{mode: mode, protocol: protocol, state: state}
+	if c != nil {
+		c.Set(openAIResponseProgressContextKey, p)
+	}
+	return p
+}
+
+func (p *openAIResponseProgress) observeUpstream(eventType string) {
+	if eventType == "response.created" && p.createdAt.IsZero() {
+		p.createdAt = time.Now()
+	}
+}
+
+func (p *openAIResponseProgress) observeDownstream(payload []byte) {
+	typ := gjson.GetBytes(payload, "type").String()
+	p.countsKnown = true
+	p.events++
+	if isOpenAIWSTurnMetadataEvent(typ) || typ == "response.created" || typ == "response.in_progress" {
+		p.metadataEvents++
+	}
+	if isOpenAIWSTokenEvent(typ) {
+		p.tokenEvents++
+	}
+	if typ != "keepalive" {
+		p.committed = true
+	}
+	if typ != "error" && !isOpenAIWSTerminalEvent(typ) && openAIStreamDataStartsClientOutput(string(payload), typ) {
+		p.semanticSeen = true
+	}
+}
+
+func (p *openAIResponseProgress) details() map[string]any {
+	committed, semantic := p.committed, p.semanticSeen
+	if p.state != nil {
+		committed, semantic = p.state()
+	}
+	createdMS := int64(-1)
+	if !p.createdAt.IsZero() {
+		createdMS = time.Since(p.createdAt).Milliseconds()
+	}
+	data := map[string]any{"upstream_mode": p.mode, "created_to_failure_ms": createdMS, "downstream_committed": committed, "semantic_output_seen": semantic}
+	if p.protocol != "" {
+		data["upstream_protocol"] = p.protocol
+	}
+	if p.commitReason != "" {
+		data["commit_reason"] = p.commitReason
+	}
+	if p.countsKnown {
+		data["downstream_events"], data["downstream_metadata_events"], data["downstream_token_events"] = p.events, p.metadataEvents, p.tokenEvents
+	}
+	return data
+}
+
+type OpenAIRetryStopReason string
+
+const (
+	OpenAIRetryStopDownstreamCommitted OpenAIRetryStopReason = "downstream_committed"
+	OpenAIRetryStopReplayUnsafe        OpenAIRetryStopReason = "replay_unsafe"
+	OpenAIRetryStopTurnBudget          OpenAIRetryStopReason = "turn_budget"
+	OpenAIRetryStopAccountSwitchLimit  OpenAIRetryStopReason = "account_switch_limit"
+	OpenAIRetryStopNoAvailableAccount  OpenAIRetryStopReason = "no_available_account"
+	OpenAIRetryStopContextNotPortable  OpenAIRetryStopReason = "context_not_portable"
+	OpenAIRetryStopHistoryIncomplete   OpenAIRetryStopReason = "history_incomplete"
+)
+
+// LastOpsUpstreamAttempt excludes local decisions from attribution and monitoring
+// rules while retaining those decisions in the persisted event array.
+func LastOpsUpstreamAttempt(events []*OpsUpstreamErrorEvent) *OpsUpstreamErrorEvent {
+	for i := len(events) - 1; i >= 0; i-- {
+		if event := events[i]; event != nil && event.Kind != OpsUpstreamRetryStopped && event.Kind != opsSchedulingTrace {
+			return event
+		}
+	}
+	return nil
+}
+
+// RecordOpenAIRetryStop records one final decision per HTTP request or WS turn.
+// Call only when recovery has ended, not while a bare error remains provisional.
+func RecordOpenAIRetryStop(c *gin.Context, account *Account, reason OpenAIRetryStopReason, details ...string) {
+	if c == nil || (c.Request != nil && c.Request.Context().Err() != nil) {
+		return
+	}
+	switch reason {
+	case OpenAIRetryStopDownstreamCommitted, OpenAIRetryStopReplayUnsafe,
+		OpenAIRetryStopTurnBudget, OpenAIRetryStopAccountSwitchLimit, OpenAIRetryStopNoAvailableAccount,
+		OpenAIRetryStopContextNotPortable, OpenAIRetryStopHistoryIncomplete:
+	default:
+		return
+	}
+	if value, ok := c.Get(OpsUpstreamErrorsKey); ok {
+		if events, ok := value.([]*OpsUpstreamErrorEvent); ok {
+			for _, event := range events {
+				if event != nil && event.Kind == OpsUpstreamRetryStopped {
+					return
+				}
+			}
+		}
+	}
+	event := OpsUpstreamErrorEvent{
+		Kind: OpsUpstreamRetryStopped, Stage: "recovery", Scope: string(GatewayFailureScopeRequest),
+		Reason: string(reason), Platform: PlatformOpenAI,
+		ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
+	}
+	data := map[string]any{}
+	if value, ok := c.Get(openAIResponseProgressContextKey); ok {
+		if progress, ok := value.(*openAIResponseProgress); ok && progress != nil {
+			data = progress.details()
+		}
+	}
+	if len(details) > 0 && details[0] != "" {
+		var snapshot map[string]any
+		if json.Unmarshal([]byte(details[0]), &snapshot) == nil {
+			for key, value := range snapshot {
+				data[key] = value
+			}
+		}
+	}
+	if transport := GetOpenAIClientTransport(c); transport != "" {
+		data["ingress_transport"] = string(transport)
+	}
+	if blocker := c.GetString(openAIReplayBlockerContextKey); blocker != "" {
+		data["blocking_tool_kind"] = blocker
+	}
+	if blocker := c.GetString(openAIAccountReplayBlockerContextKey); blocker != "" {
+		data["context_blocker"] = blocker
+	}
+	if portable, known := c.Get(OpenAIAccountReplayAllowedContextKey); known {
+		if value, ok := portable.(bool); ok {
+			data["context_portable"] = value
+		}
+	}
+	if c.Request != nil {
+		if budget, ok := c.Request.Context().Value(openAITurnBudgetKey{}).(*OpenAITurnBudget); ok && budget != nil {
+			budget.mu.Lock()
+			data["attempts"] = budget.attempts
+			data["attempt_limit"] = budget.limit
+			data["credential_owners"] = len(budget.owners)
+			data["preparation_retries"] = budget.preparationRetries
+			data["retry_wait_ms"] = budget.retryWait.Milliseconds()
+			data["selection_operations"] = budget.selection.Operations()
+			if !budget.deadline.IsZero() {
+				remaining := time.Until(budget.deadline).Milliseconds()
+				if remaining < 0 {
+					remaining = 0
+				}
+				data["budget_remaining_ms"] = remaining
+			}
+			budget.mu.Unlock()
+		}
+	}
+	if len(data) > 0 {
+		encoded, _ := json.Marshal(data)
+		event.Detail = truncateString(string(encoded), 1024)
+	}
+	if account != nil {
+		event.AccountID, event.AccountName = account.ID, account.Name
+		if account.Platform != "" {
+			event.Platform = account.Platform
+		}
+	} else if value, ok := c.Get(OpsUpstreamErrorsKey); ok {
+		if events, ok := value.([]*OpsUpstreamErrorEvent); ok {
+			if last := LastOpsUpstreamAttempt(events); last != nil {
+				event.Platform, event.AccountID, event.AccountName = last.Platform, last.AccountID, last.AccountName
+				event.ProxyID, event.ProxyName = last.ProxyID, last.ProxyName
+			}
+		}
+	}
+	// No upstream status/message: this event must not mask the actual failure,
+	// match provider passthrough rules or count as an extra account switch.
+	appendOpsUpstreamError(c, event)
 }
 
 const (
@@ -510,6 +734,13 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 		}
 	}
 
+	if value, ok := c.Get(conversionDiagnosticsContextKey); ok {
+		if diagnostics, ok := value.(apicompat.ConversionDiagnostics); ok {
+			for _, item := range diagnostics {
+				ev.ConversionDiagnostics.Add(item.Code, item.Path)
+			}
+		}
+	}
 	evCopy := ev
 	existing = append(existing, &evCopy)
 	c.Set(OpsUpstreamErrorsKey, existing)
@@ -719,4 +950,11 @@ func safeUpstreamURL(rawURL string) string {
 		rawURL = rawURL[:idx]
 	}
 	return rawURL
+}
+
+// MarkOpsClientCancellation records the request outcome without writing to a disconnected peer.
+const OpsClientCanceledCode = "client_canceled"
+
+func MarkOpsClientCancellation(c *gin.Context, stream bool) {
+	MarkOpsStreamErrorValue(c, OpsStreamError{ErrType: OpsClientCanceledCode, Code: OpsClientCanceledCode, Message: "Client disconnected: context canceled", IntendedStatus: 499, RequestScoped: true, NonStream: !stream})
 }
