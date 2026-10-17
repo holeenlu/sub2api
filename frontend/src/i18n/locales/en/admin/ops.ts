@@ -1,5 +1,6 @@
 export default {
     ops: {
+
       title: 'Ops Monitoring',
       description: 'Operational monitoring and troubleshooting',
       // Dashboard
@@ -366,7 +367,8 @@ export default {
           client: 'Client Response',
           upstream_message: 'Upstream Message',
           upstream_detail: 'Upstream Detail',
-          upstream_events: 'Upstream Events'
+          upstream_events: 'Upstream Events',
+          scheduling_trace: 'Scheduling Decisions'
         },
         basicInfo: 'Basic Info',
         platform: 'Platform',
@@ -698,6 +700,8 @@ export default {
         }
       },
       settings: {
+        accountTelemetry: "Scheduled account telemetry",
+        accountTelemetryHint: "Off by default. When enabled, send within a ten-minute activity window: events approximately every ten seconds and GrowthBook every six hours. Turning this off stops scheduled sending and preserves profiles. Automatic initialization and manual generation always remain available.",
         title: 'Ops Monitoring Settings',
         loadFailed: 'Failed to load settings',
         saveSuccess: 'Ops monitoring settings saved successfully',
