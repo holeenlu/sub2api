@@ -208,7 +208,8 @@
         <template #cell-cost="{ row }">
           <div class="text-sm">
             <div class="flex items-center gap-1.5">
-              <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
+              <span v-if="row.billing_status && row.billing_status !== 'settled'" class="text-xs text-amber-600 dark:text-amber-400" data-testid="billing-status">{{ t('usage.billingStatus.' + row.billing_status) }}</span>
+              <span v-if="!['pending', 'pending_pricing', 'unmetered'].includes(row.billing_status || '')" class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
               <span
                 v-if="row.long_context_billing_applied"
                 data-testid="long-context-billing-marker"
@@ -620,8 +621,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const appStore = useAppStore()
 const copiedRequestId = ref<string | null>(null)
-const showAccountBilling = props.showAccountBilling
-const showUpstreamEndpoint = props.showUpstreamEndpoint
+const showAccountBilling = computed(() => props.showAccountBilling)
+const showUpstreamEndpoint = computed(() => props.showUpstreamEndpoint)
 const ipGeoBatchLoading = ref(false)
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))

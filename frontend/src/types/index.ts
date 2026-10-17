@@ -487,6 +487,9 @@ export interface ApiError {
 }
 
 export interface PaginatedResponse<T> {
+  next_cursor?: string
+  has_more?: boolean
+  total_exact?: boolean
   items: T[]
   total: number
   page: number
@@ -1766,6 +1769,7 @@ export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
 export interface UsageLog {
+  billing_status?: 'unknown' | 'pending' | 'pending_pricing' | 'settled' | 'free' | 'unmetered'
   id: number
   user_id: number
   api_key_id: number
@@ -2225,6 +2229,8 @@ export interface UserErrorListParams {
 }
 
 export interface UsageQueryParams {
+  cursor?: string
+  exact_total?: boolean
   page?: number
   page_size?: number
   api_key_id?: number
