@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | OpenAI | Codex CLI, Codex WebSocket, Claude Code (when Messages dispatch is enabled), OpenCode | `config.toml`, `auth.json` or `experimental_bearer_token`, Anthropic environment files, `opencode.json` |
 | Anthropic | Claude Code, routed Codex, OpenCode | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, Codex Responses provider, OpenCode provider |
-| Gemini | Gemini CLI, routed Codex, OpenCode | `GOOGLE_GEMINI_BASE_URL`, `GEMINI_KDAN_API_KEY`, `GEMINI_MODEL` |
+| Gemini | Gemini CLI, routed Codex, OpenCode | `GOOGLE_GEMINI_BASE_URL`, `GEMINI_API_KEY`, `GEMINI_MODEL` |
 | Antigravity | Claude Code, Gemini CLI, routed Codex, OpenCode | `/antigravity` base path; Gemini uses `/v1beta` |
 | Grok | Grok CLI, Claude Code, Codex, OpenCode | `GROK_MODELS_BASE_URL`, `XAI_API_KEY`, or the client-specific config |
 | DeepSeek, MiniMax, Composite, Kimi, Zhipu, OpenCode | Claude Code, routed Codex, OpenCode | Use the generated group URL; see catalog support below |
@@ -27,7 +27,7 @@ OpenAI's Codex tab exposes two modes. Opening **Use key** selects **Codex CLI (W
 - **Legacy** sets `requires_openai_auth = true` and offers `auth.json`. Use it only for Codex versions that require that login shape.
 - **API key** sets `requires_openai_auth = false`, writes `experimental_bearer_token`, and adds the local image extension header. This stores the secret on disk; restrict permissions and never commit it.
 
-Routed Codex tabs default to `env_key = "KDAN_API_KEY"`, `wire_api = "responses"`, and `supports_websockets = false`; the Zhipu tab embeds its API key as `experimental_bearer_token`, so its standalone `config.toml` does not depend on `KDAN_API_KEY`. The WebSocket tab enables WebSocket transport only for the OpenAI Responses path.
+Routed Codex tabs default to `env_key = "TOKENSAVY_API_KEY"`, `wire_api = "responses"`, and `supports_websockets = false`; the Zhipu tab embeds its API key as `experimental_bearer_token`, so its standalone `config.toml` does not depend on `TOKENSAVY_API_KEY`. The WebSocket tab enables WebSocket transport only for the OpenAI Responses path.
 
 ## Model catalog
 
@@ -38,7 +38,7 @@ If the selected Codex tab offers a catalog, follow the mode shown in the dialog:
 
 For tabs without a catalog, use an exact model ID available to that group. Catalog visibility, routable accounts, and protocol support are separate conditions. A visible model does not guarantee every tool or endpoint. Use the current dialog as the configuration source; a plain model-list JSON response is not a Codex manifest.
 
-## Follow the KDAN UI
+## Follow the Tokensavy UI
 
 These screenshots render the current project's Use key component with an invalid sample key and `api.example.com`. Copy values from your own console, not the images.
 

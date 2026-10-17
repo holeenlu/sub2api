@@ -4,7 +4,7 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo_root"
 
-gateway_variables=$(mktemp "${TMPDIR:-/tmp}/kdan-gateway-env.XXXXXX")
+gateway_variables=$(mktemp "${TMPDIR:-/tmp}/tokensavy-gateway-env.XXXXXX")
 cleanup() {
   rm -f "$gateway_variables"
 }

@@ -3,7 +3,7 @@
 ```http
 POST /v1/images/generations
 POST /v1/images/edits
-Authorization: Bearer $KDAN_API_KEY
+Authorization: Bearer $API_KEY
 ```
 
 目前產品展示的影像模型包括 `gpt-image-2.5-flare` 與 `gpt-image-2.5-sunburst`，實際權限由 API Key 分組和執行中的相容帳號決定。閘道器驗證 `gpt-image-*` 模型族；如果省略 `model`，程式碼預設使用 `gpt-image-2`，但預設值不代表目前分組一定可排程，生產整合應始終顯式傳送 `GET /v1/models` 回傳的精確 ID。
@@ -13,8 +13,8 @@ Authorization: Bearer $KDAN_API_KEY
 生成介面使用 JSON：
 
 ```bash
-curl "$KDAN_BASE_URL/v1/images/generations" \
-  -H "Authorization: Bearer $KDAN_API_KEY" \
+curl "$API_BASE_URL/v1/images/generations" \
+  -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model":"gpt-image-2.5-flare",
@@ -46,8 +46,8 @@ curl "$KDAN_BASE_URL/v1/images/generations" \
 編輯的檔案上傳形式接受一個或多個 `image` / `image[n]` part，以及可選 `mask`。每個上傳 part 最多讀取 20 MiB；總請求大小還受伺服器端閘道器設定限制。
 
 ```bash
-curl "$KDAN_BASE_URL/v1/images/edits" \
-  -H "Authorization: Bearer $KDAN_API_KEY" \
+curl "$API_BASE_URL/v1/images/edits" \
+  -H "Authorization: Bearer $API_KEY" \
   -F "model=gpt-image-2.5-flare" \
   -F "prompt=Replace the background with a quiet library" \
   -F "image=@input.png;type=image/png" \
