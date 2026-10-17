@@ -183,6 +183,9 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 
 	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
 	attachOpenAILegacySessionHashToGin(c, legacyHash)
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(WithGatewayCacheDiagnostics(c.Request.Context(), getAPIKeyIDFromContext(c), "responses", ExtractClientSessionID(c), currentHash, c.GetHeader("User-Agent")))
+	}
 	return currentHash
 }
 
