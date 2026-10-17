@@ -46,23 +46,52 @@ func StartOpenAICompactSSEKeepalive(c *gin.Context, interval time.Duration) func
 	if !openAICompactClientWantsStream(c) {
 		return func() {}
 	}
-	return startOpenAISSEKeepalive(c, interval)
+	return StartSSEKeepalive(c, interval)
 }
 
-// startOpenAISSEKeepalive 是不检查 compact 标记的内部入口，供【已经确定处于
-// SSE 流式上下文】的调用方使用（例如 /v1/responses 透传：进入流式循环时上游
-// 已返回 text/event-stream，SSE 响应头也已设好）。
-//
-// 心跳字节由 OpenAICompactKeepaliveAdjustedWrittenSize 统一排除，因此不会污染
-// "是否已向客户端写出语义响应"的 failover 判定（见 #3887）。
-func startOpenAISSEKeepalive(c *gin.Context, interval time.Duration) func() {
+// doOpenAIResponsesUpstream keeps a streaming HTTP client alive while waiting
+// for upstream headers. Stop the pump before any response handling; comment
+// bytes never count as semantic output or reset the existing attempt budget.
+// Adapted from huoji120/sub4api 234ef4d60, retaining qualified dispatch.
+func (s *OpenAIGatewayService) doOpenAIResponsesUpstream(c *gin.Context, request *http.Request, proxyURL string, account *Account, stream bool) (*http.Response, error) {
+	timing := newOpenAIForwardTiming(c, request, account)
+	request = request.WithContext(timing.context(request.Context()))
+	if stream && account != nil && account.Platform == PlatformOpenAI &&
+		!openAICompactClientWantsStream(c) && s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		stop := StartSSEKeepalive(c, time.Duration(s.cfg.Gateway.StreamKeepaliveInterval)*time.Second)
+		defer stop()
+	}
+	response, err := s.doOpenAIUpstream(request, proxyURL, account, vendorDispatchGroup(c))
+	timing.markResponse(response, err)
+	return response, err
+}
+
+// StartSSEKeepalive shares the pre-output pump across Responses and Claude.
+// Callers select streaming requests and restart it after queue/attempt handoffs.
+// Header access or a business write synchronously stops the pump.
+// OpenAICompactKeepaliveAdjustedWrittenSize excludes its comment bytes from
+// failover decisions, including across pump restarts.
+func StartSSEKeepalive(c *gin.Context, interval time.Duration) func() {
 	if c == nil || c.Writer == nil || interval <= 0 {
+		return func() {}
+	}
+	if c.Request != nil && c.Request.Context().Err() != nil {
 		return func() {}
 	}
 	originalWriter := c.Writer
 	k := &openAICompactSSEKeepalive{
 		writer: originalWriter,
 		stop:   make(chan struct{}),
+	}
+	// Header waits, stream pumps and retries share one downstream response.
+	// Retain all comment bytes so a restarted pump cannot block safe failover.
+	if previous, ok := c.Get(openAICompactSSEKeepaliveKey); ok {
+		if prior, valid := previous.(*openAICompactSSEKeepalive); valid && prior != nil {
+			prior.mu.Lock()
+			prior.markStoppedLocked()
+			k.bytes, k.started = prior.bytes, prior.started
+			prior.mu.Unlock()
+		}
 	}
 	c.Set(openAICompactSSEKeepaliveKey, k)
 	wrappedWriter := &openAICompactKeepaliveWriter{ResponseWriter: originalWriter, k: k}
@@ -149,19 +178,21 @@ func StopOpenAICompactSSEKeepaliveCommitted(c *gin.Context) bool {
 	if c == nil {
 		return false
 	}
+	streamBytes, _ := c.Get(openAIStreamKeepaliveBytesKey)
+	streamWritten, _ := streamBytes.(int)
 	value, ok := c.Get(openAICompactSSEKeepaliveKey)
 	if !ok {
-		return false
+		return streamWritten > 0
 	}
 	k, ok := value.(*openAICompactSSEKeepalive)
 	if !ok || k == nil {
-		return false
+		return streamWritten > 0
 	}
 	k.mu.Lock()
 	k.markStoppedLocked()
 	committed := k.started
 	k.mu.Unlock()
-	return committed
+	return committed || streamWritten > 0
 }
 
 // OpenAICompactKeepaliveAdjustedWrittenSize 返回排除 compact 心跳注释字节后
@@ -183,7 +214,11 @@ func OpenAICompactKeepaliveAdjustedWrittenSize(c *gin.Context) int {
 	if value, ok := c.Get(openAICompactSSEKeepaliveKey); ok {
 		if k, valid := value.(*openAICompactSSEKeepalive); valid && k != nil {
 			k.mu.Lock()
-			size = k.writer.Size()
+			// After handoff the outer writer may serialize a staged flush.
+			// Keep its Size snapshot instead of bypassing its write lock.
+			if !k.stopped {
+				size = k.writer.Size()
+			}
 			compactKeepaliveBytes = k.bytes
 			k.mu.Unlock()
 		}

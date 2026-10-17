@@ -361,6 +361,29 @@ func (s *GatewayService) readUpstreamErrorBody(resp *http.Response) ([]byte, err
 	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
 
+// Preparation comments commit HTTP 200 but never turn a failed request into
+// success. Preserve the existing error payload and logical failure status.
+func writeClaudeGatewayError(c *gin.Context, status int, payload any) {
+	if !StopOpenAICompactSSEKeepaliveCommitted(c) {
+		c.JSON(status, payload)
+		return
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	errType := gjson.GetBytes(body, "error.type").String()
+	message := gjson.GetBytes(body, "error.message").String()
+	MarkResponseCommitted(c)
+	MarkOpsStreamError(c, errType, message, status)
+	c.Header("Content-Type", "text/event-stream")
+	if _, err := fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", body); err != nil {
+		_ = c.Error(err)
+	}
+	c.Writer.Flush()
+}
+
 func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, requestedModel ...string) (*ForwardResult, error) {
 	// Upstream returned a non-success HTTP status; count Ollama Cloud / OpenCode Go activity.
 	scheduleOllamaCloudUsageActivity(s.deferredService, account)
@@ -416,6 +439,15 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		Detail:             upstreamDetail,
 	})
 
+	if IsUpstreamContentRefusal(body) {
+		observeUpstreamContentRefusal(ctx, body)
+		MarkResponseCommitted(c)
+		status, errType, errMsg, _ := applyErrorPassthroughRule(c, account.Platform, resp.StatusCode, body,
+			http.StatusBadRequest, "invalid_request_error", "Request blocked by upstream content policy")
+		writeClaudeGatewayError(c, status, gin.H{"type": "error", "error": gin.H{"type": errType, "code": "content_policy_violation", "message": errMsg}})
+		return nil, fmt.Errorf("upstream content policy refusal: %d", resp.StatusCode)
+	}
+
 	// 处理上游错误，标记账号状态
 	shouldDisable := false
 	if s.rateLimitService != nil {
@@ -453,7 +485,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		"upstream_error",
 		"Upstream request failed",
 	); matched {
-		c.JSON(status, gin.H{
+		writeClaudeGatewayError(c, status, gin.H{
 			"type": "error",
 			"error": gin.H{
 				"type":    errType,
@@ -477,7 +509,16 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 
 	switch resp.StatusCode {
 	case 400:
-		c.Data(http.StatusBadRequest, "application/json", body)
+		if StopOpenAICompactSSEKeepaliveCommitted(c) {
+			var payload map[string]any
+			if json.Unmarshal(body, &payload) != nil || payload["error"] == nil {
+				payload = map[string]any{"error": gin.H{"type": "invalid_request_error", "message": upstreamMsg}}
+			}
+			payload["type"] = "error"
+			writeClaudeGatewayError(c, http.StatusBadRequest, payload)
+		} else {
+			c.Data(http.StatusBadRequest, "application/json", body)
+		}
 		summary := upstreamMsg
 		if summary == "" {
 			summary = truncateForLog(body, 512)
@@ -513,7 +554,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 	}
 
 	// 返回自定义错误响应
-	c.JSON(statusCode, gin.H{
+	writeClaudeGatewayError(c, statusCode, gin.H{
 		"type": "error",
 		"error": gin.H{
 			"type":    errType,
@@ -624,7 +665,7 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		"upstream_error",
 		"Upstream request failed after retries",
 	); matched {
-		c.JSON(status, gin.H{
+		writeClaudeGatewayError(c, status, gin.H{
 			"type": "error",
 			"error": gin.H{
 				"type":    errType,
@@ -643,7 +684,7 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 	}
 
 	// 返回统一的重试耗尽错误响应
-	c.JSON(http.StatusBadGateway, gin.H{
+	writeClaudeGatewayError(c, http.StatusBadGateway, gin.H{
 		"type": "error",
 		"error": gin.H{
 			"type":    "upstream_error",
@@ -707,6 +748,7 @@ func partialStreamUsageResult(c *gin.Context, resp *http.Response, streamResult 
 }
 
 func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, mimicClaudeCode bool) (*streamingResult, error) {
+	writerSizeBeforeStream := OpenAICompactKeepaliveAdjustedWrittenSize(c)
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -775,6 +817,13 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		if err := scanner.Err(); err != nil {
 			_ = sendEvent(scanEvent{err: err})
 		}
+		// 这里刻意不补合成的事件边界。SSE 规范下「以空行结尾」才是一个完整
+		// 事件；以空行正常收尾的流，bufio.ScanLines 本来就会产出那一行空字符串
+		// （"a\nb\n\n" → ["a","b",""]），不存在尾事件被吞的问题。EOF 时
+		// pendingEvent 还非空，只说明上游在事件中途断了：此时派发残片会把
+		// 截断误判成正常结束（残片若恰好形如 message_stop / [DONE] 就会置位
+		// sawTerminalEvent），压掉本该发生的重试。残片保持丢弃，由
+		// missing terminal 分支处理。
 	}(scanBuf)
 	defer close(done)
 
@@ -845,7 +894,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			// json.Marshal 不可能在已知 string-only 输入上失败，保守 fallback
 			body = []byte(fmt.Sprintf(`{"type":"error","error":{"type":%q,"message":%q}}`, reason, message))
 		}
-		_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", body)
+		if _, err := fmt.Fprintf(w, "event: error\ndata: %s\n\n", body); err == nil {
+			MarkResponseCommitted(c)
+		}
 		flusher.Flush()
 	}
 
@@ -856,56 +907,40 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	noopDeltaKeepaliveBlockIndex := -1
 	noopDeltaKeepaliveDeltaType := ""
 
-	pendingEventLines := make([]string, 0, 4)
+	pendingEvent := anthropicSSEEventBuffer{lines: make([]string, 0, 4)}
 
 	processSSEEvent := func(lines []string) ([]string, string, *sseUsagePatch, error) {
 		if len(lines) == 0 {
 			return nil, "", nil, nil
 		}
 
-		eventName := ""
-		dataLine := ""
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "event:") {
-				eventName = strings.TrimSpace(strings.TrimPrefix(trimmed, "event:"))
-				continue
-			}
-			if dataLine == "" && sseDataRe.MatchString(trimmed) {
-				dataLine = sseDataRe.ReplaceAllString(trimmed, "")
-			}
-		}
+		sseEvent := parseAnthropicSSEEvent(lines)
+		eventName := strings.TrimSpace(sseEvent.eventName)
+		dataLine := strings.TrimSpace(sseEvent.data)
 
 		if eventName == "error" {
-			return nil, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
+			return []string{sseEvent.block("", nil)}, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
 		}
 
-		if dataLine == "" {
-			return []string{strings.Join(lines, "\n") + "\n\n"}, "", nil, nil
+		if !sseEvent.hasData || dataLine == "" {
+			return []string{sseEvent.block(eventName, nil)}, "", nil, nil
 		}
 
 		if dataLine == "[DONE]" {
 			sawTerminalEvent = true
-			block := ""
-			if eventName != "" {
-				block = "event: " + eventName + "\n"
-			}
-			block += "data: " + dataLine + "\n\n"
-			return []string{block}, dataLine, nil, nil
+			return []string{sseEvent.block(eventName, nil)}, dataLine, nil, nil
 		}
 
 		var event map[string]any
-		if err := json.Unmarshal([]byte(dataLine), &event); err != nil {
-			// JSON 解析失败，直接透传原始数据
-			block := ""
-			if eventName != "" {
-				block = "event: " + eventName + "\n"
-			}
-			block += "data: " + dataLine + "\n\n"
-			return []string{block}, dataLine, nil, nil
+		if err := decodeJSONUseNumber([]byte(dataLine), &event); err != nil {
+			// JSON 解析失败，直接透传原始事件
+			return []string{sseEvent.block(eventName, nil)}, dataLine, nil, nil
 		}
 
 		eventType, _ := event["type"].(string)
+		if eventType == "error" {
+			return []string{sseEvent.block("", nil)}, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
+		}
 		observer.ObserveAnthropic([]byte(dataLine))
 		if eventName == "" {
 			eventName = eventType
@@ -961,23 +996,6 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 		}
 
-		// Cache TTL Override: 重写 SSE 事件中的 cache_creation 分类。
-		// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
-		if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
-			if eventType == "message_start" {
-				if msg, ok := event["message"].(map[string]any); ok {
-					if u, ok := msg["usage"].(map[string]any); ok {
-						eventChanged = rewriteCacheCreationJSON(u, overrideTarget) || eventChanged
-					}
-				}
-			}
-			if eventType == "message_delta" {
-				if u, ok := event["usage"].(map[string]any); ok {
-					eventChanged = rewriteCacheCreationJSON(u, overrideTarget) || eventChanged
-				}
-			}
-		}
-
 		if needModelReplace {
 			if msg, ok := event["message"].(map[string]any); ok {
 				if model, ok := msg["model"].(string); ok && model == mappedModel {
@@ -992,47 +1010,30 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			sawTerminalEvent = true
 		}
 		if !eventChanged {
-			block := ""
-			if eventName != "" {
-				block = "event: " + eventName + "\n"
-			}
-			block += "data: " + dataLine + "\n\n"
-			return []string{block}, dataLine, usagePatch, nil
+			return []string{sseEvent.block(eventName, nil)}, dataLine, usagePatch, nil
 		}
 
 		newData, err := json.Marshal(event)
 		if err != nil {
-			// 序列化失败，直接透传原始数据
-			block := ""
-			if eventName != "" {
-				block = "event: " + eventName + "\n"
-			}
-			block += "data: " + dataLine + "\n\n"
-			return []string{block}, dataLine, usagePatch, nil
+			// 序列化失败，直接透传原始事件
+			return []string{sseEvent.block(eventName, nil)}, dataLine, usagePatch, nil
 		}
 
-		block := ""
-		if eventName != "" {
-			block = "event: " + eventName + "\n"
-		}
-		block += "data: " + string(newData) + "\n\n"
-		return []string{block}, string(newData), usagePatch, nil
+		rewritten := string(newData)
+		return []string{sseEvent.block(eventName, &rewritten)}, rewritten, usagePatch, nil
 	}
 
 	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				// 上游完成，返回结果
-				if !sawTerminalEvent {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
+				// 完整终态已在派发时返回；读到 EOF 说明流缺少终态。
+				if !clientDisconnected && OpenAICompactKeepaliveAdjustedWrittenSize(c) < 0 && !usage.hasObservedTokens() {
+					return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway, Cause: io.ErrUnexpectedEOF, Reason: "upstream_missing_terminal", RetryableOnSameAccount: true, SameAccountRetryMax: 1}
 				}
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
 			}
 			if ev.err != nil {
-				if sawTerminalEvent {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
-				}
 				// 检测 context 取消（客户端断开会导致 context 取消，进而影响上游读取）
 				if errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete: %w", ev.err)
@@ -1054,7 +1055,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				// 默认 *net.OpError 的 Error() 会泄露内部 IP/端口和上游地址。完整 ev.err
 				// 仅在下方 LegacyPrintf 内部日志中保留供运维诊断。
 				disconnectMsg := "upstream stream disconnected: " + sanitizeStreamError(ev.err)
-				if !c.Writer.Written() {
+				if OpenAICompactKeepaliveAdjustedWrittenSize(c) < 0 && !usage.hasObservedTokens() {
 					logger.LegacyPrintf("service.gateway", "Upstream stream read error before any client output (account=%d), failing over: %v", account.ID, ev.err)
 					body, _ := json.Marshal(map[string]any{
 						"type": "error",
@@ -1073,18 +1074,29 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream read error: %w", ev.err)
 			}
 			line := ev.line
-			trimmed := strings.TrimSpace(line)
 
-			if trimmed == "" {
-				if len(pendingEventLines) == 0 {
+			if line == "" {
+				if len(pendingEvent.lines) == 0 {
 					continue
 				}
 
-				outputBlocks, data, usagePatch, err := processSSEEvent(pendingEventLines)
-				pendingEventLines = pendingEventLines[:0]
+				outputBlocks, data, usagePatch, err := processSSEEvent(pendingEvent.lines)
+				pendingEvent.reset()
 				if err != nil {
-					if clientDisconnected {
-						return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
+					if clientDisconnected || usage.hasObservedTokens() || OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeStream {
+						// Forward owns error classification; only this layer still has the
+						// original frame, including id/retry/comments and multiline data.
+						if !clientDisconnected {
+							for _, block := range outputBlocks {
+								if _, writeErr := io.WriteString(w, block); writeErr != nil {
+									clientDisconnected = true
+									break
+								}
+								MarkResponseCommitted(c)
+								flusher.Flush()
+							}
+						}
+						return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, err
 					}
 					return nil, err
 				}
@@ -1114,10 +1126,16 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 						}
 					}
 				}
+				if sawTerminalEvent {
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+				}
 				continue
 			}
 
-			pendingEventLines = append(pendingEventLines, line)
+			if err := pendingEvent.addLine(line, maxLineSize); err != nil {
+				sendErrorEvent("response_too_large", fmt.Sprintf("upstream SSE event exceeded %d bytes", maxLineSize))
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, err
+			}
 
 		case <-intervalCh:
 			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
@@ -1210,6 +1228,10 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 		patch.hasInputTokens = true
 		if v, ok := parseSSEUsageInt(usageObj["input_tokens"]); ok {
 			patch.inputTokens = v
+		}
+		if v, ok := parseSSEUsageInt(usageObj["output_tokens"]); ok {
+			patch.outputTokens = v
+			patch.hasOutputTokens = true
 		}
 		patch.hasCacheCreationInput = true
 		if v, ok := parseSSEUsageInt(usageObj["cache_creation_input_tokens"]); ok {
@@ -1351,36 +1373,6 @@ func applyCacheTTLOverride(usage *ClaudeUsage, target string) bool {
 	return true
 }
 
-// rewriteCacheCreationJSON 在 JSON usage 对象中重写 cache_creation 嵌套对象的 TTL 分类。
-// usageObj 是 usage JSON 对象（map[string]any）。
-func rewriteCacheCreationJSON(usageObj map[string]any, target string) bool {
-	ccObj, ok := usageObj["cache_creation"].(map[string]any)
-	if !ok {
-		return false
-	}
-	v5m, _ := parseSSEUsageInt(ccObj["ephemeral_5m_input_tokens"])
-	v1h, _ := parseSSEUsageInt(ccObj["ephemeral_1h_input_tokens"])
-	total := v5m + v1h
-	if total == 0 {
-		return false
-	}
-	switch target {
-	case "1h":
-		if v1h == total {
-			return false
-		}
-		ccObj["ephemeral_1h_input_tokens"] = float64(total)
-		ccObj["ephemeral_5m_input_tokens"] = float64(0)
-	default: // "5m"
-		if v5m == total {
-			return false
-		}
-		ccObj["ephemeral_5m_input_tokens"] = float64(total)
-		ccObj["ephemeral_1h_input_tokens"] = float64(0)
-	}
-	return true
-}
-
 func (s *GatewayService) resolveCacheTTLUsageOverrideTarget(ctx context.Context, account *Account) (string, bool) {
 	if account == nil {
 		return "", false
@@ -1438,20 +1430,6 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		}
 	}
 
-	// Cache TTL Override: 重写 non-streaming 响应中的 cache_creation 分类。
-	// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
-	if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
-		if applyCacheTTLOverride(&response.Usage, overrideTarget) {
-			// 同步更新 body JSON 中的嵌套 cache_creation 对象
-			if newBody, err := sjson.SetBytes(body, "usage.cache_creation.ephemeral_5m_input_tokens", response.Usage.CacheCreation5mTokens); err == nil {
-				body = newBody
-			}
-			if newBody, err := sjson.SetBytes(body, "usage.cache_creation.ephemeral_1h_input_tokens", response.Usage.CacheCreation1hTokens); err == nil {
-				body = newBody
-			}
-		}
-	}
-
 	// 如果有模型映射，替换响应中的model字段
 	if originalModel != mappedModel {
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
@@ -1493,14 +1471,14 @@ func reconcileCachedTokens(usage map[string]any) bool {
 	if usage == nil {
 		return false
 	}
-	cacheRead, _ := usage["cache_read_input_tokens"].(float64)
+	cacheRead, _ := parseSSEUsageInt(usage["cache_read_input_tokens"])
 	if cacheRead > 0 {
 		return false // 已有标准字段，无需处理
 	}
-	cached, _ := usage["cached_tokens"].(float64)
+	cached, _ := parseSSEUsageInt(usage["cached_tokens"])
 	if cached <= 0 {
 		return false
 	}
-	usage["cache_read_input_tokens"] = cached
+	usage["cache_read_input_tokens"] = usage["cached_tokens"]
 	return true
 }

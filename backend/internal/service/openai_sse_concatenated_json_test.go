@@ -151,7 +151,7 @@ func TestOpenAIWSv2RejectsMalformedEventAfterWritingDownstream(t *testing.T) {
 
 	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.6-sol","stream":true,"input":"hello"}`))
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "after downstream output")
+	require.Contains(t, err.Error(), "after execution started")
 	require.Nil(t, result)
 	require.True(t, captureConn.closed)
 	require.Contains(t, recorder.Body.String(), `"delta":"ok"`)

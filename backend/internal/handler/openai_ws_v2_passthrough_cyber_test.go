@@ -47,6 +47,7 @@ func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, sett
 
 	groupID := int64(4301)
 	account := service.Account{
+		GroupIDs:    []int64{groupID},
 		ID:          9951,
 		Name:        "openai-ws-passthrough-cyber",
 		Platform:    service.PlatformOpenAI,
@@ -102,6 +103,10 @@ func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, sett
 		GroupID: &groupID,
 		User:    &service.User{ID: 1751, Status: service.StatusActive},
 	}
+	apiKey.Status = service.StatusActive
+	apiKey.Group = &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	h.apiKeyService = newWSGroupPricingAPIKeyService(&wsGroupPricingAPIKeyRepoStub{apiKey: *apiKey, group: *apiKey.Group})
+	h.cfg = cfg
 	handlerDone := make(chan struct{})
 	router := gin.New()
 	router.Use(func(c *gin.Context) {

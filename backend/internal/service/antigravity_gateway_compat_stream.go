@@ -14,12 +14,14 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type antigravityCompatStreamAdapter interface {
 	Emit(*apicompat.AnthropicStreamEvent, *antigravityClientWriter)
 	Finalize(*antigravityClientWriter)
 	WriteError(*antigravityClientWriter, string)
+	Err() error
 }
 
 type antigravityChatStreamAdapter struct {
@@ -45,11 +47,20 @@ func (a *antigravityChatStreamAdapter) Emit(event *apicompat.AnthropicStreamEven
 	}
 }
 
+func (a *antigravityChatStreamAdapter) Err() error { return a.chatState.Err() }
+
 func (a *antigravityChatStreamAdapter) Finalize(writer *antigravityClientWriter) {
+	if a.Err() != nil {
+		return
+	}
 	for _, responseEvent := range apicompat.FinalizeAnthropicResponsesStream(a.anthropicState) {
 		a.emitResponseEvent(&responseEvent, writer)
 	}
-	for _, chunk := range apicompat.FinalizeResponsesChatStream(a.chatState) {
+	chunks := apicompat.FinalizeResponsesChatStream(a.chatState)
+	if a.Err() != nil {
+		return
+	}
+	for _, chunk := range chunks {
 		if data, err := apicompat.ChatChunkToSSE(chunk); err == nil {
 			writer.Write([]byte(data))
 		}
@@ -62,7 +73,11 @@ func (a *antigravityChatStreamAdapter) WriteError(writer *antigravityClientWrite
 }
 
 func (a *antigravityChatStreamAdapter) emitResponseEvent(event *apicompat.ResponsesStreamEvent, writer *antigravityClientWriter) {
-	for _, chunk := range apicompat.ResponsesEventToChatChunks(event, a.chatState) {
+	chunks := apicompat.ResponsesEventToChatChunks(event, a.chatState)
+	if a.Err() != nil {
+		return
+	}
+	for _, chunk := range chunks {
 		if data, err := apicompat.ChatChunkToSSE(chunk); err == nil {
 			writer.Write([]byte(data))
 		}
@@ -79,6 +94,8 @@ func newAntigravityResponsesStreamAdapter(model string) *antigravityResponsesStr
 	return &antigravityResponsesStreamAdapter{anthropicState: state}
 }
 
+func (a *antigravityResponsesStreamAdapter) Err() error { return nil }
+
 func (a *antigravityResponsesStreamAdapter) Emit(event *apicompat.AnthropicStreamEvent, writer *antigravityClientWriter) {
 	for _, responseEvent := range apicompat.AnthropicEventToResponsesEvents(event, a.anthropicState) {
 		a.emitResponseEvent(responseEvent, writer)
@@ -92,7 +109,27 @@ func (a *antigravityResponsesStreamAdapter) Finalize(writer *antigravityClientWr
 }
 
 func (a *antigravityResponsesStreamAdapter) WriteError(writer *antigravityClientWriter, reason string) {
-	writer.Fprintf("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"upstream_error\",\"message\":%q}}\n\n", reason)
+	state := a.anthropicState
+	if state.CompletedSent {
+		return
+	}
+	if state.ResponseID == "" {
+		state.ResponseID = "resp_" + uuid.NewString()
+	}
+	output := state.Outputs
+	if output == nil {
+		output = []apicompat.ResponsesOutput{}
+	}
+	a.emitResponseEvent(apicompat.ResponsesStreamEvent{
+		Type: "response.failed", SequenceNumber: state.SequenceNumber,
+		Response: &apicompat.ResponsesResponse{
+			ID: state.ResponseID, Object: "response", CreatedAt: state.Created,
+			Model: state.Model, Status: "failed", Output: output,
+			Error: &apicompat.ResponsesError{Code: "upstream_error", Message: reason},
+		},
+	}, writer)
+	state.SequenceNumber++
+	state.CompletedSent = true
 }
 
 func (a *antigravityResponsesStreamAdapter) emitResponseEvent(event apicompat.ResponsesStreamEvent, writer *antigravityClientWriter) {
@@ -176,6 +213,9 @@ func (s *antigravityCompatStreamSession) finish() (*antigravityStreamResult, err
 		return nil, antigravityCompatEmptyStreamError()
 	}
 	s.adapter.Finalize(s.writer)
+	if err := s.adapter.Err(); err != nil {
+		return s.result(s.writer.Disconnected()), fmt.Errorf("upstream protocol conversion failed: %w", err)
+	}
 	return s.result(s.writer.Disconnected()), nil
 }
 
@@ -256,7 +296,7 @@ func isMeaningfulAntigravityCompatEvent(event *apicompat.AnthropicStreamEvent) b
 	}
 	if event.Delta != nil {
 		delta := event.Delta
-		return delta.Text != "" ||
+		return delta.StopReason != "" || delta.Text != "" ||
 			delta.PartialJSON != "" ||
 			delta.Thinking != ""
 	}
@@ -304,7 +344,7 @@ func (s *AntigravityGatewayService) handleAntigravityCompatStreamWithKeepaliveIn
 	}
 	session := newAntigravityCompatStreamSession(originalModel, startTime, adapter, writer)
 	session.preContentKeepaliveInterval = interval
-	events, stopScanner, maxLineSize := s.startAntigravityCompatScanner(resp.Body)
+	events, stopScanner, maxLineSize := s.startAntigravityCompatScanner(resp.Body, c)
 	defer stopScanner()
 
 	timeout := s.antigravityCompatStreamTimeout()
@@ -347,7 +387,13 @@ func (s *AntigravityGatewayService) handleAntigravityCompatStreamWithKeepaliveIn
 				if !session.hasMeaningfulData() && !writer.Disconnected() {
 					return handleAntigravityCompatEmptyStream(c, session)
 				}
-				return session.finish()
+				result, err := session.finish()
+				if adapter.Err() != nil {
+					if !writer.Disconnected() {
+						err = writeAPICompatConversionError(c, adapter.Err(), false)
+					}
+				}
+				return result, err
 			}
 			if event.err != nil {
 				return s.handleAntigravityCompatReadError(c, session, event.err, maxLineSize, prefix)
@@ -396,13 +442,13 @@ func handleAntigravityCompatEmptyStream(c *gin.Context, session *antigravityComp
 }
 
 func (s *AntigravityGatewayService) startAntigravityCompatScanner(
-	body io.Reader,
+	body io.Reader, contexts ...*gin.Context,
 ) (<-chan antigravityCompatScanEvent, func(), int) {
 	maxLineSize := defaultMaxLineSize
 	if s.settingService != nil && s.settingService.cfg != nil && s.settingService.cfg.Gateway.MaxLineSize > 0 {
 		maxLineSize = s.settingService.cfg.Gateway.MaxLineSize
 	}
-	scanner := bufio.NewScanner(body)
+	scanner := bufio.NewScanner(newGeminiTerminalReader(body, maxLineSize, contexts...))
 	scanBuf := getSSEScannerBuf64K()
 	scanner.Buffer(scanBuf[:0], maxLineSize)
 
@@ -478,6 +524,12 @@ func (s *AntigravityGatewayService) handleAntigravityCompatReadError(
 	maxLineSize int,
 	prefix string,
 ) (*antigravityStreamResult, error) {
+	if session.writer.Disconnected() || (c.Request != nil && c.Request.Context().Err() != nil) {
+		MarkOpsClientCancellation(c, true)
+		MarkResponseCommitted(c)
+		return session.collectResult(true), err
+	}
+
 	if !session.hasMeaningfulData() && !session.writer.Disconnected() {
 		if session.preContentKeepaliveSent {
 			writeAntigravityCompatStreamError(c, session.adapter, session.writer, "stream_read_error")
@@ -485,16 +537,13 @@ func (s *AntigravityGatewayService) handleAntigravityCompatReadError(
 		}
 		return nil, antigravityCompatEmptyStreamError()
 	}
-	if disconnect, handled := handleStreamReadError(err, session.writer.Disconnected(), prefix); handled {
-		return session.collectResult(disconnect), nil
-	}
 	if errors.Is(err, bufio.ErrTooLong) {
 		logger.LegacyPrintf("service.antigravity_gateway", "SSE line too long (%s): max_size=%d error=%v", prefix, maxLineSize, err)
 		writeAntigravityCompatStreamError(c, session.adapter, session.writer, "response_too_large")
-		return session.result(false), err
+		return session.collectResult(false), err
 	}
 	writeAntigravityCompatStreamError(c, session.adapter, session.writer, "stream_read_error")
-	return nil, fmt.Errorf("stream read error: %w", err)
+	return session.collectResult(false), fmt.Errorf("stream read error: %w", err)
 }
 
 func writeAntigravityCompatStreamError(
@@ -504,6 +553,7 @@ func writeAntigravityCompatStreamError(
 	reason string,
 ) {
 	adapter.WriteError(writer, reason)
+	MarkOpsStreamError(c, "upstream_error", reason, http.StatusBadGateway)
 	MarkResponseCommitted(c)
 }
 

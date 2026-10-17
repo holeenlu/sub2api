@@ -218,7 +218,11 @@ func parseOpenAIWSErrorEventFields(message []byte) (code string, errType string,
 	if len(message) == 0 {
 		return "", "", ""
 	}
-	values := gjson.GetManyBytes(message, "error.code", "error.type", "error.message")
+	prefix := "error"
+	if gjson.GetBytes(message, "response.error").IsObject() {
+		prefix = "response.error"
+	}
+	values := gjson.GetManyBytes(message, prefix+".code", prefix+".type", prefix+".message")
 	return strings.TrimSpace(values[0].String()), strings.TrimSpace(values[1].String()), strings.TrimSpace(values[2].String())
 }
 
@@ -511,12 +515,14 @@ func applyOpenAIWSRetryPayloadStrategy(payload map[string]any, attempt int) (str
 	return "trim_optional_fields", removed
 }
 
+// 这些辅助函数由调用方决定级别，不走 LegacyPrintf 的关键字推断：
+// 事件名/字段名（error_event、*_fail、fallback_reason）不应把信息日志抬升为错误。
 func logOpenAIWSModeInfo(format string, args ...any) {
-	logger.LegacyPrintf("service.openai_gateway", "[OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
+	logger.LegacyPrintfLevel(logger.LevelInfo, "service.openai_gateway", "[OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
 }
 
 func logOpenAIWSModeWarn(format string, args ...any) {
-	logger.LegacyPrintf("service.openai_gateway", "[warn] [OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
+	logger.LegacyPrintfLevel(logger.LevelWarn, "service.openai_gateway", "[warn] [OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
 }
 
 func isOpenAIWSModeDebugEnabled() bool {
@@ -527,7 +533,7 @@ func logOpenAIWSModeDebug(format string, args ...any) {
 	if !isOpenAIWSModeDebugEnabled() {
 		return
 	}
-	logger.LegacyPrintf("service.openai_gateway", "[debug] [OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
+	logger.LegacyPrintfLevel(logger.LevelDebug, "service.openai_gateway", "[debug] [OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
 }
 
 func logOpenAIWSBindResponseAccountWarn(groupID, accountID int64, responseID string, err error) {
@@ -661,7 +667,7 @@ func isOpenAIWSClientDisconnectError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) {
 		return true
 	}
 	switch coderws.CloseStatus(err) {
