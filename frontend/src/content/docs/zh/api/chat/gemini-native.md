@@ -6,7 +6,7 @@ GET  /v1beta/models/{model}
 POST /v1beta/models/{model}:generateContent
 POST /v1beta/models/{model}:streamGenerateContent?alt=sse
 POST /v1beta/models/{model}:countTokens
-x-goog-api-key: $KDAN_API_KEY
+x-goog-api-key: $TOKENSAVY_API_KEY
 ```
 
 普通 `/v1beta` 仅接受 Gemini 分组。另有 `/antigravity/v1beta` 专用前缀，它强制选择 Antigravity 平台，不能用它推断普通 Gemini 分组的账号或模型能力。
@@ -16,7 +16,7 @@ x-goog-api-key: $KDAN_API_KEY
 ## 模型发现
 
 ```bash
-curl "$KDAN_BASE_URL/v1beta/models" -H "x-goog-api-key: $KDAN_API_KEY"
+curl "$TOKENSAVY_BASE_URL/v1beta/models" -H "x-goog-api-key: $TOKENSAVY_API_KEY"
 ```
 
 响应使用 Gemini `models[]` 信封，`name` 通常为 `models/YOUR_MODEL_ID`。列表可能来自上游，也可能在特定账号无法直接发现时回退到代码默认项，并经过分组白名单过滤。可见性不代表即时可调度。
@@ -24,8 +24,8 @@ curl "$KDAN_BASE_URL/v1beta/models" -H "x-goog-api-key: $KDAN_API_KEY"
 ## generateContent 请求
 
 ```bash
-curl "$KDAN_BASE_URL/v1beta/models/YOUR_MODEL_ID:generateContent" \
-  -H "x-goog-api-key: $KDAN_API_KEY" \
+curl "$TOKENSAVY_BASE_URL/v1beta/models/YOUR_MODEL_ID:generateContent" \
+  -H "x-goog-api-key: $TOKENSAVY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "systemInstruction":{"parts":[{"text":"Answer briefly."}]},
@@ -49,8 +49,8 @@ curl "$KDAN_BASE_URL/v1beta/models/YOUR_MODEL_ID:generateContent" \
 ## SSE 流
 
 ```bash
-curl -N "$KDAN_BASE_URL/v1beta/models/YOUR_MODEL_ID:streamGenerateContent?alt=sse" \
-  -H "x-goog-api-key: $KDAN_API_KEY" \
+curl -N "$TOKENSAVY_BASE_URL/v1beta/models/YOUR_MODEL_ID:streamGenerateContent?alt=sse" \
+  -H "x-goog-api-key: $TOKENSAVY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"contents":[{"role":"user","parts":[{"text":"Explain idempotency."}]}]}'
 ```

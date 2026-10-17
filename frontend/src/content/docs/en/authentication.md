@@ -1,6 +1,6 @@
 ## Base URL
 
-The real KDAN endpoint comes from public system settings and the console. Raw HTTP requests use `{root}/v1/...`. OpenAI SDKs normally use `{root}/v1` as `base_url`; Anthropic SDKs use the root and append `/v1/messages`.
+The real Tokensavy endpoint comes from public system settings and the console. Raw HTTP requests use `{root}/v1/...`. OpenAI SDKs normally use `{root}/v1` as `base_url`; Anthropic SDKs use the root and append `/v1/messages`.
 
 The examples normalize configured values to avoid `/v1/v1`. Custom deployment domains, proxy paths, and runtime settings take precedence over placeholders.
 
@@ -8,9 +8,9 @@ The examples normalize configured values to avoid `/v1/v1`. Custom deployment do
 
 | Protocol | Header |
 | --- | --- |
-| OpenAI compatible | `Authorization: Bearer $KDAN_API_KEY` |
-| Anthropic Messages | `x-api-key: $KDAN_API_KEY` |
-| Gemini compatible | `x-goog-api-key: $KDAN_API_KEY` |
+| OpenAI compatible | `Authorization: Bearer $API_KEY` |
+| Anthropic Messages | `x-api-key: $API_KEY` |
+| Gemini compatible | `x-goog-api-key: $API_KEY` |
 
 Use one key header per request. The gateway reads a valid Bearer header before the two compatibility headers. Raw Messages requests also include the applicable `anthropic-version`.
 

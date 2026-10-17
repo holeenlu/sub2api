@@ -99,7 +99,7 @@ const { t, locale } = useI18n()
  */
 const USAGE_TOKENS = [18420, 9640, 42180, 5310]
 const USAGE_COSTS = [0.1836, 0.0721, 0.2604, 0.0058]
-const MASKED_KEYS = ['sk-…a1b2', 'sk-…7f3e', 'sk-…c9d0']
+const MASKED_KEYS = ['sk-tap-…a1b2', 'sk-tap-…7f3e', 'sk-tap-…c9d0']
 const SUFFIXES = ['A', 'B', 'C', 'D']
 const QUOTA_USED = 124
 const QUOTA_TOTAL = 200
