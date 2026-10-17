@@ -2358,7 +2358,8 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if isOAuth {
 		testModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
-	payloadBytes, _ := json.Marshal(createOpenAICompactProbePayload(testModelID, isOAuth))
+	payload := createOpenAICompactProbePayload(testModelID, isOAuth)
+	payloadBytes, _ := json.Marshal(payload)
 	if !agentIdentityTaskRecoveryWasTried(ctx) {
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
@@ -2397,16 +2398,40 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if isOAuth {
 		req.Host = "chatgpt.com"
 		setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
-		// 指纹收敛：探测与真实转发走同一个 /responses 端点，身份也必须同构，
-		// 否则探测流量会以「缺 x-codex-installation-id + 非收敛 session」的
-		// 形态暴露在上游眼里。账号关闭收敛（off）时返回 nil，探测保持原样。
-		if fpIDs := resolveCodexFingerprintIDsFromRequest(account, req.Header); fpIDs != nil {
-			applyCodexFingerprintHeaders(req.Header, fpIDs)
-		}
 	}
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	if isOAuth {
+		apiKeyID := getAPIKeyIDFromContext(c)
+		// Match the forwarding order: resolve from raw probe identity, scope once,
+		// then share the same fingerprint IDs between the body and final headers.
+		fpIDs := resolveCodexFingerprintIDsForCaller(credentialAccount, req.Header, apiKeyID)
+		applyCodexAccountIdentityClientMetadataMap(payload, credentialAccount, apiKeyID)
+		applyCodexFingerprintClientMetadata(payload, fpIDs)
+		applyCodexAccountIdentityHeaders(req.Header, credentialAccount, apiKeyID)
+		for _, key := range []string{"session_id", "conversation_id"} {
+			if raw := req.Header.Get(key); raw != "" {
+				req.Header.Set(key, isolateOpenAIUpstreamSessionID(apiKeyID, credentialAccount, raw))
+			}
+		}
+		applyCodexFingerprintHeaders(req.Header, fpIDs)
+		// Only the original probe UUID is a fallback input, never the legacy hash.
+		applyCodexOfficialSessionHeaderFallback(req.Header, credentialAccount, apiKeyID, probeSessionID)
+		// Native compaction v2 uses ordinary /responses metadata, not the legacy
+		// compact body-preservation path (sub4api a3eaf63, local v4 adaptation).
+		if err := normalizeCodexRequestMetadataMap(payload, req.Header, credentialAccount, apiKeyID); err != nil {
+			return s.sendErrorAndEnd(c, "Failed to normalize compact probe metadata")
+		}
+		payloadBytes, err = json.Marshal(payload)
+		if err != nil {
+			return s.sendErrorAndEnd(c, "Failed to encode compact probe request")
+		}
+		req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
+		req.ContentLength = int64(len(payloadBytes))
+		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(payloadBytes)), nil }
+		projectCodexOutboundHeaders(req.Header, credentialAccount, false)
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
