@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 )
 
 const defaultImageMaxDownloadBytes int64 = 32 << 20 // 32 MiB
@@ -54,7 +56,19 @@ func NewImageResultUploader(storage ImageStorage, prefix string, maxDownloadByte
 }
 
 func defaultImageDownloadHTTPClient() *http.Client {
-	return &http.Client{Timeout: 60 * time.Second}
+	return &http.Client{
+		Timeout:   60 * time.Second,
+		Transport: urlvalidator.NewPublicTransport(nil),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+				return errors.New("image download cannot downgrade HTTPS")
+			}
+			return nil // PublicTransport validates and pins every destination.
+		},
+	}
 }
 
 // Rewrite 将 result（上游生图响应 JSON）里的每张图片转存到对象存储，
@@ -115,11 +129,12 @@ func (u *ImageResultUploader) fetchImageBytes(ctx context.Context, item map[stri
 		var b64 string
 		if err := json.Unmarshal(raw, &b64); err == nil {
 			if b64 = strings.TrimSpace(b64); b64 != "" {
-				data, err := base64.StdEncoding.DecodeString(b64)
+				data, err := u.readBase64Image(b64)
 				if err != nil {
 					return nil, "", fmt.Errorf("decode b64_json: %w", err)
 				}
-				return data, detectImageContentType(data), nil
+				contentType, err := allowedStoredImageContentType(data)
+				return data, contentType, err
 			}
 		}
 	}
@@ -184,17 +199,22 @@ func (u *ImageResultUploader) decodeImageDataURL(rawURL string) ([]byte, string,
 		return nil, "", fmt.Errorf("decoded image data URL exceeds %d bytes", limit)
 	}
 
-	contentType := detectedImageContentType(data)
-	if contentType == "" {
-		contentType = declaredType
-	}
-	return data, contentType, nil
+	contentType, err := allowedStoredImageContentType(data)
+	return data, contentType, err
 }
 
 func (u *ImageResultUploader) download(ctx context.Context, rawURL string) ([]byte, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	_, err := urlvalidator.ValidateHTTPURL(rawURL, true, urlvalidator.ValidationOptions{})
+	if err != nil {
+		return nil, "", fmt.Errorf("image download URL is not allowed: %w", err)
+	}
+	// Validation must not rewrite escaped paths or signed query parameters.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(rawURL), nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("build download request: %w", err)
+	}
+	if req.URL.User != nil {
+		return nil, "", errors.New("image download URL must not contain credentials")
 	}
 	resp, err := u.httpClient.Do(req)
 	if err != nil {
@@ -215,22 +235,35 @@ func (u *ImageResultUploader) download(ctx context.Context, rawURL string) ([]by
 	if int64(len(data)) > limit {
 		return nil, "", fmt.Errorf("downloaded image exceeds %d bytes", limit)
 	}
-	contentType := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
-	if !strings.HasPrefix(contentType, "image/") {
-		contentType = detectImageContentType(data)
+	contentType, err := allowedStoredImageContentType(data)
+	return data, contentType, err
+}
+
+func (u *ImageResultUploader) readBase64Image(payload string) ([]byte, error) {
+	limit := u.maxDownloadBytes
+	if limit <= 0 {
+		limit = defaultImageMaxDownloadBytes
 	}
-	return data, contentType, nil
+	data, err := io.ReadAll(io.LimitReader(base64.NewDecoder(base64.StdEncoding, strings.NewReader(payload)), limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("decoded image exceeds %d bytes", limit)
+	}
+	return data, nil
+}
+
+func allowedStoredImageContentType(data []byte) (string, error) {
+	contentType := detectedImageContentType(data)
+	if _, ok := openAIImageBackfillContentTypes[contentType]; !ok {
+		return "", errors.New("content is not an allowed image format")
+	}
+	return contentType, nil
 }
 
 func (u *ImageResultUploader) buildKey(taskID string, index int, contentType string) string {
 	return u.prefix + taskID + "-" + strconv.Itoa(index) + extensionForContentType(contentType)
-}
-
-func detectImageContentType(data []byte) string {
-	if ct := detectedImageContentType(data); ct != "" {
-		return ct
-	}
-	return "image/png"
 }
 
 func detectedImageContentType(data []byte) string {
