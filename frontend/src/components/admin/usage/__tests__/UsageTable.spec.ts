@@ -914,3 +914,14 @@ describe('admin UsageTable deleted-user badge', () => {
     expect(wrapper.text()).toContain('active@test.com')
   })
 })
+
+describe('settlement status display', () => {
+  it.each(['pending', 'pending_pricing', 'unmetered'])('does not display unknown %s charges as zero', (status) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, actual_cost: 0, billing_status: status }], loading: false, columns: [{ key: 'cost', label: 'Cost' }], showAccountBilling: false },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } }
+    })
+    expect(wrapper.get('[data-testid="billing-status"]').text()).toBe('usage.billingStatus.' + status)
+    expect(wrapper.find('span.font-medium.text-green-600').exists()).toBe(false)
+  })
+})
