@@ -1313,15 +1313,15 @@ func TestOpenAISelectAccountWithLoadAwareness_PrefersLowerLoad(t *testing.T) {
 	groupID := int64(1)
 	repo := stubOpenAIAccountRepo{
 		accounts: []Account{
-			{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 1},
-			{ID: 2, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 1},
+			{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 10, Priority: 1},
+			{ID: 2, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 10, Priority: 1},
 		},
 	}
 	cache := &stubGatewayCache{}
 	concurrencyCache := stubConcurrencyCache{
 		loadMap: map[int64]*AccountLoadInfo{
-			1: {AccountID: 1, LoadRate: 80},
-			2: {AccountID: 2, LoadRate: 10},
+			1: {AccountID: 1, LoadRate: 80, CurrentConcurrency: 8},
+			2: {AccountID: 2, LoadRate: 10, CurrentConcurrency: 1},
 		},
 	}
 
@@ -1331,16 +1331,22 @@ func TestOpenAISelectAccountWithLoadAwareness_PrefersLowerLoad(t *testing.T) {
 		concurrencyService: NewConcurrencyService(concurrencyCache),
 	}
 
-	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "load", "gpt-4", nil)
-	if err != nil {
-		t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
+	// Capacity-weighted selection favours spare capacity across sessions; it
+	// does not promise the same winner for one arbitrarily chosen hash.
+	counts := map[int64]int{}
+	for i := range 256 {
+		session := fmt.Sprintf("load-%d", i)
+		selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, session, "gpt-4", nil)
+		require.NoError(t, err)
+		require.NotNil(t, selection)
+		require.NotNil(t, selection.Account)
+		counts[selection.Account.ID]++
+		require.Equal(t, selection.Account.ID, cache.sessionBindings["openai:"+session], "bind the actual selected account")
+		if selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
 	}
-	if selection == nil || selection.Account == nil || selection.Account.ID != 2 {
-		t.Fatalf("expected account 2")
-	}
-	if cache.sessionBindings["openai:load"] != 2 {
-		t.Fatalf("expected sticky session updated")
-	}
+	require.Greater(t, counts[2], 2*counts[1], "nine free slots should receive substantially more traffic than two")
 }
 
 func TestOpenAISelectAccountForModelWithExclusions_StickyExcludedFallback(t *testing.T) {

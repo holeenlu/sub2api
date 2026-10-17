@@ -110,7 +110,7 @@ func TestCodexAccountIdentitySourceResolvesShadowAndOverwritesFailoverContext(t 
 
 	req, err := service.buildUpstreamRequest(
 		context.Background(), c, shadow,
-		[]byte(`{"model":"gpt-5.6-codex","stream":true,"prompt_cache_key":"client-session"}`),
+		[]byte(`{"model":"gpt-5.6-codex","stream":true,"prompt_cache_key":"client-session","input":[{"role":"user","content":"hello"}]}`),
 		"token", true, "client-session", true,
 	)
 	require.NoError(t, err)
@@ -161,7 +161,7 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 
 	httpRequest, err := service.buildUpstreamRequest(
 		context.Background(), c, account11,
-		[]byte(`{"model":"gpt-5.6-codex","stream":true,"prompt_cache_key":"client-session"}`),
+		[]byte(`{"model":"gpt-5.6-codex","stream":true,"prompt_cache_key":"client-session","input":[{"role":"user","content":"hello"}]}`),
 		"token", true, "client-session", true,
 	)
 	require.NoError(t, err)
@@ -171,7 +171,7 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 func TestBuildUpstreamRequestNamespacesCodexIdentityByOAuthAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := &OpenAIGatewayService{}
-	body := []byte(`{"model":"gpt-5.6-codex","stream":true,"prompt_cache_key":"client-session"}`)
+	body := []byte(`{"model":"gpt-5.6-codex","stream":true,"prompt_cache_key":"client-session","input":[{"role":"user","content":"hello"}]}`)
 
 	build := func(accountID int64, chatgptAccountID string) http.Header {
 		t.Helper()

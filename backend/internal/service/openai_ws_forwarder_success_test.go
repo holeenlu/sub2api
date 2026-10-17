@@ -419,6 +419,7 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersPreservesCodexIdentity(t *test
 		"",
 		"",
 		"",
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -443,7 +444,7 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersDeviceModePreservesNamespacedC
 	c.Request.Header.Set("x-client-request-id", "client-request")
 
 	account := newTestOAuthAccount(1300, map[string]any{codexFingerprintModeExtraKey: "device"})
-	ids := resolveCodexFingerprintIDsFromRequest(account, c.Request.Header)
+	ids := resolveCodexFingerprintIDsForCaller(account, c.Request.Header, 0)
 	require.NotNil(t, ids)
 	stageCodexFingerprintIDs(c, ids)
 
@@ -460,6 +461,7 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersDeviceModePreservesNamespacedC
 		"",
 		"",
 		"",
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -468,7 +470,7 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersDeviceModePreservesNamespacedC
 	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "window", "client-window"), headers.Get("x-codex-window-id"))
 	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "session", "client-session"), headers.Get("session-id"))
 	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "thread", "client-thread"), headers.Get("thread-id"))
-	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "request", "client-request"), headers.Get("x-client-request-id"))
+	require.Equal(t, headers.Get("thread-id"), headers.Get("x-client-request-id"), "Codex request correlation carries the scoped thread identity")
 }
 
 func TestLogOpenAIWSBindResponseAccountWarn(t *testing.T) {
@@ -1157,12 +1159,15 @@ func TestOpenAIGatewayService_Forward_WSv2_CodexFingerprintHandshakeBodyParityAn
 	require.True(t, ok)
 	wantInstall := resolveConvergedInstallationID(account, seed)
 	wantSession := resolveConvergedSessionID(seed)
-	wantThread := resolveConvergedThreadID(seed, "header-session")
+	wantThread := scopeCodexAccountIdentityValue(account, 0, "thread", "body-thread")
+	wantAffinity := scopeCodexAccountIdentityValue(account, 0, "session", "header-session")
 	payloadJSON := requestToJSONString(captureConn.lastWrite)
 
-	require.Equal(t, wantInstall, captureDialer.lastHeaders.Get("x-codex-installation-id"))
-	require.Equal(t, wantSession, captureDialer.lastHeaders.Get("session-id"))
-	require.Equal(t, wantSession, captureDialer.lastHeaders.Get("session_id"))
+	for _, name := range []string{"session_id", "conversation_id", "x-codex-installation-id", "accept-language"} {
+		require.Empty(t, captureDialer.lastHeaders.Get(name), name)
+	}
+	require.Equal(t, wantAffinity, captureDialer.lastHeaders.Get("session-id"))
+	require.NotEqual(t, wantSession, wantAffinity, "explicit affinity remains independent of body session")
 	require.Equal(t, wantThread, captureDialer.lastHeaders.Get("thread-id"))
 	require.Equal(t, wantThread, captureDialer.lastHeaders.Get("x-client-request-id"))
 	require.Equal(t, wantThread+":0", captureDialer.lastHeaders.Get("x-codex-window-id"))
@@ -1433,72 +1438,87 @@ func TestOpenAIGatewayService_Forward_WSv2_TurnStateAndMetadataReplayOnReconnect
 }
 
 func TestOpenAIGatewayService_Forward_WSv2_GeneratePrewarm(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
+		t.Run(accountType, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
 
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
-	c.Request.Header.Set("session_id", "session-prewarm")
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+			c.Request.Header.Set("session_id", "session-prewarm")
 
-	cfg := &config.Config{}
-	cfg.Security.URLAllowlist.Enabled = false
-	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
-	cfg.Gateway.OpenAIWS.Enabled = true
-	cfg.Gateway.OpenAIWS.OAuthEnabled = true
-	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
-	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
-	cfg.Gateway.OpenAIWS.PrewarmGenerateEnabled = true
-	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
-	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
-	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+			cfg := &config.Config{}
+			cfg.Security.URLAllowlist.Enabled = false
+			cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+			cfg.Gateway.OpenAIWS.Enabled = true
+			cfg.Gateway.OpenAIWS.OAuthEnabled = true
+			cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+			cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+			cfg.Gateway.OpenAIWS.PrewarmGenerateEnabled = true
+			cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
 
-	captureConn := &openAIWSCaptureConn{
-		events: [][]byte{
-			[]byte(`{"type":"response.completed","response":{"id":"resp_prewarm_1","model":"gpt-5.1","usage":{"input_tokens":0,"output_tokens":0}}}`),
-			[]byte(`{"type":"response.completed","response":{"id":"resp_main_1","model":"gpt-5.1","usage":{"input_tokens":4,"output_tokens":2}}}`),
-		},
+			captureConn := &openAIWSCaptureConn{
+				events: [][]byte{
+					[]byte(`{"type":"response.completed","response":{"id":"resp_prewarm_1","model":"gpt-5.1","usage":{"input_tokens":0,"output_tokens":0}}}`),
+					[]byte(`{"type":"response.completed","response":{"id":"resp_main_1","model":"gpt-5.1","usage":{"input_tokens":4,"output_tokens":2}}}`),
+				},
+			}
+			captureDialer := &openAIWSCaptureDialer{conn: captureConn}
+			pool := newOpenAIWSConnPool(cfg)
+			pool.setClientDialerForTest(captureDialer)
+			t.Cleanup(pool.Close)
+
+			svc := &OpenAIGatewayService{
+				cfg:              cfg,
+				httpUpstream:     &httpUpstreamRecorder{},
+				cache:            &stubGatewayCache{},
+				openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+				toolCorrector:    NewCodexToolCorrector(),
+				openaiWSPool:     pool,
+			}
+
+			account := &Account{
+				ID:          59,
+				Name:        "openai-prewarm",
+				Platform:    PlatformOpenAI,
+				Type:        accountType,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"api_key": "sk-test",
+				},
+				Extra: map[string]any{
+					"responses_websockets_v2_enabled": true,
+				},
+			}
+
+			if accountType == AccountTypeOAuth {
+				account.Credentials = map[string]any{"access_token": "test-token", "chatgpt_account_id": "prewarm-owner"}
+			}
+
+			body := []byte(`{"model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"hello"}]}`)
+			result, err := svc.Forward(context.Background(), c, account, body)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, "resp_main_1", result.RequestID)
+
+			require.Len(t, captureConn.writes, 2, "开启 generate=false 预热后应发送两次 WS 请求")
+			firstWrite := requestToJSONString(captureConn.writes[0])
+			secondWrite := requestToJSONString(captureConn.writes[1])
+			require.True(t, gjson.Get(firstWrite, "generate").Exists())
+			require.False(t, gjson.Get(firstWrite, "generate").Bool())
+			require.False(t, gjson.Get(secondWrite, "generate").Exists())
+			if accountType == AccountTypeOAuth {
+				require.JSONEq(t, `{}`, gjson.Get(firstWrite, "reasoning").Raw)
+				require.Equal(t, "auto", gjson.Get(firstWrite, "tool_choice").String())
+				require.Equal(t, gjson.False, gjson.Get(firstWrite, "parallel_tool_calls").Type)
+				require.JSONEq(t, `["reasoning.encrypted_content"]`, gjson.Get(firstWrite, "include").Raw)
+			}
+		})
 	}
-	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
-	pool := newOpenAIWSConnPool(cfg)
-	pool.setClientDialerForTest(captureDialer)
-
-	svc := &OpenAIGatewayService{
-		cfg:              cfg,
-		httpUpstream:     &httpUpstreamRecorder{},
-		cache:            &stubGatewayCache{},
-		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
-		toolCorrector:    NewCodexToolCorrector(),
-		openaiWSPool:     pool,
-	}
-
-	account := &Account{
-		ID:          59,
-		Name:        "openai-prewarm",
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeAPIKey,
-		Status:      StatusActive,
-		Schedulable: true,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"api_key": "sk-test",
-		},
-		Extra: map[string]any{
-			"responses_websockets_v2_enabled": true,
-		},
-	}
-
-	body := []byte(`{"model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"hello"}]}`)
-	result, err := svc.Forward(context.Background(), c, account, body)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, "resp_main_1", result.RequestID)
-
-	require.Len(t, captureConn.writes, 2, "开启 generate=false 预热后应发送两次 WS 请求")
-	firstWrite := requestToJSONString(captureConn.writes[0])
-	secondWrite := requestToJSONString(captureConn.writes[1])
-	require.True(t, gjson.Get(firstWrite, "generate").Exists())
-	require.False(t, gjson.Get(firstWrite, "generate").Bool())
-	require.False(t, gjson.Get(secondWrite, "generate").Exists())
 }
 
 func TestOpenAIGatewayService_PrewarmReadHonorsParentContext(t *testing.T) {
@@ -1951,6 +1971,7 @@ func (d *openAIWSCaptureDialer) DialCount() int {
 
 type openAIWSCaptureConn struct {
 	mu         sync.Mutex
+	readErr    error
 	readDelays []time.Duration
 	events     [][]byte
 	lastWrite  map[string]any
@@ -1996,6 +2017,9 @@ func (c *openAIWSCaptureConn) ReadMessage(ctx context.Context) ([]byte, error) {
 	}
 	if len(c.events) == 0 {
 		c.mu.Unlock()
+		if c.readErr != nil {
+			return nil, c.readErr
+		}
 		return nil, io.EOF
 	}
 	delay := time.Duration(0)
