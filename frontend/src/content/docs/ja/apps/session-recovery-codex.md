@@ -4,7 +4,7 @@
 
 [API キー](/keys) から現在のグループの有効な設定をコピーし、新しいセッションが動作することを確認します。401、503、残高不足、上流エラーは設定またはサーバー側の調査が必要です。元のセッションディレクトリは保持してください。
 
-Python 3.11 以降と Codex CLI が必要です。[ツールをダウンロード](/downloads/kdan-codex-session-repair.zip)して展開し、kdan-codex-session-repair に移動します。macOS、Linux、Windows に対応します。
+Python 3.11 以降と Codex CLI が必要です。[ツールをダウンロード](/downloads/tapmodels-codex-session-repair.zip)して展開し、tapmodels-codex-session-repair に移動します。macOS、Linux、Windows に対応します。
 
 ## セッションを探して再開コマンドを確認
 
@@ -16,7 +16,7 @@ bash repair-sessions.sh --list
 
 
 ```powershell
-.\RepairSessions.ps1 -List
+.\Repair-TapModelsSessions.ps1 -List
 ```
 
 
@@ -28,7 +28,7 @@ bash repair-sessions.sh --resume "SESSION_ID" --project-dir "/path/to/project"
 
 
 ```powershell
-.\RepairSessions.ps1 -Resume "SESSION_ID" -ProjectDir "C:\path\to\project"
+.\Repair-TapModelsSessions.ps1 -Resume "SESSION_ID" -ProjectDir "C:\path\to\project"
 ```
 
 
@@ -53,7 +53,7 @@ bash repair-sessions.sh --apply --client-closed
 
 
 ```powershell
-.\Repair-KDANSessions.ps1 -Apply -ClientClosed
+.\Repair-TapModelsSessions.ps1 -Apply -ClientClosed
 ```
 
 

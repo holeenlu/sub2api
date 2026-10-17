@@ -1,7 +1,7 @@
 interface:
-  display_name: "KDAN Admin"
-  short_description: "Manage KDAN admin accounts and settings"
-  default_prompt: "Use $sub2api-admin to inspect and manage KDAN backend accounts safely."
+  display_name: "TapModels Admin"
+  short_description: "Manage TapModels admin accounts and settings"
+  default_prompt: "Use $sub2api-admin to inspect and manage TapModels backend accounts safely."
 
 policy:
   allow_implicit_invocation: true
