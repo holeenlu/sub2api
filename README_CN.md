@@ -42,6 +42,12 @@ KDAN 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的 AP
 - **管理后台** - Web 界面进行监控和管理
 - **外部系统集成** - 支持通过 iframe 嵌入外部系统（如工单等），扩展管理后台功能
 
+## 供应商门户独立部署
+
+供应商门户可作为独立静态前端/API 代理镜像，与现有运营后端同机部署，或部署在 A、运营后端在 B、PostgreSQL/Redis 在 C 或云服务。门户不运行第二个业务后端，不持有数据库和 Redis 凭证；现有“API 端点地址”继续用于网关客户端，门户连接 B 的地址在启动时单独配置。
+
+入口为 deploy/vendor-portal/Dockerfile 和 deploy/docker-compose.vendor.yml。可选 TLS 入口、同机/分机命令、版本配套及验证见 [门户部署说明](docs/vendor-console/PORTAL-ROUTING.md#独立门户镜像2026-10-19)。
+
 ## 技术栈
 
 | 组件 | 技术 |
@@ -202,18 +208,6 @@ docker compose -f docker-compose.local.yml logs -f kdan
 | **docker-compose.yml** | 命名卷 | ⚠️ 需要 docker 命令 | 简单设置 |
 
 **推荐：** 使用 `docker-compose.local.yml`（脚本部署）以便更轻松地管理数据。
-
-#### 启用“数据管理”功能（datamanagementd）
-
-如需启用管理后台“数据管理”，需要额外部署宿主机数据管理进程 `datamanagementd`。
-
-关键点：
-
-- 主进程固定探测：`/tmp/kdan-datamanagement.sock`
-- 只有该 Socket 可连通时，数据管理功能才会开启
-- Docker 场景需将宿主机 Socket 挂载到容器同路径
-
-详细部署步骤见：`deploy/DATAMANAGEMENTD_CN.md`
 
 #### 访问
 
