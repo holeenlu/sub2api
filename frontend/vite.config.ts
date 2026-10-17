@@ -3,6 +3,12 @@ import vue from '@vitejs/plugin-vue'
 import checker from 'vite-plugin-checker'
 import { resolve } from 'path'
 
+// Duplicated on purpose: tsconfig.node.json is a `composite` project scoped to
+// vite.config.ts, so importing src/config/brand.ts here would emit brand.js /
+// brand.d.ts into the source tree. Keep in sync with BRAND_TITLE_SUFFIX_EN in
+// src/config/brand.ts.
+const BRAND_TITLE_SUFFIX_EN = 'AI API Gateway'
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
     '&': '&amp;',
@@ -32,7 +38,7 @@ function injectBranding(html: string, config: { site_name?: string; site_logo?: 
   if (siteName) {
     brandedHtml = brandedHtml.replace(
       /<title>[^<]*<\/title>/i,
-      `<title>${escapeHtml(siteName)} - AI API Gateway</title>`,
+      `<title>${escapeHtml(siteName)} - ${escapeHtml(BRAND_TITLE_SUFFIX_EN)}</title>`,
     )
   }
 

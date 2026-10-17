@@ -30,6 +30,8 @@ server:
   # Maximum time to receive complete request headers. Does not limit response streams.
   # 完整读取请求头的最大时间；不限制响应流持续时间。
   read_header_timeout: 10
+  # Request body phase only; cleared after the body completes. 0 disables.
+  read_body_timeout: 300
   # Request header limit in bytes (64 KiB); also bounds the HTTP/2 header list.
   # 请求头上限（字节，默认 64 KiB）；同时约束 HTTP/2 header list。
   max_header_bytes: 65536
@@ -426,9 +428,9 @@ gateway:
     fallback_error_threshold: 2
     fallback_window_seconds: 60
     fallback_ttl_seconds: 600
-  # OpenAI Responses SSE 代理断流熔断；按 proxy_id 跨账号隔离，仅影响下一次调度。
-  # 隔离是偏好而非硬闸：当全部候选账号都在被隔离代理下时自动放行（fail-open），
-  # 不会因熔断而返回"无可用账号"。3 秒内的并发断流合并为一次失败事件。
+  # OpenAI Responses SSE 代理断流熔断；按 proxy_id 跨账号隔离，并在生成发送前核验共享恢复状态。
+  # 隔离期间不整体放行；冷却结束后的真实请求须取得 Redis 单探测租约，
+  # Redis 无法确认已隔离路径的探测资格时保持隔离；3 秒内并发断流合并为一次事件。
   openai_proxy_stream_circuit:
     disabled: false
     failure_threshold: 2

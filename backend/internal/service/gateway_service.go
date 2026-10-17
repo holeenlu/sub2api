@@ -431,6 +431,7 @@ var ErrReasoningContentNotFound = errors.New("reasoning content not found")
 // GatewayCache defines cache operations for gateway service.
 // Provides sticky session storage, retrieval, refresh and deletion capabilities.
 type GatewayCache interface {
+	ClaudeConversationStateCache
 	// GetSessionAccountID 获取粘性会话绑定的账号 ID；无绑定时返回
 	// ErrStickySessionNotFound，使 service 层无需依赖具体缓存实现即可
 	// 区分"未绑定"与真实读取失败。
