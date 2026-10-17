@@ -11,8 +11,8 @@
 ## Anthropic Messages 计数
 
 ```bash
-curl "$KDAN_BASE_URL/v1/messages/count_tokens" \
-  -H "x-api-key: $KDAN_API_KEY" \
+curl "$TAPMODELS_BASE_URL/v1/messages/count_tokens" \
+  -H "x-api-key: $TAPMODELS_API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
   -d '{"model":"YOUR_MODEL_ID","system":"Answer briefly.","messages":[{"role":"user","content":"What is idempotency?"}]}'
@@ -27,8 +27,8 @@ curl "$KDAN_BASE_URL/v1/messages/count_tokens" \
 ## Responses input_tokens
 
 ```bash
-curl "$KDAN_BASE_URL/v1/responses/input_tokens" \
-  -H "Authorization: Bearer $KDAN_API_KEY" \
+curl "$TAPMODELS_BASE_URL/v1/responses/input_tokens" \
+  -H "Authorization: Bearer $TAPMODELS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"YOUR_MODEL_ID","instructions":"Answer briefly.","input":"What is idempotency?"}'
 ```
@@ -42,8 +42,8 @@ curl "$KDAN_BASE_URL/v1/responses/input_tokens" \
 ## Gemini countTokens
 
 ```bash
-curl "$KDAN_BASE_URL/v1beta/models/YOUR_MODEL_ID:countTokens" \
-  -H "x-goog-api-key: $KDAN_API_KEY" \
+curl "$TAPMODELS_BASE_URL/v1beta/models/YOUR_MODEL_ID:countTokens" \
+  -H "x-goog-api-key: $TAPMODELS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"contents":[{"role":"user","parts":[{"text":"What is idempotency?"}]}]}'
 ```
