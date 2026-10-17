@@ -1,5 +1,25 @@
 export default {
     ops: {
+      clientTelemetry: {
+        title: "クライアントのテレメトリサンプル",
+        description: "受信した Claude イベントをローカルに保存し、上流へ転送しません。同じユーザーの同一デバイスまたは同一イベントは最初のサンプルを保持し、再送は受信回数に加算します。",
+        retention: "運用ログの保存日数と有効なクリーンアップ設定に従い、長期間受信のないサンプルを削除します。デバイス ID がない場合は内容で重複を判定します。",
+        user_id: "ユーザー ID",
+        api_key_id: "API Key ID",
+        session: "初回セッション ID",
+        lastSeen: "最終受信",
+        source: "クライアント / ユーザー / Key",
+        device: "デバイス ID",
+        noDevice: "未指定",
+        count: "受信回数",
+        detail: "サンプルを表示",
+        body: "元のイベント JSON",
+        headers: "クライアント環境ヘッダー",
+        copy: "元のイベントをコピー",
+        copied: "コピーしました",
+        loadFailed: "テレメトリの読み込みに失敗しました",
+        invalidID: "ID は正の整数で指定してください",
+      },
       title: '運用監視',
       description: '運用状況の監視とトラブルシューティング',
       // Dashboard
@@ -366,7 +386,8 @@ export default {
           client: 'クライアントレスポンス',
           upstream_message: 'アップストリームメッセージ',
           upstream_detail: 'アップストリーム詳細',
-          upstream_events: 'アップストリームイベント'
+          upstream_events: 'アップストリームイベント',
+          scheduling_trace: 'スケジューリング判断'
         },
         basicInfo: '基本情報',
         platform: 'プラットフォーム',

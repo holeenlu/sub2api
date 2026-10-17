@@ -1,5 +1,25 @@
 export default {
     ops: {
+      clientTelemetry: {
+        title: "客户端遥测样本",
+        description: "仅在本地保存实际收到的 Claude 客户端事件，不转发到上游。同一用户的相同设备或相同事件只保留首份样本，重复上传累计次数。",
+        retention: "按运维日志保留天数和已启用的清理计划，清除长时间未收到新上传的样本。没有设备标识时只按事件内容去重。",
+        user_id: "用户 ID",
+        api_key_id: "API Key ID",
+        session: "首次会话 ID",
+        lastSeen: "最近接收",
+        source: "客户端 / 用户 / Key",
+        device: "设备标识",
+        noDevice: "未提供",
+        count: "接收次数",
+        detail: "查看样本",
+        body: "原始事件 JSON",
+        headers: "客户端环境头",
+        copy: "复制原始事件",
+        copied: "已复制",
+        loadFailed: "加载遥测样本失败",
+        invalidID: "ID 必须是正整数",
+      },
       title: '运维监控',
       description: '运维监控与排障',
       // Dashboard
@@ -366,7 +386,8 @@ export default {
           client: '客户端响应',
           upstream_message: '上游消息',
           upstream_detail: '上游详情',
-          upstream_events: '上游事件'
+          upstream_events: '上游事件',
+          scheduling_trace: '调度决策'
         },
         basicInfo: '基本信息',
         platform: '平台',

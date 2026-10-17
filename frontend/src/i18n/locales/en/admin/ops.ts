@@ -1,5 +1,25 @@
 export default {
     ops: {
+      clientTelemetry: {
+        title: "Client telemetry samples",
+        description: "Stores received Claude client events locally without forwarding them upstream. The same device or event for a user keeps its first sample; repeated uploads increment the count.",
+        retention: "Inactive samples expire under the ops log retention period and enabled cleanup schedule. Events without a device ID are deduplicated by content only.",
+        user_id: "User ID",
+        api_key_id: "API Key ID",
+        session: "First session ID",
+        lastSeen: "Last received",
+        source: "Client / User / Key",
+        device: "Device ID",
+        noDevice: "Not provided",
+        count: "Receipts",
+        detail: "View sample",
+        body: "Original event JSON",
+        headers: "Client environment headers",
+        copy: "Copy original event",
+        copied: "Copied",
+        loadFailed: "Failed to load telemetry samples",
+        invalidID: "IDs must be positive integers",
+      },
       title: 'Ops Monitoring',
       description: 'Operational monitoring and troubleshooting',
       // Dashboard
@@ -366,7 +386,8 @@ export default {
           client: 'Client Response',
           upstream_message: 'Upstream Message',
           upstream_detail: 'Upstream Detail',
-          upstream_events: 'Upstream Events'
+          upstream_events: 'Upstream Events',
+          scheduling_trace: 'Scheduling Decisions'
         },
         basicInfo: 'Basic Info',
         platform: 'Platform',

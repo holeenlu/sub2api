@@ -2,6 +2,26 @@
 // 詞彙修正請改 tools/zh-tw/convert.mjs（CORRECTIONS / TW_VOCAB），逐句修正請改 gen-locale.mjs 的 OVERRIDES。
 export default {
     ops: {
+      clientTelemetry: {
+        title: "用戶端遙測樣本",
+        description: "僅在本地儲存實際收到的 Claude 用戶端事件，不轉發到上游。同一使用者的相同裝置或相同事件只保留首份樣本，重複上傳累計次數。",
+        retention: "按維運日誌保留天數和已啟用的清理計劃，清除長時間未收到新上傳的樣本。沒有裝置標識時只按事件內容去重。",
+        user_id: "使用者 ID",
+        api_key_id: "API Key ID",
+        session: "首次工作階段 ID",
+        lastSeen: "最近接收",
+        source: "用戶端 / 使用者 / Key",
+        device: "裝置標識",
+        noDevice: "未提供",
+        count: "接收次數",
+        detail: "檢視樣本",
+        body: "原始事件 JSON",
+        headers: "用戶端環境頭",
+        copy: "複製原始事件",
+        copied: "已複製",
+        loadFailed: "載入遙測樣本失敗",
+        invalidID: "ID 必須是正整數",
+      },
       title: '維運監控',
       description: '維運監控與故障排除',
       // Dashboard
@@ -368,7 +388,8 @@ export default {
           client: '用戶端回應',
           upstream_message: '上游訊息',
           upstream_detail: '上游詳情',
-          upstream_events: '上游事件'
+          upstream_events: '上游事件',
+          scheduling_trace: '排程決策'
         },
         basicInfo: '基本資訊',
         platform: '平台',
