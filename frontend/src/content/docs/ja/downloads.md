@@ -4,8 +4,8 @@
 
 | ファイル | 用途 | デフォルトの動作 |
 | --- | --- | --- |
-| [TapModels Codex session repair bundle](/downloads/tapmodels-codex-session-repair.zip) | macOS、Linux、Windows における Codex セッションの診断と修復 | 読み取り専用。書き込みには明示的な Apply が必要 |
-| [TapModels Claude Code session recovery bundle](/downloads/tapmodels-claude-session-recovery.zip) | ローカルの Claude セッションを検索し、正確な再開コマンドを生成 | 読み取り専用。Claude の起動やセッションの変更は行わない |
+| [Tokensavy Codex session repair bundle](/downloads/tokensavy-codex-session-repair.zip) | macOS、Linux、Windows における Codex セッションの診断と修復 | 読み取り専用。書き込みには明示的な Apply が必要 |
+| [Tokensavy Claude Code session recovery bundle](/downloads/tokensavy-claude-session-recovery.zip) | ローカルの Claude セッションを検索し、正確な再開コマンドを生成 | 読み取り専用。Claude の起動やセッションの変更は行わない |
 | [GPT Image 2.5 Flare skill](/downloads/gpt-image-flare.zip) | Codex による画像生成と編集 | Flare モデルに固定 |
 | [GPT Image 2.5 Sunburst skill](/downloads/gpt-image-sunburst.zip) | Codex による画像生成と編集 | Sunburst モデルに固定 |
 

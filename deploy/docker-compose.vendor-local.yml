@@ -2,4 +2,4 @@
 # Join its existing network without recreating the backend or storage.
 services:
   vendor-portal:
-    networks: [kdan-network]
+    networks: [tokensavy-network]

@@ -17,11 +17,11 @@ export default {
     exploreModels: 'Explore Models',
     goToDashboard: 'Go to Dashboard',
     // Hero copy
-    heroSubtitle: 'Pick a model. Start building.',
+    heroSubtitle: 'Smart tokens. More possibilities.',
     heroDescription:
       'Access multiple AI models through one unified API.\nSpend less time managing integrations and more time building.',
     heroEyebrow: 'A multi-model AI API gateway',
-    heroTitle: 'Pick a model. Start building.',
+    heroTitle: 'Smart tokens. More possibilities.',
     contactIntegration: 'Discuss your integration',
     quickInstall: { eyebrow: 'Ready in minutes', title: 'Start with one API key', description: 'Codex CLI and Claude Code guides include backups, environment variables, and configuration files.' },
     terminal: {
@@ -171,7 +171,7 @@ export default {
         'All tools share the same connection details: model aliases map to the actual upstream models, /v1/models returns the model catalog for the API key’s group, and reasoning effort settings and the prompt cache key are preserved when forwarding.'
     },
     seo: {
-      title: '@:common.siteName | Pick a model. Start building.',
+      title: '@:common.siteName | Smart tokens. More possibilities.',
       description:
         'Access multiple AI models through one @:common.siteName API. Explore available models and rates, and review request-level usage and charges.'
     },

@@ -1,6 +1,6 @@
 ## 錯誤結構
 
-KDAN 保留入口協議的錯誤格式。OpenAI、Anthropic 與 Google 風格的欄位可能不同；用戶端應至少記錄 HTTP 狀態、錯誤類型、訊息和回應 request ID。
+Tokensavy 保留入口協議的錯誤格式。OpenAI、Anthropic 與 Google 風格的欄位可能不同；用戶端應至少記錄 HTTP 狀態、錯誤類型、訊息和回應 request ID。
 
 | 狀態 | 常見原因 | 建議 |
 | --- | --- | --- |

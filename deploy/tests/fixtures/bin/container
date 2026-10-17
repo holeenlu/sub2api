@@ -46,16 +46,16 @@ inspect_resource() {
         if [[ -s "${STATE_DIR}/network-subnets/${resource_name}" ]]; then
             subnet="$(<"${STATE_DIR}/network-subnets/${resource_name}")"
         fi
-        printf '[{"configuration":{"ipv4Subnet":"%s","labels":{"org.kdan.stack":"%s"}}}]\n' \
+        printf '[{"configuration":{"ipv4Subnet":"%s","labels":{"org.tokensavy.stack":"%s"}}}]\n' \
             "${subnet}" "${label_value}"
         return
     fi
     case "${resource_name}" in
-        kdan-apple-postgres) address="192.168.65.2/24" ;;
-        kdan-apple-redis) address="192.168.65.3/24" ;;
+        tokensavy-apple-postgres) address="192.168.65.2/24" ;;
+        tokensavy-apple-redis) address="192.168.65.3/24" ;;
     esac
 
-    printf '[{"configuration":{"labels":{"org.kdan.stack":"%s"}},"status":{"networks":[{"ipv4Address":"%s"}]}}]\n' \
+    printf '[{"configuration":{"labels":{"org.tokensavy.stack":"%s"}},"status":{"networks":[{"ipv4Address":"%s"}]}}]\n' \
         "${label_value}" "${address}"
 }
 

@@ -11,7 +11,7 @@
 # 修改为你的域名
 # 独立供应商域名使用 examples/vendor-portal.Caddyfile 的并列站点块；
 # API 必须保留完整 /api/v1 路径并由后端 VendorOrigin 统一授权。
-nextcode.buildtoconnect.com {
+api.tokensavy.ai {
 	# This baseline assumes clients connect directly to Caddy. When Caddy is
 	# behind a CDN, configure explicit trusted proxy CIDRs and {client_ip} as
 	# documented in EDGE_SECURITY.md; {remote_host} would otherwise be the CDN.
@@ -99,7 +99,7 @@ nextcode.buildtoconnect.com {
 	# =========================================================================
 	log_append request_id {http.request.uuid}
 	log {
-		output file /var/log/caddy/kdan.log {
+		output file /var/log/caddy/tokensavy.log {
 			roll_size 50mb
 			roll_keep 10
 			roll_keep_for 720h
