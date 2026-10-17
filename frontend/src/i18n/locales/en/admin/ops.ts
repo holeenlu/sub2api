@@ -145,7 +145,7 @@ export default {
       // Health Score & Diagnosis
       health: 'Health',
       healthCondition: 'Health Condition',
-      healthHelp: 'Overall system health score based on SLA, error rate, and resource usage',
+      healthHelp: 'Uses ops thresholds to assess request failures, TTFT, resources and background jobs; SLA and error rate are not penalized twice.',
       healthyStatus: 'Healthy',
       riskyStatus: 'At Risk',
       idleStatus: 'Idle',
@@ -214,7 +214,7 @@ export default {
         memoryHighAction: 'Monitor memory trends, check for memory leaks',
         ttftHigh: 'Time to first token elevated ({ttft}ms)',
         ttftHighImpact: 'User perceived latency increased',
-        ttftHighAction: 'Optimize request processing flow, reduce pre-processing time',
+        ttftHighAction: 'Check upstream queues, model reasoning time and gateway overhead for the selected model',
         // Error rate diagnostics
         upstreamCritical: 'Upstream error rate critically high ({rate}%)',
         upstreamCriticalImpact: 'May affect many user requests',
@@ -236,17 +236,22 @@ export default {
         slaLowImpact: 'Service quality needs attention',
         slaLowAction: 'Analyze SLA decline causes, optimize system performance',
         // Health score diagnostics
+        jobFailed: 'Background job failed ({job})',
+        jobStale: 'Background job missed its expected schedule ({job})',
+        jobImpact: 'Collection, aggregation or maintenance may be delayed',
+        jobAction: 'Check recent job results, schedule and service logs',
         healthCritical: 'Overall health score critically low ({score})',
         healthCriticalImpact: 'Multiple metrics may be degraded; prioritize error rate and latency investigation',
         healthCriticalAction: 'Comprehensive system check, prioritize critical-level issues',
         healthLow: 'Overall health score low ({score})',
         healthLowImpact: 'May indicate minor instability; monitor SLA and error rates',
         healthLowAction: 'Monitor metric trends, prevent issue escalation',
-        healthy: 'All system metrics normal',
+        healthy: 'No issues detected in the available metrics',
         healthyImpact: 'Service running stable'
       },
       // Error Log
       errorLog: {
+        recovered: 'Recovered',
         timeId: 'Time / ID',
         commonErrors: {
           contextDeadlineExceeded: 'context deadline exceeded',
@@ -316,6 +321,7 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        requestStatus: 'Request status code',
         title: 'Error Detail',
         titleWithId: 'Error #{id}',
         noErrorSelected: 'No error selected.',
@@ -595,9 +601,9 @@ export default {
         metricThresholds: 'Metric Thresholds',
         metricThresholdsHint: 'Configure alert thresholds for metrics, values exceeding thresholds will be displayed in red',
         slaMinPercent: 'SLA Minimum Percentage',
-        slaMinPercentHint: 'SLA below this value will be displayed in red (default: 99.5%)',
+        slaMinPercentHint: 'Warns below the target; turns red more than 2 percentage points below it (default target: 99.5%).',
         ttftP99MaxMs: 'TTFT P99 Maximum (ms)',
-        ttftP99MaxMsHint: 'TTFT P99 above this value will be displayed in red (default: 500ms)',
+        ttftP99MaxMsHint: 'Used for TTFT colors, health scoring and diagnosis; default 10,000ms. Configure for the model workload.',
         requestErrorRateMaxPercent: 'Request Error Rate Maximum (%)',
         requestErrorRateMaxPercentHint: 'Request error rate above this value will be displayed in red (default: 5%)',
         upstreamErrorRateMaxPercent: 'Upstream Error Rate Maximum (%)',
@@ -713,9 +719,9 @@ export default {
         metricThresholds: 'Metric Thresholds',
         metricThresholdsHint: 'Configure alert thresholds for metrics, values exceeding thresholds will be displayed in red',
         slaMinPercent: 'SLA Minimum Percentage',
-        slaMinPercentHint: 'SLA below this value will be displayed in red (default: 99.5%)',
+        slaMinPercentHint: 'Warns below the target; turns red more than 2 percentage points below it (default target: 99.5%).',
         ttftP99MaxMs: 'TTFT P99 Maximum (ms)',
-        ttftP99MaxMsHint: 'TTFT P99 above this value will be displayed in red (default: 500ms)',
+        ttftP99MaxMsHint: 'Used for TTFT colors, health scoring and diagnosis; default 10,000ms. Configure for the model workload.',
         requestErrorRateMaxPercent: 'Request Error Rate Maximum (%)',
         requestErrorRateMaxPercentHint: 'Request error rate above this value will be displayed in red (default: 5%)',
         upstreamErrorRateMaxPercent: 'Upstream Error Rate Maximum (%)',
@@ -827,7 +833,7 @@ export default {
         upstreamErrors: 'Upstream error statistics, excluding rate limit errors (429/529).',
         latency: 'Request duration statistics, including p50, p90, p95, p99 percentiles.',
         ttft: 'Time To First Token, measuring the speed of first token return in streaming responses.',
-        health: 'System health score (0-100), considering SLA, error rate, and resource usage.'
+        health: 'Uses ops thresholds to assess request failures, TTFT, resources and background jobs; SLA and error rate are not penalized twice.'
       },
       charts: {
         emptyRequest: 'No requests in this window.',

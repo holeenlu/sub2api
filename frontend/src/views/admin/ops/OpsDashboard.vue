@@ -10,7 +10,7 @@
 
       <OpsDashboardSkeleton v-if="loading && !hasLoadedOnce" :fullscreen="isFullscreen" />
 
-      <OpsDashboardHeader
+      <OpsDashboardHeader :can-configure="rolePermissions.isSuperAdmin"
         v-else-if="opsEnabled"
         :overview="overview"
         :platform="platform"
@@ -33,7 +33,7 @@
         @refresh="fetchData"
         @open-request-details="handleOpenRequestDetails"
         @open-error-details="openErrorDetails"
-        @open-settings="showSettingsDialog = true"
+        @open-settings="rolePermissions.isSuperAdmin && (showSettingsDialog = true)"
         @open-alert-rules="showAlertRulesCard = true"
         @enter-fullscreen="enterFullscreen"
         @exit-fullscreen="exitFullscreen"
@@ -98,14 +98,14 @@
 
       <!-- System Logs -->
       <OpsSystemLogTable
-        v-if="opsEnabled && !(loading && !hasLoadedOnce)"
+        v-if="rolePermissions.isSuperAdmin && opsEnabled && !(loading && !hasLoadedOnce)"
         :platform-filter="platform"
         :refresh-token="dashboardRefreshToken"
       />
 
       <!-- Settings Dialog (hidden in fullscreen mode) -->
       <template v-if="!isFullscreen">
-        <OpsSettingsDialog :show="showSettingsDialog" @close="showSettingsDialog = false" @saved="onSettingsSaved" />
+        <OpsSettingsDialog v-if="rolePermissions.isSuperAdmin" :show="showSettingsDialog" @close="showSettingsDialog = false" @saved="onSettingsSaved" />
 
         <BaseDialog :show="showAlertRulesCard" :title="t('admin.ops.alertRules.title')" width="extra-wide" @close="showAlertRulesCard = false">
           <OpsAlertRulesCard />
@@ -141,6 +141,8 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore as useRolePermissions } from "@/stores/auth"
+const rolePermissions = useRolePermissions()
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useDebounceFn, useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
@@ -245,6 +247,7 @@ function handleKeydown(e: KeyboardEvent) {
 
 let dashboardFetchController: AbortController | null = null
 let dashboardFetchSeq = 0
+let disposed = false
 
 function isCanceledRequest(err: unknown): boolean {
   return (
@@ -423,14 +426,17 @@ const { pause: pauseCountdown, resume: resumeCountdown } = useIntervalFn(
 
 // Load ops dashboard presentation settings from backend.
 async function loadDashboardAdvancedSettings() {
+ if (!rolePermissions.isSuperAdmin) return
   try {
     const settings = await opsAPI.getAdvancedSettings()
+    if (disposed) return
     showAlertEvents.value = settings.display_alert_events
     showOpenAITokenStats.value = settings.display_openai_token_stats
     autoRefreshEnabled.value = settings.auto_refresh_enabled
     autoRefreshIntervalMs.value = settings.auto_refresh_interval_seconds * 1000
     autoRefreshCountdown.value = settings.auto_refresh_interval_seconds
   } catch (err) {
+    if (disposed) return
     console.error('[OpsDashboard] Failed to load dashboard advanced settings', err)
     showAlertEvents.value = true
     showOpenAITokenStats.value = false
@@ -738,10 +744,9 @@ async function fetchData() {
   loading.value = true
   errorMessage.value = ''
   try {
-    await Promise.all([
-      refreshCoreSnapshotWithCancel(fetchSeq, dashboardFetchController.signal),
-      refreshSwitchTrendWithCancel(fetchSeq, dashboardFetchController.signal),
-    ])
+    // The switch trend has its own loading state; do not hide the entire dashboard behind it.
+    void refreshSwitchTrendWithCancel(fetchSeq, dashboardFetchController.signal)
+    await refreshCoreSnapshotWithCancel(fetchSeq, dashboardFetchController.signal)
     if (fetchSeq !== dashboardFetchSeq) return
 
     lastUpdated.value = new Date()
@@ -808,6 +813,7 @@ onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
 
   await adminSettingsStore.fetch()
+  if (disposed) return
   if (!adminSettingsStore.opsMonitoringEnabled) {
     await router.replace('/admin/settings')
     return
@@ -816,12 +822,13 @@ onMounted(async () => {
   // Load thresholds configuration
   loadThresholds()
 
-  // Load auto refresh settings
-  await loadDashboardAdvancedSettings()
+  // Presentation preferences must not delay the first data request.
+  await Promise.all([
+    loadDashboardAdvancedSettings(),
+    opsEnabled.value ? fetchData() : Promise.resolve()
+  ])
 
-  if (opsEnabled.value) {
-    await fetchData()
-  }
+  if (disposed) return
 
   // Start auto refresh if enabled
   if (autoRefreshEnabled.value) {
@@ -840,6 +847,8 @@ async function loadThresholds() {
 }
 
 onUnmounted(() => {
+  disposed = true
+  dashboardFetchSeq += 1
   window.removeEventListener('keydown', handleKeydown)
   abortDashboardFetch()
   pauseCountdown()

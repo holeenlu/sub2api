@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -375,6 +376,38 @@ func TestOpsErrorLoggerMiddleware_RecordsRecoveredUpstreamTelemetryOutsideFailur
 	require.Equal(t, http.StatusTooManyRequests, persistedEvents[0].UpstreamStatusCode)
 }
 
+func TestOpsRecoveredWebSocketRequiresSuccessfulTurn(t *testing.T) {
+	for _, completed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(completed), func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
+			service.BeginOpsStreamTurn(c, 2)
+			c.Set(service.OpsStreamTurnSucceededKey, completed)
+			service.SetOpsUpstreamError(c, http.StatusBadGateway, "provider failed", "")
+			ops := service.NewOpsService(&ingressRejectOpsRepo{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+			job := <-opsErrorLogQueue
+			if completed {
+				require.Contains(t, job.entry.ErrorMessage, "Recovered upstream error")
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				require.Empty(t, opsErrorLogQueue, "socket close must not duplicate the completed turn")
+				service.BeginOpsStreamTurn(c, 3)
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				require.Empty(t, opsErrorLogQueue, "later disconnected turn cannot relabel earlier recovery")
+				service.SetOpsUpstreamError(c, http.StatusBadGateway, "third turn failed", "")
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				third := <-opsErrorLogQueue
+				require.Contains(t, third.entry.ErrorMessage, "recovery not confirmed")
+				require.Contains(t, job.entry.ErrorMessage, "Recovered upstream error")
+			} else {
+				require.Contains(t, job.entry.ErrorMessage, "recovery not confirmed")
+			}
+		})
+	}
+}
+
 func TestOpsErrorLoggerMiddleware_RecoveredTelemetryFiltersSkipMonitoringAttempts(t *testing.T) {
 	setupOpsErrorLogTestQueue(t, 2)
 	gin.SetMode(gin.TestMode)
@@ -730,26 +763,75 @@ func TestLogOpsStreamError_RecordsOneFailurePerWebSocketTurn(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
 
-	service.BeginOpsStreamTurn(c, 1)
-	service.MarkOpsStreamFailure(c, "rate_limit_error", "rate_limit_exceeded", "turn one failed", http.StatusTooManyRequests)
-	service.MarkOpsStreamError(c, "upstream_error", "generic duplicate for turn one", http.StatusBadGateway)
-	service.BeginOpsStreamTurn(c, 2)
-	service.MarkOpsStreamFailure(c, "permission_error", "permission_denied", "turn two failed", http.StatusForbidden)
+	turns := []struct {
+		attempt      *service.OpsUpstreamErrorEvent
+		clientStatus int
+		wantStatus   int // -1 means there was no upstream HTTP response.
+		wantMessage  string
+		wantDetail   string
+		wantPhase    string
+	}{
+		{
+			attempt:      &service.OpsUpstreamErrorEvent{Kind: "failover", UpstreamStatusCode: http.StatusTooManyRequests, Message: "provider rejected upload", Detail: "attachment attempt"},
+			clientStatus: http.StatusTooManyRequests,
+			wantStatus:   http.StatusTooManyRequests, wantMessage: "provider rejected upload", wantDetail: "attachment attempt", wantPhase: "upstream",
+		},
+		{
+			attempt:      &service.OpsUpstreamErrorEvent{Kind: "request_error", Message: "final transport failure", Detail: "connection reset"},
+			clientStatus: http.StatusBadGateway,
+			wantStatus:   -1, wantMessage: "final transport failure", wantDetail: "connection reset", wantPhase: "upstream",
+		},
+		{
+			attempt:      &service.OpsUpstreamErrorEvent{Stage: string(service.GatewayFailureStageAccountAuth), Message: "credentials unavailable", Detail: "account action required"},
+			clientStatus: http.StatusServiceUnavailable,
+			wantStatus:   0, wantMessage: "credentials unavailable", wantDetail: "account action required", wantPhase: "account_auth",
+		},
+		{
+			clientStatus: http.StatusForbidden,
+			wantStatus:   http.StatusUnauthorized, wantMessage: "scalar provider error", wantDetail: "scalar detail", wantPhase: "upstream",
+		},
+	}
+	for i, turn := range turns {
+		service.BeginOpsStreamTurn(c, i+1)
+		service.SetOpsUpstreamError(c, http.StatusUnauthorized, "scalar provider error", "scalar detail")
+		if turn.attempt != nil {
+			c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{turn.attempt, nil})
+		}
+		service.RecordOpenAIRetryStop(c, nil, service.OpenAIRetryStopContextNotPortable)
+		service.MarkOpsStreamFailure(c, "upstream_error", "upstream_error", turn.wantMessage, turn.clientStatus)
+		service.MarkOpsStreamError(c, "upstream_error", "generic duplicate for turn", http.StatusBadGateway)
+		if turn.attempt != nil {
+			turn.attempt.Message = "mutated after snapshot"
+		}
+	}
 
 	streamErrors := service.GetOpsStreamErrors(c)
-	require.Len(t, streamErrors, 2)
-	require.Equal(t, 1, streamErrors[0].Turn)
-	require.Equal(t, 2, streamErrors[1].Turn)
+	require.Len(t, streamErrors, len(turns))
 	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	logOpsStreamError(c, ops, http.StatusSwitchingProtocols)
 
-	require.Equal(t, int64(2), OpsErrorLogQueueLength())
-	first := <-opsErrorLogQueue
-	second := <-opsErrorLogQueue
-	require.Equal(t, "turn one failed", first.entry.ErrorMessage)
-	require.Equal(t, http.StatusTooManyRequests, first.entry.StatusCode)
-	require.Equal(t, "turn two failed", second.entry.ErrorMessage)
-	require.Equal(t, http.StatusForbidden, second.entry.StatusCode)
+	require.Equal(t, int64(len(turns)), OpsErrorLogQueueLength())
+	for i, turn := range turns {
+		require.Equal(t, i+1, streamErrors[i].Turn)
+		entry := (<-opsErrorLogQueue).entry
+		require.Equal(t, turn.wantMessage, entry.ErrorMessage)
+		require.Equal(t, turn.clientStatus, entry.StatusCode, "client status is independent of the provider response and subsequent turns")
+		if turn.wantStatus < 0 {
+			require.Nil(t, entry.UpstreamStatusCode)
+		} else {
+			require.NotNil(t, entry.UpstreamStatusCode)
+			require.Equal(t, turn.wantStatus, *entry.UpstreamStatusCode)
+		}
+		require.NotNil(t, entry.UpstreamErrorMessage)
+		require.Equal(t, turn.wantMessage, *entry.UpstreamErrorMessage)
+		require.NotNil(t, entry.UpstreamErrorDetail)
+		require.Equal(t, turn.wantDetail, *entry.UpstreamErrorDetail)
+		require.Equal(t, turn.wantPhase, entry.ErrorPhase)
+		require.NotNil(t, entry.UpstreamErrorsJSON)
+		events, err := service.ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
+		require.NoError(t, err)
+		require.Equal(t, service.OpsUpstreamRetryStopped, events[len(events)-1].Kind)
+	}
 }
 
 func TestIsKnownOpsErrorType(t *testing.T) {
@@ -812,7 +894,7 @@ func TestNormalizeOpsErrorType(t *testing.T) {
 	}
 }
 
-func TestClassifyOpsNoAvailableAccountsExcludedFromSLA(t *testing.T) {
+func TestClassifyOpsNoAvailableAccountsCountForSLA(t *testing.T) {
 	const message = "No available accounts"
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -825,12 +907,12 @@ func TestClassifyOpsNoAvailableAccountsExcludedFromSLA(t *testing.T) {
 
 	require.Equal(t, "api_error", errType)
 	require.Equal(t, "routing", phase)
-	require.True(t, isBusinessLimited)
+	require.False(t, isBusinessLimited)
 	require.Equal(t, "platform", errorOwner)
 	require.Equal(t, "gateway", errorSource)
 }
 
-func TestClassifyOpsRoutingCapacityMarkerExcludesMaskedSelectionFailureFromSLA(t *testing.T) {
+func TestClassifyOpsRoutingCapacityMarkerCountsMaskedSelectionFailureForSLA(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -846,7 +928,7 @@ func TestClassifyOpsRoutingCapacityMarkerExcludesMaskedSelectionFailureFromSLA(t
 	)
 
 	require.Equal(t, "routing", phase)
-	require.True(t, isBusinessLimited)
+	require.False(t, isBusinessLimited)
 	require.Equal(t, "platform", errorOwner)
 	require.Equal(t, "gateway", errorSource)
 }
@@ -856,6 +938,7 @@ func TestClassifyOpsLocalModelConfigurationRejection(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+	markOpsRoutingCapacityLimited(c)
 
 	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
 		c,
@@ -869,6 +952,18 @@ func TestClassifyOpsLocalModelConfigurationRejection(t *testing.T) {
 	require.True(t, isBusinessLimited)
 	require.Equal(t, "platform", errorOwner)
 	require.Equal(t, "gateway", errorSource)
+}
+
+func TestClassifyOpsCapacityOverridesStaleUserLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	markOpsRoutingCapacityLimited(c)
+	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+	phase, limited, owner, source := classifyOpsErrorLog(c, "api_error", "Service temporarily unavailable", "", http.StatusServiceUnavailable)
+	require.Equal(t, "routing", phase)
+	require.False(t, limited)
+	require.Equal(t, "platform", owner)
+	require.Equal(t, "gateway", source)
 }
 
 func TestClassifyOpsLocalModelConfigurationOverridesStaleUpstreamMarkers(t *testing.T) {
@@ -1400,7 +1495,7 @@ func TestClassifyOpsOtherErrorsStillCountForSLA(t *testing.T) {
 	require.Equal(t, "gateway", errorSource)
 }
 
-func TestClassifyOpsUnsupportedModelExcludedFromSLA(t *testing.T) {
+func TestClassifyOpsUndiagnosedModelAvailabilityCountsForSLA(t *testing.T) {
 	tests := []string{
 		"No available accounts: no available accounts supporting model: made-up-model",
 		"No available accounts: no available OpenAI accounts supporting model: made-up-model",
@@ -1420,7 +1515,7 @@ func TestClassifyOpsUnsupportedModelExcludedFromSLA(t *testing.T) {
 
 			require.Equal(t, "api_error", errType)
 			require.Equal(t, "routing", phase)
-			require.True(t, isBusinessLimited)
+			require.False(t, isBusinessLimited)
 			require.Equal(t, "platform", errorOwner)
 			require.Equal(t, "gateway", errorSource)
 		})
@@ -1660,9 +1755,10 @@ func TestApplyOpsUpstreamFieldsUsesLastNonNilAttempt(t *testing.T) {
 	c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{
 		{UpstreamStatusCode: http.StatusTooManyRequests, Message: "first attempt", Detail: "first detail"},
 		nil,
-		{UpstreamStatusCode: http.StatusServiceUnavailable, Message: "final attempt", Detail: "final detail"},
+		{UpstreamStatusCode: http.StatusServiceUnavailable, Message: "final attempt", Detail: "final detail", SkipMonitoring: true},
 		nil,
 	})
+	service.RecordOpenAIRetryStop(c, nil, service.OpenAIRetryStopDownstreamCommitted)
 	entry := &service.OpsInsertErrorLogInput{}
 
 	applyOpsUpstreamFieldsFromContext(c, entry)
@@ -1673,7 +1769,64 @@ func TestApplyOpsUpstreamFieldsUsesLastNonNilAttempt(t *testing.T) {
 	require.Equal(t, "final attempt", *entry.UpstreamErrorMessage)
 	require.NotNil(t, entry.UpstreamErrorDetail)
 	require.Equal(t, "final detail", *entry.UpstreamErrorDetail)
-	require.Len(t, entry.UpstreamErrors, 4)
+	require.Len(t, entry.UpstreamErrors, 5)
+	require.True(t, shouldSkipFinalOpsFailure(c), "a diagnostic stop must not clear provider monitoring rules")
+}
+
+func TestOpsErrorLoggerMiddlewareResponsesFailureProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		gateway          bool
+		upstreamEvidence bool
+		wantUpstream     int
+		wantMessage      string
+	}{
+		{"gateway keeps actual 500", true, true, 500, "actual provider failure"},
+		{"gateway infers only without evidence", true, false, 502, "Upstream service temporarily unavailable"},
+		{"provider terminal supersedes earlier attempt", false, true, 429, "final provider quota"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			gin.SetMode(gin.TestMode)
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.POST("/v1/responses", func(c *gin.Context) {
+				setOpsRequestContext(c, "gpt-6.1-sol", true)
+				if tc.upstreamEvidence {
+					service.SetOpsUpstreamError(c, 500, "actual provider failure", "")
+					c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{{
+						Kind: "failover", UpstreamStatusCode: 500, Message: "actual provider failure",
+					}})
+				}
+				service.RecordOpenAIRetryStop(c, nil, service.OpenAIRetryStopReplayUnsafe, `{"blocking_tool_kind":"mcp"}`)
+				if tc.gateway {
+					c.Header("Content-Type", "text/event-stream")
+					c.Writer.Flush()
+					require.True(t, writeResponsesFailedSSE(c, "upstream_error", "", "Upstream service temporarily unavailable"))
+				} else {
+					c.Data(http.StatusOK, "text/event-stream", []byte("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"final provider quota\"}}}\n\n"))
+				}
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+			require.Equal(t, int64(1), OpsErrorLogQueueLength())
+			entry := (<-opsErrorLogQueue).entry
+			require.NotNil(t, entry.UpstreamStatusCode)
+			require.Equal(t, tc.wantUpstream, *entry.UpstreamStatusCode)
+			require.NotNil(t, entry.UpstreamErrorMessage)
+			require.Equal(t, tc.wantMessage, *entry.UpstreamErrorMessage)
+			if tc.gateway {
+				require.Equal(t, 502, entry.StatusCode, "client status remains independently mapped")
+			}
+			require.NotNil(t, entry.UpstreamErrorsJSON)
+			events, err := service.ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
+			require.NoError(t, err)
+			require.Equal(t, service.OpsUpstreamRetryStopped, events[len(events)-1].Kind)
+			require.Equal(t, string(service.OpenAIRetryStopReplayUnsafe), events[len(events)-1].Reason)
+			require.JSONEq(t, `{"blocking_tool_kind":"mcp"}`, events[len(events)-1].Detail, "stop evidence must survive persistence without replacing provider attribution")
+		})
+	}
 }
 
 func TestApplyOpsUpstreamFieldsFinalStatuslessAttemptClearsStaleContext(t *testing.T) {
@@ -1963,6 +2116,7 @@ func TestClassifyOpsIngressModelNotAllowedKeepsRequestPhase(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 	middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
+	markOpsRoutingCapacityLimited(c) // stale capacity cannot override the ingress rejection
 
 	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
 		c,
@@ -2247,4 +2401,29 @@ func TestOpsErrorLoggerMiddleware_RecordsClientClosedWhenIgnoreContextCanceledDi
 	require.Equal(t, int64(1), OpsErrorLogQueueLength())
 	job := <-opsErrorLogQueue
 	require.Equal(t, statusClientClosedRequest, job.entry.StatusCode)
+}
+
+func TestOpsSchedulingTraceDoesNotReplaceProviderAttribution(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx := service.WithSchedulingTrace(context.Background())
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+	service.RecordSchedulingDecision(ctx, service.SchedulingDecision{Stage: "selection", Action: "acquired", AccountID: 2})
+	entry := &service.OpsInsertErrorLogInput{}
+	applyOpsUpstreamFieldsFromContext(c, entry)
+	require.Nil(t, entry.UpstreamStatusCode)
+	require.Nil(t, entry.AccountID)
+	require.Nil(t, service.LastOpsUpstreamAttempt(entry.UpstreamErrors))
+	require.Len(t, entry.UpstreamErrors, 1)
+	upstream := &service.OpsUpstreamErrorEvent{Kind: "http_error", AccountID: 1, UpstreamStatusCode: 429, Message: "provider limited"}
+	c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{upstream})
+	applyOpsUpstreamFieldsFromContext(c, entry)
+	require.Equal(t, 429, *entry.UpstreamStatusCode)
+	require.Equal(t, "provider limited", *entry.UpstreamErrorMessage)
+	require.Same(t, upstream, service.LastOpsUpstreamAttempt(entry.UpstreamErrors))
+	require.Len(t, entry.UpstreamErrors, 2, "one diagnostic envelope, not another attempt")
+	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+	suppressOpsUpstreamAttributionForLocalModelConfiguration(c, entry)
+	require.Nil(t, entry.UpstreamStatusCode)
+	require.Nil(t, service.LastOpsUpstreamAttempt(entry.UpstreamErrors))
+	require.Len(t, entry.UpstreamErrors, 1, "local validation retains scheduling diagnostics only")
 }

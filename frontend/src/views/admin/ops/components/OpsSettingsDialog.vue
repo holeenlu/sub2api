@@ -33,7 +33,7 @@ const advancedSettings = ref<OpsAdvancedSettings | null>(null)
 // 指标阈值配置
 const metricThresholds = ref<OpsMetricThresholds>({
   sla_percent_min: 99.5,
-  ttft_p99_ms_max: 500,
+  ttft_p99_ms_max: 10000,
   request_error_rate_percent_max: 5,
   upstream_error_rate_percent_max: 5
 })
@@ -60,7 +60,7 @@ async function loadAllSettings() {
     if (thresholds && Object.keys(thresholds).length > 0) {
         metricThresholds.value = {
           sla_percent_min: thresholds.sla_percent_min ?? 99.5,
-          ttft_p99_ms_max: thresholds.ttft_p99_ms_max ?? 500,
+          ttft_p99_ms_max: thresholds.ttft_p99_ms_max ?? 10000,
           request_error_rate_percent_max: thresholds.request_error_rate_percent_max ?? 5,
           upstream_error_rate_percent_max: thresholds.upstream_error_rate_percent_max ?? 5
         }
