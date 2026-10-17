@@ -89,6 +89,39 @@ func TestCodexAccountIdentityNamespaceUsesStableCredentialSource(t *testing.T) {
 	require.NotEqual(t, setupNamespace, codexAccountIdentityNamespace(setupTokenB))
 }
 
+func TestCodexAccountIdentityBContractAndParentWindowIsolation(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "acct-A"}}
+	// Fixed vectors from the pre-migration B scheme, independent of the helper
+	// under test. A global v7 or seed change must not silently move cache keys.
+	require.Equal(t, "92b14f01-dfe9-4174-836c-db5f54a4e8c3", scopeCodexAccountIdentityValue(account, 77, "session", "client-session"))
+	require.Equal(t, "9e60db1f-d024-49d0-84ef-5bab1e6a85ae", scopeCodexAccountIdentityValue(account, 77, "thread", "client-thread"))
+	require.Equal(t, "af116e7e-d062-42c8-aa95-6b00a330568d", scopeCodexAccountIdentityValue(account, 77, "prompt-cache", "cache-override"))
+	parentValues := map[string]bool{}
+	for _, owner := range []struct {
+		name string
+		key  int64
+	}{{"acct-A", 77}, {"acct-A", 88}, {"acct-B", 77}} {
+		account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": owner.name}}
+		body := []byte(`{"prompt_cache_key":"client-session","client_metadata":{"session_id":"client-session","thread_id":"client-thread","parent_thread_id":"parent","forked_from_thread_id":"parent","parent_turn_id":"turn","root_turn_id":"turn","x-codex-window-id":"client-thread:12","number":900719925474099312345}}`)
+		scoped, changed, err := applyCodexAccountIdentityClientMetadataRaw(body, account, owner.key)
+		require.NoError(t, err)
+		require.True(t, changed)
+		h := make(http.Header)
+		h.Set("x-codex-parent-thread-id", "parent")
+		applyCodexAccountIdentityHeaders(h, account, owner.key)
+		cm := gjson.GetBytes(scoped, "client_metadata")
+		parent := cm.Get("parent_thread_id").String()
+		require.Equal(t, parent, h.Get("x-codex-parent-thread-id"))
+		require.Equal(t, parent, cm.Get("forked_from_thread_id").String())
+		require.False(t, parentValues[parent])
+		parentValues[parent] = true
+		require.Equal(t, cm.Get("thread_id").String()+":12", cm.Get("x-codex-window-id").String())
+		require.Equal(t, cm.Get("parent_turn_id").String(), cm.Get("root_turn_id").String())
+		require.Equal(t, cm.Get("session_id").String(), gjson.GetBytes(scoped, "prompt_cache_key").String())
+		require.Equal(t, "900719925474099312345", cm.Get("number").Raw)
+	}
+}
+
 func TestCodexAccountIdentitySourceResolvesShadowAndOverwritesFailoverContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -114,7 +147,7 @@ func TestCodexAccountIdentitySourceResolvesShadowAndOverwritesFailoverContext(t 
 		"token", true, "client-session", true,
 	)
 	require.NoError(t, err)
-	require.Equal(t, isolateOpenAIUpstreamSessionID(0, parent, "client-session"), req.Header.Get("session_id"))
+	require.Equal(t, scopeCodexAccountIdentityValue(parent, 0, "session", "client-session"), req.Header.Get("session-id"))
 
 	next := &Account{ID: 19, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{
 		"chatgpt_account_id": "other-account",
@@ -131,7 +164,7 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
-	c.Set("api_key_id", int64(77))
+	c.Set("api_key", &APIKey{ID: 77})
 	c.Request.Header.Set("x-codex-installation-id", "client-installation")
 	c.Request.Header.Set("thread-id", "client-thread")
 	c.Request.Header.Set("x-codex-window-id", "client-window")
@@ -145,18 +178,23 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 			context.Background(), c, account, "token",
 			OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
 			true, "", "", "client-session", "", "",
+			nil,
 		)
 		require.NoError(t, err)
+		projectCodexOutboundHeaders(headers, account, true)
 		return headers
 	}
 
 	first := build(account11)
 	firstAgain := build(account11)
 	second := build(account19)
-	for _, header := range []string{"session_id", "x-codex-installation-id", "thread-id", "x-codex-window-id", "x-client-request-id"} {
+	for _, header := range []string{"session-id", "thread-id", "x-codex-window-id", "x-client-request-id"} {
 		require.NotEmpty(t, first.Get(header), header)
 		require.Equal(t, first.Get(header), firstAgain.Get(header), header)
 		require.NotEqual(t, first.Get(header), second.Get(header), header)
+	}
+	for _, header := range []string{"session_id", "conversation_id", "x-codex-installation-id"} {
+		require.Empty(t, first.Get(header), "final projection removes legacy wire headers")
 	}
 
 	httpRequest, err := service.buildUpstreamRequest(
@@ -165,7 +203,7 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 		"token", true, "client-session", true,
 	)
 	require.NoError(t, err)
-	require.Equal(t, httpRequest.Header.Get("session_id"), first.Get("session_id"), "HTTP and WS must derive the same identity from the raw client key")
+	require.Equal(t, httpRequest.Header.Get("session-id"), first.Get("session-id"), "HTTP and WS must derive the same identity from the raw client key")
 }
 
 func TestBuildUpstreamRequestNamespacesCodexIdentityByOAuthAccount(t *testing.T) {
@@ -223,6 +261,13 @@ func TestBuildUpstreamRequestNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 		}
 		checked++
 		require.NotEmpty(t, first.Get(header), header)
+		if header == openAIWSTurnMetadataHeader {
+			for _, key := range []string{"installation_id", "session_id", "thread_id", "turn_id", "window_id"} {
+				require.Equal(t, gjson.Get(first.Get(header), key).String(), gjson.Get(firstAgain.Get(header), key).String(), key)
+				require.NotEqual(t, gjson.Get(first.Get(header), key).String(), gjson.Get(second.Get(header), key).String(), key)
+			}
+			continue // A synthesized request timestamp is intentionally per turn.
+		}
 		require.Equal(t, first.Get(header), firstAgain.Get(header), "same account must retain stable identity: %s", header)
 		require.NotEqual(t, first.Get(header), second.Get(header), "account failover must rotate upstream identity: %s", header)
 	}

@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type geminiCompatHTTPUpstreamStub struct {
@@ -1290,4 +1292,118 @@ func parseAnthropicContentBlockEvents(t *testing.T, raw string) []anthropicConte
 		})
 	}
 	return events
+}
+
+func TestGeminiSchemaDialectAndOutputFormat(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"q"}],"tools":[{"name":"lookup","input_schema":{"type":"object","$defs":{"value":{"type":["string","null"],"const":"x"}},"properties":{"v":{"$ref":"#/$defs/value"}},"additionalProperties":false}}],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"ok":{"enum":[true,false]}}}}}}`)
+	for _, raw := range []bool{false, true} {
+		var d apicompat.ConversionDiagnostics
+		got, err := convertClaudeMessagesToGeminiWithSchema(body, raw, &d)
+		require.NoError(t, err)
+		if raw {
+			require.True(t, gjson.GetBytes(got, "tools.0.functionDeclarations.0.parametersJsonSchema.$defs").Exists())
+			require.False(t, gjson.GetBytes(got, "tools.0.functionDeclarations.0.parameters").Exists())
+			require.Equal(t, "true", gjson.GetBytes(got, "generationConfig.responseJsonSchema.properties.ok.enum.0").Raw)
+			require.Empty(t, d)
+		} else {
+			require.True(t, gjson.GetBytes(got, "tools.0.functionDeclarations.0.parameters").Exists())
+			require.True(t, gjson.GetBytes(got, "generationConfig.responseSchema").Exists())
+			require.Len(t, d, 2)
+		}
+	}
+	require.True(t, geminiSupportsJSONSchema(&Account{Platform: PlatformGemini, Type: AccountTypeAPIKey}))
+	require.True(t, geminiSupportsJSONSchema(&Account{Platform: PlatformGemini, Type: AccountTypeServiceAccount}))
+	require.False(t, geminiSupportsJSONSchema(&Account{Platform: PlatformGemini, Type: AccountTypeOAuth, Credentials: map[string]any{"project_id": "p"}}))
+	require.False(t, geminiSupportsJSONSchema(&Account{Platform: PlatformAntigravity, Type: AccountTypeOAuth}))
+	var schema any = map[string]any{"type": "string"}
+	for i := 0; i < 70; i++ {
+		schema = map[string]any{"items": schema}
+	}
+	require.False(t, schemaDepthAllowed(schema, 0))
+}
+
+func TestGeminiChatFinalWireSchemaFidelity(t *testing.T) {
+	schema := `{"$defs":{"choice":{"oneOf":[{"const":true},{"type":"number","enum":[1,2]}]}},"type":"object","properties":{"value":{"$ref":"#/$defs/choice"}},"additionalProperties":false}`
+	body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"choose","parameters":` + schema + `}}],"response_format":{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":` + schema + `}}}`)
+	original := append([]byte(nil), body...)
+	for _, codeAssist := range []bool{false, true} {
+		t.Run(fmt.Sprint(codeAssist), func(t *testing.T) {
+			upstream := &geminiCompatHTTPUpstreamStub{response: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(`data: {"response":{"candidates":[{"content":{"parts":[{"text":"{}"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}}` + "\n\n"))}}
+			if !codeAssist {
+				upstream.response.Header.Set("Content-Type", "application/json")
+				upstream.response.Body = io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"parts":[{"text":"{}"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}`))
+			}
+			account := &Account{Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test"}}
+			if codeAssist {
+				account.Type = AccountTypeOAuth
+				account.Credentials = map[string]any{"access_token": "test", "project_id": "project"}
+			}
+			svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}, tokenProvider: &GeminiTokenProvider{}}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+			_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body)
+			require.NoError(t, err)
+			sent, err := io.ReadAll(upstream.lastReq.Body)
+			require.NoError(t, err)
+			if codeAssist {
+				sent = []byte(gjson.GetBytes(sent, "request").Raw)
+			}
+			tool := gjson.GetBytes(sent, "tools.0.functionDeclarations.0")
+			generation := gjson.GetBytes(sent, "generationConfig")
+			if codeAssist {
+				require.True(t, tool.Get("parameters").Exists())
+				require.False(t, tool.Get("parametersJsonSchema").Exists())
+				require.True(t, generation.Get("responseSchema").Exists())
+				require.False(t, generation.Get("responseJsonSchema").Exists())
+			} else {
+				require.JSONEq(t, schema, tool.Get("parametersJsonSchema").Raw)
+				require.JSONEq(t, schema, generation.Get("responseJsonSchema").Raw)
+				require.False(t, tool.Get("parameters").Exists())
+				require.False(t, generation.Get("responseSchema").Exists())
+			}
+			require.Equal(t, original, body)
+		})
+	}
+}
+
+func TestGeminiForwardFailureRetainsOnlyMeasuredFacts(t *testing.T) {
+	for _, protocol := range []string{"chat", "messages", "native", "native-aggregate"} {
+		t.Run(protocol, func(t *testing.T) {
+			wire := `data: {"candidates":[{"content":{"parts":[{"text":"partial"},{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}` + "\n\n"
+			upstream := &geminiCompatHTTPUpstreamStub{response: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"known-id"}}, Body: io.NopCloser(strings.NewReader(wire))}}
+			svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+			account := &Account{Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test"}}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			body := []byte(`{"model":"gemini-2.5-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+			var result *ForwardResult
+			var err error
+			switch protocol {
+			case "chat":
+				result, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body)
+			case "messages":
+				result, err = svc.Forward(context.Background(), c, account, body)
+			case "native-aggregate":
+				account.Type = AccountTypeOAuth
+				account.Credentials = map[string]any{"access_token": "test", "project_id": "project"}
+				svc.tokenProvider = &GeminiTokenProvider{}
+				result, err = svc.ForwardNative(context.Background(), c, account, "gemini-2.5-flash", "generateContent", false, []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
+			default:
+				result, err = svc.ForwardNative(context.Background(), c, account, "gemini-2.5-flash", "streamGenerateContent", true, []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
+			}
+			require.Error(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, 7, result.Usage.InputTokens)
+			require.Equal(t, 3, result.Usage.OutputTokens)
+			require.Equal(t, 1, result.ImageCount)
+			require.True(t, geminiUsageWasReported(c))
+			require.Equal(t, "known-id", result.RequestID)
+			require.Equal(t, 1, upstream.calls)
+			require.True(t, IsResponseCommitted(c))
+			require.Equal(t, 1, strings.Count(rec.Body.String(), `"error":`))
+			require.NotContains(t, rec.Body.String(), "[DONE]")
+			require.NotContains(t, rec.Body.String(), "message_stop")
+		})
+	}
 }
