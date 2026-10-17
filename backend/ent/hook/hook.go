@@ -45,6 +45,18 @@ func (f AccountGroupFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AccountGroupMutation", m)
 }
 
+// The AccountSupplyIdentityClaimFunc type is an adapter to allow the use of ordinary
+// function as AccountSupplyIdentityClaim mutator.
+type AccountSupplyIdentityClaimFunc func(context.Context, *ent.AccountSupplyIdentityClaimMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AccountSupplyIdentityClaimFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.AccountSupplyIdentityClaimMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AccountSupplyIdentityClaimMutation", m)
+}
+
 // The AnnouncementFunc type is an adapter to allow the use of ordinary
 // function as Announcement mutator.
 type AnnouncementFunc func(context.Context, *ent.AnnouncementMutation) (ent.Value, error)
@@ -475,6 +487,78 @@ func (f UserSubscriptionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.V
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.UserSubscriptionMutation", m)
+}
+
+// The VendorFunc type is an adapter to allow the use of ordinary
+// function as Vendor mutator.
+type VendorFunc func(context.Context, *ent.VendorMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f VendorFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.VendorMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.VendorMutation", m)
+}
+
+// The VendorGroupFunc type is an adapter to allow the use of ordinary
+// function as VendorGroup mutator.
+type VendorGroupFunc func(context.Context, *ent.VendorGroupMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f VendorGroupFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.VendorGroupMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.VendorGroupMutation", m)
+}
+
+// The VendorSettlementFunc type is an adapter to allow the use of ordinary
+// function as VendorSettlement mutator.
+type VendorSettlementFunc func(context.Context, *ent.VendorSettlementMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f VendorSettlementFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.VendorSettlementMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.VendorSettlementMutation", m)
+}
+
+// The VendorSettlementAllocationFunc type is an adapter to allow the use of ordinary
+// function as VendorSettlementAllocation mutator.
+type VendorSettlementAllocationFunc func(context.Context, *ent.VendorSettlementAllocationMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f VendorSettlementAllocationFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.VendorSettlementAllocationMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.VendorSettlementAllocationMutation", m)
+}
+
+// The VendorSettlementLineFunc type is an adapter to allow the use of ordinary
+// function as VendorSettlementLine mutator.
+type VendorSettlementLineFunc func(context.Context, *ent.VendorSettlementLineMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f VendorSettlementLineFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.VendorSettlementLineMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.VendorSettlementLineMutation", m)
+}
+
+// The VendorSettlementPaymentFunc type is an adapter to allow the use of ordinary
+// function as VendorSettlementPayment mutator.
+type VendorSettlementPaymentFunc func(context.Context, *ent.VendorSettlementPaymentMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f VendorSettlementPaymentFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.VendorSettlementPaymentMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.VendorSettlementPaymentMutation", m)
 }
 
 // Condition is a hook condition function.

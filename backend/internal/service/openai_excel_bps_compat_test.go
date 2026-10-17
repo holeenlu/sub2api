@@ -57,6 +57,7 @@ func TestExcelBPSCompatibilityRoutingAndFailures(t *testing.T) {
 						return
 					}
 					require.NotNil(t, result)
+					require.Equal(t, UsageAuthorizationModeBPS, result.AuthorizationMode)
 					require.Equal(t, "bps.openai.com", upstream.lastReq.URL.Host)
 					require.Equal(t, "/basispoints/api/responses", upstream.lastReq.URL.Path)
 					require.Equal(t, "gpt-6-astra", gjson.GetBytes(upstream.lastBody, "model").String())

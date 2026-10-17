@@ -28,9 +28,8 @@
                 v-model="filters.role"
                 :options="[
                   { value: '', label: t('admin.users.allRoles') },
-                  ...(rolePermissions.isSuperAdmin ? [{value:'super_admin',label:t('admin.users.roles.super_admin')}] : []),
-                  { value: 'admin', label: t('admin.users.admin') },
-                  { value: 'user', label: t('admin.users.user') }
+                  ...USER_ROLES.filter(role => role !== 'super_admin' || rolePermissions.isSuperAdmin)
+                    .map(role => ({ value: role, label: t(`admin.users.roles.${role}`) }))
                 ]"
                 @change="applyFilter"
               />
@@ -796,6 +795,7 @@
 
 <script setup lang="ts">
 import { useAuthStore as useRolePermissions } from '@/stores/auth'
+import { USER_ROLES } from '@/constants/userRoles'
 const rolePermissions = useRolePermissions()
 
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'

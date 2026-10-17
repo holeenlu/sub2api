@@ -32,6 +32,20 @@ func (_u *UsageLogUpdate) Where(ps ...predicate.UsageLog) *UsageLogUpdate {
 	return _u
 }
 
+// SetBillingStatus sets the "billing_status" field.
+func (_u *UsageLogUpdate) SetBillingStatus(v string) *UsageLogUpdate {
+	_u.mutation.SetBillingStatus(v)
+	return _u
+}
+
+// SetNillableBillingStatus sets the "billing_status" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableBillingStatus(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetBillingStatus(*v)
+	}
+	return _u
+}
+
 // SetUserID sets the "user_id" field.
 func (_u *UsageLogUpdate) SetUserID(v int64) *UsageLogUpdate {
 	_u.mutation.SetUserID(v)
@@ -1135,6 +1149,27 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			}
 		}
 	}
+	if value, ok := _u.mutation.BillingStatus(); ok {
+		_spec.SetField(usagelog.FieldBillingStatus, field.TypeString, value)
+	}
+	if _u.mutation.VendorIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorRootIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorRootIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorParentIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorParentIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.AccountNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldAccountNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.GroupNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldGroupNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.PlatformSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldPlatformSnapshot, field.TypeString)
+	}
 	if value, ok := _u.mutation.RequestID(); ok {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)
 	}
@@ -1381,6 +1416,9 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
 	}
+	if _u.mutation.AuthorizationModeCleared() {
+		_spec.ClearField(usagelog.FieldAuthorizationMode, field.TypeString)
+	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.M2O,
@@ -1544,6 +1582,20 @@ type UsageLogUpdateOne struct {
 	fields   []string
 	hooks    []Hook
 	mutation *UsageLogMutation
+}
+
+// SetBillingStatus sets the "billing_status" field.
+func (_u *UsageLogUpdateOne) SetBillingStatus(v string) *UsageLogUpdateOne {
+	_u.mutation.SetBillingStatus(v)
+	return _u
+}
+
+// SetNillableBillingStatus sets the "billing_status" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableBillingStatus(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetBillingStatus(*v)
+	}
+	return _u
 }
 
 // SetUserID sets the "user_id" field.
@@ -2679,6 +2731,27 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 			}
 		}
 	}
+	if value, ok := _u.mutation.BillingStatus(); ok {
+		_spec.SetField(usagelog.FieldBillingStatus, field.TypeString, value)
+	}
+	if _u.mutation.VendorIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorRootIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorRootIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorParentIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorParentIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.AccountNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldAccountNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.GroupNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldGroupNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.PlatformSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldPlatformSnapshot, field.TypeString)
+	}
 	if value, ok := _u.mutation.RequestID(); ok {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)
 	}
@@ -2924,6 +2997,9 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if _u.mutation.AuthorizationModeCleared() {
+		_spec.ClearField(usagelog.FieldAuthorizationMode, field.TypeString)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
