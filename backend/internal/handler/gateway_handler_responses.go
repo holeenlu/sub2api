@@ -128,6 +128,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesSecurityAuditError(c, decision)
 		return
 	}
+	requestCtx = c.Request.Context()
 
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {

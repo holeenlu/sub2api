@@ -2618,6 +2618,9 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 	if !ok {
 		return partialResult(), s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream stream ended without a terminal response")
 	}
+	if err := validateResponsesSSEToolArguments(bodyText); err != nil {
+		return partialResult(), s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream response contains inconsistent tool arguments")
+	}
 	// When the terminal event has an empty output array, reconstruct
 	// output from accumulated delta events so the client gets full content.
 	if len(gjson.GetBytes(finalResponse, "output").Array()) == 0 {
@@ -2641,6 +2644,9 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 	restoredBody = restoreCodexToolNamesFromContext(c, restoredBody)
 	body = restoredBody
 
+	if err := validateResponsesToolArgumentsJSON(body); err != nil {
+		return partialResult(), s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream response contains invalid tool arguments")
+	}
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usage, terminalType, false)
 

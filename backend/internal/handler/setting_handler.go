@@ -44,6 +44,8 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 	}
 
 	response.Success(c, dto.PublicSettings{
+		VendorConsoleEnabled:                settings.VendorConsoleEnabled,
+		VendorPortalOrigin:                  settings.VendorPortalOrigin,
 		RegistrationEnabled:                 settings.RegistrationEnabled,
 		EmailVerifyEnabled:                  settings.EmailVerifyEnabled,
 		ForceEmailOnThirdPartySignup:        settings.ForceEmailOnThirdPartySignup,
@@ -76,7 +78,6 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		DocURL:                              settings.DocURL,
 		HomeContent:                         settings.HomeContent,
 		CompactHomeEnabled:                  settings.CompactHomeEnabled,
-		HideCcsImportButton:                 settings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:         settings.PurchaseSubscriptionEnabled,
 		PurchaseSubscriptionURL:             settings.PurchaseSubscriptionURL,
 		TableDefaultPageSize:                settings.TableDefaultPageSize,
