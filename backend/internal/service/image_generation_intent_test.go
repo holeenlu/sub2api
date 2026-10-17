@@ -1,11 +1,35 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAIImageRequestScopeUsesAccountModelsAndResetsForText(t *testing.T) {
+	account := &Account{ID: 7, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.5": "gpt-5.5"}}}
+	ctx := WithOpenAIImageGenerationRequest(context.Background(), "gpt-5.5", []byte(
+		"{\"model\":\"gpt-5.5\",\"tools\":[{\"type\":\"image_generation\",\"model\":\"gpt-image-2\"}]}"))
+	require.Equal(t, "image_model_not_supported", openAICompatibleAccountBaseEligibilityFailureReason(ctx, account, PlatformOpenAI, "gpt-5.5"))
+	account.Credentials["model_mapping"] = map[string]any{"gpt-5.5": "gpt-5.5", "gpt-image-2": "gpt-image-2"}
+	require.Empty(t, OpenAIImageRequestRejection(ctx, account, "gpt-5.5"))
+	account.Extra = map[string]any{"model_rate_limits": map[string]any{openAIImageGenerationRateLimitKey: map[string]any{
+		"rate_limit_reset_at": time.Now().Add(time.Minute).Format(time.RFC3339),
+	}}}
+	require.Equal(t, "image_model_rate_limited", OpenAIImageRequestRejection(ctx, account, "gpt-5.5"))
+	textCtx := WithOpenAIImageGenerationRequest(ctx, "gpt-5.5", []byte("{\"model\":\"gpt-5.5\",\"input\":\"hi\"}"))
+	require.False(t, OpenAIImageGenerationIntentFromContext(textCtx))
+	require.Empty(t, openAICompatibleAccountBaseEligibilityFailureReason(textCtx, account, PlatformOpenAI, "gpt-5.5"))
+	passive := WithOpenAIImageGenerationRequest(ctx, "gpt-5.5", []byte("{\"model\":\"gpt-5.5\",\"tools\":[{\"type\":\"namespace\",\"name\":\"image_gen\"}]}"))
+	require.False(t, OpenAIImageGenerationIntentFromContext(passive))
+	require.Empty(t, OpenAIImageRequestRejection(passive, account, "gpt-5.5"))
+	imageCtx := WithOpenAIImagesEndpoint(WithOpenAIImageGenerationIntent(context.Background()))
+	require.Equal(t, "image_model_rate_limited", OpenAIImageRequestRejection(imageCtx, account, "gpt-image-2"))
+}
 
 func TestIsImageGenerationIntent(t *testing.T) {
 	tests := []struct {
