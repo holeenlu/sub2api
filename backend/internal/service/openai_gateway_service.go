@@ -20,8 +20,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/platform/liveattestation"
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -272,20 +274,21 @@ type OpenAIForwardResult struct {
 	OpenAIWSMode             bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
-	UpstreamTerminalEvent string
-	ResponseHeaders       http.Header
-	Duration              time.Duration
-	FirstTokenMs          *int
-	ClientDisconnect      bool
-	ImageCount            int
-	ImageSize             string
-	ImageInputSize        string
-	ImageOutputSize       string
-	ImageOutputSizes      []string
-	ImageSizeSource       string
-	ImageSizeBreakdown    map[string]int
-	VideoCount            int
-	VideoResolution       string
+	UpstreamTerminalEvent    string
+	UpstreamIncompleteReason string
+	ResponseHeaders          http.Header
+	Duration                 time.Duration
+	FirstTokenMs             *int
+	ClientDisconnect         bool
+	ImageCount               int
+	ImageSize                string
+	ImageInputSize           string
+	ImageOutputSize          string
+	ImageOutputSizes         []string
+	ImageSizeSource          string
+	ImageSizeBreakdown       map[string]int
+	VideoCount               int
+	VideoResolution          string
 	// VideoDurationSeconds 是提交时请求的生成时长（xAI 按输出秒数计费），已归一化到 1-15 秒。
 	VideoDurationSeconds int
 	// WebSearchCalls 是 Codex alpha/search 网页搜索调用次数（每次成功请求为 1）。
@@ -298,22 +301,46 @@ type OpenAIForwardResult struct {
 
 	wsReplayInput                []json.RawMessage
 	wsReplayInputExists          bool
+	wsReplayIncomplete           bool
 	wsAccountFailoverReplayInput []json.RawMessage
+	wsContextRejected            bool // invalid encrypted context is not an account health sample
+	wsLocalWarmup                bool // HTTP bridge control turn; no upstream execution or billing
 }
 
 // SucceededForScheduling reports whether this result is an upstream success
 // that may clear model-scoped transient state. The zero value remains a success
 // for existing non-WS callers.
 func (r *OpenAIForwardResult) SucceededForScheduling() bool {
-	if r == nil || !r.OpenAIWSMode || r.UpstreamTerminalEvent == "" {
+	if r != nil && r.UpstreamEndpoint == "/basispoints/api/responses" && r.UpstreamTerminalEvent == "" {
+		return false
+	}
+	if r == nil || (!r.OpenAIWSMode && r.UpstreamEndpoint != "/basispoints/api/responses") || r.UpstreamTerminalEvent == "" {
 		return true
 	}
 	switch r.UpstreamTerminalEvent {
 	case "response.completed", "response.done":
 		return true
+	case "response.incomplete":
+		return r.UpstreamIncompleteReason == "max_output_tokens" || r.UpstreamIncompleteReason == "max_tokens"
 	default:
 		return false
 	}
+}
+
+func (r *OpenAIForwardResult) SchedulingOutcomeKnown() bool {
+	if r == nil || r.wsContextRejected {
+		return false
+	}
+	if r.ClientDisconnect || (r.OpenAIWSMode && r.UpstreamTerminalEvent == "") || r.UpstreamTerminalEvent == "response.cancelled" || r.UpstreamTerminalEvent == "response.canceled" {
+		return false
+	}
+	if r.UpstreamTerminalEvent == "response.incomplete" {
+		switch r.UpstreamIncompleteReason {
+		case "content_filter", "safety", "content_policy_violation":
+			return false
+		}
+	}
+	return true
 }
 
 const openAIResponsesUpstreamEndpoint = "/v1/responses"
@@ -442,6 +469,18 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
+	excelBPSRecoveryMu      sync.Mutex
+	excelBPSRecoveryCancel  context.CancelFunc
+	excelBPSRecoveryDone    chan struct{}
+	excelBPSRecoveryStopped bool
+	excelBPSImagesMu        sync.Mutex
+	excelBPSImages          *basispoints.ImageRelay
+	excelBPSImageAdmission  excelBPSImageAdmission
+	excelBPSAttachments     basispoints.AttachmentUploader
+	excelBPSCooldownUntil   sync.Map
+	excelBPSModelCooldowns  excelBPSModelCooldowns
+	excelBPSModelsCache     openAIModelsCache
+
 	accountRepo           AccountRepository
 	usageLogRepo          UsageLogRepository
 	usageBillingRepo      UsageBillingRepository
@@ -584,6 +623,7 @@ func NewOpenAIGatewayService(
 	if openAITokenProvider != nil {
 		openAITokenProvider.SetAccountRuntimeBlocker(svc)
 	}
+	svc.StartBPS403Recovery()
 	svc.logOpenAIWSModeBootstrap()
 	return svc
 }
@@ -621,6 +661,9 @@ func (s *OpenAIGatewayService) isCodexImageGenerationBridgeEnabled(ctx context.C
 	if account == nil || account.Platform != PlatformOpenAI {
 		return false
 	}
+	if OpenAIImageRequestRejection(WithOpenAIImageGenerationIntent(ctx), account, "gpt-image-2") != "" {
+		return false
+	}
 	if override := account.CodexImageGenerationBridgeOverride(); override != nil {
 		return *override
 	}
@@ -655,7 +698,7 @@ func (s *OpenAIGatewayService) isUpstreamModelRestrictedByChannel(ctx context.Co
 		requestedModel = compactForwardModel.model
 		requireCompact = compactForwardModel.useCompactModelMapping
 	}
-	upstreamModel := resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact)
+	upstreamModel := resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact, account != nil && account.IsExcelBPSEnabledForModel(requestedModel) && s.excelBPSGloballyEnabled(ctx))
 	if upstreamModel == "" {
 		return false
 	}
@@ -1275,4 +1318,43 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 	default:
 		return "", "", fmt.Errorf("unsupported account type: %s", account.Type)
 	}
+}
+
+// ErrOpenAIWSCodexClientRestricted marks a WebSocket turn denied by the
+// account's codex_cli_only policy. It is a client decision, not an account
+// failure: the handler neither fails over nor penalizes the account.
+var ErrOpenAIWSCodexClientRestricted = errors.New("codex_cli_only restriction: only codex official clients are allowed")
+
+// checkOpenAIWSCodexClientRestriction applies the HTTP codex_cli_only gate to
+// one response.create frame. HTTP checks every request, so WS checks every
+// turn: the handshake fixes the identity headers, while body fingerprint
+// signals and the global policy are read per frame. A denial first sends a 403
+// error event, which Codex reports instead of retrying a bare close.
+func (s *OpenAIGatewayService) checkOpenAIWSCodexClientRestriction(ctx context.Context, c *gin.Context, account *Account, frame []byte, writeEvent func([]byte) error) error {
+	result := s.detectCodexClientRestriction(c, account, frame)
+	logCodexCLIOnlyDetection(ctx, c, account, getAPIKeyIDFromContext(c), result, frame)
+	if !result.Enabled || result.Matched {
+		return nil
+	}
+	MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+	message := CodexClientRestrictionMessage(result)
+	event := buildOpenAIWSCodexClientRestrictedEvent(message)
+	if writeEvent != nil && writeEvent(event) == nil {
+		markOpenAIWSClientVisibleFailure(c, "error", event)
+	}
+	return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, message,
+		fmt.Errorf("%w: %s", ErrOpenAIWSCodexClientRestricted, result.Reason))
+}
+
+// buildOpenAIWSCodexClientRestrictedEvent mirrors the HTTP 403 body as a WS
+// error event; the status makes Codex treat it as a final rejection.
+func buildOpenAIWSCodexClientRestrictedEvent(message string) []byte {
+	payload, err := json.Marshal(map[string]any{
+		"type": "error", "sequence_number": 0, "status": http.StatusForbidden,
+		"error": map[string]any{"type": "forbidden_error", "message": message},
+	})
+	if err != nil {
+		return []byte(`{"type":"error","sequence_number":0,"status":403,"error":{"type":"forbidden_error","message":"` + CodexOfficialClientsOnlyMessage + `"}}`)
+	}
+	return payload
 }
