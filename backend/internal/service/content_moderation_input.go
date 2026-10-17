@@ -239,6 +239,13 @@ func (collector moderationTextCollector) collectLastResponsesInput(input gjson.R
 }
 
 func (collector moderationTextCollector) isResponsesUserTextItem(item gjson.Result) bool {
+	// A tool result remains a tool result even when it contains a content/text
+	// extension or a forged user role. All guards share this protocol boundary.
+	switch strings.ToLower(strings.TrimSpace(item.Get("type").String())) {
+	case "", "message", "input_text", "input_image":
+	default:
+		return false
+	}
 	role := strings.ToLower(strings.TrimSpace(item.Get("role").String()))
 	if role == "user" {
 		return collector.responseItemHasModerationText(item)
@@ -301,6 +308,11 @@ func (collector moderationTextCollector) collectContentValue(value gjson.Result,
 		})
 	case value.IsObject():
 		typ := strings.ToLower(strings.TrimSpace(value.Get("type").String()))
+		switch typ {
+		case "", "text", "input_text", "message", "image_url", "input_image", "image":
+		default:
+			return
+		}
 		addModerationImage(images, value.Get("image_url.url").String())
 		addModerationImage(images, value.Get("image_url").String())
 		addModerationImage(images, value.Get("url").String())
