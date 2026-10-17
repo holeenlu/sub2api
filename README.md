@@ -46,6 +46,8 @@ API Key limits default to `0` (no additional limit). Configure them under **API 
 
 ## Supplier Console
 
+The supplier UI can run as an independent static frontend/proxy image on the same host as the operations backend, or on server A with the existing backend on B and PostgreSQL/Redis on C or managed services. It reuses the existing frontend and backend authorization rules. See the [container layout, runtime configuration and deployment examples](docs/vendor-console/PORTAL-ROUTING.md#独立门户镜像2026-10-19). The public gateway API endpoint setting remains unchanged; the portal's backend connection is configured separately at runtime.
+
 Super-admin-only supplier provisioning, scoped Claude/OpenAI onboarding and authorization import/export, private proxies, an independent supplier portal, shared native-group supply, and multi-supplier usage reconciliation with settlement snapshots and offline payment recording are implemented. See the [requirements and operating design](docs/vendor-console/README.md) and [validation and deployment requirements](docs/vendor-console/IMPLEMENTATION-STATUS.md). Production activation requires the documented deployment checks; the supplier console is disabled by default.
 
 ## Tech Stack
