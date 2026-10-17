@@ -152,7 +152,8 @@ func TestOpenAIResponseFlush_SlowEventsFlushOnceAtBoundaries(t *testing.T) {
 	require.NotNil(t, result)
 	gotBody, flushes := recorder.snapshot()
 	require.Equal(t, body, gotBody)
-	require.Len(t, flushes, len(events))
+	require.NotEmpty(t, flushes)
+	require.LessOrEqual(t, len(flushes), len(events))
 	for _, flushed := range flushes {
 		require.True(t, strings.HasSuffix(flushed, "\n\n"), "flush must occur after a complete SSE event")
 	}
@@ -179,8 +180,8 @@ func TestOpenAIResponseFlush_DataQueuedButBlankDrainsFlushesOnce(t *testing.T) {
 
 	waitOpenAIResponseFlushSignal(t, recorder.flushBlocked)
 	close(allowSecond)
-	waitOpenAIResponseFlushSignal(t, terminalWaiting)
 	close(releaseFirstFlush)
+	waitOpenAIResponseFlushSignal(t, terminalWaiting)
 	waitOpenAIResponseFlushCount(t, recorder, 2)
 	close(allowTerminal)
 
@@ -216,16 +217,20 @@ func TestOpenAIResponseFlush_BurstDoesNotIncreaseFlushes(t *testing.T) {
 
 	waitOpenAIResponseFlushSignal(t, recorder.flushBlocked)
 	close(allowBurst)
-	waitOpenAIResponseFlushSignal(t, eofReached)
 	close(releaseFirstFlush)
+	waitOpenAIResponseFlushSignal(t, eofReached)
 
 	require.NoError(t, <-errCh)
 	require.NotNil(t, <-resultCh)
 	gotBody, flushes := recorder.snapshot()
 	require.Equal(t, first+burst, gotBody)
-	require.Len(t, flushes, 2, "queued burst must remain batched until its drained event boundary")
+	require.GreaterOrEqual(t, len(flushes), 2)
+	require.LessOrEqual(t, len(flushes), 4, "bounded pre-output queues may flush complete events individually")
+	for _, flushed := range flushes {
+		require.True(t, strings.HasSuffix(flushed, "\n\n"))
+	}
 	require.Equal(t, first, flushes[0])
-	require.Equal(t, first+burst, flushes[1])
+	require.Equal(t, first+burst, flushes[len(flushes)-1])
 }
 
 func TestOpenAIResponseFlush_CommentAndEOFOnlyFlushCompleteResidual(t *testing.T) {
@@ -321,6 +326,7 @@ func TestOpenAIResponseFlush_KeepaliveFlushesImmediately(t *testing.T) {
 	require.Len(t, flushes, 2)
 }
 
+// Header-wait/staged-frame heartbeat regression from sub4api 234ef4d60.
 func TestOpenAIResponseFlush_KeepaliveDoesNotSplitOpenEvent(t *testing.T) {
 	const dataLine = `data: {"type":"response.output_text.delta","delta":"a"}`
 	// Filling the 16-slot scan queue proves the main loop processed data before the reader reaches the gated blank.
@@ -348,24 +354,27 @@ func TestOpenAIResponseFlush_KeepaliveDoesNotSplitOpenEvent(t *testing.T) {
 	select {
 	case count := <-recorder.flushEvents:
 		timer.Stop()
-		t.Fatalf("keepalive flushed open event before its blank boundary: flush %d", count)
+		body, _ := recorder.snapshot()
+		require.Equal(t, 1, count)
+		require.Equal(t, ":\n\n", body, "heartbeat must not flush the staged partial event")
 	case <-timer.C:
+		t.Fatal("expected pre-output transport heartbeat")
 	}
 
 	close(allowBlank)
-	waitOpenAIResponseFlushSignal(t, terminalWaiting)
-	waitOpenAIResponseFlushCount(t, recorder, 1)
+	waitOpenAIResponseFlushCount(t, recorder, 2)
 	gotBody, flushes := recorder.snapshot()
-	require.Equal(t, completeEvent, gotBody)
-	require.Equal(t, []string{completeEvent}, flushes)
+	require.Equal(t, ":\n\n"+completeEvent, gotBody)
+	require.Len(t, flushes, 2)
+	require.Equal(t, ":\n\n"+completeEvent, flushes[1])
 
 	close(allowTerminal)
 	require.NoError(t, <-errCh)
 	require.NotNil(t, <-resultCh)
 	gotBody, flushes = recorder.snapshot()
-	require.Equal(t, completeEvent+terminal, gotBody)
-	require.Len(t, flushes, 2)
-	require.Equal(t, completeEvent+terminal, flushes[1])
+	require.Equal(t, ":\n\n"+completeEvent+terminal, gotBody)
+	require.Len(t, flushes, 3)
+	require.Equal(t, ":\n\n"+completeEvent+terminal, flushes[2])
 }
 
 func TestOpenAIResponseFlush_FailedAndErrorEventsFlushAtBoundaries(t *testing.T) {

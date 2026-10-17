@@ -398,7 +398,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
-		if turnMetadata := strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)); turnMetadata != "" {
+		if turnMetadata := strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)); turn == 1 && turnMetadata != "" && !gjson.GetBytes(normalized, "client_metadata."+openAIWSTurnMetadataHeader).Exists() {
 			next, setErr := applyPayloadMutation(normalized, "client_metadata."+openAIWSTurnMetadataHeader, turnMetadata)
 			if setErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
@@ -413,6 +413,19 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if accountScoped {
 			normalized = accountScopedPayload
 		}
+		ids := resolveCodexFingerprintIDsForCaller(codexAccountIdentitySource(c, account), c.Request.Header, getAPIKeyIDFromContext(c))
+		if next, _, fpErr := applyCodexFingerprintClientMetadataRaw(normalized, ids); fpErr != nil {
+			return openAIWSClientPayload{}, fpErr
+		} else {
+			normalized = next
+		}
+		stageCodexFingerprintIDs(c, ids)
+		if next, _, metadataErr := normalizeCodexRequestMetadata(normalized, nil, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c), false); metadataErr != nil {
+			return openAIWSClientPayload{}, metadataErr
+		} else {
+			normalized = next
+		}
+
 		if responsesLite {
 			litePayload, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(normalized, account)
 			if liteErr != nil {
@@ -1045,10 +1058,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		firstPayload.promptCacheKey,
 		firstRoutingFields[0].String(),
 		firstRoutingFields[1].String(),
+		firstPayload.payloadRaw,
 	)
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	if next, _, metadataErr := normalizeCodexRequestMetadata(firstPayload.payloadRaw, wsHeaders, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c), false); metadataErr != nil {
+		return metadataErr
+	} else {
+		firstPayload.payloadRaw = next
+	}
+	projectCodexOutboundHeaders(wsHeaders, codexAccountIdentitySource(c, account), true)
+
 	baseAcquireReq := openAIWSAcquireRequest{
 		TenantScope: openAIWSTenantScope(c),
 		Account:     account,
@@ -1120,9 +1141,29 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		acquireTimeout = 30 * time.Second
 	}
 
+	currentPayload := firstPayload.payloadRaw
+	currentPayloadBytes := len(currentPayload)
 	agentTaskRecoveryTried := false
 	var acquireTurnLease func(int, string, bool, bool) (*openAIWSConnLease, error)
 	acquireTurnLease = func(turn int, preferred string, forcePreferredConn bool, forceNewConn bool) (*openAIWSConnLease, error) {
+		if turn > 1 || forceNewConn {
+			fields := gjson.GetManyBytes(currentPayload, "prompt_cache_key", "model", "service_tier")
+			// Reconnect from this turn's already-scoped body, never the first
+			// handshake's raw metadata. Passing it as a raw header would scope twice.
+			headers, _, err := s.buildOpenAIWSHeaders(ctx, c, account, token, wsDecision, isCodexCLI,
+				turnState, "", fields[0].String(), fields[1].String(), fields[2].String(), currentPayload)
+			if err != nil {
+				return nil, fmt.Errorf("build ws reconnect headers: %w", err)
+			}
+			next, _, err := normalizeCodexRequestMetadata(currentPayload, headers, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c), false)
+			if err != nil {
+				return nil, err
+			}
+			currentPayload = next
+			currentPayloadBytes = len(next)
+			projectCodexOutboundHeaders(headers, codexAccountIdentitySource(c, account), true)
+			baseAcquireReq.Headers = headers
+		}
 		req := cloneOpenAIWSAcquireRequest(baseAcquireReq)
 		req.PreferredConnID = strings.TrimSpace(preferred)
 		req.ForcePreferredConn = forcePreferredConn
@@ -1205,6 +1246,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		connID := strings.TrimSpace(lease.ConnID())
 		if handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader)); handshakeTurnState != "" {
+			s.noteOpenAICodexTurnStateProvenance(c, account, handshakeTurnState)
 			turnState = handshakeTurnState
 			if stateStore != nil && sessionHash != "" {
 				stateStore.BindSessionTurnState(groupID, sessionHash, handshakeTurnState, s.openAIWSSessionStickyTTL())
@@ -1268,6 +1310,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		defer func() {
 			var turnErr *openAIWSIngressTurnError
 			if errors.As(returnErr, &turnErr) {
+				if IsOpenAIWSUpstreamTransportError(returnErr) {
+					progress.upstreamCloseCode = int(coderws.CloseStatus(returnErr))
+				}
 				turnErr.retryDetail = retryDetail()
 			}
 		}()
@@ -1286,6 +1331,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			err := observeWrite(writeClientMessage(message))
 			if err == nil && !clientDisconnected {
 				progress.observeDownstream(message)
+				if gjson.GetBytes(message, "type").String() == "codex.response.metadata" {
+					if state := gjson.GetBytes(message, "headers.x-codex-turn-state").String(); state != "" {
+						s.noteOpenAICodexTurnStateProvenance(c, account, state)
+					}
+				}
 			}
 
 			return err
@@ -1358,6 +1408,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if err := validateVendorDispatch(ctx, s.accountRepo, account, vendorDispatchGroup(c)); err != nil {
 			return nil, err
 		}
+		logGatewayCacheTransform(ctx, account, "", payload)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -1961,14 +2012,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 	}
 
-	currentPayload := firstPayload.payloadRaw
 	// Admission hooks must see client model candidates before upstream mapping.
 	currentClientPayload := firstPayload.rawForHash
 	currentOriginalModel := firstPayload.originalModel
 	currentImageBillingModel := firstPayload.imageBillingModel
 	currentImageSizeTier := firstPayload.imageSizeTier
 	currentImageInputSize := firstPayload.imageInputSize
-	currentPayloadBytes := firstPayload.payloadBytes
 	currentRequestedReasoningEffort := firstPayload.requestedReasoningEffort
 	isStrictAffinityTurn := func(payload []byte) bool {
 		if !storeDisabled {
@@ -2596,30 +2645,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if parseErr != nil {
 			return parseErr
 		}
-		nextRoutingFields := gjson.GetManyBytes(nextPayload.payloadRaw, "model", "service_tier")
-		if nextPayload.promptCacheKey != "" {
-			// ingress 会话在整个客户端 WS 生命周期内复用同一上游连接；
-			// prompt_cache_key 对握手头的更新仅在未来需要重新建连时生效。
-			updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeaders(
-				ctx,
-				c,
-				account,
-				token,
-				wsDecision,
-				isCodexCLI,
-				turnState,
-				strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)),
-				nextPayload.promptCacheKey,
-				nextRoutingFields[0].String(),
-				nextRoutingFields[1].String(),
-			)
-			if updHdrErr != nil {
-				logOpenAIWSModeInfo("ingress_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
-			} else {
-				baseAcquireReq.Headers = updatedHeaders
-			}
-		}
-		setOpenAICodexRoutingHint(baseAcquireReq.Headers, account, nextRoutingFields[0].String(), nextRoutingFields[1].String())
 		if nextPayload.previousResponseID != "" {
 			expectedPrev := strings.TrimSpace(lastTurnResponseID)
 			chainedFromLast := expectedPrev != "" && nextPayload.previousResponseID == expectedPrev

@@ -3,9 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -140,4 +143,106 @@ func TestReadOpenAIWSClientMessage_ParentCancellationStillJoinsRead(t *testing.T
 	case <-time.After(time.Second):
 		t.Fatal("server read goroutine leaked after parent cancellation")
 	}
+}
+
+// Deliberately ignores close until CloseNow: exercises the bounded close path.
+type queuedWSDownstreamTestConn struct {
+	input       chan []byte
+	closed      chan struct{}
+	closeOnce   sync.Once
+	closeStatus chan coderws.StatusCode
+}
+
+func (c *queuedWSDownstreamTestConn) Read(ctx context.Context) (coderws.MessageType, []byte, error) {
+	select {
+	case b := <-c.input:
+		return coderws.MessageText, b, nil
+	case <-ctx.Done():
+		return 0, nil, ctx.Err()
+	case <-c.closed:
+		return 0, nil, io.EOF
+	}
+}
+func (c *queuedWSDownstreamTestConn) Write(context.Context, coderws.MessageType, []byte) error {
+	return nil
+}
+func (c *queuedWSDownstreamTestConn) Close(status coderws.StatusCode, _ string) error {
+	c.closeStatus <- status
+	<-c.closed
+	return nil
+}
+func (c *queuedWSDownstreamTestConn) CloseNow() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return nil
+}
+func newQueuedWSDownstreamTestConn() *queuedWSDownstreamTestConn {
+	return &queuedWSDownstreamTestConn{input: make(chan []byte, 16), closed: make(chan struct{}), closeStatus: make(chan coderws.StatusCode, 1)}
+}
+
+func TestOpenAIWSDownstreamBackpressureAndBoundedClose(t *testing.T) {
+	conn := newQueuedWSDownstreamTestConn()
+	ds := NewOpenAIWSDownstream(conn, 4096)
+	defer ds.CloseNow()
+	for i := 0; i < 12; i++ {
+		conn.input <- []byte(fmt.Sprintf(`{"type":"response.create","model":"m","input":"%d"}`, i))
+	}
+	require.Eventually(t, func() bool { return len(ds.frames) == openAIWSClientQueueLimit }, time.Second, time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for i := 0; i < 12; i++ {
+		_, b, err := ds.Read(ctx)
+		require.NoError(t, err)
+		require.Contains(t, string(b), fmt.Sprintf(`"input":"%d"`, i))
+	}
+	require.False(t, ds.ClientClosed(), "queue pressure applies backpressure instead of disconnecting")
+	start := time.Now()
+	require.NoError(t, ds.Close(coderws.StatusGoingAway, "preempted"))
+	require.Less(t, time.Since(start), time.Second)
+	require.Equal(t, coderws.StatusGoingAway, <-conn.closeStatus)
+}
+
+func TestOpenAIWSDownstreamEarlyCancelPassesThrough(t *testing.T) {
+	conn := newQueuedWSDownstreamTestConn()
+	ds := NewOpenAIWSDownstream(conn, 4096)
+	defer ds.CloseNow()
+	conn.input <- []byte(`{"type":"response.create"}`)
+	conn.input <- []byte(`{"type":"response.cancel","event_id":"early"}`)
+	require.Eventually(t, func() bool { return len(ds.controls) == 1 }, time.Second, time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, _, err := ds.Read(ctx)
+	require.NoError(t, err)
+	ds.controlsEnabled.Store(false)
+	ds.modeSelected.Store(true)
+	_, b, err := ds.Read(ctx)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"type":"response.cancel","event_id":"early"}`, string(b))
+}
+
+func TestOpenAIWSDownstreamUsageDrainDeadline(t *testing.T) {
+	conn := newQueuedWSDownstreamTestConn()
+	ds := NewOpenAIWSDownstream(conn, 4096)
+	defer ds.CloseNow()
+	ctx, finish := ds.turnContext(context.Background())
+	defer finish()
+	require.NoError(t, conn.CloseNow())
+	select {
+	case <-ctx.Done():
+		require.ErrorIs(t, context.Cause(ctx), errOpenAIWSUsageDrainExpired)
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain is not bounded")
+	}
+}
+
+func TestOpenAIWSDownstreamDoesNotConsumeQueuedCreateAfterDisconnect(t *testing.T) {
+	conn := newQueuedWSDownstreamTestConn()
+	ds := NewOpenAIWSDownstream(conn, 4096)
+	defer ds.CloseNow()
+	conn.input <- []byte(`{"type":"response.create","input":"queued"}`)
+	require.Eventually(t, func() bool { return len(ds.frames) == 1 }, time.Second, time.Millisecond)
+	require.NoError(t, conn.CloseNow())
+	<-ds.done
+	_, payload, err := ds.Read(context.Background())
+	require.Error(t, err)
+	require.Empty(t, payload)
 }

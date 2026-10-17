@@ -65,13 +65,13 @@ func TestSameAccountRetryDelayFor(t *testing.T) {
 	})
 }
 
-func TestSameAccountRetryAllowedUsesDeadlineInsteadOfPoolCount(t *testing.T) {
+func TestSameAccountRetryDeadlineCannotExtendCountBudget(t *testing.T) {
 	err := &service.UpstreamFailoverError{
 		RetryableOnSameAccount:   true,
 		SameAccountRetryDeadline: time.Now().Add(time.Minute),
 	}
-	require.True(t, sameAccountRetryAllowed(err, 100, 0))
-	require.True(t, sameAccountRetryAllowed(err, 100, maxSameAccountRetries))
+	require.False(t, sameAccountRetryAllowed(err, 100, 0))
+	require.False(t, sameAccountRetryAllowed(err, 100, maxSameAccountRetries))
 	err.SameAccountRetryDeadline = time.Now().Add(-time.Second)
 	require.False(t, sameAccountRetryAllowed(err, 0, 100))
 }
@@ -374,7 +374,7 @@ func TestHandleFailoverError_CacheBilling(t *testing.T) {
 		require.Zero(t, fs.SwitchCount)
 	})
 
-	t.Run("OAuth deadline存在时不按普通计数切换", func(t *testing.T) {
+	t.Run("OAuth deadline不能突破同目标预算", func(t *testing.T) {
 		mock := &mockTempUnscheduler{}
 		fs := NewFailoverState(3, true)
 		fs.SameAccountRetryCount[100] = maxSameAccountRetries
@@ -384,10 +384,10 @@ func TestHandleFailoverError_CacheBilling(t *testing.T) {
 
 		fs.HandleFailoverError(context.Background(), mock, 100, "openai", maxSameAccountRetries, err)
 
-		require.False(t, fs.ForceCacheBilling)
-		require.Zero(t, fs.SwitchCount)
-		require.Equal(t, maxSameAccountRetries+1, fs.SameAccountRetryCount[100])
-		require.Empty(t, mock.calls)
+		require.True(t, fs.ForceCacheBilling)
+		require.Equal(t, 1, fs.SwitchCount)
+		require.Equal(t, maxSameAccountRetries, fs.SameAccountRetryCount[100])
+		require.Len(t, mock.calls, 1)
 	})
 
 	t.Run("同账号重试耗尽并实际切换时设置ForceCacheBilling", func(t *testing.T) {
@@ -626,7 +626,7 @@ func TestHandleFailoverError_ContextCanceled(t *testing.T) {
 		fs := NewFailoverState(3, false)
 		err := newTestFailoverErr(400, true, false)
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(service.WithSchedulingTrace(context.Background()))
 		go func() {
 			time.Sleep(30 * time.Millisecond)
 			cancel() // 通过入口检查后、sleep 期间取消
@@ -640,6 +640,11 @@ func TestHandleFailoverError_ContextCanceled(t *testing.T) {
 		require.Less(t, elapsed, 400*time.Millisecond, "sleep 应被取消打断")
 		// 进入重试分支后才取消：重试计数已递增
 		require.Equal(t, 1, fs.SameAccountRetryCount[100])
+
+		trace := service.WithOpsSchedulingTrace(ctx, nil)
+		require.Len(t, trace, 1)
+		require.Contains(t, trace[0].Detail, `"reason":"client_canceled"`)
+		require.Nil(t, service.LastOpsUpstreamAttempt(trace))
 	})
 
 	t.Run("入口即已取消_不改动任何failover状态", func(t *testing.T) {
@@ -920,7 +925,7 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		require.Equal(t, FailoverExhausted, action)
 	})
 
-	t.Run("503且未耗尽_等待后返回Continue并清除失败列表", func(t *testing.T) {
+	t.Run("503候选耗尽_保留排除列表并停止", func(t *testing.T) {
 		fs := NewFailoverState(3, false)
 		fs.LastFailoverErr = newTestFailoverErr(503, false, false)
 		fs.FailedAccountIDs[100] = struct{}{}
@@ -930,10 +935,9 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		action := fs.HandleSelectionExhausted(context.Background())
 		elapsed := time.Since(start)
 
-		require.Equal(t, FailoverContinue, action)
-		require.Empty(t, fs.FailedAccountIDs, "应清除失败账号列表")
-		require.GreaterOrEqual(t, elapsed, 1500*time.Millisecond, "应等待约 2s")
-		require.Less(t, elapsed, 5*time.Second)
+		require.Equal(t, FailoverExhausted, action)
+		require.Contains(t, fs.FailedAccountIDs, int64(100))
+		require.Less(t, elapsed, 100*time.Millisecond)
 	})
 
 	t.Run("503但SwitchCount已超过MaxSwitches_返回Exhausted", func(t *testing.T) {
@@ -987,13 +991,13 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		require.Equal(t, FailoverCanceled, action)
 	})
 
-	t.Run("503且SwitchCount等于MaxSwitches_仍可重试", func(t *testing.T) {
+	t.Run("503且SwitchCount等于MaxSwitches_停止", func(t *testing.T) {
 		fs := NewFailoverState(2, false)
 		fs.LastFailoverErr = newTestFailoverErr(503, false, false)
-		fs.SwitchCount = 2 // == MaxSwitches，条件是 <=，仍可重试
+		fs.SwitchCount = 2 // == MaxSwitches，条件是 <=，停止
 
 		action := fs.HandleSelectionExhausted(context.Background())
-		require.Equal(t, FailoverContinue, action)
+		require.Equal(t, FailoverExhausted, action)
 	})
 }
 
