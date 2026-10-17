@@ -132,6 +132,14 @@ RUN --mount=type=cache,id=kdan-gomod,target=/go/pkg/mod \
 # -----------------------------------------------------------------------------
 FROM ${POSTGRES_IMAGE} AS pg-client
 
+# Official CLI used solely for isolated account identity initialization.
+# Select the target binary without executing it on the build host.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS telemetry-cli
+ARG TARGETARCH
+WORKDIR /build/telemetry
+COPY deploy/claude-telemetry/ ./
+RUN node install.mjs "${TARGETARCH}" /opt/telemetry-cli
+
 # -----------------------------------------------------------------------------
 # Stage 4: Final Runtime Image
 # -----------------------------------------------------------------------------
@@ -154,6 +162,9 @@ RUN apk add --no-cache \
     libldap \
     libedit \
     && rm -rf /var/cache/apk/*
+
+COPY --from=telemetry-cli --chmod=755 /opt/telemetry-cli/claude /usr/local/bin/claude
+COPY --from=telemetry-cli /opt/telemetry-cli/LICENSE /usr/local/share/claude-telemetry/LICENSE
 
 # Copy pg_dump and psql from the same postgres image used in docker-compose
 # This ensures version consistency between backup tools and the database server

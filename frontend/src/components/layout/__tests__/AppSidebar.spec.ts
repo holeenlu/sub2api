@@ -9,6 +9,14 @@ const componentSource = readFileSync(componentPath, 'utf8')
 const stylePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../style.css')
 const styleSource = readFileSync(stylePath, 'utf8')
 
+describe('AppSidebar customer operations boundary', () => {
+  it('keeps supplier administration out of the customer-admin navigation', () => {
+    expect(componentSource).not.toContain("path: '/admin/vendors'")
+    expect(componentSource).toContain("path: '/admin/users'")
+    expect(componentSource).toContain("path: '/admin/accounts'")
+  })
+})
+
 describe('AppSidebar custom SVG styles', () => {
   it('does not override uploaded SVG fill or stroke colors', () => {
     expect(componentSource).toContain('.sidebar-svg-icon {')

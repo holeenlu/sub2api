@@ -30,6 +30,8 @@ server:
   # Maximum time to receive complete request headers. Does not limit response streams.
   # 完整读取请求头的最大时间；不限制响应流持续时间。
   read_header_timeout: 10
+  # Request body phase only; cleared after the body completes. 0 disables.
+  read_body_timeout: 300
   # Request header limit in bytes (64 KiB); also bounds the HTTP/2 header list.
   # 请求头上限（字节，默认 64 KiB）；同时约束 HTTP/2 header list。
   max_header_bytes: 65536
@@ -216,6 +218,9 @@ security:
 # 网关配置
 # =============================================================================
 gateway:
+  # Official CLI for account telemetry initialization; per-account homes are private.
+  account_telemetry_cli_path: /usr/local/bin/claude
+  account_telemetry_home_dir: /app/data/account-telemetry
   # Minimum max_output_tokens when converting Chat Completions or Anthropic requests to Responses (minimum 16, default 128)
   # Chat Completions 或 Anthropic 请求转换为 Responses 时的最小 max_output_tokens（最小 16，默认 128）
   min_output_tokens: 128
