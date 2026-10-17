@@ -32,11 +32,11 @@ class ReleaseMatrixTest(unittest.TestCase):
         Path('backend/cmd/server').mkdir(parents=True)
         release.VERSION_FILE.write_text('9.8.7\n')
 
-    def fixture_artifacts(self, simple=False):
+    def fixture_artifacts(self, simple=False, channel='', version='9.8.7'):
         directory = Path('release-input')
         directory.mkdir()
         for target in release.targets(simple):
-            name = release.archive_name('9.8.7', target)
+            name = release.archive_name(version, target, channel)
             archive = directory / name
             if target['goos'] == 'linux':
                 with tarfile.open(archive, 'w:gz') as out:
@@ -46,10 +46,61 @@ class ReleaseMatrixTest(unittest.TestCase):
                     out.addfile(info, io.BytesIO(b'fixture'))
             else:
                 archive.write_bytes(b'fixture archive')
-            metadata = {'version': '9.8.7', 'sha': 'a' * 40, 'target': target,
+            metadata = {'version': version, 'sha': 'a' * 40, 'target': target,
                         'archive': name, 'sha256': release.sha256(archive)}
             (directory / f"manifest-{target['goos']}-{target['goarch']}.json").write_text(json.dumps(metadata))
-        return argparse.Namespace(input='release-input', version='9.8.7', sha='a' * 40, simple=simple, output='contexts')
+        return argparse.Namespace(input='release-input', version=version, sha='a' * 40, simple=simple, output='contexts', channel=channel)
+
+    def test_channel_snapshot_injects_version_and_preserves_runtime_binary_name(self):
+        original = yaml.safe_load(release.FULL_CONFIG.read_text())
+        original['project_name'] = 'kdan'
+        original['builds'][0]['binary'] = 'kdan'
+        release.FULL_CONFIG.write_text(yaml.safe_dump(original))
+        release.generate_config(argparse.Namespace(mode='build', simple=False, channel='kdan', goos='linux', goarch='arm64', output='leaf.yaml'))
+        data = yaml.safe_load(Path('leaf.yaml').read_text())
+        self.assertEqual(data['project_name'], 'kdan')
+        self.assertEqual(data['builds'][0]['binary'], 'sub2api')
+        flags = '\n'.join(data['builds'][0]['ldflags'])
+        self.assertIn('main.Version={{ .Env.RELEASE_VERSION }}', flags)
+        self.assertIn('main.UpstreamVersion={{ .Env.UPSTREAM_VERSION }}', flags)
+        self.assertIn('service.ReleaseChannel=kdan', flags)
+        self.assertEqual(release.archive_name('0.2.8.10', {'goos': 'windows', 'goarch': 'amd64'}, 'kdan'), 'kdan_0.2.8.10_windows_amd64.zip')
+
+    def test_tokensavy_snapshot_and_archive_channel(self):
+        release.generate_config(argparse.Namespace(mode='build', simple=False, channel='tokensavy', goos='linux', goarch='amd64', output='tokensavy.yaml'))
+        data = yaml.safe_load(Path('tokensavy.yaml').read_text())
+        self.assertEqual(data['project_name'], 'tokensavy')
+        self.assertEqual(data['builds'][0]['binary'], 'sub2api')
+        self.assertIn('service.ReleaseChannel=tokensavy', '\n'.join(data['builds'][0]['ldflags']))
+        self.assertEqual(release.archive_name('0.2.9.3', {'goos': 'linux', 'goarch': 'amd64'}, 'tokensavy'), 'tokensavy_0.2.9.3_linux_amd64.tar.gz')
+        args = self.fixture_artifacts(channel='tokensavy', version='0.2.9.3')
+        release.verify(args)
+        args.channel = 'tapmodels'
+        with self.assertRaises(FileNotFoundError):
+            release.verify(args)
+
+    def test_channel_matrix_rejects_other_brand_assets(self):
+        args = self.fixture_artifacts(channel='kdan', version='0.2.8.1')
+        release.verify(args)
+        args.channel = 'tapmodels'
+        with self.assertRaises(FileNotFoundError):
+            release.verify(args)
+
+    def test_channel_archive_collect_and_docker_context_use_the_same_binary(self):
+        args = self.fixture_artifacts(channel='kdan', version='0.2.8.1')
+        Path('Dockerfile.goreleaser').write_text('FROM scratch\nCOPY sub2api /sub2api\n')
+        Path('deploy').mkdir()
+        Path('deploy/docker-entrypoint.sh').write_text('#!/bin/sh\nexec /app/sub2api\n')
+        Path('backend/resources').mkdir()
+        release.contexts(args)
+        self.assertEqual(Path('contexts/arm64/sub2api').read_bytes(), b'fixture')
+        Path('dist').mkdir()
+        name = release.archive_name(args.version, {'goos': 'linux', 'goarch': 'arm64'}, args.channel)
+        shutil.copyfile(Path(args.input) / name, Path('dist') / name)
+        Path('dist/checksums.txt').write_text(release.sha256(Path('dist') / name) + '  ' + name + '\n')
+        release.collect(argparse.Namespace(version=args.version, sha=args.sha, channel=args.channel,
+            goos='linux', goarch='arm64', output='collected'))
+        self.assertEqual((Path('collected') / name).read_bytes(), (Path(args.input) / name).read_bytes())
 
     def test_full_and_simple_matrix_match_existing_targets(self):
         full = release.targets()
@@ -184,6 +235,26 @@ class ReleaseMatrixTest(unittest.TestCase):
                     self.assertEqual(log.count('imagetools create'), 2)
                     self.assertIn('fixturehub/sub2api:9.8', log)
                     self.assertIn('ghcr.io/exampleowner/sub2api:9', log)
+
+    def test_channel_image_does_not_promote_before_release_publication(self):
+        fake_bin = Path('bin')
+        fake_bin.mkdir()
+        docker = fake_bin / 'docker'
+        docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\n')
+        docker.chmod(0o755)
+        env = {**os.environ, 'PATH': str(fake_bin.resolve()) + os.pathsep + os.environ['PATH'],
+               'DOCKER_LOG': str(Path('docker.log').resolve()), 'RUNNER_TEMP': self.temp.name,
+               'RELEASE_VERSION': '0.2.8.1', 'RELEASE_SHA': 'a' * 40, 'GITHUB_REPOSITORY': 'holeenlu/sub2api',
+               'RELEASE_IMAGE': 'ghcr.io/holeenlu/kdan', 'RELEASE_CHANNEL': 'kdan', 'DEFER_PROMOTION': 'true',
+               'DRY_RUN': 'false', 'SIMPLE_RELEASE': 'false', 'DOCKERHUB_USERNAME': 'skip'}
+        subprocess.run(['bash', str(ROOT / '.github/release-tools/release-images.sh')], env=env, check=True)
+        log = Path('docker.log').read_text()
+        self.assertIn('ghcr.io/holeenlu/kdan:0.2.8.1-amd64', log)
+        self.assertIn('ghcr.io/holeenlu/kdan:0.2.8.1-arm64', log)
+        self.assertEqual(log.count('imagetools create'), 1)
+        self.assertEqual(log.count('--build-arg BINARY_NAME=sub2api'), 2)
+        self.assertNotIn(':latest', log)
+        self.assertNotIn('ghcr.io/holeenlu/sub2api', log)
 
 
 
