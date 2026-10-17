@@ -28,6 +28,7 @@
                 v-model="filters.role"
                 :options="[
                   { value: '', label: t('admin.users.allRoles') },
+                  ...(rolePermissions.isSuperAdmin ? [{value:'super_admin',label:t('admin.users.roles.super_admin')}] : []),
                   { value: 'admin', label: t('admin.users.admin') },
                   { value: 'user', label: t('admin.users.user') }
                 ]"
@@ -232,7 +233,7 @@
                 </div>
               </div>
               <!-- Attributes Config Button -->
-              <button
+              <button v-if="(rolePermissions.can('users.update') || rolePermissions.can('staff.manage'))"
                 @click="showAttributesModal = true"
                 class="btn btn-secondary px-2 md:px-3"
                 :title="t('admin.users.attributes.configButton')"
@@ -243,7 +244,7 @@
             </div>
 
             <button
-              v-if="selectedCount > 0"
+              v-if="(selectedCount > 0) &amp;&amp; ((rolePermissions.can('users.update') || rolePermissions.can('staff.manage')))"
               class="btn btn-secondary flex-1 md:flex-initial"
               data-test="bulk-edit-limits"
               @click="showBulkEditModal = true"
@@ -253,7 +254,7 @@
             </button>
 
             <button
-              v-if="selectedCount > 0"
+              v-if="(selectedCount > 0) &amp;&amp; ((rolePermissions.can('users.delete') || rolePermissions.can('staff.manage')))"
               class="btn btn-danger flex-1 md:flex-initial"
               data-test="bulk-delete-users"
               :disabled="bulkDeleting"
@@ -264,7 +265,7 @@
             </button>
 
             <!-- Create User Button (full width on mobile, auto width on desktop) -->
-            <button @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
+            <button v-if="(rolePermissions.can('users.create') || rolePermissions.can('staff.manage'))" @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.users.createUser') }}
             </button>
@@ -337,7 +338,7 @@
           </template>
 
           <template #cell-role="{ value }">
-            <span :class="['badge', value === 'admin' ? 'badge-purple' : 'badge-gray']">
+            <span :class="['badge', value === 'admin' || value === 'super_admin' ? 'badge-purple' : 'badge-gray']">
               {{ t('admin.users.roles.' + value) }}
             </span>
           </template>
@@ -447,7 +448,7 @@
                   <div class="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-dark-600"></div>
                 </div>
               </div>
-              <button
+              <button v-if="rolePermissions.can('billing.balance.adjust') &amp;&amp; row.id !== rolePermissions.user?.id"
                 @click.stop="handleDeposit(row)"
                 class="rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                 :title="t('admin.users.deposit')"
@@ -458,7 +459,7 @@
           </template>
 
           <template #cell-balance_platform_quota="{ row }">
-            <button
+            <button v-if="(rolePermissions.can('users.update') || rolePermissions.can('staff.manage'))"
               type="button"
               class="block text-left underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:decoration-primary-400 dark:decoration-dark-500"
               :title="t('admin.users.platformQuota.cellColumnTooltip')"
@@ -594,6 +595,8 @@
             </div>
           </template>
 
+          <template #cell-created_by="{ value }"><span>{{ value ? `#${value}` : '—' }}</span></template>
+          <template #cell-last_login_at="{ value }"><span>{{ value ? formatDateTime(value) : '—' }}</span></template>
           <template #cell-created_at="{ value }">
             <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
           </template>
@@ -613,7 +616,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <!-- Edit Button -->
-              <button
+              <button v-if="rolePermissions.can(row.role === 'admin' ? 'staff.manage' : 'users.update')"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -621,9 +624,9 @@
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
 
-              <!-- Toggle Status Button (not for admin) -->
+              <!-- Peer administrators are manageable; self and protected roots are not. -->
               <button
-                v-if="row.role !== 'admin'"
+                v-if="rolePermissions.can(row.role === 'admin' ? 'staff.manage' : 'users.update') &amp;&amp; row.id !== rolePermissions.user?.id &amp;&amp; (rolePermissions.isSuperAdmin || row.role !== 'super_admin')"
                 @click="handleToggleStatus(row)"
                 :class="[
                   'flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors',
@@ -684,7 +687,7 @@
           <template v-for="user in users" :key="user.id">
             <template v-if="user.id === activeMenuId">
               <!-- View API Keys -->
-              <button
+              <button v-if="rolePermissions.can('api_keys.read')"
                 @click="handleViewApiKeys(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -693,7 +696,7 @@
               </button>
 
               <!-- Allowed Groups -->
-              <button
+              <button v-if="rolePermissions.can(user.role === 'admin' ? 'staff.manage' : 'users.update')"
                 @click="handleAllowedGroups(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -704,7 +707,7 @@
               <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
 
               <!-- Deposit -->
-              <button
+              <button v-if="rolePermissions.can('billing.balance.adjust') &amp;&amp; user.id !== rolePermissions.user?.id"
                 @click="handleDeposit(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -713,7 +716,7 @@
               </button>
 
               <!-- Withdraw -->
-              <button
+              <button v-if="rolePermissions.can('billing.balance.adjust') &amp;&amp; user.id !== rolePermissions.user?.id"
                 @click="handleWithdraw(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -724,7 +727,7 @@
               </button>
 
               <!-- Platform Quotas -->
-              <button
+              <button v-if="rolePermissions.can(user.role === 'admin' ? 'staff.manage' : 'users.update')"
                 @click="handlePlatformQuota(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -743,9 +746,9 @@
 
               <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
 
-              <!-- Delete (not for admin) -->
+              <!-- Delete an eligible member. -->
               <button
-                v-if="user.role !== 'admin'"
+                v-if="rolePermissions.can(user.role === 'admin' ? 'staff.manage' : 'users.delete') &amp;&amp; user.id !== rolePermissions.user?.id &amp;&amp; (rolePermissions.isSuperAdmin || user.role !== 'super_admin')"
                 @click="handleDelete(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
               >
@@ -792,6 +795,9 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore as useRolePermissions } from '@/stores/auth'
+const rolePermissions = useRolePermissions()
+
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -901,6 +907,8 @@ const allColumns = computed<Column[]>(() => [
   { key: 'status', label: t('admin.users.columns.status'), sortable: true },
   { key: 'last_active_at', label: t('admin.users.columns.lastActive'), sortable: true },
   { key: 'last_used_at', label: t('admin.users.columns.lastUsed'), sortable: true },
+  { key: 'created_by', label: t('admin.rolePermissions.createdBy'), sortable: false },
+  { key: 'last_login_at', label: t('admin.rolePermissions.lastLogin'), sortable: false },
   { key: 'created_at', label: t('admin.users.columns.created'), sortable: true },
   { key: 'actions', label: t('admin.users.columns.actions'), sortable: false }
 ])
@@ -1374,7 +1382,7 @@ const loadUsersSecondaryData = async (
 
   const tasks: Promise<void>[] = []
 
-  if (hasVisibleUsageColumn.value) {
+  if (hasVisibleUsageColumn.value && rolePermissions.can('usage.read')) {
     tasks.push(
       (async () => {
         try {
@@ -1819,27 +1827,20 @@ const confirmDelete = async () => {
 }
 
 const confirmBulkDelete = async () => {
-  const ids = bulkDeleteIds.value
+  const ids = [...bulkDeleteIds.value]
   bulkDeleteIds.value = []
   bulkDeleting.value = true
-  const deletedIds: number[] = []
-  for (const id of ids) {
-    try {
-      await adminAPI.users.delete(id)
-      deletedIds.push(id)
-    } catch (error) {
-      console.error('Error deleting user:', error)
-    }
-  }
-  removeSelectedIds(deletedIds)
-  if (deletedIds.length > 0) {
-    appStore.showSuccess(t('admin.users.bulkDelete.success', { count: deletedIds.length }))
+  try {
+    await adminAPI.users.deleteBatch(ids)
+    removeSelectedIds(ids)
+    appStore.showSuccess(t('admin.users.bulkDelete.success', { count: ids.length }))
     pagination.page = 1
+    await loadUsers()
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.users.bulkDelete.failed', { count: ids.length }))
+  } finally {
+    bulkDeleting.value = false
   }
-  const failed = ids.length - deletedIds.length
-  if (failed > 0) appStore.showError(t('admin.users.bulkDelete.failed', { count: failed }))
-  await loadUsers()
-  bulkDeleting.value = false
 }
 
 const handleDeposit = (user: AdminUser) => {
