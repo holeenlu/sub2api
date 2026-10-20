@@ -76,15 +76,24 @@ func TestImageResultUploaderRewritesB64JSON(t *testing.T) {
 }
 
 func TestImageResultUploaderRewritesURL(t *testing.T) {
+	var requested string
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requested = req.URL.String()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"image/png"}},
+			Body:       io.NopCloser(bytes.NewReader(pngBytes)),
+			Request:    req,
+		}, nil
+	})}
 
 	storage := &fakeImageStorage{}
-	uploader := NewImageResultUploader(storage, "images/", 0, &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"image/png"}}, Body: io.NopCloser(bytes.NewReader(pngBytes))}, nil
-	})})
+	uploader := NewImageResultUploader(storage, "images/", 0, client)
 
-	result := json.RawMessage(`{"created":1,"data":[{"url":"https://public.example/pic.png"}]}`)
+	result := json.RawMessage(`{"created":1,"data":[{"url":"https://images.example.test/pic.png"}]}`)
 	out, err := uploader.Rewrite(context.Background(), "imgtask_xyz", result)
 	require.NoError(t, err)
+	require.Equal(t, "https://images.example.test/pic.png", requested)
 
 	require.Len(t, storage.saved, 1)
 	require.Equal(t, pngBytes, storage.saved[0].data)
@@ -254,6 +263,7 @@ func TestImageOffloadRejectsPrivateURLBeforeNetwork(t *testing.T) {
 	defer server.Close()
 	storage := &fakeImageStorage{}
 	uploader := NewImageResultUploader(storage, "", 0, nil)
+	require.Same(t, uploader.httpClient, NewImageResultUploader(storage, "other/", 0, nil).httpClient)
 	for _, rawURL := range []string{server.URL, "http://[::ffff:127.0.0.1]/secret", "http://169.254.169.254/latest/meta-data/", "file:///etc/passwd"} {
 		body, err := json.Marshal(map[string]any{"data": []map[string]string{{"url": rawURL}}})
 		require.NoError(t, err)
@@ -261,6 +271,34 @@ func TestImageOffloadRejectsPrivateURLBeforeNetwork(t *testing.T) {
 		require.Error(t, err)
 	}
 	require.Zero(t, requests.Load())
+	require.Empty(t, storage.saved)
+}
+
+func TestImageTaskServiceCompletePrivateURLMarksFailed(t *testing.T) {
+	var hits atomic.Int32
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write(pngBytes)
+	}))
+	defer internal.Close()
+
+	store := &imageTaskMemoryStore{}
+	storage := &fakeImageStorage{}
+	svc := NewImageTaskServiceWithUploader(store, NewImageResultUploader(storage, "images/", 0, nil), time.Hour, time.Minute)
+	owner := ImageTaskOwner{UserID: 1, APIKeyID: 2}
+	created, err := svc.Create(context.Background(), owner)
+	require.NoError(t, err)
+
+	result := json.RawMessage(`{"data":[{"url":"` + internal.URL + `/a.png"}]}`)
+	require.NoError(t, svc.Complete(context.Background(), created.ID, http.StatusOK, result))
+
+	got, err := svc.Get(context.Background(), owner, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, ImageTaskStatusFailed, got.Status)
+	require.Equal(t, http.StatusBadGateway, got.HTTPStatus)
+	require.Empty(t, got.ImageURL)
+	require.NotContains(t, string(got.Result), internal.URL)
+	require.Zero(t, hits.Load())
 	require.Empty(t, storage.saved)
 }
 
