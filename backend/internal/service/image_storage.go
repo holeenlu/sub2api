@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
@@ -55,7 +56,7 @@ func NewImageResultUploader(storage ImageStorage, prefix string, maxDownloadByte
 	}
 }
 
-func defaultImageDownloadHTTPClient() *http.Client {
+var defaultImageDownloadHTTPClient = sync.OnceValue(func() *http.Client {
 	return &http.Client{
 		Timeout:   60 * time.Second,
 		Transport: urlvalidator.NewPublicTransport(nil),
@@ -69,7 +70,7 @@ func defaultImageDownloadHTTPClient() *http.Client {
 			return nil // PublicTransport validates and pins every destination.
 		},
 	}
-}
+})
 
 // Rewrite 将 result（上游生图响应 JSON）里的每张图片转存到对象存储，
 // 返回改写后的紧凑结果（data[i].url 指向对象存储，b64_json 被移除）。
