@@ -177,11 +177,14 @@ func TestGeminiStreamsRequireProtocolTerminal(t *testing.T) {
 		}{
 			{"truncated", "", false},
 			{"unterminated_usage", `data: {"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}`, false},
+			{"truncated_usage", `data: {"usageMetadata":{"promptTokenCount":99,"candidatesTokenCount":`, false},
+			{"unspecified_finish", "data: {\"candidates\":[{\"finishReason\":\"FINISH_REASON_UNSPECIFIED\"}]}\n\n", false},
 			{"unterminated_terminal", `data: {"candidates":[{"finishReason":"STOP"}]}`, true}, {"done_is_not_terminal", "data: [DONE]\n\n", false},
 			{"malformed", "data: {broken\n\n", false}, {"explicit_error", "data: {\"error\":{\"code\":500}}\n\n", false},
 			{"stop", "data: {\"candidates\":[{\"finishReason\":\"STOP\"}]}\n\n", true},
 			{"max_tokens", "data: {\"candidates\":[{\"finishReason\":\"MAX_TOKENS\"}]}\n\n", true},
 			{"blocked", "data: {\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}\n\n", true},
+			{"error_before_terminal", "data: {\"error\":{\"code\":500}}\n\ndata: {\"candidates\":[{\"finishReason\":\"STOP\"}]}\n\n", false},
 		} {
 			t.Run(protocol+"/"+tc.name, func(t *testing.T) {
 				input := `data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}` + "\n\n" + tc.tail
@@ -234,7 +237,7 @@ func TestGeminiTerminalReaderCompletedThenCanceled(t *testing.T) {
 		if complete {
 			prefix = terminal
 		}
-		r := newGeminiTerminalReader(io.MultiReader(strings.NewReader(prefix), geminiCanceledReader{}), 0)
+		r := newGeminiTerminalReader(io.MultiReader(strings.NewReader(prefix), geminiEndingReader{err: context.Canceled}), 0)
 		_, err := io.ReadAll(r)
 		if complete {
 			require.NoError(t, err)
@@ -244,23 +247,57 @@ func TestGeminiTerminalReaderCompletedThenCanceled(t *testing.T) {
 	}
 }
 
-type geminiCanceledReader struct{}
+type geminiEndingReader struct {
+	err         error
+	beforeError func()
+}
 
-func (geminiCanceledReader) Read([]byte) (int, error) { return 0, context.Canceled }
+func (r geminiEndingReader) Read([]byte) (int, error) {
+	if r.beforeError != nil {
+		r.beforeError()
+	}
+	return 0, r.err
+}
 
-type geminiFailedClientWriter struct{ gin.ResponseWriter }
+type geminiFailedClientWriter struct {
+	gin.ResponseWriter
+	failOn string
+}
 
-func (w geminiFailedClientWriter) Write([]byte) (int, error)       { return 0, io.ErrClosedPipe }
-func (w geminiFailedClientWriter) WriteString(string) (int, error) { return 0, io.ErrClosedPipe }
+func (w geminiFailedClientWriter) Write(p []byte) (int, error) {
+	if w.failOn == "" || strings.Contains(string(p), w.failOn) {
+		return 0, io.ErrClosedPipe
+	}
+	return w.ResponseWriter.Write(p)
+}
+func (w geminiFailedClientWriter) WriteString(p string) (int, error) { return w.Write([]byte(p)) }
+
 func TestGeminiChatCanceledWriteIsNotSuccessfulGeneration(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	c.Writer = geminiFailedClientWriter{c.Writer}
+	c.Writer = geminiFailedClientWriter{ResponseWriter: c.Writer}
 	resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`data: {"candidates":[{"finishReason":"STOP"}]}` + "\n\n"))}
 	result, err := (&GeminiMessagesCompatService{}).handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-test", false, false)
 	require.ErrorIs(t, err, context.Canceled)
 	require.NotNil(t, result)
 	require.True(t, result.clientDisconnect)
+	outcome, ok := GetOpsStreamError(c)
+	require.True(t, ok)
+	require.Equal(t, OpsClientCanceledCode, outcome.Code)
+}
+
+func TestGeminiMessagesThinkingWriteFailureKeepsUsage(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Writer = geminiFailedClientWriter{ResponseWriter: c.Writer, failOn: "thinking_delta"}
+	wire := `data: {"candidates":[{"content":{"parts":[{"text":"thinking","thought":true}]}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}` + "\n\n"
+	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(wire))}
+	result, err := (&GeminiMessagesCompatService{}).handleStreamingResponse(c, resp, time.Now(), "gemini-test")
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotNil(t, result)
+	require.True(t, result.clientDisconnect)
+	require.Equal(t, 7, result.usage.InputTokens)
+	require.Equal(t, 3, result.usage.OutputTokens)
 	outcome, ok := GetOpsStreamError(c)
 	require.True(t, ok)
 	require.Equal(t, OpsClientCanceledCode, outcome.Code)

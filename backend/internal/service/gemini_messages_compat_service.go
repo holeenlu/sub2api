@@ -2234,11 +2234,12 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 		if writer.err != nil && !terminal.terminal {
 			retErr = context.Canceled
 		}
+		disconnected := writer.err != nil || (c.Request != nil && c.Request.Context().Err() != nil)
 		if result != nil {
-			result.clientDisconnect = writer.err != nil
+			result.clientDisconnect = disconnected
 		}
 		if retErr != nil {
-			result = &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs, clientDisconnect: writer.err != nil}
+			result = &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs, clientDisconnect: disconnected}
 			reportGeminiStreamFailure(c, retErr, "anthropic")
 		}
 	}()
@@ -2305,7 +2306,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 					continue
 				}
 				if openToolIndex >= 0 {
-					writeSSE(c.Writer, "content_block_stop", map[string]any{
+					writeSSE(writer, "content_block_stop", map[string]any{
 						"type":  "content_block_stop",
 						"index": openToolIndex,
 					})
@@ -2315,7 +2316,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 				}
 				if openBlockType != "thinking" {
 					if openBlockIndex >= 0 {
-						writeSSE(c.Writer, "content_block_stop", map[string]any{
+						writeSSE(writer, "content_block_stop", map[string]any{
 							"type":  "content_block_stop",
 							"index": openBlockIndex,
 						})
@@ -2323,7 +2324,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 					openBlockType = "thinking"
 					openBlockIndex = nextBlockIndex
 					nextBlockIndex++
-					writeSSE(c.Writer, "content_block_start", map[string]any{
+					writeSSE(writer, "content_block_start", map[string]any{
 						"type":  "content_block_start",
 						"index": openBlockIndex,
 						"content_block": map[string]any{
@@ -2337,7 +2338,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 					ms := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &ms
 				}
-				writeSSE(c.Writer, "content_block_delta", map[string]any{
+				writeSSE(writer, "content_block_delta", map[string]any{
 					"type":  "content_block_delta",
 					"index": openBlockIndex,
 					"delta": map[string]any{
@@ -2963,11 +2964,12 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 		if writer.err != nil && terminal != nil && !terminal.terminal {
 			retErr = context.Canceled
 		}
+		disconnected := writer.err != nil || (c.Request != nil && c.Request.Context().Err() != nil)
 		if result != nil {
-			result.clientDisconnect = writer.err != nil
+			result.clientDisconnect = disconnected
 		}
 		if retErr != nil {
-			result = &geminiNativeStreamResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: writer.err != nil}
+			result = &geminiNativeStreamResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: disconnected}
 			s.finalizeGeminiSSESignal(c, account, true, upstreamRequestID, best, sawDataEvent, fallback)
 			if best.Kind != geminiSignalError {
 				reportGeminiStreamFailure(c, retErr, "gemini")
@@ -2977,6 +2979,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 
 	for {
 		line, err := reader.ReadString('\n')
+		// A complete JSON event can share its final read with an error.
 		if len(line) > 0 {
 			trimmed := strings.TrimRight(line, "\r\n")
 			if strings.HasPrefix(trimmed, "data:") {
@@ -2986,6 +2989,12 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					_, _ = io.WriteString(writer, line)
 					flusher.Flush()
 				} else {
+					if terminal != nil && !gjson.Valid(payload) {
+						if err != nil {
+							return nil, err
+						}
+						continue
+					}
 					var rawToWrite string
 					rawToWrite = payload
 
@@ -3172,9 +3181,10 @@ func extractGeminiUsage(data []byte) *ClaudeUsage {
 	}
 
 	// 注意：Gemini 的 promptTokenCount 包含 cachedContentTokenCount，
-	// 但 Claude 的 input_tokens 不包含 cache_read_input_tokens，需要减去
+	// 但 Claude 的 input_tokens 不包含 cache_read_input_tokens，需要减去。
+	// prompt 被拦截时上游可能只报 cachedContentTokenCount，差值下限为 0。
 	return &ClaudeUsage{
-		InputTokens:          prompt - cached,
+		InputTokens:          max(prompt-cached, 0),
 		OutputTokens:         cand + thoughts,
 		CacheReadInputTokens: cached,
 		ImageOutputTokens:    imageTokens,
