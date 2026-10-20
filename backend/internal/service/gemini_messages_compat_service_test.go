@@ -950,6 +950,16 @@ func TestExtractGeminiUsage(t *testing.T) {
 			},
 		},
 		{
+			name:    "prompt 被拦截只报 cachedContentTokenCount — input 下限为 0",
+			input:   `{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"},"usageMetadata":{"cachedContentTokenCount":12980}}`,
+			wantNil: false,
+			wantUsage: &ClaudeUsage{
+				InputTokens:          0,
+				OutputTokens:         0,
+				CacheReadInputTokens: 12980,
+			},
+		},
+		{
 			name:    "无 usageMetadata",
 			input:   `{"candidates":[]}`,
 			wantNil: true,
@@ -1366,45 +1376,110 @@ func TestGeminiChatFinalWireSchemaFidelity(t *testing.T) {
 	}
 }
 
-func TestGeminiForwardFailureRetainsOnlyMeasuredFacts(t *testing.T) {
+func TestGeminiForwardStreamOutcomeRetainsOnlyMeasuredFacts(t *testing.T) {
 	for _, protocol := range []string{"chat", "messages", "native", "native-aggregate"} {
-		t.Run(protocol, func(t *testing.T) {
-			wire := `data: {"candidates":[{"content":{"parts":[{"text":"partial"},{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}` + "\n\n"
-			upstream := &geminiCompatHTTPUpstreamStub{response: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"known-id"}}, Body: io.NopCloser(strings.NewReader(wire))}}
-			svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
-			account := &Account{Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test"}}
-			rec := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(rec)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-			body := []byte(`{"model":"gemini-2.5-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
-			var result *ForwardResult
-			var err error
-			switch protocol {
-			case "chat":
-				result, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body)
-			case "messages":
-				result, err = svc.Forward(context.Background(), c, account, body)
-			case "native-aggregate":
-				account.Type = AccountTypeOAuth
-				account.Credentials = map[string]any{"access_token": "test", "project_id": "project"}
-				svc.tokenProvider = &GeminiTokenProvider{}
-				result, err = svc.ForwardNative(context.Background(), c, account, "gemini-2.5-flash", "generateContent", false, []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
-			default:
-				result, err = svc.ForwardNative(context.Background(), c, account, "gemini-2.5-flash", "streamGenerateContent", true, []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
+		for _, tc := range []struct {
+			name                                 string
+			readErr                              error
+			usage, image, complete, unterminated bool
+		}{
+			{name: "truncated", readErr: io.EOF, usage: true, image: true},
+			{name: "canceled_with_usage", readErr: context.Canceled, usage: true},
+			{name: "canceled_with_image", readErr: context.Canceled, image: true},
+			{name: "canceled_without_usage", readErr: context.Canceled},
+			{name: "unterminated_usage_then_cancel", readErr: context.Canceled, usage: true, unterminated: true},
+			{name: "read_error_with_usage", readErr: io.ErrUnexpectedEOF, usage: true},
+			{name: "terminal_then_cancel", readErr: context.Canceled, usage: true, complete: true},
+			{name: "terminal_then_read_error", readErr: io.ErrUnexpectedEOF, usage: true, complete: true},
+		} {
+			if protocol == "native-aggregate" && tc.name != "truncated" {
+				continue
 			}
-			require.Error(t, err)
-			require.NotNil(t, result)
-			require.Equal(t, 7, result.Usage.InputTokens)
-			require.Equal(t, 3, result.Usage.OutputTokens)
-			require.Equal(t, 1, result.ImageCount)
-			require.True(t, geminiUsageWasReported(c))
-			require.Equal(t, "known-id", result.RequestID)
-			require.Equal(t, 1, upstream.calls)
-			require.True(t, IsResponseCommitted(c))
-			require.Equal(t, 1, strings.Count(rec.Body.String(), `"error":`))
-			require.NotContains(t, rec.Body.String(), "[DONE]")
-			require.NotContains(t, rec.Body.String(), "message_stop")
-		})
+			t.Run(protocol+"/"+tc.name, func(t *testing.T) {
+				parts := `{"text":"partial"}`
+				if tc.image {
+					parts += `,{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}`
+				}
+				wire := `data: {"candidates":[{"content":{"parts":[` + parts + `]}}]`
+				if tc.usage {
+					wire += `,"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}`
+				}
+				wire += "}\n\n"
+				if tc.complete {
+					wire += "data: {\"candidates\":[{\"finishReason\":\"STOP\"}]}\n\n"
+				}
+				if tc.unterminated {
+					wire = strings.TrimRight(wire, "\n")
+				}
+				ctx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+				ending := geminiEndingReader{err: tc.readErr}
+				if tc.readErr == context.Canceled {
+					ending.beforeError = cancel
+				}
+				upstream := &geminiCompatHTTPUpstreamStub{response: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"known-id"}}, Body: io.NopCloser(io.MultiReader(strings.NewReader(wire), ending))}}
+				svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+				account := &Account{Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test"}}
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(ctx)
+				body := []byte(`{"model":"gemini-3-pro-image","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+				var result *ForwardResult
+				var err error
+				switch protocol {
+				case "chat":
+					result, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body)
+				case "messages":
+					result, err = svc.Forward(context.Background(), c, account, body)
+				case "native-aggregate":
+					account.Type = AccountTypeOAuth
+					account.Credentials = map[string]any{"access_token": "test", "project_id": "project"}
+					svc.tokenProvider = &GeminiTokenProvider{}
+					result, err = svc.ForwardNative(context.Background(), c, account, "gemini-3-pro-image", "generateContent", false, []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
+				default:
+					result, err = svc.ForwardNative(context.Background(), c, account, "gemini-3-pro-image", "streamGenerateContent", true, []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
+				}
+				if tc.complete {
+					require.NoError(t, err)
+					require.Empty(t, GetOpsStreamErrors(c))
+				} else {
+					require.Error(t, err)
+					if tc.readErr != io.EOF {
+						require.ErrorIs(t, err, tc.readErr)
+					}
+					require.True(t, IsResponseCommitted(c))
+					errorCount := 1
+					if tc.readErr == context.Canceled {
+						errorCount = 0
+						outcome, ok := GetOpsStreamError(c)
+						require.True(t, ok)
+						require.Equal(t, OpsClientCanceledCode, outcome.Code)
+					}
+					require.Equal(t, errorCount, strings.Count(rec.Body.String(), `"error":`))
+					require.NotContains(t, rec.Body.String(), "[DONE]")
+					require.NotContains(t, rec.Body.String(), "message_stop")
+				}
+				require.Equal(t, 1, upstream.calls)
+				if !tc.usage && !tc.image {
+					require.Nil(t, result)
+					return
+				}
+				require.NotNil(t, result)
+				wantUsage := ClaudeUsage{}
+				if tc.usage {
+					wantUsage.InputTokens, wantUsage.OutputTokens = 7, 3
+				}
+				require.Equal(t, wantUsage, result.Usage)
+				wantImages := 0
+				if tc.image || tc.complete {
+					wantImages = 1
+				}
+				require.Equal(t, wantImages, result.ImageCount)
+				require.Equal(t, tc.usage, geminiUsageWasReported(c))
+				require.Equal(t, tc.readErr == context.Canceled, result.ClientDisconnect)
+				require.Equal(t, "known-id", result.RequestID)
+			})
+		}
 	}
 }
 

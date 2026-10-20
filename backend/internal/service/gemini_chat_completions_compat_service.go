@@ -601,11 +601,12 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		if writer.err != nil && !terminal.terminal {
 			retErr = context.Canceled
 		}
+		disconnected := writer.err != nil || (c.Request != nil && c.Request.Context().Err() != nil)
 		if result != nil {
-			result.clientDisconnect = writer.err != nil
+			result.clientDisconnect = disconnected
 		}
 		if retErr != nil {
-			result = &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs, clientDisconnect: writer.err != nil}
+			result = &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs, clientDisconnect: disconnected}
 			reportGeminiStreamFailure(c, retErr, "openai")
 		}
 	}()
