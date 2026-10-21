@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -206,7 +207,20 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	// Read Anthropic SSE → convert to Responses events → convert to CC format
 	var handleErr error
 	if clientStream {
+		writerSizeBeforeStream := OpenAICompactKeepaliveAdjustedWrittenSize(c)
 		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		var sseErr *sseStreamErrorEventError
+		switch {
+		case errors.As(handleErr, &sseErr):
+			canFailover := OpenAICompactKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeStream &&
+				(result == nil || (!result.Usage.HasObservedTokens() && !result.ClientDisconnect))
+			failoverErr := s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, !canFailover)
+			if canFailover {
+				return nil, failoverErr
+			}
+		case errors.Is(handleErr, errAnthropicCompatStreamIdle) && s.rateLimitService != nil:
+			s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
+		}
 	} else {
 		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
 	}

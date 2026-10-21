@@ -16,6 +16,7 @@ import (
 
 type snapshotReadHook struct {
 	direct    int
+	commands  []redis.Cmder
 	pipelines [][]redis.Cmder
 }
 
@@ -23,7 +24,11 @@ func (h *snapshotReadHook) DialHook(next redis.DialHook) redis.DialHook {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) { return next(ctx, network, addr) }
 }
 func (h *snapshotReadHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
-	return func(ctx context.Context, cmd redis.Cmder) error { h.direct++; return next(ctx, cmd) }
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		h.direct++
+		h.commands = append(h.commands, cmd)
+		return next(ctx, cmd)
+	}
 }
 func (h *snapshotReadHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
 	return func(ctx context.Context, cmds []redis.Cmder) error {
@@ -53,12 +58,11 @@ func TestSchedulerSnapshotPipelinesBoundedFieldsAndFreshLastUsed(t *testing.T) {
 		require.Equal(t, accounts[i].ID, account.ID)
 	}
 	require.Equal(t, latest, *result[2].LastUsedAt)
-	require.Equal(t, 1, hook.direct)  // membership ZRANGE
-	require.Len(t, hook.pipelines, 3) // control pair + two bounded field pairs
-	for _, pair := range hook.pipelines[1:] {
-		require.Len(t, pair, 2)
-		for _, command := range pair {
-			require.Equal(t, "mget", command.Name())
+	require.Equal(t, 5, hook.direct)  // membership, two metadata and two last-used chunks
+	require.Len(t, hook.pipelines, 1) // revision tags share one round trip
+	require.Len(t, hook.pipelines[0], len(schedulerSnapshotTagKeys(bucket)))
+	for _, command := range hook.commands {
+		if command.Name() == "mget" {
 			require.LessOrEqual(t, len(command.Args())-1, 2)
 		}
 	}
@@ -70,6 +74,9 @@ func TestSchedulerSnapshotPipelinesBoundedFieldsAndFreshLastUsed(t *testing.T) {
 	require.True(t, hit)
 	require.Equal(t, newer, *result[2].LastUsedAt)
 	require.NoError(t, cache.rdb.Del(ctx, schedulerAccountMetaKey(strconv.Itoa(802))).Err())
+	// Out-of-band deletion is discovered when the memo expires; normal cache
+	// mutations invalidate it through the metadata revision.
+	cache.now = func() time.Time { return time.Now().Add(schedulerSnapshotCacheMaxAge) }
 	_, hit, err = cache.GetSnapshot(ctx, bucket)
 	require.NoError(t, err)
 	require.False(t, hit) // missing metadata cannot return a partial candidate pool
