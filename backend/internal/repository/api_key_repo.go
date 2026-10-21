@@ -55,7 +55,13 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		SetNillableExpiresAt(key.ExpiresAt).
 		SetRateLimit5h(key.RateLimit5h).
 		SetRateLimit1d(key.RateLimit1d).
-		SetRateLimit7d(key.RateLimit7d)
+		SetRateLimit7d(key.RateLimit7d).
+		SetUsage5h(key.Usage5h).
+		SetUsage1d(key.Usage1d).
+		SetUsage7d(key.Usage7d).
+		SetNillableWindow5hStart(key.Window5hStart).
+		SetNillableWindow1dStart(key.Window1dStart).
+		SetNillableWindow7dStart(key.Window7dStart)
 
 	if len(key.IPWhitelist) > 0 {
 		builder.SetIPWhitelist(key.IPWhitelist)

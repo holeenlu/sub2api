@@ -306,3 +306,27 @@ func TestSIWCCallbackAuditOmitsOneTimeAuthorizationMaterial(t *testing.T) {
 	require.Equal(t, "<credential-bearing body omitted>", repository.logs[0].RequestBody)
 	require.NotContains(t, repository.logs[0].RequestBody, "canary-")
 }
+
+func TestAPIKeyDataAuditProtectsBackupCredentials(t *testing.T) {
+	require.Equal(t, "user.api_keys.export", auditSensitiveReads["GET /api/v1/keys/export"])
+	require.Equal(t, "user.api_keys.import", auditActionOverrides["POST /api/v1/keys/import"])
+	redacted := service.RedactAuditBody([]byte(`{"data":{"keys":[{"name":"client","key":"sk-secret-import-0123"}]}}`), "application/json")
+	require.NotContains(t, redacted, "sk-secret-import-0123")
+	require.Contains(t, redacted, "client")
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	router.GET("/api/v1/keys/export", func(c *gin.Context) {
+		require.Equal(t, "sk-secret-search-0123", c.Query("search"))
+		c.Status(http.StatusOK)
+	})
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/v1/keys/export?search=sk-secret-search-0123&status=active", nil))
+	auditService.Stop()
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	require.Len(t, repository.logs, 1)
+	require.Equal(t, "user.api_keys.export", repository.logs[0].Action)
+	require.Equal(t, "status=active", repository.logs[0].Extra["query"])
+}
