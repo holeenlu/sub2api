@@ -48,7 +48,13 @@
       </template>
 
       <template #actions>
-        <div class="flex justify-end gap-3">
+        <div class="flex flex-wrap justify-end gap-3">
+          <KeyDataTransfer
+            :selected-ids="selectedIds"
+            :filters="{ search: filterSearch || undefined, status: filterStatus || undefined, group_id: filterGroupId === '' ? undefined : filterGroupId }"
+            :disabled="loading"
+            @imported="loadApiKeys"
+          />
           <button
             @click="refreshPage"
             :disabled="loading || groupPricingLoading"
@@ -1155,6 +1161,7 @@ import { keysAPI, authAPI, usageAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import BulkEditKeysModal from '@/components/keys/BulkEditKeysModal.vue'
+import KeyDataTransfer from '@/components/keys/KeyDataTransfer.vue'
 	import DataTable from '@/components/common/DataTable.vue'
 	import Pagination from '@/components/common/Pagination.vue'
 	import BaseDialog from '@/components/common/BaseDialog.vue'
