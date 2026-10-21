@@ -31,6 +31,8 @@
 - POST /callback：session_id/callback_url。拒绝不匹配 state、重复关键字段、错误回环地址、错误 returning client ID；后端再次进行权威校验。拒绝授权、会话失效、一次性代码失败后显示错误，清除已提交回调材料，重新读取注册信息并由用户重新发起登录。
 - DELETE：bound/remote_revocation_confirmed/message。断开立即移除授权；页面重新读取状态并提示尚未确认的远端撤销。若用户要改回原协议，须明确保存账号的协议选择。注册信息仍保留以便复用 issued client ID。
 
+登录会话与已保存授权使用相同的稳定主账号身份绑定；登录期间 Codex Access Token、Refresh Token 或过期时间的自动更新不会使 SIWC 回调失效。真实身份变化、会话过期、管理员登录变化、SIWC 授权并发更新及重复回调仍被拒绝。更新前已经发起的旧登录会话需重新发起，不兼容旧的整份凭据指纹。
+
 未新增自动登录 Worker、保存密码/2FA、轮询任务、供应商 SIWC 权限选项。页面不会显示 token、PKCE verifier 或上游原始认证响应。
 
 ## 账号备份与迁移
