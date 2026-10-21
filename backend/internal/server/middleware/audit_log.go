@@ -108,6 +108,7 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
+	"GET /api/v1/keys/export":                    "user.api_keys.export",
 	"GET /api/v1/admin/usage/export":             "admin.usage.export",
 	"GET /api/v1/admin/accounts/data":            "admin.accounts.export",
 	"GET /api/v1/admin/proxies/data":             "admin.proxies.export",
@@ -121,6 +122,7 @@ var auditSensitiveReads = map[string]string{
 
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。
 var auditActionOverrides = map[string]string{
+	"POST /api/v1/keys/import":                                "user.api_keys.import",
 	"POST /api/v1/auth/login":                                 service.AuditActionLogin,
 	"POST /api/v1/auth/login/2fa":                             service.AuditActionLogin2FA,
 	"POST /api/v1/auth/passkey/login/finish":                  service.AuditActionLogin,
@@ -286,7 +288,14 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 			}
 			extra["params"] = params
 		}
-		if q := service.RedactAuditQuery(c.Request.URL.RawQuery); q != "" {
+		rawQuery := c.Request.URL.RawQuery
+		if routeKey == "GET /api/v1/keys/export" {
+			// The key search field may contain an entire credential.
+			query := c.Request.URL.Query()
+			query.Del("search")
+			rawQuery = query.Encode()
+		}
+		if q := service.RedactAuditQuery(rawQuery); q != "" {
 			extra["query"] = q
 		}
 		if len(extra) > 0 {

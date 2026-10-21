@@ -242,6 +242,7 @@ const mountView = async () => {
         Icon: IconStub,
         UseKeyModal: true,
         BulkEditKeysModal: true,
+        KeyDataTransfer: true,
         EndpointPopover: true,
         GroupBadge: {
           name: 'GroupBadge',
@@ -490,6 +491,12 @@ describe('user KeysView column settings', () => {
     const modal = wrapper.findComponent({ name: 'BulkEditKeysModal' })
     expect(modal.props('show')).toBe(true)
     expect(modal.props('selectedKeys').map((key: ApiKey) => key.id)).toEqual([1])
+    const transfer = wrapper.findComponent({ name: 'KeyDataTransfer' })
+    expect(transfer.props('selectedIds')).toEqual([1])
+    const requests = listKeys.mock.calls.length
+    transfer.vm.$emit('imported')
+    await flushPromises()
+    expect(listKeys.mock.calls.length).toBe(requests + 1)
     wrapper.unmount()
   })
 
