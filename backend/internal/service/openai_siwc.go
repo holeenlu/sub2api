@@ -271,7 +271,8 @@ func (s *OpenAIOAuthService) BeginSIWCAuthorization(ctx context.Context, account
 	if err != nil {
 		return nil, err
 	}
-	session := &openai.OAuthSession{Authorization: lease, State: state, CodeVerifier: verifier, ClientID: r.ClientID, ProxyURL: proxy, RedirectURI: openai.SIWCRedirectURI, CreatedAt: time.Now(), SIWCAccountID: account.ID, SIWCNonce: nonce, SIWCPrimaryHash: siwcHash(account.Credentials), SIWCRegistration: registration, SIWCGrant: grant}
+	// Native token rotation must not invalidate this independent sign-in attempt.
+	session := &openai.OAuthSession{Authorization: lease, State: state, CodeVerifier: verifier, ClientID: r.ClientID, ProxyURL: proxy, RedirectURI: openai.SIWCRedirectURI, CreatedAt: time.Now(), SIWCAccountID: account.ID, SIWCNonce: nonce, SIWCPrimaryHash: siwcPrimaryIdentity(account), SIWCRegistration: registration, SIWCGrant: grant}
 	if s.rdb != nil {
 		err = oauth.PutSharedSession(ctx, s.rdb, "oauth:siwc:"+sessionID, session, openai.SessionTTL)
 	} else {
@@ -320,7 +321,7 @@ func (s *OpenAIOAuthService) CompleteSIWCAuthorization(ctx context.Context, acco
 			err = oauth.ErrSessionConflict
 		}
 	}
-	if err != nil || session == nil || session.SIWCAccountID != account.ID || time.Since(session.CreatedAt) > openai.SessionTTL || session.SIWCPrimaryHash != siwcHash(account.Credentials) {
+	if err != nil || session == nil || session.SIWCAccountID != account.ID || time.Since(session.CreatedAt) > openai.SessionTTL || session.SIWCPrimaryHash != siwcPrimaryIdentity(account) {
 		return siwcConflict()
 	}
 	if err = authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
