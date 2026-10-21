@@ -704,8 +704,8 @@ type streamingResult struct {
 	clientDisconnect bool // 客户端是否在流式传输过程中断开
 }
 
-// hasObservedTokens 报告流式过程中是否已观测到任何上游计量的 token。
-func (u *ClaudeUsage) hasObservedTokens() bool {
+// HasObservedTokens 报告流式过程中是否已观测到任何上游计量的 token。
+func (u *ClaudeUsage) HasObservedTokens() bool {
 	if u == nil {
 		return false
 	}
@@ -723,7 +723,7 @@ func (u *ClaudeUsage) hasObservedTokens() bool {
 // 不变式：UpstreamFailoverError 必须保持 result=nil——failover 重试成功后按成功请求
 // 计费，若同时返回部分 usage 会造成双重计费，此处显式拦截兜底。
 func partialStreamUsageResult(c *gin.Context, resp *http.Response, streamResult *streamingResult, model, upstreamModel string, startTime time.Time, err error) *ForwardResult {
-	if streamResult == nil || !streamResult.usage.hasObservedTokens() {
+	if streamResult == nil || !streamResult.usage.HasObservedTokens() {
 		return nil
 	}
 	var failoverErr *UpstreamFailoverError
@@ -1010,7 +1010,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		case ev, ok := <-events:
 			if !ok {
 				// 完整终态已在派发时返回；读到 EOF 说明流缺少终态。
-				if !clientDisconnected && OpenAICompactKeepaliveAdjustedWrittenSize(c) < 0 && !usage.hasObservedTokens() {
+				if !clientDisconnected && OpenAICompactKeepaliveAdjustedWrittenSize(c) < 0 && !usage.HasObservedTokens() {
 					return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway, Cause: io.ErrUnexpectedEOF, Reason: "upstream_missing_terminal", RetryableOnSameAccount: true, SameAccountRetryMax: 1}
 				}
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
@@ -1037,7 +1037,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				// 默认 *net.OpError 的 Error() 会泄露内部 IP/端口和上游地址。完整 ev.err
 				// 仅在下方 LegacyPrintf 内部日志中保留供运维诊断。
 				disconnectMsg := "upstream stream disconnected: " + sanitizeStreamError(ev.err)
-				if OpenAICompactKeepaliveAdjustedWrittenSize(c) < 0 && !usage.hasObservedTokens() {
+				if OpenAICompactKeepaliveAdjustedWrittenSize(c) < 0 && !usage.HasObservedTokens() {
 					logger.LegacyPrintf("service.gateway", "Upstream stream read error before any client output (account=%d), failing over: %v", account.ID, ev.err)
 					body, _ := json.Marshal(map[string]any{
 						"type": "error",
@@ -1065,7 +1065,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				outputBlocks, data, usagePatch, err := processSSEEvent(pendingEvent.lines)
 				pendingEvent.reset()
 				if err != nil {
-					if clientDisconnected || usage.hasObservedTokens() || OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeStream {
+					if clientDisconnected || usage.HasObservedTokens() || OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeStream {
 						// Forward owns error classification; only this layer still has the
 						// original frame, including id/retry/comments and multiline data.
 						if !clientDisconnected {

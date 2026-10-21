@@ -114,7 +114,7 @@ func logGatewayUsageAccounting(ctx context.Context, account *Account, apiKey *AP
 		zap.String("upstream_request_id", requestID), zap.Int64("api_key_id", apiKey.ID), zap.Int64("account_id", account.ID), zap.String("platform", account.Platform),
 		zap.Int("upstream_input_uncached", observed.InputTokens), zap.Int("upstream_cache_read", observed.CacheReadInputTokens),
 		zap.Int("upstream_cache_write", observed.CacheCreationInputTokens), zap.Int("upstream_cache_write_5m", observed.CacheCreation5mTokens), zap.Int("upstream_cache_write_1h", observed.CacheCreation1hTokens),
-		zap.Int("upstream_output", observed.OutputTokens), zap.Bool("has_observed_tokens", observed.hasObservedTokens()),
+		zap.Int("upstream_output", observed.OutputTokens), zap.Bool("has_observed_tokens", observed.HasObservedTokens()),
 		zap.Int("billed_input", billed.InputTokens), zap.Int("billed_cache_read", billed.CacheReadInputTokens), zap.Int("billed_cache_write", billed.CacheCreationInputTokens),
 		zap.Int("billed_cache_write_5m", billed.CacheCreation5mTokens), zap.Int("billed_cache_write_1h", billed.CacheCreation1hTokens),
 		zap.Bool("force_cache_billing", forced), zap.Bool("cache_ttl_overridden", ttlOverride))
