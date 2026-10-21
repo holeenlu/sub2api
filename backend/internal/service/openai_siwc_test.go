@@ -257,6 +257,9 @@ func TestSIWCSharedCallbackOwnershipAndRejectedRebinding(t *testing.T) {
 	bad := actor
 	bad.SessionID = "other-session"
 	require.Error(t, second.CompleteSIWCAuthorization(authz.WithSubject(t.Context(), bad), a, begin.SessionID, siwcCallback(t, begin)))
+	a.Credentials["access_token"] = "native-rotated"
+	a.Credentials["refresh_token"] = "native-refresh-rotated"
+	a.Credentials["expires_at"] = time.Now().Add(time.Hour).Unix()
 	require.NoError(t, second.CompleteSIWCAuthorization(ctx, a, begin.SessionID, siwcCallback(t, begin)))
 	owner, err := s.SIWCGrantIdentity(ctx, a)
 	require.NoError(t, err)
@@ -293,10 +296,26 @@ func TestSIWCRejectsMalformedCallbackAndStalePrimary(t *testing.T) {
 	for _, bad := range []string{strings.Replace(callback, "127.0.0.1:1455", "evil.example", 1), callback + "&state=other", callback + "#fragment", callback + "&iss=https%3A%2F%2Fevil.example", callback + "&iss=", callback + "&iss=https%3A%2F%2Fauth.openai.com&iss=https%3A%2F%2Fauth.openai.com", strings.Replace(callback, "code=one-time-code", "error=access_denied&error=other", 1)} {
 		require.Error(t, s.CompleteSIWCAuthorization(t.Context(), a, begin.SessionID, bad))
 	}
-	a.Credentials["access_token"] = "primary-rotated"
+	for _, key := range []string{"chatgpt_account_id", "chatgpt_user_id", "email", "client_id", openAIAuthModeCredentialKey, openAIAuthModeLegacyCredentialKey} {
+		original, exists := a.Credentials[key]
+		a.Credentials[key] = "changed-primary"
+		require.Error(t, s.CompleteSIWCAuthorization(t.Context(), a, begin.SessionID, callback), key)
+		if exists {
+			a.Credentials[key] = original
+		} else {
+			delete(a.Credentials, key)
+		}
+	}
+	session, ok := s.sessionStore.Get(begin.SessionID)
+	require.True(t, ok)
+	session.CreatedAt = time.Now().Add(-openai.SessionTTL - time.Second)
 	require.Error(t, s.CompleteSIWCAuthorization(t.Context(), a, begin.SessionID, callback))
-	a.Credentials["access_token"] = "native-secret"
+	session.CreatedAt = time.Now()
+	a.Credentials["access_token"] = "primary-rotated"
+	a.Credentials["refresh_token"] = "primary-refresh-rotated"
+	a.Credentials["expires_at"] = time.Now().Add(time.Hour).Unix()
 	require.NoError(t, s.CompleteSIWCAuthorization(t.Context(), a, begin.SessionID, callback))
+	require.Error(t, s.CompleteSIWCAuthorization(t.Context(), a, begin.SessionID, callback), "callback is still single-use")
 	a.Credentials["chatgpt_account_id"] = "changed-primary"
 	_, err = s.SIWCAccessToken(t.Context(), a, nil)
 	require.Error(t, err)
