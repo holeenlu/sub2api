@@ -214,11 +214,12 @@ type APIKeyAuthCacheInvalidator interface {
 
 // CreateAPIKeyRequest 创建API Key请求
 type CreateAPIKeyRequest struct {
-	Name        string   `json:"name"`
-	GroupID     *int64   `json:"group_id"`
-	CustomKey   *string  `json:"custom_key"`   // 可选的自定义key
-	IPWhitelist []string `json:"ip_whitelist"` // IP 白名单
-	IPBlacklist []string `json:"ip_blacklist"` // IP 黑名单
+	importData  *APIKeyDataRow // Only the validated backup path can restore state at creation.
+	Name        string         `json:"name"`
+	GroupID     *int64         `json:"group_id"`
+	CustomKey   *string        `json:"custom_key"`   // 可选的自定义key
+	IPWhitelist []string       `json:"ip_whitelist"` // IP 白名单
+	IPBlacklist []string       `json:"ip_blacklist"` // IP 黑名单
 
 	// Quota fields
 	Quota         float64 `json:"quota"`           // Quota limit in USD (0 = unlimited)
@@ -594,6 +595,10 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 	if req.ExpiresInDays != nil && *req.ExpiresInDays > 0 {
 		expiresAt := time.Now().AddDate(0, 0, *req.ExpiresInDays)
 		apiKey.ExpiresAt = &expiresAt
+	}
+
+	if req.importData != nil {
+		req.importData.restore(apiKey)
 	}
 
 	if err := s.apiKeyRepo.Create(ctx, apiKey); err != nil {
