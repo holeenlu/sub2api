@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 )
 
 type stubIdentityCache struct {
+	identityCacheStub
 	fingerprint *Fingerprint
 	setCalls    int
 	lastSet     *Fingerprint
@@ -34,14 +36,6 @@ func (s *stubIdentityCache) SetFingerprint(_ context.Context, _ int64, fp *Finge
 	return nil
 }
 
-func (s *stubIdentityCache) GetMaskedSessionID(_ context.Context, _ int64) (string, error) {
-	return "", nil
-}
-
-func (s *stubIdentityCache) SetMaskedSessionID(_ context.Context, _ int64, _ string) error {
-	return nil
-}
-
 func headersWithUA(ua string) http.Header {
 	h := http.Header{}
 	if ua != "" {
@@ -59,7 +53,7 @@ func TestIsAcceptableFingerprintUserAgent(t *testing.T) {
 		{"official_cli", "claude-cli/2.1.220 (external, cli)", true},
 		{"official_cli_no_meta", "claude-cli/2.1.220", true},
 		{"next_major_still_allowed", "claude-cli/4.0.0 (external, cli)", true},
-		{"other_product_valid_form", "some-sdk/1.2.3 (node)", true},
+		{"other_product_valid_form", "some-sdk/1.2.3 (node)", false},
 
 		// 本地/开发构建：版本号后带后缀，正是 #5254 的毒化 UA 形态。
 		{"local_build_suffix", "claude-cli/999.0.0-local (undefined, cli)", false},
@@ -236,4 +230,36 @@ func TestGetOrCreateFingerprintMissingUserAgentKeepsDefault(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, defaultFingerprint().UserAgent, fp.UserAgent)
+}
+
+func TestGetOrCreateFingerprintRejectsForeignRuntimeAsAWhole(t *testing.T) {
+	for _, ua := range []string{"some-sdk/1.2.3", "claude-cli/999.0.0-local", claude.DefaultUserAgent(), ""} {
+		for _, cached := range []bool{false, true} {
+			t.Run(ua+fmt.Sprint("/cached=", cached), func(t *testing.T) {
+				cache := &stubIdentityCache{}
+				if cached {
+					cache.fingerprint = &Fingerprint{UserAgent: ua, ClientID: "stable-device",
+						StainlessLang: "python", StainlessRuntime: "CPython", UpdatedAt: time.Now().Unix()}
+				}
+				headers := headersWithUA(ua)
+				headers.Set("X-Stainless-Lang", "python")
+				headers.Set("X-Stainless-Runtime", "CPython")
+				headers.Set("X-Stainless-Package-Version", "9.9.9")
+				headers.Set("X-Stainless-Runtime-Version", "3.13.0")
+				headers.Set("X-Stainless-OS", "foreign-platform")
+				svc := NewIdentityService(cache)
+				fp, err := svc.GetOrCreateFingerprint(context.Background(), 1, headers)
+				require.NoError(t, err)
+				want := defaultFingerprint()
+				want.ClientID, want.UpdatedAt = fp.ClientID, fp.UpdatedAt
+				require.Equal(t, &want, fp)
+				if cached {
+					require.Equal(t, "stable-device", fp.ClientID)
+				}
+				_, err = svc.GetOrCreateFingerprint(context.Background(), 1, headers)
+				require.NoError(t, err)
+				require.Equal(t, 1, cache.setCalls, "a healed profile must not churn on each request")
+			})
+		}
+	}
 }

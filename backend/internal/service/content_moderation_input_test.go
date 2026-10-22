@@ -6,6 +6,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestExtractContentModerationInput_ToolExtensionsStayOutsideUserText(t *testing.T) {
+	for _, protocol := range []string{ContentModerationProtocolOpenAIResponses, ContentModerationProtocolOpenAIChat, ContentModerationProtocolAnthropicMessages} {
+		body := []byte(`{"input":[{"type":"function_call_output","role":"user","content":"untrusted tool output","text":"untrusted tool text","image_url":"https://example.invalid/tool.png"}],"messages":[{"role":"user","content":[{"type":"tool_result","content":"untrusted tool output","text":"untrusted tool text","source":{"media_type":"image/png","data":"AAAA"}}]}]}`)
+		semantic := ExtractContentModerationInput(protocol, body)
+		local := extractContentModerationInput(protocol, body, false)
+		require.True(t, semantic.IsEmpty(), protocol)
+		require.True(t, local.IsEmpty(), protocol)
+	}
+}
+
 // 当数组末尾不是用户消息时（典型场景：Agent 工具循环结束于 tool/assistant），
 // 应直接跳过审计——不再回溯查找历史中的某条用户消息。
 

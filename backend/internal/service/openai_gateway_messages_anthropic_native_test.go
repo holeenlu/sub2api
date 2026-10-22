@@ -3,12 +3,16 @@
 package service
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -210,6 +214,251 @@ func TestNativeAnthropicPassthroughLeavesOtherThinkingUntouched(t *testing.T) {
 				adaptiveProtocolTestContext("/v1/messages", body), nativeAnthropicGLMTestAccount(), body, "", "")
 			require.NoError(t, err)
 			require.JSONEq(t, tt.body, string(upstream.lastBody))
+		})
+	}
+}
+
+func TestNativeAnthropicMessagesCompleteFramesAndMetering(t *testing.T) {
+	body := []byte(`{"model":"k3","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	start := ": upstream comment\r\nid: start-1\r\nretry: 3000\r\nevent: message_start\r\n" +
+		`data: {"type":"message_start",` + "\r\n" +
+		`data: "message":{"id":"msg_1","role":"assistant","model":"provider-observed","content":[],"usage":{"input_tokens":100,"prompt_tokens":100,"cache_read_input_tokens":30,"cache_creation_input_tokens":20,"cache_creation":{"ephemeral_5m_input_tokens":5,"ephemeral_1h_input_tokens":15}}}}` + "\r\n\r\n"
+	tool := "id: tool-1\r\nevent: content_block_start\r\n" +
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"cc_sess_list","id":"call_cc_sess_list","input":{"literal":"cc_sess_list","n":9007199254740993}}}` + "\r\n\r\n"
+	delta := `data: {"type":"message_delta","usage":{"input_tokens":50,"prompt_tokens":100,"cache_read_input_tokens":30,"cache_creation_input_tokens":20,"output_tokens":7}}` + "\r\n\r\n"
+	fixture := start + tool + delta + strings.ReplaceAll(anthropicCompatStop, "\n", "\r\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK,
+		Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(fixture))}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
+	c.Set(toolNameRewriteKey, buildToolNameRewriteFromBody([]byte(`{"tools":[{"name":"sessions_list"}]}`)))
+	result, err := svc.ForwardAsAnthropic(t.Context(), c, nativeAnthropicTestAccount(), body, "", "")
+	require.NoError(t, err)
+	require.Equal(t, 100, result.Usage.InputTokens, "CN input total must include exclusive prompt/cache buckets exactly once")
+	require.Equal(t, 30, result.Usage.CacheReadInputTokens)
+	require.Equal(t, 20, result.Usage.CacheCreationInputTokens)
+	require.Equal(t, 5, result.Usage.CacheCreation5mTokens)
+	require.Equal(t, 15, result.Usage.CacheCreation1hTokens)
+	require.Equal(t, 7, result.Usage.OutputTokens)
+	require.Equal(t, "k3", result.Model)
+	require.Equal(t, "k3", result.BillingModel)
+	require.Equal(t, "k3", result.UpstreamModel)
+	require.Equal(t, "provider-observed", observedUpstreamResponseModel(c))
+	require.True(t, IsResponseCommitted(c))
+	wire := rec.Body.String()
+	require.Contains(t, wire, strings.ReplaceAll(start, "\r\n", "\n"))
+	require.Contains(t, wire, "id: tool-1\n")
+	require.Contains(t, wire, `"name":"sessions_list"`)
+	require.Contains(t, wire, `"id":"call_cc_sess_list"`)
+	require.Contains(t, wire, `"literal":"cc_sess_list","n":9007199254740993`)
+	require.Equal(t, 1, strings.Count(wire, `"type":"message_stop"`))
+}
+
+func TestNativeAnthropicMessagesStrictTerminalAndPartialUsage(t *testing.T) {
+	prefix := `data: {"type":"message_start","message":{"id":"msg_1","model":"k3","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}` + "\n\n" +
+		`data: {"type":"message_delta","usage":{"output_tokens":7}}` + "\n\n"
+	errorFrame := ": error comment\nid: failed-1\nretry: 900\nevent: error\ndata: {\"type\":\"error\",\ndata: \"error\":{\"type\":\"overloaded_error\",\"message\":\"busy\"}}\n\n"
+	for _, mode := range []string{"normal", "missing", "event_only", "empty_data", "truncated", "invalid_stop_data", "error", "read_error", "event_limit"} {
+		t.Run(mode, func(t *testing.T) {
+			fixture := prefix
+			var readErr error
+			switch mode {
+			case "normal":
+				fixture += anthropicCompatStop
+				readErr = errors.New("must stop before a later read failure")
+			case "event_only":
+				fixture += "event: message_stop\n\n"
+			case "empty_data":
+				fixture += "event: message_stop\ndata:\n\n"
+			case "truncated":
+				fixture += strings.TrimSuffix(anthropicCompatStop, "\n")
+			case "invalid_stop_data":
+				fixture += "event: message_stop\ndata: 42\n\n"
+			case "error":
+				fixture += errorFrame + anthropicCompatStop
+			case "read_error":
+				readErr = errors.New("synthetic read failure")
+			case "event_limit":
+				fixture += strings.Repeat(": comment\n", 100) + "\n"
+			}
+			response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: &antigravityCompatErrorReader{data: []byte(fixture), err: readErr}}
+			upstream := &httpUpstreamRecorder{resp: response}
+			cfg := rawChatCompletionsTestConfig()
+			cfg.Gateway.MaxLineSize = 512
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+			body := []byte(`{"model":"k3","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
+			result, err := svc.ForwardAsAnthropic(t.Context(), c, nativeAnthropicTestAccount(), body, "", "")
+			require.NotNil(t, result)
+			require.Equal(t, 10, result.Usage.InputTokens)
+			require.Equal(t, 7, result.Usage.OutputTokens)
+			require.True(t, IsResponseCommitted(c))
+			if mode == "normal" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			var failover *UpstreamFailoverError
+			require.False(t, errors.As(err, &failover), "already delivered output/usage cannot be replayed")
+			require.NotContains(t, rec.Body.String(), `"type":"message_stop"`)
+			if mode == "read_error" {
+				require.ErrorIs(t, err, readErr)
+			}
+			if mode == "event_limit" {
+				require.ErrorIs(t, err, bufio.ErrTooLong)
+			}
+			if mode == "error" {
+				var streamError *sseStreamErrorEventError
+				require.ErrorAs(t, err, &streamError)
+				require.Equal(t, 1, strings.Count(rec.Body.String(), errorFrame))
+			}
+		})
+	}
+}
+
+func TestNativeAnthropicMessagesTerminalAndBoundedDrain(t *testing.T) {
+	for _, mode := range []string{"terminal_without_eof", "canceled_terminal", "canceled_timeout", "idle_timeout"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(ctx)
+			canceled := strings.HasPrefix(mode, "canceled_")
+			if canceled {
+				cancel()
+			}
+			reader, writer := io.Pipe()
+			defer reader.Close()
+			defer writer.Close()
+			type outcome struct {
+				result *OpenAIForwardResult
+				err    error
+			}
+			finished := make(chan outcome, 1)
+			svc := &OpenAIGatewayService{}
+			if mode == "idle_timeout" {
+				svc = newNativeAnthropicHangTestService(1)
+			}
+			go func() {
+				result, err := svc.handleNativeAnthropicStreamingResponse(t.Context(), &http.Response{Body: reader}, c, nativeAnthropicTestAccount(), "k3", "k3", "k3", nil, time.Now())
+				finished <- outcome{result, err}
+			}()
+			fixture := miniAnthropicSSEStream()
+			if strings.HasSuffix(mode, "timeout") {
+				fixture = strings.TrimSuffix(fixture, anthropicCompatStop)
+			}
+			_, err := io.WriteString(writer, fixture)
+			require.NoError(t, err)
+			select {
+			case got := <-finished:
+				if mode == "canceled_timeout" {
+					require.ErrorIs(t, got.err, context.DeadlineExceeded)
+				} else if mode == "idle_timeout" {
+					require.ErrorIs(t, got.err, errAnthropicCompatStreamIdle)
+				} else {
+					require.NoError(t, got.err)
+				}
+				require.Equal(t, 5, got.result.Usage.OutputTokens)
+				require.Equal(t, canceled, got.result.ClientDisconnect)
+				if got.result.ClientDisconnect {
+					require.Empty(t, rec.Body.String())
+				}
+			case <-time.After(4 * time.Second):
+				t.Fatal("native Messages waited for EOF or failed to bound disconnect draining")
+			}
+		})
+	}
+}
+
+func TestNativeAnthropicMessagesWriteFailureDrainsWithoutReplay(t *testing.T) {
+	writer := &ccPingResponseWriter{ResponseRecorder: httptest.NewRecorder(), failPing: true}
+	c, _ := gin.CreateTestContext(writer)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	fixture := ": ping\n\n" + miniAnthropicSSEStream()
+	result, err := (&OpenAIGatewayService{}).handleNativeAnthropicStreamingResponse(t.Context(), &http.Response{Body: io.NopCloser(strings.NewReader(fixture))}, c, nativeAnthropicTestAccount(), "k3", "k3", "k3", nil, time.Now())
+	require.NoError(t, err)
+	require.True(t, result.ClientDisconnect)
+	require.Equal(t, 5, result.Usage.OutputTokens)
+	require.Nil(t, result.FirstTokenMs)
+	require.Zero(t, writer.writesAfterError)
+	require.Zero(t, writer.flushesAfterError)
+}
+
+func TestNativeAnthropicMessagesKeepaliveWhileFrameBuffered(t *testing.T) {
+	const partial = ": delayed frame\nid: delayed-start\nevent: message_start\ndata: {\"type\":\"message_start\",\n"
+	const remaining = `data: "message":{"id":"msg_slow","model":"k3","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}` + "\n\n"
+	const ping = "event: ping\ndata: {\"type\":\"ping\"}\n\n"
+	for _, mode := range []string{"connected", "canceled", "write_failure"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			writer := &ccPingResponseWriter{ResponseRecorder: httptest.NewRecorder(), flushed: make(chan string, 16), failPing: mode == "write_failure"}
+			c, _ := gin.CreateTestContext(writer)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(ctx)
+			if mode == "canceled" {
+				cancel()
+			}
+			reader, upstream := io.Pipe()
+			defer reader.Close()
+			defer upstream.Close()
+			svc := newNativeAnthropicHangTestService(5)
+			svc.cfg.Gateway.StreamKeepaliveInterval = 1
+			type outcome struct {
+				result *OpenAIForwardResult
+				err    error
+			}
+			finished := make(chan outcome, 1)
+			go func() {
+				result, err := svc.handleNativeAnthropicStreamingResponse(t.Context(), &http.Response{Body: reader}, c, nativeAnthropicTestAccount(), "k3", "k3", "k3", nil, time.Now())
+				finished <- outcome{result, err}
+			}()
+			if mode == "write_failure" {
+				// The existing writer fails this complete comment frame before
+				// the heartbeat timer can fire; no later write/flush is permitted.
+				_, err := io.WriteString(upstream, ": ping\n\n")
+				require.NoError(t, err)
+			}
+			// Supply complete lines but no event delimiter. The reader must
+			// buffer this partial JSON without making any of it visible.
+			_, err := io.WriteString(upstream, partial)
+			require.NoError(t, err)
+			if mode == "connected" {
+				select {
+				case visible := <-writer.flushed:
+					require.Equal(t, ping, visible, "heartbeat must be a complete independent frame with no buffered payload")
+				case <-time.After(2500 * time.Millisecond):
+					t.Fatal("buffered upstream half-frame suppressed downstream keepalive")
+				}
+				_, err := io.WriteString(upstream, remaining+anthropicCompatStop)
+				require.NoError(t, err)
+			}
+			select {
+			case got := <-finished:
+				if mode == "connected" {
+					require.NoError(t, got.err)
+					require.False(t, got.result.ClientDisconnect)
+					require.Equal(t, 10, got.result.Usage.InputTokens)
+					require.Contains(t, writer.Body.String(), partial+remaining)
+					require.Equal(t, 1, strings.Count(writer.Body.String(), "id: delayed-start"))
+					require.Equal(t, 1, strings.Count(writer.Body.String(), `"type":"message_stop"`))
+				} else {
+					// The 1s heartbeat timer fires before the 1.2s drain deadline.
+					require.ErrorIs(t, got.err, context.DeadlineExceeded)
+					require.True(t, got.result.ClientDisconnect)
+					require.Empty(t, writer.Body.String())
+					require.Zero(t, writer.writesAfterError)
+					require.Zero(t, writer.flushesAfterError)
+				}
+			case <-time.After(4 * time.Second):
+				t.Fatal("native consumer failed to finish after terminal or bounded drain")
+			}
 		})
 	}
 }

@@ -1,5 +1,6 @@
 export default {
     ops: {
+
       title: 'Ops Monitoring',
       description: 'Operational monitoring and troubleshooting',
       // Dashboard
@@ -145,7 +146,7 @@ export default {
       // Health Score & Diagnosis
       health: 'Health',
       healthCondition: 'Health Condition',
-      healthHelp: 'Overall system health score based on SLA, error rate, and resource usage',
+      healthHelp: 'Uses ops thresholds to assess request failures, TTFT, resources and background jobs; SLA and error rate are not penalized twice.',
       healthyStatus: 'Healthy',
       riskyStatus: 'At Risk',
       idleStatus: 'Idle',
@@ -214,7 +215,7 @@ export default {
         memoryHighAction: 'Monitor memory trends, check for memory leaks',
         ttftHigh: 'Time to first token elevated ({ttft}ms)',
         ttftHighImpact: 'User perceived latency increased',
-        ttftHighAction: 'Optimize request processing flow, reduce pre-processing time',
+        ttftHighAction: 'Check upstream queues, model reasoning time and gateway overhead for the selected model',
         // Error rate diagnostics
         upstreamCritical: 'Upstream error rate critically high ({rate}%)',
         upstreamCriticalImpact: 'May affect many user requests',
@@ -236,17 +237,22 @@ export default {
         slaLowImpact: 'Service quality needs attention',
         slaLowAction: 'Analyze SLA decline causes, optimize system performance',
         // Health score diagnostics
+        jobFailed: 'Background job failed ({job})',
+        jobStale: 'Background job missed its expected schedule ({job})',
+        jobImpact: 'Collection, aggregation or maintenance may be delayed',
+        jobAction: 'Check recent job results, schedule and service logs',
         healthCritical: 'Overall health score critically low ({score})',
         healthCriticalImpact: 'Multiple metrics may be degraded; prioritize error rate and latency investigation',
         healthCriticalAction: 'Comprehensive system check, prioritize critical-level issues',
         healthLow: 'Overall health score low ({score})',
         healthLowImpact: 'May indicate minor instability; monitor SLA and error rates',
         healthLowAction: 'Monitor metric trends, prevent issue escalation',
-        healthy: 'All system metrics normal',
+        healthy: 'No issues detected in the available metrics',
         healthyImpact: 'Service running stable'
       },
       // Error Log
       errorLog: {
+        recovered: 'Recovered',
         timeId: 'Time / ID',
         commonErrors: {
           contextDeadlineExceeded: 'context deadline exceeded',
@@ -316,6 +322,7 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        requestStatus: 'Request status code',
         title: 'Error Detail',
         titleWithId: 'Error #{id}',
         noErrorSelected: 'No error selected.',
@@ -360,7 +367,8 @@ export default {
           client: 'Client Response',
           upstream_message: 'Upstream Message',
           upstream_detail: 'Upstream Detail',
-          upstream_events: 'Upstream Events'
+          upstream_events: 'Upstream Events',
+          scheduling_trace: 'Scheduling Decisions'
         },
         basicInfo: 'Basic Info',
         platform: 'Platform',
@@ -595,9 +603,9 @@ export default {
         metricThresholds: 'Metric Thresholds',
         metricThresholdsHint: 'Configure alert thresholds for metrics, values exceeding thresholds will be displayed in red',
         slaMinPercent: 'SLA Minimum Percentage',
-        slaMinPercentHint: 'SLA below this value will be displayed in red (default: 99.5%)',
+        slaMinPercentHint: 'Warns below the target; turns red more than 2 percentage points below it (default target: 99.5%).',
         ttftP99MaxMs: 'TTFT P99 Maximum (ms)',
-        ttftP99MaxMsHint: 'TTFT P99 above this value will be displayed in red (default: 500ms)',
+        ttftP99MaxMsHint: 'Used for TTFT colors, health scoring and diagnosis; default 10,000ms. Configure for the model workload.',
         requestErrorRateMaxPercent: 'Request Error Rate Maximum (%)',
         requestErrorRateMaxPercentHint: 'Request error rate above this value will be displayed in red (default: 5%)',
         upstreamErrorRateMaxPercent: 'Upstream Error Rate Maximum (%)',
@@ -692,6 +700,8 @@ export default {
         }
       },
       settings: {
+        accountTelemetry: "Scheduled account telemetry",
+        accountTelemetryHint: "Off by default. Only accounts with an imported device bundle send within a ten-minute activity window: events approximately every ten seconds and GrowthBook every six hours. Turning this off stops scheduled sending and preserves imported data. Accounts without a bundle wait for an import; the server does not initialize Claude Code.",
         title: 'Ops Monitoring Settings',
         loadFailed: 'Failed to load settings',
         saveSuccess: 'Ops monitoring settings saved successfully',
@@ -713,9 +723,9 @@ export default {
         metricThresholds: 'Metric Thresholds',
         metricThresholdsHint: 'Configure alert thresholds for metrics, values exceeding thresholds will be displayed in red',
         slaMinPercent: 'SLA Minimum Percentage',
-        slaMinPercentHint: 'SLA below this value will be displayed in red (default: 99.5%)',
+        slaMinPercentHint: 'Warns below the target; turns red more than 2 percentage points below it (default target: 99.5%).',
         ttftP99MaxMs: 'TTFT P99 Maximum (ms)',
-        ttftP99MaxMsHint: 'TTFT P99 above this value will be displayed in red (default: 500ms)',
+        ttftP99MaxMsHint: 'Used for TTFT colors, health scoring and diagnosis; default 10,000ms. Configure for the model workload.',
         requestErrorRateMaxPercent: 'Request Error Rate Maximum (%)',
         requestErrorRateMaxPercentHint: 'Request error rate above this value will be displayed in red (default: 5%)',
         upstreamErrorRateMaxPercent: 'Upstream Error Rate Maximum (%)',
@@ -732,6 +742,21 @@ export default {
         aggregation: 'Pre-aggregation Tasks',
         enableAggregation: 'Enable Pre-aggregation',
         aggregationHint: 'Pre-aggregation improves query performance for long time windows',
+        quotaProtection: {
+          "title": "Quota protection near the limit",
+          "apply": "Apply vm2api suggested values",
+          "hint": "Suggested thresholds: default/Pro 85% for 5h and 80% for 7d; Max 95% for both. OpenAI defaults become 85%/80%. Account overrides and stricter administrator limits take precedence. The independent Fable threshold is preserved. Save to apply.",
+          "tiers": "Enable Anthropic plan and window thresholds",
+          "cold": "Block large uncached inputs near the limit",
+          "anthropic_default_5h": "Default/Pro 5h threshold (%)",
+          "anthropic_default_7d": "Default/Pro 7d threshold (%)",
+          "anthropic_max_5h": "Max 5h threshold (%)",
+          "anthropic_max_7d": "Max 7d threshold (%)",
+          "critical_band_percent": "Critical band (percentage points)",
+          "large_cold_input_tokens": "Uncached input token limit",
+          "sample_max_age_seconds": "Trusted sample lifetime (seconds)",
+          "invalid": "Check the allowed ranges for quota protection settings"
+        },
         openaiQuotaAutoPause: 'OpenAI Account Quota Auto-pause',
         openaiQuotaAutoPauseHint: 'When an OpenAI account reaches its 5h / 7d usage threshold, the scheduler skips it automatically and resumes once the window rolls over. Per-account thresholds take precedence over this global default.',
         openaiQuotaAutoPauseDefault5h: 'Default 5h usage threshold (%)',
@@ -827,7 +852,7 @@ export default {
         upstreamErrors: 'Upstream error statistics, excluding rate limit errors (429/529).',
         latency: 'Request duration statistics, including p50, p90, p95, p99 percentiles.',
         ttft: 'Time To First Token, measuring the speed of first token return in streaming responses.',
-        health: 'System health score (0-100), considering SLA, error rate, and resource usage.'
+        health: 'Uses ops thresholds to assess request failures, TTFT, resources and background jobs; SLA and error rate are not penalized twice.'
       },
       charts: {
         emptyRequest: 'No requests in this window.',

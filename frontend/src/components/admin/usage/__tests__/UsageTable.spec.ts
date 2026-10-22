@@ -16,21 +16,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-import en from '@/i18n/locales/en/admin/resources'
-import zh from '@/i18n/locales/zh/admin/resources'
 import UsageTable from '../UsageTable.vue'
-
-let locale: 'en' | 'zh' = 'en'
-const localizedMessages: Record<'en' | 'zh', Record<string, string>> = {
-  en: {
-    'admin.usage.longContext': en.usage.longContext,
-    'admin.usage.longContextPricingTooltip': en.usage.longContextPricingTooltip,
-  },
-  zh: {
-    'admin.usage.longContext': zh.usage.longContext,
-    'admin.usage.longContextPricingTooltip': zh.usage.longContextPricingTooltip,
-  },
-}
 
 const messages: Record<string, string> = {
   'usage.outputTps': 'Output TPS',
@@ -93,7 +79,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => localizedMessages[locale][key] ?? messages[key] ?? key,
+      t: (key: string) => messages[key] ?? key,
     }),
   }
 })
@@ -160,7 +146,6 @@ describe('admin UsageTable tooltip', () => {
   })
 
   beforeEach(() => {
-    locale = 'en'
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       x: 0,
       y: 0,
@@ -172,51 +157,6 @@ describe('admin UsageTable tooltip', () => {
       height: 20,
       toJSON: () => ({}),
     } as DOMRect)
-  })
-
-  it.each([
-    ['en', 'Long context', 'Long-context pricing was applied. Input and output rates depend on the pricing tier, not a uniform multiplier.'],
-    ['zh', '长上下文', '已应用长上下文计费。输入和输出费率取决于定价档位，并非统一倍率。'],
-  ] as const)('marks only applied long-context billing with localized text in %s', (language, label, tooltip) => {
-    locale = language
-    const wrapper = mount(UsageTable, {
-      props: {
-        data: [
-          {
-            ...baseImageRow,
-            request_id: 'req-long-context-enabled',
-            long_context_billing_applied: true,
-          },
-          {
-            ...baseImageRow,
-            request_id: 'req-long-context-disabled',
-            long_context_billing_applied: false,
-          },
-          {
-            ...baseImageRow,
-            request_id: 'req-long-context-absent',
-          },
-        ],
-        loading: false,
-        columns: [],
-      },
-      global: {
-        stubs: {
-          DataTable: DataTableStub,
-          EmptyState: true,
-          Icon: true,
-          Teleport: true,
-        },
-      },
-    })
-
-    expect(wrapper.findAll('[data-testid="long-context-billing-marker"]')).toHaveLength(1)
-    const marker = wrapper.get('[data-request-id="req-long-context-enabled"] [data-testid="long-context-billing-marker"]')
-    expect(marker.text()).toBe(label)
-    expect(marker.attributes('title')).toBe(tooltip)
-    expect(wrapper.find('[data-request-id="req-long-context-disabled"] [data-testid="long-context-billing-marker"]').exists()).toBe(false)
-    expect(wrapper.find('[data-request-id="req-long-context-absent"] [data-testid="long-context-billing-marker"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('x2')
   })
 
   it('keeps the request type badge and adds a separate badge only for native compaction rows', () => {
@@ -912,5 +852,28 @@ describe('admin UsageTable deleted-user badge', () => {
 
     expect(wrapper.text()).not.toContain('Deleted')
     expect(wrapper.text()).toContain('active@test.com')
+  })
+})
+
+describe('amount-only cost display', () => {
+  it.each(['pending', 'pending_pricing', 'unmetered'])('does not display unknown %s charges as zero', (status) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, actual_cost: 0, billing_status: status }], loading: false, columns: [{ key: 'cost', label: 'Cost' }], showAccountBilling: false },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } }
+    })
+    expect(wrapper.get('button[aria-label="Cost Breakdown"]').element.parentElement?.textContent?.trim()).toBe('—')
+    expect(wrapper.find('[data-testid="billing-status"]').exists()).toBe(false)
+    expect(wrapper.find('span.font-medium.text-green-600').exists()).toBe(false)
+  })
+
+  it.each(['free', 'settled', 'unknown', undefined])('shows only the amount for %s even with long-context pricing', (status) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, actual_cost: 0, billing_status: status, long_context_billing_applied: true }], loading: false, columns: [{ key: 'cost', label: 'Cost' }], showAccountBilling: false },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } }
+    })
+    expect(wrapper.get('button[aria-label="Cost Breakdown"]').element.parentElement?.textContent?.trim()).toBe('$0.000000')
+    expect(wrapper.find('[data-testid="billing-status"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="long-context-billing-marker"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="Cost Breakdown"]').exists()).toBe(true)
   })
 })

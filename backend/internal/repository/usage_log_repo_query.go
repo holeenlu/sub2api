@@ -19,7 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, upstream_response_model, upstream_model_mismatch, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, image_input_tokens, image_input_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, video_count, video_resolution, video_duration_seconds, service_tier, reasoning_effort, requested_reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, long_context_billing_applied, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, upstream_request_id, session_id, native_compaction_v2, created_at"
+const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, upstream_response_model, upstream_model_mismatch, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, image_input_tokens, image_input_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, video_count, video_resolution, video_duration_seconds, service_tier, reasoning_effort, requested_reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, long_context_billing_applied, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, vendor_id_snapshot, account_name_snapshot, group_name_snapshot, platform_snapshot, authorization_mode, upstream_request_id, session_id, native_compaction_v2, created_at, billing_status"
 
 func (r *usageLogRepository) GetByID(ctx context.Context, id int64) (log *service.UsageLog, err error) {
 	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE id = $1"
@@ -97,48 +97,7 @@ type UsageLogFilters = usagestats.UsageLogFilters
 
 // ListWithFilters lists usage logs with optional filters (for admin)
 func (r *usageLogRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
-	conditions := make([]string, 0, 9)
-	args := make([]any, 0, 9)
-
-	if filters.UserID > 0 {
-		conditions = append(conditions, fmt.Sprintf("user_id = $%d", len(args)+1))
-		args = append(args, filters.UserID)
-	}
-	if filters.APIKeyID > 0 {
-		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", len(args)+1))
-		args = append(args, filters.APIKeyID)
-	}
-	if filters.AccountID > 0 {
-		conditions = append(conditions, fmt.Sprintf("account_id = $%d", len(args)+1))
-		args = append(args, filters.AccountID)
-	}
-	if filters.GroupID > 0 {
-		conditions = append(conditions, fmt.Sprintf("group_id = $%d", len(args)+1))
-		args = append(args, filters.GroupID)
-	}
-	if requestID := strings.TrimSpace(filters.RequestID); requestID != "" {
-		conditions = append(conditions, fmt.Sprintf("request_id = $%d", len(args)+1))
-		args = append(args, requestID)
-	}
-	conditions, args = appendUsageLogModelWhereCondition(conditions, args, filters.Model, filters.ModelFilterSource)
-	conditions, args = appendRequestTypeOrStreamWhereCondition(conditions, args, filters.RequestType, filters.Stream)
-	conditions, args = appendNativeCompactionV2WhereCondition(conditions, args, filters.NativeCompactionV2, "")
-	if filters.BillingType != nil {
-		conditions = append(conditions, fmt.Sprintf("billing_type = $%d", len(args)+1))
-		args = append(args, int16(*filters.BillingType))
-	}
-	conditions, args = appendUsageLogBillingModeWhereCondition(conditions, args, filters.BillingMode)
-	if filters.UpstreamModelMismatch != nil {
-		conditions = append(conditions, upstreamModelMismatchCondition("upstream_model_mismatch", *filters.UpstreamModelMismatch))
-	}
-	if filters.StartTime != nil {
-		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", len(args)+1))
-		args = append(args, *filters.StartTime)
-	}
-	if filters.EndTime != nil {
-		conditions = append(conditions, fmt.Sprintf("created_at < $%d", len(args)+1))
-		args = append(args, *filters.EndTime)
-	}
+	conditions, args := usageLogFilterConditions(filters)
 
 	whereClause := buildWhere(conditions)
 	var (
@@ -146,7 +105,11 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 		page *pagination.PaginationResult
 		err  error
 	)
-	if shouldUseFastUsageLogTotal(filters) {
+	if params.Cursor != "" {
+		logs, page, err = r.listUsageLogsWithCursor(ctx, conditions, args, params, filters)
+	} else if params.Page > 10000/params.Limit()+1 {
+		return nil, nil, errUsageCursorRequired
+	} else if shouldUseFastUsageLogTotal(filters) {
 		logs, page, err = r.listUsageLogsWithFastPagination(ctx, whereClause, args, params)
 	} else {
 		logs, page, err = r.listUsageLogsWithPagination(ctx, whereClause, args, params)
@@ -172,8 +135,8 @@ func shouldUseFastUsageLogTotal(filters UsageLogFilters) bool {
 	if filters.ExactTotal {
 		return false
 	}
-	// 强选择过滤下记录集通常较小，保留精确总数。
-	return filters.UserID == 0 && filters.APIKeyID == 0 && filters.AccountID == 0
+	// Exact totals are opt-in, including large single-user/account result sets.
+	return true
 }
 
 func (r *usageLogRepository) listUsageLogsWithPagination(ctx context.Context, whereClause string, args []any, params pagination.PaginationParams) ([]service.UsageLog, *pagination.PaginationResult, error) {
@@ -499,10 +462,16 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		billingTier               sql.NullString
 		billingMode               sql.NullString
 		accountStatsCost          sql.NullFloat64
+		vendorIDSnapshot          sql.NullInt64
+		accountNameSnapshot       sql.NullString
+		groupNameSnapshot         sql.NullString
+		platformSnapshot          sql.NullString
+		authorizationMode         sql.NullString
 		upstreamRequestID         sql.NullString
 		sessionID                 sql.NullString
 		nativeCompactionV2        bool
 		createdAt                 time.Time
+		billingStatus             string
 	)
 
 	if err := scanner.Scan(
@@ -565,15 +534,27 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		&billingTier,
 		&billingMode,
 		&accountStatsCost,
+		&vendorIDSnapshot,
+		&accountNameSnapshot,
+		&groupNameSnapshot,
+		&platformSnapshot,
+		&authorizationMode,
 		&upstreamRequestID,
 		&sessionID,
 		&nativeCompactionV2,
 		&createdAt,
+		&billingStatus,
 	); err != nil {
 		return nil, err
 	}
 
 	log := &service.UsageLog{
+		BillingStatus:             billingStatus,
+		VendorIDSnapshot:          vendorUsageNullInt64(vendorIDSnapshot),
+		AccountNameSnapshot:       vendorUsageNullString(accountNameSnapshot),
+		GroupNameSnapshot:         vendorUsageNullString(groupNameSnapshot),
+		PlatformSnapshot:          vendorUsageNullString(platformSnapshot),
+		AuthorizationMode:         authorizationMode.String,
 		ID:                        id,
 		UserID:                    userID,
 		APIKeyID:                  apiKeyID,
@@ -783,4 +764,64 @@ func setToSlice(set map[int64]struct{}) []int64 {
 		out = append(out, id)
 	}
 	return out
+}
+
+func usageLogFilterConditions(filters UsageLogFilters) ([]string, []any) {
+	conditions := make([]string, 0, 9)
+	args := make([]any, 0, 9)
+
+	if filters.UserID > 0 {
+		conditions = append(conditions, fmt.Sprintf("user_id = $%d", len(args)+1))
+		args = append(args, filters.UserID)
+	}
+	if filters.APIKeyID > 0 {
+		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", len(args)+1))
+		args = append(args, filters.APIKeyID)
+	}
+	if filters.AccountID > 0 {
+		conditions = append(conditions, fmt.Sprintf("account_id = $%d", len(args)+1))
+		args = append(args, filters.AccountID)
+	}
+	if filters.GroupID > 0 {
+		conditions = append(conditions, fmt.Sprintf("group_id = $%d", len(args)+1))
+		args = append(args, filters.GroupID)
+	}
+	if requestID := strings.TrimSpace(filters.RequestID); requestID != "" {
+		conditions = append(conditions, fmt.Sprintf("request_id = $%d", len(args)+1))
+		args = append(args, requestID)
+	}
+	conditions, args = appendUsageLogModelWhereCondition(conditions, args, filters.Model, filters.ModelFilterSource)
+	conditions, args = appendRequestTypeOrStreamWhereCondition(conditions, args, filters.RequestType, filters.Stream)
+	conditions, args = appendNativeCompactionV2WhereCondition(conditions, args, filters.NativeCompactionV2, "")
+	if filters.BillingType != nil {
+		conditions = append(conditions, fmt.Sprintf("billing_type = $%d", len(args)+1))
+		args = append(args, int16(*filters.BillingType))
+	}
+	conditions, args = appendUsageLogBillingModeWhereCondition(conditions, args, filters.BillingMode)
+	if filters.UpstreamModelMismatch != nil {
+		conditions = append(conditions, upstreamModelMismatchCondition("upstream_model_mismatch", *filters.UpstreamModelMismatch))
+	}
+	if filters.StartTime != nil {
+		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", len(args)+1))
+		args = append(args, *filters.StartTime)
+	}
+	if filters.EndTime != nil {
+		conditions = append(conditions, fmt.Sprintf("created_at < $%d", len(args)+1))
+		args = append(args, *filters.EndTime)
+	}
+
+	return conditions, args
+}
+
+func vendorUsageNullInt64(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
+}
+func vendorUsageNullString(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	return &v.String
 }
