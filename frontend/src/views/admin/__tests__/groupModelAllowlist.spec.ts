@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   addCustomModelAllowlistItem,
-  createModelAllowlistState,
   type ModelAllowlistAddError,
 } from "../groupModelAllowlist";
 
@@ -18,6 +17,18 @@ import {
 } from "../groupModelAllowlist";
 
 describe("groupModelAllowlist", () => {
+  it("keeps saved legacy and custom rules when the bundled catalog is pruned", () => {
+    const config = { enabled: true, models: ["gemini-2.0-flash", "private-*"] };
+    const state = hydrateModelAllowlistState(config, ["gemini-3.8-flash"]);
+
+    expect(state.items).toEqual([
+      { id: "gemini-2.0-flash", selected: true },
+      { id: "private-*", selected: true },
+      { id: "gemini-3.8-flash", selected: false },
+    ]);
+    expect(buildModelAllowlistConfig(state)).toEqual(config);
+  });
+
   it("selects all default candidates for a new disabled config", () => {
     const state = createModelAllowlistState();
 

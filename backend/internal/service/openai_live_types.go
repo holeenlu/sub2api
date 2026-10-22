@@ -40,16 +40,22 @@ type LiveCallRequest struct {
 }
 
 type LiveCallIdentity struct {
-	APIKeyID        int64
-	UserID          int64
-	GroupID         *int64
-	SubscriptionID  *int64
-	UserAgent       string
-	IPAddress       string
-	InboundEndpoint string
+	GroupNameSnapshot *string
+	APIKeyID          int64
+	UserID            int64
+	GroupID           *int64
+	SubscriptionID    *int64
+	UserAgent         string
+	IPAddress         string
+	InboundEndpoint   string
 }
 
 type LiveCallRecord struct {
+	GroupNameSnapshot   *string
+	VendorIDSnapshot    *int64
+	AccountNameSnapshot *string
+	PlatformSnapshot    *string
+
 	CallID          string
 	CallHash        string
 	AccountID       int64
@@ -100,4 +106,11 @@ type LiveConcurrencyCache interface {
 	) (bool, error)
 	RefreshLiveLease(ctx context.Context, accountID, userID, apiKeyID int64, leaseID string) (bool, error)
 	ReleaseLiveLease(ctx context.Context, accountID, userID, apiKeyID int64, leaseID string) error
+}
+
+// LiveUsageSnapshotStore persists selected-account attribution alongside native
+// live-call state; the finalizer must never look up a current account owner.
+type LiveUsageSnapshotStore interface {
+	SaveLiveUsageSnapshot(context.Context, *LiveCallRecord, time.Duration) error
+	LoadLiveUsageSnapshot(context.Context, *LiveCallRecord) error
 }

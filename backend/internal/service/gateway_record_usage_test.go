@@ -224,8 +224,8 @@ func TestGatewayServiceRecordUsage_GeminiFlashThinkingTierUsesCatalogPrice(t *te
 			require.NotNil(t, usageRepo.lastLog)
 			require.Equal(t, model, usageRepo.lastLog.Model)
 			require.InDelta(t, 0.02007585, usageRepo.lastLog.TotalCost, 1e-12)
-			require.InDelta(t, 0.0030113775, usageRepo.lastLog.ActualCost, 1e-12)
-			require.InDelta(t, 0.0030113775, userRepo.lastAmount, 1e-12)
+			require.Equal(t, 0.00301138, usageRepo.lastLog.ActualCost)
+			require.Equal(t, usageRepo.lastLog.ActualCost, userRepo.lastAmount)
 		})
 	}
 }
@@ -824,4 +824,19 @@ func TestGatewayServiceRecordUsage_FastSpeedHonouredKeepsPremium(t *testing.T) {
 	fastCost, err := svc.billingService.CalculateCostWithServiceTier("claude-opus-5", UsageTokens{InputTokens: 100, OutputTokens: 50}, 1.0, "fast")
 	require.NoError(t, err)
 	require.InDelta(t, fastCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
+}
+
+func TestGatewayServiceRecordUsage_PreservesRawUsageWithBillingOverrides(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	observed := ClaudeUsage{InputTokens: 100, OutputTokens: 5, CacheReadInputTokens: 10, CacheCreationInputTokens: 20, CacheCreation1hTokens: 20}
+	result := &ForwardResult{RequestID: "raw-usage-contract", Usage: observed, Model: "claude-sonnet-4"}
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{Result: result, APIKey: &APIKey{ID: 1}, User: &User{ID: 2}, Account: &Account{ID: 3, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"cache_ttl_override_enabled": true, "cache_ttl_override_target": "5m"}}, ForceCacheBilling: true})
+	require.NoError(t, err)
+	require.Equal(t, observed, result.Usage, "billing must not overwrite upstream evidence")
+	require.Zero(t, usageRepo.lastLog.InputTokens)
+	require.Equal(t, 110, usageRepo.lastLog.CacheReadTokens)
+	require.Equal(t, 20, usageRepo.lastLog.CacheCreation5mTokens)
+	require.Zero(t, usageRepo.lastLog.CacheCreation1hTokens)
+	require.True(t, usageRepo.lastLog.CacheTTLOverridden)
 }

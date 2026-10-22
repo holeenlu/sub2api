@@ -275,6 +275,32 @@ func (h *PaymentHandler) QueryAndFinalizeRefund(c *gin.Context) {
 	response.Success(c, result)
 }
 
+type ResolvePendingRefundRequest struct {
+	Outcome string `json:"outcome" binding:"required,oneof=success failed"`
+	Reason  string `json:"reason" binding:"required"`
+}
+
+// ResolvePendingRefund applies an explicit admin decision when the provider
+// cannot expose refund status querying.
+// POST /api/v1/admin/payment/orders/:id/refund/resolve
+func (h *PaymentHandler) ResolvePendingRefund(c *gin.Context) {
+	orderID, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	var req ResolvePendingRefundRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.paymentService.ResolvePendingRefund(c.Request.Context(), orderID, req.Outcome == "success", req.Reason)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 // --- Subscription Plans ---
 
 // ListPlans returns all subscription plans.

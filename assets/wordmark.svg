@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 260" role="img" aria-labelledby="t">
+  <title id="t">TapModels</title>
+  <defs>
+    <linearGradient id="w-brand" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#79F4BD"/><stop offset=".48" stop-color="#39D9E7"/><stop offset="1" stop-color="#3875F6"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(20 20) scale(0.43)">
+    <rect x="16" y="16" width="480" height="480" rx="120" fill="#0A1A39"/>
+    <g transform="translate(52 52) scale(17)" fill="none" stroke="url(#w-brand)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4">
+    <path d="M5.4 10.2h9.2a1.6 1.6 0 0 1 1.6 1.6v6.6a1.6 1.6 0 0 1-1.6 1.6H5.4a1.6 1.6 0 0 1-1.6-1.6v-6.6a1.6 1.6 0 0 1 1.6-1.6Z"/>
+    <path d="M6.6 7.4h8.2" stroke-opacity=".55"/>
+    <path d="M7.8 4.6h7.4" stroke-opacity=".28"/>
+    <circle cx="19.4" cy="7.4" r="1.45" fill="url(#w-brand)" stroke="none"/>
+    <path d="M16.9 4.75a3.6 3.6 0 0 0 0 5.3" stroke-width="1.9"/>
+    <path d="M21.9 4.75a3.6 3.6 0 0 1 0 5.3" stroke-width="1.9"/>
+
+    </g>
+  </g>
+  <text x="270" y="172" font-family="Inter, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="150" font-weight="700" letter-spacing="-4" fill="#0A1A39">Tap<tspan fill="#3875F6">Models</tspan></text>
+</svg>

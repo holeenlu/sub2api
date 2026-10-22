@@ -193,6 +193,55 @@ func TestOpenAICyberPolicyWrapped5xxNeverFailsOver(t *testing.T) {
 	require.False(t, shouldFailoverOpenAIPassthroughResponse(&Account{Type: AccountTypeOAuth}, http.StatusBadGateway, body))
 }
 
+func TestOpenAIUpstreamSessionBlockedDoesNotPenalizeAccount(t *testing.T) {
+	for _, status := range []int{http.StatusForbidden, http.StatusTooManyRequests, http.StatusBadGateway} {
+		body := []byte(`{"error":{"code":"session_blocked_by_cyber_policy","message":"This conversation is blocked; start a new conversation."}}`)
+		repo := &openAIAuthPolicyAccountRepo{}
+		counter := &openAIAuthPolicy403Counter{counts: []int64{1}}
+		rateLimits := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		rateLimits.openAI403CounterCache = counter
+		svc := &OpenAIGatewayService{rateLimitService: rateLimits}
+		rateLimits.SetAccountRuntimeBlocker(svc)
+		account := &Account{ID: 935, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+			Credentials: map[string]any{"custom_error_codes_enabled": true, "custom_error_codes": []any{float64(status)}}}
+		require.False(t, svc.shouldFailoverOpenAIUpstreamResponse(account, status, "", body))
+		require.False(t, shouldFailoverOpenAIPassthroughResponse(account, status, body))
+		require.Equal(t, ErrorPolicySkipped, rateLimits.CheckErrorPolicy(context.Background(), account, status, body))
+		require.False(t, rateLimits.HandleUpstreamError(context.Background(), account, status, nil, body))
+		require.False(t, svc.handleOpenAIAccountUpstreamError(context.Background(), account, status, nil, body))
+		for _, mode := range []string{"responses", "compat", "passthrough"} {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			resp := &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(string(body)))}
+			var err error
+			switch mode {
+			case "responses":
+				_, err = svc.handleErrorResponse(context.Background(), resp, c, account, nil)
+			case "compat":
+				_, err = svc.handleCompatErrorResponse(resp, c, account, writeChatCompletionsError)
+			default:
+				err = svc.handleErrorResponsePassthrough(context.Background(), resp, c, account, nil, body)
+			}
+			require.Error(t, err)
+			require.Equal(t, status, rec.Code, mode)
+			require.Contains(t, rec.Body.String(), "start a new conversation", mode)
+			require.Nil(t, GetOpsCyberPolicy(c), "a blocked session is not a fresh violation")
+		}
+		require.Zero(t, repo.tempCalls)
+		require.Zero(t, repo.setErrorCalls)
+		require.Len(t, counter.counts, 1, "must not increment the account-wide 403 counter")
+		require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	}
+	for _, body := range []string{
+		`{"error":{"code":"invalid_request_error","message":"session_blocked_by_cyber_policy"}}`,
+		`{"echo":{"error":{"code":"session_blocked_by_cyber_policy"}}}`,
+		`{"error":{"code":"session_blocked_by_cyber_policy"}`,
+	} {
+		require.False(t, isOpenAIUpstreamSessionBlocked([]byte(body)))
+	}
+}
+
 func TestOpenAICapacityFailoverCarriesSafeTerminalResponse(t *testing.T) {
 	message := "Our servers are currently overloaded. Please try again later."
 	body := []byte(`{"error":{"code":"server_is_overloaded","message":"` + message + `"}}`)
@@ -215,6 +264,7 @@ func TestOpenAIStreamSemanticStatusesPreservedAcrossTerminalShapes(t *testing.T)
 		{"forbidden", `{"type":"response.failed","response":{"error":{"type":"permission_error","message":"forbidden"}}}`, http.StatusForbidden, false},
 		{"rate_limit", `{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"slow down"}}`, http.StatusTooManyRequests, true},
 		{"overload_529", `{"type":"error","error":{"status_code":529,"code":"overloaded","message":"overloaded"}}`, 529, true},
+		{"frozen_session", `{"type":"response.failed","response":{"error":{"status":429,"code":"session_blocked_by_cyber_policy","message":"try again"}}}`, http.StatusForbidden, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -222,6 +272,9 @@ func TestOpenAIStreamSemanticStatusesPreservedAcrossTerminalShapes(t *testing.T)
 			message := extractOpenAISSEErrorMessage(payload)
 			require.Equal(t, tt.status, openAIStreamFailureStatus(payload, message))
 			require.Equal(t, tt.wantFailover, openAIStreamErrorEventShouldFailover(payload, message))
+			if isOpenAIUpstreamSessionBlocked(payload) {
+				require.False(t, openAIStreamFailedEventShouldFailover(payload, message))
+			}
 		})
 	}
 }

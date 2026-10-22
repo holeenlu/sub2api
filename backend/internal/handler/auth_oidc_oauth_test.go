@@ -160,6 +160,7 @@ func TestOIDCOAuthBindStartRedirectsAndSetsBindCookies(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/oidc/bind/start?intent=bind_current_user&redirect=/settings/connections", nil)
 	c.Request = req
 	c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 84})
+	seedUserID := lifecycleSeedAuth(t, handler, c, 84)
 
 	handler.OIDCOAuthStart(c)
 
@@ -182,9 +183,8 @@ func TestOIDCOAuthBindStartRedirectsAndSetsBindCookies(t *testing.T) {
 
 	bindCookie := findCookie(cookies, oidcOAuthBindUserCookieName)
 	require.NotNil(t, bindCookie)
-	userID, err := parseOAuthBindUserCookieValue(decodeCookieValueForTest(t, bindCookie.Value), "test-secret")
-	require.NoError(t, err)
-	require.Equal(t, int64(84), userID)
+	userID := lifecycleBindCookieUser(t, handler, decodeCookieValueForTest(t, bindCookie.Value))
+	require.Equal(t, seedUserID, userID)
 }
 
 func TestOIDCOAuthStartOmitsPKCEAndNonceWhenDisabled(t *testing.T) {
@@ -583,8 +583,9 @@ func TestOIDCOAuthCallbackCreatesBindPendingSessionForCurrentUser(t *testing.T) 
 	req.AddCookie(encodedCookie(oidcOAuthVerifierCookie, "verifier-bind"))
 	req.AddCookie(encodedCookie(oidcOAuthNonceCookie, "nonce-oidc-subject-bind"))
 	req.AddCookie(encodedCookie(oidcOAuthIntentCookieName, oauthIntentBindCurrentUser))
-	req.AddCookie(encodedCookie(oidcOAuthBindUserCookieName, buildEncodedOAuthBindUserCookie(t, currentUser.ID, "test-secret")))
 	req.AddCookie(encodedCookie(oauthPendingBrowserCookieName, "browser-bind"))
+
+	lifecycleAddBindCapability(t, handler, req, oidcOAuthBindUserCookieName, currentUser.ID)
 	c.Request = req
 
 	handler.OIDCOAuthCallback(c)
