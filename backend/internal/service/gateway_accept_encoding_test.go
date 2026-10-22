@@ -49,7 +49,7 @@ func TestGatewayService_AcceptEncodingOnWire(t *testing.T) {
 				{name: "gzip", encoding: "gzip", want: "gzip"},
 				{name: "multiple encodings", encoding: "gzip, deflate, br", want: "gzip, deflate, br"},
 				{name: "identity", encoding: "identity", want: "identity"},
-				{name: "omitted", want: "gzip"},
+				{name: "omitted", want: "gzip, deflate, br, zstd"},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					c, _ := gin.CreateTestContext(httptest.NewRecorder())

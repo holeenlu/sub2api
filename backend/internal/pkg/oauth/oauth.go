@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"net/url"
 	"strings"
 	"sync"
@@ -37,11 +38,12 @@ const (
 // OAuthSession stores OAuth flow state
 
 type OAuthSession struct {
-	State        string    `json:"state"`
-	CodeVerifier string    `json:"code_verifier"`
-	Scope        string    `json:"scope"`
-	ProxyURL     string    `json:"proxy_url,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	Authorization *authz.Lease `json:"authorization,omitempty"`
+	State         string       `json:"state"`
+	CodeVerifier  string       `json:"code_verifier"`
+	Scope         string       `json:"scope"`
+	ProxyURL      string       `json:"proxy_url,omitempty"`
+	CreatedAt     time.Time    `json:"created_at"`
 }
 
 // SessionStore manages OAuth sessions in memory

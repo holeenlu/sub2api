@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -207,4 +208,74 @@ func TestUpdateSettingsRejectsInvalidForwardedClientIPHeader(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.JSONEq(t, `["X-Existing-IP"]`, repo.values[service.SettingKeyForwardedClientIPHeaders])
+}
+
+// Keep policy edits separate from the remaining sensitive settings transitions.
+// Nil user/TOTP services ensure this path does not depend on enrollment or grants.
+type rolePolicyHandlerRepoStub struct {
+	settingHandlerRepoStub
+	policy *authz.Policy
+	trace  *service.AuditLog
+}
+
+func (r *rolePolicyHandlerRepoStub) UpdateAdminRolePolicy(_ context.Context, expected int64, policy *authz.Policy, trace *service.AuditLog) error {
+	if expected != r.policy.Version {
+		return service.ErrAdminPolicyConflict
+	}
+	r.policy, r.trace = policy, trace
+	return nil
+}
+
+func TestUpdateAdminRolePermissionsWithoutStepUp(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, enabled := range []string{"false", "true"} {
+		t.Run("step_up="+enabled, func(t *testing.T) {
+			for _, tc := range []struct {
+				name, role, method string
+				status             int
+			}{
+				{"super_admin_session", service.RoleSuperAdmin, service.AuditAuthMethodJWT, http.StatusOK},
+				{"administrator", service.RoleAdmin, service.AuditAuthMethodJWT, http.StatusForbidden},
+				{"user", service.RoleUser, service.AuditAuthMethodJWT, http.StatusForbidden},
+				{"machine_key", service.RoleSuperAdmin, service.AuditAuthMethodAdminAPIKey, http.StatusForbidden},
+				{"missing_subject", "", "", http.StatusForbidden},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					repo := &rolePolicyHandlerRepoStub{
+						settingHandlerRepoStub: settingHandlerRepoStub{values: map[string]string{service.SettingKeyStepUpEnabled: enabled}},
+						policy:                 &authz.Policy{Version: 7, Permissions: []string{}},
+					}
+					h := NewSettingHandler(service.NewSettingService(repo, &config.Config{}), nil, nil, nil, nil, nil, nil)
+					request := func() *httptest.ResponseRecorder {
+						rec := httptest.NewRecorder()
+						c, _ := gin.CreateTestContext(rec)
+						c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/roles/admin/permissions", bytes.NewBufferString(`{"expected_version":7,"permissions":["accounts.read"],"reason":"Enable operations visibility"}`))
+						c.Request.Header.Set("Content-Type", "application/json")
+						c.Set("auth_method", tc.method)
+						if tc.role != "" {
+							c.Request = c.Request.WithContext(authz.WithSubject(c.Request.Context(), authz.Subject{UserID: 1, Role: tc.role, AuthMethod: tc.method}))
+						}
+						h.UpdateAdminRolePermissions(c)
+						return rec
+					}
+					rec := request()
+					require.Equal(t, tc.status, rec.Code, rec.Body.String())
+					if tc.status != http.StatusOK {
+						require.Nil(t, repo.trace)
+						require.EqualValues(t, 7, repo.policy.Version)
+						return
+					}
+					require.EqualValues(t, 8, repo.policy.Version)
+					require.Equal(t, []string{"accounts.read"}, repo.policy.Permissions)
+					require.Equal(t, "admin.roles.permissions.update", repo.trace.Action)
+					require.Equal(t, service.RoleSuperAdmin, repo.trace.Visibility)
+					require.Equal(t, "Enable operations visibility", repo.trace.Extra["reason"])
+					rec = request()
+					require.Equal(t, http.StatusConflict, rec.Code)
+					require.Contains(t, rec.Body.String(), "ADMIN_POLICY_CONFLICT")
+					require.EqualValues(t, 8, repo.policy.Version)
+				})
+			}
+		})
+	}
 }

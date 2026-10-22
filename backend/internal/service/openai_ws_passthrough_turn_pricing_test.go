@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -108,7 +109,7 @@ func TestPassthroughIngressFollowUpCallsBeforeTurnAfterBeforeRequest(t *testing.
 	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1"}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"hello"}`))
 	cancelWrite()
 	require.NoError(t, err)
 	require.Equal(t, "response.create", gjson.GetBytes(requirePassthroughUpstreamWrite(t, upstream, time.Second), "type").String())
@@ -127,6 +128,15 @@ func TestPassthroughIngressFollowUpCallsBeforeTurnAfterBeforeRequest(t *testing.
 }
 
 func TestPassthroughIngressBeforeTurnRejectionDoesNotForwardFollowUp(t *testing.T) {
+	for _, overloaded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("overload_%t", overloaded), func(t *testing.T) {
+			testPassthroughIngressBeforeTurnRejection(t, overloaded)
+		})
+	}
+}
+
+func testPassthroughIngressBeforeTurnRejection(t *testing.T, overloaded bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	controlCtx, cancelControl := context.WithCancelCause(context.Background())
 	defer cancelControl(context.Canceled)
@@ -134,6 +144,10 @@ func TestPassthroughIngressBeforeTurnRejectionDoesNotForwardFollowUp(t *testing.
 	upstream := newStagedPassthroughConn()
 	upstream.Send(`{"type":"response.completed","response":{"id":"resp_reject_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
 	rejection := errors.New("turn rejected")
+	pressure := &instancePressure{}
+	if overloaded {
+		rejection = NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "gateway instance is busy; retry shortly", ErrGatewayInstanceOverloaded)
+	}
 	var hooksMu sync.Mutex
 	afterTurnCalls := 0
 	var finalErr error
@@ -143,6 +157,9 @@ func TestPassthroughIngressBeforeTurnRejectionDoesNotForwardFollowUp(t *testing.
 			hooksMu.Lock()
 			beforeTurnTurn = turn
 			hooksMu.Unlock()
+			if overloaded {
+				require.True(t, pressure.rejecting(time.Now()))
+			}
 			return rejection
 		},
 		AfterTurn: func(_ int, _ *OpenAIForwardResult, turnErr error) {
@@ -160,17 +177,28 @@ func TestPassthroughIngressBeforeTurnRejectionDoesNotForwardFollowUp(t *testing.
 	clientConn := dialPassthroughLifecycleClient(t, server)
 	defer func() { _ = clientConn.CloseNow() }()
 	requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	// Pressure rises while turn 1 is in progress; its completion still arrives.
+	if overloaded {
+		high := 91.0
+		for range 3 {
+			pressure.observe(time.Now(), &high, &high)
+		}
+	}
 	_, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 	require.NoError(t, err)
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1"}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"hello"}`))
 	cancelWrite()
 	require.NoError(t, err)
 	select {
 	case payload := <-upstream.writes:
 		t.Fatalf("rejected response.create was forwarded upstream: %s", payload)
 	case <-time.After(100 * time.Millisecond):
+	}
+	if overloaded {
+		_, closeErr := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+		require.Equal(t, coderws.StatusTryAgainLater, coderws.CloseStatus(closeErr))
 	}
 	select {
 	case err = <-serverErr:
@@ -185,6 +213,15 @@ func TestPassthroughIngressBeforeTurnRejectionDoesNotForwardFollowUp(t *testing.
 	require.Equal(t, 2, gotBeforeTurn)
 	require.Equal(t, 2, gotAfter, "each started turn must be finalized exactly once")
 	require.ErrorIs(t, gotFinalErr, rejection)
+	if overloaded {
+		var closeErr *OpenAIWSClientCloseError
+		require.ErrorAs(t, gotFinalErr, &closeErr)
+		require.Equal(t, coderws.StatusTryAgainLater, closeErr.statusCode)
+		var retry *UpstreamFailoverError
+		require.False(t, errors.As(gotFinalErr, &retry), "overload does not switch accounts")
+		svc := &OpenAIGatewayService{}
+		require.False(t, svc.ReportOpenAIAccountScheduleFailure(context.Background(), passthroughLifecycleAccount(), "gpt-5.1", gotFinalErr))
+	}
 }
 
 func TestPassthroughIngressFreezesSubsequentTurnBeforeRequestPolicy(t *testing.T) {

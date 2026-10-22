@@ -31,6 +31,12 @@ func (Proxy) Mixin() []ent.Mixin {
 
 func (Proxy) Fields() []ent.Field {
 	return []ent.Field{
+		field.Int64("vendor_id").Optional().Nillable(),
+		field.Int64("created_by").Optional().Nillable(),
+		field.Text("vendor_notes").Default(""),
+		field.String("region_label_country_code").MaxLen(8).Default(""),
+		field.String("region_label_city").MaxLen(100).Default(""),
+		field.Int64("config_version").Default(1),
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),
@@ -85,6 +91,7 @@ func (Proxy) Edges() []ent.Edge {
 
 func (Proxy) Indexes() []ent.Index {
 	return []ent.Index{
+		index.Fields("vendor_id", "status", "id"),
 		index.Fields("status"),
 		index.Fields("deleted_at"),
 		index.Fields("expires_at"),

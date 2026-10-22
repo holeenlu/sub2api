@@ -35,7 +35,7 @@ func TestMappedGPT55LiteCompatibility(t *testing.T) {
 			if tc.mapped {
 				a.Credentials["model_mapping"] = map[string]any{"gpt-5.6-sol": "gpt-5.5"}
 			}
-			body := []byte(`{"model":"` + tc.model + `","input":[{"type":"additional_tools","role":"developer","tools":[]},{"type":"function_call_output","call_id":"call1","output":"12345678901234567890"}],"reasoning":{"context":"all_turns"},"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true","keep":"yes"}}`)
+			body := []byte(`{"model":"` + tc.model + `","input":[{"type":"additional_tools","role":"developer","tools":[]},{"type":"web_search_call","id":"ws_history","status":"completed","action":{"type":"search","query":"earlier query"}},{"type":"function_call_output","call_id":"call1","output":"12345678901234567890"}],"reasoning":{"context":"all_turns"},"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true","keep":"yes"}}`)
 			r, err := http.NewRequest("POST", "http://localhost", bytes.NewReader(body))
 			require.NoError(t, err)
 			r.Header.Set(responsesLiteHeader, "true")
@@ -50,6 +50,8 @@ func TestMappedGPT55LiteCompatibility(t *testing.T) {
 				require.Equal(t, gjson.GetBytes(body, "input").Raw, gjson.GetBytes(got, "input").Raw)
 				require.Equal(t, "all_turns", gjson.GetBytes(got, "reasoning.context").String())
 				require.Equal(t, "yes", gjson.GetBytes(got, "client_metadata.keep").String())
+				require.Equal(t, "web_search", gjson.GetBytes(got, "tools.0.type").String())
+				require.Equal(t, "none", gjson.GetBytes(got, "tool_choice").String())
 				require.Equal(t, int64(len(got)), r.ContentLength)
 				replay, err := r.GetBody()
 				require.NoError(t, err)
@@ -70,7 +72,7 @@ func TestMappedGPT55LiteBuildersPreserveIngressForFailover(t *testing.T) {
 		c.Request.Header.Set(responsesLiteHeader, "true")
 		s := &OpenAIGatewayService{cfg: &config.Config{}}
 		a := &Account{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.6-sol": "gpt-5.5"}}}
-		body := []byte(`{"model":"gpt-5.5","stream":true,"input":[]}`)
+		body := []byte(`{"model":"gpt-5.5","stream":true,"input":[{"role":"user","content":"hello"}]}`)
 		var r *http.Request
 		var err error
 		if passthrough {
@@ -82,7 +84,7 @@ func TestMappedGPT55LiteBuildersPreserveIngressForFailover(t *testing.T) {
 		require.Empty(t, r.Header.Get(responsesLiteHeader))
 		require.Equal(t, "true", c.GetHeader(responsesLiteHeader))
 		a.ID = 14
-		body = []byte(`{"model":"gpt-6-astra","stream":true,"input":[]}`)
+		body = []byte(`{"model":"gpt-6-astra","stream":true,"input":[{"role":"user","content":"hello"}]}`)
 		if passthrough {
 			r, err = s.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, a, body, "test-token")
 		} else {

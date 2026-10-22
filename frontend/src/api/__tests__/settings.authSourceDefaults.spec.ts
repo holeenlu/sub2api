@@ -88,6 +88,7 @@ describe("admin settings auth source defaults helpers", () => {
       auth_source_default_email_platform_quotas: {
         anthropic: { daily: 10, weekly: 50, monthly: 200 },
         openai:    { daily: null, weekly: null, monthly: null },
+
       } as DefaultPlatformQuotasMap,
     });
 
