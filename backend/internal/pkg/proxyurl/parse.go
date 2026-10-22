@@ -42,11 +42,11 @@ func Parse(raw string) (trimmed string, parsed *url.URL, err error) {
 	parsed, err = url.Parse(trimmed)
 	if err != nil {
 		// 不使用 %w 包装，避免 url.Parse 的底层错误消息泄漏原始 URL（可能含凭据）
-		return "", nil, fmt.Errorf("invalid proxy URL: %v", err)
+		return "", nil, fmt.Errorf("invalid proxy URL")
 	}
 
 	if parsed.Host == "" || parsed.Hostname() == "" {
-		return "", nil, fmt.Errorf("proxy URL missing host: %s", parsed.Redacted())
+		return "", nil, fmt.Errorf("proxy URL missing host")
 	}
 
 	scheme := strings.ToLower(parsed.Scheme)

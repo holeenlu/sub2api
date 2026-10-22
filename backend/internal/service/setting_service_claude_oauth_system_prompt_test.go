@@ -47,3 +47,27 @@ func TestSettingService_GetClaudeOAuthSystemPromptInjectionSettings(t *testing.T
 		require.Equal(t, customBlocks, blocks)
 	})
 }
+
+func TestSettingService_ClaudePromptTemplatesSaveAndReadBack(t *testing.T) {
+	resetGatewayForwardingSettingsCacheForTest(t)
+	ctx := context.Background()
+	repo := &gatewayTTLSettingRepo{data: map[string]string{}}
+	svc := NewSettingService(repo, &config.Config{})
+	settings, err := svc.GetAllSettings(ctx)
+	require.NoError(t, err)
+	for _, raw := range []string{localMinimalPromptTemplate, localFullPromptTemplate, `[]`, `[{"text":"{caller_system}","drop_if_empty":true}]`} {
+		settings.EnableClaudeOAuthSystemPromptInjection = true
+		settings.ClaudeOAuthSystemPromptBlocks = raw
+		require.NoError(t, svc.UpdateSettings(ctx, settings))
+		require.Equal(t, raw, repo.data[SettingKeyClaudeOAuthSystemPromptBlocks])
+		readBack, err := svc.GetAllSettings(ctx)
+		require.NoError(t, err)
+		require.Equal(t, raw, readBack.ClaudeOAuthSystemPromptBlocks)
+		enabled, _, blocks := svc.GetClaudeOAuthSystemPromptInjectionSettings(ctx)
+		require.True(t, enabled)
+		require.Equal(t, raw, blocks)
+	}
+	settings.ClaudeOAuthSystemPromptBlocks = `[{"text":"bad TTL","cache_control":{"type":"ephemeral","ttl":"30m"}}]`
+	require.Error(t, svc.UpdateSettings(ctx, settings))
+	require.NotContains(t, repo.data[SettingKeyClaudeOAuthSystemPromptBlocks], "30m")
+}

@@ -1,0 +1,73 @@
+export default {
+  docs: {
+    brand: 'API Docs', search: 'Search docs and models', searchApps: 'Search app guides and downloads', openImage: 'Open full-size screenshot', searchShortcut: 'Search docs', close: 'Close', menu: 'Open navigation',
+    sections: 'Documentation sections',
+    backToSite: 'Back to home', console: 'Console', login: 'Log in', copied: 'Copied', copy: 'Copy', copyModel: 'Copy model ID',
+    officialSource: 'Official source', updatedAt: 'Pricing verified {date}', onThisPage: 'On this page', previous: 'Previous', next: 'Next',
+    noResults: 'No matching docs or models', loadingCatalog: 'Loading models enabled for your groups…',
+    noVisibleGroups: 'No visible groups',
+    catalogUnavailable: 'The model catalog is temporarily unavailable. You can still use the integration guides; verify availability in the console or with GET /v1/models.',
+    group: 'Group', chooseGroup: 'Choose group', groupRate: 'Effective rate {rate}x', availability: 'Availability', available: 'Enabled for this group',
+    unavailable: 'Not enabled for this group', unknownAvailability: 'Availability unknown', livePrice: 'Selected group price',
+    priceUnit: 'USD / 1M tokens', official: 'Official', referencePrice: 'KDAN group price', currentGroup: 'Current group', input: 'Input',
+    cachedInput: 'Cached input', cacheWrite: 'Cache write', cacheWrite1h: '1-hour write', output: 'Output', textInput: 'Text input',
+    cachedTextInput: 'Cached text', imageInput: 'Image input', cachedImageInput: 'Cached image', imageOutput: 'Image output',
+    unitRequest: 'request', unitImage: 'image',
+    longContext: "Selected group’s long-context rules", standardContext: 'Standard context',
+    priceMismatch: 'Prices follow group settings. Actual charges depend on the API key group, applicable billing rules, and usage records.',
+    priceFallback: 'These dated public reference prices do not indicate that a model is enabled for your group.',
+    endpointScope: 'Endpoint availability follows KDAN gateway and the selected group. Official support does not automatically enable a KDAN route.',
+    modelId: 'Model ID', platform: 'Provider', type: 'Type', context: 'Context', maxOutput: 'Max output', cacheMinimum: 'Minimum cache prefix',
+    endpoints: 'Endpoints', features: 'Known capabilities', modelDetailsPending: 'This model is enabled by the current group, but dedicated documentation is still pending. Follow the group description and actual API responses.',
+    modelNotFound: 'This model is not enabled for a visible group and has no static model reference.',
+    requestExample: 'Request example', parametersAndResponse: 'Parameters and response', allModels: 'View all models', startBuilding: 'Start building',
+    viewGuide: 'View guide', docsUpdated: 'Documentation follows the current project routes and configuration.',
+    nav: { start: 'Get started', chat: 'Chat', image: 'Image', models: 'Models and query APIs', apps: 'Apps and tools', availableModels: 'Enabled models' },
+    pages: {
+      overview: { title: 'KDAN API Docs', description: 'Use one gateway for chat and image models. System group configuration controls availability.' },
+      quickstart: { title: 'Quickstart', description: 'Create a key and read your first response.' },
+      authentication: { title: 'Authentication and base URL', description: 'Configure your key, base URL, and request headers.' },
+      pricing: { title: 'Pricing and billing', description: 'View current group prices, reference rates, and billing methods.' },
+      errors: { title: 'Errors and retries', description: 'Diagnose authentication, group, model, and upstream failures.' },
+      limits: { title: 'Limits and timeouts', description: 'Understand constraints applied by keys, groups, models, and upstreams.' },
+      openaiChat: { title: 'OpenAI Chat Completions', description: 'Send compatible requests to POST /v1/chat/completions.' },
+      responses: { title: 'OpenAI Responses', description: 'Send text, image, and tool requests to POST /v1/responses.' },
+      messages: { title: 'Anthropic Messages', description: 'Send Anthropic-format requests to POST /v1/messages.' },
+      image: { title: 'OpenAI image generation and edits', description: 'Generate or edit images and safely read the result.' },
+      models: { title: 'Enabled models', description: 'Inspect current models, endpoints, and prices by visible group.' },
+      queryModels: { title: 'List models', description: 'Use GET /v1/models to inspect discovery results for the current key.' },
+      apps: { title: 'AI Apps', description: 'Connect Codex, Claude and image tools using this console, with setup and troubleshooting guides.' },
+      consoleGuide: { title: 'Console and client configuration', description: 'Create a key, select its group and generate client configuration from Use Key.' },
+      protocols: { title: 'Protocols and endpoints', description: 'Gateway routes, authentication, platform requirements and compatibility boundaries.' },
+      geminiNative: { title: 'Gemini native protocol', description: 'Connect generateContent, streaming and model discovery.' },
+      grokNative: { title: 'Grok endpoints', description: 'Chat, search and media routes available to Grok groups.' },
+      tokenCount: { title: 'Token counting', description: 'Supported platforms and response constraints for message token counting.' },
+      embeddings: { title: 'Text embeddings', description: 'Embedding inputs, encoding and response format for OpenAI groups.' },
+      codex: { title: 'Codex desktop and CLI', description: 'Configure Codex with the KDAN Responses API and dynamic model catalog.' },
+      claudeCode: { title: 'Claude Code', description: 'Configure Claude Code with the KDAN Messages API.' },
+      claudeDesktop: { title: 'Claude desktop', description: 'Third-Party Inference · Messages API' },
+      sessionRecoveryCodex: { title: 'Recover Codex sessions', description: "Find local sessions, prepare CLI resume commands with your current provider, and repair verified index paths." },
+      sessionRecoveryClaude: { title: 'Recover Claude Code sessions', description: "Resume Claude Code transcripts by absolute path, including moved projects and configuration directories." },
+      imageSkills: { title: 'Codex image skills', description: 'Install the Flare and Sunburst generation and editing skills.' },
+      downloads: { title: 'Downloads', description: 'Download the session repair utility and image skill bundles.' }
+    },
+    models: {
+      chat: 'Chat', image: 'Image', openai: 'OpenAI', anthropic: 'Anthropic',
+      summaries: {
+        astra: 'For complex reasoning, long-running tasks, and demanding workflows.', sol: 'The primary tier for professional quality, speed, and cost.',
+        terra: 'Balances quality and cost for routine production workloads.', luna: 'For high-volume and cost-sensitive lightweight work.',
+        gpt55: 'A general reasoning model with long context and tool workflows.', fable51: 'A high-compute reasoning model with distinct cache-read pricing.',
+        fable5: 'For complex analysis, code, and multi-step tool use.', opus5: 'For high-quality complex reasoning and professional work.',
+        opus48: 'A mature model for complex reasoning and agent tasks.', sonnet5: 'Balances quality, speed, and price.',
+        flare: 'Fast, high-quality everyday image generation and editing.', sunburst: 'A high-capability model for demanding image generation and editing.'
+      }
+    },
+    home: {
+      eyebrow: 'Unified API · Group controls · Precise billing', title: 'Choose a protocol and send your first request',
+      description: 'Select a group to view available models and copy the matching API example. Offers and rates follow the current group settings.',
+      step1: 'Create or choose an API key', step2: 'Confirm its group and enabled models', step3: 'Run the request and verify usage and cost',
+      priceTitle: 'A clear pricing basis', priceDescription: 'View group prices with separate input, output, cache, and per-image charges. No fixed discount is assumed.',
+      modelsTitle: 'Models follow system groups', modelsDescription: 'Navigation and model pages follow the visible group catalog as models are enabled or removed.'
+    }
+  }
+}
