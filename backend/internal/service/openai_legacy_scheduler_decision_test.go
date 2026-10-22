@@ -234,7 +234,7 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.Contains(t, released, int64(38102), "the owning account's slot must be released after the proxy quarantine check fails")
 	})
 
-	t.Run("all proxies quarantined fails open to the owner", func(t *testing.T) {
+	t.Run("quarantine also protects the previous response owner", func(t *testing.T) {
 		proxy := int64(38115)
 		accounts := newLegacySchedulerDecisionTestAccounts(groupID, true)
 		accounts[0].ProxyID = &proxy
@@ -250,16 +250,11 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.True(t, tripped)
 		require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, groupID, responseID, 38102, time.Hour))
 
-		selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		selection, _, err := svc.SelectAccountWithSchedulerForCapability(
 			ctx, &groupID, responseID, "", "gpt-5.1", nil,
 			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true, true,
 		)
-		require.NoError(t, err, "quarantine must fail open instead of returning no available accounts")
-		require.NotNil(t, selection)
-		require.NotNil(t, selection.Account)
-		releaseLegacySchedulerDecisionSelection(selection)
-		require.Equal(t, int64(38102), selection.Account.ID)
-		require.Equal(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
-		require.True(t, decision.StickyPreviousHit)
+		require.ErrorIs(t, err, ErrNoAvailableAccounts)
+		require.Nil(t, selection)
 	})
 }

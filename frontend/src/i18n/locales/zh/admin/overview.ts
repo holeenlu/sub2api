@@ -1,4 +1,78 @@
 export default {
+  rolePermissions: {
+"denied": "当前角色无权执行此操作，已刷新可用权限。",
+"createdBy": "创建人",
+"lastLogin": "最近登录",
+"stepUpDisabled": "全站二次验证已关闭：标注的敏感业务操作暂不要求验证；创建或提升超级管理员仍必须验证。",
+"affected": "本次配置影响 {count} 位管理员，并应用于以后创建的管理员。",
+"added": "新增权限",
+"removed": "撤销权限",
+"noChanges": "无",
+"levels": {"off": "关闭", "read": "只读", "manage": "可操作"},
+"categories": {"personnel": "人员管理", "resources": "服务资源", "finance": "经营财务", "operations": "内容运维", "settings": "站点设置"},
+"preUpgrade": "升级前记录",
+"sharedPolicy": "此账号使用统一管理员角色权限，后续调整对全部管理员生效。",
+  "resetTotp": "重置 TOTP 验证器",
+  "resetTotpHint": "需要二次验证；目标账号的旧会话将失效，旧验证器将解除。",
+  "reason": "变更原因",
+  "recovery": "角色权限缺失或损坏。保存将恢复所选权限，不影响个人登录。",
+  "title": "管理员角色权限",
+  "description": "全部管理员共用此权限配置。超级管理员始终保留全站权限和专属操作。",
+  "selectAll": "全选可授权项",
+  "clear": "清空选择",
+  "version": "权限版本 {version}",
+  "sensitive": "需要二次验证",
+  "sessionNotice": "保存后立即对全部管理员生效，无需重新登录。",
+  "saved": "管理员角色权限已保存。",
+  "loadFailed": "无法加载角色权限。",
+  "saveFailed": "无法保存角色权限。",
+  "conflict": "权限配置已被修改，请刷新并重新核对后保存。",
+  "generalSettings": "站点信息",
+  "contentSettings": "协议与模板",
+  "modules": {
+"staff": "管理员成员",
+    "dashboard": "仪表盘",
+    "users": "用户管理",
+    "api_keys": "API 密钥",
+    "groups": "分组管理",
+    "channels": "渠道管理",
+    "channel_monitor": "渠道监控",
+    "accounts": "上游账号",
+    "proxies": "IP / 代理",
+    "usage": "使用记录",
+    "subscriptions": "订阅管理",
+    "orders": "订单管理",
+    "plans": "套餐管理",
+    "redeem_codes": "兑换码",
+    "promo_codes": "优惠码",
+    "affiliates": "邀请返利",
+    "announcements": "公告管理",
+    "ops": "运维监控",
+    "risk": "内容风控",
+    "prompt_audit": "提示词审计",
+    "audit": "操作日志",
+    "settings_general": "站点信息",
+    "settings_content": "协议与模板",
+    "billing": "计费"
+  },
+  "actions": {
+    "read": "查看",
+    "manage": "管理",
+    "create": "创建",
+    "update": "编辑",
+    "delete": "删除",
+    "security": "维护登录安全",
+    "authorize": "授权 / 更新凭据",
+    "diagnostics": "执行诊断",
+    "export": "导出",
+    "cost_read": "查看上游成本",
+    "balance_adjust": "调整余额",
+    "rates_update": "修改价格",
+    "refund": "退款",
+    "adjust": "调整额度",
+    "content_read": "查看完整内容"
+  }
+},
     // Dashboard
     dashboard: {
       title: '管理控制台',
@@ -219,7 +293,7 @@ export default {
         step1: {
           title: '创建 R2 存储桶',
           line1: '登录 Cloudflare Dashboard (dash.cloudflare.com)，左侧菜单选择「R2 对象存储」',
-          line2: '点击「创建存储桶」，输入名称（如 sub2api-backups），选择区域',
+          line2: '点击「创建存储桶」，输入名称（如 tokensavy-backups），选择区域',
           line3: '点击创建完成'
         },
         step2: {
@@ -243,181 +317,6 @@ export default {
           unchecked: '不勾选'
         },
         freeTier: 'R2 免费额度：10GB 存储 + 每月 100 万次 A 类请求 + 1000 万次 B 类请求，对数据库备份完全够用。'
-      }
-    },
-
-    dataManagement: {
-      title: '数据管理',
-      description: '统一管理数据管理代理状态、对象存储配置和备份任务',
-      agent: {
-        title: '数据管理代理状态',
-        description: '系统会自动探测固定 Unix Socket，仅在可连通时启用数据管理功能。',
-        enabled: '数据管理代理已就绪，可继续进行数据管理操作。',
-        disabled: '数据管理代理不可用，当前仅可查看诊断信息。',
-        socketPath: 'Socket 路径',
-        version: '版本',
-        status: '状态',
-        uptime: '运行时长',
-        reasonLabel: '不可用原因',
-        reason: {
-          DATA_MANAGEMENT_AGENT_SOCKET_MISSING: '未检测到数据管理 Socket 文件',
-          DATA_MANAGEMENT_AGENT_UNAVAILABLE: '数据管理代理不可连通',
-          BACKUP_AGENT_SOCKET_MISSING: '未检测到备份 Socket 文件',
-          BACKUP_AGENT_UNAVAILABLE: '备份代理不可连通',
-          UNKNOWN: '未知原因'
-        }
-      },
-      sections: {
-        config: {
-          title: '备份配置',
-          description: '配置备份源、保留策略与 S3 存储参数。'
-        },
-        s3: {
-          title: 'S3 对象存储',
-          description: '配置并测试备份产物上传到标准 S3 对象存储。'
-        },
-        backup: {
-          title: '备份操作',
-          description: '触发 PostgreSQL、Redis 与全量备份任务。'
-        },
-        history: {
-          title: '备份历史',
-          description: '查看备份任务执行状态、错误与产物信息。'
-        }
-      },
-      form: {
-        sourceMode: '源模式',
-        backupRoot: '备份根目录',
-        activePostgresProfile: '当前激活 PostgreSQL 配置',
-        activeRedisProfile: '当前激活 Redis 配置',
-        activeS3Profile: '当前激活 S3 账号',
-        retentionDays: '保留天数',
-        keepLast: '至少保留最近任务数',
-        uploadToS3: '上传到 S3',
-        useActivePostgresProfile: '使用当前激活 PostgreSQL 配置',
-        useActiveRedisProfile: '使用当前激活 Redis 配置',
-        useActiveS3Profile: '使用当前激活账号',
-        idempotencyKey: '幂等键（可选）',
-        secretConfigured: '已配置，留空不变',
-        source: {
-          profileID: '配置 ID（唯一）',
-          profileName: '配置名称',
-          setActive: '创建后立即设为激活配置'
-        },
-        postgres: {
-          title: 'PostgreSQL',
-          host: '主机',
-          port: '端口',
-          user: '用户名',
-          password: '密码',
-          database: '数据库',
-          sslMode: 'SSL 模式',
-          containerName: '容器名（docker_exec 模式）'
-        },
-        redis: {
-          title: 'Redis',
-          addr: '地址（host:port）',
-          username: '用户名',
-          password: '密码',
-          db: '数据库编号',
-          containerName: '容器名（docker_exec 模式）'
-        },
-        s3: {
-          enabled: '启用 S3 上传',
-          profileID: '账号 ID（唯一）',
-          profileName: '账号名称',
-          endpoint: 'Endpoint（可选）',
-          region: 'Region',
-          bucket: 'Bucket',
-          accessKeyID: 'Access Key ID',
-          secretAccessKey: 'Secret Access Key',
-          prefix: '对象前缀',
-          forcePathStyle: '强制 path-style',
-          useSSL: '使用 SSL',
-          setActive: '创建后立即设为激活账号'
-        }
-      },
-      sourceProfiles: {
-        createTitle: '创建数据源配置',
-        editTitle: '编辑数据源配置',
-        empty: '暂无配置，请先创建',
-        deleteConfirm: '确定删除配置 {profileID} 吗？',
-        columns: {
-          profile: '配置',
-          active: '激活状态',
-          connection: '连接信息',
-          database: '数据库',
-          updatedAt: '更新时间',
-          actions: '操作'
-        }
-      },
-      s3Profiles: {
-        createTitle: '创建 S3 账号',
-        editTitle: '编辑 S3 账号',
-        empty: '暂无 S3 账号，请先创建',
-        editHint: '点击“编辑”将在右侧抽屉中修改账号信息。',
-        deleteConfirm: '确定删除 S3 账号 {profileID} 吗？',
-        columns: {
-          profile: '账号',
-          active: '激活状态',
-          storage: '存储配置',
-          updatedAt: '更新时间',
-          actions: '操作'
-        }
-      },
-      history: {
-        total: '共 {count} 条',
-        empty: '暂无备份任务',
-        columns: {
-          jobID: '任务 ID',
-          type: '类型',
-          status: '状态',
-          triggeredBy: '触发人',
-          pgProfile: 'PostgreSQL 配置',
-          redisProfile: 'Redis 配置',
-          s3Profile: 'S3 账号',
-          finishedAt: '完成时间',
-          artifact: '产物',
-          error: '错误'
-        },
-        status: {
-          queued: '排队中',
-          running: '执行中',
-          succeeded: '成功',
-          failed: '失败',
-          partial_succeeded: '部分成功'
-        }
-      },
-      actions: {
-        refresh: '刷新状态',
-        disabledHint: '请先启动 datamanagementd 并确认 Socket 可连通。',
-        reloadConfig: '加载配置',
-        reloadSourceProfiles: '刷新数据源配置',
-        reloadProfiles: '刷新账号列表',
-        newSourceProfile: '新建数据源配置',
-        saveConfig: '保存配置',
-        configSaved: '配置保存成功',
-        testS3: '测试 S3 连接',
-        s3TestOK: 'S3 连接测试成功',
-        s3TestFailed: 'S3 连接测试失败',
-        newProfile: '新建账号',
-        saveProfile: '保存账号',
-        activateProfile: '设为激活',
-        profileIDRequired: '请输入账号 ID',
-        profileNameRequired: '请输入账号名称',
-        profileSelectRequired: '请先选择要编辑的账号',
-        profileCreated: 'S3 账号创建成功',
-        profileSaved: 'S3 账号保存成功',
-        profileActivated: 'S3 账号已切换为激活',
-        profileDeleted: 'S3 账号删除成功',
-        sourceProfileCreated: '数据源配置创建成功',
-        sourceProfileSaved: '数据源配置保存成功',
-        sourceProfileActivated: '数据源配置已切换为激活',
-        sourceProfileDeleted: '数据源配置删除成功',
-        createBackup: '创建备份任务',
-        jobCreated: '备份任务已创建：{jobID}（{status}）',
-        refreshJobs: '刷新任务',
-        loadMore: '加载更多'
       }
     },
 
@@ -627,8 +526,11 @@ export default {
       failedToLoadApiKeys: '加载用户 API 密钥失败',
       deleteConfirm: "确定要删除用户 '{email}' 吗？此操作无法撤销。",
       roles: {
+        super_admin: "超级管理员",
         admin: '管理员',
-        user: '用户'
+        user: '用户',
+        vendor_level1: '一级供应商',
+        vendor_level2: '二级供应商'
       },
       form: {
         emailLabel: '邮箱',
@@ -641,6 +543,7 @@ export default {
         passwordLabel: '密码',
         passwordPlaceholder: '请输入密码（留空则不修改）',
         roleLabel: '角色',
+        vendorRoleHint: '供应商身份请在供应商管理中创建；现有供应商级别不可在此修改。',
         selectRole: '选择角色',
         balanceLabel: '余额',
         concurrencyLabel: '并发数',
@@ -1148,7 +1051,7 @@ export default {
       },
       modelAllowlist: {
         title: '模型白名单',
-        hint: '开启后，不在白名单中的模型会被拒绝（404 model_not_found），模型列表接口也只展示白名单内的模型。条目支持精确模型 ID 与任意位置的 * 通配（如 gpt-*-codex）。注意：Claude Code 会用 haiku 系小模型做标题/摘要等探测，/messages/count_tokens 同样受白名单控制，请一并勾选所需的小模型。',
+        hint: '开启后，不在白名单中的模型会被拒绝（404 model_not_found），模型列表接口也只展示白名单内的模型。条目支持精确模型 ID 与任意位置的 * 通配（如 gpt-*-codex）。注意：Claude Code 会用 haiku 系小模型做标题/摘要等探测，/messages/count_tokens 同样受白名单控制，请一并勾选所需的小模型。 候选来自当前版本内置模型与组内可调度账号的模型映射，每次打开时加载，不定时同步官方目录；新模型可手工添加。',
         loading: '正在加载候选模型...',
         empty: '暂无候选模型，可在下方手工添加条目',
         selectedSummary: '已选 {selected} / {total}',
@@ -1261,9 +1164,9 @@ export default {
       openaiLive: {
         title: 'OpenAI Live',
         allow: '允许访问 Live',
-        hint: '启用后，此 OpenAI 分组的 API Key 可以创建并控制 Live 语音会话。默认关闭。运行 Sub2API 的服务端必须是 Apple Silicon Mac，并安装官方 ChatGPT App；客户端平台不受限制。',
+        hint: '启用后，此 OpenAI 分组的 API Key 可以创建并控制 Live 语音会话。默认关闭。运行 @:common.siteName 的服务端必须是 Apple Silicon Mac，并安装官方 ChatGPT App；客户端平台不受限制。',
         unsupportedTitle: '当前服务端不支持 Live',
-        unsupportedMessage: '当前 Sub2API 服务端无法生成 Live 所需的设备证明，即使开启也不能使用。是否仍然开启？',
+        unsupportedMessage: '当前 @:common.siteName 服务端无法生成 Live 所需的设备证明，即使开启也不能使用。是否仍然开启？',
         enableAnyway: '仍然开启'
       },
       openaiFast: {

@@ -152,7 +152,7 @@ func (h *AuthHandler) DingTalkOAuthStart(c *gin.Context) {
 	clearOAuthPendingSessionCookie(c, secureCookie)
 
 	if intent == oauthIntentBindCurrentUser {
-		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c)
+		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c, dingTalkOAuthBindUserCookieName, state, browserSessionKey)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -592,26 +592,6 @@ func checkDingTalkCorpAllowed(cfg config.DingTalkConnectConfig, corpID string) b
 		return true
 	default:
 		return false
-	}
-}
-
-// decideDingTalkStep34Strategy 根据 policy 和 Step 3/4 运行时错误决定处理方式。
-// 返回 (proceed bool, fatal bool)：
-//   - proceed=true：继续处理（step 成功或降级）
-//   - fatal=true：应 hard fail（upstream_error）
-//
-// 此 helper 从主链中提取，便于 unit test 独立验证策略决策逻辑。
-func decideDingTalkStep34Strategy(policy string, stepErr error) (shouldFallback bool, isFatal bool) {
-	if stepErr == nil {
-		return false, false // 成功，不需要降级
-	}
-	switch policy {
-	case "internal_only":
-		return false, true // hard fail：同企业 Step 3/4 必须成功
-	case "none", "":
-		return true, false // 降级：公网场景跨组织用户失败属正常预期
-	default:
-		return false, true // 未知 policy，视为 hard fail
 	}
 }
 

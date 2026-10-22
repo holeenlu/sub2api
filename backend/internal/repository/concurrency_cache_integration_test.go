@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -876,4 +878,73 @@ func (s *ConcurrencyCacheSuite) TestCleanupStaleProcessSlots_DeletesEmptySlotKey
 	exists, err := s.rdb.Exists(s.ctx, accountSlotKey).Result()
 	require.NoError(s.T(), err)
 	require.EqualValues(s.T(), 0, exists)
+}
+
+func (s *ConcurrencyCacheSuite) TestSchedulerRecoveryAndQueueAcrossRedisClients() {
+	prefix := fmt.Sprintf("it:recovery:%d:", time.Now().UnixNano())
+	firstClient := redis.NewClient(s.rdb.Options())
+	defer func() { _ = firstClient.Close() }()
+	firstClient.AddHook(prefixHook{prefix: prefix})
+	first, ok := NewConcurrencyCache(firstClient, 15, 900).(*concurrencyCache)
+	require.True(s.T(), ok)
+	secondClient := redis.NewClient(s.rdb.Options())
+	secondClient.AddHook(prefixHook{prefix: prefix})
+	defer func() { _ = secondClient.Close() }()
+	second, ok := NewConcurrencyCache(secondClient, 15, 900).(*concurrencyCache)
+	require.True(s.T(), ok)
+	scope := "proxy:integration-recovery"
+	require.NoError(s.T(), first.BlockRecoveryScope(s.ctx, scope, time.Minute))
+	allowed, _, err := second.AcquireRecoveryProbe(s.ctx, scope, 0, "early")
+	require.NoError(s.T(), err)
+	require.False(s.T(), allowed)
+	require.NoError(s.T(), firstClient.HSet(s.ctx, "concurrency:recovery:"+scope, "until", 0).Err())
+	var winners atomic.Int32
+	var winner atomic.Value
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cache := first
+			if i%2 == 1 {
+				cache = second
+			}
+			owner := fmt.Sprint(i)
+			allowed, probe, err := cache.AcquireRecoveryProbe(s.ctx, scope, 0, owner)
+			if err == nil && allowed && probe {
+				winners.Add(1)
+				winner.Store(owner)
+			}
+		}(i)
+	}
+	wg.Wait()
+	require.Equal(s.T(), int32(1), winners.Load())
+	owner, ok := winner.Load().(string)
+	require.True(s.T(), ok)
+	renewed, err := second.RefreshRecoveryProbe(s.ctx, scope, owner)
+	require.NoError(s.T(), err)
+	require.True(s.T(), renewed)
+	require.NoError(s.T(), first.FinishRecoveryProbe(s.ctx, scope, "wrong-owner", 0, true))
+	allowed, _, err = second.AcquireRecoveryProbe(s.ctx, scope, 0, "denied")
+	require.NoError(s.T(), err)
+	require.False(s.T(), allowed)
+	require.NoError(s.T(), second.FinishRecoveryProbe(s.ctx, scope, owner, 0, true))
+	allowed, probe, err := first.AcquireRecoveryProbe(s.ctx, scope, 0, "healthy")
+	require.NoError(s.T(), err)
+	require.True(s.T(), allowed)
+	require.False(s.T(), probe)
+	firstSlots := service.NewConcurrencyService(first)
+	secondSlots := service.NewConcurrencyService(second)
+	slot, err := firstSlots.AcquireAccountSlot(s.ctx, 90001, 1)
+	require.NoError(s.T(), err)
+	require.True(s.T(), slot.Acquired)
+	blocked, err := secondSlots.AcquireAccountSlot(s.ctx, 90001, 1)
+	require.NoError(s.T(), err)
+	require.False(s.T(), blocked.Acquired)
+	require.NoError(s.T(), first.StartWaitObservation(s.ctx, "account", 90001, "older", time.Minute))
+	_, older, err := second.ObserveWaitAdmission(s.ctx, "account", 90001, "")
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), 1, older)
+	require.NoError(s.T(), second.EndWaitObservation(s.ctx, "account", 90001, "older"))
+	slot.ReleaseFunc()
 }

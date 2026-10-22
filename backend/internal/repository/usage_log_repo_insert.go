@@ -59,6 +59,7 @@ var usageLogInsertArgTypes = [...]string{
 	"boolean",     // openai_ws_mode
 	"integer",     // duration_ms
 	"integer",     // first_token_ms
+	"jsonb",       // latency_metrics
 	"text",        // user_agent
 	"text",        // ip_address
 	"integer",     // image_count
@@ -82,10 +83,16 @@ var usageLogInsertArgTypes = [...]string{
 	"text",        // billing_tier
 	"text",        // billing_mode
 	"numeric",     // account_stats_cost
+	"bigint",      // vendor_id_snapshot
+	"text",        // account_name_snapshot
+	"text",        // group_name_snapshot
+	"text",        // platform_snapshot
+	"text",        // authorization_mode
 	"text",        // upstream_request_id
 	"text",        // session_id
 	"boolean",     // native_compaction_v2
 	"timestamptz", // created_at
+	"text",        // billing_status
 }
 
 const (
@@ -260,6 +267,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			openai_ws_mode,
 			duration_ms,
 			first_token_ms,
+			latency_metrics,
 			user_agent,
 			ip_address,
 			image_count,
@@ -283,17 +291,23 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			vendor_id_snapshot,
+			account_name_snapshot,
+			group_name_snapshot,
+			platform_snapshot,
+			authorization_mode,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
-			created_at
+			created_at,
+			billing_status
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -720,6 +734,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			openai_ws_mode,
 			duration_ms,
 			first_token_ms,
+			latency_metrics,
 			user_agent,
 			ip_address,
 			image_count,
@@ -743,15 +758,20 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			vendor_id_snapshot,
+			account_name_snapshot,
+			group_name_snapshot,
+			platform_snapshot,
+			authorization_mode,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
-			created_at
+			created_at,
+			billing_status
 		) AS (VALUES `)
 
-	// Each batch row prepends the synthetic input_index before the 60
-	// usage-log column values.
-	args := make([]any, 0, len(keys)*61)
+	// Each batch row prepends the synthetic input_index before usage-log values.
+	args := make([]any, 0, len(keys)*(len(usageLogInsertArgTypes)+1))
 	argPos := 1
 	for idx, key := range keys {
 		if idx > 0 {
@@ -815,6 +835,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				openai_ws_mode,
 				duration_ms,
 				first_token_ms,
+				latency_metrics,
 				user_agent,
 				ip_address,
 				image_count,
@@ -838,10 +859,16 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				billing_tier,
 				billing_mode,
 				account_stats_cost,
+				vendor_id_snapshot,
+				account_name_snapshot,
+				group_name_snapshot,
+				platform_snapshot,
+			authorization_mode,
 				upstream_request_id,
 				session_id,
 				native_compaction_v2,
-				created_at
+				created_at,
+				billing_status
 			)
 			SELECT
 				user_id,
@@ -879,6 +906,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				openai_ws_mode,
 				duration_ms,
 				first_token_ms,
+				latency_metrics,
 				user_agent,
 				ip_address,
 				image_count,
@@ -902,10 +930,16 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				billing_tier,
 				billing_mode,
 				account_stats_cost,
+				vendor_id_snapshot,
+				account_name_snapshot,
+				group_name_snapshot,
+				platform_snapshot,
+			authorization_mode,
 				upstream_request_id,
 				session_id,
 				native_compaction_v2,
-				created_at
+				created_at,
+				billing_status
 			FROM input
 			ON CONFLICT (request_id, api_key_id) DO NOTHING
 			RETURNING request_id, api_key_id, id, created_at
@@ -983,6 +1017,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			openai_ws_mode,
 			duration_ms,
 			first_token_ms,
+			latency_metrics,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1006,13 +1041,19 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			vendor_id_snapshot,
+			account_name_snapshot,
+			group_name_snapshot,
+			platform_snapshot,
+			authorization_mode,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
-			created_at
+			created_at,
+			billing_status
 		) AS (VALUES `)
 
-	args := make([]any, 0, len(preparedList)*60)
+	args := make([]any, 0, len(preparedList)*len(usageLogInsertArgTypes))
 	argPos := 1
 	for idx, prepared := range preparedList {
 		if idx > 0 {
@@ -1073,6 +1114,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			openai_ws_mode,
 			duration_ms,
 			first_token_ms,
+			latency_metrics,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1096,10 +1138,16 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			vendor_id_snapshot,
+			account_name_snapshot,
+			group_name_snapshot,
+			platform_snapshot,
+			authorization_mode,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
-			created_at
+			created_at,
+			billing_status
 		)
 		SELECT
 			user_id,
@@ -1137,6 +1185,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			openai_ws_mode,
 			duration_ms,
 			first_token_ms,
+			latency_metrics,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1160,10 +1209,16 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			vendor_id_snapshot,
+			account_name_snapshot,
+			group_name_snapshot,
+			platform_snapshot,
+			authorization_mode,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
-			created_at
+			created_at,
+			billing_status
 		FROM input
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`)
@@ -1171,8 +1226,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 	return query.String(), args
 }
 
-func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared usageLogInsertPrepared) error {
-	_, err := sqlq.ExecContext(ctx, `
+const usageLogInsertStatement = `
 		INSERT INTO usage_logs (
 			user_id,
 			api_key_id,
@@ -1209,6 +1263,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			openai_ws_mode,
 			duration_ms,
 			first_token_ms,
+			latency_metrics,
 			user_agent,
 			ip_address,
 			image_count,
@@ -1232,20 +1287,43 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			vendor_id_snapshot,
+			account_name_snapshot,
+			group_name_snapshot,
+			platform_snapshot,
+			authorization_mode,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
-			created_at
+			created_at,
+			billing_status
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
-	`, prepared.args...)
+	`
+
+func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared usageLogInsertPrepared) error {
+	_, err := sqlq.ExecContext(ctx, usageLogInsertStatement, prepared.args...)
+	return err
+}
+
+// Pending/error rows may exist already. Settle their financial fields in the
+// same transaction as the debit, preserving request identity and attribution.
+func execUsageSettlementLog(ctx context.Context, sqlq sqlExecutor, prepared usageLogInsertPrepared) error {
+	query := strings.Replace(usageLogInsertStatement, "DO NOTHING", `DO UPDATE SET
+ input_cost=EXCLUDED.input_cost,output_cost=EXCLUDED.output_cost,
+ cache_creation_cost=EXCLUDED.cache_creation_cost,cache_read_cost=EXCLUDED.cache_read_cost,
+ image_input_cost=EXCLUDED.image_input_cost,image_output_cost=EXCLUDED.image_output_cost,
+ total_cost=EXCLUDED.total_cost,actual_cost=EXCLUDED.actual_cost,
+ account_stats_cost=EXCLUDED.account_stats_cost,billing_mode=EXCLUDED.billing_mode,
+ long_context_billing_applied=EXCLUDED.long_context_billing_applied,billing_status=EXCLUDED.billing_status`, 1)
+	_, err := sqlq.ExecContext(ctx, query, prepared.args...)
 	return err
 }
 
@@ -1266,6 +1344,7 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 	subscriptionID := nullInt64(log.SubscriptionID)
 	duration := nullInt(log.DurationMs)
 	firstToken := nullInt(log.FirstTokenMs)
+	latencyMetrics := nullUsageLatencyMetricsJSON(log.LatencyMetrics)
 	userAgent := nullString(log.UserAgent)
 	ipAddress := nullString(log.IPAddress)
 	imageSize := nullString(log.ImageSize)
@@ -1340,6 +1419,7 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			log.OpenAIWSMode,
 			duration,
 			firstToken,
+			latencyMetrics,
 			userAgent,
 			ipAddress,
 			log.ImageCount,
@@ -1363,10 +1443,16 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			billingTier,
 			billingMode,
 			log.AccountStatsCost, // account_stats_cost
-			upstreamRequestID,    // upstream_request_id
-			sessionID,            // session_id
+			nullInt64(log.VendorIDSnapshot),
+			nullString(log.AccountNameSnapshot),
+			nullString(log.GroupNameSnapshot),
+			nullString(log.PlatformSnapshot),
+			nullString(service.UsageAuthorizationModePtr(log.AuthorizationMode)),
+			upstreamRequestID, // upstream_request_id
+			sessionID,         // session_id
 			log.NativeCompactionV2,
 			createdAt,
+			service.UsageBillingStatus(log),
 		},
 	}
 }

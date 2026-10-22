@@ -1,5 +1,6 @@
 export default {
     ops: {
+
       title: '运维监控',
       description: '运维监控与排障',
       // Dashboard
@@ -145,7 +146,7 @@ export default {
       // Health Score & Diagnosis
       health: '健康',
       healthCondition: '健康状况',
-      healthHelp: '基于 SLA、错误率和资源使用情况的系统整体健康评分',
+      healthHelp: '按运维阈值评估请求错误、首 Token 耗时、资源和后台任务状态；SLA 与错误率不重复扣分',
       healthyStatus: '健康',
       riskyStatus: '风险',
       idleStatus: '待机',
@@ -214,7 +215,7 @@ export default {
         memoryHighAction: '监控内存趋势，检查是否有内存泄漏',
         ttftHigh: '首 Token 时间偏高 ({ttft}ms)',
         ttftHighImpact: '用户感知时长增加',
-        ttftHighAction: '优化请求处理流程，减少前置逻辑耗时',
+        ttftHighAction: '检查上游排队、模型推理耗时及网关前置处理，按模型类型评估',
         // Error rate diagnostics
         upstreamCritical: '上游错误率严重偏高 ({rate}%)',
         upstreamCriticalImpact: '可能影响大量用户请求',
@@ -235,6 +236,10 @@ export default {
         slaLow: 'SLA 低于目标 ({sla}%)',
         slaLowImpact: '需要关注服务质量',
         slaLowAction: '分析SLA下降原因，优化系统性能',
+        jobFailed: '后台任务执行失败 ({job})',
+        jobStale: '后台任务超过预期执行周期 ({job})',
+        jobImpact: '后台数据采集、聚合或维护可能延迟',
+        jobAction: '检查任务最近执行结果、执行周期和服务日志',
         // Health score diagnostics
         healthCritical: '综合健康评分过低 ({score})',
         healthCriticalImpact: '多个指标可能同时异常，建议优先排查错误与资源使用情况',
@@ -242,11 +247,12 @@ export default {
         healthLow: '综合健康评分偏低 ({score})',
         healthLowImpact: '可能存在轻度波动，建议关注 SLA 与错误率',
         healthLowAction: '监控指标趋势，预防问题恶化',
-        healthy: '所有系统指标正常',
+        healthy: '当前已采集指标无异常',
         healthyImpact: '服务运行稳定'
       },
       // Error Log
       errorLog: {
+        recovered: '已恢复',
         timeId: '时间 / ID',
         commonErrors: {
           contextDeadlineExceeded: '请求超时',
@@ -316,6 +322,7 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        requestStatus: '请求状态码',
         title: '错误详情',
         titleWithId: '错误 #{id}',
         noErrorSelected: '未选择错误。',
@@ -360,7 +367,8 @@ export default {
           client: '客户端响应',
           upstream_message: '上游消息',
           upstream_detail: '上游详情',
-          upstream_events: '上游事件'
+          upstream_events: '上游事件',
+          scheduling_trace: '调度决策'
         },
         basicInfo: '基本信息',
         platform: '平台',
@@ -595,9 +603,9 @@ export default {
         metricThresholds: '指标阈值配置',
         metricThresholdsHint: '配置各项指标的告警阈值，超出阈值时将以红色显示',
         slaMinPercent: 'SLA 最低百分比',
-        slaMinPercentHint: 'SLA 低于此值时显示为红色（默认：99.5%）',
+        slaMinPercentHint: '低于目标时提示，低于目标超过 2 个百分点时标红（默认目标：99.5%）',
         ttftP99MaxMs: 'TTFT P99 最大值（毫秒）',
-        ttftP99MaxMsHint: 'TTFT P99 高于此值时显示为红色（默认：500ms）',
+        ttftP99MaxMsHint: '用于 TTFT 指标颜色、健康评分和诊断；默认 10,000ms，请按模型类型配置',
         requestErrorRateMaxPercent: '请求错误率最大值（%）',
         requestErrorRateMaxPercentHint: '请求错误率高于此值时显示为红色（默认：5%）',
         upstreamErrorRateMaxPercent: '上游错误率最大值（%）',
@@ -692,6 +700,8 @@ export default {
         }
       },
       settings: {
+        accountTelemetry: "账号遥测定时发送",
+        accountTelemetryHint: "默认关闭。仅已导入设备包的账号在开启后按十分钟活动窗口、约十秒事件、六小时 GrowthBook 周期发送；关闭后停止定时发送并保留导入资料。未导入的账号保持等待，服务器不再初始化 Claude Code。",
         title: '运维监控设置',
         loadFailed: '加载设置失败',
         saveSuccess: '运维监控设置保存成功',
@@ -713,9 +723,9 @@ export default {
         metricThresholds: '指标阈值配置',
         metricThresholdsHint: '配置各项指标的告警阈值，超出阈值时将以红色显示',
         slaMinPercent: 'SLA最低百分比',
-        slaMinPercentHint: 'SLA低于此值时显示为红色（默认：99.5%）',
+        slaMinPercentHint: '低于目标时提示，低于目标超过 2 个百分点时标红（默认目标：99.5%）',
         ttftP99MaxMs: 'TTFT P99最大值（毫秒）',
-        ttftP99MaxMsHint: 'TTFT P99高于此值时显示为红色（默认：500ms）',
+        ttftP99MaxMsHint: '用于 TTFT 指标颜色、健康评分和诊断；默认 10,000ms，请按模型类型配置',
         requestErrorRateMaxPercent: '请求错误率最大值（%）',
         requestErrorRateMaxPercentHint: '请求错误率高于此值时显示为红色（默认：5%）',
         upstreamErrorRateMaxPercent: '上游错误率最大值（%）',
@@ -732,6 +742,21 @@ export default {
         aggregation: '预聚合任务',
         enableAggregation: '启用预聚合任务',
         aggregationHint: '预聚合可提升长时间窗口查询性能',
+        quotaProtection: {
+          "title": "额度临界保护",
+          "apply": "应用 vm2api 建议值",
+          "hint": "建议值：普通/Pro 账号 5h 85%、7d 80%，Max 账号均 95%；OpenAI 全局阈值设为 85%/80%。账号覆盖和更严格的管理员停调线仍优先，Fable 独立阈值保留。点击保存后生效。",
+          "tiers": "启用 Anthropic 套餐与窗口阈值",
+          "cold": "临界区拦截大额未缓存输入",
+          "anthropic_default_5h": "普通/Pro 5h 阈值 (%)",
+          "anthropic_default_7d": "普通/Pro 7d 阈值 (%)",
+          "anthropic_max_5h": "Max 5h 阈值 (%)",
+          "anthropic_max_7d": "Max 7d 阈值 (%)",
+          "critical_band_percent": "临界区宽度（百分点）",
+          "large_cold_input_tokens": "未缓存输入 token 上限",
+          "sample_max_age_seconds": "可信采样有效期（秒）",
+          "invalid": "请检查额度临界保护参数的有效范围"
+        },
         openaiQuotaAutoPause: 'OpenAI 账号配额自动暂停',
         openaiQuotaAutoPauseHint: '当 OpenAI 账号 5h / 7d 用量达到阈值时，调度会自动跳过该账号；窗口滚动后自动恢复。账号级阈值优先于此全局默认值。',
         openaiQuotaAutoPauseDefault5h: '默认 5h 用量阈值 (%)',
@@ -828,7 +853,7 @@ export default {
         errors: '错误统计，包括总错误数、错误率和上游错误率。',
         latency: '请求时长统计，包括 p50、p90、p95、p99 等百分位数。',
         ttft: '首 Token 延迟（Time To First Token），衡量流式响应的首 Token 返回速度。',
-        health: '系统健康评分（0-100），综合考虑 SLA、错误率和资源使用情况。'
+        health: '按运维阈值评估请求错误、首 Token 耗时、资源和后台任务状态；SLA 与错误率不重复扣分'
       },
       charts: {
         emptyRequest: '该时间窗口内暂无请求。',

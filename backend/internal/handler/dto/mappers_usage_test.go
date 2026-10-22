@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -331,4 +332,37 @@ func TestUsageLogFromService_PreservesHistoricalMissingImageSize(t *testing.T) {
 
 func f64Ptr(value float64) *float64 {
 	return &value
+}
+
+func TestUsageLogFromService_LatencyMetricsAndLegacyExport(t *testing.T) {
+	zero, firstText := 0, 75
+	metrics := &service.UsageLatencyMetrics{Version: 1, FirstEventMs: &zero, FirstTextMs: &firstText, DurationMs: 100}
+	for _, snapshot := range []*service.UsageLatencyMetrics{nil, metrics} {
+		log := &service.UsageLog{LatencyMetrics: snapshot}
+		for _, value := range []any{UsageLogFromService(log), UsageLogFromServiceAdmin(log)} {
+			data, err := json.Marshal(value)
+			require.NoError(t, err)
+			var decoded map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(data, &decoded))
+			require.Contains(t, decoded, "latency_metrics", "legacy rows have explicit null, not fabricated v1 data")
+			if snapshot == nil {
+				require.JSONEq(t, "null", string(decoded["latency_metrics"]))
+			} else {
+				require.JSONEq(t, `{"version":1,"first_event_ms":0,"first_content_ms":null,"first_text_ms":75,"duration_ms":100}`, string(decoded["latency_metrics"]))
+			}
+		}
+	}
+	// The admin NDJSON export uses this same permission serializer and DTO.
+	// Timing is request metadata and must survive an operator without cost access.
+	actor := authz.Subject{Role: authz.Admin, Permissions: []string{"usage.read"}}
+	data, err := authz.MarshalResponse(map[string]any{"type": "rows", "items": []any{UsageLogFromServiceAdmin(&service.UsageLog{LatencyMetrics: metrics})}}, "/api/v1/admin/usage/export", actor, false)
+	require.NoError(t, err)
+	var frame struct {
+		Items []struct {
+			LatencyMetrics *service.UsageLatencyMetrics `json:"latency_metrics"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(data, &frame))
+	require.Len(t, frame.Items, 1)
+	require.Equal(t, metrics, frame.Items[0].LatencyMetrics)
 }
