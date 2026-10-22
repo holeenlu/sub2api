@@ -29,7 +29,7 @@ const {
   showSuccess: vi.fn(),
   isCurrentStep: vi.fn(),
   nextStep: vi.fn(),
-  authState: { isSimpleMode: false },
+  authState: { isSimpleMode: false, isSuperAdmin: true, can: () => true },
 }))
 
 const messages: Record<string, string> = {

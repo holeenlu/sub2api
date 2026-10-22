@@ -252,7 +252,7 @@ const isAdmin = computed(() => authStore.isAdmin)
 const sidebarNavRef = ref<HTMLElement | null>(null)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
-const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
+const homePath = computed(() => authStore.adminLandingPath)
 
 // Per-group expand/collapse overrides. A group with no entry follows the
 // automatic behavior (expanded while the active route is one of its children);
@@ -772,6 +772,16 @@ const customMenuItemsForAdmin = computed(() => {
     .sort((a, b) => a.sort_order - b.sort_order)
 })
 
+function filterAdminPermissions(items: NavItem[]): NavItem[] {
+  return items.flatMap(item => {
+    if (item.children) {
+      const children = filterAdminPermissions(item.children)
+      return children.length ? [{ ...item, children }] : []
+    }
+    return !item.path.startsWith('/admin') || authStore.canAccessAdminPage(item.path) ? [item] : []
+  })
+}
+
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
   const baseItems: NavItem[] = [
@@ -849,14 +859,14 @@ const adminNavItems = computed((): NavItem[] => {
     for (const cm of customMenuItemsForAdmin.value) {
       filtered.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
     }
-    return filtered
+    return filterAdminPermissions(filtered)
   }
 
   visible.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon })
   for (const cm of customMenuItemsForAdmin.value) {
     visible.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
   }
-  return visible
+  return filterAdminPermissions(visible)
 })
 
 function toggleSidebar() {

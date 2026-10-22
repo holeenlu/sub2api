@@ -1,0 +1,4 @@
+interface:
+  display_name: "GPT Image 2.5 Sunburst"
+  short_description: "使用已配置 API Key 调用 Sunburst 生成或编辑图片"
+  default_prompt: "使用 $gpt-image-sunburst 根据我的描述生成或编辑一张图片。"

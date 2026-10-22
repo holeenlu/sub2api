@@ -277,6 +277,17 @@ func (m *mockGatewayCacheForPlatform) DeleteSessionAccountID(ctx context.Context
 	return nil
 }
 
+// 长周期亲和键：该 mock 不参与历史键行为，给出中性实现以满足接口。
+func (m *mockGatewayCacheForPlatform) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, ErrStickySessionNotFound
+}
+func (m *mockGatewayCacheForPlatform) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
+	return true, nil
+}
+func (m *mockGatewayCacheForPlatform) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+
 func (m *mockGatewayCacheForPlatform) SetGrokVideoPendingBilling(_ context.Context, _ string, _ []byte, _ time.Duration) error {
 	return nil
 }
@@ -2975,8 +2986,8 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 
 		concurrencyCache := &mockConcurrencyCache{
 			loadMap: map[int64]*AccountLoadInfo{
-				1: {AccountID: 1, LoadRate: 100},
-				2: {AccountID: 2, LoadRate: 100},
+				1: {AccountID: 1, CurrentConcurrency: 5, LoadRate: 100},
+				2: {AccountID: 2, CurrentConcurrency: 5, LoadRate: 100},
 				3: {AccountID: 3, LoadRate: 0},
 			},
 		}
@@ -3585,4 +3596,11 @@ func TestGatewayService_SelectAccountForModelWithPlatform_RoutedOpenAIGroup(t *t
 	require.NoError(t, err)
 	require.NotNil(t, acc)
 	require.Equal(t, int64(2), acc.ID, "routed account must win over the higher-priority unrouted one")
+}
+
+func (m *mockGatewayCacheForPlatform) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (m *mockGatewayCacheForPlatform) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
 }

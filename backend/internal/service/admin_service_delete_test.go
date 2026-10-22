@@ -5,6 +5,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"testing"
 	"time"
 
@@ -116,8 +118,8 @@ func (s *userRepoStub) GetByEmail(ctx context.Context, email string) (*User, err
 	return nil, ErrUserNotFound
 }
 
-func (s *userRepoStub) GetFirstAdmin(ctx context.Context) (*User, error) {
-	panic("unexpected GetFirstAdmin call")
+func (s *userRepoStub) GetFirstSuperAdmin(ctx context.Context) (*User, error) {
+	panic("unexpected GetFirstSuperAdmin call")
 }
 
 func (s *userRepoStub) Update(ctx context.Context, user *User, fields UserUpdateFields) error {
@@ -559,22 +561,6 @@ func (s *billingCacheStub) DeleteUserPlatformQuotaCache(ctx context.Context, use
 	panic("unexpected DeleteUserPlatformQuotaCache call")
 }
 
-func (s *billingCacheStub) IncrUserPlatformQuotaUsageCache(ctx context.Context, userID int64, platform string, cost float64, ttl time.Duration, markDirty bool) error {
-	panic("unexpected IncrUserPlatformQuotaUsageCache call")
-}
-
-func (s *billingCacheStub) PopDirtyUserPlatformQuotaKeys(ctx context.Context, n int) ([]UserPlatformQuotaKey, error) {
-	panic("unexpected PopDirtyUserPlatformQuotaKeys call")
-}
-
-func (s *billingCacheStub) ReaddDirtyUserPlatformQuotaKeys(ctx context.Context, keys []UserPlatformQuotaKey) error {
-	panic("unexpected ReaddDirtyUserPlatformQuotaKeys call")
-}
-
-func (s *billingCacheStub) BatchGetUserPlatformQuotaCache(ctx context.Context, keys []UserPlatformQuotaKey) ([]*UserPlatformQuotaCacheEntry, error) {
-	panic("unexpected BatchGetUserPlatformQuotaCache call")
-}
-
 func waitForInvalidations(t *testing.T, ch <-chan subscriptionInvalidateCall, expected int) []subscriptionInvalidateCall {
 	t.Helper()
 	calls := make([]subscriptionInvalidateCall, 0, expected)
@@ -633,14 +619,28 @@ func TestAdminService_DeleteUser_NotFound(t *testing.T) {
 	require.Empty(t, repo.deletedIDs)
 }
 
-func TestAdminService_DeleteUser_AdminGuard(t *testing.T) {
-	repo := &userRepoStub{user: &User{ID: 1, Role: RoleAdmin}}
-	svc := &adminServiceImpl{userRepo: repo}
-
-	err := svc.DeleteUser(context.Background(), 1)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "cannot delete admin user")
-	require.Empty(t, repo.deletedIDs)
+func TestAdminService_DeleteUser_ManagementScope(t *testing.T) {
+	for _, tc := range []struct {
+		role    string
+		id      int64
+		allowed bool
+	}{
+		{RoleAdmin, 2, true}, {RoleUser, 2, true}, {RoleSuperAdmin, 2, false}, {RoleAdmin, 1, false},
+	} {
+		t.Run(tc.role+fmt.Sprint(tc.id), func(t *testing.T) {
+			repo := &userRepoStub{user: &User{ID: tc.id, Role: tc.role}}
+			svc := &adminServiceImpl{userRepo: repo}
+			ctx := authz.WithSubject(context.Background(), authz.Subject{UserID: 1, Role: RoleAdmin, PolicyVersion: 1, Permissions: []string{"users.read", "users.delete", "staff.manage"}})
+			err := svc.DeleteUser(ctx, tc.id)
+			if tc.allowed {
+				require.NoError(t, err)
+				require.Equal(t, []int64{tc.id}, repo.deletedIDs)
+			} else {
+				require.Error(t, err)
+				require.Empty(t, repo.deletedIDs)
+			}
+		})
+	}
 }
 
 func TestAdminService_DeleteUser_DeleteError(t *testing.T) {
