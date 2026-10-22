@@ -110,6 +110,9 @@
                 <p class="text-xl font-bold text-gray-900 dark:text-white">
                   {{ formatTokens(stats.today_tokens) }}
                 </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('dashboard.cache') }}: {{ formatTokens(stats.today_cache_creation_tokens + stats.today_cache_read_tokens) }}
+                </p>
                 <p class="text-xs">
                   <span
                     class="text-green-600 dark:text-green-400"
@@ -145,6 +148,9 @@
                 </p>
                 <p class="text-xl font-bold text-gray-900 dark:text-white">
                   {{ formatTokens(stats.total_tokens) }}
+                </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('dashboard.cache') }}: {{ formatTokens(stats.total_cache_creation_tokens + stats.total_cache_read_tokens) }}
                 </p>
                 <p class="text-xs">
                   <span

@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 // ApplyBedrockCCCompat 应用 Bedrock CC 兼容转换（渠道级模型映射后调用）
@@ -33,7 +33,7 @@ func (s *GatewayService) ApplyBedrockCCCompat(c *gin.Context, body []byte, model
 	body = sanitizeBedrockToolUseIDs(body)
 	body = sanitizeBedrockCCBetaTokens(body, model)
 	// 过滤 HTTP header 中的 anthropic-beta，只保留 Bedrock 支持的 token
-	if betaHeader := c.GetHeader("anthropic-beta"); betaHeader != "" {
+	if betaHeader := getRequestTokenListHeader(c.Request, "anthropic-beta"); betaHeader != "" {
 		if filtered := ResolveBedrockBetaTokens(betaHeader, body, model); len(filtered) > 0 {
 			c.Request.Header.Set("anthropic-beta", strings.Join(filtered, ", "))
 		} else {
@@ -78,7 +78,7 @@ func (s *GatewayService) forwardBedrock(
 
 	betaHeader := ""
 	if c != nil && c.Request != nil {
-		betaHeader = c.GetHeader("anthropic-beta")
+		betaHeader = getRequestTokenListHeader(c.Request, "anthropic-beta")
 	}
 
 	// 准备请求体（注入 anthropic_version/anthropic_beta，移除 Bedrock 不支持的字段，清理 cache_control）
@@ -91,6 +91,9 @@ func (s *GatewayService) forwardBedrock(
 	if err != nil {
 		return nil, fmt.Errorf("prepare bedrock request body: %w", err)
 	}
+	// The handler's usage fallback must reflect the final InvokeModel body,
+	// including effort removed for models that do not support it.
+	parsed.OutputEffort = gjson.GetBytes(bedrockBody, "output_config.effort").String()
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -168,6 +171,7 @@ func (s *GatewayService) forwardBedrock(
 		Usage:            *usage,
 		Model:            reqModel,
 		UpstreamModel:    mappedModel,
+		ReasoningEffort:  NormalizeClaudeOutputEffort(parsed.OutputEffort),
 		Stream:           reqStream,
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     firstTokenMs,
@@ -202,7 +206,7 @@ func (s *GatewayService) executeBedrockUpstream(
 			return nil, err
 		}
 
-		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, nil)
+		resp, err = qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, nil)
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -212,6 +216,9 @@ func (s *GatewayService) executeBedrockUpstream(
 			})
 		}
 
+		if resp.StatusCode >= 500 && !NativeUncertainReplaySafe(body) {
+			break // No proof that a hosted tool was not executed.
+		}
 		if resp.StatusCode >= 400 && resp.StatusCode != 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
 			if attempt < maxRetryAttempts {
 				elapsed := time.Since(retryStart)

@@ -97,7 +97,7 @@ func ServerTimingHeaderValue(c *gin.Context) string {
 	if !ok || role == "" {
 		return ""
 	}
-	if role != "admin" && !isUserTimingPath(c.Request.URL.Path) {
+	if role != "admin" && role != "super_admin" && !isUserTimingPath(c.Request.URL.Path) {
 		return ""
 	}
 	return servertiming.HeaderValue(c.Request.Context(), time.Now(), responseCacheStatus(c.Writer.Header()))

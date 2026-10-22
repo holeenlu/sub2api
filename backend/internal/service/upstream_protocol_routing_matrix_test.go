@@ -245,7 +245,13 @@ func observeRouting(tc routingMatrixCase) (obs routingObservation) {
 	}()
 	err := tc.ingress.forward(svc, c, tc.account(), body)
 	if err != nil {
-		obs.Error = err.Error()
+		// Recovery typing is tested separately; route selection still preserves the original build failure.
+		var recovery *UpstreamFailoverError
+		if errors.As(err, &recovery) && recovery.Cause != nil && recovery.RequestNotSent && recovery.IsCredentialFailure() {
+			obs.Error = recovery.Cause.Error()
+		} else {
+			obs.Error = err.Error()
+		}
 	}
 	return obs
 }

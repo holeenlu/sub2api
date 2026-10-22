@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"net/http"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -186,7 +187,7 @@ func normalizeDeepSeekResponsesRequestBody(account *Account, body []byte) []byte
 	if err != nil {
 		return normalized
 	}
-	return rebuilt
+	return restoreOpenAIUpstreamJSONTopLevelOrder(normalized, rebuilt)
 }
 
 func shouldAliasDeepSeekResponsesInputImages(account *Account) bool {
@@ -462,117 +463,6 @@ func sanitizeEncryptedReasoningInputItem(item any) (next any, changed bool, keep
 	return inputItem, true, true
 }
 
-// SanitizeOpenAICrossModeFailoverReasoning derives a failover attempt body from
-// the canonical request body by dropping provider-specific encrypted reasoning
-// input items in full (encrypted_content plus the coupled id/summary shape).
-//
-// This is the proactive counterpart to the reactive same-account
-// invalid_encrypted_content recovery in Forward: when a failover switches from an
-// OpenAI passthrough account (which forwards upstream-native encrypted reasoning,
-// e.g. Kiro) to a non-passthrough account (e.g. Bedrock Mantle) that rejects the
-// provider-specific reasoning IDs/shape, the whole reasoning item must go before
-// the request reaches the new upstream. Unlike trimOpenAIEncryptedReasoningItems,
-// which only strips the encrypted_content / null-content fields while preserving
-// the reasoning item's id and summary, this drops the entire item.
-//
-// The input slice is treated as immutable and is never mutated; a distinct slice
-// is returned only when changed is true.
-func SanitizeOpenAICrossModeFailoverReasoning(body []byte) (sanitized []byte, changed bool, err error) {
-	if len(body) == 0 {
-		return body, false, nil
-	}
-	if !gjson.GetBytes(body, "input").Exists() {
-		return body, false, nil
-	}
-	var decoded map[string]any
-	if err := decodeOpenAIJSONUseNumber(body, &decoded); err != nil {
-		return body, false, fmt.Errorf("decode cross-mode failover body: %w", err)
-	}
-	if !dropOpenAIEncryptedReasoningInputItems(decoded) {
-		return body, false, nil
-	}
-	out, marshalErr := marshalOpenAIUpstreamJSON(decoded)
-	if marshalErr != nil {
-		return body, false, fmt.Errorf("serialize cross-mode failover body: %w", marshalErr)
-	}
-	return out, true, nil
-}
-
-// dropOpenAIEncryptedReasoningInputItems removes reasoning input items that carry
-// provider-specific encrypted_content in full — including their coupled id and
-// summary — and reports whether anything changed. Contrast with
-// trimOpenAIEncryptedReasoningItems, which only strips fields while keeping the
-// reasoning item skeleton.
-func dropOpenAIEncryptedReasoningInputItems(reqBody map[string]any) bool {
-	if len(reqBody) == 0 {
-		return false
-	}
-	inputValue, has := reqBody["input"]
-	if !has {
-		return false
-	}
-	switch input := inputValue.(type) {
-	case []any:
-		filtered := input[:0]
-		changed := false
-		for _, item := range input {
-			if isOpenAIEncryptedReasoningInputItem(item) {
-				changed = true
-				continue
-			}
-			filtered = append(filtered, item)
-		}
-		if !changed {
-			return false
-		}
-		if len(filtered) == 0 {
-			delete(reqBody, "input")
-			return true
-		}
-		reqBody["input"] = filtered
-		return true
-	case []map[string]any:
-		filtered := input[:0]
-		changed := false
-		for _, item := range input {
-			if isOpenAIEncryptedReasoningInputItem(item) {
-				changed = true
-				continue
-			}
-			filtered = append(filtered, item)
-		}
-		if !changed {
-			return false
-		}
-		if len(filtered) == 0 {
-			delete(reqBody, "input")
-			return true
-		}
-		reqBody["input"] = filtered
-		return true
-	case map[string]any:
-		if isOpenAIEncryptedReasoningInputItem(input) {
-			delete(reqBody, "input")
-			return true
-		}
-		return false
-	default:
-		return false
-	}
-}
-
-func isOpenAIEncryptedReasoningInputItem(item any) bool {
-	inputItem, ok := item.(map[string]any)
-	if !ok {
-		return false
-	}
-	if itemType, _ := inputItem["type"].(string); strings.TrimSpace(itemType) != "reasoning" {
-		return false
-	}
-	_, has := inputItem["encrypted_content"]
-	return has
-}
-
 // IsOpenAIResponsesCompactPath reports whether the request targets the legacy
 // /responses/compact endpoint, including its forwardable subpaths.
 func IsOpenAIResponsesCompactPath(c *gin.Context) bool {
@@ -629,7 +519,7 @@ func normalizeOpenAICompactRequestBody(body []byte) ([]byte, bool, error) {
 	if bytes.Equal(bytes.TrimSpace(body), bytes.TrimSpace(normalized)) {
 		return body, false, nil
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func normalizeOpenAIParallelToolCallsWithoutTools(body []byte, responsesLite bool) ([]byte, bool, error) {
@@ -647,7 +537,7 @@ func normalizeOpenAIParallelToolCallsWithoutTools(body []byte, responsesLite boo
 	if err != nil {
 		return body, false, fmt.Errorf("normalize parallel_tool_calls without tools: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 // openAIRequestBodyHasTools 同时识别顶层 tools 和 input[].additional_tools。
@@ -724,7 +614,7 @@ func normalizeOpenAIResponsesReasoningContentReplay(body []byte) ([]byte, bool, 
 	if err != nil {
 		return body, false, fmt.Errorf("serialize normalized OpenAI reasoning content replay: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body []byte, knownStoreFalse bool) ([]byte, bool, error) {
@@ -760,7 +650,9 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body []byte, knownStoreFalse
 		encrypted := item.Get("encrypted_content")
 		if (typ == "reasoning" && (encrypted.Type != gjson.String || strings.TrimSpace(encrypted.Str) == "")) ||
 			(typ == "item_reference" && strings.HasPrefix(id, "rs_")) {
-			changed = true
+			// Missing content cannot be repaired by deleting history. Preserve it
+			// for a precise upstream rejection or a complete session replay.
+			items = append(items, item.Raw)
 			return true
 		}
 		stripID := typ == "reasoning" && strings.HasPrefix(id, "rs_")
@@ -837,7 +729,7 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded(body []byte, knownSto
 		case "reasoning":
 			encryptedContent, hasEncryptedContent := item["encrypted_content"].(string)
 			if !hasEncryptedContent || strings.TrimSpace(encryptedContent) == "" {
-				changed = true
+				filtered = append(filtered, item)
 				continue
 			}
 			if strings.HasPrefix(id, "rs_") {
@@ -847,11 +739,6 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded(body []byte, knownSto
 			if summary, ok := item["summary"]; !ok || summary == nil {
 				item["summary"] = []any{}
 				changed = true
-			}
-		case "item_reference":
-			if strings.HasPrefix(id, "rs_") {
-				changed = true
-				continue
 			}
 		}
 		if shouldStripOpenAIResponsesNonPairCallID(typ) {
@@ -870,7 +757,7 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded(body []byte, knownSto
 	if err != nil {
 		return body, false, fmt.Errorf("serialize API-key store=false reasoning replay: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func normalizeOpenAICodexCompactReasoningEffortForAccount(c *gin.Context, account *Account, body []byte) ([]byte, bool, error) {
@@ -896,7 +783,7 @@ func normalizeOpenAICodexCompactReasoningEffort(body []byte, effectiveModel stri
 	if err != nil {
 		return body, false, fmt.Errorf("normalize codex compact reasoning effort: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func resolveOpenAICompactSessionID(c *gin.Context) string {
@@ -1295,7 +1182,7 @@ func normalizeOpenAIOAuthResponsesCompatibilityBody(body []byte) ([]byte, bool, 
 			if err != nil {
 				return body, false, fmt.Errorf("normalize oauth responses prompt: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 		}
 		next, err := sjson.DeleteBytes(normalized, "prompt")
 		if err != nil {
@@ -1425,11 +1312,7 @@ func normalizeOpenAIResponseFormatSchemasBody(body []byte) ([]byte, bool, error)
 	if err != nil {
 		return body, false, fmt.Errorf("serialize normalized responses schema body: %w", err)
 	}
-	return normalized, true, nil
-}
-
-func normalizeOpenAIResponsesWebSocketCompatibilityBody(body []byte, account *Account, responsesLite bool) ([]byte, bool, error) {
-	return normalizeOpenAIResponsesCompatibilityBodyWithOptions(body, account, openAIResponsesCompatibilityOptions{ResponsesLite: responsesLite})
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(cfg *config.Config, body []byte, account *Account, responsesLite bool) ([]byte, bool, error) {
@@ -1468,13 +1351,13 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 		if next, normalizedParallel, err := normalizeOpenAIParallelToolCallsWithoutTools(normalized, responsesLite); err != nil {
 			return body, false, err
 		} else if normalizedParallel {
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 		if next, normalizedReasoning, err := normalizeOpenAIAPIKeyStoreFalseReasoningReplay(normalized, false); err != nil {
 			return body, false, err
 		} else if normalizedReasoning {
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	}
@@ -1507,7 +1390,7 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 			if deleteErr != nil {
 				return body, false, fmt.Errorf("normalize websocket body delete %s: %w", field, deleteErr)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 		if !opts.Compact {
@@ -1528,12 +1411,12 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 		}
 		mapChanged := false
 		if needsOrphanCleanup {
-			if input, ok := reqBody["input"].([]any); ok && sanitizeOpenAIResponsesOrphanToolOutputs(
-				reqBody,
-				input,
-				strings.TrimSpace(firstNonEmptyString(reqBody["previous_response_id"])) != "",
-			) {
-				mapChanged = true
+			if input, ok := reqBody["input"].([]any); ok {
+				inputChanged, inputErr := sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, hasOpenAIResponsesContextReference(reqBody))
+				if inputErr != nil {
+					return body, false, inputErr
+				}
+				mapChanged = inputChanged
 			}
 		}
 		if truncateOpenAIResponsesInputText(reqBody) {
@@ -1544,7 +1427,7 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 			if err != nil {
 				return body, false, fmt.Errorf("serialize normalized websocket Responses body: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	}
@@ -1564,7 +1447,7 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 			if err != nil {
 				return body, false, fmt.Errorf("serialize normalized websocket image tool body: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	}
@@ -1640,14 +1523,14 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body input string: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		case inputResult.Type == gjson.JSON && !inputResult.IsArray():
 			next, err := sjson.SetRawBytes(normalized, "input", []byte("["+inputResult.Raw+"]"))
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body input object: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	}
@@ -1658,7 +1541,7 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body delete store: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 		if stream := gjson.GetBytes(normalized, "stream"); stream.Exists() {
@@ -1666,7 +1549,7 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body delete stream: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	} else {
@@ -1675,7 +1558,7 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body store=false: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 		if stream := gjson.GetBytes(normalized, "stream"); !stream.Exists() || stream.Type != gjson.True {
@@ -1683,7 +1566,7 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body stream=true: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	}
@@ -2387,7 +2270,7 @@ func sanitizeEmptyBase64InputImagesInOpenAIBody(body []byte) ([]byte, bool, erro
 	}
 
 	var reqBody map[string]any
-	if err := json.Unmarshal(body, &reqBody); err != nil {
+	if err := decodeOpenAIJSONUseNumber(body, &reqBody); err != nil {
 		return body, false, fmt.Errorf("sanitize request body: %w", err)
 	}
 	if !sanitizeEmptyBase64InputImagesInOpenAIRequestBodyMap(reqBody) {
@@ -2397,7 +2280,7 @@ func sanitizeEmptyBase64InputImagesInOpenAIBody(body []byte) ([]byte, bool, erro
 	if err != nil {
 		return body, false, fmt.Errorf("serialize sanitized request body: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func sanitizeEmptyBase64InputImagesInOpenAIRequestBodyMap(reqBody map[string]any) bool {

@@ -29,7 +29,7 @@ vi.mock('@/stores/app', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ token: 'test-token', isSimpleMode: false })
+  useAuthStore: () => ({ token: 'test-token', isSuperAdmin: true, can: () => true, isSimpleMode: false })
 }))
 
 vi.mock('vue-i18n', async () => {
