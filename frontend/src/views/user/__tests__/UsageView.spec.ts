@@ -8,9 +8,11 @@ import UsageTable from '@/components/admin/usage/UsageTable.vue'
 
 const {
   query,
+  consumeUsageExport,
   getStats,
   getDashboardModels,
   getDashboardSnapshotV2,
+  getDashboardAPIKeyBreakdown,
   listMyErrorRequests,
   list,
   getAvailable,
@@ -20,9 +22,11 @@ const {
   showInfo,
 } = vi.hoisted(() => ({
   query: vi.fn(),
+  consumeUsageExport: vi.fn(),
   getStats: vi.fn(),
   getDashboardModels: vi.fn(),
   getDashboardSnapshotV2: vi.fn(),
+  getDashboardAPIKeyBreakdown: vi.fn(),
   listMyErrorRequests: vi.fn(),
   list: vi.fn(),
   getAvailable: vi.fn(),
@@ -31,6 +35,11 @@ const {
   showSuccess: vi.fn(),
   showInfo: vi.fn(),
 }))
+
+vi.mock('@/api/usageExport', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/usageExport')>()
+  return { ...actual, consumeUsageExport }
+})
 
 const messages: Record<string, string> = {
   'admin.dashboard.timeRange': 'Time range',
@@ -54,8 +63,23 @@ const messages: Record<string, string> = {
   'usage.allApiKeys': 'All API Keys',
   'usage.errors.allKeys': 'All API Keys',
   'usage.tabs.usage': 'Usage records',
+  'usage.tabs.keyRanking': 'API Key Ranking',
   'usage.tabs.errors': 'Error records',
   'usage.apiKeyFilter': 'API Key',
+  'usage.time': 'Time',
+  'usage.reasoningEffort': 'Reasoning Effort',
+  'usage.inboundEndpoint': 'Inbound Endpoint',
+  'admin.usage.ipAddress': 'IP Address',
+  'admin.usage.inputTokens': 'Input Tokens',
+  'admin.usage.outputTokens': 'Output Tokens',
+  'admin.usage.cacheReadTokens': 'Cache Read Tokens',
+  'admin.usage.cacheCreationTokens': 'Cache Creation Tokens',
+  'usage.rate': 'Rate Multiplier',
+  'usage.userBilled': 'Billed Cost',
+  'usage.original': 'Original Cost',
+  'usage.firstToken': 'First Token (ms)',
+  'usage.duration': 'Duration (ms)',
+  'usage.billingStatusLabel': 'Settlement status',
   'usage.model': 'Model',
   'usage.type': 'Type',
   'usage.ws': 'WS',
@@ -81,6 +105,7 @@ vi.mock('@/api', () => ({
     getStats,
     getDashboardModels,
     getDashboardSnapshotV2,
+    getDashboardAPIKeyBreakdown,
     listMyErrorRequests,
   },
   keysAPI: {
@@ -161,6 +186,7 @@ function mountUsageView() {
         UsageStatsCards: chartStub,
         UsageTable: { ...chartStub, props: ['columns'] },
         UserErrorRequestsTable: chartStub,
+        APIKeyTokenRanking: chartStub,
         ModelDistributionChart: chartStub,
         GroupDistributionChart: chartStub,
         EndpointDistributionChart: chartStub,
@@ -172,10 +198,16 @@ function mountUsageView() {
 
 describe('user UsageView', () => {
   beforeEach(() => {
+    consumeUsageExport.mockReset().mockImplementation(async (_endpoint, _params, onRows) => {
+      const result = await query.mock.results.at(-1)!.value
+      onRows(result.items)
+      return result.items.length
+    })
     query.mockReset()
     getStats.mockReset()
     getDashboardModels.mockReset()
     getDashboardSnapshotV2.mockReset()
+    getDashboardAPIKeyBreakdown.mockReset()
     listMyErrorRequests.mockReset()
     list.mockReset()
     getAvailable.mockReset()
@@ -203,6 +235,7 @@ describe('user UsageView', () => {
       start_date: '2026-03-08',
       end_date: '2026-03-08',
     })
+    getDashboardAPIKeyBreakdown.mockResolvedValue({ api_keys: [], start_date: '2026-03-08', end_date: '2026-03-08' })
     getDashboardSnapshotV2.mockResolvedValue({
       generated_at: '2026-03-08T00:00:00Z',
       start_date: '2026-03-08',
@@ -214,6 +247,24 @@ describe('user UsageView', () => {
     listMyErrorRequests.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     list.mockResolvedValue({ items: [{ id: 1, name: 'demo-key' }], total: 1, page: 1, page_size: 100, pages: 1 })
     getAvailable.mockResolvedValue([{ id: 1, name: 'default' }])
+  })
+
+  it('cancels all superseded aggregates on filtering and when leaving the page', async () => {
+    getStats.mockImplementation(() => new Promise(() => {}))
+    getDashboardModels.mockImplementation(() => new Promise(() => {}))
+    getDashboardSnapshotV2.mockImplementation(() => new Promise(() => {}))
+    const wrapper = mountUsageView()
+    await flushPromises()
+    const signals = () => [getStats.mock.lastCall![2].signal, getDashboardModels.mock.lastCall![1].signal, getDashboardSnapshotV2.mock.lastCall![1].signal] as AbortSignal[]
+    const first = signals()
+    wrapper.findComponent(DateRangePicker).vm.$emit('change', { startDate: '2026-03-09', endDate: '2026-03-10', preset: null })
+    await flushPromises()
+    expect(first.every(signal => signal.aborted)).toBe(true)
+    const current = signals()
+    expect(current.every(signal => !signal.aborted)).toBe(true)
+    wrapper.unmount()
+    expect(current.every(signal => signal.aborted)).toBe(true)
+    expect(showError).not.toHaveBeenCalled()
   })
 
   it('loads logs, stats, model stats, and snapshot on first render', async () => {
@@ -228,7 +279,7 @@ describe('user UsageView', () => {
       include_trend: true,
       include_model_stats: false,
       include_group_stats: true,
-    }))
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(list).toHaveBeenCalledTimes(1)
     expect(list).toHaveBeenCalledWith(1, 100)
     expect(getAvailable).toHaveBeenCalled()
@@ -343,9 +394,9 @@ describe('user UsageView', () => {
       expect.objectContaining({ native_compaction_v2: true }),
       expect.anything()
     )
-    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }))
-    expect(getDashboardModels).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }))
-    expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }))
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }), undefined, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getDashboardModels).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
 
     query.mockClear()
     getStats.mockClear()
@@ -360,9 +411,9 @@ describe('user UsageView', () => {
       expect.objectContaining({ native_compaction_v2: null }),
       expect.anything()
     )
-    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }))
-    expect(getDashboardModels).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }))
-    expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }))
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }), undefined, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getDashboardModels).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 
   it('exports csv with current filters and without admin-only fields', async () => {
@@ -389,19 +440,19 @@ describe('user UsageView', () => {
     await (wrapper.vm as any).exportToCSV()
 
     expect(exportedBlob).not.toBeNull()
-    expect(query).toHaveBeenCalledWith(expect.objectContaining({
+    expect(consumeUsageExport).toHaveBeenCalledWith('/usage/export', expect.objectContaining({
       page_size: 100,
       sort_by: 'created_at',
       sort_order: 'desc',
       native_compaction_v2: true,
-    }))
+    }), expect.any(Function), expect.any(AbortSignal))
     expect(clickSpy).toHaveBeenCalled()
     expect(showSuccess).toHaveBeenCalled()
     expect(csvContent.startsWith('\uFEFF')).toBe(true)
     expect(csvContent.slice(1)).toBe([
-      'Time,API Key Name,Model,Reasoning Effort,Inbound Endpoint,IP Address,Type,Billing Mode,Input Tokens,Output Tokens,Cache Read Tokens,Cache Creation Tokens,Rate Multiplier,Billed Cost,Original Cost,First Token (ms),Duration (ms)',
-      '2026-03-08T00:00:00Z,demo-key,gpt-5.4,-,,203.0.113.10,Sync,Token,4057,101,278272,4,1,0.09288300,0.09288300,12,345',
-    ].join('\n'))
+      'Time,API Key,Model,Reasoning Effort,Inbound Endpoint,IP Address,Type,Billing mode,Input Tokens,Output Tokens,Cache Read Tokens,Cache Creation Tokens,Rate Multiplier,Billed Cost,Original Cost,First Token (ms),Duration (ms),Settlement status',
+      '2026-03-08T00:00:00Z,demo-key,gpt-5.4,-,,203.0.113.10,Sync,Token,4057,101,278272,4,1,0.09288300,0.09288300,12,345,unknown',
+    ].join('\n') + '\n')
     expect(csvContent).toContain('IP Address')
     expect(csvContent).toContain('203.0.113.10')
     expect(csvContent).toContain('Billed Cost')
@@ -449,7 +500,7 @@ describe('user UsageView', () => {
     wrapper.unmount()
   })
 
-  it('keeps the initial filters, sort, and filename while exporting multiple pages', async () => {
+  it('keeps the initial filters, sort, and filename while receiving export batches', async () => {
     const pageResponse = { items: [usageLog], total: 101, pages: 2 }
     query.mockResolvedValue(pageResponse)
     const wrapper = mountUsageView()
@@ -459,12 +510,14 @@ describe('user UsageView', () => {
     datePicker.vm.$emit('change', { startDate: '2026-03-01', endDate: '2026-03-08', preset: null })
     await flushPromises()
 
-    let resolveFirstPage!: (value: typeof pageResponse) => void
-    const firstPage = new Promise<typeof pageResponse>((resolve) => { resolveFirstPage = resolve })
-    query.mockClear()
-    query.mockImplementation((params, options) =>
-      !options && params.page === 1 ? firstPage : Promise.resolve(pageResponse)
-    )
+    let completeExport!: () => void
+    const completion = new Promise<void>((resolve) => { completeExport = resolve })
+    consumeUsageExport.mockImplementation(async (_endpoint, _params, onRows) => {
+      onRows([usageLog])
+      await completion
+      onRows([usageLog])
+      return 2
+    })
     const originalCreateObjectURL = window.URL.createObjectURL
     const originalRevokeObjectURL = window.URL.revokeObjectURL
     window.URL.createObjectURL = vi.fn(() => 'blob:usage-export')
@@ -476,7 +529,7 @@ describe('user UsageView', () => {
 
     try {
       await wrapper.findAll('button').find((button) => button.text() === 'Export CSV')!.trigger('click')
-      const initialParams = { ...query.mock.calls[0][0] }
+      const initialParams = { ...consumeUsageExport.mock.calls[0][1] }
       expect(initialParams).toMatchObject({
         page: 1, page_size: 100, start_date: '2026-03-01', end_date: '2026-03-08',
         sort_by: 'created_at', sort_order: 'desc',
@@ -495,11 +548,11 @@ describe('user UsageView', () => {
         sort_by: 'actual_cost', sort_order: 'asc',
       }), expect.anything())
 
-      resolveFirstPage(pageResponse)
+      completeExport()
       await flushPromises()
 
-      const exportCalls = query.mock.calls.filter((call) => call.length === 1)
-      expect.soft(exportCalls).toEqual([[initialParams], [{ ...initialParams, page: 2 }]])
+      expect(consumeUsageExport).toHaveBeenCalledTimes(1)
+      expect(consumeUsageExport.mock.calls[0][1]).toEqual(initialParams)
       expect.soft(filename).toBe('usage_2026-03-01_to_2026-03-08.csv')
       expect(showSuccess).toHaveBeenCalledWith('Export success')
       expect(showError).not.toHaveBeenCalled()
@@ -554,7 +607,7 @@ describe('user UsageView', () => {
 
     await (wrapper.vm as any).exportToCSV()
 
-    expect(csvContent).toContain('Billing Mode')
+    expect(csvContent).toContain('Billing mode')
     expect(csvContent).toContain('Image')
     expect(csvContent).not.toContain(',Token,0,0,0,0,')
 
@@ -562,6 +615,19 @@ describe('user UsageView', () => {
     window.URL.revokeObjectURL = originalRevokeObjectURL
     vi.unstubAllGlobals()
     clickSpy.mockRestore()
+  })
+})
+
+describe('UsageView API key ranking tab', () => {
+  it('exposes the ranking tab without changing the usage detail route', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+
+    const rankingButton = wrapper.findAll('button').find((button) => button.text() === 'API Key Ranking')
+    expect(rankingButton).toBeDefined()
+    await rankingButton!.trigger('click')
+    expect((wrapper.vm as any).activeTab).toBe('keyRanking')
+    wrapper.unmount()
   })
 })
 

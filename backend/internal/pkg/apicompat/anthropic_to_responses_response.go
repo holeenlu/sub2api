@@ -118,6 +118,16 @@ func AnthropicToResponsesResponse(resp *AnthropicResponse) *ResponsesResponse {
 			Status:  "completed",
 		})
 	}
+	if AnthropicStopReasonString(resp.StopReason) == "refusal" {
+		for i := range outputs {
+			for j := range outputs[i].Content {
+				part := &outputs[i].Content[j]
+				if part.Type == "output_text" {
+					part.Type, part.Refusal, part.Text = "refusal", part.Text, ""
+				}
+			}
+		}
+	}
 	out.Output = outputs
 
 	// Map stop_reason → status
@@ -235,6 +245,9 @@ func AnthropicEventToResponsesEvents(
 	evt *AnthropicStreamEvent,
 	state *AnthropicEventToResponsesState,
 ) []ResponsesStreamEvent {
+	if evt == nil || state == nil || state.CompletedSent {
+		return nil
+	}
 	switch evt.Type {
 	case "message_start":
 		return anthToResHandleMessageStart(evt, state)
@@ -564,6 +577,27 @@ func anthToResHandleMessageDelta(evt *AnthropicStreamEvent, state *AnthropicEven
 	}
 	if evt.Delta != nil && evt.Delta.StopReason != "" {
 		state.StopReason = evt.Delta.StopReason
+	}
+	if state.StopReason == "refusal" && state.CurrentItemType == "message" {
+		var text string
+		for _, part := range state.CurrentContent {
+			if part.Type == "refusal" {
+				return nil
+			}
+			text += part.Text
+		}
+		if text != "" {
+			idx := state.ContentIndex
+			part := ResponsesContentPart{Type: "refusal", Refusal: text}
+			state.CurrentContent = append(state.CurrentContent, part)
+			state.ContentIndex++
+			return []ResponsesStreamEvent{
+				makeResponsesEvent(state, "response.content_part.added", &ResponsesStreamEvent{OutputIndex: state.OutputIndex, ContentIndex: idx, ItemID: state.CurrentItemID, Part: &ResponsesContentPart{Type: "refusal"}}),
+				makeResponsesEvent(state, "response.refusal.delta", &ResponsesStreamEvent{OutputIndex: state.OutputIndex, ContentIndex: idx, ItemID: state.CurrentItemID, Delta: text}),
+				makeResponsesEvent(state, "response.refusal.done", &ResponsesStreamEvent{OutputIndex: state.OutputIndex, ContentIndex: idx, ItemID: state.CurrentItemID, Refusal: text}),
+				makeResponsesEvent(state, "response.content_part.done", &ResponsesStreamEvent{OutputIndex: state.OutputIndex, ContentIndex: idx, ItemID: state.CurrentItemID, Part: &part}),
+			}
+		}
 	}
 
 	return nil

@@ -77,6 +77,7 @@ func TestUsageRecordWorkerPool_OverflowDrop(t *testing.T) {
 
 func TestUsageRecordWorkerPool_OverflowSync(t *testing.T) {
 	pool := NewUsageRecordWorkerPoolWithOptions(UsageRecordWorkerPoolOptions{
+		ExecutionLimit:        2,
 		WorkerCount:           1,
 		QueueSize:             1,
 		TaskTimeout:           time.Second,
@@ -120,6 +121,7 @@ func TestUsageRecordWorkerPool_OverflowSync(t *testing.T) {
 
 func TestUsageRecordWorkerPool_OverflowSample(t *testing.T) {
 	pool := NewUsageRecordWorkerPoolWithOptions(UsageRecordWorkerPoolOptions{
+		ExecutionLimit:        2,
 		WorkerCount:           1,
 		QueueSize:             1,
 		TaskTimeout:           time.Second,

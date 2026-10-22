@@ -643,50 +643,50 @@ func (s *UserRepoSuite) TestRemoveGroupFromAllowedGroups_NoMatch() {
 	s.Require().Zero(affected, "expected no affected rows")
 }
 
-// --- GetFirstAdmin ---
+// --- GetFirstSuperAdmin ---
 
-func (s *UserRepoSuite) TestGetFirstAdmin() {
+func (s *UserRepoSuite) TestGetFirstSuperAdmin() {
 	admin1 := s.mustCreateUser(&service.User{
 		Email:  "admin1@example.com",
-		Role:   service.RoleAdmin,
+		Role:   service.RoleSuperAdmin,
 		Status: service.StatusActive,
 	})
 	s.mustCreateUser(&service.User{
 		Email:  "admin2@example.com",
-		Role:   service.RoleAdmin,
+		Role:   service.RoleSuperAdmin,
 		Status: service.StatusActive,
 	})
 
-	got, err := s.repo.GetFirstAdmin(s.ctx)
-	s.Require().NoError(err, "GetFirstAdmin")
-	s.Require().Equal(admin1.ID, got.ID, "GetFirstAdmin mismatch")
+	got, err := s.repo.GetFirstSuperAdmin(s.ctx)
+	s.Require().NoError(err, "GetFirstSuperAdmin")
+	s.Require().Equal(admin1.ID, got.ID, "GetFirstSuperAdmin mismatch")
 }
 
-func (s *UserRepoSuite) TestGetFirstAdmin_NoAdmin() {
+func (s *UserRepoSuite) TestGetFirstSuperAdmin_NoAdmin() {
 	s.mustCreateUser(&service.User{
 		Email:  "user@example.com",
 		Role:   service.RoleUser,
 		Status: service.StatusActive,
 	})
 
-	_, err := s.repo.GetFirstAdmin(s.ctx)
+	_, err := s.repo.GetFirstSuperAdmin(s.ctx)
 	s.Require().Error(err, "expected error when no admin exists")
 }
 
-func (s *UserRepoSuite) TestGetFirstAdmin_DisabledAdminIgnored() {
+func (s *UserRepoSuite) TestGetFirstSuperAdmin_DisabledAdminIgnored() {
 	s.mustCreateUser(&service.User{
 		Email:  "disabled@example.com",
-		Role:   service.RoleAdmin,
+		Role:   service.RoleSuperAdmin,
 		Status: service.StatusDisabled,
 	})
 	activeAdmin := s.mustCreateUser(&service.User{
 		Email:  "active@example.com",
-		Role:   service.RoleAdmin,
+		Role:   service.RoleSuperAdmin,
 		Status: service.StatusActive,
 	})
 
-	got, err := s.repo.GetFirstAdmin(s.ctx)
-	s.Require().NoError(err, "GetFirstAdmin")
+	got, err := s.repo.GetFirstSuperAdmin(s.ctx)
+	s.Require().NoError(err, "GetFirstSuperAdmin")
 	s.Require().Equal(activeAdmin.ID, got.ID, "should return only active admin")
 }
 

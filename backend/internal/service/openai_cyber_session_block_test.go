@@ -195,6 +195,17 @@ func (c *comboCacheAndStore) DeleteSessionAccountID(_ context.Context, _ int64, 
 	return nil
 }
 
+// 长周期亲和键：该 mock 不参与历史键行为，给出中性实现以满足接口。
+func (c *comboCacheAndStore) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, ErrStickySessionNotFound
+}
+func (c *comboCacheAndStore) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
+	return true, nil
+}
+func (c *comboCacheAndStore) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+
 func (c *comboCacheAndStore) SetGrokVideoPendingBilling(_ context.Context, _ string, _ []byte, _ time.Duration) error {
 	return nil
 }
@@ -329,4 +340,11 @@ func TestCyberSessionScopeKeyNormalizesUserAgentVersion(t *testing.T) {
 	require.Equal(t, base, CyberSessionScopeKey(7, "203.0.113.10", "Codex CLI 1.2.4"))
 	require.NotEqual(t, base, CyberSessionScopeKey(8, "203.0.113.10", "Codex CLI 1.2.3"))
 	require.NotEqual(t, base, CyberSessionScopeKey(7, "203.0.113.11", "Codex CLI 1.2.3"))
+}
+
+func (c *comboCacheAndStore) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (c *comboCacheAndStore) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
 }

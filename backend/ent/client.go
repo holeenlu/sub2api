@@ -17,6 +17,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
+	"github.com/Wei-Shaw/sub2api/ent/accountsupplyidentityclaim"
 	"github.com/Wei-Shaw/sub2api/ent/announcement"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
@@ -54,6 +55,12 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/ent/vendor"
+	"github.com/Wei-Shaw/sub2api/ent/vendorgroup"
+	"github.com/Wei-Shaw/sub2api/ent/vendorsettlement"
+	"github.com/Wei-Shaw/sub2api/ent/vendorsettlementallocation"
+	"github.com/Wei-Shaw/sub2api/ent/vendorsettlementline"
+	"github.com/Wei-Shaw/sub2api/ent/vendorsettlementpayment"
 
 	stdsql "database/sql"
 )
@@ -69,6 +76,8 @@ type Client struct {
 	Account *AccountClient
 	// AccountGroup is the client for interacting with the AccountGroup builders.
 	AccountGroup *AccountGroupClient
+	// AccountSupplyIdentityClaim is the client for interacting with the AccountSupplyIdentityClaim builders.
+	AccountSupplyIdentityClaim *AccountSupplyIdentityClaimClient
 	// Announcement is the client for interacting with the Announcement builders.
 	Announcement *AnnouncementClient
 	// AnnouncementRead is the client for interacting with the AnnouncementRead builders.
@@ -141,6 +150,18 @@ type Client struct {
 	UserPlatformQuota *UserPlatformQuotaClient
 	// UserSubscription is the client for interacting with the UserSubscription builders.
 	UserSubscription *UserSubscriptionClient
+	// Vendor is the client for interacting with the Vendor builders.
+	Vendor *VendorClient
+	// VendorGroup is the client for interacting with the VendorGroup builders.
+	VendorGroup *VendorGroupClient
+	// VendorSettlement is the client for interacting with the VendorSettlement builders.
+	VendorSettlement *VendorSettlementClient
+	// VendorSettlementAllocation is the client for interacting with the VendorSettlementAllocation builders.
+	VendorSettlementAllocation *VendorSettlementAllocationClient
+	// VendorSettlementLine is the client for interacting with the VendorSettlementLine builders.
+	VendorSettlementLine *VendorSettlementLineClient
+	// VendorSettlementPayment is the client for interacting with the VendorSettlementPayment builders.
+	VendorSettlementPayment *VendorSettlementPaymentClient
 }
 
 // NewClient creates a new client configured with the given options.
@@ -155,6 +176,7 @@ func (c *Client) init() {
 	c.APIKey = NewAPIKeyClient(c.config)
 	c.Account = NewAccountClient(c.config)
 	c.AccountGroup = NewAccountGroupClient(c.config)
+	c.AccountSupplyIdentityClaim = NewAccountSupplyIdentityClaimClient(c.config)
 	c.Announcement = NewAnnouncementClient(c.config)
 	c.AnnouncementRead = NewAnnouncementReadClient(c.config)
 	c.AuthIdentity = NewAuthIdentityClient(c.config)
@@ -191,6 +213,12 @@ func (c *Client) init() {
 	c.UserAttributeValue = NewUserAttributeValueClient(c.config)
 	c.UserPlatformQuota = NewUserPlatformQuotaClient(c.config)
 	c.UserSubscription = NewUserSubscriptionClient(c.config)
+	c.Vendor = NewVendorClient(c.config)
+	c.VendorGroup = NewVendorGroupClient(c.config)
+	c.VendorSettlement = NewVendorSettlementClient(c.config)
+	c.VendorSettlementAllocation = NewVendorSettlementAllocationClient(c.config)
+	c.VendorSettlementLine = NewVendorSettlementLineClient(c.config)
+	c.VendorSettlementPayment = NewVendorSettlementPaymentClient(c.config)
 }
 
 type (
@@ -286,6 +314,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		APIKey:                        NewAPIKeyClient(cfg),
 		Account:                       NewAccountClient(cfg),
 		AccountGroup:                  NewAccountGroupClient(cfg),
+		AccountSupplyIdentityClaim:    NewAccountSupplyIdentityClaimClient(cfg),
 		Announcement:                  NewAnnouncementClient(cfg),
 		AnnouncementRead:              NewAnnouncementReadClient(cfg),
 		AuthIdentity:                  NewAuthIdentityClient(cfg),
@@ -322,6 +351,12 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		UserAttributeValue:            NewUserAttributeValueClient(cfg),
 		UserPlatformQuota:             NewUserPlatformQuotaClient(cfg),
 		UserSubscription:              NewUserSubscriptionClient(cfg),
+		Vendor:                        NewVendorClient(cfg),
+		VendorGroup:                   NewVendorGroupClient(cfg),
+		VendorSettlement:              NewVendorSettlementClient(cfg),
+		VendorSettlementAllocation:    NewVendorSettlementAllocationClient(cfg),
+		VendorSettlementLine:          NewVendorSettlementLineClient(cfg),
+		VendorSettlementPayment:       NewVendorSettlementPaymentClient(cfg),
 	}, nil
 }
 
@@ -344,6 +379,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		APIKey:                        NewAPIKeyClient(cfg),
 		Account:                       NewAccountClient(cfg),
 		AccountGroup:                  NewAccountGroupClient(cfg),
+		AccountSupplyIdentityClaim:    NewAccountSupplyIdentityClaimClient(cfg),
 		Announcement:                  NewAnnouncementClient(cfg),
 		AnnouncementRead:              NewAnnouncementReadClient(cfg),
 		AuthIdentity:                  NewAuthIdentityClient(cfg),
@@ -380,6 +416,12 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		UserAttributeValue:            NewUserAttributeValueClient(cfg),
 		UserPlatformQuota:             NewUserPlatformQuotaClient(cfg),
 		UserSubscription:              NewUserSubscriptionClient(cfg),
+		Vendor:                        NewVendorClient(cfg),
+		VendorGroup:                   NewVendorGroupClient(cfg),
+		VendorSettlement:              NewVendorSettlementClient(cfg),
+		VendorSettlementAllocation:    NewVendorSettlementAllocationClient(cfg),
+		VendorSettlementLine:          NewVendorSettlementLineClient(cfg),
+		VendorSettlementPayment:       NewVendorSettlementPaymentClient(cfg),
 	}, nil
 }
 
@@ -409,17 +451,19 @@ func (c *Client) Close() error {
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
-		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
-		c.AuthIdentity, c.AuthIdentityChannel, c.BatchImageEvent, c.BatchImageItem,
-		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
-		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
-		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.APIKey, c.Account, c.AccountGroup, c.AccountSupplyIdentityClaim,
+		c.Announcement, c.AnnouncementRead, c.AuthIdentity, c.AuthIdentityChannel,
+		c.BatchImageEvent, c.BatchImageItem, c.BatchImageJob, c.ChannelMonitor,
+		c.ChannelMonitorDailyRollup, c.ChannelMonitorHistory,
+		c.ChannelMonitorRequestTemplate, c.CompositeModelRoute, c.ErrorPassthroughRule,
+		c.Group, c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
+		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.UserPlatformQuota, c.UserSubscription, c.Vendor, c.VendorGroup,
+		c.VendorSettlement, c.VendorSettlementAllocation, c.VendorSettlementLine,
+		c.VendorSettlementPayment,
 	} {
 		n.Use(hooks...)
 	}
@@ -429,17 +473,19 @@ func (c *Client) Use(hooks ...Hook) {
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
-		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
-		c.AuthIdentity, c.AuthIdentityChannel, c.BatchImageEvent, c.BatchImageItem,
-		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
-		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
-		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.APIKey, c.Account, c.AccountGroup, c.AccountSupplyIdentityClaim,
+		c.Announcement, c.AnnouncementRead, c.AuthIdentity, c.AuthIdentityChannel,
+		c.BatchImageEvent, c.BatchImageItem, c.BatchImageJob, c.ChannelMonitor,
+		c.ChannelMonitorDailyRollup, c.ChannelMonitorHistory,
+		c.ChannelMonitorRequestTemplate, c.CompositeModelRoute, c.ErrorPassthroughRule,
+		c.Group, c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
+		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.UserPlatformQuota, c.UserSubscription, c.Vendor, c.VendorGroup,
+		c.VendorSettlement, c.VendorSettlementAllocation, c.VendorSettlementLine,
+		c.VendorSettlementPayment,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -454,6 +500,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.Account.mutate(ctx, m)
 	case *AccountGroupMutation:
 		return c.AccountGroup.mutate(ctx, m)
+	case *AccountSupplyIdentityClaimMutation:
+		return c.AccountSupplyIdentityClaim.mutate(ctx, m)
 	case *AnnouncementMutation:
 		return c.Announcement.mutate(ctx, m)
 	case *AnnouncementReadMutation:
@@ -526,6 +574,18 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.UserPlatformQuota.mutate(ctx, m)
 	case *UserSubscriptionMutation:
 		return c.UserSubscription.mutate(ctx, m)
+	case *VendorMutation:
+		return c.Vendor.mutate(ctx, m)
+	case *VendorGroupMutation:
+		return c.VendorGroup.mutate(ctx, m)
+	case *VendorSettlementMutation:
+		return c.VendorSettlement.mutate(ctx, m)
+	case *VendorSettlementAllocationMutation:
+		return c.VendorSettlementAllocation.mutate(ctx, m)
+	case *VendorSettlementLineMutation:
+		return c.VendorSettlementLine.mutate(ctx, m)
+	case *VendorSettlementPaymentMutation:
+		return c.VendorSettlementPayment.mutate(ctx, m)
 	default:
 		return nil, fmt.Errorf("ent: unknown mutation type %T", m)
 	}
@@ -1058,6 +1118,139 @@ func (c *AccountGroupClient) mutate(ctx context.Context, m *AccountGroupMutation
 		return (&AccountGroupDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown AccountGroup mutation op: %q", m.Op())
+	}
+}
+
+// AccountSupplyIdentityClaimClient is a client for the AccountSupplyIdentityClaim schema.
+type AccountSupplyIdentityClaimClient struct {
+	config
+}
+
+// NewAccountSupplyIdentityClaimClient returns a client for the AccountSupplyIdentityClaim from the given config.
+func NewAccountSupplyIdentityClaimClient(c config) *AccountSupplyIdentityClaimClient {
+	return &AccountSupplyIdentityClaimClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `accountsupplyidentityclaim.Hooks(f(g(h())))`.
+func (c *AccountSupplyIdentityClaimClient) Use(hooks ...Hook) {
+	c.hooks.AccountSupplyIdentityClaim = append(c.hooks.AccountSupplyIdentityClaim, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `accountsupplyidentityclaim.Intercept(f(g(h())))`.
+func (c *AccountSupplyIdentityClaimClient) Intercept(interceptors ...Interceptor) {
+	c.inters.AccountSupplyIdentityClaim = append(c.inters.AccountSupplyIdentityClaim, interceptors...)
+}
+
+// Create returns a builder for creating a AccountSupplyIdentityClaim entity.
+func (c *AccountSupplyIdentityClaimClient) Create() *AccountSupplyIdentityClaimCreate {
+	mutation := newAccountSupplyIdentityClaimMutation(c.config, OpCreate)
+	return &AccountSupplyIdentityClaimCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of AccountSupplyIdentityClaim entities.
+func (c *AccountSupplyIdentityClaimClient) CreateBulk(builders ...*AccountSupplyIdentityClaimCreate) *AccountSupplyIdentityClaimCreateBulk {
+	return &AccountSupplyIdentityClaimCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *AccountSupplyIdentityClaimClient) MapCreateBulk(slice any, setFunc func(*AccountSupplyIdentityClaimCreate, int)) *AccountSupplyIdentityClaimCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &AccountSupplyIdentityClaimCreateBulk{err: fmt.Errorf("calling to AccountSupplyIdentityClaimClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*AccountSupplyIdentityClaimCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &AccountSupplyIdentityClaimCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for AccountSupplyIdentityClaim.
+func (c *AccountSupplyIdentityClaimClient) Update() *AccountSupplyIdentityClaimUpdate {
+	mutation := newAccountSupplyIdentityClaimMutation(c.config, OpUpdate)
+	return &AccountSupplyIdentityClaimUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *AccountSupplyIdentityClaimClient) UpdateOne(_m *AccountSupplyIdentityClaim) *AccountSupplyIdentityClaimUpdateOne {
+	mutation := newAccountSupplyIdentityClaimMutation(c.config, OpUpdateOne, withAccountSupplyIdentityClaim(_m))
+	return &AccountSupplyIdentityClaimUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *AccountSupplyIdentityClaimClient) UpdateOneID(id int64) *AccountSupplyIdentityClaimUpdateOne {
+	mutation := newAccountSupplyIdentityClaimMutation(c.config, OpUpdateOne, withAccountSupplyIdentityClaimID(id))
+	return &AccountSupplyIdentityClaimUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for AccountSupplyIdentityClaim.
+func (c *AccountSupplyIdentityClaimClient) Delete() *AccountSupplyIdentityClaimDelete {
+	mutation := newAccountSupplyIdentityClaimMutation(c.config, OpDelete)
+	return &AccountSupplyIdentityClaimDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *AccountSupplyIdentityClaimClient) DeleteOne(_m *AccountSupplyIdentityClaim) *AccountSupplyIdentityClaimDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *AccountSupplyIdentityClaimClient) DeleteOneID(id int64) *AccountSupplyIdentityClaimDeleteOne {
+	builder := c.Delete().Where(accountsupplyidentityclaim.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &AccountSupplyIdentityClaimDeleteOne{builder}
+}
+
+// Query returns a query builder for AccountSupplyIdentityClaim.
+func (c *AccountSupplyIdentityClaimClient) Query() *AccountSupplyIdentityClaimQuery {
+	return &AccountSupplyIdentityClaimQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeAccountSupplyIdentityClaim},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a AccountSupplyIdentityClaim entity by its id.
+func (c *AccountSupplyIdentityClaimClient) Get(ctx context.Context, id int64) (*AccountSupplyIdentityClaim, error) {
+	return c.Query().Where(accountsupplyidentityclaim.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *AccountSupplyIdentityClaimClient) GetX(ctx context.Context, id int64) *AccountSupplyIdentityClaim {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *AccountSupplyIdentityClaimClient) Hooks() []Hook {
+	return c.hooks.AccountSupplyIdentityClaim
+}
+
+// Interceptors returns the client interceptors.
+func (c *AccountSupplyIdentityClaimClient) Interceptors() []Interceptor {
+	return c.inters.AccountSupplyIdentityClaim
+}
+
+func (c *AccountSupplyIdentityClaimClient) mutate(ctx context.Context, m *AccountSupplyIdentityClaimMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&AccountSupplyIdentityClaimCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&AccountSupplyIdentityClaimUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&AccountSupplyIdentityClaimUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&AccountSupplyIdentityClaimDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown AccountSupplyIdentityClaim mutation op: %q", m.Op())
 	}
 }
 
@@ -6838,31 +7031,833 @@ func (c *UserSubscriptionClient) mutate(ctx context.Context, m *UserSubscription
 	}
 }
 
+// VendorClient is a client for the Vendor schema.
+type VendorClient struct {
+	config
+}
+
+// NewVendorClient returns a client for the Vendor from the given config.
+func NewVendorClient(c config) *VendorClient {
+	return &VendorClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `vendor.Hooks(f(g(h())))`.
+func (c *VendorClient) Use(hooks ...Hook) {
+	c.hooks.Vendor = append(c.hooks.Vendor, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `vendor.Intercept(f(g(h())))`.
+func (c *VendorClient) Intercept(interceptors ...Interceptor) {
+	c.inters.Vendor = append(c.inters.Vendor, interceptors...)
+}
+
+// Create returns a builder for creating a Vendor entity.
+func (c *VendorClient) Create() *VendorCreate {
+	mutation := newVendorMutation(c.config, OpCreate)
+	return &VendorCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of Vendor entities.
+func (c *VendorClient) CreateBulk(builders ...*VendorCreate) *VendorCreateBulk {
+	return &VendorCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *VendorClient) MapCreateBulk(slice any, setFunc func(*VendorCreate, int)) *VendorCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &VendorCreateBulk{err: fmt.Errorf("calling to VendorClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*VendorCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &VendorCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for Vendor.
+func (c *VendorClient) Update() *VendorUpdate {
+	mutation := newVendorMutation(c.config, OpUpdate)
+	return &VendorUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *VendorClient) UpdateOne(_m *Vendor) *VendorUpdateOne {
+	mutation := newVendorMutation(c.config, OpUpdateOne, withVendor(_m))
+	return &VendorUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *VendorClient) UpdateOneID(id int64) *VendorUpdateOne {
+	mutation := newVendorMutation(c.config, OpUpdateOne, withVendorID(id))
+	return &VendorUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for Vendor.
+func (c *VendorClient) Delete() *VendorDelete {
+	mutation := newVendorMutation(c.config, OpDelete)
+	return &VendorDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *VendorClient) DeleteOne(_m *Vendor) *VendorDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *VendorClient) DeleteOneID(id int64) *VendorDeleteOne {
+	builder := c.Delete().Where(vendor.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &VendorDeleteOne{builder}
+}
+
+// Query returns a query builder for Vendor.
+func (c *VendorClient) Query() *VendorQuery {
+	return &VendorQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeVendor},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a Vendor entity by its id.
+func (c *VendorClient) Get(ctx context.Context, id int64) (*Vendor, error) {
+	return c.Query().Where(vendor.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *VendorClient) GetX(ctx context.Context, id int64) *Vendor {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *VendorClient) Hooks() []Hook {
+	return c.hooks.Vendor
+}
+
+// Interceptors returns the client interceptors.
+func (c *VendorClient) Interceptors() []Interceptor {
+	return c.inters.Vendor
+}
+
+func (c *VendorClient) mutate(ctx context.Context, m *VendorMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&VendorCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&VendorUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&VendorUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&VendorDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Vendor mutation op: %q", m.Op())
+	}
+}
+
+// VendorGroupClient is a client for the VendorGroup schema.
+type VendorGroupClient struct {
+	config
+}
+
+// NewVendorGroupClient returns a client for the VendorGroup from the given config.
+func NewVendorGroupClient(c config) *VendorGroupClient {
+	return &VendorGroupClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `vendorgroup.Hooks(f(g(h())))`.
+func (c *VendorGroupClient) Use(hooks ...Hook) {
+	c.hooks.VendorGroup = append(c.hooks.VendorGroup, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `vendorgroup.Intercept(f(g(h())))`.
+func (c *VendorGroupClient) Intercept(interceptors ...Interceptor) {
+	c.inters.VendorGroup = append(c.inters.VendorGroup, interceptors...)
+}
+
+// Create returns a builder for creating a VendorGroup entity.
+func (c *VendorGroupClient) Create() *VendorGroupCreate {
+	mutation := newVendorGroupMutation(c.config, OpCreate)
+	return &VendorGroupCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of VendorGroup entities.
+func (c *VendorGroupClient) CreateBulk(builders ...*VendorGroupCreate) *VendorGroupCreateBulk {
+	return &VendorGroupCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *VendorGroupClient) MapCreateBulk(slice any, setFunc func(*VendorGroupCreate, int)) *VendorGroupCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &VendorGroupCreateBulk{err: fmt.Errorf("calling to VendorGroupClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*VendorGroupCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &VendorGroupCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for VendorGroup.
+func (c *VendorGroupClient) Update() *VendorGroupUpdate {
+	mutation := newVendorGroupMutation(c.config, OpUpdate)
+	return &VendorGroupUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *VendorGroupClient) UpdateOne(_m *VendorGroup) *VendorGroupUpdateOne {
+	mutation := newVendorGroupMutation(c.config, OpUpdateOne, withVendorGroup(_m))
+	return &VendorGroupUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *VendorGroupClient) UpdateOneID(id int64) *VendorGroupUpdateOne {
+	mutation := newVendorGroupMutation(c.config, OpUpdateOne, withVendorGroupID(id))
+	return &VendorGroupUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for VendorGroup.
+func (c *VendorGroupClient) Delete() *VendorGroupDelete {
+	mutation := newVendorGroupMutation(c.config, OpDelete)
+	return &VendorGroupDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *VendorGroupClient) DeleteOne(_m *VendorGroup) *VendorGroupDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *VendorGroupClient) DeleteOneID(id int64) *VendorGroupDeleteOne {
+	builder := c.Delete().Where(vendorgroup.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &VendorGroupDeleteOne{builder}
+}
+
+// Query returns a query builder for VendorGroup.
+func (c *VendorGroupClient) Query() *VendorGroupQuery {
+	return &VendorGroupQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeVendorGroup},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a VendorGroup entity by its id.
+func (c *VendorGroupClient) Get(ctx context.Context, id int64) (*VendorGroup, error) {
+	return c.Query().Where(vendorgroup.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *VendorGroupClient) GetX(ctx context.Context, id int64) *VendorGroup {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *VendorGroupClient) Hooks() []Hook {
+	return c.hooks.VendorGroup
+}
+
+// Interceptors returns the client interceptors.
+func (c *VendorGroupClient) Interceptors() []Interceptor {
+	return c.inters.VendorGroup
+}
+
+func (c *VendorGroupClient) mutate(ctx context.Context, m *VendorGroupMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&VendorGroupCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&VendorGroupUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&VendorGroupUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&VendorGroupDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown VendorGroup mutation op: %q", m.Op())
+	}
+}
+
+// VendorSettlementClient is a client for the VendorSettlement schema.
+type VendorSettlementClient struct {
+	config
+}
+
+// NewVendorSettlementClient returns a client for the VendorSettlement from the given config.
+func NewVendorSettlementClient(c config) *VendorSettlementClient {
+	return &VendorSettlementClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `vendorsettlement.Hooks(f(g(h())))`.
+func (c *VendorSettlementClient) Use(hooks ...Hook) {
+	c.hooks.VendorSettlement = append(c.hooks.VendorSettlement, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `vendorsettlement.Intercept(f(g(h())))`.
+func (c *VendorSettlementClient) Intercept(interceptors ...Interceptor) {
+	c.inters.VendorSettlement = append(c.inters.VendorSettlement, interceptors...)
+}
+
+// Create returns a builder for creating a VendorSettlement entity.
+func (c *VendorSettlementClient) Create() *VendorSettlementCreate {
+	mutation := newVendorSettlementMutation(c.config, OpCreate)
+	return &VendorSettlementCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of VendorSettlement entities.
+func (c *VendorSettlementClient) CreateBulk(builders ...*VendorSettlementCreate) *VendorSettlementCreateBulk {
+	return &VendorSettlementCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *VendorSettlementClient) MapCreateBulk(slice any, setFunc func(*VendorSettlementCreate, int)) *VendorSettlementCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &VendorSettlementCreateBulk{err: fmt.Errorf("calling to VendorSettlementClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*VendorSettlementCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &VendorSettlementCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for VendorSettlement.
+func (c *VendorSettlementClient) Update() *VendorSettlementUpdate {
+	mutation := newVendorSettlementMutation(c.config, OpUpdate)
+	return &VendorSettlementUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *VendorSettlementClient) UpdateOne(_m *VendorSettlement) *VendorSettlementUpdateOne {
+	mutation := newVendorSettlementMutation(c.config, OpUpdateOne, withVendorSettlement(_m))
+	return &VendorSettlementUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *VendorSettlementClient) UpdateOneID(id int64) *VendorSettlementUpdateOne {
+	mutation := newVendorSettlementMutation(c.config, OpUpdateOne, withVendorSettlementID(id))
+	return &VendorSettlementUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for VendorSettlement.
+func (c *VendorSettlementClient) Delete() *VendorSettlementDelete {
+	mutation := newVendorSettlementMutation(c.config, OpDelete)
+	return &VendorSettlementDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *VendorSettlementClient) DeleteOne(_m *VendorSettlement) *VendorSettlementDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *VendorSettlementClient) DeleteOneID(id int64) *VendorSettlementDeleteOne {
+	builder := c.Delete().Where(vendorsettlement.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &VendorSettlementDeleteOne{builder}
+}
+
+// Query returns a query builder for VendorSettlement.
+func (c *VendorSettlementClient) Query() *VendorSettlementQuery {
+	return &VendorSettlementQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeVendorSettlement},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a VendorSettlement entity by its id.
+func (c *VendorSettlementClient) Get(ctx context.Context, id int64) (*VendorSettlement, error) {
+	return c.Query().Where(vendorsettlement.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *VendorSettlementClient) GetX(ctx context.Context, id int64) *VendorSettlement {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *VendorSettlementClient) Hooks() []Hook {
+	return c.hooks.VendorSettlement
+}
+
+// Interceptors returns the client interceptors.
+func (c *VendorSettlementClient) Interceptors() []Interceptor {
+	return c.inters.VendorSettlement
+}
+
+func (c *VendorSettlementClient) mutate(ctx context.Context, m *VendorSettlementMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&VendorSettlementCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&VendorSettlementUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&VendorSettlementUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&VendorSettlementDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown VendorSettlement mutation op: %q", m.Op())
+	}
+}
+
+// VendorSettlementAllocationClient is a client for the VendorSettlementAllocation schema.
+type VendorSettlementAllocationClient struct {
+	config
+}
+
+// NewVendorSettlementAllocationClient returns a client for the VendorSettlementAllocation from the given config.
+func NewVendorSettlementAllocationClient(c config) *VendorSettlementAllocationClient {
+	return &VendorSettlementAllocationClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `vendorsettlementallocation.Hooks(f(g(h())))`.
+func (c *VendorSettlementAllocationClient) Use(hooks ...Hook) {
+	c.hooks.VendorSettlementAllocation = append(c.hooks.VendorSettlementAllocation, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `vendorsettlementallocation.Intercept(f(g(h())))`.
+func (c *VendorSettlementAllocationClient) Intercept(interceptors ...Interceptor) {
+	c.inters.VendorSettlementAllocation = append(c.inters.VendorSettlementAllocation, interceptors...)
+}
+
+// Create returns a builder for creating a VendorSettlementAllocation entity.
+func (c *VendorSettlementAllocationClient) Create() *VendorSettlementAllocationCreate {
+	mutation := newVendorSettlementAllocationMutation(c.config, OpCreate)
+	return &VendorSettlementAllocationCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of VendorSettlementAllocation entities.
+func (c *VendorSettlementAllocationClient) CreateBulk(builders ...*VendorSettlementAllocationCreate) *VendorSettlementAllocationCreateBulk {
+	return &VendorSettlementAllocationCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *VendorSettlementAllocationClient) MapCreateBulk(slice any, setFunc func(*VendorSettlementAllocationCreate, int)) *VendorSettlementAllocationCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &VendorSettlementAllocationCreateBulk{err: fmt.Errorf("calling to VendorSettlementAllocationClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*VendorSettlementAllocationCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &VendorSettlementAllocationCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for VendorSettlementAllocation.
+func (c *VendorSettlementAllocationClient) Update() *VendorSettlementAllocationUpdate {
+	mutation := newVendorSettlementAllocationMutation(c.config, OpUpdate)
+	return &VendorSettlementAllocationUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *VendorSettlementAllocationClient) UpdateOne(_m *VendorSettlementAllocation) *VendorSettlementAllocationUpdateOne {
+	mutation := newVendorSettlementAllocationMutation(c.config, OpUpdateOne, withVendorSettlementAllocation(_m))
+	return &VendorSettlementAllocationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *VendorSettlementAllocationClient) UpdateOneID(id int64) *VendorSettlementAllocationUpdateOne {
+	mutation := newVendorSettlementAllocationMutation(c.config, OpUpdateOne, withVendorSettlementAllocationID(id))
+	return &VendorSettlementAllocationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for VendorSettlementAllocation.
+func (c *VendorSettlementAllocationClient) Delete() *VendorSettlementAllocationDelete {
+	mutation := newVendorSettlementAllocationMutation(c.config, OpDelete)
+	return &VendorSettlementAllocationDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *VendorSettlementAllocationClient) DeleteOne(_m *VendorSettlementAllocation) *VendorSettlementAllocationDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *VendorSettlementAllocationClient) DeleteOneID(id int64) *VendorSettlementAllocationDeleteOne {
+	builder := c.Delete().Where(vendorsettlementallocation.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &VendorSettlementAllocationDeleteOne{builder}
+}
+
+// Query returns a query builder for VendorSettlementAllocation.
+func (c *VendorSettlementAllocationClient) Query() *VendorSettlementAllocationQuery {
+	return &VendorSettlementAllocationQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeVendorSettlementAllocation},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a VendorSettlementAllocation entity by its id.
+func (c *VendorSettlementAllocationClient) Get(ctx context.Context, id int64) (*VendorSettlementAllocation, error) {
+	return c.Query().Where(vendorsettlementallocation.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *VendorSettlementAllocationClient) GetX(ctx context.Context, id int64) *VendorSettlementAllocation {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *VendorSettlementAllocationClient) Hooks() []Hook {
+	return c.hooks.VendorSettlementAllocation
+}
+
+// Interceptors returns the client interceptors.
+func (c *VendorSettlementAllocationClient) Interceptors() []Interceptor {
+	return c.inters.VendorSettlementAllocation
+}
+
+func (c *VendorSettlementAllocationClient) mutate(ctx context.Context, m *VendorSettlementAllocationMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&VendorSettlementAllocationCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&VendorSettlementAllocationUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&VendorSettlementAllocationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&VendorSettlementAllocationDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown VendorSettlementAllocation mutation op: %q", m.Op())
+	}
+}
+
+// VendorSettlementLineClient is a client for the VendorSettlementLine schema.
+type VendorSettlementLineClient struct {
+	config
+}
+
+// NewVendorSettlementLineClient returns a client for the VendorSettlementLine from the given config.
+func NewVendorSettlementLineClient(c config) *VendorSettlementLineClient {
+	return &VendorSettlementLineClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `vendorsettlementline.Hooks(f(g(h())))`.
+func (c *VendorSettlementLineClient) Use(hooks ...Hook) {
+	c.hooks.VendorSettlementLine = append(c.hooks.VendorSettlementLine, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `vendorsettlementline.Intercept(f(g(h())))`.
+func (c *VendorSettlementLineClient) Intercept(interceptors ...Interceptor) {
+	c.inters.VendorSettlementLine = append(c.inters.VendorSettlementLine, interceptors...)
+}
+
+// Create returns a builder for creating a VendorSettlementLine entity.
+func (c *VendorSettlementLineClient) Create() *VendorSettlementLineCreate {
+	mutation := newVendorSettlementLineMutation(c.config, OpCreate)
+	return &VendorSettlementLineCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of VendorSettlementLine entities.
+func (c *VendorSettlementLineClient) CreateBulk(builders ...*VendorSettlementLineCreate) *VendorSettlementLineCreateBulk {
+	return &VendorSettlementLineCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *VendorSettlementLineClient) MapCreateBulk(slice any, setFunc func(*VendorSettlementLineCreate, int)) *VendorSettlementLineCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &VendorSettlementLineCreateBulk{err: fmt.Errorf("calling to VendorSettlementLineClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*VendorSettlementLineCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &VendorSettlementLineCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for VendorSettlementLine.
+func (c *VendorSettlementLineClient) Update() *VendorSettlementLineUpdate {
+	mutation := newVendorSettlementLineMutation(c.config, OpUpdate)
+	return &VendorSettlementLineUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *VendorSettlementLineClient) UpdateOne(_m *VendorSettlementLine) *VendorSettlementLineUpdateOne {
+	mutation := newVendorSettlementLineMutation(c.config, OpUpdateOne, withVendorSettlementLine(_m))
+	return &VendorSettlementLineUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *VendorSettlementLineClient) UpdateOneID(id int64) *VendorSettlementLineUpdateOne {
+	mutation := newVendorSettlementLineMutation(c.config, OpUpdateOne, withVendorSettlementLineID(id))
+	return &VendorSettlementLineUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for VendorSettlementLine.
+func (c *VendorSettlementLineClient) Delete() *VendorSettlementLineDelete {
+	mutation := newVendorSettlementLineMutation(c.config, OpDelete)
+	return &VendorSettlementLineDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *VendorSettlementLineClient) DeleteOne(_m *VendorSettlementLine) *VendorSettlementLineDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *VendorSettlementLineClient) DeleteOneID(id int64) *VendorSettlementLineDeleteOne {
+	builder := c.Delete().Where(vendorsettlementline.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &VendorSettlementLineDeleteOne{builder}
+}
+
+// Query returns a query builder for VendorSettlementLine.
+func (c *VendorSettlementLineClient) Query() *VendorSettlementLineQuery {
+	return &VendorSettlementLineQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeVendorSettlementLine},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a VendorSettlementLine entity by its id.
+func (c *VendorSettlementLineClient) Get(ctx context.Context, id int64) (*VendorSettlementLine, error) {
+	return c.Query().Where(vendorsettlementline.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *VendorSettlementLineClient) GetX(ctx context.Context, id int64) *VendorSettlementLine {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *VendorSettlementLineClient) Hooks() []Hook {
+	return c.hooks.VendorSettlementLine
+}
+
+// Interceptors returns the client interceptors.
+func (c *VendorSettlementLineClient) Interceptors() []Interceptor {
+	return c.inters.VendorSettlementLine
+}
+
+func (c *VendorSettlementLineClient) mutate(ctx context.Context, m *VendorSettlementLineMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&VendorSettlementLineCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&VendorSettlementLineUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&VendorSettlementLineUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&VendorSettlementLineDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown VendorSettlementLine mutation op: %q", m.Op())
+	}
+}
+
+// VendorSettlementPaymentClient is a client for the VendorSettlementPayment schema.
+type VendorSettlementPaymentClient struct {
+	config
+}
+
+// NewVendorSettlementPaymentClient returns a client for the VendorSettlementPayment from the given config.
+func NewVendorSettlementPaymentClient(c config) *VendorSettlementPaymentClient {
+	return &VendorSettlementPaymentClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `vendorsettlementpayment.Hooks(f(g(h())))`.
+func (c *VendorSettlementPaymentClient) Use(hooks ...Hook) {
+	c.hooks.VendorSettlementPayment = append(c.hooks.VendorSettlementPayment, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `vendorsettlementpayment.Intercept(f(g(h())))`.
+func (c *VendorSettlementPaymentClient) Intercept(interceptors ...Interceptor) {
+	c.inters.VendorSettlementPayment = append(c.inters.VendorSettlementPayment, interceptors...)
+}
+
+// Create returns a builder for creating a VendorSettlementPayment entity.
+func (c *VendorSettlementPaymentClient) Create() *VendorSettlementPaymentCreate {
+	mutation := newVendorSettlementPaymentMutation(c.config, OpCreate)
+	return &VendorSettlementPaymentCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of VendorSettlementPayment entities.
+func (c *VendorSettlementPaymentClient) CreateBulk(builders ...*VendorSettlementPaymentCreate) *VendorSettlementPaymentCreateBulk {
+	return &VendorSettlementPaymentCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *VendorSettlementPaymentClient) MapCreateBulk(slice any, setFunc func(*VendorSettlementPaymentCreate, int)) *VendorSettlementPaymentCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &VendorSettlementPaymentCreateBulk{err: fmt.Errorf("calling to VendorSettlementPaymentClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*VendorSettlementPaymentCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &VendorSettlementPaymentCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for VendorSettlementPayment.
+func (c *VendorSettlementPaymentClient) Update() *VendorSettlementPaymentUpdate {
+	mutation := newVendorSettlementPaymentMutation(c.config, OpUpdate)
+	return &VendorSettlementPaymentUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *VendorSettlementPaymentClient) UpdateOne(_m *VendorSettlementPayment) *VendorSettlementPaymentUpdateOne {
+	mutation := newVendorSettlementPaymentMutation(c.config, OpUpdateOne, withVendorSettlementPayment(_m))
+	return &VendorSettlementPaymentUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *VendorSettlementPaymentClient) UpdateOneID(id int64) *VendorSettlementPaymentUpdateOne {
+	mutation := newVendorSettlementPaymentMutation(c.config, OpUpdateOne, withVendorSettlementPaymentID(id))
+	return &VendorSettlementPaymentUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for VendorSettlementPayment.
+func (c *VendorSettlementPaymentClient) Delete() *VendorSettlementPaymentDelete {
+	mutation := newVendorSettlementPaymentMutation(c.config, OpDelete)
+	return &VendorSettlementPaymentDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *VendorSettlementPaymentClient) DeleteOne(_m *VendorSettlementPayment) *VendorSettlementPaymentDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *VendorSettlementPaymentClient) DeleteOneID(id int64) *VendorSettlementPaymentDeleteOne {
+	builder := c.Delete().Where(vendorsettlementpayment.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &VendorSettlementPaymentDeleteOne{builder}
+}
+
+// Query returns a query builder for VendorSettlementPayment.
+func (c *VendorSettlementPaymentClient) Query() *VendorSettlementPaymentQuery {
+	return &VendorSettlementPaymentQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeVendorSettlementPayment},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a VendorSettlementPayment entity by its id.
+func (c *VendorSettlementPaymentClient) Get(ctx context.Context, id int64) (*VendorSettlementPayment, error) {
+	return c.Query().Where(vendorsettlementpayment.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *VendorSettlementPaymentClient) GetX(ctx context.Context, id int64) *VendorSettlementPayment {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *VendorSettlementPaymentClient) Hooks() []Hook {
+	return c.hooks.VendorSettlementPayment
+}
+
+// Interceptors returns the client interceptors.
+func (c *VendorSettlementPaymentClient) Interceptors() []Interceptor {
+	return c.inters.VendorSettlementPayment
+}
+
+func (c *VendorSettlementPaymentClient) mutate(ctx context.Context, m *VendorSettlementPaymentMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&VendorSettlementPaymentCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&VendorSettlementPaymentUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&VendorSettlementPaymentUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&VendorSettlementPaymentDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown VendorSettlementPayment mutation op: %q", m.Op())
+	}
+}
+
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
-		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
-		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
-		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Hook
+		APIKey, Account, AccountGroup, AccountSupplyIdentityClaim, Announcement,
+		AnnouncementRead, AuthIdentity, AuthIdentityChannel, BatchImageEvent,
+		BatchImageItem, BatchImageJob, ChannelMonitor, ChannelMonitorDailyRollup,
+		ChannelMonitorHistory, ChannelMonitorRequestTemplate, CompositeModelRoute,
+		ErrorPassthroughRule, Group, IdempotencyRecord, IdentityAdoptionDecision,
+		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription, Vendor, VendorGroup, VendorSettlement,
+		VendorSettlementAllocation, VendorSettlementLine,
+		VendorSettlementPayment []ent.Hook
 	}
 	inters struct {
-		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
-		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
-		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
-		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Interceptor
+		APIKey, Account, AccountGroup, AccountSupplyIdentityClaim, Announcement,
+		AnnouncementRead, AuthIdentity, AuthIdentityChannel, BatchImageEvent,
+		BatchImageItem, BatchImageJob, ChannelMonitor, ChannelMonitorDailyRollup,
+		ChannelMonitorHistory, ChannelMonitorRequestTemplate, CompositeModelRoute,
+		ErrorPassthroughRule, Group, IdempotencyRecord, IdentityAdoptionDecision,
+		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription, Vendor, VendorGroup, VendorSettlement,
+		VendorSettlementAllocation, VendorSettlementLine,
+		VendorSettlementPayment []ent.Interceptor
 	}
 )
 

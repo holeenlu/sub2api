@@ -55,7 +55,13 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		SetNillableExpiresAt(key.ExpiresAt).
 		SetRateLimit5h(key.RateLimit5h).
 		SetRateLimit1d(key.RateLimit1d).
-		SetRateLimit7d(key.RateLimit7d)
+		SetRateLimit7d(key.RateLimit7d).
+		SetUsage5h(key.Usage5h).
+		SetUsage1d(key.Usage1d).
+		SetUsage7d(key.Usage7d).
+		SetNillableWindow5hStart(key.Window5hStart).
+		SetNillableWindow1dStart(key.Window1dStart).
+		SetNillableWindow7dStart(key.Window7dStart)
 
 	if len(key.IPWhitelist) > 0 {
 		builder.SetIPWhitelist(key.IPWhitelist)
@@ -432,8 +438,28 @@ func (r *apiKeyRepository) deleteWithTombstone(ctx context.Context, exec *dbent.
 	return nil
 }
 
+// apiKeyManagementScope checks both live identities in the same query. Ordinary
+// users and staff retain their own-Key boundary. This is not gateway authority.
+func apiKeyManagementScope(userID int64) func(*entsql.Selector) {
+	return func(s *entsql.Selector) {
+		s.Where(entsql.Or(
+			entsql.EQ(s.C(apikey.FieldUserID), userID),
+			entsql.P(func(b *entsql.Builder) {
+				b.WriteString("EXISTS (SELECT 1 FROM users actor JOIN users owner ON owner.id=").WriteString(s.C(apikey.FieldUserID)).
+					WriteString(" WHERE actor.id=").Arg(userID).
+					WriteString(" AND actor.role='super_admin' AND actor.status='active' AND actor.deleted_at IS NULL AND owner.role='super_admin' AND owner.deleted_at IS NULL)")
+			}),
+		))
+	}
+}
+
 func (r *apiKeyRepository) apiKeyListByUserIDQuery(userID int64, filters service.APIKeyListFilters) *dbent.APIKeyQuery {
-	q := r.activeQuery().Where(apikey.UserIDEQ(userID))
+	q := r.activeQuery()
+	if filters.IncludeSuperAdminKeys {
+		q = q.Where(apiKeyManagementScope(userID))
+	} else {
+		q = q.Where(apikey.UserIDEQ(userID))
+	}
 
 	if filters.Search != "" {
 		q = q.Where(apikey.Or(
@@ -601,7 +627,7 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 	}
 
 	ids, err := r.client.APIKey.Query().
-		Where(apikey.UserIDEQ(userID), apikey.IDIn(apiKeyIDs...), apikey.DeletedAtIsNil()).
+		Where(apiKeyManagementScope(userID), apikey.IDIn(apiKeyIDs...), apikey.DeletedAtIsNil()).
 		IDs(ctx)
 	if err != nil {
 		return nil, err
