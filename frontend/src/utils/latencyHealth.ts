@@ -1,4 +1,5 @@
 import type { UsageLog } from '@/types'
+import { getUsageLatency } from './usageMetrics'
 
 /**
  * 请求延迟健康度分档（用于用量明细"延迟"列的纵向健康扫视）。
@@ -70,11 +71,12 @@ export const LATENCY_BAR_TO_CLASSES: Record<LatencySeverity, string> = {
   critical: 'to-red-500',
 }
 
-// 与运维 Token 请求统计一致：使用完整耗时，输出可能包含推理 Token。
+// 使用所选计时口径的完整耗时，输出可能包含推理 Token。
 export const formatUsageOutputRate = (row: Pick<UsageLog,
-  'output_tokens' | 'duration_ms' | 'image_count' | 'image_output_tokens' | 'billing_mode' | 'request_type'
+  'output_tokens' | 'duration_ms' | 'image_count' | 'image_output_tokens' | 'billing_mode' | 'request_type' | 'latency_metrics'
 >): string => {
-  const { output_tokens: outputTokens, duration_ms: durationMs } = row
+  const { output_tokens: outputTokens } = row
+  const { durationMs } = getUsageLatency({ ...row, first_token_ms: null })
   if (row.image_count > 0 || row.image_output_tokens > 0 || row.billing_mode === 'image'
     || (row.request_type && !['sync', 'stream', 'ws_v2', 'cyber'].includes(row.request_type))
     || !Number.isFinite(outputTokens) || outputTokens <= 0

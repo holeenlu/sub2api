@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"strconv"
 	"strings"
 	"time"
@@ -55,10 +56,11 @@ func (s *AntigravityOAuthService) GenerateAuthURL(ctx context.Context, proxyID *
 	}
 
 	session := &antigravity.OAuthSession{
-		State:        state,
-		CodeVerifier: codeVerifier,
-		ProxyURL:     proxyURL,
-		CreatedAt:    time.Now(),
+		Authorization: authz.CaptureLease(ctx),
+		State:         state,
+		CodeVerifier:  codeVerifier,
+		ProxyURL:      proxyURL,
+		CreatedAt:     time.Now(),
 	}
 	s.sessionStore.Set(sessionID, session)
 
@@ -99,6 +101,9 @@ func (s *AntigravityOAuthService) ExchangeCode(ctx context.Context, input *Antig
 	session, ok := s.sessionStore.Get(input.SessionID)
 	if !ok {
 		return nil, fmt.Errorf("session 不存在或已过期")
+	}
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
 	}
 
 	if strings.TrimSpace(input.State) == "" || input.State != session.State {

@@ -953,3 +953,10 @@ func TestSelectAccountWithLoadAwareness_StickyReadReuse(t *testing.T) {
 		require.Equal(t, int64(1), cache.getCalls.Load())
 	})
 }
+
+func (s *stickyGatewayCacheHotpathStub) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (s *stickyGatewayCacheHotpathStub) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
+}

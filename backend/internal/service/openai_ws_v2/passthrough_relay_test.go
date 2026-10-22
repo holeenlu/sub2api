@@ -674,14 +674,11 @@ func TestRelay_OnTurnComplete_BareErrorWithoutIDBeforeLaterCompleted(t *testing.
 	)
 
 	require.Nil(t, relayExit)
-	require.Len(t, turns, 2)
-	require.Equal(t, "error", turns[0].TerminalEventType)
-	require.Empty(t, turns[0].RequestID)
-	require.Equal(t, Usage{InputTokens: 5, OutputTokens: 1}, turns[0].Usage)
-	require.Equal(t, "response.completed", turns[1].TerminalEventType)
-	require.Equal(t, "resp_next", turns[1].RequestID)
-	require.Equal(t, Usage{InputTokens: 3, OutputTokens: 2}, turns[1].Usage)
-	require.Equal(t, Usage{InputTokens: 8, OutputTokens: 3}, result.Usage)
+	require.Len(t, turns, 1, "one create with a recovered bare error must settle once")
+	require.Equal(t, "response.completed", turns[0].TerminalEventType)
+	require.Equal(t, "resp_next", turns[0].RequestID)
+	require.Equal(t, Usage{InputTokens: 3, OutputTokens: 2}, turns[0].Usage)
+	require.Equal(t, Usage{InputTokens: 3, OutputTokens: 2}, result.Usage)
 }
 
 func TestRelay_OnTurnComplete_AuxiliaryFrameDoesNotSettleBareErrorBeforeFailed(t *testing.T) {
@@ -1477,4 +1474,55 @@ func TestRelay_OnTurnComplete_RealOpenAIStream_FirstTokenMs(t *testing.T) {
 
 	require.NotNil(t, result.FirstTokenMs)
 	require.Greater(t, *result.FirstTokenMs, 0)
+}
+
+func TestRelay_ClientDisconnectRetainsUnfinishedTurnUsage(t *testing.T) {
+	client := newPassthroughTestFrameConn(nil, true)
+	upstream := newPassthroughTestFrameConn([]passthroughTestFrame{{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_partial","usage":{"input_tokens":6,"output_tokens":4}}}`)}}, false)
+	var turns []RelayTurnResult
+	_, _ = Relay(context.Background(), client, upstream, []byte(`{"type":"response.create","model":"gpt-4o"}`), RelayOptions{
+		UpstreamDrainTimeout: 50 * time.Millisecond,
+		OnTurnComplete:       func(turn RelayTurnResult) { turns = append(turns, turn) },
+	})
+	require.Len(t, turns, 1)
+	require.Equal(t, "resp_partial", turns[0].RequestID)
+	require.Equal(t, 6, turns[0].Usage.InputTokens)
+	require.Equal(t, 4, turns[0].Usage.OutputTokens)
+	require.Empty(t, turns[0].TerminalEventType)
+}
+
+func TestRelay_UpstreamWriteObservers(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "failure"}[fail], func(t *testing.T) {
+			client := newPassthroughTestFrameConn(nil, false)
+			base := newPassthroughTestFrameConn([]passthroughTestFrame{{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_observed"}}`)}}, true)
+			var upstream FrameConn = base
+			if fail {
+				upstream = &errorOnWriteFrameConn{}
+			}
+			request := []byte(`{"type":"response.create","model":"gpt-5","input":"hello"}`)
+			var before, after atomic.Int32
+			var observedErr atomic.Bool
+			_, _ = Relay(context.Background(), client, upstream, request, RelayOptions{
+				BeforeUpstreamWrite: func(typ coderws.MessageType, payload []byte) {
+					require.Equal(t, coderws.MessageText, typ)
+					require.Equal(t, string(request), string(payload))
+					require.Empty(t, base.Writes())
+					before.Add(1)
+				},
+				AfterUpstreamWrite: func(typ coderws.MessageType, payload []byte, err error) {
+					require.Equal(t, int32(1), before.Load())
+					require.Equal(t, string(request), string(payload))
+					observedErr.Store(err != nil)
+					if !fail {
+						require.Len(t, base.Writes(), 1)
+					}
+					after.Add(1)
+				},
+			})
+			require.Equal(t, int32(1), before.Load())
+			require.Equal(t, int32(1), after.Load())
+			require.Equal(t, fail, observedErr.Load())
+		})
+	}
 }
