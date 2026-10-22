@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -12,9 +13,10 @@ import (
 
 const (
 	codexReservedPythonToolName = "python"
-	codexPythonToolAlias        = "python__sub2api"
-	codexToolNameReverseKey     = "openai_codex_tool_name_reverse"
-	codexToolNameSessionKey     = "openai_codex_tool_name_session_reverse"
+	// Neutral wire alias from sub4api a3eaf63; reverse maps remain request-owned.
+	codexPythonToolAlias    = "python__custom"
+	codexToolNameReverseKey = "openai_codex_tool_name_reverse"
+	codexToolNameSessionKey = "openai_codex_tool_name_session_reverse"
 )
 
 type codexToolNameField struct {
@@ -114,7 +116,11 @@ func collectOpenAIResponsesToolNameFields(reqBody map[string]any) []codexToolNam
 			collectTools(session["tools"])
 		}
 	}
-	if choice, ok := reqBody["tool_choice"].(map[string]any); ok {
+	collectChoice := func(raw any) {
+		choice, ok := raw.(map[string]any)
+		if !ok {
+			return
+		}
 		if strings.EqualFold(strings.TrimSpace(firstNonEmptyString(choice["type"])), "allowed_tools") {
 			collectTools(choice["tools"])
 		}
@@ -123,6 +129,15 @@ func collectOpenAIResponsesToolNameFields(reqBody map[string]any) []codexToolNam
 			if function, ok := choice["function"].(map[string]any); ok {
 				appendName(function, "name")
 			}
+		}
+	}
+	collectChoice(reqBody["tool_choice"])
+	if choice, ok := reqBody["function_call"].(map[string]any); ok {
+		appendName(choice, "name")
+	}
+	if strings.EqualFold(strings.TrimSpace(firstNonEmptyString(reqBody["type"])), "session.update") {
+		if session, ok := reqBody["session"].(map[string]any); ok {
+			collectChoice(session["tool_choice"])
 		}
 	}
 	if input, ok := reqBody["input"].([]any); ok {
@@ -147,7 +162,7 @@ func collectOpenAIResponsesToolNameFields(reqBody map[string]any) []codexToolNam
 }
 
 func aliasOpenAIOAuthReservedToolNamesBody(body []byte) ([]byte, map[string]string, bool, error) {
-	if len(body) == 0 || !containsASCIIFold(body, []byte(codexReservedPythonToolName)) {
+	if len(body) == 0 || (!containsASCIIFold(body, []byte(codexReservedPythonToolName)) && !bytes.Contains(body, []byte(`\u`))) {
 		return body, nil, false, nil
 	}
 	var reqBody map[string]any
@@ -162,7 +177,7 @@ func aliasOpenAIOAuthReservedToolNamesBody(body []byte) ([]byte, map[string]stri
 	if err != nil {
 		return body, nil, false, fmt.Errorf("encode OAuth reserved tool names: %w", err)
 	}
-	return normalized, reverse, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), reverse, true, nil
 }
 
 func containsASCIIFold(haystack, needle []byte) bool {
@@ -302,7 +317,7 @@ func restoreCodexToolNamesInJSON(data []byte, reverse map[string]string) []byte 
 	if err != nil {
 		return data
 	}
-	return restored
+	return restoreOpenAIUpstreamJSONTopLevelOrder(data, restored)
 }
 
 func restoreCodexToolNamesFromContext(c *gin.Context, data []byte) []byte {
@@ -346,6 +361,14 @@ func restoreCodexToolNameFields(value any, reverse map[string]string) bool {
 			item["name"] = original
 			changed = true
 		}
+		if function, ok := item["function"].(map[string]any); ok {
+			if name, ok := function["name"].(string); ok {
+				if original, exists := reverse[name]; exists {
+					function["name"] = original
+					changed = true
+				}
+			}
+		}
 	}
 	restoreOutput := func(raw any) {
 		output, _ := raw.([]any)
@@ -353,10 +376,21 @@ func restoreCodexToolNameFields(value any, reverse map[string]string) bool {
 			restoreItem(item)
 		}
 	}
+	restoreDeclarations := func(object map[string]any) {
+		for _, field := range collectOpenAIResponsesToolNameFields(map[string]any{
+			"tools": object["tools"], "tool_choice": object["tool_choice"], "functions": object["functions"],
+		}) {
+			if original, exists := reverse[field.name]; exists {
+				field.object[field.key] = original
+				changed = true
+			}
+		}
+	}
 	restoreResponse := func(raw any) {
 		response, ok := raw.(map[string]any)
 		if ok {
 			restoreOutput(response["output"])
+			restoreDeclarations(response)
 		}
 	}
 	restoreFunction := func(raw any) {
@@ -397,41 +431,22 @@ func restoreCodexToolNameFields(value any, reverse map[string]string) bool {
 			}
 		}
 	}
-	var restoreTools func(any)
-	restoreTools = func(raw any) {
-		tools, _ := raw.([]any)
-		for _, rawTool := range tools {
-			tool, ok := rawTool.(map[string]any)
-			if !ok {
-				continue
-			}
-			toolType := strings.ToLower(strings.TrimSpace(firstNonEmptyString(tool["type"])))
-			if toolType == "function" {
-				name, _ := tool["name"].(string)
-				if original, exists := reverse[name]; exists {
-					tool["name"] = original
-					changed = true
-				}
-			}
-			if toolType == "namespace" {
-				restoreTools(tool["tools"])
-			}
-		}
-	}
-
 	eventType := strings.ToLower(strings.TrimSpace(firstNonEmptyString(root["type"])))
 	switch eventType {
+	case "response.function_call_arguments.delta", "response.function_call_arguments.done":
+		restoreFunction(root)
 	case "response.output_item.added", "response.output_item.done":
 		restoreItem(root["item"])
 	case "response.created", "response.in_progress", "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
 		restoreResponse(root["response"])
 	case "session.created", "session.updated":
 		if session, ok := root["session"].(map[string]any); ok {
-			restoreTools(session["tools"])
+			restoreDeclarations(session)
 		}
 	}
 	if _, hasOutput := root["output"]; hasOutput {
 		restoreOutput(root["output"])
+		restoreDeclarations(root)
 	}
 	if choices, ok := root["choices"].([]any); ok {
 		for _, rawChoice := range choices {

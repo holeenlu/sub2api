@@ -774,3 +774,50 @@ func (s *OpenAIGatewayService) EstimateInflightReservation(ctx context.Context, 
 	}
 	return s.inflightEstimateDeps().estimate(ctx, apiKey, req)
 }
+
+// ValidateUsagePricing checks price existence independently from reservation size.
+// An explicit zero price is valid; an unresolved model must not consume paid upstream capacity.
+func (s *GatewayService) ValidateUsagePricing(ctx context.Context, key *APIKey, req InflightEstimateRequest) error {
+	if s == nil {
+		return nil
+	}
+	return s.inflightEstimateDeps().validateUsagePricing(ctx, key, req)
+}
+func (s *OpenAIGatewayService) ValidateUsagePricing(ctx context.Context, key *APIKey, req InflightEstimateRequest) error {
+	if s == nil {
+		return nil
+	}
+	return s.inflightEstimateDeps().validateUsagePricing(ctx, key, req)
+}
+func (d inflightEstimateDeps) validateUsagePricing(ctx context.Context, key *APIKey, req InflightEstimateRequest) error {
+	if d.billing == nil || key == nil || req.Model == "" || req.Kind != InflightEstimateToken {
+		return nil
+	}
+	if d.cfg != nil && d.cfg.RunMode == config.RunModeSimple {
+		return nil
+	}
+	known := func(model string) bool {
+		if d.resolver != nil {
+			resolved := d.resolver.Resolve(ctx, PricingInput{Model: model, GroupID: key.GroupID, Group: key.Group})
+			if resolved != nil && (resolved.BasePricing != nil || resolved.Source == PricingSourceGroup || resolved.Source == PricingSourceChannel) {
+				return true
+			}
+		}
+		price, err := d.billing.GetModelPricing(model)
+		return err == nil && price != nil
+	}
+	primary, fallbacks, upstream := inflightBillingModelCandidates(ctx, d, key, req.Model)
+	for _, model := range append(primary, fallbacks...) {
+		if known(model) {
+			return nil
+		}
+	}
+	if d.accountMappedModels != nil {
+		for _, model := range d.accountMappedModels(ctx, key, upstream) {
+			if known(model) {
+				return nil
+			}
+		}
+	}
+	return ErrModelPricingUnavailable
+}

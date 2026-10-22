@@ -189,6 +189,11 @@ export default {
       batchQualityDone: '批量质量检测完成，共检测 {count} 个；优质 {healthy} 个，告警 {warn} 个，挑战 {challenge} 个，异常 {failed} 个',
       batchQualityFailed: '批量质量检测失败',
       batchQualityEmpty: '暂无可检测质量的代理',
+      qualityReachable: '目标可达',
+      qualityRateLimited: '目标服务限流',
+      qualityVerification: '目标要求验证',
+      qualityConnectionFailed: '目标连接失败',
+      qualitySummary: '通过 {passed} 项，告警 {warn} 项，失败 {failed} 项，挑战 {challenge} 项',
       qualityReportTitle: '代理质量检测报告',
       qualityGrade: '等级 {grade}',
       qualityExitIP: '出口 IP',
@@ -527,8 +532,6 @@ export default {
       allTypes: '全部类型',
       inputCost: '输入费用',
       outputCost: '输出费用',
-      longContext: '长上下文',
-      longContextPricingTooltip: '已应用长上下文计费。输入和输出费率取决于定价档位，并非统一倍率。',
       cacheCreationCost: '缓存创建费用',
       cacheReadCost: '缓存读取费用',
       inputTokens: '输入 Token',
@@ -556,6 +559,15 @@ export default {
       clickToViewBalance: '点击查看充值记录',
       failedToLoadUser: '加载用户信息失败',
       userDeletedBadge: '已删除',
+      keyRanking: {
+        subtitle: '按当前筛选与时间范围统计每把 API 密钥的 Token 用量',
+        rowHint: '点击查看该密钥的用量明细',
+        keyCount: '共 {count} 把密钥',
+        columns: {
+          key: '密钥',
+          user: '所属用户'
+        }
+      },
       tokenRanking: {
         subtitle: '按当前筛选与时间范围统计每个用户的 Token 用量',
         rowHint: '点击查看该用户的用量明细',

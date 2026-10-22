@@ -173,33 +173,33 @@ type UpdateProviderInstanceRequest struct {
 	AllowUserRefund *bool             `json:"allow_user_refund"`
 }
 type CreatePlanRequest struct {
-	GroupID       int64    `json:"group_id"`
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	Price         float64  `json:"price"`
-	OriginalPrice *float64 `json:"original_price"`
-	Currency      string   `json:"currency"`
-	ValidityDays  int      `json:"validity_days"`
-	ValidityUnit  string   `json:"validity_unit"`
-	Features      string   `json:"features"`
-	ProductName   string   `json:"product_name"`
-	ForSale       bool     `json:"for_sale"`
-	SortOrder     int      `json:"sort_order"`
+	GroupID       int64    `json:"group_id" authz:"billing.rates.update"`
+	Name          string   `json:"name" authz:"base"`
+	Description   string   `json:"description" authz:"base"`
+	Price         float64  `json:"price" authz:"billing.rates.update"`
+	OriginalPrice *float64 `json:"original_price" authz:"billing.rates.update"`
+	Currency      string   `json:"currency" authz:"billing.rates.update"`
+	ValidityDays  int      `json:"validity_days" authz:"billing.rates.update"`
+	ValidityUnit  string   `json:"validity_unit" authz:"billing.rates.update"`
+	Features      string   `json:"features" authz:"base"`
+	ProductName   string   `json:"product_name" authz:"base"`
+	ForSale       bool     `json:"for_sale" authz:"base"`
+	SortOrder     int      `json:"sort_order" authz:"base"`
 }
 
 type UpdatePlanRequest struct {
-	GroupID       *int64   `json:"group_id"`
-	Name          *string  `json:"name"`
-	Description   *string  `json:"description"`
-	Price         *float64 `json:"price"`
-	OriginalPrice *float64 `json:"original_price"`
-	Currency      *string  `json:"currency"`
-	ValidityDays  *int     `json:"validity_days"`
-	ValidityUnit  *string  `json:"validity_unit"`
-	Features      *string  `json:"features"`
-	ProductName   *string  `json:"product_name"`
-	ForSale       *bool    `json:"for_sale"`
-	SortOrder     *int     `json:"sort_order"`
+	GroupID       *int64   `json:"group_id" authz:"billing.rates.update"`
+	Name          *string  `json:"name" authz:"base"`
+	Description   *string  `json:"description" authz:"base"`
+	Price         *float64 `json:"price" authz:"billing.rates.update"`
+	OriginalPrice *float64 `json:"original_price" authz:"billing.rates.update"`
+	Currency      *string  `json:"currency" authz:"billing.rates.update"`
+	ValidityDays  *int     `json:"validity_days" authz:"billing.rates.update"`
+	ValidityUnit  *string  `json:"validity_unit" authz:"billing.rates.update"`
+	Features      *string  `json:"features" authz:"base"`
+	ProductName   *string  `json:"product_name" authz:"base"`
+	ForSale       *bool    `json:"for_sale" authz:"base"`
+	SortOrder     *int     `json:"sort_order" authz:"base"`
 }
 
 // PaymentConfigService manages payment configuration and CRUD for
@@ -542,80 +542,4 @@ func pcParseInt(s string, defaultVal int) int {
 		return defaultVal
 	}
 	return v
-}
-
-func buildVisibleMethodSourceAvailability(instances []*dbent.PaymentProviderInstance) map[string]bool {
-	available := make(map[string]bool, 4)
-	for _, inst := range instances {
-		switch inst.ProviderKey {
-		case payment.TypeAlipay:
-			if inst.SupportedTypes == "" || payment.InstanceSupportsType(inst.SupportedTypes, payment.TypeAlipay) || payment.InstanceSupportsType(inst.SupportedTypes, payment.TypeAlipayDirect) {
-				available[VisibleMethodSourceOfficialAlipay] = true
-			}
-		case payment.TypeWxpay:
-			if inst.SupportedTypes == "" || payment.InstanceSupportsType(inst.SupportedTypes, payment.TypeWxpay) || payment.InstanceSupportsType(inst.SupportedTypes, payment.TypeWxpayDirect) {
-				available[VisibleMethodSourceOfficialWechat] = true
-			}
-		case payment.TypeEasyPay:
-			for _, supportedType := range splitTypes(inst.SupportedTypes) {
-				switch NormalizeVisibleMethod(supportedType) {
-				case payment.TypeAlipay:
-					available[VisibleMethodSourceEasyPayAlipay] = true
-				case payment.TypeWxpay:
-					available[VisibleMethodSourceEasyPayWechat] = true
-				}
-			}
-		}
-	}
-	return available
-}
-
-func applyVisibleMethodRoutingToEnabledTypes(base []string, vals map[string]string, available map[string]bool) []string {
-	shouldExpose := map[string]bool{
-		payment.TypeAlipay: visibleMethodShouldBeExposed(payment.TypeAlipay, vals, available),
-		payment.TypeWxpay:  visibleMethodShouldBeExposed(payment.TypeWxpay, vals, available),
-	}
-
-	seen := make(map[string]struct{}, len(base)+2)
-	out := make([]string, 0, len(base)+2)
-	appendType := func(paymentType string) {
-		paymentType = NormalizeVisibleMethod(paymentType)
-		if paymentType == "" {
-			return
-		}
-		if _, ok := seen[paymentType]; ok {
-			return
-		}
-		seen[paymentType] = struct{}{}
-		out = append(out, paymentType)
-	}
-
-	for _, paymentType := range base {
-		visibleMethod := NormalizeVisibleMethod(paymentType)
-		switch visibleMethod {
-		case payment.TypeAlipay, payment.TypeWxpay:
-			if shouldExpose[visibleMethod] {
-				appendType(visibleMethod)
-			}
-		default:
-			appendType(visibleMethod)
-		}
-	}
-
-	for _, visibleMethod := range []string{payment.TypeAlipay, payment.TypeWxpay} {
-		if shouldExpose[visibleMethod] {
-			appendType(visibleMethod)
-		}
-	}
-	return out
-}
-
-func visibleMethodShouldBeExposed(method string, vals map[string]string, available map[string]bool) bool {
-	enabledKey := visibleMethodEnabledSettingKey(method)
-	sourceKey := visibleMethodSourceSettingKey(method)
-	if enabledKey == "" || sourceKey == "" || vals[enabledKey] != "true" {
-		return false
-	}
-	source := NormalizeVisibleMethodSource(method, vals[sourceKey])
-	return source != "" && available[source]
 }

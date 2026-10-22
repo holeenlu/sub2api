@@ -46,7 +46,7 @@ func (s *AuthService) SendPendingOAuthVerifyCode(ctx context.Context, email stri
 		return nil, err
 	}
 
-	siteName := "Sub2API"
+	siteName := DefaultSiteName
 	if s.settingService != nil {
 		siteName = s.settingService.GetSiteName(ctx)
 	}
@@ -483,6 +483,9 @@ func (s *AuthService) ValidatePasswordCredentials(ctx context.Context, email, pa
 	}
 	if !s.CheckPassword(password, user.PasswordHash) {
 		return nil, ErrInvalidCredentials
+	}
+	if err := s.ValidateLoginIdentity(ctx, user); err != nil {
+		return nil, err
 	}
 	return user, nil
 }
