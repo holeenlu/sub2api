@@ -25,14 +25,14 @@ type opsCleanupTarget struct {
 }
 
 type opsCleanupDeletedCounts struct {
-	errorLogs      int64
-	ingressRejects int64
-	alertEvents    int64
-	systemLogs     int64
-	logAudits      int64
-	systemMetrics  int64
-	hourlyPreagg   int64
-	dailyPreagg    int64
+	errorLogs       int64
+	ingressRejects  int64
+	alertEvents     int64
+	systemLogs      int64
+	logAudits       int64
+	systemMetrics   int64
+	hourlyPreagg    int64
+	dailyPreagg     int64
 }
 
 func (c opsCleanupDeletedCounts) String() string {

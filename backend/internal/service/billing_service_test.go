@@ -1337,6 +1337,43 @@ func TestGetModelPricing_GrokCatalogFallbacks(t *testing.T) {
 	}
 }
 
+func TestFallbackClaudePricingPreservesCacheTTLs(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, nil)
+	for _, model := range []string{"claude-sonnet-4-6", "claude-opus-4-6", "anthropic/claude-sonnet-4-6", "claude-opus-4-8", "claude-sonnet-5-5"} {
+		t.Run(model, func(t *testing.T) {
+			price, err := svc.GetModelPricing(model)
+			require.NoError(t, err)
+			require.True(t, price.SupportsCacheBreakdown)
+			got, err := svc.CalculateCost(model, UsageTokens{CacheCreationTokens: 1000, CacheCreation5mTokens: 250, CacheCreation1hTokens: 750}, 1)
+			require.NoError(t, err)
+			want := 250*price.CacheCreationPricePerToken + 750*2*price.InputPricePerToken
+			require.InDelta(t, want, got.CacheCreationCost, 1e-12)
+		})
+	}
+}
+
+func TestCacheTTLBreakdownPreservesPriorityAndLongContext(t *testing.T) {
+	pricing := &ModelPricing{InputPricePerToken: 4e-6, InputPricePerTokenPriority: 8e-6,
+		CacheCreationPricePerToken: 5e-6, CacheCreationPricePerTokenPriority: 10e-6,
+		CacheCreation5mPrice: 5e-6, CacheCreation1hPrice: 8e-6, SupportsCacheBreakdown: true,
+		LongContextInputThreshold: 1, LongContextInputMultiplier: 3}
+	for _, long := range []bool{false, true} {
+		for _, details := range []bool{false, true} {
+			tokens := UsageTokens{InputTokens: 2, CacheCreationTokens: 1000}
+			want := 0.01 // 1000 writes at the explicit priority 5m rate.
+			if details {
+				tokens.CacheCreation5mTokens, tokens.CacheCreation1hTokens = 250, 750
+				want = 0.0145 // (250 * 5e-6 + 750 * 8e-6) * 2.
+			}
+			if long {
+				want *= 3
+			}
+			got := (&BillingService{}).computeTokenBreakdown(pricing, tokens, 1, "priority", long)
+			require.InDelta(t, want, got.CacheCreationCost, 1e-12)
+		}
+	}
+}
+
 func TestCalculateCost_SupportsCacheBreakdown(t *testing.T) {
 	svc := &BillingService{
 		cfg: &config.Config{},

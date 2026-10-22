@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -31,15 +31,21 @@ import (
 // （GLM effort 归一化、fast policy、Grok 分支、ClientDisconnect 语义等）仍留在
 // 调用方，属于有意保留的行为差异，不在此强行统一。
 
-// newUpstreamSSEScanner 构造读取上游 SSE 流的行扫描器，按配置放大单行上限。
-func (s *OpenAIGatewayService) newUpstreamSSEScanner(r io.Reader) *bufio.Scanner {
-	scanner := bufio.NewScanner(r)
+// newUpstreamSSEReadPump shares byte activity, complete-event framing and joined
+// shutdown across Responses, Chat Completions and compatibility conversion.
+func (s *OpenAIGatewayService) newUpstreamSSEReadPump(r io.ReadCloser) *openAISSEReadPump {
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		maxLineSize = s.cfg.Gateway.MaxLineSize
 	}
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
-	return scanner
+	return newOpenAISSEReadPump(r, maxLineSize)
+}
+
+func (s *OpenAIGatewayService) openAIStreamDataInterval() time.Duration {
+	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		return time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	return 0
 }
 
 // newStreamHeaderWriter 返回幂等的 SSE 响应头写入闭包：首次调用时透传过滤后的
@@ -201,9 +207,22 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	// passed back to the API"。在共用出站点补空格占位，真实明文不覆盖。
 	body = ensureDeepSeekChatReasoningPlaceholders(account, body)
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	var headerGuard *openAIFirstOutputHeaderGuard
+	if stream {
+		effort := gjson.GetBytes(body, "reasoning_effort").String()
+		deadline := openAITurnFirstOutputDeadline(ctx, s.openAIFirstOutputTimeout(effort), time.Now())
+		if !deadline.IsZero() {
+			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, deadline)
+		}
+	}
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(body))
-	releaseUpstreamCtx()
+	if headerGuard == nil {
+		releaseUpstreamCtx()
+	}
 	if err != nil {
+		if headerGuard != nil {
+			headerGuard.close()
+		}
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 	// 记录本次实际选择的协议端点，供错误日志和用量日志在没有
@@ -251,7 +270,24 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	resp, err := s.doOpenAIHTTPUpstream(c, upstreamReq, proxyURL, account)
+	if headerGuard != nil {
+		expired := headerGuard.stopHeaderWait()
+		if err != nil || resp == nil || resp.Body == nil || expired {
+			headerGuard.close()
+			if expired {
+				if resp != nil && resp.Body != nil {
+					_ = resp.Body.Close()
+				}
+				if streamClientDisconnected(c) {
+					return nil, context.Canceled
+				}
+				return nil, ErrOpenAIWSFirstOutputBudgetExhausted
+			}
+		} else {
+			resp.Body = &openAIRequestContextReadCloser{ReadCloser: resp.Body, cleanup: headerGuard.close}
+		}
+	}
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -266,7 +302,8 @@ type ccStreamScanState struct {
 	// FirstTokenMs 为首个实际输出 chunk（排除 usage-only chunk）的到达时延。
 	FirstTokenMs *int
 	// SawDone 表示上游发出了 [DONE] 哨兵。
-	SawDone bool
+	SawDone          bool
+	ClientDisconnect bool
 	// Err 为 scanner 读错误（客户端 context 取消不属于此类，会原样带出）。
 	// 非 nil 时调用方必须跳过 finalize 并返回 usage-incomplete 错误，避免
 	// 把上游截断伪装成正常收尾。
@@ -284,12 +321,40 @@ func (s *OpenAIGatewayService) scanCCStream(
 	requestID string,
 	startTime time.Time,
 	emit func(*apicompat.ChatCompletionsChunk),
-) ccStreamScanState {
-	var st ccStreamScanState
+) (st ccStreamScanState) {
+	finishWrites := GuardSSEWrites(c)
+	defer finishWrites()
+	drain := newOpenAIHTTPUsageDrain(c.Request.Context(), resp.Body.Close, streamWriteContext(c))
+	defer drain.stop()
+	defer func() {
+		st.ClientDisconnect = drain.disconnected() || streamClientDisconnected(c)
+		if st.ClientDisconnect && IsTurnBudgetError(st.Err) {
+			st.Err = context.Canceled
+		}
+	}()
+	var terminal openAIRawStreamTerminalState
+	eventType := ""
 
-	scanner := s.newUpstreamSSEScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
+	pump := s.newUpstreamSSEReadPump(resp.Body)
+	defer pump.Close()
+	if budget, _ := c.Request.Context().Value(openAITurnBudgetKey{}).(*OpenAITurnBudget); budget != nil {
+		// Preserve the already-resolved effort-specific budget; do not tighten high
+		// effort to the default here, where the original request is no longer present.
+		pump.firstOutputDeadline = openAITurnFirstOutputDeadline(c.Request.Context(), 0, startTime)
+	} else {
+		pump.firstOutputDeadline = startTime.Add(s.openAIFirstOutputTimeout(""))
+	}
+	pump.firstOutputCanceled = streamWriteContext(c).Done()
+	for pump.Next(context.Background(), s.openAIStreamDataInterval(), nil, nil) {
+		line := pump.Text()
+		if line == "" {
+			eventType = ""
+			continue
+		}
+		if typ, ok := extractOpenAISSEEventLine(line); ok {
+			eventType = strings.TrimSpace(typ)
+			continue
+		}
 		payload, ok := extractOpenAISSEDataLine(line)
 		if !ok {
 			continue
@@ -298,8 +363,20 @@ func (s *OpenAIGatewayService) scanCCStream(
 		if payload == "" {
 			continue
 		}
+		terminal.ObserveDataLine(payload)
+		if eventType == "error" {
+			terminal.fail()
+		}
+		if terminal.failure != nil {
+			if u := extractCCStreamUsage(payload); u != nil {
+				st.Usage = *u
+			}
+			st.Err = newOpenAIUpstreamStreamReadError(terminal.failure)
+			break
+		}
 		if payload == "[DONE]" {
 			st.SawDone = true
+			CompleteHTTPUpstreamResponse(resp)
 			break
 		}
 		// 观察上游 CC chunk 回显的 model / service_tier（计费以回显为准）。
@@ -321,14 +398,20 @@ func (s *OpenAIGatewayService) scanCCStream(
 			)
 			continue
 		}
-		if st.FirstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) && chatChunkStartsResponsesOutput(&chunk) {
-			ms := int(time.Since(startTime).Milliseconds())
-			st.FirstTokenMs = &ms
+		if chatStreamPayloadHasSemanticOutput(payload) {
+			if st.FirstTokenMs == nil {
+				ms := int(time.Since(startTime).Milliseconds())
+				st.FirstTokenMs = &ms
+			}
+			pump.firstOutputDeadline = time.Time{}
 		}
 		emit(&chunk)
+		if drain.disconnected() || streamClientDisconnected(c) {
+			pump.firstOutputDeadline = time.Time{}
+		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := pump.Err(); err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn(logPrefix+": stream read error",
 				zap.Error(err),
@@ -336,6 +419,15 @@ func (s *OpenAIGatewayService) scanCCStream(
 			)
 		}
 		st.Err = err
+		if errors.Is(err, errOpenAISSEFirstOutput) {
+			st.Err = ErrOpenAIWSFirstOutputBudgetExhausted
+		}
+	}
+	if st.Err == nil && !terminal.Terminated() {
+		st.Err = newOpenAIUpstreamStreamReadError(ErrOpenAIUpstreamStreamTruncated)
+	}
+	if st.Err == nil {
+		CompleteHTTPUpstreamResponse(resp)
 	}
 	return st
 }
