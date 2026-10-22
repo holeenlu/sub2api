@@ -1,16 +1,16 @@
-# Sub2API Docker Image
+# Tokensavy Docker Image
 
-Sub2API is an AI API Gateway Platform for distributing and managing AI product subscription API quotas.
+Tokensavy lets developers reach multiple AI models through one unified API.
 
 ## Quick Start
 
 ```bash
 docker run -d \
-  --name sub2api \
+  --name tokensavy \
   -p 8080:8080 \
-  -e DATABASE_URL="postgres://user:pass@host:5432/sub2api" \
+  -e DATABASE_URL="postgres://user:pass@host:5432/tokensavy" \
   -e REDIS_URL="redis://host:6379" \
-  weishaw/sub2api:latest
+  ghcr.io/holeenlu/tokensavy:latest
 ```
 
 ## Docker Compose
@@ -19,12 +19,12 @@ docker run -d \
 version: '3.8'
 
 services:
-  sub2api:
-    image: weishaw/sub2api:latest
+  tokensavy:
+    image: ghcr.io/holeenlu/tokensavy:latest
     ports:
       - "8080:8080"
     environment:
-      - DATABASE_URL=postgres://postgres:postgres@db:5432/sub2api?sslmode=disable
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/tokensavy?sslmode=disable
       - REDIS_URL=redis://redis:6379
     depends_on:
       - db
@@ -35,7 +35,7 @@ services:
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=sub2api
+      - POSTGRES_DB=tokensavy
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -51,7 +51,7 @@ volumes:
 
 ## Startup and Database Recovery
 
-Sub2API runs database migrations while starting. PostgreSQL may still be
+Tokensavy runs database migrations while starting. PostgreSQL may still be
 recovering briefly after a host or Docker daemon restart. The application
 retries transient PostgreSQL startup and connection errors with bounded
 exponential backoff, then continues startup when the database is ready.
@@ -84,7 +84,9 @@ Docker restores existing containers after a host restart.
 - `x.y` - Latest patch of minor version
 - `x` - Latest minor of major version
 
+The Compose files under `deploy/` read the image from `TOKENSAVY_IMAGE` (default `ghcr.io/holeenlu/tokensavy:latest`), so pin a tag or digest there instead of editing the Compose file.
+
 ## Links
 
-- [GitHub Repository](https://github.com/weishaw/sub2api)
-- [Documentation](https://github.com/weishaw/sub2api#readme)
+- [Website](https://tokensavy.ai)
+- [Documentation](https://tokensavy.ai/docs)

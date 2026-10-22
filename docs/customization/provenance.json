@@ -1,0 +1,98 @@
+{
+  "date": "2026-10-22",
+  "upstream_repository": "Wei-Shaw/sub2api",
+  "upstream_ref": "refs/heads/main",
+  "upstream_commit": "21cc926933163e015d2b632be07055759c983541",
+  "input_commits": {
+    "main": "7c9a9a241f17549bc4f581f1786d206e9b482838",
+    "TapModels": "3b65c7564690931ba0e68857ab512fcb6b5c5b71",
+    "tokensavy": "5b5fb7447894c9fd1fed2f6b9fd9ea4902692129"
+  },
+  "input_trees": {
+    "main": "3dbf86e2582ee2993c9875c53f53c8aeb206a1ab",
+    "TapModels": "1b2811a5852c5450325b49124979fa5e53c3bc9b",
+    "tokensavy": "427d8a0b52ee89da872d5b5d2c19bc33d63eed9d"
+  },
+  "inventory": "final candidate compared to official, no rename detection; excludes docs/customization itself to avoid recursive hashes",
+  "history_rule": "one complete customization commit per brand, sole parent is upstream_commit",
+  "runtime_rule": "Initial consolidation preserved runtime trees. Later reconciliations and selective adaptations are explicitly recorded below; unrelated branding, migrations and assets remain unchanged.",
+  "selective_sync_2026_10_22": {
+    "previous_tips": {
+      "main": "754c5ebe14bc37a7c9ebe77d082219a60749ed49",
+      "TapModels": "83ea4539e79d1687cdc52d4ce344645f8a79fe11",
+      "tokensavy": "cb59670fdc3af2c250cba03ae794f9a801d33fc4"
+    },
+    "brand_integration_base": "754c5ebe14bc37a7c9ebe77d082219a60749ed49",
+    "ranxi_reviewed": "8b36fe7d647c28e8189147c6bfce52a41b6e26db",
+    "new_api_reviewed": "7d8b91268dab69d7150f345c448b5e250163146a",
+    "sub4api_observed": "254e7ec4932e65ab8830e7d10e66f184140041bd",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/selective-20261022/before.bundle",
+    "evidence": ".release/upstream-sync/selective-20261022/",
+    "decisions": [
+      "docs/bps/upstream-changes.md",
+      "docs/new-api-gateway-implementation-report-2026-10-13.md"
+    ],
+    "scope": "API-key quota isolation, TypeSafe URLs, SIWC session encryption, compress 1.18.7; no release/deployment/migration"
+  },
+  "prior_provenance": "docs/requirements/final-v0.2.17-2026-10-17/source-commits.json",
+  "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/single-customization-20261022/before.bundle",
+  "reconciliation_2026_10_22": {
+    "input_main": "c793b9e396df08ddc9b850453b9328a0729f99b1",
+    "source_base": "2bb31cdae2db444a2a26ecf25d68c11a6a71edbd",
+    "source_snapshot_tree": "2aa59a87a284c5af081ec697bfd4bab2b062f8f3",
+    "source_task": "合并上游并压缩部署提交",
+    "pending_files": 17,
+    "reviewed_old_worktrees": 6,
+    "historical_or_superseded_paths": 302,
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/reconcile-customization-20261022-k_oxvt2i",
+    "report": "docs/customization/reconciliation.md"
+  },
+  "http_sse_delivery_2026_10_22": {
+    "input_main": "75138832e55c05437625c65172518a9451d49751",
+    "input_brands": {
+      "main": "75138832e55c05437625c65172518a9451d49751",
+      "TapModels": "faa35fe3eac33c96366278a3f4e04fecce6e9a1c",
+      "tokensavy": "5b146f53ec94be392328a1bd79212628ba6387fd"
+    },
+    "implementation_base": "754c5ebe14bc37a7c9ebe77d082219a60749ed49",
+    "shared_merge_base": "75138832e55c05437625c65172518a9451d49751",
+    "implementation_files": 17,
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/sub2api-http-sse-delivery-20261022-elrdnwd4",
+    "scope": "HTTP/SSE terminal, disconnect, first-output budget, bounded staging and framing; preserve remote selective updates and brand overrides; exclude concurrent uncommitted work"
+  },
+  "setup_token_credentials_2026_10_22": {
+    "input_brands": {
+      "main": "966d4412471b97b2391e42de198240c3cac00cf3",
+      "TapModels": "e3bdda4773382d7d675b4b4c1d5fce84bc34c716",
+      "tokensavy": "e5885e51ee81167aacb52dd1fbf5fa17032f5c1f"
+    },
+    "implementation_base": "754c5ebe14bc37a7c9ebe77d082219a60749ed49",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/setup-token-20261022",
+    "scope": "Explicit refresh-token removal and actual API error display; identity verification unchanged; no release/deployment/migration"
+  },
+  "usage_cost_display_2026_10_22": {
+    "input_main": "7c140bf0df1b6b6f6fa74cea665c60f1272c0baa",
+    "input_brands": {
+      "main": "7c140bf0df1b6b6f6fa74cea665c60f1272c0baa",
+      "TapModels": "08c7d62eb9af0a2db3ad5cb36eccb5a94e2620b9",
+      "tokensavy": "79b16b959a0c2bd34662a44fd48b3eb22ea63b82"
+    },
+    "previous_official": "7da09cab4e875463baa79fc150adde700c5438df",
+    "upstream_commit": "21cc926933163e015d2b632be07055759c983541",
+    "official_change": "Docker Go 1.27.3 already present in all brands; three-way tree equal",
+    "shared_merge_base": "7c140bf0df1b6b6f6fa74cea665c60f1272c0baa",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/sub2api-cost-delivery-mbnkpity",
+    "scope": "Remove all cost cell text labels; keep amounts/detail and unknown amount placeholder; preserve backend and concurrent work"
+  },
+  "claude_authorization_2026_10_22": {
+    "input_brands": {
+      "main": "8bf8232ba0de43d0b6fd2fefeded8a496f173d99",
+      "TapModels": "afb48f25752f2035beb1dfc3ae2c3fa148c39842",
+      "tokensavy": "003e150d535592a4efb0bab5c5865fcf3972ed28"
+    },
+    "implementation_base": "7c140bf0df1b6b6f6fa74cea665c60f1272c0baa",
+    "shared_merge_base": "8bf8232ba0de43d0b6fd2fefeded8a496f173d99",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/claude-auth-methods-20261022",
+    "scope": "Shared Claude Auth/browser inference OAuth/direct Setup Token semantics, credential-only ownership claims, session-bound server identity handoff; preserve roles and branding; no release/deployment/migration"
+  }
+}

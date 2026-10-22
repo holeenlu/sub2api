@@ -13,8 +13,11 @@
 *.dylib
 backend/bin/
 backend/server
-backend/sub2api
+backend/tapmodels
 backend/main
+
+# Release binary produced by the local build/deploy kit
+/tapmodels
 
 # Go 测试二进制
 *.test
@@ -25,6 +28,8 @@ coverage.html
 
 # 依赖（使用 go mod）
 vendor/
+!backend/ent/vendor/
+!backend/ent/vendor/*.go
 
 # Go 编译缓存
 backend/.gocache/
@@ -124,15 +129,67 @@ CLAUDE.md
 scripts
 !backend/scripts/
 !backend/scripts/resolve-version.sh
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-flare/scripts/
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-flare/scripts/generate.py
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-sunburst/scripts/
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-sunburst/scripts/generate.py
 .code-review-state
 #openspec/
 code-reviews/
 AGENTS.md
+!/AGENTS.md
 backend/cmd/server/server
 deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
 docs/*
+!docs/new-api-account-pool-scheduling-review-2026-10-17.md
+!docs/CLAUDE_REQUEST_FINGERPRINT.md
+!docs/CODEX_RESPONSES_TRANSPORT_OPTIMIZATION.md
+!docs/TEST_DATA_AND_ENVIRONMENT_SIMULATION.md
+!docs/vendor-console/
+docs/vendor-console/*
+!docs/vendor-console/README.md
+!docs/vendor-console/PORTAL-ROUTING.md
+!docs/vendor-console/RESEARCH.md
+!docs/vendor-console/DESIGN.md
+!docs/vendor-console/IMPLEMENTATION.md
+!docs/vendor-console/API-ROUTES.md
+!docs/vendor-console/IMPLEMENTATION-STATUS.md
+!docs/vendor-console/UI-ACCEPTANCE.md
+!docs/vendor-console/TEST-REPORT-2026-10-18.md
+!docs/vendor-console/REQUIREMENTS-REVIEW.md
+!docs/vendor-console/prototype.html
+!docs/vendor-console/prototype.css
+!docs/vendor-console/prototype.js
+!docs/vendor-console/prototype-admin.js
+!docs/vendor-console/prototype-proxies.js
+!docs/vendor-console/HIERARCHY-DESIGN.md
+!docs/vendor-console/prototype-hierarchy.js
+!docs/vendor-console/prototype-hierarchy-model.js
+!docs/vendor-console/prototype-translations.js
+!docs/vendor-console/generate-prototype-locales.cjs
+!docs/vendor-console/tests/
+!docs/vendor-console/tests/hierarchy-model.test.cjs
+!docs/bps/
+docs/bps/*
+!docs/bps/REQUIREMENTS.md
+!docs/bps/source-inventory.json
+!docs/bps/upstream-changes.md
+!docs/bps/integration-state.json
+!docs/bps/VALIDATION.md
+!docs/bps/DUAL_PATH_REVIEW.md
+!docs/bps/FULL_PATH_REVIEW_2026-10-19.md
+!docs/CHANGE_DELIVERY.md
+!docs/GROUP_MODEL_CANDIDATES.md
+!docs/MODEL_CATALOG_INCIDENT_2026-10-01.md
+!docs/FORK_FEATURE_RETIREMENT.md
+!docs/RANXI2001_TICKET_INTEGRATION.md
+!tools/tests/
+!tools/tests/test_change_delivery.py
+tools/__pycache__/
+tools/tests/__pycache__/
+!docs/ANTIGRAVITY_ATTRIBUTION_429.md
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
@@ -141,6 +198,14 @@ docs/*
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
+!docs/KEYS_PAGE_AND_BRANDING_PLAN.md
+!docs/CODEX_MODEL_CATALOG_REFRESH.md
+!docs/PRIVATE_REPOSITORY_SYNC.md
+!docs/I18N_COMPLETENESS_AUDIT.md
+!docs/CUSTOMIZATION_REVIEW_2026-09-08.md
+!docs/PROJECT_CUSTOMIZATION_WORKFLOW.md
+# TapModels fork 自己的 CI／發版說明
+!docs/tapmodels-ci.md
 !docs/codex-credits.md
 !docs/legal/
 !docs/legal/*.md
@@ -161,3 +226,38 @@ issues/
 .vite/
 # 本地闭源插件开发目录及构建产物不进入 Sub2API 仓库
 /plugins/
+
+# convert-go.mjs 的「已轉換」標記；只該出現在建置用的副本樹，不進版控
+.zh-tw-converted
+
+!docs/AI_COORDINATION_BASELINE.md
+!docs/TAPMODELS_DOCS_ACCEPTANCE.md
+# Python release/update tooling bytecode
+__pycache__/
+
+# Tokensavy generated deployment secrets and local binaries
+deploy/tokensavy/credentials.txt
+/backend/tokensavy
+/tokensavy
+
+!docs/BPS_REMOVAL.md
+
+# Read-only review for the independently integrated BPS adapter
+!/scripts/
+/scripts/*
+!/scripts/bps/
+/scripts/bps/*
+!/scripts/bps/upstream-review.py
+
+# Standalone account device export documentation
+!docs/ACCOUNT_TELEMETRY_DEVICE_EXPORT.md
+
+!docs/vendor-console/UNIFIED-PLATFORM-PLAN.md
+!docs/vendor-console/UNIFIED-PLATFORM-ACCEPTANCE.md
+!docs/vendor-console/OPENAI-BPS-AUTH-DESIGN.md
+!docs/vendor-console/OPENAI-BPS-AUTH-ACCEPTANCE.md
+!docs/CACHE_PROTOCOL_AUDIT_2026-10-19.md
+!docs/CODE_QUALITY_REVIEW_2026-10-19.md
+
+!docs/CODE_QUALITY_IMPLEMENTATION_2026-10-19.md
+!docs/WORKSPACE_REVIEW_2026-10-19.md

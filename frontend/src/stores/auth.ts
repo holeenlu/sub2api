@@ -4,7 +4,8 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed, readonly } from 'vue'
+import { ref, computed, readonly, watch } from 'vue'
+import { useSubscriptionStore } from './subscriptions'
 import { authAPI, isTotp2FARequired, passkeyAPI, type LoginResponse } from '@/api'
 import type {
   User,
@@ -86,6 +87,8 @@ export const useAuthStore = defineStore('auth', () => {
   let refreshIntervalId: ReturnType<typeof setInterval> | null = null
   let tokenRefreshTimeoutId: ReturnType<typeof setTimeout> | null = null
 
+  watch(() => `${user.value?.id}:${user.value?.role}:${user.value?.policy_version}`, () => { useSubscriptionStore().clear() }, { flush:'sync' })
+
   // ==================== Computed ====================
 
   const isAuthenticated = computed(() => {
@@ -93,7 +96,31 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   const isAdmin = computed(() => {
-    return user.value?.role === 'admin'
+    return user.value?.role === 'admin' || user.value?.role === 'super_admin'
+  })
+
+  const isSuperAdmin = computed(() => user.value?.role === 'super_admin')
+  function can(permission: string): boolean {
+    return isSuperAdmin.value || (user.value?.role === 'admin' && (user.value.permissions || []).includes(permission))
+  }
+  function canEditAdminField(schema: string, field: string): boolean {
+    return isSuperAdmin.value || (user.value?.role === 'admin' && (user.value.admin_write_fields?.[schema] || []).includes(field))
+  }
+  function editableAdminFields<T extends object>(schema: string, payload: T): T {
+    if (isSuperAdmin.value) return payload
+    return Object.fromEntries(Object.entries(payload).filter(([field]) => canEditAdminField(schema, field))) as T
+  }
+  function canAccessAdminPage(path: string): boolean {
+    if (!isAdmin.value) return false
+    if (isSuperAdmin.value) return true
+    const normalized = path.split('?')[0].replace(/\/$/, '')
+    if (normalized === '/admin/ops' && user.value?.admin_features?.ops_monitoring_enabled === false) return false
+    return (user.value?.admin_pages || []).some(page => normalized === page)
+  }
+  const adminLandingPath = computed(() => {
+    if (!isAdmin.value) return '/dashboard'
+    if (canAccessAdminPage('/admin/dashboard')) return '/admin/dashboard'
+    return user.value?.admin_pages?.find(page => canAccessAdminPage(page)) || '/dashboard'
   })
 
   const isSimpleMode = computed(() => runMode.value === 'simple')
@@ -438,7 +465,9 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     try {
+      const requestToken = token.value
       const response = await authAPI.getCurrentUser()
+      if (requestToken !== token.value) throw new Error("Authentication changed")
       if (response.data.run_mode) {
         runMode.value = response.data.run_mode
       }
@@ -498,6 +527,12 @@ export const useAuthStore = defineStore('auth', () => {
     // Computed
     isAuthenticated,
     isAdmin,
+    isSuperAdmin,
+    can,
+    canAccessAdminPage,
+    canEditAdminField,
+    editableAdminFields,
+    adminLandingPath,
     isSimpleMode,
     hasPendingAuthSession,
 
