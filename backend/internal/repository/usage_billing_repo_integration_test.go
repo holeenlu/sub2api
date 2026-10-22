@@ -658,3 +658,26 @@ func TestUsageBillingRepositoryApply_DeduplicatesAgainstArchivedKey(t *testing.T
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT balance FROM users WHERE id = $1", user.ID).Scan(&balance))
 	require.InDelta(t, 98.75, balance, 0.000001)
 }
+
+func TestUsageBillingRepositoryActualCostMatchesNumericDebit(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	user := mustCreateUser(t, client, &service.User{Balance: 100})
+	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: uuid.NewString(), Name: "precision-review", Quota: 100})
+	account := mustCreateAccount(t, client, &service.Account{Name: uuid.NewString()})
+	id := uuid.NewString()
+	cost := 0.000078125
+	log := &service.UsageLog{RequestID: id, UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, Model: "precision-review", CreatedAt: time.Now(), TotalCost: cost, ActualCost: cost, BillingStatus: "settled"}
+	cmd := &service.UsageBillingCommand{RequestID: id, UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, BalanceCost: cost, APIKeyQuotaCost: cost, UsageLog: log}
+	repo := &usageBillingRepository{db: integrationDB}
+	result, err := repo.Apply(ctx, cmd)
+	require.NoError(t, err)
+	require.True(t, result.Applied)
+	var debit, quota, recorded string
+	var debitMatchesQuota, debitMatchesLog bool
+	query := "SELECT (100-u.balance)::text, k.quota_used::text, l.actual_cost::text, (100-u.balance)=k.quota_used, (100-u.balance)=l.actual_cost FROM users u JOIN api_keys k ON k.user_id=u.id JOIN usage_logs l ON l.api_key_id=k.id WHERE u.id=$1 AND k.id=$2 AND l.request_id=$3"
+	require.NoError(t, integrationDB.QueryRowContext(ctx, query, user.ID, key.ID, id).Scan(&debit, &quota, &recorded, &debitMatchesQuota, &debitMatchesLog))
+	t.Logf("SQL numeric values: balance_debit=%s key_quota=%s usage_actual_cost=%s", debit, quota, recorded)
+	require.True(t, debitMatchesQuota, "existing command quantization must keep balance and key quota consistent")
+	require.True(t, debitMatchesLog, "usage actual_cost must equal the amount actually debited, without float comparison tolerances")
+}

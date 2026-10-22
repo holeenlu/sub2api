@@ -110,6 +110,10 @@
                 <p class="text-xl font-bold text-gray-900 dark:text-white">
                   {{ formatTokens(stats.today_tokens) }}
                 </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('dashboard.cache') }}: {{ formatTokens(stats.today_cache_creation_tokens + stats.today_cache_read_tokens) }}
+                </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400" :title="t('usage.cacheHitRateHint')">{{ t('usage.cacheHitRate') }}: <span data-testid="today-cache-share">{{ formatCacheHitRate(getCacheHitRate(stats.today_input_tokens, stats.today_cache_read_tokens, stats.today_cache_creation_tokens)) }}</span></p>
                 <p class="text-xs">
                   <span
                     class="text-green-600 dark:text-green-400"
@@ -146,6 +150,10 @@
                 <p class="text-xl font-bold text-gray-900 dark:text-white">
                   {{ formatTokens(stats.total_tokens) }}
                 </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('dashboard.cache') }}: {{ formatTokens(stats.total_cache_creation_tokens + stats.total_cache_read_tokens) }}
+                </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400" :title="t('usage.cacheHitRateHint')">{{ t('usage.cacheHitRate') }}: <span data-testid="total-cache-share">{{ formatCacheHitRate(getCacheHitRate(stats.total_input_tokens, stats.total_cache_read_tokens, stats.total_cache_creation_tokens)) }}</span></p>
                 <p class="text-xs">
                   <span
                     class="text-green-600 dark:text-green-400"
@@ -206,7 +214,7 @@
                   {{ t('admin.dashboard.avgResponse') }}
                 </p>
                 <p class="text-xl font-bold text-gray-900 dark:text-white">
-                  {{ formatDuration(stats.average_duration_ms) }}
+                  <span :title="t('usage.aggregateDurationHint')">{{ formatDuration(stats.average_duration_ms) }}</span>
                 </p>
                 <p class="text-xs text-gray-500 dark:text-gray-400">
                   {{ stats.active_users }} {{ t('admin.dashboard.activeUsers') }}
@@ -352,6 +360,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { formatCacheHitRate, getCacheHitRate } from '@/utils/usageMetrics'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
