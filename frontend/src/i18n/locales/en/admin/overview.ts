@@ -1,4 +1,78 @@
 export default {
+  rolePermissions: {
+"denied": "Your role does not allow this action. Available permissions have been refreshed.",
+"createdBy": "Created by",
+"lastLogin": "Last sign-in",
+"stepUpDisabled": "Site step-up is disabled: marked business actions do not require verification. Creating or promoting super administrators still requires it.",
+"affected": "This policy applies to {count} administrators and all future administrators.",
+"added": "Added permissions",
+"removed": "Removed permissions",
+"noChanges": "None",
+"levels": {"off": "Off", "read": "Read only", "manage": "Manage"},
+"categories": {"personnel": "People", "resources": "Service resources", "finance": "Business and finance", "operations": "Content and operations", "settings": "Site settings"},
+"preUpgrade": "Before role upgrade",
+"sharedPolicy": "This account uses the shared administrator policy. Later changes apply to all administrators.",
+  "resetTotp": "Reset TOTP authenticator",
+  "resetTotpHint": "Requires verification. This account will be signed out and its old authenticator removed.",
+  "reason": "Reason for change",
+  "recovery": "The role policy is missing or invalid. Save to restore the selected grants without interrupting personal sign-in.",
+  "title": "Administrator role permissions",
+  "description": "All administrators share this policy. Super administrators retain full access and protected operations.",
+  "selectAll": "Select all delegable permissions",
+  "clear": "Clear selection",
+  "version": "Policy version {version}",
+  "sensitive": "Additional verification",
+  "sessionNotice": "Saved permissions apply to every administrator immediately. Sign-in sessions stay active.",
+  "saved": "Administrator role permissions saved.",
+  "loadFailed": "Unable to load role permissions.",
+  "saveFailed": "Unable to save role permissions.",
+  "conflict": "The policy changed. Refresh and review before saving again.",
+  "generalSettings": "Site information",
+  "contentSettings": "Agreements and templates",
+  "modules": {
+"staff": "Administrator membership",
+    "dashboard": "Dashboard",
+    "users": "Users",
+    "api_keys": "API keys",
+    "groups": "Groups",
+    "channels": "Channels",
+    "channel_monitor": "Channel monitoring",
+    "accounts": "Upstream accounts",
+    "proxies": "IP / proxies",
+    "usage": "Usage",
+    "subscriptions": "Subscriptions",
+    "orders": "Orders",
+    "plans": "Plans",
+    "redeem_codes": "Redeem codes",
+    "promo_codes": "Promo codes",
+    "affiliates": "Affiliates",
+    "announcements": "Announcements",
+    "ops": "Operations",
+    "risk": "Risk control",
+    "prompt_audit": "Prompt audit",
+    "audit": "Operation logs",
+    "settings_general": "Site settings",
+    "settings_content": "Agreements and templates",
+    "billing": "Billing"
+  },
+  "actions": {
+    "read": "Read",
+    "manage": "Manage",
+    "create": "Create",
+    "update": "Edit",
+    "delete": "Delete",
+    "security": "Manage sign-in security",
+    "authorize": "Authorize / replace credentials",
+    "diagnostics": "Run diagnostics",
+    "export": "Export",
+    "cost_read": "Read upstream cost",
+    "balance_adjust": "Adjust balance",
+    "rates_update": "Edit prices",
+    "refund": "Refund",
+    "adjust": "Adjust credits",
+    "content_read": "Read full content"
+  }
+},
     // Dashboard
     dashboard: {
       title: 'Admin Dashboard',
@@ -219,7 +293,7 @@ export default {
         step1: {
           title: 'Create an R2 Bucket',
           line1: 'Log in to the Cloudflare Dashboard (dash.cloudflare.com), select "R2 Object Storage" from the sidebar',
-          line2: 'Click "Create bucket", enter a name (e.g. sub2api-backups), choose a region',
+          line2: 'Click "Create bucket", enter a name (e.g. kdan-backups), choose a region',
           line3: 'Click create to finish'
         },
         step2: {
@@ -243,181 +317,6 @@ export default {
           unchecked: 'Unchecked'
         },
         freeTier: 'R2 Free Tier: 10GB storage + 1M Class A requests + 10M Class B requests per month — more than enough for database backups.'
-      }
-    },
-
-    dataManagement: {
-      title: 'Data Management',
-      description: 'Manage data management agent status, object storage settings, and backup jobs in one place',
-      agent: {
-        title: 'Data Management Agent Status',
-        description: 'The system probes a fixed Unix socket and enables data management only when reachable.',
-        enabled: 'Data management agent is ready. Data management operations are available.',
-        disabled: 'Data management agent is unavailable. Only diagnostic information is available now.',
-        socketPath: 'Socket Path',
-        version: 'Version',
-        status: 'Status',
-        uptime: 'Uptime',
-        reasonLabel: 'Unavailable Reason',
-        reason: {
-          DATA_MANAGEMENT_AGENT_SOCKET_MISSING: 'Data management socket file is missing',
-          DATA_MANAGEMENT_AGENT_UNAVAILABLE: 'Data management agent is unreachable',
-          BACKUP_AGENT_SOCKET_MISSING: 'Backup socket file is missing',
-          BACKUP_AGENT_UNAVAILABLE: 'Backup agent is unreachable',
-          UNKNOWN: 'Unknown reason'
-        }
-      },
-      sections: {
-        config: {
-          title: 'Backup Configuration',
-          description: 'Configure backup source, retention policy, and S3 settings.'
-        },
-        s3: {
-          title: 'S3 Object Storage',
-          description: 'Configure and test uploads of backup artifacts to a standard S3-compatible storage.'
-        },
-        backup: {
-          title: 'Backup Operations',
-          description: 'Trigger PostgreSQL, Redis, and full backup jobs.'
-        },
-        history: {
-          title: 'Backup History',
-          description: 'Review backup job status, errors, and artifact metadata.'
-        }
-      },
-      form: {
-        sourceMode: 'Source Mode',
-        backupRoot: 'Backup Root',
-        activePostgresProfile: 'Active PostgreSQL Profile',
-        activeRedisProfile: 'Active Redis Profile',
-        activeS3Profile: 'Active S3 Profile',
-        retentionDays: 'Retention Days',
-        keepLast: 'Keep Last Jobs',
-        uploadToS3: 'Upload to S3',
-        useActivePostgresProfile: 'Use Active PostgreSQL Profile',
-        useActiveRedisProfile: 'Use Active Redis Profile',
-        useActiveS3Profile: 'Use Active Profile',
-        idempotencyKey: 'Idempotency Key (Optional)',
-        secretConfigured: 'Configured already, leave empty to keep unchanged',
-        source: {
-          profileID: 'Profile ID (Unique)',
-          profileName: 'Profile Name',
-          setActive: 'Set as active after creation'
-        },
-        postgres: {
-          title: 'PostgreSQL',
-          host: 'Host',
-          port: 'Port',
-          user: 'User',
-          password: 'Password',
-          database: 'Database',
-          sslMode: 'SSL Mode',
-          containerName: 'Container Name (docker_exec mode)'
-        },
-        redis: {
-          title: 'Redis',
-          addr: 'Address (host:port)',
-          username: 'Username',
-          password: 'Password',
-          db: 'Database Index',
-          containerName: 'Container Name (docker_exec mode)'
-        },
-        s3: {
-          enabled: 'Enable S3 Upload',
-          profileID: 'Profile ID (Unique)',
-          profileName: 'Profile Name',
-          endpoint: 'Endpoint (Optional)',
-          region: 'Region',
-          bucket: 'Bucket',
-          accessKeyID: 'Access Key ID',
-          secretAccessKey: 'Secret Access Key',
-          prefix: 'Object Prefix',
-          forcePathStyle: 'Force Path Style',
-          useSSL: 'Use SSL',
-          setActive: 'Set as active after creation'
-        }
-      },
-      sourceProfiles: {
-        createTitle: 'Create Source Profile',
-        editTitle: 'Edit Source Profile',
-        empty: 'No source profiles yet, create one first',
-        deleteConfirm: 'Delete source profile {profileID}?',
-        columns: {
-          profile: 'Profile',
-          active: 'Active',
-          connection: 'Connection',
-          database: 'Database',
-          updatedAt: 'Updated At',
-          actions: 'Actions'
-        }
-      },
-      s3Profiles: {
-        createTitle: 'Create S3 Profile',
-        editTitle: 'Edit S3 Profile',
-        empty: 'No S3 profiles yet, create one first',
-        editHint: 'Click "Edit" to modify profile details in the right drawer.',
-        deleteConfirm: 'Delete S3 profile {profileID}?',
-        columns: {
-          profile: 'Profile',
-          active: 'Active',
-          storage: 'Storage',
-          updatedAt: 'Updated At',
-          actions: 'Actions'
-        }
-      },
-      history: {
-        total: '{count} jobs',
-        empty: 'No backup jobs yet',
-        columns: {
-          jobID: 'Job ID',
-          type: 'Type',
-          status: 'Status',
-          triggeredBy: 'Triggered By',
-          pgProfile: 'PostgreSQL Profile',
-          redisProfile: 'Redis Profile',
-          s3Profile: 'S3 Profile',
-          finishedAt: 'Finished At',
-          artifact: 'Artifact',
-          error: 'Error'
-        },
-        status: {
-          queued: 'Queued',
-          running: 'Running',
-          succeeded: 'Succeeded',
-          failed: 'Failed',
-          partial_succeeded: 'Partial Succeeded'
-        }
-      },
-      actions: {
-        refresh: 'Refresh Status',
-        disabledHint: 'Start datamanagementd first and ensure the socket is reachable.',
-        reloadConfig: 'Reload Config',
-        reloadSourceProfiles: 'Reload Source Profiles',
-        reloadProfiles: 'Reload Profiles',
-        newSourceProfile: 'New Source Profile',
-        saveConfig: 'Save Config',
-        configSaved: 'Configuration saved',
-        testS3: 'Test S3 Connection',
-        s3TestOK: 'S3 connection test succeeded',
-        s3TestFailed: 'S3 connection test failed',
-        newProfile: 'New Profile',
-        saveProfile: 'Save Profile',
-        activateProfile: 'Activate',
-        profileIDRequired: 'Profile ID is required',
-        profileNameRequired: 'Profile name is required',
-        profileSelectRequired: 'Select a profile to edit first',
-        profileCreated: 'S3 profile created',
-        profileSaved: 'S3 profile saved',
-        profileActivated: 'S3 profile activated',
-        profileDeleted: 'S3 profile deleted',
-        sourceProfileCreated: 'Source profile created',
-        sourceProfileSaved: 'Source profile saved',
-        sourceProfileActivated: 'Source profile activated',
-        sourceProfileDeleted: 'Source profile deleted',
-        createBackup: 'Create Backup Job',
-        jobCreated: 'Backup job created: {jobID} ({status})',
-        refreshJobs: 'Refresh Jobs',
-        loadMore: 'Load More'
       }
     },
 
@@ -576,6 +475,7 @@ export default {
         passwordLabel: 'Password',
         passwordPlaceholder: 'Enter password (leave empty to keep unchanged)',
         roleLabel: 'Role',
+        vendorRoleHint: 'Create supplier identities in Supplier Management; existing supplier tiers cannot be changed here.',
         selectRole: 'Select role',
         balanceLabel: 'Balance',
         concurrencyLabel: 'Concurrency',
@@ -741,8 +641,11 @@ export default {
       createdAt: 'Created',
       totalRecharged: 'Total Recharged',
       roles: {
+        super_admin: "Super administrator",
         admin: 'Admin',
-        user: 'User'
+        user: 'User',
+        vendor_level1: 'Level 1 supplier',
+        vendor_level2: 'Level 2 supplier'
       },
       // Settings Dropdowns
       filterSettings: 'Filter Settings',
@@ -1151,7 +1054,7 @@ export default {
       },
       modelAllowlist: {
         title: 'Model Allowlist',
-        hint: 'When enabled, models outside the allowlist are rejected with 404 model_not_found, and model listing endpoints only show allowlisted models. Entries support exact model IDs and * wildcards anywhere (e.g., gpt-*-codex). Note: Claude Code probes with haiku-family models for titles/summaries and /messages/count_tokens is also allowlist-controlled, so make sure the small models you need are selected too.',
+        hint: 'When enabled, models outside the allowlist are rejected with 404 model_not_found, and model listing endpoints only show allowlisted models. Entries support exact model IDs and * wildcards anywhere (e.g., gpt-*-codex). Note: Claude Code probes with haiku-family models for titles/summaries and /messages/count_tokens is also allowlist-controlled, so make sure the small models you need are selected too. Candidates come from the bundled model list and model mappings of schedulable accounts in this group. They load when opened, with no scheduled official catalog sync; new models can be added manually.',
         loading: 'Loading candidate models...',
         empty: 'No candidate models; add custom entries below',
         selectedSummary: 'Selected {selected} / {total}',
@@ -1263,9 +1166,9 @@ export default {
       openaiLive: {
         title: 'OpenAI Live',
         allow: 'Allow Live access',
-        hint: 'When enabled, API keys in this OpenAI group can create and control Live voice sessions. Disabled by default. The Sub2API server must run on Apple Silicon macOS with the official ChatGPT app installed; client platforms are unrestricted.',
+        hint: 'When enabled, API keys in this OpenAI group can create and control Live voice sessions. Disabled by default. The @:common.siteName server must run on Apple Silicon macOS with the official ChatGPT app installed; client platforms are unrestricted.',
         unsupportedTitle: 'Current server does not support Live',
-        unsupportedMessage: 'This Sub2API server cannot generate the required Live attestation. Live will not work even if enabled. Continue anyway?',
+        unsupportedMessage: 'This @:common.siteName server cannot generate the required Live attestation. Live will not work even if enabled. Continue anyway?',
         enableAnyway: 'Enable anyway'
       },
       openaiFast: {

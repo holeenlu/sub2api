@@ -11,7 +11,17 @@ export interface ReleaseInfo {
   html_url: string
 }
 
+export interface ContainerUpdateStatus {
+  status: 'idle' | 'running' | 'succeeded' | 'failed'
+  version?: string
+  message?: string
+}
+
 export interface VersionInfo {
+  update_method?: 'binary' | 'compose' | 'manual'
+  release_channel?: string
+  container_update?: ContainerUpdateStatus
+  build_commit?: string
   current_version: string
   latest_version: string
   has_update: boolean
@@ -19,13 +29,17 @@ export interface VersionInfo {
   cached: boolean
   warning?: string
   build_type: string // "source" for manual builds, "release" for CI builds
+  upstream_version?: string // upstream Sub2API version this build is based on, e.g. "v0.2.1"
+  disabled?: boolean // update.check_enabled is false: no remote lookup was performed
 }
 
 /**
  * Get current version
  */
-export async function getVersion(): Promise<{ version: string }> {
-  const { data } = await apiClient.get<{ version: string }>('/admin/system/version')
+export async function getVersion(): Promise<{ version: string; upstream_version?: string; build_commit?: string }> {
+  const { data } = await apiClient.get<{ version: string; upstream_version?: string; build_commit?: string }>(
+    '/admin/system/version'
+  )
   return data
 }
 

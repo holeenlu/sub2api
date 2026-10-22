@@ -71,9 +71,28 @@ describe('OpsErrorDetailModal', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('provider rate limit exhausted')
+    expect(wrapper.text()).not.toContain('All available accounts exhausted')
     expect(wrapper.text()).toContain('admin.ops.errorDetail.upstreamStatus')
     expect(wrapper.text()).toContain('429')
     expect(wrapper.findAll('pre')).toHaveLength(2)
     expect(wrapper.text()).not.toContain('admin.ops.errorDetail.payloads.upstream_detail')
   })
+  it('shows the final request status separately from a recovered upstream failure', async () => {
+    mocks.getRequestErrorDetail.mockResolvedValue({
+      id: 4712, status_code: 503, request_status_code: 200, upstream_status_code: 503,
+      message: 'Recovered upstream error 503: overloaded', upstream_error_message: 'overloaded',
+      platform: 'openai', model: 'gpt-6.1-sol', request_type: 2, error_body: '', upstream_errors: '[]'
+    })
+    const wrapper = shallowMount(OpsErrorDetailModal, {
+      props: { show: true, errorId: 4712, errorType: 'request' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, Icon: true } }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.ops.errorDetail.requestStatus')
+    expect(wrapper.text()).toContain('admin.ops.errorLog.recovered')
+    expect(wrapper.text()).toContain('200')
+    expect(wrapper.text()).toContain('503')
+    expect(wrapper.text()).toContain('Recovered upstream error 503: overloaded')
+  })
+
 })

@@ -267,6 +267,16 @@ func TestGroupHandlerSimpleModeAllReadAndWriteResponsesUseFieldAllowlist(t *test
 	}
 }
 
+func TestGroupHandlerSimpleModeAllowsBuiltinAccountModelCandidates(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := newSimpleModeGroupRouter(newStubAdminService())
+	res := httptest.NewRecorder()
+	r.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/groups/0/model-allowlist-candidates?platform=openai", nil))
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Contains(t, res.Body.String(), "gpt-5.5")
+	require.NotContains(t, res.Body.String(), "claude-sonnet-4-6")
+}
+
 func TestGroupHandlerSimpleModeBlocksAdvancedOperations(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
