@@ -30,7 +30,25 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	account *Account,
 	body []byte,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	defer func() {
+		if forwardResult != nil {
+			forwardResult.AuthorizationMode = nativeOpenAIUsageAuthorizationMode(account)
+		}
+	}()
+	// Chat Completions cannot resolve Responses server-side state. Check raw
+	// JSON before decoding into the narrower conversion DTO, which otherwise
+	// silently drops prompt/conversation/context_management (and the converter
+	// ignores previous_response_id even when a nonempty input is only a delta).
+	for _, field := range []string{"previous_response_id", "conversation", "prompt", "context_management"} {
+		value := gjson.GetBytes(body, field)
+		if !value.Exists() || value.Type == gjson.Null || (value.Type == gjson.String && strings.TrimSpace(value.String()) == "") || (value.IsArray() && len(value.Array()) == 0) {
+			continue
+		}
+		inputErr := &openAIResponsesInputError{Code: "unsupported_parameter", Param: field, Message: fmt.Sprintf("Chat Completions cannot resolve Responses %s; use a Responses-capable account or resend full input without this field.", field)}
+		writeOpenAIResponsesInputError(c, inputErr)
+		return nil, inputErr
+	}
 	var responsesReq apicompat.ResponsesRequest
 	if err := json.Unmarshal(body, &responsesReq); err != nil {
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -160,15 +178,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	if err != nil {
 		return nil, err
 	}
-	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
-	s.cacheReasoningItemsFromOutput(responsesResp.Output)
-
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	}
-	c.JSON(http.StatusOK, responsesResp)
-
-	return &OpenAIForwardResult{
+	result := &OpenAIForwardResult{
 		RequestID:                   requestID,
 		UpstreamHeaders:             resp.Header,
 		Usage:                       usage,
@@ -180,7 +190,32 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                      false,
 		Duration:                    time.Since(startTime),
-	}, nil
+	}
+	// Apply the same tool-kind rules as the streaming bridge before its
+	// buffered converter can omit malformed function calls.
+	validation := apicompat.NewChatCompletionsToResponsesStreamState(originalModel)
+	validation.CustomTools, validation.FunctionTools = customTools, functionTools
+	validation.ToolSearchDeclared, validation.NamespaceTools = toolSearch, namespaceTools
+	if len(ccResp.Choices) > 0 {
+		calls := append([]apicompat.ChatToolCall(nil), ccResp.Choices[0].Message.ToolCalls...)
+		for i := range calls {
+			idx := i
+			calls[i].Index = &idx
+		}
+		apicompat.ChatCompletionsChunkToResponsesEvents(&apicompat.ChatCompletionsChunk{Choices: []apicompat.ChatChunkChoice{{Delta: apicompat.ChatDelta{ToolCalls: calls}}}}, validation)
+	}
+	if err := validation.ValidateToolCallArguments(); err != nil {
+		return result, writeAPICompatConversionError(c, err, false)
+	}
+	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
+	s.cacheReasoningItemsFromOutput(responsesResp.Output)
+
+	if s.responseHeaderFilter != nil {
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	}
+	c.JSON(http.StatusOK, responsesResp)
+
+	return result, nil
 }
 
 func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
@@ -196,7 +231,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	reasoningEffort *string,
 	serviceTier *string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (out *OpenAIForwardResult, outErr error) {
+	finishWrites := GuardSSEWrites(c)
+	defer finishWrites()
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -206,6 +243,11 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	state.ToolSearchDeclared = toolSearch
 	state.NamespaceTools = namespaceTools
 	clientDisconnected := false
+	defer func() {
+		if out != nil {
+			out.ClientDisconnect = clientDisconnected || streamClientDisconnected(c)
+		}
+	}()
 
 	writeEvents := func(events []apicompat.ResponsesStreamEvent) {
 		if clientDisconnected || len(events) == 0 {
@@ -231,6 +273,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			}
 		}
 		c.Writer.Flush()
+		clientDisconnected = clientDisconnected || streamClientDisconnected(c)
 	}
 
 	scan := s.scanCCStream(c, resp, "openai responses chat fallback", requestID, startTime, func(chunk *apicompat.ChatCompletionsChunk) {
@@ -238,6 +281,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		s.cacheReasoningItemsFromEvents(events)
 		writeEvents(events)
 	})
+	clientDisconnected = clientDisconnected || scan.ClientDisconnect
 
 	if scan.Err != nil {
 		return &OpenAIForwardResult{
@@ -282,6 +326,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		}
 		if !clientDisconnected {
 			c.Writer.Flush()
+			clientDisconnected = clientDisconnected || streamClientDisconnected(c)
 		}
 	}
 	if !scan.SawDone {

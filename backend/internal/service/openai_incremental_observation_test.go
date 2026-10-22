@@ -1,0 +1,678 @@
+package service
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+)
+
+const incrementalUser = `{"type":"message","role":"user","content":"private-low-entropy-prompt"}`
+const incrementalOutput = `{"type":"message","id":"private-item-id","role":"assistant","status":"completed","content":[{"type":"output_text","text":"private-answer","annotations":[]}]}`
+const incrementalNext = `{"type":"message","role":"user","content":"next"}`
+
+func incrementalRequest(items string, extra ...string) []byte {
+	suffix := ""
+	if len(extra) > 0 {
+		suffix = "," + extra[0]
+	}
+	return []byte(`{"model":"gpt-5.5","input":[` + items + `]` + suffix + `}`)
+}
+func incrementalCompleted(items string) []byte {
+	return []byte(`{"type":"response.completed","response":{"id":"resp_p2","status":"completed","output":[` + items + `]}}`)
+}
+func incrementalFixture(t testing.TB) (*OpenAIGatewayService, *gin.Context, *Account, openAIIncrementalObservationOptions) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	c.Request.Header.Set("session_id", "explicit-private-session")
+	group := int64(9)
+	c.Set("api_key", &APIKey{ID: 7, UserID: 8, GroupID: &group})
+	account := &Account{ID: 10, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "private-owner"}}
+	scope, _ := resolveOpenAIWSExecutionScope(c, incrementalRequest(incrementalUser), 7)
+	require.NotEmpty(t, scope)
+	opts := openAIIncrementalObservationOptions{ExecutionScope: scope, WindowID: "window-1", Endpoint: "https://chatgpt.com/backend-api/codex/responses", CredentialGeneration: "private-bearer", SettingsIdentity: "proxy1-http-settings1"}
+	return &OpenAIGatewayService{}, c, account, opts
+}
+func incrementalSeed(t testing.TB, s *OpenAIGatewayService, c *gin.Context, a *Account, o openAIIncrementalObservationOptions, extra ...string) {
+	t.Helper()
+	txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser, extra...), o)
+	txn.ObserveEvent(incrementalCompleted(incrementalOutput))
+	r := txn.Finish(context.Background(), true, o.ConnID)
+	require.Equal(t, "completed", r.AnchorReason)
+}
+
+func TestOpenAIIncrementalPrefixAndStateAreSeparate(t *testing.T) {
+	for _, tc := range []struct {
+		name, conn, binding string
+		ready               bool
+		want                string
+	}{
+		{"http", "", "", false, "unknown"},
+		{"held same connection", "conn-1", "conn-1", true, "true"},
+		{"lost binding", "conn-1", "", true, "false"},
+		{"other connection", "conn-1", "conn-2", true, "false"},
+		{"unverified lease", "conn-1", "conn-1", false, "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, c, a, o := incrementalFixture(t)
+			o.ConnID = "conn-1"
+			incrementalSeed(t, s, c, a, o)
+			if tc.binding != "" {
+				s.getOpenAIWSStateStore().BindResponseConn("resp_p2", tc.binding, time.Minute)
+			}
+			o.ConnID, o.ConnectionReady = tc.conn, tc.ready
+			body := incrementalRequest(incrementalUser + "," + incrementalOutput + "," + incrementalNext)
+			before := string(body)
+			txn := s.beginOpenAIIncrementalObservation(c, a, body, o)
+			txn.ObserveEvent(incrementalCompleted(""))
+			report := txn.Finish(context.Background(), true, tc.conn)
+			require.True(t, report.Assessable)
+			require.Equal(t, "true", report.PrefixMatch)
+			require.Equal(t, tc.want, report.StateReady)
+			require.Equal(t, 2, report.CandidateItems)
+			require.Equal(t, int64(len(incrementalUser)+len(incrementalOutput)), report.CandidateSemanticBytes)
+			require.Equal(t, before, string(body), "observer must not mutate final send bytes")
+			require.Equal(t, report, txn.Finish(context.Background(), false, "other"), "finish is idempotent")
+			encoded, err := json.Marshal(report)
+			require.NoError(t, err)
+			require.NotContains(t, string(encoded), "private-")
+			require.NotContains(t, string(encoded), "resp_p2")
+			require.NotContains(t, string(encoded), "conn-1")
+		})
+	}
+}
+
+func TestOpenAIIncrementalFullHistoryIncludesOutputAndSettings(t *testing.T) {
+	for _, tc := range []struct{ name, input, want string }{
+		{"full", incrementalUser + "," + incrementalOutput + "," + incrementalNext, "prefix_match"},
+		{"missing assistant", incrementalUser + "," + incrementalNext, "input_mismatch"},
+		{"shortened", incrementalUser, "input_shortened"},
+		{"empty delta", incrementalUser + "," + incrementalOutput, "prefix_match"},
+		{"changed answer", incrementalUser + "," + strings.Replace(incrementalOutput, "private-answer", "different", 1), "input_mismatch"},
+		{"reordered members", `{"content":"private-low-entropy-prompt", "role":"user", "type":"message"}` + "," + incrementalOutput, "prefix_match"},
+		{"missing status", incrementalUser + "," + strings.Replace(incrementalOutput, `"status":"completed",`, "", 1), "input_mismatch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, c, a, o := incrementalFixture(t)
+			incrementalSeed(t, s, c, a, o)
+			txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(tc.input), o)
+			r := txn.Finish(context.Background(), false, "")
+			require.Equal(t, tc.want, r.Reason)
+			require.Equal(t, tc.want == "prefix_match", r.PrefixMatch == "true")
+		})
+	}
+	for _, tc := range []struct{ name, old, new string }{
+		{"instructions", `"instructions":"one"`, `"instructions":"two"`},
+		{"metadata kept", `"client_metadata":{"turn":"one"}`, `"client_metadata":{"turn":"two"}`},
+		{"cache hint not ignored", `"prompt_cache_key":"one"`, `"prompt_cache_key":"two"`},
+		{"reasoning default", `"reasoning":{}`, `"reasoning":{"effort":"low"}`},
+		{"precision", `"max_output_tokens":9007199254740992`, `"max_output_tokens":9007199254740993`},
+		{"numeric spelling narrow subset", `"temperature":1`, `"temperature":1.0`},
+		{"delivery options conservative", `"stream_options":{"include_usage":true}`, `"stream_options":{"include_usage":false}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, c, a, o := incrementalFixture(t)
+			incrementalSeed(t, s, c, a, o, tc.old)
+			txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser+","+incrementalOutput, tc.new), o)
+			r := txn.Finish(context.Background(), false, "")
+			require.Equal(t, "settings_changed", r.Reason)
+			require.Equal(t, "false", r.PrefixMatch)
+		})
+	}
+}
+
+func TestOpenAIIncrementalIsolation(t *testing.T) {
+	for _, name := range []string{"key", "user", "group", "scope", "account", "credential owner", "credential generation", "authorization mode", "endpoint", "settings", "window", "model"} {
+		t.Run(name, func(t *testing.T) {
+			s, c, a, o := incrementalFixture(t)
+			incrementalSeed(t, s, c, a, o)
+			raw, _ := c.Get("api_key")
+			key := raw.(*APIKey)
+			body := incrementalRequest(incrementalUser + "," + incrementalOutput)
+			want := "boundary_changed"
+			switch name {
+			case "key":
+				key.ID++
+				want = "no_anchor_or_evicted"
+			case "user":
+				key.UserID++
+				want = "no_anchor_or_evicted"
+			case "group":
+				*key.GroupID++
+				want = "no_anchor_or_evicted"
+			case "scope":
+				o.ExecutionScope = "another-explicit-scope"
+				want = "no_anchor_or_evicted"
+			case "account":
+				a.ID++
+			case "credential owner":
+				c.Set(codexAccountIdentitySourceContextKey, &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth})
+			case "credential generation":
+				o.CredentialGeneration = "rotated-bearer"
+			case "authorization mode":
+				a.Extra = map[string]any{OpenAISIWCEnabledKey: true}
+			case "endpoint":
+				o.Endpoint = "https://elsewhere.example/v1/responses"
+			case "settings":
+				o.SettingsIdentity = "different-proxy"
+			case "window":
+				o.WindowID = "window-2"
+			case "model":
+				body = []byte(strings.Replace(string(body), "gpt-5.5", "gpt-5.4", 1))
+				want = "settings_changed"
+			}
+			txn := s.beginOpenAIIncrementalObservation(c, a, body, o)
+			r := txn.Finish(context.Background(), false, "")
+			require.Equal(t, want, r.Reason)
+			require.NotEqual(t, "true", r.PrefixMatch)
+		})
+	}
+	t.Run("window A B A cannot revive old anchor", func(t *testing.T) {
+		s, c, a, o := incrementalFixture(t)
+		incrementalSeed(t, s, c, a, o)
+		o.WindowID = "window-2"
+		incrementalSeed(t, s, c, a, o)
+		o.WindowID = "window-1"
+		r := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser+","+incrementalOutput), o).Finish(context.Background(), false, "")
+		require.Equal(t, "boundary_changed", r.Reason)
+	})
+	t.Run("missing identity never falls back to cache or content", func(t *testing.T) {
+		s, c, a, o := incrementalFixture(t)
+		o.ExecutionScope = ""
+		r := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser, `"prompt_cache_key":"same"`), o).Finish(context.Background(), true, "")
+		require.Equal(t, "missing_scope", r.Reason)
+		require.True(t, r.Candidate)
+		require.False(t, r.Assessable)
+		o.ExecutionScope = "explicit"
+		c.Set("api_key", &APIKey{ID: 7})
+		r = s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o).Finish(context.Background(), true, "")
+		require.Equal(t, "missing_identity", r.Reason)
+		require.Empty(t, s.getOpenAIWSStateStore().(*defaultOpenAIWSStateStore).incremental)
+	})
+}
+
+func TestOpenAIIncrementalUnassessableShapes(t *testing.T) {
+	for _, tc := range []struct{ name, body, reason string }{
+		{"unknown item", string(incrementalRequest(`{"type":"future_item"}`)), "unknown_item"},
+		{"unknown field", string(incrementalRequest(strings.Replace(incrementalUser, "}", `,"future":true}`, 1))), "unknown_field"},
+		{"late tool result metadata", string(incrementalRequest(strings.Replace(incrementalUser, "}", `,"tool_result_metadata":{"late":true}}`, 1))), "unknown_field"},
+		{"unknown joined field", string(incrementalRequest(incrementalUser, `"model input":true`)), "unknown_field"},
+		{"missing type", string(incrementalRequest(`{"role":"user","content":"hi"}`)), "unknown_item"},
+		{"null type", string(incrementalRequest(`{"type":null,"role":"user","content":"hi"}`)), "unknown_item"},
+		{"null optional", string(incrementalRequest(incrementalUser, `"reasoning":null`)), "ambiguous_null"},
+		{"bad content", string(incrementalRequest(`{"type":"message","role":"user","content":3}`)), "unknown_shape"},
+		{"duplicate escaped", `{"model":"gpt-5.5","\u006dodel":"other","input":[]}`, "duplicate_json"},
+		{"nested duplicate", string(incrementalRequest(`{"type":"message","role":"user","content":"a","content":"b"}`)), "duplicate_json"},
+		{"schema duplicate", string(incrementalRequest(incrementalUser, `"tools":[{"type":"function","name":"echo","parameters":{"type":"object","type":"array"}}]`)), "duplicate_json"},
+		{"null parent", string(incrementalRequest(incrementalUser, `"previous_response_id":null`)), "ambiguous_null"},
+		{"nonarray input", `{"model":"gpt-5.5","input":"hello"}`, "unknown_shape"},
+		{"trailing JSON", string(incrementalRequest(incrementalUser)) + "{}", "invalid_json"},
+		{"unpaired surrogate", string(incrementalRequest(`{"type":"message","role":"user","content":"\ud800"}`)), "invalid_json"},
+		{"unknown nested part", string(incrementalRequest(`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok","future":true}]}`)), "unknown_field"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, c, a, o := incrementalFixture(t)
+			txn := s.beginOpenAIIncrementalObservation(c, a, []byte(tc.body), o)
+			txn.ObserveEvent(incrementalCompleted(incrementalOutput))
+			r := txn.Finish(context.Background(), true, "")
+			require.Equal(t, tc.reason, r.Reason)
+			require.False(t, r.Assessable)
+			require.Equal(t, "unknown", r.PrefixMatch)
+			require.Nil(t, s.getOpenAIWSStateStore().(*defaultOpenAIWSStateStore).incremental[txn.key].anchor)
+		})
+	}
+	for _, field := range []string{`"previous_response_id":"resp_native"`, `"generate":false`} {
+		s, c, a, o := incrementalFixture(t)
+		txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser, field), o)
+		require.False(t, txn.Finish(context.Background(), false, "").Candidate)
+	}
+}
+
+func TestOpenAIIncrementalOnlyCompleteSuccessfulOutputAnchors(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		events          []string
+		success, cancel bool
+		reason          string
+	}{
+		{"completed", []string{string(incrementalCompleted(incrementalOutput))}, true, false, "completed"},
+		{"missing terminal", nil, true, false, "output_incomplete"},
+		{"missing output", []string{`{"type":"response.completed","response":{"id":"r","status":"completed"}}`}, true, false, "output_incomplete"},
+		{"missing status", []string{`{"type":"response.completed","response":{"id":"r","output":[]}}`}, true, false, "output_incomplete"},
+		{"null output", []string{`{"type":"response.completed","response":{"id":"r","status":"completed","output":null}}`}, true, false, "output_incomplete"},
+		{"switched response", []string{`{"type":"response.created","response":{"id":"different"}}`, string(incrementalCompleted(incrementalOutput))}, true, false, "response_changed"},
+		{"failed", []string{`{"type":"response.failed"}`}, true, false, "unsuccessful_terminal"},
+		{"incomplete", []string{`{"type":"response.incomplete"}`}, true, false, "unsuccessful_terminal"},
+		{"cancelled", []string{`{"type":"response.cancelled"}`}, true, false, "unsuccessful_terminal"},
+		{"failed write", []string{string(incrementalCompleted(incrementalOutput))}, false, false, "failed"},
+		{"cancelled context", []string{string(incrementalCompleted(incrementalOutput))}, true, true, "cancelled"},
+		{"unknown output", []string{string(incrementalCompleted(`{"type":"unknown"}`))}, true, false, "unknown_item"},
+		{"duplicate output id", []string{string(incrementalCompleted(incrementalOutput + "," + incrementalOutput))}, true, false, "output_incomplete"},
+		{"omitted observed item", []string{`{"type":"response.output_item.added","output_index":1,"item":{"id":"private-item-id","type":"message"}}`, string(incrementalCompleted(incrementalOutput))}, true, false, "output_incomplete"},
+		{"different observed id", []string{`{"type":"response.output_text.delta","output_index":0,"item_id":"other","delta":"x"}`, string(incrementalCompleted(incrementalOutput))}, true, false, "output_incomplete"},
+		{"late event", []string{string(incrementalCompleted(incrementalOutput)), `{"type":"response.output_item.done"}`}, true, false, "event_after_completed"},
+		{"duplicate terminal JSON", []string{`{"type":"response.completed","response":{"id":"r","status":"completed","output":[],"output":[]}}`}, true, false, "duplicate_json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, c, a, o := incrementalFixture(t)
+			txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o)
+			for _, event := range tc.events {
+				txn.ObserveEvent([]byte(event))
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancel {
+				cancel()
+			}
+			r := txn.Finish(ctx, tc.success, "")
+			require.Equal(t, tc.reason, r.AnchorReason)
+			store := s.getOpenAIWSStateStore().(*defaultOpenAIWSStateStore)
+			require.Equal(t, tc.reason == "completed", store.incremental[txn.key].anchor != nil)
+			require.Nil(t, store.incremental[txn.key].pending)
+		})
+	}
+	t.Run("reasoning and calls kept exactly", func(t *testing.T) {
+		s, c, a, o := incrementalFixture(t)
+		output := `{"type":"reasoning","id":"rs1","summary":[],"encrypted_content":"private-cipher"},{"type":"function_call","id":"fc1","call_id":"fc_1","name":"echo","arguments":"{}","status":"completed"}`
+		txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o)
+		txn.ObserveEvent(incrementalCompleted(output))
+		require.Equal(t, "completed", txn.Finish(context.Background(), true, "").AnchorReason)
+		next := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser+","+output), o)
+		require.Equal(t, "prefix_match", next.Finish(context.Background(), false, "").Reason)
+	})
+}
+
+func TestOpenAIIncrementalConcurrentAndLateCompletion(t *testing.T) {
+	s, c, a, o := incrementalFixture(t)
+	incrementalSeed(t, s, c, a, o)
+	body := incrementalRequest(incrementalUser + "," + incrementalOutput)
+	first := s.beginOpenAIIncrementalObservation(c, a, body, o)
+	second := s.beginOpenAIIncrementalObservation(c, a, body, o)
+	first.ObserveEvent(incrementalCompleted(incrementalOutput))
+	require.Equal(t, "concurrent", first.Finish(context.Background(), true, "").Reason)
+	third := s.beginOpenAIIncrementalObservation(c, a, body, o)
+	require.Equal(t, "concurrent", third.Finish(context.Background(), false, "").Reason)
+	second.ObserveEvent(incrementalCompleted(incrementalOutput))
+	require.Equal(t, "concurrent", second.Finish(context.Background(), true, "").Reason)
+	next := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o)
+	require.Equal(t, "no_anchor_or_evicted", next.report.Reason)
+	next.ObserveEvent(incrementalCompleted(incrementalOutput))
+	require.Equal(t, "completed", next.Finish(context.Background(), true, "").AnchorReason)
+	require.Equal(t, "concurrent", first.Finish(context.Background(), true, "").Reason)
+	current := s.beginOpenAIIncrementalObservation(c, a, body, o)
+	require.Equal(t, "prefix_match", current.Finish(context.Background(), false, "").Reason)
+}
+
+func TestOpenAIIncrementalExpiryAndPressureCannotRestoreLateState(t *testing.T) {
+	s, c, a, o := incrementalFixture(t)
+	txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o)
+	store := s.getOpenAIWSStateStore().(*defaultOpenAIWSStateStore)
+	store.incrementalMu.Lock()
+	store.incremental[txn.key].expires = time.Now().Add(-time.Second)
+	store.incrementalMu.Unlock()
+	replacement := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalNext), o)
+	require.Equal(t, "expired", replacement.report.Reason)
+	txn.ObserveEvent(incrementalCompleted(incrementalOutput))
+	require.Equal(t, "expired_or_evicted", txn.Finish(context.Background(), true, "").Reason)
+	replacement.ObserveEvent(incrementalCompleted(incrementalOutput))
+	require.Equal(t, "completed", replacement.Finish(context.Background(), true, "").AnchorReason)
+	verify := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalNext+","+incrementalOutput), o)
+	require.Equal(t, "prefix_match", verify.Finish(context.Background(), false, "").Reason)
+
+	var handles []*openAIIncrementalObservation
+	for i := 0; i < 90; i++ {
+		o.ExecutionScope = fmt.Sprintf("scope-%d", i)
+		handles = append(handles, s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o))
+		require.LessOrEqual(t, store.incrementalBytes, openAIIncrementalMaxMemory)
+	}
+	require.Less(t, len(store.incremental), len(handles), "in-flight reservations are globally bounded per store")
+	for _, h := range handles {
+		h.ObserveEvent(incrementalCompleted(incrementalOutput))
+		h.Finish(context.Background(), true, "")
+	}
+	require.Equal(t, "expired_or_evicted", handles[0].report.Reason)
+	sum := 0
+	for _, slot := range store.incremental {
+		sum += slot.bytes
+		require.Nil(t, slot.pending)
+	}
+	require.Equal(t, sum, store.incrementalBytes)
+	require.LessOrEqual(t, sum, openAIIncrementalMaxMemory)
+}
+
+func TestOpenAIIncrementalLimitsAndPrivacy(t *testing.T) {
+	s, c, a, o := incrementalFixture(t)
+	for _, tc := range []struct {
+		body   []byte
+		reason string
+	}{
+		{[]byte(strings.Repeat(" ", openAIIncrementalMaxBody+1)), "body_limit"},
+		{incrementalRequest(strings.TrimSuffix(strings.Repeat(incrementalUser+",", openAIIncrementalMaxItems+1), ",")), "item_limit"},
+	} {
+		txn := s.beginOpenAIIncrementalObservation(c, a, tc.body, o)
+		require.Equal(t, tc.reason, txn.Finish(context.Background(), false, "").Reason)
+	}
+	for i := 0; i < openAIIncrementalMaxEntries+5; i++ {
+		o.ExecutionScope = fmt.Sprintf("scope-%d", i)
+		txn := s.beginOpenAIIncrementalObservation(c, a, []byte(`{"unknown":true}`), o)
+		txn.Finish(context.Background(), false, "")
+	}
+	store := s.getOpenAIWSStateStore().(*defaultOpenAIWSStateStore)
+	require.LessOrEqual(t, len(store.incremental), openAIIncrementalMaxEntries)
+	require.LessOrEqual(t, store.incrementalBytes, openAIIncrementalMaxMemory)
+	o.ExecutionScope = "privacy-scope"
+	incrementalSeed(t, s, c, a, o)
+	for _, slot := range store.incremental {
+		require.Nil(t, slot.pending)
+		if slot.anchor != nil {
+			dump := fmt.Sprintf("%+v", *slot.anchor)
+			for _, secret := range []string{"private-low-entropy-prompt", "private-answer", "private-bearer", "private-owner", "private-item-id", "privacy-scope"} {
+				require.NotContains(t, dump, secret)
+			}
+			require.Len(t, slot.anchor.items, 2)
+		}
+	}
+	plain := sha256.Sum256([]byte("yes"))
+	require.NotEqual(t, plain, openAIIncrementalHash("item", []byte("yes")))
+	require.NotEqual(t, openAIIncrementalHash("item", []byte("yes")), openAIIncrementalHash("scope", []byte("yes")))
+	require.NotEqual(t, openAIIncrementalHash("item", []byte("a"), []byte("bc")), openAIIncrementalHash("item", []byte("ab"), []byte("c")))
+}
+
+func TestOpenAIIncrementalRaceAndIdempotentFinish(t *testing.T) {
+	s, c, a, o := incrementalFixture(t)
+	const count = 24
+	begins := make(chan *openAIIncrementalObservation, count)
+	finish := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o)
+			begins <- txn
+			<-finish
+			txn.ObserveEvent(incrementalCompleted(incrementalOutput))
+			txn.Finish(context.Background(), true, "")
+		}()
+	}
+	var txns []*openAIIncrementalObservation
+	for i := 0; i < count; i++ {
+		txns = append(txns, <-begins)
+	}
+	close(finish)
+	wg.Wait()
+	for _, txn := range txns {
+		require.Equal(t, "concurrent", txn.Finish(context.Background(), true, "").Reason)
+	}
+	store := s.getOpenAIWSStateStore().(*defaultOpenAIWSStateStore)
+	for _, slot := range store.incremental {
+		require.Zero(t, slot.active)
+		require.Nil(t, slot.anchor)
+		require.Nil(t, slot.pending)
+	}
+	incrementalSeed(t, s, c, a, o)
+	txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser+","+incrementalOutput), o)
+	txn.ObserveEvent(incrementalCompleted(incrementalNext))
+	reports := make(chan openAIIncrementalObservationReport, count)
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); reports <- txn.Finish(context.Background(), true, "") }()
+	}
+	wg.Wait()
+	close(reports)
+	for r := range reports {
+		require.Equal(t, "prefix_match", r.Reason)
+		require.Equal(t, "completed", r.AnchorReason)
+	}
+}
+
+func TestOpenAIIncrementalClassificationPrecedesIdentity(t *testing.T) {
+	for _, tc := range []struct{ field, reason string }{
+		{`"previous_response_id":"resp_native"`, "native_continuation"},
+		{`"generate":false`, "prewarm"},
+	} {
+		for _, missing := range []string{"scope", "auth", "account", "boundary"} {
+			t.Run(tc.reason+"/"+missing, func(t *testing.T) {
+				s, c, a, o := incrementalFixture(t)
+				switch missing {
+				case "scope":
+					o.ExecutionScope = ""
+				case "auth":
+					c.Set("api_key", nil)
+				case "account":
+					a = nil
+				case "boundary":
+					o.CredentialGeneration = ""
+				}
+				txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser, tc.field), o)
+				report := txn.Finish(context.Background(), true, "")
+				require.False(t, report.Candidate)
+				require.False(t, report.Assessable)
+				require.Equal(t, tc.reason, report.Reason)
+				require.Equal(t, "unknown", report.StateReady)
+			})
+		}
+	}
+}
+
+func TestOpenAIIncrementalBufferedResponse(t *testing.T) {
+	body := []byte(`{"id":"resp_p2","status":"completed","output":[` + incrementalOutput + `]}`)
+	t.Run("same complete snapshot as SSE", func(t *testing.T) {
+		var reports []openAIIncrementalObservationReport
+		for _, buffered := range []bool{false, true} {
+			s, c, a, o := incrementalFixture(t)
+			txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o)
+			if buffered {
+				txn.ObserveResponse(body)
+			} else {
+				txn.ObserveEvent(incrementalCompleted(incrementalOutput))
+			}
+			require.Equal(t, "completed", txn.Finish(context.Background(), true, "").AnchorReason)
+			next := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser+","+incrementalOutput+","+incrementalNext), o)
+			reports = append(reports, next.Finish(context.Background(), false, ""))
+		}
+		require.Equal(t, reports[0], reports[1])
+		require.Equal(t, "true", reports[0].PrefixMatch)
+		require.Equal(t, "unknown", reports[0].StateReady)
+	})
+	for _, tc := range []struct{ name, body, reason string }{
+		{"partial", `{"id":"resp_p2","status":"in_progress","output":[]}`, "output_incomplete"},
+		{"missing output", `{"id":"resp_p2","status":"completed"}`, "output_incomplete"},
+		{"duplicate", `{"id":"resp_p2","status":"completed","output":[],"output":[]}`, "duplicate_json"},
+		{"null", `{"id":"resp_p2","status":"completed","output":null}`, "output_incomplete"},
+		{"failure", `{"id":"resp_p2","status":"completed","output":[],"error":{}}`, "unsuccessful_terminal"},
+		{"unknown", `{"id":"resp_p2","status":"completed","output":[],"future":true}`, "unknown_field"},
+		{"event envelope is not a response", string(incrementalCompleted(incrementalOutput)), "unknown_field"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, c, a, o := incrementalFixture(t)
+			txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o)
+			txn.ObserveResponse([]byte(tc.body))
+			require.Equal(t, tc.reason, txn.Finish(context.Background(), true, "").AnchorReason)
+			require.Nil(t, txn.store.incremental[txn.key].anchor)
+		})
+	}
+	for _, success := range []bool{false, true} {
+		s, c, a, o := incrementalFixture(t)
+		txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o)
+		txn.ObserveResponse(body)
+		ctx, cancel := context.WithCancel(context.Background())
+		if success {
+			cancel()
+		}
+		r := txn.Finish(ctx, success, "")
+		cancel()
+		require.NotEqual(t, "completed", r.AnchorReason, "downstream failure/cancellation cannot establish a buffered anchor")
+	}
+}
+
+func TestOpenAIIncrementalDeltaEnvelopeAndFinalSnapshot(t *testing.T) {
+	base := `{"type":"response.output_text.delta","response_id":"resp_p2","output_index":0,"item_id":"private-item-id","delta":"private-delta"}`
+	for _, tc := range []struct{ name, event, output, reason string }{
+		{"known flat delta", base, incrementalOutput, "completed"},
+		{"unknown envelope", strings.TrimSuffix(base, "}") + `,"future":true}`, incrementalOutput, "unknown_field"},
+		{"duplicate escaped key", strings.TrimSuffix(base, "}") + `,"\u0064elta":"other"}`, incrementalOutput, "duplicate_json"},
+		{"nested delta", strings.Replace(base, `"private-delta"`, `{"a":1,"a":2}`, 1), incrementalOutput, "unknown_shape"},
+		{"null delta", strings.Replace(base, `"private-delta"`, `null`, 1), incrementalOutput, "unknown_shape"},
+		{"ambiguous identity", strings.Replace(base, "private-item-id", `\ud800`, 1), incrementalOutput, "invalid_json"},
+		{"unknown final output", base, `{"type":"future"}`, "unknown_item"},
+		{"bad final Unicode", base, strings.Replace(incrementalOutput, "private-answer", `\ud800`, 1), "invalid_json"},
+		{"delta text is not accumulated", strings.Replace(base, "private-delta", "different-text", 1), incrementalOutput, "completed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, c, a, o := incrementalFixture(t)
+			txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o)
+			txn.ObserveEvent([]byte(tc.event))
+			txn.ObserveEvent(incrementalCompleted(tc.output))
+			r := txn.Finish(context.Background(), true, "")
+			require.Equal(t, tc.reason, r.AnchorReason)
+		})
+	}
+}
+
+func BenchmarkOpenAIIncrementalDelta(b *testing.B) {
+	for _, size := range []int{32, 4096, 65536} {
+		payload, _ := json.Marshal(map[string]any{"type": "response.output_text.delta", "item_id": "private-item-id", "output_index": 0, "delta": strings.Repeat("x", size)})
+		b.Run(fmt.Sprintf("Observe/%d", size), func(b *testing.B) {
+			s, c, a, o := incrementalFixture(b)
+			txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o)
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				txn.ObserveEvent(payload)
+			}
+			b.StopTimer()
+			require.Empty(b, txn.store.incremental[txn.key].pending.outputReason)
+			txn.Finish(context.Background(), false, "")
+		})
+		b.Run(fmt.Sprintf("StrictJSONOnly/%d", size), func(b *testing.B) {
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, why := openAIIncrementalJSON(payload); why != "" {
+					b.Fatal(why)
+				}
+			}
+		})
+	}
+	b.Run("AlreadyUnassessable", func(b *testing.B) {
+		s, c, a, o := incrementalFixture(b)
+		txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser), o)
+		txn.ObserveEvent([]byte(`{"type":"future"}`))
+		payload := []byte(strings.Repeat("x", 1<<20))
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			txn.ObserveEvent(payload)
+		}
+	})
+}
+
+func BenchmarkOpenAIIncrementalSnapshots(b *testing.B) {
+	for _, size := range []int{8192, 131072, 1048576, openAIIncrementalMaxBody - 512} {
+		input := strings.Replace(incrementalUser, "private-low-entropy-prompt", strings.Repeat("x", size), 1)
+		body := incrementalRequest(input)
+		b.Run(fmt.Sprintf("Begin/%d", size), func(b *testing.B) {
+			s, c, a, o := incrementalFixture(b)
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				txn := s.beginOpenAIIncrementalObservation(c, a, body, o)
+				if r := txn.Finish(context.Background(), false, ""); r.AnchorReason != "failed" {
+					b.Fatal(r)
+				}
+			}
+		})
+		output := strings.Replace(incrementalOutput, "private-answer", strings.Repeat("x", size), 1)
+		response := []byte(`{"id":"r","status":"completed","output":[` + output + `]}`)
+		b.Run(fmt.Sprintf("CompletedRead/%d", size), func(b *testing.B) {
+			b.SetBytes(int64(len(response)))
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if e := openAIIncrementalReadEvent(response, true); !e.completed {
+					b.Fatal(e.reason)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenAIIncrementalCompactionInvalidatesScope(t *testing.T) {
+	for _, inFlight := range []bool{false, true} {
+		t.Run(fmt.Sprintf("in_flight_%t", inFlight), func(t *testing.T) {
+			s, c, a, o := incrementalFixture(t)
+			incrementalSeed(t, s, c, a, o)
+			history := incrementalRequest(incrementalUser + "," + incrementalOutput)
+			var old *openAIIncrementalObservation
+			if inFlight {
+				old = s.beginOpenAIIncrementalObservation(c, a, history, o)
+			}
+			o.Compaction = true
+			// Compaction invalidates authenticated scope even when no candidate
+			// endpoint/credential is available (e.g. a rejected compact attempt).
+			o.Endpoint, o.CredentialGeneration, o.SettingsIdentity = "", "", ""
+			compact := s.beginOpenAIIncrementalObservation(c, a, []byte(`{"model":"gpt-5.5","input":"opaque compact input"}`), o)
+			require.False(t, compact.report.Candidate)
+			require.Equal(t, "compact", compact.report.Reason)
+			require.Nil(t, compact.store.incremental[compact.key].anchor)
+			compact.ObserveResponse([]byte(`{"id":"r","status":"completed","output":[]}`))
+			report := compact.Finish(context.Background(), true, "")
+			require.Equal(t, "compact", report.Reason)
+			require.False(t, report.Candidate)
+			if old != nil {
+				old.ObserveEvent(incrementalCompleted(incrementalOutput))
+				require.Equal(t, "concurrent", old.Finish(context.Background(), true, "").Reason)
+			}
+			_, _, _, o = incrementalFixture(t)
+			next := s.beginOpenAIIncrementalObservation(c, a, history, o)
+			require.Equal(t, "no_anchor_or_evicted", next.Finish(context.Background(), false, "").Reason)
+		})
+	}
+	t.Run("classification without scope", func(t *testing.T) {
+		s, c, a, o := incrementalFixture(t)
+		o.Compaction, o.ExecutionScope = true, ""
+		txn := s.beginOpenAIIncrementalObservation(c, a, nil, o)
+		report := txn.Finish(context.Background(), true, "")
+		require.Equal(t, "compact", report.Reason)
+		require.False(t, report.Candidate)
+	})
+}
+
+func TestOpenAIIncrementalBusyDoesNotWaitOrKeepAnchor(t *testing.T) {
+	s, c, a, o := incrementalFixture(t)
+	incrementalSeed(t, s, c, a, o)
+	require.True(t, acquireOpenAIIncrementalParsing(openAIIncrementalParseBudget))
+	func() {
+		defer openAIIncrementalParsing.Add(-openAIIncrementalParseBudget)
+		txn := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser+","+incrementalOutput), o)
+		require.Equal(t, "observation_busy", txn.Finish(context.Background(), true, "").Reason)
+		require.Equal(t, "observation_busy", openAIIncrementalReadEvent(incrementalCompleted(incrementalOutput), false).reason)
+	}()
+	next := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser+","+incrementalOutput), o)
+	require.Equal(t, "no_anchor_or_evicted", next.Finish(context.Background(), false, "").Reason)
+}
+
+func TestOpenAIIncrementalSIWCCandidateSeparatesPrefixFromConnectionState(t *testing.T) {
+	s, c, a, o := incrementalFixture(t)
+	a.Extra = map[string]any{OpenAISIWCEnabledKey: true}
+	o.Endpoint = "https://api.openai.com/v1/responses"
+	incrementalSeed(t, s, c, a, o)
+	report := s.beginOpenAIIncrementalObservation(c, a, incrementalRequest(incrementalUser+","+incrementalOutput+","+incrementalNext), o).Finish(context.Background(), false, "")
+	require.True(t, report.Candidate)
+	require.True(t, report.Assessable)
+	require.Equal(t, "prefix_match", report.Reason)
+	require.Equal(t, "true", report.PrefixMatch)
+	require.Equal(t, "unknown", report.StateReady)
+}

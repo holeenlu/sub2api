@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 )
 
 const (
@@ -83,4 +85,59 @@ func classifyOpenAIUpstreamStreamReadError(err error) (code, message string) {
 		}
 	}
 	return OpenAIUpstreamStreamReadErrorCode, "Upstream response stream was interrupted"
+}
+
+// HTTP response readers use detached upstream contexts for final usage. Bound
+// that drain independently of upstream pings, just like the native WS reader.
+// This guard closes the existing body to unblock both scanners and buffered reads.
+type openAIHTTPUsageDrain struct {
+	ctx                context.Context
+	mu                 sync.Mutex
+	closeBody          func() error
+	timer              *time.Timer
+	stopContexts       []func() bool
+	stopped, triggered bool
+}
+
+func newOpenAIHTTPUsageDrain(ctx context.Context, closeBody func() error, additional ...context.Context) *openAIHTTPUsageDrain {
+	d := &openAIHTTPUsageDrain{closeBody: closeBody, ctx: ctx}
+	for _, observed := range append(additional, ctx) {
+		if observed != nil {
+			d.stopContexts = append(d.stopContexts, context.AfterFunc(observed, d.start))
+		}
+	}
+	return d
+}
+func (d *openAIHTTPUsageDrain) start() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.stopped || d.triggered {
+		return
+	}
+	d.triggered = true
+	d.timer = time.AfterFunc(openAIWSUsageDrainTimeout, func() {
+		if d.closeBody != nil {
+			_ = d.closeBody()
+		}
+	})
+}
+func (d *openAIHTTPUsageDrain) disconnected() bool {
+	canceled := d.ctx != nil && d.ctx.Err() != nil
+	if canceled {
+		d.start()
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.triggered || canceled
+}
+func (d *openAIHTTPUsageDrain) stop() {
+	for _, stop := range d.stopContexts {
+		stop()
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.stopped = true
+	if d.timer != nil {
+		d.timer.Stop()
+	}
 }

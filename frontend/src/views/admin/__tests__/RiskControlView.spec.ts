@@ -8,28 +8,33 @@ import type { ContentModerationAPIKeyStatus, ContentModerationConfig, UpdateCont
 
 const {
   getConfig,
+  updateSettings,
   updateConfig,
   getStatus,
   listLogs,
   getGroups,
   getProxies,
   testAPIKeys,
+  clearFlaggedHashes,
   showError,
   showSuccess,
 } = vi.hoisted(() => ({
   getConfig: vi.fn(),
+  updateSettings: vi.fn(),
   updateConfig: vi.fn(),
   getStatus: vi.fn(),
   listLogs: vi.fn(),
   getGroups: vi.fn(),
   getProxies: vi.fn(),
   testAPIKeys: vi.fn(),
+  clearFlaggedHashes: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    settings: { updateSettings },
     riskControl: {
       getConfig,
       updateConfig,
@@ -37,7 +42,7 @@ vi.mock('@/api/admin', () => ({
       listLogs,
       testAPIKeys,
       deleteFlaggedHash: vi.fn(),
-      clearFlaggedHashes: vi.fn(),
+      clearFlaggedHashes,
       unbanUser: vi.fn(),
     },
     groups: {
@@ -194,6 +199,7 @@ function findButtonByText(wrapper: VueWrapper, text: string): DOMWrapper<HTMLBut
 
 describe('admin RiskControlView', () => {
   beforeEach(() => {
+    updateSettings.mockReset().mockResolvedValue({ risk_control_enabled: true })
     getConfig.mockReset()
     updateConfig.mockReset()
     getStatus.mockReset()
@@ -202,6 +208,8 @@ describe('admin RiskControlView', () => {
     showError.mockReset()
     showSuccess.mockReset()
     testAPIKeys.mockReset()
+    clearFlaggedHashes.mockReset()
+    clearFlaggedHashes.mockResolvedValue({ deleted: 3 })
 
     getConfig.mockResolvedValue(baseConfig())
     getStatus.mockResolvedValue(runtimeStatus())
@@ -218,6 +226,93 @@ describe('admin RiskControlView', () => {
       api_key_masks: [],
       api_key_statuses: [],
     }))
+  })
+
+  it('loads, edits and saves all guard settings through the existing config API', async () => {
+    const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.guards').trigger('click')
+    expect((wrapper.get('[data-test="refusal_guard-ttl"]').element as HTMLInputElement).value).toBe('3600')
+    expect((wrapper.get('[data-test="device_guard-ttl"]').element as HTMLInputElement).value).toBe('900')
+    await wrapper.get('[data-test="failure-policy"]').setValue('fail_closed')
+    await wrapper.get('[data-test="distillation-enabled"]').setValue(true)
+    await wrapper.get('[data-test="distillation-phrases"]').setValue('custom phrase\nsecond phrase')
+    await wrapper.get('[data-test="distillation-patterns"]').setValue('(?i)dataset.*collection')
+    await wrapper.get('[data-test="distillation-fingerprints"]').setValue('a'.repeat(64))
+    await wrapper.get('[data-test="distillation-structure"]').setValue('challenge')
+    await wrapper.get('[data-test="distillation-max-tokens"]').setValue(16384)
+    await wrapper.get('[data-test="distillation-thinking-tokens"]').setValue(4096)
+    await wrapper.get('[data-test="regex-rules"]').setValue('blocked.*pattern')
+    await wrapper.get('[data-test="refusal_guard-enabled"]').setValue(true)
+    await wrapper.get('[data-test="device_guard-enabled"]').setValue(true)
+    await wrapper.get('[data-test="refusal_guard-ttl"]').setValue(600)
+    await wrapper.get('[data-test="refusal_guard-capacity"]').setValue(50)
+    await wrapper.get('[data-test="device_guard-ttl"]').setValue(120)
+    await wrapper.get('[data-test="device_guard-capacity"]').setValue(10)
+    await wrapper.get('[data-test="refusal-similarity"]').setValue(0.95)
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      failure_policy: 'fail_closed',
+      distillation: { enabled: true, phrases: ['custom phrase', 'second phrase'], patterns: ['(?i)dataset.*collection'], fingerprints: ['a'.repeat(64)], structure_pattern: 'challenge', min_max_tokens: 16384, min_thinking_tokens: 4096 },
+      regex_rules: ['blocked.*pattern'],
+      refusal_guard: { enabled: true, ttl_seconds: 600, max_entries: 50, similarity_threshold: 0.95 },
+      device_guard: { enabled: true, ttl_seconds: 120, max_entries: 10 },
+    }))
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.guards').trigger('click')
+    expect((wrapper.get('[data-test="regex-rules"]').element as HTMLTextAreaElement).value).toBe('blocked.*pattern')
+    expect(updateSettings).not.toHaveBeenCalled()
+    // Explicit removal stays empty and failed saves retain the user's draft.
+    await wrapper.get('[data-test="regex-rules"]').setValue('')
+    updateConfig.mockRejectedValueOnce(new Error('validation failed'))
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="risk-guards"]').exists()).toBe(true)
+    expect(updateConfig.mock.lastCall?.[0].regex_rules).toEqual([])
+    expect(showError).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each(['success', 'config failure', 'enable failure'])('saves rules before explicitly enabling the global gate: %s', async (outcome) => {
+    getConfig.mockResolvedValue({ ...baseConfig(), enabled: false, mode: 'off' })
+    getStatus.mockResolvedValue({ ...runtimeStatus(), enabled: false, risk_control_enabled: false })
+    if (outcome === 'config failure') updateConfig.mockRejectedValueOnce(new Error('config failed'))
+    if (outcome === 'enable failure') updateSettings.mockRejectedValueOnce(new Error('enable failed'))
+    const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await wrapper.get('[data-test="save-and-enable"]').trigger('click')
+    await flushPromises()
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, mode: 'pre_block' }))
+    if (outcome === 'config failure') {
+      expect(updateSettings).not.toHaveBeenCalled()
+    } else {
+      expect(updateSettings).toHaveBeenCalledWith({ risk_control_enabled: true })
+      expect(updateConfig.mock.invocationCallOrder[0]).toBeLessThan(updateSettings.mock.invocationCallOrder[0]!)
+    }
+    if (outcome !== 'success') {
+      expect(showSuccess).not.toHaveBeenCalled()
+      expect(wrapper.find('[data-test="save-and-enable"]').exists()).toBe(true)
+      if (outcome === 'enable failure') expect(showError).toHaveBeenCalledWith('admin.riskControl.savedButNotEnabled')
+    }
+    wrapper.unmount()
+  })
+
+  it('clears temporary guard memory even when the legacy hash count is zero', async () => {
+    getStatus.mockResolvedValue({ ...runtimeStatus(), refusal_guard_entries: 2, device_guard_entries: 1 })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.guards').trigger('click')
+    await wrapper.get('[data-test="clear-guard-memory"]').trigger('click')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledWith('admin.riskControl.guard.clearConfirm')
+    expect(clearFlaggedHashes).toHaveBeenCalledOnce()
+    confirm.mockRestore()
+    wrapper.unmount()
   })
 
   it.each(['openai', 'typesafe'] as const)('shows the selected draft engine keys while %s remains active', async (activeEngine) => {
@@ -536,3 +631,6 @@ describe('admin RiskControlView', () => {
     ]))
   })
 })
+
+// Existing behavior under the migrated full administrator role.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))

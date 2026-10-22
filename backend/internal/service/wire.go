@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -29,8 +30,10 @@ func ProvideGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthCli
 
 // BuildInfo contains build information
 type BuildInfo struct {
-	Version   string
-	BuildType string
+	UpstreamVersion string
+	BuildCommit     string
+	Version         string
+	BuildType       string
 }
 
 // ProvidePricingService creates and initializes PricingService
@@ -44,8 +47,8 @@ func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient)
 }
 
 // ProvideUpdateService creates UpdateService with BuildInfo
-func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo) *UpdateService {
-	return NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType)
+func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo, cfg *config.Config) *UpdateService {
+	return NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType).WithUpstreamVersion(buildInfo.UpstreamVersion).WithBuildCommit(buildInfo.BuildCommit).WithCheckEnabled(cfg == nil || cfg.Update.CheckEnabled)
 }
 
 // ProvideEmailQueueService creates EmailQueueService with default worker count
@@ -109,12 +112,31 @@ func ProvideBatchImageCleanupService(repo BatchImageRepository, accountRepo Acco
 
 // ProvideOpenAIOAuthService creates OpenAIOAuthService with privacy/account enrichment support.
 func ProvideOpenAIOAuthService(
+	accountRepo AccountRepository, encryptor SecretEncryptor, cfg *config.Config,
 	proxyRepo ProxyRepository,
 	oauthClient OpenAIOAuthClient,
 	privacyClientFactory PrivacyClientFactory,
+	redisClient *redis.Client,
+	settingRepo SettingRepository,
 ) *OpenAIOAuthService {
-	svc := NewOpenAIOAuthService(proxyRepo, oauthClient)
+	svc := NewOpenAIOAuthService(proxyRepo, oauthClient, redisClient)
+	// Existing runtime site_name overrides the branch's shared branding fallback.
+	// No independent SIWC application-name setting or brand literal is introduced.
+	svc.SetSIWCAgentName(DefaultSiteName)
+	if settingRepo != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		name, err := settingRepo.GetValue(ctx, SettingKeySiteName)
+		cancel()
+		if err == nil && strings.TrimSpace(name) != "" {
+			svc.SetSIWCAgentName(name)
+		}
+	}
+
 	svc.SetPrivacyClientFactory(privacyClientFactory)
+	svc.excelAccountRepo = accountRepo
+	if cfg != nil && cfg.Totp.EncryptionKeyConfigured {
+		svc.excelEncryptor = encryptor
+	}
 	return svc
 }
 
@@ -649,10 +671,18 @@ func ProvideGeminiCachedContentService(repo GeminiCachedContentRepository, compa
 
 // ProvideScheduledTestService creates ScheduledTestService.
 func ProvideScheduledTestService(
-	planRepo ScheduledTestPlanRepository,
-	resultRepo ScheduledTestResultRepository,
+	planRepo ScheduledTestPlanRepository, resultRepo ScheduledTestResultRepository,
+	accounts AccountRepository, keys *APIKeyService, users UserRepository,
+	gateway *OpenAIGatewayService,
 ) *ScheduledTestService {
-	return NewScheduledTestService(planRepo, resultRepo)
+	svc := NewScheduledTestService(planRepo, resultRepo)
+	svc.accounts, svc.keys, svc.users, svc.gateway = accounts, keys, users, gateway
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if gateway != nil && gateway.settingService != nil {
+		_ = gateway.settingService.LoadModelTraceBank(ctx)
+	}
+	return svc
 }
 
 // ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
@@ -664,7 +694,6 @@ func ProvideScheduledTestRunnerService(
 	cfg *config.Config,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
-	svc.Start()
 	return svc
 }
 
@@ -767,7 +796,7 @@ func ProvideOpsService(
 		systemLogSink,
 	)
 	if settingService != nil {
-		svc.SetOpenAIQuotaAutoPauseSettingsSink(settingService.SetOpenAIQuotaAutoPauseSettings)
+		svc.SetQuotaSchedulingSettingsSink(settingService.SetQuotaSchedulingSettings)
 		// Optional warm-up so the first scheduled request after process start observes
 		// a populated cache rather than zero defaults. Best-effort, sync-bounded.
 		settingService.WarmOpenAIQuotaAutoPauseSettings(context.Background())
@@ -856,6 +885,7 @@ func ProvideAPIKeyService(
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	ProvideVendorService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
@@ -869,7 +899,7 @@ var ProviderSet = wire.NewSet(
 	NewProxyService,
 	NewRedeemService,
 	NewPromoService,
-	NewUsageService,
+	ProvideUsageService,
 	NewDashboardService,
 	ProvidePricingService,
 	NewBillingService,
@@ -886,7 +916,7 @@ var ProviderSet = wire.NewSet(
 	ProvideBatchImageCleanupService,
 	ProvideBatchImageWorkerRuntime,
 	wire.Bind(new(AccountRuntimeBlocker), new(*OpenAIGatewayService)),
-	NewOAuthService,
+	ProvideVendorCompatibleOAuthService,
 	ProvideClaudeResetCreditService,
 	ProvideOpenAIOAuthService,
 	ProvideGrokOAuthService,
@@ -918,7 +948,6 @@ var ProviderSet = wire.NewSet(
 	ProvideOllamaCloudUsageService,
 	ProvideOpenCodeGoUsageService,
 	ProvideSettingService,
-	NewDataManagementService,
 	ProvideBackupService,
 	ProvideOpsSystemLogSink,
 	ProvideOpsService,
@@ -939,7 +968,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(DefaultSubscriptionAssigner), new(*SubscriptionService)),
 	ProvideConcurrencyService,
 	ProvideUserMessageQueueService,
-	NewUsageRecordWorkerPool,
+	ProvideUsageRecordWorkerPool,
 	ProvideSchedulerSnapshotService,
 	NewIdentityService,
 	NewCRSSyncService,
@@ -986,15 +1015,7 @@ var ProviderSet = wire.NewSet(
 	ProvideChannelMonitorV2Service,
 	ProvideChannelMonitorV2Aggregator,
 	NewChannelMonitorRequestTemplateService,
-	ProvideUserPlatformQuotaUsageFlusher,
 )
-
-// ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
-func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {
-	svc := NewUserPlatformQuotaUsageFlusher(cfg, cache, quotaRepo, tw)
-	svc.Start()
-	return svc
-}
 
 // ProvidePaymentConfigService wraps NewPaymentConfigService to accept the named
 // payment.EncryptionKey type instead of raw []byte, avoiding Wire ambiguity.
@@ -1085,5 +1106,25 @@ func ProvideChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.
 func ProvideClaudeResetCreditService(accounts AccountRepository, tokens *ClaudeTokenProvider, proxies ProxyRepository, settings *SettingService, idem *IdempotencyCoordinator, locks LeaderLockCache) *ClaudeResetCreditService {
 	s := NewClaudeResetCreditService(accounts, tokens, proxies, settings)
 	s.ConfigureRedemption(idem, locks)
+	return s
+}
+
+func ProvideVendorCompatibleOAuthService(repo ProxyRepository, client ClaudeOAuthClient, rdb *redis.Client) *OAuthService {
+	return NewOAuthService(repo, client, rdb)
+}
+
+func ProvideVendorService(db *sql.DB, client *dbent.Client, accounts AccountRepository, adminAccounts AdminAccountRepository, proxies ProxyRepository, groups GroupRepository, users UserRepository, admin AdminService, settings *SettingService, oauth *OAuthService, openaiOAuth *OpenAIOAuthService, rdb *redis.Client, audit *AuditLogService, accountUsage *AccountUsageService, cfg *config.Config) *VendorService {
+	s := NewVendorService(db, client, accounts, proxies, groups, users, admin, settings, oauth, openaiOAuth, rdb, audit, accountUsage, cfg)
+	guard := s.NativeSupplyIdentityGuard()
+	if repo, ok := accounts.(interface {
+		SetSupplyIdentityGuard(NativeSupplyIdentityGuard)
+	}); ok {
+		repo.SetSupplyIdentityGuard(guard)
+	}
+	if repo, ok := adminAccounts.(interface {
+		SetSupplyIdentityGuard(NativeSupplyIdentityGuard)
+	}); ok {
+		repo.SetSupplyIdentityGuard(guard)
+	}
 	return s
 }
