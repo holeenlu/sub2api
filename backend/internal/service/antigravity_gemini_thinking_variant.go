@@ -108,12 +108,6 @@ func geminiThinkingLevelFromClaudeThinking(thinking *antigravity.ThinkingConfig)
 	}
 }
 
-// resolveGeminiThinkingVariant 为裸 Gemini 模型名挑选账号映射表里存在的思考深度变体。
-// 返回 (映射后的上游模型名, 是否命中)。未命中时调用方应回退到常规 getMappedModel 流程。
-func resolveGeminiThinkingVariant(account *Account, requestedModel string, body []byte) (string, bool) {
-	return resolveGeminiThinkingVariantForLevel(account, requestedModel, geminiThinkingLevelFromBody(body))
-}
-
 // resolveGeminiThinkingVariantForLevel 是 resolveGeminiThinkingVariant 的协议无关内核：
 // 调用方负责按自身协议推导 preferred 档位（Gemini 原生读 generationConfig.thinkingConfig，
 // Claude/OpenAI 兼容层读 thinking.budget_tokens），此处只做映射查找与降级。

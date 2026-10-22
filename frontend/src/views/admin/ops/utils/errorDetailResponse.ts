@@ -38,6 +38,24 @@ function isGenericGatewayUpstreamError(raw: string): boolean {
   return GENERIC_UPSTREAM_MESSAGES.has(parsed.message.toLowerCase())
 }
 
+// Local scheduling decisions share Ops storage, but are not provider responses.
+export function splitSchedulingDiagnostics(raw: string | null | undefined): { upstream: string; scheduling: string } {
+  const text = String(raw || '').trim()
+  try {
+    const events: unknown = JSON.parse(text)
+    if (!Array.isArray(events)) return { upstream: text, scheduling: '' }
+    if (!events.some(event => event?.kind === 'scheduling_trace')) return { upstream: text, scheduling: '' }
+    const upstream = events.filter(event => event?.kind !== 'scheduling_trace')
+    const trace = events.find(event => event?.kind === 'scheduling_trace')
+    return {
+      upstream: upstream.length ? JSON.stringify(upstream) : '',
+      scheduling: typeof trace?.detail === 'string' ? trace.detail : ''
+    }
+  } catch {
+    return { upstream: text, scheduling: '' }
+  }
+}
+
 export function resolveUpstreamPayload(
   detail: Pick<OpsErrorDetail, 'upstream_error_detail' | 'upstream_errors' | 'upstream_error_message'> | null | undefined
 ): string {
@@ -45,7 +63,7 @@ export function resolveUpstreamPayload(
 
   const candidates = [
     detail.upstream_error_detail,
-    detail.upstream_errors,
+    splitSchedulingDiagnostics(detail.upstream_errors).upstream,
     detail.upstream_error_message
   ]
 

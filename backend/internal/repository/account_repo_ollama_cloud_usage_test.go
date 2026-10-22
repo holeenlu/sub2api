@@ -239,6 +239,7 @@ func TestListDueOllamaCloudUsageAccountsFiltersOrdersAndLimits(t *testing.T) {
 
 func TestBulkUpdateOllamaIdentityCleanupIsValueConditional(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	allowNativeBulkPreflight(t, exec)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
@@ -260,6 +261,7 @@ func TestBulkUpdateOllamaIdentityCleanupIsValueConditional(t *testing.T) {
 
 func TestUpdateCredentialsIdentityChangeClearsAllOllamaManagedExtra(t *testing.T) {
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
+	expectNativeAPIKeyCredentialPreflight(mock)
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*credentials -> 'api_key' IS DISTINCT FROM.*ollama_cloud_usage_session.*ollama_cloud_usage_auto_refresh.*ollama_cloud_usage_snapshot`).
 		WithArgs(`{"api_key":"new-key","base_url":"https://ollama.com"}`, int64(17)).
@@ -299,6 +301,7 @@ func TestDisableOllamaCloudUsageAutoRefreshUsesGroupIdentityCAS(t *testing.T) {
 // openai/anthropic apikey 账号在凭证未变化的持久化上也会误清探测快照。
 func TestUpdateCredentialsCleanupBranchRequiresChangedCredentials(t *testing.T) {
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
+	expectNativeAPIKeyCredentialPreflight(mock)
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*CASE.*AND credentials IS DISTINCT FROM \$1::jsonb\s+AND \(\s+credentials -> 'api_key' IS DISTINCT FROM`).
 		WithArgs(`{"api_key":"same-key","base_url":"https://relay.example.com/v1"}`, int64(17)).
@@ -356,6 +359,7 @@ func TestUpdateCredentialsPlainCNAPIKeyAccountCleanupStaysSemanticallyEquivalent
 	t.Cleanup(func() { _ = db.Close() })
 	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
 	t.Cleanup(func() { _ = client.Close() })
+	expectNativeAPIKeyCredentialPreflight(mock)
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*- 'upstream_billing_probe'.*- 'ollama_cloud_usage_session'.*- 'ollama_cloud_usage_auto_refresh'.*- 'ollama_cloud_usage_snapshot'`).
 		WithArgs(`{"api_key":"rotated-key","base_url":"https://api.moonshot.cn/v1"}`, int64(17)).

@@ -3,6 +3,8 @@ package apicompat
 import (
 	"bytes"
 	"encoding/json"
+
+	"github.com/tidwall/gjson"
 )
 
 // anthropicInputSchemaUnionKeywords 是 Anthropic 在工具 input_schema 顶层拒绝的
@@ -24,7 +26,7 @@ func flattenAnthropicRootUnions(schema map[string]json.RawMessage) {
 		return
 	}
 
-	properties := anthropicSchemaProperties(schema)
+	properties, propertyOrder := anthropicSchemaProperties(schema)
 	rootRequired := anthropicBranchRequired(schema)
 	var (
 		intersections [][]string
@@ -38,7 +40,7 @@ func flattenAnthropicRootUnions(schema map[string]json.RawMessage) {
 		if !ok {
 			continue
 		}
-		mergeAnthropicObjectBranchProperties(properties, branches)
+		propertyOrder = mergeAnthropicObjectBranchProperties(properties, propertyOrder, branches)
 		if keyword == "allOf" {
 			for _, branch := range branches {
 				allOfRequired = appendAnthropicRequired(allOfRequired, anthropicBranchRequired(branch))
@@ -49,9 +51,21 @@ func flattenAnthropicRootUnions(schema map[string]json.RawMessage) {
 	}
 
 	if len(properties) > 0 {
-		if encoded, err := json.Marshal(properties); err == nil {
-			schema["properties"] = encoded
+		// Keep root order, then first appearance in each branch, without sorting
+		// property names or changing nested schema bytes.
+		var encoded bytes.Buffer
+		encoded.WriteByte('{')
+		for i, name := range propertyOrder {
+			if i > 0 {
+				encoded.WriteByte(',')
+			}
+			key, _ := json.Marshal(name)
+			encoded.Write(key)
+			encoded.WriteByte(':')
+			encoded.Write(properties[name])
 		}
+		encoded.WriteByte('}')
+		schema["properties"] = encoded.Bytes()
 	}
 	required := intersectAnthropicRequiredLists(intersections)
 	required = appendAnthropicRequired(required, allOfRequired)
@@ -63,16 +77,26 @@ func flattenAnthropicRootUnions(schema map[string]json.RawMessage) {
 	}
 }
 
-func anthropicSchemaProperties(schema map[string]json.RawMessage) map[string]json.RawMessage {
+func anthropicSchemaProperties(schema map[string]json.RawMessage) (map[string]json.RawMessage, []string) {
 	properties := make(map[string]json.RawMessage)
 	raw, ok := schema["properties"]
 	if !ok {
-		return properties
+		return properties, nil
 	}
 	if err := json.Unmarshal(raw, &properties); err != nil || properties == nil {
-		return make(map[string]json.RawMessage)
+		return make(map[string]json.RawMessage), nil
 	}
-	return properties
+	order := make([]string, 0, len(properties))
+	seen := make(map[string]bool, len(properties))
+	gjson.ParseBytes(raw).ForEach(func(key, _ gjson.Result) bool {
+		name := key.String()
+		if !seen[name] {
+			order = append(order, name)
+			seen[name] = true
+		}
+		return true
+	})
+	return properties, order
 }
 
 // decodeAnthropicUnionBranches 解析联合分支并递归摊平分支自身的顶层联合。
@@ -95,23 +119,18 @@ func decodeAnthropicUnionBranches(raw json.RawMessage) ([]map[string]json.RawMes
 	return branches, true
 }
 
-func mergeAnthropicObjectBranchProperties(into map[string]json.RawMessage, branches []map[string]json.RawMessage) {
+func mergeAnthropicObjectBranchProperties(into map[string]json.RawMessage, order []string, branches []map[string]json.RawMessage) []string {
 	for _, branch := range branches {
 		if !anthropicSchemaBranchIsObject(branch) {
 			continue
 		}
-		raw, ok := branch["properties"]
-		if !ok {
-			continue
-		}
-		var properties map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &properties); err != nil {
-			continue
-		}
-		for name, property := range properties {
+		properties, names := anthropicSchemaProperties(branch)
+		for _, name := range names {
+			property := properties[name]
 			existing, seen := into[name]
 			if !seen {
 				into[name] = property
+				order = append(order, name)
 				continue
 			}
 			if anthropicSchemaJSONEqual(existing, property) {
@@ -124,6 +143,7 @@ func mergeAnthropicObjectBranchProperties(into map[string]json.RawMessage, branc
 			into[name] = merged
 		}
 	}
+	return order
 }
 
 // anthropicSchemaBranchIsObject 判断分支是否可能是对象：显式 type=object，或省略

@@ -4,7 +4,7 @@ import { defineComponent, ref } from 'vue'
 
 import UsageView from '../UsageView.vue'
 
-const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
+const { list, consumeUsageExport, exportList, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -13,6 +13,7 @@ const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listE
 
   return {
     list: vi.fn(),
+    consumeUsageExport: vi.fn(),
 		exportList: vi.fn(),
     getStats: vi.fn(),
     getSnapshotV2: vi.fn(),
@@ -65,11 +66,7 @@ vi.mock('@/api/admin', () => ({
   },
 }))
 
-vi.mock('@/api/admin/usage', () => ({
-  adminUsageAPI: {
-		list: exportList,
-  },
-}))
+vi.mock('@/api/usageExport', () => ({ consumeUsageExport }))
 
 vi.mock('file-saver', () => ({ saveAs }))
 
@@ -120,29 +117,53 @@ const AppLayoutStub = { template: '<div><slot /></div>' }
 const UsageFiltersStub = defineComponent({
   setup(_, { expose }) {
     const userKeyword = ref('')
+    const apiKeyKeyword = ref('')
     let userSearchRevision = 0
     const setUserKeyword = (email: string) => {
       userSearchRevision += 1
       userKeyword.value = email
     }
+    const setApiKeyKeyword = (name: string) => {
+      apiKeyKeyword.value = name
+    }
     expose({
       getUserSearchRevision: () => userSearchRevision,
       setUserKeyword,
+      setApiKeyKeyword,
       simulateUserInput: setUserKeyword,
     })
-    return { userKeyword }
+    return { userKeyword, apiKeyKeyword }
   },
-  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><slot name="after-reset" /></div>',
+  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><span data-test="api-key-filter-label">{{ apiKeyKeyword }}</span><slot name="after-reset" /></div>',
 })
 const UsageTableStub = {
   props: ['columns'],
   emits: ['userClick'],
   template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
 }
-const UserTokenRankingStub = {
+const rankingReload = vi.fn()
+const UserTokenRankingStub = defineComponent({
   emits: ['select-user'],
+  setup(_, { expose }) {
+    expose({ reload: rankingReload })
+    return {}
+  },
   template: '<div data-test="ranking"><button class="pick-user" @click="$emit(\'select-user\', 5, \'rank@test.com\')">pick</button></div>',
-}
+})
+const keyRankingReload = vi.fn()
+const APIKeyTokenRankingStub = defineComponent({
+  props: ['visibleColumnKeys'],
+  emits: ['select-api-key'],
+  setup(_, { expose }) {
+    expose({ reload: keyRankingReload })
+    return {}
+  },
+  template: '<div data-test="key-ranking"><button class="pick-key" @click="$emit(\'select-api-key\', 42, \'prod-key\')">pick</button></div>',
+})
+const OpsErrorLogTableStub = defineComponent({
+  props: ['visibleColumnKeys'],
+  template: '<div data-test="error-log-table" />',
+})
 const ModelDistributionChartStub = {
   props: ['metric'],
   emits: ['update:metric'],
@@ -171,7 +192,7 @@ const mountRouteFilteredUsageView = () => mount(UsageView, {
     UserBalanceHistoryModal: true, Pagination: true, Select: true,
     DateRangePicker: true, Icon: true, TokenUsageTrend: true,
     ModelDistributionChart: true, GroupDistributionChart: true,
-    EndpointDistributionChart: true, UserTokenRanking: true,
+    EndpointDistributionChart: true, UserTokenRanking: true, APIKeyTokenRanking: true,
   } },
 })
 
@@ -198,6 +219,25 @@ describe('admin UsageView route filters', () => {
   afterEach(() => {
     Object.keys(routeQuery).forEach((key) => delete routeQuery[key])
     vi.useRealTimers()
+  })
+
+  it('cancels statistics on refresh and clears delayed chart work on unmount', async () => {
+    getStats.mockImplementation(() => new Promise(() => {}))
+    getModelStats.mockImplementation(() => new Promise(() => {}))
+    getSnapshotV2.mockImplementation(() => new Promise(() => {}))
+    const wrapper = mountRouteFilteredUsageView()
+    const statsSignal = getStats.mock.lastCall![1].signal as AbortSignal
+    const modelSignal = getModelStats.mock.lastCall![1].signal as AbortSignal
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    expect(statsSignal.aborted).toBe(true)
+    expect(modelSignal.aborted).toBe(true)
+    expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+    const current = [getStats.mock.lastCall![1].signal, getModelStats.mock.lastCall![1].signal, getSnapshotV2.mock.lastCall![1].signal] as AbortSignal[]
+    wrapper.unmount()
+    vi.advanceTimersByTime(120)
+    expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+    expect(current.every(signal => signal.aborted)).toBe(true)
   })
 
   it('shows the routed user while applying user_id to usage requests', async () => {
@@ -313,9 +353,9 @@ describe('admin UsageView native compaction filter', () => {
       expect.objectContaining({ native_compaction_v2: true }),
       expect.anything()
     )
-    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }))
-    expect(getModelStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }))
-    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }))
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getModelStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
 
     list.mockClear()
     getStats.mockClear()
@@ -331,9 +371,9 @@ describe('admin UsageView native compaction filter', () => {
       expect.objectContaining({ native_compaction_v2: null }),
       expect.anything()
     )
-    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }))
-    expect(getModelStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }))
-    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }))
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getModelStats).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 })
 
@@ -384,7 +424,7 @@ describe('admin UsageView distribution metric toggles', () => {
         UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
         DateRangePicker: true, Icon: true, TokenUsageTrend: true,
         ModelDistributionChart: ModelDistributionChartStub, GroupDistributionChart: GroupDistributionChartStub,
-        EndpointDistributionChart: true, UserTokenRanking: true,
+        EndpointDistributionChart: true, UserTokenRanking: true, APIKeyTokenRanking: true,
       } },
     })
     vi.advanceTimersByTime(120)
@@ -422,7 +462,7 @@ describe('admin UsageView distribution metric toggles', () => {
           TokenUsageTrend: true,
           ModelDistributionChart: ModelDistributionChartStub,
           GroupDistributionChart: GroupDistributionChartStub,
-          UserTokenRanking: true,
+          UserTokenRanking: true, APIKeyTokenRanking: true,
         },
       },
     })
@@ -437,7 +477,7 @@ describe('admin UsageView distribution metric toggles', () => {
       start_date: formatLocalDate(yesterday),
       end_date: formatLocalDate(now),
       granularity: 'hour'
-    }))
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
 
     const modelChart = wrapper.find('[data-test="model-chart"]')
     const groupChart = wrapper.find('[data-test="group-chart"]')
@@ -499,7 +539,7 @@ describe('admin UsageView request ID column visibility', () => {
           ModelDistributionChart: true,
           GroupDistributionChart: true,
           EndpointDistributionChart: true,
-          UserTokenRanking: true,
+          UserTokenRanking: true, APIKeyTokenRanking: true,
         },
       },
     })
@@ -608,7 +648,7 @@ describe('admin UsageView handleUserClick', () => {
           ModelDistributionChart: true,
           GroupDistributionChart: true,
           EndpointDistributionChart: true,
-          UserTokenRanking: true,
+          UserTokenRanking: true, APIKeyTokenRanking: true,
         },
       },
     })
@@ -654,7 +694,7 @@ describe('admin UsageView errors tab filter forwarding', () => {
         UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
         DateRangePicker: true, Icon: true, TokenUsageTrend: true,
         ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
-        UserTokenRanking: true, OpsErrorLogTable: true, OpsErrorDetailModal: true,
+        UserTokenRanking: true, APIKeyTokenRanking: true, OpsErrorLogTable: true, OpsErrorDetailModal: true,
       } },
     })
     vi.advanceTimersByTime(120)
@@ -681,9 +721,23 @@ describe('admin UsageView errors tab filter forwarding', () => {
   })
 })
 
+const mountRankingUsageView = () => mount(UsageView, {
+  global: { stubs: {
+    AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+    UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+    UserBalanceHistoryModal: true, Pagination: true, Select: true,
+    DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+    ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+    UserTokenRanking: UserTokenRankingStub, APIKeyTokenRanking: APIKeyTokenRankingStub,
+    OpsErrorLogTable: OpsErrorLogTableStub, OpsErrorDetailModal: true,
+  } },
+})
+
 describe('admin UsageView ranking tab', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    rankingReload.mockReset()
+    keyRankingReload.mockReset()
     list.mockReset()
     getStats.mockReset()
     getSnapshotV2.mockReset()
@@ -710,7 +764,8 @@ describe('admin UsageView ranking tab', () => {
         UserBalanceHistoryModal: true, Pagination: true, Select: true,
         DateRangePicker: true, Icon: true, TokenUsageTrend: true,
         ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
-        UserTokenRanking: UserTokenRankingStub, OpsErrorLogTable: true, OpsErrorDetailModal: true,
+        UserTokenRanking: UserTokenRankingStub, APIKeyTokenRanking: APIKeyTokenRankingStub,
+        OpsErrorLogTable: true, OpsErrorDetailModal: true,
       } },
     })
     vi.advanceTimersByTime(120)
@@ -720,7 +775,7 @@ describe('admin UsageView ranking tab', () => {
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(false)
 
     const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
-    expect(tabs).toHaveLength(3)
+    expect(tabs).toHaveLength(4)
     await tabs[2].trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(true)
@@ -734,10 +789,135 @@ describe('admin UsageView ranking tab', () => {
     expect((wrapper.vm as any).filters.user_id).toBe(5)
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ user_id: 5 }), expect.anything())
   })
+
+  it('mounts the key ranking lazily and drill-down sets api_key_id, backfills the key name and jumps back', async () => {
+    const wrapper = mountRankingUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="key-ranking"]').exists()).toBe(false)
+
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[3].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="key-ranking"]').exists()).toBe(true)
+
+    list.mockClear()
+    await wrapper.find('[data-test="key-ranking"] .pick-key').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.vm as any).activeTab).toBe('usage')
+    expect((wrapper.vm as any).filters.api_key_id).toBe(42)
+    expect(wrapper.get('[data-test="api-key-filter-label"]').text()).toBe('prod-key')
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ api_key_id: 42 }), expect.anything())
+  })
+
+  it('key ranking has its own column settings while the user ranking has none', async () => {
+    vi.mocked(localStorage.getItem).mockReset().mockImplementation((key: string) =>
+      key === 'usage-key-ranking-hidden-columns' ? JSON.stringify(['cache_tokens']) : null
+    )
+    vi.mocked(localStorage.setItem).mockReset()
+
+    const wrapper = mountRankingUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[2].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-column-settings"]').exists()).toBe(false)
+
+    await tabs[3].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-column-settings"]').exists()).toBe(true)
+
+    const keyRanking = wrapper.findComponent(APIKeyTokenRankingStub)
+    // 存档里的 cache_tokens 已隐藏
+    expect(keyRanking.props('visibleColumnKeys')).toEqual([
+      'key', 'user', 'requests', 'input_tokens', 'output_tokens', 'total_tokens', 'actual_cost',
+    ])
+
+    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
+    // 密钥列是行的身份，不出现在可切换列表里
+    expect(wrapper.find('[data-testid="usage-column-toggle-key"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="usage-column-toggle-user"]').trigger('click')
+    await flushPromises()
+
+    expect(keyRanking.props('visibleColumnKeys')).not.toContain('user')
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'usage-key-ranking-hidden-columns',
+      JSON.stringify(['cache_tokens', 'user'])
+    )
+    // 与用量明细 / 错误请求的存档互不干扰
+    expect(localStorage.setItem).not.toHaveBeenCalledWith('usage-hidden-columns', expect.anything())
+    expect(localStorage.setItem).not.toHaveBeenCalledWith('usage-error-hidden-columns', expect.anything())
+  })
+
+  // 错误请求 tab 的列显隐与其它 tab 共用 useHiddenColumns：存档键、默认隐藏列
+  // 与 alwaysVisible 守卫都由 composable 统一负责。
+  it('error tab column settings honour the archive and never hide a required column', async () => {
+    vi.mocked(localStorage.getItem).mockReset().mockImplementation((key: string) =>
+      key === 'usage-error-hidden-columns' ? JSON.stringify(['category', 'status']) : null
+    )
+    vi.mocked(localStorage.setItem).mockReset()
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 0 })
+
+    const wrapper = mountRankingUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[1].trigger('click')
+    await flushPromises()
+
+    const errorTable = wrapper.findComponent(OpsErrorLogTableStub)
+    // 存档里的 category 已隐藏；status 属于 alwaysVisible，存档也不能把它藏掉
+    expect(errorTable.props('visibleColumnKeys')).not.toContain('category')
+    expect(errorTable.props('visibleColumnKeys')).toContain('status')
+
+    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
+    // alwaysVisible 的列不出现在可切换列表里
+    expect(wrapper.find('[data-testid="usage-column-toggle-status"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="usage-column-toggle-model"]').trigger('click')
+    await flushPromises()
+
+    expect(errorTable.props('visibleColumnKeys')).not.toContain('model')
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'usage-error-hidden-columns',
+      JSON.stringify(['category', 'model'])
+    )
+    expect(localStorage.setItem).not.toHaveBeenCalledWith('usage-hidden-columns', expect.anything())
+  })
+
+  it('refresh reloads every mounted ranking, not only the user one', async () => {
+    const wrapper = mountRankingUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[3].trigger('click')
+    await flushPromises()
+
+    ;(wrapper.vm as any).refreshData()
+    expect(keyRankingReload).toHaveBeenCalledTimes(1)
+    // 用户排行从未打开过，不存在实例，自然不 reload
+    expect(rankingReload).not.toHaveBeenCalled()
+
+    await tabs[2].trigger('click')
+    await flushPromises()
+    ;(wrapper.vm as any).refreshData()
+    expect(rankingReload).toHaveBeenCalledTimes(1)
+    expect(keyRankingReload).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('admin UsageView model audit export', () => {
 	beforeEach(() => {
+		consumeUsageExport.mockReset().mockImplementation(async (_endpoint, _params, onRows) => {
+			const result = await exportList()
+			onRows(result.items)
+			return result.items.length
+		})
 		vi.useFakeTimers()
 		list.mockReset().mockResolvedValue({ items: [], total: 0, pages: 0 })
 		exportList.mockReset().mockResolvedValue({
@@ -754,6 +934,8 @@ describe('admin UsageView model audit export', () => {
 				cache_read_tokens: 0,
 				cache_creation_tokens: 0,
 				duration_ms: 10,
+				first_token_ms: 1,
+				latency_metrics: { version: 1, first_event_ms: 100, first_content_ms: 400, first_text_ms: 500, duration_ms: 900 },
 			}],
 			total: 1,
 			pages: 1,
@@ -783,9 +965,9 @@ describe('admin UsageView model audit export', () => {
 		await (wrapper.vm as any).exportToExcel()
 		await flushPromises()
 
-		expect(exportList).toHaveBeenCalledWith(
-			expect.objectContaining({ native_compaction_v2: true }),
-			expect.anything()
+		expect(consumeUsageExport).toHaveBeenCalledWith(
+			'/admin/usage/export', expect.objectContaining({ native_compaction_v2: true }),
+			expect.any(Function), expect.any(AbortSignal)
 		)
 
 		const headers = aoaToSheet.mock.calls[0][0][0]
@@ -797,6 +979,13 @@ describe('admin UsageView model audit export', () => {
 		])
 		const row = sheetAddAoa.mock.calls[0][1][0]
 		expect(row.slice(4, 8)).toEqual(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'Yes'])
+		const timingIndex = headers.indexOf('usage.latencyMeasurement')
+		expect(timingIndex).toBeGreaterThan(0)
+		expect(row.slice(timingIndex, timingIndex + 6)).toEqual(['unified_v1', 100, 400, 500, 900, ''])
+		expect(row[headers.indexOf('usage.cacheHitRate (%)')]).toBe('0.00')
 		expect(saveAs).toHaveBeenCalledTimes(1)
 	})
 })
+
+// Existing behavior under the migrated full administrator role.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))

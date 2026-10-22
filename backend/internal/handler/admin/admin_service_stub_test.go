@@ -191,6 +191,8 @@ func (s *stubAdminService) UpdateUser(ctx context.Context, id int64, input *serv
 	return &user, nil
 }
 
+func (s *stubAdminService) DeleteUsers(ctx context.Context, ids []int64) error { return nil }
+
 func (s *stubAdminService) DeleteUser(ctx context.Context, id int64) error {
 	return nil
 }
@@ -544,11 +546,6 @@ func (s *stubAdminService) UpdateAccountExtra(ctx context.Context, id int64, upd
 
 func (s *stubAdminService) DeleteAccount(ctx context.Context, id int64) error {
 	return nil
-}
-
-func (s *stubAdminService) RefreshAccountCredentials(ctx context.Context, id int64) (*service.Account, error) {
-	account := service.Account{ID: id, Name: "account", Status: service.StatusActive}
-	return &account, nil
 }
 
 func (s *stubAdminService) ClearAccountError(ctx context.Context, id int64) (*service.Account, error) {

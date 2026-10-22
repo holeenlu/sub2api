@@ -65,6 +65,13 @@ func TestBuildUsageBillingCommand_AccountQuotaPeriodHints(t *testing.T) {
 			require.Equal(t, tt.wantQuota, cmd.AccountQuotaCost > 0)
 			require.Equal(t, tt.wantDaily, cmd.AccountQuotaHasDailyLimit)
 			require.Equal(t, tt.wantWeekly, cmd.AccountQuotaHasWeeklyLimit)
+
+			p.Cost = &CostBreakdown{PricingError: "temporarily unavailable"}
+			pending := buildUsageBillingCommand("pending", nil, p)
+			require.True(t, pending.Pricing.Pending)
+			require.Equal(t, tt.wantQuota, pending.Pricing.AccountQuota)
+			p.SimpleModeKeyRateLimitOnly = true
+			require.False(t, buildUsageBillingCommand("simple-pending", nil, p).Pricing.AccountQuota)
 		})
 	}
 }

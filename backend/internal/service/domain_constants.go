@@ -18,8 +18,11 @@ const (
 
 // Role constants
 const (
-	RoleAdmin = domain.RoleAdmin
-	RoleUser  = domain.RoleUser
+	RoleSuperAdmin   = domain.RoleSuperAdmin
+	RoleAdmin        = domain.RoleAdmin
+	RoleUser         = domain.RoleUser
+	RoleVendorLevel1 = domain.RoleVendorLevel1
+	RoleVendorLevel2 = domain.RoleVendorLevel2
 )
 
 // Affiliate rebate settings
@@ -145,6 +148,20 @@ var AllowedSchedulingThresholdPlatforms = []string{
 	PlatformOpenCodeGo,
 	PlatformCommandCode,
 }
+
+// SchedulingThresholdScopeAnthropicFable 是 Anthropic Fable 模型家族的独立停调阈值
+// scope。它不是平台——account.Platform 永远不会等于它，只在
+// account_scheduling_thresholds 这张 map 里多占一个 key。越线只对 Fable 打模型级
+// 限流，账号对其他模型仍可调度。
+const SchedulingThresholdScopeAnthropicFable = "anthropic_fable"
+
+// AllowedSchedulingThresholdScopes 是 account_scheduling_thresholds 允许出现的全部
+// key：平台 + 非平台 scope。设置的校验/解析/审计遍历用它；判定「某账号平台是否支持
+// 阈值停调」仍用 AllowedSchedulingThresholdPlatforms。
+var AllowedSchedulingThresholdScopes = append(
+	append([]string{}, AllowedSchedulingThresholdPlatforms...),
+	SchedulingThresholdScopeAnthropicFable,
+)
 
 // IsAllowedQuotaPlatform 报告 s 是否为合法的 quota platform 标识。
 func IsAllowedQuotaPlatform(s string) bool {
@@ -381,7 +398,6 @@ const (
 	SettingKeyDocURL                      = "doc_url"                       // 文档链接
 	SettingKeyHomeContent                 = "home_content"                  // 首页内容（支持 Markdown/HTML，或 URL 作为 iframe src）
 	SettingKeyCompactHomeEnabled          = "compact_home_enabled"          // 是否启用内置简洁首页
-	SettingKeyHideCcsImportButton         = "hide_ccs_import_button"        // 是否隐藏 API Keys 页面的导入 CCS 按钮
 	SettingKeyPurchaseSubscriptionEnabled = "purchase_subscription_enabled" // 是否展示"购买订阅"页面入口
 	SettingKeyPurchaseSubscriptionURL     = "purchase_subscription_url"     // "购买订阅"页面 URL（作为 iframe src）
 	SettingKeyTableDefaultPageSize        = "table_default_page_size"       // 表格默认每页条数
@@ -642,21 +658,8 @@ const (
 	SettingKeyOpenAILowUpstreamRatePriorityEnabled = "openai_low_upstream_rate_priority_enabled"
 	// SettingKeyOpenAIOAuthSchedulingRateMultiplier OAuth 账号参与成本调度时使用的参考倍率。
 	SettingKeyOpenAIOAuthSchedulingRateMultiplier = "openai_oauth_scheduling_rate_multiplier"
-	// SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled OpenAI 高级调度下是否启用粘性加权。
-	SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled = "openai_advanced_scheduler_sticky_weighted_enabled"
 	// SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled OpenAI 高级调度下是否优先使用订阅账号池。
 	SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled = "openai_advanced_scheduler_subscription_priority_enabled"
-	SettingKeyOpenAIAdvancedSchedulerLBTopK                      = "openai_advanced_scheduler_lb_top_k"
-	SettingKeyOpenAIAdvancedSchedulerWeightPriority              = "openai_advanced_scheduler_weight_priority"
-	SettingKeyOpenAIAdvancedSchedulerWeightLoad                  = "openai_advanced_scheduler_weight_load"
-	SettingKeyOpenAIAdvancedSchedulerWeightQueue                 = "openai_advanced_scheduler_weight_queue"
-	SettingKeyOpenAIAdvancedSchedulerWeightErrorRate             = "openai_advanced_scheduler_weight_error_rate"
-	SettingKeyOpenAIAdvancedSchedulerWeightTTFT                  = "openai_advanced_scheduler_weight_ttft"
-	SettingKeyOpenAIAdvancedSchedulerWeightReset                 = "openai_advanced_scheduler_weight_reset"
-	SettingKeyOpenAIAdvancedSchedulerWeightQuotaHeadroom         = "openai_advanced_scheduler_weight_quota_headroom"
-	SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost          = "openai_advanced_scheduler_weight_upstream_cost"
-	SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse      = "openai_advanced_scheduler_weight_previous_response"
-	SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky         = "openai_advanced_scheduler_weight_session_sticky"
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"

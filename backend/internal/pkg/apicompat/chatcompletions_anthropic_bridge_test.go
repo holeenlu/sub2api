@@ -8,6 +8,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestChatMessagesParallelToolBlocksRemainOpenUntilComplete(t *testing.T) {
+	state := NewChatCompletionsToAnthropicStreamState("example")
+	var events []AnthropicStreamEvent
+	for _, calls := range [][]ChatToolCall{
+		{{Index: intPtr(4), ID: "call_a", Function: ChatFunctionCall{Name: "first", Arguments: `{"record":`}}, {Index: intPtr(9), ID: "call_b", Function: ChatFunctionCall{Arguments: `{"other":`}}},
+		{{Index: intPtr(9), Function: ChatFunctionCall{Name: "second", Arguments: `7}`}}, {Index: intPtr(4), Function: ChatFunctionCall{Arguments: `42}`}}},
+	} {
+		events = append(events, ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{ToolCalls: calls}}}}, state)...)
+	}
+	events = append(events, FinalizeChatCompletionsAnthropicStream(state)...)
+	require.NoError(t, state.Err())
+	requireAnthropicBlockLifecycle(t, events)
+	args := make(map[int]string)
+	for _, e := range events {
+		if e.Delta != nil && e.Delta.Type == "input_json_delta" {
+			args[*e.Index] += e.Delta.PartialJSON
+		}
+	}
+	require.JSONEq(t, `{"record":42}`, args[0])
+	require.JSONEq(t, `{"other":7}`, args[1])
+	require.Empty(t, FinalizeChatCompletionsAnthropicStream(state))
+	require.Empty(t, ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{Content: strPtr("late")}}}}, state))
+}
+
+func TestChatMessagesInvalidToolCannotFinishSuccessfully(t *testing.T) {
+	state := NewChatCompletionsToAnthropicStreamState("example")
+	ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{ToolCalls: []ChatToolCall{{Index: intPtr(0), ID: "call_a", Function: ChatFunctionCall{Name: "inspect", Arguments: `{"record":`}}}}}}}, state)
+	require.Empty(t, FinalizeChatCompletionsAnthropicStream(state))
+	require.Error(t, state.Err())
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -1120,8 +1151,7 @@ func TestDirectBridge_NonStreamingMatchesDoubleConversion_EmptyChoices(t *testin
 }
 
 func TestChatCompletionsResponseToAnthropic_ContentFilterWithToolUse(t *testing.T) {
-	// content_filter (and unknown finish reasons) derive stop_reason from the
-	// blocks, like the double-conversion path.
+	// A filtered turn must not invite execution of the partial tool call.
 	resp := &ChatCompletionsResponse{
 		ID:    "chatcmpl-cf",
 		Model: "deepseek-v4-pro",
@@ -1140,5 +1170,5 @@ func TestChatCompletionsResponseToAnthropic_ContentFilterWithToolUse(t *testing.
 	}
 
 	out := ChatCompletionsResponseToAnthropic(resp, "claude-sonnet-4-20250514")
-	require.Equal(t, "tool_use", AnthropicStopReasonString(out.StopReason))
+	require.Equal(t, "refusal", AnthropicStopReasonString(out.StopReason))
 }

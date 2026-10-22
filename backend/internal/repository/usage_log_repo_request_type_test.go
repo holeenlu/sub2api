@@ -76,6 +76,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			true,
 			sqlmock.AnyArg(), // duration_ms
 			sqlmock.AnyArg(), // first_token_ms
+			sqlmock.AnyArg(), // latency_metrics
 			sqlmock.AnyArg(), // user_agent
 			sqlmock.AnyArg(), // ip_address
 			log.ImageCount,
@@ -99,10 +100,16 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // billing_tier
 			sqlmock.AnyArg(), // billing_mode
 			sqlmock.AnyArg(), // account_stats_cost
+			sqlmock.AnyArg(), // vendor_id_snapshot
+			sqlmock.AnyArg(), // account_name_snapshot
+			sqlmock.AnyArg(), // group_name_snapshot
+			sqlmock.AnyArg(), // platform_snapshot
+			sqlmock.AnyArg(), // authorization_mode
 			sqlmock.AnyArg(), // upstream_request_id
 			sqlmock.AnyArg(), // session_id
 			log.NativeCompactionV2,
 			createdAt,
+			"unknown",
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -171,6 +178,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			false,
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
+			sqlmock.AnyArg(), // latency_metrics
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			log.ImageCount,
@@ -194,10 +202,16 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // billing_tier
 			sqlmock.AnyArg(), // billing_mode
 			sqlmock.AnyArg(), // account_stats_cost
+			sqlmock.AnyArg(), // vendor_id_snapshot
+			sqlmock.AnyArg(), // account_name_snapshot
+			sqlmock.AnyArg(), // group_name_snapshot
+			sqlmock.AnyArg(), // platform_snapshot
+			sqlmock.AnyArg(), // authorization_mode
 			sqlmock.AnyArg(), // upstream_request_id
 			sqlmock.AnyArg(), // session_id
 			log.NativeCompactionV2,
 			createdAt,
+			"unknown",
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
@@ -278,8 +292,8 @@ func TestPrepareUsageLogInsert_PersistsNativeCompactionV2WithoutChangingRequestT
 	prepared := prepareUsageLogInsert(log)
 
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
-	require.Equal(t, "boolean", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-2])
-	require.Equal(t, true, prepared.args[len(prepared.args)-2])
+	require.Equal(t, "boolean", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-3])
+	require.Equal(t, true, prepared.args[len(prepared.args)-3])
 	require.Equal(t, int16(service.RequestTypeStream), prepared.args[30])
 	require.Equal(t, service.RequestTypeStream, log.RequestType)
 	require.True(t, log.Stream)
@@ -307,11 +321,11 @@ func TestPrepareUsageLogInsert_PersistsImageSizeMetadata(t *testing.T) {
 		CreatedAt:          time.Date(2025, 1, 6, 12, 0, 0, 0, time.UTC),
 	})
 
-	require.Equal(t, sql.NullString{String: imageSize, Valid: true}, prepared.args[38])
-	require.Equal(t, sql.NullString{String: inputSize, Valid: true}, prepared.args[39])
-	require.Equal(t, sql.NullString{String: outputSize, Valid: true}, prepared.args[40])
-	require.Equal(t, sql.NullString{String: source, Valid: true}, prepared.args[41])
-	breakdownJSON, ok := prepared.args[42].(string)
+	require.Equal(t, sql.NullString{String: imageSize, Valid: true}, prepared.args[39])
+	require.Equal(t, sql.NullString{String: inputSize, Valid: true}, prepared.args[40])
+	require.Equal(t, sql.NullString{String: outputSize, Valid: true}, prepared.args[41])
+	require.Equal(t, sql.NullString{String: source, Valid: true}, prepared.args[42])
+	breakdownJSON, ok := prepared.args[43].(string)
 	require.True(t, ok)
 	require.JSONEq(t, `{"1K":1,"4K":1}`, breakdownJSON)
 }
@@ -698,8 +712,8 @@ func TestUsageLogRepositoryGetModelStatsAccountCostColumn(t *testing.T) {
 	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
 
-	mock.ExpectQuery("FROM usage_logs").
-		WithArgs(start, end).
+	mock.ExpectQuery(`SUM\(actual_cost\), 0\) as actual_cost`).
+		WithArgs(start, end, int64(17)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"model", "requests", "input_tokens", "output_tokens",
 			"cache_creation_tokens", "cache_read_tokens", "total_tokens",
@@ -708,7 +722,7 @@ func TestUsageLogRepositoryGetModelStatsAccountCostColumn(t *testing.T) {
 			AddRow("claude-opus-4-6", int64(10), int64(100), int64(200), int64(5), int64(3), int64(308), 2.5, 2.0, 1.8).
 			AddRow("claude-sonnet-4-6", int64(5), int64(50), int64(100), int64(0), int64(0), int64(150), 1.0, 0.8, 0.7))
 
-	results, err := repo.GetModelStatsWithFilters(context.Background(), start, end, 0, 0, 0, 0, nil, nil, nil)
+	results, err := repo.GetModelStatsWithFilters(context.Background(), start, end, 0, 0, 17, 0, nil, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	require.Equal(t, "claude-opus-4-6", results[0].Model)
@@ -934,6 +948,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			false,
 			sql.NullInt64{},
 			sql.NullInt64{},
+			sql.NullString{}, // latency_metrics
 			sql.NullString{},
 			sql.NullString{},
 			2,
@@ -957,10 +972,16 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			sql.NullString{},
 			sql.NullFloat64{},
+			sql.NullInt64{},  // vendor_id_snapshot
+			sql.NullString{}, // account_name_snapshot
+			sql.NullString{}, // group_name_snapshot
+			sql.NullString{}, // platform_snapshot
+			sql.NullString{}, // authorization_mode
 			sql.NullString{}, // upstream_request_id
 			sql.NullString{},
 			false, // native_compaction_v2
 			now,
+			"unknown",
 		}})
 		require.NoError(t, err)
 		require.Equal(t, 2, log.ImageCount)
@@ -1014,6 +1035,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			false, // legacy openai ws
 			sql.NullInt64{},
 			sql.NullInt64{},
+			sql.NullString{}, // latency_metrics
 			sql.NullString{},
 			sql.NullString{},
 			0,
@@ -1037,10 +1059,16 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_tier
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
+			sql.NullInt64{},   // vendor_id_snapshot
+			sql.NullString{},  // account_name_snapshot
+			sql.NullString{},  // group_name_snapshot
+			sql.NullString{},  // platform_snapshot
+			sql.NullString{},  // authorization_mode
 			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			false,             // native_compaction_v2
 			now,
+			"unknown",
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1077,6 +1105,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			false,
 			sql.NullInt64{},
 			sql.NullInt64{},
+			sql.NullString{}, // latency_metrics
 			sql.NullString{},
 			sql.NullString{},
 			0,
@@ -1100,10 +1129,16 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_tier
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
+			sql.NullInt64{},   // vendor_id_snapshot
+			sql.NullString{},  // account_name_snapshot
+			sql.NullString{},  // group_name_snapshot
+			sql.NullString{},  // platform_snapshot
+			sql.NullString{},  // authorization_mode
 			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			true,              // native_compaction_v2
 			now,
+			"unknown",
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1141,6 +1176,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			false,
 			sql.NullInt64{},
 			sql.NullInt64{},
+			sql.NullString{}, // latency_metrics
 			sql.NullString{},
 			sql.NullString{},
 			0,
@@ -1164,10 +1200,16 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_tier
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
+			sql.NullInt64{},   // vendor_id_snapshot
+			sql.NullString{},  // account_name_snapshot
+			sql.NullString{},  // group_name_snapshot
+			sql.NullString{},  // platform_snapshot
+			sql.NullString{},  // authorization_mode
 			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			false,             // native_compaction_v2
 			now,
+			"unknown",
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
