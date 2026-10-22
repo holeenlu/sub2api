@@ -30,7 +30,7 @@
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="showCreateDialog = true" class="btn btn-primary">
+            <button v-if="rolePermissions.can('promo_codes.manage')" @click="showCreateDialog = true" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-1" />
               {{ t('admin.promo.createCode') }}
             </button>
@@ -125,14 +125,14 @@
               >
                 <Icon name="eye" size="sm" />
               </button>
-              <button
+              <button v-if="rolePermissions.can('promo_codes.manage')"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-600 dark:hover:text-gray-300"
                 :title="t('common.edit')"
               >
                 <Icon name="edit" size="sm" />
               </button>
-              <button
+              <button v-if="rolePermissions.can('promo_codes.manage')"
                 @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                 :title="t('common.delete')"
@@ -163,7 +163,7 @@
       width="normal"
       @close="showCreateDialog = false"
     >
-      <form id="create-promo-form" @submit.prevent="handleCreate" class="space-y-4">
+      <form v-if="rolePermissions.can('promo_codes.manage')" id="create-promo-form" @submit.prevent="handleCreate" class="space-y-4">
         <div>
           <label class="input-label">
             {{ t('admin.promo.code') }}
@@ -242,7 +242,7 @@
       width="normal"
       @close="closeEditDialog"
     >
-      <form id="edit-promo-form" @submit.prevent="handleUpdate" class="space-y-4">
+      <form v-if="rolePermissions.can('promo_codes.manage')" id="edit-promo-form" @submit.prevent="handleUpdate" class="space-y-4">
         <div>
           <label class="input-label">{{ t('admin.promo.code') }}</label>
           <input
@@ -386,6 +386,9 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore as useRolePermissions } from '@/stores/auth'
+const rolePermissions = useRolePermissions()
+
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
