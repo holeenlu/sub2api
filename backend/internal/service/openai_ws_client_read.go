@@ -2,23 +2,543 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	coderws "github.com/coder/websocket"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
+
+// OpenAIWSDownstreamConn lets every ingress path use the connection's single
+// reader and serialized writer, including handler errors and preemption.
+type OpenAIWSDownstreamConn interface {
+	Read(context.Context) (coderws.MessageType, []byte, error)
+	Write(context.Context, coderws.MessageType, []byte) error
+	Close(coderws.StatusCode, string) error
+	CloseNow() error
+}
+
+const openAIWSClientQueueLimit = 8
+
+// normalizeOpenAIWSInterrupt adapts the control to the native cancellation
+// lifecycle. The accepted frame is metadata; it does not commit model output.
+func normalizeOpenAIWSInterrupt(payload []byte) (cancel, ack []byte, target string, err error) {
+	if len(payload) > 16<<10 || !gjson.ValidBytes(payload) || !gjson.ParseBytes(payload).IsObject() {
+		return nil, nil, "", errors.New("invalid response.interrupt frame")
+	}
+	seen := map[string]bool{}
+	duplicate := false
+	gjson.ParseBytes(payload).ForEach(func(key, value gjson.Result) bool {
+		switch key.String() {
+		case "type", "previous_response_id", "response_id", "mode":
+			if seen[key.String()] {
+				duplicate = true
+			}
+			seen[key.String()] = true
+		}
+		return true
+	})
+	if duplicate {
+		return nil, nil, "", errors.New("duplicate response.interrupt field")
+	}
+	if _, _, err = openAIWSRequestEnvelope(payload); err != nil {
+		return nil, nil, "", err
+	}
+	event := map[string]any{"type": "response.interrupt.accepted"}
+	cancelEvent := map[string]any{"type": "response.cancel"}
+	for _, key := range []string{"previous_response_id", "response_id", "mode", "event_id", "stream_id"} {
+		value := gjson.GetBytes(payload, key)
+		if !value.Exists() {
+			continue
+		}
+		if value.Type != gjson.String || len(value.String()) > 512 {
+			return nil, nil, "", errors.New("invalid response.interrupt " + key)
+		}
+		if key == "event_id" || key == "stream_id" {
+			event[key] = value.String()
+			cancelEvent[key] = value.String()
+		}
+	}
+	previous := strings.TrimSpace(gjson.GetBytes(payload, "previous_response_id").String())
+	response := strings.TrimSpace(gjson.GetBytes(payload, "response_id").String())
+	if previous != "" {
+		target = previous
+		event["previous_response_id"] = previous
+	} else if response != "" {
+		target = response
+		event["response_id"] = response
+	}
+	if mode := gjson.GetBytes(payload, "mode").String(); mode != "" {
+		event["mode"] = mode
+	}
+	if target != "" {
+		cancelEvent["response_id"] = target
+	}
+	cancel, err = json.Marshal(cancelEvent)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	ack, err = json.Marshal(event)
+	return cancel, ack, target, err
+}
+
+const openAIWSUsageDrainTimeout = 1200 * time.Millisecond
+const openAIWSCloseHandshakeTimeout = 250 * time.Millisecond
+
+var errOpenAIWSUsageDrainExpired = errors.New("websocket client usage drain expired")
+var ErrOpenAIWSLocalClientPolicy = errors.New("websocket client policy rejection")
+var errOpenAIWSTurnCancelled = errors.New("websocket turn cancelled by client")
+
+type openAIWSControl struct {
+	payload   []byte
+	turn      uint64
+	interrupt bool
+}
+
+// OpenAIWSDownstream owns the physical socket for its complete lifetime, rather
+// than starting a new reader each time an account/turn changes.
+type OpenAIWSDownstream struct {
+	budget            atomic.Pointer[OpenAITurnBudget] // replaced only for a newly accepted client turn
+	stagingDeadline   time.Time
+	responseIDs       map[string]bool
+	streamID          atomic.Pointer[string] // current implementation admits one lane per socket
+	conn              OpenAIWSDownstreamConn
+	frames            chan openAIWSClientReadResult
+	controls          chan openAIWSControl
+	done              chan struct{}
+	err               error // published by done
+	queued            atomic.Int64
+	maxQueued         int64
+	writeGate         chan struct{}
+	writeCtx          context.Context
+	stopWrites        context.CancelFunc
+	closeOnce         sync.Once
+	turn              atomic.Uint64
+	active            atomic.Bool
+	controlsEnabled   atomic.Bool
+	modeSelected      atomic.Bool
+	lastTerminalID    atomic.Pointer[string]
+	terminalTurn      atomic.Uint64
+	requestEventID    string
+	currentResponseID atomic.Pointer[string]
+	nativeHistory     openAIWSRecoveryHistory
+	bridgeHistory     openAIWSRecoveryHistory
+}
+
+// Successful history belongs to the socket owner, not an individual upstream
+// invocation. The ingress coordinator is its single reader/writer.
+type openAIWSRecoveryHistory struct {
+	accountID                        int64
+	siwcOwner                        string
+	siwcTools                        json.RawMessage
+	responseID, windowID             string
+	payload                          []byte
+	strict                           *openAIWSIngressPreviousTurnStrictState
+	input, portableInput             []json.RawMessage
+	exists, portableExists, complete bool
+}
+
+// FinishTurnAndReadNext never creates a second physical socket reader. A failed
+// response is not added to history. Only accepting a new create resets budgets.
+func (s *OpenAIWSDownstream) FinishTurnAndReadNext(ctx context.Context, cfg *config.Config, code, message string) ([]byte, error) {
+	if s.terminalTurn.Load() != s.turn.Load() {
+		event := map[string]any{"type": "error", "error": map[string]string{"type": "server_error", "code": code, "message": message}}
+		if id := s.currentResponseID.Load(); id != nil && *id != "" {
+			event = map[string]any{"type": "response.failed", "response": map[string]any{"id": *id, "object": "response", "status": "failed", "error": event["error"]}}
+		} else if s.requestEventID != "" {
+			event["event_id"] = s.requestEventID
+		}
+		payload, _ := json.Marshal(event)
+		writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := s.Write(writeCtx, coderws.MessageText, payload)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		s.terminalTurn.Store(s.turn.Load())
+	}
+	s.active.Store(false)
+	for {
+		kind, payload, err := ReadOpenAIWSClientMessage(ctx, s, openAIWSPassthroughIdleTimeoutDefault, coderws.StatusNormalClosure, "websocket idle")
+		if err != nil {
+			return nil, err
+		}
+		if kind != coderws.MessageText || !gjson.ValidBytes(payload) {
+			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request", ErrOpenAIWSLocalClientPolicy)
+		}
+		if typ := gjson.GetBytes(payload, "type").String(); typ != "response.create" && typ != "" {
+			if err := s.writeControlError(ctx, payload, "expected response.create after failed turn"); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if err := s.bindRequestEnvelope(payload); err != nil {
+			return nil, err
+		}
+		s.budget.Store(NewOpenAITurnBudget(cfg))
+		s.stagingDeadline, s.responseIDs = time.Time{}, nil
+		return payload, nil
+	}
+}
+
+func openAIWSRequestEnvelope(payload []byte) (string, string, error) {
+	stream := gjson.GetBytes(payload, "stream_id")
+	event := gjson.GetBytes(payload, "event_id")
+	lane := stream.String()
+	if stream.Exists() {
+		valid := stream.Type == gjson.String && len(lane) >= 1 && len(lane) <= 256
+		for _, ch := range lane {
+			valid = valid && (ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '_' || ch == '-' || ch == '.')
+		}
+		if !valid {
+			return "", "", NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid stream_id: use 1-256 ASCII letters, digits, underscores, hyphens or periods", ErrOpenAIWSLocalClientPolicy)
+		}
+	}
+	if event.Exists() && event.Type != gjson.String {
+		return "", "", NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "event_id must be a string", ErrOpenAIWSLocalClientPolicy)
+	}
+	seenStream, seenEvent := false, false
+	duplicate := false
+	gjson.ParseBytes(payload).ForEach(func(key, _ gjson.Result) bool {
+		switch key.String() {
+		case "stream_id":
+			duplicate, seenStream = seenStream, true
+		case "event_id":
+			duplicate, seenEvent = seenEvent, true
+		}
+		return !duplicate
+	})
+	if duplicate {
+		return "", "", NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "duplicate websocket envelope field", ErrOpenAIWSLocalClientPolicy)
+	}
+	return lane, event.String(), nil
+}
+
+func (s *OpenAIWSDownstream) bindRequestEnvelope(payload []byte) error {
+	lane, eventID, err := openAIWSRequestEnvelope(payload)
+	if err != nil {
+		return err
+	}
+	if previous := s.streamID.Load(); previous != nil {
+		if *previous != lane {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "this websocket connection supports one response stream; open a separate connection for another stream", ErrOpenAIWSLocalClientPolicy)
+		}
+	} else {
+		s.streamID.Store(&lane)
+	}
+	s.requestEventID = eventID
+	s.currentResponseID.Store(nil)
+	return nil
+}
+
+// Preserve explicit control-error correlation; fill only missing request
+// envelope fields. Connection metadata stays connection-scoped.
+func openAIWSEventWithEnvelope(payload []byte, lane, eventID string) ([]byte, error) {
+	typ := gjson.GetBytes(payload, "type").String()
+	if typ != "error" && !strings.HasPrefix(typ, "response.") {
+		return payload, nil
+	}
+	var err error
+	if lane != "" && !gjson.GetBytes(payload, "stream_id").Exists() {
+		payload, err = sjson.SetBytes(payload, "stream_id", lane)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if typ == "error" && eventID != "" && !gjson.GetBytes(payload, "event_id").Exists() {
+		payload, err = sjson.SetBytes(payload, "event_id", eventID)
+	}
+	return payload, err
+}
+
+func NewOpenAIWSDownstream(conn OpenAIWSDownstreamConn, maxQueuedBytes int64) *OpenAIWSDownstream {
+	if existing, ok := conn.(*OpenAIWSDownstream); ok {
+		return existing
+	}
+	if maxQueuedBytes <= 0 {
+		maxQueuedBytes = 32 << 20
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &OpenAIWSDownstream{conn: conn, frames: make(chan openAIWSClientReadResult, openAIWSClientQueueLimit), controls: make(chan openAIWSControl, openAIWSClientQueueLimit), done: make(chan struct{}), maxQueued: maxQueuedBytes, writeGate: make(chan struct{}, 1), writeCtx: ctx, stopWrites: cancel}
+	s.controlsEnabled.Store(true)
+	go s.readLoop()
+	return s
+}
+
+// TurnBudgetContext is called before account selection and reused on retries.
+// Only a newly accepted client turn replaces s.budget in the ingress owner.
+func (s *OpenAIWSDownstream) TurnBudgetContext(ctx context.Context, cfg *config.Config, payload []byte) context.Context {
+	budget := s.budget.Load()
+	if budget == nil {
+		s.budget.CompareAndSwap(nil, NewOpenAITurnBudget(cfg))
+		budget = s.budget.Load()
+	}
+	return EnsureOpenAITurnBudget(WithOpenAITurnBudget(ctx, budget), cfg, gjson.GetBytes(payload, "reasoning.effort").String())
+}
+
+func (s *OpenAIWSDownstream) readLoop() {
+	defer close(s.done)
+	for {
+		kind, payload, err := s.conn.Read(context.Background())
+		if err != nil {
+			s.err = err
+			return
+		}
+		interrupt := gjson.GetBytes(payload, "type").String() == "response.interrupt"
+		interruptTurn := s.turn.Load()
+		if interrupt {
+			cancelPayload, ack, target, err := normalizeOpenAIWSInterrupt(payload)
+			if err != nil {
+				if writeErr := s.writeControlError(s.writeCtx, payload, err.Error()); writeErr != nil {
+					s.err = writeErr
+					return
+				}
+				continue
+			}
+			current, last := s.currentResponseID.Load(), s.lastTerminalID.Load()
+			lane := gjson.GetBytes(payload, "stream_id").String()
+			activeLane := s.streamID.Load()
+			matched := s.active.Load() && (target == "" || current != nil && *current == target && (last == nil || *last != target)) && (lane == "" || activeLane != nil && *activeLane == lane)
+			if target == "" && current != nil && (last == nil || *last != *current) {
+				cancelPayload, _ = sjson.SetBytes(cancelPayload, "response_id", *current)
+			}
+			writeCtx, cancel := context.WithTimeout(s.writeCtx, 5*time.Second)
+			err = s.Write(writeCtx, coderws.MessageText, ack)
+			cancel()
+			if err != nil {
+				s.err = err
+				return
+			}
+			if !matched || s.turn.Load() != interruptTurn {
+				continue
+			}
+			payload = cancelPayload
+		}
+		if (s.controlsEnabled.Load() || interrupt) && gjson.GetBytes(payload, "type").String() == "response.cancel" {
+			turn := s.turn.Load()
+			if interrupt {
+				turn = interruptTurn
+			}
+			if !s.active.Load() {
+				turn = 0
+			}
+			// Control frames cannot retain arbitrarily large request bodies.
+			if len(payload) > 16<<10 {
+				s.err = NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "websocket control frame too large", ErrOpenAIWSLocalClientPolicy)
+				s.closeTransport(coderws.StatusPolicyViolation, "websocket control frame too large", true)
+				return
+			}
+			select {
+			case s.controls <- openAIWSControl{payload: payload, turn: turn, interrupt: interrupt}:
+			default:
+				s.err = NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "too many pending websocket controls", ErrOpenAIWSLocalClientPolicy)
+				s.closeTransport(coderws.StatusPolicyViolation, "websocket control queue limit exceeded", true)
+				return
+			}
+			continue
+		}
+		if s.queued.Add(int64(len(payload))) > s.maxQueued {
+			s.err = NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "websocket request queue byte limit exceeded", ErrOpenAIWSLocalClientPolicy)
+			s.closeTransport(coderws.StatusPolicyViolation, "websocket request queue byte limit exceeded", true)
+			return
+		}
+		var turn uint64
+		if typ := gjson.GetBytes(payload, "type").String(); (typ == "response.create" || typ == "") && s.active.CompareAndSwap(false, true) {
+			turn = s.turn.Add(1)
+		}
+		select {
+		case s.frames <- openAIWSClientReadResult{messageType: kind, payload: payload, turn: turn}:
+		case <-s.writeCtx.Done():
+			s.err = io.ErrClosedPipe
+			return
+		}
+	}
+}
+
+func (s *OpenAIWSDownstream) Read(ctx context.Context) (coderws.MessageType, []byte, error) {
+	for {
+		controls := s.controls
+		// Account selection has not chosen native versus passthrough yet.
+		// Preserve early cancel frames while the handler reads the first create.
+		if !s.modeSelected.Load() {
+			controls = nil
+		}
+		select {
+		case <-ctx.Done():
+			return 0, nil, ctx.Err()
+		case <-s.done:
+			return 0, nil, s.err
+		case control := <-controls:
+			// A control may have arrived during account selection, before the
+			// ingress mode was known. Passthrough owns it once selected.
+			if !s.controlsEnabled.Load() {
+				if control.interrupt && (control.turn != s.turn.Load() || !s.active.Load()) {
+					continue
+				}
+				return coderws.MessageText, control.payload, nil
+			}
+			if control.interrupt {
+				continue
+			}
+			if err := s.writeControlError(ctx, control.payload, "no active response for cancellation"); err != nil {
+				return 0, nil, err
+			}
+		case frame := <-s.frames:
+			s.queued.Add(-int64(len(frame.payload)))
+			// A buffered create is not authorization to start new work after
+			// the physical reader has already observed the client's disconnect.
+			if !s.alive() {
+				select {
+				case <-s.done:
+					return 0, nil, s.err
+				default:
+					return 0, nil, io.ErrClosedPipe
+				}
+			}
+			if kind := gjson.GetBytes(frame.payload, "type").String(); kind == "response.create" || kind == "" {
+				if frame.turn == 0 {
+					s.turn.Add(1)
+				}
+				s.active.Store(true)
+			}
+			return frame.messageType, frame.payload, nil
+		}
+	}
+}
+
+func (s *OpenAIWSDownstream) Write(ctx context.Context, kind coderws.MessageType, payload []byte) error {
+	select {
+	case s.writeGate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.writeCtx.Done():
+		return io.ErrClosedPipe
+	}
+	defer func() { <-s.writeGate }()
+	if s.writeCtx.Err() != nil {
+		return io.ErrClosedPipe
+	}
+	lane := ""
+	if value := s.streamID.Load(); value != nil {
+		lane = *value
+	}
+	var envelopeErr error
+	payload, envelopeErr = openAIWSEventWithEnvelope(payload, lane, "")
+	if envelopeErr != nil {
+		return envelopeErr
+	}
+	writeCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.writeCtx, cancel)
+	defer func() { stop(); cancel() }()
+	if id := gjson.GetBytes(payload, "response.id").String(); id != "" {
+		s.currentResponseID.Store(&id)
+	}
+	eventType := gjson.GetBytes(payload, "type").String()
+	terminalError := eventType == "error" && gjson.GetBytes(payload, "error.code").String() != "response_not_active"
+	if isOpenAIWSTerminalEvent(eventType) || terminalError {
+		s.terminalTurn.Store(s.turn.Load())
+		if id := gjson.GetBytes(payload, "response.id").String(); id != "" {
+			s.lastTerminalID.Store(&id)
+		}
+		s.active.Store(false)
+	}
+	return s.conn.Write(writeCtx, kind, payload)
+}
+
+func (s *OpenAIWSDownstream) closeTransport(status coderws.StatusCode, reason string, graceful bool) {
+	s.closeOnce.Do(func() {
+		s.stopWrites()
+		s.writeGate <- struct{}{}
+		if graceful {
+			// A peer that ignores our close frame must not hold preemption or
+			// handler cleanup for the websocket library's full handshake wait.
+			closed := make(chan struct{})
+			timer := time.AfterFunc(openAIWSCloseHandshakeTimeout, func() { _ = s.conn.CloseNow(); close(closed) })
+			_ = s.conn.Close(status, reason)
+			if !timer.Stop() {
+				<-closed
+			}
+		}
+		_ = s.conn.CloseNow()
+		<-s.writeGate
+	})
+}
+func (s *OpenAIWSDownstream) close(status coderws.StatusCode, reason string, graceful bool) {
+	s.closeTransport(status, reason, graceful)
+	<-s.done
+}
+func (s *OpenAIWSDownstream) Close(status coderws.StatusCode, reason string) error {
+	s.close(status, reason, true)
+	return nil
+}
+func (s *OpenAIWSDownstream) CloseNow() error { s.close(0, "", false); return nil }
+func (s *OpenAIWSDownstream) alive() bool {
+	select {
+	case <-s.done:
+		return false
+	default:
+		return s.writeCtx.Err() == nil
+	}
+}
+func (s *OpenAIWSDownstream) writeControlError(ctx context.Context, control []byte, message string) error {
+	event := map[string]any{"type": "error", "error": map[string]string{"type": "invalid_request_error", "code": "response_not_active", "message": message}}
+	for _, key := range []string{"event_id", "stream_id"} {
+		if v := gjson.GetBytes(control, key).String(); v != "" {
+			event[key] = v
+		}
+	}
+	b, _ := json.Marshal(event)
+	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return s.Write(writeCtx, coderws.MessageText, b)
+}
+
+func (s *OpenAIWSDownstream) turnContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	turnCtx, cancel := context.WithCancelCause(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case <-turnCtx.Done():
+			return
+		case <-s.done:
+		}
+		timer := time.NewTimer(openAIWSUsageDrainTimeout)
+		defer timer.Stop()
+		select {
+		case <-turnCtx.Done():
+		case <-timer.C:
+			cancel(errOpenAIWSUsageDrainExpired)
+		}
+	}()
+	return turnCtx, func() { cancel(context.Canceled); <-done }
+}
+
+// ClientContext also bounds admission/failover work after the reader observes
+// disconnect, while allowing the same brief usage drain as an active turn.
+func (s *OpenAIWSDownstream) ClientContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return s.turnContext(ctx)
+}
 
 type openAIWSClientReadResult struct {
 	messageType coderws.MessageType
 	payload     []byte
 	err         error
+	turn        uint64
 }
 
 // ReadOpenAIWSClientMessage keeps one reader alive while control events send
 // their close frame, then closes the transport and joins that reader.
 func ReadOpenAIWSClientMessage(
 	controlCtx context.Context,
-	conn *coderws.Conn,
+	conn OpenAIWSDownstreamConn,
 	timeout time.Duration,
 	timeoutStatus coderws.StatusCode,
 	timeoutReason string,
@@ -39,7 +559,7 @@ func ReadOpenAIWSClientMessage(
 // timeoutActive is nil, a positive timeout starts immediately.
 func readOpenAIWSClientMessageWithTimeoutStart(
 	controlCtx context.Context,
-	conn *coderws.Conn,
+	conn OpenAIWSDownstreamConn,
 	timeout time.Duration,
 	timeoutStatus coderws.StatusCode,
 	timeoutReason string,
@@ -114,4 +634,23 @@ func readOpenAIWSClientMessageWithTimeoutStart(
 			return closeAndJoin(coderws.StatusGoingAway, "websocket request canceled", cause)
 		}
 	}
+}
+
+func (s *OpenAIWSDownstream) ClientClosed() bool { return !s.alive() }
+
+func (s *OpenAIWSDownstream) CanRetry(accountID int64, response []byte) (bool, OpenAIRetryStopReason) {
+	if !s.alive() || len(s.controls) != 0 {
+		// Client cancellation is not retry-budget exhaustion.
+		return false, ""
+	}
+	if IsUpstreamContentRefusal(response) {
+		return false, OpenAIRetryStopContentRefusal
+	}
+	if TurnOutputCommitted(WithOpenAITurnBudget(context.Background(), s.budget.Load())) {
+		return false, OpenAIRetryStopDownstreamCommitted
+	}
+	if !OpenAITurnRetryAllowed(WithOpenAITurnBudget(context.Background(), s.budget.Load()), accountID, response) {
+		return false, OpenAIRetryStopTurnBudget
+	}
+	return true, ""
 }

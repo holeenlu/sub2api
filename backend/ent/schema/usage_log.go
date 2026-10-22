@@ -31,10 +31,17 @@ func (UsageLog) Annotations() []schema.Annotation {
 // Fields 定义使用日志实体的所有字段。
 func (UsageLog) Fields() []ent.Field {
 	return []ent.Field{
+		field.String("billing_status").Default("unknown"),
 		// 关联字段
 		field.Int64("user_id"),
 		field.Int64("api_key_id"),
 		field.Int64("account_id"),
+		field.Int64("vendor_id_snapshot").Optional().Nillable().Immutable(),
+		field.Int64("vendor_root_id_snapshot").Optional().Nillable().Immutable(),
+		field.Int64("vendor_parent_id_snapshot").Optional().Nillable().Immutable(),
+		field.String("account_name_snapshot").Optional().Nillable().Immutable().SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.String("group_name_snapshot").Optional().Nillable().Immutable().SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.String("platform_snapshot").Optional().Nillable().Immutable().SchemaType(map[string]string{dialect.Postgres: "text"}),
 		field.String("request_id").
 			MaxLen(64).
 			NotEmpty(),
@@ -186,6 +193,9 @@ func (UsageLog) Fields() []ent.Field {
 			Default(time.Now).
 			Immutable().
 			SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
+		// Actual upstream authorization used for this metered execution. NULL
+		// preserves unknown historical/non-OpenAI usage; never backfill from accounts.
+		field.String("authorization_mode").Optional().Nillable().Immutable().MaxLen(6),
 	}
 }
 
@@ -221,6 +231,11 @@ func (UsageLog) Edges() []ent.Edge {
 // Indexes 定义数据库索引，优化查询性能。
 func (UsageLog) Indexes() []ent.Index {
 	return []ent.Index{
+		index.Fields("vendor_root_id_snapshot", "created_at", "id").StorageKey("idx_usage_logs_vendor_root_time").Annotations(entsql.IndexWhere("vendor_root_id_snapshot IS NOT NULL")),
+		index.Fields("vendor_id_snapshot", "created_at", "id").StorageKey("idx_usage_logs_vendor_time").Annotations(entsql.IndexWhere("vendor_id_snapshot IS NOT NULL")),
+		index.Fields("vendor_id_snapshot", "account_id", "created_at", "id").StorageKey("idx_usage_logs_vendor_account_time").Annotations(entsql.IndexWhere("vendor_id_snapshot IS NOT NULL")),
+		index.Fields("vendor_id_snapshot", "id").StorageKey("idx_usage_logs_vendor_watermark").Annotations(entsql.IndexWhere("vendor_id_snapshot IS NOT NULL")),
+		index.Fields("created_at", "id").StorageKey("idx_usage_logs_supply_time").Annotations(entsql.IndexWhere("vendor_id_snapshot IS NOT NULL")),
 		index.Fields("user_id"),
 		index.Fields("api_key_id"),
 		index.Fields("account_id"),

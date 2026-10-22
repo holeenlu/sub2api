@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -19,7 +20,7 @@ func (a *openAISSEDataAccumulator) AddLine(line string, fn func([]byte)) {
 		a.lines = append(a.lines, data)
 		return
 	}
-	if strings.TrimSpace(trimmedLine) == "" {
+	if trimmedLine == "" {
 		a.Flush(fn)
 	}
 }
@@ -29,66 +30,44 @@ func (a *openAISSEDataAccumulator) Flush(fn func([]byte)) {
 		return
 	}
 	emitOpenAISSEDataPayloads(a.lines, fn)
+	clear(a.lines)
 	a.lines = a.lines[:0]
 }
 
 func forEachOpenAISSEDataPayload(body string, fn func([]byte)) {
-	if fn == nil || strings.TrimSpace(body) == "" {
+	if fn == nil {
 		return
 	}
-	var acc openAISSEDataAccumulator
-	for _, line := range strings.Split(body, "\n") {
-		acc.AddLine(line, fn)
-	}
-	acc.Flush(fn)
+	forEachOpenAISSEFrame(body, func(_ string, data []byte) { fn(data) })
 }
 
 func forEachOpenAISSEFrame(body string, fn func(string, []byte)) {
-	if fn == nil || strings.TrimSpace(body) == "" {
+	if fn == nil || body == "" {
 		return
 	}
+	scanner := bufio.NewScanner(strings.NewReader(body))
+	scanner.Split(newSSEScanLines())
+	scanner.Buffer(make([]byte, 64*1024), defaultMaxLineSize)
+	frames := newOpenAISSEJSONDocumentScanner(scanner)
 	var parser openAICompatSSEFrameParser
-	emit := func(frame openAICompatSSEFrame, ok bool) {
-		if !ok {
-			return
+	for frames.Scan() {
+		frame, ok := parser.AddLine(frames.Text())
+		if !ok || strings.TrimSpace(frame.Data) == "[DONE]" {
+			continue
 		}
-		emitData := func(value string) {
-			value = strings.TrimSpace(value)
-			if value == "" || value == "[DONE]" {
-				return
-			}
-			data := []byte(value)
-			fn(effectiveOpenAISSEEventType(data, frame.EventType), data)
-		}
-		if gjson.Valid(frame.Data) {
-			emitData(frame.Data)
-			return
-		}
-		for _, value := range strings.Split(frame.Data, "\n") {
-			emitData(value)
-		}
+		data := []byte(frame.Data)
+		fn(effectiveOpenAISSEEventType(data, frame.EventType), data)
 	}
-	for _, line := range strings.Split(body, "\n") {
-		emit(parser.AddLine(strings.TrimRight(line, "\r")))
-	}
-	emit(parser.Finish())
+	// Pending EOF frames and malformed JSON never become terminal/usage events.
 }
 
 func emitOpenAISSEDataPayloads(lines []string, fn func([]byte)) {
 	if fn == nil || len(lines) == 0 {
 		return
 	}
-	if len(lines) == 1 {
-		emitOpenAISSEDataPayload(lines[0], fn)
-		return
-	}
 	joined := strings.Join(lines, "\n")
 	if gjson.Valid(joined) {
 		emitOpenAISSEDataPayload(joined, fn)
-		return
-	}
-	for _, line := range lines {
-		emitOpenAISSEDataPayload(line, fn)
 	}
 }
 

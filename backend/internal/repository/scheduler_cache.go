@@ -22,8 +22,8 @@ import (
 const (
 	schedulerBucketSetKey          = "sched:buckets"
 	schedulerOutboxWatermarkKey    = "sched:outbox:watermark"
-	schedulerAccountPrefix         = "sched:acc:"
-	schedulerAccountMetaPrefix     = "sched:meta:"
+	schedulerAccountPrefix         = "sched:acc:v3:"
+	schedulerAccountMetaPrefix     = "sched:meta:v3:"
 	schedulerAccountLastUsedPrefix = "sched:acc:last_used:"
 	schedulerActivePrefix          = "sched:active:"
 	schedulerReadyPrefix           = "sched:ready:"
@@ -295,12 +295,26 @@ func newSchedulerCacheWithChunkSizes(rdb *redis.Client, mgetChunkSize, writeChun
 func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.SchedulerBucket) ([]*service.Account, bool, error) {
 	bucketKey := bucket.String()
 	tagKeys := schedulerSnapshotTagKeys(bucket)
-	tags, err := c.rdb.MGet(ctx, tagKeys...).Result()
-	if err != nil {
-		return nil, false, err
+	// Keep Redis GET type errors while reading all revision tags in one round trip.
+	pipe := c.rdb.Pipeline()
+	commands := make([]*redis.StringCmd, len(tagKeys))
+	for i, key := range tagKeys {
+		commands[i] = pipe.Get(ctx, key)
 	}
-	if len(tags) != len(tagKeys) {
-		return nil, false, fmt.Errorf("unexpected scheduler snapshot tag count: got %d, want %d", len(tags), len(tagKeys))
+	_, _ = pipe.Exec(ctx)
+	tags := make([]any, len(tagKeys))
+	for i, command := range commands {
+		value, err := command.Result()
+		if err != nil && err != redis.Nil {
+			return nil, false, err
+		}
+		if i == 0 && value != "1" || i == 1 && value == "" {
+			c.dropSnapshotEntry(bucketKey)
+			return nil, false, nil
+		}
+		if err == nil {
+			tags[i] = value
+		}
 	}
 	readyVal, err := schedulerCacheOptionalString(tags[0])
 	if err != nil {
@@ -1155,6 +1169,13 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 }
 
 func buildSchedulerMetadataAccount(account service.Account) service.Account {
+	extra := filterSchedulerExtra(account.Extra)
+	for key, value := range service.SchedulingQuotaMetadataExtra(&account) {
+		if extra == nil {
+			extra = make(map[string]any)
+		}
+		extra[key] = value
+	}
 	return service.Account{
 		ID:                      account.ID,
 		Name:                    account.Name,
@@ -1182,7 +1203,7 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		AccountGroups:           filterSchedulerAccountGroups(account.AccountGroups),
 		GroupIDs:                filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
 		Credentials:             filterSchedulerCredentials(account.Credentials),
-		Extra:                   filterSchedulerExtra(account.Extra),
+		Extra:                   extra,
 	}
 }
 
@@ -1248,7 +1269,7 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	}
 	// Candidate-list admission evaluates the account override before hydrating
 	// the full account. Dropping it silently falls back to the platform threshold.
-	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold",
+	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold", "anthropic_fable_scheduling_threshold",
 		// Gemini 显式缓存的候选过滤（GeminiExplicitCacheExclusions）读本投影判定账号是否支持显式缓存：
 		// 官方地址、Vertex 认证方式与上游网关的显式缓存声明。缺这几个键时只能按类型粗筛，
 		// 不支持的账号要逐个选中后才被剔除。
@@ -1316,6 +1337,10 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// model_not_supported —— 转发阶段却仍按透传工作，表现为"单独测账号能通、
 		// 走网关报 no available accounts"。
 		"openai_passthrough",
+		// Preserve the selected grant mode before credential hydration.
+		service.OpenAISIWCEnabledKey,
+		"openai_excel_bps", "openai_excel_bps_models", "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_ignore_encrypted_content", "openai_excel_bps_omit_unsupported_tools",
+		"openai_excel_bps_auto_disable_on_403", "openai_excel_bps_auto_recover_on_403", "openai_excel_bps_403_recovery_interval_minutes", "openai_excel_bps_auto_move_on_403", "openai_excel_bps_403_target_group_id", "openai_excel_bps_403_disabled_at", "openai_excel_bps_403_last_probe_at", "openai_excel_bps_403_moved_at", "openai_excel_bps_403_moved_group_id",
 		"openai_oauth_passthrough",
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
