@@ -131,6 +131,7 @@ func TestOpenAISetupTokenWSCompatibility(t *testing.T) {
 		context.Background(), c, account, "setup-token-value",
 		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
 		true, "", "", "", "gpt-5.1-codex", "",
+		nil,
 	)
 	require.NoError(t, err)
 	require.Equal(t, "Bearer setup-token-value", headers.Get("authorization"))
@@ -227,7 +228,8 @@ func TestOpenAISetupTokenMessagesUsesCodexBridgeAndTurnState(t *testing.T) {
 	require.NotNil(t, secondResult)
 	require.True(t, isOpenAICompatMessagesBridgeContext(secondCtx))
 	require.Equal(t, "turn_state_setup", upstream.requests[1].Header.Get("x-codex-turn-state"))
-	require.Equal(t, generateSessionUUID(isolateOpenAIUpstreamSessionID(0, account, "stable-cache-key")), upstream.requests[1].Header.Get("session_id"))
+	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "session", "stable-cache-key"), upstream.requests[1].Header.Get("session-id"))
+	require.Empty(t, upstream.requests[1].Header.Get("session_id"))
 	require.Empty(t, upstream.requests[1].Header.Get("conversation_id"))
 	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, "codex-tui")
 }
