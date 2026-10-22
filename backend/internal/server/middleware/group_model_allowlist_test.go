@@ -8,11 +8,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 func newGroupModelAllowlistTestRouter(apiKey *service.APIKey, pathPrefix string) (*gin.Engine, *[]string) {
@@ -147,6 +149,51 @@ func TestGroupModelAllowlistRequestBodyTooLargePassesThrough413(t *testing.T) {
 	if len(*calls) != 0 {
 		t.Fatalf("expected handler not to run, got %v", *calls)
 	}
+}
+
+func TestGroupModelAllowlistReadFailureLogsCorrelatedDiagnostics(t *testing.T) {
+	sink := initMiddlewareTestLogger(t)
+	router := gin.New()
+	router.Use(RequestLogger(), ClientRequestID(), func(c *gin.Context) {
+		c.Set(string(ContextKeyAPIKey), allowlistAPIKey(true, "gpt-6-astra"))
+		c.Next()
+	}, GroupModelAllowlist())
+	router.POST("/v1/responses", func(c *gin.Context) { t.Error("handler must not run after a read failure") })
+	ids := make(map[string]bool)
+	for _, originalID := range []string{"repeated-session-id", "repeated-session-id", strings.Repeat("x", 200)} {
+		body := io.MultiReader(strings.NewReader("partial"), iotest.ErrReader(io.ErrUnexpectedEOF))
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", body)
+		req.ContentLength = 100
+		req.Header.Set(clientRequestIDHeader, originalID)
+		req.Header.Set(requestIDHeader, "edge-request-id")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		require.JSONEq(t, `{"error":{"type":"invalid_request_error","message":"Failed to read request body"}}`, w.Body.String())
+		events := sink.list()
+		event := events[len(events)-1]
+		require.Equal(t, "warn", event.Level)
+		require.Equal(t, "read request body failed", event.Message)
+		require.Equal(t, "edge-request-id", event.Fields["request_id"])
+		id, ok := event.Fields["client_request_id"].(string)
+		require.True(t, ok)
+		require.NotEmpty(t, id)
+		require.NotEqual(t, originalID, id)
+		require.False(t, ids[id], "internal request IDs must not repeat")
+		ids[id] = true
+		require.Equal(t, id, w.Header().Get(clientRequestIDHeader))
+		if originalID == "repeated-session-id" {
+			require.Equal(t, originalID, event.Fields["original_client_request_id"])
+		} else {
+			require.NotContains(t, event.Fields, "original_client_request_id")
+		}
+		require.Equal(t, "group_model_allowlist", event.Fields["body_read_stage"])
+		require.EqualValues(t, 7, event.Fields["bytes_read"])
+		require.EqualValues(t, 100, event.Fields["content_length"])
+		require.Equal(t, "truncated_body", event.Fields["error_kind"])
+		require.Equal(t, "none", event.Fields["context_error"])
+	}
+	require.Len(t, sink.list(), 3, "one diagnostic per failed request")
 }
 
 func TestGroupModelAllowlistJSONBodyAllowed(t *testing.T) {

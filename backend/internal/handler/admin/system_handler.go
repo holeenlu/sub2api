@@ -64,7 +64,9 @@ func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOper
 func (h *SystemHandler) GetVersion(c *gin.Context) {
 	info, _ := h.updateSvc.CheckUpdate(c.Request.Context(), false)
 	response.Success(c, gin.H{
-		"version": info.CurrentVersion,
+		"version":          info.CurrentVersion,
+		"upstream_version": info.UpstreamVersion,
+		"build_commit":     info.BuildCommit,
 	})
 }
 
@@ -121,8 +123,8 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 		succeeded = true
 
 		return gin.H{
-			"message":      "Update completed. Please restart the service.",
-			"need_restart": true,
+			"message":      updateResultMessage(h.updateSvc, "Update"),
+			"need_restart": updateRequiresRestart(h.updateSvc),
 			"operation_id": lock.OperationID(),
 		}, nil
 	})
@@ -190,8 +192,8 @@ func (h *SystemHandler) Rollback(c *gin.Context) {
 		succeeded = true
 
 		return gin.H{
-			"message":      "Rollback completed. Please restart the service.",
-			"need_restart": true,
+			"message":      updateResultMessage(h.updateSvc, "Rollback"),
+			"need_restart": updateRequiresRestart(h.updateSvc),
 			"version":      targetVersion,
 			"operation_id": lock.OperationID(),
 		}, nil
@@ -262,4 +264,19 @@ func buildSystemOperationID(c *gin.Context, operation string) string {
 		hash = hash[:24]
 	}
 	return "sysop-" + hash
+}
+
+// Legacy binary implementations need restart; Compose replaces the container itself.
+func updateRequiresRestart(svc systemUpdateService) bool {
+	if provider, ok := svc.(interface{ RequiresRestart() bool }); ok {
+		return provider.RequiresRestart()
+	}
+	return true
+}
+
+func updateResultMessage(svc systemUpdateService, operation string) string {
+	if updateRequiresRestart(svc) {
+		return operation + " completed. Please restart the service."
+	}
+	return operation + " accepted by the host Compose updater."
 }

@@ -613,3 +613,19 @@ func TestDeriveOpenAIStablePrefixSessionSeed_RequiresMeaningfulPrefix(t *testing
 		require.Empty(t, deriveOpenAIStablePrefixSessionSeed(body))
 	}
 }
+
+func TestDeriveOpenAIContentSessionSeed_ResponsesStableAcrossDeveloperUpdates(t *testing.T) {
+	for _, anchor := range []string{
+		`{"type":"message","role":"user","content":"Hello"}`,
+		`{"type":"input_text","text":"Hello"}`,
+	} {
+		base := `{"model":"gpt-5.4","input":[{"role":"developer","content":"Stable prefix"},` + anchor
+		first := deriveOpenAIContentSessionSeed([]byte(base + "]}"))
+		history := base
+		for turn := 0; turn < 10; turn++ {
+			history += `,{"role":"assistant","content":"Answer"},{"role":"developer","content":"Dynamic turn update"},{"role":"user","content":"Continue"}`
+			require.Equal(t, first, deriveOpenAIContentSessionSeed([]byte(history+"]}")))
+		}
+		require.NotEqual(t, first, deriveOpenAIContentSessionSeed([]byte(strings.Replace(base, "Stable prefix", "Different prefix", 1)+"]}")))
+	}
+}

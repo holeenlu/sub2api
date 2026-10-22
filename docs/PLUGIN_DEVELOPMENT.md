@@ -1,8 +1,8 @@
-# Sub2API 插件开发教程
+# TapModels 插件开发教程
 
-本文面向希望为 Sub2API 开发、打包和发布插件的团队。插件是独立进程和静态 UI 组成的 `.s2plugin` 包，宿主通过稳定的 gRPC 协议调用它。本文以当前宿主已经定义的 `openai.oauth.outbound_transport.v1` 能力作为协议示例，说明开发者需要准备什么、哪些职责属于插件、哪些职责仍由 Sub2API 负责。
+本文面向希望为 TapModels 开发、打包和发布插件的团队。插件是独立进程和静态 UI 组成的 `.s2plugin` 包，宿主通过稳定的 gRPC 协议调用它。本文以当前宿主已经定义的 `openai.oauth.outbound_transport.v1` 能力作为协议示例，说明开发者需要准备什么、哪些职责属于插件、哪些职责仍由 TapModels 负责。
 
-本文不是一个可直接安装的完整插件，也不代表 Sub2API 已经发布对应的官方插件包。当前文档主要描述公开协议、宿主边界和开发流程。后续是否发布可安装包、支持哪些 Provider，以及如何提供示例仓库，都需要另行公告。
+本文不是一个可直接安装的完整插件，也不代表 TapModels 已经发布对应的官方插件包。当前文档主要描述公开协议、宿主边界和开发流程。后续是否发布可安装包、支持哪些 Provider，以及如何提供示例仓库，都需要另行公告。
 
 ## 1. 准备开发环境
 
@@ -40,7 +40,7 @@ my-plugin/
 
 开发时至少准备以下部分：
 
-1. `manifest.source.json`：插件 ID、名称、版本、作者、能力和兼容的 Sub2API 版本；
+1. `manifest.source.json`：插件 ID、名称、版本、作者、能力和兼容的 TapModels 版本；
 2. `cmd/<plugin>/main.go`：启动入口和运行时版本注入，并同步打包器中的构建目标和二进制名称；
 3. `internal/pluginconfig/`：配置结构、默认值、严格校验和规范化；
 4. `internal/transport/`：HTTP 客户端、代理、请求头、请求体、网络连接参数、响应流和资源回收；
@@ -70,7 +70,7 @@ my-plugin/
 
 ## 4. 设计插件配置
 
-插件配置由插件定义，由 Sub2API 加密保存。推荐流程是：
+插件配置由插件定义，由 TapModels 加密保存。推荐流程是：
 
 1. 在 `internal/pluginconfig.Config` 中定义字段和默认值；
 2. 使用 `json.Decoder.DisallowUnknownFields` 等严格方式解析；
@@ -82,7 +82,7 @@ JSON 字段统一使用 `snake_case`。敏感配置不要放入 URL、UI 通知�
 
 ## 5. 实现插件自己的配置 UI
 
-UI 是插件包内的静态页面，不需要修改 Sub2API 前端源码。宿主会在受限 iframe 中加载 `ui/index.html`，并通过 UI Bridge 提供配置读写和测试能力。
+UI 是插件包内的静态页面，不需要修改 TapModels 前端源码。宿主会在受限 iframe 中加载 `ui/index.html`，并通过 UI Bridge 提供配置读写和测试能力。
 
 页面初始化流程：
 
@@ -162,7 +162,7 @@ go run ./tools/keygen -out build/keys/my-publisher
 
 签名覆盖最终 `manifest.json` 的精确字节；清单中的文件哈希再覆盖运行时和 UI 文件。签名完成后不要重新格式化 `manifest.json`。
 
-部署者在 Sub2API 配置文件中追加公钥：
+部署者在 TapModels 配置文件中追加公钥：
 
 ```yaml
 plugins:
@@ -187,7 +187,7 @@ node --check ui/assets/app.js
 unzip -t dist/*.s2plugin
 ```
 
-回到 Sub2API 仓库根目录后，再使用真实构建包运行宿主集成测试：
+回到 TapModels 仓库根目录后，再使用真实构建包运行宿主集成测试：
 
 ```bash
 cd ../..
@@ -197,7 +197,7 @@ SUB2API_TEST_PLUGIN_PACKAGE=plugins/my-openai-plugin/dist/my-openai-plugin.s2plu
 
 最低测试集应覆盖配置默认值和边界值、插件身份、请求和响应分块、流式响应、上下文取消、插件退出、代理开关、包哈希、签名、路径安全、目标平台运行时以及 UI Bridge 的加载、保存、测试、错误和超时。
 
-安装后先保持停用，确认清单兼容性、签名和诊断结果，再按账号灰度启用。API Key 账号和未命中灰度的 OAuth 账号继续走 Sub2API 原有路径。
+安装后先保持停用，确认清单兼容性、签名和诊断结果，再按账号灰度启用。API Key 账号和未命中灰度的 OAuth 账号继续走 TapModels 原有路径。
 
 ## 9. 发布前检查清单
 
@@ -226,8 +226,8 @@ SUB2API_TEST_PLUGIN_PACKAGE=plugins/my-openai-plugin/dist/my-openai-plugin.s2plu
 
 如果新插件需要支持其他 Provider、其他账号类型或新的消息字段，应先扩展并版本化公开协议，再由宿主增加能力匹配和生命周期处理。不要仅通过清单声明一个宿主尚未实现的能力。这样可以让旧插件继续运行，也能让新宿主明确拒绝不兼容的插件。
 
-Sub2API 后续会持续补充更多 Provider 的插件适配说明，包括能力标识、请求和响应契约、配置字段、UI Bridge 使用方式、版本兼容要求以及测试清单。本文会随着这些能力的落地继续更新，Provider 专属章节会放在本节之后。
+TapModels 后续会持续补充更多 Provider 的插件适配说明，包括能力标识、请求和响应契约、配置字段、UI Bridge 使用方式、版本兼容要求以及测试清单。本文会随着这些能力的落地继续更新，Provider 专属章节会放在本节之后。
 
 ## 12. 示例仓库预留
 
-后续计划提供独立的插件示例仓库，用于存放可复用的运行时骨架、UI 组件、打包工具和各 Provider 的最小实现。目前示例仓库尚未准备完成，因此暂不提供地址；正式发布后会在这里补充仓库地址、适用的 Sub2API 版本、示例插件版本和构建说明。
+后续计划提供独立的插件示例仓库，用于存放可复用的运行时骨架、UI 组件、打包工具和各 Provider 的最小实现。目前示例仓库尚未准备完成，因此暂不提供地址；正式发布后会在这里补充仓库地址、适用的 TapModels 版本、示例插件版本和构建说明。

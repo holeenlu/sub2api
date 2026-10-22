@@ -2,8 +2,16 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"github.com/redis/go-redis/v9"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
@@ -42,20 +50,101 @@ type ClaudeOAuthClient interface {
 	RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error)
 }
 
+// NormalizeClaudeSetupToken accepts the CLI's raw token or export assignment.
+// Parsing is not proof of identity or connectivity; those are separate concerns.
+func NormalizeClaudeSetupToken(raw string) (string, error) {
+	token := strings.TrimSpace(raw)
+	if strings.HasPrefix(token, "export ") {
+		name, value, ok := strings.Cut(strings.TrimSpace(strings.TrimPrefix(token, "export ")), "=")
+		if !ok || strings.TrimSpace(name) != "CLAUDE_CODE_OAUTH_TOKEN" {
+			return "", vendorAccountInputError("Expected a Claude Setup Token")
+		}
+		token = strings.TrimSpace(value)
+	}
+	if len(token) >= 2 && ((token[0] == '\'' && token[len(token)-1] == '\'') || (token[0] == '"' && token[len(token)-1] == '"')) {
+		token = strings.TrimSpace(token[1 : len(token)-1])
+	}
+	if !strings.HasPrefix(token, "sk-ant-oat") || strings.ContainsAny(token, " \t\r\n\"'") {
+		return "", vendorAccountInputError("Setup Token must be a single sk-ant-oat token")
+	}
+	return token, nil
+}
+
 // OAuthService handles OAuth authentication flows
 type OAuthService struct {
+	rdb          *redis.Client
 	sessionStore *oauth.SessionStore
 	proxyRepo    ProxyRepository
 	oauthClient  ClaudeOAuthClient
 }
 
 // NewOAuthService creates a new OAuth service
-func NewOAuthService(proxyRepo ProxyRepository, oauthClient ClaudeOAuthClient) *OAuthService {
+func NewOAuthService(proxyRepo ProxyRepository, oauthClient ClaudeOAuthClient, shared ...*redis.Client) *OAuthService {
+	var rdb *redis.Client
+	if len(shared) > 0 {
+		rdb = shared[0]
+	}
 	return &OAuthService{
+		rdb:          rdb,
 		sessionStore: oauth.NewSessionStore(),
 		proxyRepo:    proxyRepo,
 		oauthClient:  oauthClient,
 	}
+}
+
+// Retain provider-verified identity across the existing exchange/save requests.
+// Only identity metadata is cached; the key binds it to the exact token, and the
+// authorization lease binds it to the actor/session. Client UUID fields are not proof.
+type claudeOAuthIdentity struct {
+	Authorization *authz.Lease `json:"authorization"`
+	AccountUUID   string       `json:"account_uuid"`
+	OrgUUID       string       `json:"org_uuid"`
+	EmailAddress  string       `json:"email_address"`
+}
+
+func claudeTokenDigest(token string) string {
+	digest := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(digest[:])
+}
+func claudeOAuthIdentityKey(token string) string {
+	return "oauth:anthropic:identity:" + claudeTokenDigest(token)
+}
+func (s *OAuthService) rememberClaudeIdentity(ctx context.Context, t *TokenInfo) error {
+	if s.rdb == nil || t.AccountUUID == "" || t.OrgUUID == "" || t.AccessToken == "" {
+		return nil
+	}
+	lease := authz.CaptureLease(ctx)
+	if lease == nil {
+		return nil
+	}
+	if err := authz.CheckLease(ctx, lease, "accounts.authorize"); err != nil {
+		return err
+	}
+	proof := claudeOAuthIdentity{lease, t.AccountUUID, t.OrgUUID, t.EmailAddress}
+	raw, err := json.Marshal(proof)
+	if err != nil {
+		return err
+	}
+	return s.rdb.Set(ctx, claudeOAuthIdentityKey(t.AccessToken), raw, oauth.SessionTTL).Err()
+}
+func (s *OAuthService) claudeIdentityForToken(ctx context.Context, token string) (*claudeOAuthIdentity, error) {
+	if s == nil || s.rdb == nil || authz.CaptureLease(ctx) == nil {
+		return nil, nil
+	}
+	proof, _, err := oauth.ReadSharedSession[claudeOAuthIdentity](ctx, s.rdb, claudeOAuthIdentityKey(token))
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := authz.CheckLease(ctx, proof.Authorization, "accounts.authorize"); err != nil {
+		return nil, nil // Another session must obtain its own identity evidence.
+	}
+	if proof.AccountUUID == "" || proof.OrgUUID == "" {
+		return nil, nil
+	}
+	return proof, nil
 }
 
 // GenerateAuthURLResult contains the authorization URL and session info
@@ -66,6 +155,9 @@ type GenerateAuthURLResult struct {
 
 // GenerateAuthURL generates an OAuth authorization URL with full scope
 func (s *OAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64) (*GenerateAuthURLResult, error) {
+	if _, scoped := authz.VendorScopeFromContext(ctx); scoped {
+		return nil, authz.ErrAuthorizationExpired
+	}
 	return s.generateAuthURLWithScope(ctx, oauth.ScopeOAuth, proxyID)
 }
 
@@ -106,13 +198,20 @@ func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope strin
 
 	// Store session
 	session := &oauth.OAuthSession{
-		State:        state,
-		CodeVerifier: codeVerifier,
-		Scope:        scope,
-		ProxyURL:     proxyURL,
-		CreatedAt:    time.Now(),
+		Authorization: authz.CaptureLease(ctx),
+		State:         state,
+		CodeVerifier:  codeVerifier,
+		Scope:         scope,
+		ProxyURL:      proxyURL,
+		CreatedAt:     time.Now(),
 	}
-	s.sessionStore.Set(sessionID, session)
+	if s.rdb != nil {
+		if err := oauth.PutSharedSession(ctx, s.rdb, "oauth:anthropic:"+sessionID, session, oauth.SessionTTL); err != nil {
+			return nil, err
+		}
+	} else {
+		s.sessionStore.Set(sessionID, session)
+	}
 
 	// Build authorization URL
 	authURL := oauth.BuildAuthorizationURL(state, codeChallenge, scope)
@@ -145,12 +244,32 @@ type TokenInfo struct {
 
 // ExchangeCode exchanges authorization code for tokens
 func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInput) (*TokenInfo, error) {
+	if _, scoped := authz.VendorScopeFromContext(ctx); scoped {
+		return nil, authz.ErrAuthorizationExpired
+	}
+	if input == nil || input.SessionID == "" || strings.TrimSpace(input.Code) == "" {
+		return nil, fmt.Errorf("invalid OAuth exchange input")
+	}
 	// Get session
 	session, ok := s.sessionStore.Get(input.SessionID)
+	var raw string
+	if s.rdb != nil {
+		var err error
+		session, raw, err = oauth.ReadSharedSession[oauth.OAuthSession](ctx, s.rdb, "oauth:anthropic:"+input.SessionID)
+		ok = err == nil
+	}
 	if !ok {
 		return nil, fmt.Errorf("session not found or expired")
 	}
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
+	}
 
+	if code, state, hasState := strings.Cut(strings.TrimSpace(input.Code), "#"); hasState {
+		if code == "" || subtle.ConstantTimeCompare([]byte(state), []byte(session.State)) != 1 {
+			return nil, fmt.Errorf("invalid oauth state")
+		}
+	}
 	// Get proxy URL
 	proxyURL := session.ProxyURL
 	if input.ProxyID != nil {
@@ -163,9 +282,25 @@ func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInpu
 	// Determine if this is a setup token (scope is inference only)
 	isSetupToken := session.Scope == oauth.ScopeInference
 
+	// Atomically claim before the remote side effect; failures are not replayable.
+	if s.rdb != nil {
+		if _, err := oauth.CompareSwapSession(ctx, s.rdb, "oauth:anthropic:"+input.SessionID, raw, nil); err != nil {
+			return nil, oauth.ErrSessionConflict
+		}
+	} else if !s.sessionStore.Consume(input.SessionID, session) {
+		return nil, oauth.ErrSessionConflict
+	}
 	// Exchange code for token
 	tokenInfo, err := s.exchangeCodeForToken(ctx, input.Code, session.CodeVerifier, session.State, proxyURL, isSetupToken)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
+	}
+
+	if err := s.rememberClaudeIdentity(ctx, tokenInfo); err != nil {
 		return nil, err
 	}
 
@@ -238,6 +373,9 @@ func (s *OAuthService) CookieAuth(ctx context.Context, input *CookieAuthInput) (
 		log.Printf("[OAuth] Set org_uuid from cookie auth")
 	}
 
+	if err := s.rememberClaudeIdentity(ctx, tokenInfo); err != nil {
+		return nil, err
+	}
 	return tokenInfo, nil
 }
 
