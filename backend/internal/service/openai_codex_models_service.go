@@ -204,12 +204,12 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	if err != nil {
 		return fmt.Errorf("merge group configured Codex models: %w", err)
 	}
-	if group.CodexModelsManifestConfig.Enabled && group.ModelAllowlistEnabled() {
-		body, err = orderPinnedCodexModelsBySelection(body, group.ModelAllowlist)
-		if err != nil {
-			return fmt.Errorf("order pinned Codex models: %w", err)
+	if s.excelBPSGloballyEnabled(ctx) {
+		restricted, restrictedChanged, restrictErr := restrictExcelBPSCodexModelsManifest(body, accounts, group)
+		if restrictErr != nil {
+			return restrictErr
 		}
-		changed = true
+		body, changed = restricted, changed || restrictedChanged
 	}
 	filtered, retired, err := filterRetiredOpenAIPublicModelsBody(body, accounts, true)
 	if err != nil {
@@ -1451,20 +1451,28 @@ func mergeConfiguredCodexModelsManifest(
 		seen[modelID] = struct{}{}
 		changed = true
 	}
-	if !changed {
-		return body, false, nil
+	if changed {
+		rawModels, err := json.Marshal(merged)
+		if err != nil {
+			return nil, false, err
+		}
+		envelope["models"] = rawModels
+		body, err = json.Marshal(envelope)
+		if err != nil {
+			return nil, false, err
+		}
 	}
-
-	rawModels, err := json.Marshal(merged)
-	if err != nil {
-		return nil, false, err
+	// Apply the group's order after upstream entries and configured aliases are
+	// merged, for pinned discovery, scheduler discovery and local catalogs alike.
+	if filterBySelection {
+		ordered, err := orderCodexModelsBySelection(body, allowlist)
+		if err != nil {
+			return nil, false, err
+		}
+		changed = changed || !bytes.Equal(body, ordered)
+		body = ordered
 	}
-	envelope["models"] = rawModels
-	mergedBody, err := json.Marshal(envelope)
-	if err != nil {
-		return nil, false, err
-	}
-	return mergedBody, true, nil
+	return body, changed, nil
 }
 
 func codexModelWithVisibility(rawModel json.RawMessage, visibility string) (json.RawMessage, bool, error) {
@@ -1694,6 +1702,19 @@ func (c *openAIModelsCache) set(key string, manifest *OpenAIModelsResponse, now 
 // passed through verbatim. Custom API key manifests receive only the narrowly
 // scoped compatibility adjustments required by custom-provider Codex clients.
 func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	if account.IsSIWCEnabled() {
+		manifest, err := s.fetchSIWCModelsCatalog(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+		return openAIModelsResponseForClient(manifest, ifNoneMatch), nil
+	}
+	if account != nil && account.IsExcelBPSEnabled() && s.excelBPSGloballyEnabled(ctx) {
+		return s.fetchExcelBPSCodexManifest(ctx, account, ifNoneMatch)
+	}
+	return s.fetchNativeCodexModelsManifest(ctx, account, clientVersion, ifNoneMatch)
+}
+func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
@@ -2147,16 +2168,6 @@ func adjustAPIKeyCodexModelsManifest(body []byte, account *Account) ([]byte, err
 		return nil, fmt.Errorf("encode JSON object: %w", err)
 	}
 	return adjusted, nil
-}
-
-// convertOpenAIModelListToCodexManifest rewrites a standard OpenAI
-// GET /v1/models response ({"object":"list","data":[{"id":...},...]}) into the
-// same complete Codex manifest used by locally generated custom-provider
-// catalogs. Bodies that already carry a top-level models field, are not the
-// standard list shape, or yield no usable model IDs are returned unchanged so
-// envelope validation reports the original payload.
-func convertOpenAIModelListToCodexManifest(body []byte) []byte {
-	return convertOpenAIModelListToCodexManifestForAccount(body, nil)
 }
 
 func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Account) []byte {

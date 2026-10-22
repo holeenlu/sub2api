@@ -153,6 +153,13 @@ func (s *grokMediaSlotBindings) RefreshSessionTTL(context.Context, int64, string
 	s.writes++
 	return nil
 }
+func (s *grokMediaSlotBindings) CompareAndRefreshSessionAccountID(ctx context.Context, groupID int64, key string, owner int64, ttl time.Duration, create bool) (bool, error) {
+	exists := groupID == 24 && key == s.key
+	if (exists && s.owner != owner) || (!exists && !create) {
+		return false, nil
+	}
+	return true, s.SetSessionAccountID(ctx, groupID, key, owner, ttl)
+}
 func (s *grokMediaSlotBindings) DeleteSessionAccountID(context.Context, int64, string) error {
 	s.writes++
 	return nil
@@ -227,7 +234,6 @@ func newGrokMediaSlotHandler(t *testing.T, oauth, mismatch bool, platforms ...st
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.Gateway.Scheduling.StickySessionWaitTimeout = 20 * time.Millisecond
 	cfg.Gateway.Scheduling.StickySessionMaxWaiting = 3
-	cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 	repo := grokMediaSlotRepo{openAIImagesFailoverAccountRepo: openAIImagesFailoverAccountRepo{accounts: accounts}, mismatch: mismatch}
 	provider := service.NewGrokTokenProvider(repo, nil)
 	if oauth {
