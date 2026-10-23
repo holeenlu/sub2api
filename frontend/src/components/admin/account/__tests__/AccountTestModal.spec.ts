@@ -221,3 +221,44 @@ describe('AccountTestModal', () => {
     })
   })
 })
+
+describe('Cloud compatibility test results', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it.each([true, false])('uses the terminal result for downloads (successful: %s)', async (success) => {
+    const finalResult = {
+      kind: 'cloud_result', response_id: 'response-1', status: success ? 'completed' : 'failed', model: 'cloud-model',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Final answer' }] }],
+      usage: { input_tokens: 12, output_tokens: 3, total_tokens: 15 }, created_at: 1, completed_at: 2,
+      capabilities: { text: true, tools: success, usage: true, settlement: success, image_input: success, encrypted_context: success, web_search: success, image_generation: success }
+    }
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse([
+      'data: {"type":"content","text":"partial output"}\n',
+      `data: ${JSON.stringify({ type: 'test_complete', success, error: success ? undefined : 'tool verification failed', data: finalResult })}\n`
+    ])) as any
+    const wrapper = mountModal({ id: 42, name: 'Cloud account', platform: 'openai', type: 'oauth', status: 'active', credentials: {} })
+    await wrapper.setProps({ initialMode: 'cloud', initialModel: 'cloud-model', cloudModels: ['cloud-model'], show: true })
+    await flushPromises()
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toMatchObject({ mode: 'cloud', model_id: 'cloud-model' })
+    expect(wrapper.find('[data-testid="cloud-download-result"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="cloud-download-answer"]').exists()).toBe(success)
+    expect((wrapper.vm as any).cloudResult).toEqual(finalResult)
+    await wrapper.setProps({ account: { id: 43, name: 'Another account', platform: 'openai', type: 'oauth', status: 'active' } as any })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="cloud-download-result"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not report success when the Cloud terminal result is missing', async () => {
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse(['data: {"type":"test_complete","success":true}\n'])) as any
+    const wrapper = mountModal({ id: 42, name: 'Cloud account', platform: 'openai', type: 'oauth', status: 'active', credentials: {} })
+    await wrapper.setProps({ initialMode: 'cloud', cloudModels: ['cloud-model'], show: true })
+    await flushPromises()
+    await (wrapper.vm as any).startTest(); await flushPromises()
+    expect((wrapper.vm as any).status).toBe('error')
+    expect(wrapper.find('[data-testid="cloud-download-result"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})

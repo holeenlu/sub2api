@@ -71,3 +71,13 @@ func TestAuthRoutesRateLimitFailCloseWhenRedisUnavailable(t *testing.T) {
 		require.Contains(t, w.Body.String(), "rate limit exceeded", "path=%s", path)
 	}
 }
+
+func TestRetiredInvitationRoutesAreNotRegistered(t *testing.T) {
+	router := newAuthRoutesTestRouter(nil)
+	for _, route := range router.Routes() {
+		require.NotContains(t, route.Path, "validate-invitation-code")
+		for _, provider := range []string{"linuxdo", "oidc", "wechat", "dingtalk"} {
+			require.NotEqual(t, "/api/v1/auth/oauth/"+provider+"/complete-registration", route.Path)
+		}
+	}
+}
