@@ -702,7 +702,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	if endpoint.RequiresRequestBody() {
 		bodyReader = bytes.NewReader(body)
 	}
-	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx, defaultUpstreamCompletionTimeout)
 	defer releaseUpstreamCtx()
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, endpoint.httpMethod(), targetURL, bodyReader)
 	if err != nil {
@@ -808,7 +808,7 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 		return nil, err
 	}
 
-	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx, defaultUpstreamCompletionTimeout)
 	defer releaseUpstreamCtx()
 	statusReq, err := http.NewRequestWithContext(
 		WithHTTPUpstreamRedirectsDisabled(upstreamCtx),

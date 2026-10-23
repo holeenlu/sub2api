@@ -8,10 +8,11 @@
       <div>
         <label class="input-label">{{ operation === 'add' ? t('admin.users.depositAmount') : t('admin.users.withdrawAmount') }}</label>
         <div class="relative flex gap-2">
-          <div class="relative flex-1"><div class="absolute left-3 top-1/2 -translate-y-1/2 font-medium text-gray-500">$</div><input v-model.number="form.amount" type="number" step="any" min="0" required class="input pl-8" /></div>
+          <div class="relative flex-1"><div class="absolute left-3 top-1/2 -translate-y-1/2 font-medium text-gray-500">$</div><input v-model.number="form.amount" type="number" step="any" min="0" :max="availableTransfer" required class="input pl-8" /></div>
           <button v-if="operation === 'subtract'" type="button" @click="fillAllBalance" class="btn btn-secondary whitespace-nowrap">{{ t('admin.users.withdrawAll') }}</button>
         </div>
       </div>
+      <p v-if="!auth.isSuperAdmin" class="text-sm text-gray-500">{{ t('admin.users.transferFundingHint', { balance: formatBalance(auth.user?.balance ?? 0) }) }}</p>
       <div><label class="input-label">{{ t('admin.users.notes') }}</label><textarea v-model="form.notes" rows="3" class="input"></textarea></div>
       <div v-if="form.amount > 0" class="rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950"><div class="flex items-center justify-between text-sm"><span class="text-gray-700 dark:text-gray-300">{{ t('admin.users.newBalance') }}:</span><span class="font-bold text-gray-900 dark:text-gray-100">${{ formatBalance(calculateNewBalance()) }}</span></div></div>
     </form>
@@ -25,7 +26,8 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -36,8 +38,10 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 const props = defineProps<{ show: boolean, user: AdminUser | null, operation: 'add' | 'subtract' }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n(); const appStore = useAppStore()
 
+const auth = useAuthStore()
+const availableTransfer = computed(() => props.operation === 'subtract' ? props.user?.balance : auth.isSuperAdmin ? undefined : auth.user?.balance ?? 0)
 const submitting = ref(false); const form = reactive({ amount: 0, notes: '' })
-watch(() => props.show, (v) => { if(v) { form.amount = 0; form.notes = '' } })
+watch(() => props.show, (v) => { if(v) { form.amount = 0; form.notes = ''; void auth.refreshUser().catch(() => {}) } })
 
 // 格式化余额：显示完整精度，去除尾部多余的0
 const formatBalance = (value: number) => {
@@ -71,14 +75,14 @@ const handleBalanceSubmit = async () => {
     return
   }
   // 退款时验证金额不超过实际余额
-  if (props.operation === 'subtract' && form.amount > props.user.balance) {
+  if (availableTransfer.value !== undefined && form.amount > availableTransfer.value) {
     appStore.showError(t('admin.users.insufficientBalance'))
     return
   }
   submitting.value = true
   try {
     await adminAPI.users.updateBalance(props.user.id, form.amount, props.operation, form.notes)
-    appStore.showSuccess(t('common.success')); emit('success'); emit('close')
+    await auth.refreshUser().catch(() => {}); appStore.showSuccess(t('common.success')); emit('success'); emit('close')
   } catch (e: any) {
     console.error('Failed to update balance:', e)
     appStore.showError(extractApiErrorMessage(e, t('common.error')))

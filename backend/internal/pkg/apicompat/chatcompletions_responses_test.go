@@ -467,6 +467,26 @@ func TestChatCompletionsToResponses_ImageURL(t *testing.T) {
 	assert.Equal(t, "Describe this", parts[0].Text)
 	assert.Equal(t, "input_image", parts[1].Type)
 	assert.Equal(t, "data:image/png;base64,abc123", parts[1].ImageURL)
+	assert.Equal(t, "auto", parts[1].Detail)
+
+	for _, tc := range []struct{ input, want string }{
+		{"low", "low"}, {"high", "high"}, {"original", "original"},
+		{"auto", "auto"}, {" HIGH ", "high"}, {"bogus", "auto"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			content, err := json.Marshal([]ChatContentPart{{Type: "image_url", ImageURL: &ChatImageURL{URL: "https://example.com/image.png", Detail: tc.input}}})
+			require.NoError(t, err)
+			converted, err := ChatCompletionsToResponses(&ChatCompletionsRequest{
+				Model: "gpt-4o", Messages: []ChatMessage{{Role: "user", Content: content}},
+			})
+			require.NoError(t, err)
+			var messages []ResponsesInputItem
+			require.NoError(t, json.Unmarshal(converted.Input, &messages))
+			var images []ResponsesContentPart
+			require.NoError(t, json.Unmarshal(messages[0].Content, &images))
+			require.Equal(t, tc.want, images[0].Detail)
+		})
+	}
 }
 
 func TestChatCompletionsToResponses_EmptyBase64ImageURLSkipped(t *testing.T) {

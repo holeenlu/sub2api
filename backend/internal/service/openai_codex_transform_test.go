@@ -1,13 +1,126 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestForwardCodexOAuthResponsesDefaults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name    string
+		fields  string
+		want    string
+		model   string
+		compact bool
+		lite    bool
+	}{
+		{
+			name: "missing defaults without tools", fields: `"input":"hello"`,
+			want: `{"reasoning":{},"tool_choice":"auto","parallel_tool_calls":false,"include":["reasoning.encrypted_content"]}`,
+		},
+		{
+			name: "legacy functions become tools before defaults", fields: `"input":"hello","functions":[{"name":"shell","parameters":{"type":"object","properties":{}}}]`,
+			want: `{"reasoning":{},"tool_choice":"auto","parallel_tool_calls":true,"include":["reasoning.encrypted_content"]}`,
+		},
+		{
+			name: "additional tools count without top level tools", fields: `"input":[{"type":"additional_tools","tools":[{"type":"function","name":"shell","parameters":{"type":"object","properties":{}}}]},{"role":"user","content":"hello"}]`,
+			want: `{"reasoning":{},"tool_choice":"auto","parallel_tool_calls":true,"include":["reasoning.encrypted_content"]}`,
+		},
+		{
+			name: "history tool injected before defaults", fields: `"input":[{"type":"web_search_call","id":"ws_old","status":"completed","action":{"type":"search","query":"hello"}},{"role":"user","content":"summarize"}]`,
+			want: `{"reasoning":{},"tool_choice":"none","parallel_tool_calls":true,"include":["reasoning.encrypted_content"]}`,
+		},
+		{
+			name: "removed spark tool does not enable parallel calls", model: "gpt-5.3-codex-spark", fields: `"input":"hello","tools":[{"type":"image_generation"}]`,
+			want: `{"reasoning":{},"tool_choice":"auto","parallel_tool_calls":false,"include":["reasoning.encrypted_content"]}`,
+		},
+		{
+			name: "explicit defaults and encrypted include remain", fields: `"input":"hello","reasoning":{"effort":"low"},"tool_choice":"none","parallel_tool_calls":false,"include":["message.output_text.logprobs","reasoning.encrypted_content"]`,
+			want: `{"reasoning":{"effort":"low"},"tool_choice":"none","parallel_tool_calls":false,"include":["message.output_text.logprobs","reasoning.encrypted_content"]}`,
+		},
+		{
+			name: "reasoning include remains additive", fields: `"input":"hello","reasoning":{"effort":"low"},"include":["message.output_text.logprobs"]`,
+			want: `{"reasoning":{"effort":"low"},"tool_choice":"auto","parallel_tool_calls":false,"include":["message.output_text.logprobs","reasoning.encrypted_content"]}`,
+		},
+		{
+			name: "explicit empty include with empty reasoning", fields: `"input":"hello","reasoning":{},"include":[],"parallel_tool_calls":true`,
+			want: `{"reasoning":{},"tool_choice":"auto","parallel_tool_calls":true,"include":[]}`,
+		},
+		{
+			name: "explicit nulls and invalid include retain validation semantics", fields: `"input":"hello","reasoning":null,"tool_choice":null,"parallel_tool_calls":null,"include":"invalid"`,
+			want: `{"reasoning":null,"tool_choice":null,"parallel_tool_calls":null,"include":"invalid"}`,
+		},
+		{
+			name: "compact does not receive defaults", compact: true, fields: `"input":"hello"`, want: `{}`,
+		},
+		{
+			name: "compact preserves explicit fields", compact: true, fields: `"input":"hello","reasoning":{"effort":"low"},"tool_choice":"none","parallel_tool_calls":true,"include":[]`,
+			want: `{"reasoning":{"effort":"low"},"tool_choice":"none","parallel_tool_calls":true,"include":[]}`,
+		},
+		{
+			name: "Lite normalization remains authoritative", lite: true, fields: `"input":"hello","parallel_tool_calls":true,"tools":[{"type":"namespace","name":"functions","tools":[{"type":"function","name":"shell","parameters":{"type":"object","properties":{}}}]}]`,
+			want: `{"reasoning":{"context":"all_turns"},"tool_choice":"auto","parallel_tool_calls":false,"include":["reasoning.encrypted_content"]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := "/v1/responses"
+			responseBody := "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_defaults\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n"
+			contentType := "text/event-stream"
+			if tc.compact {
+				path += "/compact"
+				responseBody = `{"id":"resp_compact","object":"response.compaction","output":[],"usage":{"input_tokens":1,"output_tokens":0}}`
+				contentType = "application/json"
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, path, nil)
+			c.Set("api_key", &APIKey{ID: 77})
+			if tc.lite {
+				c.Request.Header.Set(responsesLiteHeader, "true")
+			}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {contentType}},
+				Body: io.NopCloser(strings.NewReader(responseBody)),
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, toolCorrector: NewCodexToolCorrector()}
+			account := &Account{ID: 801, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+				Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "defaults-account"}}
+			model := tc.model
+			if model == "" {
+				model = "gpt-5.4"
+			}
+			result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"`+model+`","stream":false,`+tc.fields+`}`))
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, upstream.lastReq)
+			var got, want map[string]any
+			require.NoError(t, json.Unmarshal(upstream.lastBody, &got))
+			require.NoError(t, json.Unmarshal([]byte(tc.want), &want))
+			for _, field := range []string{"reasoning", "tool_choice", "parallel_tool_calls", "include"} {
+				value, exists := want[field]
+				if !exists {
+					require.NotContains(t, got, field, string(upstream.lastBody))
+					continue
+				}
+				require.Contains(t, got, field, string(upstream.lastBody))
+				require.Equal(t, value, got[field], "%s: %s", field, upstream.lastBody)
+			}
+			if !tc.compact {
+				require.False(t, ensureCodexResponsesDefaults(got), "outbound defaults must already be stable")
+			}
+		})
+	}
+}
 
 func TestApplyCodexOAuthTransform_ToolContinuationPreservesInput(t *testing.T) {
 	// 续链场景：保留 item_reference 与 id，但不再强制 store=true。
@@ -2198,4 +2311,33 @@ func TestFilterCodexInput_PreservesReasoningInMixedInput(t *testing.T) {
 			require.Equal(t, "fc_1", byType["function_call_output"][0]["call_id"])
 		})
 	}
+}
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+// filterCodexInput 按需过滤 item_reference 与 id。
+// preserveReferences 为 true 时保持引用与 id，以满足续链请求对上下文的依赖。
+func filterCodexInput(input []any, preserveReferences bool) []any {
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
+		PreserveReferences: preserveReferences,
+	})
+	return filtered
+}
+
+func TestCodexOAuthTransformStableInputIsUnmodified(t *testing.T) {
+	input := []any{
+		map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "hello"}}},
+		map[string]any{"type": "reasoning", "summary": []any{}, "encrypted_content": "encrypted"},
+	}
+	body := map[string]any{"model": "gpt-test", "input": input, "instructions": "test"}
+	opts := codexOAuthTransformOptions{IsCodexCLI: true}
+	require.NoError(t, applyCodexOAuthTransformWithOptions(body, opts).Error)
+	before, err := json.Marshal(body)
+	require.NoError(t, err)
+	result := applyCodexOAuthTransformWithOptions(body, opts)
+	require.NoError(t, result.Error)
+	require.False(t, result.Modified, "already normalized native history must not trigger another encoding")
+	after, err := json.Marshal(body)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	require.Equal(t, "encrypted", input[1].(map[string]any)["encrypted_content"])
 }

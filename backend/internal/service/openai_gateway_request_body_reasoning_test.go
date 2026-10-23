@@ -140,53 +140,6 @@ func TestTrimOpenAIEncryptedReasoningItems_Compaction(t *testing.T) {
 	}
 }
 
-func TestSanitizeOpenAICrossModeFailoverReasoning_DropsWholeEncryptedItem(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.1","input":[` +
-		`{"type":"message","role":"user","content":"hi"},` +
-		`{"type":"reasoning","id":"rs_kiro_1","encrypted_content":"ENC","summary":[{"type":"summary_text","text":"t"}]},` +
-		`{"type":"message","role":"assistant","content":"yo"}` +
-		`]}`)
-
-	sanitized, changed, err := SanitizeOpenAICrossModeFailoverReasoning(body)
-	require.NoError(t, err)
-	require.True(t, changed)
-	// The whole reasoning item is gone — id and summary go with encrypted_content,
-	// unlike trimOpenAIEncryptedReasoningItems which keeps the skeleton.
-	require.NotContains(t, string(sanitized), "reasoning")
-	require.NotContains(t, string(sanitized), "rs_kiro_1")
-	require.NotContains(t, string(sanitized), "summary_text")
-	require.Equal(t, int64(2), gjson.GetBytes(sanitized, "input.#").Int())
-}
-
-func TestSanitizeOpenAICrossModeFailoverReasoning_NoEncryptedIsNoop(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.1","input":[{"type":"reasoning","summary":[{"type":"summary_text","text":"t"}]}]}`)
-	sanitized, changed, err := SanitizeOpenAICrossModeFailoverReasoning(body)
-	require.NoError(t, err)
-	require.False(t, changed, "reasoning without encrypted_content must be preserved")
-	require.Equal(t, string(body), string(sanitized))
-}
-
-func TestSanitizeOpenAICrossModeFailoverReasoning_NoInputIsNoop(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.1"}`)
-	sanitized, changed, err := SanitizeOpenAICrossModeFailoverReasoning(body)
-	require.NoError(t, err)
-	require.False(t, changed)
-	require.Equal(t, string(body), string(sanitized))
-}
-
-func TestSanitizeOpenAICrossModeFailoverReasoning_PreservesLargeIntegers(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.1","input":[` +
-		`{"type":"reasoning","id":"rs_kiro_1","encrypted_content":"ENC"},` +
-		`{"type":"message","role":"user","content":"hi"}` +
-		`],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object","properties":{"id":{"const":9007199254740993}}}}}]}`)
-
-	sanitized, changed, err := SanitizeOpenAICrossModeFailoverReasoning(body)
-	require.NoError(t, err)
-	require.True(t, changed)
-	require.Contains(t, string(sanitized), `"const":9007199254740993`,
-		"sanitization must not round JSON integers through float64")
-}
-
 func TestTrimOpenAIEncryptedReasoningItems_ContentNullDropsBareSkeleton(t *testing.T) {
 	reqBody := map[string]any{
 		"input": []any{
@@ -212,15 +165,16 @@ func TestNormalizeOpenAIAPIKeyStoreFalseReasoningReplay(t *testing.T) {
 	normalized, changed, err := normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body, false)
 	require.NoError(t, err)
 	require.True(t, changed)
-	require.Equal(t, int64(3), gjson.GetBytes(normalized, "input.#").Int())
+	require.Equal(t, int64(5), gjson.GetBytes(normalized, "input.#").Int())
 	require.Equal(t, "reasoning", gjson.GetBytes(normalized, "input.0.type").String())
 	require.False(t, gjson.GetBytes(normalized, "input.0.id").Exists())
 	require.False(t, gjson.GetBytes(normalized, "input.0.call_id").Exists())
 	require.Equal(t, "cipher", gjson.GetBytes(normalized, "input.0.encrypted_content").String())
 	require.True(t, gjson.GetBytes(normalized, "input.0.summary").IsArray())
 	require.Equal(t, "9007199254740993", gjson.GetBytes(normalized, "input.0.opaque").Raw)
-	require.Equal(t, "msg_keep", gjson.GetBytes(normalized, "input.1.id").String())
-	require.Equal(t, "message", gjson.GetBytes(normalized, "input.2.type").String())
+	require.Equal(t, "rs_server_only", gjson.GetBytes(normalized, "input.1.id").String())
+	require.Equal(t, "item_reference", gjson.GetBytes(normalized, "input.2.type").String())
+	require.Equal(t, "message", gjson.GetBytes(normalized, "input.4.type").String())
 }
 
 func TestNormalizeOpenAIAPIKeyStoreFalseReasoningReplayRequiresExplicitStoreFalse(t *testing.T) {
@@ -241,9 +195,8 @@ func TestNormalizeOpenAIAPIKeyStoreFalseReasoningReplayKnownCompactMode(t *testi
 	normalized, changed, err := normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body, true)
 
 	require.NoError(t, err)
-	require.True(t, changed)
-	require.Equal(t, int64(1), gjson.GetBytes(normalized, "input.#").Int())
-	require.Equal(t, "message", gjson.GetBytes(normalized, "input.0.type").String())
+	require.False(t, changed)
+	require.Equal(t, body, normalized, "missing reasoning content must not silently disappear")
 }
 
 func TestNormalizeOpenAIAPIKeyStoreFalseReasoningReplayRejectsEmptyEncryptedContent(t *testing.T) {
@@ -251,9 +204,8 @@ func TestNormalizeOpenAIAPIKeyStoreFalseReasoningReplayRejectsEmptyEncryptedCont
 		body := []byte(`{"store":false,"input":[{"type":"reasoning","id":"rs_drop","encrypted_content":` + encrypted + `},{"type":"message","content":"continue"}]}`)
 		normalized, changed, err := normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body, false)
 		require.NoError(t, err)
-		require.True(t, changed)
-		require.Equal(t, int64(1), gjson.GetBytes(normalized, "input.#").Int())
-		require.Equal(t, "message", gjson.GetBytes(normalized, "input.0.type").String())
+		require.False(t, changed)
+		require.Equal(t, body, normalized, "invalid ciphertext requires recovery, not deletion")
 	}
 }
 

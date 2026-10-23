@@ -1,6 +1,9 @@
 package service
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/shirou/gopsutil/v4/mem"
@@ -11,6 +14,77 @@ const (
 	testMiB = 1024 * 1024
 	testGiB = 1024 * testMiB
 )
+
+func TestReadCgroupMemoryWorkingSet(t *testing.T) {
+	for _, version := range []string{"v1", "v2"} {
+		for _, tc := range []struct {
+			name, usage, limit, inactive string
+			want                         uint64
+			ok                           bool
+		}{
+			{"working set", "800", "1000", "300", 500, true},
+			{"no cache", "800", "1000", "0", 800, true},
+			{"cache ahead of usage", "800", "1000", "900", 0, true},
+			{"missing cache", "800", "1000", "", 0, false},
+			{"invalid cache", "800", "1000", "bad", 0, false},
+			{"invalid usage", "bad", "1000", "300", 0, false},
+			{"zero limit", "800", "0", "300", 0, false},
+			{"unlimited", "800", "max", "300", 0, false},
+			{"unlimited v1", "800", "9223372036854771712", "300", 0, false},
+		} {
+			t.Run(version+"/"+tc.name, func(t *testing.T) {
+				root := t.TempDir()
+				usagePath, limitPath, statPath, key := "memory.current", "memory.max", "memory.stat", "inactive_file"
+				if version == "v1" {
+					require.NoError(t, os.Mkdir(filepath.Join(root, "memory"), 0o700))
+					usagePath, limitPath, statPath, key = "memory/memory.usage_in_bytes", "memory/memory.limit_in_bytes", "memory/memory.stat", "total_inactive_file"
+				}
+				require.NoError(t, os.WriteFile(filepath.Join(root, usagePath), []byte(tc.usage), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(root, limitPath), []byte(tc.limit), 0o600))
+				if tc.inactive != "" {
+					require.NoError(t, os.WriteFile(filepath.Join(root, statPath), []byte(fmt.Sprintf("anon 100\n%s\t%s\n", key, tc.inactive)), 0o600))
+				}
+				used, limit, ok := readCgroupMemoryBytes(root)
+				require.Equal(t, tc.ok, ok)
+				require.Equal(t, tc.want, used)
+				if tc.ok {
+					require.EqualValues(t, 1000, limit)
+				} else {
+					require.Zero(t, limit, "fallback must not mix container and host metrics")
+				}
+			})
+		}
+	}
+}
+
+func TestReadCgroupCPULimitRespectsSchedulableCPUs(t *testing.T) {
+	for _, tc := range []struct {
+		name, v2, quota, period string
+		cpus                    int
+		want                    float64
+	}{
+		{"v2 quota", "50000 100000", "", "", 2, 0.5},
+		{"v2 affinity", "800000 100000", "", "", 2, 2},
+		{"v1 quota", "", "50000", "100000", 2, 0.5},
+		{"v1 affinity", "", "800000", "100000", 2, 2},
+		{"unlimited v2", "max 100000", "", "", 2, 0},
+		{"unlimited v1", "", "-1", "100000", 2, 0},
+		{"invalid quota", "bad 100000", "", "", 2, 0},
+		{"zero period", "100000 0", "", "", 2, 0},
+		{"unknown affinity", "100000 100000", "", "", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			require.NoError(t, os.Mkdir(filepath.Join(root, "cpu"), 0o700))
+			for path, value := range map[string]string{"cpu.max": tc.v2, "cpu/cpu.cfs_quota_us": tc.quota, "cpu/cpu.cfs_period_us": tc.period} {
+				if value != "" {
+					require.NoError(t, os.WriteFile(filepath.Join(root, path), []byte(value), 0o600))
+				}
+			}
+			require.Equal(t, tc.want, readCgroupCPULimitCores(root, tc.cpus))
+		})
+	}
+}
 
 // TestResolveMemoryStatsCgroupUsageButUnlimitedFallsBackToHost is the core
 // regression: in Docker + cgroup v2 with NO memory limit, memory.current is a

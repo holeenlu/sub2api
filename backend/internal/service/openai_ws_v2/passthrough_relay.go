@@ -15,6 +15,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/tidwall/gjson"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
@@ -29,6 +30,8 @@ type Usage struct {
 	ImageInputTokens         int
 	OutputTokens             int
 	CacheCreationInputTokens int
+	CacheCreation30mTokens   int
+	CacheCreation12hTokens   int
 	CacheReadInputTokens     int
 	ImageOutputTokens        int
 }
@@ -81,13 +84,17 @@ type RelayOptions struct {
 	StartClientAfterFirstDownstream bool
 	OnUsageParseFailure             func(eventType string, usageRaw string)
 	OnTurnComplete                  func(turn RelayTurnResult)
-	BeforeWriteClient               func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
-	BeforeClientWrite               func(msgType coderws.MessageType, payload []byte)
-	AfterClientWrite                func(msgType coderws.MessageType, payload []byte, writeErr error)
-	BeforeRelayCancel               func(exit RelayExit)
-	ReadClientFrame                 func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
-	OnTrace                         func(event RelayTraceEvent)
-	Now                             func() time.Time
+	// Observers run synchronously around the actual upstream write. Payload is
+	// borrowed and read-only; observers must not retain it or change relay policy.
+	BeforeUpstreamWrite func(msgType coderws.MessageType, payload []byte)
+	AfterUpstreamWrite  func(msgType coderws.MessageType, payload []byte, writeErr error)
+	BeforeWriteClient   func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
+	BeforeClientWrite   func(msgType coderws.MessageType, payload []byte)
+	AfterClientWrite    func(msgType coderws.MessageType, payload []byte, writeErr error)
+	BeforeRelayCancel   func(exit RelayExit)
+	ReadClientFrame     func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
+	OnTrace             func(event RelayTraceEvent)
+	Now                 func() time.Time
 }
 
 type RelayTraceEvent struct {
@@ -203,7 +210,14 @@ func Relay(
 	writeUpstream := func(msgType coderws.MessageType, payload []byte) error {
 		writeCtx, cancel := context.WithTimeout(relayCtx, writeTimeout)
 		defer cancel()
-		return upstreamConn.WriteFrame(writeCtx, msgType, payload)
+		if options.BeforeUpstreamWrite != nil {
+			options.BeforeUpstreamWrite(msgType, payload)
+		}
+		err := upstreamConn.WriteFrame(writeCtx, msgType, payload)
+		if options.AfterUpstreamWrite != nil {
+			options.AfterUpstreamWrite(msgType, payload, err)
+		}
+		return err
 	}
 	writeClientFrameUpstream := func(msgType coderws.MessageType, payload []byte) error {
 		isResponseCreate := isClientResponseCreateFrame(msgType, payload)
@@ -379,6 +393,13 @@ func Relay(
 	<-upstreamDone
 
 	emitTurnComplete(options.OnTurnComplete, state, finalizePendingBareError(state, nowFn()))
+	if (firstExit.stage == "read_client" && firstExit.graceful) || relayUsageHasTokens(state.turnUsage) {
+		if id := openAIWSRelayActiveTurnID(state); id != "" {
+			// Disconnect or upstream failure without a terminal. Settle this turn's
+			// observed usage, keeping its terminal type empty (unknown).
+			emitTurnComplete(options.OnTurnComplete, state, finalizeObservedRelayTerminal(state, observedUpstreamEvent{responseID: id}, nowFn()))
+		}
+	}
 	enrichResult(&result, state, nowFn().Sub(startAt))
 	result.ClientToUpstreamFrames = clientToUpstreamFrames.Load()
 	result.UpstreamToClientFrames = upstreamToClientFrames.Load()
@@ -597,6 +618,11 @@ func runUpstreamToClient(
 		switch msgType {
 		case coderws.MessageText:
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+			// A bare error is provisional. Resumed output or the authoritative
+			// terminal belongs to the same request, not a second billable turn.
+			if state.pendingBareError != nil && (state.pendingBareError.responseID == "" || gjson.GetBytes(payload, "response.id").String() == "" || state.pendingBareError.responseID == gjson.GetBytes(payload, "response.id").String()) && (isTokenEvent(eventType) || eventType == "response.completed" || eventType == "response.done" || eventType == "response.incomplete") {
+				state.pendingBareError = nil
+			}
 			if shouldFinalizePendingBareError(state, payload, eventType) {
 				emitTurnComplete(onTurnComplete, state, finalizePendingBareError(state, nowFn()))
 			}
@@ -654,7 +680,10 @@ func runUpstreamToClient(
 			return
 		}
 		wroteDownstream = true
-		if state != nil {
+		// A late control acknowledgement can arrive after the next create has
+		// reset this flag. Keep connection delivery facts without committing
+		// that new turn before any of its own response frames arrive.
+		if state != nil && observedEvent.eventType != "response.interrupt.accepted" && observedEvent.eventType != "response.interrupt.failed" {
 			state.turnWroteDownstream.Store(true)
 		}
 		if afterWriteClient != nil {
@@ -758,6 +787,11 @@ func observeUpstreamMessage(
 	if eventType == "" {
 		return observedUpstreamEvent{}
 	}
+	// Interrupt acknowledgements are control metadata, including when the
+	// provider sends them after the terminal. They cannot start or bill a turn.
+	if eventType == "response.interrupt.accepted" || eventType == "response.interrupt.failed" {
+		return observedUpstreamEvent{eventType: eventType, responseID: strings.TrimSpace(values[2].String())}
+	}
 	responseID := strings.TrimSpace(values[1].String())
 	if responseID == "" {
 		responseID = strings.TrimSpace(values[2].String())
@@ -850,7 +884,7 @@ func finalizePendingBareError(state *relayState, now time.Time) observedUpstream
 }
 
 func finalizeObservedRelayTerminal(state *relayState, observed observedUpstreamEvent, now time.Time) observedUpstreamEvent {
-	if state == nil || strings.TrimSpace(observed.eventType) == "" {
+	if state == nil || (strings.TrimSpace(observed.eventType) == "" && observed.responseID == "") {
 		return observedUpstreamEvent{}
 	}
 	observed.usage = finalizeRelayTurnUsage(state)
@@ -1155,11 +1189,15 @@ func parseUsageAndAccumulate(
 			int64(inputTokens), int64(outputTokens), usageResult.Get("total_tokens").Int(), reasoningTokens,
 		))
 	}
+	cacheCreation := openAICacheCreationTokensFromUsage(usageResult)
+	writes := apicompat.CacheWriteTokensDetailsFromUsage(usageResult, cacheCreation)
 	parsedUsage := Usage{
 		InputTokens:              inputTokens,
 		ImageInputTokens:         int(imageInputTokens),
 		OutputTokens:             outputTokens,
-		CacheCreationInputTokens: openAICacheCreationTokensFromUsage(usageResult),
+		CacheCreationInputTokens: cacheCreation,
+		CacheCreation30mTokens:   writes.TTL30mTokens,
+		CacheCreation12hTokens:   writes.TTL12hTokens,
 		CacheReadInputTokens:     cachedTokens,
 		ImageOutputTokens:        int(imageTokens),
 	}
@@ -1193,6 +1231,9 @@ func mergeRelayUsageNonZero(dst *Usage, src Usage) {
 	}
 	if src.CacheCreationInputTokens > 0 {
 		dst.CacheCreationInputTokens = src.CacheCreationInputTokens
+		writes := (apicompat.CacheWriteTokensDetails{TTL30mTokens: dst.CacheCreation30mTokens, TTL12hTokens: dst.CacheCreation12hTokens}).MergeNonZero(
+			apicompat.CacheWriteTokensDetails{TTL30mTokens: src.CacheCreation30mTokens, TTL12hTokens: src.CacheCreation12hTokens}, src.CacheCreationInputTokens)
+		dst.CacheCreation30mTokens, dst.CacheCreation12hTokens = writes.TTL30mTokens, writes.TTL12hTokens
 	}
 	if src.CacheReadInputTokens > 0 {
 		dst.CacheReadInputTokens = src.CacheReadInputTokens
@@ -1214,6 +1255,8 @@ func finalizeRelayTurnUsage(state *relayState) Usage {
 	state.usage.ImageInputTokens += turnUsage.ImageInputTokens
 	state.usage.OutputTokens += turnUsage.OutputTokens
 	state.usage.CacheCreationInputTokens += turnUsage.CacheCreationInputTokens
+	state.usage.CacheCreation30mTokens += turnUsage.CacheCreation30mTokens
+	state.usage.CacheCreation12hTokens += turnUsage.CacheCreation12hTokens
 	state.usage.CacheReadInputTokens += turnUsage.CacheReadInputTokens
 	state.usage.ImageOutputTokens += turnUsage.ImageOutputTokens
 	state.turnUsage = Usage{}

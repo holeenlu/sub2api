@@ -301,14 +301,28 @@ func (h *ProxyHandler) GetStats(c *gin.Context) {
 		return
 	}
 
-	// Return mock data for now
-	_ = proxyID
+	if _, err = h.adminService.GetProxy(c.Request.Context(), proxyID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	accounts, err := h.adminService.GetProxyAccounts(c.Request.Context(), proxyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	active := 0
+	for _, a := range accounts {
+		if a.Status == service.StatusActive {
+			active++
+		}
+	}
 	response.Success(c, gin.H{
-		"total_accounts":  0,
-		"active_accounts": 0,
-		"total_requests":  0,
-		"success_rate":    100.0,
-		"average_latency": 0,
+		"total_accounts":  len(accounts),
+		"active_accounts": active,
+		"total_requests":  nil,
+		"success_rate":    nil,
+		"average_latency": nil,
+		"collected_at":    time.Now(),
 	})
 }
 
