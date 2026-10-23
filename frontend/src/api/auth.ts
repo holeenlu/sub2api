@@ -290,11 +290,7 @@ export function getPendingOAuthBindLoginKind(
   return getOAuthCompletionKind(completion)
 }
 
-export function isPendingOAuthCreateAccountRequired(
-  completion: Pick<PendingOAuthBindLoginResponse, 'error'>
-): boolean {
-  return completion.error === 'invitation_required'
-}
+
 
 export function hasPendingOAuthSuggestedProfile(
   completion: Pick<
@@ -508,22 +504,13 @@ export async function validatePromoCode(code: string): Promise<ValidatePromoCode
 }
 
 /**
- * Validate invitation code response
  */
-export interface ValidateInvitationCodeResponse {
-  valid: boolean
-  error_code?: string
-}
+
 
 /**
- * Validate invitation code (public endpoint, no auth required)
- * @param code - Invitation code to validate
  * @returns Validation result
  */
-export async function validateInvitationCode(code: string): Promise<ValidateInvitationCodeResponse> {
-  const { data } = await apiClient.post<ValidateInvitationCodeResponse>('/auth/validate-invitation-code', { code })
-  return data
-}
+
 
 /**
  * Forgot password request
@@ -579,88 +566,26 @@ export async function resetPassword(request: ResetPasswordRequest): Promise<Rese
 }
 
 /**
- * Complete LinuxDo OAuth registration by supplying an invitation code
- * @param invitationCode - Invitation code entered by the user
  * @returns Token pair on success
  */
-export async function completeLinuxDoOAuthRegistration(
-  invitationCode: string,
-  decision?: OAuthAdoptionDecision,
-  affiliateCode?: string
-): Promise<OAuthTokenResponse> {
-  return createPendingLinuxDoOAuthAccount(invitationCode, decision, affiliateCode)
-}
+
 
 /**
- * Complete OIDC OAuth registration by supplying an invitation code
- * @param invitationCode - Invitation code entered by the user
  * @returns Token pair on success
  */
-export async function completeOIDCOAuthRegistration(
-  invitationCode: string,
-  decision?: OAuthAdoptionDecision,
-  affiliateCode?: string
-): Promise<OAuthTokenResponse> {
-  return createPendingOIDCOAuthAccount(invitationCode, decision, affiliateCode)
-}
 
-export async function completeWeChatOAuthRegistration(
-  invitationCode: string,
-  decision?: OAuthAdoptionDecision,
-  affiliateCode?: string
-): Promise<OAuthTokenResponse> {
-  return createPendingWeChatOAuthAccount(invitationCode, decision, affiliateCode)
-}
 
-async function createPendingOAuthAccount(
-  provider: 'linuxdo' | 'oidc' | 'wechat' | 'dingtalk',
-  invitationCode: string,
-  decision?: OAuthAdoptionDecision,
-  affiliateCode?: string
-): Promise<PendingOAuthCreateAccountResponse> {
-  const normalizedAffiliateCode = affiliateCode?.trim()
-  const { data } = await apiClient.post<PendingOAuthCreateAccountResponse>(
-    `/auth/oauth/${provider}/complete-registration`,
-    {
-      invitation_code: invitationCode,
-      ...(normalizedAffiliateCode ? { aff_code: normalizedAffiliateCode } : {}),
-      ...serializeOAuthAdoptionDecision(decision)
-    }
-  )
-  return data
-}
 
-export async function createPendingLinuxDoOAuthAccount(
-  invitationCode: string,
-  decision?: OAuthAdoptionDecision,
-  affiliateCode?: string
-): Promise<PendingOAuthCreateAccountResponse> {
-  return createPendingOAuthAccount('linuxdo', invitationCode, decision, affiliateCode)
-}
 
-export async function createPendingOIDCOAuthAccount(
-  invitationCode: string,
-  decision?: OAuthAdoptionDecision,
-  affiliateCode?: string
-): Promise<PendingOAuthCreateAccountResponse> {
-  return createPendingOAuthAccount('oidc', invitationCode, decision, affiliateCode)
-}
 
-export async function createPendingWeChatOAuthAccount(
-  invitationCode: string,
-  decision?: OAuthAdoptionDecision,
-  affiliateCode?: string
-): Promise<PendingOAuthCreateAccountResponse> {
-  return createPendingOAuthAccount('wechat', invitationCode, decision, affiliateCode)
-}
 
-export async function createPendingDingTalkOAuthAccount(
-  invitationCode: string,
-  decision?: OAuthAdoptionDecision,
-  affiliateCode?: string
-): Promise<PendingOAuthCreateAccountResponse> {
-  return createPendingOAuthAccount('dingtalk', invitationCode, decision, affiliateCode)
-}
+
+
+
+
+
+
+
 
 export async function completePendingOAuthBindLogin(
   decision?: OAuthAdoptionDecision
@@ -697,23 +622,14 @@ export const authAPI = {
   sendVerifyCode,
   sendPendingOAuthVerifyCode,
   validatePromoCode,
-  validateInvitationCode,
   forgotPassword,
   resetPassword,
   refreshToken,
   revokeAllSessions,
   getPendingOAuthBindLoginKind,
-  isPendingOAuthCreateAccountRequired,
   hasPendingOAuthSuggestedProfile,
   completePendingOAuthBindLogin,
-  createPendingLinuxDoOAuthAccount,
-  createPendingOIDCOAuthAccount,
-  createPendingWeChatOAuthAccount,
   exchangePendingOAuthCompletion,
-  completeLinuxDoOAuthRegistration,
-  completeOIDCOAuthRegistration,
-  completeWeChatOAuthRegistration,
-  createPendingDingTalkOAuthAccount
 }
 
 export default authAPI

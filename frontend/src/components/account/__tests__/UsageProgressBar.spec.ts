@@ -223,4 +223,20 @@ describe('UsageProgressBar', () => {
     expect(percent.classes()).toContain('w-[32px]')
     expect(percent.classes()).toContain('text-right')
   })
+  it('renders server forecast confidence and removes estimates when evidence becomes stale', async () => {
+    const wrapper = mount(UsageProgressBar, { props: {
+      label: '7d', utilization: 8, color: 'emerald',
+      windowStats: { requests: 2, tokens: 200, cost: 0 },
+      capacityForecast: { status: 'ready', sample_percent: 8, low_sample: true, estimated_tokens: 2500 }
+    } })
+    const badge = wrapper.get('[data-test="capacity-forecast"]')
+    expect(badge.text()).toContain('tok')
+    expect(badge.text()).toContain('forecastLowSample')
+    expect(badge.text()).not.toContain('estimatedTotalCost')
+    await wrapper.setProps({ capacityForecast: { status: 'stale_observation', sample_percent: 8, low_sample: false } })
+    expect(badge.text()).toContain('forecastUnavailable')
+    expect(badge.text()).not.toContain('tok')
+    wrapper.unmount()
+  })
+
 })

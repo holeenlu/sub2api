@@ -19,7 +19,14 @@ const {
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ showError: showErrorMock, showSuccess: vi.fn(), showInfo: vi.fn() })
 }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ get isSimpleMode() { return authIsSimpleMode.value } }) }))
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    can: vi.fn(() => true),
+    isSuperAdmin: true,
+    user: { id: 1, role: 'super_admin' },
+    get isSimpleMode() { return authIsSimpleMode.value }
+  })
+}))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
@@ -61,6 +68,7 @@ function mountModal(value = account()) {
     props: { show: true, account: value, proxies: [], groups: [] },
     global: { stubs: {
       BaseDialog: BaseDialogStub, Select: true, Icon: true, ProxySelector: true,
+      ExcelBPSAuthorization: true,
       GroupSelector: true, ModelWhitelistSelector: true
     } }
   })
