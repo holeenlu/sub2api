@@ -159,7 +159,7 @@
             >
               <Icon name="questionCircle" size="md" />
             </button>
-            <button @click="showAssignModal = true" class="btn btn-primary">
+            <button v-if="rolePermissions.can('subscriptions.manage')" @click="showAssignModal = true" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.subscriptions.assignSubscription') }}
             </button>
@@ -174,7 +174,7 @@
             <span class="mr-2 text-sm font-medium text-primary-800 dark:text-primary-200">
               {{ t('admin.subscriptions.bulk.selected', { count: selectedCount }) }}
             </span>
-            <button
+            <button v-if="rolePermissions.can('subscriptions.manage')"
               v-for="action in bulkActions"
               :key="action"
               type="button"
@@ -419,7 +419,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
-                v-if="row.status === 'active' || row.status === 'expired'"
+                v-if="(row.status === 'active' || row.status === 'expired') &amp;&amp; (rolePermissions.can('subscriptions.manage'))"
                 @click="handleExtend(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
               >
@@ -427,7 +427,7 @@
                 <span class="text-xs">{{ t('admin.subscriptions.adjust') }}</span>
               </button>
               <button
-                v-if="row.status === 'active'"
+                v-if="(row.status === 'active') &amp;&amp; (rolePermissions.can('subscriptions.manage'))"
                 @click="handleResetQuota(row)"
                 :disabled="resettingQuota && resettingSubscription?.id === row.id"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20 dark:hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
@@ -436,7 +436,7 @@
                 <span class="text-xs">{{ t('admin.subscriptions.resetQuota') }}</span>
               </button>
               <button
-                v-if="row.status === 'active'"
+                v-if="(row.status === 'active') &amp;&amp; (rolePermissions.can('subscriptions.manage'))"
                 @click="handleRevoke(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
@@ -444,7 +444,7 @@
                 <span class="text-xs">{{ t('admin.subscriptions.revoke') }}</span>
               </button>
               <button
-                v-if="row.status === 'revoked'"
+                v-if="(row.status === 'revoked') &amp;&amp; (rolePermissions.can('subscriptions.manage'))"
                 @click="handleRestore(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
               >
@@ -496,7 +496,7 @@
       :close-on-escape="!submitting"
       @close="closeAssignModal"
     >
-      <form
+      <form v-if="rolePermissions.can('subscriptions.manage')"
         id="assign-subscription-form"
         @submit.prevent="handleAssignSubscription"
         class="space-y-5"
@@ -664,7 +664,7 @@
       @close="closeExtendModal"
     >
       <form
-        v-if="extendingSubscription"
+        v-if="(extendingSubscription) &amp;&amp; (rolePermissions.can('subscriptions.manage'))"
         id="extend-subscription-form"
         @submit.prevent="handleExtendSubscription"
         class="space-y-5"
@@ -840,6 +840,9 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore as useRolePermissions } from '@/stores/auth'
+const rolePermissions = useRolePermissions()
+
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

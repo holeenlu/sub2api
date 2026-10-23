@@ -212,6 +212,7 @@ func TestForwardAsRawChatCompletions_OllamaCloudReasoningAliasStreaming(t *testi
 		"",
 		"data: [DONE]",
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,

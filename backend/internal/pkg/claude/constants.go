@@ -5,11 +5,9 @@ package claude
 
 // Beta header 常量
 //
-// 这里的常量对齐真实 Claude Code CLI 的最新流量（截至 2026-04）。
-// 选型参考：与 Parrot (src/transform/cc_mimicry.py) 的 BETAS 保持一致，
-// 原因：Anthropic 上游会基于 anthropic-beta 的完整集合判定请求来源；
-// 缺少任何"官方 Claude Code 请求才会带"的 beta，都会被降级到第三方额度，
-// 对应报错：`Third-party apps now draw from your extra usage, not your plan limits.`
+// 这些 token 参与现有功能及兼容性策略，不等同于某一 CLI 版本的完整抓包。
+// mimic 固定集合及其与 2.1.301 样本的差异见 FullClaudeCodeMimicryBetas 和
+// docs/CLAUDE_REQUEST_FINGERPRINT.md；不能仅凭 beta 集合推断上游身份判定。
 const (
 	BetaOAuth                    = "oauth-2025-04-20"
 	BetaClaudeCode               = "claude-code-20250219"
@@ -81,17 +79,14 @@ const APIKeyHaikuBetaHeader = BetaInterleavedThinking
 // 客户端缺省时统一使用 5m"，这样既不浪费 1h 缓存额度，也保留客户端自定义能力。
 const DefaultCacheControlTTL = "5m"
 
-// CLICurrentVersion 是内置的 Claude Code CLI 伪装版本号基线（三段 semver）。
-// 用于 billing attribution block 中的 cc_version=X.Y.Z.{fp} 前缀以及 fingerprint 计算。
-// 必须与 DefaultHeaders["User-Agent"] 中的版本号严格一致；不一致会被 Anthropic 判第三方。
-//
-// ⚠️ 读取实际生效的版本号请用 CLIVersion()，它会叠加 SUB2API_CLAUDE_CLI_VERSION 覆盖。
-// 直接引用本常量只在"表达内置基线"时才正确（例如覆盖值的下限校验）。
-const CLICurrentVersion = "2.1.258"
+// CLICurrentVersion 是已采样验证的 mimic 协议基线（三段 semver）。
+// 生成请求的 UA、billing 与 CCH 使用该固定版本；升级须一起验证 SDK/runtime。
+// 真实客户端身份跟踪的配置版本另由 EffectiveCLIVersion() 提供。
+const CLICurrentVersion = "2.1.301"
 
-// FullClaudeCodeMimicryBetas 返回最"像"真实 Claude Code CLI 的完整 beta 列表，
-// 用于 OAuth 账号伪装成 Claude Code 时使用。
-// 顺序与真实 CLI 抓包一致。
+// FullClaudeCodeMimicryBetas 返回 OAuth mimic 使用的 beta 列表。
+// 产品兼容性集合，并非 2.1.301 抓包的完整列表/顺序：保留 output-config
+// 兼容性，不默认开启 thinking-token-count/cache-diagnosis。详见指纹说明文档。
 //
 // 使用建议：
 //   - OAuth mimic：所有模型（包括 Haiku）都使用这整份列表。
@@ -114,23 +109,23 @@ func FullClaudeCodeMimicryBetas() []string {
 
 // DefaultHeaders 是 Claude Code 客户端默认请求头。
 // 每次调用现构造：User-Agent 走 DefaultUserAgent()（运行期可变版本号），
-// 不再在包 init 时固化。同一次请求内应只取一次 UA 字符串并在出站头与
-// billing 两条路径间复用，避免版本缓存翻转瞬间头/体不一致。
+// 不再在包 init 时固化；mimic 构建器另将 UA 固定为 CLICurrentVersion。
 func DefaultHeaders() map[string]string {
 	return map[string]string{
-		// Keep these in sync with recent Claude CLI traffic to reduce the chance
-		// that Claude Code-scoped OAuth credentials are rejected as "non-CLI" usage.
-		// 版本参考：对齐 Parrot (src/transform/cc_mimicry.py:49) 的 CLI_USER_AGENT。
-		"User-Agent":                                DefaultUserAgent(),
-		"X-Stainless-Lang":                          "js",
-		"X-Stainless-Package-Version":               "0.94.0",
-		"X-Stainless-OS":                            "Linux",
-		"X-Stainless-Arch":                          "arm64",
-		"X-Stainless-Runtime":                       "node",
-		"X-Stainless-Runtime-Version":               "v24.3.0",
-		"X-Stainless-Retry-Count":                   "0",
-		"X-Stainless-Timeout":                       "600",
-		"X-App":                                     "cli",
+		// Captured from the official 2.1.301 linux-arm64 binary on 2026-10-16.
+		// Keep the SDK, runtime and platform together as one client profile.
+		"User-Agent":                  DefaultUserAgent(),
+		"Accept":                      "application/json",
+		"Accept-Encoding":             "gzip, deflate, br, zstd",
+		"X-Stainless-Lang":            "js",
+		"X-Stainless-Package-Version": "0.128.0",
+		"X-Stainless-OS":              "Linux",
+		"X-Stainless-Arch":            "arm64",
+		"X-Stainless-Runtime":         "node",
+		"X-Stainless-Runtime-Version": "v26.3.0",
+		"X-Stainless-Retry-Count":     "0",
+		"X-Stainless-Timeout":         "600",
+		"X-App":                       "cli",
 		"Anthropic-Dangerous-Direct-Browser-Access": "true",
 	}
 }
