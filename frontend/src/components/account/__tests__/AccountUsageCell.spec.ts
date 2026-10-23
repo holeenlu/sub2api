@@ -608,33 +608,41 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('7d|36|900')
   })
 
-  it('仅为 OpenAI OAuth 7d 窗口计算预计总费用', async () => {
+  it.each<[Account['platform'], Account['type'], number]>([
+    ['openai', 'oauth', 6752],
+    ['anthropic', 'oauth', 6753],
+    ['anthropic', 'setup-token', 6754]
+  ])('%s %s 展示独立窗口统计、重置时间及 7d 预计总费用', async (platform, type, id) => {
     getUsage.mockResolvedValue({
       five_hour: {
         utilization: 25,
-        resets_at: null,
+        resets_at: '2099-03-07T12:00:00Z',
         remaining_seconds: 0,
         window_stats: { requests: 1, tokens: 100, cost: 2 }
       },
       seven_day: {
         utilization: 40,
-        resets_at: null,
+        resets_at: '2099-03-13T12:00:00Z',
         remaining_seconds: 0,
-        window_stats: { requests: 2, tokens: 200, cost: 12 }
+        window_stats: { requests: 2, tokens: 200, cost: 12, standard_cost: 18, user_cost: 6 },
+        capacity_forecast: { status: 'ready', sample_percent: 40, low_sample: false, estimated_cost: 30, estimated_tokens: 500 }
       }
     })
 
     const wrapper = mount(AccountUsageCell, {
       props: {
-        account: makeAccount({ id: 6752, platform: 'openai', type: 'oauth' })
+        account: makeAccount({ id, platform, type })
       },
       global: {
         stubs: {
           UsageProgressBar: {
-            props: ['label', 'estimatedTotalCost'],
-            template: '<div class="usage-bar">{{ label }}|{{ estimatedTotalCost ?? "none" }}</div>'
+            name: 'UsageProgressBar',
+            props: ['label', 'capacityForecast', 'windowStats', 'resetsAt'],
+            template: '<div class="usage-bar">{{ label }}|{{ capacityForecast?.estimated_cost ?? "none" }}</div>'
           },
-          AccountQuotaInfo: true
+          AccountQuotaInfo: true,
+          ClaudeResetCreditsCell: true,
+          OpenAIQuotaResetCell: true
         }
       }
     })
@@ -643,15 +651,18 @@ describe('AccountUsageCell', () => {
 
     expect(wrapper.text()).toContain('5h|none')
     expect(wrapper.text()).toContain('7d|30')
+    const bars = wrapper.findAllComponents({ name: 'UsageProgressBar' })
+    expect(bars[0].props('windowStats').requests).toBe(1)
+    expect(bars[0].props('resetsAt')).toBe('2099-03-07T12:00:00Z')
+    expect(bars[1].props('windowStats')).toEqual({
+      requests: 2, tokens: 200, cost: 12, standard_cost: 18, user_cost: 6
+    })
+    expect(bars[1].props('resetsAt')).toBe('2099-03-13T12:00:00Z')
+    wrapper.unmount()
   })
 
-  it.each([
-    { id: 6801, utilization: 0, cost: 12 },
-    { id: 6802, utilization: -1, cost: 12 },
-    { id: 6803, utilization: Number.NaN, cost: 12 },
-    { id: 6804, utilization: 40, cost: 0 },
-    { id: 6805, utilization: 40, cost: Number.POSITIVE_INFINITY }
-  ])('OpenAI OAuth 7d 输入无效时不显示预计总费用 (%o)', async ({ id, utilization, cost }) => {
+  it('OpenAI OAuth 7d 缺少服务端预测时不自行推算费用', async () => {
+    const id = 6801, utilization = 40, cost = 12
     getUsage.mockResolvedValue({
       seven_day: {
         utilization,
@@ -672,8 +683,8 @@ describe('AccountUsageCell', () => {
       global: {
         stubs: {
           UsageProgressBar: {
-            props: ['label', 'estimatedTotalCost'],
-            template: '<div class="usage-bar">{{ label }}|{{ estimatedTotalCost ?? "none" }}</div>'
+            props: ['label', 'capacityForecast'],
+            template: '<div class="usage-bar">{{ label }}|{{ capacityForecast?.estimated_cost ?? "none" }}</div>'
           },
           AccountQuotaInfo: true
         }
@@ -1871,7 +1882,58 @@ describe('AccountUsageCell', () => {
     expect(getUsage).toHaveBeenCalledWith(4003)
   })
 
-  it('Anthropic OAuth 会渲染 7d F (Fable) 进度条，且 7d S 逻辑保留', async () => {
+  it('Anthropic 用量仅显示原生窗口，异常传回状态列', async () => {
+    const status = { error_code: 'revoked' }
+    getUsage.mockResolvedValue({
+      seven_day: { utilization: 42, resets_at: null, remaining_seconds: 0 },
+      anthropic_status: status,
+      anthropic: { observations: { 'seven_day.utilization': { value: null, source: 'upstream_api', sampled_at: null } } }
+    })
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 3901, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: {
+        UsageProgressBar: { name: 'UsageProgressBar', props: ['utilizationKnown'], template: '<div />' },
+        ClaudeResetCreditsCell: true
+      } }
+    })
+    await flushPromises()
+    expect(wrapper.getComponent({ name: 'UsageProgressBar' }).props('utilizationKnown')).toBe(false)
+    expect(wrapper.find('details').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('usageMetadata')
+    expect(wrapper.emitted('account-updated')?.[0]).toEqual([expect.objectContaining({ anthropic_status: status })])
+    wrapper.unmount()
+  })
+
+  it('Anthropic 重置刷新覆盖旧请求与组件缓存，重挂载不会恢复旧 Fable 用量', async () => {
+    const oldUsage = { seven_day_fable: { utilization: 50, resets_at: null, remaining_seconds: 0 } }
+    const freshUsage = { seven_day_fable: { utilization: 0, resets_at: null, remaining_seconds: 0 } }
+    let finishOld!: (value: typeof oldUsage) => void
+    getUsage.mockReturnValueOnce(new Promise(resolve => { finishOld = resolve }))
+      .mockResolvedValue(freshUsage)
+    const options = {
+      props: { account: makeAccount({ id: 3988, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: { UsageProgressBar: true, ClaudeResetCreditsCell: true } }
+    }
+    const wrapper = mount(AccountUsageCell, options)
+    await flushPromises()
+    wrapper.getComponent({ name: 'ClaudeResetCreditsCell' }).vm.$emit('redeemed', {
+      outcome: 'reset', cleared: ['seven_day_overage_included']
+    })
+    await flushPromises()
+    expect(getUsage).toHaveBeenLastCalledWith(3988, 'active', true)
+    expect(wrapper.get('usage-progress-bar-stub').attributes('utilization')).toBe('0')
+    finishOld(oldUsage)
+    await flushPromises()
+    expect(wrapper.get('usage-progress-bar-stub').attributes('utilization')).toBe('0')
+    wrapper.unmount()
+    const reloaded = mount(AccountUsageCell, options)
+    await flushPromises()
+    expect(reloaded.get('usage-progress-bar-stub').attributes('utilization')).toBe('0')
+    expect(getUsage).toHaveBeenCalledTimes(3)
+    reloaded.unmount()
+  })
+
+  it('Anthropic OAuth 只渲染 5h、7d 和 7d F (Fable) 窗口', async () => {
     getUsage.mockResolvedValue({
       source: 'passive',
       five_hour: {
@@ -1920,7 +1982,7 @@ describe('AccountUsageCell', () => {
 
     expect(wrapper.text()).toContain('5h|41')
     expect(wrapper.text()).toContain('7d|56')
-    expect(wrapper.text()).toContain('7d S|30')
+    expect(wrapper.text()).not.toContain('7d S|30')
     expect(wrapper.text()).toContain('7d F|100')
   })
 

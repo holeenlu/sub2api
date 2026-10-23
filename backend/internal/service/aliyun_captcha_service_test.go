@@ -56,7 +56,6 @@ func newAliyunAuthServiceForTest(cfg *config.Config, settings map[string]string,
 	settingService := NewSettingService(&settingPublicRepoStub{values: settings}, cfg)
 	authService := NewAuthService(
 		nil, // entClient
-		nil, // userRepo
 		nil, // redeemRepo
 		nil, // refreshTokenCache
 		cfg,
@@ -65,7 +64,6 @@ func newAliyunAuthServiceForTest(cfg *config.Config, settings map[string]string,
 		NewTurnstileService(settingService, &turnstileVerifierSpy{}),
 		nil, // emailQueueService
 		nil, // promoService
-		nil, // defaultSubAssigner
 		nil, // affiliateService
 		nil, // userPlatformQuotaRepo
 	)

@@ -273,6 +273,8 @@ func (s *OpenAIQuotaService) CachePostResetSnapshot(ctx context.Context, account
 		updates = make(map[string]any)
 	}
 	updates[openaiQuotaCreditsKey] = openAICreditsSnapshot{Credits: usage.Credits, FetchedAt: usage.FetchedAt}
+	// Preserve the known discontinuity even if the upstream reset timestamp stays unchanged.
+	updates["codex_quota_reset_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 	return s.cacheResetCreditsSnapshot(
 		ctx,
 		accountID,

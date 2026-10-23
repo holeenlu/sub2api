@@ -1,0 +1,92 @@
+## 選擇你正在使用的 Claude
+
+| 用戶端 | 設定方式 |
+| --- | --- |
+| Claude Code CLI | 本頁環境變數或使用者 `settings.json` |
+| VS Code 中的 Claude Code | 編輯器使用者設定中的環境變數，見下文 |
+| 支援 Third-Party Inference 的 Claude 桌面版 | [Claude 桌面版教程](/apps/claude-desktop) |
+| claude.ai 網頁聊天 | 本頁不會把網頁帳號聊天切換為 TapModels Key |
+
+先在 [API 金鑰](/keys) 為目標分組建立 Key。專案支援 Messages 請求，最終是否允許該用戶端、模型及輔助請求由分組策略決定。
+
+## CLI 設定
+
+### 線上部署（macOS / Linux）
+
+```bash
+export TAPMODELS_API_KEY="你的 TapModels API Key"
+curl -fsSL https://tapmodels.ai/install/claude-code.sh | bash
+```
+
+腳本會備份 `~/.claude/settings.json` 後寫入 Messages 環境變數並限制權限。執行前請審閱腳本；需要自訂地址時設定 `TAPMODELS_BASE_URL`。
+
+下圖來自TapModels“使用金鑰 → Claude Code”，使用無效範例 Key 與演示地址。選擇與你作業系統一致的標籤，並複製自己控制台裡的值；[設定器教程](/apps/console) 也提供了 PowerShell 截圖。
+
+![TapModels Claude Code 設定器（範例資料）](/docs-assets/client-claude-zh-TW.png)
+
+已安裝 Claude Code 後執行 `claude --version`。安裝步驟見 [Claude Code 官方說明](https://code.claude.com/docs/en/setup)。
+
+macOS / Linux：
+
+```bash
+export ANTHROPIC_BASE_URL="{{API_ROOT}}"
+export ANTHROPIC_AUTH_TOKEN="你的 TapModels API Key"
+claude --model claude-sonnet-5
+```
+
+Windows PowerShell：
+
+```powershell
+$env:ANTHROPIC_BASE_URL="{{API_ROOT}}"
+$env:ANTHROPIC_AUTH_TOKEN="你的 TapModels API Key"
+claude --model claude-sonnet-5
+```
+
+將範例模型替換為目前 Key 開放的 ID。Base URL 填根地址，用戶端自行追加 `/v1/messages`。Token 填原始 Key，不加 `Bearer `。清理自己舊設定中衝突的認證資訊來源前先備份，不必刪除已儲存的官方登入。
+
+## 持久化與 IDE
+
+需要每次啟動生效時，備份併合並 `~/.claude/settings.json` 中的 `env`：
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "{{API_ROOT}}",
+    "ANTHROPIC_AUTH_TOKEN": "你的 TapModels API Key"
+  }
+}
+```
+
+本閘道器不採集或儲存 Claude Code / Claude 桌面用戶端的遙測，不提供 `/v1/logs`、`/v1/metrics` 採集端點。原事件介面只返回空 200，不讀取或轉發上傳內容。用戶端自身的隱私設定及其直連供應商的流量由用戶端控制。
+
+帳號遙測僅使用管理員匯入的裝置包，適用於 Claude OAuth / Setup Token 帳號。新帳號等待匯入，伺服器不再初始化 Claude Code。本地工具生成的 JSON 包含真實裝置安裝 ID、CLI 版本及環境，不包含帳號認證資訊或工作階段。匯入後，閘道器綁定目前帳號身分和工作階段，按 vm2api 規則生成完整遙測事件；權杖只用於上游請求驗證，不寫入遙測 JSON。“帳號遙測定時傳送”預設關閉，開啟後僅已匯入裝置包的帳號按十分鐘活動視窗、約十秒事件、六小時 GrowthBook 週期傳送，關閉時保留匯入的裝置資料。
+
+該文件含私密認證資訊，不要寫進共享專案的 `.claude/settings.json`。安裝腳本保留已有用戶端隱私設定。GUI 啟動的 IDE 不一定繼承終端機環境。VS Code 擴充套件可在使用者 Settings JSON 中設定：
+
+```json
+{
+  "claudeCode.environmentVariables": [
+    { "name": "ANTHROPIC_BASE_URL", "value": "{{API_ROOT}}" },
+    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "你的 TapModels API Key" }
+  ]
+}
+```
+
+## 驗證與模型選擇
+
+執行 `/status` 檢查 Base URL 和認證資訊來源，再透過 `/model claude-sonnet-5` 選擇分組開放的精確 ID。傳送一次簡單問題，並在 TapModels 用量記錄核對。不要假設 `/model` 一定自動列出 `GET /v1/models` 的所有項目。
+
+Claude Code 可能為標題、摘要和 token 計數傳送輔助請求。主模型呼叫正常但輔助功能失敗時，需核對分組白名單或模型對應，不能僅換 Key 解決。
+
+## 切換後找回工作階段
+
+回到原來的專案目錄，使用 `claude --resume` 選擇工作階段；`claude --continue` 繼續目前目錄最近的工作階段，也可在用戶端使用 `/resume`。確認作業系統使用者、專案路徑和設定目錄沒有變化。仍找不到時進入 [Claude Code 工作階段恢復](/apps/session-recovery-claude)，不要使用 Codex 修復腳本處理 Claude 資料。
+
+| 錯誤 | 處理 |
+| --- | --- |
+| 401 | 核對 Key、env/settings 的覆蓋關係、`/status` 的認證資訊來源 |
+| 404 / 模型錯誤 | 檢查 Base URL 與分組模型，不要重複拼接 `/v1/messages` |
+| 429 | 等待速率限制視窗，核對餘額、並行與分組配額 |
+| 仍提示帳號登入 | 確認啟動的是 Claude Code，變數傳到目前程序；桌面版使用獨立教程 |
+
+來源：[官方閘道器接入](https://code.claude.com/docs/en/llm-gateway-connect)、[恢復工作階段](https://code.claude.com/docs/en/common-workflows#resume-previous-conversations)，專案設定生成器核對於 2026-10-19。

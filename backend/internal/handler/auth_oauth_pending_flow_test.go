@@ -91,7 +91,7 @@ func TestExchangePendingOAuthCompletionPreviewThenFinalizeAppliesAdoptionDecisio
 
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("pending-session-token").
-		SetIntent("login").
+		SetIntent("bind_current_user").
 		SetProviderType("linuxdo").
 		SetProviderKey("linuxdo").
 		SetProviderSubject("123").
@@ -112,6 +112,7 @@ func TestExchangePendingOAuthCompletionPreviewThenFinalizeAppliesAdoptionDecisio
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	previewRecorder := httptest.NewRecorder()
 	previewCtx, _ := gin.CreateTestContext(previewRecorder)
@@ -203,7 +204,7 @@ func TestExchangePendingOAuthCompletionSkipsInvalidAvatarAdoptionWithoutBlocking
 
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("pending-invalid-avatar-token").
-		SetIntent("login").
+		SetIntent("bind_current_user").
 		SetProviderType("linuxdo").
 		SetProviderKey("linuxdo").
 		SetProviderSubject("invalid-avatar-123").
@@ -224,6 +225,7 @@ func TestExchangePendingOAuthCompletionSkipsInvalidAvatarAdoptionWithoutBlocking
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	body := bytes.NewBufferString(`{"adopt_display_name":true,"adopt_avatar":true}`)
 	recorder := httptest.NewRecorder()
@@ -296,6 +298,7 @@ func TestExchangePendingOAuthCompletionBindCurrentUserPreviewThenFinalizeBindsId
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	previewRecorder := httptest.NewRecorder()
 	previewCtx, _ := gin.CreateTestContext(previewRecorder)
@@ -429,6 +432,7 @@ func TestExchangePendingOAuthCompletionBindCurrentUserOwnershipConflict(t *testi
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	body := bytes.NewBufferString(`{"adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
@@ -464,7 +468,7 @@ func TestExchangePendingOAuthCompletionBindCurrentUserOwnershipConflict(t *testi
 	require.Nil(t, storedSession.ConsumedAt)
 }
 
-func TestExchangePendingOAuthCompletionLoginFalseFalseBindsIdentityWithoutAdoption(t *testing.T) {
+func TestExchangePendingOAuthCompletionLoginFalseFalsePreservesLinkedIdentity(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandler(t, false)
 	ctx := context.Background()
 
@@ -498,6 +502,7 @@ func TestExchangePendingOAuthCompletionLoginFalseFalseBindsIdentityWithoutAdopti
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	body := bytes.NewBufferString(`{"adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
@@ -607,6 +612,7 @@ func TestExchangePendingOAuthCompletionLoginReassignsExistingDecisionIdentityRef
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	_, err = client.IdentityAdoptionDecision.Create().
 		SetPendingAuthSessionID(session.ID).
@@ -646,7 +652,7 @@ func TestExchangePendingOAuthCompletionLoginReassignsExistingDecisionIdentityRef
 	require.NotNil(t, storedSession.ConsumedAt)
 }
 
-func TestExchangePendingOAuthCompletionLoginWithoutDecisionStillBindsIdentity(t *testing.T) {
+func TestExchangePendingOAuthCompletionLoginWithoutDecisionPreservesLinkedIdentity(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandler(t, false)
 	ctx := context.Background()
 
@@ -679,6 +685,7 @@ func TestExchangePendingOAuthCompletionLoginWithoutDecisionStillBindsIdentity(t 
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
@@ -757,6 +764,7 @@ func TestExchangePendingOAuthCompletionExistingLoginWithSuggestedProfileSkipsAdo
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
 	require.NoError(t, err)
+	lifecycleAuthorizePendingFixture(t, handler, session)
 
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
@@ -1012,71 +1020,6 @@ func TestNormalizePendingOAuthCompletionResponseScrubsLegacyTokenPayload(t *test
 	require.Equal(t, "/dashboard", payload["redirect"])
 }
 
-func TestExchangePendingOAuthCompletionInvitationRequiredFalseFalsePersistsDecisionWithoutBinding(t *testing.T) {
-	handler, client := newOAuthPendingFlowTestHandler(t, true)
-	ctx := context.Background()
-
-	session, err := client.PendingAuthSession.Create().
-		SetSessionToken("invitation-required-session-token").
-		SetIntent("login").
-		SetProviderType("linuxdo").
-		SetProviderKey("linuxdo").
-		SetProviderSubject("invitation-123").
-		SetBrowserSessionKey("invitation-required-browser-session-key").
-		SetUpstreamIdentityClaims(map[string]any{
-			"suggested_display_name": "Invite Example",
-			"suggested_avatar_url":   "https://cdn.example/invite.png",
-		}).
-		SetLocalFlowState(map[string]any{
-			oauthCompletionResponseKey: map[string]any{
-				"error": "invitation_required",
-			},
-		}).
-		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
-		Save(ctx)
-	require.NoError(t, err)
-
-	body := bytes.NewBufferString(`{"adopt_display_name":false,"adopt_avatar":false}`)
-	recorder := httptest.NewRecorder()
-	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
-	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("invitation-required-browser-session-key")})
-	ginCtx.Request = req
-
-	handler.ExchangePendingOAuthCompletion(ginCtx)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	data := decodeJSONResponseData(t, recorder)
-	require.Equal(t, "invitation_required", data["error"])
-	require.Equal(t, true, data["adoption_required"])
-
-	identityCount, err := client.AuthIdentity.Query().
-		Where(
-			authidentity.ProviderTypeEQ("linuxdo"),
-			authidentity.ProviderKeyEQ("linuxdo"),
-			authidentity.ProviderSubjectEQ("invitation-123"),
-		).
-		Count(ctx)
-	require.NoError(t, err)
-	require.Zero(t, identityCount)
-
-	decision, err := client.IdentityAdoptionDecision.Query().
-		Where(identityadoptiondecision.PendingAuthSessionIDEQ(session.ID)).
-		Only(ctx)
-	require.NoError(t, err)
-	require.Nil(t, decision.IdentityID)
-	require.False(t, decision.AdoptDisplayName)
-	require.False(t, decision.AdoptAvatar)
-
-	storedSession, err := client.PendingAuthSession.Query().
-		Where(pendingauthsession.IDEQ(session.ID)).
-		Only(ctx)
-	require.NoError(t, err)
-	require.Nil(t, storedSession.ConsumedAt)
-}
-
 func TestCreateOIDCOAuthAccountCreatesUserBindsIdentityAndConsumesSession(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandlerWithEmailVerification(t, false, "fresh@example.com", "246810")
 	ctx := context.Background()
@@ -1317,11 +1260,8 @@ func TestOAuthExistingUserLoginDoesNotApplyPromoCode(t *testing.T) {
 		ctx,
 		existingUser.Email,
 		existingUser.Username,
-		"",
-		"",
 		"WELCOME2024",
-		"oidc",
-	)
+		"oidc")
 
 	require.NoError(t, err)
 	require.Equal(t, existingUser.ID, loggedInUser.ID)
@@ -2411,10 +2351,13 @@ func TestLogin2FACompletesPendingOAuthBindAndConsumesSession(t *testing.T) {
 		Save(ctx)
 	require.NoError(t, err)
 
+	proofUser, err := handler.authService.ValidatePasswordCredentials(ctx, existingUser.Email, "secret-123")
+	require.NoError(t, err)
 	tempToken, err := handler.totpService.CreatePendingOAuthBindLoginSession(
 		ctx,
 		existingUser.ID,
 		existingUser.Email,
+		service.CredentialVersion(proofUser),
 		session.SessionToken,
 		session.BrowserSessionKey,
 	)
@@ -2519,8 +2462,6 @@ type oauthPendingFlowTestHandlerOptions struct {
 	settingValues      map[string]string
 	promoRepo          service.PromoCodeRepository
 	defaultSubAssigner service.DefaultSubscriptionAssigner
-	affiliateService   *service.AffiliateService
-	affiliateFactory   func(*dbent.Client, *service.SettingService) *service.AffiliateService
 	totpCache          service.TotpCache
 	totpEncryptor      service.SecretEncryptor
 	userRepoOptions    oauthPendingFlowUserRepoOptions
@@ -2593,7 +2534,6 @@ CREATE TABLE IF NOT EXISTS user_affiliates (
 	}
 	settingValues := map[string]string{
 		service.SettingKeyRegistrationEnabled:              "true",
-		service.SettingKeyInvitationCodeEnabled:            boolSettingValue(options.invitationEnabled),
 		service.SettingKeyEmailVerifyEnabled:               boolSettingValue(options.emailVerifyEnabled),
 		service.SettingKeyRegistrationEmailSuffixWhitelist: "[]",
 	}
@@ -2601,15 +2541,11 @@ CREATE TABLE IF NOT EXISTS user_affiliates (
 		settingValues[key] = value
 	}
 	settingSvc := service.NewSettingService(&oauthPendingFlowSettingRepoStub{values: settingValues}, cfg)
-	affiliateService := options.affiliateService
-	if affiliateService == nil && options.affiliateFactory != nil {
-		affiliateService = options.affiliateFactory(client, settingSvc)
-	}
+
 	userRepo := &oauthPendingFlowUserRepo{
 		client:  client,
 		options: options.userRepoOptions,
 	}
-	redeemRepo := &oauthPendingFlowRedeemCodeRepo{client: client}
 	var promoService *service.PromoService
 	if options.promoRepo != nil {
 		promoService = service.NewPromoService(options.promoRepo, userRepo, nil, client, nil)
@@ -2625,7 +2561,6 @@ CREATE TABLE IF NOT EXISTS user_affiliates (
 	authSvc := service.NewAuthService(
 		client,
 		userRepo,
-		redeemRepo,
 		&oauthPendingFlowRefreshTokenCacheStub{},
 		cfg,
 		settingSvc,
@@ -2634,9 +2569,7 @@ CREATE TABLE IF NOT EXISTS user_affiliates (
 		nil,
 		promoService,
 		options.defaultSubAssigner,
-		affiliateService,
-		nil,
-	)
+		nil)
 	userSvc := service.NewUserService(userRepo, nil, nil, nil)
 	var totpSvc *service.TotpService
 	if options.totpCache != nil || options.totpEncryptor != nil {
@@ -2974,10 +2907,6 @@ func (r *oauthPendingFlowRedeemCodeRepo) Update(ctx context.Context, code *servi
 	return err
 }
 
-func (r *oauthPendingFlowRedeemCodeRepo) BatchUpdate(context.Context, []int64, service.RedeemCodeBatchUpdateFields) (int64, error) {
-	panic("unexpected BatchUpdate call")
-}
-
 func (r *oauthPendingFlowRedeemCodeRepo) Delete(context.Context, int64) error {
 	panic("unexpected Delete call")
 }
@@ -3191,8 +3120,8 @@ func (r *oauthPendingFlowUserRepo) GetByEmail(ctx context.Context, email string)
 	return oauthPendingFlowServiceUser(entity), nil
 }
 
-func (r *oauthPendingFlowUserRepo) GetFirstAdmin(context.Context) (*service.User, error) {
-	panic("unexpected GetFirstAdmin call")
+func (r *oauthPendingFlowUserRepo) GetFirstSuperAdmin(context.Context) (*service.User, error) {
+	panic("unexpected GetFirstSuperAdmin call")
 }
 
 func (r *oauthPendingFlowUserRepo) Update(ctx context.Context, user *service.User, fields service.UserUpdateFields) error {

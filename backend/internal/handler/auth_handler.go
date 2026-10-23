@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -24,7 +26,6 @@ type AuthHandler struct {
 	userService          *service.UserService
 	settingSvc           *service.SettingService
 	promoService         *service.PromoService
-	redeemService        *service.RedeemService
 	totpService          *service.TotpService
 	userAttributeService *service.UserAttributeService
 
@@ -33,14 +34,13 @@ type AuthHandler struct {
 }
 
 // NewAuthHandler creates a new AuthHandler
-func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService, userAttributeService *service.UserAttributeService) *AuthHandler {
+func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, totpService *service.TotpService, userAttributeService *service.UserAttributeService) *AuthHandler {
 	return &AuthHandler{
 		cfg:                  cfg,
 		authService:          authService,
 		userService:          userService,
 		settingSvc:           settingService,
 		promoService:         promoService,
-		redeemService:        redeemService,
 		totpService:          totpService,
 		userAttributeService: userAttributeService,
 	}
@@ -54,9 +54,7 @@ type RegisterRequest struct {
 	TurnstileToken        string `json:"turnstile_token"`
 	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
 	TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
-	PromoCode             string `json:"promo_code"`      // 注册优惠码
-	InvitationCode        string `json:"invitation_code"` // 邀请码
-	AffCode               string `json:"aff_code"`        // 邀请返利码
+	PromoCode             string `json:"promo_code"` // 注册优惠码
 }
 
 // SendVerifyCodeRequest 发送验证码请求
@@ -121,6 +119,14 @@ func respondWithTokenPair(c *gin.Context, authService *service.AuthService, user
 		return
 	}
 
+	authorization, permissionErr := authService.GetUserAuthorization(c.Request.Context(), user)
+	if permissionErr != nil {
+		response.ErrorFrom(c, permissionErr)
+		return
+	}
+	userResponse := dto.UserFromService(user)
+	userResponse.Snapshot = &authorization
+
 	tokenPair, err := authService.GenerateTokenPair(c.Request.Context(), user, "")
 	if err != nil {
 		slog.Error("failed to generate token pair", "error", err, "user_id", user.ID)
@@ -133,7 +139,7 @@ func respondWithTokenPair(c *gin.Context, authService *service.AuthService, user
 		response.Success(c, AuthResponse{
 			AccessToken: token,
 			TokenType:   "Bearer",
-			User:        dto.UserFromService(user),
+			User:        userResponse,
 		})
 		return
 	}
@@ -142,7 +148,7 @@ func respondWithTokenPair(c *gin.Context, authService *service.AuthService, user
 		RefreshToken: tokenPair.RefreshToken,
 		ExpiresIn:    tokenPair.ExpiresIn,
 		TokenType:    "Bearer",
-		User:         dto.UserFromService(user),
+		User:         userResponse,
 	})
 }
 
@@ -150,7 +156,7 @@ func (h *AuthHandler) ensureBackendModeAllowsUser(ctx context.Context, user *ser
 	if user == nil {
 		return infraerrors.Unauthorized("INVALID_USER", "user not found")
 	}
-	if h == nil || !h.isBackendModeEnabled(ctx) || user.IsAdmin() {
+	if h == nil || !h.isBackendModeEnabled(ctx) || user.IsStaff() || (user.IsVendor() && supplierLoginContext(ctx)) {
 		return nil
 	}
 	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "Backend mode is active. Only admin login is allowed.")
@@ -195,10 +201,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		req.Email,
 		req.Password,
 		req.VerifyCode,
-		req.PromoCode,
-		req.InvitationCode,
-		req.AffCode,
-	)
+		req.PromoCode)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -264,7 +267,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Check if TOTP 2FA is enabled for this user
 	if h.totpService != nil && h.settingSvc.IsTotpEnabled(c.Request.Context()) && user.TotpEnabled {
 		// Create a temporary login session for 2FA
-		tempToken, err := h.totpService.CreateLoginSession(c.Request.Context(), user.ID, user.Email)
+		tempToken, err := h.totpService.CreateLoginSession(c.Request.Context(), user.ID, user.Email, service.CredentialVersion(user))
 		if err != nil {
 			response.InternalError(c, "Failed to create 2FA session")
 			return
@@ -342,6 +345,11 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	// Reloads may refresh profile fields, but cannot upgrade the password proof.
+	if service.CredentialVersion(user) != session.CredentialVersion {
+		response.ErrorFrom(c, service.ErrTokenRevoked)
+		return
+	}
 	if err := ensureLoginUserActive(user); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -374,6 +382,8 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 			response.ErrorFrom(c, err)
 			return
 		}
+		pendingSession.LocalFlowState = clonePendingMap(pendingSession.LocalFlowState)
+		pendingSession.LocalFlowState["credential_version"] = fmt.Sprintf("%d", session.CredentialVersion)
 		if err := applyPendingOAuthBinding(
 			c.Request.Context(),
 			h.entClient(),
@@ -386,14 +396,6 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 			true,
 		); err != nil {
 			response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to bind pending oauth identity").WithCause(err))
-			return
-		}
-		if _, err := pendingSvc.ConsumeBrowserSession(
-			c.Request.Context(),
-			pendingSession.SessionToken,
-			pendingSession.BrowserSessionKey,
-		); err != nil {
-			response.ErrorFrom(c, err)
 			return
 		}
 
@@ -409,6 +411,17 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 		}
 	}
 
+	// Pending adoption reloads the user again. Require the same proof before
+	// issuing either a token pair or the legacy access-token fallback. A revocation
+	// after this snapshot still invalidates both tokens through their old version.
+	if service.CredentialVersion(user) != session.CredentialVersion {
+		response.ErrorFrom(c, service.ErrTokenRevoked)
+		return
+	}
+	issuanceUser := *user
+	issuanceUser.TokenVersion = session.CredentialVersion
+	issuanceUser.TokenVersionResolved = true
+
 	// Delete the login session (only after all checks pass)
 	_ = h.totpService.DeleteLoginSession(c.Request.Context(), req.TempToken)
 
@@ -416,7 +429,7 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 		h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
 	}
 
-	h.respondWithTokenPair(c, user)
+	h.respondWithTokenPair(c, &issuanceUser)
 }
 
 // GetCurrentUser handles getting current authenticated user
@@ -443,6 +456,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	type UserResponse struct {
 		userProfileResponse
 		RunMode string `json:"run_mode"`
+		authz.Snapshot
 	}
 
 	runMode := config.RunModeStandard
@@ -450,7 +464,13 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		runMode = h.cfg.RunMode
 	}
 
+	permissions, err := h.settingSvc.ManagementSnapshot(c.Request.Context(), user)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	response.Success(c, UserResponse{
+		Snapshot:            permissions,
 		userProfileResponse: userProfileResponseFromService(user, identities),
 		RunMode:             runMode,
 	})
@@ -522,67 +542,6 @@ func (h *AuthHandler) ValidatePromoCode(c *gin.Context) {
 	response.Success(c, ValidatePromoCodeResponse{
 		Valid:       true,
 		BonusAmount: promoCode.BonusAmount,
-	})
-}
-
-// ValidateInvitationCodeRequest 验证邀请码请求
-type ValidateInvitationCodeRequest struct {
-	Code string `json:"code" binding:"required"`
-}
-
-// ValidateInvitationCodeResponse 验证邀请码响应
-type ValidateInvitationCodeResponse struct {
-	Valid     bool   `json:"valid"`
-	ErrorCode string `json:"error_code,omitempty"`
-}
-
-// ValidateInvitationCode 验证邀请码（公开接口，注册前调用）
-// POST /api/v1/auth/validate-invitation-code
-func (h *AuthHandler) ValidateInvitationCode(c *gin.Context) {
-	// 检查邀请码功能是否启用
-	if h.settingSvc == nil || !h.settingSvc.IsInvitationCodeEnabled(c.Request.Context()) {
-		response.Success(c, ValidateInvitationCodeResponse{
-			Valid:     false,
-			ErrorCode: "INVITATION_CODE_DISABLED",
-		})
-		return
-	}
-
-	var req ValidateInvitationCodeRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
-		return
-	}
-
-	// 验证邀请码
-	redeemCode, err := h.redeemService.GetByCode(c.Request.Context(), req.Code)
-	if err != nil {
-		response.Success(c, ValidateInvitationCodeResponse{
-			Valid:     false,
-			ErrorCode: "INVITATION_CODE_NOT_FOUND",
-		})
-		return
-	}
-
-	// 检查类型和状态
-	if redeemCode.Type != service.RedeemTypeInvitation {
-		response.Success(c, ValidateInvitationCodeResponse{
-			Valid:     false,
-			ErrorCode: "INVITATION_CODE_INVALID",
-		})
-		return
-	}
-
-	if redeemCode.Status != service.StatusUnused {
-		response.Success(c, ValidateInvitationCodeResponse{
-			Valid:     false,
-			ErrorCode: "INVITATION_CODE_USED",
-		})
-		return
-	}
-
-	response.Success(c, ValidateInvitationCodeResponse{
-		Valid: true,
 	})
 }
 
@@ -696,7 +655,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	}
 
 	// Backend mode: block non-admin token refresh
-	if h.settingSvc.IsBackendModeEnabled(c.Request.Context()) && result.UserRole != "admin" {
+	if h.settingSvc.IsBackendModeEnabled(c.Request.Context()) && result.UserRole != service.RoleAdmin && result.UserRole != service.RoleSuperAdmin && !(supplierLoginContext(c.Request.Context()) && authz.IsVendorRole(result.UserRole)) {
 		response.Forbidden(c, "Backend mode is active. Only admin login is allowed.")
 		return
 	}
@@ -765,3 +724,5 @@ func (h *AuthHandler) RevokeAllSessions(c *gin.Context) {
 		Message: "All sessions have been revoked. Please log in again.",
 	})
 }
+
+func supplierLoginContext(ctx context.Context) bool { v, _ := authz.SupplierOrigin(ctx); return v }

@@ -2,11 +2,18 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"io"
-	"sync/atomic"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+	coderws "github.com/coder/websocket"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,18 +68,6 @@ func TestForwardGrokVoice_RejectsNonGrok(t *testing.T) {
 	require.Contains(t, err.Error(), "not supported")
 }
 
-func TestAwaitGrokRealtimeAudioObservedReadsFlagAfterRelayExits(t *testing.T) {
-	errCh := make(chan error, 1)
-	var observed atomic.Bool
-	go func() {
-		observed.Store(true)
-		errCh <- io.EOF
-	}()
-	got, err := awaitGrokRealtimeAudioObserved(errCh, &observed)
-	require.ErrorIs(t, err, io.EOF)
-	require.True(t, got, "audioObserved must be read after the relay returns, not before <-errCh")
-}
-
 func TestGrokRealtimeEventHasAudio(t *testing.T) {
 	require.False(t, grokRealtimeEventHasAudio([]byte(`{"type":"session.created"}`)))
 	require.False(t, grokRealtimeEventHasAudio([]byte(`{"type":"response.audio_transcript.delta","delta":"hi"}`)))
@@ -81,9 +76,347 @@ func TestGrokRealtimeEventHasAudio(t *testing.T) {
 	require.True(t, grokRealtimeEventHasAudio([]byte(`{"type":"response.output_audio.delta","audio":"abc"}`)))
 }
 
+func TestGrokRealtimeFrameIsAudio(t *testing.T) {
+	cases := []struct {
+		name string
+		kind coderws.MessageType
+		msg  []byte
+		want bool
+	}{
+		{"raw pcm binary frame", coderws.MessageBinary, []byte{0x00, 0x01, 0xfe, 0xff}, true},
+		{"binary frame that is a bare json number", coderws.MessageBinary, []byte("12"), true},
+		{"json event sent as binary frame", coderws.MessageBinary, []byte(`{"type":"input_audio_buffer.commit"}`), false},
+		{"empty binary frame", coderws.MessageBinary, nil, false},
+		{"text event", coderws.MessageText, []byte(`{"type":"response.output_audio.delta","delta":"abc"}`), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, grokRealtimeFrameIsAudio(tc.kind, tc.msg))
+		})
+	}
+}
+
+type grokRealtimeFrame struct {
+	kind coderws.MessageType
+	data []byte
+}
+
+// grokRealtimeFrameUpstreamStub records frames written upstream with their type
+// and replays queued upstream frames.
+type grokRealtimeFrameUpstreamStub struct {
+	mu          sync.Mutex
+	written     []grokRealtimeFrame
+	toClient    chan grokRealtimeFrame
+	afterCancel func() (coderws.MessageType, []byte, error)
+}
+
+func (u *grokRealtimeFrameUpstreamStub) record(kind coderws.MessageType, data []byte) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.written = append(u.written, grokRealtimeFrame{kind, append([]byte(nil), data...)})
+}
+
+func (u *grokRealtimeFrameUpstreamStub) WriteJSON(_ context.Context, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	u.record(coderws.MessageText, data)
+	return nil
+}
+
+func (u *grokRealtimeFrameUpstreamStub) WriteFrame(_ context.Context, kind coderws.MessageType, data []byte) error {
+	u.record(kind, data)
+	return nil
+}
+
+func (u *grokRealtimeFrameUpstreamStub) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	select {
+	case frame := <-u.toClient:
+		return frame.kind, frame.data, nil
+	case <-ctx.Done():
+		if u.afterCancel != nil {
+			finishRead := u.afterCancel
+			u.afterCancel = nil
+			return finishRead()
+		}
+		return coderws.MessageText, nil, ctx.Err()
+	}
+}
+
+func (u *grokRealtimeFrameUpstreamStub) ReadMessage(ctx context.Context) ([]byte, error) {
+	_, data, err := u.ReadFrame(ctx)
+	return data, err
+}
+
+func (u *grokRealtimeFrameUpstreamStub) Ping(context.Context) error { return nil }
+func (u *grokRealtimeFrameUpstreamStub) Close() error               { return nil }
+
+func TestProxyGrokRealtimeConnWaitsForLateAudioBeforeReturning(t *testing.T) {
+	readCanceled, releaseRead := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseRead) }) }
+	stub := &grokRealtimeFrameUpstreamStub{
+		toClient: make(chan grokRealtimeFrame),
+		afterCancel: func() (coderws.MessageType, []byte, error) {
+			close(readCanceled)
+			<-releaseRead
+			return coderws.MessageBinary, []byte{0x10, 0x01}, nil
+		},
+	}
+	observed := make(chan bool, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		c := securityVoiceContext(1, 10)
+		c.Request = r
+		got, _ := (&OpenAIGatewayService{}).ProxyGrokRealtimeConn(r.Context(), c, conn, &GrokRealtimeUpstream{conn: stub, accountID: 77})
+		observed <- got
+	}))
+	defer server.Close()
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	require.NoError(t, err)
+	_ = client.CloseNow()
+	select {
+	case <-readCanceled:
+	case <-ctx.Done():
+		t.Fatal("upstream reader was not canceled")
+	}
+	select {
+	case <-observed:
+		t.Fatal("relay returned before its upstream reader finished")
+	case <-time.After(25 * time.Millisecond):
+	}
+	release()
+	select {
+	case got := <-observed:
+		require.True(t, got, "late audio must be observed before releasing the request")
+	case <-ctx.Done():
+		t.Fatal("relay did not finish after its reader exited")
+	}
+}
+
+func TestProxyGrokRealtimeConnPreservesBinaryAudioFrames(t *testing.T) {
+	upstreamAudio := []byte{0x10, 0x00, 0xf0, 0xff, 0x7b}
+	clientAudio := []byte{0x7b, 0x01, 0x02, 0x03}
+	stub := &grokRealtimeFrameUpstreamStub{toClient: make(chan grokRealtimeFrame, 2)}
+	stub.toClient <- grokRealtimeFrame{coderws.MessageBinary, upstreamAudio}
+	stub.toClient <- grokRealtimeFrame{coderws.MessageText, []byte(`{"type":"response.done"}`)}
+	repo := newSecurityMediaRepo()
+	require.NoError(t, repo.PutVoice(context.Background(), &GatewayMediaVoice{ID: "private", UserID: 1, GroupID: 10, AccountID: 77}))
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	type proxyResult struct {
+		observed bool
+		err      error
+	}
+	results := make(chan proxyResult, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		c := securityVoiceContext(2, 20)
+		c.Request = r
+		observed, proxyErr := svc.ProxyGrokRealtimeConn(r.Context(), c, conn, &GrokRealtimeUpstream{conn: stub, accountID: 77})
+		results <- proxyResult{observed, proxyErr}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	require.NoError(t, err)
+	defer func() { _ = client.CloseNow() }()
+
+	kind, msg, err := client.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, coderws.MessageBinary, kind)
+	require.Equal(t, upstreamAudio, msg)
+	kind, msg, err = client.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, coderws.MessageText, kind)
+	require.JSONEq(t, `{"type":"response.done"}`, string(msg))
+
+	sessionUpdate := `{"type":"session.update","session":{"audio":{"input":{"transport":"binary"},"output":{"transport":"binary"}}}}`
+	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(sessionUpdate)))
+	require.NoError(t, client.Write(ctx, coderws.MessageBinary, clientAudio))
+	require.NoError(t, client.Write(ctx, coderws.MessageBinary, []byte(`{"type":"input_audio_buffer.commit"}`)))
+	require.Eventually(t, func() bool {
+		stub.mu.Lock()
+		defer stub.mu.Unlock()
+		return len(stub.written) == 3
+	}, 5*time.Second, 10*time.Millisecond)
+	// Binary JSON must not bypass voice ownership after raw audio was relayed.
+	require.NoError(t, client.Write(ctx, coderws.MessageBinary, []byte(`{"type":"session.update","session":{"voice":"private"}}`)))
+
+	result := <-results
+	require.ErrorIs(t, result.err, ErrMediaNotOwned)
+	require.True(t, result.observed, "binary audio frames must count as observed audio for billing")
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	require.Equal(t, coderws.MessageText, stub.written[0].kind)
+	require.JSONEq(t, sessionUpdate, string(stub.written[0].data))
+	require.Equal(t, grokRealtimeFrame{coderws.MessageBinary, clientAudio}, stub.written[1])
+	// A JSON event sent as a binary frame is still relayed as a text event.
+	require.Equal(t, coderws.MessageText, stub.written[2].kind)
+	require.JSONEq(t, `{"type":"input_audio_buffer.commit"}`, string(stub.written[2].data))
+}
+
 func TestForwardGrokVoice_RejectsUnknownEndpoint(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	_, err := svc.ForwardGrokVoice(context.Background(), nil, &Account{Platform: PlatformGrok}, "unknown", []byte(`{}`), "application/json")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported")
+}
+
+type securityMediaRepo struct {
+	AccountRepository
+	mu     sync.Mutex
+	voices map[string]GatewayMediaVoice
+}
+
+func newSecurityMediaRepo() *securityMediaRepo {
+	return &securityMediaRepo{voices: map[string]GatewayMediaVoice{}}
+}
+func (r *securityMediaRepo) PutVoice(_ context.Context, v *GatewayMediaVoice) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if old, ok := r.voices[v.ID]; ok && (old.UserID != v.UserID || old.GroupID != v.GroupID) {
+		return ErrMediaNotOwned
+	}
+	r.voices[v.ID] = *v
+	return nil
+}
+
+func (r *securityMediaRepo) GetVoice(_ context.Context, g, u int64, id string) (*GatewayMediaVoice, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	v, ok := r.voices[id]
+	if !ok || v.UserID != u || v.GroupID != g {
+		return nil, ErrMediaNotOwned
+	}
+	return &v, nil
+}
+
+func (r *securityMediaRepo) ListVoices(_ context.Context, g, u int64) ([]GatewayMediaVoice, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []GatewayMediaVoice{}
+	for _, v := range r.voices {
+		if v.GroupID == g && v.UserID == u {
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}
+
+func (r *securityMediaRepo) DeleteVoice(_ context.Context, g, u int64, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	v := r.voices[id]
+	if v.GroupID == g && v.UserID == u {
+		delete(r.voices, id)
+	}
+	return nil
+}
+
+func securityVoiceContext(user, key int64) *gin.Context {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/tts", nil)
+	g := int64(10)
+	c.Set("api_key", &APIKey{ID: key, UserID: user, GroupID: &g})
+	return c
+}
+
+type securityMediaHTTP struct {
+	HTTPUpstream
+	response string
+	calls    int
+}
+
+func (u *securityMediaHTTP) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.calls++
+	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(u.response))}, nil
+}
+
+func TestSecurityCustomVoiceOwnerAllReferences(t *testing.T) {
+	repo := newSecurityMediaRepo()
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	ctx := context.Background()
+	require.NoError(t, repo.PutVoice(ctx, &GatewayMediaVoice{ID: "private", UserID: 1, GroupID: 10, AccountID: 77, Metadata: json.RawMessage(`{"voice_id":"private"}`)}))
+	for _, endpoint := range []string{"custom-voices/private", "custom-voices/private/audio"} {
+		_, err := svc.ResolveGrokVoiceAccount(ctx, securityVoiceContext(2, 20), endpoint, nil)
+		require.ErrorIs(t, err, ErrMediaNotOwned)
+		id, err := svc.ResolveGrokVoiceAccount(ctx, securityVoiceContext(1, 99), endpoint, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, 77, id)
+	}
+	for _, body := range []string{`{"voice_id":"private"}`, `{"voice":"private"}`, `{"session":{"voice":"private"}}`, `{"response":{"audio":{"output":{"voice":{"id":"private"}}}}}`, `{"voice":"Ara","voice_id":"private"}`, `{"voice":"Ara","voice":"private"}`, `{"voice":"Ara","vo\u0069ce":"private"}`} {
+		for _, endpoint := range []string{"tts", "realtime"} {
+			_, err := svc.ResolveGrokVoiceAccount(ctx, securityVoiceContext(2, 20), endpoint, []byte(body))
+			require.Error(t, err, body)
+		}
+	}
+	for _, endpoint := range []string{"tts", "realtime"} {
+		id, err := svc.ResolveGrokVoiceAccount(ctx, securityVoiceContext(1, 99), endpoint, []byte(`{"voice":"private"}`))
+		require.NoError(t, err)
+		require.EqualValues(t, 77, id)
+		id, err = svc.ResolveGrokVoiceAccount(ctx, securityVoiceContext(2, 20), endpoint, []byte(`{"voice":"Ara"}`))
+		require.NoError(t, err)
+		require.Zero(t, id)
+	}
+	voices, err := svc.ListOwnedGrokVoices(ctx, securityVoiceContext(2, 20))
+	require.NoError(t, err)
+	require.Empty(t, voices)
+	voices, err = svc.ListOwnedGrokVoices(ctx, securityVoiceContext(1, 99))
+	require.NoError(t, err)
+	require.Len(t, voices, 1)
+	_, err = svc.ResolveGrokVoiceAccount(ctx, securityVoiceContext(1, 99), "tts", []byte(`{"voice":"unowned_historical"}`))
+	require.ErrorIs(t, err, ErrMediaNotOwned)
+}
+
+func TestSecurityCustomVoiceCRUDAndPersistence(t *testing.T) {
+	repo := newSecurityMediaRepo()
+	upstream := &securityMediaHTTP{response: `{"voice_id":"created","name":"mine"}`}
+	svc := &OpenAIGatewayService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{ID: 77, Platform: PlatformGrok, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "upstream"}}
+	ctx := context.Background()
+	owner := securityVoiceContext(1, 11)
+	owner.Request = httptest.NewRequest(http.MethodPost, "/custom-voices", nil)
+	_, err := svc.ForwardGrokVoice(ctx, owner, account, "custom-voices", []byte(`{"name":"mine"}`), "application/json")
+	require.NoError(t, err)
+	stored, err := repo.GetVoice(ctx, 10, 1, "created")
+	require.NoError(t, err)
+	require.EqualValues(t, 77, stored.AccountID)
+	for _, method := range []string{http.MethodGet, http.MethodPatch, http.MethodDelete} {
+		for _, endpoint := range []string{"custom-voices/created", "custom-voices/created/audio"} {
+			attacker := securityVoiceContext(2, 22)
+			attacker.Request = httptest.NewRequest(method, "/v1/"+endpoint, nil)
+			before := upstream.calls
+			_, err := svc.ForwardGrokVoice(ctx, attacker, account, endpoint, []byte(`{"name":"stolen"}`), "application/json")
+			require.ErrorIs(t, err, ErrMediaNotOwned)
+			require.Equal(t, before, upstream.calls)
+		}
+	}
+	siblingKey := securityVoiceContext(1, 99)
+	siblingKey.Request = httptest.NewRequest(http.MethodGet, "/custom-voices/created/audio", nil)
+	_, err = svc.ForwardGrokVoice(ctx, siblingKey, account, "custom-voices/created/audio", nil, "")
+	require.NoError(t, err)
+	wrongAccount := *account
+	wrongAccount.ID = 88
+	_, err = svc.ForwardGrokVoice(ctx, siblingKey, &wrongAccount, "custom-voices/created/audio", nil, "")
+	require.ErrorIs(t, err, ErrMediaNotOwned)
+	// Deleting through a different key of the same tenant removes the durable grant.
+	siblingKey.Request = httptest.NewRequest(http.MethodDelete, "/custom-voices/created", nil)
+	_, err = svc.ForwardGrokVoice(ctx, siblingKey, account, "custom-voices/created", nil, "")
+	require.NoError(t, err)
+	_, err = repo.GetVoice(ctx, 10, 1, "created")
+	require.ErrorIs(t, err, ErrMediaNotOwned)
 }

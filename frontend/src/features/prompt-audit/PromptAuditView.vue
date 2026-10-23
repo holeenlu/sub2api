@@ -66,7 +66,7 @@
                 {{ t('admin.promptAudit.events.openConfiguration') }}
               </button>
             </div>
-            <EventWorkspace
+            <EventWorkspace :can-delete="rolePermissions.isSuperAdmin" :can-view-content="rolePermissions.can('prompt_audit.content.read')"
               :events="events.items"
               :total="events.total"
               :page="events.page"
@@ -144,6 +144,8 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore } from "@/stores/auth"
+const rolePermissions = useAuthStore()
 import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -177,7 +179,7 @@ type PromptAuditPageTab = 'config' | 'events'
 const activeTab = ref<PromptAuditPageTab>('events')
 const pageTabs = computed(() => [
   { id: 'events' as const, label: t('admin.promptAudit.tabs.events') },
-  { id: 'config' as const, label: t('admin.promptAudit.tabs.config') },
+  ...(rolePermissions.isSuperAdmin ? [{ id: 'config' as const, label: t('admin.promptAudit.tabs.config') }] : []),
 ])
 const serverConfig = ref<PromptAuditDraft | null>(null)
 const draft = ref<PromptAuditDraft | null>(null)
@@ -246,6 +248,7 @@ function errorMessage(error: unknown, fallbackKey: string): string {
 }
 
 async function loadConfig() {
+ if (!rolePermissions.isSuperAdmin) return
   loading.config = true
   loadErrors.config = ''
   try {
@@ -259,6 +262,7 @@ async function loadConfig() {
   }
 }
 async function loadRuntime() {
+ if (!rolePermissions.isSuperAdmin) return
   loading.runtime = true
   loadErrors.runtime = ''
   try { runtime.value = await promptAuditAPI.getRuntime() }

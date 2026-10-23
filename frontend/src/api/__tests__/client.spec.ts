@@ -5,6 +5,7 @@ import type { AxiosInstance } from 'axios'
 // 需要在导入 client 之前设置 mock
 vi.mock('@/i18n', () => ({
   getLocale: () => 'zh-CN',
+  i18n: { global: { t: (key: string) => key === 'ui.networkError' ? 'Network error. Please check your connection.' : key } },
 }))
 
 describe('API Client', () => {
@@ -529,4 +530,24 @@ describe('API Client', () => {
       ).rejects.toBeDefined()
     })
   })
+})
+
+describe('Supplier client boundaries',()=>{
+ afterEach(()=>{vi.unstubAllEnvs();localStorage.clear()})
+ it('preserves an explicit reconciliation timezone',async()=>{
+  vi.resetModules();const {apiClient}=await import('@/api/client')
+  const adapter=vi.fn(async config=>({status:200,data:{code:0,data:{}},headers:{},config,statusText:'OK'}));apiClient.defaults.adapter=adapter
+  await apiClient.get('/vendor/usage/summary',{params:{timezone:'Asia/Tokyo'}})
+  expect(adapter.mock.calls[0][0].params.timezone).toBe('Asia/Tokyo')
+ })
+ it('forces same-origin API requests for a dedicated supplier build',async()=>{
+  vi.resetModules();vi.stubEnv('VITE_VENDOR_PORTAL','true');vi.stubEnv('VITE_API_BASE_URL','https://admin.example/api/v1')
+  const {apiClient}=await import('@/api/client');expect(apiClient.defaults.baseURL).toBe('/api/v1')
+ })
+ it('discards sensitive supplier results after the login session changes',async()=>{
+  vi.resetModules();localStorage.setItem('auth_user',JSON.stringify({id:5,role:'user'}));localStorage.setItem('auth_token','old-session')
+  const {apiClient}=await import('@/api/client')
+  apiClient.defaults.adapter=async config=>{localStorage.setItem('auth_token','new-session');return {status:200,data:new Blob(['sensitive-export']),headers:{},config,statusText:'OK'}}
+  await expect(apiClient.post('/vendor/accounts/export',{ids:[1]},{responseType:'blob'})).rejects.toMatchObject({code:'ERR_CANCELED'})
+ })
 })

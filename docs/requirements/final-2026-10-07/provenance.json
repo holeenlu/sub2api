@@ -1,0 +1,506 @@
+{
+  "date": "2026-10-07",
+  "official_base": "3f1a2ea0a760730e3bc528105c00b4ee4f23e469",
+  "source_tips": {
+    "main": "3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238",
+    "TapModels": "a2d3feb5fe7c4e79ec280c04f20714aed78fa68f",
+    "tokensavy": "fcc675b664360da27b3fccbafce32c7de55647b2"
+  },
+  "source_trees": {
+    "main": "bda7a34a9ff2b2e16812b14b854797e44517d848",
+    "TapModels": "0131ee7b185fc36d780b10a4b0584951f8583bc8",
+    "tokensavy": "4be81b40d7711031e2312be0f1ad95ef24c0c283"
+  },
+  "path_comparison": "git diff --no-renames; added/deleted names are separate rows",
+  "groups": {
+    "migration": {
+      "order": "01",
+      "title": "数据库升级与历史兼容",
+      "commit_subject": "chore(schema): consolidate preserved migrations and entity schemas"
+    },
+    "identity": {
+      "order": "02",
+      "title": "三级角色、会话与管理授权",
+      "commit_subject": "feat(auth): consolidate three-tier roles and session protections"
+    },
+    "gateway": {
+      "order": "03",
+      "title": "原生网关与多媒体安全",
+      "commit_subject": "fix(gateway): consolidate native forwarding and tenant isolation"
+    },
+    "anthropic": {
+      "order": "04",
+      "title": "账号、Anthropic 授权与调度",
+      "commit_subject": "feat(accounts): consolidate setup tokens sticky history and Fable thresholds"
+    },
+    "billing": {
+      "order": "05",
+      "title": "支付、退款与返利完整性",
+      "commit_subject": "fix(billing): consolidate payment and refund invariants"
+    },
+    "usage": {
+      "order": "06",
+      "title": "用量排行与页面加载",
+      "commit_subject": "feat(usage): consolidate rankings and page loading improvements"
+    },
+    "diagnostics": {
+      "order": "07",
+      "title": "Codex 降智检测与定时诊断",
+      "commit_subject": "feat(diagnostics): consolidate Codex probes and scheduled tests"
+    },
+    "clients": {
+      "order": "08",
+      "title": "API Key 客户端配置与下载工具",
+      "commit_subject": "feat(clients): consolidate Codex setup catalogs and downloads"
+    },
+    "site": {
+      "order": "09",
+      "title": "品牌界面、文档站与用户体验",
+      "commit_subject": "feat(site): consolidate KDAN presentation and documentation portal"
+    },
+    "localization": {
+      "order": "10",
+      "title": "多语言与繁体生成",
+      "commit_subject": "feat(i18n): consolidate translations and generated traditional Chinese"
+    },
+    "delivery": {
+      "order": "11",
+      "title": "构建、手动发布与在线更新",
+      "commit_subject": "chore(delivery): consolidate manual release and update tooling"
+    },
+    "integration": {
+      "order": "12",
+      "title": "跨功能设置、路由与依赖装配",
+      "commit_subject": "refactor(core): consolidate shared settings routes and dependency wiring"
+    },
+    "records": {
+      "order": "13",
+      "title": "需求、历史说明与工程规范",
+      "commit_subject": "docs(requirements): record final feature requirements and file inventories"
+    }
+  },
+  "source_custom_commits": [
+    {
+      "sha": "a2d3feb5fe7c4e79ec280c04f20714aed78fa68f",
+      "parents": [
+        "756e05168f650a4efa6b0ffb8f06e6d550a991e0",
+        "3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync RBAC fixes and page loading improvements into TapModels"
+    },
+    {
+      "sha": "756e05168f650a4efa6b0ffb8f06e6d550a991e0",
+      "parents": [
+        "23d48cade6091491cb9750ea3341ec77923e1b69",
+        "3f0d6ede2dd5753bdd70d7b6b866d55a62559fa8"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync corrected Codex configuration into TapModels"
+    },
+    {
+      "sha": "23d48cade6091491cb9750ea3341ec77923e1b69",
+      "parents": [
+        "b06532840289c33ae5f52cbab160d3c6d15b4071",
+        "207871b21721f36049f233cb1c71345188e3158f"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync consolidated three-tier roles into TapModels"
+    },
+    {
+      "sha": "b06532840289c33ae5f52cbab160d3c6d15b4071",
+      "parents": [
+        "88bfcc93d3d1ed2dc6c5419e0f5d9dbcf307e6f4",
+        "7c9d3607f5ceb2a3450b53ed3c91bb00cc43f7d3"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync amended Codex setup and native search"
+    },
+    {
+      "sha": "88bfcc93d3d1ed2dc6c5419e0f5d9dbcf307e6f4",
+      "parents": [
+        "0fde25b7c943076ff5bbc6c37cd44d9d05cb111b",
+        "3d46bfaef290935b4234b3758fefe4681dd0fa51"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): auto-load Codex catalogs, add config downloads and remove CC-Switch import"
+    },
+    {
+      "sha": "0fde25b7c943076ff5bbc6c37cd44d9d05cb111b",
+      "parents": [
+        "524d6b248d3e52b7eec7f27c90f493a94a9ef25e",
+        "39d4e56db8fcdb4be4ff30e162a112bc835b15fc"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync official bootstrap and dependency security fixes"
+    },
+    {
+      "sha": "524d6b248d3e52b7eec7f27c90f493a94a9ef25e",
+      "parents": [
+        "81f4853d813179903c697a1cf9f7d8ed8e7bf8f9",
+        "46fb3a3cfdcb7e167e735c72a37452b61efe82af"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync official Codex discovery and EasyPay callback fixes"
+    },
+    {
+      "sha": "81f4853d813179903c697a1cf9f7d8ed8e7bf8f9",
+      "parents": [
+        "8dbfbbaccdb3388c63124f89f7299f389ae0d84e",
+        "704383a0232a3d05eeb6979fb9625cd0185070ba"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync shared usage ranking fix"
+    },
+    {
+      "sha": "8dbfbbaccdb3388c63124f89f7299f389ae0d84e",
+      "parents": [
+        "cda3b84dc72101a9575e950e6f69a21667e1ad80"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "fix: consolidate recent audit and release repairs"
+    },
+    {
+      "sha": "cda3b84dc72101a9575e950e6f69a21667e1ad80",
+      "parents": [
+        "fdd35bbe1a6b929fd846aa7d5aa112220cb79650"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "rebuild: align TapModels with rebuilt main"
+    },
+    {
+      "sha": "fcc675b664360da27b3fccbafce32c7de55647b2",
+      "parents": [
+        "f5e68efe56fa4e82532bed91bdd839344e2c76f7",
+        "3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync RBAC fixes and page loading improvements into tokensavy"
+    },
+    {
+      "sha": "3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238",
+      "parents": [
+        "16f9fc2eadad9a476e4573ac8c899ecb9c9263de"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "perf: reduce page loading waits and batch account window queries"
+    },
+    {
+      "sha": "16f9fc2eadad9a476e4573ac8c899ecb9c9263de",
+      "parents": [
+        "77165317ad2504b735ca11f43b4f2c7fed28700e"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(auth): implement audited three-tier roles and generated locales"
+    },
+    {
+      "sha": "f5e68efe56fa4e82532bed91bdd839344e2c76f7",
+      "parents": [
+        "96c636158334407122a4edbedc6ca883b5db8609",
+        "3f0d6ede2dd5753bdd70d7b6b866d55a62559fa8"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync corrected Codex configuration into tokensavy"
+    },
+    {
+      "sha": "3f0d6ede2dd5753bdd70d7b6b866d55a62559fa8",
+      "parents": [
+        "77165317ad2504b735ca11f43b4f2c7fed28700e"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(auth): implement audited three-tier roles and generated locales"
+    },
+    {
+      "sha": "77165317ad2504b735ca11f43b4f2c7fed28700e",
+      "parents": [
+        "b538d6c98a5b022aa6dc2f711ffa89eefc05e6ff"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(keys): remove CC-Switch import"
+    },
+    {
+      "sha": "b538d6c98a5b022aa6dc2f711ffa89eefc05e6ff",
+      "parents": [
+        "39d4e56db8fcdb4be4ff30e162a112bc835b15fc"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(keys): complete Codex setup with catalogs, downloads and native search"
+    },
+    {
+      "sha": "96c636158334407122a4edbedc6ca883b5db8609",
+      "parents": [
+        "b4d7693d3b9a2a2359e9854d02e5fbb097d87bb5",
+        "207871b21721f36049f233cb1c71345188e3158f"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync consolidated three-tier roles into tokensavy"
+    },
+    {
+      "sha": "207871b21721f36049f233cb1c71345188e3158f",
+      "parents": [
+        "7c9d3607f5ceb2a3450b53ed3c91bb00cc43f7d3"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(auth): implement audited three-tier roles and generated locales"
+    },
+    {
+      "sha": "b4d7693d3b9a2a2359e9854d02e5fbb097d87bb5",
+      "parents": [
+        "c2a78cd6237263798a7ef8eb7c8d882306780111",
+        "7c9d3607f5ceb2a3450b53ed3c91bb00cc43f7d3"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync amended Codex setup and native search"
+    },
+    {
+      "sha": "7c9d3607f5ceb2a3450b53ed3c91bb00cc43f7d3",
+      "parents": [
+        "7f89a7ea9971ebd1491135ea96b12f49a8852163"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(keys): remove CC-Switch import"
+    },
+    {
+      "sha": "7f89a7ea9971ebd1491135ea96b12f49a8852163",
+      "parents": [
+        "39d4e56db8fcdb4be4ff30e162a112bc835b15fc"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(keys): complete Codex setup with catalogs, downloads and native search"
+    },
+    {
+      "sha": "c2a78cd6237263798a7ef8eb7c8d882306780111",
+      "parents": [
+        "1cba64680015d8774a2e62a4ce5c278bf03bc32d",
+        "3d46bfaef290935b4234b3758fefe4681dd0fa51"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): auto-load Codex catalogs, add config downloads and remove CC-Switch import"
+    },
+    {
+      "sha": "3d46bfaef290935b4234b3758fefe4681dd0fa51",
+      "parents": [
+        "35ebb83d83e6c9f680fffd26b08ab67978681d1e"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(keys): remove CC-Switch import"
+    },
+    {
+      "sha": "35ebb83d83e6c9f680fffd26b08ab67978681d1e",
+      "parents": [
+        "39d4e56db8fcdb4be4ff30e162a112bc835b15fc"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(keys): load Codex catalogs automatically and add config downloads"
+    },
+    {
+      "sha": "1cba64680015d8774a2e62a4ce5c278bf03bc32d",
+      "parents": [
+        "0b718feb97fe4ecdf5cc44ae8524f5a183d29eb8",
+        "39d4e56db8fcdb4be4ff30e162a112bc835b15fc"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync official bootstrap and dependency security fixes"
+    },
+    {
+      "sha": "39d4e56db8fcdb4be4ff30e162a112bc835b15fc",
+      "parents": [
+        "46fb3a3cfdcb7e167e735c72a37452b61efe82af",
+        "3f1a2ea0a760730e3bc528105c00b4ee4f23e469"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(upstream): sync main through 3f1a2ea0a"
+    },
+    {
+      "sha": "0b718feb97fe4ecdf5cc44ae8524f5a183d29eb8",
+      "parents": [
+        "2f84132c6991a3f3859f600402a1c3e98d8dff84",
+        "46fb3a3cfdcb7e167e735c72a37452b61efe82af"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync official Codex discovery and EasyPay callback fixes"
+    },
+    {
+      "sha": "46fb3a3cfdcb7e167e735c72a37452b61efe82af",
+      "parents": [
+        "704383a0232a3d05eeb6979fb9625cd0185070ba",
+        "d97ccc952ff3b7f63b44c45079ee6a28422f1393"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(upstream): sync main through d97ccc952"
+    },
+    {
+      "sha": "2f84132c6991a3f3859f600402a1c3e98d8dff84",
+      "parents": [
+        "d1b4d3dc21a9e2e1cc6c9f9e8d29afcb0f46f2d2",
+        "704383a0232a3d05eeb6979fb9625cd0185070ba"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "merge(main): sync shared usage ranking fix"
+    },
+    {
+      "sha": "704383a0232a3d05eeb6979fb9625cd0185070ba",
+      "parents": [
+        "f7f744e3ae7e600e955ed21cdb4b2924b5fd2c8d"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "fix: consolidate recent audit and release repairs"
+    },
+    {
+      "sha": "f7f744e3ae7e600e955ed21cdb4b2924b5fd2c8d",
+      "parents": [
+        "b56b53e63f5392adfde2817f15218650a2af9852"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "docs: define project implementation standards"
+    },
+    {
+      "sha": "b56b53e63f5392adfde2817f15218650a2af9852",
+      "parents": [
+        "c551e4a7bc8fc1f83990b28a5d7dbafdb796dfa1"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "i18n: complete API key ranking labels"
+    },
+    {
+      "sha": "c551e4a7bc8fc1f83990b28a5d7dbafdb796dfa1",
+      "parents": [
+        "cd71d889ae143d645bf1f16e139982411a899d57"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "test(usage): cover user API key ranking tab"
+    },
+    {
+      "sha": "cd71d889ae143d645bf1f16e139982411a899d57",
+      "parents": [
+        "fdea0e20368e36357b8fb997c5e14462311a6867"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(usage): add user API key ranking"
+    },
+    {
+      "sha": "d1b4d3dc21a9e2e1cc6c9f9e8d29afcb0f46f2d2",
+      "parents": [
+        "c9b3fe5cd0828979eebeb8ce340f8e60318c7ed3"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "fix: consolidate recent audit and release repairs"
+    },
+    {
+      "sha": "c9b3fe5cd0828979eebeb8ce340f8e60318c7ed3",
+      "parents": [
+        "fdd35bbe1a6b929fd846aa7d5aa112220cb79650"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "rebuild: align tokensavy with rebuilt main"
+    },
+    {
+      "sha": "fdd35bbe1a6b929fd846aa7d5aa112220cb79650",
+      "parents": [
+        "6c40c27e6889bfcab6c0c0fee561a0a04a92ee28"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "docs: define project implementation standards"
+    },
+    {
+      "sha": "6c40c27e6889bfcab6c0c0fee561a0a04a92ee28",
+      "parents": [
+        "893d9eed3a5d62b401978f093ff2b884d59731b1"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "i18n: complete API key ranking labels"
+    },
+    {
+      "sha": "893d9eed3a5d62b401978f093ff2b884d59731b1",
+      "parents": [
+        "b415d6cd1b9f03e5637a7d69a1ed92e7ecb1e2be"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "test(usage): cover user API key ranking tab"
+    },
+    {
+      "sha": "b415d6cd1b9f03e5637a7d69a1ed92e7ecb1e2be",
+      "parents": [
+        "fdea0e20368e36357b8fb997c5e14462311a6867"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(usage): add user API key ranking"
+    },
+    {
+      "sha": "fdea0e20368e36357b8fb997c5e14462311a6867",
+      "parents": [
+        "50f93c72fdf2ed11ebddc1e236a01700c5c2b19b"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(gateway): make Anthropic sticky-session affinity outlive the hour"
+    },
+    {
+      "sha": "50f93c72fdf2ed11ebddc1e236a01700c5c2b19b",
+      "parents": [
+        "13307e42b64e72be87ddaf83a05fd3de56966685"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "feat(usage): add an API key ranking tab to the admin usage page"
+    },
+    {
+      "sha": "13307e42b64e72be87ddaf83a05fd3de56966685",
+      "parents": [
+        "b8dece9000c68815a5b867ca5a1e6f236e173905"
+      ],
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "subject": "rebuild: port current branded customizations onto upstream main"
+    }
+  ],
+  "runtime_change_in_this_reorganization": false,
+  "new_http_endpoints": 0,
+  "new_runtime_configuration": 0,
+  "new_execution_paths": 0,
+  "preserved_attribution": [
+    "Upstream Wei-Shaw Git history and repository LICENSE retained",
+    "backend/internal/service/modeltrace_LICENSE unchanged"
+  ]
+}

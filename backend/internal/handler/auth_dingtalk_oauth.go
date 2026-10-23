@@ -152,7 +152,7 @@ func (h *AuthHandler) DingTalkOAuthStart(c *gin.Context) {
 	clearOAuthPendingSessionCookie(c, secureCookie)
 
 	if intent == oauthIntentBindCurrentUser {
-		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c)
+		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c, dingTalkOAuthBindUserCookieName, state, browserSessionKey)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -595,26 +595,6 @@ func checkDingTalkCorpAllowed(cfg config.DingTalkConnectConfig, corpID string) b
 	}
 }
 
-// decideDingTalkStep34Strategy 根据 policy 和 Step 3/4 运行时错误决定处理方式。
-// 返回 (proceed bool, fatal bool)：
-//   - proceed=true：继续处理（step 成功或降级）
-//   - fatal=true：应 hard fail（upstream_error）
-//
-// 此 helper 从主链中提取，便于 unit test 独立验证策略决策逻辑。
-func decideDingTalkStep34Strategy(policy string, stepErr error) (shouldFallback bool, isFatal bool) {
-	if stepErr == nil {
-		return false, false // 成功，不需要降级
-	}
-	switch policy {
-	case "internal_only":
-		return false, true // hard fail：同企业 Step 3/4 必须成功
-	case "none", "":
-		return true, false // 降级：公网场景跨组织用户失败属正常预期
-	default:
-		return false, true // 未知 policy，视为 hard fail
-	}
-}
-
 // mapDingTalkErrorCode 把 DingTalkAPIError 映射到 redirectOAuthError 用的字符串 code
 func mapDingTalkErrorCode(err error) string {
 	var apiErr *DingTalkAPIError
@@ -689,138 +669,6 @@ func buildDingTalkAuthorizeURL(cfg config.DingTalkConnectConfig, state string) (
 }
 
 // ─── Complete Registration ─────────────────────────────────────────────────
-
-type completeDingTalkOAuthRequest struct {
-	InvitationCode   string `json:"invitation_code" binding:"required"`
-	AffCode          string `json:"aff_code,omitempty"`
-	AdoptDisplayName *bool  `json:"adopt_display_name,omitempty"`
-	AdoptAvatar      *bool  `json:"adopt_avatar,omitempty"`
-}
-
-// CompleteDingTalkOAuthRegistration completes a pending OAuth registration by validating
-// the invitation code and creating the user account.
-// POST /api/v1/auth/oauth/dingtalk/complete-registration
-func (h *AuthHandler) CompleteDingTalkOAuthRegistration(c *gin.Context) {
-	var req completeDingTalkOAuthRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_REQUEST", "message": err.Error()})
-		return
-	}
-
-	secureCookie := isRequestHTTPS(c)
-	sessionToken, err := readOAuthPendingSessionCookie(c)
-	if err != nil {
-		clearOAuthPendingSessionCookie(c, secureCookie)
-		clearOAuthPendingBrowserCookie(c, secureCookie)
-		response.ErrorFrom(c, service.ErrPendingAuthSessionNotFound)
-		return
-	}
-	browserSessionKey, err := readOAuthPendingBrowserCookie(c)
-	if err != nil {
-		clearOAuthPendingSessionCookie(c, secureCookie)
-		clearOAuthPendingBrowserCookie(c, secureCookie)
-		response.ErrorFrom(c, service.ErrPendingAuthBrowserMismatch)
-		return
-	}
-	pendingSvc, err := h.pendingIdentityService()
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	session, err := pendingSvc.GetBrowserSession(c.Request.Context(), sessionToken, browserSessionKey)
-	if err != nil {
-		clearOAuthPendingSessionCookie(c, secureCookie)
-		clearOAuthPendingBrowserCookie(c, secureCookie)
-		response.ErrorFrom(c, err)
-		return
-	}
-	if err := ensurePendingOAuthCompleteRegistrationSession(session); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	if updatedSession, handled, err := h.legacyCompleteRegistrationSessionStatus(c, session); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	} else if handled {
-		c.JSON(http.StatusOK, buildPendingOAuthSessionStatusPayload(updatedSession))
-		return
-	} else {
-		session = updatedSession
-	}
-	if err := h.ensureBackendModeAllowsNewUserLogin(c.Request.Context()); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	email := strings.TrimSpace(session.ResolvedEmail)
-	username := pendingSessionStringValue(session.UpstreamIdentityClaims, "username")
-	// E: username 空时退到 email local part（跨组织用户没拿到 staff.Name 也能注册）
-	if username == "" {
-		if at := strings.Index(email, "@"); at > 0 {
-			username = email[:at]
-		} else {
-			username = email
-		}
-	}
-	if email == "" || username == "" {
-		response.ErrorFrom(c, infraerrors.BadRequest("PENDING_AUTH_SESSION_INVALID", "pending auth registration context is invalid"))
-		return
-	}
-
-	client := h.entClient()
-	if client == nil {
-		response.ErrorFrom(c, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready"))
-		return
-	}
-	if err := ensurePendingOAuthRegistrationIdentityAvailable(c.Request.Context(), client, session); err != nil {
-		respondPendingOAuthBindingApplyError(c, err)
-		return
-	}
-	decision, err := h.ensurePendingOAuthAdoptionDecision(c, session.ID, oauthAdoptionDecisionRequest{
-		AdoptDisplayName: req.AdoptDisplayName,
-		AdoptAvatar:      req.AdoptAvatar,
-	})
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	tokenPair, user, err := h.authService.LoginOrRegisterOAuthWithTokenPairAndPromoCode(
-		c.Request.Context(),
-		email,
-		username,
-		req.InvitationCode,
-		req.AffCode,
-		pendingOAuthPromoCode(session),
-		"dingtalk",
-	)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	if err := applyPendingOAuthAdoptionAndConsumeSession(c.Request.Context(), client, h.authService, h.userService, session, decision, user.ID); err != nil {
-		respondPendingOAuthBindingApplyError(c, err)
-		return
-	}
-	// 新用户注册完成后执行身份同步（user_id 现在已知）。
-	// 异步执行避免阻塞 token 响应。
-	if completionCfg, cfgErr := h.getDingTalkOAuthConfig(c.Request.Context()); cfgErr == nil {
-		dtClient := h.dingTalkClient(completionCfg)
-		claims := session.UpstreamIdentityClaims
-		runDingTalkSyncAsync(c.Request.Context(), func(ctx context.Context) {
-			h.syncDingTalkIdentityFromClaims(ctx, completionCfg, dtClient, user.ID, claims, true)
-		})
-	}
-	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
-	clearOAuthPendingSessionCookie(c, secureCookie)
-	clearOAuthPendingBrowserCookie(c, secureCookie)
-
-	c.JSON(http.StatusOK, gin.H{
-		"access_token":  tokenPair.AccessToken,
-		"refresh_token": tokenPair.RefreshToken,
-		"expires_in":    tokenPair.ExpiresIn,
-		"token_type":    "Bearer",
-	})
-}
 
 // CreateDingTalkOAuthAccount creates a new user account from a pending DingTalk OAuth session.
 // POST /api/v1/auth/oauth/dingtalk/create-account

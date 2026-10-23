@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -268,4 +270,74 @@ func TestClientRequestedModelUsesCompositePublicModel(t *testing.T) {
 	require.Equal(t, "public-alias", fields.OriginalModel)
 	require.Equal(t, "public-alias", fields.ChannelMappedModel)
 	require.Equal(t, "public-alias\u2192gpt-5", fields.ModelMappingChain)
+}
+
+func TestAppliedIngressEffortPolicyDoesNotRunAgainInBridge(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	key := &service.APIKey{Group: &service.Group{Platform: service.PlatformOpenAI, MaxReasoningEffort: "high", ReasoningEffortMappings: []service.ReasoningEffortMapping{{From: "low", To: "medium"}, {From: "medium", To: "high"}}}}
+	body, changed, err := applyOpenAIReasoningEffortPolicyForRequest(c, key, []byte(`{"model":"gpt-5","reasoning_effort":"low"}`))
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "medium", gjson.GetBytes(body, "reasoning_effort").String())
+	for _, converted := range []string{`{"reasoning":{"effort":"medium"}}`, `{"reasoning":{"effort":"max"}}`} {
+		got, changed, err := service.ApplyOpenAIReasoningEffortPolicyFromContext(c.Request.Context(), []byte(converted))
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, converted, string(got))
+	}
+	require.Equal(t, "low", *service.RequestedReasoningEffortFromContext(c.Request.Context()))
+}
+
+func TestAnthropicCompatibleIngressEffortDeniedBeforeScheduling(t *testing.T) {
+	for _, chat := range []bool{false, true} {
+		for _, mappingDeny := range []bool{false, true} {
+			t.Run(fmt.Sprintf("chat=%t/mapping=%t", chat, mappingDeny), func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				body := `{"model":"claude-opus-4-6","input":"hi","reasoning":{"effort":"xhigh"}}`
+				path := "/v1/responses"
+				if chat {
+					path = "/v1/chat/completions"
+					body = `{"model":"claude-opus-4-6","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"xhigh"}`
+				}
+				c.Request = httptest.NewRequest("POST", path, strings.NewReader(body))
+				group := &service.Group{Platform: service.PlatformAnthropic, MaxReasoningEffort: "high", MaxReasoningEffortOverLimit: "deny"}
+				if mappingDeny {
+					group.MaxReasoningEffort = ""
+					group.ReasoningEffortMappings = []service.ReasoningEffortMapping{{From: "xhigh", To: "deny"}}
+				}
+				c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 1, Group: group})
+				c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 1, Concurrency: 1})
+				h := &GatewayHandler{}
+				if chat {
+					h.ChatCompletions(c)
+				} else {
+					h.Responses(c)
+				}
+				require.Equal(t, 403, rec.Code)
+				errorField := "error.code"
+				if chat {
+					errorField = "error.type"
+				}
+				require.Equal(t, "permission_error", gjson.Get(rec.Body.String(), errorField).String())
+				require.Equal(t, "xhigh", *service.RequestedReasoningEffortFromContext(c.Request.Context()))
+			})
+		}
+	}
+}
+
+func TestFallbackGroupEffortPolicyReevaluatesOriginalIntent(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+	original := []byte(`{"model":"claude-fable-5-1","output_config":{"effort":"xhigh"}}`)
+	primary := &service.APIKey{Group: &service.Group{Platform: service.PlatformAnthropic, ReasoningEffortMappings: []service.ReasoningEffortMapping{{From: "xhigh", To: "low"}}}}
+	first, changed, err := applyAnthropicReasoningEffortPolicyForRequest(c, primary, original)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "low", gjson.GetBytes(first, "output_config.effort").String())
+	fallback := &service.APIKey{Group: &service.Group{Platform: service.PlatformAnthropic, MaxReasoningEffort: "high", MaxReasoningEffortOverLimit: "deny"}}
+	_, _, err = applyAnthropicReasoningEffortPolicyForRequest(c, fallback, original)
+	require.True(t, service.IsReasoningEffortPolicyDenied(err), "a prior group's downgrade must not bypass fallback denial")
+	require.Equal(t, "xhigh", gjson.GetBytes(original, "output_config.effort").String())
 }
