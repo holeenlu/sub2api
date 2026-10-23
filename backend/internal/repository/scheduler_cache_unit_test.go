@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -444,6 +445,46 @@ func TestBuildSchedulerMetadataAccount_KeepsQuotaAutoPauseFields(t *testing.T) {
 	require.Equal(t, 0.96, got.Extra["auto_pause_7d_threshold"])
 	require.Equal(t, true, got.Extra["auto_pause_5h_disabled"])
 	require.Equal(t, false, got.Extra["auto_pause_7d_disabled"])
+}
+
+func TestSchedulerMetadataQuotaGuardPreservesValidatedEvidence(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Second).Truncate(time.Second)
+	reset := now.Add(time.Hour).Format(time.RFC3339)
+	identity := fmt.Sprintf("%x", sha256.Sum256([]byte("quota-test-token")))
+	body := []byte(`{"model":"gpt-5.1","input":"` + strings.Repeat(" word", 100010) + `"}`)
+	for _, platform := range []string{service.PlatformAnthropic, service.PlatformOpenAI} {
+		for _, rotated := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/rotated=%t", platform, rotated), func(t *testing.T) {
+				account := service.Account{ID: 88, Platform: platform, Type: service.AccountTypeOAuth,
+					Credentials: map[string]any{"access_token": "quota-test-token", "account_scheduling_threshold": 80, "email": "original@example.test"},
+					Extra:       map[string]any{"unused_large_field": "drop", "email": "original@example.test"}}
+				if platform == service.PlatformAnthropic {
+					for key, value := range map[string]any{"utilization": 79.0, "resets_at": reset} {
+						account.Extra["anthropic_observation_five_hour."+key] = map[string]any{
+							"value": value, "source": "upstream_headers", "sampled_at": now, "identity": identity,
+						}
+					}
+				} else {
+					account.Extra["codex_5h_used_percent"], account.Extra["codex_5h_reset_at"] = 79.0, reset
+					account.Extra["codex_5h_quota_observation"] = map[string]any{"used_percent": 79.0, "reset_at": reset, "sampled_at": now}
+				}
+				if rotated {
+					account.Credentials["access_token"], account.Credentials["email"] = "replacement-token", "replacement@example.test"
+				}
+				_, payload, err := marshalSchedulerCacheAccount(account)
+				require.NoError(t, err)
+				var cached service.Account
+				require.NoError(t, json.Unmarshal(payload, &cached))
+				require.NotContains(t, string(payload), "quota-test-token")
+				require.NotContains(t, string(payload), "replacement-token")
+				require.NotContains(t, cached.Extra, "unused_large_field")
+				for _, candidate := range []*service.Account{&account, &cached} {
+					ctx := service.WithSchedulingQuotaRequest(t.Context(), body, service.ContentModerationProtocolOpenAIResponses)
+					require.Equal(t, !rotated, (*service.RateLimitService)(nil).IsRequestBlockedBySchedulingQuota(ctx, candidate))
+				}
+			})
+		}
+	}
 }
 
 // 候选过滤读的是 Redis 元数据投影；自动用卡的开关、阈值和卡状态缺失时，

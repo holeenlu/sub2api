@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -20,8 +21,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/platform/liveattestation"
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -70,27 +73,13 @@ const (
 	openAICodexAutoPauseStaleAfter = 2 * time.Hour
 )
 
-// OpenAI allowed headers whitelist (for non-passthrough).
+// Shared safe HTTP request headers. Passthrough additionally allows Accept and
+// its explicitly configured timeout headers. Codex caller intent is projected
+// separately for both HTTP and WS before account identity scoping.
 var openaiAllowedHeaders = map[string]bool{
-	"accept-language":         true,
-	"content-type":            true,
-	"conversation_id":         true,
-	"openai-beta":             true,
-	"user-agent":              true,
-	"originator":              true,
-	"session_id":              true,
-	"x-codex-beta-features":   true,
-	"x-codex-installation-id": true,
-	"x-codex-turn-state":      true,
-	"x-codex-turn-metadata":   true,
-	"x-codex-window-id":       true,
-	responsesLiteHeaderKey:    true,
-}
-
-// OpenAI passthrough allowed headers whitelist.
-// 透传模式下仅放行这些低风险请求头，避免将非标准/环境噪声头传给上游触发风控。
-var openaiPassthroughAllowedHeaders = map[string]bool{
-	"accept":                  true,
+	"session-id":              true,
+	"thread-id":               true,
+	"x-client-request-id":     true,
 	"accept-language":         true,
 	"content-type":            true,
 	"conversation_id":         true,
@@ -227,14 +216,23 @@ type OpenAIUsage struct {
 	ImageCacheReadTokens     int `json:"image_cache_read_tokens,omitempty"`
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheCreation5mTokens    int `json:"cache_creation_5m_tokens,omitempty"`
+	CacheCreation1hTokens    int `json:"cache_creation_1h_tokens,omitempty"`
+	CacheCreation30mTokens   int `json:"cache_creation_30m_tokens,omitempty"`
+	CacheCreation12hTokens   int `json:"cache_creation_12h_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 	ImageOutputTokens        int `json:"image_output_tokens,omitempty"`
 }
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
-	RequestID  string
-	ResponseID string
+	AuthorizationMode string `json:"authorization_mode"`
+	// PriorAuthorizationResults retains already-metered attempts when switching
+	// authorization within one account. Usage remains the client-visible total.
+	PriorAuthorizationResults []*OpenAIForwardResult
+	authorizationUsage        *OpenAIUsage
+	RequestID                 string
+	ResponseID                string
 	// UpstreamHeaders 是直接上游的响应头，用于按账户配置解析上游请求标识。
 	UpstreamHeaders http.Header
 	Usage           OpenAIUsage
@@ -272,20 +270,22 @@ type OpenAIForwardResult struct {
 	OpenAIWSMode             bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
-	UpstreamTerminalEvent string
-	ResponseHeaders       http.Header
-	Duration              time.Duration
-	FirstTokenMs          *int
-	ClientDisconnect      bool
-	ImageCount            int
-	ImageSize             string
-	ImageInputSize        string
-	ImageOutputSize       string
-	ImageOutputSizes      []string
-	ImageSizeSource       string
-	ImageSizeBreakdown    map[string]int
-	VideoCount            int
-	VideoResolution       string
+	UpstreamTerminalEvent    string
+	UpstreamIncompleteReason string
+	ResponseHeaders          http.Header
+	Duration                 time.Duration
+	FirstTokenMs             *int
+	LatencyMetrics           *UsageLatencyMetrics
+	ClientDisconnect         bool
+	ImageCount               int
+	ImageSize                string
+	ImageInputSize           string
+	ImageOutputSize          string
+	ImageOutputSizes         []string
+	ImageSizeSource          string
+	ImageSizeBreakdown       map[string]int
+	VideoCount               int
+	VideoResolution          string
 	// VideoDurationSeconds 是提交时请求的生成时长（xAI 按输出秒数计费），已归一化到 1-15 秒。
 	VideoDurationSeconds int
 	// WebSearchCalls 是 Codex alpha/search 网页搜索调用次数（每次成功请求为 1）。
@@ -298,22 +298,46 @@ type OpenAIForwardResult struct {
 
 	wsReplayInput                []json.RawMessage
 	wsReplayInputExists          bool
+	wsReplayIncomplete           bool
 	wsAccountFailoverReplayInput []json.RawMessage
+	wsContextRejected            bool // invalid encrypted context is not an account health sample
+	wsLocalWarmup                bool // HTTP bridge control turn; no upstream execution or billing
 }
 
 // SucceededForScheduling reports whether this result is an upstream success
 // that may clear model-scoped transient state. The zero value remains a success
 // for existing non-WS callers.
 func (r *OpenAIForwardResult) SucceededForScheduling() bool {
-	if r == nil || !r.OpenAIWSMode || r.UpstreamTerminalEvent == "" {
+	if r != nil && r.UpstreamEndpoint == "/basispoints/api/responses" && r.UpstreamTerminalEvent == "" {
+		return false
+	}
+	if r == nil || (!r.OpenAIWSMode && r.UpstreamEndpoint != "/basispoints/api/responses") || r.UpstreamTerminalEvent == "" {
 		return true
 	}
 	switch r.UpstreamTerminalEvent {
 	case "response.completed", "response.done":
 		return true
+	case "response.incomplete":
+		return r.UpstreamIncompleteReason == "max_output_tokens" || r.UpstreamIncompleteReason == "max_tokens"
 	default:
 		return false
 	}
+}
+
+func (r *OpenAIForwardResult) SchedulingOutcomeKnown() bool {
+	if r == nil || r.wsContextRejected {
+		return false
+	}
+	if r.ClientDisconnect || (r.OpenAIWSMode && r.UpstreamTerminalEvent == "") || r.UpstreamTerminalEvent == "response.cancelled" || r.UpstreamTerminalEvent == "response.canceled" {
+		return false
+	}
+	if r.UpstreamTerminalEvent == "response.incomplete" {
+		switch r.UpstreamIncompleteReason {
+		case "content_filter", "safety", "content_policy_violation":
+			return false
+		}
+	}
+	return true
 }
 
 const openAIResponsesUpstreamEndpoint = "/v1/responses"
@@ -442,6 +466,18 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
+	excelBPSRecoveryMu      sync.Mutex
+	excelBPSRecoveryCancel  context.CancelFunc
+	excelBPSRecoveryDone    chan struct{}
+	excelBPSRecoveryStopped bool
+	excelBPSImagesMu        sync.Mutex
+	excelBPSImages          *basispoints.ImageRelay
+	excelBPSImageAdmission  excelBPSImageAdmission
+	excelBPSAttachments     basispoints.AttachmentUploader
+	excelBPSCooldownUntil   sync.Map
+	excelBPSModelCooldowns  excelBPSModelCooldowns
+	excelBPSModelsCache     openAIModelsCache
+
 	accountRepo           AccountRepository
 	usageLogRepo          UsageLogRepository
 	usageBillingRepo      UsageBillingRepository
@@ -471,22 +507,21 @@ type OpenAIGatewayService struct {
 	liveAttestation       liveattestation.Provider
 	liveAttestationCipher SecretEncryptor
 
-	openaiWSPoolOnce               sync.Once
-	openaiWSStateStoreOnce         sync.Once
-	openaiSchedulerOnce            sync.Once
-	openaiProxyStreamCircuitOnce   sync.Once
-	openaiWSPassthroughDialerOnce  sync.Once
-	openaiModelTransientOnce       sync.Once
-	agentIdentityTaskMu            sync.Mutex
-	openaiWSPool                   *openAIWSConnPool
-	openaiWSStateStore             OpenAIWSStateStore
-	openaiScheduler                OpenAIAccountScheduler
-	openaiWSPassthroughDialer      openAIWSClientDialer
-	openaiWSSessionPreemptions     openAIWSSessionPreemptRegistry
-	openaiAccountStats             *openAIAccountRuntimeStats
-	openaiModelTransient           *openAIAccountModelTransientState
-	openaiProxyStreamCircuit       *openAIProxyStreamCircuit
-	openaiProxyStreamFailOpenLogAt atomic.Int64
+	openaiWSPoolOnce              sync.Once
+	openaiWSStateStoreOnce        sync.Once
+	openaiSchedulerOnce           sync.Once
+	openaiProxyStreamCircuitOnce  sync.Once
+	openaiWSPassthroughDialerOnce sync.Once
+	openaiModelTransientOnce      sync.Once
+	agentIdentityTaskMu           sync.Mutex
+	openaiWSPool                  *openAIWSConnPool
+	openaiWSStateStore            OpenAIWSStateStore
+	openaiScheduler               OpenAIAccountScheduler
+	openaiWSPassthroughDialer     openAIWSClientDialer
+	openaiWSSessionPreemptions    openAIWSSessionPreemptRegistry
+	openaiAccountStats            *openAIAccountRuntimeStats
+	openaiModelTransient          *openAIAccountModelTransientState
+	openaiProxyStreamCircuit      *openAIProxyStreamCircuit
 
 	openaiWSFallbackUntil               sync.Map // key: int64(accountID), value: time.Time
 	openaiAccountRuntimeBlockUntil      sync.Map // key: int64(accountID), value: time.Time
@@ -503,11 +538,6 @@ type OpenAIGatewayService struct {
 	openAIModelsCache                   openAIModelsCache
 	openaiCompatSessionResponses        sync.Map
 	openaiCompatAnthropicDigestSessions sync.Map
-	// openaiCodexTurnStateOrigins: 下游会话 seed → openAICodexTurnStateOrigin，
-	// 记录最近一次向该会话下发 x-codex-turn-state 的铸造账号，供出站守卫
-	// 剥离跨账号回带（openai_codex_turn_state.go）。
-	openaiCodexTurnStateOrigins sync.Map
-	openaiCodexTurnStateWrites  atomic.Uint64
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -584,6 +614,7 @@ func NewOpenAIGatewayService(
 	if openAITokenProvider != nil {
 		openAITokenProvider.SetAccountRuntimeBlocker(svc)
 	}
+	svc.StartBPS403Recovery()
 	svc.logOpenAIWSModeBootstrap()
 	return svc
 }
@@ -621,6 +652,9 @@ func (s *OpenAIGatewayService) isCodexImageGenerationBridgeEnabled(ctx context.C
 	if account == nil || account.Platform != PlatformOpenAI {
 		return false
 	}
+	if OpenAIImageRequestRejection(WithOpenAIImageGenerationIntent(ctx), account, "gpt-image-2") != "" {
+		return false
+	}
 	if override := account.CodexImageGenerationBridgeOverride(); override != nil {
 		return *override
 	}
@@ -655,7 +689,7 @@ func (s *OpenAIGatewayService) isUpstreamModelRestrictedByChannel(ctx context.Co
 		requestedModel = compactForwardModel.model
 		requireCompact = compactForwardModel.useCompactModelMapping
 	}
-	upstreamModel := resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact)
+	upstreamModel := resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact, account != nil && account.IsExcelBPSEnabledForModel(requestedModel) && s.excelBPSGloballyEnabled(ctx))
 	if upstreamModel == "" {
 		return false
 	}
@@ -790,7 +824,7 @@ func classifyOpenAIWSReconnectReason(err error) (string, bool) {
 
 	switch baseReason {
 	case "read_event",
-		"write_request",
+		openAIWSFailureWriteRequest,
 		"write",
 		"acquire_timeout",
 		"acquire_conn",
@@ -811,6 +845,15 @@ func classifyOpenAIWSReconnectReason(err error) (string, bool) {
 func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType string, clientMessage string, upstreamMessage string, ok bool) {
 	if err == nil {
 		return 0, "", "", "", false
+	}
+	// A typed close 1009 is the peer rejecting an incoming message. The
+	// local reader's ErrMessageTooBig is a different failure and must not
+	// become a client request error. Also handle non-replayable requests,
+	// whose read errors are deliberately not wrapped as fallback errors.
+	if coderws.CloseStatus(err) == coderws.StatusMessageTooBig {
+		return http.StatusRequestEntityTooLarge, "invalid_request_error",
+			"The upstream WebSocket message size limit was exceeded. Reduce the request size before retrying.",
+			sanitizeUpstreamErrorMessage(strings.TrimSpace(err.Error())), true
 	}
 	var fallbackErr *openAIWSFallbackError
 	if !errors.As(err, &fallbackErr) || fallbackErr == nil {
@@ -902,7 +945,7 @@ func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType st
 }
 
 func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context, account *Account, wsErr error) bool {
-	if c == nil || c.Writer == nil || c.Writer.Written() {
+	if c == nil || c.Writer == nil || openAIStreamClientOutputStarted(c, false) {
 		return false
 	}
 	statusCode, errType, clientMessage, upstreamMessage, ok := resolveOpenAIWSFallbackErrorResponse(wsErr)
@@ -916,7 +959,25 @@ func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context
 		upstreamMessage = clientMessage
 	}
 
-	setOpsUpstreamError(c, statusCode, upstreamMessage, "")
+	upstreamStatusCode := statusCode
+	detail, reason := "", ""
+	errorBody := gin.H{"type": errType, "message": clientMessage}
+	if coderws.CloseStatus(wsErr) == coderws.StatusMessageTooBig {
+		// The client-facing 413 is a translation, not an upstream HTTP status.
+		upstreamStatusCode = 0
+		c.Set(OpsUpstreamStatusCodeKey, 0)
+		reason = "message_too_big"
+		errorBody["code"] = "request_too_large"
+		diagnostic := map[string]any{"upstream_protocol": "websocket", "upstream_close_code": int(coderws.StatusMessageTooBig)}
+		if size, ok := c.Get(OpsOpenAIWSPayloadBytesKey); ok {
+			if bytes, known := size.(int); known && bytes >= 0 {
+				diagnostic["payload_bytes"] = bytes
+			}
+		}
+		raw, _ := json.Marshal(diagnostic)
+		detail = string(raw)
+	}
+	setOpsUpstreamError(c, upstreamStatusCode, upstreamMessage, detail)
 	if account != nil {
 		proxyID, proxyName := opsUpstreamWSProxyAttribution(account)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -925,17 +986,14 @@ func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context
 			Platform:           account.Platform,
 			AccountID:          account.ID,
 			AccountName:        account.Name,
-			UpstreamStatusCode: statusCode,
+			UpstreamStatusCode: upstreamStatusCode,
 			Kind:               "ws_error",
 			Message:            upstreamMessage,
+			Reason:             reason,
+			Detail:             detail,
 		})
 	}
-	c.JSON(statusCode, gin.H{
-		"error": gin.H{
-			"type":    errType,
-			"message": clientMessage,
-		},
-	})
+	writeOpenAIResponsesErrorJSON(c, statusCode, gin.H{"error": errorBody})
 	return true
 }
 
@@ -1208,12 +1266,31 @@ func hashSensitiveValueForLog(raw string) string {
 
 // GetAccessToken gets the access token for an OpenAI account
 func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Account) (string, string, error) {
+	ctx = selectionbudget.PreparationContext(ctx)
+	ctx, stopPreparation := OpenAITurnWaitContext(ctx)
+	defer stopPreparation()
 	if account.IsShadow() {
 		credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 		if err != nil {
 			return "", "", err
 		}
 		account = credAccount
+	}
+	if account.IsSIWCEnabled() {
+		if oauth := s.siwcOAuthService(); oauth != nil {
+			var cache OpenAITokenCache
+			if s.openAITokenProvider != nil {
+				cache = s.openAITokenProvider.tokenCache
+			}
+			token, err := oauth.SIWCAccessToken(ctx, account, cache)
+			return token, UsageAuthorizationModeSIWC, err
+		}
+		return "", UsageAuthorizationModeSIWC, errors.New("SIWC credential service is unavailable")
+	}
+	if account.VendorID != nil && account.Platform == PlatformOpenAI {
+		if err := validateVendorModeDispatch(ctx, s.accountRepo, account, nil, vendorAccountPrimaryMode(account)); err != nil {
+			return "", "", err
+		}
 	}
 	switch account.Type {
 	case AccountTypeOAuth:
@@ -1275,4 +1352,43 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 	default:
 		return "", "", fmt.Errorf("unsupported account type: %s", account.Type)
 	}
+}
+
+// ErrOpenAIWSCodexClientRestricted marks a WebSocket turn denied by the
+// account's codex_cli_only policy. It is a client decision, not an account
+// failure: the handler neither fails over nor penalizes the account.
+var ErrOpenAIWSCodexClientRestricted = errors.New("codex_cli_only restriction: only codex official clients are allowed")
+
+// checkOpenAIWSCodexClientRestriction applies the HTTP codex_cli_only gate to
+// one response.create frame. HTTP checks every request, so WS checks every
+// turn: the handshake fixes the identity headers, while body fingerprint
+// signals and the global policy are read per frame. A denial first sends a 403
+// error event, which Codex reports instead of retrying a bare close.
+func (s *OpenAIGatewayService) checkOpenAIWSCodexClientRestriction(ctx context.Context, c *gin.Context, account *Account, frame []byte, writeEvent func([]byte) error) error {
+	result := s.detectCodexClientRestriction(c, account, frame)
+	logCodexCLIOnlyDetection(ctx, c, account, getAPIKeyIDFromContext(c), result, frame)
+	if !result.Enabled || result.Matched {
+		return nil
+	}
+	MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+	message := CodexClientRestrictionMessage(result)
+	event := buildOpenAIWSCodexClientRestrictedEvent(message)
+	if writeEvent != nil && writeEvent(event) == nil {
+		markOpenAIWSClientVisibleFailure(c, "error", event)
+	}
+	return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, message,
+		fmt.Errorf("%w: %s", ErrOpenAIWSCodexClientRestricted, result.Reason))
+}
+
+// buildOpenAIWSCodexClientRestrictedEvent mirrors the HTTP 403 body as a WS
+// error event; the status makes Codex treat it as a final rejection.
+func buildOpenAIWSCodexClientRestrictedEvent(message string) []byte {
+	payload, err := json.Marshal(map[string]any{
+		"type": "error", "sequence_number": 0, "status": http.StatusForbidden,
+		"error": map[string]any{"type": "forbidden_error", "message": message},
+	})
+	if err != nil {
+		return []byte(`{"type":"error","sequence_number":0,"status":403,"error":{"type":"forbidden_error","message":"` + CodexOfficialClientsOnlyMessage + `"}}`)
+	}
+	return payload
 }
