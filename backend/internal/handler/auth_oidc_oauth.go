@@ -150,7 +150,7 @@ func (h *AuthHandler) OIDCOAuthStart(c *gin.Context) {
 	setOAuthPendingBrowserCookie(c, browserSessionKey, secureCookie)
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	if intent == oauthIntentBindCurrentUser {
-		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c)
+		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c, oidcOAuthBindUserCookieName, state, browserSessionKey)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -601,121 +601,6 @@ func (h *AuthHandler) createOIDCOAuthChoicePendingSession(
 		BrowserSessionKey:      browserSessionKey,
 		UpstreamIdentityClaims: upstreamClaims,
 		CompletionResponse:     completionResponse,
-	})
-}
-
-type completeOIDCOAuthRequest struct {
-	InvitationCode   string `json:"invitation_code" binding:"required"`
-	AffCode          string `json:"aff_code,omitempty"`
-	AdoptDisplayName *bool  `json:"adopt_display_name,omitempty"`
-	AdoptAvatar      *bool  `json:"adopt_avatar,omitempty"`
-}
-
-// CompleteOIDCOAuthRegistration completes a pending OAuth registration by validating
-// the invitation code and creating the user account.
-// POST /api/v1/auth/oauth/oidc/complete-registration
-func (h *AuthHandler) CompleteOIDCOAuthRegistration(c *gin.Context) {
-	var req completeOIDCOAuthRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_REQUEST", "message": err.Error()})
-		return
-	}
-
-	secureCookie := isRequestHTTPS(c)
-	sessionToken, err := readOAuthPendingSessionCookie(c)
-	if err != nil {
-		clearOAuthPendingSessionCookie(c, secureCookie)
-		clearOAuthPendingBrowserCookie(c, secureCookie)
-		response.ErrorFrom(c, service.ErrPendingAuthSessionNotFound)
-		return
-	}
-	browserSessionKey, err := readOAuthPendingBrowserCookie(c)
-	if err != nil {
-		clearOAuthPendingSessionCookie(c, secureCookie)
-		clearOAuthPendingBrowserCookie(c, secureCookie)
-		response.ErrorFrom(c, service.ErrPendingAuthBrowserMismatch)
-		return
-	}
-	pendingSvc, err := h.pendingIdentityService()
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	session, err := pendingSvc.GetBrowserSession(c.Request.Context(), sessionToken, browserSessionKey)
-	if err != nil {
-		clearOAuthPendingSessionCookie(c, secureCookie)
-		clearOAuthPendingBrowserCookie(c, secureCookie)
-		response.ErrorFrom(c, err)
-		return
-	}
-	if err := ensurePendingOAuthCompleteRegistrationSession(session); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	if updatedSession, handled, err := h.legacyCompleteRegistrationSessionStatus(c, session); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	} else if handled {
-		c.JSON(http.StatusOK, buildPendingOAuthSessionStatusPayload(updatedSession))
-		return
-	} else {
-		session = updatedSession
-	}
-	if err := h.ensureBackendModeAllowsNewUserLogin(c.Request.Context()); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	email := strings.TrimSpace(session.ResolvedEmail)
-	username := pendingSessionStringValue(session.UpstreamIdentityClaims, "username")
-	if email == "" || username == "" {
-		response.ErrorFrom(c, infraerrors.BadRequest("PENDING_AUTH_SESSION_INVALID", "pending auth registration context is invalid"))
-		return
-	}
-
-	client := h.entClient()
-	if client == nil {
-		response.ErrorFrom(c, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready"))
-		return
-	}
-	if err := ensurePendingOAuthRegistrationIdentityAvailable(c.Request.Context(), client, session); err != nil {
-		respondPendingOAuthBindingApplyError(c, err)
-		return
-	}
-	decision, err := h.ensurePendingOAuthAdoptionDecision(c, session.ID, oauthAdoptionDecisionRequest{
-		AdoptDisplayName: req.AdoptDisplayName,
-		AdoptAvatar:      req.AdoptAvatar,
-	})
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	tokenPair, user, err := h.authService.LoginOrRegisterOAuthWithTokenPairAndPromoCode(
-		c.Request.Context(),
-		email,
-		username,
-		req.InvitationCode,
-		req.AffCode,
-		pendingOAuthPromoCode(session),
-		"oidc",
-	)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	if err := applyPendingOAuthAdoptionAndConsumeSession(c.Request.Context(), client, h.authService, h.userService, session, decision, user.ID); err != nil {
-		respondPendingOAuthBindingApplyError(c, err)
-		return
-	}
-	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
-	clearOAuthPendingSessionCookie(c, secureCookie)
-	clearOAuthPendingBrowserCookie(c, secureCookie)
-
-	c.JSON(http.StatusOK, gin.H{
-		"access_token":  tokenPair.AccessToken,
-		"refresh_token": tokenPair.RefreshToken,
-		"expires_in":    tokenPair.ExpiresIn,
-		"token_type":    "Bearer",
 	})
 }
 
@@ -1240,9 +1125,7 @@ func (h *AuthHandler) tryOIDCVerifiedEmailFastPath(
 	if h.isForceEmailOnThirdPartySignup(ctx) {
 		return false
 	}
-	if h.settingSvc.IsInvitationCodeEnabled(ctx) {
-		return false
-	}
+
 	if err := h.ensureBackendModeAllowsNewUserLogin(ctx); err != nil {
 		log.Printf("[OIDC OAuth] verified-email fast path blocked by backend mode: reason=%s", infraerrors.Reason(err))
 		clearOAuthPendingSessionCookie(c, isRequestHTTPS(c))
@@ -1274,10 +1157,7 @@ func (h *AuthHandler) tryOIDCVerifiedEmailFastPath(
 	tokenPair, _, err := h.authService.LoginOrRegisterVerifiedEmailOAuthWithSignupCodes(
 		ctx,
 		input,
-		"",
-		"",
-		readOAuthPromoCode(c),
-	)
+		readOAuthPromoCode(c))
 	if err != nil {
 		log.Printf("[OIDC OAuth] verified-email fast path skipped: reason=%s", infraerrors.Reason(err))
 		return false

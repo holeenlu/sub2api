@@ -29,7 +29,7 @@ func updateSettingsCodexStatus(t *testing.T, body map[string]any) int {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(raw))
 	c.Request.Header.Set("Content-Type", "application/json")
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 	return rec.Code
 }
 

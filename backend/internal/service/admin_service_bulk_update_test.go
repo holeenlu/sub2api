@@ -319,6 +319,22 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {
 	require.Equal(t, []int64{7, 11}, result.SuccessIDs)
 }
 
+func TestAdminServiceBulkUpdateAccountsRejectsEmptyScope(t *testing.T) {
+	for _, parameterPatch := range []bool{false, true} {
+		repo := &accountRepoStubForBulkUpdate{}
+		svc := &adminServiceImpl{accountRepo: repo}
+		result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+			Filters:                    &BulkUpdateAccountFilters{Platform: " ", Search: " "},
+			UseSingleAccountValidation: parameterPatch,
+		})
+		require.Nil(t, result)
+		requireApplicationErrorReason(t, err, "BULK_UPDATE_SCOPE_REQUIRED")
+		require.False(t, repo.listCalled)
+		require.False(t, repo.getByIDsCalled)
+		require.Zero(t, repo.bulkUpdateCalls)
+	}
+}
+
 func TestAdminServiceBulkUpdateAccounts_NormalizesOpenAISettings(t *testing.T) {
 	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{
 		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},

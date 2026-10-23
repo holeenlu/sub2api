@@ -190,7 +190,7 @@ func BuildBedrockURL(region, modelID string, stream bool) string {
 // PrepareBedrockRequestBody 处理请求体以适配 Bedrock API
 //  1. 注入 anthropic_version
 //  2. 注入 anthropic_beta（从客户端 anthropic-beta 头解析）
-//  3. 移除 Bedrock 不支持的字段（model, stream, output_format）；Sonnet 5.5 保留 output_config.effort
+//  3. 移除 Bedrock 不支持的字段（model, stream, output_format）；支持 effort 的模型保留该字段
 //  4. 移除工具定义中的 custom 字段（Claude Code 会发送 custom: {defer_loading: true}）
 //  5. 清理 cache_control 中 Bedrock 不支持的字段（scope, ttl）
 //  6. 修复 thinking 字段兼容性（Opus 4.7 仅支持 adaptive，enabled 需要 budget_tokens）
@@ -205,6 +205,10 @@ func PrepareBedrockRequestBody(body []byte, modelID string, betaHeader string) (
 // ccCompat 启用 CC 兼容模式时额外处理 thinking 类型转换和 tool_use.id 清理。
 func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens []string, ccCompat bool) ([]byte, error) {
 	var err error
+	body, err = claude.NormalizeThinking(body, modelID)
+	if err != nil {
+		return nil, err
+	}
 
 	betaTokens = filterBedrockBetaTokens(betaTokens)
 	body = sanitizeBedrockFieldsForBetaTokens(body, betaTokens)
@@ -249,10 +253,10 @@ func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens
 	// 参考 litellm: _convert_output_format_to_inline_schema()
 	body = convertOutputFormatToInlineSchema(body)
 
-	// InvokeModel accepts output_config.effort for Sonnet 5.5. Keep just that
-	// field; output_config.format has already been inlined above, and older
-	// models retain the existing output_config stripping behavior.
-	if claude.IsSonnet55(modelID) {
+	// InvokeModel supports effort on the catalogued effort-capable models.
+	// Keep only effort; format has already been inlined above.
+	caps, _ := claude.ThinkingCapabilitiesForModel(modelID)
+	if len(caps.EffortLevels) > 0 && (caps.Adaptive || containsBedrockBetaToken(betaTokens, "effort-2025-11-24")) {
 		if effort := gjson.GetBytes(body, "output_config.effort"); effort.Exists() {
 			body, err = sjson.SetRawBytes(body, "output_config", []byte(`{"effort":`+effort.Raw+`}`))
 		} else {
@@ -512,6 +516,7 @@ var bedrockSupportedBetaTokens = map[string]bool{
 	// "interleaved-thinking-2025-05-14": false, // 无官方文档支持
 	"tool-search-tool-2025-10-19": true,
 	"tool-examples-2025-10-29":    true,
+	"effort-2025-11-24":           true, // Opus 4.5 InvokeModel effort opt-in
 }
 
 const bedrockContextManagementBetaToken = "context-management-2025-06-27"
@@ -539,6 +544,11 @@ func autoInjectBedrockBetaTokens(tokens []string, body []byte, modelID string) [
 			tokens = append(tokens, token)
 			seen[token] = true
 		}
+	}
+	// Opus 4.5 is the manual-only effort-capable model and requires this
+	// Bedrock beta. Adaptive models support effort without this opt-in.
+	if caps, known := claude.ThinkingCapabilitiesForModel(modelID); known && !caps.Adaptive && len(caps.EffortLevels) > 0 && gjson.GetBytes(body, "output_config.effort").Exists() {
+		inject("effort-2025-11-24")
 	}
 
 	// 注意：thinking 字段不再自动注入 interleaved-thinking-2025-05-14
@@ -707,22 +717,6 @@ func containsAnyBedrockBetaToken(tokens []string, targets ...string) bool {
 // bedrockToolUseIDRe 匹配 Bedrock 允许的 tool_use ID 字符（字母、数字、下划线、连字符）
 var bedrockToolUseIDRe = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
-// isBedrockOpus47OrNewer 判断 Bedrock 模型 ID 是否为 Claude Opus 4.7 或更新版本
-// Opus 4.7 仅支持 thinking.type: "adaptive"，不支持 "enabled"
-func isBedrockOpus47OrNewer(modelID string) bool {
-	lower := strings.ToLower(modelID)
-	if !strings.Contains(lower, "opus") {
-		return false
-	}
-	matches := claudeVersionRe.FindStringSubmatch(lower)
-	if matches == nil {
-		return false
-	}
-	major, _ := strconv.Atoi(matches[1])
-	minor, _ := strconv.Atoi(matches[2])
-	return major > 4 || (major == 4 && minor >= 7)
-}
-
 func isBedrockFable5(modelID string) bool {
 	return strings.Contains(strings.ToLower(modelID), "claude-fable-5")
 }
@@ -745,33 +739,10 @@ func sanitizeBedrockThinking(body []byte, modelID string) []byte {
 		return body
 	}
 
-	if isBedrockFable5(modelID) {
-		if thinkingType == "enabled" {
-			body, _ = sjson.SetBytes(body, "thinking.type", "adaptive")
-		}
-		if thinkingType == "enabled" || thinkingType == "adaptive" {
-			body, _ = sjson.DeleteBytes(body, "thinking.budget_tokens")
-		}
-		return body
-	}
-
-	if claude.IsSonnet55(modelID) {
-		switch thinkingType {
-		case "enabled":
-			body, _ = sjson.SetBytes(body, "thinking.type", "adaptive")
-			body, _ = sjson.DeleteBytes(body, "thinking.budget_tokens")
-		case "disabled":
-			body, _ = sjson.SetBytes(body, "thinking.type", "between_tools")
-		}
-		return body
-	}
-
-	if isBedrockOpus47OrNewer(modelID) {
-		if thinkingType == "enabled" {
-			body, _ = sjson.SetBytes(body, "thinking.type", "adaptive")
-			body, _ = sjson.DeleteBytes(body, "thinking.budget_tokens")
-		}
-		return body
+	if normalized, err := claude.NormalizeThinking(body, modelID); err == nil {
+		body = normalized
+		thinking = gjson.GetBytes(body, "thinking")
+		thinkingType = thinking.Get("type").String()
 	}
 
 	if thinkingType == "enabled" && !thinking.Get("budget_tokens").Exists() {

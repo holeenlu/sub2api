@@ -28,7 +28,7 @@ describe('EmailOAuthButtons', () => {
     window.sessionStorage.clear()
   })
 
-  it('emits the GitHub OAuth request with redirect and affiliate parameters', async () => {
+  it('emits the GitHub OAuth request with redirect and promo parameters, without referral tracking', async () => {
     const wrapper = mount(EmailOAuthButtons, {
       props: {
         githubEnabled: true,
@@ -48,10 +48,10 @@ describe('EmailOAuthButtons', () => {
     expect(wrapper.emitted('start')).toEqual([[
       {
         provider: 'github',
-        params: { redirect: '/billing?plan=pro', aff_code: 'AFF123', promo_code: 'PROMO123' }
+        params: { redirect: '/billing?plan=pro', promo_code: 'PROMO123' }
       }
     ]])
-    expect(window.sessionStorage.getItem('oauth_aff_code')).toBe('AFF123')
+    expect(window.sessionStorage.getItem('oauth_aff_code')).toBeNull()
     expect(window.sessionStorage.getItem('email_oauth_pending_provider')).toBe('github')
   })
 
@@ -75,7 +75,7 @@ describe('EmailOAuthButtons', () => {
 
     expect(wrapper.emitted('start')?.[0]?.[0]).toEqual({
       provider: 'google',
-      params: { redirect: '/billing?plan=pro', aff_code: 'AFF123', promo_code: 'PROMO456' }
+      params: { redirect: '/billing?plan=pro', promo_code: 'PROMO456' }
     })
     expect(window.location.href).toBe(originalHref)
   })
@@ -99,7 +99,7 @@ describe('EmailOAuthButtons', () => {
 
     expect(wrapper.emitted('start')?.[0]?.[0]).toEqual({
       provider: 'github',
-      params: { redirect: '/billing?plan=pro', aff_code: 'AFF123' }
+      params: { redirect: '/billing?plan=pro' }
     })
   })
 

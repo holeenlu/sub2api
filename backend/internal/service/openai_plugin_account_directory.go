@@ -87,7 +87,7 @@ func accountToPluginInfo(account *Account) PluginAccountInfo {
 
 // accountReadableSnapshotJSON marshals the account's readable field set to JSON.
 // It is a DENYLIST on purpose: any non-secret field added to the account model
-// later flows through automatically with no host change. Only two categories are
+// later flows through automatically with no host change. The following fields are
 // stripped:
 //
 //   - Credentials: holds the refresh_token (and possibly api_key), a long-lived
@@ -96,6 +96,9 @@ func accountToPluginInfo(account *Account) PluginAccountInfo {
 //     credential surface exactly what the outbound-identity channel already
 //     exposes. (Extra and the proxy — including its password, which is already
 //     handed out via the resolved ProxyURL — are intentionally NOT stripped.)
+//   - VendorNotes: private supplier management notes are not transport metadata.
+//   - CreatedBy / CreatedByName / CreatedByRole: management audit identity is not
+//     needed by the transport plugin.
 //   - Groups / AccountGroups: relational graphs with *Group/*Account
 //     back-references. encoding/json does NOT detect reference cycles and would
 //     recurse into a stack-overflow panic if the reverse relation is ever
@@ -109,6 +112,10 @@ func accountReadableSnapshotJSON(account *Account) []byte {
 	}
 	clone := *account
 	clone.Credentials = nil
+	clone.CreatedBy = nil
+	clone.CreatedByName = ""
+	clone.CreatedByRole = ""
+	clone.VendorNotes = ""
 	clone.Groups = nil
 	clone.AccountGroups = nil
 	data, err := json.Marshal(&clone)
