@@ -15,6 +15,15 @@ import (
 
 // ---------- mock helpers ----------
 
+func TestOAuthRefreshAPIArchivedAccountDoesNotContactProvider(t *testing.T) {
+	repo := &refreshAPIAccountRepo{account: &Account{ID: 1, Status: StatusActive, Extra: map[string]any{VendorArchivedAtKey: "2026-10-17T00:00:00Z"}}}
+	executor := &refreshAPIExecutorStub{needsRefresh: true}
+	_, err := NewOAuthRefreshAPI(repo, nil).RefreshIfNeeded(context.Background(), &Account{ID: 1}, executor, time.Minute)
+	require.ErrorIs(t, err, ErrVendorAccountArchived)
+	require.Zero(t, executor.refreshCalls)
+	require.Zero(t, repo.updateCalls)
+}
+
 // refreshAPIAccountRepo implements AccountRepository for OAuthRefreshAPI tests.
 type refreshAPIAccountRepo struct {
 	mockAccountRepoForGemini

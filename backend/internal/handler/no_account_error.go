@@ -56,7 +56,7 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 	// one message that names the real problem. It also flips the ops attribution
 	// from a local model-configuration issue to routing capacity, because call
 	// sites gate markOpsRoutingCapacityLimitedIfNoAvailable on ModelNotFound.
-	if fallback.ModelNotFound {
+	if fallback.ModelNotFound || fallback.ErrType == service.SchedulingQuotaRequestTooLarge {
 		return fallback
 	}
 	match := selectionModelRateLimitedPattern.FindStringSubmatch(strings.ToLower(err.Error()))
@@ -111,6 +111,13 @@ func classifyNoAccountError(
 		ErrType: "api_error",
 		Message: "Service temporarily unavailable",
 	}
+	if service.SchedulingQuotaRequestWasBlocked(ctx) {
+		fallback = noAccountErrorClassification{
+			Status:  http.StatusTooManyRequests,
+			ErrType: service.SchedulingQuotaRequestTooLarge,
+			Message: "Large uncached input is blocked near the account quota limit. Reduce the input or wait for quota recovery.",
+		}
+	}
 
 	routingModel = strings.TrimSpace(routingModel)
 	displayModel = strings.TrimSpace(displayModel)
@@ -155,6 +162,8 @@ func classifyNoAccountErrorFromGin(
 	classification := classifyNoAccountError(ctx, diag, apiKey, routingModel, displayModel, platform)
 	if classification.ModelNotFound {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+	} else if classification.ErrType == service.SchedulingQuotaRequestTooLarge {
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
 	}
 	return classification
 }

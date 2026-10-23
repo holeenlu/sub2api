@@ -17,6 +17,28 @@ import (
 // Mock
 // ---------------------------------------------------------------------------
 
+func TestOpenAISameAccountRetrySharesTurnLimits(t *testing.T) {
+	account := &service.Account{ID: 12, Extra: map[string]any{"pool_mode": true, "pool_mode_retry_count": 3}}
+	failure := &service.UpstreamFailoverError{RetryableOnSameAccount: true, SameAccountRetryDelay: time.Nanosecond}
+	counts := map[int64]int{}
+	ctx := service.WithOpenAITurnBudget(context.Background(), service.NewOpenAITurnBudget(nil))
+	retried, err := waitOpenAISameAccountRetry(ctx, account, failure, counts, nil, "")
+	require.NoError(t, err)
+	require.True(t, retried)
+	require.Same(t, account, service.TurnRetryAccount(ctx))
+	retried, err = waitOpenAISameAccountRetry(ctx, account, failure, counts, nil, "")
+	require.NoError(t, err)
+	require.False(t, retried, "HTTP/WS 再次进入不能重新取得同账号重试预算")
+	require.Equal(t, 1, counts[account.ID])
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	counts = map[int64]int{}
+	retried, err = waitOpenAISameAccountRetry(canceled, account, failure, counts, nil, "")
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, retried)
+	require.Empty(t, counts)
+}
+
 // mockTempUnscheduler 记录 TempUnscheduleRetryableError 的调用信息。
 type mockTempUnscheduler struct {
 	calls []tempUnscheduleCall
@@ -29,6 +51,81 @@ type tempUnscheduleCall struct {
 
 func (m *mockTempUnscheduler) TempUnscheduleRetryableError(_ context.Context, accountID int64, failoverErr *service.UpstreamFailoverError) {
 	m.calls = append(m.calls, tempUnscheduleCall{accountID: accountID, failoverErr: failoverErr})
+}
+
+func TestFailoverStopsContentRefusalBeforeRetryOrAccountSideEffects(t *testing.T) {
+	for _, body := range []string{
+		`{"stop_reason":"refusal"}`,
+		`{"error":{"code":"content_policy_violation"}}`,
+		`{"choices":[{"finish_reason":"content_filter"}]}`,
+		`{"type":"response.refusal.done","refusal":"declined"}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			for _, sameAccount := range []bool{true, false} {
+				ctx := service.EnsureOpenAITurnBudget(t.Context(), nil)
+				owner := &service.Account{ID: 41}
+				service.PinTurnRetryAccount(ctx, owner)
+				state := NewFailoverState(5, true)
+				unscheduler := &mockTempUnscheduler{}
+				failure := &service.UpstreamFailoverError{StatusCode: 502, ResponseBody: []byte(body), RetryableOnSameAccount: sameAccount, ForceCacheBilling: true}
+				require.Equal(t, FailoverExhausted, state.HandleFailoverError(ctx, unscheduler, owner.ID, service.PlatformOpenAI, 5, failure))
+				require.Empty(t, state.SameAccountRetryCount)
+				require.Zero(t, state.SwitchCount)
+				require.Empty(t, state.FailedAccountIDs)
+				require.Empty(t, unscheduler.calls)
+				require.False(t, state.ForceCacheBilling)
+				require.Same(t, failure, state.LastFailoverErr)
+				require.Equal(t, FailoverExhausted, state.HandleSelectionExhausted(ctx, service.ErrNoAvailableAccounts))
+				require.Equal(t, owner.ID, service.TurnRetryAccount(ctx).ID)
+				require.Zero(t, state.SwitchCount)
+			}
+		})
+	}
+}
+
+func TestFailoverCommittedOutputCannotReplayWithRemainingBudget(t *testing.T) {
+	ctx := service.EnsureOpenAITurnBudget(t.Context(), nil)
+	owner := &service.Account{ID: 42}
+	service.PinTurnRetryAccount(ctx, owner)
+	require.True(t, service.OpenAITurnRetryAllowed(ctx, owner.ID, nil))
+	service.MarkTurnOutputCommitted(ctx)
+	require.False(t, service.OpenAITurnRetryAllowed(ctx, owner.ID, nil), "the shared retry gate also fences committed output")
+	require.True(t, service.TurnOutputCommitted(ctx))
+	state := NewFailoverState(5, true)
+	unscheduler := &mockTempUnscheduler{}
+	failure := &service.UpstreamFailoverError{StatusCode: 503, RetryableOnSameAccount: true, SafeToFailoverAfterWrite: true, RequestNotSent: true}
+	require.Equal(t, FailoverExhausted, state.HandleFailoverError(ctx, unscheduler, owner.ID, service.PlatformOpenAI, 5, failure))
+	require.Equal(t, FailoverExhausted, state.HandleSelectionExhausted(ctx, service.ErrNoAvailableAccounts))
+	require.Empty(t, state.SameAccountRetryCount)
+	require.Empty(t, state.FailedAccountIDs)
+	require.Empty(t, unscheduler.calls)
+	require.Zero(t, state.SwitchCount)
+	require.False(t, state.ForceCacheBilling)
+	require.Equal(t, owner.ID, service.TurnRetryAccount(ctx).ID)
+}
+
+func TestFailoverSilentEmptyStreamRemainsRecoverable(t *testing.T) {
+	ctx := service.EnsureOpenAITurnBudget(t.Context(), nil)
+	state := NewFailoverState(5, false)
+	failure := &service.UpstreamFailoverError{StatusCode: 502, ResponseBody: []byte(`{"error":{"type":"upstream_error","code":"openai_silent_refusal"}}`)}
+	unscheduler := &mockTempUnscheduler{}
+	require.Equal(t, FailoverContinue, state.HandleFailoverError(ctx, unscheduler, 43, service.PlatformOpenAI, 1, failure))
+	require.Equal(t, 1, state.SwitchCount)
+	require.Contains(t, state.FailedAccountIDs, int64(43))
+	require.Empty(t, unscheduler.calls)
+}
+
+func TestFailoverSelectionCannotReopenExhaustedTurnBudget(t *testing.T) {
+	ctx := service.EnsureOpenAITurnBudget(t.Context(), nil)
+	service.PinTurnRetryAccount(ctx, &service.Account{ID: 44})
+	for range 8 {
+		require.NoError(t, service.TakeOpenAITurnAttempt(ctx))
+	}
+	state := NewFailoverState(5, false)
+	state.LastFailoverErr = &service.UpstreamFailoverError{StatusCode: 503}
+	require.Equal(t, FailoverExhausted, state.HandleSelectionExhausted(ctx, service.ErrNoAvailableAccounts))
+	require.Zero(t, state.SwitchCount)
+	require.Empty(t, state.FailedAccountIDs)
 }
 
 func TestSameAccountRetryDelayFor(t *testing.T) {
@@ -65,13 +162,13 @@ func TestSameAccountRetryDelayFor(t *testing.T) {
 	})
 }
 
-func TestSameAccountRetryAllowedUsesDeadlineInsteadOfPoolCount(t *testing.T) {
+func TestSameAccountRetryDeadlineCannotExtendCountBudget(t *testing.T) {
 	err := &service.UpstreamFailoverError{
 		RetryableOnSameAccount:   true,
 		SameAccountRetryDeadline: time.Now().Add(time.Minute),
 	}
-	require.True(t, sameAccountRetryAllowed(err, 100, 0))
-	require.True(t, sameAccountRetryAllowed(err, 100, maxSameAccountRetries))
+	require.False(t, sameAccountRetryAllowed(err, 100, 0))
+	require.False(t, sameAccountRetryAllowed(err, 100, maxSameAccountRetries))
 	err.SameAccountRetryDeadline = time.Now().Add(-time.Second)
 	require.False(t, sameAccountRetryAllowed(err, 0, 100))
 }
@@ -374,7 +471,7 @@ func TestHandleFailoverError_CacheBilling(t *testing.T) {
 		require.Zero(t, fs.SwitchCount)
 	})
 
-	t.Run("OAuth deadline存在时不按普通计数切换", func(t *testing.T) {
+	t.Run("OAuth deadline不能突破同目标预算", func(t *testing.T) {
 		mock := &mockTempUnscheduler{}
 		fs := NewFailoverState(3, true)
 		fs.SameAccountRetryCount[100] = maxSameAccountRetries
@@ -384,10 +481,10 @@ func TestHandleFailoverError_CacheBilling(t *testing.T) {
 
 		fs.HandleFailoverError(context.Background(), mock, 100, "openai", maxSameAccountRetries, err)
 
-		require.False(t, fs.ForceCacheBilling)
-		require.Zero(t, fs.SwitchCount)
-		require.Equal(t, maxSameAccountRetries+1, fs.SameAccountRetryCount[100])
-		require.Empty(t, mock.calls)
+		require.True(t, fs.ForceCacheBilling)
+		require.Equal(t, 1, fs.SwitchCount)
+		require.Equal(t, maxSameAccountRetries, fs.SameAccountRetryCount[100])
+		require.Len(t, mock.calls, 1)
 	})
 
 	t.Run("同账号重试耗尽并实际切换时设置ForceCacheBilling", func(t *testing.T) {
@@ -626,7 +723,7 @@ func TestHandleFailoverError_ContextCanceled(t *testing.T) {
 		fs := NewFailoverState(3, false)
 		err := newTestFailoverErr(400, true, false)
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(service.WithSchedulingTrace(context.Background(), nil))
 		go func() {
 			time.Sleep(30 * time.Millisecond)
 			cancel() // 通过入口检查后、sleep 期间取消
@@ -640,6 +737,11 @@ func TestHandleFailoverError_ContextCanceled(t *testing.T) {
 		require.Less(t, elapsed, 400*time.Millisecond, "sleep 应被取消打断")
 		// 进入重试分支后才取消：重试计数已递增
 		require.Equal(t, 1, fs.SameAccountRetryCount[100])
+
+		trace := service.WithOpsSchedulingTrace(ctx, nil)
+		require.Len(t, trace, 1)
+		require.Contains(t, trace[0].Detail, `"reason":"client_canceled"`)
+		require.Nil(t, service.LastOpsUpstreamAttempt(trace))
 	})
 
 	t.Run("入口即已取消_不改动任何failover状态", func(t *testing.T) {
@@ -920,7 +1022,7 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		require.Equal(t, FailoverExhausted, action)
 	})
 
-	t.Run("503且未耗尽_等待后返回Continue并清除失败列表", func(t *testing.T) {
+	t.Run("503候选耗尽_保留排除列表并停止", func(t *testing.T) {
 		fs := NewFailoverState(3, false)
 		fs.LastFailoverErr = newTestFailoverErr(503, false, false)
 		fs.FailedAccountIDs[100] = struct{}{}
@@ -930,10 +1032,9 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		action := fs.HandleSelectionExhausted(context.Background())
 		elapsed := time.Since(start)
 
-		require.Equal(t, FailoverContinue, action)
-		require.Empty(t, fs.FailedAccountIDs, "应清除失败账号列表")
-		require.GreaterOrEqual(t, elapsed, 1500*time.Millisecond, "应等待约 2s")
-		require.Less(t, elapsed, 5*time.Second)
+		require.Equal(t, FailoverExhausted, action)
+		require.Contains(t, fs.FailedAccountIDs, int64(100))
+		require.Less(t, elapsed, 100*time.Millisecond)
 	})
 
 	t.Run("503但SwitchCount已超过MaxSwitches_返回Exhausted", func(t *testing.T) {
@@ -987,13 +1088,13 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		require.Equal(t, FailoverCanceled, action)
 	})
 
-	t.Run("503且SwitchCount等于MaxSwitches_仍可重试", func(t *testing.T) {
+	t.Run("503且SwitchCount等于MaxSwitches_停止", func(t *testing.T) {
 		fs := NewFailoverState(2, false)
 		fs.LastFailoverErr = newTestFailoverErr(503, false, false)
-		fs.SwitchCount = 2 // == MaxSwitches，条件是 <=，仍可重试
+		fs.SwitchCount = 2 // == MaxSwitches，条件是 <=，停止
 
 		action := fs.HandleSelectionExhausted(context.Background())
-		require.Equal(t, FailoverContinue, action)
+		require.Equal(t, FailoverExhausted, action)
 	})
 }
 
@@ -1038,5 +1139,102 @@ func TestFailoverClientGone(t *testing.T) {
 
 	t.Run("nil安全", func(t *testing.T) {
 		require.False(t, failoverClientGone(nil))
+	})
+}
+
+type openAIRecoverySchedulerStub struct {
+	switches int
+	stop429  bool
+}
+
+func (s *openAIRecoverySchedulerStub) RecordOpenAIAccountSwitch() { s.switches++ }
+func (s *openAIRecoverySchedulerStub) ShouldStopOpenAIOAuth429Failover(_ *service.Account, status, _ int, _ *service.OpenAIOAuth429FailoverState) bool {
+	return s.stop429 && status == 429
+}
+
+func TestOpenAIRecoveryController(t *testing.T) {
+	account := &service.Account{ID: 12, Extra: map[string]any{"pool_mode": true, "pool_mode_retry_count": 3}}
+	failure := func() *service.UpstreamFailoverError {
+		return &service.UpstreamFailoverError{StatusCode: 502, SameAccountRetryDelay: time.Nanosecond}
+	}
+	t.Run("one_same_owner_then_switch_then_stop", func(t *testing.T) {
+		ctx := service.EnsureOpenAITurnBudget(t.Context(), nil)
+		scheduler := &openAIRecoverySchedulerStub{}
+		state := NewFailoverState(1, false)
+		for _, want := range []FailoverAction{FailoverRetrySameAccount, FailoverContinue, FailoverExhausted} {
+			action, err := state.RecoverOpenAI(ctx, nil, account, failure(), true, true, scheduler, nil)
+			require.NoError(t, err)
+			require.Equal(t, want, action)
+		}
+		require.Equal(t, 1, state.SameAccountRetryCount[account.ID])
+		require.Equal(t, 1, state.SwitchCount)
+		require.Equal(t, 1, scheduler.switches)
+		require.Contains(t, state.FailedAccountIDs, account.ID)
+		require.Nil(t, service.TurnRetryAccount(ctx))
+	})
+	t.Run("owner_bound_context_does_not_move", func(t *testing.T) {
+		ctx := service.EnsureOpenAITurnBudget(t.Context(), nil)
+		state := NewFailoverState(3, false)
+		scheduler := &openAIRecoverySchedulerStub{}
+		for _, want := range []FailoverAction{FailoverRetrySameAccount, FailoverExhausted} {
+			action, err := state.RecoverOpenAI(ctx, nil, account, failure(), false, true, scheduler, nil)
+			require.NoError(t, err)
+			require.Equal(t, want, action)
+		}
+		require.Zero(t, scheduler.switches)
+		require.Empty(t, state.FailedAccountIDs)
+	})
+	t.Run("cancel_output_attempt_and_preparation_limits", func(t *testing.T) {
+		for _, mode := range []string{"cancel", "output", "attempts", "preparation", "terminal"} {
+			t.Run(mode, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(service.EnsureOpenAITurnBudget(t.Context(), nil))
+				defer cancel()
+				errFact := failure()
+				want := FailoverExhausted
+				switch mode {
+				case "cancel":
+					cancel()
+					want = FailoverCanceled
+				case "output":
+					service.MarkTurnOutputCommitted(ctx)
+				case "attempts":
+					for range 8 {
+						require.NoError(t, service.TakeOpenAITurnAttempt(ctx))
+					}
+				case "preparation":
+					require.NoError(t, service.TakeTurnPreparationRetry(ctx))
+					require.NoError(t, service.TakeTurnPreparationRetry(ctx))
+					errFact.Stage = service.GatewayFailureStageAccountAuth
+					errFact.RequestNotSent = true
+				case "terminal":
+					errFact.NextAccountAction = service.NextAccountStop
+				}
+				state := NewFailoverState(3, false)
+				scheduler := &openAIRecoverySchedulerStub{}
+				action, err := state.RecoverOpenAI(ctx, nil, account, errFact, true, true, scheduler, nil)
+				require.Equal(t, want, action)
+				if mode == "preparation" {
+					require.ErrorIs(t, err, service.ErrTurnPreparationExhausted)
+				}
+				require.Zero(t, scheduler.switches)
+				require.Empty(t, state.SameAccountRetryCount)
+				require.Empty(t, state.FailedAccountIDs)
+			})
+		}
+	})
+	t.Run("oauth_429_cap_and_bps_exception", func(t *testing.T) {
+		for _, bps := range []bool{false, true} {
+			state := NewFailoverState(3, false)
+			scheduler := &openAIRecoverySchedulerStub{stop429: true}
+			fact := &service.UpstreamFailoverError{StatusCode: 429}
+			want := FailoverExhausted
+			if bps {
+				fact.Reason = service.ExcelBPSRateLimitedReason
+				want = FailoverContinue
+			}
+			action, err := state.RecoverOpenAI(service.EnsureOpenAITurnBudget(t.Context(), nil), nil, account, fact, true, false, scheduler, nil)
+			require.NoError(t, err)
+			require.Equal(t, want, action)
+		}
 	})
 }

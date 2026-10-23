@@ -129,9 +129,9 @@ func TestGeminiResponseSignalKindPrecedence(t *testing.T) {
 func TestDetectGeminiResponseSignalInBody(t *testing.T) {
 	t.Run("json array picks the most severe element", func(t *testing.T) {
 		body := `[{"candidates":[{"content":{"parts":[{"text":"a"}]}}]}
-,
+
 {"candidates":[{"content":{},"finishReason":"SAFETY"}]}
-,
+
 {"error":{"code":503,"status":"UNAVAILABLE","message":"busy"}}
 ]`
 		sig, ok := detectGeminiResponseSignalInBody([]byte(body))
