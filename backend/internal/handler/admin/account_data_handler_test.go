@@ -2,15 +2,112 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type stubAccountAuthorizations struct {
+	data *service.AccountAuthorizationData
+	err  error
+}
+
+func (s *stubAccountAuthorizations) ExportAccountAuthorizations(context.Context, *service.Account) (*service.AccountAuthorizationData, error) {
+	return s.data, s.err
+}
+func (s *stubAccountAuthorizations) PrepareAccountAuthorizations(_ *service.Account, data *service.AccountAuthorizationData) (*service.AccountAuthorizationCiphertexts, error) {
+	s.data = data
+	return &service.AccountAuthorizationCiphertexts{Excel: "target-encrypted-bps", SIWCRegistration: "target-encrypted-siwc", SIWCCredentials: "target-encrypted-token"}, s.err
+}
+
+func TestAccountDataPortableAuthorizationImportAndGroupMapping(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		adminSvc := newStubAdminService()
+		adminSvc.groups = []service.Group{{ID: 901, Name: "paid", Platform: service.PlatformOpenAI}}
+		auth := &stubAccountAuthorizations{}
+		if fail {
+			auth.err = errors.New("authorization mismatch")
+		}
+		h := &AccountHandler{adminService: adminSvc, accountDataAuthorizations: auth}
+		paused := false
+		row := DataAccount{Name: "portable", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"access_token": "native"}, BPSCredentials: map[string]any{"refresh_token": "excel"}, SIWCAuthorization: &service.AccountSIWCData{}, Status: service.StatusDisabled, Schedulable: &paused, Groups: []DataAccountGroup{{Name: "paid", Platform: service.PlatformOpenAI, Priority: 17}}}
+		result, err := h.importData(t.Context(), DataImportRequest{Data: DataPayload{Type: dataType, Version: 2, Proxies: []DataProxy{}, Accounts: []DataAccount{row}}})
+		require.NoError(t, err)
+		if fail {
+			require.Equal(t, 1, result.AccountFailed)
+			require.Empty(t, adminSvc.createdAccounts)
+			continue
+		}
+		require.Equal(t, 1, result.AccountCreated)
+		require.Len(t, adminSvc.createdAccounts, 1)
+		in := adminSvc.createdAccounts[0]
+		require.Equal(t, []int64{901}, in.GroupIDs)
+		require.Equal(t, 17, in.ImportOptions.Groups[0].Priority)
+		require.Equal(t, service.StatusDisabled, in.ImportOptions.Status)
+		require.False(t, *in.ImportOptions.Schedulable)
+		require.Equal(t, "target-encrypted-siwc", in.ImportOptions.Authorizations.SIWCRegistration)
+		require.Equal(t, "excel", auth.data.BPSCredentials["refresh_token"])
+	}
+	_, err := validateImportAuthorizationFieldsForTest(authz.Subject{Role: authz.Admin})
+	require.Error(t, err)
+}
+
+func validateImportAuthorizationFieldsForTest(actor authz.Subject) (bool, error) {
+	return authz.ValidateRequestFields("account.import", map[string]any{"data": map[string]any{"accounts": []any{map[string]any{"siwc_authorization": map[string]any{}}}}}, actor)
+}
+
+func TestAccountDataRejectsUnresolvedGroupReferences(t *testing.T) {
+	_, _, err := resolveDataAccountGroups(&DataAccount{Extra: map[string]any{service.ExcelBPS403TargetGroupIDKey: 12}}, nil)
+	require.Error(t, err)
+	ref := DataAccountGroup{Name: "paid", Platform: service.PlatformOpenAI}
+	row := DataAccount{Groups: []DataAccountGroup{ref}, BPS403TargetGroup: &ref, Extra: map[string]any{service.ExcelBPS403TargetGroupIDKey: 12}}
+	_, _, err = resolveDataAccountGroups(&row, nil)
+	require.Error(t, err)
+	group := service.Group{ID: 902, Name: "paid", Platform: service.PlatformOpenAI}
+	_, _, err = resolveDataAccountGroups(&row, []service.Group{group, group})
+	require.Error(t, err)
+	ids, _, err := resolveDataAccountGroups(&row, []service.Group{group})
+	require.NoError(t, err)
+	require.Equal(t, []int64{902}, ids)
+	require.Equal(t, int64(902), row.Extra[service.ExcelBPS403TargetGroupIDKey])
+}
+
+func TestAccountDataProxyBackupOrderAndFailure(t *testing.T) {
+	for _, broken := range []bool{false, true} {
+		svc := newStubAdminService()
+		h := &AccountHandler{adminService: svc}
+		primary := DataProxy{ProxyKey: "primary", Name: "primary", Protocol: "http", Host: "primary.invalid", Port: 8080, FallbackMode: service.FallbackModeProxy, BackupProxyKey: "backup"}
+		backup := DataProxy{ProxyKey: "backup", Name: "backup", Protocol: "socks5h", Host: "backup.invalid", Port: 1080}
+		if broken {
+			backup.FallbackMode = service.FallbackModeProxy
+			backup.BackupProxyKey = "primary"
+		}
+		result := DataImportResult{}
+		keys, err := h.importDataProxies(t.Context(), []DataProxy{primary, backup}, &result)
+		require.NoError(t, err)
+		if broken {
+			require.Equal(t, 2, result.ProxyFailed)
+			require.Empty(t, svc.createdProxies)
+			require.NotContains(t, keys, "primary")
+			require.NotContains(t, keys, "backup")
+			continue
+		}
+		require.Zero(t, result.ProxyFailed)
+		require.Equal(t, 2, result.ProxyCreated)
+		require.Equal(t, "backup", svc.createdProxies[0].Name)
+		require.Equal(t, "primary", svc.createdProxies[1].Name)
+		require.NotNil(t, svc.createdProxies[1].BackupProxyID)
+		require.NotZero(t, keys["primary"])
+	}
+}
 
 type dataResponse struct {
 	Code int         `json:"code"`
@@ -68,6 +165,7 @@ func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
 		nil,
 		nil,
 	)
+	h.accountDataAuthorizations = &stubAccountAuthorizations{}
 
 	router.GET("/api/v1/admin/accounts/data", h.ExportData)
 	router.POST("/api/v1/admin/accounts/data", h.ImportData)
@@ -123,12 +221,54 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	var resp dataResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, 0, resp.Code)
-	require.Empty(t, resp.Data.Type)
-	require.Equal(t, 0, resp.Data.Version)
+	require.Equal(t, "sub2api-data", resp.Data.Type)
+	require.Equal(t, 2, resp.Data.Version)
 	require.Len(t, resp.Data.Proxies, 1)
 	require.Equal(t, "pass", resp.Data.Proxies[0].Password)
 	require.Len(t, resp.Data.Accounts, 1)
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
+}
+
+func TestExportDataCannotBypassSupplierArchiveGuard(t *testing.T) {
+	for _, archived := range []bool{false, true} {
+		router, adminSvc := setupAccountDataRouter()
+		owner := int64(7)
+		a := service.Account{ID: 21, VendorID: &owner, Credentials: map[string]any{"access_token": "retained-secret"}}
+		if archived {
+			a.Extra = map[string]any{service.VendorArchivedAtKey: "2026-10-17T00:00:00Z"}
+		}
+		adminSvc.accounts = []service.Account{a}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data", nil))
+		require.Equal(t, http.StatusForbidden, rec.Code)
+		require.NotContains(t, rec.Body.String(), "retained-secret")
+	}
+}
+
+func TestExportDataIncludesPortableProxyBackupChain(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	primaryID, backupID := int64(11), int64(12)
+	adminSvc.proxies = []service.Proxy{
+		{ID: primaryID, Name: "primary", Protocol: "http", Host: "primary.invalid", Port: 8080, Status: service.StatusActive, FallbackMode: service.FallbackModeProxy, BackupProxyID: &backupID},
+		{ID: backupID, Name: "backup", Protocol: "socks5h", Host: "backup.invalid", Port: 1080, Username: "backup-user", Password: "backup-secret", Status: service.StatusActive},
+	}
+	adminSvc.accounts = []service.Account{{ID: 21, Name: "account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"access_token": "secret"}, ProxyID: &primaryID}}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response struct {
+		Data DataPayload `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Len(t, response.Data.Proxies, 2)
+	require.Equal(t, "backup", response.Data.Proxies[0].BackupProxyName)
+	require.Equal(t, "backup-secret", response.Data.Proxies[1].Password)
+	otherOwner := int64(8)
+	adminSvc.proxies[1].VendorID = &otherOwner
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data", nil))
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.NotContains(t, rec.Body.String(), "backup-secret")
 }
 
 func TestExportDataWithoutProxies(t *testing.T) {

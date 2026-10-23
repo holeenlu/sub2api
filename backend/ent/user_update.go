@@ -94,6 +94,27 @@ func (_u *UserUpdate) SetNillablePasswordHash(v *string) *UserUpdate {
 	return _u
 }
 
+// SetSessionGeneration sets the "session_generation" field.
+func (_u *UserUpdate) SetSessionGeneration(v int64) *UserUpdate {
+	_u.mutation.ResetSessionGeneration()
+	_u.mutation.SetSessionGeneration(v)
+	return _u
+}
+
+// SetNillableSessionGeneration sets the "session_generation" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableSessionGeneration(v *int64) *UserUpdate {
+	if v != nil {
+		_u.SetSessionGeneration(*v)
+	}
+	return _u
+}
+
+// AddSessionGeneration adds value to the "session_generation" field.
+func (_u *UserUpdate) AddSessionGeneration(v int64) *UserUpdate {
+	_u.mutation.AddSessionGeneration(v)
+	return _u
+}
+
 // SetRole sets the "role" field.
 func (_u *UserUpdate) SetRole(v string) *UserUpdate {
 	_u.mutation.SetRole(v)
@@ -1023,6 +1044,12 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.PasswordHash(); ok {
 		_spec.SetField(user.FieldPasswordHash, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.SessionGeneration(); ok {
+		_spec.SetField(user.FieldSessionGeneration, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSessionGeneration(); ok {
+		_spec.AddField(user.FieldSessionGeneration, field.TypeInt64, value)
+	}
 	if value, ok := _u.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)
 	}
@@ -1784,6 +1811,27 @@ func (_u *UserUpdateOne) SetNillablePasswordHash(v *string) *UserUpdateOne {
 	if v != nil {
 		_u.SetPasswordHash(*v)
 	}
+	return _u
+}
+
+// SetSessionGeneration sets the "session_generation" field.
+func (_u *UserUpdateOne) SetSessionGeneration(v int64) *UserUpdateOne {
+	_u.mutation.ResetSessionGeneration()
+	_u.mutation.SetSessionGeneration(v)
+	return _u
+}
+
+// SetNillableSessionGeneration sets the "session_generation" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableSessionGeneration(v *int64) *UserUpdateOne {
+	if v != nil {
+		_u.SetSessionGeneration(*v)
+	}
+	return _u
+}
+
+// AddSessionGeneration adds value to the "session_generation" field.
+func (_u *UserUpdateOne) AddSessionGeneration(v int64) *UserUpdateOne {
+	_u.mutation.AddSessionGeneration(v)
 	return _u
 }
 
@@ -2745,6 +2793,12 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.PasswordHash(); ok {
 		_spec.SetField(user.FieldPasswordHash, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SessionGeneration(); ok {
+		_spec.SetField(user.FieldSessionGeneration, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSessionGeneration(); ok {
+		_spec.AddField(user.FieldSessionGeneration, field.TypeInt64, value)
 	}
 	if value, ok := _u.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)

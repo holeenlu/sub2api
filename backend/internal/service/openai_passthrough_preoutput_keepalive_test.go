@@ -30,9 +30,9 @@ func newPassthroughKeepaliveTestContext(t *testing.T) (*gin.Context, *httptest.R
 	return c, rec
 }
 
-// startOpenAISSEKeepalive 必须在【没有】compact 标记时也能启动 ——
+// StartSSEKeepalive 必须在【没有】compact 标记时也能启动 ——
 // 否则普通透传请求依旧静默。
-func TestStartOpenAISSEKeepalive_WorksWithoutCompactMarker(t *testing.T) {
+func TestStartSSEKeepalive_WorksWithoutCompactMarker(t *testing.T) {
 	c, rec := newPassthroughKeepaliveTestContext(t)
 
 	// 对照:带 compact 标记检查的入口在这里应当直接 no-op。
@@ -43,7 +43,7 @@ func TestStartOpenAISSEKeepalive_WorksWithoutCompactMarker(t *testing.T) {
 
 	// 内部入口不检查标记,应当真的开始打拍。
 	c, rec = newPassthroughKeepaliveTestContext(t)
-	stop = startOpenAISSEKeepalive(c, keepaliveTestInterval)
+	stop = StartSSEKeepalive(c, keepaliveTestInterval)
 	defer stop()
 	waitForKeepaliveBeats()
 
@@ -59,7 +59,7 @@ func TestStartOpenAISSEKeepalive_WorksWithoutCompactMarker(t *testing.T) {
 // 透传路径的 pre-output failover 完全依赖它。
 func TestPassthroughKeepaliveDoesNotBlockPreOutputFailover(t *testing.T) {
 	c, rec := newPassthroughKeepaliveTestContext(t)
-	stop := startOpenAISSEKeepalive(c, keepaliveTestInterval)
+	stop := StartSSEKeepalive(c, keepaliveTestInterval)
 	defer stop()
 	waitForKeepaliveBeats()
 	require.True(t, StopOpenAICompactSSEKeepaliveCommitted(c))
@@ -79,7 +79,7 @@ func TestPassthroughKeepaliveDoesNotBlockPreOutputFailover(t *testing.T) {
 // 停拍之后不得再有心跳字节写出 —— 主循环接管 ResponseWriter 的前提。
 func TestPassthroughKeepaliveStopsBeforeHandingOverWriter(t *testing.T) {
 	c, rec := newPassthroughKeepaliveTestContext(t)
-	stop := startOpenAISSEKeepalive(c, keepaliveTestInterval)
+	stop := StartSSEKeepalive(c, keepaliveTestInterval)
 	waitForKeepaliveBeats()
 	stop()
 
@@ -98,7 +98,7 @@ func TestPassthroughKeepaliveStopsBeforeHandingOverWriter(t *testing.T) {
 // interval<=0(配置禁用)时行为与改动前完全一致:一个字节都不写。
 func TestPassthroughKeepaliveDisabledKeepsWriterUntouched(t *testing.T) {
 	c, rec := newPassthroughKeepaliveTestContext(t)
-	stop := startOpenAISSEKeepalive(c, 0)
+	stop := StartSSEKeepalive(c, 0)
 	waitForKeepaliveBeats()
 	stop()
 	require.Zero(t, rec.Body.Len())
