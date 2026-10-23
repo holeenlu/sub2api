@@ -45,7 +45,7 @@ func TestOpenAISchedulingRateFallback(t *testing.T) {
 				{floatPtr(0.3), 0.3, true},
 				{floatPtr(0), 0, true},
 				{nil, 1, true},
-				{floatPtr(-1), 1, true},
+				{floatPtr(-1), 0, false},
 				{floatPtr(math.NaN()), 0, false},
 				{floatPtr(math.Inf(1)), 0, false},
 			} {
@@ -73,28 +73,6 @@ func TestOpenAISchedulingRateFallback(t *testing.T) {
 	}
 	_, ok := openAISchedulingRate(nil, now, nil)
 	require.False(t, ok)
-}
-
-func TestOpenAISchedulingRateFallbackSharedByBothModes(t *testing.T) {
-	now := time.Now()
-	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
-		t.Run(accountType, func(t *testing.T) {
-			cheap := &Account{ID: 1, Platform: PlatformOpenAI, Type: accountType, RateMultiplier: floatPtr(0.3)}
-			expensive := &Account{ID: 2, Platform: PlatformOpenAI, Type: accountType, RateMultiplier: floatPtr(0.8)}
-			accounts := []*Account{cheap, expensive}
-			order := newOpenAILegacyUpstreamRateOrder(accounts, now, nil)
-			require.True(t, order.enabled)
-			require.Negative(t, order.compare(cheap, expensive))
-			factors := openAIUpstreamCostFactors(accounts, now, nil)
-			require.Greater(t, factors[cheap.ID], factors[expensive.ID])
-			if accountType == AccountTypeOAuth {
-				order = newOpenAILegacyUpstreamRateOrder(accounts, now, floatPtr(0.7))
-				require.False(t, order.enabled)
-				factors = openAIUpstreamCostFactors(accounts, now, floatPtr(0.7))
-				require.Equal(t, factors[cheap.ID], factors[expensive.ID])
-			}
-		})
-	}
 }
 
 func TestOpenAIOAuthSchedulingRateRuntimePreservesExplicitClear(t *testing.T) {

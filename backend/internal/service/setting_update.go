@@ -2,15 +2,18 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -30,36 +33,13 @@ func (o OmittedSettingKeys) dropFrom(updates map[string]string) {
 	}
 }
 
-// UpdateSettings 更新系统设置
-func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSettings) error {
-	return s.UpdateSettingsOmitting(ctx, settings, nil)
-}
-
-// UpdateSettingsOmitting persists system settings, leaving the keys in omitted
-// at their stored value.
-func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) error {
-	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
-	if err != nil {
-		return err
+// UpdateSettings validates and atomically persists the settings page against its
+// read revision. All settings, auth defaults and prepared payment/Fast values
+// share this one write; omitted keys retain their stored values.
+func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings, omitted OmittedSettingKeys, additional map[string]string) error {
+	if settings == nil || len(settings.Revision) != 64 {
+		return infraerrors.New(428, "SETTINGS_REVISION_REQUIRED", "Read current settings and include revision before saving")
 	}
-	omitted.dropFrom(updates)
-
-	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
-		return err
-	}
-	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
-	return nil
-}
-
-// UpdateSettingsWithAuthSourceDefaults persists system settings and auth-source defaults in a single write.
-func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings) error {
-	return s.UpdateSettingsWithAuthSourceDefaultsOmitting(ctx, settings, authDefaults, nil)
-}
-
-// UpdateSettingsWithAuthSourceDefaultsOmitting persists system settings and
-// auth-source defaults in a single write, leaving the keys in omitted at their
-// stored value.
-func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings, omitted OmittedSettingKeys) error {
 	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
@@ -73,10 +53,24 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 		updates[key] = value
 	}
 	omitted.dropFrom(updates)
-
-	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
+	for key, value := range additional {
+		updates[key] = value
+	}
+	if err := s.validateVendorSettingsWrite(ctx, updates); err != nil {
 		return err
 	}
+
+	repo, ok := s.settingRepo.(interface {
+		CompareAndSetMultiple(context.Context, string, map[string]string) (string, error)
+	})
+	if !ok {
+		return errors.New("conditional settings writes unavailable")
+	}
+	revision, err := repo.CompareAndSetMultiple(ctx, settings.Revision, updates)
+	if err != nil {
+		return err
+	}
+	settings.Revision = revision
 	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
 	return nil
 }
@@ -86,6 +80,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 // it omitted, so in that case the caches are rebuilt from storage rather than
 // from the request struct.
 func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
+	if _, skip := omitted[SettingKeyCodexDiagnosticPromptTemplate]; !skip {
+		s.InvalidateCodexProbeTemplateCache()
+	}
 	if len(omitted) == 0 {
 		s.refreshCachedSettings(settings)
 		return
@@ -99,6 +96,60 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
+	if rate := settings.OpenAIOAuthSchedulingRateMultiplier; rate != nil && (*rate < 0 || math.IsNaN(*rate) || math.IsInf(*rate, 0)) {
+		return nil, infraerrors.BadRequest("INVALID_OPENAI_OAUTH_SCHEDULING_RATE_MULTIPLIER", "OpenAI OAuth scheduling rate multiplier must be a finite non-negative number")
+	}
+
+	imageRelay, err := normalizeExcelBPSImageRelaySettings(settings.ExcelBPSImageRelayEnabled, settings.ExcelBPSImageBaseURL, settings.ExcelBPSImageMode)
+	if err != nil {
+		return nil, err
+	}
+	settings.ExcelBPSImageBaseURL = imageRelay.BaseURL
+	if settings.ExcelBPSImageBodyLimitMiB == 0 {
+		settings.ExcelBPSImageBodyLimitMiB = DefaultExcelBPSImageBodyLimitMiB
+	}
+	if settings.ExcelBPSImageBudgetMiB == 0 {
+		settings.ExcelBPSImageBudgetMiB = DefaultExcelBPSImageBudgetMiB
+	}
+	if settings.ExcelBPSImageMaxRequests == 0 {
+		settings.ExcelBPSImageMaxRequests = DefaultExcelBPSImageMaxRequests
+	}
+	if settings.ExcelBPSImageMaxImageMiB == 0 {
+		settings.ExcelBPSImageMaxImageMiB = imageRelay.Limits.MaxImageMiB
+	}
+	if settings.ExcelBPSImageMaxImages == 0 {
+		settings.ExcelBPSImageMaxImages = imageRelay.Limits.MaxImages
+	}
+	if settings.ExcelBPSImageMaxTotalMiB == 0 {
+		settings.ExcelBPSImageMaxTotalMiB = imageRelay.Limits.MaxTotalMiB
+	}
+	if settings.ExcelBPSImageStorageMiB == 0 {
+		settings.ExcelBPSImageStorageMiB = imageRelay.Limits.StorageMiB
+	}
+	if settings.ExcelBPSImageStorageEntries == 0 {
+		settings.ExcelBPSImageStorageEntries = imageRelay.Limits.StorageEntries
+	}
+	if settings.ExcelBPSImageTTLMinutes == 0 {
+		settings.ExcelBPSImageTTLMinutes = imageRelay.Limits.TTLMinutes
+	}
+	if settings.ExcelBPSImageLimitPolicy == "" {
+		settings.ExcelBPSImageLimitPolicy = DefaultExcelBPSImageLimitPolicy
+	}
+	if settings.ExcelBPSImageWarningRemaining == 0 {
+		settings.ExcelBPSImageWarningRemaining = 8
+	}
+	if settings.ExcelBPSImageCompactReserve == 0 {
+		settings.ExcelBPSImageCompactReserve = 3
+	}
+	if err := validateExcelBPSImagePolicy(settings.ExcelBPSImageLimitPolicy, settings.ExcelBPSImageWarningRemaining, settings.ExcelBPSImageCompactReserve, settings.ExcelBPSImageMaxImages); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_EXCEL_BPS_IMAGE_POLICY", err.Error())
+	}
+	if err := validateExcelBPSImageLimits(settings.ExcelBPSImageMode, settings.imageRelayLimits()); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_EXCEL_BPS_IMAGE_LIMITS", err.Error())
+	}
+	if err := validateExcelBPSImageCapacity(settings.ExcelBPSImageBodyLimitMiB, settings.ExcelBPSImageBudgetMiB, settings.ExcelBPSImageMaxRequests); err != nil {
+		return nil, err
+	}
 	if err := s.validateDefaultSubscriptionGroups(ctx, settings.DefaultSubscriptions); err != nil {
 		return nil, err
 	}
@@ -121,9 +172,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	}
 	wxpaySource, err := normalizeVisibleMethodSettingSource("wxpay", settings.PaymentVisibleMethodWxpaySource, settings.PaymentVisibleMethodWxpayEnabled)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.normalizeOpenAIAdvancedSchedulerOverrides(settings); err != nil {
 		return nil, err
 	}
 	settings.PaymentVisibleMethodAlipaySource = alipaySource
@@ -162,6 +210,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates := make(map[string]string)
 
 	// 注册设置
+	if _, err := ParseCodexProbeTemplate(settings.OpenAICodexDiagnosticPromptTemplate); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_CODEX_PROBE_TEMPLATE", err.Error())
+	}
+	updates[SettingKeyCodexDiagnosticPromptTemplate] = settings.OpenAICodexDiagnosticPromptTemplate
 	updates[SettingKeyRegistrationEnabled] = strconv.FormatBool(settings.RegistrationEnabled)
 	updates[SettingKeyEmailVerifyEnabled] = strconv.FormatBool(settings.EmailVerifyEnabled)
 	registrationEmailSuffixWhitelistJSON, err := json.Marshal(settings.RegistrationEmailSuffixWhitelist)
@@ -173,11 +225,12 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyPromoCodeEnabled] = strconv.FormatBool(settings.PromoCodeEnabled)
 	updates[SettingKeyPasswordResetEnabled] = strconv.FormatBool(settings.PasswordResetEnabled)
 	updates[SettingKeyFrontendURL] = settings.FrontendURL
-	updates[SettingKeyInvitationCodeEnabled] = strconv.FormatBool(settings.InvitationCodeEnabled)
 	updates[SettingKeyTotpEnabled] = strconv.FormatBool(settings.TotpEnabled)
 	updates[SettingKeyPasskeyEnabled] = strconv.FormatBool(settings.PasskeyEnabled)
 	updates[SettingKeySessionBindingEnabled] = strconv.FormatBool(settings.SessionBindingEnabled)
 	updates[SettingKeyStepUpEnabled] = strconv.FormatBool(settings.StepUpEnabled)
+	updates["vendor_console_enabled"] = strconv.FormatBool(settings.VendorConsoleEnabled)
+	updates["vendor_portal_origin"] = strings.TrimSuffix(strings.TrimSpace(settings.VendorPortalOrigin), "/")
 	updates[SettingKeyAuditLogRetentionDays] = strconv.Itoa(settings.AuditLogRetentionDays)
 	settings.LoginAgreementMode = normalizeLoginAgreementMode(settings.LoginAgreementMode)
 	settings.LoginAgreementUpdatedAt = strings.TrimSpace(settings.LoginAgreementUpdatedAt)
@@ -344,7 +397,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyDocURL] = settings.DocURL
 	updates[SettingKeyHomeContent] = settings.HomeContent
 	updates[SettingKeyCompactHomeEnabled] = strconv.FormatBool(settings.CompactHomeEnabled)
-	updates[SettingKeyHideCcsImportButton] = strconv.FormatBool(settings.HideCcsImportButton)
 	updates[SettingKeyPurchaseSubscriptionEnabled] = strconv.FormatBool(settings.PurchaseSubscriptionEnabled)
 	updates[SettingKeyPurchaseSubscriptionURL] = strings.TrimSpace(settings.PurchaseSubscriptionURL)
 	tableDefaultPageSize, tablePageSizeOptions := normalizeTablePreferences(
@@ -363,27 +415,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// 默认配置
 	updates[SettingKeyDefaultConcurrency] = strconv.Itoa(settings.DefaultConcurrency)
 	updates[SettingKeyDefaultBalance] = strconv.FormatFloat(settings.DefaultBalance, 'f', 8, 64)
-	settings.AffiliateRebateRate = clampAffiliateRebateRate(settings.AffiliateRebateRate)
-	updates[SettingKeyAffiliateRebateRate] = strconv.FormatFloat(settings.AffiliateRebateRate, 'f', 8, 64)
-	if settings.AffiliateRebateFreezeHours < 0 {
-		settings.AffiliateRebateFreezeHours = AffiliateRebateFreezeHoursDefault
-	}
-	if settings.AffiliateRebateFreezeHours > AffiliateRebateFreezeHoursMax {
-		settings.AffiliateRebateFreezeHours = AffiliateRebateFreezeHoursMax
-	}
-	updates[SettingKeyAffiliateRebateFreezeHours] = strconv.Itoa(settings.AffiliateRebateFreezeHours)
-	if settings.AffiliateRebateDurationDays < 0 {
-		settings.AffiliateRebateDurationDays = AffiliateRebateDurationDaysDefault
-	}
-	if settings.AffiliateRebateDurationDays > AffiliateRebateDurationDaysMax {
-		settings.AffiliateRebateDurationDays = AffiliateRebateDurationDaysMax
-	}
-	updates[SettingKeyAffiliateRebateDurationDays] = strconv.Itoa(settings.AffiliateRebateDurationDays)
-	if settings.AffiliateRebatePerInviteeCap < 0 {
-		settings.AffiliateRebatePerInviteeCap = AffiliateRebatePerInviteeCapDefault
-	}
-	updates[SettingKeyAffiliateRebatePerInviteeCap] = strconv.FormatFloat(settings.AffiliateRebatePerInviteeCap, 'f', 8, 64)
-	updates[SettingKeyAffiliateAdminRechargeEnabled] = strconv.FormatBool(settings.AdminRechargeRebateEnabled)
+
 	updates[SettingKeyDefaultUserRPMLimit] = strconv.Itoa(settings.DefaultUserRPMLimit)
 	defaultSubsJSON, err := json.Marshal(settings.DefaultSubscriptions)
 	if err != nil {
@@ -440,9 +472,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyModelPlazaRequireAuth] = strconv.FormatBool(settings.ModelPlazaRequireAuth)
 	updates[SettingKeyModelPlazaDescription] = settings.ModelPlazaDescription
 	updates[SettingKeyPluginManagementEnabled] = strconv.FormatBool(settings.PluginManagementEnabled)
-
-	// Affiliate (邀请返利) feature switch
-	updates[SettingKeyAffiliateEnabled] = strconv.FormatBool(settings.AffiliateEnabled)
 
 	// 风控中心功能开关
 	updates[SettingKeyRiskControlEnabled] = strconv.FormatBool(settings.RiskControlEnabled)
@@ -511,20 +540,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if rate := settings.OpenAIOAuthSchedulingRateMultiplier; rate != nil {
 		updates[SettingKeyOpenAIOAuthSchedulingRateMultiplier] = strconv.FormatFloat(*rate, 'f', -1, 64)
 	}
-	updates[openAIAdvancedSchedulerSettingKey] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerEnabled)
-	updates[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerStickyWeightedEnabled)
 	updates[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled)
-	updates[SettingKeyOpenAIAdvancedSchedulerLBTopK] = settings.OpenAIAdvancedSchedulerLBTopK
-	updates[SettingKeyOpenAIAdvancedSchedulerWeightPriority] = settings.OpenAIAdvancedSchedulerWeightPriority
-	updates[SettingKeyOpenAIAdvancedSchedulerWeightLoad] = settings.OpenAIAdvancedSchedulerWeightLoad
-	updates[SettingKeyOpenAIAdvancedSchedulerWeightQueue] = settings.OpenAIAdvancedSchedulerWeightQueue
-	updates[SettingKeyOpenAIAdvancedSchedulerWeightErrorRate] = settings.OpenAIAdvancedSchedulerWeightErrorRate
-	updates[SettingKeyOpenAIAdvancedSchedulerWeightTTFT] = settings.OpenAIAdvancedSchedulerWeightTTFT
-	updates[SettingKeyOpenAIAdvancedSchedulerWeightReset] = settings.OpenAIAdvancedSchedulerWeightReset
-	updates[SettingKeyOpenAIAdvancedSchedulerWeightQuotaHeadroom] = settings.OpenAIAdvancedSchedulerWeightQuotaHeadroom
-	updates[SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost] = settings.OpenAIAdvancedSchedulerWeightUpstreamCost
-	updates[SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse] = settings.OpenAIAdvancedSchedulerWeightPreviousResponse
-	updates[SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky] = settings.OpenAIAdvancedSchedulerWeightSessionSticky
 
 	// 余额、订阅到期与账号限额通知
 	updates[SettingKeyBalanceLowNotifyEnabled] = strconv.FormatBool(settings.BalanceLowNotifyEnabled)
@@ -558,15 +574,32 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	}
 
 	updates[SettingKeyAllowUserViewErrorRequests] = strconv.FormatBool(settings.AllowUserViewErrorRequests)
+	updates[SettingKeyExcelBPSEnabled] = strconv.FormatBool(settings.ExcelBPSEnabled)
+	updates[SettingKeyExcelBPSImageMode] = imageRelay.Mode
+	updates[SettingKeyExcelBPSImageRelayEnabled] = strconv.FormatBool(imageRelay.Enabled)
+	updates[SettingKeyExcelBPSImageBaseURL] = imageRelay.BaseURL
+	updates[SettingKeyExcelBPSImageBodyLimitMiB] = strconv.Itoa(settings.ExcelBPSImageBodyLimitMiB)
+	updates[SettingKeyExcelBPSImageBudgetMiB] = strconv.Itoa(settings.ExcelBPSImageBudgetMiB)
+	updates[SettingKeyExcelBPSImageMaxRequests] = strconv.Itoa(settings.ExcelBPSImageMaxRequests)
+	updates[SettingKeyExcelBPSImageMaxImageMiB] = strconv.Itoa(settings.ExcelBPSImageMaxImageMiB)
+	updates[SettingKeyExcelBPSImageLimitPolicy] = settings.ExcelBPSImageLimitPolicy
+	updates[SettingKeyExcelBPSImageWarningRemaining] = strconv.Itoa(settings.ExcelBPSImageWarningRemaining)
+	updates[SettingKeyExcelBPSImageCompactReserve] = strconv.Itoa(settings.ExcelBPSImageCompactReserve)
+	updates[SettingKeyExcelBPSImageMaxImages] = strconv.Itoa(settings.ExcelBPSImageMaxImages)
+	updates[SettingKeyExcelBPSImageMaxTotalMiB] = strconv.Itoa(settings.ExcelBPSImageMaxTotalMiB)
+	updates[SettingKeyExcelBPSImageStorageMiB] = strconv.Itoa(settings.ExcelBPSImageStorageMiB)
+	updates[SettingKeyExcelBPSImageStorageEntries] = strconv.Itoa(settings.ExcelBPSImageStorageEntries)
+	updates[SettingKeyExcelBPSImageTTLMinutes] = strconv.Itoa(settings.ExcelBPSImageTTLMinutes)
 
 	return updates, nil
 }
 
 func defaultAccountSchedulingThresholds() map[string]int {
 	return map[string]int{
-		PlatformOpenAI:    100,
-		PlatformAnthropic: 100,
-		PlatformGrok:      100,
+		PlatformOpenAI:                         100,
+		PlatformAnthropic:                      100,
+		SchedulingThresholdScopeAnthropicFable: 100,
+		PlatformGrok:                           100,
 	}
 }
 
@@ -574,7 +607,7 @@ func validateAndNormalizeAccountSchedulingThresholds(input map[string]int) (map[
 	normalized := defaultAccountSchedulingThresholds()
 	for platform, value := range input {
 		allowed := false
-		for _, item := range AllowedSchedulingThresholdPlatforms {
+		for _, item := range AllowedSchedulingThresholdScopes {
 			if item == platform {
 				allowed = true
 				break
@@ -601,7 +634,7 @@ func parseAccountSchedulingThresholdsSetting(raw string) (map[string]int, error)
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return thresholds, err
 	}
-	for _, platform := range AllowedSchedulingThresholdPlatforms {
+	for _, platform := range AllowedSchedulingThresholdScopes {
 		if value, ok := parsed[platform]; ok {
 			thresholds[platform] = boundedIntOrDefault(value, 1, 100, 100)
 		}
@@ -755,33 +788,20 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
 		lowUpstreamRatePriorityEnabled: settings.OpenAILowUpstreamRatePriorityEnabled,
 		oauthSchedulingRateMultiplier:  settings.OpenAIOAuthSchedulingRateMultiplier,
-		enabled:                        settings.OpenAIAdvancedSchedulerEnabled,
-		stickyWeightedEnabled:          settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		subscriptionPriorityEnabled:    settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
-		lbTopKOverride:                 parsePositiveIntOverride(settings.OpenAIAdvancedSchedulerLBTopK),
-		weightOverrides: parseOpenAIAdvancedSchedulerWeightOverrides(map[string]string{
-			SettingKeyOpenAIAdvancedSchedulerWeightPriority:         settings.OpenAIAdvancedSchedulerWeightPriority,
-			SettingKeyOpenAIAdvancedSchedulerWeightLoad:             settings.OpenAIAdvancedSchedulerWeightLoad,
-			SettingKeyOpenAIAdvancedSchedulerWeightQueue:            settings.OpenAIAdvancedSchedulerWeightQueue,
-			SettingKeyOpenAIAdvancedSchedulerWeightErrorRate:        settings.OpenAIAdvancedSchedulerWeightErrorRate,
-			SettingKeyOpenAIAdvancedSchedulerWeightTTFT:             settings.OpenAIAdvancedSchedulerWeightTTFT,
-			SettingKeyOpenAIAdvancedSchedulerWeightReset:            settings.OpenAIAdvancedSchedulerWeightReset,
-			SettingKeyOpenAIAdvancedSchedulerWeightQuotaHeadroom:    settings.OpenAIAdvancedSchedulerWeightQuotaHeadroom,
-			SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost:     settings.OpenAIAdvancedSchedulerWeightUpstreamCost,
-			SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse: settings.OpenAIAdvancedSchedulerWeightPreviousResponse,
-			SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky:    settings.OpenAIAdvancedSchedulerWeightSessionSticky,
-		}),
+
 		expiresAt: time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
 	})
 	// Invalidate the quota auto-pause cache and let the next read trigger a fresh load.
 	// We can't know from here whether ops_advanced_settings was also touched, so be
 	// defensive: store an expired entry — GetOpenAIQuotaAutoPauseSettings will serve
 	// stale and kick off an async refresh, never blocking the request that follows.
-	s.openAIQuotaAutoPauseSettingsSF.Forget(openAIQuotaAutoPauseSettingsRefreshKey)
-	if cached, _ := s.openAIQuotaAutoPauseSettingsCache.Load().(*cachedOpenAIQuotaAutoPauseSettings); cached != nil {
-		s.openAIQuotaAutoPauseSettingsCache.Store(&cachedOpenAIQuotaAutoPauseSettings{
-			settings:  cached.settings,
-			expiresAt: 0,
+	s.schedulingQuotaSettingsSF.Forget(openAIQuotaAutoPauseSettingsRefreshKey)
+	if cached, _ := s.schedulingQuotaSettingsCache.Load().(*cachedSchedulingQuotaSettings); cached != nil {
+		s.schedulingQuotaSettingsCache.CompareAndSwap(cached, &cachedSchedulingQuotaSettings{
+			settings:   cached.settings,
+			protection: cached.protection,
+			expiresAt:  0,
 		})
 	}
 	accountSchedulingThresholdsSF.Forget(SettingKeyAccountSchedulingThresholds)
@@ -792,6 +812,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		}
 		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
 			thresholds: cloneAccountSchedulingThresholds(normalizedThresholds),
+			resolved:   true,
 			expiresAt:  time.Now().Add(accountSchedulingThresholdsCacheTTL).UnixNano(),
 		})
 	} else {
@@ -857,3 +878,93 @@ func (s *SettingService) validateDefaultSubscriptionGroups(ctx context.Context, 
 
 	return nil
 }
+
+// The native setting transaction remains the only setting persistence path.
+func (s *SettingService) validateVendorSettingsWrite(ctx context.Context, updates map[string]string) error {
+	actor, ok := authz.FromContext(ctx)
+	if ok && actor.Role != authz.SuperAdmin {
+		old, err := s.settingRepo.GetMultiple(ctx, []string{"vendor_console_enabled", "vendor_portal_origin"})
+		if err != nil {
+			return err
+		}
+		for _, key := range []string{"vendor_console_enabled", "vendor_portal_origin"} {
+			if value, exists := updates[key]; exists {
+				before := old[key]
+				if key == "vendor_console_enabled" && before == "" {
+					before = "false"
+				}
+				if value != before {
+					return authz.ErrPermissionDenied
+				}
+				delete(updates, key)
+			}
+		}
+	}
+	if value, ok := updates["vendor_portal_origin"]; ok && !ValidateVendorOrigin(value) {
+		return ErrVendorInput
+	}
+	_, originChanged := updates["vendor_portal_origin"]
+	_, enabledChanged := updates["vendor_console_enabled"]
+	_, frontendChanged := updates[SettingKeyFrontendURL]
+	if originChanged || enabledChanged || frontendChanged {
+		keys := []string{"vendor_portal_origin", "vendor_console_enabled", SettingKeyFrontendURL}
+		values := make(map[string]string, len(keys))
+		missing := []string{}
+		for _, key := range keys {
+			if value, exists := updates[key]; exists {
+				values[key] = value
+			} else {
+				missing = append(missing, key)
+			}
+		}
+		if len(missing) > 0 {
+			stored, err := s.settingRepo.GetMultiple(ctx, missing)
+			if err != nil {
+				return err
+			}
+			for key, value := range stored {
+				values[key] = value
+			}
+		}
+		origin := values["vendor_portal_origin"]
+		if values["vendor_console_enabled"] == "true" && origin == "" {
+			return ErrVendorInput
+		}
+		frontend := values[SettingKeyFrontendURL]
+		if frontend == "" && s.cfg != nil {
+			frontend = s.cfg.Server.FrontendURL
+		}
+		if origin != "" && sameVendorOrigin(origin, frontend) {
+			return ErrVendorInput
+		}
+	}
+	return nil
+}
+
+func sameVendorOrigin(a, b string) bool {
+	origin := func(raw string) string {
+		u, err := url.Parse(raw)
+		if err != nil || u.Hostname() == "" {
+			return ""
+		}
+		port := u.Port()
+		if port == "" {
+			if u.Scheme == "https" {
+				port = "443"
+			} else if u.Scheme == "http" {
+				port = "80"
+			}
+		}
+		return strings.ToLower(u.Scheme + "://" + strings.TrimSuffix(u.Hostname(), ".") + ":" + port)
+	}
+	left, right := origin(a), origin(b)
+	return left != "" && left == right
+}
+
+// SettingsRevision 只标识读取时的设置内容，不保存第二份配置或将秘密值暴露给客户端。
+func SettingsRevision(values map[string]string) string {
+	encoded, _ := json.Marshal(values)
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
+}
+
+var ErrSettingsRevisionConflict = infraerrors.Conflict("SETTINGS_REVISION_CONFLICT", "Settings changed; reload before saving")

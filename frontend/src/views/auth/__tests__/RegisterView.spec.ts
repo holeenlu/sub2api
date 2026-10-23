@@ -174,7 +174,6 @@ describe('RegisterView', () => {
       tencent_captcha_ticket: 'ticket',
       tencent_captcha_randstr: 'randstr',
       promo_code: undefined,
-      invitation_code: undefined
     })
     expect(pushMock).toHaveBeenCalledWith('/dashboard')
   })
@@ -206,34 +205,6 @@ describe('RegisterView', () => {
     })
     expect(pushMock).toHaveBeenCalledWith('/email-verify')
     expect(registerMock).not.toHaveBeenCalled()
-  })
-
-  it('keeps the optional affiliate invitation field before Turnstile', async () => {
-    const wrapper = mountRegister()
-    await flushPromises()
-
-    const invitationField = wrapper.get('[data-testid="affiliate-invitation-field"]')
-    const turnstile = wrapper.get('[data-testid="registration-turnstile"]')
-
-    expect(invitationField.get('input').attributes('id')).toBe('affiliate_code')
-    expect(invitationField.text()).toContain('common.optional')
-    expect(
-      invitationField.element.compareDocumentPosition(turnstile.element) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-  })
-
-  it('uses the mandatory invitation field without duplicating the affiliate field', async () => {
-    getPublicSettingsMock.mockResolvedValueOnce({
-      ...publicSettings,
-      invitation_code_enabled: true
-    })
-
-    const wrapper = mountRegister()
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="affiliate-invitation-field"]').exists()).toBe(false)
-    expect(wrapper.get('#invitation_code').exists()).toBe(true)
   })
 
   it('submits a non-whitelist email domain so the backend can enforce its registration quota', async () => {

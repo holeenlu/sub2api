@@ -27,6 +27,7 @@ type StreamingProcessor struct {
 	blockIndex        int
 	messageStartSent  bool
 	messageStopSent   bool
+	finishReason      string
 	usedTool          bool
 	pendingSignature  string
 	trailingSignature string
@@ -98,6 +99,14 @@ func (p *StreamingProcessor) ProcessLine(line string) []byte {
 		v1Resp.ModelVersion = directResp.ModelVersion
 	}
 
+	// A valid direct Gemini object also unmarshals into the wrapper as zero values.
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal([]byte(data), &envelope) == nil && envelope["response"] == nil {
+		if json.Unmarshal([]byte(data), &v1Resp.Response) != nil {
+			return nil
+		}
+		v1Resp.ResponseID = v1Resp.Response.ResponseID
+	}
 	geminiResp := &v1Resp.Response
 
 	var result bytes.Buffer
@@ -130,6 +139,10 @@ func (p *StreamingProcessor) ProcessLine(line string) []byte {
 		p.captureGrounding(geminiResp.Candidates[0].GroundingMetadata)
 	}
 
+	if feedback := geminiResp.PromptFeedback; feedback != nil && feedback.BlockReason != "" && feedback.BlockReason != "BLOCK_REASON_UNSPECIFIED" {
+		p.finishReason = "SAFETY"
+	}
+
 	// 检查是否结束
 	if len(geminiResp.Candidates) > 0 {
 		finishReason := geminiResp.Candidates[0].FinishReason
@@ -142,7 +155,7 @@ func (p *StreamingProcessor) ProcessLine(line string) []byte {
 			}
 		}
 		if finishReason != "" {
-			_, _ = result.Write(p.emitFinish(finishReason))
+			p.finishReason = finishReason
 		}
 	}
 
@@ -166,7 +179,9 @@ func (p *StreamingProcessor) Finish() ([]byte, *ClaudeUsage) {
 
 	var result bytes.Buffer
 	if !p.messageStopSent {
-		_, _ = result.Write(p.emitFinish(""))
+		// Only the caller's validated stream completion may emit success.
+		// A later explicit error must not follow a fabricated message_stop.
+		_, _ = result.Write(p.emitFinish(p.finishReason))
 	}
 
 	return result.Bytes(), usage
@@ -179,7 +194,7 @@ func (p *StreamingProcessor) MessageStartSent() bool {
 
 // HasContent reports whether any substantive text, thinking, or tool calls were emitted.
 func (p *StreamingProcessor) HasContent() bool {
-	return p.hasContent
+	return p.hasContent || p.finishReason != ""
 }
 
 // emitMessageStart 发送 message_start 事件
@@ -528,6 +543,8 @@ func (p *StreamingProcessor) emitFinish(finishReason string) []byte {
 		stopReason = "tool_use"
 	} else if finishReason == "MAX_TOKENS" {
 		stopReason = "max_tokens"
+	} else if finishReason == "SAFETY" {
+		stopReason = "refusal"
 	}
 
 	usage := ClaudeUsage{

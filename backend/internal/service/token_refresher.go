@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"hash/fnv"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -112,12 +114,29 @@ func (r *OpenAITokenRefresher) NeedsRefresh(account *Account, refreshWindow time
 		return account.IsRateLimited()
 	}
 
-	return time.Until(*expiresAt) < refreshWindow
+	return time.Until(*expiresAt) < openAIRefreshWindow(account.ID, refreshWindow)
+}
+
+// 同批导入账号按稳定身份错开首次刷新，重启和多实例使用同一提前量。
+// 只向前错峰且最多增加五分钟，不改变强制刷新、失败退避或刷新锁。
+func openAIRefreshWindow(accountID int64, base time.Duration) time.Duration {
+	if accountID <= 0 || base <= 0 {
+		return base
+	}
+	spread := min(base, 5*time.Minute)
+	hash := fnv.New64a()
+	_, _ = hash.Write([]byte("openai-refresh:" + strconv.FormatInt(accountID, 10)))
+	return base + time.Duration(hash.Sum64()%uint64(spread))
 }
 
 // Refresh 执行token刷新
 // 保留原有credentials中的所有字段，只更新token相关字段
 func (r *OpenAITokenRefresher) Refresh(ctx context.Context, account *Account) (map[string]any, error) {
+	// This check runs after provider rate admission, immediately before the
+	// actual exchange, including callers outside the background refresh API.
+	if err := validateVendorOAuthRefresh(ctx, r.accountRepo, account); err != nil {
+		return nil, err
+	}
 	tokenInfo, err := r.openaiOAuthService.RefreshAccountToken(ctx, account)
 	if err != nil {
 		return nil, err

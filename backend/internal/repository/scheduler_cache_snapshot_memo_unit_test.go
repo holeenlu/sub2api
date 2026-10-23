@@ -179,6 +179,14 @@ func memoRead(t *testing.T, cache *schedulerCache, bucket service.SchedulerBucke
 	return accounts
 }
 
+func memoExpectedControlReads(bucket service.SchedulerBucket, lastUsed string) []string {
+	commands := make([]string, 0, len(schedulerSnapshotTagKeys(bucket))+1)
+	for _, key := range schedulerSnapshotTagKeys(bucket) {
+		commands = append(commands, "get "+key)
+	}
+	return append(commands, "mget "+schedulerLastUsedKey(lastUsed))
+}
+
 func memoRequireMiss(t *testing.T, cache *schedulerCache, bucket service.SchedulerBucket) {
 	t.Helper()
 	accounts, hit, err := cache.GetSnapshot(context.Background(), bucket)
@@ -231,10 +239,7 @@ func TestSchedulerCacheSnapshotMemoSecondReadOnlyFetchesTagsAndLastUsed(t *testi
 
 	recorder.reset()
 	second := memoRead(t, cache, bucket)
-	require.Equal(t, []string{
-		"mget " + schedulerBucketKey(schedulerReadyPrefix, bucket),
-		"mget " + schedulerLastUsedKey("1"),
-	}, recorder.recorded())
+	require.Equal(t, memoExpectedControlReads(bucket, "1"), recorder.recorded())
 
 	require.Equal(t, []int64{1, 2, 3}, memoIDs(second))
 	require.Equal(t, first, second)
@@ -670,10 +675,7 @@ func TestSchedulerCacheSnapshotMemoPlatformRevisionScopesInvalidation(t *testing
 	require.NoError(t, cache.SetAccount(ctx, &anthropic))
 	recorder.reset()
 	memoRead(t, cache, geminiSingle)
-	require.Equal(t, []string{
-		"mget " + schedulerBucketKey(schedulerReadyPrefix, geminiSingle),
-		"mget " + schedulerLastUsedKey("211"),
-	}, recorder.recorded(), "an Anthropic account write must not invalidate a Gemini bucket")
+	require.Equal(t, memoExpectedControlReads(geminiSingle, "211"), recorder.recorded(), "an Anthropic account write must not invalidate a Gemini bucket")
 
 	gemini.Name = "gemini-renamed"
 	require.NoError(t, cache.SetAccount(ctx, &gemini))

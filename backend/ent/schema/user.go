@@ -43,6 +43,8 @@ func (User) Fields() []ent.Field {
 		field.String("password_hash").
 			MaxLen(255).
 			NotEmpty(),
+		field.Int64("session_generation").Default(0),
+		field.Int64("created_by").Optional().Nillable().Immutable(),
 		field.String("role").
 			MaxLen(20).
 			Default(domain.RoleUser),
