@@ -2,7 +2,7 @@
 
 ## Overview
 
-This directory contains the Vue Router configuration for the Sub2API frontend application. The router implements a comprehensive navigation system with authentication guards, role-based access control, and lazy loading.
+This directory contains the Vue Router configuration for the TapModels frontend application. The router implements a comprehensive navigation system with authentication guards, role-based access control, and lazy loading.
 
 ## Files
 
@@ -26,7 +26,6 @@ This directory contains the Vue Router configuration for the Sub2API frontend ap
 | `/dashboard` | DashboardView | User dashboard with stats    |
 | `/keys`      | KeysView      | API key management           |
 | `/usage`     | UsageView     | Usage records and statistics |
-| `/redeem`    | RedeemView    | Redeem code interface        |
 | `/profile`   | ProfileView   | User profile settings        |
 
 ### Admin Routes (Admin Role Required)
@@ -39,7 +38,6 @@ This directory contains the Vue Router configuration for the Sub2API frontend ap
 | `/admin/groups`    | AdminGroupsView    | Group management                |
 | `/admin/accounts`  | AdminAccountsView  | Account management              |
 | `/admin/proxies`   | AdminProxiesView   | Proxy management                |
-| `/admin/redeem`    | AdminRedeemView    | Redeem code management          |
 
 ### Special Routes
 
