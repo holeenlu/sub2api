@@ -19,6 +19,7 @@ type AdminService interface {
 	CreateUser(ctx context.Context, input *CreateUserInput) (*User, error)
 	UpdateUser(ctx context.Context, id int64, input *UpdateUserInput) (*User, error)
 	DeleteUser(ctx context.Context, id int64) error
+	DeleteUsers(ctx context.Context, ids []int64) error
 	UpdateUserBalance(ctx context.Context, userID int64, balance float64, operation string, notes string) (*User, error)
 	BatchUpdateConcurrency(ctx context.Context, userIDs []int64, value int, mode string) (int, error)
 	BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error)
@@ -93,7 +94,6 @@ type AdminService interface {
 	// 用于刷新流程持久化 account_uuid / org_uuid 等少量键，避免被全量快照覆盖。
 	UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error
 	DeleteAccount(ctx context.Context, id int64) error
-	RefreshAccountCredentials(ctx context.Context, id int64) (*Account, error)
 	ClearAccountError(ctx context.Context, id int64) (*Account, error)
 	SetAccountError(ctx context.Context, id int64, errorMsg string) error
 	// EnsureOpenAIPrivacy 检查 OpenAI OAuth 账号 privacy_mode，未设置则尝试关闭训练数据共享并持久化。
@@ -175,6 +175,7 @@ type CreateUserInput struct {
 }
 
 type UpdateUserInput struct {
+	ResetTOTP     bool
 	Email         string
 	Password      string
 	Username      *string
@@ -396,6 +397,7 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
+	ImportOptions      *AccountImportOptions
 	Name               string
 	Notes              *string
 	Platform           string
@@ -428,6 +430,8 @@ type ShadowOptions struct {
 }
 
 type UpdateAccountInput struct {
+	ParameterPatch        bool
+	Schedulable           *bool
 	Name                  string
 	Notes                 *string
 	Type                  string // Account type: oauth, setup-token, apikey
@@ -449,20 +453,26 @@ type UpdateAccountInput struct {
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
-	AccountIDs     []int64
-	Filters        *BulkUpdateAccountFilters
-	Name           string
-	ProxyID        *int64
-	Concurrency    *int
-	Priority       *int
-	RateMultiplier *float64 // 账号计费倍率（>=0，允许 0）
-	LoadFactor     *int
-	Status         string
-	Schedulable    *bool
-	GroupIDs       *[]int64
-	Credentials    map[string]any
-	Extra          map[string]any
-	ProbeEnabled   *bool
+	Notes                      *string
+	Type                       string
+	ExpiresAt                  *int64
+	AutoPauseOnExpired         *bool
+	RateSyncEnabled            *bool
+	UseSingleAccountValidation bool
+	AccountIDs                 []int64
+	Filters                    *BulkUpdateAccountFilters
+	Name                       string
+	ProxyID                    *int64
+	Concurrency                *int
+	Priority                   *int
+	RateMultiplier             *float64 // 账号计费倍率（>=0，允许 0）
+	LoadFactor                 *int
+	Status                     string
+	Schedulable                *bool
+	GroupIDs                   *[]int64
+	Credentials                map[string]any
+	Extra                      map[string]any
+	ProbeEnabled               *bool
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool
@@ -685,6 +695,7 @@ var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_ST
 
 // adminServiceImpl implements AdminService
 type adminServiceImpl struct {
+	emailQueue           *EmailQueueService
 	cfg                  *config.Config
 	userRepo             UserRepository
 	groupRepo            GroupRepository
@@ -754,8 +765,10 @@ func NewAdminService(
 	compositeRouteRepo CompositeModelRouteRepository,
 	compositeResolver *CompositeRouteResolver,
 	channelCacheInvalidator ChannelCacheInvalidator,
+	emailQueue *EmailQueueService,
 ) AdminService {
 	return &adminServiceImpl{
+		emailQueue:           emailQueue,
 		cfg:                  cfg,
 		userRepo:             userRepo,
 		groupRepo:            groupRepo,
