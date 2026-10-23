@@ -7,7 +7,29 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/stretchr/testify/require"
 )
+
+func TestAccountTelemetrySendingSettingDefaultsAndPersistence(t *testing.T) {
+	repo := newRuntimeSettingRepoStub()
+	// A retired collection choice must not opt an installation into sending.
+	repo.values[SettingKeyOpsAdvancedSettings] = `{"client_telemetry_mode":"enabled"}`
+	svc := &OpsService{settingRepo: repo}
+	svc.initRuntimeSettings(t.Context())
+	require.False(t, svc.OpsAdvancedSettingsSnapshot().AccountTelemetrySendingEnabled)
+	for _, enabled := range []bool{true, false} {
+		settings := svc.OpsAdvancedSettingsSnapshot()
+		settings.AccountTelemetrySendingEnabled = enabled
+		updated, err := svc.UpdateOpsAdvancedSettings(t.Context(), &settings)
+		require.NoError(t, err)
+		require.Equal(t, enabled, updated.AccountTelemetrySendingEnabled)
+		require.Equal(t, enabled, svc.OpsAdvancedSettingsSnapshot().AccountTelemetrySendingEnabled)
+		// Restart and another instance read the same persisted setting.
+		reloaded := &OpsService{settingRepo: repo}
+		reloaded.initRuntimeSettings(t.Context())
+		require.Equal(t, enabled, reloaded.OpsAdvancedSettingsSnapshot().AccountTelemetrySendingEnabled)
+	}
+}
 
 func TestGetOpsAdvancedSettings_DefaultSnapshotHidesOpenAITokenStats(t *testing.T) {
 	repo := newRuntimeSettingRepoStub()
@@ -168,16 +190,56 @@ func TestGetOpenAIQuotaAutoPauseSettings_ColdCacheNonBlocking(t *testing.T) {
 
 // Explicit cache write (e.g. from UpdateOpsAdvancedSettings) must be visible on the
 // very next read without any DB roundtrip.
-func TestSetOpenAIQuotaAutoPauseSettings_VisibleImmediately(t *testing.T) {
+func TestSetQuotaSchedulingSettings_VisibleImmediately(t *testing.T) {
 	svc := NewSettingService(newRuntimeSettingRepoStub(), &config.Config{})
 
-	svc.SetOpenAIQuotaAutoPauseSettings(OpsOpenAIAccountQuotaAutoPauseSettings{
+	svc.SetQuotaSchedulingSettings(OpsOpenAIAccountQuotaAutoPauseSettings{
 		DefaultThreshold5h: 0.88,
 		DefaultThreshold7d: 0.77,
-	})
+	}, defaultSchedulingQuotaProtection())
 
 	got := svc.GetOpenAIQuotaAutoPauseSettings(context.Background())
 	if got.DefaultThreshold5h != 0.88 || got.DefaultThreshold7d != 0.77 {
 		t.Fatalf("after Set, Get = %+v, want {0.88, 0.77}", got)
 	}
+}
+
+func TestSchedulingQuotaProtectionPersistenceAndDelayedRefresh(t *testing.T) {
+	repo := newRuntimeSettingRepoStub()
+	settings := NewSettingService(repo, &config.Config{})
+	ops := &OpsService{settingRepo: repo}
+	ops.SetQuotaSchedulingSettingsSink(settings.SetQuotaSchedulingSettings)
+	cfg := defaultOpsAdvancedSettings()
+	cfg.QuotaProtection.AnthropicTierThresholdsEnabled = true
+	cfg.QuotaProtection.CriticalBandPercent = 7.5
+	cfg.QuotaProtection.LargeColdInputTokens = 120000
+	cfg.OpenAIAccountQuotaAutoPause.DefaultThreshold5h = .85
+	_, err := ops.UpdateOpsAdvancedSettings(t.Context(), cfg)
+	require.NoError(t, err)
+	require.Equal(t, cfg.QuotaProtection, settings.GetSchedulingQuotaProtection(t.Context()))
+	restarted := NewSettingService(repo, &config.Config{})
+	restarted.WarmOpenAIQuotaAutoPauseSettings(t.Context())
+	require.Equal(t, cfg.QuotaProtection, restarted.GetSchedulingQuotaProtection(t.Context()))
+	reads := repo.getValueCalls
+	for range 100 {
+		require.Equal(t, 7.5, settings.GetSchedulingQuotaProtection(t.Context()).CriticalBandPercent)
+	}
+	require.Equal(t, reads, repo.getValueCalls, "the scheduler must not query the DB per request")
+	cfg.QuotaProtection.SampleMaxAgeSeconds = 0
+	_, err = ops.UpdateOpsAdvancedSettings(t.Context(), cfg)
+	require.Error(t, err)
+	require.Equal(t, 300, settings.GetSchedulingQuotaProtection(t.Context()).SampleMaxAgeSeconds)
+	// An old DB read can complete after an administrator saves a new value.
+	started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	oldRaw := repo.values[SettingKeyOpsAdvancedSettings]
+	repo.getValueFn = func(string) (string, error) { close(started); <-release; return oldRaw, nil }
+	go func() { settings.refreshSchedulingQuotaSettings(t.Context()); close(done) }()
+	<-started
+	next := defaultSchedulingQuotaProtection()
+	next.CriticalBandPercent = 2
+	settings.SetQuotaSchedulingSettings(OpsOpenAIAccountQuotaAutoPauseSettings{DefaultThreshold5h: .9}, next)
+	close(release)
+	<-done
+	require.Equal(t, next, settings.GetSchedulingQuotaProtection(t.Context()))
+	require.Equal(t, .9, settings.GetOpenAIQuotaAutoPauseSettings(t.Context()).DefaultThreshold5h)
 }

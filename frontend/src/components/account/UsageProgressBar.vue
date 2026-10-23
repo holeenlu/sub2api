@@ -23,12 +23,17 @@
           U ${{ formatUserCost }}
         </span>
         <span
-          v-if="estimatedTotalCost != null"
-          data-test="estimated-total-cost"
+          v-if="capacityForecast"
+          data-test="capacity-forecast"
           class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
-          :title="t('admin.accounts.usageWindow.estimatedTotalCostTooltip')"
+          :title="forecastTooltip"
         >
-          {{ t('admin.accounts.usageWindow.estimatedTotalCost', { cost: estimatedTotalCost.toFixed(2) }) }}
+          <template v-if="capacityForecast.status === 'ready'">
+            <span v-if="capacityForecast.estimated_cost != null">{{ t('admin.accounts.usageWindow.estimatedTotalCost', { cost: capacityForecast.estimated_cost.toFixed(2) }) }}</span>
+            <span v-if="capacityForecast.estimated_tokens != null"> · {{ formatCompactNumber(capacityForecast.estimated_tokens) }} tok</span>
+            <span v-if="capacityForecast.low_sample"> · {{ t('admin.accounts.usageWindow.forecastLowSample') }}</span>
+          </template>
+          <template v-else>{{ t('admin.accounts.usageWindow.forecastUnavailable') }}</template>
         </span>
       </div>
     </div>
@@ -65,26 +70,36 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import type { WindowStats } from '@/types'
+import type { WindowStats, QuotaCapacityForecast } from '@/types'
 import { formatCompactNumber } from '@/utils/format'
 
 const props = withDefaults(
   defineProps<{
     label: string
     utilization: number // Percentage (0-100+)
+    utilizationKnown?: boolean
     resetsAt?: string | null
     color: 'indigo' | 'emerald' | 'purple' | 'amber'
     windowStats?: WindowStats | null
-    estimatedTotalCost?: number | null
+    capacityForecast?: QuotaCapacityForecast
     showNowWhenIdle?: boolean
     remainingCapacity?: boolean
     /** fixed: 定宽居中徽章（账号页纵向对齐）；auto: 限宽截断左对齐（监控页组合标签） */
     labelWidth?: 'fixed' | 'auto'
   }>(),
-  { labelWidth: 'fixed' }
+  { labelWidth: 'fixed', utilizationKnown: true }
 )
 
 const { t } = useI18n()
+const forecastTooltip = computed(() => {
+  const forecast = props.capacityForecast
+  if (!forecast || forecast.status !== 'ready') return t('admin.accounts.usageWindow.forecastNeedsEvidence')
+  return t('admin.accounts.usageWindow.estimatedTotalCostTooltip', {
+    percent: forecast.sample_percent.toFixed(1),
+    monthlyCost: forecast.monthly_equivalent_cost?.toFixed(2) ?? '—',
+    monthlyTokens: forecast.monthly_equivalent_tokens != null ? formatCompactNumber(forecast.monthly_equivalent_tokens) : '—'
+  })
+})
 
 // Reactive clock for countdown — only runs when a reset time is shown,
 // to avoid creating many idle timers across large account lists.
@@ -173,11 +188,13 @@ const textClass = computed(() => {
 
 // Bar width (capped at 100%)
 const barWidth = computed(() => {
+  if (!props.utilizationKnown) return '0%'
   return `${Math.min(Math.max(props.utilization, 0), 100)}%`
 })
 
 // Display percentage (cap at 999% for readability)
 const displayPercent = computed(() => {
+  if (!props.utilizationKnown) return '—'
   const percent = Math.round(
     props.remainingCapacity
       ? Math.min(Math.max(props.utilization, 0), 100)
@@ -188,7 +205,7 @@ const displayPercent = computed(() => {
 
 const shouldShowResetTime = computed(() => {
   if (props.resetsAt) return true
-  return Boolean(props.showNowWhenIdle && props.utilization <= 0)
+  return Boolean(props.showNowWhenIdle && props.utilizationKnown && props.utilization <= 0)
 })
 
 // Format reset time

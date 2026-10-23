@@ -188,7 +188,7 @@ func TestSettingHandler_AuthSourcePlatformQuotas_PutGetRoundTrip(t *testing.T) {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	// 验证 DB 中写入了 JSON key

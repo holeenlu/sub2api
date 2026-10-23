@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -361,6 +360,29 @@ func (s *GatewayService) readUpstreamErrorBody(resp *http.Response) ([]byte, err
 	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
 
+// Preparation comments commit HTTP 200 but never turn a failed request into
+// success. Preserve the existing error payload and logical failure status.
+func writeClaudeGatewayError(c *gin.Context, status int, payload any) {
+	if !StopOpenAICompactSSEKeepaliveCommitted(c) {
+		c.JSON(status, payload)
+		return
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	errType := gjson.GetBytes(body, "error.type").String()
+	message := gjson.GetBytes(body, "error.message").String()
+	MarkResponseCommitted(c)
+	MarkOpsStreamError(c, errType, message, status)
+	c.Header("Content-Type", "text/event-stream")
+	if _, err := fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", body); err != nil {
+		_ = c.Error(err)
+	}
+	c.Writer.Flush()
+}
+
 func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, requestedModel ...string) (*ForwardResult, error) {
 	// Upstream returned a non-success HTTP status; count Ollama Cloud / OpenCode Go activity.
 	scheduleOllamaCloudUsageActivity(s.deferredService, account)
@@ -416,6 +438,15 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		Detail:             upstreamDetail,
 	})
 
+	if IsUpstreamContentRefusal(body) {
+		observeUpstreamContentRefusal(ctx, body)
+		MarkResponseCommitted(c)
+		status, errType, errMsg, _ := applyErrorPassthroughRule(c, account.Platform, resp.StatusCode, body,
+			http.StatusBadRequest, "invalid_request_error", "Request blocked by upstream content policy")
+		writeClaudeGatewayError(c, status, gin.H{"type": "error", "error": gin.H{"type": errType, "code": "content_policy_violation", "message": errMsg}})
+		return nil, fmt.Errorf("upstream content policy refusal: %d", resp.StatusCode)
+	}
+
 	// 处理上游错误，标记账号状态
 	shouldDisable := false
 	if s.rateLimitService != nil {
@@ -453,7 +484,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		"upstream_error",
 		"Upstream request failed",
 	); matched {
-		c.JSON(status, gin.H{
+		writeClaudeGatewayError(c, status, gin.H{
 			"type": "error",
 			"error": gin.H{
 				"type":    errType,
@@ -477,7 +508,16 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 
 	switch resp.StatusCode {
 	case 400:
-		c.Data(http.StatusBadRequest, "application/json", body)
+		if StopOpenAICompactSSEKeepaliveCommitted(c) {
+			var payload map[string]any
+			if json.Unmarshal(body, &payload) != nil || payload["error"] == nil {
+				payload = map[string]any{"error": gin.H{"type": "invalid_request_error", "message": upstreamMsg}}
+			}
+			payload["type"] = "error"
+			writeClaudeGatewayError(c, http.StatusBadRequest, payload)
+		} else {
+			c.Data(http.StatusBadRequest, "application/json", body)
+		}
 		summary := upstreamMsg
 		if summary == "" {
 			summary = truncateForLog(body, 512)
@@ -513,7 +553,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 	}
 
 	// 返回自定义错误响应
-	c.JSON(statusCode, gin.H{
+	writeClaudeGatewayError(c, statusCode, gin.H{
 		"type": "error",
 		"error": gin.H{
 			"type":    errType,
@@ -624,7 +664,7 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		"upstream_error",
 		"Upstream request failed after retries",
 	); matched {
-		c.JSON(status, gin.H{
+		writeClaudeGatewayError(c, status, gin.H{
 			"type": "error",
 			"error": gin.H{
 				"type":    errType,
@@ -643,7 +683,7 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 	}
 
 	// 返回统一的重试耗尽错误响应
-	c.JSON(http.StatusBadGateway, gin.H{
+	writeClaudeGatewayError(c, http.StatusBadGateway, gin.H{
 		"type": "error",
 		"error": gin.H{
 			"type":    "upstream_error",
@@ -664,8 +704,8 @@ type streamingResult struct {
 	clientDisconnect bool // 客户端是否在流式传输过程中断开
 }
 
-// hasObservedTokens 报告流式过程中是否已观测到任何上游计量的 token。
-func (u *ClaudeUsage) hasObservedTokens() bool {
+// HasObservedTokens 报告流式过程中是否已观测到任何上游计量的 token。
+func (u *ClaudeUsage) HasObservedTokens() bool {
 	if u == nil {
 		return false
 	}
@@ -683,7 +723,7 @@ func (u *ClaudeUsage) hasObservedTokens() bool {
 // 不变式：UpstreamFailoverError 必须保持 result=nil——failover 重试成功后按成功请求
 // 计费，若同时返回部分 usage 会造成双重计费，此处显式拦截兜底。
 func partialStreamUsageResult(c *gin.Context, resp *http.Response, streamResult *streamingResult, model, upstreamModel string, startTime time.Time, err error) *ForwardResult {
-	if streamResult == nil || !streamResult.usage.hasObservedTokens() {
+	if streamResult == nil || !streamResult.usage.HasObservedTokens() {
 		return nil
 	}
 	var failoverErr *UpstreamFailoverError
@@ -706,7 +746,18 @@ func partialStreamUsageResult(c *gin.Context, resp *http.Response, streamResult 
 	}
 }
 
-func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, mimicClaudeCode bool) (*streamingResult, error) {
+func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, mimicClaudeCode bool) (result *streamingResult, returnErr error) {
+	finishWrites := GuardSSEWrites(c)
+	defer finishWrites()
+	timing := beginAnthropicStreamTiming(c, account, originalModel)
+	defer func() {
+		if result != nil && (result.clientDisconnect || downstreamStreamError(c) != nil) {
+			result.clientDisconnect = true
+			timing.MarkDownstreamFailure()
+		}
+		timing.Finish(returnErr)
+	}()
+	writerSizeBeforeStream := OpenAICompactKeepaliveAdjustedWrittenSize(c)
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -737,46 +788,15 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
-	scanner := bufio.NewScanner(resp.Body)
-	// 设置更大的buffer以处理长行
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		maxLineSize = s.cfg.Gateway.MaxLineSize
 	}
-	scanBuf := getSSEScannerBuf64K()
-	scanner.Buffer(scanBuf[:0], maxLineSize)
-
-	type scanEvent struct {
-		line string
-		err  error
-	}
-	// 独立 goroutine 读取上游，避免读取阻塞导致超时/keepalive无法处理
-	events := make(chan scanEvent, 16)
-	done := make(chan struct{})
-	sendEvent := func(ev scanEvent) bool {
-		select {
-		case events <- ev:
-			return true
-		case <-done:
-			return false
-		}
-	}
-	var lastReadAt int64
-	atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
-	go func(scanBuf *sseScannerBuf64K) {
-		defer putSSEScannerBuf64K(scanBuf)
-		defer close(events)
-		for scanner.Scan() {
-			atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
-			if !sendEvent(scanEvent{line: scanner.Text()}) {
-				return
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			_ = sendEvent(scanEvent{err: err})
-		}
-	}(scanBuf)
-	defer close(done)
+	pump := newSSEReadPump(resp.Body, maxLineSize, nil, false)
+	defer pump.Close()
+	drain := newOpenAIHTTPUsageDrain(ctx, resp.Body.Close, streamWriteContext(c))
+	defer drain.stop()
+	events := pump.events
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
@@ -845,68 +865,71 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			// json.Marshal 不可能在已知 string-only 输入上失败，保守 fallback
 			body = []byte(fmt.Sprintf(`{"type":"error","error":{"type":%q,"message":%q}}`, reason, message))
 		}
-		_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", body)
+		if _, err := fmt.Fprintf(w, "event: error\ndata: %s\n\n", body); err == nil {
+			MarkResponseCommitted(c)
+		}
 		flusher.Flush()
 	}
 
 	needModelReplace := originalModel != mappedModel
 	clientDisconnected := false // 客户端断开标志，断开后继续读取上游以获取完整usage
 	sawTerminalEvent := false
+	var lifecycle anthropicStreamLifecycle
 	useNoopDeltaKeepalive := c != nil && c.Request != nil && shouldUseClaudeCodeNoopDeltaKeepalive(c.GetHeader("User-Agent"))
 	noopDeltaKeepaliveBlockIndex := -1
 	noopDeltaKeepaliveDeltaType := ""
 
-	pendingEventLines := make([]string, 0, 4)
+	pendingEvent := sseEventBuffer{lines: make([]string, 0, 4)}
 
 	processSSEEvent := func(lines []string) ([]string, string, *sseUsagePatch, error) {
 		if len(lines) == 0 {
 			return nil, "", nil, nil
 		}
 
-		eventName := ""
-		dataLine := ""
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "event:") {
-				eventName = strings.TrimSpace(strings.TrimPrefix(trimmed, "event:"))
-				continue
-			}
-			if dataLine == "" && sseDataRe.MatchString(trimmed) {
-				dataLine = sseDataRe.ReplaceAllString(trimmed, "")
-			}
-		}
+		sseEvent := parseSSEEvent(lines)
+		eventName := strings.TrimSpace(sseEvent.eventName)
+		dataLine := strings.TrimSpace(sseEvent.data)
 
 		if eventName == "error" {
-			return nil, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
+			if gjson.Valid(dataLine) && gjson.Parse(dataLine).IsObject() {
+				timing.observeTimingEvent(openAITimingEvent{valid: true, terminal: "error"})
+			}
+			return []string{sseEvent.block("", nil)}, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
 		}
 
-		if dataLine == "" {
-			return []string{strings.Join(lines, "\n") + "\n\n"}, "", nil, nil
+		if !sseEvent.hasData || dataLine == "" {
+			return []string{sseEvent.block(eventName, nil)}, "", nil, nil
 		}
 
 		if dataLine == "[DONE]" {
-			sawTerminalEvent = true
-			block := ""
-			if eventName != "" {
-				block = "event: " + eventName + "\n"
+			terminal, err := lifecycle.observe(eventName, dataLine)
+			if err != nil {
+				return nil, "", nil, err
 			}
-			block += "data: " + dataLine + "\n\n"
-			return []string{block}, dataLine, nil, nil
+			sawTerminalEvent = terminal
+			timing.observeTimingEvent(openAITimingEvent{valid: true, terminal: "[DONE]"})
+			return []string{sseEvent.block(eventName, nil)}, dataLine, nil, nil
 		}
 
+		if !json.Valid([]byte(dataLine)) {
+			return nil, "", nil, fmt.Errorf("invalid Anthropic SSE event JSON")
+		}
 		var event map[string]any
-		if err := json.Unmarshal([]byte(dataLine), &event); err != nil {
-			// JSON 解析失败，直接透传原始数据
-			block := ""
-			if eventName != "" {
-				block = "event: " + eventName + "\n"
-			}
-			block += "data: " + dataLine + "\n\n"
-			return []string{block}, dataLine, nil, nil
+		if err := decodeJSONUseNumber([]byte(dataLine), &event); err != nil {
+			return nil, "", nil, fmt.Errorf("invalid Anthropic SSE event object: %w", err)
 		}
 
 		eventType, _ := event["type"].(string)
+		if eventType == "error" {
+			timing.ObserveEvent([]byte(dataLine))
+			return []string{sseEvent.block("", nil)}, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
+		}
+		terminal, err := lifecycle.observe(eventName, dataLine)
+		if err != nil {
+			return nil, "", nil, err
+		}
 		observer.ObserveAnthropic([]byte(dataLine))
+		timing.ObserveEvent([]byte(dataLine))
 		if eventName == "" {
 			eventName = eventType
 		}
@@ -961,23 +984,6 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 		}
 
-		// Cache TTL Override: 重写 SSE 事件中的 cache_creation 分类。
-		// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
-		if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
-			if eventType == "message_start" {
-				if msg, ok := event["message"].(map[string]any); ok {
-					if u, ok := msg["usage"].(map[string]any); ok {
-						eventChanged = rewriteCacheCreationJSON(u, overrideTarget) || eventChanged
-					}
-				}
-			}
-			if eventType == "message_delta" {
-				if u, ok := event["usage"].(map[string]any); ok {
-					eventChanged = rewriteCacheCreationJSON(u, overrideTarget) || eventChanged
-				}
-			}
-		}
-
 		if needModelReplace {
 			if msg, ok := event["message"].(map[string]any); ok {
 				if model, ok := msg["model"].(string); ok && model == mappedModel {
@@ -988,57 +994,44 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 
 		usagePatch := s.extractSSEUsagePatch(event)
-		if anthropicStreamEventIsTerminal(eventName, dataLine) {
+		if terminal {
 			sawTerminalEvent = true
 		}
 		if !eventChanged {
-			block := ""
-			if eventName != "" {
-				block = "event: " + eventName + "\n"
-			}
-			block += "data: " + dataLine + "\n\n"
-			return []string{block}, dataLine, usagePatch, nil
+			return []string{sseEvent.block(eventName, nil)}, dataLine, usagePatch, nil
 		}
 
 		newData, err := json.Marshal(event)
 		if err != nil {
-			// 序列化失败，直接透传原始数据
-			block := ""
-			if eventName != "" {
-				block = "event: " + eventName + "\n"
-			}
-			block += "data: " + dataLine + "\n\n"
-			return []string{block}, dataLine, usagePatch, nil
+			// 序列化失败，直接透传原始事件
+			return []string{sseEvent.block(eventName, nil)}, dataLine, usagePatch, nil
 		}
 
-		block := ""
-		if eventName != "" {
-			block = "event: " + eventName + "\n"
-		}
-		block += "data: " + string(newData) + "\n\n"
-		return []string{block}, string(newData), usagePatch, nil
+		rewritten := string(newData)
+		return []string{sseEvent.block(eventName, &rewritten)}, rewritten, usagePatch, nil
 	}
 
 	for {
+		if clientDisconnected {
+			drain.start()
+		}
+		clientDisconnected = clientDisconnected || drain.disconnected() || downstreamStreamError(c) != nil
+		if clientDisconnected {
+			drain.start()
+		}
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				// 上游完成，返回结果
-				if !sawTerminalEvent {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
+				// 完整终态已在派发时返回；读到 EOF 说明流缺少终态。
+				if !clientDisconnected && OpenAICompactKeepaliveAdjustedWrittenSize(c) < 0 && !usage.HasObservedTokens() {
+					return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway, Cause: io.ErrUnexpectedEOF, Reason: "upstream_missing_terminal", RetryableOnSameAccount: true, SameAccountRetryMax: 1}
 				}
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
 			}
 			if ev.err != nil {
-				if sawTerminalEvent {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
-				}
-				// 检测 context 取消（客户端断开会导致 context 取消，进而影响上游读取）
-				if errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete: %w", ev.err)
-				}
+				// 断连必须有客户端 context / 写失败证据，上游取消本身不能证明客户端离线。
 				// 客户端已通过写入失败检测到断开，上游也出错了，返回已收集的 usage
-				if clientDisconnected {
+				if clientDisconnected || ctx.Err() != nil || streamClientDisconnected(c) {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after disconnect: %w", ev.err)
 				}
 				// 客户端未断开，正常的错误处理
@@ -1054,7 +1047,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				// 默认 *net.OpError 的 Error() 会泄露内部 IP/端口和上游地址。完整 ev.err
 				// 仅在下方 LegacyPrintf 内部日志中保留供运维诊断。
 				disconnectMsg := "upstream stream disconnected: " + sanitizeStreamError(ev.err)
-				if !c.Writer.Written() {
+				if OpenAICompactKeepaliveAdjustedWrittenSize(c) < 0 && !usage.HasObservedTokens() {
 					logger.LegacyPrintf("service.gateway", "Upstream stream read error before any client output (account=%d), failing over: %v", account.ID, ev.err)
 					body, _ := json.Marshal(map[string]any{
 						"type": "error",
@@ -1073,18 +1066,29 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream read error: %w", ev.err)
 			}
 			line := ev.line
-			trimmed := strings.TrimSpace(line)
 
-			if trimmed == "" {
-				if len(pendingEventLines) == 0 {
+			if line == "" {
+				if len(pendingEvent.lines) == 0 {
 					continue
 				}
 
-				outputBlocks, data, usagePatch, err := processSSEEvent(pendingEventLines)
-				pendingEventLines = pendingEventLines[:0]
+				outputBlocks, data, usagePatch, err := processSSEEvent(pendingEvent.lines)
+				pendingEvent.reset()
 				if err != nil {
-					if clientDisconnected {
-						return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
+					if clientDisconnected || usage.HasObservedTokens() || OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeStream {
+						// Forward owns error classification; only this layer still has the
+						// original frame, including id/retry/comments and multiline data.
+						if !clientDisconnected {
+							for _, block := range outputBlocks {
+								if _, writeErr := io.WriteString(w, block); writeErr != nil {
+									clientDisconnected = true
+									break
+								}
+								MarkResponseCommitted(c)
+								flusher.Flush()
+							}
+						}
+						return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, err
 					}
 					return nil, err
 				}
@@ -1092,7 +1096,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				for _, block := range outputBlocks {
 					if !clientDisconnected {
 						restored := reverseToolNamesIfPresent(c, []byte(block))
-						if _, werr := fmt.Fprint(w, string(restored)); werr != nil {
+						if _, werr := w.Write(restored); werr != nil {
 							clientDisconnected = true
 							logger.LegacyPrintf("service.gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
 							// 不 break：客户端断开后仍需继续合并本事件及后续事件的 usage，
@@ -1100,6 +1104,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 							// clientDisconnected 守卫跳过。
 						} else {
 							flusher.Flush()
+							if downstreamStreamError(c) == nil {
+								timing.MarkDownstream([]byte(data))
+							}
 							lastDataAt = time.Now()
 							resetKeepaliveTimer()
 						}
@@ -1114,13 +1121,20 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 						}
 					}
 				}
+				if sawTerminalEvent {
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+				}
 				continue
 			}
 
-			pendingEventLines = append(pendingEventLines, line)
+			if err := pendingEvent.addLine(line, maxLineSize); err != nil {
+				sendErrorEvent("response_too_large", fmt.Sprintf("upstream SSE event exceeded %d bytes", maxLineSize))
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, err
+			}
 
 		case <-intervalCh:
-			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
+			clientDisconnected = clientDisconnected || drain.disconnected() || downstreamStreamError(c) != nil
+			lastRead := time.Unix(0, pump.lastRead.Load())
 			if time.Since(lastRead) < streamInterval {
 				continue
 			}
@@ -1210,6 +1224,10 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 		patch.hasInputTokens = true
 		if v, ok := parseSSEUsageInt(usageObj["input_tokens"]); ok {
 			patch.inputTokens = v
+		}
+		if v, ok := parseSSEUsageInt(usageObj["output_tokens"]); ok {
+			patch.outputTokens = v
+			patch.hasOutputTokens = true
 		}
 		patch.hasCacheCreationInput = true
 		if v, ok := parseSSEUsageInt(usageObj["cache_creation_input_tokens"]); ok {
@@ -1351,36 +1369,6 @@ func applyCacheTTLOverride(usage *ClaudeUsage, target string) bool {
 	return true
 }
 
-// rewriteCacheCreationJSON 在 JSON usage 对象中重写 cache_creation 嵌套对象的 TTL 分类。
-// usageObj 是 usage JSON 对象（map[string]any）。
-func rewriteCacheCreationJSON(usageObj map[string]any, target string) bool {
-	ccObj, ok := usageObj["cache_creation"].(map[string]any)
-	if !ok {
-		return false
-	}
-	v5m, _ := parseSSEUsageInt(ccObj["ephemeral_5m_input_tokens"])
-	v1h, _ := parseSSEUsageInt(ccObj["ephemeral_1h_input_tokens"])
-	total := v5m + v1h
-	if total == 0 {
-		return false
-	}
-	switch target {
-	case "1h":
-		if v1h == total {
-			return false
-		}
-		ccObj["ephemeral_1h_input_tokens"] = float64(total)
-		ccObj["ephemeral_5m_input_tokens"] = float64(0)
-	default: // "5m"
-		if v5m == total {
-			return false
-		}
-		ccObj["ephemeral_5m_input_tokens"] = float64(total)
-		ccObj["ephemeral_1h_input_tokens"] = float64(0)
-	}
-	return true
-}
-
 func (s *GatewayService) resolveCacheTTLUsageOverrideTarget(ctx context.Context, account *Account) (string, bool) {
 	if account == nil {
 		return "", false
@@ -1395,6 +1383,8 @@ func (s *GatewayService) resolveCacheTTLUsageOverrideTarget(ctx context.Context,
 }
 
 func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*ClaudeUsage, error) {
+	timing := beginAnthropicStreamTiming(c, account, originalModel)
+	defer timing.Finish(nil)
 	// 更新5h窗口状态
 	s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 
@@ -1407,6 +1397,7 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	observer.ObserveAnthropic(body)
+	timing.ObserveBufferedResponse(body)
 
 	// 解析usage
 	var response struct {
@@ -1433,20 +1424,6 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		if cachedTokens > 0 {
 			response.Usage.CacheReadInputTokens = int(cachedTokens)
 			if newBody, err := sjson.SetBytes(body, "usage.cache_read_input_tokens", cachedTokens); err == nil {
-				body = newBody
-			}
-		}
-	}
-
-	// Cache TTL Override: 重写 non-streaming 响应中的 cache_creation 分类。
-	// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
-	if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
-		if applyCacheTTLOverride(&response.Usage, overrideTarget) {
-			// 同步更新 body JSON 中的嵌套 cache_creation 对象
-			if newBody, err := sjson.SetBytes(body, "usage.cache_creation.ephemeral_5m_input_tokens", response.Usage.CacheCreation5mTokens); err == nil {
-				body = newBody
-			}
-			if newBody, err := sjson.SetBytes(body, "usage.cache_creation.ephemeral_1h_input_tokens", response.Usage.CacheCreation1hTokens); err == nil {
 				body = newBody
 			}
 		}
@@ -1493,14 +1470,14 @@ func reconcileCachedTokens(usage map[string]any) bool {
 	if usage == nil {
 		return false
 	}
-	cacheRead, _ := usage["cache_read_input_tokens"].(float64)
+	cacheRead, _ := parseSSEUsageInt(usage["cache_read_input_tokens"])
 	if cacheRead > 0 {
 		return false // 已有标准字段，无需处理
 	}
-	cached, _ := usage["cached_tokens"].(float64)
+	cached, _ := parseSSEUsageInt(usage["cached_tokens"])
 	if cached <= 0 {
 		return false
 	}
-	usage["cache_read_input_tokens"] = cached
+	usage["cache_read_input_tokens"] = usage["cached_tokens"]
 	return true
 }

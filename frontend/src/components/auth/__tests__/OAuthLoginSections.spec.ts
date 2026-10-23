@@ -38,7 +38,7 @@ describe('OAuth login sections', () => {
       provider,
       params: { redirect: '/billing?plan=pro' }
     })
-    expect(window.sessionStorage.getItem('oauth_aff_code')).toBe('AFF456')
+    expect(window.sessionStorage.getItem('oauth_aff_code')).toBeNull()
     expect(window.location.href).toBe(originalHref)
   })
 
