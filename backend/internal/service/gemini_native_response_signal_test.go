@@ -128,7 +128,7 @@ data: {"error":{"code":429,"message":"Resource has been exhausted (e.g. check qu
 
 	result, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
 		"gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, body, rec.Body.String(), "错误信封也原样透传，交给 SDK 客户端按错误处理")
 	require.Equal(t, 10, result.Usage.InputTokens)
@@ -210,11 +210,10 @@ func TestGeminiForwardNative_EmptyStreamMarksUpstreamFailure(t *testing.T) {
 
 	result, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
 		"gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
-	require.NoError(t, err)
-	require.NotNil(t, result)
+	require.Error(t, err)
+	require.Nil(t, result)
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Zero(t, rec.Body.Len())
-	require.Nil(t, result.FirstTokenMs)
+	require.Contains(t, rec.Body.String(), "Upstream response stream ended before completion")
 
 	streamErrs := GetOpsStreamErrors(c)
 	require.Len(t, streamErrs, 1)
@@ -308,7 +307,7 @@ data: {"error":{"code":503,"message":"The model is overloaded. Please try again 
 
 	_, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
 		"gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.Equal(t, body, rec.Body.String())
 
 	streamErrs := GetOpsStreamErrors(c)
@@ -327,7 +326,7 @@ func TestGeminiForwardNative_StreamNonSSEJSONBodyIsInspected(t *testing.T) {
   "candidates": [{"content": {"parts": [{"text": "hello"}], "role": "model"}}],
   "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 1}
 }
-,
+
 {
   "candidates": [{"content": {}, "finishReason": "PROHIBITED_CONTENT"}]
 }
@@ -418,8 +417,8 @@ func TestGeminiForwardNative_StreamWithoutDataEventsIsEmpty(t *testing.T) {
 			c, rec := newGeminiNativeTestContext(t)
 			_, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
 				"gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
-			require.NoError(t, err)
-			require.Equal(t, body, rec.Body.String())
+			require.Error(t, err)
+			require.True(t, strings.HasPrefix(rec.Body.String(), body))
 			streamErrs := GetOpsStreamErrors(c)
 			require.Len(t, streamErrs, 1)
 			require.Equal(t, geminiSignalEmptyStreamReason, streamErrs[0].Code)
