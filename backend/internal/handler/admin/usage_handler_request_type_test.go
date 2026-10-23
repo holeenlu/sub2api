@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -216,4 +217,27 @@ func TestAdminUsageStatsInvalidStream(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestAdminUsagePaginationRespectsExportGrantAfterQueryCaching(t *testing.T) {
+	for _, exported := range []bool{false, true} {
+		repo := &adminUsageRepoCapture{}
+		h := NewUsageHandler(service.NewUsageService(repo, nil, nil, nil), nil, nil, nil)
+		r := gin.New()
+		r.GET("/admin/usage", func(c *gin.Context) { _ = c.Query("sort_by"); c.Next() }, h.List)
+		actor := authz.Subject{Role: authz.Admin, PolicyVersion: 1, Permissions: []string{"usage.read"}}
+		if exported {
+			actor.Permissions = append(actor.Permissions, "usage.export")
+		}
+		req := httptest.NewRequest(http.MethodGet, "/admin/usage?page_size=1000", nil)
+		req = req.WithContext(authz.WithSubject(req.Context(), actor))
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		require.Equal(t, 200, rec.Code)
+		if exported {
+			require.Equal(t, 1000, repo.listParams.PageSize)
+		} else {
+			require.Equal(t, 100, repo.listParams.PageSize)
+		}
+	}
 }
