@@ -112,6 +112,10 @@
               {{ row.status_code }}
             </span>
             <span
+              v-if="isRecoveredOpsError(row)"
+              class="inline-flex items-center rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300"
+            >{{ t('admin.ops.errorLog.recovered') }} · {{ row.request_status_code }}</span>
+            <span
               v-if="row.severity"
               :class="['rounded px-1.5 py-0.5 text-[10px] font-medium', getSeverityClass(row.severity)]"
             >{{ row.severity }}</span>
@@ -188,7 +192,7 @@ import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import IpGeoBatchToolbar from '@/components/common/IpGeoBatchToolbar.vue'
 import type { OpsErrorLog } from '@/api/admin/ops'
 import type { Column } from '@/components/common/types'
-import { getSeverityClass, formatDateTime } from '../utils/opsFormatters'
+import { getSeverityClass, formatDateTime, isRecoveredOpsError } from '../utils/opsFormatters'
 import { mapErrorCategory } from '@/utils/errorCategory'
 import { mapErrorSortKey, statusCodeBadgeClass } from '@/utils/errorBadges'
 

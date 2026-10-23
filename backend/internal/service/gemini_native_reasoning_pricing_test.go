@@ -189,3 +189,46 @@ func TestGeminiChatCompatReasoningPricingUsesForwardedEffort(t *testing.T) {
 		})
 	}
 }
+
+func TestGeminiThinkingUsesMappedProtocolAndRejectsLocally(t *testing.T) {
+	for _, tc := range []struct {
+		name, endpoint, model, body, level, budget string
+		reject                                     bool
+	}{
+		{"chat_alias_disable", "chat", "gemini-2.5-flash", `{"model":"claude-opus-5-5","reasoning_effort":"none","messages":[{"role":"user","content":"hi"}]}`, "", "0", false},
+		{"messages_alias_disable", "messages", "gemini-2.5-flash", `{"model":"claude-opus-5-5","thinking":{"type":"disabled"},"messages":[{"role":"user","content":"hi"}]}`, "", "0", false},
+		{"native_mapped_level", "native", "gemini-3.8-flash", `{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"thinkingConfig":{"thinkingLevel":"minimal"}}}`, "low", "", false},
+		{"native_conflicting_controls", "native", "gemini-3.8-flash", `{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"thinkingConfig":{"thinkingLevel":"high","thinkingBudget":1024}}}`, "", "", true},
+		{"chat_no_thinking_unsupported", "chat", "gemini-3.1-pro-preview", `{"model":"claude-opus-5-5","reasoning_effort":"none","messages":[{"role":"user","content":"hi"}]}`, "", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(tc.body)
+			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`))}}}
+			svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+			account := geminiSignalTestAccount()
+			account.Credentials["model_mapping"] = map[string]any{"claude-opus-5-5": tc.model}
+			c, rec := newAntigravityCompatContext(http.MethodPost, "/v1/"+tc.endpoint, body)
+			var result *ForwardResult
+			var err error
+			switch tc.endpoint {
+			case "chat":
+				result, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body)
+			case "messages":
+				result, err = svc.Forward(context.Background(), c, account, body)
+			case "native":
+				result, err = svc.ForwardNative(context.Background(), c, account, "claude-opus-5-5", "generateContent", false, body)
+			}
+			if tc.reject {
+				require.Error(t, err)
+				require.Equal(t, 400, rec.Code)
+				require.Empty(t, upstream.requestBodies)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, upstream.requestBodies, 1)
+			require.Equal(t, tc.level, gjson.GetBytes(upstream.requestBodies[0], "generationConfig.thinkingConfig.thinkingLevel").String())
+			require.Equal(t, tc.budget, gjson.GetBytes(upstream.requestBodies[0], "generationConfig.thinkingConfig.thinkingBudget").Raw)
+			require.Equal(t, tc.level, optionalStringValue(result.ReasoningEffort))
+		})
+	}
+}

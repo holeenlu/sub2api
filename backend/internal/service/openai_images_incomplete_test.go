@@ -247,10 +247,11 @@ func TestImagesOAuthStreaming_SplitSafetyRefusalReturns400(t *testing.T) {
 	}
 }
 
-// extractOpenAIImagesModelRefusal：真空响应（无文字）返回空串。
+// The current refusal classifier must not treat an empty terminal response as a refusal.
 func TestExtractModelRefusal_EmptyWhenNoText(t *testing.T) {
 	body := "data: {\"type\":\"response.completed\",\"response\":{\"output\":[],\"tool_usage\":{\"image_gen\":{\"output_tokens\":0}}}}\n\n"
-	if r := extractOpenAIImagesModelRefusal([]byte(body)); r != "" {
-		t.Fatalf("empty response should yield no refusal, got %q", r)
+	text := extractOpenAIImagesModelText([]byte(body))
+	if isOpenAIImagesContentPolicyRefusal(text) {
+		t.Fatalf("empty response should not be classified as refusal: %q", text)
 	}
 }

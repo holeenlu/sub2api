@@ -57,3 +57,23 @@ func TestInsertSystemMetricsNullableIntegerMetrics(t *testing.T) {
 		})
 	}
 }
+
+func TestListJobHeartbeatsLoadsExpectedInterval(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	mock.ExpectQuery("SELECT[\\s\\S]*COALESCE\\(expected_interval_seconds, 0\\)[\\s\\S]*FROM ops_job_heartbeats").WillReturnRows(sqlmock.NewRows([]string{"job_name", "last_run_at", "last_success_at", "last_error_at", "last_error", "last_duration_ms", "last_result", "updated_at", "expected_interval_seconds"}).AddRow("ops_cleanup", now, now, nil, nil, 20, "ok", now, 86400))
+	jobs, err := (&opsRepository{db: db}).ListJobHeartbeats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].ExpectedIntervalSeconds != 86400 {
+		t.Fatalf("daily interval not loaded: %+v", jobs)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
