@@ -145,19 +145,18 @@ func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(
 	}, writer.flushBodyLengths)
 }
 
-func TestOpenAIStreamingPassthroughFlushesTerminalEventAtEOFWithoutBlankLine(t *testing.T) {
+func TestOpenAIStreamingPassthroughRejectsTerminalEventAtEOFWithoutBlankLine(t *testing.T) {
 	upstream := "event: response.completed\n" +
 		`data: {"type":"response.completed","response":{"id":"resp_eof","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`
-	wantBody := upstream + "\n"
 
 	result, recorder, writer, err := runPassthroughFlushTest(t, io.NopCloser(strings.NewReader(upstream)), -1)
 
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, wantBody, recorder.Body.String())
-	require.Equal(t, []int{len(wantBody)}, writer.flushBodyLengths)
-	require.Equal(t, 5, result.usage.InputTokens)
-	require.Equal(t, 2, result.usage.OutputTokens)
+	require.Empty(t, recorder.Body.String())
+	require.Empty(t, writer.flushBodyLengths)
+	require.Zero(t, result.usage.InputTokens)
+	require.Zero(t, result.usage.OutputTokens)
 }
 
 func TestOpenAIStreamingPassthroughFailedBeforeOutputCanStillFailOverWithoutFlush(t *testing.T) {
@@ -271,7 +270,7 @@ func TestOpenAIStreamingPassthroughClientDisconnectStillDrainsTerminalUsage(t *t
 }
 
 func TestOpenAIStreamingPassthroughScannerErrorFlushesWrittenResidual(t *testing.T) {
-	upstream := []byte(`data: {"type":"response.output_text.delta","delta":"partial"}`)
+	upstream := []byte(`data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n")
 	readErr := errors.New("upstream read failed")
 
 	_, recorder, writer, err := runPassthroughFlushTest(t, &passthroughFlushTestErrorBody{
@@ -280,14 +279,14 @@ func TestOpenAIStreamingPassthroughScannerErrorFlushesWrittenResidual(t *testing
 	}, -1)
 
 	require.ErrorIs(t, err, readErr)
-	wantBody := string(upstream) + "\n"
+	wantBody := string(upstream)
 	require.Equal(t, wantBody, recorder.Body.String())
 	require.Equal(t, []int{len(wantBody)}, writer.flushBodyLengths)
 }
 
 func TestOpenAIStreamingPassthroughNamespaceRestoreErrorFlushesWrittenResidualOnce(t *testing.T) {
-	writtenPrefix := `data: {"type":"response.output_text.delta","delta":"prefix"}` + "\n"
-	overflowData := `data: {"type":"response.output_text.delta","delta":"not-written","overflow":1e1000}`
+	writtenPrefix := `data: {"type":"response.output_text.delta","delta":"prefix"}` + "\n\n"
+	overflowData := `data: {"type":"response.output_text.delta","delta":"not-written","overflow":1e1000}` + "\n\n"
 
 	_, recorder, writer, err := runPassthroughFlushTest(
 		t,

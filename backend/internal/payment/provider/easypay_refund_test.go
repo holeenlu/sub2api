@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -302,4 +303,38 @@ func newTestEasyPay(t *testing.T, apiBase string) *EasyPay {
 		t.Fatalf("NewEasyPay: %v", err)
 	}
 	return provider
+}
+
+// EasyPay 閘道回傳的訊息永遠是簡體，與本系統的 UI 語言無關。
+// 這些比對字串刻意不隨後端訊息一起轉繁；此測試把該約束釘住，
+// 避免日後有人「順手」把它們改成繁體而讓退款冪等判斷失效。
+func TestIsEasyPayRefundOrderNotFoundMatchesSimplifiedGatewayText(t *testing.T) {
+	t.Parallel()
+
+	notFound := []string{
+		"订单编号不存在",
+		"订单不存在",
+		"easypay refund failed (code=-1): 订单编号不存在",
+		"order not found",
+		"record does not exist",
+	}
+	for _, msg := range notFound {
+		if !isEasyPayRefundOrderNotFound(errors.New(msg)) {
+			t.Fatalf("expected %q to be treated as order-not-found", msg)
+		}
+	}
+
+	other := []string{
+		"余额不足",
+		"easypay refund HTTP 500: internal error",
+	}
+	for _, msg := range other {
+		if isEasyPayRefundOrderNotFound(errors.New(msg)) {
+			t.Fatalf("did not expect %q to be treated as order-not-found", msg)
+		}
+	}
+
+	if isEasyPayRefundOrderNotFound(nil) {
+		t.Fatal("nil error must not be treated as order-not-found")
+	}
 }

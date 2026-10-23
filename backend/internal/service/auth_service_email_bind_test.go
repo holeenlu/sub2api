@@ -811,6 +811,7 @@ func (s *emailBindSettingRepoStub) Delete(context.Context, string) error {
 }
 
 type emailBindCacheStub struct {
+	mu        sync.Mutex
 	data      *service.VerificationCodeData
 	err       error
 	setEmails []string
@@ -820,10 +821,20 @@ func (s *emailBindCacheStub) GetVerificationCode(context.Context, string) (*serv
 	if s.err != nil {
 		return nil, s.err
 	}
-	return s.data, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data == nil {
+		return nil, nil
+	}
+	// Return a copy like the Redis cache does, so concurrent verifications
+	// never read the record while IncrVerificationCodeAttempts updates it.
+	data := *s.data
+	return &data, nil
 }
 
 func (s *emailBindCacheStub) SetVerificationCode(_ context.Context, email string, _ *service.VerificationCodeData, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.setEmails = append(s.setEmails, email)
 	return nil
 }
@@ -1038,8 +1049,8 @@ func (s *emailBindUserRepoStub) GetByEmail(_ context.Context, email string) (*se
 	return cloneEmailBindUser(user), nil
 }
 
-func (s *emailBindUserRepoStub) GetFirstAdmin(context.Context) (*service.User, error) {
-	panic("unexpected GetFirstAdmin call")
+func (s *emailBindUserRepoStub) GetFirstSuperAdmin(context.Context) (*service.User, error) {
+	panic("unexpected GetFirstSuperAdmin call")
 }
 
 func (s *emailBindUserRepoStub) Update(_ context.Context, user *service.User, _ service.UserUpdateFields) error {
@@ -1167,6 +1178,8 @@ func cloneEmailBindUser(user *service.User) *service.User {
 }
 
 func (s *emailBindCacheStub) IncrVerificationCodeAttempts(context.Context, string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.data == nil {
 		return 0, errors.New("verification code not found")
 	}
