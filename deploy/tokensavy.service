@@ -1,0 +1,33 @@
+[Unit]
+Description=Tokensavy - Smart tokens. More possibilities.
+Documentation=https://tokensavy.ai/docs
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=tokensavy
+Group=tokensavy
+WorkingDirectory=/opt/tokensavy
+ExecStart=/opt/tokensavy/tokensavy
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tokensavy
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/tokensavy
+
+# Environment - Server configuration
+# Modify these values to change listen address and port
+Environment=GIN_MODE=release
+Environment=SERVER_HOST=0.0.0.0
+Environment=SERVER_PORT=8080
+
+[Install]
+WantedBy=multi-user.target

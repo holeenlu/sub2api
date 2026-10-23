@@ -12,6 +12,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestBuildOpenAIAutoResetUsageUpdatesAbsoluteResetFallback(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, tc := range []struct {
+		name                          string
+		relative, absolute, wantReset int64
+		wantUsed                      float64
+	}{
+		{"absolute only", 0, now.Unix() + 3600, now.Unix() + 3600, 42},
+		{"relative retained", 600, now.Unix() + 3600, now.Unix() + 600, 42},
+		{"relative only", 600, 0, now.Unix() + 600, 42},
+		{"expired absolute", 0, now.Unix() - 600, now.Unix(), 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, primaryMinutes := range []int64{300, 10080} {
+				usage := &OpenAIQuotaUsage{RateLimit: &OpenAIRateLimit{PrimaryWindow: &OpenAIRateLimitWindow{UsedPercent: 42, LimitWindowSeconds: primaryMinutes * 60, ResetAfterSeconds: tc.relative, ResetAt: tc.absolute}}}
+				updates := buildOpenAIAutoResetUsageUpdates(usage, now)
+				window := "5h"
+				if primaryMinutes == 10080 {
+					window = "7d"
+				}
+				progress := buildCodexUsageProgressFromExtra(updates, window, now)
+				require.NotNil(t, progress)
+				require.NotNil(t, progress.ResetsAt)
+				require.Equal(t, tc.wantReset, progress.ResetsAt.Unix())
+				require.Equal(t, tc.wantUsed, progress.Utilization)
+			}
+		})
+	}
+}
+
 func TestNormalizeOpenAIAutoResetCreditExtra(t *testing.T) {
 	t.Run("历史账号默认关闭", func(t *testing.T) {
 		account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}

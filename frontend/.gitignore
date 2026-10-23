@@ -1,0 +1,10 @@
+
+# Supplier UI source is not a Go vendored-dependency directory.
+!src/features/vendor/
+!src/features/vendor/**
+!src/views/vendor/
+!src/views/vendor/**
+
+/dist-vendor/
+/dist-review/
+/.vendor-*/

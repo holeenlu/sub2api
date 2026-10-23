@@ -184,8 +184,8 @@ func (r *contentModerationTestUserRepo) GetByEmail(ctx context.Context, email st
 	panic("unexpected GetByEmail call")
 }
 
-func (r *contentModerationTestUserRepo) GetFirstAdmin(ctx context.Context) (*User, error) {
-	panic("unexpected GetFirstAdmin call")
+func (r *contentModerationTestUserRepo) GetFirstSuperAdmin(ctx context.Context) (*User, error) {
+	panic("unexpected GetFirstSuperAdmin call")
 }
 
 func (r *contentModerationTestUserRepo) Update(ctx context.Context, user *User, fields UserUpdateFields) error {
@@ -1527,38 +1527,43 @@ func TestContentModerationCheck_HashBlockLogsDoNotIncreaseNextViolationCount(t *
 	require.Equal(t, 1, logs[1].ViolationCount)
 }
 
-func TestContentModerationAutoBanSkipsAdminAccount(t *testing.T) {
-	var slogOutput bytes.Buffer
-	previousLogger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&slogOutput, nil)))
-	t.Cleanup(func() {
-		slog.SetDefault(previousLogger)
-	})
+func TestContentModerationAutoBanSkipsStaffAccounts(t *testing.T) {
+	for _, role := range []string{RoleSuperAdmin, RoleAdmin} {
+		t.Run(role, func(t *testing.T) {
+			var slogOutput bytes.Buffer
+			previousLogger := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&slogOutput, nil)))
+			t.Cleanup(func() {
+				slog.SetDefault(previousLogger)
+			})
 
-	cfg := defaultContentModerationConfig()
-	cfg.BanThreshold = 2
-	cfg.ViolationWindowHours = 24
+			cfg := defaultContentModerationConfig()
+			cfg.BanThreshold = 2
+			cfg.ViolationWindowHours = 24
 
-	userID := int64(1001)
-	repo := &contentModerationTestRepo{}
-	require.NoError(t, repo.CreateLog(context.Background(), newContentModerationFlaggedLog(userID)))
-	userRepo := &contentModerationTestUserRepo{user: &User{ID: userID, Role: RoleAdmin, Status: StatusActive}}
-	invalidator := &contentModerationTestAuthCacheInvalidator{}
-	svc := NewContentModerationService(nil, repo, nil, nil, userRepo, nil, invalidator, nil)
+			userID := int64(1001)
+			repo := &contentModerationTestRepo{}
+			require.NoError(t, repo.CreateLog(context.Background(), newContentModerationFlaggedLog(userID)))
+			userRepo := &contentModerationTestUserRepo{user: &User{ID: userID, Role: role, Status: StatusActive}}
+			invalidator := &contentModerationTestAuthCacheInvalidator{}
+			svc := NewContentModerationService(nil, repo, nil, nil, userRepo, nil, invalidator, nil)
 
-	svc.persistContentModerationLog(context.Background(), cfg, newContentModerationFlaggedLog(userID), "", false, true)
+			svc.persistContentModerationLog(context.Background(), cfg, newContentModerationFlaggedLog(userID), "", false, true)
 
-	logs := requireContentModerationLogCount(t, repo, 2)
-	require.Equal(t, 2, logs[1].ViolationCount)
-	require.False(t, logs[1].AutoBanned)
-	require.Equal(t, StatusActive, userRepo.user.Status)
-	require.Empty(t, userRepo.updated)
-	require.Empty(t, invalidator.userIDs)
-	require.Contains(t, slogOutput.String(), "content_moderation.autoban_skipped_admin")
-	require.Contains(t, slogOutput.String(), "user_id=1001")
-	require.Contains(t, slogOutput.String(), "role=admin")
-	require.Contains(t, slogOutput.String(), "count=2")
-	require.Contains(t, slogOutput.String(), "threshold=2")
+			logs := requireContentModerationLogCount(t, repo, 2)
+			require.Equal(t, 2, logs[1].ViolationCount)
+			require.False(t, logs[1].AutoBanned)
+			require.Equal(t, StatusActive, userRepo.user.Status)
+			require.Empty(t, userRepo.updated)
+			require.Empty(t, invalidator.userIDs)
+			require.Contains(t, slogOutput.String(), "content_moderation.autoban_skipped_admin")
+			require.Contains(t, slogOutput.String(), "user_id=1001")
+			require.Contains(t, slogOutput.String(), "role="+role)
+			require.Contains(t, slogOutput.String(), "count=2")
+			require.Contains(t, slogOutput.String(), "threshold=2")
+
+		})
+	}
 }
 
 func TestContentModerationAutoBanDisablesRegularUserAtThreshold(t *testing.T) {
