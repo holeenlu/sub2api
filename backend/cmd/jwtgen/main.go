@@ -33,7 +33,7 @@ func main() {
 	}()
 
 	userRepo := repository.NewUserRepository(client, sqlDB)
-	authService := service.NewAuthService(client, userRepo, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	authService := service.NewAuthService(client, userRepo, nil, cfg, nil, nil, nil, nil, nil, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -42,7 +42,7 @@ func main() {
 	if *email != "" {
 		user, err = userRepo.GetByEmail(ctx, *email)
 	} else {
-		user, err = userRepo.GetFirstAdmin(ctx)
+		user, err = userRepo.GetFirstSuperAdmin(ctx)
 	}
 	if err != nil {
 		log.Fatalf("failed to resolve admin user: %v", err)

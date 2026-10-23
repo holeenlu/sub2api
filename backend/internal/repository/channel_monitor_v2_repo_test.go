@@ -96,6 +96,7 @@ func TestChannelMonitorV2WhereUsesConfiguredScopeAndEmptyFilterMeansAllConfigure
 	require.Contains(t, where, "m.platform = ANY($3)")
 	require.Contains(t, where, "m.group_id = ANY($4)")
 	require.Len(t, args, 4)
+	require.Contains(t, where, "(m.group_id <= 0 OR m.group_id IN (SELECT id FROM groups WHERE deleted_at IS NULL))")
 }
 
 func TestChannelMonitorV2WhereRejectsGroupFilterOutsideConfiguredScope(t *testing.T) {
@@ -162,6 +163,9 @@ func TestChannelMonitorV2AdminScopeRemainsGlobal(t *testing.T) {
 	where, args := channelMonitorV2Where(filter, cfg, "m")
 	require.Contains(t, where, "m.group_id = ANY($4)")
 	require.Equal(t, pq.Array([]int64{9}), args[3])
+	require.Contains(t, where, "groups WHERE deleted_at IS NULL")
+	where, _ = channelMonitorV2Where(filter, cfg, "h")
+	require.Contains(t, where, "(h.group_id <= 0 OR h.group_id IN (SELECT id FROM groups WHERE deleted_at IS NULL))")
 }
 
 func TestChannelMonitorV2MatrixDoesNotSeedGroupsForEmptyViewerScope(t *testing.T) {

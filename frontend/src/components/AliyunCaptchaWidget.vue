@@ -42,6 +42,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { isChineseLocale } from '@/i18n/localeUtils'
+
+// 阿里云验证码支持 cn / tw / en 三套文案，繁体不要退回简体。
+function aliyunCaptchaLanguage(locale: string): 'cn' | 'tw' | 'en' {
+  if (!isChineseLocale(locale)) {
+    return 'en'
+  }
+  return locale.toLowerCase().startsWith('zh-tw') ? 'tw' : 'cn'
+}
 
 interface AliyunCaptchaVerifyResult {
   captchaResult: boolean
@@ -168,7 +177,7 @@ function initCaptcha(): void {
     onBizResultCallback: () => {},
     getInstance: () => {},
     slideStyle: { width: 360, height: 40 },
-    language: locale.value.toLowerCase().startsWith('zh') ? 'cn' : 'en'
+    language: aliyunCaptchaLanguage(locale.value)
   })
 }
 

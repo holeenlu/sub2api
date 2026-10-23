@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -189,7 +190,7 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *tes
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "12.75000000", repo.values[service.SettingKeyAuthSourceDefaultEmailBalance])
@@ -222,7 +223,6 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 		"payment_visible_method_wxpay_source":                     "wxpay",
 		"payment_visible_method_alipay_enabled":                   true,
 		"payment_visible_method_wxpay_enabled":                    false,
-		"openai_advanced_scheduler_enabled":                       true,
 		"openai_oauth_scheduling_rate_multiplier":                 0.05,
 		"openai_advanced_scheduler_subscription_priority_enabled": true,
 	}
@@ -234,14 +234,13 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, service.VisibleMethodSourceEasyPayAlipay, repo.values[service.SettingPaymentVisibleMethodAlipaySource])
 	require.Equal(t, service.VisibleMethodSourceOfficialWechat, repo.values[service.SettingPaymentVisibleMethodWxpaySource])
 	require.Equal(t, "true", repo.values[service.SettingPaymentVisibleMethodAlipayEnabled])
 	require.Equal(t, "false", repo.values[service.SettingPaymentVisibleMethodWxpayEnabled])
-	require.Equal(t, "true", repo.values["openai_advanced_scheduler_enabled"])
 	require.Equal(t, "0.05", repo.values[service.SettingKeyOpenAIOAuthSchedulingRateMultiplier])
 	require.Equal(t, "true", repo.values[service.SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled])
 
@@ -253,7 +252,6 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	require.Equal(t, service.VisibleMethodSourceOfficialWechat, data["payment_visible_method_wxpay_source"])
 	require.Equal(t, true, data["payment_visible_method_alipay_enabled"])
 	require.Equal(t, false, data["payment_visible_method_wxpay_enabled"])
-	require.Equal(t, true, data["openai_advanced_scheduler_enabled"])
 	require.Equal(t, 0.05, data["openai_oauth_scheduling_rate_multiplier"])
 	require.Equal(t, true, data["openai_advanced_scheduler_subscription_priority_enabled"])
 }
@@ -283,7 +281,7 @@ func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodS
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "", repo.values[service.SettingPaymentVisibleMethodAlipaySource])
@@ -332,7 +330,7 @@ func TestSettingHandler_UpdateSettings_PersistsExplicitFalseOIDCCompatibilityFla
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "false", repo.values[service.SettingKeyOIDCConnectUsePKCE])
@@ -408,7 +406,7 @@ func TestSettingHandler_UpdateSettings_DoesNotSolidifyImplicitOIDCSecurityDefaul
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "false", repo.values[service.SettingKeyOIDCConnectUsePKCE])
@@ -437,7 +435,7 @@ func TestSettingHandler_UpdateSettings_RejectsInvalidPaymentVisibleMethodSource(
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.NotContains(t, repo.values, service.SettingPaymentVisibleMethodAlipaySource)
@@ -471,7 +469,7 @@ func TestSettingHandler_UpdateSettings_DoesNotPersistPartialSystemSettingsWhenAu
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	require.Equal(t, "false", repo.values[service.SettingKeyRegistrationEnabled])
@@ -511,4 +509,84 @@ func TestDiffSettings_IncludesAuthSourceDefaultsAndForceEmail(t *testing.T) {
 	require.Contains(t, changed, "auth_source_default_email_grant_on_signup")
 	require.Contains(t, changed, "auth_source_default_email_grant_on_first_bind")
 	require.Contains(t, changed, "force_email_on_third_party_signup")
+}
+
+func updateSettingsWithRevision(t *testing.T, h *SettingHandler, c *gin.Context) {
+	t.Helper()
+	body, err := io.ReadAll(c.Request.Body)
+	require.NoError(t, err)
+	var payload map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &payload))
+	current, err := h.settingService.GetAllSettings(c.Request.Context())
+	require.NoError(t, err)
+	payload["revision"], err = json.Marshal(current.Revision)
+	require.NoError(t, err)
+	body, err = json.Marshal(payload)
+	require.NoError(t, err)
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	h.UpdateSettings(c)
+}
+
+func (s *settingHandlerRepoStub) CompareAndSetMultiple(ctx context.Context, revision string, values map[string]string) (string, error) {
+	current, err := s.GetAll(ctx)
+	if err != nil {
+		return "", err
+	}
+	if service.SettingsRevision(current) != revision {
+		return "", service.ErrSettingsRevisionConflict
+	}
+	if err := s.SetMultiple(ctx, values); err != nil {
+		return "", err
+	}
+	current, err = s.GetAll(ctx)
+	return service.SettingsRevision(current), err
+}
+
+func (s *failingAuthSourceSettingsRepoStub) CompareAndSetMultiple(ctx context.Context, _ string, values map[string]string) (string, error) {
+	if err := s.SetMultiple(ctx, values); err != nil {
+		return "", err
+	}
+	current, err := s.GetAll(ctx)
+	return service.SettingsRevision(current), err
+}
+
+func TestSettingsSaveRevisionAndAtomicValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, scenario := range []string{"missing", "stale", "invalid_payment", "valid"} {
+		t.Run(scenario, func(t *testing.T) {
+			repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeySiteName: "before"}}
+			svc := service.NewSettingService(repo, &config.Config{})
+			h := NewSettingHandler(svc, nil, nil, nil, service.NewPaymentConfigService(nil, repo, nil), nil, nil)
+			payload := map[string]any{"site_name": "after", "payment_enabled": true, "revision": service.SettingsRevision(repo.values)}
+			status := http.StatusOK
+			switch scenario {
+			case "missing":
+				delete(payload, "revision")
+				status = http.StatusPreconditionRequired
+			case "stale":
+				repo.values["concurrent_setting"] = "changed"
+				status = http.StatusConflict
+			case "invalid_payment":
+				payload["payment_balance_recharge_multiplier"] = -1
+				status = http.StatusBadRequest
+			}
+			body, err := json.Marshal(payload)
+			require.NoError(t, err)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			h.UpdateSettings(c)
+			require.Equal(t, status, w.Code, w.Body.String())
+			if status != http.StatusOK {
+				require.Nil(t, repo.lastUpdates)
+				require.Equal(t, "before", repo.values[service.SettingKeySiteName])
+				require.NotContains(t, repo.values, service.SettingPaymentEnabled)
+			} else {
+				require.Equal(t, "after", repo.lastUpdates[service.SettingKeySiteName])
+				require.Equal(t, "true", repo.lastUpdates[service.SettingPaymentEnabled])
+				require.Contains(t, w.Body.String(), service.SettingsRevision(repo.values))
+			}
+		})
+	}
 }

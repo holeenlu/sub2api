@@ -28,27 +28,31 @@ type CustomEndpoint struct {
 
 // SystemSettings represents the admin settings API response payload.
 type SystemSettings struct {
-	RegistrationEnabled                 bool                     `json:"registration_enabled"`
-	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`
-	RegistrationEmailSuffixWhitelist    []string                 `json:"registration_email_suffix_whitelist"`
-	RegistrationEmailDomainQuotaEnabled bool                     `json:"registration_email_domain_quota_enabled"`
-	PromoCodeEnabled                    bool                     `json:"promo_code_enabled"`
-	PasswordResetEnabled                bool                     `json:"password_reset_enabled"`
-	FrontendURL                         string                   `json:"frontend_url"`
-	InvitationCodeEnabled               bool                     `json:"invitation_code_enabled"`
-	TotpEnabled                         bool                     `json:"totp_enabled"`                   // TOTP 双因素认证
-	TotpEncryptionKeyConfigured         bool                     `json:"totp_encryption_key_configured"` // TOTP 加密密钥是否已配置
-	PasskeyEnabled                      bool                     `json:"passkey_enabled"`
-	PasskeyConfigured                   bool                     `json:"passkey_configured"`
-	PasskeyRPID                         string                   `json:"passkey_rp_id"`
-	PasskeyRPOrigins                    []string                 `json:"passkey_rp_origins"`
-	SessionBindingEnabled               bool                     `json:"session_binding_enabled"`  // 会话 IP/UA 绑定
-	StepUpEnabled                       bool                     `json:"step_up_enabled"`          // 敏感操作 step-up 2FA
-	AuditLogRetentionDays               int                      `json:"audit_log_retention_days"` // 审计日志保留天数
-	LoginAgreementEnabled               bool                     `json:"login_agreement_enabled"`
-	LoginAgreementMode                  string                   `json:"login_agreement_mode"`
-	LoginAgreementUpdatedAt             string                   `json:"login_agreement_updated_at"`
-	LoginAgreementDocuments             []LoginAgreementDocument `json:"login_agreement_documents"`
+	Revision                                   string                   `json:"revision"`
+	VendorConsoleEnabled                       bool                     `json:"vendor_console_enabled"`
+	VendorPortalOrigin                         string                   `json:"vendor_portal_origin"`
+	OpenAICodexDiagnosticPromptTemplate        string                   `json:"openai_codex_diagnostic_prompt_template"`
+	OpenAICodexDiagnosticPromptTemplateDefault string                   `json:"openai_codex_diagnostic_prompt_template_default"`
+	RegistrationEnabled                        bool                     `json:"registration_enabled"`
+	EmailVerifyEnabled                         bool                     `json:"email_verify_enabled"`
+	RegistrationEmailSuffixWhitelist           []string                 `json:"registration_email_suffix_whitelist"`
+	RegistrationEmailDomainQuotaEnabled        bool                     `json:"registration_email_domain_quota_enabled"`
+	PromoCodeEnabled                           bool                     `json:"promo_code_enabled"`
+	PasswordResetEnabled                       bool                     `json:"password_reset_enabled"`
+	FrontendURL                                string                   `json:"frontend_url"`
+	TotpEnabled                                bool                     `json:"totp_enabled"`                   // TOTP 双因素认证
+	TotpEncryptionKeyConfigured                bool                     `json:"totp_encryption_key_configured"` // TOTP 加密密钥是否已配置
+	PasskeyEnabled                             bool                     `json:"passkey_enabled"`
+	PasskeyConfigured                          bool                     `json:"passkey_configured"`
+	PasskeyRPID                                string                   `json:"passkey_rp_id"`
+	PasskeyRPOrigins                           []string                 `json:"passkey_rp_origins"`
+	SessionBindingEnabled                      bool                     `json:"session_binding_enabled"`  // 会话 IP/UA 绑定
+	StepUpEnabled                              bool                     `json:"step_up_enabled"`          // 敏感操作 step-up 2FA
+	AuditLogRetentionDays                      int                      `json:"audit_log_retention_days"` // 审计日志保留天数
+	LoginAgreementEnabled                      bool                     `json:"login_agreement_enabled"`
+	LoginAgreementMode                         string                   `json:"login_agreement_mode"`
+	LoginAgreementUpdatedAt                    string                   `json:"login_agreement_updated_at"`
+	LoginAgreementDocuments                    []LoginAgreementDocument `json:"login_agreement_documents"`
 
 	SMTPHost               string `json:"smtp_host"`
 	SMTPPort               int    `json:"smtp_port"`
@@ -157,7 +161,6 @@ type SystemSettings struct {
 	DocURL                      string           `json:"doc_url"`
 	HomeContent                 string           `json:"home_content"`
 	CompactHomeEnabled          bool             `json:"compact_home_enabled"`
-	HideCcsImportButton         bool             `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled bool             `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL     string           `json:"purchase_subscription_url"`
 	TableDefaultPageSize        int              `json:"table_default_page_size"`
@@ -165,15 +168,10 @@ type SystemSettings struct {
 	CustomMenuItems             []CustomMenuItem `json:"custom_menu_items"`
 	CustomEndpoints             []CustomEndpoint `json:"custom_endpoints"`
 
-	DefaultConcurrency           int                          `json:"default_concurrency"`
-	DefaultBalance               float64                      `json:"default_balance"`
-	AffiliateRebateRate          float64                      `json:"affiliate_rebate_rate"`
-	AffiliateRebateFreezeHours   int                          `json:"affiliate_rebate_freeze_hours"`
-	AffiliateRebateDurationDays  int                          `json:"affiliate_rebate_duration_days"`
-	AffiliateRebatePerInviteeCap float64                      `json:"affiliate_rebate_per_invitee_cap"`
-	AdminRechargeRebateEnabled   bool                         `json:"affiliate_admin_recharge_enabled"`
-	DefaultUserRPMLimit          int                          `json:"default_user_rpm_limit"`
-	DefaultSubscriptions         []DefaultSubscriptionSetting `json:"default_subscriptions"`
+	DefaultConcurrency   int                          `json:"default_concurrency"`
+	DefaultBalance       float64                      `json:"default_balance"`
+	DefaultUserRPMLimit  int                          `json:"default_user_rpm_limit"`
+	DefaultSubscriptions []DefaultSubscriptionSetting `json:"default_subscriptions"`
 
 	// Model fallback configuration
 	EnableModelFallback      bool   `json:"enable_model_fallback"`
@@ -239,33 +237,9 @@ type SystemSettings struct {
 	PaymentVisibleMethodWxpayEnabled  bool   `json:"payment_visible_method_wxpay_enabled"`
 
 	// OpenAI account scheduling
-	OpenAILowUpstreamRatePriorityEnabled                   bool     `json:"openai_low_upstream_rate_priority_enabled"`
-	OpenAIOAuthSchedulingRateMultiplier                    *float64 `json:"openai_oauth_scheduling_rate_multiplier"`
-	OpenAIAdvancedSchedulerEnabled                         bool     `json:"openai_advanced_scheduler_enabled"`
-	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool     `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
-	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool     `json:"openai_advanced_scheduler_subscription_priority_enabled"`
-	OpenAIAdvancedSchedulerLBTopK                          string   `json:"openai_advanced_scheduler_lb_top_k"`
-	OpenAIAdvancedSchedulerWeightPriority                  string   `json:"openai_advanced_scheduler_weight_priority"`
-	OpenAIAdvancedSchedulerWeightLoad                      string   `json:"openai_advanced_scheduler_weight_load"`
-	OpenAIAdvancedSchedulerWeightQueue                     string   `json:"openai_advanced_scheduler_weight_queue"`
-	OpenAIAdvancedSchedulerWeightErrorRate                 string   `json:"openai_advanced_scheduler_weight_error_rate"`
-	OpenAIAdvancedSchedulerWeightTTFT                      string   `json:"openai_advanced_scheduler_weight_ttft"`
-	OpenAIAdvancedSchedulerWeightReset                     string   `json:"openai_advanced_scheduler_weight_reset"`
-	OpenAIAdvancedSchedulerWeightQuotaHeadroom             string   `json:"openai_advanced_scheduler_weight_quota_headroom"`
-	OpenAIAdvancedSchedulerWeightUpstreamCost              string   `json:"openai_advanced_scheduler_weight_upstream_cost"`
-	OpenAIAdvancedSchedulerWeightPreviousResponse          string   `json:"openai_advanced_scheduler_weight_previous_response"`
-	OpenAIAdvancedSchedulerWeightSessionSticky             string   `json:"openai_advanced_scheduler_weight_session_sticky"`
-	OpenAIAdvancedSchedulerEffectiveLBTopK                 string   `json:"openai_advanced_scheduler_effective_lb_top_k"`
-	OpenAIAdvancedSchedulerEffectiveWeightPriority         string   `json:"openai_advanced_scheduler_effective_weight_priority"`
-	OpenAIAdvancedSchedulerEffectiveWeightLoad             string   `json:"openai_advanced_scheduler_effective_weight_load"`
-	OpenAIAdvancedSchedulerEffectiveWeightQueue            string   `json:"openai_advanced_scheduler_effective_weight_queue"`
-	OpenAIAdvancedSchedulerEffectiveWeightErrorRate        string   `json:"openai_advanced_scheduler_effective_weight_error_rate"`
-	OpenAIAdvancedSchedulerEffectiveWeightTTFT             string   `json:"openai_advanced_scheduler_effective_weight_ttft"`
-	OpenAIAdvancedSchedulerEffectiveWeightReset            string   `json:"openai_advanced_scheduler_effective_weight_reset"`
-	OpenAIAdvancedSchedulerEffectiveWeightQuotaHeadroom    string   `json:"openai_advanced_scheduler_effective_weight_quota_headroom"`
-	OpenAIAdvancedSchedulerEffectiveWeightUpstreamCost     string   `json:"openai_advanced_scheduler_effective_weight_upstream_cost"`
-	OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse string   `json:"openai_advanced_scheduler_effective_weight_previous_response"`
-	OpenAIAdvancedSchedulerEffectiveWeightSessionSticky    string   `json:"openai_advanced_scheduler_effective_weight_session_sticky"`
+	OpenAILowUpstreamRatePriorityEnabled               bool     `json:"openai_low_upstream_rate_priority_enabled"`
+	OpenAIOAuthSchedulingRateMultiplier                *float64 `json:"openai_oauth_scheduling_rate_multiplier"`
+	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled bool     `json:"openai_advanced_scheduler_subscription_priority_enabled"`
 
 	// Payment configuration
 	PaymentEnabled                   bool     `json:"payment_enabled"`
@@ -343,9 +317,6 @@ type SystemSettings struct {
 	CyberPolicyUserAllowlist    string `json:"cyber_policy_user_allowlist"`
 	CyberSessionBlockTTLSeconds int    `json:"cyber_session_block_ttl_seconds"`
 
-	// Affiliate (邀请返利) feature switch
-	AffiliateEnabled bool `json:"affiliate_enabled"`
-
 	// OpenAI fast/flex policy
 	OpenAIFastPolicySettings *OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
 
@@ -356,7 +327,23 @@ type SystemSettings struct {
 	AccountSchedulingThresholds map[string]int `json:"account_scheduling_thresholds,omitempty"`
 
 	// 允许终端用户在用量页查看自己的失败请求
-	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`
+	AllowUserViewErrorRequests    bool   `json:"allow_user_view_error_requests"`
+	ExcelBPSEnabled               bool   `json:"excel_bps_enabled"`
+	ExcelBPSImageMode             string `json:"excel_bps_image_mode"`
+	ExcelBPSImageRelayEnabled     bool   `json:"excel_bps_image_relay_enabled"`
+	ExcelBPSImageBaseURL          string `json:"excel_bps_image_base_url"`
+	ExcelBPSImageBodyLimitMiB     int    `json:"excel_bps_image_body_limit_mib"`
+	ExcelBPSImageBudgetMiB        int    `json:"excel_bps_image_budget_mib"`
+	ExcelBPSImageMaxRequests      int    `json:"excel_bps_image_max_requests"`
+	ExcelBPSImageMaxImageMiB      int    `json:"excel_bps_image_max_image_mib"`
+	ExcelBPSImageMaxImages        int    `json:"excel_bps_image_max_images"`
+	ExcelBPSImageLimitPolicy      string `json:"excel_bps_image_limit_policy"`
+	ExcelBPSImageWarningRemaining int    `json:"excel_bps_image_warning_remaining"`
+	ExcelBPSImageCompactReserve   int    `json:"excel_bps_image_compact_reserve"`
+	ExcelBPSImageMaxTotalMiB      int    `json:"excel_bps_image_max_total_mib"`
+	ExcelBPSImageStorageMiB       int    `json:"excel_bps_image_storage_mib"`
+	ExcelBPSImageStorageEntries   int    `json:"excel_bps_image_storage_entries"`
+	ExcelBPSImageTTLMinutes       int    `json:"excel_bps_image_ttl_minutes"`
 }
 
 type DefaultSubscriptionSetting struct {
@@ -365,6 +352,8 @@ type DefaultSubscriptionSetting struct {
 }
 
 type PublicSettings struct {
+	VendorConsoleEnabled                bool                     `json:"vendor_console_enabled"`
+	VendorPortalOrigin                  string                   `json:"vendor_portal_origin"`
 	RegistrationEnabled                 bool                     `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`
 	ForceEmailOnThirdPartySignup        bool                     `json:"force_email_on_third_party_signup"`
@@ -372,7 +361,6 @@ type PublicSettings struct {
 	RegistrationEmailDomainQuotaEnabled bool                     `json:"registration_email_domain_quota_enabled"`
 	PromoCodeEnabled                    bool                     `json:"promo_code_enabled"`
 	PasswordResetEnabled                bool                     `json:"password_reset_enabled"`
-	InvitationCodeEnabled               bool                     `json:"invitation_code_enabled"`
 	TotpEnabled                         bool                     `json:"totp_enabled"` // TOTP 双因素认证
 	PasskeyEnabled                      bool                     `json:"passkey_enabled"`
 	LoginAgreementEnabled               bool                     `json:"login_agreement_enabled"`
@@ -397,7 +385,6 @@ type PublicSettings struct {
 	DocURL                              string                   `json:"doc_url"`
 	HomeContent                         string                   `json:"home_content"`
 	CompactHomeEnabled                  bool                     `json:"compact_home_enabled"`
-	HideCcsImportButton                 bool                     `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled         bool                     `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL             string                   `json:"purchase_subscription_url"`
 	TableDefaultPageSize                int                      `json:"table_default_page_size"`
@@ -444,8 +431,6 @@ type PublicSettings struct {
 	ModelPlazaEnabled       bool `json:"model_plaza_enabled"`
 	ModelPlazaRequireAuth   bool `json:"model_plaza_require_auth"`
 	PluginManagementEnabled bool `json:"plugin_management_enabled"`
-
-	AffiliateEnabled bool `json:"affiliate_enabled"`
 
 	RiskControlEnabled bool `json:"risk_control_enabled"`
 

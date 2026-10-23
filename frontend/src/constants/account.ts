@@ -1,3 +1,5 @@
+/** Initial model selection for BPS account settings. */
+export const DEFAULT_EXCEL_BPS_MODELS = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'] as const
 /** WebSearch emulation mode values (must match backend WebSearchMode* constants in account.go) */
 export const WEB_SEARCH_MODE_DEFAULT = 'default' as const
 export const WEB_SEARCH_MODE_ENABLED = 'enabled' as const

@@ -1,5 +1,8 @@
 export default {
   common: {
+    // Site name. Overwritten via mergeLocaleMessage in stores/app.ts once the
+    // public settings load; reference it as @:common.siteName in copy.
+    siteName: 'Tokensavy',
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',
@@ -121,8 +124,8 @@ export default {
     blockingNotice: 'Deployment and operation compliance acknowledgment is required before continuing to use the console.',
     riskNotice: 'This acknowledgment provides clear, conspicuous, and reproducible notice of compliance obligations and operation risks for self-hosted instances.',
     version: 'Document Version',
-    openDocument: 'Open the GitHub document',
-    documentSource: 'The agreement text comes from Markdown files in this project repository. When the agreement content changes, the document version must be incremented; acknowledgments of older versions become invalid and console users must acknowledge again.',
+    openDocument: 'View the full agreement',
+    documentSource: 'The agreement text ships with the software and is managed by version. When the agreement content changes, the document version must be incremented; acknowledgments of older versions become invalid and console users must acknowledge again.',
     inputLabel: 'Type the following confirmation phrase exactly',
     inputPlaceholder: 'Type the confirmation phrase to continue',
     inputMismatch: 'The confirmation phrase does not match. Type the displayed text exactly.',
@@ -134,6 +137,7 @@ export default {
   },
 
   legal: {
+    pageTitle: 'Legal Document',
     loadFailed: 'Failed to load document',
     retryLater: 'Refresh the page and try again later.',
     notFound: 'Document not found',
@@ -168,12 +172,6 @@ export default {
     apiKeys: 'API Keys',
     batchImage: 'Batch Images',
     usage: 'Usage',
-    redeem: 'Redeem',
-    affiliate: 'Affiliate Rebates',
-    affiliateManagement: 'Affiliate Rebates',
-    affiliateInviteRecords: 'Invite Records',
-    affiliateRebateRecords: 'Rebate Records',
-    affiliateTransferRecords: 'Transfer Records',
     profile: 'Profile',
     users: 'Users',
     groups: 'Groups',
@@ -184,7 +182,6 @@ export default {
     accounts: 'Accounts',
     plugins: 'Plugins',
     proxies: 'Proxies',
-    redeemCodes: 'Redeem Codes',
     ops: 'Ops',
     promoCodes: 'Promo Codes',
     settings: 'Settings',
@@ -296,13 +293,6 @@ export default {
     promoCodeAlreadyUsed: 'You have already used this promo code',
     promoCodeValidating: 'Promo code is being validated, please wait',
     promoCodeInvalidCannotRegister: 'Invalid promo code. Please check and try again or clear the promo code field',
-    invitationCodeLabel: 'Invitation Code',
-    invitationCodePlaceholder: 'Enter invitation code',
-    invitationCodeRequired: 'Invitation code is required',
-    invitationCodeValid: 'Invitation code is valid',
-    invitationCodeInvalid: 'Invalid or used invitation code',
-    invitationCodeValidating: 'Validating invitation code...',
-    invitationCodeInvalidCannotRegister: 'Invalid invitation code. Please check and try again',
     oauthOrContinue: 'or continue with others',
     linuxdo: {
       signIn: 'Continue with Linux.do',
@@ -312,7 +302,6 @@ export default {
       callbackHint: 'If you are not redirected automatically, go back to the login page and try again.',
       callbackMissingToken: 'Missing login token, please try again.',
       backToLogin: 'Back to Login',
-      invitationRequired: 'This Linux.do account is not yet registered. The site requires an invitation code — please enter one to complete registration.',
       invalidPendingToken: 'The registration token has expired. Please sign in with Linux.do again.',
       completeRegistration: 'Complete Registration',
       completing: 'Completing registration…',
@@ -325,7 +314,6 @@ export default {
       callbackHint: 'If you are not redirected automatically, go back to the login page and try again.',
       callbackMissingToken: 'Missing login token, please try again.',
       backToLogin: 'Back to Login',
-      invitationRequired: 'This DingTalk account is not yet registered. The site requires an invitation code — please enter one to complete registration.',
       invalidPendingToken: 'The registration token has expired. Please sign in with DingTalk again.',
       completeRegistration: 'Complete Registration',
       completing: 'Completing registration…',
@@ -356,8 +344,6 @@ export default {
       callbackHint: 'If you are not redirected automatically, go back to the login page and try again.',
       callbackMissingToken: 'Missing login token, please try again.',
       backToLogin: 'Back to Login',
-      invitationRequired:
-        'This {providerName} account is not yet registered. The site requires an invitation code — please enter one to complete registration.',
       invalidPendingToken: 'The registration token has expired. Please sign in again.',
       completeRegistration: 'Complete Registration',
       completing: 'Completing registration…',

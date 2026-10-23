@@ -27,6 +27,10 @@ type User struct {
 	Email string `json:"email,omitempty"`
 	// PasswordHash holds the value of the "password_hash" field.
 	PasswordHash string `json:"password_hash,omitempty"`
+	// SessionGeneration holds the value of the "session_generation" field.
+	SessionGeneration int64 `json:"session_generation,omitempty"`
+	// CreatedBy holds the value of the "created_by" field.
+	CreatedBy *int64 `json:"created_by,omitempty"`
 	// Role holds the value of the "role" field.
 	Role string `json:"role,omitempty"`
 	// Balance holds the value of the "balance" field.
@@ -243,7 +247,7 @@ func (*User) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case user.FieldBalance, user.FieldFrozenBalance, user.FieldBalanceNotifyThreshold, user.FieldTotalRecharged:
 			values[i] = new(sql.NullFloat64)
-		case user.FieldID, user.FieldConcurrency, user.FieldRpmLimit:
+		case user.FieldID, user.FieldSessionGeneration, user.FieldCreatedBy, user.FieldConcurrency, user.FieldRpmLimit:
 			values[i] = new(sql.NullInt64)
 		case user.FieldEmail, user.FieldPasswordHash, user.FieldRole, user.FieldStatus, user.FieldUsername, user.FieldNotes, user.FieldTotpSecretEncrypted, user.FieldSignupSource, user.FieldBalanceNotifyThresholdType, user.FieldBalanceNotifyExtraEmails:
 			values[i] = new(sql.NullString)
@@ -300,6 +304,19 @@ func (_m *User) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field password_hash", values[i])
 			} else if value.Valid {
 				_m.PasswordHash = value.String
+			}
+		case user.FieldSessionGeneration:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field session_generation", values[i])
+			} else if value.Valid {
+				_m.SessionGeneration = value.Int64
+			}
+		case user.FieldCreatedBy:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field created_by", values[i])
+			} else if value.Valid {
+				_m.CreatedBy = new(int64)
+				*_m.CreatedBy = value.Int64
 			}
 		case user.FieldRole:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -548,6 +565,14 @@ func (_m *User) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("password_hash=")
 	builder.WriteString(_m.PasswordHash)
+	builder.WriteString(", ")
+	builder.WriteString("session_generation=")
+	builder.WriteString(fmt.Sprintf("%v", _m.SessionGeneration))
+	builder.WriteString(", ")
+	if v := _m.CreatedBy; v != nil {
+		builder.WriteString("created_by=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteString(", ")
 	builder.WriteString("role=")
 	builder.WriteString(_m.Role)
