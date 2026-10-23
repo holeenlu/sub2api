@@ -356,7 +356,8 @@ SELECT
   last_error,
   last_duration_ms,
   last_result,
-  updated_at
+  updated_at,
+  COALESCE(expected_interval_seconds, 0)
 FROM ops_job_heartbeats
 ORDER BY job_name ASC`
 
@@ -386,6 +387,7 @@ ORDER BY job_name ASC`
 			&lastDuration,
 			&lastResult,
 			&item.UpdatedAt,
+			&item.ExpectedIntervalSeconds,
 		); err != nil {
 			return nil, err
 		}

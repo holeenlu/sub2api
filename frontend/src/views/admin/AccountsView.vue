@@ -11,7 +11,7 @@
             @change="debouncedReload"
             @update:searchQuery="debouncedReload"
           />
-          <AccountTableActions
+          <AccountTableActions :can-create="rolePermissions.can('accounts.authorize')"
             :loading="loading"
             @refresh="handleManualRefresh"
             @create="showCreate = true"
@@ -88,19 +88,19 @@
                           {{ t('admin.accounts.dataActions') }}
                         </div>
                       </div>
-                      <button class="account-tools-menu-item" @click="openSyncFromCrs">
+                      <button v-if="rolePermissions.can('accounts.authorize')" class="account-tools-menu-item" @click="openSyncFromCrs">
                         <span class="account-tools-menu-icon bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
                           <Icon name="sync" size="sm" />
                         </span>
                         <span class="flex-1 text-left">{{ t('admin.accounts.syncFromCrs') }}</span>
                       </button>
-                      <button class="account-tools-menu-item" @click="openImportData">
+                      <button v-if="rolePermissions.can('accounts.authorize')" class="account-tools-menu-item" @click="openImportData">
                         <span class="account-tools-menu-icon bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
                           <Icon name="upload" size="sm" />
                         </span>
                         <span class="flex-1 text-left">{{ t('admin.accounts.dataImport') }}</span>
                       </button>
-                      <button class="account-tools-menu-item" @click="openExportDataDialogFromMenu">
+                      <button v-if="rolePermissions.isSuperAdmin" class="account-tools-menu-item" @click="openExportDataDialogFromMenu">
                         <span class="account-tools-menu-icon bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300">
                           <Icon name="download" size="sm" />
                         </span>
@@ -121,13 +121,13 @@
                           {{ t('admin.accounts.toolActions') }}
                         </div>
                       </div>
-                      <button class="account-tools-menu-item" @click="openErrorPassthrough">
+                      <button v-if="rolePermissions.isSuperAdmin" class="account-tools-menu-item" @click="openErrorPassthrough">
                         <span class="account-tools-menu-icon bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300">
                           <Icon name="shield" size="sm" />
                         </span>
                         <span class="flex-1 text-left">{{ t('admin.errorPassthrough.title') }}</span>
                       </button>
-                      <button class="account-tools-menu-item" @click="openTLSFingerprintProfiles">
+                      <button v-if="rolePermissions.isSuperAdmin" class="account-tools-menu-item" @click="openTLSFingerprintProfiles">
                         <span class="account-tools-menu-icon bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200">
                           <Icon name="lock" size="sm" />
                         </span>
@@ -223,25 +223,27 @@
             <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
           </template>
           <template #cell-name="{ row, value }">
-            <div class="flex flex-col">
+            <div class="flex w-[228px] min-w-0 flex-col">
               <HelpTooltip
                 v-if="accountHomepageUrl(row)"
                 :content="accountHomepageUrl(row)"
                 width-class="w-max max-w-sm break-all"
-                class="-ml-1 self-start"
+                class="-ml-1 min-w-0 max-w-full self-start"
               >
                 <template #trigger>
                   <a
                     :href="accountHomepageUrl(row)"
                     target="_blank"
                     rel="noopener noreferrer"
-                    class="border-b border-dotted border-gray-300 font-medium text-gray-900 dark:border-dark-600 dark:text-white"
+                    class="block min-w-0 max-w-[228px] truncate border-b border-dotted border-gray-300 font-medium text-gray-900 dark:border-dark-600 dark:text-white"
+                    :title="value"
                   >
                     {{ value }}
                   </a>
                 </template>
               </HelpTooltip>
-              <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <span v-else class="block truncate font-medium text-gray-900 dark:text-white" :title="value">{{ value }}</span>
+              <span class="text-[11px] text-gray-400">#{{ row.id }}</span>
               <span
                 v-if="accountDisplayEmail(row)"
                 class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
@@ -249,6 +251,8 @@
               >
                 {{ accountDisplayEmail(row) }}
               </span>
+              <ExcelBPS403Badge :account="row" :groups="accountGroupsForRow(row)" />
+              <CodexDiagnosticBadge :summary="row.codex_diagnostic" @open="openCodexDiagnostic(row)" />
             </div>
           </template>
           <template #cell-notes="{ value }">
@@ -292,7 +296,7 @@
             </div>
           </template>
           <template #cell-schedulable="{ row }">
-            <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+            <button v-if="rolePermissions.can('accounts.manage')" @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
           </template>
@@ -343,7 +347,7 @@
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" :title="t('admin.accounts.fallbackActiveTip', { origin: row.proxy_fallback_origin_name })">
                   {{ t('admin.accounts.fallbackActive') }}
                 </span>
-                <button class="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-dark-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700" @click="onRevertFallback(row)">{{ t('admin.accounts.revertProxy') }}</button>
+                <button v-if="rolePermissions.can('accounts.manage')" class="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-dark-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700" @click="onRevertFallback(row)">{{ t('admin.accounts.revertProxy') }}</button>
               </div>
             </div>
           </template>
@@ -397,19 +401,23 @@
                 v-for="score in getSchedulerScoreRows(row)"
                 :key="String(score.group_id)"
                 class="flex items-center gap-1 whitespace-nowrap text-gray-700 dark:text-gray-300"
-                :title="`${formatSchedulerScoreGroup(score)} / ${formatSchedulerScore(score.base_score)} / ${formatStickySchedulerScore(score)}`"
+                :title="`${formatSchedulerScoreGroup(score)} / ${formatSchedulerScore(score.base_score)}`"
               >
                 <span class="max-w-[4.75rem] truncate text-gray-500 dark:text-dark-400">{{ formatSchedulerScoreGroup(score) }}</span>
                 <span class="text-gray-300 dark:text-gray-600">/</span>
                 <span>{{ formatSchedulerScore(score.base_score) }}</span>
-                <span class="text-gray-300 dark:text-gray-600">/</span>
-                <span class="text-primary-700 dark:text-primary-300">{{ formatStickySchedulerScore(score) }}</span>
               </div>
             </div>
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
           <template #cell-last_used_at="{ value }">
             <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatRelativeTime(value) }}</span>
+          </template>
+          <template #cell-created_by_name="{ row }">
+            <span :title="row.created_by ? '#' + row.created_by : undefined">{{ row.created_by_name || t('admin.accounts.creatorUnknown') }}</span>
+          </template>
+          <template #cell-created_by_role="{ value }">
+            {{ value ? (value === 'system' ? t('admin.accounts.creatorSystem') : t('admin.users.roles.' + value)) : t('admin.accounts.creatorUnknown') }}
           </template>
           <template #cell-created_at="{ value }">
             <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
@@ -435,11 +443,11 @@
           </template>
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
-              <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
+              <button v-if="rolePermissions.can('accounts.manage')" @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
-              <button @click="handleDelete(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
+              <button v-if="rolePermissions.can('accounts.manage')" @click="handleDelete(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
                 <span class="text-xs">{{ t('common.delete') }}</span>
               </button>
@@ -454,16 +462,20 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
-    <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
+    <CreateAccountModal :allow-rate-edit="rolePermissions.can('billing.rates.update')" :allow-system-settings="rolePermissions.isSuperAdmin" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
+    <EditAccountModal :allow-rate-edit="rolePermissions.can('billing.rates.update')" :show-cost="rolePermissions.can('billing.cost.read')" :allow-authorize="rolePermissions.can('accounts.authorize')" :allow-transport-edit="rolePermissions.isSuperAdmin" :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <ReAuthAccountModal :allow-extra-edit="rolePermissions.isSuperAdmin" :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <CodexDiagnosticModal :show="showCodexDiagnostic" :account="codexDiagnosticAcc" @close="showCodexDiagnostic = false" @completed="handleCodexDiagnosticCompleted" />
+    <AccountActionMenu @codex-diagnostic="openCodexDiagnostic" :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
+      :allow-rate-edit="rolePermissions.can('billing.rates.update')"
+      :allow-authorize="rolePermissions.can('accounts.authorize')"
+      :allow-transport-edit="rolePermissions.isSuperAdmin"
       :show="showBulkEdit"
       :account-ids="selIds"
       :selected-platforms="selPlatforms"
@@ -490,6 +502,9 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore as useRolePermissions } from '@/stores/auth'
+const rolePermissions = useRolePermissions()
+
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
@@ -513,6 +528,8 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import CodexDiagnosticModal from '@/components/admin/account/CodexDiagnosticModal.vue'
+import CodexDiagnosticBadge from '@/components/admin/account/CodexDiagnosticBadge.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
@@ -524,6 +541,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
+import ExcelBPS403Badge from '@/components/account/ExcelBPS403Badge.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
@@ -554,29 +572,12 @@ const accountGroupsForRow = (account: Pick<AccountListItem, 'group_ids'>): Admin
 }
 const accountTableRef = ref<HTMLElement | null>(null)
 const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
-type AccountBulkEditTarget =
-  | {
+type AccountBulkEditTarget = {
       mode: 'selected'
       accountIds: number[]
       selectedPlatforms: AccountPlatform[]
       selectedTypes: AccountType[]
-    }
-  | {
-      mode: 'filtered'
-      filters: {
-        platform?: string
-        type?: string
-        status?: string
-        group?: string
-        search?: string
-        privacy_mode?: string
-        sort_by?: string
-        sort_order?: AccountSortOrder
-      }
-      previewCount: number
-      selectedPlatforms: AccountPlatform[]
-      selectedTypes: AccountType[]
-    }
+}
 const selPlatforms = computed<AccountPlatform[]>(() => {
   const platforms = new Set(
     accounts.value
@@ -595,6 +596,13 @@ const selTypes = computed<AccountType[]>(() => {
 })
 const showCreate = ref(false)
 const showEdit = ref(false)
+const showCodexDiagnostic = ref(false)
+const codexDiagnosticAcc = ref<Account | null>(null)
+function openCodexDiagnostic(account: Account) { codexDiagnosticAcc.value = account; showCodexDiagnostic.value = true }
+async function handleCodexDiagnosticCompleted(accountID: number) {
+  try { handleAccountUpdated(await adminAPI.accounts.getById(accountID)) }
+  catch (error) { console.error('Failed to refresh account after diagnostic', error) }
+}
 const showSync = ref(false)
 const showImportData = ref(false)
 const showExportDataDialog = ref(false)
@@ -794,6 +802,14 @@ const setUsageBatchState = (accountID: number, usage: AccountUsageInfo | null, e
 
 const handleAccountUsageLoaded = (accountID: number, usage: AccountUsageInfo) => {
   if (usageBatchByAccountId.value[String(accountID)] === usage) return
+  // A direct query/reset result supersedes any older desktop batch and cache.
+  usageBatchRequestTokenByAccountId.value = {
+    ...usageBatchRequestTokenByAccountId.value,
+    [String(accountID)]: ++usageBatchRequestToken
+  }
+  pendingUsageBatchIds.delete(accountID)
+  usageBatchCache.set(accountID, { data: usage, ts: Date.now() })
+  setUsageBatchLoading(accountID, false)
   setUsageBatchState(accountID, usage, null)
 }
 
@@ -950,12 +966,6 @@ const formatSchedulerScore = (value: unknown): string => {
   const num = Number(value)
   if (!Number.isFinite(num)) return '-'
   return num.toFixed(6).replace(/\.?0+$/, '')
-}
-
-const formatStickySchedulerScore = (score: AccountSchedulerGroupScore): string => {
-  if (!score) return '-'
-  if (score.sticky_score_infinity) return '+∞'
-  return formatSchedulerScore(score.sticky_score)
 }
 
 const getSchedulerScoreRows = (account: Account): AccountSchedulerGroupScore[] => {
@@ -1274,6 +1284,7 @@ const applyUpstreamBillingRateSnapshots = async (
 }
 
 const refreshUpstreamBillingRates = async (force = false) => {
+ if (!rolePermissions.can('billing.cost.read')) return
   if (upstreamBillingRateRefreshing.value || loading.value || accounts.value.length === 0) return
   if (!force && (
     probingUpstreamBilling.size > 0 ||
@@ -1432,6 +1443,7 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.active_sessions !== next.active_sessions ||
     current.schedulable !== next.schedulable ||
     current.status !== next.status ||
+    JSON.stringify(current.anthropic_status ?? null) !== JSON.stringify(next.anthropic_status ?? null) ||
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
     current.overload_until !== next.overload_until ||
     current.temp_unschedulable_until !== next.temp_unschedulable_until ||
@@ -1526,6 +1538,7 @@ const handleManualRefresh = async () => {
 }
 
 const loadUpstreamBillingProbeGlobalState = async () => {
+ if (!rolePermissions.isSuperAdmin) return
   try {
     const settings = await adminAPI.accounts.getUpstreamBillingProbeSettings()
     upstreamBillingProbeGloballyEnabled.value = settings.enabled
@@ -1824,7 +1837,7 @@ function getAntigravityTierClass(row: any): string {
 const allColumns = computed(() => {
   const c = [
     { key: 'select', label: '', sortable: false },
-    { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
+    { key: 'name', label: t('admin.accounts.columns.name'), sortable: true, class: 'w-[260px] max-w-[260px]' },
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
@@ -1843,12 +1856,14 @@ const allColumns = computed(() => {
     { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
     { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
     { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
+    { key: 'created_by_name', label: t('admin.accounts.columns.createdBy'), sortable: false },
+    { key: 'created_by_role', label: t('admin.accounts.columns.createdByRole'), sortable: false },
     { key: 'created_at', label: t('admin.accounts.columns.createdAt'), sortable: true },
     { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
     { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
     { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
   )
-  return c
+  return rolePermissions.can('billing.cost.read') ? c : c.filter(column => !['usage', 'today_stats', 'rate_multiplier', 'upstream_billing_rate'].includes(column.key))
 })
 
 // Columns that can be toggled (exclude select, name, and actions)
@@ -2144,17 +2159,42 @@ const openBulkEditSelected = () => {
 }
 
 const openBulkEditFiltered = async () => {
-  const filters = buildBulkEditFilterSnapshot()
-  const preview = await adminAPI.accounts.list(1, 100, filters)
-  const { selectedPlatforms, selectedTypes } = collectSelectionMetadata(preview.items)
-  bulkEditTarget.value = {
-    mode: 'filtered',
-    filters,
-    previewCount: preview.total,
-    selectedPlatforms,
-    selectedTypes
+  // A checked selection always wins, including queued clicks from the old toolbar.
+  if (selIds.value.length > 0) {
+    openBulkEditSelected()
+    return
   }
-  showBulkEdit.value = true
+  const filters = buildBulkEditFilterSnapshot()
+  const requestVersion = selectionRequestVersion.value
+  try {
+    // Freeze the complete preview as explicit IDs. Saving must never re-resolve
+    // a broader filter or silently include accounts created while editing.
+    const rows: Account[] = []
+    const accountIds = await fetchAllAccountIds(async (page, pageSize, requestFilters) => {
+      const result = await adminAPI.accounts.list(page, pageSize, requestFilters)
+      rows.push(...result.items)
+      return result
+    }, filters)
+    if (requestVersion !== selectionRequestVersion.value) return
+    if (selIds.value.length > 0) {
+      openBulkEditSelected()
+      return
+    }
+    if (accountIds.length === 0) {
+      appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
+      return
+    }
+    const { selectedPlatforms, selectedTypes } = collectSelectionMetadata(rows)
+    bulkEditTarget.value = {
+      mode: 'selected',
+      accountIds,
+      selectedPlatforms,
+      selectedTypes
+    }
+    showBulkEdit.value = true
+  } catch {
+    appStore.showError(t('admin.accounts.bulkActions.selectAllFailed'))
+  }
 }
 
 const handleBulkUpdated = () => {
@@ -2316,7 +2356,7 @@ const handleExportData = async () => {
           }
     ))
     const timestamp = formatExportTimestamp()
-    const filename = `sub2api-account-${timestamp}.json`
+    const filename = `kdan-account-${timestamp}.json`
     const blob = new Blob([JSON.stringify(dataPayload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')

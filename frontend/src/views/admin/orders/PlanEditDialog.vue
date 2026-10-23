@@ -6,7 +6,7 @@
           <label class="input-label">{{ t('payment.admin.planName') }} <span class="text-red-500">*</span></label>
           <input v-model="planForm.name" type="text" class="input" required />
         </div>
-        <div>
+        <div :inert="!canEditField('group_id')" :aria-disabled="!canEditField('group_id')">
           <label class="input-label">{{ t('payment.admin.group') }} <span class="text-red-500">*</span></label>
           <Select v-model="planForm.group_id" :options="groupOptions" :placeholder="t('payment.admin.selectGroup')" class="w-full">
             <template #selected="{ option }">
@@ -35,7 +35,7 @@
 
       <div><label class="input-label">{{ t('payment.admin.planDescription') }} <span class="text-red-500">*</span></label><textarea v-model="planForm.description" rows="2" class="input" required></textarea></div>
       <div class="grid grid-cols-2 gap-4">
-        <div>
+        <div :inert="!canEditField('price')" :aria-disabled="!canEditField('price')">
           <label class="input-label">{{ t('payment.admin.price') }} <span class="text-red-500">*</span></label>
           <input v-model.number="planForm.price" type="number" step="0.01" min="0.01" class="input" required />
           <p v-if="subscriptionCnyPreview" class="mt-1 text-xs font-medium text-primary-600 dark:text-primary-400">
@@ -45,15 +45,15 @@
             </span>
           </p>
         </div>
-        <div><label class="input-label">{{ t('payment.admin.originalPrice') }}</label><input v-model.number="planForm.original_price" type="number" step="0.01" min="0" class="input" /></div>
+        <div :inert="!canEditField('original_price')" :aria-disabled="!canEditField('original_price')"><label class="input-label">{{ t('payment.admin.originalPrice') }}</label><input v-model.number="planForm.original_price" type="number" step="0.01" min="0" class="input" /></div>
       </div>
       <div class="grid grid-cols-2 gap-4">
-        <div><label class="input-label">{{ t('payment.admin.validity') }} <span class="text-red-500">*</span></label><input v-model.number="planForm.validity_days" type="number" min="1" class="input" required /></div>
-        <div><label class="input-label">{{ t('payment.admin.validityUnit') }} <span class="text-red-500">*</span></label><Select v-model="planForm.validity_unit" :options="validityUnitOptions" /></div>
+        <div :inert="!canEditField('validity_days')" :aria-disabled="!canEditField('validity_days')"><label class="input-label">{{ t('payment.admin.validity') }} <span class="text-red-500">*</span></label><input v-model.number="planForm.validity_days" type="number" min="1" class="input" required /></div>
+        <div :inert="!canEditField('validity_unit')" :aria-disabled="!canEditField('validity_unit')"><label class="input-label">{{ t('payment.admin.validityUnit') }} <span class="text-red-500">*</span></label><Select v-model="planForm.validity_unit" :options="validityUnitOptions" /></div>
       </div>
       <div class="grid grid-cols-2 gap-4">
         <div><label class="input-label">{{ t('payment.admin.sortOrder') }}</label><input v-model.number="planForm.sort_order" type="number" min="0" class="input" /></div>
-        <div>
+        <div :inert="!canEditField('currency')" :aria-disabled="!canEditField('currency')">
           <label class="input-label">{{ t('payment.admin.currency') }}</label>
           <input v-model="planForm.currency" type="text" maxlength="3" class="input uppercase" :placeholder="t('payment.admin.currencyPlaceholder')" />
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.currencyHint') }}</p>
@@ -110,6 +110,7 @@ const props = defineProps<{
   show: boolean
   plan: SubscriptionPlan | null
   groups: AdminGroup[]
+  editableFields?: string[]
   paymentConfig?: AdminPaymentConfig | null
 }>()
 
@@ -121,6 +122,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const appStore = useAppStore()
 
+const canEditField = (field: string) => props.editableFields === undefined || props.editableFields.includes(field)
 const saving = ref(false)
 const planForm = reactive({ name: '', group_id: null as number | null, description: '', price: 0, original_price: 0, currency: '', validity_days: 30, validity_unit: 'days', sort_order: 0, for_sale: true })
 const planFeaturesText = ref('')
@@ -216,7 +218,8 @@ async function handleSavePlan() {
   }
   saving.value = true
   try {
-    const data = buildPlanPayload()
+    const full = buildPlanPayload()
+    const data = Object.fromEntries(Object.entries(full).filter(([field]) => canEditField(field)))
     if (props.plan) { await adminPaymentAPI.updatePlan(props.plan.id, data) }
     else { await adminPaymentAPI.createPlan(data) }
     appStore.showSuccess(t('common.saved'))
