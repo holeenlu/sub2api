@@ -1,0 +1,9 @@
+# Pass alongside your existing Compose file. Use the same project name as before.
+# KDAN/TapModels installations change the service key to kdan/tapmodels.
+services:
+  sub2api:
+    environment:
+      UPDATE_CHECK_ENABLED: "true"
+      UPDATE_COMPOSE_SOCKET: /run/compose-updater/updater.sock
+    volumes:
+      - /run/sub2api-updater:/run/compose-updater:ro

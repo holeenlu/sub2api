@@ -126,3 +126,9 @@ func TestBillingErrorDetails_T10_QuotaExhaustedReturns429WithRetryAfter(t *testi
 		})
 	}
 }
+
+func TestBillingErrorDetails_PricingMissingIsNotInsufficientBalance(t *testing.T) {
+	status, code, _, _ := billingErrorDetails(service.ErrModelPricingUnavailable)
+	require.Equal(t, http.StatusServiceUnavailable, status)
+	require.Equal(t, "model_pricing_unavailable", code)
+}

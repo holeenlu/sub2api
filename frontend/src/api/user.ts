@@ -14,8 +14,6 @@ import type {
   ChangePasswordRequest,
   NotifyEmailEntry,
   UserAuthProvider,
-  UserAffiliateDetail,
-  AffiliateTransferResponse,
   PlatformQuotasResponse,
 } from '@/types'
 
@@ -176,15 +174,9 @@ export async function startOAuthBinding(
   window.location.href = startURL
 }
 
-export async function getAffiliateDetail(): Promise<UserAffiliateDetail> {
-  const { data } = await apiClient.get<UserAffiliateDetail>('/user/aff')
-  return data
-}
 
-export async function transferAffiliateQuota(): Promise<AffiliateTransferResponse> {
-  const { data } = await apiClient.post<AffiliateTransferResponse>('/user/aff/transfer')
-  return data
-}
+
+
 
 /**
  * 获取当前用户的平台限额 + 用量。
@@ -207,8 +199,6 @@ export const userAPI = {
   unbindAuthIdentity,
   buildOAuthBindingStartURL,
   startOAuthBinding,
-  getAffiliateDetail,
-  transferAffiliateQuota,
   getMyPlatformQuotas,
 }
 

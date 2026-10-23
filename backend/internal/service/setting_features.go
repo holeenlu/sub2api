@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -52,24 +51,6 @@ func (s *SettingService) GetRegistrationEmailSuffixWhitelist(ctx context.Context
 	return ParseRegistrationEmailSuffixWhitelist(value)
 }
 
-// IsPromoCodeEnabled 检查是否启用优惠码功能
-func (s *SettingService) IsPromoCodeEnabled(ctx context.Context) bool {
-	value, err := s.settingRepo.GetValue(ctx, SettingKeyPromoCodeEnabled)
-	if err != nil {
-		return true // 默认启用
-	}
-	return value != "false"
-}
-
-// IsInvitationCodeEnabled 检查是否启用邀请码注册功能
-func (s *SettingService) IsInvitationCodeEnabled(ctx context.Context) bool {
-	value, err := s.settingRepo.GetValue(ctx, SettingKeyInvitationCodeEnabled)
-	if err != nil {
-		return false // 默认关闭
-	}
-	return value == "true"
-}
-
 // GetCustomMenuItemsRaw returns the raw JSON string of custom_menu_items setting.
 func (s *SettingService) GetCustomMenuItemsRaw(ctx context.Context) string {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyCustomMenuItems)
@@ -77,88 +58,6 @@ func (s *SettingService) GetCustomMenuItemsRaw(ctx context.Context) string {
 		return "[]"
 	}
 	return value
-}
-
-// IsAffiliateEnabled 检查是否启用邀请返利功能（总开关）
-func (s *SettingService) IsAffiliateEnabled(ctx context.Context) bool {
-	value, err := s.settingRepo.GetValue(ctx, SettingKeyAffiliateEnabled)
-	if err != nil {
-		return false // 默认关闭
-	}
-	return value == "true"
-}
-
-// IsAffiliateAdminRechargeEnabled reports whether admin balance
-// deposits should participate in the affiliate rebate program.
-func (s *SettingService) IsAffiliateAdminRechargeEnabled(ctx context.Context) bool {
-	value, err := s.settingRepo.GetValue(ctx, SettingKeyAffiliateAdminRechargeEnabled)
-	if err != nil {
-		return AdminRechargeRebateEnabledDefault
-	}
-	return value == "true"
-}
-
-// GetAffiliateRebateRatePercent 读取并 clamp 全局返利比例。
-// 解析失败、缺失或越界都回退到 AffiliateRebateRateDefault — 该比例从不抛错，
-// 调用方只关心一个可用的数值。
-func (s *SettingService) GetAffiliateRebateRatePercent(ctx context.Context) float64 {
-	raw, err := s.settingRepo.GetValue(ctx, SettingKeyAffiliateRebateRate)
-	if err != nil {
-		return AffiliateRebateRateDefault
-	}
-	rate, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-	if err != nil || math.IsNaN(rate) || math.IsInf(rate, 0) {
-		return AffiliateRebateRateDefault
-	}
-	return clampAffiliateRebateRate(rate)
-}
-
-// GetAffiliateRebateFreezeHours 返回返利冻结期（小时）。
-// 返回 0 表示不冻结（向后兼容）。
-func (s *SettingService) GetAffiliateRebateFreezeHours(ctx context.Context) int {
-	raw, err := s.settingRepo.GetValue(ctx, SettingKeyAffiliateRebateFreezeHours)
-	if err != nil {
-		return AffiliateRebateFreezeHoursDefault
-	}
-	hours, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || hours < 0 {
-		return AffiliateRebateFreezeHoursDefault
-	}
-	if hours > AffiliateRebateFreezeHoursMax {
-		return AffiliateRebateFreezeHoursMax
-	}
-	return hours
-}
-
-// GetAffiliateRebateDurationDays 返回返利有效期（天）。
-// 返回 0 表示永久有效。
-func (s *SettingService) GetAffiliateRebateDurationDays(ctx context.Context) int {
-	raw, err := s.settingRepo.GetValue(ctx, SettingKeyAffiliateRebateDurationDays)
-	if err != nil {
-		return AffiliateRebateDurationDaysDefault
-	}
-	days, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || days < 0 {
-		return AffiliateRebateDurationDaysDefault
-	}
-	if days > AffiliateRebateDurationDaysMax {
-		return AffiliateRebateDurationDaysMax
-	}
-	return days
-}
-
-// GetAffiliateRebatePerInviteeCap 返回单人返利上限。
-// 返回 0 表示无上限。
-func (s *SettingService) GetAffiliateRebatePerInviteeCap(ctx context.Context) float64 {
-	raw, err := s.settingRepo.GetValue(ctx, SettingKeyAffiliateRebatePerInviteeCap)
-	if err != nil {
-		return AffiliateRebatePerInviteeCapDefault
-	}
-	cap, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-	if err != nil || cap < 0 || math.IsNaN(cap) || math.IsInf(cap, 0) {
-		return AffiliateRebatePerInviteeCapDefault
-	}
-	return cap
 }
 
 // IsPasswordResetEnabled 检查是否启用密码重置功能
@@ -1002,10 +901,10 @@ func (s *SettingService) GetOpenAIFastPolicySettings(ctx context.Context) (*Open
 	return &settings, nil
 }
 
-// SetOpenAIFastPolicySettings 设置 OpenAI fast 策略配置
-func (s *SettingService) SetOpenAIFastPolicySettings(ctx context.Context, settings *OpenAIFastPolicySettings) error {
+// EncodeOpenAIFastPolicySettings 为设置原子保存校验并编码 Fast 策略。
+func EncodeOpenAIFastPolicySettings(settings *OpenAIFastPolicySettings) (string, error) {
 	if settings == nil {
-		return fmt.Errorf("settings cannot be nil")
+		return "", fmt.Errorf("settings cannot be nil")
 	}
 
 	validActions := map[string]bool{
@@ -1026,43 +925,43 @@ func (s *SettingService) SetOpenAIFastPolicySettings(ctx context.Context, settin
 			tier = OpenAIFastTierAny
 		}
 		if !validTiers[tier] {
-			return fmt.Errorf("rule[%d]: invalid service_tier %q", i, rule.ServiceTier)
+			return "", fmt.Errorf("rule[%d]: invalid service_tier %q", i, rule.ServiceTier)
 		}
 		settings.Rules[i].ServiceTier = tier
 		if !validActions[rule.Action] {
-			return fmt.Errorf("rule[%d]: invalid action %q", i, rule.Action)
+			return "", fmt.Errorf("rule[%d]: invalid action %q", i, rule.Action)
 		}
 		if !validScopes[rule.Scope] {
-			return fmt.Errorf("rule[%d]: invalid scope %q", i, rule.Scope)
+			return "", fmt.Errorf("rule[%d]: invalid scope %q", i, rule.Scope)
 		}
 		seenUserIDs := make(map[int64]struct{}, len(rule.UserIDs))
 		for j, userID := range rule.UserIDs {
 			if userID <= 0 {
-				return fmt.Errorf("rule[%d]: user_ids[%d] must be positive", i, j)
+				return "", fmt.Errorf("rule[%d]: user_ids[%d] must be positive", i, j)
 			}
 			if _, exists := seenUserIDs[userID]; exists {
-				return fmt.Errorf("rule[%d]: user_ids[%d] duplicates user_id %d", i, j, userID)
+				return "", fmt.Errorf("rule[%d]: user_ids[%d] duplicates user_id %d", i, j, userID)
 			}
 			seenUserIDs[userID] = struct{}{}
 		}
 		for j, pattern := range rule.ModelWhitelist {
 			trimmed := strings.TrimSpace(pattern)
 			if trimmed == "" {
-				return fmt.Errorf("rule[%d]: model_whitelist[%d] cannot be empty", i, j)
+				return "", fmt.Errorf("rule[%d]: model_whitelist[%d] cannot be empty", i, j)
 			}
 			settings.Rules[i].ModelWhitelist[j] = trimmed
 		}
 		if rule.FallbackAction != "" && !validActions[rule.FallbackAction] {
-			return fmt.Errorf("rule[%d]: invalid fallback_action %q", i, rule.FallbackAction)
+			return "", fmt.Errorf("rule[%d]: invalid fallback_action %q", i, rule.FallbackAction)
 		}
 	}
 
 	data, err := json.Marshal(settings)
 	if err != nil {
-		return fmt.Errorf("marshal openai fast policy settings: %w", err)
+		return "", fmt.Errorf("marshal openai fast policy settings: %w", err)
 	}
 
-	return s.settingRepo.Set(ctx, SettingKeyOpenAIFastPolicySettings, string(data))
+	return string(data), nil
 }
 
 // SetStreamTimeoutSettings 设置流超时处理配置
@@ -1124,22 +1023,35 @@ func (s *SettingService) GetDefaultPlatformQuotas(ctx context.Context) (map[stri
 	return out, nil // 补齐全部允许 platform key，保持与旧实现一致的下游契约
 }
 
+// accountSchedulingThresholdsSnapshot 是一次阈值读取的结果：阈值本身，加上「这份值
+// 是否真的来自配置」。见 cachedAccountSchedulingThresholds.resolved。
+type accountSchedulingThresholdsSnapshot struct {
+	thresholds map[string]int
+	resolved   bool
+}
+
 // GetAccountSchedulingThresholds returns per-platform auto-pause thresholds (1..100).
 // 100 disables the threshold for that platform. Hot-path cached with singleflight.
-func (s *SettingService) GetAccountSchedulingThresholds(ctx context.Context) map[string]int {
+//
+// 第二个返回值报告这份阈值是否可信：读取或解析失败时返回的是全 100 的兜底默认值，
+// 与「运维把阈值全部关掉」取值相同却含义相反，调用方必须自己区分。
+func (s *SettingService) GetAccountSchedulingThresholds(ctx context.Context) (map[string]int, bool) {
 	if s == nil || s.settingRepo == nil {
-		return defaultAccountSchedulingThresholds()
+		return defaultAccountSchedulingThresholds(), false
 	}
 	if cached, ok := accountSchedulingThresholdsCache.Load().(*cachedAccountSchedulingThresholds); ok {
 		if cached != nil && len(cached.thresholds) > 0 && time.Now().UnixNano() < cached.expiresAt {
-			return cloneAccountSchedulingThresholds(cached.thresholds)
+			return cloneAccountSchedulingThresholds(cached.thresholds), cached.resolved
 		}
 	}
 
 	result, err, _ := accountSchedulingThresholdsSF.Do(SettingKeyAccountSchedulingThresholds, func() (any, error) {
 		if cached, ok := accountSchedulingThresholdsCache.Load().(*cachedAccountSchedulingThresholds); ok {
 			if cached != nil && len(cached.thresholds) > 0 && time.Now().UnixNano() < cached.expiresAt {
-				return cloneAccountSchedulingThresholds(cached.thresholds), nil
+				return accountSchedulingThresholdsSnapshot{
+					thresholds: cloneAccountSchedulingThresholds(cached.thresholds),
+					resolved:   cached.resolved,
+				}, nil
 			}
 		}
 
@@ -1150,41 +1062,44 @@ func (s *SettingService) GetAccountSchedulingThresholds(ctx context.Context) map
 		raw, err := s.settingRepo.GetValue(dbCtx, SettingKeyAccountSchedulingThresholds)
 		if err != nil {
 			if errors.Is(err, ErrSettingNotFound) {
-				accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
-					thresholds: cloneAccountSchedulingThresholds(thresholds),
-					expiresAt:  time.Now().Add(accountSchedulingThresholdsCacheTTL).UnixNano(),
-				})
-				return cloneAccountSchedulingThresholds(thresholds), nil
+				// 「这一项没配过」是配置本身给出的答案，与读不到配置不同。
+				return storeAccountSchedulingThresholdsCache(thresholds, true, accountSchedulingThresholdsCacheTTL), nil
 			}
 			slog.Warn("failed to get account scheduling thresholds, falling back to defaults", "error", err)
-			accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
-				thresholds: cloneAccountSchedulingThresholds(thresholds),
-				expiresAt:  time.Now().Add(accountSchedulingThresholdsErrorTTL).UnixNano(),
-			})
-			return cloneAccountSchedulingThresholds(thresholds), nil
+			return storeAccountSchedulingThresholdsCache(thresholds, false, accountSchedulingThresholdsErrorTTL), nil
 		}
 
+		resolved := true
 		if trimmed := strings.TrimSpace(raw); trimmed != "" {
 			if parsed, err := parseAccountSchedulingThresholdsSetting(trimmed); err != nil {
 				slog.Warn("failed to parse account scheduling thresholds, falling back to defaults", "error", err)
+				resolved = false
 			} else {
 				thresholds = parsed
 			}
 		}
 
-		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
-			thresholds: cloneAccountSchedulingThresholds(thresholds),
-			expiresAt:  time.Now().Add(accountSchedulingThresholdsCacheTTL).UnixNano(),
-		})
-		return cloneAccountSchedulingThresholds(thresholds), nil
+		return storeAccountSchedulingThresholdsCache(thresholds, resolved, accountSchedulingThresholdsCacheTTL), nil
 	})
 	if err != nil {
-		return defaultAccountSchedulingThresholds()
+		return defaultAccountSchedulingThresholds(), false
 	}
-	if thresholds, ok := result.(map[string]int); ok {
-		return cloneAccountSchedulingThresholds(thresholds)
+	if snapshot, ok := result.(accountSchedulingThresholdsSnapshot); ok {
+		return cloneAccountSchedulingThresholds(snapshot.thresholds), snapshot.resolved
 	}
-	return defaultAccountSchedulingThresholds()
+	return defaultAccountSchedulingThresholds(), false
+}
+
+func storeAccountSchedulingThresholdsCache(thresholds map[string]int, resolved bool, ttl time.Duration) accountSchedulingThresholdsSnapshot {
+	accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
+		thresholds: cloneAccountSchedulingThresholds(thresholds),
+		resolved:   resolved,
+		expiresAt:  time.Now().Add(ttl).UnixNano(),
+	})
+	return accountSchedulingThresholdsSnapshot{
+		thresholds: cloneAccountSchedulingThresholds(thresholds),
+		resolved:   resolved,
+	}
 }
 
 // GetAuthSourcePlatformQuotas 读取指定 auth source 的 platform quota 覆盖（仅返回有配置的平台，override 语义）。
