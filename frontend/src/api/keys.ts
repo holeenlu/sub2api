@@ -6,6 +6,46 @@
 import { apiClient } from './client'
 import type { ApiKey, CreateApiKeyRequest, UpdateApiKeyRequest, PaginatedResponse } from '@/types'
 
+export interface ApiKeyFilters {
+  search?: string
+  status?: string
+  group_id?: number | string
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
+}
+
+export type ApiKeyDataRow = Pick<ApiKey,
+  'name' | 'key' | 'ip_whitelist' | 'ip_blacklist' | 'quota' | 'quota_used' |
+  'expires_at' | 'rate_limit_5h' | 'rate_limit_1d' | 'rate_limit_7d' |
+  'usage_5h' | 'usage_1d' | 'usage_7d' | 'window_5h_start' | 'window_1d_start' | 'window_7d_start'
+> & { status: ApiKey['status'] | 'disabled'; group: { name: string; platform: string } | null }
+
+export interface ApiKeyData {
+  type: 'sub2api-keys'
+  version: 1
+  exported_at: string
+  keys: ApiKeyDataRow[]
+}
+
+export interface ApiKeyImportResult {
+  created: number
+  skipped: number
+  failed: number
+  errors: Array<{ index: number; message: string }>
+}
+
+export async function exportData(filters: ApiKeyFilters, ids?: number[]): Promise<ApiKeyData> {
+  const { data } = await apiClient.get<ApiKeyData>('/keys/export', {
+    params: ids?.length ? { ids: ids.join(',') } : filters
+  })
+  return data
+}
+
+export async function importData(data: ApiKeyData): Promise<ApiKeyImportResult> {
+  const response = await apiClient.post<ApiKeyImportResult>('/keys/import', { data })
+  return response.data
+}
+
 /**
  * List all API keys for current user
  * @param page - Page number (default: 1)
@@ -17,13 +57,7 @@ import type { ApiKey, CreateApiKeyRequest, UpdateApiKeyRequest, PaginatedRespons
 export async function list(
   page: number = 1,
   pageSize: number = 10,
-  filters?: {
-    search?: string
-    status?: string
-    group_id?: number | string
-    sort_by?: string
-    sort_order?: 'asc' | 'desc'
-  },
+  filters?: ApiKeyFilters,
   options?: {
     signal?: AbortSignal
   }
@@ -158,7 +192,8 @@ export async function toggleStatus(id: number, status: 'active' | 'inactive'): P
 }
 
 export const keysAPI = {
-  list,
+  exportData,
+  importData,  list,
   getById,
   create,
   update,

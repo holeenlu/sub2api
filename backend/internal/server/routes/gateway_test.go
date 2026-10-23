@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
@@ -465,4 +466,44 @@ func TestGatewayRoutesOpenAICountTokensPathIsRegistered(t *testing.T) {
 
 	router.ServeHTTP(w, req)
 	require.NotEqual(t, http.StatusNotFound, w.Code)
+}
+
+type gatewayDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	armed int
+}
+
+func (w *gatewayDeadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	if !deadline.IsZero() {
+		w.armed++
+	}
+	return nil
+}
+
+func TestGatewayRoutesAlreadyGuardWritesBeforeAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterGatewayRoutes(router, &handler.Handlers{
+		Gateway: &handler.GatewayHandler{}, OpenAIGateway: &handler.OpenAIGatewayHandler{},
+		AsyncImage: handler.NewAsyncImageHandler(nil, nil),
+	}, func(c *gin.Context) {
+		// Probe the actual outer middleware chain before account scheduling.
+		c.Header("Content-Type", "text/event-stream")
+		_, _ = c.Writer.WriteString(": probe\n\n")
+		c.Writer.Flush()
+		c.Abort()
+	}, nil, nil, nil, nil, nil, &config.Config{Gateway: config.GatewayConfig{MaxBodySize: 1 << 20, TextMaxBodySize: 1 << 20}})
+	for _, path := range []string{
+		"/v1/responses", "/responses", "/backend-api/codex/responses",
+		"/v1/messages", "/v1/chat/completions", "/v1/images/generations",
+		"/v1beta/models/gemini:streamGenerateContent",
+		"/antigravity/v1/messages", "/antigravity/v1beta/models/gemini:streamGenerateContent",
+	} {
+		t.Run(path, func(t *testing.T) {
+			writer := &gatewayDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+			router.ServeHTTP(writer, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}")))
+			require.NotEqual(t, http.StatusNotFound, writer.Code)
+			require.Positive(t, writer.armed, "registered gateway route must bound writes before any service is entered")
+		})
+	}
 }

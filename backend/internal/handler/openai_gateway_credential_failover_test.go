@@ -417,7 +417,7 @@ func TestOpsWebSocketCredentialFailoverExhaustedIsRecorded(t *testing.T) {
 			Stage: string(service.GatewayFailureStageAccountAuth), Scope: string(service.GatewayFailureScopeAccount),
 			Reason: string(service.GrokCredentialReasonRevoked), Message: "Grok OAuth credentials require account action",
 		}})
-		closeOpenAIWSFailoverExhausted(c, nil, &service.UpstreamFailoverError{
+		markOpenAIWSTurnFailure(c, &service.UpstreamFailoverError{
 			Stage:             service.GatewayFailureStageAccountAuth,
 			Scope:             service.GatewayFailureScopeAccount,
 			Reason:            service.GrokCredentialReasonRevoked,
