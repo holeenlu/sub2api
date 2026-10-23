@@ -87,6 +87,20 @@ func detectOpenAICyberPolicy(payload []byte) (bool, string, string) {
 	return true, "cyber_policy", strings.TrimSpace(msg)
 }
 
+// A previously frozen upstream conversation is not a new policy violation or
+// evidence that the relay credential is unhealthy. Trust protocol codes only.
+func isOpenAIUpstreamSessionBlocked(payload []byte) bool {
+	if !gjson.ValidBytes(payload) {
+		return false
+	}
+	for _, path := range []string{"error.code", "response.error.code"} {
+		if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(payload, path).String()), "session_blocked_by_cyber_policy") {
+			return true
+		}
+	}
+	return false
+}
+
 func markOpenAICyberPolicyEvent(c *gin.Context, payload []byte, upstreamStatus int, usage *OpenAIUsage) bool {
 	hit, code, message := detectOpenAICyberPolicy(payload)
 	if !hit {

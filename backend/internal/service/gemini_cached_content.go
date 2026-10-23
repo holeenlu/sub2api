@@ -1151,7 +1151,7 @@ func geminiCachedContentCollectionURL(account *Account, base, mappedModel string
 			return "", fmt.Errorf("invalid vertex location: %s", location)
 		}
 		return fmt.Sprintf("https://%s/v1/projects/%s/locations/%s/cachedContents",
-			geminiCachedContentVertexHost(location), url.PathEscape(projectID), url.PathEscape(location)), nil
+			vertexAPIHost(location), url.PathEscape(projectID), url.PathEscape(location)), nil
 	default:
 		return "", fmt.Errorf("account type %s does not support explicit context caching", account.Type)
 	}
@@ -1173,17 +1173,10 @@ func geminiCachedContentResourceURL(account *Account, base, upstreamName string)
 		if m == nil {
 			return "", fmt.Errorf("invalid upstream cached content name: %s", upstreamName)
 		}
-		return fmt.Sprintf("https://%s/v1/%s", geminiCachedContentVertexHost(m[1]), upstreamName), nil
+		return fmt.Sprintf("https://%s/v1/%s", vertexAPIHost(m[1]), upstreamName), nil
 	default:
 		return "", fmt.Errorf("account type %s does not support explicit context caching", account.Type)
 	}
-}
-
-func geminiCachedContentVertexHost(location string) string {
-	if location == "global" {
-		return "aiplatform.googleapis.com"
-	}
-	return location + "-aiplatform.googleapis.com"
 }
 
 // GeminiCachedContentView 返回客户端可见的缓存元数据。

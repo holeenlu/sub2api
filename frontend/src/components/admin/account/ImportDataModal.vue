@@ -101,6 +101,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
+import { hasRetiredAccountAuthorization } from '@/utils/accountImport'
 import type { AdminDataImportResult, AdminDataPayload } from '@/types'
 
 interface Props {
@@ -225,7 +226,7 @@ const readFileAsText = async (sourceFile: File): Promise<string> => {
 }
 
 const SUPPORTED_DATA_TYPES = ['sub2api-data', 'sub2api-bundle']
-const SUPPORTED_DATA_VERSION = 1
+const SUPPORTED_DATA_VERSIONS = [0, 1, 2]
 
 // 与后端 validateDataHeader 对齐:合并前逐文件校验,避免坏文件混入合并 payload 后
 // 报错无法定位来源,或绕过后端本会对单文件做的 type/version 检查。
@@ -241,8 +242,7 @@ const isValidDataPayload = (payload: unknown): payload is AdminDataPayload => {
   }
   if (
     candidate.version !== undefined &&
-    candidate.version !== 0 &&
-    candidate.version !== SUPPORTED_DATA_VERSION
+    !SUPPORTED_DATA_VERSIONS.includes(candidate.version as number)
   ) {
     return false
   }
@@ -255,7 +255,9 @@ const mergeDataPayloads = (payloads: AdminDataPayload[]): AdminDataPayload => {
 
   return {
     type: payloads.find((item) => typeof item.type === 'string')?.type,
-    version: payloads.find((item) => typeof item.version === 'number')?.version,
+    version: payloads.some((item) => item.version !== undefined)
+      ? Math.max(...payloads.map((item) => item.version ?? 0))
+      : undefined,
     exported_at: new Date().toISOString(),
     proxies: payloads.flatMap((item) => item.proxies),
     accounts: payloads.flatMap((item) => item.accounts),
@@ -287,6 +289,10 @@ const handleImport = async () => {
       }
       if (!isValidDataPayload(parsed)) {
         appStore.showError(t('admin.accounts.dataImportInvalidFile', { name: sourceFile.name }))
+        return
+      }
+      if (parsed.accounts.some(hasRetiredAccountAuthorization)) {
+        appStore.showError(t('admin.accounts.dataImportRetiredAuthorization', { name: sourceFile.name }))
         return
       }
       dataPayloads.push(parsed)

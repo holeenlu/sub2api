@@ -17,7 +17,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
-	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -85,6 +84,34 @@ func (_c *UserCreate) SetEmail(v string) *UserCreate {
 // SetPasswordHash sets the "password_hash" field.
 func (_c *UserCreate) SetPasswordHash(v string) *UserCreate {
 	_c.mutation.SetPasswordHash(v)
+	return _c
+}
+
+// SetSessionGeneration sets the "session_generation" field.
+func (_c *UserCreate) SetSessionGeneration(v int64) *UserCreate {
+	_c.mutation.SetSessionGeneration(v)
+	return _c
+}
+
+// SetNillableSessionGeneration sets the "session_generation" field if the given value is not nil.
+func (_c *UserCreate) SetNillableSessionGeneration(v *int64) *UserCreate {
+	if v != nil {
+		_c.SetSessionGeneration(*v)
+	}
+	return _c
+}
+
+// SetCreatedBy sets the "created_by" field.
+func (_c *UserCreate) SetCreatedBy(v int64) *UserCreate {
+	_c.mutation.SetCreatedBy(v)
+	return _c
+}
+
+// SetNillableCreatedBy sets the "created_by" field if the given value is not nil.
+func (_c *UserCreate) SetNillableCreatedBy(v *int64) *UserCreate {
+	if v != nil {
+		_c.SetCreatedBy(*v)
+	}
 	return _c
 }
 
@@ -488,21 +515,6 @@ func (_c *UserCreate) AddAttributeValues(v ...*UserAttributeValue) *UserCreate {
 	return _c.AddAttributeValueIDs(ids...)
 }
 
-// AddPromoCodeUsageIDs adds the "promo_code_usages" edge to the PromoCodeUsage entity by IDs.
-func (_c *UserCreate) AddPromoCodeUsageIDs(ids ...int64) *UserCreate {
-	_c.mutation.AddPromoCodeUsageIDs(ids...)
-	return _c
-}
-
-// AddPromoCodeUsages adds the "promo_code_usages" edges to the PromoCodeUsage entity.
-func (_c *UserCreate) AddPromoCodeUsages(v ...*PromoCodeUsage) *UserCreate {
-	ids := make([]int64, len(v))
-	for i := range v {
-		ids[i] = v[i].ID
-	}
-	return _c.AddPromoCodeUsageIDs(ids...)
-}
-
 // AddPaymentOrderIDs adds the "payment_orders" edge to the PaymentOrder entity by IDs.
 func (_c *UserCreate) AddPaymentOrderIDs(ids ...int64) *UserCreate {
 	_c.mutation.AddPaymentOrderIDs(ids...)
@@ -614,6 +626,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.SessionGeneration(); !ok {
+		v := user.DefaultSessionGeneration
+		_c.mutation.SetSessionGeneration(v)
+	}
 	if _, ok := _c.mutation.Role(); !ok {
 		v := user.DefaultRole
 		_c.mutation.SetRole(v)
@@ -700,6 +716,9 @@ func (_c *UserCreate) check() error {
 		if err := user.PasswordHashValidator(v); err != nil {
 			return &ValidationError{Name: "password_hash", err: fmt.Errorf(`ent: validator failed for field "User.password_hash": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.SessionGeneration(); !ok {
+		return &ValidationError{Name: "session_generation", err: errors.New(`ent: missing required field "User.session_generation"`)}
 	}
 	if _, ok := _c.mutation.Role(); !ok {
 		return &ValidationError{Name: "role", err: errors.New(`ent: missing required field "User.role"`)}
@@ -812,6 +831,14 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.PasswordHash(); ok {
 		_spec.SetField(user.FieldPasswordHash, field.TypeString, value)
 		_node.PasswordHash = value
+	}
+	if value, ok := _c.mutation.SessionGeneration(); ok {
+		_spec.SetField(user.FieldSessionGeneration, field.TypeInt64, value)
+		_node.SessionGeneration = value
+	}
+	if value, ok := _c.mutation.CreatedBy(); ok {
+		_spec.SetField(user.FieldCreatedBy, field.TypeInt64, value)
+		_node.CreatedBy = &value
 	}
 	if value, ok := _c.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)
@@ -1025,22 +1052,6 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 		}
 		_spec.Edges = append(_spec.Edges, edge)
 	}
-	if nodes := _c.mutation.PromoCodeUsagesIDs(); len(nodes) > 0 {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.O2M,
-			Inverse: false,
-			Table:   user.PromoCodeUsagesTable,
-			Columns: []string{user.PromoCodeUsagesColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(promocodeusage.FieldID, field.TypeInt64),
-			},
-		}
-		for _, k := range nodes {
-			edge.Target.Nodes = append(edge.Target.Nodes, k)
-		}
-		_spec.Edges = append(_spec.Edges, edge)
-	}
 	if nodes := _c.mutation.PaymentOrdersIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -1208,6 +1219,24 @@ func (u *UserUpsert) SetPasswordHash(v string) *UserUpsert {
 // UpdatePasswordHash sets the "password_hash" field to the value that was provided on create.
 func (u *UserUpsert) UpdatePasswordHash() *UserUpsert {
 	u.SetExcluded(user.FieldPasswordHash)
+	return u
+}
+
+// SetSessionGeneration sets the "session_generation" field.
+func (u *UserUpsert) SetSessionGeneration(v int64) *UserUpsert {
+	u.Set(user.FieldSessionGeneration, v)
+	return u
+}
+
+// UpdateSessionGeneration sets the "session_generation" field to the value that was provided on create.
+func (u *UserUpsert) UpdateSessionGeneration() *UserUpsert {
+	u.SetExcluded(user.FieldSessionGeneration)
+	return u
+}
+
+// AddSessionGeneration adds v to the "session_generation" field.
+func (u *UserUpsert) AddSessionGeneration(v int64) *UserUpsert {
+	u.Add(user.FieldSessionGeneration, v)
 	return u
 }
 
@@ -1531,6 +1560,9 @@ func (u *UserUpsertOne) UpdateNewValues() *UserUpsertOne {
 		if _, exists := u.create.mutation.CreatedAt(); exists {
 			s.SetIgnore(user.FieldCreatedAt)
 		}
+		if _, exists := u.create.mutation.CreatedBy(); exists {
+			s.SetIgnore(user.FieldCreatedBy)
+		}
 	}))
 	return u
 }
@@ -1622,6 +1654,27 @@ func (u *UserUpsertOne) SetPasswordHash(v string) *UserUpsertOne {
 func (u *UserUpsertOne) UpdatePasswordHash() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdatePasswordHash()
+	})
+}
+
+// SetSessionGeneration sets the "session_generation" field.
+func (u *UserUpsertOne) SetSessionGeneration(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetSessionGeneration(v)
+	})
+}
+
+// AddSessionGeneration adds v to the "session_generation" field.
+func (u *UserUpsertOne) AddSessionGeneration(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddSessionGeneration(v)
+	})
+}
+
+// UpdateSessionGeneration sets the "session_generation" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateSessionGeneration() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateSessionGeneration()
 	})
 }
 
@@ -2161,6 +2214,9 @@ func (u *UserUpsertBulk) UpdateNewValues() *UserUpsertBulk {
 			if _, exists := b.mutation.CreatedAt(); exists {
 				s.SetIgnore(user.FieldCreatedAt)
 			}
+			if _, exists := b.mutation.CreatedBy(); exists {
+				s.SetIgnore(user.FieldCreatedBy)
+			}
 		}
 	}))
 	return u
@@ -2253,6 +2309,27 @@ func (u *UserUpsertBulk) SetPasswordHash(v string) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdatePasswordHash() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdatePasswordHash()
+	})
+}
+
+// SetSessionGeneration sets the "session_generation" field.
+func (u *UserUpsertBulk) SetSessionGeneration(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetSessionGeneration(v)
+	})
+}
+
+// AddSessionGeneration adds v to the "session_generation" field.
+func (u *UserUpsertBulk) AddSessionGeneration(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddSessionGeneration(v)
+	})
+}
+
+// UpdateSessionGeneration sets the "session_generation" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateSessionGeneration() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateSessionGeneration()
 	})
 }
 

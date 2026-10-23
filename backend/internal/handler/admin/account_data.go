@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"log/slog"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -20,35 +22,22 @@ import (
 const (
 	dataType       = "sub2api-data"
 	legacyDataType = "sub2api-bundle"
-	dataVersion    = 1
+	dataVersion    = 2
 	dataPageCap    = 1000
 )
 
 type DataPayload struct {
-	Type       string        `json:"type,omitempty"`
-	Version    int           `json:"version,omitempty"`
-	ExportedAt string        `json:"exported_at"`
-	Proxies    []DataProxy   `json:"proxies"`
-	Accounts   []DataAccount `json:"accounts"`
+	Type       string        `json:"type,omitempty" authz:"base"`
+	Version    int           `json:"version,omitempty" authz:"base"`
+	ExportedAt string        `json:"exported_at" authz:"base"`
+	Proxies    []DataProxy   `json:"proxies" authz:"proxies.manage,nonempty"`
+	Accounts   []DataAccount `json:"accounts" authz:"object"`
 	// SkippedShadows 记录导出时被排除的 spark 影子账号数量(见 ExportData)。仅作可见性提示,
 	// 导入侧忽略该字段;omitempty 保持向后兼容。
-	SkippedShadows int `json:"skipped_shadows,omitempty"`
+	SkippedShadows int `json:"skipped_shadows,omitempty" authz:"base"`
 }
 
-type DataProxy struct {
-	ProxyKey        string `json:"proxy_key"`
-	Name            string `json:"name"`
-	Protocol        string `json:"protocol"`
-	Host            string `json:"host"`
-	Port            int    `json:"port"`
-	Username        string `json:"username,omitempty"`
-	Password        string `json:"password,omitempty"`
-	Status          string `json:"status"`
-	ExpiresAt       *int64 `json:"expires_at,omitempty"`        // unix 秒，与 DataAccount.ExpiresAt 风格一致
-	FallbackMode    string `json:"fallback_mode,omitempty"`     // none/direct/proxy
-	BackupProxyName string `json:"backup_proxy_name,omitempty"` // 备用代理 name（跨实例按 name 反查）
-	ExpiryWarnDays  int    `json:"expiry_warn_days,omitempty"`
-}
+type DataProxy = service.AccountDataProxy
 
 // DataAccount 是管理员显式备份导出使用的账号结构，故意不走 dto.Account 的脱敏路径，
 // Credentials 原文返回。这是"管理员备份"这一显式行为的一部分；如未来需要导出脱敏版本，
@@ -58,23 +47,37 @@ type DataProxy struct {
 // 影子的独立调度配置(priority/并发/分组/status 管理员可单独调)亦不在本备份范围,属已知局限
 // (外审第6轮裁决:保持排除 + 前端警告,而非升级格式做完整往返)。
 type DataAccount struct {
-	Name               string         `json:"name"`
-	Notes              *string        `json:"notes,omitempty"`
-	Platform           string         `json:"platform"`
-	Type               string         `json:"type"`
-	Credentials        map[string]any `json:"credentials"`
-	Extra              map[string]any `json:"extra,omitempty"`
-	ProxyKey           *string        `json:"proxy_key,omitempty"`
-	Concurrency        int            `json:"concurrency"`
-	Priority           int            `json:"priority"`
-	RateMultiplier     *float64       `json:"rate_multiplier,omitempty"`
-	ExpiresAt          *int64         `json:"expires_at,omitempty"`
-	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired,omitempty"`
+	Name               string             `json:"name" authz:"base"`
+	Notes              *string            `json:"notes,omitempty" authz:"base"`
+	Platform           string             `json:"platform" authz:"base"`
+	Type               string             `json:"type" authz:"base"`
+	Credentials        map[string]any     `json:"credentials" authz:"accounts.authorize"`
+	Extra              map[string]any     `json:"extra,omitempty" authz:"account_create_extra"`
+	ProxyKey           *string            `json:"proxy_key,omitempty" authz:"base"`
+	Concurrency        int                `json:"concurrency" authz:"base"`
+	Priority           int                `json:"priority" authz:"base"`
+	RateMultiplier     *float64           `json:"rate_multiplier,omitempty" authz:"billing.rates.update"`
+	ExpiresAt          *int64             `json:"expires_at,omitempty" authz:"base"`
+	AutoPauseOnExpired *bool              `json:"auto_pause_on_expired,omitempty" authz:"base"`
+	BPSCredentials     map[string]any     `json:"bps_credentials,omitempty" authz:"super_admin,accounts.authorize"`
+	Status             string             `json:"status,omitempty" authz:"super_admin"`
+	Schedulable        *bool              `json:"schedulable,omitempty" authz:"super_admin"`
+	LoadFactor         *int               `json:"load_factor,omitempty" authz:"base"`
+	Groups             []DataAccountGroup `json:"groups,omitempty" authz:"super_admin"`
+	BPS403TargetGroup  *DataAccountGroup  `json:"bps_403_target_group,omitempty" authz:"super_admin"`
+}
+
+// Group IDs are installation-local. Match an existing destination group by
+// platform and exact name; never silently create a different billing policy.
+type DataAccountGroup struct {
+	Name     string `json:"name"`
+	Platform string `json:"platform"`
+	Priority int    `json:"priority"`
 }
 
 type DataImportRequest struct {
-	Data                 DataPayload `json:"data"`
-	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind"`
+	Data                 DataPayload `json:"data" authz:"object"`
+	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind" authz:"base"`
 }
 
 type DataImportResult struct {
@@ -93,12 +96,35 @@ type DataImportError struct {
 	Message  string `json:"message"`
 }
 
+// UnmarshalJSON rejects retired authorizations instead of silently restoring a
+// backup under a different execution mode. No retired credential is retained.
+func (a *DataAccount) UnmarshalJSON(data []byte) error {
+	type accountData DataAccount
+	var decoded struct {
+		*accountData
+		RetiredAuthorization json.RawMessage `json:"siwc_authorization"`
+	}
+	decoded.accountData = (*accountData)(a)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	_, retiredMode := a.Extra["openai_siwc"]
+	if len(decoded.RetiredAuthorization) != 0 || retiredMode {
+		return errors.New("SIWC authorization is retired; remove its fields from the backup before importing")
+	}
+	return nil
+}
+
 func buildProxyKey(protocol, host string, port int, username, password string) string {
-	return fmt.Sprintf("%s|%s|%d|%s|%s", strings.TrimSpace(protocol), strings.TrimSpace(host), port, strings.TrimSpace(username), strings.TrimSpace(password))
+	return service.NativeDataProxyKey(protocol, host, port, username, password)
 }
 
 func (h *AccountHandler) ExportData(c *gin.Context) {
 	ctx := c.Request.Context()
+	if err := authz.Revalidate(ctx); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	selectedIDs, err := parseAccountIDs(c)
 	if err != nil {
@@ -119,6 +145,12 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	skippedShadows := 0
 	exportable := make([]service.Account, 0, len(accounts))
 	for i := range accounts {
+		// Supplier exports require the scoped, step-up protected transaction,
+		// which locks and rechecks archive before reading any secrets.
+		if accounts[i].VendorID != nil || accounts[i].IsVendorArchived() {
+			response.ErrorFrom(c, authz.ErrPermissionDenied)
+			return
+		}
 		if accounts[i].IsCredentialShadow() {
 			skippedShadows++
 			continue
@@ -154,6 +186,9 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	}
 
 	proxyKeyByID := make(map[int64]string, len(proxies))
+	for _, p := range proxies {
+		proxyKeyByID[p.ID] = buildProxyKey(p.Protocol, p.Host, p.Port, p.Username, p.Password)
+	}
 	dataProxies := make([]DataProxy, 0, len(proxies))
 	for i := range proxies {
 		p := proxies[i]
@@ -166,8 +201,10 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			expiresAt = &v
 		}
 		var backupProxyName string
+		var backupProxyKey string
 		if p.BackupProxyID != nil {
 			backupProxyName = proxyNameByID[*p.BackupProxyID]
+			backupProxyKey = proxyKeyByID[*p.BackupProxyID]
 		}
 		dataProxies = append(dataProxies, DataProxy{
 			ProxyKey:        key,
@@ -181,13 +218,35 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			ExpiresAt:       expiresAt,
 			FallbackMode:    p.FallbackMode,
 			BackupProxyName: backupProxyName,
+			BackupProxyKey:  backupProxyKey,
 			ExpiryWarnDays:  p.ExpiryWarnDays,
 		})
 	}
 
 	dataAccounts := make([]DataAccount, 0, len(accounts))
+	groups, err := h.adminService.GetAllGroupsIncludingInactive(ctx)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	groupByID := make(map[int64]service.Group, len(groups))
+	for _, group := range groups {
+		groupByID[group.ID] = group
+	}
 	for i := range accounts {
 		acc := accounts[i]
+		var authorization *service.AccountAuthorizationData
+		if acc.IsOpenAIOAuth() {
+			if h.accountDataAuthorizations == nil {
+				response.InternalError(c, "Account authorization backup is unavailable")
+				return
+			}
+			authorization, err = h.accountDataAuthorizations.ExportAccountAuthorizations(ctx, &acc)
+			if err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		}
 		var proxyKey *string
 		if acc.ProxyID != nil {
 			if key, ok := proxyKeyByID[*acc.ProxyID]; ok {
@@ -199,29 +258,70 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			v := acc.ExpiresAt.Unix()
 			expiresAt = &v
 		}
-		dataAccounts = append(dataAccounts, DataAccount{
+		extra := make(map[string]any, len(acc.Extra))
+		for key, value := range acc.Extra {
+			if key != "openai_siwc" {
+				extra[key] = value
+			}
+		}
+		row := DataAccount{
 			Name:               acc.Name,
 			Notes:              acc.Notes,
 			Platform:           acc.Platform,
 			Type:               acc.Type,
 			Credentials:        acc.Credentials,
-			Extra:              acc.Extra,
+			Extra:              extra,
 			ProxyKey:           proxyKey,
 			Concurrency:        acc.Concurrency,
 			Priority:           acc.Priority,
 			RateMultiplier:     acc.RateMultiplier,
 			ExpiresAt:          expiresAt,
 			AutoPauseOnExpired: &acc.AutoPauseOnExpired,
-		})
+			Status:             acc.Status, Schedulable: &acc.Schedulable, LoadFactor: acc.LoadFactor,
+		}
+		if authorization != nil {
+			row.BPSCredentials = authorization.BPSCredentials
+		}
+		for _, id := range acc.GroupIDs {
+			group, ok := groupByID[id]
+			if !ok {
+				response.BadRequest(c, "An account group is unavailable for backup")
+				return
+			}
+			priority := acc.Priority
+			for _, binding := range acc.AccountGroups {
+				if binding.GroupID == id {
+					priority = binding.Priority
+					break
+				}
+			}
+			row.Groups = append(row.Groups, DataAccountGroup{Name: group.Name, Platform: group.Platform, Priority: priority})
+		}
+		if target, ok := acc.Extra[service.ExcelBPS403TargetGroupIDKey]; ok && fmt.Sprint(target) != "0" && target != nil {
+			id, parseErr := strconv.ParseInt(fmt.Sprint(target), 10, 64)
+			group, found := groupByID[id]
+			if parseErr != nil || !found {
+				response.BadRequest(c, "BPS destination group is unavailable for backup")
+				return
+			}
+			row.BPS403TargetGroup = &DataAccountGroup{Name: group.Name, Platform: group.Platform}
+			delete(row.Extra, service.ExcelBPS403TargetGroupIDKey)
+		}
+		dataAccounts = append(dataAccounts, row)
 	}
 
 	payload := DataPayload{
+		Type: dataType, Version: dataVersion,
 		ExportedAt:     time.Now().UTC().Format(time.RFC3339),
 		Proxies:        dataProxies,
 		Accounts:       dataAccounts,
 		SkippedShadows: skippedShadows,
 	}
 
+	if err := authz.Revalidate(ctx); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	response.Success(c, payload)
 }
 
@@ -250,154 +350,14 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 
 	dataPayload := req.Data
 	result := DataImportResult{}
-
-	existingProxies, err := h.listAllProxies(ctx)
+	groups, err := h.adminService.GetAllGroupsIncludingInactive(ctx)
 	if err != nil {
 		return result, err
 	}
 
-	proxyKeyToID := make(map[string]int64, len(existingProxies))
-	// proxyNameToID 用于 backup_proxy_name 反查：DB 已有 + 本批次新建均会写入
-	proxyNameToID := make(map[string]int64, len(existingProxies))
-	for i := range existingProxies {
-		p := existingProxies[i]
-		key := buildProxyKey(p.Protocol, p.Host, p.Port, p.Username, p.Password)
-		proxyKeyToID[key] = p.ID
-		if p.Name != "" {
-			proxyNameToID[p.Name] = p.ID
-		}
-	}
-
-	for i := range dataPayload.Proxies {
-		item := dataPayload.Proxies[i]
-		key := item.ProxyKey
-		if key == "" {
-			key = buildProxyKey(item.Protocol, item.Host, item.Port, item.Username, item.Password)
-		}
-		if err := validateDataProxy(item); err != nil {
-			result.ProxyFailed++
-			result.Errors = append(result.Errors, DataImportError{
-				Kind:     "proxy",
-				Name:     item.Name,
-				ProxyKey: key,
-				Message:  err.Error(),
-			})
-			continue
-		}
-		normalizedStatus := normalizeProxyStatus(item.Status)
-		if existingID, ok := proxyKeyToID[key]; ok {
-			proxyKeyToID[key] = existingID
-			result.ProxyReused++
-			if normalizedStatus != "" {
-				if proxy, getErr := h.adminService.GetProxy(ctx, existingID); getErr == nil && proxy != nil && proxy.Status != normalizedStatus {
-					// 同步 status 时传入完整字段，避免零值覆盖已存在代理的有效期/fallback 配置。
-					var existingExpiresAt *time.Time
-					if item.ExpiresAt != nil {
-						t := time.Unix(*item.ExpiresAt, 0).UTC()
-						existingExpiresAt = &t
-					}
-					existingFallbackMode := item.FallbackMode
-					if existingFallbackMode == "" {
-						existingFallbackMode = service.FallbackModeNone
-					}
-					var existingBackupProxyID *int64
-					if item.BackupProxyName != "" {
-						if bid, ok := proxyNameToID[item.BackupProxyName]; ok {
-							existingBackupProxyID = &bid
-						}
-					}
-					_, _ = h.adminService.UpdateProxy(ctx, existingID, &service.UpdateProxyInput{
-						Status:         normalizedStatus,
-						ExpiresAt:      existingExpiresAt,
-						ClearExpiresAt: existingExpiresAt == nil,
-						FallbackMode:   existingFallbackMode,
-						BackupProxyID:  existingBackupProxyID,
-						ClearBackupID:  existingBackupProxyID == nil,
-						ExpiryWarnDays: &item.ExpiryWarnDays,
-						Name:           proxy.Name,
-						Protocol:       proxy.Protocol,
-						Host:           proxy.Host,
-						Port:           proxy.Port,
-						Username:       &proxy.Username,
-						Password:       &proxy.Password,
-					})
-				}
-			}
-			continue
-		}
-
-		// 解析 expires_at（unix 秒 → *time.Time）
-		var expiresAt *time.Time
-		if item.ExpiresAt != nil {
-			t := time.Unix(*item.ExpiresAt, 0).UTC()
-			expiresAt = &t
-		}
-
-		// 解析 backup_proxy_name → backup_proxy_id
-		fallbackMode := item.FallbackMode
-		var backupProxyID *int64
-		if item.BackupProxyName != "" {
-			if bid, ok := proxyNameToID[item.BackupProxyName]; ok {
-				backupProxyID = &bid
-			} else {
-				// 查不到备用代理：降级 fallback_mode=none，记录 warning
-				fallbackMode = service.FallbackModeNone
-				result.Errors = append(result.Errors, DataImportError{
-					Kind:     "proxy",
-					Name:     item.Name,
-					ProxyKey: key,
-					Message:  fmt.Sprintf("backup_proxy_name %q not found, fallback_mode downgraded to none", item.BackupProxyName),
-				})
-			}
-		}
-
-		created, createErr := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
-			Name:           defaultProxyName(item.Name),
-			Protocol:       item.Protocol,
-			Host:           item.Host,
-			Port:           item.Port,
-			Username:       item.Username,
-			Password:       item.Password,
-			ExpiresAt:      expiresAt,
-			FallbackMode:   fallbackMode,
-			BackupProxyID:  backupProxyID,
-			ExpiryWarnDays: item.ExpiryWarnDays,
-		})
-		if createErr != nil {
-			result.ProxyFailed++
-			result.Errors = append(result.Errors, DataImportError{
-				Kind:     "proxy",
-				Name:     item.Name,
-				ProxyKey: key,
-				Message:  createErr.Error(),
-			})
-			continue
-		}
-		proxyKeyToID[key] = created.ID
-		// 把新建代理的 name 也加入反查表，供后续批内代理引用
-		if created.Name != "" {
-			proxyNameToID[created.Name] = created.ID
-		}
-		result.ProxyCreated++
-
-		if normalizedStatus != "" && normalizedStatus != created.Status {
-			// 新建后同步 status 时，传入完整字段，避免零值覆盖刚创建的有效期/fallback 配置。
-			_, _ = h.adminService.UpdateProxy(ctx, created.ID, &service.UpdateProxyInput{
-				Status:         normalizedStatus,
-				ExpiresAt:      expiresAt,
-				ClearExpiresAt: expiresAt == nil,
-				FallbackMode:   fallbackMode,
-				BackupProxyID:  backupProxyID,
-				ClearBackupID:  backupProxyID == nil,
-				ExpiryWarnDays: &item.ExpiryWarnDays,
-				Name:           created.Name,
-				Protocol:       created.Protocol,
-				Host:           created.Host,
-				Port:           created.Port,
-				Username:       &created.Username,
-				Password:       &created.Password,
-			})
-		}
+	proxyKeyToID, err := h.importDataProxies(ctx, dataPayload.Proxies, &result)
+	if err != nil {
+		return result, err
 	}
 
 	// 收集需要异步设置隐私的 Antigravity OAuth 账号
@@ -432,6 +392,25 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 
 		enrichCredentialsFromIDToken(&item)
+		groupIDs, bindings, err := resolveDataAccountGroups(&item, groups)
+		if err != nil {
+			result.AccountFailed++
+			result.Errors = append(result.Errors, DataImportError{Kind: "account", Name: item.Name, Message: err.Error()})
+			continue
+		}
+		var encrypted *service.AccountAuthorizationCiphertexts
+		if item.BPSCredentials != nil {
+			if h.accountDataAuthorizations == nil {
+				return result, errors.New("Account authorization import is unavailable")
+			}
+			account := &service.Account{Platform: item.Platform, Type: item.Type, Credentials: item.Credentials, Extra: item.Extra}
+			encrypted, err = h.accountDataAuthorizations.PrepareAccountAuthorizations(account, &service.AccountAuthorizationData{BPSCredentials: item.BPSCredentials})
+			if err != nil {
+				result.AccountFailed++
+				result.Errors = append(result.Errors, DataImportError{Kind: "account", Name: item.Name, Message: err.Error()})
+				continue
+			}
+		}
 
 		accountInput := &service.CreateAccountInput{
 			Name:                 item.Name,
@@ -444,7 +423,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			Concurrency:          item.Concurrency,
 			Priority:             item.Priority,
 			RateMultiplier:       item.RateMultiplier,
-			GroupIDs:             nil,
+			GroupIDs:             groupIDs,
+			LoadFactor:           item.LoadFactor,
+			ImportOptions:        &service.AccountImportOptions{Status: item.Status, Schedulable: item.Schedulable, Groups: bindings, Authorizations: encrypted},
 			ExpiresAt:            item.ExpiresAt,
 			AutoPauseOnExpired:   item.AutoPauseOnExpired,
 			SkipDefaultGroupBind: skipDefaultGroupBind,
@@ -592,7 +573,34 @@ func (h *AccountHandler) resolveExportProxies(ctx context.Context, accounts []se
 		return []service.Proxy{}, nil
 	}
 
-	return h.adminService.GetProxiesByIDs(ctx, ids)
+	// A portable account backup must include its fallback chain as well as
+	// the selected accounts' primary proxies. Otherwise backup_proxy_name
+	// points outside the file and cannot be safely restored by a supplier.
+	proxies := make([]service.Proxy, 0, len(ids))
+	for len(ids) > 0 {
+		batch, err := h.adminService.GetProxiesByIDs(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		if len(batch) != len(ids) {
+			return nil, service.ErrProxyNotFound
+		}
+		ids = nil
+		for _, proxy := range batch {
+			if proxy.VendorID != nil {
+				return nil, authz.ErrPermissionDenied
+			}
+			proxies = append(proxies, proxy)
+			if proxy.FallbackMode != service.FallbackModeProxy || proxy.BackupProxyID == nil {
+				continue
+			}
+			if _, ok := seen[*proxy.BackupProxyID]; !ok {
+				seen[*proxy.BackupProxyID] = struct{}{}
+				ids = append(ids, *proxy.BackupProxyID)
+			}
+		}
+	}
+	return proxies, nil
 }
 
 func parseAccountIDs(c *gin.Context) ([]int64, error) {
@@ -640,17 +648,19 @@ func parseIncludeProxies(c *gin.Context) (bool, error) {
 }
 
 func validateDataHeader(payload DataPayload) error {
-	if payload.Type != "" && payload.Type != dataType && payload.Type != legacyDataType {
-		return fmt.Errorf("unsupported data type: %s", payload.Type)
-	}
-	if payload.Version != 0 && payload.Version != dataVersion {
-		return fmt.Errorf("unsupported data version: %d", payload.Version)
+	if err := service.ValidateNativeDataVersion(payload.Type, payload.Version); err != nil {
+		return err
 	}
 	if payload.Proxies == nil {
 		return errors.New("proxies is required")
 	}
 	if payload.Accounts == nil {
 		return errors.New("accounts is required")
+	}
+	for _, item := range payload.Accounts {
+		if _, retired := item.Extra["openai_siwc"]; retired {
+			return errors.New("SIWC authorization is retired; remove its fields from the backup before importing")
+		}
 	}
 	return nil
 }
@@ -693,7 +703,7 @@ func validateDataAccount(item DataAccount) error {
 		return errors.New("account credentials is required")
 	}
 	switch item.Type {
-	case service.AccountTypeOAuth, service.AccountTypeSetupToken, service.AccountTypeAPIKey, service.AccountTypeUpstream:
+	case service.AccountTypeOAuth, service.AccountTypeSetupToken, service.AccountTypeAPIKey, service.AccountTypeUpstream, service.AccountTypeBedrock, service.AccountTypeServiceAccount:
 	default:
 		return fmt.Errorf("account type is invalid: %s", item.Type)
 	}
@@ -706,7 +716,57 @@ func validateDataAccount(item DataAccount) error {
 	if item.Priority < 0 {
 		return errors.New("priority must be >= 0")
 	}
+	if item.Status != "" && item.Status != service.StatusActive && item.Status != service.StatusDisabled && item.Status != service.StatusError {
+		return errors.New("account status is invalid")
+	}
 	return nil
+}
+
+func resolveDataAccountGroups(item *DataAccount, groups []service.Group) ([]int64, []service.AccountGroup, error) {
+	if value, exists := item.Extra[service.ExcelBPS403TargetGroupIDKey]; exists && value != nil && fmt.Sprint(value) != "0" && item.BPS403TargetGroup == nil {
+		return nil, nil, errors.New("BPS destination must be mapped by group name and platform, not a source group ID")
+	}
+	resolve := func(ref DataAccountGroup) (int64, error) {
+		var id int64
+		for _, group := range groups {
+			if group.Name == ref.Name && group.Platform == ref.Platform {
+				if id != 0 {
+					return 0, errors.New("Account backup group name is ambiguous")
+				}
+				id = group.ID
+			}
+		}
+		if id == 0 {
+			return 0, fmt.Errorf("Create or map destination group %q (%s) before importing", ref.Name, ref.Platform)
+		}
+		return id, nil
+	}
+	var ids []int64
+	var bindings []service.AccountGroup
+	seen := map[int64]bool{}
+	for _, ref := range item.Groups {
+		id, err := resolve(ref)
+		if err != nil {
+			return nil, nil, err
+		}
+		if seen[id] || ref.Priority < 0 {
+			return nil, nil, errors.New("Invalid or duplicate account backup group")
+		}
+		seen[id] = true
+		ids = append(ids, id)
+		bindings = append(bindings, service.AccountGroup{GroupID: id, Priority: ref.Priority})
+	}
+	if item.BPS403TargetGroup != nil {
+		id, err := resolve(*item.BPS403TargetGroup)
+		if err != nil {
+			return nil, nil, err
+		}
+		if item.Extra == nil {
+			item.Extra = map[string]any{}
+		}
+		item.Extra[service.ExcelBPS403TargetGroupIDKey] = id
+	}
+	return ids, bindings, nil
 }
 
 func defaultProxyName(name string) string {
