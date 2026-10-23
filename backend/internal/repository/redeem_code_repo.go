@@ -23,7 +23,9 @@ func NewRedeemCodeRepository(client *dbent.Client) service.RedeemCodeRepository 
 }
 
 func (r *redeemCodeRepository) Create(ctx context.Context, code *service.RedeemCode) error {
-	created, err := r.client.RedeemCode.Create().
+	// Adjustment records reference the user locked by the management transaction.
+	// Use that transaction so the FK check cannot wait on our own user lock.
+	created, err := clientFromContext(ctx, r.client).RedeemCode.Create().
 		SetCode(code.Code).
 		SetType(code.Type).
 		SetValue(code.Value).

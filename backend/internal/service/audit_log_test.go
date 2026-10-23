@@ -87,6 +87,9 @@ func TestRedactAuditBody_AuthoritativeTablesSynced(t *testing.T) {
 			"service_account": "sa-blob-ccc"
 		},
 		"proxy_key": "socks5|1.2.3.4|1080|proxyuser|proxypass-ddd",
+		"backup_proxy_key": "http|backup.invalid|8080|backup-user|backup-secret-ddd",
+		"bps_credentials": {"refresh_token": "bps-private-refresh"},
+		"siwc_authorization": {"credentials": {"access_token": "siwc-private-access", "refresh_token": "siwc-private-refresh"}},
 		"custom_key": "sk-custom-eee",
 		"config": {
 			"pkey": "easypay-merchant-fff",
@@ -103,6 +106,7 @@ func TestRedactAuditBody_AuthoritativeTablesSynced(t *testing.T) {
 	for _, secret := range []string{
 		"sk-session-aaa", "pem-body-bbb", "sa-blob-ccc",
 		"proxypass-ddd", "sk-custom-eee",
+		"backup-secret-ddd", "bps-private-refresh", "siwc-private-access", "siwc-private-refresh",
 		"easypay-merchant-fff", "alipay-pem-ggg", "wxpay-v3-hhh",
 		"stripe-sk-iii", "whsec-jjj",
 	} {

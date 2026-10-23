@@ -1,6 +1,9 @@
 package service
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 // HTTPUpstreamProfile marks HTTP upstream requests that need provider-specific
 // transport policy.
@@ -8,6 +11,7 @@ type HTTPUpstreamProfile string
 
 const (
 	HTTPUpstreamProfileDefault    HTTPUpstreamProfile = ""
+	HTTPUpstreamProfileExcelBPS   HTTPUpstreamProfile = "excel_bps"
 	HTTPUpstreamProfileOpenAI     HTTPUpstreamProfile = "openai"
 	HTTPUpstreamProfileGrok       HTTPUpstreamProfile = "grok"
 	HTTPUpstreamProfileLongStream HTTPUpstreamProfile = "long_stream"
@@ -38,7 +42,7 @@ func HTTPUpstreamProfileFromContext(ctx context.Context) HTTPUpstreamProfile {
 		return HTTPUpstreamProfileDefault
 	}
 	switch profile {
-	case HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream:
+	case HTTPUpstreamProfileExcelBPS, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream:
 		return profile
 	default:
 		return HTTPUpstreamProfileDefault
@@ -71,4 +75,13 @@ func WithHTTPUpstreamPublicHostsOnly(ctx context.Context) context.Context {
 
 func HTTPUpstreamPublicHostsOnly(ctx context.Context) bool {
 	return ctx != nil && ctx.Value(httpUpstreamPublicHostsOnlyContextKey{}) == true
+}
+
+// CompleteHTTPUpstreamResponse reports protocol completion rather than mere response headers or EOF.
+func CompleteHTTPUpstreamResponse(resp *http.Response) {
+	if resp != nil {
+		if complete, ok := resp.Body.(interface{ MarkComplete() }); ok {
+			complete.MarkComplete()
+		}
+	}
 }

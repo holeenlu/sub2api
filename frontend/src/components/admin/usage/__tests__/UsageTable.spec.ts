@@ -16,24 +16,22 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-import en from '@/i18n/locales/en/admin/resources'
-import zh from '@/i18n/locales/zh/admin/resources'
 import UsageTable from '../UsageTable.vue'
-
-let locale: 'en' | 'zh' = 'en'
-const localizedMessages: Record<'en' | 'zh', Record<string, string>> = {
-  en: {
-    'admin.usage.longContext': en.usage.longContext,
-    'admin.usage.longContextPricingTooltip': en.usage.longContextPricingTooltip,
-  },
-  zh: {
-    'admin.usage.longContext': zh.usage.longContext,
-    'admin.usage.longContextPricingTooltip': zh.usage.longContextPricingTooltip,
-  },
-}
 
 const messages: Record<string, string> = {
   'usage.outputTps': 'Output TPS',
+  'usage.latencyDetails': 'Latency details',
+  'usage.firstEvent': 'First event',
+  'usage.latencyFirstToken': '首字',
+  'usage.firstContent': 'First content',
+  'usage.firstText': 'First text',
+  'usage.legacyLatency': 'Legacy timing',
+  'usage.totalTokens': 'Total Tokens',
+  'admin.usage.cacheCreationTokens': 'Cache Write Total',
+  'admin.usage.cacheCreation5mTokens': 'Cache Write (5m)',
+  'admin.usage.cacheCreation1hTokens': 'Cache Write (1h)',
+  'admin.usage.cacheCreation30mTokens': 'Cache Write (30m)',
+  'admin.usage.cacheCreation12hTokens': 'Cache Write (12h)',
   'admin.usage.userDeletedBadge': 'Deleted',
   'usage.costDetails': 'Cost Breakdown',
   'admin.usage.inputCost': 'Input Cost',
@@ -93,7 +91,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => localizedMessages[locale][key] ?? messages[key] ?? key,
+      t: (key: string) => messages[key] ?? key,
     }),
   }
 })
@@ -134,6 +132,8 @@ const baseImageRow = {
   cache_read_tokens: 0,
   cache_creation_5m_tokens: 0,
   cache_creation_1h_tokens: 0,
+  cache_creation_30m_tokens: 0,
+  cache_creation_12h_tokens: 0,
   cache_ttl_overridden: false,
   billing_mode: 'image',
   image_count: 2,
@@ -145,6 +145,52 @@ const baseImageRow = {
 }
 
 describe('admin UsageTable tooltip', () => {
+  it.each([
+    { name: 'both OpenAI TTLs', ttl: [0, 0, 13, 21] },
+    { name: '30m only', ttl: [0, 0, 34, 0] },
+    { name: '12h only', ttl: [0, 0, 0, 34] },
+    { name: 'historical unknown TTL', ttl: [0, 0, 0, 0] },
+    { name: 'existing Anthropic TTLs', ttl: [5, 29, 0, 0] },
+  ])('shows $name without counting the breakdown twice', async ({ ttl }) => {
+    const row = {
+      ...baseImageRow,
+      image_count: 0,
+      billing_mode: 'token',
+      input_tokens: 10,
+      output_tokens: 20,
+      cache_read_tokens: 7,
+      cache_creation_tokens: 34,
+      cache_creation_5m_tokens: ttl[0],
+      cache_creation_1h_tokens: ttl[1],
+      cache_creation_30m_tokens: ttl[2],
+      cache_creation_12h_tokens: ttl[3],
+    }
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], loading: false, columns: [] },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    for (const [index, label] of ['5m', '1h', '30m', '12h'].entries()) {
+      if (index > 0) {
+        expect(wrapper.findAll('span').some(span => span.text() === label)).toBe(ttl[index] > 0)
+      }
+    }
+    await wrapper.find('.group.relative').trigger('mouseenter')
+    await nextTick()
+    const tooltip = wrapper.get('.fixed')
+    for (const [index, label] of ['5m', '1h', '30m', '12h'].entries()) {
+      const detail = tooltip.findAll('div.flex.items-center.justify-between.gap-4')
+        .find(line => line.text().includes('Cache Write (' + label + ')'))
+      if (ttl[index] > 0) {
+        expect(detail?.find('span.font-medium.text-white').text()).toBe(String(ttl[index]))
+      } else {
+        expect(detail).toBeUndefined()
+      }
+    }
+    expect(tooltip.text().includes('Cache Write Total')).toBe(ttl.every(value => value === 0))
+    expect(tooltip.get('span.font-semibold.text-blue-400').text()).toBe('71')
+    wrapper.unmount()
+  })
+
   it('shows output TPS in the latency cell using total duration', () => {
     const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', output_tokens: 1000, duration_ms: 20_000, first_token_ms: 10_000 }
     const wrapper = mount(UsageTable, {
@@ -159,8 +205,69 @@ describe('admin UsageTable tooltip', () => {
     expect(wrapper.text()).toContain('Output TPS')
   })
 
+  it('shows first-event timing under the unchanged first-token label while keeping detailed and legacy timings distinct', async () => {
+    const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', input_tokens: 200, cache_read_tokens: 500, cache_creation_tokens: 300, output_tokens: 1000, duration_ms: 20_000, first_token_ms: 10_000 }
+    const metrics = { version: 1, first_event_ms: 100, first_content_ms: 2000, first_text_ms: 3000, duration_ms: 40_000 }
+    const wrapper = mount(UsageTable, {
+      props: { data: [
+        { ...row, request_id: 'measured', latency_metrics: metrics },
+        { ...row, request_id: 'missing-event', latency_metrics: { ...metrics, first_event_ms: null } },
+        { ...row, request_id: 'legacy' },
+        { ...row, request_id: 'zero-event', latency_metrics: { ...metrics, first_event_ms: 0 } },
+      ], columns: [{ key: 'latency', label: 'Latency' }] },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    const measured = wrapper.get('[data-request-id="measured"]')
+    expect(measured.get('[data-testid="primary-latency"]').text()).toBe('100ms')
+    expect(measured.text()).toContain('首字')
+    expect(measured.text()).not.toContain('First content')
+    expect(measured.get('[data-testid="usage-duration"]').text()).toBe('40.00s')
+    expect(measured.get('[data-testid="output-tps"]').text()).toBe('25.0 tok/s')
+    expect(measured.get('[data-testid="cache-hit-rate"]').text()).toBe('50.0%')
+    expect(measured.find('[data-testid="legacy-latency"]').exists()).toBe(false)
+    expect(wrapper.get('[data-request-id="missing-event"]').find('[data-testid="primary-latency"]').exists()).toBe(false)
+    expect(wrapper.get('[data-request-id="zero-event"] [data-testid="primary-latency"]').text()).toBe('0ms')
+    expect(wrapper.get('[data-request-id="legacy"] [data-testid="primary-latency"]').text()).toBe('10.00s')
+    expect(wrapper.get('[data-request-id="legacy"] [data-testid="legacy-latency"]').text()).toBe('Legacy timing')
+    await measured.get('button[aria-label="Latency details"]').trigger('click')
+    expect(wrapper.get('dl').text()).toContain('First event100ms')
+    expect(wrapper.get('dl').text()).toContain('First content2.00s')
+    expect(wrapper.get('dl').text()).toContain('First text3.00s')
+    expect(wrapper.get('dl').element.parentElement?.querySelectorAll('p')).toHaveLength(1)
+  })
+
+  it.each([
+    { first: 100, total: 40_000, firstColor: 'emerald', totalColor: 'emerald' },
+    { first: 63_000, total: 66_000, firstColor: 'red', totalColor: 'amber' },
+    { first: null, total: null, firstColor: null, totalColor: null },
+  ])('shares latency colors between the row and dark details: $first / $total', async ({ first, total, firstColor, totalColor }) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, latency_metrics: {
+        version: 1, first_event_ms: first, first_content_ms: first, first_text_ms: first, duration_ms: total,
+      } }], columns: [{ key: 'latency', label: 'Latency' }] },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    await wrapper.get('button[aria-label="Latency details"]').trigger('click')
+    const details = wrapper.get('dl')
+    // The popover is always dark, including when the surrounding page is light.
+    expect(details.element.parentElement?.classList.contains('dark')).toBe(true)
+    const values = details.findAll('dd')
+    expect(values).toHaveLength(4)
+    for (const [index, value] of values.entries()) {
+      const color = index === 3 ? totalColor : firstColor
+      if (color == null) {
+        expect(value.classes()).toContain('text-gray-400')
+        expect(value.text()).toBe('-')
+      } else {
+        expect(value.classes()).toEqual(expect.arrayContaining([`text-${color}-600`, `dark:text-${color}-400`]))
+        const rowValue = wrapper.get(index === 3 ? '[data-testid="usage-duration"]' : '[data-testid="primary-latency"]')
+        expect(rowValue.classes()).toEqual(expect.arrayContaining([`text-${color}-600`, `dark:text-${color}-400`]))
+      }
+    }
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
-    locale = 'en'
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       x: 0,
       y: 0,
@@ -172,51 +279,6 @@ describe('admin UsageTable tooltip', () => {
       height: 20,
       toJSON: () => ({}),
     } as DOMRect)
-  })
-
-  it.each([
-    ['en', 'Long context', 'Long-context pricing was applied. Input and output rates depend on the pricing tier, not a uniform multiplier.'],
-    ['zh', '长上下文', '已应用长上下文计费。输入和输出费率取决于定价档位，并非统一倍率。'],
-  ] as const)('marks only applied long-context billing with localized text in %s', (language, label, tooltip) => {
-    locale = language
-    const wrapper = mount(UsageTable, {
-      props: {
-        data: [
-          {
-            ...baseImageRow,
-            request_id: 'req-long-context-enabled',
-            long_context_billing_applied: true,
-          },
-          {
-            ...baseImageRow,
-            request_id: 'req-long-context-disabled',
-            long_context_billing_applied: false,
-          },
-          {
-            ...baseImageRow,
-            request_id: 'req-long-context-absent',
-          },
-        ],
-        loading: false,
-        columns: [],
-      },
-      global: {
-        stubs: {
-          DataTable: DataTableStub,
-          EmptyState: true,
-          Icon: true,
-          Teleport: true,
-        },
-      },
-    })
-
-    expect(wrapper.findAll('[data-testid="long-context-billing-marker"]')).toHaveLength(1)
-    const marker = wrapper.get('[data-request-id="req-long-context-enabled"] [data-testid="long-context-billing-marker"]')
-    expect(marker.text()).toBe(label)
-    expect(marker.attributes('title')).toBe(tooltip)
-    expect(wrapper.find('[data-request-id="req-long-context-disabled"] [data-testid="long-context-billing-marker"]').exists()).toBe(false)
-    expect(wrapper.find('[data-request-id="req-long-context-absent"] [data-testid="long-context-billing-marker"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('x2')
   })
 
   it('keeps the request type badge and adds a separate badge only for native compaction rows', () => {
@@ -912,5 +974,28 @@ describe('admin UsageTable deleted-user badge', () => {
 
     expect(wrapper.text()).not.toContain('Deleted')
     expect(wrapper.text()).toContain('active@test.com')
+  })
+})
+
+describe('amount-only cost display', () => {
+  it.each(['pending', 'pending_pricing', 'unmetered'])('does not display unknown %s charges as zero', (status) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, actual_cost: 0, billing_status: status }], loading: false, columns: [{ key: 'cost', label: 'Cost' }], showAccountBilling: false },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } }
+    })
+    expect(wrapper.get('button[aria-label="Cost Breakdown"]').element.parentElement?.textContent?.trim()).toBe('—')
+    expect(wrapper.find('[data-testid="billing-status"]').exists()).toBe(false)
+    expect(wrapper.find('span.font-medium.text-green-600').exists()).toBe(false)
+  })
+
+  it.each(['free', 'settled', 'unknown', undefined])('shows only the amount for %s even with long-context pricing', (status) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, actual_cost: 0, billing_status: status, long_context_billing_applied: true }], loading: false, columns: [{ key: 'cost', label: 'Cost' }], showAccountBilling: false },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } }
+    })
+    expect(wrapper.get('button[aria-label="Cost Breakdown"]').element.parentElement?.textContent?.trim()).toBe('$0.000000')
+    expect(wrapper.find('[data-testid="billing-status"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="long-context-billing-marker"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="Cost Breakdown"]').exists()).toBe(true)
   })
 })

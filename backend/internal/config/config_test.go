@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,6 +102,17 @@ func TestLoadServerTimingConfig(t *testing.T) {
 	})
 }
 
+func TestLoadCORSFromEnvironment(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://web.chatboxai.app, capacitor://localhost")
+	t.Setenv("CORS_ALLOW_CREDENTIALS", "false")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://web.chatboxai.app", "capacitor://localhost"}, cfg.CORS.AllowedOrigins)
+	require.False(t, cfg.CORS.AllowCredentials)
+}
+
 func TestLoadSimpleModeKeyRateLimitEnabledFromEnvironment(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("SIMPLE_MODE_KEY_RATE_LIMIT_ENABLED", "true")
@@ -129,7 +139,7 @@ func TestLoadHTTPIngressSafetyDefaults(t *testing.T) {
 	require.Equal(t, 64*1024, cfg.Server.MaxHeaderBytes)
 	require.Empty(t, cfg.Server.TrustedProxies)
 	require.False(t, cfg.Server.TrustedProxiesConfigured)
-	require.True(t, cfg.TrustForwardedIPForAPIKeyACL())
+	require.False(t, cfg.TrustForwardedIPForAPIKeyACL())
 	require.Equal(t, int64(32*1024*1024), cfg.Gateway.TextMaxBodySize)
 	require.True(t, cfg.APIKeyAuth.InvalidAbuse.Enabled)
 	require.Equal(t, 120, cfg.APIKeyAuth.InvalidAbuse.Threshold)
@@ -414,6 +424,14 @@ func TestLoadDefaultSchedulingConfig(t *testing.T) {
 		t.Fatalf("Load() error: %v", err)
 	}
 
+	// 默认必须仍是历史硬编码的 1 小时：升级本身不得改变任何实例的粘性行为。
+	if cfg.Gateway.Scheduling.StickySessionTTLSeconds != 3600 {
+		t.Fatalf("StickySessionTTLSeconds = %d, want 3600", cfg.Gateway.Scheduling.StickySessionTTLSeconds)
+	}
+	// 长周期亲和键默认关闭。
+	if cfg.Gateway.Scheduling.SessionAccountHistoryTTLSeconds != 0 {
+		t.Fatalf("SessionAccountHistoryTTLSeconds = %d, want 0", cfg.Gateway.Scheduling.SessionAccountHistoryTTLSeconds)
+	}
 	if cfg.Gateway.Scheduling.StickySessionMaxWaiting != 3 {
 		t.Fatalf("StickySessionMaxWaiting = %d, want 3", cfg.Gateway.Scheduling.StickySessionMaxWaiting)
 	}
@@ -444,17 +462,20 @@ func TestLoadDefaultOpenAIFirstOutputTimeoutsDisabled(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, cfg.Gateway.OpenAIFirstOutputTimeoutSeconds)
 	require.Zero(t, cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds)
+	require.Zero(t, cfg.Gateway.OpenAITurnMaxAttempts)
 }
 
 func TestLoadOpenAIFirstOutputTimeoutsFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_OPENAI_FIRST_OUTPUT_TIMEOUT_SECONDS", "90")
 	t.Setenv("GATEWAY_OPENAI_HIGH_EFFORT_FIRST_OUTPUT_TIMEOUT_SECONDS", "240")
+	t.Setenv("GATEWAY_OPENAI_TURN_MAX_ATTEMPTS", "3")
 
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, 90, cfg.Gateway.OpenAIFirstOutputTimeoutSeconds)
 	require.Equal(t, 240, cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds)
+	require.Equal(t, 3, cfg.Gateway.OpenAITurnMaxAttempts)
 }
 
 func TestValidateOpenAIFirstOutputTimeoutMinimum(t *testing.T) {
@@ -493,15 +514,6 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	}
 	if cfg.Gateway.OpenAIWS.StickySessionTTLSeconds != 3600 {
 		t.Fatalf("Gateway.OpenAIWS.StickySessionTTLSeconds = %d, want 3600", cfg.Gateway.OpenAIWS.StickySessionTTLSeconds)
-	}
-	if !cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled {
-		t.Fatalf("Gateway.OpenAIScheduler.StickyEscapeEnabled = false, want true")
-	}
-	if cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs != 15000 {
-		t.Fatalf("Gateway.OpenAIScheduler.StickyEscapeTTFTMs = %d, want 15000", cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs)
-	}
-	if cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate != 0.5 {
-		t.Fatalf("Gateway.OpenAIScheduler.StickyEscapeErrorRate = %v, want 0.5", cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate)
 	}
 	if !cfg.Gateway.OpenAIWS.SessionHashReadOldFallback {
 		t.Fatalf("Gateway.OpenAIWS.SessionHashReadOldFallback = false, want true")
@@ -550,12 +562,6 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	}
 	if cfg.Gateway.OpenAIWS.PayloadLogSampleRate != 0.2 {
 		t.Fatalf("Gateway.OpenAIWS.PayloadLogSampleRate = %v, want 0.2", cfg.Gateway.OpenAIWS.PayloadLogSampleRate)
-	}
-	if cfg.Gateway.OpenAIWS.SchedulerScoreWeights.QuotaHeadroom != 0 {
-		t.Fatalf("Gateway.OpenAIWS.SchedulerScoreWeights.QuotaHeadroom = %v, want 0", cfg.Gateway.OpenAIWS.SchedulerScoreWeights.QuotaHeadroom)
-	}
-	if cfg.Gateway.OpenAIWS.SchedulerScoreWeights.UpstreamCost != 0 {
-		t.Fatalf("Gateway.OpenAIWS.SchedulerScoreWeights.UpstreamCost = %v, want 0", cfg.Gateway.OpenAIWS.SchedulerScoreWeights.UpstreamCost)
 	}
 	if !cfg.Gateway.OpenAIWS.StoreDisabledForceNewConn {
 		t.Fatalf("Gateway.OpenAIWS.StoreDisabledForceNewConn = false, want true")
@@ -757,6 +763,8 @@ func TestLoadIdempotencyConfigFromEnv(t *testing.T) {
 func TestLoadSchedulingConfigFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_SCHEDULING_STICKY_SESSION_MAX_WAITING", "5")
+	t.Setenv("GATEWAY_SCHEDULING_STICKY_SESSION_TTL_SECONDS", "259200")
+	t.Setenv("GATEWAY_SCHEDULING_SESSION_ACCOUNT_HISTORY_TTL_SECONDS", "604800")
 
 	cfg, err := Load()
 	if err != nil {
@@ -765,6 +773,12 @@ func TestLoadSchedulingConfigFromEnv(t *testing.T) {
 
 	if cfg.Gateway.Scheduling.StickySessionMaxWaiting != 5 {
 		t.Fatalf("StickySessionMaxWaiting = %d, want 5", cfg.Gateway.Scheduling.StickySessionMaxWaiting)
+	}
+	if cfg.Gateway.Scheduling.StickySessionTTLSeconds != 259200 {
+		t.Fatalf("StickySessionTTLSeconds = %d, want 259200", cfg.Gateway.Scheduling.StickySessionTTLSeconds)
+	}
+	if cfg.Gateway.Scheduling.SessionAccountHistoryTTLSeconds != 604800 {
+		t.Fatalf("SessionAccountHistoryTTLSeconds = %d, want 604800", cfg.Gateway.Scheduling.SessionAccountHistoryTTLSeconds)
 	}
 }
 
@@ -1621,6 +1635,8 @@ func TestValidateConfigErrors(t *testing.T) {
 		mutate  func(*Config)
 		wantErr string
 	}{
+		{name: "negative OpenAI turn attempts", mutate: func(c *Config) { c.Gateway.OpenAITurnMaxAttempts = -1 }, wantErr: "gateway.openai_turn_max_attempts"},
+		{name: "excessive OpenAI turn attempts", mutate: func(c *Config) { c.Gateway.OpenAITurnMaxAttempts = 101 }, wantErr: "gateway.openai_turn_max_attempts"},
 		{
 			name:    "server read header timeout",
 			mutate:  func(c *Config) { c.Server.ReadHeaderTimeout = 0 },
@@ -2131,6 +2147,36 @@ func TestValidateConfigErrors(t *testing.T) {
 			wantErr: "gateway.models_list_cache_ttl_seconds",
 		},
 		{
+			name:    "gateway scheduling sticky ttl",
+			mutate:  func(c *Config) { c.Gateway.Scheduling.StickySessionTTLSeconds = 0 },
+			wantErr: "gateway.scheduling.sticky_session_ttl_seconds",
+		},
+		{
+			name:    "gateway scheduling sticky ttl upper bound",
+			mutate:  func(c *Config) { c.Gateway.Scheduling.StickySessionTTLSeconds = 30*24*60*60 + 1 },
+			wantErr: "gateway.scheduling.sticky_session_ttl_seconds",
+		},
+		{
+			name:    "gateway scheduling session account history ttl negative",
+			mutate:  func(c *Config) { c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds = -1 },
+			wantErr: "gateway.scheduling.session_account_history_ttl_seconds",
+		},
+		{
+			// 历史键比短期粘性键还短是纯配置错误：短期键在时不会读它，短期键一过期
+			// 它也没了。必须启动就拒绝，而不是静默失效。
+			name: "gateway scheduling session account history ttl shorter than sticky",
+			mutate: func(c *Config) {
+				c.Gateway.Scheduling.StickySessionTTLSeconds = 3600
+				c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds = 60
+			},
+			wantErr: "gateway.scheduling.session_account_history_ttl_seconds",
+		},
+		{
+			name:    "gateway scheduling session account history ttl upper bound",
+			mutate:  func(c *Config) { c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds = 30*24*60*60 + 1 },
+			wantErr: "gateway.scheduling.session_account_history_ttl_seconds",
+		},
+		{
 			name:    "gateway scheduling sticky waiting",
 			mutate:  func(c *Config) { c.Gateway.Scheduling.StickySessionMaxWaiting = 0 },
 			wantErr: "gateway.scheduling.sticky_session_max_waiting",
@@ -2349,11 +2395,6 @@ func TestValidateConfig_OpenAIWSRules(t *testing.T) {
 			wantErr: "gateway.openai_ws.retry_total_budget_ms",
 		},
 		{
-			name:    "lb_top_k 必须为正数",
-			mutate:  func(c *Config) { c.Gateway.OpenAIWS.LBTopK = 0 },
-			wantErr: "gateway.openai_ws.lb_top_k",
-		},
-		{
 			name:    "sticky_session_ttl_seconds 必须为正数",
 			mutate:  func(c *Config) { c.Gateway.OpenAIWS.StickySessionTTLSeconds = 0 },
 			wantErr: "gateway.openai_ws.sticky_session_ttl_seconds",
@@ -2371,78 +2412,6 @@ func TestValidateConfig_OpenAIWSRules(t *testing.T) {
 			mutate:  func(c *Config) { c.Gateway.OpenAIWS.StickyPreviousResponseTTLSeconds = -1 },
 			wantErr: "gateway.openai_ws.sticky_previous_response_ttl_seconds",
 		},
-		{
-			name:    "scheduler_score_weights 不能为负数",
-			mutate:  func(c *Config) { c.Gateway.OpenAIWS.SchedulerScoreWeights.Queue = -0.1 },
-			wantErr: "gateway.openai_ws.scheduler_score_weights.* must be non-negative",
-		},
-		{
-			name:    "scheduler_score_weights quota_headroom 不能为负数",
-			mutate:  func(c *Config) { c.Gateway.OpenAIWS.SchedulerScoreWeights.QuotaHeadroom = -0.1 },
-			wantErr: "gateway.openai_ws.scheduler_score_weights.* must be non-negative",
-		},
-		{
-			name:    "scheduler_score_weights upstream_cost 不能为负数",
-			mutate:  func(c *Config) { c.Gateway.OpenAIWS.SchedulerScoreWeights.UpstreamCost = -0.1 },
-			wantErr: "gateway.openai_ws.scheduler_score_weights.* must be non-negative",
-		},
-		{
-			name:    "scheduler_score_weights reset 不能为负数",
-			mutate:  func(c *Config) { c.Gateway.OpenAIWS.SchedulerScoreWeights.Reset = -0.1 },
-			wantErr: "gateway.openai_ws.scheduler_score_weights.* must be non-negative",
-		},
-		{
-			name:    "scheduler_score_weights 不能为 NaN",
-			mutate:  func(c *Config) { c.Gateway.OpenAIWS.SchedulerScoreWeights.PreviousResponse = math.NaN() },
-			wantErr: "gateway.openai_ws.scheduler_score_weights.* must be non-negative and finite",
-		},
-		{
-			name:    "scheduler_score_weights 不能为 Inf",
-			mutate:  func(c *Config) { c.Gateway.OpenAIWS.SchedulerScoreWeights.UpstreamCost = math.Inf(1) },
-			wantErr: "gateway.openai_ws.scheduler_score_weights.* must be non-negative and finite",
-		},
-		{
-			name: "scheduler_score_weights 总和不能溢出",
-			mutate: func(c *Config) {
-				c.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = math.MaxFloat64
-				c.Gateway.OpenAIWS.SchedulerScoreWeights.Load = math.MaxFloat64
-			},
-			wantErr: "gateway.openai_ws.scheduler_score_weights base-weight sum must be finite",
-		},
-		{
-			name: "scheduler_score_weights 含 sticky 总和不能溢出",
-			mutate: func(c *Config) {
-				c.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = math.MaxFloat64
-				c.Gateway.OpenAIWS.SchedulerScoreWeights.PreviousResponse = math.MaxFloat64
-			},
-			wantErr: "gateway.openai_ws.scheduler_score_weights total-weight sum must be finite",
-		},
-		{
-			name: "scheduler_score_weights 不能全为 0",
-			mutate: func(c *Config) {
-				c.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 0
-				c.Gateway.OpenAIWS.SchedulerScoreWeights.Load = 0
-				c.Gateway.OpenAIWS.SchedulerScoreWeights.Queue = 0
-				c.Gateway.OpenAIWS.SchedulerScoreWeights.ErrorRate = 0
-				c.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT = 0
-			},
-			wantErr: "gateway.openai_ws.scheduler_score_weights must not all be zero",
-		},
-		{
-			name:    "sticky_escape_ttft_ms 必须为正数",
-			mutate:  func(c *Config) { c.Gateway.OpenAIScheduler.StickyEscapeTTFTMs = 0 },
-			wantErr: "gateway.openai_scheduler.sticky_escape_ttft_ms",
-		},
-		{
-			name:    "sticky_escape_error_rate 不能小于 0",
-			mutate:  func(c *Config) { c.Gateway.OpenAIScheduler.StickyEscapeErrorRate = -0.1 },
-			wantErr: "gateway.openai_scheduler.sticky_escape_error_rate",
-		},
-		{
-			name:    "sticky_escape_error_rate 不能大于 1",
-			mutate:  func(c *Config) { c.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 1.1 },
-			wantErr: "gateway.openai_scheduler.sticky_escape_error_rate",
-		},
 	}
 
 	for _, tc := range cases {
@@ -2457,41 +2426,6 @@ func TestValidateConfig_OpenAIWSRules(t *testing.T) {
 		})
 	}
 
-	t.Run("quota_headroom 可作为唯一有效调度权重", func(t *testing.T) {
-		cfg := buildValid(t)
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Load = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Queue = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.ErrorRate = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.QuotaHeadroom = 0.1
-
-		require.NoError(t, cfg.Validate())
-	})
-
-	t.Run("upstream_cost 可作为唯一有效调度权重", func(t *testing.T) {
-		cfg := buildValid(t)
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Load = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Queue = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.ErrorRate = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.UpstreamCost = 0.1
-
-		require.NoError(t, cfg.Validate())
-	})
-
-	t.Run("reset 可作为唯一有效调度权重", func(t *testing.T) {
-		cfg := buildValid(t)
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Load = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Queue = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.ErrorRate = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT = 0
-		cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Reset = 0.1
-
-		require.NoError(t, cfg.Validate())
-	})
 }
 
 func TestValidateConfig_AutoScaleDisabledIgnoreAutoScaleFields(t *testing.T) {
@@ -2715,4 +2649,15 @@ func TestLoadSimpleModeAutoCreateDefaultGroups(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRetiredSchedulerConfigOnlySuppliesOneTimeCostIntent(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_WS_SCHEDULER_SCORE_WEIGHTS_UPSTREAM_COST", "0.75")
+	t.Setenv("GATEWAY_OPENAI_WS_LB_TOP_K", "1")
+	t.Setenv("GATEWAY_OPENAI_SCHEDULER_STICKY_ESCAPE_ENABLED", "false")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 0.75, cfg.SchedulerMigrationWeights()["upstream_cost"])
+	require.Greater(t, cfg.Gateway.Scheduling.FallbackWaitTimeout, time.Duration(0))
 }

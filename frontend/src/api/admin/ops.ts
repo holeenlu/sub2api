@@ -1,3 +1,4 @@
+import type { SchedulingQuotaProtection } from '@/utils/schedulingQuota'
 /**
  * Admin Ops API endpoints (vNext)
  * - Error logs list/detail
@@ -284,6 +285,8 @@ export interface OpsSystemMetricsSnapshot {
 
 export interface OpsJobHeartbeat {
   job_name: string
+  expected_interval_seconds?: number
+  health_status?: 'healthy' | 'failed' | 'stale' | 'unknown'
   last_run_at?: string | null
   last_success_at?: string | null
   last_error_at?: string | null
@@ -795,6 +798,8 @@ export interface OpsOpenAIAccountQuotaAutoPauseSettings {
 }
 
 export interface OpsAdvancedSettings {
+  quota_protection: SchedulingQuotaProtection
+  account_telemetry_sending_enabled: boolean
   data_retention: OpsDataRetentionSettings
   aggregation: OpsAggregationSettings
   openai_account_quota_auto_pause: OpsOpenAIAccountQuotaAutoPauseSettings
@@ -912,6 +917,7 @@ export interface OpsErrorLog {
 
   severity: OpsSeverity
   status_code: number
+  request_status_code?: number | null
   platform: string
   model: string
 

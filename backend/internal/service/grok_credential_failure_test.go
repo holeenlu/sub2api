@@ -5,8 +5,10 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -1661,5 +1663,80 @@ func expiredGrokOAuthAccountForCredentialTest(id int64) *Account {
 			"expires_at":    time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
 			"base_url":      xai.DefaultCLIBaseURL,
 		},
+	}
+}
+
+// ResponsesWebSocket uses this exact entry before opening its upstream bridge.
+// A non-failover error prevents both same-account and next-account retry gates.
+func TestGetRequestCredentialSIWCPreflightPreservesFailureWithoutFailover(t *testing.T) {
+	for _, scenario := range []string{"missing grant", "revoked grant", "read-only grant", "storage unavailable", "refresh failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			oauth, repo, client, account := siwcFixture(t)
+			want := siwcRequired()
+			if scenario != "missing grant" {
+				authorizeSIWC(t, oauth, account)
+			}
+			switch scenario {
+			case "revoked grant":
+				repo.mu.Lock()
+				record := repo.records[account.ID]
+				record.grant = ""
+				repo.records[account.ID] = record
+				repo.mu.Unlock()
+			case "read-only grant":
+				pr, pg, registration, grant, err := oauth.readSIWCRecord(t.Context(), account)
+				require.NoError(t, err)
+				grant.Scope = "openid email profile"
+				_, _, err = oauth.saveSIWCRecord(t.Context(), account, pr, pg, registration, grant)
+				require.NoError(t, err)
+				want = siwcDirectRequired()
+			case "storage unavailable":
+				oauth.excelEncryptor = nil
+				want = infraerrors.ServiceUnavailable("OPENAI_SIWC_STORAGE_UNAVAILABLE", "SIWC requires private storage and a persistent encryption key")
+			case "refresh failure":
+				require.NoError(t, oauth.rejectSIWCAccessToken(t.Context(), account, siwcOpaqueToken().AccessToken, nil))
+				client.token = func(context.Context, url.Values, string, string) (*openai.TokenResponse, *openai.SIWCIdentity, error) {
+					return nil, nil, errors.New("transient provider failure")
+				}
+				want = infraerrors.ServiceUnavailable("OPENAI_SIWC_REFRESH_FAILED", "SIWC refresh failed; credentials were retained")
+			}
+			upstream := &httpUpstreamRecorder{}
+			svc := &OpenAIGatewayService{httpUpstream: upstream, openAITokenProvider: NewOpenAITokenProvider(nil, nil, oauth)}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			c.Request.Header.Set("Upgrade", "websocket")
+			SetOpenAIClientTransport(c, OpenAIClientTransportWS)
+			token, kind, err := svc.GetRequestCredential(t.Context(), c, account, "gpt-6.1-sol")
+			require.Error(t, err)
+			require.Empty(t, token)
+			require.Equal(t, UsageAuthorizationModeSIWC, kind)
+			require.Equal(t, infraerrors.Reason(want), infraerrors.Reason(err))
+			require.Equal(t, infraerrors.Message(want), infraerrors.Message(err))
+			var failover *UpstreamFailoverError
+			require.False(t, errors.As(err, &failover), "the WS handler must not enter credential failover")
+			require.Empty(t, upstream.requests)
+			require.Equal(t, "native-secret", account.GetOpenAIAccessToken())
+		})
+	}
+}
+
+func TestGetRequestCredentialKeepsNativeAndGrokFailureContracts(t *testing.T) {
+	for _, platform := range []string{PlatformOpenAI, PlatformGrok} {
+		t.Run(platform, func(t *testing.T) {
+			svc := &OpenAIGatewayService{}
+			account := &Account{ID: 76, Platform: platform, Type: AccountTypeOAuth}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			_, _, err := svc.GetRequestCredential(t.Context(), c, account)
+			var failover *UpstreamFailoverError
+			require.ErrorAs(t, err, &failover)
+			if platform == PlatformOpenAI {
+				require.Equal(t, GatewayFailureReason("credential_preparation_failed"), failover.Reason)
+				require.True(t, failover.ShouldRetryNextAccount())
+				require.True(t, failover.RetryableOnSameAccount)
+			} else {
+				require.Equal(t, GrokCredentialReasonProviderConfig, failover.Reason)
+				require.False(t, failover.ShouldRetryNextAccount())
+			}
+		})
 	}
 }
