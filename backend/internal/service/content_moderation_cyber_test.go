@@ -261,14 +261,13 @@ func TestRecordCyberPolicyEvent_RuntimeSnapshotRefreshFailureKeepsStaleScope(t *
 		SettingKeyContentModerationConfig: `{"all_groups":true,"model_filter":{"type":"include","models":["gpt-5"]}}`,
 	}}
 	svc := NewContentModerationService(settingRepo, repo, nil, nil, nil, nil, nil, nil)
-	svc.runtimeCacheTTL = time.Minute
 
 	_, err := svc.loadRuntimeSnapshot(context.Background())
 	require.NoError(t, err)
 	current := svc.runtimeSnapshot.Load()
 	require.NotNil(t, current)
 	expired := *current
-	expired.loadedAt = time.Now().Add(-2 * time.Minute)
+	expired.loadedAt = time.Now().Add(-svc.runtimeSnapshotTTL() - time.Minute)
 	svc.runtimeSnapshot.Store(&expired)
 	settingRepo.failMultiple(errors.New("database unavailable"))
 

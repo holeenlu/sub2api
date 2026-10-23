@@ -9,6 +9,14 @@ const componentSource = readFileSync(componentPath, 'utf8')
 const stylePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../style.css')
 const styleSource = readFileSync(stylePath, 'utf8')
 
+describe('AppSidebar customer operations boundary', () => {
+  it('keeps supplier administration out of the customer-admin navigation', () => {
+    expect(componentSource).not.toContain("path: '/admin/vendors'")
+    expect(componentSource).toContain("path: '/admin/users'")
+    expect(componentSource).toContain("path: '/admin/accounts'")
+  })
+})
+
 describe('AppSidebar custom SVG styles', () => {
   it('does not override uploaded SVG fill or stroke colors', () => {
     expect(componentSource).toContain('.sidebar-svg-icon {')
@@ -54,7 +62,7 @@ describe('AppSidebar collapsible groups', () => {
 describe('AppSidebar header styles', () => {
   it('does not clip the version badge dropdown', () => {
     const sidebarHeaderBlockMatch = styleSource.match(/\.sidebar-header\s*\{[\s\S]*?\n {2}\}/)
-    const sidebarBrandBlockMatch = componentSource.match(/\.sidebar-brand\s*\{[\s\S]*?\n\}/)
+    const sidebarBrandBlockMatch = styleSource.match(/\.sidebar-brand\s*\{[\s\S]*?\n {2}\}/)
 
     expect(sidebarHeaderBlockMatch).not.toBeNull()
     expect(sidebarBrandBlockMatch).not.toBeNull()

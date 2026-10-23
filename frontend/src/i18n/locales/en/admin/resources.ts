@@ -190,6 +190,11 @@ export default {
         'Batch quality check completed for {count} proxies: healthy {healthy}, warn {warn}, challenge {challenge}, abnormal {failed}',
       batchQualityFailed: 'Batch quality check failed',
       batchQualityEmpty: 'No proxies available for quality check',
+      qualityReachable: 'Target reachable',
+      qualityRateLimited: 'Target rate limited',
+      qualityVerification: 'Target requires verification',
+      qualityConnectionFailed: 'Target connection failed',
+      qualitySummary: '{passed} passed, {warn} warnings, {failed} failed, {challenge} challenges',
       qualityReportTitle: 'Proxy Quality Report',
       qualityGrade: 'Grade {grade}',
       qualityExitIP: 'Exit IP',
@@ -530,8 +535,6 @@ export default {
       allTypes: 'All Types',
       inputCost: 'Input Cost',
       outputCost: 'Output Cost',
-      longContext: 'Long context',
-      longContextPricingTooltip: 'Long-context pricing was applied. Input and output rates depend on the pricing tier, not a uniform multiplier.',
       cacheCreationCost: 'Cache Creation Cost',
       cacheReadCost: 'Cache Read Cost',
       inputTokens: 'Input Tokens',
@@ -539,6 +542,8 @@ export default {
       cacheCreationTokens: 'Cache Creation Tokens',
       cacheCreation5mTokens: 'Cache Write',
       cacheCreation1hTokens: 'Cache Write',
+      cacheCreation30mTokens: 'Cache Write',
+      cacheCreation12hTokens: 'Cache Write',
       cacheReadTokens: 'Cache Read Tokens',
       failedToLoad: 'Failed to load usage records',
       billingType: 'Billing Type',
@@ -559,6 +564,15 @@ export default {
       clickToViewBalance: 'Click to view balance history',
       failedToLoadUser: 'Failed to load user info',
       userDeletedBadge: 'Deleted',
+      keyRanking: {
+        subtitle: 'Per-API-key token usage for the current filters and time range',
+        rowHint: "Click to view this key's usage details",
+        keyCount: '{count} keys',
+        columns: {
+          key: 'API Key',
+          user: 'Owner'
+        }
+      },
       tokenRanking: {
         subtitle: 'Per-user token usage for the current filters and time range',
         rowHint: "Click to view this user's usage details",

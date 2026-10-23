@@ -139,6 +139,7 @@ func TestOpenAIGatewayService_ForwardAsAnthropic_CapacityShedReturnsRequestScope
 				"",
 				`data: {"type":"response.completed","response":{"id":"resp_second","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`,
 				"",
+				"",
 			}, "\n"))),
 		},
 	}}
@@ -489,6 +490,10 @@ func TestOpenAIGatewayService_GenerateSessionHash_AttachesLegacyHashToContext(t 
 	require.NotNil(t, c.Request)
 	require.NotNil(t, c.Request.Context())
 	require.NotEmpty(t, openAILegacySessionHashFromContext(c.Request.Context()))
+	diagnostics, ok := c.Request.Context().Value(gatewayCacheDiagnosticKey{}).(gatewayCacheDiagnostic)
+	require.True(t, ok)
+	require.Equal(t, gatewayCacheIdentity(0, sessionHash), diagnostics.Routing)
+	require.Equal(t, gatewayCacheIdentity(0, "sess-legacy-check"), diagnostics.Session)
 }
 
 func TestExtractOpenAIResponseIDFromJSONBytes(t *testing.T) {
@@ -685,6 +690,10 @@ func TestOpenAIGatewayService_GenerateSessionHash_ContentFallback(t *testing.T) 
 
 	hash := svc.GenerateSessionHash(c, body)
 	require.NotEmpty(t, hash, "content-based fallback should produce a hash")
+	diagnostics, ok := c.Request.Context().Value(gatewayCacheDiagnosticKey{}).(gatewayCacheDiagnostic)
+	require.True(t, ok)
+	require.Equal(t, gatewayCacheIdentity(0, hash), diagnostics.Routing)
+	require.Empty(t, diagnostics.Session, "derived routing must not fabricate an explicit conversation identity")
 
 	hash2 := svc.GenerateSessionHash(c, body)
 	require.Equal(t, hash, hash2, "same content should produce same hash")
@@ -765,6 +774,17 @@ func (c *stubGatewayCache) GetSessionAccountID(ctx context.Context, groupID int6
 	return 0, errors.New("not found")
 }
 
+func (c *stubGatewayCache) CompareAndRefreshSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration, createIfAbsent bool) (bool, error) {
+	current, exists := c.sessionBindings[sessionHash]
+	if (exists && current != accountID) || (!exists && !createIfAbsent) {
+		return false, nil
+	}
+	if err := c.SetSessionAccountID(ctx, groupID, sessionHash, accountID, ttl); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (c *stubGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	if c.sessionBindings == nil {
 		c.sessionBindings = make(map[string]int64)
@@ -786,6 +806,17 @@ func (c *stubGatewayCache) DeleteSessionAccountID(ctx context.Context, groupID i
 	}
 	c.deletedSessions[sessionHash]++
 	delete(c.sessionBindings, sessionHash)
+	return nil
+}
+
+// 长周期亲和键：该 mock 不参与历史键行为，给出中性实现以满足接口。
+func (c *stubGatewayCache) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, ErrStickySessionNotFound
+}
+func (c *stubGatewayCache) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
+	return true, nil
+}
+func (c *stubGatewayCache) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
 	return nil
 }
 
@@ -1302,15 +1333,15 @@ func TestOpenAISelectAccountWithLoadAwareness_PrefersLowerLoad(t *testing.T) {
 	groupID := int64(1)
 	repo := stubOpenAIAccountRepo{
 		accounts: []Account{
-			{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 1},
-			{ID: 2, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 1},
+			{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 10, Priority: 1},
+			{ID: 2, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 10, Priority: 1},
 		},
 	}
 	cache := &stubGatewayCache{}
 	concurrencyCache := stubConcurrencyCache{
 		loadMap: map[int64]*AccountLoadInfo{
-			1: {AccountID: 1, LoadRate: 80},
-			2: {AccountID: 2, LoadRate: 10},
+			1: {AccountID: 1, LoadRate: 80, CurrentConcurrency: 8},
+			2: {AccountID: 2, LoadRate: 10, CurrentConcurrency: 1},
 		},
 	}
 
@@ -1320,16 +1351,22 @@ func TestOpenAISelectAccountWithLoadAwareness_PrefersLowerLoad(t *testing.T) {
 		concurrencyService: NewConcurrencyService(concurrencyCache),
 	}
 
-	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "load", "gpt-4", nil)
-	if err != nil {
-		t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
+	// Capacity-weighted selection favours spare capacity across sessions; it
+	// does not promise the same winner for one arbitrarily chosen hash.
+	counts := map[int64]int{}
+	for i := range 256 {
+		session := fmt.Sprintf("load-%d", i)
+		selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, session, "gpt-4", nil)
+		require.NoError(t, err)
+		require.NotNil(t, selection)
+		require.NotNil(t, selection.Account)
+		counts[selection.Account.ID]++
+		require.Equal(t, selection.Account.ID, cache.sessionBindings["openai:"+session], "bind the actual selected account")
+		if selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
 	}
-	if selection == nil || selection.Account == nil || selection.Account.ID != 2 {
-		t.Fatalf("expected account 2")
-	}
-	if cache.sessionBindings["openai:load"] != 2 {
-		t.Fatalf("expected sticky session updated")
-	}
+	require.Greater(t, counts[2], 2*counts[1], "nine free slots should receive substantially more traffic than two")
 }
 
 func TestOpenAISelectAccountForModelWithExclusions_StickyExcludedFallback(t *testing.T) {
@@ -1441,8 +1478,9 @@ func TestOpenAISelectAccountWithLoadAwareness_AllFullWaitPlan(t *testing.T) {
 	}
 	cache := &stubGatewayCache{}
 	concurrencyCache := stubConcurrencyCache{
+		acquireResults: map[int64]bool{1: false},
 		loadMap: map[int64]*AccountLoadInfo{
-			1: {AccountID: 1, LoadRate: 100},
+			1: {AccountID: 1, LoadRate: 100, CurrentConcurrency: 1},
 		},
 	}
 
@@ -1503,6 +1541,7 @@ func TestOpenAISelectAccountWithLoadAwareness_MissingLoadInfo(t *testing.T) {
 			1: {AccountID: 1, LoadRate: 50},
 		},
 		skipDefaultLoad: true,
+		acquireResults:  map[int64]bool{1: false, 2: true},
 	}
 
 	svc := &OpenAIGatewayService{
@@ -1545,7 +1584,7 @@ func TestOpenAISelectAccountForModelWithExclusions_LeastRecentlyUsed(t *testing.
 	}
 }
 
-func TestOpenAISelectAccountWithLoadAwareness_PreferNeverUsed(t *testing.T) {
+func TestOpenAISelectAccountWithLoadAwareness_ColdStartParticipates(t *testing.T) {
 	groupID := int64(1)
 	lastUsed := time.Now().Add(-1 * time.Hour)
 	repo := stubOpenAIAccountRepo{
@@ -1568,13 +1607,18 @@ func TestOpenAISelectAccountWithLoadAwareness_PreferNeverUsed(t *testing.T) {
 		concurrencyService: NewConcurrencyService(concurrencyCache),
 	}
 
-	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "gpt-4", nil)
-	if err != nil {
-		t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
+	counts := map[int64]int{}
+	for i := 0; i < 200; i++ {
+		selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, fmt.Sprintf("cold-start-%d", i), "gpt-4", nil)
+		require.NoError(t, err)
+		require.NotNil(t, selection.Account)
+		counts[selection.Account.ID]++
+		if selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
 	}
-	if selection == nil || selection.Account == nil || selection.Account.ID != 2 {
-		t.Fatalf("expected account 2")
-	}
+	require.Greater(t, counts[1], 40)
+	require.Greater(t, counts[2], 40, "cold-start accounts must remain eligible without a history score")
 }
 
 func TestOpenAIStreamingTimeout(t *testing.T) {
@@ -1729,11 +1773,13 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 	gin.SetMode(gin.TestMode)
 	proxyID := int64(4698)
 	account := &Account{
-		ID:       469801,
-		Name:     "oauth-on-shared-proxy",
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeOAuth,
-		ProxyID:  &proxyID,
+		ID:          469801,
+		Name:        "oauth-on-shared-proxy",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		ProxyID:     &proxyID,
 	}
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
 		MaxLineSize: defaultMaxLineSize,
@@ -1761,6 +1807,7 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 					"event: response.output_text.delta",
 					`data: {"type":"response.output_text.delta","delta":"partial"}`,
 					"",
+					"",
 				}, "\n")),
 				err: readErr,
 			},
@@ -1783,7 +1830,7 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 func TestOpenAIStreamingTerminalAndClientCancellationDoNotQuarantineProxy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	proxyID := int64(4699)
-	account := &Account{ID: 469901, Name: "oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, ProxyID: &proxyID}
+	account := &Account{ID: 469901, Name: "oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, ProxyID: &proxyID, Status: StatusActive, Schedulable: true}
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
 
 	terminalRecorder := httptest.NewRecorder()
@@ -1795,6 +1842,7 @@ func TestOpenAIStreamingTerminalAndClientCancellationDoNotQuarantineProxy(t *tes
 			reader: strings.NewReader(strings.Join([]string{
 				"event: response.completed",
 				`data: {"type":"response.completed","response":{"status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}}`,
+				"",
 				"",
 			}, "\n")),
 			err: io.ErrUnexpectedEOF,
@@ -1855,6 +1903,7 @@ func TestOpenAIStreamingResponseFailedBeforeOutputReturnsFailover(t *testing.T) 
 			"event: response.failed",
 			`data: {"type":"response.failed","error":{"message":"An error occurred while processing your request."}}`,
 			"",
+			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-failed"}},
 	}
@@ -1896,6 +1945,7 @@ func TestOpenAIStreamingResponseFailedBeforeOutputCapacityErrorReturnsFailover(t
 			"",
 			"event: response.failed",
 			`data: {"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"}}`,
+			"",
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-capacity-failed"}},
@@ -1945,6 +1995,7 @@ func TestOpenAIStreamingResponseFailedBeforeOutputServerOverloadedCodeReturnsFai
 			"event: response.failed",
 			`data: {"type":"response.failed","response":{"id":"resp_1","error":{"code":"server_is_overloaded","message":"Please retry later."}}}`,
 			"",
+			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-overloaded-failed"}},
 	}
@@ -1986,6 +2037,7 @@ func TestOpenAIStreamingResponseFailedBeforeOutputRateLimitUsesPoolRetryPolicy(t
 			"",
 			"event: response.failed",
 			`data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"rate_limit_exceeded","message":"Concurrency limit exceeded for account, please retry later"}}}`,
+			"",
 			"",
 		}, "\n"))),
 		Header: http.Header{
@@ -2051,6 +2103,7 @@ func TestOpenAIStreamingResponseFailedRateLimitDoesNotBlockAccountScheduling(t *
 			"event: response.failed",
 			`data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"rate_limit_exceeded","message":"Concurrency limit exceeded for account, please retry later"}}}`,
 			"",
+			"",
 		}, "\n"))),
 		Header: http.Header{
 			"X-Codex-Primary-Used-Percent":        []string{"12"},
@@ -2107,6 +2160,7 @@ func TestOpenAIStreamingResponseFailedAfterOutputSanitizesVerboseResponseForClie
 			"event: response.failed",
 			"data: " + failedPayload,
 			"",
+			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-failed-after-output"}},
 	}
@@ -2148,6 +2202,7 @@ func TestOpenAIStreamingContextWindowResponseFailedBeforeOutputPassesThrough(t *
 			"",
 			"event: response.failed",
 			`data: {"type":"response.failed","error":{"type":"upstream_error","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","code":null}}`,
+			"",
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-context-window-failed"}},
@@ -2194,6 +2249,7 @@ func TestOpenAIStreamingContextWindowResponseFailedBeforeOutputAppliesPassthroug
 			"",
 			"event: response.failed",
 			`data: {"type":"response.failed","response":{"id":"resp_1","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"` + upstreamMessage + `"}}}`,
+			"",
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-context-window-passthrough-rule"}},
@@ -2324,6 +2380,7 @@ func TestOpenAIStreamingNormalizesTerminalOutputFromDeltas(t *testing.T) {
 			"",
 			`data: {"type":"response.completed","response":{"id":"resp_sdk_parse","status":"completed","output":null,"usage":{"input_tokens":1,"output_tokens":1}}}`,
 			"",
+			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-sdk-parse"}},
 	}
@@ -2360,6 +2417,7 @@ func TestOpenAIStreamingNormalizesTerminalOutputToEmptyArray(t *testing.T) {
 		StatusCode: http.StatusOK,
 		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
 			`data: {"type":"response.completed","response":{"id":"resp_empty","status":"completed","output":null,"usage":{"input_tokens":1,"output_tokens":0}}}`,
+			"",
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-empty-output"}},
@@ -2400,6 +2458,7 @@ func TestOpenAIStreamingPolicyResponseFailedBeforeOutputPassesThrough(t *testing
 			"",
 			"event: response.failed",
 			`data: {"type":"response.failed","error":{"type":"safety_error","message":"This request has been flagged for potentially high-risk cyber activity."}}`,
+			"",
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-policy-failed"}},
@@ -2584,6 +2643,7 @@ func TestOpenAIStreamingPassthroughResponseFailedBeforeOutputReturnsFailover(t *
 			"event: response.failed",
 			`data: {"type":"response.failed","error":{"message":"upstream processing failed"}}`,
 			"",
+			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-passthrough-failed"}},
 	}
@@ -2627,6 +2687,7 @@ func TestOpenAIStreamingPassthroughContextWindowResponseFailedBeforeOutputApplie
 			"",
 			"event: response.failed",
 			`data: {"type":"response.failed","response":{"id":"resp_1","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"` + upstreamMessage + `"}}}`,
+			"",
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-pass-context-window-passthrough-rule"}},
@@ -2672,6 +2733,7 @@ func TestOpenAIStreamingPassthroughContextWindowResponseFailedBeforeOutputWithou
 			"event: response.failed",
 			`data: {"type":"response.failed","response":{"id":"resp_1","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again."}}}`,
 			"",
+			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-pass-context-window-no-rule"}},
 	}
@@ -2715,6 +2777,7 @@ func TestOpenAIStreamingPassthroughResponseFailedAfterOutputSanitizesVerboseResp
 			"",
 			"event: response.failed",
 			"data: " + failedPayload,
+			"",
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-pass-failed-after-output"}},
@@ -3190,7 +3253,7 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesExplicitAPIKeyBetaH
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5"}`)))
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`)))
 	c.Request.Header.Set("OpenAI-Beta", "api-key-specific-beta")
 
 	svc := &OpenAIGatewayService{cfg: &config.Config{
@@ -3200,7 +3263,7 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesExplicitAPIKeyBetaH
 	}}
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
-	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token")
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, []byte(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`), "token")
 	require.NoError(t, err)
 	require.Equal(t, "api-key-specific-beta", req.Header.Get("OpenAI-Beta"), "OAuth-only backport must not alter API-key passthrough headers")
 }
@@ -3780,8 +3843,12 @@ func TestExtractCodexFinalResponse_SampleReplay(t *testing.T) {
 	body := strings.Join([]string{
 		`event: message`,
 		`data: {"type":"response.in_progress","response":{"id":"resp_1"}}`,
+		"",
 		`data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-4o","usage":{"input_tokens":11,"output_tokens":22,"input_tokens_details":{"cached_tokens":3}}}}`,
+		"",
 		`data: [DONE]`,
+		"",
+		"",
 	}, "\n")
 
 	finalResp, ok := extractCodexFinalResponse(body)
@@ -3803,8 +3870,12 @@ func TestHandleSSEToJSON_CompletedEventReturnsJSON(t *testing.T) {
 	}
 	body := []byte(strings.Join([]string{
 		`data: {"type":"response.in_progress","response":{"id":"resp_2"}}`,
+		"",
 		`data: {"type":"response.completed","response":{"id":"resp_2","model":"gpt-4o","usage":{"input_tokens":7,"output_tokens":9,"input_tokens_details":{"cached_tokens":1}}}}`,
+		"",
 		`data: [DONE]`,
+		"",
+		"",
 	}, "\n"))
 
 	usage, err := svc.handleSSEToJSON(resp, c, nil, body, "gpt-4o", "gpt-4o")
@@ -3831,9 +3902,14 @@ func TestHandleNonStreamingResponse_APIKeyFallsBackToSSEBodyWhenContentTypeIsWro
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
 			`data: {"type":"response.output_text.delta","delta":"hel"}`,
+			"",
 			`data: {"type":"response.output_text.delta","delta":"lo"}`,
+			"",
 			`data: {"type":"response.completed","response":{"id":"resp_api_key_sse","object":"response","model":"gpt-5.4","status":"completed","output":[],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}`,
+			"",
 			`data: [DONE]`,
+			"",
+			"",
 		}, "\n"))),
 	}
 	account := &Account{ID: 1, Type: AccountTypeAPIKey}
@@ -3922,8 +3998,12 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 	}
 	body := []byte(strings.Join([]string{
 		`data: {"type":"response.output_item.done","item":{"id":"ig_123","type":"image_generation_call","status":"generating","result":"aGVsbG8=","revised_prompt":"draw a cat","output_format":"png"}}`,
+		"",
 		`data: {"type":"response.completed","response":{"id":"resp_img","model":"gpt-5.4","output":[],"usage":{"input_tokens":7,"output_tokens":9,"output_tokens_details":{"image_tokens":4}}}}`,
+		"",
 		`data: [DONE]`,
+		"",
+		"",
 	}, "\n"))
 
 	usage, err := svc.handleSSEToJSON(resp, c, nil, body, "gpt-5.4", "gpt-5.4")
@@ -3937,7 +4017,7 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 	require.Equal(t, "draw a cat", gjson.Get(rec.Body.String(), "output.0.revised_prompt").String())
 }
 
-func TestHandleSSEToJSON_NoFinalResponseKeepsSSEBody(t *testing.T) {
+func TestHandleSSEToJSON_NoFinalResponseReturnsProtocolError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -3954,11 +4034,11 @@ func TestHandleSSEToJSON_NoFinalResponseKeepsSSEBody(t *testing.T) {
 	}, "\n"))
 
 	usage, err := svc.handleSSEToJSON(resp, c, nil, body, "gpt-4o", "gpt-4o")
-	require.NoError(t, err)
-	require.NotNil(t, usage)
-	require.Equal(t, 0, usage.InputTokens)
-	require.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
-	require.Contains(t, rec.Body.String(), `data: {"type":"response.in_progress"`)
+	require.Error(t, err)
+	require.Nil(t, usage)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+	require.Contains(t, rec.Body.String(), "without a terminal response")
 }
 
 // 无账号时没有可换的对象：newOpenAIStreamFailoverError 要拿 account 记录 ops 归属与
@@ -3977,7 +4057,10 @@ func TestHandleSSEToJSON_ResponseFailedWithoutAccountReturnsProtocolError(t *tes
 	}
 	body := []byte(strings.Join([]string{
 		`data: {"type":"response.failed","error":{"message":"upstream rejected request"}}`,
+		"",
 		`data: [DONE]`,
+		"",
+		"",
 	}, "\n"))
 
 	usage, err := svc.handleSSEToJSON(resp, c, nil, body, "gpt-4o", "gpt-4o")
@@ -4031,6 +4114,7 @@ func TestStreamingPassthroughCyberPolicyMarksAndPassesThrough(t *testing.T) {
 			"event: response.failed",
 			`data: {"type":"response.failed","response":{"error":{"code":"cyber_policy","message":"flagged for cyber policy"}}}`,
 			"",
+			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-cyber"}},
 	}
@@ -4060,6 +4144,7 @@ func TestHandleStreamingResponseCyberPolicyMarks(t *testing.T) {
 			"",
 			"event: response.failed",
 			`data: {"type":"response.failed","error":{"code":"cyber_policy","message":"flagged"}}`,
+			"",
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid"}},
@@ -4118,4 +4203,11 @@ func TestHandleCompatErrorResponseCyberPolicyEarlyReturn(t *testing.T) {
 	require.Contains(t, gotMsg, "flagged for cyber policy")
 	require.NotContains(t, gotMsg, "Upstream request failed")
 	require.NotNil(t, GetOpsCyberPolicy(c))
+}
+
+func (c *stubGatewayCache) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (c *stubGatewayCache) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
 }

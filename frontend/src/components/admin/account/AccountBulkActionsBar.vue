@@ -52,8 +52,8 @@
         <button @click="$emit('toggle-schedulable', false)" class="btn btn-warning btn-sm">{{ t('admin.accounts.bulkActions.disableScheduling') }}</button>
         <button @click="$emit('edit-selected')" class="btn btn-primary btn-sm">{{ t('admin.accounts.bulkActions.edit') }}</button>
       </template>
-      <button @click="$emit('edit-filtered')" class="btn btn-primary btn-sm">
-        {{ t('admin.accounts.bulkEdit.submit') }}
+      <button v-if="selectedIds.length === 0" @click="$emit('edit-filtered')" class="btn btn-primary btn-sm">
+        {{ t('admin.accounts.bulkActions.editFiltered', { count: totalResults }) }}
       </button>
     </div>
   </div>

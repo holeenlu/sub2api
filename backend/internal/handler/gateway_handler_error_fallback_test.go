@@ -8,12 +8,50 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGatewayClaudeKeepaliveFinalError(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		for _, committed := range []bool{false, true} {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			interval := time.Hour
+			if committed {
+				interval = time.Millisecond
+			}
+			stop := service.StartSSEKeepalive(c, interval)
+			if committed {
+				require.Eventually(t, func() bool { return c.Writer.Size() > 0 }, time.Second, time.Millisecond)
+			}
+			h := &GatewayHandler{}
+			if direct {
+				h.errorResponseWithCode(c, http.StatusBadRequest, "invalid_request_error", "invalid_field", "rejected")
+			} else {
+				h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, "invalid_request_error", "invalid_field", "rejected", false)
+			}
+			stop()
+			require.Equal(t, 1, strings.Count(rec.Body.String(), `"type":"error"`))
+			require.Contains(t, rec.Body.String(), `"code":"invalid_field"`)
+			if committed {
+				require.Equal(t, http.StatusOK, rec.Code)
+				require.Contains(t, rec.Body.String(), "data: ")
+				outcome, ok := service.GetOpsStreamError(c)
+				require.True(t, ok)
+				require.Equal(t, http.StatusBadRequest, outcome.IntendedStatus)
+			} else {
+				require.Equal(t, http.StatusBadRequest, rec.Code)
+				require.True(t, json.Valid(rec.Body.Bytes()))
+			}
+		}
+	}
+}
 
 func TestGatewayEnsureForwardErrorResponse_WritesFallbackWhenNotWritten(t *testing.T) {
 	gin.SetMode(gin.TestMode)

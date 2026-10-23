@@ -140,6 +140,9 @@ type V1InternalResponse struct {
 
 // GeminiResponse Gemini 响应
 type GeminiResponse struct {
+	PromptFeedback *struct {
+		BlockReason string `json:"blockReason,omitempty"`
+	} `json:"promptFeedback,omitempty"`
 	Candidates    []GeminiCandidate    `json:"candidates,omitempty"`
 	UsageMetadata *GeminiUsageMetadata `json:"usageMetadata,omitempty"`
 	ResponseID    string               `json:"responseId,omitempty"`

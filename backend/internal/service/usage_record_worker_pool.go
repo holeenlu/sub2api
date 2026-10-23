@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
@@ -57,6 +58,8 @@ func (m UsageRecordSubmitMode) Dropped() bool {
 
 // UsageRecordWorkerPoolOptions 使用量记录池配置。
 type UsageRecordWorkerPoolOptions struct {
+	ExecutionLimit        int // Shared by queued recovery work and synchronous first attempts.
+	DatabaseStats         func() sql.DBStats
 	WorkerCount           int
 	QueueSize             int
 	TaskTimeout           time.Duration
@@ -75,22 +78,33 @@ type UsageRecordWorkerPoolOptions struct {
 
 // UsageRecordWorkerPoolStats 使用量记录池运行时统计。
 type UsageRecordWorkerPoolStats struct {
-	MaxConcurrency     int
-	RunningWorkers     int64
-	WaitingTasks       uint64
-	SubmittedTasks     uint64
-	CompletedTasks     uint64
-	SuccessfulTasks    uint64
-	FailedTasks        uint64
-	DroppedTasks       uint64
-	DroppedQueueFull   uint64
-	DroppedPoolStopped uint64
-	SyncFallbackTasks  uint64
+	ExecutionLimit            int
+	ExecutionInFlight         int
+	ExecutionWaitMilliseconds uint64
+	InlineTasks               uint64
+	InlineCompleted           uint64
+	MaxConcurrency            int
+	RunningWorkers            int64
+	WaitingTasks              uint64
+	SubmittedTasks            uint64
+	CompletedTasks            uint64
+	SuccessfulTasks           uint64
+	FailedTasks               uint64
+	DroppedTasks              uint64
+	DroppedQueueFull          uint64
+	DroppedPoolStopped        uint64
+	SyncFallbackTasks         uint64
 }
 
 // UsageRecordWorkerPool 提供“有界队列 + 固定 worker”的异步执行器。
 // 用于替代请求路径里的直接 goroutine，避免高并发时无界堆积。
 type UsageRecordWorkerPool struct {
+	inlineTasks           atomic.Uint64
+	inlineCompleted       atomic.Uint64
+	executionWaitNanos    atomic.Uint64
+	executionSlots        chan struct{}
+	databaseStats         func() sql.DBStats
+	previousDBWaitCount   int64
 	pool                  pond.Pool
 	taskTimeout           time.Duration
 	overflowPolicy        string
@@ -111,6 +125,7 @@ type UsageRecordWorkerPool struct {
 	autoScaleCooldown     time.Duration
 	lastScaleNanos        atomic.Int64
 	autoScaleCancel       context.CancelFunc
+	recoveryCancel        context.CancelFunc
 	lifecycleWg           sync.WaitGroup
 	stopOnce              sync.Once
 }
@@ -118,14 +133,32 @@ type UsageRecordWorkerPool struct {
 // NewUsageRecordWorkerPool 从配置构建使用量记录池。
 func NewUsageRecordWorkerPool(cfg *config.Config) *UsageRecordWorkerPool {
 	opts := usageRecordPoolOptionsFromConfig(cfg)
+	if cfg != nil && cfg.Database.MaxOpenConns > 0 {
+		opts.ExecutionLimit = max(1, cfg.Database.MaxOpenConns/2)
+	}
 	return NewUsageRecordWorkerPoolWithOptions(opts)
 }
 
 // NewUsageRecordWorkerPoolWithOptions 根据给定参数构建使用量记录池。
 func NewUsageRecordWorkerPoolWithOptions(opts UsageRecordWorkerPoolOptions) *UsageRecordWorkerPool {
 	opts = normalizeUsageRecordPoolOptions(opts)
+	limit := opts.ExecutionLimit
+	if limit <= 0 {
+		limit = opts.WorkerCount
+		if opts.AutoScaleEnabled {
+			limit = opts.AutoScaleMaxWorkers
+		}
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	opts.WorkerCount = min(opts.WorkerCount, limit)
+	opts.AutoScaleMinWorkers = min(opts.AutoScaleMinWorkers, limit)
+	opts.AutoScaleMaxWorkers = min(opts.AutoScaleMaxWorkers, limit)
 
 	p := &UsageRecordWorkerPool{
+		executionSlots:        make(chan struct{}, limit),
+		databaseStats:         opts.DatabaseStats,
 		taskTimeout:           opts.TaskTimeout,
 		overflowPolicy:        opts.OverflowPolicy,
 		overflowSamplePercent: opts.OverflowSamplePercent,
@@ -199,17 +232,22 @@ func (p *UsageRecordWorkerPool) Stats() UsageRecordWorkerPoolStats {
 		return UsageRecordWorkerPoolStats{}
 	}
 	return UsageRecordWorkerPoolStats{
-		MaxConcurrency:     p.pool.MaxConcurrency(),
-		RunningWorkers:     p.pool.RunningWorkers(),
-		WaitingTasks:       p.pool.WaitingTasks(),
-		SubmittedTasks:     p.pool.SubmittedTasks(),
-		CompletedTasks:     p.pool.CompletedTasks(),
-		SuccessfulTasks:    p.pool.SuccessfulTasks(),
-		FailedTasks:        p.pool.FailedTasks(),
-		DroppedTasks:       p.pool.DroppedTasks(),
-		DroppedQueueFull:   p.droppedQueueFull.Load(),
-		DroppedPoolStopped: p.droppedPoolStopped.Load(),
-		SyncFallbackTasks:  p.syncFallback.Load(),
+		ExecutionLimit:            cap(p.executionSlots),
+		ExecutionInFlight:         len(p.executionSlots),
+		ExecutionWaitMilliseconds: p.executionWaitNanos.Load() / uint64(time.Millisecond),
+		InlineTasks:               p.inlineTasks.Load(),
+		InlineCompleted:           p.inlineCompleted.Load(),
+		MaxConcurrency:            p.pool.MaxConcurrency(),
+		RunningWorkers:            p.pool.RunningWorkers(),
+		WaitingTasks:              p.pool.WaitingTasks(),
+		SubmittedTasks:            p.pool.SubmittedTasks(),
+		CompletedTasks:            p.pool.CompletedTasks(),
+		SuccessfulTasks:           p.pool.SuccessfulTasks(),
+		FailedTasks:               p.pool.FailedTasks(),
+		DroppedTasks:              p.pool.DroppedTasks(),
+		DroppedQueueFull:          p.droppedQueueFull.Load(),
+		DroppedPoolStopped:        p.droppedPoolStopped.Load(),
+		SyncFallbackTasks:         p.syncFallback.Load(),
 	}
 }
 
@@ -221,6 +259,9 @@ func (p *UsageRecordWorkerPool) Stop() {
 	p.stopOnce.Do(func() {
 		if p.autoScaleCancel != nil {
 			p.autoScaleCancel()
+		}
+		if p.recoveryCancel != nil {
+			p.recoveryCancel()
 		}
 		p.lifecycleWg.Wait()
 		p.pool.StopAndWait()
@@ -276,7 +317,13 @@ func (p *UsageRecordWorkerPool) autoScaleTick() {
 	}
 
 	// 扩容优先：队列占用率超过阈值时，按步长提升并发上限。
-	if queuePercent >= p.autoScaleUpPercent && current < p.autoScaleMaxWorkers {
+	dbSaturated := false
+	if p.databaseStats != nil {
+		stats := p.databaseStats()
+		dbSaturated = stats.WaitCount > p.previousDBWaitCount || (stats.MaxOpenConnections > 0 && stats.InUse >= stats.MaxOpenConnections)
+		p.previousDBWaitCount = stats.WaitCount
+	}
+	if !dbSaturated && queuePercent >= p.autoScaleUpPercent && current < p.autoScaleMaxWorkers {
 		target := current + p.autoScaleUpStep
 		if target > p.autoScaleMaxWorkers {
 			target = p.autoScaleMaxWorkers
@@ -324,7 +371,25 @@ func (p *UsageRecordWorkerPool) shouldSyncFallback() bool {
 	return int((n-1)%100) < p.overflowSamplePercent
 }
 
+// Run records a first attempt before the request returns. Monetary tasks cannot
+// be dropped or left as unjournaled closures in the in-memory recovery queue.
+func (p *UsageRecordWorkerPool) Run(task UsageRecordTask) {
+	if p == nil || task == nil {
+		return
+	}
+	p.inlineTasks.Add(1)
+	defer p.inlineCompleted.Add(1)
+	p.execute(task)
+}
+
 func (p *UsageRecordWorkerPool) execute(task UsageRecordTask) {
+	if p.executionSlots != nil {
+		start := time.Now()
+		p.executionSlots <- struct{}{}
+		p.executionWaitNanos.Add(uint64(time.Since(start)))
+		defer func() { <-p.executionSlots }()
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), p.taskTimeout)
 	defer cancel()
 
@@ -503,4 +568,53 @@ func (m UsageRecordSubmitMode) String() string {
 
 func (s UsageRecordWorkerPoolStats) String() string {
 	return fmt.Sprintf("running=%d waiting=%d submitted=%d dropped=%d", s.RunningWorkers, s.WaitingTasks, s.SubmittedTasks, s.DroppedTasks)
+}
+
+// ProvideUsageRecordWorkerPool attaches database pressure and durable recovery to
+// the existing bounded executor. NewUsageRecordWorkerPool remains a test factory.
+func ProvideUsageRecordWorkerPool(cfg *config.Config, db *sql.DB, repo UsageBillingRepository, billing *BillingService, resolver *ModelPricingResolver, groups GroupRepository, cache BillingCache, keys *APIKeyService) *UsageRecordWorkerPool {
+	opts := usageRecordPoolOptionsFromConfig(cfg)
+	if cfg != nil && cfg.Database.MaxOpenConns > 0 {
+		opts.ExecutionLimit = max(1, cfg.Database.MaxOpenConns/2)
+	}
+	if db != nil {
+		opts.DatabaseStats = db.Stats
+	}
+	pool := NewUsageRecordWorkerPoolWithOptions(opts)
+	if recovery, ok := repo.(UsageBillingRecoveryRepository); ok {
+		recovery.ConfigureUsageBillingRecovery(usageBillingRepricer(billing, resolver, groups), usageBillingCacheInvalidator(cache, keys))
+		pool.startBillingRecovery(recovery)
+	}
+	return pool
+}
+
+func (p *UsageRecordWorkerPool) startBillingRecovery(repo UsageBillingRecoveryRepository) {
+	ctx, cancel := context.WithCancel(context.Background())
+	p.recoveryCancel = cancel
+	p.lifecycleWg.Add(1)
+	go func() {
+		defer p.lifecycleWg.Done()
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		var active atomic.Bool
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if !active.CompareAndSwap(false, true) {
+					continue
+				}
+				mode := p.Submit(func(taskCtx context.Context) {
+					defer active.Store(false)
+					if _, err := repo.RecoverPendingUsageBilling(taskCtx, 16, nil); err != nil {
+						logger.L().Warn("billing.recovery_failed", zap.Error(err))
+					}
+				})
+				if mode.Dropped() {
+					active.Store(false)
+				}
+			}
+		}
+	}()
 }

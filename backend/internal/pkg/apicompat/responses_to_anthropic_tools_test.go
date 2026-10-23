@@ -245,9 +245,12 @@ func TestResponsesToAnthropic_RootUnionKeepsRootPropertiesAndRequired(t *testing
 		Name: "merge_root_tool",
 		Parameters: json.RawMessage(`{
 			"type":"object",
-			"properties":{"shared":{"type":"string"}},
+			"properties":{"z":{"type":"object","properties":{"z":{"type":"string"},"a":{"type":"number"}}},"shared":{"type":"string"}},
 			"required":["shared"],
-			"oneOf":[{"type":"object","properties":{"extra":{"type":"integer"}}}]
+			"oneOf":[
+				{"type":"object","properties":{"extra":{"type":"integer"},"a.b":{"type":"boolean"}}},
+				{"anyOf":[{"type":"object","properties":{"shared":{"enum":["x"]},"a\\b":{"type":"string"},"a\"b":{"type":"number"},"":{"type":"null"}}}]}
+			]
 		}`),
 	}})
 
@@ -259,6 +262,8 @@ func TestResponsesToAnthropic_RootUnionKeepsRootPropertiesAndRequired(t *testing
 	assert.Contains(t, properties, "shared")
 	assert.Contains(t, properties, "extra")
 	assert.JSONEq(t, `["shared"]`, string(schema["required"]))
+	assert.Equal(t, `{"z":{"type":"object","properties":{"z":{"type":"string"},"a":{"type":"number"}}},"shared":{"anyOf":[{"type":"string"},{"enum":["x"]}]},"extra":{"type":"integer"},"a.b":{"type":"boolean"},"a\\b":{"type":"string"},"a\"b":{"type":"number"},"":{"type":"null"}}`, string(schema["properties"]),
+		"preserve root, branch and nested property order, including literal special-character names")
 }
 
 // 端到端：Codex 命名空间工具经降级/摊平后，最终 Anthropic 工具 schema 顶部不再有联合关键字。
