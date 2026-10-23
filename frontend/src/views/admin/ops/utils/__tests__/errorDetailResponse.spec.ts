@@ -132,3 +132,12 @@ describe('errorDetailResponse', () => {
     }))).toBe('fallback message')
   })
 })
+
+it('keeps scheduling diagnostics out of provider response fallback', () => {
+  const local = { kind: 'scheduling_trace', detail: '{"events":[{"stage":"selection"}]}' }
+  const detail = makeDetail({ upstream_errors: JSON.stringify([local]) })
+  expect(resolveUpstreamPayload(detail)).toBe('')
+  const provider = { kind: 'http_error', upstream_status_code: 429, message: 'limited' }
+  detail.upstream_errors = JSON.stringify([provider, local])
+  expect(JSON.parse(resolveUpstreamPayload(detail))).toEqual([provider])
+})

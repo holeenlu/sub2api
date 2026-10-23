@@ -692,3 +692,25 @@ func TestAPIKeyService_GetByKey_SingleflightCollapses(t *testing.T) {
 	}
 	require.Equal(t, int32(1), atomic.LoadInt32(&calls))
 }
+
+func TestAPIKeyService_VendorIdentitiesDeniedFromDatabaseAndCachedKeys(t *testing.T) {
+	for _, role := range []string{RoleVendorLevel1, RoleVendorLevel2} {
+		t.Run(role, func(t *testing.T) {
+			repo := &authRepoStub{getByKeyForAuth: func(context.Context, string) (*APIKey, error) {
+				return &APIKey{ID: 1, UserID: 2, Status: StatusActive, User: &User{ID: 2, Role: role, Status: StatusActive}}, nil
+			}}
+			cfg := &config.Config{APIKeyAuth: config.APIKeyAuthCacheConfig{L2TTLSeconds: 60}}
+			svc := NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+			key, err := svc.GetByKey(context.Background(), "database-key")
+			require.Nil(t, key)
+			require.ErrorIs(t, err, ErrVendorDenied)
+			cache := &authCacheStub{getAuthCache: func(context.Context, string) (*APIKeyAuthCacheEntry, error) {
+				return &APIKeyAuthCacheEntry{Snapshot: &APIKeyAuthSnapshot{Version: apiKeyAuthSnapshotVersion, APIKeyID: 1, UserID: 2, Status: StatusActive, User: APIKeyAuthUserSnapshot{ID: 2, Role: role, Status: StatusActive}}}, nil
+			}}
+			svc = NewAPIKeyService(repo, nil, nil, nil, nil, cache, cfg)
+			key, err = svc.GetByKey(context.Background(), "cached-key")
+			require.Nil(t, key)
+			require.ErrorIs(t, err, ErrVendorDenied)
+		})
+	}
+}

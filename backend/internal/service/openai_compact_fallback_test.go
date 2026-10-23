@@ -26,6 +26,61 @@ func newOpenAICompactFallbackTestContext(t *testing.T, path string) *gin.Context
 	return c
 }
 
+func TestForwardCompactPromotesOnlyRejectedOAuthRoute(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run(strconv.FormatBool(passthrough), func(t *testing.T) {
+			c := newOpenAICompactFallbackTestContext(t, "/v1/responses/compact")
+			upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{
+				{StatusCode: 404, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"route not found"}}`))},
+				{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: " + `{"type":"response.completed","response":{"id":"resp_compact_v2","status":"completed","output":[{"type":"compaction","encrypted_content":"opaque-window"}],"usage":{"input_tokens":8,"output_tokens":3}}}` + "\n\n"))},
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, toolCorrector: NewCodexToolCorrector()}
+			account := &Account{ID: 992, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "owner"}, Extra: map[string]any{"openai_passthrough": passthrough}}
+			body := []byte(`{"model":"gpt-5.5","input":[{"role":"user","content":"compact","nonce":9007199254740993}]}`)
+			result, err := svc.Forward(context.Background(), c, account, body)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, 2, upstream.callCount)
+			require.Equal(t, "/backend-api/codex/responses/compact", upstream.reqs[0].URL.Path)
+			require.Equal(t, "/backend-api/codex/responses", upstream.reqs[1].URL.Path)
+			require.True(t, gjson.GetBytes(upstream.bodies[1], "stream").Bool())
+			require.False(t, gjson.GetBytes(upstream.bodies[1], "store").Bool())
+			require.Equal(t, "compaction_trigger", gjson.GetBytes(upstream.bodies[1], "input.1.type").String())
+			require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.bodies[1], "input.0.nonce").Raw)
+			require.Contains(t, upstream.reqs[1].Header.Get("x-codex-beta-features"), "remote_compaction_v2")
+			require.Equal(t, 8, result.Usage.InputTokens)
+			require.Equal(t, 3, result.Usage.OutputTokens)
+			require.False(t, result.Stream, "legacy client keeps unary contract")
+			_, changed, err := prepareOpenAILegacyCompactPromotion(c, account, upstream.bodies[1], 404, []byte("not found"))
+			require.NoError(t, err)
+			require.False(t, changed, "one promotion per account attempt")
+		})
+	}
+	for _, tc := range []struct {
+		name, typ string
+		status    int
+		errorBody string
+		committed bool
+	}{
+		{"public_api", AccountTypeAPIKey, 404, "not found", false},
+		{"model_error", AccountTypeOAuth, 404, `{"error":{"code":"model_not_found"}}`, false},
+		{"server_error", AccountTypeOAuth, 503, "unavailable", false},
+		{"already_output", AccountTypeOAuth, 404, "not found", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newOpenAICompactFallbackTestContext(t, "/v1/responses/compact")
+			if tc.committed {
+				MarkResponseCommitted(c)
+			}
+			original := []byte(`{"model":"gpt-5.5","input":[]}`)
+			body, changed, err := prepareOpenAILegacyCompactPromotion(c, &Account{Platform: PlatformOpenAI, Type: tc.typ}, original, tc.status, []byte(tc.errorBody))
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Equal(t, original, body)
+		})
+	}
+}
+
 func TestPrepareOpenAICompactFallbackRetryRequiresExplicitCompact(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{OpenAICompactModel: "gpt-5.4"}}}

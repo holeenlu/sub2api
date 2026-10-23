@@ -707,16 +707,6 @@ func isOpenAIImagesContentPolicyRefusal(text string) bool {
 	return false
 }
 
-// extractOpenAIImagesModelRefusal returns only text with an explicit safety or
-// moderation signal. Plain prompt suggestions are capability failures instead.
-func extractOpenAIImagesModelRefusal(body []byte) string {
-	text := extractOpenAIImagesModelText(body)
-	if !isOpenAIImagesContentPolicyRefusal(text) {
-		return ""
-	}
-	return text
-}
-
 func openAIImagesTextFallbackError(body []byte) *OpenAIImagesUpstreamError {
 	return openAIImagesTextFallbackErrorForText(extractOpenAIImagesModelText(body))
 }
@@ -1142,7 +1132,7 @@ func (s *OpenAIGatewayService) writeOpenAIImagesStreamEvent(c *gin.Context, flus
 		return err
 	}
 	flusher.Flush()
-	return nil
+	return downstreamStreamError(c)
 }
 
 func (s *OpenAIGatewayService) tryWriteOpenAIImagesStreamEvent(
@@ -1401,6 +1391,9 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 	streamPrefix string,
 	fallbackModel string,
 ) (OpenAIUsage, int, []string, *int, error) {
+	defer GuardSSEWrites(c)()
+	drain := newOpenAIHTTPUsageDrain(streamWriteContext(c), resp.Body.Close)
+	defer drain.stop()
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -1589,7 +1582,6 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 	}
 
 	flushData := func() (bool, error) {
-		sseData.Flush(processData)
 		if processDataErr != nil {
 			return true, processDataErr
 		}
@@ -1648,7 +1640,10 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 				} else if done {
 					return usage, imageCount, imageOutputSizes, firstTokenMs, nil
 				}
-				if shouldClassifyOpenAIUpstreamStreamReadError(err, c.Request.Context()) {
+				if streamClientDisconnected(c) {
+					return usage, imageCount, imageOutputSizes, firstTokenMs, context.Canceled
+				}
+				if shouldClassifyOpenAIUpstreamStreamReadError(err, c.Request.Context(), streamWriteContext(c)) {
 					err = newOpenAIUpstreamStreamReadError(err)
 				}
 				return usage, imageCount, imageOutputSizes, firstTokenMs, err
@@ -1743,7 +1738,10 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 				} else if done {
 					return usage, imageCount, imageOutputSizes, firstTokenMs, nil
 				}
-				if shouldClassifyOpenAIUpstreamStreamReadError(ev.err, c.Request.Context()) {
+				if streamClientDisconnected(c) {
+					return usage, imageCount, imageOutputSizes, firstTokenMs, context.Canceled
+				}
+				if shouldClassifyOpenAIUpstreamStreamReadError(ev.err, c.Request.Context(), streamWriteContext(c)) {
 					ev.err = newOpenAIUpstreamStreamReadError(ev.err)
 				}
 				return usage, imageCount, imageOutputSizes, firstTokenMs, ev.err
@@ -1788,6 +1786,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	parsed *OpenAIImagesRequest,
 	channelMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	if parsed.Stream {
+		defer GuardSSEWrites(c)()
+	}
 	startTime := time.Now()
 	requestModel := strings.TrimSpace(parsed.Model)
 	if mapped := strings.TrimSpace(channelMappedModel); mapped != "" {
@@ -1817,6 +1818,20 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	defer releaseUpstreamCtx()
 
+	if direct && s.excelBPSGloballyEnabled(ctx) && account.IsExcelBPSImagesEnabledForModel(requestModel) {
+		if reason := excelBPSImagesUnsupportedReason(parsed); reason != "" {
+			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Images request stays on Codex: account_id=%d bps_unsupported=%s", account.ID, reason)
+		} else {
+			result, fallback, err := s.forwardExcelBPSImages(upstreamCtx, c, account, parsed, requestModel, upstreamModel, startTime)
+			if !fallback {
+				return result, err
+			}
+		}
+	}
+
+	if account.IsExcelOAuth() {
+		return nil, &OpenAIImagesUpstreamError{StatusCode: http.StatusBadRequest, ErrorType: "invalid_request_error", Code: "basispoints_image_unsupported", Message: "Excel-only authorization cannot fall back to native image generation"}
+	}
 	token, _, err := s.GetAccessToken(upstreamCtx, account)
 	if err != nil {
 		return nil, err
@@ -1859,9 +1874,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		proxyURL = account.Proxy.URL()
 	}
 	upstreamStart := time.Now()
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account, vendorDispatchGroup(c))
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
+		if errors.Is(err, ErrOpenAITurnAttemptBudgetExhausted) || errors.Is(err, ErrOpenAIWSFirstOutputBudgetExhausted) {
+			return nil, err
+		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -1943,6 +1961,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		if err != nil {
 			if imageCount > 0 {
 				return &OpenAIForwardResult{
+					AuthorizationMode:             nativeOpenAIUsageAuthorizationMode(account),
 					RequestID:                     resp.Header.Get("x-request-id"),
 					UpstreamHeaders:               resp.Header,
 					Usage:                         usage,
@@ -1952,6 +1971,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 					UpstreamResponseModel:         observedUpstreamResponseModel(c),
 					UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 					Stream:                        parsed.Stream,
+					ClientDisconnect:              streamClientDisconnected(c),
 					ResponseHeaders:               resp.Header.Clone(),
 					Duration:                      time.Since(startTime),
 					FirstTokenMs:                  firstTokenMs,
@@ -1995,6 +2015,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		imageCount = parsed.N
 	}
 	return &OpenAIForwardResult{
+		AuthorizationMode:             nativeOpenAIUsageAuthorizationMode(account),
 		RequestID:                     resp.Header.Get("x-request-id"),
 		UpstreamHeaders:               resp.Header,
 		Usage:                         usage,
@@ -2004,6 +2025,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		Stream:                        parsed.Stream,
+		ClientDisconnect:              streamClientDisconnected(c),
 		ResponseHeaders:               resp.Header.Clone(),
 		Duration:                      time.Since(startTime),
 		FirstTokenMs:                  firstTokenMs,
