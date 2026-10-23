@@ -3,6 +3,7 @@ import {
   findCodexCatalogModel,
   formatCodexReasoningEffortTomlLine,
   parseCodexCatalogModels,
+  selectCodexCatalogModel,
   selectCodexConfigReasoningEffort
 } from '@/utils/codexCatalogConfig'
 
@@ -17,6 +18,21 @@ describe('codexCatalogConfig', () => {
     expect(parseCodexCatalogModels(content).map((model) => model.slug)).toEqual(['glm-5.3'])
     expect(findCodexCatalogModel(content, 'glm-5.3')?.slug).toBe('glm-5.3')
     expect(findCodexCatalogModel(content, 'missing')).toBeUndefined()
+  })
+
+  it('keeps the preferred model when offered, otherwise the first model Codex lists', () => {
+    const models = parseCodexCatalogModels(JSON.stringify({
+      models: [
+        { slug: 'codex-auto-review', visibility: 'hide' },
+        { slug: 'gpt-6-astra', visibility: 'list' },
+        { slug: 'gpt-5.5' }
+      ]
+    }))
+    expect(selectCodexCatalogModel(models, 'gpt-5.5')).toBe('gpt-5.5')
+    expect(selectCodexCatalogModel(models, 'gpt-5.4')).toBe('gpt-6-astra')
+    expect(selectCodexCatalogModel([{ slug: 'codex-auto-review', visibility: 'hide' }], 'gpt-5.5'))
+      .toBe('codex-auto-review')
+    expect(selectCodexCatalogModel([], 'gpt-5.5')).toBe('gpt-5.5')
   })
 
   it('omits effort when the descriptor only advertises none', () => {

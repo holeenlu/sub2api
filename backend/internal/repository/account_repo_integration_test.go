@@ -5,6 +5,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -1761,4 +1763,89 @@ func idsOfAccounts(accounts []service.Account) []int64 {
 		out = append(out, accounts[i].ID)
 	}
 	return out
+}
+
+func (s *AccountRepoSuite) TestRemovedAccountFieldsRejectWritesWithoutPartialChanges() {
+	account := &service.Account{
+		Name: "native-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token", "model_mapping": map[string]any{"client": "native"}},
+		Extra:       map[string]any{"codex_diagnostic_monitor": "preserve", "custom_bps_label": "allowed"},
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, account))
+	before, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	for _, tc := range []struct {
+		field       string
+		credentials bool
+	}{
+		{"model_mapping_mode", true}, {"openai_excel_bps", false},
+		{"codex_turn_ticket:gpt-6-astra", false}, {"codex_ticket_harvest_enabled", false},
+		{"codex_allow_without_ticket", false}, {"openai_apikey_codex_identity", false}, {"model_catalog_snapshot", false},
+		{"openai_excel_bps_auto_recover_on_403", false}, {"openai_bps", false},
+		{"openai_bps_credential_state", false}, {"cost_multiplier", false}, {"cost_multiplier_auto_sync", false},
+	} {
+		s.Run(tc.field, func() {
+			creds, extra := maps.Clone(account.Credentials), maps.Clone(account.Extra)
+			if tc.credentials {
+				creds[tc.field] = "obsolete"
+			} else {
+				extra[tc.field] = "obsolete"
+			}
+			candidate := *account
+			candidate.ID, candidate.Name = 0, "must-not-be-created"
+			candidate.Credentials, candidate.Extra = creds, extra
+			s.Require().ErrorIs(s.repo.Create(s.ctx, &candidate), service.ErrUnsupportedAccountField)
+			s.Require().Zero(candidate.ID)
+			candidate.ID, candidate.Name = account.ID, "must-not-change"
+			s.Require().ErrorIs(s.repo.Update(s.ctx, &candidate), service.ErrUnsupportedAccountField)
+			changed, err := s.repo.BulkUpdate(s.ctx, []int64{account.ID}, service.AccountBulkUpdate{
+				Name: &candidate.Name, Credentials: creds, Extra: extra,
+			})
+			s.Require().ErrorIs(err, service.ErrUnsupportedAccountField)
+			s.Require().Zero(changed)
+			if tc.credentials {
+				s.Require().ErrorIs(s.repo.UpdateCredentials(s.ctx, account.ID, creds), service.ErrUnsupportedAccountField)
+				updated, err := s.repo.UpdateGrokOAuthCredentialsIfUnchanged(s.ctx, account.ID, account.Credentials, nil, creds)
+				s.Require().ErrorIs(err, service.ErrUnsupportedAccountField)
+				s.Require().False(updated)
+				s.Require().Contains(creds, tc.field, "rejected input must not be silently rewritten")
+			} else {
+				s.Require().ErrorIs(s.repo.UpdateExtra(s.ctx, account.ID, extra), service.ErrUnsupportedAccountField)
+				s.Require().Contains(extra, tc.field, "rejected input must not be silently rewritten")
+			}
+			after, err := s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			s.Require().Equal(before, after, "rejected writes must preserve mappings, diagnostics, and the complete account")
+		})
+	}
+}
+
+func TestAccountRepositoryGrokVoiceOwnershipRemainsTenantBound(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	_, err := tx.ExecContext(ctx, `CREATE TEMP TABLE gateway_media_voices (
+ account_id BIGINT,voice_id TEXT,user_id BIGINT,group_id BIGINT,metadata JSONB,created_at TIMESTAMPTZ DEFAULT NOW(),
+ PRIMARY KEY(account_id,voice_id)) ON COMMIT DROP`)
+	require.NoError(t, err)
+	repo := &accountRepository{sql: tx}
+	voice := &service.GatewayMediaVoice{ID: "voice-one", AccountID: 10, UserID: 20, GroupID: 30, Metadata: json.RawMessage(`{"voice_id":"voice-one"}`)}
+	require.NoError(t, repo.PutVoice(ctx, voice))
+	owned, err := repo.GetVoice(ctx, 30, 20, "voice-one")
+	require.NoError(t, err)
+	require.Equal(t, int64(10), owned.AccountID)
+	_, err = repo.GetVoice(ctx, 30, 21, "voice-one")
+	require.ErrorIs(t, err, service.ErrMediaNotOwned)
+	stolen := *voice
+	stolen.UserID = 21
+	require.ErrorIs(t, repo.PutVoice(ctx, &stolen), service.ErrMediaNotOwned)
+	require.NoError(t, repo.DeleteVoice(ctx, 30, 21, "voice-one"))
+	_, err = repo.GetVoice(ctx, 30, 20, "voice-one")
+	require.NoError(t, err)
+	foreign, err := repo.ListVoices(ctx, 31, 20)
+	require.NoError(t, err)
+	require.Empty(t, foreign)
+	require.NoError(t, repo.DeleteVoice(ctx, 30, 20, "voice-one"))
+	_, err = repo.GetVoice(ctx, 30, 20, "voice-one")
+	require.ErrorIs(t, err, service.ErrMediaNotOwned)
 }

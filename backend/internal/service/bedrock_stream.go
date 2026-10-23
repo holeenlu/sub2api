@@ -30,6 +30,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 	startTime time.Time,
 	model string,
 ) (*streamingResult, error) {
+	defer GuardSSEWrites(c)()
 	w := c.Writer
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -47,6 +48,8 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
 	clientDisconnected := false
+	drain := newOpenAIHTTPUsageDrain(c.Request.Context(), resp.Body.Close, ctx, streamWriteContext(c))
+	defer drain.stop()
 
 	// Bedrock EventStream 使用 application/vnd.amazon.eventstream 二进制格式。
 	// 每个帧结构：total_length(4) + headers_length(4) + prelude_crc(4) + headers + payload + message_crc(4)
@@ -104,20 +107,35 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 		intervalCh = intervalTicker.C
 	}
 
+	// Keep heartbeats in the same writer loop as business events. They neither
+	// advance TTFT/usage nor reset the upstream data-idle deadline.
+	keepaliveInterval := time.Duration(0)
+	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+	}
+	var keepaliveCh <-chan time.Time
+	if keepaliveInterval > 0 {
+		ticker := time.NewTicker(keepaliveInterval)
+		defer ticker.Stop()
+		keepaliveCh = ticker.C
+	}
+	lastWriteAt := time.Now()
+
 	for {
+		clientDisconnected = clientDisconnected || drain.disconnected() || downstreamStreamError(c) != nil
 		select {
 		case ev, ok := <-events:
+			clientDisconnected = clientDisconnected || drain.disconnected()
+
 			if !ok {
 				if !clientDisconnected {
 					flusher.Flush()
+					clientDisconnected = downstreamStreamError(c) != nil
 				}
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
 			}
 			if ev.err != nil {
 				if clientDisconnected {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
-				}
-				if errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
 				}
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("bedrock stream read error: %w", ev.err)
@@ -157,8 +175,23 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 					logger.LegacyPrintf("service.gateway", "[Bedrock] Client disconnected during streaming, continue draining for usage: account=%d", account.ID)
 				} else {
 					flusher.Flush()
+					clientDisconnected = downstreamStreamError(c) != nil
+					lastWriteAt = time.Now()
 				}
 			}
+
+		case <-keepaliveCh:
+			if clientDisconnected || time.Since(lastWriteAt) < keepaliveInterval {
+				continue
+			}
+			if _, err := io.WriteString(w, "event: ping\ndata: {\"type\":\"ping\"}\n\n"); err != nil {
+				clientDisconnected = true
+				drain.start()
+				continue
+			}
+			flusher.Flush()
+			clientDisconnected = downstreamStreamError(c) != nil
+			lastWriteAt = time.Now()
 
 		case <-intervalCh:
 			lastRead := time.Unix(0, lastReadAt.Load())
