@@ -899,7 +899,10 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 				releaseRate, err = acquireRate(attemptCtx)
 			}
 			if err == nil {
-				newCredentials, err = refresher.Refresh(attemptCtx, account)
+				err = validateVendorOAuthRefresh(attemptCtx, s.accountRepo, account)
+				if err == nil {
+					newCredentials, err = refresher.Refresh(attemptCtx, account)
+				}
 			}
 			if releaseRate != nil {
 				releaseRate()
@@ -907,7 +910,11 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 			attemptTimedOut := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 			if err == nil && newCredentials != nil && !attemptTimedOut {
 				newCredentials["_token_version"] = time.Now().UnixMilli()
-				if saveErr := persistAccountCredentials(attemptCtx, s.accountRepo, account, newCredentials); saveErr != nil {
+				persist := persistAccountCredentials
+				if isVendorOpenAIRefresh(account) {
+					persist = persistVendorOAuthRefresh
+				}
+				if saveErr := persist(attemptCtx, s.accountRepo, account, newCredentials); saveErr != nil {
 					err = fmt.Errorf("failed to save credentials: %w", saveErr)
 				} else {
 					credentialsPersisted = true
@@ -960,6 +967,9 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		if errors.Is(err, errRefreshSkipped) {
 			return errRefreshSkipped
 		}
+		if isVendorOpenAIRefresh(account) && errors.Is(err, ErrVendorSupplyUnavailable) {
+			return errRefreshSkipped
+		}
 		if isProviderScopedTerminalRefreshError(err) {
 			return err
 		}
@@ -984,6 +994,9 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 
 		// 不可重试错误（invalid_grant/invalid_client 等）直接标记 error 状态并返回
 		if isNonRetryableRefreshError(err) {
+			if isVendorOpenAIRefresh(account) {
+				return s.disableVendorOAuthRefreshGrant(ctx, account, err)
+			}
 			errorMsg := "Token refresh failed (non-retryable): " + logredact.RedactText(err.Error())
 			isGrokOAuth := account.IsGrokOAuth()
 			if !isGrokOAuth {
@@ -1081,6 +1094,13 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		"error", logredact.RedactText(lastErr.Error()),
 	)
 
+	// A transient failure of one supplier grant is not evidence that its other
+	// grant is unusable. Retry at the next bounded refresh cycle, without placing
+	// an account-wide cooldown on the independent authorization.
+	if isVendorOpenAIRefresh(account) {
+		return lastErr
+	}
+
 	// 设置临时不可调度 10 分钟（不标记 error，保持 status=active 让下个刷新周期能继续尝试）
 	until := time.Now().Add(tokenRefreshTempUnschedDuration)
 	reason := "token refresh retry exhausted"
@@ -1158,6 +1178,12 @@ func (s *TokenRefreshService) retryBackoff(accountID int64, attempt int) time.Du
 
 // postRefreshActions 刷新成功后的后续动作（清除错误状态、缓存失效、调度器同步等）
 func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *Account) {
+	if isVendorOpenAIRefresh(account) {
+		// A mode refresh cannot clear an unrelated account cooldown or run
+		// native privacy calls with a BPS grant.
+		s.postRefreshStateSync(ctx, account)
+		return
+	}
 	s.clearAntigravityForceTokenRefresh(ctx, account, "success")
 
 	// Antigravity 账户：如果之前是因为缺少 project_id 而标记为 error，现在成功获取到了，清除错误状态
@@ -1217,6 +1243,15 @@ func (s *TokenRefreshService) postRefreshStateSyncWithCleanup(parent context.Con
 }
 
 func (s *TokenRefreshService) postRefreshStateSync(ctx context.Context, account *Account) {
+	if isVendorOpenAIRefresh(account) {
+		// Also covers detached cleanup after a committed refresh: do not publish
+		// a pre-refresh snapshot over a concurrent policy or scheduling change.
+		current, err := s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || current == nil {
+			return
+		}
+		account = current
+	}
 	// 对所有 OAuth 账号调用缓存失效（InvalidateToken 内部根据平台判断是否需要处理）
 	if s.cacheInvalidator != nil && account.Type == AccountTypeOAuth {
 		if err := s.cacheInvalidator.InvalidateToken(ctx, account); err != nil {

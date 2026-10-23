@@ -5,6 +5,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,9 @@ func (h *SettingHandler) GetAdminAPIKey(c *gin.Context) {
 // RegenerateAdminAPIKey 生成/重新生成管理员 API Key
 // POST /api/v1/admin/settings/admin-api-key/regenerate
 func (h *SettingHandler) RegenerateAdminAPIKey(c *gin.Context) {
+	if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
+		return
+	}
 	key, err := h.settingService.GenerateAdminAPIKey(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)

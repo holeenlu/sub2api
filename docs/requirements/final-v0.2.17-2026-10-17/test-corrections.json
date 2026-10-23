@@ -1,0 +1,18 @@
+[
+  {
+    "path": "backend/internal/repository/account_repo_excel_bps_test.go",
+    "before_blob": "503c678ded97f732e6d348ccb554a61ae7725e64",
+    "after_blob": "93d7c0c80ac25d377ea1e52809a6dbef50b64c39",
+    "added_lines": 1,
+    "deleted_lines": 1,
+    "reason": "Update SQL assertions to retain the existing archived-vendor account write exclusion."
+  },
+  {
+    "path": "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
+    "before_blob": "a1b858e51ae8bd3a83544d6337a1099b62cdf25c",
+    "after_blob": "4d6992e2d599c5c7feb14e4b32364c03c32a0ad9",
+    "added_lines": 1,
+    "deleted_lines": 1,
+    "reason": "Update SQL assertions to retain the existing archived-vendor account write exclusion."
+  }
+]

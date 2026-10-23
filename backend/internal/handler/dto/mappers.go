@@ -70,6 +70,9 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 	}
 	return &AdminUser{
 		User:                 *base,
+		CreatedBy:            u.CreatedBy,
+		LastLoginAt:          u.LastLoginAt,
+		TotpEnabled:          u.TotpEnabled,
 		Notes:                u.Notes,
 		LastUsedAt:           u.LastUsedAt,
 		GroupRates:           u.GroupRates,
@@ -247,6 +250,9 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		openCodeGoUsage = state
 	}
 	out := &Account{
+		CreatedBy: a.CreatedBy, CreatedByName: a.CreatedByName, CreatedByRole: a.CreatedByRole,
+		AnthropicStatus: service.AnthropicAccountStatusFromAccount(a),
+		VendorID:        a.VendorID, VendorPausedAt: a.VendorPausedAt, VendorNotes: a.VendorNotes,
 		ID:                      a.ID,
 		Name:                    a.Name,
 		Notes:                   a.Notes,
@@ -420,7 +426,14 @@ func redactAccountManagedExtra(extra map[string]any) map[string]any {
 	}
 	redacted := make(map[string]any, len(extra))
 	for key, value := range extra {
+		// Internal observations are projected through usage/status APIs. Do not
+		// expose retired JSONB metadata or credential identity hashes in Extra.
+		if strings.HasPrefix(key, "anthropic_observation_") {
+			continue
+		}
 		switch key {
+		case service.AccountTelemetryExtraKey:
+			redacted[key] = service.ReadAccountTelemetry(&service.Account{Extra: extra})
 		case service.OllamaCloudUsageSessionExtraKey,
 			service.OllamaCloudUsageAutoRefreshExtraKey,
 			service.OllamaCloudUsageSnapshotExtraKey,
@@ -464,6 +477,9 @@ func AccountListItemFromAccount(a *Account) *AccountListItem {
 		return nil
 	}
 	return &AccountListItem{
+		CreatedBy: a.CreatedBy, CreatedByName: a.CreatedByName, CreatedByRole: a.CreatedByRole,
+		AnthropicStatus: a.AnthropicStatus,
+		VendorID:        a.VendorID, VendorPausedAt: a.VendorPausedAt, VendorNotes: a.VendorNotes,
 		ID: a.ID, Name: a.Name, Notes: a.Notes, Platform: a.Platform, Type: a.Type,
 		Credentials: a.Credentials, CredentialsStatus: a.CredentialsStatus, Extra: a.Extra,
 		OllamaCloudUsage: a.OllamaCloudUsage, OpenCodeGoUsage: a.OpenCodeGoUsage,
@@ -564,7 +580,7 @@ func ProxyWithAccountCountFromService(p *service.ProxyWithAccountCount) *ProxyWi
 }
 
 // ProxyFromServiceAdmin converts a service Proxy to AdminProxy DTO for admin users.
-// It includes the password field - user-facing endpoints must not use this.
+// It returns credential presence rather than an existing password.
 func ProxyFromServiceAdmin(p *service.Proxy) *AdminProxy {
 	if p == nil {
 		return nil
@@ -574,13 +590,13 @@ func ProxyFromServiceAdmin(p *service.Proxy) *AdminProxy {
 		return nil
 	}
 	return &AdminProxy{
-		Proxy:    *base,
-		Password: p.Password,
+		Proxy:       *base,
+		HasPassword: p.Password != "",
 	}
 }
 
 // ProxyWithAccountCountFromServiceAdmin converts a service ProxyWithAccountCount to AdminProxyWithAccountCount DTO.
-// It includes the password field - user-facing endpoints must not use this.
+// It returns credential presence rather than an existing password.
 func ProxyWithAccountCountFromServiceAdmin(p *service.ProxyWithAccountCount) *AdminProxyWithAccountCount {
 	if p == nil {
 		return nil
@@ -691,6 +707,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		requestedModel = l.Model
 	}
 	return UsageLog{
+		BillingStatus:             service.UsageBillingStatus(l),
 		ID:                        l.ID,
 		UserID:                    l.UserID,
 		APIKeyID:                  l.APIKeyID,
@@ -708,6 +725,8 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		CacheReadTokens:           l.CacheReadTokens,
 		CacheCreation5mTokens:     l.CacheCreation5mTokens,
 		CacheCreation1hTokens:     l.CacheCreation1hTokens,
+		CacheCreation30mTokens:    l.CacheCreation30mTokens,
+		CacheCreation12hTokens:    l.CacheCreation12hTokens,
 		InputCost:                 l.InputCost,
 		OutputCost:                l.OutputCost,
 		CacheCreationCost:         l.CacheCreationCost,
@@ -723,6 +742,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		NativeCompactionV2:        l.NativeCompactionV2,
 		DurationMs:                l.DurationMs,
 		FirstTokenMs:              l.FirstTokenMs,
+		LatencyMetrics:            l.LatencyMetrics,
 		ImageCount:                l.ImageCount,
 		ImageSize:                 l.ImageSize,
 		ImageInputSize:            l.ImageInputSize,
@@ -766,6 +786,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	usageLog := usageLogFromServiceUser(l)
 	usageLog.UpstreamEndpoint = l.UpstreamEndpoint
 	return &AdminUsageLog{
+		AuthorizationMode:       service.DisplayUsageAuthorizationMode(l.AuthorizationMode),
 		UsageLog:                usageLog,
 		UpstreamModel:           l.UpstreamModel,
 		UpstreamReasoningEffort: adminUpstreamReasoningEffort(l),
