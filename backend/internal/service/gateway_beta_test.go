@@ -311,3 +311,24 @@ func TestDefaultBetaPolicy_Context1M_Sonnet5Whitelist(t *testing.T) {
 		})
 	}
 }
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+// stripBetaTokens removes the given beta tokens from a comma-separated header value.
+func stripBetaTokens(header string, tokens []string) string {
+	if header == "" || len(tokens) == 0 {
+		return header
+	}
+	return stripBetaTokensWithSet(header, buildBetaTokenSet(tokens))
+}
+
+// droppedBetaSet returns claude.DroppedBetas as a set, with optional extra tokens.
+func droppedBetaSet(extra ...string) map[string]struct{} {
+	m := make(map[string]struct{}, len(defaultDroppedBetasSet)+len(extra))
+	for t := range defaultDroppedBetasSet {
+		m[t] = struct{}{}
+	}
+	for _, t := range extra {
+		m[t] = struct{}{}
+	}
+	return m
+}

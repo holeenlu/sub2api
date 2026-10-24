@@ -1,9 +1,64 @@
+import type { AccountTelemetryState } from '@/utils/accountTelemetry'
 /**
  * Admin Accounts API endpoints
  * Handles AI platform account management for administrators
  */
 
 import { apiClient } from '../client'
+
+export interface OpenAICloudAuthorization {
+  authorized: boolean
+  enabled: boolean
+  status: 'unauthorized' | 'authorized' | 'verified' | 'reauthorization_required'
+  verified_models: string[]
+  models: string[]
+  account_id?: string
+  user_id?: string
+  generation?: string
+  last_verified_at?: string
+  last_error?: string
+}
+
+export async function getCloudAuthorization(id: number): Promise<OpenAICloudAuthorization> {
+  const { data } = await apiClient.get<OpenAICloudAuthorization>(`/admin/accounts/${id}/cloud`)
+  return data
+}
+
+export async function authorizeCloud(id: number): Promise<{ auth_url: string; session_id: string }> {
+  const { data } = await apiClient.post(`/admin/accounts/${id}/cloud/authorize`)
+  return data
+}
+
+export async function completeCloudAuthorization(id: number, callback: { session_id: string; code: string; state: string }): Promise<OpenAICloudAuthorization> {
+  const { data } = await apiClient.post<OpenAICloudAuthorization>(`/admin/accounts/${id}/cloud/callback`, callback)
+  return data
+}
+
+export async function disconnectCloud(id: number): Promise<{ authorized: false; remote_revoked: false }> {
+  const { data } = await apiClient.delete(`/admin/accounts/${id}/cloud`)
+  return data
+}
+
+export interface CloudUnsettled {
+  root_id: string
+  sequence: number
+  thread_id: string
+  turn_id: string
+  model: string
+  observed_usage: Record<string, unknown> | null
+}
+export async function getCloudUnsettled(id: number): Promise<CloudUnsettled[]> {
+  const { data } = await apiClient.get<CloudUnsettled[]>(`/admin/accounts/${id}/cloud/unsettled`)
+  return data
+}
+export async function reconcileCloud(id: number, input: { root_id: string; sequence: number; status: string; usage: Record<string, unknown>; evidence: string; reason: string; confirmed: boolean }): Promise<void> {
+  await apiClient.post(`/admin/accounts/${id}/cloud/reconcile`, input)
+}
+
+export async function creationDefaults(): Promise<{ concurrency: number; priority: number }> {
+  const { data } = await apiClient.get('/admin/accounts/defaults')
+  return data
+}
 import type { OpenAIReferralRefreshResult, OpenAIReferralSendResult } from '@/types/openaiReferrals'
 import type {
   Account,
@@ -532,7 +587,8 @@ export async function batchUpdateCredentials(request: {
  */
 export async function bulkUpdate(
   accountIdsOrPayload: number[] | Record<string, unknown>,
-  updates?: Record<string, unknown>
+  updates?: Record<string, unknown>,
+  params?: Record<string, unknown>
 ): Promise<{
   success: number
   failed: number
@@ -554,7 +610,7 @@ export async function bulkUpdate(
     failed_ids?: number[]
     long_context_inherited_count?: number
     results: Array<{ account_id: number; success: boolean; error?: string }>
-  }>('/admin/accounts/bulk-update', payload)
+  }>('/admin/accounts/bulk-update', payload, params ? { params } : undefined)
   return data
 }
 
@@ -1132,6 +1188,11 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
 }
 
 export const accountsAPI = {
+  getCloudAuthorization,
+  authorizeCloud,
+  completeCloudAuthorization,
+  disconnectCloud,
+  creationDefaults,
   list,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
@@ -1203,3 +1264,8 @@ export const accountsAPI = {
 }
 
 export default accountsAPI
+
+export async function importAccountTelemetry(id: number, bundle: unknown): Promise<AccountTelemetryState> {
+  const { data } = await apiClient.post<AccountTelemetryState>('/admin/accounts/' + id + '/telemetry/import', bundle)
+  return data
+}
