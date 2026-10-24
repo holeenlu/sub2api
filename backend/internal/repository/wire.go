@@ -76,7 +76,6 @@ var ProviderSet = wire.NewSet(
 	NewScheduledTestResultRepository, // 定时测试结果仓储
 	NewProxyRepository,
 	NewRedeemCodeRepository,
-	NewPromoCodeRepository,
 	NewAnnouncementRepository,
 	NewAnnouncementReadRepository,
 	NewUsageLogRepository,
@@ -104,7 +103,6 @@ var ProviderSet = wire.NewSet(
 	NewChannelMonitorV2Repository,
 	NewChannelMonitorRequestTemplateRepository,
 	NewContentModerationRepository,
-	NewAffiliateRepository,
 	NewUserPlatformQuotaRepository,     // T14: user × platform quota
 	NewUserPlatformQuotaServiceAdapter, // T14: adapter → service.UserPlatformQuotaRepository
 

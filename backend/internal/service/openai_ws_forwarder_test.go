@@ -123,6 +123,7 @@ func TestOpenAIForwardResultSucceededForScheduling_TerminalEvents(t *testing.T) 
 		{name: "completed", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.completed"}, expected: true},
 		{name: "done", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.done"}, expected: true},
 		{name: "failed", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.failed"}, expected: false},
+		{name: "output limit", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.incomplete", UpstreamIncompleteReason: "max_output_tokens"}, expected: true},
 		{name: "incomplete", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.incomplete"}, expected: false},
 		{name: "cancelled", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.cancelled"}, expected: false},
 	}
@@ -149,16 +150,24 @@ func TestOpenAIWSTerminalEvent_ResponseFailedRecordsModelTransient(t *testing.T)
 }
 
 func TestOpenAIWSErrorEvent_ServerErrorRecordsModelTransient(t *testing.T) {
-	svc := &OpenAIGatewayService{}
-	svc.rateLimitService = NewRateLimitService(transientCooldownAccountRepo{}, nil, &config.Config{}, nil, nil)
-	account := &Account{ID: 5203, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
-	payload := []byte(`{"type":"error","error":{"code":"server_error","type":"server_error","message":"Internal error"}}`)
-
-	for range 2 {
-		svc.handleOpenAIWSErrorEventTransientFailure(context.Background(), account, "gpt-5.5", http.Header{}, payload)
+	for _, code := range []string{"server_error", "server_err"} {
+		for _, field := range []string{"code", "type"} {
+			t.Run(code+"/"+field, func(t *testing.T) {
+				svc := &OpenAIGatewayService{}
+				svc.rateLimitService = NewRateLimitService(transientCooldownAccountRepo{}, nil, &config.Config{}, nil, nil)
+				account := &Account{ID: 5203, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+				payload := []byte(`{"type":"error","error":{"` + field + `":"` + code + `","message":"Internal error"}}`)
+				require.Equal(t, http.StatusInternalServerError, openAIWSPayloadTransientStatus(payload))
+				reason, retryable := classifyOpenAIWSErrorEvent(payload)
+				require.Equal(t, "upstream_error_event", reason)
+				require.True(t, retryable)
+				for range 2 {
+					svc.handleOpenAIWSErrorEventTransientFailure(context.Background(), account, "gpt-5.5", http.Header{}, payload)
+				}
+				require.True(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-5.5"))
+			})
+		}
 	}
-
-	require.True(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-5.5"))
 }
 
 func TestOpenAIWSPayloadTransientStatus_Explicit529IsNotModelTransient(t *testing.T) {

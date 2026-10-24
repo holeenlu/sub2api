@@ -8,8 +8,10 @@ import {
 } from '@/constants/platformCatalog'
 import ChannelsView from '@/views/admin/ChannelsView.vue'
 
-const { listChannels, getGroups, syncPricingModels, showSuccess, showError } = vi.hoisted(() => ({
+const { listChannels, createChannel, getSearchConfig, getGroups, syncPricingModels, showSuccess, showError } = vi.hoisted(() => ({
   listChannels: vi.fn(),
+  createChannel: vi.fn(),
+  getSearchConfig: vi.fn(),
   getGroups: vi.fn(),
   syncPricingModels: vi.fn(),
   showSuccess: vi.fn(),
@@ -18,13 +20,19 @@ const { listChannels, getGroups, syncPricingModels, showSuccess, showError } = v
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    channels: { list: listChannels, syncPricingModels },
+    channels: { list: listChannels, create: createChannel, syncPricingModels },
     groups: { getAll: getGroups },
-    settings: { getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false }) }
+    settings: { getWebSearchEmulationConfig: getSearchConfig }
   }
 }))
 
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess, showError }) }))
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    can: () => true, canEditAdminField: () => true, isSuperAdmin: true,
+    editableAdminFields: (_schema: string, payload: object) => payload
+  })
+}))
 
 vi.mock('vue-i18n', async () => ({
   ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'),
@@ -85,12 +93,35 @@ describe('ChannelsView pricing model sync', () => {
     vi.clearAllMocks()
     localStorage.clear()
     listChannels.mockResolvedValue({ items: [], total: 0 })
+    createChannel.mockResolvedValue({})
+    getSearchConfig.mockResolvedValue({ enabled: false })
     getGroups.mockResolvedValue([])
     syncPricingModels.mockReset()
   })
 
   afterEach(() => {
     resetPlatformCatalog()
+  })
+
+  it('saves the OpenAI channel web search setting when global emulation is enabled', async () => {
+    getSearchConfig.mockResolvedValue({ enabled: true, providers: [{ type: 'tavily' }] })
+    getGroups.mockResolvedValue([{ id: 1, name: 'OpenAI group', platform: 'openai', rate_multiplier: 1 }])
+    const wrapper = mountView()
+    await openDialog(wrapper)
+    await enablePlatform(wrapper, 'openai')
+    const toggle = wrapper.findAllComponents({ name: 'Toggle' }).find(component =>
+      component.element.parentElement?.textContent?.includes('admin.channels.form.webSearchEmulation')
+    )
+    expect(toggle).toBeDefined()
+    toggle!.vm.$emit('update:modelValue', true)
+    await wrapper.findAll('label').find(label => label.text().includes('OpenAI group'))!.get('input[type="checkbox"]').setValue(true)
+    await wrapper.get('input[placeholder="admin.channels.form.namePlaceholder"]').setValue('search')
+    await wrapper.get('#channel-form').trigger('submit')
+    await flushPromises()
+    expect(createChannel).toHaveBeenCalledWith(expect.objectContaining({
+      features_config: expect.objectContaining({ web_search_emulation: expect.objectContaining({ openai: true }) })
+    }))
+    wrapper.unmount()
   })
 
   it.each([

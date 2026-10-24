@@ -25,6 +25,7 @@ import (
 //   - deleteErr: 模拟 Delete 返回的错误
 //   - deletedIDs: 记录被调用删除的 API Key ID，用于断言验证
 type apiKeyRepoStub struct {
+	verifyOwnership        func(context.Context, int64, []int64) ([]int64, error)
 	apiKey                 *APIKey // GetKeyAndOwnerID 的返回值
 	getByIDErr             error   // GetKeyAndOwnerID 的错误返回值
 	deleteErr              error   // Delete 的错误返回值
@@ -169,6 +170,9 @@ func filterAPIKeyStubKeys(userID int64, keys []APIKey, filters APIKeyListFilters
 }
 
 func (s *apiKeyRepoStub) VerifyOwnership(ctx context.Context, userID int64, apiKeyIDs []int64) ([]int64, error) {
+	if s.verifyOwnership != nil {
+		return s.verifyOwnership(ctx, userID, apiKeyIDs)
+	}
 	panic("unexpected VerifyOwnership call")
 }
 
@@ -294,6 +298,11 @@ func (s *apiKeyCacheStub) SubscribeAuthCacheInvalidation(ctx context.Context, ha
 func TestApiKeyService_Delete_OwnerMismatch(t *testing.T) {
 	repo := &apiKeyRepoStub{
 		apiKey: &APIKey{ID: 10, UserID: 1, Key: "k"},
+		verifyOwnership: func(_ context.Context, userID int64, ids []int64) ([]int64, error) {
+			require.EqualValues(t, 2, userID)
+			require.Equal(t, []int64{10}, ids)
+			return nil, nil
+		},
 	}
 	cache := &apiKeyCacheStub{}
 	svc := &APIKeyService{apiKeyRepo: repo, cache: cache}
@@ -488,4 +497,26 @@ func TestApiKeyService_Delete_DeleteFails(t *testing.T) {
 	require.ErrorContains(t, err, "delete api key")
 	require.Equal(t, []int64{3}, repo.deletedIDs) // 验证 DeleteWithAudit 被调用
 	require.Empty(t, cache.deleteAuthKeys)        // 验证删除失败时 auth 缓存未被清除
+}
+
+func TestApiKeyService_Delete_PeerScopeSuccessAndFailure(t *testing.T) {
+	for _, checkErr := range []error{nil, errors.New("identity query unavailable")} {
+		repo := &apiKeyRepoStub{apiKey: &APIKey{ID: 10, UserID: 1, Key: "peer-key"}, verifyOwnership: func(_ context.Context, actor int64, ids []int64) ([]int64, error) {
+			require.EqualValues(t, 2, actor)
+			require.Equal(t, []int64{10}, ids)
+			return ids, checkErr
+		}}
+		cache := &apiKeyCacheStub{}
+		svc := &APIKeyService{apiKeyRepo: repo, cache: cache}
+		err := svc.Delete(context.Background(), 10, 2)
+		if checkErr != nil {
+			require.ErrorIs(t, err, checkErr)
+			require.Empty(t, repo.deletedIDs)
+			require.Empty(t, cache.deleteAuthKeys)
+		} else {
+			require.NoError(t, err)
+			require.Equal(t, []int64{10}, repo.deletedIDs)
+			require.Len(t, cache.deleteAuthKeys, 1)
+		}
+	}
 }
