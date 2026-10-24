@@ -14,8 +14,6 @@ import type {
   ChangePasswordRequest,
   NotifyEmailEntry,
   UserAuthProvider,
-  UserAffiliateDetail,
-  AffiliateTransferResponse,
   PlatformQuotasResponse,
 } from '@/types'
 
@@ -176,15 +174,9 @@ export async function startOAuthBinding(
   window.location.href = startURL
 }
 
-export async function getAffiliateDetail(): Promise<UserAffiliateDetail> {
-  const { data } = await apiClient.get<UserAffiliateDetail>('/user/aff')
-  return data
-}
 
-export async function transferAffiliateQuota(): Promise<AffiliateTransferResponse> {
-  const { data } = await apiClient.post<AffiliateTransferResponse>('/user/aff/transfer')
-  return data
-}
+
+
 
 /**
  * 获取当前用户的平台限额 + 用量。
@@ -207,9 +199,33 @@ export const userAPI = {
   unbindAuthIdentity,
   buildOAuthBindingStartURL,
   startOAuthBinding,
-  getAffiliateDetail,
-  transferAffiliateQuota,
   getMyPlatformQuotas,
 }
 
 export default userAPI
+
+export interface BalanceHistoryItem {
+  id: string
+  type: 'balance' | 'admin_balance' | 'affiliate_balance' | 'concurrency' | 'admin_concurrency' | 'subscription'
+  value: number
+  source: 'admin' | 'payment' | 'redeem' | 'affiliate'
+  notes: string
+  occurred_at: string
+}
+
+export interface BalanceHistoryPage {
+  items: BalanceHistoryItem[]
+  total: number
+  total_recharged: number
+}
+
+export interface BalanceHistoryFilter {
+  category: 'balance' | 'other'
+  direction: '' | 'increase' | 'decrease'
+  source: '' | BalanceHistoryItem['source']
+}
+
+export async function getBalanceHistory(params: BalanceHistoryFilter & { page: number; page_size: number }): Promise<BalanceHistoryPage> {
+  const { data } = await apiClient.get<BalanceHistoryPage>('/user/balance-history', { params })
+  return data
+}

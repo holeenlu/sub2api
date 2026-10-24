@@ -18,8 +18,12 @@ import OpsAlertEventsCard from '../OpsAlertEventsCard.vue'
 import { ref } from 'vue'
 const { listAlertEvents, showError } = vi.hoisted(() => ({ listAlertEvents: vi.fn(), showError: vi.fn() }))
 vi.mock('@vueuse/core', () => ({ useMediaQuery: () => ref(true) }))
-vi.mock('@/api/admin/ops', () => ({ opsAPI: { listAlertEvents } }))
+vi.mock('@/api/admin/ops', () => {
+  const opsAPI = { listAlertEvents }
+  return { opsAPI, default: opsAPI }
+})
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ can: () => true }) }))
 const rows = (first: number, count = 10) => Array.from({ length: count }, (_, i) => ({
   id: first + i, severity: 'P1', status: 'firing', created_at: '2026-10-03T00:00:00Z',
 }))

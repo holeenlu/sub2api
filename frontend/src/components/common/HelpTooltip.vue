@@ -5,15 +5,18 @@ const props = withDefaults(defineProps<{
   content?: string
   trigger?: 'hover' | 'click'
   widthClass?: string
+  tone?: 'default' | 'brand'
 }>(), {
   trigger: 'hover',
   widthClass: 'w-64',
+  tone: 'default',
 })
 
 const show = ref(false)
 const triggerRef = useTemplateRef<HTMLElement>('trigger')
 const tooltipRef = useTemplateRef<HTMLElement>('tooltip')
 const tooltipStyle = ref({ top: '0px', left: '0px' })
+const arrowLeft = ref('50%')
 
 function openTooltip() {
   show.value = true
@@ -80,10 +83,16 @@ function updatePosition() {
   const el = triggerRef.value
   if (!el) return
   const rect = el.getBoundingClientRect()
+  const center = rect.left + rect.width / 2
+  const width = tooltipRef.value?.getBoundingClientRect().width || 0
+  const left = props.tone === 'brand'
+    ? Math.max(width / 2 + 8, Math.min(center, window.innerWidth - width / 2 - 8))
+    : center + window.scrollX
   tooltipStyle.value = {
-    top: `${rect.top + window.scrollY}px`,
-    left: `${rect.left + rect.width / 2 + window.scrollX}px`,
+    top: `${props.tone === 'brand' ? rect.top : rect.top + window.scrollY}px`,
+    left: `${left}px`,
   }
+  arrowLeft.value = props.tone === 'brand' ? `${Math.max(8, Math.min(width - 8, center - left + width / 2))}px` : '50%'
 }
 
 onMounted(() => {
@@ -134,7 +143,10 @@ onBeforeUnmount(() => {
         v-show="show"
         role="tooltip"
         :class="[
-          'fixed z-[99999] -translate-x-1/2 -translate-y-full rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 selection:bg-primary-200 selection:text-gray-900 before:absolute before:inset-x-0 before:top-full before:h-3 dark:bg-gray-800 dark:selection:bg-primary-200 dark:selection:text-gray-900',
+          'fixed z-[99999] -translate-x-1/2 -translate-y-full rounded-lg text-xs shadow-xl selection:bg-primary-200 selection:text-gray-900 before:absolute before:inset-x-0 before:top-full before:h-3 dark:selection:bg-primary-200 dark:selection:text-gray-900',
+          props.tone === 'brand'
+            ? 'bg-primary-400 px-3 py-2 leading-[18px] text-primary-950'
+            : 'bg-gray-900 p-3 leading-relaxed text-white ring-1 ring-white/10 dark:bg-gray-800',
           props.widthClass,
         ]"
         :style="{ top: `calc(${tooltipStyle.top} - 8px)`, left: tooltipStyle.left }"
@@ -152,7 +164,7 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <slot>{{ content }}</slot>
-        <div class="absolute -bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 bg-gray-900 dark:bg-gray-800"></div>
+        <div class="absolute -bottom-1 h-2 w-2 -translate-x-1/2 rotate-45" :style="{ left: arrowLeft }" :class="props.tone === 'brand' ? 'bg-primary-400' : 'bg-gray-900 dark:bg-gray-800'"></div>
       </div>
     </Teleport>
   </div>
