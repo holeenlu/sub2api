@@ -1,3 +1,4 @@
+import type { SchedulingQuotaProtection } from '@/utils/schedulingQuota'
 /**
  * Admin Ops API endpoints (vNext)
  * - Error logs list/detail
@@ -284,6 +285,8 @@ export interface OpsSystemMetricsSnapshot {
 
 export interface OpsJobHeartbeat {
   job_name: string
+  expected_interval_seconds?: number
+  health_status?: 'healthy' | 'failed' | 'stale' | 'unknown'
   last_run_at?: string | null
   last_success_at?: string | null
   last_error_at?: string | null
@@ -795,6 +798,9 @@ export interface OpsOpenAIAccountQuotaAutoPauseSettings {
 }
 
 export interface OpsAdvancedSettings {
+  quota_protection: SchedulingQuotaProtection
+  account_telemetry_sending_enabled: boolean
+  account_telemetry_upload_interval_seconds: number
   data_retention: OpsDataRetentionSettings
   aggregation: OpsAggregationSettings
   openai_account_quota_auto_pause: OpsOpenAIAccountQuotaAutoPauseSettings
@@ -912,6 +918,7 @@ export interface OpsErrorLog {
 
   severity: OpsSeverity
   status_code: number
+  request_status_code?: number | null
   platform: string
   model: string
 
@@ -1134,6 +1141,11 @@ export async function getErrorLogDetail(id: number): Promise<OpsErrorDetail> {
   return data
 }
 
+export async function getErrorDiagnostics(id: number): Promise<Record<string, unknown>> {
+  const { data } = await apiClient.get<Record<string, unknown>>(`/admin/ops/errors/${id}`, { params: { diagnostics: '1' } })
+  return data
+}
+
 export async function updateErrorResolved(errorId: number, resolved: boolean): Promise<void> {
   await apiClient.put(`/admin/ops/errors/${errorId}/resolve`, { resolved })
 }
@@ -1333,6 +1345,7 @@ export const opsAPI = {
   // Legacy unified endpoints
   listErrorLogs,
   getErrorLogDetail,
+  getErrorDiagnostics,
   updateErrorResolved,
 
   // New split endpoints

@@ -234,3 +234,10 @@ func TestBuildCyberPolicyOpsErrorEntry_StatusCode(t *testing.T) {
 		})
 	}
 }
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+// clearCyberPolicyTurnState resets the cyber mark and recorded guard after a
+// logical WS turn has finished.
+func clearCyberPolicyTurnState(c *gin.Context) {
+	clearCyberPolicyAttemptState(c, true)
+}
