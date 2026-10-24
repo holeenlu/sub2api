@@ -92,12 +92,17 @@
       </div>
     </div>
 
+    <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+      {{ t('admin.accounts.modelSyncSourceHint') }}
+    </p>
+
     <!-- Quick Actions -->
     <div class="mb-4 flex flex-wrap gap-2">
       <button
         type="button"
         @click="fillRelated"
-        class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
+        :disabled="isLoadingBuiltin"
+        class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
       >
         {{ t('admin.accounts.fillRelatedModels') }}
       </button>
@@ -118,6 +123,10 @@
         {{ t('admin.accounts.clearAllModels') }}
       </button>
     </div>
+
+    <p v-if="syncAccountIds" class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+      {{ t('admin.accounts.syncUpstreamModelsBatchHint') }}
+    </p>
 
     <!-- Custom Model Input -->
     <div class="mb-3">
@@ -145,15 +154,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { accountsAPI } from '@/api/admin/accounts'
-import type { SyncUpstreamPreviewParams } from '@/api/admin/accounts'
+import type { SyncUpstreamModelsResult, SyncUpstreamPreviewParams } from '@/api/admin/accounts'
 import { useClipboard } from '@/composables/useClipboard'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { allModels, getModelsByPlatform } from '@/composables/useModelWhitelist'
+import { getModelAllowlistCandidates } from '@/api/admin/groups'
 import { supportsUpstreamModelSync } from '@/constants/platformCatalog'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
@@ -165,6 +174,7 @@ const props = defineProps<{
   platform?: string
   platforms?: string[]
   accountId?: number
+  syncAccountIds?: () => Promise<number[]>
   syncCredentials?: {
     platform: string
     type: string
@@ -186,6 +196,11 @@ const searchQuery = ref('')
 const customModel = ref('')
 const isComposing = ref(false)
 const isSyncingUpstream = ref(false)
+const isLoadingBuiltin = ref(false)
+const builtinModels = ref<string[]>([])
+let builtinRequestID = 0
+let disposed = false
+onBeforeUnmount(() => { disposed = true })
 const normalizedPlatforms = computed(() => {
   const rawPlatforms =
     props.platforms && props.platforms.length > 0
@@ -204,6 +219,7 @@ const normalizedPlatforms = computed(() => {
 })
 
 const canSyncUpstream = computed(() => {
+  if (props.syncAccountIds) return true
   if (props.accountId) {
     if (normalizedPlatforms.value.length === 0) return true
     return normalizedPlatforms.value.some(supportsUpstreamModelSync)
@@ -214,20 +230,30 @@ const canSyncUpstream = computed(() => {
   return false
 })
 
-const availableOptions = computed(() => {
-  if (normalizedPlatforms.value.length === 0) {
-    return allModels
-  }
-
-  const allowedModels = new Set<string>()
-  for (const platform of normalizedPlatforms.value) {
-    for (const model of getModelsByPlatform(platform)) {
-      allowedModels.add(model)
+// id=0 returns only the shared built-in catalog, without group/account mappings.
+const loadBuiltinModels = async (): Promise<string[] | null> => {
+  const requestID = ++builtinRequestID
+  isLoadingBuiltin.value = true
+  builtinModels.value = []
+  try {
+    const platforms = normalizedPlatforms.value.length ? normalizedPlatforms.value : ['composite']
+    const catalogs = await Promise.all(platforms.map(platform => getModelAllowlistCandidates(0, platform)))
+    if (disposed || requestID !== builtinRequestID) return null
+    builtinModels.value = [...new Set(catalogs.flat().map(model => model.trim()).filter(Boolean))]
+    return builtinModels.value
+  } catch {
+    if (!disposed && requestID === builtinRequestID) {
+      appStore.showError(t('admin.accounts.modelSyncBuiltinFailed'))
     }
+    return null
+  } finally {
+    if (!disposed && requestID === builtinRequestID) isLoadingBuiltin.value = false
   }
+}
 
-  return allModels.filter(model => allowedModels.has(model.value))
-})
+watch(normalizedPlatforms, () => { void loadBuiltinModels() }, { immediate: true })
+
+const availableOptions = computed(() => builtinModels.value.map(model => ({ value: model, label: model })))
 
 const filteredModels = computed(() => {
   const query = searchQuery.value.toLowerCase().trim()
@@ -278,13 +304,13 @@ const handleEnter = () => {
   if (!isComposing.value) addCustom()
 }
 
-const fillRelated = () => {
+const fillRelated = async () => {
+  const models = await loadBuiltinModels()
+  if (!models) return
   const newModels = [...props.modelValue]
-  for (const platform of normalizedPlatforms.value) {
-    for (const model of getModelsByPlatform(platform)) {
-      if (!newModels.includes(model)) {
-        newModels.push(model)
-      }
+  for (const model of models) {
+    if (!newModels.includes(model)) {
+      newModels.push(model)
     }
   }
   emit('update:modelValue', newModels)
@@ -295,8 +321,29 @@ const syncUpstreamModels = async () => {
 
   isSyncingUpstream.value = true
   try {
-    let result
-    if (props.accountId) {
+    let result: SyncUpstreamModelsResult
+    if (props.syncAccountIds) {
+      const ids = [...new Set(await props.syncAccountIds())]
+      if (disposed) return
+      let commonModels: string[] | undefined
+      const warnings: NonNullable<SyncUpstreamModelsResult['warnings']> = []
+      // A bulk edit writes one whitelist to all targets. Only add their intersection.
+      // Fetch sequentially to avoid a burst of upstream requests; fail without changing the draft.
+      for (const id of ids) {
+        const catalog = await accountsAPI.syncUpstreamModels(id)
+        if (disposed) return
+        const models = new Set(catalog.models.map(model => model.trim()).filter(Boolean))
+        commonModels = commonModels === undefined
+          ? [...models]
+          : commonModels.filter(model => models.has(model))
+        warnings.push(...(catalog.warnings ?? []))
+      }
+      if (!commonModels?.length) {
+        appStore.showError(t('admin.accounts.syncUpstreamModelsNoCommon'))
+        return
+      }
+      result = { models: commonModels, warnings }
+    } else if (props.accountId) {
       result = await accountsAPI.syncUpstreamModels(props.accountId)
     } else if (props.syncCredentials) {
       result = await accountsAPI.syncUpstreamModelsPreview(props.syncCredentials as SyncUpstreamPreviewParams)
@@ -304,13 +351,14 @@ const syncUpstreamModels = async () => {
       return
     }
 
+    if (disposed) return
     const upstreamModels = result.models.map(model => model.trim()).filter(Boolean)
     if (upstreamModels.length === 0) {
       appStore.showInfo(t('admin.accounts.syncUpstreamModelsEmpty'))
       return
     }
 
-    if (!props.accountId) {
+    if (props.syncCredentials && !props.accountId && !props.syncAccountIds) {
       emit('upstream-synced')
     }
 
@@ -344,6 +392,7 @@ const syncUpstreamModels = async () => {
       appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataPartial'))
     }
   } catch (error) {
+    if (disposed) return
     const message = extractApiErrorMessage(error, t('admin.accounts.syncUpstreamModelsFailed'))
     appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
   } finally {

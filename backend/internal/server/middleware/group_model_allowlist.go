@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -113,6 +114,7 @@ func isResponsesWebSocketRoute(c *gin.Context) bool {
 func groupModelAllowlistModelsFromBody(c *gin.Context) ([]string, bool) {
 	body, err := httputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
+		httputil.LogRequestBodyReadFailure(logger.FromContext(c.Request.Context()), c.Request, err, "group_model_allowlist")
 		status := http.StatusBadRequest
 		message := "Failed to read request body"
 		var maxErr *http.MaxBytesError
