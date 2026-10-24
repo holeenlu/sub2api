@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"io"
 	"net/http"
 	"regexp"
@@ -137,14 +138,15 @@ func (s *GeminiOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 	}
 
 	session := &geminicli.OAuthSession{
-		State:        state,
-		CodeVerifier: codeVerifier,
-		ProxyURL:     proxyURL,
-		RedirectURI:  redirectURI,
-		ProjectID:    strings.TrimSpace(projectID),
-		TierID:       canonicalGeminiTierIDForOAuthType(oauthType, tierID),
-		OAuthType:    oauthType,
-		CreatedAt:    time.Now(),
+		Authorization: authz.CaptureLease(ctx),
+		State:         state,
+		CodeVerifier:  codeVerifier,
+		ProxyURL:      proxyURL,
+		RedirectURI:   redirectURI,
+		ProjectID:     strings.TrimSpace(projectID),
+		TierID:        canonicalGeminiTierIDForOAuthType(oauthType, tierID),
+		OAuthType:     oauthType,
+		CreatedAt:     time.Now(),
 	}
 	s.sessionStore.Set(sessionID, session)
 
@@ -450,6 +452,9 @@ func (s *GeminiOAuthService) ExchangeCode(ctx context.Context, input *GeminiExch
 	if !ok {
 		logger.LegacyPrintf("service.gemini_oauth", "[GeminiOAuth] ERROR: Session not found or expired")
 		return nil, fmt.Errorf("session not found or expired")
+	}
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(input.State) == "" || input.State != session.State {
 		logger.LegacyPrintf("service.gemini_oauth", "[GeminiOAuth] ERROR: Invalid state")

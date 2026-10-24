@@ -72,6 +72,7 @@ const props = withDefaults(
   defineProps<{
     label: string
     utilization: number // Percentage (0-100+)
+    utilizationKnown?: boolean
     resetsAt?: string | null
     color: 'indigo' | 'emerald' | 'purple' | 'amber'
     windowStats?: WindowStats | null
@@ -81,11 +82,10 @@ const props = withDefaults(
     /** fixed: 定宽居中徽章（账号页纵向对齐）；auto: 限宽截断左对齐（监控页组合标签） */
     labelWidth?: 'fixed' | 'auto'
   }>(),
-  { labelWidth: 'fixed' }
+  { labelWidth: 'fixed', utilizationKnown: true }
 )
 
 const { t } = useI18n()
-
 // Reactive clock for countdown — only runs when a reset time is shown,
 // to avoid creating many idle timers across large account lists.
 const now = ref(new Date())
@@ -173,11 +173,13 @@ const textClass = computed(() => {
 
 // Bar width (capped at 100%)
 const barWidth = computed(() => {
+  if (!props.utilizationKnown) return '0%'
   return `${Math.min(Math.max(props.utilization, 0), 100)}%`
 })
 
 // Display percentage (cap at 999% for readability)
 const displayPercent = computed(() => {
+  if (!props.utilizationKnown) return '—'
   const percent = Math.round(
     props.remainingCapacity
       ? Math.min(Math.max(props.utilization, 0), 100)
@@ -188,7 +190,7 @@ const displayPercent = computed(() => {
 
 const shouldShowResetTime = computed(() => {
   if (props.resetsAt) return true
-  return Boolean(props.showNowWhenIdle && props.utilization <= 0)
+  return Boolean(props.showNowWhenIdle && props.utilizationKnown && props.utilization <= 0)
 })
 
 // Format reset time

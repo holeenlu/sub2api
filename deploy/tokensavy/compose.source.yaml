@@ -1,0 +1,12 @@
+# Optional first install before a manual GHCR release exists.
+# Do not include this override when installing/using the online updater.
+services:
+  tokensavy:
+    image: tokensavy:local
+    pull_policy: never
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        RELEASE_CHANNEL: tokensavy
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-}
