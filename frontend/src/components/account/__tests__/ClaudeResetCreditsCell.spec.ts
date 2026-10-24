@@ -55,6 +55,65 @@ describe('Claude reset credit status', () => {
     expect(expiry.attributes('title')).toContain('Launch reset')
   })
 
+  it('restores the persisted count and expiry after remount without querying or enabling reset', async () => {
+    const wrapper = mount(ClaudeResetCreditsCell, { props: { account } })
+    getCredits.mockResolvedValue({ ...snapshot, cache_persisted: true })
+    await countButton(wrapper).trigger('click')
+    await flushPromises()
+    const updated = wrapper.emitted('account-updated')?.[0]?.[0] as Account
+    expect(updated.extra?.claude_reset_credit_snapshot).toMatchObject({ credits: [credit], cache_persisted: true })
+    await wrapper.setProps({ account: updated })
+    expect(redeemButton(wrapper).attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+    const reloaded = mount(ClaudeResetCreditsCell, { props: { account: JSON.parse(JSON.stringify(updated)) } })
+    expect(countButton(reloaded).text()).toBe('admin.accounts.claudeResetCredits.count1')
+    expect(reloaded.get('[data-testid="claude-reset-expiry"]').attributes('title')).toContain('Launch reset')
+    expect(redeemButton(reloaded).attributes('disabled')).toBeDefined()
+    expect(getCredits).toHaveBeenCalledTimes(1)
+  })
+
+  it('filters expired and future cached credits and keeps a saved zero', () => {
+    const cached = {
+      ...snapshot,
+      credits: [credit, { ...credit, resets_left: 5, expires_at: '2000-01-01T00:00:00Z' },
+        { ...credit, resets_left: 7, starts_at: '2100-01-01T00:00:00Z' }]
+    }
+    const wrapper = mount(ClaudeResetCreditsCell, { props: { account: { ...account, extra: { claude_reset_credit_snapshot: cached } } as Account } })
+    expect(countButton(wrapper).text()).toBe('admin.accounts.claudeResetCredits.count1')
+    const zero = mount(ClaudeResetCreditsCell, { props: { account: { ...account, extra: { claude_reset_credit_snapshot: { ...snapshot, credits: [], available_count: 0 } } } as Account } })
+    expect(countButton(zero).text()).toBe('admin.accounts.claudeResetCredits.count0')
+    expect(getCredits).not.toHaveBeenCalled()
+  })
+
+  it('keeps a cached count on query failure and reports snapshot write failures', async () => {
+    const cachedAccount = { ...account, extra: { claude_reset_credit_snapshot: snapshot } } as Account
+    const wrapper = mount(ClaudeResetCreditsCell, { props: { account: cachedAccount } })
+    getCredits.mockRejectedValueOnce(new Error('offline'))
+    await countButton(wrapper).trigger('click')
+    await flushPromises()
+    expect(countButton(wrapper).text()).toBe('admin.accounts.claudeResetCredits.count1')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(true)
+    expect(redeemButton(wrapper).attributes('disabled')).toBeDefined()
+    getCredits.mockResolvedValueOnce({ ...snapshot, cache_persisted: false, credits: [{ ...credit, resets_left: 2 }] })
+    await countButton(wrapper).trigger('click')
+    await flushPromises()
+    expect(countButton(wrapper).text()).toBe('admin.accounts.claudeResetCredits.count2')
+    expect(wrapper.find('[data-testid="claude-reset-cache-warning"]').exists()).toBe(true)
+    expect(wrapper.emitted('account-updated')).toBeUndefined()
+    expect(cachedAccount.extra?.claude_reset_credit_snapshot).toEqual(snapshot)
+  })
+
+  it('clears a spent cached count when the post-reset refresh fails', async () => {
+    const wrapper = await queried({ ...snapshot, cache_persisted: true })
+    redeem.mockResolvedValueOnce({ outcome: 'reset', cleared: ['five_hour'], replayed: false })
+    getCredits.mockRejectedValueOnce(new Error('offline'))
+    await confirmReset(wrapper)
+    expect(countButton(wrapper).text()).toBe('admin.accounts.claudeResetCredits.count')
+    expect(redeemButton(wrapper).attributes('disabled')).toBeDefined()
+    const updates = wrapper.emitted('account-updated')
+    expect((updates?.[updates.length - 1]?.[0] as Account).extra?.claude_reset_credit_snapshot).toBeNull()
+  })
+
   it('counts held resets and prefers the next redeemable grant', async () => {
     const later = { ...credit, label: 'Later', expires_at: '2026-12-01T00:00:00Z', redeemable: false }
     const next = { ...credit, label: 'Next', expires_at: '2026-11-01T00:00:00Z', redeemable: true }

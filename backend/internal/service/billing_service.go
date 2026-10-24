@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
@@ -26,12 +27,6 @@ type APIKeyRateLimitCacheData struct {
 	Window5h int64   `json:"window_5h"` // unix timestamp, 0 = not started
 	Window1d int64   `json:"window_1d"`
 	Window7d int64   `json:"window_7d"`
-}
-
-// UserPlatformQuotaKey 标识一个 user×platform，用于脏集出入与批量读。
-type UserPlatformQuotaKey struct {
-	UserID   int64
-	Platform string
 }
 
 // UserPlatformQuotaCacheEntry Redis hash 反序列化结果。
@@ -84,18 +79,12 @@ type BillingCache interface {
 	GetUserPlatformQuotaCache(ctx context.Context, userID int64, platform string) (*UserPlatformQuotaCacheEntry, bool, error)
 	SetUserPlatformQuotaCache(ctx context.Context, userID int64, platform string, entry *UserPlatformQuotaCacheEntry, ttl time.Duration) error
 	DeleteUserPlatformQuotaCache(ctx context.Context, userID int64, platform string) error
-	// IncrUserPlatformQuotaUsageCache 在缓存命中时累加用量；缓存未命中（key 不存在）静默返回 nil。
-	// markDirty=true 时将该 key 的 member 写入 Redis 脏集，供 flusher 批量回写 DB。
-	IncrUserPlatformQuotaUsageCache(ctx context.Context, userID int64, platform string, cost float64, ttl time.Duration, markDirty bool) error
-
-	// 脏集读写，供 flusher 使用。
-	PopDirtyUserPlatformQuotaKeys(ctx context.Context, n int) ([]UserPlatformQuotaKey, error)
-	ReaddDirtyUserPlatformQuotaKeys(ctx context.Context, keys []UserPlatformQuotaKey) error
-	BatchGetUserPlatformQuotaCache(ctx context.Context, keys []UserPlatformQuotaKey) ([]*UserPlatformQuotaCacheEntry, error)
 }
 
 // ModelPricing 模型价格配置（per-token价格，与LiteLLM格式一致）
 type ModelPricing struct {
+	// An operator flat write price applies to every TTL, including an explicit zero.
+	cacheWriteFlatOverride bool
 	// UltrafastMultiplier is model-owned and independent of operator Fast pricing.
 	UltrafastMultiplier                float64
 	InputPricePerToken                 float64            // 每token输入价格 (USD)
@@ -186,6 +175,8 @@ func pricingWithPriorityMultiplier(base *ModelPricing, multiplier float64) *Mode
 
 // UsageTokens 使用的token数量
 type UsageTokens struct {
+	// Enabled only by a public OpenAI API billing path, never inferred from TTL.
+	OpenAICacheWriteTTL   bool
 	InputTokens           int
 	ImageInputTokens      int
 	ImageCacheReadTokens  int
@@ -194,11 +185,16 @@ type UsageTokens struct {
 	CacheReadTokens       int
 	CacheCreation5mTokens int
 	CacheCreation1hTokens int
-	ImageOutputTokens     int
+	// OpenAI write lifetimes are disjoint components of CacheCreationTokens.
+	CacheCreation30mTokens int
+	CacheCreation12hTokens int
+	ImageOutputTokens      int
 }
 
 // CostBreakdown 费用明细
 type CostBreakdown struct {
+	PricingRequest            *UsagePricingRequest
+	PricingError              string  // Nonempty means unresolved, never a free-price decision.
 	InputCost                 float64 // 文本输入费用（不含图片输入，图片输入单独记入 ImageInputCost）
 	ImageInputCost            float64 // 图片输入 token 费用（如 gpt-image-2 图片编辑）
 	OutputCost                float64
@@ -1045,6 +1041,16 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextInputMultiplier:    2,
 		LongContextOutputMultiplier:   2,
 	}
+	// Older Claude aliases share price cards. Populate their missing TTL rates
+	// once, preserving existing standard and explicitly configured 5.5 prices.
+	for model, pricing := range s.fallbackPrices {
+		if strings.HasPrefix(model, "claude-") && !pricing.SupportsCacheBreakdown && pricing.CacheCreationPricePerToken > 0 {
+			pricing.CacheCreation5mPrice = pricing.CacheCreationPricePerToken
+			pricing.CacheCreation1hPrice = 2 * pricing.InputPricePerToken
+			pricing.SupportsCacheBreakdown = true
+		}
+	}
+
 }
 
 // getFallbackPricing 根据模型系列获取回退价格
@@ -1516,6 +1522,7 @@ func applyChannelTokenPriceOverrides(pricing *ModelPricing, channelPricing *Chan
 		pricing.CacheCreationPricePerToken = *channelPricing.CacheWritePrice
 		pricing.CacheCreationPricePerTokenPriority = priority
 		pricing.CacheCreationPriceExplicit = true
+		pricing.cacheWriteFlatOverride = true
 		pricing.CacheCreation5mPrice = *channelPricing.CacheWritePrice
 		if channelPricing.CacheWrite1hPrice == nil {
 			// Preserve the pre-split behavior for existing configurations: a lone
@@ -1785,12 +1792,20 @@ func (s *BillingService) computeTokenBreakdown(
 // computeCacheCreationCost 计算缓存创建费用（支持 5m/1h 分类或标准计费）。
 // multiplier 用于长上下文等场景下的整体价格缩放（普通调用传 1.0 即可）。
 func (s *BillingService) computeCacheCreationCost(pricing *ModelPricing, tokens UsageTokens, price, multiplier float64) float64 {
+	if tokens.OpenAICacheWriteTTL && !pricing.cacheWriteFlatOverride && (tokens.CacheCreation30mTokens > 0 || tokens.CacheCreation12hTokens > 0) {
+		writes := (apicompat.CacheWriteTokensDetails{TTL30mTokens: tokens.CacheCreation30mTokens, TTL12hTokens: tokens.CacheCreation12hTokens}).Normalize(tokens.CacheCreationTokens)
+		// The current write price is the 30m price. 12h costs twice that rate.
+		// Unclassified remainder retains the existing price; no double counting.
+		return (float64(tokens.CacheCreationTokens) + float64(writes.TTL12hTokens)) * price * multiplier
+	}
+
 	if pricing.SupportsCacheBreakdown && (pricing.CacheCreation5mPrice > 0 || pricing.CacheCreation1hPrice > 0) {
-		cacheCreation5mTokens, cacheCreation1hTokens := normalizeCacheCreationBreakdown(tokens)
-		if cacheCreation5mTokens == 0 && cacheCreation1hTokens == 0 && tokens.CacheCreationTokens > 0 {
-			// API 未返回 ephemeral 明细，回退到全部按 5m 单价计费
-			return float64(tokens.CacheCreationTokens) * pricing.CacheCreation5mPrice * multiplier
+		// The selected flat price carries explicit Priority pricing. TTL rates
+		// must inherit that same uplift as well as the long-context multiplier.
+		if price > 0 && pricing.CacheCreationPricePerToken > 0 {
+			multiplier *= price / pricing.CacheCreationPricePerToken
 		}
+		cacheCreation5mTokens, cacheCreation1hTokens := normalizeCacheCreationBreakdown(tokens)
 		return float64(cacheCreation5mTokens)*pricing.CacheCreation5mPrice*multiplier +
 			float64(cacheCreation1hTokens)*pricing.CacheCreation1hPrice*multiplier
 	}
@@ -1799,6 +1814,7 @@ func (s *BillingService) computeCacheCreationCost(pricing *ModelPricing, tokens 
 
 // normalizeCacheCreationBreakdown caps contradictory 5m/1h details at an explicitly
 // positive aggregate while retaining their reported ratio as closely as integer tokens allow.
+// Any unclassified remainder uses the same 5m rate as an entirely absent breakdown.
 func normalizeCacheCreationBreakdown(tokens UsageTokens) (int, int) {
 	cacheCreation5mTokens := tokens.CacheCreation5mTokens
 	cacheCreation1hTokens := tokens.CacheCreation1hTokens
@@ -1809,8 +1825,11 @@ func normalizeCacheCreationBreakdown(tokens UsageTokens) (int, int) {
 	if cacheCreation1hTokens < 0 {
 		cacheCreation1hTokens = 0
 	}
-	if aggregate <= 0 || (cacheCreation5mTokens <= aggregate && cacheCreation1hTokens <= aggregate-cacheCreation5mTokens) {
+	if aggregate <= 0 {
 		return cacheCreation5mTokens, cacheCreation1hTokens
+	}
+	if cacheCreation5mTokens <= aggregate && cacheCreation1hTokens <= aggregate-cacheCreation5mTokens {
+		return aggregate - cacheCreation1hTokens, cacheCreation1hTokens
 	}
 
 	detailTotal := float64(cacheCreation5mTokens) + float64(cacheCreation1hTokens)

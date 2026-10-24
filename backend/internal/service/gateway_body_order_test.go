@@ -128,16 +128,17 @@ func TestNormalizeClaudeOAuthRequestBody_PreservesTopLevelFieldOrder(t *testing.
 	require.Contains(t, resultStr, `"max_tokens":128000`)
 }
 
-func TestInjectClaudeCodePrompt_PreservesFieldOrder(t *testing.T) {
+func TestRewriteSystemPromptBlocks_PreservesFieldOrder(t *testing.T) {
 	body := []byte(`{"alpha":1,"system":[{"id":"block-1","type":"text","text":"Custom"}],"messages":[],"omega":2}`)
 
-	result := injectClaudeCodePrompt(body, []any{
+	result := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, []any{
 		map[string]any{"id": "block-1", "type": "text", "text": "Custom"},
-	})
+	}, "", "")
 	resultStr := string(result)
 
 	assertJSONTokenOrder(t, resultStr, `"alpha"`, `"system"`, `"messages"`, `"omega"`)
-	require.Contains(t, resultStr, `{"id":"block-1","type":"text","text":"`+claudeCodeSystemPrompt+`\n\nCustom"}`)
+	require.Contains(t, resultStr, claudeCodeSystemPrompt)
+	require.Contains(t, resultStr, "Custom")
 }
 
 func TestEnforceCacheControlLimit_PreservesTopLevelFieldOrder(t *testing.T) {
