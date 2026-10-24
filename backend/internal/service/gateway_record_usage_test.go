@@ -55,6 +55,47 @@ func newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo UsageLogReposi
 	return svc
 }
 
+func TestRecordUsagePreservesVersionedLatencyWithoutChangingLegacyTiming(t *testing.T) {
+	firstEvent, firstContent, firstText, legacyFirst := 110, 220, 330, 15
+	for _, platform := range []string{PlatformAnthropic, PlatformOpenAI} {
+		for _, tc := range []struct {
+			name    string
+			stream  bool
+			metrics *UsageLatencyMetrics
+		}{
+			{name: "legacy", stream: true},
+			{name: "stream", stream: true, metrics: &UsageLatencyMetrics{Version: 1, FirstEventMs: &firstEvent, FirstContentMs: &firstContent, FirstTextMs: &firstText, DurationMs: 500}},
+			{name: "buffered", metrics: &UsageLatencyMetrics{Version: 1, DurationMs: 500}},
+		} {
+			t.Run(platform+"/"+tc.name, func(t *testing.T) {
+				repo := &openAIRecordUsageLogRepoStub{}
+				userRepo, subRepo := &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}
+				apiKey, user := &APIKey{ID: 1}, &User{ID: 2}
+				account := &Account{ID: 3, Platform: platform, Type: AccountTypeAPIKey}
+				var err error
+				if platform == PlatformAnthropic {
+					svc := newGatewayRecordUsageServiceForTest(repo, userRepo, subRepo)
+					err = svc.RecordUsage(context.Background(), &RecordUsageInput{
+						Result: &ForwardResult{RequestID: "latency-contract", Model: "claude-sonnet-4", Stream: tc.stream, Duration: 100 * time.Millisecond, FirstTokenMs: &legacyFirst, LatencyMetrics: tc.metrics},
+						APIKey: apiKey, User: user, Account: account,
+					})
+				} else {
+					svc := newOpenAIRecordUsageServiceForTest(repo, userRepo, subRepo, nil)
+					err = svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+						Result: &OpenAIForwardResult{RequestID: "latency-contract", Model: "gpt-5.1", Stream: tc.stream, Duration: 100 * time.Millisecond, FirstTokenMs: &legacyFirst, LatencyMetrics: tc.metrics},
+						APIKey: apiKey, User: user, Account: account,
+					})
+				}
+				require.NoError(t, err)
+				require.NotNil(t, repo.lastLog)
+				require.Equal(t, tc.metrics, repo.lastLog.LatencyMetrics)
+				require.Equal(t, legacyFirst, *repo.lastLog.FirstTokenMs)
+				require.EqualValues(t, 100, *repo.lastLog.DurationMs)
+			})
+		}
+	}
+}
+
 type openAIRecordUsageBestEffortLogRepoStub struct {
 	UsageLogRepository
 
@@ -224,8 +265,8 @@ func TestGatewayServiceRecordUsage_GeminiFlashThinkingTierUsesCatalogPrice(t *te
 			require.NotNil(t, usageRepo.lastLog)
 			require.Equal(t, model, usageRepo.lastLog.Model)
 			require.InDelta(t, 0.02007585, usageRepo.lastLog.TotalCost, 1e-12)
-			require.InDelta(t, 0.0030113775, usageRepo.lastLog.ActualCost, 1e-12)
-			require.InDelta(t, 0.0030113775, userRepo.lastAmount, 1e-12)
+			require.Equal(t, 0.00301138, usageRepo.lastLog.ActualCost)
+			require.Equal(t, usageRepo.lastLog.ActualCost, userRepo.lastAmount)
 		})
 	}
 }
@@ -824,4 +865,19 @@ func TestGatewayServiceRecordUsage_FastSpeedHonouredKeepsPremium(t *testing.T) {
 	fastCost, err := svc.billingService.CalculateCostWithServiceTier("claude-opus-5", UsageTokens{InputTokens: 100, OutputTokens: 50}, 1.0, "fast")
 	require.NoError(t, err)
 	require.InDelta(t, fastCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
+}
+
+func TestGatewayServiceRecordUsage_PreservesRawUsageWithBillingOverrides(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	observed := ClaudeUsage{InputTokens: 100, OutputTokens: 5, CacheReadInputTokens: 10, CacheCreationInputTokens: 20, CacheCreation1hTokens: 20}
+	result := &ForwardResult{RequestID: "raw-usage-contract", Usage: observed, Model: "claude-sonnet-4"}
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{Result: result, APIKey: &APIKey{ID: 1}, User: &User{ID: 2}, Account: &Account{ID: 3, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"cache_ttl_override_enabled": true, "cache_ttl_override_target": "5m"}}, ForceCacheBilling: true})
+	require.NoError(t, err)
+	require.Equal(t, observed, result.Usage, "billing must not overwrite upstream evidence")
+	require.Zero(t, usageRepo.lastLog.InputTokens)
+	require.Equal(t, 110, usageRepo.lastLog.CacheReadTokens)
+	require.Equal(t, 20, usageRepo.lastLog.CacheCreation5mTokens)
+	require.Zero(t, usageRepo.lastLog.CacheCreation1hTokens)
+	require.True(t, usageRepo.lastLog.CacheTTLOverridden)
 }
