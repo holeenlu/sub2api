@@ -1,0 +1,17 @@
+{
+  "format": "sub2api-account-telemetry",
+  "version": 2,
+  "exported_at": "2026-10-20T00:00:00Z",
+  "device_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "machine_id": "fixture-machine",
+  "cli_version": "2.1.296",
+  "platform": "win32",
+  "arch": "x64",
+  "locale": "en-US",
+  "environment": {
+    "shell": "pwsh",
+    "cpu_cores": 8,
+    "memory_bytes": 8589934592,
+    "dmi_product": "fixture-windows-pc"
+  }
+}

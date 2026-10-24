@@ -79,7 +79,7 @@ func (p *PanelRateLimiter) userScoped(scope string, limitOf func(service.PanelRa
 		}
 		principal := adminaccess.FromContext(c.Request.Context())
 		if settings.ExemptAdmin && principal == nil {
-			if role, hasRole := GetUserRoleFromContext(c); hasRole && role == service.RoleAdmin {
+			if role, hasRole := GetUserRoleFromContext(c); hasRole && role == service.RoleSuperAdmin {
 				c.Next()
 				return
 			}

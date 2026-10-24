@@ -16,8 +16,8 @@ import (
 )
 
 func TestHandleCCBufferedFromAnthropic_ToolArgumentsAreValidJSON(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -37,7 +37,10 @@ func TestHandleCCBufferedFromAnthropic_ToolArgumentsAreValidJSON(t *testing.T) {
 		`event: message_delta`,
 		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}`,
 		``,
-	}, "\n")))}
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n") + "\n"))}
 
 	_, err := (&GatewayService{}).handleCCBufferedFromAnthropic(resp, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now())
 	require.NoError(t, err)
@@ -103,8 +106,8 @@ func TestExtractCCReasoningEffortFromBody(t *testing.T) {
 }
 
 func TestHandleCCBufferedFromAnthropic_PreservesMessageStartCacheUsageAndReasoning(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -122,7 +125,10 @@ func TestHandleCCBufferedFromAnthropic_PreservesMessageStartCacheUsageAndReasoni
 			`event: message_delta`,
 			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`,
 			``,
-		}, "\n"))),
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
+			``,
+		}, "\n") + "\n")),
 	}
 
 	svc := &GatewayService{}
@@ -141,8 +147,8 @@ func TestHandleCCBufferedFromAnthropic_PreservesMessageStartCacheUsageAndReasoni
 // "event: " / "data: " 严格匹配会丢弃全部事件，最终报 "Upstream stream ended
 // without a response"（#4653 同根因；#4657 只修了 /v1/responses 桥）。
 func TestHandleCCBufferedFromAnthropic_CompactSSEFormat(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -159,7 +165,10 @@ func TestHandleCCBufferedFromAnthropic_CompactSSEFormat(t *testing.T) {
 			`event:message_delta`,
 			`data:{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}`,
 			``,
-		}, "\n"))),
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
+			``,
+		}, "\n") + "\n")),
 	}
 
 	svc := &GatewayService{}
@@ -174,8 +183,8 @@ func TestHandleCCBufferedFromAnthropic_CompactSSEFormat(t *testing.T) {
 }
 
 func TestHandleCCStreamingFromAnthropic_CompactSSEFormat(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -195,11 +204,11 @@ func TestHandleCCStreamingFromAnthropic_CompactSSEFormat(t *testing.T) {
 			`event:message_stop`,
 			`data:{"type":"message_stop"}`,
 			``,
-		}, "\n"))),
+		}, "\n") + "\n")),
 	}
 
 	svc := &GatewayService{}
-	result, err := svc.handleCCStreamingFromAnthropic(resp, c, "k3", "k3", nil, time.Now())
+	result, err := svc.handleCCStreamingFromAnthropic(resp, c, "k3", "k3", nil, time.Now(), true)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 21, result.Usage.InputTokens)
@@ -210,8 +219,8 @@ func TestHandleCCStreamingFromAnthropic_CompactSSEFormat(t *testing.T) {
 }
 
 func TestHandleCCStreamingFromAnthropic_PreservesMessageStartCacheUsageAndReasoning(t *testing.T) {
-	t.Parallel()
 	gin.SetMode(gin.TestMode)
+	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -232,11 +241,11 @@ func TestHandleCCStreamingFromAnthropic_PreservesMessageStartCacheUsageAndReason
 			`event: message_stop`,
 			`data: {"type":"message_stop"}`,
 			``,
-		}, "\n"))),
+		}, "\n") + "\n")),
 	}
 
 	svc := &GatewayService{}
-	result, err := svc.handleCCStreamingFromAnthropic(resp, c, "gpt-5", "claude-sonnet-4.5", &reasoningEffort, time.Now())
+	result, err := svc.handleCCStreamingFromAnthropic(resp, c, "gpt-5", "claude-sonnet-4.5", &reasoningEffort, time.Now(), true)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 20, result.Usage.InputTokens)

@@ -36,6 +36,17 @@ type systemHandlerUpdateServiceStub struct {
 	rollbackVersionsCall  int
 }
 
+func TestSystemHandlerPortalAuthorizationExposesRunningBackendVersion(t *testing.T) {
+	stub := &systemHandlerUpdateServiceStub{updateInfo: &service.UpdateInfo{CurrentVersion: "0.2.17.13"}}
+	handler := NewSystemHandler(stub, nil)
+	router := gin.New()
+	router.GET("/api/v1/admin/system/version", handler.GetVersion)
+	out := httptest.NewRecorder()
+	router.ServeHTTP(out, httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/version", nil))
+	require.Equal(t, http.StatusOK, out.Code)
+	require.Equal(t, "0.2.17.13", out.Header().Get("X-Portal-Backend-Version"))
+}
+
 func (s *systemHandlerUpdateServiceStub) CheckUpdate(_ context.Context, force bool) (*service.UpdateInfo, error) {
 	s.checkForces = append(s.checkForces, force)
 	return s.updateInfo, s.checkErr

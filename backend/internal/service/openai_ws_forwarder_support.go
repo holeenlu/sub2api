@@ -30,6 +30,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	account *Account,
 	stateStore OpenAIWSStateStore,
 	groupID int64,
+	timing *openAIForwardTiming,
 ) error {
 	if s == nil {
 		return nil
@@ -69,6 +70,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		return nil
 	}
 	prewarmStart := time.Now()
+	defer func() { timing.MarkPrewarm(time.Since(prewarmStart)) }()
 	logOpenAIWSModeInfo("prewarm_start account_id=%d conn_id=%s", account.ID, connID)
 
 	prewarmPayload := make(map[string]any, len(payload)+1)
@@ -78,6 +80,9 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	prewarmPayload["generate"] = false
 	prewarmPayloadJSON := payloadAsJSONBytes(prewarmPayload)
 
+	if err := validateVendorNativeDispatch(ctx, s.accountRepo, account, &groupID); err != nil {
+		return err
+	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmPayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
@@ -170,19 +175,14 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		stateStore.BindResponseConn(prewarmResponseID, lease.ConnID(), ttl)
 	}
 	logOpenAIWSModeInfo(
-		"prewarm_done account_id=%d conn_id=%s response_id=%s events=%d terminal_events=%d duration_ms=%d",
+		"prewarm_done account_id=%d conn_id=%s response_id=%s events=%d terminal_events=%d",
 		account.ID,
 		connID,
 		truncateOpenAIWSLogValue(prewarmResponseID, openAIWSIDValueMaxLen),
 		prewarmEventCount,
 		prewarmTerminalCount,
-		time.Since(prewarmStart).Milliseconds(),
 	)
 	return nil
-}
-
-func payloadAsJSON(payload map[string]any) string {
-	return string(payloadAsJSONBytes(payload))
 }
 
 func payloadAsJSONBytes(payload map[string]any) []byte {
@@ -194,6 +194,47 @@ func payloadAsJSONBytes(payload map[string]any) []byte {
 		return []byte("{}")
 	}
 	return body
+}
+
+// isOpenAIWSTurnMetadataEvent reports the per-turn metadata frames ChatGPT
+// sends ahead of the response itself. Only these two are listed: Codex reads
+// rate limits from the first and the models etag plus x-codex-turn-state from
+// the second, and neither belongs to a response, so holding them back until
+// the response starts is invisible to the client. An unknown codex.* frame is
+// forwarded immediately as before rather than assumed to be equally inert.
+// isOpenAIWSTurnIdentityEvent reports the events a staging-window flush can
+// publish before any content: the codex.* preamble and the response identity.
+func isOpenAIWSTurnIdentityEvent(eventType string) bool {
+	return isOpenAIWSTurnMetadataEvent(eventType) || eventType == "response.created" || eventType == "response.in_progress"
+}
+
+// rewriteOpenAIWSPublishedResponseID presents a retried attempt's events under
+// the response.id the client already received. Only the response identity
+// fields change; item IDs, output indexes and content are untouched.
+func rewriteOpenAIWSPublishedResponseID(message []byte, from, to string) []byte {
+	if from == "" || to == "" || from == to {
+		return message
+	}
+	if gjson.GetBytes(message, "response.id").String() == from {
+		if next, err := sjson.SetBytes(message, "response.id", to); err == nil {
+			message = next
+		}
+	}
+	if gjson.GetBytes(message, "response_id").String() == from {
+		if next, err := sjson.SetBytes(message, "response_id", to); err == nil {
+			message = next
+		}
+	}
+	return message
+}
+
+func isOpenAIWSTurnMetadataEvent(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "codex.rate_limits", "codex.response.metadata":
+		return true
+	default:
+		return false
+	}
 }
 
 func isOpenAIWSTerminalEvent(eventType string) bool {
@@ -221,6 +262,8 @@ func normalizeOpenAIWSTerminalEvent(eventType string) string {
 		return ""
 	}
 }
+
+const openAIWSProvisionalErrorDetail = "provisional websocket error"
 
 // markOpenAIWSClientVisibleFailure records only terminal/error protocol events
 // that were delivered to the client. Callers invoke it only after any hidden
@@ -262,6 +305,16 @@ func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload 
 	if message == "" {
 		message = "upstream websocket request failed"
 	}
+	// This is an upstream WS event, even when its logical status is 400/404.
+	// Snapshot its origin before the turn marker so it is not blamed on the
+	// client or on the gateway merely because the handshake status stayed 101.
+	if !HasOpsClientBusinessLimited(c) {
+		detail := ""
+		if c != nil && c.GetString(OpsUpstreamErrorDetailKey) == openAIWSProvisionalErrorDetail {
+			detail = "client-visible websocket " + eventType
+		}
+		setOpsUpstreamError(c, status, message, detail)
+	}
 	MarkOpsStreamFailure(c, errType, code, message, status)
 }
 
@@ -296,10 +349,12 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 	switch {
 	case code == "server_is_overloaded", code == "slow_down":
 		return http.StatusServiceUnavailable
-	case strings.Contains(code, "server_error"),
+	// Some Responses WS backends use the shorter server_err spelling. Keep
+	// both forms on the existing transient policy path (sub4api 25b06c394).
+	case strings.Contains(code, "server_err"),
 		strings.Contains(code, "internal_error"),
 		strings.Contains(code, "upstream_error"),
-		strings.Contains(errType, "server_error"),
+		strings.Contains(errType, "server_err"),
 		strings.Contains(errType, "internal_error"),
 		strings.Contains(errType, "upstream_error"):
 		return http.StatusInternalServerError
@@ -766,17 +821,10 @@ func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (stri
 		(strings.Contains(msg, "previous response") && strings.Contains(msg, "not found")) {
 		return "previous_response_not_found", true
 	}
-	if strings.Contains(errType, "server_error") || strings.Contains(code, "server_error") {
+	if strings.Contains(errType, "server_err") || strings.Contains(code, "server_err") {
 		return "upstream_error_event", true
 	}
 	return "event_error", false
-}
-
-func classifyOpenAIWSErrorEvent(message []byte) (string, bool) {
-	if len(message) == 0 {
-		return "event_error", false
-	}
-	return classifyOpenAIWSErrorEventFromRaw(parseOpenAIWSErrorEventFields(message))
 }
 
 func openAIWSErrorHTTPStatusFromRaw(codeRaw, errTypeRaw string) int {
@@ -798,6 +846,12 @@ func openAIWSErrorHTTPStatusFromRaw(codeRaw, errTypeRaw string) int {
 		return http.StatusForbidden
 	case isOpenAIWSRateLimitError(codeRaw, errTypeRaw, ""):
 		return http.StatusTooManyRequests
+	case code == "server_is_overloaded", code == "slow_down":
+		// Match Responses SSE's request-scoped capacity classification. This
+		// is a semantic status: a successfully upgraded WS has no HTTP 5xx.
+		return http.StatusServiceUnavailable
+	case code == "first_output_timeout":
+		return http.StatusGatewayTimeout
 	default:
 		return http.StatusBadGateway
 	}
@@ -862,4 +916,23 @@ func (s *OpenAIGatewayService) clearOpenAIWSFallbackCooling(accountID int64) {
 		return
 	}
 	s.openaiWSFallbackUntil.Delete(accountID)
+}
+
+// A named request-parameter rejection before any response is accepted can end
+// immediately after field repair has been exhausted. Bare codes/messages alone
+// are insufficient: rustponsesapi emits those before successful responses too.
+func openAIWSDefinitiveRequestRejection(message []byte, responseID string) bool {
+	if responseID != "" || gjson.GetBytes(message, "error.type").String() != "invalid_request_error" {
+		return false
+	}
+	param := gjson.GetBytes(message, "error.param").String()
+	if param == "" || strings.HasPrefix(param, "input") {
+		return false
+	}
+	switch gjson.GetBytes(message, "error.code").String() {
+	case "unknown_parameter", "unsupported_parameter", "missing_required_parameter":
+		return true
+	default:
+		return false
+	}
 }

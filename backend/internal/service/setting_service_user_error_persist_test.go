@@ -19,7 +19,7 @@ func TestAllowUserViewErrorRequests_PersistsToDB(t *testing.T) {
 	repo := &bmUpdateRepoStub{}
 	svc := NewSettingService(repo, &config.Config{})
 
-	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+	err := updateSystemSettingsForTest(svc, context.Background(), &SystemSettings{
 		AllowUserViewErrorRequests: true,
 	})
 	require.NoError(t, err)

@@ -1,0 +1,968 @@
+{
+  "date": "2026-10-23",
+  "upstream_repository": "Wei-Shaw/sub2api",
+  "upstream_ref": "refs/heads/main",
+  "upstream_commit": "37067e8e340e9440d173a92b4faa05e8ce58368f",
+  "responses_lifecycle_sync_2026_10_22": {
+    "previous_tips": {
+      "main": "424846ad0afa4f9b4dce6b444daacce8eed17177",
+      "TapModels": "1ca9fcde48c9dd96987a0c5ee87ede06704d69cd",
+      "tokensavy": "6fd5a0bcb5eb76ceaf98dffe5d1802aea5e88e1a"
+    },
+    "brand_integration_base": "424846ad0afa4f9b4dce6b444daacce8eed17177",
+    "ranxi_reviewed": "1777b5c4f8953db1d6d1d1b006a7153f59dd0a96",
+    "new_api_adapted": "0c2af9780e45f6f9073528fb0fcbdcd64b5d9495",
+    "sub4api_observed": "254e7ec4932e65ab8830e7d10e66f184140041bd",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/lifecycle-20261022/before.bundle",
+    "evidence": ".release/upstream-sync/lifecycle-20261022/",
+    "scope": "Successful Responses terminal flush takes precedence over simultaneous cancellation; retain actual write errors, usage and brands; no release/deployment/migration"
+  },
+  "input_commits": {
+    "main": "7c9a9a241f17549bc4f581f1786d206e9b482838",
+    "TapModels": "3b65c7564690931ba0e68857ab512fcb6b5c5b71",
+    "tokensavy": "5b5fb7447894c9fd1fed2f6b9fd9ea4902692129"
+  },
+  "input_trees": {
+    "main": "3dbf86e2582ee2993c9875c53f53c8aeb206a1ab",
+    "TapModels": "1b2811a5852c5450325b49124979fa5e53c3bc9b",
+    "tokensavy": "427d8a0b52ee89da872d5b5d2c19bc33d63eed9d"
+  },
+  "inventory": "final candidate compared to official, no rename detection; excludes docs/customization itself to avoid recursive hashes",
+  "history_rule": "one complete customization commit per brand, sole parent is upstream_commit",
+  "runtime_rule": "Initial consolidation preserved runtime trees. Later reconciliations and selective adaptations are explicitly recorded below; unrelated branding, migrations and assets remain unchanged.",
+  "selective_sync_2026_10_22": {
+    "previous_tips": {
+      "main": "754c5ebe14bc37a7c9ebe77d082219a60749ed49",
+      "TapModels": "83ea4539e79d1687cdc52d4ce344645f8a79fe11",
+      "tokensavy": "cb59670fdc3af2c250cba03ae794f9a801d33fc4"
+    },
+    "brand_integration_base": "754c5ebe14bc37a7c9ebe77d082219a60749ed49",
+    "ranxi_reviewed": "8b36fe7d647c28e8189147c6bfce52a41b6e26db",
+    "new_api_reviewed": "7d8b91268dab69d7150f345c448b5e250163146a",
+    "sub4api_observed": "254e7ec4932e65ab8830e7d10e66f184140041bd",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/selective-20261022/before.bundle",
+    "evidence": ".release/upstream-sync/selective-20261022/",
+    "decisions": [
+      "docs/bps/upstream-changes.md",
+      "docs/new-api-gateway-implementation-report-2026-10-13.md"
+    ],
+    "scope": "API-key quota isolation, TypeSafe URLs, SIWC session encryption, compress 1.18.7; no release/deployment/migration"
+  },
+  "prior_provenance": "docs/requirements/final-v0.2.17-2026-10-17/source-commits.json",
+  "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/single-customization-20261022/before.bundle",
+  "reconciliation_2026_10_22": {
+    "input_main": "c793b9e396df08ddc9b850453b9328a0729f99b1",
+    "source_base": "2bb31cdae2db444a2a26ecf25d68c11a6a71edbd",
+    "source_snapshot_tree": "2aa59a87a284c5af081ec697bfd4bab2b062f8f3",
+    "source_task": "合并上游并压缩部署提交",
+    "pending_files": 17,
+    "reviewed_old_worktrees": 6,
+    "historical_or_superseded_paths": 302,
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/reconcile-customization-20261022-k_oxvt2i",
+    "report": "docs/customization/reconciliation.md"
+  },
+  "http_sse_delivery_2026_10_22": {
+    "input_main": "75138832e55c05437625c65172518a9451d49751",
+    "input_brands": {
+      "main": "75138832e55c05437625c65172518a9451d49751",
+      "TapModels": "faa35fe3eac33c96366278a3f4e04fecce6e9a1c",
+      "tokensavy": "5b146f53ec94be392328a1bd79212628ba6387fd"
+    },
+    "implementation_base": "754c5ebe14bc37a7c9ebe77d082219a60749ed49",
+    "shared_merge_base": "75138832e55c05437625c65172518a9451d49751",
+    "implementation_files": 17,
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/sub2api-http-sse-delivery-20261022-elrdnwd4",
+    "scope": "HTTP/SSE terminal, disconnect, first-output budget, bounded staging and framing; preserve remote selective updates and brand overrides; exclude concurrent uncommitted work"
+  },
+  "setup_token_credentials_2026_10_22": {
+    "input_brands": {
+      "main": "966d4412471b97b2391e42de198240c3cac00cf3",
+      "TapModels": "e3bdda4773382d7d675b4b4c1d5fce84bc34c716",
+      "tokensavy": "e5885e51ee81167aacb52dd1fbf5fa17032f5c1f"
+    },
+    "implementation_base": "754c5ebe14bc37a7c9ebe77d082219a60749ed49",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/setup-token-20261022",
+    "scope": "Explicit refresh-token removal and actual API error display; identity verification unchanged; no release/deployment/migration"
+  },
+  "usage_cost_display_2026_10_22": {
+    "input_main": "7c140bf0df1b6b6f6fa74cea665c60f1272c0baa",
+    "input_brands": {
+      "main": "7c140bf0df1b6b6f6fa74cea665c60f1272c0baa",
+      "TapModels": "08c7d62eb9af0a2db3ad5cb36eccb5a94e2620b9",
+      "tokensavy": "79b16b959a0c2bd34662a44fd48b3eb22ea63b82"
+    },
+    "previous_official": "7da09cab4e875463baa79fc150adde700c5438df",
+    "upstream_commit": "21cc926933163e015d2b632be07055759c983541",
+    "official_change": "Docker Go 1.27.3 already present in all brands; three-way tree equal",
+    "shared_merge_base": "7c140bf0df1b6b6f6fa74cea665c60f1272c0baa",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/sub2api-cost-delivery-mbnkpity",
+    "scope": "Remove all cost cell text labels; keep amounts/detail and unknown amount placeholder; preserve backend and concurrent work"
+  },
+  "claude_authorization_2026_10_22": {
+    "input_brands": {
+      "main": "8bf8232ba0de43d0b6fd2fefeded8a496f173d99",
+      "TapModels": "afb48f25752f2035beb1dfc3ae2c3fa148c39842",
+      "tokensavy": "003e150d535592a4efb0bab5c5865fcf3972ed28"
+    },
+    "implementation_base": "7c140bf0df1b6b6f6fa74cea665c60f1272c0baa",
+    "shared_merge_base": "8bf8232ba0de43d0b6fd2fefeded8a496f173d99",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/claude-auth-methods-20261022",
+    "scope": "Shared Claude Auth/browser inference OAuth/direct Setup Token semantics, credential-only ownership claims, session-bound server identity handoff; preserve roles and branding; no release/deployment/migration"
+  },
+  "release_speed_2026_10_22": {
+    "previous_tips": {
+      "main": "e817202b3eeeb0c923b04ed1ae7c5a40c69c36fb",
+      "TapModels": "0928eda7a5ba2289e20726143b4f1a6e6c94ffcb",
+      "tokensavy": "438949ae3e0908921c21d59bba431b98053b1835"
+    },
+    "shared_merge_base": "e817202b3eeeb0c923b04ed1ae7c5a40c69c36fb",
+    "upstream": "21cc926933163e015d2b632be07055759c983541",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/release-speed-20261022/before.bundle",
+    "evidence": ".release/upstream-sync/release-speed-20261022",
+    "scope": "Deduplicate frontend checks, restore Go cache across dependency updates, parallel brand builds with serialized publication. No release/deployment."
+  },
+  "http_ws_incremental_2026_10_22": {
+    "input_brands": {
+      "main": "3b4d34baa1cae3da130a626e11047da3dc184bf0",
+      "TapModels": "059659a4ffdccac2ecdd6c715c7f13971fb04a39",
+      "tokensavy": "a5f12b3eb27fddf559c81a3c6cf0bce6fd5d0d69"
+    },
+    "shared_merge_base": "3b4d34baa1cae3da130a626e11047da3dc184bf0",
+    "implementation_base": "754c5ebe14bc37a7c9ebe77d082219a60749ed49",
+    "verified_snapshot": "ec5a2bd8e77504a885612f45b404fa98c8ae0117",
+    "recovered_files": [
+      "backend/internal/service/openai_forward_timing.go",
+      "backend/internal/service/openai_incremental_observation.go",
+      "backend/internal/service/openai_incremental_observation_test.go",
+      "backend/internal/service/openai_ws_forwarder_v2.go",
+      "backend/internal/service/openai_ws_pool.go",
+      "backend/internal/service/openai_ws_protocol_forward_test.go",
+      "backend/internal/service/openai_ws_state_store.go",
+      "docs/CODEX_RESPONSES_TRANSPORT_OPTIMIZATION.md"
+    ],
+    "old_upstream": "21cc926933163e015d2b632be07055759c983541",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/incremental-publish-20261022-er7xbhun",
+    "evidence": ".release/upstream-sync/incremental-publish-20261022-er7xbhun",
+    "scope": "Publish proven ordinary OAuth HTTP-to-WS continuation; preserve native/SIWC behavior, latest published content and concurrent uncommitted changes; no release/deployment/migration"
+  },
+  "siwc_tool_error_2026_10_22": {
+    "input_brands": {
+      "main": "707a6cc99c166f2326e0e5c6dc71144aef185eee",
+      "TapModels": "2e6a3971b4144fd7fe260cbe9f884477149a36af",
+      "tokensavy": "044e86386d27327112d67ffe48e0227df706716e"
+    },
+    "shared_merge_base": "707a6cc99c166f2326e0e5c6dc71144aef185eee",
+    "implementation_base": "e817202b3eeeb0c923b04ed1ae7c5a40c69c36fb",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/siwc-delivery-20261022-qucvq9kp",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/siwc-delivery-20261022-qucvq9kp/verification-receipt.json",
+    "scope": "Preserve terminal JSON errors and identify rejected SIWC tool type/path; no capability expansion, client configuration changes, release, deployment or migration"
+  },
+  "latency_followup_2026_10_22": {
+    "input_brands": {
+      "main": "5130517dfd303c469c6004cf0264f04a65669bb1",
+      "TapModels": "4d81ad878e71bee5a1f638051bd839b167856502",
+      "tokensavy": "52d50166d903606011c64201cb429b516001dd2d"
+    },
+    "shared_merge_base": "5130517dfd303c469c6004cf0264f04a65669bb1",
+    "implementation_base": "707a6cc99c166f2326e0e5c6dc71144aef185eee",
+    "implementation_tree": "fa602c858a2352205312df1b7009406a96b97824",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/latency-publish-20261022-k777biri",
+    "evidence": ".release/upstream-sync/latency-publish-20261022-k777biri",
+    "scope": "First visible-text flush, strict offline paired latency analysis and connection diagnostics; preserve compaction/lane boundaries and published SIWC tool error fix; no release/deployment/migration"
+  },
+  "http_sse_closeout_2026_10_22": {
+    "input_brands": {
+      "main": "db9171044e7f9474a3f3f10f08a0c38bd21b9ff2",
+      "TapModels": "150aeab8f7ed5b80f756eabac95fc398bd6b4869",
+      "tokensavy": "3fd71a7df08078ee3e7d6e719d1569e26fca51e4"
+    },
+    "shared_merge_base": "db9171044e7f9474a3f3f10f08a0c38bd21b9ff2",
+    "implementation_base": "e817202b3eeeb0c923b04ed1ae7c5a40c69c36fb",
+    "verified_implementation_tree": "9f83ea2d9b5e26709a9e3c59260ec3ef9d6132ee",
+    "publication_input_tree": "9ee7a113e1c98e94d5ead537fe4ab461030ca67e",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/sse-publish-20261022-evxc63dk",
+    "evidence": ".release/upstream-sync/sse-publish-20261022-evxc63dk",
+    "scope": "HTTP/SSE budgets, cancellation attribution, FlushError propagation, bounded draining, Bedrock keepalive and historical review documents; preserve published continuation, latency, SIWC, pricing and brands; no release/deployment/migration"
+  },
+  "default_auto_delivery_2026_10_22": {
+    "previous_tips": {
+      "main": "854a86287e2fcec0a7f8718178dc017933b91d84",
+      "TapModels": "646eb0483e8a81fee8b2c2cb76a1c6d7d32da0e1",
+      "tokensavy": "f407a5a8d70e7c4685d7cb97d9afa812aa6b345e"
+    },
+    "shared_merge_base": "854a86287e2fcec0a7f8718178dc017933b91d84",
+    "upstream": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/default-auto-delivery-20261022/reviewed-remote.bundle",
+    "scope": "User-authorized automatic commit/push after completed verified work; documentation only. Preserve concurrent Responses terminal lifecycle fix."
+  },
+  "vendor_release_coupling_2026_10_22": {
+    "previous_tips": {
+      "main": "6102b3b2fd9be3b13af48d41565c4bf6f434d2cd",
+      "TapModels": "b82411f0fdc69c99750c4de5a72a54635b44bdb7",
+      "tokensavy": "e48bda41bb008787fa089f5a39641bfdcf449036"
+    },
+    "brand_integration_base": "6102b3b2fd9be3b13af48d41565c4bf6f434d2cd",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/vendor-release-coupling-20261022-djpze9_y/before.bundle",
+    "evidence": ".release/upstream-sync/vendor-release-coupling-20261022/",
+    "scope": "Paired backend/portal updates, image recovery, installer detection, portable portal deployment artifact and release regression gates.",
+    "validation": "Release/updater unit tests and real Docker Compose paired image switch, portal health failure recovery, volume/sibling preservation; unchanged scoped inputs reused after concurrent policy delivery.",
+    "release_authorization": "User explicitly requested releasing all three brands; production deployment and database migration remain separate."
+  },
+  "workspace_delivery_2026_10_22": {
+    "previous_tips": {
+      "main": "85c88f98520b475e04c5da1b740a2c772671aeb4",
+      "TapModels": "33504078ad984e8e9cad5efd21c2f25cfeb45871",
+      "tokensavy": "da67fe9f45f502b0966b29f94f3190001dbbe5ef"
+    },
+    "brand_integration_base": "85c88f98520b475e04c5da1b740a2c772671aeb4",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "workspace_base": "424846ad0afa4f9b4dce6b444daacce8eed17177",
+    "workspace_snapshot": "b64dc57c1a374f17ca291cf9b3acc4a9900c727c",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/workspace-delivery-20261022/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/workspace-delivery-20261022",
+    "scope": "All authorized main workspace changes: audit fixes, superadmin key collaboration and balance exemption, BPS encrypted diagnostics; preserve independently published supplier release and HTTP terminal fixes.",
+    "release_authorization": "Code commit/push only; no Release, deployment or production migration."
+  },
+  "portal_manual_update_2026_10_22": {
+    "previous_tips": {
+      "main": "f201f3017223a7260f667644831f95e5b68ba5f7",
+      "TapModels": "596c33e4a3589521391cc5647fa99c9f58474143",
+      "tokensavy": "2e4d1fde714b7b5546b479dfc34f340c2f5671ad"
+    },
+    "brand_integration_base": "f201f3017223a7260f667644831f95e5b68ba5f7",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/portal-online-update-20261022-bgu4rcnm/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/portal-online-update-20261022-bgu4rcnm",
+    "scope": "Super administrator portal update UI, backend version authentication, standalone host updater, environment preservation, actual image versions and paired release gates.",
+    "validation": "Scoped release/updater, frontend, backend authorization tests and real Docker portal authentication, paired/standalone image replacement and recovery. See verification receipt for successful checks and exact inputs.",
+    "release_authorization": "User explicitly requested releasing all three brands; production deployment and database migration remain separate."
+  },
+  "portal_version_badge_alignment_2026_10_22": {
+    "previous_tips": {
+      "main": "dd9969117b4831ea0d309dc2a4fddbe9ea71c25c",
+      "TapModels": "6c8dc51705510a9ed7b953f1b7bfecd2d48159f8",
+      "tokensavy": "e5272b3457c59ccfc627545e4a99fb6e3c017d32"
+    },
+    "brand_integration_base": "dd9969117b4831ea0d309dc2a4fddbe9ea71c25c",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/portal-online-update-20261022-bgu4rcnm/phase1-published.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/portal-online-update-20261022-bgu4rcnm",
+    "scope": "Reuse the backend VersionBadge in the supplier sidebar, replace the dedicated portal button/modal, retain paired-version update source, permissions and host updater.",
+    "validation": "Scoped release/updater, frontend, backend authorization tests and real Docker portal authentication, paired/standalone image replacement and recovery. See verification receipt for successful checks and exact inputs.",
+    "release_authorization": "User explicitly requested releasing all three brands; production deployment and database migration remain separate."
+  },
+  "vendor_procurement_2026_10_22": {
+    "previous_tips": {
+      "main": "464877d99876da12fd01ee3fb1f74ccea133f2a3",
+      "TapModels": "1e44479fc2839aa2d0952193bc887ef2c03245cf",
+      "tokensavy": "39c9e28fa13939276a74245c05d33152474aa2e6"
+    },
+    "brand_integration_base": "464877d99876da12fd01ee3fb1f74ccea133f2a3",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/vendor-purchase-price-20261022/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/vendor-purchase-price-20261022",
+    "scope": "Shared gateway usage before account/group/user multipliers, per-group purchase prices, one persisted CNY/USDT settlement rate, normalized decimal inputs, old bill snapshots preserved. Code delivery only; no production migration, release or deployment."
+  },
+  "unified_usage_metrics_2026_10_22": {
+    "previous_tips": {
+      "main": "67b0e149a5fa75cc5736d202ac90113c10adb94b",
+      "TapModels": "880a23dc6ef066649e1aae31945ecda5bc1292d9",
+      "tokensavy": "ef264b9205ec552eb5653bf81403a4080a440e8b"
+    },
+    "brand_integration_base": "67b0e149a5fa75cc5736d202ac90113c10adb94b",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/unified-usage-metrics-20261022/remote-drift.bundle",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/unified-usage-metrics-20261022",
+    "scope": "Shared versioned Claude/Codex request/turn latency, original-event observation across native and compatibility paths, cache input share, history preserved; supplier remote updates retained. No release, deployment or production migration.",
+    "validation": "Isolated implementation all backend unit tests passed (29509 test/subtest passes), final combined targeted gateway/vendor/API regression, type/locale/frontend tests, vet and builds. Brand verification recorded separately."
+  },
+  "cache_schema_sync_2026_10_22": {
+    "previous_tips": {
+      "main": "4d10e4a746d37b397b4a4e7d21d06ddfab08118d",
+      "TapModels": "8e1b392bd63f211ff78bef8ec1e3d199792a5503",
+      "tokensavy": "e735dda2c76022ae0e8e41137affbac9bd8ce571"
+    },
+    "brand_integration_base": "4d10e4a746d37b397b4a4e7d21d06ddfab08118d",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "ranxi_observed": "829a52113a5e591feb4d2d3ca8af1d88b2fcd3ab",
+    "new_api_observed": "d0b840e75ff36d731b04ff981ee361819acd593f",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/selective-review-20261022/remote-drift.bundle",
+    "remote_drift_review": "Preserve published unified usage metrics. Four implementation/test files unchanged upstream; final combination rechecks cache billing, schema conversion and usage persistence; inventories regenerated.",
+    "evidence": ".release/upstream-sync/selective-review-20261022/",
+    "scope": "User-approved partial cache TTL remainder at 5m; preserve root-union tool property order; no new moderation system or request evidence retention; no release/deployment/migration",
+    "new_api_adapted": [
+      "94cc3ff0906db37703d5ce2bc6a479209b7b9b23",
+      "d0b840e75ff36d731b04ff981ee361819acd593f"
+    ]
+  },
+  "sync_efficiency_2026_10_22": {
+    "previous_tips": {
+      "main": "9daa6cd1237150ccf59c44233926e1090de38e11",
+      "TapModels": "ab3a83ead8174ba930ebfeb40b4d8fc2dae31e9a",
+      "tokensavy": "b799b60a962c6a39ed3952c1f3e325ab9ee53edd"
+    },
+    "brand_integration_base": "9daa6cd1237150ccf59c44233926e1090de38e11",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/sync-efficiency-20261022/before.bundle",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/efficiency-20261022",
+    "scope": "User-requested workflow optimization: bounded review, serial delivery, lock-free status, explicit bounded shared Go cache; no business changes or source synchronization"
+  },
+  "review_cleanup_2026_10_23": {
+    "previous_tips": {
+      "main": "1f640f558e3ee385589ec42058a3fd52cee597e5",
+      "TapModels": "8ab0655b8d545ebac82bc0f2c21b7efb27ecf6ec",
+      "tokensavy": "cbe3a2129c5df01b73e7b7ea747093fadac610aa"
+    },
+    "official": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "brand_integration_base": "1f640f558e3ee385589ec42058a3fd52cee597e5",
+    "report": "docs/code-review/2026-10-23.md",
+    "backup": "/Users/luhonglin/Git/sub2api-review-20261023/before.bundle",
+    "evidence": "/Users/luhonglin/Git/sub2api-review-20261023",
+    "scope": "First review batch: Key export management scope, stateless Chat conversion, test fixture tags, orphan Ops component and obsolete timing helper; no release/deployment/migration; broader review remains incomplete as listed in report."
+  },
+  "ranxi_sync_2026_10_23": {
+    "previous_tips": {
+      "main": "be45de6e9e628a4e3292fe307be01aa14aa431aa",
+      "TapModels": "0030630992d142bc56daaad6eb1750f01af0e391",
+      "tokensavy": "442161b982eea3b6aba4e533fb69d106864fbe9f"
+    },
+    "source": "ranxi2001/sub2api",
+    "observed": "ffb547127bb6cbccf523a3098e65b9e282d9c785",
+    "adopted": [
+      "8ff32b566",
+      "d71123389",
+      "09faea758"
+    ],
+    "adapted": [
+      "98f7a7980",
+      "f79b27f48"
+    ],
+    "scope": "Idle moderation workers; BPS external context is not executed history but still forbids regeneration; optional dev trusted-proxy environment. No role topology, safety injection or account operations imported."
+  },
+  "usage_first_event_display_2026_10_23": {
+    "previous_tips": {
+      "TapModels": "393a6b19297f26b4e8d8f72e56048daebac13ebf",
+      "main": "87c44f4e74de9c7a6788a251b3f3e4eb4cbb8709",
+      "tokensavy": "8b309c9bf0312685adb2db969e0c86b97a4900dd"
+    },
+    "brand_integration_base": "87c44f4e74de9c7a6788a251b3f3e4eb4cbb8709",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "scope": "Keep existing first-token label; use first_event_ms for primary latency and color. Retain all detail stages, exports, historical values, and branding. Frontend only; no release/deployment/migration.",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/first-response-20261023",
+    "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/first-response-20261023/recovery.bundle"
+  },
+  "latency_detail_colors_2026_10_23": {
+    "previous_tips": {
+      "TapModels": "f37df85453b0b81e66706cc9c441fb0bdc4670ed",
+      "main": "93298ad6400f5a838e0cbf66cb7cca8deca5adb6",
+      "tokensavy": "5a50e9f663f0d870f7dcb33e3bbc912af28c59bc"
+    },
+    "brand_integration_base": "93298ad6400f5a838e0cbf66cb7cca8deca5adb6",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "scope": "Remove unified latency explanation from the popover and all locale keys; reuse existing severity colors in dark details. Preserve first-token label/event value, thresholds, legacy hints, billing and brands. No release/deployment/migration.",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/latency-detail-colors-20261023",
+    "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/latency-detail-colors-20261023/recovery.bundle"
+  },
+  "upstream_tps_2026_10_23": {
+    "previous_tips": {
+      "TapModels": "9c891e00acd7844dfc2234a55dc97ef510966951",
+      "main": "b5b2b818509ccd393063d417e9f61a18fa65ab52",
+      "tokensavy": "97f0d27b03973507013b5931f2140ac1624d39fb"
+    },
+    "brand_integration_base": "b5b2b818509ccd393063d417e9f61a18fa65ab52",
+    "upstream_commit": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "scope": "Restore official formatUsageOutputRate using output_tokens * 1000 / duration_ms. Remove unified timing dependency; preserve first-event display, latency details/colors, billing and brands. No release/deployment/migration.",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/upstream-tps-20261023",
+    "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/upstream-tps-20261023/recovery.bundle"
+  },
+  "minimum_verification_2026_10_23": {
+    "previous_tips": {
+      "main": "92fea3bf3def58f6e8956a041a899b0ae7666f20",
+      "TapModels": "4ce86750493b0f02b9667e5a118d3186fc1e47d2",
+      "tokensavy": "d8e32d4e3d9f45bf1265f6db5909693d69a8761a"
+    },
+    "official": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "scope": "Policy and local sync-upstream Skill only: ordinary changes preserve baseline; minimum sufficient risk checks; no automatic Actions; no runtime changes",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/minimal-validation-20261023"
+  },
+  "vendor_auth_preflight_2026_10_23": {
+    "previous_tips": {
+      "main": "8780dfd25e792ad66d390eb2db1959d0eb604ec4",
+      "TapModels": "706100db207af0b9d5ce3349ed6d5a6e603f7ae9",
+      "tokensavy": "10af6500e6c64c8ed8702c858da18b185f26b955"
+    },
+    "brand_integration_base": "8780dfd25e792ad66d390eb2db1959d0eb604ec4",
+    "source": "Local supplier OAuth incident review; shared native provider clients preserved",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/vendor-auth-review-20261023/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/vendor-auth-review-20261023",
+    "scope": "Identity-key preflight and restart UX; no release/deployment/migration; separately authorized TapModels one-setting repair recorded in external evidence"
+  },
+  "vendor_platform_colors_2026_10_23": {
+    "previous_tips": {
+      "main": "2427b3579ccd8beca140e9aa61c880f4f51a6040",
+      "TapModels": "4ee023db468360fcbba8eb88f78c1b17a7beebaf",
+      "tokensavy": "a54844763cd998aa693974b10df80f3316f3f0ee"
+    },
+    "brand_integration_base": "2427b3579ccd8beca140e9aa61c880f4f51a6040",
+    "source": "Local supplier/operations UI consistency request",
+    "scope": "Shared group badges and Claude/OpenAI account colours; no API/config/migration/release/deployment",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/vendor-platform-colors-20261023/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/vendor-platform-colors-20261023"
+  },
+  "cpr_flow_adaptation_2026_10_23": {
+    "previous_tips": {
+      "main": "69a07cf73bbd726d7225657f7199933db4550714",
+      "TapModels": "552c1a0bdf99d2266b806c39fafbceb04729ebf0",
+      "tokensavy": "ac4681c7fcdcab4820da09ba7e17a89299fb80a3"
+    },
+    "brand_integration_base": "69a07cf73bbd726d7225657f7199933db4550714",
+    "implementation_base": "2427b3579ccd8beca140e9aa61c880f4f51a6040",
+    "official": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "reference": {
+      "repository": "zyycn/codex-proxy-rs",
+      "commit": "bea002ae9b8b4cc5583cd55874513646a62fa31b",
+      "author": "Zyy",
+      "adoption": "Design reference; implemented in existing Go/Vue paths, no source merge or dependency upgrade"
+    },
+    "report": "docs/codex-proxy-rs-adaptation-2026-10-23.md",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cpr-flow-20261023/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/cpr-flow-20261023",
+    "scope": "Shared request/recovery simplification, atomic revisioned settings with obsolete writer removal, refresh staggering, replacement quota forecast, redacted diagnostics; no release/deployment/migration"
+  },
+  "user_creator_name_2026_10_23": {
+    "previous_tips": {
+      "main": "8d31b8d064c20209f46d566f2d19e311107a8630",
+      "TapModels": "e3970c0cb69949d864563516df139ba7b28f3ca9",
+      "tokensavy": "e720247c6bd590758cd673f31ad56bea15f11ad6"
+    },
+    "brand_integration_base": "8d31b8d064c20209f46d566f2d19e311107a8630",
+    "source": "Local user-management creator display request",
+    "scope": "Creator username first, ID fallback; admin-only response metadata; no API endpoint/config/migration/release/deployment",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/user-creator-name-20261023/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/user-creator-name-20261023"
+  },
+  "source_scope_2026_10_23": {
+    "previous_tips": {
+      "main": "0774e52fe9fd53db759f4d51223a93aee1da1c81",
+      "TapModels": "a1675179dc11040124459db147e66394d0082d18",
+      "tokensavy": "d7811df4529120c35a63eb00a709b7886c5d3b0c"
+    },
+    "official": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "default_sources": [
+      "Wei-Shaw/sub2api",
+      "ranxi2001/sub2api",
+      "zyycn/codex-proxy-rs",
+      "QuantumNous/new-api"
+    ],
+    "sub4api": "historical evidence; existing features preserved",
+    "scope": "Policy and installed Skill only; no source fetch/review or runtime change",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/source-scope-20261023"
+  },
+  "cpr_flow_completion_2026_10_23": {
+    "previous_tips": {
+      "main": "2a3617dc82c5a30eb77a09976e8cfff09ae4edcc",
+      "TapModels": "cb7aa80229173e32813bc7498daf43d6edf2d725",
+      "tokensavy": "6b62616b96b32fc8609eac2a6748bd59ee877fbd"
+    },
+    "brand_integration_base": "2a3617dc82c5a30eb77a09976e8cfff09ae4edcc",
+    "implementation_base": "0774e52fe9fd53db759f4d51223a93aee1da1c81",
+    "official": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "reference": "zyycn/codex-proxy-rs@bea002ae9b8b4cc5583cd55874513646a62fa31b (Zyy), design reference only",
+    "report": "docs/codex-proxy-rs-adaptation-2026-10-23.md",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cpr-completion-20261023/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/cpr-completion-20261023",
+    "scope": "Shared native preparation, recovery ownership, bounded WS prelude and async observation; retain contracts, no new public endpoints/config/workers, no release/deployment/migration"
+  },
+  "admin_funding_retirement_20261023": {
+    "source": "explicit user requests and transfer-model confirmation",
+    "reviewed_main": "6251ba0d3446323a31920b976341cb87d235c415",
+    "official_base": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "scope": [
+      "main",
+      "TapModels",
+      "tokensavy"
+    ],
+    "features": [
+      "persistent creator ownership",
+      "atomic admin balance transfer",
+      "retire redemption, registration invitations and affiliate rewards"
+    ],
+    "migration": "289_user_creator_ownership.sql; no production migration in this delivery",
+    "historical_storage": "retained for payment idempotency and balance history",
+    "production_correction": "separate explicit approval; original credit preserved and offset"
+  },
+  "implementation_comparison_2026_10_23": {
+    "previous_tips": {
+      "main": "b15ff3542066c970fb7c37cc522d41bad4e7762e",
+      "TapModels": "ffba28e5ef137743488d9c31085d619f817421ba",
+      "tokensavy": "ee8f4b53416ebde4a3476ef9a7cec3b16d7a6fa6"
+    },
+    "official": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "scope": "Policy and local Skill only; compare existing algorithms and applicability, separate correctness from benchmark claims; no runtime change",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/implementation-comparison-20261023"
+  },
+  "portal_version_copy_20261023": {
+    "source": "user screenshot request",
+    "reviewed_main": "3c9bed71c60a47054e75f3d5f7ae4f1ec5da7431",
+    "scope": [
+      "main",
+      "TapModels",
+      "tokensavy"
+    ],
+    "change": "remove two redundant version popover help paragraphs and their locale keys; runtime version, match state and updater unchanged"
+  },
+  "vendor_account_parity_20261023": {
+    "source": "user account-state and usage screenshots",
+    "reviewed_main": "ad801af6ab44363c092a7268fd06b24118624a26",
+    "scope": [
+      "main",
+      "TapModels",
+      "tokensavy"
+    ],
+    "change": "reuse operations status component and native quota batch service; safe supplier projections; compact token labels and model brand colours; no fabricated outcome or Claude authorization history",
+    "interfaces": 0,
+    "configuration": 0,
+    "new_read_fields": [
+      "anthropic_status",
+      "extra (whitelisted model limits and overages only)",
+      "platform_schedulable"
+    ],
+    "migration": null
+  },
+  "cpr_protocol_optimization_2026_10_23": {
+    "previous_tips": {
+      "main": "b43ce5c4462f0b3ad2af5b52786a3714827b43de",
+      "TapModels": "6ef3172646f8a051c9125a69fc6ab42d856ee34f",
+      "tokensavy": "f6096d1991be67d7d17fc433fe6a6e1f341205b0"
+    },
+    "implementation_base": "3c9bed71c60a47054e75f3d5f7ae4f1ec5da7431",
+    "brand_integration_base": "b43ce5c4462f0b3ad2af5b52786a3714827b43de",
+    "official": "dba770d56a0ee0ae5bad1b3dc5e11614d323163c",
+    "reference": {
+      "repository": "zyycn/codex-proxy-rs",
+      "commit": "bea002ae9b8b4cc5583cd55874513646a62fa31b",
+      "author": "Zyy",
+      "adoption": "Design comparison; existing Go gateway paths only, no source merge or dependency upgrade"
+    },
+    "official_codex_reference": "9a8a85bc539325f2819dd0717f88b6ba6286495e",
+    "report": "docs/codex-proxy-rs-adaptation-2026-10-23.md",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cpr-protocol-20261023",
+    "scope": "Shared native interrupt/headers/recovery and unsent transport selection; bounded zstd concurrency and final-byte reuse; incremental SSE scanning and complete-frame handoff; remove replaced shims/copies/parsers. Preserve billing, BPS/SIWC and brands. No release/deployment/migration."
+  },
+  "proportional_forecast_20261023": {
+    "source": "user explicitly requested proportional estimates without labels",
+    "reviewed_main": "1263ceed967b198c94bbe8755a0cd50833456853",
+    "scope": [
+      "main",
+      "TapModels",
+      "tokensavy"
+    ],
+    "change": "restore Wei-Shaw window_stats.cost * 100 / utilization; remove separate backend sample query and forecast metadata/labels",
+    "reviewed_author_main": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "interfaces": 0,
+    "configuration": 0,
+    "migration": null
+  },
+  "four_source_sync_20261023": {
+    "previous_tips": {
+      "main": "06b51d712f29a58ebf02244a80dadea7c8f27673",
+      "TapModels": "d3df0999e5ed86bcb99d657cb460978c9ae2393a",
+      "tokensavy": "b9e106b99223467139c13708a8f1ec8ea354a9dd"
+    },
+    "brand_integration_base": "06b51d712f29a58ebf02244a80dadea7c8f27673",
+    "official": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "ranxi_observed": "c5f9b0ec5f573b60e699b4e94b31bc442d456ea8",
+    "new_api_observed": "33c61a24234aa20cb10e8a644304322c476361de",
+    "cpr_observed": "6b4b8faaf41c03f7da345bb9679bc0d6d204760a",
+    "decision_record": "docs/upstream-sync-2026-10-23.md",
+    "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/four-source-20261023/before.bundle",
+    "scope": "Bounded deltas and documented prior gaps; no claim of whole-history review; no sub4api fetch; no release/deploy/migration"
+  },
+  "protocol_chain_2026_10_23": {
+    "previous_tips": {
+      "main": "bd58b726023e0d02bd0ddec43feaf16c2e3c93e2",
+      "TapModels": "953a75dfeb8b72c28d1d547afe2637098385258d",
+      "tokensavy": "3a775da97388f16dba20cc3fad05ee60fe085e0a"
+    },
+    "brand_integration_base": "bd58b726023e0d02bd0ddec43feaf16c2e3c93e2",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/protocol-chain-20261023/before.bundle",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/protocol-chain-fixes-20261023",
+    "scope": "Shared protocol bounds, terminal/partial usage, detached completion capacity, Gemini/Grok deadlines, TTS and image incremental delivery; no release/deployment/migration"
+  },
+  "vendor_pool_table_20261023": {
+    "source": "user requests: unified supplier tables, verified authorization profiles, site-wide summary and promo-code removal",
+    "reviewed_main": "441f231efa55e5978b9dd6e0d83f88d2c5b57b14",
+    "scope": [
+      "main",
+      "TapModels",
+      "tokensavy"
+    ],
+    "interfaces_added": 0,
+    "interfaces_removed": 7,
+    "configuration_added": 0,
+    "migration": null,
+    "font_source": "rsms/inter e3a3d4c57d5ecc01453a575621882a384c1995a3 / SIL OFL 1.1"
+  },
+  "four_source_followup_20261023": {
+    "previous_tips": {
+      "main": "eae450da64c6abfabdb3ab0889ef6232cae9142b",
+      "TapModels": "3792751ec7237783d580d9d5ec271e8e0afb7a27",
+      "tokensavy": "75b0df24f05803bc4a0a279118c152145bff20c2"
+    },
+    "brand_integration_base": "eae450da64c6abfabdb3ab0889ef6232cae9142b",
+    "official": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "ranxi_observed": "5e9bbe994c907de1c569827e94796473f531097f",
+    "ranxi_reviewed_from": "c5f9b0ec5f573b60e699b4e94b31bc442d456ea8",
+    "new_api_observed": "33c61a24234aa20cb10e8a644304322c476361de",
+    "cpr_observed": "605354c8611dcf88fcc52a1f25d52c669b0f6169",
+    "cpr_reviewed_from": "6b4b8faaf41c03f7da345bb9679bc0d6d204760a",
+    "decision_record": "docs/upstream-sync-2026-10-23-followup.md",
+    "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/incremental-20261023-2/before.bundle",
+    "scope": "Bounded deltas and prior evidence; retained deferred product choices; no full-history claim, release, deployment or database migration"
+  },
+  "vendor_account_entry_20261023": {
+    "source": "user supplied ccmax screenshots, confirmed email copy behavior and quota display feedback",
+    "reviewed_main": "e2fba09ff1a2f2c6dbb46ec9b4e04fa8e5fa17f8",
+    "scope": [
+      "main",
+      "TapModels",
+      "tokensavy"
+    ],
+    "interfaces_added": 0,
+    "configuration_added": 0,
+    "migration": null,
+    "setup_token_docs": "https://code.claude.com/docs/en/authentication#generate-a-long-lived-token"
+  },
+  "siwc_retirement_cloud_design_20261023": {
+    "previous_tips": {
+      "main": "560ea2208bbe492e52ad14d13a87935de2663a77",
+      "TapModels": "3c4076ca5ae96bdbf84ebf1fb65b2500e90459d4",
+      "tokensavy": "6d8bd55448a62d481f380d9255a46076745d9f12"
+    },
+    "brand_integration_base": "560ea2208bbe492e52ad14d13a87935de2663a77",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/20261023-remove-siwc-cloud-design/recovery.bundle",
+    "scope": "Complete SIWC runtime retirement; Cloud design only; preserve historical SQL/data and read-only usage labels; no release/deployment/migration",
+    "interfaces_added": 0,
+    "interfaces_removed": 4,
+    "configuration_added": 0,
+    "configuration_removed": 1,
+    "new_execution_paths": 0,
+    "design": "docs/OPENAI_CLOUD_DESIGN.md",
+    "baseline_failure": "Three canceled-context image contracts reproduced unchanged on 2526b0b; exact names and evidence in diagnostics.json"
+  },
+  "cpr_further_mechanisms_20261023": {
+    "previous_tips": {
+      "main": "b598e1b70af126f58aaad82cc29498ed7c1e5cf2",
+      "TapModels": "fdf1b0a351ebec75a4aafc3039a3ad627a4df9d2",
+      "tokensavy": "d5225fb4b6649093071c2e8dc8990952e7a3741c"
+    },
+    "brand_integration_base": "b598e1b70af126f58aaad82cc29498ed7c1e5cf2",
+    "implementation_base": "e2fba09ff1a2f2c6dbb46ec9b4e04fa8e5fa17f8",
+    "official": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "reference": {
+      "repository": "zyycn/codex-proxy-rs",
+      "commit": "c7af86e033040946fdad8676bd4b6ccb98aa8a5d",
+      "author": "Zyy",
+      "adoption": "Read-only fixed Git objects; design reference adapted into existing Go/Vue paths; no source merge or dependency upgrade"
+    },
+    "scope": "Shared native OAuth refresh CAS and valid-token fallback, Retry-After deadlines, cancelable fair retention cleanup, browser session isolation; no release/deployment/production migration",
+    "report": "docs/codex-proxy-rs-adaptation-2026-10-23.md",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cpr-further-20261023",
+    "interfaces_added": 0,
+    "internal_capabilities_added": 1,
+    "internal_methods_added": 3,
+    "configuration_added": 0,
+    "new_execution_paths": 0
+  },
+  "vendor_account_tooltip_20261023": {
+    "source": "user supplied compact account tooltip reference and requested admin-equivalent proxy quality interaction and complete OAuth instructions",
+    "reviewed_main": "cfd51a40eaa51cfd9a2740cf81e856beb50b8fd3",
+    "scope": [
+      "main",
+      "TapModels",
+      "tokensavy"
+    ],
+    "interfaces_added": 0,
+    "configuration_added": 0,
+    "migration": null
+  },
+  "personal_recharge_history_20261023": {
+    "previous_tips": {
+      "main": "1a0255aea53e4ae84198b70f39fac699574cb1e5",
+      "TapModels": "648e542aa103bef611e60851c2e6004d92ab5d0b",
+      "tokensavy": "e2fb7acfde1c6833bce19301f09c088c6f377b13"
+    },
+    "brand_integration_base": "1a0255aea53e4ae84198b70f39fac699574cb1e5",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "source": "User-confirmed personal recharge history table and menu for all three roles; current JWT account only",
+    "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/self-recharge-history-20261023/recovery.bundle",
+    "scope": [
+      "main",
+      "TapModels",
+      "tokensavy"
+    ],
+    "interfaces_added": 1,
+    "internal_reader_interfaces_added": 1,
+    "configuration_added": 0,
+    "new_execution_paths": 1,
+    "migration": null,
+    "verification": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/self-recharge-history-20261023/verification-receipt.json"
+  },
+  "cloud_gateway_20261024": {
+    "implementation_base": "4b34d4a90c12a6490f19c792a79be4d7751763c2",
+    "integrated_main": "42fb455892fa408eeb818ae35c5af59ae63b1390",
+    "official": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "scope": [
+      "main",
+      "TapModels",
+      "tokensavy"
+    ],
+    "source": "User requested Cloud protocol; official App Server documentation, installed client schemas and explicitly authorized live synthetic probes; local Go/Vue implementation without dependency upgrades",
+    "interfaces_added": 4,
+    "configuration_added": 2,
+    "new_execution_paths": 1,
+    "migration": "291_openai_cloud_authorization.sql",
+    "report": "docs/OPENAI_CLOUD_DESIGN.md",
+    "evidence": ".release/upstream-sync/20261023-cloud-gateway/",
+    "enabled_by_default": false,
+    "boundary": "Native OAuth single token authority; full per-model capability and settlement gate; no SIWC runtime, release, deployment or production migration"
+  },
+  "source_scope_2026_10_24": {
+    "previous_tips": {
+      "main": "73516d303c965158c36a32e9de69036d2943aa75",
+      "TapModels": "f19bd6b64c21914c40acf051d30173faf01d6ae3",
+      "tokensavy": "0483d28986a22fdfe7223607fdeb8f19b0374a45"
+    },
+    "official": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "defaults": [
+      "Wei-Shaw/sub2api",
+      "ranxi2001/sub2api",
+      "zyycn/codex-proxy-rs"
+    ],
+    "explicit_only": [
+      "QuantumNous/new-api",
+      "MACOS-DO/sub4api"
+    ],
+    "skill_sha256": {
+      "SKILL.md": "041d8e81428b468bf32d20b2a780ccc68f42cda9188998cfd8a018d9e07fe95e",
+      "references/source-selection.md": "d88f3617d094c11c62f92fd841b03b1850cf474f4b5a532fd96c806b4a86f90c",
+      "agents/openai.yaml": "6dcdfeefd88f86cc59cd0b5335d8754d6f34c9c47aa0127a2d6296e9a5ecb33d"
+    },
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/source-scope-20261024",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/source-scope-20261024"
+  },
+  "five_source_scope_2026_10_24": {
+    "previous_tips": {
+      "main": "9c7b07c807f04a79a639d16abd687a93a44861d3",
+      "TapModels": "0000f41739d47c2c67eb6b16cfbc0e1bc3fc4fb1",
+      "tokensavy": "94691a7d1dd30a1fde98e1ec261c3802bed0052f"
+    },
+    "official": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "defaults": [
+      "Wei-Shaw/sub2api",
+      "ranxi2001/sub2api",
+      "QuantumNous/new-api",
+      "zyycn/codex-proxy-rs",
+      "dofastted/vm2api"
+    ],
+    "explicit_only": [
+      "MACOS-DO/sub4api"
+    ],
+    "skill_sha256": {
+      "SKILL.md": "db74cbc0dd0559cef9930dc532827ac47b929041ea61dca30c35832288f894d4",
+      "references/source-selection.md": "1a581a38d30e5702a5d6d47b304b7c110ad13e816894005219f43f28cb7c2d54",
+      "agents/openai.yaml": "39624d80336b847c34e9f7d9fb73155364cd1536a038dbedef47c0aafd99d5ac"
+    },
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/five-source-20261024",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/five-source-20261024"
+  },
+  "five_source_sync_20261024": {
+    "previous_tips": {
+      "main": "a9dd4f89be4488c3c89f266bee9e901c36dedf17",
+      "TapModels": "f71ab31102f2a08764659add47a80a6ca407d94b",
+      "tokensavy": "0d96c51d25dde1b5361a55da4561c10b4fc1ff77"
+    },
+    "brand_integration_base": "a9dd4f89be4488c3c89f266bee9e901c36dedf17",
+    "official": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "sources": {
+      "Wei-Shaw/sub2api": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+      "ranxi2001/sub2api": "7c6851cae25518f6e8e2541fc5394aad7c3c426c",
+      "QuantumNous/new-api": "33c61a24234aa20cb10e8a644304322c476361de",
+      "zyycn/codex-proxy-rs": "e033e21994d08e86d4df71cf5c72e374a7a09987",
+      "dofastted/vm2api": "3c45c6852258cd27024330f85e92e9f3d0e14fa1"
+    },
+    "review_scope": "Official/ranxi/New API unchanged; CPR 76291f44..e033e219; vm2api topical six-capability 33e1f0a6 and telemetry819ee2a7 comparisons, not whole-history watermark",
+    "decision_record": "docs/upstream-sync-2026-10-24.md",
+    "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/sync-five-20261024/before.bundle",
+    "public_interfaces_added": 0,
+    "configuration_added": 1,
+    "new_execution_paths": 0
+  },
+  "cloud_review_fixes_2026_10_24": {
+    "previous_tips": {
+      "main": "cf591e30f2c149e508692af2ba232a420fe6beb2",
+      "TapModels": "fa441e543ad6f71a83a0abb0ac4dcfc5c08570c8",
+      "tokensavy": "5ccfa244aeec9d14de9a3914aa983e971584947e"
+    },
+    "brand_integration_base": "cf591e30f2c149e508692af2ba232a420fe6beb2",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cloud-review-fixes-20261024/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/cloud-review-fixes-20261024",
+    "scope": "Cloud Responses JSON/SSE/WS ingress, errors/health, capacity/keepalive, settings verification and audited settlement recovery; migration 292 requires re-verification; no live Cloud, production deployment or migration"
+  },
+  "credential_response_fix_2026_10_24": {
+    "previous_tips": {
+      "main": "ac6e7d95019145c46448910d6a126374e6d3fd7e",
+      "TapModels": "a2b651cce451b2945bcac70f797090419fe03ee9",
+      "tokensavy": "c60cd4abed1f64838e088cd562a6f7eea761955e"
+    },
+    "brand_integration_base": "ac6e7d95019145c46448910d6a126374e6d3fd7e",
+    "scope": "Typed Grok-only credential response; safe generic fallback for other account-auth failures. Preserves concurrently published Cloud changes.",
+    "evidence": ".release/upstream-sync/credential-error-fix-20261024/"
+  },
+  "cloud_boundary_fixes_2026_10_24": {
+    "previous_tips": {
+      "main": "7ca8ad64f6270530b576e8aa99e74c511259eb44",
+      "TapModels": "0ee0f66a448b4bb51342004ce464262dd4c1982a",
+      "tokensavy": "9392fabf0c7cab6f3b35a1f58ddcead1abd95552"
+    },
+    "brand_integration_base": "7ca8ad64f6270530b576e8aa99e74c511259eb44",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cloud-boundary-fixes-20261024/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/cloud-boundary-fixes-20261024",
+    "scope": "Cloud cancellation/dispatch, local WS warmup, account-wide unresolved consumption, unstarted reservations, semantic first output, latest-attempt verification and bounded envelopes; no new public API/settings/migration, live Cloud or production deployment"
+  },
+  "full_release_notes_20261024": {
+    "previous_tips": {
+      "main": "5217fd4db08e44f70128ecaa40a56129f8246cc5",
+      "TapModels": "e8b53ffe2287ca2e772da936639f0363b179749b",
+      "tokensavy": "27ef258cbb6e066c3a478a5ba0ae7b55073a6459"
+    },
+    "brand_integration_base": "5217fd4db08e44f70128ecaa40a56129f8246cc5",
+    "official": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "reference": "https://github.com/holeenlu/vm2api/releases/tag/v1.3.225.0",
+    "scope": "Complete current release notes from every released commit; source-change and section guards; relative links pinned; incremental notes supplement only. No release/deployment/migration.",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/full-release-notes-20261024",
+    "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/full-release-notes-20261024/before.bundle",
+    "interfaces_added": 0,
+    "configuration_added": 0,
+    "new_business_execution_paths": 0
+  },
+  "cloud_client_metadata_2026_10_24": {
+    "previous_tips": {
+      "main": "ba43ef4ada19d9d00d212f164947015e1a9d096a",
+      "TapModels": "4417b3263d4d50a8e12fbaa42b41f01da0555d13",
+      "tokensavy": "71fea50aea8f8db8b47217b05e905183393810b1"
+    },
+    "brand_integration_base": "ba43ef4ada19d9d00d212f164947015e1a9d096a",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cloud-client-metadata-20261024/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/cloud-client-metadata-20261024",
+    "scope": "Cloud bounded client_metadata compatibility for HTTP/SSE/WS, bounded encrypted-reasoning evidence retry, safe archival diagnostics. Reference: local openai/codex 7d592f6dd9988e349e3164feaa21d0fc14bbac8a and official reasoning/App Server docs. No new public API, setting, migration or independent execution path; no live Cloud or production changes."
+  },
+  "cloud_manual_test_policy_2026_10_24": {
+    "previous_tips": {
+      "main": "06ee48ed57b8a53c3bb747b616e66098d48d9f7a",
+      "TapModels": "8733e74ed5539cebf57253e188257a95aeaa3895",
+      "tokensavy": "a2f792d38537b9807c10c58e65ac0b47d10e95f1"
+    },
+    "brand_integration_base": "06ee48ed57b8a53c3bb747b616e66098d48d9f7a",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cloud-manual-test-policy-20261024/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/cloud-manual-test-policy-20261024",
+    "scope": "Cloud account-level precedence preserving BPS/native routing, remove capability admission and separate model allowlist, manual account test only, preserve ordinary model policy and settlement ownership; migration 293 removes obsolete evidence and BPS mutual exclusion; no live Cloud, release, production deployment or migration"
+  },
+  "cloud_final_audit_2026_10_24": {
+    "previous_tips": {
+      "main": "59b3a928f37647ee990e208af8856d52e2d2fe6c",
+      "TapModels": "3e4a90e09b461720e9738cdf0e8d6b18d9c61851",
+      "tokensavy": "31f393ef0b7ba19a298d1b20b88bb3c65753aa76"
+    },
+    "brand_integration_base": "59b3a928f37647ee990e208af8856d52e2d2fe6c",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cloud-final-audit-20261024/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/cloud-final-audit-20261024",
+    "scope": "Cloud requirement audit follow-up: synchronize reauthorization UI selection, fence late BPS 403 disable/group actions after Cloud selection, preserve Cloud eligibility and protocol in scheduler metadata and rebuild old projections; no new protocol, config, migration, live Cloud call, release or deployment"
+  },
+  "cloud_native_switch_2026_10_24": {
+    "previous_tips": {
+      "main": "135fd58f17fa13e6f26ae3ff2155b5767186c945",
+      "TapModels": "c7d88281c1a5b651ccd071fb085ba8b32e62badb",
+      "tokensavy": "f6805022065f3f966bc510e211c8ed8c56eab845"
+    },
+    "brand_integration_base": "135fd58f17fa13e6f26ae3ff2155b5767186c945",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cloud-native-switch-20261024/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/cloud-native-switch-20261024",
+    "scope": "Reuse native Codex OAuth directly; automatic signed-identity execution binding, retire redundant Cloud login/callback/disconnect, compact single-account and opt-in bulk switches, migration294 preserves identity and settlement fences; retain independently published Cloud failover and balance-column work; no live calls, release/deployment/production migration"
+  },
+  "cloud_transport_review_2026_10_24": {
+    "previous_tips": {
+      "main": "dfaefc46899bee49f55ab9aef4c6680392c8ecfd",
+      "TapModels": "95a20da037e7093823f53988fa93d8632b040794",
+      "tokensavy": "e62c5575d014923eccce60fe6ad5c41bb351d829"
+    },
+    "brand_integration_base": "dfaefc46899bee49f55ab9aef4c6680392c8ecfd",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cloud-transport-review-20261024/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/cloud-transport-review-20261024",
+    "scope": "Native ingress normalization, cache hint and summary/verbosity mapping, mixed HTTP/SSE/WS continuation, drain/budget/client policy/stream failure and cyber settlement classification; no release, deployment, SQL migration or production calls",
+    "codex_protocol_reference": "openai/codex@7d592f6dd9988e349e3164feaa21d0fc14bbac8a"
+  },
+  "cloud_retrospective_2026_10_24": {
+    "previous_tips": {
+      "main": "032cdf1d0fd67e43b444b9aec04cec707986e4f5",
+      "TapModels": "41f735fe1deea537f55549905dcd2146dc5580d1",
+      "tokensavy": "40b9139090786307e8abb6938fae05ef979510bf"
+    },
+    "brand_integration_base": "032cdf1d0fd67e43b444b9aec04cec707986e4f5",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cloud-retrospective-20261024/before.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/cloud-retrospective-20261024",
+    "scope": "Whole reasoning inheritance after completion, cancellation terminal ownership, shared HTTP/SSE write guard and flush-error attribution; sanitized real Codex 0.159.3 HTTP/WS request fixture and engineering retrospective; no new product gates, endpoints, migrations, production requests or deployment"
+  },
+  "cloud_final_repair_2026_10_24": {
+    "previous_tips": {
+      "main": "394d69d48067a2fd1238dec95c887cd96c100bce",
+      "TapModels": "0c1ce8fa95eb446c3bc0d118f74184921da6bfcc",
+      "tokensavy": "bb9d9291f72a3120c7fbb85b97f215f77ef4f683"
+    },
+    "brand_integration_base": "394d69d48067a2fd1238dec95c887cd96c100bce",
+    "upstream_commit": "5c185c5c5d4f5e409e2139806e0964ae944e03e8",
+    "backup": "/Users/luhonglin/.codex/backups/sub2api/cloud-final-repair-20261024/pre-delivery.bundle",
+    "evidence": "/Users/luhonglin/.codex/backups/sub2api/cloud-final-repair-20261024",
+    "scope": "Cloud native ingress and keepalive, serial tools, immutable output history, turn settings, ephemeral and idle lifecycle, persistent settlement archival and telemetry, native model cache and independent Cloud account switch validation; existing BPS business rules unchanged; no release, deployment or production migration"
+  },
+  "five_source_followup_20261024": {
+    "previous_tips": {
+      "TapModels": "6b01624b4e8292d5249676488960007643d93314",
+      "main": "05408e09e96f57cd089f971bcd5dda09acbedc6e",
+      "tokensavy": "f9b9bec5e7d7ed6c2559e83ff1e42104407a3120"
+    },
+    "brand_integration_base": "05408e09e96f57cd089f971bcd5dda09acbedc6e",
+    "official": "37067e8e340e9440d173a92b4faa05e8ce58368f",
+    "sources": {
+      "Wei-Shaw/sub2api": "37067e8e340e9440d173a92b4faa05e8ce58368f",
+      "ranxi2001/sub2api": "cc9e57a933d3aa08b6de62fc4672435c5aaa2d2d",
+      "QuantumNous/new-api": "e835b1bfc43b565d625537830dbfb19328925134",
+      "zyycn/codex-proxy-rs": "a36137bafb340c0869810f2f174be15e839fbff0",
+      "dofastted/vm2api": "8f3b6bab42274765d4a246740c238d658e3f6e23"
+    },
+    "report": "docs/upstream-sync-2026-10-24-followup.md",
+    "backup": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/sync-five-followup-20261024/before.bundle",
+    "evidence": "/Users/luhonglin/Git/sub2api/.release/upstream-sync/sync-five-followup-20261024",
+    "scope": "Official scoped admin keys adapted to super-admin JWT, native policy and supplier guards; Gemini imageConfig; checked recovery invalidation; user-approved batch owned money/precision/receipt safety. No release/deployment/migration or historical money correction.",
+    "interfaces_added": 6,
+    "configuration_added": 0,
+    "migrations_added": [
+      "247_scoped_admin_api_keys.sql",
+      "297_batch_image_owned_money.sql"
+    ]
+  }
+}

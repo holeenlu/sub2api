@@ -22,6 +22,18 @@ const (
 	FieldUpdatedAt = "updated_at"
 	// FieldDeletedAt holds the string denoting the deleted_at field in the database.
 	FieldDeletedAt = "deleted_at"
+	// FieldCreatedBy holds the string denoting the created_by field in the database.
+	FieldCreatedBy = "created_by"
+	// FieldCreatedByName holds the string denoting the created_by_name field in the database.
+	FieldCreatedByName = "created_by_name"
+	// FieldCreatedByRole holds the string denoting the created_by_role field in the database.
+	FieldCreatedByRole = "created_by_role"
+	// FieldVendorID holds the string denoting the vendor_id field in the database.
+	FieldVendorID = "vendor_id"
+	// FieldVendorPausedAt holds the string denoting the vendor_paused_at field in the database.
+	FieldVendorPausedAt = "vendor_paused_at"
+	// FieldVendorNotes holds the string denoting the vendor_notes field in the database.
+	FieldVendorNotes = "vendor_notes"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
 	// FieldNotes holds the string denoting the notes field in the database.
@@ -134,6 +146,12 @@ var Columns = []string{
 	FieldCreatedAt,
 	FieldUpdatedAt,
 	FieldDeletedAt,
+	FieldCreatedBy,
+	FieldCreatedByName,
+	FieldCreatedByRole,
+	FieldVendorID,
+	FieldVendorPausedAt,
+	FieldVendorNotes,
 	FieldName,
 	FieldNotes,
 	FieldPlatform,
@@ -194,6 +212,12 @@ var (
 	DefaultUpdatedAt func() time.Time
 	// UpdateDefaultUpdatedAt holds the default value on update for the "updated_at" field.
 	UpdateDefaultUpdatedAt func() time.Time
+	// DefaultCreatedByName holds the default value on creation for the "created_by_name" field.
+	DefaultCreatedByName string
+	// DefaultCreatedByRole holds the default value on creation for the "created_by_role" field.
+	DefaultCreatedByRole string
+	// DefaultVendorNotes holds the default value on creation for the "vendor_notes" field.
+	DefaultVendorNotes string
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
 	// PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
@@ -269,6 +293,36 @@ func ByUpdatedAt(opts ...sql.OrderTermOption) OrderOption {
 // ByDeletedAt orders the results by the deleted_at field.
 func ByDeletedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDeletedAt, opts...).ToFunc()
+}
+
+// ByCreatedBy orders the results by the created_by field.
+func ByCreatedBy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCreatedBy, opts...).ToFunc()
+}
+
+// ByCreatedByName orders the results by the created_by_name field.
+func ByCreatedByName(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCreatedByName, opts...).ToFunc()
+}
+
+// ByCreatedByRole orders the results by the created_by_role field.
+func ByCreatedByRole(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCreatedByRole, opts...).ToFunc()
+}
+
+// ByVendorID orders the results by the vendor_id field.
+func ByVendorID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVendorID, opts...).ToFunc()
+}
+
+// ByVendorPausedAt orders the results by the vendor_paused_at field.
+func ByVendorPausedAt(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVendorPausedAt, opts...).ToFunc()
+}
+
+// ByVendorNotes orders the results by the vendor_notes field.
+func ByVendorNotes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVendorNotes, opts...).ToFunc()
 }
 
 // ByName orders the results by the name field.

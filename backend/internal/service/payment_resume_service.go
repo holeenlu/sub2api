@@ -210,17 +210,6 @@ func (lb *visibleMethodLoadBalancer) SelectInstance(ctx context.Context, provide
 	return lb.inner.SelectInstance(ctx, inst.ProviderKey, paymentType, strategy, orderAmount)
 }
 
-func visibleMethodEnabledSettingKey(method string) string {
-	switch NormalizeVisibleMethod(method) {
-	case payment.TypeAlipay:
-		return SettingPaymentVisibleMethodAlipayEnabled
-	case payment.TypeWxpay:
-		return SettingPaymentVisibleMethodWxpayEnabled
-	default:
-		return ""
-	}
-}
-
 func visibleMethodSourceSettingKey(method string) string {
 	switch NormalizeVisibleMethod(method) {
 	case payment.TypeAlipay:
@@ -260,7 +249,6 @@ func CanonicalizeReturnURL(raw string, srcHost string, srcURL string) (string, e
 	// smuggled into EasyPay-style sign base strings (values are concatenated
 	// unescaped), letting an order-creation signature be replayed as a forged
 	// payment-success callback. See issue #7881.
-	parsed.RawQuery = ""
 	if parsed.Path == "" {
 		parsed.Path = "/"
 	}
@@ -270,6 +258,9 @@ func CanonicalizeReturnURL(raw string, srcHost string, srcURL string) (string, e
 	if !allowedReturnURLHost(parsed.Host, srcHost, srcURL) {
 		return "", infraerrors.BadRequest("INVALID_RETURN_URL", "return_url must use the same host as the current site or browser origin")
 	}
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.User = nil
 	return parsed.String(), nil
 }
 
@@ -323,7 +314,8 @@ func buildPaymentReturnURL(base string, orderID int64, outTradeNo string, resume
 	}
 	parsed.Fragment = ""
 
-	query := parsed.Query()
+	// Only server-owned result fields may enter the provider signing input.
+	query := url.Values{}
 	if orderID > 0 {
 		query.Set("order_id", strconv.FormatInt(orderID, 10))
 	}
