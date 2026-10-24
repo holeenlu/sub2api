@@ -132,3 +132,16 @@ func TestSupplementResponseOutput_NoSyntheticMessageWithoutStreamText(t *testing
 	require.Len(t, resp.Output, 1)
 	assert.Empty(t, resp.Output[0].Content)
 }
+
+func TestResponsesChatSnapshotDoesNotReplayRenumberedText(t *testing.T) {
+	state := NewResponsesEventToChatState()
+	ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_text.delta", OutputIndex: 7, Delta: "already delivered"}, state)
+	chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{{Type: "message", Content: []ResponsesContentPart{{Type: "output_text", Text: "already delivered"}}}}}}, state)
+	for _, chunk := range chunks {
+		for _, choice := range chunk.Choices {
+			if choice.Delta.Content != nil {
+				require.Empty(t, *choice.Delta.Content)
+			}
+		}
+	}
+}
