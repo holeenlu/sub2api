@@ -1,6 +1,6 @@
 # Layout Components
 
-Vue 3 layout components for the Sub2API frontend, built with Composition API, TypeScript, and TailwindCSS.
+Vue 3 layout components for the KDAN frontend, built with Composition API, TypeScript, and TailwindCSS.
 
 ## Components
 
@@ -44,7 +44,6 @@ Navigation sidebar with user and admin sections.
   - Dashboard
   - API Keys
   - Usage
-  - Redeem
   - Profile
 - Admin navigation links (shown only if user is admin):
   - Admin Dashboard
@@ -52,7 +51,6 @@ Navigation sidebar with user and admin sections.
   - Groups
   - Accounts
   - Proxies
-  - Redeem Codes
 - Collapsible sidebar with toggle button
 - Active route highlighting
 - Icons using HTML entities
@@ -194,14 +192,12 @@ Components use HTML entity icons for simplicity:
 - &#128200; Chart (Dashboard)
 - &#128273; Key (API Keys)
 - &#128202; Bar Chart (Usage)
-- &#127873; Gift (Redeem)
 - &#128100; User (Profile)
 - &#128268; Admin
 - &#128101; Users
 - &#128193; Folder (Groups)
 - &#127760; Globe (Accounts)
 - &#128260; Network (Proxies)
-- &#127991; Ticket (Redeem Codes)
 
 You can replace these with your preferred icon library (e.g., Heroicons, Font Awesome) if needed.
 

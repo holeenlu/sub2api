@@ -1,0 +1,31 @@
+package service
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestOpsDiagnosticsExportKeepsGapsWithoutSensitivePayloads(t *testing.T) {
+	events := []*OpsUpstreamErrorEvent{
+		{Kind: "http_error", UpstreamStatusCode: 503, Message: "Bearer private-secret", Detail: `{"api_key":"private-secret"}`, UpstreamURL: "https://private-secret.example", DroppedEarlierAttempts: 2},
+		{Kind: opsSchedulingTrace, Detail: `{"dropped_events":3,"events":[{"stage":"queue","account_id":99,"reason":"private-secret","duration_ms":80,"oldest_wait_ms":60}]}`},
+	}
+	raw, err := json.Marshal(events)
+	require.NoError(t, err)
+	detail := &OpsErrorLogDetail{OpsErrorLog: OpsErrorLog{RequestID: "request-1", StatusCode: 502, UserEmail: "private-secret@example.test"}, ErrorBody: "private-secret", UpstreamErrors: string(raw)}
+	out := BuildOpsRequestDiagnostics(detail)
+	encoded, err := json.Marshal(out)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "private-secret")
+	require.NotContains(t, string(encoded), "account_id")
+	require.Equal(t, "recorded_events_only", out.Coverage)
+	require.Equal(t, 2, out.DroppedAttempts)
+	require.Equal(t, 3, out.DroppedDecisions)
+	require.Contains(t, out.Gaps, "truncated_capture")
+	require.Equal(t, int64(80), out.Scheduling[0].DurationMs)
+	require.Equal(t, string(raw), detail.UpstreamErrors, "导出不改写原始诊断记录")
+	detail.UpstreamErrors = "invalid"
+	require.Contains(t, BuildOpsRequestDiagnostics(detail).Gaps, "invalid_events")
+}
