@@ -35,7 +35,6 @@ func TestSelectGrokMediaVideoRequestAccountPreservesOwner(t *testing.T) {
 			var acquired, released []int64
 			cache := &schedulerTestGatewayCache{}
 			cfg := &config.Config{}
-			cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 			cfg.Gateway.Scheduling.StickySessionWaitTimeout = time.Second
 			cfg.Gateway.Scheduling.StickySessionMaxWaiting = 3
 			svc := &OpenAIGatewayService{
