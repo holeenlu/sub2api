@@ -3,15 +3,29 @@ package service
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"net/url"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 var codexToolCapabilityFields = []string{
 	"service_tiers",
 	"supports_search_tool", "apply_patch_tool_type", "comp_hash", "tool_mode", "use_responses_lite",
 	"multi_agent_reasoning_effort", "multi_agent_version",
+	"supports_reasoning_effort_updates",
+}
+
+// One capability declaration for locally generated and proxied directories.
+// The group directory must describe every route that can serve a model.
+var cloudCodexToolCapabilities = map[string]json.RawMessage{
+	"supports_search_tool":              json.RawMessage("false"),
+	"use_responses_lite":                json.RawMessage("false"),
+	"tool_mode":                         json.RawMessage("null"),
+	"multi_agent_version":               json.RawMessage("null"),
+	"multi_agent_reasoning_effort":      json.RawMessage("null"),
+	"service_tiers":                     json.RawMessage("[]"),
+	"supports_reasoning_effort_updates": json.RawMessage("false"),
 }
 
 func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite bool) bool {
@@ -31,7 +45,7 @@ func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite b
 				if json.Unmarshal(value, &tiers) != nil {
 					continue
 				}
-			} else if field == "supports_search_tool" || field == "use_responses_lite" {
+			} else if field == "supports_search_tool" || field == "use_responses_lite" || field == "supports_reasoning_effort_updates" {
 				if !bytes.Equal(value, []byte("true")) && !bytes.Equal(value, []byte("false")) {
 					continue
 				}
@@ -96,6 +110,24 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 		if disabled && bytes.Equal(capabilities["use_responses_lite"], []byte("true")) {
 			capabilities["use_responses_lite"] = json.RawMessage("false")
 		}
+	}
+	// This function receives the mapped upstream model. A BPS relay does not
+	// implement Codex's native encrypted multi-agent message contract, even
+	// when the underlying ChatGPT model advertises it. Explicit nulls override
+	// synced/bundled declarations without disabling ordinary plaintext tools.
+	if account.isExcelBPSUpstreamModelEnabled(modelID) {
+		capabilities["multi_agent_version"] = json.RawMessage("null")
+		capabilities["multi_agent_reasoning_effort"] = json.RawMessage("null")
+		capabilities["use_responses_lite"] = json.RawMessage("false")
+	}
+	// Cloud adapts standard Responses to App Server dynamic tools registered at
+	// thread start. It cannot load client tools mid-turn (tool_search), speak
+	// Responses Lite, host client code mode, carry encrypted multi-agent
+	// messages or honor a non-default service tier. Declaring that makes Codex
+	// send deferred tools directly in the standard shape instead of failing.
+	if account.IsOpenAICloudConfigured() {
+		applyCodexToolCapabilities(capabilities, cloudCodexToolCapabilities, true)
+		return capabilities
 	}
 	// API Astra publicly supports Ultrafast. OAuth must advertise it in its
 	// account manifest; a subscription label alone does not grant the capability.
@@ -288,7 +320,7 @@ func intersectUpstreamModelMetadata(modelID string, candidates []UpstreamModelMe
 		} else if declared {
 			fallback := json.RawMessage("null")
 			switch field {
-			case "supports_search_tool", "use_responses_lite":
+			case "supports_search_tool", "use_responses_lite", "supports_reasoning_effort_updates":
 				fallback = json.RawMessage("false")
 			case "service_tiers":
 				fallback = json.RawMessage("[]")

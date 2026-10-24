@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -123,6 +125,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamPreservesBodyAnd
 		`data: {"type":"message_delta","usage":{"output_tokens":3}}`,
 		"",
 		"data: [DONE]",
+		"",
 		"",
 	}, "\n")
 	upstream := &anthropicHTTPUpstreamRecorder{
@@ -975,6 +978,14 @@ func TestGatewayService_AnthropicOAuthRealClaudeCodeHaiku_PreservesClientHeaders
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	c.Request.Header.Set("User-Agent", "claude-cli/"+claude.CLICurrentVersion+" (external, cli)")
 	c.Request.Header.Set("X-Stainless-Package-Version", "real-client-package")
+	clientHints := map[string]string{
+		"x-claude-code-prompt-id":     "685622eb-8280-4c19-9a09-b447739f2d58",
+		"x-claude-code-request-class": "main",
+		"x-claude-code-agent-type":    "general-purpose",
+	}
+	for key, value := range clientHints {
+		c.Request.Header.Set(key, value)
+	}
 	clientBeta := strings.Join([]string{
 		claude.BetaClaudeCode,
 		claude.BetaOAuth,
@@ -1007,13 +1018,37 @@ func TestGatewayService_AnthropicOAuthRealClaudeCodeHaiku_PreservesClientHeaders
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, c.Request.Header.Get("User-Agent"), getHeaderRaw(upstream.lastReq.Header, "User-Agent"))
 	require.Equal(t, "real-client-package", getHeaderRaw(upstream.lastReq.Header, "X-Stainless-Package-Version"))
+	for key, value := range clientHints {
+		require.Equal(t, value, getHeaderRaw(upstream.lastReq.Header, key))
+	}
 	require.Equal(t, clientBeta, getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"), "真实 CC 不应被强制写入 mimic request id")
-	require.Equal(t, gjson.GetBytes(body, "system").Raw, gjson.GetBytes(upstream.lastBody, "system").Raw)
+	clientSystem := gjson.GetBytes(body, "system").Array()
+	wireSystem := gjson.GetBytes(upstream.lastBody, "system").Array()
+	require.Len(t, wireSystem, len(clientSystem)+1, "only the missing billing block is prepended")
+	for i, block := range clientSystem {
+		require.Equal(t, block.Raw, wireSystem[i+1].Raw, "client system blocks retain their exact bytes and order")
+		require.Equal(t, block.Get("cache_control").Raw, wireSystem[i+1].Get("cache_control").Raw, "client cache breakpoints remain byte-for-byte intact")
+	}
+	require.Equal(t, "text", wireSystem[0].Get("type").String())
+	require.False(t, wireSystem[0].Get("cache_control").Exists(), "billing must not introduce a cache breakpoint")
+	billing := wireSystem[0].Get("text").String()
+	require.True(t, strings.HasPrefix(billing, "x-anthropic-billing-header: "))
+	require.Contains(t, billing, "cc_version="+claude.CLICurrentVersion+"."+computeClaudeCodeFingerprint(body, claude.CLICurrentVersion)+";")
+	require.Contains(t, billing, "cc_entrypoint=cli;")
+	checksum := cchInBillingRe.FindStringSubmatch(billing)
+	require.Len(t, checksum, 2, "the verified CLI version must carry a five-digit native CCH")
+	require.NotEqual(t, "00000", checksum[1], "never send the placeholder checksum")
+	// Validate the checksum against the final transmitted bytes, independently
+	// of the finalizer. Native-capture tests separately verify the exclusions.
+	zeroed := bytes.Replace(upstream.lastBody, []byte(" cch="+checksum[1]+";"), []byte(" cch=00000;"), 1)
+	hash := xxhash.NewWithSeed(claudeCCHSeed)
+	_, err = hash.Write(claudeCCHHashInput(zeroed))
+	require.NoError(t, err)
+	require.Equal(t, fmt.Sprintf("%05x", hash.Sum64()&0xfffff), checksum[1])
 	require.Equal(t, gjson.GetBytes(body, "messages").Raw, gjson.GetBytes(upstream.lastBody, "messages").Raw)
 	require.Equal(t, metadataUserID, gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "context_management").Exists())
-	require.NotContains(t, string(upstream.lastBody), "x-anthropic-billing-header:")
 }
 
 func TestGatewayService_AnthropicOAuth_SystemPromptInjectionCanBeDisabled(t *testing.T) {
@@ -1111,6 +1146,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingStillCollectsUsageAf
 			`data: {"type":"message_delta","usage":{"output_tokens":5}}`,
 			"",
 			"data: [DONE]",
+			"",
 			"",
 		}, "\n"))),
 	}
@@ -1466,6 +1502,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingSendsKeepaliveDuring
 			"",
 			"data: [DONE]",
 			"",
+			"",
 		}, "\n")))
 		_ = pw.Close()
 	}()
@@ -1581,7 +1618,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingTimeoutAfterClientDi
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = pw.Write([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":9}}}` + "\n"))
+		_, _ = pw.Write([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":9}}}` + "\n\n"))
 		// 保持上游连接静默，触发数据间隔超时分支。
 		time.Sleep(1500 * time.Millisecond)
 		_ = pw.Close()
@@ -1602,7 +1639,9 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingContextCanceled(t *t
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(ctx)
 
 	svc := &GatewayService{
 		cfg: &config.Config{
@@ -1772,7 +1811,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_Non2xxRecordsOllamaActivity(t
 
 func TestOpus55RejectsUnsupportedParametersBeforeMimicry(t *testing.T) {
 	for _, typ := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
-		for _, field := range []string{`"thinking":{"type":"disabled"}`, `"thinking":{"type":"enabled","budget_tokens":1024}`, `"tool_choice":{"type":"any"}`, `"tool_choice":{"type":"tool","name":"lookup"}`} {
+		for _, field := range []string{`"thinking":{"type":"disabled"}`, `"tool_choice":{"type":"any"}`, `"tool_choice":{"type":"tool","name":"lookup"}`} {
 			for _, count := range []bool{false, true} {
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
@@ -1815,8 +1854,6 @@ func TestOpus55ThinkingDefaultPreservesSignedHistory(t *testing.T) {
 
 func TestSonnet55RejectsUnsupportedParametersBeforeMimicry(t *testing.T) {
 	fields := []string{
-		`"thinking":{"type":"disabled"}`,
-		`"thinking":{"type":"enabled","budget_tokens":1024}`,
 		`"thinking":{"type":"between_tools"},"output_config":{"effort":"xhigh"}`,
 		`"thinking":{"type":"between_tools","display":"summarized"}`,
 		`"tool_choice":{"type":"any"}`,
@@ -1914,6 +1951,36 @@ func TestSonnet55BedrockCCCompatTransformsBeforeValidation(t *testing.T) {
 			prepared, err := PrepareBedrockRequestBodyWithTokens(converted, mapped, nil, false)
 			require.NoError(t, err)
 			require.Equal(t, "low", gjson.GetBytes(prepared, "output_config.effort").String())
+		})
+	}
+}
+
+// TTFT follows the upstream data-line boundary even when a complete frame never arrives.
+func TestGatewayService_AnthropicAPIKeyPassthrough_UpstreamFirstTokenBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		body      string
+		wantFirst bool
+	}{
+		{"partial message", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n", true},
+		{"partial error", "data: {\"type\":\"error\",\"error\":{\"message\":\"failed\"}}\n", true},
+		{"ping", "data: {\"type\":\"ping\"}\n", true},
+		{"done marker", "data: [DONE]\n", false},
+		{"empty data", "data: \n", false},
+		{"comment", ": heartbeat\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			svc := &GatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.body))}
+			result, err := svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now().Add(-time.Second), "claude-test")
+			require.Error(t, err, "incomplete streams still fail; sampling does not change lifecycle validation")
+			require.NotNil(t, result)
+			require.Equal(t, tc.wantFirst, result.firstTokenMs != nil)
+			if tc.wantFirst {
+				require.GreaterOrEqual(t, *result.firstTokenMs, 1000)
+			}
 		})
 	}
 }

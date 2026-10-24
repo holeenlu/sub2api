@@ -69,7 +69,7 @@
           <div class="mt-1 flex items-center justify-between">
             <span></span>
             <router-link
-              v-if="passwordResetEnabled && !backendModeEnabled"
+              v-if="passwordResetEnabled && (supplierPortal || !backendModeEnabled)"
               to="/forgot-password"
               class="text-sm font-medium text-primary-600 transition-colors hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
             >
@@ -197,7 +197,7 @@
     </div>
 
     <!-- Footer -->
-    <template v-if="!backendModeEnabled && publicSettingsLoaded && registrationEnabled" #footer>
+    <template v-if="!supplierPortal && !backendModeEnabled && publicSettingsLoaded && registrationEnabled" #footer>
       <p class="text-gray-500 dark:text-dark-400">
         {{ t('auth.dontHaveAccount') }}
         <router-link
@@ -222,6 +222,8 @@
 </template>
 
 <script setup lang="ts">
+import { isVendorOrigin, safePortalRedirect } from '@/features/vendor/helpers'
+
 import { computed, ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -250,7 +252,7 @@ import type {
   TotpLoginResponse
 } from '@/types'
 import { extractI18nErrorMessage } from '@/utils/apiError'
-import { clearAllAffiliateReferralCodes } from '@/utils/oauthAffiliate'
+
 
 const { t } = useI18n()
 const LOGIN_AGREEMENT_STORAGE_KEY = 'sub2api_login_agreement_consent'
@@ -270,6 +272,7 @@ const showPassword = ref<boolean>(false)
 const publicSettingsLoaded = ref<boolean>(false)
 
 // Public settings
+const supplierPortal = computed(() => isVendorOrigin(appStore.cachedPublicSettings) || import.meta.env.VITE_VENDOR_PORTAL === 'true')
 const registrationEnabled = ref<boolean>(false)
 const turnstileEnabled = ref<boolean>(false)
 const turnstileSiteKey = ref<string>('')
@@ -354,7 +357,7 @@ const showPasskeyLogin = computed(
 
 const showOAuthLogin = computed(
   () =>
-    !backendModeEnabled.value &&
+    !supplierPortal.value && !backendModeEnabled.value &&
     (linuxdoOAuthEnabled.value ||
       dingtalkOAuthEnabled.value ||
       wechatOAuthEnabled.value ||
@@ -599,11 +602,10 @@ async function handleLogin(): Promise<void> {
     }
 
     // Show success toast
-    clearAllAffiliateReferralCodes()
     appStore.showSuccess(t('auth.loginSuccess'))
 
     // Redirect to dashboard or intended route
-    const redirectTo = (router.currentRoute.value.query.redirect as string) || '/dashboard'
+    const redirectTo = supplierPortal.value ? safePortalRedirect(router.currentRoute.value.query.redirect) : (router.currentRoute.value.query.redirect as string) || authStore.adminLandingPath || '/dashboard'
     await router.push(redirectTo)
   } catch (error: unknown) {
     errorMessage.value = extractI18nErrorMessage(error, t, 'auth.errors', t('auth.loginFailed'))
@@ -642,9 +644,8 @@ async function handlePasskeyLogin(): Promise<void> {
     }
 
     await authStore.loginWithPasskey(proof)
-    clearAllAffiliateReferralCodes()
     appStore.showSuccess(t('auth.loginSuccess'))
-    const redirectTo = (router.currentRoute.value.query.redirect as string) || '/dashboard'
+    const redirectTo = supplierPortal.value ? safePortalRedirect(router.currentRoute.value.query.redirect) : (router.currentRoute.value.query.redirect as string) || authStore.adminLandingPath || '/dashboard'
     await router.push(redirectTo)
   } catch (error: unknown) {
     const fallback = error instanceof DOMException && error.name === 'NotAllowedError'
@@ -709,11 +710,10 @@ async function handle2FAVerify(code: string): Promise<void> {
 
     // Close modal and show success
     show2FAModal.value = false
-    clearAllAffiliateReferralCodes()
     appStore.showSuccess(t('auth.loginSuccess'))
 
     // Redirect to dashboard or intended route
-    const redirectTo = (router.currentRoute.value.query.redirect as string) || '/dashboard'
+    const redirectTo = supplierPortal.value ? safePortalRedirect(router.currentRoute.value.query.redirect) : (router.currentRoute.value.query.redirect as string) || authStore.adminLandingPath || '/dashboard'
     await router.push(redirectTo)
   } catch (error: unknown) {
     const err = error as { message?: string; response?: { data?: { message?: string } } }

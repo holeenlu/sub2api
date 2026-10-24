@@ -159,6 +159,14 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 	if err != nil {
 		return nil, false, fmt.Errorf("build group configured Codex models: %w", err)
 	}
+	// The configured catalog is returned without MergeGroupConfiguredCodexModels,
+	// so it needs the same BPS route restrictions (multi-agent and context window).
+	if s.excelBPSGloballyEnabled(ctx) {
+		body, _, err = restrictExcelBPSCodexModelsManifest(body, catalog, group)
+		if err != nil {
+			return nil, false, err
+		}
+	}
 	manifest := &OpenAIModelsResponse{
 		Body: body,
 		ETag: codexModelsManifestBodyETag(body),
@@ -204,13 +212,18 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	if err != nil {
 		return fmt.Errorf("merge group configured Codex models: %w", err)
 	}
-	if group.CodexModelsManifestConfig.Enabled && group.ModelAllowlistEnabled() {
-		body, err = orderPinnedCodexModelsBySelection(body, group.ModelAllowlist)
-		if err != nil {
-			return fmt.Errorf("order pinned Codex models: %w", err)
+	if s.excelBPSGloballyEnabled(ctx) {
+		restricted, restrictedChanged, restrictErr := restrictExcelBPSCodexModelsManifest(body, accounts, group)
+		if restrictErr != nil {
+			return restrictErr
 		}
-		changed = true
+		body, changed = restricted, changed || restrictedChanged
 	}
+	restricted, cloudChanged, err := restrictCloudCodexModelsManifest(body, accounts, group)
+	if err != nil {
+		return fmt.Errorf("restrict Cloud Codex models: %w", err)
+	}
+	body, changed = restricted, changed || cloudChanged
 	filtered, retired, err := filterRetiredOpenAIPublicModelsBody(body, accounts, true)
 	if err != nil {
 		return fmt.Errorf("filter retired Codex models: %w", err)
@@ -225,6 +238,66 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		manifest.NotModified = true
 	}
 	return nil
+}
+
+// Discovery may use a native or pinned account while inference selects Cloud.
+// Apply the same capability ceiling as local generation to the final group
+// directory, including unmapped groups. Transient limits must not widen it.
+func restrictCloudCodexModelsManifest(body []byte, accounts []Account, group *Group) ([]byte, bool, error) {
+	cloudAccounts := make([]*Account, 0)
+	for i := range accounts {
+		if accounts[i].IsOpenAI() && accounts[i].IsOpenAICloudConfigured() {
+			cloudAccounts = append(cloudAccounts, &accounts[i])
+		}
+	}
+	if len(cloudAccounts) == 0 {
+		return body, false, nil
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, false, err
+	}
+	var models []json.RawMessage
+	if err := json.Unmarshal(envelope["models"], &models); err != nil {
+		return nil, false, err
+	}
+	changed := false
+	for index, raw := range models {
+		var model map[string]json.RawMessage
+		if json.Unmarshal(raw, &model) != nil {
+			continue
+		}
+		var slug string
+		if json.Unmarshal(model["slug"], &slug) != nil || strings.TrimSpace(slug) == "" {
+			continue
+		}
+		slug = strings.TrimSpace(slug)
+		routed := codexModelRoutingAccountIDs(group, slug)
+		for _, account := range cloudAccounts {
+			if len(routed) > 0 && !containsInt64(routed, account.ID) || !account.IsModelSupported(slug) {
+				continue
+			}
+			if applyCodexToolCapabilities(model, cloudCodexToolCapabilities, true) {
+				var err error
+				models[index], err = json.Marshal(model)
+				if err != nil {
+					return nil, false, err
+				}
+				changed = true
+			}
+			break
+		}
+	}
+	if !changed {
+		return body, false, nil
+	}
+	var err error
+	envelope["models"], err = json.Marshal(models)
+	if err != nil {
+		return nil, false, err
+	}
+	result, err := json.Marshal(envelope)
+	return result, err == nil, err
 }
 
 // loadCodexGroupCatalogAccounts separates picker membership from capability
@@ -1451,20 +1524,28 @@ func mergeConfiguredCodexModelsManifest(
 		seen[modelID] = struct{}{}
 		changed = true
 	}
-	if !changed {
-		return body, false, nil
+	if changed {
+		rawModels, err := json.Marshal(merged)
+		if err != nil {
+			return nil, false, err
+		}
+		envelope["models"] = rawModels
+		body, err = json.Marshal(envelope)
+		if err != nil {
+			return nil, false, err
+		}
 	}
-
-	rawModels, err := json.Marshal(merged)
-	if err != nil {
-		return nil, false, err
+	// Apply the group's order after upstream entries and configured aliases are
+	// merged, for pinned discovery, scheduler discovery and local catalogs alike.
+	if filterBySelection {
+		ordered, err := orderCodexModelsBySelection(body, allowlist)
+		if err != nil {
+			return nil, false, err
+		}
+		changed = changed || !bytes.Equal(body, ordered)
+		body = ordered
 	}
-	envelope["models"] = rawModels
-	mergedBody, err := json.Marshal(envelope)
-	if err != nil {
-		return nil, false, err
-	}
-	return mergedBody, true, nil
+	return body, changed, nil
 }
 
 func codexModelWithVisibility(rawModel json.RawMessage, visibility string) (json.RawMessage, bool, error) {
@@ -1694,6 +1775,12 @@ func (c *openAIModelsCache) set(key string, manifest *OpenAIModelsResponse, now 
 // passed through verbatim. Custom API key manifests receive only the narrowly
 // scoped compatibility adjustments required by custom-provider Codex clients.
 func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	if account != nil && account.IsExcelBPSEnabled() && s.excelBPSGloballyEnabled(ctx) {
+		return s.fetchExcelBPSCodexManifest(ctx, account, ifNoneMatch)
+	}
+	return s.fetchNativeCodexModelsManifest(ctx, account, clientVersion, ifNoneMatch)
+}
+func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
@@ -2147,16 +2234,6 @@ func adjustAPIKeyCodexModelsManifest(body []byte, account *Account) ([]byte, err
 		return nil, fmt.Errorf("encode JSON object: %w", err)
 	}
 	return adjusted, nil
-}
-
-// convertOpenAIModelListToCodexManifest rewrites a standard OpenAI
-// GET /v1/models response ({"object":"list","data":[{"id":...},...]}) into the
-// same complete Codex manifest used by locally generated custom-provider
-// catalogs. Bodies that already carry a top-level models field, are not the
-// standard list shape, or yield no usable model IDs are returned unchanged so
-// envelope validation reports the original payload.
-func convertOpenAIModelListToCodexManifest(body []byte) []byte {
-	return convertOpenAIModelListToCodexManifestForAccount(body, nil)
 }
 
 func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Account) []byte {

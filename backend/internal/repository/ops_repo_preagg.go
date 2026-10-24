@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endTime time.Time) error {
@@ -76,7 +78,7 @@ error_base AS (
     -- value so platform-level GROUPING SETS don't collide with the overall (platform=NULL) row.
     COALESCE(platform, 'unknown') AS platform,
     group_id AS group_id,
-    is_business_limited AS is_business_limited,
+    ` + service.OpsSLABusinessLimitedSQL("") + ` AS is_business_limited,
     error_owner AS error_owner,
     status_code AS client_status_code,
     COALESCE(upstream_status_code, status_code, 0) AS effective_status_code

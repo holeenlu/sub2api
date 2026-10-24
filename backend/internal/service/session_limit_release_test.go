@@ -47,7 +47,9 @@ func TestReleaseAccountSession_ReleasesRegisteredSlot(t *testing.T) {
 	svc := &GatewayService{sessionLimitCache: cache}
 	acc := newSessionLimitTestAccount()
 
-	svc.ReleaseAccountSession(context.Background(), acc, "session-hash-1")
+	ctx := WithGatewaySessionTracking(context.Background())
+	rememberSessionRegistration(ctx, acc.ID, "session-hash-1", true)
+	svc.ReleaseAccountSession(ctx, acc, "session-hash-1")
 
 	require.Equal(t, []string{"session-hash-1"}, cache.unregistered[42],
 		"应立即移除注册的会话槽")
@@ -113,9 +115,22 @@ func TestReleaseAccountSession_Idempotent(t *testing.T) {
 	svc := &GatewayService{sessionLimitCache: cache}
 	acc := newSessionLimitTestAccount()
 
-	svc.ReleaseAccountSession(context.Background(), acc, "session-hash")
-	svc.ReleaseAccountSession(context.Background(), acc, "session-hash")
+	ctx := WithGatewaySessionTracking(context.Background())
+	rememberSessionRegistration(ctx, acc.ID, "session-hash", true)
+	svc.ReleaseAccountSession(ctx, acc, "session-hash")
+	svc.ReleaseAccountSession(ctx, acc, "session-hash")
 
-	// 两次调用都透传到缓存层（Redis ZREM 本身幂等，重复移除无副作用）
-	require.Len(t, cache.unregistered[42], 2)
+	// Only a registration created by this request is released, once.
+	require.Len(t, cache.unregistered[42], 1)
+}
+
+func TestReleaseAccountSessionPreservesPreviouslyActiveSession(t *testing.T) {
+	cache := newSessionLimitReleaseCacheStub()
+	svc := &GatewayService{sessionLimitCache: cache}
+	a := newSessionLimitTestAccount()
+	ctx := WithGatewaySessionTracking(context.Background())
+	rememberSessionRegistration(ctx, a.ID, "old", false)
+	svc.ReleaseAccountSession(ctx, a, "old")
+	svc.ReleaseAccountSession(context.Background(), a, "unknown")
+	require.Empty(t, cache.unregistered)
 }
