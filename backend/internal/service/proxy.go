@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"net"
 	"net/url"
 	"strconv"
@@ -14,20 +15,26 @@ const (
 )
 
 type Proxy struct {
-	ID             int64
-	Name           string
-	Protocol       string
-	Host           string
-	Port           int
-	Username       string
-	Password       string
-	Status         string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	ExpiresAt      *time.Time
-	FallbackMode   string
-	BackupProxyID  *int64
-	ExpiryWarnDays int
+	VendorID               *int64
+	CreatedBy              *int64
+	VendorNotes            string
+	RegionLabelCountryCode string
+	RegionLabelCity        string
+	ConfigVersion          int64
+	ID                     int64
+	Name                   string
+	Protocol               string
+	Host                   string
+	Port                   int
+	Username               string
+	Password               string
+	Status                 string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	ExpiresAt              *time.Time
+	FallbackMode           string
+	BackupProxyID          *int64
+	ExpiryWarnDays         int
 }
 
 func (p *Proxy) IsActive() bool {
@@ -44,10 +51,19 @@ func (p *Proxy) URL() string {
 		Scheme: p.Protocol,
 		Host:   net.JoinHostPort(p.Host, strconv.Itoa(p.Port)),
 	}
-	if p.Username != "" && p.Password != "" {
+	if p.Username != "" && p.Password != "" || p.VendorID != nil && (p.Username != "" || p.Password != "") {
 		u.User = url.UserPassword(p.Username, p.Password)
 	}
+	if p.VendorID != nil {
+		// Internal transport policy and pool generation; never included in safe DTOs.
+		u.Fragment = fmt.Sprintf("vendor-proxy:%d:%d:%d", *p.VendorID, p.ID, p.ConfigVersion)
+	}
 	return u.String()
+}
+
+// SameProxyOwner excludes platform and cross-vendor fallbacks.
+func SameProxyOwner(a, b *int64) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
 type ProxyWithAccountCount struct {
@@ -74,4 +90,5 @@ type ProxyAccountSummary struct {
 	Platform string
 	Type     string
 	Notes    *string
+	Status   string
 }

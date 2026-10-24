@@ -25,7 +25,7 @@ func TestFilterCodexInput_StripsMessageItemID_WhenPreservingReferences(t *testin
 		},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
 		PreserveReferences: true,
 	})
 
@@ -52,7 +52,7 @@ func TestFilterCodexInput_KeepsMsgID_WhenPreservingReferences(t *testing.T) {
 		},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
 		PreserveReferences: true,
 	})
 
@@ -74,7 +74,7 @@ func TestFilterCodexInput_StripsMessageIDWhenNotPreservingReferences(t *testing.
 			},
 		}
 
-		filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{
+		filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
 			PreserveReferences: false,
 		})
 
@@ -95,7 +95,7 @@ func TestFilterCodexInput_MessageIDStripDoesNotMutateInput(t *testing.T) {
 		"role": "user",
 	}
 
-	filtered := filterCodexInputWithOptions([]any{original}, codexInputFilterOptions{
+	filtered, _ := filterCodexInputWithOptions([]any{original}, codexInputFilterOptions{
 		PreserveReferences: true,
 	})
 
@@ -132,7 +132,7 @@ func TestFilterCodexInput_MessageStripKeepsFunctionCallBehavior(t *testing.T) {
 		},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
 		PreserveReferences: true,
 	})
 

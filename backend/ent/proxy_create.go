@@ -65,6 +65,90 @@ func (_c *ProxyCreate) SetNillableDeletedAt(v *time.Time) *ProxyCreate {
 	return _c
 }
 
+// SetVendorID sets the "vendor_id" field.
+func (_c *ProxyCreate) SetVendorID(v int64) *ProxyCreate {
+	_c.mutation.SetVendorID(v)
+	return _c
+}
+
+// SetNillableVendorID sets the "vendor_id" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableVendorID(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetVendorID(*v)
+	}
+	return _c
+}
+
+// SetCreatedBy sets the "created_by" field.
+func (_c *ProxyCreate) SetCreatedBy(v int64) *ProxyCreate {
+	_c.mutation.SetCreatedBy(v)
+	return _c
+}
+
+// SetNillableCreatedBy sets the "created_by" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableCreatedBy(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetCreatedBy(*v)
+	}
+	return _c
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (_c *ProxyCreate) SetVendorNotes(v string) *ProxyCreate {
+	_c.mutation.SetVendorNotes(v)
+	return _c
+}
+
+// SetNillableVendorNotes sets the "vendor_notes" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableVendorNotes(v *string) *ProxyCreate {
+	if v != nil {
+		_c.SetVendorNotes(*v)
+	}
+	return _c
+}
+
+// SetRegionLabelCountryCode sets the "region_label_country_code" field.
+func (_c *ProxyCreate) SetRegionLabelCountryCode(v string) *ProxyCreate {
+	_c.mutation.SetRegionLabelCountryCode(v)
+	return _c
+}
+
+// SetNillableRegionLabelCountryCode sets the "region_label_country_code" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableRegionLabelCountryCode(v *string) *ProxyCreate {
+	if v != nil {
+		_c.SetRegionLabelCountryCode(*v)
+	}
+	return _c
+}
+
+// SetRegionLabelCity sets the "region_label_city" field.
+func (_c *ProxyCreate) SetRegionLabelCity(v string) *ProxyCreate {
+	_c.mutation.SetRegionLabelCity(v)
+	return _c
+}
+
+// SetNillableRegionLabelCity sets the "region_label_city" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableRegionLabelCity(v *string) *ProxyCreate {
+	if v != nil {
+		_c.SetRegionLabelCity(*v)
+	}
+	return _c
+}
+
+// SetConfigVersion sets the "config_version" field.
+func (_c *ProxyCreate) SetConfigVersion(v int64) *ProxyCreate {
+	_c.mutation.SetConfigVersion(v)
+	return _c
+}
+
+// SetNillableConfigVersion sets the "config_version" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableConfigVersion(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetConfigVersion(*v)
+	}
+	return _c
+}
+
 // SetName sets the "name" field.
 func (_c *ProxyCreate) SetName(v string) *ProxyCreate {
 	_c.mutation.SetName(v)
@@ -273,6 +357,22 @@ func (_c *ProxyCreate) defaults() error {
 		v := proxy.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.VendorNotes(); !ok {
+		v := proxy.DefaultVendorNotes
+		_c.mutation.SetVendorNotes(v)
+	}
+	if _, ok := _c.mutation.RegionLabelCountryCode(); !ok {
+		v := proxy.DefaultRegionLabelCountryCode
+		_c.mutation.SetRegionLabelCountryCode(v)
+	}
+	if _, ok := _c.mutation.RegionLabelCity(); !ok {
+		v := proxy.DefaultRegionLabelCity
+		_c.mutation.SetRegionLabelCity(v)
+	}
+	if _, ok := _c.mutation.ConfigVersion(); !ok {
+		v := proxy.DefaultConfigVersion
+		_c.mutation.SetConfigVersion(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := proxy.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -295,6 +395,28 @@ func (_c *ProxyCreate) check() error {
 	}
 	if _, ok := _c.mutation.UpdatedAt(); !ok {
 		return &ValidationError{Name: "updated_at", err: errors.New(`ent: missing required field "Proxy.updated_at"`)}
+	}
+	if _, ok := _c.mutation.VendorNotes(); !ok {
+		return &ValidationError{Name: "vendor_notes", err: errors.New(`ent: missing required field "Proxy.vendor_notes"`)}
+	}
+	if _, ok := _c.mutation.RegionLabelCountryCode(); !ok {
+		return &ValidationError{Name: "region_label_country_code", err: errors.New(`ent: missing required field "Proxy.region_label_country_code"`)}
+	}
+	if v, ok := _c.mutation.RegionLabelCountryCode(); ok {
+		if err := proxy.RegionLabelCountryCodeValidator(v); err != nil {
+			return &ValidationError{Name: "region_label_country_code", err: fmt.Errorf(`ent: validator failed for field "Proxy.region_label_country_code": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.RegionLabelCity(); !ok {
+		return &ValidationError{Name: "region_label_city", err: errors.New(`ent: missing required field "Proxy.region_label_city"`)}
+	}
+	if v, ok := _c.mutation.RegionLabelCity(); ok {
+		if err := proxy.RegionLabelCityValidator(v); err != nil {
+			return &ValidationError{Name: "region_label_city", err: fmt.Errorf(`ent: validator failed for field "Proxy.region_label_city": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.ConfigVersion(); !ok {
+		return &ValidationError{Name: "config_version", err: errors.New(`ent: missing required field "Proxy.config_version"`)}
 	}
 	if _, ok := _c.mutation.Name(); !ok {
 		return &ValidationError{Name: "name", err: errors.New(`ent: missing required field "Proxy.name"`)}
@@ -390,6 +512,30 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DeletedAt(); ok {
 		_spec.SetField(proxy.FieldDeletedAt, field.TypeTime, value)
 		_node.DeletedAt = &value
+	}
+	if value, ok := _c.mutation.VendorID(); ok {
+		_spec.SetField(proxy.FieldVendorID, field.TypeInt64, value)
+		_node.VendorID = &value
+	}
+	if value, ok := _c.mutation.CreatedBy(); ok {
+		_spec.SetField(proxy.FieldCreatedBy, field.TypeInt64, value)
+		_node.CreatedBy = &value
+	}
+	if value, ok := _c.mutation.VendorNotes(); ok {
+		_spec.SetField(proxy.FieldVendorNotes, field.TypeString, value)
+		_node.VendorNotes = value
+	}
+	if value, ok := _c.mutation.RegionLabelCountryCode(); ok {
+		_spec.SetField(proxy.FieldRegionLabelCountryCode, field.TypeString, value)
+		_node.RegionLabelCountryCode = value
+	}
+	if value, ok := _c.mutation.RegionLabelCity(); ok {
+		_spec.SetField(proxy.FieldRegionLabelCity, field.TypeString, value)
+		_node.RegionLabelCity = value
+	}
+	if value, ok := _c.mutation.ConfigVersion(); ok {
+		_spec.SetField(proxy.FieldConfigVersion, field.TypeInt64, value)
+		_node.ConfigVersion = value
 	}
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(proxy.FieldName, field.TypeString, value)
@@ -559,6 +705,108 @@ func (u *ProxyUpsert) UpdateDeletedAt() *ProxyUpsert {
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (u *ProxyUpsert) ClearDeletedAt() *ProxyUpsert {
 	u.SetNull(proxy.FieldDeletedAt)
+	return u
+}
+
+// SetVendorID sets the "vendor_id" field.
+func (u *ProxyUpsert) SetVendorID(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldVendorID, v)
+	return u
+}
+
+// UpdateVendorID sets the "vendor_id" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateVendorID() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldVendorID)
+	return u
+}
+
+// AddVendorID adds v to the "vendor_id" field.
+func (u *ProxyUpsert) AddVendorID(v int64) *ProxyUpsert {
+	u.Add(proxy.FieldVendorID, v)
+	return u
+}
+
+// ClearVendorID clears the value of the "vendor_id" field.
+func (u *ProxyUpsert) ClearVendorID() *ProxyUpsert {
+	u.SetNull(proxy.FieldVendorID)
+	return u
+}
+
+// SetCreatedBy sets the "created_by" field.
+func (u *ProxyUpsert) SetCreatedBy(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldCreatedBy, v)
+	return u
+}
+
+// UpdateCreatedBy sets the "created_by" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateCreatedBy() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldCreatedBy)
+	return u
+}
+
+// AddCreatedBy adds v to the "created_by" field.
+func (u *ProxyUpsert) AddCreatedBy(v int64) *ProxyUpsert {
+	u.Add(proxy.FieldCreatedBy, v)
+	return u
+}
+
+// ClearCreatedBy clears the value of the "created_by" field.
+func (u *ProxyUpsert) ClearCreatedBy() *ProxyUpsert {
+	u.SetNull(proxy.FieldCreatedBy)
+	return u
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (u *ProxyUpsert) SetVendorNotes(v string) *ProxyUpsert {
+	u.Set(proxy.FieldVendorNotes, v)
+	return u
+}
+
+// UpdateVendorNotes sets the "vendor_notes" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateVendorNotes() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldVendorNotes)
+	return u
+}
+
+// SetRegionLabelCountryCode sets the "region_label_country_code" field.
+func (u *ProxyUpsert) SetRegionLabelCountryCode(v string) *ProxyUpsert {
+	u.Set(proxy.FieldRegionLabelCountryCode, v)
+	return u
+}
+
+// UpdateRegionLabelCountryCode sets the "region_label_country_code" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateRegionLabelCountryCode() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldRegionLabelCountryCode)
+	return u
+}
+
+// SetRegionLabelCity sets the "region_label_city" field.
+func (u *ProxyUpsert) SetRegionLabelCity(v string) *ProxyUpsert {
+	u.Set(proxy.FieldRegionLabelCity, v)
+	return u
+}
+
+// UpdateRegionLabelCity sets the "region_label_city" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateRegionLabelCity() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldRegionLabelCity)
+	return u
+}
+
+// SetConfigVersion sets the "config_version" field.
+func (u *ProxyUpsert) SetConfigVersion(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldConfigVersion, v)
+	return u
+}
+
+// UpdateConfigVersion sets the "config_version" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateConfigVersion() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldConfigVersion)
+	return u
+}
+
+// AddConfigVersion adds v to the "config_version" field.
+func (u *ProxyUpsert) AddConfigVersion(v int64) *ProxyUpsert {
+	u.Add(proxy.FieldConfigVersion, v)
 	return u
 }
 
@@ -807,6 +1055,125 @@ func (u *ProxyUpsertOne) UpdateDeletedAt() *ProxyUpsertOne {
 func (u *ProxyUpsertOne) ClearDeletedAt() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.ClearDeletedAt()
+	})
+}
+
+// SetVendorID sets the "vendor_id" field.
+func (u *ProxyUpsertOne) SetVendorID(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetVendorID(v)
+	})
+}
+
+// AddVendorID adds v to the "vendor_id" field.
+func (u *ProxyUpsertOne) AddVendorID(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddVendorID(v)
+	})
+}
+
+// UpdateVendorID sets the "vendor_id" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateVendorID() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateVendorID()
+	})
+}
+
+// ClearVendorID clears the value of the "vendor_id" field.
+func (u *ProxyUpsertOne) ClearVendorID() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearVendorID()
+	})
+}
+
+// SetCreatedBy sets the "created_by" field.
+func (u *ProxyUpsertOne) SetCreatedBy(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetCreatedBy(v)
+	})
+}
+
+// AddCreatedBy adds v to the "created_by" field.
+func (u *ProxyUpsertOne) AddCreatedBy(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddCreatedBy(v)
+	})
+}
+
+// UpdateCreatedBy sets the "created_by" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateCreatedBy() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateCreatedBy()
+	})
+}
+
+// ClearCreatedBy clears the value of the "created_by" field.
+func (u *ProxyUpsertOne) ClearCreatedBy() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearCreatedBy()
+	})
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (u *ProxyUpsertOne) SetVendorNotes(v string) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetVendorNotes(v)
+	})
+}
+
+// UpdateVendorNotes sets the "vendor_notes" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateVendorNotes() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateVendorNotes()
+	})
+}
+
+// SetRegionLabelCountryCode sets the "region_label_country_code" field.
+func (u *ProxyUpsertOne) SetRegionLabelCountryCode(v string) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetRegionLabelCountryCode(v)
+	})
+}
+
+// UpdateRegionLabelCountryCode sets the "region_label_country_code" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateRegionLabelCountryCode() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateRegionLabelCountryCode()
+	})
+}
+
+// SetRegionLabelCity sets the "region_label_city" field.
+func (u *ProxyUpsertOne) SetRegionLabelCity(v string) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetRegionLabelCity(v)
+	})
+}
+
+// UpdateRegionLabelCity sets the "region_label_city" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateRegionLabelCity() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateRegionLabelCity()
+	})
+}
+
+// SetConfigVersion sets the "config_version" field.
+func (u *ProxyUpsertOne) SetConfigVersion(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetConfigVersion(v)
+	})
+}
+
+// AddConfigVersion adds v to the "config_version" field.
+func (u *ProxyUpsertOne) AddConfigVersion(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddConfigVersion(v)
+	})
+}
+
+// UpdateConfigVersion sets the "config_version" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateConfigVersion() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateConfigVersion()
 	})
 }
 
@@ -1249,6 +1616,125 @@ func (u *ProxyUpsertBulk) UpdateDeletedAt() *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) ClearDeletedAt() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.ClearDeletedAt()
+	})
+}
+
+// SetVendorID sets the "vendor_id" field.
+func (u *ProxyUpsertBulk) SetVendorID(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetVendorID(v)
+	})
+}
+
+// AddVendorID adds v to the "vendor_id" field.
+func (u *ProxyUpsertBulk) AddVendorID(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddVendorID(v)
+	})
+}
+
+// UpdateVendorID sets the "vendor_id" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateVendorID() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateVendorID()
+	})
+}
+
+// ClearVendorID clears the value of the "vendor_id" field.
+func (u *ProxyUpsertBulk) ClearVendorID() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearVendorID()
+	})
+}
+
+// SetCreatedBy sets the "created_by" field.
+func (u *ProxyUpsertBulk) SetCreatedBy(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetCreatedBy(v)
+	})
+}
+
+// AddCreatedBy adds v to the "created_by" field.
+func (u *ProxyUpsertBulk) AddCreatedBy(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddCreatedBy(v)
+	})
+}
+
+// UpdateCreatedBy sets the "created_by" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateCreatedBy() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateCreatedBy()
+	})
+}
+
+// ClearCreatedBy clears the value of the "created_by" field.
+func (u *ProxyUpsertBulk) ClearCreatedBy() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearCreatedBy()
+	})
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (u *ProxyUpsertBulk) SetVendorNotes(v string) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetVendorNotes(v)
+	})
+}
+
+// UpdateVendorNotes sets the "vendor_notes" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateVendorNotes() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateVendorNotes()
+	})
+}
+
+// SetRegionLabelCountryCode sets the "region_label_country_code" field.
+func (u *ProxyUpsertBulk) SetRegionLabelCountryCode(v string) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetRegionLabelCountryCode(v)
+	})
+}
+
+// UpdateRegionLabelCountryCode sets the "region_label_country_code" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateRegionLabelCountryCode() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateRegionLabelCountryCode()
+	})
+}
+
+// SetRegionLabelCity sets the "region_label_city" field.
+func (u *ProxyUpsertBulk) SetRegionLabelCity(v string) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetRegionLabelCity(v)
+	})
+}
+
+// UpdateRegionLabelCity sets the "region_label_city" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateRegionLabelCity() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateRegionLabelCity()
+	})
+}
+
+// SetConfigVersion sets the "config_version" field.
+func (u *ProxyUpsertBulk) SetConfigVersion(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetConfigVersion(v)
+	})
+}
+
+// AddConfigVersion adds v to the "config_version" field.
+func (u *ProxyUpsertBulk) AddConfigVersion(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddConfigVersion(v)
+	})
+}
+
+// UpdateConfigVersion sets the "config_version" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateConfigVersion() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateConfigVersion()
 	})
 }
 

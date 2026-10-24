@@ -182,6 +182,8 @@ const userMappedLog = {
   cache_read_tokens: 0,
   cache_creation_5m_tokens: 0,
   cache_creation_1h_tokens: 0,
+  cache_creation_30m_tokens: 0,
+  cache_creation_12h_tokens: 0,
   image_count: 0,
   billing_mode: 'token',
   request_type: 'sync',
@@ -320,3 +322,6 @@ describe('usage reasoning effort page display', () => {
     expect(cell).not.toContain('↳')
   })
 })
+
+// Existing behavior under the migrated full administrator role.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))

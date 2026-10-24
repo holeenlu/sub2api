@@ -1,0 +1,43 @@
+# Example only; replace the hostname, static root and backend address before use.
+# Match vendor_portal_origin, enable vendor_console_enabled, and upgrade every
+# backend instance before exposing this host. Build frontend with build:vendor.
+# Include this site block beside the customer site, not inside its site block.
+# If the backend already serves the frontend, use vendor-portal-backend.Caddyfile
+# instead; that variant does not need a separate static directory or build.
+supplier.example.invalid {
+	root * /srv/sub2api/vendor-frontend
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Frame-Options DENY
+	}
+	route {
+		# Keep the full URI, including /api/v1 and vendor_id. Do not use
+		# handle_path or a second edge allowlist that omits /admin/vendors.
+		# VendorOrigin owns the API allowlist; authentication and ownership
+		# checks stay in the shared backend, also for the superadmin workspace.
+		handle /api/v1/* {
+			reverse_proxy 127.0.0.1:8080 {
+				header_up Host {host}
+				header_up X-Forwarded-Host {host}
+				header_up X-Forwarded-Proto {scheme}
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+		@unavailable path /api /api/* /admin /admin/* /register /register/* /setup /setup/*
+		handle @unavailable {
+			respond "Not found" 404
+		}
+		# Missing assets must stay 404 rather than returning index.html.
+		handle /assets/* {
+			file_server
+		}
+		handle {
+			# Direct navigation and refresh of /vendor/platform and all supplier
+			# workspaces must load the SPA; the router enforces role boundaries.
+			try_files {path} /index.html
+			header Cache-Control no-store
+			file_server
+		}
+	}
+}

@@ -23,6 +23,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	streamStarted := false
 	defer h.recoverResponsesPanic(c, &streamStarted)
 	setOpenAIClientTransportHTTP(c)
+	c.Request = c.Request.WithContext(service.EnsureOpenAITurnBudget(c.Request.Context(), h.cfg))
 	requestStart := time.Now()
 
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
@@ -52,6 +53,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
+		logRequestBodyReadFailure(reqLog, c.Request, err)
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
@@ -199,7 +201,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
 
 		if err == nil {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, requestedModel, false, result), true, nil)
+			h.gatewayService.ReportOpenAIAccountScheduleSuccess(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), nil)
 			if result != nil {
 				h.recordAlphaSearchUsage(c, apiKey, account, subscription, channelMapping, requestedModel, body, result, subject.UserID)
 			}
@@ -208,7 +210,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 
 		var failoverErr *service.UpstreamFailoverError
 		if !errors.As(err, &failoverErr) {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, requestedModel, false, result), false, nil, err)
+			h.gatewayService.ReportOpenAIAccountScheduleFailure(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), err)
 			if failoverClientGone(c) {
 				reqLog.Info("openai_alpha_search.forward_aborted_client_disconnected", zap.Int64("account_id", account.ID), zap.Error(err))
 				return
@@ -220,7 +222,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			return
 		}
 
-		h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, requestedModel, false, result), false, nil, err)
+		h.gatewayService.ReportOpenAIAccountScheduleFailure(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), err)
 		if c.Writer.Size() != writerSizeBeforeForward {
 			h.handleFailoverExhausted(c, failoverErr, true)
 			return
@@ -233,25 +235,18 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			return
 		}
 		if failoverErr.RetryableOnSameAccount {
-			retryLimit := account.GetPoolModeRetryCount()
-			if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
-				sameAccountRetryCount[account.ID]++
-				retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
-				reqLog.Warn("openai_alpha_search.same_account_retry",
-					zap.Int64("account_id", account.ID),
-					zap.Int("upstream_status", failoverErr.StatusCode),
-					zap.Int("retry_limit", retryLimit),
-					zap.Int("retry_count", sameAccountRetryCount[account.ID]),
-					zap.Duration("retry_delay", retryDelay),
-				)
-				select {
-				case <-c.Request.Context().Done():
-					return
-				case <-time.After(retryDelay):
+			retried, retryErr := waitOpenAISameAccountRetry(c.Request.Context(), account, failoverErr, sameAccountRetryCount, reqLog, "openai_alpha_search.same_account_retry")
+			if retryErr != nil {
+				if !h.handleOpenAITurnBudgetError(c, retryErr, streamStarted) && !failoverClientGone(c) {
+					h.handleFailoverExhausted(c, failoverErr, streamStarted)
 				}
+				return
+			}
+			if retried {
 				continue
 			}
 		}
+		service.PinTurnRetryAccount(c.Request.Context(), nil)
 		h.gatewayService.RecordOpenAIAccountSwitch()
 		failedAccountIDs[account.ID] = struct{}{}
 		lastFailoverErr = failoverErr
@@ -294,7 +289,7 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
-	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+	h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 			Result:             result,
 			APIKey:             apiKey,

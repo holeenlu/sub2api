@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -73,7 +74,7 @@ var (
 			-- 未达上限，添加新会话
 			redis.call('ZADD', key, now, sessionUUID)
 			redis.call('EXPIRE', key, idleTimeout + 60)
-			return 1
+			return 2
 		end
 
 		-- 达到上限，拒绝新会话
@@ -198,9 +199,9 @@ func windowCostKey(accountID int64) string {
 }
 
 // RegisterSession 注册会话活动
-func (c *sessionLimitCache) RegisterSession(ctx context.Context, accountID int64, sessionUUID string, maxSessions int, idleTimeout time.Duration) (bool, error) {
+func (c *sessionLimitCache) RegisterSession(ctx context.Context, accountID int64, sessionUUID string, maxSessions int, idleTimeout time.Duration) (service.SessionRegistration, error) {
 	if sessionUUID == "" || maxSessions <= 0 {
-		return true, nil // 无效参数，默认允许
+		return service.SessionRegistration{Allowed: true}, nil // 无效参数，默认允许
 	}
 
 	key := sessionLimitKey(accountID)
@@ -211,9 +212,9 @@ func (c *sessionLimitCache) RegisterSession(ctx context.Context, accountID int64
 
 	result, err := registerSessionScript.Run(ctx, c.rdb, []string{key}, maxSessions, idleTimeoutSeconds, sessionUUID).Int()
 	if err != nil {
-		return true, err // 失败开放：缓存错误时允许请求通过
+		return service.SessionRegistration{}, err
 	}
-	return result == 1, nil
+	return service.SessionRegistration{Allowed: result > 0, Created: result == 2}, nil
 }
 
 // UnregisterSession 立即移除会话注册（不等待空闲超时）
@@ -362,4 +363,76 @@ func (c *sessionLimitCache) GetWindowCostBatch(ctx context.Context, accountIDs [
 	}
 
 	return results, nil
+}
+
+// GetSessionAdmissionBatch is read-only: expired members are excluded by score,
+// not removed, and no session is registered. Each pipeline contains <=256 accounts.
+func (c *sessionLimitCache) GetSessionAdmissionBatch(ctx context.Context, ids []int64, sessionID string, idleTimeouts map[int64]time.Duration) (map[int64]service.SessionAdmission, error) {
+	out := make(map[int64]service.SessionAdmission, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	now, err := c.rdb.Time(ctx).Result()
+	if err != nil {
+		return out, err
+	}
+	var failures []error
+	for start := 0; start < len(ids); start += 256 {
+		batch := ids[start:min(start+256, len(ids))]
+		pipe := c.rdb.Pipeline()
+		type query struct {
+			id     int64
+			count  *redis.IntCmd
+			score  *redis.FloatCmd
+			cutoff int64
+		}
+		queries := make([]query, 0, len(batch))
+		for _, id := range batch {
+			idle := idleTimeouts[id]
+			if idle <= 0 {
+				idle = c.defaultIdleTimeout
+			}
+			cutoff := now.Unix() - int64(idle.Seconds())
+			key := sessionLimitKey(id)
+			queries = append(queries, query{id, pipe.ZCount(ctx, key, "("+strconv.FormatInt(cutoff, 10), "+inf"), pipe.ZScore(ctx, key, sessionID), cutoff})
+		}
+		_, execErr := pipe.Exec(ctx)
+		if execErr != nil && !errors.Is(execErr, redis.Nil) {
+			failures = append(failures, execErr)
+		}
+		for _, q := range queries {
+			count, countErr := q.count.Result()
+			score, scoreErr := q.score.Result()
+			if errors.Is(scoreErr, redis.Nil) {
+				scoreErr = nil
+			}
+			entry := service.SessionAdmission{ActiveCount: int(count), SessionActive: score > float64(q.cutoff), Known: countErr == nil && scoreErr == nil, Err: errors.Join(countErr, scoreErr)}
+			out[q.id] = entry
+		}
+		if ctx.Err() != nil {
+			return out, ctx.Err()
+		}
+	}
+	return out, errors.Join(failures...)
+}
+
+// SetWindowCostBatch warms optional hints with bounded pipelines. Callers may
+// reserve the remaining selection budget; failure never discards queried costs.
+func (c *sessionLimitCache) SetWindowCostBatch(ctx context.Context, costs map[int64]float64) error {
+	pipe := c.rdb.Pipeline()
+	count := 0
+	for id, cost := range costs {
+		pipe.Set(ctx, windowCostKey(id), cost, windowCostCacheTTL)
+		count++
+		if count%256 == 0 {
+			if _, err := pipe.Exec(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	if count%256 != 0 {
+		_, err := pipe.Exec(ctx)
+		return err
+	}
+	return nil
 }
