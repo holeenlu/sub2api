@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAdminSettingsStore } from '../adminSettings'
+import { useAuthStore } from '../auth'
 
 const mocks = vi.hoisted(() => ({ getSettings: vi.fn(), getConfig: vi.fn() }))
 vi.mock('@/api', () => ({ adminAPI: { settings: { getSettings: mocks.getSettings }, payment: { getConfig: mocks.getConfig } } }))
@@ -8,6 +9,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
   setActivePinia(createPinia())
+  useAuthStore().user = { id: 1, role: "super_admin" } as any
   mocks.getSettings.mockResolvedValue({ ops_monitoring_enabled: true, custom_menu_items: [{ id: 'custom', title: 'Custom' }] })
   mocks.getConfig.mockResolvedValue({ data: { enabled: true } })
   vi.spyOn(console, 'error').mockImplementation(() => {})

@@ -63,7 +63,7 @@ func opsCleanupPlan(now time.Time, days int) (cutoff time.Time, truncate, ok boo
 	return now.AddDate(0, 0, -days), false, true
 }
 
-func opsCleanupRunOne(
+func opsCleanupRunBatch(
 	ctx context.Context,
 	db *sql.DB,
 	truncate bool,
@@ -75,10 +75,10 @@ func opsCleanupRunOne(
 	if truncate {
 		return truncateOpsTable(ctx, db, table)
 	}
-	return deleteOldRowsByID(ctx, db, table, timeCol, cutoff, batchSize, castDate)
+	return deleteOldRowsBatchByID(ctx, db, table, timeCol, cutoff, batchSize, castDate)
 }
 
-func deleteOldRowsByID(
+func deleteOldRowsBatchByID(
 	ctx context.Context,
 	db *sql.DB,
 	table string,
@@ -110,25 +110,14 @@ DELETE FROM %s
 WHERE id IN (SELECT id FROM batch)
 `, table, where, table)
 
-	var total int64
-	for {
-		res, err := db.ExecContext(ctx, q, cutoff, batchSize)
-		if err != nil {
-			if isMissingRelationError(err) {
-				return total, nil
-			}
-			return total, err
+	res, err := db.ExecContext(ctx, q, cutoff, batchSize)
+	if err != nil {
+		if isMissingRelationError(err) {
+			return 0, nil
 		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return total, err
-		}
-		total += affected
-		if affected == 0 {
-			break
-		}
+		return 0, err
 	}
-	return total, nil
+	return res.RowsAffected()
 }
 
 // truncateOpsTable 用 TRUNCATE TABLE 清空指定表，先 SELECT COUNT(*) 取得清空前行数用于 heartbeat。
