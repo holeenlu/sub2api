@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -12,9 +13,25 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
 const maxOpenAIResponsesRejectedFieldRetries = 6
+
+// Match only the phrase that identifies the failure, not the whole sentence:
+// the upstream wording has carried a trailing period and a backend name that
+// may both change. The sibling rustponsesapi rejection reads "requires
+// authorization and metering" and never contains this phrase, so matching a
+// substring keeps the two unambiguous — both are pinned by tests.
+const openAIResponsesPersistedItemLookupPhrase = "persisted-item lookup"
+
+// openAIResponsesHostedToolMeteringPhrase identifies the rustponsesapi backend
+// refusing a hosted web_search declaration. The gateway itself adds a
+// cached-only web_search declaration (external_web_access:false) for history
+// that replays web_search_call items; only that compatibility declaration is
+// removed on retry. A caller's own hosted search is never dropped silently.
+const openAIResponsesHostedToolMeteringPhrase = "requires authorization and metering"
 
 var (
 	openAIResponsesRejectedNamespaceParamPattern  = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
@@ -27,6 +44,8 @@ var (
 	openAIResponsesCacheModelRejectionPattern     = regexp.MustCompile(`(?i)["']?(prompt_cache_breakpoint|input\[\d+\]\.prompt_cache_breakpoint)["']?\s+is\s+not\s+supported\s+on\s+this\s+model\b`)
 	openAIResponsesToolParametersParamPattern     = regexp.MustCompile(`(?i)^(?:tools|input)\[\d+\](?:\.tools\[\d+\])*(?:\.function)?\.parameters$`)
 	openAIResponsesMissingSchemaTypePattern       = regexp.MustCompile(`(?i)\bgot\s+["']?type\s*:\s*["']?none["']?`)
+	openAIResponsesMissingItemIDPattern           = regexp.MustCompile(`(?i)item with id ['"]([^'"]+)['"] not found`)
+	openAIResponsesItemIDParamPattern             = regexp.MustCompile(`(?i)^input\[\d+\]\.id$`)
 )
 
 type openAIResponsesRejectedFieldRetryState struct {
@@ -112,13 +131,58 @@ func (s *openAIResponsesRejectedFieldRetryState) rememberLocked(body []byte) {
 }
 
 func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, responseBody []byte) ([]byte, string, bool, error) {
-	if statusCode != http.StatusBadRequest || len(body) == 0 || len(responseBody) == 0 {
+	if (statusCode != http.StatusBadRequest && statusCode != http.StatusNotFound) || len(body) == 0 || len(responseBody) == 0 {
 		return nil, "", false, nil
+	}
+	// WS providers use both bare error and response.failed envelopes.
+	if nested := gjson.GetBytes(responseBody, "response.error"); nested.IsObject() {
+		responseBody = []byte(`{"error":` + nested.Raw + `}`)
 	}
 
 	code := strings.ToLower(strings.TrimSpace(extractUpstreamErrorCode(responseBody)))
 	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
 	param := strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "error.param").String()))
+	if strings.Contains(message, "items are not persisted") && strings.Contains(message, "store") && strings.Contains(message, "false") {
+		match := openAIResponsesMissingItemIDPattern.FindStringSubmatch(extractUpstreamErrorMessage(responseBody))
+		if len(match) != 2 {
+			return nil, "", false, nil
+		}
+		retryBody, changed, reason, err := removeOpenAIResponsesSelfContainedItemIDs(body, match[1])
+		if err != nil || changed {
+			return retryBody, "stateless input item lookup rejection", changed, err
+		}
+		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] warning: stateless item repair declined: %s", reason)
+		return nil, reason, false, nil
+	}
+	if statusCode == http.StatusNotFound {
+		return nil, "", false, nil
+	}
+	if code == "unsupported_parameter" && strings.Contains(message, openAIResponsesHostedToolMeteringPhrase) &&
+		strings.Contains(message, "web_search") && (param == "" || param == "tools") {
+		retryBody, changed, err := removeOpenAIResponsesCompatibilityWebSearchTool(body)
+		if err != nil || changed {
+			return retryBody, "hosted web_search metering rejection", changed, err
+		}
+		return nil, "", false, nil
+	}
+	if code == "unsupported_parameter" && (param == "" || param == "input" || openAIResponsesItemIDParamPattern.MatchString(param)) &&
+		strings.Contains(message, openAIResponsesPersistedItemLookupPhrase) {
+		retryBody, changed, declineReason, err := removeOpenAIResponsesSelfContainedItemIDs(body)
+		if err != nil || changed {
+			return retryBody, "persisted input item lookup rejection", changed, err
+		}
+		// Logged here rather than at the four call sites so every transport —
+		// HTTP forward, passthrough, native WS and the WS HTTP bridge — reports
+		// it. The request's account and model are already on the matching
+		// ops_error_logs row; what is missing without this line is which item
+		// blocked the repair, which is what decides whether to widen coverage.
+		logger.LegacyPrintf(
+			"service.openai_gateway",
+			"[OpenAI] warning: persisted input item id repair declined: %s",
+			declineReason,
+		)
+		return nil, declineReason, false, nil
+	}
 	if code == "invalid_function_parameters" &&
 		openAIResponsesToolParametersParamPattern.MatchString(param) &&
 		openAIResponsesMissingSchemaTypePattern.MatchString(message) {
@@ -194,6 +258,49 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 		return removeOpenAIResponsesRejectedReasoningContentAtIndex(body, index)
 	}
 	return nil, "", false, nil
+}
+
+// removeOpenAIResponsesCompatibilityWebSearchTool drops the gateway's own
+// cached-only web_search declaration from tools. It leaves caller-declared
+// hosted search alone: an empty result means the rejection was not caused by
+// the compatibility declaration and must reach the client unchanged.
+func removeOpenAIResponsesCompatibilityWebSearchTool(body []byte) ([]byte, bool, error) {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.IsArray() {
+		return nil, false, nil
+	}
+	kept := make([]json.RawMessage, 0, len(tools.Array()))
+	removed := 0
+	for _, tool := range tools.Array() {
+		toolType := strings.TrimSpace(tool.Get("type").String())
+		access := tool.Get("external_web_access")
+		if strings.HasPrefix(toolType, "web_search") && access.Exists() && access.Type == gjson.False {
+			removed++
+			continue
+		}
+		kept = append(kept, json.RawMessage(tool.Raw))
+	}
+	if removed == 0 {
+		return nil, false, nil
+	}
+	var (
+		next []byte
+		err  error
+	)
+	if len(kept) == 0 {
+		next, err = sjson.DeleteBytes(body, "tools")
+		if err == nil && gjson.GetBytes(next, "tool_choice").String() == "none" {
+			// The pin only existed to stop the compatibility declaration from
+			// enabling a new search; without tools it has nothing to pin.
+			next, err = sjson.DeleteBytes(next, "tool_choice")
+		}
+	} else {
+		next, err = sjson.SetBytes(body, "tools", kept)
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("remove compatibility web_search declaration: %w", err)
+	}
+	return next, true, nil
 }
 
 func isExplicitOpenAIResponsesFieldRejection(code, message string) bool {

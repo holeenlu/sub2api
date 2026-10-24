@@ -19,7 +19,7 @@ import (
 func updateSettingsCodexStatus(t *testing.T, body map[string]any) int {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyPromoCodeEnabled: "true"}}
+	repo := &settingHandlerRepoStub{values: map[string]string{}}
 	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
@@ -29,7 +29,7 @@ func updateSettingsCodexStatus(t *testing.T, body map[string]any) int {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(raw))
 	c.Request.Header.Set("Content-Type", "application/json")
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 	return rec.Code
 }
 

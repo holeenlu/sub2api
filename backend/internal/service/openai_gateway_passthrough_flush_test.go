@@ -19,18 +19,34 @@ import (
 type passthroughFlushTestWriter struct {
 	gin.ResponseWriter
 	recorder         *httptest.ResponseRecorder
-	failAfterWrites  int
+	failAfterBytes   int
+	writtenBytes     int
+	partialWrites    int
 	successfulWrites int
 	failedWrites     int
 	flushBodyLengths []int
 }
 
 func (w *passthroughFlushTestWriter) Write(data []byte) (int, error) {
-	if w.failAfterWrites >= 0 && w.successfulWrites >= w.failAfterWrites {
-		w.failedWrites++
-		return 0, errors.New("client disconnected")
+	// Inject failure at a wire byte boundary, independent of how many Write
+	// calls the frame handoff or bounded writer uses to emit one event.
+	partial := false
+	if w.failAfterBytes >= 0 && len(data) > w.failAfterBytes-w.writtenBytes {
+		remaining := max(0, w.failAfterBytes-w.writtenBytes)
+		if remaining == 0 {
+			w.failedWrites++
+			return 0, errors.New("client disconnected")
+		}
+		data = data[:remaining]
+		partial = true
 	}
 	n, err := w.ResponseWriter.Write(data)
+	w.writtenBytes += n
+	if err == nil && partial {
+		w.failedWrites++
+		w.partialWrites++
+		return n, errors.New("client disconnected")
+	}
 	if err == nil {
 		w.successfulWrites++
 	}
@@ -65,7 +81,7 @@ func (r *passthroughFlushTestErrorBody) Close() error { return nil }
 func runPassthroughFlushTest(
 	t *testing.T,
 	body io.ReadCloser,
-	failAfterWrites int,
+	failAfterBytes int,
 	setups ...func(*gin.Context),
 ) (*openaiStreamingResultPassthrough, *httptest.ResponseRecorder, *passthroughFlushTestWriter, error) {
 	t.Helper()
@@ -75,9 +91,9 @@ func runPassthroughFlushTest(
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	writer := &passthroughFlushTestWriter{
-		ResponseWriter:  c.Writer,
-		recorder:        recorder,
-		failAfterWrites: failAfterWrites,
+		ResponseWriter: c.Writer,
+		recorder:       recorder,
+		failAfterBytes: failAfterBytes,
 	}
 	c.Writer = writer
 	for _, setup := range setups {
@@ -145,19 +161,18 @@ func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(
 	}, writer.flushBodyLengths)
 }
 
-func TestOpenAIStreamingPassthroughFlushesTerminalEventAtEOFWithoutBlankLine(t *testing.T) {
+func TestOpenAIStreamingPassthroughRejectsTerminalEventAtEOFWithoutBlankLine(t *testing.T) {
 	upstream := "event: response.completed\n" +
 		`data: {"type":"response.completed","response":{"id":"resp_eof","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`
-	wantBody := upstream + "\n"
 
 	result, recorder, writer, err := runPassthroughFlushTest(t, io.NopCloser(strings.NewReader(upstream)), -1)
 
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, wantBody, recorder.Body.String())
-	require.Equal(t, []int{len(wantBody)}, writer.flushBodyLengths)
-	require.Equal(t, 5, result.usage.InputTokens)
-	require.Equal(t, 2, result.usage.OutputTokens)
+	require.Empty(t, recorder.Body.String())
+	require.Empty(t, writer.flushBodyLengths)
+	require.Zero(t, result.usage.InputTokens)
+	require.Zero(t, result.usage.OutputTokens)
 }
 
 func TestOpenAIStreamingPassthroughFailedBeforeOutputCanStillFailOverWithoutFlush(t *testing.T) {
@@ -258,11 +273,12 @@ func TestOpenAIStreamingPassthroughClientDisconnectStillDrainsTerminalUsage(t *t
 	result, recorder, writer, err := runPassthroughFlushTest(
 		t,
 		io.NopCloser(strings.NewReader(firstOutput+terminalEvent)),
-		2,
+		len(firstOutput),
 	)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.clientDisconnected)
 	require.Equal(t, firstOutput, recorder.Body.String())
 	require.Equal(t, []int{len(firstOutput)}, writer.flushBodyLengths)
 	require.Equal(t, 1, writer.failedWrites)
@@ -271,7 +287,7 @@ func TestOpenAIStreamingPassthroughClientDisconnectStillDrainsTerminalUsage(t *t
 }
 
 func TestOpenAIStreamingPassthroughScannerErrorFlushesWrittenResidual(t *testing.T) {
-	upstream := []byte(`data: {"type":"response.output_text.delta","delta":"partial"}`)
+	upstream := []byte(`data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n")
 	readErr := errors.New("upstream read failed")
 
 	_, recorder, writer, err := runPassthroughFlushTest(t, &passthroughFlushTestErrorBody{
@@ -280,14 +296,14 @@ func TestOpenAIStreamingPassthroughScannerErrorFlushesWrittenResidual(t *testing
 	}, -1)
 
 	require.ErrorIs(t, err, readErr)
-	wantBody := string(upstream) + "\n"
+	wantBody := string(upstream)
 	require.Equal(t, wantBody, recorder.Body.String())
 	require.Equal(t, []int{len(wantBody)}, writer.flushBodyLengths)
 }
 
 func TestOpenAIStreamingPassthroughNamespaceRestoreErrorFlushesWrittenResidualOnce(t *testing.T) {
-	writtenPrefix := `data: {"type":"response.output_text.delta","delta":"prefix"}` + "\n"
-	overflowData := `data: {"type":"response.output_text.delta","delta":"not-written","overflow":1e1000}`
+	writtenPrefix := `data: {"type":"response.output_text.delta","delta":"prefix"}` + "\n\n"
+	overflowData := `data: {"type":"response.output_text.delta","delta":"not-written","overflow":1e1000}` + "\n\n"
 
 	_, recorder, writer, err := runPassthroughFlushTest(
 		t,
@@ -312,14 +328,16 @@ func TestOpenAIStreamingPassthroughBlankWriteFailureDoesNotFlushAndStillDrainsUs
 	result, recorder, writer, err := runPassthroughFlushTest(
 		t,
 		io.NopCloser(strings.NewReader(writtenDataLine+"\n"+terminalEvent)),
-		1,
+		len(writtenDataLine),
 	)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.clientDisconnected)
 	require.Equal(t, writtenDataLine, recorder.Body.String())
 	require.Empty(t, writer.flushBodyLengths)
-	require.Equal(t, 1, writer.successfulWrites)
+	require.Zero(t, writer.successfulWrites, "the first frame failed before its final boundary byte")
+	require.Equal(t, 1, writer.partialWrites)
 	require.Equal(t, 1, writer.failedWrites)
 	require.Equal(t, 13, result.usage.InputTokens)
 	require.Equal(t, 5, result.usage.OutputTokens)
