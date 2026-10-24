@@ -1347,15 +1347,11 @@ func buildVertexPublisherModelsURL(location, pageToken string) (string, error) {
 	if !vertexLocationPattern.MatchString(location) {
 		return "", fmt.Errorf("invalid vertex location: %s", location)
 	}
-	host := location + "-aiplatform.googleapis.com"
-	if location == "global" {
-		host = vertexGlobalHost
-	}
 	query := url.Values{"pageSize": []string{strconv.Itoa(vertexPublisherModelsPageSize)}}
 	if pageToken != "" {
 		query.Set("pageToken", pageToken)
 	}
-	return fmt.Sprintf("https://%s/v1beta1/publishers/google/models?%s", host, query.Encode()), nil
+	return fmt.Sprintf("https://%s/v1beta1/publishers/google/models?%s", vertexAPIHost(location), query.Encode()), nil
 }
 
 func buildGeminiModelsURL(base string) string {

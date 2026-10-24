@@ -124,7 +124,7 @@ func (v *ClaudeCodeValidator) Validate(r *http.Request, body map[string]any) boo
 		return false
 	}
 
-	anthropicBeta := r.Header.Get("anthropic-beta")
+	anthropicBeta := getTokenListHeader(r.Header, "anthropic-beta")
 	if anthropicBeta == "" {
 		return false
 	}

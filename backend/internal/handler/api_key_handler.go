@@ -120,6 +120,8 @@ func (h *APIKeyHandler) List(c *gin.Context) {
 
 	// Parse filter parameters
 	var filters service.APIKeyListFilters
+	role, _ := middleware2.GetUserRoleFromContext(c)
+	filters.IncludeSuperAdminKeys = role == service.RoleSuperAdmin
 	if search := strings.TrimSpace(c.Query("search")); search != "" {
 		if len(search) > 100 {
 			search = search[:100]
@@ -168,10 +170,16 @@ func (h *APIKeyHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	// 验证所有权
 	if key.UserID != subject.UserID {
-		response.NotFound(c, "API key not found")
-		return
+		ids, err := h.apiKeyService.VerifyOwnership(c.Request.Context(), subject.UserID, []int64{keyID})
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		if len(ids) != 1 {
+			response.NotFound(c, "API key not found")
+			return
+		}
 	}
 
 	response.Success(c, dto.APIKeyFromService(key).Localized(c.GetHeader("Accept-Language")))

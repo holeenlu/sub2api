@@ -113,3 +113,11 @@ func TestReplaceOpenAIWSMessageModel_OptimizedStillCorrect(t *testing.T) {
 	both := []byte(`{"model":"gpt-5.1","response":{"model":"gpt-5.1"}}`)
 	require.Equal(t, `{"model":"custom-model","response":{"model":"custom-model"}}`, string(replaceOpenAIWSMessageModel(both, "gpt-5.1", "custom-model")))
 }
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+func summarizeOpenAIWSErrorEventFields(message []byte) (code string, errType string, errMessage string) {
+	if len(message) == 0 {
+		return "-", "-", "-"
+	}
+	return summarizeOpenAIWSErrorEventFieldsFromRaw(parseOpenAIWSErrorEventFields(message))
+}
