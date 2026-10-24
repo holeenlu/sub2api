@@ -139,7 +139,10 @@ func (k *APIKey) EffectiveUsage7d() float64 {
 
 // APIKeyListFilters holds optional filtering parameters for listing API keys.
 type APIKeyListFilters struct {
-	Search  string
-	Status  string
-	GroupID *int64 // nil=不筛选, 0=无分组, >0=指定分组
+	// Set only by the personal Key list; exact per-user repository operations
+	// (especially account deletion) must not include other administrators.
+	IncludeSuperAdminKeys bool `json:"-"`
+	Search                string
+	Status                string
+	GroupID               *int64 // nil=不筛选, 0=无分组, >0=指定分组
 }

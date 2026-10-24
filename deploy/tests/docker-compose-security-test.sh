@@ -8,7 +8,7 @@ check_application_security_opt() {
   file=$1
   count=$(
     awk '
-      $0 == "  sub2api:" {
+      $0 == "  tokensavy:" {
         in_application = 1
         next
       }
@@ -27,7 +27,7 @@ check_application_security_opt() {
   )
 
   if [ "$count" -ne 1 ]; then
-    printf '%s must enable no-new-privileges exactly once for the sub2api service\n' "$file" >&2
+    printf '%s must enable no-new-privileges exactly once for the tokensavy service\n' "$file" >&2
     exit 1
   fi
 }
@@ -39,6 +39,10 @@ for compose_file in \
   deploy/docker-compose.dev.yml
 do
   check_application_security_opt "$compose_file"
+  if ! grep -q '^      - SERVER_TRUSTED_PROXIES$' "$compose_file"; then
+    printf '%s must pass through SERVER_TRUSTED_PROXIES without a default\n' "$compose_file" >&2
+    exit 1
+  fi
 done
 
 printf 'docker compose security test passed\n'
