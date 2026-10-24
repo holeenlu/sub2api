@@ -1510,6 +1510,62 @@ func TestMergeGroupConfiguredCodexModelsKeepsExplicitAutoReviewSelection(t *test
 	require.Equal(t, []string{"codex-auto-review"}, codexManifestModelSlugs(t, manifest.Body))
 }
 
+func TestCodexCatalogsFollowGroupSelectionOrder(t *testing.T) {
+	for _, mode := range []string{"local", "scheduler", "pinned"} {
+		t.Run(mode, func(t *testing.T) {
+			svc := &OpenAIGatewayService{accountRepo: codexModelsVisibilityAccountRepo{
+				byGroup: map[int64][]Account{74: {{Platform: PlatformOpenAI, Credentials: map[string]any{
+					"model_mapping": map[string]any{"model-a": "model-a", "model-b": "model-b", "model-z": "model-z"},
+				}}}},
+			}}
+			group := &Group{ID: 74, Platform: PlatformOpenAI,
+				ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"model-z", "model-b", "model-a"}},
+			}
+			group.CodexModelsManifestConfig.Enabled = mode == "pinned"
+			source := []byte(`{"version":"upstream","models":[{"slug":"model-a"},{"slug":"model-z","input_modalities":["text","image"],"unknown_capability":{"keep":true}},{"slug":"model-b"}]}`)
+			build := func(etag string) *OpenAIModelsResponse {
+				if mode == "local" {
+					manifest, configured, err := svc.BuildGroupConfiguredCodexModelsManifest(context.Background(), group, etag)
+					require.NoError(t, err)
+					require.True(t, configured)
+					return manifest
+				}
+				manifest := &OpenAIModelsResponse{Body: bytes.Clone(source), ETag: codexModelsManifestBodyETag(source)}
+				require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, manifest, etag))
+				return manifest
+			}
+			first := build("")
+			require.Equal(t, group.ModelAllowlist.Models, codexManifestModelSlugs(t, first.Body))
+			if mode != "local" {
+				model, err := json.Marshal(decodeCodexManifestModels(t, first.Body)[0])
+				require.NoError(t, err)
+				require.JSONEq(t, `{"slug":"model-z","input_modalities":["text","image"],"unknown_capability":{"keep":true}}`, string(model))
+				require.Contains(t, string(first.Body), `"version":"upstream"`)
+			}
+			require.True(t, build(first.ETag).NotModified)
+			group.ModelAllowlist.Models = []string{"model-b", "model-a", "model-z"}
+			reordered := build(first.ETag)
+			require.False(t, reordered.NotModified)
+			require.NotEqual(t, first.ETag, reordered.ETag)
+			require.Equal(t, group.ModelAllowlist.Models, codexManifestModelSlugs(t, reordered.Body))
+		})
+	}
+
+	// A wildcard expands available concrete models in source order, once, at its position.
+	source := []byte(`{"models":[{"slug":"model-b"},{"slug":"model-z"},{"slug":"model-a"},{"slug":"hidden"}]}`)
+	body, changed, err := mergeConfiguredCodexModelsManifest(source, nil, []string{"model-z", "model-*", "model-a"}, true)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, []string{"model-z", "model-b", "model-a"}, codexManifestModelSlugs(t, body))
+	body, _, err = mergeConfiguredCodexModelsManifest(source, nil, []string{"MODEL-Z", "model-b"}, true)
+	require.NoError(t, err)
+	require.Equal(t, []string{"model-z", "model-b"}, codexManifestModelSlugs(t, body))
+	unchanged, changed, err := mergeConfiguredCodexModelsManifest(source, nil, nil, false)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, source, unchanged)
+}
+
 func TestMergeGroupConfiguredCodexModelsHonorsCustomListAndFinalETag(t *testing.T) {
 	t.Parallel()
 
@@ -3880,4 +3936,15 @@ func TestGPT61SolAPIKeyCatalogContextWindow(t *testing.T) {
 			require.EqualValues(t, tc.want, models[0]["context_window"])
 		})
 	}
+}
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+// convertOpenAIModelListToCodexManifest rewrites a standard OpenAI
+// GET /v1/models response ({"object":"list","data":[{"id":...},...]}) into the
+// same complete Codex manifest used by locally generated custom-provider
+// catalogs. Bodies that already carry a top-level models field, are not the
+// standard list shape, or yield no usable model IDs are returned unchanged so
+// envelope validation reports the original payload.
+func convertOpenAIModelListToCodexManifest(body []byte) []byte {
+	return convertOpenAIModelListToCodexManifestForAccount(body, nil)
 }
