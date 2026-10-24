@@ -46,6 +46,7 @@ func (p *deterministicOpsCaptureWriterStatePool) Put(value any) {
 
 func TestOpsCaptureWriter_NilInnerWriter_NoPanic(t *testing.T) {
 	w := &opsCaptureWriter{}
+	assert.Nil(t, w.Unwrap())
 
 	assert.NotPanics(t, func() {
 		assert.Equal(t, 0, w.Status())
@@ -128,6 +129,7 @@ func TestOpsCaptureWriter_StaleLeaseCannotReachReacquiredState(t *testing.T) {
 	firstContext, _ := gin.CreateTestContext(firstRecorder)
 	stale := acquireOpsCaptureWriterFromPool(pool, firstContext.Writer)
 	releaseOpsCaptureWriter(stale)
+	assert.Nil(t, stale.Unwrap(), "a retired handle must never reveal another request writer")
 
 	secondRecorder := httptest.NewRecorder()
 	secondContext, _ := gin.CreateTestContext(secondRecorder)
@@ -150,6 +152,7 @@ func TestOpsCaptureWriter_StaleLeaseCannotReachReacquiredState(t *testing.T) {
 
 	// Releasing the stale handle must not return an active state to the pool.
 	releaseOpsCaptureWriter(stale)
+	assert.Nil(t, stale.Unwrap(), "a retired handle must never reveal another request writer")
 	thirdRecorder := httptest.NewRecorder()
 	thirdContext, _ := gin.CreateTestContext(thirdRecorder)
 	other := acquireOpsCaptureWriterFromPool(pool, thirdContext.Writer)

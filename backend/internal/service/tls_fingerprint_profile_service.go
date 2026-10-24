@@ -191,7 +191,7 @@ func (s *TLSFingerprintProfileService) ResolveTLSProfile(account *Account) *tlsf
 		}
 	}
 	// TLS 启用但无绑定 profile → 空 Profile → dialer 使用内置默认值
-	return &tlsfingerprint.Profile{Name: "Built-in Default (Node.js 24.x)"}
+	return &tlsfingerprint.Profile{Name: "Built-in Default (Claude Code 2.1.301 Linux arm64)"}
 }
 
 // --- 缓存管理 ---

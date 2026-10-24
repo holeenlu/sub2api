@@ -2,6 +2,7 @@ package service
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -39,9 +40,12 @@ var headerWireCasing = map[string]string{
 	"authorization":                             "authorization",
 
 	// Claude Code 2.1.87+ 新增 header
-	"x-claude-code-session-id": "X-Claude-Code-Session-Id",
-	"x-client-request-id":      "x-client-request-id",
-	"content-length":           "content-length",
+	"x-claude-code-session-id":    "X-Claude-Code-Session-Id",
+	"x-claude-code-prompt-id":     "x-claude-code-prompt-id",
+	"x-claude-code-request-class": "x-claude-code-request-class",
+	"x-claude-code-agent-type":    "x-claude-code-agent-type",
+	"x-client-request-id":         "x-client-request-id",
+	"content-length":              "content-length",
 }
 
 // headerWireOrder 定义真实 Claude CLI 发送 header 的顺序（基于抓包）。
@@ -177,4 +181,41 @@ func sortHeadersByWireOrder(h http.Header) []string {
 	}
 
 	return result
+}
+
+// getTokenListHeader is only for comma-separated token lists, never credentials
+// or arbitrary HTTP headers. Include noncanonical keys used by wire adapters.
+func getTokenListHeader(h http.Header, key string) string {
+	keys := make([]string, 0, 1)
+	for k := range h {
+		if strings.EqualFold(k, key) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	seen := make(map[string]struct{})
+	var tokens []string
+	for _, k := range keys {
+		for _, value := range h[k] {
+			for _, token := range strings.Split(value, ",") {
+				token = strings.TrimSpace(token)
+				if token == "" {
+					continue
+				}
+				if _, ok := seen[token]; ok {
+					continue
+				}
+				seen[token] = struct{}{}
+				tokens = append(tokens, token)
+			}
+		}
+	}
+	return strings.Join(tokens, ",")
+}
+
+func getRequestTokenListHeader(r *http.Request, key string) string {
+	if r == nil {
+		return ""
+	}
+	return getTokenListHeader(r.Header, key)
 }

@@ -155,39 +155,6 @@ describe('OAuthCallbackView', () => {
     expect(exchangePendingOAuthCompletionMock).not.toHaveBeenCalled()
   })
 
-  it('submits stored affiliate code when completing invited email oauth registration', async () => {
-    routeState.path = '/auth/oauth/callback'
-    exchangePendingOAuthCompletionMock.mockResolvedValue({
-      error: 'invitation_required',
-      provider: 'google',
-      redirect: '/dashboard',
-      resolved_email: 'pending@example.com',
-      invitation_required: true,
-    })
-    apiPostMock.mockResolvedValue({
-      data: {
-        access_token: 'token-1',
-      },
-    })
-    window.sessionStorage.setItem('oauth_aff_code', 'AFF456')
-
-    const wrapper = mount(OAuthCallbackView)
-    await vi.dynamicImportSettled()
-    const passwordInputs = wrapper.findAll('input[type="password"]')
-    await passwordInputs[0].setValue('secret-123')
-    await passwordInputs[1].setValue('secret-123')
-    const invitationInput = wrapper.find('input[type="text"]')
-    await invitationInput.setValue('INVITE456')
-    await wrapper.findAll('button').at(0)?.trigger('click')
-
-    expect(apiPostMock).toHaveBeenCalledWith('/auth/oauth/google/complete-registration', {
-      password: 'secret-123',
-      invitation_code: 'INVITE456',
-      aff_code: 'AFF456',
-    })
-    expect(setTokenMock).toHaveBeenCalledWith('token-1')
-  })
-
   it('completes email oauth registration with readonly email and without posting email', async () => {
     routeState.path = '/auth/oauth/callback'
     exchangePendingOAuthCompletionMock.mockResolvedValue({

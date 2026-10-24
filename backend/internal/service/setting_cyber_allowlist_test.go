@@ -30,13 +30,13 @@ func TestUpdateSettingsCyberAllowlistRoundTripAndImmediateRefresh(t *testing.T) 
 	defer svc.refreshCachedSettings(&SystemSettings{})
 	require.False(t, svc.IsCyberPolicyUserAllowlisted(ctx, 12))
 	settings := &SystemSettings{CyberPolicyUserAllowlist: "12, 34"}
-	require.NoError(t, svc.UpdateSettings(ctx, settings))
+	require.NoError(t, updateSystemSettingsForTest(svc, ctx, settings))
 	require.True(t, svc.IsCyberPolicyUserAllowlisted(ctx, 12))
 	require.Equal(t, "12, 34", svc.parseSettings(repo.values).CyberPolicyUserAllowlist)
 	settings.CyberPolicyUserAllowlist = "12, invalid"
-	require.Error(t, svc.UpdateSettings(ctx, settings))
+	require.Error(t, updateSystemSettingsForTest(svc, ctx, settings))
 	require.Equal(t, "12, 34", repo.values[SettingKeyCyberPolicyUserAllowlist])
 	settings.CyberPolicyUserAllowlist = ""
-	require.NoError(t, svc.UpdateSettings(ctx, settings))
+	require.NoError(t, updateSystemSettingsForTest(svc, ctx, settings))
 	require.False(t, svc.IsCyberPolicyUserAllowlisted(ctx, 12))
 }

@@ -14,8 +14,8 @@ func requireAdminKeyJWT(c *gin.Context) bool {
 		return false
 	}
 	role, ok := middleware.GetUserRoleFromContext(c)
-	if !ok || role != "admin" {
-		response.Error(c, 403, "需要管理员权限")
+	if !ok || role != service.RoleSuperAdmin {
+		response.Error(c, 403, "需要超级管理员权限")
 		return false
 	}
 	return true

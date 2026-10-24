@@ -79,6 +79,12 @@ func TestHandle429_FallbackUsesDBSeconds(t *testing.T) {
 	require.Equal(t, 1, accountRepo.rateLimitCalls)
 	require.Equal(t, int64(42), accountRepo.lastRateLimitID)
 	require.True(t, !accountRepo.lastRateLimitReset.Before(before.Add(12*time.Second)) && !accountRepo.lastRateLimitReset.After(after.Add(12*time.Second)))
+	account.Type = AccountTypeAPIKey
+	before = time.Now()
+	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"type":"usage_limit_reached","resets_at":4102444800}}`))
+	after = time.Now()
+	require.Equal(t, 2, accountRepo.rateLimitCalls)
+	require.True(t, !accountRepo.lastRateLimitReset.Before(before.Add(12*time.Second)) && !accountRepo.lastRateLimitReset.After(after.Add(12*time.Second)))
 }
 
 func TestHandle429_FallbackDisabledSkipsLocalMark(t *testing.T) {
@@ -95,6 +101,9 @@ func TestHandle429_FallbackDisabledSkipsLocalMark(t *testing.T) {
 	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
 
 	require.Zero(t, accountRepo.rateLimitCalls)
+	account.Type = AccountTypeAPIKey
+	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"type":"usage_limit_reached","resets_at":4102444800}}`))
+	require.Zero(t, accountRepo.rateLimitCalls, "relay quota must respect disabled fallback cooldown")
 }
 
 // Anthropic 无 reset 头的 429（如 Extra usage required）也应走兜底冷却，

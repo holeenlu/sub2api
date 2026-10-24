@@ -52,7 +52,7 @@ func TestSettingsPUT_DingTalk_V3_InternalOnlyAllowsEmptyCorpID(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 }
@@ -73,7 +73,7 @@ func TestSettingsPUT_DingTalk_HappyPath_None(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var resp response.Response
@@ -100,7 +100,7 @@ func TestSettingsPUT_DingTalk_HappyPath_InternalOnly_WithCorpID(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 }
@@ -123,7 +123,7 @@ func TestSettingsPUT_DingTalk_BypassRegistration_RoundTrip(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var resp response.Response
@@ -154,7 +154,7 @@ func TestSettingsPUT_DingTalk_Disabled_SkipsValidation(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 }
@@ -178,7 +178,7 @@ func TestSettingsPUT_DingTalk_SyncFlags_InternalOnly_RoundTrip(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var resp response.Response
@@ -209,7 +209,7 @@ func TestSettingsPUT_DingTalk_SyncFlags_PolicyNone_CoercedToFalse(t *testing.T) 
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var resp response.Response
@@ -239,7 +239,7 @@ func TestSettingsPUT_DingTalk_StaleWhitelist_CoercedToNone(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "none", repo.values[service.SettingKeyDingTalkConnectCorpRestrictionPolicy],
@@ -270,7 +270,7 @@ func TestSettingsPUT_DingTalk_SyncAttrKey_RoundTrip(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 		c.Request.Header.Set("Content-Type", "application/json")
 
-		handler.UpdateSettings(c)
+		updateSettingsWithRevision(t, handler, c)
 
 		require.Equal(t, http.StatusOK, rec.Code)
 
@@ -307,7 +307,7 @@ func TestSettingsPUT_DingTalk_SyncAttrKey_RoundTrip(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 		c.Request.Header.Set("Content-Type", "application/json")
 
-		handler.UpdateSettings(c)
+		updateSettingsWithRevision(t, handler, c)
 
 		require.Equal(t, http.StatusOK, rec.Code)
 
