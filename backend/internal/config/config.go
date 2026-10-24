@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/textproto"
 	"net/url"
 	"os"
@@ -66,6 +65,10 @@ const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 const DefaultModelsListReadMaxBytes int64 = 8 * 1024 * 1024
 
 type Config struct {
+	// Read only during the one-time preference migration; never used by ranking.
+	schedulerMigrationWeights map[string]float64
+
+	UsageExport             UsageExportConfig             `mapstructure:"usage_export"`
 	Server                  ServerConfig                  `mapstructure:"server"`
 	Log                     LogConfig                     `mapstructure:"log"`
 	CORS                    CORSConfig                    `mapstructure:"cors"`
@@ -109,6 +112,21 @@ type Config struct {
 
 	// Enforce only API-key spending windows in simple mode.
 	SimpleModeKeyRateLimitEnabled bool `mapstructure:"simple_mode_key_rate_limit_enabled" yaml:"simple_mode_key_rate_limit_enabled"`
+}
+
+// SchedulerMigrationWeights is a startup-only snapshot of retired YAML input.
+// Runtime scheduling never consumes these coefficients.
+func (c *Config) SchedulerMigrationWeights() map[string]float64 {
+	result := SchedulerMigrationDefaultWeights()
+	if c != nil {
+		for k, v := range c.schedulerMigrationWeights {
+			result[k] = v
+		}
+	}
+	return result
+}
+func SchedulerMigrationDefaultWeights() map[string]float64 {
+	return map[string]float64{"priority": 1, "load": 1, "queue": 0.7, "error_rate": 0.8, "ttft": 0.5, "reset": 0, "quota_headroom": 0, "upstream_cost": 0, "previous_response": 5, "session_sticky": 3}
 }
 
 // SimpleModeConfig controls startup behavior in simple mode.
@@ -182,6 +200,7 @@ type GeminiTierQuotaConfig struct {
 }
 
 type UpdateConfig struct {
+	CheckEnabled bool `mapstructure:"check_enabled"`
 	// ProxyURL 用于访问 GitHub 的代理地址
 	// 支持 http/https/socks5/socks5h 协议
 	// 例如: "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"
@@ -691,6 +710,7 @@ type ServerConfig struct {
 	Mode                     string    `mapstructure:"mode"`                  // debug/release
 	EnableServerTiming       bool      `mapstructure:"enable_server_timing"`  // Admin UI Server-Timing response header
 	FrontendURL              string    `mapstructure:"frontend_url"`          // 前端基础 URL，用于生成邮件中的外部链接
+	ReadBodyTimeout          int       `mapstructure:"read_body_timeout"`     // 请求体读取空闲时限（秒）：两次成功读取之间允许的最长停滞，每读到数据即续期；慢而持续的上传不受总时长限制。0 禁用；不限制响应流
 	ReadHeaderTimeout        int       `mapstructure:"read_header_timeout"`   // 读取请求头超时（秒）
 	MaxHeaderBytes           int       `mapstructure:"max_header_bytes"`      // 请求头最大字节数（HTTP/2 映射为 header-list 上限）
 	IdleTimeout              int       `mapstructure:"idle_timeout"`          // 空闲连接超时（秒）
@@ -738,8 +758,8 @@ type SecurityConfig struct {
 	CSP             CSPConfig            `mapstructure:"csp"`
 	ProxyFallback   ProxyFallbackConfig  `mapstructure:"proxy_fallback"`
 	ProxyProbe      ProxyProbeConfig     `mapstructure:"proxy_probe"`
-	// TrustForwardedIPForAPIKeyACL enables legacy raw forwarded-header takeover.
-	// When disabled, server.trusted_proxies is authoritative for all client-IP consumers.
+	// Deprecated name retained for settings compatibility: this controls only
+	// legacy request metadata. Security decisions always use server.trusted_proxies.
 	TrustForwardedIPForAPIKeyACL  bool                                       `mapstructure:"trust_forwarded_ip_for_api_key_acl"`
 	ForwardedClientIPHeaders      []string                                   `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
 	forwardedClientIPSettingsLive *atomic.Pointer[ForwardedClientIPSettings] `mapstructure:"-" json:"-" yaml:"-"`
@@ -991,11 +1011,14 @@ type GatewayConfig struct {
 	// GrokResponseHeaderTimeout bounds the pre-first-byte wait for xAI/Grok.
 	// A zero value uses the provider-safe default instead of the generic gateway timeout.
 	GrokResponseHeaderTimeout int `mapstructure:"grok_response_header_timeout"`
-	// OpenAIFirstOutputTimeoutSeconds: native HTTP Responses 首个语义输出超时（秒），0表示禁用。
+	// OpenAIFirstOutputTimeoutSeconds: OpenAI HTTP / WS / HTTP bridge 首个语义输出超时（秒），0使用内置 300 秒。
 	OpenAIFirstOutputTimeoutSeconds int `mapstructure:"openai_first_output_timeout_seconds"`
 	// OpenAIHighEffortFirstOutputTimeoutSeconds: high/xhigh/max 推理的首个语义输出超时（秒）。
-	// 0 表示回退到 OpenAIFirstOutputTimeoutSeconds。
+	// 0 使用标准显式超时；标准也为 0 时使用 600 秒。
 	OpenAIHighEffortFirstOutputTimeoutSeconds int `mapstructure:"openai_high_effort_first_output_timeout_seconds"`
+	// OpenAITurnMaxAttempts bounds all network attempts for one logical turn;
+	// zero uses 8; positive values may lower the cap. Account switches are separate.
+	OpenAITurnMaxAttempts int `mapstructure:"openai_turn_max_attempts"`
 	// 请求体最大字节数，用于网关请求体大小限制
 	MaxBodySize int64 `mapstructure:"max_body_size"`
 	// TextMaxBodySize limits endpoints that cannot carry inline image/video payloads.
@@ -1046,8 +1069,6 @@ type GatewayConfig struct {
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
 	// Live: ChatGPT Frameless Live 会话配置。
 	Live GatewayLiveConfig `mapstructure:"live"`
-	// OpenAIScheduler: OpenAI 高级调度器粘性逃逸配置
-	OpenAIScheduler GatewayOpenAISchedulerConfig `mapstructure:"openai_scheduler"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
 	OpenAIHTTP2 GatewayOpenAIHTTP2Config `mapstructure:"openai_http2"`
 	// OpenAIProxyStreamCircuit: Responses SSE 代理断流熔断策略。
@@ -1082,7 +1103,9 @@ type GatewayConfig struct {
 	SessionIdleTimeoutMinutes int `mapstructure:"session_idle_timeout_minutes"`
 
 	// StreamDataIntervalTimeout: 流数据间隔超时（秒），0表示禁用
-	StreamDataIntervalTimeout int `mapstructure:"stream_data_interval_timeout"`
+	StreamDataIntervalTimeout         int  `mapstructure:"stream_data_interval_timeout"`
+	ExcelBPSStateRedisEnabled         bool `mapstructure:"excel_bps_state_redis_enabled"`
+	ExcelBPSStreamDataIntervalTimeout int  `mapstructure:"excel_bps_stream_data_interval_timeout"`
 	// StreamKeepaliveInterval: 流式 keepalive 间隔（秒），0表示禁用
 	StreamKeepaliveInterval int `mapstructure:"stream_keepalive_interval"`
 	// ImageStreamDataIntervalTimeout: 图片流数据间隔超时（秒），0表示禁用
@@ -1347,7 +1370,6 @@ type GatewayOpenAIWSConfig struct {
 	PayloadLogSampleRate float64 `mapstructure:"payload_log_sample_rate"`
 
 	// 账号调度与粘连参数
-	LBTopK int `mapstructure:"lb_top_k"`
 	// StickySessionTTLSeconds: session_hash -> account_id 粘连 TTL
 	StickySessionTTLSeconds int `mapstructure:"sticky_session_ttl_seconds"`
 	// SessionHashReadOldFallback: 会话哈希迁移期是否允许“新 key 未命中时回退读旧 SHA-256 key”
@@ -1360,59 +1382,6 @@ type GatewayOpenAIWSConfig struct {
 	StickyResponseIDTTLSeconds int `mapstructure:"sticky_response_id_ttl_seconds"`
 	// StickyPreviousResponseTTLSeconds: 兼容旧键（当新键未设置时回退）
 	StickyPreviousResponseTTLSeconds int `mapstructure:"sticky_previous_response_ttl_seconds"`
-
-	SchedulerScoreWeights GatewayOpenAIWSSchedulerScoreWeights `mapstructure:"scheduler_score_weights"`
-}
-
-// GatewayOpenAIWSSchedulerScoreWeights 账号调度打分权重。
-type GatewayOpenAIWSSchedulerScoreWeights struct {
-	Priority  float64 `mapstructure:"priority"`
-	Load      float64 `mapstructure:"load"`
-	Queue     float64 `mapstructure:"queue"`
-	ErrorRate float64 `mapstructure:"error_rate"`
-	TTFT      float64 `mapstructure:"ttft"`
-	// Reset 倾向「会话窗口最早重置」的账号（use-it-or-lose-it）。
-	// >0 时，剩余重置时间越短的账号得分越高，从而被优先用尽。默认 0（关闭，不改变原有行为）。
-	Reset float64 `mapstructure:"reset"`
-	// QuotaHeadroom 倾向 7d 剩余额度更健康的账号；默认 0（关闭，不改变原有行为）。
-	QuotaHeadroom float64 `mapstructure:"quota_headroom"`
-	// UpstreamCost 倾向上游声明倍率更低的账号；默认 0（关闭，不改变原有行为）。
-	UpstreamCost float64 `mapstructure:"upstream_cost"`
-	// PreviousResponse/SessionSticky 仅在开启 OpenAI 高级调度的粘性加权时生效。
-	PreviousResponse float64 `mapstructure:"previous_response"`
-	SessionSticky    float64 `mapstructure:"session_sticky"`
-}
-
-func (w GatewayOpenAIWSSchedulerScoreWeights) BaseWeightSum() float64 {
-	return w.Priority + w.Load + w.Queue + w.ErrorRate + w.TTFT + w.Reset + w.QuotaHeadroom + w.UpstreamCost
-}
-
-func (w GatewayOpenAIWSSchedulerScoreWeights) TotalWeightSum() float64 {
-	return w.BaseWeightSum() + w.PreviousResponse + w.SessionSticky
-}
-
-func (w GatewayOpenAIWSSchedulerScoreWeights) IsValid() bool {
-	for _, weight := range []float64{
-		w.Priority, w.Load, w.Queue, w.ErrorRate, w.TTFT, w.Reset,
-		w.QuotaHeadroom, w.UpstreamCost, w.PreviousResponse, w.SessionSticky,
-	} {
-		if weight < 0 || math.IsNaN(weight) || math.IsInf(weight, 0) {
-			return false
-		}
-	}
-	baseSum := w.BaseWeightSum()
-	return baseSum > 0 && !math.IsNaN(baseSum) && !math.IsInf(baseSum, 0) &&
-		!math.IsNaN(w.TotalWeightSum()) && !math.IsInf(w.TotalWeightSum(), 0)
-}
-
-// GatewayOpenAISchedulerConfig OpenAI 高级调度器配置。
-type GatewayOpenAISchedulerConfig struct {
-	// StickyEscapeEnabled: 是否允许 session_hash sticky 在账号健康度劣化时临时逃逸
-	StickyEscapeEnabled bool `mapstructure:"sticky_escape_enabled"`
-	// StickyEscapeTTFTMs: TTFT EWMA 超过该阈值时跳过 sticky
-	StickyEscapeTTFTMs int `mapstructure:"sticky_escape_ttft_ms"`
-	// StickyEscapeErrorRate: 错误率 EWMA 超过该阈值时跳过 sticky
-	StickyEscapeErrorRate float64 `mapstructure:"sticky_escape_error_rate"`
 }
 
 // GatewayUsageRecordConfig 使用量记录异步队列配置
@@ -1490,6 +1459,31 @@ type TLSProfileConfig struct {
 
 // GatewaySchedulingConfig accounts scheduling configuration.
 type GatewaySchedulingConfig struct {
+	// StickySessionTTLSeconds: session_hash -> account_id 粘连 TTL（滑动窗口，
+	// 每次成功选号或粘性命中都会续期）。默认 3600 与历史硬编码值一致，升级不改
+	// 变任何实例的行为；调大后同一会话隔夜/跨周末回来仍会落回原账号，避免在多个
+	// 账号之间反复重建上游 prompt cache。
+	//
+	// 只作用于 GatewayService 的 Anthropic 账号路径。Gemini、Antigravity 以及
+	// OpenAI 各自保留原有的 TTL 常量/配置，不受此项影响。
+	//
+	// 注意这只延长「同一会话优先复用同一账号」的记忆时长，不会绕过任何调度闸门：
+	// 账号停调、限流、模型不支持、配额或利润门不通过时依旧照常换号。
+	StickySessionTTLSeconds int `mapstructure:"sticky_session_ttl_seconds"`
+
+	// SessionAccountHistoryTTLSeconds: 长周期「会话账号历史」亲和键的 TTL（秒）。
+	// 0（默认）为关闭，保持升级前行为。
+	//
+	// 短期粘性键过期后，自由选号会按优先级重新挑账号，同一个会话隔天回来极可能
+	// 落到另一个账号上并重建整份上游 prompt cache。开启后会额外写一个寿命长得多
+	// 的亲和键：短期键 miss 时先试历史账号，历史账号同样要过全部调度闸门，过不了
+	// 才进入自由选号。
+	//
+	// 与直接把 StickySessionTTLSeconds 拉到几天相比，两级结构保留了「短期内严格
+	// 粘住、长期只是优先建议」的区分，也不会让一次会话把某个账号锁定数天。
+	// 同样只作用于 Anthropic 账号。
+	SessionAccountHistoryTTLSeconds int `mapstructure:"session_account_history_ttl_seconds"`
+
 	// 粘性会话排队配置
 	StickySessionMaxWaiting  int           `mapstructure:"sticky_session_max_waiting"`
 	StickySessionWaitTimeout time.Duration `mapstructure:"sticky_session_wait_timeout"`
@@ -1563,13 +1557,6 @@ type DatabaseConfig struct {
 	ConnMaxLifetimeMinutes int `mapstructure:"conn_max_lifetime_minutes"`
 	// ConnMaxIdleTimeMinutes: 空闲连接最大存活时间，及时释放不活跃连接
 	ConnMaxIdleTimeMinutes int `mapstructure:"conn_max_idle_time_minutes"`
-	// UserPlatformQuotaFlusherEnabled: 是否启用 user×platform 配额写聚合 flusher
-	UserPlatformQuotaFlusherEnabled bool `mapstructure:"user_platform_quota_flusher_enabled"`
-	// UserPlatformQuotaFlushIntervalMs: flusher 刷写间隔（毫秒）
-	UserPlatformQuotaFlushIntervalMs int `mapstructure:"user_platform_quota_flush_interval_ms"`
-	// UserPlatformQuotaFlushBatchSize: flusher 单批最大条数
-	// 建议 ≤ 6000（单条 UPSERT 原子上限）
-	UserPlatformQuotaFlushBatchSize int `mapstructure:"user_platform_quota_flush_batch_size"`
 }
 
 func (d *DatabaseConfig) DSN() string {
@@ -1858,12 +1845,25 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 	trustedProxiesEnv, trustedProxiesEnvConfigured := os.LookupEnv("SERVER_TRUSTED_PROXIES")
 	forwardedClientIPHeadersEnv, forwardedClientIPHeadersEnvConfigured := os.LookupEnv("SECURITY_FORWARDED_CLIENT_IP_HEADERS")
+	corsAllowedOriginsEnv, corsAllowedOriginsEnvConfigured := os.LookupEnv("CORS_ALLOWED_ORIGINS")
 	trustedProxiesConfigured := viper.InConfig("server.trusted_proxies") ||
 		viper.IsSet("server.trusted_proxies") || trustedProxiesEnvConfigured
 
 	var cfg Config
+	if viper.GetBool("database.user_platform_quota_flusher_enabled") {
+		return nil, fmt.Errorf("database.user_platform_quota_flusher_enabled is retired: stop traffic and drain the old quota flusher before upgrading; see docs/CODE_QUALITY_IMPLEMENTATION_2026-10-19.md")
+	}
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config error: %w", err)
+	}
+	// Capture retired YAML/env cost intent for startup migration only. There is
+	// no default, public form, or runtime override for this algorithm coefficient.
+	cfg.schedulerMigrationWeights = SchedulerMigrationDefaultWeights()
+	for key := range cfg.schedulerMigrationWeights {
+		fullKey := "gateway.openai_ws.scheduler_score_weights." + key
+		if viper.IsSet(fullKey) {
+			cfg.schedulerMigrationWeights[key] = viper.GetFloat64(fullKey)
+		}
 	}
 	if trustedProxiesEnvConfigured {
 		cfg.Server.TrustedProxies = normalizeStringSlice(strings.Split(trustedProxiesEnv, ","))
@@ -1871,19 +1871,10 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	if forwardedClientIPHeadersEnvConfigured {
 		cfg.Security.ForwardedClientIPHeaders = normalizeStringSlice(strings.Split(forwardedClientIPHeadersEnv, ","))
 	}
+	if corsAllowedOriginsEnvConfigured {
+		cfg.CORS.AllowedOrigins = normalizeStringSlice(strings.Split(corsAllowedOriginsEnv, ","))
+	}
 	cfg.Server.TrustedProxiesConfigured = trustedProxiesConfigured
-	if cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs == 0 {
-		cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs = 15000
-	}
-	if cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate == 0 {
-		cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 0.5
-	}
-	// Kept as a backstop: setEnvReachableDefaults now registers this key with its
-	// effective default (true), so IsSet always reports true and this branch no
-	// longer fires. It still guards the default if that registration is dropped.
-	if !cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled && !viper.IsSet("gateway.openai_scheduler.sticky_escape_enabled") {
-		cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
-	}
 
 	cfg.RunMode = NormalizeRunMode(cfg.RunMode)
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
@@ -2033,7 +2024,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 	addConfigPath("/app/data")
 	addConfigPath(".")
 	addConfigPath("./config")
-	addConfigPath("/etc/sub2api")
+	addConfigPath("/etc/kdan")
 }
 
 func setDefaults() {
@@ -2048,6 +2039,7 @@ func setDefaults() {
 	viper.SetDefault("server.mode", "release")
 	viper.SetDefault("server.enable_server_timing", false)
 	viper.SetDefault("server.frontend_url", "")
+	viper.SetDefault("server.read_body_timeout", 300)
 	viper.SetDefault("server.read_header_timeout", 10) // 10秒读取请求头
 	viper.SetDefault("server.max_header_bytes", 64*1024)
 	viper.SetDefault("server.idle_timeout", 120) // 120秒空闲超时
@@ -2063,7 +2055,7 @@ func setDefaults() {
 	// Log
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.format", "console")
-	viper.SetDefault("log.service_name", "sub2api")
+	viper.SetDefault("log.service_name", "kdan")
 	viper.SetDefault("log.env", "production")
 	viper.SetDefault("log.caller", true)
 	viper.SetDefault("log.stacktrace_level", "error")
@@ -2086,7 +2078,7 @@ func setDefaults() {
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
 	// declare its relying-party domain and trusted browser origins.
 	viper.SetDefault("webauthn.enabled", false)
-	viper.SetDefault("webauthn.rp_display_name", "Sub2API")
+	viper.SetDefault("webauthn.rp_display_name", "KDAN")
 	viper.SetDefault("webauthn.rp_id", "")
 	viper.SetDefault("webauthn.rp_origins", []string{})
 
@@ -2119,7 +2111,7 @@ func setDefaults() {
 	viper.SetDefault("security.csp.enabled", true)
 	viper.SetDefault("security.csp.policy", DefaultCSPPolicy)
 	viper.SetDefault("security.proxy_probe.insecure_skip_verify", false)
-	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", true)
+	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", false)
 
 	// Security - disable direct fallback on proxy error
 	viper.SetDefault("security.proxy_fallback.allow_direct_on_error", false)
@@ -2219,15 +2211,12 @@ func setDefaults() {
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")
 	viper.SetDefault("database.password", "postgres")
-	viper.SetDefault("database.dbname", "sub2api")
+	viper.SetDefault("database.dbname", "kdan")
 	viper.SetDefault("database.sslmode", "prefer")
 	viper.SetDefault("database.max_open_conns", 256)
 	viper.SetDefault("database.max_idle_conns", 128)
 	viper.SetDefault("database.conn_max_lifetime_minutes", 30)
 	viper.SetDefault("database.conn_max_idle_time_minutes", 5)
-	viper.SetDefault("database.user_platform_quota_flusher_enabled", false)
-	viper.SetDefault("database.user_platform_quota_flush_interval_ms", 2000)
-	viper.SetDefault("database.user_platform_quota_flush_batch_size", 1000)
 
 	// Redis
 	viper.SetDefault("redis.host", "localhost")
@@ -2406,6 +2395,9 @@ func setDefaults() {
 	viper.SetDefault("dashboard_aggregation.recompute_days", 2)
 
 	// Usage cleanup task
+	viper.SetDefault("usage_export.max_range_days", 90)
+	viper.SetDefault("usage_export.max_rows", 100000)
+	viper.SetDefault("usage_export.timeout_seconds", 120)
 	viper.SetDefault("usage_cleanup.enabled", true)
 	viper.SetDefault("usage_cleanup.max_range_days", 31)
 	viper.SetDefault("usage_cleanup.batch_size", 5000)
@@ -2428,6 +2420,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.grok_response_header_timeout", 120)
 	viper.SetDefault("gateway.openai_first_output_timeout_seconds", 0)
 	viper.SetDefault("gateway.openai_high_effort_first_output_timeout_seconds", 0)
+	viper.SetDefault("gateway.openai_turn_max_attempts", 0)
 	viper.SetDefault("gateway.log_upstream_error_body", true)
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)
@@ -2481,23 +2474,12 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.retry_jitter_ratio", 0.2)
 	viper.SetDefault("gateway.openai_ws.retry_total_budget_ms", 5000)
 	viper.SetDefault("gateway.openai_ws.payload_log_sample_rate", 0.2)
-	viper.SetDefault("gateway.openai_ws.lb_top_k", 7)
 	viper.SetDefault("gateway.openai_ws.sticky_session_ttl_seconds", 3600)
 	viper.SetDefault("gateway.openai_ws.session_hash_read_old_fallback", true)
 	viper.SetDefault("gateway.openai_ws.session_hash_dual_write_old", true)
 	viper.SetDefault("gateway.openai_ws.metadata_bridge_enabled", true)
 	viper.SetDefault("gateway.openai_ws.sticky_response_id_ttl_seconds", 3600)
 	viper.SetDefault("gateway.openai_ws.sticky_previous_response_ttl_seconds", 3600)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.priority", 1.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.load", 1.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.queue", 0.7)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.error_rate", 0.8)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.ttft", 0.5)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.reset", 0.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.quota_headroom", 0.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.upstream_cost", 0.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.previous_response", 5.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.session_sticky", 3.0)
 	// OpenAI HTTP upstream protocol strategy
 	viper.SetDefault("gateway.openai_http2.enabled", true)
 	viper.SetDefault("gateway.openai_http2.allow_proxy_fallback_to_http1", true)
@@ -2545,11 +2527,15 @@ func setDefaults() {
 	viper.SetDefault("gateway.client_idle_ttl_seconds", 900)
 	viper.SetDefault("gateway.concurrency_slot_ttl_minutes", 30) // 并发槽位过期时间（支持超长请求）
 	viper.SetDefault("gateway.stream_data_interval_timeout", 180)
+	viper.SetDefault("gateway.excel_bps_stream_data_interval_timeout", 120)
+	viper.SetDefault("gateway.excel_bps_state_redis_enabled", false)
 	viper.SetDefault("gateway.stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_stream_data_interval_timeout", 900)
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_nonstream_keepalive_interval", 0)
 	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
+	viper.SetDefault("gateway.scheduling.sticky_session_ttl_seconds", 3600)
+	viper.SetDefault("gateway.scheduling.session_account_history_ttl_seconds", 0)
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)
 	viper.SetDefault("gateway.scheduling.fallback_wait_timeout", 30*time.Second)
@@ -2650,16 +2636,8 @@ func setEnvReachableDefaults() {
 	viper.SetDefault("gateway.forced_codex_instructions_template_file", "")
 	viper.SetDefault("gateway.session_idle_timeout_minutes", 0)
 	viper.SetDefault("gateway.user_message_queue.mode", "")
+	viper.SetDefault("update.check_enabled", true)
 	viper.SetDefault("update.proxy_url", "")
-
-	// sticky_escape_enabled is the one exception to the zero-value rule: its
-	// effective default is true, applied post-unmarshal via a viper.IsSet guard.
-	// Registering false would make IsSet always report true and permanently
-	// disable sticky escape, so register the effective default instead. An
-	// explicit false in config or env still wins.
-	viper.SetDefault("gateway.openai_scheduler.sticky_escape_enabled", true)
-	viper.SetDefault("gateway.openai_scheduler.sticky_escape_error_rate", 0.0)
-	viper.SetDefault("gateway.openai_scheduler.sticky_escape_ttft_ms", 0)
 
 	// server.trusted_proxies and security.forwarded_client_ip_headers are the
 	// other exception: load() distinguishes explicit configuration from absence
@@ -2711,6 +2689,9 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if err := c.UsageExport.Validate(); err != nil {
+		return err
+	}
 	if c.Gateway.MinOutputTokens < 16 {
 		return fmt.Errorf("gateway.min_output_tokens must be at least 16")
 	}
@@ -2733,6 +2714,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Plugins.StartTimeoutSeconds < 1 || c.Plugins.StartTimeoutSeconds > 120 {
 		return fmt.Errorf("plugins.start_timeout_seconds must be between 1 and 120")
+	}
+	if c.Server.ReadBodyTimeout < 0 || c.Server.ReadBodyTimeout > 3600 {
+		return fmt.Errorf("server.read_body_timeout (idle seconds between request body reads) must be between 0 and 3600")
 	}
 	if c.Server.ReadHeaderTimeout < 1 || c.Server.ReadHeaderTimeout > 60 {
 		return fmt.Errorf("server.read_header_timeout must be between 1 and 60 seconds")
@@ -3368,6 +3352,9 @@ func (c *Config) Validate() error {
 	if c.Gateway.OpenAIResponseHeaderTimeout < 0 {
 		return fmt.Errorf("gateway.openai_response_header_timeout must be non-negative")
 	}
+	if c.Gateway.OpenAITurnMaxAttempts < 0 || c.Gateway.OpenAITurnMaxAttempts > 100 {
+		return fmt.Errorf("gateway.openai_turn_max_attempts must be between 0-100")
+	}
 	if c.Gateway.GrokResponseHeaderTimeout < 0 || c.Gateway.GrokResponseHeaderTimeout > 1800 {
 		return fmt.Errorf("gateway.grok_response_header_timeout must be between 0-1800 seconds")
 	}
@@ -3428,6 +3415,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ConcurrencySlotTTLMinutes <= 0 {
 		return fmt.Errorf("gateway.concurrency_slot_ttl_minutes must be positive")
+	}
+	if n := c.Gateway.ExcelBPSStreamDataIntervalTimeout; n != 0 && (n < 30 || n > 300) {
+		return fmt.Errorf("gateway.excel_bps_stream_data_interval_timeout must be 0 or between 30 and 300")
 	}
 	if c.Gateway.StreamDataIntervalTimeout < 0 {
 		return fmt.Errorf("gateway.stream_data_interval_timeout must be non-negative")
@@ -3569,9 +3559,6 @@ func (c *Config) Validate() error {
 	if c.Gateway.OpenAIWS.PayloadLogSampleRate < 0 || c.Gateway.OpenAIWS.PayloadLogSampleRate > 1 {
 		return fmt.Errorf("gateway.openai_ws.payload_log_sample_rate must be within [0,1]")
 	}
-	if c.Gateway.OpenAIWS.LBTopK <= 0 {
-		return fmt.Errorf("gateway.openai_ws.lb_top_k must be positive")
-	}
 	if c.Gateway.OpenAIWS.StickySessionTTLSeconds <= 0 {
 		return fmt.Errorf("gateway.openai_ws.sticky_session_ttl_seconds must be positive")
 	}
@@ -3599,32 +3586,7 @@ func (c *Config) Validate() error {
 	if c.Gateway.OpenAIProxyStreamCircuit.TTLSeconds < 0 {
 		return fmt.Errorf("gateway.openai_proxy_stream_circuit.ttl_seconds must be non-negative")
 	}
-	weights := c.Gateway.OpenAIWS.SchedulerScoreWeights
-	for _, weight := range []float64{
-		weights.Priority, weights.Load, weights.Queue, weights.ErrorRate, weights.TTFT,
-		weights.Reset, weights.QuotaHeadroom, weights.UpstreamCost,
-		weights.PreviousResponse, weights.SessionSticky,
-	} {
-		if weight < 0 || math.IsNaN(weight) || math.IsInf(weight, 0) {
-			return fmt.Errorf("gateway.openai_ws.scheduler_score_weights.* must be non-negative and finite")
-		}
-	}
-	weightSum := weights.BaseWeightSum()
-	if weightSum <= 0 {
-		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights must not all be zero")
-	}
-	if math.IsNaN(weightSum) || math.IsInf(weightSum, 0) {
-		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights base-weight sum must be finite")
-	}
-	if totalWeightSum := weights.TotalWeightSum(); math.IsNaN(totalWeightSum) || math.IsInf(totalWeightSum, 0) {
-		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights total-weight sum must be finite")
-	}
-	if c.Gateway.OpenAIScheduler.StickyEscapeTTFTMs <= 0 {
-		return fmt.Errorf("gateway.openai_scheduler.sticky_escape_ttft_ms must be positive")
-	}
-	if c.Gateway.OpenAIScheduler.StickyEscapeErrorRate < 0 || c.Gateway.OpenAIScheduler.StickyEscapeErrorRate > 1 {
-		return fmt.Errorf("gateway.openai_scheduler.sticky_escape_error_rate must be between 0 and 1")
-	}
+
 	if c.Gateway.MaxLineSize < 0 {
 		return fmt.Errorf("gateway.max_line_size must be non-negative")
 	}
@@ -3694,6 +3656,24 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ModelsListCacheTTLSeconds < 10 || c.Gateway.ModelsListCacheTTLSeconds > 30 {
 		return fmt.Errorf("gateway.models_list_cache_ttl_seconds must be between 10-30")
+	}
+	if c.Gateway.Scheduling.StickySessionTTLSeconds <= 0 {
+		return fmt.Errorf("gateway.scheduling.sticky_session_ttl_seconds must be positive")
+	}
+	if c.Gateway.Scheduling.StickySessionTTLSeconds > 30*24*60*60 {
+		return fmt.Errorf("gateway.scheduling.sticky_session_ttl_seconds must not exceed 30 days")
+	}
+	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds < 0 {
+		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must not be negative")
+	}
+	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds > 30*24*60*60 {
+		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must not exceed 30 days")
+	}
+	// 历史键比短期粘性键还短就毫无意义：短期键还在时根本不会去读它，短期键一过期
+	// 它也已经跟着没了。这种配置一定是写错了，直接拒绝而不是静默失效。
+	if c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds > 0 &&
+		c.Gateway.Scheduling.SessionAccountHistoryTTLSeconds < c.Gateway.Scheduling.StickySessionTTLSeconds {
+		return fmt.Errorf("gateway.scheduling.session_account_history_ttl_seconds must be >= gateway.scheduling.sticky_session_ttl_seconds")
 	}
 	if c.Gateway.Scheduling.StickySessionMaxWaiting <= 0 {
 		return fmt.Errorf("gateway.scheduling.sticky_session_max_waiting must be positive")

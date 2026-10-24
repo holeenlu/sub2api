@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -90,6 +91,8 @@ func TestNormalizeDeepSeekResponsesRequestBodyAliasesInputImageURL(t *testing.T)
 		require.Equal(t, "input_image", gjson.GetBytes(got, "input.0.content.1.type").String())
 		require.Equal(t, deepSeekInputImageDataURI, gjson.GetBytes(got, "input.0.content.1.image_url").String())
 		require.False(t, gjson.GetBytes(got, "input.0.content.1.url").Exists())
+		require.False(t, gjson.GetBytes(got, "input.0.content.1.source").Exists())
+		require.Equal(t, 1, strings.Count(string(got), "AQID"))
 	})
 
 	t.Run("lifted_tool_output_image_keeps_image_url_only", func(t *testing.T) {

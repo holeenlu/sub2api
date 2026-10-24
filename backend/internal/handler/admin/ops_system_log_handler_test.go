@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -326,5 +327,29 @@ func TestOpsSystemLogHandler_HealthUnavailableAndMonitoringDisabled(t *testing.T
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status=%d, want 404", w.Code)
+	}
+}
+
+// The same detail loader and monitoring gate serve diagnostic exports.
+type opsDiagnosticRepo struct{ service.OpsRepository }
+
+func (r *opsDiagnosticRepo) GetErrorLogByID(context.Context, int64) (*service.OpsErrorLogDetail, error) {
+	return &service.OpsErrorLogDetail{OpsErrorLog: service.OpsErrorLog{RequestID: "request-1", StatusCode: 502}, ErrorBody: "private-secret"}, nil
+}
+func TestOpsErrorDiagnosticsProjectionAndMonitoringGate(t *testing.T) {
+	svc := service.NewOpsService(&opsDiagnosticRepo{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.GET("/errors/:id", NewOpsHandler(svc).GetErrorLogByID)
+	for _, enabled := range []bool{true, false} {
+		svc.SetMonitoringEnabled(enabled)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/errors/1?diagnostics=1", nil))
+		if enabled {
+			if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "recorded_events_only") || strings.Contains(w.Body.String(), "private-secret") {
+				t.Fatalf("unexpected export: %d %s", w.Code, w.Body.String())
+			}
+		} else if w.Code == http.StatusOK {
+			t.Fatal("disabled monitoring must still reject exports")
+		}
 	}
 }
