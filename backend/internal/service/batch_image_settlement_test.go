@@ -341,13 +341,12 @@ func TestBatchImageSettlementService_InvalidCountsExhaustsAndReleases(t *testing
 	require.Equal(t, requestHash, billing.releases[0].RequestPayloadHash)
 }
 
-func TestReleaseBatchImageBalanceHold_TreatsFingerprintConflictAsReleased(t *testing.T) {
+func TestReleaseBatchImageBalanceHold_ConflictRequiresMatchingReceipt(t *testing.T) {
 	job := testSettlingBatchImageJob("imgbatch_release_conflict")
-	// 历史版本用 manifestHash 释放过一次：同一 request id 再以 RequestHash
-	// 释放会命中指纹冲突。资金已归还，必须视为幂等成功而非毒消息。
+	// 指纹冲突不是已归还证明，必须保留失败状态，不能使用其他批次的冻结余额。
 	billing := &fakeBatchImageBillingRepo{releaseErr: ErrUsageBillingRequestConflict}
 	err := releaseBatchImageBalanceHold(context.Background(), billing, job, "request-hash")
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrUsageBillingRequestConflict)
 	require.Len(t, billing.releases, 1)
 }
 

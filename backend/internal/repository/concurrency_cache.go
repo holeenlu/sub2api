@@ -952,7 +952,7 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 	}
 
 	// 使用 Pipeline 替代 Lua 脚本，兼容 Redis Cluster（Lua 内动态拼 key 会 CROSSSLOT）。
-	// 每个账号执行 3 个命令：ZREMRANGEBYSCORE（清理过期）、ZCARD（并发数）、GET（等待数）。
+	// 每账号清理并读取普通/实时槽位，再读取等待数，共 5 个命令。
 	now, err := c.rdb.Time(ctx).Result()
 	if err != nil {
 		return nil, fmt.Errorf("redis TIME: %w", err)
@@ -969,7 +969,10 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 		getCmd         *redis.StringCmd
 	}
 	cmds := make([]accountCmds, 0, len(accounts))
-	for _, acc := range accounts {
+	for i, acc := range accounts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		slotKey := accountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
 		liveKey := liveAccountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
 		waitKey := accountWaitKeyPrefix + strconv.FormatInt(acc.ID, 10)
@@ -983,6 +986,12 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 			getCmd:         pipe.Get(ctx, waitKey),
 		}
 		cmds = append(cmds, ac)
+		// Five Redis commands per account; cap each pipeline at 1280 commands.
+		if (i+1)%256 == 0 {
+			if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+				return nil, fmt.Errorf("pipeline exec: %w", err)
+			}
+		}
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
