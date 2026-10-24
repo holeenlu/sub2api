@@ -121,7 +121,7 @@ WITH combined AS (
     o.time_to_first_token_ms AS first_token_ms,
     o.status_code AS status_code,
     o.id AS error_id,
-    o.error_phase AS phase,
+    ` + service.OpsSLAEffectiveColumnSQL("o", "error_phase") + ` AS phase,
     o.severity AS severity,
     o.error_message AS message,
     o.user_id AS user_id,

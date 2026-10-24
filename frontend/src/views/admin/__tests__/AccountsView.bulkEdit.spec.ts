@@ -63,7 +63,7 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
-    token: 'test-token'
+    token: 'test-token', isSuperAdmin: true, can: () => true
   })
 }))
 
@@ -165,7 +165,11 @@ describe('admin AccountsView bulk edit scope', () => {
     probeUpstreamBillingBatch.mockResolvedValue([])
   })
 
-  it('opens bulk edit in filtered-results mode from the bulk actions dropdown', async () => {
+  it('freezes filtered results as explicit account IDs before opening bulk edit', async () => {
+    listAccounts.mockResolvedValue({
+      items: [{ id: 7, name: 'selected-oauth', platform: 'openai', type: 'oauth', status: 'active', group_ids: [] }],
+      total: 1, page: 1, page_size: 100, pages: 1
+    })
     const wrapper = mount(AccountsView, {
       global: {
         stubs: {
@@ -208,7 +212,8 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')
-    expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('filtered')
+    expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('selected')
+    expect(wrapper.findComponent(BulkEditAccountModalStub).props('target').accountIds).toEqual([7])
   })
 
   it('renders the created_at column by default', async () => {
