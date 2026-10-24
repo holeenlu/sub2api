@@ -15,7 +15,7 @@ import (
 )
 
 // toolNameRewriteKey 是 gin.Context 上存 ToolNameRewrite 映射的 key。
-// 请求阶段写入，响应阶段读取，用于 bytes 级逆向还原假名 → 真名。
+// 请求阶段写入，响应阶段读取，仅按协议工具名字段还原假名。
 const toolNameRewriteKey = "claude_tool_name_rewrite"
 
 // staticToolNameRewrites 是"静态前缀映射"，与 Parrot src/transform/cc_mimicry.py
@@ -40,29 +40,28 @@ const dynamicToolMapThreshold = 5
 
 // ToolNameRewrite 是单次请求内的工具名混淆映射。
 //   - Forward: real → fake，请求阶段在 body 上应用。
-//   - Reverse: fake → real，响应阶段对每个 chunk 做 bytes.Replace 还原。
-//
-// ReverseOrdered 是按假名长度倒序的 (fake, real) 列表，用于防止短假名是长假名的
-// 子串时 bytes.Replace 先被吃掉（对齐 Parrot _restore_tool_names_in_chunk 的
-// `sorted(..., key=lambda x: len(x[1]), reverse=True)`）。
+//   - Reverse: fake → real，响应阶段仅还原协议中的工具名字段。
 type ToolNameRewrite struct {
-	Forward        map[string]string
-	Reverse        map[string]string
-	ReverseOrdered [][2]string
+	Forward map[string]string
+	Reverse map[string]string
 }
 
 // buildDynamicToolMap 构造 tools 的动态假名映射。
 //
 // 与 Parrot _build_dynamic_tool_map 语义等价：
-//   - tools 数量 ≤ dynamicToolMapThreshold 时返回 nil（不做动态映射，走静态 fallback）
-//   - 同一组 tool_names 在同进程内映射稳定（保证 cache 命中）
+//   - 有效 ASCII tools 数量 ≤ dynamicToolMapThreshold 时返回 nil，非法名称仍需合法别名
+//   - 同一组 tool_names 映射确定，避免别名自身破坏缓存前缀
 //
 // Parrot 用 `random.Random(hash(tuple(tool_names)))` 作 seed + shuffle 前缀池；
 // Go 无法字节级复刻 Python hash，但"稳定性"和"前缀池打散"两个不变量都保留：
 // 用 fnv64a(strings.Join(names, "\x00")) 作 seed 喂 math/rand.New。
 // 字节级不同不影响上游判定（Anthropic 不会验证我们的随机种子算法）。
 func buildDynamicToolMap(toolNames []string) map[string]string {
-	if len(toolNames) <= dynamicToolMapThreshold {
+	validNames := true
+	for _, name := range toolNames {
+		validNames = validNames && validAnthropicToolName(name)
+	}
+	if len(toolNames) <= dynamicToolMapThreshold && validNames {
 		return nil
 	}
 	h := fnv.New64a()
@@ -81,14 +80,35 @@ func buildDynamicToolMap(toolNames []string) map[string]string {
 	mapping := make(map[string]string, len(toolNames))
 	for i, name := range toolNames {
 		prefix := available[i%len(available)]
-		headLen := 3
-		if len(name) < 3 {
-			headLen = len(name)
+		// Preserve aliases for valid ASCII names; never slice a UTF-8 rune or
+		// forward non-ASCII names to an ASCII-only upstream tool schema.
+		var head strings.Builder
+		for _, r := range name {
+			if head.Len() == 3 {
+				break
+			}
+			if r < 128 && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+				head.WriteByte(byte(r))
+			} else {
+				head.WriteByte('_')
+			}
 		}
-		fake := fmt.Sprintf("%s%s%02d", prefix, name[:headLen], i)
+		fake := fmt.Sprintf("%s%s%02d", prefix, head.String(), i)
 		mapping[name] = fake
 	}
 	return mapping
+}
+
+func validAnthropicToolName(name string) bool {
+	if len(name) == 0 || len(name) > 128 {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // sanitizeToolName 把真名转成假名。
@@ -158,14 +178,6 @@ func buildToolNameRewriteFromBody(body []byte) *ToolNameRewrite {
 		return nil
 	}
 
-	rw.ReverseOrdered = make([][2]string, 0, len(rw.Reverse))
-	for fake, real := range rw.Reverse {
-		rw.ReverseOrdered = append(rw.ReverseOrdered, [2]string{fake, real})
-	}
-	sort.SliceStable(rw.ReverseOrdered, func(i, j int) bool {
-		return len(rw.ReverseOrdered[i][0]) > len(rw.ReverseOrdered[j][0])
-	})
-
 	return rw
 }
 
@@ -181,7 +193,7 @@ type toolNameSpan struct {
 //   - 改写 $.messages[*].content[*].name（仅当 type == "tool_use"）
 //   - 在 $.tools[last].cache_control 上打 ephemeral 缓存断点
 //
-// 响应侧 bytes.Replace 会连带还原假名 → 真名。
+// 响应侧只在工具调用的 name 字段还原假名。
 func applyToolNameRewriteToBody(body []byte, rw *ToolNameRewrite) []byte {
 	if rw == nil || len(rw.Forward) == 0 {
 		body = applyToolsLastCacheBreakpoint(body)
@@ -327,34 +339,73 @@ func stripDeferredToolCacheControl(body []byte) []byte {
 	return body
 }
 
-// restoreToolNamesInBytes 对 bytes chunk 做逆向还原：假名 → 真名。
-// 按 ReverseOrdered 的假名长度倒序逐个 bytes.Replace，防止子串冲突
-// （与 Parrot _restore_tool_names_in_chunk 的 sorted(..., reverse=True) 等价）。
-// 再做静态前缀还原（cc_sess_ → sessions_ / cc_ses_ → session_）。
-//
-// rw 可为 nil；nil 时仍会做静态前缀还原。
+// restoreToolNamesInBytes restores exact tool-name fields in JSON or complete SSE events.
 func restoreToolNamesInBytes(data []byte, rw *ToolNameRewrite) []byte {
-	if rw != nil {
-		for _, pair := range rw.ReverseOrdered {
-			fake, real := pair[0], pair[1]
-			if fake == "" || fake == real {
-				continue
-			}
-			data = replaceAllBytes(data, fake, real)
-		}
-	}
-	for prefix, replacement := range staticToolNameRewrites {
-		data = replaceAllBytes(data, replacement, prefix)
-	}
-	return data
-}
-
-// replaceAllBytes 是 bytes.ReplaceAll 的便捷封装，避免每个调用点各自做 []byte 转换。
-func replaceAllBytes(data []byte, from, to string) []byte {
-	if len(data) == 0 || from == to || !strings.Contains(string(data), from) {
+	if rw == nil || len(rw.Reverse) == 0 {
 		return data
 	}
-	return []byte(strings.ReplaceAll(string(data), from, to))
+	if gjson.ValidBytes(data) {
+		return restoreToolNamesJSON(data, rw)
+	}
+	// Callers provide complete SSE events. Never rewrite an unfinished frame,
+	// arbitrary text, input_json_delta strings, IDs, or tool arguments.
+	frames := strings.SplitAfter(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n\n")
+	changed := false
+	for i, frame := range frames {
+		if !strings.HasSuffix(frame, "\n\n") {
+			continue
+		}
+		event := parseSSEEvent(strings.Split(strings.TrimSuffix(frame, "\n\n"), "\n"))
+		original := []byte(event.data)
+		if !gjson.ValidBytes(original) {
+			continue
+		}
+		rewritten := restoreToolNamesJSON(original, rw)
+		if bytes.Equal(original, rewritten) {
+			continue
+		}
+		var compact bytes.Buffer
+		if json.Compact(&compact, rewritten) != nil {
+			continue
+		}
+		payload := compact.String()
+		frames[i] = event.block("", &payload)
+		changed = true
+	}
+	if !changed {
+		return data
+	}
+	return []byte(strings.Join(frames, ""))
+}
+
+func restoreToolNamesJSON(data []byte, rw *ToolNameRewrite) []byte {
+	root := gjson.ParseBytes(data)
+	var paths []string
+	addTool := func(value gjson.Result, prefix string) {
+		if kind := value.Get("type").String(); kind != "tool_use" && kind != "server_tool_use" {
+			return
+		}
+		if prefix != "" {
+			prefix += "."
+		}
+		if _, ok := rw.Reverse[value.Get("name").String()]; ok {
+			paths = append(paths, prefix+"name")
+		}
+	}
+	addTool(root, "")
+	addTool(root.Get("content_block"), "content_block")
+	for _, prefix := range []string{"content", "message.content"} {
+		for i, block := range root.Get(prefix).Array() {
+			addTool(block, fmt.Sprintf("%s.%d", prefix, i))
+		}
+	}
+	for _, path := range paths {
+		real := rw.Reverse[gjson.GetBytes(data, path).String()]
+		if next, err := sjson.SetBytes(data, path, real); err == nil {
+			data = next
+		}
+	}
+	return data
 }
 
 // toolNameRewriteFromContext 从 gin.Context 取出请求阶段保存的工具名映射。
@@ -374,13 +425,9 @@ func toolNameRewriteFromContext(c interface {
 }
 
 // reverseToolNamesIfPresent 是响应侧 5 处注入点的统一封装：从 c 取出 mapping
-// 并对 chunk 做 bytes 级假名→真名替换。c 没有 mapping 时仍会做静态前缀还原。
+// 并对 chunk 做 bytes 级假名→真名替换。c 没有 mapping 时保持原文。
 func reverseToolNamesIfPresent(c interface {
 	Get(string) (any, bool)
 }, chunk []byte) []byte {
-	rw := toolNameRewriteFromContext(c)
-	if rw == nil && len(staticToolNameRewrites) == 0 {
-		return chunk
-	}
-	return restoreToolNamesInBytes(chunk, rw)
+	return restoreToolNamesInBytes(chunk, toolNameRewriteFromContext(c))
 }

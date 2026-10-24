@@ -10,6 +10,7 @@ const (
 
 // PaginationParams 分页参数
 type PaginationParams struct {
+	Cursor    string
 	Page      int
 	PageSize  int
 	SortBy    string
@@ -18,10 +19,13 @@ type PaginationParams struct {
 
 // PaginationResult 分页结果
 type PaginationResult struct {
-	Total    int64
-	Page     int
-	PageSize int
-	Pages    int
+	NextCursor string
+	HasMore    bool
+	TotalExact bool
+	Total      int64
+	Page       int
+	PageSize   int
+	Pages      int
 }
 
 // DefaultPagination 默认分页参数

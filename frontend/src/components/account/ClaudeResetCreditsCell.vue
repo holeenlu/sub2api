@@ -74,7 +74,7 @@
         {{ t('admin.accounts.claudeResetCredits.expiresAt', { time: formatTime(primaryCredit.expires_at, 'short') }) }}
       </span>
       <span
-        v-if="status.eligible && totalResets > 0 && status.available_count === 0"
+        v-if="hasLiveStatus && status.eligible && totalResets > 0 && status.available_count === 0"
         data-testid="claude-reset-not-usable"
         class="text-[10px] text-gray-500 dark:text-gray-400"
       >
@@ -90,6 +90,9 @@
 
     <div v-if="visible && error" role="alert" class="text-[10px] text-red-600 dark:text-red-400">
       {{ t('admin.accounts.claudeResetCredits.error') }}
+    </div>
+    <div v-if="visible && cacheWarning" role="alert" data-testid="claude-reset-cache-warning" class="text-[10px] text-amber-600 dark:text-amber-400">
+      {{ t('admin.accounts.claudeResetCredits.cachePersistFailed') }}
     </div>
     <div
       v-if="visible && redeemFeedback"
@@ -123,6 +126,7 @@ import type { Account } from '@/types'
 import {
   getClaudeResetCredits,
   redeemClaudeResetCredit,
+  type ClaudeResetCredit,
   type ClaudeResetCredits,
   type ClaudeResetOutcome
 } from '@/api/admin/claudeResetCredits'
@@ -130,9 +134,11 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 const props = defineProps<{ account: Account }>()
 // Fired after a redemption attempt so the parent can refresh the usage row.
-const emit = defineEmits<{ redeemed: [outcome: ClaudeResetOutcome] }>()
+const emit = defineEmits<{ redeemed: [outcome: ClaudeResetOutcome]; 'account-updated': [account: Account] }>()
 const { t } = useI18n()
-const status = ref<ClaudeResetCredits | null>(null)
+const status = ref<ClaudeResetCredits | null>(readCachedCredits(props.account))
+const hasLiveStatus = ref(false)
+const cacheWarning = ref(false)
 const loading = ref(false)
 const error = ref(false)
 const redeeming = ref(false)
@@ -145,9 +151,14 @@ let generation = 0
 
 const visible = computed(() => props.account.platform === 'anthropic' && props.account.type === 'oauth')
 
-watch(() => [props.account.id, props.account.platform, props.account.type], () => {
+watch(() => [props.account.id, props.account.platform, props.account.type], (next, previous) => {
+  // Updating this row's persisted extra must not cancel an in-flight operation
+  // or turn its just-queried result back into a cached-only display.
+  if (next.every((value, index) => value === previous[index])) return
   generation++
-  status.value = null
+  status.value = readCachedCredits(props.account)
+  hasLiveStatus.value = false
+  cacheWarning.value = false
   loading.value = false
   error.value = false
   redeeming.value = false
@@ -155,6 +166,44 @@ watch(() => [props.account.id, props.account.platform, props.account.type], () =
   redeemFeedback.value = null
   pendingKey = null
 })
+
+watch(() => props.account.extra?.claude_reset_credit_snapshot, () => {
+  if (!hasLiveStatus.value && !loading.value && !redeeming.value) status.value = readCachedCredits(props.account)
+})
+
+function readCachedCredits(account: Account): ClaudeResetCredits | null {
+  if (account.platform !== 'anthropic' || account.type !== 'oauth') return null
+  const value = account.extra?.claude_reset_credit_snapshot
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const cached = value as Partial<ClaudeResetCredits>
+  if (typeof cached.eligible !== 'boolean' || !Array.isArray(cached.credits) ||
+      typeof cached.fetched_at !== 'string' || !Number.isFinite(Date.parse(cached.fetched_at))) return null
+  const now = Date.now()
+  const credits = cached.credits.filter((credit: unknown): credit is ClaudeResetCredit => {
+    if (!credit || typeof credit !== 'object') return false
+    const c = credit as Partial<ClaudeResetCredit>
+    if (!Number.isInteger(c.resets_left) || (c.resets_left ?? 0) <= 0 || typeof c.label !== 'string' ||
+        !Array.isArray(c.clears) || !c.clears.length || !c.clears.every(w => typeof w === 'string')) return false
+    if (c.expires_at && (!Number.isFinite(Date.parse(c.expires_at)) || Date.parse(c.expires_at) <= now)) return false
+    if (c.starts_at && (!Number.isFinite(Date.parse(c.starts_at)) || Date.parse(c.starts_at) > now)) return false
+    return true
+  }).map(c => ({ ...c, redeemable: false }))
+  // A persisted count is for display. Eligibility is rechecked by a live query
+  // before offering redemption; the backend also rechecks immediately before use.
+  return { eligible: cached.eligible, available_count: 0, credits, fetched_at: cached.fetched_at,
+    cooldown_until: cached.cooldown_until, weekly_resets_at: cached.weekly_resets_at, cache_persisted: true }
+}
+
+function publishSnapshot(value: ClaudeResetCredits | null) {
+  emit('account-updated', { ...props.account, extra: { ...props.account.extra, claude_reset_credit_snapshot: value } })
+}
+
+function acceptCredits(result: ClaudeResetCredits) {
+  status.value = result
+  hasLiveStatus.value = true
+  cacheWarning.value = result.cache_persisted === false
+  if (result.cache_persisted === true) publishSnapshot(result)
+}
 
 // 与 OpenAIQuotaResetCell 的到期时间格式保持一致
 const formatTime = (value: string, style: 'short' | 'full'): string => {
@@ -214,10 +263,10 @@ const countButtonTitle = computed(() => {
   ].join('\n')
 })
 
-const canRedeem = computed(() => (status.value?.available_count ?? 0) > 0)
+const canRedeem = computed(() => hasLiveStatus.value && (status.value?.available_count ?? 0) > 0)
 
 const redeemButtonTitle = computed(() => {
-  if (!status.value) return t('admin.accounts.claudeResetCredits.resetTooltipNeedQuery')
+  if (!hasLiveStatus.value) return t('admin.accounts.claudeResetCredits.resetTooltipNeedQuery')
   if (!canRedeem.value) return t('admin.accounts.claudeResetCredits.resetTooltipNone')
   return t('admin.accounts.claudeResetCredits.resetTooltipReady')
 })
@@ -302,6 +351,12 @@ async function confirmRedeem() {
     // A definite server answer ends this confirmation; the next one gets a new key.
     pendingKey = null
     redeemFeedback.value = outcomeFeedback(result)
+    // Never restore the pre-claim count when refreshing the post-claim status
+    // fails. A reset may already have consumed a credit, including unknown results.
+    status.value = null
+    hasLiveStatus.value = false
+    publishSnapshot(null)
+    if (result.credits) acceptCredits(result.credits)
     redeeming.value = false
     emit('redeemed', result)
     await refresh()
@@ -322,9 +377,9 @@ async function refresh() {
   error.value = false
   try {
     const result = await getClaudeResetCredits(props.account.id)
-    if (current === generation) status.value = result
+    if (current === generation) acceptCredits(result)
   } catch {
-    if (current === generation) { error.value = true; status.value = null }
+    if (current === generation) { error.value = true; hasLiveStatus.value = false }
   } finally {
     if (current === generation) loading.value = false
   }

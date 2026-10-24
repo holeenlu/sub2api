@@ -24,6 +24,39 @@ func TestBuildVertexGeminiURL(t *testing.T) {
 	require.Equal(t, "https://us-central1-aiplatform.googleapis.com/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-3-pro:streamGenerateContent?alt=sse", got)
 }
 
+func TestVertexMultiRegionEndpoints(t *testing.T) {
+	for _, location := range []string{"us", "eu"} {
+		t.Run(location, func(t *testing.T) {
+			base := "https://aiplatform." + location + ".rep.googleapis.com"
+			projectPath := "/v1/projects/my-project/locations/" + location
+			account := &Account{Platform: PlatformGemini, Type: AccountTypeServiceAccount, Credentials: map[string]any{
+				"auth_mode": "apikey", "api_key": "k", "project_id": "my-project", "location": location,
+			}}
+			got, err := buildVertexGeminiAccountURL(account, "gemini-3-pro", "streamGenerateContent", true)
+			require.NoError(t, err)
+			require.Equal(t, base+projectPath+"/publishers/google/models/gemini-3-pro:streamGenerateContent?alt=sse", got)
+			got, err = buildVertexAnthropicURL("my-project", location, "claude-sonnet-4-5@20250929", true)
+			require.NoError(t, err)
+			require.Equal(t, base+projectPath+"/publishers/anthropic/models/claude-sonnet-4-5@20250929:streamRawPredict", got)
+			got, err = buildVertexPublisherModelsURL(location, "next/page+token")
+			require.NoError(t, err)
+			require.Equal(t, base+"/v1beta1/publishers/google/models?pageSize=300&pageToken=next%2Fpage%2Btoken", got)
+			got, err = geminiCachedContentCollectionURL(account, "", "gemini-3-pro")
+			require.NoError(t, err)
+			require.Equal(t, base+projectPath+"/cachedContents", got)
+			got, err = geminiCachedContentResourceURL(account, "", "projects/my-project/locations/"+location+"/cachedContents/123")
+			require.NoError(t, err)
+			require.Equal(t, base+projectPath+"/cachedContents/123", got)
+			got, err = BuildVertexBatchPredictionJobsEndpoint("", "my-project", location)
+			require.NoError(t, err)
+			require.Equal(t, base+projectPath+"/batchPredictionJobs", got)
+			got, err = BuildVertexBatchPredictionJobsEndpoint("https://vertex.example.test/", "my-project", location)
+			require.NoError(t, err)
+			require.Equal(t, "https://vertex.example.test"+projectPath+"/batchPredictionJobs", got)
+		})
+	}
+}
+
 func TestBuildVertexGeminiURLUsesGlobalEndpointHost(t *testing.T) {
 	got, err := buildVertexGeminiURL("my-project", "global", "gemini-3-flash-preview", "streamGenerateContent", true)
 	require.NoError(t, err)
