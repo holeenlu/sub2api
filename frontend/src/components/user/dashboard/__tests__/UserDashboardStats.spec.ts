@@ -82,6 +82,12 @@ function cardPlatforms(w: VueWrapper): string[] {
 }
 
 describe('UserDashboardStats 按平台拆分', () => {
+  it('shows weighted token cache shares and keeps empty periods unknown', () => {
+    const w = mountStats(makeStats({ total_input_tokens: 200, total_cache_creation_tokens: 300, total_cache_read_tokens: 500 }))
+    expect(w.get('[data-testid="total-cache-share"]').text()).toBe('50.0%')
+    expect(w.get('[data-testid="today-cache-share"]').text()).toBe('—')
+  })
+
   it('只有用量的平台才产生卡片；三档全空的限额记录不产生卡片', () => {
     const w = mountStats(
       makeStats({ total_actual_cost: 0.03, today_actual_cost: 0.03, by_platform: [usage('grok', 0.03)] }),

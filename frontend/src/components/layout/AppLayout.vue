@@ -3,6 +3,8 @@
     <!-- Background Decoration -->
     <div class="pointer-events-none fixed inset-0 bg-mesh-gradient"></div>
 
+    <TotpStepUpDialog :controller="globalAdminStepUp" />
+
     <!-- Sidebar -->
     <AppSidebar />
 
@@ -24,18 +26,20 @@
 
 <script setup lang="ts">
 import '@/styles/onboarding.css'
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingTour } from '@/composables/useOnboardingTour'
 import { useOnboardingStore } from '@/stores/onboarding'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
+import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import { globalAdminStepUp } from '@/composables/useStepUp'
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
-const isAdmin = computed(() => authStore.user?.role === 'admin')
+const isAdmin = computed(() => authStore.isAdmin)
 
 const { replayTour } = useOnboardingTour({
   storageKey: isAdmin.value ? 'admin_guide' : 'user_guide',
@@ -47,6 +51,8 @@ const onboardingStore = useOnboardingStore()
 onMounted(() => {
   onboardingStore.setReplayCallback(replayTour)
 })
+
+onUnmounted(() => globalAdminStepUp.onCancel())
 
 defineExpose({ replayTour })
 </script>

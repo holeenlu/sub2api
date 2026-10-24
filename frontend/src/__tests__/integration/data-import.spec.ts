@@ -54,6 +54,39 @@ const setInputFiles = (element: Element, files: File[]) => {
 }
 
 describe('ImportDataModal', () => {
+  it('preserves native and BPS authorizations when combining v1 and v2 backups', async () => {
+    const { adminAPI } = await import('@/api/admin')
+    vi.mocked(adminAPI.accounts.importData).mockResolvedValue({proxy_created:0,proxy_reused:0,proxy_failed:0,account_created:2,account_failed:0})
+    const wrapper = mountModal()
+    const input = wrapper.find('input[type="file"]')
+    const row = {
+      name: 'portable', credentials: { refresh_token: 'codex' },
+      bps_credentials: { refresh_token: 'excel' },
+      status: 'disabled', schedulable: false,
+      groups: [{name:'paid',platform:'openai',priority:17}]
+    }
+    setInputFiles(input.element, [
+      makeJsonFile('v1.json',JSON.stringify({type:'sub2api-data',version:1,proxies:[],accounts:[{name:'old'}]})),
+      makeJsonFile('v2.json',JSON.stringify({type:'sub2api-data',version:2,proxies:[],accounts:[row]}))
+    ])
+    await input.trigger('change'); await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(adminAPI.accounts.importData).toHaveBeenCalledWith({data:expect.objectContaining({version:2,accounts:[{name:'old'},row]}),skip_default_group_bind:true})
+  })
+
+  it('rejects unsupported backup versions before sending credentials', async () => {
+    const { adminAPI } = await import('@/api/admin')
+    const wrapper = mountModal()
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile('unsupported.json', JSON.stringify({
+      type: 'sub2api-data', version: 3, proxies: [], accounts: [{ name: 'a' }]
+    }))])
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(adminAPI.accounts.importData).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportInvalidFile')
+  })
+
   beforeEach(async () => {
     showError.mockReset()
     showSuccess.mockReset()
