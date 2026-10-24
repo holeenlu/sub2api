@@ -118,15 +118,18 @@ func (e GrokMediaEndpoint) httpMethod() string {
 }
 
 func ExtractGrokMediaModel(contentType string, body []byte) string {
-	return ParseGrokMediaRequest(contentType, body).Model
+	info, _ := ParseGrokMediaRequest(contentType, body)
+	return info.Model
 }
 
-func ParseGrokMediaRequest(contentType string, body []byte) GrokMediaRequestInfo {
+// ParseGrokMediaRequest 尽力解析请求；仅当 multipart 单个 part 超过上传上限时返回错误（info 为已解析部分）。
+func ParseGrokMediaRequest(contentType string, body []byte) (GrokMediaRequestInfo, error) {
 	info := GrokMediaRequestInfo{N: 1}
+	var err error
 	if gjson.ValidBytes(body) {
 		parseGrokMediaJSONRequest(body, &info)
 	} else {
-		parseGrokMediaMultipartRequest(contentType, body, &info)
+		err = parseGrokMediaMultipartRequest(contentType, body, &info)
 	}
 	info.Model = strings.TrimSpace(info.Model)
 	info.Prompt = strings.TrimSpace(info.Prompt)
@@ -139,7 +142,7 @@ func ParseGrokMediaRequest(contentType string, body []byte) GrokMediaRequestInfo
 	if info.N <= 0 {
 		info.N = 1
 	}
-	return info
+	return info, err
 }
 
 func parseGrokMediaJSONRequest(body []byte, info *GrokMediaRequestInfo) {
@@ -205,36 +208,39 @@ func grokMediaImageObject(imageURL string) map[string]string {
 	return map[string]string{"url": imageURL, "type": "image_url"}
 }
 
-func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokMediaRequestInfo) {
+func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokMediaRequestInfo) error {
 	if info == nil {
-		return
+		return nil
 	}
 	mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(contentType))
 	if err != nil || !strings.EqualFold(mediaType, "multipart/form-data") {
-		return
+		return nil
 	}
 	boundary := strings.TrimSpace(params["boundary"])
 	if boundary == "" {
-		return
+		return nil
 	}
 	reader := multipart.NewReader(bytes.NewReader(body), boundary)
 	for {
 		part, err := reader.NextPart()
 		if err == io.EOF {
-			return
+			return nil
 		}
 		if err != nil {
-			return
+			return nil
 		}
 		name := strings.TrimSpace(part.FormName())
 		if name == "" {
 			_ = part.Close()
 			continue
 		}
-		data, err := io.ReadAll(io.LimitReader(part, openAIImageMaxUploadPartSize))
+		data, err := io.ReadAll(io.LimitReader(part, openAIImageMaxUploadPartSize+1))
 		_ = part.Close()
 		if err != nil {
-			return
+			return nil
+		}
+		if len(data) > openAIImageMaxUploadPartSize {
+			return fmt.Errorf("multipart field %s exceeds %d MiB", name, openAIImageMaxUploadPartSize>>20)
 		}
 		fileName := strings.TrimSpace(part.FileName())
 		partContentType := strings.TrimSpace(part.Header.Get("Content-Type"))
@@ -680,7 +686,10 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	if err != nil {
 		return nil, err
 	}
-	requestInfo := ParseGrokMediaRequest(contentType, body)
+	requestInfo, err := ParseGrokMediaRequest(contentType, body)
+	if err != nil {
+		return nil, err
+	}
 	upstreamModel := requestInfo.Model
 	if endpoint.RequiresRequestBody() && gjson.ValidBytes(body) {
 		if mappedModel := strings.TrimSpace(account.GetMappedModel(requestInfo.Model)); mappedModel != "" {
@@ -702,7 +711,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	if endpoint.RequiresRequestBody() {
 		bodyReader = bytes.NewReader(body)
 	}
-	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx, defaultUpstreamCompletionTimeout)
 	defer releaseUpstreamCtx()
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, endpoint.httpMethod(), targetURL, bodyReader)
 	if err != nil {
@@ -808,7 +817,7 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 		return nil, err
 	}
 
-	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx, defaultUpstreamCompletionTimeout)
 	defer releaseUpstreamCtx()
 	statusReq, err := http.NewRequestWithContext(
 		WithHTTPUpstreamRedirectsDisabled(upstreamCtx),
@@ -968,7 +977,10 @@ func prepareGrokMediaForwardBody(endpoint GrokMediaEndpoint, body []byte, conten
 		return body, contentType, nil
 	}
 
-	info := ParseGrokMediaRequest(contentType, body)
+	info, err := ParseGrokMediaRequest(contentType, body)
+	if err != nil {
+		return nil, "", err
+	}
 	payload := make(map[string]any)
 	if info.Model != "" {
 		payload["model"] = info.Model
@@ -1032,7 +1044,7 @@ func prepareGrokMediaForwardBody(endpoint GrokMediaEndpoint, body []byte, conten
 }
 
 func normalizeGrokMediaJSONImageRefs(body []byte) ([]byte, error) {
-	info := ParseGrokMediaRequest("application/json", body)
+	info, _ := ParseGrokMediaRequest("application/json", body)
 	if len(info.InputImageURLs) > grokMediaMaxEditSourceImages {
 		return nil, fmt.Errorf("a maximum of %d source images is supported for image edits", grokMediaMaxEditSourceImages)
 	}
@@ -1094,7 +1106,10 @@ func normalizeGrokMediaForwardBody(endpoint GrokMediaEndpoint, body []byte, cont
 	if err != nil {
 		return nil, "", err
 	}
-	info := ParseGrokMediaRequest(contentType, body)
+	info, err := ParseGrokMediaRequest(contentType, body)
+	if err != nil {
+		return nil, "", err
+	}
 	upstreamModel := NormalizeGrokMediaModelForEndpoint(endpoint, info.Model, info.HasInputImage())
 	if upstreamModel == "" || upstreamModel == info.Model {
 		return body, contentType, nil

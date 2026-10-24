@@ -251,3 +251,10 @@ func TestForwardResponses_NonDeepSeekChatFallbackDoesNotInjectReasoningPlacehold
 	require.NotNil(t, result)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "messages.0.reasoning_content").Exists())
 }
+
+func (c *reasoningHitCache) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (c *reasoningHitCache) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
+}

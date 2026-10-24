@@ -29,9 +29,19 @@ interface AuthSnapshot {
   refreshToken: string
   expiresAt: number
   userID: number | null
+  session: string
 }
 
-let inFlightRefresh: Promise<RefreshTokenResponse> | null = null
+let inFlightRefresh: { session: string; promise: Promise<RefreshTokenResponse> } | null = null
+
+export function authSessionStamp(token: string | null): string {
+  if (!token) return ''
+  try {
+    const encoded = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    const claims = JSON.parse(atob(encoded)) as Record<string, unknown>
+    return JSON.stringify([claims.user_id, claims.role, claims.sid || token, claims.token_version])
+  } catch { return token }
+}
 
 function getStoredUserID(): number | null {
   const rawUser = localStorage.getItem(AUTH_USER_KEY)
@@ -57,7 +67,8 @@ function readAuthSnapshot(): AuthSnapshot {
     accessToken: localStorage.getItem(AUTH_TOKEN_KEY),
     refreshToken,
     expiresAt: Number(localStorage.getItem(TOKEN_EXPIRES_AT_KEY)),
-    userID: getStoredUserID()
+    userID: getStoredUserID(),
+    session: authSessionStamp(localStorage.getItem(AUTH_TOKEN_KEY))
   }
 }
 
@@ -71,7 +82,8 @@ function readStoredTokenPair(snapshot: AuthSnapshot): RefreshTokenResponse | nul
     !refreshToken ||
     !Number.isFinite(expiresAt) ||
     expiresAt <= Date.now() ||
-    getStoredUserID() !== snapshot.userID
+    getStoredUserID() !== snapshot.userID ||
+    authSessionStamp(accessToken) !== snapshot.session
   ) {
     return null
   }
@@ -154,7 +166,8 @@ async function requestTokenPair(
 
     if (
       localStorage.getItem(REFRESH_TOKEN_KEY) !== snapshot.refreshToken ||
-      getStoredUserID() !== snapshot.userID
+      getStoredUserID() !== snapshot.userID ||
+      authSessionStamp(localStorage.getItem(AUTH_TOKEN_KEY)) !== snapshot.session
     ) {
       const peerResult = readPeerRefreshResult(snapshot, failedAccessToken)
       if (peerResult) {
@@ -187,9 +200,11 @@ async function requestTokenPair(
   }
 }
 
-async function runRefresh(options: RefreshAuthTokensOptions): Promise<RefreshTokenResponse> {
-  const snapshot = readAuthSnapshot()
+async function runRefresh(snapshot: AuthSnapshot, options: RefreshAuthTokensOptions): Promise<RefreshTokenResponse> {
   const refresh = async (mayHaveUncoordinatedPeer = false): Promise<RefreshTokenResponse> => {
+    if (authSessionStamp(localStorage.getItem(AUTH_TOKEN_KEY)) !== snapshot.session) {
+      throw new Error('Session changed during token refresh')
+    }
     const peerResult = readPeerRefreshResult(snapshot, options.failedAccessToken)
     if (peerResult) {
       return peerResult
@@ -207,20 +222,22 @@ async function runRefresh(options: RefreshAuthTokensOptions): Promise<RefreshTok
 /**
  * Refresh and persist the browser session.
  *
- * Calls in the same document share one promise. Web Locks serialize refreshes across tabs, while
+ * Calls for the same logical session share one promise. Web Locks serialize refreshes across tabs, while
  * the token snapshot check adopts a peer's newly rotated token instead of logging the user out.
  */
 export function refreshAuthTokens(
   options: RefreshAuthTokensOptions = {}
 ): Promise<RefreshTokenResponse> {
-  if (inFlightRefresh) {
-    return inFlightRefresh
+  let snapshot: AuthSnapshot
+  try { snapshot = readAuthSnapshot() } catch (error) { return Promise.reject(error) }
+  if (inFlightRefresh?.session === snapshot.session) {
+    return inFlightRefresh.promise
   }
 
-  const pending = runRefresh(options)
-  inFlightRefresh = pending
+  const pending = runRefresh(snapshot, options)
+  inFlightRefresh = { session: snapshot.session, promise: pending }
   const clearPending = (): void => {
-    if (inFlightRefresh === pending) {
+    if (inFlightRefresh?.promise === pending) {
       inFlightRefresh = null
     }
   }

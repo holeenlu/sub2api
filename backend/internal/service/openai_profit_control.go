@@ -269,7 +269,7 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 	}
 }
 
-// attachSelectionProfitGate 把调度上下文里生效的利润门记录到选号结果上。门在
+// attachSelectionProfitGate 保存本次选号的利润门和借用亲和决策。门在
 // 选号函数内部的局部 ctx 上安装（composite/fallback 路由还可能解析出与入口
 // 分组不同的门），不随返回值离开调度栈；结果携带后 handler 才能对"真实过滤了
 // 候选的那个门"做抢槽后终检与准入后绑定。
@@ -277,18 +277,28 @@ func attachSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult)
 	if sel == nil {
 		return nil
 	}
+	if affinity := schedulingAffinityFrom(ctx); affinity != nil && affinity.home != nil {
+		copy := *affinity
+		sel.affinity = &copy
+	}
 	if gate, ok := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); ok && gate != nil {
 		sel.profitGate = gate
 	}
 	return sel
 }
 
-// ContextWithSelectionProfitGate 把选号时真实生效的利润门重放到 ctx 上。
+// ContextWithSelectionProfitGate 把选号时的利润门和借用亲和决策重放到 ctx 上。
 // handler 在拿到选号结果后必须用返回的 ctx 做抢槽后终检
 // （ProfitControlVetoLatest / GatewayProfitControlVetoLatest）与准入后粘性
 // 绑定，否则这两步会因为看不到调度栈内安装的门而退化为空操作。
 func ContextWithSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult) context.Context {
-	if sel == nil || sel.profitGate == nil {
+	if sel == nil {
+		return ctx
+	}
+	if sel.affinity != nil {
+		ctx = context.WithValue(ctx, schedulingAffinityKey{}, sel.affinity)
+	}
+	if sel.profitGate == nil {
 		return ctx
 	}
 	if existing, ok := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); ok && existing == sel.profitGate {
@@ -358,7 +368,7 @@ func (s *OpenAIGatewayService) BindStickySessionAfterProfitAdmission(ctx context
 	if sessionHash == "" || accountID <= 0 {
 		return nil
 	}
-	if preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
+	if preserveOpenAIGuardianParentBinding(ctx, sessionHash) || preserveBorrowedStickyHome(ctx, sessionHash, accountID) {
 		return nil
 	}
 	if !gatewayProfitControlGateActive(ctx) {
@@ -372,7 +382,9 @@ func (s *OpenAIGatewayService) BindStickySessionAfterProfitAdmission(ctx context
 	if existingAccountID > 0 && existingAccountID != accountID {
 		return nil
 	}
-	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+	// The compatibility read can race with another admitted request. Recheck
+	// ownership atomically when committing instead of writing unconditionally.
+	return s.refreshStickySessionTTL(ctx, groupID, sessionHash, accountID, s.openAIWSSessionStickyTTL())
 }
 
 // ---- 可观测性：按分组累计计数 + 采样日志（无逐请求输出） ----
