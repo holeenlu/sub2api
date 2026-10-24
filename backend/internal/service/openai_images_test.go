@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
-	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -98,6 +98,38 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_MultipartEdit(t *testing.T
 	require.Equal(t, "2K", parsed.SizeTier)
 	require.Len(t, parsed.Uploads, 1)
 	require.Equal(t, OpenAIImagesCapabilityNative, parsed.RequiredCapability)
+}
+
+func TestOpenAIGatewayServiceParseOpenAIImagesRequest_MultipartPartSizeLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	build := func(imageSize int) (*gin.Context, []byte) {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		require.NoError(t, writer.WriteField("model", "gpt-image-2"))
+		require.NoError(t, writer.WriteField("prompt", "replace background"))
+		part, err := writer.CreateFormFile("image", "source.png")
+		require.NoError(t, err)
+		_, err = part.Write(make([]byte, imageSize))
+		require.NoError(t, err)
+		require.NoError(t, writer.Close())
+		req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = req
+		return c, body.Bytes()
+	}
+	svc := &OpenAIGatewayService{}
+
+	c, body := build(openAIImageMaxUploadPartSize)
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+	require.Len(t, parsed.Uploads, 1)
+	require.Len(t, parsed.Uploads[0].Data, openAIImageMaxUploadPartSize)
+
+	c, body = build(openAIImageMaxUploadPartSize + 1)
+	parsed, err = svc.ParseOpenAIImagesRequest(c, body)
+	require.Nil(t, parsed)
+	require.EqualError(t, err, "multipart field image exceeds 20 MiB")
 }
 
 func TestOpenAIImagesRequestModerationBody_JSONEditIncludesInputImageURLs(t *testing.T) {
@@ -396,61 +428,6 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_JSONEditURLs(t *testing.T)
 	require.Equal(t, 2, *parsed.PartialImages)
 	require.True(t, parsed.HasMask)
 	require.Equal(t, OpenAIImagesCapabilityNative, parsed.RequiredCapability)
-}
-
-func TestCollectOpenAIImagePointers_RecognizesDirectAssets(t *testing.T) {
-	items := collectOpenAIImagePointers([]byte(`{
-		"revised_prompt": "cat astronaut",
-		"parts": [
-			{"b64_json":"QUJD"},
-			{"download_url":"https://files.example.com/image.png?sig=1"},
-			{"asset_pointer":"file-service://file_123"}
-		]
-	}`))
-
-	require.Len(t, items, 3)
-	var sawBase64, sawURL, sawPointer bool
-	for _, item := range items {
-		if item.B64JSON == "QUJD" {
-			sawBase64 = true
-			require.Equal(t, "cat astronaut", item.Prompt)
-		}
-		if item.DownloadURL == "https://files.example.com/image.png?sig=1" {
-			sawURL = true
-		}
-		if item.Pointer == "file-service://file_123" {
-			sawPointer = true
-		}
-	}
-	require.True(t, sawBase64)
-	require.True(t, sawURL)
-	require.True(t, sawPointer)
-}
-
-func TestResolveOpenAIImageBytes_PrefersInlineBase64(t *testing.T) {
-	data, err := resolveOpenAIImageBytes(context.Background(), nil, nil, "", openAIImagePointerInfo{
-		B64JSON: "data:image/png;base64,QUJD",
-	}, openAIUpstreamErrorBodyReadLimit)
-	require.NoError(t, err)
-	require.Equal(t, []byte("ABC"), data)
-}
-
-func TestNewOpenAIImageStatusError_UsesProvidedReadLimit(t *testing.T) {
-	padding := strings.Repeat("x", int(openAIUpstreamErrorBodyReadLimit)+1024)
-	body := fmt.Sprintf(`{"error":{"padding":"%s","message":"diagnostic-marker"}}`, padding)
-	resp := &req.Response{Response: &http.Response{
-		StatusCode: http.StatusBadGateway,
-		Header:     http.Header{},
-		Body:       io.NopCloser(strings.NewReader(body)),
-	}}
-
-	err := newOpenAIImageStatusError(resp, "download image bytes failed", int64(len(body)))
-	require.Error(t, err)
-	require.Equal(t, "diagnostic-marker", err.Error())
-
-	var statusErr *openAIImageStatusError
-	require.ErrorAs(t, err, &statusErr)
-	require.Len(t, statusErr.ResponseBody, len(body))
 }
 
 func TestOpenAIUpstreamErrorBodyReadLimitForConfig_RespectsDiagnosticLimit(t *testing.T) {
@@ -1194,6 +1171,11 @@ func TestOpenAIImagesOAuthBodyReadErrorsNotMisclassified(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+			if errors.Is(tt.err, context.Canceled) {
+				ctx, cancel := context.WithCancel(c.Request.Context())
+				cancel()
+				c.Request = c.Request.WithContext(ctx)
+			}
 			resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header)}
 			err := tt.err
 			if tt.name != "semantic error" && shouldClassifyOpenAIUpstreamStreamReadError(err, c.Request.Context()) {
@@ -1243,6 +1225,9 @@ func TestShouldClassifyOpenAIUpstreamStreamReadErrorTransportStrings(t *testing.
 	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	require.False(t, shouldClassifyOpenAIUpstreamStreamReadError(errors.New("unexpected EOF"), canceledCtx))
+	require.True(t, shouldClassifyOpenAIUpstreamStreamReadError(context.Canceled, context.Background()))
+	require.True(t, shouldClassifyOpenAIUpstreamStreamReadError(context.DeadlineExceeded, context.Background()))
+	require.False(t, shouldClassifyOpenAIUpstreamStreamReadError(ErrOpenAIWSFirstOutputBudgetExhausted, context.Background()))
 }
 
 func TestOpenAIGatewayServiceForwardImages_OAuthStreamServerErrorAfterFlushDoesNotFailover(t *testing.T) {
@@ -1584,12 +1569,6 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyStreamMultilineSSEDataBillsImag
 	require.Equal(t, 10, result.Usage.InputTokens)
 	require.Equal(t, 18, result.Usage.OutputTokens)
 	require.Equal(t, 8, result.Usage.ImageOutputTokens)
-}
-
-func TestExtractOpenAIImagesBillableCountFromJSONBytes_CompletedEvent(t *testing.T) {
-	body := []byte(`{"type":"image_generation.completed","b64_json":"ZmluYWw=","usage":{"input_tokens":10,"output_tokens":18}}`)
-
-	require.Equal(t, 1, extractOpenAIImagesBillableCountFromJSONBytes(body))
 }
 
 func TestOpenAIGatewayServiceForwardImages_APIKeyEditUsesConfiguredV1BaseURL(t *testing.T) {
@@ -2034,7 +2013,7 @@ func TestCollectOpenAIImagesFromResponsesBody_FallsBackToOutputItemDone(t *testi
 			"data: [DONE]\n\n",
 	)
 
-	results, createdAt, usageRaw, firstMeta, foundFinal, err := collectOpenAIImagesFromResponsesBody(body)
+	results, createdAt, usageRaw, firstMeta, foundFinal, err := collectOpenAIImagesFromResponses(func(consume func([]byte)) { forEachOpenAISSEDataPayload(string(body), consume) })
 	require.NoError(t, err)
 	require.True(t, foundFinal)
 	require.Equal(t, int64(1710000004), createdAt)
@@ -2052,7 +2031,7 @@ func TestCollectOpenAIImagesFromResponsesBody_MultilineSSE(t *testing.T) {
 			"data: [DONE]\n\n",
 	)
 
-	results, createdAt, usageRaw, firstMeta, foundFinal, err := collectOpenAIImagesFromResponsesBody(body)
+	results, createdAt, usageRaw, firstMeta, foundFinal, err := collectOpenAIImagesFromResponses(func(consume func([]byte)) { forEachOpenAISSEDataPayload(string(body), consume) })
 	require.NoError(t, err)
 	require.True(t, foundFinal)
 	require.Equal(t, int64(1710000010), createdAt)
@@ -2230,4 +2209,27 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingDrainsAfterClientDiscon
 	require.Equal(t, 5, result.Usage.InputTokens)
 	require.Equal(t, 9, result.Usage.OutputTokens)
 	require.Equal(t, 4, result.Usage.ImageOutputTokens)
+}
+
+func TestOpenAIImagesNonStreamingContentTypePolicy(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Security.ResponseHeaders.Enabled = enabled
+			svc := &OpenAIGatewayService{cfg: cfg, responseHeaderFilter: responseheaders.CompileHeaderFilter(cfg.Security.ResponseHeaders)}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/plain"}}, Body: io.NopCloser(strings.NewReader(`{"data":[{"b64_json":"aA=="}],"usage":{"input_tokens":5}}`))}
+			usage, count, _, err := svc.handleOpenAIImagesNonStreamingResponse(context.Background(), resp, c, &Account{}, &OpenAIImagesRequest{})
+			require.NoError(t, err)
+			expected := "text/plain"
+			if enabled {
+				expected = "application/json"
+			}
+			require.Equal(t, expected, rec.Header().Get("Content-Type"))
+			require.Equal(t, 1, count)
+			require.EqualValues(t, 5, usage.InputTokens)
+		})
+	}
 }

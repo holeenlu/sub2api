@@ -24,11 +24,10 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { OAuthLoginStart } from '@/api/auth'
-import { resolveAffiliateReferralCode, storeOAuthAffiliateCode } from '@/utils/oauthAffiliate'
+
 
 const props = withDefaults(defineProps<{
   disabled?: boolean
-  affCode?: string
   providerName?: string
   showDivider?: boolean
 }>(), {
@@ -51,7 +50,6 @@ const providerInitial = computed(() => normalizedProviderName.value.charAt(0).to
 
 function startLogin(): void {
   const redirectTo = (route.query.redirect as string) || '/dashboard'
-  storeOAuthAffiliateCode(resolveAffiliateReferralCode(props.affCode, route.query.aff, route.query.aff_code))
   emit('start', { provider: 'oidc', params: { redirect: redirectTo } })
 }
 </script>

@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -71,6 +72,9 @@ func (r *settingRepository) GetValue(ctx context.Context, key string) (string, e
 }
 
 func (r *settingRepository) Set(ctx context.Context, key, value string) error {
+	if key == authz.PolicyKey {
+		return service.ErrAdminPermissionDenied
+	}
 	now := time.Now()
 	return r.client.Setting.
 		Create().
@@ -113,6 +117,9 @@ func (r *settingRepository) GetMultiple(ctx context.Context, keys []string) (map
 }
 
 func (r *settingRepository) SetMultiple(ctx context.Context, settings map[string]string) error {
+	if _, exists := settings[authz.PolicyKey]; exists {
+		return service.ErrAdminPermissionDenied
+	}
 	if len(settings) == 0 {
 		return nil
 	}
@@ -129,6 +136,43 @@ func (r *settingRepository) SetMultiple(ctx context.Context, settings map[string
 		Exec(ctx)
 }
 
+// CompareAndSetMultiple 对现有设置执行条件写入。表级写锁同时覆盖其他入口的
+// INSERT/UPDATE/DELETE，避免新增键绕过行锁；读取不受阻塞，锁只持有至本次提交。
+func (r *settingRepository) CompareAndSetMultiple(ctx context.Context, revision string, values map[string]string) (string, error) {
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, ent.ErrTxStarted) {
+		return "", err
+	}
+	client := r.client
+	if tx != nil {
+		defer func() { _ = tx.Rollback() }()
+		client = tx.Client()
+	}
+	if _, err := client.ExecContext(ctx, "LOCK TABLE settings IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+		return "", err
+	}
+	writer := &settingRepository{client: client}
+	current, err := writer.GetAll(ctx)
+	if err != nil {
+		return "", err
+	}
+	if revision != service.SettingsRevision(current) {
+		return "", service.ErrSettingsRevisionConflict
+	}
+	if err := writer.SetMultiple(ctx, values); err != nil {
+		return "", err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return "", err
+		}
+	}
+	for key, value := range values {
+		current[key] = value
+	}
+	return service.SettingsRevision(current), nil
+}
+
 func (r *settingRepository) GetAll(ctx context.Context) (map[string]string, error) {
 	settings, err := r.client.Setting.Query().All(ctx)
 	if err != nil {
@@ -143,6 +187,9 @@ func (r *settingRepository) GetAll(ctx context.Context) (map[string]string, erro
 }
 
 func (r *settingRepository) Delete(ctx context.Context, key string) error {
+	if key == authz.PolicyKey {
+		return service.ErrAdminPermissionDenied
+	}
 	_, err := r.client.Setting.Delete().Where(setting.KeyEQ(key)).Exec(ctx)
 	return err
 }
