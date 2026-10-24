@@ -13,7 +13,8 @@ const {
   showInfo,
   showWarning,
   syncUpstreamModels,
-  syncUpstreamModelsPreview
+  syncUpstreamModelsPreview,
+  getModelAllowlistCandidates
 } = vi.hoisted(() => ({
   copyToClipboard: vi.fn().mockResolvedValue(true),
   showError: vi.fn(),
@@ -21,7 +22,8 @@ const {
   showInfo: vi.fn(),
   showWarning: vi.fn(),
   syncUpstreamModels: vi.fn(),
-  syncUpstreamModelsPreview: vi.fn()
+  syncUpstreamModelsPreview: vi.fn(),
+  getModelAllowlistCandidates: vi.fn()
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -56,6 +58,8 @@ vi.mock('@/composables/useClipboard', () => ({
   })
 }))
 
+vi.mock('@/api/admin/groups', () => ({ getModelAllowlistCandidates }))
+
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
 
 function mountSelector(props: Record<string, unknown> = {}) {
@@ -86,6 +90,94 @@ function findModelRow(wrapper: ReturnType<typeof mountSelector>, modelId: string
 }
 
 describe('ModelWhitelistSelector', () => {
+  it('loads and appends the group built-in catalog while preserving custom models', async () => {
+    getModelAllowlistCandidates.mockResolvedValue(['gpt-reserve', 'gpt-6.1-sol'])
+    const wrapper = mountSelector({ modelValue: ['custom', 'gpt-reserve'] })
+    await flushPromises()
+    await wrapper.get('div.cursor-pointer').trigger('click')
+    expect(wrapper.findAll('[data-testid="model-option"]').map(row => row.text())).toEqual(['gpt-reserve', 'gpt-6.1-sol'])
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.fillRelatedModels')!.trigger('click')
+    await flushPromises()
+    expect(getModelAllowlistCandidates).toHaveBeenLastCalledWith(0, 'openai')
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['custom', 'gpt-reserve', 'gpt-6.1-sol']]])
+  })
+
+  it('merges built-in catalogs for mixed platform targets without duplicates', async () => {
+    getModelAllowlistCandidates.mockImplementation(async (_id: number, platform: string) =>
+      platform === 'openai' ? ['gpt-reserve', 'shared'] : ['claude-haiku-5-5', 'shared'])
+    const wrapper = mountSelector({ platforms: ['openai', 'anthropic'] })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.fillRelatedModels')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['gpt-reserve', 'shared', 'claude-haiku-5-5']]])
+  })
+
+  it('keeps the draft on catalog failure and retries without a stale local fallback', async () => {
+    const wrapper = mountSelector({ modelValue: ['custom'] })
+    await flushPromises()
+    getModelAllowlistCandidates.mockRejectedValueOnce(new Error('offline'))
+    const syncButton = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.fillRelatedModels')!
+    await syncButton.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(showError).toHaveBeenCalledWith('admin.accounts.modelSyncBuiltinFailed')
+    getModelAllowlistCandidates.mockResolvedValueOnce(['gpt-reserve'])
+    await syncButton.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['custom', 'gpt-reserve']]])
+  })
+
+  it.each(['switch', 'close'])('ignores pending built-in sync after %s', async (action) => {
+    const wrapper = mountSelector()
+    await flushPromises()
+    let complete!: (models: string[]) => void
+    getModelAllowlistCandidates.mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.fillRelatedModels')!.trigger('click')
+    if (action === 'switch') await wrapper.setProps({ platform: 'anthropic' })
+    else wrapper.unmount()
+    complete(['gpt-reserve'])
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it.each(['anthropic', 'openai'])('bulk %s sync adds only common upstream models and preserves the draft', async (platform) => {
+    const model = platform === 'openai' ? 'gpt-reserve' : 'claude-haiku-5-5'
+    syncUpstreamModels.mockResolvedValueOnce({ models: [model, 'only-first'] })
+      .mockResolvedValueOnce({ models: [` ${model} `, 'only-second'] })
+    const wrapper = mountSelector({ platform, modelValue: ['custom'], syncAccountIds: async () => [1, 2, 1] })
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+    expect(syncUpstreamModels.mock.calls).toEqual([[1], [2]])
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['custom', model]]])
+    expect(wrapper.emitted('upstream-synced')).toBeUndefined()
+  })
+
+  it('stops a pending bulk sync after the selector is closed', async () => {
+    let complete!: (value: { models: string[] }) => void
+    syncUpstreamModels.mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    const wrapper = mountSelector({ platform: 'anthropic', syncAccountIds: async () => [1, 2] })
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+    wrapper.unmount()
+    complete({ models: ['claude-haiku-5-5'] })
+    await flushPromises()
+    expect(syncUpstreamModels).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(showSuccess).not.toHaveBeenCalled()
+  })
+
+  it.each(['failure', 'empty', 'disjoint'])('bulk sync keeps the draft on %s instead of applying a partial or empty whitelist', async (mode) => {
+    syncUpstreamModels.mockResolvedValueOnce({ models: ['claude-haiku-5-5'] })
+    if (mode === 'failure') syncUpstreamModels.mockRejectedValueOnce(new Error('upstream unavailable'))
+    else syncUpstreamModels.mockResolvedValueOnce({ models: mode === 'empty' ? [] : ['other-model'] })
+    const wrapper = mountSelector({ platform: 'anthropic', modelValue: ['custom'], syncAccountIds: async () => [1, 2] })
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(showError).toHaveBeenCalled()
+    expect(showSuccess).not.toHaveBeenCalled()
+  })
+
   beforeEach(() => {
     copyToClipboard.mockClear()
     showError.mockReset()
@@ -94,6 +186,7 @@ describe('ModelWhitelistSelector', () => {
     showWarning.mockReset()
     syncUpstreamModels.mockReset()
     syncUpstreamModelsPreview.mockReset()
+    getModelAllowlistCandidates.mockReset().mockResolvedValue(['gpt-5.6-sol'])
   })
 
   afterEach(() => {
@@ -184,6 +277,7 @@ describe('ModelWhitelistSelector', () => {
 
   it('copies a model ID without selecting the model', async () => {
     const wrapper = mountSelector()
+    await flushPromises()
     await wrapper.get('div.cursor-pointer').trigger('click')
 
     const row = findModelRow(wrapper, 'gpt-5.6-sol')
@@ -200,6 +294,7 @@ describe('ModelWhitelistSelector', () => {
 
   it('keeps the existing model selection behavior', async () => {
     const wrapper = mountSelector()
+    await flushPromises()
     await wrapper.get('div.cursor-pointer').trigger('click')
 
     const row = findModelRow(wrapper, 'gpt-5.6-sol')
