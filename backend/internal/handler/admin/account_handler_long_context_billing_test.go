@@ -180,6 +180,49 @@ func TestApplyOAuthCredentialsPreservesExistingNonAuthCredentials(t *testing.T) 
 	}, stub.lastUpdateAccountInput.Credentials)
 }
 
+func TestApplyOAuthCredentialsSetupTokenExpiryAndRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		credentials map[string]any
+	}{
+		{"manual CLI token", map[string]any{"access_token": "sk-ant-oat01-new"}},
+		{"browser inference OAuth", map[string]any{"access_token": "sk-ant-oat01-new", "refresh_token": "new-rt", "expires_at": float64(2000000000), "expires_in": float64(3600)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			stub := newStubAdminService()
+			stub.getAccountResult = &service.Account{
+				ID:       1,
+				Platform: service.PlatformAnthropic,
+				Type:     service.AccountTypeOAuth,
+				Credentials: map[string]any{
+					"access_token":  "old-token",
+					"refresh_token": "old-refresh-token",
+					"expires_at":    float64(1000000000),
+					"expires_in":    float64(100),
+				},
+			}
+			handler := NewAccountHandler(stub, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.POST("/accounts/:id/apply-oauth-credentials", handler.ApplyOAuthCredentials)
+			recorder := httptest.NewRecorder()
+			body, err := json.Marshal(map[string]any{"type": "setup-token", "credentials": tc.credentials})
+			require.NoError(t, err)
+			request := httptest.NewRequest(http.MethodPost, "/accounts/1/apply-oauth-credentials", bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			// The real service merges redacted credentials once more. Verify that the
+			// explicit deletion survives that merge instead of resurrecting the old RT.
+			finalCredentials := service.MergePreservingSensitiveCreds(stub.getAccountResult.Credentials, stub.lastUpdateAccountInput.Credentials)
+			require.Equal(t, tc.credentials, finalCredentials)
+
+		})
+	}
+}
+
 func TestOpenAIOAuthCodexPATBoundaryRejectsMalformedOpenAILongContextBillingValueBeforeTokenValidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewOpenAIOAuthHandler(nil, newStubAdminService(), nil, nil)
