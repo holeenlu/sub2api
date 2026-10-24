@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -744,7 +745,8 @@ func TestBackupService_RestoreBackup_Streaming(t *testing.T) {
 	require.NoError(t, err)
 
 	// 验证 psql 收到的数据是否与原始 dump 内容一致
-	require.Equal(t, dumpContent, string(dumper.restored))
+	require.True(t, strings.HasPrefix(string(dumper.restored), dumpContent))
+	require.Contains(t, string(dumper.restored), "UPDATE users SET session_generation =")
 }
 
 func TestBackupService_RestoreBackup_SplitParts(t *testing.T) {
@@ -777,7 +779,8 @@ func TestBackupService_RestoreBackup_SplitParts(t *testing.T) {
 	require.NoError(t, svc.saveRecord(context.Background(), record))
 
 	require.NoError(t, svc.RestoreBackup(context.Background(), record.ID))
-	require.Equal(t, dumpContent, dumper.restored)
+	require.True(t, bytes.HasPrefix(dumper.restored, dumpContent))
+	require.Contains(t, string(dumper.restored), "UPDATE users SET session_generation =")
 }
 
 func TestBackupService_RestoreBackup_SplitPartsMissingPartDoesNotRestore(t *testing.T) {
@@ -1366,5 +1369,19 @@ func TestBackupService_StartRestore_SplitParts(t *testing.T) {
 	final, err := svc.GetBackupRecord(context.Background(), record.ID)
 	require.NoError(t, err)
 	require.Equal(t, "completed", final.RestoreStatus)
-	require.Equal(t, dumpContent, dumper.restored)
+	require.True(t, bytes.HasPrefix(dumper.restored, dumpContent))
+	require.Contains(t, string(dumper.restored), "UPDATE users SET session_generation =")
+}
+
+func TestBackupRestoreUsesFreshGenerationForEveryRestore(t *testing.T) {
+	dumper := &mockDumper{}
+	svc := &BackupService{dumper: dumper}
+	require.NoError(t, svc.restoreWithSessionInvalidation(context.Background(), strings.NewReader("-- original dump\n")))
+	first := string(dumper.restored)
+	require.True(t, strings.HasPrefix(first, "-- original dump\n"))
+	require.Contains(t, first, "UPDATE pending_auth_sessions SET consumed_at = NOW()")
+	require.NoError(t, svc.restoreWithSessionInvalidation(context.Background(), strings.NewReader("-- original dump\n")))
+	require.NotEqual(t, first, string(dumper.restored), "restoring the same backup must not revive an earlier login generation")
+	dumper.restErr = errors.New("restore transaction rolled back")
+	require.Error(t, svc.restoreWithSessionInvalidation(context.Background(), strings.NewReader("-- original dump\n")))
 }

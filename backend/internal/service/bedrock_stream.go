@@ -29,7 +29,8 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 	account *Account,
 	startTime time.Time,
 	model string,
-) (*streamingResult, error) {
+) (result *streamingResult, retErr error) {
+	defer GuardSSEWrites(c)()
 	w := c.Writer
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -47,6 +48,17 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
 	clientDisconnected := false
+	defer func() {
+		result = &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected || streamClientDisconnected(c)}
+		if retErr != nil && !result.clientDisconnect {
+			code, message := anthropicCompatError(retErr)
+			MarkOpsStreamError(c, code, message, http.StatusBadGateway)
+			writeSSE(c.Writer, "error", map[string]any{"type": "error", "error": map[string]string{"type": code, "message": message}})
+			c.Writer.Flush()
+		}
+	}()
+	drain := newOpenAIHTTPUsageDrain(c.Request.Context(), resp.Body.Close, ctx, streamWriteContext(c))
+	defer drain.stop()
 
 	// Bedrock EventStream 使用 application/vnd.amazon.eventstream 二进制格式。
 	// 每个帧结构：total_length(4) + headers_length(4) + prelude_crc(4) + headers + payload + message_crc(4)
@@ -60,6 +72,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 	}
 	events := make(chan decodeEvent, 16)
 	done := make(chan struct{})
+	readerDone := make(chan struct{})
 	sendEvent := func(ev decodeEvent) bool {
 		select {
 		case events <- ev:
@@ -72,6 +85,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 	lastReadAt.Store(time.Now().UnixNano())
 
 	go func() {
+		defer close(readerDone)
 		defer close(events)
 		for {
 			payload, err := decoder.Decode()
@@ -88,7 +102,11 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 			}
 		}
 	}()
-	defer close(done)
+	defer func() {
+		close(done)
+		_ = resp.Body.Close()
+		<-readerDone
+	}()
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
@@ -104,20 +122,32 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 		intervalCh = intervalTicker.C
 	}
 
+	// Keep heartbeats in the same writer loop as business events. They neither
+	// advance TTFT/usage nor reset the upstream data-idle deadline.
+	keepaliveInterval := time.Duration(0)
+	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+	}
+	var keepaliveCh <-chan time.Time
+	if keepaliveInterval > 0 {
+		ticker := time.NewTicker(keepaliveInterval)
+		defer ticker.Stop()
+		keepaliveCh = ticker.C
+	}
+	lastWriteAt := time.Now()
+	var lifecycle anthropicStreamLifecycle
+
 	for {
+		clientDisconnected = clientDisconnected || drain.disconnected() || downstreamStreamError(c) != nil
 		select {
 		case ev, ok := <-events:
+			clientDisconnected = clientDisconnected || drain.disconnected()
+
 			if !ok {
-				if !clientDisconnected {
-					flusher.Flush()
-				}
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+				return nil, fmt.Errorf("Bedrock stream ended without message_stop: %w", io.ErrUnexpectedEOF)
 			}
 			if ev.err != nil {
 				if clientDisconnected {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
-				}
-				if errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
 				}
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("bedrock stream read error: %w", ev.err)
@@ -125,8 +155,8 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 
 			// payload 是 JSON，提取 chunk.bytes（base64 编码的 Claude SSE 事件数据）
 			sseData := extractBedrockChunkData(ev.payload)
-			if sseData == nil {
-				continue
+			if sseData == nil || !gjson.ValidBytes(sseData) {
+				return nil, errors.New("invalid Bedrock chunk")
 			}
 
 			if firstTokenMs == nil {
@@ -143,6 +173,13 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 
 			// 确定 SSE event type
 			eventType := gjson.GetBytes(sseData, "type").String()
+			if eventType == "error" {
+				return nil, &sseStreamErrorEventError{RawData: string(sseData)}
+			}
+			terminal, err := lifecycle.observe(eventType, string(sseData))
+			if err != nil {
+				return nil, err
+			}
 
 			// 写入标准 SSE 格式
 			if !clientDisconnected {
@@ -157,8 +194,26 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 					logger.LegacyPrintf("service.gateway", "[Bedrock] Client disconnected during streaming, continue draining for usage: account=%d", account.ID)
 				} else {
 					flusher.Flush()
+					clientDisconnected = downstreamStreamError(c) != nil
+					lastWriteAt = time.Now()
 				}
 			}
+			if terminal {
+				return nil, nil
+			}
+
+		case <-keepaliveCh:
+			if clientDisconnected || time.Since(lastWriteAt) < keepaliveInterval {
+				continue
+			}
+			if _, err := io.WriteString(w, "event: ping\ndata: {\"type\":\"ping\"}\n\n"); err != nil {
+				clientDisconnected = true
+				drain.start()
+				continue
+			}
+			flusher.Flush()
+			clientDisconnected = downstreamStreamError(c) != nil
+			lastWriteAt = time.Now()
 
 		case <-intervalCh:
 			lastRead := time.Unix(0, lastReadAt.Load())
@@ -172,7 +227,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, model)
 			}
-			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
+			return nil, errAnthropicCompatStreamIdle
 		}
 	}
 }
@@ -267,6 +322,10 @@ func (d *bedrockEventStreamDecoder) Decode() ([]byte, error) {
 
 		if totalLength < 16 { // minimum: 12 prelude + 4 message_crc
 			return nil, fmt.Errorf("invalid eventstream frame: total_length=%d", totalLength)
+		}
+		// Bound allocations before trusting the upstream's CRC-valid lengths.
+		if totalLength > 32<<20 || headersLength > 128<<10 || headersLength > totalLength-16 {
+			return nil, fmt.Errorf("invalid eventstream lengths: total=%d headers=%d", totalLength, headersLength)
 		}
 
 		// 读取 headers + payload + message_crc

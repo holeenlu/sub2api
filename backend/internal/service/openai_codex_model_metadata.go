@@ -3,9 +3,10 @@ package service
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"net/url"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 var codexToolCapabilityFields = []string{
@@ -96,6 +97,15 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 		if disabled && bytes.Equal(capabilities["use_responses_lite"], []byte("true")) {
 			capabilities["use_responses_lite"] = json.RawMessage("false")
 		}
+	}
+	// This function receives the mapped upstream model. A BPS relay does not
+	// implement Codex's native encrypted multi-agent message contract, even
+	// when the underlying ChatGPT model advertises it. Explicit nulls override
+	// synced/bundled declarations without disabling ordinary plaintext tools.
+	if account.isExcelBPSUpstreamModelEnabled(modelID) {
+		capabilities["multi_agent_version"] = json.RawMessage("null")
+		capabilities["multi_agent_reasoning_effort"] = json.RawMessage("null")
+		capabilities["use_responses_lite"] = json.RawMessage("false")
 	}
 	// API Astra publicly supports Ultrafast. OAuth must advertise it in its
 	// account manifest; a subscription label alone does not grant the capability.

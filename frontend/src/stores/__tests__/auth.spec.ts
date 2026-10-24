@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
+import { CanceledError } from 'axios'
 
 // Mock authAPI
 const mockLogin = vi.fn()
@@ -61,6 +62,68 @@ describe('useAuthStore', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it.each(['login', 'logout', 'refreshUser'])('旧 %s 的完成不清除另一登录会话', async operation => {
+    const store = useAuthStore()
+    mockLogin.mockResolvedValueOnce(fakeAuthResponse)
+    await store.login({ email: 'test@example.com', password: 'secret' })
+    let finish!: () => void
+    const delayed = new Promise((resolve, reject) => {
+      finish = () => operation === 'logout' ? resolve(undefined) : reject(new CanceledError('old session'))
+    })
+    if (operation === 'login') mockLogin.mockReturnValueOnce(delayed)
+    if (operation === 'logout') mockLogout.mockReturnValueOnce(delayed)
+    if (operation === 'refreshUser') mockGetCurrentUser.mockReturnValueOnce(delayed)
+    const pending = operation === 'login' ? store.login({ email: 'test@example.com', password: 'secret' })
+      : operation === 'logout' ? store.logout() : store.refreshUser()
+    const settled = operation === 'logout' ? expect(pending).resolves.toBeUndefined() : expect(pending).rejects.toMatchObject({ code: 'ERR_CANCELED' })
+    mockLogin.mockResolvedValueOnce({ ...fakeAuthResponse, access_token: 'replacement-login', refresh_token: 'replacement-refresh', user: fakeAdminUser })
+    await store.login({ email: 'admin@example.com', password: 'secret' })
+    finish()
+    await settled
+    expect(store.token).toBe('replacement-login')
+    expect(store.user?.id).toBe(2)
+    expect(localStorage.getItem('auth_token')).toBe('replacement-login')
+    expect(localStorage.getItem('refresh_token')).toBe('replacement-refresh')
+  })
+
+  it.each(['logout', 'refreshUser'])('%s 的 401 已清存储时仍清除原会话内存与定时器', async operation => {
+    const store = useAuthStore()
+    mockLogin.mockResolvedValueOnce(fakeAuthResponse)
+    await store.login({ email: 'test@example.com', password: 'secret' })
+    const expired = async () => {
+      localStorage.clear()
+      throw { status: 401 }
+    }
+    if (operation === 'logout') mockLogout.mockImplementationOnce(expired)
+    else mockGetCurrentUser.mockImplementationOnce(expired)
+    if (operation === 'logout') await store.logout()
+    else await expect(store.refreshUser()).rejects.toMatchObject({ status: 401 })
+    expect(store.token).toBeNull()
+    expect(store.user).toBeNull()
+    expect(store.isAuthenticated).toBe(false)
+    const userRequests = mockGetCurrentUser.mock.calls.length
+    const tokenRequests = mockRefreshToken.mock.calls.length
+    await vi.advanceTimersByTimeAsync(3600_000)
+    expect(mockGetCurrentUser).toHaveBeenCalledTimes(userRequests)
+    expect(mockRefreshToken).toHaveBeenCalledTimes(tokenRequests)
+  })
+
+  it('存储已清空时迟到注销不清除另一会话的内存', async () => {
+    const store = useAuthStore()
+    mockLogin.mockResolvedValueOnce(fakeAuthResponse)
+    await store.login({ email: 'test@example.com', password: 'secret' })
+    let finish!: () => void
+    mockLogout.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve }))
+    const pending = store.logout()
+    mockLogin.mockResolvedValueOnce({ ...fakeAuthResponse, access_token: 'replacement-login', user: fakeAdminUser })
+    await store.login({ email: 'admin@example.com', password: 'secret' })
+    localStorage.clear()
+    finish()
+    await pending
+    expect(store.token).toBe('replacement-login')
+    expect(store.user?.id).toBe(2)
   })
 
   // --- login ---
