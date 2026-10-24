@@ -580,7 +580,9 @@ func TestResponsesEventToAnthropicEvents_ResponseDone(t *testing.T) {
 			Usage:  &ResponsesUsage{InputTokens: 12, OutputTokens: 4},
 		},
 	}, state)
-	require.Len(t, events, 2)
+	require.Len(t, events, 3)
+	assert.Equal(t, "message_start", events[0].Type)
+	events = events[1:]
 	assert.Equal(t, "message_delta", events[0].Type)
 	assert.Equal(t, "end_turn", events[0].Delta.StopReason)
 	assert.Equal(t, 12, events[0].Usage.InputTokens)
@@ -607,7 +609,9 @@ func TestResponsesEventToAnthropicEvents_TopLevelTerminalUsage(t *testing.T) {
 		},
 	}, state)
 
-	require.Len(t, events, 2)
+	require.Len(t, events, 3)
+	assert.Equal(t, "message_start", events[0].Type)
+	events = events[1:]
 	assert.Equal(t, "message_delta", events[0].Type)
 	require.NotNil(t, events[0].Usage)
 	assert.Equal(t, 15, events[0].Usage.InputTokens)
@@ -628,7 +632,9 @@ func TestResponsesEventToAnthropicEvents_ResponseDoneIncomplete(t *testing.T) {
 			Usage:             &ResponsesUsage{InputTokens: 12, OutputTokens: 4},
 		},
 	}, state)
-	require.Len(t, events, 2)
+	require.Len(t, events, 3)
+	assert.Equal(t, "message_start", events[0].Type)
+	events = events[1:]
 	assert.Equal(t, "message_delta", events[0].Type)
 	assert.Equal(t, "max_tokens", events[0].Delta.StopReason)
 	assert.Equal(t, "message_stop", events[1].Type)
@@ -698,10 +704,12 @@ func TestStreamingToolCall(t *testing.T) {
 
 	// 4. arguments done
 	events = ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
-		Type: "response.function_call_arguments.done",
+		Type:      "response.function_call_arguments.done",
+		Arguments: `{"city":"Osaka"}`,
 	}, state)
-	require.Len(t, events, 1)
-	assert.Equal(t, "content_block_stop", events[0].Type)
+	require.Len(t, events, 2)
+	assert.Equal(t, `"Osaka"}`, events[0].Delta.PartialJSON)
+	assert.Equal(t, "content_block_stop", events[1].Type)
 
 	// 5. completed with tool_calls
 	events = ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
@@ -960,7 +968,9 @@ func TestFinalizeStream_ToolCallAbnormalTerminationKeepsToolUseStopReason(t *tes
 	}, state)
 
 	events := FinalizeResponsesAnthropicStream(state)
-	require.Len(t, events, 3)
+	require.Len(t, events, 4)
+	assert.Equal(t, "{}", events[0].Delta.PartialJSON)
+	events = events[1:]
 	assert.Equal(t, "content_block_stop", events[0].Type)
 	assert.Equal(t, "message_delta", events[1].Type)
 	assert.Equal(t, "tool_use", events[1].Delta.StopReason)
@@ -1387,6 +1397,7 @@ func TestAnthropicToResponses_UserImageBlock(t *testing.T) {
 	assert.Equal(t, "What is in this image?", parts[0].Text)
 	assert.Equal(t, "input_image", parts[1].Type)
 	assert.Equal(t, "data:image/png;base64,iVBOR", parts[1].ImageURL)
+	assert.Equal(t, "auto", parts[1].Detail)
 }
 
 func TestAnthropicToResponses_ImageOnlyUserMessage(t *testing.T) {
@@ -1449,6 +1460,7 @@ func TestAnthropicToResponses_ToolResultWithImage(t *testing.T) {
 	require.Len(t, parts, 1)
 	assert.Equal(t, "input_image", parts[0].Type)
 	assert.Equal(t, "data:image/png;base64,iVBOR", parts[0].ImageURL)
+	assert.Equal(t, "auto", parts[0].Detail)
 }
 
 func TestAnthropicToResponses_ToolResultMixed(t *testing.T) {
@@ -1854,8 +1866,8 @@ func TestOpus55ResponsesAdaptiveThinkingAndToolChoice(t *testing.T) {
 	require.ErrorContains(t, err, "reasoning effort")
 	old, err := ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-opus-5", Input: json.RawMessage(`"hello"`), Reasoning: &ResponsesReasoning{Effort: "xhigh"}})
 	require.NoError(t, err)
-	require.Equal(t, "max", old.OutputConfig.Effort)
-	require.Equal(t, "enabled", old.Thinking.Type)
+	require.Equal(t, "xhigh", old.OutputConfig.Effort)
+	require.Equal(t, "adaptive", old.Thinking.Type)
 }
 
 func TestOpus55SignedThinkingResponsesRoundTrip(t *testing.T) {
@@ -1915,6 +1927,45 @@ func TestSonnet55ResponsesThinkingAndSampling(t *testing.T) {
 	temperature, topP = 1, 0.99
 	_, err = ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-sonnet-5-5", Input: json.RawMessage(`"hello"`), Temperature: &temperature, TopP: &topP})
 	require.NoError(t, err)
+}
+
+func TestResponsesManualThinkingIntentAndLimit(t *testing.T) {
+	for _, model := range []string{"claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-1", "claude-opus-4-5"} {
+		for _, effort := range []string{"", "none", "low"} {
+			t.Run(model+"/"+effort, func(t *testing.T) {
+				req := &ResponsesRequest{Model: model, Input: json.RawMessage(`"hello"`), Reasoning: &ResponsesReasoning{Effort: effort}}
+				out, err := ResponsesToAnthropicRequest(req)
+				require.NoError(t, err)
+				switch effort {
+				case "":
+					require.Nil(t, out.Thinking)
+				case "none":
+					require.Equal(t, &AnthropicThinking{Type: "disabled"}, out.Thinking)
+				case "low":
+					require.Equal(t, &AnthropicThinking{Type: "enabled", BudgetTokens: 1024}, out.Thinking)
+				}
+				if model == "claude-opus-4-5" && effort == "low" {
+					require.Equal(t, &AnthropicOutputConfig{Effort: "low"}, out.OutputConfig)
+				} else {
+					require.Nil(t, out.OutputConfig)
+				}
+			})
+		}
+	}
+	for _, maxTokens := range []int{1024, 1025} {
+		out, err := ResponsesToAnthropicRequest(&ResponsesRequest{
+			Model: "claude-opus-4-5", Input: json.RawMessage(`"hello"`),
+			Reasoning: &ResponsesReasoning{Effort: "high"}, MaxOutputTokens: &maxTokens,
+		})
+		if maxTokens == 1024 {
+			require.ErrorContains(t, err, "max_tokens greater than 1024")
+			require.Nil(t, out)
+			continue
+		}
+		require.NoError(t, err)
+		require.Equal(t, maxTokens, out.MaxTokens, "conversion must not raise the caller's limit")
+		require.Equal(t, &AnthropicThinking{Type: "enabled", BudgetTokens: 1024}, out.Thinking)
+	}
 }
 
 func TestSonnet55SignedThinkingResponsesRoundTrip(t *testing.T) {
@@ -2057,4 +2108,21 @@ func TestGPT61SolCacheOptionsAndBreakpointsSurviveChatBridge(t *testing.T) {
 		require.JSONEq(t, `{"ttl":"30m","mode":"explicit"}`, string(out.PromptCacheOptions))
 		require.Contains(t, string(out.Input), "prompt_cache_breakpoint")
 	}
+}
+
+func TestResponsesIntermediateKeepsSignedThinkingWithoutClaudeModeRestrictions(t *testing.T) {
+	block := AnthropicContentBlock{Type: "thinking", Signature: "signed-original"}
+	response := AnthropicToResponsesResponse(&AnthropicResponse{Model: "claude-sonnet-5-5", Content: []AnthropicContentBlock{block}})
+	input, err := json.Marshal(response.Output)
+	require.NoError(t, err)
+	var wire []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(input, &wire))
+	require.JSONEq(t, `[]`, string(wire[0]["summary"]))
+	request, err := ResponsesToAnthropicIntermediateRequest(&ResponsesRequest{Model: "claude-sonnet-5-5", Input: input, Reasoning: &ResponsesReasoning{Effort: "none"}})
+	require.NoError(t, err)
+	require.Equal(t, "disabled", request.Thinking.Type)
+	require.Len(t, request.Messages, 1)
+	var blocks []AnthropicContentBlock
+	require.NoError(t, json.Unmarshal(request.Messages[0].Content, &blocks))
+	require.Equal(t, []AnthropicContentBlock{block}, blocks)
 }

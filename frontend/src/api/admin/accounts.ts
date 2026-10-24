@@ -1,9 +1,42 @@
+import type { AccountTelemetryState } from '@/utils/accountTelemetry'
 /**
  * Admin Accounts API endpoints
  * Handles AI platform account management for administrators
  */
 
 import { apiClient } from '../client'
+
+export interface OpenAICloudStatus {
+  enabled: boolean
+  runtime_blocked: boolean
+  last_error?: string
+}
+
+export async function getCloudStatus(id: number): Promise<OpenAICloudStatus> {
+  const { data } = await apiClient.get<OpenAICloudStatus>(`/admin/accounts/${id}/cloud`)
+  return data
+}
+
+export interface CloudUnsettled {
+  root_id: string
+  sequence: number
+  thread_id: string
+  turn_id: string
+  model: string
+  observed_usage: Record<string, unknown> | null
+}
+export async function getCloudUnsettled(id: number): Promise<CloudUnsettled[]> {
+  const { data } = await apiClient.get<CloudUnsettled[]>(`/admin/accounts/${id}/cloud/unsettled`)
+  return data
+}
+export async function reconcileCloud(id: number, input: { root_id: string; sequence: number; status: string; usage: Record<string, unknown>; evidence: string; reason: string; confirmed: boolean }): Promise<void> {
+  await apiClient.post(`/admin/accounts/${id}/cloud/reconcile`, input)
+}
+
+export async function creationDefaults(): Promise<{ concurrency: number; priority: number }> {
+  const { data } = await apiClient.get('/admin/accounts/defaults')
+  return data
+}
 import type { OpenAIReferralRefreshResult, OpenAIReferralSendResult } from '@/types/openaiReferrals'
 import type {
   Account,
@@ -532,7 +565,8 @@ export async function batchUpdateCredentials(request: {
  */
 export async function bulkUpdate(
   accountIdsOrPayload: number[] | Record<string, unknown>,
-  updates?: Record<string, unknown>
+  updates?: Record<string, unknown>,
+  params?: Record<string, unknown>
 ): Promise<{
   success: number
   failed: number
@@ -554,7 +588,7 @@ export async function bulkUpdate(
     failed_ids?: number[]
     long_context_inherited_count?: number
     results: Array<{ account_id: number; success: boolean; error?: string }>
-  }>('/admin/accounts/bulk-update', payload)
+  }>('/admin/accounts/bulk-update', payload, params ? { params } : undefined)
   return data
 }
 
@@ -1132,6 +1166,8 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
 }
 
 export const accountsAPI = {
+  getCloudStatus,
+  creationDefaults,
   list,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
@@ -1203,3 +1239,8 @@ export const accountsAPI = {
 }
 
 export default accountsAPI
+
+export async function importAccountTelemetry(id: number, bundle: unknown): Promise<AccountTelemetryState> {
+  const { data } = await apiClient.post<AccountTelemetryState>('/admin/accounts/' + id + '/telemetry/import', bundle)
+  return data
+}
