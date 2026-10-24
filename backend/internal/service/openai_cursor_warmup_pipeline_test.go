@@ -1,7 +1,12 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -154,46 +159,24 @@ func TestCursorMixedShape_JSONRoundtrip(t *testing.T) {
 	require.Len(t, inputArr, 1)
 }
 
-// TestCursorMixedShape_StripsUnsupportedFields mirrors the strip loop in
-// ForwardAsChatCompletions (isResponsesShape branch). Cursor cloud sends
-// prompt_cache_retention, safety_identifier, metadata and stream_options
-// as top-level Responses API parameters, which Codex upstreams reject with
-// "Unsupported parameter: ...". The fix must remove them from the raw body
-// before it is forwarded, for BOTH OAuth and API Key account types.
-func TestCursorMixedShape_StripsUnsupportedFields(t *testing.T) {
-	cursorBody := []byte(`{
-		"model": "gpt-5.4",
-		"stream": true,
-		"prompt_cache_retention": "24h",
-		"safety_identifier": "cursor-user-xyz",
-		"metadata": {"trace_id":"abc","caller":"cursor"},
-		"stream_options": {"include_usage": true},
-		"input": [{"role":"user","content":"hi"}]
-	}`)
-
-	// Sanity: the test fixture contains every field the production code strips.
-	for _, field := range cursorResponsesUnsupportedFields {
-		require.True(t, gjson.GetBytes(cursorBody, field).Exists(),
-			"test fixture must contain %s", field)
+// Exercise the real compatibility entry point: public Responses fields survive
+// API-key routing; only the Codex OAuth transform removes internal exclusions.
+func TestCursorMixedShape_CachePolicyFollowsUpstreamProtocol(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.4","stream":false,"prompt_cache_retention":"24h","safety_identifier":"cursor-user","metadata":{"trace_id":"abc"},"input":[{"role":"user","content":"hi"}]}`)
+	for _, kind := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
+		t.Run(kind, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_cursor_cache", "gpt-5.4")}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 4, Platform: PlatformOpenAI, Type: kind, Credentials: map[string]any{"api_key": "test", "access_token": "test", "chatgpt_account_id": "account", "base_url": "https://api.openai.com"}, Extra: map[string]any{"openai_responses_supported": true, "openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff}}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+			require.NoError(t, err)
+			for _, field := range []string{"prompt_cache_retention", "safety_identifier", "metadata"} {
+				require.Equal(t, kind == AccountTypeAPIKey, gjson.GetBytes(upstream.lastBody, field).Exists(), field)
+			}
+			require.True(t, gjson.GetBytes(upstream.lastBody, "input").IsArray())
+		})
 	}
-
-	// Run the exact same loop as the production code.
-	result := cursorBody
-	for _, field := range cursorResponsesUnsupportedFields {
-		if stripped, err := sjson.DeleteBytes(result, field); err == nil {
-			result = stripped
-		}
-	}
-
-	// All unsupported fields must be gone.
-	for _, field := range cursorResponsesUnsupportedFields {
-		assert.False(t, gjson.GetBytes(result, field).Exists(),
-			"%s must be stripped", field)
-	}
-
-	// Everything else must survive intact.
-	assert.Equal(t, "gpt-5.4", gjson.GetBytes(result, "model").String())
-	assert.Equal(t, true, gjson.GetBytes(result, "stream").Bool())
-	assert.True(t, gjson.GetBytes(result, "input").IsArray())
-	assert.Equal(t, "user", gjson.GetBytes(result, "input.0.role").String())
 }

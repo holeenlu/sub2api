@@ -510,7 +510,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const appStore = useAppStore()
 const { t, te, locale } = useI18n()
-const isAdmin = computed(() => authStore.isAdmin)
+const isAdmin = computed(() => route.path.startsWith('/admin/') && authStore.can('channel_monitor.read'))
 /** Admins always see RPM/TPM; users honor the hide-throughput system setting. */
 const showThroughput = computed(() => isAdmin.value || !isChannelMonitorThroughputHidden())
 /** Admins always see ranking; users honor the hide-user-ranking system setting. */

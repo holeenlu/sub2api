@@ -1,0 +1,29 @@
+# For an existing deployment whose shared backend already serves the frontend.
+# Replace the hostname and upstream with the active deployment's values. Replace
+# the existing supplier site block; do not add a second block for the same host.
+# Match vendor_portal_origin and enable vendor_console_enabled in the backend.
+supplier.example.invalid {
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Frame-Options DENY
+	}
+	route {
+		# Forward every versioned API unchanged. VendorOrigin owns the API
+		# allowlist; the backend enforces live roles and resource ownership.
+		# Include the superadmin SPA route so direct navigation/refresh works.
+		@application path /api/v1/* / /index.html /login /forgot-password /reset-password /vendor /vendor/* /vendor-unavailable /legal/* /assets/* /theme-init.js /logo.svg /favicon.ico
+		handle @application {
+			reverse_proxy 127.0.0.1:8080 {
+				header_up Host {host}
+				header_up X-Forwarded-Host {host}
+				header_up X-Forwarded-Proto {scheme}
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+		# Keep the customer UI, setup, registration and gateway off this host.
+		handle {
+			respond "Not found" 404
+		}
+	}
+}
