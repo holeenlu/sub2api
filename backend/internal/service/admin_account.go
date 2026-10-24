@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -98,6 +99,8 @@ func cloneAccountJSONMap(value map[string]any) (map[string]any, error) {
 }
 
 var duplicateAccountDiscardedExtraKeys = map[string]struct{}{
+	// Cloud authorization belongs to one private account binding.
+	OpenAICloudEnabledKey: {},
 	// A retry identity belongs to the operation that created one copy, not to later copies.
 	duplicateAccountOperationIDExtraKey: {},
 	// External sync identity belongs to one local account only.
@@ -161,6 +164,11 @@ func duplicateAccountExtra(value map[string]any) (map[string]any, error) {
 	}
 	for key := range duplicateAccountDiscardedExtraKeys {
 		delete(cloned, key)
+	}
+	for key := range cloned {
+		if strings.HasPrefix(key, anthropicObservationPrefix) {
+			delete(cloned, key)
+		}
 	}
 	return cloned, nil
 }
@@ -411,6 +419,20 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if input.Platform == PlatformAnthropic && input.Type == AccountTypeSetupToken {
+		if raw, ok := input.Credentials["access_token"].(string); ok && raw != "" {
+			token, err := NormalizeClaudeSetupToken(raw)
+			if err != nil {
+				return nil, err
+			}
+			input.Credentials["access_token"] = token
+		}
+	}
+	concurrency := normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency)
+	if concurrency <= 0 {
+		concurrency = DefaultAccountConcurrency
+	}
+	stripAnthropicObservationExtra(accountExtra)
 	if input.Platform == PlatformTypeSafe && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
@@ -432,7 +454,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Credentials: input.Credentials,
 		Extra:       accountExtra,
 		ProxyID:     input.ProxyID,
-		Concurrency: normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
+		Concurrency: concurrency,
 		Priority:    input.Priority,
 		Status:      StatusActive,
 		Schedulable: true,
@@ -532,17 +554,40 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	if _, err := normalizeBulkExcelBPSExtra(account.Extra); err != nil {
+		return nil, err
+	}
+	if err := s.validateOpenAIProtocolSettings(ctx, account); err != nil {
+		return nil, err
+	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
-	if err := s.accountRepo.Create(ctx, account); err != nil {
-		return nil, err
-	}
-
-	// 绑定分组
-	if len(groupIDs) > 0 {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
+	if input.ImportOptions != nil {
+		if err := input.ImportOptions.apply(account); err != nil {
 			return nil, err
+		}
+		repo, ok := s.accountRepo.(AccountAuthorizationRepository)
+		if !ok {
+			return nil, errors.New("Atomic account import is unavailable")
+		}
+		groups := input.ImportOptions.Groups
+		if groups == nil {
+			for _, id := range groupIDs {
+				groups = append(groups, AccountGroup{GroupID: id, Priority: account.Priority})
+			}
+		}
+		if err := repo.CreateWithAccountAuthorizations(ctx, account, groups, input.ImportOptions.Authorizations); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := s.accountRepo.Create(ctx, account); err != nil {
+			return nil, err
+		}
+		if len(groupIDs) > 0 {
+			if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -579,6 +624,16 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	ctx = withAccountLifecycleEdit(ctx, input.Status != "" && input.Status != account.Status, input.Schedulable != nil && *input.Schedulable != account.Schedulable)
+	if input.ParameterPatch {
+		if input.Credentials != nil {
+			input.Credentials = mergeAccountParameterPatch(account.Credentials, input.Credentials)
+		}
+		if input.Extra != nil {
+			input.Extra = mergeAccountParameterPatch(account.Extra, input.Extra)
+		}
+	}
+
 	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
@@ -645,6 +700,15 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if input.Notes != nil {
 		account.Notes = normalizeAccountNotes(input.Notes)
 	}
+	if account.Platform == PlatformAnthropic && account.Type == AccountTypeSetupToken {
+		if raw, ok := input.Credentials["access_token"].(string); ok && raw != "" {
+			token, err := NormalizeClaudeSetupToken(raw)
+			if err != nil {
+				return nil, err
+			}
+			input.Credentials["access_token"] = token
+		}
+	}
 	if account.IsCredentialShadow() && input.Credentials != nil {
 		account.Credentials = sanitizeSparkShadowCredentials(input.Credentials)
 	} else if len(input.Credentials) > 0 {
@@ -707,7 +771,25 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 				normalizedExtra[key] = v
 			}
 		}
+		stripAnthropicObservationExtra(normalizedExtra)
+		for key, value := range account.Extra {
+			if strings.HasPrefix(key, anthropicObservationPrefix) {
+				normalizedExtra[key] = value
+			}
+		}
 		normalizedExtra = prepareCodexFingerprintExtraForUpdate(account, normalizedExtra)
+		if account.VendorID != nil {
+			for key := range normalizedExtra {
+				if strings.HasPrefix(key, "vendor_") {
+					delete(normalizedExtra, key)
+				}
+			}
+			for key, value := range account.Extra {
+				if strings.HasPrefix(key, "vendor_") {
+					normalizedExtra[key] = value
+				}
+			}
+		}
 		account.Extra = normalizedExtra
 		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
@@ -832,6 +914,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if input.Status != "" {
 		account.Status = input.Status
 	}
+	if input.Schedulable != nil {
+		account.Schedulable = *input.Schedulable
+	}
 	if input.ExpiresAt != nil {
 		if *input.ExpiresAt <= 0 {
 			account.ExpiresAt = nil
@@ -861,6 +946,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	if _, err := normalizeBulkExcelBPSExtra(account.Extra); err != nil {
+		return nil, err
+	}
+	if err := s.validateOpenAIProtocolSettings(ctx, account); err != nil {
+		return nil, err
+	}
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -926,6 +1017,28 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	stripAnthropicObservationExtra(updates)
+	if _, err := normalizeBulkExcelBPSExtra(updates); err != nil {
+		return err
+	}
+	for key := range updates {
+		if strings.HasPrefix(key, "openai_excel_bps") {
+			account, err := s.accountRepo.GetByID(ctx, id)
+			if err != nil {
+				return err
+			}
+			merged := *account
+			merged.Extra = maps.Clone(account.Extra)
+			if merged.Extra == nil {
+				merged.Extra = map[string]any{}
+			}
+			maps.Copy(merged.Extra, updates)
+			if err := s.validateOpenAIProtocolSettings(ctx, &merged); err != nil {
+				return err
+			}
+			break
+		}
+	}
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
@@ -954,6 +1067,10 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	if input.UseSingleAccountValidation || input.Notes != nil || input.Type != "" || input.ExpiresAt != nil || input.AutoPauseOnExpired != nil || input.RateSyncEnabled != nil {
+		return s.bulkUpdateAccountParameters(ctx, input)
+	}
+	stripAnthropicObservationExtra(input.Extra)
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
@@ -1000,7 +1117,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if authz.IsManagementRequest(ctx) || len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1013,12 +1130,40 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			targetsByID[account.ID] = account
 		}
 	}
+	for _, account := range cachedTargets {
+		if account != nil && account.VendorID != nil {
+			return s.bulkUpdateAccountParameters(ctx, input)
+		}
+	}
 	if openAISettings.any() {
 		inheritedCount, err := validateBulkOpenAISettingsTargets(input, openAISettings, targetsByID)
 		if err != nil {
 			return nil, err
 		}
 		result.LongContextInheritedCount = inheritedCount
+	}
+	_, moveChanged := input.Extra[ExcelBPSAutoMoveOn403Key]
+	_, targetChanged := input.Extra[ExcelBPS403TargetGroupIDKey]
+	_, bpsChanged := input.Extra["openai_excel_bps"]
+	_, planChanged := input.Credentials["plan_type"]
+	if moveChanged || targetChanged || bpsChanged || planChanged {
+		for _, account := range cachedTargets {
+			if account == nil {
+				continue
+			}
+			merged := *account
+			merged.Credentials = maps.Clone(account.Credentials)
+			if merged.Credentials == nil {
+				merged.Credentials = make(map[string]any)
+			}
+			maps.Copy(merged.Credentials, input.Credentials)
+			merged.Extra = make(map[string]any, len(account.Extra)+len(input.Extra))
+			maps.Copy(merged.Extra, account.Extra)
+			maps.Copy(merged.Extra, input.Extra)
+			if err := s.validateOpenAIProtocolSettings(ctx, &merged); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if input.ProbeEnabled != nil {
 		for _, accountID := range input.AccountIDs {
@@ -1237,6 +1382,12 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 	if filters == nil {
 		return nil, nil
 	}
+	// Empty fields and sorting cannot authorize a whole-inventory mutation.
+	if strings.TrimSpace(filters.Platform) == "" && strings.TrimSpace(filters.Type) == "" &&
+		strings.TrimSpace(filters.Status) == "" && strings.TrimSpace(filters.Group) == "" &&
+		strings.TrimSpace(filters.Search) == "" && strings.TrimSpace(filters.PrivacyMode) == "" {
+		return nil, infraerrors.BadRequest("BULK_UPDATE_SCOPE_REQUIRED", "Select account IDs or provide a non-empty account filter")
+	}
 
 	groupID := int64(0)
 	switch strings.TrimSpace(filters.Group) {
@@ -1297,15 +1448,6 @@ func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
 		return err
 	}
 	return nil
-}
-
-func (s *adminServiceImpl) RefreshAccountCredentials(ctx context.Context, id int64) (*Account, error) {
-	account, err := s.accountRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	// TODO: Implement refresh logic
-	return account, nil
 }
 
 func (s *adminServiceImpl) ClearAccountError(ctx context.Context, id int64) (*Account, error) {

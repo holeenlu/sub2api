@@ -41,7 +41,9 @@ func TestGatewayAnthropicCompatReasoningPricingUsesForwardedEffort(t *testing.T)
 				wantEffort string
 				multiplier float64
 			}{
-				{"xhigh_converts_to_max", "claude-fable-5-1", "xhigh", "", "max", 3},
+				{"fable_preserves_xhigh", "claude-fable-5-1", "xhigh", "", "xhigh", 2},
+				{"opus46_converts_xhigh", "claude-opus-4-6", "xhigh", "", "max", 3},
+				{"opus45_caps_max", "claude-opus-4-5", "max", "", "high", 1.5},
 				{"native_max", "claude-fable-5-1", "max", "", "max", 3},
 				{"missing_effort", "kimi-k3", "", "", "", 1},
 				{"disabled_thinking", "kimi-k3", "", "disabled", "", 1},

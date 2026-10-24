@@ -183,14 +183,18 @@ func TestOpsSystemLogSink_StartStopAndFlushSuccess(t *testing.T) {
 		Component: "http.access",
 		Message:   `authorization="Bearer sk-test-123"`,
 		Fields: map[string]any{
-			"component":         "http.access",
-			"request_id":        "req-1",
-			"client_request_id": "creq-1",
-			"user_id":           "12",
-			"api_key_id":        int64(56),
-			"account_id":        json.Number("34"),
-			"platform":          "openai",
-			"model":             "gpt-5",
+			"component":                  "http.access",
+			"request_id":                 "req-1",
+			"client_request_id":          "creq-1",
+			"user_id":                    "12",
+			"api_key_id":                 int64(56),
+			"account_id":                 json.Number("34"),
+			"platform":                   "openai",
+			"model":                      "gpt-5",
+			"original_client_request_id": "repeated-session-id",
+			"body_read_stage":            "group_model_allowlist",
+			"bytes_read":                 int64(2602449),
+			"content_length":             int64(12957603),
 		},
 	})
 
@@ -209,6 +213,15 @@ func TestOpsSystemLogSink_StartStopAndFlushSuccess(t *testing.T) {
 	}
 	if item.RequestID != "req-1" || item.ClientRequestID != "creq-1" {
 		t.Fatalf("unexpected request ids: %+v", item)
+	}
+	var extra map[string]any
+	if err := json.Unmarshal([]byte(item.ExtraJSON), &extra); err != nil {
+		t.Fatal(err)
+	}
+	if extra["original_client_request_id"] != "repeated-session-id" ||
+		extra["body_read_stage"] != "group_model_allowlist" ||
+		extra["bytes_read"] != float64(2602449) || extra["content_length"] != float64(12957603) {
+		t.Fatalf("body read diagnostics lost during persistence: %s", item.ExtraJSON)
 	}
 	if item.UserID == nil || *item.UserID != 12 {
 		t.Fatalf("unexpected user_id: %+v", item.UserID)

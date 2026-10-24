@@ -1,0 +1,5 @@
+ok  	github.com/Wei-Shaw/sub2api/internal/service	16.940s
+ok  	github.com/Wei-Shaw/sub2api/internal/handler	20.821s
+ok  	github.com/Wei-Shaw/sub2api/internal/server/middleware	1.094s
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/apicompat	1.097s
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/antigravity	1.074s [no tests to run]
