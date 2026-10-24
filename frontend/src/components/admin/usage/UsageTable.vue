@@ -176,6 +176,8 @@
                   <svg class="h-3.5 w-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                   <span class="font-medium text-amber-600 dark:text-amber-400">{{ formatCacheTokens(row.cache_creation_tokens) }}</span>
                   <span v-if="row.cache_creation_1h_tokens > 0" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/30">1h</span>
+                  <span v-if="row.cache_creation_30m_tokens > 0" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-amber-100 text-amber-600 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-400 dark:ring-amber-500/30">30m</span>
+                  <span v-if="row.cache_creation_12h_tokens > 0" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/30">12h</span>
                   <span v-if="row.cache_ttl_overridden" :title="t('usage.cacheTtlOverriddenHint')" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">R</span>
                 </div>
               </div>
@@ -193,38 +195,41 @@
               </div>
             </div>
             <!-- Token Detail Tooltip -->
-            <div
+            <button
+              type="button"
+              :aria-label="t('usage.tokenDetails')"
+              :aria-expanded="tokenTooltipVisible && tokenTooltipData === row"
               class="group relative"
-              @mouseenter="showTokenTooltip($event, row)"
-              @mouseleave="hideTokenTooltip"
+              @mouseenter="!isMobile && showTokenTooltip($event, row)"
+              @mouseleave="!isMobile && scheduleHide(hideTokenTooltip)"
+              @click="showTokenTooltip($event, row)"
             >
               <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
                 <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
               </div>
-            </div>
+            </button>
           </div>
         </template>
 
         <template #cell-cost="{ row }">
           <div class="text-sm">
             <div class="flex items-center gap-1.5">
-              <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
-              <span
-                v-if="row.long_context_billing_applied"
-                data-testid="long-context-billing-marker"
-                :title="t('admin.usage.longContextPricingTooltip')"
-                class="inline-flex items-center rounded px-1 py-px text-[10px] font-semibold leading-tight bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30"
-              >{{ t('admin.usage.longContext') }}</span>
+              <span v-if="!['pending', 'pending_pricing', 'unmetered'].includes(row.billing_status || '')" class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
+              <span v-else class="text-gray-400">—</span>
               <!-- Cost Detail Tooltip -->
-              <div
+              <button
+                type="button"
+                :aria-label="t('usage.costDetails')"
+                :aria-expanded="tooltipVisible && tooltipData === row"
                 class="group relative"
-                @mouseenter="showTooltip($event, row)"
-                @mouseleave="hideTooltip"
+                @mouseenter="!isMobile && showTooltip($event, row)"
+                @mouseleave="!isMobile && scheduleHide(hideTooltip)"
+                @click="showTooltip($event, row)"
               >
                 <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
                   <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
                 </div>
-              </div>
+              </button>
             </div>
             <div v-if="showAccountBilling && row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-orange-500 dark:text-orange-400">
               A ${{ accountBilled(row).toFixed(6) }}
@@ -237,20 +242,29 @@
           <div class="flex items-stretch gap-2">
             <span
               class="w-1 shrink-0 rounded-full"
-              :class="row.first_token_ms != null
-                ? ['bg-gradient-to-b from-40% to-60%', LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(row.first_token_ms)], LATENCY_BAR_TO_CLASSES[durationSeverity(row.duration_ms ?? 0)]]
-                : LATENCY_BAR_CLASSES[durationSeverity(row.duration_ms ?? 0)]"
+              :class="getUsageLatency(row).durationMs == null ? 'bg-gray-300 dark:bg-gray-600' : getUsageLatency(row).primaryLatencyMs != null
+                ? ['bg-gradient-to-b from-40% to-60%', LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(getUsageLatency(row).primaryLatencyMs ?? 0)], LATENCY_BAR_TO_CLASSES[durationSeverity(getUsageLatency(row).durationMs ?? 0)]]
+                : LATENCY_BAR_CLASSES[durationSeverity(getUsageLatency(row).durationMs ?? 0)]"
               aria-hidden="true"
             ></span>
             <div class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs">
               <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyFirstToken') }}</span>
-              <span v-if="row.first_token_ms != null" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatDuration(row.first_token_ms) }}</span>
+              <span v-if="getUsageLatency(row).primaryLatencyMs != null" data-testid="primary-latency" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(getUsageLatency(row).primaryLatencyMs ?? 0)]">{{ formatDuration(getUsageLatency(row).primaryLatencyMs) }}</span>
               <span v-else class="text-gray-400 dark:text-gray-500">-</span>
               <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyDuration') }}</span>
-              <span class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms ?? 0)]">{{ formatDuration(row.duration_ms) }}</span>
+              <span data-testid="usage-duration" class="font-medium tabular-nums" :class="getUsageLatency(row).durationMs == null ? 'text-gray-400' : LATENCY_TEXT_CLASSES[durationSeverity(getUsageLatency(row).durationMs ?? 0)]">{{ formatDuration(getUsageLatency(row).durationMs) }}</span>
               <span class="text-gray-400 dark:text-gray-500" :title="t('usage.outputTpsHint')">{{ t('usage.outputTps') }}</span>
               <span data-testid="output-tps" class="font-medium tabular-nums text-gray-700 dark:text-gray-300">{{ formatUsageOutputRate(row) }}</span>
+              <span class="text-gray-400 dark:text-gray-500" :title="t('usage.cacheHitRateHint')">{{ t('usage.cacheHitRate') }}</span>
+              <span data-testid="cache-hit-rate" class="font-medium tabular-nums text-gray-700 dark:text-gray-300">{{ formatCacheHitRate(getUsageCacheHitRate(row)) }}</span>
+              <span v-if="getUsageLatency(row).legacy" data-testid="legacy-latency" class="col-span-2 text-[10px] text-gray-400" :title="t('usage.legacyLatencyHint')">{{ t('usage.legacyLatency') }}</span>
+              <span v-else-if="getUsageLatency(row).measurement === 'unsupported'" data-testid="unsupported-latency" class="col-span-2 text-[10px] text-gray-400">{{ t('usage.unsupportedLatency') }}</span>
             </div>
+            <button type="button" :aria-label="t('usage.latencyDetails')" :aria-expanded="latencyTooltipVisible && latencyTooltipData === row" class="self-start rounded text-gray-400 hover:text-blue-500 focus-visible:outline focus-visible:outline-blue-500"
+              @mouseenter="!isMobile && showLatencyTooltip($event, row)" @mouseleave="!isMobile && scheduleHide(hideLatencyTooltip)"
+              @focus="showLatencyTooltip($event, row)" @blur="scheduleHide(hideLatencyTooltip)" @click="showLatencyTooltip($event, row)">
+              <Icon name="infoCircle" size="xs" />
+            </button>
           </div>
         </template>
 
@@ -312,17 +326,24 @@
     </div>
   </div>
 
+  <UsageDetailPopover :show="latencyTooltipVisible" :anchor="latencyTooltipAnchor" :title="t('usage.latencyDetails')"
+    @close="hideLatencyTooltip" @mouseenter="cancelHide" @mouseleave="scheduleHide(hideLatencyTooltip)">
+    <div v-if="latencyTooltipData" class="dark w-80 max-w-[calc(100vw-1rem)] rounded-lg border border-gray-700 bg-gray-900 p-3 text-xs text-white shadow-xl dark:bg-gray-800">
+      <p class="mb-2 font-semibold">{{ t('usage.latencyDetails') }}</p>
+      <dl class="grid grid-cols-[1fr_max-content] gap-x-4 gap-y-1.5">
+        <dt class="text-gray-400">{{ t('usage.firstEvent') }}</dt><dd class="font-medium tabular-nums" :class="getUsageLatency(latencyTooltipData).firstEventMs == null ? 'text-gray-400' : LATENCY_TEXT_CLASSES[firstTokenSeverity(getUsageLatency(latencyTooltipData).firstEventMs ?? 0)]">{{ formatDuration(getUsageLatency(latencyTooltipData).firstEventMs) }}</dd>
+        <dt class="text-gray-400">{{ t('usage.firstContent') }}</dt><dd class="font-medium tabular-nums" :class="getUsageLatency(latencyTooltipData).firstContentMs == null ? 'text-gray-400' : LATENCY_TEXT_CLASSES[firstTokenSeverity(getUsageLatency(latencyTooltipData).firstContentMs ?? 0)]">{{ formatDuration(getUsageLatency(latencyTooltipData).firstContentMs) }}</dd>
+        <dt class="text-gray-400">{{ t('usage.firstText') }}</dt><dd class="font-medium tabular-nums" :class="getUsageLatency(latencyTooltipData).firstTextMs == null ? 'text-gray-400' : LATENCY_TEXT_CLASSES[firstTokenSeverity(getUsageLatency(latencyTooltipData).firstTextMs ?? 0)]">{{ formatDuration(getUsageLatency(latencyTooltipData).firstTextMs) }}</dd>
+        <dt class="text-gray-400">{{ t('usage.latencyDuration') }}</dt><dd class="font-medium tabular-nums" :class="getUsageLatency(latencyTooltipData).durationMs == null ? 'text-gray-400' : LATENCY_TEXT_CLASSES[durationSeverity(getUsageLatency(latencyTooltipData).durationMs ?? 0)]">{{ formatDuration(getUsageLatency(latencyTooltipData).durationMs) }}</dd>
+      </dl>
+      <p v-if="getUsageLatency(latencyTooltipData).legacy || getUsageLatency(latencyTooltipData).measurement === 'unsupported'" class="mt-2 leading-relaxed text-gray-300">{{ t(getUsageLatency(latencyTooltipData).legacy ? 'usage.legacyLatencyHint' : 'usage.unsupportedLatencyHint') }}</p>
+    </div>
+  </UsageDetailPopover>
+
   <!-- Token Tooltip Portal -->
-  <Teleport to="body">
-    <div
-      v-if="tokenTooltipVisible"
-      class="fixed z-[9999] pointer-events-none -translate-y-1/2"
-      :style="{
-        left: tokenTooltipPosition.x + 'px',
-        top: tokenTooltipPosition.y + 'px'
-      }"
-    >
-      <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
+  <UsageDetailPopover :show="tokenTooltipVisible" :anchor="tokenTooltipAnchor" :title="t('usage.tokenDetails')"
+    @close="hideTokenTooltip" @mouseenter="cancelHide" @mouseleave="scheduleHide(hideTokenTooltip)">
+      <div class="max-w-[calc(100vw-1rem)] whitespace-normal rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
         <div class="space-y-1.5">
           <div>
             <div class="text-xs font-semibold text-gray-300 mb-1">{{ t('usage.tokenDetails') }}</div>
@@ -351,8 +372,8 @@
               <span class="font-medium text-pink-300">{{ tokenTooltipData.image_output_tokens.toLocaleString() }}</span>
             </div>
             <div v-if="tokenTooltipData && tokenTooltipData.cache_creation_tokens > 0">
-              <!-- 有 5m/1h 明细时，展开显示 -->
-              <template v-if="tokenTooltipData.cache_creation_5m_tokens > 0 || tokenTooltipData.cache_creation_1h_tokens > 0">
+              <!-- 有已记录的 TTL 明细时展开显示；明细属于缓存写入总量 -->
+              <template v-if="tokenTooltipData.cache_creation_5m_tokens > 0 || tokenTooltipData.cache_creation_1h_tokens > 0 || tokenTooltipData.cache_creation_30m_tokens > 0 || tokenTooltipData.cache_creation_12h_tokens > 0">
                 <div v-if="tokenTooltipData.cache_creation_5m_tokens > 0" class="flex items-center justify-between gap-4">
                   <span class="text-gray-400 flex items-center gap-1.5">
                     {{ t('admin.usage.cacheCreation5mTokens') }}
@@ -366,6 +387,20 @@
                     <span class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-500/20 text-orange-400 ring-1 ring-inset ring-orange-500/30">1h</span>
                   </span>
                   <span class="font-medium text-white">{{ tokenTooltipData.cache_creation_1h_tokens.toLocaleString() }}</span>
+                </div>
+                <div v-if="tokenTooltipData.cache_creation_30m_tokens > 0" class="flex items-center justify-between gap-4">
+                  <span class="text-gray-400 flex items-center gap-1.5">
+                    {{ t('admin.usage.cacheCreation30mTokens') }}
+                    <span class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-amber-500/20 text-amber-400 ring-1 ring-inset ring-amber-500/30">30m</span>
+                  </span>
+                  <span class="font-medium text-white">{{ tokenTooltipData.cache_creation_30m_tokens.toLocaleString() }}</span>
+                </div>
+                <div v-if="tokenTooltipData.cache_creation_12h_tokens > 0" class="flex items-center justify-between gap-4">
+                  <span class="text-gray-400 flex items-center gap-1.5">
+                    {{ t('admin.usage.cacheCreation12hTokens') }}
+                    <span class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-500/20 text-orange-400 ring-1 ring-inset ring-orange-500/30">12h</span>
+                  </span>
+                  <span class="font-medium text-white">{{ tokenTooltipData.cache_creation_12h_tokens.toLocaleString() }}</span>
                 </div>
               </template>
               <!-- 无明细时，只显示聚合值 -->
@@ -385,28 +420,23 @@
               <span class="text-gray-400">{{ t('admin.usage.cacheReadTokens') }}</span>
               <span class="font-medium text-white">{{ tokenTooltipData.cache_read_tokens.toLocaleString() }}</span>
             </div>
+            <div v-if="tokenTooltipData" class="mt-1 flex items-center justify-between gap-4" :title="t('usage.cacheHitRateHint')">
+              <span class="text-gray-400">{{ t('usage.cacheHitRate') }}</span>
+              <span class="font-medium text-white">{{ formatCacheHitRate(getUsageCacheHitRate(tokenTooltipData)) }}</span>
+            </div>
           </div>
           <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
             <span class="text-gray-400">{{ t('usage.totalTokens') }}</span>
             <span class="font-semibold text-blue-400">{{ ((tokenTooltipData?.input_tokens || 0) + (tokenTooltipData?.output_tokens || 0) + (tokenTooltipData?.cache_creation_tokens || 0) + (tokenTooltipData?.cache_read_tokens || 0)).toLocaleString() }}</span>
           </div>
         </div>
-        <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
       </div>
-    </div>
-  </Teleport>
+  </UsageDetailPopover>
 
   <!-- Cost Tooltip Portal -->
-  <Teleport to="body">
-    <div
-      v-if="tooltipVisible"
-      class="fixed z-[9999] pointer-events-none -translate-y-1/2"
-      :style="{
-        left: tooltipPosition.x + 'px',
-        top: tooltipPosition.y + 'px'
-      }"
-    >
-      <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
+  <UsageDetailPopover :show="tooltipVisible" :anchor="tooltipAnchor" :title="t('usage.costDetails')"
+    @close="hideTooltip" @mouseenter="cancelHide" @mouseleave="scheduleHide(hideTooltip)">
+      <div class="max-w-[calc(100vw-1rem)] whitespace-normal rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
         <div class="space-y-1.5">
           <!-- Cost Breakdown -->
           <div class="mb-2 border-b border-gray-700 pb-1.5">
@@ -528,14 +558,14 @@
             </div>
           </template>
         </div>
-        <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
       </div>
-    </div>
-  </Teleport>
+  </UsageDetailPopover>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onUnmounted } from 'vue'
+import { useWindowSize } from '@vueuse/core'
+import UsageDetailPopover from './UsageDetailPopover.vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime, formatReasoningEffort, reasoningEffortValuesEqual } from '@/utils/format'
@@ -543,6 +573,7 @@ import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
+import { formatCacheHitRate, getUsageCacheHitRate, getUsageLatency } from '@/utils/usageMetrics'
 import {
   LATENCY_BAR_CLASSES,
   LATENCY_BAR_FROM_CLASSES,
@@ -620,8 +651,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const appStore = useAppStore()
 const copiedRequestId = ref<string | null>(null)
-const showAccountBilling = props.showAccountBilling
-const showUpstreamEndpoint = props.showUpstreamEndpoint
+const showAccountBilling = computed(() => props.showAccountBilling)
+const showUpstreamEndpoint = computed(() => props.showUpstreamEndpoint)
 const ipGeoBatchLoading = ref(false)
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
@@ -694,13 +725,17 @@ const copyUpstreamRequestId = (upstreamRequestId: string) =>
 
 // Tooltip state - cost
 const tooltipVisible = ref(false)
-const tooltipPosition = ref({ x: 0, y: 0 })
+const tooltipAnchor = ref<DOMRect | null>(null)
 const tooltipData = ref<AdminUsageLog | null>(null)
 
 // Tooltip state - token
 const tokenTooltipVisible = ref(false)
-const tokenTooltipPosition = ref({ x: 0, y: 0 })
+const tokenTooltipAnchor = ref<DOMRect | null>(null)
 const tokenTooltipData = ref<AdminUsageLog | null>(null)
+
+const latencyTooltipVisible = ref(false)
+const latencyTooltipAnchor = ref<DOMRect | null>(null)
+const latencyTooltipData = ref<AdminUsageLog | null>(null)
 
 const getRequestTypeLabel = (row: AdminUsageLog): string => {
   const requestType = resolveUsageRequestType(row)
@@ -738,13 +773,19 @@ const formatDuration = (ms: number | null | undefined): string => {
   return `${Math.floor(totalSec / 3600)}h ${Math.floor((totalSec % 3600) / 60)}m`
 }
 
-// Cost tooltip functions
-const showTooltip = (event: MouseEvent, row: AdminUsageLog) => {
-  const target = event.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
+const { width: viewportWidth } = useWindowSize()
+const isMobile = computed(() => viewportWidth.value < 768)
+let hideTimer: ReturnType<typeof setTimeout> | undefined
+const cancelHide = () => { clearTimeout(hideTimer) }
+const scheduleHide = (hide: () => void) => { cancelHide(); hideTimer = setTimeout(hide, 120) }
+onUnmounted(cancelHide)
+
+const showTooltip = (event: Event, row: AdminUsageLog) => {
+  cancelHide()
+  hideTokenTooltip()
+  hideLatencyTooltip()
+  tooltipAnchor.value = (event.currentTarget as HTMLElement).getBoundingClientRect()
   tooltipData.value = row
-  tooltipPosition.value.x = rect.right + 8
-  tooltipPosition.value.y = rect.top + rect.height / 2
   tooltipVisible.value = true
 }
 
@@ -753,18 +794,31 @@ const hideTooltip = () => {
   tooltipData.value = null
 }
 
-// Token tooltip functions
-const showTokenTooltip = (event: MouseEvent, row: AdminUsageLog) => {
-  const target = event.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
+const showTokenTooltip = (event: Event, row: AdminUsageLog) => {
+  cancelHide()
+  hideTooltip()
+  hideLatencyTooltip()
+  tokenTooltipAnchor.value = (event.currentTarget as HTMLElement).getBoundingClientRect()
   tokenTooltipData.value = row
-  tokenTooltipPosition.value.x = rect.right + 8
-  tokenTooltipPosition.value.y = rect.top + rect.height / 2
   tokenTooltipVisible.value = true
 }
 
 const hideTokenTooltip = () => {
   tokenTooltipVisible.value = false
   tokenTooltipData.value = null
+}
+
+const showLatencyTooltip = (event: Event, row: AdminUsageLog) => {
+  cancelHide()
+  hideTooltip()
+  hideTokenTooltip()
+  latencyTooltipAnchor.value = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  latencyTooltipData.value = row
+  latencyTooltipVisible.value = true
+}
+
+const hideLatencyTooltip = () => {
+  latencyTooltipVisible.value = false
+  latencyTooltipData.value = null
 }
 </script>

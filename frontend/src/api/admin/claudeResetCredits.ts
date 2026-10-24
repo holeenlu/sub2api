@@ -19,6 +19,7 @@ export interface ClaudeResetCredits {
   cooldown_until?: string
   weekly_resets_at?: string
   fetched_at: string
+  cache_persisted?: boolean
 }
 
 export async function getClaudeResetCredits(id: number): Promise<ClaudeResetCredits> {

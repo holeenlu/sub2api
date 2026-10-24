@@ -247,7 +247,7 @@ func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error)
 			}
 		case "image":
 			if uri := anthropicImageToDataURI(b.Source); uri != "" {
-				parts = append(parts, ResponsesContentPart{Type: "input_image", ImageURL: uri})
+				parts = append(parts, ResponsesContentPart{Type: "input_image", ImageURL: uri, Detail: "auto"})
 			}
 		}
 	}
@@ -407,7 +407,7 @@ func convertToolResultOutput(b AnthropicContentBlock) (string, []ResponsesConten
 			}
 		case "image":
 			if uri := anthropicImageToDataURI(ib.Source); uri != "" {
-				imageParts = append(imageParts, ResponsesContentPart{Type: "input_image", ImageURL: uri})
+				imageParts = append(imageParts, ResponsesContentPart{Type: "input_image", ImageURL: uri, Detail: "auto"})
 			}
 		}
 	}
@@ -466,11 +466,12 @@ func convertAnthropicToolsToResponses(tools []AnthropicTool) []ResponsesTool {
 			continue
 		}
 		out = append(out, ResponsesTool{
-			Type:        "function",
-			Name:        t.Name,
-			Description: t.Description,
-			Parameters:  normalizeToolParameters(t.InputSchema),
-			Strict:      boolPtr(false),
+			Type:                "function",
+			Name:                t.Name,
+			Description:         t.Description,
+			Parameters:          normalizeToolParameters(t.InputSchema),
+			Strict:              defaultStrictFalse(t.Strict),
+			EagerInputStreaming: t.EagerInputStreaming, CacheControl: t.CacheControl,
 		})
 	}
 	return out
