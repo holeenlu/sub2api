@@ -126,3 +126,12 @@ func TestSyncBalanceCacheAfterDeduction_QueuesDeductWhenBalanceStillEligible(t *
 		return cache.deductCalls.Load() == 1
 	}, 2*time.Second, 10*time.Millisecond)
 }
+
+func TestSuperAdminBillingEligibilityStillEnforcesKeyWindows(t *testing.T) {
+	cache := &fixedChargeCacheStub{balance: 0, rate: &APIKeyRateLimitCacheData{Usage1d: 5, Window1d: time.Now().Unix()}}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+	root := &User{ID: 1, Role: RoleSuperAdmin}
+	require.NoError(t, svc.CheckBillingEligibility(context.Background(), root, &APIKey{ID: 2, RateLimit1d: 10}, nil, nil, ""))
+	require.ErrorIs(t, svc.CheckBillingEligibility(context.Background(), root, &APIKey{ID: 2, RateLimit1d: 5}, nil, nil, ""), ErrAPIKeyRateLimit1dExceeded)
+}

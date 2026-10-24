@@ -97,3 +97,41 @@ func TestShrinkToEssentials_IncludesThinking(t *testing.T) {
 		t.Fatalf("expected thinking to be included in essentials: %#v", out)
 	}
 }
+
+func TestSanitizeErrorBodyForStorage_RetryStopCounter(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, value string
+		want        any
+	}{
+		{"zero", `0`, float64(0)},
+		{"one", `1`, float64(1)},
+		{"many", `1234`, float64(1234)},
+		{"string", `"private-token"`, "[REDACTED]"},
+		{"numeric string", `"1"`, "[REDACTED]"},
+		{"negative", `-1`, "[REDACTED]"},
+		{"fractional", `1.5`, "[REDACTED]"},
+		{"object", `{"value":"private-token"}`, "[REDACTED]"},
+		{"null", `null`, "[REDACTED]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{"downstream_token_events":` + tc.value + `,"access_token":"private-credential","other_token_events":1}`
+			// Queue and repository preparation may sanitize the same detail twice.
+			for pass := 0; pass < 2; pass++ {
+				raw, _ = sanitizeErrorBodyForStorage(raw, 1024)
+				var detail map[string]any
+				if err := json.Unmarshal([]byte(raw), &detail); err != nil {
+					t.Fatal(err)
+				}
+				if got := detail["downstream_token_events"]; got != tc.want {
+					t.Fatalf("pass %d: expected counter %#v, got %#v", pass, tc.want, got)
+				}
+				for _, key := range []string{"access_token", "other_token_events"} {
+					if detail[key] != "[REDACTED]" {
+						t.Fatalf("expected %s to remain redacted", key)
+					}
+				}
+			}
+		})
+	}
+}

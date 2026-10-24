@@ -9,7 +9,9 @@
 }
 
 # 修改为你的域名
-api.sub2api.com {
+# 独立供应商域名使用 examples/vendor-portal.Caddyfile 的并列站点块；
+# API 必须保留完整 /api/v1 路径并由后端 VendorOrigin 统一授权。
+nextcode.buildtoconnect.com {
 	# This baseline assumes clients connect directly to Caddy. When Caddy is
 	# behind a CDN, configure explicit trusted proxy CIDRs and {client_ip} as
 	# documented in EDGE_SECURITY.md; {remote_host} would otherwise be the CDN.
@@ -44,6 +46,8 @@ api.sub2api.com {
 		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto {scheme}
 		header_up X-Forwarded-Host {host}
+		# Caddy 与应用共享每请求唯一编号，客户端中断后也可关联访问日志。
+		header_up X-Request-ID {http.request.uuid}
 		# 连接池优化
 		transport http {
 			keepalive 120s
@@ -93,8 +97,9 @@ api.sub2api.com {
 	# =========================================================================
 	# 日志配置
 	# =========================================================================
+	log_append request_id {http.request.uuid}
 	log {
-		output file /var/log/caddy/sub2api.log {
+		output file /var/log/caddy/kdan.log {
 			roll_size 50mb
 			roll_keep 10
 			roll_keep_for 720h
