@@ -68,6 +68,23 @@ func TestImageTaskServiceLifecycleAndOwnership(t *testing.T) {
 	require.NotNil(t, completed.CompletedAt)
 }
 
+func TestImageTaskExpiredExecutorDoesNotStayProcessing(t *testing.T) {
+	store := &imageTaskMemoryStore{task: &ImageTaskRecord{
+		ID: "expired", UserID: 7, APIKeyID: 9, Status: ImageTaskStatusProcessing,
+		CreatedAt: time.Now().Add(-time.Hour).Unix(),
+	}}
+	svc := NewImageTaskServiceWithOptions(store, 24*time.Hour, 30*time.Minute)
+	task, err := svc.Get(context.Background(), ImageTaskOwner{UserID: 7, APIKeyID: 9}, "expired")
+	require.NoError(t, err)
+	require.Equal(t, ImageTaskStatusFailed, task.Status)
+	require.Contains(t, string(task.Error), "not replayed")
+	require.Equal(t, ImageTaskStatusProcessing, store.task.Status, "polling must not overwrite concurrent completion")
+	store.task.Status = ImageTaskStatusCompleted
+	task, err = svc.Get(context.Background(), ImageTaskOwner{UserID: 7, APIKeyID: 9}, "expired")
+	require.NoError(t, err)
+	require.Equal(t, ImageTaskStatusCompleted, task.Status, "a known completion remains available")
+}
+
 func TestImageTaskServiceInvalidResultBecomesFailed(t *testing.T) {
 	store := &imageTaskMemoryStore{}
 	svc := NewImageTaskServiceWithOptions(store, time.Hour, time.Minute)

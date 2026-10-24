@@ -138,20 +138,6 @@ func selectVisibleMethodInstanceByProviderKey(instances []*dbent.PaymentProvider
 	return nil
 }
 
-func (s *PaymentConfigService) validateVisibleMethodEnablementConflicts(
-	ctx context.Context,
-	excludeID int64,
-	providerKey string,
-	supportedTypes string,
-	enabled bool,
-) error {
-	// Visible methods are selected by configured source (official/easypay),
-	// so multiple enabled providers can intentionally claim the same user-facing
-	// method. Order creation and limits will route through the configured source.
-	_, _, _, _, _ = ctx, excludeID, providerKey, supportedTypes, enabled
-	return nil
-}
-
 func (s *PaymentConfigService) resolveVisibleMethodSourceProviderKey(ctx context.Context, method string) (string, error) {
 	method = NormalizeVisibleMethod(method)
 	sourceKey := visibleMethodSourceSettingKey(method)
