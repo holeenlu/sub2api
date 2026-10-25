@@ -68,3 +68,5 @@ WP-00源码冻结完成；WP-01-BUDGET、WP-02-SSE、WP-27-API、WP-27-IDENTITY�
 当前追加清理已移除旧自更新和品牌构建/发布链，受影响回归及唯一根构建正在完成最终核验；最终交付状态见IMPLEMENTATION和FRONTEND_HANDOFF，不沿用第一波中间制品作为最终源码证明。
 
 整合前端规划后父工作包总数为30；WP-28、WP-29保持明确依赖，第一波局部完成不等于父包accepted。当前源码默认路径/名称、最终API镜像与本机编译均已通过对应检查。
+
+最终整合已完成本轮范围的核验并移除四个退役接口，前端已按提交整合；整体implementation_ready/rollout_ready仍为false，因为完整执行引擎、其余领域和真实UI/上游验收尚未完成。

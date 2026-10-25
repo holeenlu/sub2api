@@ -1,6 +1,6 @@
 # 前端会话交接边界
 
-日期：2026-10-25。后端分支 codex/sub2api-rebuild；前端分支 codex/frontend-architecture 由用户另建会话负责。此文件定义交接事实，不向另一会话发指令，也不代表其工作已经交付。
+日期：2026-10-25。前后端统一分支 codex/sub2api-rebuild；前端由用户另建会话在隔离工作树开发，通过审查后的普通增量提交接入。此文件定义交接事实，不向另一会话发指令，也不代表其工作已经交付。
 
 ## 写入和集成
 
@@ -35,8 +35,8 @@
 | POST /api/v1/admin/system/update | 已删除路由、处理器、安装实现及权限目录项 |
 | POST /api/v1/admin/system/rollback | 已删除路由、处理器、恢复实现及权限目录项 |
 | GET /api/v1/admin/system/rollback-versions | 已删除路由、处理器、版本列表及权限目录项 |
-| GET /api/v1/admin/system/version | 保留version、upstream_version、build_commit和门户版本响应头 |
-| GET /api/v1/admin/system/check-updates | 只读当前版本及手动部署状态：manual、disabled=true、has_update=false、cached=false；不查询远端，不返回release_info/container_update/release_channel |
+| GET /api/v1/admin/system/version | 保留version、upstream_version、build_commit；升级器专属响应头已删除 |
+| GET /api/v1/admin/system/check-updates | 已删除；前端已改为仅getVersion，无活跃消费者 |
 | POST /api/v1/admin/system/restart | 保留独立运维用途、原授权、锁及幂等要求 |
 
 更新方式是从本独立分支构建制品并重新部署。后端不提供隐藏的下载/安装开关，UPDATE_CHECK_ENABLED已删除。保留实际被Claude/Codex版本同步和价格数据读取使用的GitHub客户端及代理配置；它们不安装本项目二进制。前端代码未由本任务修改，相关删除验收由前端会话完成后再整合。
@@ -50,3 +50,9 @@
 后端完成当前提交后在此登记可集成HEAD和写集边界；前端会话自行核对并仅集成frontend及其实施记录。后端清理已删除三个旧系统更新/回滚接口；门户旧updater代理块随同退休，前端需移除旧socket/updater调用与控件。网站公共设置、认证、网关协议合同本轮保持。维护三品牌分支继续独立。
 
 独立项目启动默认改为/etc/sub2api配置目录、sub2api数据库名和WebAuthn显示名；显式配置优先，不变更RP ID或已保存数据，不再自动发现旧/etc/kdan。
+
+## 已整合前端检查点
+
+后端第一波代码提交：5aaf015b6d62864ee0fe3279967a579261cab51f。前端原始提交737fd177d30679a573995f6ad9b9314467ccb3f4已审查并cherry-pick为18853316238485e373a1113feee782549169bd03；frontend树与已验证d786178e800e85b0dd7e3d36540e25625bf17d89完全相同，没有收取隔离工作树的未提交文件。
+
+当前前端仅消费GET /api/v1/admin/system/version。因此进一步删除无消费者GET /api/v1/admin/system/check-updates、安装状态字段及X-Portal-Backend-Version专属升级器响应头；BuildStatus仅保存三个当前版本值，不留旧更新占位接口。独立restart接口保留。前后端共同分支已有第一波实现，完整领域迁移与真实UI登录联调仍未完成。

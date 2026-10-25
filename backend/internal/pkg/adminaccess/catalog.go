@@ -61,7 +61,7 @@ var definitions = []permissionDefinition{
 	{Permission{"ops.errors.resolve", "标记请求错误处理状态", "监控", "global"}, []string{"PUT /ops/errors/:id/resolve", "PUT /ops/request-errors/:id/resolve", "PUT /ops/upstream-errors/:id/resolve"}},
 	{Permission{"ops.alerts.read", "读取全站告警规则与事件", "监控", "global"}, []string{"GET /ops/alert-rules", "GET /ops/alert-events", "GET /ops/alert-events/:id"}},
 	{Permission{"ops.alerts.write", "修改告警规则、状态与静默", "监控", "global"}, []string{"POST /ops/alert-rules", "PUT /ops/alert-rules/:id", "DELETE /ops/alert-rules/:id", "PUT /ops/alert-events/:id/status", "POST /ops/alert-silences"}},
-	{Permission{"system.read", "读取系统版本与手动部署状态", "系统", "global"}, []string{"GET /system/version", "GET /system/check-updates"}},
+	{Permission{"system.read", "读取系统版本", "系统", "global"}, []string{"GET /system/version"}},
 }
 
 func PermissionCatalog() []Permission {

@@ -47,7 +47,7 @@ func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient)
 
 // ProvideBuildStatusService creates BuildStatusService with BuildInfo
 func ProvideBuildStatusService(buildInfo BuildInfo) *BuildStatusService {
-	return NewBuildStatusService(buildInfo.Version, buildInfo.BuildType).WithUpstreamVersion(buildInfo.UpstreamVersion).WithBuildCommit(buildInfo.BuildCommit)
+	return NewBuildStatusService(buildInfo.Version).WithUpstreamVersion(buildInfo.UpstreamVersion).WithBuildCommit(buildInfo.BuildCommit)
 }
 
 // ProvideEmailQueueService creates EmailQueueService with default worker count

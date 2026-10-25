@@ -368,7 +368,7 @@
 - 站名、域名、Logo、法律主体、默认配置、安装包及下载地址属于品牌覆盖；运行时已保存设置优先。共享逻辑不能硬编码其他品牌策略。
 - 供应商和主站的账号状态、错误提示、费用/配额、移动端焦点和弹层遵守同一授权与显示语义。
 
-**代码/验收。** [路由](../frontend/src/router/index.ts)、[品牌](../frontend/src/config/brand.ts)、[客户端配置](../frontend/src/components/keys/UseKeyModal.vue)、[在线手册](../frontend/src/content/docs/)、[繁体生成](../tools/zh-tw/)。验收四语言键、异步语言竞态、链接/下载包、权限菜单、窄屏、键盘与品牌差异；同语言唯一版本，翻译不算重复需求方案。
+**代码/验收。** [路由](../frontend/src/router/index.ts)、[品牌](../frontend/src/shared/config/project.ts)、[客户端配置](../frontend/src/components/keys/UseKeyModal.vue)、[在线手册](../frontend/src/content/docs/)、[繁体生成](../tools/zh-tw/)。验收四语言键、异步语言竞态、链接/下载包、权限菜单、窄屏、键盘与品牌差异；同语言唯一版本，翻译不算重复需求方案。
 
 <a id="req-plugins"></a>
 ### R18 插件扩展

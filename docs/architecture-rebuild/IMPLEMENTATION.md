@@ -10,7 +10,7 @@
 | WP-02-SSE | 纯SSE分行器与测试迁至protocol/sse，服务/BPS接入，旧pkg/sse删除 | 其余协议、provider及会话迁移 |
 | WP-27-API | 唯一根Dockerfile，deploy/api独立PG/Redis/API模板、镜像/项目/可选容器名配置 | 完整UI角色集成及真实上游验收 |
 | WP-27-IDENTITY | projectinfo集中技术名；站点/日志默认sub2api；显式网站/日志设置保留 | 前端品牌与资产治理、历史部署迁移 |
-| WP-24-UPDATE | 删除旧下载/校验/解压/二进制替换/备份回滚、Compose socket、缓存及三个失效API；删除旧UpdateService文件，保留纯BuildStatus和独立重启 | 新的制品发布自动化没有开发或宣称完成 |
+| WP-24-UPDATE | 删除旧下载/校验/解压/二进制替换/备份回滚、Compose socket、缓存及四个失效API；删除旧UpdateService文件，保留纯BuildStatus和独立重启 | 新的制品发布自动化没有开发或宣称完成 |
 | WP-24-PACKAGING | 删除旧品牌发版矩阵、GoReleaser、安装器、多套旧主站Compose；删除门户updater代理和品牌网络覆盖 | 门户完整新UI由前端会话验收 |
 | WP-24-DOCS | 替换旧项目入口/交付规则、清理无引用旧Logo及推广图片、消除维护品牌推送选择器与当前资料断链 | 历史输入资料仍保留作研究/许可证据，不当作当前运行清单 |
 
@@ -18,7 +18,7 @@
 
 ## 已删除与有依据保留
 
-旧自更新不是放在死开关后：releaseSourceTrusted、下载/替换/回滚方法、update_check_cache、UPDATE_CHECK_ENABLED及专属路由/权限项一并移除。只读构建状态使用无I/O的Status值返回，不保留无用force/context参数或不可能的错误分支。HTTP读合同供当前前端消费者显示版本和手动部署方式；写接口删除清单见FRONTEND_HANDOFF。
+旧自更新不是放在死开关后：releaseSourceTrusted、下载/替换/回滚方法、update_check_cache、UPDATE_CHECK_ENABLED及专属路由/权限项一并移除。只读构建状态只保留当前version/upstream_version/build_commit三个值，无I/O、force/context或不可能的错误分支。前端VersionBadge仅消费getVersion；check-updates和升级器专属响应头也删除，不留无消费者安装状态字段。接口清单见FRONTEND_HANDOFF。
 
 GitHub latest/recent读取继续供Claude Code和Codex版本同步；同一代理配置也供远程价格读取。保留这些实际消费者、鉴权/重定向/出口保护，不把它们按update名称误删。供应商门户的静态站点/同源代理、许可、SDK、法律文档、历史SQL和未被接管的业务模块各有当前用途。
 
@@ -31,15 +31,21 @@ GitHub latest/recent读取继续供Claude Code和Codex版本同步；同一代�
 - 清理后版本同步、GitHub读取鉴权/代理、构建状态、权限目录和中间件284个测试/子测试通过。处理器/路由编译发现的一个无用import已删除，两个受影响包定向复测通过。
 - Wire通过真实生成器重新生成，使用任务临时modfile承载工具依赖，应用go.mod/go.sum未修改；不以手改生成代码掩盖类型问题。
 - 交付工具19项测试通过；API部署权限/密钥/卷隔离/命名/门户接线8项测试通过，资源与Caddy检查通过。部署worker只完成部分清理，剩余测试及代理移除由主代理接手完成，未把未运行检查记为worker成功。
-- 第一波Linux arm64镜像实际构建、UID1000、PG客户端、隔离初始化、健康、公开设置、登录和重启持久化已通过。清理后唯一根Dockerfile已重新构建，独立新数据库初始化、健康、公开设置、登录、重启持久化通过；三个退役接口实测404。最后默认值调整的镜像/原生编译结果继续按当前源码记录。
+- 第一波Linux arm64镜像实际构建、UID1000、PG客户端、隔离初始化、健康、公开设置、登录和重启持久化已通过。清理后唯一根Dockerfile已重新构建，独立新数据库初始化、健康、公开设置、登录、重启持久化通过；原三个安装/回滚接口实测404；前端接入后第四个无消费者check-updates读接口也已删除并补相应回归。最后默认值调整的镜像/原生编译结果继续按当前源码记录。
 - 管理员check-updates实际路由受既有423合规确认保护；没有代用户确认。纯只读状态由服务/处理器测试证明。真实上游、生产、Linux amd64和完整UI均未验证。
 
 ## 并行与交接
 
 第一波由3个实现worker和1个只读审查worker协作；追加清理由2个worker分离写集，主代理整合共享配置、权限、Wire、文档及未完成部署验证。所有worker均已结束，Git索引和发布由主代理单写。
 
-前端会话报告327项定向测试、类型/lint和主站/vendor构建通过，但仍在独立工作树，未由后端自动收集或合入。后端提交后在FRONTEND_HANDOFF登记准确HEAD，供其自行核对增量。此处不宣称前后端完整联调。
+前端提交737fd177已审查并作为188533162整合。核对其365项测试、类型/lint与web/vendor构建回执，并校验frontend树d786178e与提交一致；相关backend JSON与法律输入未改变，复用该会话有效证据。没有复制未提交文件，也没有宣称真实UI登录或上游联调完成。
 
 ## 后续开发
 
-继续补齐access/session/billing/catalog端口与统一执行引擎，再完成原生完整切片及BPS/Cloud/其余平台迁移。每个切片同步删除替代代码、旧配置和测试；不把无用旧项目文件保留到最后。当前仅上述切片完成，28项父工作包未全部验收，implementation_ready及rollout_ready仍为false。
+继续补齐access/session/billing/catalog端口与统一执行引擎，再完成原生完整切片及BPS/Cloud/其余平台迁移。每个切片同步删除替代代码、旧配置和测试；不把无用旧项目文件保留到最后。当前仅上述切片完成，30项父工作包未全部验收，implementation_ready及rollout_ready仍为false。
+
+## 最终整合核验
+
+已审查并整合前端提交，frontend源码树保持其365项已通过验证输入不变；相同backend JSON、法律输入和依赖清单核对一致。集成后删除最后一个无消费者check-updates读接口、升级器响应头和安装状态字段，服务/处理器/路由定向回归通过。最终源码镜像重新构建并实际启动，健康/中性公开设置通过，四个退役接口均实测404；测试容器、卷、网络和镜像均已按本任务归属移除。
+
+后端代码检查点5aaf015b6，前端整合检查点188533162；后续集成收敛提交采用普通历史，不移动维护三品牌。详细SHA、最终资源实测与保留证据以最终交接回执为准。

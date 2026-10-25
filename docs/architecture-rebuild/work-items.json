@@ -1603,10 +1603,13 @@
     "write_paths": [
       "frontend/**"
     ],
-    "status": "external_changes_ready_pending_backend_checkpoint",
+    "status": "first_wave_integrated",
     "integration_rule": "Backend APIs and independent API deployment remain buildable; UI integration requires the frontend session deliverable.",
     "staging_worktree": "/Users/luhonglin/.codex/worktrees/b889/sub2api",
-    "evidence_note": "Externally reported 327 targeted tests, type/lint and main/vendor builds; not imported or independently rerun by backend integrator."
+    "evidence_note": "Externally reported 327 targeted tests, type/lint and main/vendor builds; not imported or independently rerun by backend integrator.",
+    "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4",
+    "integration_commit": "18853316238485e373a1113feee782549169bd03",
+    "verified_frontend_tree": "d786178e800e85b0dd7e3d36540e25625bf17d89"
   },
   "work_slices": [
     {
@@ -1732,10 +1735,75 @@
       "assignee": "integrator",
       "scope": "Replace maintenance-only project entry/delivery rules, remove orphaned root branding/promotion assets, and synchronize documentation/frontend handoff. Keep source/legal evidence with real purpose.",
       "evidence": "IMPLEMENTATION.md"
+    },
+    {
+      "id": "WP-28-TRANSPORT",
+      "parent": "WP-28",
+      "depends_on": [
+        "WP-00"
+      ],
+      "title": "共享HTTP/session真实接线",
+      "status": "accepted",
+      "assignee": "frontend_session",
+      "integration_owner": "integrator",
+      "evidence": "FRONTEND_IMPLEMENTATION.md",
+      "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4"
+    },
+    {
+      "id": "WP-28-PUBLIC-CONFIG",
+      "parent": "WP-28",
+      "depends_on": [
+        "WP-00"
+      ],
+      "title": "公共设置唯一owner",
+      "status": "accepted",
+      "assignee": "frontend_session",
+      "integration_owner": "integrator",
+      "evidence": "FRONTEND_IMPLEMENTATION.md",
+      "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4"
+    },
+    {
+      "id": "WP-28-APP",
+      "parent": "WP-28",
+      "depends_on": [
+        "WP-00"
+      ],
+      "title": "应用启动与会话副作用",
+      "status": "accepted",
+      "assignee": "frontend_session",
+      "integration_owner": "integrator",
+      "evidence": "FRONTEND_IMPLEMENTATION.md",
+      "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4"
+    },
+    {
+      "id": "WP-28-BRANDING",
+      "parent": "WP-28",
+      "depends_on": [
+        "WP-00"
+      ],
+      "title": "运行品牌与版本只读展示",
+      "status": "accepted",
+      "assignee": "frontend_session",
+      "integration_owner": "integrator",
+      "evidence": "FRONTEND_IMPLEMENTATION.md",
+      "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4"
+    },
+    {
+      "id": "WP-21-CLEANUP-01",
+      "parent": "WP-21",
+      "depends_on": [
+        "WP-00"
+      ],
+      "title": "无消费者前端代码/截图删除",
+      "status": "accepted",
+      "assignee": "frontend_session",
+      "integration_owner": "integrator",
+      "evidence": "FRONTEND_IMPLEMENTATION.md",
+      "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4"
     }
   ],
   "last_completed_phase": "first_wave_foundation_2026-10-25",
-  "current_phase": "backend_checkpoint_ready_for_frontend_integration",
+  "current_phase": "first_wave_integrated_and_verified",
   "retired_implementation_inputs": [
     "deploy/docker-compose.yml",
     "scripts/release/channels.json",

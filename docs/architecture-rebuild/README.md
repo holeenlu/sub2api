@@ -20,7 +20,7 @@
 | [ARCHITECTURE](ARCHITECTURE.md) | 总体结构、职责、依赖方向和取舍 | 架构、各领域 |
 | [DECISIONS](DECISIONS.md) | 15项ADR、工程默认、需证据的局部事项 | 集成者、合同owner |
 | [CONTRACTS](CONTRACTS.md) | 11项CT的输入输出、状态、错误、取消、幂等和资源寿命 | 所有实现者 |
-| [CODING_STANDARDS](CODING_STANDARDS.md) | 69项编码规则、Go/Vue/TS结构与写法、数据/安全/测试、实际工具覆盖及审查方式 | 所有实现者、评审者 |
+| [CODING_STANDARDS](CODING_STANDARDS.md) | 100项编码规则、Go/Vue/TS结构与写法、数据/安全/测试、实际工具覆盖及审查方式 | 所有实现者、评审者 |
 | [BRANDING](BRANDING.md) | sub2api统一项目、部署参数、网站品牌设置、广告清理与更名迁移 | 控制面、前端、部署、集成与评审 |
 | [PROTOCOLS](PROTOCOLS.md) | 真实入口/平台/mode/transport矩阵、协议场景和有效兼容 | 协议、provider、ingress |
 | [DATA_AND_CONFIG](DATA_AND_CONFIG.md) | PG/Redis/进程状态、owner、TTL、敏感信息和配置来源 | 数据、会话、账务、控制 |

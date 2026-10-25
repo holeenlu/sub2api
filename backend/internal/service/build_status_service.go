@@ -4,20 +4,18 @@ import (
 	"strings"
 )
 
-// BuildStatusService exposes the running build and its manual deployment policy.
+// BuildStatusService exposes the running build metadata.
 // Rebuild artifacts are installed by the operator; this service performs no
 // release lookup, download, binary replacement, rollback, or host update.
 type BuildStatusService struct {
 	currentVersion  string
-	buildType       string
 	upstreamVersion string
 	buildCommit     string
 }
 
-func NewBuildStatusService(version, buildType string) *BuildStatusService {
+func NewBuildStatusService(version string) *BuildStatusService {
 	return &BuildStatusService{
 		currentVersion: version,
-		buildType:      buildType,
 	}
 }
 
@@ -49,33 +47,18 @@ func (s *BuildStatusService) WithBuildCommit(commit string) *BuildStatusService 
 	return s
 }
 
-// BuildStatus is the read-only status consumed by the admin UI. LatestVersion
-// mirrors CurrentVersion because the application does not check remote releases.
+// BuildStatus contains only the running build metadata consumed by the UI.
 type BuildStatus struct {
-	UpdateMethod    string `json:"update_method"`
-	BuildCommit     string `json:"build_commit,omitempty"`
-	CurrentVersion  string `json:"current_version"`
-	LatestVersion   string `json:"latest_version"`
-	HasUpdate       bool   `json:"has_update"`
-	Cached          bool   `json:"cached"`
-	Warning         string `json:"warning,omitempty"`
-	BuildType       string `json:"build_type"`
-	UpstreamVersion string `json:"upstream_version,omitempty"`
-	Disabled        bool   `json:"disabled"`
+	CurrentVersion  string
+	BuildCommit     string
+	UpstreamVersion string
 }
 
 // Status describes the running build without I/O or mutable release state.
 func (s *BuildStatusService) Status() BuildStatus {
 	return BuildStatus{
-		UpdateMethod:    "manual",
 		CurrentVersion:  s.currentVersion,
-		LatestVersion:   s.currentVersion,
-		HasUpdate:       false,
-		Cached:          false,
-		Warning:         "Automatic updates and rollback are unavailable; deploy independent rebuild artifacts manually.",
-		BuildType:       s.buildType,
 		UpstreamVersion: s.upstreamVersion,
 		BuildCommit:     s.buildCommit,
-		Disabled:        true,
 	}
 }

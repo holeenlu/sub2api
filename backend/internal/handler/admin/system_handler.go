@@ -39,19 +39,11 @@ func (h *SystemHandler) GetVersion(c *gin.Context) {
 	info := h.buildStatus.Status()
 	// Portal and admin clients receive the running backend version.
 	// This endpoint retains the existing live super-administrator authorization.
-	c.Header("X-Portal-Backend-Version", info.CurrentVersion)
 	response.Success(c, gin.H{
 		"version":          info.CurrentVersion,
 		"upstream_version": info.UpstreamVersion,
 		"build_commit":     info.BuildCommit,
 	})
-}
-
-// CheckUpdates returns the manual deployment status of the current build
-// GET /api/v1/admin/system/check-updates
-func (h *SystemHandler) CheckUpdates(c *gin.Context) {
-	info := h.buildStatus.Status()
-	response.Success(c, info)
 }
 
 // RestartService restarts the systemd service

@@ -251,7 +251,6 @@ var routeRules = map[string]RouteRule{
 	"GET /api/v1/admin/subscriptions":                                             {All: []string{"subscriptions.read"}},
 	"GET /api/v1/admin/subscriptions/:id":                                         {All: []string{"subscriptions.read"}},
 	"GET /api/v1/admin/subscriptions/:id/progress":                                {All: []string{"subscriptions.read"}},
-	"GET /api/v1/admin/system/check-updates":                                      {SuperOnly: true},
 	"GET /api/v1/admin/system/version":                                            {SuperOnly: true},
 	"GET /api/v1/admin/tls-fingerprint-profiles":                                  {SuperOnly: true},
 	"GET /api/v1/admin/tls-fingerprint-profiles/:id":                              {SuperOnly: true},
