@@ -24,7 +24,7 @@ func TestScopedAdminKeyPanelRateLimitAuthenticatedRead(t *testing.T) {
 	}, 9)
 	require.NoError(t, err)
 	users := service.NewUserService(&stubUserRepo{getByID: func(context.Context, int64) (*service.User, error) {
-		return &service.User{ID: 9, Role: service.RoleAdmin, Status: service.StatusActive}, nil
+		return &service.User{ID: 9, Role: service.RoleSuperAdmin, Status: service.StatusActive}, nil
 	}}, nil, nil, nil)
 	allower := &fakePanelAllower{}
 	p := &PanelRateLimiter{limiter: allower, settingService: settings}
@@ -55,7 +55,7 @@ func TestScopedAdminKeyPanelRateLimitWritesAndIndependentKeys(t *testing.T) {
 				r := gin.New()
 				r.Use(func(c *gin.Context) {
 					c.Set(string(ContextKeyUser), AuthSubject{UserID: 9})
-					c.Set(string(ContextKeyUserRole), service.RoleAdmin)
+					c.Set(string(ContextKeyUserRole), service.RoleSuperAdmin)
 					c.Request = c.Request.WithContext(adminaccess.WithPrincipal(c.Request.Context(), &adminaccess.Principal{KeyID: keyID}))
 					c.Next()
 				}, p.Global(), p.Heavy())
@@ -99,7 +99,7 @@ func TestScopedAdminKeyPanelRateLimitAuthenticatedSensitiveWrite(t *testing.T) {
 			}, 9)
 			require.NoError(t, err)
 			users := service.NewUserService(&stubUserRepo{getByID: func(context.Context, int64) (*service.User, error) {
-				return &service.User{ID: 9, Role: service.RoleAdmin, Status: service.StatusActive}, nil
+				return &service.User{ID: 9, Role: service.RoleSuperAdmin, Status: service.StatusActive}, nil
 			}}, nil, nil, nil)
 			p := &PanelRateLimiter{limiter: &fakePanelAllower{err: tc.redisErr}, settingService: settings}
 			r := gin.New()
@@ -125,7 +125,7 @@ func TestScopedAdminKeyPanelRateLimitSafeMethods(t *testing.T) {
 			r := gin.New()
 			r.Use(func(c *gin.Context) {
 				c.Set(string(ContextKeyUser), AuthSubject{UserID: 9})
-				c.Set(string(ContextKeyUserRole), service.RoleAdmin)
+				c.Set(string(ContextKeyUserRole), service.RoleSuperAdmin)
 				c.Request = c.Request.WithContext(adminaccess.WithPrincipal(c.Request.Context(), &adminaccess.Principal{KeyID: "read-key"}))
 				c.Next()
 			}, p.Global())
@@ -150,7 +150,7 @@ func TestScopedAdminKeyPanelRateLimitPreservesUnrestrictedAdminWrites(t *testing
 			r.Use(func(c *gin.Context) {
 				// JWT 与旧全权密钥都只有管理员用户身份，没有受限 Principal。
 				c.Set(string(ContextKeyUser), AuthSubject{UserID: 9})
-				c.Set(string(ContextKeyUserRole), service.RoleAdmin)
+				c.Set(string(ContextKeyUserRole), service.RoleSuperAdmin)
 				c.Next()
 			}, p.Global())
 			r.POST("/test", func(c *gin.Context) { c.Status(http.StatusNoContent) })

@@ -1,3 +1,4 @@
+import type { SchedulingQuotaProtection } from '@/utils/schedulingQuota'
 /**
  * Admin Ops API endpoints (vNext)
  * - Error logs list/detail
@@ -284,6 +285,8 @@ export interface OpsSystemMetricsSnapshot {
 
 export interface OpsJobHeartbeat {
   job_name: string
+  expected_interval_seconds?: number
+  health_status?: 'healthy' | 'failed' | 'stale' | 'unknown'
   last_run_at?: string | null
   last_success_at?: string | null
   last_error_at?: string | null
@@ -795,6 +798,9 @@ export interface OpsOpenAIAccountQuotaAutoPauseSettings {
 }
 
 export interface OpsAdvancedSettings {
+  quota_protection: SchedulingQuotaProtection
+  account_telemetry_sending_enabled: boolean
+  account_telemetry_upload_interval_seconds: number
   data_retention: OpsDataRetentionSettings
   aggregation: OpsAggregationSettings
   openai_account_quota_auto_pause: OpsOpenAIAccountQuotaAutoPauseSettings
@@ -912,6 +918,7 @@ export interface OpsErrorLog {
 
   severity: OpsSeverity
   status_code: number
+  request_status_code?: number | null
   platform: string
   model: string
 
@@ -970,6 +977,11 @@ export interface OpsErrorDetail extends OpsErrorLog {
 }
 
 export type OpsErrorLogsResponse = PaginatedResponse<OpsErrorLog>
+
+export interface OpsErrorDiagnostics extends OpsErrorDetail {
+  // Separate records shown below the current request; upstream_errors remains the raw event string.
+  correlated_upstream_errors: OpsErrorDetail[]
+}
 
 export async function getDashboardOverview(
   params: {
@@ -1132,6 +1144,35 @@ export async function listErrorLogs(params: OpsErrorListQueryParams): Promise<Op
 export async function getErrorLogDetail(id: number): Promise<OpsErrorDetail> {
   const { data } = await apiClient.get<OpsErrorDetail>(`/admin/ops/errors/${id}`)
   return data
+}
+
+// Use the same authorized detail and request-scoped attempts as the current error modal.
+export async function getErrorDiagnostics(id: number, errorType: 'request' | 'upstream' = 'request'): Promise<OpsErrorDiagnostics> {
+  const detail = await (errorType === 'upstream' ? getUpstreamErrorDetail(id) : getRequestErrorDetail(id))
+  const correlatedUpstreamErrors: OpsErrorDetail[] = []
+  if (errorType === 'request') {
+    let page = 1
+    let pages = 1
+    let total: number | undefined
+    const attemptIds = new Set<number>()
+    do {
+      const response = await listRequestErrorUpstreamErrors(id, { page, page_size: 100, view: 'all' }, { include_detail: true })
+      if (total !== undefined && response.total !== total) {
+        throw new Error('Upstream error count changed during export')
+      }
+      total = response.total
+      for (const attempt of response.items) {
+        if (attemptIds.has(attempt.id)) throw new Error('Duplicate upstream error during export')
+        attemptIds.add(attempt.id)
+      }
+      correlatedUpstreamErrors.push(...response.items)
+      pages = response.pages
+      page += 1
+    } while (page <= pages)
+    // The detail endpoint can skip records whose individual detail lookup failed.
+    if (correlatedUpstreamErrors.length !== total) throw new Error('Incomplete upstream error details')
+  }
+  return { ...detail, correlated_upstream_errors: correlatedUpstreamErrors }
 }
 
 export async function updateErrorResolved(errorId: number, resolved: boolean): Promise<void> {
@@ -1333,6 +1374,7 @@ export const opsAPI = {
   // Legacy unified endpoints
   listErrorLogs,
   getErrorLogDetail,
+  getErrorDiagnostics,
   updateErrorResolved,
 
   // New split endpoints

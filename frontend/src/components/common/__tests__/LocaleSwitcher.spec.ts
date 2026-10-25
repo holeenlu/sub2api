@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import LocaleSwitcher from '../LocaleSwitcher.vue'
 
-const { setLocale } = vi.hoisted(() => ({ setLocale: vi.fn() }))
+const { setLocale, showError } = vi.hoisted(() => ({ setLocale: vi.fn(), showError: vi.fn() }))
+vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError }) }))
 
 vi.mock('@/i18n', () => ({
   setLocale,
@@ -13,7 +14,7 @@ vi.mock('@/i18n', () => ({
   ]
 }))
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'zh' } }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'zh' }, t: (key: string) => key }) }))
 
 const reload = vi.fn()
 
@@ -29,7 +30,8 @@ const choose = async (wrapper: ReturnType<typeof mountSwitcher>, name: string) =
 
 describe('LocaleSwitcher', () => {
   beforeEach(() => {
-    setLocale.mockReset().mockResolvedValue(undefined)
+    setLocale.mockReset().mockResolvedValue(true)
+    showError.mockReset()
     reload.mockReset()
     vi.stubGlobal('location', { ...window.location, reload })
   })
@@ -55,6 +57,26 @@ describe('LocaleSwitcher', () => {
     await choose(wrapper, '中文')
 
     expect(setLocale).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('keeps the current page and permits retry after a language download fails', async () => {
+    setLocale.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mountSwitcher()
+    await choose(wrapper, 'English')
+    expect(showError).toHaveBeenCalledWith('common.languageLoadFailed')
+    expect(reload).not.toHaveBeenCalled()
+    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
+    const option = wrapper.findAll('button').find((button) => button.text().includes('English'))!
+    await option.trigger('click')
+    await flushPromises()
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not reload for a superseded selection', async () => {
+    setLocale.mockResolvedValue(false)
+    const wrapper = mountSwitcher()
+    await choose(wrapper, 'English')
     expect(reload).not.toHaveBeenCalled()
   })
 })
