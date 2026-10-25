@@ -3,11 +3,13 @@ package repository
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
 
 	"github.com/imroc/req/v3"
@@ -76,6 +78,15 @@ func getSharedReqClient(opts reqClientOptions) (*req.Client, error) {
 func instrumentReqClient(client *req.Client) *req.Client {
 	if client == nil {
 		return nil
+	}
+	// Covers OAuth creation, refresh and shared metadata clients, including
+	// browser fingerprint transports. Their SOCKS dialer uses this forward dial.
+	transport := client.GetTransport()
+	if transport.Proxy != nil {
+		if u, err := transport.Proxy(&http.Request{URL: &url.URL{Scheme: "https", Host: "example.invalid"}}); err == nil && proxyutil.IsVendorProxy(u) {
+			transport.DialContext = proxyutil.GuardProxyDial(u, transport.DialContext)
+			client.GetClient().CheckRedirect = proxyutil.VendorRedirectPolicy(client.GetClient().CheckRedirect)
+		}
 	}
 	client.GetTransport().WrapRoundTripFunc(func(rt http.RoundTripper) req.HttpRoundTripFunc {
 		timed := servertiming.WrapRoundTripper(rt)

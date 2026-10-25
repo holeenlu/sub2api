@@ -115,6 +115,24 @@ func TestEasyPayConfirmNotification(t *testing.T) {
 			wantErr:     "out_trade_no mismatch",
 		},
 		{
+			name:        "nested identity cannot contradict top level",
+			body:        `{"code":1,"pid":"1001","out_trade_no":"sub2_ORDER1","trade_no":"2026101600001","money":"10.00","status":1,"data":{"pid":"other"}}`,
+			notifyTrade: "2026101600001",
+			wantErr:     "merchant mismatch",
+		},
+		{
+			name:        "missing upstream transaction identity",
+			body:        `{"code":1,"money":"10.00","status":1}`,
+			notifyTrade: "2026101600001",
+			wantErr:     "missing upstream trade_no",
+		},
+		{
+			name:        "nonfinite upstream amount",
+			body:        `{"code":1,"trade_no":"2026101600001","money":"NaN","status":1}`,
+			notifyTrade: "2026101600001",
+			wantErr:     "amount mismatch",
+		},
+		{
 			name:        "upstream HTTP error body",
 			body:        `<html>502 Bad Gateway</html>`,
 			status:      http.StatusBadGateway,

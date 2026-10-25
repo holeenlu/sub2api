@@ -35,9 +35,9 @@ func EffectiveCLIVersion() string {
 	return CLIVersion()
 }
 
-// DefaultUserAgent 返回 Claude Code CLI 伪装 User-Agent。
-// 所有出站路径都必须经本函数取 UA，保证 User-Agent 头与请求体 billing
-// attribution 块中的 cc_version 始终源自同一个版本号。
+// DefaultUserAgent 返回真实客户端身份跟踪/兼容路径的默认 User-Agent。
+// 网关生成的 mimic 请求单独固定到 CLICurrentVersion 的已验证协议模板；
+// 自动同步、手动设置和环境变量不能只抬升 mimic UA 而使 CCH 失效。
 func DefaultUserAgent() string {
 	return "claude-cli/" + EffectiveCLIVersion() + " (external, cli)"
 }
