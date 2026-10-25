@@ -27,6 +27,27 @@ type moderationTextCollector struct {
 	filterReminders bool
 }
 
+// Distillation rules cover the client's instructions as well as the current
+// user input. Semantic moderation and refusal fingerprints retain their own
+// current-user boundary; tool results and assistant reasoning are not scanned.
+func contentModerationDistillationText(input ContentModerationCheckInput, userText string) string {
+	collector := moderationTextCollector{}
+	parts := []string{}
+	images := []string{}
+	for _, path := range []string{"system", "instructions", "systemInstruction.parts"} {
+		collector.collectContentValue(gjson.GetBytes(input.Body, path), &parts, &images)
+	}
+	for _, path := range []string{"messages", "input"} {
+		for _, message := range gjson.GetBytes(input.Body, path).Array() {
+			if role := message.Get("role").String(); role == "system" || role == "developer" {
+				collector.collectContentValue(message.Get("content"), &parts, &images)
+			}
+		}
+	}
+	parts = append(parts, userText)
+	return normalizeContentModerationText(strings.Join(parts, "\n"))
+}
+
 func extractContentModerationInput(protocol string, body []byte, filterReminders bool) ContentModerationInput {
 	collector := moderationTextCollector{filterReminders: filterReminders}
 	if len(body) == 0 || !gjson.ValidBytes(body) {
@@ -239,6 +260,13 @@ func (collector moderationTextCollector) collectLastResponsesInput(input gjson.R
 }
 
 func (collector moderationTextCollector) isResponsesUserTextItem(item gjson.Result) bool {
+	// A tool result remains a tool result even when it contains a content/text
+	// extension or a forged user role. All guards share this protocol boundary.
+	switch strings.ToLower(strings.TrimSpace(item.Get("type").String())) {
+	case "", "message", "input_text", "input_image":
+	default:
+		return false
+	}
 	role := strings.ToLower(strings.TrimSpace(item.Get("role").String()))
 	if role == "user" {
 		return collector.responseItemHasModerationText(item)
@@ -301,6 +329,11 @@ func (collector moderationTextCollector) collectContentValue(value gjson.Result,
 		})
 	case value.IsObject():
 		typ := strings.ToLower(strings.TrimSpace(value.Get("type").String()))
+		switch typ {
+		case "", "text", "input_text", "message", "image_url", "input_image", "image":
+		default:
+			return
+		}
 		addModerationImage(images, value.Get("image_url.url").String())
 		addModerationImage(images, value.Get("image_url").String())
 		addModerationImage(images, value.Get("url").String())

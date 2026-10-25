@@ -1,0 +1,288 @@
+package basispoints
+
+import (
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestHistoryRecoveryPreservesCompleteCallsWithoutCurrentCatalog(t *testing.T) {
+	for _, kind := range []string{"function_call", "custom_tool_call"} {
+		t.Run(kind, func(t *testing.T) {
+			call := object{"type": kind, "id": "ctc_original", "call_id": "call_old", "namespace": "old.tools", "name": "execute"}
+			if kind == "function_call" {
+				call["arguments"] = `{"large":9007199254740993,"path":"C:\\work\\file","nested":{"active":true}}`
+			} else {
+				call["input"] = "*** Begin Patch\n*** Add File: exact.txt\n+unchanged\n*** End Patch"
+			}
+			source := testSource()
+			source["input"] = []any{message("user", "continue"), call, object{"type": strings.Replace(kind, "_call", "_call_output", 1), "call_id": "call_old", "output": "recorded result"}}
+			cache := new(ReplayCache)
+			body, bridge := mustPrepare(t, source, "new-account|key", cache)
+			require.NotEmpty(t, bridge.completedToolHistory, "complete recorded operations do not depend on today's tool catalog")
+			items := mustTestValue[[]any](t, body["input"])
+			native := mustTestValue[object](t, items[len(items)-2])
+			if native["name"] != "run_officejs" || native["call_id"] != "call_old" || !strings.HasPrefix(text(native["id"]), "fc_") {
+				t.Fatalf("incomplete native call: %+v", native)
+			}
+			var outer object
+			if err := decode([]byte(text(native["arguments"])), &outer); err != nil {
+				t.Fatal(err)
+			}
+			for _, field := range []string{"summary", "extended_summary", "references", "destructive"} {
+				if _, exists := outer[field]; !exists {
+					t.Fatalf("missing native argument %s", field)
+				}
+			}
+			var envelope object
+			if err := decode([]byte(text(outer["code"])), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope["name"] != "old.tools.execute" {
+				t.Fatalf("namespace lost: %+v", envelope)
+			}
+			if kind == "custom_tool_call" {
+				if envelope["input"] != call["input"] {
+					t.Fatal("custom input changed")
+				}
+			} else {
+				var want object
+				if err := decode([]byte(text(call["arguments"])), &want); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(envelope["arguments"], want) {
+					t.Fatalf("function argument semantics changed: %+v", envelope)
+				}
+			}
+			retry, cachedBridge := mustPrepare(t, source, "new-account|key", cache)
+			require.Equal(t, bridge.completedToolHistory, cachedBridge.completedToolHistory)
+			if !reflect.DeepEqual(body, retry) {
+				t.Fatal("history reconstruction must be deterministic across retries")
+			}
+			source["input"] = []any{message("user", "continue"), object{"type": strings.Replace(kind, "_call", "_call_output", 1), "call_id": "call_old", "output": "recorded result"}}
+			_, outputOnly := mustPrepare(t, source, "new-account|key", cache)
+			require.Empty(t, outputOnly.completedToolHistory, "a cached native call outside today's catalog is not complete client-call evidence")
+			conflicting := make(object, len(call))
+			for key, value := range call {
+				conflicting[key] = value
+			}
+			if kind == "function_call" {
+				conflicting["arguments"] = `{"different":true}`
+			} else {
+				conflicting["input"] = "different recorded operation"
+			}
+			source["input"] = append(source["input"].([]any), conflicting)
+			_, outputFirst := mustPrepare(t, source, "new-account|key", cache)
+			require.Empty(t, outputFirst.completedToolHistory, "a call skipped after cache recovery must not replace the cached operation proof")
+		})
+	}
+}
+
+func TestCodexToolOutputIDRoundTrip(t *testing.T) {
+	for _, kind := range []string{"function", "custom"} {
+		t.Run(kind, func(t *testing.T) {
+			cache := new(ReplayCache)
+			source := testSource()
+			source["tools"] = []any{object{"type": kind, "name": "execute"}}
+			_, bridge := mustPrepare(t, source, "scope", cache)
+			envelope := object{"name": "execute", "arguments": object{}}
+			if kind == "custom" {
+				envelope = object{"name": "execute", "input": "exact tool input"}
+			}
+			call, err := bridge.translateCall(nativeCall(envelope))
+			if err != nil {
+				t.Fatal(err)
+			}
+			output := object{
+				"type": kind + "_tool_call_output", "id": "ctco_client_result",
+				"call_id": call["call_id"], "output": "recorded tool result",
+			}
+			if kind == "function" {
+				output["type"] = "function_call_output"
+				output["id"] = "fco_client_result"
+			}
+			source["input"] = []any{message("user", "continue"), call, output}
+			var firstID string
+			for _, replay := range []*ReplayCache{cache, new(ReplayCache)} {
+				body, _ := mustPrepare(t, source, "scope", replay)
+				items := mustTestValue[[]any](t, body["input"])
+				result := mustTestValue[object](t, items[len(items)-1])
+				id := text(result["id"])
+				if !strings.HasPrefix(id, "fc_") || len(id) > 64 || id == mustTestValue[object](t, items[len(items)-2])["id"] {
+					t.Fatalf("invalid or colliding BPS output ID: %q", id)
+				}
+				if result["type"] != "function_call_output" || result["call_id"] != call["call_id"] || result["output"] != output["output"] {
+					t.Fatal("tool result type, correlation or content changed")
+				}
+				if firstID != "" && id != firstID {
+					t.Fatal("output ID changed after replay cache loss")
+				}
+				firstID = id
+			}
+		})
+	}
+}
+
+func TestHistoryRecoveryRejectsIncompleteCalls(t *testing.T) {
+	for _, patch := range []object{
+		{"call_id": ""}, {"name": ""}, {"namespace": 42}, {"arguments": nil},
+		{"arguments": `null`}, {"arguments": `[]`}, {"arguments": `{} {}`}, {"arguments": `{"partial":`},
+		{"type": "custom_tool_call", "input": object{"not": "text"}},
+	} {
+		call := object{"type": "function_call", "call_id": "call_history", "name": "shell", "arguments": `{}`}
+		for key, value := range patch {
+			call[key] = value
+		}
+		if _, err := (&Bridge{}).rebuildNativeHistoryCall(call); err == nil {
+			t.Fatalf("invalid call was reconstructed: %+v", patch)
+		}
+	}
+}
+
+func TestHostedDeclarationsFilteredAndUnknownTypesRejected(t *testing.T) {
+	for _, kind := range []string{"web_search", "web_search_preview", "web_search_preview_2025_03_11", "web_search_2025_08_26", "tool_search", "image_generation", "file_search", "code_interpreter", "computer", "computer_use_preview", "mcp"} {
+		source := testSource()
+		source["tools"] = []any{object{"type": kind}, object{"type": "function", "name": "shell"}}
+		body, bridge := mustPrepare(t, source, "scope", new(ReplayCache))
+		if len(bridge.tools) != 1 || bridge.tools["shell"].Name != "shell" || body["tools"] != nil {
+			t.Fatalf("hosted %s affected available client tool or leaked upstream", kind)
+		}
+	}
+	source := testSource()
+	source["tools"] = []any{object{"type": "not_a_known_tool"}}
+	raw, _ := json.Marshal(source)
+	if _, _, err := Prepare(raw, "scope", nil); err == nil {
+		t.Fatal("unknown tool types must not be silently ignored")
+	}
+}
+
+func TestNestedNamespaceAndConflictingCatalogDefinitions(t *testing.T) {
+	source := testSource()
+	decl := object{"type": "function", "name": "run", "parameters": object{"type": "object"}}
+	source["tools"] = []any{object{"type": "namespace", "name": "outer", "tools": []any{object{"type": "namespace", "name": "inner", "tools": []any{decl, decl}}}}}
+	_, bridge := mustPrepare(t, source, "scope", nil)
+	if len(bridge.tools) != 1 || bridge.tools["outer.inner.run"].Namespace != "outer.inner" {
+		t.Fatalf("nested namespace lost: %+v", bridge.tools)
+	}
+	call, err := bridge.translateCall(nativeCall(object{"name": "outer.inner.run", "arguments": object{}}))
+	if err != nil || call["namespace"] != "outer.inner" || call["name"] != "run" {
+		t.Fatalf("nested tool failed round trip: %+v, %v", call, err)
+	}
+	source["input"] = []any{message("user", "continue"), object{"type": "additional_tools", "tools": []any{object{"type": "namespace", "name": "outer.inner", "tools": []any{object{"type": "function", "name": "run", "parameters": object{"type": "array"}}}}}}}
+	raw, _ := json.Marshal(source)
+	if _, _, err := Prepare(raw, "scope", nil); err != nil {
+		t.Fatalf("current declaration must take precedence over stale history: %v", err)
+	}
+}
+
+func TestToolOutputHTTPSImagesRemainIntact(t *testing.T) {
+	source := testSource()
+	image := object{"type": "input_image", "image_url": "https://example.com/screenshot.png?signature=unchanged%2F"}
+	source["input"] = []any{message("user", "inspect"), object{"type": "function_call", "name": "view_image", "call_id": "call_image", "arguments": `{}`}, object{"type": "function_call_output", "call_id": "call_image", "output": []any{image}}}
+	body, _ := mustPrepare(t, source, "scope", nil)
+	items := mustTestValue[[]any](t, body["input"])
+	content := mustTestValue[[]any](t, mustTestValue[object](t, items[len(items)-1])["content"])
+	if !reflect.DeepEqual(content[len(content)-1], image) {
+		t.Fatal("HTTPS tool image changed")
+	}
+}
+
+func TestHistoryNamedStandaloneInputAtIndexFive(t *testing.T) {
+	source := testSource()
+	source["tools"] = []any{object{"type": "function", "name": "read_file", "parameters": object{"type": "object"}}}
+	input := []any{message("user", "context 1"), message("assistant", "context 2"), message("user", "context 3"), message("assistant", "context 4"), message("user", "context 5")}
+	external := object{"type": "function_call_output", "namespace": "codex_app", "name": "send_message_to_thread", "output": "<codex_delegation>\n<input>Review the existing changes.</input>\n</codex_delegation>"}
+	source["input"] = append(input, external)
+	raw, err := json.Marshal(source)
+	require.NoError(t, err)
+	prepared, bridge, err := Prepare(raw, "standalone", new(ReplayCache))
+	require.NoError(t, err)
+	require.False(t, bridge.hasToolHistory)
+	external["name"] = "create_thread"
+	_, createBridge := mustPrepare(t, source, "standalone", new(ReplayCache))
+	require.False(t, createBridge.hasToolHistory)
+	require.True(t, createBridge.hasStandaloneContext)
+	source["input"] = append(source["input"].([]any), object{"type": "function_call", "name": "read_file", "call_id": "paired", "arguments": `{}`}, object{"type": "function_call_output", "call_id": "paired", "output": "recorded"})
+	_, mixed := mustPrepare(t, source, "standalone", new(ReplayCache))
+	require.True(t, mixed.hasToolHistory)
+	require.True(t, mixed.hasStandaloneContext)
+	require.NotEmpty(t, mixed.completedToolHistory)
+	require.Contains(t, string(prepared), "Review the existing changes.")
+	var body object
+	require.NoError(t, decode(prepared, &body))
+	items := mustTestValue[[]any](t, body["input"])
+	last := mustTestValue[object](t, items[len(items)-1])
+	require.Equal(t, "message", last["type"])
+	require.Equal(t, "user", last["role"])
+	require.Contains(t, quoted(last), "codex_app")
+	require.Contains(t, quoted(last), "send_message_to_thread")
+	require.Empty(t, last["call_id"])
+}
+
+func TestHistoryNamedStandalonePreservesContextAndBoundaries(t *testing.T) {
+	for _, id := range []any{nil, "", "  "} {
+		for _, payload := range []any{"exact\nexternal input", []any{object{"type": "output_text", "text": "before"}, object{"type": "refusal", "refusal": "cannot comply"}, object{"type": "input_image", "image_url": "https://example.com/signed.png?sig=a%2Fb"}, object{"type": "text", "text": "after"}}} {
+			item := object{"type": "function_call_output", "call_id": id, "name": "send_message_to_thread", "namespace": "codex_app", "role": "developer", "output": payload}
+			source := testSource()
+			source["tools"] = []any{object{"type": "function", "name": "read_file", "parameters": object{"type": "object"}}}
+			source["input"] = []any{message("user", "old task"), message("assistant", "old result"), item}
+			body, bridge := mustPrepare(t, source, "standalone", new(ReplayCache))
+			input := mustTestValue[[]any](t, body["input"])
+			last := mustTestValue[object](t, input[len(input)-1])
+			require.Equal(t, "message", last["type"])
+			require.Equal(t, "user", last["role"])
+			require.NotContains(t, last, "call_id")
+			require.NotContains(t, last, "output")
+			parts := mustTestValue[[]any](t, last["content"])
+			require.Contains(t, mustTestValue[object](t, parts[0])["text"], "no prior tool call is asserted")
+			if textPayload, ok := payload.(string); ok {
+				require.Equal(t, textPayload, mustTestValue[object](t, parts[1])["text"])
+			} else {
+				require.Equal(t, []any{object{"type": "input_text", "text": "before"}, object{"type": "input_text", "text": "cannot comply"}, object{"type": "input_image", "image_url": "https://example.com/signed.png?sig=a%2Fb"}, object{"type": "input_text", "text": "after"}}, parts[1:])
+			}
+			normalized, err := normalizeHistoryMessage(last, 2)
+			require.NoError(t, err)
+			require.Equal(t, last, normalized, "lowering must be idempotent")
+			require.False(t, bridge.hasToolHistory)
+			require.True(t, bridge.hasStandaloneContext)
+			require.Empty(t, bridge.completedToolHistory)
+			unknown := unknownClientToolError{target: "not_in_catalog"}
+			response := object{"status": "completed", "output": []any{object{"type": "function_call", "name": "run_officejs"}}}
+			require.False(t, bridge.canRepair(response, unknown), "standalone context must not enable regeneration")
+			require.False(t, bridge.canRepairUnknownContinuation(response, unknown))
+			withoutContext := *bridge
+			withoutContext.hasStandaloneContext = false
+			require.True(t, withoutContext.canRepair(response, unknown), "fixture must exercise the regeneration gate")
+			metadata := mustTestValue[object](t, body["metadata"])
+			require.Equal(t, "1", metadata["agent_iteration"])
+			originalTurn := metadata["turn_id"]
+			item["output"] = "next external task"
+			next, _ := mustPrepare(t, source, "standalone", nil)
+			require.NotEqual(t, originalTurn, mustTestValue[object](t, next["metadata"])["turn_id"])
+		}
+	}
+}
+
+func TestHistoryNamedStandaloneDoesNotRecoverOrDiscardRealOrphans(t *testing.T) {
+	for _, patch := range []object{
+		{"call_id": "call_missing"}, {"call_id": 123}, {"name": ""},
+		{"type": "custom_tool_call_output"}, {"namespace": 42}, {"output": object{"unknown": "PRIVATE_PAYLOAD"}},
+		{"output": []any{object{"type": "input_text", "text": 42}}},
+		{"output": []any{object{"type": "input_file", "file_id": "file-PRIVATE_PAYLOAD"}}},
+	} {
+		item := object{"type": "function_call_output", "name": "send_message_to_thread", "output": "PRIVATE_PAYLOAD"}
+		for key, value := range patch {
+			item[key] = value
+		}
+		source := testSource()
+		source["input"] = []any{item}
+		raw, err := json.Marshal(source)
+		require.NoError(t, err)
+		_, _, err = Prepare(raw, "standalone", new(ReplayCache))
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "PRIVATE_PAYLOAD")
+	}
+}

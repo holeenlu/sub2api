@@ -139,6 +139,9 @@ func applyOpenAIReasoningEffortPolicyForRequest(c *gin.Context, apiKey *service.
 	if !ok {
 		return body, false, nil
 	}
+	if c != nil && c.Request != nil {
+		c.Request = c.Request.WithContext(service.WithAppliedReasoningEffortPolicy(c.Request.Context(), maxEffort, overLimit, body))
+	}
 	return service.ApplyOpenAIReasoningEffortPolicy(body, maxEffort, mappings, overLimit)
 }
 
@@ -154,6 +157,9 @@ func applyAnthropicReasoningEffortPolicyForRequest(c *gin.Context, apiKey *servi
 	maxEffort, mappings, overLimit, ok := anthropicReasoningEffortPolicyForRequest(c, apiKey)
 	if !ok {
 		return body, false, nil
+	}
+	if c != nil && c.Request != nil {
+		c.Request = c.Request.WithContext(service.WithAppliedReasoningEffortPolicy(c.Request.Context(), maxEffort, overLimit, body))
 	}
 	return service.ApplyReasoningEffortPolicy(body, maxEffort, mappings, overLimit)
 }

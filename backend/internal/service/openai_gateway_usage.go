@@ -51,14 +51,15 @@ type OpenAIRecordUsageInput struct {
 // 用量按上游真实 token 计费，与 WS cyber 及正常请求口径一致（InputTokens/OutputTokens
 // 取自上游 response.failed 报告的 usage，即 mark.UpstreamInTok/OutTok）。
 type CyberPolicyUsageInput struct {
-	APIKey       *APIKey
-	Account      *Account
-	Subscription *UserSubscription
-	RequestID    string
-	Model        string
-	Stream       bool
-	InputTokens  int
-	OutputTokens int
+	AuthorizationMode string
+	APIKey            *APIKey
+	Account           *Account
+	Subscription      *UserSubscription
+	RequestID         string
+	Model             string
+	Stream            bool
+	InputTokens       int
+	OutputTokens      int
 	// 渠道归因与请求级 meta，使 cyber 计费行与正常 RecordUsage 行口径一致
 	// （否则 cyber 行 channel_id 等为空，渠道维度统计会遗漏 cyber 命中）。
 	InboundEndpoint    string
@@ -83,9 +84,10 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 		return
 	}
 	result := &OpenAIForwardResult{
-		RequestID: in.RequestID,
-		Model:     in.Model,
-		Stream:    in.Stream,
+		AuthorizationMode: in.AuthorizationMode,
+		RequestID:         in.RequestID,
+		Model:             in.Model,
+		Stream:            in.Stream,
 		Usage: OpenAIUsage{
 			InputTokens:  in.InputTokens,
 			OutputTokens: in.OutputTokens,
@@ -160,6 +162,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result == nil {
 		return errors.New("openai usage result is nil")
 	}
+	if result.CloudManagedBilling {
+		return nil
+	}
+	cloudSnapshot := cloudSettlingSnapshot(ctx)
+	RecordSchedulingCacheTokens(ctx, result.Usage.InputTokens, result.Usage.CacheReadInputTokens)
 	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}
@@ -179,28 +186,51 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// OpenAI input_tokens 是总输入，包含缓存读取和缓存写入明细。
 	// 将三类 token 拆成互斥桶，避免缓存写入同时按普通输入和 cache_write 重复计费。
-	actualInputTokens := result.Usage.InputTokens - result.Usage.CacheReadInputTokens - result.Usage.CacheCreationInputTokens
+	cacheCreationTokens := result.Usage.CacheCreationInputTokens
+	cacheCreationAsInput := account.IsExcelBPSCacheCreationAsInputEnabled() && result.UpstreamEndpoint == "/basispoints/api/responses"
+	if cacheCreationAsInput {
+		cacheCreationTokens = 0
+	}
+	actualInputTokens := result.Usage.InputTokens - result.Usage.CacheReadInputTokens - cacheCreationTokens
 	if actualInputTokens < 0 {
 		actualInputTokens = 0
 	}
 
 	// Calculate cost
 	tokens := UsageTokens{
-		InputTokens:          actualInputTokens,
-		ImageInputTokens:     max(result.Usage.ImageInputTokens-result.Usage.ImageCacheReadTokens, 0),
-		ImageCacheReadTokens: result.Usage.ImageCacheReadTokens,
-		OutputTokens:         result.Usage.OutputTokens,
-		CacheCreationTokens:  result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:      result.Usage.CacheReadInputTokens,
-		ImageOutputTokens:    result.Usage.ImageOutputTokens,
+		OpenAICacheWriteTTL:    account.Type == AccountTypeAPIKey && !account.UsesOpenAICodexProtocol(),
+		InputTokens:            actualInputTokens,
+		ImageInputTokens:       max(result.Usage.ImageInputTokens-result.Usage.ImageCacheReadTokens, 0),
+		ImageCacheReadTokens:   result.Usage.ImageCacheReadTokens,
+		OutputTokens:           result.Usage.OutputTokens,
+		CacheCreationTokens:    cacheCreationTokens,
+		CacheCreation5mTokens:  result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens:  result.Usage.CacheCreation1hTokens,
+		CacheCreation30mTokens: result.Usage.CacheCreation30mTokens,
+		CacheCreation12hTokens: result.Usage.CacheCreation12hTokens,
+		CacheReadTokens:        result.Usage.CacheReadInputTokens,
+		ImageOutputTokens:      result.Usage.ImageOutputTokens,
 	}
+
+	if cacheCreationAsInput {
+		tokens.CacheCreation5mTokens, tokens.CacheCreation1hTokens = 0, 0
+		tokens.CacheCreation30mTokens, tokens.CacheCreation12hTokens = 0, 0
+	}
+	observed := ClaudeUsage{InputTokens: max(result.Usage.InputTokens-result.Usage.CacheReadInputTokens-result.Usage.CacheCreationInputTokens, 0), OutputTokens: result.Usage.OutputTokens, CacheReadInputTokens: result.Usage.CacheReadInputTokens, CacheCreationInputTokens: result.Usage.CacheCreationInputTokens, CacheCreation5mTokens: result.Usage.CacheCreation5mTokens, CacheCreation1hTokens: result.Usage.CacheCreation1hTokens, CacheCreation30mTokens: result.Usage.CacheCreation30mTokens, CacheCreation12hTokens: result.Usage.CacheCreation12hTokens}
+	billed := observed
+	billed.InputTokens, billed.CacheCreationInputTokens = actualInputTokens, cacheCreationTokens
+	billed.CacheCreation5mTokens, billed.CacheCreation1hTokens = tokens.CacheCreation5mTokens, tokens.CacheCreation1hTokens
+	billed.CacheCreation30mTokens, billed.CacheCreation12hTokens = tokens.CacheCreation30mTokens, tokens.CacheCreation12hTokens
+	logGatewayUsageAccounting(ctx, account, apiKey, result.RequestID, input.SessionID, observed, billed, false, false)
 
 	// Get rate multiplier
 	multiplier := 1.0
 	if s.cfg != nil {
 		multiplier = s.cfg.Default.RateMultiplier
 	}
-	if apiKey.GroupID != nil && apiKey.Group != nil {
+	if cloudSnapshot != nil {
+		multiplier = cloudSnapshot.BaseMultiplier
+	} else if apiKey.GroupID != nil && apiKey.Group != nil {
 		multiplier = s.ResolveUserGroupRateMultiplier(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
 	}
 	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。
@@ -210,6 +240,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	baseMultiplier := multiplier
 	pricingAt := openAIUsagePricingAt(input)
 	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, pricingAt)
+	if cloudSnapshot != nil {
+		multiplier = cloudSnapshot.TokenMultiplier
+	}
 	videoMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
 
 	var cost *CostBreakdown
@@ -231,6 +264,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		result.UpstreamModel,
 		result.Model,
 	)
+	pricingCandidates := append([]string(nil), billingModels...)
 	billingModels = s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, billingModels)
 	serviceTier := ""
 	if result.ServiceTier != nil {
@@ -253,10 +287,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		modelLongContextExempt,
 		pricingAt,
 	)
+	if err != nil && cloudSnapshot != nil {
+		return err
+	}
 	if err != nil {
-		if !isUsagePricingUnavailableError(err) {
-			return err
-		}
 		logger.L().With(
 			zap.String("component", "service.openai_gateway"),
 			zap.Strings("billing_models", billingModels),
@@ -265,8 +299,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			zap.String("upstream_model", result.UpstreamModel),
 			zap.Int64("api_key_id", apiKey.ID),
 			zap.Int64("account_id", account.ID),
-		).Warn("openai_usage.pricing_missing_record_zero_cost", zap.Error(err))
-		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
+		).Warn("openai_usage.pricing_pending", zap.Error(err))
+		cost = &CostBreakdown{BillingMode: string(BillingModeToken), PricingError: err.Error()}
 	}
 	// response_model：按上游成功响应自报的模型计费（渠道显式开启才生效）。
 	// 采纳条件见 responseModelBillingDeclaration + hasIdentifiedOpenAIResponsePricing
@@ -279,7 +313,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		result.UpstreamResponseModelConflict,
 		result.ImageCount > 0 || result.VideoCount > 0 || result.WebSearchCalls > 0 ||
 			result.AudioUsage != nil || result.SearchCount > 0,
-	); responseModel != "" && !strings.EqualFold(responseModel, baselineBillingModel) {
+	); cloudSnapshot == nil && responseModel != "" && !strings.EqualFold(responseModel, baselineBillingModel) {
 		if identified, responseChannelPriced := s.hasIdentifiedOpenAIResponsePricing(ctx, responseModel, apiKey); identified {
 			responseModels := s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, usageBillingModelCandidates(responseModel))
 			responseCost, responseErr := s.calculateOpenAIRecordUsageCost(
@@ -318,8 +352,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			modelLongContextExempt,
 			pricingAt,
 		)
-		if standardErr != nil && !isUsagePricingUnavailableError(standardErr) {
-			return standardErr
+		if standardErr != nil {
+			cost.PricingError = standardErr.Error()
 		}
 		// Missing pricing already fell back to a zero-cost log above; keep that
 		// usage row instead of dropping it on the Standard re-evaluation.
@@ -328,6 +362,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 	}
 
+	if cost.PricingError != "" {
+		cost.PricingRequest = openAIPricingRequest(result, apiKey, pricingCandidates, tokens, multiplier, imageMultiplier, videoMultiplier, baseMultiplier, serviceTier, longContextBillingGate, modelLongContextExempt, groupBillsOpenAIFastAtStandard(apiKey, billingAccount, serviceTier), pricingAt)
+	}
+	if cost.PricingRequest != nil && apiKey.Group != nil {
+		cost.PricingRequest.GroupLongContextEnabled = apiKey.Group.LongContextPricingEnabled
+	}
+	if cost.PricingRequest != nil {
+		cost.PricingRequest.AccountPlatform = account.Platform
+	}
 	// Determine billing type
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 	billingType := BillingTypeBalance
@@ -339,7 +382,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	durationMs := int(result.Duration.Milliseconds())
 	accountRateMultiplier := account.BillingRateMultiplier()
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
-	if result.OpenAIWSMode {
+	if cloudSnapshot != nil {
+		requestID = result.RequestID
+	}
+	// One HTTP BPS request can settle compaction before a safe account failover.
+	// As with separate WS turns, distinct metered attempts need distinct billing
+	// identities; the connection/client correlation ID must not deduplicate them.
+	if result.OpenAIWSMode || result.UpstreamEndpoint == "/basispoints/api/responses" {
 		if upstreamRequestID := strings.TrimSpace(result.RequestID); upstreamRequestID != "" {
 			requestID = upstreamRequestID
 		}
@@ -382,6 +431,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		imageSizeBreakdown["image_cache_read_tokens"] = result.Usage.ImageCacheReadTokens
 	}
 	usageLog := &UsageLog{
+		AuthorizationMode:        result.AuthorizationMode,
 		UserID:                   user.ID,
 		APIKeyID:                 apiKey.ID,
 		AccountID:                account.ID,
@@ -399,7 +449,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		UpstreamEndpoint:         optionalTrimmedStringPtr(input.UpstreamEndpoint),
 		InputTokens:              actualInputTokens,
 		OutputTokens:             result.Usage.OutputTokens,
-		CacheCreationTokens:      result.Usage.CacheCreationInputTokens,
+		CacheCreationTokens:      cacheCreationTokens,
+		CacheCreation5mTokens:    tokens.CacheCreation5mTokens,
+		CacheCreation1hTokens:    tokens.CacheCreation1hTokens,
+		CacheCreation30mTokens:   tokens.CacheCreation30mTokens,
+		CacheCreation12hTokens:   tokens.CacheCreation12hTokens,
 		CacheReadTokens:          result.Usage.CacheReadInputTokens,
 		ImageInputTokens:         result.Usage.ImageInputTokens,
 		ImageOutputTokens:        result.Usage.ImageOutputTokens,
@@ -411,6 +465,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ImageSizeBreakdown:       imageSizeBreakdown,
 		NativeCompactionV2:       input.NativeCompactionV2,
 	}
+	usageLog.CaptureVendorSnapshot(account, apiKey.Group)
 	isVideoUsage := isGrokVideoUsageResult(result, billingModels)
 	if isVideoUsage {
 		usageLog.VideoCount = result.VideoCount
@@ -443,8 +498,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		usageLog.RequestType = RequestTypeCyberBlocked
 	}
 	usageLog.OpenAIWSMode = result.OpenAIWSMode
+	usageLog.UsageLowerBound = result.UsageLowerBound
 	usageLog.DurationMs = &durationMs
 	usageLog.FirstTokenMs = result.FirstTokenMs
+	usageLog.LatencyMetrics = result.LatencyMetrics
 	usageLog.CreatedAt = time.Now()
 	// 设置渠道信息
 	usageLog.ChannelID = optionalInt64Ptr(input.ChannelID)
@@ -484,7 +541,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
-	if apiKey.GroupID != nil {
+	if cloudSnapshot != nil {
+		usageLog.AccountStatsCost = s.cloudFrozenStatsCost(ctx, cloudSnapshot, result, tokens, cost.TotalCost)
+	} else if apiKey.GroupID != nil {
 		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
 			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
 			tokens, cost.TotalCost, pricingAt,
@@ -493,8 +552,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
-		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+	if cloudSnapshot != nil {
+		simpleModeKeyRateLimitOnly = cloudSnapshot.SimpleMode
+	}
+	if cloudSnapshot == nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
+		s.writeOpenAIAuthorizationUsage(ctx, usageLog, result, account)
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 		return nil
@@ -508,6 +570,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+		UsageLogs:    splitOpenAIUsageAuthorization(usageLog, result, account),
+		BillingModel: billingModel, PricingAt: pricingAt,
 		Cost:                       cost,
 		User:                       user,
 		APIKey:                     apiKey,
@@ -522,11 +586,16 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {
+		if cost.PricingError != "" {
+			usageLog.BillingStatus = "pending_pricing"
+		} else {
+			usageLog.BillingStatus = "pending"
+		}
 		usageLog.ActualCost = 0
-		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+		s.writeOpenAIAuthorizationUsage(ctx, usageLog, result, account)
 		return billingErr
 	}
-	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+	s.writeOpenAIAuthorizationUsage(ctx, usageLog, result, account)
 
 	return nil
 }
@@ -590,6 +659,9 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	modelLongContextExempt bool,
 	pricingAt time.Time,
 ) (*CostBreakdown, error) {
+	if snapshot := cloudSettlingSnapshot(ctx); snapshot != nil {
+		return s.cloudFrozenCost(ctx, snapshot, result, billingModels, tokens, multiplier, serviceTier, modelLongContextExempt)
+	}
 	billingModel := firstUsageBillingModel(billingModels)
 	if result != nil && result.WebSearchCalls > 0 {
 		// Codex alpha/search 网页搜索按次计费：上游不返回 usage/token 字段，单价只取
@@ -716,17 +788,6 @@ func isGrokVideoUsageResult(result *OpenAIForwardResult, billingModels []string)
 		}
 	}
 	return true
-}
-
-func isUsagePricingUnavailableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrModelPricingUnavailable) {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "no pricing available") || strings.Contains(msg, "pricing not found")
 }
 
 func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
@@ -1135,6 +1196,7 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 			updates["codex_7d_reset_at"] = *reset7dAt
 		}
 	}
+	appendSchedulingQuotaObservations(updates)
 
 	return updates
 }
