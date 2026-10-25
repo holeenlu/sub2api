@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Split GoReleaser builds across runners without requiring GoReleaser Pro."""
+"""Build and verify Linux amd64 release artifacts with GoReleaser OSS."""
 import argparse
 import hashlib
-import itertools
 import json
 import os
 from pathlib import Path
@@ -17,7 +16,8 @@ import yaml
 FULL_CONFIG = Path('.goreleaser.yaml')
 SIMPLE_CONFIG = Path('.goreleaser.simple.yaml')
 VERSION_FILE = Path('backend/cmd/server/VERSION')
-VERSION_RE = re.compile(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?')
+VERSION_RE = re.compile(r'\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?')
+CHANNELS = ('kdan', 'tapmodels', 'tokensavy')
 
 
 def config(simple=False):
@@ -25,24 +25,20 @@ def config(simple=False):
 
 
 def targets(simple=False):
-    build = config()['builds'][0]
-    result = []
-    for goos, goarch in itertools.product(build['goos'], build['goarch']):
-        item = {'goos': goos, 'goarch': goarch}
-        if any(all(item.get(k) == v for k, v in rule.items()) for rule in build.get('ignore', [])):
-            continue
-        if not simple or item == {'goos': 'linux', 'goarch': 'amd64'}:
-            result.append(item)
-    if not result:
-        raise ValueError('empty release target matrix')
+    result = [{'goos': goos, 'goarch': goarch}
+              for build in config(simple)['builds']
+              for goos in build['goos'] for goarch in build['goarch']]
+    if result != [{'goos': 'linux', 'goarch': 'amd64'}]:
+        raise ValueError('release targets must contain only linux/amd64')
     return result
 
 
-def archive_name(version, target):
+def archive_name(version, target, channel=''):
+    if channel and channel not in CHANNELS:
+        raise ValueError('invalid release channel')
     if not VERSION_RE.fullmatch(version) or target not in targets():
         raise ValueError('invalid release version or target')
-    suffix = 'zip' if target['goos'] == 'windows' else 'tar.gz'
-    return f"sub2api_{version}_{target['goos']}_{target['goarch']}.{suffix}"
+    return f"{channel or 'sub2api'}_{version}_{target['goos']}_{target['goarch']}.tar.gz"
 
 
 def sha256(path):
@@ -78,6 +74,11 @@ def plan(args):
 
 def generate_config(args):
     data = config(args.simple if args.mode == 'publish' else False)
+    channel = getattr(args, 'channel', '')
+    if channel:
+        if channel not in CHANNELS or args.mode != 'build':
+            raise ValueError('channel releases use the reserved-draft publisher')
+        data['project_name'] = channel
     data['snapshot'] = {'version_template': '{{ .Env.RELEASE_VERSION }}'}
     data['dockers'] = []
     data['docker_manifests'] = []
@@ -89,13 +90,23 @@ def generate_config(args):
             build['goos'], build['goarch'], build['ignore'] = [args.goos], [args.goarch], []
             build['ldflags'] = [re.sub(r'{{\s*\.Date\s*}}', '{{ .Env.RELEASE_DATE }}', flag)
                                 for flag in build.get('ldflags', [])]
+            if channel:
+                # The updater and archive extractor use this stable entrypoint,
+                # even when the branch's standalone config names a brand binary.
+                build['binary'] = 'sub2api'
+                build['ldflags'] += [
+                    '-X main.Version={{ .Env.RELEASE_VERSION }}',
+                    '-X main.Commit={{ .Env.RELEASE_SHA }}',
+                    '-X main.UpstreamVersion={{ .Env.UPSTREAM_VERSION }}',
+                    f'-X github.com/Wei-Shaw/sub2api/internal/service.ReleaseChannel={channel}',
+                ]
     else:
         # Artifacts are supplied through the OSS extra_files mechanism. No build
         # is repeated on the publishing runner, and release templates stay intact.
         data['before'] = {'hooks': []}
         data['builds'] = [{'id': 'sub2api', 'skip': True}]
         data['archives'] = []
-        extra = [{'glob': 'release-input/sub2api_*.tar.gz'}, {'glob': 'release-input/sub2api_*.zip'}]
+        extra = [{'glob': 'release-input/sub2api_*_linux_amd64.tar.gz'}]
         if args.simple:
             data['checksum'] = {'disable': True}
         else:
@@ -106,7 +117,7 @@ def generate_config(args):
 
 def collect(args):
     target = {'goos': args.goos, 'goarch': args.goarch}
-    name = archive_name(args.version, target)
+    name = archive_name(args.version, target, getattr(args, 'channel', ''))
     source = Path('dist') / name
     checksums = {line.split()[1].lstrip('*'): line.split()[0] for line in Path('dist/checksums.txt').read_text().splitlines()}
     digest = sha256(source)
@@ -123,7 +134,7 @@ def verify(args):
     directory = Path(args.input)
     expected = set()
     for target in targets(args.simple):
-        name = archive_name(args.version, target)
+        name = archive_name(args.version, target, getattr(args, 'channel', ''))
         manifest_name = f"manifest-{target['goos']}-{target['goarch']}.json"
         expected.update((name, manifest_name))
         manifest = json.loads((directory / manifest_name).read_text())
@@ -137,11 +148,9 @@ def verify(args):
 def contexts(args):
     verify(args)
     for target in targets(args.simple):
-        if target['goos'] != 'linux':
-            continue
         dest = Path(args.output) / target['goarch']
         dest.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(Path(args.input) / archive_name(args.version, target), 'r:gz') as archive:
+        with tarfile.open(Path(args.input) / archive_name(args.version, target, getattr(args, 'channel', '')), 'r:gz') as archive:
             members = [member for member in archive.getmembers() if member.name in ('sub2api', './sub2api')]
             if len(members) != 1 or not members[0].isfile():
                 raise ValueError('archive must contain one regular sub2api binary')
@@ -168,16 +177,19 @@ def main():
     p.add_argument('--goarch')
     p.add_argument('--simple', action='store_true')
     p.add_argument('--output', required=True)
+    p.add_argument('--channel', choices=CHANNELS, default='')
     p.set_defaults(run=generate_config)
     p = commands.add_parser('collect')
     for arg in ('version', 'sha', 'goos', 'goarch', 'output'):
         p.add_argument('--' + arg, required=True)
     p.set_defaults(run=collect)
+    p.add_argument('--channel', choices=CHANNELS, default='')
     for command, handler in [('verify', verify), ('contexts', contexts)]:
         p = commands.add_parser(command)
         for arg in ('version', 'sha', 'input'):
             p.add_argument('--' + arg, required=True)
         p.add_argument('--simple', action='store_true')
+        p.add_argument('--channel', choices=CHANNELS, default='')
         if command == 'contexts':
             p.add_argument('--output', required=True)
         p.set_defaults(run=handler)

@@ -72,3 +72,15 @@ func BenchmarkOpenAIResponseSSETypeExtraction(b *testing.B) {
 		}
 	})
 }
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+func openAIStreamEventIsTerminal(data string) bool {
+	trimmed := strings.TrimSpace(data)
+	if trimmed == "" {
+		return false
+	}
+	if trimmed == "[DONE]" {
+		return true
+	}
+	return openAIStreamEventTypeIsTerminal(gjson.Get(trimmed, "type").String())
+}

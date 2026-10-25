@@ -34,6 +34,28 @@ func newTestBillingService() *BillingService {
 	return NewBillingService(&config.Config{}, nil)
 }
 
+func TestBillingOpenAICacheWriteLifetimes(t *testing.T) {
+	svc := newTestBillingService()
+	pricing := &ModelPricing{InputPricePerToken: 1e-6, CacheReadPricePerToken: 0.1e-6, CacheCreationPricePerToken: 1.25e-6}
+	tokens := UsageTokens{OpenAICacheWriteTTL: true, InputTokens: 1000, CacheReadTokens: 4000, CacheCreationTokens: 7000, CacheCreation30mTokens: 3000, CacheCreation12hTokens: 4000}
+	got := svc.computeTokenBreakdown(pricing, tokens, 1, "", true)
+	require.InDelta(t, 0.01515, got.TotalCost, 1e-12)
+	require.InDelta(t, 0.01375, got.CacheCreationCost, 1e-12)
+	// Subscriber and BPS paths keep the existing contract even if a provider reports details.
+	tokens.OpenAICacheWriteTTL = false
+	require.InDelta(t, 7000*1.25e-6, svc.computeTokenBreakdown(pricing, tokens, 1, "", true).CacheCreationCost, 1e-12)
+	tokens.OpenAICacheWriteTTL = true
+	for _, override := range []float64{0, 3e-6} {
+		custom := *pricing
+		applyChannelTokenPriceOverrides(&custom, &ChannelModelPricing{CacheWritePrice: &override})
+		require.InDelta(t, float64(7000)*override, svc.computeTokenBreakdown(&custom, tokens, 1, "", true).CacheCreationCost, 1e-12)
+	}
+	priority := *pricing
+	priority.InputPricePerTokenPriority, priority.CacheCreationPricePerTokenPriority = 2e-6, 2.5e-6
+	priority.LongContextInputThreshold, priority.LongContextInputMultiplier = 100, 2
+	require.InDelta(t, 0.01375*4, svc.computeTokenBreakdown(&priority, tokens, 1, "priority", true).CacheCreationCost, 1e-12)
+}
+
 func newTestBillingServiceWithOpenAILadderCatalog(t *testing.T) *BillingService {
 	t.Helper()
 	return NewBillingService(&config.Config{}, newStubPricingServiceFromJSON(t, openAILadderCatalogJSON))
@@ -1389,6 +1411,43 @@ func TestGetModelPricing_GrokCatalogFallbacks(t *testing.T) {
 	}
 }
 
+func TestFallbackClaudePricingPreservesCacheTTLs(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, nil)
+	for _, model := range []string{"claude-sonnet-4-6", "claude-opus-4-6", "anthropic/claude-sonnet-4-6", "claude-opus-4-8", "claude-sonnet-5-5"} {
+		t.Run(model, func(t *testing.T) {
+			price, err := svc.GetModelPricing(model)
+			require.NoError(t, err)
+			require.True(t, price.SupportsCacheBreakdown)
+			got, err := svc.CalculateCost(model, UsageTokens{CacheCreationTokens: 1000, CacheCreation5mTokens: 250, CacheCreation1hTokens: 750}, 1)
+			require.NoError(t, err)
+			want := 250*price.CacheCreationPricePerToken + 750*2*price.InputPricePerToken
+			require.InDelta(t, want, got.CacheCreationCost, 1e-12)
+		})
+	}
+}
+
+func TestCacheTTLBreakdownPreservesPriorityAndLongContext(t *testing.T) {
+	pricing := &ModelPricing{InputPricePerToken: 4e-6, InputPricePerTokenPriority: 8e-6,
+		CacheCreationPricePerToken: 5e-6, CacheCreationPricePerTokenPriority: 10e-6,
+		CacheCreation5mPrice: 5e-6, CacheCreation1hPrice: 8e-6, SupportsCacheBreakdown: true,
+		LongContextInputThreshold: 1, LongContextInputMultiplier: 3}
+	for _, long := range []bool{false, true} {
+		for _, details := range []bool{false, true} {
+			tokens := UsageTokens{InputTokens: 2, CacheCreationTokens: 1000}
+			want := 0.01 // 1000 writes at the explicit priority 5m rate.
+			if details {
+				tokens.CacheCreation5mTokens, tokens.CacheCreation1hTokens = 250, 750
+				want = 0.0145 // (250 * 5e-6 + 750 * 8e-6) * 2.
+			}
+			if long {
+				want *= 3
+			}
+			got := (&BillingService{}).computeTokenBreakdown(pricing, tokens, 1, "priority", long)
+			require.InDelta(t, want, got.CacheCreationCost, 1e-12)
+		}
+	}
+}
+
 func TestCalculateCost_SupportsCacheBreakdown(t *testing.T) {
 	svc := &BillingService{
 		cfg: &config.Config{},
@@ -1450,27 +1509,27 @@ func TestNormalizeCacheCreationBreakdown_BillingSafetyInvariant(t *testing.T) {
 			want1h: 40,
 		},
 		{
-			name:   "details below aggregate unchanged",
+			name:   "details below aggregate filled at 5m",
 			tokens: UsageTokens{CacheCreationTokens: 100, CacheCreation5mTokens: 30, CacheCreation1hTokens: 60},
-			want5m: 30,
+			want5m: 40,
 			want1h: 60,
 		},
 		{
-			name:   "absent 5m detail unchanged",
+			name:   "absent 5m detail filled from aggregate",
 			tokens: UsageTokens{CacheCreationTokens: 100, CacheCreation1hTokens: 60},
-			want5m: 0,
+			want5m: 40,
 			want1h: 60,
 		},
 		{
-			name:   "absent 1h detail unchanged",
+			name:   "absent 1h detail does not invent 1h usage",
 			tokens: UsageTokens{CacheCreationTokens: 100, CacheCreation5mTokens: 30},
-			want5m: 30,
+			want5m: 100,
 			want1h: 0,
 		},
 		{
 			name:   "negative detail clamped",
 			tokens: UsageTokens{CacheCreationTokens: 100, CacheCreation5mTokens: -50, CacheCreation1hTokens: 60},
-			want5m: 0,
+			want5m: 40,
 			want1h: 60,
 		},
 		{
@@ -1492,6 +1551,12 @@ func TestNormalizeCacheCreationBreakdown_BillingSafetyInvariant(t *testing.T) {
 			want1h: 0,
 		},
 		{
+			name:   "integer boundary remainder does not overflow",
+			tokens: UsageTokens{CacheCreationTokens: int(^uint(0) >> 1), CacheCreation1hTokens: 1},
+			want5m: int(^uint(0)>>1) - 1,
+			want1h: 1,
+		},
+		{
 			name:   "zero aggregate unchanged",
 			tokens: UsageTokens{CacheCreation5mTokens: 90, CacheCreation1hTokens: 60},
 			want5m: 90,
@@ -1508,27 +1573,36 @@ func TestNormalizeCacheCreationBreakdown_BillingSafetyInvariant(t *testing.T) {
 	}
 }
 
-func TestComputeCacheCreationCost_PreservesZeroDetailFallback(t *testing.T) {
+func TestComputeCacheCreationCost_FillsMissingDetails(t *testing.T) {
 	svc := &BillingService{}
 	pricing := &ModelPricing{
-		SupportsCacheBreakdown: true,
-		CacheCreation5mPrice:   4e-6,
-		CacheCreation1hPrice:   5e-6,
+		SupportsCacheBreakdown:     true,
+		CacheCreation5mPrice:       4e-6,
+		CacheCreation1hPrice:       5e-6,
+		CacheCreationPricePerToken: 4e-6,
 	}
 
 	tests := []struct {
 		name   string
 		tokens UsageTokens
+		want1h int
 	}{
 		{name: "zero details", tokens: UsageTokens{CacheCreationTokens: 100}},
 		{name: "one negative detail", tokens: UsageTokens{CacheCreationTokens: 100, CacheCreation5mTokens: -25}},
 		{name: "both negative details", tokens: UsageTokens{CacheCreationTokens: 100, CacheCreation5mTokens: -25, CacheCreation1hTokens: -75}},
+		{name: "partial mixed TTL", tokens: UsageTokens{CacheCreationTokens: 100, CacheCreation5mTokens: 30, CacheCreation1hTokens: 60}, want1h: 60},
+		{name: "only 1h detail", tokens: UsageTokens{CacheCreationTokens: 100, CacheCreation1hTokens: 60}, want1h: 60},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cost := svc.computeCacheCreationCost(pricing, tt.tokens, 0, 1)
-			require.InDelta(t, 100*4e-6, cost, 1e-12)
+			base := float64(100-tt.want1h)*4e-6 + float64(tt.want1h)*5e-6
+			for _, priority := range []float64{1, 2} {
+				for _, longContext := range []float64{1, 1.5} {
+					cost := svc.computeCacheCreationCost(pricing, tt.tokens, 4e-6*priority, longContext)
+					require.InDelta(t, base*priority*longContext, cost, 1e-12)
+				}
+			}
 		})
 	}
 }

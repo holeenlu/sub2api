@@ -133,7 +133,11 @@ func (s *OpenAIGatewayService) ForwardSeedance(ctx context.Context, c *gin.Conte
 	// accepted a billable job. Preserve native error codes and response bodies.
 	if resp.StatusCode >= 300 {
 		writeGrokMediaResponse(c, resp, responseBody, s.responseHeaderFilter)
-		return nil, fmt.Errorf("seedance upstream status %d", resp.StatusCode)
+		failure := seedanceUpstreamFailure(endpoint, resp.StatusCode, responseBody, resp.Header)
+		if s.rateLimitService != nil && failure.Scope == GatewayFailureScopeAccount && (failure.IsCredentialFailure() || resp.StatusCode == http.StatusTooManyRequests) {
+			s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, responseBody, upstreamModel)
+		}
+		return nil, failure
 	}
 	result := &OpenAIForwardResult{Model: model, BillingModel: model, UpstreamModel: upstreamModel, Duration: time.Since(started), ResponseHeaders: resp.Header.Clone()}
 	if endpoint == SeedanceEndpointCreate {
@@ -152,4 +156,22 @@ func (s *OpenAIGatewayService) ForwardSeedance(ctx context.Context, c *gin.Conte
 	}
 	writeGrokMediaResponse(c, resp, responseBody, s.responseHeaderFilter)
 	return result, nil
+}
+
+func seedanceUpstreamFailure(endpoint GrokMediaEndpoint, status int, body []byte, headers http.Header) *UpstreamFailoverError {
+	failure := &UpstreamFailoverError{StatusCode: status, ResponseBody: body, ResponseHeaders: headers, Stage: GatewayFailureStageInference, Scope: GatewayFailureScopeAccount, NextAccountAction: NextAccountStop}
+	code := strings.ToLower(gjson.GetBytes(body, "error.code").String())
+	if code == "" {
+		code = strings.ToLower(gjson.GetBytes(body, "error.type").String())
+	}
+	policy := strings.Contains(code, "contentpolicy") || strings.Contains(code, "content_policy") || strings.Contains(code, "sensitivecontent")
+	parameter := strings.HasPrefix(code, "invalidparameter") || strings.HasPrefix(code, "missingparameter") || code == "invalid_request_error"
+	switch {
+	case policy || status == http.StatusRequestEntityTooLarge || (status == 400 && parameter) || (status == 404 && endpoint != SeedanceEndpointCreate):
+		failure.Scope = GatewayFailureScopeRequest
+	case status == 401 || (status == 403 && (strings.Contains(code, "authentication") || strings.Contains(code, "accessdenied") || strings.Contains(code, "invalidapikey"))):
+		failure.Stage = GatewayFailureStageAccountAuth
+		failure.Reason = "seedance_credentials"
+	}
+	return failure
 }
