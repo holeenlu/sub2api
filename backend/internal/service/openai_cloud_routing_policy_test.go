@@ -362,7 +362,7 @@ func TestCloudWSBridgePreservesBudgetAndRejectionCauses(t *testing.T) {
 			case "attempt budget":
 				takeOpenAITurnAttempts(t, budget, budget.attemptBudget.Snapshot().Limit)
 			case "first output deadline":
-				budget.deadline = time.Now().Add(-time.Second)
+				setTurnOutputDeadlineForTest(budget, time.Now().Add(-time.Second))
 				want = ErrOpenAIWSFirstOutputBudgetExhausted
 			case "client cancellation":
 				want = context.Canceled

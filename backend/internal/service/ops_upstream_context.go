@@ -735,8 +735,8 @@ func RecordOpenAIRetryStop(c *gin.Context, account *Account, reason OpenAIRetryS
 			data["preparation_retries"] = attempts.PreparationRetries
 			data["retry_wait_ms"] = attempts.RetryWait.Milliseconds()
 			data["selection_operations"] = budget.selection.Operations()
-			if !budget.deadline.IsZero() {
-				remaining := time.Until(budget.deadline).Milliseconds()
+			if deadline := budget.firstOutput.Snapshot().Deadline; !deadline.IsZero() {
+				remaining := time.Until(deadline).Milliseconds()
 				if remaining < 0 {
 					remaining = 0
 				}

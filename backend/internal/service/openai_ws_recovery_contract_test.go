@@ -92,7 +92,7 @@ func TestOpenAIRetryStopCapturesBoundedProgressWithoutContent(t *testing.T) {
 	c.Request = httptest.NewRequest("GET", "/v1/responses", nil)
 	budget := NewOpenAITurnBudget(&config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: 3}})
 	takeOpenAITurnAttempts(t, budget, 2)
-	budget.deadline = time.Now().Add(time.Second)
+	setTurnOutputDeadlineForTest(budget, time.Now().Add(time.Second))
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAITurnBudgetKey{}, budget))
 	progress := beginOpenAIResponseProgress(c, "http_bridge", "HTTP/2.0", nil)
 	progress.observeUpstream("response.created")

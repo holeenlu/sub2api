@@ -192,18 +192,18 @@ func TestOpenAITurnFirstOutputPauseSurvivesAccountSwitch(t *testing.T) {
 	ctx := EnsureOpenAITurnBudget(context.Background(), nil, "low")
 	budget := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
 	timeout := 300 * time.Millisecond
-	start := budget.started
+	start := budget.firstOutput.Snapshot().Started
 	original := openAITurnFirstOutputDeadline(ctx, timeout, start)
 	resume := pauseOpenAITurnFirstOutput(ctx, time.Second)
 	budget.mu.Lock()
-	require.True(t, budget.deadline.After(original.Add(900*time.Millisecond)), "waits inside the phase see the extended deadline")
+	require.True(t, budget.firstOutput.Snapshot().Deadline.After(original.Add(900*time.Millisecond)), "waits inside the phase see the extended deadline")
 	budget.mu.Unlock()
 	time.Sleep(120 * time.Millisecond)
 	resume()
 	resume() // idempotent
 	budget.mu.Lock()
-	paused := budget.firstOutputPaused
-	extended := budget.deadline
+	paused := budget.firstOutput.Snapshot().Paused
+	extended := budget.firstOutput.Snapshot().Deadline
 	budget.mu.Unlock()
 	require.GreaterOrEqual(t, paused, 120*time.Millisecond)
 	require.Less(t, paused, time.Second)

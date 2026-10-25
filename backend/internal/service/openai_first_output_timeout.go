@@ -29,15 +29,9 @@ type openAITurnBudgetKey struct{}
 // OpenAITurnBudget is shared through context across account switches and
 // transport-local retries. It does not contain request data or credentials.
 type OpenAITurnBudget struct {
-	mu            sync.Mutex
-	attemptBudget *execution.AttemptBudget
-	started       time.Time
-	deadline      time.Time
-	// firstOutputPaused is time excluded from the first-output budget, such as
-	// a separately bounded attachment upload phase. Every deadline derived from
-	// started includes it, so later account switches keep the exclusion.
-	firstOutputPaused  time.Duration
-	automaticDeadline  time.Time
+	mu                 sync.Mutex
+	attemptBudget      *execution.AttemptBudget
+	firstOutput        *execution.FirstOutput
 	control            context.Context
 	controlCancel      context.CancelCauseFunc
 	protectionAccounts map[int64]bool
@@ -51,8 +45,6 @@ type OpenAITurnBudget struct {
 	healthAccountID    int64
 	recovery           *schedulingRecovery
 	model              string
-	outputCommitted    bool
-	outputReady        chan struct{}
 	selection          selectionbudget.Aggregate
 }
 
@@ -63,7 +55,7 @@ func NewOpenAITurnBudget(cfg *config.Config) *OpenAITurnBudget {
 	if cfg != nil && cfg.Gateway.OpenAITurnMaxAttempts > 0 {
 		limit = min(limit, cfg.Gateway.OpenAITurnMaxAttempts)
 	}
-	return &OpenAITurnBudget{started: time.Now(), attemptBudget: newOpenAITurnAttemptBudget(limit)}
+	return &OpenAITurnBudget{firstOutput: execution.NewFirstOutput(time.Now()), attemptBudget: newOpenAITurnAttemptBudget(limit)}
 }
 
 func newOpenAITurnAttemptBudget(limit int) *execution.AttemptBudget {
@@ -81,6 +73,9 @@ func WithOpenAITurnBudget(ctx context.Context, budget *OpenAITurnBudget) context
 	}
 	if budget != nil {
 		budget.mu.Lock()
+		if budget.firstOutput == nil {
+			budget.firstOutput = execution.NewFirstOutput(time.Now())
+		}
 		budget.bpsRecovery.managed = budget.bpsRecovery.managed || managed
 		if budget.control == nil {
 			ctx, budget.controlCancel = context.WithCancelCause(ctx)
@@ -111,14 +106,7 @@ func EnsureOpenAITurnBudget(ctx context.Context, cfg *config.Config, reasoningEf
 		effort = reasoningEffort[0]
 	}
 	b.mu.Lock()
-	if !b.outputCommitted && (b.deadline.IsZero() || (len(reasoningEffort) > 0 && b.attemptBudget.Snapshot().Attempts == 0 && !b.automaticDeadline.IsZero() && b.deadline.Equal(b.automaticDeadline))) {
-		b.deadline = b.started.Add(openAIFirstOutputTimeoutForConfig(cfg, effort) + b.firstOutputPaused)
-		if len(reasoningEffort) == 0 {
-			b.automaticDeadline = b.deadline
-		} else {
-			b.automaticDeadline = time.Time{}
-		}
-	}
+	b.firstOutput.Configure(openAIFirstOutputTimeoutForConfig(cfg, effort), len(reasoningEffort) > 0, b.attemptBudget.Snapshot().Attempts > 0)
 
 	b.mu.Unlock()
 
@@ -132,7 +120,7 @@ func OpenAITurnWaitContext(ctx context.Context) (context.Context, context.Cancel
 	b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
 	if b != nil {
 		b.mu.Lock()
-		deadline := b.deadline
+		deadline := b.firstOutput.Snapshot().Deadline
 		b.mu.Unlock()
 		if !deadline.IsZero() {
 			return context.WithDeadlineCause(ctx, deadline, ErrOpenAIWSFirstOutputBudgetExhausted)
@@ -192,7 +180,7 @@ func TakeOpenAITurnAttempt(ctx context.Context) error {
 	if b.control != nil && b.control.Err() != nil {
 		return b.control.Err()
 	}
-	if !b.deadline.IsZero() && !time.Now().Before(b.deadline) {
+	if deadline := b.firstOutput.Snapshot().Deadline; !deadline.IsZero() && !time.Now().Before(deadline) {
 		return ErrOpenAIWSFirstOutputBudgetExhausted
 	}
 	target, hasTarget := ctx.Value(turnRecoveryTargetKey{}).(model.AttemptTarget)
@@ -218,15 +206,7 @@ func openAITurnFirstOutputDeadline(ctx context.Context, timeout time.Duration, f
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	started := b.started
-	if !fallback.IsZero() && (started.IsZero() || fallback.Before(started)) {
-		started = fallback // WS acceptance can precede allocation of its budget.
-	}
-	limit := started.Add(timeout + b.firstOutputPaused)
-	if !b.outputCommitted && timeout > 0 && (b.deadline.IsZero() || limit.Before(b.deadline)) {
-		b.deadline = limit
-	}
-	return b.deadline
+	return b.firstOutput.Limit(timeout, fallback)
 }
 
 // pauseOpenAITurnFirstOutput excludes a separately bounded pre-generation phase
@@ -240,24 +220,12 @@ func pauseOpenAITurnFirstOutput(ctx context.Context, maxPause time.Duration) (re
 		return func() {}
 	}
 	b.mu.Lock()
-	if b.outputCommitted || b.deadline.IsZero() {
-		b.mu.Unlock()
-		return func() {}
-	}
-	pausedAt := time.Now()
-	b.deadline = b.deadline.Add(maxPause)
+	resumeOutput := b.firstOutput.Pause(maxPause)
 	b.mu.Unlock()
-	var once sync.Once
 	return func() {
-		once.Do(func() {
-			elapsed := min(time.Since(pausedAt), maxPause)
-			b.mu.Lock()
-			defer b.mu.Unlock()
-			b.firstOutputPaused += elapsed
-			if !b.outputCommitted && !b.deadline.IsZero() {
-				b.deadline = b.deadline.Add(elapsed - maxPause)
-			}
-		})
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		resumeOutput()
 	}
 }
 
@@ -277,7 +245,7 @@ func OpenAITurnRetryAllowed(ctx context.Context, accountID int64, response []byt
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.outputCommitted {
+	if b.firstOutput.Snapshot().Committed {
 		return false
 	}
 	if b.control != nil && b.control.Err() != nil {
@@ -287,7 +255,7 @@ func OpenAITurnRetryAllowed(ctx context.Context, accountID int64, response []byt
 	if snapshot.Attempts >= snapshot.Limit {
 		return false
 	}
-	if !b.deadline.IsZero() && !time.Now().Before(b.deadline) {
+	if deadline := b.firstOutput.Snapshot().Deadline; !deadline.IsZero() && !time.Now().Before(deadline) {
 		return false
 	}
 	if !isOpenAIResponseProtectionUnavailable("", response) {

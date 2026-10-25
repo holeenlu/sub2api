@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/execution"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -252,11 +253,11 @@ func TestOpenAIFirstOutputTimeoutForReasoningEffort(t *testing.T) {
 		require.Equal(t, 300*time.Second, svc.openAIFirstOutputTimeout(effort), effort)
 		ctx := EnsureOpenAITurnBudget(t.Context(), svc.cfg, effort)
 		budget := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
-		require.Equal(t, 300*time.Second, budget.deadline.Sub(budget.started))
+		require.Equal(t, 300*time.Second, budget.firstOutput.Snapshot().Deadline.Sub(budget.firstOutput.Snapshot().Started))
 		require.NoError(t, TakeOpenAITurnAttempt(ctx))
-		deadline := budget.deadline
+		deadline := budget.firstOutput.Snapshot().Deadline
 		ctx = EnsureOpenAITurnBudget(ctx, svc.cfg, "high")
-		require.Equal(t, deadline, ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget).deadline, "retries never reset the deadline")
+		require.Equal(t, deadline, ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget).firstOutput.Snapshot().Deadline, "retries never reset the deadline")
 	}
 }
 
@@ -743,11 +744,11 @@ func TestOpenAINativeFirstOutputFailoverKeepsAttemptHeadersPrivateAfterKeepalive
 func TestOpenAITurnFirstOutputDeadlineDefaultAndEnabled(t *testing.T) {
 	for _, limit := range []int{0, 3} {
 		budget := NewOpenAITurnBudget(&config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: limit}})
-		budget.started = time.Now().Add(-2 * time.Second)
+		budget.firstOutput = execution.NewFirstOutput(time.Now().Add(-2 * time.Second))
 		ctx := WithOpenAITurnBudget(context.Background(), budget)
 		forwardB := time.Now()
 		deadline := openAITurnFirstOutputDeadline(ctx, time.Second, forwardB)
-		require.Equal(t, budget.started.Add(time.Second), deadline)
+		require.Equal(t, budget.firstOutput.Snapshot().Started.Add(time.Second), deadline)
 		require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAIWSFirstOutputBudgetExhausted)
 	}
 }
@@ -756,8 +757,8 @@ func TestOpenAITurnDeadlineBoundsWaitsWithoutCancelingResponseContext(t *testing
 	cfg := &config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: 3, OpenAIFirstOutputTimeoutSeconds: 60, OpenAIHighEffortFirstOutputTimeoutSeconds: 180}}
 	ctx := EnsureOpenAITurnBudget(context.Background(), cfg, "high")
 	budget := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
-	require.Equal(t, 180*time.Second, budget.deadline.Sub(budget.started))
-	budget.deadline = time.Now().Add(25 * time.Millisecond)
+	require.Equal(t, 180*time.Second, budget.firstOutput.Snapshot().Deadline.Sub(budget.firstOutput.Snapshot().Started))
+	setTurnOutputDeadlineForTest(budget, time.Now().Add(25*time.Millisecond))
 	require.ErrorIs(t, WaitOpenAITurnRetry(ctx, time.Second), ErrOpenAIWSFirstOutputBudgetExhausted)
 	require.NoError(t, ctx.Err(), "a finished pre-output wait must not cancel an already streaming response")
 	require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAIWSFirstOutputBudgetExhausted)
@@ -779,7 +780,7 @@ func TestOpenAIHTTPFirstOutputDeadlineCoversHeadersAndBody(t *testing.T) {
 				defer cancel()
 				ctx := EnsureOpenAITurnBudget(parent, cfg, "medium")
 				budget := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
-				budget.deadline = time.Now().Add(40 * time.Millisecond)
+				setTurnOutputDeadlineForTest(budget, time.Now().Add(40*time.Millisecond))
 				var upstream HTTPUpstream
 				closed := make(chan struct{})
 				if headers {
@@ -830,7 +831,7 @@ func TestOpenAIHTTPFirstOutputDeadlineStopsAfterContent(t *testing.T) {
 			cfg := &config.Config{Gateway: config.GatewayConfig{OpenAITurnMaxAttempts: 3, OpenAIFirstOutputTimeoutSeconds: 60}}
 			ctx := EnsureOpenAITurnBudget(context.Background(), cfg, "medium")
 			budget := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
-			budget.deadline = time.Now().Add(40 * time.Millisecond)
+			setTurnOutputDeadlineForTest(budget, time.Now().Add(40*time.Millisecond))
 			pr, pw := io.Pipe()
 			defer pw.Close()
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: pr}}
@@ -869,4 +870,21 @@ func takeOpenAITurnAttempts(t *testing.T, budget *OpenAITurnBudget, count int) {
 	for range count {
 		require.NoError(t, budget.attemptBudget.Take(nil))
 	}
+}
+
+// Tests use the production deadline API instead of mutating private fields.
+func setTurnOutputDeadlineForTest(b *OpenAITurnBudget, deadline time.Time) {
+	state := b.firstOutput.Snapshot()
+	accepted := state.Started
+	if latest := deadline.Add(-state.Paused - time.Nanosecond); latest.Before(accepted) {
+		accepted = latest
+	}
+	b.firstOutput.Limit(deadline.Sub(accepted)-state.Paused, accepted)
+}
+
+func newTurnOutputBudgetForTest(started time.Time, timeout time.Duration) *OpenAITurnBudget {
+	b := NewOpenAITurnBudget(nil)
+	b.firstOutput = execution.NewFirstOutput(started)
+	b.firstOutput.Configure(timeout, true, false)
+	return b
 }

@@ -20,6 +20,8 @@ linters:
             - "**/internal/gateway/model/**"
             - "**/internal/gateway/execution/**"
             - "**/internal/gateway/protocol/**"
+            - "**/internal/gateway/session/**"
+            - "**/internal/billing/reservation/**"
           deny:
             - pkg: github.com/Wei-Shaw/sub2api/internal/service
               desc: "gateway core must not depend on legacy services"
@@ -29,6 +31,8 @@ linters:
               desc: "gateway core must not depend on repositories"
             - pkg: github.com/Wei-Shaw/sub2api/internal/config
               desc: "pass explicit immutable policy values to gateway core"
+            - pkg: github.com/Wei-Shaw/sub2api/internal/pkg/logger
+              desc: "domain owners report facts without infrastructure logging"
             - pkg: github.com/Wei-Shaw/sub2api/internal/providers
               desc: "execution consumes ports rather than concrete providers"
             - pkg: github.com/Wei-Shaw/sub2api/internal/storage

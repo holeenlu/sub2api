@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/execution"
 	"io"
 	"maps"
 	"net/http"
@@ -180,7 +181,7 @@ func TestExcelBPSFirstOutputDeadlineStopsAtSemanticOutput(t *testing.T) {
 	svc.cfg.Gateway.OpenAITurnMaxAttempts = 2
 	svc.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 1
 	budget := NewOpenAITurnBudget(svc.cfg)
-	budget.started = time.Now().Add(-900 * time.Millisecond)
+	budget.firstOutput = execution.NewFirstOutput(time.Now().Add(-900 * time.Millisecond))
 	ctx := WithOpenAITurnBudget(t.Context(), budget)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -298,7 +299,7 @@ func TestExcelBPSFirstOutputDeadlineCoversHeadersAndMetadata(t *testing.T) {
 				svc.cfg.Gateway.OpenAITurnMaxAttempts = 2
 				svc.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 1
 				budget := NewOpenAITurnBudget(svc.cfg)
-				budget.started = time.Now().Add(-950 * time.Millisecond)
+				budget.firstOutput = execution.NewFirstOutput(time.Now().Add(-950 * time.Millisecond))
 				ctx := WithOpenAITurnBudget(t.Context(), budget)
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
@@ -379,14 +380,17 @@ func TestExcelBPSRetryableFailurePreservesTurnDeadline(t *testing.T) {
 			svc.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 2
 			budget := NewOpenAITurnBudget(svc.cfg)
 			deadline := time.Now().Add(time.Second)
-			budget.deadline = deadline
+			setTurnOutputDeadlineForTest(budget, deadline)
+			// Compare the configured deadline across the failure, preserving both
+			// clock readings after production deadline arithmetic.
+			deadline = budget.firstOutput.Snapshot().Deadline
 			ctx := WithOpenAITurnBudget(t.Context(), budget)
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
 			_, err := svc.Forward(ctx, c, excelAccount(), []byte(`{"model":"gpt-6-astra","input":"continue","stream":true}`))
 			var failover *UpstreamFailoverError
 			require.ErrorAs(t, err, &failover)
-			require.Equal(t, deadline, budget.deadline, "a failure before semantic output must not reset the logical turn's deadline")
+			require.Equal(t, deadline, budget.firstOutput.Snapshot().Deadline, "a failure before semantic output must not reset the logical turn's deadline")
 		})
 	}
 }

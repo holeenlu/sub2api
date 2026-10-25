@@ -72,3 +72,5 @@ WP-00源码冻结完成；WP-01-BUDGET、WP-02-SSE、WP-27-API、WP-27-IDENTITY�
 最终整合已完成本轮范围的核验并移除四个退役接口，前端已按提交整合；整体implementation_ready/rollout_ready仍为false，因为完整执行引擎、其余领域和真实UI/上游验收尚未完成。
 
 共同工作树继续实施：WP-29身份/Key与WP-28共享HTTP解耦由前端owner推进；执行deadline/交付边界和会话隔离子切片由后端推进。已恢复完整36项计划，未验收新切片不纳入已完成声明；总体implementation_ready=false、rollout_ready=false。
+
+第二批后端已有接入证据：首输出/交付所有权、会话隔离和账务预留生命周期及旧兑换码timing残留清理已验收；675项唯一整合测试/子场景、目标模块race、depguard/vet和独立API编译通过。前端identity/keys新实现仍在修复全量测试与审查阶段，未纳入本批提交。下一步使用本地独立数据库/Redis/账号做前后端登录与Keys归属联调，不使用生产数据。整体状态继续为未完成。

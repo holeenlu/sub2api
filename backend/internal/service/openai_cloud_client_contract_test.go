@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/billing/reservation"
+
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -311,8 +313,7 @@ func TestCloudCanceledDeliveryDoesNotEmitGatewayFailure(t *testing.T) {
 	in.Account.Credentials["model_mapping"].(map[string]any)["gpt-5.1"] = "gpt-5.1"
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	reservation := &InflightReservation{ttl: time.Minute}
-	reservation.refs.Store(1)
+	reservation := reservation.New(reservation.Options{TTL: time.Minute})
 	defer reservation.Release()
 	ctx = WithInflightReservation(ctx, reservation)
 	body := capturedCodexBody(t, capturedCodexFrames(t, "http_cancel")[0], true)

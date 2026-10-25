@@ -199,7 +199,7 @@ func TakeTurnPreparationRetry(ctx context.Context) error {
 	if b.control != nil && b.control.Err() != nil {
 		return b.control.Err()
 	}
-	if !b.deadline.IsZero() && !time.Now().Before(b.deadline) {
+	if deadline := b.firstOutput.Snapshot().Deadline; !deadline.IsZero() && !time.Now().Before(deadline) {
 		return ErrOpenAIWSFirstOutputBudgetExhausted
 	}
 	return b.attemptBudget.TakePreparation()
@@ -444,13 +444,7 @@ func MarkTurnOutputCommitted(ctx context.Context) {
 	if b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget); b != nil {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		if !b.outputCommitted {
-			b.outputCommitted = true
-			b.deadline = time.Time{}
-			if b.outputReady != nil {
-				close(b.outputReady)
-			}
-		}
+		b.firstOutput.Commit()
 	}
 }
 
@@ -462,25 +456,21 @@ func guardTurnFirstOutput(req *http.Request) (*http.Request, context.CancelFunc)
 		return req, func() {}
 	}
 	b.mu.Lock()
-	deadline, committed := b.deadline, b.outputCommitted
-	if b.outputReady == nil {
-		b.outputReady = make(chan struct{})
-	}
-	ready := b.outputReady
+	output, ready := b.firstOutput.Watch()
 	b.mu.Unlock()
-	if committed || deadline.IsZero() {
+	if output.Committed || output.Deadline.IsZero() {
 		return req, func() {}
 	}
 	ctx, cancel := context.WithCancelCause(req.Context())
 	go func() {
-		timer := time.NewTimer(time.Until(deadline))
+		timer := time.NewTimer(time.Until(output.Deadline))
 		defer timer.Stop()
 		select {
 		case <-ready:
 		case <-ctx.Done():
 		case <-timer.C:
 			b.mu.Lock()
-			committed := b.outputCommitted
+			committed := b.firstOutput.Snapshot().Committed
 			b.mu.Unlock()
 			if !committed {
 				cancel(ErrOpenAIWSFirstOutputBudgetExhausted)

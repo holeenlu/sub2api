@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/billing/reservation"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/alicebob/miniredis/v2"
@@ -321,7 +322,7 @@ func TestReserveFixedCharge_ConcurrentChargesAdmitOnlyWhatAPIKeyQuotaCovers(t *t
 
 	const n = 20
 	var admitted atomic.Int32
-	reservations := make(chan *service.InflightReservation, n)
+	reservations := make(chan *reservation.Handle, n)
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for i := 0; i < n; i++ {

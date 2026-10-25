@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	billingreservation "github.com/Wei-Shaw/sub2api/internal/billing/reservation"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/google/uuid"
@@ -252,7 +253,8 @@ func (s *OpenAIGatewayService) CaptureCloudBillingSnapshot(ctx context.Context, 
 		}
 	}
 	if reservation := InflightReservationFromContext(ctx); reservation != nil {
-		snapshot.Inflight = &openAICloudInflightSnapshot{RequestID: reservation.requestID, UserID: reservation.userID, Balance: reservation.cache != nil, Scopes: append([]string(nil), reservation.scopes...)}
+		hold := reservation.Snapshot()
+		snapshot.Inflight = &openAICloudInflightSnapshot{RequestID: hold.RequestID, UserID: hold.UserID, Balance: hold.Balance, Scopes: hold.Scopes}
 	}
 	data, err := json.Marshal(snapshot)
 	if err != nil || len(data) > 256<<10 {
@@ -553,7 +555,7 @@ func (s *OpenAIGatewayService) HoldCloudBillingReservation(ctx context.Context, 
 	if len(worker.holds) >= OpenAICloudMaxSessions {
 		return errors.New("Cloud billing reservation capacity reached")
 	}
-	worker.holds[rootID] = openAICloudHeldReservation{done: reservation.Acquire(), expires: time.Now().Add(reservation.ttl)}
+	worker.holds[rootID] = openAICloudHeldReservation{done: reservation.Acquire(), expires: time.Now().Add(reservation.TTL())}
 	return nil
 }
 func (s *OpenAIGatewayService) WaitCloudProbeSettlement(ctx context.Context, rootID string) error {
@@ -824,10 +826,10 @@ func (w *openAICloudBillingWorker) releaseReservation(ctx context.Context, settl
 		return
 	}
 	cache := w.service.billingCacheService.cache
-	if balance, ok := cache.(InflightBalanceReservationCache); ok && reservation.Balance {
+	if balance, ok := cache.(billingreservation.BalanceCache); ok && reservation.Balance {
 		_ = balance.ReleaseInflightBalance(ctx, reservation.UserID, reservation.RequestID)
 	}
-	if scopes, ok := cache.(InflightScopeReservationCache); ok {
+	if scopes, ok := cache.(billingreservation.ScopeCache); ok {
 		for _, scope := range reservation.Scopes {
 			_ = scopes.ReleaseInflightScope(ctx, scope, reservation.RequestID)
 		}

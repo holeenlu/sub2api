@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/billing/reservation"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -289,10 +290,31 @@ func TestInflightReservation_HeldUntilBillingTaskDone(t *testing.T) {
 	require.Equal(t, int32(2), cache.releaseCt.Load())
 
 	// Nil handle is safe.
-	var nilRes *InflightReservation
+	var nilRes *reservation.Handle
 	nilRes.Acquire()()
 	nilRes.HandlerDone()
 	nilRes.Release()
+}
+
+func TestInflightReservation_CanceledRequestKeepsPendingBillingHold(t *testing.T) {
+	cache := newMemInflightCache(1)
+	svc := newInflightSvc(t, cache, 60)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	res, err := svc.ReserveInflight(ctx, &User{ID: 1}, nil, nil, 0.9)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	t.Cleanup(res.Release)
+	require.Same(t, res, InflightReservationFromContext(WithInflightReservation(ctx, res)))
+	done := res.Acquire()
+	cancel()
+	res.HandlerDone()
+	require.Equal(t, 1, cache.count(), "request cancellation must not release pending billing")
+	require.Zero(t, cache.releaseCt.Load())
+	done()
+	done()
+	require.Zero(t, cache.count())
+	require.Equal(t, int32(1), cache.releaseCt.Load())
 }
 
 func TestInflightReservation_RenewedWhileHandlerActive(t *testing.T) {

@@ -271,7 +271,7 @@ func (u *httpStreamContractUpstream) Do(req *http.Request, _ string, _ int64, _ 
 }
 func TestHTTPStreamContractRawFullForwardFirstOutputBudget(t *testing.T) {
 	c, rec := httpStreamContractContext()
-	budget := &OpenAITurnBudget{deadline: time.Now().Add(60 * time.Millisecond), attemptBudget: newOpenAITurnAttemptBudget(8)}
+	budget := newTurnOutputBudgetForTest(time.Now(), 60*time.Millisecond)
 	c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), budget))
 	reader, writer := io.Pipe()
 	producerDone := make(chan struct{})
@@ -299,7 +299,7 @@ func TestHTTPStreamContractRawDeadlineEndsAtContent(t *testing.T) {
 		t.Run(map[bool]string{false: "empty_delta", true: "long_generation"}[content], func(t *testing.T) {
 			c, _ := httpStreamContractContext()
 			started := time.Now()
-			c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), &OpenAITurnBudget{started: started, deadline: started.Add(150 * time.Millisecond), attemptBudget: newOpenAITurnAttemptBudget(8)}))
+			c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), newTurnOutputBudgetForTest(started, 150*time.Millisecond)))
 			reader, writer := io.Pipe()
 			done := make(chan struct{})
 			go func() {
@@ -335,7 +335,7 @@ func (*httpStreamHeaderWait) Do(req *http.Request, _ string, _ int64, _ int) (*h
 func TestHTTPStreamContractRawHeaderWaitBudget(t *testing.T) {
 	c, _ := httpStreamContractContext()
 	started := time.Now()
-	c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), &OpenAITurnBudget{started: started, deadline: started.Add(50 * time.Millisecond), attemptBudget: newOpenAITurnAttemptBudget(8)}))
+	c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), newTurnOutputBudgetForTest(started, 50*time.Millisecond)))
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: &httpStreamHeaderWait{}}
 	_, err := svc.forwardAsRawChatCompletions(c.Request.Context(), c, rawChatCompletionsTestAccount(), largeRawChatCompletionsBody(), "")
 	if !errors.Is(err, ErrOpenAIWSFirstOutputBudgetExhausted) {
@@ -368,7 +368,7 @@ func TestHTTPStreamContractFallbackFirstOutputBudget(t *testing.T) {
 		t.Run(protocol, func(t *testing.T) {
 			c, _ := httpStreamContractContext()
 			start := time.Now()
-			c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), &OpenAITurnBudget{attemptBudget: newOpenAITurnAttemptBudget(8), started: start, deadline: start.Add(50 * time.Millisecond)}))
+			c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), newTurnOutputBudgetForTest(start, 50*time.Millisecond)))
 			reader, writer := io.Pipe()
 			done := make(chan struct{})
 			go func() {
@@ -400,7 +400,7 @@ func TestHTTPStreamContractCanceledPreoutputStillDrainsUsage(t *testing.T) {
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 	start := time.Now()
-	ctx = WithOpenAITurnBudget(ctx, &OpenAITurnBudget{attemptBudget: newOpenAITurnAttemptBudget(8), started: start, deadline: start.Add(30 * time.Millisecond)})
+	ctx = WithOpenAITurnBudget(ctx, newTurnOutputBudgetForTest(start, 30*time.Millisecond))
 	c.Request = c.Request.WithContext(ctx)
 	reader, writer := io.Pipe()
 	done := make(chan struct{})
@@ -631,7 +631,7 @@ func TestHTTPBoundarySuccessfulCompatibilityTerminalReportsCompletion(t *testing
 
 func TestHTTPBoundaryErrorBodyRetainsFirstOutputBudget(t *testing.T) {
 	budget := NewOpenAITurnBudget(nil)
-	budget.deadline = time.Now().Add(70 * time.Millisecond)
+	setTurnOutputDeadlineForTest(budget, time.Now().Add(70*time.Millisecond))
 	ctx := WithOpenAITurnBudget(context.Background(), budget)
 	reader, writer := io.Pipe()
 	defer func() { _ = writer.Close() }()
@@ -729,7 +729,7 @@ func TestHTTPBoundaryBufferedBudgetKeepsCancellationDrain(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			budget := NewOpenAITurnBudget(nil)
-			budget.deadline = time.Now().Add(70 * time.Millisecond)
+			setTurnOutputDeadlineForTest(budget, time.Now().Add(70*time.Millisecond))
 			parent, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			ctx := WithOpenAITurnBudget(parent, budget)

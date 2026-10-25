@@ -184,3 +184,11 @@ WP-01提交实际Go类型和受影响调用方后形成可编译的contract基�
 用户要求删除新项目中的无用旧实现：系统二进制更新、回滚、回滚版本列表和门户updater/socket链退出，三个管理写/列表路由删除，细节见FRONTEND_HANDOFF。保留实际消费的只读构建/手动部署状态和独立重启操作。原版本同步GitHub读取及价格配置不属于软件安装链，继续保留。此版本仅为工程契约，不新增客户端准入版本门禁。
 
 0.4同时整合已制定的FRONTEND_ARCHITECTURE与编码规范1.3，并包含独立项目旧接口退休；未增加运行时协议版本准入。
+
+## 0.4执行切片接线记录
+
+execution.FirstOutput承接既有首输出绝对截止、自动/显式policy选择、有界准备暂停和不可逆交付标记。Configure与attempt准入由调用方串行；Snapshot仅供观察，Watch接收交付通知，Commit只表示入口实际不可撤回输出，不证明上游终态或Final usage。服务层只提取既有配置、context和传输timer，不再持有另一份deadline/committed状态。此切片不等于Execute或SendPermit全合同完成。
+
+会话切片由session.ExecutionIdentity/ExecutionScopeSeed唯一解释线程、请求kind、subagent与命名stream作用域；protocol/codex只解码wire，Gin边界继续使用既有显式session resolver及哈希格式。新类型中的客户端声明不是可信授权，不能替代CT-05复核或CT-06 owner lease。
+
+账务切片由billing/reservation.Handle持有已准入预留的生命周期：构造不启动后台任务，显式StartRenewal；HandlerDone取消并等待续期，但异步计费引用仍保持到完成或原TTL。Snapshot只输出原有恢复身份，Scopes为独立副本；Release是明确回滚/完成收尾，不等于unknown usage可标settled。余额/订阅/Key缓存原子脚本、金额估计、豁免及故障策略沿用原规则，service负责已有配置与日志适配。旧预留struct及其接口已替换，没有保留同名alias。

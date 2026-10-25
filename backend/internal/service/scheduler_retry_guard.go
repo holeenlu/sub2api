@@ -15,5 +15,5 @@ func TurnOutputCommitted(ctx context.Context) bool {
 	}
 	budget.mu.Lock()
 	defer budget.mu.Unlock()
-	return budget.outputCommitted
+	return budget.firstOutput.Snapshot().Committed
 }

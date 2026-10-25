@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"github.com/Wei-Shaw/sub2api/internal/billing/reservation"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -230,6 +231,15 @@ func TestCloudFailedManualTestDoesNotChangeAuthorizationOrActivation(t *testing.
 	require.True(t, in.Account.IsOpenAICloudEnabled(), "failed manual testing cannot change the account switch")
 }
 
+type cloudInflightReleaseProbe struct {
+	released atomic.Int32
+}
+
+func (c *cloudInflightReleaseProbe) ReleaseInflightBalance(context.Context, int64, string) error {
+	c.released.Add(1)
+	return nil
+}
+
 func TestCloudRejectedContinuationReleasesUnstartedBillingHold(t *testing.T) {
 	for _, cancelAtRejection := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cancel=%v", cancelAtRejection), func(t *testing.T) {
@@ -260,8 +270,8 @@ func TestCloudRejectedContinuationReleasesUnstartedBillingHold(t *testing.T) {
 			body, _ := json.Marshal(map[string]any{"model": "client-model", "input": "follow up", "instructions": "changed instructions", "previous_response_id": first.ResponseID})
 			followCtx, err := svc.PrepareCloudContinuation(ctx, in.User.ID, in.APIKey.ID, *in.APIKey.GroupID, body)
 			require.NoError(t, err)
-			reservation := &InflightReservation{ttl: time.Minute, userID: in.User.ID, requestID: "reserved-followup"}
-			reservation.refs.Store(1)
+			cache := &cloudInflightReleaseProbe{}
+			reservation := reservation.New(reservation.Options{TTL: time.Minute, UserID: in.User.ID, RequestID: "reserved-followup", Balance: cache})
 			defer reservation.Release()
 			followCtx = WithInflightReservation(followCtx, reservation)
 			followCtx, err = svc.CaptureCloudBillingSnapshot(followCtx, in)
@@ -276,7 +286,7 @@ func TestCloudRejectedContinuationReleasesUnstartedBillingHold(t *testing.T) {
 			require.Equal(t, 1, store.settlementCount())
 			require.Empty(t, svc.cloudBillingWorker.holds)
 			reservation.HandlerDone()
-			require.Zero(t, reservation.refs.Load())
+			require.Equal(t, int32(1), cache.released.Load())
 
 		})
 	}

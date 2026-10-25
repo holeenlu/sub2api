@@ -278,7 +278,7 @@ func TestExcelBPSAttachment429RecoveryBounds(t *testing.T) {
 			ctx := EnsureOpenAITurnBudget(t.Context(), svc.cfg, "low")
 			budget := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
 			if tc.shortDeadline {
-				budget.deadline = time.Now().Add(200 * time.Millisecond)
+				setTurnOutputDeadlineForTest(budget, time.Now().Add(200*time.Millisecond))
 			}
 			if tc.shortPhase {
 				previous := excelBPSAttachmentPhaseTimeout

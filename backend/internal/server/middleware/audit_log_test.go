@@ -28,7 +28,7 @@ func TestDeriveAuditAction(t *testing.T) {
 		{"POST", "/api/v1/admin/accounts", "admin.accounts.create"},
 		{"DELETE", "/api/v1/admin/backups/:id", "admin.backups.delete"},
 		{"GET", "/api/v1/admin/users/:id/api-keys", "admin.users.api_keys.read"},
-		{"POST", "/api/v1/admin/redeem-codes/batch", "admin.redeem_codes.batch.create"},
+		{"POST", "/api/v1/admin/accounts/batch-refresh", "admin.accounts.batch_refresh.create"},
 	}
 	for _, tc := range cases {
 		if got := deriveAuditAction(tc.method, tc.path); got != tc.want {

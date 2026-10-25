@@ -882,7 +882,7 @@ func TestExcelBPS429NativeFallbackPreservesBoundaries(t *testing.T) {
 				budget.attemptBudget = newOpenAITurnAttemptBudget(1)
 			}
 			if mode == "deadline" {
-				budget.deadline = time.Now().Add(-time.Second)
+				setTurnOutputDeadlineForTest(budget, time.Now().Add(-time.Second))
 			}
 			ctx = WithOpenAITurnBudget(ctx, budget)
 			rec := httptest.NewRecorder()

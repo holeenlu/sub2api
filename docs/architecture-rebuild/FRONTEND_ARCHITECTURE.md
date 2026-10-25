@@ -193,9 +193,9 @@ Abort仅取消等待/传输，不代表服务端撤销命令。只有现有幂�
 
 | 已核实行为 | 新归属与迁移约束 | 证据 |
 | --- | --- | --- |
-| 刷新失败为网络/429/5xx时保留登录态；相同用户重新登录也是新session，旧响应不能接纳；同session正常轮换可继续 | identity处理登录生命周期，shared/http保留single-flight/peer rotation与取消判别；不能将暂时不可用当作凭据失效 | [client](../../frontend/src/api/client.ts)、[tokenRefresh测试](../../frontend/src/shared/http/__tests__/tokenRefresh.spec.ts) |
-| 管理403刷新权限后重新核对session；step-up仅针对原session受控重试一次；423合规确认不清登录 | typed结果交app装配identity/system明确流程，旧事件语义有对应消费者后删除CustomEvent耦合；禁止把所有403当可重试 | [client](../../frontend/src/api/client.ts)、[client测试](../../frontend/src/api/__tests__/client.spec.ts) |
-| Admin/User UI标记、locale、GET timezone及withCredentials有现有消费者；供应商角色制品使用同源API | shared/http保留头部精确适用范围，显式timezone优先；不把所有请求或公开支付都打同一标记，不由网站API展示链接更换认证目标 | [adminUIRequest](../../frontend/src/api/adminUIRequest.ts)、[client测试](../../frontend/src/api/__tests__/client.spec.ts) |
+| 刷新失败为网络/429/5xx时保留登录态；相同用户重新登录也是新session，旧响应不能接纳；同session正常轮换可继续 | identity处理登录生命周期，shared/http保留single-flight/peer rotation与取消判别；不能将暂时不可用当作凭据失效 | [client](../../frontend/src/shared/http/)、[tokenRefresh测试](../../frontend/src/shared/http/__tests__/tokenRefresh.spec.ts) |
+| 管理403刷新权限后重新核对session；step-up仅针对原session受控重试一次；423合规确认不清登录 | typed结果交app装配identity/system明确流程，旧事件语义有对应消费者后删除CustomEvent耦合；禁止把所有403当可重试 | [client](../../frontend/src/shared/http/)、[client测试](FRONTEND_IMPLEMENTATION.md#已执行验证) |
+| Admin/User UI标记、locale、GET timezone及withCredentials有现有消费者；供应商角色制品使用同源API | shared/http保留头部精确适用范围，显式timezone优先；不把所有请求或公开支付都打同一标记，不由网站API展示链接更换认证目标 | [adminUIRequest](FRONTEND_IMPLEMENTATION.md#保留的行为)、[client测试](FRONTEND_IMPLEMENTATION.md#已执行验证) |
 | supplier origin含scheme/port精确匹配；超管可进入platform而无需冒充supplier；二级供应商不能管理children | app/router消费当前role与capability；supply拥有业务scope规则，resources接收已确定scope，但后端仍逐对象验证 | [portalGuard测试](../../frontend/src/features/vendor/__tests__/portalGuard.spec.ts)、[scope测试](../../frontend/src/features/vendor/__tests__/scope.spec.ts) |
 | vendor_id=0仅明确安全aggregate；children仅只读；scope最后写入防旧query覆盖；admin更新PUT、vendor更新PATCH有区别 | 资源API集中拥有角色端点映射，不能将所有请求机械合成一种方法；0/false保留，空可选filter依现有规则省略 | [vendor API](../../frontend/src/features/vendor/api.ts)、[scope测试](../../frontend/src/features/vendor/__tests__/scope.spec.ts) |
 | backend-only模式保留pending-auth注册/验证与公开payment回调例外；微信恢复优先opaque token，并清除URL恢复参数 | identity/payments分别定义真实流程，app只组合guard；旧回调/恢复格式核实调用者后再决定退出，不能因含legacy名称直接删除 | [router guards](../../frontend/src/router/__tests__/guards.spec.ts)、[微信恢复测试](../../frontend/src/views/user/__tests__/paymentWechatResume.spec.ts) |

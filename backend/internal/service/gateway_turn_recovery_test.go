@@ -261,7 +261,7 @@ func TestTurnRecoveryHeaderDeadlineAndCommittedStream(t *testing.T) {
 			ctx := EnsureOpenAITurnBudget(t.Context(), nil)
 			b, ok := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
 			require.True(t, ok)
-			b.deadline = time.Now().Add(20 * time.Millisecond)
+			setTurnOutputDeadlineForTest(b, time.Now().Add(20*time.Millisecond))
 			req, cleanup := guardTurnFirstOutput(httptest.NewRequest(http.MethodPost, "/messages", nil).WithContext(ctx))
 			defer cleanup()
 			if commit {

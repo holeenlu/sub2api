@@ -1433,7 +1433,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	var currentTurnReplayInput []json.RawMessage
 	var currentTurnReplayInputExists, currentTurnReplayComplete bool
 	turnRetry := 0
-	turnStartedAt := downstream.budget.Load().started
+	turnStartedAt := downstream.budget.Load().firstOutput.Snapshot().Started
 	if hooks != nil && !hooks.InitialTurnStartedAt.IsZero() {
 		turnStartedAt = hooks.InitialTurnStartedAt
 	}

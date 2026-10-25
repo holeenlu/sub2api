@@ -1399,8 +1399,8 @@
       "claimed_base": null,
       "contract_version": "0.4",
       "write_paths": [
-        "docs/CUSTOMIZATION_RELEASE_NOTES.md",
-        "docs/customization/**"
+        "docs/architecture-rebuild/IMPLEMENTATION.md",
+        "docs/architecture-rebuild/FRONTEND_HANDOFF.md"
       ],
       "legacy_read_paths": [
         "docs/CHANGE_DELIVERY.md"
@@ -1453,7 +1453,7 @@
       ],
       "integration_paths": [
         "backend/internal/service/brand.go",
-        "frontend/src/config/brand.ts",
+        "frontend/src/shared/config/project.ts",
         "frontend/index.html",
         "frontend/vite.config.ts"
       ],
@@ -1473,7 +1473,7 @@
         "CT-10",
         "CT-11"
       ],
-      "outcome": "按BRANDING统一项目名sub2api，将镜像/容器/项目等部署输入中性化并复用网站设置；保留旧有效设置、卷挂载和更新来源，验证同角色同版本制品可用于两个独立品牌配置。",
+      "outcome": "按BRANDING统一项目名sub2api，将镜像/容器/项目等部署输入中性化并复用网站设置；保留有效设置和卷挂载，验证同角色同版本制品可用于两个独立品牌配置。独立制品通过重新构建部署更新，不恢复已删除的维护版自更新来源。",
       "retirement_acceptance": "替换既有模板而非另建平行部署器；旧品牌变量/fallback/硬编码与广告专属内容有退出证据，许可/来源、持久身份及当前发布权限保留。",
       "acceptance": [
         "AT-38至AT-43的静态、设置、制品和部署风险有分级证据，未运行项明确标记",
@@ -2071,7 +2071,7 @@
       ],
       "scope": "Extract actual attempt counters and immutable recovery target identities; integrate consumers and remove replaced counters. Not the full execution engine.",
       "note": "Only exact affected budget assertions in test files; unrelated tests and other worker update/brand tests excluded.",
-      "evidence": "IMPLEMENTATION.md#第一波验证结果",
+      "evidence": "IMPLEMENTATION.md#验证证据",
       "reviewer": "Linnaeus (static review of budget extraction and consumers)"
     },
     {
@@ -2087,7 +2087,7 @@
         "backend/internal/pkg/sse/**"
       ],
       "scope": "Move existing pure SSE implementation and tests without semantic change. Existing SSE API supplies this independent slice contract; integrator changes imports.",
-      "evidence": "IMPLEMENTATION.md#第一波验证结果"
+      "evidence": "IMPLEMENTATION.md#验证证据"
     },
     {
       "id": "WP-27-API",
@@ -2098,10 +2098,12 @@
       "status": "accepted",
       "assignee": "Pascal",
       "write_paths": [
-        "deploy/rebuild/**"
+        "Dockerfile",
+        ".dockerignore",
+        "deploy/api/**"
       ],
       "scope": "Standalone API binary image and isolated compose from this branch. Does not claim full branding, control or UI completion.",
-      "evidence": "IMPLEMENTATION.md#第一波验证结果"
+      "evidence": "IMPLEMENTATION.md#验证证据"
     },
     {
       "id": "WP-27-IDENTITY",
@@ -2127,7 +2129,7 @@
         "backend/internal/config/config_test.go"
       ],
       "scope": "Neutral backend defaults and development-build update isolation; preserves persisted website settings.",
-      "evidence": "IMPLEMENTATION.md#第一波验证结果",
+      "evidence": "IMPLEMENTATION.md#验证证据",
       "integration_owner": "integrator"
     },
     {
@@ -2245,7 +2247,7 @@
       "depends_on": [
         "WP-01-BUDGET"
       ],
-      "status": "in_progress",
+      "status": "accepted",
       "assignee": "integrator",
       "write_paths": [
         "backend/internal/gateway/execution/first_output*.go",
@@ -2254,7 +2256,10 @@
         "backend/internal/service/scheduler_retry_guard.go",
         "backend/internal/service/ops_upstream_context.go"
       ],
-      "scope": "Move existing absolute deadline, bounded preparation pause and irreversible delivery fence into execution and replace actual service consumers. Not the full executor/SendPermit."
+      "scope": "Move existing absolute deadline, bounded preparation pause and irreversible delivery fence into execution and replace actual service consumers. Not the full executor/SendPermit.",
+      "evidence": "IMPLEMENTATION.md#第二批后端领域接线",
+      "reviewer": "integrator",
+      "acceptance_boundary": "Only this integrated slice is accepted. Parent work package and full rebuild remain incomplete."
     },
     {
       "id": "WP-05-EXECUTION-SCOPE",
@@ -2262,7 +2267,7 @@
       "depends_on": [
         "WP-00"
       ],
-      "status": "in_progress",
+      "status": "accepted",
       "assignee": "Jason",
       "write_paths": [
         "backend/internal/gateway/session/**",
@@ -2270,7 +2275,10 @@
         "backend/internal/service/openai_ws_execution_scope.go",
         "backend/internal/service/openai_ws_execution_scope_test.go"
       ],
-      "scope": "Extract existing pure thread/lane/session identity rules with unchanged keys and real ingress consumers; not owner leasing or authorization completion."
+      "scope": "Extract existing pure thread/lane/session identity rules with unchanged keys and real ingress consumers; not owner leasing or authorization completion.",
+      "evidence": "IMPLEMENTATION.md#第二批后端领域接线",
+      "reviewer": "integrator",
+      "acceptance_boundary": "Only this integrated slice is accepted. Parent work package and full rebuild remain incomplete."
     },
     {
       "id": "WP-28-HTTP-DECOUPLING",
@@ -2292,7 +2300,7 @@
       "depends_on": [
         "WP-00"
       ],
-      "status": "in_progress",
+      "status": "accepted",
       "assignee": "Descartes",
       "write_paths": [
         "backend/internal/billing/reservation/**",
@@ -2300,11 +2308,32 @@
         "backend/internal/service/billing_inflight_reservation_test.go"
       ],
       "integration_owner": "integrator",
-      "scope": "Migrate actual inflight reservation handle, asynchronous references, bounded renewal/release and narrow cache ports; preserve existing cache atomicity and pricing/eligibility policies. Exact type/import consumers included in reviewed handoff."
+      "scope": "Migrate actual inflight reservation handle, asynchronous references, bounded renewal/release and narrow cache ports; preserve existing cache atomicity and pricing/eligibility policies. Exact type/import consumers included in reviewed handoff.",
+      "evidence": "IMPLEMENTATION.md#第二批后端领域接线",
+      "reviewer": "integrator",
+      "acceptance_boundary": "Only this integrated slice is accepted. Parent work package and full rebuild remain incomplete."
+    },
+    {
+      "id": "WP-24-REDEEM-TIMING",
+      "parent": "WP-24",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/server/middleware/server_timing.go",
+        "backend/internal/server/middleware/server_timing_test.go",
+        "backend/internal/server/middleware/audit_log_test.go"
+      ],
+      "scope": "Remove the retired user redeem timing allowance and obsolete audit test example. Preserve Claude reset-credit redeem, invitation records and active balance-history readers; no historical schema/data deletion.",
+      "evidence": "IMPLEMENTATION.md#第二批后端领域接线",
+      "reviewer": "integrator",
+      "acceptance_boundary": "Only this integrated slice is accepted. Parent work package and full rebuild remain incomplete."
     }
   ],
-  "last_completed_phase": "first_wave_foundation_2026-10-25",
-  "current_phase": "second_wave_domains_in_progress",
+  "last_completed_phase": "second_backend_wave_2026-10-25",
+  "current_phase": "domain_migration_in_progress",
   "retired_implementation_inputs": [
     "deploy/docker-compose.yml",
     "scripts/release/channels.json",

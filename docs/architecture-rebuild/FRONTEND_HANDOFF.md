@@ -20,7 +20,7 @@
 | 更新 | 独立开发制品不应下载维护品牌的二进制；前端应显示后端返回的更新状态，不从展示品牌推导可信更新源 |
 | 构建交付 | 后端API制品独立于Node和frontend/dist；完整UI角色与最终资源路径由集成阶段确认，不能把缺少UI误报为全站可用 |
 
-现有代码锚点：[公开设置DTO](../../backend/internal/handler/dto/settings.go)、[API客户端](../../frontend/src/api/client.ts)、[前端品牌入口](../../frontend/src/shared/config/project.ts)、[目标CT-11](CONTRACTS.md)。本轮没有新增面向前端的API字段或路由。
+现有代码锚点：[公开设置DTO](../../backend/internal/handler/dto/settings.go)、[API客户端](../../frontend/src/shared/http/)、[前端品牌入口](../../frontend/src/shared/config/project.ts)、[目标CT-11](CONTRACTS.md)。本轮没有新增面向前端的API字段或路由。
 
 ## 后续整合验收
 
@@ -64,3 +64,7 @@
 工作包已从原始前端规划72dc16b恢复WP-30至WP-35，并恢复WP-21对全部领域切片的集成依赖。WP-29由前端会话继续实施；其只写frontend/**，后端集成者唯一操作Git索引、提交和推送。未交接、未验证的前端新文件不进入后端阶段提交。完整验收仍包含身份/Key、资源/准入、目录/定价/订阅、支付/用量、观测/作业、供应关系/结算、网站/系统及最终装配。
 
 远端第一波检查点已推送并通过git ls-remote核对：origin/codex/sub2api-rebuild = 2d32cd0ea6c7c3defdaf866ef8a58701ee4adc93。新的identity/keys及shared/http改动正在共同工作树内实施，尚未自动纳入提交；准确文件集/回执由前端owner交接。
+
+旧用户兑换码附带残留已接手：删除Server-Timing中/api/v1/redeem及子路径白名单，改为负例；通用audit action测试改用仍注册的accounts/batch-refresh。Claude reset-credits/redeem独立路由及保护链保持，旧RedeemCode数据仍服务邀请和余额历史读取，不按同名关键词删除。定向结果见IMPLEMENTATION；前端正在开发的HTTP/identity/keys仍待owner验证交接。
+
+第二批后端接线及兑换码timing残留清理已验收：675项唯一测试/子场景、目标核心race、depguard/vet及独立API编译通过。当前API字段/网站设置合同保持；本次提交不包含前端owner正在开发的未验证文件。完整项目仍在领域迁移阶段，不标记implementation_ready或rollout_ready。
