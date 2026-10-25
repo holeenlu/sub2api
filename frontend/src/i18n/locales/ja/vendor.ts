@@ -29,13 +29,11 @@ export default {
   nonFable: 'Fable 以外',
   oauthRestartRequired: 'この認証セッションは使用済みです。新しい認証リンクを生成して再度ログインしてください。',
   identityKeyMismatch: 'サプライヤーの識別設定が一致しません。管理者に修正を依頼してから再試行してください。',
-  portalUpdate: {
-    "portalVersion": "稼働中のポータル",
-    "backendVersion": "稼働中のバックエンド",
-    "matched": "ポータルとバックエンドのバージョンは一致しています。",
-    "versionUnavailable": "ポータルまたはバックエンドの稼働バージョンを確認できません。再読み込みして確認してください。",
-    "setupRequired": "更新サービスに接続できません。ポータルサーバーに新版の更新サービスを導入し、コンテナを接続してください。バックエンドも更新認証に対応する必要があります。"
-},
+  portalVersion: {
+    portalVersion: "稼働中のポータル",
+    backendVersion: "稼働中のバックエンド",
+    backendCommit: "バックエンドのビルドコミット",
+  },
   authorization: {
     cloud: "Cloud 認可",
     noModelsHelp: "空のリストを保存すると、すべてのモデルの BPS 供給が停止します。認証と履歴は保持されます。",

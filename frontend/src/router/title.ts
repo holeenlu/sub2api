@@ -1,5 +1,5 @@
 import { i18n } from '@/i18n'
-import { BRAND_NAME } from '@/config/brand'
+import { BRAND_NAME } from '@/shared/config/project'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import type { CustomMenuItem } from '@/types'
 import type { SiteBillingMode } from '@/utils/siteBillingMode'

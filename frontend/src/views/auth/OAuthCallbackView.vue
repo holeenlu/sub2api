@@ -142,7 +142,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useClipboard } from '@/composables/useClipboard'
 import { useAppStore, useAuthStore } from '@/stores'
 import { apiClient } from '@/api/client'
-import { buildApiUrl } from '@/api/url'
+import { buildApiUrl } from '@/shared/http/url'
 import {
   exchangePendingOAuthCompletion,
   persistOAuthTokenContext,

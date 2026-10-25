@@ -35,6 +35,7 @@
             </p>
           </div>
           <a
+            v-if="documentUrl"
             :href="documentUrl"
             target="_blank"
             rel="noopener noreferrer"
@@ -106,7 +107,7 @@ import Input from '@/components/common/Input.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAdminComplianceStore, useAppStore, useAuthStore } from '@/stores'
 import { getLocale } from '@/i18n'
-import { BRAND_COMPLIANCE_DOCUMENT_URL } from '@/config/brand'
+import { sanitizeUrl } from '@/utils/url'
 import zhDocument from '../../../../docs/legal/admin-compliance.zh.md?raw'
 import zhTwDocument from '../../../../docs/legal/admin-compliance.zh-TW.md?raw'
 import jaDocument from '../../../../docs/legal/admin-compliance.ja.md?raw'
@@ -126,7 +127,7 @@ marked.setOptions({
 
 const visible = computed(() => authStore.isAuthenticated && authStore.isAdmin && complianceStore.shouldShow)
 const expectedPhrase = computed(() => complianceStore.expectedPhrase)
-const canSubmit = computed(() => typedPhrase.value.trim() === expectedPhrase.value)
+const canSubmit = computed(() => !!expectedPhrase.value && typedPhrase.value.trim() === expectedPhrase.value)
 const currentDocument = computed(() => {
   const locale = getLocale()
   if (locale === 'zh-TW') return zhTwDocument
@@ -134,16 +135,11 @@ const currentDocument = computed(() => {
   return locale === 'ja' ? jaDocument : enDocument
 })
 const documentUrl = computed(() => {
-  if (getLocale() === 'zh-TW') {
-    return complianceStore.status?.document_url_zh || BRAND_COMPLIANCE_DOCUMENT_URL['zh-TW']
-  }
-  if (getLocale() === 'zh') {
-    return complianceStore.status?.document_url_zh || BRAND_COMPLIANCE_DOCUMENT_URL.zh
-  }
-  if (getLocale() === 'ja') {
-    return BRAND_COMPLIANCE_DOCUMENT_URL.ja
-  }
-  return complianceStore.status?.document_url_en || BRAND_COMPLIANCE_DOCUMENT_URL.en
+  const locale = getLocale()
+  const url = locale === 'zh' || locale === 'zh-TW'
+    ? complianceStore.status?.document_url_zh
+    : complianceStore.status?.document_url_en
+  return sanitizeUrl(url || '')
 })
 const inputError = computed(() => {
   if (!attemptedSubmit.value || canSubmit.value) {

@@ -1,140 +1,118 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { nextTick } from 'vue'
-
-const authState = vi.hoisted(() => ({isAdmin:true,isSuperAdmin:true}))
-
-const appStoreState = {
-  versionLoading: false,
-  currentVersion: '1.2.3',
-  latestVersion: '',
-  hasUpdate: false,
-  releaseInfo: null as unknown,
-  buildType: 'release',
-  upstreamVersion: 'v9.9.9',
-  buildCommit: '2776c84a5ebcc94d2fba1f551c200ab1d9ffe149',
-  updateDisabled: true,
-  fetchVersion: vi.fn(),
-  clearVersionCache: vi.fn()
-}
-
-vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
-    t: (key: string, values?: { commit: string }) => values ? `${key}: [${values.commit}]` : key
-  })
-}))
-
-vi.mock('@/stores', () => ({
-  useAuthStore: () => authState,
-  useAppStore: () => appStoreState
-}))
-
-vi.mock('@/api/admin/system', () => ({
-  performUpdate: vi.fn(),
-  restartService: vi.fn(),
-  getRollbackVersions: vi.fn().mockResolvedValue({ versions: [] }),
-  rollback: vi.fn()
-}))
-
-vi.mock('@/composables/useClipboard', () => ({
-  useClipboard: () => ({ copied: false, copyToClipboard: vi.fn() })
-}))
-
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { reactive } from 'vue'
 import VersionBadge from '../VersionBadge.vue'
 
-const stubs = {
-  Icon: { template: '<span />' }
-}
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), clear: vi.fn(), copy: vi.fn(), portal: vi.fn() }))
+const auth = reactive({ isSuperAdmin: true, isAdmin: true })
+const app = reactive({
+  versionLoaded: true, versionLoading: false, currentVersion: '1.2.3', upstreamVersion: 'v1.2.0',
+  buildCommit: 'a'.repeat(40), fetchVersion: mocks.fetch, clearVersionCache: mocks.clear
+})
+vi.mock('@/stores', () => ({ useAuthStore: () => auth, useAppStore: () => app }))
+vi.mock('@/features/vendor/version', () => ({ usePortalVersion: mocks.portal }))
+vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copied: false, copyToClipboard: mocks.copy }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+enableAutoUnmount(afterEach)
 
-async function mountOpened() {
-  const wrapper = mount(VersionBadge, { global: { stubs } })
-  await wrapper.find('button').trigger('click')
-  await nextTick()
+beforeEach(() => {
+  vi.clearAllMocks()
+  auth.isSuperAdmin = true
+  auth.isAdmin = true
+  app.versionLoaded = true
+  app.versionLoading = false
+  app.currentVersion = '1.2.3'
+  app.upstreamVersion = 'v1.2.0'
+  app.buildCommit = 'a'.repeat(40)
+  mocks.fetch.mockResolvedValue({ version: '1.2.3' })
+  mocks.copy.mockResolvedValue(true)
+})
+
+async function open(props: { version?: string; compact?: boolean; collapsed?: boolean } = {}) {
+  const wrapper = mount(VersionBadge, { props, global: { stubs: { Icon: true } } })
+  await flushPromises()
+  await wrapper.get('button').trigger('click')
   return wrapper
 }
 
-describe('VersionBadge', () => {
-  it('does not check protected update endpoints for a limited administrator', async () => {
-    authState.isSuperAdmin = false
-    appStoreState.fetchVersion.mockClear()
-    const wrapper = mount(VersionBadge, { global: { stubs } })
-    await nextTick()
-    expect(appStoreState.fetchVersion).not.toHaveBeenCalled()
+describe('read-only version information', () => {
+  it.each([false, true])('shows only the supplied public version to a non-super-admin (admin=%s)', async (isAdmin) => {
+    auth.isSuperAdmin = false
+    auth.isAdmin = isAdmin
+    const wrapper = mount(VersionBadge, { props: { version: '0.9.0' } })
+    await flushPromises()
+    expect(wrapper.text()).toBe('v0.9.0')
     expect(wrapper.find('button').exists()).toBe(false)
-    wrapper.unmount()
-    authState.isSuperAdmin = true
-  })
-  it('shows only the version when online update check is disabled', async () => {
-    appStoreState.updateDisabled = true
-    appStoreState.hasUpdate = false
-    const wrapper = await mountOpened()
-
-    const badgeButton = wrapper.find('button')
-    expect(badgeButton.text()).toBe('v1.2.3')
-    expect(badgeButton.attributes('title')).toBeUndefined()
-    // no update dot / ping animation
-    expect(wrapper.find('.animate-ping').exists()).toBe(false)
-
-    const text = wrapper.text()
-    // header + version only
-    expect(text).toContain('version.currentVersion')
-    expect(text).toContain('v1.2.3')
-
-    for (const hidden of [
-      'version.refresh',
-      'version.checkDisabled',
-      'version.upToDate',
-      'version.latestVersion',
-      'version.updateAvailable',
-      'version.updateNow',
-      'version.viewRelease',
-      'version.viewChangelog',
-      'version.rollback'
-    ]) {
-      expect(text, `${hidden} should be hidden`).not.toContain(hidden)
-    }
-    expect(wrapper.get('[data-testid="build-commit"]').text()).toBe('version.buildCommit: [2776c84a5]')
-    expect(wrapper.get('[data-testid="build-commit"]').attributes('title')).toBe(appStoreState.buildCommit)
-    expect(text).not.toContain('9.9.9')
-    // only the badge button itself remains clickable in the popover
-    expect(wrapper.findAll('button')).toHaveLength(1)
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain(app.buildCommit)
   })
 
-  it('does not flag an update while the check is disabled even if the store says so', async () => {
-    appStoreState.updateDisabled = true
-    appStoreState.hasUpdate = true
-    const wrapper = await mountOpened()
-
-    expect(wrapper.find('.animate-ping').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('version.updateAvailable')
+  it('reads metadata and copies the full commit without deployment actions', async () => {
+    const wrapper = await open()
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    expect(mocks.fetch).toHaveBeenCalledWith(false)
+    expect(wrapper.get('[data-testid="current-version"]').text()).toBe('v1.2.3')
+    expect(wrapper.get('[data-testid="upstream-version"]').text()).toBe('v1.2.0')
+    expect(wrapper.get('[data-testid="build-commit"]').attributes('title')).toBe('a'.repeat(40))
+    expect(wrapper.findAll('button').map(button => button.text())).toEqual(['v1.2.3', 'version.refresh', 'version.copyDetails'])
+    const copy = wrapper.findAll('button').find(button => button.text() === 'version.copyDetails')
+    expect(copy).toBeDefined()
+    await copy?.trigger('click')
+    expect(mocks.copy).toHaveBeenCalledWith('version.currentVersion: v1.2.3\nversion.upstreamVersion: v1.2.0\nversion.buildCommit: ' + 'a'.repeat(40))
+    expect(wrapper.find('a').exists()).toBe(false)
+    expect(wrapper.find('code').exists()).toBe(false)
   })
 
-  it('keeps the update-check UI when online update check is enabled', async () => {
-    appStoreState.updateDisabled = false
-    appStoreState.hasUpdate = false
-    const wrapper = await mountOpened()
-
-    const text = wrapper.text()
-    expect(text).toContain('version.currentVersion')
-    expect(text).toContain('version.upToDate')
-    expect(text).toContain('version.rollback')
-    // refresh button is back
-    expect(wrapper.findAll('button').length).toBeGreaterThan(1)
-    expect(text).toContain('version.buildCommit: [2776c84a5]')
-    expect(text).not.toContain('9.9.9')
+  it.each(['dev', 'source', 'build-abcdef', 'v1.2.3'])('preserves the actual build identifier %s', async (version) => {
+    app.currentVersion = version
+    const wrapper = await open()
+    expect(wrapper.get('[data-testid="current-version"]').text()).toBe(version)
   })
 
-  it.each(['', '   ', 'unknown', 'docker', '123xyz7'])('hides an invalid build commit (%j)', async (commit) => {
-    appStoreState.buildCommit = commit
-    const wrapper = await mountOpened()
+  it('refreshes metadata only on explicit interaction', async () => {
+    const wrapper = await open()
+    const refresh = wrapper.findAll('button').find(button => button.text() === 'version.refresh')
+    await refresh?.trigger('click')
+    await flushPromises()
+    expect(mocks.fetch.mock.calls).toEqual([[false], [true]])
+  })
+
+  it('preserves compact and collapsed presentation with an accessible details button', async () => {
+    const wrapper = await open({ compact: true, collapsed: true })
+    expect(wrapper.get('button').classes()).toContain('p-1')
+    expect(wrapper.get('button').attributes('aria-label')).toBe('version.details')
+    expect(wrapper.get('button span').classes()).toContain('sr-only')
+    expect(wrapper.get('button').attributes('aria-expanded')).toBe('true')
+  })
+
+  it.each(['', 'unknown', '  UNKNOWN  '])('does not fabricate a missing version (%j)', async (value) => {
+    app.currentVersion = value
+    app.upstreamVersion = ''
+    app.buildCommit = ''
+    const wrapper = await open()
+    expect(wrapper.get('[data-testid="current-version"]').text()).toBe('—')
+    const copy = wrapper.findAll('button').find(button => button.text() === 'version.copyDetails')
+    expect(copy?.attributes('disabled')).toBeDefined()
+  })
+
+  it.each(['', 'unknown', 'docker', '123xyz7'])('omits an invalid commit (%j)', async (commit) => {
+    app.buildCommit = commit
+    const wrapper = await open()
     expect(wrapper.find('[data-testid="build-commit"]').exists()).toBe(false)
-    appStoreState.buildCommit = '2776c84a5ebcc94d2fba1f551c200ab1d9ffe149'
   })
 
-  it('accepts a legacy short build commit', async () => {
-    appStoreState.buildCommit = ' ABCDEF0 '
-    const wrapper = await mountOpened()
-    expect(wrapper.get('[data-testid="build-commit"]').text()).toBe('version.buildCommit: [abcdef0]')
-    appStoreState.buildCommit = '2776c84a5ebcc94d2fba1f551c200ab1d9ffe149'
+  it('shows a read failure without claiming the running version is current', async () => {
+    mocks.fetch.mockRejectedValue(new Error('unavailable'))
+    const wrapper = await open()
+    expect(wrapper.get('[role="status"]').text()).toBe('version.unavailable')
+  })
+
+  it('closes privileged details immediately when the role is revoked', async () => {
+    const wrapper = await open({ version: '0.9.0' })
+    auth.isSuperAdmin = false
+    await flushPromises()
+    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.text()).toBe('v0.9.0')
+    expect(mocks.copy).not.toHaveBeenCalled()
   })
 })

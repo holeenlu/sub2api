@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAppStore } from '@/stores/app'
 import { getPublicSettings } from '@/api/auth'
+import { getVersion, type VersionInfo } from '@/api/admin/system'
+import { i18n, loadLocaleMessages } from '@/i18n'
 import type { PublicSettings } from '@/types'
 
 function createDeferred<T>() {
@@ -59,14 +61,13 @@ function createPublicSettings(overrides: Partial<PublicSettings> = {}): PublicSe
     model_plaza_require_auth: false,
     plugin_management_enabled: false,
     service_quota_enabled: false,
-    affiliate_enabled: false,
     ...overrides,
   }
 }
 
 // Mock API 模块
 vi.mock('@/api/admin/system', () => ({
-  checkUpdates: vi.fn(),
+  getVersion: vi.fn(),
 }))
 
 vi.mock('@/api/auth', () => ({
@@ -79,8 +80,9 @@ describe('useAppStore', () => {
     vi.useFakeTimers()
     localStorage.clear()
     vi.mocked(getPublicSettings).mockReset()
+    vi.mocked(getVersion).mockReset()
     // 清除 window.__APP_CONFIG__
-    delete (window as any).__APP_CONFIG__
+    delete window.__APP_CONFIG__
   })
 
   afterEach(() => {
@@ -339,6 +341,138 @@ describe('useAppStore', () => {
     })
   })
 
+  describe('只读版本信息', () => {
+    it('仅缓存当前构建字段，force 只重新读取版本且清除缺失元数据', async () => {
+      const initial: VersionInfo = { version: '1.0.0', upstream_version: 'v0.2.0', build_commit: 'abc123' }
+      const updated: VersionInfo = { version: '1.0.1' }
+      vi.mocked(getVersion).mockResolvedValueOnce(initial).mockResolvedValueOnce(updated)
+      const store = useAppStore()
+
+      await expect(store.fetchVersion()).resolves.toEqual(initial)
+      await expect(store.fetchVersion()).resolves.toEqual(initial)
+      expect(getVersion).toHaveBeenCalledTimes(1)
+      expect(store.currentVersion).toBe('1.0.0')
+      expect(store.upstreamVersion).toBe('v0.2.0')
+      expect(store.buildCommit).toBe('abc123')
+      expect(store.versionLoaded).toBe(true)
+      expect(store.versionLoading).toBe(false)
+      for (const removed of [
+        'latestVersion', 'hasUpdate', 'buildType', 'updateDisabled', 'updateMethod',
+        'releaseChannel', 'updateWarning', 'containerUpdate', 'releaseInfo'
+      ]) {
+        expect(store).not.toHaveProperty(removed)
+      }
+
+      await expect(store.fetchVersion(true)).resolves.toEqual(updated)
+      expect(getVersion).toHaveBeenCalledTimes(2)
+      expect(getVersion).toHaveBeenLastCalledWith()
+      expect(store.currentVersion).toBe('1.0.1')
+      expect(store.upstreamVersion).toBe('')
+      expect(store.buildCommit).toBe('')
+      await expect(store.fetchVersion()).resolves.toEqual({
+        version: '1.0.1', upstream_version: undefined, build_commit: undefined
+      })
+      expect(getVersion).toHaveBeenCalledTimes(2)
+    })
+
+    it('有缓存时普通调用与 force 仍等待同一个活动刷新', async () => {
+      const initial: VersionInfo = { version: '1.0.0' }
+      const updated: VersionInfo = { version: '1.0.1', build_commit: 'new123' }
+      const pending = createDeferred<VersionInfo>()
+      vi.mocked(getVersion).mockResolvedValueOnce(initial).mockReturnValueOnce(pending.promise)
+      const store = useAppStore()
+      await store.fetchVersion()
+
+      const forced = store.fetchVersion(true)
+      const ordinary = store.fetchVersion()
+      const anotherForced = store.fetchVersion(true)
+      expect(getVersion).toHaveBeenCalledTimes(2)
+      expect(store.versionLoading).toBe(true)
+      expect(store.currentVersion).toBe('1.0.0')
+
+      pending.resolve(updated)
+      await expect(Promise.all([forced, ordinary, anotherForced])).resolves.toEqual([
+        updated, updated, updated
+      ])
+      expect(store.currentVersion).toBe('1.0.1')
+      expect(store.versionLoading).toBe(false)
+    })
+
+    it.each(['throw', 'reject'] as const)('%s 失败保留已读版本并允许重试', async (failureMode) => {
+      const initial: VersionInfo = { version: '1.0.0', build_commit: 'abc123' }
+      const failure = new Error('Version unavailable')
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      try {
+        vi.mocked(getVersion).mockResolvedValueOnce(initial)
+        const store = useAppStore()
+        await store.fetchVersion()
+        if (failureMode === 'throw') {
+          vi.mocked(getVersion).mockImplementationOnce(() => { throw failure })
+        } else {
+          vi.mocked(getVersion).mockRejectedValueOnce(failure)
+        }
+
+        await expect(store.fetchVersion(true)).resolves.toBeNull()
+        expect(store.versionLoaded).toBe(true)
+        expect(store.versionLoading).toBe(false)
+        expect(store.currentVersion).toBe('1.0.0')
+        expect(store.buildCommit).toBe('abc123')
+        await expect(store.fetchVersion()).resolves.toEqual(initial)
+        expect(getVersion).toHaveBeenCalledTimes(2)
+        expect(consoleError).toHaveBeenCalledTimes(1)
+
+        vi.mocked(getVersion).mockResolvedValueOnce({ version: '1.0.1' })
+        await expect(store.fetchVersion(true)).resolves.toEqual({ version: '1.0.1' })
+        expect(getVersion).toHaveBeenCalledTimes(3)
+      } finally {
+        consoleError.mockRestore()
+      }
+    })
+
+    it.each(['resolve', 'reject'] as const)('清除后旧请求 %s 不得回写或释放新请求', async (settlement) => {
+      const initial: VersionInfo = { version: '1.0.0', upstream_version: 'v0.2.0', build_commit: 'abc123' }
+      const old = createDeferred<VersionInfo>()
+      const current = createDeferred<VersionInfo>()
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      try {
+        vi.mocked(getVersion)
+          .mockResolvedValueOnce(initial)
+          .mockReturnValueOnce(old.promise)
+          .mockReturnValueOnce(current.promise)
+        const store = useAppStore()
+        await store.fetchVersion()
+        const invalidated = store.fetchVersion(true)
+        store.clearVersionCache()
+        expect(store.versionLoaded).toBe(false)
+        expect(store.versionLoading).toBe(false)
+        expect(store.currentVersion).toBe('')
+        expect(store.upstreamVersion).toBe('')
+        expect(store.buildCommit).toBe('')
+        const active = store.fetchVersion()
+
+        if (settlement === 'resolve') old.resolve({ version: 'stale' })
+        else old.reject(new Error('Invalidated request failed'))
+        await expect(invalidated).resolves.toBeNull()
+        expect(store.versionLoaded).toBe(false)
+        expect(store.currentVersion).toBe('')
+        expect(store.versionLoading).toBe(true)
+        expect(consoleError).not.toHaveBeenCalled()
+        const joined = store.fetchVersion(true)
+        expect(getVersion).toHaveBeenCalledTimes(3)
+
+        const latest: VersionInfo = { version: '1.0.2', build_commit: 'new456' }
+        current.resolve(latest)
+        await expect(Promise.all([active, joined])).resolves.toEqual([latest, latest])
+        expect(store.versionLoaded).toBe(true)
+        expect(store.versionLoading).toBe(false)
+        expect(store.currentVersion).toBe('1.0.2')
+        expect(store.buildCommit).toBe('new456')
+      } finally {
+        consoleError.mockRestore()
+      }
+    })
+  })
+
   // --- 公开设置 ---
 
   describe('公开设置加载', () => {
@@ -412,15 +546,14 @@ describe('useAppStore', () => {
     })
 
     it('从 window.__APP_CONFIG__ 初始化', () => {
-      const windowAny = window as any
-      windowAny.__APP_CONFIG__ = {
+      window.__APP_CONFIG__ = createPublicSettings({
         site_name: 'TestSite',
         site_logo: '/logo.png',
         version: '1.0.0',
         contact_info: 'test@test.com',
         api_base_url: 'https://api.test.com',
         doc_url: 'https://docs.test.com',
-      }
+      })
 
       const store = useAppStore()
       const result = store.initFromInjectedConfig()
@@ -441,8 +574,7 @@ describe('useAppStore', () => {
     })
 
     it('clearPublicSettingsCache 清除缓存', () => {
-      const windowAny = window as any
-      windowAny.__APP_CONFIG__ = { site_name: 'Test' }
+      window.__APP_CONFIG__ = createPublicSettings({ site_name: 'Test' })
       const store = useAppStore()
       store.initFromInjectedConfig()
 
@@ -454,39 +586,58 @@ describe('useAppStore', () => {
       expect(store.cachedPublicSettings).toBeNull()
     })
 
+    it('清除使旧请求失效，迟到结果不能覆盖新配置、favicon 或站点文案', async () => {
+      await loadLocaleMessages('en')
+      document.head.innerHTML = '<link rel="icon" href="/logo.svg">'
+      window.__APP_CONFIG__ = createPublicSettings({ site_name: 'Initial site' })
+      const store = useAppStore()
+      store.initFromInjectedConfig()
+      const stale = createDeferred<PublicSettings>()
+      const fresh = createDeferred<PublicSettings>()
+      vi.mocked(getPublicSettings)
+        .mockReturnValueOnce(stale.promise)
+        .mockReturnValueOnce(fresh.promise)
+      const invalidated = store.fetchPublicSettings(true)
+
+      store.clearPublicSettingsCache()
+      expect(store.cachedPublicSettings).toBeNull()
+      expect(store.publicSettingsLoaded).toBe(false)
+      expect(window.__APP_CONFIG__).toBeUndefined()
+      expect(store.siteName).toBe('Initial site')
+      const active = store.fetchPublicSettings()
+      expect(getPublicSettings).toHaveBeenCalledTimes(2)
+
+      const latest = createPublicSettings({
+        site_name: 'Current site',
+        site_logo: '/current-logo.svg',
+        table_default_page_size: 100,
+      })
+      fresh.resolve(latest)
+      await expect(active).resolves.toEqual(latest)
+      stale.resolve(createPublicSettings({ site_name: 'Stale site', site_logo: '/stale.svg' }))
+      await expect(invalidated).resolves.toBeNull()
+
+      expect(store.cachedPublicSettings).toEqual(latest)
+      expect(window.__APP_CONFIG__).toEqual(latest)
+      expect(store.publicSettingsLoaded).toBe(true)
+      expect(store.publicSettingsLoading).toBe(false)
+      expect(store.siteName).toBe('Current site')
+      expect(document.querySelector('link[rel="icon"]')?.getAttribute('href')).toBe('/current-logo.svg')
+      expect(i18n.global.t('common.siteName', {}, { locale: 'en' })).toBe('Current site')
+    })
+
     it('fetchPublicSettings(force) 会同步更新运行时注入配置', async () => {
-      vi.mocked(getPublicSettings).mockResolvedValue({
-        registration_enabled: false,
-        email_verify_enabled: false,
-        registration_email_suffix_whitelist: [],
-        password_reset_enabled: false,
-        invitation_code_enabled: false,
-        turnstile_enabled: false,
-        turnstile_site_key: '',
+      vi.mocked(getPublicSettings).mockResolvedValue(createPublicSettings({
         site_name: 'Updated Site',
-        site_logo: '',
-        site_subtitle: '',
-        api_base_url: '',
-        contact_info: '',
-        doc_url: '',
-        home_content: '',
-        compact_home_enabled: false,
-        purchase_subscription_enabled: false,
-        purchase_subscription_url: '',
         table_default_page_size: 1000,
         table_page_size_options: [20, 100, 1000],
-        custom_menu_items: [],
-        custom_endpoints: [],
-        linuxdo_oauth_enabled: false,
-        backend_mode_enabled: false,
-        version: '1.0.0'
-      })
+      }))
 
       const store = useAppStore()
       await store.fetchPublicSettings(true)
 
-      expect((window as any).__APP_CONFIG__.table_default_page_size).toBe(1000)
-      expect((window as any).__APP_CONFIG__.table_page_size_options).toEqual([20, 100, 1000])
+      expect(window.__APP_CONFIG__?.table_default_page_size).toBe(1000)
+      expect(window.__APP_CONFIG__?.table_page_size_options).toEqual([20, 100, 1000])
       expect(localStorage.getItem('table-page-size')).toBeNull()
       expect(localStorage.getItem('table-page-size-source')).toBeNull()
     })

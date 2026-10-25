@@ -5,7 +5,7 @@
 
 import { defineStore } from 'pinia'
 import { CanceledError, isCancel } from 'axios'
-import { authSessionStamp } from '@/api/tokenRefresh'
+import { authSessionStamp, AUTH_TOKEN_KEY, AUTH_USER_KEY, REFRESH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY } from '@/shared/session'
 import { ref, computed, readonly, watch } from 'vue'
 import { useSubscriptionStore } from './subscriptions'
 import { authAPI, isTotp2FARequired, passkeyAPI, type LoginResponse } from '@/api'
@@ -17,10 +17,6 @@ import type {
   ActionCaptchaRequestProof
 } from '@/types'
 
-const AUTH_TOKEN_KEY = 'auth_token'
-const AUTH_USER_KEY = 'auth_user'
-const REFRESH_TOKEN_KEY = 'refresh_token'
-const TOKEN_EXPIRES_AT_KEY = 'token_expires_at' // 存储过期时间戳而非有效期
 const PENDING_AUTH_SESSION_KEY = 'pending_auth_session'
 const AUTO_REFRESH_INTERVAL = 60 * 1000 // 60 seconds for user data refresh
 const TOKEN_REFRESH_BUFFER = 120 * 1000 // 120 seconds before expiry to refresh token

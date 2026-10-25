@@ -7,14 +7,11 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Toast, ToastType, PublicSettings } from '@/types'
 import { i18n, setSiteName } from '@/i18n'
-import {
-  checkUpdates as checkUpdatesAPI,
-  type VersionInfo,
-  type ReleaseInfo
-} from '@/api/admin/system'
+import { getVersion as getVersionAPI, type VersionInfo } from '@/api/admin/system'
 import { getPublicSettings as fetchPublicSettingsAPI } from '@/api/auth'
 import { updateFavicon } from '@/utils/branding'
-import { BRAND_NAME } from '@/config/brand'
+import { BRAND_NAME } from '@/shared/config/project'
+import { createPublicSettings } from '@/shared/config/publicSettings'
 
 export const useAppStore = defineStore('app', () => {
   // ==================== State ====================
@@ -25,35 +22,29 @@ export const useAppStore = defineStore('app', () => {
   const loading = ref<boolean>(false)
   const toasts = ref<Toast[]>([])
 
-  // Public settings cache state
-  const publicSettingsLoaded = ref<boolean>(false)
-  const publicSettingsLoading = ref<boolean>(false)
-  const siteName = ref<string>(BRAND_NAME)
-  const siteLogo = ref<string>('')
-  const siteVersion = ref<string>('')
-  const contactInfo = ref<string>('')
-  const apiBaseUrl = ref<string>('')
-  const docUrl = ref<string>('')
-  const cachedPublicSettings = ref<PublicSettings | null>(null)
-  let publicSettingsRequest: Promise<PublicSettings | null> | null = null
+  const publicSettings = createPublicSettings<PublicSettings>({
+    defaultSiteName: BRAND_NAME,
+    load: fetchPublicSettingsAPI,
+    readInjected: () => (typeof window === 'undefined' ? undefined : window.__APP_CONFIG__),
+    onApplied: (settings, brand) => {
+      if (typeof window !== 'undefined') window.__APP_CONFIG__ = { ...settings }
+      setSiteName(brand.siteName)
+      updateFavicon(brand.siteLogo)
+    },
+    onCleared: () => {
+      if (typeof window !== 'undefined') delete window.__APP_CONFIG__
+    },
+    onError: (error) => console.error('Failed to fetch public settings:', error)
+  })
 
-  // Version cache state
+  // Read-only information about the currently running build.
   const versionLoaded = ref<boolean>(false)
   const versionLoading = ref<boolean>(false)
   const currentVersion = ref<string>('')
-  const latestVersion = ref<string>('')
-  const hasUpdate = ref<boolean>(false)
-  const buildType = ref<string>('source')
-  // 本次构建所基于的上游 Sub2API 版本，例如 "v0.2.1"；上游自身的构建为空
   const upstreamVersion = ref<string>('')
   const buildCommit = ref<string>('')
-  // 後端 update.check_enabled=false 時為 true：沒有連線查過版本，徽章不該顯示「已是最新」
-  const updateDisabled = ref<boolean>(false)
-  const updateMethod = ref<'binary' | 'compose' | 'manual'>('binary')
-  const releaseChannel = ref('')
-  const updateWarning = ref('')
-  const containerUpdate = ref<import('@/api/admin/system').ContainerUpdateStatus | undefined>()
-  const releaseInfo = ref<ReleaseInfo | null>(null)
+  let versionRequest: Promise<VersionInfo | null> | null = null
+  let versionGeneration = 0
 
   // Auto-incrementing ID for toasts
   let toastIdCounter = 0
@@ -61,7 +52,6 @@ export const useAppStore = defineStore('app', () => {
   // ==================== Computed ====================
 
   const hasActiveToasts = computed(() => toasts.value.length > 0)
-  const backendModeEnabled = computed(() => cachedPublicSettings.value?.backend_mode_enabled ?? false)
 
   const loadingCount = ref<number>(0)
 
@@ -247,216 +237,61 @@ export const useAppStore = defineStore('app', () => {
 
   // ==================== Version Management ====================
 
-  /**
-   * Fetch version info (uses cache unless force=true)
-   * @param force - Force refresh from API
-   */
-  async function fetchVersion(force = false): Promise<VersionInfo | null> {
-    // Return cached data if available and not forcing refresh
+  /** Refresh current build information; force only bypasses a settled local cache. */
+  function fetchVersion(force = false): Promise<VersionInfo | null> {
+    // Every caller joins the current request, including force and cache readers.
+    if (versionRequest) return versionRequest
     if (versionLoaded.value && !force) {
-      return {
-        current_version: currentVersion.value,
-        latest_version: latestVersion.value,
-        has_update: hasUpdate.value,
-        build_type: buildType.value,
-        upstream_version: upstreamVersion.value || undefined,
-        build_commit: buildCommit.value || undefined,
-        release_info: releaseInfo.value || undefined,
-        cached: true,
-        disabled: updateDisabled.value,
-        update_method: updateMethod.value,
-        release_channel: releaseChannel.value,
-        warning: updateWarning.value || undefined,
-        container_update: containerUpdate.value
-      }
-    }
-
-    // Prevent duplicate requests
-    if (versionLoading.value) {
-      return null
-    }
-
-    versionLoading.value = true
-    try {
-      const data = await checkUpdatesAPI(force)
-      currentVersion.value = data.current_version
-      latestVersion.value = data.latest_version
-      hasUpdate.value = data.has_update
-      buildType.value = data.build_type || 'source'
-      upstreamVersion.value = data.upstream_version || ''
-      buildCommit.value = data.build_commit || ''
-      updateDisabled.value = data.disabled === true
-      updateMethod.value = data.update_method || 'binary'
-      releaseChannel.value = data.release_channel || ''
-      updateWarning.value = data.warning || ''
-      containerUpdate.value = data.container_update
-      releaseInfo.value = data.release_info || null
-      versionLoaded.value = true
-      return data
-    } catch (error) {
-      console.error('Failed to fetch version:', error)
-      return null
-    } finally {
-      versionLoading.value = false
-    }
-  }
-
-  /**
-   * Clear version cache (e.g., after update)
-   */
-  function clearVersionCache(): void {
-    versionLoaded.value = false
-    hasUpdate.value = false
-  }
-
-  // ==================== Public Settings Management ====================
-
-  /**
-   * Apply settings to store state (internal helper to avoid code duplication)
-   */
-  function applySettings(config: PublicSettings): void {
-    if (typeof window !== 'undefined') {
-      window.__APP_CONFIG__ = { ...config }
-    }
-    cachedPublicSettings.value = config
-    siteName.value = config.site_name || BRAND_NAME
-    // 讓文案裡的 @:common.siteName 解析成後台設定的站點名稱。
-    // 用 linked message 而不是在每個 t() 呼叫端傳參數，新增文案時才不會漏掉。
-    setSiteName(siteName.value)
-    siteLogo.value = config.site_logo || ''
-    updateFavicon(siteLogo.value)
-    siteVersion.value = config.version || ''
-    contactInfo.value = config.contact_info || ''
-    apiBaseUrl.value = config.api_base_url || ''
-    docUrl.value = config.doc_url || ''
-    publicSettingsLoaded.value = true
-  }
-
-  /**
-   * Fetch public settings (uses cache unless force=true)
-   * @param force - Force refresh from API
-   */
-  function fetchPublicSettings(force = false): Promise<PublicSettings | null> {
-    // An active request always wins over cache/force semantics so every caller observes
-    // the same refresh result and no older request can overwrite a newer one.
-    if (publicSettingsRequest) {
-      return publicSettingsRequest
-    }
-
-    // Check for injected config from server (eliminates flash)
-    if (!publicSettingsLoaded.value && !force && window.__APP_CONFIG__) {
-      applySettings(window.__APP_CONFIG__)
-      return Promise.resolve(window.__APP_CONFIG__)
-    }
-
-    // Return cached data if available and not forcing refresh
-    if (publicSettingsLoaded.value && !force) {
-      if (cachedPublicSettings.value) {
-        return Promise.resolve({ ...cachedPublicSettings.value })
-      }
       return Promise.resolve({
-        registration_enabled: false,
-        email_verify_enabled: false,
-        force_email_on_third_party_signup: false,
-        registration_email_suffix_whitelist: [],
-        password_reset_enabled: false,
-        turnstile_enabled: false,
-        turnstile_site_key: '',
-        aliyun_captcha_enabled: false,
-        aliyun_captcha_scene_id: '',
-        aliyun_captcha_prefix: '',
-        aliyun_captcha_region: 'cn',
-        site_name: siteName.value,
-        site_logo: siteLogo.value,
-        site_subtitle: '',
-        api_base_url: apiBaseUrl.value,
-        contact_info: contactInfo.value,
-        doc_url: docUrl.value,
-        home_content: '',
-        compact_home_enabled: false,
-        payment_enabled: false,
-        table_default_page_size: 20,
-        table_page_size_options: [10, 20, 50, 100],
-        custom_menu_items: [],
-        custom_endpoints: [],
-        linuxdo_oauth_enabled: false,
-        wechat_oauth_enabled: false,
-        wechat_oauth_open_enabled: false,
-        wechat_oauth_mp_enabled: false,
-        wechat_oauth_mobile_enabled: false,
-        oidc_oauth_enabled: false,
-        oidc_oauth_provider_name: 'OIDC',
-        github_oauth_enabled: false,
-        google_oauth_enabled: false,
-        backend_mode_enabled: false,
-        passkey_enabled: false,
-        version: siteVersion.value,
-        balance_low_notify_enabled: false,
-        account_quota_notify_enabled: false,
-        balance_low_notify_threshold: 0,
-        channel_monitor_enabled: true,
-        channel_monitor_default_interval_seconds: 60,
-        available_channels_enabled: false,
-        subscription_enabled: true,
-        payment_balance_disabled: false,
-        model_plaza_enabled: false,
-        model_plaza_require_auth: false,
-        plugin_management_enabled: false,
-        risk_control_enabled: false,
-        service_quota_enabled: false,
-        allow_user_view_error_requests: false,
+        version: currentVersion.value,
+        upstream_version: upstreamVersion.value || undefined,
+        build_commit: buildCommit.value || undefined
       })
     }
 
-    publicSettingsLoading.value = true
-    let apiRequest: Promise<PublicSettings>
+    const generation = versionGeneration
+    versionLoading.value = true
+    let loading: Promise<VersionInfo>
     try {
-      apiRequest = fetchPublicSettingsAPI()
+      loading = getVersionAPI()
     } catch (error) {
-      console.error('Failed to fetch public settings:', error)
-      publicSettingsLoading.value = false
+      versionLoading.value = false
+      console.error('Failed to fetch version:', error)
       return Promise.resolve(null)
     }
 
-    const request = apiRequest
+    const request = loading
       .then((data) => {
-        applySettings(data)
+        if (generation !== versionGeneration) return null
+        currentVersion.value = data.version
+        upstreamVersion.value = data.upstream_version ?? ''
+        buildCommit.value = data.build_commit ?? ''
+        versionLoaded.value = true
         return data
       })
-      .catch((error) => {
-        console.error('Failed to fetch public settings:', error)
+      .catch((error: unknown) => {
+        if (generation === versionGeneration) console.error('Failed to fetch version:', error)
         return null
       })
       .finally(() => {
-        if (publicSettingsRequest === request) {
-          publicSettingsRequest = null
-          publicSettingsLoading.value = false
+        if (versionRequest === request) {
+          versionRequest = null
+          versionLoading.value = false
         }
       })
-
-    publicSettingsRequest = request
+    versionRequest = request
     return request
   }
 
-  /**
-   * Clear public settings cache
-   */
-  function clearPublicSettingsCache(): void {
-    publicSettingsLoaded.value = false
-    cachedPublicSettings.value = null
-  }
-
-  /**
-   * Initialize settings from injected config (window.__APP_CONFIG__)
-   * This is called synchronously before Vue app mounts to prevent flash
-   * @returns true if config was found and applied, false otherwise
-   */
-  function initFromInjectedConfig(): boolean {
-    if (window.__APP_CONFIG__) {
-      applySettings(window.__APP_CONFIG__)
-      return true
-    }
-    return false
+  /** Invalidate the cached build and prevent earlier requests from restoring it. */
+  function clearVersionCache(): void {
+    versionGeneration += 1
+    versionRequest = null
+    versionLoading.value = false
+    versionLoaded.value = false
+    currentVersion.value = ''
+    upstreamVersion.value = ''
+    buildCommit.value = ''
   }
 
   // ==================== Return Store API ====================
@@ -469,35 +304,17 @@ export const useAppStore = defineStore('app', () => {
     loading,
     toasts,
 
-    // Public settings state
-    publicSettingsLoaded,
-    siteName,
-    siteLogo,
-    siteVersion,
-    contactInfo,
-    apiBaseUrl,
-    docUrl,
-    cachedPublicSettings,
+    ...publicSettings,
 
     // Version state
     versionLoaded,
     versionLoading,
     currentVersion,
-    latestVersion,
-    hasUpdate,
-    buildType,
     upstreamVersion,
     buildCommit,
-    updateDisabled,
-    updateMethod,
-    releaseChannel,
-    updateWarning,
-    containerUpdate,
-    releaseInfo,
 
     // Computed
     hasActiveToasts,
-    backendModeEnabled,
 
     // Actions
     toggleSidebar,
@@ -518,11 +335,6 @@ export const useAppStore = defineStore('app', () => {
 
     // Version actions
     fetchVersion,
-    clearVersionCache,
-
-    // Public settings actions
-    fetchPublicSettings,
-    clearPublicSettingsCache,
-    initFromInjectedConfig
+    clearVersionCache
   }
 })

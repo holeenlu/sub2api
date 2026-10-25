@@ -13,7 +13,7 @@
  *   // template: <TotpStepUpDialog :controller="stepUp" />
  */
 import { ref } from 'vue'
-import { authSessionStamp } from '@/api/tokenRefresh'
+import { authSessionStamp } from '@/shared/session'
 
 /** Error codes the backend uses to signal step-up state. */
 const STEP_UP_REQUIRED = 'STEP_UP_REQUIRED'

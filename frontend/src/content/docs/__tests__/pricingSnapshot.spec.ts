@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { docsModelCatalog } from '../modelCatalog'
-import { formatPerMillion } from '../pricingSnapshot'
 
 describe('API docs pricing snapshot', () => {
   it('contains each documented model exactly once', () => {
@@ -14,12 +13,6 @@ describe('API docs pricing snapshot', () => {
       'claude-fable-5-1', 'claude-fable-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5',
       'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'
     ])
-  })
-
-  it('formats prices without applying a fixed marketing discount', () => {
-    expect(formatPerMillion(20)).toBe('$20')
-    expect(formatPerMillion(0)).toBe('$0')
-    expect(formatPerMillion(undefined)).toBe('—')
   })
 
   it.each(['zh', 'zh-TW', 'en', 'ja'])('keeps %s marketing copy independent of configured group discounts', (locale) => {

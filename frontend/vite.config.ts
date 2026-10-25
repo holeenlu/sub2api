@@ -4,9 +4,9 @@ import checker from 'vite-plugin-checker'
 import { resolve } from 'path'
 
 // Duplicated on purpose: tsconfig.node.json is a `composite` project scoped to
-// vite.config.ts, so importing src/config/brand.ts here would emit brand.js /
+// vite.config.ts, so importing src/shared/config/project.ts here would emit brand.js /
 // brand.d.ts into the source tree. Keep in sync with BRAND_TITLE_SUFFIX_EN in
-// src/config/brand.ts.
+// src/shared/config/project.ts.
 const BRAND_TITLE_SUFFIX_EN = 'AI API Gateway'
 
 function escapeHtml(value: string): string {

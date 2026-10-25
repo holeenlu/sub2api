@@ -12,10 +12,11 @@ import {
   shouldMarkAdminUIRequest,
   shouldMarkUserUIRequest,
 } from './adminUIRequest'
-import { authSessionStamp, refreshAuthTokens } from './tokenRefresh'
-import { getAPIBaseURL } from './url'
+import { authSessionStamp } from '@/shared/session'
+import { refreshAuthTokens } from '@/shared/http/tokenRefresh'
+import { getAPIBaseURL } from '@/shared/http/url'
 import { requestAdminStepUp, StepUpCancelledError } from '@/composables/useStepUp'
-export { buildApiUrl, buildGatewayUrl } from './url'
+export { buildApiUrl, buildGatewayUrl } from '@/shared/http/url'
 
 // ==================== Axios Instance Configuration ====================
 

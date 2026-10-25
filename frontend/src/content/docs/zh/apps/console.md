@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | OpenAI | Codex CLI、Codex WebSocket、Claude Code（启用 Messages 时）、OpenCode | `config.toml`、`auth.json` 或 `experimental_bearer_token`、Anthropic 环境变量、`opencode.json` |
 | Anthropic | Claude Code、Codex（路由）、OpenCode | `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、Codex Responses provider、OpenCode provider |
-| Gemini | Gemini CLI、Codex（路由）、OpenCode | `GOOGLE_GEMINI_BASE_URL`、`GEMINI_KDAN_API_KEY`、`GEMINI_MODEL` |
+| Gemini | Gemini CLI、Codex（路由）、OpenCode | `GOOGLE_GEMINI_BASE_URL`、`GEMINI_API_KEY`、`GEMINI_MODEL` |
 | Antigravity | Claude Code、Gemini CLI、Codex（路由）、OpenCode | 地址自动追加 `/antigravity`，Gemini 使用 `/v1beta` |
 | Grok | Grok CLI、Claude Code、Codex、OpenCode | `GROK_MODELS_BASE_URL`、`XAI_API_KEY` 或对应客户端配置 |
 | DeepSeek、MiniMax、Composite、Kimi、Zhipu、OpenCode | Claude Code、Codex（路由）、OpenCode | 以弹窗生成的分组地址为准；目录支持范围见下节 |

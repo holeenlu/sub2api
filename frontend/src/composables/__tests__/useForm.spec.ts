@@ -5,7 +5,7 @@ import { useAppStore } from '@/stores/app'
 
 // Mock API 依赖（app store 内部引用了这些）
 vi.mock('@/api/admin/system', () => ({
-  checkUpdates: vi.fn(),
+  getVersion: vi.fn(),
 }))
 vi.mock('@/api/auth', () => ({
   getPublicSettings: vi.fn(),

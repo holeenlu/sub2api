@@ -3,9 +3,9 @@ import { computed, ref } from 'vue'
 import adminComplianceAPI, { type AdminComplianceStatus } from '@/api/admin/compliance'
 import { getLocale } from '@/i18n'
 import { isChineseLocale } from '@/i18n/localeUtils'
-import { BRAND_COMPLIANCE_DOCUMENT_URL, BRAND_NAME } from '@/config/brand'
+import { BRAND_NAME } from '@/shared/config/project'
 
-// 与后端 AdminComplianceAckPhraseZH / EN 同构：站点名来自品牌常量（= service.DefaultSiteName）。
+// Server acknowledgement phrases remain authoritative; these are neutral unavailable-status defaults.
 const FALLBACK_ZH_PHRASE = `我已阅读、理解并同意 ${BRAND_NAME} 部署与运营合规承诺`
 const FALLBACK_EN_PHRASE = `I have read, understood, and agree to the ${BRAND_NAME} Deployment and Operation Compliance Commitment`
 const JA_DISPLAY_PHRASE = `${BRAND_NAME} のデプロイおよび運用コンプライアンス誓約を読み、理解し、同意しました`
@@ -92,8 +92,8 @@ export const useAdminComplianceStore = defineStore('adminCompliance', () => {
       version: partialStatus?.version || status.value?.version || 'v2026.06.10',
       document_path_zh: partialStatus?.document_path_zh || status.value?.document_path_zh || 'docs/legal/admin-compliance.zh.md',
       document_path_en: partialStatus?.document_path_en || status.value?.document_path_en || 'docs/legal/admin-compliance.en.md',
-      document_url_zh: partialStatus?.document_url_zh || status.value?.document_url_zh || BRAND_COMPLIANCE_DOCUMENT_URL.zh,
-      document_url_en: partialStatus?.document_url_en || status.value?.document_url_en || BRAND_COMPLIANCE_DOCUMENT_URL.en,
+      document_url_zh: partialStatus?.document_url_zh ?? status.value?.document_url_zh ?? '',
+      document_url_en: partialStatus?.document_url_en ?? status.value?.document_url_en ?? '',
       ack_phrase_zh: partialStatus?.ack_phrase_zh || status.value?.ack_phrase_zh || FALLBACK_ZH_PHRASE,
       ack_phrase_en: partialStatus?.ack_phrase_en || status.value?.ack_phrase_en || FALLBACK_EN_PHRASE,
       acknowledgement: status.value?.acknowledgement

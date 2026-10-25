@@ -4,8 +4,8 @@
  */
 
 import { apiClient } from './client'
-import { refreshAuthTokens, type RefreshTokenResponse } from './tokenRefresh'
-export type { RefreshTokenResponse } from './tokenRefresh'
+import { refreshAuthTokens, type RefreshTokenResponse } from '@/shared/http/tokenRefresh'
+export type { RefreshTokenResponse } from '@/shared/http/tokenRefresh'
 import type {
   LoginRequest,
   RegisterRequest,

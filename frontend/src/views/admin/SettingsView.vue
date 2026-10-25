@@ -7152,6 +7152,7 @@
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 {{ t("admin.settings.payment.description") }}
                 <a
+                  v-if="paymentGuideHref"
                   :href="paymentGuideHref"
                   target="_blank"
                   rel="noopener noreferrer"
@@ -7617,7 +7618,8 @@
                   <p class="mt-2 text-xs text-gray-400 dark:text-gray-500">
                     {{ t("admin.settings.payment.enabledPaymentTypesHint") }}
                     <a
-                      :href="paymentMethodsHref"
+                      v-if="paymentGuideHref"
+                      :href="paymentGuideHref"
                       target="_blank"
                       rel="noopener noreferrer"
                       class="ml-1 text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300"
@@ -8201,7 +8203,7 @@ import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
 import AdminRolePermissions from "@/components/admin/AdminRolePermissions.vue";
 import DelegatedSettings from "@/components/admin/DelegatedSettings.vue";
-import { isChineseLocale } from "@/i18n/localeUtils";
+import { sanitizeUrl } from "@/utils/url";
 import { adminAPI } from "@/api";
 import {
   appendAuthSourceDefaultsToUpdateRequest,
@@ -8238,10 +8240,8 @@ import type {
 import type { ProviderInstance } from "@/types/payment";
 import {
   BRAND_NAME,
-  BRAND_PAYMENT_GUIDE_URL,
-  BRAND_PAYMENT_METHODS_URL,
   BRAND_TAGLINE_EN,
-} from "@/config/brand";
+} from "@/shared/config/project";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import Icon from "@/components/icons/Icon.vue";
 import Select, { type SelectOption } from "@/components/common/Select.vue";
@@ -8297,28 +8297,15 @@ import {
   type FingerprintSignalRow,
 } from "./codexFingerprintSignals";
 
-const { t, locale } = useI18n();
+const { t } = useI18n();
 const appStore = useAppStore();
 // 关闭 step-up 开关是敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 码重试
 const settingsStepUp = useStepUp();
 const adminSettingsStore = useAdminSettingsStore();
 const bpsGroups = ref<AdminGroup[]>([]);
-const isZhLocale = computed(() => isChineseLocale(locale.value));
-
+// Deployment-configured documentation is the only external guide source.
 const paymentGuideHref = computed(() =>
-  isZhLocale.value
-    ? BRAND_PAYMENT_GUIDE_URL.zh
-    : locale.value === 'ja'
-      ? BRAND_PAYMENT_GUIDE_URL.ja
-    : BRAND_PAYMENT_GUIDE_URL.en,
-);
-
-const paymentMethodsHref = computed(() =>
-  isZhLocale.value
-    ? BRAND_PAYMENT_METHODS_URL.zh
-    : locale.value === 'ja'
-      ? BRAND_PAYMENT_METHODS_URL.ja
-    : BRAND_PAYMENT_METHODS_URL.en,
+  sanitizeUrl(appStore.cachedPublicSettings?.doc_url || ""),
 );
 
 const roleAuth = useAuthStore();

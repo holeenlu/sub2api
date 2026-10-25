@@ -1,9 +1,11 @@
+import { BRAND_NAME } from '@/shared/config/project'
+
 export default {
   common: {
     languageLoadFailed: '语言加载失败，请重试',
     // 站点名称。实际值在设置加载后由 stores/app.ts 以 mergeLocaleMessage 覆盖，
     // 文案中用 @:common.siteName 链接即可自动跟随后台设置变化。
-    siteName: 'KDAN',
+    siteName: BRAND_NAME,
     loading: '加载中...',
     submitting: '提交中...',
     justNow: '刚刚',
@@ -191,7 +193,6 @@ export default {
     collapse: '收起',
     expand: '展开',
     logout: '退出登录',
-    github: 'GitHub',
     mySubscriptions: '我的订阅',
     buySubscription: '充值/订阅',
     recharge: '充值',

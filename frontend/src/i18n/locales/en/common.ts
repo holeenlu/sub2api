@@ -1,9 +1,11 @@
+import { BRAND_NAME } from '@/shared/config/project'
+
 export default {
   common: {
     languageLoadFailed: 'Could not load the language. Please try again.',
     // Site name. Overwritten via mergeLocaleMessage in stores/app.ts once the
     // public settings load; reference it as @:common.siteName in copy.
-    siteName: 'KDAN',
+    siteName: BRAND_NAME,
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',
@@ -191,7 +193,6 @@ export default {
     collapse: 'Collapse',
     expand: 'Expand',
     logout: 'Logout',
-    github: 'GitHub',
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Recharge / Subscription',
     recharge: 'Recharge',

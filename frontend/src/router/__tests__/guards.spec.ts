@@ -39,7 +39,7 @@ vi.mock('@/api', () => ({
 }))
 
 vi.mock('@/api/admin/system', () => ({
-  checkUpdates: vi.fn(),
+  getVersion: vi.fn(),
 }))
 
 vi.mock('@/api/auth', () => ({

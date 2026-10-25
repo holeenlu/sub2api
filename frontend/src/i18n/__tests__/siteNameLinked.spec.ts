@@ -4,7 +4,7 @@ import zh from '../locales/zh'
 import zhTW from '../locales/zh-TW'
 import en from '../locales/en'
 import ja from '../locales/ja'
-import { BRAND_NAME } from '@/config/brand'
+import { BRAND_NAME } from '@/shared/config/project'
 
 /**
  * 站點名稱由後台設定，文案透過 @:common.siteName 連結取用。

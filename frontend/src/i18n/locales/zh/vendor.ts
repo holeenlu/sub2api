@@ -29,13 +29,11 @@ export default {
   nonFable: '非 Fable',
   oauthRestartRequired: '本次授权会话已使用，请重新生成授权链接并登录。',
   identityKeyMismatch: '供应商身份配置不一致，请联系管理员修复后重试。',
-  portalUpdate: {
-    "portalVersion": "门户运行版本",
-    "backendVersion": "后端运行版本",
-    "matched": "门户与后端版本一致。",
-    "versionUnavailable": "无法确认门户或后端的运行版本，请稍后刷新检查。",
-    "setupRequired": "无法连接门户更新服务。首次使用需要在门户服务器安装新版更新器并接入门户容器；同时确认后端支持门户更新授权。"
-},
+  portalVersion: {
+    portalVersion: "门户运行版本",
+    backendVersion: "后端运行版本",
+    backendCommit: "后端构建提交",
+  },
   authorization: {
     cloud: "Cloud 授权",
     noModelsHelp: "保存空列表将停止所有模型的 BPS 供给，已有授权和历史仍然保留。",

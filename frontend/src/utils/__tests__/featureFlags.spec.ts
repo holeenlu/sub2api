@@ -5,7 +5,7 @@ import { FeatureFlags, isFeatureFlagEnabled, makeSidebarFlag, resolveFeatureFlag
 import type { PublicSettings } from '@/types'
 
 vi.mock('@/api/admin/system', () => ({
-  checkUpdates: vi.fn(),
+  getVersion: vi.fn(),
 }))
 
 vi.mock('@/api/auth', () => ({

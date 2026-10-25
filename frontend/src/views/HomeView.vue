@@ -449,7 +449,7 @@ import GatewayShowcase from '@/components/home/GatewayShowcase.vue'
 import AgentToolCards from '@/components/home/AgentToolCards.vue'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
-import { BRAND_NAME } from '@/config/brand'
+import { BRAND_NAME } from '@/shared/config/project'
 
 const { t } = useI18n()
 

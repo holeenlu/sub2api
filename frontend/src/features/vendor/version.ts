@@ -1,84 +1,71 @@
-import { reactive } from 'vue'
-import { useI18n } from 'vue-i18n'
-import type { ContainerUpdateStatus, ReleaseInfo, UpdateResult, VersionInfo } from '@/api/admin/system'
+import { onScopeDispose, reactive } from 'vue'
+import apiClient from '@/api/client'
+import { getVersion } from '@/api/admin/system'
 
-type PortalStatus = ContainerUpdateStatus & {
-  portal_version: string
-  portal_commit?: string
-  backend_version: string
-  mode: 'portal' | 'paired'
+function readString(value: unknown): string {
+  return typeof value === 'string' && value.trim().toLowerCase() !== 'unknown' ? value.trim() : ''
 }
 
-// The shared version badge owns the interaction and polling. This source only
-// reads the portal's actual build and routes updates to its local host updater.
+function readBuild(value: unknown): { version: string; commit: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { version: '', commit: '' }
+  const data = value as Record<string, unknown>
+  return { version: readString(data.version), commit: readString(data.commit) }
+}
+
+/** Independent runtime facts: a backend version must never stand in for the portal build. */
 export function usePortalVersion() {
-  const { t } = useI18n()
+  let generation = 0
+  let inFlight: Promise<boolean> | null = null
   const state = reactive({
+    versionLoaded: false,
     versionLoading: false,
     currentVersion: '',
-    latestVersion: '',
-    hasUpdate: false,
-    releaseInfo: null as ReleaseInfo | null,
-    buildType: 'release',
+    backendVersion: '',
+    upstreamVersion: '',
     buildCommit: '',
-    updateDisabled: false,
-    updateMethod: 'manual' as 'manual' | 'compose',
-    releaseChannel: '',
-    updateWarning: '',
-    containerUpdate: undefined as ContainerUpdateStatus | undefined,
-    mode: '' as '' | 'portal' | 'paired',
-    clearVersionCache() { /* Portal checks always read the running containers. */ },
-    async fetchVersion(_force = false): Promise<VersionInfo | null> {
-      if (state.versionLoading) return null
-      state.versionLoading = true
-      try {
-        const { default: api } = await import('@/api/client')
-        const [build, backend, status] = await Promise.allSettled([
-          api.get<{ version: string; commit?: string }>('/portal-build.json', { baseURL: '/' }),
-          api.get<{ version: string }>('/admin/system/version'),
-          api.get<PortalStatus>('/portal-updater/status'),
-        ])
-        if (build.status === 'fulfilled') {
-          state.currentVersion = build.value.data.version || state.currentVersion
-          state.buildCommit = build.value.data.commit || ''
-        }
-        if (backend.status === 'fulfilled') state.latestVersion = backend.value.data.version || ''
-        if (status.status === 'fulfilled' && ['portal', 'paired'].includes(status.value.data?.mode)) {
-          const data = status.value.data
-          state.currentVersion = data.portal_version || state.currentVersion
-          state.buildCommit = data.portal_commit || state.buildCommit
-          state.latestVersion = data.backend_version
-          state.containerUpdate = data
-          state.mode = data.mode
-          state.updateMethod = 'compose'
-          state.updateWarning = ''
-        } else {
-          // Keep an accepted update's running state through container downtime.
-          state.updateMethod = 'manual'
-          state.updateWarning = t('vendor.portalUpdate.setupRequired')
-        }
-        const versionsKnown = !!state.currentVersion && /^\d+\.\d+\.\d+(\.\d+)?$/.test(state.latestVersion)
-        if (!versionsKnown && !state.updateWarning) {
-          state.updateMethod = 'manual'
-          state.updateWarning = t('vendor.portalUpdate.versionUnavailable')
-        }
-        state.hasUpdate = versionsKnown && state.currentVersion !== state.latestVersion
-        return {
-          current_version: state.currentVersion, latest_version: state.latestVersion,
-          has_update: state.hasUpdate, build_type: 'release', cached: false,
-          update_method: state.updateMethod, warning: state.updateWarning,
-          container_update: state.containerUpdate,
-        }
-      } finally {
-        state.versionLoading = false
-      }
-    },
-    async performUpdate(): Promise<UpdateResult> {
-      if (state.updateMethod !== 'compose' || !state.hasUpdate) throw new Error(t('vendor.portalUpdate.setupRequired'))
-      const { default: api } = await import('@/api/client')
-      await api.post('/portal-updater/update', { version: state.latestVersion })
-      return { message: '', need_restart: false }
-    },
+    backendBuildCommit: '',
+    fetchVersion,
+    clearVersionCache
   })
+
+  function fetchVersion(force = false): Promise<boolean> {
+    if (inFlight) return inFlight
+    if (state.versionLoaded && !force) return Promise.resolve(!!state.currentVersion && !!state.backendVersion)
+    const version = generation
+    state.versionLoading = true
+    const request = Promise.allSettled([
+      apiClient.get<unknown>('/portal-build.json', { baseURL: '/' }),
+      getVersion()
+    ]).then(([build, backend]) => {
+      if (version !== generation) return false
+      const manifest = build.status === 'fulfilled' ? readBuild(build.value.data) : { version: '', commit: '' }
+      state.currentVersion = manifest.version
+      state.buildCommit = manifest.commit
+      state.backendVersion = backend.status === 'fulfilled' ? readString(backend.value.version) : ''
+      state.upstreamVersion = backend.status === 'fulfilled' ? readString(backend.value.upstream_version) : ''
+      state.backendBuildCommit = backend.status === 'fulfilled' ? readString(backend.value.build_commit) : ''
+      state.versionLoaded = true
+      return !!state.currentVersion && !!state.backendVersion
+    }).finally(() => {
+      if (version === generation) state.versionLoading = false
+      if (inFlight === request) inFlight = null
+    })
+    inFlight = request
+    return request
+  }
+
+  function clearVersionCache(): void {
+    generation++
+    inFlight = null
+    state.versionLoaded = false
+    state.versionLoading = false
+    state.currentVersion = ''
+    state.backendVersion = ''
+    state.upstreamVersion = ''
+    state.buildCommit = ''
+    state.backendBuildCommit = ''
+  }
+
+  onScopeDispose(clearVersionCache)
   return state
 }

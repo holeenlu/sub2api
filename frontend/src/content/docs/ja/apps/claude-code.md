@@ -15,7 +15,7 @@
 
 ```bash
 export TAPMODELS_API_KEY="YOUR_TAPMODELS_API_KEY"
-curl -fsSL https://tapmodels.ai/install/claude-code.sh | bash
+curl -fsSL {{API_ROOT}}/install/claude-code.sh | bash
 ```
 
 このスクリプトは `~/.claude/settings.json` をバックアップし、Messages の環境変数を書き込み、ファイル権限を制限します。シェルにパイプで渡す前に内容を確認してください。カスタムゲートウェイを使用する場合は `TAPMODELS_BASE_URL` を設定します。

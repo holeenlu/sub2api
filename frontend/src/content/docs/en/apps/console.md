@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | OpenAI | Codex CLI, Codex WebSocket, Claude Code (when Messages dispatch is enabled), OpenCode | `config.toml`, `auth.json` or `experimental_bearer_token`, Anthropic environment files, `opencode.json` |
 | Anthropic | Claude Code, routed Codex, OpenCode | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, Codex Responses provider, OpenCode provider |
-| Gemini | Gemini CLI, routed Codex, OpenCode | `GOOGLE_GEMINI_BASE_URL`, `GEMINI_KDAN_API_KEY`, `GEMINI_MODEL` |
+| Gemini | Gemini CLI, routed Codex, OpenCode | `GOOGLE_GEMINI_BASE_URL`, `GEMINI_API_KEY`, `GEMINI_MODEL` |
 | Antigravity | Claude Code, Gemini CLI, routed Codex, OpenCode | `/antigravity` base path; Gemini uses `/v1beta` |
 | Grok | Grok CLI, Claude Code, Codex, OpenCode | `GROK_MODELS_BASE_URL`, `XAI_API_KEY`, or the client-specific config |
 | DeepSeek, MiniMax, Composite, Kimi, Zhipu, OpenCode | Claude Code, routed Codex, OpenCode | Use the generated group URL; see catalog support below |

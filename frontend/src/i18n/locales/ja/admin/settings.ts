@@ -1,4 +1,4 @@
-import { BRAND_NAME } from '@/config/brand'
+import { BRAND_NAME } from '@/shared/config/project'
 
 export default {
     settings: {
@@ -997,7 +997,7 @@ codexProbeChallenge: '新しいランダム課題',
         fromEmail: '送信元メールアドレス',
         fromEmailPlaceholder: "noreply{'@'}example.com",
         fromName: '送信元名',
-        fromNamePlaceholder: 'TapModels',
+        fromNamePlaceholder: '@:common.siteName',
         useTls: 'TLSを使用',
         useTlsHint: 'SMTP接続のTLS暗号化を有効にします'
       },

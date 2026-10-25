@@ -407,7 +407,7 @@ describe('API Client', () => {
           headers: {}, config: { headers: new axios.AxiosHeaders() },
         }
       }
-      const refresh = await import('@/api/tokenRefresh')
+      const refresh = await import('@/shared/http/tokenRefresh')
       vi.spyOn(refresh, 'refreshAuthTokens').mockRejectedValueOnce(refreshError)
       const adapter = vi.fn().mockRejectedValueOnce({
         response: { status: 401, data: { code: 'TOKEN_EXPIRED' } },
@@ -437,7 +437,7 @@ describe('API Client', () => {
       const refreshError = status
         ? Object.assign(new axios.AxiosError('Refresh rejected'), { response: { status } })
         : new Error('Invalid refresh response')
-      const refresh = await import('@/api/tokenRefresh')
+      const refresh = await import('@/shared/http/tokenRefresh')
       vi.spyOn(refresh, 'refreshAuthTokens').mockRejectedValueOnce(refreshError)
       apiClient.defaults.adapter = vi.fn().mockRejectedValueOnce({
         response: { status: 401, data: { code: 'TOKEN_EXPIRED' } },
@@ -495,7 +495,7 @@ describe('API Client', () => {
       localStorage.setItem('auth_token', sessionToken('session-a'))
       localStorage.setItem('refresh_token', 'refresh-a')
       localStorage.setItem('auth_user', JSON.stringify({ id: 7, role: 'user' }))
-      const refresh = await import('@/api/tokenRefresh')
+      const refresh = await import('@/shared/http/tokenRefresh')
       const refreshSpy = vi.spyOn(refresh, 'refreshAuthTokens')
       const events = vi.spyOn(window, 'dispatchEvent')
       let finish!: () => void

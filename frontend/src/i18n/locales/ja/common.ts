@@ -1,9 +1,11 @@
+import { BRAND_NAME } from '@/shared/config/project'
+
 export default {
   common: {
     languageLoadFailed: '言語を読み込めませんでした。もう一度お試しください。',
     // Site name. Overwritten via mergeLocaleMessage in stores/app.ts once the
     // public settings load; reference it as @:{\'common.siteName\'} in copy.
-    siteName: 'TapModels',
+    siteName: BRAND_NAME,
     loading: '読み込み中…',
     submitting: '送信中…',
     justNow: 'たった今',
@@ -191,7 +193,6 @@ export default {
     collapse: '折りたたむ',
     expand: '展開',
     logout: 'ログアウト',
-    github: 'GitHub',
     mySubscriptions: 'マイサブスクリプション',
     buySubscription: 'チャージ / サブスクリプション',
     recharge: 'チャージ',

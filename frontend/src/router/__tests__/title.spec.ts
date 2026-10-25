@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { i18n } from '@/i18n'
-import { BRAND_NAME } from '@/config/brand'
+import { BRAND_NAME } from '@/shared/config/project'
 import {
   PURCHASE_ROUTE_NAME,
   applyRouteMetaDescription,

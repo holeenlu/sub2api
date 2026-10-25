@@ -12,6 +12,7 @@ import { getSetupStatus } from '@/api/setup'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 import { isVendorOrigin } from '@/features/vendor/helpers'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
+import { authSessionStamp } from '@/shared/session'
 
 const router = useRouter()
 const route = useRoute()
@@ -88,55 +89,60 @@ watch(subscriptionFeatureEnabled, (enabled) => {
 })
 
 watch(
-  () => authStore.isAuthenticated,
-  async (isAuthenticated, oldValue) => {
-    if (isAuthenticated) {
-      if (!appStore.publicSettingsLoaded) await appStore.fetchPublicSettings()
-      if (!authStore.isAuthenticated) return
-      if (authStore.isAdmin) {
-        adminComplianceStore.fetchStatus().catch((error) => {
-          console.error('Failed to fetch admin compliance status:', error)
-        })
-      }
+  [() => authStore.isAuthenticated, () => authSessionStamp(authStore.token), supplierPortal],
+  async ([isAuthenticated, session, isSupplier], previous, onCleanup) => {
+    let active = true
+    let announcementTimer: ReturnType<typeof setTimeout> | undefined
+    onCleanup(() => {
+      active = false
+      if (announcementTimer !== undefined) clearTimeout(announcementTimer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      subscriptionStore.stopPolling()
+    })
 
-      if (supplierPortal.value) return
-
-      // User logged in: preload subscriptions and start polling (skipped when the
-      // subscription feature is switched off; see the flag watcher below)
-      if (subscriptionFeatureEnabled.value) {
-        startSubscriptionSync()
-      }
-
-      // Announcements: new login vs page refresh restore
-      if (oldValue === false) {
-        // New login: delay 3s then force fetch
-        setTimeout(() => announcementStore.fetchAnnouncements(true), 3000)
-      } else {
-        // Page refresh restore (oldValue was undefined)
-        announcementStore.fetchAnnouncements()
-      }
-
-      // Register visibility change listener
-      document.addEventListener('visibilitychange', onVisibilityChange)
-    } else {
-      // User logged out: clear data and stop polling
+    const changedIdentity = previous[0] === true && previous[1] !== session
+    const changedPortal = previous[2] !== undefined && previous[2] !== isSupplier
+    if (!isAuthenticated || changedIdentity || changedPortal) {
       subscriptionStore.clear()
       announcementStore.reset()
       adminComplianceStore.reset()
-      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
+    if (!isAuthenticated) return
+
+    if (!appStore.publicSettingsLoaded) await appStore.fetchPublicSettings()
+    if (!active || !authStore.isAuthenticated || session !== authSessionStamp(authStore.token)) return
+    if (authStore.isAdmin) {
+      adminComplianceStore.fetchStatus().catch((error) => {
+        console.error('Failed to fetch admin compliance status:', error)
+      })
+    }
+    if (isSupplier) return
+
+    if (subscriptionFeatureEnabled.value) startSubscriptionSync()
+    if (previous[0] === false) {
+      announcementTimer = setTimeout(() => {
+        if (active && session === authSessionStamp(authStore.token)) {
+          announcementStore.fetchAnnouncements(true)
+        }
+      }, 3000)
+    } else {
+      announcementStore.fetchAnnouncements()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
   },
   { immediate: true }
 )
 
 // Route change trigger (throttled by store)
-router.afterEach(() => {
+const removeAfterEach = router.afterEach(() => {
   if (!supplierPortal.value && authStore.isAuthenticated) {
     announcementStore.fetchAnnouncements()
   }
 })
 
 onBeforeUnmount(() => {
+  removeAfterEach()
+  subscriptionStore.stopPolling()
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('admin-compliance-required', onAdminComplianceRequired)
 })

@@ -68,7 +68,7 @@ const { t } = useI18n()
 import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores'
 import { sanitizeUrl } from '@/utils/url'
-import { BRAND_NAME, BRAND_TAGLINE_EN } from '@/config/brand'
+import { BRAND_NAME, BRAND_TAGLINE_EN } from '@/shared/config/project'
 
 const appStore = useAppStore()
 

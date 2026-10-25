@@ -268,7 +268,7 @@ import {
   type OAuthLoginStart,
 } from '@/api/auth'
 import { buildAuthErrorMessage } from '@/utils/authError'
-import { BRAND_NAME } from '@/config/brand'
+import { BRAND_NAME } from '@/shared/config/project'
 import { extractApiErrorCode, extractI18nErrorMessage } from '@/utils/apiError'
 import {
   formatRegistrationEmailSuffixWhitelistForMessage,

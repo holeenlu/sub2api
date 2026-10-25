@@ -1,4 +1,4 @@
-import { authSessionStamp } from '@/api/tokenRefresh'
+import { authSessionStamp } from '@/shared/session'
 import { describe, it, expect, vi } from 'vitest'
 import {
   useStepUp,

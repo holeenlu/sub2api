@@ -81,3 +81,40 @@ it('still updates compliance status during a normal fetch and acceptance', async
   expect(store.status).toEqual(status(false))
   expect(store.shouldShow).toBe(false)
 })
+
+
+describe('compliance document and phrase ownership', () => {
+  it('keeps acknowledgement required without inventing an external document URL', () => {
+    const store = useAdminComplianceStore()
+    store.requireAcknowledgement()
+    expect(store.shouldShow).toBe(true)
+    expect(store.required).toBe(true)
+    expect(store.status?.document_url_zh).toBe('')
+    expect(store.status?.document_url_en).toBe('')
+    expect(store.expectedPhrase).toContain('sub2api')
+  })
+
+  it('preserves backend document links and exact acknowledgement phrases', async () => {
+    const serverStatus = {
+      ...status(true),
+      document_url_en: 'https://operator.example.org/legal',
+      ack_phrase_en: 'I agree to the operator deployment terms'
+    }
+    api.getStatus.mockResolvedValue(serverStatus)
+    api.accept.mockResolvedValue(status(false))
+    const store = useAdminComplianceStore()
+    await store.fetchStatus()
+    expect(store.status?.document_url_en).toBe(serverStatus.document_url_en)
+    expect(store.expectedPhrase).toBe(serverStatus.ack_phrase_en)
+    await store.accept(serverStatus.ack_phrase_en)
+    expect(api.accept).toHaveBeenCalledWith({ phrase: serverStatus.ack_phrase_en, language: 'en' })
+  })
+
+  it('honors an explicitly cleared document URL without dismissing the gate', () => {
+    const store = useAdminComplianceStore()
+    store.requireAcknowledgement({ document_url_en: 'https://operator.example.org/legal' })
+    store.requireAcknowledgement({ document_url_en: '' })
+    expect(store.status?.document_url_en).toBe('')
+    expect(store.shouldShow).toBe(true)
+  })
+})

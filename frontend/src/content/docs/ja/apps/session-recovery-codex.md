@@ -53,7 +53,7 @@ bash repair-sessions.sh --apply --client-closed
 
 
 ```powershell
-.\Repair-KDANSessions.ps1 -Apply -ClientClosed
+.\RepairSessions.ps1 -Apply -ClientClosed
 ```
 
 

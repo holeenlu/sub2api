@@ -29,13 +29,11 @@ export default {
   nonFable: 'Non-Fable',
   oauthRestartRequired: 'This authorization session was already used. Generate a new authorization link and sign in again.',
   identityKeyMismatch: 'Supplier identity configuration is inconsistent. Contact an administrator to fix it before retrying.',
-  portalUpdate: {
-    "portalVersion": "Running portal version",
-    "backendVersion": "Running backend version",
-    "matched": "Portal and backend versions match.",
-    "versionUnavailable": "The running portal or backend version could not be verified. Refresh to check again.",
-    "setupRequired": "Portal update service unavailable. Install the new host updater and connect the portal container first; the backend must also support portal update authorization."
-},
+  portalVersion: {
+    portalVersion: "Running portal version",
+    backendVersion: "Running backend version",
+    backendCommit: "Backend build commit",
+  },
   authorization: {
     cloud: "Cloud authorization",
     noModelsHelp: "Saving an empty list stops BPS supply for all models. Authorization and history are retained.",

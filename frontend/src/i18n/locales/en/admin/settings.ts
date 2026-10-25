@@ -1,4 +1,4 @@
-import { BRAND_NAME } from '@/config/brand'
+import { BRAND_NAME } from '@/shared/config/project'
 
 export default {
     settings: {
@@ -996,7 +996,7 @@ codexProbeChallenge: 'Fresh random challenge',
         fromEmail: 'From Email',
         fromEmailPlaceholder: "noreply{'@'}example.com",
         fromName: 'From Name',
-        fromNamePlaceholder: 'KDAN',
+        fromNamePlaceholder: '@:common.siteName',
         useTls: 'Use TLS',
         useTlsHint: 'Enable TLS encryption for SMTP connection'
       },

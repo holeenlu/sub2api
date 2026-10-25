@@ -48,6 +48,8 @@ describe('refreshAuthTokens', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
   })
 
   it('shares one refresh request between concurrent callers in the same document', async () => {
@@ -58,7 +60,7 @@ describe('refreshAuthTokens', () => {
         resolveRequest = resolve
       })
     )
-    const { refreshAuthTokens } = await import('@/api/tokenRefresh')
+    const { refreshAuthTokens } = await import('@/shared/http/tokenRefresh')
 
     const first = refreshAuthTokens({ failedAccessToken: accessToken('old-access') })
     const second = refreshAuthTokens({ failedAccessToken: accessToken('old-access') })
@@ -83,7 +85,7 @@ describe('refreshAuthTokens', () => {
       configurable: true,
       value: { request }
     })
-    const { refreshAuthTokens } = await import('@/api/tokenRefresh')
+    const { refreshAuthTokens } = await import('@/shared/http/tokenRefresh')
 
     const result = await refreshAuthTokens({ failedAccessToken: accessToken('old-access') })
 
@@ -104,7 +106,7 @@ describe('refreshAuthTokens', () => {
       configurable: true,
       value: { request }
     })
-    const { refreshAuthTokens } = await import('@/api/tokenRefresh')
+    const { refreshAuthTokens } = await import('@/shared/http/tokenRefresh')
 
     await expect(refreshAuthTokens()).resolves.toMatchObject({ access_token: accessToken('new-access') })
 
@@ -115,7 +117,7 @@ describe('refreshAuthTokens', () => {
   it('recovers when a peer publishes the rotated token just after this request fails', async () => {
     seedSession()
     mockedPost.mockRejectedValueOnce(new Error('refresh token already used'))
-    const { refreshAuthTokens } = await import('@/api/tokenRefresh')
+    const { refreshAuthTokens } = await import('@/shared/http/tokenRefresh')
 
     window.setTimeout(() => {
       localStorage.setItem('auth_token', accessToken('peer-access'))
@@ -140,9 +142,9 @@ describe('refreshAuthTokens', () => {
         resolveWinningRequest = resolve
       })
     )
-    const firstTab = await import('@/api/tokenRefresh')
+    const firstTab = await import('@/shared/http/tokenRefresh')
     vi.resetModules()
-    const secondTab = await import('@/api/tokenRefresh')
+    const secondTab = await import('@/shared/http/tokenRefresh')
 
     const winner = firstTab.refreshAuthTokens({ failedAccessToken: accessToken('old-access') })
     mockedPost.mockRejectedValueOnce({ response: { status: 401 } })
@@ -161,7 +163,7 @@ describe('refreshAuthTokens', () => {
     vi.useFakeTimers()
     seedSession()
     mockedPost.mockRejectedValueOnce(new Error('refresh token already used'))
-    const { refreshAuthTokens } = await import('@/api/tokenRefresh')
+    const { refreshAuthTokens } = await import('@/shared/http/tokenRefresh')
 
     window.setTimeout(() => {
       localStorage.setItem('auth_user', JSON.stringify({ id: 8, email: 'other@example.com' }))
@@ -186,7 +188,7 @@ describe('refreshAuthTokens', () => {
         resolveRequest = resolve
       })
     )
-    const { refreshAuthTokens } = await import('@/api/tokenRefresh')
+    const { refreshAuthTokens } = await import('@/shared/http/tokenRefresh')
 
     const pending = refreshAuthTokens({ failedAccessToken: accessToken('old-access') })
     localStorage.clear()
@@ -204,7 +206,7 @@ describe('refreshAuthTokens', () => {
     seedSession()
     let finishOld!: (value: ReturnType<typeof refreshedResponse>) => void
     mockedPost.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
-    const { refreshAuthTokens } = await import('@/api/tokenRefresh')
+    const { refreshAuthTokens } = await import('@/shared/http/tokenRefresh')
     const old = refreshAuthTokens()
     const rejected = expect(old).rejects.toThrow('Session changed during token refresh')
     seedSession({ auth_token: accessToken('second-login', 'session-b'), refresh_token: 'second-refresh' })
@@ -217,6 +219,63 @@ describe('refreshAuthTokens', () => {
     await vi.advanceTimersByTimeAsync(1_100)
     await rejected
     expect(localStorage.getItem('auth_token')).toBe(accessToken('new-access', 'session-b'))
+  })
+
+  it.each([
+    { kind: 'network failure', error: new Error('Network Error'), waitMs: 1_100 },
+    { kind: 'rate limit', error: { response: { status: 429 } }, waitMs: 31_100 },
+    { kind: 'upstream failure', error: { response: { status: 503 } }, waitMs: 1_100 }
+  ])('preserves stored credentials and the original $kind', async ({ error, waitMs }) => {
+    vi.useFakeTimers()
+    seedSession()
+    mockedPost.mockRejectedValueOnce(error)
+    const { refreshAuthTokens } = await import('@/shared/http/tokenRefresh')
+
+    const rejection = expect(refreshAuthTokens()).rejects.toBe(error)
+    await vi.advanceTimersByTimeAsync(waitMs)
+    await rejection
+
+    expect(localStorage.getItem('auth_token')).toBe(accessToken('old-access'))
+    expect(localStorage.getItem('refresh_token')).toBe('old-refresh')
+    expect(mockedPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears failed single-flight work so a later request can retry', async () => {
+    vi.useFakeTimers()
+    seedSession()
+    mockedPost.mockRejectedValueOnce(new Error('Network Error'))
+    const { refreshAuthTokens } = await import('@/shared/http/tokenRefresh')
+    const rejection = expect(refreshAuthTokens()).rejects.toThrow('Network Error')
+    await vi.advanceTimersByTimeAsync(1_100)
+    await rejection
+
+    mockedPost.mockResolvedValueOnce(refreshedResponse())
+    await expect(refreshAuthTokens()).resolves.toMatchObject({ refresh_token: 'new-refresh' })
+    expect(mockedPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses the existing refresh storage key and rejects before a request when it is absent', async () => {
+    seedSession()
+    localStorage.removeItem('refresh_token')
+    const { refreshAuthTokens } = await import('@/shared/http/tokenRefresh')
+
+    await expect(refreshAuthTokens()).rejects.toThrow('No refresh token available')
+    expect(mockedPost).not.toHaveBeenCalled()
+  })
+
+  it('retains the same-origin supplier refresh endpoint and bounded request timeout', async () => {
+    vi.stubEnv('VITE_VENDOR_PORTAL', 'true')
+    vi.stubEnv('VITE_API_BASE_URL', 'https://platform.example/api/v1')
+    seedSession()
+    mockedPost.mockResolvedValueOnce(refreshedResponse())
+    const { refreshAuthTokens } = await import('@/shared/http/tokenRefresh')
+
+    await refreshAuthTokens()
+
+    expect(mockedPost).toHaveBeenCalledWith('/api/v1/auth/refresh', { refresh_token: 'old-refresh' }, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30_000
+    })
   })
 
 })

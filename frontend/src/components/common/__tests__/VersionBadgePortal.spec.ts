@@ -1,97 +1,71 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { reactive } from 'vue'
 import VersionBadge from '../VersionBadge.vue'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), backendUpdate: vi.fn(), root: true }))
-vi.mock('@/api/client', () => ({ default: { get: mocks.get, post: mocks.post } }))
-vi.mock('@/stores', () => ({ useAuthStore: () => ({ isSuperAdmin: mocks.root }), useAppStore: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), backend: vi.fn(), copy: vi.fn(), app: vi.fn() }))
+const auth = reactive({ isSuperAdmin: true })
+vi.mock('@/api/client', () => ({ default: { get: mocks.get } }))
+vi.mock('@/api/admin/system', () => ({ getVersion: mocks.backend }))
+vi.mock('@/stores', () => ({ useAuthStore: () => auth, useAppStore: mocks.app }))
+vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copied: false, copyToClipboard: mocks.copy }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('@/api/admin/system', () => ({ performUpdate: mocks.backendUpdate, restartService: vi.fn(), getRollbackVersions: vi.fn(), rollback: vi.fn() }))
-vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copied: false, copyToClipboard: vi.fn() }) }))
-let state: Record<string, unknown>
-let wrapper: ReturnType<typeof mount>
-beforeEach(() => {
-  vi.useFakeTimers()
-  vi.clearAllMocks()
-  mocks.root = true
-  state = { status: 'idle', portal_version: '0.2.17.12', backend_version: '0.2.17.13', mode: 'portal' }
-  mocks.get.mockImplementation(async (url: string) => ({ data: url === '/portal-build.json'
-    ? { version: '0.2.17.12' } : url === '/admin/system/version' ? { version: '0.2.17.13' } : { ...state } }))
-  mocks.post.mockResolvedValue({ data: { status: 'running' } })
-  wrapper = mount(VersionBadge, { props: { portal: true }, global: { stubs: { Icon: true } } })
-})
-afterEach(() => { wrapper.unmount(); vi.useRealTimers() })
-async function open() { await flushPromises(); await wrapper.get('button').trigger('click'); await flushPromises() }
-function updateButton() { return wrapper.findAll('button').find(b => b.text() === 'version.updateNow')! }
+enableAutoUnmount(afterEach)
 
-describe('shared version badge for the supplier portal', () => {
-  it('uses the same version badge and update action while keeping the portal and backend versions separate', async () => {
-    await open()
-    expect(wrapper.get('button').text()).toBe('v0.2.17.12')
-    expect(wrapper.text()).toContain('vendor.portalUpdate.portalVersion')
-    expect(wrapper.text()).toContain('vendor.portalUpdate.backendVersion: v0.2.17.13')
-    await updateButton().trigger('click')
-    await flushPromises()
-    expect(mocks.post).toHaveBeenCalledWith('/portal-updater/update', { version: '0.2.17.13' })
-    expect(mocks.backendUpdate).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('version.composeUpdating')
-    expect(updateButton().attributes('disabled')).toBeDefined()
+beforeEach(() => {
+  vi.clearAllMocks()
+  auth.isSuperAdmin = true
+  mocks.get.mockResolvedValue({ data: { version: '1.2.3', commit: 'a'.repeat(40) } })
+  mocks.backend.mockResolvedValue({ version: '1.2.4', upstream_version: '1.2.0', build_commit: 'b'.repeat(40) })
+  mocks.copy.mockResolvedValue(true)
+})
+
+async function open() {
+  const wrapper = mount(VersionBadge, { props: { portal: true, version: '9.9.9' }, global: { stubs: { Icon: true } } })
+  await flushPromises()
+  await wrapper.get('button').trigger('click')
+  return wrapper
+}
+
+describe('read-only portal and backend versions', () => {
+  it('reads the actual portal manifest and backend metadata separately', async () => {
+    const wrapper = await open()
+    expect(mocks.get.mock.calls).toEqual([['/portal-build.json', { baseURL: '/' }]])
+    expect(mocks.backend).toHaveBeenCalledOnce()
+    expect(mocks.app).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="current-version"]').text()).toBe('v1.2.3')
+    expect(wrapper.get('[data-testid="backend-version"]').text()).toBe('v1.2.4')
+    expect(wrapper.get('[data-testid="build-commit"]').attributes('title')).toBe('a'.repeat(40))
+    expect(wrapper.get('[data-testid="backend-build-commit"]').attributes('title')).toBe('b'.repeat(40))
+    const copy = wrapper.findAll('button').find(button => button.text() === 'version.copyDetails')
+    await copy?.trigger('click')
+    expect(mocks.copy).toHaveBeenCalledWith(expect.stringContaining('vendor.portalVersion.portalVersion: v1.2.3\nvendor.portalVersion.backendVersion: v1.2.4'))
+    expect(wrapper.findAll('button').map(button => button.text())).toEqual(['v1.2.3', 'version.refresh', 'version.copyDetails'])
   })
-  it('does not claim a successful synchronization from backend version alone', async () => {
-    await open()
-    await updateButton().trigger('click')
-    await flushPromises()
-    state.status = 'succeeded'
-    await vi.advanceTimersByTimeAsync(5000)
-    expect(wrapper.get('button').text()).toBe('v0.2.17.12')
-    expect(wrapper.text()).not.toContain('vendor.portalUpdate.matched')
-    expect(wrapper.text()).not.toContain('version.rollback')
+
+  it.each([{ version: '' }, { version: 'unknown' }, { version: 123 }, '<html>SPA fallback</html>'])('does not replace an unknown portal build with the backend or public prop (%j)', async (data) => {
+    mocks.get.mockResolvedValue({ data })
+    const wrapper = await open()
+    expect(wrapper.get('[data-testid="current-version"]').text()).toBe('—')
+    expect(wrapper.get('[data-testid="backend-version"]').text()).toBe('v1.2.4')
+    expect(wrapper.get('[role="status"]').text()).toBe('version.unavailable')
+    expect(wrapper.text()).not.toContain('9.9.9')
   })
-  it('keeps the running portal version and disables updates without the host updater', async () => {
-    mocks.get.mockImplementation(async (url: string) => {
-      if (url === '/portal-updater/status') throw new Error('502')
-      return { data: { version: url === '/portal-build.json' ? '0.2.17.12' : '0.2.17.13' } }
-    })
-    await open()
-    await wrapper.findAll('button').find(b => b.attributes('title') === 'version.refresh')!.trigger('click')
-    await flushPromises()
-    expect(wrapper.get('button').text()).toBe('v0.2.17.12')
-    expect(wrapper.text()).toContain('vendor.portalUpdate.setupRequired')
-    expect(updateButton().attributes('disabled')).toBeDefined()
+
+  it('retains the real portal version when backend metadata is unavailable', async () => {
+    mocks.backend.mockRejectedValue(new Error('403'))
+    const wrapper = await open()
+    expect(wrapper.get('[data-testid="current-version"]').text()).toBe('v1.2.3')
+    expect(wrapper.get('[data-testid="backend-version"]').text()).toBe('—')
+    expect(wrapper.find('[data-testid="backend-build-commit"]').exists()).toBe(false)
   })
-  it.each(['portal', 'backend'])('does not claim matching versions when the %s version is unknown', async missing => {
-    wrapper.unmount()
-    await flushPromises()
-    state.portal_version = missing === 'portal' ? '' : '0.2.17.12'
-    state.backend_version = missing === 'backend' ? 'unknown' : '0.2.17.13'
-    mocks.get.mockImplementation(async (url: string) => ({ data: url === '/portal-updater/status'
-      ? { ...state } : { version: url === '/portal-build.json' ? state.portal_version : state.backend_version } }))
-    wrapper = mount(VersionBadge, { props: { portal: true }, global: { stubs: { Icon: true } } })
-    await open()
-    expect(wrapper.text()).toContain('vendor.portalUpdate.versionUnavailable')
-    expect(wrapper.text()).not.toContain('vendor.portalUpdate.matched')
-    expect(updateButton()).toBeUndefined()
-    expect(mocks.post).not.toHaveBeenCalled()
-  })
-  it('shows recovery failure and clears polling on unmount', async () => {
-    await open()
-    await updateButton().trigger('click')
-    await flushPromises()
-    state.status = 'failed'
-    state.message = 'previous image restored for all managed services'
-    await vi.advanceTimersByTimeAsync(5000)
-    expect(wrapper.text()).toContain(state.message)
-    wrapper.unmount()
-    expect(vi.getTimerCount()).toBe(0)
-  })
-  it('does not query privileged endpoints for non-super-admin users', async () => {
-    wrapper.unmount()
-    await flushPromises()
-    mocks.get.mockClear()
-    mocks.root = false
-    wrapper = mount(VersionBadge, { props: { portal: true }, global: { stubs: { Icon: true } } })
+
+  it('does not fetch either endpoint for a non-super-admin', async () => {
+    auth.isSuperAdmin = false
+    const wrapper = mount(VersionBadge, { props: { portal: true } })
     await flushPromises()
     expect(mocks.get).not.toHaveBeenCalled()
+    expect(mocks.backend).not.toHaveBeenCalled()
     expect(wrapper.find('button').exists()).toBe(false)
   })
 })

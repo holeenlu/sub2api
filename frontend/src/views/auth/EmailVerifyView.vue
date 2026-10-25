@@ -196,7 +196,7 @@ import {
 } from '@/api/auth'
 import { apiClient } from '@/api/client'
 import { buildAuthErrorMessage } from '@/utils/authError'
-import { BRAND_NAME } from '@/config/brand'
+import { BRAND_NAME } from '@/shared/config/project'
 import { extractApiErrorCode } from '@/utils/apiError'
 import {
   formatRegistrationEmailSuffixWhitelistForMessage,
