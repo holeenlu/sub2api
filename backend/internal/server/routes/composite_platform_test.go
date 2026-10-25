@@ -9,12 +9,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type compositeRouteRepoStub struct {
@@ -81,6 +86,29 @@ func TestCompositeTargetPlatformMiddlewareResolvesModelAndRestoresBody(t *testin
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusNoContent, w.Code)
+}
+
+func TestCompositeTargetPlatformReadFailureLogsStage(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Platform: service.PlatformComposite}})
+		c.Next()
+	}, compositeTargetPlatformMiddleware(nil))
+	router.POST("/v1/responses", func(c *gin.Context) { t.Error("handler must not run after a read failure") })
+	body := io.MultiReader(strings.NewReader("partial"), iotest.ErrReader(io.ErrUnexpectedEOF))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", body)
+	req.ContentLength = 100
+	req = req.WithContext(logger.IntoContext(req.Context(), zap.New(core)))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	// A body cut short of its Content-Length is the client leaving: 499, not 400.
+	require.Equal(t, pkghttputil.StatusClientClosedRequest, w.Code)
+	require.JSONEq(t, `{"error":{"type":"invalid_request_error","message":"Client closed request before the request body was fully received"}}`, w.Body.String())
+	require.Len(t, logs.All(), 1)
+	fields := logs.All()[0].ContextMap()
+	require.Equal(t, "composite_routing", fields["body_read_stage"])
+	require.EqualValues(t, 7, fields["bytes_read"])
 }
 
 func TestCompositeTargetPlatformMiddlewareUsesExplicitRouteAndRewritesBody(t *testing.T) {

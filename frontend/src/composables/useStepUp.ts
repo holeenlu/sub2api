@@ -13,6 +13,7 @@
  *   // template: <TotpStepUpDialog :controller="stepUp" />
  */
 import { ref } from 'vue'
+import { authSessionStamp } from '@/api/tokenRefresh'
 
 /** Error codes the backend uses to signal step-up state. */
 const STEP_UP_REQUIRED = 'STEP_UP_REQUIRED'
@@ -102,6 +103,7 @@ export function useStepUp() {
    * distinguish "user changed their mind" from real failures.
    */
   async function run<T>(action: () => Promise<T>): Promise<T> {
+    const session = authSessionStamp(localStorage.getItem('auth_token'))
     try {
       return await action()
     } catch (err) {
@@ -112,8 +114,9 @@ export function useStepUp() {
       if (!isStepUpRequired(err)) {
         throw err
       }
+      if (session !== authSessionStamp(localStorage.getItem('auth_token'))) throw new StepUpCancelledError()
       const ok = await prompt()
-      if (!ok) {
+      if (!ok || session !== authSessionStamp(localStorage.getItem('auth_token'))) {
         throw new StepUpCancelledError()
       }
       // Retry once now that the session holds a step-up grant.
@@ -129,4 +132,14 @@ export function useStepUp() {
     onCancel,
     run
   }
+}
+
+// Shared management actions reuse the same verification dialog. Concurrent
+// requests in one session share a prompt; the API client still retries each
+// original operation at most once.
+export const globalAdminStepUp = useStepUp()
+let globalPrompt: Promise<boolean> | null = null
+export function requestAdminStepUp(): Promise<boolean> {
+  if (!globalPrompt) globalPrompt = globalAdminStepUp.prompt().finally(() => { globalPrompt = null })
+  return globalPrompt
 }

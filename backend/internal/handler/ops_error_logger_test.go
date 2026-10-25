@@ -2,14 +2,24 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
+	"testing/iotest"
 	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -63,10 +73,10 @@ func TestOpsErrorLogQueueByteBudget(t *testing.T) {
 		opsErrorLogQueueLen.Store(previousLen)
 	})
 
-	if !reserveOpsErrorLogQueueBytes(opsErrorLogMaxQueueBytes - 1) {
+	if !reserveOpsErrorLogQueueBytes(opsErrorLogMaxQueueBytes-1, opsErrorLogMaxQueueBytes) {
 		t.Fatal("first reservation within byte budget should succeed")
 	}
-	if reserveOpsErrorLogQueueBytes(2) {
+	if reserveOpsErrorLogQueueBytes(2, opsErrorLogMaxQueueBytes) {
 		t.Fatal("reservation beyond byte budget should be rejected")
 	}
 	if got := OpsErrorLogQueueBytes(); got != opsErrorLogMaxQueueBytes-1 {
@@ -116,6 +126,7 @@ func resetOpsErrorLoggerStateForTest(t *testing.T) {
 	opsErrorLogStopping = false
 
 	opsErrorLogQueueLen.Store(0)
+	opsErrorLogQueueBytes.Store(0)
 	opsErrorLogEnqueued.Store(0)
 	opsErrorLogDropped.Store(0)
 	opsErrorLogProcessed.Store(0)
@@ -340,9 +351,15 @@ func TestOpsErrorLoggerMiddleware_RecordsRecoveredUpstreamTelemetryOutsideFailur
 	router := gin.New()
 	router.Use(OpsErrorLoggerMiddleware(ops))
 	router.POST("/v1/responses", func(c *gin.Context) {
+		c.Set(opsAccountIDKey, int64(7)) // successful native account
 		c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{{
+			Kind: "failover", Scope: "excel_bps", Stage: "attachment_http", AccountID: 39,
 			UpstreamStatusCode: http.StatusTooManyRequests,
 			Message:            "earlier attempt was rate limited",
+			Detail:             `{"generation_started":false}`,
+		}, {
+			Kind: "recovery", Scope: "excel_bps", Stage: "protocol_fallback", AccountID: 7,
+			Message: "Available BPS routes exhausted; retrying with native Codex authorization",
 		}})
 		c.JSON(http.StatusOK, gin.H{"status": "completed"})
 	})
@@ -357,8 +374,9 @@ func TestOpsErrorLoggerMiddleware_RecordsRecoveredUpstreamTelemetryOutsideFailur
 	require.NotNil(t, job.entry.UpstreamErrorsJSON)
 	queuedEvents, err := service.ParseOpsUpstreamErrors(*job.entry.UpstreamErrorsJSON)
 	require.NoError(t, err)
-	require.Len(t, queuedEvents, 1)
+	require.Len(t, queuedEvents, 2)
 	require.Equal(t, http.StatusTooManyRequests, queuedEvents[0].UpstreamStatusCode)
+	require.Equal(t, "recovery", queuedEvents[1].Kind, "local decisions remain in the diagnostic timeline")
 
 	flushOpsErrorLogBatch([]opsErrorLogJob{job})
 	require.Equal(t, 1, repo.insertCalls)
@@ -368,11 +386,58 @@ func TestOpsErrorLoggerMiddleware_RecordsRecoveredUpstreamTelemetryOutsideFailur
 	require.Equal(t, "upstream", persisted.ErrorPhase)
 	require.Equal(t, "upstream_error", persisted.ErrorType)
 	require.Equal(t, "Recovered upstream error 429: earlier attempt was rate limited", persisted.ErrorMessage)
+	require.NotNil(t, persisted.UpstreamStatusCode)
+	require.Equal(t, http.StatusTooManyRequests, *persisted.UpstreamStatusCode)
+	require.NotNil(t, persisted.AccountID)
+	require.Equal(t, int64(39), *persisted.AccountID, "the recovered error belongs to the failed BPS account")
+	require.NotNil(t, persisted.UpstreamErrorDetail)
+	require.JSONEq(t, `{"generation_started":false}`, *persisted.UpstreamErrorDetail)
 	require.NotNil(t, persisted.UpstreamErrorsJSON)
 	persistedEvents, err := service.ParseOpsUpstreamErrors(*persisted.UpstreamErrorsJSON)
 	require.NoError(t, err)
-	require.Len(t, persistedEvents, 1)
+	require.Len(t, persistedEvents, 2)
 	require.Equal(t, http.StatusTooManyRequests, persistedEvents[0].UpstreamStatusCode)
+}
+
+func TestOpsRecoveredWebSocketRequiresSuccessfulTurn(t *testing.T) {
+	for _, completed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(completed), func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
+			service.BeginOpsStreamTurn(c, 2)
+			c.Set(service.OpsStreamTurnSucceededKey, completed)
+			service.SetOpsUpstreamError(c, http.StatusBadGateway, "provider failed", "")
+			c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{
+				{Kind: "request_error", UpstreamStatusCode: http.StatusBadGateway, AccountID: 41, Message: "provider failed"},
+				{Kind: "recovery", Scope: "excel_bps", Stage: "protocol_fallback", AccountID: 7, Message: "switching to native Codex"},
+			})
+			ops := service.NewOpsService(&ingressRejectOpsRepo{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+			job := <-opsErrorLogQueue
+			require.NotNil(t, job.entry.UpstreamStatusCode)
+			require.Equal(t, http.StatusBadGateway, *job.entry.UpstreamStatusCode)
+			require.NotNil(t, job.entry.AccountID)
+			require.Equal(t, int64(41), *job.entry.AccountID)
+			require.Contains(t, job.entry.ErrorMessage, "502: provider failed")
+			if completed {
+				require.Contains(t, job.entry.ErrorMessage, "Recovered upstream error")
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				require.Empty(t, opsErrorLogQueue, "socket close must not duplicate the completed turn")
+				service.BeginOpsStreamTurn(c, 3)
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				require.Empty(t, opsErrorLogQueue, "later disconnected turn cannot relabel earlier recovery")
+				service.SetOpsUpstreamError(c, http.StatusBadGateway, "third turn failed", "")
+				logOpsRecoveredUpstream(c, ops, http.StatusSwitchingProtocols)
+				third := <-opsErrorLogQueue
+				require.Contains(t, third.entry.ErrorMessage, "recovery not confirmed")
+				require.Contains(t, job.entry.ErrorMessage, "Recovered upstream error")
+			} else {
+				require.Contains(t, job.entry.ErrorMessage, "recovery not confirmed")
+			}
+		})
+	}
 }
 
 func TestOpsErrorLoggerMiddleware_RecoveredTelemetryFiltersSkipMonitoringAttempts(t *testing.T) {
@@ -415,6 +480,9 @@ func TestOpsErrorLoggerMiddleware_RecoveredTelemetrySkipsAllHiddenAttempts(t *te
 			UpstreamStatusCode: http.StatusTooManyRequests,
 			Message:            "hidden retry",
 			SkipMonitoring:     true,
+		}, {
+			Kind: "recovery", Scope: "excel_bps", Stage: "protocol_fallback",
+			Message: "switching to native Codex",
 		}})
 		c.JSON(http.StatusOK, gin.H{"status": "completed"})
 	})
@@ -730,26 +798,75 @@ func TestLogOpsStreamError_RecordsOneFailurePerWebSocketTurn(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
 
-	service.BeginOpsStreamTurn(c, 1)
-	service.MarkOpsStreamFailure(c, "rate_limit_error", "rate_limit_exceeded", "turn one failed", http.StatusTooManyRequests)
-	service.MarkOpsStreamError(c, "upstream_error", "generic duplicate for turn one", http.StatusBadGateway)
-	service.BeginOpsStreamTurn(c, 2)
-	service.MarkOpsStreamFailure(c, "permission_error", "permission_denied", "turn two failed", http.StatusForbidden)
+	turns := []struct {
+		attempt      *service.OpsUpstreamErrorEvent
+		clientStatus int
+		wantStatus   int // -1 means there was no upstream HTTP response.
+		wantMessage  string
+		wantDetail   string
+		wantPhase    string
+	}{
+		{
+			attempt:      &service.OpsUpstreamErrorEvent{Kind: "failover", UpstreamStatusCode: http.StatusTooManyRequests, Message: "provider rejected upload", Detail: "attachment attempt"},
+			clientStatus: http.StatusTooManyRequests,
+			wantStatus:   http.StatusTooManyRequests, wantMessage: "provider rejected upload", wantDetail: "attachment attempt", wantPhase: "upstream",
+		},
+		{
+			attempt:      &service.OpsUpstreamErrorEvent{Kind: "request_error", Message: "final transport failure", Detail: "connection reset"},
+			clientStatus: http.StatusBadGateway,
+			wantStatus:   -1, wantMessage: "final transport failure", wantDetail: "connection reset", wantPhase: "upstream",
+		},
+		{
+			attempt:      &service.OpsUpstreamErrorEvent{Stage: string(service.GatewayFailureStageAccountAuth), Message: "credentials unavailable", Detail: "account action required"},
+			clientStatus: http.StatusServiceUnavailable,
+			wantStatus:   0, wantMessage: "credentials unavailable", wantDetail: "account action required", wantPhase: "account_auth",
+		},
+		{
+			clientStatus: http.StatusForbidden,
+			wantStatus:   http.StatusUnauthorized, wantMessage: "scalar provider error", wantDetail: "scalar detail", wantPhase: "upstream",
+		},
+	}
+	for i, turn := range turns {
+		service.BeginOpsStreamTurn(c, i+1)
+		service.SetOpsUpstreamError(c, http.StatusUnauthorized, "scalar provider error", "scalar detail")
+		if turn.attempt != nil {
+			c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{turn.attempt, nil})
+		}
+		service.RecordOpenAIRetryStop(c, nil, service.OpenAIRetryStopContextNotPortable)
+		service.MarkOpsStreamFailure(c, "upstream_error", "upstream_error", turn.wantMessage, turn.clientStatus)
+		service.MarkOpsStreamError(c, "upstream_error", "generic duplicate for turn", http.StatusBadGateway)
+		if turn.attempt != nil {
+			turn.attempt.Message = "mutated after snapshot"
+		}
+	}
 
 	streamErrors := service.GetOpsStreamErrors(c)
-	require.Len(t, streamErrors, 2)
-	require.Equal(t, 1, streamErrors[0].Turn)
-	require.Equal(t, 2, streamErrors[1].Turn)
+	require.Len(t, streamErrors, len(turns))
 	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	logOpsStreamError(c, ops, http.StatusSwitchingProtocols)
 
-	require.Equal(t, int64(2), OpsErrorLogQueueLength())
-	first := <-opsErrorLogQueue
-	second := <-opsErrorLogQueue
-	require.Equal(t, "turn one failed", first.entry.ErrorMessage)
-	require.Equal(t, http.StatusTooManyRequests, first.entry.StatusCode)
-	require.Equal(t, "turn two failed", second.entry.ErrorMessage)
-	require.Equal(t, http.StatusForbidden, second.entry.StatusCode)
+	require.Equal(t, int64(len(turns)), OpsErrorLogQueueLength())
+	for i, turn := range turns {
+		require.Equal(t, i+1, streamErrors[i].Turn)
+		entry := (<-opsErrorLogQueue).entry
+		require.Equal(t, turn.wantMessage, entry.ErrorMessage)
+		require.Equal(t, turn.clientStatus, entry.StatusCode, "client status is independent of the provider response and subsequent turns")
+		if turn.wantStatus < 0 {
+			require.Nil(t, entry.UpstreamStatusCode)
+		} else {
+			require.NotNil(t, entry.UpstreamStatusCode)
+			require.Equal(t, turn.wantStatus, *entry.UpstreamStatusCode)
+		}
+		require.NotNil(t, entry.UpstreamErrorMessage)
+		require.Equal(t, turn.wantMessage, *entry.UpstreamErrorMessage)
+		require.NotNil(t, entry.UpstreamErrorDetail)
+		require.Equal(t, turn.wantDetail, *entry.UpstreamErrorDetail)
+		require.Equal(t, turn.wantPhase, entry.ErrorPhase)
+		require.NotNil(t, entry.UpstreamErrorsJSON)
+		events, err := service.ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
+		require.NoError(t, err)
+		require.Equal(t, service.OpsUpstreamRetryStopped, events[len(events)-1].Kind)
+	}
 }
 
 func TestIsKnownOpsErrorType(t *testing.T) {
@@ -812,7 +929,7 @@ func TestNormalizeOpsErrorType(t *testing.T) {
 	}
 }
 
-func TestClassifyOpsNoAvailableAccountsExcludedFromSLA(t *testing.T) {
+func TestClassifyOpsNoAvailableAccountsCountForSLA(t *testing.T) {
 	const message = "No available accounts"
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -825,12 +942,12 @@ func TestClassifyOpsNoAvailableAccountsExcludedFromSLA(t *testing.T) {
 
 	require.Equal(t, "api_error", errType)
 	require.Equal(t, "routing", phase)
-	require.True(t, isBusinessLimited)
+	require.False(t, isBusinessLimited)
 	require.Equal(t, "platform", errorOwner)
 	require.Equal(t, "gateway", errorSource)
 }
 
-func TestClassifyOpsRoutingCapacityMarkerExcludesMaskedSelectionFailureFromSLA(t *testing.T) {
+func TestClassifyOpsRoutingCapacityMarkerCountsMaskedSelectionFailureForSLA(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -846,7 +963,7 @@ func TestClassifyOpsRoutingCapacityMarkerExcludesMaskedSelectionFailureFromSLA(t
 	)
 
 	require.Equal(t, "routing", phase)
-	require.True(t, isBusinessLimited)
+	require.False(t, isBusinessLimited)
 	require.Equal(t, "platform", errorOwner)
 	require.Equal(t, "gateway", errorSource)
 }
@@ -856,6 +973,7 @@ func TestClassifyOpsLocalModelConfigurationRejection(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+	markOpsRoutingCapacityLimited(c)
 
 	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
 		c,
@@ -869,6 +987,18 @@ func TestClassifyOpsLocalModelConfigurationRejection(t *testing.T) {
 	require.True(t, isBusinessLimited)
 	require.Equal(t, "platform", errorOwner)
 	require.Equal(t, "gateway", errorSource)
+}
+
+func TestClassifyOpsCapacityOverridesStaleUserLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	markOpsRoutingCapacityLimited(c)
+	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+	phase, limited, owner, source := classifyOpsErrorLog(c, "api_error", "Service temporarily unavailable", "", http.StatusServiceUnavailable)
+	require.Equal(t, "routing", phase)
+	require.False(t, limited)
+	require.Equal(t, "platform", owner)
+	require.Equal(t, "gateway", source)
 }
 
 func TestClassifyOpsLocalModelConfigurationOverridesStaleUpstreamMarkers(t *testing.T) {
@@ -1400,7 +1530,7 @@ func TestClassifyOpsOtherErrorsStillCountForSLA(t *testing.T) {
 	require.Equal(t, "gateway", errorSource)
 }
 
-func TestClassifyOpsUnsupportedModelExcludedFromSLA(t *testing.T) {
+func TestClassifyOpsUndiagnosedModelAvailabilityCountsForSLA(t *testing.T) {
 	tests := []string{
 		"No available accounts: no available accounts supporting model: made-up-model",
 		"No available accounts: no available OpenAI accounts supporting model: made-up-model",
@@ -1420,7 +1550,7 @@ func TestClassifyOpsUnsupportedModelExcludedFromSLA(t *testing.T) {
 
 			require.Equal(t, "api_error", errType)
 			require.Equal(t, "routing", phase)
-			require.True(t, isBusinessLimited)
+			require.False(t, isBusinessLimited)
 			require.Equal(t, "platform", errorOwner)
 			require.Equal(t, "gateway", errorSource)
 		})
@@ -1660,9 +1790,10 @@ func TestApplyOpsUpstreamFieldsUsesLastNonNilAttempt(t *testing.T) {
 	c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{
 		{UpstreamStatusCode: http.StatusTooManyRequests, Message: "first attempt", Detail: "first detail"},
 		nil,
-		{UpstreamStatusCode: http.StatusServiceUnavailable, Message: "final attempt", Detail: "final detail"},
+		{UpstreamStatusCode: http.StatusServiceUnavailable, Message: "final attempt", Detail: "final detail", SkipMonitoring: true},
 		nil,
 	})
+	service.RecordOpenAIRetryStop(c, nil, service.OpenAIRetryStopDownstreamCommitted)
 	entry := &service.OpsInsertErrorLogInput{}
 
 	applyOpsUpstreamFieldsFromContext(c, entry)
@@ -1673,7 +1804,99 @@ func TestApplyOpsUpstreamFieldsUsesLastNonNilAttempt(t *testing.T) {
 	require.Equal(t, "final attempt", *entry.UpstreamErrorMessage)
 	require.NotNil(t, entry.UpstreamErrorDetail)
 	require.Equal(t, "final detail", *entry.UpstreamErrorDetail)
-	require.Len(t, entry.UpstreamErrors, 4)
+	require.Len(t, entry.UpstreamErrors, 5)
+	require.True(t, shouldSkipFinalOpsFailure(c), "a diagnostic stop must not clear provider monitoring rules")
+}
+
+func TestOpsErrorLoggerMiddlewareResponsesFailureProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		gateway          bool
+		upstreamEvidence bool
+		wantUpstream     int
+		wantMessage      string
+	}{
+		{"gateway keeps actual 500", true, true, 500, "actual provider failure"},
+		{"gateway infers only without evidence", true, false, 502, "Upstream service temporarily unavailable"},
+		{"provider terminal supersedes earlier attempt", false, true, 429, "final provider quota"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			gin.SetMode(gin.TestMode)
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.POST("/v1/responses", func(c *gin.Context) {
+				setOpsRequestContext(c, "gpt-6.1-sol", true)
+				if tc.upstreamEvidence {
+					service.SetOpsUpstreamError(c, 500, "actual provider failure", "")
+					c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{{
+						Kind: "failover", UpstreamStatusCode: 500, Message: "actual provider failure",
+					}})
+				}
+				service.RecordOpenAIRetryStop(c, nil, service.OpenAIRetryStopReplayUnsafe, `{"blocking_tool_kind":"mcp"}`)
+				if tc.gateway {
+					c.Header("Content-Type", "text/event-stream")
+					c.Writer.Flush()
+					require.True(t, writeResponsesFailedSSE(c, "upstream_error", "", "Upstream service temporarily unavailable"))
+				} else {
+					c.Data(http.StatusOK, "text/event-stream", []byte("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"final provider quota\"}}}\n\n"))
+				}
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+			require.Equal(t, int64(1), OpsErrorLogQueueLength())
+			entry := (<-opsErrorLogQueue).entry
+			require.NotNil(t, entry.UpstreamStatusCode)
+			require.Equal(t, tc.wantUpstream, *entry.UpstreamStatusCode)
+			require.NotNil(t, entry.UpstreamErrorMessage)
+			require.Equal(t, tc.wantMessage, *entry.UpstreamErrorMessage)
+			if tc.gateway {
+				require.Equal(t, 502, entry.StatusCode, "client status remains independently mapped")
+			}
+			require.NotNil(t, entry.UpstreamErrorsJSON)
+			events, err := service.ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
+			require.NoError(t, err)
+			require.Equal(t, service.OpsUpstreamRetryStopped, events[len(events)-1].Kind)
+			require.Equal(t, string(service.OpenAIRetryStopReplayUnsafe), events[len(events)-1].Reason)
+			require.JSONEq(t, `{"blocking_tool_kind":"mcp"}`, events[len(events)-1].Detail, "stop evidence must survive persistence without replacing provider attribution")
+		})
+	}
+}
+
+func TestOpsErrorLoggerBPSFirstOutputTimeoutPreservesHTTPStatus(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 2)
+	gin.SetMode(gin.TestMode)
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.Use(OpsErrorLoggerMiddleware(ops))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		setOpsRequestContext(c, "gpt-6-astra", true)
+		c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{{
+			Kind: "request_error", Scope: "excel_bps", Stage: "stream", UpstreamStatusCode: 200,
+			UpstreamRequestID: "req_bps_timeout", Message: "Excel BPS stream failed: canceled",
+			Detail: `{"stream_end_reason":"first_output_timeout","semantic_output_seen":false}`,
+		}})
+		service.RecordOpenAIRetryStop(c, nil, service.OpenAIRetryStopTurnBudget)
+		service.MarkOpsStreamFailure(c, "server_error", "first_output_timeout", "No semantic output before deadline", 504)
+		c.Header("Content-Type", "text/event-stream")
+		c.Writer.Flush()
+		require.True(t, writeResponsesFailedSSE(c, "server_error", "first_output_timeout", "No semantic output before deadline"))
+	})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(1), OpsErrorLogQueueLength())
+	entry := (<-opsErrorLogQueue).entry
+	require.Equal(t, http.StatusGatewayTimeout, entry.StatusCode)
+	require.NotNil(t, entry.UpstreamStatusCode)
+	require.Equal(t, http.StatusOK, *entry.UpstreamStatusCode)
+	require.Contains(t, *entry.UpstreamErrorDetail, "first_output_timeout")
+	require.NotNil(t, entry.UpstreamErrorsJSON)
+	events, err := service.ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
+	require.NoError(t, err)
+	require.NotEmpty(t, events)
+	require.Equal(t, service.OpsUpstreamRetryStopped, events[len(events)-1].Kind)
 }
 
 func TestApplyOpsUpstreamFieldsFinalStatuslessAttemptClearsStaleContext(t *testing.T) {
@@ -1683,6 +1906,7 @@ func TestApplyOpsUpstreamFieldsFinalStatuslessAttemptClearsStaleContext(t *testi
 	c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{
 		{UpstreamStatusCode: http.StatusBadGateway, Message: "first response"},
 		{Kind: "request_error", Message: "final transport failure", Detail: "connection reset"},
+		{Kind: "recovery", Message: "selecting the next route"},
 	})
 	entry := &service.OpsInsertErrorLogInput{}
 
@@ -1963,6 +2187,7 @@ func TestClassifyOpsIngressModelNotAllowedKeepsRequestPhase(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 	middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
+	markOpsRoutingCapacityLimited(c) // stale capacity cannot override the ingress rejection
 
 	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
 		c,
@@ -2076,6 +2301,74 @@ func TestLogOpsStreamError_RequestScopedIgnoresResidualUpstreamContext(t *testin
 	require.Nil(t, job.entry.UpstreamErrorMessage)
 	require.Nil(t, job.entry.UpstreamErrorsJSON)
 	require.Contains(t, job.entry.ErrorBody, "PROHIBITED_CONTENT")
+}
+
+func TestLogOpsStreamError_WebSocketLocalContinuationDoesNotPolluteProviderTurn(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 2)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	setOpsRequestContext(c, "gpt-6-astra", true)
+	service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
+
+	const code = "previous_response_not_found"
+	const localMessage = "Excel BPS continuation history is unavailable; resend the complete conversation history in input without previous_response_id"
+	const providerMessage = "Previous response not found"
+	service.BeginOpsStreamTurn(c, 1)
+	service.MarkOpsStreamErrorValue(c, service.OpsStreamError{
+		ErrType:        "invalid_request_error",
+		Code:           code,
+		Message:        localMessage,
+		IntendedStatus: http.StatusBadRequest,
+		RequestScoped:  true,
+	})
+
+	// The same code on the next turn is a real provider rejection. Log both
+	// after it arrives to verify each row retains its own origin snapshot.
+	service.BeginOpsStreamTurn(c, 2)
+	service.SetOpsUpstreamError(c, http.StatusBadRequest, providerMessage, "")
+	service.MarkOpsStreamFailure(c, "invalid_request_error", code, providerMessage, http.StatusBadRequest)
+
+	streamErrors := service.GetOpsStreamErrors(c)
+	require.Len(t, streamErrors, 2)
+	require.Equal(t, 1, streamErrors[0].Turn)
+	require.True(t, streamErrors[0].RequestScoped)
+	require.False(t, streamErrors[0].CountTowardsSLA)
+	require.Zero(t, streamErrors[0].UpstreamStatus)
+	require.Equal(t, 2, streamErrors[1].Turn)
+	require.False(t, streamErrors[1].RequestScoped)
+	require.True(t, streamErrors[1].CountTowardsSLA)
+	require.Equal(t, http.StatusBadRequest, streamErrors[1].UpstreamStatus)
+
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	logOpsStreamError(c, ops, http.StatusSwitchingProtocols)
+	require.Equal(t, int64(2), OpsErrorLogQueueLength())
+
+	local := (<-opsErrorLogQueue).entry
+	require.Equal(t, http.StatusBadRequest, local.StatusCode)
+	require.Equal(t, "request", local.ErrorPhase)
+	require.Equal(t, "client", local.ErrorOwner)
+	require.Equal(t, "client_request", local.ErrorSource)
+	require.Equal(t, localMessage, local.ErrorMessage)
+	require.True(t, local.IsBusinessLimited, "local continuation rejection must not count against upstream SLA")
+	require.Nil(t, local.UpstreamStatusCode)
+	require.Nil(t, local.UpstreamErrorMessage)
+	require.Nil(t, local.UpstreamErrorDetail)
+	require.Nil(t, local.UpstreamErrorsJSON)
+	require.Contains(t, local.ErrorBody, code)
+
+	provider := (<-opsErrorLogQueue).entry
+	require.Equal(t, http.StatusBadRequest, provider.StatusCode)
+	require.Equal(t, "upstream", provider.ErrorPhase)
+	require.Equal(t, "provider", provider.ErrorOwner)
+	require.Equal(t, "upstream_http", provider.ErrorSource)
+	require.Equal(t, providerMessage, provider.ErrorMessage)
+	require.False(t, provider.IsBusinessLimited, "the same provider code must still count against upstream SLA")
+	require.NotNil(t, provider.UpstreamStatusCode)
+	require.Equal(t, http.StatusBadRequest, *provider.UpstreamStatusCode)
+	require.NotNil(t, provider.UpstreamErrorMessage)
+	require.Equal(t, providerMessage, *provider.UpstreamErrorMessage)
+	require.Contains(t, provider.ErrorBody, code)
 }
 
 // 请求级带内结果与此前尝试的上游错误并存时，中间件既落带内错误行，也保留恢复行的 provider 遥测。
@@ -2247,4 +2540,324 @@ func TestOpsErrorLoggerMiddleware_RecordsClientClosedWhenIgnoreContextCanceledDi
 	require.Equal(t, int64(1), OpsErrorLogQueueLength())
 	job := <-opsErrorLogQueue
 	require.Equal(t, statusClientClosedRequest, job.entry.StatusCode)
+}
+
+// Exercise the actual pre-read middleware that rejected production request
+// a0509e5e: cancellation must be captured before its generic 400 hides the cause.
+func TestOpsErrorLoggerMiddleware_RequestBodyCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		readErr       error
+		cancelBefore  bool
+		cancelAfter   bool
+		keepCanceled  bool
+		upstreamError bool
+		handlerRead   bool
+		encoding      string
+		wantStatus    int
+		wantRecords   int64
+	}{
+		// 客户端放弃上传（取消 / 截断 / 事后取消）一律 499，并按客户端取消跳过 ops。
+		{name: "canceled_upload", readErr: io.ErrUnexpectedEOF, cancelBefore: true, wantStatus: statusClientClosedRequest},
+		{name: "canceled_upload_in_gateway_handler", readErr: io.ErrUnexpectedEOF, cancelBefore: true, handlerRead: true, wantStatus: statusClientClosedRequest},
+		{name: "explicit_cancellation", readErr: context.Canceled, wantStatus: statusClientClosedRequest},
+		{name: "filter_disabled", readErr: io.ErrUnexpectedEOF, cancelBefore: true, keepCanceled: true, wantStatus: statusClientClosedRequest, wantRecords: 1},
+		{name: "truncated_without_cancellation", readErr: io.ErrUnexpectedEOF, wantStatus: statusClientClosedRequest},
+		{name: "truncated_in_gateway_handler", readErr: io.ErrUnexpectedEOF, handlerRead: true, wantStatus: statusClientClosedRequest},
+		{name: "later_cancellation", readErr: io.ErrUnexpectedEOF, cancelAfter: true, wantStatus: statusClientClosedRequest},
+		// 大小、超时、解码失败不是客户端放弃：照常落库，状态码按 kind 区分。
+		{name: "body_limit_with_cancellation", readErr: &http.MaxBytesError{Limit: 10}, cancelBefore: true, wantStatus: 413, wantRecords: 1},
+		{name: "timeout_with_cancellation", readErr: os.ErrDeadlineExceeded, cancelBefore: true, wantStatus: 408, wantRecords: 1},
+		{name: "timeout_in_gateway_handler", readErr: os.ErrDeadlineExceeded, handlerRead: true, wantStatus: 408, wantRecords: 1},
+		{name: "invalid_encoding_with_cancellation", encoding: "gzip", cancelBefore: true, wantStatus: 400, wantRecords: 1},
+		{name: "upstream_failure_then_cancellation", readErr: io.ErrUnexpectedEOF, cancelBefore: true, upstreamError: true, wantStatus: statusClientClosedRequest, wantRecords: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			gin.SetMode(gin.TestMode)
+			var settings service.SettingRepository
+			if tc.keepCanceled {
+				settings = &opsAdvancedSettingsRepoStub{advanced: `{"ignore_context_canceled":false}`}
+			}
+			ops := service.NewOpsService(nil, settings, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancelBefore {
+				cancel()
+			}
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops), func(c *gin.Context) {
+				c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{
+					Platform:       service.PlatformOpenAI,
+					ModelAllowlist: service.GroupModelAllowlist{Enabled: !tc.handlerRead, Models: []string{"test-model"}},
+				}})
+				c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 1, Concurrency: 1})
+				if tc.upstreamError {
+					c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{{
+						AccountID: 7, UpstreamStatusCode: 503, Kind: "failover", Message: "upstream unavailable",
+					}})
+				}
+				c.Next()
+				if tc.cancelAfter {
+					cancel()
+				}
+			}, middleware2.GroupModelAllowlist())
+			handlerCalled := false
+			h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
+			router.POST("/v1/responses", func(c *gin.Context) {
+				handlerCalled = true
+				h.Responses(c)
+			})
+			var body io.Reader = strings.NewReader("partial request")
+			if tc.readErr != nil {
+				body = io.MultiReader(body, iotest.ErrReader(tc.readErr))
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", body).WithContext(ctx)
+			req.Header.Set("Content-Encoding", tc.encoding)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, req)
+			require.Equal(t, tc.handlerRead, handlerCalled, "pre-read rejection must not reach the gateway handler")
+			require.Equal(t, tc.wantStatus, recorder.Code)
+			require.Equal(t, tc.wantRecords, OpsErrorLogQueueLength())
+			if tc.wantRecords != 0 {
+				job := <-opsErrorLogQueue
+				if tc.upstreamError {
+					require.NotNil(t, job.entry.UpstreamStatusCode)
+					require.Equal(t, 503, *job.entry.UpstreamStatusCode)
+				} else {
+					require.Equal(t, "client", job.entry.ErrorOwner)
+					require.Equal(t, "request", job.entry.ErrorPhase)
+					require.Nil(t, job.entry.UpstreamStatusCode)
+				}
+				require.Contains(t, job.entry.ErrorBody, `"request_body_read"`, "ops rows carry the read diagnostics")
+			}
+		})
+	}
+}
+
+// 读体失败按 error_kind 分状态码与错误体，并把 content_length / bytes_read /
+// error_kind 附到 ops error_body；只有客户端放弃上传按客户端取消跳过落库。
+func TestOpsErrorLoggerMiddleware_RequestBodyReadErrorKinds(t *testing.T) {
+	const partial = "partial request"
+	for _, tc := range []struct {
+		name        string
+		readErr     error
+		encoding    string
+		keepCancel  bool
+		wantStatus  int
+		wantType    string
+		wantMessage string
+		wantKind    string
+		wantRecords int64
+		wantSkipped bool
+	}{
+		{name: "truncated_body_skipped", readErr: io.ErrUnexpectedEOF, wantStatus: statusClientClosedRequest, wantType: "invalid_request_error",
+			wantMessage: "Client closed request before the request body was fully received", wantKind: "truncated_body", wantSkipped: true},
+		{name: "truncated_body_recorded_when_filter_off", readErr: io.ErrUnexpectedEOF, keepCancel: true, wantStatus: statusClientClosedRequest, wantType: "invalid_request_error",
+			wantMessage: "Client closed request before the request body was fully received", wantKind: "truncated_body", wantRecords: 1},
+		{name: "connection_reset_skipped", readErr: &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}, wantStatus: statusClientClosedRequest, wantType: "invalid_request_error",
+			wantMessage: "Client closed request before the request body was fully received", wantKind: "connection_reset", wantSkipped: true},
+		{name: "timeout", readErr: &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}, wantStatus: http.StatusRequestTimeout, wantType: "request_timeout",
+			wantMessage: "Request body upload timed out", wantKind: "timeout", wantRecords: 1},
+		{name: "decode", encoding: "gzip", wantStatus: http.StatusBadRequest, wantType: "invalid_request_error",
+			wantMessage: "Failed to read request body", wantKind: "decode_content_encoding", wantRecords: 1},
+		{name: "max_bytes", readErr: &http.MaxBytesError{Limit: 10 << 20}, wantStatus: http.StatusRequestEntityTooLarge, wantType: "invalid_request_error",
+			wantMessage: "Request body too large, limit is 10MB", wantKind: "max_bytes", wantRecords: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			gin.SetMode(gin.TestMode)
+			var settings service.SettingRepository
+			if tc.keepCancel {
+				settings = &opsAdvancedSettingsRepoStub{advanced: `{"ignore_context_canceled":false}`}
+			}
+			ops := service.NewOpsService(nil, settings, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			clientAbandoned := false
+			router.Use(OpsErrorLoggerMiddleware(ops), func(c *gin.Context) {
+				c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Platform: service.PlatformOpenAI}})
+				c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 1, Concurrency: 1})
+				c.Next()
+				// Middlewares replace c.Request; read the marker from the request the handler saw.
+				clientAbandoned = httputil.RequestBodyReadCanceled(c.Request)
+			})
+			h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
+			router.POST("/v1/responses", h.Responses)
+			var body io.Reader = strings.NewReader(partial)
+			if tc.readErr != nil {
+				body = io.MultiReader(body, iotest.ErrReader(tc.readErr))
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", body)
+			req.ContentLength = 1024
+			if tc.encoding != "" {
+				req.Header.Set("Content-Encoding", tc.encoding)
+			}
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, req)
+			require.Equal(t, tc.wantStatus, recorder.Code)
+			require.JSONEq(t, fmt.Sprintf(`{"error":{"type":%q,"message":%q}}`, tc.wantType, tc.wantMessage), recorder.Body.String())
+			require.Equal(t, tc.wantSkipped, clientAbandoned && OpsErrorLogQueueLength() == 0, "only abandoned uploads are skipped as client cancellations")
+			require.Equal(t, tc.wantRecords, OpsErrorLogQueueLength())
+			if tc.wantRecords == 0 {
+				return
+			}
+			job := <-opsErrorLogQueue
+			require.Equal(t, tc.wantStatus, job.entry.StatusCode)
+			require.Equal(t, tc.wantType, job.entry.ErrorType)
+			require.Equal(t, "request", job.entry.ErrorPhase)
+			require.Equal(t, "client", job.entry.ErrorOwner)
+			require.Equal(t, tc.wantMessage, job.entry.ErrorMessage)
+			var persisted struct {
+				Error struct {
+					Type    string `json:"type"`
+					Message string `json:"message"`
+				} `json:"error"`
+				RequestBodyRead struct {
+					Kind          string `json:"error_kind"`
+					BytesRead     int64  `json:"bytes_read"`
+					ContentLength int64  `json:"content_length"`
+				} `json:"request_body_read"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(job.entry.ErrorBody), &persisted), job.entry.ErrorBody)
+			require.Equal(t, tc.wantType, persisted.Error.Type)
+			require.Equal(t, tc.wantKind, persisted.RequestBodyRead.Kind)
+			require.EqualValues(t, 1024, persisted.RequestBodyRead.ContentLength)
+			require.EqualValues(t, len(partial), persisted.RequestBodyRead.BytesRead)
+		})
+	}
+}
+
+// 各 API 风格保留各自错误体格式，状态码与文案由 kind 决定。
+func TestWriteRequestBodyReadErrorKeepsFormatEnvelopes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	newContext := func(readErr error) (*gin.Context, *httptest.ResponseRecorder) {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", io.MultiReader(strings.NewReader("abc"), iotest.ErrReader(readErr)))
+		c.Request.ContentLength = 99
+		_, err := httputil.ReadRequestBodyWithPrealloc(c.Request)
+		require.ErrorIs(t, err, readErr)
+		c.Set("read_err", err)
+		return c, recorder
+	}
+	h := &OpenAIGatewayHandler{}
+
+	c, recorder := newContext(os.ErrDeadlineExceeded)
+	writeRequestBodyReadError(c, c.MustGet("read_err").(error), func(status int, errType, message string) {
+		h.anthropicErrorResponse(c, status, errType, message)
+	})
+	require.Equal(t, http.StatusRequestTimeout, recorder.Code)
+	require.JSONEq(t, `{"type":"error","error":{"type":"request_timeout","message":"Request body upload timed out"}}`, recorder.Body.String())
+	failure, ok := opsRequestBodyReadFailure(c)
+	require.True(t, ok)
+	require.Equal(t, "timeout", failure.Kind)
+	require.EqualValues(t, 3, failure.BytesRead)
+
+	c, recorder = newContext(io.ErrUnexpectedEOF)
+	writeRequestBodyReadError(c, c.MustGet("read_err").(error), func(status int, errType, message string) {
+		googleErrorWithType(c, status, errType, "", message)
+	})
+	require.Equal(t, statusClientClosedRequest, recorder.Code)
+	var google struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &google))
+	require.Equal(t, statusClientClosedRequest, google.Error.Code)
+	require.Equal(t, "Client closed request before the request body was fully received", google.Error.Message)
+	errType, _ := service.OpsLocalErrorType(c)
+	require.Equal(t, "invalid_request_error", errType)
+	require.True(t, httputil.RequestBodyReadCanceled(c.Request))
+
+	c, recorder = newContext(&http.MaxBytesError{Limit: 2 << 20})
+	writeRequestBodyReadError(c, c.MustGet("read_err").(error), func(status int, errType, message string) {
+		imageTaskJSONError(c, status, errType, message)
+	})
+	require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
+	require.JSONEq(t, `{"error":{"type":"invalid_request_error","code":"invalid_request_error","message":"Request body too large, limit is 2MB"}}`, recorder.Body.String())
+}
+
+func TestAppendOpsRequestBodyReadFailure(t *testing.T) {
+	failure := httputil.RequestBodyReadFailure{Kind: "truncated_body", Phase: "read", BytesRead: 7, ContentLength: 100, ClientAbandoned: true}
+	merged := appendOpsRequestBodyReadFailure(`{"error":{"type":"invalid_request_error","message":"x"}}`, failure)
+	var object map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(merged), &object))
+	require.Contains(t, object, "error")
+	require.JSONEq(t, `{"error_kind":"truncated_body","phase":"read","bytes_read":7,"content_length":100,"client_abandoned":true}`, string(object["request_body_read"]))
+
+	appended := appendOpsRequestBodyReadFailure("plain text body", failure)
+	require.True(t, strings.HasPrefix(appended, "plain text body\n{\"request_body_read\":"), appended)
+	require.True(t, strings.HasPrefix(appendOpsRequestBodyReadFailure("", failure), `{"request_body_read":`))
+}
+
+func TestOpsSchedulingTraceDoesNotReplaceProviderAttribution(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx := service.WithSchedulingTrace(context.Background(), nil)
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+	service.RecordSchedulingDecision(ctx, service.SchedulingDecision{Stage: "selection", Action: "acquired", AccountID: 2})
+	entry := &service.OpsInsertErrorLogInput{}
+	applyOpsUpstreamFieldsFromContext(c, entry)
+	require.Nil(t, entry.UpstreamStatusCode)
+	require.Nil(t, entry.AccountID)
+	require.Nil(t, service.LastOpsUpstreamAttempt(entry.UpstreamErrors))
+	require.Len(t, entry.UpstreamErrors, 1)
+	upstream := &service.OpsUpstreamErrorEvent{Kind: "http_error", AccountID: 1, UpstreamStatusCode: 429, Message: "provider limited"}
+	c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{upstream})
+	applyOpsUpstreamFieldsFromContext(c, entry)
+	require.Equal(t, 429, *entry.UpstreamStatusCode)
+	require.Equal(t, "provider limited", *entry.UpstreamErrorMessage)
+	require.Same(t, upstream, service.LastOpsUpstreamAttempt(entry.UpstreamErrors))
+	require.Len(t, entry.UpstreamErrors, 2, "one diagnostic envelope, not another attempt")
+	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+	suppressOpsUpstreamAttributionForLocalModelConfiguration(c, entry)
+	require.Nil(t, entry.UpstreamStatusCode)
+	require.Nil(t, service.LastOpsUpstreamAttempt(entry.UpstreamErrors))
+	require.Len(t, entry.UpstreamErrors, 1, "local validation retains scheduling diagnostics only")
+}
+
+func TestOpsObservationAdmissionAndPanicIsolation(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 8)
+	t.Cleanup(func() { resetOpsErrorLoggerStateForTest(t) })
+	ran := 0
+	var producers sync.WaitGroup
+	for range 64 {
+		producers.Add(1)
+		go func() { defer producers.Done(); enqueueOpsObservation(func() { ran++ }) }()
+	}
+	producers.Wait()
+	require.Equal(t, int64(7), OpsErrorLogEnqueuedTotal())
+	require.False(t, enqueueOpsObservation(func() { ran++ }))
+	require.Zero(t, ran, "a saturated queue cannot fall back to logging on the caller")
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	enqueueOpsErrorLog(ops, &service.OpsInsertErrorLogInput{StatusCode: 502, ErrorType: "upstream_error"})
+	require.Equal(t, int64(8), OpsErrorLogQueueLength(), "reserve the last slot for a critical failure")
+	require.Equal(t, int64(58), OpsErrorLogDroppedTotal())
+	flushOpsErrorLogBatch([]opsErrorLogJob{{observation: func() { panic("isolated") }}, {observation: func() { ran++ }}})
+	require.Equal(t, 1, ran)
+	require.Equal(t, int64(59), OpsErrorLogDroppedTotal())
+	resetOpsErrorLoggerStateForTest(t)
+	opsErrorLogOnce.Do(func() {})
+	opsErrorLogQueue = make(chan opsErrorLogJob, 8)
+	opsErrorLogQueueBytes.Store(opsErrorLogMaxQueueBytes - opsErrorLogMaxQueueBytes/8)
+	require.False(t, enqueueOpsObservation(func() {}), "ordinary observations cannot consume reserved bytes")
+	enqueueOpsErrorLog(ops, &service.OpsInsertErrorLogInput{StatusCode: 503})
+	require.Equal(t, int64(1), OpsErrorLogQueueLength())
+	close(opsErrorLogShutdownCh)
+	require.False(t, enqueueOpsObservation(func() {}))
+}
+
+func TestOpsObservationShutdownDrains(t *testing.T) {
+	resetOpsErrorLoggerStateForTest(t)
+	t.Cleanup(func() { resetOpsErrorLoggerStateForTest(t) })
+	var processed atomic.Int64
+	for range 64 {
+		require.True(t, enqueueOpsObservation(func() { processed.Add(1) }))
+	}
+	require.True(t, StopOpsErrorLogWorkers())
+	require.Equal(t, int64(64), processed.Load())
+	require.Zero(t, OpsErrorLogQueueLength())
+	require.Zero(t, OpsErrorLogQueueBytes())
+	require.False(t, enqueueOpsObservation(func() {}))
 }

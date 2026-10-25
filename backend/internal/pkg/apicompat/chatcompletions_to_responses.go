@@ -1,6 +1,7 @@
 package apicompat
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -11,6 +12,89 @@ import (
 type chatMessageContent struct {
 	Text  *string
 	Parts []ChatContentPart
+}
+
+// ChatMessagesMapToResponsesInput adapts an already decoded legacy messages
+// array using the same converter as native Chat Completions. It never decodes
+// the request envelope again. Content RawMessages are the converter's existing
+// typed boundary; call IDs keep the native legacy pairing algorithm.
+func ChatMessagesMapToResponsesInput(values []any) ([]any, error) {
+	messages := make([]ChatMessage, 0, len(values))
+	for _, raw := range values {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("legacy message must be an object")
+		}
+		str := func(key string) string { s, _ := m[key].(string); return s }
+		content, err := json.Marshal(m["content"])
+		if err != nil {
+			return nil, err
+		}
+		msg := ChatMessage{Role: str("role"), Content: content, Name: str("name"), ToolCallID: str("tool_call_id"), Refusal: str("refusal"), ReasoningContent: str("reasoning_content"), Reasoning: str("reasoning")}
+		parseCall := func(raw any) (ChatFunctionCall, error) {
+			f, ok := raw.(map[string]any)
+			if !ok {
+				return ChatFunctionCall{}, fmt.Errorf("legacy function must be an object")
+			}
+			name, _ := f["name"].(string)
+			arguments, _ := f["arguments"].(string)
+			return ChatFunctionCall{Name: name, Arguments: arguments}, nil
+		}
+		if f, exists := m["function_call"]; exists && f != nil {
+			call, err := parseCall(f)
+			if err != nil {
+				return nil, err
+			}
+			msg.FunctionCall = &call
+		}
+		if calls, exists := m["tool_calls"]; exists && calls != nil {
+			list, ok := calls.([]any)
+			if !ok {
+				return nil, fmt.Errorf("legacy tool calls must be an array")
+			}
+			for _, v := range list {
+				call, ok := v.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("legacy tool call must be an object")
+				}
+				f, err := parseCall(call["function"])
+				if err != nil {
+					return nil, err
+				}
+				id, _ := call["id"].(string)
+				typ, _ := call["type"].(string)
+				msg.ToolCalls = append(msg.ToolCalls, ChatToolCall{ID: id, Type: typ, Function: f})
+			}
+		}
+		messages = append(messages, msg)
+	}
+	items, err := convertChatMessagesToResponsesInput(messages)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, 0, len(items))
+	for _, item := range items {
+		m := map[string]any{"type": item.Type}
+		for key, value := range map[string]string{"role": item.Role, "status": item.Status, "encrypted_content": item.EncryptedContent, "call_id": item.CallID, "name": item.Name, "arguments": item.Arguments, "id": item.ID} {
+			if value != "" {
+				m[key] = value
+			}
+		}
+		if item.Type == "function_call_output" {
+			m["output"] = item.Output
+		}
+		if len(item.Content) > 0 {
+			var content any
+			decoder := json.NewDecoder(bytes.NewReader(item.Content))
+			decoder.UseNumber()
+			if decoder.Decode(&content) != nil {
+				return nil, fmt.Errorf("invalid converted content")
+			}
+			m["content"] = content
+		}
+		out = append(out, m)
+	}
+	return out, nil
 }
 
 // ChatCompletionsToResponses converts a Chat Completions request into a
@@ -38,14 +122,15 @@ func ChatCompletionsToResponsesWithMinOutputTokens(req *ChatCompletionsRequest, 
 	}
 
 	out := &ResponsesRequest{
-		Model:              req.Model,
-		Instructions:       req.Instructions,
-		Input:              inputJSON,
-		Stream:             true, // upstream always streams
-		Include:            []string{"reasoning.encrypted_content"},
-		ServiceTier:        req.ServiceTier,
-		PromptCacheOptions: req.PromptCacheOptions,
-		ParallelToolCalls:  req.ParallelToolCalls,
+		FromChatCompletions: true,
+		Model:               req.Model,
+		Instructions:        req.Instructions,
+		Input:               inputJSON,
+		Stream:              true, // upstream always streams
+		Include:             []string{"reasoning.encrypted_content"},
+		ServiceTier:         req.ServiceTier,
+		PromptCacheOptions:  req.PromptCacheOptions,
+		ParallelToolCalls:   req.ParallelToolCalls,
 	}
 
 	// Reasoning models (gpt-5.x) do not accept sampling parameters.
@@ -461,6 +546,7 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 					PromptCacheBreakpoint: p.PromptCacheBreakpoint,
 					Type:                  "input_image",
 					ImageURL:              p.ImageURL.URL,
+					Detail:                responsesImageDetail(p.ImageURL.Detail),
 				})
 			}
 		case "file":
@@ -476,6 +562,15 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 		}
 	}
 	return responseParts
+}
+
+func responsesImageDetail(detail string) string {
+	switch normalized := strings.ToLower(strings.TrimSpace(detail)); normalized {
+	case "low", "high", "auto", "original":
+		return normalized
+	default:
+		return "auto"
+	}
 }
 
 func isEmptyBase64DataURI(raw string) bool {
@@ -535,11 +630,19 @@ func convertChatToolsToResponses(tools []ChatTool, functions []ChatFunction) []R
 			continue
 		}
 		rt := ResponsesTool{
-			Type:        "function",
-			Name:        t.Function.Name,
-			Description: t.Function.Description,
-			Parameters:  t.Function.Parameters,
-			Strict:      defaultStrictFalse(t.Function.Strict),
+			Type:                "function",
+			Name:                t.Function.Name,
+			Description:         t.Function.Description,
+			Parameters:          t.Function.Parameters,
+			Strict:              defaultStrictFalse(t.Function.Strict),
+			EagerInputStreaming: t.Function.EagerInputStreaming,
+			CacheControl:        t.Function.CacheControl,
+		}
+		if rt.EagerInputStreaming == nil {
+			rt.EagerInputStreaming = t.EagerInputStreaming
+		}
+		if rt.CacheControl == nil {
+			rt.CacheControl = t.CacheControl
 		}
 		out = append(out, rt)
 	}
@@ -547,11 +650,13 @@ func convertChatToolsToResponses(tools []ChatTool, functions []ChatFunction) []R
 	// Legacy functions[] are treated as function-type tools.
 	for _, f := range functions {
 		rt := ResponsesTool{
-			Type:        "function",
-			Name:        f.Name,
-			Description: f.Description,
-			Parameters:  f.Parameters,
-			Strict:      defaultStrictFalse(f.Strict),
+			Type:                "function",
+			Name:                f.Name,
+			Description:         f.Description,
+			Parameters:          f.Parameters,
+			Strict:              defaultStrictFalse(f.Strict),
+			EagerInputStreaming: f.EagerInputStreaming,
+			CacheControl:        f.CacheControl,
 		}
 		out = append(out, rt)
 	}

@@ -77,6 +77,23 @@ func TestWire_ReasoningItemSummaryAlwaysArray(t *testing.T) {
 	require.Contains(t, item, "summary")
 	_, ok = item["summary"].([]any)
 	require.True(t, ok, "summary must be an array")
+	for _, summary := range [][]ResponsesSummary{nil, {}, {{Type: "summary_text", Text: "analysis"}}} {
+		payload, err := json.Marshal(ResponsesOutput{Type: "reasoning", Summary: summary, EncryptedContent: "encrypted"})
+		require.NoError(t, err)
+		var wire map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(payload, &wire))
+		want := summary
+		if want == nil {
+			want = []ResponsesSummary{}
+		}
+		expected, err := json.Marshal(want)
+		require.NoError(t, err)
+		require.JSONEq(t, string(expected), string(wire["summary"]))
+		require.JSONEq(t, `"encrypted"`, string(wire["encrypted_content"]))
+	}
+	payload, err := json.Marshal(ResponsesOutput{Type: "message"})
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), `"summary"`)
 }
 
 // TestWire_ContentPartCarriesAnnotationsLogprobs guards the output_text part shape.
