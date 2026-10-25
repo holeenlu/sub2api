@@ -311,51 +311,6 @@ describe('WechatCallbackView', () => {
     expect(replaceMock).toHaveBeenCalledWith('/legacy-dashboard')
   })
 
-  it('accepts the legacy pending oauth invitation fragment without pending-session exchange', async () => {
-    locationState.current.hash =
-      '#error=invitation_required&pending_oauth_token=legacy-pending-token&redirect=%2Flegacy-invite'
-    Object.defineProperty(window, 'location', {
-      configurable: true,
-      value: locationState.current,
-    })
-    apiClientPostMock.mockResolvedValue({
-      data: {
-        access_token: 'legacy-access-token',
-        refresh_token: 'legacy-refresh-token',
-        expires_in: 3600,
-        token_type: 'Bearer',
-      },
-    })
-    setTokenMock.mockResolvedValue({})
-
-    const wrapper = mount(WechatCallbackView, {
-      global: {
-        stubs: {
-          AuthLayout: { template: '<div><slot /></div>' },
-          Icon: true,
-          RouterLink: { template: '<a><slot /></a>' },
-          transition: false,
-        },
-      },
-    })
-
-    await flushPromises()
-
-    expect(exchangePendingOAuthCompletionMock).not.toHaveBeenCalled()
-    await wrapper.find('input[type="text"]').setValue('invite-code')
-    await wrapper.find('button').trigger('click')
-    await flushPromises()
-
-    expect(apiClientPostMock).toHaveBeenCalledWith('/auth/oauth/wechat/complete-registration', {
-      pending_oauth_token: 'legacy-pending-token',
-      invitation_code: 'invite-code',
-      adopt_display_name: true,
-      adopt_avatar: true,
-    })
-    expect(setTokenMock).toHaveBeenCalledWith('legacy-access-token')
-    expect(replaceMock).toHaveBeenCalledWith('/legacy-invite')
-  })
-
   it('does not send adoption decisions during the initial exchange', async () => {
     exchangePendingOAuthCompletionMock.mockResolvedValue({
       access_token: 'access-token',
@@ -474,183 +429,6 @@ describe('WechatCallbackView', () => {
     expect(replaceMock).toHaveBeenCalledWith('/profile/connections')
   })
 
-  it('renders adoption choices for invitation flow and submits the selected values', async () => {
-    exchangePendingOAuthCompletionMock.mockResolvedValue({
-      error: 'invitation_required',
-      redirect: '/subscriptions',
-      adoption_required: true,
-      suggested_display_name: 'WeChat Nick',
-      suggested_avatar_url: 'https://cdn.example/wechat.png',
-    })
-    completeWeChatOAuthRegistrationMock.mockResolvedValue({
-      access_token: 'wechat-invite-token',
-      refresh_token: 'wechat-invite-refresh',
-      expires_in: 600,
-      token_type: 'Bearer',
-    })
-
-    const wrapper = mount(WechatCallbackView, {
-      global: {
-        stubs: {
-          AuthLayout: { template: '<div><slot /></div>' },
-          Icon: true,
-          RouterLink: { template: '<a><slot /></a>' },
-          transition: false,
-        },
-      },
-    })
-
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('WeChat Nick')
-    const checkboxes = wrapper.findAll('input[type="checkbox"]')
-    expect(checkboxes).toHaveLength(2)
-    await checkboxes[0].setValue(false)
-    await wrapper.get('input[type="text"]').setValue(' INVITE-CODE ')
-    await wrapper.get('button').trigger('click')
-    await flushPromises()
-
-    expect(completeWeChatOAuthRegistrationMock).toHaveBeenCalledWith('INVITE-CODE', {
-      adoptDisplayName: false,
-      adoptAvatar: true,
-    })
-    expect(setTokenMock).toHaveBeenCalledWith('wechat-invite-token')
-    expect(replaceMock).toHaveBeenCalledWith('/subscriptions')
-  })
-
-  it('keeps the oauth flow active when complete-registration returns another pending step', async () => {
-    exchangePendingOAuthCompletionMock.mockResolvedValue({
-      error: 'invitation_required',
-      redirect: '/dashboard',
-      adoption_required: true,
-      suggested_display_name: 'WeChat Nick',
-      suggested_avatar_url: 'https://cdn.example/wechat.png',
-    })
-    completeWeChatOAuthRegistrationMock.mockResolvedValue({
-      auth_result: 'pending_session',
-      step: 'choose_account_action_required',
-      redirect: '/dashboard',
-      email: 'fresh@example.com',
-      resolved_email: 'fresh@example.com',
-      force_email_on_signup: true,
-      adoption_required: true,
-    })
-
-    const wrapper = mount(WechatCallbackView, {
-      global: {
-        stubs: {
-          AuthLayout: { template: '<div><slot /></div>' },
-          Icon: true,
-          RouterLink: { template: '<a><slot /></a>' },
-          transition: false,
-        },
-      },
-    })
-
-    await flushPromises()
-    await wrapper.find('input[type="text"]').setValue('invite-code')
-    await wrapper.find('button').trigger('click')
-    await flushPromises()
-
-    expect(completeWeChatOAuthRegistrationMock).toHaveBeenCalledWith('invite-code', {
-      adoptDisplayName: true,
-      adoptAvatar: true,
-    })
-    expect(setTokenMock).not.toHaveBeenCalled()
-    expect(replaceMock).not.toHaveBeenCalled()
-    expect(wrapper.get('[data-testid="wechat-choice-bind-existing"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="wechat-choice-create-account"]').exists()).toBe(true)
-  })
-
-  it('offers existing-account email collection during invitation flow', async () => {
-    exchangePendingOAuthCompletionMock.mockResolvedValue({
-      error: 'invitation_required',
-      redirect: '/usage',
-    })
-    getAuthTokenMock.mockReturnValue(null)
-
-    const wrapper = mount(WechatCallbackView, {
-      global: {
-        stubs: {
-          AuthLayout: { template: '<div><slot /></div>' },
-          Icon: true,
-          RouterLink: { template: '<a><slot /></a>' },
-          transition: false,
-        },
-      },
-    })
-
-    await flushPromises()
-
-    const emailInput = wrapper.get('[data-testid="existing-account-email"]')
-    await emailInput.setValue('user@example.com')
-    await wrapper.get('[data-testid="existing-account-submit"]').trigger('click')
-
-    expect(replaceMock).toHaveBeenCalledTimes(1)
-    expect(replaceMock.mock.calls[0]?.[0]).toContain('/login?')
-    expect(replaceMock.mock.calls[0]?.[0]).toContain('wechat_bind_existing%3D1')
-    expect(replaceMock.mock.calls[0]?.[0]).toContain('email=user%40example.com')
-    expect(replaceMock.mock.calls[0]?.[0]).toContain('mode%3Dopen')
-  })
-
-  it('binds directly to the current signed-in account during invitation flow', async () => {
-    exchangePendingOAuthCompletionMock.mockResolvedValue({
-      error: 'invitation_required',
-      redirect: '/usage',
-    })
-    getAuthTokenMock.mockReturnValue('current-auth-token')
-
-    const wrapper = mount(WechatCallbackView, {
-      global: {
-        stubs: {
-          AuthLayout: { template: '<div><slot /></div>' },
-          Icon: true,
-          RouterLink: { template: '<a><slot /></a>' },
-          transition: false,
-        },
-      },
-    })
-
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="existing-account-email"]').exists()).toBe(false)
-    await wrapper.get('[data-testid="existing-account-submit"]').trigger('click')
-
-    expect(prepareOAuthBindAccessTokenCookieMock).toHaveBeenCalledTimes(1)
-    expect(locationState.current.href).toContain('/api/v1/auth/oauth/wechat/bind/start?')
-    expect(locationState.current.href).toContain('intent=bind_current_user')
-    expect(locationState.current.href).toContain('redirect=%2Fusage')
-    expect(locationState.current.href).toContain('mode=open')
-  })
-
-  it('shows an error and stays on the page when preparing bind-token for the current account fails', async () => {
-    exchangePendingOAuthCompletionMock.mockResolvedValue({
-      error: 'invitation_required',
-      redirect: '/usage',
-    })
-    getAuthTokenMock.mockReturnValue('current-auth-token')
-    prepareOAuthBindAccessTokenCookieMock.mockRejectedValue(new Error('bind token failed'))
-
-    const wrapper = mount(WechatCallbackView, {
-      global: {
-        stubs: {
-          AuthLayout: { template: '<div><slot /></div>' },
-          Icon: true,
-          RouterLink: { template: '<a><slot /></a>' },
-          transition: false,
-        },
-      },
-    })
-
-    await flushPromises()
-
-    await wrapper.get('[data-testid="existing-account-submit"]').trigger('click').catch(() => undefined)
-    await flushPromises()
-
-    expect(showErrorMock).toHaveBeenCalledWith('bind token failed')
-    expect(locationState.current.href).toBe('http://localhost/auth/wechat/callback')
-  })
-
   it('collects email, password, and verify code for pending oauth account creation and submits adoption decisions', async () => {
     getPublicSettingsMock.mockResolvedValue({
       invitation_code_enabled: true,
@@ -693,7 +471,6 @@ describe('WechatCallbackView', () => {
     await wrapper.get('[data-testid="wechat-create-account-email"]').setValue('  new@example.com  ')
     await wrapper.get('[data-testid="wechat-create-account-password"]').setValue('secret-123')
     await wrapper.get('[data-testid="wechat-create-account-verify-code"]').setValue('246810')
-    await wrapper.get('[data-testid="wechat-create-account-invitation-code"]').setValue(' INVITE123 ')
     await wrapper.get('[data-testid="wechat-create-account-submit"]').trigger('click')
     await flushPromises()
 
@@ -701,7 +478,6 @@ describe('WechatCallbackView', () => {
       email: 'new@example.com',
       password: 'secret-123',
       verify_code: '246810',
-      invitation_code: 'INVITE123',
       adopt_display_name: true,
       adopt_avatar: false,
     })

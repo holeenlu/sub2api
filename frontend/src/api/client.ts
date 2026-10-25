@@ -5,18 +5,25 @@
 
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig, AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types'
-import { getLocale } from '@/i18n'
+import { getLocale, i18n } from '@/i18n'
 import {
   ADMIN_UI_REQUEST_HEADER,
   USER_UI_REQUEST_HEADER,
   shouldMarkAdminUIRequest,
   shouldMarkUserUIRequest,
 } from './adminUIRequest'
-import { refreshAuthTokens } from './tokenRefresh'
+import { authSessionStamp, refreshAuthTokens } from './tokenRefresh'
 import { getAPIBaseURL } from './url'
+import { requestAdminStepUp, StepUpCancelledError } from '@/composables/useStepUp'
 export { buildApiUrl, buildGatewayUrl } from './url'
 
 // ==================== Axios Instance Configuration ====================
+
+function clientMessage(key: string, fallback: string): string {
+  // Public settings can fail before the lazy locale bundle has loaded.
+  const message = i18n.global.t(key)
+  return message === key ? fallback : message
+}
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL: getAPIBaseURL(),
@@ -26,6 +33,46 @@ export const apiClient: AxiosInstance = axios.create({
     'Content-Type': 'application/json'
   }
 })
+
+function currentAuthorizationScope(): string {
+  try {
+    const user = JSON.parse(localStorage.getItem('auth_user') || 'null')
+    return JSON.stringify([user?.id, user?.role, user?.policy_version, authSessionStamp(localStorage.getItem('auth_token'))])
+  } catch { return '' }
+}
+type SessionRequestConfig = InternalAxiosRequestConfig & {
+  _authorizationScope?: string
+  _retry?: boolean
+  _stepUpRetried?: boolean
+}
+
+function requireCurrentSession(config?: SessionRequestConfig): void {
+  if (config?._authorizationScope !== undefined && config._authorizationScope !== currentAuthorizationScope()) {
+    throw new axios.CanceledError('Authorization scope changed')
+  }
+}
+
+let permissionRefresh: { session: string; promise: Promise<void> } | null = null
+async function refreshManagementPermissions(requestToken: string) {
+  const session = authSessionStamp(requestToken)
+  const isCurrent = () => session === authSessionStamp(localStorage.getItem('auth_token'))
+  if (!isCurrent()) return
+  if (permissionRefresh?.session !== session) {
+    const promise = import('@/stores/auth').then(async ({ useAuthStore }) => {
+      if (!isCurrent()) return
+      const auth = useAuthStore()
+      await auth.refreshUser()
+      const { default: router } = await import('@/router')
+      if (!isCurrent()) return
+      const path = router.currentRoute.value.path
+      if (path.startsWith('/admin/') && !auth.canAccessAdminPage(path)) await router.replace(auth.adminLandingPath)
+    }).catch(() => { /* Preserve the original failure and let the next request retry. */ }).finally(() => {
+      if (permissionRefresh?.promise === promise) permissionRefresh = null
+    })
+    permissionRefresh = { session, promise }
+  }
+  await permissionRefresh.promise
+}
 
 // ==================== Request Interceptor ====================
 
@@ -40,6 +87,10 @@ const getUserTimezone = (): string => {
 
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    const sessionRequest = config as SessionRequestConfig
+    requireCurrentSession(sessionRequest)
+    sessionRequest._authorizationScope ??= currentAuthorizationScope()
+
     // Attach token from localStorage
     const token = localStorage.getItem('auth_token')
     if (token && config.headers) {
@@ -56,7 +107,7 @@ apiClient.interceptors.request.use(
       if (!config.params) {
         config.params = {}
       }
-      config.params.timezone = getUserTimezone()
+      config.params.timezone ??= getUserTimezone()
     }
 
     if (config.headers) {
@@ -79,7 +130,19 @@ apiClient.interceptors.request.use(
 // ==================== Response Interceptor ====================
 
 apiClient.interceptors.response.use(
-  (response: AxiosResponse) => {
+  async (response: AxiosResponse) => {
+    requireCurrentSession(response.config as SessionRequestConfig)
+    if (/^\/(admin|vendor)\//.test(String(response.config.url || ''))) {
+      const config = response.config as SessionRequestConfig
+      const version = response.headers['x-admin-policy-version']
+      const requestToken = String(config.headers?.Authorization || '').replace(/^Bearer\s+/i, '')
+      let user: { role?: string; policy_version?: number } | null = null
+      try { user = JSON.parse(localStorage.getItem('auth_user') || 'null') } catch { /* no stored scope */ }
+      if (user?.role === 'admin' && version !== undefined && Number(version) !== user.policy_version) {
+        await refreshManagementPermissions(requestToken)
+        if (config._authorizationScope !== currentAuthorizationScope()) throw new axios.CanceledError('Administrator permissions updated')
+      }
+    }
     // Unwrap standard API response format { code, message, data }
     const apiResponse = response.data as ApiResponse<unknown>
     if (apiResponse && typeof apiResponse === 'object' && 'code' in apiResponse) {
@@ -92,7 +155,7 @@ apiClient.interceptors.response.use(
         return Promise.reject({
           status: response.status,
           code: apiResponse.code,
-          message: apiResponse.message || 'Unknown error',
+          message: apiResponse.message || clientMessage('ui.unknownError', 'Unknown error'),
           reason: resp.reason,
           metadata: resp.metadata,
         })
@@ -107,7 +170,8 @@ apiClient.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
+    const originalRequest = error.config as SessionRequestConfig
+    requireCurrentSession(originalRequest)
 
     // Handle common errors
     if (error.response) {
@@ -116,6 +180,21 @@ apiClient.interceptors.response.use(
 
       // Validate `data` shape to avoid HTML error pages breaking our error handling.
       const apiData = (typeof data === 'object' && data !== null ? data : {}) as Record<string, any>
+
+      if (status === 403 && url.startsWith('/admin/') && ['ADMIN_PERMISSION_DENIED', 'PERMISSION_DENIED'].includes(String(apiData.reason || apiData.code))) {
+        await refreshManagementPermissions(String(originalRequest.headers?.Authorization || '').replace(/^Bearer\s+/i, ''))
+        requireCurrentSession(originalRequest)
+      }
+
+      if (status === 403 && url.startsWith('/admin/') && (apiData.reason === 'STEP_UP_REQUIRED' || apiData.code === 'STEP_UP_REQUIRED') && !originalRequest._stepUpRetried) {
+        const originalToken = String(originalRequest.headers?.Authorization || '').replace(/^Bearer\s+/i, '')
+        const stamp = authSessionStamp(originalToken)
+        if (!stamp || stamp !== authSessionStamp(localStorage.getItem('auth_token'))) throw new StepUpCancelledError()
+        originalRequest._stepUpRetried = true
+        const verified = await requestAdminStepUp()
+        if (!verified || stamp !== authSessionStamp(localStorage.getItem('auth_token'))) throw new StepUpCancelledError()
+        return apiClient(originalRequest)
+      }
 
       // Ops monitoring disabled: treat as feature-flagged 404, and proactively redirect away
       // from ops pages to avoid broken UI states.
@@ -132,7 +211,7 @@ apiClient.interceptors.response.use(
         }
 
         if (window.location.pathname.startsWith('/admin/ops')) {
-          window.location.href = '/admin/settings'
+          window.location.href = '/dashboard'
         }
 
         return Promise.reject({
@@ -169,7 +248,6 @@ apiClient.interceptors.response.use(
 
         // If we have a refresh token and this is not an auth endpoint, try to refresh
         if (refreshToken && !isAuthEndpoint) {
-          const refreshSessionUser = localStorage.getItem('auth_user')
           originalRequest._retry = true
 
           try {
@@ -181,25 +259,15 @@ apiClient.interceptors.response.use(
                 : null
             const tokens = await refreshAuthTokens({ failedAccessToken })
 
+            requireCurrentSession(originalRequest)
+
             // Retry the original request with the refreshed token
             if (originalRequest.headers) {
               originalRequest.headers.Authorization = `Bearer ${tokens.access_token}`
             }
             return apiClient(originalRequest)
           } catch (refreshError) {
-            // A stale request must never destroy a session that was logged out or replaced while
-            // its refresh was in flight (for example, when another tab signs in as another user).
-            const sessionChanged =
-              localStorage.getItem('refresh_token') !== refreshToken ||
-              localStorage.getItem('auth_user') !== refreshSessionUser
-            if (sessionChanged) {
-              return Promise.reject({
-                status: 401,
-                code: 'AUTH_SESSION_CHANGED',
-                message: 'Authentication session changed while refreshing.'
-              })
-            }
-
+            requireCurrentSession(originalRequest)
             if (axios.isAxiosError(refreshError)) {
               const refreshStatus = refreshError.response?.status ?? 0
               if (refreshStatus === 0 || refreshStatus === 429 || refreshStatus >= 500) {
@@ -225,7 +293,7 @@ apiClient.interceptors.response.use(
             return Promise.reject({
               status: 401,
               code: 'TOKEN_REFRESH_FAILED',
-              message: 'Session expired. Please log in again.'
+              message: clientMessage('ui.sessionExpired', 'Session expired. Please log in again.')
             })
           }
         }
@@ -254,13 +322,19 @@ apiClient.interceptors.response.use(
         }
       }
 
+      const permissionMessage = apiData.reason === 'ADMIN_PERMISSION_DENIED'
+        ? clientMessage('admin.rolePermissions.denied', 'Your role does not allow this action.')
+        : apiData.reason === 'ADMIN_POLICY_CONFLICT'
+          ? clientMessage('admin.rolePermissions.conflict', 'Permissions changed. Reload before saving.')
+          : undefined
+
       // Return structured error
       return Promise.reject({
         status,
         code: apiData.code,
         reason: apiData.reason,
         error: apiData.error,
-        message: apiData.message || apiData.detail || error.message,
+        message: permissionMessage || apiData.message || apiData.detail || error.message,
         metadata: apiData.metadata,
       })
     }
@@ -269,7 +343,7 @@ apiClient.interceptors.response.use(
     return Promise.reject({
       status: 0,
       code: error.code || 'ERR_NETWORK',
-      message: 'Network error. Please check your connection.'
+      message: clientMessage('ui.networkError', 'Network error. Please check your connection.')
     })
   }
 )

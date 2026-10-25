@@ -1,10 +1,10 @@
-# Sub2API Configuration File
-# Sub2API 配置文件
+# TapModels Configuration File
+# TapModels 配置文件
 #
-# Copy this file to /etc/sub2api/config.yaml and modify as needed
-# 复制此文件到 /etc/sub2api/config.yaml 并根据需要修改
+# Copy this file to /etc/tapmodels/config.yaml and modify as needed
+# 复制此文件到 /etc/tapmodels/config.yaml 并根据需要修改
 #
-# Documentation / 文档: https://github.com/Wei-Shaw/sub2api
+# Documentation / 文档: https://docs.tapmodels.ai
 
 # =============================================================================
 # Server Configuration
@@ -30,6 +30,13 @@ server:
   # Maximum time to receive complete request headers. Does not limit response streams.
   # 完整读取请求头的最大时间；不限制响应流持续时间。
   read_header_timeout: 10
+  # Idle timeout for the request body phase: the maximum seconds allowed between two
+  # successful body reads. The deadline is renewed whenever bytes arrive, so slow but
+  # steady uploads are never cut; a stalled upload fails with 408. Cleared after the
+  # body completes; does not limit response streams. 0 disables.
+  # 请求体阶段的空闲超时：两次成功读取之间允许的最长秒数。每读到数据即续期，慢而
+  # 持续的上传不会被切断；停滞超过该值返回 408。读完后解除，不限制响应流。0 禁用。
+  read_body_timeout: 300
   # Request header limit in bytes (64 KiB); also bounds the HTTP/2 header list.
   # 请求头上限（字节，默认 64 KiB）；同时约束 HTTP/2 header list。
   max_header_bytes: 65536
@@ -37,10 +44,10 @@ server:
   # Keep-Alive 空闲连接超时（秒）。
   idle_timeout: 120
   # Trusted proxies used when security.trust_forwarded_ip_for_api_key_acl is false.
-  # List only the exact proxy addresses that connect directly to Sub2API.
+  # List only the exact proxy addresses that connect directly to TapModels.
   # Set [] explicitly to disable forwarded-IP trust in high-security mode.
   # security.trust_forwarded_ip_for_api_key_acl=false 时使用的可信代理。
-  # 只填写直接连接 Sub2API 的精确代理地址；显式设置 [] 可在高安全模式下
+  # 只填写直接连接 TapModels 的精确代理地址；显式设置 [] 可在高安全模式下
   # 禁用转发 IP 信任。
   trusted_proxies:
     - 127.0.0.1/32
@@ -82,10 +89,10 @@ server:
 # 填写浏览器访问使用的完整 Origin。
 webauthn:
   enabled: false
-  rp_display_name: "Sub2API"
-  # Example / 示例: "sub2api.example.com"
+  rp_display_name: "TapModels"
+  # Example / 示例: "console.tapmodels.ai"
   rp_id: ""
-  # Example / 示例: ["https://sub2api.example.com"]
+  # Example / 示例: ["https://console.tapmodels.ai"]
   rp_origins: []
 
 # =============================================================================
@@ -125,10 +132,9 @@ cors:
 # 安全配置
 # =============================================================================
 security:
-  # Legacy compatibility switch. When true, raw forwarded headers take over
-  # server.trusted_proxies. Set false to enforce the trusted proxy chain above.
-  # 旧版兼容开关。开启时原始转发头会接管 server.trusted_proxies；关闭后严格
-  # 使用上方配置的可信代理链。示例配置采用高安全模式。
+  # Legacy request-metadata compatibility only. Authentication, IP ACLs,
+  # rate limits and session binding always use server.trusted_proxies.
+  # 仅保留请求元数据兼容；认证、IP ACL、限流与会话绑定始终使用可信代理链。
   trust_forwarded_ip_for_api_key_acl: false
   # Optional client-IP headers for third-party CDNs, checked in list order before
   # CF-Connecting-IP, X-Real-IP, and X-Forwarded-For. Valid only while the legacy
@@ -229,24 +235,27 @@ gateway:
   # Grok text Responses first-byte timeout (seconds, 0=disabled; default 120)
   # Grok 文本 Responses 首字节超时时间（秒，0=禁用；默认 120）
   grok_response_header_timeout: 120
-  # Native OpenAI HTTP Responses first semantic output timeout (seconds, 0=disabled)
-  # Includes response-header wait; does not apply to passthrough or WebSocket transports.
+  # Shared HTTP/WS first semantic output timeout (seconds, 0=300 seconds)
+  # Includes admission, credential preparation and response-header wait across retries.
   # A timed-out request may already have incurred upstream usage; account failover can therefore duplicate upstream billing.
   # 超时请求可能已产生上游用量；切换账号重试可能导致上游重复计费。
   # Pre-output attempt staging is capped at 8 MiB; overflow fails over without exposing partial SSE data.
   # 首次输出前的单次尝试暂存上限为 8 MiB；溢出时切号且不暴露不完整 SSE 数据。
   openai_first_output_timeout_seconds: 0
-  # Optional high/xhigh/max override (seconds, 0=use the standard timeout)
+  # High/xhigh/max override (0=explicit standard timeout, or 600 seconds when both are 0)
   openai_high_effort_first_output_timeout_seconds: 0
+  # Logical-turn attempt cap across reconnects, repairs and account switches.
+  # 0 uses 8 generation attempts; a positive value can lower this cap. Account switches remain a separate limit.
+  openai_turn_max_attempts: 0
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456
   # Pure-text endpoint body limit (embeddings and alpha/search), default 32 MiB.
   # 纯文本端点请求体上限（embeddings、alpha/search），默认 32 MiB。
   text_max_body_size: 33554432
-  # Max bytes to read for non-stream upstream responses (default: 8MB)
-  # 非流式上游响应体读取上限（默认 8MB）
-  upstream_response_read_max_bytes: 8388608
+  # Max bytes to read for non-stream upstream HTTP responses (default: 128 MiB)
+  # 非流式上游 HTTP 响应体读取上限（默认 128 MiB）；不覆盖 Cloud 结果存储限制。
+  upstream_response_read_max_bytes: 134217728
   # Max bytes to read for upstream model-list responses (default: 8MB)
   # 上游模型列表响应体读取上限（默认 8MB）
   models_list_read_max_bytes: 8388608
@@ -273,6 +282,9 @@ gateway:
   #
   # 注意：开启后会影响所有客户端的行为（不仅限于 VS Code / Codex CLI），请谨慎开启。
   force_codex_cli: false
+  # Reject lossy native Codex conversions with 400 unsupported_feature (default: false).
+  # Environment: CODEX_STRICT_RESPONSES_COMPAT; per request: X-Codex2API-Strict-Compatibility: true.
+  strict_responses_compatibility: false
   # Stop rewriting load-shed Codex originators to the official CLI identity.
   # 关闭「把落在上游降载桶的 Codex originator 改写为官方 CLI 身份（codex_cli_rs）」。
   #
@@ -338,10 +350,13 @@ gateway:
     # ingress 默认模式：off|ctx_pool|passthrough|http_bridge（仅 mode_router_v2_enabled=true 生效；关闭时账号级 WS mode 被忽略）
     # 兼容旧值：shared/dedicated 会按 ctx_pool 处理。
     ingress_mode_default: ctx_pool
-    # 完整读取并解压首条客户端消息的总超时（秒）；大请求或慢链路可调高到 120-300。
-    client_first_message_timeout_seconds: 30
+    # 完整读取并解压首条客户端消息的总超时（秒）；默认 120；慢链路可按需调到 300。
+    client_first_message_timeout_seconds: 120
     # Close a client WebSocket that stays idle between completed turns (seconds). Set 0 to disable.
-    ingress_inter_turn_idle_timeout_seconds: 300
+    ingress_inter_turn_idle_timeout_seconds: 900
+    # Maximum complete client WS message (128 MiB), including inline base64 images.
+    # 完整客户端 WS 消息上限，包含 Base64 图片；上游仍有独立限制。
+    client_read_limit_bytes: 134217728
     # Limit live client WebSocket ingress sessions per API key across all instances. Set 0 to disable.
     max_ingress_connections_per_api_key: 64
     # 全局总开关，默认 true；关闭时所有请求保持原有 HTTP/SSE 路由
@@ -405,7 +420,6 @@ gateway:
     # payload_schema 日志采样率（0-1）；降低热路径日志放大
     payload_log_sample_rate: 0.2
     # 调度与粘连参数
-    lb_top_k: 7
     sticky_session_ttl_seconds: 3600
     # 会话哈希迁移兼容开关：新 key 未命中时回退读取旧 SHA-256 key
     session_hash_read_old_fallback: true
@@ -416,27 +430,7 @@ gateway:
     sticky_response_id_ttl_seconds: 3600
     # 兼容旧键：当 sticky_response_id_ttl_seconds 缺失时回退该值
     sticky_previous_response_ttl_seconds: 3600
-    scheduler_score_weights:
-      priority: 1.0
-      load: 1.0
-      queue: 0.7
-      error_rate: 0.8
-      ttft: 0.5
-      # use-it-or-lose-it：倾向「会话窗口最早重置」的账号，剩余重置时间越短得分越高。
-      # 0 表示关闭（默认，不改变原有行为）；调大可让即将重置的账号被优先用尽。
-      reset: 0.0
-      # 倾向 7d 剩余额度更健康的账号；0 表示关闭（默认，不改变原有行为），小流量灰度可设为 0.3。
-      quota_headroom: 0.0
-      # 倾向上游声明倍率更低的账号；0 表示关闭（默认），建议启用时从 1.5 开始。
-      upstream_cost: 0.0
   # OpenAI 高级调度器补充配置
-  openai_scheduler:
-    # 是否允许 session_hash sticky 在账号健康度恶化时临时逃逸；false 可一键回退旧行为
-    sticky_escape_enabled: true
-    # TTFT EWMA 超过该阈值（毫秒）时跳过 sticky，默认 15s，避免轻微抖动就逃逸
-    sticky_escape_ttft_ms: 15000
-    # 错误率 EWMA 超过该阈值时跳过 sticky，默认 0.5，仅在明显降级时触发
-    sticky_escape_error_rate: 0.5
   # OpenAI HTTP upstream protocol strategy.
   # OpenAI HTTP 上游协议策略（默认 HTTP/2；代理明确不兼容时可临时回退 HTTP/1.1）。
   openai_http2:
@@ -445,9 +439,9 @@ gateway:
     fallback_error_threshold: 2
     fallback_window_seconds: 60
     fallback_ttl_seconds: 600
-  # OpenAI Responses SSE 代理断流熔断；按 proxy_id 跨账号隔离，仅影响下一次调度。
-  # 隔离是偏好而非硬闸：当全部候选账号都在被隔离代理下时自动放行（fail-open），
-  # 不会因熔断而返回"无可用账号"。3 秒内的并发断流合并为一次失败事件。
+  # OpenAI Responses SSE 代理断流熔断；按 proxy_id 跨账号隔离，并在生成发送前核验共享恢复状态。
+  # 隔离期间不整体放行；冷却结束后的真实请求须取得 Redis 单探测租约，
+  # Redis 无法确认已隔离路径的探测资格时保持隔离；3 秒内并发断流合并为一次事件。
   openai_proxy_stream_circuit:
     disabled: false
     failure_threshold: 2
@@ -526,9 +520,9 @@ gateway:
     # Max image requests waiting in this process when overflow_mode=wait, 0=unlimited
     # wait 模式当前进程允许排队等待的图片请求数，0=不限制
     max_waiting_requests: 100
-  # SSE max line size in bytes (default: 40MB)
-  # SSE 单行最大字节数（默认 40MB）
-  max_line_size: 41943040
+  # Native SSE max line / assembled event size in bytes (default: 128 MiB).
+  # 原生 SSE 单行及拼接后完整事件上限（默认 128 MiB）；BPS/Cloud 桥接另有本地保护值。
+  max_line_size: 134217728
   # Log upstream error response body summary (safe/truncated; does not log request content)
   # 记录上游错误响应体摘要（安全/截断；不记录请求内容）
   log_upstream_error_body: true
@@ -544,6 +538,27 @@ gateway:
   # Scheduling configuration
   # 调度配置
   scheduling:
+    # Sticky session TTL in seconds for Anthropic accounts (sliding window, renewed
+    # on every hit). Longer values keep a resumed conversation on the same upstream
+    # account instead of rebuilding its prompt cache elsewhere; raise to 86400 (24h)
+    # or 259200 (72h) if sessions are commonly resumed the next day. Other platforms
+    # (Gemini / Antigravity) always use one hour.
+    # Anthropic 账号的粘性会话 TTL（秒，滑动窗口，每次命中都会续期）。调大后隔夜/跨
+    # 周末续上的会话仍会落回原账号，不必在新账号上重建 prompt cache；常见取值
+    # 86400（24 小时）或 259200（72 小时）。Gemini / Antigravity 固定 1 小时。
+    # 注意：这只延长「优先复用同一账号」的记忆，账号停调、限流、模型不支持、配额或
+    # 利润门不通过时照常换号。
+    sticky_session_ttl_seconds: 3600
+    # Long-lived "session -> account" affinity key TTL in seconds. 0 (default)
+    # disables it. When the short sticky key has expired, the session first
+    # retries its historical account; that account still has to pass every
+    # scheduling gate, so this only lengthens the preference, never bypasses a
+    # rate limit, quota or profit gate. Anthropic accounts only. Try 604800 (7d).
+    # 长周期「会话账号历史」亲和键 TTL（秒），0（默认）为关闭。短期粘性键过期后，
+    # 会话先回试历史账号；该账号仍要过全部调度闸门，所以这只延长「优先级」，不会
+    # 绕过限流、配额或利润门。仅 Anthropic 账号。建议值 604800（7 天）。
+    # 必须 >= sticky_session_ttl_seconds，否则启动校验失败。
+    session_account_history_ttl_seconds: 0
     # Sticky session max waiting queue size
     # 粘性会话最大排队长度
     sticky_session_max_waiting: 3
@@ -611,7 +626,7 @@ log:
   format: "console"
   # Service name field written into each log line
   # 每条日志都会附带 service 字段
-  service_name: "sub2api"
+  service_name: "tapmodels"
   # Environment field written into each log line
   # 每条日志都会附带 env 字段
   env: "production"
@@ -629,11 +644,11 @@ log:
     # 启用文件输出（默认路径自动推导）
     to_file: true
     # Empty means:
-    # - DATA_DIR set: {{DATA_DIR}}/logs/sub2api.log
-    # - otherwise: /app/data/logs/sub2api.log
+    # - DATA_DIR set: {{DATA_DIR}}/logs/tapmodels.log
+    # - otherwise: /app/data/logs/tapmodels.log
     # 留空时：
-    # - 设置 DATA_DIR：{{DATA_DIR}}/logs/sub2api.log
-    # - 否则：/app/data/logs/sub2api.log
+    # - 设置 DATA_DIR：{{DATA_DIR}}/logs/tapmodels.log
+    # - 否则：/app/data/logs/tapmodels.log
     file_path: ""
   rotation:
     # Max file size before rotation (MB)
@@ -795,6 +810,13 @@ dashboard_aggregation:
     # 日聚合保留天数
     daily_days: 730
 
+# Usage query/export resource bounds (not data retention; restart required).
+# 查询/导出窗口不会删除旧记录；可选择较早的起止日期查询历史。
+usage_export:
+  max_range_days: 90
+  max_rows: 100000
+  timeout_seconds: 120
+
 # =============================================================================
 # Usage Cleanup Task Configuration
 # 使用记录清理任务配置（重启生效）
@@ -868,7 +890,7 @@ database:
   password: "your_secure_password_here"
   # Database name
   # 数据库名称
-  dbname: "sub2api"
+  dbname: "tapmodels"
   # SSL mode: disable, prefer, require, verify-ca, verify-full
   # SSL 模式：disable（禁用）, prefer（优先加密，默认）, require（要求）, verify-ca（验证CA）, verify-full（完全验证）
   # 默认值为 "prefer"，数据库支持 SSL 时自动使用加密连接，不支持时回退明文
@@ -964,7 +986,7 @@ totp:
 
 # =============================================================================
 # LinuxDo Connect OAuth Login (SSO)
-# LinuxDo Connect OAuth 登录（用于 Sub2API 用户登录）
+# LinuxDo Connect OAuth 登录（用于 TapModels 用户登录）
 # =============================================================================
 linuxdo_connect:
   enabled: false
@@ -989,7 +1011,7 @@ linuxdo_connect:
 
 # =============================================================================
 # Generic OIDC OAuth Login (SSO)
-# 通用 OIDC OAuth 登录（用于 Sub2API 用户登录）
+# 通用 OIDC OAuth 登录（用于 TapModels 用户登录）
 # =============================================================================
 oidc_connect:
   enabled: false
@@ -1198,8 +1220,8 @@ turnstile:
 # Gemini OAuth (Required for Gemini accounts)
 # Gemini OAuth 配置（Gemini 账户必需）
 # =============================================================================
-# Sub2API supports TWO Gemini OAuth modes:
-# Sub2API 支持两种 Gemini OAuth 模式：
+# TapModels supports TWO Gemini OAuth modes:
+# TapModels 支持两种 Gemini OAuth 模式：
 #
 # 1. Code Assist OAuth (requires GCP project_id)
 # 1. Code Assist OAuth（需要 GCP project_id）
@@ -1267,6 +1289,13 @@ gemini:
 # Update Configuration (在线更新配置)
 # =============================================================================
 update:
+  # Release check behind the version badge (queries this fork's own releases,
+  # holeenlu/sub2api). Off by default for white-label deployments: version check,
+  # self-update and rollback endpoints return "disabled" and no request is made to
+  # GitHub. Set true to allow the online check.
+  # 版本徽章的线上版本检查（查本 fork 自己的 release）。默认关闭（白标部署）：
+  # 版本检查、自更新与回滚接口直接返回 "disabled"，不会访问 GitHub。需要时显式设为 true。
+  check_enabled: false
   # Proxy URL for accessing GitHub (used for online updates and pricing data)
   # 用于访问 GitHub 的代理地址（用于在线更新和定价数据获取）
   # Supports: http, https, socks5, socks5h
