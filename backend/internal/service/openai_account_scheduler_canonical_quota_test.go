@@ -88,16 +88,16 @@ func TestOpenAIQuotaHeadroomFactorRawWindowReset(t *testing.T) {
 
 func TestOpenAISchedulerCanonicalResetScoresMatchSnapshot(t *testing.T) {
 	now := time.Now()
-	scheduler := openAIResetTestScheduler(1)
+	scheduler := fixedSchedulerForTest()
 	accounts := []*Account{
 		{ID: 1, Extra: map[string]any{"codex_5h_reset_at": now.Add(10 * time.Minute).Format(time.RFC3339)}},
 		{ID: 2, Extra: map[string]any{"codex_5h_reset_at": now.Add(4 * time.Hour).Format(time.RFC3339)}},
 	}
-	plan := scheduler.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, accounts, nil)
+	plan := scheduler.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{SubscriptionPriority: true}, accounts, nil)
 	scores := openAIPlanScores(plan)
-	require.InDelta(t, 1, scores[1]-scores[2], 1e-9)
+	require.InDelta(t, 0.2, scores[1]-scores[2], 1e-9)
 
-	snapshots := buildOpenAIAccountSchedulerScoreSnapshot(accounts, nil, scheduler.service.openAIWSSchedulerWeights(), false, floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier))
+	snapshots := buildOpenAIAccountSchedulerScoreSnapshot(accounts, nil, scheduler.service.openAIWSSchedulerWeights())
 	for _, account := range accounts {
 		require.InDelta(t, scores[account.ID], snapshots[account.ID].BaseScore, 1e-9)
 	}

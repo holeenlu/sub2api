@@ -12,6 +12,9 @@ import (
 )
 
 const (
+	accountTelemetryUploadIntervalDefault = 600
+	accountTelemetryUploadIntervalMin     = 60
+	accountTelemetryUploadIntervalMax     = 86400
 	opsAlertEvaluatorLeaderLockKeyDefault = "ops:alert:evaluator:leader"
 	opsAlertEvaluatorLeaderLockTTLDefault = 30 * time.Second
 )
@@ -361,6 +364,7 @@ func (s *OpsService) UpdateOpsAlertRuntimeSettings(ctx context.Context, cfg *Ops
 
 func defaultOpsAdvancedSettings() *OpsAdvancedSettings {
 	return &OpsAdvancedSettings{
+		QuotaProtection: defaultSchedulingQuotaProtection(),
 		DataRetention: OpsDataRetentionSettings{
 			// Keep the DB-backed default aligned with ops.cleanup.enabled so a
 			// first settings read cannot silently disable configured retention.
@@ -373,16 +377,18 @@ func defaultOpsAdvancedSettings() *OpsAdvancedSettings {
 		Aggregation: OpsAggregationSettings{
 			AggregationEnabled: false,
 		},
-		OpenAIAccountQuotaAutoPause:     OpsOpenAIAccountQuotaAutoPauseSettings{},
-		IgnoreCountTokensErrors:         true,  // count_tokens 404 是预期行为，默认忽略
-		IgnoreContextCanceled:           true,  // Default to true - client disconnects are not errors
-		IgnoreNoAvailableAccounts:       false, // Default to false - this is a real routing issue
-		IgnoreInvalidApiKeyErrors:       true,  // Legacy compatibility field; admission rejects are always excluded.
-		IgnoreInsufficientBalanceErrors: false, // 默认不忽略，余额不足可能需要关注
-		DisplayOpenAITokenStats:         false,
-		DisplayAlertEvents:              true,
-		AutoRefreshEnabled:              false,
-		AutoRefreshIntervalSec:          30,
+		AccountTelemetrySendingEnabled:        false,
+		AccountTelemetryUploadIntervalSeconds: accountTelemetryUploadIntervalDefault,
+		OpenAIAccountQuotaAutoPause:           OpsOpenAIAccountQuotaAutoPauseSettings{},
+		IgnoreCountTokensErrors:               true,  // count_tokens 404 是预期行为，默认忽略
+		IgnoreContextCanceled:                 true,  // Default to true - client disconnects are not errors
+		IgnoreNoAvailableAccounts:             false, // Default to false - this is a real routing issue
+		IgnoreInvalidApiKeyErrors:             true,  // Legacy compatibility field; admission rejects are always excluded.
+		IgnoreInsufficientBalanceErrors:       false, // 默认不忽略，余额不足可能需要关注
+		DisplayOpenAITokenStats:               false,
+		DisplayAlertEvents:                    true,
+		AutoRefreshEnabled:                    false,
+		AutoRefreshIntervalSec:                30,
 	}
 }
 
@@ -401,6 +407,10 @@ func normalizeOpsAdvancedSettings(cfg *OpsAdvancedSettings) {
 	// Admission rejects are a security/traffic concern, not an operational
 	// request-error category. Keep the legacy field true for old clients but do
 	// not allow it to re-enable those rows.
+	if cfg.AccountTelemetryUploadIntervalSeconds < accountTelemetryUploadIntervalMin || cfg.AccountTelemetryUploadIntervalSeconds > accountTelemetryUploadIntervalMax {
+		cfg.AccountTelemetryUploadIntervalSeconds = accountTelemetryUploadIntervalDefault
+	}
+	cfg.QuotaProtection = effectiveSchedulingQuotaProtection(cfg.QuotaProtection)
 	cfg.IgnoreInvalidApiKeyErrors = true
 	cfg.OpenAIAccountQuotaAutoPause.DefaultThreshold5h = clampOpsQuotaAutoPauseThreshold(cfg.OpenAIAccountQuotaAutoPause.DefaultThreshold5h)
 	cfg.OpenAIAccountQuotaAutoPause.DefaultThreshold7d = clampOpsQuotaAutoPauseThreshold(cfg.OpenAIAccountQuotaAutoPause.DefaultThreshold7d)
@@ -438,6 +448,12 @@ func clampOpsQuotaAutoPauseThreshold(value float64) float64 {
 func validateOpsAdvancedSettings(cfg *OpsAdvancedSettings) error {
 	if cfg == nil {
 		return errors.New("invalid config")
+	}
+	if cfg.AccountTelemetryUploadIntervalSeconds < accountTelemetryUploadIntervalMin || cfg.AccountTelemetryUploadIntervalSeconds > accountTelemetryUploadIntervalMax {
+		return errors.New("account_telemetry_upload_interval_seconds must be between 60 and 86400")
+	}
+	if err := cfg.QuotaProtection.validate(); err != nil {
+		return err
 	}
 	// 保留天数：0 表示每次清理全部，1-365 表示按天数保留。
 	if cfg.DataRetention.ErrorLogRetentionDays < 0 || cfg.DataRetention.ErrorLogRetentionDays > 365 {
@@ -501,7 +517,7 @@ func (s *OpsService) UpdateOpsAdvancedSettings(ctx context.Context, cfg *OpsAdva
 	// the OpenAI scheduling hot path reads, so the next request observes the new value
 	// without waiting for the background refresher's TTL.
 	if s.quotaAutoPauseSink != nil {
-		s.quotaAutoPauseSink(cfg.OpenAIAccountQuotaAutoPause)
+		s.quotaAutoPauseSink(cfg.OpenAIAccountQuotaAutoPause, cfg.QuotaProtection)
 	}
 
 	// notify cleanup service to reload schedule/enabled.
@@ -525,7 +541,7 @@ const SettingKeyOpsMetricThresholds = "ops_metric_thresholds"
 
 func defaultOpsMetricThresholds() *OpsMetricThresholds {
 	slaMin := 99.5
-	ttftMax := 500.0
+	ttftMax := 10000.0
 	reqErrMax := 5.0
 	upstreamErrMax := 5.0
 	return &OpsMetricThresholds{
@@ -556,11 +572,24 @@ func (s *OpsService) GetMetricThresholds(ctx context.Context) (*OpsMetricThresho
 		return nil, err
 	}
 
-	cfg := &OpsMetricThresholds{}
+	cfg := defaultCfg
 	if err := json.Unmarshal([]byte(raw), cfg); err != nil {
-		return defaultCfg, nil
+		return defaultOpsMetricThresholds(), nil
 	}
-
+	// Partial/old settings must resolve to the same limits in scoring and the UI.
+	defaults := defaultOpsMetricThresholds()
+	if cfg.SLAPercentMin == nil {
+		cfg.SLAPercentMin = defaults.SLAPercentMin
+	}
+	if cfg.TTFTp99MsMax == nil {
+		cfg.TTFTp99MsMax = defaults.TTFTp99MsMax
+	}
+	if cfg.RequestErrorRatePercentMax == nil {
+		cfg.RequestErrorRatePercentMax = defaults.RequestErrorRatePercentMax
+	}
+	if cfg.UpstreamErrorRatePercentMax == nil {
+		cfg.UpstreamErrorRatePercentMax = defaults.UpstreamErrorRatePercentMax
+	}
 	return cfg, nil
 }
 

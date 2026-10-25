@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { getIntlLocale } from '@/i18n/localeUtils'
 import Select from '@/components/common/Select.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
@@ -16,6 +17,7 @@ import { formatMemorySizeMB } from '../utils/opsFormatters'
 type RealtimeWindow = '1min' | '5min' | '30min' | '1h'
 
 interface Props {
+  canConfigure?: boolean
   overview?: OpsDashboardOverview | null
   platform: string
   groupId: number | null
@@ -49,7 +51,7 @@ interface Emits {
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const adminSettingsStore = useAdminSettingsStore()
 
 const realtimeWindow = ref<RealtimeWindow>('1min')
@@ -224,11 +226,11 @@ function getSLAThresholdLevel(slaPercent: number | null): ThresholdLevel {
   if (threshold == null) return 'normal'
 
   // SLA is "higher is better":
-  // - below threshold => critical
+  // - more than 2 percentage points below target => critical
   // - within +0.1% buffer => warning
   const warningBuffer = 0.1
 
-  if (slaPercent < threshold) return 'critical'
+  if (slaPercent < threshold - 2) return 'critical'
   if (slaPercent < threshold + warningBuffer) return 'warning'
   return 'normal'
 }
@@ -237,6 +239,7 @@ function getTTFTThresholdLevel(ttftMs: number | null): ThresholdLevel {
   if (ttftMs == null) return 'normal'
   const threshold = props.thresholds?.ttft_p99_ms_max
   if (threshold == null) return 'normal'
+  if (threshold === 0) return ttftMs > 0 ? 'critical' : 'normal'
   if (ttftMs >= threshold) return 'critical'
   if (ttftMs >= threshold * 0.8) return 'warning'
   return 'normal'
@@ -246,6 +249,7 @@ function getRequestErrorRateThresholdLevel(errorRatePercent: number | null): Thr
   if (errorRatePercent == null) return 'normal'
   const threshold = props.thresholds?.request_error_rate_percent_max
   if (threshold == null) return 'normal'
+  if (threshold === 0) return errorRatePercent > 0 ? 'critical' : 'normal'
   if (errorRatePercent >= threshold) return 'critical'
   if (errorRatePercent >= threshold * 0.8) return 'warning'
   return 'normal'
@@ -255,6 +259,7 @@ function getUpstreamErrorRateThresholdLevel(upstreamErrorRatePercent: number | n
   if (upstreamErrorRatePercent == null) return 'normal'
   const threshold = props.thresholds?.upstream_error_rate_percent_max
   if (threshold == null) return 'normal'
+  if (threshold === 0) return upstreamErrorRatePercent > 0 ? 'critical' : 'normal'
   if (upstreamErrorRatePercent >= threshold) return 'critical'
   if (upstreamErrorRatePercent >= threshold * 0.8) return 'warning'
   return 'normal'
@@ -426,9 +431,11 @@ const ttftMaxMs = computed(() => overview.value?.ttft?.max_ms ?? null)
 const isSystemIdle = computed(() => {
   const ov = overview.value
   if (!ov) return true
-  const qps = ov.qps?.current
-  const errorRate = ov.error_rate ?? 0
-  return (qps ?? 0) === 0 && errorRate === 0
+  const noTraffic = (ov.request_count_total ?? 0) === 0 && (ov.request_count_sla ?? 0) === 0 && (ov.error_count_total ?? 0) === 0
+  const sm = ov.system_metrics
+  const noFault = sm?.db_ok !== false && sm?.redis_ok !== false && (sm?.cpu_usage_percent ?? 0) <= 80 && (sm?.memory_usage_percent ?? 0) <= 85
+    && !(ov.job_heartbeats ?? []).some(hb => hb.health_status === 'failed' || hb.health_status === 'stale')
+  return noTraffic && noFault && (ov.health_score == null || ov.health_score >= 90)
 })
 
 const healthScoreValue = computed<number | null>(() => {
@@ -543,9 +550,10 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
   }
 
   const ttftP99 = ov.ttft?.p99_ms ?? 0
-  if (ttftP99 > 500) {
+  const ttftLevel = getTTFTThresholdLevel(ttftP99Ms.value)
+  if (ttftLevel !== 'normal') {
     report.push({
-      type: 'warning',
+      type: ttftLevel,
       message: t('admin.ops.diagnosis.ttftHigh', { ttft: ttftP99.toFixed(0) }),
       impact: t('admin.ops.diagnosis.ttftHighImpact'),
       action: t('admin.ops.diagnosis.ttftHighAction')
@@ -554,14 +562,15 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
 
   // Error rate diagnostics (adjusted thresholds)
   const upstreamRatePct = (ov.upstream_error_rate ?? 0) * 100
-  if (upstreamRatePct > 5) {
+  const upstreamLevel = getUpstreamErrorRateThresholdLevel(upstreamErrorRatePercent.value)
+  if (upstreamLevel === 'critical') {
     report.push({
       type: 'critical',
       message: t('admin.ops.diagnosis.upstreamCritical', { rate: upstreamRatePct.toFixed(2) }),
       impact: t('admin.ops.diagnosis.upstreamCriticalImpact'),
       action: t('admin.ops.diagnosis.upstreamCriticalAction')
     })
-  } else if (upstreamRatePct > 2) {
+  } else if (upstreamLevel === 'warning') {
     report.push({
       type: 'warning',
       message: t('admin.ops.diagnosis.upstreamHigh', { rate: upstreamRatePct.toFixed(2) }),
@@ -571,14 +580,15 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
   }
 
   const errorPct = (ov.error_rate ?? 0) * 100
-  if (errorPct > 3) {
+  const errorLevel = getRequestErrorRateThresholdLevel(errorRatePercent.value)
+  if (errorLevel === 'critical') {
     report.push({
       type: 'critical',
       message: t('admin.ops.diagnosis.errorHigh', { rate: errorPct.toFixed(2) }),
       impact: t('admin.ops.diagnosis.errorHighImpact'),
       action: t('admin.ops.diagnosis.errorHighAction')
     })
-  } else if (errorPct > 0.5) {
+  } else if (errorLevel === 'warning') {
     report.push({
       type: 'warning',
       message: t('admin.ops.diagnosis.errorElevated', { rate: errorPct.toFixed(2) }),
@@ -589,14 +599,15 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
 
   // SLA diagnostics
   const slaPct = (ov.sla ?? 0) * 100
-  if (slaPct < 90) {
+  const slaLevel = getSLAThresholdLevel(slaPercent.value)
+  if (slaLevel === 'critical') {
     report.push({
       type: 'critical',
       message: t('admin.ops.diagnosis.slaCritical', { sla: slaPct.toFixed(2) }),
       impact: t('admin.ops.diagnosis.slaCriticalImpact'),
       action: t('admin.ops.diagnosis.slaCriticalAction')
     })
-  } else if (slaPct < 98) {
+  } else if (slaLevel === 'warning') {
     report.push({
       type: 'warning',
       message: t('admin.ops.diagnosis.slaLow', { sla: slaPct.toFixed(2) }),
@@ -605,8 +616,19 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
     })
   }
 
-  // Health score diagnostics (lowest priority)
-  if (healthScoreValue.value != null) {
+  for (const hb of ov.job_heartbeats ?? []) {
+    if (hb.health_status === 'failed' || hb.health_status === 'stale') {
+      report.push({
+        type: 'warning',
+        message: t(hb.health_status === 'failed' ? 'admin.ops.diagnosis.jobFailed' : 'admin.ops.diagnosis.jobStale', { job: hb.job_name }),
+        impact: t('admin.ops.diagnosis.jobImpact'),
+        action: t('admin.ops.diagnosis.jobAction')
+      })
+    }
+  }
+
+  // Avoid repeating the same metric warnings as a derived score warning.
+  if (healthScoreValue.value != null && report.length === 0) {
     if (healthScoreValue.value < 60) {
       report.push({
         type: 'critical',
@@ -810,16 +832,16 @@ const jobsStatus = computed<'ok' | 'warn' | 'unknown'>(() => {
   if (!list.length) return 'unknown'
   for (const hb of list) {
     if (!hb) continue
-    if (hb.last_error_at && (!hb.last_success_at || hb.last_error_at > hb.last_success_at)) return 'warn'
+    if (hb.health_status === 'failed' || hb.health_status === 'stale') return 'warn'
   }
-  return 'ok'
+  return list.some(hb => hb.health_status === 'healthy') ? 'ok' : 'unknown'
 })
 
 const jobsWarnCount = computed(() => {
   let warn = 0
   for (const hb of jobHeartbeats.value) {
     if (!hb) continue
-    if (hb.last_error_at && (!hb.last_success_at || hb.last_error_at > hb.last_success_at)) warn++
+    if (hb.health_status === 'failed' || hb.health_status === 'stale') warn++
   }
   return warn
 })
@@ -884,7 +906,7 @@ function handleToolbarRefresh() {
           </span>
 
           <span>·</span>
-          <span>{{ t('common.refresh') }}: {{ props.lastUpdated ? props.lastUpdated.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\//g, '-') : t('common.unknown') }}</span>
+          <span>{{ t('common.refresh') }}: {{ props.lastUpdated ? props.lastUpdated.toLocaleString(getIntlLocale(locale), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\//g, '-') : t('common.unknown') }}</span>
 
           <template v-if="props.autoRefreshEnabled && props.autoRefreshCountdown !== undefined">
             <span>·</span>
@@ -963,7 +985,7 @@ function handleToolbarRefresh() {
 
         <!-- Settings Button (hidden in fullscreen) -->
         <button
-          v-if="!props.fullscreen"
+          v-if="!props.fullscreen && props.canConfigure !== false"
           type="button"
           class="flex h-8 items-center gap-1.5 rounded-lg bg-gray-100 px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
           :title="t('admin.ops.settings.title')"

@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	ErrAccountNotFound      = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
-	ErrAccountNilInput      = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
-	ErrAccountNotInFallback = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
+	ErrAccountNotFound         = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
+	ErrUnsupportedAccountField = infraerrors.BadRequest("UNSUPPORTED_ACCOUNT_FIELD", "Account contains removed settings; refresh the editor or remove obsolete fields from the import")
+	ErrAccountNilInput         = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
+	ErrAccountNotInFallback    = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
 )
 
 const AccountListGroupUngrouped int64 = -1
@@ -496,38 +497,4 @@ func (s *AccountService) GetCredential(ctx context.Context, id int64, key string
 	}
 
 	return account.GetCredential(key), nil
-}
-
-// TestCredentials 测试账号凭证是否有效（需要实现具体平台的测试逻辑）
-func (s *AccountService) TestCredentials(ctx context.Context, id int64) error {
-	account, err := s.accountRepo.GetByID(ctx, id)
-	if err != nil {
-		return fmt.Errorf("get account: %w", err)
-	}
-
-	// 根据平台执行不同的测试逻辑
-	switch account.Platform {
-	case PlatformAnthropic:
-		// TODO: 测试Anthropic API凭证
-		return nil
-	case PlatformOpenAI:
-		// TODO: 测试OpenAI API凭证
-		return nil
-	case PlatformGemini:
-		// TODO: 测试Gemini API凭证
-		return nil
-	case PlatformGrok:
-		// Grok OAuth credentials are validated via token exchange/refresh and request-path probes.
-		return nil
-	case PlatformTypeSafe:
-		// TypeSafe credentials are API keys; inference failures drive health and cooldown state.
-		return nil
-	default:
-		if IsMultiProtocolAPIKeyProvider(account.Platform) {
-			// 多协议 API Key 供应商（国产厂商与聚合平台）：凭证为 API Key，实际可用性
-			// 经余额/额度探测与转发路径验证。
-			return nil
-		}
-		return fmt.Errorf("unsupported platform: %s", account.Platform)
-	}
 }

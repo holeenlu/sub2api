@@ -10,6 +10,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOpenAITokenRefreshStaggersBeforeExpiry(t *testing.T) {
+	base := 10 * time.Minute
+	seen := map[time.Duration]bool{}
+	for id := int64(1); id <= 100; id++ {
+		window := openAIRefreshWindow(id, base)
+		require.Equal(t, window, openAIRefreshWindow(id, base))
+		require.GreaterOrEqual(t, window, base)
+		require.Less(t, window, base+5*time.Minute)
+		seen[window] = true
+	}
+	require.Greater(t, len(seen), 90)
+	require.Equal(t, time.Duration(0), openAIRefreshWindow(1, 0))
+	window := openAIRefreshWindow(12, base)
+	account := &Account{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{
+		"refresh_token": "test-refresh", "expires_at": time.Now().Add((base + window) / 2).Format(time.RFC3339Nano),
+	}}
+	require.True(t, (&OpenAITokenRefresher{}).NeedsRefresh(account, base))
+	account.Credentials["expires_at"] = time.Now().Add(base + 6*time.Minute).Format(time.RFC3339Nano)
+	require.False(t, (&OpenAITokenRefresher{}).NeedsRefresh(account, base))
+}
+
 func TestClaudeTokenRefresher_NeedsRefresh(t *testing.T) {
 	refresher := &ClaudeTokenRefresher{}
 	refreshWindow := 30 * time.Minute

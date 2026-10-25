@@ -9,6 +9,7 @@ import (
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -20,7 +21,7 @@ func contentModerationStatus(decision *service.ContentModerationDecision) int {
 }
 
 func contentModerationErrorCode(decision *service.ContentModerationDecision) string {
-	return "content_policy_violation"
+	return decision.ErrorCode()
 }
 
 func clientRequestedModel(c *gin.Context, fallback string) string {
@@ -89,6 +90,12 @@ func buildContentModerationInput(c *gin.Context, apiKey *service.APIKey, subject
 		Model:     clientRequestedModel(c, model),
 		Protocol:  protocol,
 		Body:      body,
+		DeviceID:  strings.TrimSpace(c.GetHeader("X-Kin-Device-ID")),
+	}
+	if metadata := service.ParseMetadataUserID(gjson.GetBytes(body, "metadata.user_id").String()); metadata != nil {
+		input.DeviceID = metadata.DeviceID
+	} else if device := gjson.GetBytes(body, "device_id"); device.Type == gjson.String && strings.TrimSpace(device.String()) != "" {
+		input.DeviceID = strings.TrimSpace(device.String())
 	}
 	if resolvedPlatform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
 		input.Provider = resolvedPlatform

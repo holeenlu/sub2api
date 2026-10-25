@@ -69,8 +69,31 @@ func TestGetOrCreateFingerprintFloorsStaleCachedUserAgent(t *testing.T) {
 	require.Equal(t, "claude-cli/"+claude.CLICurrentVersion+" (external, cli)", fp.UserAgent)
 	require.Equal(t, 1, cache.setCalls, "下限抬升必须持久化写回缓存")
 	require.Equal(t, "claude-cli/"+claude.CLICurrentVersion+" (external, cli)", cache.lastSet.UserAgent)
-	// X-Stainless-* 维持既有 merge 语义：客户端未携带时保留缓存中的真实值，不被下限逻辑覆盖。
-	require.Equal(t, "0.91.1", fp.StainlessPackageVersion)
+	// The old bundled SDK/runtime must advance with the CLI version.
+	require.Equal(t, defaultFingerprint().StainlessPackageVersion, fp.StainlessPackageVersion)
+	require.Equal(t, defaultFingerprint().StainlessRuntimeVersion, fp.StainlessRuntimeVersion)
+}
+
+func TestGetOrCreateFingerprintMigratesLegacyBuiltinAfterVersionSync(t *testing.T) {
+	for _, ua := range []string{claude.DefaultUserAgent(), "claude-cli/2.9.0 (external, cli)"} {
+		t.Run(ua, func(t *testing.T) {
+			cache := &stubIdentityCache{fingerprint: &Fingerprint{
+				UserAgent: ua, ClientID: "stable-device", UpdatedAt: time.Now().Unix(),
+				StainlessLang: "js", StainlessRuntime: "node",
+				StainlessPackageVersion: "0.94.0", StainlessRuntimeVersion: "v24.3.0",
+				StainlessOS: "Linux", StainlessArch: "arm64",
+			}}
+			svc := NewIdentityService(cache)
+			for i := 0; i < 2; i++ {
+				fp, err := svc.GetOrCreateFingerprint(context.Background(), 1, nil)
+				require.NoError(t, err)
+				want := defaultFingerprint()
+				want.UserAgent, want.ClientID, want.UpdatedAt = ua, "stable-device", fp.UpdatedAt
+				require.Equal(t, want, *fp)
+			}
+			require.Equal(t, 1, cache.setCalls, "migration must not repeatedly rewrite the account identity")
+		})
+	}
 }
 
 // 缓存版本高于下限：不得被降级，也不得触发多余写入。
