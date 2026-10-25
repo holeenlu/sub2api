@@ -87,117 +87,6 @@ func (p paymentFulfillmentTestProvider) Refund(ctx context.Context, req payment.
 	panic("unexpected call")
 }
 
-type paymentFulfillmentAffiliateAccrueCall struct {
-	inviterID     int64
-	inviteeUserID int64
-	amount        float64
-	freezeHours   int
-	sourceOrderID *int64
-}
-
-type paymentFulfillmentAffiliateRepoStub struct {
-	inviteeSummary *AffiliateSummary
-	inviterSummary *AffiliateSummary
-	accrueCalls    []paymentFulfillmentAffiliateAccrueCall
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) EnsureUserAffiliate(_ context.Context, userID int64) (*AffiliateSummary, error) {
-	switch {
-	case r.inviteeSummary != nil && r.inviteeSummary.UserID == userID:
-		cp := *r.inviteeSummary
-		return &cp, nil
-	case r.inviterSummary != nil && r.inviterSummary.UserID == userID:
-		cp := *r.inviterSummary
-		return &cp, nil
-	default:
-		return &AffiliateSummary{UserID: userID, AffCode: "AFFTEST", CreatedAt: time.Now().Add(-time.Hour)}, nil
-	}
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) GetAffiliateByCode(context.Context, string) (*AffiliateSummary, error) {
-	panic("unexpected GetAffiliateByCode call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) BindInviter(context.Context, int64, int64) (bool, error) {
-	panic("unexpected BindInviter call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) AccrueQuota(_ context.Context, inviterID, inviteeUserID int64, amount float64, freezeHours int, sourceOrderID *int64) (bool, error) {
-	var sourceCopy *int64
-	if sourceOrderID != nil {
-		v := *sourceOrderID
-		sourceCopy = &v
-	}
-	r.accrueCalls = append(r.accrueCalls, paymentFulfillmentAffiliateAccrueCall{
-		inviterID:     inviterID,
-		inviteeUserID: inviteeUserID,
-		amount:        amount,
-		freezeHours:   freezeHours,
-		sourceOrderID: sourceCopy,
-	})
-	return true, nil
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) GetAccruedRebateFromInvitee(context.Context, int64, int64) (float64, error) {
-	return 0, nil
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) ThawFrozenQuota(context.Context, int64) (float64, error) {
-	panic("unexpected ThawFrozenQuota call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) TransferQuotaToBalance(context.Context, int64) (float64, float64, error) {
-	panic("unexpected TransferQuotaToBalance call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) WithdrawQuota(context.Context, int64, float64, string) (*AffiliateWithdrawResult, error) {
-	panic("unexpected WithdrawQuota call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) ListInvitees(context.Context, int64, int) ([]AffiliateInvitee, error) {
-	panic("unexpected ListInvitees call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) UpdateUserAffCode(context.Context, int64, string) error {
-	panic("unexpected UpdateUserAffCode call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) ResetUserAffCode(context.Context, int64) (string, error) {
-	panic("unexpected ResetUserAffCode call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) SetUserRebateRate(context.Context, int64, *float64) error {
-	panic("unexpected SetUserRebateRate call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) BatchSetUserRebateRate(context.Context, []int64, *float64) error {
-	panic("unexpected BatchSetUserRebateRate call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) ListUsersWithCustomSettings(context.Context, AffiliateAdminFilter) ([]AffiliateAdminEntry, int64, error) {
-	panic("unexpected ListUsersWithCustomSettings call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) ListAffiliateInviteRecords(context.Context, AffiliateRecordFilter) ([]AffiliateInviteRecord, int64, error) {
-	panic("unexpected ListAffiliateInviteRecords call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) ListAffiliateRebateRecords(context.Context, AffiliateRecordFilter) ([]AffiliateRebateRecord, int64, error) {
-	panic("unexpected ListAffiliateRebateRecords call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) ListAffiliateTransferRecords(context.Context, AffiliateRecordFilter) ([]AffiliateTransferRecord, int64, error) {
-	panic("unexpected ListAffiliateTransferRecords call")
-}
-
-func (r *paymentFulfillmentAffiliateRepoStub) GetAffiliateUserOverview(context.Context, int64) (*AffiliateUserOverview, error) {
-	panic("unexpected GetAffiliateUserOverview call")
-}
-
-type paymentFulfillmentSettingRepoStub struct {
-	values map[string]string
-}
-
 func (s *paymentFulfillmentSettingRepoStub) Get(context.Context, string) (*Setting, error) {
 	return nil, ErrSettingNotFound
 }
@@ -767,38 +656,9 @@ func TestFulfillmentLeaseVersionRejectsStaleWorker(t *testing.T) {
 	require.NoError(t, svc.markCompleted(ctx, order, secondLease, "SUBSCRIPTION_SUCCESS"))
 }
 
-func TestPublicRedeemStillEnforcesFailureLimit(t *testing.T) {
-	cache := &paymentFulfillmentRedeemCacheStub{count: redeemMaxFailedAttempts}
-	svc := &RedeemService{cache: cache}
-
-	result, err := svc.Redeem(context.Background(), 42, "PUBLIC-CODE")
-
-	require.Nil(t, result)
-	require.ErrorIs(t, err, ErrRedeemRateLimited)
-	require.Equal(t, 1, cache.getCalls)
-	require.Zero(t, cache.incrementCalls)
-	require.Zero(t, cache.acquireCalls)
-}
-
-func TestPublicRedeemStillIncrementsInvalidCodeFailures(t *testing.T) {
-	cache := &paymentFulfillmentRedeemCacheStub{}
-	redeemRepo := &redeemRejectRepo{code: RedeemCode{Code: "OTHER"}}
-	svc := &RedeemService{redeemRepo: redeemRepo, cache: cache}
-
-	result, err := svc.Redeem(context.Background(), 42, "MISSING")
-
-	require.Nil(t, result)
-	require.ErrorIs(t, err, ErrRedeemCodeNotFound)
-	require.Equal(t, 1, cache.getCalls)
-	require.Equal(t, 1, cache.incrementCalls)
-	require.Equal(t, 1, cache.count)
-	require.Equal(t, 1, cache.acquireCalls)
-	require.Equal(t, 1, cache.releaseCalls)
-}
-
-func TestPaymentRedeemDoesNotIncrementFailureLimit(t *testing.T) {
+func TestPaymentRechargeRejectsExpiredRecord(t *testing.T) {
 	ctx := context.Background()
-	cache := &paymentFulfillmentRedeemCacheStub{count: redeemMaxFailedAttempts}
+	cache := &paymentFulfillmentRedeemCacheStub{}
 	redeemRepo := &redeemRejectRepo{code: RedeemCode{
 		ID:     1,
 		Code:   "PAY-EXPIRED",
@@ -818,7 +678,7 @@ func TestPaymentRedeemDoesNotIncrementFailureLimit(t *testing.T) {
 	require.Equal(t, 1, cache.releaseCalls)
 }
 
-func TestExecuteBalanceFulfillmentBypassesUserRedeemRateLimit(t *testing.T) {
+func TestExecuteBalanceFulfillmentCreditsUser(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
 	ensurePaymentAuditOrderActionUniqueIndex(t, ctx, client)
@@ -839,8 +699,8 @@ func TestExecuteBalanceFulfillmentBypassesUserRedeemRateLimit(t *testing.T) {
 		credited += amount
 		return nil
 	}
-	cache := &paymentFulfillmentRedeemCacheStub{count: redeemMaxFailedAttempts}
-	redeemService := NewRedeemService(redeemRepo, userRepo, nil, cache, nil, client, nil, nil)
+	cache := &paymentFulfillmentRedeemCacheStub{}
+	redeemService := NewRedeemService(redeemRepo, userRepo, cache, nil, client, nil)
 	svc := &PaymentService{entClient: client, redeemService: redeemService, userRepo: userRepo}
 
 	require.NoError(t, svc.ExecuteBalanceFulfillment(ctx, order.ID))
@@ -1118,92 +978,6 @@ func assertPaymentSubscriptionExpiry(t *testing.T, repo *subscriptionUserSubRepo
 	require.True(t, sub.ExpiresAt.Equal(expected), "subscription expiry changed from %s to %s", expected, sub.ExpiresAt)
 }
 
-func TestExecuteSubscriptionFulfillmentAppliesAffiliateRebate(t *testing.T) {
-	ctx := context.Background()
-	client := newPaymentConfigServiceTestClient(t)
-	ensurePaymentAuditOrderActionUniqueIndex(t, ctx, client)
-
-	user, err := client.User.Create().
-		SetEmail("subscription-affiliate@example.com").
-		SetPasswordHash("hash").
-		SetUsername("subscription-affiliate-user").
-		Save(ctx)
-	require.NoError(t, err)
-
-	order, err := client.PaymentOrder.Create().
-		SetUserID(user.ID).
-		SetUserEmail(user.Email).
-		SetUserName(user.Username).
-		SetAmount(9.99).
-		SetPayAmount(71.36).
-		SetFeeRate(0).
-		SetRechargeCode("PAY-SUB-AFFILIATE").
-		SetOutTradeNo("sub2_subscription_affiliate").
-		SetPaymentType(payment.TypeAlipay).
-		SetPaymentTradeNo("trade-sub-affiliate").
-		SetOrderType(payment.OrderTypeSubscription).
-		SetPlanID(99).
-		SetSubscriptionGroupID(7).
-		SetSubscriptionDays(30).
-		SetStatus(OrderStatusPaid).
-		SetExpiresAt(time.Now().Add(time.Hour)).
-		SetClientIP("127.0.0.1").
-		SetSrcHost("api.example.com").
-		Save(ctx)
-	require.NoError(t, err)
-
-	inviterID := int64(9001)
-	affiliateRepo := &paymentFulfillmentAffiliateRepoStub{
-		inviteeSummary: &AffiliateSummary{
-			UserID:    user.ID,
-			AffCode:   "INVITEE",
-			InviterID: &inviterID,
-			CreatedAt: time.Now().Add(-24 * time.Hour),
-		},
-		inviterSummary: &AffiliateSummary{
-			UserID:    inviterID,
-			AffCode:   "INVITER",
-			CreatedAt: time.Now().Add(-48 * time.Hour),
-		},
-	}
-	settingSvc := NewSettingService(&paymentFulfillmentSettingRepoStub{values: map[string]string{
-		SettingKeyAffiliateEnabled:           "true",
-		SettingKeyAffiliateRebateRate:        "15",
-		SettingKeyAffiliateRebateFreezeHours: "0",
-	}}, nil)
-	subRepo := newSubscriptionUserSubRepoStub()
-	subscriptionSvc := NewSubscriptionService(&subscriptionGroupRepoStub{
-		group: &Group{ID: 7, Status: payment.EntityStatusActive, SubscriptionType: SubscriptionTypeSubscription},
-	}, subRepo, nil, nil, nil)
-	svc := &PaymentService{
-		entClient:        client,
-		groupRepo:        &subscriptionGroupRepoStub{group: &Group{ID: 7, Status: payment.EntityStatusActive, SubscriptionType: SubscriptionTypeSubscription}},
-		subscriptionSvc:  subscriptionSvc,
-		affiliateService: NewAffiliateService(affiliateRepo, settingSvc, nil, nil),
-	}
-
-	err = svc.ExecuteSubscriptionFulfillment(ctx, order.ID)
-	require.NoError(t, err)
-
-	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
-	require.NoError(t, err)
-	require.Equal(t, OrderStatusCompleted, reloaded.Status)
-	require.Len(t, affiliateRepo.accrueCalls, 1)
-	require.Equal(t, inviterID, affiliateRepo.accrueCalls[0].inviterID)
-	require.Equal(t, user.ID, affiliateRepo.accrueCalls[0].inviteeUserID)
-	require.InDelta(t, 1.4985, affiliateRepo.accrueCalls[0].amount, 0.00000001)
-	require.NotNil(t, affiliateRepo.accrueCalls[0].sourceOrderID)
-	require.Equal(t, order.ID, *affiliateRepo.accrueCalls[0].sourceOrderID)
-	require.Equal(t, 1, subRepo.createCalls)
-
-	applied, err := client.PaymentAuditLog.Query().
-		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("AFFILIATE_REBATE_APPLIED")).
-		Only(ctx)
-	require.NoError(t, err)
-	require.Contains(t, applied.Detail, `"baseAmount":9.99`)
-	require.Contains(t, applied.Detail, `"rebateAmount":1.4985`)
-}
-
 func TestExecuteSubscriptionFulfillmentDoesNotDuplicateWorkAfterLegacySuccessAudit(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
@@ -1252,33 +1026,13 @@ func TestExecuteSubscriptionFulfillmentDoesNotDuplicateWorkAfterLegacySuccessAud
 		Save(ctx)
 	require.NoError(t, err)
 
-	inviterID := int64(9001)
-	affiliateRepo := &paymentFulfillmentAffiliateRepoStub{
-		inviteeSummary: &AffiliateSummary{
-			UserID:    user.ID,
-			AffCode:   "INVITEE",
-			InviterID: &inviterID,
-			CreatedAt: time.Now().Add(-24 * time.Hour),
-		},
-		inviterSummary: &AffiliateSummary{
-			UserID:    inviterID,
-			AffCode:   "INVITER",
-			CreatedAt: time.Now().Add(-48 * time.Hour),
-		},
-	}
-	settingSvc := NewSettingService(&paymentFulfillmentSettingRepoStub{values: map[string]string{
-		SettingKeyAffiliateEnabled:    "true",
-		SettingKeyAffiliateRebateRate: "20",
-	}}, nil)
 	subRepo := newSubscriptionUserSubRepoStub()
-	subscriptionSvc := NewSubscriptionService(&subscriptionGroupRepoStub{
-		group: &Group{ID: 7, Status: payment.EntityStatusActive, SubscriptionType: SubscriptionTypeSubscription},
-	}, subRepo, nil, nil, nil)
+	subscriptionSvc := &SubscriptionService{userSubRepo: subRepo}
+
 	svc := &PaymentService{
-		entClient:        client,
-		groupRepo:        &subscriptionGroupRepoStub{group: &Group{ID: 7, Status: payment.EntityStatusActive, SubscriptionType: SubscriptionTypeSubscription}},
-		subscriptionSvc:  subscriptionSvc,
-		affiliateService: NewAffiliateService(affiliateRepo, settingSvc, nil, nil),
+		entClient:       client,
+		groupRepo:       &subscriptionGroupRepoStub{group: &Group{ID: 7, Status: payment.EntityStatusActive, SubscriptionType: SubscriptionTypeSubscription}},
+		subscriptionSvc: subscriptionSvc,
 	}
 
 	err = svc.ExecuteSubscriptionFulfillment(ctx, order.ID)
@@ -1287,9 +1041,11 @@ func TestExecuteSubscriptionFulfillmentDoesNotDuplicateWorkAfterLegacySuccessAud
 	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
 	require.NoError(t, err)
 	require.Equal(t, OrderStatusCompleted, reloaded.Status)
-	require.Empty(t, affiliateRepo.accrueCalls)
 	require.Zero(t, subRepo.createCalls)
 }
 
-var _ AffiliateRepository = (*paymentFulfillmentAffiliateRepoStub)(nil)
 var _ SettingRepository = (*paymentFulfillmentSettingRepoStub)(nil)
+
+type paymentFulfillmentSettingRepoStub struct {
+	values map[string]string
+}

@@ -1,13 +1,13 @@
-# Batch Image MVP
+# Batch Image API and Operations
 
-Sub2API Batch Image MVP provides asynchronous Gemini image batch generation through a unified API surface backed by Redis workers, PostgreSQL state, and provider-specific batch backends.
+KDAN Batch Image MVP provides asynchronous Gemini image batch generation through a unified API surface backed by Redis workers, PostgreSQL state, and provider-specific batch backends.
 
 Supported providers:
 
 - `gemini_api`
 - `vertex`
 
-API users do not see Gemini file names, Vertex job names, GCS paths, signed URLs, API keys, or service account material. Downloads are proxied through Sub2API in this MVP.
+API users do not see Gemini file names, Vertex job names, GCS paths, signed URLs, API keys, or service account material. Downloads are proxied through KDAN in this MVP.
 
 ## API Routes
 
@@ -57,7 +57,7 @@ Submit request:
 
 - `gemini-2.5-flash-image` and other Flash Image aliases: up to 3 reference images per item.
 - `gemini-3-pro-image` and other Pro Image aliases: up to 14 reference images per item.
-- Per batch job: up to 1000 reference image attachments total after `output_count` expansion across all items. This is an internal Sub2API guardrail for request size and cost control, not the generated-image cap and not a Pro Image per-item capability. The generated-output cap is 200 images per job.
+- Per batch job: up to 1000 reference image attachments total after `output_count` expansion across all items. This is an internal KDAN guardrail for request size and cost control, not the generated-image cap and not a Pro Image per-item capability. The generated-output cap is 200 images per job.
 - Per batch job: up to 128 MB decoded inline reference image data total. For large batches or repeated reference images, prefer `gs://` `file_uri` references or split the request into multiple jobs.
 
 `output_count` is optional per item and defaults to `1`. It means "repeat this prompt and reference image set N times" rather than relying on Gemini to return multiple images from one upstream request. The backend expands each repeat into a separate provider JSONL line with suffixed custom ids such as `cover_001_01`, `cover_001_02`. Current limits are:
@@ -158,18 +158,20 @@ The worker does not perform DB scan polling. Database reads happen only after a 
 
 ## Billing
 
-MVP billing rules:
+Current billing rules (monetary snapshot v2):
 
 - Submit may estimate cost.
 - Settlement runs after result indexing.
 - Only successful images are charged.
 - Failed items are not charged.
 - Reference images are sent to Gemini as input and can create small upstream input-token and temporary storage cost. They are counted once per expanded output request when `output_count > 1`, but the public MVP billing model does not add a separate reference-image surcharge. User-facing estimated, held, and settled amounts are still based on the output image count and configured batch image unit price.
-- Settlement request id is `batch_image_settlement:{batch_id}`.
+- Financial operation IDs are `batch_image_hold:{batch_id}`, `batch_image_capture:{batch_id}` and `batch_image_release:{batch_id}`.
 - Settlement is idempotent; re-running settlement must not double charge.
 - Settlement billing failures are retried with a bounded retry limit. After the retry limit is reached, the job is failed and the remaining hold is released through the idempotent release path.
 
 Exact production pricing is resolved through model pricing configuration and is not defined here.
+
+New jobs freeze batch/user/API-key ownership and the once-quantized eight-decimal amount in a durable hold. Capture and release are mutually exclusive; one batch cannot consume another batch's reserved money. Zero-price jobs remain zero-price. Legacy over-precision operations are only acknowledged when the exact committed receipt can be verified; otherwise BATCH_IMAGE_MONEY_REVIEW_REQUIRED requires reconciliation rather than a guessed charge/refund. Migration 297 supplies the hold table. Drain old financial writers before upgrading; do not run old and new batch-money writers together. See [engineering requirements](ENGINEERING.md#req-media) and the [upgrade guide](CUSTOMIZATION_RELEASE_NOTES.md#批量生图财务协议升级).
 
 ## Cleanup
 
@@ -201,7 +203,7 @@ For the managed Vertex/GCS batch bucket, disable Cloud Storage soft delete or co
 - Supports Gemini `apikey` upstream accounts with a configured API key.
 - Result file refs are internal.
 - API keys are never returned.
-- The provider can be selected and submitted through Sub2API when an administrator configures a Gemini API-key upstream account. In the 2026-07-07 PR validation, this path was verified as selectable/callable, but successful image generation was not continued because the test API key had no prepayment.
+- The provider can be selected and submitted through KDAN when an administrator configures a Gemini API-key upstream account. In the 2026-07-07 PR validation, this path was verified as selectable/callable, but successful image generation was not continued because the test API key had no prepayment.
 
 `vertex`:
 
@@ -216,21 +218,21 @@ Other Gemini account/login types are not selected by the current batch image pro
 
 ## Official Google Enablement
 
-Operators must enable Gemini/Vertex capability in Google's official console before turning on Sub2API batch image for any group. Sub2API feature flags and group switches do not create Google-side access by themselves.
+Operators must enable Gemini/Vertex capability in Google's official console before turning on KDAN batch image for any group. KDAN feature flags and group switches do not create Google-side access by themselves.
 
 Recommended production path:
 
 - Use a Google Cloud project with billing enabled.
 - Enable the relevant Gemini API / Vertex AI APIs for the project.
-- Use a service account or Application Default Credentials for the Sub2API runtime.
+- Use a service account or Application Default Credentials for the KDAN runtime.
 - Create one fixed Cloud Storage bucket for batch image input and output, then grant the runtime and Vertex service agent the minimum required bucket permissions.
-- Configure Sub2API with the project id, location, managed bucket, provider account, model whitelist, and pricing.
+- Configure KDAN with the project id, location, managed bucket, provider account, model whitelist, and pricing.
 - Enable `BATCH_IMAGE_ENABLED` globally, enable image generation on the intended Gemini group, then enable `allow_batch_image_generation` for that group. Non-Gemini groups are not eligible for batch image generation, and the admin UI only shows the batch image group switch after image generation is enabled on a Gemini group.
 
 API-key path:
 
 - Google API keys are suitable for Gemini API development and supported Gemini methods.
-- The Sub2API `x-goog-api-key` compatibility header still expects a Sub2API key, not a plain Google key.
+- The KDAN `x-goog-api-key` compatibility header still expects a KDAN key, not a plain Google key.
 - Plain Google API keys should not be documented as the default production credential for Vertex service-account batch jobs.
 - If an administrator configures a Gemini API-key upstream account, validate it with one low-cost batch image after the Google account has the required billing/prepayment state. If it has no prepayment, record only that the provider is selectable/callable and that failed submit releases hold.
 
@@ -316,10 +318,6 @@ Feature flags default to disabled.
 - Confirm billing pricing.
 - Run smoke tests before enabling.
 
-## Future Optimization
-
-- Optional object-storage download offload: persist completed image outputs to an operator-configured object store such as GCS, S3, or R2, then issue short-lived signed download links to users. This would avoid routing large image/ZIP downloads through the Sub2API server, which is useful for small-bandwidth deployments. Keep it opt-in because it needs extra storage credentials, lifecycle cleanup, signed-URL expiry policy, access auditing, and compatibility with output deletion.
-
 ## Security Checklist
 
 - No provider refs in public responses.
@@ -346,13 +344,3 @@ go test ./... -run '^$'
 
 These commands should not require Docker, testcontainers, Redis, GCP, Gemini, Vertex, or GCS.
 
-## PR Hygiene Checklist
-
-- Do not accidentally commit `rfcs/batch-image-issue-draft.md` unless maintainers explicitly want it.
-- Keep migrations ordered: `159_batch_image_foundation.sql`, then `160_batch_image_provider_refs.sql`, then later migrations.
-- Include generated Ent code if generated code is committed in this repository.
-- Keep generated server and wire files updated.
-- Keep feature flags disabled by default unless maintainers ask otherwise.
-- Do not commit real secrets, API keys, service account JSON, or local machine paths.
-- Keep fixtures tiny and fake; no real cloud refs or credentials.
-- Do not add new public routes, providers, dashboards, queues, or billing behavior in this stabilization PR.

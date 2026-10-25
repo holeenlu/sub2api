@@ -2,14 +2,20 @@ package service
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 type identityCacheStub struct {
+	mu              sync.Mutex
 	maskedSessionID string
+	controlHeaders  map[int64]http.Header
+	cacheErr        error
 }
 
 func (s *identityCacheStub) GetFingerprint(_ context.Context, _ int64) (*Fingerprint, error) {
@@ -18,11 +24,37 @@ func (s *identityCacheStub) GetFingerprint(_ context.Context, _ int64) (*Fingerp
 func (s *identityCacheStub) SetFingerprint(_ context.Context, _ int64, _ *Fingerprint) error {
 	return nil
 }
-func (s *identityCacheStub) GetMaskedSessionID(_ context.Context, _ int64) (string, error) {
+func (s *identityCacheStub) GetOrCreateSessionMaskSeed(_ context.Context, _ int64, candidate string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cacheErr != nil {
+		return "", s.cacheErr
+	}
+	if s.maskedSessionID == "" {
+		s.maskedSessionID = candidate
+	}
 	return s.maskedSessionID, nil
 }
-func (s *identityCacheStub) SetMaskedSessionID(_ context.Context, _ int64, sessionID string) error {
-	s.maskedSessionID = sessionID
+func (s *identityCacheStub) GetClaudeCodeHeaders(_ context.Context, id int64) (http.Header, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.controlHeaders[id].Clone(), s.cacheErr
+}
+func (s *identityCacheStub) UpdateClaudeCodeHeaders(_ context.Context, id int64, headers http.Header) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cacheErr != nil {
+		return s.cacheErr
+	}
+	if s.controlHeaders == nil {
+		s.controlHeaders = make(map[int64]http.Header)
+	}
+	if s.controlHeaders[id] == nil {
+		s.controlHeaders[id] = http.Header{}
+	}
+	for k, v := range headers.Clone() {
+		s.controlHeaders[id][k] = v
+	}
 	return nil
 }
 
@@ -73,10 +105,30 @@ func TestIdentityService_RewriteUserIDWithMasking_PreservesTopLevelFieldOrder(t 
 	resultStr := string(result)
 
 	assertJSONTokenOrder(t, resultStr, `"alpha"`, `"messages"`, `"metadata"`, `"max_tokens"`, `"thinking"`, `"output_config"`, `"stream"`)
-	require.Contains(t, resultStr, cache.maskedSessionID)
+	require.Contains(t, resultStr, generateUUIDFromSeed("123::"+cache.maskedSessionID+"::7578cf37-aaca-46e4-a45c-71285d9dbb83"))
 	require.True(t, strings.Contains(resultStr, `"metadata":{"user_id":"`))
 }
 
 func strconvQuote(v string) string {
 	return `"` + strings.ReplaceAll(strings.ReplaceAll(v, `\`, `\\`), `"`, `\"`) + `"`
+}
+
+func TestIdentityServiceMaskingCacheFailureKeepsAccountIsolation(t *testing.T) {
+	uid := `{"device_id":"client","account_uuid":"","session_id":"child","parent_session_id":"parent","unknown":9007199254740993}`
+	body := []byte(`{"metadata":{"user_id":` + strconvQuote(uid) + `}}`)
+	for _, cache := range []IdentityCache{nil, &identityCacheStub{cacheErr: errors.New("unavailable")}} {
+		svc := NewIdentityService(cache)
+		account := &Account{ID: 11, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"session_id_masking_enabled": true}}
+		want, err := svc.RewriteUserID(body, 11, "account", "cached-device", "claude-cli/2.1.301")
+		require.NoError(t, err)
+		got, err := svc.RewriteUserIDWithMasking(t.Context(), body, account, "account", "cached-device", "claude-cli/2.1.301")
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.NotContains(t, string(got), strconvQuote(uid))
+		require.Contains(t, string(got), "9007199254740993")
+		account.ID++
+		other, err := svc.RewriteUserIDWithMasking(t.Context(), body, account, "account", "cached-device", "claude-cli/2.1.301")
+		require.NoError(t, err)
+		require.NotEqual(t, got, other)
+	}
 }

@@ -28,7 +28,7 @@ func TestFilterCodexInput_StripsFunctionCallItemID_WhenPreservingReferences(t *t
 		},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
 		PreserveReferences: true,
 	})
 
@@ -56,7 +56,7 @@ func TestFilterCodexInput_KeepsFcID_WhenPreservingReferences(t *testing.T) {
 		},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
 		PreserveReferences: true,
 	})
 
@@ -72,7 +72,7 @@ func TestFilterCodexInput_PreservesNativeCustomAndToolSearchIDs(t *testing.T) {
 		map[string]any{"type": "tool_search_call", "id": "tsc_valid", "call_id": "call_search"},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
 	require.Equal(t, "ctc_valid", filtered[0].(map[string]any)["id"])
 	require.Equal(t, "tsc_valid", filtered[1].(map[string]any)["id"])
@@ -84,7 +84,7 @@ func TestFilterCodexInput_StripsWrongCustomAndToolSearchIDs(t *testing.T) {
 		map[string]any{"type": "tool_search_call", "id": "fc_wrong", "call_id": "call_search"},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
 	require.NotContains(t, filtered[0].(map[string]any), "id")
 	require.NotContains(t, filtered[1].(map[string]any), "id")
@@ -100,7 +100,7 @@ func TestFilterCodexInput_MapsItemReferencesToNativeToolCallPair(t *testing.T) {
 		map[string]any{"type": "item_reference", "id": "call_search"},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
 	require.Equal(t, "ctc_custom", filtered[0].(map[string]any)["call_id"])
 	require.Equal(t, "ctc_custom", filtered[1].(map[string]any)["call_id"])
@@ -117,7 +117,7 @@ func TestFilterCodexInput_PreservesAmbiguousItemReference(t *testing.T) {
 		map[string]any{"type": "item_reference", "id": "call_shared"},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
 	require.Equal(t, "ctc_shared", filtered[0].(map[string]any)["call_id"])
 	require.Equal(t, "tsc_shared", filtered[1].(map[string]any)["call_id"])
@@ -130,7 +130,7 @@ func TestFilterCodexInput_PreservesNativeItemIDReferenceIndependentlyFromCallID(
 		map[string]any{"type": "item_reference", "id": "ctc_item"},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
 	require.Equal(t, "ctc_item", filtered[0].(map[string]any)["id"])
 	require.Equal(t, "ctc_custom", filtered[0].(map[string]any)["call_id"])
@@ -144,7 +144,7 @@ func TestFilterCodexInput_ExistingItemIDWinsOverLegacyCallIDMapping(t *testing.T
 		map[string]any{"type": "item_reference", "id": "call_shared"},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
 	require.Equal(t, "ctc_shared", filtered[0].(map[string]any)["call_id"])
 	require.Equal(t, "call_shared", filtered[1].(map[string]any)["id"])
@@ -156,7 +156,7 @@ func TestFilterCodexInput_NormalizesCrossTurnLegacyCallReference(t *testing.T) {
 		map[string]any{"type": "item_reference", "id": "call_previous_turn"},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
 	require.Equal(t, "fc_previous_turn", filtered[0].(map[string]any)["id"])
 }
@@ -166,7 +166,7 @@ func TestFilterCodexInput_PreservesNativeRemoteItemReferences(t *testing.T) {
 		t.Run(id, func(t *testing.T) {
 			input := []any{map[string]any{"type": "item_reference", "id": id}}
 
-			filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
+			filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
 			require.Equal(t, id, filtered[0].(map[string]any)["id"])
 		})
@@ -187,7 +187,7 @@ func TestFilterCodexInput_StripsItemIDFromAllToolCallInputTypes(t *testing.T) {
 				"name":    "tool",
 			},
 		}
-		filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{
+		filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
 			PreserveReferences: true,
 		})
 		require.Len(t, filtered, 1)
@@ -211,7 +211,7 @@ func TestFilterCodexInput_OutputTypeKeepsItemID(t *testing.T) {
 		},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
 		PreserveReferences: true,
 	})
 
@@ -233,7 +233,7 @@ func TestFilterCodexInput_NonToolCallItemKeepsID(t *testing.T) {
 		},
 	}
 
-	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
 		PreserveReferences: true,
 	})
 
