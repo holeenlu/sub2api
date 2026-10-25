@@ -26,6 +26,29 @@ func TestIsOpenAIImageRateLimitError(t *testing.T) {
 	require.False(t, isOpenAIImageRateLimitError(http.StatusBadRequest, imageBody))
 }
 
+func TestExplicitImagePermissionDenialOnlyCoolsImages(t *testing.T) {
+	body := []byte("{\"error\":{\"type\":\"permission_error\",\"message\":\"Image generation is not enabled for this group\"}}")
+	for _, fastpath := range []bool{false, true} {
+		repo := &modelNotFoundAccountRepoStub{}
+		ratelimit := &RateLimitService{accountRepo: repo}
+		svc := &OpenAIGatewayService{rateLimitService: ratelimit}
+		account := &Account{ID: 203, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+		var disabled bool
+		if fastpath {
+			disabled = svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusForbidden, nil, body, "gpt-5.5")
+		} else {
+			disabled = ratelimit.HandleUpstreamError(context.Background(), account, http.StatusForbidden, nil, body, "gpt-5.5")
+		}
+		require.False(t, disabled)
+		require.Len(t, repo.modelRateLimitCalls, 1)
+		require.Equal(t, openAIImageGenerationRateLimitKey, repo.modelRateLimitCalls[0].scope)
+		require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	}
+	require.False(t, isOpenAIImagePermissionError(http.StatusBadRequest, body))
+	require.False(t, isOpenAIImagePermissionError(http.StatusForbidden, []byte("{\"error\":{\"type\":\"permission_error\",\"message\":\"account suspended\"}}")))
+	require.False(t, isOpenAIImagePermissionError(http.StatusForbidden, []byte(ImageGenerationPermissionMessage())))
+}
+
 func TestRateLimitService_HandleOpenAIImageRateLimit_ParsesTryAgainCooldown(t *testing.T) {
 	repo := &modelNotFoundAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}

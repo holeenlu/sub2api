@@ -112,6 +112,9 @@ func TestEnsureOpenAIResponseObjectCreatedAt(t *testing.T) {
 }
 
 func TestBuildOpenAIResponseFailedSSE_CarriesCreatedAtAndSequenceNumber(t *testing.T) {
+	bare := buildOpenAIResponseFailedSSE("resp_1", "gpt-5.5", 1700000000,
+		[]byte(`{"type":"error","code":"invalid_encrypted_content","message":"Cannot verify encrypted history"}`), "")
+	require.Equal(t, "invalid_encrypted_content", gjson.Get(sseDataPayloads(bare)[0], "response.error.code").String())
 	frame := buildOpenAIResponseFailedSSE("resp_1", "gpt-5.5", 1700000000,
 		[]byte(`{"type":"error","sequence_number":7,"error":{"code":"server_is_overloaded","message":"busy"}}`), "")
 	payloads := sseDataPayloads(frame)
@@ -140,6 +143,9 @@ func TestBuildOpenAIWSHTTPBridgeFailedEvent_CarriesCreatedAtAndSequenceNumber(t 
 	event = buildOpenAIWSHTTPBridgeFailedEvent("resp_1", "", 0, []byte(`{"type":"error","error":{"message":"boom"}}`), "")
 	require.EqualValues(t, 0, gjson.GetBytes(event, "sequence_number").Int())
 	require.Positive(t, gjson.GetBytes(event, "response.created_at").Int())
+	event = buildOpenAIWSHTTPBridgeFailedEvent("", "", 1700000000, []byte(`{"type":"error","error":{"code":"invalid_request_error","message":"bad request"}}`), "")
+	require.Equal(t, "error", gjson.GetBytes(event, "type").String())
+	require.False(t, gjson.GetBytes(event, "response").Exists(), "no response identity may be fabricated for a request rejection")
 }
 
 // Grok 账号挂在不发 created_at 的上游（第三方中转）后面：每个生命周期事件都要补齐，
@@ -247,6 +253,7 @@ func TestProxyOpenAIWSHTTPBridgeTurn_GrokStampsMissingCreatedAt(t *testing.T) {
 			`data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_ws","object":"response","model":"grok-4.5","status":"in_progress"}}`,
 			"",
 			`data: {"type":"response.completed","sequence_number":1,"response":{"id":"resp_ws","object":"response","model":"grok-4.5","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
+			"",
 			"",
 		}, "\n"))),
 	}}

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { schedulingQuotaNumberFields, schedulingQuotaPreset, validSchedulingQuotaProtection } from '@/utils/schedulingQuota'
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -33,10 +34,17 @@ const advancedSettings = ref<OpsAdvancedSettings | null>(null)
 // 指标阈值配置
 const metricThresholds = ref<OpsMetricThresholds>({
   sla_percent_min: 99.5,
-  ttft_p99_ms_max: 500,
+  ttft_p99_ms_max: 10000,
   request_error_rate_percent_max: 5,
   upstream_error_rate_percent_max: 5
 })
+
+function applySchedulingQuotaPreset() {
+  if (!advancedSettings.value) return
+  const preset = schedulingQuotaPreset()
+  advancedSettings.value.quota_protection = preset.protection
+  advancedSettings.value.openai_account_quota_auto_pause = preset.openai
+}
 
 // 加载所有配置
 async function loadAllSettings() {
@@ -60,7 +68,7 @@ async function loadAllSettings() {
     if (thresholds && Object.keys(thresholds).length > 0) {
         metricThresholds.value = {
           sla_percent_min: thresholds.sla_percent_min ?? 99.5,
-          ttft_p99_ms_max: thresholds.ttft_p99_ms_max ?? 500,
+          ttft_p99_ms_max: thresholds.ttft_p99_ms_max ?? 10000,
           request_error_rate_percent_max: thresholds.request_error_rate_percent_max ?? 5,
           upstream_error_rate_percent_max: thresholds.upstream_error_rate_percent_max ?? 5
         }
@@ -164,6 +172,10 @@ const validation = computed(() => {
 
   // 验证高级设置
   if (advancedSettings.value) {
+    const interval = advancedSettings.value.account_telemetry_upload_interval_seconds
+    if (!Number.isInteger(interval) || interval < 60 || interval > 86400) {
+      errors.push(t('admin.ops.settings.accountTelemetryIntervalInvalid'))
+    }
     const { error_log_retention_days, minute_metrics_retention_days, hourly_metrics_retention_days } = advancedSettings.value.data_retention
     if (error_log_retention_days < 0 || error_log_retention_days > 365) {
       errors.push(t('admin.ops.settings.validation.retentionDaysRange'))
@@ -175,6 +187,9 @@ const validation = computed(() => {
       errors.push(t('admin.ops.settings.validation.retentionDaysRange'))
     }
 
+    if (advancedSettings.value.quota_protection && !validSchedulingQuotaProtection(advancedSettings.value.quota_protection)) {
+      errors.push(t('admin.ops.settings.quotaProtection.invalid'))
+    }
     const { default_threshold_5h, default_threshold_7d } = advancedSettings.value.openai_account_quota_auto_pause
     if (default_threshold_5h < 0 || default_threshold_5h > 1 || default_threshold_7d < 0 || default_threshold_7d > 1) {
       errors.push(t('admin.ops.settings.validation.openaiQuotaAutoPauseRange'))
@@ -440,6 +455,18 @@ async function saveAllSettings() {
           {{ t('admin.ops.settings.advancedSettings') }}
         </summary>
         <div class="space-y-4 px-4 pb-4">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.accountTelemetry') }}</label>
+              <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.accountTelemetryHint') }}</p>
+            </div>
+            <Toggle v-model="advancedSettings.account_telemetry_sending_enabled" :aria-label="t('admin.ops.settings.accountTelemetry')" data-testid="account-telemetry-enabled" />
+          </div>
+          <div>
+            <label for="telemetry-upload-interval" class="input-label">{{ t('admin.ops.settings.accountTelemetryInterval') }}</label>
+            <input id="telemetry-upload-interval" v-model.number="advancedSettings.account_telemetry_upload_interval_seconds" type="number" min="60" max="86400" step="1" class="input" data-testid="account-telemetry-interval" />
+            <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.accountTelemetryIntervalHint') }}</p>
+          </div>
           <!-- 数据保留策略 -->
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.dataRetention') }}</h5>
@@ -540,6 +567,27 @@ async function saveAllSettings() {
               </div>
             </div>
             <p class="text-xs text-gray-500">{{ t('admin.ops.settings.openaiQuotaAutoPauseThresholdHint') }}</p>
+          </div>
+          <div v-if="advancedSettings.quota_protection" class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-600" data-testid="quota-protection">
+            <div class="flex items-center justify-between gap-3">
+              <h5 class="text-xs font-semibold">{{ t('admin.ops.settings.quotaProtection.title') }}</h5>
+              <button type="button" class="btn btn-secondary btn-sm" data-testid="quota-protection-preset" @click="applySchedulingQuotaPreset">{{ t('admin.ops.settings.quotaProtection.apply') }}</button>
+            </div>
+            <p class="text-xs text-gray-500">{{ t('admin.ops.settings.quotaProtection.hint') }}</p>
+            <label class="flex items-center justify-between gap-3 text-sm">
+              {{ t('admin.ops.settings.quotaProtection.tiers') }}
+              <Toggle v-model="advancedSettings.quota_protection.anthropic_tier_thresholds_enabled" :aria-label="t('admin.ops.settings.quotaProtection.tiers')" />
+            </label>
+            <label class="flex items-center justify-between gap-3 text-sm">
+              {{ t('admin.ops.settings.quotaProtection.cold') }}
+              <Toggle v-model="advancedSettings.quota_protection.guard_large_cold" :aria-label="t('admin.ops.settings.quotaProtection.cold')" />
+            </label>
+            <div class="grid grid-cols-2 gap-3">
+              <label v-for="field in schedulingQuotaNumberFields" :key="field.key" class="text-xs">
+                {{ t('admin.ops.settings.quotaProtection.' + field.key) }}
+                <input v-model.number="advancedSettings.quota_protection[field.key]" type="number" class="input mt-1" :min="field.min" :max="field.max" :step="field.step" :data-testid="'quota-' + field.key" />
+              </label>
+            </div>
           </div>
 
           <!-- Error Filtering -->

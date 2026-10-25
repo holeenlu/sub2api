@@ -26,12 +26,22 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
+      <div v-if="!allowTransportEdit" class="space-y-4" data-testid="delegated-account-editor">
+        <div class="grid grid-cols-3 gap-4">
+          <label class="input-label">{{ t('admin.accounts.concurrency') }}<input v-model.number="form.concurrency" type="number" min="1" class="input" /></label>
+          <label class="input-label">{{ t('admin.accounts.priority') }}<input v-model.number="form.priority" type="number" min="1" class="input" /></label>
+          <label class="input-label">{{ t('admin.accounts.loadFactor') }}<input v-model.number="form.load_factor" type="number" min="1" class="input" /></label>
+        </div>
+        <label v-if="showCost && allowRateEdit" class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}<input v-model.number="form.rate_multiplier" type="number" min="0" step="0.001" class="input" /></label>
+        <label v-if="allowAuthorize && account.type === 'apikey'" class="input-label">{{ t('admin.accounts.apiKey') }}<input v-model="editApiKey" type="password" autocomplete="new-password" class="input" /></label>
+      </div>
+      <template v-if="allowTransportEdit">
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
-            v-model="editBaseUrl"
+ :disabled="!allowTransportEdit"            v-model="editBaseUrl"
             type="text"
             class="input"
             :placeholder="
@@ -69,7 +79,7 @@
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                 {{ t(`admin.accounts.cnProviders.apiProtocol.${item.labelKey}`) }}
               </label>
-              <input v-model="editAdaptiveBaseUrls[item.value]" type="text" class="input" />
+              <input :disabled="!allowTransportEdit" v-model="editAdaptiveBaseUrls[item.value]" type="text" class="input" />
             </div>
           </div>
           <p v-if="!cnSupportsNativeResponses(account.platform, currentOpenCodeOrCNMode())" class="input-hint">
@@ -228,7 +238,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
           <input
-            v-model="editApiKey"
+ :disabled="!allowAuthorize"            v-model="editApiKey"
             type="password"
             class="input font-mono"
             autocomplete="new-password"
@@ -744,7 +754,7 @@
         </div>
         <div v-if="grokOAuthCustomBaseUrlEnabled" class="space-y-2">
           <input
-            v-model="grokOAuthBaseUrl"
+ :disabled="!allowTransportEdit"            v-model="grokOAuthBaseUrl"
             type="text"
             class="input"
             data-testid="grok-custom-base-url-input"
@@ -795,9 +805,9 @@
         </div>
       </div>
 
-      <!-- OpenAI/Grok OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
+      <!-- OAuth / setup-token accounts have no API key model restriction section. -->
       <div
-        v-if="(account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth'"
+        v-if="hasOAuthModelRestriction"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -936,7 +946,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.upstream.baseUrl') }}</label>
           <input
-            v-model="editBaseUrl"
+ :disabled="!allowTransportEdit"            v-model="editBaseUrl"
             type="text"
             class="input"
             placeholder="https://cloudcode-pa.googleapis.com"
@@ -946,7 +956,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.upstream.apiKey') }}</label>
           <input
-            v-model="editApiKey"
+ :disabled="!allowAuthorize"            v-model="editApiKey"
             type="password"
             class="input font-mono"
             placeholder="sk-..."
@@ -994,7 +1004,7 @@
           <div v-if="!isVertexAPIKeyMode || editVertexProjectId.trim()">
             <label class="input-label">Location</label>
             <select
-              v-model="editVertexLocation"
+ :disabled="!allowTransportEdit"              v-model="editVertexLocation"
               required
               class="input font-mono"
             >
@@ -1199,7 +1209,7 @@
           <div>
             <label class="input-label">{{ t('admin.accounts.bedrockAccessKeyId') }}</label>
             <input
-              v-model="editBedrockAccessKeyId"
+ :disabled="!allowAuthorize"              v-model="editBedrockAccessKeyId"
               type="text"
               class="input font-mono"
               placeholder="AKIA..."
@@ -1208,7 +1218,7 @@
           <div>
             <label class="input-label">{{ t('admin.accounts.bedrockSecretAccessKey') }}</label>
             <input
-              v-model="editBedrockSecretAccessKey"
+ :disabled="!allowAuthorize"              v-model="editBedrockSecretAccessKey"
               type="password"
               class="input font-mono"
               :placeholder="t('admin.accounts.bedrockSecretKeyLeaveEmpty')"
@@ -1218,7 +1228,7 @@
           <div>
             <label class="input-label">{{ t('admin.accounts.bedrockSessionToken') }}</label>
             <input
-              v-model="editBedrockSessionToken"
+ :disabled="!allowAuthorize"              v-model="editBedrockSessionToken"
               type="password"
               class="input font-mono"
               :placeholder="t('admin.accounts.bedrockSecretKeyLeaveEmpty')"
@@ -1231,7 +1241,7 @@
         <div v-if="isBedrockAPIKeyMode">
           <label class="input-label">{{ t('admin.accounts.bedrockApiKeyInput') }}</label>
           <input
-            v-model="editBedrockApiKeyValue"
+ :disabled="!allowAuthorize"            v-model="editBedrockApiKeyValue"
             type="password"
             class="input font-mono"
             :placeholder="t('admin.accounts.bedrockApiKeyLeaveEmpty')"
@@ -1243,7 +1253,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.bedrockRegion') }}</label>
           <input
-            v-model="editBedrockRegion"
+ :disabled="!allowTransportEdit"            v-model="editBedrockRegion"
             type="text"
             class="input"
             placeholder="us-east-1"
@@ -1734,6 +1744,40 @@
         </div>
       </div>
 
+      <!-- Anthropic 7d Fable 阈值覆盖：只拦 Fable 模型，不停整个账号 -->
+      <div
+        v-if="supportsAnthropicFableSchedulingThresholdOverride"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="anthropic-fable-scheduling-threshold-section"
+      >
+        <div class="mb-3 flex items-center justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverride') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideHint') }}
+            </p>
+          </div>
+          <input
+            v-model="anthropicFableSchedulingThresholdOverrideEnabled"
+            data-testid="anthropic-fable-scheduling-threshold-override-enabled"
+            type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div v-if="anthropicFableSchedulingThresholdOverrideEnabled">
+          <label class="input-label">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideValue') }}</label>
+          <input
+            v-model.number="anthropicFableSchedulingThresholdOverrideValue"
+            data-testid="anthropic-fable-scheduling-threshold-override-value"
+            type="number"
+            min="1"
+            max="100"
+            class="input"
+          />
+          <p class="input-hint">{{ t('admin.accounts.anthropicFableSchedulingThresholdOverrideDisabledHint') }}</p>
+        </div>
+      </div>
+
       <!-- Intercept Warmup Requests (Anthropic/Antigravity) -->
       <div
         v-if="account?.platform === 'anthropic' || account?.platform === 'antigravity'"
@@ -1769,10 +1813,17 @@
       <div v-if="!isSparkShadow">
         <div class="mb-1 flex items-center gap-2">
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
-          <ProxyAdBanner />
+
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector :disabled="!allowTransportEdit" v-model="form.proxy_id" :proxies="proxies" />
       </div>
+
+      <AccountTelemetryPanel
+        v-if="authStore.isSuperAdmin && allowTransportEdit && !supplierScope && !captureBaseline && !isSparkShadow && (account.platform === 'anthropic' && (account.type === 'oauth' || account.type === 'setup-token'))"
+        :key="`${account.id}:${show}`"
+        :account-id="account.id"
+        :value="readAccountTelemetry(account.extra)"
+      />
 
       <UpstreamRequestIdHeaderField
         v-model="upstreamRequestIdHeader"
@@ -1804,7 +1855,7 @@
           />
           <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
         </div>
-        <div>
+        <div v-if="showCost">
           <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
           <input
             v-model.number="form.rate_multiplier"
@@ -1813,7 +1864,7 @@
             step="0.001"
             class="input disabled:cursor-not-allowed disabled:opacity-60"
             data-testid="account-rate-multiplier"
-            :disabled="upstreamBillingRateSyncEnabled"
+            :disabled="upstreamBillingRateSyncEnabled || !allowRateEdit"
           />
           <p class="input-hint">
             {{
@@ -1860,6 +1911,109 @@
           {{ t('admin.accounts.expiresAtHint') }}
           {{ t('admin.accounts.expiresAtTimezoneHint', { timezone: browserTimeZone }) }}
         </p>
+      </div>
+
+      <CloudGatewaySettings
+        v-if="show && cloudEligible && account"
+        v-model:enabled="cloudEnabled"
+        :account-id="account.id"
+        :can-edit="allowTransportEdit"
+      />
+
+      <div v-if="account?.platform === 'openai' && account?.type === 'oauth' && !isSparkShadow"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.excelBPS') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSDesc') }}</p>
+          </div>
+        </div>
+        <ExcelBPSAuthorization v-if="account && !account.vendor_id && allowAuthorize && authStore.can('accounts.authorize')" :account-id="account.id" :proxy-id="account.proxy_id" class="mb-4" />
+        <ExcelBPSModeSwitches :enabled="excelBPSEnabled" :mode="excelBPSMode"
+          :loading="bpsDefaults.loading.value" :failed="bpsDefaults.failed.value" :applied="bpsDefaults.applied.value"
+          :available="authStore.isSuperAdmin" prefix="excel-bps" @toggle="bpsDefaults.toggle" />
+        <div v-if="excelBPSEnabled" class="mt-3 space-y-3">
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="excelBPSAllModels" type="checkbox" data-testid="excel-bps-all-models" />
+            <span>{{ t('admin.accounts.openai.excelBPSAllModels') }}</span>
+          </label>
+          <div v-if="!excelBPSAllModels" data-testid="excel-bps-model-selection">
+            <label class="input-label">{{ t('admin.accounts.openai.excelBPSModels') }}</label>
+            <ModelWhitelistSelector v-model="excelBPSModels" platform="openai" />
+            <button type="button" class="btn btn-secondary" data-testid="excel-bps-astra-only"
+              @click="excelBPSModels = ['gpt-6-astra']">{{ t('admin.accounts.openai.excelBPSAstraOnly') }}</button>
+            <p class="input-hint">{{ t('admin.accounts.openai.excelBPSModelsHint') }}</p>
+          </div>
+        </div>
+        <p v-if="excelBPSEnabled" class="mt-2 text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.excelBPSNotice') }}</p>
+        <div v-if="excelBPSEnabled" class="mt-3">
+          <label class="flex items-center gap-2">
+            <input v-model="excelBPSOmitUnsupportedTools" type="checkbox"
+              data-testid="excel-bps-omit-unsupported-tools"
+              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedTools') }}</span>
+          </label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedToolsDesc') }}</p>
+        </div>
+        <div v-if="excelBPSEnabled" class="mt-3">
+          <label class="flex items-center gap-2">
+            <input v-model="excelBPSIgnoreEncryptedContent" type="checkbox"
+              data-testid="excel-bps-ignore-encrypted-content"
+              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContent') }}</span>
+          </label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContentDesc') }}</p>
+        </div>
+        <div v-if="excelBPSEnabled || excelBPS403RecoveryPending" class="mt-3">
+          <label class="flex items-center gap-2">
+            <input v-model="excelBPSAutoDisableOn403" type="checkbox"
+              data-testid="excel-bps-auto-disable-on-403"
+              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoDisableOn403') }}</span>
+          </label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoDisableOn403Desc') }}</p>
+        </div>
+        <div v-if="excelBPSEnabled || excelBPS403RecoveryPending" class="mt-3">
+          <label class="flex items-center gap-2">
+            <input v-model="excelBPSAutoRecoverOn403" type="checkbox" :disabled="!excelBPSAutoDisableOn403"
+              data-testid="excel-bps-auto-recover-on-403"
+              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500 disabled:opacity-50" />
+            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoRecoverOn403') }}</span>
+          </label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoRecoverOn403Desc') }}</p>
+          <div v-if="excelBPSAutoRecoverOn403 && excelBPSAutoDisableOn403" class="mt-2">
+            <label class="block space-y-1">
+              <span class="text-sm">{{ t('admin.accounts.openai.excelBPS403RecoveryInterval') }}</span>
+              <input v-model.number="excelBPSRecoveryIntervalMinutes" type="number" min="1" :max="MAX_BPS_RECOVERY_INTERVAL_MINUTES" step="1" required
+                data-testid="excel-bps-recovery-interval" class="input w-40" />
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPS403RecoveryIntervalHint') }}</p>
+          </div>
+        </div>
+        <div v-if="excelBPSEnabled" class="mt-3">
+          <label class="flex items-center gap-2">
+            <input v-model="excelBPSAutoMoveOn403" type="checkbox"
+              data-testid="excel-bps-auto-move-on-403"
+              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoMoveOn403') }}</span>
+          </label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoMoveOn403Desc') }}</p>
+          <div v-if="excelBPSAutoMoveOn403" class="mt-2">
+            <label class="input-label">{{ t('admin.accounts.openai.excelBPS403TargetGroup') }}</label>
+            <Select v-model="excelBPS403TargetGroupID" :options="excelBPS403GroupOptions"
+              :aria-label="t('admin.accounts.openai.excelBPS403TargetGroup')"
+              data-testid="excel-bps-403-target-group" />
+          </div>
+        </div>
+        <div v-if="excelBPSEnabled" class="mt-3">
+          <label class="flex items-center gap-2">
+            <input v-model="excelBPSCacheCreationAsInput" type="checkbox"
+              data-testid="excel-bps-cache-creation-as-input"
+              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInput') }}</span>
+          </label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInputDesc') }}</p>
+        </div>
       </div>
 
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
@@ -3090,7 +3244,7 @@
           </div>
           <div v-if="customBaseUrlEnabled" class="mt-3">
             <input
-              v-model="customBaseUrl"
+ :disabled="!allowTransportEdit"              v-model="customBaseUrl"
               type="text"
               class="input"
               :placeholder="t('admin.accounts.quotaControl.customBaseUrl.urlHint')"
@@ -3164,6 +3318,7 @@
         </div>
       </div>
 
+      </template>
       <!-- Group Selection - 仅标准模式显示 -->
       <GroupSelector
         v-model="form.group_ids"
@@ -3229,7 +3384,15 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ExcelBPSModeSwitches from './ExcelBPSModeSwitches.vue'
+import ExcelBPSAuthorization from './ExcelBPSAuthorization.vue'
+import CloudGatewaySettings from './CloudGatewaySettings.vue'
+import { isOpenAICloudAccount } from '@/utils/openaiCloud'
+import type { ExcelBPSMode } from '@/utils/excelBPSDefaults'
+import { useExcelBPSDefaults } from '@/composables/useExcelBPSDefaults'
+import { DEFAULT_BPS_RECOVERY_INTERVAL_MINUTES, MAX_BPS_RECOVERY_INTERVAL_MINUTES, isValidBPSRecoveryInterval, bpsRecoveryIntervalOrDefault } from '@/utils/excelBPSRecovery'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
@@ -3254,10 +3417,11 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
+import AccountTelemetryPanel from '@/components/account/AccountTelemetryPanel.vue'
+import { readAccountTelemetry } from '@/utils/accountTelemetry'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
-import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
@@ -3319,7 +3483,7 @@ import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { supportsAccountQuota } from '@/utils/accountQuota'
 import { getAccountExpiryTimestamp } from '@/components/account/accountExpiry'
 import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
-import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
+import { DEFAULT_EXCEL_BPS_MODELS, VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
@@ -3339,20 +3503,29 @@ import {
 } from '@/composables/useModelWhitelist'
 
 interface Props {
+  saveAccount?: (id: number, updates: Record<string, unknown>) => Promise<Account>
+  supplierScope?: boolean
+  captureBaseline?: boolean
   show: boolean
   account: Account | null
   proxies: Proxy[]
   groups: AdminGroup[]
+  allowRateEdit?: boolean
+  allowAuthorize?: boolean
+  allowTransportEdit?: boolean
+  showCost?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { allowRateEdit: true, allowAuthorize: true, allowTransportEdit: true, showCost: true })
 const emit = defineEmits<{
   close: []
   updated: [account: Account]
+  baseline: [payload: Record<string, unknown>]
 }>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const browserTimeZone = getBrowserTimeZone()
 
 const selectableGroups = computed(() => {
@@ -3672,6 +3845,13 @@ const isBedrockAPIKeyMode = computed(() =>
 const modelMappings = ref<ModelMapping[]>([])
 const openAICompactModelMappings = ref<ModelMapping[]>([])
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
+const hasOAuthModelRestriction = computed(() => {
+  const account = props.account
+  return account != null && (
+    (account.platform === 'anthropic' && (account.type === 'oauth' || account.type === 'setup-token')) ||
+    ((account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth')
+  )
+})
 const allowedModels = ref<string[]>([])
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
@@ -3796,11 +3976,28 @@ const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
 const isSyncingAntigravityUpstream = ref(false)
 const tempUnschedEnabled = ref(false)
-const accountSchedulingThresholdOverrideEnabled = ref(false)
-const accountSchedulingThresholdOverrideValue = ref(100)
 const ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY = 'account_scheduling_threshold'
+const ANTHROPIC_FABLE_SCHEDULING_THRESHOLD_CREDENTIAL_KEY = 'anthropic_fable_scheduling_threshold'
+
+const accountSchedulingThresholdOverride = createSchedulingThresholdOverrideBinding(
+  ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY,
+  supportsAccountSchedulingThresholdOverridePlatform
+)
+// Fable 是 Anthropic 独有的模型家族，其他平台没有这个概念。
+const anthropicFableSchedulingThresholdOverride = createSchedulingThresholdOverrideBinding(
+  ANTHROPIC_FABLE_SCHEDULING_THRESHOLD_CREDENTIAL_KEY,
+  supportsAnthropicFableSchedulingThresholdAccount
+)
+
+const accountSchedulingThresholdOverrideEnabled = accountSchedulingThresholdOverride.enabled
+const accountSchedulingThresholdOverrideValue = accountSchedulingThresholdOverride.value
 const supportsAccountSchedulingThresholdOverride = computed(() =>
   supportsAccountSchedulingThresholdOverridePlatform(props.account?.platform)
+)
+const anthropicFableSchedulingThresholdOverrideEnabled = anthropicFableSchedulingThresholdOverride.enabled
+const anthropicFableSchedulingThresholdOverrideValue = anthropicFableSchedulingThresholdOverride.value
+const supportsAnthropicFableSchedulingThresholdOverride = computed(() =>
+  supportsAnthropicFableSchedulingThresholdAccount(props.account?.platform, props.account?.type)
 )
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-model-mapping')
@@ -3843,6 +4040,43 @@ const customBaseUrlEnabled = ref(false)
 const customBaseUrl = ref('')
 
 // OpenAI 自动透传开关（OAuth/API Key）
+const cloudEligible = computed(() => !props.supplierScope && isOpenAICloudAccount(props.account))
+const cloudEnabled = ref(false)
+const excelBPSEnabled = ref(false)
+const excelBPSMode = ref<ExcelBPSMode>('initial')
+const excelBPSAllModels = ref(false)
+const excelBPSModels = ref<string[]>([...DEFAULT_EXCEL_BPS_MODELS])
+const excelBPSCacheCreationAsInput = ref(false)
+const excelBPSAutoDisableOn403 = ref(false)
+const excelBPSAutoRecoverOn403 = ref(false)
+const excelBPSRecoveryIntervalMinutes = ref<number | string>(DEFAULT_BPS_RECOVERY_INTERVAL_MINUTES)
+const excelBPS403RecoveryPending = computed(() => props.account?.extra?.openai_excel_bps !== true && typeof props.account?.extra?.openai_excel_bps_403_disabled_at === 'string')
+const excelBPSOmitUnsupportedTools = ref(false)
+const excelBPSIgnoreEncryptedContent = ref(false)
+const excelBPSAutoMoveOn403 = ref(false)
+const excelBPS403TargetGroupID = ref<number | string>('')
+const bpsDefaults = useExcelBPSDefaults({
+  enabled: excelBPSEnabled,
+  mode: excelBPSMode,
+  available: () => authStore.isSuperAdmin,
+  context: () => JSON.stringify([props.show, props.account?.id, authStore.user?.id, authStore.user?.role]),
+  fields: {
+    all_models: excelBPSAllModels, models: excelBPSModels,
+    omit_unsupported_tools: excelBPSOmitUnsupportedTools,
+    ignore_encrypted_content: excelBPSIgnoreEncryptedContent,
+    auto_disable_on_403: excelBPSAutoDisableOn403, auto_recover_on_403: excelBPSAutoRecoverOn403,
+    recovery_interval_minutes: excelBPSRecoveryIntervalMinutes,
+    auto_move_on_403: excelBPSAutoMoveOn403, target_group_id: excelBPS403TargetGroupID,
+    cache_creation_as_input: excelBPSCacheCreationAsInput
+  }
+})
+const excelBPS403GroupOptions = computed(() => [
+  { value: '', label: t('admin.accounts.openai.excelBPS403SelectTarget') },
+  { value: 0, label: t('admin.accounts.openai.excelBPS403LeaveAllGroups') },
+  ...props.groups
+    .filter(group => group.platform === 'openai' || (!authStore.isSimpleMode && group.platform === 'composite'))
+    .map(group => ({ value: group.id, label: group.name }))
+])
 const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
@@ -3878,11 +4112,11 @@ const {
 } = useQuotaNotifyState()
 
 // Load global feature states once
-adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
+if (props.allowTransportEdit) adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
   webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
 
-loadQuotaNotifyGlobal()
+if (props.allowTransportEdit) loadQuotaNotifyGlobal()
 const editQuotaLimit = ref<number | null>(null)
 const editQuotaDailyLimit = ref<number | null>(null)
 const editQuotaWeeklyLimit = ref<number | null>(null)
@@ -4193,7 +4427,7 @@ const form = reactive({
   load_factor: null as number | null,
   priority: 1,
   rate_multiplier: 1,
-  status: 'active' as 'active' | 'inactive' | 'error',
+  status: 'active' as Account['status'],
   group_ids: [] as number[],
   expires_at: null as number | null
 })
@@ -4217,6 +4451,7 @@ const statusOptions = computed(() => {
     { value: 'active', label: t('common.active') },
     { value: 'inactive', label: t('common.inactive') }
   ]
+  if (form.status === 'disabled') options.push({ value: 'disabled', label: t('common.inactive') })
   if (form.status === 'error') {
     options.push({ value: 'error', label: t('admin.accounts.status.error') })
   }
@@ -4344,6 +4579,19 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
+  cloudEnabled.value = cloudEligible.value && extra?.openai_cloud === true
+  excelBPSEnabled.value = false
+  excelBPSMode.value = 'initial'
+  excelBPSAllModels.value = false
+  excelBPSModels.value = [...DEFAULT_EXCEL_BPS_MODELS]
+  excelBPSCacheCreationAsInput.value = false
+  excelBPSAutoDisableOn403.value = false
+  excelBPSAutoRecoverOn403.value = false
+  excelBPSRecoveryIntervalMinutes.value = DEFAULT_BPS_RECOVERY_INTERVAL_MINUTES
+  excelBPSOmitUnsupportedTools.value = false
+  excelBPSIgnoreEncryptedContent.value = false
+  excelBPSAutoMoveOn403.value = false
+  excelBPS403TargetGroupID.value = ''
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
@@ -4362,6 +4610,23 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
+    excelBPSEnabled.value = newAccount.type === 'oauth' && extra?.openai_excel_bps === true
+    excelBPSMode.value = extra?.openai_excel_bps_config_mode === 'defaults' ? 'defaults' : 'initial'
+    excelBPSAllModels.value = excelBPSEnabled.value && !Object.prototype.hasOwnProperty.call(extra ?? {}, 'openai_excel_bps_models')
+    if (Object.prototype.hasOwnProperty.call(extra ?? {}, 'openai_excel_bps_models')) {
+      excelBPSModels.value = Array.isArray(extra?.openai_excel_bps_models)
+        ? extra.openai_excel_bps_models.filter((model): model is string => typeof model === 'string')
+        : []
+    }
+    excelBPSCacheCreationAsInput.value = excelBPSEnabled.value && extra?.openai_excel_bps_cache_creation_as_input === true
+    excelBPSAutoDisableOn403.value = newAccount.type === 'oauth' && extra?.openai_excel_bps_auto_disable_on_403 === true
+    excelBPSAutoRecoverOn403.value = newAccount.type === 'oauth' && extra?.openai_excel_bps_auto_recover_on_403 === true
+    excelBPSRecoveryIntervalMinutes.value = bpsRecoveryIntervalOrDefault(extra?.openai_excel_bps_403_recovery_interval_minutes)
+    excelBPSOmitUnsupportedTools.value = excelBPSEnabled.value && extra?.openai_excel_bps_omit_unsupported_tools === true
+    excelBPSIgnoreEncryptedContent.value = excelBPSEnabled.value && extra?.openai_excel_bps_ignore_encrypted_content === true
+    excelBPSAutoMoveOn403.value = newAccount.type === 'oauth' && extra?.openai_excel_bps_auto_move_on_403 === true
+    const targetGroupID = extra?.openai_excel_bps_403_target_group_id
+    excelBPS403TargetGroupID.value = typeof targetGroupID === 'number' && Number.isSafeInteger(targetGroupID) && targetGroupID >= 0 ? targetGroupID : ''
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
     openaiFlattenNamespacesEnabled.value =
       newAccount.type === 'oauth' && extra?.openai_responses_flatten_namespaces === true
@@ -4505,7 +4770,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   loadQuotaControlSettings(newAccount)
 
   loadTempUnschedRules(credentials)
-  loadAccountSchedulingThresholdOverride(newAccount.platform, credentials)
+  loadAccountSchedulingThresholdOverride(newAccount.platform, newAccount.type, credentials)
 
   // Load header override state for eligible account platforms/types
   headerOverrideEnabled.value = false
@@ -4704,8 +4969,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
             : 'https://api.anthropic.com'
     editBaseUrl.value = platformDefaultUrl
 
-    // Load model mappings for OpenAI/Grok OAuth accounts
-    if ((newAccount.platform === 'openai' || newAccount.platform === 'grok') && newAccount.credentials) {
+    // Load model mappings for OAuth / setup-token accounts
+    if ((hasOAuthModelRestriction.value || newAccount.platform === 'openai' || newAccount.platform === 'grok') && newAccount.credentials) {
       const oauthCredentials = newAccount.credentials as Record<string, unknown>
       loadModelRestrictionFromMapping(oauthCredentials.model_mapping as Record<string, unknown> | undefined)
     } else {
@@ -4726,6 +4991,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 
 async function loadTLSProfiles() {
   try {
+    if (!props.allowTransportEdit) return
     const profiles = await adminAPI.tlsFingerprintProfiles.list()
     tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name }))
   } catch {
@@ -4975,6 +5241,16 @@ function supportsAccountSchedulingThresholdOverridePlatform(platform: Account['p
   return platform === 'openai' || platform === 'anthropic' || platform === 'grok'
 }
 
+// 7d / 7d_oi 窗口只来自 Anthropic OAuth 类账号的被动采样（后端
+// supportsAnthropicPassiveUsage 同样只认 oauth / setup-token），apikey 与 bedrock
+// 永远没有窗口样本，覆盖写进去也不会生效，入口就不该出现。
+function supportsAnthropicFableSchedulingThresholdAccount(
+  platform: Account['platform'] | undefined,
+  type: Account['type'] | undefined
+) {
+  return platform === 'anthropic' && (type === 'oauth' || type === 'setup-token')
+}
+
 function normalizeAccountSchedulingThresholdOverride(value: unknown): number | null {
   if (value === null || value === undefined || value === '') {
     return null
@@ -4994,43 +5270,76 @@ function clampAccountSchedulingThresholdOverride(value: unknown): number {
   return Math.min(100, Math.max(1, Math.trunc(Number(value) || 100)))
 }
 
+// 通用阈值覆盖与 Fable 阈值覆盖只差一个 credentials 键和一个适用性判定，其余（回填、
+// 关闭时发 null 删键、无变化不进 patch）逐字相同，因此按键参数化成一个工厂。
+function createSchedulingThresholdOverrideBinding(
+  credentialKey: string,
+  supportsAccount: (
+    platform: Account['platform'] | undefined,
+    type: Account['type'] | undefined
+  ) => boolean
+) {
+  const enabled = ref(false)
+  const value = ref(100)
+
+  const load = (
+    platform: Account['platform'] | undefined,
+    type: Account['type'] | undefined,
+    credentials: Record<string, unknown> | undefined
+  ) => {
+    if (!supportsAccount(platform, type)) {
+      enabled.value = false
+      value.value = 100
+      return
+    }
+    const stored = normalizeAccountSchedulingThresholdOverride(credentials?.[credentialKey])
+    enabled.value = stored !== null
+    value.value = stored ?? 100
+  }
+
+  const applyPatch = (
+    credentials: Record<string, unknown>,
+    currentCredentials: Record<string, unknown>,
+    platform: Account['platform'] | undefined = props.account?.platform,
+    type: Account['type'] | undefined = props.account?.type
+  ) => {
+    if (!supportsAccount(platform, type)) {
+      return
+    }
+    const current = normalizeAccountSchedulingThresholdOverride(currentCredentials[credentialKey])
+    if (!enabled.value) {
+      // 显式发 null 才能让后端删掉这个键；本来就没有则不进 patch。
+      if (current !== null) {
+        credentials[credentialKey] = null
+      }
+      return
+    }
+    const next = clampAccountSchedulingThresholdOverride(value.value)
+    if (current !== next) {
+      credentials[credentialKey] = next
+    }
+  }
+
+  return { enabled, value, load, applyPatch }
+}
+
 function loadAccountSchedulingThresholdOverride(
   platform: Account['platform'] | undefined,
+  type: Account['type'] | undefined,
   credentials: Record<string, unknown> | undefined
 ) {
-  if (!supportsAccountSchedulingThresholdOverridePlatform(platform)) {
-    accountSchedulingThresholdOverrideEnabled.value = false
-    accountSchedulingThresholdOverrideValue.value = 100
-    return
-  }
-  const value = normalizeAccountSchedulingThresholdOverride(
-    credentials?.[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY]
-  )
-  accountSchedulingThresholdOverrideEnabled.value = value !== null
-  accountSchedulingThresholdOverrideValue.value = value ?? 100
+  accountSchedulingThresholdOverride.load(platform, type, credentials)
+  anthropicFableSchedulingThresholdOverride.load(platform, type, credentials)
 }
 
 const applyAccountSchedulingThresholdOverridePatch = (
   credentials: Record<string, unknown>,
   currentCredentials: Record<string, unknown>,
-  platform: Account['platform'] | undefined = props.account?.platform
+  platform: Account['platform'] | undefined = props.account?.platform,
+  type: Account['type'] | undefined = props.account?.type
 ) => {
-  if (!supportsAccountSchedulingThresholdOverridePlatform(platform)) {
-    return
-  }
-  const current = normalizeAccountSchedulingThresholdOverride(
-    currentCredentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY]
-  )
-  if (!accountSchedulingThresholdOverrideEnabled.value) {
-    if (current !== null) {
-      credentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY] = null
-    }
-    return
-  }
-  const next = clampAccountSchedulingThresholdOverride(accountSchedulingThresholdOverrideValue.value)
-  if (current !== next) {
-    credentials[ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY] = next
-  }
+  accountSchedulingThresholdOverride.applyPatch(credentials, currentCredentials, platform, type)
+  anthropicFableSchedulingThresholdOverride.applyPatch(credentials, currentCredentials, platform, type)
 }
 
 function loadTempUnschedRules(credentials?: Record<string, unknown>) {
@@ -5230,6 +5539,7 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
   }
 
   try {
+    if (props.supplierScope) return true
     const result = await adminAPI.accounts.checkMixedChannelRisk({
       platform: props.account.platform,
       group_ids: form.group_ids,
@@ -5300,9 +5610,11 @@ const persistGrokMediaEligibility = async (accountID: number, updatedAccount: Ac
 }
 
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
+  if (!props.allowRateEdit || !props.showCost) delete updatePayload.rate_multiplier
+  if (!props.allowTransportEdit) delete updatePayload.proxy_id
   submitting.value = true
   try {
-    let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
+    let updatedAccount = await (props.saveAccount ?? adminAPI.accounts.update)(accountID, withAntigravityConfirmFlag(updatePayload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
     emit('updated', updatedAccount)
@@ -5324,11 +5636,29 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
   }
 }
 
-const handleSubmit = async () => {
+const buildAccountUpdatePayload = (): Record<string, unknown> | undefined => {
+  if (bpsDefaults.loading.value) return
   if (!props.account) return
-  const accountID = props.account.id
+  if (!props.allowTransportEdit) {
+    const payload: Record<string,unknown> = {name:form.name,notes:form.notes,concurrency:form.concurrency,priority:form.priority,load_factor:form.load_factor || 0,group_ids:form.group_ids}
+    if (props.allowRateEdit && props.showCost && form.rate_multiplier !== props.account.rate_multiplier) payload.rate_multiplier = form.rate_multiplier
+    if (props.allowAuthorize && props.account.type === 'apikey' && editApiKey.value.trim()) payload.credentials = {...props.account.credentials,api_key:editApiKey.value.trim()}
+    return payload
+  }
+  if (props.account.platform === 'openai' && props.account.type === 'oauth' && !isSparkShadow.value && (excelBPSEnabled.value || excelBPS403RecoveryPending.value) && excelBPSAutoDisableOn403.value && excelBPSAutoRecoverOn403.value && !isValidBPSRecoveryInterval(excelBPSRecoveryIntervalMinutes.value)) {
+    appStore.showError(t('admin.accounts.openai.excelBPS403RecoveryIntervalInvalid'))
+    return
+  }
+  if (props.account.platform === 'openai' && props.account.type === 'oauth' && !isSparkShadow.value && excelBPSEnabled.value && excelBPSAutoMoveOn403.value) {
+    const target = Number(excelBPS403TargetGroupID.value)
+    if (excelBPS403TargetGroupID.value === '' || !Number.isSafeInteger(target) || target < 0 ||
+      !excelBPS403GroupOptions.value.some(option => option.value === target)) {
+      appStore.showError(t('admin.accounts.openai.excelBPS403SelectTarget'))
+      return
+    }
+  }
 
-  if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
+  if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error' && form.status !== 'disabled') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))
     return
   }
@@ -5660,8 +5990,8 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
     }
 
-    // OpenAI/Grok OAuth: persist model mapping to credentials
-    if ((props.account.platform === 'openai' || props.account.platform === 'grok') && props.account.type === 'oauth') {
+    // OAuth / setup-token: persist model mapping to credentials
+    if (hasOAuthModelRestriction.value) {
       const currentCredentials = isSparkShadow.value
         ? {}
         : (updatePayload.credentials as Record<string, unknown>) ||
@@ -5894,6 +6224,66 @@ const handleSubmit = async () => {
       const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
+      if (cloudEligible.value) newExtra.openai_cloud = cloudEnabled.value
+
+      if (props.account.type === 'oauth' && !isSparkShadow.value && excelBPSEnabled.value) {
+        newExtra.openai_excel_bps = true
+        newExtra.openai_excel_bps_config_mode = excelBPSMode.value
+        if (excelBPSAllModels.value) {
+          delete newExtra.openai_excel_bps_models
+        } else {
+          newExtra.openai_excel_bps_models = [...new Set(excelBPSModels.value.map(model => model.trim()).filter(Boolean))]
+        }
+      } else {
+        delete newExtra.openai_excel_bps
+        delete newExtra.openai_excel_bps_config_mode
+        delete newExtra.openai_excel_bps_models
+      }
+      const preserveDisabledBPS = props.account.type === 'oauth' && !isSparkShadow.value &&
+        !excelBPSEnabled.value && excelBPS403RecoveryPending.value
+      if (preserveDisabledBPS) {
+        for (const key of ['openai_excel_bps_config_mode', 'openai_excel_bps_models', 'openai_excel_bps_cache_creation_as_input',
+          'openai_excel_bps_omit_unsupported_tools',
+          'openai_excel_bps_ignore_encrypted_content']) {
+          if (Object.prototype.hasOwnProperty.call(currentExtra, key)) newExtra[key] = currentExtra[key]
+          else delete newExtra[key]
+        }
+      }
+      if ((newExtra.openai_excel_bps === true || preserveDisabledBPS) && excelBPSCacheCreationAsInput.value) {
+        newExtra.openai_excel_bps_cache_creation_as_input = true
+      } else {
+        delete newExtra.openai_excel_bps_cache_creation_as_input
+      }
+      if ((newExtra.openai_excel_bps === true || preserveDisabledBPS) && excelBPSOmitUnsupportedTools.value) {
+        newExtra.openai_excel_bps_omit_unsupported_tools = true
+      } else {
+        delete newExtra.openai_excel_bps_omit_unsupported_tools
+      }
+      if ((newExtra.openai_excel_bps === true || preserveDisabledBPS) && excelBPSIgnoreEncryptedContent.value) {
+        newExtra.openai_excel_bps_ignore_encrypted_content = true
+      } else {
+        delete newExtra.openai_excel_bps_ignore_encrypted_content
+      }
+      if ((newExtra.openai_excel_bps === true || preserveDisabledBPS) && excelBPSAutoDisableOn403.value) {
+        newExtra.openai_excel_bps_auto_disable_on_403 = true
+      } else {
+        delete newExtra.openai_excel_bps_auto_disable_on_403
+      }
+      if ((newExtra.openai_excel_bps === true || preserveDisabledBPS) && excelBPSAutoDisableOn403.value && excelBPSAutoRecoverOn403.value) {
+        newExtra.openai_excel_bps_auto_recover_on_403 = true
+      } else {
+        delete newExtra.openai_excel_bps_auto_recover_on_403
+      }
+      if (newExtra.openai_excel_bps === true || preserveDisabledBPS) {
+        newExtra.openai_excel_bps_403_recovery_interval_minutes = bpsRecoveryIntervalOrDefault(excelBPSRecoveryIntervalMinutes.value)
+      }
+      if ((newExtra.openai_excel_bps === true || preserveDisabledBPS) && excelBPSAutoMoveOn403.value) {
+        newExtra.openai_excel_bps_auto_move_on_403 = true
+        newExtra.openai_excel_bps_403_target_group_id = Number(excelBPS403TargetGroupID.value)
+      } else {
+        delete newExtra.openai_excel_bps_auto_move_on_403
+        delete newExtra.openai_excel_bps_403_target_group_id
+      }
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
         newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
         newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -6090,18 +6480,31 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
-    const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
-      await submitUpdateAccount(accountID, updatePayload)
-    })
-    if (!canContinue) {
-      return
-    }
-
-    await submitUpdateAccount(accountID, updatePayload)
+    return updatePayload
   } catch (error: any) {
     appStore.showError(error.message || t('admin.accounts.failedToUpdate'))
   }
 }
+
+const handleSubmit = async () => {
+  const payload = buildAccountUpdatePayload()
+  if (!payload || !props.account) return
+  const accountID = props.account.id
+  const ready = await ensureAntigravityMixedChannelConfirmed(() => submitUpdateAccount(accountID, payload))
+  if (ready) await submitUpdateAccount(accountID, payload)
+}
+
+let capturedBaselineID: number | undefined
+watch([() => props.account?.id, () => props.show, () => bpsDefaults.loading.value], async () => {
+  if (!props.show) { capturedBaselineID = undefined; return }
+  if (!props.captureBaseline || bpsDefaults.loading.value || capturedBaselineID === props.account?.id) return
+  await nextTick()
+  const baseline = buildAccountUpdatePayload()
+  if (baseline) {
+    capturedBaselineID = props.account?.id
+    emit('baseline', JSON.parse(JSON.stringify(baseline)))
+  }
+}, { immediate: true, flush: 'post' })
 
 // Handle mixed channel warning confirmation
 const handleMixedChannelConfirm = async () => {
