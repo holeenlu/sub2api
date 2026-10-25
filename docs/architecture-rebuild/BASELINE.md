@@ -55,4 +55,4 @@ CPR、vm2api、New API的固定本地版本及核查范围记录在source-invent
 
 独立重构分支 codex/sub2api-rebuild 从已完成维护提交 6f48d6ab6fcc29763af84410690530aeaa957403 创建。相对前轮资料提交 b7b6a440 的12文件变化已核对，属于人工发布固定选定源的修正、对应测试和交付资料；网关业务代码没有增量。没有同步新上游、升级依赖或移动 main 工作树。source-inventory 原研究指纹保留，implementation_baseline 另记实际开发输入。
 
-前端会话使用 codex/frontend-architecture（起点 b7b6a440）；不要求其跟随本分支未完成代码。公开API保持已有合同，本轮后端独立构建不需要前端完成。此前“本轮仅资料”“三品牌交付”等描述仅记录研究阶段，本次实施以根AGENTS独立分支条款为准。
+前端早期隔离规划起点为b7b6a440；当前前后端已统一在codex/sub2api-rebuild共同工作树开发，Git索引由后端集成者单写。公开API保持已有合同，本轮后端独立构建不需要前端完成。此前“本轮仅资料”“三品牌交付”等描述仅记录研究阶段，本次实施以根AGENTS独立分支条款为准。

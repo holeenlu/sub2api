@@ -63,10 +63,12 @@
 
 ## 当前实施状态（覆盖前述历史记录）
 
-WP-00源码冻结完成；WP-01-BUDGET、WP-02-SSE、WP-27-API、WP-27-IDENTITY已按实际范围验收。独立分支可编译后端并以隔离Compose运行，详细结果及工具限制见IMPLEMENTATION。documentation_ready=true；整个重构的implementation_ready=false、rollout_ready=false。原生完整切片及其余工作包尚未完成，前端外部会话尚未整合；不把第一波结果替代完整项目验收。
+WP-00源码冻结完成；WP-01-BUDGET、WP-02-SSE、WP-27-API、WP-27-IDENTITY已按实际范围验收。独立分支可编译后端并以隔离Compose运行，详细结果及工具限制见IMPLEMENTATION。documentation_ready=true；整个重构的implementation_ready=false、rollout_ready=false。原生完整切片及其余工作包尚未完成，前端首批已整合，领域迁移继续实施；不把第一波结果替代完整项目验收。
 
 当前追加清理已移除旧自更新和品牌构建/发布链，受影响回归及唯一根构建正在完成最终核验；最终交付状态见IMPLEMENTATION和FRONTEND_HANDOFF，不沿用第一波中间制品作为最终源码证明。
 
-整合前端规划后父工作包总数为30；WP-28、WP-29保持明确依赖，第一波局部完成不等于父包accepted。当前源码默认路径/名称、最终API镜像与本机编译均已通过对应检查。
+整合前端规划后父工作包总数为36；WP-28至WP-35保持明确依赖，第一波局部完成不等于父包accepted。当前源码默认路径/名称、最终API镜像与本机编译均已通过对应检查。
 
 最终整合已完成本轮范围的核验并移除四个退役接口，前端已按提交整合；整体implementation_ready/rollout_ready仍为false，因为完整执行引擎、其余领域和真实UI/上游验收尚未完成。
+
+共同工作树继续实施：WP-29身份/Key与WP-28共享HTTP解耦由前端owner推进；执行deadline/交付边界和会话隔离子切片由后端推进。已恢复完整36项计划，未验收新切片不纳入已完成声明；总体implementation_ready=false、rollout_ready=false。

@@ -56,3 +56,11 @@
 后端第一波代码提交：5aaf015b6d62864ee0fe3279967a579261cab51f。前端原始提交737fd177d30679a573995f6ad9b9314467ccb3f4已审查并cherry-pick为18853316238485e373a1113feee782549169bd03；frontend树与已验证d786178e800e85b0dd7e3d36540e25625bf17d89完全相同，没有收取隔离工作树的未提交文件。
 
 当前前端仅消费GET /api/v1/admin/system/version。因此进一步删除无消费者GET /api/v1/admin/system/check-updates、安装状态字段及X-Portal-Backend-Version专属升级器响应头；BuildStatus仅保存三个当前版本值，不留旧更新占位接口。独立restart接口保留。前后端共同分支已有第一波实现，完整领域迁移与真实UI登录联调仍未完成。
+
+## 共同分支持续开发检查点（2026-10-25）
+
+第一波已核验代码HEAD：2d32cd0ea6c7c3defdaf866ef8a58701ee4adc93。前后端是同一个完整项目，当前均在本工作树的codex/sub2api-rebuild继续开发；此前detached前端工作树仅用于隔离，已验证提交已整合。首批成果不构成整体方案完成。
+
+工作包已从原始前端规划72dc16b恢复WP-30至WP-35，并恢复WP-21对全部领域切片的集成依赖。WP-29由前端会话继续实施；其只写frontend/**，后端集成者唯一操作Git索引、提交和推送。未交接、未验证的前端新文件不进入后端阶段提交。完整验收仍包含身份/Key、资源/准入、目录/定价/订阅、支付/用量、观测/作业、供应关系/结算、网站/系统及最终装配。
+
+远端第一波检查点已推送并通过git ls-remote核对：origin/codex/sub2api-rebuild = 2d32cd0ea6c7c3defdaf866ef8a58701ee4adc93。新的identity/keys及shared/http改动正在共同工作树内实施，尚未自动纳入提交；准确文件集/回执由前端owner交接。

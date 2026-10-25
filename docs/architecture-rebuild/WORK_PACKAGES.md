@@ -27,15 +27,21 @@
 | WP-18 | BPS Cloud垂直切片集成 | integrator | WP-11, WP-12 |
 | WP-19 | 其他平台与操作完整集成 | integrator | WP-13, WP-14, WP-15, WP-16, WP-17, WP-18 |
 | WP-20 | 控制面与领域配置 | control_worker | WP-03, WP-06, WP-07 |
-| WP-21 | 前端领域组织与品牌 | frontend_worker | WP-20 |
+| WP-21 | 前端跨域装配与最终收敛 | frontend_worker | WP-20, WP-28, WP-29, WP-30, WP-31, WP-32, WP-33, WP-34, WP-35 |
 | WP-22 | Host与观测边界 | host_worker | WP-01 |
 | WP-23 | 生命周期及控制装配集成 | integrator | WP-19, WP-20, WP-22, WP-27 |
 | WP-24 | 全功能旧路径与数据读者收敛 | integrator | WP-19, WP-21, WP-23 |
 | WP-25 | 整体风险与真实证据验收 | reviewer | WP-24 |
-| WP-26 | 独立分支交付与开发收尾 | release_integrator | WP-25 |
+| WP-26 | 独立重构分支交付与开发收尾 | release_integrator | WP-25 |
 | WP-27 | 统一项目身份与部署品牌参数 | deployment_worker | WP-01, WP-20, WP-21, WP-22 |
-| WP-28 | 前端共享基础合同与技术机制 | frontend_foundation_worker | WP-01 |
-| WP-29 | 前端身份安全与API Key完整切片 | frontend_identity_worker | WP-20, WP-28 |
+| WP-28 | 前端基础合同与技术机制 | frontend_foundation_worker | WP-01 |
+| WP-29 | 身份安全与API Key切片 | frontend_identity_worker | WP-20, WP-28 |
+| WP-30 | 资源凭据与访问策略切片 | frontend_resources_worker | WP-20, WP-28 |
+| WP-31 | 目录定价与订阅切片 | frontend_catalog_billing_worker | WP-20, WP-28 |
+| WP-32 | 支付订单与使用量切片 | frontend_payments_usage_worker | WP-20, WP-28 |
+| WP-33 | 运行观测与异步作业切片 | frontend_operations_jobs_worker | WP-20, WP-28 |
+| WP-34 | 供应商关系与结算切片 | frontend_supply_worker | WP-20, WP-28 |
+| WP-35 | 网站品牌与系统设置切片 | frontend_site_system_worker | WP-20, WP-28 |
 
 ## 开发波次
 
@@ -62,7 +68,7 @@
 
 入口精确清单以PROTOCOLS为准，数据owner以DATA_AND_CONFIG为准。发现未分配入口先补该表和JSON，不允许worker自行扩大对外能力。
 
-所有工作包同时遵守[编码规范1.1](CODING_STANDARDS.md)，适用范围与检查方式以任务实际影响确定；交接记录适用CS规则和证据。
+所有工作包同时遵守[编码规范1.3](CODING_STANDARDS.md)，适用范围与检查方式以任务实际影响确定；交接记录适用CS规则和证据。
 
 ## 领取与写集解释
 

@@ -246,7 +246,7 @@
         "WP-01",
         "WP-03"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "assignee": null,
       "claimed_base": null,
       "contract_version": "0.4",
@@ -284,7 +284,8 @@
         "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
         "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
       ],
-      "evidence_status": "not_run"
+      "evidence_status": "not_run",
+      "implementation_note": "Only explicit second-wave slices in progress; full parent contract and dependencies remain incomplete."
     },
     {
       "id": "WP-06",
@@ -293,8 +294,8 @@
       "depends_on": [
         "WP-01"
       ],
-      "status": "planned",
-      "assignee": null,
+      "status": "in_progress",
+      "assignee": "Descartes",
       "claimed_base": null,
       "contract_version": "0.4",
       "write_paths": [
@@ -329,7 +330,8 @@
         "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
         "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
       ],
-      "evidence_status": "not_run"
+      "evidence_status": "not_run",
+      "implementation_note": "Reservation lifetime slice only; settlement, durable recovery and all CT-07 invariants remain incomplete."
     },
     {
       "id": "WP-07",
@@ -387,7 +389,7 @@
         "WP-06",
         "WP-07"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "assignee": null,
       "claimed_base": null,
       "contract_version": "0.4",
@@ -429,7 +431,8 @@
         "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
         "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
       ],
-      "evidence_status": "not_run"
+      "evidence_status": "not_run",
+      "implementation_note": "Only explicit second-wave slices in progress; full parent contract and dependencies remain incomplete."
     },
     {
       "id": "WP-09",
@@ -1075,24 +1078,25 @@
     },
     {
       "id": "WP-21",
-      "title": "前端领域组织与品牌",
+      "title": "前端跨域装配与最终收敛",
       "role": "frontend_worker",
       "depends_on": [
-        "WP-20"
+        "WP-20",
+        "WP-28",
+        "WP-29",
+        "WP-30",
+        "WP-31",
+        "WP-32",
+        "WP-33",
+        "WP-34",
+        "WP-35"
       ],
       "status": "in_progress",
       "assignee": "frontend_session",
       "claimed_base": null,
       "contract_version": "0.4",
       "write_paths": [
-        "frontend/src/features/**",
-        "frontend/src/views/**",
-        "frontend/src/components/**",
-        "frontend/src/composables/**",
-        "frontend/src/stores/**",
-        "frontend/src/i18n/locales/**",
-        "frontend/src/utils/branding.ts",
-        "frontend/src/utils/__tests__/branding.spec.ts"
+        "frontend/src/app/**"
       ],
       "legacy_read_paths": [
         "frontend/src/api/**",
@@ -1105,14 +1109,28 @@
         "frontend/public/logo.svg"
       ],
       "integration_paths": [
+        "frontend/src/main.ts",
+        "frontend/src/App.vue",
+        "frontend/src/router/**",
         "frontend/src/api/**",
         "frontend/src/types/**",
-        "frontend/src/router/**",
+        "frontend/src/views/**",
+        "frontend/src/components/**",
+        "frontend/src/stores/**",
+        "frontend/src/composables/**",
+        "frontend/src/utils/**",
+        "frontend/src/constants/**",
+        "frontend/src/i18n/**",
         "frontend/src/config/**",
-        "frontend/src/config/brand.ts",
+        "frontend/src/content/**",
+        "frontend/src/style.css",
+        "frontend/src/styles/**",
         "frontend/index.html",
         "frontend/vite.config.ts",
-        "frontend/public/logo.svg"
+        "frontend/public/logo.svg",
+        "frontend/.eslintrc.cjs",
+        "frontend/package.json",
+        "frontend/pnpm-lock.yaml"
       ],
       "requirements": [
         "REQ-10",
@@ -1126,7 +1144,7 @@
         "CT-08",
         "CT-11"
       ],
-      "outcome": "以稳定领域API组织账号、路由、账务、设置及供应商页面，处理revision冲突和能力展示。 网站消费者统一读取品牌设置，首屏中性，同角色镜像不按品牌重编译，清理广告和专属资产。",
+      "outcome": "按FRONTEND_ARCHITECTURE完成Account/Group/Settings/dashboard/vendor跨域组合、route/nav与所有消费者收敛；WP-28至35各切片先接入并清理，WP-21负责最终跨域验收而非延迟第一次接线。",
       "retirement_acceptance": "同步清理旧表单状态、props、API、locale；共享业务不分裂为三套。",
       "acceptance": [
         "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
@@ -1134,7 +1152,33 @@
         "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
       ],
       "evidence_status": "not_run",
-      "implementation_note": "First-wave frontend commit 737fd177 reviewed for integration; full parent package remains incomplete."
+      "implementation_note": "First-wave frontend commit 737fd177 reviewed for integration; full parent package remains incomplete.",
+      "deliverables": [
+        "Account/Group/Settings/dashboard/vendor跨领域组合与统一导航",
+        "根桶/旧API/store/locale最终消费者和删除核验"
+      ],
+      "evidence_refs": [
+        "AT-19",
+        "AT-20",
+        "AT-30",
+        "AT-31",
+        "AT-38",
+        "AT-39",
+        "AT-42",
+        "AT-43",
+        "AT-44",
+        "AT-45",
+        "AT-46",
+        "AT-47",
+        "AT-48",
+        "AT-49",
+        "AT-50",
+        "AT-51",
+        "AT-52",
+        "AT-53",
+        "AT-54",
+        "AT-55"
+      ]
     },
     {
       "id": "WP-22",
@@ -1513,8 +1557,8 @@
         "WP-20",
         "WP-28"
       ],
-      "status": "planned",
-      "assignee": null,
+      "status": "in_progress",
+      "assignee": "frontend_session",
       "claimed_base": null,
       "contract_version": "0.4",
       "write_paths": [
@@ -1571,6 +1615,397 @@
       ],
       "reviewer": null,
       "review_mode": null,
+      "handoff_record": null,
+      "implementation_note": "Shared-worktree implementation started by frontend owner; no completion or validation claimed."
+    },
+    {
+      "id": "WP-30",
+      "title": "资源凭据与访问策略切片",
+      "role": "frontend_resources_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/resources/**",
+        "frontend/src/features/access-policy/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/components/account/**",
+        "frontend/src/views/admin/AccountsView.vue",
+        "frontend/src/views/admin/GroupsView.vue",
+        "frontend/src/views/admin/ProxiesView.vue",
+        "frontend/src/views/admin/RiskControlView.vue",
+        "frontend/src/api/admin/accounts.ts"
+      ],
+      "integration_paths": [
+        "frontend/src/app/compositions/account-editor/**",
+        "frontend/src/app/compositions/group-editor/**",
+        "frontend/src/app/router/**",
+        "frontend/src/components/account/**",
+        "frontend/src/views/admin/AccountsView.vue",
+        "frontend/src/views/admin/GroupsView.vue"
+      ],
+      "requirements": [
+        "REQ-09",
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "账号/凭据/出口和准入范围独立owner；交付窄面板及单域切片，Group组合待WP-31面板到位再由集成者原子接线；无浏览器调度器。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "资源凭据/访问策略领域页面与窄组合面板",
+        "六维配置、supplier scope和旧巨型表单消费者清单"
+      ],
+      "evidence_refs": [
+        "AT-44",
+        "AT-45",
+        "AT-47",
+        "AT-48",
+        "AT-50",
+        "AT-51",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null
+    },
+    {
+      "id": "WP-31",
+      "title": "目录定价与订阅切片",
+      "role": "frontend_catalog_billing_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/catalog/**",
+        "frontend/src/features/pricing/**",
+        "frontend/src/features/subscriptions/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/constants/platformCatalog.ts",
+        "frontend/src/views/ModelPlazaView.vue",
+        "frontend/src/views/admin/ChannelsView.vue",
+        "frontend/src/stores/subscriptions.ts"
+      ],
+      "integration_paths": [
+        "frontend/src/app/compositions/group-editor/**",
+        "frontend/src/app/router/**",
+        "frontend/src/constants/platformCatalog.ts",
+        "frontend/src/stores/subscriptions.ts",
+        "frontend/src/views/ModelPlazaView.vue"
+      ],
+      "requirements": [
+        "REQ-08",
+        "REQ-09",
+        "REQ-11",
+        "REQ-15",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "按CT-08展示六维能力与unknown，价格/订阅只消费服务端权威语义；公开组合面板，禁止重写计价或模型权限。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "目录/价格/订阅领域查询、命令与组合面板",
+        "unknown展示、原子Group提交和服务端权威语义证据"
+      ],
+      "evidence_refs": [
+        "AT-44",
+        "AT-47",
+        "AT-50",
+        "AT-51",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null
+    },
+    {
+      "id": "WP-32",
+      "title": "支付订单与使用量切片",
+      "role": "frontend_payments_usage_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/payments/**",
+        "frontend/src/features/usage/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/stores/payment.ts",
+        "frontend/src/api/payment.ts",
+        "frontend/src/api/usage.ts",
+        "frontend/src/api/usageExport.ts",
+        "frontend/src/views/user/PaymentView.vue",
+        "frontend/src/utils/usageMetrics.ts"
+      ],
+      "integration_paths": [
+        "frontend/src/app/router/**",
+        "frontend/src/stores/payment.ts",
+        "frontend/src/views/user/PaymentView.vue",
+        "frontend/src/api/payment.ts",
+        "frontend/src/api/usage.ts",
+        "frontend/src/api/usageExport.ts"
+      ],
+      "requirements": [
+        "REQ-08",
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "支付回跳/轮询有独立owner，未知提交不重放；usage保留金额单位、TPS及lower_bound/unknown，用户/admin/vendor读模型作用域明确。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "支付/订单/usage领域流程和作用域查询",
+        "支付回跳、未知提交、指标/精度与旧轮询退出证据"
+      ],
+      "evidence_refs": [
+        "AT-45",
+        "AT-49",
+        "AT-50",
+        "AT-51",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null
+    },
+    {
+      "id": "WP-33",
+      "title": "运行观测与异步作业切片",
+      "role": "frontend_operations_jobs_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/operations/**",
+        "frontend/src/features/jobs/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/views/admin/ops/**",
+        "frontend/src/features/prompt-audit/**",
+        "frontend/src/features/channel-monitor-v2/**",
+        "frontend/src/views/user/BatchImageGuideView.vue",
+        "frontend/src/api/batchImage.ts"
+      ],
+      "integration_paths": [
+        "frontend/src/app/router/**",
+        "frontend/src/features/prompt-audit/**",
+        "frontend/src/features/channel-monitor-v2/**",
+        "frontend/src/views/admin/ops/**",
+        "frontend/src/views/user/BatchImageGuideView.vue"
+      ],
+      "requirements": [
+        "REQ-03",
+        "REQ-08",
+        "REQ-11",
+        "REQ-12",
+        "REQ-13",
+        "REQ-14",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "监控/审计/提示审查与作业状态分别建模；operation/attempt/usage事实只读，订阅取消不伪装服务端任务终止。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "观测/审计/提示审查和异步作业领域页面",
+        "执行事实投影、轮询取消、动态注册与旧monitor收敛证据"
+      ],
+      "evidence_refs": [
+        "AT-45",
+        "AT-50",
+        "AT-51",
+        "AT-54",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null
+    },
+    {
+      "id": "WP-34",
+      "title": "供应商关系与结算切片",
+      "role": "frontend_supply_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/supply/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/features/vendor/**",
+        "frontend/src/views/vendor/**"
+      ],
+      "integration_paths": [
+        "frontend/src/app/compositions/vendor-portal/**",
+        "frontend/src/app/router/**",
+        "frontend/src/features/vendor/**",
+        "frontend/src/views/vendor/**"
+      ],
+      "requirements": [
+        "REQ-08",
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "保留供应商层级、aggregate/children/readOnly和双边结算；本包交付供应商独有关系/结算切片，复用资源/usage的最终门户装配由WP-21依赖所有公开出口后完成。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "供应商关系/授权/往来结算独有领域切片",
+        "上下级/aggregate/children/readOnly与后续门户装配合同"
+      ],
+      "evidence_refs": [
+        "AT-45",
+        "AT-48",
+        "AT-51",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null
+    },
+    {
+      "id": "WP-35",
+      "title": "网站品牌与系统设置切片",
+      "role": "frontend_site_system_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/site/**",
+        "frontend/src/features/system/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/views/admin/SettingsView.vue",
+        "frontend/src/views/setup/**",
+        "frontend/src/components/home/**",
+        "frontend/src/content/docs/**",
+        "frontend/src/config/brand.ts"
+      ],
+      "integration_paths": [
+        "frontend/src/app/compositions/settings/**",
+        "frontend/src/app/router/**",
+        "frontend/src/config/brand.ts",
+        "frontend/src/i18n/**",
+        "frontend/src/content/docs/**",
+        "frontend/src/views/admin/SettingsView.vue",
+        "frontend/public/logo.svg",
+        "frontend/index.html"
+      ],
+      "requirements": [
+        "REQ-10",
+        "REQ-11",
+        "REQ-15",
+        "REQ-17",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "网站设置复用PublicSettings，首页/公告/文档/法律/系统分属领域；设置分段保存有冲突语义，广告与专属文案资产退出，来源许可保留。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "网站内容/品牌/系统设置领域切片与设置面板",
+        "首屏/URL隔离/并发保存/广告资产退出与许可保留证据"
+      ],
+      "evidence_refs": [
+        "AT-47",
+        "AT-51",
+        "AT-52",
+        "AT-53",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
       "handoff_record": null
     }
   ],
@@ -1593,23 +2028,26 @@
     "project_name": "sub2api",
     "target": "single codebase and role artifact; deployment parameters plus runtime site settings",
     "implementation_status": "planned",
-    "current_branch_policy": "transitional delivery only"
+    "current_branch_policy": "single independent rebuild branch; maintenance branches remain separate"
   },
   "implementation_baseline": "6f48d6ab6fcc29763af84410690530aeaa957403",
   "development_branch": "codex/sub2api-rebuild",
   "frontend_handoff": {
-    "owner": "separate_user_session",
+    "owner": "frontend_session",
     "branch": "codex/sub2api-rebuild",
     "write_paths": [
       "frontend/**"
     ],
-    "status": "first_wave_integrated",
-    "integration_rule": "Backend APIs and independent API deployment remain buildable; UI integration requires the frontend session deliverable.",
-    "staging_worktree": "/Users/luhonglin/.codex/worktrees/b889/sub2api",
-    "evidence_note": "Externally reported 327 targeted tests, type/lint and main/vendor builds; not imported or independently rerun by backend integrator.",
+    "status": "first_wave_integrated_next_domains_in_progress",
+    "integration_rule": "One project and one complete rebuild on codex/sub2api-rebuild. Frontend owner writes frontend/**; integrator stages only explicitly handed-off verified file sets.",
+    "evidence_note": "First-wave 365 tests, type/lint and web/vendor builds reused only after exact tree and external-input verification; current in-progress changes require new handoff evidence.",
     "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4",
     "integration_commit": "18853316238485e373a1113feee782549169bd03",
-    "verified_frontend_tree": "d786178e800e85b0dd7e3d36540e25625bf17d89"
+    "verified_frontend_tree": "d786178e800e85b0dd7e3d36540e25625bf17d89",
+    "active_worktree": "/Users/luhonglin/.codex/worktrees/architecture-rebuild/sub2api",
+    "git_index_owner": "backend_integrator",
+    "code_checkpoint": "2d32cd0ea6c7c3defdaf866ef8a58701ee4adc93",
+    "previous_staging_worktree": "/Users/luhonglin/.codex/worktrees/b889/sub2api"
   },
   "work_slices": [
     {
@@ -1800,10 +2238,73 @@
       "integration_owner": "integrator",
       "evidence": "FRONTEND_IMPLEMENTATION.md",
       "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4"
+    },
+    {
+      "id": "WP-08-FIRST-OUTPUT",
+      "parent": "WP-08",
+      "depends_on": [
+        "WP-01-BUDGET"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/gateway/execution/first_output*.go",
+        "backend/internal/service/openai_first_output_timeout*.go",
+        "backend/internal/service/gateway_turn_recovery*.go",
+        "backend/internal/service/scheduler_retry_guard.go",
+        "backend/internal/service/ops_upstream_context.go"
+      ],
+      "scope": "Move existing absolute deadline, bounded preparation pause and irreversible delivery fence into execution and replace actual service consumers. Not the full executor/SendPermit."
+    },
+    {
+      "id": "WP-05-EXECUTION-SCOPE",
+      "parent": "WP-05",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "in_progress",
+      "assignee": "Jason",
+      "write_paths": [
+        "backend/internal/gateway/session/**",
+        "backend/internal/gateway/protocol/codex/**",
+        "backend/internal/service/openai_ws_execution_scope.go",
+        "backend/internal/service/openai_ws_execution_scope_test.go"
+      ],
+      "scope": "Extract existing pure thread/lane/session identity rules with unchanged keys and real ingress consumers; not owner leasing or authorization completion."
+    },
+    {
+      "id": "WP-28-HTTP-DECOUPLING",
+      "parent": "WP-28",
+      "depends_on": [
+        "WP-28-TRANSPORT"
+      ],
+      "status": "in_progress",
+      "assignee": "frontend_session",
+      "write_paths": [
+        "frontend/src/shared/http/**",
+        "frontend/src/app/**"
+      ],
+      "scope": "Frontend owner removes remaining identity dependencies from shared HTTP while integrating identity/key domains; new files require explicit verified handoff."
+    },
+    {
+      "id": "WP-06-RESERVATION-LIFETIME",
+      "parent": "WP-06",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "in_progress",
+      "assignee": "Descartes",
+      "write_paths": [
+        "backend/internal/billing/reservation/**",
+        "backend/internal/service/billing_inflight_reservation.go",
+        "backend/internal/service/billing_inflight_reservation_test.go"
+      ],
+      "integration_owner": "integrator",
+      "scope": "Migrate actual inflight reservation handle, asynchronous references, bounded renewal/release and narrow cache ports; preserve existing cache atomicity and pricing/eligibility policies. Exact type/import consumers included in reviewed handoff."
     }
   ],
   "last_completed_phase": "first_wave_foundation_2026-10-25",
-  "current_phase": "first_wave_integrated_and_verified",
+  "current_phase": "second_wave_domains_in_progress",
   "retired_implementation_inputs": [
     "deploy/docker-compose.yml",
     "scripts/release/channels.json",

@@ -26,7 +26,7 @@
 | [DATA_AND_CONFIG](DATA_AND_CONFIG.md) | PG/Redis/进程状态、owner、TTL、敏感信息和配置来源 | 数据、会话、账务、控制 |
 | [RISKS](RISKS.md) | 信任边界、严重失败及可观察控制 | 所有人、评审者 |
 | [COLLABORATION](COLLABORATION.md) | 工作分配、单一写者、公共文件、变更和冲突交接 | 集成者、人类开发者、子智能体 |
-| [WORK_PACKAGES](WORK_PACKAGES.md) / [work-items.json](work-items.json) | 30项任务、依赖、职责与写集；JSON为状态唯一来源 | 任务owner |
+| [WORK_PACKAGES](WORK_PACKAGES.md) / [work-items.json](work-items.json) | 36项任务、依赖、职责与写集；JSON为状态唯一来源 | 任务owner |
 | [VALIDATION](VALIDATION.md) | REQ/CT/WP到场景、现有夹具、命令和证据层级 | 实现者、评审者 |
 | [MIGRATION](MIGRATION.md) | 垂直切换、滚动版本、排空、数据兼容、对账和回退 | 集成者、数据、运维 |
 | [RETIREMENT](RETIREMENT.md) | 12类旧实现的替换和删除证据 | 各切片owner、集成者 |
