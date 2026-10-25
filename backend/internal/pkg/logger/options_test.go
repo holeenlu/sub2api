@@ -18,9 +18,9 @@ func TestResolveLogFilePath_Default(t *testing.T) {
 }
 
 func TestResolveLogFilePath_WithDataDir(t *testing.T) {
-	t.Setenv("DATA_DIR", "/tmp/kdan-data")
+	t.Setenv("DATA_DIR", "/tmp/sub2api-data")
 	got := resolveLogFilePath("")
-	want := filepath.Join("/tmp/kdan-data", "logs", "kdan.log")
+	want := filepath.Join("/tmp/sub2api-data", "logs", "sub2api.log")
 	if got != want {
 		t.Fatalf("resolveLogFilePath() = %q, want %q", got, want)
 	}
@@ -98,5 +98,17 @@ func TestBuildFileCore_InvalidPathFallback(t *testing.T) {
 	_, _, err := buildFileCore(encoder, zap.NewAtomicLevel(), opts)
 	if err == nil {
 		t.Fatalf("buildFileCore() expected error for invalid path")
+	}
+}
+
+func TestProjectIdentityDefaultsAndExplicitServiceName(t *testing.T) {
+	if got := bootstrapOptions().ServiceName; got != "sub2api" {
+		t.Fatalf("bootstrap identity = %q", got)
+	}
+	if got := (InitOptions{}).normalized().ServiceName; got != "sub2api" {
+		t.Fatalf("default identity = %q", got)
+	}
+	if got := (InitOptions{ServiceName: "deployment-service"}).normalized().ServiceName; got != "deployment-service" {
+		t.Fatalf("explicit deployment identity overwritten: %q", got)
 	}
 }

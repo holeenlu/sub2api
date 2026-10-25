@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/sse"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/protocol/sse"
 )
 
 // newSSEScanLines keeps the service-local name for its call sites; the
-// splitter is shared with basispoints through internal/pkg/sse.
+// splitter is shared with basispoints through internal/gateway/protocol/sse.
 func newSSEScanLines() bufio.SplitFunc {
 	return sse.ScanLines()
 }

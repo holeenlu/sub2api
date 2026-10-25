@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/projectinfo"
 )
 
 const (
 	// DefaultContainerLogPath 为容器内默认日志文件路径。
-	DefaultContainerLogPath = "/app/data/logs/kdan.log"
-	defaultLogFilename      = "kdan.log"
+	DefaultContainerLogPath = "/app/data/logs/" + defaultLogFilename
+	defaultLogFilename      = projectinfo.Name + ".log"
 )
 
 type InitOptions struct {
@@ -57,7 +59,7 @@ func (o InitOptions) normalized() InitOptions {
 	}
 	out.ServiceName = strings.TrimSpace(out.ServiceName)
 	if out.ServiceName == "" {
-		out.ServiceName = "kdan"
+		out.ServiceName = projectinfo.Name
 	}
 	out.Environment = strings.TrimSpace(out.Environment)
 	if out.Environment == "" {
@@ -107,7 +109,7 @@ func bootstrapOptions() InitOptions {
 	return InitOptions{
 		Level:       "info",
 		Format:      "console",
-		ServiceName: "kdan",
+		ServiceName: projectinfo.Name,
 		Environment: "bootstrap",
 		Output: OutputOptions{
 			ToStdout: true,

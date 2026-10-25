@@ -165,7 +165,7 @@ func TestForwardOpenAIWSV2_HTTPPartialFailurePreservesUsageAndDoesNotReplay(t *t
 				require.Equal(t, 1, writes, "one actual response.create send")
 				require.Zero(t, upstream.callCount, "no HTTP replay")
 				budget.mu.Lock()
-				attempts := budget.attempts
+				attempts := budget.attemptBudget.Snapshot().Attempts
 				budget.mu.Unlock()
 				require.Equal(t, 1, attempts, "preserve actual-send budget accounting")
 				if tc.metered {

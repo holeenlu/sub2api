@@ -1,6 +1,6 @@
 # 重构工作包与依赖
 
-任务ID、依赖、写集、状态的唯一来源是[work-items.json](work-items.json)。本表是其阅读视图，不是第二份任务状态。全部为计划任务，尚未开始业务开发。任务状态变化只更新JSON及准备状态，不在聊天中另建相互矛盾的清单。
+任务ID、依赖、写集、状态的唯一来源是[work-items.json](work-items.json)。本表是其阅读视图，不是第二份任务状态。已开始开发；首批显式切片见JSON的work_slices，父任务完整依赖和完成条件继续有效。任务状态变化只更新JSON及准备状态，不在聊天中另建相互矛盾的清单。
 
 ## 工作包表
 
@@ -32,8 +32,10 @@
 | WP-23 | 生命周期及控制装配集成 | integrator | WP-19, WP-20, WP-22, WP-27 |
 | WP-24 | 全功能旧路径与数据读者收敛 | integrator | WP-19, WP-21, WP-23 |
 | WP-25 | 整体风险与真实证据验收 | reviewer | WP-24 |
-| WP-26 | 品牌交付与开发收尾 | release_integrator | WP-25 |
+| WP-26 | 独立分支交付与开发收尾 | release_integrator | WP-25 |
 | WP-27 | 统一项目身份与部署品牌参数 | deployment_worker | WP-01, WP-20, WP-21, WP-22 |
+| WP-28 | 前端共享基础合同与技术机制 | frontend_foundation_worker | WP-01 |
+| WP-29 | 前端身份安全与API Key完整切片 | frontend_identity_worker | WP-20, WP-28 |
 
 ## 开发波次
 
@@ -74,4 +76,4 @@ write_paths是worker可直接修改的范围，部分为尚不存在的目标目
 
 范围和合同一致、独立风险有真实证据、旧路径同时处理、依赖消费者已核对、无越界文件、资源收尾有记录。review不等于accepted，文档ready不等于运行ready。按照[协作协议](COLLABORATION.md)和[交接模板](templates/HANDOFF.md)提交。
 
-WP-27为新增任务，不表示排在发布之后；依赖图要求它先于WP-23/24/25/26完成。品牌目标见BRANDING，当前三分支仅为迁移期交付安排。
+WP-27为新增任务，不表示排在发布之后；依赖图要求它先于WP-23/24/25/26完成。品牌目标见BRANDING，重构只交付codex/sub2api-rebuild，维护分支不接收本轮改动。

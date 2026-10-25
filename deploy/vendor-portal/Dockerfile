@@ -11,6 +11,8 @@ RUN --mount=type=cache,id=vendor-portal-pnpm,target=/root/.local/share/pnpm/stor
     pnpm install --frozen-lockfile --prefer-offline
 COPY frontend/ ./
 COPY docs/legal/ /app/docs/legal/
+COPY backend/internal/pkg/claude/prompts/catalog.json /app/backend/internal/pkg/claude/prompts/catalog.json
+COPY backend/internal/service/scheduling_quota_defaults.json /app/backend/internal/service/scheduling_quota_defaults.json
 RUN pnpm run build:vendor
 
 FROM ${NGINX_IMAGE} AS runtime

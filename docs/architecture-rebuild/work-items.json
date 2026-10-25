@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "contract_version": "0.2",
+  "contract_version": "0.4",
   "planning_baseline": "750d4a16c7adaf558cf2c6ce7101975602832d7b",
-  "scope": "shared_all_brands",
-  "code_development_started": false,
-  "execution_note": "Planning document only. No automatic execution. Begin coding only under a subsequent implementation instruction; formal delivery uses current CHANGE_DELIVERY.",
+  "scope": "independent_rebuild_branch",
+  "code_development_started": true,
+  "execution_note": "User authorized implementation on 2026-10-25. Incremental development and publication only on codex/sub2api-rebuild; maintenance branches remain separate. Parent work packages are not accepted merely because a slice passes.",
   "status_vocabulary": [
     "planned",
     "ready",
@@ -20,10 +20,10 @@
       "title": "实施基线与合同证据冻结",
       "role": "integrator",
       "depends_on": [],
-      "status": "planned",
-      "assignee": null,
-      "claimed_base": null,
-      "contract_version": "0.2",
+      "status": "accepted",
+      "assignee": "integrator",
+      "claimed_base": "6f48d6ab6fcc29763af84410690530aeaa957403",
+      "contract_version": "0.4",
       "write_paths": [
         "docs/architecture-rebuild/BASELINE.md",
         "docs/architecture-rebuild/source-inventory.json",
@@ -52,7 +52,8 @@
         "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
         "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
       ],
-      "evidence_status": "not_run"
+      "evidence_status": "source_verified",
+      "implementation_note": "Reviewed b7b6a440..6f48d6ab release-source changes; no runtime gateway delta. Existing protocol and data evidence gaps remain explicit. Independent branch and frontend ownership recorded in AGENTS."
     },
     {
       "id": "WP-01",
@@ -61,10 +62,10 @@
       "depends_on": [
         "WP-00"
       ],
-      "status": "planned",
-      "assignee": null,
-      "claimed_base": null,
-      "contract_version": "0.2",
+      "status": "in_progress",
+      "assignee": "integrator",
+      "claimed_base": "6f48d6ab6fcc29763af84410690530aeaa957403",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/gateway/model/**",
         "docs/architecture-rebuild/CONTRACTS.md"
@@ -100,7 +101,8 @@
         "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
         "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
       ],
-      "evidence_status": "not_run"
+      "evidence_status": "first_wave_slices_accepted_parent_incomplete",
+      "implementation_note": "Accepted only explicit first-wave slices; the full package remains in_progress. See IMPLEMENTATION.md for validation and remaining dependencies."
     },
     {
       "id": "WP-02",
@@ -109,10 +111,10 @@
       "depends_on": [
         "WP-01"
       ],
-      "status": "planned",
-      "assignee": null,
-      "claimed_base": null,
-      "contract_version": "0.2",
+      "status": "in_progress",
+      "assignee": "protocol_worker",
+      "claimed_base": "6f48d6ab6fcc29763af84410690530aeaa957403",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/gateway/protocol/**"
       ],
@@ -142,7 +144,8 @@
         "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
         "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
       ],
-      "evidence_status": "not_run"
+      "evidence_status": "first_wave_slices_accepted_parent_incomplete",
+      "implementation_note": "Accepted only explicit first-wave slices; the full package remains in_progress. See IMPLEMENTATION.md for validation and remaining dependencies."
     },
     {
       "id": "WP-03",
@@ -154,7 +157,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/access/**"
       ],
@@ -199,7 +202,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/gateway/routing/**",
         "backend/internal/storage/routing/**"
@@ -246,7 +249,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/gateway/session/**",
         "backend/internal/storage/session/**"
@@ -293,7 +296,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/billing/**",
         "backend/internal/storage/billing/**"
@@ -338,7 +341,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/catalog/**",
         "backend/internal/storage/catalog/**"
@@ -387,7 +390,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/gateway/execution/**"
       ],
@@ -440,7 +443,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/providers/openai/native/**"
       ],
@@ -487,7 +490,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/ingress/openai/**"
       ],
@@ -544,7 +547,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/providers/openai/bps/**"
       ],
@@ -593,7 +596,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/providers/openai/cloud/**"
       ],
@@ -640,7 +643,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/providers/anthropic/**",
         "backend/internal/providers/typesafe/**"
@@ -686,7 +689,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/providers/gemini/**",
         "backend/internal/providers/antigravity/**"
@@ -736,7 +739,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/providers/grok/http/**",
         "backend/internal/providers/kimi/**",
@@ -790,7 +793,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/gateway/jobs/**",
         "backend/internal/providers/media_jobs/**",
@@ -852,7 +855,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/gateway/realtime/**",
         "backend/internal/providers/grok/realtime/**"
@@ -908,7 +911,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/ingress/modes/**"
       ],
@@ -967,7 +970,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/ingress/providers/**",
         "backend/internal/ingress/jobs/**",
@@ -1024,7 +1027,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/control/**",
         "backend/internal/storage/control/**"
@@ -1077,10 +1080,10 @@
       "depends_on": [
         "WP-20"
       ],
-      "status": "planned",
-      "assignee": null,
+      "status": "in_progress",
+      "assignee": "frontend_session",
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "frontend/src/features/**",
         "frontend/src/views/**",
@@ -1130,7 +1133,8 @@
         "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
         "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
       ],
-      "evidence_status": "not_run"
+      "evidence_status": "not_run",
+      "implementation_note": "First-wave frontend commit 737fd177 reviewed for integration; full parent package remains incomplete."
     },
     {
       "id": "WP-22",
@@ -1142,7 +1146,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "backend/internal/host/**",
         "backend/internal/observability/**"
@@ -1189,7 +1193,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [],
       "legacy_read_paths": [
         "backend/cmd/server/wire.go",
@@ -1233,10 +1237,10 @@
         "WP-21",
         "WP-23"
       ],
-      "status": "planned",
-      "assignee": null,
+      "status": "in_progress",
+      "assignee": "integrator",
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "docs/architecture-rebuild/retirement-record.md"
       ],
@@ -1274,7 +1278,8 @@
         "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
         "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
       ],
-      "evidence_status": "not_run"
+      "evidence_status": "not_run",
+      "implementation_note": "User explicitly requested deletion of unused legacy files/code. Only enumerated early retirement slices are active; remaining live modules wait for their replacement and full package dependencies remain."
     },
     {
       "id": "WP-25",
@@ -1286,7 +1291,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "docs/architecture-rebuild/READINESS.md",
         "docs/architecture-rebuild/evidence/**"
@@ -1340,7 +1345,7 @@
     },
     {
       "id": "WP-26",
-      "title": "品牌交付与开发收尾",
+      "title": "独立重构分支交付与开发收尾",
       "role": "release_integrator",
       "depends_on": [
         "WP-25"
@@ -1348,7 +1353,7 @@
       "status": "planned",
       "assignee": null,
       "claimed_base": null,
-      "contract_version": "0.2",
+      "contract_version": "0.4",
       "write_paths": [
         "docs/CUSTOMIZATION_RELEASE_NOTES.md",
         "docs/customization/**"
@@ -1367,7 +1372,7 @@
         "CT-10",
         "CT-11"
       ],
-      "outcome": "按实时政策完成三品牌共享树、单一定制、恢复备份、精确lease、远端和本地核验；上线/迁移独立。 当前三品牌refs按迁移期规则交付；目标同角色统一制品由独立部署profile提供品牌，发布阶段不再实现新配置逻辑。",
+      "outcome": "Verify and publish only the independent rebuild branch; no maintenance-brand propagation or history rewrite. No release or production deployment.",
       "retirement_acceptance": "清理本任务临时资源，保留必要交付恢复与精简证据，保护并行工作。",
       "acceptance": [
         "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
@@ -1386,15 +1391,14 @@
         "WP-21",
         "WP-22"
       ],
-      "status": "planned",
-      "assignee": null,
-      "claimed_base": null,
-      "contract_version": "0.2",
+      "status": "in_progress",
+      "assignee": "deployment_worker",
+      "claimed_base": "6f48d6ab6fcc29763af84410690530aeaa957403",
+      "contract_version": "0.4",
       "write_paths": [
-        "deploy/docker-compose*.yml",
-        "deploy/.env.example",
-        "deploy/config.example.yaml",
-        "deploy/README.md"
+        "deploy/api/**",
+        "Dockerfile",
+        ".dockerignore"
       ],
       "legacy_read_paths": [
         "backend/internal/service/brand.go",
@@ -1407,9 +1411,7 @@
         "backend/internal/service/brand.go",
         "frontend/src/config/brand.ts",
         "frontend/index.html",
-        "frontend/vite.config.ts",
-        "scripts/release/channels.json",
-        "scripts/release/plan.py"
+        "frontend/vite.config.ts"
       ],
       "requirements": [
         "REQ-09",
@@ -1434,12 +1436,147 @@
         "公共身份/构建/渠道由集成者串行接入WP-23，之后才进入WP-24/25验收，不在WP-26发布后补代码",
         "按HANDOFF提交实际diff、CS规则证据、旧变量和挂载迁移记录；不自行发镜像、部署或迁移生产数据"
       ],
-      "evidence_status": "not_run"
+      "evidence_status": "first_wave_slices_accepted_parent_incomplete",
+      "implementation_note": "Accepted only explicit first-wave slices; the full package remains in_progress. See IMPLEMENTATION.md for validation and remaining dependencies."
+    },
+    {
+      "id": "WP-28",
+      "title": "前端基础合同与技术机制",
+      "role": "frontend_foundation_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "in_progress",
+      "assignee": "frontend_session",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/shared/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/api/client.ts",
+        "frontend/src/api/tokenRefresh.ts",
+        "frontend/src/api/adminUIRequest.ts",
+        "frontend/src/stores/app.ts",
+        "frontend/src/main.ts",
+        "frontend/src/App.vue"
+      ],
+      "integration_paths": [
+        "frontend/src/main.ts",
+        "frontend/src/App.vue",
+        "frontend/src/router/**",
+        "frontend/.eslintrc.cjs",
+        "frontend/src/i18n/index.ts",
+        "frontend/src/style.css"
+      ],
+      "requirements": [
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "产出可编译的共享HTTP/旋转令牌协调机制、session读取合同、PublicSettings投影与UI/i18n基础；只迁移已存在技术行为，不要求身份业务提前实现。作为基础依赖可在定向验证后accepted；运行入口切换与WP-29身份纵向切片一起完成，不单独发布未接入的新架构。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "基础包按可编译接口及定向行为证据accepted，不等于运行切换；app/身份接线归WP-29集成者完成且删除被替代旧技术入口，WP-21核对最终无遗留。",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "可编译shared HTTP/session/config/UI/i18n技术机制与公开合同",
+        "定向机制证据及与WP-29共同运行切换的接线清单"
+      ],
+      "evidence_refs": [
+        "AT-44",
+        "AT-45",
+        "AT-46",
+        "AT-52",
+        "AT-53",
+        "AT-54"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null,
+      "implementation_note": "First-wave frontend commit 737fd177 reviewed for integration; full parent package remains incomplete."
+    },
+    {
+      "id": "WP-29",
+      "title": "身份安全与API Key切片",
+      "role": "frontend_identity_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/identity/**",
+        "frontend/src/features/keys/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/stores/auth.ts",
+        "frontend/src/api/auth.ts",
+        "frontend/src/api/keys.ts",
+        "frontend/src/views/auth/**",
+        "frontend/src/components/auth/**",
+        "frontend/src/components/keys/**"
+      ],
+      "integration_paths": [
+        "frontend/src/app/bootstrap.ts",
+        "frontend/src/app/lifecycle/**",
+        "frontend/src/app/router/**",
+        "frontend/src/stores/auth.ts",
+        "frontend/src/api/auth.ts",
+        "frontend/src/api/keys.ts",
+        "frontend/src/views/auth/**",
+        "frontend/src/components/auth/**",
+        "frontend/src/components/keys/**"
+      ],
+      "requirements": [
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "保留session/多tab刷新、登录/MFA/passkey/OAuth、RBAC字段与step-up、Key完整切片；登录动作经app注入共享设施，旧身份路径同次替换。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "身份安全/Key领域API、页面、状态及公开出口",
+        "首次运行切片、旧身份/刷新入口删除与session隔离证据"
+      ],
+      "evidence_refs": [
+        "AT-45",
+        "AT-46",
+        "AT-48",
+        "AT-51",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null
     }
   ],
   "runtime_behavior_revision": "ce58a16ee67305575a704cef304b9c2b1959cb75",
   "coding_standard": {
-    "version": "1.1",
+    "version": "1.3",
     "document": "CODING_STANDARDS.md",
     "scope": "new and actually modified code; no unrelated repository-wide rewrite",
     "review": "record applicable CS rules, checks and narrowly justified exceptions in HANDOFF"
@@ -1457,5 +1594,152 @@
     "target": "single codebase and role artifact; deployment parameters plus runtime site settings",
     "implementation_status": "planned",
     "current_branch_policy": "transitional delivery only"
-  }
+  },
+  "implementation_baseline": "6f48d6ab6fcc29763af84410690530aeaa957403",
+  "development_branch": "codex/sub2api-rebuild",
+  "frontend_handoff": {
+    "owner": "separate_user_session",
+    "branch": "codex/sub2api-rebuild",
+    "write_paths": [
+      "frontend/**"
+    ],
+    "status": "external_changes_ready_pending_backend_checkpoint",
+    "integration_rule": "Backend APIs and independent API deployment remain buildable; UI integration requires the frontend session deliverable.",
+    "staging_worktree": "/Users/luhonglin/.codex/worktrees/b889/sub2api",
+    "evidence_note": "Externally reported 327 targeted tests, type/lint and main/vendor builds; not imported or independently rerun by backend integrator."
+  },
+  "work_slices": [
+    {
+      "id": "WP-01-BUDGET",
+      "parent": "WP-01",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/gateway/model/**",
+        "backend/internal/gateway/execution/**",
+        "backend/internal/service/openai_first_output_timeout.go",
+        "backend/internal/service/gateway_turn_recovery.go",
+        "backend/internal/service/openai_account_scheduler.go",
+        "backend/internal/service/ops_upstream_context.go",
+        "backend/internal/service/*_test.go",
+        "backend/.golangci.yml",
+        "backend/internal/service/scheduler_health_cohort.go"
+      ],
+      "scope": "Extract actual attempt counters and immutable recovery target identities; integrate consumers and remove replaced counters. Not the full execution engine.",
+      "note": "Only exact affected budget assertions in test files; unrelated tests and other worker update/brand tests excluded.",
+      "evidence": "IMPLEMENTATION.md#第一波验证结果",
+      "reviewer": "Linnaeus (static review of budget extraction and consumers)"
+    },
+    {
+      "id": "WP-02-SSE",
+      "parent": "WP-02",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "Harvey",
+      "write_paths": [
+        "backend/internal/gateway/protocol/sse/**",
+        "backend/internal/pkg/sse/**"
+      ],
+      "scope": "Move existing pure SSE implementation and tests without semantic change. Existing SSE API supplies this independent slice contract; integrator changes imports.",
+      "evidence": "IMPLEMENTATION.md#第一波验证结果"
+    },
+    {
+      "id": "WP-27-API",
+      "parent": "WP-27",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "Pascal",
+      "write_paths": [
+        "deploy/rebuild/**"
+      ],
+      "scope": "Standalone API binary image and isolated compose from this branch. Does not claim full branding, control or UI completion.",
+      "evidence": "IMPLEMENTATION.md#第一波验证结果"
+    },
+    {
+      "id": "WP-27-IDENTITY",
+      "parent": "WP-27",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "Archimedes",
+      "write_paths": [
+        "backend/internal/service/brand.go",
+        "backend/internal/service/brand_test.go",
+        "backend/internal/service/update_service.go",
+        "backend/internal/service/update_service_test.go",
+        "backend/internal/service/update_service_rebuild_test.go",
+        "backend/internal/service/setting_public.go",
+        "backend/internal/service/setting_features.go",
+        "backend/internal/service/update_release_channel_test.go",
+        "backend/internal/projectinfo/**",
+        "backend/internal/pkg/logger/options.go",
+        "backend/internal/pkg/logger/options_test.go",
+        "backend/internal/config/config.go",
+        "backend/internal/config/config_test.go"
+      ],
+      "scope": "Neutral backend defaults and development-build update isolation; preserves persisted website settings.",
+      "evidence": "IMPLEMENTATION.md#第一波验证结果",
+      "integration_owner": "integrator"
+    },
+    {
+      "id": "WP-24-UPDATE",
+      "parent": "WP-24",
+      "depends_on": [
+        "WP-27-IDENTITY"
+      ],
+      "status": "accepted",
+      "assignee": "Hubble",
+      "scope": "Remove dormant self-update/rollback/Compose updater code and exclusive cache/routes/tests; preserve version-sync shared GitHub facilities and readable build metadata.",
+      "integration_owner": "integrator",
+      "integration_paths": [
+        "backend/internal/authz/routes.go",
+        "backend/internal/pkg/adminaccess/catalog.go",
+        "backend/internal/server/middleware/vendor_origin_test.go",
+        "backend/internal/handler/admin/openai_oauth_handler.go",
+        "backend/internal/config/config.go",
+        "backend/cmd/server/wire_gen.go"
+      ],
+      "evidence": "IMPLEMENTATION.md"
+    },
+    {
+      "id": "WP-24-PACKAGING",
+      "parent": "WP-24",
+      "depends_on": [
+        "WP-27-API"
+      ],
+      "status": "accepted",
+      "assignee": "Popper",
+      "scope": "One root API Dockerfile and deploy/api; remove obsolete maintenance-brand packaging, release and updater scripts plus exclusive tests/docs; preserve active vendor portal.",
+      "integration_owner": "integrator",
+      "worker_note": "Worker froze partial implementation; integrator completed deployment tests, retired updater proxy blocks, and remaining active references.",
+      "evidence": "IMPLEMENTATION.md"
+    },
+    {
+      "id": "WP-24-DOCS",
+      "parent": "WP-24",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "integrator",
+      "scope": "Replace maintenance-only project entry/delivery rules, remove orphaned root branding/promotion assets, and synchronize documentation/frontend handoff. Keep source/legal evidence with real purpose.",
+      "evidence": "IMPLEMENTATION.md"
+    }
+  ],
+  "last_completed_phase": "first_wave_foundation_2026-10-25",
+  "current_phase": "backend_checkpoint_ready_for_frontend_integration",
+  "retired_implementation_inputs": [
+    "deploy/docker-compose.yml",
+    "scripts/release/channels.json",
+    "scripts/release/plan.py"
+  ],
+  "frontend_planning_source": "72dc16b8659f24319ac86e816c7900aa159261b4"
 }

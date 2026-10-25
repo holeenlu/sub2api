@@ -88,8 +88,8 @@ func TestRecoveryProbeTwoGatewayInstancesAndTurnCancellation(t *testing.T) {
 	}
 	require.NoError(t, TakeOpenAITurnAttempt(request(ctxA)))
 	require.Error(t, TakeOpenAITurnAttempt(request(ctxB)))
-	require.Equal(t, 1, a.attempts)
-	require.Zero(t, b.attempts, "lease rejection is not an upstream send")
+	require.Equal(t, 1, a.attemptBudget.Snapshot().Attempts)
+	require.Zero(t, b.attemptBudget.Snapshot().Attempts, "lease rejection is not an upstream send")
 	// A child transport context closing must not release a still-running turn.
 	child, closeChild := context.WithCancel(ctxA)
 	_ = child

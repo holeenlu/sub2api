@@ -1,193 +1,49 @@
 # syntax=docker/dockerfile:1.7
-# =============================================================================
-# KDAN Multi-Stage Dockerfile
-# =============================================================================
-# Stage 1: Build frontend
-# Stage 2: Build Go backend with embedded frontend
-# Stage 3: Final minimal image
-# =============================================================================
+# API-only build from the repository root; intentionally no embed build tag.
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS builder
 
-ARG NODE_IMAGE=node:24-alpine
-ARG GOLANG_IMAGE=golang:1.27.3-alpine
-ARG ALPINE_IMAGE=alpine:3.21
-ARG POSTGRES_IMAGE=postgres:18-alpine
-ARG GOPROXY=https://goproxy.cn,direct
-ARG GOSUMDB=sum.golang.google.cn
-ARG NPM_CONFIG_REGISTRY=
-# Upstream Sub2API version this build is based on (e.g. v0.2.1); derived builds pass it
-# from CI or a local build script. Empty falls back to backend/cmd/server/VERSION.
-ARG UPSTREAM_VERSION=
-# 建置時把後端 Go 字串字面值（API 錯誤訊息等）從簡體轉成繁體（台灣用語）。
-# 前端不在此轉換：介面文案走提交進 git 的 zh-TW 語言包（frontend/src/i18n/locales/zh-TW）。
-# 設 --build-arg ZH_TW=false 可建出後端訊息與上游相同的簡體版本。
-ARG ZH_TW=true
-
-# -----------------------------------------------------------------------------
-# Stage 0: zh-TW converter (backend only)
-# -----------------------------------------------------------------------------
-# 用 tools/zh-tw/convert-go.mjs 把後端 Go 原始碼的字串字面值轉成繁體。
-# 比對外部系統文字的字串由 convert-go.mjs 的 PROTECTED 清單保護，不會被轉換。
-FROM --platform=${BUILDPLATFORM} ${NODE_IMAGE} AS zh-tw-converter
-ARG NPM_CONFIG_REGISTRY
-ARG ZH_TW
-
-WORKDIR /work
-
-COPY tools/zh-tw/package.json tools/zh-tw/package-lock.json ./tools/zh-tw/
-RUN --mount=type=cache,id=kdan-zhtw-npm,target=/root/.npm \
-    if [ -n "${NPM_CONFIG_REGISTRY}" ]; then npm config set registry "${NPM_CONFIG_REGISTRY}"; fi && \
-    npm ci --prefix ./tools/zh-tw --omit=dev
-COPY tools/zh-tw/ ./tools/zh-tw/
-
-COPY backend/ ./backend/
-RUN if [ "${ZH_TW}" = "true" ]; then node tools/zh-tw/convert-go.mjs backend; fi
-
-# -----------------------------------------------------------------------------
-# Stage 1: Frontend Builder
-# -----------------------------------------------------------------------------
-# --platform=$BUILDPLATFORM: the frontend output is JS (arch-neutral), so build
-# it on the native host arch instead of under QEMU emulation for the target.
-FROM --platform=${BUILDPLATFORM} ${NODE_IMAGE} AS frontend-builder
-ARG NPM_CONFIG_REGISTRY
-
-WORKDIR /app/frontend
-
-# Install pnpm (pinned to v9 to match CI and keep builds reproducible)
-RUN corepack enable && COREPACK_NPM_REGISTRY=${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org} corepack prepare pnpm@9.15.9 --activate
-
-# Install dependencies first (better caching)
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN --mount=type=cache,id=kdan-pnpm-store,target=/root/.local/share/pnpm/store \
-    if [ -n "${NPM_CONFIG_REGISTRY}" ]; then pnpm config set registry "${NPM_CONFIG_REGISTRY}"; fi && \
-    pnpm install --frozen-lockfile --prefer-offline
-
-# Copy frontend source and build.
-# LegalDocumentView.vue (admin-compliance gate) build-time imports
-# ../../../../docs/legal/*.md?raw, so docs/legal/ must sit beside frontend/
-# in the image (WORKDIR /app/frontend -> resolves to /app/docs/legal/*.md).
-# Copy only that subtree to keep the build dependency minimal.
-COPY frontend/ ./
-COPY docs/legal/ /app/docs/legal/
-COPY backend/internal/pkg/claude/prompts/catalog.json /app/backend/internal/pkg/claude/prompts/catalog.json
-COPY backend/internal/service/scheduling_quota_defaults.json /app/backend/internal/service/scheduling_quota_defaults.json
-RUN pnpm run build
-
-# -----------------------------------------------------------------------------
-# Stage 2: Backend Builder
-# -----------------------------------------------------------------------------
-# --platform=$BUILDPLATFORM: run the Go toolchain on the native host arch and
-# cross-compile to the target arch below. The binary is CGO_ENABLED=0, so this
-# is a clean pure-Go cross-compile — no QEMU emulation of go mod download / go
-# build (emulated networking here was dropping module fetches with EOF).
-FROM --platform=${BUILDPLATFORM} ${GOLANG_IMAGE} AS backend-builder
-
-# Build arguments for version info (set by CI)
-ARG VERSION=
-ARG RELEASE_CHANNEL=kdan
-ARG COMMIT=docker
-ARG DATE
-ARG UPSTREAM_VERSION=
-ARG GOPROXY
-ARG GOSUMDB
-# Populated by buildx from the --platform target (e.g. linux/amd64).
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION=
+ARG COMMIT=unknown
+ARG DATE=unknown
+ARG GOPROXY=https://goproxy.cn,direct
+ARG GOSUMDB=sum.golang.google.cn
+ENV GOPROXY=${GOPROXY} GOSUMDB=${GOSUMDB}
 
-ENV GOPROXY=${GOPROXY}
-ENV GOSUMDB=${GOSUMDB}
-
-# Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
-
-WORKDIR /app/backend
-
-# Copy go mod files first (better caching)
+WORKDIR /src/backend
 COPY backend/go.mod backend/go.sum ./
-# Cache mount keeps the module cache across builds so a transient CDN blip on
-# retry resumes instead of re-fetching every zip from scratch.
-RUN --mount=type=cache,id=kdan-gomod,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
+COPY backend/ ./
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -mod=readonly -trimpath \
+    -ldflags="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${DATE} -X main.BuildType=source" \
+    -o /out/sub2api ./cmd/server
 
-# Copy backend source first (already converted to zh-TW by the converter stage
-# when ZH_TW=true; identical to the repo source otherwise)
-COPY --from=zh-tw-converter /work/backend/ ./
+# Keep the existing PostgreSQL backup/restore tools and runtime versions.
+FROM postgres:18-alpine AS pg-client
+FROM alpine:3.21 AS runtime
+LABEL org.opencontainers.image.title="sub2api API" \
+      org.opencontainers.image.source="https://github.com/holeenlu/sub2api"
 
-# Copy frontend dist from previous stage (must be after backend copy to avoid being overwritten)
-COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
-
-# Build the binary (BuildType=release for CI builds, embed frontend)
-# Version precedence: build arg VERSION > exact git tag > cmd/server/VERSION
-RUN --mount=type=cache,id=kdan-gomod,target=/go/pkg/mod \
-    --mount=type=cache,id=kdan-gobuild,target=/root/.cache/go-build \
-    VERSION_VALUE="${VERSION}" && \
-    if [ -z "${VERSION_VALUE}" ]; then VERSION_VALUE="$(./scripts/resolve-version.sh)"; fi && \
-    DATE_VALUE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
-    -tags embed \
-    -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=release -X main.UpstreamVersion=${UPSTREAM_VERSION} -X github.com/Wei-Shaw/sub2api/internal/service.ReleaseChannel=${RELEASE_CHANNEL}" \
-    -trimpath \
-    -o /app/kdan \
-    ./cmd/server
-
-# -----------------------------------------------------------------------------
-# Stage 3: PostgreSQL Client (version-matched with docker-compose)
-# -----------------------------------------------------------------------------
-FROM ${POSTGRES_IMAGE} AS pg-client
-
-# -----------------------------------------------------------------------------
-# Stage 4: Final Runtime Image
-# -----------------------------------------------------------------------------
-FROM ${ALPINE_IMAGE}
-
-# Labels
-LABEL maintainer="KDAN <https://kdan.com>"
-LABEL description="KDAN - Subscription to API Conversion Platform"
-LABEL org.opencontainers.image.source="https://github.com/holeenlu/sub2api"
-
-# Install runtime dependencies
-RUN apk add --no-cache \
-    ca-certificates \
-    tzdata \
-    su-exec \
-    libpq \
-    zstd-libs \
-    lz4-libs \
-    krb5-libs \
-    libldap \
-    libedit \
-    && rm -rf /var/cache/apk/*
-
-# Copy pg_dump and psql from the same postgres image used in docker-compose
-# This ensures version consistency between backup tools and the database server
+RUN apk add --no-cache ca-certificates tzdata su-exec libpq zstd-libs \
+    lz4-libs krb5-libs libldap libedit
 COPY --from=pg-client /usr/local/bin/pg_dump /usr/local/bin/pg_dump
 COPY --from=pg-client /usr/local/bin/psql /usr/local/bin/psql
 COPY --from=pg-client /usr/local/lib/libpq.so.5* /usr/local/lib/
 
-# Create non-root user
-RUN addgroup -g 1000 kdan && \
-    adduser -u 1000 -G kdan -s /bin/sh -D kdan
-
-# Set working directory
+# This new API role uses its own neutral runtime identity and entrypoint.
+RUN addgroup -g 1000 sub2api && adduser -u 1000 -G sub2api -s /bin/sh -D sub2api
 WORKDIR /app
-
-# Copy binary/resources with ownership to avoid extra full-layer chown copy
-COPY --from=backend-builder --chown=kdan:kdan --chmod=755 /app/kdan /app/kdan
-RUN ln -s /app/kdan /app/sub2api
-COPY --from=backend-builder --chown=kdan:kdan /app/backend/resources /app/resources
-
-# Create data directory
-RUN mkdir -p /app/data && chown kdan:kdan /app /app/data
-
-# Copy entrypoint script (fixes volume permissions then drops to kdan)
-COPY --chmod=755 deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-
-# Expose port (can be overridden by SERVER_PORT env var)
+COPY --from=builder --chown=sub2api:sub2api --chmod=755 /out/sub2api /app/sub2api
+COPY --from=builder --chown=sub2api:sub2api /src/backend/resources /app/resources
+COPY LICENSE /app/LICENSE
+RUN mkdir -p /app/data && chown sub2api:sub2api /app /app/data
+COPY --chmod=755 deploy/api/docker-entrypoint.sh /app/docker-entrypoint.sh
+ENV DATA_DIR=/app/data
 EXPOSE 8080
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD wget -q -T 5 -O /dev/null http://localhost:${SERVER_PORT:-8080}/health || exit 1
-
-# Run the application (entrypoint fixes /app/data ownership then execs as kdan)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD wget -q -T 5 -O /dev/null http://127.0.0.1:${SERVER_PORT:-8080}/health || exit 1
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["/app/kdan"]
+CMD ["/app/sub2api"]

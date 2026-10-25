@@ -18,22 +18,9 @@ assert_line() {
 test -s backend/resources/model-pricing/model_prices_and_context_window.json || \
   fail 'fallback pricing data is missing or empty'
 
-assert_line Dockerfile.goreleaser 'COPY --chown=kdan:kdan backend/resources /app/resources'
-assert_line deploy/Dockerfile 'COPY --from=backend-builder --chown=kdan:kdan /app/backend/resources /app/resources'
-python3 - <<'PY'
-from pathlib import Path
-import yaml
-
-for filename in ('.goreleaser.yaml', '.goreleaser.simple.yaml'):
-    contexts = yaml.safe_load(Path(filename).read_text())['dockers']
-    if not contexts:
-        raise SystemExit(f'{filename}: no Docker contexts configured')
-    for context in contexts:
-        count = context.get('extra_files', []).count('backend/resources')
-        if count != 1:
-            raise SystemExit(
-                f"{filename}: {context['id']} must include backend/resources exactly once; found {count}"
-            )
-PY
+assert_line Dockerfile 'COPY --from=builder --chown=sub2api:sub2api /src/backend/resources /app/resources'
+assert_line Dockerfile 'COPY --from=pg-client /usr/local/bin/pg_dump /usr/local/bin/pg_dump'
+assert_line Dockerfile 'COPY --from=pg-client /usr/local/bin/psql /usr/local/bin/psql'
+assert_line Dockerfile 'COPY LICENSE /app/LICENSE'
 
 printf 'docker runtime resources test passed\n'

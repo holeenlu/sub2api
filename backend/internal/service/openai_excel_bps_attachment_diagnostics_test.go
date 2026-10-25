@@ -202,8 +202,8 @@ func TestExcelBPSAttachment429BoundContextRecovery(t *testing.T) {
 			require.Equal(t, 1, generations, "generation was never replayed")
 			budget, ok := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
 			require.True(t, ok)
-			require.Equal(t, 1, budget.attempts, "only generation consumes generation attempts")
-			require.Equal(t, 1, budget.preparationRetries)
+			require.Equal(t, 1, budget.attemptBudget.Snapshot().Attempts, "only generation consumes generation attempts")
+			require.Equal(t, 1, budget.attemptBudget.Snapshot().PreparationRetries)
 			require.Empty(t, c.GetString(OpsUpstreamErrorMessageKey))
 			events, _ := c.Get(OpsUpstreamErrorsKey)
 			require.Len(t, events.([]*OpsUpstreamErrorEvent), 1)
@@ -291,7 +291,7 @@ func TestExcelBPSAttachment429RecoveryBounds(t *testing.T) {
 			_, err := svc.Forward(ctx, c, account, body)
 			require.Error(t, err)
 			require.Equal(t, tc.wantCalls, calls)
-			require.Equal(t, tc.wantAttempts, budget.attempts)
+			require.Equal(t, tc.wantAttempts, budget.attemptBudget.Snapshot().Attempts)
 			require.Equal(t, tc.portable, c.GetBool(OpenAIAccountReplayAllowedContextKey))
 			if tc.status == 429 {
 				var failover *UpstreamFailoverError

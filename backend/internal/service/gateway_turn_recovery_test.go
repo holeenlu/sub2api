@@ -356,7 +356,7 @@ func TestTurnRecoveryNativeReservationAndDependencyRecovery(t *testing.T) {
 		ctx := EnsureOpenAITurnBudget(t.Context(), nil)
 		b, ok := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
 		require.True(t, ok)
-		b.attempts = 6
+		takeOpenAITurnAttempts(t, b, 6)
 		b.bpsRecovery.nativeAvailable = native
 		b.bpsRecovery.rejected = map[int64]bool{1: true}
 		excluded := map[int64]struct{}{1: {}}
@@ -375,8 +375,8 @@ func TestTurnRecoveryNativeReservationAndDependencyRecovery(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int64(2), result.Account.ID)
 		require.Equal(t, 2, calls)
-		require.Equal(t, 6, b.attempts, "dependency recovery must not spend generation attempts")
-		require.Equal(t, 1, b.preparationRetries)
+		require.Equal(t, 6, b.attemptBudget.Snapshot().Attempts, "dependency recovery must not spend generation attempts")
+		require.Equal(t, 1, b.attemptBudget.Snapshot().PreparationRetries)
 		if native {
 			require.NotContains(t, excluded, int64(1))
 		} else {

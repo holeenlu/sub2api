@@ -10,9 +10,8 @@
 | deploy/vendor-portal/Dockerfile | 独立镜像；默认从源码构建，release target 复用已构建产物 |
 | deploy/vendor-portal/entrypoint.sh、nginx.conf.template | 启动时校验配置、生成代理配置；非 root、只读根文件系统 |
 | deploy/docker-compose.vendor.yml | A 单独运行或叠加使用外部存储的后端，不创建后端或存储 |
-| deploy/docker-compose.vendor-local.yml | 与整套后端同机时追加，加入既有后端网络 |
 | deploy/docker-compose.vendor-tls.yml | A 没有 HTTPS 入口时的可选 Caddy 层 |
-| deploy/docker-compose.standalone.yml | B 连接 C/云存储的现有应用配置 |
+| deploy/api/compose.yaml | 当前独立后端API及隔离存储模板 |
 
 ### 三个地址分别配置
 
@@ -20,7 +19,7 @@
 | --- | --- |
 | 现有后台 api_base_url | 运营/网关对外地址，用于“使用密钥”和回调建议；含义不变 |
 | PORTAL_PUBLIC_ORIGIN | 门户公开 origin，例如 https://supplier.example.com；与后台 vendor_portal_origin 完全一致 |
-| BACKEND_ORIGIN | 门户连接现有后端的 origin；同机例如 http://kdan:8080，跨机使用 B 私网地址或 HTTPS 入口 |
+| BACKEND_ORIGIN | 门户连接现有后端的 origin；同机例如 http://api:8080，跨机使用 B 私网地址或 HTTPS 入口 |
 
 部署前在现有运营后台启用 vendor_console_enabled，并将 vendor_portal_origin 配成 PORTAL_PUBLIC_ORIGIN。供应商账号仍由既有超管/上级供应商按权限开通；门户镜像不会自动开户或放宽授权。
 
@@ -30,20 +29,18 @@
 
 ### 同机部署
 
-从仓库根目录执行，先填写真实域名和已发布的同品牌、同版本镜像：
+从仓库根目录执行，先填写真实域名和自行构建且版本匹配的门户镜像：
 
 ~~~sh
 cp deploy/vendor-portal.env.example deploy/vendor-portal.env
-# BACKEND_ORIGIN 使用现有 Compose 服务名，例如 http://kdan:8080。
-docker compose --env-file deploy/.env --env-file deploy/vendor-portal.env \
-  -f deploy/docker-compose.yml -f deploy/docker-compose.vendor.yml \
-  -f deploy/docker-compose.vendor-local.yml config
-docker compose --env-file deploy/.env --env-file deploy/vendor-portal.env \
-  -f deploy/docker-compose.yml -f deploy/docker-compose.vendor.yml \
-  -f deploy/docker-compose.vendor-local.yml up -d --no-deps vendor-portal
+# BACKEND_ORIGIN 使用现有 Compose 服务名，例如 http://api:8080。
+docker compose --env-file deploy/api/.env --env-file deploy/vendor-portal.env \
+  -f deploy/api/compose.yaml -f deploy/docker-compose.vendor.yml config
+docker compose --env-file deploy/api/.env --env-file deploy/vendor-portal.env \
+  -f deploy/api/compose.yaml -f deploy/docker-compose.vendor.yml up -d --no-deps vendor-portal
 ~~~
 
-整套后端使用显式品牌网络，同机时必须追加 vendor-local 文件；它只把门户接入既有网络，不改变后端和存储。仅使用 docker-compose.standalone.yml 时，后端和门户共享默认网络，不追加 vendor-local。
+新API和门户在同一Compose项目中使用default网络，后端服务名为api；旧vendor-local品牌网络覆盖已删除。独立门户仍只代理已有后端，完整新前端由独立会话接入后验收。
 
 沿用现有 Compose project name（必要时加 -p）和全部原 override 文件，不能以新 project 重建既有后端/数据卷。首次安装整套系统时才按原部署步骤启动后端和存储。门户默认绑定宿主机 127.0.0.1:8081；把既有供应商域名整站反代到该地址。不要再把 /api/v1 分流至另一套后端。
 
@@ -89,9 +86,9 @@ docker compose --env-file deploy/vendor-portal.env \
 docker build -f deploy/vendor-portal/Dockerfile -t local/vendor-portal:dev .
 ~~~
 
-门户镜像为 ghcr.io/holeenlu/kdan-vendor、tapmodels-vendor、tokensavy-vendor。现有人工 Run workflow 在同一个固定源码提交下构建主站和供应商前端，门户/后端共用版本号，分别记录镜像摘要。完整产物成功才发布 Release，随后提升 latest；跨镜像标签不是原子切换，部署使用明确版本或 digest。
+门户和后端按各自角色从同一已验证版本自行构建，镜像引用通过部署配置指定。原品牌发布workflow、Compose updater及宿主机socket升级机制已经删除，不能继续使用旧安装器、发布附件或旧品牌镜像作为本重构的更新来源。
 
-代码调整和本地构建不会上传镜像或部署生产。首次使用前需人工发布对应版本，不把示例版本占位符或本地 tag 当作已发布镜像。原后台“API 端点地址”语义保留。新版宿主机更新器会联动同 Compose 项目的 vendor-portal（自定义名称通过 --portal-service 配置），对两份镜像一起预检、健康检查及失败恢复；已有主机须重新安装更新器。A/B 分机或不同项目可在 A 安装 `install-compose-updater.py --portal-only`，超管登录供应商站后从左侧栏站点名称下方的版本号同步到后端实际运行版本；首次仍须升级镜像并接入宿主机 socket。未接入时可下载同版本发布附件 compose.vendor-release.json，追加到原 Compose 文件列表后拉取并重建门户。所有后续维护保留此固定摘要 override；详细步骤见 [配套升级](../../deploy/AUTOMATIC_RELEASE.md#供应商门户配套升级2026-10-22)。回退门户不回滚数据库。
+升级时由操作者选择明确版本/摘要并重建对应角色容器；本项目不会下载或替换运行二进制。独立门户和新前端尚需其会话完成集成验收，本次保留其有效代理/鉴权边界与构建源，不宣称新UI已完成。
 
 这套结构没有增加第二个业务后端。未来网关多实例仍需单独解决启动并发清理、BPS 图片所属实例和后台任务协调；门户分离不代表网关双活验收完成。
 
@@ -100,8 +97,7 @@ docker build -f deploy/vendor-portal/Dockerfile -t local/vendor-portal:dev .
 ~~~sh
 VENDOR_PORTAL_TEST_IMAGE=local/vendor-portal:dev \
   python3 -m unittest deploy.tests.test_vendor_portal_image -v
-python3 -m unittest discover -s deploy/tests -p 'test_auto_release*.py' -v
-python3 -m unittest discover -s .github/release-tools -p test_release_matrix.py -v
+python3 -m unittest deploy.tests.test_api_compose deploy.tests.test_runtime_permissions -v
 ~~~
 
 容器测试使用受控上游，覆盖同网段、跨网络、HTTPS 和失败路径；业务权限另运行既有 Go/前端回归，不能用代理 fixture 代替真实账号、模型消费或生产跨服务器/云厂商验收。

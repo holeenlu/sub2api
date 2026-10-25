@@ -728,11 +728,12 @@ func RecordOpenAIRetryStop(c *gin.Context, account *Account, reason OpenAIRetryS
 	if c.Request != nil {
 		if budget, ok := c.Request.Context().Value(openAITurnBudgetKey{}).(*OpenAITurnBudget); ok && budget != nil {
 			budget.mu.Lock()
-			data["attempts"] = budget.attempts
-			data["attempt_limit"] = budget.limit
-			data["credential_owners"] = len(budget.owners)
-			data["preparation_retries"] = budget.preparationRetries
-			data["retry_wait_ms"] = budget.retryWait.Milliseconds()
+			attempts := budget.attemptBudget.Snapshot()
+			data["attempts"] = attempts.Attempts
+			data["attempt_limit"] = attempts.Limit
+			data["credential_owners"] = attempts.Owners
+			data["preparation_retries"] = attempts.PreparationRetries
+			data["retry_wait_ms"] = attempts.RetryWait.Milliseconds()
 			data["selection_operations"] = budget.selection.Operations()
 			if !budget.deadline.IsZero() {
 				remaining := time.Until(budget.deadline).Milliseconds()

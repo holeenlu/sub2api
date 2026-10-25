@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	ssesplit "github.com/Wei-Shaw/sub2api/internal/pkg/sse"
+	ssesplit "github.com/Wei-Shaw/sub2api/internal/gateway/protocol/sse"
 )
 
 // MaxSSEEventBytes bounds a complete BPS event, including tool batches.

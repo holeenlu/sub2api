@@ -1,4 +1,7 @@
-# Sub2API 定制工程：需求、架构、设计与实施基线
+# 源系统工程盘点与有效业务资料
+
+本文件记录重构输入中的业务能力及来源。独立项目的开发状态、代码边界和交付规则以[重构资料](architecture-rebuild/README.md)、[实施记录](architecture-rebuild/IMPLEMENTATION.md)和[本分支交付规范](CHANGE_DELIVERY.md)为准；历史维护版的文件映射不作为当前运行清单。
+
 
 > 核查日期：2026-10-25（Asia/Shanghai）。适用：KDAN、TapModels、Tokensavy。本说明书是定制功能的统一工程入口：已开发功能按当前代码补齐需求和设计，后续开发先沿本文形成可评审的变更说明。它不是生产验收证明，也不自动授权新的功能开发。
 
@@ -214,7 +217,7 @@
 
 **新增现行合同。** 原生字段优先于兼容别名；可选严格兼容检查已知有损转换；WS 支持同流 FIFO 与跨流并行，具体错误、取消、资源和同连接跨流续链见 [完整契约](#responses-compat)。
 
-**代码/验收。** [注册入口](../backend/internal/server/routes/gateway.go)、[通用转发](../backend/internal/service/gateway_forward.go)、[OpenAI 转发](../backend/internal/service/openai_gateway_forward.go)、[SSE 包](../backend/internal/pkg/sse/)。验收完整客户端序列化报文、分片、非流式、取消、读/写/Flush 失败、压缩边界和不支持形态。
+**代码/验收。** [注册入口](../backend/internal/server/routes/gateway.go)、[通用转发](../backend/internal/service/gateway_forward.go)、[OpenAI 转发](../backend/internal/service/openai_gateway_forward.go)、[SSE 包](../backend/internal/gateway/protocol/sse/)。验收完整客户端序列化报文、分片、非流式、取消、读/写/Flush 失败、压缩边界和不支持形态。
 
 <a id="req-recovery"></a>
 ### R08 会话连续性、终态与有界重放
@@ -392,18 +395,9 @@
 **代码/验收。** [装配](../backend/cmd/server/wire.go)、[配置](../backend/internal/config/config.go)、[实体](../backend/ent/schema/)、[迁移说明](../backend/migrations/README.md)、[repository](../backend/internal/repository/)。验收新装/升级、幂等、默认缺值、多实例失效、进程重启和数据库不可用；本轮文档整理不执行迁移。
 
 <a id="req-delivery"></a>
-### R20 构建、发布、来源与工程交付
+### R20 独立构建与来源交付
 
-**目标。** 可重复建立候选、验证、回退与三品牌分发，避免混入并行任务或从旧历史恢复已退役功能。
-
-- 三品牌最终历史均为同一已核对官方 SHA + 一笔完整定制提交，main 先审核共享行为，品牌按三方文件树整合。
-- 代码发布限 `holeenlu/sub2api` 三个完整目标 ref；精确旧 SHA lease、外部恢复备份、预期树校验和实时远端核对是已有交付条件。
-- 所有 GitHub Workflow 仅人工 workflow_dispatch；提交/推送不自动发版、打标签、发布镜像、部署或迁移。
-- 发布固定使用人工运行选定的提交，分支后续推进或重写不阻止本轮构建、发布及 latest 提升；从该提交读取完整累计说明，主站/门户版本、源码及镜像摘要需要可核对。正式标签、Release 和附件不因文档归并改写。
-- 官方全量基线与四个选择性来源分工明确，许可、NOTICE、署名和既有源冻结保留。参考某来源不表示整仓已审查或取得额外授权。
-
-**资料/验收。** [交付规范](CHANGE_DELIVERY.md)、[人工发布及更新](../deploy/AUTOMATIC_RELEASE.md)、[来源说明](SOURCE_ADAPTATIONS.md)。核对实际 refs/trees、品牌覆盖、所有 workflow 触发、文档版本及恢复备份；文档变更不重复全应用构建。
-
+独立重构分支采用统一API构建和可配置部署，原维护版的品牌发布矩阵、自更新安装器及多份主站部署选择器退出。发布、回退和生产迁移不由普通代码推送隐式触发。当前入口见[API部署](../deploy/api/README.md)及[交付规范](CHANGE_DELIVERY.md)。来源与许可继续见[SOURCE_ADAPTATIONS](SOURCE_ADAPTATIONS.md)，历史源代码可按固定Git输入追索，不复制旧项目目录。
 
 <a id="architecture"></a>
 ## 3. 系统架构与代码结构
@@ -485,7 +479,7 @@ flowchart TB
 | [frontend/src/i18n](../frontend/src/i18n/) | 语言键和加载 | 繁体生成、并发语言选择和回退 |
 | [frontend/src/content/docs](../frontend/src/content/docs/) | 运行时加载的用户手册 | 四语内容、导航、定价/能力说明 |
 | [backend/pkg/pluginapi](../backend/pkg/pluginapi/) | 插件协议与开发合同 | 插件管理器、包格式、UI bridge |
-| [deploy](../deploy/) / [scripts/release](../scripts/release/) | 安装、构建、发布/更新 | 品牌渠道、版本、镜像/附件、人工触发 |
+| [deploy/api](../deploy/api/) / 根Dockerfile | 独立API构建与部署 | 可配置镜像、项目/容器和隔离数据；旧品牌发布/更新链已删除 |
 | [tools/change_delivery.py](../tools/change_delivery.py) | 已有审查、验证回执及交付锁 | 实际输入、工具链、并行任务和资源收尾 |
 
 新增和实际修改代码的语言级规则、包内与前端feature组织、审查和工具覆盖见[详细编码规范](architecture-rebuild/CODING_STANDARDS.md)。当前系统结构仍以本节为准，目标重构职责以其架构文档为准。

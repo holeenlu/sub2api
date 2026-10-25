@@ -144,7 +144,7 @@ func TestExcelBPS429NativeFallbackAcrossTransports(t *testing.T) {
 						calls = 1
 					}
 					require.Len(t, upstream.requests, calls)
-					require.Equal(t, calls, budget.attempts)
+					require.Equal(t, calls, budget.attemptBudget.Snapshot().Attempts)
 					require.Equal(t, "chatgpt.com", upstream.lastReq.URL.Host)
 					require.Equal(t, "/backend-api/codex/responses", upstream.lastReq.URL.Path)
 					require.Equal(t, "Bearer native-codex-token", upstream.lastReq.Header.Get("Authorization"))
@@ -879,7 +879,7 @@ func TestExcelBPS429NativeFallbackPreservesBoundaries(t *testing.T) {
 			}
 			budget := NewOpenAITurnBudget(svc.cfg)
 			if mode == "attempt_budget" {
-				budget.limit = 1
+				budget.attemptBudget = newOpenAITurnAttemptBudget(1)
 			}
 			if mode == "deadline" {
 				budget.deadline = time.Now().Add(-time.Second)

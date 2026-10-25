@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/gateway/execution"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/model"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -18,27 +20,18 @@ import (
 
 // The existing turn budget owns recovery across adapters. These keys contain
 // identity and bounded digests only, never prompts or credential plaintext.
-type turnRecoveryOwner struct{ account, vendor int64 }
-type turnRecoveryTarget struct {
-	owner                 turnRecoveryOwner
-	mode, endpoint, model string
-	proxy                 [32]byte
-	grant                 [32]byte
-	variant               [32]byte
-	limit                 int
-}
 type turnRecoveryTargetKey struct{}
 
 var (
-	ErrTurnTargetExhausted      = errors.New("upstream recovery target attempt budget exhausted")
-	ErrTurnPreparationExhausted = errors.New("turn preparation retry budget exhausted")
-	ErrTurnRetryWaitExhausted   = errors.New("turn retry waiting budget exhausted")
+	ErrTurnTargetExhausted      = execution.ErrTargetBudgetExhausted
+	ErrTurnPreparationExhausted = execution.ErrPreparationBudgetExhausted
+	ErrTurnRetryWaitExhausted   = execution.ErrRetryWaitBudgetExhausted
 	ErrSelectionDependency      = errors.New("account selection dependency unavailable")
 )
 
-func recoveryOwner(account *Account) turnRecoveryOwner {
+func recoveryOwner(account *Account) model.ResourceOwner {
 	if account == nil {
-		return turnRecoveryOwner{}
+		return model.ResourceOwner{}
 	}
 	id := account.ID
 	if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
@@ -48,7 +41,7 @@ func recoveryOwner(account *Account) turnRecoveryOwner {
 	if account.VendorID != nil {
 		vendor = *account.VendorID
 	}
-	return turnRecoveryOwner{id, vendor}
+	return model.ResourceOwner{AccountID: id, VendorID: vendor}
 }
 
 func retrySelectionDependency(ctx context.Context, err error) (bool, error) {
@@ -80,10 +73,10 @@ func takeTurnGrantRefresh(ctx context.Context, account *Account, mode, token str
 	if b == nil {
 		return ErrTurnPreparationExhausted
 	}
-	key := turnRecoveryTarget{owner: recoveryOwner(account), mode: mode, grant: sha256.Sum256([]byte(token))}
+	key := model.AttemptTarget{Owner: recoveryOwner(account), Mode: mode, GrantDigest: sha256.Sum256([]byte(token))}
 	b.mu.Lock()
 	if b.refreshedGrants == nil {
-		b.refreshedGrants = make(map[turnRecoveryTarget]bool)
+		b.refreshedGrants = make(map[model.AttemptTarget]bool)
 	}
 	if b.refreshedGrants[key] {
 		b.mu.Unlock()
@@ -125,10 +118,10 @@ func withTurnRecoveryTarget(ctx context.Context, account *Account, mode, endpoin
 	if account != nil && account.GetPoolModeRetryCount() == 0 {
 		limit = 1
 	}
-	model := ""
+	modelName := ""
 	if b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget); b != nil {
 		b.mu.Lock()
-		model = b.model
+		modelName = b.model
 		b.mu.Unlock()
 	}
 	var variant [32]byte
@@ -142,7 +135,7 @@ func withTurnRecoveryTarget(ctx context.Context, account *Account, mode, endpoin
 			ctx = WithSchedulingQuotaRequest(ctx, data, ContentModerationProtocolOpenAIResponses)
 		}
 	}
-	return context.WithValue(ctx, turnRecoveryTargetKey{}, turnRecoveryTarget{model: model, variant: variant, owner: recoveryOwner(account), mode: mode, endpoint: endpoint, proxy: sha256.Sum256([]byte(proxy)), grant: sha256.Sum256([]byte(grant)), limit: limit})
+	return context.WithValue(ctx, turnRecoveryTargetKey{}, model.AttemptTarget{Model: modelName, InputDigest: variant, Owner: recoveryOwner(account), Mode: mode, Endpoint: endpoint, ProxyDigest: sha256.Sum256([]byte(proxy)), GrantDigest: sha256.Sum256([]byte(grant)), Limit: limit})
 }
 
 // Attach the target to the actual request so repository-level unsent retries
@@ -165,8 +158,8 @@ func takeHTTPAccountTurnAttempt(req *http.Request, account *Account, proxy, mode
 		if err != nil {
 			return nil, err
 		}
-		target, _ := ctx.Value(turnRecoveryTargetKey{}).(turnRecoveryTarget)
-		copy(target.variant[:], hash.Sum(nil))
+		target, _ := ctx.Value(turnRecoveryTargetKey{}).(model.AttemptTarget)
+		copy(target.InputDigest[:], hash.Sum(nil))
 		ctx = context.WithValue(ctx, turnRecoveryTargetKey{}, target)
 	}
 	if err := TakeOpenAITurnAttempt(ctx); err != nil {
@@ -179,7 +172,7 @@ func takeHTTPAccountTurnAttempt(req *http.Request, account *Account, proxy, mode
 				b.mu.Lock()
 				owner := recoveryOwner(account)
 				if b.excludedModes == nil {
-					b.excludedModes = make(map[turnRecoveryOwner]map[string]bool)
+					b.excludedModes = make(map[model.ResourceOwner]map[string]bool)
 				}
 				if b.excludedModes[owner] == nil {
 					b.excludedModes[owner] = make(map[string]bool)
@@ -209,11 +202,7 @@ func TakeTurnPreparationRetry(ctx context.Context) error {
 	if !b.deadline.IsZero() && !time.Now().Before(b.deadline) {
 		return ErrOpenAIWSFirstOutputBudgetExhausted
 	}
-	if b.preparationRetries >= 2 {
-		return ErrTurnPreparationExhausted
-	}
-	b.preparationRetries++
-	return nil
+	return b.attemptBudget.TakePreparation()
 }
 
 // Pinning is a hard request-local constraint, independent of sticky affinity.
@@ -253,7 +242,7 @@ func turnAccountEligible(ctx context.Context, account *Account, modes ...string)
 		mode = modes[0]
 	}
 
-	return b.owners[recoveryOwner(account)] < 3 && !b.excludedModes[recoveryOwner(account)][mode]
+	return b.attemptBudget.OwnerAvailable(recoveryOwner(account)) && !b.excludedModes[recoveryOwner(account)][mode]
 }
 
 func IsTurnBudgetError(err error) bool {
@@ -385,7 +374,7 @@ func ExcludeTurnRecoveryAccount(ctx context.Context, account *Account, failure *
 	defer b.mu.Unlock()
 	owner := recoveryOwner(account)
 	if b.excludedModes == nil {
-		b.excludedModes = make(map[turnRecoveryOwner]map[string]bool)
+		b.excludedModes = make(map[model.ResourceOwner]map[string]bool)
 	}
 	if b.excludedModes[owner] == nil {
 		b.excludedModes[owner] = make(map[string]bool)
@@ -401,9 +390,9 @@ func ExcludeTurnRecoveryAccount(ctx context.Context, account *Account, failure *
 		return
 	}
 	if b.failedDomains == nil {
-		b.failedDomains = make(map[turnRecoveryOwner]turnRecoveryDomain)
+		b.failedDomains = make(map[model.ResourceOwner]turnRecoveryDomain)
 	}
-	domain := turnRecoveryDomain{vendor: owner.vendor}
+	domain := turnRecoveryDomain{vendor: owner.VendorID}
 	if account.ProxyID != nil {
 		domain.proxy = *account.ProxyID
 	}

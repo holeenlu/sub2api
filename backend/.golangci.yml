@@ -14,6 +14,39 @@ linters:
   settings:
     depguard:
       rules:
+        gateway-core-no-infrastructure:
+          list-mode: original
+          files:
+            - "**/internal/gateway/model/**"
+            - "**/internal/gateway/execution/**"
+            - "**/internal/gateway/protocol/**"
+          deny:
+            - pkg: github.com/Wei-Shaw/sub2api/internal/service
+              desc: "gateway core must not depend on legacy services"
+            - pkg: github.com/Wei-Shaw/sub2api/internal/handler
+              desc: "gateway core must not depend on HTTP handlers"
+            - pkg: github.com/Wei-Shaw/sub2api/internal/repository
+              desc: "gateway core must not depend on repositories"
+            - pkg: github.com/Wei-Shaw/sub2api/internal/config
+              desc: "pass explicit immutable policy values to gateway core"
+            - pkg: github.com/Wei-Shaw/sub2api/internal/providers
+              desc: "execution consumes ports rather than concrete providers"
+            - pkg: github.com/Wei-Shaw/sub2api/internal/storage
+              desc: "gateway core must not depend on storage implementations"
+            - pkg: github.com/gin-gonic/gin
+              desc: "transport contexts stay at the ingress boundary"
+            - pkg: entgo.io/ent
+              desc: "gateway core must not depend on database entities"
+            - pkg: github.com/redis/go-redis/v9
+              desc: "gateway core must not depend on Redis"
+        gateway-values-no-execution:
+          list-mode: original
+          files:
+            - "**/internal/gateway/model/**"
+            - "**/internal/gateway/protocol/**"
+          deny:
+            - pkg: github.com/Wei-Shaw/sub2api/internal/gateway/execution
+              desc: "values and pure protocol must not depend on execution"
         # Enforce: service must not depend on repository.
         service-no-repository:
           list-mode: original

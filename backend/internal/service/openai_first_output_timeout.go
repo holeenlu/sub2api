@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/execution"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/model"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"github.com/gin-gonic/gin"
@@ -27,10 +29,10 @@ type openAITurnBudgetKey struct{}
 // OpenAITurnBudget is shared through context across account switches and
 // transport-local retries. It does not contain request data or credentials.
 type OpenAITurnBudget struct {
-	mu              sync.Mutex
-	limit, attempts int
-	started         time.Time
-	deadline        time.Time
+	mu            sync.Mutex
+	attemptBudget *execution.AttemptBudget
+	started       time.Time
+	deadline      time.Time
 	// firstOutputPaused is time excluded from the first-output budget, such as
 	// a separately bounded attachment upload phase. Every deadline derived from
 	// started includes it, so later account switches keep the exclusion.
@@ -40,14 +42,10 @@ type OpenAITurnBudget struct {
 	controlCancel      context.CancelCauseFunc
 	protectionAccounts map[int64]bool
 	bpsRecovery        excelBPSPoolRecovery
-	preparationRetries int
-	refreshedGrants    map[turnRecoveryTarget]bool
-	retryWait          time.Duration
+	refreshedGrants    map[model.AttemptTarget]bool
 	pinnedAccount      *Account
-	owners             map[turnRecoveryOwner]int
-	targets            map[turnRecoveryTarget]int
-	excludedModes      map[turnRecoveryOwner]map[string]bool
-	failedDomains      map[turnRecoveryOwner]turnRecoveryDomain
+	excludedModes      map[model.ResourceOwner]map[string]bool
+	failedDomains      map[model.ResourceOwner]turnRecoveryDomain
 	healthMode         string
 	healthCohort       string
 	healthAccountID    int64
@@ -58,14 +56,20 @@ type OpenAITurnBudget struct {
 	selection          selectionbudget.Aggregate
 }
 
-var ErrOpenAITurnAttemptBudgetExhausted = errors.New("OpenAI turn attempt budget exhausted before upstream send")
+var ErrOpenAITurnAttemptBudgetExhausted = execution.ErrAttemptBudgetExhausted
 
 func NewOpenAITurnBudget(cfg *config.Config) *OpenAITurnBudget {
-	b := &OpenAITurnBudget{started: time.Now(), limit: 8}
+	limit := 8
 	if cfg != nil && cfg.Gateway.OpenAITurnMaxAttempts > 0 {
-		b.limit = min(b.limit, cfg.Gateway.OpenAITurnMaxAttempts)
+		limit = min(limit, cfg.Gateway.OpenAITurnMaxAttempts)
 	}
-	return b
+	return &OpenAITurnBudget{started: time.Now(), attemptBudget: newOpenAITurnAttemptBudget(limit)}
+}
+
+func newOpenAITurnAttemptBudget(limit int) *execution.AttemptBudget {
+	return execution.NewAttemptBudget(execution.AttemptLimits{
+		Total: limit, PerOwner: 3, Preparation: 2, RetryWait: 10 * time.Second,
+	})
 }
 
 func WithOpenAITurnBudget(ctx context.Context, budget *OpenAITurnBudget) context.Context {
@@ -107,7 +111,7 @@ func EnsureOpenAITurnBudget(ctx context.Context, cfg *config.Config, reasoningEf
 		effort = reasoningEffort[0]
 	}
 	b.mu.Lock()
-	if !b.outputCommitted && (b.deadline.IsZero() || (len(reasoningEffort) > 0 && b.attempts == 0 && !b.automaticDeadline.IsZero() && b.deadline.Equal(b.automaticDeadline))) {
+	if !b.outputCommitted && (b.deadline.IsZero() || (len(reasoningEffort) > 0 && b.attemptBudget.Snapshot().Attempts == 0 && !b.automaticDeadline.IsZero() && b.deadline.Equal(b.automaticDeadline))) {
 		b.deadline = b.started.Add(openAIFirstOutputTimeoutForConfig(cfg, effort) + b.firstOutputPaused)
 		if len(reasoningEffort) == 0 {
 			b.automaticDeadline = b.deadline
@@ -142,19 +146,14 @@ func WaitOpenAITurnRetry(ctx context.Context, delay time.Duration) error {
 		return ctx.Err()
 	}
 	if b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget); b != nil {
-		b.mu.Lock()
-		if delay > 10*time.Second-b.retryWait {
-			b.mu.Unlock()
-			return ErrTurnRetryWaitExhausted
-		}
-		// Positive jitter never retries before Retry-After and stays inside the hard wait cap.
+		// Positive jitter never retries before Retry-After; the execution owner
+		// clips it to the shared wait allowance.
 		jitter := time.Duration(mathrand.Int64N(int64(delay/10) + 1))
-		if available := 10*time.Second - b.retryWait - delay; jitter > available {
-			jitter = available
+		var err error
+		delay, err = b.attemptBudget.ReserveWait(delay, jitter)
+		if err != nil {
+			return err
 		}
-		delay += jitter
-		b.retryWait += delay
-		b.mu.Unlock()
 	}
 	waitCtx, cancel := OpenAITurnWaitContext(ctx)
 	defer cancel()
@@ -196,24 +195,19 @@ func TakeOpenAITurnAttempt(ctx context.Context) error {
 	if !b.deadline.IsZero() && !time.Now().Before(b.deadline) {
 		return ErrOpenAIWSFirstOutputBudgetExhausted
 	}
-	if b.limit > 0 && b.attempts >= b.limit {
-		return ErrOpenAITurnAttemptBudgetExhausted
+	target, hasTarget := ctx.Value(turnRecoveryTargetKey{}).(model.AttemptTarget)
+	var identity *model.AttemptTarget
+	if hasTarget {
+		identity = &target
 	}
-	if target, ok := ctx.Value(turnRecoveryTargetKey{}).(turnRecoveryTarget); ok {
-		if b.owners == nil {
-			b.owners = make(map[turnRecoveryOwner]int)
-			b.targets = make(map[turnRecoveryTarget]int)
-		}
-		if b.owners[target.owner] >= 3 || (target.limit == 1 && b.owners[target.owner] >= 1) || b.targets[target] >= target.limit {
-			return ErrTurnTargetExhausted
-		}
-		b.healthMode = schedulingHealthMode(target.mode)
+	if err := b.attemptBudget.Take(identity); err != nil {
+		return err
+	}
+	if hasTarget {
+		b.healthMode = schedulingHealthMode(target.Mode)
 		b.healthCohort = schedulingHealthCohort(ctx, b.healthMode)
-		b.healthAccountID = target.owner.account
-		b.owners[target.owner]++
-		b.targets[target]++
+		b.healthAccountID = target.Owner.AccountID
 	}
-	b.attempts++
 	return nil
 }
 
@@ -289,13 +283,14 @@ func OpenAITurnRetryAllowed(ctx context.Context, accountID int64, response []byt
 	if b.control != nil && b.control.Err() != nil {
 		return false
 	}
-	if b.limit > 0 && b.attempts >= b.limit {
+	snapshot := b.attemptBudget.Snapshot()
+	if snapshot.Attempts >= snapshot.Limit {
 		return false
 	}
 	if !b.deadline.IsZero() && !time.Now().Before(b.deadline) {
 		return false
 	}
-	if b.limit == 0 || !isOpenAIResponseProtectionUnavailable("", response) {
+	if !isOpenAIResponseProtectionUnavailable("", response) {
 		return true
 	}
 	if b.protectionAccounts == nil {

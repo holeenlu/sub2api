@@ -87,7 +87,7 @@ func reportedSchedulingHealthCohort(ctx context.Context, account *Account) strin
 	if b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget); b != nil {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		if b.healthAccountID == recoveryOwner(account).account {
+		if b.healthAccountID == recoveryOwner(account).AccountID {
 			return b.healthCohort
 		}
 	}

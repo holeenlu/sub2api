@@ -54,7 +54,7 @@ func TestOpenAITurnBudgetSharedAcrossRetries(t *testing.T) {
 		require.NoError(t, TakeOpenAITurnAttempt(WithOpenAITurnBudget(ctx, NewOpenAITurnBudget(cfg))))
 	}
 	t.Run("preparation and generation have independent limits", func(t *testing.T) {
-		ctx := WithOpenAITurnBudget(t.Context(), &OpenAITurnBudget{limit: 2})
+		ctx := WithOpenAITurnBudget(t.Context(), &OpenAITurnBudget{attemptBudget: newOpenAITurnAttemptBudget(2)})
 		require.NoError(t, TakeTurnPreparationRetry(ctx))
 		require.NoError(t, TakeTurnPreparationRetry(ctx))
 		require.ErrorIs(t, TakeTurnPreparationRetry(ctx), ErrTurnPreparationExhausted)
@@ -761,7 +761,7 @@ func TestOpenAITurnDeadlineBoundsWaitsWithoutCancelingResponseContext(t *testing
 	require.ErrorIs(t, WaitOpenAITurnRetry(ctx, time.Second), ErrOpenAIWSFirstOutputBudgetExhausted)
 	require.NoError(t, ctx.Err(), "a finished pre-output wait must not cancel an already streaming response")
 	require.ErrorIs(t, TakeOpenAITurnAttempt(ctx), ErrOpenAIWSFirstOutputBudgetExhausted)
-	require.Zero(t, budget.attempts, "admission exhaustion never sends or penalizes another account")
+	require.Zero(t, budget.attemptBudget.Snapshot().Attempts, "admission exhaustion never sends or penalizes another account")
 	cfg.Gateway.OpenAITurnMaxAttempts = 0
 	legacy := EnsureOpenAITurnBudget(context.Background(), cfg, "high")
 	wait, cancel := OpenAITurnWaitContext(legacy)
@@ -818,7 +818,7 @@ func TestOpenAIHTTPFirstOutputDeadlineCoversHeadersAndBody(t *testing.T) {
 				case <-parent.Done():
 					t.Fatal("upstream reader was not canceled")
 				}
-				require.Equal(t, 1, budget.attempts)
+				require.Equal(t, 1, budget.attemptBudget.Snapshot().Attempts)
 			})
 		}
 	}
@@ -860,5 +860,13 @@ func TestOpenAIHTTPFirstOutputDeadlineStopsAfterContent(t *testing.T) {
 			}
 			<-writerDone
 		})
+	}
+}
+
+// takeOpenAITurnAttempts prepares consumed accounting through its public API.
+func takeOpenAITurnAttempts(t *testing.T, budget *OpenAITurnBudget, count int) {
+	t.Helper()
+	for range count {
+		require.NoError(t, budget.attemptBudget.Take(nil))
 	}
 }

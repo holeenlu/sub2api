@@ -65,8 +65,7 @@ type openAIQuotaRefreshResponse struct {
 
 // openAIQuotaResetPostProcessContext detaches the post-reset bookkeeping from the
 // client connection. The credit is already spent at that point, so account-state
-// recovery must complete even if the operator closes the tab (mirrors
-// systemUpdateContext, added for the same reason in #4504).
+// recovery must complete even if the operator closes the tab.
 func openAIQuotaResetPostProcessContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	base := context.Background()
 	if ctx != nil {

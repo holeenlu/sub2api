@@ -406,5 +406,12 @@
     ],
     "runtime_cleanup_done": false,
     "deployment_parameters_implemented": false
+  },
+  "implementation_baseline": {
+    "date": "2026-10-25",
+    "commit": "6f48d6ab6fcc29763af84410690530aeaa957403",
+    "branch": "codex/sub2api-rebuild",
+    "reviewed_delta_from": "b7b6a4402b3a82ba8b69308a31d07322cab01683",
+    "scope": "Release source pinning and documentation/test updates only; gateway runtime unchanged at branch creation. Historical hashes remain source evidence, not current implementation fingerprints."
   }
 }

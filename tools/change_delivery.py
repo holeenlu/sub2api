@@ -16,13 +16,7 @@ import time
 from pathlib import Path
 
 
-TARGETS = {
-    'shared': [('main', 'origin', 'main'), ('TapModels', 'origin', 'TapModels'),
-               ('tokensavy', 'origin', 'tokensavy')],
-    'main': [('main', 'origin', 'main')],
-    'tapmodels': [('TapModels', 'origin', 'TapModels')],
-    'tokensavy': [('tokensavy', 'origin', 'tokensavy')],
-}
+DELIVERY_BRANCH = 'codex/sub2api-rebuild'
 RECEIPT_VERSION = 1
 GO_CACHE_LIMIT_KIB = 8 * 1024 * 1024
 BUILD_ENV = ('PATH', 'GOFLAGS', 'GOTOOLCHAIN', 'GOWORK', 'GOOS', 'GOARCH',
@@ -298,38 +292,34 @@ def changed_paths(repo, staged=False, commit=None):
     return sorted(set(filter(None, output.split('\0'))))
 
 
-def review(repo, scope=None, staged=False, commit=None):
+def review(repo, staged=False, commit=None):
     files = changed_paths(repo, staged, commit)
+    branch = git(repo, 'branch', '--show-current') or '(detached)'
     clues = []
     for name in files:
-        lower = name.lower()
         tags = []
-        if 'kdan' in lower:
-            tags.append('KDAN path: inspect whether change is brand-specific')
-        if 'tapmodels' in lower:
-            tags.append('TapModels path: inspect whether change is brand-specific')
-        if 'tokensavy' in lower:
-            tags.append('Tokensavy path: inspect whether change is brand-specific')
-        if ('brand' in lower or lower.startswith(('docs/legal/', 'assets/', 'frontend/public/'))
-                or name.endswith('HomeView.vue') or '/i18n/' in name):
-            tags.append('Brand/content boundary: inspect actual diff, not the whole file')
-        if lower.startswith(('deploy/', '.github/workflows/')):
-            tags.append('Deployment/CI boundary: check external side effects before pushing')
+        if name.startswith('frontend/'):
+            tags.append('Frontend belongs to the separate frontend session; verify write ownership')
+        if name.startswith(('deploy/', '.github/')) or name in ('Dockerfile', '.dockerignore'):
+            tags.append('Build/deployment boundary: inspect commands, credentials and resource ownership')
+        if name.startswith('backend/migrations/'):
+            tags.append('Historical migrations must not be rewritten; production data changes need separate scope')
         if tags:
             clues.append({'path': name, 'review': tags})
-    targets = TARGETS.get(scope, []) if files else []
+    targets = []
+    if files and branch == DELIVERY_BRANCH:
+        targets.append({'source': branch, 'remote': 'origin',
+                        'destination': f'refs/heads/{DELIVERY_BRANCH}',
+                        'push_command': f'git push origin HEAD:refs/heads/{DELIVERY_BRANCH}'})
     return {
-        'current_branch': git(repo, 'branch', '--show-current') or '(detached)',
-        'scope': scope or 'unclassified',
+        'current_branch': branch,
+        'scope': 'independent_rebuild',
         'scope_status': ('No changes selected' if not files else
-                         'Split common and brand changes before committing' if scope == 'mixed' else
-                         'Declared scope; verify semantic ownership and authorization before executing' if scope else
-                         'Choose shared/main/tapmodels/tokensavy/mixed after reviewing the actual diff'),
+                         'Only the independent rebuild branch is a delivery target' if targets else
+                         'Integrate reviewed changes into the rebuild branch before publication'),
         'files': files,
         'review_clues': clues,
-        'targets': [{'source': branch, 'remote': remote, 'destination': f'refs/heads/{dest}',
-                     'push_command': f'git push {remote} refs/heads/{branch}:refs/heads/{dest}'}
-                    for branch, remote, dest in targets],
+        'targets': targets,
         'limitations': 'Local read-only report; no fetch, content review, merge, commit, push, or live remote verification performed.',
     }
 
@@ -339,7 +329,6 @@ def main():
     parser.add_argument('action', nargs='?', default='review',
                         choices=['review', 'validate', 'validation-status', 'delivery-run'])
     parser.add_argument('--repo', type=Path, default=Path.cwd())
-    parser.add_argument('--scope', choices=[*TARGETS, 'mixed'])
     parser.add_argument('--plan', type=Path)
     parser.add_argument('--receipt', type=Path)
     parser.add_argument('--wait-seconds', type=float, default=0,
@@ -354,15 +343,15 @@ def main():
     args = parser.parse_args()
     try:
         if args.action == 'delivery-run':
-            if args.plan or args.receipt or args.scope or args.staged or args.commit or args.go_cache:
+            if args.plan or args.receipt or args.staged or args.commit or args.go_cache:
                 parser.error('delivery-run accepts only --repo, --wait-seconds and --command.')
             result = delivery_run(args.repo, args.command, args.wait_seconds)
         elif args.action == 'review':
             if args.plan or args.receipt or args.command or args.go_cache or args.wait_seconds:
                 parser.error('Review does not accept validation or delivery options.')
-            result = review(args.repo, args.scope, args.staged, args.commit)
+            result = review(args.repo, args.staged, args.commit)
         else:
-            if not args.plan or not args.receipt or args.scope or args.staged or args.commit or args.command:
+            if not args.plan or not args.receipt or args.staged or args.commit or args.command:
                 parser.error('Validation requires --plan and --receipt; do not combine review options.')
             result = validate(args.repo, args.plan, args.receipt, args.action == 'validation-status',
                               args.wait_seconds, args.go_cache)

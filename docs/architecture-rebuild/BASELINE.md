@@ -25,7 +25,7 @@
 | 管理、运营与通知 | [admin routes](../../backend/internal/server/routes/admin.go)、Ops、邮件/通知等worker | 保留功能与权限，分离控制用例/生命周期/只读观测 | WP-20、WP-22、WP-23 |
 | 前端与品牌 | [frontend/src](../../frontend/src)、主站/供应商构建、brand入口 | 接着现有features整理领域，不新建第二个前端；品牌通过现有配置差异化 | WP-21 |
 | 持久化 | [Ent schema](../../backend/ent/schema)、[SQL migrations](../../backend/migrations)、repository | 权威来源/幂等/旧数据明确；不改历史迁移，不预造新表 | WP-05、WP-06、WP-20 |
-| 部署及交付 | [compose](../../deploy/docker-compose.yml)、[交付规范](../CHANGE_DELIVERY.md) | 现有部署和三品牌历史结构继续，源码交付不等于发版/上线 | WP-26 |
+| 部署及交付 | [新API Compose](../../deploy/api/compose.yaml)、[交付规范](../CHANGE_DELIVERY.md) | 旧部署/品牌发布链已纳入退出；当前独立分支和API角色见IMPLEMENTATION，源码交付不等于上线 | WP-26 |
 
 系统重构覆盖职责和调用边界，不要求把已经独立、正确且不受影响的支付、认证、审计、通知等模块全部重写。目标目录名称是职责；当前已有authz/payment/securityaudit等模块优先复用，禁止新建一套同能力模块后长期并存。
 
@@ -50,3 +50,9 @@ CPR、vm2api、New API的固定本地版本及核查范围记录在source-invent
 ## 品牌重构的新目标
 
 本节现状表和快照继续描述已实现系统。用户后续要求已将重构目标明确为统一sub2api项目、部署标识参数化、网站品牌设置化和无关推广清理；具体以BRANDING为准。不得把现状中的三品牌常量/渠道照搬为永久源码分叉，也不得将新目标写成当前运行实现已经完成。
+
+## 实施输入冻结（2026-10-25）
+
+独立重构分支 codex/sub2api-rebuild 从已完成维护提交 6f48d6ab6fcc29763af84410690530aeaa957403 创建。相对前轮资料提交 b7b6a440 的12文件变化已核对，属于人工发布固定选定源的修正、对应测试和交付资料；网关业务代码没有增量。没有同步新上游、升级依赖或移动 main 工作树。source-inventory 原研究指纹保留，implementation_baseline 另记实际开发输入。
+
+前端会话使用 codex/frontend-architecture（起点 b7b6a440）；不要求其跟随本分支未完成代码。公开API保持已有合同，本轮后端独立构建不需要前端完成。此前“本轮仅资料”“三品牌交付”等描述仅记录研究阶段，本次实施以根AGENTS独立分支条款为准。

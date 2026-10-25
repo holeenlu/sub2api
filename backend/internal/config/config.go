@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/projectinfo"
 	"github.com/spf13/viper"
 	"golang.org/x/net/http/httpguts"
 )
@@ -200,7 +201,6 @@ type GeminiTierQuotaConfig struct {
 }
 
 type UpdateConfig struct {
-	CheckEnabled bool `mapstructure:"check_enabled"`
 	// ProxyURL 用于访问 GitHub 的代理地址
 	// 支持 http/https/socks5/socks5h 协议
 	// 例如: "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"
@@ -2026,7 +2026,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 	addConfigPath("/app/data")
 	addConfigPath(".")
 	addConfigPath("./config")
-	addConfigPath("/etc/kdan")
+	addConfigPath("/etc/" + projectinfo.Name)
 }
 
 func setDefaults() {
@@ -2057,7 +2057,7 @@ func setDefaults() {
 	// Log
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.format", "console")
-	viper.SetDefault("log.service_name", "kdan")
+	viper.SetDefault("log.service_name", projectinfo.Name)
 	viper.SetDefault("log.env", "production")
 	viper.SetDefault("log.caller", true)
 	viper.SetDefault("log.stacktrace_level", "error")
@@ -2080,7 +2080,7 @@ func setDefaults() {
 	// WebAuthn / Passkeys are opt-in because every deployment must explicitly
 	// declare its relying-party domain and trusted browser origins.
 	viper.SetDefault("webauthn.enabled", false)
-	viper.SetDefault("webauthn.rp_display_name", "KDAN")
+	viper.SetDefault("webauthn.rp_display_name", projectinfo.Name)
 	viper.SetDefault("webauthn.rp_id", "")
 	viper.SetDefault("webauthn.rp_origins", []string{})
 
@@ -2213,7 +2213,7 @@ func setDefaults() {
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")
 	viper.SetDefault("database.password", "postgres")
-	viper.SetDefault("database.dbname", "kdan")
+	viper.SetDefault("database.dbname", projectinfo.Name)
 	viper.SetDefault("database.sslmode", "prefer")
 	viper.SetDefault("database.max_open_conns", 256)
 	viper.SetDefault("database.max_idle_conns", 128)
@@ -2640,7 +2640,6 @@ func setEnvReachableDefaults() {
 	viper.SetDefault("gateway.forced_codex_instructions_template_file", "")
 	viper.SetDefault("gateway.session_idle_timeout_minutes", 0)
 	viper.SetDefault("gateway.user_message_queue.mode", "")
-	viper.SetDefault("update.check_enabled", true)
 	viper.SetDefault("update.proxy_url", "")
 
 	// server.trusted_proxies and security.forwarded_client_ip_headers are the

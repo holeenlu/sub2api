@@ -1,17 +1,17 @@
 # Sub2API 开发指南
 
-本指南只说明开发入口与操作；需求、架构、设计、模块、接口和验收统一见 [工程基线](docs/ENGINEERING.md)，交付规则见 [CHANGE_DELIVERY](docs/CHANGE_DELIVERY.md)。
+本指南只说明开发入口与操作；需求、架构、设计、模块、接口和验收统一见 [重构资料](docs/architecture-rebuild/README.md)，交付规则见 [CHANGE_DELIVERY](docs/CHANGE_DELIVERY.md)。
 
 ## 工具链与输入
 
 - 后端：Go 1.27.3，以 `backend/go.mod` 和所选构建 SDK 为准；Gin、Ent、Wire 版本由 go.mod/go.sum 固定。
-- 前端：Vue/TypeScript/Vite；使用 `frontend/package.json` 声明的 `pnpm@9.15.9` 和 pnpm-lock.yaml。仓库 Docker 默认 Node 24，不再沿用旧文档的 Node 18 构建假设。
+- 前端：Vue/TypeScript/Vite；使用 `frontend/package.json` 声明的 `pnpm@9.15.9` 和 pnpm-lock.yaml。默认API Docker不构建前端；前端工具链由独立会话维护。
 - PostgreSQL/Redis、环境配置和启动方式见 [部署手册](deploy/README.md)。生产凭据不写入仓库、夹具或日志。
-- 多品牌共享源代码按 main 审查，品牌实际覆盖另核对；不要依据当前检出分支判断需求归属。
+- 本项目只在codex/sub2api-rebuild增量开发与交付，不向维护分支传播。
 
 ## 开发前
 
-1. 读取 AGENTS.md 与 main 当前交付规范；核对工作区、暂存、worktree 占用和任务边界。
+1. 读取本分支 AGENTS.md 与当前交付规范；核对工作区、暂存、worktree 占用和任务边界。
 2. 定位工程基线 R01–R20 中受影响需求及真实调用链，更新相应输入/输出、权限、数据、状态、错误、兼容和验收设计。
 3. 现有 owner 可承载时直接修改；确需新增接口/字段/层时写明原因，列出被替代代码与同步清理范围。
 4. 不复制新的日期版方案，不将未实现规划标为已实现，也不混入其他任务未完成代码。
@@ -42,7 +42,7 @@ pnpm build:vendor
 ```bash
 # 后端：在 backend 目录使用适用的已有测试标签与包
 cd backend
-go test -tags=unit ./internal/pkg/sse
+go test -tags=unit ./internal/gateway/protocol/sse
 # 真实数据库、race、全量构建只在实际风险需要时运行
 ```
 
@@ -54,9 +54,9 @@ go test -tags=unit ./internal/pkg/sse
 - 业务变化：按受影响入口和独立风险选现有回归；协议涉及真实报文、第二轮、取消/失败、输出和账务。
 - 所有 GitHub Workflow 仅 `workflow_dispatch`，包括质量检查；push/PR 不自动启动 CI 或发版。
 - 已有 `tools/change_delivery.py` 管理验证输入与回执、交付互斥；不建立第二套验证/发布工具。
-- 提交、推送与人工发版/部署/迁移分开；实际差异、品牌树、精确 lease、远端/本地对齐遵循现行规范。
+- 提交、推送与人工发版/部署/迁移分开；核对实际差异、唯一目标ref及远端/本地一致性。
 - 测试临时输出和构建产物按任务归属登记、清理并实测；限额内共享缓存与 SDK 保留，不清理其他任务资源。
 
 ## 维护资料
 
-[工程入口](docs/README.md) · [来源与许可](docs/SOURCE_ADAPTATIONS.md) · [插件开发](backend/pkg/pluginapi/docs/development.md) · [数据库迁移](backend/migrations/README.md) · [人工发布](deploy/AUTOMATIC_RELEASE.md)
+[工程入口](docs/README.md) · [来源与许可](docs/SOURCE_ADAPTATIONS.md) · [插件开发](backend/pkg/pluginapi/docs/development.md) · [数据库迁移](backend/migrations/README.md) · [API部署](deploy/api/README.md)

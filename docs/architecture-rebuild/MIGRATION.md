@@ -4,7 +4,7 @@
 
 本文是 [REQUIREMENTS.md](REQUIREMENTS.md) REQ-02～08/12～18 和 [CONTRACTS.md](CONTRACTS.md) CT-01～11 的切换落实方案；依 [DECISIONS.md](DECISIONS.md) ADR-05～11/13/14，不另定义状态机/接口。现状存储/TTL/幂等键见 [DATA_AND_CONFIG.md](DATA_AND_CONFIG.md)。目标模块均为设计，不是假定已经存在的包。
 
-任务 ID、依赖、写集、状态以 [work-items.json](work-items.json) 为唯一来源，[WORK_PACKAGES.md](WORK_PACKAGES.md) 仅为阅读视图；共享集成遵循 [COLLABORATION.md](COLLABORATION.md)。文档版本化与三品牌交付遵循现行政策；外部上线、生产迁移与数据处置仍按既有独立授权边界，已授权动作直接执行，不增加固定审批流程。
+任务 ID、依赖、写集、状态以 [work-items.json](work-items.json) 为唯一来源，[WORK_PACKAGES.md](WORK_PACKAGES.md) 仅为阅读视图；共享集成遵循 [COLLABORATION.md](COLLABORATION.md)。文档版本化与独立重构分支交付遵循根AGENTS当前范围；外部上线、生产迁移与数据处置仍按既有独立授权边界，已授权动作直接执行，不增加固定审批流程。
 
 ## 1. 切换单位与副作用边界
 
@@ -47,7 +47,7 @@
 | WP-13～17 + WP-18 → WP-19 | 其他平台与异步/实时窄端口接入 | remote job ID、逐轮授权、产物/voice 归属与资金正确；不重发已提交任务 |
 | WP-03/06/07 → WP-20 → WP-21 | 领域配置/revision、旧 API 和前端保存冲突 | Group/Account 视图可追溯，旧 writer/解释器与表单状态清理；三品牌不分裂业务链 |
 | WP-19/20/22 → WP-23 | 控制与 host 启动、Drain/Stop、共享路由/Wire 装配 | 生命周期和持久恢复一起完成；删除旧隐式启动及失效注册 |
-| WP-19/21/23 → WP-24 → WP-25 → WP-26 | 全功能旧 reader 收敛、独立风险验收、现行三品牌交付 | 代码与数据回滚分别证明；WP-26 的交付不包含发版/上线/生产迁移 |
+| WP-19/21/23 → WP-24 → WP-25 → WP-26 | 全功能旧 reader 收敛、独立风险验收、独立分支交付 | 代码与数据回滚分别证明；WP-26 的交付不包含发版/上线/生产迁移 |
 
 WP-01 后可按各自依赖并行准备；WP-11～17 的正式模式实现以 WP-10 为前提，不能提前将其登记为已切换。共享 SQL/Ent、跨模式 Redis、现有 handler/service、注册/Wire 只能由指定单写者处理。Domain worker 交提取实现和精确旧文件替换建议，集成者在同一切片接入并删除。跨机器交接用 [templates/HANDOFF.md](templates/HANDOFF.md) 记录实际 SHA、合同、diff、证据与资源，不使用本机绝对路径或另建状态平台。
 
@@ -232,4 +232,4 @@ WP-25 按实际层级记录结果，WP-26 在其依赖满足后按现行政策�
 
 ## 统一项目和品牌的迁移补充
 
-新增WP-27在WP-23集成前完成部署参数与旧品牌变量迁移，随后WP-24清理、WP-25验收、WP-26交付；不能到发布阶段才改模板。见[BRANDING](BRANDING.md)及AT-38至43。保留旧有效设置、镜像版本和数据挂载，删除被替代的编译品牌fallback、品牌重编译选择器及广告专属路径。许可证/来源、有效业务与持久身份不按品牌词清除。当前三分支/渠道为迁移期操作，目标同角色制品跨品牌配置；本轮不发布镜像、改线上参数或执行数据迁移。
+新增WP-27在WP-23集成前完成部署参数与旧品牌变量迁移，随后WP-24清理、WP-25验收、WP-26交付；不能到发布阶段才改模板。见[BRANDING](BRANDING.md)及AT-38至43。保留旧有效设置、镜像版本和数据挂载，删除被替代的编译品牌fallback、品牌重编译选择器及广告专属路径。许可证/来源、有效业务与持久身份不按品牌词清除。当前三分支/渠道继续维护，重构只交付独立分支，目标同角色制品跨品牌配置；本轮不发布镜像、改线上参数或执行数据迁移。

@@ -1,8 +1,6 @@
-# =============================================================================
-# KDAN Deploy Directory - Git Ignore
-# =============================================================================
+# Local deployment state; never commit credentials or runtime data.
 
-# Data directories (generated at runtime when using docker-compose.local.yml)
+# Local bind-mount data, if explicitly configured by the operator.
 data/
 postgres_data/
 redis_data/

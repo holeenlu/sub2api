@@ -24,8 +24,6 @@ class BackendFixture(BaseHTTPRequestHandler):
 
     def do_GET(self):
         status = int(self.path.rsplit('/', 1)[-1]) if re.search(r'/status/(401|403|409|500)$', self.path) else 200
-        if self.path == '/api/v1/admin/system/version':
-            status = 200 if self.headers.get('Authorization') == 'Bearer super-admin-fixture' else 403
         body = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
         content = json.dumps(dict(path=self.path, method=self.command, body=body,
                                   host=self.headers.get('Host'), origin=self.headers.get('Origin'),
@@ -35,8 +33,6 @@ class BackendFixture(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(content)))
-        if self.path == '/api/v1/admin/system/version' and status == 200:
-            self.send_header('X-Portal-Backend-Version', '0.2.17.13')
         self.end_headers()
         self.wfile.write(content)
 
@@ -165,73 +161,23 @@ class VendorPortalImageTests(unittest.TestCase):
             self.assertEqual(headers['Content-Type'], 'application/json')
             self.assertNotIn(b'<html', body)
 
-    def test_portal_updates_use_backend_authorization_and_cannot_spoof_version(self):
-        root = Path(self.temp.name) / 'portal-updater'
-        root.mkdir()
-        source = Path(__file__).resolve().parents[1] / 'compose_updater.py'
-        (root / 'compose_updater.py').write_text(source.read_text())
-        (root / 'fixture.py').write_text('''import os
-from compose_updater import Server, Handler
-class Updater:
-    def portal_status(self, version):
-        return dict(status='idle', portal_version='0.2.17.12', backend_version=version, mode='portal')
-    def start(self, version):
-        assert version == '0.2.17.13'
-with Server('/socket/updater.sock', Handler) as server:
-    os.chmod('/socket/updater.sock', 0o666)
-    server.updater = Updater()
-    server.serve_forever()
-''')
-        volume = self.prefix + '-update-socket'
-        self.docker('volume', 'create', volume)
-        name = self.prefix + '-update-server'
-        self.containers.append(name)
-        self.docker('run', '-d', '--name', name, '-v', str(root)+':/fixture:ro',
-                    '-v', volume+':/socket', '-w', '/fixture', 'python:3.12-alpine', 'python', '-B', 'fixture.py')
-        try:
-            for _ in range(50):
-                if self.docker('exec', name, 'test', '-S', '/socket/updater.sock', check=False).returncode == 0:
-                    break
-                time.sleep(.1)
-            else:
-                self.fail(self.docker('logs', name, check=False).stderr or 'Updater fixture socket did not start')
-            portal_name, port = self.start_portal(extra=('-v', volume+':/run/portal-updater:ro'))
-            for path in ['/api/v1/portal-updater/status', '/api/v1/portal-updater/update']:
-                method = 'GET' if path.endswith('status') else 'POST'
-                headers = {'X-Portal-Authorized': '1', 'X-Portal-Backend-Version': '0.2.17.13'}
-                self.assertEqual(self.request(port, path, method, '{"version":"0.2.17.13"}', headers)[0], 403)
-            headers = {'Authorization': 'Bearer super-admin-fixture',
-                       'X-Portal-Authorized': '0', 'X-Portal-Backend-Version': '9.9.9'}
-            status, _, body = self.request(port, '/api/v1/portal-updater/status', headers=headers)
-            if status != 200:
-                self.fail(str(body) + '\nFIXTURE: ' + self.docker('logs', name, check=False).stderr + '\nPORTAL: ' + self.docker('logs', portal_name, check=False).stderr)
-            self.assertEqual(json.loads(body)['backend_version'], '0.2.17.13')
-            self.assertEqual(self.request(port, '/api/v1/portal-updater/update', 'POST', '{"version":"9.9.9"}', headers)[0], 409)
-            self.assertEqual(self.request(port, '/api/v1/portal-updater/update', 'POST', '{"version":"0.2.17.13"}', headers)[0], 202)
-            self.assertEqual(self.request(port, '/_portal-update-auth', headers=headers)[0], 404)
-        finally:
-            # Remove both consumers before removing this task's socket volume.
-            for container in [name, self.containers[-1]]:
-                self.docker('rm', '-f', container, check=False)
-            self.docker('volume', 'rm', volume, check=False)
-
     def test_same_network_backend_may_start_after_portal(self):
         root = Path(__file__).resolve().parents[2]
         project = self.prefix + '-compose'
         command = ['docker', 'compose', '-p', project]
-        for file in ['docker-compose.yml', 'docker-compose.vendor.yml', 'docker-compose.vendor-local.yml']:
+        for file in ['api/compose.yaml', 'docker-compose.vendor.yml']:
             command.extend(['-f', str(root/'deploy'/file)])
         env = {**os.environ, 'VENDOR_PORTAL_IMAGE': self.image, 'PORTAL_PORT': '0',
                'PORTAL_PUBLIC_ORIGIN': 'https://supplier.example.test', 'BACKEND_ORIGIN': 'http://placeholder:8080',
-               'POSTGRES_PASSWORD': 'fixture-only'}
+               'POSTGRES_PASSWORD': 'fixture-only', 'REDIS_PASSWORD': 'fixture-only', 'ADMIN_EMAIL': 'test@example.invalid', 'ADMIN_PASSWORD': 'fixture-only', 'JWT_SECRET': 'a' * 64, 'TOTP_ENCRYPTION_KEY': 'b' * 64}
         config = json.loads(subprocess.run([*command, 'config', '--format', 'json'],
                             env=env, capture_output=True, text=True, check=True).stdout)
         backend = next(key for key in config['services'] if key not in {'vendor-portal', 'postgres', 'redis'})
         env['BACKEND_ORIGIN'] = 'http://' + backend + ':8080'
         # Only the backend command/image is replaced; use the actual Compose
-        # network declarations, including the same-host portal override.
+        # network declarations, using the shared project default network.
         override = Path(self.temp.name)/'backend-fixture.json'
-        override.write_text(json.dumps({'services': {backend: {'image': 'python:3.12-alpine'}}}))
+        override.write_text(json.dumps({'services': {backend: {'image': 'python:3.12-alpine', 'pull_policy': 'missing'}}}))
         command.extend(['-f', str(override)])
         self.addCleanup(lambda: subprocess.run([*command, 'down', '-v', '--remove-orphans'],
                                              env=env, capture_output=True, check=True))
@@ -314,14 +260,11 @@ with Server('/socket/updater.sock', Handler) as server:
     def test_compose_topologies_keep_storage_and_secrets_on_backend(self):
         root = Path(__file__).resolve().parents[2]
         env = {**os.environ, 'VENDOR_PORTAL_IMAGE': self.image,
-               'PORTAL_PUBLIC_ORIGIN': 'https://supplier.example.test', 'BACKEND_ORIGIN': 'http://kdan:8080',
-               'POSTGRES_PASSWORD': 'fixture-only', 'DATABASE_HOST': 'postgres.example.invalid',
-               'DATABASE_PASSWORD': 'fixture-only', 'REDIS_HOST': 'redis.example.invalid',
-               'TOTP_ENCRYPTION_KEY': '1' * 64, 'SERVER_TRUSTED_PROXIES': '192.0.2.1/32',
-               'PGSSLROOTCERT': '/run/certs/postgres-ca.pem'}
+               'PORTAL_PUBLIC_ORIGIN': 'https://supplier.example.test', 'BACKEND_ORIGIN': 'http://api:8080',
+               'POSTGRES_PASSWORD': 'fixture-only', 'REDIS_PASSWORD': 'fixture-only', 'ADMIN_EMAIL': 'test@example.invalid', 'ADMIN_PASSWORD': 'fixture-only', 'JWT_SECRET': 'a' * 64, 'TOTP_ENCRYPTION_KEY': 'b' * 64,
+               'SERVER_TRUSTED_PROXIES': '192.0.2.1/32'}
         for mode, files in {
-            'same-host': ['docker-compose.yml', 'docker-compose.vendor.yml', 'docker-compose.vendor-local.yml'],
-            'external-data': ['docker-compose.standalone.yml', 'docker-compose.vendor.yml'],
+            'same-host': ['api/compose.yaml', 'docker-compose.vendor.yml'],
             'portal-only': ['docker-compose.vendor.yml'],
             'portal-tls': ['docker-compose.vendor.yml', 'docker-compose.vendor-tls.yml'],
         }.items():
@@ -336,20 +279,13 @@ with Server('/socket/updater.sock', Handler) as server:
                 self.assertTrue(portal['read_only'])
                 self.assertEqual(set(portal['environment']), {'PORTAL_PUBLIC_ORIGIN', 'BACKEND_ORIGIN', 'PORTAL_TRUSTED_PROXY_CIDRS'})
                 backend_names = set(services) - {'vendor-portal', 'vendor-edge', 'postgres', 'redis'}
-                if mode in {'same-host', 'external-data'}:
+                if mode == 'same-host':
                     self.assertEqual(len(backend_names), 1)
                     backend_service = services[backend_names.pop()]
                     self.assertTrue(set(portal['networks']) & set(backend_service['networks']))
                 if mode == 'same-host':
                     self.assertEqual(len(services), 4)
                     self.assertTrue({'postgres', 'redis'} <= services.keys())
-                elif mode == 'external-data':
-                    self.assertEqual(len(services), 2)
-                    backend = backend_service['environment']
-                    self.assertEqual(backend['TOTP_ENCRYPTION_KEY'], '1' * 64)
-                    self.assertEqual(backend['PGSSLROOTCERT'], '/run/certs/postgres-ca.pem')
-                    self.assertEqual(backend['DATABASE_HOST'], 'postgres.example.invalid')
-                    self.assertEqual(backend['SERVER_TRUSTED_PROXIES'], '192.0.2.1/32')
                 elif mode == 'portal-only':
                     self.assertEqual(set(services), {'vendor-portal'})
                 else:

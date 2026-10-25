@@ -139,7 +139,6 @@ deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
 docs/*
-!docs/ARCHITECTURE_REBUILD.md
 !docs/architecture-rebuild/
 !docs/CLAUDE_REQUEST_FINGERPRINT.md
 !docs/GATEWAY_PROTOCOL_LIMITS.md

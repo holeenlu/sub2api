@@ -360,7 +360,7 @@ func TestCloudWSBridgePreservesBudgetAndRejectionCauses(t *testing.T) {
 			want := ErrOpenAITurnAttemptBudgetExhausted
 			switch name {
 			case "attempt budget":
-				budget.attempts = budget.limit
+				takeOpenAITurnAttempts(t, budget, budget.attemptBudget.Snapshot().Limit)
 			case "first output deadline":
 				budget.deadline = time.Now().Add(-time.Second)
 				want = ErrOpenAIWSFirstOutputBudgetExhausted

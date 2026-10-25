@@ -1,6 +1,6 @@
 # 重构验收矩阵
 
-日期：2026-10-25。源码基线：`750d4a16c7adaf558cf2c6ce7101975602832d7b`；合同版本 `0.2`，已包含 Cloud parser 重构。
+日期：2026-10-25。源码基线：`750d4a16c7adaf558cf2c6ce7101975602832d7b`；合同版本 `0.4`，已包含 Cloud parser 重构。
 
 需求/接口/取舍分别以 [REQUIREMENTS](REQUIREMENTS.md)、[CONTRACTS](CONTRACTS.md)、[DECISIONS](DECISIONS.md) 为唯一来源；任务状态/依赖/写集以 [work-items.json](work-items.json) 为准，[WORK_PACKAGES](WORK_PACKAGES.md) 是阅读视图。遵守 [COLLABORATION](COLLABORATION.md)、[根 AGENTS](../../AGENTS.md) 和 [交付政策](../CHANGE_DELIVERY.md)。本文只维护验收追踪，不复制接口或改变任务授权。
 
@@ -135,7 +135,7 @@
 | AT-27 实时双向音频生命周期 | 正例持续双向音频、二进制帧及晚到音频；反例只有连接成功无音频、客户端取消、上游结束与下游关闭竞争、超限和归属失败。 | 实时端口不强制文本 SSE 终态；只有观测到的音频事实进入既有计费规则，连接 id 不充当可重复使用的 billing root；终止后不重开生成，晚到帧有界处理。 | [grok_audio_test.go](../../backend/internal/service/grok_audio_test.go) 的 `TestProxyGrokRealtimeConnWaitsForLateAudioBeforeReturning`、`TestProxyGrokRealtimeConnPreservesBinaryAudioFrames`；V19 |
 | AT-28 配置 revision、发布失败与即时撤销 | 正例同轮固定策略/价格 revision，新轮采用新 revision；反例并发写入同 revision、PG 提交后发布通知丢失、Redis 重启、过期 rebuild 写回、等待时发生撤销。 | CAS 拒绝丢更新；提交后从持久化 revision 恢复收敛；旧 epoch 不能覆盖新配置；紧急撤销不依赖普通通知或下一次全量重建；一轮不混用两套价格。 | [scheduler_snapshot_group_lifecycle_test.go](../../backend/internal/service/scheduler_snapshot_group_lifecycle_test.go) 的 `TestSchedulerGroupLifecycleEpochPreventsABA`；V07、V22、V22-R |
 | AT-29 数据迁移与历史幂等键兼容 | 只在隔离 DB 中装入既有 Group/Account/授权/usage/归档数据，运行拟议迁移再重放旧请求；正例旧 API/数据读写保持产品合同；反例新 root 绕过旧去重、两实例同时迁移、旧版本无法读新格式。 | 历史结算不重扣、归属不变化、已应用 migration 校验值保持；幂等运行和并发锁可靠；回退是否可读必须用实际旧版本/数据证明，不能仅声明“回滚代码”。 | [migrations_runner_checksum_test.go](../../backend/internal/repository/migrations_runner_checksum_test.go) 的 `TestIsMigrationChecksumCompatible`；V12、V23 |
-| AT-30 三品牌 UI、来源与渠道 | 分别核对 KDAN/main、TapModels/TapModels、Tokensavy/tokensavy 的品牌配置与实际界面：登录、管理、供应商、账号/路由/计费、语言与 logo/favicon；正例共享行为一致；反例混用资产/渠道、品牌分支另生执行逻辑、来源说明丢失。 | 品牌资产/文案/已授权差异各归其主；用户/管理员/供应商看到对应权限界面，安全 logo URL 规则保留；渠道仍与 [channels.json](../../scripts/release/channels.json) 的 `kdan`、`tapmodels`、`tokensavy` 一致；来源与累计变更对实际树可追溯。 | [branding.spec.ts](../../frontend/src/utils/__tests__/branding.spec.ts) 的 `updateFavicon`；V15、V24 |
+| AT-30 多部署品牌 UI、来源与隔离 | 分别核对同一代码制品在独立部署中的品牌配置与实际界面：登录、管理、供应商、账号/路由/计费、语言与 logo/favicon；正例共享行为一致；反例混用资产/渠道、品牌分支另生执行逻辑、来源说明丢失。 | 品牌资产/文案/已授权差异各归其主；用户/管理员/供应商看到对应权限界面，安全 logo URL 规则保留；独立重构不使用旧维护品牌发布渠道，部署配置与当前制品身份一致；来源与累计变更对实际树可追溯。 | [branding.spec.ts](../../frontend/src/utils/__tests__/branding.spec.ts) 的 `updateFavicon`；V15、V24 |
 | AT-31 旧路径删除、依赖方向与单链切换 | 每一垂直切片核对旧/新名称、字段、注册、路由、Wire、配置、动态注册、前端 store/locale/测试；正例只有新链可产生副作用；反例旧路由、旧恢复 loop、过渡开关或新旧双发仍存在。 | 一个请求只有一个执行者和幂等结算用例；删除失效入口及专属资源，有效公开兼容保留具体调用方/数据依据与退出条件；核心不 import Gin/Ent/Redis/具体 provider，model 不反向依赖 execution。 | [ARCHITECTURE.md](ARCHITECTURE.md)“旧代码替换与删除清单”；V25 |
 
 ### 真实取证
@@ -182,7 +182,7 @@ AT-10/11/13/21/23 同时消费 AT-36：连接、命名流、每轮 operation、P
 
 已静态核对 [backend/Makefile](../../backend/Makefile)：`test-unit`/`test-integration`/`test-e2e` 使用 `unit`/`integration`/`e2e`，`test-e2e-local` 是别名；[根 Makefile](../../Makefile) 使用 `pnpm --dir frontend exec vitest run`；[package.json](../../frontend/package.json) 具有 `test:run`、`typecheck`、`lint:check`，pnpm 为 `9.15.9`；[go.mod](../../backend/go.mod) 指定 Go `1.27.3`。未检查本机已安装依赖、编译或运行成功。
 
-后端命令在仓库 `backend/`，前端命令在仓库根。按受影响 AT 选取并可进一步收窄，不整表跑；同输入证据不按品牌/阶段重复。并发行为改变才给相关选择器加 `-race`。遵守 [最小充分验证](../CHANGE_DELIVERY.md#最小充分验证2026-10-23) 和 [产物收尾](../CHANGE_DELIVERY.md#本机编译与部署数据收尾)，隔离临时目录/日志、复用合规缓存，不新建平台。Go `-run` 缩小执行，但仍编译整个所选包。
+后端命令在仓库 `backend/`，前端命令在仓库根。按受影响 AT 选取并可进一步收窄，不整表跑；同输入证据不按品牌/阶段重复。并发行为改变才给相关选择器加 `-race`。遵守 [最小充分验证](../CHANGE_DELIVERY.md#最小充分验证) 和 [产物收尾](../CHANGE_DELIVERY.md#本机编译与部署数据收尾)，隔离临时目录/日志、复用合规缓存，不新建平台。Go `-run` 缩小执行，但仍编译整个所选包。
 
 下列 V 编号仅为本文索引，不是新增 Make target；选择器引用现有测试/前缀。目标缺口需要 WP 实现后在原测试上扩展，当前不提供虚构新包命令。
 
@@ -324,11 +324,30 @@ C/P/O 按 AT-32..34 采集版本、完整脱敏报文、指定账号/部署和�
 
 | ID | 输入与动作 | 必须观察的结果及反例 | 现有起点与缺口 |
 | --- | --- | --- | --- |
-| AT-38 | 空白安装、未配置品牌，查看首页/登录/标题/favicon/帮助及随包文档 | 默认sub2api和中性本地资产；无原作者广告、赞助墙、商业导流与相关请求；LICENSE/NOTICE和必要来源仍保留。不能以隐藏组件代替移除专属路径。 | [brand defaults](../../backend/internal/service/brand.go)、[frontend defaults](../../frontend/src/config/brand.ts)、当前README及最终制品清单；需要完整清理证据，当前常量并未中性化。 |
+| AT-38 | 空白安装、未配置品牌，查看首页/登录/标题/favicon/帮助及随包文档 | 默认sub2api和中性本地资产；无原作者广告、赞助墙、商业导流与相关请求；LICENSE/NOTICE和必要来源仍保留。不能以隐藏组件代替移除专属路径。 | [brand defaults](../../backend/internal/service/brand.go)、[frontend defaults](../../frontend/src/shared/config/project.ts)、当前README及最终制品清单；需要完整清理证据，当前常量并未中性化。 |
 | AT-39 | 通过现有设置修改site_name/site_logo/api_base_url，刷新、清空Logo、切换语言并访问独立门户 | 对应消费者使用同一有效配置，无重新构建、另一品牌首屏闪现或跨部署缓存污染；金额/权限/历史不随显示值变化。 | [app store](../../frontend/src/stores/app.ts)、[branding tests](../../frontend/src/utils/__tests__/branding.spec.ts)、[public settings tests](../../backend/internal/service/setting_service_public_test.go)；现有测试不自动覆盖全部消费者。 |
-| AT-40 | 两个独立部署profile使用同角色同版本镜像内容，设置不同名称/Logo/API展示链接及部署项目/容器/镜像引用 | 无品牌代码条件或重编译；配置渲染、升级/回滚信息、功能权限一致且数据各自隔离；功能角色不同可保留不同制品。 | [Compose](../../deploy/docker-compose.yml)、[brand release tests](../../deploy/tests/test_brand_release.py)；实现时更新相应旧品牌假设，实际制品/配置渲染证据单独记录。 |
+| AT-40 | 两个独立部署profile使用同角色同版本镜像内容，设置不同名称/Logo/API展示链接及部署项目/容器/镜像引用 | 无品牌代码条件或重编译；配置渲染、升级/回滚信息、功能权限一致且数据各自隔离；功能角色不同可保留不同制品。 | [API Compose](../../deploy/api/compose.yaml)及新的部署边界检查；实现时更新相应旧品牌假设，实际制品/配置渲染证据单独记录。 |
 | AT-41 | 存量部署分别有显式设置和依赖编译fallback；随后修改部署项目/容器名并升级 | 显式值优先，旧有效fallback有一次性映射；挂载仍指向原数据，账号/余额/账务键和必要会话合同不变；不能连接空卷或重复记账。 | [设置更新测试](../../backend/internal/service/setting_service_update_test.go)、[MIGRATION](MIGRATION.md)；需要隔离的真实存储/挂载验证，不能用重建数据库冒充迁移。 |
 | AT-42 | 向Logo/名称/链接提交恶意值，修改公开API展示地址为另一测试域名，读取public settings | 复用既有URL/转义/归属保护；管理登录态不发往展示地址，provider/更新源不变，不泄露部署凭据，不执行宿主命令。合法图片/链接不能因新规范被无依据拒绝。 | [branding helper](../../frontend/src/utils/branding.ts)、[管理API client](../../frontend/src/api/client.ts)、[public DTO检查](../../backend/internal/handler/dto/public_settings_injection_schema_test.go)；补跨域/权限负例。 |
 | AT-43 | 在隔离副本演练网站改名、部署改名和技术项目更名，扫描实际制品与调用点 | 可定位集中元数据与必要外部合同；展示改名不触及持久/鉴权身份；旧品牌/广告专属实现退出，许可/来源保留；不以全局替换代替迁移。 | [BRANDING](BRANDING.md)、[RETIREMENT](RETIREMENT.md)及实际代码引用；不在生产环境执行更名实验。 |
 
 本轮不运行这些场景，不新增测试平台。实现后按影响复用现有设置、UI、发布与部署检查，静态渲染、真实存储、实际镜像及线上证据分别报告。
+
+## 9. 前端架构增量验收（FRONTEND_ARCHITECTURE 1.0）
+
+AT-44至55关联FR-01至12、REQ-10/11/13/18/19与CT-08/11；均未执行。C在本节指真实浏览器/客户端对实际运行前后端的交互，不能用组件mock代替。R只在实际修改持久化/权限/事务的风险需要时执行；当前只读已有测试作为起点，不声称新场景已经覆盖。
+
+| AT / 风险 | 输入与反例 | 可观察结果 | 现有起点 | 证据 |
+| --- | --- | --- | --- | --- |
+| AT-44 FR-01/02/12：依赖与唯一owner | 从每个迁入域导出页面/面板；反例为shared导入feature、跨域深导入、barrel提前加载全部页面。 | 依赖方向和显式出口可审查；公共type没有重复业务实体；新增边界lint仅对已迁入范围生效。 | [现有ESLint配置；新规则尚未实施](../../frontend/.eslintrc.cjs) | U/S，not_run/not_collected |
+| AT-45 FR-04：请求竞态与scope | A账号或供应商scope慢请求在切到B后返回；过滤翻页和卸载时也复现；正常token轮换作正例。 | 旧结果不写入新scope，loading复位、订阅停止、无误报toast；正常轮换不清空同一逻辑session。 | [useTableLoader现有行为测试](../../frontend/src/composables/__tests__/useTableLoader.spec.ts) | U/S+C，not_run/not_collected |
+| AT-46 FR-05：单一刷新与退出 | 并发401、多tab一次性refresh竞争、刷新中登出再登录、取消后重试。 | 单一刷新机制保留有效peer结果，旧请求不以新身份重放；刷新失败不覆盖新登录。 | [tokenRefresh及client现有测试](../../frontend/src/shared/http/__tests__/tokenRefresh.spec.ts) | U/S+C，not_run/not_collected |
+| AT-47 FR-03/08：组合保存与冲突 | Group两个领域字段一起保存并制造其中一个校验失败；两人编辑不同Settings section、stale revision及无权字段。 | 当前原子用例全成或全败；并发冲突保留草稿、不覆盖他人更新；服务端字段过滤仍权威。 | [Settings当前测试；revision目标需WP-20补真实服务端证据](../../frontend/src/views/admin/__tests__/SettingsView.spec.ts) | U/S+R+C，not_run/not_collected |
+| AT-48 FR-07：角色与供应商 | 普通管理员、超管、一级/二级供应商及aggregate/children/readOnly切换；stale policy、越权对象与step-up取消。 | UI路由/字段一致；服务器分别拒绝越权；vendor_id不能从旧query覆盖新scope，取消不重放。 | [vendor scope、portalGuard及client现有测试](../../frontend/src/features/vendor/__tests__/scope.spec.ts) | U/S+R+C，not_run/not_collected |
+| AT-49 FR-05：支付与异步状态 | 支付回调参数声称成功但服务器未确认；提交超时、取消轮询、重复点击；后台作业仍在运行。 | 不以URL确付款，不自动再次扣款/提交；UI取消只结束等待，任务状态仍来自服务端。 | [paymentFlow、paymentWechatResume和useBatchImageAccess现有测试](../../frontend/src/components/payment/__tests__/paymentFlow.spec.ts) | U/S+C，not_run/not_collected |
+| AT-50 FR-06：网关事实投影 | 同平台不同Native/BPS/Cloud与HTTP/WS组合、目录缺项、工具未知、confirmed lower_bound及未知账务。 | 六维不合并成平台bool；未知不等于unsupported或零，lower_bound不冒充完整Final，TPS口径保持。 | [latencyHealth现有TPS口径；新投影需CT-08/11实际返回](../../frontend/src/utils/latencyHealth.ts) | U/S+C，not_run/not_collected |
+| AT-51 FR-11：切片与历史入口 | 新页面接入后枚举旧URL、OAuth/payment callback、root出口、locale、缓存与持久化键读者。 | 有效外部合同有具名映射，旧页面/平行API/store完全退出；无legacy/v2开关和空wrapper；不清历史数据冒充删除。 | [router guards与实际路由清单](../../frontend/src/router/__tests__/guards.spec.ts) | U/S+C，not_run/not_collected |
+| AT-52 FR-09：品牌与地址隔离 | 同角色同版本制品加载两种配置，首屏无网络、配置更新、恶意logo/doc URL及不同api_base_url。 | 首屏中性或正确品牌；没有旧品牌闪现；公开API展示变化不改变带认证管理请求目标，许可证内容保留。 | [branding既有测试；AT-38至43补制品/配置证据](../../frontend/src/utils/__tests__/branding.spec.ts) | U/S+C，not_run/not_collected |
+| AT-53 FR-10：UI和文案 | 键盘打开/关闭对话框、错误定位、窄屏表格、全部现有语言切换、导航/标题同步。 | 焦点/label/错误可达；状态不只靠颜色，菜单与route来自同一贡献；无缺键或拼接破句。 | [title与既有check:i18n；浏览器人工交互记录](../../frontend/src/router/__tests__/title.spec.ts) | U/S+C，not_run/not_collected |
+| AT-54 FR-04/10：启动和资源 | 重复挂载、退出账号、切portal、页面隐藏再返回；检查懒加载、计时器/请求/订阅和两个功能角色产物。 | 没有重复轮询或泄漏；只加载所需页面；同条件记录资源/请求与现状比较，不凭文件行数宣称提速。 | [现有App生命周期；主站/vendor构建仅在相关变化时运行](../../frontend/src/app/App.vue) | U/S+C，not_run/not_collected |
+| AT-55 FR-03/12：完整切片协作 | 从登录到Key/资源保存或供应商只读查询走完整链；各领域并行交付后由单一integrator接线并删除旧消费者。 | 路由到DTO/服务器/状态/页面完整，跨域保存无半成；实际diff不越界，未接入模块不能accepted。 | [精确写集和实际应用/接口证据；不是以任务JSON代替测试](work-items.json) | U/S+R+C，not_run/not_collected |

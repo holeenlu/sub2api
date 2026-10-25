@@ -2691,3 +2691,23 @@ func TestRetiredSchedulerConfigOnlySuppliesOneTimeCostIntent(t *testing.T) {
 	require.Equal(t, 0.75, cfg.SchedulerMigrationWeights()["upstream_cost"])
 	require.Greater(t, cfg.Gateway.Scheduling.FallbackWaitTimeout, time.Duration(0))
 }
+
+func TestLoadProjectIdentityDefaultsAndLogOverride(t *testing.T) {
+	for _, name := range []string{"", "deployment-service"} {
+		t.Run(name, func(t *testing.T) {
+			resetViperWithJWTSecret(t)
+			t.Setenv("LOG_SERVICE_NAME", name)
+			t.Setenv("DATABASE_DBNAME", "")
+			t.Setenv("WEBAUTHN_RP_DISPLAY_NAME", "")
+			cfg, err := Load()
+			require.NoError(t, err)
+			want := name
+			if want == "" {
+				want = "sub2api"
+			}
+			require.Equal(t, want, cfg.Log.ServiceName)
+			require.Equal(t, "sub2api", cfg.Database.DBName)
+			require.Equal(t, "sub2api", cfg.WebAuthn.RPDisplayName)
+		})
+	}
+}

@@ -877,8 +877,8 @@ func TestExcelBPSImageByteCompactionFlow(t *testing.T) {
 				wantUploads = 3 // Retry the rejected new image only; history upload and compact run once.
 				budget, ok := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
 				require.True(t, ok)
-				require.Equal(t, 2, budget.attempts, "compact and generation each consume one attempt")
-				require.Equal(t, 1, budget.preparationRetries)
+				require.Equal(t, 2, budget.attemptBudget.Snapshot().Attempts, "compact and generation each consume one attempt")
+				require.Equal(t, 1, budget.attemptBudget.Snapshot().PreparationRetries)
 				require.False(t, c.GetBool(OpenAIAccountReplayAllowedContextKey))
 			}
 			require.Equal(t, wantUploads, uploads)

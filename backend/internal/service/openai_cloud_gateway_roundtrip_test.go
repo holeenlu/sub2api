@@ -583,7 +583,7 @@ func TestCloudPreInferenceFailureReachesWSScheduler(t *testing.T) {
 	require.Equal(t, "failed", settlements[0].Status)
 	require.Equal(t, &OpenAICloudUsage{}, settlements[0].Usage)
 	budget := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
-	require.Equal(t, 1, budget.attempts)
+	require.Equal(t, 1, budget.attemptBudget.Snapshot().Attempts)
 	ExcludeTurnRecoveryAccount(ctx, in.Account, failure)
 	require.False(t, turnAccountEligible(ctx, in.Account, UsageAuthorizationModeCloud))
 	require.True(t, turnAccountEligible(ctx, in.Account, "native"), "Cloud exclusion must not poison other mode state")

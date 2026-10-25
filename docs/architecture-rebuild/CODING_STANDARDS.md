@@ -1,6 +1,6 @@
 # Sub2API 详细编码规范
 
-规范版本：1.1。日期：2026-10-25。适用：本次重构及其后续新增、实际修改的 Go / Vue / TypeScript / 数据访问与测试代码，三品牌共用。业务重构尚未开始，本轮只制定规范及接入开发资料，不修改运行代码、lint/编译配置或依赖。
+规范版本：1.3。日期：2026-10-25。适用：本次重构及其后续新增、实际修改的 Go / Vue / TypeScript / 数据访问与测试代码，统一sub2api代码使用。当前已启动独立分支开发；实际实施、验证及工具限制见IMPLEMENTATION。
 
 本文件是语言级编码、文件组织及审查标准的唯一来源。业务行为以[需求](REQUIREMENTS.md)、模块边界和生命周期以[契约](CONTRACTS.md)为准，顶层布局见[架构](ARCHITECTURE.md)，授权与交付仍遵循[AGENTS](../../AGENTS.md)和[交付规范](../CHANGE_DELIVERY.md)。规范不替代实际客户端、协议和历史数据合同。
 
@@ -8,7 +8,7 @@
 
 未标为“建议”的规则均用于新增和本次实际修改代码的审查。既有代码不能仅因为不符合新风格就全仓重写；迁移切片内失效实现的删除仍按RETIREMENT执行。
 
-检查标记：**F** 格式化，**G** Go静态检查，**T** TypeScript类型检查，**E** ESLint，**U** 定向单元/组件/替身测试，**I** 必要的真实依赖/多实例/上游验证，**R** 代码审查。标记表示验证方式，**不表示工具已经完整实现该规则，也不表示本轮运行通过**。
+检查标记：**F** 格式化，**G** Go静态检查，**T** TypeScript类型检查，**E** ESLint，**U** 定向单元/组件/替身测试，**I** 必要的真实依赖/多实例/上游验证，**R** 代码审查，**C** 真实浏览器交互。标记表示验证方式，**不表示工具已经完整实现该规则，也不表示本轮运行通过**。
 
 | ID | 规范 | 检查 |
 | --- | --- | --- |
@@ -38,29 +38,16 @@ backend/internal/gateway/execution/
 
 Go包名用简短小写单词，文件用snake_case.go；测试用_test.go。外部测试包的_test后缀沿Go惯例。不创建通用的manager/service/base/common目录来吸收无法归类的职责。
 
-### 2.2 前端feature内部组织
+### 2.2 前端目录与领域归属
 
-~~~text
-frontend/src/features/<feature>/
-  api.ts             调用已有共享HTTP客户端的端点封装
-  contracts.ts       该feature的外部DTO或共享DTO的明确入口
-  model.ts           UI状态/视图模型；确有差异才建立
-  components/        该领域独有组件
-  composables/       useXxx.ts，拥有明确副作用和销毁责任
-  views/             页面编排
-  store.ts           确有跨页面共享状态时才创建
-  __tests__/         同领域组件、请求和状态测试
-  index.ts           必要的少量公开导出；不默认export全部内部模块
-~~~
-
-单文件即可表达的feature不制造完整骨架。已有features/vendor、全局认证、brand、共享HTTP客户端和基础UI组件优先复用。公共router/API/type出口按COLLABORATION交由单一集成者处理。
+详细目录和共享边界以[FRONTEND_ARCHITECTURE](FRONTEND_ARCHITECTURE.md)为唯一来源：app装配、features拥有领域API/草稿/查询、shared提供无业务依赖的技术机制。小领域按需使用单文件；不预建空目录，不重复维护旧views/contracts与新pages/api两份布局。
 
 | ID | 规范 | 检查 |
 | --- | --- | --- |
 | CS-05 | 核心model/protocol/execution不导入Gin、Ent、Redis客户端或具体provider；具体设施经端口注入。新包禁止反向依赖旧service万能实体；确需过渡转换只放集成边界并登记退出条件，不得流入核心或长期保留。 | G部分/R |
 | CS-06 | 接口通常由消费者定义；跨模块真正共享的值对象归model/合同owner。不为每个struct生成对应interface，不使用I前缀或空泛BaseService接口。 | R |
 | CS-07 | 类型和方法名称表达责任与行为：业务ID保持明确含义，Do/Handle/Manager等泛名仅在已有明确上下文中使用。同一方法不能直接实现多个领域的具体规则；CT定义的主编排可以依次调用各owner端口，但不复制其规则，也不为形式拆分制造空转发层。 | R |
-| CS-08 | feature可依赖共享基础设施和其他feature明确公开的能力，不能深层导入别的feature内部组件/store。路由壳只在实际需要时保留，迁完不留下多层空转发。 | T部分/R |
+| CS-08 | 按FRONTEND_ARCHITECTURE保持app→features/shared、features→shared；跨域运行组合在app，禁止feature相互导入实现或借event bus绕过；最小跨域只读类型须登记owner。公开出口显式，路由贡献保持懒加载。 | T部分/R |
 | CS-09 | 只有实际共享且语义一致的代码才下沉；不能为未来可能复用建立工具库。新公共helper须说明调用方、唯一owner和为什么原模块不能承载。 | R/U |
 | CS-10 | 拆分依据是责任/状态所有者/协议差异，不能按任意行数或机械文件切割。若一个函数直接实现解析、选号、重试、写响应和扣费等多领域规则，应按CT拆分；调用各端口的合法编排不受此禁令。文件变小但职责不变不算完成。 | R |
 
@@ -201,7 +188,7 @@ if err != nil {
 
 | ID | 规范 | 检查 |
 | --- | --- | --- |
-| CS-57 | Go测试与被测包同目录并沿现有unit/integration/e2e标签；TS沿现有__tests__/xxx.spec.ts等约定。优先扩展现有测试，不为命名统一搬动无关测试。 | G/T部分/R |
+| CS-57 | Go测试与被测包同目录并沿现有unit/integration/e2e标签；TS沿现有__tests__/xxx.spec.ts等约定。优先扩展现有测试，不为命名统一搬动无关测试。 | G部分/R |
 | CS-58 | 测试名表达行为和条件；相似输入用表驱动，独立风险有独立断言。断言可观察结果、身份、副作用和状态，不只断言调用一次或状态200。 | R/U |
 | CS-59 | 时间、随机、网络和全局状态尽量受控；测试不依赖执行顺序、个人凭据或真实用户数据。环境修改必须恢复，并发测试不共享可变全局夹具。 | G部分/R/U |
 | CS-60 | fake/mock只实现其被消费合同，不能通过省略错误、延迟、取消或重复事件隐藏风险。fixture有来源、版本、脱敏和覆盖说明，合成样本不得冒充真实客户端报文。 | R/U/I |
@@ -254,7 +241,7 @@ if err != nil {
 | [前端脚本](../../frontend/package.json) | lint:check、typecheck、test:run、check:i18n及既有build入口 | lint默认只读：lint脚本实际带--fix；build只是格式检查 |
 | [忽略范围](../../frontend/.eslintignore) | 依赖、生成文件和构建输出排除 | 被排除输出可代替源代码质量证据 |
 
-现有命名、any/ts-comment、feature边界和新核心依赖的缺口先由规则审查与相应行为测试承担。WP-01负责新核心边界与合同，WP-21负责前端领域迁移时必要的类型/lint补齐，WP-24核对旧规则退出；只有实际实施这些任务后才更新“已自动覆盖”状态。本次不修改这些工具配置，也不追溯性开启全仓新门禁。
+现有命名、any/ts-comment、feature边界和新核心依赖的缺口先由规则审查与相应行为测试承担。WP-01负责新核心边界与合同，WP-28负责迁入边界的必要类型/lint补齐，WP-29至35负责领域证据，WP-21负责最终收敛，WP-24核对旧规则退出；只有实际实施这些任务后才更新“已自动覆盖”状态。本次不修改这些工具配置，也不追溯性开启全仓新门禁。
 
 ## 10. 按影响选择的检查命令
 
@@ -265,9 +252,9 @@ if err != nil {
 gofmt -l internal/gateway/execution/engine.go
 # 上行目标包尚待开发；文件未存在时不能拿它作为已验证命令。
 # 现有包的定向测试示例；按实际影响替换为已有包和匹配的测试。
-go test -tags=unit ./internal/pkg/sse
+go test -tags=unit ./internal/gateway/protocol/sse
 # 在依赖规则或静态风险确有变化时，用已有工具检查实际包。
-golangci-lint run ./internal/pkg/sse/...
+golangci-lint run ./internal/gateway/protocol/sse/...
 
 # 前端：在frontend目录；不要把带--fix的pnpm lint当作只读验证。
 pnpm exec eslint src/api/client.ts
@@ -293,3 +280,164 @@ pnpm check:i18n
 | 给已有代码加一条文档说明 | CS-04/68 | 仅文档差异/链接/示例检查，不启动业务测试、Docker或全量构建 |
 
 规范和示例均不授予上线、生产数据库操作或未明确需求的代码开发范围。当前交付是规范文本与协作接入；实际自动化覆盖、代码迁移及运行验收分别记录。
+
+## 12. 语言级细则（1.3增量）
+
+本节将前述职责规则落到可直接审查的语法和文件写法。沿用CS-01至69，新增CS-70至100；规则是本项目选择，不代表所有检查器已开启。目录、领域和品牌的唯一来源不变。
+
+### 12.1 Go
+
+| ID | 写法与边界 | 检查 |
+| --- | --- | --- |
+| CS-70 | import按标准库、第三方、本项目分组；普通包不使用点导入。空白导入只在确有注册要求的装配/驱动入口并说明原因；别名解决真实冲突，不给所有导入重命名。 | F/R |
+| CS-71 | 业务身份、金额单位、计数与时间不能只靠变量名区别；在易混用边界使用有明确意义的命名类型。别名仅用于保留同一类型身份的明确需要，不能假装类型隔离；不批量改变现有wire字段或数据库类型。 | G部分/R/U |
+| CS-72 | 接收者短名且同类型一致；需要修改状态、持有锁或共享资源的类型使用指针语义。带mutex/atomic/连接所有权的值不得在使用后复制；小型不可变值可按值传递，不机械全指针。 | G部分/R/U |
+| CS-73 | 配置/实体/结果用具名字段构造；公开构造函数验证必要依赖。可选依赖和默认值显式记录，不以nil代表多种业务模式；不将可变全局变量或init中的环境读取当依赖注入。 | G部分/R/U |
+| CS-74 | slice/map零值、空集合和未设置按合同处理；跨goroutine或缓存边界交接前明确谁可以修改底层内容。浅复制不当深复制；输出顺序、摘要和幂等输入不能依赖map遍历顺序。 | R/U |
+| CS-75 | JSON字段名/omitempty/指针按外部合同选择。普通指针字段不能单独表达缺省、null和显式清空三种状态；PATCH等需要区分时复用现有presence表达，在边界判定后进入类型化命令。敏感字段不因omitempty缺失就认为不会序列化。 | R/U |
+| CS-76 | 端口实现方可用编译期接口断言核对方法集；返回interface前检查typed nil。接口留给真实替换边界，泛型只提炼稳定类型算法，不用反射/泛型注册器抹平provider和账务生命周期。 | G部分/R |
+| CS-77 | switch显式覆盖领域状态；default按合同返回错误或未知，不能作为隐式成功。向枚举添加值时检查所有消费者、持久化与观测标签，不仅改定义；不以数值排序隐含状态迁移。 | G部分/R/U |
+| CS-78 | goroutine启动处可看见输入捕获、取消与join责任；循环中的共享对象、slice和指针仍需审查。按go.mod的实际语言版本理解闭包/计时器语义，不机械复制旧版本修复片段；并发数量来自已有受控预算。 | G部分/R/U |
+| CS-79 | 作用域内及时关闭body/rows/file；长循环不要累积直到函数返回的defer。Close/Rollback/恢复失败按CS-15/19保留主要错误与必要次要事实；不把一个函数的裸命名返回值和defer写入作为隐藏业务状态机。 | G部分/R/U |
+| CS-80 | 测试命名表达条件与结果，表驱动case使用具名字段；t.Parallel只用于无共享可变环境/fixture的用例，t.Cleanup归还自己创建的资源。子测试失败应能定位输入、状态与副作用，不依赖前一case预热。 | R/U |
+
+### 12.2 TypeScript
+
+| ID | 写法与边界 | 检查 |
+| --- | --- | --- |
+| CS-81 | 默认const，确实需要重新赋值才用let，不新增var。普通变量/函数camelCase，类型/类PascalCase；布尔命名体现肯定条件，避免isNotDisabled等叠加否定和无解释缩写。 | E部分/T/R |
+| CS-82 | 纯类型依赖用import type；显式具名出口，业务模块不使用export *聚合全部内部符号。先外部包后内部绝对路径再局部路径；不能通过barrel隐藏feature循环依赖或副作用导入。 | T/E部分/R |
+| CS-83 | 对象合同用interface或明确对象type，联合/映射/工具类型用type；遵循同模块一致写法，不为风格改现有公共类型。互斥业务状态优先字符串字面量判别联合，不新增可随意赋值的状态字符串或位掩码bool组合。 | T/R/U |
+| CS-84 | 公开函数、API适配器、composable及store action标明参数/结果；局部简单值允许推断。泛型表达输入输出关系，不能仅为让调用方写任意T后把未知响应强转成T；默认unknown而非any。 | T/R/U |
+| CS-85 | unknown先做必要的结构/范围检查，再构造可信视图；as const用于字面量保留，satisfies用于编译期形状核对，两者均不是运行时校验。可选字段、null、空字符串、0、false按API分别保留，禁止统一filter(Boolean)清洗业务数据。 | T/R/U |
+| CS-86 | 对封闭联合使用显式分支和never检查新增状态；对开放的服务端枚举保留unknown分支与原始诊断，不用穷尽断言把未来合法值变成无提示崩溃。对外枚举扩展同步消费者。 | T/R/U |
+| CS-87 | Number/parseInt/parseFloat转换后按合同检查finite、安全整数、范围和单位；不能让NaN/Infinity或空串转换所得0进入业务命令。大整数/金额沿用服务端合同与已有表示，不先损失精度再转字符串。 | T/R/U |
+| CS-88 | 单次请求捕获scope、request sequence和signal；finally更新状态前也校验归属。AbortError/axios取消保留可识别身份；Promise.all仅用于允许一项失败整体失败的并行操作，allSettled必须逐项处理结果，禁止丢弃失败项。 | T部分/R/U |
+| CS-89 | 日期保存和传输遵循既有UTC/offset/epoch合同，界面再按用户时区格式化。解析仅日期字符串不能隐式改成某一时区的瞬时点；费用、token、ms/s和百分比的转换集中于具名边界。 | R/U |
+| CS-90 | 不用JSON stringify/parse当通用深复制或隐藏undefined/日期/精度差异。使用显式draft投影隔离表单与服务端快照；readonly只表达类型约束，不能据此宣称嵌套对象在运行时不可变。 | T/R/U |
+
+### 12.3 Vue 单文件组件、Pinia 与 CSS
+
+| ID | 写法与边界 | 检查 |
+| --- | --- | --- |
+| CS-91 | 新SFC按script setup、template、style组织；脚本依次为imports、props/emits、注入与状态、computed、actions、watch和生命周期。允许按紧密职责分小组，禁止为排序搬动无关旧文件；模板不内联请求/权限/价格算法。 | E部分/R |
+| CS-92 | Props/Emits写明类型、默认和可变边界；集合/对象默认值按Vue约定隔离实例。更新使用具名事件或update:modelValue，不修改props内部对象；模板事件处理承担错误去向，不能用void掩盖未处理Promise。 | T/E部分/R/U |
+| CS-93 | ref用于明确单值，reactive用于有整体寿命的草稿；保持响应式读取语义，不将普通解构误当响应式引用。Pinia读取state/getter用storeToRefs或保留store访问，actions按既有方式调用；不假定任意Vue/编译版本的props解构行为相同。 | T/R/U |
+| CS-94 | watch依赖尽量精确，清理注册与请求作用域相匹配；异步watch/事件晚到不能写入已销毁页面。onMounted/activated/visibility事件分别说明启动原因，onScopeDispose/卸载或停用有对应清理，不重复开启同一轮询。 | R/U |
+| CS-95 | 领域Pinia只保存确需跨页面共享的事实与操作，不复制query快照、表单草稿和本地派生值；setup store有明确reset与会话失效清理合同，不能假定框架会替业务自动删除私有缓存。 | T/R/U |
+| CS-96 | 样式先复用现有Tailwind和tokens；局部规则默认scoped，:deep/全局样式必须说明作用对象。z-index、断点、间距与主题色沿公共tokens，不复制品牌色/魔法层级；不用!important掩盖组件边界错误。 | R/C |
+| CS-97 | 按钮/链接使用对应语义元素，非提交按钮明确type；输入有label和可关联错误，对话框管理焦点，异步状态提供可访问反馈。i18n使用完整句子与参数，不拼句；URL、Markdown、iframe安全仍沿CS-41。 | E部分/R/U/C |
+
+### 12.4 SQL、脚本与配置
+
+| ID | 写法与边界 | 检查 |
+| --- | --- | --- |
+| CS-98 | SQL列/排序/过滤含义明确；列表查询有稳定排序和分页合同，更新显式列出目标字段及必要scope/revision条件并检查实际结果。金额、NULL、时区及空集合沿schema；SQL迁移按既有命名和runner，生成文件不手改，历史已应用迁移不重写。 | R/U/I |
+| CS-99 | Python工具使用明确argv运行子进程、检查退出/超时、局部捕获已知异常；Shell遵循文件shebang和目标平台，引用变量/路径并显式处理失败。动态文本、JSON或用户输入不能拼成可执行shell；不打印环境秘密，不以全局通配删除共享文件。 | R/U |
+| CS-100 | JSON/YAML/环境模板对键、类型、单位、缺省、优先级和敏感性有唯一schema/owner；缺失与false/0不混用。真实密钥不进示例；新增配置同步读者/示例/退出条件。品牌和项目部署输入按BRANDING，禁止增加隐式兼容别名链。 | R/U/I |
+
+C表示实际浏览器交互记录，仅对受影响的UI行为使用；不能以组件替身代替键盘、焦点和布局证据。这里只记录需要的证据类型，不创建新检查平台。
+
+### 12.5 可照着审查的局部片段
+
+以下为设计示例，非新业务实现、非已运行测试。类型和函数名只说明边界；开发时使用相应CT和现有模块的真实类型，不把片段直接当完整SDK。
+
+**Go：保持原因和资源所有权。**
+
+~~~go
+lease, err := leases.Acquire(ctx, request)
+if err != nil {
+	return Result{}, fmt.Errorf("acquire capacity: %w", err)
+}
+// 本用例从此负责释放。释放错误处理、收尾上下文及所有退出路径
+// 按实际租约合同明确，不用忽略错误的空defer作为完成依据。
+return executeWithOwnedLease(ctx, lease, request)
+~~~
+
+executeWithOwnedLease是示意的所有权接管点，不要求新增此包装；如果现有用例直接持有lease，应在原处实现有界收尾。不能把多个业务规则迁入这个函数以规避模块边界。
+
+**TypeScript：封闭状态与空值。**
+
+~~~ts
+type SaveOutcome =
+  | { kind: 'saved'; revision: string }
+  | { kind: 'conflict'; currentRevision: string }
+  | { kind: 'rejected'; fieldErrors: Readonly<Record<string, string>> }
+
+function outcomeKey(result: SaveOutcome): string {
+  switch (result.kind) {
+    case 'saved': return 'saved'
+    case 'conflict': return 'conflict'
+    case 'rejected': return 'rejected'
+  }
+  const unreachable: never = result
+  return unreachable
+}
+
+// 保留0/false；只在合同规定的缺省条件下移除字段。
+const hasValue = value !== undefined && value !== null
+~~~
+
+SaveOutcome仅用于已经有该revision合同的内部用例；不能据此给旧REST新增必填revision。开放服务器枚举另有unknown分支。UI文案由调用方映射i18n，不能把上述内部key直接显示给用户。
+
+**Vue：只提交当前scope的结果。**
+
+~~~ts
+let sequence = 0
+let controller: AbortController | undefined
+
+async function reload(): Promise<void> {
+  const current = ++sequence
+  const scopeAtStart = readScopeKey()
+  controller?.abort()
+  const pending = new AbortController()
+  controller = pending
+  loading.value = true
+  try {
+    const result = await query({ signal: pending.signal })
+    if (current !== sequence || scopeAtStart !== readScopeKey()) return
+    data.value = result
+  } catch (error: unknown) {
+    if (current !== sequence || scopeAtStart !== readScopeKey()) return
+    if (!isCancellation(error)) presentError(error)
+  } finally {
+    if (current === sequence && scopeAtStart === readScopeKey()) {
+      loading.value = false
+    }
+  }
+}
+
+onScopeDispose(() => {
+  ++sequence
+  controller?.abort()
+})
+~~~
+
+readScopeKey/query/isCancellation/presentError代表现有会话/领域API能力，不要求新建通用框架。实际组件还需在身份/scope变化时清理旧data/error/loading，并触发新的加载；只有Abort、不检查晚到结果的实现不符合CS-33/88。
+
+**Python/Shell：数据不能成为命令。**
+
+~~~python
+# argv元素按参数传递；timeout取所属工具的既定预算。
+result = subprocess.run(
+    [executable, "--input", str(input_path)],
+    check=True, capture_output=True, text=True, timeout=command_timeout,
+)
+~~~
+
+Shell脚本使用目标解释器允许的数组或位置参数构造命令；不用eval执行外部文本。CI及仓库现有Python/Shell工具按受影响范围验证，不因补规范强制重写或新增脚本。
+
+### 12.6 实施时的语言检查责任
+
+| 范围 | 规则与最小证据 | 单一负责入口 |
+| --- | --- | --- |
+| Go新核心/领域 | CS-11至28、70至80；gofmt、定向测试，必要静态/并发检查 | WP-01及各后端包；共同装配由integrator |
+| TS/API/查询 | CS-29至41、81至90；实际类型与竞态/错误行为 | WP-28及各前端领域包 |
+| Vue/Pinia/样式 | CS-29至42、91至97；组件/i18n与受影响浏览器交互 | WP-29至35；共享设施/入口单写者 |
+| SQL/部署与工具 | CS-43至56、98至100；对应真实合同与已有工具检查 | 原工作包及现行交付规则，不另建执行器 |
+
+本节没有修改go.mod、package.json、锁文件、ESLint或TS配置。实际语言/依赖版本由WP-00在开工时读取清单、锁文件和工具身份，不能把本规范的版本号误当工具链版本。
+
+## 第一波实际工具覆盖（2026-10-25）
+
+新gateway/model、execution、protocol已通过既有depguard配置限制对service、handler、repository、config、providers、storage、Gin、Ent和Redis的反向依赖，model/protocol不得导入execution。规则实际执行通过；Go vet和核心-race亦通过。现有golangci-lint 2.13.1完整运行无法读取Go 1.27.3 export data v5，未把工具不兼容记作lint通过，也未升级项目依赖。后续匹配分析工具后补齐完整lint；当前实际证据与范围见IMPLEMENTATION。

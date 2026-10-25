@@ -3,7 +3,6 @@
 //
 // 原始碼在 git 裡保持簡體（與上游、協作者一致）：
 // 前端由 gen-locale.mjs 依 zh 產生 zh-TW 語言包（提交進 git），
-// 後端由 convert-go.mjs 在 Docker 建置時呼叫這裡的函式轉換字串字面值。
 //
 // 也可當 CLI 對檔案就地轉換（例如檢查或一次性處理）：
 //   node tools/zh-tw/convert.mjs [--dry] [--vocab-only] <glob> [glob...]

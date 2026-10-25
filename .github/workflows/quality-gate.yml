@@ -7,6 +7,15 @@ permissions:
   contents: read
 
 jobs:
+  api-deployment:
+    name: API deployment contracts (no image build or containers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -B -m unittest deploy.tests.test_runtime_permissions deploy.tests.test_api_compose -v
+      - run: sh deploy/tests/docker-runtime-resources-test.sh
+      - run: sh deploy/test-caddyfile-cache.sh
+
   backend:
     name: Backend build and unit tests
     runs-on: ubuntu-latest

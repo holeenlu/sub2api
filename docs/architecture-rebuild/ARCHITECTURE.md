@@ -75,6 +75,7 @@ backend/internal/
   storage/                     PostgreSQL/Redis 端口实现
   host/                        worker、连接池、插件进程生命周期
   observability/               日志、指标、追踪、只读投影
+  projectinfo/                 纯编译项目身份；不读取网站或部署设置
 ```
 
 不是先建空目录或给每个类型套 interface。边界规则：

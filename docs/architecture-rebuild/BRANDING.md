@@ -1,6 +1,6 @@
 # sub2api 项目身份与品牌配置规范
 
-版本：1.0。需求确认日期：2026-10-25。状态：重构目标及开发合同，尚未修改运行代码或部署。用户明确要求统一技术项目名称sub2api，清理上游广告/赞助等无关推广，品牌部署时自定义镜像/容器标识，网站Logo、品牌名和API链接等通过设置配置。
+版本：1.0。需求确认日期：2026-10-25。状态：开发合同与源输入记录；独立分支已开始实施，已完成范围及未验收项见IMPLEMENTATION。用户明确要求统一技术项目名称sub2api，清理上游广告/赞助等无关推广，品牌部署时自定义镜像/容器标识，网站Logo、品牌名和API链接等通过设置配置。
 
 本要求替代目标设计中“靠品牌分支分别维护代码/资产默认值”的假设。**目标是一套代码和按服务角色构建的制品，多份独立部署配置。** 当前main/TapModels/tokensavy分支和渠道是现有系统的过渡交付安排，本文件不删除分支、标签或Release，也不擅自改变当前发布权限。
 
@@ -31,16 +31,16 @@
 
 ## 2. 当前实现与需要替换的部分
 
-核查代码输入为6be77b99bc0118ee3f34f7a6987edb4735497ed4。以下是当前事实，不能当作目标已经完成。
+核查代码输入为6be77b99bc0118ee3f34f7a6987edb4735497ed4。以下是研究时源输入事实，不能当作当前实施进度；实施结果见IMPLEMENTATION。
 
 | 现有入口 | 已有能力/耦合 | 重构处置 |
 | --- | --- | --- |
 | [backend brand.go](../../backend/internal/service/brand.go) | DefaultSiteName=KDAN，文档地址和release channel等编译fallback；已有设置优先 | 展示默认值中性化并归项目身份/网站设置；更新来源从显示品牌中分离 |
-| [frontend brand.ts](../../frontend/src/config/brand.ts) | BRAND_NAME、站点/文档链接、RELEASE_DOCKER_IMAGE等编译常量 | 运行时品牌读取公共设置；部署/更新命令不从展示常量推导；去掉与后端/构建配置重复维护的默认值 |
+| [frontend brand.ts](../../frontend/src/shared/config/project.ts) | BRAND_NAME、站点/文档链接、RELEASE_DOCKER_IMAGE等编译常量 | 运行时品牌读取公共设置；部署/更新命令不从展示常量推导；去掉与后端/构建配置重复维护的默认值 |
 | [public settings DTO](../../backend/internal/handler/dto/settings.go)、[admin settings API](../../frontend/src/api/admin/settings.ts) | 已有site_name、site_logo、site_subtitle、api_base_url、doc_url、contact_info等 | 继续作为权威配置入口；只有当前字段无法表达明确需求时才提出最小字段变化 |
 | [app store](../../frontend/src/stores/app.ts)、[branding helper](../../frontend/src/utils/branding.ts) | 设置驱动站点名、i18n、Logo和favicon，仍有编译fallback | 全面复用；补齐首屏、切换与缓存失效，不再增加一套品牌store |
-| [Compose模板](../../deploy/docker-compose.yml) | 当前有kdan服务名、KDAN_IMAGE、固定container_name及卷名 | 迁成通用部署参数，显式处理旧变量/卷挂载；不能直接改名后连接空数据卷 |
-| [发布渠道](../../scripts/release/channels.json) | main/kdan、TapModels/tapmodels、tokensavy/tokensavy | 当前交付继续遵守；目标部署品牌不等于发布渠道，更换发行策略在WP-26单独形成可审查映射 |
+| 基线部署模板（已由[API Compose](../../deploy/api/compose.yaml)替代） | 当前有kdan服务名、KDAN_IMAGE、固定container_name及卷名 | 迁成通用部署参数，显式处理旧变量/卷挂载；不能直接改名后连接空数据卷 |
+| 基线发布渠道（已从重构项目删除） | main/kdan、TapModels/tapmodels、tokensavy/tokensavy | 维护项目保留自己的渠道；本重构项目只构建独立制品，不保留旧品牌发版代码 |
 
 上游官方基线37067e8e340e9440d173a92b4faa05e8ce58368f的README包含Sponsors及商业注册链接。当前定制树的README和本轮检索的前端范围未发现同样的赞助段落；这只是局部源码核查，不是全仓或最终制品已清理证明。WP-24仍须按下述范围核对实际可达内容。
 
@@ -133,7 +133,7 @@ LICENSE、NOTICE、原始许可证、必要版权/来源记录、第三方依赖
 2. 显式保存值始终优先；依赖旧编译fallback的存量部署，先明确一次性导入/持久化方案，再删除fallback。新安装默认中性，不能继续自动识别成历史品牌。
 3. 映射部署参数和旧数据挂载，确认升级仍读取同一数据库、卷和必要状态；改名不等于重建或删除数据。
 4. 同一垂直切片验证后台保存、公共投影、首屏、各消费者、独立门户与邮件/支付展示，并删除旧品牌常量、重编译选择器和仅供推广的实现。
-5. 当前三分支/渠道在迁移期间按现行政策交付；收敛后的代码、制品和部署profile关系在WP-26明确，不通过本次文档编辑删除分支或发布新镜像。
+5. 用户已指定独立重构分支；现有三分支/渠道继续维护，重构改动不向它们传播；收敛后的代码、制品和部署profile关系在WP-26明确，不通过本次文档编辑删除分支或发布新镜像。
 
 ### 6.2 更名不变的东西
 
@@ -155,7 +155,7 @@ LICENSE、NOTICE、原始许可证、必要版权/来源记录、第三方依赖
 | WP-22/23 | 中性项目/部署身份、构建/host/门户装配；不硬编码品牌容器和镜像 |
 | WP-24 | 原生/历史品牌及推广内容按完整功能退出，保留许可与来源，核对无遗留执行路径 |
 | WP-25 | 对照两个部署profile、运行时品牌变更、迁移和隔离负例，分级记录真实证据 |
-| WP-26 | 同角色统一制品与部署配置交付；过渡期三品牌refs按现行规范处理；不自动上线 |
+| WP-26 | 同角色统一制品与部署配置交付；仅交付独立重构分支，三品牌维护refs保持独立；不自动上线 |
 
 验收场景加入VALIDATION的AT-38至AT-43，统一状态为not_run/not_collected：
 
@@ -167,3 +167,9 @@ LICENSE、NOTICE、原始许可证、必要版权/来源记录、第三方依赖
 - AT-43：技术更名演练及扫描能定位集中元数据与必要外部合同；旧品牌/广告实现已退出，许可/来源和稳定身份仍正确。
 
 本轮只把用户要求写成可执行的重构约束和验收任务；没有宣称现有代码已中性化、广告已全面清除或部署模板已支持新参数。
+
+## 第一波已实施边界
+
+projectinfo集中技术项目名；后端fallback、日志service和默认日志文件使用sub2api，显式站点/日志设置优先。独立API模板使用中性用户、二进制及可配置镜像/项目/可选容器名。旧自更新/回滚及品牌发版机制已完整删除；当前只构建并手动部署独立制品，不保留未来备用下载器或死开关。只读版本状态服务当前前端消费者，不选择远端安装来源。
+
+前端品牌/Logo/广告资产由外部会话负责，未宣称完成全量广告清理；独立项目的默认配置发现路径改为/etc/sub2api，新库与WebAuthn显示名默认为sub2api；不再自动读取/etc/kdan。已有部署迁移必须显式指定有效配置/数据库/数据位置；不改已保存设置、RP ID或历史数据。

@@ -173,13 +173,17 @@ func TestHTTPStreamContractRawUsageIsNotProofOfCompletion(t *testing.T) {
 
 func TestHTTPStreamContractRawPreoutputStagingLimit(t *testing.T) {
 	c, rec := httpStreamContractContext()
-	// Every individual frame is small; only the aggregate pending stream is large.
-	prefix := strings.Repeat(":"+strings.Repeat("x", 1020)+"\n\n", 9*1024)
+	// Every frame is small; only the aggregate exceeds the shared stage cap.
+	frame := ":" + strings.Repeat("x", 1020) + "\n\n"
+	prefix := strings.Repeat(frame, openAIFirstOutputStageMaxBytes/len(frame)+1)
 	svc := &OpenAIGatewayService{}
 	_, err := svc.streamRawChatCompletions(c, httpStreamContractResponse(prefix+httpStreamContractPartial+httpStreamContractDone), &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, "model", "model", "model", nil, nil, time.Now(), 64*1024)
-	t.Logf("err=%v metadata_before_first_semantic=%d downstream_bytes=%d", err, len(prefix), rec.Body.Len())
-	if err == nil && rec.Body.Len() > 8*1024*1024 {
-		t.Error("raw Chat pending metadata exceeds the gateway's existing 8 MiB pre-output staging budget")
+	var failure *UpstreamFailoverError
+	if !errors.As(err, &failure) || failure.StatusCode != http.StatusBadGateway {
+		t.Fatalf("aggregate pre-output staging must stop at %d bytes; err=%v downstream=%d", openAIFirstOutputStageMaxBytes, err, rec.Body.Len())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatal("output escaped after the staging limit was exceeded")
 	}
 }
 
@@ -267,7 +271,7 @@ func (u *httpStreamContractUpstream) Do(req *http.Request, _ string, _ int64, _ 
 }
 func TestHTTPStreamContractRawFullForwardFirstOutputBudget(t *testing.T) {
 	c, rec := httpStreamContractContext()
-	budget := &OpenAITurnBudget{deadline: time.Now().Add(60 * time.Millisecond), limit: 8}
+	budget := &OpenAITurnBudget{deadline: time.Now().Add(60 * time.Millisecond), attemptBudget: newOpenAITurnAttemptBudget(8)}
 	c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), budget))
 	reader, writer := io.Pipe()
 	producerDone := make(chan struct{})
@@ -282,7 +286,7 @@ func TestHTTPStreamContractRawFullForwardFirstOutputBudget(t *testing.T) {
 	started := time.Now()
 	_, err := svc.forwardAsRawChatCompletions(c.Request.Context(), c, rawChatCompletionsTestAccount(), largeRawChatCompletionsBody(), "")
 	<-producerDone
-	t.Logf("err=%v elapsed=%s attempts=%d bytes=%d", err, time.Since(started), budget.attempts, rec.Body.Len())
+	t.Logf("err=%v elapsed=%s attempts=%d bytes=%d", err, time.Since(started), budget.attemptBudget.Snapshot().Attempts, rec.Body.Len())
 	if err == nil {
 		t.Error("the full raw Chat forwarding route returned success after its absolute first-output deadline")
 	}
@@ -295,7 +299,7 @@ func TestHTTPStreamContractRawDeadlineEndsAtContent(t *testing.T) {
 		t.Run(map[bool]string{false: "empty_delta", true: "long_generation"}[content], func(t *testing.T) {
 			c, _ := httpStreamContractContext()
 			started := time.Now()
-			c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), &OpenAITurnBudget{started: started, deadline: started.Add(150 * time.Millisecond), limit: 8}))
+			c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), &OpenAITurnBudget{started: started, deadline: started.Add(150 * time.Millisecond), attemptBudget: newOpenAITurnAttemptBudget(8)}))
 			reader, writer := io.Pipe()
 			done := make(chan struct{})
 			go func() {
@@ -331,7 +335,7 @@ func (*httpStreamHeaderWait) Do(req *http.Request, _ string, _ int64, _ int) (*h
 func TestHTTPStreamContractRawHeaderWaitBudget(t *testing.T) {
 	c, _ := httpStreamContractContext()
 	started := time.Now()
-	c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), &OpenAITurnBudget{started: started, deadline: started.Add(50 * time.Millisecond), limit: 8}))
+	c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), &OpenAITurnBudget{started: started, deadline: started.Add(50 * time.Millisecond), attemptBudget: newOpenAITurnAttemptBudget(8)}))
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: &httpStreamHeaderWait{}}
 	_, err := svc.forwardAsRawChatCompletions(c.Request.Context(), c, rawChatCompletionsTestAccount(), largeRawChatCompletionsBody(), "")
 	if !errors.Is(err, ErrOpenAIWSFirstOutputBudgetExhausted) {
@@ -364,7 +368,7 @@ func TestHTTPStreamContractFallbackFirstOutputBudget(t *testing.T) {
 		t.Run(protocol, func(t *testing.T) {
 			c, _ := httpStreamContractContext()
 			start := time.Now()
-			c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), &OpenAITurnBudget{started: start, deadline: start.Add(50 * time.Millisecond)}))
+			c.Request = c.Request.WithContext(WithOpenAITurnBudget(c.Request.Context(), &OpenAITurnBudget{attemptBudget: newOpenAITurnAttemptBudget(8), started: start, deadline: start.Add(50 * time.Millisecond)}))
 			reader, writer := io.Pipe()
 			done := make(chan struct{})
 			go func() {
@@ -396,7 +400,7 @@ func TestHTTPStreamContractCanceledPreoutputStillDrainsUsage(t *testing.T) {
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 	start := time.Now()
-	ctx = WithOpenAITurnBudget(ctx, &OpenAITurnBudget{started: start, deadline: start.Add(30 * time.Millisecond)})
+	ctx = WithOpenAITurnBudget(ctx, &OpenAITurnBudget{attemptBudget: newOpenAITurnAttemptBudget(8), started: start, deadline: start.Add(30 * time.Millisecond)})
 	c.Request = c.Request.WithContext(ctx)
 	reader, writer := io.Pipe()
 	done := make(chan struct{})

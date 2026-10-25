@@ -122,7 +122,7 @@
 
 [defaultOpenAIWSProtocolResolver.Resolve/openAIWSRequestAllowsHTTP](../../backend/internal/service/openai_ws_protocol_resolver.go) 以平台、凭据、开关、并发、mode 决定实际路径；`shared/dedicated` 才是旧 ctx_pool 别名。warmup、agent_task、conversation、显式 previous 等不能通过删除字段强转新 HTTP 生成。`openAIWSFailureBeforeSend` 的具体分类须与实际写证据核对，非任意网络错误都未发送。
 
-SSE 共享 [sse.ScanLines](../../backend/internal/pkg/sse/sse.go) 的 CR/LF/CRLF/BOM；事件解码仍有模式差异：原生有限多 JSON 修复、BPS 严格单 JSON、Cloud 上游 JSON-RPC 不机械合并。资源限额参考 [GATEWAY_PROTOCOL_LIMITS](../GATEWAY_PROTOCOL_LIMITS.md) 当前章节及源码；字节/token/图像/历史条数不可替代，上限不等于真实上游成功容量。
+SSE 共享 [sse.ScanLines](../../backend/internal/gateway/protocol/sse/sse.go) 的 CR/LF/CRLF/BOM；事件解码仍有模式差异：原生有限多 JSON 修复、BPS 严格单 JSON、Cloud 上游 JSON-RPC 不机械合并。资源限额参考 [GATEWAY_PROTOCOL_LIMITS](../GATEWAY_PROTOCOL_LIMITS.md) 当前章节及源码；字节/token/图像/历史条数不可替代，上限不等于真实上游成功容量。
 
 ### 4.1 Native不确定发送恢复的既有例外
 
@@ -258,7 +258,7 @@ SSE 共享 [sse.ScanLines](../../backend/internal/pkg/sse/sse.go) 的 CR/LF/CRLF
 | PC-31 / CT-01、05、07、09 | TTS/STT/音色/实时二进制与迟到音频→每引用验owner、用户并发在上游前、费用按实测单位。 | [grok audio](../../backend/internal/service/grok_audio_test.go)：`TestSecurityCustomVoiceOwnerAllReferences` |
 | PC-32 / CT-01、05、06、07、09 | Live SDP/attestation/sideband/到期→call绑定、租约终止、幂等结算，非Responses文本终态。 | [Live lifecycle](../../backend/internal/service/openai_live_lifecycle_test.go)：`TestGetLiveCallForIdentityRejectsMismatchedCaller` |
 | PC-33 / CT-01、04、06、09 | 公共files/audio/batches负例，内部附件/cache/relay→未注册不可用，资源独立鉴权，不跨mode解引用。 | [gateway routes](../../backend/internal/server/routes/gateway.go) |
-| PC-34 / CT-03、04、05、10 | 体积/解压/SSE拼帧/背压/Cloud队列→限额不混、取消可达、超限不丢usage或造成功。 | [SSE](../../backend/internal/pkg/sse/sse_test.go)、[HTTP流](../../backend/internal/service/gateway_http_stream_contract_test.go)：`TestHTTPStreamContractGeminiCompleteFrameParsing` |
+| PC-34 / CT-03、04、05、10 | 体积/解压/SSE拼帧/背压/Cloud队列→限额不混、取消可达、超限不丢usage或造成功。 | [SSE](../../backend/internal/gateway/protocol/sse/sse_test.go)、[HTTP流](../../backend/internal/service/gateway_http_stream_contract_test.go)：`TestHTTPStreamContractGeminiCompleteFrameParsing` |
 | PC-35 / CT-01、02、05、06、08 | 排队/重试/工具/worker发送前撤销→一致性明确的权威读/epoch/有效快照复核，非每次SQL；统计缓存故障不全站拒绝。 | [owner校验](../../backend/internal/service/openai_cloud_gateway.go)：`validateCloudSessionOwner`；[运行时复核](../../backend/internal/service/openai_ws_account_sticky_test.go)；全链覆盖待补核 |
 | PC-36 / CT-01、04、06、10 | 可信IP/恶意出口/伪owner/秘密日志→保留安全边界、诊断最小化，不扩大scope。 | [Cloud transport](../../backend/internal/service/openai_cloud_transport_test.go)：`TestCloudDialFixedHandshakeDoesNotExposeCredentials` |
 | PC-37 / CT-02、04、06、08、10 | 切片后注册/调用/版本/缓存读取方→唯一副作用路径，旧实现删除或列真实兼容退出依据。 | [架构替换清单](ARCHITECTURE.md)与第7节；新架构尚无运行证据 |

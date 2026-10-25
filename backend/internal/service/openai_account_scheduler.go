@@ -1950,7 +1950,8 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerForCapabilityAttempt(
 	if budget != nil {
 		budget.mu.Lock()
 		budget.bpsRecovery.managed = true
-		if !budget.bpsRecovery.native && budget.bpsRecovery.nativeAvailable && len(budget.bpsRecovery.rejected) > 0 && budget.limit > 2 && budget.attempts >= budget.limit-2 {
+		attempts := budget.attemptBudget.Snapshot()
+		if !budget.bpsRecovery.native && budget.bpsRecovery.nativeAvailable && len(budget.bpsRecovery.rejected) > 0 && attempts.Limit > 2 && attempts.Attempts >= attempts.Limit-2 {
 			budget.bpsRecovery.native = true
 			budget.pinnedAccount = nil
 			for id := range budget.bpsRecovery.rejected {

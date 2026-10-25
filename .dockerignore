@@ -1,98 +1,30 @@
-# =============================================================================
-# Docker Ignore File for KDAN
-# =============================================================================
-
-# Git
-.git
-.gitignore
-.gitattributes
-
-# Documentation
-*.md
-!deploy/DOCKER.md
-docs/
-# admin-compliance gate (LegalDocumentView.vue) build-time imports
-# docs/legal/*.md?raw into the frontend bundle; keep that subtree in the
-# Docker build context even though docs/ is otherwise excluded.
-!docs/legal/
-!docs/legal/*.md
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Build artifacts
-dist/
-build/
-
-# Node modules (will be installed in container)
-frontend/node_modules/
-node_modules/
-
-# Go build cache (will be built in container)
+# Keep the API build independent of frontend, other worktrees and local secrets.
+# Allow only API sources, runtime entrypoint and license in the build context.
+**
+!backend/
+!backend/**
+!deploy/
+deploy/**
+!deploy/api/
+deploy/api/**
+!deploy/api/docker-entrypoint.sh
+!LICENSE
+backend/bin/
+backend/dist/
+backend/main
+backend/server
 backend/vendor/
-
-# Test files
-*_test.go
-**/*.test.js
-coverage/
-.nyc_output/
-
-# Environment files
-.env
-.env.*
-!.env.example
-
-# 本地闭源插件目录可能包含发布签名私钥，绝不能进入 Docker 构建上下文。
-/plugins/
-
-# Local config
-config.yaml
-config.local.yaml
-
-# Logs
-*.log
-logs/
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-
-# Deploy files (not needed in image)
-deploy/install.sh
-deploy/kdan.service
-deploy/kdan-datamanagementd.service
-deploy/data/
-deploy/postgres_data/
-deploy/redis_data/
-
-# GoReleaser
-.goreleaser.yaml
-
-# GitHub
-.github/
-
-# Claude files
-.claude/
-issues/
-CLAUDE.md
-
-# node_modules 一律不進建置上下文：tools/zh-tw 的依賴由 Dockerfile 的 zh-tw-converter 階段自行 npm ci，
-# 從 Windows 磁碟經 WSL 傳送成千上萬個小檔會讓 context 傳輸看似停滯。
-**/node_modules/
-
-# Shipped tutorials, download instructions and payment guides are runtime assets.
-!frontend/**/*.md
-# Local deployment and handoff material
-**/*.env
-**/credentials.txt
-output/
-.codex/
-docs-local/
+backend/internal/web/dist/
+backend/data/
+backend/logs/
+backend/tmp/
+backend/temp/
+backend/**/node_modules/
+backend/**/.git
+backend/**/.env
+backend/**/.env.*
+backend/**/*.env
+backend/**/config.yaml
+backend/**/config.local.yaml
+backend/**/*.log
+backend/**/credentials.txt

@@ -35,58 +35,47 @@ class GitFixture(unittest.TestCase):
 
 
 class DeliveryReviewTest(GitFixture):
-    def test_brand_checkout_does_not_assign_scope(self):
+    def test_maintenance_checkout_has_no_publication_target(self):
         (self.repo / 'shared.txt').write_text('changed\n')
         result = delivery.review(self.repo)
         self.assertEqual(result['current_branch'], 'main')
-        self.assertEqual(result['scope'], 'unclassified')
+        self.assertEqual(result['scope'], 'independent_rebuild')
         self.assertEqual(result['targets'], [])
 
-    def test_shared_targets_start_at_main_and_propagate_brand_branches(self):
-        (self.repo / 'shared.txt').write_text('changed\n')
-        result = delivery.review(self.repo, 'shared')
-        self.assertEqual([t['push_command'] for t in result['targets']], [
-            'git push origin refs/heads/main:refs/heads/main',
-            'git push origin refs/heads/TapModels:refs/heads/TapModels',
-            'git push origin refs/heads/tokensavy:refs/heads/tokensavy',
-        ])
-
-    def test_main_target_is_kdan_delivery_branch(self):
-        self.git('config', 'push.default', 'upstream')
+    def test_only_rebuild_ref_is_reported_without_mutation(self):
+        self.git('checkout', '-qb', 'codex/sub2api-rebuild')
         (self.repo / 'shared.txt').write_text('changed\n')
         before = self.git('status', '--porcelain')
-        result = delivery.review(self.repo, 'main')
+        result = delivery.review(self.repo)
         self.assertEqual([t['push_command'] for t in result['targets']], [
-            'git push origin refs/heads/main:refs/heads/main',
+            'git push origin HEAD:refs/heads/codex/sub2api-rebuild',
         ])
         self.assertEqual(self.git('status', '--porcelain'), before)
         self.assertEqual(self.git('log', '--format=%s', '-1'), 'baseline')
 
-    def test_staged_scope_excludes_unstaged_and_handles_spaces(self):
+    def test_staged_selection_excludes_unstaged_and_handles_spaces(self):
         (self.repo / 'shared.txt').write_text('unstaged\n')
-        (self.repo / 'brand name.txt').write_text('staged\n')
-        self.git('add', 'brand name.txt')
-        self.assertEqual(delivery.review(self.repo, staged=True)['files'], ['brand name.txt'])
+        (self.repo / 'file name.txt').write_text('staged\n')
+        self.git('add', 'file name.txt')
+        self.assertEqual(delivery.review(self.repo, staged=True)['files'], ['file name.txt'])
 
-    def test_mixed_has_no_push_plan(self):
+    def test_untracked_files_are_included(self):
         (self.repo / 'new file.txt').write_text('change\n')
-        self.assertEqual(delivery.review(self.repo, 'mixed')['targets'], [])
         self.assertIn('new file.txt', delivery.review(self.repo)['files'])
 
     def test_commit_selection_ignores_worktree_changes(self):
+        self.git('checkout', '-qb', 'codex/sub2api-rebuild')
         (self.repo / 'shared.txt').write_text('committed\n')
         self.git('commit', '-qam', 'change')
         (self.repo / 'another.txt').write_text('untracked\n')
-        result = delivery.review(self.repo, 'tapmodels', commit='HEAD')
+        result = delivery.review(self.repo, commit='HEAD')
         self.assertEqual(result['files'], ['shared.txt'])
         self.assertEqual(len(result['targets']), 1)
 
-    def test_tokensavy_has_only_its_same_repository_target(self):
-        (self.repo / 'shared.txt').write_text('changed\n')
-        result = delivery.review(self.repo, 'tokensavy')
-        self.assertEqual([t['push_command'] for t in result['targets']], [
-            'git push origin refs/heads/tokensavy:refs/heads/tokensavy',
-        ])
+    def test_detached_checkout_has_no_publication_target(self):
+        self.git('checkout', '-q', '--detach')
+        (self.repo / 'shared.txt').write_text('change\n')
+        self.assertEqual(delivery.review(self.repo)['targets'], [])
 
 
 class ValidationTest(GitFixture):
