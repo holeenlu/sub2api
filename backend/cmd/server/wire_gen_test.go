@@ -88,12 +88,12 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		antigravityOAuthSvc,
 		nil, // grokOAuth
 		nil, // openAIGateway
+		nil, // accountTelemetry
 		nil, // scheduledTestRunner
 		nil, // backupSvc
 		nil, // paymentOrderExpiry
 		nil, // channelMonitorRunner
 		nil, // channelMonitorV2Aggregator
-		nil, // quotaFlusher
 		nil, // upstreamBillingProbe
 		nil, // ollamaCloudUsage
 		nil, // opencodeGoUsage

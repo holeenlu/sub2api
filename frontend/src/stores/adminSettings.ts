@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { useAuthStore } from './auth'
+import { useAppStore } from './app'
 import { adminAPI } from '@/api'
 import type { CustomMenuItem } from '@/types'
 
@@ -51,7 +53,20 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   const paymentEnabled = ref(readCachedBool('payment_enabled_cached', false))
   const customMenuItems = ref<CustomMenuItem[]>([])
 
+  let loadedIdentity = ''
   async function fetch(force = false): Promise<void> {
+    const auth = useAuthStore()
+    const identity = `${auth.user?.id}:${auth.user?.role}:${auth.user?.policy_version}`
+    if (identity !== loadedIdentity) { loaded.value = false; customMenuItems.value = []; loadedIdentity = identity }
+    if (!auth.isSuperAdmin) {
+      const features = auth.user?.admin_features || {}
+      opsMonitoringEnabled.value = features.ops_monitoring_enabled === true
+      opsRealtimeMonitoringEnabled.value = features.ops_realtime_monitoring_enabled === true
+      paymentEnabled.value = useAppStore().cachedPublicSettings?.payment_enabled === true
+      customMenuItems.value = []
+      loaded.value = true
+      return
+    }
     if (loaded.value && !force) return
     if (loading.value) return
 

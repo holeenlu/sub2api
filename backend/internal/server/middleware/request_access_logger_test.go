@@ -309,3 +309,31 @@ func TestLogger_AccessLogDroppedWhenLevelWarn(t *testing.T) {
 		}
 	}
 }
+
+func TestAccessLogRedactsImageTokenAndOmitsQueryCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sink := initMiddlewareTestLogger(t)
+	router := gin.New()
+	router.Use(RequestLogger(), Logger())
+	target := "/api/bps-images/secret-image-token?%6bey=secret-key&token=secret-token"
+	router.GET("/api/bps-images/:token", func(c *gin.Context) {
+		if c.Request.RequestURI != target || c.Query("key") != "secret-key" || c.Param("token") != "secret-image-token" {
+			t.Fatal("logging changed the handler request")
+		}
+		c.Status(http.StatusOK)
+	})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
+	found := false
+	for _, event := range sink.list() {
+		if event.Message == "http request completed" {
+			found = true
+			if event.Fields["path"] != "/api/bps-images/[redacted]" {
+				t.Fatalf("credential path leaked: %v", event.Fields["path"])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing access log")
+	}
+}

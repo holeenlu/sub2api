@@ -149,7 +149,7 @@ func TestOpenAIResponsesCompactionRoutingFlags(t *testing.T) {
 			wantNativeBefore:    false,
 			wantLegacyAfter:     false,
 			wantNativeAfter:     false,
-			wantCapabilityAfter: service.OpenAIEndpointCapabilityChatCompletions,
+			wantCapabilityAfter: service.OpenAIEndpointCapabilityResponsesCompatible,
 			wantPathAfter:       "/v1/responses",
 			wantBodyUnchanged:   true,
 		},
@@ -183,7 +183,7 @@ func TestOpenAIResponsesCompactionRoutingFlags(t *testing.T) {
 			wantNativeBefore:    false,
 			wantLegacyAfter:     false,
 			wantNativeAfter:     false,
-			wantCapabilityAfter: service.OpenAIEndpointCapabilityChatCompletions,
+			wantCapabilityAfter: service.OpenAIEndpointCapabilityResponsesCompatible,
 			wantPathAfter:       "/v1/responses/resp_123/responses",
 			wantBodyUnchanged:   true,
 		},
@@ -314,6 +314,21 @@ func TestNormalizeOpenAIResponsesCompactRequest_NoTriggerUntouched(t *testing.T)
 	require.False(t, isOpenAILegacyCompactPath(c))
 	require.Equal(t, body, normalized)
 	require.True(t, gjson.GetBytes(normalized, "stream").Bool())
+}
+
+func TestCloudNonStreamingCompactionKeepsResponsesIngress(t *testing.T) {
+	h := &OpenAIGatewayHandler{}
+	body := []byte(`{"model":"gpt-6.1-sol","stream":false,"input":[{"role":"user","content":"hello"},{"type":"compaction_trigger"}]}`)
+	c := newCompactBodySignalTestContext(t, "/v1/responses", body)
+	normalized, ok := h.normalizeOpenAIResponsesCompactRequest(c, zap.NewNop(), body)
+	require.True(t, ok)
+	require.Equal(t, "/v1/responses/compact", c.Request.URL.Path, "native routing retains its existing contract")
+	gateway := &service.OpenAIGatewayService{}
+	require.False(t, gateway.IsOpenAICloudRequestUnsupported(c, normalized), "Cloud consumes the original Responses input after account selection")
+	legacy := newCompactBodySignalTestContext(t, "/v1/responses/compact", body)
+	_, ok = h.normalizeOpenAIResponsesCompactRequest(legacy, zap.NewNop(), body)
+	require.True(t, ok)
+	require.True(t, gateway.IsOpenAICloudRequestUnsupported(legacy, body), "a genuine legacy endpoint must not acquire the Responses exception")
 }
 
 func TestNormalizeOpenAIResponsesCompactRequest_PathBasedNoDoubleSuffix(t *testing.T) {

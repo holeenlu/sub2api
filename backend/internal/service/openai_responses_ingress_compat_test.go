@@ -14,7 +14,7 @@ func TestNormalizeOpenAIResponsesLegacyIngressMessagesOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.False(t, gjson.GetBytes(normalized, "messages").Exists())
-	require.False(t, gjson.GetBytes(normalized, "previous_response_id").Exists())
+	require.Equal(t, "resp_stale", gjson.GetBytes(normalized, "previous_response_id").String())
 	require.Equal(t, "system", gjson.GetBytes(normalized, "input.0.role").String())
 	require.Equal(t, "repo policy", gjson.GetBytes(normalized, "input.0.content").String())
 	require.Equal(t, "function_call", gjson.GetBytes(normalized, "input.1.type").String())
@@ -91,4 +91,34 @@ func TestNormalizeOpenAIResponsesLegacyIngressPreservesUnknownPromptShapeWhileDr
 	require.Equal(t, int64(2), gjson.GetBytes(normalized, "prompt.#").Int())
 	require.False(t, gjson.GetBytes(normalized, "input").Exists())
 	require.False(t, gjson.GetBytes(normalized, "commands").Exists())
+}
+
+func TestResponsesNativeFieldsWinAliases(t *testing.T) {
+	body := []byte(`{"model":"gpt-6-luna","messages":[{"role":"user","content":"hello"}],"previous_response_id":"resp_parent","reasoning":{"effort":"low","summary":"detailed"},"reasoning_effort":"high","max_output_tokens":999,"max_tokens":32,"tools":[{"type":"function","name":"native_tool","parameters":{"type":"object","properties":{"n":{"const":9007199254740993}}}}],"functions":[{"name":"legacy_tool"}],"tool_choice":"none","function_call":{"name":"legacy_tool"},"text":{"format":{"type":"json_schema","name":"native","schema":{"type":"object","minProperties":1,"properties":{"n":{"type":"integer","const":9007199254740993}}}}},"response_format":{"type":"json_object"}}`)
+	out, changed, err := normalizeOpenAIResponsesLegacyIngress(body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "low", gjson.GetBytes(out, "reasoning.effort").String())
+	require.Equal(t, "detailed", gjson.GetBytes(out, "reasoning.summary").String())
+	require.Equal(t, "resp_parent", gjson.GetBytes(out, "previous_response_id").String())
+	require.Equal(t, int64(999), gjson.GetBytes(out, "max_output_tokens").Int())
+	require.Equal(t, "native_tool", gjson.GetBytes(out, "tools.0.name").String())
+	require.Equal(t, "9007199254740993", gjson.GetBytes(out, "tools.0.parameters.properties.n.const").Raw)
+	require.Equal(t, "none", gjson.GetBytes(out, "tool_choice").String())
+	require.Equal(t, "native", gjson.GetBytes(out, "text.format.name").String())
+	require.Equal(t, "9007199254740993", gjson.GetBytes(out, "text.format.schema.properties.n.const").Raw)
+	require.False(t, gjson.GetBytes(out, "response_format").Exists())
+}
+func TestResponsesNativeAliasOnlyAndRelaySchema(t *testing.T) {
+	body := []byte(`{"model":"gpt-6-luna","input":"hello","reasoning_effort":"high","response_format":{"type":"json_schema","json_schema":{"name":"data","strict":true,"schema":{"type":"array","uniqueItems":true,"items":{"type":"integer","const":9007199254740993}}}}}`)
+	out, changed, err := normalizeOpenAIResponsesLegacyIngress(body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "high", gjson.GetBytes(out, "reasoning.effort").String())
+	require.Equal(t, "data", gjson.GetBytes(out, "text.format.name").String())
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	out, _, err = normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(nil, body, account, false)
+	require.NoError(t, err)
+	require.True(t, gjson.GetBytes(out, "text.format.schema.uniqueItems").Bool())
+	require.Equal(t, "9007199254740993", gjson.GetBytes(out, "text.format.schema.items.const").Raw)
 }
