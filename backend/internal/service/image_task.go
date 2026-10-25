@@ -20,7 +20,7 @@ const (
 	ImageTaskStatusFailed     = "failed"
 
 	defaultImageTaskTTL              = 24 * time.Hour
-	defaultImageTaskExecutionTimeout = 30 * time.Minute
+	defaultImageTaskExecutionTimeout = defaultUpstreamCompletionTimeout
 )
 
 var (
@@ -183,6 +183,13 @@ func (s *ImageTaskService) Get(ctx context.Context, owner ImageTaskOwner, id str
 	if task.UserID != owner.UserID || task.APIKeyID != owner.APIKeyID {
 		// Do not reveal whether a random task ID exists for another caller.
 		return nil, ErrImageTaskNotFound
+	}
+	if task.Status == ImageTaskStatusProcessing && time.Since(time.Unix(task.CreatedAt, 0)) >= s.ExecutionTimeout() {
+		// A lost in-process executor cannot be replayed safely. Project a bounded
+		// failure without racing a worker's durable completion or extending TTL.
+		task.Status = ImageTaskStatusFailed
+		task.HTTPStatus = http.StatusGatewayTimeout
+		task.Error = imageTaskErrorJSON("execution_timeout", "Image task execution expired; upstream outcome may be unknown; task was not replayed")
 	}
 	return imageTaskToPublic(task), nil
 }

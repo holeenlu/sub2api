@@ -75,7 +75,7 @@ func openCodeGoMergeMockColumns() []string {
 		"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged",
 		"enabled", "rate_sync_enabled", "snapshot",
 		"ollama_session", "ollama_auto", "ollama_snapshot",
-		"opencode_group_unchanged", "opencode_auto", "opencode_snapshot",
+		"opencode_group_unchanged", "opencode_auto", "opencode_snapshot", "extra",
 	}
 }
 
@@ -188,7 +188,7 @@ func TestLockAndMergeAccountProbeExtraPreservesOpenCodeGoManagedState(t *testing
 			mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
 				WithArgs(tt.account.ID, tt.account.Platform, tt.account.Type, string(credentials), nil).
 				WillReturnRows(sqlmock.NewRows(openCodeGoMergeMockColumns()).
-					AddRow(false, false, tt.proxyUnchanged, nil, nil, nil, nil, nil, nil, tt.groupUnchanged, tt.databaseAuto, tt.databaseSnapshot))
+					AddRow(false, false, tt.proxyUnchanged, nil, nil, nil, nil, nil, nil, tt.groupUnchanged, tt.databaseAuto, tt.databaseSnapshot, []byte(`{}`)))
 
 			got, err := lockAndMergeAccountProbeExtra(context.Background(), client, tt.account, nil, nil)
 			require.NoError(t, err)
@@ -213,6 +213,7 @@ func TestLockAndMergeAccountProbeExtraPreservesOpenCodeGoManagedState(t *testing
 
 func TestUpdateCredentialsOpenCodeGoIdentityChangeClearsManagedExtra(t *testing.T) {
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
+	expectNativeAPIKeyCredentialPreflight(mock)
 	mock.ExpectBegin()
 	// opencode 清理分支必须文本上先于 ollama 分支出现，否则 opencode 行的
 	// api_key/base_url 变化会被先求值的 Ollama 分支遮蔽。
@@ -236,6 +237,7 @@ func TestUpdateCredentialsOpenCodeGoIdentityChangeClearsManagedExtra(t *testing.
 // opencode → ollama 的 base_url 跨域变化同样必须清除 opencode 受管键（不再 eligible）。
 func TestUpdateCredentialsOpenCodeGoToOllamaCrossOverClearsManagedExtra(t *testing.T) {
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
+	expectNativeAPIKeyCredentialPreflight(mock)
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*opencode_go_usage_auto_refresh.*opencode_go_usage_snapshot`).
 		WithArgs(`{"api_key":"same-key","base_url":"https://ollama.com/v1"}`, int64(17)).
@@ -257,6 +259,7 @@ func TestUpdateCredentialsOpenCodeGoToOllamaCrossOverClearsManagedExtra(t *testi
 // OpenCode 清理分支必须带顶层 credentials DISTINCT 守卫：凭证未变化时不能误清受管键。
 func TestUpdateCredentialsOpenCodeGoCleanupRequiresChangedCredentials(t *testing.T) {
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
+	expectNativeAPIKeyCredentialPreflight(mock)
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*CASE.*AND credentials IS DISTINCT FROM \$1::jsonb`).
 		WithArgs(`{"api_key":"same-key","base_url":"https://relay.example.com/v1"}`, int64(17)).
@@ -277,6 +280,7 @@ func TestUpdateCredentialsOpenCodeGoCleanupRequiresChangedCredentials(t *testing
 
 func TestBulkUpdateOpenCodeGoIdentityCleanupIsValueConditional(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	allowNativeBulkPreflight(t, exec)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
@@ -303,6 +307,7 @@ func TestBulkUpdateOpenCodeGoIdentityCleanupIsValueConditional(t *testing.T) {
 // 的 WHEN 携带 opencode 正则（与 Ollama 正则互斥），真实行为由 integration 测试覆盖。
 func TestBulkUpdateOpenCodeGoEligiblePredicateIncludesBaseURL(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	allowNativeBulkPreflight(t, exec)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	proxyID := int64(9)
@@ -334,6 +339,7 @@ func TestBulkUpdateOpenCodeGoEligiblePredicateIncludesBaseURL(t *testing.T) {
 // OpenCode 状态；IS NOT TRUE 把 NULL 视为不匹配。
 func TestBulkUpdateOpenCodeGoBaseURLClauseIsNullSafe(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	allowNativeBulkPreflight(t, exec)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
@@ -419,6 +425,7 @@ func TestOpenCodeGoUsagePlatformWhitelistMatchesServicePredicate(t *testing.T) {
 
 func TestBulkUpdateOpenCodeGoProxyChangeClearsSnapshotOnly(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	allowNativeBulkPreflight(t, exec)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	proxyID := int64(9)
@@ -457,6 +464,7 @@ func TestInvalidateProxyProbeSnapshotsClearsOpenCodeGoSnapshot(t *testing.T) {
 // WHEN 标记（ollama.com 基址正则片段）。
 func TestUpdateCredentialsOpenCodeBranchPrecedesOllamaBranch(t *testing.T) {
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
+	expectNativeAPIKeyCredentialPreflight(mock)
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*platform = 'opencode_go'.*\[oO\]\[lL\]\[lL\]\[aA\]\[mM\]\[aA\]`).
 		WithArgs(`{"api_key":"new-key","base_url":"https://opencode.ai/zen/go/v1"}`, int64(17)).

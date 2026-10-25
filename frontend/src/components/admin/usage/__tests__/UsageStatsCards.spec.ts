@@ -63,6 +63,7 @@ describe('UsageStatsCards', () => {
     expect(text).toContain('12')
     expect(text).toContain('Cache Read')
     expect(text).toContain('22')
+    expect(wrapper.get('[data-testid="summary-cache-share"]').text()).toBe('16.4%')
   })
 
   it('keeps the cache tooltip out of the layout while it is hidden', () => {

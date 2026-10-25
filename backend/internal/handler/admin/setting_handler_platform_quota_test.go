@@ -166,9 +166,7 @@ func TestAppendAuthSourceDefaultChanges_DetectsPerWindow(t *testing.T) {
 func TestSettingHandler_AuthSourcePlatformQuotas_PutGetRoundTrip(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{
-		values: map[string]string{
-			service.SettingKeyPromoCodeEnabled: "true",
-		},
+		values: map[string]string{},
 	}
 	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
@@ -188,7 +186,7 @@ func TestSettingHandler_AuthSourcePlatformQuotas_PutGetRoundTrip(t *testing.T) {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	// 验证 DB 中写入了 JSON key

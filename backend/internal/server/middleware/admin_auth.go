@@ -2,8 +2,10 @@
 package middleware
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -42,7 +44,7 @@ func adminAuth(
 				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService) {
 					return
 				}
-				c.Next()
+				continueAdminRequest(c, userService, auditService)
 				return
 			}
 		}
@@ -63,7 +65,7 @@ func adminAuth(
 			if !validateAdminAPIKey(c, apiKey, settingService, userService) {
 				return
 			}
-			c.Next()
+			continueAdminRequest(c, userService, auditService)
 			return
 		}
 
@@ -80,7 +82,7 @@ func adminAuth(
 				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService) {
 					return
 				}
-				c.Next()
+				continueAdminRequest(c, userService, auditService)
 				return
 			}
 		}
@@ -148,9 +150,17 @@ func validateAdminAPIKey(
 	}
 
 	// 获取真实的管理员用户
-	admin, err := userService.GetFirstAdmin(c.Request.Context())
+	admin, err := userService.GetFirstSuperAdmin(c.Request.Context())
 	if err != nil {
-		AbortWithError(c, 500, "INTERNAL_ERROR", "No admin user found")
+		AbortWithError(c, 401, "INVALID_ADMIN_KEY", "Invalid admin API key")
+		return false
+	}
+
+	if admin == nil || !admin.IsSuperAdmin() || !admin.IsActive() {
+		AbortWithError(c, 401, "INVALID_ADMIN_KEY", "Invalid admin API key")
+		return false
+	}
+	if !bindManagementSubject(c, settingService, userService, admin, fmt.Sprintf("machine:%x", sha256.Sum256([]byte(key))), nil, nil) {
 		return false
 	}
 
@@ -202,19 +212,28 @@ func validateJWTForAdmin(
 	}
 
 	// 校验 TokenVersion，确保管理员改密后旧 token 失效
-	if claims.TokenVersion != user.TokenVersion {
+	if err := authService.ValidateAccessSession(c.Request.Context(), claims, user); err != nil {
+		if errors.Is(err, service.ErrServiceUnavailable) {
+			AbortWithError(c, 503, "AUTH_UNAVAILABLE", "Session validation is unavailable")
+			return false
+		}
+
 		AbortWithError(c, 401, "TOKEN_REVOKED", "Token has been revoked (password changed)")
 		return false
 	}
 
 	// 会话绑定校验：IP/UA 任一变化即撤销会话（功能可在系统设置中关闭）
-	if !enforceSessionBinding(c, authService, settingService, auditService, claims) {
+	if !enforceSessionBinding(c, authService, settingService, auditService, claims, user) {
 		return false
 	}
 
 	// 检查管理员权限
-	if !user.IsAdmin() {
+	if !user.IsStaff() {
 		AbortWithError(c, 403, "FORBIDDEN", "Admin access required")
+		return false
+	}
+
+	if !bindManagementSubject(c, settingService, userService, user, claims.SessionID, authService, claims) {
 		return false
 	}
 
@@ -244,12 +263,15 @@ func authenticateScopedAdminRequest(c *gin.Context, key string, settings *servic
 		return
 	}
 	user, err := users.GetByID(c.Request.Context(), item.CreatedBy)
-	if err != nil || user == nil || !user.IsActive() || !user.IsAdmin() {
+	if err != nil || user == nil || !user.IsActive() || !user.IsSuperAdmin() {
 		AbortWithError(c, 401, "INVALID_ADMIN_KEY", "Invalid admin API key")
 		return
 	}
 	principal := &adminaccess.Principal{KeyID: item.ID, KeyName: item.Name, CreatorID: item.CreatedBy, Policy: item.Policy}
 	c.Request = c.Request.WithContext(adminaccess.WithPrincipal(c.Request.Context(), principal))
+	if !bindManagementSubject(c, settings, users, user, "scoped:"+item.ID, nil, nil) {
+		return
+	}
 	c.Set(string(ContextKeyUser), AuthSubject{UserID: user.ID, Concurrency: user.Concurrency})
 	c.Set(string(ContextKeyUserRole), user.Role)
 	c.Set(ContextKeyAuthEmail, user.Email)
@@ -260,7 +282,7 @@ func authenticateScopedAdminRequest(c *gin.Context, key string, settings *servic
 		AbortWithError(c, 403, "FORBIDDEN", "管理密钥未获此操作权限")
 		return
 	}
-	c.Next()
+	continueAdminRequest(c, users, audit)
 }
 func recordAdminKeyRequest(c *gin.Context, audit *service.AuditLogService, item *service.ScopedAdminKey) {
 	if audit == nil {

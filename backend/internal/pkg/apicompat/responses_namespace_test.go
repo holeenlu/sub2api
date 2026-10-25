@@ -73,6 +73,21 @@ func TestFlattenResponsesNamespaces_RejectsFlatNameCollision(t *testing.T) {
 	require.ErrorContains(t, err, "conflicts with a top-level tool")
 }
 
+func TestFlattenResponsesNamespaces_RejectsConflictingChildDefinitions(t *testing.T) {
+	for _, second := range []map[string]any{
+		{"type": "custom", "name": "exec"},
+		{"type": "function", "name": "exec", "description": "different contract"},
+	} {
+		req := map[string]any{"tools": []any{map[string]any{
+			"type": "namespace", "name": "functions", "tools": []any{
+				map[string]any{"type": "function", "name": "exec"}, second,
+			},
+		}}}
+		_, _, err := FlattenResponsesNamespaces(req)
+		require.ErrorContains(t, err, "conflicting definitions")
+	}
+}
+
 func TestFlattenResponsesNamespaces_NamespaceGroupChoiceFallsBackToAuto(t *testing.T) {
 	req := map[string]any{
 		"tools": []any{map[string]any{
@@ -161,4 +176,22 @@ func TestRestoreResponsesNamespaceCalls_RewritesLifecycleItems(t *testing.T) {
 			require.JSONEq(t, `{"type":"`+eventType+`","item":{"type":"function_call","name":"spawn_agent","namespace":"collaboration","arguments":"{}"}}`, string(got))
 		})
 	}
+}
+
+func TestFlattenResponsesNamespaces_CustomDeclarationAndReplay(t *testing.T) {
+	req := map[string]any{"tools": []any{map[string]any{"type": "namespace", "name": "functions", "tools": []any{map[string]any{"type": "custom", "name": "exec", "format": map[string]any{"type": "grammar", "syntax": "lark", "definition": "start: /.+/"}}}}}, "input": []any{map[string]any{"type": "custom_tool_call", "name": "exec", "namespace": "functions", "input": "text(7)"}}}
+	names, changed, err := FlattenResponsesNamespaces(req)
+	require.NoError(t, err)
+	require.True(t, changed)
+	tool := req["tools"].([]any)[0].(map[string]any)
+	require.Equal(t, "custom", tool["type"])
+	require.Equal(t, "functions__exec", tool["name"])
+	require.NotNil(t, tool["format"])
+	item := req["input"].([]any)[0].(map[string]any)
+	require.Equal(t, "functions__exec", item["name"])
+	require.Equal(t, "text(7)", item["input"])
+	restored, changed, err := RestoreResponsesNamespaceCalls([]byte("{\"type\":\"custom_tool_call\",\"name\":\"functions__exec\",\"input\":\"text(7)\"}"), names)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.JSONEq(t, "{\"type\":\"custom_tool_call\",\"name\":\"exec\",\"namespace\":\"functions\",\"input\":\"text(7)\"}", string(restored))
 }
