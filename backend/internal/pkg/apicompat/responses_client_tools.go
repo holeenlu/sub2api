@@ -27,7 +27,7 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 	if !ok || len(tools) == 0 {
 		return ResponsesClientToolMapping{}, false, nil
 	}
-	discovered, err := promoteResponsesToolSearchDiscoveries(req)
+	discovered, err := PromoteResponsesToolSearchDiscoveries(req)
 	if err != nil {
 		return ResponsesClientToolMapping{}, false, err
 	}
@@ -451,7 +451,10 @@ func rewriteClientToolChoice(req map[string]any, adapter *ResponsesClientToolMap
 	return false
 }
 
-func customToolCallArguments(input string) string {
+func customToolCallArguments(input string) string { return CustomToolCallArguments(input) }
+
+// CustomToolCallArguments is the lossless freeform-to-function encoding shared by protocol adapters.
+func CustomToolCallArguments(input string) string {
 	encoded, _ := json.Marshal(map[string]string{"input": input})
 	return string(encoded)
 }

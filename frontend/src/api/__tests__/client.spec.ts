@@ -5,7 +5,12 @@ import type { AxiosInstance } from 'axios'
 // 需要在导入 client 之前设置 mock
 vi.mock('@/i18n', () => ({
   getLocale: () => 'zh-CN',
+  i18n: { global: { t: (key: string) => key === 'ui.networkError' ? 'Network error. Please check your connection.' : key } },
 }))
+
+function sessionToken(session: string, userID = 7, issuedAt = 0): string {
+  return `header.${btoa(JSON.stringify({ user_id: userID, role: 'user', sid: session, token_version: 0, iat: issuedAt }))}.signature`
+}
 
 describe('API Client', () => {
   let apiClient: AxiosInstance
@@ -347,23 +352,20 @@ describe('API Client', () => {
     })
 
     it('有 refresh_token 时刷新并重试原请求', async () => {
-      localStorage.setItem('auth_token', 'expired-token')
+      localStorage.setItem('auth_token', sessionToken('same-session'))
       localStorage.setItem('refresh_token', 'refresh-token')
       localStorage.setItem('token_expires_at', String(Date.now() - 1))
       localStorage.setItem('auth_user', JSON.stringify({ id: 7 }))
 
       const adapter = vi.fn()
-        .mockRejectedValueOnce({
+        .mockImplementationOnce(async config => { throw {
           response: {
             status: 401,
             data: { code: 'TOKEN_EXPIRED', message: 'Token expired' },
           },
-          config: {
-            url: '/test',
-            headers: { Authorization: 'Bearer expired-token' },
-          },
+          config,
           code: 'ERR_BAD_REQUEST',
-        })
+        } })
         .mockResolvedValueOnce({
           status: 200,
           data: { code: 0, data: { ok: true } },
@@ -377,7 +379,7 @@ describe('API Client', () => {
           code: 0,
           message: 'ok',
           data: {
-            access_token: 'new-token',
+            access_token: sessionToken('same-session', 7, 1),
             refresh_token: 'new-refresh-token',
             expires_in: 3600,
             token_type: 'Bearer',
@@ -388,9 +390,9 @@ describe('API Client', () => {
       await expect(apiClient.get('/test')).resolves.toMatchObject({ data: { ok: true } })
 
       expect(adapter).toHaveBeenCalledTimes(2)
-      expect(localStorage.getItem('auth_token')).toBe('new-token')
+      expect(localStorage.getItem('auth_token')).toBe(sessionToken('same-session', 7, 1))
       expect(localStorage.getItem('refresh_token')).toBe('new-refresh-token')
-      expect(adapter.mock.calls[1][0].headers.get('Authorization')).toBe('Bearer new-token')
+      expect(adapter.mock.calls[1][0].headers.get('Authorization')).toBe(`Bearer ${sessionToken('same-session', 7, 1)}`)
     })
 
     it.each([429, 500, 503, 0])('刷新暂时失败（%s）时保留会话并返回实际状态', async (status) => {
@@ -455,17 +457,14 @@ describe('API Client', () => {
       localStorage.setItem('token_expires_at', String(Date.now() - 1))
       localStorage.setItem('auth_user', JSON.stringify({ id: 7 }))
 
-      apiClient.defaults.adapter = vi.fn().mockRejectedValueOnce({
+      apiClient.defaults.adapter = vi.fn().mockImplementationOnce(async config => { throw {
         response: {
           status: 401,
           data: { code: 'TOKEN_EXPIRED', message: 'Token expired' },
         },
-        config: {
-          url: '/test',
-          headers: { Authorization: 'Bearer user-a-access' },
-        },
+        config,
         code: 'ERR_BAD_REQUEST',
-      })
+      } })
 
       let rejectRefresh!: (reason: Error) => void
       vi.spyOn(axios, 'post').mockImplementationOnce(
@@ -483,11 +482,57 @@ describe('API Client', () => {
       localStorage.setItem('auth_user', JSON.stringify({ id: 8 }))
       rejectRefresh(new Error('stale refresh failed'))
 
-      await expect(staleRequest).rejects.toMatchObject({ code: 'AUTH_SESSION_CHANGED' })
+      await expect(staleRequest).rejects.toMatchObject({ code: 'ERR_CANCELED' })
       expect(localStorage.getItem('auth_token')).toBe('user-b-access')
       expect(localStorage.getItem('refresh_token')).toBe('user-b-refresh')
       expect(localStorage.getItem('auth_user')).toBe(JSON.stringify({ id: 8 }))
       expect(window.location.pathname).toBe('/')
+    })
+  })
+
+  describe('请求与逻辑会话绑定', () => {
+    it.each([200, 401, 403, 423])('换号后的迟到 %s 不回写、不重试、不改变新会话', async status => {
+      localStorage.setItem('auth_token', sessionToken('session-a'))
+      localStorage.setItem('refresh_token', 'refresh-a')
+      localStorage.setItem('auth_user', JSON.stringify({ id: 7, role: 'user' }))
+      const refresh = await import('@/api/tokenRefresh')
+      const refreshSpy = vi.spyOn(refresh, 'refreshAuthTokens')
+      const events = vi.spyOn(window, 'dispatchEvent')
+      let finish!: () => void
+      const adapter = vi.fn(config => new Promise((resolve, reject) => {
+        finish = () => {
+          const response = { status, headers: {}, config, statusText: '', data: { code: status === 423 ? 'ADMIN_COMPLIANCE_ACK_REQUIRED' : 0, data: { private: 'user-a' } } }
+          if (status === 200) resolve(response)
+          else reject({ response, config })
+        }
+      }))
+      apiClient.defaults.adapter = adapter
+      const pending = apiClient.post('/keys', { name: 'old-user-key' })
+      const rejected = expect(pending).rejects.toMatchObject({ code: 'ERR_CANCELED' })
+      await vi.waitFor(() => expect(adapter).toHaveBeenCalledTimes(1))
+      localStorage.setItem('auth_token', sessionToken('session-b', 8))
+      localStorage.setItem('refresh_token', 'refresh-b')
+      localStorage.setItem('auth_user', JSON.stringify({ id: 8, role: 'user' }))
+      finish()
+      await rejected
+      expect(adapter).toHaveBeenCalledTimes(1)
+      expect(refreshSpy).not.toHaveBeenCalled()
+      expect(events).not.toHaveBeenCalled()
+      expect(localStorage.getItem('refresh_token')).toBe('refresh-b')
+      expect(sessionStorage.getItem('auth_expired')).toBeNull()
+    })
+
+    it('相同用户重新登录后不接受旧会话结果，但同会话令牌轮换允许完成', async () => {
+      for (const sameSession of [false, true]) {
+        localStorage.setItem('auth_token', sessionToken('initial'))
+        localStorage.setItem('auth_user', JSON.stringify({ id: 7, role: 'user' }))
+        apiClient.defaults.adapter = async config => {
+          localStorage.setItem('auth_token', sessionToken(sameSession ? 'initial' : 'new-login', 7, 1))
+          return { status: 200, data: { code: 0, data: { ok: true } }, config, headers: {}, statusText: 'OK' }
+        }
+        if (sameSession) await expect(apiClient.get('/usage')).resolves.toMatchObject({ data: { ok: true } })
+        else await expect(apiClient.get('/usage')).rejects.toMatchObject({ code: 'ERR_CANCELED' })
+      }
     })
   })
 
@@ -529,4 +574,24 @@ describe('API Client', () => {
       ).rejects.toBeDefined()
     })
   })
+})
+
+describe('Supplier client boundaries',()=>{
+ afterEach(()=>{vi.unstubAllEnvs();localStorage.clear()})
+ it('preserves an explicit reconciliation timezone',async()=>{
+  vi.resetModules();const {apiClient}=await import('@/api/client')
+  const adapter=vi.fn(async config=>({status:200,data:{code:0,data:{}},headers:{},config,statusText:'OK'}));apiClient.defaults.adapter=adapter
+  await apiClient.get('/vendor/usage/summary',{params:{timezone:'Asia/Tokyo'}})
+  expect(adapter.mock.calls[0][0].params.timezone).toBe('Asia/Tokyo')
+ })
+ it('forces same-origin API requests for a dedicated supplier build',async()=>{
+  vi.resetModules();vi.stubEnv('VITE_VENDOR_PORTAL','true');vi.stubEnv('VITE_API_BASE_URL','https://admin.example/api/v1')
+  const {apiClient}=await import('@/api/client');expect(apiClient.defaults.baseURL).toBe('/api/v1')
+ })
+ it('discards sensitive supplier results after the login session changes',async()=>{
+  vi.resetModules();localStorage.setItem('auth_user',JSON.stringify({id:5,role:'user'}));localStorage.setItem('auth_token','old-session')
+  const {apiClient}=await import('@/api/client')
+  apiClient.defaults.adapter=async config=>{localStorage.setItem('auth_token','new-session');return {status:200,data:new Blob(['sensitive-export']),headers:{},config,statusText:'OK'}}
+  await expect(apiClient.post('/vendor/accounts/export',{ids:[1]},{responseType:'blob'})).rejects.toMatchObject({code:'ERR_CANCELED'})
+ })
 })

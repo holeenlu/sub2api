@@ -1,9 +1,9 @@
-# Sub2API Admin Reference
+# KDAN Admin Reference
 
 ## Environment
 
 ```bash
-export SUB2API_BASE_URL='https://your-sub2api-host'
+export SUB2API_BASE_URL='https://api.kdan.com'
 export SUB2API_ADMIN_API_KEY='<admin api key>'
 # 或者，未配置管理员 API Key 时使用管理员 JWT：
 # export SUB2API_JWT='<admin access_token>'
@@ -73,7 +73,10 @@ node scripts/sub2api-admin.js accounts reset-temp-unschedulable 40
 
 ```bash
 node scripts/sub2api-admin.js accounts delete 25
+# Preview every page; no deletion occurs.
 node scripts/sub2api-admin.js accounts keep-only --name 'target@example.com'
+# After reviewing the preview and within authorized scope, supply its exact target IDs.
+node scripts/sub2api-admin.js accounts keep-only --name 'target@example.com' --execute --ids 25,26
 ```
 
 ### 批量写入
@@ -143,10 +146,12 @@ node scripts/sub2api-admin.js redeem-codes export --file redeem-codes.csv
 
 ### 生成兑换码
 
+幂等键使用业务操作 ID：同一次操作重试必须复用同一个键，不要使用当前时间；不同操作使用不同键。示例中的订单 ID 需替换为真实业务 ID。
+
 ```bash
 node scripts/sub2api-admin.js redeem-codes generate \
   --json '{"count":1,"type":"balance","value":10}' \
-  --idempotency-key "redeem-generate-$(date +%s)"
+  --idempotency-key order-123-generate
 ```
 
 订阅兑换码需要 `group_id` 和非零 `validity_days`：
@@ -154,7 +159,7 @@ node scripts/sub2api-admin.js redeem-codes generate \
 ```bash
 node scripts/sub2api-admin.js redeem-codes generate \
   --json '{"count":1,"type":"subscription","value":0,"group_id":2,"validity_days":30}' \
-  --idempotency-key "redeem-subscription-$(date +%s)"
+  --idempotency-key order-456-subscription
 ```
 
 ### 创建并兑换

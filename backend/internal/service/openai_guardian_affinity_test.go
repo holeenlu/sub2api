@@ -132,7 +132,6 @@ func TestOpenAIGatewayService_GuardianParentAffinitySelectsParentAccountAcrossSc
 				},
 			}
 			cfg := &config.Config{}
-			cfg.Gateway.OpenAIWS.LBTopK = 2
 			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:" + parentHash: 39001}}
 			svc := &OpenAIGatewayService{
 				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
@@ -365,26 +364,21 @@ func TestOpenAIGatewayService_PreviousResponseHonorsGroupAndRequiredPrivacy(t *t
 			directSelection, directErr := svc.SelectAccountByPreviousResponseID(
 				context.Background(), &groupID, responseID, codexAutoReviewModel, nil, false,
 			)
-			require.NoError(t, directErr)
+			require.ErrorIs(t, directErr, ErrOpenAIContinuationUnavailable)
 			require.Nil(t, directSelection, "the previous-response helper must enforce fresh group/privacy state")
 
-			selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+			selection, _, err := svc.SelectAccountWithSchedulerForCapability(
 				context.Background(), &groupID, responseID, "", codexAutoReviewModel,
 				nil, OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityResponses,
-				false, false, true,
+				false, true,
 			)
-			require.NoError(t, err)
-			require.NotNil(t, selection)
-			require.Equal(t, fallback.ID, selection.Account.ID)
-			require.NotEqual(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
+			require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
+			require.Nil(t, selection, "an ineligible known response owner requires client history recovery, not a different account")
 			require.Zero(t, repo.setErrorCalls)
 			require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(&accounts[0], codexAutoReviewModel))
 			boundAccountID, getErr := store.GetResponseAccount(context.Background(), groupID, responseID)
 			require.NoError(t, getErr)
 			require.Equal(t, tc.boundAccount.ID, boundAccountID, "transient policy misses must preserve the response binding")
-			if selection.ReleaseFunc != nil {
-				selection.ReleaseFunc()
-			}
 		})
 	}
 }
@@ -438,7 +432,7 @@ func TestOpenAIGatewayService_PreviousResponseSimpleModeIgnoresGroupMembership(t
 	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 		context.Background(), &groupID, responseID, "", codexAutoReviewModel,
 		nil, OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityResponses,
-		false, false, true,
+		false, true,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, selection)

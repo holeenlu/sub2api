@@ -29,7 +29,6 @@ const (
 	easypayHTTPTimeout     = 10 * time.Second
 	maxEasypayResponseSize = 1 << 20 // 1MB
 	maxEasypayErrorSummary = 512
-	easypayAmountTolerance = 0.005
 	tradeStatusSuccess     = "TRADE_SUCCESS"
 	signTypeMD5            = "MD5"
 	paymentModePopup       = "popup"
@@ -312,12 +311,19 @@ func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.Quer
 	if result.tradeNo != "" {
 		responseTradeNo = result.tradeNo
 	}
-	amount, _ := strconv.ParseFloat(result.money, 64)
+	amount, err := strconv.ParseFloat(result.money, 64)
+	if err != nil || amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+		result.status = payment.ProviderStatusPending
+	}
+	metadata := e.MerchantIdentityMetadata()
+	if result.tradeNo != "" {
+		metadata["verified_trade_no"] = result.tradeNo
+	}
 	return &payment.QueryOrderResponse{
 		TradeNo:  responseTradeNo,
 		Status:   result.status,
 		Amount:   amount,
-		Metadata: e.MerchantIdentityMetadata(),
+		Metadata: metadata,
 	}, nil
 }
 
@@ -354,6 +360,7 @@ func (e *EasyPay) queryOrder(ctx context.Context, outTradeNo string) (*easyPayQu
 	// Scalars are decoded leniently: PHP deployments commonly serialize
 	// integer columns as strings ("status":"1").
 	type easyPayQueryData struct {
+		PID         json.RawMessage `json:"pid"`
 		TradeStatus *string         `json:"trade_status"`
 		Status      json.RawMessage `json:"status"`
 		Money       json.RawMessage `json:"money"`
@@ -380,8 +387,15 @@ func (e *EasyPay) queryOrder(ctx context.Context, outTradeNo string) (*easyPayQu
 	}
 	// When the upstream echoes the order identity it must be this order; some
 	// implementations silently ignore unknown lookup parameters.
-	if echoed := easyPayJSONScalar(pickEasyPayJSON(resp.OutTradeNo, resp.Data.OutTradeNo)); echoed != "" && echoed != strings.TrimSpace(outTradeNo) {
-		return nil, fmt.Errorf("easypay query out_trade_no mismatch: expected %s, got %s", strings.TrimSpace(outTradeNo), echoed)
+	for _, raw := range []json.RawMessage{resp.PID, resp.Data.PID} {
+		if pickEasyPayJSON(raw, nil) != nil && easyPayJSONScalar(raw) != strings.TrimSpace(e.config["pid"]) {
+			return nil, fmt.Errorf("easypay query merchant mismatch")
+		}
+	}
+	for _, raw := range []json.RawMessage{resp.OutTradeNo, resp.Data.OutTradeNo} {
+		if pickEasyPayJSON(raw, nil) != nil && easyPayJSONScalar(raw) != strings.TrimSpace(outTradeNo) {
+			return nil, fmt.Errorf("easypay query out_trade_no mismatch")
+		}
 	}
 
 	status := payment.ProviderStatusPending
@@ -422,15 +436,17 @@ func (e *EasyPay) ConfirmNotification(ctx context.Context, n *payment.PaymentNot
 		return fmt.Errorf("easypay confirm: upstream reports order %s as not paid", n.OrderID)
 	}
 	queriedAmount, err := strconv.ParseFloat(result.money, 64)
-	if err != nil || math.Abs(queriedAmount-n.Amount) > easypayAmountTolerance {
+	if err != nil || queriedAmount <= 0 || math.IsNaN(queriedAmount) || math.IsInf(queriedAmount, 0) ||
+		n.Amount <= 0 || math.IsNaN(n.Amount) || math.IsInf(n.Amount, 0) || math.Abs(queriedAmount-n.Amount) > 0.000001 {
 		return fmt.Errorf("easypay confirm: amount mismatch: notified %v, upstream %q", n.Amount, result.money)
 	}
-	if result.tradeNo != "" {
-		if n.TradeNo != "" && n.TradeNo != result.tradeNo {
-			return fmt.Errorf("easypay confirm: trade_no mismatch: notified %s, upstream %s", n.TradeNo, result.tradeNo)
-		}
-		n.TradeNo = result.tradeNo
+	if result.tradeNo == "" {
+		return fmt.Errorf("easypay confirm: missing upstream trade_no")
 	}
+	if n.TradeNo != "" && n.TradeNo != result.tradeNo {
+		return fmt.Errorf("easypay confirm: trade_no mismatch: notified %s, upstream %s", n.TradeNo, result.tradeNo)
+	}
+	n.TradeNo = result.tradeNo
 	return nil
 }
 
@@ -468,18 +484,17 @@ func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[st
 	}
 	// url.ParseQuery already decodes values — no additional decode needed.
 	params := make(map[string]string)
-	for k := range values {
+	for k, v := range values {
 		if !easyPayNotifyAllowedParams[k] {
 			return nil, fmt.Errorf("unexpected notify param: %s", k)
 		}
-		v := values.Get(k)
-		// Notify values are plain tokens; only the merchant-defined product
-		// name is free text. Delimiter characters elsewhere are rejected so
-		// each value maps to exactly one field of the signed string.
-		if k != "name" && strings.ContainsAny(v, "&=") {
+		if len(v) != 1 {
+			return nil, fmt.Errorf("duplicate notify field: %s", k)
+		}
+		if k != "name" && strings.ContainsAny(v[0], "&=") {
 			return nil, fmt.Errorf("invalid notify param value: %s", k)
 		}
-		params[k] = v
+		params[k] = v[0]
 	}
 	sign := params["sign"]
 	if sign == "" {
@@ -497,7 +512,13 @@ func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[st
 	if params["trade_status"] == tradeStatusSuccess {
 		status = payment.ProviderStatusSuccess
 	}
-	amount, _ := strconv.ParseFloat(params["money"], 64)
+	amount, err := strconv.ParseFloat(params["money"], 64)
+	if err != nil || amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return nil, fmt.Errorf("invalid notification amount")
+	}
+	if params["out_trade_no"] == "" {
+		return nil, fmt.Errorf("notification merchant or order identity missing/mismatched")
+	}
 
 	return &payment.PaymentNotification{
 		TradeNo: params["trade_no"], OrderID: params["out_trade_no"],
