@@ -616,3 +616,20 @@ func TestIncrementAccountWaitCount_NilCache(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, allowed)
 }
+
+func TestLoadCacheReusesOverlappingBatchesAndCurrentCapacity(t *testing.T) {
+	cache := &stubConcurrencyCacheForTest{loadBatch: map[int64]*AccountLoadInfo{1: {AccountID: 1, CurrentConcurrency: 1, LoadRate: 10}, 2: {AccountID: 2, CurrentConcurrency: 2, LoadRate: 20}}}
+	svc := NewConcurrencyService(cache)
+	svc.SetAccountLoadBatchCacheTTL(time.Second)
+	_, err := svc.GetAccountsLoadBatch(t.Context(), []AccountWithConcurrency{{ID: 1, MaxConcurrency: 10}, {ID: 2, MaxConcurrency: 10}})
+	require.NoError(t, err)
+	loads, err := svc.GetAccountsLoadBatch(t.Context(), []AccountWithConcurrency{{ID: 2, MaxConcurrency: 2}, {ID: 1, MaxConcurrency: 1}})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), cache.loadBatchCalls.Load())
+	require.Equal(t, 100, loads[1].LoadRate)
+	require.Equal(t, 100, loads[2].LoadRate)
+	loads[1].CurrentConcurrency = 99
+	again, err := svc.GetAccountsLoadBatch(t.Context(), []AccountWithConcurrency{{ID: 1, MaxConcurrency: 1}})
+	require.NoError(t, err)
+	require.Equal(t, 1, again[1].CurrentConcurrency, "callers cannot mutate cached evidence")
+}

@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -9,6 +8,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -30,12 +30,20 @@ func RegisterGatewayRoutes(
 	compositeResolver *service.CompositeRouteResolver,
 	cfg *config.Config,
 ) {
+	r.GET("/api/bps-images/:token", h.OpenAIGateway.ExcelBPSImage)
+	r.HEAD("/api/bps-images/:token", h.OpenAIGateway.ExcelBPSImage)
+	imageAdmission := middleware.ExcelBPSImageAdmission()
 	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
 	textBodyLimit := middleware.RequestBodyLimit(cfg.Gateway.TextMaxBodySize)
 	clientRequestID := middleware.ClientRequestID()
-	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
+	captureErrors := handler.OpsErrorLoggerMiddleware(opsService)
+	opsErrorLogger := func(c *gin.Context) {
+		finish := service.GuardSSEWrites(c)
+		defer finish()
+		captureErrors(c)
+	}
 	endpointNorm := handler.InboundEndpointMiddleware()
-	compositeTarget := compositeTargetPlatformMiddleware(compositeResolver)
+	compositeTarget := compositeTargetPlatformMiddleware(compositeResolver, cfg.Gateway.MaxBodySize)
 	compositeGeminiTarget := compositeGeminiTargetPlatformMiddleware(compositeResolver)
 
 	// 未分组 Key 拦截中间件（按协议格式区分错误响应）
@@ -44,7 +52,7 @@ func RegisterGatewayRoutes(
 
 	// 分组级模型白名单准入：在 apiKeyAuth 之后、compositeTarget 之前，
 	// 保证校验发生在合成路由改写与调度之前，且只看客户端书写的模型名。
-	groupModelAllowlist := middleware.GroupModelAllowlist()
+	groupModelAllowlist := middleware.GroupModelAllowlistWithBodyLimit(cfg.Gateway.MaxBodySize)
 
 	isOpenAIResponsesCompatibleGatewayPlatform := func(c *gin.Context) bool {
 		// openai、grok 与多协议 API Key 供应商经 OpenAI 网关转发（平台清单）。
@@ -184,6 +192,7 @@ func RegisterGatewayRoutes(
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
+	gateway.Use(imageAdmission)
 	gateway.Use(groupModelAllowlist)
 	gateway.Use(compositeTarget)
 	gateway.Use(requireGroupAnthropic)
@@ -368,7 +377,7 @@ func RegisterGatewayRoutes(
 	// 根路径别名共用中间件链：白名单准入在 apiKeyAuth 之后、compositeTarget
 	// 之前，避免逐条路由手工维护链导致漏挂。
 	rootRoute := func(method, path string, limit gin.HandlerFunc, handler gin.HandlerFunc) {
-		r.Handle(method, path, limit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), groupModelAllowlist, compositeTarget, requireGroupAnthropic, handler)
+		r.Handle(method, path, limit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), imageAdmission, groupModelAllowlist, compositeTarget, requireGroupAnthropic, handler)
 	}
 	for _, prefix := range []string{"/api/v3", "/v3", "/v1", ""} {
 		rootRoute(http.MethodPost, prefix+"/contents/generations/tasks", bodyLimit, h.OpenAIGateway.SeedanceTasks)
@@ -385,7 +394,7 @@ func RegisterGatewayRoutes(
 	rootRoute(http.MethodGet, "/models/:model", bodyLimit, h.Gateway.Models)
 	rootRoute(http.MethodPost, "/messages/count_tokens", bodyLimit, countTokensHandler)
 	codexDirect := r.Group("/backend-api/codex")
-	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), groupModelAllowlist, compositeTarget, requireGroupAnthropic)
+	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), imageAdmission, groupModelAllowlist, compositeTarget, requireGroupAnthropic)
 	{
 		codexDirect.POST("/realtime/calls", h.OpenAIGateway.Live)
 		codexDirect.GET("/:call_id", h.OpenAIGateway.LiveSideband)
@@ -546,9 +555,13 @@ func getGroupPlatform(c *gin.Context) string {
 	return apiKey.Group.Platform
 }
 
-func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver) gin.HandlerFunc {
+func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver, maxBodySize ...int64) gin.HandlerFunc {
 	if resolver == nil {
 		resolver = service.NewCompositeRouteResolver(nil)
+	}
+	var bodyLimit int64
+	if len(maxBodySize) > 0 {
+		bodyLimit = maxBodySize[0]
 	}
 	return func(c *gin.Context) {
 		apiKey, ok := middleware.GetAPIKeyFromContext(c)
@@ -561,16 +574,18 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 			return
 		}
 
-		body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+		// JSON 请求体与网关 handler 同样做宽松规范化（multipart 含二进制字段，原样读取）。
+		var body []byte
+		var err error
+		if requestmodel.IsMultipartContentType(c.GetHeader("Content-Type")) {
+			body, err = pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+		} else {
+			body, err = pkghttputil.ReadLenientJSONRequestBodyWithPrealloc(c.Request, bodyLimit)
+		}
 		if err != nil {
-			status := http.StatusBadRequest
-			message := "Failed to read request body"
-			var maxErr *http.MaxBytesError
-			if errors.As(err, &maxErr) {
-				status = http.StatusRequestEntityTooLarge
-				message = "Request body is too large"
-			}
-			c.JSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
+			pkghttputil.LogRequestBodyReadFailure(logger.FromContext(c.Request.Context()), c.Request, err, "composite_routing")
+			status, errType, message := pkghttputil.DescribeRequestBodyReadFailure(c.Request, err).Response()
+			c.JSON(status, gin.H{"error": gin.H{"type": errType, "message": message}})
 			c.Abort()
 			return
 		}

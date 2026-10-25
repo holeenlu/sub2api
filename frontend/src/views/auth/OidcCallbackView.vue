@@ -17,7 +17,6 @@
       <transition name="fade">
         <div
           v-if="
-            needsInvitation ||
             needsAdoptionConfirmation ||
             needsChooser ||
             needsCreateAccount ||
@@ -77,34 +76,9 @@
             </div>
           </div>
 
-          <template v-if="needsInvitation">
-            <p class="text-sm text-gray-700 dark:text-gray-300">
-              {{ t('auth.oidc.invitationRequired', { providerName }) }}
-            </p>
-            <div>
-              <input
-                v-model="invitationCode"
-                type="text"
-                class="input w-full"
-                :placeholder="t('auth.invitationCodePlaceholder')"
-                :disabled="isSubmitting"
-                @keyup.enter="handleSubmitInvitation"
-              />
-            </div>
-            <button
-              class="btn btn-primary w-full"
-              :disabled="isSubmitting || !invitationCode.trim()"
-              @click="handleSubmitInvitation"
-            >
-              {{
-                isSubmitting
-                  ? t('auth.oidc.completing')
-                  : t('auth.oidc.completeRegistration')
-              }}
-            </button>
-          </template>
 
-          <template v-else-if="needsAdoptionConfirmation">
+
+          <template v-if="needsAdoptionConfirmation">
             <p class="text-sm text-gray-700 dark:text-gray-300">
               {{ t('auth.oauthFlow.reviewProfileBeforeContinue', { providerName }) }}
             </p>
@@ -253,7 +227,6 @@ import PendingOAuthCreateAccountForm, {
 import { apiClient } from '@/api/client'
 import { useAuthStore, useAppStore } from '@/stores'
 import {
-  completeOIDCOAuthRegistration,
   exchangePendingOAuthCompletion,
   getOAuthCompletionKind,
   getPublicSettings,
@@ -264,11 +237,7 @@ import {
   type OAuthTokenResponse,
   type PendingOAuthExchangeResponse
 } from '@/api/auth'
-import {
-  clearAllAffiliateReferralCodes,
-  loadOAuthAffiliateCode,
-  oauthAffiliatePayload
-} from '@/utils/oauthAffiliate'
+
 
 const route = useRoute()
 const router = useRouter()
@@ -279,10 +248,7 @@ const appStore = useAppStore()
 
 const isProcessing = ref(true)
 const errorMessage = ref('')
-const needsInvitation = ref(false)
-const invitationCode = ref('')
 const isSubmitting = ref(false)
-const invitationError = ref('')
 const redirectTo = ref('/dashboard')
 const providerName = ref('OIDC')
 const adoptionRequired = ref(false)
@@ -295,7 +261,6 @@ const pendingAccountAction = ref<'none' | 'choose_account_action' | 'create_acco
 const pendingAccountEmail = ref('')
 const bindLoginEmail = ref('')
 const bindLoginPassword = ref('')
-const legacyPendingOAuthToken = ref('')
 const accountActionError = ref('')
 const canReturnToCreateAccount = ref(false)
 const bindSuccessMessage = t('profile.authBindings.bindSuccess')
@@ -309,11 +274,7 @@ const needsCreateAccount = computed(() => pendingAccountAction.value === 'create
 const needsChooser = computed(() => pendingAccountAction.value === 'choose_account_action')
 const needsBindLogin = computed(() => pendingAccountAction.value === 'bind_login')
 
-watch(invitationError, value => {
-  if (value) {
-    appStore.showError(value)
-  }
-})
+
 
 watch(accountActionError, value => {
   if (value) {
@@ -539,7 +500,6 @@ function applyTotpChallenge(completion: PendingOidcCompletion): boolean {
   }
 
   pendingAccountAction.value = 'none'
-  needsInvitation.value = false
   needsAdoptionConfirmation.value = false
   needsTotpChallenge.value = true
   totpTempToken.value = completion.temp_token
@@ -597,7 +557,6 @@ async function finalizeCompletion(completion: PendingOAuthExchangeResponse, redi
   if (getOAuthCompletionKind(completion) === 'bind') {
     const bindRedirect = sanitizeRedirectPath(completion.redirect || '/profile')
     clearPendingAuthSession()
-    clearAllAffiliateReferralCodes()
     appStore.showSuccess(bindSuccessMessage)
     await router.replace(bindRedirect)
     return
@@ -609,7 +568,6 @@ async function finalizeCompletion(completion: PendingOAuthExchangeResponse, redi
 
   persistOAuthTokenContext(completion)
   await authStore.setToken(completion.access_token)
-  clearAllAffiliateReferralCodes()
   appStore.showSuccess(t('auth.loginSuccess'))
   await router.replace(redirect)
 }
@@ -618,14 +576,7 @@ async function finalizePendingAccountResponse(completion: PendingOidcCompletion)
   applyAdoptionSuggestionState(completion)
   const redirect = sanitizeRedirectPath(completion.redirect || redirectTo.value)
 
-  if (completion.error === 'invitation_required') {
-    pendingAccountAction.value = 'none'
-    needsInvitation.value = true
-    needsAdoptionConfirmation.value = false
-    isProcessing.value = false
-    persistPendingAuthSession(redirect)
-    return
-  }
+
 
   if (applyTotpChallenge(completion)) {
     persistPendingAuthSession(redirect)
@@ -634,7 +585,6 @@ async function finalizePendingAccountResponse(completion: PendingOidcCompletion)
 
   applyPendingAccountAction(completion)
   if (pendingAccountAction.value !== 'none') {
-    needsInvitation.value = false
     needsAdoptionConfirmation.value = false
     isProcessing.value = false
     persistPendingAuthSession(redirect)
@@ -642,7 +592,6 @@ async function finalizePendingAccountResponse(completion: PendingOidcCompletion)
   }
 
   if (completion.auth_result === 'pending_session') {
-    needsInvitation.value = false
     needsAdoptionConfirmation.value = false
     isProcessing.value = false
     persistPendingAuthSession(redirect)
@@ -652,35 +601,7 @@ async function finalizePendingAccountResponse(completion: PendingOidcCompletion)
   await finalizeCompletion(completion, redirect)
 }
 
-async function handleSubmitInvitation() {
-  invitationError.value = ''
-  if (!invitationCode.value.trim()) return
 
-  isSubmitting.value = true
-  try {
-    const affCode = loadOAuthAffiliateCode()
-    const decision = currentAdoptionDecision()
-    const completion: PendingOidcCompletion = legacyPendingOAuthToken.value
-      ? (
-          await apiClient.post<PendingOidcCompletion>('/auth/oauth/oidc/complete-registration', {
-            pending_oauth_token: legacyPendingOAuthToken.value,
-            invitation_code: invitationCode.value.trim(),
-            ...oauthAffiliatePayload(affCode),
-            ...serializeAdoptionDecision(decision)
-          })
-        ).data
-      : affCode
-        ? await completeOIDCOAuthRegistration(invitationCode.value.trim(), decision, affCode)
-        : await completeOIDCOAuthRegistration(invitationCode.value.trim(), decision)
-    await finalizePendingAccountResponse(completion)
-  } catch (e: unknown) {
-    const err = e as { message?: string; response?: { data?: { message?: string } } }
-    invitationError.value =
-      err.response?.data?.message || err.message || t('auth.oidc.completeRegistrationFailed')
-  } finally {
-    isSubmitting.value = false
-  }
-}
 
 async function handleContinueLogin() {
   isSubmitting.value = true
@@ -712,8 +633,6 @@ async function handleCreateAccount(payload: PendingOAuthCreateAccountPayload) {
             tencent_captcha_randstr: payload.tencentCaptchaRandstr
         }
         : {}),
-      invitation_code: payload.invitationCode || undefined,
-      ...oauthAffiliatePayload(loadOAuthAffiliateCode()),
       ...serializeAdoptionDecision(currentAdoptionDecision())
     })
     await finalizePendingAccountResponse(data)
@@ -761,7 +680,6 @@ async function handleSubmitTotpChallenge() {
       totp_code: code
     })
     await authStore.setToken(completion.access_token)
-    clearAllAffiliateReferralCodes()
     appStore.showSuccess(t('auth.loginSuccess'))
     await router.replace(redirectTo.value)
   } catch (e: unknown) {
@@ -776,7 +694,6 @@ onMounted(async () => {
 
   const params = parseFragmentParams()
   const legacyLogin = readLegacyFragmentLogin(params)
-  const legacyPendingToken = params.get('pending_oauth_token')?.trim() || ''
   const error = params.get('error')
   const errorDesc = params.get('error_description') || params.get('error_message') || ''
   const redirect = sanitizeRedirectPath(
@@ -787,19 +704,12 @@ onMounted(async () => {
     if (legacyLogin) {
       persistOAuthTokenContext(legacyLogin)
       await authStore.setToken(legacyLogin.access_token)
-      clearAllAffiliateReferralCodes()
       appStore.showSuccess(t('auth.loginSuccess'))
       await router.replace(redirect)
       return
     }
 
-    if (error === 'invitation_required' && legacyPendingToken) {
-      legacyPendingOAuthToken.value = legacyPendingToken
-      redirectTo.value = redirect
-      needsInvitation.value = true
-      isProcessing.value = false
-      return
-    }
+
 
     if (error) {
       errorMessage.value = errorDesc || error
@@ -814,12 +724,7 @@ onMounted(async () => {
     applyAdoptionSuggestionState(completion)
     redirectTo.value = completionRedirect
 
-    if (completion.error === 'invitation_required') {
-      needsInvitation.value = true
-      isProcessing.value = false
-      persistPendingAuthSession(completionRedirect)
-      return
-    }
+
 
     if (applyTotpChallenge(completion)) {
       persistPendingAuthSession(completionRedirect)

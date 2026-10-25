@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -270,6 +271,34 @@ func TestUsageLogFromService_FallsBackToLegacyModelWhenRequestedModelMissing(t *
 	require.Equal(t, "claude-3", adminDTO.Model)
 }
 
+func TestUsageLogFromService_CacheWriteTTLBreakdown(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		log  service.UsageLog
+	}{
+		{"openai", service.UsageLog{CacheCreationTokens: 34, CacheCreation30mTokens: 13, CacheCreation12hTokens: 21}},
+		{"historical_unknown_ttl", service.UsageLog{CacheCreationTokens: 34}},
+		{"anthropic", service.UsageLog{CacheCreationTokens: 34, CacheCreation5mTokens: 13, CacheCreation1hTokens: 21}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			userDTO := UsageLogFromService(&tc.log)
+			adminDTO := UsageLogFromServiceAdmin(&tc.log)
+			for _, got := range []any{userDTO, adminDTO} {
+				body, err := json.Marshal(got)
+				require.NoError(t, err)
+				var fields map[string]any
+				require.NoError(t, json.Unmarshal(body, &fields))
+				require.Equal(t, float64(tc.log.CacheCreationTokens), fields["cache_creation_tokens"])
+				require.Equal(t, float64(tc.log.CacheCreation5mTokens), fields["cache_creation_5m_tokens"])
+				require.Equal(t, float64(tc.log.CacheCreation1hTokens), fields["cache_creation_1h_tokens"])
+				require.Equal(t, float64(tc.log.CacheCreation30mTokens), fields["cache_creation_30m_tokens"])
+				require.Equal(t, float64(tc.log.CacheCreation12hTokens), fields["cache_creation_12h_tokens"])
+			}
+		})
+	}
+}
+
 func TestUsageLogFromService_IncludesImageBillingMetadataForUserAndAdmin(t *testing.T) {
 	t.Parallel()
 
@@ -331,4 +360,76 @@ func TestUsageLogFromService_PreservesHistoricalMissingImageSize(t *testing.T) {
 
 func f64Ptr(value float64) *float64 {
 	return &value
+}
+
+func TestUsageLogFromService_LatencyMetricsAndLegacyExport(t *testing.T) {
+	zero, firstText := 0, 75
+	metrics := &service.UsageLatencyMetrics{Version: 1, FirstEventMs: &zero, FirstTextMs: &firstText, DurationMs: 100}
+	for _, snapshot := range []*service.UsageLatencyMetrics{nil, metrics} {
+		log := &service.UsageLog{LatencyMetrics: snapshot}
+		for _, value := range []any{UsageLogFromService(log), UsageLogFromServiceAdmin(log)} {
+			data, err := json.Marshal(value)
+			require.NoError(t, err)
+			var decoded map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(data, &decoded))
+			require.Contains(t, decoded, "latency_metrics", "legacy rows have explicit null, not fabricated v1 data")
+			if snapshot == nil {
+				require.JSONEq(t, "null", string(decoded["latency_metrics"]))
+			} else {
+				require.JSONEq(t, `{"version":1,"first_event_ms":0,"first_content_ms":null,"first_text_ms":75,"duration_ms":100}`, string(decoded["latency_metrics"]))
+			}
+		}
+	}
+	// The admin NDJSON export uses this same permission serializer and DTO.
+	// Timing is request metadata and must survive an operator without cost access.
+	actor := authz.Subject{Role: authz.Admin, Permissions: []string{"usage.read"}}
+	data, err := authz.MarshalResponse(map[string]any{"type": "rows", "items": []any{UsageLogFromServiceAdmin(&service.UsageLog{LatencyMetrics: metrics})}}, "/api/v1/admin/usage/export", actor, false)
+	require.NoError(t, err)
+	var frame struct {
+		Items []struct {
+			LatencyMetrics *service.UsageLatencyMetrics `json:"latency_metrics"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(data, &frame))
+	require.Len(t, frame.Items, 1)
+	require.Equal(t, metrics, frame.Items[0].LatencyMetrics)
+}
+
+func TestUsageAccountIdentityRoleProjection(t *testing.T) {
+	log := &service.UsageLog{ID: 1, UserID: 2, AccountID: 991, ActualCost: 0.5, AuthorizationMode: "native", Account: &service.Account{ID: 991, Name: "private-upstream@example.com"}}
+	userJSON, err := json.Marshal(UsageLogFromService(log))
+	require.NoError(t, err)
+	require.NotContains(t, string(userJSON), "account_id")
+	require.NotContains(t, string(userJSON), "private-upstream")
+	for _, path := range []string{"/api/v1/admin/usage", "/api/v1/admin/usage/export", "/api/v1/admin/ops/request-errors/:id", "/api/v1/admin/ops/upstream-errors/:id"} {
+		for _, role := range []string{authz.Admin, authz.SuperAdmin} {
+			t.Run(path+"/"+role, func(t *testing.T) {
+				dto := UsageLogFromServiceAdmin(log)
+				actor := authz.Subject{Role: role, Permissions: []string{"usage.read", "usage.export", "accounts.read", "billing.cost.read"}}
+				payload, err := authz.MarshalResponse(map[string]any{"items": []any{dto}, "nested": map[string]any{"account_name": "private-upstream@example.com"}, "upstream_errors": `[{"account_id":991,"account_name":"private-upstream@example.com","upstream_status_code":429},{"kind":"scheduling_trace","detail":"{\"events\":[{\"account_id\":991,\"duration_ms\":80}]}"}]`}, path, actor, false)
+				require.NoError(t, err)
+				if role == authz.SuperAdmin {
+					require.Contains(t, string(payload), `"account_id":991`)
+					require.Contains(t, string(payload), "private-upstream@example.com")
+					require.Contains(t, string(payload), `"authorization_mode":"native"`)
+				} else {
+					for _, hidden := range []string{`"account"`, `"account_id"`, `"account_name"`, `"authorization_mode"`, "private-upstream"} {
+						require.NotContains(t, string(payload), hidden)
+					}
+				}
+				var response map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(payload, &response))
+				var events string
+				require.NoError(t, json.Unmarshal(response["upstream_errors"], &events))
+				require.Contains(t, events, "429")
+				require.Contains(t, events, "80")
+				if role != authz.SuperAdmin {
+					require.NotContains(t, events, "account_id")
+					require.NotContains(t, events, "account_name")
+				}
+				require.Contains(t, string(payload), `"actual_cost":0.5`)
+				require.Equal(t, "private-upstream@example.com", dto.Account.Name, "response projection must not mutate shared source data")
+			})
+		}
+	}
 }

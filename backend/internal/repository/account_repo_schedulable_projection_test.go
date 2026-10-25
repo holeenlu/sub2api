@@ -62,8 +62,17 @@ func TestListSchedulableAccountLoadsUsesSingleProjectionQuery(t *testing.T) {
 	require.NotContains(t, selectClause, "credentials")
 	require.NotContains(t, selectClause, "extra")
 	require.NotContains(t, selectClause, "proxy_id")
-	require.NotContains(t, normalized, "account_groups")
-	require.NotContains(t, normalized, "proxies")
+	// Supplier qualification needs correlated EXISTS reads of grants/proxies,
+	// but must not hydrate those relations, multiply account rows, or issue
+	// additional queries. The outer projection stays on accounts alone.
+	_, fromAndWhere, _ := strings.Cut(normalized, " FROM ")
+	fromClause, _, hasWhere := strings.Cut(fromAndWhere, " WHERE ")
+	require.True(t, hasWhere)
+	require.Equal(t, `"accounts"`, fromClause)
+	require.Contains(t, normalized, "accounts.vendor_id IS NULL OR")
+	require.Contains(t, normalized, "EXISTS (SELECT 1 FROM proxies vp")
+	require.Contains(t, normalized, "EXISTS (SELECT 1 FROM vendor_groups vg")
+	require.Contains(t, normalized, "ag.account_id=accounts.id")
 	for _, predicateColumn := range []string{
 		"status",
 		"schedulable",

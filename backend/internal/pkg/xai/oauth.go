@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"log/slog"
 	"net/url"
 	"os"
@@ -55,14 +56,15 @@ var (
 
 // OAuthSession stores one PKCE OAuth flow.
 type OAuthSession struct {
-	State         string    `json:"state"`
-	CodeVerifier  string    `json:"code_verifier"`
-	CodeChallenge string    `json:"code_challenge"`
-	ClientID      string    `json:"client_id,omitempty"`
-	Scope         string    `json:"scope,omitempty"`
-	ProxyURL      string    `json:"proxy_url,omitempty"`
-	RedirectURI   string    `json:"redirect_uri"`
-	CreatedAt     time.Time `json:"created_at"`
+	Authorization *authz.Lease `json:"authorization,omitempty"`
+	State         string       `json:"state"`
+	CodeVerifier  string       `json:"code_verifier"`
+	CodeChallenge string       `json:"code_challenge"`
+	ClientID      string       `json:"client_id,omitempty"`
+	Scope         string       `json:"scope,omitempty"`
+	ProxyURL      string       `json:"proxy_url,omitempty"`
+	RedirectURI   string       `json:"redirect_uri"`
+	CreatedAt     time.Time    `json:"created_at"`
 
 	mu       sync.Mutex
 	consumed bool
