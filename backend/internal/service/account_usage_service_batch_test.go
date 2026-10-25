@@ -46,6 +46,9 @@ func (r *usageBatchLogRepoStub) ListByModelAndTimeRange(context.Context, string,
 func (r *usageBatchLogRepoStub) GetAccountWindowStats(context.Context, int64, time.Time) (*usagestats.AccountStats, error) {
 	return &usagestats.AccountStats{}, nil
 }
+func (r *usageBatchLogRepoStub) GetAccountFableWindowStats(context.Context, int64, time.Time) (*usagestats.AccountStats, error) {
+	return &usagestats.AccountStats{}, nil
+}
 func (r *usageBatchLogRepoStub) GetAccountTodayStats(context.Context, int64) (*usagestats.AccountStats, error) {
 	return &usagestats.AccountStats{}, nil
 }
@@ -68,6 +71,10 @@ func (r *usageBatchLogRepoStub) GetGroupStatsWithFilters(context.Context, time.T
 	return nil, nil
 }
 func (r *usageBatchLogRepoStub) GetUserBreakdownStats(context.Context, time.Time, time.Time, usagestats.UserBreakdownDimension, int) ([]usagestats.UserBreakdownItem, error) {
+	return nil, nil
+}
+
+func (r *usageBatchLogRepoStub) GetAPIKeyBreakdownStats(context.Context, time.Time, time.Time, usagestats.UserBreakdownDimension, int) ([]usagestats.APIKeyBreakdownItem, error) {
 	return nil, nil
 }
 func (r *usageBatchLogRepoStub) GetAllGroupUsageSummary(context.Context, time.Time) ([]usagestats.GroupUsageSummary, error) {

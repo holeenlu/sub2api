@@ -784,6 +784,11 @@ func isWebSearchTool(tool ClaudeTool) bool {
 		return true
 	}
 
+	// A caller's function may legitimately use a built-in search name.
+	// Explicit server tool types above still win even if a schema is present.
+	if tool.InputSchema != nil || (tool.Type == "custom" && tool.Custom != nil && tool.Custom.InputSchema != nil) {
+		return false
+	}
 	name := strings.TrimSpace(tool.Name)
 	switch name {
 	case "web_search", "google_search", "web_search_20250305":

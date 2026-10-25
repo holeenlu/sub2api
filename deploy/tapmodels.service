@@ -1,0 +1,33 @@
+[Unit]
+Description=TapModels - Pick a model. Start building.
+Documentation=https://docs.tapmodels.ai
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=tapmodels
+Group=tapmodels
+WorkingDirectory=/opt/tapmodels
+ExecStart=/opt/tapmodels/tapmodels
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tapmodels
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/tapmodels
+
+# Environment - Server configuration
+# Modify these values to change listen address and port
+Environment=GIN_MODE=release
+Environment=SERVER_HOST=0.0.0.0
+Environment=SERVER_PORT=8080
+
+[Install]
+WantedBy=multi-user.target
