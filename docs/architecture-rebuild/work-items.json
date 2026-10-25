@@ -1,0 +1,1461 @@
+{
+  "schema_version": 1,
+  "contract_version": "0.2",
+  "planning_baseline": "750d4a16c7adaf558cf2c6ce7101975602832d7b",
+  "scope": "shared_all_brands",
+  "code_development_started": false,
+  "execution_note": "Planning document only. No automatic execution. Begin coding only under a subsequent implementation instruction; formal delivery uses current CHANGE_DELIVERY.",
+  "status_vocabulary": [
+    "planned",
+    "ready",
+    "in_progress",
+    "review",
+    "accepted",
+    "blocked"
+  ],
+  "shared_file_owner": "integrator_or_explicit_contract_owner",
+  "tasks": [
+    {
+      "id": "WP-00",
+      "title": "实施基线与合同证据冻结",
+      "role": "integrator",
+      "depends_on": [],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "docs/architecture-rebuild/BASELINE.md",
+        "docs/architecture-rebuild/source-inventory.json",
+        "docs/architecture-rebuild/READINESS.md"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "docs/GATEWAY_PROTOCOL_LIMITS.md"
+      ],
+      "integration_paths": [],
+      "requirements": [
+        "REQ-01",
+        "REQ-13",
+        "REQ-16",
+        "REQ-17",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-04"
+      ],
+      "outcome": "核对开始实施时的代码、有效客户端合同、夹具来源和数据读者，标明真实证据缺口，不伪造live验收。",
+      "retirement_acceptance": "保留已交付Cloud等修复；不附带上游升级。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-01",
+      "title": "共享值对象与可编译合同",
+      "role": "contract_owner",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/gateway/model/**",
+        "docs/architecture-rebuild/CONTRACTS.md"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/domain/platforms.go",
+        "backend/internal/service/openai_first_output_timeout.go"
+      ],
+      "integration_paths": [],
+      "requirements": [
+        "REQ-02",
+        "REQ-09",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-06",
+        "CT-07",
+        "CT-08",
+        "CT-09",
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "将CT设计落实为最小Go类型与消费端口，明确零值、单位、资源寿命和依赖，禁止平台分支进入核心。",
+      "retirement_acceptance": "删除本切片被取代的重复类型；不保留v2平行合同。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-02",
+      "title": "纯协议与wire事实",
+      "role": "protocol_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/gateway/protocol/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/pkg/apicompat/**",
+        "backend/internal/pkg/sse/**",
+        "backend/internal/service/openai_cloud_protocol.go"
+      ],
+      "integration_paths": [
+        "backend/internal/pkg/apicompat/**",
+        "backend/internal/pkg/sse/**"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-07",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-04"
+      ],
+      "outcome": "原文与facts分离；纯解码/转换及诊断，无网络/存储/token；扩展现有夹具。",
+      "retirement_acceptance": "迁完同一转换规则即删旧解释器，保留有效公开协议。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-03",
+      "title": "授权范围与发送前复核",
+      "role": "access_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/access/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/authz/**",
+        "backend/internal/server/middleware/**",
+        "backend/internal/service/scheduler_snapshot_service.go"
+      ],
+      "integration_paths": [
+        "backend/internal/server/middleware/**",
+        "backend/internal/service/scheduler_snapshot_service.go"
+      ],
+      "requirements": [
+        "REQ-04",
+        "REQ-09",
+        "REQ-10",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-05",
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "复用现有身份/RBAC，建立窄scope与撤销校验，排队后变更不能扩大授权。",
+      "retirement_acceptance": "删除重复scope解释；既有authz保留且不复制第二套认证。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-04",
+      "title": "调度资格与容量租约",
+      "role": "routing_worker",
+      "depends_on": [
+        "WP-01",
+        "WP-03"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/gateway/routing/**",
+        "backend/internal/storage/routing/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_account_scheduler.go",
+        "backend/internal/service/scheduler_snapshot*",
+        "backend/internal/service/concurrency*"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_account_scheduler.go",
+        "backend/internal/service/scheduler_snapshot*",
+        "backend/internal/service/concurrency*"
+      ],
+      "requirements": [
+        "REQ-02",
+        "REQ-04",
+        "REQ-06",
+        "REQ-09",
+        "REQ-15"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-05",
+        "CT-08"
+      ],
+      "outcome": "迁移现有调度策略和资格；亲和、硬绑定、容量租约区分；续期失败与幂等释放明确。",
+      "retirement_acceptance": "旧选号/容量重复决策随入口切换删除，不新设评分算法。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-05",
+      "title": "会话归属与owner状态",
+      "role": "session_worker",
+      "depends_on": [
+        "WP-01",
+        "WP-03"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/gateway/session/**",
+        "backend/internal/storage/session/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_ws_state_store.go",
+        "backend/internal/service/openai_cloud_session.go",
+        "backend/internal/service/openai_cloud_session_store.go",
+        "backend/internal/pkg/redissession/**"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_ws_state_store.go",
+        "backend/internal/service/openai_cloud_session.go",
+        "backend/internal/service/openai_cloud_session_store.go"
+      ],
+      "requirements": [
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-13",
+        "REQ-16"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-05",
+        "CT-06"
+      ],
+      "outcome": "显式绑定身份、grant、mode和owner epoch；定义Redis与本地socket边界、跨轮和迟到命令。",
+      "retirement_acceptance": "移除被替代session索引解释；历史读者退出后再决定数据处置。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-06",
+      "title": "账务用例与幂等恢复",
+      "role": "billing_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/billing/**",
+        "backend/internal/storage/billing/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/repository/usage_billing*",
+        "backend/internal/service/gateway_usage_billing.go",
+        "backend/internal/service/usage_record_worker_pool.go",
+        "backend/internal/service/openai_gateway_usage.go"
+      ],
+      "integration_paths": [
+        "backend/internal/repository/usage_billing*",
+        "backend/internal/service/gateway_usage_billing.go",
+        "backend/internal/service/usage_record_worker_pool.go"
+      ],
+      "requirements": [
+        "REQ-03",
+        "REQ-08",
+        "REQ-09",
+        "REQ-16"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-07"
+      ],
+      "outcome": "保留PG事务与旧幂等键，明确usage累计/增量、unknown/价格待定、预留/释放和双边费用。",
+      "retirement_acceptance": "旧补扣/并行结算包装清理，不能降低现有持久化保证。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-07",
+      "title": "能力与配置快照编译",
+      "role": "catalog_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/catalog/**",
+        "backend/internal/storage/catalog/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/domain/platforms.go",
+        "backend/internal/service/openai_cloud_capabilities.go",
+        "backend/internal/service/setting_service.go"
+      ],
+      "integration_paths": [
+        "backend/internal/domain/platforms.go",
+        "backend/internal/service/setting_service.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-09",
+        "REQ-15",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-08"
+      ],
+      "outcome": "以单一平台注册和现有规则编译模式/模型/定价计划，revision并发保存与撤销分离。",
+      "retirement_acceptance": "旧重复能力/价格解释器随消费者迁移退出。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-08",
+      "title": "统一执行与恢复引擎",
+      "role": "execution_worker",
+      "depends_on": [
+        "WP-01",
+        "WP-03",
+        "WP-04",
+        "WP-05",
+        "WP-06",
+        "WP-07"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/gateway/execution/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/handler/failover_loop.go",
+        "backend/internal/service/gateway_turn_recovery.go",
+        "backend/internal/service/openai_first_output_timeout.go"
+      ],
+      "integration_paths": [
+        "backend/internal/handler/failover_loop.go",
+        "backend/internal/service/gateway_turn_recovery.go",
+        "backend/internal/service/openai_first_output_timeout.go"
+      ],
+      "requirements": [
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-08",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-02",
+        "CT-03",
+        "CT-05",
+        "CT-06",
+        "CT-07",
+        "CT-08"
+      ],
+      "outcome": "落实中央预算、prepare/permit/open、三轴状态、取消排空和唯一恢复决策；保持平台无关。",
+      "retirement_acceptance": "原有预算账号/BPS/健康耦合字段和重复循环随切片删除。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-09",
+      "title": "原生OpenAI单次尝试",
+      "role": "native_worker",
+      "depends_on": [
+        "WP-01",
+        "WP-02",
+        "WP-07"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/providers/openai/native/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/service/openai_ws_forwarder*",
+        "backend/internal/service/openai_ws_http_bridge.go"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/service/openai_ws_forwarder*",
+        "backend/internal/service/openai_ws_http_bridge.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-05",
+        "REQ-07",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-06"
+      ],
+      "outcome": "支持现有原生HTTP/SSE/WS/bridge语义，一次调用一个grant一次生成发送，不暗含业务failover。 包括其既有Chat/Messages转换、Responses compact/input_tokens、Embeddings与alpha/search；能力由真实路由/账号合同限制。",
+      "retirement_acceptance": "迁移真实转发能力；旧native外壳和重复模式判断同切片删除。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-10",
+      "title": "原生Responses完整切片集成",
+      "role": "integrator",
+      "depends_on": [
+        "WP-08",
+        "WP-09"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/ingress/openai/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/server/routes/gateway.go"
+      ],
+      "integration_paths": [
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/server/routes/gateway.go",
+        "backend/cmd/server/wire.go",
+        "backend/internal/service/wire.go",
+        "backend/internal/handler/wire.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-06",
+        "CT-07"
+      ],
+      "outcome": "将HTTP/SSE/客户端WS首轮及工具后续轮全部接入新主链，单写路径与失败结算同时验收。",
+      "retirement_acceptance": "删除本切片旧执行循环、context键和临时注册，不留第二个原生引擎。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-11",
+      "title": "BPS模式适配",
+      "role": "bps_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-05",
+        "WP-06",
+        "WP-10"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/providers/openai/bps/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_excel_bps*",
+        "backend/internal/service/basispoints/**",
+        "docs/bps/REQUIREMENTS.md"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_excel_bps*",
+        "backend/internal/service/basispoints/**"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-05",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-06",
+        "CT-07"
+      ],
+      "outcome": "保留Excel-only、工具目录/图片附件阶段、历史和明确403恢复，转换与执行边界分开。",
+      "retirement_acceptance": "删除重复授权/预算/结算包装，不恢复退役worker。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-12",
+      "title": "Cloud模式适配",
+      "role": "cloud_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-05",
+        "WP-06",
+        "WP-10"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/providers/openai/cloud/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_cloud*",
+        "backend/internal/service/openai_ws_cloud_bridge.go"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_cloud*",
+        "backend/internal/service/openai_ws_cloud_bridge.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-05",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13",
+        "REQ-16"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-06",
+        "CT-07"
+      ],
+      "outcome": "迁移最新parser/ingress/capability plan、thread/turn、owner、工具轮、usage archive/ACK，沿用原生OAuth权威。",
+      "retirement_acceptance": "移除Cloud内部总调度和重复控制，不回退本轮之前的解析器。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-13",
+      "title": "Anthropic与TypeSafe适配",
+      "role": "anthropic_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-10"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/providers/anthropic/**",
+        "backend/internal/providers/typesafe/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/gateway_service.go",
+        "backend/internal/handler/gateway_handler.go"
+      ],
+      "integration_paths": [
+        "backend/internal/service/gateway_service.go",
+        "backend/internal/handler/gateway_handler.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-07"
+      ],
+      "outcome": "保留Messages/systemone真实能力、指纹和既有降智/Fable安全语义，共用中央执行。",
+      "retirement_acceptance": "旧平台handler执行循环在集成后删除，协议能力不凭名称归并。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-14",
+      "title": "Gemini与Antigravity适配",
+      "role": "gemini_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-10"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/providers/gemini/**",
+        "backend/internal/providers/antigravity/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/gemini*",
+        "backend/internal/service/antigravity*",
+        "backend/internal/handler/gemini*"
+      ],
+      "integration_paths": [
+        "backend/internal/service/gemini*",
+        "backend/internal/service/antigravity*",
+        "backend/internal/handler/gemini*"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-05",
+        "REQ-07",
+        "REQ-08",
+        "REQ-14"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-06",
+        "CT-07",
+        "CT-09"
+      ],
+      "outcome": "保留两族实际模型、生成、缓存/续接等支持面，能力差异明确，不硬塞OpenAI DTO。",
+      "retirement_acceptance": "旧局部调度和重复转换按能力逐条退出。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-15",
+      "title": "其余OpenAI兼容供给适配",
+      "role": "compatible_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-10"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/providers/grok/http/**",
+        "backend/internal/providers/kimi/**",
+        "backend/internal/providers/zhipu/**",
+        "backend/internal/providers/deepseek/**",
+        "backend/internal/providers/minimax/**",
+        "backend/internal/providers/opencode/**",
+        "backend/internal/providers/commandcode/**",
+        "backend/internal/providers/cline/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/domain/platforms.go"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/domain/platforms.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-07",
+        "REQ-08",
+        "REQ-09",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-07",
+        "CT-08"
+      ],
+      "outcome": "逐供给保存真实授权/模型/价格/协议差异，普通平台新增不进入执行内核分支。",
+      "retirement_acceptance": "原大service中的对应平台特判随能力迁出删除。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-16",
+      "title": "媒体 文件与异步作业",
+      "role": "jobs_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-06",
+        "WP-10"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/gateway/jobs/**",
+        "backend/internal/providers/media_jobs/**",
+        "backend/internal/storage/jobs/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "docs/ASYNC_IMAGE_TASKS.md",
+        "backend/internal/service/image_task.go",
+        "backend/internal/handler/image_task_handler.go",
+        "backend/internal/service/seedance.go",
+        "backend/internal/handler/seedance.go",
+        "backend/internal/service/batch_image_provider.go"
+      ],
+      "integration_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/service/batch_image*",
+        "backend/internal/handler/openai_image*",
+        "backend/internal/service/image_task.go",
+        "backend/internal/handler/image_task_handler.go",
+        "backend/internal/service/seedance.go",
+        "backend/internal/handler/seedance.go",
+        "backend/internal/service/batch_image_provider.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-08",
+        "REQ-13",
+        "REQ-14",
+        "REQ-16"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-07",
+        "CT-09"
+      ],
+      "outcome": "区分提交/轮询/取消/取产物授权，图片视频batch和文件归属/出口保护，费用按任务事实结算。",
+      "retirement_acceptance": "旧作业副作用路径逐项退出，禁止父子任务重复计费。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-17",
+      "title": "双向实时与语音",
+      "role": "realtime_worker",
+      "depends_on": [
+        "WP-03",
+        "WP-04",
+        "WP-05",
+        "WP-06",
+        "WP-10"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/gateway/realtime/**",
+        "backend/internal/providers/grok/realtime/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/service/openai_live*",
+        "backend/internal/service/grok_audio*",
+        "backend/internal/handler/grok_audio*",
+        "backend/internal/handler/openai_live.go"
+      ],
+      "integration_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/service/openai_live*",
+        "backend/internal/service/grok_audio*",
+        "backend/internal/handler/grok_audio*",
+        "backend/internal/handler/openai_live.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-08",
+        "REQ-13",
+        "REQ-14"
+      ],
+      "contracts": [
+        "CT-02",
+        "CT-05",
+        "CT-06",
+        "CT-07",
+        "CT-09"
+      ],
+      "outcome": "连接与turn分离，用户并发、voice归属、双向背压、取消排空与真实usage明确。",
+      "retirement_acceptance": "旧实时独立容量/权限解释器随切换删除。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-18",
+      "title": "BPS Cloud垂直切片集成",
+      "role": "integrator",
+      "depends_on": [
+        "WP-11",
+        "WP-12"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/ingress/modes/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/service/openai_gateway_forward.go"
+      ],
+      "integration_paths": [
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/server/routes/gateway.go",
+        "backend/cmd/server/wire.go",
+        "backend/internal/service/wire.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-06",
+        "CT-07"
+      ],
+      "outcome": "与native同一引擎集成两模式，覆盖工具后续轮/断流/图片/ACK/跨实例归属。",
+      "retirement_acceptance": "模式选择及回退只在计划层；删除旧重试和临时模式开关。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-19",
+      "title": "其他平台与操作完整集成",
+      "role": "integrator",
+      "depends_on": [
+        "WP-13",
+        "WP-14",
+        "WP-15",
+        "WP-16",
+        "WP-17",
+        "WP-18"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/ingress/providers/**",
+        "backend/internal/ingress/jobs/**",
+        "backend/internal/ingress/realtime/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/handler/wire.go"
+      ],
+      "integration_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/handler/wire.go",
+        "backend/internal/service/wire.go",
+        "backend/cmd/server/wire.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "REQ-06",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13",
+        "REQ-14",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-07",
+        "CT-09"
+      ],
+      "outcome": "逐项核对全部已登记操作与控制入口，确认唯一有副作用执行路径。",
+      "retirement_acceptance": "删除对应旧路由执行者和过渡注册，保留必要外部路径本身。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-20",
+      "title": "控制面与领域配置",
+      "role": "control_worker",
+      "depends_on": [
+        "WP-03",
+        "WP-06",
+        "WP-07"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/control/**",
+        "backend/internal/storage/control/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/server/routes/admin.go",
+        "backend/internal/server/routes/user.go",
+        "backend/internal/server/routes/vendor.go",
+        "backend/internal/payment/**",
+        "backend/internal/service/setting_service.go",
+        "backend/internal/service/brand.go",
+        "backend/internal/handler/dto/settings.go"
+      ],
+      "integration_paths": [
+        "backend/internal/server/routes/admin.go",
+        "backend/internal/server/routes/user.go",
+        "backend/internal/server/routes/vendor.go",
+        "backend/internal/service/setting_service.go",
+        "backend/internal/service/brand.go",
+        "backend/internal/handler/dto/settings.go"
+      ],
+      "requirements": [
+        "REQ-04",
+        "REQ-09",
+        "REQ-10",
+        "REQ-11",
+        "REQ-15",
+        "REQ-16",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-05",
+        "CT-07",
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "复用authz/payment/现有用户体系，类型化管理/供应商命令、revision与权威校验，保持外部API。 复用site_name/site_logo/api_base_url等字段，区分公开品牌与部署/管理/上游地址，迁移旧有效fallback。",
+      "retirement_acceptance": "删除重复Group/Account解释器，未受影响模块保持。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-21",
+      "title": "前端领域组织与品牌",
+      "role": "frontend_worker",
+      "depends_on": [
+        "WP-20"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "frontend/src/features/**",
+        "frontend/src/views/**",
+        "frontend/src/components/**",
+        "frontend/src/composables/**",
+        "frontend/src/stores/**",
+        "frontend/src/i18n/locales/**",
+        "frontend/src/utils/branding.ts",
+        "frontend/src/utils/__tests__/branding.spec.ts"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/api/**",
+        "frontend/src/types/**",
+        "frontend/src/router/**",
+        "frontend/src/config/**",
+        "frontend/src/config/brand.ts",
+        "frontend/index.html",
+        "frontend/vite.config.ts",
+        "frontend/public/logo.svg"
+      ],
+      "integration_paths": [
+        "frontend/src/api/**",
+        "frontend/src/types/**",
+        "frontend/src/router/**",
+        "frontend/src/config/**",
+        "frontend/src/config/brand.ts",
+        "frontend/index.html",
+        "frontend/vite.config.ts",
+        "frontend/public/logo.svg"
+      ],
+      "requirements": [
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-17",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "以稳定领域API组织账号、路由、账务、设置及供应商页面，处理revision冲突和能力展示。 网站消费者统一读取品牌设置，首屏中性，同角色镜像不按品牌重编译，清理广告和专属资产。",
+      "retirement_acceptance": "同步清理旧表单状态、props、API、locale；共享业务不分裂为三套。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-22",
+      "title": "Host与观测边界",
+      "role": "host_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "backend/internal/host/**",
+        "backend/internal/observability/**"
+      ],
+      "legacy_read_paths": [
+        "backend/cmd/server/wire.go",
+        "backend/internal/service/wire.go",
+        "backend/internal/securityaudit/**"
+      ],
+      "integration_paths": [
+        "backend/cmd/server/wire.go",
+        "backend/internal/service/wire.go"
+      ],
+      "requirements": [
+        "REQ-03",
+        "REQ-08",
+        "REQ-12",
+        "REQ-13",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-10"
+      ],
+      "outcome": "显式Start/Drain/Stop与worker/插件/连接池生命周期，区分可丢观测和必须持久化事实。",
+      "retirement_acceptance": "消除目标构造器隐式Start，不删有效安全审计能力。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-23",
+      "title": "生命周期及控制装配集成",
+      "role": "integrator",
+      "depends_on": [
+        "WP-19",
+        "WP-20",
+        "WP-22",
+        "WP-27"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [],
+      "legacy_read_paths": [
+        "backend/cmd/server/wire.go",
+        "backend/internal/server/router.go"
+      ],
+      "integration_paths": [
+        "backend/cmd/server/wire.go",
+        "backend/internal/server/router.go",
+        "backend/internal/handler/wire.go",
+        "backend/internal/service/wire.go"
+      ],
+      "requirements": [
+        "REQ-03",
+        "REQ-10",
+        "REQ-12",
+        "REQ-13",
+        "REQ-15",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "按依赖顺序装配控制与运行模块，生成Wire并核对shutdown、错误处理和全部注册。 整合中性项目身份、网站设置与部署参数，复核旧有效配置/挂载，不保留品牌源码分叉。",
+      "retirement_acceptance": "删除旧隐式启动和不再使用的provider set，不保留空壳。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-24",
+      "title": "全功能旧路径与数据读者收敛",
+      "role": "integrator",
+      "depends_on": [
+        "WP-19",
+        "WP-21",
+        "WP-23"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "docs/architecture-rebuild/retirement-record.md"
+      ],
+      "legacy_read_paths": [],
+      "integration_paths": [
+        "backend/internal/service/**",
+        "backend/internal/handler/**",
+        "frontend/src/**",
+        "backend/.golangci.yml"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-13",
+        "REQ-16",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-06",
+        "CT-07",
+        "CT-08",
+        "CT-09",
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "按功能核对旧新名称、注册、调用、持久化读者与schema，证明无重复执行核心；保留项有依据和退出条件。",
+      "retirement_acceptance": "退休清单覆盖源码、配置、数据读者、UI和测试；不擅删生产数据或历史迁移。 核对广告/赞助、品牌编译fallback和专属资产，不删除LICENSE/NOTICE或必要来源。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-25",
+      "title": "整体风险与真实证据验收",
+      "role": "reviewer",
+      "depends_on": [
+        "WP-24"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "docs/architecture-rebuild/READINESS.md",
+        "docs/architecture-rebuild/evidence/**"
+      ],
+      "legacy_read_paths": [
+        "docs/architecture-rebuild/VALIDATION.md"
+      ],
+      "integration_paths": [],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-07",
+        "REQ-08",
+        "REQ-09",
+        "REQ-10",
+        "REQ-11",
+        "REQ-12",
+        "REQ-13",
+        "REQ-14",
+        "REQ-15",
+        "REQ-16",
+        "REQ-17",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-06",
+        "CT-07",
+        "CT-08",
+        "CT-09",
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "按受影响风险补验真实DB/Redis/多实例/协议，区分单测mock与真实上游；记录性能比较和剩余验收限制。",
+      "retirement_acceptance": "不新增验证平台，不拿生产未验收冒充整体通过。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-26",
+      "title": "品牌交付与开发收尾",
+      "role": "release_integrator",
+      "depends_on": [
+        "WP-25"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "docs/CUSTOMIZATION_RELEASE_NOTES.md",
+        "docs/customization/**"
+      ],
+      "legacy_read_paths": [
+        "docs/CHANGE_DELIVERY.md"
+      ],
+      "integration_paths": [],
+      "requirements": [
+        "REQ-16",
+        "REQ-17",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "按实时政策完成三品牌共享树、单一定制、恢复备份、精确lease、远端和本地核验；上线/迁移独立。 当前三品牌refs按迁移期规则交付；目标同角色统一制品由独立部署profile提供品牌，发布阶段不再实现新配置逻辑。",
+      "retirement_acceptance": "清理本任务临时资源，保留必要交付恢复与精简证据，保护并行工作。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-27",
+      "title": "统一项目身份与部署品牌参数",
+      "role": "deployment_worker",
+      "depends_on": [
+        "WP-01",
+        "WP-20",
+        "WP-21",
+        "WP-22"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.2",
+      "write_paths": [
+        "deploy/docker-compose*.yml",
+        "deploy/.env.example",
+        "deploy/config.example.yaml",
+        "deploy/README.md"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/brand.go",
+        "frontend/src/config/brand.ts",
+        "deploy/docker-compose.yml",
+        "scripts/release/channels.json",
+        "scripts/release/plan.py"
+      ],
+      "integration_paths": [
+        "backend/internal/service/brand.go",
+        "frontend/src/config/brand.ts",
+        "frontend/index.html",
+        "frontend/vite.config.ts",
+        "scripts/release/channels.json",
+        "scripts/release/plan.py"
+      ],
+      "requirements": [
+        "REQ-09",
+        "REQ-11",
+        "REQ-13",
+        "REQ-15",
+        "REQ-16",
+        "REQ-17",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-08",
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "按BRANDING统一项目名sub2api，将镜像/容器/项目等部署输入中性化并复用网站设置；保留旧有效设置、卷挂载和更新来源，验证同角色同版本制品可用于两个独立品牌配置。",
+      "retirement_acceptance": "替换既有模板而非另建平行部署器；旧品牌变量/fallback/硬编码与广告专属内容有退出证据，许可/来源、持久身份及当前发布权限保留。",
+      "acceptance": [
+        "AT-38至AT-43的静态、设置、制品和部署风险有分级证据，未运行项明确标记",
+        "公共身份/构建/渠道由集成者串行接入WP-23，之后才进入WP-24/25验收，不在WP-26发布后补代码",
+        "按HANDOFF提交实际diff、CS规则证据、旧变量和挂载迁移记录；不自行发镜像、部署或迁移生产数据"
+      ],
+      "evidence_status": "not_run"
+    }
+  ],
+  "runtime_behavior_revision": "ce58a16ee67305575a704cef304b9c2b1959cb75",
+  "coding_standard": {
+    "version": "1.1",
+    "document": "CODING_STANDARDS.md",
+    "scope": "new and actually modified code; no unrelated repository-wide rewrite",
+    "review": "record applicable CS rules, checks and narrowly justified exceptions in HANDOFF"
+  },
+  "required_reading": [
+    "REQUIREMENTS.md",
+    "CONTRACTS.md",
+    "CODING_STANDARDS.md",
+    "COLLABORATION.md",
+    "BRANDING.md"
+  ],
+  "brand_contract": {
+    "document": "BRANDING.md",
+    "project_name": "sub2api",
+    "target": "single codebase and role artifact; deployment parameters plus runtime site settings",
+    "implementation_status": "planned",
+    "current_branch_policy": "transitional delivery only"
+  }
+}

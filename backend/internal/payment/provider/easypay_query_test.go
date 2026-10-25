@@ -21,6 +21,7 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 		wantTradeNo string
 		wantAmount  float64
 		wantErr     bool
+		merchant    string
 	}{
 		{
 			name:        "top level trade success is paid",
@@ -91,6 +92,7 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 		},
 		{
 			name:        "string numeric status from PHP deployments is paid",
+			merchant:    "1001",
 			body:        `{"code":"1","msg":"查询订单号成功！","trade_no":"2026101600001","out_trade_no":"order-123","pid":"1001","money":"12.34","status":"1"}`,
 			wantStatus:  payment.ProviderStatusPaid,
 			wantTradeNo: "2026101600001",
@@ -105,6 +107,7 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 		},
 		{
 			name:        "documented caihong response with integer pid and status is paid",
+			merchant:    "1001",
 			body:        `{"code":1,"msg":"查询订单号成功！","trade_no":"2016080622555342651","out_trade_no":"order-123","api_trade_no":"4200001","type":"alipay","pid":1001,"addtime":"2016-08-06 22:55:52","endtime":"2016-08-06 22:55:52","name":"VIP会员","money":"1.00","status":1,"param":"","buyer":""}`,
 			wantStatus:  payment.ProviderStatusPaid,
 			wantTradeNo: "2016080622555342651",
@@ -165,6 +168,9 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 			defer server.Close()
 
 			provider := newTestEasyPay(t, server.URL)
+			if tt.merchant != "" {
+				provider.config["pid"] = tt.merchant
+			}
 			resp, err := provider.QueryOrder(context.Background(), orderID)
 			if tt.wantErr {
 				if err == nil {
@@ -186,7 +192,7 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 			}
 			for key, want := range map[string]string{
 				"act":          "order",
-				"pid":          "pid-1",
+				"pid":          provider.config["pid"],
 				"key":          "pkey-1",
 				"out_trade_no": orderID,
 			} {

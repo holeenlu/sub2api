@@ -361,18 +361,26 @@ func TestOpenAIHTTP429StillUsesQuotaResetHeaders(t *testing.T) {
 	require.Greater(t, time.Until(blockedUntil), 6*24*time.Hour, "real HTTP 429 must retain the upstream quota reset")
 }
 
-func TestOpenAI429RetryDelayHonorsBoundedRetryAfter(t *testing.T) {
-	deadline := time.Now().Add(openAIOAuth429RetryWindow)
-	require.Equal(t, openAIOAuth429RetryDelay, openAIOAuth429SameAccountRetryDelay(nil, deadline))
-	require.Equal(t, openAIOAuth429MaxRetryDelay, openAIOAuth429SameAccountRetryDelay(http.Header{"Retry-After": []string{"90"}}, deadline))
+func TestOpenAI429RetryDelayHonorsRetryAfter(t *testing.T) {
+	require.Equal(t, openAIOAuth429RetryDelay, openAIOAuth429SameAccountRetryDelay(nil))
+	require.Equal(t, 90*time.Second, openAIOAuth429SameAccountRetryDelay(http.Header{"Retry-After": []string{"90"}}))
+	require.Equal(t, time.Duration(1<<63-1), openAIOAuth429SameAccountRetryDelay(http.Header{"Retry-After": []string{"99999999999999999999"}}))
+	require.Equal(t, openAIOAuth429RetryDelay, openAIOAuth429SameAccountRetryDelay(http.Header{"Retry-After": []string{"Inf"}}))
+	retryAt := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
+	before := time.Now()
+	delay := openAIOAuth429SameAccountRetryDelay(http.Header{"Retry-After": []string{retryAt.Format(http.TimeFormat)}})
+	require.GreaterOrEqual(t, delay, time.Until(retryAt))
+	require.LessOrEqual(t, delay, retryAt.Sub(before))
 }
 
 func TestOpenAI429FastPath_OpenCodeGoUsageLimitUsesMessageResetDuration(t *testing.T) {
 	repo := &rateLimit429AccountRepoStub{}
 	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	svc := &OpenAIGatewayService{rateLimitService: rateLimitService}
-	rateLimitService.SetAccountRuntimeBlocker(svc)
-	account := &Account{ID: 44, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	blocker := &runtimeBlockRecorder{}
+	rateLimitService.SetAccountRuntimeBlocker(blocker)
+	// Only an identified provider owns this quota; generic relayed OpenAI keys use fallback.
+	account := &Account{ID: 44, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey}
 	body := []byte(`{"type":"error","error":{"type":"GoUsageLimitError","message":"5-hour usage limit reached. Resets in 4hr 59min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_test/go"},"metadata":{"workspace":"wrk_test","limitName":"5 hour"}}`)
 
 	before := time.Now()
@@ -391,7 +399,8 @@ func TestOpenAI429FastPath_OpenCodeGoUsageLimitUsesMessageResetDuration(t *testi
 	expectedResetAfter := 4*time.Hour + 59*time.Minute
 	require.False(t, repo.lastRateLimitReset.Before(before.Add(expectedResetAfter-time.Second)))
 	require.False(t, repo.lastRateLimitReset.After(after.Add(expectedResetAfter)))
-	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	require.Equal(t, []*Account{account}, blocker.accounts)
+	require.Equal(t, []time.Time{repo.lastRateLimitReset}, blocker.until)
 }
 
 // TestOpenAI429FastPath_SkipsSparkShadow 外审第8轮 P1:spark 影子被选中后若 /responses 返回 429,

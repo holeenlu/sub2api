@@ -1,0 +1,410 @@
+{
+  "schema_version": 1,
+  "captured_date": "2026-10-25",
+  "source_commit": "750d4a16c7adaf558cf2c6ce7101975602832d7b",
+  "official_parent": "37067e8e340e9440d173a92b4faa05e8ce58368f",
+  "original_analysis_commit": "d1e6e924debeaaced1dc816f779198577703aee4",
+  "purpose": "Development documentation source inventory; not implementation verification or upstream reviewed watermark",
+  "source_paths": [
+    {
+      "path": "backend/cmd/server/wire.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "4b8924fe1405de05c05511af064f2940aa6e39f0175560737d3d9708afcd14ce",
+      "git_blob": "62275a4652e34424e71cc61ffb1e6689a8482117"
+    },
+    {
+      "path": "backend/internal/server/router.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "c3b2839b1b7c997e2b70cf5d0c73d9b5621b7b79bbb8cca31178a62f59f11c0d",
+      "git_blob": "47859b58b3c6a93fdb4539f8684899b511f4dd7f"
+    },
+    {
+      "path": "backend/internal/server/routes/gateway.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "983b6dea0976e66959e01f22a5212931163d100f682ae2d5a7d49c690bd6fb15",
+      "git_blob": "17aa97e2ecf22a99c3cff9e235e31e0b4a9cbc6c"
+    },
+    {
+      "path": "backend/internal/server/routes/auth.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "ed0ff1de2837ed627fd924d0e8145b11f486fc7d18910cb3d35a4bcbba57f376",
+      "git_blob": "c4a24af58cafb7677059616ec087531378a2246c"
+    },
+    {
+      "path": "backend/internal/server/routes/user.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "df3f58dea3077b7b94e2ebbaddb9c98b4d782943e0d02fa0b0a0463475d7b228",
+      "git_blob": "b2b0a681ccfd2c9ba5faee5d0901bbb62da6b217"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "f47ba197654aef23b33418af398b39b3aa1da6278154ebdcc80d5730b1e737b3",
+      "git_blob": "5c1c870b9daa5b86a29bbe548934150599bebf8f"
+    },
+    {
+      "path": "backend/internal/server/routes/vendor.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "492ca49845348db816836341e5b3e60c277dcc93396a35e3657fa2dcf9d8d8fc",
+      "git_blob": "72b1dda328ffbe2f695dfefc2d700f3845c207d1"
+    },
+    {
+      "path": "backend/internal/server/routes/payment.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "7d362c952610c4a76e52b64abc72afaf497e5b354450f4c21176fa57ba03785e",
+      "git_blob": "aec49d91b03fdb7644154f71adb57ae646f0de9b"
+    },
+    {
+      "path": "backend/internal/domain/platforms.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "255f65e97fce140479f79607847e599f4882639effebef19741460adf4313e56",
+      "git_blob": "1bb41813a0457a9a963bd51e5100b76b656c976f"
+    },
+    {
+      "path": "backend/internal/authz",
+      "exists": true,
+      "kind": "directory"
+    },
+    {
+      "path": "backend/internal/payment",
+      "exists": true,
+      "kind": "directory"
+    },
+    {
+      "path": "backend/internal/securityaudit",
+      "exists": true,
+      "kind": "directory"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "03e7c4d586e855cf72d327c5690e923bc42919c3692a0dfb99f1c3798a38850d",
+      "git_blob": "2726e73629741cac13cfe206b8ecf266d6a2b4c0"
+    },
+    {
+      "path": "backend/internal/service/openai_cloud_ingress.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "5e607e3e8061c0e7b4254cb1ca657d65398af8fbe1aacbeb966b865036b3ff1e",
+      "git_blob": "84d43fb6980dcb7cd79b0858b5c08d6e0bf82047"
+    },
+    {
+      "path": "backend/internal/service/openai_cloud_capabilities.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "49c560724ef369a33679e9ddeee4d1aacab70261a5e8d5f201568c4c88227d59",
+      "git_blob": "89c8ea7be43f82d6415a95733755cac5e5de2418"
+    },
+    {
+      "path": "backend/internal/service/openai_cloud_protocol.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "a334bdb739682cc9506bdb0c7db603e9a4235e16fb18f4b8f921a234b9e9e6f9",
+      "git_blob": "20ecf4c405773ff3b3d1880c11d78251e54a441e"
+    },
+    {
+      "path": "backend/internal/service/openai_first_output_timeout.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "9b9a814c803d465ba112790b31a1ddfa7ac652ddfdd4ab6b06ac1df2b41cc939",
+      "git_blob": "626da1b2d6735d6b94e8e5306e04af9ee7fb362f"
+    },
+    {
+      "path": "backend/internal/repository/usage_billing_repo.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "53f52399db3cbfa88cbb3210694e97878041905824f57413b37bc6396378f9d8",
+      "git_blob": "77af2284163de795c374616395a7cccfb7ba9d5b"
+    },
+    {
+      "path": "backend/ent/schema",
+      "exists": true,
+      "kind": "directory"
+    },
+    {
+      "path": "backend/migrations",
+      "exists": true,
+      "kind": "directory"
+    },
+    {
+      "path": "backend/.golangci.yml",
+      "exists": true,
+      "kind": "file",
+      "sha256": "4bff809c3462035e46013346c09de028f92f39929c443d42a8ac69e3b7531bc1",
+      "git_blob": "0ddcf5797e129816c739d4e283191d161d605641"
+    },
+    {
+      "path": "frontend/src/router",
+      "exists": true,
+      "kind": "directory"
+    },
+    {
+      "path": "frontend/src/features",
+      "exists": true,
+      "kind": "directory"
+    },
+    {
+      "path": "frontend/src/views",
+      "exists": true,
+      "kind": "directory"
+    },
+    {
+      "path": "frontend/src/api",
+      "exists": true,
+      "kind": "directory"
+    },
+    {
+      "path": "frontend/src/config",
+      "exists": true,
+      "kind": "directory"
+    },
+    {
+      "path": "frontend/package.json",
+      "exists": true,
+      "kind": "file",
+      "sha256": "1f3b993982393393f3a58cae50ee691f972f4b70cb770b803712cd42e14a7c4a",
+      "git_blob": "2e790d9f32a6d0a1889e4ff9fd5b6889c013c2c6"
+    },
+    {
+      "path": "deploy/docker-compose.yml",
+      "exists": true,
+      "kind": "file",
+      "sha256": "ac18877b256ee6d3fce440d4f4f907c47cbd61085707057c2d074b4c9458f694",
+      "git_blob": "15d291c65af6933e83132aab115a028b9388679f"
+    },
+    {
+      "path": "docs/CHANGE_DELIVERY.md",
+      "exists": true,
+      "kind": "file",
+      "sha256": "548074585a559edb6eee2ba33e6576cc51a79e259e4e21a50fbc458ca30b0886",
+      "git_blob": "7ffa91c8aa0d08273b8fe0df2a186e3c7265a13a"
+    },
+    {
+      "path": "docs/FORK_FEATURE_RETIREMENT.md",
+      "exists": true,
+      "kind": "file",
+      "sha256": "5f1dd16f424e18b5bd352f45b1bd9d9c2ad01c97acbd13948216677f69362ecc",
+      "git_blob": "b9916a10b7b674ab836465fa27a2ef73f9c79844"
+    },
+    {
+      "path": "docs/bps/REQUIREMENTS.md",
+      "exists": true,
+      "kind": "file",
+      "sha256": "688df7005958aa78759b0d8aa7a96e439641cc5b13d582e74d229bbdb2eacc90",
+      "git_blob": "a304212f7621e6dff83e3877c7a42cb94b5351b2"
+    },
+    {
+      "path": "docs/GATEWAY_PROTOCOL_LIMITS.md",
+      "exists": true,
+      "kind": "file",
+      "sha256": "18dbeb55a88b883a7baf2872404e96e2fb3c2bef9adb7975c64c52babe4a76cf",
+      "git_blob": "1e0f5ae3ab91f678c5dfc9035fa5acb8c441fc9d"
+    },
+    {
+      "path": "docs/cloud-parser/implementation-20261025.md",
+      "exists": true,
+      "kind": "file",
+      "sha256": "e42d34cfcaa43d572b6580ebc4f278697847502cdf5c593b0df9bda2841558f8",
+      "git_blob": "b7dbf542e225fc4da7561ecad2d4da633c87694e"
+    },
+    {
+      "path": "backend/internal/config/config.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "a94e8ce84d28f1845347ba3f1c9f81f952107c9fd46daebb8ec8d4ff51cc0f0f",
+      "git_blob": "bc318966f6b97cac30cacff05b1c87562280faf9"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_multiplex.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "d997c9dc40220f7823f4c4c8bd35c37ccecbd4401bc685b88114d2ca620c42c2",
+      "git_blob": "7f93b647a27bbc28c00e8fea953a7341165411bb"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_ws_writer.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "16625560a039b9e15c1ba17451af061eef8eef8da8458e36a081f1f1df3addca",
+      "git_blob": "b60e5ebacdd49d5492f0a9a33db3b9cff8efbe1b"
+    },
+    {
+      "path": "backend/internal/service/openai_responses_strict.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "8b65982ad6e426c77dee492125588f337345068456ebac1aedc86a2789c370f6",
+      "git_blob": "142a5ab88efdce5aa8932b8f9032d5059b210595"
+    },
+    {
+      "path": "backend/internal/service/openai_codex_model_metadata.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "2c946f82d8c01cb16b3b4f36f88138872e448f9f5101f5252af951adea309c07",
+      "git_blob": "3cf1ab67f3b54aa39861f4997a20d3c5cd862e3c"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_multiplex_test.go",
+      "exists": true,
+      "kind": "file",
+      "sha256": "c64a3286439c42723b9b61fc991ba7ffa25a08a05aa3d00c2ed17767fa8b6b65",
+      "git_blob": "b56c7a76a3c66afbc6add2c4f5c6511baf212c9f"
+    }
+  ],
+  "comparative_sources": [
+    {
+      "project": "codex-proxy-rs",
+      "commit": "84c0db26135dae694a5f5ac608ed6c04df049234",
+      "scope": "previous architecture report and selected core/provider/runtime boundaries; not full repository audit"
+    },
+    {
+      "project": "vm2api",
+      "commit": "6f188e94e10ff6ce9239b4c39f964da4c98916d7",
+      "scope": "Local checkout used for architecture study; this document does not advance source review watermarks",
+      "license_note": "Current SOURCE_ADAPTATIONS records existing written authorization covering project adaptation, three-brand distribution and commercial use; no source copied or authorization expanded by this task."
+    },
+    {
+      "project": "new-api",
+      "commit": "e835b1bfc43b565d625537830dbfb19328925134",
+      "scope": "previous architecture report and selected relaykit/billing boundaries; not full repository audit"
+    }
+  ],
+  "prepared_from_commit": "3e1f5275300450683f7cd434663e07f807c6aa82",
+  "incorporated_changes": [
+    "completed Cloud parser and capability plan",
+    "native Responses strict compatibility and WS multiplexing, per-stream cancellation/history and metadata scope"
+  ],
+  "runtime_behavior_revision": "ce58a16ee67305575a704cef304b9c2b1959cb75",
+  "documentation_integration_commit": "750d4a16c7adaf558cf2c6ce7101975602832d7b",
+  "historical_inputs": [
+    {
+      "path": "docs/OPENAI_CLOUD_PARSER_DESIGN.md",
+      "exists": true,
+      "kind": "file",
+      "sha256": "c1678f2ee5c6143359cf3d0b215df1f1ce742d311b6cfec5401215fd282bd74f",
+      "git_blob": "6191db547bef06d39001e204925bc36cd99e9c14",
+      "source_commit": "ce58a16ee67305575a704cef304b9c2b1959cb75",
+      "replaced_by": "docs/ENGINEERING.md#req-cloud"
+    },
+    {
+      "path": "docs/vendor-console/UNIFIED-PLATFORM-ACCEPTANCE.md",
+      "exists": true,
+      "kind": "file",
+      "sha256": "3e129237cd44f796f2f4614f0cdf29152fa818efdaff950fd9459f122567f89b",
+      "git_blob": "0485a5597bb4887f8ec8e2e0f9737a379de606b5",
+      "source_commit": "ce58a16ee67305575a704cef304b9c2b1959cb75",
+      "replaced_by": "docs/ENGINEERING.md#req-vendor"
+    }
+  ],
+  "coding_standard_inputs": {
+    "version": "1.1",
+    "source_commit": "abaab4811bb6e2daa44708bc8e731c3c857f9cb1",
+    "files": [
+      {
+        "path": "backend/.golangci.yml",
+        "git_blob": "0ddcf5797e129816c739d4e283191d161d605641",
+        "sha256": "4bff809c3462035e46013346c09de028f92f39929c443d42a8ac69e3b7531bc1"
+      },
+      {
+        "path": "frontend/.eslintrc.cjs",
+        "git_blob": "e5dba6d42af72c178ccea09b52617861a4b3f9b8",
+        "sha256": "12f3ccc6cbf83af6fe69d71ebf89d37e7ad05f2501ffc9d1407857a7d9fe905e"
+      },
+      {
+        "path": "frontend/.eslintignore",
+        "git_blob": "552967b8c362e62695eb221ea3ac382efe651846",
+        "sha256": "09ae2cf13c9b912c6707b539506b112e6a8f60159fb165e52a4b6ea90f9ce37d"
+      },
+      {
+        "path": "frontend/tsconfig.json",
+        "git_blob": "82ae3f9f10d315b4056a1329233ff7ca87e3eb98",
+        "sha256": "f98ff6cf3dda571189c0220ab3a7e52305e393856650785be136edd403217fe6"
+      },
+      {
+        "path": "frontend/package.json",
+        "git_blob": "2e790d9f32a6d0a1889e4ff9fd5b6889c013c2c6",
+        "sha256": "1f3b993982393393f3a58cae50ee691f972f4b70cb770b803712cd42e14a7c4a"
+      }
+    ],
+    "verification": "Configuration read and documentation review only; tools not executed and coverage not upgraded by this change."
+  },
+  "branding_inputs": {
+    "version": "1.0",
+    "source_commit": "6be77b99bc0118ee3f34f7a6987edb4735497ed4",
+    "official_readme_commit": "37067e8e340e9440d173a92b4faa05e8ce58368f",
+    "project_name_target": "sub2api",
+    "files": [
+      {
+        "path": "backend/internal/service/brand.go",
+        "git_blob": "5a8b24cec79a19708547b20308eabccd2d46cd33",
+        "sha256": "ed2f8ed96ab04e6b75da52a3c114efd5fdcc53496097983e6d6fda2f3dc8bd50"
+      },
+      {
+        "path": "backend/internal/handler/dto/settings.go",
+        "git_blob": "940287d4973c442df3ac9a5879869aa8957ce3b1",
+        "sha256": "dd933539c70b7caa9fb8762c01f84e16bd3b2b6505b9d02b9d1606bcc489cc17"
+      },
+      {
+        "path": "frontend/src/config/brand.ts",
+        "git_blob": "b89432dc3b700aaaf56930feef72c72e0749311c",
+        "sha256": "9808952fa2d5cb670fd8774b72fe107a32e35036e094afaeb5d97513cef4233c"
+      },
+      {
+        "path": "frontend/src/utils/branding.ts",
+        "git_blob": "6254335701d7c234aa9621bd293480e785dc3603",
+        "sha256": "430efd0c6b60488ca55d7b1c496166d0dca36cbeaf97e79c1e9d2e7fb59d0601"
+      },
+      {
+        "path": "frontend/src/stores/app.ts",
+        "git_blob": "7cbe7bcd513c5706e6141ef43c26033be1d85166",
+        "sha256": "4aba1f91f5ff1b0bb42e60347338bf041d42c847fd5cd4565bbb595a36cd9376"
+      },
+      {
+        "path": "frontend/src/api/admin/settings.ts",
+        "git_blob": "d67c873b49e6376d2a4c2777994e3b6d9dbdf42b",
+        "sha256": "16039f58844b97873c8dfbd7013b88d6bc952b36be8230dd54e585c7d0f012a1"
+      },
+      {
+        "path": "frontend/src/api/client.ts",
+        "git_blob": "47eb1611c6cb81634d785d5458ce4faf3374d18d",
+        "sha256": "35934f530ae9821438221adc410253594a9153062df8096dbbeb9d3090e9a64b"
+      },
+      {
+        "path": "deploy/docker-compose.yml",
+        "git_blob": "15d291c65af6933e83132aab115a028b9388679f",
+        "sha256": "ac18877b256ee6d3fce440d4f4f907c47cbd61085707057c2d074b4c9458f694"
+      },
+      {
+        "path": "scripts/release/channels.json",
+        "git_blob": "3f5ad3f76fbab76c5441efe493fcabd5f06b3d1c",
+        "sha256": "348792412e7f0644ee2af5729b33e0c428acc0f9f98ed6a053726e09bac53145"
+      },
+      {
+        "path": "README.md",
+        "git_blob": "22c90e0997fb8b016aab7c0a61fb40e6c8f76226",
+        "sha256": "280675e2e779ff4cac898e01670d4f79d293275cef4924a11b03373247c9ba0b"
+      },
+      {
+        "path": "LICENSE",
+        "git_blob": "153d416dc8d2d60076698ec3cbfce34d91436a03",
+        "sha256": "a5681bf9b05db14d86776930017c647ad9e6e56ff6bbcfdf21e5848288dfaf1b"
+      }
+    ],
+    "observations": [
+      "existing public site settings can be reused",
+      "current source still has brand compile defaults and deployment hardcodes",
+      "official baseline README has a sponsor section; current selected ranges do not show the same section"
+    ],
+    "runtime_cleanup_done": false,
+    "deployment_parameters_implemented": false
+  }
+}

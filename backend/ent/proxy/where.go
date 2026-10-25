@@ -70,6 +70,36 @@ func DeletedAt(v time.Time) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldDeletedAt, v))
 }
 
+// VendorID applies equality check predicate on the "vendor_id" field. It's identical to VendorIDEQ.
+func VendorID(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldVendorID, v))
+}
+
+// CreatedBy applies equality check predicate on the "created_by" field. It's identical to CreatedByEQ.
+func CreatedBy(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldCreatedBy, v))
+}
+
+// VendorNotes applies equality check predicate on the "vendor_notes" field. It's identical to VendorNotesEQ.
+func VendorNotes(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldVendorNotes, v))
+}
+
+// RegionLabelCountryCode applies equality check predicate on the "region_label_country_code" field. It's identical to RegionLabelCountryCodeEQ.
+func RegionLabelCountryCode(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCity applies equality check predicate on the "region_label_city" field. It's identical to RegionLabelCityEQ.
+func RegionLabelCity(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldRegionLabelCity, v))
+}
+
+// ConfigVersion applies equality check predicate on the "config_version" field. It's identical to ConfigVersionEQ.
+func ConfigVersion(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldConfigVersion, v))
+}
+
 // Name applies equality check predicate on the "name" field. It's identical to NameEQ.
 func Name(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldName, v))
@@ -253,6 +283,341 @@ func DeletedAtIsNil() predicate.Proxy {
 // DeletedAtNotNil applies the NotNil predicate on the "deleted_at" field.
 func DeletedAtNotNil() predicate.Proxy {
 	return predicate.Proxy(sql.FieldNotNull(FieldDeletedAt))
+}
+
+// VendorIDEQ applies the EQ predicate on the "vendor_id" field.
+func VendorIDEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldVendorID, v))
+}
+
+// VendorIDNEQ applies the NEQ predicate on the "vendor_id" field.
+func VendorIDNEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldVendorID, v))
+}
+
+// VendorIDIn applies the In predicate on the "vendor_id" field.
+func VendorIDIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldVendorID, vs...))
+}
+
+// VendorIDNotIn applies the NotIn predicate on the "vendor_id" field.
+func VendorIDNotIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldVendorID, vs...))
+}
+
+// VendorIDGT applies the GT predicate on the "vendor_id" field.
+func VendorIDGT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldVendorID, v))
+}
+
+// VendorIDGTE applies the GTE predicate on the "vendor_id" field.
+func VendorIDGTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldVendorID, v))
+}
+
+// VendorIDLT applies the LT predicate on the "vendor_id" field.
+func VendorIDLT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldVendorID, v))
+}
+
+// VendorIDLTE applies the LTE predicate on the "vendor_id" field.
+func VendorIDLTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldVendorID, v))
+}
+
+// VendorIDIsNil applies the IsNil predicate on the "vendor_id" field.
+func VendorIDIsNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldIsNull(FieldVendorID))
+}
+
+// VendorIDNotNil applies the NotNil predicate on the "vendor_id" field.
+func VendorIDNotNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotNull(FieldVendorID))
+}
+
+// CreatedByEQ applies the EQ predicate on the "created_by" field.
+func CreatedByEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldCreatedBy, v))
+}
+
+// CreatedByNEQ applies the NEQ predicate on the "created_by" field.
+func CreatedByNEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldCreatedBy, v))
+}
+
+// CreatedByIn applies the In predicate on the "created_by" field.
+func CreatedByIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldCreatedBy, vs...))
+}
+
+// CreatedByNotIn applies the NotIn predicate on the "created_by" field.
+func CreatedByNotIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldCreatedBy, vs...))
+}
+
+// CreatedByGT applies the GT predicate on the "created_by" field.
+func CreatedByGT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldCreatedBy, v))
+}
+
+// CreatedByGTE applies the GTE predicate on the "created_by" field.
+func CreatedByGTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldCreatedBy, v))
+}
+
+// CreatedByLT applies the LT predicate on the "created_by" field.
+func CreatedByLT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldCreatedBy, v))
+}
+
+// CreatedByLTE applies the LTE predicate on the "created_by" field.
+func CreatedByLTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldCreatedBy, v))
+}
+
+// CreatedByIsNil applies the IsNil predicate on the "created_by" field.
+func CreatedByIsNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldIsNull(FieldCreatedBy))
+}
+
+// CreatedByNotNil applies the NotNil predicate on the "created_by" field.
+func CreatedByNotNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotNull(FieldCreatedBy))
+}
+
+// VendorNotesEQ applies the EQ predicate on the "vendor_notes" field.
+func VendorNotesEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldVendorNotes, v))
+}
+
+// VendorNotesNEQ applies the NEQ predicate on the "vendor_notes" field.
+func VendorNotesNEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldVendorNotes, v))
+}
+
+// VendorNotesIn applies the In predicate on the "vendor_notes" field.
+func VendorNotesIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldVendorNotes, vs...))
+}
+
+// VendorNotesNotIn applies the NotIn predicate on the "vendor_notes" field.
+func VendorNotesNotIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldVendorNotes, vs...))
+}
+
+// VendorNotesGT applies the GT predicate on the "vendor_notes" field.
+func VendorNotesGT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldVendorNotes, v))
+}
+
+// VendorNotesGTE applies the GTE predicate on the "vendor_notes" field.
+func VendorNotesGTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldVendorNotes, v))
+}
+
+// VendorNotesLT applies the LT predicate on the "vendor_notes" field.
+func VendorNotesLT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldVendorNotes, v))
+}
+
+// VendorNotesLTE applies the LTE predicate on the "vendor_notes" field.
+func VendorNotesLTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldVendorNotes, v))
+}
+
+// VendorNotesContains applies the Contains predicate on the "vendor_notes" field.
+func VendorNotesContains(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContains(FieldVendorNotes, v))
+}
+
+// VendorNotesHasPrefix applies the HasPrefix predicate on the "vendor_notes" field.
+func VendorNotesHasPrefix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasPrefix(FieldVendorNotes, v))
+}
+
+// VendorNotesHasSuffix applies the HasSuffix predicate on the "vendor_notes" field.
+func VendorNotesHasSuffix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasSuffix(FieldVendorNotes, v))
+}
+
+// VendorNotesEqualFold applies the EqualFold predicate on the "vendor_notes" field.
+func VendorNotesEqualFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEqualFold(FieldVendorNotes, v))
+}
+
+// VendorNotesContainsFold applies the ContainsFold predicate on the "vendor_notes" field.
+func VendorNotesContainsFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContainsFold(FieldVendorNotes, v))
+}
+
+// RegionLabelCountryCodeEQ applies the EQ predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCountryCodeNEQ applies the NEQ predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeNEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCountryCodeIn applies the In predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldRegionLabelCountryCode, vs...))
+}
+
+// RegionLabelCountryCodeNotIn applies the NotIn predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeNotIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldRegionLabelCountryCode, vs...))
+}
+
+// RegionLabelCountryCodeGT applies the GT predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeGT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCountryCodeGTE applies the GTE predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeGTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCountryCodeLT applies the LT predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeLT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCountryCodeLTE applies the LTE predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeLTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCountryCodeContains applies the Contains predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeContains(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContains(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCountryCodeHasPrefix applies the HasPrefix predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeHasPrefix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasPrefix(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCountryCodeHasSuffix applies the HasSuffix predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeHasSuffix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasSuffix(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCountryCodeEqualFold applies the EqualFold predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeEqualFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEqualFold(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCountryCodeContainsFold applies the ContainsFold predicate on the "region_label_country_code" field.
+func RegionLabelCountryCodeContainsFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContainsFold(FieldRegionLabelCountryCode, v))
+}
+
+// RegionLabelCityEQ applies the EQ predicate on the "region_label_city" field.
+func RegionLabelCityEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldRegionLabelCity, v))
+}
+
+// RegionLabelCityNEQ applies the NEQ predicate on the "region_label_city" field.
+func RegionLabelCityNEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldRegionLabelCity, v))
+}
+
+// RegionLabelCityIn applies the In predicate on the "region_label_city" field.
+func RegionLabelCityIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldRegionLabelCity, vs...))
+}
+
+// RegionLabelCityNotIn applies the NotIn predicate on the "region_label_city" field.
+func RegionLabelCityNotIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldRegionLabelCity, vs...))
+}
+
+// RegionLabelCityGT applies the GT predicate on the "region_label_city" field.
+func RegionLabelCityGT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldRegionLabelCity, v))
+}
+
+// RegionLabelCityGTE applies the GTE predicate on the "region_label_city" field.
+func RegionLabelCityGTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldRegionLabelCity, v))
+}
+
+// RegionLabelCityLT applies the LT predicate on the "region_label_city" field.
+func RegionLabelCityLT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldRegionLabelCity, v))
+}
+
+// RegionLabelCityLTE applies the LTE predicate on the "region_label_city" field.
+func RegionLabelCityLTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldRegionLabelCity, v))
+}
+
+// RegionLabelCityContains applies the Contains predicate on the "region_label_city" field.
+func RegionLabelCityContains(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContains(FieldRegionLabelCity, v))
+}
+
+// RegionLabelCityHasPrefix applies the HasPrefix predicate on the "region_label_city" field.
+func RegionLabelCityHasPrefix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasPrefix(FieldRegionLabelCity, v))
+}
+
+// RegionLabelCityHasSuffix applies the HasSuffix predicate on the "region_label_city" field.
+func RegionLabelCityHasSuffix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasSuffix(FieldRegionLabelCity, v))
+}
+
+// RegionLabelCityEqualFold applies the EqualFold predicate on the "region_label_city" field.
+func RegionLabelCityEqualFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEqualFold(FieldRegionLabelCity, v))
+}
+
+// RegionLabelCityContainsFold applies the ContainsFold predicate on the "region_label_city" field.
+func RegionLabelCityContainsFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContainsFold(FieldRegionLabelCity, v))
+}
+
+// ConfigVersionEQ applies the EQ predicate on the "config_version" field.
+func ConfigVersionEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldConfigVersion, v))
+}
+
+// ConfigVersionNEQ applies the NEQ predicate on the "config_version" field.
+func ConfigVersionNEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldConfigVersion, v))
+}
+
+// ConfigVersionIn applies the In predicate on the "config_version" field.
+func ConfigVersionIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldConfigVersion, vs...))
+}
+
+// ConfigVersionNotIn applies the NotIn predicate on the "config_version" field.
+func ConfigVersionNotIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldConfigVersion, vs...))
+}
+
+// ConfigVersionGT applies the GT predicate on the "config_version" field.
+func ConfigVersionGT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldConfigVersion, v))
+}
+
+// ConfigVersionGTE applies the GTE predicate on the "config_version" field.
+func ConfigVersionGTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldConfigVersion, v))
+}
+
+// ConfigVersionLT applies the LT predicate on the "config_version" field.
+func ConfigVersionLT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldConfigVersion, v))
+}
+
+// ConfigVersionLTE applies the LTE predicate on the "config_version" field.
+func ConfigVersionLTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldConfigVersion, v))
 }
 
 // NameEQ applies the EQ predicate on the "name" field.
