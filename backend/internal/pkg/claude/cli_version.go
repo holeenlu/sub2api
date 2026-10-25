@@ -8,13 +8,13 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// CLIVersionEnv 是 CLICurrentVersion 的可选运维覆盖。
+// CLIVersionEnv 是身份跟踪/兼容路径的可选运维版本覆盖。
 //
 // 存在的理由：Anthropic 会对新模型设客户端版本下限（例如 claude-fable-5-1 要求
 // claude-cli >= 2.1.251），命中时上游直接返回
 // `Claude Code X.Y.Z does not support this model; version A.B.C or newer is required`。
-// 在没有本开关之前，这类模型必须等 sub2api 发一个新版本才能使用，
-// 而改动本身只是一个常量。xai 包的 XAI_GROK_CLI_VERSION 已经是同样的做法。
+// 此覆盖不升级生成请求的 mimic 协议模板；新模型若要求更高版本，仍须先
+// 采样并升级已验证模板，不能仅换 UA 而继续使用旧 CCH/SDK/runtime。
 const CLIVersionEnv = "SUB2API_CLAUDE_CLI_VERSION"
 
 // resolvedCLIVersion 在包初始化时解析一次。
@@ -25,10 +25,9 @@ const CLIVersionEnv = "SUB2API_CLAUDE_CLI_VERSION"
 // 被上游判为非正版客户端。
 var resolvedCLIVersion = resolveCLIVersion(os.Getenv(CLIVersionEnv))
 
-// CLIVersion 返回对外伪装的 Claude Code CLI 版本号（三段 semver）。
-//
-// 所有需要该版本号的位置都必须走本函数，不要直接引用 CLICurrentVersion——
-// 后者只是"没有覆盖时的内置基线"。
+// CLIVersion 返回身份跟踪/兼容路径的配置版本号（三段 semver）。
+// 生成的 mimic 请求固定使用 CLICurrentVersion 的已验证 CCH/SDK 模板，
+// 不跟随版本字符串覆盖；升级该模板需要同时重新验证协议。
 func CLIVersion() string {
 	return resolvedCLIVersion
 }

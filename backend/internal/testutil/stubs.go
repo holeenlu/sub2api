@@ -94,6 +94,10 @@ type StubGatewayCache struct{}
 func (c StubGatewayCache) GetSessionAccountID(_ context.Context, _ int64, _ string) (int64, error) {
 	return 0, nil
 }
+func (c StubGatewayCache) CompareAndRefreshSessionAccountID(context.Context, int64, string, int64, time.Duration, bool) (bool, error) {
+	return true, nil
+}
+
 func (c StubGatewayCache) SetSessionAccountID(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
 	return nil
 }
@@ -101,6 +105,15 @@ func (c StubGatewayCache) RefreshSessionTTL(_ context.Context, _ int64, _ string
 	return nil
 }
 func (c StubGatewayCache) DeleteSessionAccountID(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+func (c StubGatewayCache) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, nil
+}
+func (c StubGatewayCache) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
+	return true, nil
+}
+func (c StubGatewayCache) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
 	return nil
 }
 
@@ -133,8 +146,8 @@ var _ service.SessionLimitCache = StubSessionLimitCache{}
 
 type StubSessionLimitCache struct{}
 
-func (c StubSessionLimitCache) RegisterSession(_ context.Context, _ int64, _ string, _ int, _ time.Duration) (bool, error) {
-	return true, nil
+func (c StubSessionLimitCache) RegisterSession(_ context.Context, _ int64, _ string, _ int, _ time.Duration) (service.SessionRegistration, error) {
+	return service.SessionRegistration{Allowed: true, Created: true}, nil
 }
 func (c StubSessionLimitCache) RefreshSession(_ context.Context, _ int64, _ string, _ time.Duration) error {
 	return nil
@@ -159,4 +172,19 @@ func (c StubSessionLimitCache) SetWindowCost(_ context.Context, _ int64, _ float
 }
 func (c StubSessionLimitCache) GetWindowCostBatch(_ context.Context, _ []int64) (map[int64]float64, error) {
 	return nil, nil
+}
+
+func (c StubSessionLimitCache) GetSessionAdmissionBatch(_ context.Context, ids []int64, _ string, _ map[int64]time.Duration) (map[int64]service.SessionAdmission, error) {
+	result := make(map[int64]service.SessionAdmission, len(ids))
+	for _, id := range ids {
+		result[id] = service.SessionAdmission{Known: true}
+	}
+	return result, nil
+}
+
+func (c StubGatewayCache) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (c StubGatewayCache) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
 }

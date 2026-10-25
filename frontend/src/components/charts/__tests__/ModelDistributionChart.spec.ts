@@ -22,7 +22,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.metricTokens': 'By Tokens',
   'admin.dashboard.metricActualCost': 'By Actual Cost',
   'admin.dashboard.noDataAvailable': 'No data available',
-  'admin.redeem.userPrefix': 'User #{id}',
+  'admin.users.userPrefix': 'User #{id}',
 }
 
 vi.mock('vue-i18n', async () => {
