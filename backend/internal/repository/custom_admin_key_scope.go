@@ -26,7 +26,7 @@ func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.Pa
 	if len(alternatives) == 0 {
 		return []service.Account{}, 0, nil
 	}
-	q := r.accountListFilteredQuery(platform, kind, status, search, 0, "").Where(dbaccount.Or(alternatives...))
+	q := r.accountListFilteredQuery(ctx, platform, kind, status, search, 0, "").Where(dbaccount.Or(alternatives...))
 	total, err := q.Clone().Count(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -90,6 +90,9 @@ func (r *accountRepository) ScopedAdminCommitted(ctx context.Context, id int64, 
 func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID int64, groupIDs []int64) error {
 	if dbent.TxFromContext(ctx) == nil {
 		return fmt.Errorf("受限分组写入需要数据库事务")
+	}
+	if err := validateVendorGroupBindings(ctx, r.sql, []int64{accountID}, groupIDs); err != nil {
+		return err
 	}
 	existing, err := r.loadAccountGroupIDs(ctx, accountID)
 	if err != nil {
@@ -173,7 +176,7 @@ func (r *accountRepository) ScopedAdminCodexCandidates(ctx context.Context, iden
 			ID          int64
 			Credentials json.RawMessage
 		}
-		err := r.accountListFilteredQuery(service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "").
+		err := r.accountListFilteredQuery(ctx, service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "").
 			Where(dbaccount.Or(scope...), match).Order(dbaccount.ByID(entsql.OrderDesc())).Limit(1).
 			Select(dbaccount.FieldID).Aggregate(func(s *entsql.Selector) string {
 			c := s.C(dbaccount.FieldCredentials)

@@ -1,14 +1,20 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"go.uber.org/zap"
 )
 
 const (
@@ -53,6 +59,7 @@ type openAIReasoningEffortPolicy struct {
 	maxEffort string
 	overLimit string
 	mappings  []ReasoningEffortMapping
+	applied   bool
 }
 
 // ReasoningEffortOverLimitError is returned when a group policy is set to deny
@@ -445,6 +452,28 @@ func WithOpenAIReasoningEffortPolicy(ctx context.Context, maxEffort string, mapp
 	return context.WithValue(ctx, openAIReasoningEffortPolicyContextKey{}, policy)
 }
 
+// WithAppliedReasoningEffortPolicy retains an ingress policy's ceiling for
+// final capability validation, without replaying mappings or changing omitted
+// defaults in a downstream protocol bridge (including BPS). Pending Messages
+// to OpenAI policies continue to use WithOpenAIReasoningEffortPolicy.
+func WithAppliedReasoningEffortPolicy(ctx context.Context, maxEffort, overLimit string, inbound []byte) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// Preserve the existing omitted-effort contract even when a bridge later
+	// materializes a model default. An explicit manual budget is intent too:
+	// its approximation must be checked after conversion to effort.
+	explicit := gjson.GetBytes(inbound, "thinking.type").String() == "enabled" && gjson.GetBytes(inbound, "thinking.budget_tokens").Exists()
+	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
+		field := gjson.GetBytes(inbound, path)
+		explicit = explicit || (field.Type == gjson.String && strings.TrimSpace(field.String()) != "")
+	}
+	if !explicit {
+		maxEffort = ""
+	}
+	return context.WithValue(ctx, openAIReasoningEffortPolicyContextKey{}, openAIReasoningEffortPolicy{maxEffort: maxEffort, overLimit: overLimit, applied: true})
+}
+
 // ApplyOpenAIReasoningEffortPolicyFromContext applies a policy previously bound
 // to the request. An unbound request is returned byte-for-byte unchanged.
 func ApplyOpenAIReasoningEffortPolicyFromContext(ctx context.Context, body []byte) ([]byte, bool, error) {
@@ -452,10 +481,96 @@ func ApplyOpenAIReasoningEffortPolicyFromContext(ctx context.Context, body []byt
 		return body, false, nil
 	}
 	policy, ok := ctx.Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy)
-	if !ok {
+	if !ok || policy.applied {
 		return body, false, nil
 	}
 	return ApplyOpenAIReasoningEffortPolicy(body, policy.maxEffort, policy.mappings, policy.overLimit)
+}
+
+// normalizeClaudeThinkingForUpstream runs after model mapping and the ingress
+// policy. Do not replay mappings here: chained mappings must apply only once.
+// Capability adaptation may raise xhigh to max, so the final effort must still
+// belong to the intersection of model capabilities and the group's ceiling.
+func normalizeClaudeThinkingForUpstream(ctx context.Context, body []byte, model string) ([]byte, error) {
+	result, err := claude.NormalizeThinking(body, model)
+	if err != nil {
+		return body, err
+	}
+	cap, known := claude.ThinkingCapabilitiesForModel(model)
+	if known && ctx != nil {
+		policy, bound := ctx.Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy)
+		maxRank, hasMax := reasoningEffortRank(policy.maxEffort)
+		effort := gjson.GetBytes(result, "output_config.effort").String()
+		rank, recognized := reasoningEffortRank(effort)
+		if bound && hasMax && recognized && rank > maxRank {
+			denied := &ReasoningEffortOverLimitError{Requested: effort, Max: policy.maxEffort}
+			if NormalizeMaxReasoningEffortOverLimit(policy.overLimit) == ReasoningEffortOverLimitDeny {
+				return body, denied
+			}
+			allowed := ""
+			for _, level := range cap.EffortLevels {
+				if rank, ok := reasoningEffortRank(level); ok && rank <= maxRank {
+					allowed = level
+				}
+			}
+			if allowed == "" {
+				return body, denied
+			}
+			result, err = sjson.SetBytes(result, "output_config.effort", allowed)
+			if err != nil {
+				return body, err
+			}
+		}
+	}
+	// Recheck mode/history constraints after a ceiling changes effective effort.
+	result, err = claude.NormalizeThinking(result, model)
+	if err != nil {
+		return body, err
+	}
+	if err := validateClaude55Request(result, model); err != nil {
+		return body, err
+	}
+	if !bytes.Equal(result, body) {
+		mode := func(b []byte) string {
+			switch v := gjson.GetBytes(b, "thinking.type").String(); v {
+			case "", "enabled", "disabled", "adaptive", "between_tools":
+				return v
+			default:
+				return "unrecognized"
+			}
+		}
+		clientEffort, ceiling := "", ""
+		if requested := RequestedReasoningEffortFromContext(ctx); requested != nil {
+			clientEffort = NormalizeMaxReasoningEffort(*requested)
+		}
+		if ctx != nil {
+			if policy, ok := ctx.Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy); ok {
+				ceiling = NormalizeMaxReasoningEffort(policy.maxEffort)
+			}
+		}
+		logger.FromContext(ctx).Info("gateway.claude_thinking_adapted",
+			zap.String("requested_effort", clientEffort), zap.String("policy_ceiling", ceiling),
+			zap.String("upstream_model", truncateString(model, maxReasoningEffortModelLen)),
+			zap.String("input_mode", mode(body)), zap.String("forwarded_mode", mode(result)),
+			zap.String("input_effort", NormalizeMaxReasoningEffort(gjson.GetBytes(body, "output_config.effort").String())),
+			zap.String("forwarded_effort", NormalizeMaxReasoningEffort(gjson.GetBytes(result, "output_config.effort").String())),
+			zap.Int64("forwarded_budget", gjson.GetBytes(result, "thinking.budget_tokens").Int()),
+			zap.Bool("budget_to_effort_approximation", mode(body) == "enabled" && mode(result) == "adaptive" && gjson.GetBytes(body, "thinking.budget_tokens").Exists() && gjson.GetBytes(body, "output_config.effort").String() == ""))
+	}
+	return result, nil
+}
+
+func writeClaudeThinkingError(c *gin.Context, err error, write func(*gin.Context, int, string, string)) {
+	if c == nil || err == nil || c.Writer.Written() {
+		return
+	}
+	var denied *ReasoningEffortOverLimitError
+	if errors.As(err, &denied) {
+		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+		write(c, http.StatusForbidden, "permission_error", err.Error())
+		return
+	}
+	write(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 }
 
 func mapReasoningEffort(raw string, mappings []ReasoningEffortMapping, requestModel string) (string, bool) {
