@@ -202,6 +202,11 @@ func multipartModelCandidates(contentType string, body []byte) (models, sessions
 }
 
 // isMultipartContentType 判断请求是否声明为 multipart/form-data。
+// IsMultipartContentType 判断 Content-Type 是否声明为 multipart/form-data。
+func IsMultipartContentType(contentType string) bool {
+	return isMultipartContentType(contentType)
+}
+
 func isMultipartContentType(contentType string) bool {
 	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(contentType))
 	return err == nil && strings.EqualFold(mediaType, "multipart/form-data")

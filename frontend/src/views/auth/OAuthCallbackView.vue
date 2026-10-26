@@ -54,17 +54,7 @@
               @keyup.enter="handleSubmitRegistration"
             />
           </div>
-          <div v-if="invitationRequired">
-            <label class="input-label">{{ t('auth.invitationCodeLabel') }}</label>
-            <input
-              v-model="invitationCode"
-              type="text"
-              class="input w-full"
-              :placeholder="t('auth.invitationCodePlaceholder')"
-              :disabled="isSubmitting"
-              @keyup.enter="handleSubmitRegistration"
-            />
-          </div>
+
           <p v-if="registrationError" class="text-sm text-red-600 dark:text-red-400">
             {{ registrationError }}
           </p>
@@ -158,11 +148,7 @@ import {
   persistOAuthTokenContext,
   type OAuthTokenResponse
 } from '@/api/auth'
-import {
-  clearAllAffiliateReferralCodes,
-  loadOAuthAffiliateCode,
-  oauthAffiliatePayload
-} from '@/utils/oauthAffiliate'
+
 
 const route = useRoute()
 const router = useRouter()
@@ -173,11 +159,9 @@ const authStore = useAuthStore()
 const isProcessing = ref(false)
 const isSubmitting = ref(false)
 const needsRegistrationCompletion = ref(false)
-const invitationRequired = ref(false)
 const registrationEmail = ref('')
 const password = ref('')
 const confirmPassword = ref('')
-const invitationCode = ref('')
 const registrationError = ref('')
 const pendingProvider = ref<'github' | 'google'>('github')
 const redirectTo = ref('/dashboard')
@@ -190,7 +174,6 @@ type EmailOAuthPendingCompletion = Partial<OAuthTokenResponse> & {
   redirect?: string
   email?: string
   resolved_email?: string
-  invitation_required?: boolean
 }
 
 const code = computed(() => (route.query.code as string) || '')
@@ -206,16 +189,11 @@ const fullUrl = computed(() => {
 const providerName = computed(() =>
   pendingProvider.value === 'google' ? 'Google' : 'GitHub'
 )
-const registrationHint = computed(() =>
-  invitationRequired.value
-    ? t('auth.oidc.invitationRequired', { providerName: providerName.value })
-    : t('auth.oidc.completeRegistration')
-)
+const registrationHint = computed(() => t('auth.oidc.completeRegistration'))
 const canSubmitRegistration = computed(() => {
   if (!registrationEmail.value.trim()) return false
   if (password.value.length < 6) return false
   if (password.value !== confirmPassword.value) return false
-  if (invitationRequired.value && !invitationCode.value.trim()) return false
   return true
 })
 
@@ -277,7 +255,6 @@ async function finalizeTokenResponse(tokenResponse: OAuthTokenResponse, redirect
   if (typeof window !== 'undefined') {
     window.sessionStorage.removeItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY)
   }
-  clearAllAffiliateReferralCodes()
   appStore.showSuccess(t('auth.loginSuccess'))
   await router.replace(sanitizeRedirectPath(redirect))
 }
@@ -302,8 +279,7 @@ async function resumePendingEmailOAuth() {
     }
     redirectTo.value = sanitizeRedirectPath(completionRedirect)
 
-    if (completion.error === 'invitation_required' || completion.error === 'registration_completion_required') {
-      invitationRequired.value = completion.error === 'invitation_required' || completion.invitation_required === true
+    if (completion.error === 'registration_completion_required') {
       registrationEmail.value = String(completion.resolved_email || completion.email || '').trim()
       needsRegistrationCompletion.value = true
       isProcessing.value = false
@@ -337,18 +313,14 @@ async function handleSubmitRegistration() {
     registrationError.value = t('auth.passwordsDoNotMatch')
     return
   }
-  const code = invitationCode.value.trim()
-  if (invitationRequired.value && !code) return
 
   isSubmitting.value = true
   try {
-    const payload: { password: string; invitation_code?: string; aff_code?: string } = {
+    const payload: { password: string } = {
       password: password.value,
-      ...oauthAffiliatePayload(loadOAuthAffiliateCode())
     }
-    if (invitationRequired.value) {
-      payload.invitation_code = code
-    }
+
+
     const { data } = await apiClient.post<OAuthTokenResponse>(
       `/auth/oauth/${pendingProvider.value}/complete-registration`,
       payload

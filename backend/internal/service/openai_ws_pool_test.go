@@ -1106,6 +1106,102 @@ func TestOpenAIWSConnPool_AcquireReplacesIncompatibleIdleWhenMatchingBusy(t *tes
 	require.Equal(t, 3, dialer.DialCount())
 }
 
+func TestOpenAIWSConnPool_RequiredResponseContext(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 2
+	pool := newOpenAIWSConnPool(cfg)
+	dialer := &openAIWSCountingDialer{}
+	pool.setClientDialerForTest(dialer)
+	account := &Account{ID: 1240, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	req := openAIWSAcquireRequest{Account: account, WSURL: "wss://example.com/v1/responses"}
+	lease, err := pool.Acquire(t.Context(), req)
+	require.NoError(t, err)
+	require.NoError(t, lease.WriteJSON(map[string]any{"type": "response.create"}, 0))
+	lease.ConfirmResponse("resp_parent")
+	connID := lease.ConnID()
+	require.True(t, lease.HasResponseContext("resp_parent"))
+	require.NoError(t, lease.PingWithTimeout(time.Second))
+	require.True(t, lease.HasResponseContext("resp_parent"), "ping does not advance response lineage")
+	lease.Release()
+
+	req.PreferredConnID, req.RequiredResponseID = connID, "resp_parent"
+	lease, err = pool.Acquire(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, connID, lease.ConnID())
+	require.NoError(t, lease.WriteJSON(map[string]any{"type": "response.create", "generate": false}, 0))
+	require.False(t, lease.HasResponseContext("resp_parent"), "even an unconfirmed warmup replaces the old cache generation")
+	lease.ConfirmResponse("resp_warmup")
+	lease.Release()
+
+	lease, err = pool.Acquire(t.Context(), req)
+	require.Nil(t, lease)
+	require.ErrorIs(t, err, errOpenAIWSResponseContextUnavailable)
+	require.ErrorIs(t, err, errOpenAIWSPreferredConnUnavailable)
+	require.Equal(t, 1, dialer.DialCount(), "an expired local response must never dial a replacement")
+
+	req.RequiredResponseID = "" // persisted or unknown scope does not require a local parent
+	lease, err = pool.Acquire(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, connID, lease.ConnID(), "a stale parent does not make a healthy socket unusable")
+	lease.Release()
+
+	req.RequiredResponseID, req.PreferredConnID = "resp_warmup", ""
+	lease, err = pool.Acquire(t.Context(), req)
+	require.Nil(t, lease)
+	require.ErrorIs(t, err, errOpenAIWSResponseContextUnavailable)
+	req.PreferredConnID, req.ForceNewConn = connID, true
+	lease, err = pool.Acquire(t.Context(), req)
+	require.Nil(t, lease)
+	require.ErrorIs(t, err, errOpenAIWSResponseContextUnavailable)
+	require.Equal(t, 1, dialer.DialCount())
+}
+
+func TestOpenAIWSConnPool_RequiredResponseRevalidatedAfterQueue(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 2
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSCountingDialer{})
+	account := &Account{ID: 1241, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	req := openAIWSAcquireRequest{Account: account, WSURL: "wss://example.com/v1/responses"}
+	owner, err := pool.Acquire(t.Context(), req)
+	require.NoError(t, err)
+	defer owner.Release()
+	require.NoError(t, owner.WriteJSON(map[string]any{"type": "response.create"}, 0))
+	owner.ConfirmResponse("resp_parent")
+	req.PreferredConnID, req.RequiredResponseID = owner.ConnID(), "resp_parent"
+	done := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	go func() {
+		lease, err := pool.Acquire(ctx, req)
+		if lease != nil {
+			lease.Release()
+		}
+		done <- err
+	}()
+	require.Eventually(t, func() bool { return owner.conn.waiters.Load() > 0 }, time.Second, time.Millisecond)
+	require.NoError(t, owner.WriteJSON(map[string]any{"type": "response.create"}, 0))
+	owner.ConfirmResponse("resp_newer")
+	owner.Release()
+	require.ErrorIs(t, <-done, errOpenAIWSResponseContextUnavailable, "a queued caller must recheck the cache after taking its lease")
+}
+
+func TestOpenAIWSConnLease_ReleasedLeaseCannotConfirmResponse(t *testing.T) {
+	conn := newOpenAIWSConn("response_context", 1, &openAIWSFakeConn{}, nil)
+	lease := &openAIWSConnLease{conn: conn}
+	require.NoError(t, lease.WriteJSON(map[string]any{"type": "response.create"}, 0))
+	lease.ConfirmResponse("resp_parent")
+	require.True(t, lease.HasResponseContext("resp_parent"))
+	lease.Release()
+	lease.ConfirmResponse("resp_stale_writer")
+	require.False(t, lease.HasResponseContext("resp_parent"))
+	require.True(t, conn.matchesResponseContext("resp_parent"))
+	require.False(t, conn.matchesResponseContext("resp_stale_writer"))
+}
+
 func TestOpenAIWSConnPool_AcquireForcePreferredConnUnavailable(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2

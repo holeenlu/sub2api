@@ -2,9 +2,10 @@ import { ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 
-export type AddMethod = 'oauth' | 'setup-token'
+export type AddMethod = 'oauth' | 'setup-token' | 'setup-token-manual'
 export type AuthInputMethod =
   | 'manual'
+  | 'setup_token'
   | 'cookie'
   | 'refresh_token'
   | 'mobile_refresh_token'
@@ -32,6 +33,26 @@ export interface TokenInfo {
   [key: string]: unknown
 }
 
+export function normalizeClaudeSetupToken(raw: string): string {
+  let token = raw.trim()
+  const assignment = token.match(/^export\s+CLAUDE_CODE_OAUTH_TOKEN\s*=\s*(.+)$/i)
+  if (assignment) token = assignment[1].trim()
+  if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+    token = token.slice(1, -1).trim()
+  }
+  return token
+}
+
+export function buildClaudeSetupTokenCredentials(raw: string): Record<string, unknown> | null {
+  const accessToken = normalizeClaudeSetupToken(raw)
+  if (!accessToken || !accessToken.startsWith('sk-ant-oat')) return null
+  return {
+    access_token: accessToken,
+    token_type: 'oauth',
+    scope: 'user:inference'
+  }
+}
+
 export function useAccountOAuth() {
   const appStore = useAppStore()
 
@@ -43,8 +64,11 @@ export function useAccountOAuth() {
   const loading = ref(false)
   const error = ref('')
 
+  let generation = 0
+
   // Reset state
   const resetState = () => {
+    generation++
     authUrl.value = ''
     authCode.value = ''
     sessionId.value = ''
@@ -58,6 +82,8 @@ export function useAccountOAuth() {
     addMethod: AddMethod,
     proxyId?: number | null
   ): Promise<boolean> => {
+    if (addMethod === 'setup-token-manual') return false
+    const epoch = ++generation
     loading.value = true
     authUrl.value = ''
     sessionId.value = ''
@@ -71,15 +97,17 @@ export function useAccountOAuth() {
           : '/admin/accounts/generate-setup-token-url'
 
       const response = await adminAPI.accounts.generateAuthUrl(endpoint, proxyConfig)
+      if (epoch !== generation) return false
       authUrl.value = response.auth_url
       sessionId.value = response.session_id
       return true
     } catch (err: any) {
+      if (epoch !== generation) return false
       error.value = err.response?.data?.detail || 'Failed to generate auth URL'
       appStore.showError(error.value)
       return false
     } finally {
-      loading.value = false
+      if (epoch === generation) loading.value = false
     }
   }
 

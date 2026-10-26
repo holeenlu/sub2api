@@ -80,11 +80,12 @@ var codexVersionModelPrefixes = []struct {
 }
 
 type codexTransformResult struct {
-	Modified        bool
-	NormalizedModel string
-	PromptCacheKey  string
-	ToolNameReverse map[string]string
-	Error           error
+	WebSearchHistoryToolAdded bool
+	Modified                  bool
+	NormalizedModel           string
+	PromptCacheKey            string
+	ToolNameReverse           map[string]string
+	Error                     error
 }
 
 type codexOAuthTransformOptions struct {
@@ -169,15 +170,8 @@ var openAICodexOAuthUnsupportedFields = append([]string{
 	"presence_penalty",
 }, openAIChatGPTInternalUnsupportedFields...)
 
-func applyCodexOAuthTransform(reqBody map[string]any, isCodexCLI bool, isCompact bool) codexTransformResult {
-	return applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
-		IsCodexCLI: isCodexCLI,
-		IsCompact:  isCompact,
-	})
-}
-
 func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuthTransformOptions) codexTransformResult {
-	result := codexTransformResult{}
+	result := codexTransformResult{Modified: normalizeOpenAIResponsesNativeAliases(reqBody)}
 	if normalizeOpenAIOAuthResponsesCompatibilityFields(reqBody) {
 		result.Modified = true
 	}
@@ -225,45 +219,6 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 			delete(reqBody, key)
 			result.Modified = true
 		}
-	}
-
-	// 请求带 reasoning 时补齐 include:["reasoning.encrypted_content"]，与真实 Codex 对齐
-	// （compact 端点形态不同，单独处理，此处跳过）。
-	if !opts.IsCompact && ensureCodexReasoningInclude(reqBody) {
-		result.Modified = true
-	}
-
-	// 兼容遗留的 functions 和 function_call，转换为 tools 和 tool_choice
-	if functionsRaw, ok := reqBody["functions"]; ok {
-		if functions, k := functionsRaw.([]any); k {
-			tools := make([]any, 0, len(functions))
-			for _, f := range functions {
-				tools = append(tools, map[string]any{
-					"type":     "function",
-					"function": f,
-				})
-			}
-			reqBody["tools"] = tools
-		}
-		delete(reqBody, "functions")
-		result.Modified = true
-	}
-
-	if fcRaw, ok := reqBody["function_call"]; ok {
-		if fcStr, ok := fcRaw.(string); ok {
-			// e.g. "auto", "none"
-			reqBody["tool_choice"] = fcStr
-		} else if fcObj, ok := fcRaw.(map[string]any); ok {
-			// e.g. {"name": "my_func"}
-			if name, ok := fcObj["name"].(string); ok && strings.TrimSpace(name) != "" {
-				reqBody["tool_choice"] = map[string]any{
-					"type": "function",
-					"name": name,
-				}
-			}
-		}
-		delete(reqBody, "function_call")
-		result.Modified = true
 	}
 
 	if normalizeCodexTools(reqBody) {
@@ -325,12 +280,17 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 			input = normalizedInput
 			result.Modified = true
 		}
-		input = filterCodexInputWithOptions(input, codexInputFilterOptions{
+		filtered, filteredChanged := filterCodexInputWithOptions(input, codexInputFilterOptions{
 			PreserveReferences: needsToolContinuation,
 			PreserveCallIDs:    opts.PreserveToolCallIDs,
 		})
+		if filteredChanged {
+			input = filtered
+			result.Modified = true
+		}
+		// Normalizers above return the original slice when unchanged. Assigning
+		// that slice does not require re-encoding an otherwise unchanged request.
 		reqBody["input"] = input
-		result.Modified = true
 	} else if inputStr, ok := reqBody["input"].(string); ok {
 		// ChatGPT codex endpoint requires input to be a list, not a string.
 		// Convert string input to the expected message array format.
@@ -352,6 +312,12 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 	// Runs after input filtering so it sees the final replayed history. The
 	// compact endpoint has its own wire shape and is left untouched.
 	if !opts.IsCompact && ensureOpenAIOAuthWebSearchToolForHistory(reqBody, opts.ResponsesLite) {
+		result.WebSearchHistoryToolAdded = true
+		result.Modified = true
+	}
+	// Defaults must see the final tool declarations, including legacy functions,
+	// additional_tools and hosted tools required by replayed history.
+	if !opts.IsCompact && ensureCodexResponsesDefaults(reqBody) {
 		result.Modified = true
 	}
 
@@ -1239,6 +1205,9 @@ func normalizeOpenAIResponsesImageOnlyModel(reqBody map[string]any) bool {
 }
 
 func normalizeOpenAIModelForUpstream(account *Account, model string) string {
+	if account != nil && account.IsOpenAICloudConfigured() {
+		return strings.TrimSpace(model) // Cloud model/list is authoritative, without native Codex aliases.
+	}
 	if account == nil || account.UsesOpenAICodexProtocol() {
 		return normalizeCodexModel(model)
 	}
@@ -1351,6 +1320,17 @@ func extractSystemMessagesFromInput(reqBody map[string]any, omitPromoted bool) b
 		filteredInput = append(filteredInput, item)
 		modified = true
 	}
+	if omitPromoted && len(filteredInput) == 0 && len(systemTexts) > 0 {
+		// Instructions alone do not supply a Responses input. Preserve the
+		// client's original task as developer messages when promotion would
+		// remove every item; do not manufacture a user prompt.
+		for _, item := range input {
+			if m, ok := item.(map[string]any); ok && m["role"] == "system" {
+				m["role"] = "developer"
+			}
+		}
+		filteredInput = input
+	}
 	if omitPromoted && len(filteredInput) != len(input) {
 		reqBody["input"] = filteredInput
 	}
@@ -1430,7 +1410,54 @@ func defaultCodexSynthInstructions(model string) string {
 	return "You are a helpful coding assistant."
 }
 
-// ensureCodexReasoningInclude 在请求带 reasoning 时补齐 include:["reasoning.encrypted_content"]。
+// ensureCodexResponsesDefaults adapts huoji120/sub4api a3eaf63a defaults to
+// the final local OAuth body, after its existing tool and history transforms.
+// Explicit caller values and the Lite normalizer's overrides take precedence.
+func ensureCodexResponsesDefaults(reqBody map[string]any) bool {
+	if reqBody == nil {
+		return false
+	}
+	changed := false
+	if _, exists := reqBody["reasoning"]; !exists {
+		reqBody["reasoning"] = map[string]any{}
+		changed = true
+	}
+	if _, exists := reqBody["tool_choice"]; !exists {
+		reqBody["tool_choice"] = "auto"
+		changed = true
+	}
+	if _, exists := reqBody["parallel_tool_calls"]; !exists {
+		reqBody["parallel_tool_calls"] = openAIRequestBodyHasToolsMap(reqBody)
+		changed = true
+	}
+	if _, exists := reqBody["include"]; !exists {
+		reqBody["include"] = []any{"reasoning.encrypted_content"}
+		changed = true
+	} else if ensureCodexReasoningInclude(reqBody) {
+		changed = true
+	}
+	return changed
+}
+
+func openAIRequestBodyHasToolsMap(reqBody map[string]any) bool {
+	if tools, ok := reqBody["tools"].([]any); ok && len(tools) > 0 {
+		return true
+	}
+	input, _ := reqBody["input"].([]any)
+	for _, raw := range input {
+		item, ok := raw.(map[string]any)
+		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "additional_tools" {
+			continue
+		}
+		if tools, ok := item["tools"].([]any); ok && len(tools) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureCodexReasoningInclude is shared by the final OAuth defaults and the
+// WS-to-HTTP bridge, which intentionally bypasses the full OAuth transform.
 //
 // 真实 Codex 在 reasoning 存在时总会请求加密推理内容（ChatGPT/store=false 场景下用于上下文回放）。
 // 该函数为加法式、幂等：仅在 include 缺失或未包含该项时追加；对非数组的异常 include 不做破坏性改写。
@@ -1531,14 +1558,6 @@ type codexInputFilterOptions struct {
 	PreserveCallIDs    bool
 }
 
-// filterCodexInput 按需过滤 item_reference 与 id。
-// preserveReferences 为 true 时保持引用与 id，以满足续链请求对上下文的依赖。
-func filterCodexInput(input []any, preserveReferences bool) []any {
-	return filterCodexInputWithOptions(input, codexInputFilterOptions{
-		PreserveReferences: preserveReferences,
-	})
-}
-
 func normalizeCodexFilterCallID(itemType, id string, preserve bool) string {
 	if preserve && len(id) <= codexCallIDMaxLength {
 		return id
@@ -1605,91 +1624,31 @@ func codexInputCallIDs(input []any) map[string]struct{} {
 	return callIDs
 }
 
-func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []any {
-	filtered := make([]any, 0, len(input))
-	referenceIDMappings := codexItemReferenceIDMappings(input, opts.PreserveCallIDs)
-	inputItemIDs := codexInputItemIDs(input)
-	inputCallIDs := codexInputCallIDs(input)
-	for _, item := range input {
+func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) ([]any, bool) {
+	var filtered []any
+	changed := false
+	appendItem := func(index int, item any, itemChanged, keep bool) {
+		if !changed && (itemChanged || !keep) {
+			filtered = make([]any, 0, len(input))
+			filtered = append(filtered, input[:index]...)
+			changed = true
+		}
+		if changed && keep {
+			filtered = append(filtered, item)
+		}
+	}
+	var referenceIDMappings map[string]string
+	var inputItemIDs, inputCallIDs map[string]struct{}
+	referencesIndexed := false
+	for index, item := range input {
 		m, ok := item.(map[string]any)
 		if !ok {
-			filtered = append(filtered, item)
+			appendItem(index, item, false, true)
 			continue
 		}
 		typ, _ := m["type"].(string)
-
-		// chatgpt.com codex (OAuth path) runs with store=false (forced by
-		// applyCodexOAuthTransform). Replaying a reasoning item with its rs_*
-		// id but no encrypted_content 404s upstream ("Item with id 'rs_...'
-		// not found") — the 404 is triggered by the id lookup, not by the
-		// reasoning item itself. So strip the id (always, independent of
-		// PreserveReferences) yet keep the item: under store=false
-		// encrypted_content is the official channel for carrying reasoning
-		// context across turns, and dropping the whole item silently degrades
-		// multi-turn agent reasoning. Preserve encrypted_content/content/
-		// summary and every other field verbatim. Upstream additionally
-		// requires a summary field — a missing one is rejected with 400
-		// "Missing required parameter 'input[N].summary'" — so backfill an
-		// empty array when it is absent. Contracts verified end-to-end against
-		// chatgpt.com codex (gpt-5.5); see issue #1957.
-		// compaction_summary items (cmp_*) are the other encrypted_content
-		// carrier. Verified against the live backend: they require
-		// encrypted_content (a missing one is rejected with 400), and with it
-		// present the cmp_* id does not 404 whether kept or stripped. Being
-		// neither reasoning nor tool calls, they flow through the generic path
-		// below (id stripped when !PreserveReferences, encrypted_content
-		// preserved either way), which is safe and needs no special-casing.
-		if typ == "reasoning" {
-			newItem := make(map[string]any, len(m))
-			for key, value := range m {
-				if key == "id" || key == "call_id" {
-					// rs_* id replayed under store=false 404s; strip it.
-					continue
-				}
-				newItem[key] = value
-			}
-			if summary, ok := newItem["summary"]; !ok || summary == nil {
-				// Upstream requires a summary field; an empty array satisfies it.
-				newItem["summary"] = []any{}
-			}
-			filtered = append(filtered, newItem)
-			continue
-		}
-
-		// 仅修正真正的 tool/function call 标识，避免误改普通 message/reasoning id；
-		// 若 item_reference 指向 legacy call_* 标识，则仅修正该引用本身。
-		fixCallIDPrefix := func(id string) string {
-			return normalizeCodexFilterCallID(typ, id, opts.PreserveCallIDs)
-		}
-
-		if typ == "item_reference" {
-			if !opts.PreserveReferences {
-				continue
-			}
-			newItem := make(map[string]any, len(m))
-			for key, value := range m {
-				newItem[key] = value
-			}
-			if id, ok := newItem["id"].(string); ok && strings.HasPrefix(strings.TrimSpace(id), "call_") {
-				trimmedID := strings.TrimSpace(id)
-				_, referencesExistingItem := inputItemIDs[trimmedID]
-				if !referencesExistingItem {
-					if normalizedID, mapped := referenceIDMappings[trimmedID]; mapped {
-						newItem["id"] = normalizedID
-					} else if _, hasSameTurnCall := inputCallIDs[trimmedID]; !hasSameTurnCall {
-						// A bare call_* reference is a legacy function-call identifier.
-						// Normalize it even when its call item lives in an earlier turn.
-						newItem["id"] = normalizeCodexCallID(trimmedID)
-					}
-				}
-			}
-			filtered = append(filtered, newItem)
-			continue
-		}
-
 		newItem := m
 		copied := false
-		// 仅在需要修改字段时创建副本，避免直接改写原始输入。
 		ensureCopy := func() {
 			if copied {
 				return
@@ -1699,6 +1658,57 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 				newItem[key] = value
 			}
 			copied = true
+		}
+		remove := func(key string) {
+			if _, exists := newItem[key]; exists {
+				ensureCopy()
+				delete(newItem, key)
+			}
+		}
+
+		// store=false cannot resolve a replayed reasoning ID. Preserve its
+		// encrypted content, summary and extensions, and add the required
+		// summary only when absent; already valid reasoning needs no copy.
+		if typ == "reasoning" {
+			remove("id")
+			remove("call_id")
+			if summary, ok := newItem["summary"]; !ok || summary == nil {
+				ensureCopy()
+				newItem["summary"] = []any{}
+			}
+			appendItem(index, newItem, copied, true)
+			continue
+		}
+
+		if typ == "item_reference" {
+			if !opts.PreserveReferences {
+				appendItem(index, nil, false, false)
+				continue
+			}
+			if id, ok := m["id"].(string); ok && strings.HasPrefix(strings.TrimSpace(id), "call_") {
+				if !referencesIndexed {
+					referenceIDMappings = codexItemReferenceIDMappings(input, opts.PreserveCallIDs)
+					inputItemIDs = codexInputItemIDs(input)
+					inputCallIDs = codexInputCallIDs(input)
+					referencesIndexed = true
+				}
+				trimmedID := strings.TrimSpace(id)
+				if _, referencesExistingItem := inputItemIDs[trimmedID]; !referencesExistingItem {
+					normalizedID, mapped := referenceIDMappings[trimmedID]
+					if !mapped {
+						if _, hasSameTurnCall := inputCallIDs[trimmedID]; !hasSameTurnCall {
+							normalizedID = normalizeCodexCallID(trimmedID)
+							mapped = true
+						}
+					}
+					if mapped && normalizedID != id {
+						ensureCopy()
+						newItem["id"] = normalizedID
+					}
+				}
+			}
+			appendItem(index, newItem, copied, true)
+			continue
 		}
 
 		if isCodexToolCallItemType(typ) {
@@ -1710,48 +1720,39 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 					newItem["call_id"] = callID
 				}
 			}
-
 			if callID != "" {
-				fixedCallID := fixCallIDPrefix(callID)
-				if fixedCallID != callID {
+				if fixedCallID := normalizeCodexFilterCallID(typ, callID, opts.PreserveCallIDs); fixedCallID != callID {
 					ensureCopy()
 					newItem["call_id"] = fixedCallID
 				}
 			}
+		} else {
+			remove("call_id")
 		}
-
-		if !isCodexToolCallItemType(typ) {
-			ensureCopy()
-			delete(newItem, "call_id")
-		}
-
-		if codexInputItemRequiresName(typ) {
-			if strings.TrimSpace(firstNonEmptyString(m["name"])) == "" {
-				name := firstNonEmptyString(m["tool_name"])
-				if name == "" {
-					if function, ok := m["function"].(map[string]any); ok {
-						name = firstNonEmptyString(function["name"])
-					}
+		if codexInputItemRequiresName(typ) && strings.TrimSpace(firstNonEmptyString(m["name"])) == "" {
+			name := firstNonEmptyString(m["tool_name"])
+			if name == "" {
+				if function, ok := m["function"].(map[string]any); ok {
+					name = firstNonEmptyString(function["name"])
 				}
-				if name == "" {
-					name = "tool"
-				}
-				ensureCopy()
-				newItem["name"] = name
 			}
+			if name == "" {
+				name = "tool"
+			}
+			ensureCopy()
+			newItem["name"] = name
 		}
-
 		if !opts.PreserveReferences {
-			ensureCopy()
-			delete(newItem, "id")
+			remove("id")
 		} else if id, ok := m["id"].(string); ok && shouldStripOpenAIResponsesInputItemID(typ, id) {
-			ensureCopy()
-			delete(newItem, "id")
+			remove("id")
 		}
-
-		filtered = append(filtered, newItem)
+		appendItem(index, newItem, copied, true)
 	}
-	return filtered
+	if !changed {
+		return input, false
+	}
+	return filtered, true
 }
 
 func isCodexToolCallItemType(typ string) bool {

@@ -13,8 +13,11 @@
 *.dylib
 backend/bin/
 backend/server
-backend/sub2api
+backend/tapmodels
 backend/main
+
+# Release binary produced by the local build/deploy kit
+/tapmodels
 
 # Go 测试二进制
 *.test
@@ -25,6 +28,8 @@ coverage.html
 
 # 依赖（使用 go mod）
 vendor/
+!backend/ent/vendor/
+!backend/ent/vendor/*.go
 
 # Go 编译缓存
 backend/.gocache/
@@ -124,15 +129,54 @@ CLAUDE.md
 scripts
 !backend/scripts/
 !backend/scripts/resolve-version.sh
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-flare/scripts/
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-flare/scripts/generate.py
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-sunburst/scripts/
+!frontend/public/downloads/tokensavy-image-skills/gpt-image-sunburst/scripts/generate.py
 .code-review-state
 #openspec/
 code-reviews/
 AGENTS.md
+!/AGENTS.md
 backend/cmd/server/server
 deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
 docs/*
+!docs/ARCHITECTURE_REBUILD.md
+!docs/architecture-rebuild/
+!docs/CLAUDE_REQUEST_FINGERPRINT.md
+!docs/GATEWAY_PROTOCOL_LIMITS.md
+!docs/vendor-console/
+docs/vendor-console/*
+!docs/vendor-console/PORTAL-ROUTING.md
+!docs/vendor-console/API-ROUTES.md
+!docs/vendor-console/prototype.html
+!docs/vendor-console/prototype.css
+!docs/vendor-console/prototype.js
+!docs/vendor-console/prototype-admin.js
+!docs/vendor-console/prototype-proxies.js
+!docs/vendor-console/prototype-hierarchy.js
+!docs/vendor-console/prototype-hierarchy-model.js
+!docs/vendor-console/prototype-translations.js
+!docs/vendor-console/generate-prototype-locales.cjs
+!docs/vendor-console/tests/
+!docs/vendor-console/tests/hierarchy-model.test.cjs
+!docs/bps/
+docs/bps/*
+!docs/bps/REQUIREMENTS.md
+!docs/bps/source-inventory.json
+!docs/bps/upstream-changes.md
+!docs/bps/integration-state.json
+!docs/CHANGE_DELIVERY.md
+!docs/GROUP_MODEL_CANDIDATES.md
+!docs/FORK_FEATURE_RETIREMENT.md
+!docs/RANXI2001_TICKET_INTEGRATION.md
+!tools/tests/
+!tools/tests/test_change_delivery.py
+tools/__pycache__/
+tools/tests/__pycache__/
+!docs/ANTIGRAVITY_ATTRIBUTION_429.md
 !docs/admin-api-keys.md
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
@@ -140,8 +184,7 @@ docs/*
 !docs/ASYNC_IMAGE_TASKS.md
 !docs/BATCH_IMAGE_MVP.md
 !docs/COMPOSITE_GROUPS.md
-!docs/PLUGIN_DEVELOPMENT.md
-!docs/channel-monitor-v2-safe-defaults.md
+# TapModels fork 自己的 CI／發版說明
 !docs/codex-credits.md
 !docs/legal/
 !docs/legal/*.md
@@ -162,3 +205,39 @@ issues/
 .vite/
 # 本地闭源插件开发目录及构建产物不进入 Sub2API 仓库
 /plugins/
+
+# convert-go.mjs 的「已轉換」標記；只該出現在建置用的副本樹，不進版控
+.zh-tw-converted
+
+# Python release/update tooling bytecode
+__pycache__/
+
+# Tokensavy generated deployment secrets and local binaries
+deploy/tokensavy/credentials.txt
+/backend/tokensavy
+/tokensavy
+
+
+# Read-only review for the independently integrated BPS adapter
+!/scripts/
+/scripts/*
+!/scripts/bps/
+/scripts/bps/*
+!/scripts/bps/upstream-review.py
+
+# Standalone account device export documentation
+!docs/ACCOUNT_TELEMETRY_DEVICE_EXPORT.md
+
+
+!docs/CODE_QUALITY_IMPLEMENTATION_2026-10-19.md
+
+# Current engineering documentation and traceability
+!docs/README.md
+!docs/ENGINEERING.md
+!docs/SOURCE_ADAPTATIONS.md
+!docs/customization/
+!docs/customization/documentation-audit.tsv
+!docs/customization/documentation-sources.tsv
+!docs/customization/engineering-files.tsv
+!docs/customization/engineering-routes.tsv
+!docs/customization/engineering-brand-overrides.tsv

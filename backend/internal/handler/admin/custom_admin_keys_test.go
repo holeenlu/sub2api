@@ -48,9 +48,10 @@ func TestScopedAdminKeyDeleteRecordHandler(t *testing.T) {
 		err        error
 		status     int
 	}{
-		{"仅列表移除", "admin", nil, 200},
-		{"未撤销或已移除", "admin", service.ErrScopedAdminKeyNotFound, 404},
+		{"仅列表移除", "super_admin", nil, 200},
+		{"未撤销或已移除", "super_admin", service.ErrScopedAdminKeyNotFound, 404},
 		{"普通用户拒绝", "user", nil, 403},
+		{"普通管理员拒绝", "admin", nil, 403},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &deleteScopedKeyRecordRepo{err: tc.err}
@@ -65,7 +66,7 @@ func TestScopedAdminKeyDeleteRecordHandler(t *testing.T) {
 			c.Set("user_role", tc.role)
 			h.DeleteScopedAdminKeyRecord(c)
 			require.Equal(t, tc.status, w.Code)
-			if tc.role != "admin" {
+			if tc.role != "super_admin" {
 				require.Empty(t, repo.id)
 			} else {
 				require.Equal(t, "key-1", repo.id)

@@ -67,20 +67,12 @@
     <p v-else-if="emailVerifyEnabled" class="text-xs text-gray-500 dark:text-dark-400">
       {{ t('auth.verificationCodeHint') }}
     </p>
-    <input
-      v-if="invitationCodeEnabled"
-      v-model="invitationCode"
-      :data-testid="`${testIdPrefix}-create-account-invitation-code`"
-      type="text"
-      class="input w-full"
-      :placeholder="t('auth.invitationCodePlaceholder')"
-      :disabled="isSubmitting"
-    />
+
     <button
       :data-testid="`${testIdPrefix}-create-account-submit`"
       type="button"
       class="btn btn-primary w-full"
-      :disabled="isSubmitting || !email.trim() || password.length < 6 || (invitationCodeEnabled && !invitationCode.trim()) || (turnstileEnabled && !turnstileToken)"
+      :disabled="isSubmitting || !email.trim() || password.length < 6 || (turnstileEnabled && !turnstileToken)"
       @click="handleSubmit"
     >
       {{ isSubmitting ? t('common.processing') : t('auth.createAccount') }}
@@ -110,7 +102,6 @@ export type PendingOAuthCreateAccountPayload = {
   turnstileToken?: string
   tencentCaptchaTicket?: string
   tencentCaptchaRandstr?: string
-  invitationCode?: string
 }
 
 const props = defineProps<{
@@ -131,12 +122,10 @@ const appStore = useAppStore()
 const email = ref('')
 const password = ref('')
 const verifyCode = ref('')
-const invitationCode = ref('')
 const isSendingCode = ref(false)
 const sendCodeError = ref('')
 const sendCodeSuccess = ref(false)
 const countdown = ref(0)
-const invitationCodeEnabled = ref(false)
 const emailVerifyEnabled = ref(true)
 const turnstileEnabled = ref(false)
 const turnstileSiteKey = ref('')
@@ -333,7 +322,6 @@ async function handleSubmit() {
           tencentCaptchaRandstr: tencentCaptchaRandstr.value
         }
       : {}),
-    invitationCode: invitationCode.value.trim() || undefined
   })
 
   if (actionCaptchaEnabled.value) {
@@ -348,7 +336,6 @@ function emitSwitchToBind() {
 onMounted(async () => {
   try {
     const settings = await getPublicSettings()
-    invitationCodeEnabled.value = settings.invitation_code_enabled === true
     emailVerifyEnabled.value = settings.email_verify_enabled !== false
     turnstileEnabled.value = settings.turnstile_enabled === true
     turnstileSiteKey.value = settings.turnstile_site_key || ''
@@ -360,7 +347,6 @@ onMounted(async () => {
     aliyunCaptchaPrefix.value = settings.aliyun_captcha_prefix || ''
     aliyunCaptchaRegion.value = settings.aliyun_captcha_region || 'cn'
   } catch {
-    invitationCodeEnabled.value = false
     emailVerifyEnabled.value = true
     turnstileEnabled.value = false
     turnstileSiteKey.value = ''
