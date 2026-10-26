@@ -3,6 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql/driver"
+	"github.com/stretchr/testify/require"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,4 +59,54 @@ func TestInsertSystemMetricsNullableIntegerMetrics(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestListJobHeartbeatsLoadsExpectedInterval(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	mock.ExpectQuery("SELECT[\\s\\S]*COALESCE\\(expected_interval_seconds, 0\\)[\\s\\S]*FROM ops_job_heartbeats").WillReturnRows(sqlmock.NewRows([]string{"job_name", "last_run_at", "last_success_at", "last_error_at", "last_error", "last_duration_ms", "last_result", "updated_at", "expected_interval_seconds"}).AddRow("ops_cleanup", now, now, nil, nil, 20, "ok", now, 86400))
+	jobs, err := (&opsRepository{db: db}).ListJobHeartbeats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].ExpectedIntervalSeconds != 86400 {
+		t.Fatalf("daily interval not loaded: %+v", jobs)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The SQL mock cannot detect PostgreSQL parameter inference (varchar vs text).
+// Exercise the actual repository statement and NULL-safe duplicate check.
+func TestInsertSystemMetricsPostgresParameterTypes(t *testing.T) {
+	_, db := vendorSupplyPostgres(t)
+	migration, err := os.ReadFile("../../migrations/033_ops_monitoring_vnext.sql")
+	require.NoError(t, err)
+	start := strings.Index(string(migration), "CREATE TABLE IF NOT EXISTS ops_system_metrics (")
+	end := strings.Index(string(migration)[start:], "\n);") + start + 3
+	_, err = db.Exec(string(migration)[start:end])
+	require.NoError(t, err)
+	_, err = db.Exec(`ALTER TABLE ops_system_metrics ADD COLUMN account_switch_count BIGINT NOT NULL DEFAULT 0, ADD COLUMN redis_conn_total INT, ADD COLUMN redis_conn_idle INT`)
+	require.NoError(t, err)
+	repo := &opsRepository{db: db}
+	platform, group := "openai", int64(7)
+	now := time.Now().UTC().Truncate(time.Minute)
+	for _, input := range []*service.OpsInsertSystemMetricsInput{
+		{CreatedAt: now, SuccessCount: 3},
+		{CreatedAt: now, SuccessCount: 999},
+		{CreatedAt: now, Platform: &platform, GroupID: &group, SuccessCount: 4},
+		{CreatedAt: now, Platform: &platform, GroupID: &group, SuccessCount: 999},
+		{CreatedAt: now.Add(time.Minute), Platform: &platform, GroupID: &group, SuccessCount: 5},
+	} {
+		require.NoError(t, repo.InsertSystemMetrics(t.Context(), input))
+	}
+	var count, sum int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*), SUM(success_count) FROM ops_system_metrics`).Scan(&count, &sum))
+	require.Equal(t, 3, count)
+	require.Equal(t, 12, sum)
 }

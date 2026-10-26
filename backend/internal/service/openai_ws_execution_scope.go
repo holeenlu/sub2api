@@ -115,17 +115,27 @@ func openAIWSExecutionSubagent(c *gin.Context, body []byte) string {
 // 按子智能体值成道，它们与用户 turn 同键时同样会互相切断在飞轮次。
 func resolveOpenAIWSExecutionLane(c *gin.Context, body []byte) string {
 	metadata := openAIWSExecutionTurnMetadata(c, body)
+	lane := ""
 	switch metadata.RequestKind {
 	case "", openAIWSRequestKindTurn, openAIWSRequestKindPrewarm, openAIWSRequestKindCompaction:
 	default:
-		return "kind=" + metadata.RequestKind
+		lane = "kind=" + metadata.RequestKind
 	}
-	if metadata.ThreadID == "" {
+	if lane == "" && metadata.ThreadID == "" {
 		if subagent := openAIWSExecutionSubagent(c, body); subagent != "" {
-			return "subagent=" + subagent
+			lane = "subagent=" + subagent
 		}
 	}
-	return ""
+	if c != nil && c.Request != nil {
+		if identity, ok := c.Request.Context().Value(openAIWSStreamContextKey{}).(openAIWSStreamIdentity); ok && identity.stream != "" {
+			prefix := "connection=" + identity.connection + "|stream=" + identity.stream
+			if lane != "" {
+				prefix += "|" + lane
+			}
+			return prefix
+		}
+	}
+	return lane
 }
 
 func openAIWSExecutionScopeSeed(apiKeyID int64, identity, value, lane string) string {
@@ -152,5 +162,22 @@ func resolveOpenAIWSExecutionScope(c *gin.Context, body []byte, apiKeyID int64) 
 		scope, _ = deriveOpenAISessionHashes(openAIWSExecutionScopeSeed(apiKeyID, "session", sessionID, lane))
 		return scope, ""
 	}
+	if c != nil && c.Request != nil {
+		if identity, ok := c.Request.Context().Value(openAIWSStreamContextKey{}).(openAIWSStreamIdentity); ok && identity.stream != "" {
+			scope, _ = deriveOpenAISessionHashes(openAIWSExecutionScopeSeed(apiKeyID, "connection", identity.connection, lane))
+			return scope, ""
+		}
+	}
 	return "", ""
+}
+
+func openAIWSTenantScope(c *gin.Context) string {
+	if c != nil {
+		if raw, ok := c.Get(openAIHTTPResponseOwnerContextKey); ok {
+			if owner, ok := raw.(openAIHTTPResponseOwner); ok && owner.userID > 0 {
+				return fmt.Sprintf("%d/user/%d", getOpenAIGroupIDFromContext(c), owner.userID)
+			}
+		}
+	}
+	return fmt.Sprintf("%d/key/%d", getOpenAIGroupIDFromContext(c), getAPIKeyIDFromContext(c))
 }

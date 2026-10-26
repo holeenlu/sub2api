@@ -795,3 +795,61 @@ func TestObserveUpstreamMessage_ResponseServiceTierOnlyFromTerminalEvents(t *tes
 	)
 	require.Equal(t, "", second.responseServiceTier)
 }
+
+func TestObserveInterruptAcknowledgementDoesNotConsumeNextTurnOrUsage(t *testing.T) {
+	for _, eventType := range []string{"response.interrupt.accepted", "response.interrupt.failed"} {
+		t.Run(eventType, func(t *testing.T) {
+			clientConn := newPassthroughTestFrameConn(nil, false)
+			upstreamConn := newPassthroughTestFrameConn(nil, false)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			wroteStates := make(chan bool, 3)
+			turns := make(chan RelayTurnResult, 3)
+			stopErr := errors.New("stop after next-turn error")
+			done := make(chan struct {
+				result RelayResult
+				exit   *RelayExit
+			}, 1)
+			go func() {
+				result, exit := Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create","input":"first"}`), RelayOptions{
+					OnTurnComplete: func(turn RelayTurnResult) { turns <- turn },
+					BeforeWriteClient: func(_ coderws.MessageType, payload []byte, wrote bool) error {
+						wroteStates <- wrote
+						if gjson.GetBytes(payload, "type").String() == "error" {
+							return stopErr
+						}
+						return nil
+					},
+				})
+				done <- struct {
+					result RelayResult
+					exit   *RelayExit
+				}{result, exit}
+			}()
+			require.Eventually(t, func() bool { return len(upstreamConn.Writes()) == 1 }, time.Second, time.Millisecond)
+			upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_finished","usage":{"input_tokens":5,"output_tokens":2}}}`)}
+			require.False(t, <-wroteStates)
+			require.Eventually(t, func() bool { return len(clientConn.Writes()) == 1 }, time.Second, time.Millisecond)
+			clientConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.create","input":"next"}`)}
+			require.Eventually(t, func() bool { return len(upstreamConn.Writes()) == 2 }, time.Second, time.Millisecond)
+			ack := []byte(`{"type":"` + eventType + `","response_id":"resp_finished","usage":{"input_tokens":100,"output_tokens":100}}`)
+			upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: ack}
+			require.False(t, <-wroteStates)
+			require.Eventually(t, func() bool { return len(clientConn.Writes()) == 2 }, time.Second, time.Millisecond)
+			require.Equal(t, ack, clientConn.Writes()[1].payload, "control acknowledgement must still reach the client unchanged")
+			upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"error","error":{"code":"usage_limit_reached"}}`)}
+			require.False(t, <-wroteStates, "the prior turn's acknowledgement must not commit the next turn")
+			select {
+			case finished := <-done:
+				require.NotNil(t, finished.exit)
+				require.ErrorIs(t, finished.exit.Err, stopErr)
+				require.True(t, finished.exit.WroteDownstream, "connection-wide delivery evidence must remain intact")
+				require.Equal(t, Usage{InputTokens: 5, OutputTokens: 2}, finished.result.Usage)
+				require.Len(t, turns, 1, "acknowledgements cannot consume a pending start or create a billable turn")
+				require.Equal(t, "resp_finished", (<-turns).RequestID)
+			case <-ctx.Done():
+				t.Fatal("relay did not finish after next-turn error")
+			}
+		})
+	}
+}

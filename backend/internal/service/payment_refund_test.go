@@ -4,7 +4,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"testing"
@@ -16,6 +15,17 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRefundReconciliationReadyDoesNotResolveFreshProviderRequest(t *testing.T) {
+	now := time.Now()
+	fresh := &dbent.PaymentOrder{Status: OrderStatusRefunding, UpdatedAt: now}
+	stale := &dbent.PaymentOrder{Status: OrderStatusRefunding, UpdatedAt: now.Add(-paymentFulfillmentLeaseDuration - time.Second)}
+	pending := &dbent.PaymentOrder{Status: OrderStatusRefundPending, UpdatedAt: now}
+
+	require.False(t, refundReconciliationReady(fresh, now))
+	require.True(t, refundReconciliationReady(stale, now))
+	require.True(t, refundReconciliationReady(pending, now))
+}
 
 func TestValidateRefundRequestRejectsLegacyGuessedProviderInstance(t *testing.T) {
 	ctx := context.Background()
@@ -292,11 +302,39 @@ func TestFormatGatewayRefundAmountUsesOrderCurrency(t *testing.T) {
 	require.Equal(t, "12.345", formatGatewayRefundAmount(12.345, order))
 }
 
-func TestValidateRefundProviderResponseAcceptsPending(t *testing.T) {
-	require.NoError(t, validateRefundProviderResponse(&payment.RefundResponse{Status: payment.ProviderStatusPending}))
-	require.NoError(t, validateRefundProviderResponse(&payment.RefundResponse{Status: payment.ProviderStatusSuccess}))
-	require.Error(t, validateRefundProviderResponse(&payment.RefundResponse{Status: payment.ProviderStatusFailed}))
-	require.Error(t, validateRefundProviderResponse(nil))
+func TestFinishRefundUnknownOutcomeRetainsReservation(t *testing.T) {
+	for _, resp := range []*payment.RefundResponse{nil, {Status: payment.ProviderStatusPending}, {Status: "unknown"}} {
+		t.Run(fmt.Sprintf("%v", resp), func(t *testing.T) {
+			ctx := context.Background()
+			client := newPaymentConfigServiceTestClient(t)
+			svc, plan := securityRefundFixture(t, client, 100, "unknown-refund-outcome")
+			require.NoError(t, svc.reserveRefund(ctx, plan))
+			result, err := svc.finishRefund(ctx, plan, resp)
+			require.NoError(t, err)
+			require.False(t, result.Success)
+			record, err := loadRefundReservation(ctx, client, plan.Order)
+			require.NoError(t, err)
+			require.Equal(t, "held", record.State)
+			require.Empty(t, record.Outcome)
+			require.Zero(t, client.User.GetX(ctx, plan.Order.UserID).Balance)
+		})
+	}
+}
+
+func TestQueryRefundUnreadableReservationRetainsCollateral(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	svc, plan := securityRefundFixture(t, client, 100, "unreadable-reservation")
+	require.NoError(t, svc.reserveRefund(ctx, plan))
+	_, err := svc.markRefundPending(ctx, plan, nil)
+	require.NoError(t, err)
+	_, err = client.PaymentAuditLog.Update().Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(plan.OrderID, 10)), paymentauditlog.ActionEQ("REFUND_RESERVATION")).SetDetail("not-json").Save(ctx)
+	require.NoError(t, err)
+	result, err := svc.QueryAndFinalizeRefund(ctx, plan.OrderID)
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, OrderStatusRefundPending, client.PaymentOrder.GetX(ctx, plan.OrderID).Status)
+	require.Zero(t, client.User.GetX(ctx, plan.Order.UserID).Balance)
 }
 
 func TestFinishRefundPendingMarksOrderPendingAndHoldsDeduction(t *testing.T) {
@@ -352,6 +390,7 @@ func TestFinishRefundPendingMarksOrderPendingAndHoldsDeduction(t *testing.T) {
 		BalanceToDeduct: 40,
 	}
 
+	require.NoError(t, saveRefundReservation(ctx, client, &refundReservation{Plan: *plan, State: "held"}))
 	result, err := svc.finishRefund(ctx, plan, &payment.RefundResponse{Status: payment.ProviderStatusPending})
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -373,11 +412,11 @@ func TestFinishRefundPendingMarksOrderPendingAndHoldsDeduction(t *testing.T) {
 		Count(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, pendingAudits)
-	detail, err := svc.latestRefundPendingDetail(ctx, order.ID)
+	record, err := loadRefundReservation(ctx, client, order)
 	require.NoError(t, err)
-	require.True(t, detail.DeductionHeld)
-	require.Equal(t, payment.DeductionTypeBalance, detail.DeductionType)
-	require.Equal(t, 40.0, detail.BalanceDeducted)
+	require.Equal(t, "held", record.State)
+	require.Equal(t, payment.DeductionTypeBalance, record.Plan.DeductionType)
+	require.Equal(t, 40.0, record.Plan.BalanceToDeduct)
 	successAudits, err := client.PaymentAuditLog.Query().
 		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_SUCCESS")).
 		Count(ctx)
@@ -429,6 +468,7 @@ func TestFinishRefundSuccessStatusesFinalize(t *testing.T) {
 				BalanceToDeduct: 100,
 			}
 
+			require.NoError(t, saveRefundReservation(ctx, client, &refundReservation{Plan: *plan, State: "held"}))
 			result, err := svc.finishRefund(ctx, plan, &payment.RefundResponse{Status: status})
 			require.NoError(t, err)
 			require.NotNil(t, result)
@@ -463,7 +503,7 @@ func TestQueryAndFinalizeRefundFinalizesProviderStatuses(t *testing.T) {
 		available  float64
 	}{
 		{name: "success", status: payment.ProviderStatusSuccess, wantStatus: OrderStatusRefunded, wantDeduct: 100, available: 100},
-		{name: "success clamps current balance", status: payment.ProviderStatusSuccess, wantStatus: OrderStatusRefunded, wantDeduct: 35, available: 35},
+		{name: "success preserves forced original capture", status: payment.ProviderStatusSuccess, wantStatus: OrderStatusRefunded, wantDeduct: 35, available: 35},
 		{name: "failed", status: payment.ProviderStatusFailed, wantStatus: OrderStatusRefundFailed},
 		{name: "pending", status: payment.ProviderStatusPending, wantStatus: OrderStatusRefundPending},
 	} {
@@ -486,11 +526,14 @@ func TestQueryAndFinalizeRefundFinalizesProviderStatuses(t *testing.T) {
 			})
 			defer restore()
 
+			plan := heldBalanceRefundTestPlan(order)
+			plan.BalanceToDeduct = tc.wantDeduct
+			require.NoError(t, saveRefundReservation(ctx, client, &refundReservation{Plan: *plan, State: "held"}))
 			result, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.Equal(t, tc.status == payment.ProviderStatusSuccess, result.Success)
-			require.Equal(t, tc.wantDeduct, deducted)
+			require.Zero(t, deducted)
 			if tc.status == payment.ProviderStatusSuccess {
 				require.Equal(t, tc.wantDeduct, result.BalanceDeducted)
 				audit, err := client.PaymentAuditLog.Query().
@@ -507,27 +550,7 @@ func TestQueryAndFinalizeRefundFinalizesProviderStatuses(t *testing.T) {
 	}
 }
 
-func TestQueryAndFinalizeRefundPassesPendingAuditTimeToProvider(t *testing.T) {
-	ctx := context.Background()
-	client := newPaymentConfigServiceTestClient(t)
-	order := createPendingRefundOrderForTest(t, ctx, client, "query-requested-at")
-	pendingAudit, err := client.PaymentAuditLog.Query().
-		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_PENDING")).
-		Only(ctx)
-	require.NoError(t, err)
-
-	svc := &PaymentService{entClient: client, loadBalancer: &captureLoadBalancer{}, userRepo: &mockUserRepo{}}
-	prov := &refundQueryProviderTestDouble{refundResponse: &payment.RefundResponse{RefundID: "rf_test", Status: payment.ProviderStatusPending}}
-	restore := replacePaymentProviderFactoryForTest(t, prov)
-	defer restore()
-
-	_, err = svc.QueryAndFinalizeRefund(ctx, order.ID)
-	require.NoError(t, err)
-	require.Equal(t, "rf_test", prov.lastQuery.RefundID)
-	require.True(t, pendingAudit.CreatedAt.Equal(prov.lastQuery.RequestedAt), "RequestedAt = %v, want %v", prov.lastQuery.RequestedAt, pendingAudit.CreatedAt)
-}
-
-func TestFinalizePendingRefundSuccessRejectsStaleCallerBeforeSecondDeduction(t *testing.T) {
+func TestQueryAndFinalizeRefundRejectsStaleCallerBeforeSecondDeduction(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
 	order := createPendingRefundOrderForTest(t, ctx, client, "finalize-stale")
@@ -542,15 +565,17 @@ func TestFinalizePendingRefundSuccessRejectsStaleCallerBeforeSecondDeduction(t *
 		}},
 	}
 
-	first, err := svc.finalizePendingRefundSuccess(ctx, svc.refundFinalizePlan(order))
+	plan := heldBalanceRefundTestPlan(order)
+	require.NoError(t, saveRefundReservation(ctx, client, &refundReservation{Plan: *plan, State: "held", Outcome: payment.ProviderStatusSuccess}))
+	first, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
 	require.NoError(t, err)
 	require.True(t, first.Success)
 
-	second, err := svc.finalizePendingRefundSuccess(ctx, svc.refundFinalizePlan(order))
+	second, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
 	require.Nil(t, second)
 	require.Error(t, err)
-	require.Equal(t, "CONFLICT", infraerrors.Reason(err))
-	require.Equal(t, 1, deductions)
+	require.Equal(t, "INVALID_STATUS", infraerrors.Reason(err))
+	require.Zero(t, deductions)
 
 	successAudits, err := client.PaymentAuditLog.Query().
 		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_SUCCESS")).
@@ -559,40 +584,70 @@ func TestFinalizePendingRefundSuccessRejectsStaleCallerBeforeSecondDeduction(t *
 	require.Equal(t, 1, successAudits)
 }
 
-func TestFinalizePendingRefundSuccessRollsBackPostDeductionFailure(t *testing.T) {
+func TestQueryAndFinalizeRefundRollsBackAccountingFailure(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
 	order := createPendingRefundOrderForTest(t, ctx, client, "finalize-rollback")
-	_, err := client.User.UpdateOneID(order.UserID).SetBalance(100).Save(ctx)
+	svc := &PaymentService{entClient: client}
+	plan := heldBalanceRefundTestPlan(order)
+	require.NoError(t, saveRefundReservation(ctx, client, &refundReservation{Plan: *plan, State: "held", Outcome: payment.ProviderStatusSuccess}))
+	_, err := client.ExecContext(ctx, `CREATE TRIGGER reject_refund_success BEFORE INSERT ON payment_audit_logs WHEN NEW.action='REFUND_SUCCESS' BEGIN SELECT RAISE(ABORT,'injected accounting failure'); END`)
 	require.NoError(t, err)
-
-	svc := &PaymentService{
-		entClient: client,
-		userRepo: &mockUserRepo{deductAvailableBalanceFn: func(ctx context.Context, id int64, amount float64) (float64, error) {
-			tx := dbent.TxFromContext(ctx)
-			require.NotNil(t, tx)
-			if _, updateErr := tx.Client().User.UpdateOneID(id).AddBalance(-amount).Save(ctx); updateErr != nil {
-				return 0, updateErr
-			}
-			return 0, errors.New("injected failure after deduction")
-		}},
-	}
-
-	result, err := svc.finalizePendingRefundSuccess(ctx, svc.refundFinalizePlan(order))
+	result, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
 	require.Nil(t, result)
-	require.ErrorContains(t, err, "injected failure after deduction")
+	require.ErrorContains(t, err, "injected accounting failure")
+	require.Equal(t, OrderStatusRefundPending, client.PaymentOrder.GetX(ctx, order.ID).Status)
+	record, err := loadRefundReservation(ctx, client, order)
+	require.NoError(t, err)
+	require.Equal(t, "held", record.State)
+}
 
-	user, err := client.User.Get(ctx, order.UserID)
-	require.NoError(t, err)
-	require.Equal(t, 100.0, user.Balance)
-	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
-	require.NoError(t, err)
-	require.Equal(t, OrderStatusRefundPending, reloaded.Status)
-	successAudits, err := client.PaymentAuditLog.Query().
-		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_SUCCESS")).
-		Count(ctx)
-	require.NoError(t, err)
-	require.Zero(t, successAudits)
+func TestResolvePendingRefundHonorsPersistedProviderOutcome(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		outcome  string
+		success  bool
+		conflict bool
+	}{
+		{name: "confirmed_success_rejects_failure", outcome: payment.ProviderStatusSuccess, conflict: true},
+		{name: "confirmed_failure_rejects_success", outcome: payment.ProviderStatusFailed, success: true, conflict: true},
+		{name: "confirmed_success_completes", outcome: payment.ProviderStatusSuccess, success: true},
+		{name: "confirmed_failure_releases", outcome: payment.ProviderStatusFailed},
+		{name: "unknown_success_completes", success: true},
+		{name: "unknown_failure_releases"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			client := newPaymentConfigServiceTestClient(t)
+			order := createPendingRefundOrderForTest(t, ctx, client, test.name)
+			svc := &PaymentService{entClient: client}
+			plan := heldBalanceRefundTestPlan(order)
+			require.NoError(t, saveRefundReservation(ctx, client, &refundReservation{Plan: *plan, State: "held"}))
+			if test.outcome != "" {
+				require.NoError(t, svc.recordRefundOutcome(ctx, plan, &payment.RefundResponse{Status: test.outcome}))
+			}
+			balance := client.User.GetX(ctx, order.UserID).Balance
+			result, err := svc.ResolvePendingRefund(ctx, order.ID, test.success, "provider reconciliation")
+			if test.conflict {
+				require.Nil(t, result)
+				require.Equal(t, "REFUND_OUTCOME_CONFLICT", infraerrors.Reason(err))
+				require.Equal(t, balance, client.User.GetX(ctx, order.UserID).Balance)
+				require.Equal(t, OrderStatusRefundPending, client.PaymentOrder.GetX(ctx, order.ID).Status)
+				record, loadErr := loadRefundReservation(ctx, client, order)
+				require.NoError(t, loadErr)
+				require.Equal(t, test.outcome, record.Outcome)
+				require.Equal(t, "held", record.State)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.success, result.Success)
+			if test.success {
+				require.Equal(t, balance, client.User.GetX(ctx, order.UserID).Balance)
+			} else {
+				require.Equal(t, balance+plan.BalanceToDeduct, client.User.GetX(ctx, order.UserID).Balance)
+			}
+		})
+	}
 }
 
 func TestQueryAndFinalizeRefundUnsupportedProviderReturnsClearError(t *testing.T) {
@@ -603,6 +658,8 @@ func TestQueryAndFinalizeRefundUnsupportedProviderReturnsClearError(t *testing.T
 	restore := replacePaymentProviderFactoryForTest(t, refundProviderTestDouble{})
 	defer restore()
 
+	plan := heldBalanceRefundTestPlan(order)
+	require.NoError(t, saveRefundReservation(ctx, client, &refundReservation{Plan: *plan, State: "held"}))
 	result, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
 	require.Nil(t, result)
 	require.Error(t, err)
@@ -610,11 +667,6 @@ func TestQueryAndFinalizeRefundUnsupportedProviderReturnsClearError(t *testing.T
 }
 
 func createPendingRefundOrderForTest(t *testing.T, ctx context.Context, client *dbent.Client, suffix string) *dbent.PaymentOrder {
-	t.Helper()
-	return createPendingRefundOrderWithDetailForTest(t, ctx, client, suffix, `{"refundID":"rf_test","deductionRollbackOK":true}`)
-}
-
-func createPendingRefundOrderWithDetailForTest(t *testing.T, ctx context.Context, client *dbent.Client, suffix, pendingDetail string) *dbent.PaymentOrder {
 	t.Helper()
 
 	user, err := client.User.Create().
@@ -661,7 +713,7 @@ func createPendingRefundOrderWithDetailForTest(t *testing.T, ctx context.Context
 		SetOrderID(strconv.FormatInt(order.ID, 10)).
 		SetAction("REFUND_PENDING").
 		SetOperator("admin").
-		SetDetail(pendingDetail).
+		SetDetail(`{"refundID":"rf_test","deductionRollbackOK":true}`).
 		Save(ctx)
 	require.NoError(t, err)
 	return order
@@ -701,10 +753,16 @@ func (refundProviderTestDouble) Refund(context.Context, payment.RefundRequest) (
 type refundQueryProviderTestDouble struct {
 	refundProviderTestDouble
 	refundResponse *payment.RefundResponse
-	lastQuery      payment.RefundQueryRequest
 }
 
-func (p *refundQueryProviderTestDouble) QueryRefund(_ context.Context, req payment.RefundQueryRequest) (*payment.RefundResponse, error) {
-	p.lastQuery = req
+func (p *refundQueryProviderTestDouble) QueryRefund(context.Context, payment.RefundQueryRequest) (*payment.RefundResponse, error) {
 	return p.refundResponse, nil
+}
+
+// Fixture for already-captured jobs. Production must load the persisted plan,
+// never reconstruct deduction authorization from current order fields.
+func heldBalanceRefundTestPlan(order *dbent.PaymentOrder) *RefundPlan {
+	return &RefundPlan{ReservationID: "test-held-job", OrderID: order.ID, Order: order, RefundAmount: order.RefundAmount,
+		GatewayAmount: order.RefundAmount, Reason: "captured test refund", Force: order.ForceRefund,
+		DeductBalance: true, DeductionType: payment.DeductionTypeBalance, BalanceToDeduct: order.RefundAmount}
 }
