@@ -850,3 +850,14 @@ func TestIdempotencyCoordinator_HelperBranches(t *testing.T) {
 	_, err = c.decodeStoredResponse(&invalid)
 	require.Error(t, err)
 }
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+func resetIdempotencyMetricsForTest() {
+	defaultIdempotencyMetrics.claimTotal.Store(0)
+	defaultIdempotencyMetrics.replayTotal.Store(0)
+	defaultIdempotencyMetrics.conflictTotal.Store(0)
+	defaultIdempotencyMetrics.retryBackoffTotal.Store(0)
+	defaultIdempotencyMetrics.processingDurationCount.Store(0)
+	defaultIdempotencyMetrics.processingDurationMicros.Store(0)
+	defaultIdempotencyMetrics.storeUnavailableTotal.Store(0)
+}

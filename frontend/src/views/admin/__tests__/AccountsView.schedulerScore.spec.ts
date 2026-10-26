@@ -48,7 +48,7 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
-    token: 'test-token'
+    token: 'test-token', isSuperAdmin: true, can: () => true
   })
 }))
 
@@ -148,8 +148,6 @@ describe('admin AccountsView scheduler score column', () => {
           // 未分组账号：后端只返回基础分（scheduler_score），无分组维度分数
           scheduler_score: {
             base_score: 1.234567,
-            sticky_score: 0,
-            sticky_weighted_enabled: false
           }
         },
         {
@@ -158,16 +156,12 @@ describe('admin AccountsView scheduler score column', () => {
           name: 'grouped-openai',
           scheduler_score: {
             base_score: 2,
-            sticky_score: 3,
-            sticky_weighted_enabled: true
           },
           scheduler_scores: [
             {
               group_id: 5,
               group_name: 'group-five',
               base_score: 2,
-              sticky_score: 3,
-              sticky_weighted_enabled: true
             }
           ]
         },

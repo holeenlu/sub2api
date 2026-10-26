@@ -13,8 +13,8 @@ import (
 // SessionBindingContext 全局中间件：将请求的客户端 IP 与 User-Agent 注入
 // request context，供 token 签发路径（登录 / 刷新 / OAuth 回调）读取并写入会话绑定，
 // 同时作为审计日志、会话绑定校验的统一客户端 IP 来源。
-// IP 取值与 API Key IP 限制共用转发 IP 开关：开启时旧版原始转发头逻辑
-// 接管解析，关闭时使用 Gin 的 server.trusted_proxies 可信代理链。
+// 安全 IP 与 API Key ACL、认证限流统一使用 server.trusted_proxies 可信代理链。
+// 旧转发头开关仅保留非安全元数据的兼容行为，不能覆盖会话指纹。
 func SessionBindingContext(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		forwardedIPSettings := cfg.ForwardedClientIPSettings()
@@ -64,6 +64,7 @@ func enforceSessionBinding(
 	settingService *service.SettingService,
 	auditService *service.AuditLogService,
 	claims *service.JWTClaims,
+	currentUsers ...*service.User,
 ) bool {
 	if settingService == nil || !settingService.IsSessionBindingEnabled(c.Request.Context()) {
 		return true
@@ -86,10 +87,14 @@ func enforceSessionBinding(
 		if path == "" {
 			path = c.Request.URL.Path
 		}
+		role, email := "", ""
+		if len(currentUsers) > 0 && currentUsers[0] != nil {
+			role, email = currentUsers[0].Role, currentUsers[0].Email
+		}
 		auditService.Record(&service.AuditLog{
 			ActorUserID: &uid,
-			ActorEmail:  claims.Email,
-			ActorRole:   claims.Role,
+			ActorEmail:  email,
+			ActorRole:   role,
 			AuthMethod:  service.AuditAuthMethodJWT,
 			Action:      service.AuditActionSessionBindingMismatch,
 			Method:      c.Request.Method,
