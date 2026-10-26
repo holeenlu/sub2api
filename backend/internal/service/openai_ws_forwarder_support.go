@@ -30,6 +30,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	account *Account,
 	stateStore OpenAIWSStateStore,
 	groupID int64,
+	timing *openAIForwardTiming,
 ) error {
 	if s == nil {
 		return nil
@@ -69,6 +70,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		return nil
 	}
 	prewarmStart := time.Now()
+	defer func() { timing.MarkPrewarm(time.Since(prewarmStart)) }()
 	logOpenAIWSModeInfo("prewarm_start account_id=%d conn_id=%s", account.ID, connID)
 
 	prewarmPayload := make(map[string]any, len(payload)+1)
@@ -78,6 +80,9 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	prewarmPayload["generate"] = false
 	prewarmPayloadJSON := payloadAsJSONBytes(prewarmPayload)
 
+	if err := validateVendorNativeDispatch(ctx, s.accountRepo, account, &groupID); err != nil {
+		return err
+	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmPayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
@@ -159,30 +164,32 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 
 		if isOpenAIWSTerminalEvent(eventType) {
 			prewarmTerminalCount++
+			if (eventType != "response.completed" && eventType != "response.done") || eventResponseID == "" ||
+				(prewarmResponseID != "" && prewarmResponseID != eventResponseID) {
+				lease.MarkBroken()
+				return wrapOpenAIWSFallback("prewarm_terminal", errors.New("OpenAI websocket prewarm did not complete successfully"))
+			}
 			break
 		}
 	}
 
 	lease.MarkPrewarmed()
+	lease.ConfirmResponse(prewarmResponseID)
 	if prewarmResponseID != "" && stateStore != nil {
 		ttl := s.openAIWSResponseStickyTTL()
 		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, prewarmResponseID, stateStore.BindResponseAccount(ctx, groupID, prewarmResponseID, account.ID, ttl))
-		stateStore.BindResponseConn(prewarmResponseID, lease.ConnID(), ttl)
+		stateStore.BindResponseConn(prewarmResponseID, lease.ConnID(), ttl,
+			openAIWSResponseScopeForStore(s.isOpenAIWSStoreDisabledInRequest(prewarmPayload, account)))
 	}
 	logOpenAIWSModeInfo(
-		"prewarm_done account_id=%d conn_id=%s response_id=%s events=%d terminal_events=%d duration_ms=%d",
+		"prewarm_done account_id=%d conn_id=%s response_id=%s events=%d terminal_events=%d",
 		account.ID,
 		connID,
 		truncateOpenAIWSLogValue(prewarmResponseID, openAIWSIDValueMaxLen),
 		prewarmEventCount,
 		prewarmTerminalCount,
-		time.Since(prewarmStart).Milliseconds(),
 	)
 	return nil
-}
-
-func payloadAsJSON(payload map[string]any) string {
-	return string(payloadAsJSONBytes(payload))
 }
 
 func payloadAsJSONBytes(payload map[string]any) []byte {
@@ -194,6 +201,47 @@ func payloadAsJSONBytes(payload map[string]any) []byte {
 		return []byte("{}")
 	}
 	return body
+}
+
+// isOpenAIWSTurnMetadataEvent reports the per-turn metadata frames ChatGPT
+// sends ahead of the response itself. Only these two are listed: Codex reads
+// rate limits from the first and the models etag plus x-codex-turn-state from
+// the second, and neither belongs to a response, so holding them back until
+// the response starts is invisible to the client. An unknown codex.* frame is
+// forwarded immediately as before rather than assumed to be equally inert.
+// isOpenAIWSTurnIdentityEvent reports the events a staging-window flush can
+// publish before any content: the codex.* preamble and the response identity.
+func isOpenAIWSTurnIdentityEvent(eventType string) bool {
+	return isOpenAIWSTurnMetadataEvent(eventType) || eventType == "response.created" || eventType == "response.in_progress"
+}
+
+// rewriteOpenAIWSPublishedResponseID presents a retried attempt's events under
+// the response.id the client already received. Only the response identity
+// fields change; item IDs, output indexes and content are untouched.
+func rewriteOpenAIWSPublishedResponseID(message []byte, from, to string) []byte {
+	if from == "" || to == "" || from == to {
+		return message
+	}
+	if gjson.GetBytes(message, "response.id").String() == from {
+		if next, err := sjson.SetBytes(message, "response.id", to); err == nil {
+			message = next
+		}
+	}
+	if gjson.GetBytes(message, "response_id").String() == from {
+		if next, err := sjson.SetBytes(message, "response_id", to); err == nil {
+			message = next
+		}
+	}
+	return message
+}
+
+func isOpenAIWSTurnMetadataEvent(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "codex.rate_limits", "codex.response.metadata":
+		return true
+	default:
+		return false
+	}
 }
 
 func isOpenAIWSTerminalEvent(eventType string) bool {
@@ -222,10 +270,24 @@ func normalizeOpenAIWSTerminalEvent(eventType string) string {
 	}
 }
 
+const openAIWSProvisionalErrorDetail = "provisional websocket error"
+
 // markOpenAIWSClientVisibleFailure records only terminal/error protocol events
 // that were delivered to the client. Callers invoke it only after any hidden
 // failover/recovery decision and a successful downstream write.
-func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload []byte) {
+type openAIWSFailureOrigin uint8
+
+const (
+	openAIWSFailureProvider openAIWSFailureOrigin = iota
+	openAIWSFailureRequest
+	openAIWSFailureGateway
+)
+
+func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload []byte, source ...openAIWSFailureOrigin) {
+	origin := openAIWSFailureProvider
+	if len(source) > 0 {
+		origin = source[0]
+	}
 	eventType = strings.TrimSpace(eventType)
 	if eventType != "error" && eventType != "response.failed" {
 		return
@@ -262,6 +324,22 @@ func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload 
 	if message == "" {
 		message = "upstream websocket request failed"
 	}
+	// Origin is supplied by the local validation boundary, never inferred from
+	// a code that a real provider can also return. Snapshot only after delivery.
+	if origin == openAIWSFailureRequest {
+		MarkOpsStreamErrorValue(c, OpsStreamError{ErrType: errType, Code: code, Message: message, IntendedStatus: status, RequestScoped: true})
+		return
+	}
+	// This is an upstream WS event, even when its logical status is 400/404.
+	// Snapshot its origin before the turn marker so it is not blamed on the
+	// client or on the gateway merely because the handshake status stayed 101.
+	if origin == openAIWSFailureProvider && !HasOpsClientBusinessLimited(c) {
+		detail := ""
+		if c != nil && c.GetString(OpsUpstreamErrorDetailKey) == openAIWSProvisionalErrorDetail {
+			detail = "client-visible websocket " + eventType
+		}
+		setOpsUpstreamError(c, status, message, detail)
+	}
 	MarkOpsStreamFailure(c, errType, code, message, status)
 }
 
@@ -296,10 +374,12 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 	switch {
 	case code == "server_is_overloaded", code == "slow_down":
 		return http.StatusServiceUnavailable
-	case strings.Contains(code, "server_error"),
+	// Some Responses WS backends use the shorter server_err spelling. Keep
+	// both forms on the existing transient policy path (sub4api 25b06c394).
+	case strings.Contains(code, "server_err"),
 		strings.Contains(code, "internal_error"),
 		strings.Contains(code, "upstream_error"),
-		strings.Contains(errType, "server_error"),
+		strings.Contains(errType, "server_err"),
 		strings.Contains(errType, "internal_error"),
 		strings.Contains(errType, "upstream_error"):
 		return http.StatusInternalServerError
@@ -445,7 +525,7 @@ func getOpenAIGroupIDFromContext(c *gin.Context) int64 {
 }
 
 // SelectAccountByPreviousResponseID 按 previous_response_id 命中账号粘连。
-// 未命中或账号不可用时返回 (nil, nil)，由调用方继续走常规调度。
+// 未知响应可由提供方解释；已知 owner 不可用时返回续接错误，不能静默换号。
 func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 	ctx context.Context,
 	groupID *int64,
@@ -473,8 +553,11 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 		return nil, nil
 	}
 	accountID, account, responseID, store := s.resolveAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
-	if accountID <= 0 || account == nil || store == nil {
+	if accountID <= 0 || store == nil {
 		return nil, nil
+	}
+	if account == nil {
+		return nil, ErrOpenAIContinuationUnavailable
 	}
 
 	result, acquireErr := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
@@ -504,7 +587,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 			},
 		}), nil
 	}
-	return nil, nil
+	return nil, ErrOpenAIContinuationUnavailable
 }
 
 func (s *OpenAIGatewayService) ResolveAccountIDByPreviousResponseIDForScheduler(
@@ -516,10 +599,16 @@ func (s *OpenAIGatewayService) ResolveAccountIDByPreviousResponseIDForScheduler(
 	requiredCapability OpenAIEndpointCapability,
 	requireCompact bool,
 ) int64 {
-	accountID, _, _, _ := s.resolveAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
+	accountID, account, _, _ := s.resolveAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
+	if account == nil {
+		return 0
+	}
 	return accountID
 }
 
+// resolveAccountByPreviousResponseIDForCapability preserves a known owner ID
+// even when it is currently ineligible. A nil account then forbids fallback,
+// while a zero ID means the gateway has no binding for this provider response.
 func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	ctx context.Context,
 	groupID *int64,
@@ -547,91 +636,83 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	}
 	if excludedIDs != nil {
 		if _, excluded := excludedIDs[accountID]; excluded {
-			return 0, nil, "", nil
+			return accountID, nil, responseID, store
 		}
 	}
 
 	account, err := s.getSchedulableAccount(ctx, accountID)
 	if err != nil || account == nil {
-		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
-		return 0, nil, "", nil
+		return accountID, nil, responseID, store
 	}
 	// OAuth/SetupToken continuation state lives on the WSv2 session and cannot
 	// survive an HTTP fallback. Official API-key Responses HTTP requests are
 	// different: previous_response_id is supported by the provider and scoped to
 	// the selected key/project, so the response-id binding must retain that key.
-	if !account.IsOpenAIApiKey() && s.getOpenAIWSProtocolResolver().Resolve(account).Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
-		return 0, nil, "", nil
+	if !account.IsOpenAIApiKey() && !s.IsExcelBPSRouteEnabled(ctx, account, requestedModel) && s.getOpenAIWSProtocolResolver().Resolve(account).Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+		return accountID, nil, responseID, store
 	}
 	if shouldClearStickySession(account, requestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
-		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
-		return 0, nil, "", nil
+		return accountID, nil, responseID, store
 	}
 	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
-		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
-		return 0, nil, "", nil
+		return accountID, nil, responseID, store
 	}
 	if requestedModel != "" && !supportsOpenAIRequestModel(account, requestedModel, requireCompact) {
-		return 0, nil, "", nil
+		return accountID, nil, responseID, store
 	}
 	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
-		return 0, nil, "", nil
+		return accountID, nil, responseID, store
 	}
 	// Quota auto-pause must also gate the previous_response_id sticky path; otherwise an
 	// account over its 5h/7d threshold keeps serving the same response chain even though
-	// normal scheduling skips it. Pause is transient, so fall through to normal scheduling
-	// without deleting the binding (the window may reset before the next turn).
+	// normal scheduling skips it. Preserve the owner until its original TTL; the
+	// scheduler must not route this opaque response to another account.
 	if paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, account); paused {
-		return 0, nil, "", nil
+		return accountID, nil, responseID, store
 	}
 	// 分组利润控制：与 quota auto-pause 同语义——利润不合格是暂时
-	// 状态（上游倍率/高峰随时间变化），只跳过本次复用、落回普通调度，不删除
+	// 状态（上游倍率/高峰随时间变化），拒绝本次续接，不删除
 	// 绑定（倍率恢复后可继续按 previous_response_id 粘连）。
 	if vetoed, _ := openAIProfitControlVetoReason(ctx, account); vetoed {
-		return 0, nil, "", nil
+		return accountID, nil, responseID, store
 	}
 	if s.schedulerSnapshot != nil && s.accountRepo != nil {
 		latest, latestErr := s.accountRepo.GetByID(ctx, account.ID)
 		if latestErr != nil || latest == nil {
-			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
-			return 0, nil, "", nil
+			return accountID, nil, responseID, store
 		}
 		if shouldClearStickySession(latest, requestedModel) || !latest.IsOpenAI() || !latest.IsSchedulable() {
-			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
-			return 0, nil, "", nil
+			return accountID, nil, responseID, store
 		}
 		if !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
-			return 0, nil, "", nil
+			return accountID, nil, responseID, store
 		}
 		if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !latest.IsPrivacySet() {
-			return 0, nil, "", nil
+			return accountID, nil, responseID, store
 		}
 		if !parentHealthyForShadow(latest, s.parentAccountLookup(ctx)) {
-			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
-			return 0, nil, "", nil
+			return accountID, nil, responseID, store
 		}
 		if requestedModel != "" && !supportsOpenAIRequestModel(latest, requestedModel, requireCompact) {
-			return 0, nil, "", nil
+			return accountID, nil, responseID, store
 		}
 		if !latest.SupportsOpenAIEndpointCapability(requiredCapability) {
-			return 0, nil, "", nil
+			return accountID, nil, responseID, store
 		}
 		if paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, latest); paused {
-			return 0, nil, "", nil
+			return accountID, nil, responseID, store
 		}
 		// 利润门对最新账号状态复检一次，语义同上：跳过复用、不删绑定。
 		if vetoed, _ := openAIProfitControlVetoReason(ctx, latest); vetoed {
-			return 0, nil, "", nil
+			return accountID, nil, responseID, store
 		}
 		if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel) {
-			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
-			return 0, nil, "", nil
+			return accountID, nil, responseID, store
 		}
 		account = latest
 	}
 	if requireCompact && openAICompactSupportTier(account) == 0 {
-		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
-		return 0, nil, "", nil
+		return accountID, nil, responseID, store
 	}
 	return accountID, account, responseID, store
 }
@@ -702,19 +783,52 @@ func (s *OpenAIGatewayService) persistOpenAIWSRateLimitSignal(ctx context.Contex
 	// 可能只是成功连接时的全局快照，不能用于普通模型的 429 账号级限流。
 	// 实际拨号 HTTP 429 使用 nil responseBody，必须保留响应头。
 	if len(responseBody) > 0 {
-		headers = openAIWSSemantic429Headers(account, model, headers)
+		headers = openAIWSSemantic429Headers(account, model, headers, responseBody)
 	}
 	s.handleOpenAIAccountUpstreamError(ctx, account, http.StatusTooManyRequests, headers, responseBody, model)
 }
 
-func openAIWSSemantic429Headers(account *Account, model string, headers http.Header) http.Header {
+func openAIWSSemantic429Headers(account *Account, model string, headers http.Header, event ...[]byte) http.Header {
+	var selected http.Header
 	if isCodexSparkModel(model) && isOpenAIOAuthAccount(account) {
-		return headers
+		selected = headers.Clone()
 	}
-	return nil
+	if len(event) == 0 {
+		return selected
+	}
+	// A successful handshake's quota/reset hints are not this turn's error.
+	// Keep the existing Spark quota exception, but Retry-After must belong to
+	// the current event. Only one validated string header is transferable.
+	selected.Del("Retry-After")
+	retryAfter, occurrences := "", 0
+	gjson.GetBytes(event[0], "headers").ForEach(func(key, value gjson.Result) bool {
+		if strings.EqualFold(key.String(), "Retry-After") {
+			occurrences++
+			if value.Type == gjson.String {
+				retryAfter = strings.TrimSpace(value.String())
+			}
+		}
+		return true
+	})
+	if occurrences == 1 && len(retryAfter) <= 128 && !strings.ContainsAny(retryAfter, "\r\n") {
+		if delay, ok := parseOpenAIRetryAfterDelay(retryAfter); ok && delay > 0 {
+			if selected == nil {
+				selected = make(http.Header)
+			}
+			selected.Set("Retry-After", retryAfter)
+		}
+	}
+	return selected
 }
 
-func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverError(account *Account, headers http.Header, responseBody []byte, message string) *UpstreamFailoverError {
+func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverError(account *Account, headers http.Header, responseBody []byte, message string, canonicalModel ...string) *UpstreamFailoverError {
+	if len(responseBody) > 0 {
+		model := firstNonEmpty(canonicalModel...)
+		if model == "" {
+			model = firstNonEmpty(gjson.GetBytes(responseBody, "response.model").String(), gjson.GetBytes(responseBody, "model").String())
+		}
+		headers = openAIWSSemantic429Headers(account, model, headers, responseBody)
+	}
 	return s.newOpenAIAccountFailoverError(
 		account,
 		http.StatusTooManyRequests,
@@ -766,17 +880,10 @@ func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (stri
 		(strings.Contains(msg, "previous response") && strings.Contains(msg, "not found")) {
 		return "previous_response_not_found", true
 	}
-	if strings.Contains(errType, "server_error") || strings.Contains(code, "server_error") {
+	if strings.Contains(errType, "server_err") || strings.Contains(code, "server_err") {
 		return "upstream_error_event", true
 	}
 	return "event_error", false
-}
-
-func classifyOpenAIWSErrorEvent(message []byte) (string, bool) {
-	if len(message) == 0 {
-		return "event_error", false
-	}
-	return classifyOpenAIWSErrorEventFromRaw(parseOpenAIWSErrorEventFields(message))
 }
 
 func openAIWSErrorHTTPStatusFromRaw(codeRaw, errTypeRaw string) int {
@@ -798,6 +905,12 @@ func openAIWSErrorHTTPStatusFromRaw(codeRaw, errTypeRaw string) int {
 		return http.StatusForbidden
 	case isOpenAIWSRateLimitError(codeRaw, errTypeRaw, ""):
 		return http.StatusTooManyRequests
+	case code == "server_is_overloaded", code == "slow_down":
+		// Match Responses SSE's request-scoped capacity classification. This
+		// is a semantic status: a successfully upgraded WS has no HTTP 5xx.
+		return http.StatusServiceUnavailable
+	case code == "first_output_timeout":
+		return http.StatusGatewayTimeout
 	default:
 		return http.StatusBadGateway
 	}
@@ -862,4 +975,23 @@ func (s *OpenAIGatewayService) clearOpenAIWSFallbackCooling(accountID int64) {
 		return
 	}
 	s.openaiWSFallbackUntil.Delete(accountID)
+}
+
+// A named request-parameter rejection before any response is accepted can end
+// immediately after field repair has been exhausted. Bare codes/messages alone
+// are insufficient: rustponsesapi emits those before successful responses too.
+func openAIWSDefinitiveRequestRejection(message []byte, responseID string) bool {
+	if responseID != "" || gjson.GetBytes(message, "error.type").String() != "invalid_request_error" {
+		return false
+	}
+	param := gjson.GetBytes(message, "error.param").String()
+	if param == "" || strings.HasPrefix(param, "input") {
+		return false
+	}
+	switch gjson.GetBytes(message, "error.code").String() {
+	case "unknown_parameter", "unsupported_parameter", "missing_required_parameter":
+		return true
+	default:
+		return false
+	}
 }

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -24,7 +26,9 @@ func TestSanitizeOpenAIResponsesOrphanToolOutputs(t *testing.T) {
 		}
 		reqBody := map[string]any{"input": input}
 
-		require.True(t, sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, false))
+		changed, err := sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, false)
+		require.NoError(t, err)
+		require.True(t, changed)
 		require.Equal(t, []any{named}, reqBody["input"])
 	})
 
@@ -37,7 +41,9 @@ func TestSanitizeOpenAIResponsesOrphanToolOutputs(t *testing.T) {
 		}
 		reqBody := map[string]any{"input": input}
 
-		require.False(t, sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, false))
+		changed, err := sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, false)
+		require.NoError(t, err)
+		require.False(t, changed)
 		require.Equal(t, input, reqBody["input"])
 	})
 
@@ -50,10 +56,10 @@ func TestSanitizeOpenAIResponsesOrphanToolOutputs(t *testing.T) {
 		}
 		reqBody := map[string]any{"input": input}
 
-		require.True(t, sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, false))
-		got, ok := reqBody["input"].([]any)
-		require.True(t, ok)
-		require.Empty(t, got)
+		changed, err := sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, false)
+		require.Error(t, err)
+		require.False(t, changed)
+		require.Equal(t, input, reqBody["input"], "a rejection must not erase client input")
 	})
 
 	t.Run("preserves all output variants with matching calls", func(t *testing.T) {
@@ -76,16 +82,47 @@ func TestSanitizeOpenAIResponsesOrphanToolOutputs(t *testing.T) {
 		}
 		reqBody := map[string]any{"input": input}
 
-		require.False(t, sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, false))
+		changed, err := sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, false)
+		require.NoError(t, err)
+		require.False(t, changed)
 	})
 
 	t.Run("previous response may contain the missing call", func(t *testing.T) {
 		input := []any{map[string]any{"type": "function_call_output", "call_id": "remote", "output": "ok"}}
 		reqBody := map[string]any{"input": input, "previous_response_id": "resp_1"}
 
-		require.False(t, sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, true))
+		changed, err := sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, true)
+		require.NoError(t, err)
+		require.False(t, changed)
 		require.Equal(t, input, reqBody["input"])
 	})
+}
+
+func TestWriteOpenAIContinuationErrorJSONAndStartedSSE(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprintf("streaming=%t", streaming), func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			if streaming {
+				c.Header("Content-Type", "text/event-stream")
+				_, _ = c.Writer.WriteString(": keepalive\n\n")
+			}
+			WriteOpenAIContinuationError(c)
+			require.True(t, IsResponseCommitted(c), "the handler must not append a second failure")
+			body := w.Body.String()
+			if streaming {
+				require.Equal(t, http.StatusOK, w.Code)
+				require.Contains(t, body, "response.failed")
+			} else {
+				require.Equal(t, http.StatusBadRequest, w.Code)
+				require.True(t, gjson.Valid(body))
+			}
+			require.Contains(t, body, `"code":"previous_response_not_found"`)
+			require.Contains(t, body, `"param":"previous_response_id"`)
+			require.Contains(t, body, "resend the complete conversation")
+		})
+	}
 }
 
 func TestWebSocketCompatibilityPreservesNamedDelegation(t *testing.T) {
@@ -181,8 +218,8 @@ func TestOpenAIResponsesInputNeverRequestsPreemptiveTruncation(t *testing.T) {
 	require.False(t, openAIResponsesInputMayNeedTruncation(largeOutput))
 }
 
-func TestOpenAIGatewayService_OAuthDropsOrphanAfterDroppingPreviousResponse(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.5","stream":false,"previous_response_id":"resp_missing","input":[{"type":"function_call_output","call_id":"call_missing","output":"keep this result"}]}`)
+func TestOpenAIGatewayService_OAuthPreservesContinuationContext(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"previous_response_id":"resp_missing","input":[{"type":"function_call_output","call_id":"fc_missing","output":"keep this result"}]}`)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"id":"resp_ok","output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
 	}}
@@ -197,8 +234,8 @@ func TestOpenAIGatewayService_OAuthDropsOrphanAfterDroppingPreviousResponse(t *t
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, upstream.bodies, 1)
-	require.False(t, gjson.GetBytes(upstream.bodies[0], "previous_response_id").Exists())
-	require.Empty(t, gjson.GetBytes(upstream.bodies[0], "input").Array())
+	require.Equal(t, "resp_missing", gjson.GetBytes(upstream.bodies[0], "previous_response_id").String())
+	require.JSONEq(t, gjson.GetBytes(body, "input").Raw, gjson.GetBytes(upstream.bodies[0], "input").Raw)
 }
 
 func TestOpenAIGatewayService_PreservesOversizedToolOutputForUpstream(t *testing.T) {
@@ -219,4 +256,118 @@ func TestOpenAIGatewayService_PreservesOversizedToolOutputForUpstream(t *testing
 	require.NotNil(t, result)
 	require.Len(t, upstream.bodies, 1)
 	require.Equal(t, oversized, gjson.GetBytes(upstream.bodies[0], "input.1.output").String())
+}
+
+func TestOpenAIResponsesContextCarriers(t *testing.T) {
+	for _, fields := range []string{
+		`"input":"hello"`, `"input":[{"type":"future_multimodal_item","payload":{"opaque":true}}]`,
+		`"previous_response_id":"resp_prior"`, `"prompt":{"id":"pmpt_template"}`,
+		`"conversation":"conv_saved"`, `"conversation":{"id":"conv_saved"}`,
+		`"input":[],"previous_response_id":"resp_prior"`,
+	} {
+		t.Run(fields, func(t *testing.T) { require.NoError(t, validateOpenAIResponsesInput([]byte(`{`+fields+`}`))) })
+	}
+	for _, fields := range []string{``, `"input":null`, `"input":[]`, `"input":" "`, `"previous_response_id":""`, `"prompt":{}`, `"conversation":null`} {
+		t.Run(fields, func(t *testing.T) {
+			var inputErr *openAIResponsesInputError
+			require.ErrorAs(t, validateOpenAIResponsesInput([]byte(`{`+fields+`}`)), &inputErr)
+			require.Equal(t, "missing_required_parameter", inputErr.Code)
+		})
+	}
+}
+
+func TestOpenAIResponsesForwardContextPreservation(t *testing.T) {
+	cases := []struct{ name, fields, code string }{
+		{"missing", ``, "missing_required_parameter"},
+		{"null", `,"input":null`, "missing_required_parameter"},
+		{"empty", `,"input":[]`, "missing_required_parameter"},
+		{"orphan", `,"input":[{"type":"function_call_output","call_id":"unknown","output":"result"}]`, "missing_tool_context"},
+		{"system_only", `,"input":[{"role":"system","content":"Answer concisely"}]`, ""},
+		{"previous_only", `,"previous_response_id":"resp_prior"`, ""},
+		{"previous_delta", `,"previous_response_id":"resp_prior","input":[{"role":"user","content":"continue this task"}]`, ""},
+		{"tool_continuation", `,"previous_response_id":"resp_prior","input":[{"type":"function_call_output","call_id":"fc_prior","output":"result"}]`, ""},
+		{"template", `,"prompt":{"id":"pmpt_template"}`, ""},
+		{"conversation", `,"conversation":"conv_saved"`, ""},
+		{"legacy_prompt", `,"prompt":"the original task"`, ""},
+	}
+	for _, passthrough := range []bool{false, true} {
+		for _, tc := range cases {
+			t.Run(fmt.Sprintf("%s/passthrough=%t", tc.name, passthrough), func(t *testing.T) {
+				body := []byte(`{"model":"gpt-6.1-sol","stream":false,"instructions":"Follow the request"` + tc.fields + `}`)
+				original := string(body)
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"id":"resp_context","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}}
+				svc := newOpenAIRejectedFieldTestService(upstream)
+				c := newOpenAIRejectedFieldTestContext(body)
+				account := newOpenAIOAuthNamespaceTestAccount()
+				if passthrough {
+					account.Extra = map[string]any{"openai_passthrough": true}
+				}
+				result, err := svc.Forward(context.Background(), c, account, body)
+				require.Equal(t, original, string(body), "attempt preparation cannot mutate the caller's canonical bytes")
+				if tc.code != "" {
+					var inputErr *openAIResponsesInputError
+					require.ErrorAs(t, err, &inputErr)
+					require.Equal(t, tc.code, inputErr.Code)
+					require.Equal(t, http.StatusBadRequest, c.Writer.Status())
+					require.Nil(t, result, "local rejection has no billable usage")
+					require.Empty(t, upstream.requests, "invalid context must not reach an upstream or failover")
+					_, hasUpstreamError := c.Get(OpsUpstreamStatusCodeKey)
+					require.False(t, hasUpstreamError, "a local input error is not an upstream failure")
+					return
+				}
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Len(t, upstream.bodies, 1)
+				wire := upstream.bodies[0]
+				require.NoError(t, validateOpenAIResponsesInput(wire))
+				for _, field := range []string{"previous_response_id", "conversation"} {
+					require.Equal(t, gjson.GetBytes(body, field).Raw, gjson.GetBytes(wire, field).Raw)
+				}
+				if tc.name == "system_only" {
+					require.Equal(t, "Answer concisely", gjson.GetBytes(wire, "input.0.content").String())
+				}
+				if tc.name == "tool_continuation" || tc.name == "previous_delta" {
+					require.JSONEq(t, gjson.GetBytes(body, "input").Raw, gjson.GetBytes(wire, "input").Raw)
+				}
+			})
+		}
+	}
+}
+
+func TestOpenAIResponsesContextLossIsGatewayFailure(t *testing.T) {
+	original := []byte(`{"input":[{"role":"user","content":"private original input"}]}`)
+	c := newOpenAIRejectedFieldTestContext(original)
+	err := validateOpenAIResponsesInputTransition(original, []byte(`{"input":[]}`))
+	var rejected *openAIResponsesInputError
+	require.ErrorAs(t, err, &rejected)
+	require.Equal(t, "gateway_input_context_lost", rejected.Code)
+	writeOpenAIResponsesInputError(c, err)
+	require.Equal(t, http.StatusInternalServerError, c.Writer.Status())
+	event, encodeErr := rejected.websocketEvent([]byte(`{"event_id":"request1","stream_id":"lane1"}`))
+	require.NoError(t, encodeErr)
+	require.Equal(t, "server_error", gjson.GetBytes(event, "error.type").String())
+	require.NotContains(t, string(event), "private original input")
+	require.NoError(t, validateOpenAIResponsesInputTransition(original, original))
+}
+
+func TestOpenAIResponsesInputErrorAfterKeepaliveTerminatesSSE(t *testing.T) {
+	body := []byte(`{"model":"gpt-6.1-sol","stream":true,"input":[]}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	_, err := c.Writer.WriteString(": keepalive\n\n")
+	require.NoError(t, err)
+	c.Writer.Flush()
+	upstream := &httpUpstreamRecorder{}
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, newOpenAIOAuthNamespaceTestAccount(), body)
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Empty(t, upstream.requests)
+	require.Equal(t, http.StatusOK, recorder.Code, "HTTP headers were already committed by the queue")
+	require.Contains(t, recorder.Body.String(), "event: response.failed\n")
+	parts := strings.Split(recorder.Body.String(), "data: ")
+	require.Len(t, parts, 2, "exactly one authoritative failure event")
+	require.Equal(t, "missing_required_parameter", gjson.Get(parts[1], "response.error.code").String())
+	require.Equal(t, "failed", gjson.Get(parts[1], "response.status").String())
 }
