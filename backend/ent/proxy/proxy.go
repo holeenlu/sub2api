@@ -21,6 +21,18 @@ const (
 	FieldUpdatedAt = "updated_at"
 	// FieldDeletedAt holds the string denoting the deleted_at field in the database.
 	FieldDeletedAt = "deleted_at"
+	// FieldVendorID holds the string denoting the vendor_id field in the database.
+	FieldVendorID = "vendor_id"
+	// FieldCreatedBy holds the string denoting the created_by field in the database.
+	FieldCreatedBy = "created_by"
+	// FieldVendorNotes holds the string denoting the vendor_notes field in the database.
+	FieldVendorNotes = "vendor_notes"
+	// FieldRegionLabelCountryCode holds the string denoting the region_label_country_code field in the database.
+	FieldRegionLabelCountryCode = "region_label_country_code"
+	// FieldRegionLabelCity holds the string denoting the region_label_city field in the database.
+	FieldRegionLabelCity = "region_label_city"
+	// FieldConfigVersion holds the string denoting the config_version field in the database.
+	FieldConfigVersion = "config_version"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
 	// FieldProtocol holds the string denoting the protocol field in the database.
@@ -74,6 +86,12 @@ var Columns = []string{
 	FieldCreatedAt,
 	FieldUpdatedAt,
 	FieldDeletedAt,
+	FieldVendorID,
+	FieldCreatedBy,
+	FieldVendorNotes,
+	FieldRegionLabelCountryCode,
+	FieldRegionLabelCity,
+	FieldConfigVersion,
 	FieldName,
 	FieldProtocol,
 	FieldHost,
@@ -111,6 +129,18 @@ var (
 	DefaultUpdatedAt func() time.Time
 	// UpdateDefaultUpdatedAt holds the default value on update for the "updated_at" field.
 	UpdateDefaultUpdatedAt func() time.Time
+	// DefaultVendorNotes holds the default value on creation for the "vendor_notes" field.
+	DefaultVendorNotes string
+	// DefaultRegionLabelCountryCode holds the default value on creation for the "region_label_country_code" field.
+	DefaultRegionLabelCountryCode string
+	// RegionLabelCountryCodeValidator is a validator for the "region_label_country_code" field. It is called by the builders before save.
+	RegionLabelCountryCodeValidator func(string) error
+	// DefaultRegionLabelCity holds the default value on creation for the "region_label_city" field.
+	DefaultRegionLabelCity string
+	// RegionLabelCityValidator is a validator for the "region_label_city" field. It is called by the builders before save.
+	RegionLabelCityValidator func(string) error
+	// DefaultConfigVersion holds the default value on creation for the "config_version" field.
+	DefaultConfigVersion int64
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
 	// ProtocolValidator is a validator for the "protocol" field. It is called by the builders before save.
@@ -154,6 +184,36 @@ func ByUpdatedAt(opts ...sql.OrderTermOption) OrderOption {
 // ByDeletedAt orders the results by the deleted_at field.
 func ByDeletedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDeletedAt, opts...).ToFunc()
+}
+
+// ByVendorID orders the results by the vendor_id field.
+func ByVendorID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVendorID, opts...).ToFunc()
+}
+
+// ByCreatedBy orders the results by the created_by field.
+func ByCreatedBy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCreatedBy, opts...).ToFunc()
+}
+
+// ByVendorNotes orders the results by the vendor_notes field.
+func ByVendorNotes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVendorNotes, opts...).ToFunc()
+}
+
+// ByRegionLabelCountryCode orders the results by the region_label_country_code field.
+func ByRegionLabelCountryCode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRegionLabelCountryCode, opts...).ToFunc()
+}
+
+// ByRegionLabelCity orders the results by the region_label_city field.
+func ByRegionLabelCity(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRegionLabelCity, opts...).ToFunc()
+}
+
+// ByConfigVersion orders the results by the config_version field.
+func ByConfigVersion(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldConfigVersion, opts...).ToFunc()
 }
 
 // ByName orders the results by the name field.

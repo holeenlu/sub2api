@@ -5,9 +5,7 @@ export function updateFavicon(logoUrl: string): void {
     allowRelative: true,
     allowDataUrl: true,
   })
-  if (!sanitizedLogoUrl) {
-    return
-  }
+  if (logoUrl.trim() && !sanitizedLogoUrl) return
 
   let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
   if (!link) {
@@ -16,6 +14,8 @@ export function updateFavicon(logoUrl: string): void {
     document.head.appendChild(link)
   }
 
-  link.type = sanitizedLogoUrl.endsWith('.svg') ? 'image/svg+xml' : 'image/x-icon'
-  link.href = sanitizedLogoUrl
+  // The browser determines the image type from the data URL or response.
+  // Declaring every non-SVG upload as ICO can leave the bundled icon selected.
+  link.removeAttribute('type')
+  link.href = sanitizedLogoUrl || '/logo.svg'
 }

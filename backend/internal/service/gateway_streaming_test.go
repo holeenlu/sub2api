@@ -184,8 +184,11 @@ func TestHandleStreamingResponse_EmptyStream(t *testing.T) {
 	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "model", "model", false)
 	_ = pr.Close()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "missing terminal event")
-	require.NotNil(t, result)
+	var failure *UpstreamFailoverError
+	require.ErrorAs(t, err, &failure)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	require.Nil(t, result)
+	require.False(t, c.Writer.Written())
 }
 
 func TestHandleStreamingResponse_SpecialCharactersInJSON(t *testing.T) {
