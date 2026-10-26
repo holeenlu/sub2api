@@ -6,13 +6,16 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 func newGroupModelAllowlistTestRouter(apiKey *service.APIKey, pathPrefix string) (*gin.Engine, *[]string) {
@@ -141,12 +144,58 @@ func TestGroupModelAllowlistRequestBodyTooLargePassesThrough413(t *testing.T) {
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("expected 413, got %d: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "Request body is too large") {
+	if !strings.Contains(w.Body.String(), "Request body too large, limit is 64B") {
 		t.Fatalf("expected too-large message, got %s", w.Body.String())
 	}
 	if len(*calls) != 0 {
 		t.Fatalf("expected handler not to run, got %v", *calls)
 	}
+}
+
+func TestGroupModelAllowlistReadFailureLogsCorrelatedDiagnostics(t *testing.T) {
+	sink := initMiddlewareTestLogger(t)
+	router := gin.New()
+	router.Use(RequestLogger(), ClientRequestID(), func(c *gin.Context) {
+		c.Set(string(ContextKeyAPIKey), allowlistAPIKey(true, "gpt-6-astra"))
+		c.Next()
+	}, GroupModelAllowlist())
+	router.POST("/v1/responses", func(c *gin.Context) { t.Error("handler must not run after a read failure") })
+	ids := make(map[string]bool)
+	for _, originalID := range []string{"repeated-session-id", "repeated-session-id", strings.Repeat("x", 200)} {
+		body := io.MultiReader(strings.NewReader("partial"), iotest.ErrReader(io.ErrUnexpectedEOF))
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", body)
+		req.ContentLength = 100
+		req.Header.Set(clientRequestIDHeader, originalID)
+		req.Header.Set(requestIDHeader, "edge-request-id")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		// A body cut short of its Content-Length is the client leaving: 499, not 400.
+		require.Equal(t, httputil.StatusClientClosedRequest, w.Code)
+		require.JSONEq(t, `{"error":{"type":"invalid_request_error","message":"Client closed request before the request body was fully received"}}`, w.Body.String())
+		events := sink.list()
+		event := events[len(events)-1]
+		require.Equal(t, "warn", event.Level)
+		require.Equal(t, "read request body failed", event.Message)
+		require.Equal(t, "edge-request-id", event.Fields["request_id"])
+		id, ok := event.Fields["client_request_id"].(string)
+		require.True(t, ok)
+		require.NotEmpty(t, id)
+		require.NotEqual(t, originalID, id)
+		require.False(t, ids[id], "internal request IDs must not repeat")
+		ids[id] = true
+		require.Equal(t, id, w.Header().Get(clientRequestIDHeader))
+		if originalID == "repeated-session-id" {
+			require.Equal(t, originalID, event.Fields["original_client_request_id"])
+		} else {
+			require.NotContains(t, event.Fields, "original_client_request_id")
+		}
+		require.Equal(t, "group_model_allowlist", event.Fields["body_read_stage"])
+		require.EqualValues(t, 7, event.Fields["bytes_read"])
+		require.EqualValues(t, 100, event.Fields["content_length"])
+		require.Equal(t, "truncated_body", event.Fields["error_kind"])
+		require.Equal(t, "none", event.Fields["context_error"])
+	}
+	require.Len(t, sink.list(), 3, "one diagnostic per failed request")
 }
 
 func TestGroupModelAllowlistJSONBodyAllowed(t *testing.T) {
@@ -498,4 +547,82 @@ func TestGroupModelAllowlistDuplicateIdenticalModelsAllowed(t *testing.T) {
 	if len(*calls) != 1 {
 		t.Fatalf("expected handler to run once, got %v", *calls)
 	}
+}
+
+// 读体失败按 error_kind 分状态码：停滞超时 408、解码失败 400、超过规范化上限 413（带上限）。
+func TestGroupModelAllowlistReadFailureStatusByKind(t *testing.T) {
+	t.Run("timeout", func(t *testing.T) {
+		router, calls := newGroupModelAllowlistTestRouter(allowlistAPIKey(true, "claude-sonnet-4.5"), "/v1")
+		body := io.MultiReader(strings.NewReader("partial"), iotest.ErrReader(os.ErrDeadlineExceeded))
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", body)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusRequestTimeout, w.Code)
+		require.JSONEq(t, `{"error":{"type":"request_timeout","message":"Request body upload timed out"}}`, w.Body.String())
+		require.Empty(t, *calls)
+	})
+	t.Run("decode", func(t *testing.T) {
+		router, calls := newGroupModelAllowlistTestRouter(allowlistAPIKey(true, "claude-sonnet-4.5"), "/v1")
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4.5"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Encoding", "gzip")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		require.JSONEq(t, `{"error":{"type":"invalid_request_error","message":"Failed to read request body"}}`, w.Body.String())
+		require.Empty(t, *calls)
+	})
+	t.Run("normalized_limit", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Set(string(ContextKeyAPIKey), allowlistAPIKey(true, "claude-sonnet-4.5"))
+			c.Next()
+		}, GroupModelAllowlistWithBodyLimit(48))
+		router.POST("/v1/messages", func(c *gin.Context) { t.Error("handler must not run") })
+		w := doJSON(t, router, http.MethodPost, "/v1/messages", `{"model":"claude-sonnet-4.5","padding":"`+strings.Repeat("x", 64)+`"}`)
+		require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+		require.Contains(t, w.Body.String(), "Request body too large, limit is 48B")
+	})
+}
+
+// JSON 请求体按宽松规则规范化后回填（裸控制字符转义），multipart 原样回填。
+func TestGroupModelAllowlistLenientJSONAndRawMultipartRefill(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var seen []byte
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(ContextKeyAPIKey), allowlistAPIKey(true, "claude-sonnet-4.5"))
+		c.Next()
+	}, GroupModelAllowlist())
+	router.POST("/v1/messages", func(c *gin.Context) {
+		seen, _ = httputil.ReadRequestBodyWithPrealloc(c.Request)
+		c.Status(http.StatusOK)
+	})
+	router.POST("/v1/images/edits", func(c *gin.Context) {
+		seen, _ = httputil.ReadRequestBodyWithPrealloc(c.Request)
+		c.Status(http.StatusOK)
+	})
+
+	w := doJSON(t, router, http.MethodPost, "/v1/messages", "{\"model\":\"claude-sonnet-4.5\",\"text\":\"line\tbreak\"}")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, `{"model":"claude-sonnet-4.5","text":"line\u0009break"}`, string(seen))
+
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	require.NoError(t, writer.WriteField("model", "claude-sonnet-4.5"))
+	part, err := writer.CreateFormFile("image", "a.bin")
+	require.NoError(t, err)
+	binary := []byte("\"\x00\x01\x1f\"")
+	_, err = part.Write(binary)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	raw := append([]byte(nil), form.Bytes()...)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, raw, seen, "multipart bodies must be refilled byte-for-byte")
 }

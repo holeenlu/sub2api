@@ -14,12 +14,21 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { isChineseLocale } from '@/i18n/localeUtils'
 import {
   loadTencentCaptcha,
   normalizeTencentCaptchaRegion,
   type TencentCaptchaProof,
   type TencentCaptchaResult
 } from '@/utils/tencentCaptcha'
+
+// 腾讯验证码的 userLanguage 支持 zh-cn / zh-tw / en。
+function tencentCaptchaLanguage(locale: string): 'zh-cn' | 'zh-tw' | 'en' {
+  if (!isChineseLocale(locale)) {
+    return 'en'
+  }
+  return locale.toLowerCase().startsWith('zh-tw') ? 'zh-tw' : 'zh-cn'
+}
 
 const { locale } = useI18n()
 const props = withDefaults(defineProps<{ appId: string; region?: string }>(), { region: 'cn' })
@@ -67,7 +76,7 @@ function createVerificationPromise(revealInternational: boolean = true): Promise
       .then((TencentCaptcha) => {
         if (cancelPending !== cancel) return
 
-        const userLanguage = locale.value.toLowerCase().startsWith('zh') ? 'zh-cn' : 'en'
+        const userLanguage = tencentCaptchaLanguage(locale.value)
         const handleResult = (result: TencentCaptchaResult): void => {
           if (result.ret === 2) {
             finish(() => resolve(null))

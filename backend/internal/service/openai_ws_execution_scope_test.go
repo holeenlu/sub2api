@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -169,8 +170,14 @@ func TestResolveOpenAIWSExecutionLane(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveOpenAIWSExecutionLane(newOpenAIWSExecutionScopeTestContext(tc.headers), []byte(tc.body))
-			require.Equal(t, tc.want, got)
+			c := newOpenAIWSExecutionScopeTestContext(tc.headers)
+			require.Equal(t, tc.want, resolveOpenAIWSExecutionLane(c, []byte(tc.body)))
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAIWSStreamContextKey{}, openAIWSStreamIdentity{connection: "conn", stream: "lane"}))
+			want := "connection=conn|stream=lane"
+			if tc.want != "" {
+				want += "|" + tc.want
+			}
+			require.Equal(t, want, resolveOpenAIWSExecutionLane(c, []byte(tc.body)), "multiplexing must preserve prewarm/turn/compaction affinity and independent background lanes")
 		})
 	}
 	require.Equal(t, "kind=memory", resolveOpenAIWSExecutionLane(nil, []byte(`{"client_metadata":{"x-codex-turn-metadata":"{\"request_kind\":\"memory\"}"}}`)))

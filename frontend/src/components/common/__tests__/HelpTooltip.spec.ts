@@ -107,4 +107,22 @@ describe('HelpTooltip', () => {
 
     wrapper.unmount()
   })
+  it('supports account details by hover, keyboard focus and touch click, with Escape dismissal', async () => {
+    const wrapper = mount(HelpTooltip, { attachTo: document.body, props: { trigger: 'both', content: 'details' } })
+    const trigger = wrapper.get('.group')
+    const tooltip = getTooltipElement()
+    await trigger.trigger('focusin')
+    await trigger.trigger('click')
+    expect(tooltip.style.display).not.toBe('none')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(tooltip.style.display).toBe('none')
+    await trigger.trigger('mouseenter')
+    expect(tooltip.style.display).not.toBe('none')
+    document.body.click()
+    await nextTick()
+    expect(tooltip.style.display).toBe('none')
+    wrapper.unmount()
+  })
+
 })

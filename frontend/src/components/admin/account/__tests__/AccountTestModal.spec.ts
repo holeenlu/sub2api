@@ -221,3 +221,61 @@ describe('AccountTestModal', () => {
     })
   })
 })
+
+describe('Cloud compatibility test results', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+  beforeEach(() => { getAvailableModels.mockResolvedValue([{ id: 'cloud-model', display_name: 'Cloud model', type: 'model' }]) })
+  async function selectCloudMode(wrapper: ReturnType<typeof mountModal>) {
+    await wrapper.setProps({ show: true }); await flushPromises()
+    ;(wrapper.vm as any).testMode = 'cloud'
+    await flushPromises()
+  }
+
+  it.each([true, false])('uses the terminal result for downloads (successful: %s)', async (success) => {
+    const finalResult = {
+      kind: 'cloud_result', response_id: 'response-1', status: success ? 'completed' : 'failed', model: 'cloud-model',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Final answer' }] }],
+      usage: { input_tokens: 12, output_tokens: 3, total_tokens: 15 }, created_at: 1, completed_at: 2,
+      capabilities: { text: true, tools: success, usage: true, settlement: success, image_input: success, encrypted_context: success, web_search: success, image_generation: success }
+    }
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse([
+      'data: {"type":"content","text":"partial output"}\n',
+      `data: ${JSON.stringify({ type: 'test_complete', success, error: success ? undefined : 'tool verification failed', data: finalResult })}\n`
+    ])) as any
+    const wrapper = mountModal({ id: 42, name: 'Cloud account', platform: 'openai', type: 'oauth', status: 'active', credentials: {} })
+    await selectCloudMode(wrapper)
+    await flushPromises()
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toMatchObject({ mode: 'cloud', model_id: 'cloud-model' })
+    expect(wrapper.find('[data-testid="cloud-download-result"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="cloud-download-answer"]').exists()).toBe(success)
+    expect((wrapper.vm as any).cloudResult).toEqual(finalResult)
+    await wrapper.setProps({ account: { id: 43, name: 'Another account', platform: 'openai', type: 'oauth', status: 'active' } as any })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="cloud-download-result"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows the safe nested Cloud failure when no top-level message is present', async () => {
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse([
+      `data: ${JSON.stringify({ type: 'test_complete', success: false, data: { kind: 'cloud_result', response_id: '', status: 'failed', model: 'cloud-model', output: [], usage: null, created_at: 1, completed_at: 2, capabilities: {}, error: { message: 'wham quota exhausted (429)' } } })}\n`
+    ])) as any
+    const wrapper = mountModal({ id: 42, name: 'Cloud account', platform: 'openai', type: 'oauth', status: 'active', credentials: {} })
+    await selectCloudMode(wrapper)
+    await (wrapper.vm as any).startTest(); await flushPromises()
+    expect(wrapper.text()).toContain('wham quota exhausted (429)')
+    wrapper.unmount()
+  })
+
+  it('does not report success when the Cloud terminal result is missing', async () => {
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse(['data: {"type":"test_complete","success":true}\n'])) as any
+    const wrapper = mountModal({ id: 42, name: 'Cloud account', platform: 'openai', type: 'oauth', status: 'active', credentials: {} })
+    await selectCloudMode(wrapper)
+    await flushPromises()
+    await (wrapper.vm as any).startTest(); await flushPromises()
+    expect((wrapper.vm as any).status).toBe('error')
+    expect(wrapper.find('[data-testid="cloud-download-result"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})

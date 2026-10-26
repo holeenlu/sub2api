@@ -1,12 +1,12 @@
 package middleware
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -30,6 +30,13 @@ import (
 //   - 拒绝：按入口协议格式返回 404，并标记运维业务限流原因
 //     local_model_configuration 与 ingress 拒绝原因 model_not_allowed。
 func GroupModelAllowlist() gin.HandlerFunc {
+	return GroupModelAllowlistWithBodyLimit(0)
+}
+
+// GroupModelAllowlistWithBodyLimit 与 GroupModelAllowlist 相同，并以 maxBodySize
+// （通常为 gateway.max_body_size）作为 JSON 请求体宽松规范化后的大小上限；0 使用
+// httputil 的默认上限。
+func GroupModelAllowlistWithBodyLimit(maxBodySize int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apiKey, ok := GetAPIKeyFromContext(c)
 		if !ok || apiKey == nil || apiKey.Group == nil || !apiKey.Group.ModelAllowlistEnabled() {
@@ -55,7 +62,7 @@ func GroupModelAllowlist() gin.HandlerFunc {
 		} else {
 			switch c.Request.Method {
 			case http.MethodPost, http.MethodPut, http.MethodPatch:
-				candidates, done := groupModelAllowlistModelsFromBody(c)
+				candidates, done := groupModelAllowlistModelsFromBody(c, maxBodySize)
 				if !done {
 					// 请求体读取失败（如超限 413）已写出响应。
 					return
@@ -110,22 +117,27 @@ func isResponsesWebSocketRoute(c *gin.Context) bool {
 // 下游同时存在 gjson（首个、大小写敏感）、encoding/json 绑定（末值、大小写
 // 不敏感）与 multipart 表单（首/末字段）三类解析器，这里返回「任一解析器可能
 // 绑定到的全部模型值」，调用方必须逐一校验，任一未命中即拒绝。
-func groupModelAllowlistModelsFromBody(c *gin.Context) ([]string, bool) {
-	body, err := httputil.ReadRequestBodyWithPrealloc(c.Request)
+func groupModelAllowlistModelsFromBody(c *gin.Context, maxBodySize int64) ([]string, bool) {
+	body, err := readGroupModelAllowlistBody(c, maxBodySize)
 	if err != nil {
-		status := http.StatusBadRequest
-		message := "Failed to read request body"
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			status = http.StatusRequestEntityTooLarge
-			message = "Request body is too large"
-		}
-		c.JSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
+		httputil.LogRequestBodyReadFailure(logger.FromContext(c.Request.Context()), c.Request, err, "group_model_allowlist")
+		status, errType, message := httputil.DescribeRequestBodyReadFailure(c.Request, err).Response()
+		c.JSON(status, gin.H{"error": gin.H{"type": errType, "message": message}})
 		c.Abort()
 		return nil, false
 	}
 	requestmodel.ResetRequestBody(c.Request, body)
 	return requestmodel.FromBodyCandidates(c.FullPath(), c.GetHeader("Content-Type"), body), true
+}
+
+// readGroupModelAllowlistBody 读取请求体：JSON 请求与网关 handler 一样做宽松
+// 规范化（转义字符串内的裸控制字符，超过 maxBodySize 返回带上限的 413）；
+// multipart 请求体含二进制字段，只做原样读取。
+func readGroupModelAllowlistBody(c *gin.Context, maxBodySize int64) ([]byte, error) {
+	if requestmodel.IsMultipartContentType(c.GetHeader("Content-Type")) {
+		return httputil.ReadRequestBodyWithPrealloc(c.Request)
+	}
+	return httputil.ReadLenientJSONRequestBodyWithPrealloc(c.Request, maxBodySize)
 }
 
 // groupModelAllowlistModelFromParams 从路由参数提取模型名：Gemini 原生 URL 的
