@@ -54,6 +54,12 @@ func TestSetAccountModelRateLimitSnapshot_CopyOnWrite(t *testing.T) {
 	require.True(t, account.isModelRateLimitedWithContext(ctx, "claude-fable-5"))
 	require.True(t, account.isModelRateLimitedWithContext(ctx, "claude-opus-5"))
 	require.False(t, account.isModelRateLimitedWithContext(ctx, "claude-sonnet-5"))
+	withLimit := *account
+	clearAccountModelRateLimitSnapshot(account, anthropicFableRateLimitKey)
+	require.False(t, account.isModelRateLimitedWithContext(ctx, "claude-fable-5"))
+	require.True(t, account.isModelRateLimitedWithContext(ctx, "claude-opus-5"))
+	require.True(t, withLimit.isModelRateLimitedWithContext(ctx, "claude-fable-5"))
+	require.Equal(t, 0.5, account.Extra["session_window_utilization"])
 }
 
 func TestSetAccountModelRateLimitSnapshot_InitializesMissingOrInvalidLimits(t *testing.T) {
@@ -121,6 +127,12 @@ func TestSetAccountModelRateLimitSnapshot_ConcurrentCopiesOfSharedMaster(t *test
 					t.Errorf("worker %d: master was mutated", worker)
 					return
 				}
+				cleared := *master
+				clearAccountModelRateLimitSnapshot(&cleared, "claude-opus-5")
+				if cleared.isModelRateLimitedWithContext(ctx, "claude-opus-5") || !probe.isModelRateLimitedWithContext(ctx, "claude-opus-5") {
+					t.Errorf("worker %d: clearing a copy mutated shared limits", worker)
+					return
+				}
 			}
 		}(worker)
 	}
@@ -135,6 +147,10 @@ func TestSetAccountModelRateLimitSnapshot_ConcurrentCopiesOfSharedMaster(t *test
 type sharedSnapshotFableRepoStub struct {
 	AccountRepository
 	modelCalls atomic.Int64
+}
+
+func (r *sharedSnapshotFableRepoStub) SetModelRateLimitIfNotActive(ctx context.Context, id int64, scope string, resetAt time.Time, reason string) (bool, error) {
+	return true, r.SetModelRateLimit(ctx, id, scope, resetAt, reason)
 }
 
 func (r *sharedSnapshotFableRepoStub) SetModelRateLimit(_ context.Context, _ int64, _ string, _ time.Time, _ ...string) error {
