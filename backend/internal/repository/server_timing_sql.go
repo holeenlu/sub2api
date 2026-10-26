@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
 )
 
@@ -68,8 +69,14 @@ func (c *serverTimingConn) ExecContext(ctx context.Context, query string, args [
 	if !ok {
 		return nil, driver.ErrSkip
 	}
+	if err := selectionbudget.Take(ctx, "sql", 0); err != nil {
+		return nil, err
+	}
 	startedAt := time.Now()
 	result, err := execer.ExecContext(ctx, query, args)
+	if !errors.Is(err, driver.ErrSkip) {
+		selectionbudget.RecordError(ctx, err)
+	}
 	servertiming.Record(ctx, servertiming.MetricDatabase, startedAt, time.Now(), 1)
 	return result, err
 }
@@ -79,8 +86,14 @@ func (c *serverTimingConn) QueryContext(ctx context.Context, query string, args 
 	if !ok {
 		return nil, driver.ErrSkip
 	}
+	if err := selectionbudget.Take(ctx, "sql", 0); err != nil {
+		return nil, err
+	}
 	startedAt := time.Now()
 	rows, err := queryer.QueryContext(ctx, query, args)
+	if !errors.Is(err, driver.ErrSkip) {
+		selectionbudget.RecordError(ctx, err)
+	}
 	servertiming.Record(ctx, servertiming.MetricDatabase, startedAt, time.Now(), 1)
 	if err != nil || rows == nil {
 		return rows, err
@@ -153,6 +166,9 @@ type serverTimingStmt struct {
 }
 
 func (s *serverTimingStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	if err := selectionbudget.Take(ctx, "sql", 0); err != nil {
+		return nil, err
+	}
 	startedAt := time.Now()
 	var (
 		result driver.Result
@@ -169,11 +185,15 @@ func (s *serverTimingStmt) ExecContext(ctx context.Context, args []driver.NamedV
 			result, err = s.Stmt.Exec(values) //nolint:staticcheck // Required driver compatibility fallback.
 		}
 	}
+	selectionbudget.RecordError(ctx, err)
 	servertiming.Record(ctx, servertiming.MetricDatabase, startedAt, time.Now(), 1)
 	return result, err
 }
 
 func (s *serverTimingStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	if err := selectionbudget.Take(ctx, "sql", 0); err != nil {
+		return nil, err
+	}
 	startedAt := time.Now()
 	var (
 		rows driver.Rows
@@ -190,6 +210,7 @@ func (s *serverTimingStmt) QueryContext(ctx context.Context, args []driver.Named
 			rows, err = s.Stmt.Query(values) //nolint:staticcheck // Required driver compatibility fallback.
 		}
 	}
+	selectionbudget.RecordError(ctx, err)
 	servertiming.Record(ctx, servertiming.MetricDatabase, startedAt, time.Now(), 1)
 	if err != nil || rows == nil {
 		return rows, err

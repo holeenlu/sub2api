@@ -1,5 +1,5 @@
 const DEFAULT_API_BASE_URL = '/api/v1'
-const API_BASE_URL = normalizeAPIBaseURL(import.meta.env.VITE_API_BASE_URL)
+const API_BASE_URL = normalizeAPIBaseURL(import.meta.env.VITE_VENDOR_PORTAL === 'true' ? DEFAULT_API_BASE_URL : import.meta.env.VITE_API_BASE_URL)
 
 function normalizePath(path: string): string {
   return path.startsWith('/') ? path : `/${path}`

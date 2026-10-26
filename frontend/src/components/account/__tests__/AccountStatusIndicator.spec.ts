@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import AccountStatusIndicator from '../AccountStatusIndicator.vue'
 import type { Account } from '@/types'
 
@@ -51,6 +51,31 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
+  it('上游全量限额复用 429 提示，Fable 限额只显示模型标签', async () => {
+    const wrapper = mount(AccountStatusIndicator, { props: { account: makeAccount({
+      platform: 'anthropic', anthropic_status: { rate_limited: true, rate_limit_reset_at: '2099-01-01T00:00:00Z' }
+    }) } })
+    expect(wrapper.text()).toContain('admin.accounts.status.rateLimited')
+    expect(wrapper.text()).toContain('429')
+    await wrapper.setProps({ account: makeAccount({
+      platform: 'anthropic', anthropic_status: { model_rate_limits: { 'claude-fable-5': '2099-01-01T00:00:00Z' } }
+    }) })
+    expect(wrapper.text()).toContain('admin.accounts.status.active')
+    expect(wrapper.text()).toContain('CFable5')
+    expect(wrapper.text()).not.toContain('429')
+  })
+
+  it('授权异常复用错误图标与悬浮提示，恢复后移除提示', async () => {
+    const wrapper = mount(AccountStatusIndicator, { props: { account: makeAccount({
+      platform: 'anthropic', anthropic_status: { error_code: 'revoked' }
+    }) } })
+    expect(wrapper.text()).toContain('admin.accounts.status.error')
+    expect(wrapper.get('.badge').attributes('title')).toBe('admin.accounts.status.anthropicErrors.revoked')
+    await wrapper.setProps({ account: makeAccount({ platform: 'anthropic', anthropic_status: null }) })
+    expect(wrapper.text()).toContain('admin.accounts.status.active')
+    expect(wrapper.text()).not.toContain('anthropicErrors')
+  })
+
   it('Claude 5 系列模型限流时显示 Opus 和 Sonnet 的短别名', () => {
     const wrapper = mount(AccountStatusIndicator, {
       props: {
@@ -227,4 +252,23 @@ describe('AccountStatusIndicator', () => {
     // AICredits 积分耗尽状态应显示
     expect(wrapper.text()).toContain('admin.accounts.status.creditsExhausted')
   })
+})
+
+
+it('teleports detailed account errors out of clipped lists and clears them on recovery', async () => {
+  const message = 'Token revoked (401): Encountered invalidated oauth token for user, failing request'
+  const wrapper = mount(AccountStatusIndicator, { attachTo: document.body, props: { account: makeAccount({ status: 'error', error_message: message }) } })
+  try {
+    expect(wrapper.get('.badge').attributes('title')).toBe(message)
+    const help = wrapper.findComponent({ name: 'HelpTooltip' })
+    await help.trigger('mouseenter')
+    await flushPromises()
+    const tip = [...document.body.querySelectorAll<HTMLElement>('[role="tooltip"]')].find(el => el.textContent?.includes(message))!
+    expect(tip).toBeTruthy()
+    expect(tip.style.display).not.toBe('none')
+    expect(wrapper.element.contains(tip)).toBe(false)
+    await wrapper.setProps({ account: makeAccount({ status: 'active' }) })
+    expect(wrapper.findComponent({ name: 'HelpTooltip' }).exists()).toBe(false)
+    expect(wrapper.get('.badge').attributes('title')).toBeUndefined()
+  } finally { wrapper.unmount() }
 })
