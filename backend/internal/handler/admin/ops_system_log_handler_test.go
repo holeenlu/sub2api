@@ -7,6 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -326,5 +330,60 @@ func TestOpsSystemLogHandler_HealthUnavailableAndMonitoringDisabled(t *testing.T
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status=%d, want 404", w.Code)
+	}
+}
+
+// Downloads reuse the full detail endpoints and their existing permission projection.
+type opsDiagnosticRepo struct {
+	service.OpsRepository
+}
+
+func (r *opsDiagnosticRepo) GetErrorLogByID(_ context.Context, id int64) (*service.OpsErrorLogDetail, error) {
+	accountID, upstreamStatus := int64(7), 200
+	trace, _ := json.Marshal(map[string]any{"events": []any{map[string]any{"stage": "capacity", "account_id": accountID, "configured_capacity": 10}}, "summary": map[string]any{"stop_reason": "complete"}})
+	events, _ := json.Marshal([]any{
+		map[string]any{"kind": "bridge_error", "scope": "excel_bps", "stage": "stream", "reason": "unexpected_eof", "account_id": accountID, "upstream_status_code": upstreamStatus, "detail": "diagnostic facts", "upstream_response_body": "stored provider body", "future_field": "preserve-me"},
+		map[string]any{"kind": "scheduling_trace", "detail": string(trace)},
+	})
+	return &service.OpsErrorLogDetail{OpsErrorLog: service.OpsErrorLog{ID: id, RequestID: "request-62068", StatusCode: 502, AccountID: &accountID, AccountName: "upstream-owner", Platform: "openai", Model: "gpt-6-astra", CreatedAt: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), InboundEndpoint: "/v1/responses", UpstreamEndpoint: "/basispoints/api/responses", Message: "basispoints returned a tool outside the client's catalog"}, ErrorBody: "event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"basispoints_protocol_error\",\"message\":\"invalid tool\"}}}\n\n", UpstreamStatusCode: &upstreamStatus, UpstreamErrorMessage: "invalid tool", UpstreamErrorDetail: "{\"reason\":\"unknown_tool\",\"catalog_tool_count\":5}", UpstreamErrors: string(events)}, nil
+}
+func TestOpsCompleteErrorDetailsKeepPayloadAndPermissions(t *testing.T) {
+	for _, role := range []string{authz.Admin, authz.SuperAdmin} {
+		for _, path := range []string{"/api/v1/admin/ops/errors", "/api/v1/admin/ops/request-errors", "/api/v1/admin/ops/upstream-errors"} {
+			t.Run(path+"/"+role, func(t *testing.T) {
+				repo := &opsDiagnosticRepo{}
+				svc := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+				svc.SetMonitoringEnabled(true)
+				router := gin.New()
+				actor := authz.Subject{Role: role, ManagementRequest: true, Permissions: []string{"ops.read"}}
+				router.Use(func(c *gin.Context) {
+					c.Request = c.Request.WithContext(authz.WithSubject(c.Request.Context(), actor))
+					c.Next()
+				})
+				router.GET(path+"/:id", NewOpsHandler(svc).GetErrorLogByID)
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path+"/62068", nil))
+				require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+				for _, fact := range []string{"basispoints_protocol_error", "response.failed", "/basispoints/api/responses", "unknown_tool", "catalog_tool_count", "bridge_error", "unexpected_eof", "configured_capacity", "stop_reason", "future_field", "preserve-me"} {
+					require.Contains(t, w.Body.String(), fact)
+				}
+				var envelope struct{ Data map[string]json.RawMessage }
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
+				var events string
+				require.NoError(t, json.Unmarshal(envelope.Data["upstream_errors"], &events))
+				if role == authz.SuperAdmin {
+					require.Contains(t, w.Body.String(), "upstream-owner")
+					require.Contains(t, events, "stored provider body")
+				} else {
+					require.NotContains(t, w.Body.String(), "upstream-owner")
+					require.NotContains(t, events, "account_id")
+					require.NotContains(t, events, "upstream_response_body")
+				}
+				svc.SetMonitoringEnabled(false)
+				w = httptest.NewRecorder()
+				router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path+"/62068", nil))
+				require.NotEqual(t, http.StatusOK, w.Code)
+			})
+		}
 	}
 }

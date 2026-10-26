@@ -1,14 +1,17 @@
 package handler
 
 import (
+	"encoding/base64"
 	"html"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,14 +47,14 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 	}
 
 	response.Success(c, dto.PublicSettings{
+		VendorConsoleEnabled:                settings.VendorConsoleEnabled,
+		VendorPortalOrigin:                  settings.VendorPortalOrigin,
 		RegistrationEnabled:                 settings.RegistrationEnabled,
 		EmailVerifyEnabled:                  settings.EmailVerifyEnabled,
 		ForceEmailOnThirdPartySignup:        settings.ForceEmailOnThirdPartySignup,
 		RegistrationEmailSuffixWhitelist:    settings.RegistrationEmailSuffixWhitelist,
 		RegistrationEmailDomainQuotaEnabled: settings.RegistrationEmailDomainQuotaEnabled,
-		PromoCodeEnabled:                    settings.PromoCodeEnabled,
 		PasswordResetEnabled:                settings.PasswordResetEnabled,
-		InvitationCodeEnabled:               settings.InvitationCodeEnabled,
 		TotpEnabled:                         settings.TotpEnabled,
 		PasskeyEnabled:                      settings.PasskeyEnabled,
 		LoginAgreementEnabled:               settings.LoginAgreementEnabled,
@@ -76,7 +79,6 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		DocURL:                              settings.DocURL,
 		HomeContent:                         settings.HomeContent,
 		CompactHomeEnabled:                  settings.CompactHomeEnabled,
-		HideCcsImportButton:                 settings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:         settings.PurchaseSubscriptionEnabled,
 		PurchaseSubscriptionURL:             settings.PurchaseSubscriptionURL,
 		TableDefaultPageSize:                settings.TableDefaultPageSize,
@@ -118,8 +120,6 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		ModelPlazaRequireAuth:   settings.ModelPlazaRequireAuth,
 		PluginManagementEnabled: settings.PluginManagementEnabled,
 
-		AffiliateEnabled: settings.AffiliateEnabled,
-
 		RiskControlEnabled: settings.RiskControlEnabled,
 
 		AllowUserViewErrorRequests: settings.AllowUserViewErrorRequests,
@@ -157,4 +157,47 @@ func publicLoginAgreementDocumentsToDTO(items []service.LoginAgreementDocument) 
 		})
 	}
 	return result
+}
+
+// GetFavicon lets a static portal resolve live branding before its application loads.
+func (h *SettingHandler) GetFavicon(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	settings, err := h.settingService.GetPublicSettings(c.Request.Context())
+	if err != nil {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
+	logo := urlvalidator.SafeImageURL(settings.SiteLogo)
+	if logo == "" {
+		if strings.TrimSpace(settings.SiteLogo) != "" {
+			c.Status(http.StatusNoContent)
+			return
+		}
+		logo = "/logo.svg"
+	}
+	if !strings.HasPrefix(strings.ToLower(logo), "data:") {
+		c.Redirect(http.StatusTemporaryRedirect, logo)
+		return
+	}
+	metadata, payload, ok := strings.Cut(logo[5:], ",")
+	if !ok {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	contentType := strings.Split(metadata, ";")[0]
+	var content []byte
+	if strings.HasSuffix(strings.ToLower(metadata), ";base64") {
+		content, err = base64.StdEncoding.DecodeString(payload)
+	} else {
+		var decoded string
+		decoded, err = url.PathUnescape(payload)
+		content = []byte(decoded)
+	}
+	if err != nil || len(content) == 0 {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Security-Policy", "default-src 'none'; sandbox")
+	c.Data(http.StatusOK, contentType, content)
 }

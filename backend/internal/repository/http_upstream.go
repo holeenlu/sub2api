@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"compress/zlib"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -27,12 +29,14 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/util/transportdiag"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 )
 
@@ -100,6 +104,8 @@ const (
 const (
 	upstreamProtocolModeDefault          = "default"
 	upstreamProtocolModeLongStreamH2     = "long_stream_h2"
+	upstreamProtocolModeBPSH2            = "bps_h2"
+	upstreamProtocolModeBPSH1            = "bps_h1"
 	upstreamProtocolModeOpenAIH1         = "openai_h1"
 	upstreamProtocolModeOpenAIH2         = "openai_h2"
 	upstreamProtocolModeOpenAIH1Fallback = "openai_h1_fallback"
@@ -130,6 +136,7 @@ type openAIHTTP2Settings struct {
 // 记录客户端实例及其元数据，用于连接池管理和淘汰策略
 type upstreamClientEntry struct {
 	client       *http.Client // HTTP 客户端实例
+	feedbackKey  string       // origin/account-scoped H2 feedback, never logged raw
 	proxyKey     string       // 代理标识（用于检测代理变更）
 	poolKey      string       // 连接池配置标识（用于检测配置变更）
 	protocolMode string       // 协议模式（default/long_stream_h2/openai_h1/openai_h2/openai_h1_fallback）
@@ -142,6 +149,7 @@ type openAIHTTP2FallbackState struct {
 	windowStart   time.Time
 	errorCount    int
 	fallbackUntil time.Time
+	expiresAt     time.Time
 }
 
 // httpUpstreamService 通用 HTTP 上游服务
@@ -165,8 +173,10 @@ type httpUpstreamService struct {
 	cfg     *config.Config                  // 全局配置
 	mu      sync.RWMutex                    // 保护 clients map 的读写锁
 	clients map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
-	// OpenAI 走 HTTP/HTTPS 代理时的 H2->H1 回退状态（key=标准化 proxyKey）
-	openAIHTTP2Fallbacks sync.Map
+	// Bounded, lazily expired H2 feedback for proxy + origin + account.
+	openAIHTTP2Fallbacks  sync.Map
+	openAIHTTP2FallbackMu sync.Mutex
+	bpsHTTP2Fallbacks     map[[32]byte]bpsHTTP2Fallback
 }
 
 // NewHTTPUpstream 创建通用 HTTP 上游服务
@@ -211,7 +221,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	}
 
 	// 获取或创建对应的客户端，并标记请求占用
-	entry, err := s.acquireClientWithProfile(proxyURL, accountID, accountConcurrency, profile)
+	entry, err := s.acquireClientWithProfile(proxyURL, accountID, accountConcurrency, profile, req.URL.Scheme+"://"+req.URL.Host)
 	if err != nil {
 		return nil, err
 	}
@@ -219,16 +229,39 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	// 执行请求
 	client := s.httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
-	resp, err := doUpstreamRequest(client, req)
+	var bpsTrace *transportdiag.Trace
+	if profile == service.HTTPUpstreamProfileExcelBPS {
+		bpsTrace = transportdiag.FromContext(req.Context())
+		if bpsTrace == nil {
+			bpsTrace = &transportdiag.Trace{}
+			req = bpsTrace.Request(req)
+		}
+	}
+	resp, err := doWithOpenAIPreRequestRetry(client, req, proxyURL, profile)
 	if err != nil {
-		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
+		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.feedbackKey, err)
+		s.recordBPSHTTP2Failure(req.Context(), entry.proxyKey, bpsTrace, err)
 		// 请求失败，立即减少计数
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 		return nil, err
 	}
-	s.recordOpenAIHTTP2Success(profile, entry.protocolMode, entry.proxyKey)
+	if profile == service.HTTPUpstreamProfileOpenAI && resp.ProtoMajor == 2 {
+		resp.Body = &openAIHTTP2FeedbackBody{ReadCloser: resp.Body, report: func(err error) {
+			if req.Context().Err() != nil {
+				return
+			}
+			if err == nil {
+				s.recordOpenAIHTTP2Success(profile, entry.protocolMode, entry.feedbackKey)
+			} else {
+				s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.feedbackKey, err)
+			}
+		}}
+	}
 
+	if bpsTrace != nil && bpsTrace.NegotiatedHTTP2() {
+		resp.Body = &bpsFeedbackBody{ReadCloser: resp.Body, trace: bpsTrace, failed: func(err error) { s.recordBPSHTTP2Failure(req.Context(), entry.proxyKey, bpsTrace, err) }}
+	}
 	// 包装响应体，在关闭时自动减少计数并更新时间戳
 	// 这确保了流式响应（如 SSE）在完全读取前不会被淘汰
 	resp.Body = wrapTrackedBody(resp.Body, func() {
@@ -264,7 +297,10 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	}
 	proxyInfo := "direct"
 	if proxyURL != "" {
-		proxyInfo = proxyURL
+		proxyInfo = "configured"
+		if u, err := url.Parse(proxyURL); err == nil {
+			proxyInfo = u.Scheme + "://" + u.Host
+		}
 	}
 	slog.Debug("tls_fingerprint_enabled", "account_id", accountID, "target", targetHost, "proxy", proxyInfo, "profile", profile.Name)
 
@@ -280,7 +316,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 
 	client := s.httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
-	resp, err := doUpstreamRequest(client, req)
+	resp, err := doWithOpenAIPreRequestRetry(client, req, proxyURL, upstreamProfile)
 	if err != nil {
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
@@ -300,7 +336,20 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 // caller's context (which may be detached for billing or reused for retries).
 func doUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, error) {
 	ctx, cancel := context.WithCancel(req.Context())
-	resp, err := servertiming.Do(client, req.WithContext(ctx))
+	wireRequest := req.WithContext(ctx)
+	encodingStarted := time.Now()
+	if err := compressCodexResponsesRequest(wireRequest); err != nil {
+		cancel()
+		// Compression has not transferred body ownership to the transport.
+		// Leave the caller's semantic body intact, including on admission cancel.
+		return nil, err
+	}
+	encoding := wireRequest.Header.Get("Content-Encoding")
+	if encoding == "" {
+		encoding = "identity"
+	}
+	service.RecordOpenAIRequestBodyEncoding(ctx, req.ContentLength, wireRequest.ContentLength, encoding, time.Since(encodingStarted))
+	resp, err := servertiming.Do(client, wireRequest)
 	if err != nil {
 		cancel()
 		return resp, err
@@ -308,6 +357,81 @@ func doUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, 
 	decompressResponseBody(resp)
 	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
 	return resp, nil
+}
+
+// Each EncodeAll call exclusively owns its encoder. Pool misses allocate rather
+// than queue; sync.Pool may discard idle codec state at any garbage collection.
+var codexResponsesZstdEncoders sync.Pool
+
+// Per-attempt wire encoding was adapted from huoji120/sub4api a3eaf63a.
+// Independent synchronous compression follows CPR e7e5b659.
+// Codex compresses regular ChatGPT Responses requests, not the public API,
+// legacy compact endpoint, or WS frames. Keep the semantic request and its
+// GetBody replay unchanged; only the per-attempt wire request is encoded.
+func compressCodexResponsesRequest(req *http.Request) error {
+	if req == nil || req.URL == nil || req.Method != http.MethodPost ||
+		!strings.EqualFold(req.URL.Scheme, "https") ||
+		!strings.EqualFold(req.URL.Hostname(), "chatgpt.com") ||
+		req.URL.Path != "/backend-api/codex/responses" ||
+		req.Body == nil || req.GetBody == nil {
+		return nil
+	}
+	mediaType, _, _ := strings.Cut(req.Header.Get("Content-Type"), ";")
+	if !strings.EqualFold(strings.TrimSpace(mediaType), "application/json") {
+		return nil
+	}
+	if encoding := strings.TrimSpace(req.Header.Get("Content-Encoding")); encoding != "" && !strings.EqualFold(encoding, "identity") {
+		return nil
+	}
+	ctx := req.Context()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	replay, err := req.GetBody()
+	if err != nil {
+		return fmt.Errorf("read Codex request for compression: %w", err)
+	}
+	var payload []byte
+	if prepared, ok := replay.(*httputil.PrereadBody); ok {
+		payload = prepared.Bytes()
+	} else {
+		// Account probes and independent HTTP callers still provide ordinary
+		// replay readers; only those need a read into an owned byte slice.
+		payload, err = io.ReadAll(replay)
+	}
+	_ = replay.Close()
+	if err != nil {
+		return fmt.Errorf("read Codex request for compression: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	encoder, _ := codexResponsesZstdEncoders.Get().(*zstd.Encoder)
+	if encoder == nil {
+		encoder, err = zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(3)))
+		if err != nil {
+			return fmt.Errorf("initialize Codex request compression: %w", err)
+		}
+	}
+	// A nil destination makes the encoded bytes caller-owned; future borrowers
+	// cannot overwrite a body retained by the transport or its GetBody replay.
+	encoded := encoder.EncodeAll(payload, nil)
+	codexResponsesZstdEncoders.Put(encoder)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	slog.DebugContext(ctx, "openai.request_compression", "encoding", "zstd", "semantic_bytes", len(payload), "wire_bytes", len(encoded))
+	_ = req.Body.Close()
+	req.Body = httputil.NewPrereadBody(encoded)
+	req.GetBody = func() (io.ReadCloser, error) {
+		return httputil.NewPrereadBody(encoded), nil
+	}
+	req.ContentLength = int64(len(encoded))
+	req.TransferEncoding = nil
+	req.Header = req.Header.Clone()
+	req.Header.Del("Content-Length")
+	req.Header.Set("Content-Encoding", "zstd")
+	return nil
 }
 
 type cancelOnCloseBody struct {
@@ -576,7 +700,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 			atomic.AddInt64(&entry.inFlight, 1)
 		}
 		s.mu.RUnlock()
-		slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "cache_key", cacheKey)
+		slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "cache_hash", fmt.Sprintf("%x", sha256.Sum256([]byte(cacheKey)))[:12])
 		return entry, nil
 	}
 	s.mu.RUnlock()
@@ -590,7 +714,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 				atomic.AddInt64(&entry.inFlight, 1)
 			}
 			s.mu.Unlock()
-			slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "cache_key", cacheKey)
+			slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "cache_hash", fmt.Sprintf("%x", sha256.Sum256([]byte(cacheKey)))[:12])
 			return entry, nil
 		}
 		slog.Debug("tls_fingerprint_evicting_stale_client",
@@ -613,7 +737,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	}
 
 	// 创建带 TLS 指纹的 Transport
-	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "cache_key", cacheKey, "proxy", proxyKey)
+	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "cache_hash", fmt.Sprintf("%x", sha256.Sum256([]byte(cacheKey)))[:12])
 	transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
 	if err != nil {
 		s.mu.Unlock()
@@ -623,6 +747,9 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	client := &http.Client{Transport: transport}
 	if s.shouldValidateResolvedIP() {
 		client.CheckRedirect = s.redirectChecker
+	}
+	if proxyutil.IsVendorProxy(parsedProxy) {
+		client.CheckRedirect = proxyutil.VendorRedirectPolicy(client.CheckRedirect)
 	}
 
 	entry := &upstreamClientEntry{
@@ -686,8 +813,8 @@ func (s *httpUpstreamService) acquireClient(proxyURL string, accountID int64, ac
 }
 
 // acquireClientWithProfile 获取或创建客户端，并按请求 profile 选择协议策略。
-func (s *httpUpstreamService) acquireClientWithProfile(proxyURL string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile) (*upstreamClientEntry, error) {
-	return s.getClientEntry(proxyURL, accountID, accountConcurrency, profile, true, true)
+func (s *httpUpstreamService) acquireClientWithProfile(proxyURL string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile, origin ...string) (*upstreamClientEntry, error) {
+	return s.getClientEntry(proxyURL, accountID, accountConcurrency, profile, true, true, origin...)
 }
 
 // getOrCreateClient 获取或创建客户端
@@ -712,7 +839,7 @@ func (s *httpUpstreamService) getOrCreateClient(proxyURL string, accountID int64
 // getClientEntry 获取或创建客户端条目
 // markInFlight=true 时会标记进行中请求，用于请求路径防止被淘汰
 // enforceLimit=true 时会限制客户端数量，超限且无法淘汰时返回错误
-func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile, markInFlight bool, enforceLimit bool) (*upstreamClientEntry, error) {
+func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile, markInFlight bool, enforceLimit bool, origin ...string) (*upstreamClientEntry, error) {
 	// 获取隔离模式
 	isolation := s.getIsolationMode()
 	// 标准化代理 URL 并解析
@@ -721,11 +848,18 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 		return nil, err
 	}
 	// 根据请求 profile（例如 OpenAI）选择协议模式
-	protocolMode := s.resolveProtocolMode(profile, proxyKey, parsedProxy)
+	feedbackKey := proxyKey
+	if profile == service.HTTPUpstreamProfileOpenAI && len(origin) > 0 {
+		feedbackKey += fmt.Sprintf("\x00%s\x00%d", origin[0], accountID)
+	}
+	protocolMode := s.resolveProtocolMode(profile, feedbackKey, parsedProxy)
 	settings := s.resolvePoolSettings(isolation, accountConcurrency)
 	settings = s.applyProfilePoolSettings(settings, profile)
 	// 构建缓存键（根据隔离策略不同）
-	cacheKey := buildCacheKey(isolation, proxyKey, accountID, protocolMode)
+	cacheKey := buildCacheKey(isolation, feedbackKey, accountID, protocolMode)
+	if profile == service.HTTPUpstreamProfileOpenAI && len(origin) > 0 {
+		cacheKey += "|origin:" + origin[0]
+	}
 	// 构建连接池配置键（用于检测配置变更）
 	poolKey := buildPoolKey(settings, protocolMode)
 
@@ -779,11 +913,15 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	if s.shouldValidateResolvedIP() {
 		client.CheckRedirect = s.redirectChecker
 	}
+	if proxyutil.IsVendorProxy(parsedProxy) {
+		client.CheckRedirect = proxyutil.VendorRedirectPolicy(client.CheckRedirect)
+	}
 	entry := &upstreamClientEntry{
 		client:       client,
 		proxyKey:     proxyKey,
 		poolKey:      poolKey,
 		protocolMode: protocolMode,
+		feedbackKey:  feedbackKey,
 	}
 	atomic.StoreInt64(&entry.lastUsed, nowUnix)
 	if markInFlight {
@@ -1060,6 +1198,12 @@ func (s *httpUpstreamService) resolveOpenAIHTTP2Settings() openAIHTTP2Settings {
 }
 
 func (s *httpUpstreamService) resolveProtocolMode(profile service.HTTPUpstreamProfile, proxyKey string, parsedProxy *url.URL) string {
+	if profile == service.HTTPUpstreamProfileExcelBPS {
+		if s.bpsHTTP1Active(proxyKey, time.Now()) {
+			return upstreamProtocolModeBPSH1
+		}
+		return upstreamProtocolModeBPSH2
+	}
 	if profile == service.HTTPUpstreamProfileLongStream {
 		return upstreamProtocolModeLongStreamH2
 	}
@@ -1077,7 +1221,7 @@ func (s *httpUpstreamService) resolveProtocolMode(profile service.HTTPUpstreamPr
 		return upstreamProtocolModeOpenAIH2
 	}
 	scheme := strings.ToLower(parsedProxy.Scheme)
-	if scheme != "http" && scheme != "https" {
+	if scheme != "http" && scheme != "https" && scheme != "socks5" && scheme != "socks5h" {
 		return upstreamProtocolModeOpenAIH2
 	}
 	if settings.allowProxyFallbackToHTTP1 && s.isOpenAIHTTP2FallbackActive(proxyKey) {
@@ -1095,22 +1239,80 @@ func (s *httpUpstreamService) isOpenAIHTTP2FallbackActive(proxyKey string) bool 
 	if !ok || state == nil {
 		return false
 	}
-	return state.isFallbackActive(time.Now())
+	now := time.Now()
+	state.mu.Lock()
+	expired := !state.expiresAt.IsZero() && !now.Before(state.expiresAt)
+	state.mu.Unlock()
+	return !expired && state.isFallbackActive(now)
 }
 
+const openAIHTTP2FallbackMaxEntries = 4096
+
 func (s *httpUpstreamService) getOrCreateOpenAIHTTP2FallbackState(proxyKey string) *openAIHTTP2FallbackState {
-	state := &openAIHTTP2FallbackState{}
-	actual, _ := s.openAIHTTP2Fallbacks.LoadOrStore(proxyKey, state)
-	cached, ok := actual.(*openAIHTTP2FallbackState)
-	if !ok || cached == nil {
+	// Insertion is rare (compatibility failures only). Serialize pruning and
+	// insertion so concurrent accounts cannot overshoot the memory bound.
+	s.openAIHTTP2FallbackMu.Lock()
+	defer s.openAIHTTP2FallbackMu.Unlock()
+	now := time.Now()
+	settings := s.resolveOpenAIHTTP2Settings()
+	expires := now.Add(max(settings.fallbackTTL, settings.fallbackWindow))
+	if raw, ok := s.openAIHTTP2Fallbacks.Load(proxyKey); ok {
+		state := raw.(*openAIHTTP2FallbackState)
+		state.mu.Lock()
+		state.expiresAt = expires
+		state.mu.Unlock()
 		return state
 	}
-	return cached
+	count := 0
+	var oldestKey any
+	var oldestState *openAIHTTP2FallbackState
+	var oldest time.Time
+	s.openAIHTTP2Fallbacks.Range(func(key, value any) bool {
+		state := value.(*openAIHTTP2FallbackState)
+		state.mu.Lock()
+		at := state.expiresAt
+		state.mu.Unlock()
+		if !at.IsZero() && !now.Before(at) {
+			s.openAIHTTP2Fallbacks.CompareAndDelete(key, state)
+			return true
+		}
+		count++
+		if oldestKey == nil || at.Before(oldest) {
+			oldestKey, oldestState, oldest = key, state, at
+		}
+		return true
+	})
+	if count >= openAIHTTP2FallbackMaxEntries {
+		s.openAIHTTP2Fallbacks.CompareAndDelete(oldestKey, oldestState)
+	}
+	state := &openAIHTTP2FallbackState{expiresAt: expires}
+	s.openAIHTTP2Fallbacks.Store(proxyKey, state)
+	return state
 }
 
 func isHTTPProxyKey(proxyKey string) bool {
 	return strings.HasPrefix(proxyKey, "http://") || strings.HasPrefix(proxyKey, "https://")
 }
+
+func isOpenAIProxyFeedbackKey(key string) bool {
+	return isHTTPProxyKey(key) || strings.HasPrefix(key, "socks5://") || strings.HasPrefix(key, "socks5h://")
+}
+
+type openAIHTTP2FeedbackBody struct {
+	io.ReadCloser
+	once   sync.Once
+	report func(error)
+}
+
+func (b *openAIHTTP2FeedbackBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		b.once.Do(func() { b.report(err) })
+	}
+	return n, err
+}
+
+func (b *openAIHTTP2FeedbackBody) MarkComplete() { b.once.Do(func() { b.report(nil) }) }
 
 func isOpenAIHTTP2CompatibilityError(err error) bool {
 	if err == nil {
@@ -1178,14 +1380,15 @@ func (s *httpUpstreamService) recordOpenAIHTTP2Failure(profile service.HTTPUpstr
 	if !settings.enabled || !settings.allowProxyFallbackToHTTP1 {
 		return
 	}
-	if !isHTTPProxyKey(proxyKey) || !isOpenAIHTTP2CompatibilityError(err) {
+	if !isOpenAIProxyFeedbackKey(proxyKey) || !isOpenAIHTTP2CompatibilityError(err) {
 		return
 	}
 	state := s.getOrCreateOpenAIHTTP2FallbackState(proxyKey)
 	activated, until := state.recordFailure(time.Now(), settings.fallbackErrorThreshold, settings.fallbackWindow, settings.fallbackTTL)
 	if activated {
 		slog.Warn("openai_http2_proxy_fallback_activated",
-			"proxy", proxyKey,
+			"proxy_hash", fmt.Sprintf("%x", sha256.Sum256([]byte(strings.SplitN(proxyKey, "\x00", 2)[0])))[:8],
+			"route_hash", fmt.Sprintf("%x", sha256.Sum256([]byte(proxyKey)))[:8],
 			"fallback_until", until.Format(time.RFC3339))
 	}
 }
@@ -1194,7 +1397,7 @@ func (s *httpUpstreamService) recordOpenAIHTTP2Success(profile service.HTTPUpstr
 	if profile != service.HTTPUpstreamProfileOpenAI || protocolMode != upstreamProtocolModeOpenAIH2 {
 		return
 	}
-	if !isHTTPProxyKey(proxyKey) {
+	if !isOpenAIProxyFeedbackKey(proxyKey) {
 		return
 	}
 	raw, ok := s.openAIHTTP2Fallbacks.Load(proxyKey)
@@ -1288,7 +1491,9 @@ func normalizeProxyURL(raw string) (string, *url.URL, error) {
 	parsed.Path = ""
 	parsed.RawPath = ""
 	parsed.RawQuery = ""
-	parsed.Fragment = ""
+	if !proxyutil.IsVendorProxy(parsed) {
+		parsed.Fragment = ""
+	}
 	parsed.ForceQuery = false
 	if hostname := parsed.Hostname(); hostname != "" {
 		port := parsed.Port()
@@ -1387,15 +1592,21 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 		IdleConnTimeout:       settings.idleConnTimeout,
 		ResponseHeaderTimeout: settings.responseHeaderTimeout,
 	}
+	// Codex selects its response encodings explicitly. Do not let Go add gzip
+	// only on requests whose callers omitted Accept-Encoding.
+	if protocolMode == upstreamProtocolModeOpenAIH1 || protocolMode == upstreamProtocolModeOpenAIH2 || protocolMode == upstreamProtocolModeOpenAIH1Fallback {
+		transport.DisableCompression = true
+	}
+
 	switch protocolMode {
-	case upstreamProtocolModeLongStreamH2, upstreamProtocolModeOpenAIH2:
+	case upstreamProtocolModeLongStreamH2, upstreamProtocolModeOpenAIH2, upstreamProtocolModeBPSH2:
 		transport.ForceAttemptHTTP2 = true
 		// 显式配置 http2 并启用 PING 健康探测，剔除代理/NAT 静默掐断的死连接，
 		// 避免请求挂在死连接上直到 TCP 重传超时（分钟级）。
 		if _, err := enableHTTP2KeepAlive(transport, protocolMode); err != nil {
 			return nil, err
 		}
-	case upstreamProtocolModeOpenAIH1:
+	case upstreamProtocolModeOpenAIH1, upstreamProtocolModeBPSH1:
 		transport.ForceAttemptHTTP2 = false
 		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
 	case upstreamProtocolModeOpenAIH1Fallback:
@@ -1470,11 +1681,7 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 			slog.Debug("tls_fingerprint_transport_socks5", "proxy", proxyURL.Host)
 			socks5Dialer := tlsfingerprint.NewSOCKS5ProxyDialer(profile, proxyURL)
 			transport.DialTLSContext = socks5Dialer.DialTLSContext
-		case "https":
-			// The fingerprint dialer emits a plaintext CONNECT preface and cannot
-			// establish TLS to an HTTPS proxy. Keep proxy routing via net/http.
-			return buildUpstreamTransport(settings, proxyURL, upstreamProtocolModeDefault)
-		case "http":
+		case "http", "https":
 			// HTTP/HTTPS 代理：使用 HTTPProxyDialer（CONNECT 隧道）
 			slog.Debug("tls_fingerprint_transport_http_connect", "proxy", proxyURL.Host)
 			httpDialer := tlsfingerprint.NewHTTPProxyDialer(profile, proxyURL)
@@ -1485,6 +1692,18 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 			if err := proxyutil.ConfigureTransportProxy(transport, proxyURL); err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	if dialTLS := transport.DialTLSContext; dialTLS != nil {
+		// Adapt the plaintext HTTP/1.1 stream after TLS. The transport still owns
+		// pooling, request cancellation, proxy routing and response parsing.
+		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := dialTLS(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			return tlsfingerprint.WrapClaudeHTTP1Conn(conn), nil
 		}
 	}
 
@@ -1507,6 +1726,12 @@ func (b *trackedBody) Close() error {
 		b.once.Do(b.onClose)
 	}
 	return err
+}
+
+func (b *trackedBody) MarkComplete() {
+	if complete, ok := b.ReadCloser.(interface{ MarkComplete() }); ok {
+		complete.MarkComplete()
+	}
 }
 
 // wrapTrackedBody 包装响应体以跟踪关闭事件
@@ -1549,7 +1774,21 @@ func decompressResponseBody(resp *http.Response) {
 	case "br":
 		reader = brotli.NewReader(resp.Body)
 	case "deflate":
-		reader = flate.NewReader(resp.Body)
+		// HTTP deflate normally uses a zlib envelope; some relays send raw DEFLATE.
+		// Peek without consuming bytes so both forms work with CLI negotiation.
+		bufferedBody := bufio.NewReader(resp.Body)
+		resp.Body = &decompressedBody{reader: bufferedBody, closer: originalBody}
+		header, _ := bufferedBody.Peek(2)
+		if len(header) == 2 && header[0]&0x0f == 8 && header[0]>>4 <= 7 &&
+			(uint16(header[0])<<8|uint16(header[1]))%31 == 0 {
+			zr, err := zlib.NewReader(bufferedBody)
+			if err != nil {
+				return
+			}
+			reader = zr
+		} else {
+			reader = flate.NewReader(bufferedBody)
+		}
 	case "zstd":
 		bufferedBody := bufio.NewReader(resp.Body)
 		resp.Body = &decompressedBody{reader: bufferedBody, closer: originalBody}

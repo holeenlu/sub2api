@@ -4,14 +4,335 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
+
+func TestForwardOpenAIWSV2_RemoteMessageTooBigPreservesRejection(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra                string
+		stream, heartbeat, prewarm bool
+	}{
+		{name: "json"},
+		{name: "stream", stream: true},
+		{name: "opaque_history", stream: true},
+		{name: "hosted_tool", stream: true, extra: `,"tools":[{"type":"mcp","server_label":"private-tool","server_url":"https://tools.example.test"}]`},
+		{name: "heartbeat", stream: true, heartbeat: true},
+		{name: "prewarm", stream: true, prewarm: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+			c.Set(OpsUpstreamStatusCodeKey, http.StatusServiceUnavailable)
+			c.Set(OpsOpenAIWSPayloadBytesKey, 123) // stale diagnostics from an earlier attempt
+			if tc.heartbeat {
+				stop := StartSSEKeepalive(c, time.Hour)
+				defer stop()
+				value, _ := c.Get(openAICompactSSEKeepaliveKey)
+				require.True(t, value.(*openAICompactSSEKeepalive).beat())
+				stop()
+			}
+			cfg := newOpenAIWSV2TestConfig()
+			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			cfg.Gateway.OpenAIWS.PrewarmGenerateEnabled = tc.prewarm
+			capture := &openAIWSCaptureConn{readErr: fmt.Errorf("failed to get reader: received close frame: %w", coderws.CloseError{Code: coderws.StatusMessageTooBig})}
+			dialer := &openAIWSCaptureDialer{conn: capture}
+			pool := newOpenAIWSConnPool(cfg)
+			pool.setClientDialerForTest(dialer)
+			t.Cleanup(pool.Close)
+			upstream := &httpUpstreamSequenceRecorder{}
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), openaiWSPool: pool, toolCorrector: NewCodexToolCorrector()}
+			account := &Account{ID: 38, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "owner"}, Extra: map[string]any{"responses_websockets_v2_enabled": true}}
+			input := `"hello"`
+			if tc.name == "opaque_history" {
+				input = `[{"type":"compaction","encrypted_content":"private-history"}]`
+			}
+			result, err := svc.Forward(context.Background(), c, account, []byte(fmt.Sprintf(`{"model":"gpt-6.1-sol","stream":%t,"input":%s%s}`, tc.stream, input, tc.extra)))
+			require.Error(t, err)
+			require.Nil(t, result)
+			require.Equal(t, 1, dialer.DialCount())
+			require.Len(t, capture.writes, 1, "do not resend an oversized message")
+			require.Zero(t, upstream.callCount, "do not replay over HTTP")
+			if tc.heartbeat {
+				require.Equal(t, http.StatusOK, rec.Code)
+				require.Contains(t, rec.Body.String(), "response.failed")
+			} else {
+				require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+				require.Equal(t, "request_too_large", gjson.Get(rec.Body.String(), "error.code").String())
+			}
+			require.Contains(t, rec.Body.String(), "WebSocket message size limit")
+			require.NotContains(t, rec.Body.String(), "private-")
+			require.Equal(t, 0, c.GetInt(OpsUpstreamStatusCodeKey), "a WS close is not an HTTP 413 response")
+			raw, ok := c.Get(OpsUpstreamErrorsKey)
+			require.True(t, ok)
+			events := raw.([]*OpsUpstreamErrorEvent)
+			require.Len(t, events, 1)
+			require.Equal(t, "ws_error", events[0].Kind)
+			require.Zero(t, events[0].UpstreamStatusCode)
+			require.Equal(t, "message_too_big", events[0].Reason)
+			require.Equal(t, int64(1009), gjson.Get(events[0].Detail, "upstream_close_code").Int())
+			if tc.prewarm {
+				require.False(t, gjson.Get(events[0].Detail, "payload_bytes").Exists(), "do not report stale or unobserved sizes")
+				require.Equal(t, false, capture.lastWrite["generate"], "failed prewarm must not send a generation")
+			} else {
+				require.Equal(t, int64(len(payloadAsJSONBytes(capture.lastWrite))), gjson.Get(events[0].Detail, "payload_bytes").Int())
+			}
+			require.NotContains(t, events[0].Detail, "private-")
+			if tc.heartbeat {
+				failure, ok := GetOpsStreamError(c)
+				require.True(t, ok)
+				require.Equal(t, http.StatusRequestEntityTooLarge, failure.IntendedStatus)
+				require.Equal(t, "request_too_large", failure.ErrType)
+				require.Contains(t, rec.Body.String(), `"code":"request_too_large"`)
+			}
+		})
+	}
+}
+
+func TestForwardOpenAIWSV2_PreviousResponseUsesProducingScope(t *testing.T) {
+	for _, tc := range []struct {
+		name                                       string
+		store, stale, evict, external, oauth, beat bool
+		wantUnavailable                            bool
+	}{
+		{name: "local_latest_current_store_true"},
+		{name: "local_stale_current_store_true", stale: true, wantUnavailable: true},
+		{name: "local_evicted_json", evict: true, wantUnavailable: true},
+		{name: "local_evicted_keepalive", evict: true, beat: true, wantUnavailable: true},
+		{name: "persisted_evicted_current_store_false", store: true, evict: true},
+		{name: "unknown_api_key", external: true},
+		{name: "unknown_oauth", external: true, oauth: true, wantUnavailable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := newOpenAIWSV2TestConfig()
+			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			cfg.Gateway.OpenAIWS.MaxConnsPerAccount, cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1, 1
+			completed := func(id string) []byte {
+				return []byte(fmt.Sprintf(`{"type":"response.completed","response":{"id":"%s","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`, id))
+			}
+			capture := &openAIWSCaptureConn{events: [][]byte{completed("resp_parent"), completed("resp_intervening"), completed("resp_next")}}
+			dialer := &openAIWSCaptureDialer{conn: capture}
+			pool := newOpenAIWSConnPool(cfg)
+			pool.setClientDialerForTest(dialer)
+			t.Cleanup(pool.Close)
+			svc := &OpenAIGatewayService{cfg: cfg, openaiWSPool: pool, toolCorrector: NewCodexToolCorrector()}
+			account := &Account{ID: 5890, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "token"}}
+			if tc.oauth {
+				account.Type, account.Credentials = AccountTypeOAuth, map[string]any{"access_token": "token"}
+			}
+			forward := func(body map[string]any, heartbeat bool) (*OpenAIForwardResult, error, *httptest.ResponseRecorder) {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+				SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+				if heartbeat {
+					stop := StartSSEKeepalive(c, time.Hour)
+					defer stop()
+					value, _ := c.Get(openAICompactSSEKeepaliveKey)
+					require.True(t, value.(*openAICompactSSEKeepalive).beat())
+					stop()
+				}
+				result, err := svc.forwardOpenAIWSV2(t.Context(), c, account, body, "", "producer-scope", "token", OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, false, heartbeat, "gpt-5.5", "gpt-5.5", time.Now(), 1, time.Time{}, "", nil, nil)
+				return result, err, recorder
+			}
+			if !tc.external {
+				_, err, _ := forward(map[string]any{"model": "gpt-5.5", "store": tc.store, "input": "first"}, false)
+				require.NoError(t, err)
+				connID, scope, ok := svc.getOpenAIWSStateStore().GetResponseContinuation("resp_parent")
+				require.True(t, ok)
+				require.Equal(t, openAIWSResponseScopeForStore(!tc.store), scope)
+				if tc.stale {
+					_, err, _ = forward(map[string]any{"model": "gpt-5.5", "store": true, "input": "intervening"}, false)
+					require.NoError(t, err)
+				}
+				if tc.evict {
+					pool.evictConn(account.ID, connID)
+					dialer.conn = &openAIWSCaptureConn{events: [][]byte{completed("resp_next")}}
+				}
+			}
+			dialsBefore := dialer.DialCount()
+			result, err, recorder := forward(map[string]any{"model": "gpt-5.5", "store": !tc.store, "previous_response_id": "resp_parent", "input": "next"}, tc.beat)
+			if tc.wantUnavailable {
+				require.Nil(t, result)
+				require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
+				require.Equal(t, dialsBefore, dialer.DialCount(), "never send a connection-local parent on a replacement socket")
+				if tc.beat {
+					require.Equal(t, http.StatusOK, recorder.Code)
+					require.Contains(t, recorder.Body.String(), `"type":"response.failed"`)
+					require.Contains(t, recorder.Body.String(), `"code":"previous_response_not_found"`)
+				} else {
+					require.Equal(t, http.StatusBadRequest, recorder.Code)
+					require.Equal(t, "previous_response_not_found", gjson.GetBytes(recorder.Body.Bytes(), "error.code").String())
+				}
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, "resp_parent", dialer.conn.lastWrite["previous_response_id"])
+			}
+		})
+	}
+}
+
+func TestForwardOpenAIWSV2_HTTPPartialFailurePreservesUsageAndDoesNotReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const metered = `{"type":"response.in_progress","response":{"id":"resp_partial","model":"gpt-5.5","usage":{"input_tokens":11,"output_tokens":2,"input_tokens_details":{"cached_tokens":3}}}}`
+	const delta = `{"type":"response.output_text.delta","response_id":"resp_partial","delta":"partial reply"}`
+	for _, stream := range []bool{false, true} {
+		for _, tc := range []struct {
+			name                            string
+			events                          []string
+			metered, disconnect, hostedTool bool
+		}{
+			{name: "nonterminal_usage_then_read_error", events: []string{metered}, metered: true},
+			{name: "usage_then_malformed_json", events: []string{metered, `{`}, metered: true},
+			{name: "usage_then_error_event", events: []string{metered, `{"type":"error","error":{"type":"server_error","code":"server_error","message":"upstream failed"}}`}, metered: true},
+			{name: "usage_then_short_server_error", events: []string{metered, `{"type":"error","error":{"type":"server_err","code":"server_err","message":"upstream failed"}}`}, metered: true},
+			{name: "output_without_usage", events: []string{delta}},
+			{name: "tool_output_without_usage", events: []string{`{"type":"response.output_item.done","item":{"type":"function_call","id":"call_1","name":"write_file","arguments":"{}"}}`}},
+			{name: "hosted_tool_uncertain_execution", hostedTool: true},
+			{name: "usage_after_downstream_disconnect", events: []string{delta, metered}, metered: true, disconnect: true},
+		} {
+			if tc.disconnect && !stream {
+				continue
+			}
+			t.Run(fmt.Sprintf("stream_%t/%s", stream, tc.name), func(t *testing.T) {
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+				SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+				if tc.disconnect {
+					c.Writer = &failWriteResponseWriter{ResponseWriter: c.Writer}
+				}
+				cfg := newOpenAIWSV2TestConfig()
+				cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+				capture := &openAIWSCaptureConn{}
+				for _, event := range tc.events {
+					capture.events = append(capture.events, []byte(event))
+				}
+				dialer := &openAIWSCaptureDialer{conn: capture}
+				pool := newOpenAIWSConnPool(cfg)
+				pool.setClientDialerForTest(dialer)
+				t.Cleanup(func() { pool.Close() })
+				upstream := &httpUpstreamSequenceRecorder{}
+				svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), openaiWSPool: pool, toolCorrector: NewCodexToolCorrector()}
+				account := &Account{ID: 5886, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+					Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "owner"},
+					Extra:       map[string]any{"responses_websockets_v2_enabled": true}}
+				budget := NewOpenAITurnBudget(cfg)
+				ctx := WithOpenAITurnBudget(context.Background(), budget)
+				tools := ""
+				if tc.hostedTool {
+					tools = `,"tools":[{"type":"mcp","server_label":"write_service","server_url":"https://tools.example.test"}]`
+				}
+				result, err := svc.Forward(ctx, c, account, []byte(fmt.Sprintf(`{"model":"gpt-5.5","stream":%t,"input":"hello"%s}`, stream, tools)))
+				require.Error(t, err)
+				var failover *UpstreamFailoverError
+				require.False(t, errors.As(err, &failover), "observed execution or hosted tools cannot be replayed on another account")
+				require.Equal(t, 1, dialer.DialCount())
+				capture.mu.Lock()
+				writes := len(capture.writes)
+				capture.mu.Unlock()
+				require.Equal(t, 1, writes, "one actual response.create send")
+				require.Zero(t, upstream.callCount, "no HTTP replay")
+				budget.mu.Lock()
+				attempts := budget.attempts
+				budget.mu.Unlock()
+				require.Equal(t, 1, attempts, "preserve actual-send budget accounting")
+				if tc.metered {
+					require.NotNil(t, result, "Forward must retain the inner partial result")
+					require.Equal(t, "resp_partial", result.RequestID)
+					require.Equal(t, 11, result.Usage.InputTokens)
+					require.Equal(t, 2, result.Usage.OutputTokens)
+					require.Equal(t, 3, result.Usage.CacheReadInputTokens)
+					require.Equal(t, tc.disconnect, result.ClientDisconnect)
+					require.Equal(t, "gpt-5.5", result.BillingModel)
+					require.True(t, result.OpenAIWSMode)
+				} else {
+					require.Nil(t, result, "do not invent usage for output-only or uncertain attempts")
+				}
+			})
+		}
+	}
+}
+
+func TestForwardOpenAIWSV2_ExplicitHTTPIngressOAuthRouting(t *testing.T) {
+	for _, tc := range []struct {
+		name, path                             string
+		forceHTTP, passthrough, stream, wantWS bool
+	}{
+		{name: "oauth_stream", path: "/v1/responses", stream: true, wantWS: true},
+		{name: "oauth_json", path: "/v1/responses", wantWS: true},
+		{name: "force_http", path: "/v1/responses", forceHTTP: true},
+		{name: "compact_http", path: "/v1/responses/compact"},
+		{name: "passthrough_http", path: "/v1/responses", passthrough: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, tc.path, nil)
+			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+			cfg := newOpenAIWSV2TestConfig()
+			cfg.Gateway.OpenAIWS.ForceHTTP = tc.forceHTTP
+			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			SetOpenAIHTTPResponseOwner(c, 88, 77)
+			c.Set("api_key", &APIKey{ID: 77, UserID: 88})
+			capture := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_http_ws","status":"completed","output":[],"usage":{"input_tokens":4,"output_tokens":2}}}`)}}
+			pool := newOpenAIWSConnPool(cfg)
+			dialer := &openAIWSCaptureDialer{conn: capture}
+			pool.setClientDialerForTest(dialer)
+			t.Cleanup(pool.Close)
+			upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"resp_http","output":[],"usage":{"input_tokens":4,"output_tokens":2}}`))}}}
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), openaiWSPool: pool, toolCorrector: NewCodexToolCorrector()}
+			account := &Account{ID: 5885, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}, Extra: map[string]any{"responses_websockets_v2_enabled": true, "openai_passthrough": tc.passthrough}}
+			body := []byte(fmt.Sprintf(`{"model":"gpt-5.5","stream":%t,"input":[{"role":"user","content":"hello"}]}`, tc.stream))
+			result, err := svc.Forward(context.Background(), c, account, body)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, tc.wantWS, result.OpenAIWSMode)
+			if tc.wantWS {
+				require.Equal(t, 0, upstream.callCount)
+				require.Equal(t, "response.create", capture.lastWrite["type"])
+				require.Equal(t, 4, result.Usage.InputTokens)
+				require.Equal(t, 2, result.Usage.OutputTokens)
+				owned, ownerErr := svc.ValidateOpenAIHTTPResponseOwner(context.Background(), 0, result.ResponseID, 88, 77)
+				require.NoError(t, ownerErr)
+				require.True(t, owned, "HTTP continuation must recognize the WS-produced response")
+				owned, ownerErr = svc.ValidateOpenAIHTTPResponseOwner(context.Background(), 0, result.ResponseID, 99, 78)
+				require.NoError(t, ownerErr)
+				require.False(t, owned, "another tenant must not continue this response")
+				capture.mu.Lock()
+				capture.events = append(capture.events, []byte(`{"type":"response.completed","response":{"id":"resp_http_ws_next","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`))
+				capture.mu.Unlock()
+				next, _ := gin.CreateTestContext(httptest.NewRecorder())
+				next.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+				next.Set("api_key", &APIKey{ID: 77, UserID: 88})
+				SetOpenAIClientTransport(next, OpenAIClientTransportHTTP)
+				SetOpenAIHTTPResponseOwner(next, 88, 77)
+				nextResult, nextErr := svc.Forward(context.Background(), next, account, []byte(`{"model":"gpt-5.5","stream":false,"previous_response_id":"resp_http_ws","input":[{"role":"user","content":"next turn"}]}`))
+				require.NoError(t, nextErr)
+				require.NotNil(t, nextResult)
+				require.Equal(t, "resp_http_ws_next", nextResult.ResponseID)
+				require.Equal(t, 1, dialer.DialCount(), "headerless HTTP continuation must keep its connection-local state")
+				require.Equal(t, "resp_http_ws", capture.lastWrite["previous_response_id"])
+			} else {
+				require.Equal(t, 1, upstream.callCount)
+			}
+		})
+	}
+}
 
 // HTTP POST /v1/responses -> forwardOpenAIWSV2 keeps the canonical outbound
 // tier separate from response.completed.service_tier for usage-time billing.
@@ -84,6 +405,7 @@ func TestForwardOpenAIWSV2_KeepsOutboundAndObservedServiceTiersSeparate(t *testi
 			result, err := svc.Forward(context.Background(), c, account, body)
 			require.NoError(t, err)
 			require.NotNil(t, result)
+			require.Equal(t, UsageAuthorizationModeNative, result.AuthorizationMode)
 			require.True(t, result.OpenAIWSMode, "must take HTTP POST → forwardOpenAIWSV2, not HTTP fallback")
 			require.Equal(t, tc.stream, result.Stream)
 			require.Equal(t, "resp_tier_v2", result.RequestID)
@@ -152,12 +474,15 @@ func TestForwardOpenAIWSV2_MarksCyberPolicyForFailureEventShapes(t *testing.T) {
 			result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.5","stream":false,"input":"hello"}`))
 			if tt.wantError {
 				require.Error(t, err)
-				require.Nil(t, result)
+				require.NotNil(t, result, "a metered error must retain partial usage")
+				require.Equal(t, tt.wantInput, result.Usage.InputTokens)
+				require.Equal(t, tt.wantOutput, result.Usage.OutputTokens)
 				var failoverErr *UpstreamFailoverError
 				require.False(t, errors.As(err, &failoverErr))
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, result)
+				require.Equal(t, UsageAuthorizationModeNative, result.AuthorizationMode)
 			}
 
 			mark := GetOpsCyberPolicy(c)
@@ -165,6 +490,288 @@ func TestForwardOpenAIWSV2_MarksCyberPolicyForFailureEventShapes(t *testing.T) {
 			require.Equal(t, "cyber_policy", mark.Code)
 			require.Equal(t, tt.wantInput, mark.UpstreamInTok)
 			require.Equal(t, tt.wantOutput, mark.UpstreamOutTok)
+		})
+	}
+}
+
+// These helpers observe the shared logger through real forwarding entrypoints.
+func newWSLatencyTestContext() (*gin.Context, *observer.ObservedLogs) {
+	core, logs := observer.New(zap.InfoLevel)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(logger.IntoContext(context.Background(), zap.New(core)))
+	return c, logs
+}
+
+func wsLatencySummaries(logs *observer.ObservedLogs) []map[string]any {
+	var summaries []map[string]any
+	for _, entry := range logs.FilterMessage("openai.forward_timing").All() {
+		fields := entry.ContextMap()
+		if fields["stage"] == "attempt_summary" {
+			summaries = append(summaries, fields)
+		}
+	}
+	return summaries
+}
+
+type openAIWSFlushCaptureWriter struct {
+	gin.ResponseWriter
+	body      strings.Builder
+	snapshots []string
+}
+
+func (w *openAIWSFlushCaptureWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	w.body.Write(p[:n])
+	return n, err
+}
+
+func (w *openAIWSFlushCaptureWriter) Flush() {
+	w.ResponseWriter.Flush()
+	w.snapshots = append(w.snapshots, w.body.String())
+}
+
+func TestForwardOpenAIWSV2_TransportTimingBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		stream, text, prewarm bool
+		textSnapshot          string
+	}{
+		{name: "metadata_and_empty_delta", stream: true},
+		{name: "text_stream", stream: true, text: true},
+		{name: "text_json", text: true},
+		{name: "prewarm_then_text", stream: true, text: true, prewarm: true},
+		{name: "complete_part_without_delta", stream: true, text: true, textSnapshot: `{"type":"response.content_part.added","response_id":"resp_timing","part":{"type":"output_text","text":"private-reply"}}`},
+		{name: "complete_item_without_delta", stream: true, text: true, textSnapshot: `{"type":"response.output_item.done","response_id":"resp_timing","item":{"type":"message","content":[{"type":"output_text","text":"private-reply"}]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, logs := newWSLatencyTestContext()
+			writer := &openAIWSFlushCaptureWriter{ResponseWriter: c.Writer}
+			c.Writer = writer
+			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+			cfg := newOpenAIWSV2TestConfig()
+			// Prevent incidental batch/interval flushes without clock sleeps.
+			cfg.Gateway.OpenAIWS.EventFlushBatchSize = 100
+			cfg.Gateway.OpenAIWS.EventFlushIntervalMS = 0
+			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			cfg.Gateway.OpenAIWS.PrewarmGenerateEnabled = tc.prewarm
+			events := []string{}
+			if tc.prewarm {
+				events = append(events, `{"type":"response.completed","response":{"id":"warm","output":[]}}`)
+			}
+			events = append(events, `{"type":"codex.response.metadata","headers":{"x-codex-turn-state":"private-state"}}`,
+				`{"type":"ping"}`)
+			if tc.textSnapshot == "" {
+				events = append(events, `{"type":"response.output_text.delta","response_id":"resp_timing","delta":""}`,
+					`{"type":"response.reasoning_summary_text.delta","response_id":"resp_timing","delta":"private-reasoning"}`,
+					`{"type":"response.function_call_arguments.delta","response_id":"resp_timing","delta":"private-arguments"}`)
+			}
+			output := "[]"
+			if tc.text {
+				firstText := tc.textSnapshot
+				if firstText == "" {
+					firstText = `{"type":"response.output_text.delta","response_id":"resp_timing","delta":"private-reply"}`
+				}
+				events = append(events, firstText,
+					`{"type":"response.output_text.delta","response_id":"resp_timing","delta":"private-second"}`)
+				output = `[{"type":"message","content":[{"type":"output_text","text":"private-replyprivate-second"}]}]`
+			}
+			events = append(events, `{"type":"response.completed","response":{"object":"response","id":"resp_timing","status":"completed","output":`+output+`,"usage":{"input_tokens":3,"output_tokens":1}}}`)
+			conn := &openAIWSCaptureConn{}
+			for _, event := range events {
+				conn.events = append(conn.events, []byte(event))
+			}
+			pool := newOpenAIWSConnPool(cfg)
+			pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: conn})
+			t.Cleanup(pool.Close)
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamSequenceRecorder{}, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), openaiWSPool: pool, toolCorrector: NewCodexToolCorrector()}
+			account := &Account{ID: 38, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "owner"}, Extra: map[string]any{"responses_websockets_v2_enabled": true}}
+			result, err := svc.Forward(context.Background(), c, account, []byte(fmt.Sprintf(`{"model":"gpt-5.5","stream":%t,"input":"private-input"}`, tc.stream)))
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, 3, result.Usage.InputTokens)
+			summaries := wsLatencySummaries(logs)
+			require.Len(t, summaries, 1, "prewarm must not become a second generation attempt")
+			summary := summaries[0]
+			require.Equal(t, "websocket", summary["transport"])
+			require.Equal(t, "completed", summary["outcome"])
+			require.Equal(t, false, summary["body_wire_bytes_known"])
+			require.Equal(t, int64(len(payloadAsJSONBytes(conn.lastWrite))), summary["semantic_request_bytes"])
+			stages := summary["stages_ms"].(map[string]int64)
+			for _, key := range []string{"connection_ready", "wrote_request", "first_event", "terminal"} {
+				require.Contains(t, stages, key)
+			}
+			_, textObserved := stages["first_text"]
+			_, textFlushed := stages["first_text_flush"]
+			require.Equal(t, tc.text, textObserved)
+			require.Equal(t, tc.text && tc.stream, textFlushed)
+			if tc.text && tc.stream {
+				firstTextSnapshot := ""
+				for _, snapshot := range writer.snapshots {
+					if strings.Contains(snapshot, "private-reply") {
+						firstTextSnapshot = snapshot
+						break
+					}
+				}
+				require.NotEmpty(t, firstTextSnapshot)
+				require.NotContains(t, firstTextSnapshot, "private-second", "first text must not wait for the next delta")
+				require.NotContains(t, firstTextSnapshot, "response.completed")
+			}
+			if !tc.stream {
+				require.Contains(t, stages, "buffered_response_written")
+			}
+			prewarmCount := 0
+			for _, entry := range logs.All() {
+				fields := entry.ContextMap()
+				if fields["stage"] == "prewarm" {
+					prewarmCount++
+				}
+				if fields["stage"] == "got_conn" {
+					require.Contains(t, fields, "conn_age_ms")
+					require.Contains(t, fields, "conn_idle_ms")
+				}
+				require.NotContains(t, fmt.Sprint(fields), "private-")
+			}
+			if tc.prewarm {
+				require.Equal(t, 1, prewarmCount)
+			} else {
+				require.Zero(t, prewarmCount)
+			}
+		})
+	}
+}
+
+func TestForwardOpenAIWSV2_ServiceRestartRecordsFinalStopOnly(t *testing.T) {
+	for _, tc := range []struct{ name, input, event, reason string }{
+		{"opaque_compaction", `[{"type":"compaction","encrypted_content":"private-cipher"}]`, `{"type":"response.created","response":{"id":"resp_started"}}`, "replay_unsafe"},
+		{"metered", `"hello"`, `{"type":"response.in_progress","response":{"id":"resp_metered","usage":{"input_tokens":3,"output_tokens":1}}}`, "replay_unsafe"},
+		{"output_committed", `"hello"`, `{"type":"response.output_text.delta","response_id":"resp_started","delta":"private-text"}`, "downstream_committed"},
+		{"safe_retry", `"hello"`, `{"type":"codex.response.metadata","headers":{"x-codex-turn-state":"private-state"}}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+			cfg := newOpenAIWSV2TestConfig()
+			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			conn := &openAIWSCaptureConn{events: [][]byte{[]byte(tc.event)}, readErr: coderws.CloseError{Code: coderws.StatusServiceRestart}}
+			dialer := &openAIWSCaptureDialer{conn: conn}
+			pool := newOpenAIWSConnPool(cfg)
+			pool.setClientDialerForTest(dialer)
+			t.Cleanup(pool.Close)
+			svc := &OpenAIGatewayService{cfg: cfg, openaiWSPool: pool, toolCorrector: NewCodexToolCorrector()}
+			account := &Account{ID: 62945, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "test-token"}}
+			body := []byte(`{"model":"gpt-6.1-sol","store":false,"stream":true,"input":` + tc.input + `,"tools":[{"type":"function","name":"local_read","parameters":{"type":"object"}}]}`)
+			var request map[string]any
+			require.NoError(t, decodeOpenAIJSONUseNumber(body, &request))
+			result, err := svc.forwardOpenAIWSV2(t.Context(), c, account, request, "", "diagnostic-test", "test-token", OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, false, true, "gpt-6.1-sol", "gpt-6.1-sol", time.Now(), 1, time.Time{}, "", nil, nil)
+			require.Error(t, err)
+			require.Equal(t, 1, dialer.DialCount())
+			require.Len(t, conn.writes, 1)
+			raw, _ := c.Get(OpsUpstreamErrorsKey)
+			var stops []*OpsUpstreamErrorEvent
+			if events, ok := raw.([]*OpsUpstreamErrorEvent); ok {
+				for _, e := range events {
+					if e.Kind == OpsUpstreamRetryStopped {
+						stops = append(stops, e)
+					}
+				}
+			}
+			if tc.reason == "" {
+				require.Empty(t, stops, "recoverable attempt is not a final retry stop")
+				return
+			}
+			require.Len(t, stops, 1, "HTTP to upstream WS failures must explain why recovery stopped")
+			stop := stops[0]
+			require.Equal(t, tc.reason, stop.Reason)
+			d := gjson.Parse(stop.Detail)
+			require.True(t, d.IsObject())
+			require.Equal(t, "http", d.Get("ingress_transport").String())
+			require.Equal(t, "websocket", d.Get("upstream_protocol").String())
+			require.EqualValues(t, 1012, d.Get("upstream_close_code").Int())
+			require.Equal(t, "read_upstream", d.Get("failure_stage").String())
+			require.NotContains(t, stop.Detail, "private-")
+			if tc.name == "opaque_compaction" {
+				require.Equal(t, "compaction", d.Get("unresolved_context").String())
+				require.False(t, d.Get("usage_observed").Bool())
+				require.False(t, d.Get("downstream_committed").Bool())
+			}
+			if tc.name == "metered" {
+				require.True(t, d.Get("usage_observed").Bool())
+				require.NotNil(t, result)
+				require.Equal(t, 3, result.Usage.InputTokens)
+			}
+		})
+	}
+}
+
+func TestForwardOpenAIWSV2_RateLimitRecoveryAndDeliveredTerminal(t *testing.T) {
+	const limited = `{"error":{"code":"turn_rate_limit_exceeded","message":"Codex is at capacity, please try again later","type":"rate_limit_error"},"headers":{"Retry-After":"67"},"status":429,"type":"error"}`
+	for _, tc := range []struct {
+		name                                      string
+		stream, output, usage, writeFailure, tail bool
+	}{
+		{name: "json"}, {name: "sse", stream: true}, {name: "after_output", stream: true, output: true},
+		{name: "after_usage", stream: true, usage: true}, {name: "write_failed", stream: true, output: true, writeFailure: true},
+		{name: "concatenated_usage", stream: true, tail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+			if tc.writeFailure {
+				c.Writer = &failWriteResponseWriter{ResponseWriter: c.Writer}
+			}
+			cfg := newOpenAIWSV2TestConfig()
+			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			conn := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"codex.response.metadata","headers":{"x-codex-turn-state":"private-state"}}`)}}
+			if tc.output {
+				conn.events = append(conn.events, []byte(`{"type":"response.output_text.delta","response_id":"resp_partial","delta":"partial"}`))
+			}
+			if tc.usage {
+				conn.events = append(conn.events, []byte(`{"type":"response.in_progress","response":{"id":"resp_partial","usage":{"input_tokens":3,"output_tokens":1}}}`))
+			}
+			last := limited
+			if tc.tail {
+				last += `{"type":"response.failed","response":{"id":"resp_partial","usage":{"input_tokens":3,"output_tokens":1}}}`
+			}
+			conn.events = append(conn.events, []byte(last))
+			pool := newOpenAIWSConnPool(cfg)
+			dialer := &openAIWSCaptureDialer{conn: conn}
+			pool.setClientDialerForTest(dialer)
+			t.Cleanup(pool.Close)
+			upstream := &httpUpstreamSequenceRecorder{}
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), openaiWSPool: pool, toolCorrector: NewCodexToolCorrector()}
+			account := &Account{ID: 66273, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "owner"}, Extra: map[string]any{"responses_websockets_v2_enabled": true, "codex_image_generation_bridge": false}}
+			body := []byte(fmt.Sprintf(`{"model":"gpt-6-astra","stream":%t,"input":"hello","tools":[{"type":"function","name":"read","parameters":{"type":"object"}}]}`, tc.stream))
+			result, err := svc.Forward(t.Context(), c, account, body)
+			require.Error(t, err)
+			require.Equal(t, 1, dialer.DialCount())
+			require.Len(t, conn.writes, 1)
+			require.Zero(t, upstream.callCount, "rate limits must not be bypassed with same-account HTTP")
+			var recovery *UpstreamFailoverError
+			if !tc.output && !tc.usage && !tc.tail {
+				require.ErrorAs(t, err, &recovery, "pre-output 429 must enter existing account recovery")
+				require.Equal(t, 429, recovery.StatusCode)
+				require.Equal(t, 67*time.Second, recovery.SameAccountRetryDelay)
+				require.Equal(t, "67", recovery.ResponseHeaders.Get("Retry-After"))
+				require.Empty(t, rec.Body.String())
+				require.Nil(t, result)
+				require.False(t, OpenAIStreamTerminalFailureDelivered(c))
+				return
+			}
+			require.False(t, errors.As(err, &recovery), "observed execution/usage cannot be replayed")
+			require.Equal(t, !tc.writeFailure, OpenAIStreamTerminalFailureDelivered(c), "only successful error delivery prevents the handler fallback")
+			if tc.usage || tc.tail {
+				require.NotNil(t, result)
+				require.Equal(t, 3, result.Usage.InputTokens)
+			}
+			if !tc.writeFailure {
+				failure, ok := GetOpsStreamError(c)
+				require.True(t, ok)
+				require.Equal(t, 429, failure.IntendedStatus)
+				require.Equal(t, "turn_rate_limit_exceeded", failure.Code)
+			}
 		})
 	}
 }
