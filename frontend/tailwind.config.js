@@ -50,16 +50,12 @@ export default {
       },
       fontFamily: {
         sans: [
-          'system-ui',
-          '-apple-system',
-          'BlinkMacSystemFont',
-          'Segoe UI',
-          'Roboto',
-          'Helvetica Neue',
-          'Arial',
+          'Inter',
           'PingFang SC',
           'Hiragino Sans GB',
           'Microsoft YaHei',
+          'Noto Sans SC',
+          'system-ui',
           'sans-serif'
         ],
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']

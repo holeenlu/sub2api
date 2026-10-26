@@ -1106,6 +1106,102 @@ func TestOpenAIWSConnPool_AcquireReplacesIncompatibleIdleWhenMatchingBusy(t *tes
 	require.Equal(t, 3, dialer.DialCount())
 }
 
+func TestOpenAIWSConnPool_RequiredResponseContext(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 2
+	pool := newOpenAIWSConnPool(cfg)
+	dialer := &openAIWSCountingDialer{}
+	pool.setClientDialerForTest(dialer)
+	account := &Account{ID: 1240, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	req := openAIWSAcquireRequest{Account: account, WSURL: "wss://example.com/v1/responses"}
+	lease, err := pool.Acquire(t.Context(), req)
+	require.NoError(t, err)
+	require.NoError(t, lease.WriteJSON(map[string]any{"type": "response.create"}, 0))
+	lease.ConfirmResponse("resp_parent")
+	connID := lease.ConnID()
+	require.True(t, lease.HasResponseContext("resp_parent"))
+	require.NoError(t, lease.conn.pingWithContextTimeout(context.Background(), time.Second))
+	require.True(t, lease.HasResponseContext("resp_parent"), "ping does not advance response lineage")
+	lease.Release()
+
+	req.PreferredConnID, req.RequiredResponseID = connID, "resp_parent"
+	lease, err = pool.Acquire(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, connID, lease.ConnID())
+	require.NoError(t, lease.WriteJSON(map[string]any{"type": "response.create", "generate": false}, 0))
+	require.False(t, lease.HasResponseContext("resp_parent"), "even an unconfirmed warmup replaces the old cache generation")
+	lease.ConfirmResponse("resp_warmup")
+	lease.Release()
+
+	lease, err = pool.Acquire(t.Context(), req)
+	require.Nil(t, lease)
+	require.ErrorIs(t, err, errOpenAIWSResponseContextUnavailable)
+	require.ErrorIs(t, err, errOpenAIWSPreferredConnUnavailable)
+	require.Equal(t, 1, dialer.DialCount(), "an expired local response must never dial a replacement")
+
+	req.RequiredResponseID = "" // persisted or unknown scope does not require a local parent
+	lease, err = pool.Acquire(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, connID, lease.ConnID(), "a stale parent does not make a healthy socket unusable")
+	lease.Release()
+
+	req.RequiredResponseID, req.PreferredConnID = "resp_warmup", ""
+	lease, err = pool.Acquire(t.Context(), req)
+	require.Nil(t, lease)
+	require.ErrorIs(t, err, errOpenAIWSResponseContextUnavailable)
+	req.PreferredConnID, req.ForceNewConn = connID, true
+	lease, err = pool.Acquire(t.Context(), req)
+	require.Nil(t, lease)
+	require.ErrorIs(t, err, errOpenAIWSResponseContextUnavailable)
+	require.Equal(t, 1, dialer.DialCount())
+}
+
+func TestOpenAIWSConnPool_RequiredResponseRevalidatedAfterQueue(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 2
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSCountingDialer{})
+	account := &Account{ID: 1241, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	req := openAIWSAcquireRequest{Account: account, WSURL: "wss://example.com/v1/responses"}
+	owner, err := pool.Acquire(t.Context(), req)
+	require.NoError(t, err)
+	defer owner.Release()
+	require.NoError(t, owner.WriteJSON(map[string]any{"type": "response.create"}, 0))
+	owner.ConfirmResponse("resp_parent")
+	req.PreferredConnID, req.RequiredResponseID = owner.ConnID(), "resp_parent"
+	done := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	go func() {
+		lease, err := pool.Acquire(ctx, req)
+		if lease != nil {
+			lease.Release()
+		}
+		done <- err
+	}()
+	require.Eventually(t, func() bool { return owner.conn.waiters.Load() > 0 }, time.Second, time.Millisecond)
+	require.NoError(t, owner.WriteJSON(map[string]any{"type": "response.create"}, 0))
+	owner.ConfirmResponse("resp_newer")
+	owner.Release()
+	require.ErrorIs(t, <-done, errOpenAIWSResponseContextUnavailable, "a queued caller must recheck the cache after taking its lease")
+}
+
+func TestOpenAIWSConnLease_ReleasedLeaseCannotConfirmResponse(t *testing.T) {
+	conn := newOpenAIWSConn("response_context", 1, &openAIWSFakeConn{}, nil)
+	lease := &openAIWSConnLease{conn: conn}
+	require.NoError(t, lease.WriteJSON(map[string]any{"type": "response.create"}, 0))
+	lease.ConfirmResponse("resp_parent")
+	require.True(t, lease.HasResponseContext("resp_parent"))
+	lease.Release()
+	lease.ConfirmResponse("resp_stale_writer")
+	require.False(t, lease.HasResponseContext("resp_parent"))
+	require.True(t, conn.matchesResponseContext("resp_parent"))
+	require.False(t, conn.matchesResponseContext("resp_stale_writer"))
+}
+
 func TestOpenAIWSConnPool_AcquireForcePreferredConnUnavailable(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
@@ -1481,13 +1577,13 @@ func TestOpenAIWSConnLease_WriteJSONWithContextTimeout_RespectsParentContext(t *
 	require.Less(t, elapsed, 200*time.Millisecond)
 }
 
-func TestOpenAIWSConnLease_PingWithTimeout(t *testing.T) {
+func TestOpenAIWSConn_PingWithContextTimeout(t *testing.T) {
 	conn := newOpenAIWSConn("ping_ok", 1, &openAIWSFakeConn{}, nil)
 	lease := &openAIWSConnLease{conn: conn}
-	require.NoError(t, lease.PingWithTimeout(50*time.Millisecond))
+	require.NoError(t, lease.conn.pingWithContextTimeout(context.Background(), 50*time.Millisecond))
 
-	var nilLease *openAIWSConnLease
-	err := nilLease.PingWithTimeout(50 * time.Millisecond)
+	var nilConn *openAIWSConn
+	err := nilConn.pingWithContextTimeout(context.Background(), 50*time.Millisecond)
 	require.ErrorIs(t, err, errOpenAIWSConnClosed)
 }
 
@@ -1504,7 +1600,7 @@ func TestOpenAIWSConn_ReadAndWriteCanProceedConcurrently(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	start := time.Now()
-	err := conn.pingWithTimeout(50 * time.Millisecond)
+	err := conn.pingWithContextTimeout(context.Background(), 50*time.Millisecond)
 	elapsed := time.Since(start)
 
 	require.NoError(t, err)
@@ -2064,7 +2160,7 @@ func TestOpenAIWSConnLease_ReleasedLeaseGuards(t *testing.T) {
 	conn := newOpenAIWSConn("released_guard", 1, &openAIWSFakeConn{}, nil)
 	lease := &openAIWSConnLease{conn: conn}
 
-	require.NoError(t, lease.PingWithTimeout(50*time.Millisecond))
+	require.NoError(t, lease.conn.pingWithContextTimeout(context.Background(), 50*time.Millisecond))
 
 	lease.Release()
 	lease.Release() // idempotent
@@ -2080,7 +2176,8 @@ func TestOpenAIWSConnLease_ReleasedLeaseGuards(t *testing.T) {
 	_, err = lease.ReadMessageWithContextTimeout(context.Background(), 10*time.Millisecond)
 	require.ErrorIs(t, err, errOpenAIWSConnClosed)
 
-	require.ErrorIs(t, lease.PingWithTimeout(50*time.Millisecond), errOpenAIWSConnClosed)
+	stop := lease.startIdlePing(t.Context(), time.Hour)
+	require.NoError(t, stop(), "released leases must not start a background probe")
 }
 
 func TestOpenAIWSConnLease_MarkBrokenAfterRelease_NoEviction(t *testing.T) {
@@ -2132,20 +2229,20 @@ func TestOpenAIWSConn_AdditionalGuardBranches(t *testing.T) {
 	)
 	_, err := connClosed.readMessageWithContextTimeout(context.Background(), time.Second)
 	require.ErrorIs(t, err, errOpenAIWSConnClosed)
-	require.ErrorIs(t, connClosed.pingWithTimeout(time.Second), errOpenAIWSConnClosed)
+	require.ErrorIs(t, connClosed.pingWithContextTimeout(context.Background(), time.Second), errOpenAIWSConnClosed)
 
 	connNoWS := newOpenAIWSConn("no_ws", 1, nil, nil)
 	require.ErrorIs(t, connNoWS.writeJSON(map[string]any{"k": "v"}, context.Background()), errOpenAIWSConnClosed)
 	_, err = connNoWS.readMessage(context.Background())
 	require.ErrorIs(t, err, errOpenAIWSConnClosed)
-	require.ErrorIs(t, connNoWS.pingWithTimeout(time.Second), errOpenAIWSConnClosed)
+	require.ErrorIs(t, connNoWS.pingWithContextTimeout(context.Background(), time.Second), errOpenAIWSConnClosed)
 	require.Equal(t, "", connNoWS.handshakeHeader("x-test"))
 
 	connOK := newOpenAIWSConn("ok", 1, &openAIWSFakeConn{}, nil)
 	require.NoError(t, connOK.writeJSON(map[string]any{"k": "v"}, nil))
 	_, err = connOK.readMessageWithContextTimeout(context.Background(), 0)
 	require.NoError(t, err)
-	require.NoError(t, connOK.pingWithTimeout(0))
+	require.NoError(t, connOK.pingWithContextTimeout(context.Background(), 0))
 
 	connZero := newOpenAIWSConn("zero_ts", 1, &openAIWSFakeConn{}, nil)
 	connZero.createdAtNano.Store(0)
