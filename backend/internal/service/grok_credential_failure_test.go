@@ -1663,3 +1663,24 @@ func expiredGrokOAuthAccountForCredentialTest(id int64) *Account {
 		},
 	}
 }
+
+func TestGetRequestCredentialKeepsNativeAndGrokFailureContracts(t *testing.T) {
+	for _, platform := range []string{PlatformOpenAI, PlatformGrok} {
+		t.Run(platform, func(t *testing.T) {
+			svc := &OpenAIGatewayService{}
+			account := &Account{ID: 76, Platform: platform, Type: AccountTypeOAuth}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			_, _, err := svc.GetRequestCredential(t.Context(), c, account)
+			var failover *UpstreamFailoverError
+			require.ErrorAs(t, err, &failover)
+			if platform == PlatformOpenAI {
+				require.Equal(t, GatewayFailureReason("credential_preparation_failed"), failover.Reason)
+				require.True(t, failover.ShouldRetryNextAccount())
+				require.True(t, failover.RetryableOnSameAccount)
+			} else {
+				require.Equal(t, GrokCredentialReasonProviderConfig, failover.Reason)
+				require.False(t, failover.ShouldRetryNextAccount())
+			}
+		})
+	}
+}

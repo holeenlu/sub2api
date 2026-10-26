@@ -29,12 +29,26 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
 const gatewayCompatibilityMetricsLogInterval = 1024
+
+// stickySessionBindTimeout bounds the post-forward sticky rebind. The write is a
+// single Redis SET that must survive a client disconnect, but it must never hold
+// the request goroutine open if Redis is unreachable.
+const stickySessionBindTimeout = 3 * time.Second
+
+// detachedStickyBindContext derives the context for the post-forward sticky
+// rebind. That rebind renews the binding TTL after the response has already been
+// delivered, so by then the client has frequently hung up and the request context
+// is cancelled — binding through it fails with `context canceled` and the session
+// silently loses its account affinity while it is still in active use. The
+// binding therefore runs on a detached context with its own short deadline.
+func detachedStickyBindContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), stickySessionBindTimeout)
+}
 
 var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 
@@ -123,6 +137,9 @@ func NewGatewayHandler(
 // Messages handles Claude API compatible messages endpoint
 // POST /v1/messages
 func (h *GatewayHandler) Messages(c *gin.Context) {
+	service.BeginOpenAIRequestTiming(c)
+	c.Request = c.Request.WithContext(service.EnsureOpenAITurnBudget(c.Request.Context(), h.cfg, ""))
+	c.Request = c.Request.WithContext(service.WithGatewaySessionTracking(c.Request.Context()))
 	// 从context获取apiKey和user（ApiKeyAuth中间件已设置）
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -147,11 +164,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 读取请求体
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		logRequestBodyReadFailure(reqLog, c.Request, err)
+		writeRequestBodyReadError(c, err, func(status int, errType, message string) {
+			h.errorResponse(c, status, errType, message)
+		})
 		return
 	}
 
@@ -174,6 +190,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	reqStream := parsedReq.Stream
 	bindRequestedReasoningEffort(c, body, reqModel)
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
+	// A fallback group evaluates the original intent, not another group's
+	// already-mapped effort. Account attempts still clone their own body.
+	effortPolicyInputBody := body
 	if policyBody, changed, err := applyAnthropicReasoningEffortPolicyForRequest(c, apiKey, body); err != nil {
 		respondOpenAIReasoningEffortPolicyError(c, err, h.errorResponse)
 		return
@@ -240,6 +259,24 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// Track if we've started streaming (for error handling)
 	streamStarted := false
+	// Resolve the provider before starting the Claude preparation heartbeat.
+	platform := ""
+	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
+		platform = forcePlatform
+	} else if resolvedPlatform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
+		platform = resolvedPlatform
+	} else if apiKey.Group != nil {
+		platform = apiKey.Group.Platform
+	}
+	stopKeepalive := func() {}
+	restartKeepalive := func() {
+		stopKeepalive()
+		if reqStream && (platform == "" || platform == service.PlatformAnthropic) && h.cfg != nil {
+			stopKeepalive = service.StartSSEKeepalive(c, time.Duration(h.cfg.Gateway.StreamKeepaliveInterval)*time.Second)
+		}
+	}
+	restartKeepalive()
+	defer func() { stopKeepalive() }()
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -261,6 +298,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	if userReleaseFunc != nil {
 		defer userReleaseFunc()
 	}
+	restartKeepalive()
 
 	// 2. 【新增】Wait后二次检查余额/订阅
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
@@ -291,11 +329,19 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// 计算粘性会话hash
 	parsedReq.SessionContext = &service.SessionContext{
-		ClientIP:  ip.GetClientIP(c),
-		UserAgent: c.GetHeader("User-Agent"),
-		APIKeyID:  apiKey.ID,
+		ClientIP:          ip.GetClientIP(c),
+		UserAgent:         c.GetHeader("User-Agent"),
+		APIKeyID:          apiKey.ID,
+		ExplicitSessionID: service.ExtractClientSessionID(c),
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	correlationID := service.ExtractClientSessionID(c)
+	if correlationID == "" {
+		if metadata := service.ParseMetadataUserID(parsedReq.MetadataUserID); metadata != nil {
+			correlationID = metadata.SessionID
+		}
+	}
+	c.Request = c.Request.WithContext(service.WithGatewayCacheDiagnostics(c.Request.Context(), apiKey.ID, "anthropic", correlationID, sessionHash, c.GetHeader("User-Agent")))
 
 	// [DEBUG-STICKY] 打印会话 hash 生成结果
 	reqLog.Info("sticky.session_hash_generated",
@@ -303,15 +349,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		zap.String("metadata_user_id_raw", parsedReq.MetadataUserID),
 	)
 
-	// 获取平台：优先使用强制平台（/antigravity 路由），其次使用 composite 解析出的目标平台，否则使用分组平台
-	platform := ""
-	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
-		platform = forcePlatform
-	} else if resolvedPlatform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
-		platform = resolvedPlatform
-	} else if apiKey.Group != nil {
-		platform = apiKey.Group.Platform
-	}
 	sessionKey := sessionHash
 	if platform == service.PlatformGemini && sessionHash != "" {
 		sessionKey = "gemini:" + sessionHash
@@ -342,6 +379,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	if platform == service.PlatformGemini {
 		fs := NewFailoverState(h.maxAccountSwitchesGemini, hasBoundSession)
+		fs.ReplayAllowed, fs.UncertainReplaySafe = service.NativeAccountReplayAllowed(body), service.NativeUncertainReplaySafe(body)
 
 		// 单账号分组首次 503 就不设模型限流标记，避免设 29s 限流导致后续请求连续快速失败；
 		// 是否单账号分组在 antigravity 账号遇到 503 或模型限流预检查时才判定。
@@ -354,7 +392,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
 					return
 				}
-				if len(fs.FailedAccountIDs) == 0 {
+				if len(fs.FailedAccountIDs) == 0 || errors.Is(err, service.ErrSelectionDependency) || service.IsTurnBudgetError(err) {
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformGemini)
 					if !cls.ModelNotFound {
 						markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -373,7 +411,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)
 					return
 				}
-				action := fs.HandleSelectionExhausted(c.Request.Context())
+				action := fs.HandleSelectionExhausted(c.Request.Context(), err)
 				switch action {
 				case FailoverContinue:
 					ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
@@ -451,8 +489,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					selection.WaitPlan.MaxConcurrency,
 					selection.WaitPlan.Timeout,
 					reqStream,
-					&streamStarted,
-				)
+					&streamStarted, selection.WaitPlan.RefreshLimit)
 				if err != nil {
 					reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 					releaseWait()
@@ -483,7 +520,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindSelectionStickySessionAfterProfitAdmission(admissionCtx, selection, apiKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -497,7 +534,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
-			writerSizeBeforeForward := c.Writer.Size()
+			writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
 			if account.Platform == service.PlatformAntigravity {
 				result, err = h.antigravityGatewayService.ForwardGemini(
 					requestCtx,
@@ -511,7 +548,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					service.WithForwardGeminiSession(derefGroupID(apiKey.GroupID), sessionKey),
 				)
 			} else {
+				finishStage := beginRetryOutputStage(c)
+				defer func() { _ = finishStage(&service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable}) }()
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
+				err = finishStage(err)
 			}
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
@@ -520,10 +560,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
-					if c.Writer.Size() != writerSizeBeforeForward {
+					if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
 						return
 					}
+					service.PinTurnRetryAccount(c.Request.Context(), account)
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
@@ -560,13 +601,15 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					forwardFailedFields = append(forwardFailedFields, zap.Int64p("proxy_id", account.ProxyID))
 				}
 				reqLog.Error("gateway.forward_failed", forwardFailedFields...)
-				return
+				if result == nil {
+					return
+				}
 			}
 
 			// RPM 计数递增（Forward 成功后）
 			// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。
 			// 在高并发下可能短暂超出 RPM 限制，但不会导致请求失败。
-			if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
+			if err == nil && account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
 				if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
 					reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
@@ -579,7 +622,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
-			stampForwardRequestedReasoningEffort(result, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort))
+			stampForwardRequestedReasoningEffort(result, service.RequestedReasoningEffortFromContext(c.Request.Context()))
 			if result.ReasoningEffort == nil {
 				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
 			}
@@ -599,6 +642,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			forceCacheBilling := fs.ForceCacheBilling
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			sessionID := service.ExtractClientSessionID(c)
+			usageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:             result,
@@ -616,7 +660,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					RequestPayloadHash: requestPayloadHash,
 					ForceCacheBilling:  forceCacheBilling,
 					APIKeyService:      h.apiKeyService,
-					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+					ChannelUsageFields: usageFields,
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gateway.messages"),
@@ -657,15 +701,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		}
 		// 客户端可能已断开、请求 ctx 已取消，用独立 ctx 执行释放
 		for _, acc := range sessionSlotAccounts {
-			h.gatewayService.ReleaseAccountSession(context.Background(), acc, sessionKey)
+			h.gatewayService.ReleaseAccountSession(c.Request.Context(), acc, sessionKey)
 		}
 	}()
 
 	for {
 		fs := NewFailoverState(h.maxAccountSwitches, hasBoundSession)
+		fs.ReplayAllowed, fs.UncertainReplaySafe = service.NativeAccountReplayAllowed(body), service.NativeUncertainReplaySafe(body)
 		retryWithFallback := false
 
 		for {
+			restartKeepalive()
 			attemptParsedReq, err := parsedReq.CloneForBody(body)
 			if err != nil {
 				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -685,7 +731,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
 					return
 				}
-				if len(fs.FailedAccountIDs) == 0 {
+				if len(fs.FailedAccountIDs) == 0 || errors.Is(err, service.ErrSelectionDependency) || service.IsTurnBudgetError(err) {
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, currentAPIKey, reqModel, reqModel, platform)
 					if !cls.ModelNotFound {
 						markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -705,7 +751,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)
 					return
 				}
-				action := fs.HandleSelectionExhausted(c.Request.Context())
+				action := fs.HandleSelectionExhausted(c.Request.Context(), err)
 				switch action {
 				case FailoverContinue:
 					ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
@@ -793,8 +839,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					selection.WaitPlan.MaxConcurrency,
 					selection.WaitPlan.Timeout,
 					reqStream,
-					&streamStarted,
-				)
+					&streamStarted, selection.WaitPlan.RefreshLimit)
 				if err != nil {
 					reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 					releaseWait()
@@ -804,6 +849,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
 			}
+			restartKeepalive()
 			// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 			admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
 			latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
@@ -819,7 +865,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 				// 尝试被否决（从未转发），立即释放该账号的会话注册
-				h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
+				h.gatewayService.ReleaseAccountSession(c.Request.Context(), account, sessionKey)
 				delete(sessionSlotAccounts, account.ID)
 				continue
 			}
@@ -830,7 +876,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindSelectionStickySessionAfterProfitAdmission(admissionCtx, selection, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -888,6 +934,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 注入回调到 ParsedRequest：使用外层 wrapper 以便提前清理 AfterFunc
 			attemptParsedReq.OnUpstreamAccepted = queueRelease
 			// ===== 用户消息串行队列 END =====
+			restartKeepalive()
 
 			// 渠道模型映射只作用于本次账号尝试，避免 failover 后污染原始 ParsedRequest。
 			if channelMapping.Mapped {
@@ -914,13 +961,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if fs.ForceCacheBilling {
 				requestCtx = service.WithForceCacheBilling(requestCtx)
 			}
-			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
-			writerSizeBeforeForward := c.Writer.Size()
+			// Preparation comments must not prevent a safe account retry.
+			writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
+			finishStage := beginRetryOutputStage(c)
+			defer func() { _ = finishStage(&service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable}) }()
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}
+
+			err = finishStage(err)
 
 			// 兜底释放串行锁（正常情况已通过回调提前释放）
 			if queueRelease != nil {
@@ -944,7 +995,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
-				stampForwardRequestedReasoningEffort(result, service.NormalizeClaudeOutputEffort(attemptParsedReq.OutputEffort))
+				stampForwardRequestedReasoningEffort(result, service.RequestedReasoningEffortFromContext(c.Request.Context()))
 				if result.ReasoningEffort == nil {
 					result.ReasoningEffort = service.NormalizeClaudeOutputEffort(attemptParsedReq.OutputEffort)
 				}
@@ -962,6 +1013,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				forceCacheBilling := fs.ForceCacheBilling
 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
 				sessionID := service.ExtractClientSessionID(c)
+				usageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
 				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 					if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 						Result:             result,
@@ -979,7 +1031,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						RequestPayloadHash: requestPayloadHash,
 						ForceCacheBilling:  forceCacheBilling,
 						APIKeyService:      h.apiKeyService,
-						ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+						ChannelUsageFields: usageFields,
 					}); err != nil {
 						logger.L().With(
 							zap.String("component", "handler.gateway.messages"),
@@ -1038,14 +1090,25 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						}
 						// 兜底重试按"直接请求兜底分组"处理：清除强制平台，允许按分组平台调度
 						ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, "")
+						ctx = service.WithResolvedTargetPlatform(ctx, fallbackGroup.Platform)
 						c.Request = c.Request.WithContext(ctx)
+						fallbackBody, _, policyErr := applyAnthropicReasoningEffortPolicyForRequest(c, fallbackAPIKey, effortPolicyInputBody)
+						if policyErr != nil {
+							respondOpenAIReasoningEffortPolicyError(c, policyErr, h.errorResponse)
+							return
+						}
+						if err := parsedReq.ReplaceBody(fallbackBody); err != nil {
+							h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to apply fallback reasoning effort policy")
+							return
+						}
+						body = parsedReq.Body.Bytes()
 						currentAPIKey = fallbackAPIKey
 						currentSubscription = nil
 						fallbackUsed = true
 						retryWithFallback = true
 						// 原分组账号已确定性失败（prompt too long），先释放其会话注册再走兜底分组
 						for _, acc := range sessionSlotAccounts {
-							h.gatewayService.ReleaseAccountSession(context.Background(), acc, sessionKey)
+							h.gatewayService.ReleaseAccountSession(c.Request.Context(), acc, sessionKey)
 						}
 						sessionSlotAccounts = make(map[int64]*service.Account)
 						break
@@ -1056,15 +1119,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
-					if c.Writer.Size() != writerSizeBeforeForward {
+					if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
 						return
 					}
+					service.PinTurnRetryAccount(c.Request.Context(), account)
+					restartKeepalive()
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
 						// 本次尝试已确定性失败，立即释放该账号的会话注册
-						h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
+						h.gatewayService.ReleaseAccountSession(c.Request.Context(), account, sessionKey)
 						delete(sessionSlotAccounts, account.ID)
 						continue
 					case FailoverExhausted:
@@ -1125,9 +1190,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				// 转发已经成功，这次绑定只是把 TTL 续上，不能再挂在请求 context 上：
+				// 流式请求走到这里时客户端往往已经断开，c.Request.Context() 早被取消，
+				// 续期会以 context canceled 静默失败，绑定就在会话还活跃时到期了。
+				bindCtx, cancelBind := detachedStickyBindContext(c.Request.Context())
+				if err := h.gatewayService.BindSelectionStickySession(bindCtx, selection, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
+				cancelBind()
 			}
 
 			submitForwardUsage(result)
@@ -1988,6 +2058,7 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 }
 
 func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, status int, errType, code, message string, streamStarted bool) {
+	streamStarted = service.StopOpenAICompactSSEKeepaliveCommitted(c) || streamStarted
 	if streamStarted {
 		// 响应状态码已固化为 200（ping/部分数据已 flush），错误只能就地以 SSE 帧回传。
 		// 标记本次流内错误，供 ops_error_logger 补记——否则该中间件按 status>=400 采集，
@@ -2060,7 +2131,7 @@ func gatewayForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForw
 	if err == nil || c == nil || c.Writer == nil {
 		return false
 	}
-	if c.Writer.Size() == writerSizeBeforeForward {
+	if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward {
 		return false
 	}
 
@@ -2121,6 +2192,10 @@ func (h *GatewayHandler) errorResponse(c *gin.Context, status int, errType, mess
 }
 
 func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errType, code, message string) {
+	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+		h.handleStreamingAwareErrorWithCode(c, status, errType, code, message, true)
+		return
+	}
 	errorObject := gin.H{"type": errType, "message": message}
 	if code != "" {
 		errorObject["code"] = code
@@ -2135,6 +2210,7 @@ func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errTy
 // POST /v1/messages/count_tokens
 // 特点：校验订阅/余额，但不计算并发、不记录使用量
 func (h *GatewayHandler) CountTokens(c *gin.Context) {
+	c.Request = c.Request.WithContext(service.WithGatewaySessionTracking(c.Request.Context()))
 	// 从context获取apiKey和user（ApiKeyAuth中间件已设置）
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -2142,7 +2218,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 
-	_, ok = middleware2.GetAuthSubjectFromContext(c)
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
 		return
@@ -2158,11 +2234,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// 读取请求体
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		logRequestBodyReadFailure(reqLog, c.Request, err)
+		writeRequestBodyReadError(c, err, func(status int, errType, message string) {
+			h.errorResponse(c, status, errType, message)
+		})
 		return
 	}
 
@@ -2203,6 +2278,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 
 	setOpsRequestContext(c, parsedReq.Model, parsedReq.Stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsedReq.Stream, false)))
+	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, parsedReq.Model, body); decision != nil && !decision.AllowNextStage {
+		h.anthropicSecurityAuditError(c, decision)
+		return
+	}
 
 	// 获取订阅信息（可能为nil）
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
@@ -2220,9 +2299,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 
 	// 计算粘性会话 hash
 	parsedReq.SessionContext = &service.SessionContext{
-		ClientIP:  ip.GetClientIP(c),
-		UserAgent: c.GetHeader("User-Agent"),
-		APIKeyID:  apiKey.ID,
+		ClientIP:          ip.GetClientIP(c),
+		UserAgent:         c.GetHeader("User-Agent"),
+		APIKeyID:          apiKey.ID,
+		ExplicitSessionID: service.ExtractClientSessionID(c),
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 
@@ -2244,7 +2324,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		reqLog.Error("gateway.count_tokens_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		// 错误响应已在 ForwardCountTokens 中处理
 		// 上游未服务该会话，立即释放选号时注册的会话槽（客户端可能已断开，用独立 ctx）
-		h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionHash)
+		h.gatewayService.ReleaseAccountSession(c.Request.Context(), account, sessionHash)
 		return
 	}
 }
@@ -2253,10 +2333,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 type InterceptType int
 
 const (
-	InterceptTypeNone              InterceptType = iota
-	InterceptTypeWarmup                          // 预热请求（返回 "New Conversation"）
-	InterceptTypeSuggestionMode                  // SUGGESTION MODE（返回空字符串）
-	InterceptTypeMaxTokensOneHaiku               // max_tokens=1 + haiku 探测请求（返回 "#"）
+	InterceptTypeNone           InterceptType = iota
+	InterceptTypeWarmup                       // 预热请求（返回 "New Conversation"）
+	InterceptTypeSuggestionMode               // SUGGESTION MODE（返回空字符串）
+	InterceptTypeMaxTokensOne                 // 已验证 Claude Code 的 max_tokens=1 探测请求（返回 "#"）
 )
 
 // isHaikuModel 检查模型名称是否包含 "haiku"（大小写不敏感）
@@ -2278,9 +2358,11 @@ func isMaxTokensOneHaikuRequest(model string, maxTokens int) bool {
 //   - maxTokens: max_tokens 值
 //   - isClaudeCodeClient: 是否已通过 Claude Code 客户端校验
 func detectInterceptType(body []byte, model string, maxTokens int, isClaudeCodeClient bool) InterceptType {
-	// 优先检查 max_tokens=1 + haiku 探测请求（流式/非流式均适用）
-	if isClaudeCodeClient && isMaxTokensOneHaikuRequest(model, maxTokens) {
-		return InterceptTypeMaxTokensOneHaiku
+	// Verified clients probe all Claude models, not just Haiku. Keep the
+	// separate Haiku-only validator compatibility exception unchanged.
+	// Source: huoji120/sub4api a3eaf63afc672ffedf7844e6cfc5cb6750d52a3e.
+	if isClaudeCodeClient && maxTokens == 1 {
+		return InterceptTypeMaxTokensOne
 	}
 
 	// 快速检查：如果不包含任何关键字，直接返回
@@ -2345,6 +2427,7 @@ func detectInterceptType(body []byte, model string, maxTokens int, isClaudeCodeC
 
 // sendMockInterceptStream 发送流式 mock 响应（用于请求拦截）
 func sendMockInterceptStream(c *gin.Context, model string, interceptType InterceptType) {
+	defer service.GuardSSEWrites(c)()
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -2354,8 +2437,14 @@ func sendMockInterceptStream(c *gin.Context, model string, interceptType Interce
 	var msgID string
 	var outputTokens int
 	var textDeltas []string
+	stopReason := "end_turn"
 
 	switch interceptType {
+	case InterceptTypeMaxTokensOne:
+		msgID = generateRealisticMsgID()
+		outputTokens = 1
+		textDeltas = []string{"#"}
+		stopReason = "max_tokens"
 	case InterceptTypeSuggestionMode:
 		msgID = generateRealisticMsgID()
 		outputTokens = 1
@@ -2382,7 +2471,7 @@ func sendMockInterceptStream(c *gin.Context, model string, interceptType Interce
 	}
 
 	// Add final events
-	messageDeltaJSON := `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"output_tokens":` + strconv.Itoa(outputTokens) + `}}`
+	messageDeltaJSON := `{"type":"message_delta","delta":{"stop_reason":` + strconv.Quote(stopReason) + `,"stop_sequence":null,"stop_details":null},"usage":{"output_tokens":` + strconv.Itoa(outputTokens) + `}}`
 
 	events = append(events,
 		`event: content_block_stop`+"\n"+`data: {"index":0,"type":"content_block_stop"}`,
@@ -2391,8 +2480,12 @@ func sendMockInterceptStream(c *gin.Context, model string, interceptType Interce
 	)
 
 	for _, event := range events {
-		_, _ = c.Writer.WriteString(event + "\n\n")
-		c.Writer.Flush()
+		if _, err := c.Writer.WriteString(event + "\n\n"); err != nil {
+			return
+		}
+		if err := http.NewResponseController(c.Writer).Flush(); err != nil {
+			return
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
@@ -2424,7 +2517,7 @@ func sendMockInterceptResponse(c *gin.Context, model string, interceptType Inter
 		text = ""
 		outputTokens = 1
 		stopReason = "end_turn"
-	case InterceptTypeMaxTokensOneHaiku:
+	case InterceptTypeMaxTokensOne:
 		msgID = generateRealisticMsgID()
 		text = "#"
 		outputTokens = 1
@@ -2492,6 +2585,10 @@ func extractQuotaResetSeconds(err error) int {
 }
 
 func billingErrorDetails(err error) (status int, code, message string, retryAfter int) {
+	if errors.Is(err, service.ErrModelPricingUnavailable) {
+		return http.StatusServiceUnavailable, "model_pricing_unavailable", "Model pricing is unavailable. Contact the administrator before retrying.", 0
+	}
+
 	if errors.Is(err, service.ErrBillingServiceUnavailable) {
 		msg := pkgerrors.Message(err)
 		if msg == "" {
@@ -2565,19 +2662,10 @@ func (h *GatewayHandler) submitUsageRecordTask(parent context.Context, task serv
 	if task == nil {
 		return
 	}
-	task, abandon := wrapUsageRecordTaskContext(parent, task)
+	task, _ = wrapUsageRecordTaskContext(parent, task)
 	if h.usageRecordWorkerPool != nil {
-		if mode := h.usageRecordWorkerPool.Submit(task); mode != service.UsageRecordSubmitModeDroppedStopped {
-			if mode.Dropped() {
-				abandon()
-			}
-			return
-		}
-		// 池已停止（进程关停窗口）：计费任务不能静默丢失，降级为内联同步执行。
-		// 显式配置的 drop/sample 溢出丢弃仍按配置语义保留。
-		logger.L().With(
-			zap.String("component", "handler.gateway.messages"),
-		).Warn("gateway.usage_record_task_stopped_sync_fallback")
+		h.usageRecordWorkerPool.Run(task)
+		return
 	}
 	// 回退路径：worker 池未注入或已停止时同步执行，避免退回到无界 goroutine 模式。
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -2586,33 +2674,6 @@ func (h *GatewayHandler) submitUsageRecordTask(parent context.Context, task serv
 		if recovered := recover(); recovered != nil {
 			logger.L().With(
 				zap.String("component", "handler.gateway.messages"),
-				zap.Any("panic", recovered),
-			).Error("gateway.usage_record_task_panic_recovered")
-		}
-	}()
-	task(ctx)
-}
-
-// submitMandatoryUsageRecordTask never silently drops billing work on pool overflow.
-func (h *GatewayHandler) submitMandatoryUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
-	if task == nil {
-		return
-	}
-	task, _ = wrapUsageRecordTaskContext(parent, task)
-	if h.usageRecordWorkerPool != nil {
-		if mode := h.usageRecordWorkerPool.Submit(task); !mode.Dropped() {
-			return
-		}
-		logger.L().With(
-			zap.String("component", "handler.gateway.usage"),
-		).Warn("gateway.usage_record_task_mandatory_sync_fallback")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			logger.L().With(
-				zap.String("component", "handler.gateway.usage"),
 				zap.Any("panic", recovered),
 			).Error("gateway.usage_record_task_panic_recovered")
 		}

@@ -400,6 +400,20 @@ func TestReserveFixedCharge(t *testing.T) {
 		return err
 	}
 
+	t.Run("super balance is exempt but key budget is reserved", func(t *testing.T) {
+		svc := reservingSvc(&fixedChargeCacheStub{balance: 0}, nil, nil)
+		root := &User{ID: 1, Role: RoleSuperAdmin}
+		key := &APIKey{ID: 5, Quota: 10, QuotaUsed: 8}
+		first, err := svc.ReserveFixedCharge(ctx, root, key, nil, nil, 1.5)
+		require.NoError(t, err)
+		defer first.Release()
+		_, err = svc.ReserveFixedCharge(ctx, root, key, nil, nil, 1.5)
+		require.ErrorIs(t, err, ErrAPIKeyQuotaExhausted)
+		first.Release()
+		second, err := svc.ReserveFixedCharge(ctx, root, key, nil, nil, 1.5)
+		require.NoError(t, err)
+		second.Release()
+	})
 	t.Run("balance must cover the amount", func(t *testing.T) {
 		svc := newSvc(&fixedChargeCacheStub{balance: 10})
 		require.NoError(t, reserve(svc, nil, nil, nil, 10))
