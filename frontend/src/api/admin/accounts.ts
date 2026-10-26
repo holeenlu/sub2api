@@ -1,9 +1,15 @@
+import type { AccountTelemetryState } from '@/utils/accountTelemetry'
 /**
  * Admin Accounts API endpoints
  * Handles AI platform account management for administrators
  */
 
 import { apiClient } from '../client'
+
+export async function creationDefaults(): Promise<{ concurrency: number; priority: number }> {
+  const { data } = await apiClient.get('/admin/accounts/defaults')
+  return data
+}
 import type { OpenAIReferralRefreshResult, OpenAIReferralSendResult } from '@/types/openaiReferrals'
 import type {
   Account,
@@ -532,7 +538,8 @@ export async function batchUpdateCredentials(request: {
  */
 export async function bulkUpdate(
   accountIdsOrPayload: number[] | Record<string, unknown>,
-  updates?: Record<string, unknown>
+  updates?: Record<string, unknown>,
+  params?: Record<string, unknown>
 ): Promise<{
   success: number
   failed: number
@@ -554,7 +561,7 @@ export async function bulkUpdate(
     failed_ids?: number[]
     long_context_inherited_count?: number
     results: Array<{ account_id: number; success: boolean; error?: string }>
-  }>('/admin/accounts/bulk-update', payload)
+  }>('/admin/accounts/bulk-update', payload, params ? { params } : undefined)
   return data
 }
 
@@ -1132,6 +1139,7 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
 }
 
 export const accountsAPI = {
+  creationDefaults,
   list,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
@@ -1203,3 +1211,8 @@ export const accountsAPI = {
 }
 
 export default accountsAPI
+
+export async function importAccountTelemetry(id: number, bundle: unknown): Promise<AccountTelemetryState> {
+  const { data } = await apiClient.post<AccountTelemetryState>('/admin/accounts/' + id + '/telemetry/import', bundle)
+  return data
+}

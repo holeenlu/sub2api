@@ -45,7 +45,8 @@ func TestSanitizeGrokMediaForwardBodyConvertsImageSize(t *testing.T) {
 func TestParseGrokMediaRequestKeepsImageResolutionOutOfVideoNormalize(t *testing.T) {
 	t.Parallel()
 
-	info := ParseGrokMediaRequest("application/json", []byte(`{"model":"grok-imagine-image-2.0","resolution":"2K","aspect_ratio":"16:9"}`))
+	info, err := ParseGrokMediaRequest("application/json", []byte(`{"model":"grok-imagine-image-2.0","resolution":"2K","aspect_ratio":"16:9"}`))
+	require.NoError(t, err)
 	require.Equal(t, "2k", info.ImageResolution)
 	require.Equal(t, "16:9", info.AspectRatio)
 	require.Equal(t, VideoBillingResolution480P, info.Resolution)

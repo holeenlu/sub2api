@@ -8,7 +8,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -109,19 +108,20 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
-	"GET /api/v1/admin/accounts/data":             "admin.accounts.export",
-	"GET /api/v1/admin/proxies/data":              "admin.proxies.export",
-	"GET /api/v1/admin/redeem-codes/export":       "admin.redeem_codes.export",
-	"GET /api/v1/admin/backups/:id/download-url":  "admin.backups.download",
-	"GET /api/v1/admin/settings/admin-api-key":    "admin.admin_api_key.read",
-	"GET /api/v1/admin/users/:id/api-keys":        "admin.users.api_keys.read",
-	"GET /api/v1/admin/groups/:id/api-keys":       "admin.groups.api_keys.read",
-	"GET /api/v1/admin/backups/s3-config":         "admin.backups.s3_config.read",
-	"GET /api/v1/admin/data-management/s3/config": "admin.data_management.s3_config.read",
+	"GET /api/v1/keys/export":                    "user.api_keys.export",
+	"GET /api/v1/admin/usage/export":             "admin.usage.export",
+	"GET /api/v1/admin/accounts/data":            "admin.accounts.export",
+	"GET /api/v1/admin/proxies/data":             "admin.proxies.export",
+	"GET /api/v1/admin/backups/:id/download-url": "admin.backups.download",
+	"GET /api/v1/admin/settings/admin-api-key":   "admin.admin_api_key.read",
+	"GET /api/v1/admin/users/:id/api-keys":       "admin.users.api_keys.read",
+	"GET /api/v1/admin/groups/:id/api-keys":      "admin.groups.api_keys.read",
+	"GET /api/v1/admin/backups/s3-config":        "admin.backups.s3_config.read",
 }
 
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。
 var auditActionOverrides = map[string]string{
+	"POST /api/v1/keys/import":                                "user.api_keys.import",
 	"POST /api/v1/auth/login":                                 service.AuditActionLogin,
 	"POST /api/v1/auth/login/2fa":                             service.AuditActionLogin2FA,
 	"POST /api/v1/auth/passkey/login/finish":                  service.AuditActionLogin,
@@ -195,13 +195,14 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 		} else if c.Request.Body != nil && c.Request.Method != "GET" {
 			orig := c.Request.Body
 			raw, err := io.ReadAll(io.LimitReader(orig, service.AuditRequestBodyCaptureLimit+1))
+			var replay io.Reader = bytes.NewReader(raw)
 			if err == nil {
-				c.Request.Body = &restoredBody{
-					Reader: io.MultiReader(bytes.NewReader(raw), orig),
-					closer: orig,
-				}
+				replay = io.MultiReader(replay, orig)
 				bodyRedacted = service.RedactAuditBody(raw, c.GetHeader("Content-Type"))
 			}
+			// A failed read may have consumed the transport's only error. Replay
+			// its prefix and keep that cause sticky for every subsequent reader.
+			c.Request.Body = &restoredBody{Reader: replay, closer: orig, readErr: err}
 		}
 
 		start := time.Now()
@@ -285,7 +286,14 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 			}
 			extra["params"] = params
 		}
-		if q := service.RedactAuditQuery(c.Request.URL.RawQuery); q != "" {
+		rawQuery := c.Request.URL.RawQuery
+		if routeKey == "GET /api/v1/keys/export" {
+			// The key search field may contain an entire credential.
+			query := c.Request.URL.Query()
+			query.Del("search")
+			rawQuery = query.Encode()
+		}
+		if q := service.RedactAuditQuery(rawQuery); q != "" {
 			extra["query"] = q
 		}
 		if len(extra) > 0 {
@@ -300,7 +308,16 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 // 保证 handler 读到完整请求体；Close 委托给原始 body。
 type restoredBody struct {
 	io.Reader
-	closer io.Closer
+	closer  io.Closer
+	readErr error
+}
+
+func (b *restoredBody) Read(p []byte) (int, error) {
+	n, err := b.Reader.Read(p)
+	if err == io.EOF && b.readErr != nil {
+		return n, b.readErr
+	}
+	return n, err
 }
 
 func (b *restoredBody) Close() error { return b.closer.Close() }
