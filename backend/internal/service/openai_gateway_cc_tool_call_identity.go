@@ -3,13 +3,12 @@ package service
 import (
 	"bytes"
 	"strconv"
-	"strings"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
-// stripEmptyChatToolCallIdentityFromSSELine 从 CC 流式 SSE 行中剔除
+// stripEmptyChatToolCallIdentity 从 CC 流式 payload 中剔除
 // choices[*].delta.tool_calls[*] 上的空 id / 空 function.name 字段。
 //
 // DashScope/DeepSeek 等 OpenAI 兼容上游会把同一个 tool_calls[index]
@@ -23,26 +22,6 @@ import (
 //
 // 只处理流式 chunk 的 delta.tool_calls；非流式 message.tool_calls 不属于
 // 本 helper 范围。
-func stripEmptyChatToolCallIdentityFromSSELine(line string) string {
-	payload, ok := extractOpenAISSEDataLine(line)
-	if !ok {
-		return line
-	}
-	trimmed := strings.TrimSpace(payload)
-	if trimmed == "" || trimmed == "[DONE]" {
-		return line
-	}
-	rewritten, changed := stripEmptyChatToolCallIdentity([]byte(payload))
-	if !changed {
-		return line
-	}
-	prefixLen := len(line) - len(payload)
-	if prefixLen < 0 {
-		return line
-	}
-	return line[:prefixLen] + string(rewritten)
-}
-
 // stripEmptyChatToolCallIdentity 从单个 CC 流式 chunk payload 中删除
 // choices[*].delta.tool_calls[*] 上存在但为空字符串的 id 与
 // function.name 字段；arguments（即使是空串）、index、type 与其它字段

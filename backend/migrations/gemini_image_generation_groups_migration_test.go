@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestEnableGeminiImageGenerationGroupsMigration(t *testing.T) {
+func TestGeminiImageGenerationMigrationPreservesSavedSettings(t *testing.T) {
 	content, err := FS.ReadFile("246_enable_gemini_image_generation_groups.sql")
 	require.NoError(t, err)
 
@@ -19,6 +19,6 @@ func TestEnableGeminiImageGenerationGroupsMigration(t *testing.T) {
 	}
 	sql := strings.Join(strings.Fields(strings.Join(statements, " ")), " ")
 	require.Equal(t,
-		"UPDATE groups SET allow_image_generation = true WHERE platform IN ('gemini', 'antigravity') AND allow_image_generation = false;",
+		"SELECT 1;",
 		sql)
 }

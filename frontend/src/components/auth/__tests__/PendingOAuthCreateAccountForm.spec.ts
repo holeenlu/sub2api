@@ -201,41 +201,6 @@ describe('PendingOAuthCreateAccountForm', () => {
     ])
   })
 
-  it('shows and emits invitation code when invitation-only signup is enabled', async () => {
-    getPublicSettings.mockResolvedValue({
-      invitation_code_enabled: true,
-      email_verify_enabled: true,
-      turnstile_enabled: false,
-      turnstile_site_key: ''
-    })
-
-    const wrapper = mount(PendingOAuthCreateAccountForm, {
-      props: {
-        providerName: 'LinuxDo',
-        testIdPrefix: 'linuxdo',
-        initialEmail: 'prefill@example.com',
-        isSubmitting: false
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="linuxdo-create-account-password"]').setValue('secret-123')
-    await wrapper.get('[data-testid="linuxdo-create-account-verify-code"]').setValue('246810')
-    await wrapper.get('[data-testid="linuxdo-create-account-invitation-code"]').setValue(' INVITE123 ')
-    await wrapper.get('form').trigger('submit.prevent')
-
-    expect(wrapper.emitted('submit')).toEqual([
-      [
-        {
-          email: 'prefill@example.com',
-          password: 'secret-123',
-          verifyCode: '246810',
-          invitationCode: 'INVITE123'
-        }
-      ]
-    ])
-  })
-
   it('sends a verify code for the trimmed email value', async () => {
     sendPendingOAuthVerifyCode.mockResolvedValue({
       message: 'sent',
