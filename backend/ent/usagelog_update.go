@@ -4,11 +4,13 @@ package ent
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"entgo.io/ent/dialect/sql/sqljson"
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
@@ -29,6 +31,20 @@ type UsageLogUpdate struct {
 // Where appends a list predicates to the UsageLogUpdate builder.
 func (_u *UsageLogUpdate) Where(ps ...predicate.UsageLog) *UsageLogUpdate {
 	_u.mutation.Where(ps...)
+	return _u
+}
+
+// SetBillingStatus sets the "billing_status" field.
+func (_u *UsageLogUpdate) SetBillingStatus(v string) *UsageLogUpdate {
+	_u.mutation.SetBillingStatus(v)
+	return _u
+}
+
+// SetNillableBillingStatus sets the "billing_status" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableBillingStatus(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetBillingStatus(*v)
+	}
 	return _u
 }
 
@@ -712,6 +728,24 @@ func (_u *UsageLogUpdate) ClearFirstTokenMs() *UsageLogUpdate {
 	return _u
 }
 
+// SetLatencyMetrics sets the "latency_metrics" field.
+func (_u *UsageLogUpdate) SetLatencyMetrics(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.SetLatencyMetrics(v)
+	return _u
+}
+
+// AppendLatencyMetrics appends value to the "latency_metrics" field.
+func (_u *UsageLogUpdate) AppendLatencyMetrics(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.AppendLatencyMetrics(v)
+	return _u
+}
+
+// ClearLatencyMetrics clears the value of the "latency_metrics" field.
+func (_u *UsageLogUpdate) ClearLatencyMetrics() *UsageLogUpdate {
+	_u.mutation.ClearLatencyMetrics()
+	return _u
+}
+
 // SetUserAgent sets the "user_agent" field.
 func (_u *UsageLogUpdate) SetUserAgent(v string) *UsageLogUpdate {
 	_u.mutation.SetUserAgent(v)
@@ -947,6 +981,48 @@ func (_u *UsageLogUpdate) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpdate
 	return _u
 }
 
+// SetCacheCreation30mTokens sets the "cache_creation_30m_tokens" field.
+func (_u *UsageLogUpdate) SetCacheCreation30mTokens(v int) *UsageLogUpdate {
+	_u.mutation.ResetCacheCreation30mTokens()
+	_u.mutation.SetCacheCreation30mTokens(v)
+	return _u
+}
+
+// SetNillableCacheCreation30mTokens sets the "cache_creation_30m_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableCacheCreation30mTokens(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetCacheCreation30mTokens(*v)
+	}
+	return _u
+}
+
+// AddCacheCreation30mTokens adds value to the "cache_creation_30m_tokens" field.
+func (_u *UsageLogUpdate) AddCacheCreation30mTokens(v int) *UsageLogUpdate {
+	_u.mutation.AddCacheCreation30mTokens(v)
+	return _u
+}
+
+// SetCacheCreation12hTokens sets the "cache_creation_12h_tokens" field.
+func (_u *UsageLogUpdate) SetCacheCreation12hTokens(v int) *UsageLogUpdate {
+	_u.mutation.ResetCacheCreation12hTokens()
+	_u.mutation.SetCacheCreation12hTokens(v)
+	return _u
+}
+
+// SetNillableCacheCreation12hTokens sets the "cache_creation_12h_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableCacheCreation12hTokens(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetCacheCreation12hTokens(*v)
+	}
+	return _u
+}
+
+// AddCacheCreation12hTokens adds value to the "cache_creation_12h_tokens" field.
+func (_u *UsageLogUpdate) AddCacheCreation12hTokens(v int) *UsageLogUpdate {
+	_u.mutation.AddCacheCreation12hTokens(v)
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UsageLogUpdate) SetUser(v *User) *UsageLogUpdate {
 	return _u.SetUserID(v.ID)
@@ -1135,6 +1211,27 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			}
 		}
 	}
+	if value, ok := _u.mutation.BillingStatus(); ok {
+		_spec.SetField(usagelog.FieldBillingStatus, field.TypeString, value)
+	}
+	if _u.mutation.VendorIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorRootIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorRootIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorParentIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorParentIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.AccountNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldAccountNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.GroupNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldGroupNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.PlatformSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldPlatformSnapshot, field.TypeString)
+	}
 	if value, ok := _u.mutation.RequestID(); ok {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)
 	}
@@ -1309,6 +1406,17 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.FirstTokenMsCleared() {
 		_spec.ClearField(usagelog.FieldFirstTokenMs, field.TypeInt)
 	}
+	if value, ok := _u.mutation.LatencyMetrics(); ok {
+		_spec.SetField(usagelog.FieldLatencyMetrics, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedLatencyMetrics(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldLatencyMetrics, value)
+		})
+	}
+	if _u.mutation.LatencyMetricsCleared() {
+		_spec.ClearField(usagelog.FieldLatencyMetrics, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.UserAgent(); ok {
 		_spec.SetField(usagelog.FieldUserAgent, field.TypeString, value)
 	}
@@ -1380,6 +1488,21 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if _u.mutation.AuthorizationModeCleared() {
+		_spec.ClearField(usagelog.FieldAuthorizationMode, field.TypeString)
+	}
+	if value, ok := _u.mutation.CacheCreation30mTokens(); ok {
+		_spec.SetField(usagelog.FieldCacheCreation30mTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedCacheCreation30mTokens(); ok {
+		_spec.AddField(usagelog.FieldCacheCreation30mTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CacheCreation12hTokens(); ok {
+		_spec.SetField(usagelog.FieldCacheCreation12hTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedCacheCreation12hTokens(); ok {
+		_spec.AddField(usagelog.FieldCacheCreation12hTokens, field.TypeInt, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1544,6 +1667,20 @@ type UsageLogUpdateOne struct {
 	fields   []string
 	hooks    []Hook
 	mutation *UsageLogMutation
+}
+
+// SetBillingStatus sets the "billing_status" field.
+func (_u *UsageLogUpdateOne) SetBillingStatus(v string) *UsageLogUpdateOne {
+	_u.mutation.SetBillingStatus(v)
+	return _u
+}
+
+// SetNillableBillingStatus sets the "billing_status" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableBillingStatus(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetBillingStatus(*v)
+	}
+	return _u
 }
 
 // SetUserID sets the "user_id" field.
@@ -2226,6 +2363,24 @@ func (_u *UsageLogUpdateOne) ClearFirstTokenMs() *UsageLogUpdateOne {
 	return _u
 }
 
+// SetLatencyMetrics sets the "latency_metrics" field.
+func (_u *UsageLogUpdateOne) SetLatencyMetrics(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.SetLatencyMetrics(v)
+	return _u
+}
+
+// AppendLatencyMetrics appends value to the "latency_metrics" field.
+func (_u *UsageLogUpdateOne) AppendLatencyMetrics(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.AppendLatencyMetrics(v)
+	return _u
+}
+
+// ClearLatencyMetrics clears the value of the "latency_metrics" field.
+func (_u *UsageLogUpdateOne) ClearLatencyMetrics() *UsageLogUpdateOne {
+	_u.mutation.ClearLatencyMetrics()
+	return _u
+}
+
 // SetUserAgent sets the "user_agent" field.
 func (_u *UsageLogUpdateOne) SetUserAgent(v string) *UsageLogUpdateOne {
 	_u.mutation.SetUserAgent(v)
@@ -2461,6 +2616,48 @@ func (_u *UsageLogUpdateOne) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpd
 	return _u
 }
 
+// SetCacheCreation30mTokens sets the "cache_creation_30m_tokens" field.
+func (_u *UsageLogUpdateOne) SetCacheCreation30mTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetCacheCreation30mTokens()
+	_u.mutation.SetCacheCreation30mTokens(v)
+	return _u
+}
+
+// SetNillableCacheCreation30mTokens sets the "cache_creation_30m_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableCacheCreation30mTokens(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetCacheCreation30mTokens(*v)
+	}
+	return _u
+}
+
+// AddCacheCreation30mTokens adds value to the "cache_creation_30m_tokens" field.
+func (_u *UsageLogUpdateOne) AddCacheCreation30mTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.AddCacheCreation30mTokens(v)
+	return _u
+}
+
+// SetCacheCreation12hTokens sets the "cache_creation_12h_tokens" field.
+func (_u *UsageLogUpdateOne) SetCacheCreation12hTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetCacheCreation12hTokens()
+	_u.mutation.SetCacheCreation12hTokens(v)
+	return _u
+}
+
+// SetNillableCacheCreation12hTokens sets the "cache_creation_12h_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableCacheCreation12hTokens(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetCacheCreation12hTokens(*v)
+	}
+	return _u
+}
+
+// AddCacheCreation12hTokens adds value to the "cache_creation_12h_tokens" field.
+func (_u *UsageLogUpdateOne) AddCacheCreation12hTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.AddCacheCreation12hTokens(v)
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UsageLogUpdateOne) SetUser(v *User) *UsageLogUpdateOne {
 	return _u.SetUserID(v.ID)
@@ -2679,6 +2876,27 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 			}
 		}
 	}
+	if value, ok := _u.mutation.BillingStatus(); ok {
+		_spec.SetField(usagelog.FieldBillingStatus, field.TypeString, value)
+	}
+	if _u.mutation.VendorIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorRootIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorRootIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.VendorParentIDSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldVendorParentIDSnapshot, field.TypeInt64)
+	}
+	if _u.mutation.AccountNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldAccountNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.GroupNameSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldGroupNameSnapshot, field.TypeString)
+	}
+	if _u.mutation.PlatformSnapshotCleared() {
+		_spec.ClearField(usagelog.FieldPlatformSnapshot, field.TypeString)
+	}
 	if value, ok := _u.mutation.RequestID(); ok {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)
 	}
@@ -2853,6 +3071,17 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	if _u.mutation.FirstTokenMsCleared() {
 		_spec.ClearField(usagelog.FieldFirstTokenMs, field.TypeInt)
 	}
+	if value, ok := _u.mutation.LatencyMetrics(); ok {
+		_spec.SetField(usagelog.FieldLatencyMetrics, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedLatencyMetrics(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldLatencyMetrics, value)
+		})
+	}
+	if _u.mutation.LatencyMetricsCleared() {
+		_spec.ClearField(usagelog.FieldLatencyMetrics, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.UserAgent(); ok {
 		_spec.SetField(usagelog.FieldUserAgent, field.TypeString, value)
 	}
@@ -2924,6 +3153,21 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if _u.mutation.AuthorizationModeCleared() {
+		_spec.ClearField(usagelog.FieldAuthorizationMode, field.TypeString)
+	}
+	if value, ok := _u.mutation.CacheCreation30mTokens(); ok {
+		_spec.SetField(usagelog.FieldCacheCreation30mTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedCacheCreation30mTokens(); ok {
+		_spec.AddField(usagelog.FieldCacheCreation30mTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CacheCreation12hTokens(); ok {
+		_spec.SetField(usagelog.FieldCacheCreation12hTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedCacheCreation12hTokens(); ok {
+		_spec.AddField(usagelog.FieldCacheCreation12hTokens, field.TypeInt, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
