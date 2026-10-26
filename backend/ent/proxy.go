@@ -23,6 +23,18 @@ type Proxy struct {
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 	// DeletedAt holds the value of the "deleted_at" field.
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	// VendorID holds the value of the "vendor_id" field.
+	VendorID *int64 `json:"vendor_id,omitempty"`
+	// CreatedBy holds the value of the "created_by" field.
+	CreatedBy *int64 `json:"created_by,omitempty"`
+	// VendorNotes holds the value of the "vendor_notes" field.
+	VendorNotes string `json:"vendor_notes,omitempty"`
+	// RegionLabelCountryCode holds the value of the "region_label_country_code" field.
+	RegionLabelCountryCode string `json:"region_label_country_code,omitempty"`
+	// RegionLabelCity holds the value of the "region_label_city" field.
+	RegionLabelCity string `json:"region_label_city,omitempty"`
+	// ConfigVersion holds the value of the "config_version" field.
+	ConfigVersion int64 `json:"config_version,omitempty"`
 	// Name holds the value of the "name" field.
 	Name string `json:"name,omitempty"`
 	// Protocol holds the value of the "protocol" field.
@@ -98,9 +110,9 @@ func (*Proxy) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case proxy.FieldID, proxy.FieldPort, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays:
+		case proxy.FieldID, proxy.FieldVendorID, proxy.FieldCreatedBy, proxy.FieldConfigVersion, proxy.FieldPort, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays:
 			values[i] = new(sql.NullInt64)
-		case proxy.FieldName, proxy.FieldProtocol, proxy.FieldHost, proxy.FieldUsername, proxy.FieldPassword, proxy.FieldStatus, proxy.FieldFallbackMode:
+		case proxy.FieldVendorNotes, proxy.FieldRegionLabelCountryCode, proxy.FieldRegionLabelCity, proxy.FieldName, proxy.FieldProtocol, proxy.FieldHost, proxy.FieldUsername, proxy.FieldPassword, proxy.FieldStatus, proxy.FieldFallbackMode:
 			values[i] = new(sql.NullString)
 		case proxy.FieldCreatedAt, proxy.FieldUpdatedAt, proxy.FieldDeletedAt, proxy.FieldExpiresAt:
 			values[i] = new(sql.NullTime)
@@ -143,6 +155,44 @@ func (_m *Proxy) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.DeletedAt = new(time.Time)
 				*_m.DeletedAt = value.Time
+			}
+		case proxy.FieldVendorID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field vendor_id", values[i])
+			} else if value.Valid {
+				_m.VendorID = new(int64)
+				*_m.VendorID = value.Int64
+			}
+		case proxy.FieldCreatedBy:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field created_by", values[i])
+			} else if value.Valid {
+				_m.CreatedBy = new(int64)
+				*_m.CreatedBy = value.Int64
+			}
+		case proxy.FieldVendorNotes:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field vendor_notes", values[i])
+			} else if value.Valid {
+				_m.VendorNotes = value.String
+			}
+		case proxy.FieldRegionLabelCountryCode:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field region_label_country_code", values[i])
+			} else if value.Valid {
+				_m.RegionLabelCountryCode = value.String
+			}
+		case proxy.FieldRegionLabelCity:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field region_label_city", values[i])
+			} else if value.Valid {
+				_m.RegionLabelCity = value.String
+			}
+		case proxy.FieldConfigVersion:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field config_version", values[i])
+			} else if value.Valid {
+				_m.ConfigVersion = value.Int64
 			}
 		case proxy.FieldName:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -275,6 +325,28 @@ func (_m *Proxy) String() string {
 		builder.WriteString("deleted_at=")
 		builder.WriteString(v.Format(time.ANSIC))
 	}
+	builder.WriteString(", ")
+	if v := _m.VendorID; v != nil {
+		builder.WriteString("vendor_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.CreatedBy; v != nil {
+		builder.WriteString("created_by=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("vendor_notes=")
+	builder.WriteString(_m.VendorNotes)
+	builder.WriteString(", ")
+	builder.WriteString("region_label_country_code=")
+	builder.WriteString(_m.RegionLabelCountryCode)
+	builder.WriteString(", ")
+	builder.WriteString("region_label_city=")
+	builder.WriteString(_m.RegionLabelCity)
+	builder.WriteString(", ")
+	builder.WriteString("config_version=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ConfigVersion))
 	builder.WriteString(", ")
 	builder.WriteString("name=")
 	builder.WriteString(_m.Name)

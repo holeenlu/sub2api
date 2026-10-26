@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { getIntlLocale } from '@/i18n/localeUtils'
 import Select from '@/components/common/Select.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
@@ -11,11 +12,12 @@ import { opsAPI, type OpsDashboardOverview, type OpsMetricThresholds, type OpsRe
 import type { OpsRequestDetailsPreset } from './OpsRequestDetailsModal.vue'
 import { useAdminSettingsStore } from '@/stores'
 import { formatDateTimeLocalInput, formatNumber } from '@/utils/format'
-import { formatMemorySizeMB } from '../utils/opsFormatters'
+import OpsNodeMetrics from './OpsNodeMetrics.vue'
 
 type RealtimeWindow = '1min' | '5min' | '30min' | '1h'
 
 interface Props {
+  canConfigure?: boolean
   overview?: OpsDashboardOverview | null
   platform: string
   groupId: number | null
@@ -49,13 +51,12 @@ interface Emits {
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const adminSettingsStore = useAdminSettingsStore()
 
 const realtimeWindow = ref<RealtimeWindow>('1min')
 
 const overview = computed(() => props.overview ?? null)
-const systemMetrics = computed(() => overview.value?.system_metrics ?? null)
 
 const REALTIME_WINDOW_MINUTES: Record<RealtimeWindow, number> = {
   '1min': 1,
@@ -224,11 +225,11 @@ function getSLAThresholdLevel(slaPercent: number | null): ThresholdLevel {
   if (threshold == null) return 'normal'
 
   // SLA is "higher is better":
-  // - below threshold => critical
+  // - more than 2 percentage points below target => critical
   // - within +0.1% buffer => warning
   const warningBuffer = 0.1
 
-  if (slaPercent < threshold) return 'critical'
+  if (slaPercent < threshold - 2) return 'critical'
   if (slaPercent < threshold + warningBuffer) return 'warning'
   return 'normal'
 }
@@ -237,6 +238,7 @@ function getTTFTThresholdLevel(ttftMs: number | null): ThresholdLevel {
   if (ttftMs == null) return 'normal'
   const threshold = props.thresholds?.ttft_p99_ms_max
   if (threshold == null) return 'normal'
+  if (threshold === 0) return ttftMs > 0 ? 'critical' : 'normal'
   if (ttftMs >= threshold) return 'critical'
   if (ttftMs >= threshold * 0.8) return 'warning'
   return 'normal'
@@ -246,6 +248,7 @@ function getRequestErrorRateThresholdLevel(errorRatePercent: number | null): Thr
   if (errorRatePercent == null) return 'normal'
   const threshold = props.thresholds?.request_error_rate_percent_max
   if (threshold == null) return 'normal'
+  if (threshold === 0) return errorRatePercent > 0 ? 'critical' : 'normal'
   if (errorRatePercent >= threshold) return 'critical'
   if (errorRatePercent >= threshold * 0.8) return 'warning'
   return 'normal'
@@ -255,6 +258,7 @@ function getUpstreamErrorRateThresholdLevel(upstreamErrorRatePercent: number | n
   if (upstreamErrorRatePercent == null) return 'normal'
   const threshold = props.thresholds?.upstream_error_rate_percent_max
   if (threshold == null) return 'normal'
+  if (threshold === 0) return upstreamErrorRatePercent > 0 ? 'critical' : 'normal'
   if (upstreamErrorRatePercent >= threshold) return 'critical'
   if (upstreamErrorRatePercent >= threshold * 0.8) return 'warning'
   return 'normal'
@@ -334,20 +338,13 @@ watch(
   { immediate: true }
 )
 
-// Realtime traffic refresh follows the parent (OpsDashboard) refresh cadence.
+// Refresh realtime traffic after both automatic and manual snapshots complete.
 watch(
-  () => [props.autoRefreshEnabled, props.autoRefreshCountdown, props.loading] as const,
-  ([enabled, countdown, loading]) => {
-    if (!enabled) return
-    if (loading) return
-    // Treat countdown reset (or reaching 0) as a refresh boundary.
-    if (countdown === 0) {
-      loadRealtimeTrafficSummary()
-    }
+  () => props.lastUpdated,
+  (updated) => {
+    if (updated) void loadRealtimeTrafficSummary()
   }
 )
-
-// no-op: parent controls refresh cadence
 
 const displayRealTimeQps = computed(() => {
   const v = realtimeTrafficSummary.value?.qps?.current
@@ -426,9 +423,11 @@ const ttftMaxMs = computed(() => overview.value?.ttft?.max_ms ?? null)
 const isSystemIdle = computed(() => {
   const ov = overview.value
   if (!ov) return true
-  const qps = ov.qps?.current
-  const errorRate = ov.error_rate ?? 0
-  return (qps ?? 0) === 0 && errorRate === 0
+  const noTraffic = (ov.request_count_total ?? 0) === 0 && (ov.request_count_sla ?? 0) === 0 && (ov.error_count_total ?? 0) === 0
+  const sm = ov.system_metrics
+  const noFault = !ov.system_metrics_unavailable && !(ov.system_metrics_nodes ?? []).some(node => node.stale) && sm?.db_ok !== false && sm?.redis_ok !== false && (sm?.cpu_usage_percent ?? 0) <= 80 && (sm?.memory_usage_percent ?? 0) <= 85
+    && !(ov.job_heartbeats ?? []).some(hb => hb.health_status === 'failed' || hb.health_status === 'stale')
+  return noTraffic && noFault && (ov.health_score == null || ov.health_score >= 90)
 })
 
 const healthScoreValue = computed<number | null>(() => {
@@ -454,8 +453,8 @@ const healthScoreClass = computed(() => {
   return 'text-red-500'
 })
 
-const circleSize = computed(() => props.fullscreen ? 140 : 100)
-const strokeWidth = computed(() => props.fullscreen ? 10 : 8)
+const circleSize = computed(() => props.fullscreen ? 76 : 72)
+const strokeWidth = computed(() => props.fullscreen ? 6 : 5)
 const radius = computed(() => (circleSize.value - strokeWidth.value) / 2)
 const circumference = computed(() => 2 * Math.PI * radius.value)
 const dashOffset = computed(() => {
@@ -543,9 +542,10 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
   }
 
   const ttftP99 = ov.ttft?.p99_ms ?? 0
-  if (ttftP99 > 500) {
+  const ttftLevel = getTTFTThresholdLevel(ttftP99Ms.value)
+  if (ttftLevel !== 'normal') {
     report.push({
-      type: 'warning',
+      type: ttftLevel,
       message: t('admin.ops.diagnosis.ttftHigh', { ttft: ttftP99.toFixed(0) }),
       impact: t('admin.ops.diagnosis.ttftHighImpact'),
       action: t('admin.ops.diagnosis.ttftHighAction')
@@ -554,14 +554,15 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
 
   // Error rate diagnostics (adjusted thresholds)
   const upstreamRatePct = (ov.upstream_error_rate ?? 0) * 100
-  if (upstreamRatePct > 5) {
+  const upstreamLevel = getUpstreamErrorRateThresholdLevel(upstreamErrorRatePercent.value)
+  if (upstreamLevel === 'critical') {
     report.push({
       type: 'critical',
       message: t('admin.ops.diagnosis.upstreamCritical', { rate: upstreamRatePct.toFixed(2) }),
       impact: t('admin.ops.diagnosis.upstreamCriticalImpact'),
       action: t('admin.ops.diagnosis.upstreamCriticalAction')
     })
-  } else if (upstreamRatePct > 2) {
+  } else if (upstreamLevel === 'warning') {
     report.push({
       type: 'warning',
       message: t('admin.ops.diagnosis.upstreamHigh', { rate: upstreamRatePct.toFixed(2) }),
@@ -571,14 +572,15 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
   }
 
   const errorPct = (ov.error_rate ?? 0) * 100
-  if (errorPct > 3) {
+  const errorLevel = getRequestErrorRateThresholdLevel(errorRatePercent.value)
+  if (errorLevel === 'critical') {
     report.push({
       type: 'critical',
       message: t('admin.ops.diagnosis.errorHigh', { rate: errorPct.toFixed(2) }),
       impact: t('admin.ops.diagnosis.errorHighImpact'),
       action: t('admin.ops.diagnosis.errorHighAction')
     })
-  } else if (errorPct > 0.5) {
+  } else if (errorLevel === 'warning') {
     report.push({
       type: 'warning',
       message: t('admin.ops.diagnosis.errorElevated', { rate: errorPct.toFixed(2) }),
@@ -589,14 +591,15 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
 
   // SLA diagnostics
   const slaPct = (ov.sla ?? 0) * 100
-  if (slaPct < 90) {
+  const slaLevel = getSLAThresholdLevel(slaPercent.value)
+  if (slaLevel === 'critical') {
     report.push({
       type: 'critical',
       message: t('admin.ops.diagnosis.slaCritical', { sla: slaPct.toFixed(2) }),
       impact: t('admin.ops.diagnosis.slaCriticalImpact'),
       action: t('admin.ops.diagnosis.slaCriticalAction')
     })
-  } else if (slaPct < 98) {
+  } else if (slaLevel === 'warning') {
     report.push({
       type: 'warning',
       message: t('admin.ops.diagnosis.slaLow', { sla: slaPct.toFixed(2) }),
@@ -605,8 +608,19 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
     })
   }
 
-  // Health score diagnostics (lowest priority)
-  if (healthScoreValue.value != null) {
+  for (const hb of ov.job_heartbeats ?? []) {
+    if (hb.health_status === 'failed' || hb.health_status === 'stale') {
+      report.push({
+        type: 'warning',
+        message: t(hb.health_status === 'failed' ? 'admin.ops.diagnosis.jobFailed' : 'admin.ops.diagnosis.jobStale', { job: hb.job_name }),
+        impact: t('admin.ops.diagnosis.jobImpact'),
+        action: t('admin.ops.diagnosis.jobAction')
+      })
+    }
+  }
+
+  // Avoid repeating the same metric warnings as a derived score warning.
+  if (healthScoreValue.value != null && report.length === 0) {
     if (healthScoreValue.value < 60) {
       report.push({
         type: 'critical',
@@ -622,6 +636,10 @@ const diagnosisReport = computed<DiagnosisItem[]>(() => {
         action: t('admin.ops.diagnosis.healthLowAction')
       })
     }
+  }
+
+  if (ov.system_metrics_unavailable || (ov.system_metrics_nodes ?? []).some(node => node.stale)) {
+    report.push({ type: 'warning', message: t('admin.ops.nodes.unavailable'), impact: t('admin.ops.nodes.lastKnown') })
   }
 
   if (report.length === 0) {
@@ -644,207 +662,7 @@ function formatTimeShort(ts?: string | null): string {
   return d.toLocaleTimeString()
 }
 
-const cpuPercentValue = computed<number | null>(() => {
-  const v = systemMetrics.value?.cpu_usage_percent
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-})
-
-const cpuPercentClass = computed(() => {
-  const v = cpuPercentValue.value
-  if (v == null) return 'text-gray-900 dark:text-white'
-  if (v >= 95) return 'text-rose-600 dark:text-rose-400'
-  if (v >= 80) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-emerald-600 dark:text-emerald-400'
-})
-
-const memPercentValue = computed<number | null>(() => {
-  const v = systemMetrics.value?.memory_usage_percent
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-})
-
-const memPercentClass = computed(() => {
-  const v = memPercentValue.value
-  if (v == null) return 'text-gray-900 dark:text-white'
-  if (v >= 95) return 'text-rose-600 dark:text-rose-400'
-  if (v >= 85) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-emerald-600 dark:text-emerald-400'
-})
-
-const dbConnActiveValue = computed<number | null>(() => {
-  const v = systemMetrics.value?.db_conn_active
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-})
-
-const dbConnIdleValue = computed<number | null>(() => {
-  const v = systemMetrics.value?.db_conn_idle
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-})
-
-const dbConnWaitingValue = computed<number | null>(() => {
-  const v = systemMetrics.value?.db_conn_waiting
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-})
-
-const dbConnOpenValue = computed<number | null>(() => {
-  if (dbConnActiveValue.value == null || dbConnIdleValue.value == null) return null
-  return dbConnActiveValue.value + dbConnIdleValue.value
-})
-
-const dbMaxOpenConnsValue = computed<number | null>(() => {
-  const v = systemMetrics.value?.db_max_open_conns
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-})
-
-const dbUsagePercent = computed<number | null>(() => {
-  if (dbConnOpenValue.value == null || dbMaxOpenConnsValue.value == null || dbMaxOpenConnsValue.value <= 0) return null
-  return Math.min(100, Math.max(0, (dbConnOpenValue.value / dbMaxOpenConnsValue.value) * 100))
-})
-
-const dbMiddleLabel = computed(() => {
-  if (systemMetrics.value?.db_ok === false) return 'FAIL'
-  if (dbUsagePercent.value != null) return `${dbUsagePercent.value.toFixed(0)}%`
-  if (systemMetrics.value?.db_ok === true) return t('admin.ops.ok')
-  return t('admin.ops.noData')
-})
-
-const dbMiddleClass = computed(() => {
-  if (systemMetrics.value?.db_ok === false) return 'text-rose-600 dark:text-rose-400'
-  if (dbUsagePercent.value != null) {
-    if (dbUsagePercent.value >= 90) return 'text-rose-600 dark:text-rose-400'
-    if (dbUsagePercent.value >= 70) return 'text-yellow-600 dark:text-yellow-400'
-    return 'text-emerald-600 dark:text-emerald-400'
-  }
-  if (systemMetrics.value?.db_ok === true) return 'text-emerald-600 dark:text-emerald-400'
-  return 'text-gray-900 dark:text-white'
-})
-
-const redisConnTotalValue = computed<number | null>(() => {
-  const v = systemMetrics.value?.redis_conn_total
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-})
-
-const redisConnIdleValue = computed<number | null>(() => {
-  const v = systemMetrics.value?.redis_conn_idle
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-})
-
-const redisConnActiveValue = computed<number | null>(() => {
-  if (redisConnTotalValue.value == null || redisConnIdleValue.value == null) return null
-  return Math.max(redisConnTotalValue.value - redisConnIdleValue.value, 0)
-})
-
-const redisPoolSizeValue = computed<number | null>(() => {
-  const v = systemMetrics.value?.redis_pool_size
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-})
-
-const redisUsagePercent = computed<number | null>(() => {
-  if (redisConnTotalValue.value == null || redisPoolSizeValue.value == null || redisPoolSizeValue.value <= 0) return null
-  return Math.min(100, Math.max(0, (redisConnTotalValue.value / redisPoolSizeValue.value) * 100))
-})
-
-const redisMiddleLabel = computed(() => {
-  if (systemMetrics.value?.redis_ok === false) return 'FAIL'
-  if (redisUsagePercent.value != null) return `${redisUsagePercent.value.toFixed(0)}%`
-  if (systemMetrics.value?.redis_ok === true) return t('admin.ops.ok')
-  return t('admin.ops.noData')
-})
-
-const redisMiddleClass = computed(() => {
-  if (systemMetrics.value?.redis_ok === false) return 'text-rose-600 dark:text-rose-400'
-  if (redisUsagePercent.value != null) {
-    if (redisUsagePercent.value >= 90) return 'text-rose-600 dark:text-rose-400'
-    if (redisUsagePercent.value >= 70) return 'text-yellow-600 dark:text-yellow-400'
-    return 'text-emerald-600 dark:text-emerald-400'
-  }
-  if (systemMetrics.value?.redis_ok === true) return 'text-emerald-600 dark:text-emerald-400'
-  return 'text-gray-900 dark:text-white'
-})
-
-const goroutineCountValue = computed<number | null>(() => {
-  const v = systemMetrics.value?.goroutine_count
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-})
-
-const goroutinesWarnThreshold = 8_000
-const goroutinesCriticalThreshold = 15_000
-
-const goroutineStatus = computed<'ok' | 'warning' | 'critical' | 'unknown'>(() => {
-  const n = goroutineCountValue.value
-  if (n == null) return 'unknown'
-  if (n >= goroutinesCriticalThreshold) return 'critical'
-  if (n >= goroutinesWarnThreshold) return 'warning'
-  return 'ok'
-})
-
-const goroutineStatusLabel = computed(() => {
-  switch (goroutineStatus.value) {
-    case 'ok':
-      return t('admin.ops.ok')
-    case 'warning':
-      return t('common.warning')
-    case 'critical':
-      return t('common.critical')
-    default:
-      return t('admin.ops.noData')
-  }
-})
-
-const goroutineStatusClass = computed(() => {
-  switch (goroutineStatus.value) {
-    case 'ok':
-      return 'text-emerald-600 dark:text-emerald-400'
-    case 'warning':
-      return 'text-yellow-600 dark:text-yellow-400'
-    case 'critical':
-      return 'text-rose-600 dark:text-rose-400'
-    default:
-      return 'text-gray-900 dark:text-white'
-  }
-})
-
 const jobHeartbeats = computed(() => overview.value?.job_heartbeats ?? [])
-
-const jobsStatus = computed<'ok' | 'warn' | 'unknown'>(() => {
-  const list = jobHeartbeats.value
-  if (!list.length) return 'unknown'
-  for (const hb of list) {
-    if (!hb) continue
-    if (hb.last_error_at && (!hb.last_success_at || hb.last_error_at > hb.last_success_at)) return 'warn'
-  }
-  return 'ok'
-})
-
-const jobsWarnCount = computed(() => {
-  let warn = 0
-  for (const hb of jobHeartbeats.value) {
-    if (!hb) continue
-    if (hb.last_error_at && (!hb.last_success_at || hb.last_error_at > hb.last_success_at)) warn++
-  }
-  return warn
-})
-
-const jobsStatusLabel = computed(() => {
-  switch (jobsStatus.value) {
-    case 'ok':
-      return t('admin.ops.ok')
-    case 'warn':
-      return t('common.warning')
-    default:
-      return t('admin.ops.noData')
-  }
-})
-
-const jobsStatusClass = computed(() => {
-  switch (jobsStatus.value) {
-    case 'ok':
-      return 'text-emerald-600 dark:text-emerald-400'
-    case 'warn':
-      return 'text-yellow-600 dark:text-yellow-400'
-    default:
-      return 'text-gray-900 dark:text-white'
-  }
-})
 
 const showJobsDetails = ref(false)
 
@@ -853,13 +671,12 @@ function openJobsDetails() {
 }
 
 function handleToolbarRefresh() {
-  loadRealtimeTrafficSummary()
   emit('refresh')
 }
 </script>
 
 <template>
-  <div :class="['flex flex-col gap-4 rounded-3xl bg-white shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700', props.fullscreen ? 'p-8' : 'p-6']">
+  <div :class="['ops-dashboard-header flex flex-col gap-4 rounded-3xl bg-white shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700', props.fullscreen ? 'p-8' : 'p-6']">
     <!-- Top Toolbar -->
     <div class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 pb-4 dark:border-dark-700">
       <div>
@@ -884,7 +701,7 @@ function handleToolbarRefresh() {
           </span>
 
           <span>·</span>
-          <span>{{ t('common.refresh') }}: {{ props.lastUpdated ? props.lastUpdated.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\//g, '-') : t('common.unknown') }}</span>
+          <span>{{ t('common.refresh') }}: {{ props.lastUpdated ? props.lastUpdated.toLocaleString(getIntlLocale(locale), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\//g, '-') : t('common.unknown') }}</span>
 
           <template v-if="props.autoRefreshEnabled && props.autoRefreshCountdown !== undefined">
             <span>·</span>
@@ -963,7 +780,7 @@ function handleToolbarRefresh() {
 
         <!-- Settings Button (hidden in fullscreen) -->
         <button
-          v-if="!props.fullscreen"
+          v-if="!props.fullscreen && props.canConfigure !== false"
           type="button"
           class="flex h-8 items-center gap-1.5 rounded-lg bg-gray-100 px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
           :title="t('admin.ops.settings.title')"
@@ -991,13 +808,13 @@ function handleToolbarRefresh() {
       </div>
     </div>
 
-    <div v-if="overview" class="grid grid-cols-1 gap-6 lg:grid-cols-12">
-      <!-- Left: Health + Realtime -->
-      <div :class="['rounded-2xl bg-gray-50 dark:bg-dark-900 lg:col-span-5', props.fullscreen ? 'p-6' : 'p-4']">
-        <div class="grid h-full grid-cols-1 gap-6 md:grid-cols-[200px_1fr] md:items-center">
+    <div v-if="overview" class="ops-overview-grid" data-testid="ops-overview-grid">
+      <!-- Health and realtime traffic span the first three desktop columns. -->
+      <div :class="['ops-realtime-card min-w-0 rounded-2xl bg-gray-50 dark:bg-dark-900', props.fullscreen ? 'p-6' : 'p-4']">
+        <div class="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-3">
           <!-- 1) Health Score -->
           <div
-            class="group relative flex cursor-pointer flex-col items-center justify-center rounded-xl py-2 transition-all hover:bg-white/60 dark:hover:bg-dark-800/60 md:border-r md:border-gray-200 md:pr-6 dark:md:border-dark-700"
+            class="group relative flex cursor-pointer flex-col items-center justify-center rounded-xl transition-all hover:bg-white/60 dark:hover:bg-dark-800/60"
           >
             <!-- Diagnosis Popover (hover) -->
             <div
@@ -1077,14 +894,14 @@ function handleToolbarRefresh() {
               </svg>
 
               <div class="absolute flex flex-col items-center">
-                <span :class="[props.fullscreen ? 'text-5xl' : 'text-3xl', 'font-black', healthScoreClass]">
+                <span :class="[props.fullscreen ? 'text-3xl' : 'text-2xl', 'font-black', healthScoreClass]">
                   {{ isSystemIdle ? t('admin.ops.idleStatus') : (overview.health_score ?? '--') }}
                 </span>
                 <span :class="[props.fullscreen ? 'text-xs' : 'text-[10px]', 'font-bold uppercase tracking-wider text-gray-400']">{{ t('admin.ops.health') }}</span>
               </div>
             </div>
 
-            <div class="mt-4 text-center" v-if="!props.fullscreen">
+            <div class="mt-2 text-center" v-if="!props.fullscreen">
               <div class="flex items-center justify-center gap-1 text-xs font-medium text-gray-500">
                 {{ t('admin.ops.healthCondition') }}
                 <HelpTooltip :content="t('admin.ops.healthHelp')" />
@@ -1102,8 +919,8 @@ function handleToolbarRefresh() {
           </div>
 
           <!-- 2) Realtime Traffic -->
-          <div class="flex h-full flex-col justify-center py-2">
-            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex min-w-0 flex-col justify-center">
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div class="flex items-center gap-2">
                 <div class="relative flex h-3 w-3 shrink-0">
                   <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75"></span>
@@ -1130,28 +947,28 @@ function handleToolbarRefresh() {
               </div>
             </div>
 
-            <div :class="props.fullscreen ? 'space-y-4' : 'space-y-3'">
+            <div :class="props.fullscreen ? 'space-y-3' : 'space-y-2'">
               <!-- Row 1: Current -->
               <div>
                 <div :class="[props.fullscreen ? 'text-xs' : 'text-[10px]', 'font-bold uppercase text-gray-400']">{{ t('admin.ops.current') }}</div>
                 <div class="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-2">
                   <div class="flex items-baseline gap-1.5">
-                    <span :class="[props.fullscreen ? 'text-4xl' : 'text-xl sm:text-2xl', 'font-black text-gray-900 dark:text-white']">{{ displayRealTimeQps.toFixed(1) }}</span>
+                    <span :class="[props.fullscreen ? 'text-3xl' : 'text-xl sm:text-2xl', 'font-black text-gray-900 dark:text-white']">{{ displayRealTimeQps.toFixed(1) }}</span>
                     <span :class="[props.fullscreen ? 'text-sm' : 'text-xs', 'font-bold text-gray-500']">QPS</span>
                   </div>
                   <div class="flex items-baseline gap-1.5">
-                    <span :class="[props.fullscreen ? 'text-4xl' : 'text-xl sm:text-2xl', 'font-black text-gray-900 dark:text-white']">{{ displayRealTimeTps.toFixed(1) }}</span>
+                    <span :class="[props.fullscreen ? 'text-3xl' : 'text-xl sm:text-2xl', 'font-black text-gray-900 dark:text-white']">{{ displayRealTimeTps.toFixed(1) }}</span>
                     <span :class="[props.fullscreen ? 'text-sm' : 'text-xs', 'font-bold text-gray-500']">{{ t('admin.ops.tps') }}</span>
                   </div>
                 </div>
               </div>
 
               <!-- Row 2: Peak + Average -->
-              <div class="grid grid-cols-2 gap-3">
+              <div class="ops-realtime-peaks">
                 <!-- Peak -->
                 <div>
                   <div :class="[props.fullscreen ? 'text-xs' : 'text-[10px]', 'font-bold uppercase text-gray-400']">{{ t('admin.ops.peak') }}</div>
-                  <div :class="[props.fullscreen ? 'text-base' : 'text-sm', 'mt-1 space-y-0.5 font-medium text-gray-600 dark:text-gray-400']">
+                  <div :class="[props.fullscreen ? 'text-base' : 'text-sm', 'mt-1 flex flex-wrap gap-x-3 gap-y-1 font-medium text-gray-600 dark:text-gray-400']">
                     <div class="flex items-baseline gap-1.5">
                       <span class="font-black text-gray-900 dark:text-white">{{ realtimeQpsPeakLabel }}</span>
                       <span class="text-xs">QPS</span>
@@ -1166,7 +983,7 @@ function handleToolbarRefresh() {
                 <!-- Average -->
                 <div>
                   <div :class="[props.fullscreen ? 'text-xs' : 'text-[10px]', 'font-bold uppercase text-gray-400']">{{ t('admin.ops.average') }}</div>
-                  <div :class="[props.fullscreen ? 'text-base' : 'text-sm', 'mt-1 space-y-0.5 font-medium text-gray-600 dark:text-gray-400']">
+                  <div :class="[props.fullscreen ? 'text-base' : 'text-sm', 'mt-1 flex flex-wrap gap-x-3 gap-y-1 font-medium text-gray-600 dark:text-gray-400']">
                     <div class="flex items-baseline gap-1.5">
                       <span class="font-black text-gray-900 dark:text-white">{{ realtimeQpsAvgLabel }}</span>
                       <span class="text-xs">QPS</span>
@@ -1180,7 +997,7 @@ function handleToolbarRefresh() {
               </div>
 
               <!-- Animated Pulse Line (Heart Beat Animation) -->
-              <div class="h-8 w-full overflow-hidden opacity-50">
+              <div class="h-4 w-full overflow-hidden opacity-50">
                 <svg class="h-full w-full" viewBox="0 0 280 32" preserveAspectRatio="none">
                   <path
                     d="M0 16 Q 20 16, 40 16 T 80 16 T 120 10 T 160 22 T 200 16 T 240 16 T 280 16"
@@ -1206,10 +1023,30 @@ function handleToolbarRefresh() {
         </div>
       </div>
 
-      <!-- Right: 6 cards (3 cols x 2 rows) -->
-      <div class="grid h-full grid-cols-1 content-center gap-4 sm:grid-cols-2 lg:col-span-7 lg:grid-cols-3">
+        <!-- Per-request output speed, separate from system throughput. -->
+        <div class="ops-metric-card ops-output-card min-w-0 rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" data-testid="output-tps-card">
+          <div class="flex items-center gap-1">
+            <span class="text-[10px] font-bold uppercase text-gray-400">{{ t('admin.ops.outputTps') }}</span>
+            <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.outputTps')" />
+          </div>
+          <div class="mt-2 flex flex-wrap items-baseline gap-2">
+            <div class="text-3xl font-black text-gray-900 dark:text-white" data-testid="output-tps-p50">{{ overview.output_tps?.p50?.toFixed(1) ?? '—' }}</div>
+            <span class="text-xs font-bold text-gray-400">tok/s (P50)</span>
+          </div>
+          <div class="ops-percentile-grid mt-3 text-xs">
+            <div v-for="metric in ['p5', 'p10', 'avg'] as const" :key="metric" class="flex items-baseline gap-1 whitespace-nowrap">
+              <span class="text-gray-500">{{ metric === 'avg' ? 'Avg' : metric.toUpperCase() }}:</span>
+              <span class="font-bold text-gray-900 dark:text-white" :data-testid="`output-tps-${metric}`">{{ overview.output_tps?.[metric]?.toFixed(1) ?? '—' }}</span>
+              <span class="text-gray-400">tok/s</span>
+            </div>
+          </div>
+          <div class="mt-2 text-xs text-gray-500" data-testid="output-tps-samples">
+            {{ t('admin.ops.outputTpsSamples', { count: overview.output_tps == null ? '—' : formatNumber(overview.output_tps.sample_count) }) }}
+          </div>
+        </div>
+
         <!-- Card 1: Requests -->
-        <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" style="order: 1;">
+        <div class="ops-metric-card ops-requests-card min-w-0 rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" data-testid="requests-card">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-1">
               <span class="text-[10px] font-bold uppercase text-gray-400">{{ t('admin.ops.requestsTitle') }}</span>
@@ -1244,8 +1081,59 @@ function handleToolbarRefresh() {
           </div>
         </div>
 
+        <!-- Card 4: Request Duration -->
+        <div class="ops-metric-card ops-duration-card min-w-0 rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" data-testid="duration-card">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-1">
+              <span class="text-[10px] font-bold uppercase text-gray-400">{{ t('admin.ops.latencyDuration') }}</span>
+              <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.latency')" />
+            </div>
+            <button
+              v-if="!props.fullscreen"
+              class="text-[10px] font-bold text-blue-500 hover:underline"
+              type="button"
+              @click="openDetails({ title: t('admin.ops.latencyDuration'), sort: 'duration_desc' })"
+            >
+              {{ t('admin.ops.requestDetails.details') }}
+            </button>
+          </div>
+          <div class="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <div class="text-3xl font-black text-gray-900 dark:text-white">
+              {{ durationP99Ms ?? '-' }}
+            </div>
+            <span class="whitespace-nowrap text-xs font-bold text-gray-400">ms (P99)</span>
+          </div>
+          <div class="ops-percentile-grid mt-3 text-xs">
+            <div class="flex items-baseline gap-1 whitespace-nowrap">
+              <span class="text-gray-500">P95:</span>
+              <span class="font-bold text-gray-900 dark:text-white">{{ durationP95Ms ?? '-' }}</span>
+              <span class="text-gray-400">ms</span>
+            </div>
+            <div class="flex items-baseline gap-1 whitespace-nowrap">
+              <span class="text-gray-500">P90:</span>
+              <span class="font-bold text-gray-900 dark:text-white">{{ durationP90Ms ?? '-' }}</span>
+              <span class="text-gray-400">ms</span>
+            </div>
+            <div class="flex items-baseline gap-1 whitespace-nowrap">
+              <span class="text-gray-500">P50:</span>
+              <span class="font-bold text-gray-900 dark:text-white">{{ durationP50Ms ?? '-' }}</span>
+              <span class="text-gray-400">ms</span>
+            </div>
+            <div class="flex items-baseline gap-1 whitespace-nowrap">
+              <span class="text-gray-500">Avg:</span>
+              <span class="font-bold text-gray-900 dark:text-white">{{ durationAvgMs ?? '-' }}</span>
+              <span class="text-gray-400">ms</span>
+            </div>
+            <div class="ops-latency-max col-span-full flex flex-nowrap items-baseline gap-1 whitespace-nowrap" data-testid="duration-max">
+              <span class="text-gray-500">Max:</span>
+              <span class="font-bold text-gray-900 dark:text-white">{{ durationMaxMs ?? '-' }}</span>
+              <span class="text-gray-400">ms</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Card 2: SLA -->
-        <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" style="order: 2;">
+        <div class="ops-metric-card ops-sla-card min-w-0 rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" data-testid="sla-card">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
               <span class="text-[10px] font-bold uppercase text-gray-400">{{ t('admin.ops.sla') }}</span>
@@ -1275,110 +1163,8 @@ function handleToolbarRefresh() {
           </div>
         </div>
 
-        <!-- Card 4: Request Duration -->
-        <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" style="order: 4;">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-1">
-              <span class="text-[10px] font-bold uppercase text-gray-400">{{ t('admin.ops.latencyDuration') }}</span>
-              <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.latency')" />
-            </div>
-            <button
-              v-if="!props.fullscreen"
-              class="text-[10px] font-bold text-blue-500 hover:underline"
-              type="button"
-              @click="openDetails({ title: t('admin.ops.latencyDuration'), sort: 'duration_desc' })"
-            >
-              {{ t('admin.ops.requestDetails.details') }}
-            </button>
-          </div>
-          <div class="mt-2 flex items-baseline gap-2">
-            <div class="text-3xl font-black text-gray-900 dark:text-white">
-              {{ durationP99Ms ?? '-' }}
-            </div>
-            <span class="text-xs font-bold text-gray-400">ms (P99)</span>
-          </div>
-          <div class="mt-3 grid grid-cols-1 gap-x-3 gap-y-1 text-xs 2xl:grid-cols-2">
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">P95:</span>
-              <span class="font-bold text-gray-900 dark:text-white">{{ durationP95Ms ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">P90:</span>
-              <span class="font-bold text-gray-900 dark:text-white">{{ durationP90Ms ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">P50:</span>
-              <span class="font-bold text-gray-900 dark:text-white">{{ durationP50Ms ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">Avg:</span>
-              <span class="font-bold text-gray-900 dark:text-white">{{ durationAvgMs ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">Max:</span>
-              <span class="font-bold text-gray-900 dark:text-white">{{ durationMaxMs ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Card 5: TTFT -->
-        <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" style="order: 5;">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-1">
-              <span class="text-[10px] font-bold uppercase text-gray-400">TTFT</span>
-              <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.ttft')" />
-            </div>
-            <button
-              v-if="!props.fullscreen"
-              class="text-[10px] font-bold text-blue-500 hover:underline"
-              type="button"
-              @click="openDetails({ title: t('admin.ops.ttftLabel'), kind: 'success', sort: 'ttft_desc' })"
-            >
-              {{ t('admin.ops.requestDetails.details') }}
-            </button>
-          </div>
-          <div class="mt-2 flex items-baseline gap-2">
-            <div class="text-3xl font-black" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP99Ms))">
-              {{ ttftP99Ms ?? '-' }}
-            </div>
-            <span class="text-xs font-bold text-gray-400">ms (P99)</span>
-          </div>
-          <div class="mt-3 grid grid-cols-1 gap-x-3 gap-y-1 text-xs 2xl:grid-cols-2">
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">P95:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP95Ms))">{{ ttftP95Ms ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">P90:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP90Ms))">{{ ttftP90Ms ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">P50:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP50Ms))">{{ ttftP50Ms ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">Avg:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftAvgMs))">{{ ttftAvgMs ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">Max:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftMaxMs))">{{ ttftMaxMs ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-          </div>
-        </div>
-
         <!-- Card 3: Request Errors -->
-        <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" style="order: 3;">
+        <div class="ops-metric-card ops-request-errors-card min-w-0 rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" data-testid="request-errors-card">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-1">
               <span class="text-[10px] font-bold uppercase text-gray-400">{{ t('admin.ops.requestErrors') }}</span>
@@ -1403,8 +1189,59 @@ function handleToolbarRefresh() {
           </div>
         </div>
 
+        <!-- Card 5: TTFT -->
+        <div class="ops-metric-card ops-ttft-card min-w-0 rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" data-testid="ttft-card">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-1">
+              <span class="text-[10px] font-bold uppercase text-gray-400">TTFT</span>
+              <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.ttft')" />
+            </div>
+            <button
+              v-if="!props.fullscreen"
+              class="text-[10px] font-bold text-blue-500 hover:underline"
+              type="button"
+              @click="openDetails({ title: t('admin.ops.ttftLabel'), kind: 'success', sort: 'ttft_desc' })"
+            >
+              {{ t('admin.ops.requestDetails.details') }}
+            </button>
+          </div>
+          <div class="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <div class="text-3xl font-black" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP99Ms))">
+              {{ ttftP99Ms ?? '-' }}
+            </div>
+            <span class="whitespace-nowrap text-xs font-bold text-gray-400">ms (P99)</span>
+          </div>
+          <div class="ops-percentile-grid mt-3 text-xs">
+            <div class="flex items-baseline gap-1 whitespace-nowrap">
+              <span class="text-gray-500">P95:</span>
+              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP95Ms))">{{ ttftP95Ms ?? '-' }}</span>
+              <span class="text-gray-400">ms</span>
+            </div>
+            <div class="flex items-baseline gap-1 whitespace-nowrap">
+              <span class="text-gray-500">P90:</span>
+              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP90Ms))">{{ ttftP90Ms ?? '-' }}</span>
+              <span class="text-gray-400">ms</span>
+            </div>
+            <div class="flex items-baseline gap-1 whitespace-nowrap">
+              <span class="text-gray-500">P50:</span>
+              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP50Ms))">{{ ttftP50Ms ?? '-' }}</span>
+              <span class="text-gray-400">ms</span>
+            </div>
+            <div class="flex items-baseline gap-1 whitespace-nowrap">
+              <span class="text-gray-500">Avg:</span>
+              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftAvgMs))">{{ ttftAvgMs ?? '-' }}</span>
+              <span class="text-gray-400">ms</span>
+            </div>
+            <div class="ops-latency-max col-span-full flex flex-nowrap items-baseline gap-1 whitespace-nowrap" data-testid="ttft-max">
+              <span class="text-gray-500">Max:</span>
+              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftMaxMs))">{{ ttftMaxMs ?? '-' }}</span>
+              <span class="text-gray-400">ms</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Card 6: Upstream Errors -->
-        <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" style="order: 6;">
+        <div class="ops-metric-card ops-upstream-errors-card min-w-0 rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" data-testid="upstream-errors-card">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-1">
               <span class="text-[10px] font-bold uppercase text-gray-400">{{ t('admin.ops.upstreamErrors') }}</span>
@@ -1428,140 +1265,11 @@ function handleToolbarRefresh() {
             </div>
           </div>
         </div>
-
-        <!-- Per-request output speed, separate from system throughput. -->
-        <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" data-testid="output-tps-card" style="order: 7;">
-          <div class="flex items-center gap-1">
-            <span class="text-[10px] font-bold uppercase text-gray-400">{{ t('admin.ops.outputTps') }}</span>
-            <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.outputTps')" />
-          </div>
-          <div class="mt-2 flex flex-wrap items-baseline gap-2">
-            <div class="text-3xl font-black text-gray-900 dark:text-white" data-testid="output-tps-p50">{{ overview.output_tps?.p50?.toFixed(1) ?? '—' }}</div>
-            <span class="text-xs font-bold text-gray-400">tok/s (P50)</span>
-          </div>
-          <div class="mt-3 grid grid-cols-1 gap-x-3 gap-y-1 text-xs 2xl:grid-cols-2">
-            <div v-for="metric in ['p5', 'p10', 'avg'] as const" :key="metric" class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">{{ metric === 'avg' ? 'Avg' : metric.toUpperCase() }}:</span>
-              <span class="font-bold text-gray-900 dark:text-white" :data-testid="`output-tps-${metric}`">{{ overview.output_tps?.[metric]?.toFixed(1) ?? '—' }}</span>
-              <span class="text-gray-400">tok/s</span>
-            </div>
-          </div>
-          <div class="mt-2 text-xs text-gray-500" data-testid="output-tps-samples">
-            {{ t('admin.ops.outputTpsSamples', { count: overview.output_tps == null ? '—' : formatNumber(overview.output_tps.sample_count) }) }}
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Integrated: System health (cards) -->
     <div v-if="overview" class="mt-2 border-t border-gray-100 pt-4 dark:border-dark-700">
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <!-- CPU -->
-        <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-900">
-          <div class="flex items-center gap-1">
-            <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400">CPU</div>
-            <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.cpu')" />
-          </div>
-          <div class="mt-1 text-lg font-black" :class="cpuPercentClass">
-            {{ cpuPercentValue == null ? '-' : `${cpuPercentValue.toFixed(1)}%` }}
-          </div>
-          <div v-if="!props.fullscreen" class="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
-            {{ t('common.warning') }} 80% · {{ t('common.critical') }} 95%
-          </div>
-        </div>
-
-        <!-- MEM -->
-        <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-900">
-          <div class="flex items-center gap-1">
-            <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.memory') }}</div>
-            <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.memory')" />
-          </div>
-          <div class="mt-1 text-lg font-black" :class="memPercentClass">
-            {{ memPercentValue == null ? '-' : `${memPercentValue.toFixed(1)}%` }}
-          </div>
-          <div v-if="!props.fullscreen" class="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
-            {{
-              systemMetrics?.memory_used_mb == null || systemMetrics?.memory_total_mb == null
-                ? '-'
-                : `${formatMemorySizeMB(systemMetrics.memory_used_mb)} / ${formatMemorySizeMB(systemMetrics.memory_total_mb)}`
-            }}
-          </div>
-        </div>
-
-        <!-- DB -->
-        <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-900">
-          <div class="flex items-center gap-1">
-            <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.db') }}</div>
-            <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.db')" />
-          </div>
-          <div class="mt-1 text-lg font-black" :class="dbMiddleClass">
-            {{ dbMiddleLabel }}
-          </div>
-          <div v-if="!props.fullscreen" class="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
-            {{ t('admin.ops.conns') }} {{ dbConnOpenValue ?? '-' }} / {{ dbMaxOpenConnsValue ?? '-' }}
-            · {{ t('admin.ops.active') }} {{ dbConnActiveValue ?? '-' }}
-            · {{ t('admin.ops.idle') }} {{ dbConnIdleValue ?? '-' }}
-            <span v-if="dbConnWaitingValue != null"> · {{ t('admin.ops.waiting') }} {{ dbConnWaitingValue }} </span>
-          </div>
-        </div>
-
-        <!-- Redis -->
-        <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-900">
-          <div class="flex items-center gap-1">
-            <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Redis</div>
-            <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.redis')" />
-          </div>
-          <div class="mt-1 text-lg font-black" :class="redisMiddleClass">
-            {{ redisMiddleLabel }}
-          </div>
-          <div v-if="!props.fullscreen" class="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
-            {{ t('admin.ops.conns') }} {{ redisConnTotalValue ?? '-' }} / {{ redisPoolSizeValue ?? '-' }}
-            <span v-if="redisConnActiveValue != null"> · {{ t('admin.ops.active') }} {{ redisConnActiveValue }} </span>
-            <span v-if="redisConnIdleValue != null"> · {{ t('admin.ops.idle') }} {{ redisConnIdleValue }} </span>
-          </div>
-        </div>
-
-        <!-- Goroutines -->
-        <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-900">
-          <div class="flex items-center gap-1">
-            <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.goroutines') }}</div>
-            <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.goroutines')" />
-          </div>
-          <div class="mt-1 text-lg font-black" :class="goroutineStatusClass">
-            {{ goroutineStatusLabel }}
-          </div>
-          <div v-if="!props.fullscreen" class="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
-            {{ t('admin.ops.current') }} <span class="font-mono">{{ goroutineCountValue ?? '-' }}</span>
-            · {{ t('common.warning') }} <span class="font-mono">{{ goroutinesWarnThreshold }}</span>
-            · {{ t('common.critical') }} <span class="font-mono">{{ goroutinesCriticalThreshold }}</span>
-            <span v-if="systemMetrics?.concurrency_queue_depth != null">
-              · {{ t('admin.ops.queue') }} <span class="font-mono">{{ systemMetrics.concurrency_queue_depth }}</span>
-            </span>
-          </div>
-        </div>
-
-        <!-- Jobs -->
-        <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-900">
-          <div class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-1">
-              <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.jobs') }}</div>
-              <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.jobs')" />
-            </div>
-            <button v-if="!props.fullscreen" class="text-[10px] font-bold text-blue-500 hover:underline" type="button" @click="openJobsDetails">
-              {{ t('admin.ops.requestDetails.details') }}
-            </button>
-          </div>
-
-          <div class="mt-1 text-lg font-black" :class="jobsStatusClass">
-            {{ jobsStatusLabel }}
-          </div>
-
-          <div v-if="!props.fullscreen" class="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
-            {{ t('common.total') }} <span class="font-mono">{{ jobHeartbeats.length }}</span>
-            · {{ t('common.warning') }} <span class="font-mono">{{ jobsWarnCount }}</span>
-          </div>
-        </div>
-      </div>
+      <OpsNodeMetrics :nodes="overview.system_metrics_nodes ?? []" :unavailable="overview.system_metrics_unavailable ?? true" :job-heartbeats="jobHeartbeats" :fullscreen="props.fullscreen" @jobs-details="openJobsDetails" />
     </div>
 
     <BaseDialog :show="showJobsDetails" :title="t('admin.ops.jobs')" width="wide" @close="showJobsDetails = false">
@@ -1647,3 +1355,68 @@ function handleToolbarRefresh() {
     </BaseDialog>
   </div>
 </template>
+
+<style scoped>
+.ops-dashboard-header {
+  container-type: inline-size;
+}
+
+.ops-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.ops-percentile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));
+  gap: 0.25rem 0.75rem;
+}
+
+.ops-realtime-peaks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));
+  gap: 0.75rem;
+}
+
+.ops-metric-card > div:first-child {
+  gap: 0.5rem;
+}
+
+.ops-metric-card > div:first-child > div {
+  min-width: 0;
+}
+
+.ops-metric-card > div:first-child > button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+@container (min-width: 640px) {
+  .ops-overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ops-realtime-card {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (min-width: 960px) {
+  .ops-overview-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-areas:
+      'realtime realtime realtime sla request-errors'
+      'output requests duration ttft upstream-errors';
+  }
+
+  .ops-realtime-card { grid-area: realtime; }
+  .ops-output-card { grid-area: output; }
+  .ops-requests-card { grid-area: requests; }
+  .ops-duration-card { grid-area: duration; }
+  .ops-sla-card { grid-area: sla; }
+  .ops-request-errors-card { grid-area: request-errors; }
+  .ops-ttft-card { grid-area: ttft; }
+  .ops-upstream-errors-card { grid-area: upstream-errors; }
+}
+</style>

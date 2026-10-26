@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ippkg "github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+	"github.com/alicebob/miniredis/v2"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -18,6 +19,24 @@ func TestWindowTTLMillis(t *testing.T) {
 	require.Equal(t, int64(1), windowTTLMillis(500*time.Microsecond))
 	require.Equal(t, int64(1), windowTTLMillis(1500*time.Microsecond))
 	require.Equal(t, int64(2), windowTTLMillis(2500*time.Microsecond))
+}
+
+func TestRateLimiterRecoversAfterScriptFlush(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	ctx := context.Background()
+	count, repaired, err := rateLimitRun(ctx, client, "flush-test", 60000)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+	require.False(t, repaired)
+	server.FastForward(time.Second)
+	require.NoError(t, client.ScriptFlush(ctx).Err())
+	count, repaired, err = rateLimitRun(ctx, client, "flush-test", 60000)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), count, "NOSCRIPT recovery must not reset or double-count the window")
+	require.False(t, repaired)
+	require.Equal(t, 59*time.Second, server.TTL("flush-test"))
 }
 
 func TestRateLimiterFailureModes(t *testing.T) {
