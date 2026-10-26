@@ -178,7 +178,7 @@ func TestOpenAIWSConnReaderLoop_KeepsReaderWhileIdleSoPingSucceeds(t *testing.T)
 	require.True(t, conn.hasReaderLoop())
 	require.Eventually(t, func() bool { return fake.readers.Load() == 1 }, time.Second, 5*time.Millisecond)
 	require.True(t, conn.supportsIdlePingWithoutReader())
-	require.NoError(t, conn.pingWithTimeout(time.Second))
+	require.NoError(t, conn.pingWithContextTimeout(context.Background(), time.Second))
 
 	conn.close()
 	require.Eventually(t, func() bool { return fake.readers.Load() == 0 }, time.Second, 5*time.Millisecond, "关闭后读循环应退出")
@@ -577,7 +577,7 @@ func TestOpenAIWSConnPingDoesNotBlockWrite(t *testing.T) {
 	require.Eventually(t, func() bool { return fake.readers.Load() == 1 }, time.Second, 5*time.Millisecond)
 
 	pingDone := make(chan error, 1)
-	go func() { pingDone <- conn.pingWithTimeout(5 * time.Second) }()
+	go func() { pingDone <- conn.pingWithContextTimeout(context.Background(), 5*time.Second) }()
 	require.Eventually(t, func() bool { return fake.pinging.Load() == 1 }, time.Second, 5*time.Millisecond)
 
 	started := time.Now()
@@ -791,4 +791,79 @@ func TestOpenAIWSConnPool_AcquireSkipsDirtyIdleConn(t *testing.T) {
 	require.NotEqual(t, firstID, second.ConnID(), "脏连接不应再被借出")
 	require.Len(t, dialer.dialed(), 2)
 	requireConnClosed(t, first.conn)
+}
+
+func TestOpenAIWSConnLease_IdlePingLifecycle(t *testing.T) {
+	for _, mode := range []string{"repeat", "stop_inflight", "parent_cancel", "failure", "released"} {
+		t.Run(mode, func(t *testing.T) {
+			wire := newOpenAIWSReaderLoopFakeConn()
+			if mode == "stop_inflight" || mode == "parent_cancel" {
+				wire.pingHold = make(chan struct{})
+			}
+			if mode == "failure" {
+				wire.pingErr = errors.New("upstream pong failure")
+			}
+			conn := newOpenAIWSConn("idle-session", 1, wire, nil)
+			t.Cleanup(conn.close)
+			require.Eventually(t, func() bool { return wire.readers.Load() == 1 }, time.Second, time.Millisecond)
+			lease := &openAIWSConnLease{conn: conn}
+			require.NoError(t, lease.WriteJSONContext(t.Context(), map[string]any{"type": "response.create"}))
+			lease.ConfirmResponse("resp_idle_parent")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if mode == "released" {
+				lease.Release()
+			}
+			stop := lease.startIdlePing(ctx, time.Millisecond)
+			if mode != "released" {
+				minimum := int32(1)
+				if mode == "repeat" {
+					minimum = 2
+				}
+				require.Eventually(t, func() bool { return wire.pings.Load() >= minimum }, time.Second, time.Millisecond)
+			}
+			if mode == "parent_cancel" {
+				cancel()
+			}
+			err := stop()
+			if mode == "failure" {
+				require.ErrorIs(t, err, wire.pingErr)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Zero(t, wire.pinging.Load(), "probe must be joined before lease release or the next turn")
+			require.False(t, conn.isClosed(), "stopping an idle probe does not kill the upstream reader")
+			require.True(t, conn.matchesResponseContext("resp_idle_parent"), "probes do not advance response lineage")
+			if mode == "released" {
+				require.Zero(t, wire.pings.Load())
+			}
+			lease.Release()
+		})
+	}
+}
+
+func TestOpenAIWSConnPool_AcquireHealthCheckHonorsPreparationDeadline(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+	pool := newOpenAIWSConnPool(cfg)
+	t.Cleanup(pool.Close)
+	dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{
+		&openAIWSSlowPingConn{pingDelay: 3 * time.Second}, &openAIWSFakeConn{},
+	}}
+	pool.setClientDialerForTest(dialer)
+	account := &Account{ID: 312, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	req := openAIWSAcquireRequest{Account: account, WSURL: "wss://example.com/v1/responses"}
+	first, err := pool.Acquire(t.Context(), req)
+	require.NoError(t, err)
+	first.Release()
+	first.conn.lastUsedNano.Store(time.Now().Add(-openAIWSConnHealthCheckIdle - time.Second).UnixNano())
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	second, err := pool.Acquire(ctx, req)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Nil(t, second)
+	require.Less(t, time.Since(started), time.Second, "health check must share the acquire deadline")
+	require.Equal(t, 1, dialer.DialCount(), "cancelled acquire cannot dial a replacement")
 }

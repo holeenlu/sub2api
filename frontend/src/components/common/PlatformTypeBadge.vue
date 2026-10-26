@@ -1,7 +1,7 @@
 <template>
-  <div class="inline-flex flex-col gap-0.5 text-xs font-medium">
+  <div class="inline-flex max-w-full flex-col items-start gap-1 text-xs font-medium">
     <!-- Row 1: Platform + Type -->
-    <div class="inline-flex items-center overflow-hidden rounded-md">
+    <div v-if="!summary" class="inline-flex max-w-full flex-wrap items-center rounded-md">
       <span :class="['inline-flex items-center gap-1 px-2 py-1', platformClass]">
         <PlatformIcon :platform="platform" size="xs" />
         <span>{{ platformLabel }}</span>
@@ -31,7 +31,7 @@
       </span>
     </div>
     <!-- Row 2: Plan type + Privacy mode (only if either exists) -->
-    <div v-if="planLabel || privacyBadge" class="inline-flex items-center overflow-hidden rounded-md">
+    <div v-if="planLabel || (!summary && (privacyBadge || billingType))" class="inline-flex max-w-full flex-wrap items-center gap-1 rounded-md">
       <span v-if="planLabel" :class="['inline-flex items-center gap-1 px-1.5 py-1', planBadgeClass]">
         <GrokFreeIcon
           v-if="isGrokFreePlan"
@@ -46,8 +46,9 @@
         />
         <span>{{ planLabel }}</span>
       </span>
+      <span v-if="!summary && billingType" class="max-w-full break-words rounded bg-gray-100 px-1.5 py-1 text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ billingType }}</span>
       <span
-        v-if="privacyBadge"
+        v-if="!summary && privacyBadge"
         :class="['inline-flex items-center gap-1 px-1.5 py-1', privacyBadge.class]"
         :title="privacyBadge.title"
       >
@@ -58,8 +59,13 @@
       </span>
     </div>
     <!-- Row 3: Subscription expiration (non-free paid accounts only) -->
-    <div v-if="expiresLabel" class="text-[10px] leading-tight text-gray-400 dark:text-gray-500 pl-0.5" :title="subscriptionExpiresAt">
+    <div v-if="!summary && expiresLabel" class="text-[10px] leading-tight text-gray-400 dark:text-gray-500 pl-0.5" :title="subscriptionExpiresAt">
       {{ expiresLabel }}
+    </div>
+    <span v-if="!summary && authorizationLabel" class="max-w-full rounded bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-dark-700 dark:text-gray-300">{{ authorizationLabel }}</span>
+    <div v-if="!summary && compactMeta" class="inline-flex items-center gap-1.5 pl-0.5 text-[11px] leading-4" :class="compactMeta.className" :title="compactTitle">
+      <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="compactMeta.dotClass" />
+      <span>{{ compactMeta.label }}</span>
     </div>
   </div>
 </template>
@@ -73,19 +79,30 @@ import { normalizePlanType, openAIPlanTypeLabel } from '@/utils/planType'
 import GrokFreeIcon from './GrokFreeIcon.vue'
 import PlatformIcon from './PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { formatDateTime } from '@/utils/format'
 
 const { t } = useI18n()
 
-interface Props {
+export interface AccountBadgeProps {
+  summary?: boolean
   platform: AccountPlatform
   type: AccountType
   authMode?: string
   planType?: string
   privacyMode?: string
   subscriptionExpiresAt?: string
+  method?: string
+  billingType?: string
+  authorizationModes?: string[]
+  compact?: { mode?: unknown; supported?: unknown; checkedAt?: unknown }
 }
 
-const props = defineProps<Props>()
+const props = defineProps<AccountBadgeProps>()
+const authorizationLabel = computed(() => {
+  const modes = props.authorizationModes
+  if (props.platform !== 'openai' || !modes?.length) return ''
+  return t('vendor.authorization.' + (modes.includes('native') && modes.includes('bps') ? 'dual' : modes[0]))
+})
 
 const platformLabel = computed(() => sharedPlatformLabel(props.platform))
 
@@ -98,6 +115,9 @@ const typeLabel = computed(() => {
     if (normalizedAuthMode.value === 'agentidentity') return 'Agent Identity'
     if (normalizedAuthMode.value === 'personalaccesstoken') return 'PAT'
   }
+  if (props.method === 'setup-token-manual') return 'Setup Token'
+  if (props.method === 'setup-token') return 'OAuth Token'
+  if (props.method === 'refresh_token') return 'Refresh Token'
   switch (props.type) {
     case 'oauth':
       return 'OAuth'
@@ -114,9 +134,27 @@ const typeLabel = computed(() => {
   }
 })
 
+const compactMeta = computed(() => {
+  if (!props.compact || props.platform !== 'openai' || !['oauth', 'apikey'].includes(props.type)) return null
+  const { mode, supported } = props.compact
+  const state = mode === 'force_on' ? 'active' : mode === 'force_off' ? 'blocked' : typeof supported === 'boolean' ? supported ? 'active' : 'blocked' : 'auto'
+  if (state === 'active') return { label: t('admin.accounts.openai.compactSupported'), className: 'text-emerald-600 dark:text-emerald-300', dotClass: 'bg-emerald-500' }
+  if (state === 'blocked') return { label: t('admin.accounts.openai.compactUnsupported'), className: 'text-rose-600 dark:text-rose-300', dotClass: 'bg-rose-500' }
+  return { label: t('admin.accounts.openai.compactAuto'), className: 'text-slate-500 dark:text-slate-400', dotClass: 'bg-slate-300 dark:bg-slate-500' }
+})
+const compactTitle = computed(() => {
+  const label = compactMeta.value?.label || ''
+  const at = props.compact?.checkedAt
+  return typeof at === 'string' && at ? label + ' | ' + t('admin.accounts.openai.compactLastChecked') + ': ' + formatDateTime(new Date(at)) : label
+})
+
 const normalizedPlanType = computed(() => normalizePlanType(props.planType))
 
+// API keys can proxy another account's errors; legacy plan metadata is not their subscription.
+const isOpenAIAPIKey = computed(() => props.platform === 'openai' && props.type === 'apikey')
+
 const planLabel = computed(() => {
+  if (isOpenAIAPIKey.value) return ''
   if (!normalizedPlanType.value) return ''
   // ChatGPT 档位命名（Pro 100 / Pro 200 / Pro 500、Business / Business Premium）只适用于
   // OpenAI：Antigravity 与 Grok 各自的 pro/team 沿用下面的通用标签。
@@ -276,6 +314,7 @@ const planBadgeClass = computed(() => {
 
 // Subscription expiration label (non-free only)
 const expiresLabel = computed(() => {
+  if (isOpenAIAPIKey.value) return ''
   if (!props.subscriptionExpiresAt || !props.planType) return ''
   if (
     normalizedPlanType.value === 'free' ||
