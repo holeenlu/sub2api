@@ -162,10 +162,13 @@ func TestOpenAIGatewayService_Forward_WSv2ErrorEventUsageLimitPersistsRateLimit(
 	result, err := svc.Forward(context.Background(), c, &account, body)
 	require.Error(t, err)
 	require.Nil(t, result)
-	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
+	require.Equal(t, http.StatusTooManyRequests, failover.StatusCode)
+	require.Empty(t, rec.Body.String(), "account recovery owns the final client response")
 	require.Nil(t, upstream.lastReq, "WS 限流 error event 不应回退到同账号 HTTP")
 	require.Len(t, repo.rateLimitCalls, 1)
-	require.WithinDuration(t, time.Unix(resetAt, 0), repo.rateLimitCalls[0], 2*time.Second)
+	require.WithinDuration(t, time.Now().Add(defaultRateLimit429CooldownSeconds*time.Second), repo.rateLimitCalls[0], 2*time.Second)
 }
 
 func TestOpenAIGatewayService_Forward_WSv2Handshake429PersistsRateLimit(t *testing.T) {
@@ -235,8 +238,8 @@ func TestOpenAIGatewayService_Forward_WSv2Handshake429PersistsRateLimit(t *testi
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	require.Nil(t, upstream.lastReq, "WS 握手 429 不应回退到同账号 HTTP")
 	require.Len(t, repo.rateLimitCalls, 1)
-	require.NotEmpty(t, repo.updateExtra, "握手 429 的 x-codex 头应立即落库")
-	require.Contains(t, repo.updateExtra[0], "codex_usage_updated_at")
+	require.Empty(t, repo.updateExtra, "relayed handshake quota must not become the API key's snapshot")
+	require.WithinDuration(t, time.Now().Add(defaultRateLimit429CooldownSeconds*time.Second), repo.rateLimitCalls[0], 2*time.Second)
 }
 
 func TestOpenAIGatewayService_Forward_WSv2Handshake502RecordsModelTransient(t *testing.T) {
@@ -377,7 +380,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ErrorEventUsageL
 	defer func() { _ = clientConn.CloseNow() }()
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":[{"role":"user","content":"hello"}]}`))
 	cancelWrite()
 	require.NoError(t, err)
 
@@ -388,7 +391,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ErrorEventUsageL
 		require.ErrorAs(t, serverErr, &failoverErr)
 		require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
 		require.Len(t, repo.rateLimitCalls, 1)
-		require.WithinDuration(t, time.Unix(resetAt, 0), repo.rateLimitCalls[0], 2*time.Second)
+		require.WithinDuration(t, time.Now().Add(defaultRateLimit429CooldownSeconds*time.Second), repo.rateLimitCalls[0], 2*time.Second)
 	case <-time.After(5 * time.Second):
 		t.Fatal("等待 ingress websocket 结束超时")
 	}
@@ -556,7 +559,7 @@ func TestOpenAIWSErrorHTTPStatusFromRaw_UsageLimitReachedIs429(t *testing.T) {
 func TestOpenAIWSRateLimitFailoverError_OAuthKeepsSameAccountDeadline(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	headers := http.Header{"Retry-After": []string{"30"}}
-	body := []byte(`{"error":{"type":"rate_limit_error","message":"limited"}}`)
+	body := []byte(`{"type":"error","headers":{"Retry-After":"30"},"error":{"type":"rate_limit_error","message":"limited"}}`)
 
 	oauthErr := svc.newOpenAIWSRateLimitFailoverError(&Account{
 		ID:       904,
@@ -565,8 +568,7 @@ func TestOpenAIWSRateLimitFailoverError_OAuthKeepsSameAccountDeadline(t *testing
 	}, headers, body, "limited")
 	require.True(t, oauthErr.RetryableOnSameAccount)
 	require.False(t, oauthErr.SameAccountRetryDeadline.IsZero())
-	require.Positive(t, oauthErr.SameAccountRetryDelay)
-	require.LessOrEqual(t, oauthErr.SameAccountRetryDelay, openAIOAuth429MaxRetryDelay)
+	require.Equal(t, 30*time.Second, oauthErr.SameAccountRetryDelay)
 	require.Equal(t, body, oauthErr.ResponseBody)
 	require.Equal(t, "30", oauthErr.ResponseHeaders.Get("Retry-After"))
 
@@ -578,4 +580,29 @@ func TestOpenAIWSRateLimitFailoverError_OAuthKeepsSameAccountDeadline(t *testing
 	require.False(t, apiKeyErr.RetryableOnSameAccount)
 	require.True(t, apiKeyErr.SameAccountRetryDeadline.IsZero())
 	require.Zero(t, apiKeyErr.SameAccountRetryDelay)
+}
+
+func TestOpenAIWSSemanticRateLimitUsesEventRetryAfter(t *testing.T) {
+	for _, tc := range []struct {
+		name, headers string
+		want          time.Duration
+	}{
+		{"event", `{"Retry-After":"67","Authorization":"private-secret"}`, 67 * time.Second},
+		{"lowercase", `{"retry-after":"67"}`, 67 * time.Second},
+		{"missing", `{}`, openAIOAuth429RetryDelay},
+		{"invalid", `{"Retry-After":"Inf"}`, openAIOAuth429RetryDelay},
+		{"ambiguous", `{"Retry-After":"67","retry-after":"1"}`, openAIOAuth429RetryDelay},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &OpenAIGatewayService{}
+			handshake := http.Header{"Retry-After": []string{"7200"}, "X-Codex-Primary-Used-Percent": []string{"100"}, "X-Codex-Primary-Reset-After-Seconds": []string{"7200"}, "X-Codex-Primary-Window-Minutes": []string{"10080"}}
+			body := []byte(`{"type":"error","status":429,"headers":` + tc.headers + `,"error":{"code":"turn_rate_limit_exceeded","type":"rate_limit_error","message":"Codex is at capacity, please try again later"}}`)
+			failure := svc.newOpenAIWSRateLimitFailoverError(&Account{ID: 66273, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, handshake, body, "capacity")
+			require.True(t, failure.RetryableOnSameAccount, "a successful handshake snapshot is not current quota proof")
+			require.Equal(t, tc.want, failure.SameAccountRetryDelay)
+			require.Empty(t, failure.ResponseHeaders.Get("Authorization"))
+			require.Empty(t, failure.ResponseHeaders.Get("X-Codex-Primary-Used-Percent"))
+			require.Equal(t, "7200", handshake.Get("Retry-After"), "do not mutate the shared handshake")
+		})
+	}
 }

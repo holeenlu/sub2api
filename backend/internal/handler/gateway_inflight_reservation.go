@@ -71,6 +71,13 @@ func reserveInflightBalanceCtx(
 	subscription *service.UserSubscription,
 	req service.InflightEstimateRequest,
 ) (context.Context, func(), error) {
+	if validator, ok := estimator.(interface {
+		ValidateUsagePricing(context.Context, *service.APIKey, service.InflightEstimateRequest) error
+	}); ok {
+		if err := validator.ValidateUsagePricing(ctx, apiKey, req); err != nil {
+			return ctx, inflightNoop, err
+		}
+	}
 	if billing == nil || estimator == nil || apiKey == nil || apiKey.User == nil || !billing.InflightReservationEnabled() {
 		return ctx, inflightNoop, nil
 	}

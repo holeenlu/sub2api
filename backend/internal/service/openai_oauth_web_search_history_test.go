@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // Codex local compaction replays hosted web_search_call history with tools:[];
@@ -44,11 +45,21 @@ func TestOAuthWebSearchHistoryToolAcrossPaths(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.inject {
+				const standaloneTools = `[{"type":"namespace","name":"web","tools":[{"type":"function","name":"run","parameters":{"type":"object"}}]}]`
+				body, err := sjson.SetRawBytes([]byte(openAIWebSearchHistoryCompactionBody), "tools", []byte(standaloneTools))
+				require.NoError(t, err)
+				out, _, err := tt.normalize(body)
+				require.NoError(t, err)
+				require.JSONEq(t, standaloneTools, gjson.GetBytes(out, "tools").Raw)
+				require.Equal(t, "web_search_call", gjson.GetBytes(out, "input.1.type").String())
+				require.Equal(t, "auto", gjson.GetBytes(out, "tool_choice").String())
+			}
 			out, _, err := tt.normalize([]byte(openAIWebSearchHistoryCompactionBody))
 			require.NoError(t, err)
 			require.Equal(t, "web_search_call", gjson.GetBytes(out, "input.1.type").String())
 			if !tt.inject {
-				require.False(t, gjsonToolsContainWebSearch(gjson.GetBytes(out, "tools")))
+				require.False(t, gjsonToolsContainWebSearch(gjson.GetBytes(out, "tools"), ""))
 				return
 			}
 			tools := gjson.GetBytes(out, "tools").Array()
@@ -76,28 +87,29 @@ func TestEnsureOpenAIOAuthWebSearchToolForHistory(t *testing.T) {
 		toolsPath  string
 		toolCount  int
 		toolChoice string
-		itemTypes  []string
 	}{
-		{"tools absent", `{"input":` + history + `}`, false, true, "tools", 1, "none", nil},
-		{"tools null", `{"input":` + history + `,"tools":null,"tool_choice":null}`, false, true, "tools", 1, "none", nil},
-		{"explicit none kept", `{"input":` + history + `,"tools":[],"tool_choice":"none"}`, false, true, "tools", 1, "none", nil},
-		{"required not rewritten", `{"input":` + history + `,"tools":[],"tool_choice":"required"}`, false, true, "tools", 1, "required", nil},
-		{"caller tools keep choice", `{"input":` + history + `,"tools":[{"type":"function","name":"echo"}],"tool_choice":"auto"}`, false, true, "tools", 2, "auto", nil},
-		{"web_search already declared", `{"input":` + history + `,"tools":[{"type":"web_search"}]}`, false, false, "", 0, "", nil},
-		{"web_search_preview declared", `{"input":` + history + `,"tools":[{"type":"web_search_preview"}]}`, false, false, "", 0, "", nil},
-		{"declared via additional_tools", `{"input":[{"type":"additional_tools","tools":[{"type":"web_search"}]},` + search + `]}`, false, false, "", 0, "", nil},
-		{"no web_search_call item", `{"input":[{"type":"message","role":"user","content":"web_search_call"}],"tools":[]}`, false, false, "", 0, "", nil},
-		{"string input", `{"input":"web_search_call"}`, false, false, "", 0, "", nil},
-		{"lite inserts before compaction trigger", `{"input":[` + user + `,` + search + `,` + trigger + `]}`, true, true, "input.2.tools", 1, "none",
-			[]string{"message", "web_search_call", "additional_tools", "compaction_trigger"}},
-		{"lite appends without trigger", `{"input":` + history + `,"tool_choice":"auto"}`, true, true, "input.2.tools", 1, "none",
-			[]string{"message", "web_search_call", "additional_tools"}},
-		{"lite extends caller additional_tools", `{"input":[{"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"echo"}]},` + search + `,` + trigger + `],"tool_choice":"auto"}`, true, true, "input.0.tools", 2, "auto",
-			[]string{"additional_tools", "web_search_call", "compaction_trigger"}},
-		{"lite fills empty additional_tools", `{"input":[{"type":"additional_tools","role":"developer"},` + search + `]}`, true, true, "input.0.tools", 1, "none",
-			[]string{"additional_tools", "web_search_call"}},
-		{"lite keeps top-level tools untouched", `{"input":` + history + `,"tools":[{"type":"function","name":"echo"}]}`, true, true, "input.2.tools", 1, "",
-			[]string{"message", "web_search_call", "additional_tools"}},
+		{"tools absent", `{"input":` + history + `}`, false, true, "tools", 1, "none"},
+		{"tools null", `{"input":` + history + `,"tools":null,"tool_choice":null}`, false, true, "tools", 1, "none"},
+		{"explicit none kept", `{"input":` + history + `,"tools":[],"tool_choice":"none"}`, false, true, "tools", 1, "none"},
+		{"required not rewritten", `{"input":` + history + `,"tools":[],"tool_choice":"required"}`, false, true, "tools", 1, "required"},
+		{"caller tools keep choice", `{"input":` + history + `,"tools":[{"type":"function","name":"echo"}],"tool_choice":"auto"}`, false, true, "tools", 2, "auto"},
+		{"web_search already declared", `{"input":` + history + `,"tools":[{"type":"web_search"}]}`, false, false, "", 0, ""},
+		{"web_search_preview declared", `{"input":` + history + `,"tools":[{"type":"web_search_preview"}]}`, false, false, "", 0, ""},
+		{"standalone dotted function", `{"input":` + history + `,"tools":[{"type":"function","name":"web.run"}],"tool_choice":"auto"}`, false, false, "", 0, ""},
+		{"standalone custom tool", `{"input":` + history + `,"tools":[{"type":"namespace","name":"web","tools":[{"type":"custom","name":"run"}]}]}`, false, false, "", 0, ""},
+		{"standalone namespace function", `{"input":` + history + `,"tools":[{"type":"namespace","name":"web","tools":[{"type":"function","name":"run"}]}]}`, false, false, "", 0, ""},
+		{"standalone namespace in Lite", `{"input":` + history + `,"tools":[{"type":"namespace","name":"web","tools":[{"type":"function","name":"run"}]}]}`, true, false, "", 0, ""},
+		{"standalone additional tools", `{"input":[{"type":"additional_tools","tools":[{"type":"namespace","name":"web","tools":[{"type":"function","name":"run"}]}]},` + search + `,` + trigger + `]}`, true, false, "", 0, ""},
+		{"different namespace still injects", `{"input":` + history + `,"tools":[{"type":"namespace","name":"shell","tools":[{"type":"function","name":"run"}]}]}`, false, true, "tools", 2, ""},
+		{"declared via additional_tools", `{"input":[{"type":"additional_tools","tools":[{"type":"web_search"}]},` + search + `]}`, false, false, "", 0, ""},
+		{"no web_search_call item", `{"input":[{"type":"message","role":"user","content":"web_search_call"}],"tools":[]}`, false, false, "", 0, ""},
+		{"string input", `{"input":"web_search_call"}`, false, false, "", 0, ""},
+		{"lite preserves compaction trigger", `{"input":[` + user + `,` + search + `,` + trigger + `]}`, true, false, "", 0, ""},
+		{"lite preserves tool choice", `{"input":` + history + `,"tool_choice":"auto"}`, true, false, "", 0, ""},
+		{"lite preserves additional client tools", `{"input":[{"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"echo"}]},` + search + `,` + trigger + `],"tool_choice":"auto"}`, true, false, "", 0, ""},
+		{"lite preserves empty additional tools", `{"input":[{"type":"additional_tools","role":"developer"},` + search + `]}`, true, false, "", 0, ""},
+		{"lite preserves top level client tools", `{"input":` + history + `,"tools":[{"type":"function","name":"echo"}]}`, true, false, "", 0, ""},
+		{"lite preserves encrypted reasoning", `{"input":[` + search + `,{"type":"reasoning","id":"rs_history","encrypted_content":"cipher","summary":[]}],"previous_response_id":"resp_previous"}`, true, false, "", 0, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -109,6 +121,9 @@ func TestEnsureOpenAIOAuthWebSearchToolForHistory(t *testing.T) {
 			require.Equal(t, tt.changed, ensureOpenAIOAuthWebSearchToolForHistory(req, tt.lite))
 			if !tt.changed {
 				require.JSONEq(t, tt.body, string(out))
+				mapOut, err := json.Marshal(req)
+				require.NoError(t, err)
+				require.JSONEq(t, tt.body, string(mapOut))
 				return
 			}
 			require.True(t, gjson.ValidBytes(out))
@@ -116,14 +131,6 @@ func TestEnsureOpenAIOAuthWebSearchToolForHistory(t *testing.T) {
 			require.Len(t, tools, tt.toolCount)
 			require.Equal(t, "web_search", tools[len(tools)-1].Get("type").String())
 			require.Equal(t, tt.toolChoice, gjson.GetBytes(out, "tool_choice").String())
-			if tt.lite {
-				require.False(t, gjsonToolsContainWebSearch(gjson.GetBytes(out, "tools")), "Lite rejects top-level hosted tools")
-				var types []string
-				for _, item := range gjson.GetBytes(out, "input").Array() {
-					types = append(types, item.Get("type").String())
-				}
-				require.Equal(t, tt.itemTypes, types)
-			}
 
 			// The map variant used by the Codex transform must agree.
 			mapOut, err := json.Marshal(req)

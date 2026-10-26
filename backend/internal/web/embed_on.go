@@ -11,19 +11,26 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 )
 
 const (
 	// NonceHTMLPlaceholder is the placeholder for nonce in HTML script tags
 	NonceHTMLPlaceholder = "__CSP_NONCE_VALUE__"
+
+	// defaultTitleSuffix is appended after the configured site name when the
+	// embedded SPA shell's <title> is rewritten at request time. Brand branches
+	// change this value together with BRAND_TITLE_SUFFIX_EN in
+	// frontend/src/config/brand.ts; it is a local constant so the web package
+	// stays free of a dependency on internal/service.
+	defaultTitleSuffix = "Smart tokens. More possibilities."
 )
 
 //go:embed all:dist
@@ -226,7 +233,7 @@ func injectSiteFavicon(html, settingsJSON []byte) []byte {
 		return html
 	}
 
-	logoURL := safeImageURL(cfg.SiteLogo)
+	logoURL := urlvalidator.SafeImageURL(cfg.SiteLogo)
 	if logoURL == "" {
 		return html
 	}
@@ -249,25 +256,6 @@ func injectSiteFavicon(html, settingsJSON []byte) []byte {
 	return buf.Bytes()
 }
 
-func safeImageURL(value string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return ""
-	}
-	if strings.HasPrefix(trimmed, "/") && !strings.HasPrefix(trimmed, "//") {
-		return trimmed
-	}
-	if strings.HasPrefix(strings.ToLower(trimmed), "data:image/") {
-		return trimmed
-	}
-
-	parsed, err := url.Parse(trimmed)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return ""
-	}
-	return trimmed
-}
-
 // injectSiteTitle replaces the static <title> in HTML with the configured site name.
 // This ensures the browser tab shows the correct title before JS executes.
 func injectSiteTitle(html, settingsJSON []byte) []byte {
@@ -285,7 +273,7 @@ func injectSiteTitle(html, settingsJSON []byte) []byte {
 		return html
 	}
 
-	newTitle := []byte("<title>" + htmlpkg.EscapeString(cfg.SiteName) + " - AI API Gateway</title>")
+	newTitle := []byte("<title>" + htmlpkg.EscapeString(cfg.SiteName) + " - " + defaultTitleSuffix + "</title>")
 	var buf bytes.Buffer
 	buf.Write(html[:titleStart])
 	buf.Write(newTitle)

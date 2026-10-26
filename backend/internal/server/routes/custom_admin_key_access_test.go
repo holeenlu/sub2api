@@ -45,7 +45,7 @@ func (*scopedRouteModelSettings) Get(context.Context, string) (*service.Setting,
 }
 
 func (*scopedRouteUsers) GetByID(context.Context, int64) (*service.User, error) {
-	return &service.User{ID: 9, Role: service.RoleAdmin, Status: service.StatusActive}, nil
+	return &service.User{ID: 9, Role: service.RoleSuperAdmin, Status: service.StatusActive}, nil
 }
 func (*scopedRouteUsers) GetUserAvatar(context.Context, int64) (*service.UserAvatar, error) {
 	return nil, nil
@@ -103,7 +103,7 @@ func TestScopedAdminRegisteredRoutesEnforceDefaultDenyAndAccountScope(t *testing
 			accountHandler := adminhandler.NewAccountHandler(&scopedRouteAccounts{t: t}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			r := gin.New()
 			RegisterAdminRoutes(r.Group("/api/v1"), &handler.Handlers{Admin: &handler.AdminHandlers{Account: accountHandler, Setting: adminhandler.NewSettingHandler(settings, nil, nil, nil, nil, nil, nil)}}, auth, middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }), middleware.StepUpAuthMiddleware(func(c *gin.Context) { c.Next() }), nil, nil)
-			RegisterPaymentRoutes(r.Group("/api/v1"), &handler.PaymentHandler{}, &handler.PaymentWebhookHandler{}, &adminhandler.PaymentHandler{}, middleware.JWTAuthMiddleware(func(c *gin.Context) { c.Next() }), auth, middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }), nil, nil, nil)
+			RegisterPaymentRoutes(r.Group("/api/v1"), &handler.PaymentHandler{}, &handler.PaymentWebhookHandler{}, &adminhandler.PaymentHandler{}, middleware.JWTAuthMiddleware(func(c *gin.Context) { c.Next() }), auth, middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }), nil, nil, nil, middleware.StepUpAuthMiddleware(func(c *gin.Context) { c.Next() }))
 			for _, tc := range []struct{ method, path string }{
 				{"GET", "/api/v1/admin/accounts/1"},
 				{"GET", "/api/v1/admin/accounts/2"},
@@ -117,10 +117,11 @@ func TestScopedAdminRegisteredRoutesEnforceDefaultDenyAndAccountScope(t *testing
 				{"GET", "/api/v1/admin/groups"},
 				{"GET", "/api/v1/admin/payment/orders"},
 				{"POST", "/api/v1/admin/payment/orders/1/refund"},
-				{"PUT", "/api/v1/admin/payment/config"},
+				{"PUT", "/api/v1/admin/payment/providers/1"},
 			} {
 				req := httptest.NewRequest(tc.method, tc.path, nil)
 				req.Header.Set("x-api-key", key)
+				req.Header.Set("Content-Type", "application/json")
 				w := httptest.NewRecorder()
 				r.ServeHTTP(w, req)
 				want := 403
@@ -164,6 +165,7 @@ func TestScopedAdminRegisteredModelDefaultsRequireExplicitPermission(t *testing.
 		for _, path := range []string{"/api/v1/admin/accounts/antigravity/default-model-mapping"} {
 			req := httptest.NewRequest("GET", path, nil)
 			req.Header.Set("x-api-key", key)
+			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 			want := 403
@@ -219,6 +221,7 @@ func TestScopedAdminRegisteredLegacyModelInterfaces(t *testing.T) {
 				req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 				req.Header.Set("x-api-key", key)
 				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Content-Type", "application/json")
 				w := httptest.NewRecorder()
 				r.ServeHTTP(w, req)
 				require.Equal(t, want, w.Code, tc.method+" "+tc.path+": "+w.Body.String())
@@ -268,6 +271,7 @@ func TestScopedAdminCodexImportRouteReachesValidation(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/v1/admin/accounts/import/codex-session", strings.NewReader(`{"content":"","group_ids":[2]}`))
 	req.Header.Set("x-api-key", key)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	require.Equal(t, 400, w.Code, w.Body.String())
@@ -308,6 +312,7 @@ func TestScopedAdminCodexImportAuthenticatedRoute(t *testing.T) {
 			RegisterAdminRoutes(r.Group("/api/v1"), &handler.Handlers{Admin: &handler.AdminHandlers{Account: h}}, auth, middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }), middleware.StepUpAuthMiddleware(func(c *gin.Context) { c.Next() }), nil, nil)
 			req := httptest.NewRequest("POST", "/api/v1/admin/accounts/import/codex-session", strings.NewReader(`{"content":"{\"access_token\":\"test-private-access\",\"refresh_token\":\"test-private-refresh\"}","group_ids":[2]}`))
 			req.Header.Set("x-api-key", key)
+			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 			if allowed {
@@ -358,6 +363,7 @@ func TestScopedAdminProxyReadPermissionAndBoundedRoutes(t *testing.T) {
 			for _, path := range []string{"/api/v1/admin/proxies", "/api/v1/admin/proxies/all"} {
 				req := httptest.NewRequest("GET", path+"?page=2&page_size=20000", nil)
 				req.Header.Set("x-api-key", key)
+				req.Header.Set("Content-Type", "application/json")
 				w := httptest.NewRecorder()
 				r.ServeHTTP(w, req)
 				if !allowed {
@@ -381,6 +387,7 @@ func TestScopedAdminProxyReadPermissionAndBoundedRoutes(t *testing.T) {
 			}
 			req := httptest.NewRequest("GET", "/api/v1/admin/proxies/all", nil)
 			req.Header.Set("x-api-key", key)
+			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 			if allowed {
@@ -395,6 +402,7 @@ func TestScopedAdminProxyReadPermissionAndBoundedRoutes(t *testing.T) {
 			for _, path := range []string{"/api/v1/admin/proxies/data", "/api/v1/admin/proxies/10/accounts", "/api/v1/admin/proxies/10/stats"} {
 				req := httptest.NewRequest("GET", path, nil)
 				req.Header.Set("x-api-key", key)
+				req.Header.Set("Content-Type", "application/json")
 				w := httptest.NewRecorder()
 				r.ServeHTTP(w, req)
 				require.Equal(t, 403, w.Code)
