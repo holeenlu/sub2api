@@ -28,7 +28,7 @@ const {
   showError: vi.fn()
 }))
 
-const authState = vi.hoisted(() => ({ isSimpleMode: false }))
+const authState = vi.hoisted(() => ({ isSimpleMode: false, isSuperAdmin: true, can: () => true }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
@@ -90,6 +90,7 @@ const sourceGroup: AdminGroup = {
   monthly_limit_usd: null,
   allow_image_generation: false,
   allow_batch_image_generation: false,
+  image_count_billing: false,
   image_rate_independent: false,
   image_rate_multiplier: 1,
   batch_image_discount_multiplier: 0.5,

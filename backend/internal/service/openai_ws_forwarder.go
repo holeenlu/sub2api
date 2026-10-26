@@ -2,20 +2,27 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	coderws "github.com/coder/websocket"
+	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
 const (
 	openAIWSBetaV1Value = "responses_websockets=2026-02-04"
 	openAIWSBetaV2Value = "responses_websockets=2026-02-06"
+
+	openAIWSFallbackReasonInvalidEncryptedContent = "invalid_encrypted_content"
 
 	openAIWSTurnStateHeader    = "x-codex-turn-state"
 	openAIWSTurnMetadataHeader = "x-codex-turn-metadata"
@@ -56,10 +63,250 @@ var openAIWSLogValueReplacer = strings.NewReplacer(
 
 var openAIWSIngressPreflightPingIdle = 20 * time.Second
 
-// openAIWSFallbackError 表示可安全回退到 HTTP 的 WS 错误（尚未写下游）。
+// ErrOpenAIWSReplayUnavailable requires client context recovery, not an account
+// health penalty: the gateway cannot prove a complete replay is available.
+var ErrOpenAIWSReplayUnavailable = errors.New("websocket continuation requires full input context")
+
+// ErrOpenAIWSFirstOutputBudgetExhausted is a gateway deadline reached before
+// this account received the request; it must not affect account health.
+var ErrOpenAIWSFirstOutputBudgetExhausted = errors.New("websocket first-output budget exhausted before upstream write")
+
+// OpenAIWSAccountChangedError requests a fresh upstream attempt before this
+// turn is sent. A database account ID alone does not prove credential lineage.
+// A request-level failure has already been sent; the client may issue another
+// turn on the same socket. Its failed attempt never becomes replay history.
+type openAIWSTurnRejectedError struct{ cause error }
+
+func (e *openAIWSTurnRejectedError) Error() string { return e.cause.Error() }
+func (e *openAIWSTurnRejectedError) Unwrap() error { return e.cause }
+
+type OpenAIWSAccountChangedError struct {
+	PreserveContext bool
+	// A protocol change keeps portable history, never an old upstream response ID.
+	RequireFullInput bool
+}
+
+func (*OpenAIWSAccountChangedError) Error() string {
+	return "websocket upstream account configuration changed"
+}
+
+// RefreshOpenAIWSAccount reuses the scheduler snapshot and its bounded DB
+// fallback. It never changes the shared selection object or logs credentials.
+func (s *OpenAIGatewayService) RefreshOpenAIWSAccount(ctx context.Context, c *gin.Context, selected *Account, groupID *int64, requestModels ...string) (*Account, error) {
+	if s == nil || selected == nil || selected.Platform != PlatformOpenAI || (s.schedulerSnapshot == nil && s.accountRepo == nil) {
+		return selected, nil
+	}
+	waitCtx, cancel := OpenAITurnWaitContext(ctx)
+	defer cancel()
+	var latest *Account
+	var err error
+	if s.schedulerSnapshot != nil {
+		latest, err = s.schedulerSnapshot.GetAccount(waitCtx, selected.ID)
+	} else {
+		latest, err = s.accountRepo.GetByID(waitCtx, selected.ID)
+	}
+	if errors.Is(context.Cause(waitCtx), ErrOpenAIWSFirstOutputBudgetExhausted) {
+		return nil, ErrOpenAIWSFirstOutputBudgetExhausted
+	}
+	if err != nil {
+		return nil, NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "upstream account state unavailable", errors.Join(ErrOpenAIWSLocalClientPolicy, err))
+	}
+	if latest != nil && latest.UpdatedAt.Before(selected.UpdatedAt) {
+		latest = selected
+	}
+	if latest == nil || latest.ID != selected.ID || latest.Platform != selected.Platform || !latest.IsActive() || !latest.Schedulable || !openAIStickyAccountMatchesGroup(latest, groupID) {
+		return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "upstream account authorization is no longer valid", ErrOpenAIWSLocalClientPolicy)
+	}
+	oldSource, newSource := selected, latest
+	if latest.IsShadow() {
+		oldSource = codexAccountIdentitySource(c, selected)
+		newSource = (&defaultOpenAIAccountScheduler{service: s}).lookupShadowParentAccount(waitCtx, *latest.ParentAccountID)
+		if !parentHealthyForShadow(latest, func(int64) *Account { return newSource }) {
+			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "upstream parent credentials are no longer valid", ErrOpenAIWSLocalClientPolicy)
+		}
+	}
+	if latest.AutoPauseOnExpired && latest.ExpiresAt != nil && !time.Now().Before(*latest.ExpiresAt) {
+		return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "upstream account authorization expired", ErrOpenAIWSLocalClientPolicy)
+	}
+	cloudBoundary := selected.IsOpenAICloudConfigured() || latest.IsOpenAICloudConfigured()
+	requireFullInput := false
+	if cloudBoundary {
+		if latest.IsOpenAICloudConfigured() && !latest.IsOpenAICloudEnabled() {
+			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "Cloud authorization is no longer valid", ErrOpenAIWSLocalClientPolicy)
+		}
+		requireFullInput = selected.IsOpenAICloudConfigured() != latest.IsOpenAICloudConfigured() || cloudSettingsDigest(selected) != cloudSettingsDigest(latest)
+		if !requireFullInput {
+			return latest, nil // Inactive BPS settings do not change a Cloud execution.
+		}
+	}
+	defaultMode := OpenAIWSIngressModeCtxPool
+	selectedBPS, latestBPS := false, false
+	if len(requestModels) > 0 && s.excelBPSGloballyEnabled(ctx) {
+		selectedBPS = selected.IsExcelBPSEnabledForModel(requestModels[0])
+		latestBPS = latest.IsExcelBPSEnabledForModel(requestModels[0])
+		if selectedBPS != latestBPS && !cloudBoundary {
+			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "BPS routing changed; reconnect with full input context", ErrOpenAIWSModelSwitchRequiresReconnect)
+		}
+	}
+	if s.cfg != nil {
+		defaultMode = s.cfg.Gateway.OpenAIWS.IngressModeDefault
+		if !latestBPS && !latest.IsOpenAICloudEnabled() && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled && latest.ResolveOpenAIResponsesWebSocketV2Mode(defaultMode) == OpenAIWSIngressModeOff {
+			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "websocket mode is disabled for this account", ErrOpenAIWSLocalClientPolicy)
+		}
+	}
+	proxyURL := func(account *Account) string {
+		if account.Proxy != nil {
+			return account.Proxy.URL()
+		}
+		return ""
+	}
+	changed := requireFullInput || selected.Type != latest.Type || !reflect.DeepEqual(selected.Credentials, latest.Credentials) || !reflect.DeepEqual(oldSource.Credentials, newSource.Credentials) || !reflect.DeepEqual(selected.ParentAccountID, latest.ParentAccountID) ||
+		!reflect.DeepEqual(selected.ProxyID, latest.ProxyID) || proxyURL(selected) != proxyURL(latest) ||
+		selected.ResolveOpenAIResponsesWebSocketV2Mode(defaultMode) != latest.ResolveOpenAIResponsesWebSocketV2Mode(defaultMode)
+	changed = changed || selected.IsOpenAIPassthroughEnabled() != latest.IsOpenAIPassthroughEnabled() ||
+		selected.IsOpenAIWSForceHTTPEnabled() != latest.IsOpenAIWSForceHTTPEnabled() ||
+		selected.IsOpenAIResponsesFlattenNamespacesEnabled() != latest.IsOpenAIResponsesFlattenNamespacesEnabled() ||
+		selected.IsOpenAIWSAllowStoreRecoveryEnabled() != latest.IsOpenAIWSAllowStoreRecoveryEnabled() ||
+		selected.CodexImageGenerationExplicitToolPolicy() != latest.CodexImageGenerationExplicitToolPolicy() ||
+		!reflect.DeepEqual(selected.CodexImageGenerationBridgeOverride(), latest.CodexImageGenerationBridgeOverride()) ||
+		selected.IsCodexCLIOnlyEnabled() != latest.IsCodexCLIOnlyEnabled() || selected.IsCodexCLIOnlyAppServerAllowed() != latest.IsCodexCLIOnlyAppServerAllowed()
+	if selectedBPS {
+		// BPS options participate in the existing account snapshot boundary.
+		// Otherwise the ingress owner would keep its old pointer for later turns.
+		for key, value := range selected.Extra {
+			if IsExcelBPSExtraKey(key) && !reflect.DeepEqual(value, latest.Extra[key]) {
+				changed = true
+			}
+		}
+		for key, value := range latest.Extra {
+			if IsExcelBPSExtraKey(key) && !reflect.DeepEqual(value, selected.Extra[key]) {
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return latest, nil
+	}
+	preserve := oldSource.Type == newSource.Type && oldSource.ID == newSource.ID && reflect.DeepEqual(selected.ParentAccountID, latest.ParentAccountID) && selected.GetOpenAIBaseURL() == latest.GetOpenAIBaseURL() && selected.GetCredential("base_url") == latest.GetCredential("base_url") && oldSource.GetCredential("organization_id") == newSource.GetCredential("organization_id") && oldSource.GetCredential("project_id") == newSource.GetCredential("project_id")
+
+	if newSource.IsOpenAIOAuthLike() {
+		oldID, newID := oldSource.GetChatGPTAccountID(), newSource.GetChatGPTAccountID()
+		preserve = preserve && oldID == newID && oldSource.GetCredential("chatgpt_user_id") == newSource.GetCredential("chatgpt_user_id") && (oldID != "" || oldSource.GetOpenAIAccessToken() == newSource.GetOpenAIAccessToken())
+	} else if newSource.IsOpenAIApiKey() {
+		preserve = preserve && oldSource.GetOpenAIProtocolAPIKey() == newSource.GetOpenAIProtocolAPIKey()
+	} else {
+		preserve = false
+	}
+	return latest, &OpenAIWSAccountChangedError{PreserveContext: preserve, RequireFullInput: requireFullInput}
+}
+
+// Only an ended Cloud execution can be exported through the shared WS replay
+// boundary. Complete socket-owned history can outlive its closed response ID.
+func (s *OpenAIGatewayService) validateCloudWSProtocolMigration(ctx context.Context, c *gin.Context, payload []byte, fullInput []json.RawMessage, complete bool) error {
+	key := getAPIKeyFromContext(c)
+	if key == nil {
+		return errors.New("Cloud websocket owner is missing")
+	}
+	check := func(body []byte) error {
+		sourceCtx := PreserveCloudResponsesInput(ctx, body, false)
+		prepared, err := s.PrepareCloudContinuation(sourceCtx, key.UserID, key.ID, getOpenAIGroupIDFromContext(c), body, c.Request.Header)
+		// Ownership projection routes results. Migration must also inspect a raw
+		// call without a result, before replay sanitation can remove it.
+		if prepared != nil && s.cloudSessions != nil && s.cloudSessions.store != nil {
+			if state, _ := prepared.Value(cloudIngressKey{}).(*cloudIngressState); state != nil && state.protocol != nil {
+				results := make(map[string]bool, len(state.protocol.continuation.CallIDs))
+				for _, id := range state.protocol.continuation.CallIDs {
+					results[id] = true
+				}
+				for id := range state.protocol.continuation.PairedCalls {
+					if results[id] || !strings.HasPrefix(id, "call_cloud_") {
+						continue
+					}
+					record, lookupErr := s.cloudSessions.store.FindCloudSession(ctx, key.UserID, key.ID, getOpenAIGroupIDFromContext(c), id)
+					if lookupErr != nil {
+						return errors.New("Cloud session state is unavailable")
+					}
+					if record != nil && cloudSessionLive(record) && record.Status != "completed" {
+						return errCloudAuthorizationChanged
+					}
+				}
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if binding := cloudContinuationFromContext(prepared); binding != nil && binding.Status != "completed" {
+			return errCloudAuthorizationChanged
+		}
+		return nil
+	}
+	if err := check(payload); err != nil && !(errors.Is(err, errCloudPreviousResponseNotFound) && complete) {
+		return err
+	}
+	if !complete {
+		return ErrOpenAIWSReplayUnavailable
+	}
+	// An expired previous can precede a different still-live call reference.
+	// Inspect the complete shadow history as well as the original envelope.
+	replay, err := setOpenAIWSPayloadInputSequence(payload, fullInput, true)
+	if err != nil {
+		return err
+	}
+	return check(RemovePreviousResponseIDFromBody(replay))
+}
+
+func (s *OpenAIGatewayService) openAIWSAccountRefreshRetry(account *Account, cause error, payload []byte, fullInput []json.RawMessage, complete bool, model string) error {
+	var changed *OpenAIWSAccountChangedError
+	if !errors.As(cause, &changed) {
+		return cause
+	}
+
+	if changed.PreserveContext && !changed.RequireFullInput && !s.isOpenAIWSStoreDisabledInRequestRaw(payload, account) && gjson.GetBytes(payload, "previous_response_id").String() != "" {
+		return newOpenAIWSCurrentTurnFailoverError(cause, payload)
+	}
+	replay, safe, err := buildOpenAIWSCurrentTurnRetryPayload(payload, fullInput, complete, model, changed.PreserveContext)
+	if err != nil || !safe {
+		return NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account configuration changed; reconnect with complete portable context", errors.Join(ErrOpenAIWSReplayUnavailable, err))
+	}
+	return newOpenAIWSCurrentTurnFailoverError(cause, replay)
+}
+
+// Use configured idle limits, not a speculative short grace period: providers
+// may follow a bare error with delayed usage or even a successful response.
+func (s *OpenAIGatewayService) openAIWSErrorIdleTimeout(payload []byte) time.Duration {
+	timeout := s.openAIWSReadTimeout()
+	if s.cfg != nil {
+		seconds := s.cfg.Gateway.StreamDataIntervalTimeout
+		for _, tool := range gjson.GetBytes(payload, "tools").Array() {
+			if tool.Get("type").String() == "image_generation" {
+				seconds = s.cfg.Gateway.ImageStreamDataIntervalTimeout
+				break
+			}
+		}
+		if seconds > 0 {
+			timeout = min(timeout, time.Duration(seconds)*time.Second)
+		}
+	}
+	return timeout
+}
+
+// The sender and recovery policy share this failure identity. A failed write
+// is ambiguous, not proof that generation never started.
+const (
+	openAIWSFailureWriteRequest         = "write_request"
+	openAIWSPayloadPrefersHTTP          = "payload_size_preferred_http"
+	openAIWSOptionalPreparationTimedOut = "optional_ws_prepare_timeout"
+)
+
+// openAIWSFallbackError carries transport facts for the existing recovery owner.
+// No downstream output alone does not prove that an upstream request was unsent.
 type openAIWSFallbackError struct {
 	Reason string
 	Err    error
+	// Only an explicit rejection of a gateway-produced delta carries the
+	// complete request. Unknown transport failures never grant this proof.
+	recoveryPayload []byte
+	clientError     []byte
 }
 
 func (e *openAIWSFallbackError) Error() string {
@@ -94,6 +341,13 @@ type openAIWSIngressTurnError struct {
 	stage           string
 	cause           error
 	wroteDownstream bool
+	// identityOnly: everything written downstream so far was turn metadata
+	// (codex.* preamble, response.created, response.in_progress) published by
+	// the staging window expiring. No content, structure or terminal has been
+	// delivered, so one more upstream connection may still carry this turn if
+	// the public response identity is preserved.
+	identityOnly bool
+	retryDetail  string // bounded progress evidence; no request/output content
 }
 
 type openAIWSCurrentTurnFailoverError struct {
@@ -123,7 +377,8 @@ func newOpenAIWSCurrentTurnFailoverError(cause error, retryPayload []byte) error
 }
 
 // OpenAIWSCurrentTurnRetryPayload returns an isolated copy of the payload that
-// may be retried on a replacement account without replaying the first turn.
+// may be retried on the same account without replaying the first turn. Moving
+// it to a different account requires OpenAIResponsesAccountReplayAllowed.
 func OpenAIWSCurrentTurnRetryPayload(err error) ([]byte, bool) {
 	var retryErr *openAIWSCurrentTurnFailoverError
 	if !errors.As(err, &retryErr) || retryErr == nil {
@@ -168,7 +423,7 @@ func isOpenAIWSIngressTurnRetryable(err error) bool {
 	if errors.Is(turnErr.cause, context.Canceled) || errors.Is(turnErr.cause, context.DeadlineExceeded) {
 		return false
 	}
-	if turnErr.wroteDownstream {
+	if turnErr.wroteDownstream && !turnErr.identityOnly {
 		return false
 	}
 	switch turnErr.stage {
@@ -188,6 +443,15 @@ func openAIWSIngressTurnRetryReason(err error) string {
 		return "unknown"
 	}
 	return turnErr.stage
+}
+
+// IsOpenAIWSUpstreamTransportError distinguishes upstream I/O failures from
+// invalid client frames and normal disconnects at the handler's Ops boundary.
+func IsOpenAIWSUpstreamTransportError(err error) bool {
+	var turnErr *openAIWSIngressTurnError
+	return errors.As(err, &turnErr) && turnErr != nil &&
+		(turnErr.stage == "read_upstream" || turnErr.stage == "write_upstream") &&
+		!errors.Is(err, context.Canceled)
 }
 
 func isOpenAIWSIngressPreviousResponseNotFound(err error) bool {
@@ -263,6 +527,8 @@ type OpenAIWSIngressHooks struct {
 	TurnStarted             func(turn int, startedAt time.Time)
 	BeforeTurn              func(turn int) error
 	BeforeRequest           func(turn int, payload []byte, originalModel string) error
+	// Cloud business inputs belong to the authenticated ingress.
+	PrepareCloudTurn func(context.Context, int, []byte, string) (context.Context, error)
 	// MapRequestModel resolves the current turn's client model to the model
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)
@@ -363,11 +629,13 @@ func (s *OpenAIGatewayService) openAIWSPassthroughIdleTimeout() time.Duration {
 	return openAIWSPassthroughIdleTimeoutDefault
 }
 
+const openAIWSWriteTimeoutDefault = 2 * time.Minute
+
 func (s *OpenAIGatewayService) openAIWSWriteTimeout() time.Duration {
 	if s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.WriteTimeoutSeconds > 0 {
 		return time.Duration(s.cfg.Gateway.OpenAIWS.WriteTimeoutSeconds) * time.Second
 	}
-	return 2 * time.Minute
+	return openAIWSWriteTimeoutDefault
 }
 
 func (s *OpenAIGatewayService) openAIWSEventFlushBatchSize() int {
@@ -438,4 +706,142 @@ func (s *OpenAIGatewayService) openAIWSAcquireTimeout() time.Duration {
 		dial = 10 * time.Second
 	}
 	return dial + 2*time.Second
+}
+
+// forwardOpenAIWSV2WithRecovery 统一持有同账号 WS 重连，沿用请求的发送和等待总预算。
+// 主转发器只决定协议与计费；已交付或已计量的结果不能进入传输重放。
+func (s *OpenAIGatewayService) forwardOpenAIWSV2WithRecovery(
+	ctx context.Context, c *gin.Context, account *Account, wsReqBody map[string]any,
+	clientPromptCacheKey, wsExecutionScope, token string, wsDecision OpenAIWSProtocolDecision,
+	isCodexCLI, reqStream bool, originalModel, upstreamModel string, startTime time.Time,
+) (*OpenAIForwardResult, error, int, string) {
+	maxAttempts := 1 + min(1, account.GetPoolModeRetryCount())
+	wsAttempts := 0
+	var wsResult *OpenAIForwardResult
+	var wsErr error
+	wsLastFailureReason := ""
+	var uncertainExecutionFailure error
+	var recoveryPayload []byte
+	agentTaskRecoveryTried := false
+	retryBudget := s.openAIWSRetryTotalBudget()
+	retryStartedAt := time.Now()
+	var preparationDeadline time.Time
+	if retryBudget > 0 {
+		preparationDeadline = retryStartedAt.Add(retryBudget)
+	}
+wsRetryLoop:
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		wsAttempts = attempt
+		wsResult, wsErr = s.forwardOpenAIWSV2(
+			ctx,
+			c,
+			account,
+			wsReqBody,
+			clientPromptCacheKey,
+			wsExecutionScope,
+			token,
+			wsDecision,
+			isCodexCLI,
+			reqStream,
+			originalModel,
+			upstreamModel,
+			startTime,
+			attempt,
+			preparationDeadline,
+			wsLastFailureReason,
+			&agentTaskRecoveryTried,
+			recoveryPayload,
+		)
+		if wsErr == nil {
+			break
+		}
+		if wsResult != nil {
+			break // Metered output or client disconnect cannot be replayed.
+		}
+		if openAIStreamClientOutputStarted(c, false) {
+			break
+		}
+		if uncertainExecutionFailure != nil && ctx.Err() == nil && !IsTurnBudgetError(wsErr) {
+			// A later preparation/auth failure cannot erase an earlier ambiguous
+			// send. Preserve that fact for the existing replay/account policy.
+			wsErr = uncertainExecutionFailure
+			break
+		}
+		var rejectedGrant *openAIWSDialError
+		if errors.As(wsErr, &rejectedGrant) && rejectedGrant.StatusCode == http.StatusUnauthorized && s.openAITokenProvider != nil && attempt < maxAttempts {
+			if fresh, ok := refreshRejectedCredential(ctx, s.accountRepo, account, token, s.openAITokenProvider.refreshAPI, s.openAITokenProvider.executor); ok {
+				token = fresh
+				continue
+			}
+		}
+		var taskRecoveredErr *agentIdentityTaskRecoveredError
+		if errors.As(wsErr, &taskRecoveredErr) {
+			continue
+		}
+
+		reason, retryable := classifyOpenAIWSReconnectReason(wsErr)
+		var fallbackErr *openAIWSFallbackError
+		rejectedDelta := errors.As(wsErr, &fallbackErr) && len(fallbackErr.recoveryPayload) > 0
+		if rejectedDelta {
+			retryable = len(recoveryPayload) == 0
+			recoveryPayload = fallbackErr.recoveryPayload
+		}
+		if retryable && !rejectedDelta && !openAIWSFailureBeforeSend(reason) {
+			uncertainExecutionFailure = wsErr
+		}
+		if reason != "" {
+			wsLastFailureReason = reason
+		}
+		if retryable && attempt < maxAttempts {
+			backoff := s.openAIWSRetryBackoff(attempt)
+			if retryBudget > 0 && time.Since(retryStartedAt)+backoff > retryBudget {
+				s.recordOpenAIWSRetryExhausted()
+				logOpenAIWSModeInfo(
+					"reconnect_budget_exhausted account_id=%d attempts=%d max_retries=%d reason=%s elapsed_ms=%d budget_ms=%d",
+					account.ID,
+					attempt,
+					openAIWSReconnectRetryLimit,
+					normalizeOpenAIWSLogValue(reason),
+					time.Since(retryStartedAt).Milliseconds(),
+					retryBudget.Milliseconds(),
+				)
+				break
+			}
+			s.recordOpenAIWSRetryAttempt(backoff)
+			logOpenAIWSModeInfo(
+				"reconnect_retry account_id=%d retry=%d max_retries=%d reason=%s backoff_ms=%d",
+				account.ID,
+				attempt,
+				openAIWSReconnectRetryLimit,
+				normalizeOpenAIWSLogValue(reason),
+				backoff.Milliseconds(),
+			)
+			if waitErr := WaitOpenAITurnRetry(ctx, backoff); waitErr != nil {
+				wsErr = waitErr
+				break wsRetryLoop
+			}
+
+			continue
+		}
+		if retryable {
+			s.recordOpenAIWSRetryExhausted()
+			logOpenAIWSModeInfo(
+				"reconnect_exhausted account_id=%d attempts=%d max_retries=%d reason=%s",
+				account.ID,
+				attempt,
+				openAIWSReconnectRetryLimit,
+				normalizeOpenAIWSLogValue(reason),
+			)
+		} else if reason != "" {
+			s.recordOpenAIWSNonRetryableFastFallback()
+			logOpenAIWSModeInfo(
+				"reconnect_stop account_id=%d attempt=%d reason=%s",
+				account.ID,
+				attempt,
+				normalizeOpenAIWSLogValue(reason),
+			)
+		}
+		break
+	}
+	return wsResult, wsErr, wsAttempts, token
 }

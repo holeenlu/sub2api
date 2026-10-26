@@ -8,10 +8,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// openAIUpstreamClientErrorFallbackType 是上游没给 error.type 时的兜底值。
-// 与 handleCompatErrorResponse 对 400 的取值保持一致。
-const openAIUpstreamClientErrorFallbackType = "invalid_request_error"
-
 // openAIUpstreamClientErrorFallbackMessage 是上游连 message 都没给时的兜底文案。
 // 仍然比 "Upstream request failed" 明确：它说明拒绝来自请求本身，而不是链路故障。
 const openAIUpstreamClientErrorFallbackMessage = "Upstream rejected the request"
@@ -27,7 +23,7 @@ func isOpenAIDeterministicClientError(statusCode int) bool {
 	return statusCode == http.StatusBadRequest
 }
 
-// writeOpenAIUpstreamClientError 以 OpenAI 错误体形状回写确定性客户端错误。
+// writeOpenAIUpstreamClientError 以 OpenAI 错误体形状回写上游错误。
 //
 // 保留上游的 type/code/param：客户端靠 param 定位是哪个字段非法（上游会给出形如
 // input[8].tools[1].tools[2].parameters 的路径），靠 code 判断是否值得重试。归一成
@@ -37,7 +33,13 @@ func isOpenAIDeterministicClientError(statusCode int) bool {
 // redactAgentIdentitySensitiveBody；这里不重复清洗，也不回落读取原始 body 的
 // message，避免绕开那两道脱敏。
 func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte, upstreamMsg string) {
-	errorPayload := gin.H{"type": openAIUpstreamClientErrorFallbackType}
+	fallbackType := "upstream_error"
+	if statusCode == http.StatusBadRequest {
+		fallbackType = "invalid_request_error"
+	} else if statusCode == http.StatusTooManyRequests {
+		fallbackType = "rate_limit_error"
+	}
+	errorPayload := gin.H{"type": fallbackType}
 	if errType := strings.TrimSpace(gjson.GetBytes(body, "error.type").String()); errType != "" {
 		errorPayload["type"] = errType
 	}
@@ -53,7 +55,7 @@ func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte,
 	}
 	errorPayload["message"] = message
 
-	c.JSON(statusCode, gin.H{"error": errorPayload})
+	writeOpenAIResponsesErrorJSON(c, statusCode, gin.H{"error": errorPayload})
 }
 
 // WriteOpenAIUpstreamClientError preserves a structured deterministic upstream

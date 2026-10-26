@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -42,7 +43,9 @@ func WithForwardGeminiSession(groupID int64, sessionHash string) ForwardGeminiOp
 }
 
 func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
+	ctx = EnsureOpenAITurnBudget(ctx, nil, "")
 	beginUpstreamResponseModelObservation(c)
+	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
 	forwardOpts := forwardGeminiOptions{}
 	for _, apply := range options {
@@ -101,22 +104,17 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	}
 	forwardedModel := mappedModel
 
-	// 获取 access_token
+	// Credential/configuration preparation can recover before any generation.
 	if s.tokenProvider == nil {
-		return nil, s.writeGoogleError(c, http.StatusBadGateway, "Antigravity token provider not configured")
+		return nil, newCredentialPreparationFailure(errors.New("antigravity token provider not configured"))
 	}
 	accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"message":"Failed to get upstream access token","status":"UNAVAILABLE"}}`),
-		}
+		return nil, newCredentialPreparationFailure(err)
 	}
-
 	projectID, err := resolveAntigravityProjectID(account)
 	if err != nil {
-		_ = s.writeGoogleError(c, http.StatusBadRequest, err.Error())
-		return nil, err
+		return nil, newAccountConfigurationFailure(err)
 	}
 
 	// 代理 URL
@@ -176,6 +174,10 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		sessionHash:     forwardOpts.sessionHash,
 	})
 	if err != nil {
+		var recovery *UpstreamFailoverError
+		if IsTurnBudgetError(err) || errors.As(err, &recovery) {
+			return nil, err
+		}
 		// 检查是否是账号切换信号，转换为 UpstreamFailoverError 让 Handler 切换账号
 		if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
 			return nil, &UpstreamFailoverError{
@@ -214,7 +216,10 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				if err == nil {
 					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)
 					if err == nil {
-						fallbackResp, err := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
+						fallbackResp, err := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c)).Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
+						if IsTurnBudgetError(err) || errors.Is(err, ErrTurnTargetExhausted) {
+							return nil, err
+						}
 						if err == nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
 							resp = fallbackResp
@@ -430,7 +435,10 @@ handleSuccess:
 		streamRes, err := s.handleGeminiStreamingResponse(c, resp, startTime)
 		if err != nil {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=stream_error error=%v", prefix, err)
-			return nil, err
+			if streamRes == nil {
+				return nil, err
+			}
+			return geminiPartialForwardResult(c, resp, streamRes.usage, streamRes.firstTokenMs, startTime, originalModel, forwardedModel, stream, imageInputSize, extractGeminiReasoningEffortFromBody(injectedBody)), err
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
@@ -440,7 +448,16 @@ handleSuccess:
 		streamRes, err := s.handleGeminiStreamToNonStreaming(c, resp, startTime)
 		if err != nil {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=stream_collect_error error=%v", prefix, err)
-			return nil, err
+			if c.Request.Context().Err() != nil {
+				MarkOpsClientCancellation(c, false)
+				MarkResponseCommitted(c)
+			} else if !IsResponseCommitted(c) && !c.Writer.Written() {
+				_ = s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
+			}
+			if streamRes == nil {
+				return nil, err
+			}
+			return geminiPartialForwardResult(c, resp, streamRes.usage, streamRes.firstTokenMs, startTime, originalModel, forwardedModel, stream, imageInputSize, extractGeminiReasoningEffortFromBody(injectedBody)), err
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
