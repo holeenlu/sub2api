@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import AdminComplianceDialog from '@/components/admin/AdminComplianceDialog.vue'
-import { resolveRouteDocumentTitle } from '@/router/title'
+import { applyRouteMetaDescription, resolveRouteDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
-import { updateFavicon } from '@/utils/branding'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
+import { isVendorOrigin } from '@/features/vendor/helpers'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
 
 const router = useRouter()
@@ -20,6 +21,8 @@ const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
 const adminComplianceStore = useAdminComplianceStore()
 const adminSettingsStore = useAdminSettingsStore()
+const { locale } = useI18n()
+const supplierPortal = computed(() => isVendorOrigin(appStore.cachedPublicSettings) || import.meta.env.VITE_VENDOR_PORTAL === 'true' || route.path.startsWith('/vendor'))
 
 function updateDocumentTitle() {
   const customMenuItems = [
@@ -29,24 +32,18 @@ function updateDocumentTitle() {
   document.title = resolveRouteDocumentTitle(route, appStore.siteName, customMenuItems, {
     billingMode: resolveSiteBillingMode(appStore.cachedPublicSettings),
   })
+  applyRouteMetaDescription(route)
 }
 
-// Watch for site settings changes and update favicon/title
-watch(
-  () => appStore.siteLogo,
-  (newLogo) => {
-    if (newLogo) {
-      updateFavicon(newLogo)
-    }
-  },
-  { immediate: true }
-)
-
+// Keep the page title in sync with routes, language and site settings.
 watch(
   [
     () => route.fullPath,
     () => route.meta.title,
     () => route.meta.titleKey,
+    () => route.meta.metaDescriptionKey,
+    // 切换语言要立即换掉 title 与 description
+    () => locale.value,
     () => appStore.siteName,
     () => appStore.cachedPublicSettings?.custom_menu_items,
     () => appStore.cachedPublicSettings?.subscription_enabled,
@@ -60,7 +57,7 @@ watch(
 
 // Watch for authentication state and manage subscription data + announcements
 function onVisibilityChange() {
-  if (document.visibilityState === 'visible' && authStore.isAuthenticated) {
+  if (!supplierPortal.value && document.visibilityState === 'visible' && authStore.isAuthenticated) {
     announcementStore.fetchAnnouncements()
   }
 }
@@ -74,6 +71,7 @@ function onAdminComplianceRequired(event: Event) {
 const subscriptionFeatureEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.subscription))
 
 function startSubscriptionSync() {
+  if (supplierPortal.value) return
   subscriptionStore.fetchActiveSubscriptions().catch((error) => {
     console.error('Failed to preload subscriptions:', error)
   })
@@ -81,7 +79,7 @@ function startSubscriptionSync() {
 }
 
 watch(subscriptionFeatureEnabled, (enabled) => {
-  if (!authStore.isAuthenticated) return
+  if (!authStore.isAuthenticated || supplierPortal.value) return
   if (enabled) {
     startSubscriptionSync()
   } else {
@@ -91,13 +89,17 @@ watch(subscriptionFeatureEnabled, (enabled) => {
 
 watch(
   () => authStore.isAuthenticated,
-  (isAuthenticated, oldValue) => {
+  async (isAuthenticated, oldValue) => {
     if (isAuthenticated) {
+      if (!appStore.publicSettingsLoaded) await appStore.fetchPublicSettings()
+      if (!authStore.isAuthenticated) return
       if (authStore.isAdmin) {
         adminComplianceStore.fetchStatus().catch((error) => {
           console.error('Failed to fetch admin compliance status:', error)
         })
       }
+
+      if (supplierPortal.value) return
 
       // User logged in: preload subscriptions and start polling (skipped when the
       // subscription feature is switched off; see the flag watcher below)
@@ -129,7 +131,7 @@ watch(
 
 // Route change trigger (throttled by store)
 router.afterEach(() => {
-  if (authStore.isAuthenticated) {
+  if (!supplierPortal.value && authStore.isAuthenticated) {
     announcementStore.fetchAnnouncements()
   }
 })
@@ -144,8 +146,8 @@ onMounted(async () => {
 
   // Check if setup is needed
   try {
-    const status = await getSetupStatus()
-    if (status.needs_setup && route.path !== '/setup') {
+    const status = supplierPortal.value ? { needs_setup: false } : await getSetupStatus()
+    if (!supplierPortal.value && status.needs_setup && route.path !== '/setup') {
       router.replace('/setup')
       return
     }
@@ -163,8 +165,8 @@ onMounted(async () => {
 
 <template>
   <NavigationProgress />
-  <RouterView />
+  <RouterView :key="`${authStore.user?.id}:${authStore.user?.role}:${authStore.user?.policy_version}`" />
   <Toast />
-  <AnnouncementPopup />
-  <AdminComplianceDialog />
+  <AnnouncementPopup v-if="!supplierPortal" />
+  <AdminComplianceDialog v-if="!supplierPortal || authStore.isSuperAdmin" />
 </template>

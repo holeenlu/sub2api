@@ -15,6 +15,7 @@ function deferred<T>() {
 }
 
 import OpsSettingsDialog from '../OpsSettingsDialog.vue'
+import quotaCatalog from '../../../../../../../backend/internal/service/scheduling_quota_defaults.json'
 const { opsAPI, showError } = vi.hoisted(() => ({
   opsAPI: {
     getAlertRuntimeSettings: vi.fn(), getEmailNotificationConfig: vi.fn(),
@@ -28,7 +29,7 @@ vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError, showSuccess: v
 async function openDialog() {
   const wrapper = shallowMount(OpsSettingsDialog, {
     props: { show: false },
-    global: { stubs: { BaseDialog: { template: '<div><slot name="footer" /></div>' } } },
+    global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' } } },
   })
   await wrapper.setProps({ show: true })
   return wrapper
@@ -39,11 +40,81 @@ describe('ops settings load guard', () => {
     vi.resetAllMocks()
     vi.spyOn(console, 'error').mockImplementation(() => {})
     opsAPI.getAlertRuntimeSettings.mockResolvedValue({ evaluation_interval_seconds: 30 })
-    opsAPI.getEmailNotificationConfig.mockResolvedValue({ alert: { enabled: false }, report: { enabled: false } })
-    opsAPI.getAdvancedSettings.mockResolvedValue({ data_retention: { error_log_retention_days: 7, minute_metrics_retention_days: 7, hourly_metrics_retention_days: 7 } })
+    opsAPI.getEmailNotificationConfig.mockResolvedValue({ alert: { enabled: false, recipients: [] }, report: { enabled: false, recipients: [] } })
+    opsAPI.getAdvancedSettings.mockResolvedValue({
+      account_telemetry_sending_enabled: false,
+      account_telemetry_upload_interval_seconds: 600,
+      quota_protection: { ...quotaCatalog.protection },
+      aggregation: { aggregation_enabled: false },
+      data_retention: { cleanup_enabled: false, error_log_retention_days: 7, minute_metrics_retention_days: 7, hourly_metrics_retention_days: 7 },
+      ignore_count_tokens_errors: true, ignore_context_canceled: true,
+      ignore_no_available_accounts: false, ignore_insufficient_balance_errors: false,
+      auto_refresh_enabled: false, display_alert_events: true, display_openai_token_stats: false,
+    })
     opsAPI.getMetricThresholds.mockResolvedValue({ sla_percent_min: 98 })
   })
   afterEach(() => { vi.restoreAllMocks() })
+  it('saves page refresh independently of the alert evaluation interval', async () => {
+    opsAPI.getAlertRuntimeSettings.mockResolvedValueOnce({ evaluation_interval_seconds: 5 })
+    const wrapper = await openDialog()
+    await flushPromises()
+    wrapper.getComponent('[data-testid="ops-auto-refresh-enabled"]').vm.$emit('update:modelValue', true)
+    await flushPromises()
+    wrapper.getComponent('[data-testid="ops-auto-refresh-interval"]').vm.$emit('update:modelValue', 30)
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(opsAPI.updateAdvancedSettings).toHaveBeenCalledWith(expect.objectContaining({ auto_refresh_enabled: true, auto_refresh_interval_seconds: 30 }))
+    expect(opsAPI.updateAlertRuntimeSettings).toHaveBeenCalledWith({ evaluation_interval_seconds: 5 })
+    expect(wrapper.emitted('saved')).toHaveLength(1)
+  })
+  it.each([true, false])('saves the scheduled telemetry switch as %s', async (enabled) => {
+    const wrapper = await openDialog()
+    await flushPromises()
+    const toggle = wrapper.findComponent('[data-testid="account-telemetry-enabled"]')
+    expect(toggle.props('modelValue')).toBe(false)
+    toggle.vm.$emit('update:modelValue', enabled)
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(opsAPI.updateAdvancedSettings).toHaveBeenCalledWith(expect.objectContaining({ account_telemetry_sending_enabled: enabled }))
+    expect(wrapper.emitted('saved')).toHaveLength(1)
+  })
+  it('validates and persists the telemetry interval without enabling sending', async () => {
+    const wrapper = await openDialog()
+    await flushPromises()
+    const interval = wrapper.get('[data-testid="account-telemetry-interval"]')
+    expect((interval.element as HTMLInputElement).value).toBe('600')
+    for (const invalid of ['59', '86401', '60.5', '']) {
+      await interval.setValue(invalid)
+      expect(wrapper.get('button.btn-primary').attributes('disabled')).toBeDefined()
+    }
+    await interval.setValue('120')
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(opsAPI.updateAdvancedSettings).toHaveBeenCalledWith(expect.objectContaining({
+      account_telemetry_upload_interval_seconds: 120,
+      account_telemetry_sending_enabled: false,
+    }))
+  })
+  it('applies the quota preset only on request and validates custom values before saving', async () => {
+    const wrapper = await openDialog()
+    await flushPromises()
+    expect(opsAPI.updateAdvancedSettings).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="quota-protection-preset"]').trigger('click')
+    await wrapper.get('[data-testid="quota-critical_band_percent"]').setValue('7.5')
+    await wrapper.get('[data-testid="quota-large_cold_input_tokens"]').setValue('120000')
+    await wrapper.get('[data-testid="quota-sample_max_age_seconds"]').setValue('0')
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(opsAPI.updateAdvancedSettings).not.toHaveBeenCalled()
+    expect(wrapper.get('button.btn-primary').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="quota-sample_max_age_seconds"]').setValue('120')
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(opsAPI.updateAdvancedSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_account_quota_auto_pause: { default_threshold_5h: 0.85, default_threshold_7d: 0.8 },
+      quota_protection: { ...quotaCatalog.protection, anthropic_tier_thresholds_enabled: true, critical_band_percent: 7.5, large_cold_input_tokens: 120000, sample_max_age_seconds: 120 },
+    }))
+  })
   it('blocks saving while any settings request is still loading', async () => {
     const pending = deferred<object>()
     opsAPI.getMetricThresholds.mockReturnValueOnce(pending.promise)
@@ -56,7 +127,7 @@ describe('ops settings load guard', () => {
     expect(wrapper.get('button.btn-primary').attributes('disabled')).toBeUndefined()
     await wrapper.get('button.btn-primary').trigger('click')
     await flushPromises()
-    expect(opsAPI.updateMetricThresholds).toHaveBeenCalledWith(expect.objectContaining({ sla_percent_min: 98 }))
+    expect(opsAPI.updateMetricThresholds).toHaveBeenCalledWith(expect.objectContaining({ sla_percent_min: 98, ttft_p99_ms_max: 10000 }))
     expect(wrapper.emitted('saved')).toHaveLength(1)
   })
   it('does not save default thresholds after a failed initial load', async () => {
@@ -68,6 +139,7 @@ describe('ops settings load guard', () => {
     expect(opsAPI.updateMetricThresholds).not.toHaveBeenCalled()
     expect(wrapper.emitted('saved')).toBeUndefined()
   })
+
   it('blocks saving stale settings after a failed reopen and allows a later retry', async () => {
     const wrapper = await openDialog()
     await flushPromises()

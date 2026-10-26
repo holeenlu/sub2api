@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -14,6 +15,58 @@ import (
 const openAINativeCompactionV2Key = "openai_native_compaction_v2"
 
 const openAIRemoteCompactionV2Feature = "remote_compaction_v2"
+
+const openAIPromotedCompactWireKey = "openai_promoted_compact_wire"
+
+func isOpenAIPromotedCompactWire(c *gin.Context) bool {
+	return c != nil && c.GetBool(openAIPromotedCompactWireKey)
+}
+
+// Legacy compact is still a supported public API contract. Only a ChatGPT
+// backend explicitly rejecting that route may promote it to a Responses v2
+// turn. Keep the client path/stream semantics intact for the existing SSE-to-JSON
+// adapter and never carry this attempt-local decision across account failover.
+// The payload conversion is adapted from huoji120/sub4api a3eaf63a.
+func prepareOpenAILegacyCompactPromotion(c *gin.Context, account *Account, body []byte, status int, errorBody []byte) ([]byte, bool, error) {
+	if c == nil || account == nil || !account.IsOpenAIOAuthLike() ||
+		account.GetPoolModeRetryCount() <= 0 || !isOpenAIResponsesCompactPath(c) ||
+		c.GetBool(openAIPromotedCompactWireKey) || IsResponseCommitted(c) ||
+		OpenAICompactKeepaliveAdjustedWrittenSize(c) > 0 ||
+		(status != http.StatusNotFound && status != http.StatusMethodNotAllowed) ||
+		isOpenAICompactModelFailure(status, extractUpstreamErrorMessage(errorBody), errorBody) {
+		return body, false, nil
+	}
+	var payload map[string]any
+	if err := decodeOpenAIJSONUseNumber(body, &payload); err != nil {
+		return body, false, fmt.Errorf("decode legacy compact promotion: %w", err)
+	}
+	input, ok := payload["input"].([]any)
+	if !ok {
+		switch value := payload["input"].(type) {
+		case string:
+			input = []any{map[string]any{"type": "message", "role": "user", "content": value}}
+		case nil:
+			input = []any{}
+		default:
+			return body, false, fmt.Errorf("legacy compact input must be an array or string")
+		}
+	}
+	payload["input"] = append(input, map[string]any{"type": "compaction_trigger"})
+	payload["stream"], payload["store"] = true, false
+	if _, exists := payload["instructions"]; !exists {
+		payload["instructions"] = ""
+	}
+	encoded, err := marshalOpenAIUpstreamJSON(payload)
+	if err != nil {
+		return body, false, err
+	}
+	normalized, _, err := NormalizeCompactionTriggerInputOrder(encoded)
+	if err != nil {
+		return body, false, err
+	}
+	c.Set(openAIPromotedCompactWireKey, true)
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
+}
 
 // MarkOpenAINativeCompactionV2 由 handler 在识别出原生 v2 压缩请求时调用。
 func MarkOpenAINativeCompactionV2(c *gin.Context) {
@@ -36,31 +89,16 @@ func NormalizeCompactionTriggerInputOrder(body []byte) ([]byte, bool, error) {
 	if !ok || len(input) == 0 {
 		return body, false, nil
 	}
-	triggerCount := 0
-	normalized := make([]any, 0, len(input))
-	for _, raw := range input {
-		item, itemOK := raw.(map[string]any)
-		if itemOK && item["type"] == "compaction_trigger" {
-			triggerCount++
-			continue
-		}
-		normalized = append(normalized, raw)
-	}
-	if triggerCount == 0 {
+	normalized, changed := normalizeOpenAICompactionTriggerItems(input, false)
+	if !changed {
 		return body, false, nil
 	}
-	if triggerCount == 1 {
-		if last, ok := input[len(input)-1].(map[string]any); ok && last["type"] == "compaction_trigger" {
-			return body, false, nil
-		}
-	}
-	normalized = append(normalized, map[string]any{"type": "compaction_trigger"})
 	payload["input"] = normalized
 	encoded, err := marshalOpenAIUpstreamJSON(payload)
 	if err != nil {
 		return body, false, err
 	}
-	return encoded, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, encoded), true, nil
 }
 
 func isOpenAINativeCompactionV2(c *gin.Context) bool {
@@ -179,4 +217,30 @@ func HasCompactionTriggerInInput(body []byte) bool {
 		return true
 	})
 	return found
+}
+
+// normalizeOpenAICompactionTriggerItems preserves history order and retains one
+// trigger at the end. Cloud keeps malformed markers visible to its compiler;
+// the native byte adapter retains its existing permissive marker normalization.
+func normalizeOpenAICompactionTriggerItems(items []any, bareOnly bool) ([]any, bool) {
+	isTrigger := func(raw any) bool {
+		item, ok := raw.(map[string]any)
+		return ok && item["type"] == "compaction_trigger" && (!bareOnly || len(item) == 1)
+	}
+	count := 0
+	for _, item := range items {
+		if isTrigger(item) {
+			count++
+		}
+	}
+	if count == 0 || (count == 1 && isTrigger(items[len(items)-1])) {
+		return items, false
+	}
+	out := make([]any, 0, len(items)-count+1)
+	for _, raw := range items {
+		if !isTrigger(raw) {
+			out = append(out, raw)
+		}
+	}
+	return append(out, map[string]any{"type": "compaction_trigger"}), true
 }

@@ -444,12 +444,12 @@ func (_q *UsageLogQuery) WithSubscription(opts ...func(*UserSubscriptionQuery)) 
 // Example:
 //
 //	var v []struct {
-//		UserID int64 `json:"user_id,omitempty"`
+//		BillingStatus string `json:"billing_status,omitempty"`
 //		Count int `json:"count,omitempty"`
 //	}
 //
 //	client.UsageLog.Query().
-//		GroupBy(usagelog.FieldUserID).
+//		GroupBy(usagelog.FieldBillingStatus).
 //		Aggregate(ent.Count()).
 //		Scan(ctx, &v)
 func (_q *UsageLogQuery) GroupBy(field string, fields ...string) *UsageLogGroupBy {
@@ -467,11 +467,11 @@ func (_q *UsageLogQuery) GroupBy(field string, fields ...string) *UsageLogGroupB
 // Example:
 //
 //	var v []struct {
-//		UserID int64 `json:"user_id,omitempty"`
+//		BillingStatus string `json:"billing_status,omitempty"`
 //	}
 //
 //	client.UsageLog.Query().
-//		Select(usagelog.FieldUserID).
+//		Select(usagelog.FieldBillingStatus).
 //		Scan(ctx, &v)
 func (_q *UsageLogQuery) Select(fields ...string) *UsageLogSelect {
 	_q.ctx.Fields = append(_q.ctx.Fields, fields...)

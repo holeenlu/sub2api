@@ -13,6 +13,28 @@ import (
 // ChatCompletionsToResponses tests
 // ---------------------------------------------------------------------------
 
+func TestChatMessagesMapMatchesExistingConversion(t *testing.T) {
+	for _, raw := range []string{
+		`[{"role":"system","content":"rules"},{"role":"user","content":[{"type":"text","text":"hi"},{"type":"image_url","image_url":{"url":"data:image/png;base64,YWJj","detail":"high"}}]}]`,
+		`[{"role":"assistant","content":null,"function_call":{"name":"echo","arguments":"{\"n\":9007199254740993}"}},{"role":"function","name":"echo","content":"ok"}]`,
+		`[{"role":"assistant","tool_calls":[{"id":"call_cloud_1","type":"function","function":{"name":"echo","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_cloud_1","content":"ok"}]`,
+	} {
+		var messages []ChatMessage
+		require.NoError(t, json.Unmarshal([]byte(raw), &messages))
+		want, err := convertChatMessagesToResponsesInput(messages)
+		require.NoError(t, err)
+		var values []any
+		require.NoError(t, json.Unmarshal([]byte(raw), &values))
+		got, err := ChatMessagesMapToResponsesInput(values)
+		require.NoError(t, err)
+		wantJSON, err := json.Marshal(want)
+		require.NoError(t, err)
+		gotJSON, err := json.Marshal(got)
+		require.NoError(t, err)
+		require.JSONEq(t, string(wantJSON), string(gotJSON))
+	}
+}
+
 func TestChatCompletionsToResponses_BasicText(t *testing.T) {
 	req := &ChatCompletionsRequest{
 		Model: "gpt-4o",
@@ -467,6 +489,26 @@ func TestChatCompletionsToResponses_ImageURL(t *testing.T) {
 	assert.Equal(t, "Describe this", parts[0].Text)
 	assert.Equal(t, "input_image", parts[1].Type)
 	assert.Equal(t, "data:image/png;base64,abc123", parts[1].ImageURL)
+	assert.Equal(t, "auto", parts[1].Detail)
+
+	for _, tc := range []struct{ input, want string }{
+		{"low", "low"}, {"high", "high"}, {"original", "original"},
+		{"auto", "auto"}, {" HIGH ", "high"}, {"bogus", "auto"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			content, err := json.Marshal([]ChatContentPart{{Type: "image_url", ImageURL: &ChatImageURL{URL: "https://example.com/image.png", Detail: tc.input}}})
+			require.NoError(t, err)
+			converted, err := ChatCompletionsToResponses(&ChatCompletionsRequest{
+				Model: "gpt-4o", Messages: []ChatMessage{{Role: "user", Content: content}},
+			})
+			require.NoError(t, err)
+			var messages []ResponsesInputItem
+			require.NoError(t, json.Unmarshal(converted.Input, &messages))
+			var images []ResponsesContentPart
+			require.NoError(t, json.Unmarshal(messages[0].Content, &images))
+			require.Equal(t, tc.want, images[0].Detail)
+		})
+	}
 }
 
 func TestChatCompletionsToResponses_EmptyBase64ImageURLSkipped(t *testing.T) {
@@ -1951,4 +1993,26 @@ func TestBufferedResponseAccumulator_IgnoresNonFunctionCallItems(t *testing.T) {
 	})
 
 	assert.False(t, acc.HasContent())
+}
+
+func TestCacheCreationInputAliasSurvivesChatResponsesAndAnthropic(t *testing.T) {
+	for _, details := range []string{
+		`{"cached_tokens":5,"cache_creation_input_tokens":7}`,
+		`{"cached_tokens":5,"cache_creation_input_tokens":7,"cache_write_tokens":3,"cache_creation_tokens":6}`,
+	} {
+		var chat ChatUsage
+		require.NoError(t, json.Unmarshal([]byte(`{"prompt_tokens":20,"completion_tokens":2,"prompt_tokens_details":`+details+`}`), &chat))
+		responses := ChatUsageToResponsesUsage(&chat)
+		require.Equal(t, 7, responses.CacheCreationInputTokens)
+		require.Equal(t, 20, responses.InputTokens, "write tokens are already included in the prompt aggregate")
+		direct := chatUsageToAnthropicUsage(&chat)
+		require.Equal(t, 8, direct.InputTokens)
+		require.Equal(t, 7, direct.CacheCreationInputTokens)
+		require.Equal(t, 5, direct.CacheReadInputTokens)
+		var decoded ResponsesUsage
+		require.NoError(t, json.Unmarshal([]byte(`{"input_tokens":20,"output_tokens":2,"input_tokens_details":`+details+`}`), &decoded))
+		require.Equal(t, 7, decoded.CacheCreationInputTokens)
+		round := ChatUsageToResponsesUsage(chatUsageFromResponsesUsage(&decoded))
+		require.Equal(t, 7, round.CacheCreationInputTokens)
+	}
 }
