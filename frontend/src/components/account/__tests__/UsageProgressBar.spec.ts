@@ -223,4 +223,16 @@ describe('UsageProgressBar', () => {
     expect(percent.classes()).toContain('w-[32px]')
     expect(percent.classes()).toContain('text-right')
   })
+  it('renders the supplied total cost without sample labels or an unavailable placeholder', async () => {
+    const wrapper = mount(UsageProgressBar, { props: {
+      label: '7d', utilization: 5, color: 'emerald',
+      windowStats: { requests: 442, tokens: 22400000, cost: 77.24 }, estimatedTotalCost: 1544.8
+    } })
+    const badge = wrapper.get('[data-test="estimated-total-cost"]')
+    expect(badge.text()).toContain('estimatedTotalCost')
+    expect(badge.text()).not.toContain('forecastLowSample')
+    await wrapper.setProps({ estimatedTotalCost: null })
+    expect(wrapper.find('[data-test="estimated-total-cost"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })

@@ -84,7 +84,16 @@ export interface User {
   linuxdo_bound?: boolean
   oidc_bound?: boolean
   wechat_bound?: boolean
-  role: 'admin' | 'user' // User role for authorization
+  role: 'super_admin' | 'admin' | 'user' | 'vendor_level1' | 'vendor_level2' // User role for authorization
+  created_by?: number
+  created_by_name?: string
+  last_login_at?: string | null
+  totp_enabled?: boolean
+  policy_version?: number
+  admin_write_fields?: Record<string, string[]>
+  permissions?: string[]
+  admin_pages?: string[]
+  admin_features?: Record<string, boolean>
   balance: number // User balance for API usage
   frozen_balance?: number // Balance currently held by async batch jobs
   concurrency: number // Allowed concurrent requests
@@ -140,36 +149,13 @@ export interface RegisterRequest {
   turnstile_token?: string
   tencent_captcha_ticket?: string
   tencent_captcha_randstr?: string
-  promo_code?: string
-  invitation_code?: string
-  aff_code?: string
 }
 
-export interface AffiliateInvitee {
-  user_id: number
-  email: string
-  username: string
-  created_at?: string
-  total_rebate: number
-}
 
-export interface UserAffiliateDetail {
-  user_id: number
-  aff_code: string
-  inviter_id?: number | null
-  aff_count: number
-  aff_quota: number
-  aff_frozen_quota: number
-  aff_history_quota: number
-  /** 当前用户作为邀请人时实际生效的返利比例（专属覆盖全局）。0-100。 */
-  effective_rebate_rate_percent: number
-  invitees: AffiliateInvitee[]
-}
 
-export interface AffiliateTransferResponse {
-  transferred_quota: number
-  balance: number
-}
+
+
+
 
 export interface SendVerifyCodeRequest {
   email: string
@@ -209,14 +195,14 @@ export interface LoginAgreementDocument {
 }
 
 export interface PublicSettings {
+  vendor_console_enabled?: boolean
+  vendor_portal_origin?: string
   registration_enabled: boolean
   email_verify_enabled: boolean
   force_email_on_third_party_signup: boolean
   registration_email_suffix_whitelist: string[]
   registration_email_domain_quota_enabled?: boolean
-  promo_code_enabled: boolean
   password_reset_enabled: boolean
-  invitation_code_enabled: boolean
   login_agreement_enabled?: boolean
   login_agreement_mode?: 'modal' | 'checkbox' | string
   login_agreement_updated_at?: string
@@ -240,7 +226,6 @@ export interface PublicSettings {
   doc_url: string
   home_content: string
   compact_home_enabled: boolean
-  hide_ccs_import_button: boolean
   payment_enabled: boolean
   risk_control_enabled: boolean
   table_default_page_size: number
@@ -285,7 +270,6 @@ export interface PublicSettings {
   model_plaza_require_auth: boolean
   plugin_management_enabled: boolean
   service_quota_enabled: boolean
-  affiliate_enabled: boolean
   allow_user_view_error_requests?: boolean
 }
 
@@ -487,6 +471,9 @@ export interface ApiError {
 }
 
 export interface PaginatedResponse<T> {
+  next_cursor?: string
+  has_more?: boolean
+  total_exact?: boolean
   items: T[]
   total: number
   page: number
@@ -965,7 +952,7 @@ export interface Proxy {
   host: string
   port: number
   username: string | null
-  password?: string | null
+  has_password?: boolean
   status: 'active' | 'inactive' | 'expired'
   account_count?: number // Number of accounts using this proxy
   latency_ms?: number
@@ -1229,7 +1216,21 @@ export interface OpenCodeGoUsageSettings {
   debounce_minutes: number
 }
 
+export interface AnthropicAccountStatus {
+  error_code?: 'authentication' | 'revoked' | 'disabled'
+  rate_limited?: boolean
+  rate_limit_reset_at?: string | null
+  model_rate_limits?: Record<string, string | null>
+}
+
 export interface Account {
+  vendor_id?: number | null
+  created_by?: number | null
+  created_by_name?: string
+  created_by_role?: string
+
+  anthropic_status?: AnthropicAccountStatus | null
+  codex_diagnostic?: import('@/api/admin/codexDiagnostics').DiagnosticSummary | null
   id: number
   name: string
   notes?: string | null
@@ -1279,14 +1280,11 @@ export interface Account {
   current_concurrency?: number // Real-time concurrency count from Redis
   scheduler_score?: {
     base_score: number
-    sticky_score?: number
-    sticky_score_infinity?: boolean
-    sticky_weighted_enabled: boolean
   } | null
   scheduler_scores?: AccountSchedulerGroupScore[] | null
   priority: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
-  status: 'active' | 'inactive' | 'error'
+  status: 'active' | 'inactive' | 'error' | 'disabled'
   error_message: string | null
   last_used_at: string | null
   expires_at: number | null
@@ -1383,9 +1381,6 @@ export interface AccountSchedulerGroupScore {
   group_name?: string
   group_priority?: number | null
   base_score: number
-  sticky_score?: number
-  sticky_score_infinity?: boolean
-  sticky_weighted_enabled: boolean
 }
 
 // Account Usage types
@@ -1456,6 +1451,8 @@ export interface GrokBillingSummary {
 }
 
 export interface AccountUsageInfo {
+  anthropic_status?: AnthropicAccountStatus | null
+  anthropic?: AnthropicUsageDetails | null
   source?: 'passive' | 'active'
   updated_at: string | null
   five_hour: UsageProgress | null
@@ -1506,6 +1503,16 @@ export interface AccountUsageInfo {
   error_code?: string
 
   error?: string            // usage 获取失败时的错误信息
+}
+
+export interface UsageObservation {
+  value: unknown
+  source: 'upstream_headers' | 'upstream_api' | 'local_statistics' | 'estimate' | 'stored_snapshot'
+  sampled_at: string | null
+}
+
+export interface AnthropicUsageDetails {
+  observations: Record<string, UsageObservation>
 }
 
 // OpenAI Codex usage snapshot (from response headers)
@@ -1665,6 +1672,17 @@ export interface AdminDataProxy {
   username?: string | null
   password?: string | null
   status: 'active' | 'inactive'
+  expires_at?: number | null
+  fallback_mode?: 'none' | 'proxy' | 'direct'
+  backup_proxy_name?: string
+  backup_proxy_key?: string
+  expiry_warn_days?: number
+}
+
+export interface AdminDataAccountGroup {
+  name: string
+  platform: string
+  priority: number
 }
 
 export interface AdminDataAccount {
@@ -1673,6 +1691,12 @@ export interface AdminDataAccount {
   platform: AccountPlatform
   type: AccountType
   credentials: Record<string, unknown>
+  bps_credentials?: Record<string, unknown>
+  status?: Account['status']
+  schedulable?: boolean
+  load_factor?: number | null
+  groups?: AdminDataAccountGroup[]
+  bps_403_target_group?: AdminDataAccountGroup
   extra?: Record<string, unknown>
   proxy_key?: string | null
   concurrency: number
@@ -1763,16 +1787,25 @@ export interface CodexSessionImportResult {
 
 // ==================== Usage & Redeem Types ====================
 
-export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2' | 'cyber' | 'live'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
+export type UsageAuthorizationMode = 'native' | 'bps' | 'cloud'
+
+export interface UsageLatencyMetrics {
+  version: 1
+  first_event_ms: number | null
+  first_content_ms: number | null
+  first_text_ms: number | null
+  duration_ms: number
+}
+
 export interface UsageLog {
+  billing_status?: 'unknown' | 'pending' | 'pending_pricing' | 'settled' | 'free' | 'lower_bound' | 'unmetered'
   id: number
   user_id: number
   api_key_id: number
-  account_id: number | null
   request_id: string
   model: string
   service_tier?: string | null
@@ -1789,6 +1822,8 @@ export interface UsageLog {
   cache_read_tokens: number
   cache_creation_5m_tokens: number
   cache_creation_1h_tokens: number
+  cache_creation_30m_tokens: number
+  cache_creation_12h_tokens: number
 
   input_cost: number
   output_cost: number
@@ -1806,6 +1841,7 @@ export interface UsageLog {
   native_compaction_v2: boolean
   duration_ms: number | null
   first_token_ms: number | null
+  latency_metrics?: UsageLatencyMetrics | null
 
   // 图片生成字段
   image_count: number
@@ -1843,6 +1879,9 @@ export interface UsageLogAccountSummary {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  // Upstream account identity is returned only to super administrators.
+  account_id?: number | null
+  authorization_mode?: UsageAuthorizationMode | null
   upstream_model?: string | null
   upstream_reasoning_effort?: string | null
   upstream_response_model?: string | null
@@ -1859,7 +1898,7 @@ export interface AdminUsageLog extends UsageLog {
   channel_id?: number | null
   billing_tier?: string | null
 
-  // 最小账号信息（仅管理员接口返回）
+  // 最小账号信息（仅超级管理员可见）
   account?: UsageLogAccountSummary
 }
 
@@ -1889,50 +1928,6 @@ export interface UsageCleanupTask {
   finished_at?: string | null
   created_at: string
   updated_at: string
-}
-
-export interface RedeemCode {
-  id: number
-  code: string
-  type: RedeemCodeType
-  value: number
-  status: 'active' | 'used' | 'expired' | 'unused' | 'disabled'
-  used_by: number | null
-  used_at: string | null
-  created_at: string
-  expires_at?: string | null
-  updated_at?: string
-  notes?: string
-  group_id?: number | null // 订阅类型专用
-  validity_days?: number // 订阅类型专用
-  user?: User
-  group?: Group // 关联的分组
-}
-
-export interface GenerateRedeemCodesRequest {
-  count: number
-  type: RedeemCodeType
-  value: number
-  group_id?: number | null // 订阅类型专用
-  validity_days?: number // 订阅类型专用
-  expires_at?: string | null
-  expires_in_days?: number
-}
-
-export interface BatchUpdateRedeemCodeFields {
-  status?: 'unused' | 'disabled'
-  expires_at?: string | null
-  notes?: string
-  group_id?: number | null
-}
-
-export interface BatchUpdateRedeemCodesRequest {
-  ids: number[]
-  fields: BatchUpdateRedeemCodeFields
-}
-
-export interface RedeemCodeRequest {
-  code: string
 }
 
 // ==================== Dashboard & Statistics ====================
@@ -2064,6 +2059,25 @@ export interface UserBreakdownItem {
   account_cost: number
 }
 
+/** 与 UserBreakdownItem 同构，聚合维度换成 api_key_id。 */
+export interface APIKeyBreakdownItem {
+  api_key_id: number
+  /** Key 已被物理删除时为空 */
+  key_name: string
+  /** Key 已软删除或已不存在；历史用量仍会统计进来，只是标记出来 */
+  key_deleted: boolean
+  user_id: number
+  email: string
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  cache_tokens: number
+  total_tokens: number
+  cost: number
+  actual_cost: number
+  account_cost: number
+}
+
 export interface UserUsageTrendPoint {
   date: string
   user_id: number
@@ -2108,7 +2122,7 @@ export interface UpdateUserRequest {
   password?: string
   username?: string
   notes?: string
-  role?: 'admin' | 'user'
+  role?: User['role']
   balance?: number
   concurrency?: number
   rpm_limit?: number
@@ -2228,6 +2242,8 @@ export interface UserErrorListParams {
 }
 
 export interface UsageQueryParams {
+  cursor?: string
+  exact_total?: boolean
   page?: number
   page_size?: number
   api_key_id?: number
@@ -2377,46 +2393,7 @@ export interface UserAttributeValuesMap {
   [attributeId: number]: string
 }
 
-// ==================== Promo Code Types ====================
 
-export interface PromoCode {
-  id: number
-  code: string
-  bonus_amount: number
-  max_uses: number
-  used_count: number
-  status: 'active' | 'disabled'
-  expires_at: string | null
-  notes: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface PromoCodeUsage {
-  id: number
-  promo_code_id: number
-  user_id: number
-  bonus_amount: number
-  used_at: string
-  user?: User
-}
-
-export interface CreatePromoCodeRequest {
-  code?: string
-  bonus_amount: number
-  max_uses?: number
-  expires_at?: number | null
-  notes?: string
-}
-
-export interface UpdatePromoCodeRequest {
-  code?: string
-  bonus_amount?: number
-  max_uses?: number
-  status?: 'active' | 'disabled'
-  expires_at?: number | null
-  notes?: string
-}
 
 // ==================== TOTP (2FA) Types ====================
 
