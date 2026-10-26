@@ -41,7 +41,6 @@ func (h *OpsHandler) GetErrorLogByID(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-
 	response.Success(c, detail)
 }
 

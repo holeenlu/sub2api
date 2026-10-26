@@ -11,6 +11,12 @@ import (
 
 // 账号列表页固定传 lite=1，lite 投影（AccountListItemFromAccount）必须与完整
 // Account DTO 一样携带 opencode_go_usage，否则前端用量单元格会退回「余额 --」。
+func TestAccountListItemPreservesAuthorizationModes(t *testing.T) {
+	a := &Account{ID: 1, AuthorizationModes: []string{"native", "bps"}}
+	item := AccountListItemFromAccount(a)
+	require.Equal(t, a.AuthorizationModes, item.AuthorizationModes)
+}
+
 func TestAccountListItemFromAccount_CarriesOpenCodeGoUsage(t *testing.T) {
 	now := time.Now().UTC()
 	// 生产账号 164 的形态：deepseek 平台 + OpenCode Go 官方基址 + apikey

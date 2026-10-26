@@ -15,6 +15,9 @@ type concurrencyCacheMock struct {
 	acquireAccountSlotFn  func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error)
 	acquireIngressLeaseFn func(ctx context.Context, apiKeyID int64, maxConnections int, leaseID string) (bool, error)
 	releaseIngressLeaseFn func(ctx context.Context, apiKeyID int64, leaseID string) error
+	accountWaitAllowed    func() bool
+	accountWaitAdded      int32
+	accountWaitRemoved    int32
 	releaseUserCalled     int32
 	releaseAccountCalled  int32
 	releaseIngressCalled  int32
@@ -45,10 +48,15 @@ func (m *concurrencyCacheMock) GetAccountConcurrencyBatch(ctx context.Context, a
 }
 
 func (m *concurrencyCacheMock) IncrementAccountWaitCount(ctx context.Context, accountID int64, maxWait int) (bool, error) {
+	atomic.AddInt32(&m.accountWaitAdded, 1)
+	if m.accountWaitAllowed != nil {
+		return m.accountWaitAllowed(), nil
+	}
 	return true, nil
 }
 
 func (m *concurrencyCacheMock) DecrementAccountWaitCount(ctx context.Context, accountID int64) error {
+	atomic.AddInt32(&m.accountWaitRemoved, 1)
 	return nil
 }
 
@@ -93,10 +101,6 @@ func (m *concurrencyCacheMock) CleanupExpiredAccountSlots(ctx context.Context, a
 }
 
 func (m *concurrencyCacheMock) CleanupExpiredAccountSlotKeys(ctx context.Context) error {
-	return nil
-}
-
-func (m *concurrencyCacheMock) CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error {
 	return nil
 }
 
@@ -149,4 +153,31 @@ func TestConcurrencyHelper_TryAcquireAccountSlot_NotAcquired(t *testing.T) {
 	require.False(t, acquired)
 	require.Nil(t, release)
 	require.Equal(t, int32(0), atomic.LoadInt32(&cache.releaseAccountCalled))
+}
+
+func TestAccountWaitRefreshesCapacityBeforeEveryAcquire(t *testing.T) {
+	current := 8
+	var seen []int
+	cache := &concurrencyCacheMock{acquireAccountSlotFn: func(_ context.Context, _ int64, limit int, _ string) (bool, error) {
+		seen = append(seen, limit)
+		if len(seen) == 1 {
+			current = 1
+			return false, nil
+		}
+		return true, nil
+	}}
+	helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Second)
+	c, _ := newHelperTestContext("POST", "/v1/responses")
+	started := false
+	refresh := func(context.Context) (int, error) { return current, nil }
+	release, err := helper.AcquireAccountSlotWithWaitTimeout(c, 1, 8, time.Second, false, &started, refresh)
+	require.NoError(t, err)
+	require.NotNil(t, release)
+	release()
+	require.Equal(t, []int{8, 1}, seen)
+	calls := len(seen)
+	_, acquired, err := helper.TryAcquireAccountSlot(t.Context(), 1, 8, func(context.Context) (int, error) { return 0, service.ErrNoAvailableAccounts })
+	require.ErrorIs(t, err, service.ErrNoAvailableAccounts)
+	require.False(t, acquired)
+	require.Len(t, seen, calls, "revoked eligibility cannot reach the semaphore")
 }
