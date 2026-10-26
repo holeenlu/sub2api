@@ -78,8 +78,8 @@ INSERT INTO ops_system_metrics (
 
   goroutine_count,
   concurrency_queue_depth
-) VALUES (
-  $1,$2,$3,$4,
+) SELECT
+  $1::timestamptz,$2::integer,$3::varchar,$4::bigint,
   $5,$6,$7,$8,
   $9,$10,$11,
   $12,$13,$14,$15,
@@ -90,6 +90,11 @@ INSERT INTO ops_system_metrics (
   $34,$35,
   $36,$37,$38,
   $39,$40
+WHERE NOT EXISTS (
+ SELECT 1 FROM ops_system_metrics
+ WHERE created_at = $1 AND window_minutes = $2
+ AND platform IS NOT DISTINCT FROM $3::varchar
+ AND group_id IS NOT DISTINCT FROM $4::bigint
 )`
 
 	_, err := r.db.ExecContext(
@@ -185,7 +190,7 @@ FROM ops_system_metrics
 WHERE window_minutes = $1
   AND platform IS NULL
   AND group_id IS NULL
-ORDER BY created_at DESC
+ORDER BY created_at DESC, id DESC
 LIMIT 1`
 
 	var out service.OpsSystemMetricsSnapshot
@@ -356,7 +361,8 @@ SELECT
   last_error,
   last_duration_ms,
   last_result,
-  updated_at
+  updated_at,
+  COALESCE(expected_interval_seconds, 0)
 FROM ops_job_heartbeats
 ORDER BY job_name ASC`
 
@@ -386,6 +392,7 @@ ORDER BY job_name ASC`
 			&lastDuration,
 			&lastResult,
 			&item.UpdatedAt,
+			&item.ExpectedIntervalSeconds,
 		); err != nil {
 			return nil, err
 		}

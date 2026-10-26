@@ -1,0 +1,25 @@
+{
+  "base": "49b29ef158e6319cfd6b1227781307de5f8f870e",
+  "branch": "codex/new-api-gateway-hardening-20261013",
+  "counts_files_add_delete": {
+    "business": [
+      61,
+      1616,
+      316
+    ],
+    "tests": [
+      18,
+      1025,
+      45
+    ],
+    "config_generated": [
+      2,
+      14,
+      6
+    ]
+  },
+  "manifest_sha256": "fa60b9e4f64d261141a87fafa29e6764db186d3d77728397cb2d3c8aae4a86fe",
+  "staged_files": 0,
+  "committed": false,
+  "pushed": false
+}

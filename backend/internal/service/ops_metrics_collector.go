@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"math"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -55,6 +58,8 @@ type OpsMetricsCollector struct {
 	redisClient *redis.Client
 	instanceID  string
 
+	nodeStats               atomic.Pointer[OpsNodeMetricsSnapshot]
+	nodesEnabled            atomic.Bool
 	lastCgroupCPUUsageNanos uint64
 	lastCgroupCPUSampleAt   time.Time
 
@@ -95,6 +100,7 @@ func (c *OpsMetricsCollector) Start() {
 		if c.stopCh == nil {
 			c.stopCh = make(chan struct{})
 		}
+		go c.sampleResources()
 		go c.run()
 	})
 }
@@ -160,6 +166,7 @@ func (c *OpsMetricsCollector) getInterval() time.Duration {
 }
 
 func (c *OpsMetricsCollector) collectOnce() {
+	slog.Info("gateway.scheduler_metrics", "local", SnapshotSchedulingRuntimeMetrics())
 	if c == nil {
 		return
 	}
@@ -176,7 +183,9 @@ func (c *OpsMetricsCollector) collectOnce() {
 	ctx, cancel := context.WithTimeout(context.Background(), opsMetricsCollectorTimeout)
 	defer cancel()
 
-	if !c.isMonitoringEnabled(ctx) {
+	enabled := c.isMonitoringEnabled(ctx)
+	c.nodesEnabled.Store(enabled)
+	if !enabled {
 		return
 	}
 
@@ -189,6 +198,10 @@ func (c *OpsMetricsCollector) collectOnce() {
 	}
 
 	startedAt := time.Now().UTC()
+	// The lock serializes replicas; a completed bucket also skips repeated SQL aggregation.
+	if latest, err := c.opsRepo.GetLatestSystemMetrics(ctx, 1); err == nil && latest != nil && latest.CreatedAt.Equal(startedAt.Truncate(time.Minute)) {
+		return
+	}
 	err := c.collectAndPersist(ctx)
 	finishedAt := time.Now().UTC()
 
@@ -263,16 +276,11 @@ func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context) error {
 	windowEnd := now.Truncate(time.Minute)
 	windowStart := windowEnd.Add(-1 * time.Minute)
 
-	sys, err := c.collectSystemStats(ctx)
-	if err != nil {
-		// Continue; system stats are best-effort.
-		log.Printf("[OpsMetricsCollector] system stats error: %v", err)
+	nodes, nodesErr := c.ListNodeMetrics(ctx)
+	sys := summarizeOpsNodes(nodes)
+	if nodesErr != nil || sys == nil {
+		sys = &OpsSystemMetricsSnapshot{}
 	}
-
-	dbOK := c.checkDB(ctx)
-	redisOK := c.checkRedis(ctx)
-	active, idle := c.dbPoolStats()
-	redisTotal, redisIdle, redisStatsOK := c.redisPoolStats()
 
 	successCount, tokenConsumed, err := c.queryUsageCounts(ctx, windowStart, windowEnd)
 	if err != nil {
@@ -302,7 +310,6 @@ func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context) error {
 	qps := float64(requestTotal) / windowSeconds
 	tps := float64(tokenConsumed) / windowSeconds
 
-	goroutines := runtime.NumGoroutine()
 	concurrencyQueueDepth := c.collectConcurrencyQueueDepth(ctx)
 
 	input := &OpsInsertSystemMetricsInput{
@@ -337,30 +344,18 @@ func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context) error {
 		TTFTAvgMs: ttft.avg,
 		TTFTMaxMs: ttft.max,
 
-		CPUUsagePercent:    sys.cpuUsagePercent,
-		MemoryUsedMB:       sys.memoryUsedMB,
-		MemoryTotalMB:      sys.memoryTotalMB,
-		MemoryUsagePercent: sys.memoryUsagePercent,
+		CPUUsagePercent:    sys.CPUUsagePercent,
+		MemoryUsedMB:       sys.MemoryUsedMB,
+		MemoryTotalMB:      sys.MemoryTotalMB,
+		MemoryUsagePercent: sys.MemoryUsagePercent,
 
-		DBOK:    boolPtr(dbOK),
-		RedisOK: boolPtr(redisOK),
-
-		RedisConnTotal: func() *int {
-			if !redisStatsOK {
-				return nil
-			}
-			return intPtr(redisTotal)
-		}(),
-		RedisConnIdle: func() *int {
-			if !redisStatsOK {
-				return nil
-			}
-			return intPtr(redisIdle)
-		}(),
-
-		DBConnActive:          intPtr(active),
-		DBConnIdle:            intPtr(idle),
-		GoroutineCount:        intPtr(goroutines),
+		DBOK:                  sys.DBOK,
+		RedisOK:               sys.RedisOK,
+		RedisConnTotal:        sys.RedisConnTotal,
+		RedisConnIdle:         sys.RedisConnIdle,
+		DBConnActive:          sys.DBConnActive,
+		DBConnIdle:            sys.DBConnIdle,
+		GoroutineCount:        sys.GoroutineCount,
 		ConcurrencyQueueDepth: concurrencyQueueDepth,
 	}
 
@@ -543,11 +538,11 @@ func (c *OpsMetricsCollector) queryErrorCounts(ctx context.Context, start, end t
 	q := `
 SELECT
   COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400), 0) AS error_total,
-  COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND is_business_limited), 0) AS business_limited,
-  COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND NOT is_business_limited), 0) AS error_sla,
-  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(upstream_status_code, status_code, 0) NOT IN (429, 529)), 0) AS upstream_excl,
-  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 429), 0) AS upstream_429,
-  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 529), 0) AS upstream_529
+  COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND ` + OpsSLABusinessLimitedSQL("") + `), 0) AS business_limited,
+  COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND NOT ` + OpsSLABusinessLimitedSQL("") + `), 0) AS error_sla,
+  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT ` + OpsSLABusinessLimitedSQL("") + ` AND COALESCE(upstream_status_code, status_code, 0) NOT IN (429, 529)), 0) AS upstream_excl,
+  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT ` + OpsSLABusinessLimitedSQL("") + ` AND COALESCE(upstream_status_code, status_code, 0) = 429), 0) AS upstream_429,
+  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT ` + OpsSLABusinessLimitedSQL("") + ` AND COALESCE(upstream_status_code, status_code, 0) = 529), 0) AS upstream_529
 FROM ops_error_logs
 WHERE created_at >= $1 AND created_at < $2
   AND is_count_tokens = FALSE`
@@ -587,6 +582,9 @@ WHERE o.created_at >= $1 AND o.created_at < $2
 }
 
 type opsCollectedSystemStats struct {
+	cpuScope           string
+	memoryScope        string
+	cpuCapacity        float64
 	cpuUsagePercent    *float64
 	memoryUsedMB       *int64
 	memoryTotalMB      *int64
@@ -594,7 +592,7 @@ type opsCollectedSystemStats struct {
 }
 
 func (c *OpsMetricsCollector) collectSystemStats(ctx context.Context) (*opsCollectedSystemStats, error) {
-	out := &opsCollectedSystemStats{}
+	out := &opsCollectedSystemStats{cpuScope: "host", memoryScope: "host", cpuCapacity: float64(runtime.NumCPU())}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -605,6 +603,8 @@ func (c *OpsMetricsCollector) collectSystemStats(ctx context.Context) (*opsColle
 	// cgroup CPU accounting is unavailable.
 	if cpuPct := c.tryCgroupCPUPercent(sampleAt); cpuPct != nil {
 		out.cpuUsagePercent = cpuPct
+		out.cpuScope = "container"
+		out.cpuCapacity = readCgroupCPULimitCores("/sys/fs/cgroup", runtime.NumCPU())
 	}
 	if out.cpuUsagePercent == nil {
 		if cpuPercents, err := cpu.PercentWithContext(ctx, 0, false); err == nil && len(cpuPercents) > 0 {
@@ -618,12 +618,15 @@ func (c *OpsMetricsCollector) collectSystemStats(ctx context.Context) (*opsColle
 	// limit is missing or the cgroup data is otherwise incomplete, fall back
 	// ENTIRELY to host metrics. Never mix a container "used" with a host "total":
 	// doing so reports a misleadingly tiny percentage (e.g. 60MB / 23GB ~= 0.3%).
-	cgroupUsed, cgroupTotal, cgroupOK := readCgroupMemoryBytes()
+	cgroupUsed, cgroupTotal, cgroupOK := readCgroupMemoryBytes("/sys/fs/cgroup")
 	var host *mem.VirtualMemoryStat
 	if !cgroupOK || cgroupTotal == 0 {
 		if vm, err := mem.VirtualMemoryWithContext(ctx); err == nil {
 			host = vm
 		}
+	}
+	if cgroupOK && cgroupTotal > 0 {
+		out.memoryScope = "container"
 	}
 	out.memoryUsedMB, out.memoryTotalMB, out.memoryUsagePercent = resolveMemoryStats(cgroupUsed, cgroupTotal, cgroupOK, host)
 
@@ -652,12 +655,20 @@ func resolveMemoryStats(cgroupUsed, cgroupTotal uint64, cgroupOK bool, host *mem
 		return nil, nil, nil
 	}
 
-	u := int64(host.Used / bytesPerMB)
+	// Available accounts for shared memory and kernel watermarks.
+	used := host.Used
+	if host.Total > 0 {
+		if host.Available > host.Total {
+			return nil, nil, nil
+		}
+		used = host.Total - host.Available
+	}
+	u := int64(used / bytesPerMB)
 	usedMB = &u
 	if host.Total > 0 {
 		t := int64(host.Total / bytesPerMB)
 		totalMB = &t
-		p := roundTo1DP(float64(host.Used) / float64(host.Total) * 100)
+		p := roundTo1DP(float64(used) / float64(host.Total) * 100)
 		usagePercent = &p
 	} else {
 		// Degenerate: host reported no total. Preserve gopsutil's own percentage.
@@ -702,7 +713,7 @@ func (c *OpsMetricsCollector) tryCgroupCPUPercent(now time.Time) *float64 {
 		return nil
 	}
 
-	cores := readCgroupCPULimitCores()
+	cores := readCgroupCPULimitCores("/sys/fs/cgroup", runtime.NumCPU())
 	if cores <= 0 {
 		// Can't reliably normalize; skip and fall back to gopsutil.
 		return nil
@@ -720,55 +731,28 @@ func (c *OpsMetricsCollector) tryCgroupCPUPercent(now time.Time) *float64 {
 	return &v
 }
 
-func readCgroupMemoryBytes() (usedBytes uint64, totalBytes uint64, ok bool) {
-	// cgroup v2 (most common in modern containers)
-	if used, ok1 := readUintFile("/sys/fs/cgroup/memory.current"); ok1 {
-		usedBytes = used
-		rawMax, err := os.ReadFile("/sys/fs/cgroup/memory.max")
-		if err == nil {
-			s := strings.TrimSpace(string(rawMax))
-			if s != "" && s != "max" {
-				if v, err := strconv.ParseUint(s, 10, 64); err == nil {
-					totalBytes = v
-				}
-			}
-		}
-		return usedBytes, totalBytes, true
+// Read the container working set, excluding reclaimable inactive file cache.
+// Incomplete/unlimited readings fall back as a whole to host metrics.
+func readCgroupMemoryBytes(root string) (usedBytes uint64, totalBytes uint64, ok bool) {
+	usagePath, limitPath := filepath.Join(root, "memory.current"), filepath.Join(root, "memory.max")
+	statPath, inactiveKey := filepath.Join(root, "memory.stat"), "inactive_file"
+	if _, err := os.Stat(usagePath); err != nil {
+		dir := filepath.Join(root, "memory")
+		usagePath, limitPath = filepath.Join(dir, "memory.usage_in_bytes"), filepath.Join(dir, "memory.limit_in_bytes")
+		statPath, inactiveKey = filepath.Join(dir, "memory.stat"), "total_inactive_file"
 	}
-
-	// cgroup v1 fallback
-	if used, ok1 := readUintFile("/sys/fs/cgroup/memory/memory.usage_in_bytes"); ok1 {
-		usedBytes = used
-		if limit, ok2 := readUintFile("/sys/fs/cgroup/memory/memory.limit_in_bytes"); ok2 {
-			// Some environments report a very large number when unlimited.
-			if limit > 0 && limit < (1<<60) {
-				totalBytes = limit
-			}
-		}
-		return usedBytes, totalBytes, true
+	used, usageOK := readUintFile(usagePath)
+	limit, limitOK := readUintFile(limitPath)
+	inactive, statOK := readCgroupStatValue(statPath, inactiveKey)
+	if !usageOK || !limitOK || !statOK || limit == 0 || limit >= 1<<60 {
+		return 0, 0, false
 	}
-
-	return 0, 0, false
+	return used - min(used, inactive), limit, true
 }
 
 func readCgroupCPUUsageNanos() (usageNanos uint64, ok bool) {
-	// cgroup v2: cpu.stat has usage_usec
-	if raw, err := os.ReadFile("/sys/fs/cgroup/cpu.stat"); err == nil {
-		lines := strings.Split(string(raw), "\n")
-		for _, line := range lines {
-			fields := strings.Fields(line)
-			if len(fields) != 2 {
-				continue
-			}
-			if fields[0] != "usage_usec" {
-				continue
-			}
-			v, err := strconv.ParseUint(fields[1], 10, 64)
-			if err != nil {
-				continue
-			}
-			return v * 1000, true
-		}
+	if usec, ok := readCgroupStatValue("/sys/fs/cgroup/cpu.stat", "usage_usec"); ok {
+		return usec * 1000, true
 	}
 
 	// cgroup v1: cpuacct.usage is in nanoseconds
@@ -779,27 +763,45 @@ func readCgroupCPUUsageNanos() (usageNanos uint64, ok bool) {
 	return 0, false
 }
 
-func readCgroupCPULimitCores() float64 {
+func readCgroupCPULimitCores(root string, schedulableCPUs int) float64 {
+	if schedulableCPUs <= 0 {
+		return 0
+	}
 	// cgroup v2: cpu.max => "<quota> <period>" or "max <period>"
-	if raw, err := os.ReadFile("/sys/fs/cgroup/cpu.max"); err == nil {
+	if raw, err := os.ReadFile(filepath.Join(root, "cpu.max")); err == nil {
 		fields := strings.Fields(string(raw))
 		if len(fields) >= 2 && fields[0] != "max" {
 			quota, err1 := strconv.ParseFloat(fields[0], 64)
 			period, err2 := strconv.ParseFloat(fields[1], 64)
 			if err1 == nil && err2 == nil && quota > 0 && period > 0 {
-				return quota / period
+				return min(quota/period, float64(schedulableCPUs))
 			}
 		}
 	}
 
 	// cgroup v1: cpu.cfs_quota_us / cpu.cfs_period_us
-	quota, okQuota := readIntFile("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
-	period, okPeriod := readIntFile("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+	quota, okQuota := readIntFile(filepath.Join(root, "cpu", "cpu.cfs_quota_us"))
+	period, okPeriod := readIntFile(filepath.Join(root, "cpu", "cpu.cfs_period_us"))
 	if okQuota && okPeriod && quota > 0 && period > 0 {
-		return float64(quota) / float64(period)
+		return min(float64(quota)/float64(period), float64(schedulableCPUs))
 	}
 
 	return 0
+}
+
+func readCgroupStatValue(path, key string) (uint64, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == key {
+			value, err := strconv.ParseUint(fields[1], 10, 64)
+			return value, err == nil
+		}
+	}
+	return 0, false
 }
 
 func readUintFile(path string) (uint64, bool) {
@@ -867,14 +869,6 @@ func (c *OpsMetricsCollector) redisPoolStats() (total int, idle int, ok bool) {
 		return 0, 0, false
 	}
 	return int(stats.TotalConns), int(stats.IdleConns), true
-}
-
-func (c *OpsMetricsCollector) dbPoolStats() (active int, idle int) {
-	if c == nil || c.db == nil {
-		return 0, 0
-	}
-	stats := c.db.Stats()
-	return stats.InUse, stats.Idle
 }
 
 var opsMetricsCollectorReleaseScript = redis.NewScript(`

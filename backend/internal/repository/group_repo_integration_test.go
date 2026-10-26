@@ -13,6 +13,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -1304,4 +1305,29 @@ func (s *GroupRepoSuite) TestDelete_SoftDeletedGroup_lockForUpdate() {
 	_, err = s.repo.GetByID(s.ctx, group.ID)
 	s.Require().Error(err, "should fail to get soft-deleted group")
 	s.Require().ErrorIs(err, service.ErrGroupNotFound)
+}
+
+func (s *GroupRepoSuite) TestPlatformSuperAdminDuplicateRetainsSupplierAccounts() {
+	root, err := s.tx.Client().User.Create().SetEmail("group-root@example.invalid").SetPasswordHash("test").SetRole(service.RoleSuperAdmin).Save(s.ctx)
+	s.Require().NoError(err)
+	login, err := s.tx.Client().User.Create().SetEmail("group-owner@example.invalid").SetPasswordHash("test").SetRole(authz.VendorLevel1).Save(s.ctx)
+	s.Require().NoError(err)
+	var owner int64
+	s.Require().NoError(scanSingleRow(s.ctx, s.tx, "INSERT INTO vendors(user_id,name,allow_direct) VALUES($1,'group owner',TRUE) RETURNING id", []any{login.ID}, &owner))
+	source := &service.Group{Name: "root-supplier-source", Platform: service.PlatformOpenAI, RateMultiplier: 1, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard}
+	s.Require().NoError(s.repo.Create(s.ctx, source))
+	a, err := s.tx.Client().Account.Create().SetName("supplier source").SetPlatform(service.PlatformOpenAI).SetType(service.AccountTypeOAuth).SetVendorID(owner).Save(s.ctx)
+	s.Require().NoError(err)
+	_, err = s.tx.ExecContext(s.ctx, "INSERT INTO account_groups(account_id,group_id,priority) VALUES($1,$2,41)", a.ID, source.ID)
+	s.Require().NoError(err)
+	ctx := authz.WithSubject(s.ctx, authz.Subject{Role: authz.SuperAdmin, UserID: root.ID, SessionGeneration: root.SessionGeneration, ManagementRequest: true})
+	copy := &service.Group{Name: "root-supplier-copy", Platform: service.PlatformOpenAI, RateMultiplier: 1, Status: "inactive", SubscriptionType: service.SubscriptionTypeStandard}
+	s.Require().NoError(s.repo.CreateFromSource(ctx, copy, source.ID))
+	var priority int
+	s.Require().NoError(scanSingleRow(ctx, s.tx, "SELECT priority FROM account_groups WHERE account_id=$1 AND group_id=$2", []any{a.ID, copy.ID}, &priority))
+	s.Equal(41, priority)
+	s.EqualValues(1, copy.AccountCount)
+	var count int
+	s.Require().NoError(scanSingleRow(ctx, s.tx, "SELECT COUNT(*) FROM vendor_groups WHERE vendor_id=$1 AND group_id=$2", []any{owner, copy.ID}, &count))
+	s.Equal(1, count)
 }
