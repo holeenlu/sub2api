@@ -38,11 +38,10 @@
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { OAuthLoginStart } from '@/api/auth'
-import { resolveAffiliateReferralCode, storeOAuthAffiliateCode } from '@/utils/oauthAffiliate'
 
-const props = withDefaults(defineProps<{
+
+withDefaults(defineProps<{
   disabled?: boolean
-  affCode?: string
   showDivider?: boolean
 }>(), {
   showDivider: true
@@ -56,7 +55,6 @@ const { t } = useI18n()
 
 function startLogin(): void {
   const redirectTo = (route.query.redirect as string) || '/dashboard'
-  storeOAuthAffiliateCode(resolveAffiliateReferralCode(props.affCode, route.query.aff, route.query.aff_code))
   emit('start', { provider: 'dingtalk', params: { redirect: redirectTo } })
 }
 </script>

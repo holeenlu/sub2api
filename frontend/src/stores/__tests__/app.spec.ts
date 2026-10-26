@@ -21,7 +21,6 @@ function createPublicSettings(overrides: Partial<PublicSettings> = {}): PublicSe
     email_verify_enabled: false,
     force_email_on_third_party_signup: false,
     registration_email_suffix_whitelist: [],
-    promo_code_enabled: true,
     password_reset_enabled: false,
     invitation_code_enabled: false,
     turnstile_enabled: false,
@@ -34,7 +33,6 @@ function createPublicSettings(overrides: Partial<PublicSettings> = {}): PublicSe
     doc_url: '',
     home_content: '',
     compact_home_enabled: false,
-    hide_ccs_import_button: false,
     payment_enabled: false,
     risk_control_enabled: false,
     table_default_page_size: 20,
@@ -88,6 +86,23 @@ describe('useAppStore', () => {
   afterEach(() => {
     vi.useRealTimers()
     localStorage.clear()
+  })
+
+  it('applies backend branding on static portal settings load and subsequent refresh', async () => {
+    document.head.innerHTML = '<link rel="icon" type="image/svg+xml" href="/logo.svg">'
+    const store = useAppStore()
+    vi.mocked(getPublicSettings).mockResolvedValueOnce(createPublicSettings({ site_logo: 'data:image/png;base64,aGVsbG8=' }))
+    await store.fetchPublicSettings()
+    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')!
+    expect(icon.href).toBe('data:image/png;base64,aGVsbG8=')
+    expect(icon.hasAttribute('type')).toBe(false)
+    vi.mocked(getPublicSettings).mockResolvedValueOnce(createPublicSettings({ site_logo: '' }))
+    await store.fetchPublicSettings(true)
+    expect(icon.getAttribute('href')).toBe('/logo.svg')
+    store.clearPublicSettingsCache()
+    window.__APP_CONFIG__ = createPublicSettings({ site_logo: '/injected-logo.svg' })
+    store.initFromInjectedConfig()
+    expect(icon.getAttribute('href')).toBe('/injected-logo.svg')
   })
 
   // --- Toast 消息管理 ---
@@ -444,7 +459,6 @@ describe('useAppStore', () => {
         registration_enabled: false,
         email_verify_enabled: false,
         registration_email_suffix_whitelist: [],
-        promo_code_enabled: true,
         password_reset_enabled: false,
         invitation_code_enabled: false,
         turnstile_enabled: false,
@@ -457,7 +471,6 @@ describe('useAppStore', () => {
         doc_url: '',
         home_content: '',
         compact_home_enabled: false,
-        hide_ccs_import_button: false,
         purchase_subscription_enabled: false,
         purchase_subscription_url: '',
         table_default_page_size: 1000,

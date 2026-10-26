@@ -111,7 +111,7 @@ func configureTrustedProxies(r *gin.Engine, cfg config.ServerConfig) {
 
 // ProvideHTTPServer 提供 HTTP 服务器
 func ProvideHTTPServer(cfg *config.Config, router *gin.Engine) *http.Server {
-	httpHandler := http.Handler(router)
+	httpHandler := requestBodyReadDeadline(http.Handler(router), time.Duration(cfg.Server.ReadBodyTimeout)*time.Second)
 	server := &http.Server{
 		Addr:           cfg.Server.Address(),
 		Handler:        httpHandler,
@@ -121,7 +121,7 @@ func ProvideHTTPServer(cfg *config.Config, router *gin.Engine) *http.Server {
 		// IdleTimeout: 空闲连接超时时间，释放不活跃的连接资源
 		IdleTimeout: time.Duration(cfg.Server.IdleTimeout) * time.Second,
 		// 注意：不设置 WriteTimeout，因为流式响应可能持续十几分钟
-		// 不设置 ReadTimeout，因为大请求体可能需要较长时间读取
+		// 请求体时限由 requestBodyReadDeadline 单独管理，读取完成后解除。
 	}
 
 	globalMaxSize := cfg.Server.MaxRequestBodySize

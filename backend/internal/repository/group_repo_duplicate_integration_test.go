@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -88,4 +89,18 @@ func TestCreateGroupFromSourceRollsBackWhenOutboxInsertFails(t *testing.T) {
 	require.Zero(t, groupCount)
 	require.Zero(t, bindingCount)
 	require.Zero(t, outboxCount)
+}
+
+func TestPlatformGroupAssignmentPostgresPolicyMatrix(t *testing.T) {
+	_, err := integrationDB.Exec("CREATE DATABASE vendor_settlement_test")
+	require.NoError(t, err)
+	port, err := exec.Command("docker", "port", integrationPgContainerID, "5432/tcp").Output()
+	require.NoError(t, err)
+	address := strings.Split(strings.TrimSpace(string(port)), "\n")[0]
+	colon := strings.LastIndex(address, ":")
+	require.NotEqual(t, -1, colon)
+	t.Setenv("VENDOR_SUPPLY_TEST_DSN", "postgres://postgres:postgres@127.0.0.1"+address[colon:]+"/vendor_settlement_test?sslmode=disable")
+	t.Run("platform assignments", TestPlatformSuperAdminPostgresAssignsSupplierAccountsToAnyGroup)
+	t.Run("supplier eligibility", TestVendorSupplyPostgresEligibilityMatrix)
+	t.Run("parent qualification", TestVendorSupplyPostgresParentQualificationAndReadOnly)
 }

@@ -277,7 +277,7 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 		HoldMultiplier:          pricingSnapshot.HoldMultiplier,
 		BillableUnitPrice:       pricingSnapshot.BillableUnitPrice,
 		HoldUnitPrice:           pricingSnapshot.HoldUnitPrice,
-		PricingSnapshotVersion:  1,
+		PricingSnapshotVersion:  2,
 		Currency:                "USD",
 		HoldID:                  &holdID,
 		IdempotencyKey:          batchImageOptionalStringPtr(idempotencyKey),
@@ -1083,8 +1083,8 @@ func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, ow
 		HoldMultiplier:          holdMultiplier,
 		BillableUnitPrice:       billableUnitPrice,
 		HoldUnitPrice:           holdUnitPrice,
-		EstimatedCost:           billableUnitPrice * float64(len(req.Items)),
-		HoldAmount:              holdUnitPrice * float64(len(req.Items)),
+		EstimatedCost:           QuantizeUsageBillingAmount(billableUnitPrice * float64(len(req.Items))),
+		HoldAmount:              QuantizeUsageBillingAmount(holdUnitPrice * float64(len(req.Items))),
 	}, nil
 }
 

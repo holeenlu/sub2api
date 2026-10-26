@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
@@ -165,6 +167,9 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.User.UpdateOneID(req.UserID).AddBalance(0).Save(ctx); err != nil {
+		return nil, fmt.Errorf("lock order allowance: %w", err)
+	}
 	if err := s.checkPendingLimit(ctx, tx, req.UserID, cfg.MaxPendingOrders); err != nil {
 		return nil, err
 	}
@@ -181,6 +186,11 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		return nil, err
 	}
 	providerSnapshot := buildPaymentOrderProviderSnapshot(sel, req)
+	if providerSnapshot == nil {
+		providerSnapshot = map[string]any{}
+	}
+	providerSnapshot["daily_allowance_amount"] = limitAmount
+	providerSnapshot["daily_allowance_limit"] = cfg.DailyLimit
 	selectedInstanceID := ""
 	selectedProviderKey := ""
 	if sel != nil {
@@ -254,7 +264,7 @@ func (s *PaymentService) checkPendingLimit(ctx context.Context, tx *dbent.Tx, us
 	if max <= 0 {
 		max = defaultMaxPendingOrders
 	}
-	c, err := tx.PaymentOrder.Query().Where(paymentorder.UserIDEQ(userID), paymentorder.StatusEQ(OrderStatusPending)).Count(ctx)
+	c, err := tx.PaymentOrder.Query().Where(paymentorder.UserIDEQ(userID), paymentorder.StatusEQ(OrderStatusPending), paymentorder.ExpiresAtGT(time.Now().Add(-paymentAllowanceGrace))).Count(ctx)
 	if err != nil {
 		return fmt.Errorf("count pending orders: %w", err)
 	}
@@ -334,27 +344,7 @@ func paymentOrderSnapshotWxpayAppID(sel *payment.InstanceSelection, req CreateOr
 }
 
 func (s *PaymentService) checkDailyLimit(ctx context.Context, tx *dbent.Tx, userID int64, amount, limit float64) error {
-	if limit <= 0 {
-		return nil
-	}
-	ts := psStartOfDayUTC(time.Now())
-	orders, err := tx.PaymentOrder.Query().Where(paymentorder.UserIDEQ(userID), paymentorder.StatusIn(OrderStatusPaid, OrderStatusRecharging, OrderStatusCompleted), paymentorder.PaidAtGTE(ts)).All(ctx)
-	if err != nil {
-		return fmt.Errorf("query daily usage: %w", err)
-	}
-	var used float64
-	for _, o := range orders {
-		if o.OrderType == payment.OrderTypeBalance {
-			used += o.PayAmount
-			continue
-		}
-		used += o.Amount
-	}
-	if used+amount > limit {
-		return infraerrors.TooManyRequests("DAILY_LIMIT_EXCEEDED", "daily_limit_exceeded").
-			WithMetadata(map[string]string{"remaining": fmt.Sprintf("%.2f", math.Max(0, limit-used))})
-	}
-	return nil
+	return s.checkDailyAllowance(ctx, tx, userID, 0, amount, limit, time.Now())
 }
 
 func (s *PaymentService) selectCreateOrderInstance(ctx context.Context, req CreateOrderRequest, cfg *PaymentConfig, payAmount float64) (*payment.InstanceSelection, error) {
@@ -547,7 +537,7 @@ func (s *PaymentService) buildPaymentSubject(plan *dbent.SubscriptionPlan, limit
 	if plan != nil {
 		productName := plan.ProductName
 		if productName == "" {
-			productName = "Sub2API Subscription " + plan.Name
+			productName = DefaultSiteName + " Subscription " + plan.Name
 		}
 		return applyPaymentProductNameAffix(productName, cfg)
 	}
@@ -559,7 +549,7 @@ func (s *PaymentService) buildPaymentSubject(plan *dbent.SubscriptionPlan, limit
 	if hasPaymentProductNameAffix(cfg) {
 		return applyPaymentProductNameAffix(amountStr, cfg)
 	}
-	return "Sub2API " + amountStr + " " + currency
+	return DefaultSiteName + " " + amountStr + " " + currency
 }
 
 func hasPaymentProductNameAffix(cfg *PaymentConfig) bool {
@@ -835,7 +825,7 @@ func normalizePaymentRedirectPath(path string) string {
 // --- Order Queries ---
 
 func (s *PaymentService) GetOrder(ctx context.Context, orderID, userID int64) (*dbent.PaymentOrder, error) {
-	o, err := s.entClient.PaymentOrder.Get(ctx, orderID)
+	o, err := s.entClient.PaymentOrder.Query().Where(paymentorder.IDEQ(orderID), authz.ManagedUserPredicate(ctx, "user_id")).Only(ctx)
 	if err != nil {
 		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
@@ -846,7 +836,7 @@ func (s *PaymentService) GetOrder(ctx context.Context, orderID, userID int64) (*
 }
 
 func (s *PaymentService) GetOrderByID(ctx context.Context, orderID int64) (*dbent.PaymentOrder, error) {
-	o, err := s.entClient.PaymentOrder.Get(ctx, orderID)
+	o, err := s.entClient.PaymentOrder.Query().Where(paymentorder.IDEQ(orderID), authz.ManagedUserPredicate(ctx, "user_id")).Only(ctx)
 	if err != nil {
 		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
@@ -854,7 +844,7 @@ func (s *PaymentService) GetOrderByID(ctx context.Context, orderID int64) (*dben
 }
 
 func (s *PaymentService) GetUserOrders(ctx context.Context, userID int64, p OrderListParams) ([]*dbent.PaymentOrder, int, error) {
-	q := s.entClient.PaymentOrder.Query().Where(paymentorder.UserIDEQ(userID))
+	q := s.entClient.PaymentOrder.Query().Where(authz.ManagedUserPredicate(ctx, "user_id")).Where(paymentorder.UserIDEQ(userID))
 	if p.Status != "" {
 		q = q.Where(paymentorder.StatusEQ(p.Status))
 	}
@@ -878,7 +868,7 @@ func (s *PaymentService) GetUserOrders(ctx context.Context, userID int64, p Orde
 
 // AdminListOrders returns a paginated list of orders. If userID > 0, filters by user.
 func (s *PaymentService) AdminListOrders(ctx context.Context, userID int64, p OrderListParams) ([]*dbent.PaymentOrder, int, error) {
-	q := s.entClient.PaymentOrder.Query()
+	q := s.entClient.PaymentOrder.Query().Where(authz.ManagedUserPredicate(ctx, "user_id"))
 	if userID > 0 {
 		q = q.Where(paymentorder.UserIDEQ(userID))
 	}
