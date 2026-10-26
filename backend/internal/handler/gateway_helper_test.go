@@ -120,6 +120,17 @@ func TestWrapReleaseOnDone_NilReleaseFunc(t *testing.T) {
 	}
 }
 
+func TestWrapReleaseOnDone_DetachedWorkKeepsSlot(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var released atomic.Int32
+	release := wrapReleaseOnDone(ctx, func() { released.Add(1) }, true)
+	cancel()
+	require.Zero(t, released.Load())
+	release()
+	release()
+	require.EqualValues(t, 1, released.Load())
+}
+
 // TestWrapReleaseOnDone_ConcurrentCalls 验证并发调用的安全性
 func TestWrapReleaseOnDone_ConcurrentCalls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
