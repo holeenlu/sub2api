@@ -5,12 +5,86 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestForwardCountTokensVertexMappingAndBearer(t *testing.T) {
+	for _, mapped := range []bool{false, true} {
+		account := vertexModelSyncTestAccount(map[string]any{"location": "global"})
+		account.Platform = PlatformAnthropic
+		model, expected := "claude-sonnet-4-5-20250929", "claude-sonnet-4-5@20250929"
+		if mapped {
+			model, expected = "alias", "claude-haiku-4-5@20251001"
+			account.Credentials["model_mapping"] = map[string]any{model: expected}
+		}
+		parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(`{"model":"`+model+`","messages":[{"role":"user","content":"hello"}]}`)), PlatformAnthropic)
+		require.NoError(t, err)
+		upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"input_tokens":7}`))}}
+		tokens := &vertexModelsTokenCacheStub{token: "cached-google-bearer"}
+		svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, claudeTokenProvider: NewClaudeTokenProvider(nil, tokens, nil), rateLimitService: &RateLimitService{}}
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+		require.NoError(t, svc.ForwardCountTokens(t.Context(), c, account, parsed))
+		require.Positive(t, tokens.calls)
+		require.Equal(t, http.StatusOK, w.Code)
+		require.JSONEq(t, `{"input_tokens":7}`, w.Body.String())
+		require.Equal(t, "https://aiplatform.googleapis.com/v1/projects/proj/locations/global/publishers/anthropic/models/count-tokens:rawPredict", upstream.lastReq.URL.String())
+		require.Equal(t, "Bearer cached-google-bearer", getHeaderRaw(upstream.lastReq.Header, "authorization"))
+		require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-api-key"))
+		require.Equal(t, expected, gjson.GetBytes(upstream.lastBody, "model").String())
+		require.Equal(t, vertexAnthropicVersion, gjson.GetBytes(upstream.lastBody, "anthropic_version").String())
+	}
+}
+
+func TestGatewayService_CountTokensVertexActualBuilder(t *testing.T) {
+	for _, location := range []string{"us-east5", "global", "us", "eu"} {
+		t.Run(location, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+			for _, name := range []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Cookie"} {
+				c.Request.Header.Set(name, "client-secret")
+			}
+			c.Request.Header.Set("Anthropic-Version", "2023-06-01")
+			c.Request.Header.Set("Anthropic-Beta", "claude-code-20250219,interleaved-thinking-2025-05-14,unknown-beta")
+			account := &Account{ID: 301, Platform: PlatformAnthropic, Type: AccountTypeServiceAccount, Credentials: map[string]any{"project_id": "vertex-proj", "location": "different-region", "vertex_model_locations": map[string]any{"claude-sonnet-4-5@20250929": location}}}
+			body := []byte(`{"model":"client-alias","stream":true,"max_tokens":32,"temperature":1,"context_management":{"edits":[]},"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"hello","future":9007199254740993}]}]}`)
+			req, wire, err := (&GatewayService{}).buildCountTokensRequest(t.Context(), c, account, body, "vertex-token", "service_account", "claude-sonnet-4-5@20250929", false)
+			require.NoError(t, err)
+			require.Equal(t, "https://"+vertexAPIHost(location)+"/v1/projects/vertex-proj/locations/"+location+"/publishers/anthropic/models/count-tokens:rawPredict", req.URL.String())
+			require.Equal(t, "Bearer vertex-token", getHeaderRaw(req.Header, "authorization"))
+			for _, name := range []string{"x-api-key", "x-goog-api-key", "cookie", "anthropic-version"} {
+				require.Empty(t, getHeaderRaw(req.Header, name))
+			}
+			require.Equal(t, "interleaved-thinking-2025-05-14", getHeaderRaw(req.Header, "anthropic-beta"))
+			require.Equal(t, wire, readRequestBodyForTest(t, req))
+			replay, err := req.GetBody()
+			require.NoError(t, err)
+			defer replay.Close()
+			replayed, err := io.ReadAll(replay)
+			require.NoError(t, err)
+			require.Equal(t, wire, replayed)
+			require.Equal(t, "claude-sonnet-4-5@20250929", gjson.GetBytes(wire, "model").String())
+			require.Equal(t, vertexAnthropicVersion, gjson.GetBytes(wire, "anthropic_version").String())
+			require.Equal(t, "9007199254740993", gjson.GetBytes(wire, "messages.0.content.0.future").Raw)
+			for _, field := range []string{"stream", "max_tokens", "temperature", "context_management", "system"} {
+				require.False(t, gjson.GetBytes(wire, field).Exists(), field)
+			}
+		})
+	}
+	for _, credentials := range []map[string]any{{"location": "global"}, {"project_id": "p", "location": "bad/region"}} {
+		account := &Account{Platform: PlatformAnthropic, Type: AccountTypeServiceAccount, Credentials: credentials}
+		req, _, err := (&GatewayService{}).buildCountTokensRequest(t.Context(), nil, account, []byte(`{"model":"m","messages":[]}`), "secret", "service_account", "m", false)
+		require.Error(t, err)
+		require.Nil(t, req, "invalid Vertex configuration cannot fall back to Anthropic")
+	}
+}
 
 func TestGatewayService_BuildAnthropicVertexServiceAccountRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)

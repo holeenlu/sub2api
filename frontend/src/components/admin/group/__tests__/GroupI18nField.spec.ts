@@ -90,7 +90,9 @@ describe('GroupI18nField', () => {
     expect(menuItems(wrapper).map((item) => [item.attributes('data-locale'), item.text()])).toEqual([
       ['default', 'admin.groups.i18nField.default'],
       ['en', 'admin.groups.i18nField.edit:English'],
-      ['zh', 'admin.groups.i18nField.add:中文']
+      ['zh', 'admin.groups.i18nField.add:简体中文'],
+      ['zh-TW', 'admin.groups.i18nField.add:繁體中文'],
+      ['ja', 'admin.groups.i18nField.add:日本語']
     ])
   })
 
@@ -187,7 +189,7 @@ describe('GroupI18nField', () => {
   it('closes the menu when clicking elsewhere', async () => {
     const { wrapper } = mountField({ text: '标准', i18n: {} })
     await trigger(wrapper).trigger('click')
-    expect(menuItems(wrapper)).toHaveLength(3)
+    expect(menuItems(wrapper)).toHaveLength(5)
 
     document.body.click()
     await wrapper.vm.$nextTick()

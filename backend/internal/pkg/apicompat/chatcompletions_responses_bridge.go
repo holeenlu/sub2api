@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -289,23 +290,6 @@ func HasToolSearchTool(tools []ResponsesTool) bool {
 		}
 	}
 	return false
-}
-
-// responsesInputToChatMessages converts a Responses request's instructions +
-// input[] into Chat Completions messages. It is a three-stage pipeline:
-//
-//	parse   — instructions become a system message; input[] is split into items
-//	build   — buildChatMessagesFromItems walks items, attaching reasoning to the
-//	          assistant message that produced a tool call, merging parallel tool
-//	          calls into one assistant message, and skipping item types that have
-//	          no Chat equivalent
-//	normalize — normalizeChatMessages enforces the invariants DeepSeek requires
-//
-// The build + normalize split keeps every protocol rule in one place rather than
-// scattered across per-item cases, and makes unknown future codex item types
-// fail safe instead of leaking into the upstream request.
-func responsesInputToChatMessages(instructions string, inputRaw json.RawMessage) ([]ChatMessage, error) {
-	return responsesInputToChatMessagesWithOptions(instructions, inputRaw, nil)
 }
 
 // responsesInputToChatMessagesWithOptions is responsesInputToChatMessages with
@@ -1144,7 +1128,11 @@ func responsesToolsToChatTools(tools []ResponsesTool) ([]ChatTool, error) {
 				continue
 			}
 			toolSearchDeclared = true
-			out = append(out, toolSearchProxyChatTool())
+			proxy, err := toolSearchProxyChatTool(tool)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, proxy)
 		case "namespace":
 			flattened, err := namespaceChildrenToChatTools(tool, topLevel, flatOwner)
 			if err != nil {
@@ -1174,15 +1162,27 @@ const toolSearchProxyName = "tool_search"
 
 const toolSearchProxySchema = `{"type":"object","properties":{"query":{"type":"string","description":"Search query for tools or connectors to load."},"limit":{"type":"integer","description":"Maximum number of tool groups to return."}},"required":["query"]}`
 
-func toolSearchProxyChatTool() ChatTool {
+func toolSearchProxyChatTool(tool ResponsesTool) (ChatTool, error) {
+	schema, err := toolSearchParameters(tool.Parameters)
+	if err != nil {
+		return ChatTool{}, err
+	}
+	parameters, err := json.Marshal(schema)
+	if err != nil {
+		return ChatTool{}, err
+	}
+	description := tool.Description
+	if description == "" {
+		description = "Search and load Codex tools, plugins, connectors, and MCP namespaces for the current task."
+	}
 	return ChatTool{
 		Type: "function",
 		Function: &ChatFunction{
 			Name:        toolSearchProxyName,
-			Description: "Search and load Codex tools, plugins, connectors, and MCP namespaces for the current task.",
-			Parameters:  json.RawMessage(toolSearchProxySchema),
+			Description: description,
+			Parameters:  parameters,
 		},
-	}
+	}, nil
 }
 
 // namespaceChildrenToChatTools 将 namespace 工具的子 function 工具摊平为顶层
@@ -1372,9 +1372,13 @@ func ChatCompletionsResponseToResponses(resp *ChatCompletionsResponse, model str
 	if len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
 		out.Output = chatMessageToResponsesOutput(choice.Message, customTools, functionTools, toolSearch, namespaceTools)
-		if choice.FinishReason == "length" {
+		if choice.FinishReason == "length" || choice.FinishReason == "content_filter" {
 			out.Status = "incomplete"
-			out.IncompleteDetails = &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
+			reason := "max_output_tokens"
+			if choice.FinishReason == "content_filter" {
+				reason = "content_filter"
+			}
+			out.IncompleteDetails = &ResponsesIncompleteDetails{Reason: reason}
 		}
 	}
 	if len(out.Output) == 0 {
@@ -1408,7 +1412,7 @@ func chatMessageToResponsesOutput(message ChatMessage, customTools, functionTool
 	}
 
 	text := chatMessageContentText(message.Content)
-	if text == "" && strings.TrimSpace(reasoning) != "" && len(message.ToolCalls) == 0 {
+	if text == "" && message.Refusal == "" && strings.TrimSpace(reasoning) != "" && len(message.ToolCalls) == 0 {
 		text = reasoning
 	}
 	if text != "" || len(message.ToolCalls) == 0 {
@@ -1422,6 +1426,10 @@ func chatMessageToResponsesOutput(message ChatMessage, customTools, functionTool
 			}},
 			Status: "completed",
 		})
+	}
+
+	if message.Refusal != "" {
+		outputs = append(outputs, ResponsesOutput{Type: "message", ID: generateItemID(), Role: "assistant", Status: "completed", Content: []ResponsesContentPart{{Type: "refusal", Refusal: message.Refusal}}})
 	}
 
 	for _, toolCall := range message.ToolCalls {
@@ -1454,7 +1462,7 @@ func chatMessageToResponsesOutput(message ChatMessage, customTools, functionTool
 		// Do not mark a truncated non-streaming Chat tool call as completed;
 		// Codex would persist it and poison the next request in the same way as
 		// the streaming variant guarded by ValidateToolCallArguments.
-		if !json.Valid([]byte(arguments)) {
+		if validateFunctionArguments(arguments) != nil {
 			continue
 		}
 		if ns, ok := namespaceTools[toolCall.Function.Name]; ok {
@@ -1544,17 +1552,15 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 		out.TotalTokens = out.InputTokens + out.OutputTokens
 	}
 	if usage.PromptTokensDetails != nil && (usage.PromptTokensDetails.CachedTokens > 0 ||
-		usage.PromptTokensDetails.CacheCreationTokens > 0 || usage.PromptTokensDetails.CacheWriteTokens > 0) {
+		usage.PromptTokensDetails.CacheCreationTokens > 0 || usage.PromptTokensDetails.CacheWriteTokens > 0 || usage.PromptTokensDetails.CacheCreationInputTokens > 0 || usage.PromptTokensDetails.CacheWriteTokensDetails != nil) {
 		out.InputTokensDetails = &ResponsesInputTokensDetails{
-			CachedTokens:        usage.PromptTokensDetails.CachedTokens,
-			CacheCreationTokens: usage.PromptTokensDetails.CacheCreationTokens,
-			CacheWriteTokens:    usage.PromptTokensDetails.CacheWriteTokens,
+			CachedTokens:             usage.PromptTokensDetails.CachedTokens,
+			CacheCreationTokens:      usage.PromptTokensDetails.CacheCreationTokens,
+			CacheWriteTokens:         usage.PromptTokensDetails.CacheWriteTokens,
+			CacheCreationInputTokens: usage.PromptTokensDetails.CacheCreationInputTokens,
+			CacheWriteTokensDetails:  usage.PromptTokensDetails.CacheWriteTokensDetails,
 		}
-		if usage.PromptTokensDetails.CacheWriteTokens > 0 {
-			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheWriteTokens
-		} else {
-			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheCreationTokens
-		}
+		out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheCreationTokensTotal()
 	}
 	return out
 }
@@ -1585,9 +1591,14 @@ type ChatCompletionsToResponsesStreamState struct {
 	ReasoningDone   bool
 
 	// Message item + output_text content-part lifecycle.
-	MessageItemID string
-	MessageIndex  int
-	TextPartOpen  bool
+	MessageItemID       string
+	MessageIndex        int
+	TextPartOpen        bool
+	TextContentIndex    int
+	RefusalContentIndex int
+	nextContentIndex    int
+	RefusalPartOpen     bool
+	Refusal             strings.Builder
 
 	Text      strings.Builder
 	Reasoning strings.Builder
@@ -1669,8 +1680,8 @@ func (state *ChatCompletionsToResponsesStreamState) ValidateToolCallArguments() 
 		if arguments == "" {
 			continue
 		}
-		if !json.Valid([]byte(arguments)) {
-			return fmt.Errorf("tool call %q (%s) arguments are invalid JSON", toolCall.ID, toolCall.Function.Name)
+		if err := validateFunctionArguments(arguments); err != nil {
+			return fmt.Errorf("tool call %q (%s) arguments are invalid JSON object: %w", toolCall.ID, toolCall.Function.Name, err)
 		}
 	}
 	return nil
@@ -1688,7 +1699,7 @@ func ChatCompletionsChunkToResponsesEvents(
 	chunk *ChatCompletionsChunk,
 	state *ChatCompletionsToResponsesStreamState,
 ) []ResponsesStreamEvent {
-	if chunk == nil || state == nil {
+	if chunk == nil || state == nil || state.CompletedSent {
 		return nil
 	}
 	if chunk.ID != "" {
@@ -1732,10 +1743,22 @@ func ChatCompletionsChunkToResponsesEvents(
 			_, _ = state.Text.WriteString(*choice.Delta.Content)
 			events = append(events, chatToResponsesEvent(state, "response.output_text.delta", &ResponsesStreamEvent{
 				OutputIndex:  state.MessageIndex,
-				ContentIndex: 0,
+				ContentIndex: state.TextContentIndex,
 				Delta:        *choice.Delta.Content,
 				ItemID:       state.MessageItemID,
 			}))
+		}
+		if choice.Delta.Refusal != nil && *choice.Delta.Refusal != "" {
+			events = append(events, closeChatReasoningItem(state)...)
+			events = append(events, ensureChatToResponsesMessageItem(state)...)
+			if !state.RefusalPartOpen {
+				state.RefusalPartOpen = true
+				state.RefusalContentIndex = state.nextContentIndex
+				state.nextContentIndex++
+				events = append(events, chatToResponsesEvent(state, "response.content_part.added", &ResponsesStreamEvent{OutputIndex: state.MessageIndex, ContentIndex: state.RefusalContentIndex, ItemID: state.MessageItemID, Part: &ResponsesContentPart{Type: "refusal"}}))
+			}
+			state.Refusal.WriteString(*choice.Delta.Refusal)
+			events = append(events, chatToResponsesEvent(state, "response.refusal.delta", &ResponsesStreamEvent{OutputIndex: state.MessageIndex, ContentIndex: state.RefusalContentIndex, ItemID: state.MessageItemID, Delta: *choice.Delta.Refusal}))
 		}
 		for _, toolCall := range choice.Delta.ToolCalls {
 			idx := 0
@@ -1813,16 +1836,21 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 		if state.TextPartOpen {
 			events = append(events, chatToResponsesEvent(state, "response.output_text.done", &ResponsesStreamEvent{
 				OutputIndex:  state.MessageIndex,
-				ContentIndex: 0,
+				ContentIndex: state.TextContentIndex,
 				Text:         state.Text.String(),
 				ItemID:       state.MessageItemID,
 			}))
 			events = append(events, chatToResponsesEvent(state, "response.content_part.done", &ResponsesStreamEvent{
 				OutputIndex:  state.MessageIndex,
-				ContentIndex: 0,
+				ContentIndex: state.TextContentIndex,
 				ItemID:       state.MessageItemID,
 				Part:         &ResponsesContentPart{Type: "output_text", Text: state.Text.String()},
 			}))
+		}
+		if state.RefusalPartOpen {
+			events = append(events,
+				chatToResponsesEvent(state, "response.refusal.done", &ResponsesStreamEvent{OutputIndex: state.MessageIndex, ContentIndex: state.RefusalContentIndex, ItemID: state.MessageItemID, Refusal: state.Refusal.String()}),
+				chatToResponsesEvent(state, "response.content_part.done", &ResponsesStreamEvent{OutputIndex: state.MessageIndex, ContentIndex: state.RefusalContentIndex, ItemID: state.MessageItemID, Part: &ResponsesContentPart{Type: "refusal", Refusal: state.Refusal.String()}}))
 		}
 		events = append(events, chatToResponsesEvent(state, "response.output_item.done", &ResponsesStreamEvent{
 			OutputIndex: state.MessageIndex,
@@ -1830,7 +1858,7 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 				Type:    "message",
 				ID:      state.MessageItemID,
 				Role:    "assistant",
-				Content: []ResponsesContentPart{{Type: "output_text", Text: state.Text.String()}},
+				Content: state.messageContent(),
 				Status:  "completed",
 			},
 		}))
@@ -1844,13 +1872,17 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 
 	status := "completed"
 	var incompleteDetails *ResponsesIncompleteDetails
-	if state.FinishReason == "length" {
+	if state.FinishReason == "length" || state.FinishReason == "content_filter" {
 		status = "incomplete"
-		incompleteDetails = &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
+		reason := "max_output_tokens"
+		if state.FinishReason == "content_filter" {
+			reason = "content_filter"
+		}
+		incompleteDetails = &ResponsesIncompleteDetails{Reason: reason}
 	}
 
 	state.CompletedSent = true
-	events = append(events, chatToResponsesEvent(state, "response.completed", &ResponsesStreamEvent{
+	events = append(events, chatToResponsesEvent(state, "response."+status, &ResponsesStreamEvent{
 		Response: &ResponsesResponse{
 			ID:                state.ResponseID,
 			Object:            "response",
@@ -1962,7 +1994,7 @@ func synthesizeChatReasoningFallbackMessage(state *ChatCompletionsToResponsesStr
 	_, _ = state.Text.WriteString(text)
 	events = append(events, chatToResponsesEvent(state, "response.output_text.delta", &ResponsesStreamEvent{
 		OutputIndex:  state.MessageIndex,
-		ContentIndex: 0,
+		ContentIndex: state.TextContentIndex,
 		Delta:        text,
 		ItemID:       state.MessageItemID,
 	}))
@@ -1982,7 +2014,7 @@ func ensureChatToResponsesMessageItem(state *ChatCompletionsToResponsesStreamSta
 			ID:      state.MessageItemID,
 			Role:    "assistant",
 			Status:  "in_progress",
-			Content: []ResponsesContentPart{{Type: "output_text"}},
+			Content: []ResponsesContentPart{},
 		},
 	})}
 }
@@ -1992,9 +2024,11 @@ func ensureChatToResponsesTextPart(state *ChatCompletionsToResponsesStreamState)
 		return nil
 	}
 	state.TextPartOpen = true
+	state.TextContentIndex = state.nextContentIndex
+	state.nextContentIndex++
 	return []ResponsesStreamEvent{chatToResponsesEvent(state, "response.content_part.added", &ResponsesStreamEvent{
 		OutputIndex:  state.MessageIndex,
-		ContentIndex: 0,
+		ContentIndex: state.TextContentIndex,
 		ItemID:       state.MessageItemID,
 		Part:         &ResponsesContentPart{Type: "output_text", Text: ""},
 	})}
@@ -2070,7 +2104,7 @@ func closeChatToolItems(state *ChatCompletionsToResponsesStreamState) []Response
 		return nil
 	}
 	var events []ResponsesStreamEvent
-	for i := 0; i < len(state.ToolCalls); i++ {
+	for _, i := range state.orderedToolIndices() {
 		toolCall, ok := state.ToolCalls[i]
 		if !ok || toolCall == nil {
 			continue
@@ -2164,12 +2198,37 @@ func closeChatToolItems(state *ChatCompletionsToResponsesStreamState) []Response
 	return events
 }
 
+func (state *ChatCompletionsToResponsesStreamState) messageContent() []ResponsesContentPart {
+	var parts []ResponsesContentPart
+	if state.TextPartOpen || state.Refusal.Len() == 0 {
+		parts = append(parts, ResponsesContentPart{Type: "output_text", Text: state.Text.String()})
+	}
+	if state.Refusal.Len() > 0 {
+		part := ResponsesContentPart{Type: "refusal", Refusal: state.Refusal.String()}
+		if len(parts) > 0 && state.RefusalContentIndex < state.TextContentIndex {
+			parts = append([]ResponsesContentPart{part}, parts...)
+		} else {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+func (state *ChatCompletionsToResponsesStreamState) orderedToolIndices() []int {
+	indices := make([]int, 0, len(state.ToolCalls))
+	for idx := range state.ToolCalls {
+		indices = append(indices, idx)
+	}
+	sort.Slice(indices, func(i, j int) bool { return state.ToolOutputIndex[indices[i]] < state.ToolOutputIndex[indices[j]] })
+	return indices
+}
+
 func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutput {
 	var outputs []ResponsesOutput
 	if state.Reasoning.Len() > 0 {
 		outputs = append(outputs, ResponsesOutput{
 			Type: "reasoning",
-			ID:   generateItemID(),
+			ID:   state.ReasoningItemID,
 			Summary: []ResponsesSummary{{
 				Type: "summary_text",
 				Text: state.Reasoning.String(),
@@ -2178,17 +2237,14 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 	}
 	if state.MessageItemID != "" || len(state.ToolCalls) == 0 {
 		outputs = append(outputs, ResponsesOutput{
-			Type: "message",
-			ID:   nonEmpty(state.MessageItemID, generateItemID()),
-			Role: "assistant",
-			Content: []ResponsesContentPart{{
-				Type: "output_text",
-				Text: state.Text.String(),
-			}},
-			Status: "completed",
+			Type:    "message",
+			ID:      nonEmpty(state.MessageItemID, generateItemID()),
+			Role:    "assistant",
+			Content: state.messageContent(),
+			Status:  "completed",
 		})
 	}
-	for i := 0; i < len(state.ToolCalls); i++ {
+	for _, i := range state.orderedToolIndices() {
 		toolCall, ok := state.ToolCalls[i]
 		if !ok || toolCall == nil {
 			continue
@@ -2200,7 +2256,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 		if state.toolIsCustom[i] {
 			outputs = append(outputs, ResponsesOutput{
 				Type:   "custom_tool_call",
-				ID:     generateItemID(),
+				ID:     state.ToolItemIDs[i],
 				CallID: toolCall.ID,
 				Name:   customNameForStreamTool(state, toolCall.Function.Name),
 				Input:  extractCustomToolCallInput(arguments),
@@ -2211,7 +2267,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 		if state.toolIsToolSearch[i] {
 			outputs = append(outputs, ResponsesOutput{
 				Type:      "tool_search_call",
-				ID:        generateItemID(),
+				ID:        state.ToolItemIDs[i],
 				CallID:    toolCall.ID,
 				Arguments: arguments,
 				Status:    "completed",
@@ -2224,7 +2280,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 		}
 		outputs = append(outputs, ResponsesOutput{
 			Type:      "function_call",
-			ID:        generateItemID(),
+			ID:        state.ToolItemIDs[i],
 			CallID:    toolCall.ID,
 			Name:      name,
 			Namespace: namespace,
@@ -2232,6 +2288,11 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 			Status:    "completed",
 		})
 	}
+	positions := map[string]int{state.ReasoningItemID: state.ReasoningIndex, state.MessageItemID: state.MessageIndex}
+	for i, id := range state.ToolItemIDs {
+		positions[id] = state.ToolOutputIndex[i]
+	}
+	sort.SliceStable(outputs, func(i, j int) bool { return positions[outputs[i].ID] < positions[outputs[j].ID] })
 	return outputs
 }
 

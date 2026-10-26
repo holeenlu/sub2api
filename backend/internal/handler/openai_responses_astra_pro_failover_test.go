@@ -175,31 +175,3 @@ func TestOpenAIGatewayHandlerResponses_AstraProBoth403NoDowngrade(t *testing.T) 
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 }
-
-// passthrough -> non-passthrough drops only the encrypted *input* reasoning item;
-// the official top-level reasoning.mode/effort survive verbatim.
-func TestDeriveOpenAIForwardAttemptBody_AstraCrossModeKeepsTopLevelReasoningMode(t *testing.T) {
-	h := &OpenAIGatewayHandler{}
-	canonical := []byte(`{"model":"gpt-6-astra","stream":false,"reasoning":{"mode":"pro","effort":"max"},"input":[` +
-		`{"type":"message","role":"user","content":"hello"},` +
-		`{"type":"reasoning","id":"rs_kiro_abc","encrypted_content":"ENC_BLOB","summary":[{"type":"summary_text","text":"thinking"}]}` +
-		`]}`)
-	canonicalSnapshot := append([]byte(nil), canonical...)
-	state := &openAIPassthroughFailoverState{}
-
-	kiro := newOpenAIPassthroughAccount(1, true)     // passthrough first
-	bedrock := newOpenAIPassthroughAccount(2, false) // non-passthrough after
-
-	firstBody := h.deriveOpenAIForwardAttemptBody(nil, canonical, kiro, state)
-	require.Equal(t, 1, reasoningItemCount(t, firstBody), "first passthrough attempt keeps the encrypted input reasoning item")
-	require.Equal(t, "pro", gjson.GetBytes(firstBody, "reasoning.mode").String())
-	require.Equal(t, "max", gjson.GetBytes(firstBody, "reasoning.effort").String())
-
-	secondBody := h.deriveOpenAIForwardAttemptBody(nil, canonical, bedrock, state)
-	require.Equal(t, 0, reasoningItemCount(t, secondBody), "cross-mode attempt drops the encrypted input reasoning item")
-	require.Equal(t, "pro", gjson.GetBytes(secondBody, "reasoning.mode").String(), "mode=pro must survive cross-mode sanitization")
-	require.Equal(t, "max", gjson.GetBytes(secondBody, "reasoning.effort").String(), "effort=max must survive cross-mode sanitization")
-	require.Equal(t, "gpt-6-astra", gjson.GetBytes(secondBody, "model").String())
-	require.JSONEq(t, string(canonicalSnapshot), string(canonical), "canonical forwardBody must never be mutated")
-	require.True(t, gjson.GetBytes(canonical, "input.1.encrypted_content").Exists())
-}

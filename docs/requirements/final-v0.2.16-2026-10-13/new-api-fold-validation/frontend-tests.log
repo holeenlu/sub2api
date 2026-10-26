@@ -1,0 +1,19 @@
+
+ RUN  v2.1.9 /Users/luhonglin/.codex/worktrees/rebuild-v0216/sub2api/frontend
+
+ ✓ src/utils/__tests__/usageServiceTier.spec.ts (5 tests) 1ms
+ ✓ src/api/__tests__/usageExport.spec.ts (17 tests) 14ms
+Browserslist: browsers data (caniuse-lite) is 10 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/components/admin/usage/__tests__/UsageTable.spec.ts (32 tests) 155ms
+ ✓ src/i18n/__tests__/usageServiceTierLocales.spec.ts (2 tests) 2ms
+ ✓ src/views/user/__tests__/UsageView.spec.ts (13 tests) 135ms
+ ✓ src/__tests__/integration/usage-reasoning-effort.spec.ts (3 tests) 140ms
+ ✓ src/views/admin/__tests__/UsageView.spec.ts (19 tests) 265ms
+ ✓ src/i18n/__tests__/localeKeyCompleteness.spec.ts (4 tests) 281ms
+
+ Test Files  8 passed (8)
+      Tests  95 passed (95)
+   Start at  00:21:23
+   Duration  6.77s (transform 6.66s, setup 489ms, collect 12.58s, tests 994ms, environment 4.06s, prepare 552ms)

@@ -19,6 +19,8 @@ const redeemTestOrg = "11111111-1111-4111-8111-111111111111"
 
 type redeemAccountsStub struct{}
 
+func (redeemAccountsStub) UpdateExtra(context.Context, int64, map[string]any) error { return nil }
+
 func (redeemAccountsStub) GetByID(_ context.Context, id int64) (*Account, error) {
 	return &Account{ID: id, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Credentials: map[string]any{"scope": "user:profile"}}, nil
 }
@@ -121,6 +123,33 @@ func newRedeemService(t *testing.T, f *redeemFake) (*ClaudeResetCreditService, *
 		return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body))}, nil
 	}
 	return s, repo, locks
+}
+
+func TestClaudeResetRedemptionRefreshesOrInvalidatesPersistedCount(t *testing.T) {
+	for _, outcome := range []string{`{"result":"reset","cleared":["five_hour"]}`, "network-error"} {
+		t.Run(outcome, func(t *testing.T) {
+			f := &redeemFake{claim: outcome}
+			s, _, _ := newRedeemService(t, f)
+			account, err := (redeemAccountsStub{}).GetByID(context.Background(), 1)
+			require.NoError(t, err)
+			accounts := &resetSnapshotAccounts{resetAccountStub: resetAccountStub{account}}
+			accounts.account.Extra = map[string]any{claudeResetCreditSnapshotKey: map[string]any{"available_count": 9}}
+			s.accounts = accounts
+			result, err := s.Redeem(context.Background(), 1, "persisted-count")
+			require.NoError(t, err)
+			require.NotEmpty(t, accounts.writes)
+			require.Nil(t, accounts.writes[0][claudeResetCreditSnapshotKey], "invalidate pre-claim count even when claim outcome is unknown")
+			if outcome == "network-error" {
+				require.Equal(t, ClaudeResetOutcomeUnknown, result.Outcome)
+				require.Nil(t, accounts.account.Extra[claudeResetCreditSnapshotKey])
+			} else {
+				require.NotNil(t, result.Credits)
+				require.True(t, result.Credits.CachePersisted)
+				require.Len(t, accounts.writes, 3)
+				require.Contains(t, accounts.writes[1], anthropicObservationPrefix+"five_hour.cleared_at")
+			}
+		})
+	}
 }
 
 func TestClaudeResetRedeemHappyPathServerPicksNextGrant(t *testing.T) {
@@ -365,4 +394,85 @@ func TestClaudeResetRedeemNeverEchoesGrantIDs(t *testing.T) {
 	require.NotContains(t, string(raw), "launch")
 	require.Empty(t, out.Reason)
 	require.Equal(t, []string{"five_hour", "seven_day_overage_included"}, out.Cleared)
+}
+
+func TestClaudeResetRedeemClearsConfirmedFableSnapshot(t *testing.T) {
+	now := time.Now().UTC()
+	before := now.Add(-time.Minute)
+	reset := now.Add(4 * 24 * time.Hour)
+	account := Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"scope": "user:profile", "access_token": "synthetic-token"},
+		Extra:       map[string]any{"passive_usage_7d_oi_utilization": 0.5, "passive_usage_7d_oi_reset": reset.Unix()}}
+	fields := map[string]UsageObservation{
+		"seven_day_fable.utilization": {Value: 50.0, Source: "upstream_headers", SampledAt: &before},
+		"seven_day_fable.resets_at":   {Value: reset.Format(time.RFC3339), Source: "upstream_headers", SampledAt: &before},
+	}
+	mergeAccountExtra(&account, persistableAnthropicObservations(fields, anthropicCredentialIdentity(&account)))
+	repo := &claudeUsageSnapshotRepo{account: account}
+	s, _, _ := newRedeemService(t, &redeemFake{claim: `{"result":"reset","cleared":["seven_day_overage_included"]}`})
+	s.accounts, s.now = repo, func() time.Time { return now }
+	result, err := s.Redeem(t.Context(), 1, "clear-fable")
+	require.NoError(t, err)
+	require.Equal(t, ClaudeResetOutcomeReset, result.Outcome)
+
+	// Reload persisted state after restart; sparse usage must not restore old 50%.
+	usage := &AccountUsageService{accountRepo: repo, cache: NewUsageCache(), usageFetcher: &claudeSnapshotFetcher{
+		response: claudeUsageFixture(t, map[string]any{"seven_day": map[string]any{"utilization": 15}}),
+	}}
+	passive, err := usage.GetPassiveUsage(t.Context(), 1)
+	require.NoError(t, err)
+	require.NotNil(t, passive.SevenDayFable)
+	require.Zero(t, passive.SevenDayFable.Utilization)
+	require.Nil(t, passive.SevenDayFable.ResetsAt, "redemption does not supply a new reset deadline")
+	active, err := usage.GetUsage(t.Context(), 1, true)
+	require.NoError(t, err)
+	require.Zero(t, active.SevenDayFable.Utilization)
+	require.Equal(t, 15.0, active.SevenDay.Utilization)
+
+	// Successful and negative pre-reset caches on another worker must expire.
+	for _, oldError := range []error{nil, &ClaudeUsageHTTPError{StatusCode: 429}} {
+		usage.cache.apiCache.Store(int64(1), &apiUsageCache{identity: anthropicCredentialIdentity(&account),
+			response: claudeUsageFixture(t, map[string]any{"seven_day_overage_included": map[string]any{"utilization": 50}}),
+			err:      oldError, timestamp: before})
+		fresh, e := usage.GetUsage(t.Context(), 1)
+		require.NoError(t, e)
+		require.Empty(t, fresh.ErrorCode)
+		require.Zero(t, fresh.SevenDayFable.Utilization)
+	}
+
+	// Later real usage wins; replaying the same redemption never clears it again.
+	after := time.Now().Add(time.Second)
+	putUsageObservation(fields, "seven_day_fable.utilization", 3.0, "upstream_headers", &after)
+	require.NoError(t, repo.UpdateExtra(t.Context(), 1, persistableAnthropicObservations(fields, anthropicCredentialIdentity(&account))))
+	replayed, err := s.Redeem(t.Context(), 1, "clear-fable")
+	require.NoError(t, err)
+	require.True(t, replayed.Replayed)
+	passive, err = usage.GetPassiveUsage(t.Context(), 1)
+	require.NoError(t, err)
+	require.Equal(t, 3.0, passive.SevenDayFable.Utilization)
+}
+
+func TestClaudeResetRedeemPreservesUnconfirmedFable(t *testing.T) {
+	for _, outcome := range []string{"reset", "already_used", "not_limited", "unknown"} {
+		t.Run(outcome, func(t *testing.T) {
+			cleared := []string{"five_hour", "seven_day"}
+			if outcome != "reset" {
+				cleared = append(cleared, "seven_day_overage_included")
+			}
+			body, err := json.Marshal(map[string]any{"result": outcome, "cleared": cleared})
+			require.NoError(t, err)
+			s, _, _ := newRedeemService(t, &redeemFake{claim: string(body)})
+			a, err := (redeemAccountsStub{}).GetByID(t.Context(), 1)
+			require.NoError(t, err)
+			a.Extra = map[string]any{"passive_usage_7d_oi_utilization": 0.5}
+			repo := &claudeUsageSnapshotRepo{account: *a}
+			s.accounts = repo
+			_, err = s.Redeem(t.Context(), 1, "partial-reset")
+			require.NoError(t, err)
+			require.NotContains(t, repo.account.Extra, anthropicObservationPrefix+"seven_day_fable.cleared_at")
+			usage, err := (&AccountUsageService{accountRepo: repo, cache: NewUsageCache()}).GetPassiveUsage(t.Context(), 1)
+			require.NoError(t, err)
+			require.Equal(t, 50.0, usage.SevenDayFable.Utilization)
+		})
+	}
 }
