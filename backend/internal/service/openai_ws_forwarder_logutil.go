@@ -218,7 +218,11 @@ func parseOpenAIWSErrorEventFields(message []byte) (code string, errType string,
 	if len(message) == 0 {
 		return "", "", ""
 	}
-	values := gjson.GetManyBytes(message, "error.code", "error.type", "error.message")
+	prefix := "error"
+	if gjson.GetBytes(message, "response.error").IsObject() {
+		prefix = "response.error"
+	}
+	values := gjson.GetManyBytes(message, prefix+".code", prefix+".type", prefix+".message")
 	return strings.TrimSpace(values[0].String()), strings.TrimSpace(values[1].String()), strings.TrimSpace(values[2].String())
 }
 
@@ -227,13 +231,6 @@ func summarizeOpenAIWSErrorEventFieldsFromRaw(codeRaw, errTypeRaw, errMessageRaw
 	errType = truncateOpenAIWSLogValue(errTypeRaw, openAIWSLogValueMaxLen)
 	errMessage = truncateOpenAIWSLogValue(errMessageRaw, openAIWSLogValueMaxLen)
 	return code, errType, errMessage
-}
-
-func summarizeOpenAIWSErrorEventFields(message []byte) (code string, errType string, errMessage string) {
-	if len(message) == 0 {
-		return "-", "-", "-"
-	}
-	return summarizeOpenAIWSErrorEventFieldsFromRaw(parseOpenAIWSErrorEventFields(message))
 }
 
 func summarizeOpenAIWSPayloadKeySizes(payload map[string]any, topN int) string {
@@ -511,12 +508,14 @@ func applyOpenAIWSRetryPayloadStrategy(payload map[string]any, attempt int) (str
 	return "trim_optional_fields", removed
 }
 
+// 这些辅助函数由调用方决定级别，不走 LegacyPrintf 的关键字推断：
+// 事件名/字段名（error_event、*_fail、fallback_reason）不应把信息日志抬升为错误。
 func logOpenAIWSModeInfo(format string, args ...any) {
-	logger.LegacyPrintf("service.openai_gateway", "[OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
+	logger.LegacyPrintfLevel(logger.LevelInfo, "service.openai_gateway", "[OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
 }
 
 func logOpenAIWSModeWarn(format string, args ...any) {
-	logger.LegacyPrintf("service.openai_gateway", "[warn] [OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
+	logger.LegacyPrintfLevel(logger.LevelWarn, "service.openai_gateway", "[warn] [OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
 }
 
 func isOpenAIWSModeDebugEnabled() bool {
@@ -527,7 +526,7 @@ func logOpenAIWSModeDebug(format string, args ...any) {
 	if !isOpenAIWSModeDebugEnabled() {
 		return
 	}
-	logger.LegacyPrintf("service.openai_gateway", "[debug] [OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
+	logger.LegacyPrintfLevel(logger.LevelDebug, "service.openai_gateway", "[debug] [OpenAI WS Mode][openai_ws_mode=true] "+format, args...)
 }
 
 func logOpenAIWSBindResponseAccountWarn(groupID, accountID int64, responseID string, err error) {
@@ -582,9 +581,49 @@ func openAIWSDialRespHeaderForLog(err error, key string) string {
 	return truncateOpenAIWSLogValue(dialErr.ResponseHeaders.Get(key), openAIWSHeaderValueMaxLen)
 }
 
+// OpenAIWSHandshakeFailure exposes bounded categories, never the captured body,
+// cookies or arbitrary provider messages. An unknown 403 is not an auth fact.
+func OpenAIWSHandshakeFailure(err error) (status int, class, detail string) {
+	var dial *openAIWSDialError
+	if !errors.As(err, &dial) || dial == nil || dial.StatusCode < 400 {
+		return
+	}
+	status, class = dial.StatusCode, "handshake_rejected"
+	body := dial.ResponseBody
+	format := "other"
+	switch {
+	case len(bytes.TrimSpace(body)) == 0:
+		format = "empty"
+	case gjson.ValidBytes(body):
+		format = "json"
+	case strings.Contains(strings.ToLower(dial.ResponseHeaders.Get("Content-Type")), "text/html"):
+		format = "html"
+	}
+	if status == http.StatusForbidden {
+		class = "handshake_forbidden_unknown"
+		switch {
+		case strings.EqualFold(strings.TrimSpace(dial.ResponseHeaders.Get("cf-mitigated")), "challenge"):
+			class = "handshake_edge_challenge"
+		case isCloudflareBotBlockResponse(body):
+			class = "handshake_edge_block"
+		case isOpenAIUpstreamAccessStateError("", body):
+			class = "handshake_account_unavailable"
+		case openAIStreamCredentialAuthFailure(body):
+			class = "handshake_credentials_rejected"
+		case gjson.ValidBytes(body) && (isOpenAIRequestScoped403(&Account{Platform: PlatformOpenAI}, status, body) || IsUpstreamContentRefusal(body)):
+			class = "handshake_request_policy"
+		}
+	}
+	raw, _ := json.Marshal(map[string]any{"upstream_protocol": "websocket", "failure_stage": "handshake", "upstream_status": status, "classification": class, "body_format": format, "captured_body_bytes": len(body)})
+	return status, class, string(raw)
+}
+
 func classifyOpenAIWSDialError(err error) string {
 	if err == nil {
 		return "-"
+	}
+	if status, class, _ := OpenAIWSHandshakeFailure(err); status == http.StatusForbidden {
+		return class
 	}
 	baseErr := unwrapOpenAIWSDialBaseError(err)
 	if baseErr == nil {
@@ -661,7 +700,7 @@ func isOpenAIWSClientDisconnectError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) {
 		return true
 	}
 	switch coderws.CloseStatus(err) {

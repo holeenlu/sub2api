@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
@@ -13,6 +13,7 @@ function getTooltipElement(): HTMLDivElement {
 
 describe('HelpTooltip', () => {
   afterEach(() => {
+    vi.useRealTimers()
     document.body.innerHTML = ''
   })
 
@@ -107,4 +108,53 @@ describe('HelpTooltip', () => {
 
     wrapper.unmount()
   })
+  it('supports account details by hover, keyboard focus and touch click, with Escape dismissal', async () => {
+    const wrapper = mount(HelpTooltip, { attachTo: document.body, props: { trigger: 'both', content: 'details' } })
+    const trigger = wrapper.get('.group')
+    const tooltip = getTooltipElement()
+    await trigger.trigger('focusin')
+    await trigger.trigger('click')
+    expect(tooltip.style.display).not.toBe('none')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(tooltip.style.display).toBe('none')
+    await trigger.trigger('mouseenter')
+    expect(tooltip.style.display).not.toBe('none')
+    document.body.click()
+    await nextTick()
+    expect(tooltip.style.display).toBe('none')
+    wrapper.unmount()
+  })
+
+  it('allows crossing the hover gap and selecting text before dismissing', async () => {
+    vi.useFakeTimers()
+    const w=mount(HelpTooltip,{attachTo:document.body,props:{trigger:'both',content:'selectable account'}})
+    const trigger=w.get('.group'), panel=getTooltipElement()
+    await trigger.trigger('mouseenter');await trigger.trigger('mouseleave')
+    await vi.advanceTimersByTimeAsync(150)
+    expect(panel.style.display).not.toBe('none')
+    panel.dispatchEvent(new MouseEvent('mouseenter'))
+    await vi.advanceTimersByTimeAsync(500)
+    expect(panel.style.display).not.toBe('none')
+    panel.dispatchEvent(new MouseEvent('pointerdown',{button:0}))
+    panel.dispatchEvent(new MouseEvent('mouseleave'))
+    await vi.advanceTimersByTimeAsync(500)
+    expect(panel.style.display).not.toBe('none')
+    document.body.dispatchEvent(new MouseEvent('pointerup',{bubbles:true}))
+    await vi.advanceTimersByTimeAsync(300)
+    expect(panel.style.display).toBe('none')
+    w.unmount()
+  })
+  it('pins details on click until explicitly dismissed, without hover closing them', async () => {
+    vi.useFakeTimers()
+    const w=mount(HelpTooltip,{attachTo:document.body,props:{trigger:'both',content:'pinned'}})
+    const trigger=w.get('.group'),panel=getTooltipElement()
+    await trigger.trigger('click');await trigger.trigger('mouseleave')
+    panel.dispatchEvent(new MouseEvent('mouseleave'))
+    await vi.advanceTimersByTimeAsync(500)
+    expect(panel.style.display).not.toBe('none')
+    await trigger.trigger('click');expect(panel.style.display).toBe('none')
+    w.unmount()
+  })
+
 })

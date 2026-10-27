@@ -31,7 +31,9 @@ type OpsRepository interface {
 	GetOpenAITokenStats(ctx context.Context, filter *OpsOpenAITokenStatsFilter) (*OpsOpenAITokenStatsResponse, error)
 
 	InsertSystemMetrics(ctx context.Context, input *OpsInsertSystemMetricsInput) error
+	GetSystemMetricsWindow(ctx context.Context, start, end time.Time) (*OpsInsertSystemMetricsInput, error)
 	GetLatestSystemMetrics(ctx context.Context, windowMinutes int) (*OpsSystemMetricsSnapshot, error)
+	CleanupOpsTable(ctx context.Context, table string, cutoff time.Time, truncate bool, batchSize int) (int64, error)
 
 	UpsertJobHeartbeat(ctx context.Context, input *OpsUpsertJobHeartbeatInput) error
 	ListJobHeartbeats(ctx context.Context) ([]*OpsJobHeartbeat, error)
@@ -291,7 +293,9 @@ type OpsUpsertJobHeartbeatInput struct {
 }
 
 type OpsJobHeartbeat struct {
-	JobName string `json:"job_name"`
+	JobName                 string `json:"job_name"`
+	ExpectedIntervalSeconds int64  `json:"expected_interval_seconds"`
+	HealthStatus            string `json:"health_status,omitempty"`
 
 	LastRunAt      *time.Time `json:"last_run_at"`
 	LastSuccessAt  *time.Time `json:"last_success_at"`

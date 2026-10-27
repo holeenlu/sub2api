@@ -3,7 +3,7 @@ import { updateFavicon } from '@/utils/branding'
 
 describe('updateFavicon', () => {
   beforeEach(() => {
-    document.head.innerHTML = '<link rel="icon" href="/logo.svg">'
+    document.head.innerHTML = '<link rel="icon" type="image/svg+xml" href="/logo.svg">'
   })
 
   it('replaces the default favicon with the configured logo', () => {
@@ -11,6 +11,7 @@ describe('updateFavicon', () => {
 
     const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
     expect(link?.href).toBe('https://example.com/custom-logo.png')
+    expect(link?.hasAttribute('type')).toBe(false)
   })
 
   it('ignores unsafe logo URLs', () => {
@@ -19,4 +20,15 @@ describe('updateFavicon', () => {
     const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
     expect(link?.getAttribute('href')).toBe('/logo.svg')
   })
+})
+
+
+it('supports uploaded image data and clearing the configured logo', () => {
+  const logo = 'data:image/png;base64,aGVsbG8='
+  updateFavicon(logo)
+  const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')!
+  expect(link.href).toBe(logo)
+  expect(link.hasAttribute('type')).toBe(false)
+  updateFavicon('')
+  expect(link.getAttribute('href')).toBe('/logo.svg')
 })
