@@ -303,6 +303,8 @@
         </Transition>
       </Teleport>
 
+      <CloudTestDownloads :result="cloudResult" :successful="status === 'success'" />
+
       <!-- Test Info -->
       <div class="flex items-center justify-between px-1 text-xs text-gray-500 dark:text-gray-400">
         <div class="flex items-center gap-3">
@@ -365,7 +367,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -376,6 +378,8 @@ import { buildApiUrl } from '@/api/client'
 import { ADMIN_UI_REQUEST_HEADER } from '@/api/adminUIRequest'
 import { adminAPI } from '@/api/admin'
 import type { Account, ClaudeModel } from '@/types'
+import { isOpenAICloudAccount, readCloudTestResult, type CloudTestResult } from '@/utils/openaiCloud'
+import CloudTestDownloads from '@/components/account/CloudTestDownloads.vue'
 
 const { t } = useI18n()
 const { copyToClipboard } = useClipboard()
@@ -397,6 +401,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'completed'): void
 }>()
 
 const terminalRef = ref<HTMLElement | null>(null)
@@ -413,7 +418,7 @@ const generatedImages = ref<PreviewMedia[]>([])
 const generatedAudios = ref<PreviewMedia[]>([])
 const generatedVideos = ref<PreviewMedia[]>([])
 const previewImageUrl = ref('')
-const testMode = ref<'default' | 'compact'>('default')
+const testMode = ref<'default' | 'compact' | 'cloud'>('default')
 const grokTestMode = ref<'text' | 'image' | 'video' | 'search' | 'tts' | 'stt' | 'realtime'>('text')
 const uploadImageDataURL = ref('')
 const uploadImagePreview = ref('')
@@ -423,9 +428,14 @@ const uploadAudioName = ref('')
 const imageFileInput = ref<HTMLInputElement | null>(null)
 const audioFileInput = ref<HTMLInputElement | null>(null)
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
+const isCloudEligible = computed(() => isOpenAICloudAccount(props.account))
+const cloudResult = ref<CloudTestResult | null>(null)
+let generation = 0
+let modelGeneration = 0
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
+  ...(isCloudEligible.value ? [{ value: 'cloud', label: t('admin.accounts.openai.cloud.testMode') }] : []),
   { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
 ])
 const grokTestModeOptions = computed(() => [
@@ -446,6 +456,7 @@ const supportsGeminiImageTest = computed(() => {
 })
 
 const supportsOpenAIImageTest = computed(() => {
+  if (testMode.value === 'cloud') return false
   const modelID = selectedModelId.value.toLowerCase()
   if (!modelID.startsWith('gpt-image-')) return false
   return props.account?.platform === 'openai'
@@ -734,8 +745,10 @@ const pickDefaultModelForMode = () => {
 }
 
 watch(
-  () => props.show,
-  async (newVal) => {
+  [() => props.show, () => props.account?.id],
+  async ([newVal]) => {
+    generation++; modelGeneration++; abortStream()
+    cloudResult.value = null
     if (newVal && props.account) {
       testPrompt.value = ''
       testMode.value = 'default'
@@ -760,13 +773,20 @@ watch(grokTestMode, () => {
   applyDefaultPromptForMode()
 })
 
+watch(testMode, (mode, previousMode) => {
+  if (mode !== 'cloud' && previousMode !== 'cloud') return
+  if (props.show) { generation++; abortStream(); resetState(); void loadAvailableModels() }
+})
+
 const loadAvailableModels = async () => {
   if (!props.account) return
+  const version = ++modelGeneration, accountID = props.account.id
 
   loadingModels.value = true
   selectedModelId.value = '' // Reset selection before loading
   try {
-    const models = await adminAPI.accounts.getAvailableModels(props.account.id)
+    const models = await adminAPI.accounts.getAvailableModels(accountID)
+    if (version !== modelGeneration) return
     availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
       ? sortTestModels(models)
       : models
@@ -781,16 +801,18 @@ const loadAvailableModels = async () => {
       }
     }
   } catch (error) {
+    if (version !== modelGeneration) return
     console.error('Failed to load available models:', error)
     // Fallback to empty list
     availableModels.value = []
     selectedModelId.value = ''
   } finally {
-    loadingModels.value = false
+    if (version === modelGeneration) loadingModels.value = false
   }
 }
 
 const resetState = () => {
+  cloudResult.value = null
   status.value = 'idle'
   outputLines.value = []
   streamingContent.value = ''
@@ -802,6 +824,7 @@ const resetState = () => {
 }
 
 const handleClose = () => {
+  generation++; modelGeneration++; cloudResult.value = null
   abortStream()
   emit('close')
 }
@@ -825,6 +848,8 @@ const scrollToBottom = async () => {
   }
 }
 
+onBeforeUnmount(() => { generation++; modelGeneration++; abortStream() })
+
 const startTest = async () => {
   if (!props.account || !canStartTest.value) return
 
@@ -842,6 +867,7 @@ const startTest = async () => {
   abortStream()
 
   abortController = new AbortController()
+  const version = ++generation
 
   try {
     const requestBody: {
@@ -906,6 +932,7 @@ const startTest = async () => {
 
     while (true) {
       const { done, value } = await reader.read()
+      if (version !== generation) { await reader.cancel(); return }
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })
@@ -926,7 +953,9 @@ const startTest = async () => {
         }
       }
     }
+    if (version === generation && testMode.value === 'cloud' && status.value === 'connecting') throw new Error(t('admin.accounts.openai.cloud.incompleteTest'))
   } catch (error: unknown) {
+    if (version !== generation) return
     if (error instanceof DOMException && error.name === 'AbortError') {
       status.value = 'idle'
       return
@@ -948,6 +977,7 @@ const handleEvent = (event: {
   audio_url?: string
   video_url?: string
   mime_type?: string
+  data?: unknown
 }) => {
   switch (event.type) {
     case 'test_start':
@@ -1023,6 +1053,15 @@ const handleEvent = (event: {
       break
 
     case 'test_complete':
+      if (testMode.value === 'cloud') {
+        cloudResult.value = readCloudTestResult(event.data)
+        if (!cloudResult.value) {
+          status.value = 'error'
+          errorMessage.value = t('admin.accounts.openai.cloud.incompleteTest')
+          break
+        }
+      }
+      emit('completed')
       // Move streaming content to output lines
       if (streamingContent.value) {
         addLine(streamingContent.value, 'text-green-300')
@@ -1032,7 +1071,7 @@ const handleEvent = (event: {
         status.value = 'success'
       } else {
         status.value = 'error'
-        errorMessage.value = event.error || t('admin.accounts.testFailed')
+        errorMessage.value = event.error || (testMode.value === 'cloud' ? cloudResult.value?.error?.message : '') || t('admin.accounts.testFailed')
       }
       break
 

@@ -4,19 +4,27 @@ import OpsErrorDetailModal from '../OpsErrorDetailModal.vue'
 
 const mocks = vi.hoisted(() => ({
   getRequestErrorDetail: vi.fn(),
-  listRequestErrorUpstreamErrors: vi.fn()
+  getUpstreamErrorDetail: vi.fn(),
+  listRequestErrorUpstreamErrors: vi.fn(),
+  getErrorDiagnostics: vi.fn(), saveAs: vi.fn(), showError: vi.fn()
 }))
 
 vi.mock('@/api/admin/ops', () => ({
   opsAPI: {
     getRequestErrorDetail: mocks.getRequestErrorDetail,
-    getUpstreamErrorDetail: vi.fn(),
+    getErrorDiagnostics: mocks.getErrorDiagnostics,
+    getUpstreamErrorDetail: mocks.getUpstreamErrorDetail,
     listRequestErrorUpstreamErrors: mocks.listRequestErrorUpstreamErrors
   }
 }))
 
+const roleState = vi.hoisted(() => ({ isSuperAdmin: true }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ get isSuperAdmin() { return roleState.isSuperAdmin } }) }))
+
+vi.mock('file-saver', () => ({ saveAs: mocks.saveAs }))
+
 vi.mock('@/stores', () => ({
-  useAppStore: () => ({ showError: vi.fn() })
+  useAppStore: () => ({ showError: mocks.showError })
 }))
 
 vi.mock('vue-i18n', async (importOriginal) => {
@@ -29,7 +37,10 @@ vi.mock('vue-i18n', async (importOriginal) => {
 
 describe('OpsErrorDetailModal', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     mocks.getRequestErrorDetail.mockReset()
+    mocks.getUpstreamErrorDetail.mockReset()
+    mocks.getErrorDiagnostics.mockReset()
     mocks.listRequestErrorUpstreamErrors.mockReset()
     mocks.listRequestErrorUpstreamErrors.mockResolvedValue({ items: [] })
   })
@@ -71,9 +82,156 @@ describe('OpsErrorDetailModal', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('provider rate limit exhausted')
+    expect(wrapper.text()).not.toContain('All available accounts exhausted')
     expect(wrapper.text()).toContain('admin.ops.errorDetail.upstreamStatus')
     expect(wrapper.text()).toContain('429')
     expect(wrapper.findAll('pre')).toHaveLength(2)
     expect(wrapper.text()).not.toContain('admin.ops.errorDetail.payloads.upstream_detail')
   })
+  it('shows the final request status separately from a recovered upstream failure', async () => {
+    mocks.getRequestErrorDetail.mockResolvedValue({
+      id: 4712, status_code: 503, request_status_code: 200, upstream_status_code: 503,
+      message: 'Recovered upstream error 503: overloaded', upstream_error_message: 'overloaded',
+      platform: 'openai', model: 'gpt-6.1-sol', request_type: 2, error_body: '', upstream_errors: '[]'
+    })
+    const wrapper = shallowMount(OpsErrorDetailModal, {
+      props: { show: true, errorId: 4712, errorType: 'request' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, Icon: true } }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.ops.errorDetail.requestStatus')
+    expect(wrapper.text()).toContain('admin.ops.errorLog.recovered')
+    expect(wrapper.text()).toContain('200')
+    expect(wrapper.text()).toContain('503')
+    expect(wrapper.text()).toContain('Recovered upstream error 503: overloaded')
+  })
+
+  it('downloads all modal diagnostics and collapsed upstream responses and handles loading failure', async () => {
+    const upstreamEvent = { kind: 'http', message: 'BPS ownership rejected', detail: '{"ownership":"missing"}' }
+    const scheduling = '{"events":[{"stage":"selection","reason":"selected"}],"dropped_events":0}'
+    const detail = {
+      id: 1, status_code: 502, error_body: 'authorized-body',
+      upstream_error_message: 'BPS ownership rejected',
+      upstream_error_detail: 'original-response',
+      upstream_errors: JSON.stringify([upstreamEvent, { kind: 'scheduling_trace', detail: scheduling }])
+    }
+    const attempts = [
+      { id: 2, status_code: 500, request_id: 'upstream-rid', message: 'BPS ownership rejected', upstream_error_detail: '{"body":"complete upstream response"}' },
+      { id: 3, status_code: 503, error_body: 'fallback response body' }
+    ]
+    const exported = { ...detail, correlated_upstream_errors: attempts }
+    mocks.getRequestErrorDetail.mockResolvedValue(detail)
+    mocks.listRequestErrorUpstreamErrors.mockResolvedValue({ items: attempts })
+    mocks.getErrorDiagnostics.mockResolvedValue(exported)
+    const wrapper = shallowMount(OpsErrorDetailModal, {
+      props: { show: true, errorId: 1, errorType: 'request' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }, Icon: true } }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('upstream-rid')
+    expect(wrapper.text()).not.toContain('complete upstream response')
+    await wrapper.get('[data-testid="error-detail-export"]').trigger('click')
+    await flushPromises()
+    expect(mocks.getErrorDiagnostics).toHaveBeenCalledWith(1, 'request')
+    expect(mocks.saveAs).toHaveBeenCalledOnce()
+    const [blob, filename] = mocks.saveAs.mock.calls[0]
+    expect(filename).toBe('request-diagnostics-1.json')
+    const text = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob) })
+    expect(JSON.parse(text)).toEqual({
+      ...exported,
+      display: {
+        message: 'BPS ownership rejected',
+        root_cause: 'BPS ownership rejected',
+        diagnostic_payloads: [
+          { key: 'client', value: 'authorized-body' },
+          { key: 'upstream_message', value: 'BPS ownership rejected' },
+          { key: 'upstream_detail', value: 'original-response' },
+          { key: 'upstream_events', value: JSON.stringify([upstreamEvent]) },
+          { key: 'scheduling_trace', value: scheduling }
+        ],
+        upstream_errors: [
+          { id: 2, response_preview: '{"body":"complete upstream response"}' },
+          { id: 3, response_preview: 'fallback response body' }
+        ]
+      }
+    })
+    mocks.getErrorDiagnostics.mockRejectedValueOnce(new Error('detail unavailable'))
+    await wrapper.get('[data-testid="error-detail-export"]').trigger('click')
+    await flushPromises()
+    expect(mocks.showError).toHaveBeenCalledWith('admin.ops.errorDetail.exportFailed')
+    expect(mocks.saveAs).toHaveBeenCalledOnce()
+    expect(wrapper.get('[data-testid="error-detail-export"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('exports upstream detail using the upstream error type', async () => {
+    mocks.getUpstreamErrorDetail.mockResolvedValue({ id: 7, phase: 'upstream', status_code: 403 })
+    mocks.getErrorDiagnostics.mockResolvedValue({ id: 7, phase: 'upstream', status_code: 403, correlated_upstream_errors: [] })
+    const wrapper = shallowMount(OpsErrorDetailModal, {
+      props: { show: true, errorId: 7, errorType: 'upstream' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }, Icon: true } }
+    })
+    await flushPromises()
+    await wrapper.get('[data-testid="error-detail-export"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.getErrorDiagnostics).toHaveBeenCalledWith(7, 'upstream')
+    expect(mocks.saveAs).toHaveBeenCalledWith(expect.any(Blob), 'request-diagnostics-7.json')
+    wrapper.unmount()
+  })
+
+  it('keeps the clicked record ID and type when selection changes during export', async () => {
+    const exported = {
+      id: 1, phase: 'request', status_code: 502, upstream_error_message: 'original error',
+      correlated_upstream_errors: [{ id: 2, upstream_error_detail: 'original attempt response' }]
+    }
+    let resolveExport!: (value: typeof exported) => void
+    mocks.getRequestErrorDetail.mockResolvedValue({ id: 1, phase: 'request', status_code: 502 })
+    mocks.getUpstreamErrorDetail.mockResolvedValue({ id: 7, phase: 'upstream', status_code: 403 })
+    mocks.getErrorDiagnostics.mockReturnValue(new Promise<typeof exported>(resolve => { resolveExport = resolve }))
+    const wrapper = shallowMount(OpsErrorDetailModal, {
+      props: { show: true, errorId: 1, errorType: 'request' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }, Icon: true } }
+    })
+    await flushPromises()
+    await wrapper.get('[data-testid="error-detail-export"]').trigger('click')
+    expect(wrapper.get('[data-testid="error-detail-export"]').attributes('disabled')).toBeDefined()
+    await wrapper.setProps({ errorId: 7, errorType: 'upstream' })
+    await flushPromises()
+    resolveExport(exported)
+    await flushPromises()
+
+    expect(mocks.getErrorDiagnostics).toHaveBeenCalledOnce()
+    expect(mocks.getErrorDiagnostics).toHaveBeenCalledWith(1, 'request')
+    expect(mocks.saveAs).toHaveBeenCalledWith(expect.any(Blob), 'request-diagnostics-1.json')
+    const [blob] = mocks.saveAs.mock.calls[0]
+    const text = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob) })
+    expect(JSON.parse(text)).toMatchObject({
+      id: 1,
+      display: {
+        root_cause: 'original error',
+        upstream_errors: [{ id: 2, response_preview: 'original attempt response' }]
+      }
+    })
+    wrapper.unmount()
+  })
+
+})
+
+
+it.each([false, true])('gates upstream account details for super-admin=%s', async (isSuperAdmin) => {
+  roleState.isSuperAdmin = isSuperAdmin
+  mocks.getRequestErrorDetail.mockResolvedValue({ id: 1, phase: 'upstream', error_owner: 'provider', account_id: 991, account_name: 'private-account' })
+  const wrapper = shallowMount(OpsErrorDetailModal, {
+    props: { show: true, errorId: 1, errorType: 'request' },
+    global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, Icon: true } }
+  })
+  try {
+    await flushPromises()
+    expect(wrapper.text().includes('private-account')).toBe(isSuperAdmin)
+    expect(wrapper.text().includes('admin.ops.errorDetail.account')).toBe(isSuperAdmin)
+  } finally {
+    wrapper.unmount()
+    roleState.isSuperAdmin = true
+  }
 })

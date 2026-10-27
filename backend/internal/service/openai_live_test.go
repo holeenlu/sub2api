@@ -95,6 +95,12 @@ func TestValidateLiveCallRequestDoesNotRequireDelegation(t *testing.T) {
 }
 
 func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
+	t.Run("native", func(t *testing.T) { testCreateUpstreamLiveCallPreservesSession(t, false) })
+	t.Run("cloud_enabled", func(t *testing.T) { testCreateUpstreamLiveCallPreservesSession(t, true) })
+}
+
+func testCreateUpstreamLiveCallPreservesSession(t *testing.T, cloud bool) {
+	t.Helper()
 	upstream := &liveHTTPUpstreamStub{}
 	service := &OpenAIGatewayService{
 		cfg:          &config.Config{},
@@ -105,6 +111,7 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Concurrency: 2,
+		Extra:       map[string]any{OpenAICloudEnabledKey: cloud},
 		Credentials: map[string]any{
 			"access_token":       "test-access-token",
 			"chatgpt_account_id": "acct_test",

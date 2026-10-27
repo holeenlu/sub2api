@@ -121,7 +121,7 @@ WITH combined AS (
     o.time_to_first_token_ms AS first_token_ms,
     o.status_code AS status_code,
     o.id AS error_id,
-    o.error_phase AS phase,
+    ` + service.OpsSLAEffectiveColumnSQL("o", "error_phase") + ` AS phase,
     o.severity AS severity,
     o.error_message AS message,
     o.user_id AS user_id,
@@ -139,7 +139,7 @@ WITH combined AS (
 
 	countQuery := fmt.Sprintf(`%s SELECT COUNT(1) FROM combined %s`, cte, where)
 	var total int64
-	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+	if err := r.queryOpsRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		if err == sql.ErrNoRows {
 			total = 0
 		} else {
@@ -188,7 +188,7 @@ LIMIT $%d OFFSET $%d
 `, cte, where, sort, len(args)+1, len(args)+2)
 
 	listArgs := append(append([]any{}, args...), pageSize, offset)
-	rows, err := r.db.QueryContext(ctx, listQuery, listArgs...)
+	rows, err := r.queryOpsRows(ctx, listQuery, listArgs...)
 	if err != nil {
 		return nil, 0, err
 	}

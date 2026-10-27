@@ -3,6 +3,7 @@
 package service
 
 import (
+	mathrand "math/rand"
 	"testing"
 	"time"
 
@@ -203,4 +204,105 @@ func TestSelectByLRU_TiePreferOAuth(t *testing.T) {
 		require.Equal(t, AccountTypeOAuth, result.account.Type)
 		require.Equal(t, int64(2), result.account.ID)
 	}
+}
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+// filterByMinPriority 过滤出优先级最小的账号集合
+func filterByMinPriority(accounts []accountWithLoad) []accountWithLoad {
+	if len(accounts) == 0 {
+		return accounts
+	}
+	minPriority := accounts[0].account.Priority
+	for _, acc := range accounts[1:] {
+		if acc.account.Priority < minPriority {
+			minPriority = acc.account.Priority
+		}
+	}
+	result := make([]accountWithLoad, 0, len(accounts))
+	for _, acc := range accounts {
+		if acc.account.Priority == minPriority {
+			result = append(result, acc)
+		}
+	}
+	return result
+}
+
+// filterByMinLoadRate 过滤出负载率最低的账号集合
+func filterByMinLoadRate(accounts []accountWithLoad) []accountWithLoad {
+	if len(accounts) == 0 {
+		return accounts
+	}
+	minLoadRate := accounts[0].loadInfo.LoadRate
+	for _, acc := range accounts[1:] {
+		if acc.loadInfo.LoadRate < minLoadRate {
+			minLoadRate = acc.loadInfo.LoadRate
+		}
+	}
+	result := make([]accountWithLoad, 0, len(accounts))
+	for _, acc := range accounts {
+		if acc.loadInfo.LoadRate == minLoadRate {
+			result = append(result, acc)
+		}
+	}
+	return result
+}
+
+// selectByLRU 从集合中选择最久未用的账号
+// 如果有多个账号具有相同的最小 LastUsedAt，则随机选择一个
+func selectByLRU(accounts []accountWithLoad, preferOAuth bool) *accountWithLoad {
+	if len(accounts) == 0 {
+		return nil
+	}
+	if len(accounts) == 1 {
+		return &accounts[0]
+	}
+
+	// 1. 找到最小的 LastUsedAt（nil 被视为最小）
+	var minTime *time.Time
+	hasNil := false
+	for _, acc := range accounts {
+		if acc.account.LastUsedAt == nil {
+			hasNil = true
+			break
+		}
+		if minTime == nil || acc.account.LastUsedAt.Before(*minTime) {
+			minTime = acc.account.LastUsedAt
+		}
+	}
+
+	// 2. 收集所有具有最小 LastUsedAt 的账号索引
+	var candidateIdxs []int
+	for i, acc := range accounts {
+		if hasNil {
+			if acc.account.LastUsedAt == nil {
+				candidateIdxs = append(candidateIdxs, i)
+			}
+		} else {
+			if acc.account.LastUsedAt != nil && acc.account.LastUsedAt.Equal(*minTime) {
+				candidateIdxs = append(candidateIdxs, i)
+			}
+		}
+	}
+
+	// 3. 如果只有一个候选，直接返回
+	if len(candidateIdxs) == 1 {
+		return &accounts[candidateIdxs[0]]
+	}
+
+	// 4. 如果有多个候选且 preferOAuth，优先选择 OAuth 类型
+	if preferOAuth {
+		var oauthIdxs []int
+		for _, idx := range candidateIdxs {
+			if accounts[idx].account.Type == AccountTypeOAuth {
+				oauthIdxs = append(oauthIdxs, idx)
+			}
+		}
+		if len(oauthIdxs) > 0 {
+			candidateIdxs = oauthIdxs
+		}
+	}
+
+	// 5. 随机选择一个
+	selectedIdx := candidateIdxs[mathrand.Intn(len(candidateIdxs))]
+	return &accounts[selectedIdx]
 }

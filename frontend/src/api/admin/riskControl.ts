@@ -16,7 +16,32 @@ export interface ContentModerationModelFilter {
   models: string[]
 }
 
-export interface ContentModerationConfig {
+export interface ContentModerationDistillationConfig {
+  enabled: boolean
+  phrases: string[]
+  patterns: string[]
+  fingerprints: string[]
+  min_max_tokens: number
+  min_thinking_tokens: number
+  structure_pattern: string
+}
+export interface ContentModerationDeviceGuardConfig {
+  enabled: boolean
+  ttl_seconds: number
+  max_entries: number
+}
+export interface ContentModerationRefusalGuardConfig extends ContentModerationDeviceGuardConfig {
+  similarity_threshold: number
+}
+export interface ContentModerationGuards {
+  failure_policy?: 'fail_open' | 'fail_closed'
+  distillation?: ContentModerationDistillationConfig
+  regex_rules?: string[]
+  refusal_guard?: ContentModerationRefusalGuardConfig
+  device_guard?: ContentModerationDeviceGuardConfig
+}
+
+export interface ContentModerationConfig extends ContentModerationGuards {
   engine?: ModerationEngine
   engine_configs?: Record<ModerationEngine, ContentModerationConfig>
   enabled: boolean
@@ -100,7 +125,7 @@ export interface ContentModerationTestAuditResult {
   thresholds: Record<string, number>
 }
 
-export interface UpdateContentModerationConfig {
+export interface UpdateContentModerationConfig extends ContentModerationGuards {
   engine?: ModerationEngine
   engine_configs?: Partial<Record<ModerationEngine, UpdateModerationEngineConfig>>
   enabled?: boolean
@@ -139,6 +164,8 @@ export interface UpdateContentModerationConfig {
 }
 
 export interface ContentModerationRuntimeStatus {
+  refusal_guard_entries?: number
+  device_guard_entries?: number
   engine?: ModerationEngine
   enabled: boolean
   risk_control_enabled: boolean

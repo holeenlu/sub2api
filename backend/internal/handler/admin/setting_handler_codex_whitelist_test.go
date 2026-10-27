@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -19,7 +20,7 @@ import (
 func updateSettingsCodexStatus(t *testing.T, body map[string]any) int {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyPromoCodeEnabled: "true"}}
+	repo := &settingHandlerRepoStub{values: map[string]string{}}
 	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
@@ -29,7 +30,7 @@ func updateSettingsCodexStatus(t *testing.T, body map[string]any) int {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(raw))
 	c.Request.Header.Set("Content-Type", "application/json")
-	handler.UpdateSettings(c)
+	updateSettingsWithRevision(t, handler, c)
 	return rec.Code
 }
 
@@ -55,4 +56,25 @@ func TestUpdateSettings_CodexBlacklistAllowsOriginatorOnly(t *testing.T) {
 		"codex_cli_only_blacklist": `[{"originator":"evil"}]`,
 	})
 	require.Equal(t, http.StatusOK, code, "黑名单 originator-only 应允许(非对称)")
+}
+
+// The existing label contract says 50 characters, not 50 UTF-8 bytes.
+func TestCustomMenuLabelCharacterLimit(t *testing.T) {
+	for _, glyph := range []string{"界", "a", "😀"} {
+		t.Run(glyph, func(t *testing.T) {
+			h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+			body := func(n int) map[string]any {
+				return map[string]any{"custom_menu_items": []map[string]any{{
+					"id": "help", "label": strings.Repeat(glyph, n), "url": "https://example.com/help", "visibility": "user",
+				}}}
+			}
+			accepted := doUpdateSettings(t, h, body(50), nil)
+			require.Equal(t, http.StatusOK, accepted.Code, accepted.Body.String())
+			saved := repo.values[service.SettingKeyCustomMenuItems]
+			require.Contains(t, saved, strings.Repeat(glyph, 50))
+			rejected := doUpdateSettings(t, h, body(51), nil)
+			require.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
+			require.Equal(t, saved, repo.values[service.SettingKeyCustomMenuItems])
+		})
+	}
 }

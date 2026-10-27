@@ -112,6 +112,9 @@ func TestEnsureOpenAIResponseObjectCreatedAt(t *testing.T) {
 }
 
 func TestBuildOpenAIResponseFailedSSE_CarriesCreatedAtAndSequenceNumber(t *testing.T) {
+	bare := buildOpenAIResponseFailedSSE("resp_1", "gpt-5.5", 1700000000,
+		[]byte(`{"type":"error","code":"invalid_encrypted_content","message":"Cannot verify encrypted history"}`), "")
+	require.Equal(t, "invalid_encrypted_content", gjson.Get(sseDataPayloads(bare)[0], "response.error.code").String())
 	frame := buildOpenAIResponseFailedSSE("resp_1", "gpt-5.5", 1700000000,
 		[]byte(`{"type":"error","sequence_number":7,"error":{"code":"server_is_overloaded","message":"busy"}}`), "")
 	payloads := sseDataPayloads(frame)
@@ -140,6 +143,9 @@ func TestBuildOpenAIWSHTTPBridgeFailedEvent_CarriesCreatedAtAndSequenceNumber(t 
 	event = buildOpenAIWSHTTPBridgeFailedEvent("resp_1", "", 0, []byte(`{"type":"error","error":{"message":"boom"}}`), "")
 	require.EqualValues(t, 0, gjson.GetBytes(event, "sequence_number").Int())
 	require.Positive(t, gjson.GetBytes(event, "response.created_at").Int())
+	event = buildOpenAIWSHTTPBridgeFailedEvent("", "", 1700000000, []byte(`{"type":"error","error":{"code":"invalid_request_error","message":"bad request"}}`), "")
+	require.Equal(t, "error", gjson.GetBytes(event, "type").String())
+	require.False(t, gjson.GetBytes(event, "response").Exists(), "no response identity may be fabricated for a request rejection")
 }
 
 // Grok 账号挂在不发 created_at 的上游（第三方中转）后面：每个生命周期事件都要补齐，
@@ -248,6 +254,7 @@ func TestProxyOpenAIWSHTTPBridgeTurn_GrokStampsMissingCreatedAt(t *testing.T) {
 			"",
 			`data: {"type":"response.completed","sequence_number":1,"response":{"id":"resp_ws","object":"response","model":"grok-4.5","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
 			"",
+			"",
 		}, "\n"))),
 	}}
 	svc := &OpenAIGatewayService{
@@ -352,4 +359,36 @@ func TestHandleSSEToJSON_StampsMissingCreatedAt(t *testing.T) {
 	out := rec.Body.String()
 	require.Equal(t, "resp_1", gjson.Get(out, "id").String())
 	require.Positive(t, gjson.Get(out, "created_at").Int())
+}
+
+func TestOpenAIFailedProjectionPreservesRetryAfter(t *testing.T) {
+	cases := []struct{ name, source, want string }{
+		{"event", `{"type":"error","headers":{"Retry-After":"24","Authorization":"secret"},"error":{"message":"busy"}}`, `"24"`},
+		{"numeric", `{"type":"error","headers":{"ReTrY-AfTeR":15},"error":{"message":"busy"}}`, `15`},
+		{"date", `{"type":"error","headers":{"Retry-After":"Wed, 21 Oct 2015 07:28:00 GMT"},"error":{"message":"busy"}}`, `"Wed, 21 Oct 2015 07:28:00 GMT"`},
+		{"nested wins", `{"headers":{"Retry-After":"24"},"error":{"headers":{"retry-after":"7","X-Secret":"secret"}}}`, `"7"`},
+		{"zero wins", `{"headers":{"Retry-After":"24"},"error":{"headers":{"Retry-After":"0"}}}`, `"0"`},
+		{"invalid nested falls back", `{"headers":{"Retry-After":"24"},"error":{"headers":{"Retry-After":"later"}}}`, `"24"`},
+		{"response error", `{"response":{"error":{"headers":{"retry-after":"9"}}}}`, `"9"`},
+		{"array rejected", `{"headers":{"Retry-After":["24"]}}`, ``},
+		{"invalid rejected", `{"headers":{"Retry-After":"later"}}`, ``},
+		{"injection rejected", `{"headers":{"Retry-After":"24\r\nAuthorization: secret"}}`, ``},
+		{"ambiguous rejected", `{"headers":{"Retry-After":"24","retry-after":"7"}}`, ``},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := []byte(tc.source)
+			sse := sseDataPayloads(buildOpenAIResponseFailedSSE("resp_retry", "gpt-5.5", 1700000000, source, "busy"))[0]
+			ws := string(buildOpenAIWSHTTPBridgeFailedEvent("resp_retry", "gpt-5.5", 1700000000, source, "busy"))
+			rejected := string(buildOpenAIWSHTTPBridgeFailedEvent("", "", 0, source, "busy"))
+			require.Equal(t, tc.want, gjson.Get(rejected, "error.headers.retry-after").Raw)
+			require.False(t, gjson.Get(rejected, "response").Exists())
+			require.NotContains(t, rejected, "secret")
+			for _, event := range []string{sse, ws} {
+				require.Equal(t, tc.want, gjson.Get(event, "response.error.headers.retry-after").Raw)
+				require.NotContains(t, event, "secret")
+				require.Equal(t, "resp_retry", gjson.Get(event, "response.id").String())
+			}
+		})
+	}
 }
