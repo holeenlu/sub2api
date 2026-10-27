@@ -182,6 +182,8 @@ func TestIsUpstreamModelRestrictedByChannel_PassthroughMatchesForwardPath(t *tes
 		},
 	}
 
+	account.PrepareSharedSnapshot() // Publish immutable caches before parallel readers.
+
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
@@ -234,6 +236,8 @@ func TestIsUpstreamModelRestrictedByChannel_PassthroughFlagWithRawChatFallbackMa
 			"openai_responses_supported": false,
 		},
 	}
+
+	account.PrepareSharedSnapshot() // Publish immutable caches before parallel readers.
 
 	for _, useCompactModelMapping := range []bool{false, true} {
 		useCompactModelMapping := useCompactModelMapping

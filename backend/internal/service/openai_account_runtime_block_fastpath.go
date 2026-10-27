@@ -14,7 +14,6 @@ const (
 	openAIOAuth429FallbackCooldown        = 5 * time.Second
 	openAIOAuth429RetryWindow             = 2 * time.Minute
 	openAIOAuth429RetryDelay              = 500 * time.Millisecond
-	openAIOAuth429MaxRetryDelay           = 8 * time.Second
 	openAIOAuth429MaxAccountAttempts      = 3
 	openAIStopSchedulingBridgeCooldown    = 2 * time.Minute
 	openAIOAuth429StormWindow             = 10 * time.Second
@@ -93,6 +92,19 @@ func isOpenAIAccount(account *Account) bool {
 // handleOpenAIAccountUpstreamError expects canonicalModel to be the model used
 // for scheduling after applying account mapping exactly once.
 func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, canonicalModel ...string) bool {
+	if statusCode == http.StatusForbidden && isCloudflareBotBlockResponse(responseBody) {
+		return false
+	}
+	if isOpenAIRequestScoped403(account, statusCode, responseBody) {
+		return false
+	}
+	if isOpenAIUpstreamSessionBlocked(responseBody) {
+		return false
+	}
+
+	if IsUpstreamContentRefusal(responseBody) {
+		return false
+	}
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}
@@ -137,7 +149,8 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	// "tool choice not found in 'tools'" 400 means upstream revoked this account's
 	// image capability. Gated on the self-built marker: passthrough clients control
 	// their own tools/tool_choice and could otherwise poison a healthy account.
-	if isOpenAIImagesSelfBuiltRequest(ctx) && isOpenAIImageCapabilityLossError(statusCode, responseBody) {
+	if isOpenAIImagePermissionError(statusCode, responseBody) ||
+		(isOpenAIImagesSelfBuiltRequest(ctx) && isOpenAIImageCapabilityLossError(statusCode, responseBody)) {
 		if s != nil && s.rateLimitService != nil {
 			_ = s.rateLimitService.HandleOpenAIImageCapabilityLoss(stateCtx, account, statusCode, responseBody)
 		}
@@ -308,22 +321,11 @@ func (s *OpenAIGatewayService) openAIOAuth429RetryDeadline(account *Account) tim
 	return startedAt.Add(openAIOAuth429RetryWindow)
 }
 
-func openAIOAuth429SameAccountRetryDelay(headers http.Header, deadline time.Time) time.Duration {
-	delay := openAIOAuth429RetryDelay
-	now := time.Now()
-	if resetAt := parseRetryAfterResetTime(headers, now); resetAt != nil && resetAt.After(now) {
-		delay = resetAt.Sub(now)
+func openAIOAuth429SameAccountRetryDelay(headers http.Header) time.Duration {
+	if delay, ok := parseOpenAIRetryAfterDelay(strings.TrimSpace(headers.Get("Retry-After"))); ok {
+		return delay
 	}
-	if delay > openAIOAuth429MaxRetryDelay {
-		delay = openAIOAuth429MaxRetryDelay
-	}
-	if remaining := time.Until(deadline); !deadline.IsZero() && delay > remaining {
-		delay = remaining
-	}
-	if delay < 0 {
-		return 0
-	}
-	return delay
+	return openAIOAuth429RetryDelay
 }
 
 func (s *OpenAIGatewayService) BlockAccountScheduling(account *Account, until time.Time, reason string) {
@@ -430,13 +432,13 @@ func (s *OpenAIGatewayService) getOpenAIAccountModelTransientState() *openAIAcco
 	return s.openaiModelTransient
 }
 
-func canonicalOpenAIAccountSchedulingModel(account *Account, requestedModel string) string {
+func canonicalOpenAIAccountSchedulingModel(account *Account, requestedModel string, compact ...bool) string {
 	model := strings.TrimSpace(requestedModel)
 	if account == nil || model == "" {
 		return model
 	}
 	if account.IsOpenAI() {
-		return resolveOpenAIAccountUpstreamModelForRequest(account, model, false)
+		return resolveOpenAIAccountUpstreamModelForRequest(account, model, len(compact) > 0 && compact[0])
 	}
 	if mapped := strings.TrimSpace(account.GetMappedModel(model)); mapped != "" {
 		return mapped
@@ -456,7 +458,11 @@ func (s *OpenAIGatewayService) recordOpenAIAccountModelTransientFailure(account 
 	if state == nil {
 		return openAIAccountModelTransientDecision{}
 	}
-	return state.recordFailure(account.ID, openAIAccountModelTransientModel(canonicalModel), now)
+	decision := state.recordFailure(account.ID, openAIAccountModelTransientModel(canonicalModel), now)
+	if decision.Cooldown > 0 {
+		s.blockSchedulingRecovery(modelRecoveryScope(account.ID, canonicalModel), decision.Cooldown)
+	}
+	return decision
 }
 
 func (s *OpenAIGatewayService) clearOpenAIAccountModelTransientState(accountID int64, model string) {
@@ -555,9 +561,23 @@ func (s *OpenAIGatewayService) clearOpenAIAccountRuntimeBlockIfUnchanged(account
 // block is dropped with generation+deadline CAS. Model-scoped transient blocks
 // are left alone. This is fail-open if a DB write failed or the snapshot has
 // not caught up yet: empty cooldown fields drop the local account-level block.
-func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlocked(account *Account, requestedModel string) bool {
+func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlocked(account *Account, requestedModel string, capabilities ...OpenAIEndpointCapability) bool {
+	if account.IsExcelOAuth() && !s.excelBPSGloballyEnabled(context.Background()) {
+		return true
+	}
+	capability := OpenAIEndpointCapabilityResponses
+	if len(capabilities) > 0 {
+		capability = capabilities[0]
+	}
+	if excelBPSResponsesCapability(capability) && (s.isExcelBPSRateLimitBlocking(account, requestedModel) || s.isExcelBPSModelCoolingDown(account, requestedModel)) {
+		return true
+	}
 	if s == nil {
 		return false
+	}
+	// 容量降载冷却是纯进程内状态，没有对应的持久化字段，不走下面的 fail-open 校验。
+	if s.isOpenAICapacityShedCooling(account) {
+		return true
 	}
 	snapshot := s.peekOpenAIAccountRuntimeBlock(account)
 	if snapshot.blocked {
