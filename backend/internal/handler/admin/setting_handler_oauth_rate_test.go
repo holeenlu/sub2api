@@ -40,7 +40,7 @@ func TestSettingHandler_OAuthSchedulingRateRoundTrip(t *testing.T) {
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewBufferString(tt.body))
 			c.Request.Header.Set("Content-Type", "application/json")
-			handler.UpdateSettings(c)
+			updateSettingsWithRevision(t, handler, c)
 			require.Equal(t, tt.status, rec.Code, rec.Body.String())
 			if tt.status != http.StatusOK {
 				require.Empty(t, repo.lastUpdates)

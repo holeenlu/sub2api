@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
+import { CanceledError } from 'axios'
 
 // Mock authAPI
 const mockLogin = vi.fn()
@@ -61,6 +62,68 @@ describe('useAuthStore', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it.each(['login', 'logout', 'refreshUser'])('旧 %s 的完成不清除另一登录会话', async operation => {
+    const store = useAuthStore()
+    mockLogin.mockResolvedValueOnce(fakeAuthResponse)
+    await store.login({ email: 'test@example.com', password: 'secret' })
+    let finish!: () => void
+    const delayed = new Promise((resolve, reject) => {
+      finish = () => operation === 'logout' ? resolve(undefined) : reject(new CanceledError('old session'))
+    })
+    if (operation === 'login') mockLogin.mockReturnValueOnce(delayed)
+    if (operation === 'logout') mockLogout.mockReturnValueOnce(delayed)
+    if (operation === 'refreshUser') mockGetCurrentUser.mockReturnValueOnce(delayed)
+    const pending = operation === 'login' ? store.login({ email: 'test@example.com', password: 'secret' })
+      : operation === 'logout' ? store.logout() : store.refreshUser()
+    const settled = operation === 'logout' ? expect(pending).resolves.toBeUndefined() : expect(pending).rejects.toMatchObject({ code: 'ERR_CANCELED' })
+    mockLogin.mockResolvedValueOnce({ ...fakeAuthResponse, access_token: 'replacement-login', refresh_token: 'replacement-refresh', user: fakeAdminUser })
+    await store.login({ email: 'admin@example.com', password: 'secret' })
+    finish()
+    await settled
+    expect(store.token).toBe('replacement-login')
+    expect(store.user?.id).toBe(2)
+    expect(localStorage.getItem('auth_token')).toBe('replacement-login')
+    expect(localStorage.getItem('refresh_token')).toBe('replacement-refresh')
+  })
+
+  it.each(['logout', 'refreshUser'])('%s 的 401 已清存储时仍清除原会话内存与定时器', async operation => {
+    const store = useAuthStore()
+    mockLogin.mockResolvedValueOnce(fakeAuthResponse)
+    await store.login({ email: 'test@example.com', password: 'secret' })
+    const expired = async () => {
+      localStorage.clear()
+      throw { status: 401 }
+    }
+    if (operation === 'logout') mockLogout.mockImplementationOnce(expired)
+    else mockGetCurrentUser.mockImplementationOnce(expired)
+    if (operation === 'logout') await store.logout()
+    else await expect(store.refreshUser()).rejects.toMatchObject({ status: 401 })
+    expect(store.token).toBeNull()
+    expect(store.user).toBeNull()
+    expect(store.isAuthenticated).toBe(false)
+    const userRequests = mockGetCurrentUser.mock.calls.length
+    const tokenRequests = mockRefreshToken.mock.calls.length
+    await vi.advanceTimersByTimeAsync(3600_000)
+    expect(mockGetCurrentUser).toHaveBeenCalledTimes(userRequests)
+    expect(mockRefreshToken).toHaveBeenCalledTimes(tokenRequests)
+  })
+
+  it('存储已清空时迟到注销不清除另一会话的内存', async () => {
+    const store = useAuthStore()
+    mockLogin.mockResolvedValueOnce(fakeAuthResponse)
+    await store.login({ email: 'test@example.com', password: 'secret' })
+    let finish!: () => void
+    mockLogout.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve }))
+    const pending = store.logout()
+    mockLogin.mockResolvedValueOnce({ ...fakeAuthResponse, access_token: 'replacement-login', user: fakeAdminUser })
+    await store.login({ email: 'admin@example.com', password: 'secret' })
+    localStorage.clear()
+    finish()
+    await pending
+    expect(store.token).toBe('replacement-login')
+    expect(store.user?.id).toBe(2)
   })
 
   // --- login ---
@@ -311,6 +374,112 @@ describe('useAuthStore', () => {
         provider: 'oidc',
         redirect: '/register',
       })
+    })
+  })
+
+  describe('token refresh', () => {
+    it('刷新后持久化新的 access token 和 refresh token', async () => {
+      localStorage.setItem('auth_token', 'old-access-token')
+      localStorage.setItem('auth_user', JSON.stringify(fakeUser))
+      localStorage.setItem('refresh_token', 'old-refresh-token')
+      localStorage.setItem('token_expires_at', String(Date.now() + 121_000))
+      mockGetCurrentUser.mockResolvedValue({ data: fakeUser })
+      const refreshedTokens = {
+        access_token: 'new-access-token',
+        refresh_token: 'new-refresh-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+      }
+      mockRefreshToken.mockImplementation(async () => {
+        localStorage.setItem('auth_token', refreshedTokens.access_token)
+        localStorage.setItem('refresh_token', refreshedTokens.refresh_token)
+        localStorage.setItem('token_expires_at', String(Date.now() + 3_600_000))
+        return refreshedTokens
+      })
+
+      const store = useAuthStore()
+      store.checkAuth()
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      expect(store.token).toBe('new-access-token')
+      expect(localStorage.getItem('auth_token')).toBe('new-access-token')
+      expect(localStorage.getItem('refresh_token')).toBe('new-refresh-token')
+      expect(localStorage.getItem('token_expires_at')).toBe(String(Date.now() + 3_600_000))
+    })
+
+    it.each(['logout', 'same-user-login'])('刷新完成不恢复 %s 前的会话和定时器', async operation => {
+      localStorage.setItem('auth_token', 'old-access-token')
+      localStorage.setItem('auth_user', JSON.stringify(fakeUser))
+      localStorage.setItem('refresh_token', 'old-refresh-token')
+      localStorage.setItem('token_expires_at', String(Date.now() + 121_000))
+      mockGetCurrentUser.mockResolvedValue({ data: fakeUser })
+      let finish!: (value: unknown) => void
+      mockRefreshToken.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      const store = useAuthStore()
+      store.checkAuth()
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(mockRefreshToken).toHaveBeenCalledOnce()
+      if (operation === 'logout') {
+        mockLogout.mockResolvedValueOnce(undefined)
+        await store.logout()
+      } else {
+        mockLogin.mockResolvedValueOnce({ ...fakeAuthResponse, access_token: 'same-user-new-session' })
+        await store.login({ email: fakeUser.email, password: 'secret' })
+      }
+      const expected = localStorage.getItem('auth_token')
+      await vi.advanceTimersByTimeAsync(0)
+      const timers = vi.getTimerCount()
+      finish({ access_token: 'late-token', refresh_token: 'late-refresh', expires_in: 3600, token_type: 'Bearer' })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(store.token).toBe(expected)
+      expect(localStorage.getItem('auth_token')).toBe(expected)
+      expect(vi.getTimerCount()).toBe(timers)
+    })
+
+    it('忽略已切换会话的过期刷新结果', async () => {
+      localStorage.setItem('auth_token', 'old-access-token')
+      localStorage.setItem('auth_user', JSON.stringify(fakeUser))
+      localStorage.setItem('refresh_token', 'old-refresh-token')
+      localStorage.setItem('token_expires_at', String(Date.now() + 121_000))
+      mockGetCurrentUser.mockResolvedValue({ data: fakeUser })
+
+      let resolveRefresh!: (tokens: {
+        access_token: string
+        refresh_token: string
+        expires_in: number
+        token_type: string
+      }) => void
+      mockRefreshToken.mockImplementation(() => new Promise((resolve) => {
+        resolveRefresh = resolve
+      }))
+
+      const store = useAuthStore()
+      store.checkAuth()
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(mockRefreshToken).toHaveBeenCalledOnce()
+
+      const staleTokens = {
+        access_token: 'stale-access-token',
+        refresh_token: 'stale-refresh-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+      }
+      // Simulate the refresh coordinator committing its response before another tab changes sessions.
+      localStorage.setItem('auth_token', staleTokens.access_token)
+      localStorage.setItem('refresh_token', staleTokens.refresh_token)
+      localStorage.setItem('token_expires_at', String(Date.now() + 3_600_000))
+      localStorage.setItem('auth_token', 'new-session-access-token')
+      localStorage.setItem('refresh_token', 'new-session-refresh-token')
+      localStorage.setItem('token_expires_at', String(Date.now() + 7_200_000))
+      localStorage.setItem('auth_user', JSON.stringify(fakeAdminUser))
+
+      resolveRefresh(staleTokens)
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(store.token).toBe('old-access-token')
+      expect(localStorage.getItem('auth_token')).toBe('new-session-access-token')
+      expect(localStorage.getItem('refresh_token')).toBe('new-session-refresh-token')
+      expect(JSON.parse(localStorage.getItem('auth_user')!)).toEqual(fakeAdminUser)
     })
   })
 
