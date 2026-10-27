@@ -7,8 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"image"
 	"image/color"
 	stddraw "image/draw"
@@ -22,6 +20,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/sync/singleflight"
@@ -48,6 +49,9 @@ const (
 	maxNotifyEmails      = 3 // Maximum number of notification emails per user
 	maxInlineAvatarBytes = 100 * 1024
 	targetAvatarBytes    = 20 * 1024
+	maxAvatarDimension   = 4096
+	maxAvatarPixels      = 4 * 1024 * 1024
+	maxAvatarOutputSize  = 512
 
 	// User-level rate limiting for notify email verification codes
 	notifyCodeUserRateLimit  = 5
@@ -138,7 +142,7 @@ type UserRepository interface {
 	// GetByIDIncludeDeleted 绕过软删除过滤按 ID 取用户（含已删）。仅供管理员审计/usage 点击使用。
 	GetByIDIncludeDeleted(ctx context.Context, id int64) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)
-	GetFirstAdmin(ctx context.Context) (*User, error)
+	GetFirstSuperAdmin(ctx context.Context) (*User, error)
 	// Update 只写 fields 中显式声明的列，其余列保持库中当前值。
 	Update(ctx context.Context, user *User, fields UserUpdateFields) error
 	Delete(ctx context.Context, id int64) error
@@ -187,14 +191,6 @@ type UserRepository interface {
 type RegistrationEmailDomainRepository interface {
 	CountUsersByEmailDomain(ctx context.Context, domain string) (int, error)
 	CreateWithEmailAliasGuardAndDomainLimit(ctx context.Context, user *User, domain string) error
-}
-
-// RedeemUserAdjustmentRepository provides the atomic, floor-at-zero updates
-// used by negative-value redeem codes. It is intentionally narrower than
-// UserRepository because normal usage billing is allowed to overdraw.
-type RedeemUserAdjustmentRepository interface {
-	ApplyRedeemBalanceAdjustment(ctx context.Context, id int64, delta float64) error
-	ApplyRedeemConcurrencyAdjustment(ctx context.Context, id int64, delta int) error
 }
 
 type UserAuthIdentityRecord struct {
@@ -308,13 +304,26 @@ func NewUserService(userRepo UserRepository, settingRepo SettingRepository, auth
 	}
 }
 
-// GetFirstAdmin 获取首个管理员用户（用于 Admin API Key 认证）
-func (s *UserService) GetFirstAdmin(ctx context.Context) (*User, error) {
-	admin, err := s.userRepo.GetFirstAdmin(ctx)
+// GetFirstSuperAdmin 获取首个管理员用户（用于 Admin API Key 认证）
+func (s *UserService) GetFirstSuperAdmin(ctx context.Context) (*User, error) {
+	admin, err := s.userRepo.GetFirstSuperAdmin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get first admin: %w", err)
 	}
 	return admin, nil
+}
+
+// CountAdministrators reuses the existing filtered count for the shared-policy
+// preview; inactive admins are included because their future grants change too.
+func (s *UserService) CountAdministrators(ctx context.Context) (int64, error) {
+	_, result, err := s.userRepo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 1}, UserListFilters{Role: RoleAdmin})
+	if err != nil {
+		return 0, err
+	}
+	if result == nil {
+		return 0, nil
+	}
+	return result.Total, nil
 }
 
 // GetProfile 获取用户资料
@@ -673,6 +682,14 @@ func normalizeInlineUserAvatarInput(raw string) (UpsertUserAvatarInput, error) {
 }
 
 func compressInlineAvatar(decoded []byte) ([]byte, string, error) {
+	config, _, err := image.DecodeConfig(bytes.NewReader(decoded))
+	if err != nil {
+		return nil, "", ErrAvatarInvalid
+	}
+	if config.Width <= 0 || config.Height <= 0 || config.Width > maxAvatarDimension ||
+		config.Height > maxAvatarDimension || config.Width > maxAvatarPixels/config.Height {
+		return nil, "", ErrAvatarTooLarge
+	}
 	src, _, err := image.Decode(bytes.NewReader(decoded))
 	if err != nil {
 		return nil, "", ErrAvatarInvalid
@@ -683,7 +700,9 @@ func compressInlineAvatar(decoded []byte) ([]byte, string, error) {
 		return nil, "", ErrAvatarInvalid
 	}
 
-	for _, scale := range avatarScaleSteps {
+	outputScale := min(1.0, float64(maxAvatarOutputSize)/float64(srcBounds.Dx()), float64(maxAvatarOutputSize)/float64(srcBounds.Dy()))
+	for _, step := range avatarScaleSteps {
+		scale := step * outputScale
 		width := max(1, int(float64(srcBounds.Dx())*scale))
 		height := max(1, int(float64(srcBounds.Dy())*scale))
 		dst := image.NewRGBA(image.Rect(0, 0, width, height))
@@ -1275,7 +1294,7 @@ func saveNotifyVerifyCode(ctx context.Context, cache EmailCache, email, code str
 
 // sendNotifyVerifyEmail builds and sends the verification email.
 func (s *UserService) sendNotifyVerifyEmail(ctx context.Context, emailService *EmailService, userID int64, email, code, locale string) error {
-	siteName := "Sub2API"
+	siteName := DefaultSiteName
 	if s.settingRepo != nil {
 		if name, err := s.settingRepo.GetValue(ctx, SettingKeySiteName); err == nil && name != "" {
 			siteName = name

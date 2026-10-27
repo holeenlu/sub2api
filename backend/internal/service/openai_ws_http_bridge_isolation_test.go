@@ -115,7 +115,10 @@ func (u *httpBridgeIsolationUpstream) Do(req *http.Request, _ string, _ int64, _
 	}
 	output := "[]"
 	if turn == 1 {
-		output = fmt.Sprintf(`[{"type":"function_call","id":%q,"call_id":%q,"name":"lookup","arguments":"{}","status":"completed"}]`, "fc_"+id, "call_"+id)
+		// Complete the reasoning item announced in the prefix. An unfinished
+		// item correctly makes this history non-replayable; this fixture is
+		// testing isolation of two complete histories, not partial output.
+		output = fmt.Sprintf(`[{"id":"rs_test","type":"reasoning","encrypted_content":"opaque"},{"type":"function_call","id":%q,"call_id":%q,"name":"lookup","arguments":"{}","status":"completed"}]`, "fc_"+id, "call_"+id)
 	}
 	suffix := fmt.Sprintf("data: {\"type\":\"response.completed\",\"response\":{\"id\":%q,\"status\":\"completed\",\"output\":%s,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n", responseID, output)
 	headers := http.Header{"Content-Type": []string{"text/event-stream"}}
