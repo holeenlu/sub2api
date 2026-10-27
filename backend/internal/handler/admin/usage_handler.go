@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	"github.com/Wei-Shaw/sub2api/internal/handler/usageexport"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -15,7 +17,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -59,8 +60,20 @@ type CreateUsageCleanupTaskRequest struct {
 
 // List handles listing all usage records with filters
 // GET /api/v1/admin/usage
-func (h *UsageHandler) List(c *gin.Context) {
+func (h *UsageHandler) List(c *gin.Context) { h.list(c, false) }
+func (h *UsageHandler) Export(c *gin.Context) {
+	actor, ok := authz.FromContext(c.Request.Context())
+	if !ok || !actor.Can("usage.export") {
+		response.Forbidden(c, "Usage export is not permitted")
+		return
+	}
+	h.list(c, true)
+}
+func (h *UsageHandler) list(c *gin.Context, export bool) {
 	page, pageSize := response.ParsePagination(c)
+	if actor, ok := authz.FromContext(c.Request.Context()); ok && actor.Role == authz.Admin && !actor.Can("usage.export") && pageSize > 100 {
+		pageSize = 100
+	}
 	exactTotal := false
 	if exactTotalRaw := strings.TrimSpace(c.Query("exact_total")); exactTotalRaw != "" {
 		parsed, err := strconv.ParseBool(exactTotalRaw)
@@ -183,6 +196,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 	}
 
 	params := pagination.PaginationParams{
+		Cursor:    c.Query("cursor"),
 		Page:      page,
 		PageSize:  pageSize,
 		SortBy:    c.DefaultQuery("sort_by", "created_at"),
@@ -207,13 +221,23 @@ func (h *UsageHandler) List(c *gin.Context) {
 		ExactTotal:            exactTotal,
 	}
 
+	if export {
+		actor, _ := authz.FromContext(c.Request.Context())
+		usageexport.Stream(c, h.usageService, actor.UserID, filters, true)
+		return
+	}
 	records, result, err := h.usageService.ListWithFilters(c.Request.Context(), params, filters)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	response.Paginated(c, adminUsageLogResponses(c, records), result.Total, page, pageSize)
+	out := adminUsageLogResponses(c, records)
+	if params.Cursor != "" {
+		response.Success(c, gin.H{"items": out, "total": result.Total, "page": page, "page_size": pageSize, "pages": result.Pages, "next_cursor": result.NextCursor, "has_more": result.HasMore, "total_exact": result.TotalExact})
+		return
+	}
+	response.Paginated(c, out, result.Total, page, pageSize)
 }
 
 // Stats handles getting usage statistics with filters

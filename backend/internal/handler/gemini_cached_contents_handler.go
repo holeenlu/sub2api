@@ -65,11 +65,10 @@ func (h *GatewayHandler) geminiCachedContentsPreamble(c *gin.Context, component 
 func readGeminiCachedContentBody(c *gin.Context) ([]byte, bool) {
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			googleError(c, http.StatusRequestEntityTooLarge, buildBodyTooLargeMessage(maxErr.Limit))
-			return nil, false
-		}
-		googleError(c, http.StatusBadRequest, "Failed to read request body")
+		logRequestBodyReadFailure(requestLogger(c, "handler.gemini_gateway.cached_contents"), c.Request, err)
+		writeRequestBodyReadError(c, err, func(status int, errType, message string) {
+			googleErrorWithType(c, status, errType, "", message)
+		})
 		return nil, false
 	}
 	if len(body) == 0 {
@@ -639,7 +638,7 @@ func (h *GatewayHandler) acquireGeminiCachedContentAccountSlot(c *gin.Context, r
 		return nil, false
 	}
 	streamStarted := false
-	release, acquireErr := helper.AcquireAccountSlotWithWaitTimeout(c, account.ID, selection.WaitPlan.MaxConcurrency, selection.WaitPlan.Timeout, false, &streamStarted)
+	release, acquireErr := helper.AcquireAccountSlotWithWaitTimeout(c, account.ID, selection.WaitPlan.MaxConcurrency, selection.WaitPlan.Timeout, false, &streamStarted, selection.WaitPlan.RefreshLimit)
 	if err == nil {
 		helper.DecrementAccountWaitCount(c.Request.Context(), account.ID)
 	}
@@ -689,7 +688,7 @@ func (h *GatewayHandler) submitGeminiCachedContentUsage(
 	clientIP := ip.GetClientIP(c)
 	requestPayloadHash := service.HashUsageRequestPayload(payload)
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+	h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 			Result:             result,
 			APIKey:             apiKey,

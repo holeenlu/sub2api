@@ -10,6 +10,19 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('AccountBulkActionsBar', () => {
+  it('does not expose filtered editing while specific accounts are selected', async () => {
+    const wrapper = mount(AccountBulkActionsBar, {
+      props: { selectedIds: [1], totalResults: 45, selectingAll: false, allResultsSelected: false }
+    })
+    expect(wrapper.text()).not.toContain('admin.accounts.bulkActions.editFiltered')
+    const selected = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.bulkActions.edit')
+    await selected!.trigger('click')
+    expect(wrapper.emitted('edit-selected')).toHaveLength(1)
+    await wrapper.setProps({ selectedIds: [] })
+    const filtered = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.bulkActions.editFiltered')
+    await filtered!.trigger('click')
+    expect(wrapper.emitted('edit-filtered')).toHaveLength(1)
+  })
   it('allows selecting all results before any row is selected', async () => {
     const wrapper = mount(AccountBulkActionsBar, {
       props: {

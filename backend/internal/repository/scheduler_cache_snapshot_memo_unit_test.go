@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -179,6 +180,14 @@ func memoRead(t *testing.T, cache *schedulerCache, bucket service.SchedulerBucke
 	return accounts
 }
 
+func memoExpectedControlReads(bucket service.SchedulerBucket, lastUsed string) []string {
+	commands := make([]string, 0, len(schedulerSnapshotTagKeys(bucket))+1)
+	for _, key := range schedulerSnapshotTagKeys(bucket) {
+		commands = append(commands, "get "+key)
+	}
+	return append(commands, "mget "+schedulerLastUsedKey(lastUsed))
+}
+
 func memoRequireMiss(t *testing.T, cache *schedulerCache, bucket service.SchedulerBucket) {
 	t.Helper()
 	accounts, hit, err := cache.GetSnapshot(context.Background(), bucket)
@@ -231,13 +240,14 @@ func TestSchedulerCacheSnapshotMemoSecondReadOnlyFetchesTagsAndLastUsed(t *testi
 
 	recorder.reset()
 	second := memoRead(t, cache, bucket)
-	require.Equal(t, []string{
-		"mget " + schedulerBucketKey(schedulerReadyPrefix, bucket),
-		"mget " + schedulerLastUsedKey("1"),
-	}, recorder.recorded())
+	require.Equal(t, memoExpectedControlReads(bucket, "1"), recorder.recorded())
 
 	require.Equal(t, []int64{1, 2, 3}, memoIDs(second))
-	require.Equal(t, first, second)
+	firstJSON, err := json.Marshal(first)
+	require.NoError(t, err)
+	secondJSON, err := json.Marshal(second)
+	require.NoError(t, err)
+	require.JSONEq(t, string(firstJSON), string(secondJSON))
 	for i := range first {
 		require.NotSame(t, first[i], second[i])
 	}
@@ -670,10 +680,7 @@ func TestSchedulerCacheSnapshotMemoPlatformRevisionScopesInvalidation(t *testing
 	require.NoError(t, cache.SetAccount(ctx, &anthropic))
 	recorder.reset()
 	memoRead(t, cache, geminiSingle)
-	require.Equal(t, []string{
-		"mget " + schedulerBucketKey(schedulerReadyPrefix, geminiSingle),
-		"mget " + schedulerLastUsedKey("211"),
-	}, recorder.recorded(), "an Anthropic account write must not invalidate a Gemini bucket")
+	require.Equal(t, memoExpectedControlReads(geminiSingle, "211"), recorder.recorded(), "an Anthropic account write must not invalidate a Gemini bucket")
 
 	gemini.Name = "gemini-renamed"
 	require.NoError(t, cache.SetAccount(ctx, &gemini))
@@ -901,7 +908,8 @@ func TestSchedulerCacheSnapshotMemoPreparesSharedModelMapping(t *testing.T) {
 	rawMapping, ok := probe.Credentials["model_mapping"].(map[string]any)
 	require.True(t, ok)
 	rawMapping["claude-sonnet"] = "sonnet-mutated-in-place"
-	require.Equal(t, "sonnet-a", probe.GetMappedModel("claude-sonnet"))
+	require.Equal(t, "sonnet-mutated-in-place", probe.GetMappedModel("claude-sonnet"))
+	require.Equal(t, "sonnet-a", memoRead(t, cache, bucket)[0].GetMappedModel("claude-sonnet"), "request-local edits cannot poison the memo")
 }
 
 func TestSchedulerCacheSnapshotMemoRevisionValuesAreUnique(t *testing.T) {
@@ -977,4 +985,44 @@ func TestSchedulerCacheSnapshotMemoCoalescesBackgroundGlobalRevisionWrites(t *te
 
 func ptrAccount(account service.Account) *service.Account {
 	return &account
+}
+
+func TestSchedulerCacheSnapshotMemoNestedMutationIsolation(t *testing.T) {
+	cache, _, _ := newSchedulerCacheMemoUnit(t, defaultSchedulerSnapshotWriteChunkSize)
+	bucket := memoTestBucket(719)
+	account := memoTestAccount(719, "isolated")
+	account.Extra = map[string]any{"model_rate_limits": map[string]any{"model": map[string]any{"reason": "original"}}}
+	memoPublish(t, cache, bucket, account)
+	first := memoRead(t, cache, bucket)[0]
+	second := memoRead(t, cache, bucket)[0]
+	first.Credentials["model_mapping"].(map[string]any)["claude-sonnet"] = "changed"
+	first.Extra["model_rate_limits"].(map[string]any)["model"].(map[string]any)["reason"] = "changed"
+	require.Equal(t, "sonnet-isolated", second.GetMappedModel("claude-sonnet"))
+	require.Equal(t, "original", second.Extra["model_rate_limits"].(map[string]any)["model"].(map[string]any)["reason"])
+	require.Equal(t, "sonnet-isolated", memoRead(t, cache, bucket)[0].GetMappedModel("claude-sonnet"))
+}
+
+func TestSchedulerCacheSnapshotRebuildsOldCloudProjection(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			cache, _, _ := newSchedulerCacheMemoUnit(t, defaultSchedulerSnapshotWriteChunkSize)
+			bucket := service.SchedulerBucket{GroupID: 42, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+			account := service.Account{ID: 42, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+				Extra: map[string]any{service.OpenAICloudEnabledKey: enabled, "openai_excel_bps": true}}
+			memoPublish(t, cache, bucket, account)
+			old := buildSchedulerMetadataAccount(account)
+			delete(old.Extra, service.OpenAICloudEnabledKey)
+			raw, err := json.Marshal(old)
+			require.NoError(t, err)
+			require.NoError(t, cache.rdb.Set(t.Context(), schedulerAccountMetaKey("42"), raw, 0).Err())
+			_, hit, err := cache.GetSnapshot(t.Context(), bucket)
+			require.NoError(t, err)
+			require.False(t, hit, "missing selection must trigger the existing DB rebuild path")
+			memoPublish(t, cache, bucket, account)
+			fresh := memoRead(t, cache, bucket)
+			require.Len(t, fresh, 1)
+			require.Equal(t, enabled, fresh[0].IsOpenAICloudEnabled())
+			require.Equal(t, !enabled, fresh[0].IsExcelBPSEnabled())
+		})
+	}
 }
