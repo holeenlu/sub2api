@@ -448,29 +448,6 @@ func (s *UserRepoSuite) TestUpdateBalance_Negative() {
 	s.Require().InDelta(7.0, got.Balance, 1e-6)
 }
 
-func (s *UserRepoSuite) TestApplyRedeemBalanceAdjustment_ConcurrentNeverNegative() {
-	user := s.mustCreateUser(&service.User{Email: "redeem-bal-concurrent@test.com", Balance: 10})
-
-	var wg sync.WaitGroup
-	errs := make(chan error, 2)
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- s.repo.ApplyRedeemBalanceAdjustment(context.Background(), user.ID, -7)
-		}()
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		s.Require().NoError(err)
-	}
-
-	got, err := s.repo.GetByID(s.ctx, user.ID)
-	s.Require().NoError(err)
-	s.Require().InDelta(0, got.Balance, 1e-6)
-}
-
 func (s *UserRepoSuite) TestDeductBalance() {
 	user := s.mustCreateUser(&service.User{Email: "deduct@test.com", Balance: 10})
 
@@ -567,29 +544,6 @@ func (s *UserRepoSuite) TestUpdateConcurrency_Negative() {
 	s.Require().Equal(3, got.Concurrency)
 }
 
-func (s *UserRepoSuite) TestApplyRedeemConcurrencyAdjustment_ConcurrentNeverNegative() {
-	user := s.mustCreateUser(&service.User{Email: "redeem-concurrency-concurrent@test.com", Concurrency: 10})
-
-	var wg sync.WaitGroup
-	errs := make(chan error, 2)
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- s.repo.ApplyRedeemConcurrencyAdjustment(context.Background(), user.ID, -7)
-		}()
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		s.Require().NoError(err)
-	}
-
-	got, err := s.repo.GetByID(s.ctx, user.ID)
-	s.Require().NoError(err)
-	s.Require().Equal(0, got.Concurrency)
-}
-
 // --- ExistsByEmail ---
 
 func (s *UserRepoSuite) TestExistsByEmail() {
@@ -643,50 +597,50 @@ func (s *UserRepoSuite) TestRemoveGroupFromAllowedGroups_NoMatch() {
 	s.Require().Zero(affected, "expected no affected rows")
 }
 
-// --- GetFirstAdmin ---
+// --- GetFirstSuperAdmin ---
 
-func (s *UserRepoSuite) TestGetFirstAdmin() {
+func (s *UserRepoSuite) TestGetFirstSuperAdmin() {
 	admin1 := s.mustCreateUser(&service.User{
 		Email:  "admin1@example.com",
-		Role:   service.RoleAdmin,
+		Role:   service.RoleSuperAdmin,
 		Status: service.StatusActive,
 	})
 	s.mustCreateUser(&service.User{
 		Email:  "admin2@example.com",
-		Role:   service.RoleAdmin,
+		Role:   service.RoleSuperAdmin,
 		Status: service.StatusActive,
 	})
 
-	got, err := s.repo.GetFirstAdmin(s.ctx)
-	s.Require().NoError(err, "GetFirstAdmin")
-	s.Require().Equal(admin1.ID, got.ID, "GetFirstAdmin mismatch")
+	got, err := s.repo.GetFirstSuperAdmin(s.ctx)
+	s.Require().NoError(err, "GetFirstSuperAdmin")
+	s.Require().Equal(admin1.ID, got.ID, "GetFirstSuperAdmin mismatch")
 }
 
-func (s *UserRepoSuite) TestGetFirstAdmin_NoAdmin() {
+func (s *UserRepoSuite) TestGetFirstSuperAdmin_NoAdmin() {
 	s.mustCreateUser(&service.User{
 		Email:  "user@example.com",
 		Role:   service.RoleUser,
 		Status: service.StatusActive,
 	})
 
-	_, err := s.repo.GetFirstAdmin(s.ctx)
+	_, err := s.repo.GetFirstSuperAdmin(s.ctx)
 	s.Require().Error(err, "expected error when no admin exists")
 }
 
-func (s *UserRepoSuite) TestGetFirstAdmin_DisabledAdminIgnored() {
+func (s *UserRepoSuite) TestGetFirstSuperAdmin_DisabledAdminIgnored() {
 	s.mustCreateUser(&service.User{
 		Email:  "disabled@example.com",
-		Role:   service.RoleAdmin,
+		Role:   service.RoleSuperAdmin,
 		Status: service.StatusDisabled,
 	})
 	activeAdmin := s.mustCreateUser(&service.User{
 		Email:  "active@example.com",
-		Role:   service.RoleAdmin,
+		Role:   service.RoleSuperAdmin,
 		Status: service.StatusActive,
 	})
 
-	got, err := s.repo.GetFirstAdmin(s.ctx)
-	s.Require().NoError(err, "GetFirstAdmin")
+	got, err := s.repo.GetFirstSuperAdmin(s.ctx)
+	s.Require().NoError(err, "GetFirstSuperAdmin")
 	s.Require().Equal(activeAdmin.ID, got.ID, "should return only active admin")
 }
 

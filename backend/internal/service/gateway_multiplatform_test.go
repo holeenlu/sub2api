@@ -253,6 +253,17 @@ func (m *mockGatewayCacheForPlatform) GetSessionAccountID(ctx context.Context, g
 	return 0, errors.New("not found")
 }
 
+func (m *mockGatewayCacheForPlatform) CompareAndRefreshSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration, createIfAbsent bool) (bool, error) {
+	current, exists := m.sessionBindings[sessionHash]
+	if (exists && current != accountID) || (!exists && !createIfAbsent) {
+		return false, nil
+	}
+	if err := m.SetSessionAccountID(ctx, groupID, sessionHash, accountID, ttl); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (m *mockGatewayCacheForPlatform) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	if m.sessionBindings == nil {
 		m.sessionBindings = make(map[string]int64)
@@ -274,6 +285,17 @@ func (m *mockGatewayCacheForPlatform) DeleteSessionAccountID(ctx context.Context
 	}
 	m.deletedSessions[sessionHash]++
 	delete(m.sessionBindings, sessionHash)
+	return nil
+}
+
+// 长周期亲和键：该 mock 不参与历史键行为，给出中性实现以满足接口。
+func (m *mockGatewayCacheForPlatform) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, ErrStickySessionNotFound
+}
+func (m *mockGatewayCacheForPlatform) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
+	return true, nil
+}
+func (m *mockGatewayCacheForPlatform) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
 	return nil
 }
 
@@ -2116,6 +2138,8 @@ func (m *mockConcurrencyCache) AcquireAccountSlot(ctx context.Context, accountID
 	return true, nil
 }
 
+func (*mockConcurrencyCache) ConcurrencySlotTTL() time.Duration { return 0 }
+
 func (m *mockConcurrencyCache) ReleaseAccountSlot(ctx context.Context, accountID int64, requestID string) error {
 	return nil
 }
@@ -2205,10 +2229,6 @@ func (m *mockConcurrencyCache) CleanupExpiredAccountSlots(ctx context.Context, a
 }
 
 func (m *mockConcurrencyCache) CleanupExpiredAccountSlotKeys(ctx context.Context) error {
-	return nil
-}
-
-func (m *mockConcurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error {
 	return nil
 }
 
@@ -2975,8 +2995,8 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 
 		concurrencyCache := &mockConcurrencyCache{
 			loadMap: map[int64]*AccountLoadInfo{
-				1: {AccountID: 1, LoadRate: 100},
-				2: {AccountID: 2, LoadRate: 100},
+				1: {AccountID: 1, CurrentConcurrency: 5, LoadRate: 100},
+				2: {AccountID: 2, CurrentConcurrency: 5, LoadRate: 100},
 				3: {AccountID: 3, LoadRate: 0},
 			},
 		}
@@ -3585,4 +3605,11 @@ func TestGatewayService_SelectAccountForModelWithPlatform_RoutedOpenAIGroup(t *t
 	require.NoError(t, err)
 	require.NotNil(t, acc)
 	require.Equal(t, int64(2), acc.ID, "routed account must win over the higher-priority unrouted one")
+}
+
+func (m *mockGatewayCacheForPlatform) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (m *mockGatewayCacheForPlatform) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
 }

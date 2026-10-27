@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -113,9 +114,9 @@ func TestAstraUltraCatalogPreservesExplicitWorkflowOverrides(t *testing.T) {
 			`{"data":[{"id":"gpt-6-astra",` + fields + `}]}`,
 		} {
 			converted := convertOpenAIModelListToCodexManifestForAccount([]byte(source), account)
-			body, err := completeAPIKeyCodexModelsManifestMetadata(converted, true, account)
-			require.NoError(t, err)
-			model := decodeCodexManifestModels(t, body)[0]
+			manifest := &OpenAIModelsResponse{Body: converted, convertedFromOpenAIModelList: !bytes.Equal(converted, []byte(source))}
+			require.NoError(t, (&OpenAIGatewayService{}).CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+			model := decodeCodexManifestModels(t, manifest.Body)[0]
 			var expected map[string]any
 			require.NoError(t, json.Unmarshal([]byte(`{`+fields+`}`), &expected))
 			for key, value := range expected {
@@ -222,15 +223,17 @@ func TestAstraCodexToolCapabilitiesPreserveLiveNullAndFalse(t *testing.T) {
 		`{"data":[{"id":"gpt-6-astra","supports_search_tool":false,"apply_patch_tool_type":null,"tool_mode":null}]}`,
 	} {
 		converted := convertOpenAIModelListToCodexManifestForAccount([]byte(source), account)
-		body, err := applySyncedAPIKeyCodexModelMetadata(converted, account, source[2:6] == "data")
-		require.NoError(t, err)
-		body, err = completeAPIKeyCodexModelsManifestMetadata(body, true, account)
-		require.NoError(t, err)
-		model := decodeCodexManifestModels(t, body)[0]
+		manifest := &OpenAIModelsResponse{Body: converted, convertedFromOpenAIModelList: !bytes.Equal(converted, []byte(source))}
+		require.NoError(t, (&OpenAIGatewayService{}).CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+		model := decodeCodexManifestModels(t, manifest.Body)[0]
 		require.Equal(t, false, model["supports_search_tool"])
 		require.Nil(t, model["apply_patch_tool_type"])
 		require.Nil(t, model["tool_mode"])
-		require.Equal(t, "3000", model["comp_hash"])
+		if manifest.convertedFromOpenAIModelList {
+			require.Equal(t, "3000", model["comp_hash"])
+		} else {
+			require.NotContains(t, model, "comp_hash", "a native manifest does not inherit missing capability fields")
+		}
 	}
 	fields := make(map[string]json.RawMessage)
 	applyCodexToolCapabilities(fields, map[string]json.RawMessage{
@@ -449,7 +452,7 @@ func TestCompleteAPIKeyCodexManifestSearchCapabilityPreservesUpstreamAndFailsClo
 	body, err := completeAPIKeyCodexModelsManifestMetadata([]byte(`{"models":[
 		{"slug":"explicit","supports_search_tool":true},
 		{"slug":"missing"}
-	]}`), true, nativeAccount)
+	]}`), nativeAccount, true)
 	require.NoError(t, err)
 	models := decodeCodexManifestModels(t, body)
 	require.Equal(t, true, models[0]["supports_search_tool"])
@@ -467,7 +470,7 @@ func TestCompleteAPIKeyCodexManifestSearchCapabilityPreservesUpstreamAndFailsClo
 		[]byte(`{"models":[
 			{"slug":"explicit-disabled","supports_search_tool":false},
 			{"slug":"generated"}
-		]}`), true, chatAccount,
+		]}`), chatAccount, true,
 	)
 	require.NoError(t, err)
 	models = decodeCodexManifestModels(t, body)
@@ -790,12 +793,20 @@ func TestAstraCodexToolCapabilitiesFollowAPIKeyAlias(t *testing.T) {
 	}})
 	for _, source := range []string{`{"data":[{"id":"my-astra"}]}`, `{"models":[{"slug":"my-astra"}]}`} {
 		converted := convertOpenAIModelListToCodexManifestForAccount([]byte(source), account)
-		body, err := completeAPIKeyCodexModelsManifestMetadata(converted, true, account)
-		require.NoError(t, err)
-		models := decodeCodexManifestModels(t, body)
+		manifest := &OpenAIModelsResponse{Body: converted, convertedFromOpenAIModelList: !bytes.Equal(converted, []byte(source))}
+		require.NoError(t, (&OpenAIGatewayService{}).CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+		models := decodeCodexManifestModels(t, manifest.Body)
 		require.Len(t, models, 1)
 		model := models[0]
 		require.Equal(t, "my-astra", model["slug"])
+		if !manifest.convertedFromOpenAIModelList {
+			requireCodexModelRequiredFields(t, model, "my-astra")
+			require.Equal(t, "my-astra", model["display_name"])
+			for _, field := range []string{"supports_search_tool", "apply_patch_tool_type", "use_responses_lite"} {
+				require.NotContains(t, model, field)
+			}
+			continue
+		}
 		require.Equal(t, "my-astra", model["display_name"])
 		require.Equal(t, true, model["supports_search_tool"])
 		require.Equal(t, "freeform", model["apply_patch_tool_type"])
@@ -915,3 +926,42 @@ func TestCodexAliasFailoverMappingHonorsModelRouting(t *testing.T) {
 }
 
 // Scenario: mixed groups prefer capability metadata synced for the routed account.
+
+func TestExperimentalToolsIntersectionAndScope(t *testing.T) {
+	require.JSONEq(t, "[]", string(deriveCloudCodexToolCapabilities()["experimental_supported_tools"]), "Cloud capability ceiling must come from the existing policy matrix")
+	first := Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "first"}}
+	second := Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "second"}}
+	_, metadata, err := extractUpstreamModelCatalog([]byte(`{"models":[{"slug":"gpt-6-luna","experimental_supported_tools":["clock","send_user_message_async","clock"]}]}`), false)
+	require.NoError(t, err)
+	first.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: metadata})
+	_, other, err := extractUpstreamModelCatalog([]byte(`{"models":[{"slug":"gpt-6-luna","experimental_supported_tools":["clock","another"]}]}`), false)
+	require.NoError(t, err)
+	second.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: other})
+	body := []byte(`{"models":[{"slug":"gpt-6-luna","experimental_supported_tools":["unverified"]}]}`)
+	out, changed, err := restrictCodexExperimentalToolsManifest(body, []Account{first, second}, &Group{Platform: PlatformOpenAI})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.JSONEq(t, `{"models":[{"slug":"gpt-6-luna","experimental_supported_tools":["clock"]}]}`, string(out))
+	second.Credentials["api_key"] = "replacement"
+	out, _, err = restrictCodexExperimentalToolsManifest(body, []Account{first, second}, &Group{Platform: PlatformOpenAI})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"models":[{"slug":"gpt-6-luna","experimental_supported_tools":[]}]}`, string(out))
+	for _, invalid := range []string{`[123]`, `{"clock":true}`, `[""]`} {
+		_, valid := decodeCodexExperimentalTools([]byte(invalid))
+		require.False(t, valid)
+	}
+}
+
+func TestExperimentalToolsPersistPartialMetadataAndLiveWithdrawal(t *testing.T) {
+	_, live, err := extractUpstreamModelCatalog([]byte(`{"models":[{"slug":"private-model","experimental_supported_tools":["clock"]}]}`), false)
+	require.NoError(t, err)
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	saved := map[string]UpstreamModelMetadata{}
+	retainLiveCodexExperimentalMetadata(saved, live, []string{"private-model"}, account)
+	require.JSONEq(t, `["clock"]`, string(saved["private-model"].CodexToolCapabilities["experimental_supported_tools"]))
+	account.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: saved})
+	withdrawn := map[string]UpstreamModelMetadata{}
+	retainLiveCodexExperimentalMetadata(withdrawn, map[string]UpstreamModelMetadata{}, []string{"private-model"}, account)
+	require.JSONEq(t, `[]`, string(withdrawn["private-model"].CodexToolCapabilities["experimental_supported_tools"]))
+	require.JSONEq(t, `["clock"]`, string(saved["private-model"].CodexToolCapabilities["experimental_supported_tools"]))
+}

@@ -348,3 +348,16 @@ export function platformLabel(p: string): string {
   if (p === 'composite') return 'Composite'
   return getPlatformSpec(p)?.display_name ?? (p || 'API')
 }
+
+// Account platform tabs and authorization cards share the native console palette.
+export function platformAccountTabClass(p: string): string {
+  const text = p === 'anthropic' ? 'text-orange-600 dark:text-orange-400'
+    : p === 'openai' ? 'text-green-600 dark:text-green-400' : TEXT_DEFAULT
+  return `bg-white shadow-sm dark:bg-dark-600 ${text}`
+}
+
+export function platformAccountSelectionClass(p: string): string {
+  return p === 'anthropic' ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20'
+    : p === 'openai' ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+      : 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+}
